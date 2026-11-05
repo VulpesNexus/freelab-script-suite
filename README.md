@@ -1,12 +1,13 @@
 # FreeLab
 
-Tools for FontLab, gathered in one place. The first is an MCP server that lets an AI app such as Claude Code read the font open in FontLab 7.
+Tools for FontLab, gathered in one place: an MCP server that lets an AI app such as Claude Code read the font open in FontLab 7, and a dark mode for FontLab 7's interface.
 
 **Status: 0.1.0, groundwork.** Every part passes its tests against fakes, under Python 3 and under Python 2.7, but none of it has run inside FontLab yet: FontLab 7's Python is not working on the development machine (see *Requirements*). Which FontLab calls are proven is tracked in [docs/FONTLAB7-API.md](docs/FONTLAB7-API.md).
 
 ## What is here
 
 - *listener/freelab_listener.py*: a script you run inside FontLab. It answers requests on `127.0.0.1` only, from FontLab's main thread.
+- *darkmode/freelab_dark_mode.py*: *Scripts > FreeLab: Toggle Dark Mode* switches FontLab's menus, panels, and dialogs to a dark palette and back, without a restart, and remembers the choice for the next launch. The glyph canvas and font window keep the colors set in FontLab's *Preferences*.
 - *server/*: the MCP server your AI app starts. It never touches FontLab directly; it passes each tool call to the listener.
 - *tests/*: the test gate (*run_tests.py*).
 - *tools/*: helper scripts.
@@ -18,7 +19,7 @@ Tools for FontLab, gathered in one place. The first is an MCP server that lets a
 
 ## Install
 
-1. Copy *listener/freelab_listener.py* into FontLab's user *Scripts* folder (*Documents\FontLab\FontLab 7\Scripts*). Run it from there, not from this repository: Python 2.7 cannot open files whose path the Windows ANSI code page cannot spell.
+1. With FontLab closed, run *tools/install-fontlab.ps1*. It copies the listener and the dark-mode script into FontLab's user *Scripts* folder (*Documents\FontLab\FontLab 7\Scripts*), and adds a marked block to FontLab's startup script that applies dark mode at launch when it was left on; the original startup script is kept as *startupScript.py.freelab-backup*, and `-Uninstall` takes it all out again. Scripts run from that folder, not from this repository: Python 2.7 cannot open files whose path the Windows ANSI code page cannot spell.
 2. Register the server with your MCP client. For Claude Code:
 
    ```

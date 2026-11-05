@@ -21,7 +21,11 @@ ROOT = Path(__file__).resolve().parent.parent
 PY27_DIR = Path(os.environ.get("FREELAB_PY27_DIR") or Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "FreeLab" / "python27")
 PY27 = PY27_DIR / "tools" / "python.exe"
 NO_WINDOW = 0x08000000 if os.name == "nt" else 0
-PY27_FILES = ("listener/freelab_listener.py", "tests/fakes.py", "tests/listener_tests.py")
+PY27_FILES = (
+    "listener/freelab_listener.py", "tests/fakes.py", "tests/listener_tests.py",
+    "darkmode/freelab_dark_mode.py", "tests/qtfakes.py", "tests/darkmode_tests.py",
+)
+PY27_SUITES = ("tests/listener_tests.py", "tests/darkmode_tests.py")
 
 
 def run_py3() -> bool:
@@ -37,30 +41,34 @@ def run_py27() -> bool | None:
     env.pop("PYTHONPATH", None)
     env.pop("PYTHONHOME", None)
     work = Path(tempfile.mkdtemp(prefix="freelab-py27-"))
+    ok = True
     try:
         for rel in PY27_FILES:
             target = work / rel
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / rel, target)
         env["TEMP"] = env["TMP"] = str(work)
-        proc = subprocess.run(
-            # No -E: it would drop PYTHONIOENCODING; PYTHONPATH and PYTHONHOME are removed above instead.
-            [str(PY27), "-s", "-B", str(work / "tests" / "listener_tests.py")],
-            cwd=str(work),
-            env=env,
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            creationflags=NO_WINDOW,
-            timeout=300,
-        )
+        for suite in PY27_SUITES:
+            print("-- %s" % suite)
+            proc = subprocess.run(
+                # No -E: it would drop PYTHONIOENCODING; PYTHONPATH and PYTHONHOME are removed above instead.
+                [str(PY27), "-s", "-B", str(work / suite)],
+                cwd=str(work),
+                env=env,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                creationflags=NO_WINDOW,
+                timeout=300,
+            )
+            sys.stdout.write(proc.stdout)
+            sys.stdout.write(proc.stderr)
+            ok = ok and proc.returncode == 0
     finally:
         shutil.rmtree(work, ignore_errors=True)
-    sys.stdout.write(proc.stdout)
-    sys.stdout.write(proc.stderr)
-    return proc.returncode == 0
+    return ok
 
 
 def main() -> int:
@@ -68,10 +76,10 @@ def main() -> int:
     parser.add_argument("--skip-py27", action="store_true", help="do not fail when Python 2.7 is missing")
     args = parser.parse_args()
 
-    print("== Python %s: listener and server" % sys.version.split()[0])
+    print("== Python %s: listener, dark mode, and server" % sys.version.split()[0])
     ok3 = run_py3()
 
-    print("\n== Python 2.7: listener")
+    print("\n== Python 2.7: listener and dark mode")
     ok27 = run_py27()
     if ok27 is None:
         print("Python 2.7 not found at %s; run tools/get-python27.ps1." % PY27)
