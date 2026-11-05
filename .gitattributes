@@ -1,0 +1,3 @@
+# Store and check out every text file with LF endings, whatever core.autocrlf
+# says on the machine, so a diff shows only what was edited.
+* text=auto eol=lf
