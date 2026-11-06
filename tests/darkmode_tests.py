@@ -175,6 +175,11 @@ class SheetTests(unittest.TestCase):
         self.assertIn(u"rgba(%s, 20)" % rgb, sheet)
         self.assertEqual(sheet.count(u"rgb(%s)" % rgb), 2)
 
+    def test_both_css_spellings_of_gray_are_colors(self):
+        for name in ("gray", "grey", "lightgray", "lightgrey", "darkgrey", "dimgrey"):
+            self.assertIn(name, dm.NAMED_COLORS)
+            self.assertNotIn(name, dm.recolor_sheet(u"a{x:%s;}" % name), name)
+
     def test_selectors_and_properties_are_left_alone(self):
         sheet = u"QFrame#frameBottom{white-space:x;} QWidget#add {color:#000} #face{}"
         out = dm.recolor_sheet(sheet)

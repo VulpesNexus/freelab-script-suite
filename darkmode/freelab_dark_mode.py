@@ -173,7 +173,7 @@ NAMED_COLORS = {
     "white": (255, 255, 255), "black": (0, 0, 0), "whitesmoke": (245, 245, 245),
     "gainsboro": (220, 220, 220), "lightgray": (211, 211, 211), "lightgrey": (211, 211, 211),
     "silver": (192, 192, 192), "darkgray": (169, 169, 169), "darkgrey": (169, 169, 169),
-    "gray": (128, 128, 128), "gray": (128, 128, 128), "dimgray": (105, 105, 105), "dimgrey": (105, 105, 105),
+    "gray": (128, 128, 128), "grey": (128, 128, 128), "dimgray": (105, 105, 105), "dimgrey": (105, 105, 105),  # CSS spells both
 }
 _COLOR_RE = re.compile(
     r"(?<![\w#])#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3})(?![\w])"
