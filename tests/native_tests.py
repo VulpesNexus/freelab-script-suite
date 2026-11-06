@@ -25,15 +25,17 @@ def _load():
     if not os.path.isfile(DLL):
         return None
     lib = ctypes.CDLL(DLL)
-    lib.freelab_map_lightness.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_double, ctypes.c_double,
-                                          ctypes.c_double, ctypes.c_double, ctypes.c_double]
+    lib.freelab_map_lightness.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_int64, ctypes.c_double,
+                                          ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_double,
+                                          ctypes.c_double]
     lib.freelab_pixel_stats.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_int, ctypes.c_double,
                                         ctypes.c_double, ctypes.POINTER(ctypes.c_int64)]
     lib.freelab_light_colors.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_double, ctypes.c_int,
                                          ctypes.POINTER(ctypes.c_uint32), ctypes.c_int64]
     lib.freelab_light_colors.restype = ctypes.c_int64
-    lib.freelab_map_keyed.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.POINTER(ctypes.c_uint32), ctypes.c_int64,
-                                      ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_double]
+    lib.freelab_map_keyed.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_int64, ctypes.POINTER(ctypes.c_uint32),
+                                      ctypes.c_int64, ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_double,
+                                      ctypes.c_uint32]
     return lib
 
 
@@ -44,10 +46,17 @@ def pixels(colors, alpha=255):
     return bytearray(b"".join(struct.pack("<BBBB", b, g, r, alpha) for r, g, b in colors))
 
 
-def run_map(lib, buf, min_l=0.0, ink_below=-1.0, keep_tint=0.0):
+def run_map(lib, buf, min_l=0.0, ink_below=-1.0, keep_tint=0.0, width=None, edge_neutral=0.0):
     array = (ctypes.c_char * len(buf)).from_buffer(buf)
-    lib.freelab_map_lightness(ctypes.addressof(array), len(buf) // 4, dm.DARK_OKL, dm.LIGHT_OKL, min_l, ink_below,
-                              keep_tint)
+    count = len(buf) // 4
+    lib.freelab_map_lightness(ctypes.addressof(array), count, width or count, dm.DARK_OKL, dm.LIGHT_OKL, min_l,
+                              ink_below, keep_tint, edge_neutral)
+
+
+def keyed(lib, buf, keys, width, min_l=-1.0, target=0):
+    array = (ctypes.c_char * len(buf)).from_buffer(buf)
+    lib.freelab_map_keyed(ctypes.addressof(array), len(buf) // 4, width, (ctypes.c_uint32 * len(keys))(*keys),
+                          len(keys), dm.DARK_OKL, dm.LIGHT_OKL, 0.0, min_l, target)
 
 
 @unittest.skipIf(LIB is None, "native helper not built: run tools/build-native.ps1 (%s)" % DLL)
@@ -106,11 +115,29 @@ class NativeTests(unittest.TestCase):
 
     def test_keyed_also_maps_near_white(self):
         buf = pixels([(250, 250, 250), (60, 60, 60)])
-        keys = (ctypes.c_uint32 * 1)(0xcacbcc)
-        array = (ctypes.c_char * len(buf)).from_buffer(buf)
-        LIB.freelab_map_keyed(ctypes.addressof(array), 2, keys, 1, dm.DARK_OKL, dm.LIGHT_OKL, 0.0, dm.WHITE_L)
+        keyed(LIB, buf, [0xcacbcc], 2, dm.WHITE_L)
         self.assertLess(buf[0], 60, "a white frame corner turns dark")
         self.assertEqual(buf[4], 60)
+
+    def test_edges_lose_tint_flat_areas_keep_it(self):
+        # One row: a flat pink mark area, then a ClearType-like fringe pixel next to dark text.
+        row = [(255, 205, 205)] * 3 + [(235, 200, 160), (40, 40, 40)]
+        buf = pixels(row)
+        run_map(LIB, buf, keep_tint=1.0, width=len(row), edge_neutral=dm.EDGE_NEUTRAL)
+        out = [tuple(buf[4 * i + 2 - k] for k in range(3)) for i in range(len(row))]
+        self.assertGreater(out[1][0], out[1][1] + 5, "the mark keeps its pink")
+        self.assertEqual(max(out[3]) - min(out[3]), 0, "the fringe turns gray: %r" % (out[3],))
+
+    def test_frame_ends_on_the_first_and_last_rows_take_the_target(self):
+        width = 3
+        buf = pixels([(152, 152, 153), (40, 40, 40), (40, 40, 40),
+                      (152, 152, 153), (40, 40, 40), (40, 40, 40),
+                      (190, 190, 192), (40, 40, 40), (40, 40, 40)])
+        keyed(LIB, buf, [0xcacbcc], width, dm.WHITE_L, 0x454545)
+        firsts = [tuple(buf[4 * (r * width) + 2 - k] for k in range(3)) for r in range(3)]
+        self.assertEqual(firsts[0], (0x45, 0x45, 0x45))
+        self.assertEqual(firsts[1], (152, 152, 153), "a middle row is left")
+        self.assertEqual(firsts[2], (0x45, 0x45, 0x45))
 
     def test_content_keeps_muted_colors(self):
         node = (106, 160, 106)  # a muted green node: channels spread by 54
@@ -147,9 +174,7 @@ class KeyedTests(unittest.TestCase):
     def test_map_keyed_maps_only_the_keys(self):
         colors = [(202, 203, 204), (220, 220, 220), (202, 203, 205)]
         buf = pixels(colors)
-        keys = (ctypes.c_uint32 * 1)(0xcacbcc)
-        array = (ctypes.c_char * len(buf)).from_buffer(buf)
-        LIB.freelab_map_keyed(ctypes.addressof(array), 3, keys, 1, dm.DARK_OKL, dm.LIGHT_OKL, 0.0, -1.0)
+        keyed(LIB, buf, [0xcacbcc], 3)
         out = [tuple(buf[4 * i + 2 - k] for k in range(3)) for i in range(3)]
         expected = dm.map_rgb(202, 203, 204)
         self.assertLessEqual(max(abs(a - b) for a, b in zip(out[0], expected)), 1)

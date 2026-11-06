@@ -11,7 +11,7 @@
 
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 8
+#define FREELAB_PIXELS_VERSION 9
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -156,7 +156,7 @@ static int oklab_to_linear(double l, double a, double b, double *r, double *g, d
  * ClearType's colored edges), and only a linear mapping keeps a blend a blend: the perceptual
  * one below moved edge pixels to the wrong brightness. The interface passes keep_tint 0 (gray);
  * content passes 1, keeping the hue of muted anchors, nodes, and marks. */
-#define LINEAR_SPREAD 80
+#define LINEAR_SPREAD 110
 #define MAX_LINEAR_CHANNEL 235.0
 
 /* The sRGB gray whose OKLab lightness is l (for a gray, L is the cube root of linear light). */
@@ -245,36 +245,56 @@ EXPORT int freelab_pixels_version(void)
     return FREELAB_PIXELS_VERSION;
 }
 
-/* pixels: count 32-bit pixels as bytes B, G, R, A. With min_l at 0 or below every pixel is
- * mapped. Otherwise only pixels whose lightness is at least min_l are; and when ink_below is
- * above 0, a pixel darker than that (black text on an editor's dark paper, and its smoothed
- * edges) moves toward LIGHT_TEXT by its coverage, 1 - lightness / ink_below, which keeps the
- * text's smoothing. Runs of one color are mapped once. */
+/* pixels: count 32-bit pixels as bytes B, G, R, A, in rows of width. With min_l at 0 or below
+ * every pixel is mapped. Otherwise only pixels whose lightness is at least min_l are; and when
+ * ink_below is above 0, a grayish pixel darker than that (black text on an editor's dark paper,
+ * and its smoothed edges) moves toward LIGHT_TEXT by its coverage, 1 - lightness / ink_below,
+ * which keeps the text's smoothing. With edge_neutral above 0, a low-color pixel whose
+ * lightness differs from a horizontal neighbor's by that much (text and outline edges, where
+ * ClearType puts its colored fringes) keeps no tint, while flat areas (marks) keep keep_tint. */
 #define LIGHT_TEXT 219.0
+#define INK_SPREAD 40
 
-EXPORT void freelab_map_lightness(uint8_t *pixels, int64_t count, double dark_l, double light_l, double min_l,
-                                  double ink_below, double keep_tint)
+static uint8_t spread_of(const uint8_t *px)
 {
-    uint32_t last_in = 0, last_out = 0;
+    uint8_t maxc = px[2] > px[1] ? (px[2] > px[0] ? px[2] : px[0]) : (px[1] > px[0] ? px[1] : px[0]);
+    uint8_t minc = px[2] < px[1] ? (px[2] < px[0] ? px[2] : px[0]) : (px[1] < px[0] ? px[1] : px[0]);
+    return (uint8_t)(maxc - minc);
+}
+
+EXPORT void freelab_map_lightness(uint8_t *pixels, int64_t count, int64_t width, double dark_l, double light_l,
+                                  double min_l, double ink_below, double keep_tint, double edge_neutral)
+{
+    uint32_t last_in = 0, last_out = 0, left = 0;
     int have_last = 0;
     uint32_t *p = (uint32_t *)pixels;
     int64_t i;
     for (i = 0; i < count; i++) {
         uint32_t v = p[i];
-        uint8_t *bytes;
-        if (have_last && v == last_in) {
+        uint8_t *bytes = (uint8_t *)&p[i];
+        int64_t x = width > 0 ? i % width : 1;
+        double tint = keep_tint;
+        if (edge_neutral > 0.0 && spread_of(bytes) <= LINEAR_SPREAD) {
+            double l = lightness(bytes[2], bytes[1], bytes[0]);
+            const uint8_t *lb = (const uint8_t *)&left;
+            const uint8_t *rb = (x + 1 < width && i + 1 < count) ? (const uint8_t *)&p[i + 1] : 0;
+            if ((x > 0 && (l - lightness(lb[2], lb[1], lb[0]) >= edge_neutral || lightness(lb[2], lb[1], lb[0]) - l >= edge_neutral))
+                || (rb && (l - lightness(rb[2], rb[1], rb[0]) >= edge_neutral || lightness(rb[2], rb[1], rb[0]) - l >= edge_neutral)))
+                tint = 0.0;
+        }
+        left = v;  /* the original, before mapping */
+        if (edge_neutral <= 0.0 && have_last && v == last_in) {
             p[i] = last_out;
             continue;
         }
         last_in = v;
-        bytes = (uint8_t *)&p[i];
         if (min_l <= 0.0) {
-            map_rgb(&bytes[2], &bytes[1], &bytes[0], dark_l, light_l, keep_tint);
+            map_rgb(&bytes[2], &bytes[1], &bytes[0], dark_l, light_l, tint);
         } else {
             double l = lightness(bytes[2], bytes[1], bytes[0]);
             if (l >= min_l) {
-                map_rgb(&bytes[2], &bytes[1], &bytes[0], dark_l, light_l, keep_tint);
-            } else if (ink_below > 0.0 && l < ink_below) {
+                map_rgb(&bytes[2], &bytes[1], &bytes[0], dark_l, light_l, tint);
+            } else if (ink_below > 0.0 && l < ink_below && spread_of(bytes) <= INK_SPREAD) {
                 double coverage = 1.0 - l / ink_below;
                 int k;
                 for (k = 0; k < 3; k++)
@@ -329,16 +349,27 @@ EXPORT int64_t freelab_light_colors(const uint8_t *pixels, int64_t count, double
 /* Map only pixels whose color (0xRRGGBB, alpha ignored) is one of keys. */
 /* Map pixels whose color (0xRRGGBB, alpha ignored) is one of keys, and, when min_l is above 0,
  * pixels at least that light too (the dock's frame corners, which a render alone may not show). */
-EXPORT void freelab_map_keyed(uint8_t *pixels, int64_t count, const uint32_t *keys, int64_t nkeys,
-                              double dark_l, double light_l, double keep_tint, double min_l)
+EXPORT void freelab_map_keyed(uint8_t *pixels, int64_t count, int64_t width, const uint32_t *keys, int64_t nkeys,
+                              double dark_l, double light_l, double keep_tint, double min_l, uint32_t edge_target)
 {
     int64_t i, k;
     for (i = 0; i < count; i++) {
         uint8_t *px = pixels + 4 * i;
         uint32_t rgb = ((uint32_t)px[2] << 16) | ((uint32_t)px[1] << 8) | px[0];
+        int64_t row = width > 0 ? i / width : 1;
         for (k = 0; k < nkeys && keys[k] != rgb; k++)
             ;
-        if (k < nkeys || (min_l > 0.0 && lightness(px[2], px[1], px[0]) >= min_l))
+        if (k < nkeys || (min_l > 0.0 && lightness(px[2], px[1], px[0]) >= min_l)) {
             map_rgb(&px[2], &px[1], &px[0], dark_l, light_l, keep_tint);
+        } else if (edge_target && width > 0 && (row == 0 || row == count / width - 1)) {
+            /* The frame's antialiased ends on the first and last rows blend with what lies beneath,
+             * so their colors match no key: they take the mapped frame color. */
+            double l = lightness(px[2], px[1], px[0]);
+            if (l >= 0.3 && l < min_l) {
+                px[2] = (uint8_t)(edge_target >> 16);
+                px[1] = (uint8_t)(edge_target >> 8);
+                px[0] = (uint8_t)edge_target;
+            }
+        }
     }
 }

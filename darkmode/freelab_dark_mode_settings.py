@@ -22,6 +22,7 @@ LOOKS = (
     ("dark", "Dark"),
     ("interface", "Dark interface, light glyphs and canvas"),
 )
+SHADES = (("dark", "Dark grays"), ("medium", "Medium grays"))
 
 
 def dark_mode_module():
@@ -73,6 +74,21 @@ def show_dialog():
         button.setChecked(key == look)
         layout.addWidget(button)
         buttons[key] = button
+    layout.addWidget(QLabel("Shade:"))
+    shade = settings.get("shade", "dark")
+    shade_buttons = {}
+    for key, label in SHADES:
+        button = QRadioButton(label)
+        button.setChecked(key == shade)
+        layout.addWidget(button)
+        shade_buttons[key] = button
+    # Two groups of radio buttons in one dialog: each group needs its own exclusive QButtonGroup.
+    from PythonQt.QtGui import QButtonGroup
+    look_group, shade_group = QButtonGroup(dialog), QButtonGroup(dialog)
+    for button in buttons.values():
+        look_group.addButton(button)
+    for button in shade_buttons.values():
+        shade_group.addButton(button)
     follow = QCheckBox("Follow Windows: dark while Windows apps are dark (uses the dark look chosen above)")
     follow.setChecked(bool(settings.get("follow_windows")))
     layout.addWidget(follow)
@@ -92,7 +108,9 @@ def show_dialog():
     # Following Windows needs a dark look to switch to: "light" with it means the full dark look.
     content = chosen != "interface"
     dark = chosen != "light" or follow.isChecked()
-    result = dm.configure(dark=dark, content=content, follow_windows=follow.isChecked())
+    chosen_shade = [key for key, button in shade_buttons.items() if button.isChecked()]
+    result = dm.configure(dark=dark, content=content, follow_windows=follow.isChecked(),
+                          shade=chosen_shade[0] if chosen_shade else shade)
     print("FreeLab dark mode: %s%s." % (
         dict(LOOKS)["interface" if dark and not content else ("dark" if dark else "light")],
         ", following Windows" if result.get("follow_windows") else ""))

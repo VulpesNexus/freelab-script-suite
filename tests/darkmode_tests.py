@@ -200,6 +200,48 @@ class ContentTests(DarkModeCase):
         self.assertIsNotNone(self.search.effect, "the interface is still dark")
 
 
+class ShadeAndPickerTests(DarkModeCase):
+    def tearDown(self):
+        dm.set_shade("dark")
+        DarkModeCase.tearDown(self)
+
+    def test_medium_shade(self):
+        dm.configure(dark=True, shade="medium")
+        dm.run_queue()
+        self.assertEqual(self.app.palette().color(QPalette.Window), QColor("#44444a"))
+        self.assertEqual(dm.map_rgb(255, 255, 255), (60, 60, 60))
+        self.assertIn(dm._hex((60, 60, 60)), self.content.styleSheet)
+
+    def test_changing_the_shade_rebuilds(self):
+        dm.configure(dark=True)
+        dm.run_queue()
+        dark_sheet = self.content.styleSheet
+        dm.configure(shade="medium")
+        dm.run_queue()
+        self.assertNotEqual(self.content.styleSheet, dark_sheet)
+        dm.configure(dark=False)
+        dm.run_queue()
+        self.assertEqual(self.content.styleSheet, PANEL_SHEET)
+
+    def test_color_pickers_get_a_dark_frame_and_lose_it(self):
+        picker = FakeWidget("QtColorPicker", "colorMark", parent=self.content, sheet=u"QtColorPicker{color: lightGray;}")
+        self.on()
+        self.assertEqual(picker.styleSheet, u"QtColorPicker{color: lightGray;}" + dm.PICKER_FRAME)
+        self.assertIsNone(picker.effect)
+        self.off()
+        self.assertEqual(picker.styleSheet, u"QtColorPicker{color: lightGray;}")
+
+    def test_content_islands_neutralize_edges_only(self):
+        self.on()
+        self.assertEqual(self.canvas.effect.freelab_edge_neutral, dm.EDGE_NEUTRAL)
+        self.assertEqual(self.search.effect.freelab_edge_neutral, 0.0)
+
+    def test_dock_frame_ends_take_the_mapped_frame_color(self):
+        self.on()
+        r, g, b = dm.map_rgb(0xca, 0xcb, 0xcc)
+        self.assertEqual(self.dock.effect.freelab_edge_target, (r << 16) | (g << 8) | b)
+
+
 class OptionTests(DarkModeCase):
     def test_follow_windows_switches_with_windows(self):
         dark = [True]
