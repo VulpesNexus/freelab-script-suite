@@ -268,6 +268,8 @@ class FakeWidget(QObject):
         return found
 
     def isAncestorOf(self, other):
+        if other is self:
+            return True  # as Qt's QWidget::isAncestorOf
         parent = other.parentWidget()
         while parent is not None:
             if parent is self:

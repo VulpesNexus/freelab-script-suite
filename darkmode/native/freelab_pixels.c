@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 24
+#define FREELAB_PIXELS_VERSION 28
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -413,6 +413,15 @@ EXPORT void freelab_map_keyed(uint8_t *pixels, int64_t count, int64_t width, con
 #define ANCHORS_INK 0
 #define ANCHORS_ALL 1
 #define ANCHORS_RELIGHT 2 /* back to light: a dark main paper turns white, light gray text black, the rest stays */
+#define ANCHORS_ICON 3 /* as ANCHORS_ALL, but colored parts of middle lightness (blue guides, green fills) stay */
+#define ICON_KEEP_CHROMA 0.08
+#define ICON_KEEP_MIN_OKL 0.4
+#define ICON_KEEP_MAX_OKL 0.85
+/* Dim gray marks (icons drawn in dark gray, near black against white in light mode) on the dark
+ * interface: mapped, then lightened this much further toward the light gray. */
+#define DIM_INK_ABOVE_MAIN 0.08
+#define DIM_INK_MAX_OKL 0.58
+#define DIM_INK_LIFT 0.35
 #define RELIGHT_PAPER_OKL 0.35
 #define RELIGHT_TEXT_OKL 0.75
 #define RELIGHT_SPREAD 30
@@ -429,15 +438,18 @@ EXPORT void freelab_map_keyed(uint8_t *pixels, int64_t count, int64_t width, con
 #define LIGHT_SURFACE_RUN 6.0 /* a light surface is solid one way at least (badges, rows), unlike most text strokes */
 #define BACKGROUND_SHARE 0.2 /* a color covering this much is a background, never ink */
 #define FRINGE_SHARE 0.4 /* a dark, colored pixel this often right beside light ones is ClearType smoothing of light text */
-#define FRINGE_LIGHT 0.5 /* HLS lightness of "light" for that, */
-#define FRINGE_LIGHTER 0.25 /* and at least this much lighter than the pixel */
+#define LIGHT_FRINGE_SHARE 0.15 /* a light fringe this often beside lighter text (badges): smoothing */
+#define FRINGE_LIGHT 0.4 /* HLS lightness of "light" for that, */
+#define FRINGE_LIGHTER 0.15 /* and at least this much lighter than the pixel */
 #define LIGHT_SURFACE_OKL 0.6
 #define LIGHT_SURFACE_SPREAD 60
 #define INK_MAX_OKL 0.5
 #define INK_BELOW_MAIN 0.1 /* ink is at least this much darker (OKLab L) than the main background */
 #define INK_CHROMA 0.05 /* or this colored */
+#define SURFACE_INK_MAX_OKL 0.18 /* a solid area is ink only when near black (large glyph strokes), never a dark panel or a selection */
 #define BLEND_TOLERANCE 0.25 /* of the distance between the two anchors */
-#define LOCAL_BLEND_TOLERANCE 0.45 /* when both anchors are right around the pixel (strong ClearType fringes on small text) */
+#define LOCAL_BLEND_TOLERANCE 0.6 /* when both anchors are right around the pixel (strong ClearType fringes on small text,
+                                    white text on a light badge) */
 #define BLEND_MIN_TOLERANCE 12.0
 #define BLEND_ANCHOR_TOLERANCE 6.0 /* a candidate this close to a blend of two others is a blend */
 #define NEAR_ANCHOR 40.0 /* translucent pixels: their color is an anchor's if this close */
@@ -593,13 +605,30 @@ static uint32_t mapped_one(uint32_t rgb, double dark_l, double light_l, double k
     return ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
 }
 
+static void oklab_of(uint32_t rgb, double *l, double *chroma);
+
+/* ANCHORS_ICON: a colored color of middle lightness reads on light and dark alike: kept. */
+static int icon_keeps(uint32_t rgb)
+{
+    double l, chroma;
+    oklab_of(rgb, &l, &chroma);
+    return chroma >= ICON_KEEP_CHROMA && l >= ICON_KEEP_MIN_OKL && l <= ICON_KEEP_MAX_OKL;
+}
+
+static uint32_t all_color(uint32_t rgb, int mode, double dark_l, double light_l, double keep_tint)
+{
+    if (mode == ANCHORS_ICON && icon_keeps(rgb))
+        return rgb;
+    return mapped_one(rgb, dark_l, light_l, keep_tint);
+}
+
 /* The fallback for a pixel no anchor or blend explains. */
 static uint32_t lone_color(uint32_t rgb, int mode, double dark_l, double light_l, double keep_tint)
 {
     if (mode == ANCHORS_RELIGHT)
         return rgb;
-    if (mode == ANCHORS_ALL)
-        return mapped_one(rgb, dark_l, light_l, keep_tint);
+    if (mode == ANCHORS_ALL || mode == ANCHORS_ICON)
+        return all_color(rgb, mode, dark_l, light_l, keep_tint);
     if (lightness((uint8_t)(rgb >> 16), (uint8_t)(rgb >> 8), (uint8_t)rgb) >= WHITE_HLS)
         return mapped_one(rgb, dark_l, light_l, 0.0); /* stray white: as the selective mapping did */
     return rgb;
@@ -652,6 +681,20 @@ static int is_blend(int k, int n)
             if (blend_fit(c->r, c->g, c->b, s, ink, &t, &ee) <= BLEND_ANCHOR_TOLERANCE * BLEND_ANCHOR_TOLERANCE
                 && t > 0.03 && t < 0.97)
                 return 1;
+        }
+        /* ClearType's fringes of light text on a light surface (white digits on a gray badge): mostly
+         * right beside the lighter text, and roughly between it and the surface. */
+        if ((double)c->beside_light >= LIGHT_FRINGE_SHARE * (double)c->count) {
+            for (j = 0; j < n; j++) {
+                const Anchor *text = &anchors[j];
+                double t, ee;
+                if (j == i || j == k || text->surface || text->long_line || text->okl <= c->okl
+                    || c->count > 2 * text->count)
+                    continue; /* a fringe is rarer than the text it smooths */
+                if (blend_fit(c->r, c->g, c->b, s, text, &t, &ee) <= LOCAL_BLEND_TOLERANCE * LOCAL_BLEND_TOLERANCE * ee
+                    && t > 0.03 && t < 0.97)
+                    return 1;
+            }
         }
     }
     return 0;
@@ -803,9 +846,9 @@ static void find_anchors(const uint32_t *p, int64_t count, int64_t width, int mo
                 out = 0x000000;
                 a->mapped = 1;
             }
-        } else if (mode == ANCHORS_ALL) {
-            out = mapped_one(rgb, dark_l, light_l, keep_tint);
-            a->mapped = 1;
+        } else if (mode == ANCHORS_ALL || mode == ANCHORS_ICON) {
+            out = all_color(rgb, mode, dark_l, light_l, keep_tint);
+            a->mapped = out != rgb || mode == ANCHORS_ALL;
         } else if (hls >= WHITE_HLS && (a->surface || a->line)) {
             out = mapped_one(rgb, dark_l, light_l, 0.0);
             a->mapped = 1;
@@ -814,10 +857,19 @@ static void find_anchors(const uint32_t *p, int64_t count, int64_t width, int mo
             out = mapped_one(rgb, dark_l, light_l, 0.0);
             a->mapped = 1;
         } else if (!a->long_line && (double)a->count < BACKGROUND_SHARE * (double)total && a->okl < INK_MAX_OKL
+                   && (!a->surface || a->okl <= SURFACE_INK_MAX_OKL)
                    && (a->okl <= main_l - INK_BELOW_MAIN
                        || (a->chroma >= INK_CHROMA && (double)a->beside_light < FRINGE_SHARE * (double)a->count
                            && !smoothing_of_readable(j)))) {
             out = mapped_one(rgb, dark_l, light_l, a->chroma >= INK_CHROMA ? 1.0 : 0.0);
+            a->mapped = 1;
+        } else if (!a->surface && !a->long_line && a->chroma < INK_CHROMA && a->okl < DIM_INK_MAX_OKL
+                   && a->okl >= main_l + DIM_INK_ABOVE_MAIN && (double)a->count < BACKGROUND_SHARE * (double)total) {
+            double light = gray_byte(light_l);
+            out = mapped_one(rgb, dark_l, light_l, 0.0);
+            out = pack(((out >> 16) & 255) + (light - ((out >> 16) & 255)) * DIM_INK_LIFT,
+                       ((out >> 8) & 255) + (light - ((out >> 8) & 255)) * DIM_INK_LIFT,
+                       (out & 255) + (light - (out & 255)) * DIM_INK_LIFT);
             a->mapped = 1;
         }
         a->mr = (double)((out >> 16) & 255);
@@ -935,7 +987,7 @@ static uint32_t resolve(uint32_t c, int translucent, uint32_t mask, int mode, do
         if (anchors[j].r == r && anchors[j].g == g && anchors[j].b == b)
             return pack(anchors[j].mr, anchors[j].mg, anchors[j].mb);
     }
-    if (mode == ANCHORS_ALL) {
+    if (mode == ANCHORS_ALL || mode == ANCHORS_ICON) {
         /* Where everything is mapped, the linear mapping of low-color pixels already keeps blends
          * blends (it is affine): only colored pixels need a pair, which spares the many colors of
          * a font window's smoothed glyphs the search. */
@@ -944,7 +996,7 @@ static uint32_t resolve(uint32_t c, int translucent, uint32_t mask, int mode, do
         px[1] = (uint8_t)g;
         px[0] = (uint8_t)b;
         if (spread_of(px) <= LINEAR_SPREAD)
-            return mapped_one(c, dark_l, light_l, tint);
+            return all_color(c, mode, dark_l, light_l, tint);
     }
     if (!(mask && best_pair(r, g, b, mask, mask, LOCAL_BLEND_TOLERANCE, &a_i, &b_i, &t))
         && !best_pair(r, g, b, all, all, BLEND_TOLERANCE, &a_i, &b_i, &t))
@@ -1008,10 +1060,10 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
         return changed;
     }
     /* Neighborhoods matter where kept and mapped anchors could explain the same pixel. */
-    local = mode != ANCHORS_ALL && width > 0 && count <= MAX_INDEXED;
+    local = (mode == ANCHORS_INK || mode == ANCHORS_RELIGHT) && width > 0 && count <= MAX_INDEXED;
     if (local)
         index_pixels(p, count);
-    tinted = mode == ANCHORS_ALL && keep_tint > 0.0 && width > 0;
+    tinted = (mode == ANCHORS_ALL || mode == ANCHORS_ICON) && keep_tint > 0.0 && width > 0;
     for (i = 0; i < count; i++) {
         uint32_t v = p[i], alpha = v >> 24, c, key, out, mask = 0;
         int edge;
@@ -1032,7 +1084,7 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
         key = c | (alpha < ANCHOR_MIN_ALPHA ? 0x1000000U : 0U) | (edge ? 0x2000000U : 0U);
         if (!memo_get(key, mask, &out)) {
             out = resolve(c, alpha < ANCHOR_MIN_ALPHA, mask, mode, dark_l, light_l, keep_tint,
-                          mode == ANCHORS_ALL && !edge ? keep_tint : 0.0);
+                          (mode == ANCHORS_ALL || mode == ANCHORS_ICON) && !edge ? keep_tint : 0.0);
             memo_put(key, mask, out);
         }
         out |= v & 0xff000000U;

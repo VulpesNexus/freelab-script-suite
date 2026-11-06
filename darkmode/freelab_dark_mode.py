@@ -146,6 +146,7 @@ ISLAND_CLASSES = frozenset((
     "YTabBar",  # tab strips
     "FontCellChart",  # font window cells: the font-cell color preference, black glyphs, mark colors
     "CellChart",  # Font Map panel
+    "CellChartScrollBar",  # the cell charts' own light scroll bars
     "YContinueWidget",  # the zigzag edge where a panel's content continues below
     "YNibShape", "YStrokeShape", "YBrushStrokePreview",  # Brush panel previews
 ))
@@ -161,7 +162,7 @@ TITLE_MAX_HEIGHT = 40
 # the font window's mark slots (QToolButton#flagRed and the like, colored by their stylesheets),
 # which must show the real mark colors.
 SKIP_CLASSES = ("ColorPickerItem", "ColorPickerButton", "QtColorPicker", "QDesktopScreenWidget",
-                "YHueBar", "YSaturationBar", "YColorBar", "YColorPreview", "ColorMap")  # color controls (audit of FontLab 7.2's classes)
+                "YHueBar", "YSaturationBar", "YColorBar", "YColorPreview", "YColorRing", "ColorMap")  # color controls (audit of FontLab 7.2's classes)
 SKIP_CLASS_WORDS = ("ColorSource", "OpacityBar", "Eyedropper")
 SWATCH_NAME_PREFIXES = ("flag",)
 # Color pickers keep their swatch (the white "no color" slot included), but their button frame,
@@ -208,7 +209,7 @@ SWEEP_MS = 750  # how often to look for widgets FontLab created or showed
 FULL_SWEEP_EVERY = 40  # every Nth sweep revisits every widget (replaced stylesheets, new icons)
 FOCUS_DRAIN_MS = 80  # a window that takes focus is darkened at once, up to this long, before it paints light
 MAX_ERRORS = 50
-NATIVE_VERSION = 24
+NATIVE_VERSION = 28
 
 ID_PROP = "freelab_id"  # dynamic properties FreeLab sets on widgets, all removed by restore()
 SEEN_PROP = "freelab_seen"
@@ -646,7 +647,7 @@ def _address(image):
     return ctypes.addressof(ctypes.c_char.from_buffer(image.bits()))
 
 
-ANCHOR_MODES = {"ink": 0, "all": 1, "relight": 2}
+ANCHOR_MODES = {"ink": 0, "all": 1, "relight": 2, "icon": 3}
 
 
 def map_image(image, min_l=0.0, keys=None, ink_below=-1.0, keep_tint=0.0, light_l=None, edge_neutral=0.0, edge_target=0,
@@ -688,7 +689,7 @@ def map_image(image, min_l=0.0, keys=None, ink_below=-1.0, keep_tint=0.0, light_
         except Exception as exc:
             _note_error("map_image", exc)
             _state()["native"] = None
-    if anchors == "all" or (not anchors and min_l <= 0.0 and not keys):
+    if anchors in ("all", "icon") or (not anchors and min_l <= 0.0 and not keys):
         image.invertPixels()
     return image
 
@@ -808,11 +809,11 @@ def _mapped_resource(resource):
             stem, ext = os.path.splitext(resource[2:].replace("/", "_"))
             path = os.path.join(folder, stem + ".png")
             if not os.path.isfile(path):
-                map_image(image).save(path)
+                map_image(image, anchors="icon").save(path)
                 base, _ext = os.path.splitext(resource)
                 double = QImage(base + "@2x" + ext)  # Qt picks name@2x.png on high-density screens
                 if not double.isNull():
-                    map_image(double).save(os.path.join(folder, stem + "@2x.png"))
+                    map_image(double, anchors="icon").save(os.path.join(folder, stem + "@2x.png"))
     except Exception as exc:
         _note_error("sheet image", exc)
         path = None
@@ -911,12 +912,12 @@ def dark_icon(icon, owner=None):
             for icon_state in (QIcon.Off, QIcon.On):
                 pixmap = icon.pixmap(size, mode, icon_state)
                 if not pixmap.isNull():
-                    result.addPixmap(QPixmap.fromImage(map_image(pixmap.toImage())), mode, icon_state)
+                    result.addPixmap(QPixmap.fromImage(map_image(pixmap.toImage(), anchors="icon")), mode, icon_state)
     return result
 
 
 def dark_pixmap(pixmap):
-    return _gui("QPixmap").fromImage(map_image(pixmap.toImage()))
+    return _gui("QPixmap").fromImage(map_image(pixmap.toImage(), anchors="icon"))
 
 
 SWATCH_CHROMA = 80  # max - min of the channels: clearly colored
@@ -1077,11 +1078,18 @@ def _effect_classes():
                     if kind == "keyed":
                         draw_mapped(painter, pixmap, offset, whole, self.freelab_min_l, self.freelab_keys, -1.0,
                                     self.freelab_keep_tint, None, 0.0, self.freelab_edge_target)
+                        keep_unmapped(self, painter, pixmap, offset)  # a frame color may recur inside a panel
                         return
                     if kind == "relight":  # an editor left dark after switching off: its dark paper white, its light text black
                         draw_mapped(painter, pixmap, offset, whole, 0.0, None, -1.0, 0.0, None, 0.0, 0, "relight")
                         return
                     if kind == "picker":  # the swatch as it is; the dark arrow beside it mapped light
+                        side = pixmap.height() - 2  # the swatch: a square at the left, inside a 2-px frame
+                        image = pixmap.toImage()
+                        probe_x, probe_y = side // 4 + 1, side // 4 + 1  # off the "no color" diagonal
+                        if side > 6 and _gui("QColor").fromRgba(image.pixel(probe_x, probe_y)).alpha() < 200:
+                            # Some pickers paint "no color" transparent: give them the white slot others paint.
+                            painter.fillRect(QRect(offset.x() + 3, offset.y() + 3, side - 4, side - 4), Qt.white)
                         painter.drawPixmap(offset, pixmap)
                         split = min(pixmap.width(), pixmap.height() + PICKER_ARROW_GAP)
                         draw_mapped(painter, pixmap, offset, QRect(offset.x() + split, offset.y(),
@@ -1128,8 +1136,9 @@ def _effect_classes():
                     pixmap, offset = source(self)
                     painter.drawPixmap(offset, pixmap)
                     height = title_height(self.freelab_widget)
-                    if height > 0:
-                        draw_mapped(painter, pixmap, offset, QRect(offset.x(), offset.y(), pixmap.width(), height), 0.0)
+                    if height > 0:  # by anchor blends: a hovered title's colored text stays smooth
+                        draw_mapped(painter, pixmap, offset, QRect(offset.x(), offset.y(), pixmap.width(), height), 0.0,
+                                    None, -1.0, 0.0, None, 0.0, 0, "all")
                 except Exception as exc:
                     _note_error("title", exc)
                     self.drawSource(painter)
@@ -1270,6 +1279,25 @@ def _protect(widget):
         if protect is None:
             protect = effect.freelab_protect = {}
         protect[key] = widget
+
+
+def _protect_effects_inside(widget, effect):
+    """Have a new effect draw unmapped the widgets inside it that already have an effect."""
+    protect = getattr(effect, "freelab_protect", None)
+    if protect is None:
+        protect = effect.freelab_protect = {}
+    own = widget.property(ID_PROP)
+    for key, record in list(_state()["records"].items()):
+        inner = record.get("obj")
+        if record.get("effect") is None or inner is None or record.get("kind") == "title":
+            continue
+        if own is not None and key == int(own):
+            continue  # Qt's isAncestorOf is true for the widget itself
+        try:
+            if widget.isAncestorOf(inner):
+                protect[key] = inner
+        except Exception:  # deleted meanwhile
+            continue
 
 
 def _drop_stray_effect(widget):
@@ -1428,6 +1456,12 @@ def _set_effect(widget, record, kind, keys=None):
     effect.setProperty(EFFECT_PROP, kind)
     widget.setGraphicsEffect(effect)  # deletes any effect FreeLab set before
     record["effect"], record["kind"] = effect, kind  # PythonQt deletes it if no Python reference is kept
+    # Effects nest: each draws the widgets inside it that have an effect of their own as they come out
+    # of it (the font window's ink effect had mapped its glyph cells' island a second time).
+    if kind != "title":
+        _protect(widget)
+        if kind != "picker":
+            _protect_effects_inside(widget, effect)
 
 
 def _clear_effect(widget, record):
@@ -1519,6 +1553,11 @@ def _set_placeholder(widget):
     attribute = _core("Qt").WA_SetPalette
     palette = QPalette(_prop(widget, "palette"))
     record["placeholder"] = QPalette(palette) if widget.testAttribute(attribute) else None
+    # The copy may hold the dark palette's light text (the field took it before the island's light
+    # palette reached it): give it the light look's text colors, which the island maps light.
+    light = _island_palette()
+    for name in ("Text", "WindowText", "ButtonText"):
+        palette.setColor(getattr(QPalette, name), light.color(getattr(QPalette, name)))
     palette.setColor(role, _qt()[2](ISLAND_PLACEHOLDER))
     widget.setPalette(palette)
 
@@ -1697,7 +1736,7 @@ def process(widget):
                 _make_island(widget)
                 return
     _darken_icons(widget)
-    if kind is None and visible_unchecked and not _inside_effect(widget):
+    if kind is None and visible_unchecked:
         found = detect_ink(widget)
         if found:
             widget.setProperty(ISLAND_PROP, found)
@@ -2058,6 +2097,8 @@ def _framed_style(fusion):
                     which = int(element)
                     if which != check and which != radio:
                         return
+                    if _sheet_styles_indicators(widget):
+                        return  # FontLab's own images (blue boxes): a frame would show at their rounded corners
                     window = option.palette.color(window_role)
                     if _lightness(window.red(), window.green(), window.blue()) >= INDICATOR_FRAME_DARK_BELOW:
                         return
@@ -2080,6 +2121,18 @@ def _framed_style(fusion):
     style = cls(fusion)
     state.setdefault("styles", []).append(style)  # Qt owns it once set; PythonQt would delete it if unreferenced
     return style
+
+
+def _sheet_styles_indicators(widget, depth=8):
+    """True when the widget or an ancestor has a stylesheet with indicator rules (images FontLab draws).
+    (PythonQt cannot read a style option's state, so the stylesheet is what tells them apart.)"""
+    current = widget
+    while current is not None and depth > 0:
+        if u"indicator" in (_prop(current, "styleSheet") or u""):
+            return True
+        current = current.parentWidget()
+        depth -= 1
+    return False
 
 
 def _class_chain(obj):

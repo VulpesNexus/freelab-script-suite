@@ -234,6 +234,14 @@ class ShadeAndPickerTests(DarkModeCase):
         self.assertEqual(picker.styleSheet, u"QtColorPicker{color: lightGray;}")
         self.assertIsNone(picker.effect)
 
+    def test_effects_protect_the_effects_inside_them_but_not_themselves(self):
+        self.on()
+        dock_protect = list(self.dock.effect.freelab_protect.values())
+        self.assertIn(self.search, dock_protect, "the search field's island is drawn as it comes out of its own effect")
+        self.assertNotIn(self.dock, dock_protect)
+        self.assertNotIn(self.canvas, list(getattr(self.canvas.effect, "freelab_protect", {}).values()),
+                         "an effect that kept itself unmapped would draw its widget raw")
+
     def test_swatches_are_drawn_unmapped_by_the_effect_above_them(self):
         self.odd.light = "ink"
         slot = FakeWidget("QToolButton", "flagRed", parent=self.odd, inherits=("QAbstractButton",))
