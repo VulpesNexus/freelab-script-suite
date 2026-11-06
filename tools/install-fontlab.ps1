@@ -3,16 +3,23 @@
 #   install-fontlab.ps1             copy the listener and the dark-mode script into
 #                                   FontLab 7's Scripts folder, and add the FreeLab
 #                                   block to FontLab's startupScript.py
-#   install-fontlab.ps1 -Uninstall  remove that block and the two copied scripts
+#   install-fontlab.ps1 -Uninstall  remove that block, the two copied scripts, the
+#                                   native helper, and dark mode's settings, putting
+#                                   back the workspace color dark mode replaced
 #
+# Install also builds dark mode's native pixel helper (tools/build-native.ps1)
+# into %LOCALAPPDATA%\FreeLab\bin when it is missing; without a compiler, dark
+# mode still works, with plain inversion in the widgets FontLab paints itself.
 # The first install keeps the original startup script as
 # startupScript.py.freelab-backup. Quit FontLab first or restart it afterwards:
 # FontLab reads its Scripts folder and startup script when it starts.
 #
 # ASCII only: Windows PowerShell 5.1 reads a BOM-less script in the ANSI code page.
 
-# -ScriptsDir and -StartupScript override the two locations, for testing.
-param([switch]$Uninstall, [string]$ScriptsDir, [string]$StartupScript)
+# -ScriptsDir, -StartupScript, -BinDir, -StateDir, -RegistryKey, and -ProcessName override the
+# locations and the FontLab process name, for testing.
+param([switch]$Uninstall, [string]$ScriptsDir, [string]$StartupScript, [string]$BinDir, [string]$StateDir,
+      [string]$RegistryKey, [string]$ProcessName = 'FontLab 7')
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
@@ -32,6 +39,12 @@ $files = @(
     @{ From = 'listener\freelab_listener.py'; Name = 'freelab_listener.py' },
     @{ From = 'darkmode\freelab_dark_mode.py'; Name = 'freelab_dark_mode.py' }
 )
+if (-not $BinDir) { $BinDir = Join-Path $env:LOCALAPPDATA 'FreeLab\bin' }
+if (-not $StateDir) { $StateDir = Join-Path $env:LOCALAPPDATA 'FreeLab' }
+if (-not $RegistryKey) { $RegistryKey = 'HKCU:\Software\Fontlab\fontlab7' }
+$darkWorkspace = '#fff0f0f0'  # WORKSPACE_DARK in darkmode/freelab_dark_mode.py
+$source = [System.IO.File]::ReadAllText((Join-Path $repo 'darkmode\native\freelab_pixels.c'))
+$nativeName = 'freelab_pixels-v' + [regex]::Match($source, '#define FREELAB_PIXELS_VERSION (\d+)').Groups[1].Value + '.dll'
 $begin = '# >>> FreeLab'
 $end = '# <<< FreeLab'
 
@@ -60,6 +73,26 @@ $current = ''
 if (Test-Path $startup) { $current = [System.IO.File]::ReadAllText($startup) -replace "`r`n", "`n" }
 
 if ($Uninstall) {
+    # Dark mode keeps FontLab's own workspace color in darkmode.json while it is on.
+    $settingsFile = Join-Path $StateDir 'darkmode.json'
+    if (Test-Path $settingsFile) {
+        $saved = $null
+        try { $saved = ([System.IO.File]::ReadAllText($settingsFile) | ConvertFrom-Json).saved_workspace } catch { }
+        if ($saved -and (Get-Process -Name $ProcessName -ErrorAction SilentlyContinue)) {
+            Write-Output 'FontLab is running with dark mode on: switch dark mode off (Scripts > FreeLab: Toggle Dark Mode), quit FontLab, and run -Uninstall again.'
+            exit 1
+        }
+        if ($saved) {
+            $current = $null
+            try { $current = (Get-ItemProperty $RegistryKey -Name 'color.workspace' -ErrorAction Stop).'color.workspace' } catch { }
+            if ($current -eq $darkWorkspace) {
+                Set-ItemProperty $RegistryKey -Name 'color.workspace' -Value $saved
+                Write-Output "Put FontLab's workspace color back to $saved"
+            }
+        }
+        [System.IO.File]::Delete($settingsFile)
+        Write-Output "Removed $settingsFile"
+    }
     if (Test-Path $startup) {
         [System.IO.File]::WriteAllText($startup, (Remove-Block $current), $utf8)
         Write-Output "Removed the FreeLab block from $startup"
@@ -67,6 +100,12 @@ if ($Uninstall) {
     foreach ($f in $files) {
         $target = Join-Path $scripts $f.Name
         if (Test-Path $target) { [System.IO.File]::Delete($target); Write-Output "Removed $target" }
+    }
+    if (Test-Path $BinDir) {
+        foreach ($dll in Get-ChildItem $BinDir -Filter 'freelab_pixels*.dll') {
+            try { [System.IO.File]::Delete($dll.FullName); Write-Output "Removed $($dll.FullName)" }
+            catch { Write-Output "Could not remove $($dll.FullName) (FontLab is using it): delete it after quitting FontLab." }
+        }
     }
     exit 0
 }
@@ -76,6 +115,16 @@ foreach ($f in $files) {
     $target = Join-Path $scripts $f.Name
     [System.IO.File]::Copy((Join-Path $repo $f.From), $target, $true)
     Write-Output "Copied $($f.Name) to $scripts"
+}
+
+$native = Join-Path $BinDir $nativeName
+if (Test-Path $native) { Write-Output "Native helper present: $native" }
+else {
+    try { & (Join-Path $PSScriptRoot 'build-native.ps1') -Out $native }
+    catch {
+        Write-Output "Could not build the native helper: $_"
+        Write-Output 'Dark mode still works, with plain inversion in the widgets FontLab paints itself. Install LLVM or Visual Studio with the C++ tools, then run tools\build-native.ps1.'
+    }
 }
 
 $darkPath = ConvertTo-PyLiteral (Join-Path $scripts 'freelab_dark_mode.py')

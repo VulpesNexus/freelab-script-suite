@@ -13,6 +13,8 @@ Without that Python, FontLab still starts, but the *Scripting* panel, the *Scrip
 
 Install the 64-bit Python 2.7.18 (*python-2.7.18.amd64.msi* from python.org), or rerun the FontLab 7 installer and let it install Python. Then restart FontLab and check again.
 
+The 32-bit installer (*python-2.7.18.msi*, the one python.org lists first) does not work: it puts *python27.dll* in *SysWOW64*, where 64-bit FontLab cannot load it, and FontLab shows no error. The 64-bit one puts it in *System32*. Leave out *Register Extensions* when installing, or Python 2.7 takes over double-clicked *.py* files.
+
 ## Paths
 
 Python 2.7 opens files through the Windows ANSI code page. A script whose path that code page cannot spell, such as a folder with an en dash on a Japanese-locale system, cannot be run, so keep the listener in FontLab's own *Scripts* folder.

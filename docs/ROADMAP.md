@@ -1,10 +1,9 @@
 # Roadmap
 
-## Next: first live run
+## Next
 
-1. Get FontLab 7's Python working ([PYTHON27.md](PYTHON27.md)).
-2. Start the listener in FontLab and run `fontlab_status`. This is the first live test of the `QTimer` loop and of PythonQt's signal syntax.
-3. On a disposable test font, prove each read in [FONTLAB7-API.md](FONTLAB7-API.md) and raise its row to **live**.
+1. Dark mode in the windows not seen yet: the font window, glyph windows, *Preferences*, *Font Info*, and other dialogs. Unknown widgets that paint light are detected, but each window still needs a look.
+2. On a disposable test font, prove each read in [FONTLAB7-API.md](FONTLAB7-API.md) and raise its row to **live**.
 
 ## Then
 
@@ -15,7 +14,7 @@
 
 In the owner's order of interest:
 
-1. **Dark mode** for FontLab 7's interface (first).
+1. **Dark mode** for FontLab 7's interface (first): running, [DARKMODE.md](DARKMODE.md).
 2. Automated kerning.
 3. Automated kerning pairs.
 4. Automated diacritic variants.
