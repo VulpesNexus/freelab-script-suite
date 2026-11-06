@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 28
+#define FREELAB_PIXELS_VERSION 34
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -598,6 +598,29 @@ static int smoothing_of_readable(int k)
     return 0;
 }
 
+/* A low-color candidate lying between the background (anchor 0) and lighter colored text is that
+ * text's ClearType smoothing (blue syntax on a dark editor paper fringes in gray-teal), never a dim
+ * gray mark of its own: lifting it put light dots inside the text. */
+static double blend_fit(double r, double g, double b, const Anchor *a, const Anchor *o, double *t_out, double *ee_out);
+
+static int fringe_of_lighter_color(int k)
+{
+    const Anchor *c = &anchors[k], *paper = &anchors[0];
+    int j;
+    if (k == 0 || anchor_count == 0 || !paper->surface)
+        return 0;
+    for (j = 1; j < anchor_count; j++) {
+        const Anchor *o = &anchors[j];
+        double t, ee;
+        if (j == k || o->surface || o->long_line || o->okl <= c->okl || o->chroma < INK_CHROMA)
+            continue;
+        if (blend_fit(c->r, c->g, c->b, paper, o, &t, &ee) <= LOCAL_BLEND_TOLERANCE * LOCAL_BLEND_TOLERANCE * ee
+            && t > 0.03 && t < 0.97)
+            return 1;
+    }
+    return 0;
+}
+
 static uint32_t mapped_one(uint32_t rgb, double dark_l, double light_l, double keep_tint)
 {
     uint8_t r = (uint8_t)(rgb >> 16), g = (uint8_t)(rgb >> 8), b = (uint8_t)rgb;
@@ -750,9 +773,9 @@ static void drop_paper_blends(void)
 static void find_anchors(const uint32_t *p, int64_t count, int64_t width, int mode, double dark_l, double light_l,
                          double keep_tint, double main_default)
 {
-    int64_t i, total = 0, last_slot = -1, min_count;
+    int64_t i, total = 0, area = 0, last_slot = -1, min_count;
     int k, j, n;
-    double main_l = main_default;
+    double main_l = main_default, share_of;
     int text_found = 0;
     generation++;
     if (generation == 0)
@@ -766,6 +789,7 @@ static void find_anchors(const uint32_t *p, int64_t count, int64_t width, int mo
             last_slot = -1;
             continue;
         }
+        area++;
         if ((v >> 24) < ANCHOR_MIN_ALPHA) {
             last_slot = -1;
             continue;
@@ -824,8 +848,15 @@ static void find_anchors(const uint32_t *p, int64_t count, int64_t width, int mo
                 anchors[anchor_count++] = anchors[k];
         }
     }
+    /* A widget that paints no background (what lies beneath shows through: main_default) has only
+     * its text opaque: that text's share counts against its whole area, or black text drawn on
+     * nothing (FontLab's Unicode ranges and codepages lists) would pass for the background. Dim
+     * marks (a field's gray frame drawn on nothing) keep the share of the opaque pixels. */
+    share_of = (double)total;
     if (anchor_count > 0 && anchors[0].surface)
-        main_l = anchors[0].okl; /* else the widget paints no background: what lies beneath (main_default) */
+        main_l = anchors[0].okl;
+    else
+        share_of = (double)area;
     if (mode == ANCHORS_RELIGHT && anchor_count > 2)
         drop_paper_blends();
     for (j = 0; j < anchor_count; j++) {
@@ -856,7 +887,7 @@ static void find_anchors(const uint32_t *p, int64_t count, int64_t width, int mo
                    && a->okl >= LIGHT_SURFACE_OKL && spread_of(px) <= LIGHT_SURFACE_SPREAD) {
             out = mapped_one(rgb, dark_l, light_l, 0.0);
             a->mapped = 1;
-        } else if (!a->long_line && (double)a->count < BACKGROUND_SHARE * (double)total && a->okl < INK_MAX_OKL
+        } else if (!a->long_line && (double)a->count < BACKGROUND_SHARE * share_of && a->okl < INK_MAX_OKL
                    && (!a->surface || a->okl <= SURFACE_INK_MAX_OKL)
                    && (a->okl <= main_l - INK_BELOW_MAIN
                        || (a->chroma >= INK_CHROMA && (double)a->beside_light < FRINGE_SHARE * (double)a->count
@@ -864,7 +895,8 @@ static void find_anchors(const uint32_t *p, int64_t count, int64_t width, int mo
             out = mapped_one(rgb, dark_l, light_l, a->chroma >= INK_CHROMA ? 1.0 : 0.0);
             a->mapped = 1;
         } else if (!a->surface && !a->long_line && a->chroma < INK_CHROMA && a->okl < DIM_INK_MAX_OKL
-                   && a->okl >= main_l + DIM_INK_ABOVE_MAIN && (double)a->count < BACKGROUND_SHARE * (double)total) {
+                   && a->okl >= main_l + DIM_INK_ABOVE_MAIN && (double)a->count < BACKGROUND_SHARE * (double)total
+                   && !fringe_of_lighter_color(j)) {
             double light = gray_byte(light_l);
             out = mapped_one(rgb, dark_l, light_l, 0.0);
             out = pack(((out >> 16) & 255) + (light - ((out >> 16) & 255)) * DIM_INK_LIFT,
@@ -1041,6 +1073,7 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
     uint32_t *p = (uint32_t *)pixels;
     uint32_t last_in = 0, last_out = 0;
     int have_last = 0, any_mapped = 0, j, local, tinted, last_edge = 0;
+    uint32_t paper_bit;
     int64_t i, changed = 0;
     find_anchors(p, count, width, mode, dark_l, light_l, keep_tint, main_default);
     for (j = 0; j < anchor_count; j++)
@@ -1064,6 +1097,10 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
     if (local)
         index_pixels(p, count);
     tinted = (mode == ANCHORS_ALL || mode == ANCHORS_ICON) && keep_tint > 0.0 && width > 0;
+    /* Text smoothing lies between the paper and the text, even where the pixels around are all
+     * fringes (ClearType's navy and red beside blue syntax on a dark editor): the kept paper always
+     * counts as around, or a far pair of text colors (blue and black ink) claimed those fringes. */
+    paper_bit = mode == ANCHORS_INK && anchor_count > 1 && anchors[0].surface && !anchors[0].mapped ? 1U : 0U;
     for (i = 0; i < count; i++) {
         uint32_t v = p[i], alpha = v >> 24, c, key, out, mask = 0;
         int edge;
@@ -1071,6 +1108,8 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
             continue;
         if (local && alpha >= ANCHOR_MIN_ALPHA && a_index[i] < 0)
             mask = neighborhood(i, count, width);
+        if (mask)
+            mask |= paper_bit;
         edge = tinted && sharp_edge(p, i, width, count);
         if (have_last && v == last_in && edge == last_edge && (!local || mask == 0 || a_index[i] >= 0)) {
             if (last_out != v) {

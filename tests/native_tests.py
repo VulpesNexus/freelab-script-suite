@@ -184,6 +184,59 @@ class NativeTests(unittest.TestCase):
         buf = pixels(colors)
         self.assertEqual(anchors(LIB, buf, width, "ink"), 0, "light text and its fringes are left as drawn")
 
+    def test_black_text_drawn_on_nothing_turns_light(self):
+        # FontLab's Unicode ranges list paints no background: only its black text is opaque.
+        buf = bytearray()
+        for y in range(14):
+            for x in range(40):
+                if 3 <= y <= 10 and x % 6 == 1:
+                    buf += struct.pack("<BBBB", 0, 0, 0, 255)
+                elif 3 <= y <= 10 and x % 6 == 2:
+                    buf += struct.pack("<BBBB", 0, 0, 0, 120)
+                else:
+                    buf += struct.pack("<BBBB", 0, 0, 0, 0)
+        anchors(LIB, buf, 40, "ink")
+        self.assertEqual(rgb_at(buf, TEXT_ROW + 1), dm.map_rgb(0, 0, 0), "the text is ink, not a background")
+        self.assertEqual(rgb_at(buf, TEXT_ROW + 2), dm.map_rgb(0, 0, 0), "its smoothing too, alpha kept")
+        self.assertEqual(buf[4 * (TEXT_ROW + 2) + 3], 120)
+
+    def test_a_gray_frame_drawn_on_nothing_stays(self):
+        # A glyph-panel field: only its 1-pixel gray frame is opaque.
+        buf = bytearray()
+        for y in range(19):
+            for x in range(72):
+                edge = y in (0, 18) or x in (0, 71)
+                buf += struct.pack("<BBBB", 74, 74, 74, 255) if edge else struct.pack("<BBBB", 0, 0, 0, 0)
+        before = bytes(buf)
+        anchors(LIB, buf, 72, "ink")
+        self.assertEqual(bytes(buf), before)
+
+    def test_fringes_of_kept_text_are_not_claimed_by_far_ink_pairs(self):
+        # A rare navy ClearType pixel inside blue syntax, with only blue around it and black string
+        # ink further on: it is paper + blue (kept), not blue + black ink (mapped light).
+        width, colors = 20, []
+        for y in range(14):
+            for x in range(width):
+                band = 3 <= y <= 10
+                if band and y == 6 and x % 10 == 2:
+                    colors.append((30, 30, 78))  # navy fringe
+                elif band and x % 10 <= 4:
+                    colors.append((50, 88, 173))  # blue
+                elif band and x % 10 == 7:
+                    colors.append((10, 0, 10))  # black ink
+                else:
+                    colors.append((30, 30, 30))
+        buf = pixels(colors)
+        anchors(LIB, buf, width, "ink")
+        self.assertEqual(rgb_at(buf, 6 * width + 2), (30, 30, 78))
+
+    def test_gray_fringes_of_colored_text_are_not_dim_marks(self):
+        # Blue syntax on a dark editor paper fringes in gray-teal (#59757d), which must not be lifted.
+        paper, blue, fringe = (30, 30, 30), (69, 117, 173), (89, 117, 125)
+        buf = pixels(text_rows(paper, blue, blend=fringe))
+        anchors(LIB, buf, 40, "ink")
+        self.assertEqual(rgb_at(buf, TEXT_ROW + 2), fringe)
+
     def test_light_badges_turn_dark_without_touching_light_text_beside_them(self):
         # Gray text (192) on a dark row, and a gray badge (160) with black text: all on one gray line.
         width, rows = 60, 14

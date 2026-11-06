@@ -209,7 +209,7 @@ SWEEP_MS = 750  # how often to look for widgets FontLab created or showed
 FULL_SWEEP_EVERY = 40  # every Nth sweep revisits every widget (replaced stylesheets, new icons)
 FOCUS_DRAIN_MS = 80  # a window that takes focus is darkened at once, up to this long, before it paints light
 MAX_ERRORS = 50
-NATIVE_VERSION = 28
+NATIVE_VERSION = 34
 
 ID_PROP = "freelab_id"  # dynamic properties FreeLab sets on widgets, all removed by restore()
 SEEN_PROP = "freelab_seen"
@@ -1117,7 +1117,9 @@ def _effect_classes():
             owner = effect.freelab_widget
             protect = getattr(effect, "freelab_protect", {})
             for key, widget in list(protect.items()):
-                if not _alive(widget):
+                if not _alive(widget) or widget is owner or not owner.isAncestorOf(widget):
+                    # moved out (an undocked panel): Qt's mapTo walks off a parent chain that
+                    # does not reach the owner and crashes on the null at its end
                     del protect[key]
                     continue
                 if not widget.isVisible():
