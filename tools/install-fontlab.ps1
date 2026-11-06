@@ -1,6 +1,6 @@
 # Install FreeLab's FontLab 7 scripts for the current user, or remove them.
 #
-#   install-fontlab.ps1             copy the listener and the dark-mode script into
+#   install-fontlab.ps1             copy the listener and the dark-mode scripts into
 #                                   FontLab 7's Scripts folder, and add the FreeLab
 #                                   block to FontLab's startupScript.py
 #   install-fontlab.ps1 -Uninstall  remove that block, the two copied scripts, the
@@ -39,7 +39,8 @@ if ($StartupScript) { $startup = $StartupScript }
 else { $startup = Join-Path $env:LOCALAPPDATA 'FontLab\FontLab 7\startupScript.py' }
 $files = @(
     @{ From = 'listener\freelab_listener.py'; Name = 'freelab_listener.py' },
-    @{ From = 'darkmode\freelab_dark_mode.py'; Name = 'freelab_dark_mode.py' }
+    @{ From = 'darkmode\freelab_dark_mode.py'; Name = 'freelab_dark_mode.py' },
+    @{ From = 'darkmode\freelab_dark_mode_settings.py'; Name = 'freelab_dark_mode_settings.py' }
 )
 if (-not $BinDir) { $BinDir = Join-Path $env:LOCALAPPDATA 'FreeLab\bin' }
 if (-not $StateDir) { $StateDir = Join-Path $env:LOCALAPPDATA 'FreeLab' }

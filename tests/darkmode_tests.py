@@ -172,11 +172,75 @@ class ColorTests(unittest.TestCase):
 class ContentTests(DarkModeCase):
     def test_content_islands_keep_every_color(self):
         self.on()
-        self.assertEqual(self.canvas.effect.freelab_neutral, 0, "anchors and nodes keep their colors")
-        self.assertEqual(self.search.effect.freelab_neutral, dm.NEUTRAL_SPREAD)
+        self.assertEqual(self.canvas.effect.freelab_keep_tint, dm.KEEP_TINT_CONTENT, "anchors and nodes keep their colors")
+        self.assertEqual(self.search.effect.freelab_keep_tint, 0.0)
         node = (106, 160, 106)
-        out = dm.map_rgb(*node, neutral=0)
+        out = dm.map_rgb(*node, keep_tint=dm.KEEP_TINT_CONTENT)
         self.assertGreater(out[1], out[0] + 10)
+
+    def test_mark_slots_keep_their_colors(self):
+        slot = FakeWidget("QToolButton", "flagRed", parent=self.content, sheet=u"QToolButton{background-color:#ff8080;}",
+                          inherits=("QAbstractButton",))
+        self.on()
+        self.assertEqual(slot.styleSheet, u"QToolButton{background-color:#ff8080;}")
+        self.assertIsNone(slot.effect)
+
+    def test_the_swatch_popup_is_darkened_but_not_its_swatches(self):
+        popup = FakeWidget("ColorPickerPopup", parent=self.content, sheet=u"QWidget{background:white;}")
+        item = FakeWidget("ColorPickerItem", parent=popup, sheet=u"QWidget{background:#ffffff;}")
+        self.on()
+        self.assertEqual(popup.styleSheet, dm.recolor_sheet(u"QWidget{background:white;}"))
+        self.assertEqual(item.styleSheet, u"QWidget{background:#ffffff;}")
+
+    def test_dark_interface_mode_leaves_content_light(self):
+        dm.save_settings({"content": False})
+        self.on()
+        self.assertIsNone(self.canvas.effect)
+        self.assertEqual(qtfakes.Preferences.color_workspace, QColor("#ffacacac"), "the workspace color is left too")
+        self.assertIsNotNone(self.search.effect, "the interface is still dark")
+
+
+class OptionTests(DarkModeCase):
+    def test_follow_windows_switches_with_windows(self):
+        dark = [True]
+        self.patch("windows_is_dark", lambda: dark[0])
+        dm.configure(follow_windows=True)
+        self.assertTrue(dm._state()["on"])
+        watch = dm._state()["theme_watch"]
+        self.assertTrue(watch is not None and watch.running)
+        dark[0] = False
+        watch.fire()
+        dm.run_queue()
+        self.assertFalse(dm._state()["on"])
+        dark[0] = True
+        watch.fire()
+        self.assertTrue(dm._state()["on"])
+
+    def test_switching_by_hand_stops_following(self):
+        self.patch("windows_is_dark", lambda: True)
+        dm.configure(follow_windows=True)
+        dm.toggle()
+        self.assertFalse(self.settings()["follow_windows"])
+        self.assertIsNone(dm._state()["theme_watch"])
+
+    def test_changing_the_content_option_rebuilds(self):
+        dm.configure(dark=True)
+        dm.run_queue()
+        self.assertIsNotNone(self.canvas.effect)
+        dm.configure(content=False)
+        dm.run_queue()
+        self.assertIsNone(self.canvas.effect)
+        self.assertTrue(dm._state()["on"])
+
+    def test_startup_follows_windows(self):
+        self.patch("windows_is_dark", lambda: True)
+        dm.save_settings({"enabled": False, "follow_windows": True})
+        dm.startup()
+        self.assertTrue(dm._state()["on"])
+
+    def test_older_canvas_setting_still_counts(self):
+        self.assertFalse(dm.content_setting({"canvas": False}))
+        self.assertTrue(dm.content_setting({}))
 
 class SheetTests(unittest.TestCase):
     def test_formats(self):

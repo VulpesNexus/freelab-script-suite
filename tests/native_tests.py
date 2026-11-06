@@ -26,14 +26,14 @@ def _load():
         return None
     lib = ctypes.CDLL(DLL)
     lib.freelab_map_lightness.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_double, ctypes.c_double,
-                                          ctypes.c_double, ctypes.c_double, ctypes.c_int]
+                                          ctypes.c_double, ctypes.c_double, ctypes.c_double]
     lib.freelab_pixel_stats.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_int, ctypes.c_double,
                                         ctypes.c_double, ctypes.POINTER(ctypes.c_int64)]
     lib.freelab_light_colors.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_double, ctypes.c_int,
                                          ctypes.POINTER(ctypes.c_uint32), ctypes.c_int64]
     lib.freelab_light_colors.restype = ctypes.c_int64
     lib.freelab_map_keyed.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.POINTER(ctypes.c_uint32), ctypes.c_int64,
-                                      ctypes.c_double, ctypes.c_double, ctypes.c_int]
+                                      ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_double]
     return lib
 
 
@@ -44,10 +44,10 @@ def pixels(colors, alpha=255):
     return bytearray(b"".join(struct.pack("<BBBB", b, g, r, alpha) for r, g, b in colors))
 
 
-def run_map(lib, buf, min_l=0.0, ink_below=-1.0, neutral=dm.NEUTRAL_SPREAD):
+def run_map(lib, buf, min_l=0.0, ink_below=-1.0, keep_tint=0.0):
     array = (ctypes.c_char * len(buf)).from_buffer(buf)
     lib.freelab_map_lightness(ctypes.addressof(array), len(buf) // 4, dm.DARK_OKL, dm.LIGHT_OKL, min_l, ink_below,
-                              neutral)
+                              keep_tint)
 
 
 @unittest.skipIf(LIB is None, "native helper not built: run tools/build-native.ps1 (%s)" % DLL)
@@ -87,11 +87,36 @@ class NativeTests(unittest.TestCase):
         self.assertEqual(out[2:4], colors[2:4], "the paper and the syntax colors stay")
         self.assertTrue(30 < out[4][0] < 219, "a smoothed edge pixel lands between paper and text: %r" % (out[4],))
 
+    def test_matches_python_with_tint_kept(self):
+        random.seed(11)
+        colors = [tuple(random.randrange(256) for _ in range(3)) for _ in range(3000)]
+        buf = pixels(colors)
+        run_map(LIB, buf, keep_tint=1.0)
+        for i, rgb in enumerate(colors):
+            got = tuple(buf[4 * i + 2 - k] for k in range(3))
+            expected = dm.map_rgb(*rgb, keep_tint=1.0)
+            self.assertLessEqual(max(abs(a - b) for a, b in zip(got, expected)), 1, rgb)
+
+    def test_smoothing_blends_stay_blends(self):
+        # A pixel halfway between white paper and black text maps halfway between the mapped two.
+        buf = pixels([(255, 255, 255), (0, 0, 0), (128, 128, 128)])
+        run_map(LIB, buf)
+        white, black, half = (buf[0], buf[4], buf[8])
+        self.assertLessEqual(abs(half - (white + black) / 2.0), 1.5)
+
+    def test_keyed_also_maps_near_white(self):
+        buf = pixels([(250, 250, 250), (60, 60, 60)])
+        keys = (ctypes.c_uint32 * 1)(0xcacbcc)
+        array = (ctypes.c_char * len(buf)).from_buffer(buf)
+        LIB.freelab_map_keyed(ctypes.addressof(array), 2, keys, 1, dm.DARK_OKL, dm.LIGHT_OKL, 0.0, dm.WHITE_L)
+        self.assertLess(buf[0], 60, "a white frame corner turns dark")
+        self.assertEqual(buf[4], 60)
+
     def test_content_keeps_muted_colors(self):
         node = (106, 160, 106)  # a muted green node: channels spread by 54
         ui, content = pixels([node]), pixels([node])
         run_map(LIB, ui)
-        run_map(LIB, content, neutral=0)
+        run_map(LIB, content, keep_tint=dm.KEEP_TINT_CONTENT)
         self.assertEqual(ui[0], ui[1])  # gray in the interface
         self.assertGreater(content[1], content[0] + 10, "still green on the canvas")
 
@@ -124,7 +149,7 @@ class KeyedTests(unittest.TestCase):
         buf = pixels(colors)
         keys = (ctypes.c_uint32 * 1)(0xcacbcc)
         array = (ctypes.c_char * len(buf)).from_buffer(buf)
-        LIB.freelab_map_keyed(ctypes.addressof(array), 3, keys, 1, dm.DARK_OKL, dm.LIGHT_OKL, dm.NEUTRAL_SPREAD)
+        LIB.freelab_map_keyed(ctypes.addressof(array), 3, keys, 1, dm.DARK_OKL, dm.LIGHT_OKL, 0.0, -1.0)
         out = [tuple(buf[4 * i + 2 - k] for k in range(3)) for i in range(3)]
         expected = dm.map_rgb(202, 203, 204)
         self.assertLessEqual(max(abs(a - b) for a, b in zip(out[0], expected)), 1)

@@ -11,7 +11,7 @@
 
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 7
+#define FREELAB_PIXELS_VERSION 8
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -150,9 +150,20 @@ static int oklab_to_linear(double l, double a, double b, double *r, double *g, d
  * less and less, down to CHROMA_MIN_FACTOR at white: tinted whites and pastels turn gray. */
 #define CHROMA_FULL_BELOW 0.65
 #define CHROMA_MIN_FACTOR 0.25
-/* neutral_spread: a color whose channels spread this little (max - min, 0-255) comes out pure
- * gray, so ClearType's colored text edges, drawn dark on light and then mapped, do not stay
- * colored. Interface areas pass 60; content (canvas nodes and anchors, marks) passes 0. */
+/* Colors whose channels spread this little (max - min, 0-255) are mapped linearly: their mean
+ * is inverted between the two grays, and keep_tint (0 to 1) of each channel's distance from
+ * the mean is kept. Text smoothing lives in these colors (blends of text and background, and
+ * ClearType's colored edges), and only a linear mapping keeps a blend a blend: the perceptual
+ * one below moved edge pixels to the wrong brightness. The interface passes keep_tint 0 (gray);
+ * content passes 1, keeping the hue of muted anchors, nodes, and marks. */
+#define LINEAR_SPREAD 80
+#define MAX_LINEAR_CHANNEL 235.0
+
+/* The sRGB gray whose OKLab lightness is l (for a gray, L is the cube root of linear light). */
+static double gray_byte(double l)
+{
+    return (double)linear_to_byte(l * l * l);
+}
 /* No mapped color may reach the selective threshold (HLS lightness 0.9): one that would is darkened. */
 #define MAX_HLS_LIGHTNESS 0.89
 
@@ -194,14 +205,33 @@ static double lightness(uint8_t r, uint8_t g, uint8_t b)
 /* The mapping of freelab_dark_mode.map_rgb: in OKLab, L becomes dark + (1 - L) * (light - dark),
  * hue kept, chroma scaled by chroma_factor and reduced further only as sRGB requires; a result
  * at MAX_HLS_LIGHTNESS or above is darkened until it is below. */
-static void map_rgb(uint8_t *r8, uint8_t *g8, uint8_t *b8, double dark_l, double light_l, int neutral_spread)
+static void map_rgb(uint8_t *r8, uint8_t *g8, uint8_t *b8, double dark_l, double light_l, double keep_tint)
 {
     double l, a, b, l2, k;
     int i;
     uint8_t maxc = *r8 > *g8 ? (*r8 > *b8 ? *r8 : *b8) : (*g8 > *b8 ? *g8 : *b8);
     uint8_t minc = *r8 < *g8 ? (*r8 < *b8 ? *r8 : *b8) : (*g8 < *b8 ? *g8 : *b8);
+    if (maxc - minc <= LINEAR_SPREAD) {
+        double dark = gray_byte(dark_l), light = gray_byte(light_l);
+        double mean = (*r8 + *g8 + *b8) / 3.0;
+        double base = light - mean * (light - dark) / 255.0;
+        uint8_t *channels[3];
+        int c;
+        channels[0] = r8;
+        channels[1] = g8;
+        channels[2] = b8;
+        for (c = 0; c < 3; c++) {
+            double v = base + (*channels[c] - mean) * keep_tint;
+            if (v < 0.0)
+                v = 0.0;
+            if (v > MAX_LINEAR_CHANNEL)
+                v = MAX_LINEAR_CHANNEL;
+            *channels[c] = (uint8_t)(v + 0.5);
+        }
+        return;
+    }
     linear_to_oklab(SRGB_TO_LINEAR[*r8], SRGB_TO_LINEAR[*g8], SRGB_TO_LINEAR[*b8], &l, &a, &b);
-    k = maxc - minc <= neutral_spread ? 0.0 : chroma_factor(l);
+    k = chroma_factor(l);
     l2 = dark_l + (1.0 - l) * (light_l - dark_l);
     for (i = 0; i < 20; i++) {
         oklab_to_bytes(l2, a * k, b * k, r8, g8, b8);
@@ -223,7 +253,7 @@ EXPORT int freelab_pixels_version(void)
 #define LIGHT_TEXT 219.0
 
 EXPORT void freelab_map_lightness(uint8_t *pixels, int64_t count, double dark_l, double light_l, double min_l,
-                                  double ink_below, int neutral_spread)
+                                  double ink_below, double keep_tint)
 {
     uint32_t last_in = 0, last_out = 0;
     int have_last = 0;
@@ -239,11 +269,11 @@ EXPORT void freelab_map_lightness(uint8_t *pixels, int64_t count, double dark_l,
         last_in = v;
         bytes = (uint8_t *)&p[i];
         if (min_l <= 0.0) {
-            map_rgb(&bytes[2], &bytes[1], &bytes[0], dark_l, light_l, neutral_spread);
+            map_rgb(&bytes[2], &bytes[1], &bytes[0], dark_l, light_l, keep_tint);
         } else {
             double l = lightness(bytes[2], bytes[1], bytes[0]);
             if (l >= min_l) {
-                map_rgb(&bytes[2], &bytes[1], &bytes[0], dark_l, light_l, neutral_spread);
+                map_rgb(&bytes[2], &bytes[1], &bytes[0], dark_l, light_l, keep_tint);
             } else if (ink_below > 0.0 && l < ink_below) {
                 double coverage = 1.0 - l / ink_below;
                 int k;
@@ -297,18 +327,18 @@ EXPORT int64_t freelab_light_colors(const uint8_t *pixels, int64_t count, double
 }
 
 /* Map only pixels whose color (0xRRGGBB, alpha ignored) is one of keys. */
+/* Map pixels whose color (0xRRGGBB, alpha ignored) is one of keys, and, when min_l is above 0,
+ * pixels at least that light too (the dock's frame corners, which a render alone may not show). */
 EXPORT void freelab_map_keyed(uint8_t *pixels, int64_t count, const uint32_t *keys, int64_t nkeys,
-                              double dark_l, double light_l, int neutral_spread)
+                              double dark_l, double light_l, double keep_tint, double min_l)
 {
     int64_t i, k;
     for (i = 0; i < count; i++) {
         uint8_t *px = pixels + 4 * i;
         uint32_t rgb = ((uint32_t)px[2] << 16) | ((uint32_t)px[1] << 8) | px[0];
-        for (k = 0; k < nkeys; k++) {
-            if (keys[k] == rgb) {
-                map_rgb(&px[2], &px[1], &px[0], dark_l, light_l, neutral_spread);
-                break;
-            }
-        }
+        for (k = 0; k < nkeys && keys[k] != rgb; k++)
+            ;
+        if (k < nkeys || (min_l > 0.0 && lightness(px[2], px[1], px[0]) >= min_l))
+            map_rgb(&px[2], &px[1], &px[0], dark_l, light_l, keep_tint);
     }
 }

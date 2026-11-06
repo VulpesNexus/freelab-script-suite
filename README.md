@@ -7,7 +7,7 @@ Tools for FontLab, gathered in one place: an MCP server that lets an AI app such
 ## What is here
 
 - *listener/freelab_listener.py*: a script you run inside FontLab. It answers requests on `127.0.0.1` only, from FontLab's main thread.
-- *darkmode/*: *Scripts > FreeLab: Toggle Dark Mode* turns FontLab 7 dark (panels, tool bar, rulers, canvas, icons, and title bar) and back, without a restart, and remembers the choice for the next launch. How it works, and what it costs: [docs/DARKMODE.md](docs/DARKMODE.md).
+- *darkmode/*: *Scripts > FreeLab: Toggle Dark Mode* turns FontLab 7 dark (panels, tool bar, rulers, canvas, icons, and title bar) and back, without a restart, and remembers the choice for the next launch. *Scripts > FreeLab: Dark Mode Settings* offers a dark interface with FontLab's light canvas, and following Windows' light or dark mode. How it works, and what it costs: [docs/DARKMODE.md](docs/DARKMODE.md).
 - *server/*: the MCP server your AI app starts. It never touches FontLab directly; it passes each tool call to the listener.
 - *tests/*: the test gate (*run_tests.py*).
 - *tools/*: helper scripts.

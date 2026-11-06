@@ -83,14 +83,23 @@ STYLESHEET_MARK = u"/* FreeLab dark mode */"
 # show it. Must match darkmode/native/freelab_pixels.c.
 DARK_GRAY = 31  # #1f1f1f
 LIGHT_GRAY = 219  # #dbdbdb
+# An editor's margin (white, at its left) is mapped whole, its numbers to this gray, like the
+# Features panel's.
+MARGIN_GRAY = 133
 CHROMA_FULL_BELOW = 0.65
 CHROMA_MIN_FACTOR = 0.25
 MAX_MAPPED_LIGHTNESS = 0.89  # HLS: below WHITE_L, so selective effects never take a mapped color for FontLab's
-# A color whose channels spread this little (max - min, 0-255) comes out pure gray: faint tints
-# turn gray, and so do ClearType's colored text edges, which are drawn dark on light and then
-# mapped. (Asking Qt for grayscale text smoothing instead made GDI drop smoothing altogether at
-# FontLab's small UI sizes.)
-NEUTRAL_SPREAD = 60
+# Colors whose channels spread this little (max - min, 0-255) are mapped linearly: their mean is
+# inverted between the two grays, and keep_tint (0 to 1) of each channel's distance from the
+# mean is kept. Text smoothing lives in these colors (blends of text and background, ClearType's
+# colored edges), and only a linear mapping keeps a blend a blend; the perceptual mapping moved
+# edge pixels to the wrong brightness. The interface keeps no tint (gray, as the owner prefers,
+# and no ClearType fringes); content keeps it all (muted anchors, nodes, marks).
+# (Asking Qt for grayscale text smoothing instead made GDI drop smoothing altogether at FontLab's
+# small UI sizes.)
+LINEAR_SPREAD = 80
+MAX_LINEAR_CHANNEL = 235.0
+KEEP_TINT_CONTENT = 1.0
 # Dark mode itself draws nothing at WHITE_L or lighter (mapped colors stop near
 # 0.86, the palette above at 0.88), so a pixel at WHITE_L or above is a fixed
 # light color FontLab painted. "Selective" effects map only those pixels, which
@@ -119,7 +128,12 @@ MARGIN_MAX_WIDTH = 80
 CANVAS_RULES = (("YSketchBoard", None), ("GlyphWindow", "widget"))
 TITLE_CLASSES = ("YPanel",)  # panels paint their title strip themselves, above their children
 TITLE_MAX_HEIGHT = 40
-SKIP_CLASS_WORDS = ("ColorPicker", "ColorSource", "OpacityBar", "Eyedropper", "QDesktopScreenWidget")
+# Left as they are: color swatches (the popup that holds them is darkened), color sources, and
+# the font window's mark slots (QToolButton#flagRed and the like, colored by their stylesheets),
+# which must show the real mark colors.
+SKIP_CLASSES = ("ColorPickerItem", "ColorPickerButton", "QtColorPicker", "QDesktopScreenWidget")
+SKIP_CLASS_WORDS = ("ColorSource", "OpacityBar", "Eyedropper")
+SWATCH_NAME_PREFIXES = ("flag",)
 # Mark-color buttons: the swatch keeps its color; only the white of "no color" turns dark.
 # Color pickers keep their look, the white "no color" slot included (the owner preferred that to a half-dark frame).
 
@@ -158,7 +172,7 @@ SWEEP_MS = 750  # how often to look for widgets FontLab created or showed
 FULL_SWEEP_EVERY = 40  # every Nth sweep revisits every widget (replaced stylesheets, new icons)
 FOCUS_DRAIN_MS = 80  # a window that takes focus is darkened at once, up to this long, before it paints light
 MAX_ERRORS = 50
-NATIVE_VERSION = 7
+NATIVE_VERSION = 8
 
 ID_PROP = "freelab_id"  # dynamic properties FreeLab sets on widgets, all removed by restore()
 SEEN_PROP = "freelab_seen"
@@ -428,14 +442,26 @@ def _chroma_factor(l):
 
 DARK_OKL = oklab(DARK_GRAY, DARK_GRAY, DARK_GRAY)[0]
 LIGHT_OKL = oklab(LIGHT_GRAY, LIGHT_GRAY, LIGHT_GRAY)[0]
+MARGIN_OKL = oklab(MARGIN_GRAY, MARGIN_GRAY, MARGIN_GRAY)[0]
 
 
-def map_rgb(r, g, b, neutral=None):
-    """Map a light-theme color to its dark-theme counterpart (0-255 channels)."""
-    neutral = NEUTRAL_SPREAD if neutral is None else neutral
+def _gray_byte(l):
+    """The sRGB gray whose OKLab lightness is l (for a gray, L is the cube root of linear light)."""
+    return float(_linear_to_byte(l * l * l))
+
+
+def map_rgb(r, g, b, keep_tint=0.0, dark_l=None, light_l=None):
+    """Map a light-theme color to its dark-theme counterpart (0-255 channels). Must match the native helper."""
+    dark_l = DARK_OKL if dark_l is None else dark_l
+    light_l = LIGHT_OKL if light_l is None else light_l
+    if max(r, g, b) - min(r, g, b) <= LINEAR_SPREAD:
+        dark, light = _gray_byte(dark_l), _gray_byte(light_l)
+        mean = (r + g + b) / 3.0
+        base = light - mean * (light - dark) / 255.0
+        return tuple(int(min(MAX_LINEAR_CHANNEL, max(0.0, base + (c - mean) * keep_tint)) + 0.5) for c in (r, g, b))
     l, a, bb = oklab(r, g, b)
-    k = 0.0 if max(r, g, b) - min(r, g, b) <= neutral else _chroma_factor(l)
-    l2 = DARK_OKL + (1.0 - l) * (LIGHT_OKL - DARK_OKL)
+    k = _chroma_factor(l)
+    l2 = dark_l + (1.0 - l) * (light_l - dark_l)
     for _ in range(20):
         rgb = _oklab_to_bytes(l2, a * k, bb * k)
         if _lightness(*rgb) < MAX_MAPPED_LIGHTNESS:
@@ -528,7 +554,7 @@ def _native():
                 if lib.freelab_pixels_version() == NATIVE_VERSION:
                     mapper = lib.freelab_map_lightness
                     mapper.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_double, ctypes.c_double, ctypes.c_double,
-                                       ctypes.c_double, ctypes.c_int]
+                                       ctypes.c_double, ctypes.c_double]
                     mapper.restype = None
                     stats = lib.freelab_pixel_stats
                     stats.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_int, ctypes.c_double, ctypes.c_double,
@@ -540,7 +566,7 @@ def _native():
                     collect.restype = ctypes.c_int64
                     keyed = lib.freelab_map_keyed
                     keyed.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.POINTER(ctypes.c_uint32), ctypes.c_int64,
-                                      ctypes.c_double, ctypes.c_double, ctypes.c_int]
+                                      ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_double]
                     keyed.restype = None
                     state["native"] = (mapper, stats, collect, keyed)
                 else:
@@ -555,13 +581,14 @@ def _address(image):
     return ctypes.addressof(ctypes.c_char.from_buffer(image.bits()))
 
 
-def map_image(image, min_l=0.0, keys=None, ink_below=-1.0, neutral=None):
+def map_image(image, min_l=0.0, keys=None, ink_below=-1.0, keep_tint=0.0, light_l=None):
     """Return a Format_ARGB32 copy of a QImage with its lightness mapped like map_rgb.
 
     Only pixels at min_l or lighter are mapped (0 maps all); pixels darker than
-    ink_below, when it is above 0, move toward light text by their coverage; with
-    neutral, colors whose channels spread that little turn gray (NEUTRAL_SPREAD by
-    default, 0 for content that must keep its colors); with keys (0xRRGGBB
+    ink_below, when it is above 0, move toward light text by their coverage;
+    keep_tint is how much of a low-color pixel's tint survives (0 for the interface,
+    1 for content); light_l overrides the light end (gray numbers in an editor's
+    margin); with keys (0xRRGGBB
     integers), only pixels of exactly those colors. Without the native helper
     (or if its buffer cannot be reached) a full mapping inverts the colors
     instead, which also flips their hue, and a partial one does nothing.
@@ -569,16 +596,16 @@ def map_image(image, min_l=0.0, keys=None, ink_below=-1.0, neutral=None):
     QImage = _gui("QImage")
     image = image.convertToFormat(QImage.Format_ARGB32)
     native = _native()
-    neutral = NEUTRAL_SPREAD if neutral is None else neutral
+    light_l = LIGHT_OKL if light_l is None else light_l
     if native is not None:
         try:
             count = image.width() * image.height()
             if keys:
                 import ctypes
-                native[3](_address(image), count, (ctypes.c_uint32 * len(keys))(*keys), len(keys), DARK_OKL, LIGHT_OKL,
-                          neutral)
+                native[3](_address(image), count, (ctypes.c_uint32 * len(keys))(*keys), len(keys), DARK_OKL, light_l,
+                          keep_tint, min_l)
             else:
-                native[0](_address(image), count, DARK_OKL, LIGHT_OKL, min_l, ink_below, neutral)
+                native[0](_address(image), count, DARK_OKL, light_l, min_l, ink_below, keep_tint)
             return image
         except Exception as exc:
             _note_error("map_image", exc)
@@ -862,7 +889,7 @@ def _restore_icons(obj, record):
 # ---------------------------------------------------------------------------
 
 _EFFECTS = {}
-EFFECT_MIN_L = {"island": 0.0, "selective": WHITE_L, "edges": WHITE_L}
+EFFECT_MIN_L = {"island": 0.0, "selective": WHITE_L, "edges": WHITE_L, "keyed": WHITE_L}
 # "edges": editors (QScintilla) paint black text and a white margin on a paper that is already
 # dark (#1e1e1e, lightness 0.118): map the near-white, move pixels darker than the paper toward
 # light text by their coverage (which keeps the text's smoothing), and leave the paper and
@@ -870,8 +897,9 @@ EFFECT_MIN_L = {"island": 0.0, "selective": WHITE_L, "edges": WHITE_L}
 EDGES_INK_BELOW = 0.115
 EFFECT_INK_BELOW = {"edges": EDGES_INK_BELOW}
 EDGES_PARENTS = ("QsciScintilla",)  # their viewport (QWidget#qt_scrollarea_viewport) paints the text
+
 # Content keeps every color: anchors, nodes, and marks carry meaning even when muted.
-# Interface islands turn faint colors gray (NEUTRAL_SPREAD), which removes ClearType fringes.
+# Interface islands keep no tint of low-color pixels (LINEAR_SPREAD), which removes ClearType fringes.
 CONTENT_CLASSES = ("FontCellChart", "CellChart", "YNibShape", "YStrokeShape", "YBrushStrokePreview", "FontPreviewWidget")
 
 
@@ -891,14 +919,14 @@ def _effect_classes():
             pixmap = effect.sourcePixmap(Qt.LogicalCoordinates, offset, QGraphicsEffect.NoPad)
             return pixmap, offset
 
-        def draw_mapped(painter, pixmap, offset, area, min_l, keys=None, ink_below=-1.0, neutral=None):
+        def draw_mapped(painter, pixmap, offset, area, min_l, keys=None, ink_below=-1.0, keep_tint=0.0, light_l=None):
             """Draw the part of pixmap that lands on `area` (painter coordinates), mapped."""
             area = area.intersected(QRect(offset, pixmap.size()))
             if painter.hasClipping():
                 area = area.intersected(painter.clipBoundingRect().toAlignedRect())
             if not area.isEmpty():
                 part = pixmap.copy(area.translated(-offset.x(), -offset.y())).toImage()
-                painter.drawImage(area.topLeft(), map_image(part, min_l, keys, ink_below, neutral))
+                painter.drawImage(area.topLeft(), map_image(part, min_l, keys, ink_below, keep_tint, light_l))
 
         class MapEffect(QGraphicsEffect):
             """Draw the widget with its pixels' lightness mapped (all of them, or only those at freelab_min_l and up)."""
@@ -906,8 +934,14 @@ def _effect_classes():
             def draw(self, painter):
                 try:
                     pixmap, offset = source(self)
-                    draw_mapped(painter, pixmap, offset, QRect(offset, pixmap.size()), self.freelab_min_l,
-                                self.freelab_keys, self.freelab_ink_below, self.freelab_neutral)
+                    whole = QRect(offset, pixmap.size())
+                    margin = editor_margin(pixmap) if self.freelab_kind == "edges" else 0
+                    if margin:
+                        draw_mapped(painter, pixmap, offset, QRect(offset.x(), offset.y(), margin, pixmap.height()),
+                                    0.0, None, -1.0, 0.0, MARGIN_OKL)
+                        whole = QRect(offset.x() + margin, offset.y(), pixmap.width() - margin, pixmap.height())
+                    draw_mapped(painter, pixmap, offset, whole, self.freelab_min_l,
+                                self.freelab_keys, self.freelab_ink_below, self.freelab_keep_tint)
                 except Exception as exc:
                     _note_error("effect", exc)
                     self.drawSource(painter)
@@ -929,6 +963,20 @@ def _effect_classes():
         _EFFECTS["map"] = MapEffect
         _EFFECTS["title"] = TitleEffect
     return _EFFECTS
+
+
+def editor_margin(pixmap):
+    """Width of an editor's white margin at the left of its rendered pixmap (0 when there is none)."""
+    QColor, QImage = _gui("QColor"), _gui("QImage")
+    image = pixmap.toImage().convertToFormat(QImage.Format_ARGB32)
+    y = image.height() // 2
+    width = 0
+    for x in range(min(image.width(), 120)):
+        color = QColor.fromRgba(image.pixel(x, y))
+        if _lightness(color.red(), color.green(), color.blue()) < WHITE_L:
+            break
+        width = x + 1
+    return width if width >= 8 else 0
 
 
 def title_height(panel):
@@ -977,6 +1025,11 @@ def is_content(widget):
     parent = widget.parentWidget()
     return (_class_name(widget) == "QWidget" and parent is not None
             and _is_canvas(widget, _class_name(parent)))
+
+
+def _left_alone(widget, name):
+    return (name in SKIP_CLASSES or any(word in name for word in SKIP_CLASS_WORDS)
+            or (widget.inherits("QAbstractButton") and (_prop(widget, "objectName") or u"").startswith(SWATCH_NAME_PREFIXES)))
 
 
 def _island_ancestor(widget, canvas):
@@ -1076,7 +1129,8 @@ def _set_effect(widget, record, kind, keys=None):
     effect.freelab_min_l = EFFECT_MIN_L.get(kind, 0.0)
     effect.freelab_keys = keys
     effect.freelab_ink_below = EFFECT_INK_BELOW.get(kind, -1.0)
-    effect.freelab_neutral = 0 if kind == "island" and is_content(widget) else NEUTRAL_SPREAD
+    effect.freelab_keep_tint = KEEP_TINT_CONTENT if kind == "island" and is_content(widget) else 0.0
+    effect.freelab_kind = kind
     effect.setProperty(EFFECT_PROP, kind)
     widget.setGraphicsEffect(effect)  # deletes any effect FreeLab set before
     record["effect"], record["kind"] = effect, kind  # PythonQt deletes it if no Python reference is kept
@@ -1300,10 +1354,13 @@ def process(widget):
     if visible_unchecked:
         widget.setProperty(CHECKED_PROP, _size_key(widget))  # sweeps need not queue it again at this size
     name = _class_name(widget)
-    if any(word in name for word in SKIP_CLASS_WORDS):
+    if _left_alone(widget, name):
         _note_sheet_as_seen(widget)
         return
     canvas = state["canvas"]
+    if not canvas and is_content(widget):
+        _note_sheet_as_seen(widget)  # "dark interface" mode: canvases, font cells, and previews keep FontLab's look
+        return
     if _island_ancestor(widget, canvas) is not None:
         _undo_widget(widget, keep_props=True, keep_placeholder=True)  # the island maps it as drawn in light mode
         _set_placeholder(widget)
@@ -1517,6 +1574,89 @@ def _start_worker():
 # FontLab preferences
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Options: "content" (False: dark interface, FontLab's light glyphs and canvas)
+# and "follow_windows" (dark while Windows apps are dark), in darkmode.json
+# ---------------------------------------------------------------------------
+
+THEME_WATCH_MS = 3000
+PERSONALIZE_KEY = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+
+
+def content_setting(settings):
+    """Whether glyph canvases, font cells, and previews go dark too (the older "canvas" key counts)."""
+    return bool(settings.get("content", settings.get("canvas", True)))
+
+
+def windows_is_dark():
+    """True when Windows apps are set to dark (AppsUseLightTheme = 0); False when unknown."""
+    if sys.platform != "win32":
+        return False
+    try:
+        try:
+            import winreg
+        except ImportError:
+            import _winreg as winreg
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, PERSONALIZE_KEY)
+        try:
+            value = winreg.QueryValueEx(key, "AppsUseLightTheme")[0]
+        finally:
+            winreg.CloseKey(key)
+        return int(value) == 0
+    except Exception:
+        return False
+
+
+def _theme_hook():
+    module = _module()
+    if module is not None:
+        module._follow_windows()
+
+
+def _follow_windows():
+    """Timer, while following Windows: switch to match its app mode."""
+    try:
+        dark = windows_is_dark()
+        if dark and not _state()["on"]:
+            apply_dark()
+        elif not dark and _state()["on"]:
+            restore()
+    except Exception as exc:  # a Qt timer callback must not raise
+        _note_error("follow windows", exc)
+
+
+def _watch_windows(follow):
+    state = _state()
+    state.setdefault("theme_watch", None)
+    if follow:
+        _start_timer(state, "theme_watch", THEME_WATCH_MS, _theme_hook)
+    else:
+        _stop_timer(state, "theme_watch")
+
+
+def configure(dark=None, content=None, follow_windows=None):
+    """Change the options and apply them now; None leaves an option as it is. Returns the settings."""
+    settings = load_settings()
+    old_content = content_setting(settings)
+    if dark is not None:
+        settings["enabled"] = bool(dark)
+    if content is not None:
+        settings["content"] = bool(content)
+        settings.pop("canvas", None)
+    if follow_windows is not None:
+        settings["follow_windows"] = bool(follow_windows)
+    save_settings(settings)
+    follow = bool(settings.get("follow_windows"))
+    want_dark = windows_is_dark() if follow else bool(settings.get("enabled"))
+    state = _state()
+    if state["on"] and (not want_dark or content_setting(settings) != old_content):
+        restore()  # a change of content mode is rebuilt from scratch
+    if want_dark and not state["on"]:
+        apply_dark()
+    _watch_windows(follow)
+    return settings
+
+
 def _preferences():
     try:
         import fontlab
@@ -1579,7 +1719,7 @@ def apply_dark():
         }
     state["saved"].setdefault("font", _gui("QFont")(app.font()))  # a state kept from before fonts were saved
     settings = load_settings()
-    state["canvas"] = bool(settings.get("canvas", True))
+    state["canvas"] = content_setting(settings)
     state["log"] = bool(settings.get("log", False))
     if not (state["on"] and _app_is_dark(app, QPalette)):  # a style change repolishes every widget: only when needed
         fusion = QStyleFactory.create("Fusion")
@@ -1705,10 +1845,13 @@ def schedule_reapply():
 # ---------------------------------------------------------------------------
 
 def startup():
-    """Called by FontLab's startup script: apply dark mode if it was left on."""
-    if load_settings().get("enabled"):
+    """Called by FontLab's startup script: apply dark mode if it was left on, or if following Windows and it is dark."""
+    settings = load_settings()
+    follow = bool(settings.get("follow_windows"))
+    if (windows_is_dark() if follow else settings.get("enabled")):
         apply_dark()
         schedule_reapply()
+    _watch_windows(follow)
 
 
 def toggle():
@@ -1722,6 +1865,10 @@ def toggle():
         message = "FreeLab dark mode is on. Run this script again to switch it off."
     settings = load_settings()  # after apply/restore, which keep the saved workspace color here
     settings["enabled"] = enabled
+    if settings.get("follow_windows"):
+        settings["follow_windows"] = False  # switching by hand stops following Windows
+        _watch_windows(False)
+        message += " (No longer following Windows: Scripts > FreeLab: Dark Mode Settings turns that back on.)"
     save_settings(settings)
     print(message)
     return enabled
