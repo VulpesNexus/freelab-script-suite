@@ -3,8 +3,8 @@
 
 from __future__ import absolute_import, division, print_function
 
-import colorsys
 import json
+import math
 import os
 import shutil
 import sys
@@ -55,6 +55,7 @@ class DarkModeCase(unittest.TestCase):
         self.patch("dark_pixmap", lambda pixmap: Mapped(pixmap))
         self.patch("_process_windows", lambda: [])
         self.patch("frame_keys", lambda widget: list(getattr(widget, "keys", [])))
+        self.patch("icon_is_swatch", lambda icon: getattr(icon, "label", "") == "swatch")
         self.build_tree()
         self.original_app = (self.app.style().objectName, self.app.palette(), self.app.styleSheet)
 
@@ -126,16 +127,27 @@ class DarkModeCase(unittest.TestCase):
 
 class ColorTests(unittest.TestCase):
     def test_white_and_black_land_on_the_bounds(self):
-        dark = int(round(dm.DARK_L * 255))
-        light = int(round(dm.LIGHT_L * 255))
-        self.assertEqual(dm.map_rgb(255, 255, 255), (dark, dark, dark))
-        self.assertEqual(dm.map_rgb(0, 0, 0), (light, light, light))
+        self.assertEqual(dm.map_rgb(255, 255, 255), (dm.DARK_GRAY,) * 3)
+        self.assertEqual(dm.map_rgb(0, 0, 0), (dm.LIGHT_GRAY,) * 3)
 
     def test_hue_is_kept(self):
-        for rgb in ((200, 30, 30), (30, 160, 60), (40, 80, 220)):
-            h1 = colorsys.rgb_to_hls(*[c / 255.0 for c in rgb])[0]
-            h2 = colorsys.rgb_to_hls(*[c / 255.0 for c in dm.map_rgb(*rgb)])[0]
-            self.assertAlmostEqual(h1, h2, delta=0.02)
+        # Hue as OKLab measures it (the mapping works there); pure blue was turning violet in CIELAB.
+        for rgb in ((200, 30, 30), (30, 160, 60), (40, 80, 220), (0, 0, 255)):
+            _, a1, b1 = dm.oklab(*rgb)
+            _, a2, b2 = dm.oklab(*dm.map_rgb(*rgb))
+            difference = abs(math.atan2(b1, a1) - math.atan2(b2, a2))
+            self.assertLess(min(difference, 2 * math.pi - difference), 0.12, str(rgb))
+
+    def test_tinted_whites_turn_grey(self):
+        # #fffffa (FontLab's metrics background) turned khaki, and bluish whites navy, under HLS.
+        for rgb in ((255, 255, 250), (238, 242, 255), (204, 228, 255)):
+            out = dm.map_rgb(*rgb)
+            self.assertLessEqual(max(out) - min(out), 18, (rgb, out))
+            self.assertLess(dm._lightness(*out), 0.25)
+
+    def test_marks_keep_their_color(self):
+        r, g, b = dm.map_rgb(255, 0, 0)
+        self.assertGreater(r, 3 * max(g, b, 1))
 
     def test_nothing_mapped_reaches_white_l(self):
         # The selective effects rely on it: a pixel at WHITE_L or above was never mapped.
@@ -153,7 +165,7 @@ class ColorTests(unittest.TestCase):
 
 class SheetTests(unittest.TestCase):
     def test_formats(self):
-        sheet = dm.recolor_sheet(u"a{color:#fff;b:#ffffff;c:#80ffffff;d:rgb(255,255,255);e:rgba(255, 255, 255, 20);"
+        sheet = dm.recolor_sheet(u"a{x:#fff;b:#ffffff;c:#80ffffff;d:rgb(255,255,255);e:rgba(255, 255, 255, 20);"
                                  u"f:rgb(100%,100%,100%);g:white;h:WHITE;}")
         dark = dm._hex(dm.map_rgb(255, 255, 255))
         self.assertEqual(sheet.count(dark), 4)  # #fff, #ffffff, white, WHITE
@@ -172,6 +184,24 @@ class SheetTests(unittest.TestCase):
         self.assertIn(u"#face{", out)
         self.assertNotIn(u"#000}", out)
 
+    def test_dark_surfaces_and_light_text_stay(self):
+        out = dm.recolor_sheet(u"QWidget#bar{background:#2b2b2b;color:#ffffff;border:1px solid black;}")
+        self.assertIn(u"background:#2b2b2b", out)
+        self.assertIn(u"border:1px solid black", out)
+        self.assertIn(u"color:#dcdcdc", out, "kept white text is capped below the selective threshold")
+
+    def test_light_surfaces_and_dark_text_turn(self):
+        out = dm.recolor_sheet(u"QLabel{background-color:#edeeef;color:#000000;selection-background-color:white;}")
+        self.assertIn(u"background-color:%s" % dm._hex(dm.map_rgb(0xed, 0xee, 0xef)), out)
+        self.assertIn(u"color:%s" % dm._hex(dm.map_rgb(0, 0, 0)), out)
+        self.assertIn(u"selection-background-color:%s" % dm._hex(dm.map_rgb(255, 255, 255)), out)
+
+    def test_selectors_with_colons_are_left_alone(self):
+        sheet = u"QScrollBar::handle:hover{background:#a0a0a0;} QToolButton:checked{color:black;}"
+        out = dm.recolor_sheet(sheet)
+        self.assertIn(u"QScrollBar::handle:hover{", out)
+        self.assertIn(u"QToolButton:checked{", out)
+
     def test_malformed_values_are_kept(self):
         for sheet in (u"a{color:rgb(1,2);}", u"a{color:rgb(x,y,z);}"):
             self.assertEqual(dm.recolor_sheet(sheet), sheet)
@@ -179,7 +209,9 @@ class SheetTests(unittest.TestCase):
 
 class ClassifyTests(unittest.TestCase):
     def test_classify_render(self):
-        self.assertIsNone(dm.classify_render(10, 10, (100, 24, 0), True))
+        self.assertIsNone(dm.classify_render(10, 10, (100, 2, 0), True))
+        self.assertEqual(dm.classify_render(10, 10, (100, 24, 0), True), "selective", "an editor's white margin")
+        self.assertIsNone(dm.classify_render(10, 10, (100, 24, 0), False))
         self.assertEqual(dm.classify_render(10, 10, (100, 25, 1), True), "island")
         self.assertEqual(dm.classify_render(10, 10, (100, 25, 0), True), "selective")
         self.assertEqual(dm.classify_render(10, 10, (100, 90, 50), False), "selective")  # containers never flip whole
@@ -216,6 +248,10 @@ class CoverageTests(unittest.TestCase):
 class KindTests(DarkModeCase):
     def test_kinds(self):
         self.assertEqual(dm.widget_kind(self.search), "island")
+        self.assertEqual(dm.widget_kind(FakeWidget("QtColorPicker", "colorMark")), "picker")
+        viewport = FakeWidget("QWidget", "qt_scrollarea_viewport", parent=FakeWidget("QsciScintilla", "XmlCode"))
+        self.assertEqual(dm.widget_kind(viewport), "edges")
+        self.assertEqual(dm.widget_kind(FakeWidget("YTabWidget", parent=FakeWidget("QSplitter"))), "fill")
         self.assertEqual(dm.widget_kind(FakeWidget("FontCellChart", "fontChartView")), "island")
         glyph_canvas = FakeWidget("QWidget", "widget", parent=FakeWidget("GlyphWindow", "GlyphWindow"))
         self.assertEqual(dm.widget_kind(glyph_canvas, canvas=True), "island")
@@ -291,6 +327,38 @@ class OnOffTests(DarkModeCase):
         self.assertEqual(self.odd.effect.freelab_min_l, dm.WHITE_L)
         self.assertIsInstance(self.button.icon, Mapped)
         self.assertIsInstance(self.action.icon, Mapped)
+
+    def test_color_swatch_icons_keep_their_color(self):
+        mark = FakeWidget("QToolButton", "markRed", parent=self.content, icon=FakeIcon("swatch"),
+                          inherits=("QAbstractButton",))
+        self.on()
+        self.assertEqual(mark.icon.label, "swatch")
+        self.assertIsInstance(self.button.icon, Mapped)
+
+    def test_pictures_are_left_alone(self):
+        class Pixmap(object):
+            def __init__(self, side):
+                self.side = side
+                self.key = FakeIcon().key
+
+            def isNull(self):
+                return False
+
+            def cacheKey(self):
+                return self.key
+
+            def width(self):
+                return self.side
+
+            def height(self):
+                return self.side
+
+        icon = FakeWidget("QLabel", parent=self.content, inherits=("QLabel",))
+        art = FakeWidget("QLabel", parent=self.content, inherits=("QLabel",))
+        icon.pixmap, art.pixmap = Pixmap(16), Pixmap(400)
+        self.on()
+        self.assertIsInstance(icon.pixmap, Mapped)
+        self.assertEqual(art.pixmap.side, 400, "artwork such as the About picture stays")
 
     def test_icons_are_not_mapped_twice(self):
         self.on()
@@ -470,6 +538,102 @@ class TitleBarTests(DarkModeCase):
         finally:
             sys.platform = old_platform
         self.assertEqual(calls, [(101, True), (102, True), (103, True), (101, False), (103, False)])
+
+
+class EffectOwnershipTests(DarkModeCase):
+    """FontLab crashed in PythonQt.dll (2026-11-06) when an effect FreeLab still had installed lost its Python reference."""
+
+    def rewrap_all(self):
+        for widget in self.app.allWidgets():
+            widget.rewrap = True
+
+    def test_own_effects_are_recognized_through_a_new_wrapper(self):
+        self.rewrap_all()
+        self.on()
+        for _ in range(3):  # full sweeps revisit islands
+            dm._state()["sweeps"] = dm.FULL_SWEEP_EVERY - 1
+            dm._sweep()
+            dm.run_queue()
+        for widget in self.app.allWidgets():
+            record = dm._record(widget, create=False)
+            if widget.effect is not None:
+                self.assertIsNotNone(record and record.get("effect"), "an installed effect keeps its Python reference: %s" % widget._cls)
+                self.assertIs(record["effect"], widget.effect)
+
+    def test_off_removes_own_effects_through_qt(self):
+        self.rewrap_all()
+        self.on()
+        self.off()
+        for widget in self.app.allWidgets():
+            self.assertIsNone(widget.effect, widget._cls)
+
+
+class RecheckTests(DarkModeCase):
+    def test_a_widget_is_looked_at_again_when_its_size_changes(self):
+        calls = []
+
+        def detect(widget):
+            calls.append((widget.objectName, widget.width))
+            return None
+
+        self.patch("detect_light", detect)
+        brush = FakeWidget("QWidget", "brush", parent=self.content, width=10, height=10)
+        self.on()
+        brush.width, brush.height = 200, 200  # laid out after it was first seen
+        dm._sweep()
+        dm.run_queue()
+        self.assertEqual([c for c in calls if c[0] == "brush"], [("brush", 10), ("brush", 200)])
+        dm._sweep()
+        dm.run_queue()
+        self.assertEqual(len([c for c in calls if c[0] == "brush"]), 2, "same size: not again")
+
+    def test_text_smoothing_is_greyscale_while_dark(self):
+        self.on()
+        self.assertTrue(self.app.font().styleStrategy() & dm.NO_SUBPIXEL_ANTIALIAS)
+        self.off()
+        self.assertFalse(self.app.font().styleStrategy() & dm.NO_SUBPIXEL_ANTIALIAS)
+
+    def test_every_loaded_version_stays_referenced(self):
+        self.on()
+        first = sys.modules["freelab_dark_mode"]
+        stand_in = type(sys)("freelab_dark_mode")  # what a reload puts in sys.modules
+        sys.modules["freelab_dark_mode"] = stand_in
+        try:
+            dm.apply_dark()
+            self.assertTrue(any(m is first for m in dm._state()["modules"]))
+            self.assertTrue(any(m is stand_in for m in dm._state()["modules"]))
+        finally:
+            sys.modules["freelab_dark_mode"] = first
+
+    def test_the_module_stays_referenced(self):
+        self.on()
+        self.assertIs(dm._state()["module"], sys.modules["freelab_dark_mode"])
+        saved = sys.modules.pop("freelab_dark_mode")
+        try:
+            self.assertIs(dm._module(), saved, "found through the state when FontLab drops it from sys.modules")
+        finally:
+            sys.modules["freelab_dark_mode"] = saved
+
+
+class RestyleTests(DarkModeCase):
+    def test_sweep_catches_a_restyle_and_then_watches(self):
+        self.on()
+        self.content.setStyleSheet(u"QWidget{background:white;}")  # FontLab, while a glyph is edited
+        dm._sweep()
+        dm.run_queue()
+        self.assertEqual(self.content.styleSheet, dm.recolor_sheet(u"QWidget{background:white;}"))
+        self.assertTrue(self.content.filters, "watched from now on")
+        self.content.setStyleSheet(u"QWidget{background:#f0f0f0;}")  # the next restyle: darkened at once
+        self.assertEqual(self.content.styleSheet, dm.recolor_sheet(u"QWidget{background:#f0f0f0;}"))
+
+    def test_watching_stops_when_dark_mode_is_off(self):
+        self.on()
+        self.content.setStyleSheet(u"QWidget{background:white;}")
+        dm.process(self.content)
+        self.off()
+        self.assertEqual(self.content.filters, [])
+        self.content.setStyleSheet(u"QWidget{background:white;}")
+        self.assertEqual(self.content.styleSheet, u"QWidget{background:white;}")
 
 
 class QueueTests(DarkModeCase):

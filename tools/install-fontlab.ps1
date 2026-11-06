@@ -18,8 +18,10 @@
 
 # -ScriptsDir, -StartupScript, -BinDir, -StateDir, -RegistryKey, and -ProcessName override the
 # locations and the FontLab process name, for testing.
-param([switch]$Uninstall, [string]$ScriptsDir, [string]$StartupScript, [string]$BinDir, [string]$StateDir,
-      [string]$RegistryKey, [string]$ProcessName = 'FontLab 7')
+# -ListenerAtLaunch also starts the MCP listener at every FontLab launch, so an AI app can
+# reach FontLab (and its launch_fontlab tool can start it) without a click in FontLab.
+param([switch]$Uninstall, [switch]$ListenerAtLaunch, [string]$ScriptsDir, [string]$StartupScript, [string]$BinDir,
+      [string]$StateDir, [string]$RegistryKey, [string]$ProcessName = 'FontLab 7')
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
@@ -128,33 +130,49 @@ else {
 }
 
 $darkPath = ConvertTo-PyLiteral (Join-Path $scripts 'freelab_dark_mode.py')
+$listenerPath = ConvertTo-PyLiteral (Join-Path $scripts 'freelab_listener.py')
+$startListener = if ($ListenerAtLaunch) { 'True' } else { 'False' }
 $block = @"
 $begin (managed by FreeLab tools/install-fontlab.ps1; -Uninstall removes it)
-def _freelab_startup():
+def _freelab_load(name, path):
     import os, sys
-    path = $darkPath
     if not os.path.isfile(path):
-        return
+        return None
+    os.environ["FREELAB_NO_AUTOSTART"] = "1"  # load only; this block decides what runs
     try:
         if sys.version_info[0] == 2:
             # open() takes a unicode path through the wide Windows API; imp.load_source does not.
             import imp
-            module = imp.new_module("freelab_dark_mode")
+            module = imp.new_module(name)
             module.__file__ = path
-            sys.modules["freelab_dark_mode"] = module
+            sys.modules[name] = module
             with open(path, "rb") as handle:
                 source = handle.read()
-            exec(compile(source, "freelab_dark_mode.py", "exec", 0, True), module.__dict__)
+            exec(compile(source, name + ".py", "exec", 0, True), module.__dict__)
         else:
             import importlib.util
-            spec = importlib.util.spec_from_file_location("freelab_dark_mode", path)
+            spec = importlib.util.spec_from_file_location(name, path)
             module = importlib.util.module_from_spec(spec)
-            sys.modules["freelab_dark_mode"] = module
+            sys.modules[name] = module
             spec.loader.exec_module(module)
-        sys.modules["freelab_dark_mode"] = module
-        module.startup()
+    finally:
+        del os.environ["FREELAB_NO_AUTOSTART"]
+    sys.modules[name] = module
+    return module
+def _freelab_startup():
+    try:
+        module = _freelab_load("freelab_dark_mode", $darkPath)
+        if module is not None:
+            module.startup()
     except Exception as exc:
-        print("FreeLab startup: %s" % (exc,))
+        print("FreeLab dark mode at startup: %s" % (exc,))
+    if ${startListener}:
+        try:
+            module = _freelab_load("freelab_listener", $listenerPath)
+            if module is not None:
+                module.main()
+        except Exception as exc:
+            print("FreeLab listener at startup: %s" % (exc,))
 try:
     _freelab_startup()
 except Exception:

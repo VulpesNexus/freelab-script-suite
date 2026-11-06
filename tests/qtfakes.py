@@ -81,6 +81,25 @@ class Qt(object):
     LogicalCoordinates = 0
 
 
+class QFont(object):
+    NoSubpixelAntialias = 0x0800
+
+    def __init__(self, other=None):
+        self.strategy = other.strategy if other is not None else 1
+
+    def styleStrategy(self):
+        return self.strategy
+
+    def setStyleStrategy(self, value):
+        self.strategy = value
+
+    def __eq__(self, other):
+        return isinstance(other, QFont) and other.strategy == self.strategy
+
+    def __ne__(self, other):
+        return not self == other
+
+
 class QPoint(object):
     def __init__(self, x=0, y=0):
         self._x, self._y = x, y
@@ -136,6 +155,31 @@ class FakeIcon(object):
 class QGraphicsEffect(object):
     def __init__(self):
         self.enabled = True
+        self._props = {}
+
+    def property(self, name):
+        return self._props.get(name)
+
+    def setProperty(self, name, value):
+        self._props[name] = value
+
+
+class OtherWrapper(object):
+    """What PythonQt may return for an effect: another Python object for the same Qt object."""
+
+    def __init__(self, effect):
+        self._effect = effect
+
+    def property(self, name):
+        return self._effect.property(name)
+
+
+class FakeEvent(object):
+    def __init__(self, kind):
+        self.kind = kind
+
+    def type(self):
+        return self.kind
 
 
 class Deleted(Exception):
@@ -206,6 +250,8 @@ class FakeWidget(QObject):
         self.pixmap = None
         self.autoFillBackground = False
         self.light = light  # what detect_light reports (patched in by the tests)
+        self.filters = []
+        self.rewrap = False  # True: graphicsEffect() returns a new wrapper, as PythonQt may
         self._actions = []
 
     def parentWidget(self):
@@ -238,8 +284,20 @@ class FakeWidget(QObject):
     def setStyleSheet(self, sheet):
         self.styleSheet = sheet
         self.sheet_sets += 1
+        for watcher in list(self.filters):  # Qt sends QEvent::StyleChange through installed filters
+            watcher.eventFilter(self, FakeEvent(100))
+
+    def installEventFilter(self, watcher):
+        if watcher not in self.filters:
+            self.filters.append(watcher)
+
+    def removeEventFilter(self, watcher):
+        if watcher in self.filters:
+            self.filters.remove(watcher)
 
     def graphicsEffect(self):
+        if self.rewrap and self.effect is not None and isinstance(self.effect, QGraphicsEffect):
+            return OtherWrapper(self.effect)
         return self.effect
 
     def setGraphicsEffect(self, effect):
@@ -275,6 +333,13 @@ class FakeApp(object):
         self.styleSheet = u""
         self.roots = []
         self.style_sets = 0
+        self._font = QFont()
+
+    def font(self):
+        return QFont(self._font)
+
+    def setFont(self, font):
+        self._font = QFont(font)
         self.signals = {}
 
     def connect(self, signal, callback):
@@ -381,7 +446,7 @@ def install(remove_placeholder=False):
     core.qVersion = lambda: QT_VERSION[0]
     for name, value in (("QColor", QColor), ("QPalette", QPalette), ("QApplication", QApplication),
                         ("QStyleFactory", QStyleFactory), ("QGraphicsEffect", QGraphicsEffect),
-                        ("QWidget", FakeWidget)):
+                        ("QWidget", FakeWidget), ("QFont", QFont)):
         setattr(gui, name, value)
     pkg.QtCore, pkg.QtGui = core, gui
     fontlab = types.ModuleType("fontlab")

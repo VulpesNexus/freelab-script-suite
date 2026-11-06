@@ -26,7 +26,7 @@ def _load():
         return None
     lib = ctypes.CDLL(DLL)
     lib.freelab_map_lightness.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_double, ctypes.c_double,
-                                          ctypes.c_double]
+                                          ctypes.c_double, ctypes.c_double]
     lib.freelab_pixel_stats.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_int, ctypes.c_double,
                                         ctypes.c_double, ctypes.POINTER(ctypes.c_int64)]
     lib.freelab_light_colors.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_double, ctypes.c_int,
@@ -44,9 +44,9 @@ def pixels(colors, alpha=255):
     return bytearray(b"".join(struct.pack("<BBBB", b, g, r, alpha) for r, g, b in colors))
 
 
-def run_map(lib, buf, min_l=0.0):
+def run_map(lib, buf, min_l=0.0, max_dark_l=-1.0):
     array = (ctypes.c_char * len(buf)).from_buffer(buf)
-    lib.freelab_map_lightness(ctypes.addressof(array), len(buf) // 4, dm.DARK_L, dm.LIGHT_L, min_l)
+    lib.freelab_map_lightness(ctypes.addressof(array), len(buf) // 4, dm.DARK_OKL, dm.LIGHT_OKL, min_l, max_dark_l)
 
 
 @unittest.skipIf(LIB is None, "native helper not built: run tools/build-native.ps1 (%s)" % DLL)
@@ -75,6 +75,16 @@ class NativeTests(unittest.TestCase):
         self.assertEqual(out[0], dm.map_rgb(255, 255, 255))
         self.assertEqual(out[1], dm.map_rgb(240, 240, 240))
         self.assertEqual(out[2:], colors[2:], "below WHITE_L: untouched")
+
+    def test_edges_map_near_white_and_near_black_only(self):
+        colors = [(255, 255, 255), (0, 0, 0), (30, 30, 30), (40, 160, 60), (12, 12, 12)]  # paper #1e1e1e, green syntax
+        buf = pixels(colors)
+        run_map(LIB, buf, min_l=dm.WHITE_L, max_dark_l=dm.EDGES_MAX_DARK_L)
+        out = [tuple(buf[4 * i + 2 - k] for k in range(3)) for i in range(len(colors))]
+        self.assertEqual(out[0], dm.map_rgb(255, 255, 255))
+        self.assertEqual(out[1], dm.map_rgb(0, 0, 0))
+        self.assertEqual(out[2:4], colors[2:4], "the paper and the syntax colors stay")
+        self.assertEqual(out[4], dm.map_rgb(12, 12, 12))
 
     def test_stats(self):
         colors = [(255, 255, 255)] * 3 + [(0, 0, 0)] * 2 + [(128, 128, 128)]
@@ -105,7 +115,7 @@ class KeyedTests(unittest.TestCase):
         buf = pixels(colors)
         keys = (ctypes.c_uint32 * 1)(0xcacbcc)
         array = (ctypes.c_char * len(buf)).from_buffer(buf)
-        LIB.freelab_map_keyed(ctypes.addressof(array), 3, keys, 1, dm.DARK_L, dm.LIGHT_L)
+        LIB.freelab_map_keyed(ctypes.addressof(array), 3, keys, 1, dm.DARK_OKL, dm.LIGHT_OKL)
         out = [tuple(buf[4 * i + 2 - k] for k in range(3)) for i in range(3)]
         expected = dm.map_rgb(202, 203, 204)
         self.assertLessEqual(max(abs(a - b) for a, b in zip(out[0], expected)), 1)
