@@ -145,6 +145,11 @@ class ColorTests(unittest.TestCase):
             self.assertLessEqual(max(out) - min(out), 18, (rgb, out))
             self.assertLess(dm._lightness(*out), 0.25)
 
+    def test_cleartype_fringes_and_faint_tints_turn_gray(self):
+        for rgb in ((220, 200, 160), (200, 220, 255), (255, 240, 230), (90, 70, 60)):
+            out = dm.map_rgb(*rgb)
+            self.assertEqual(max(out) - min(out), 0, (rgb, out))
+
     def test_marks_keep_their_color(self):
         r, g, b = dm.map_rgb(255, 0, 0)
         self.assertGreater(r, 3 * max(g, b, 1))
@@ -256,6 +261,9 @@ class KindTests(DarkModeCase):
         self.assertEqual(dm.widget_kind(FakeWidget("QtColorPicker", "colorMark")), "picker")
         viewport = FakeWidget("QWidget", "qt_scrollarea_viewport", parent=FakeWidget("QsciScintilla", "XmlCode"))
         self.assertEqual(dm.widget_kind(viewport), "edges")
+        badges = FakeWidget("QWidget", "qt_scrollarea_viewport", parent=FakeWidget("YSelectableTree", "listClasses"))
+        self.assertEqual(dm.widget_kind(badges), "edges")
+        self.assertEqual(dm.widget_kind(FakeWidget("YContinueWidget", "widgetContinue")), "island")
         self.assertEqual(dm.widget_kind(FakeWidget("YTabWidget", parent=FakeWidget("QSplitter"))), "fill")
         self.assertEqual(dm.widget_kind(FakeWidget("FontCellChart", "fontChartView")), "island")
         glyph_canvas = FakeWidget("QWidget", "widget", parent=FakeWidget("GlyphWindow", "GlyphWindow"))
@@ -592,11 +600,13 @@ class RecheckTests(DarkModeCase):
         dm.run_queue()
         self.assertEqual(len([c for c in calls if c[0] == "brush"]), 2, "same size: not again")
 
-    def test_text_smoothing_is_greyscale_while_dark(self):
+    def test_fonts_are_left_as_they_are(self):
+        # Grayscale smoothing made GDI drop smoothing altogether at FontLab's small UI sizes.
+        before = self.app.font()
         self.on()
-        self.assertTrue(self.app.font().styleStrategy() & dm.NO_SUBPIXEL_ANTIALIAS)
+        self.assertEqual(self.app.font(), before)
         self.off()
-        self.assertFalse(self.app.font().styleStrategy() & dm.NO_SUBPIXEL_ANTIALIAS)
+        self.assertEqual(self.app.font(), before)
 
     def test_every_loaded_version_stays_referenced(self):
         self.on()
@@ -630,6 +640,19 @@ class RestyleTests(DarkModeCase):
         self.assertTrue(self.content.filters, "watched from now on")
         self.content.setStyleSheet(u"QWidget{background:#f0f0f0;}")  # the next restyle: darkened at once
         self.assertEqual(self.content.styleSheet, dm.recolor_sheet(u"QWidget{background:#f0f0f0;}"))
+
+    def test_a_first_stylesheet_counts_as_a_restyle(self):
+        self.on()
+        self.assertFalse(self.button.styleSheet)
+        self.button.setStyleSheet(u"QToolButton{background:#5fcf00;}")  # "Set": FontLab turns it green
+        dm._sweep()
+        dm.run_queue()
+        self.assertEqual(self.button.styleSheet, dm.recolor_sheet(u"QToolButton{background:#5fcf00;}"))
+
+    def test_sweeps_leave_island_contents_and_swatches_alone(self):
+        self.on()
+        dm._sweep()
+        self.assertEqual(dm._state()["queue"], [], "their own stylesheets are noted, not taken for restyles")
 
     def test_watching_stops_when_dark_mode_is_off(self):
         self.on()

@@ -86,6 +86,11 @@ LIGHT_GRAY = 219  # #dbdbdb
 CHROMA_FULL_BELOW = 0.65
 CHROMA_MIN_FACTOR = 0.25
 MAX_MAPPED_LIGHTNESS = 0.89  # HLS: below WHITE_L, so selective effects never take a mapped color for FontLab's
+# A color whose channels spread this little (max - min, 0-255) comes out pure gray: faint tints
+# turn gray, and so do ClearType's colored text edges, which are drawn dark on light and then
+# mapped. (Asking Qt for grayscale text smoothing instead made GDI drop smoothing altogether at
+# FontLab's small UI sizes.)
+NEUTRAL_SPREAD = 60
 # Dark mode itself draws nothing at WHITE_L or lighter (mapped colors stop near
 # 0.86, the palette above at 0.88), so a pixel at WHITE_L or above is a fixed
 # light color FontLab painted. "Selective" effects map only those pixels, which
@@ -103,6 +108,8 @@ ISLAND_CLASSES = frozenset((
     "YTabBar",  # tab strips
     "FontCellChart",  # font window cells: the font-cell color preference, black glyphs, mark colors
     "CellChart",  # Font Map panel
+    "YContinueWidget",  # the zigzag edge where a panel's content continues below
+    "YNibShape", "YStrokeShape", "YBrushStrokePreview",  # Brush panel previews
 ))
 ISLAND_NAMES = frozenset((("QListWidget", "historyList"),))  # its selected row is painted light
 MARGIN_PARENTS = ("CodeEditor",)  # an unnamed narrow QWidget child is the line-number margin
@@ -150,7 +157,7 @@ SWEEP_MS = 750  # how often to look for widgets FontLab created or showed
 FULL_SWEEP_EVERY = 40  # every Nth sweep revisits every widget (replaced stylesheets, new icons)
 FOCUS_DRAIN_MS = 80  # a window that takes focus is darkened at once, up to this long, before it paints light
 MAX_ERRORS = 50
-NATIVE_VERSION = 5
+NATIVE_VERSION = 6
 
 ID_PROP = "freelab_id"  # dynamic properties FreeLab sets on widgets, all removed by restore()
 SEEN_PROP = "freelab_seen"
@@ -158,11 +165,7 @@ QUEUED_PROP = "freelab_queued"  # in the work queue already: never queued twice
 WATCHED_PROP = "freelab_watched"  # restyled by FontLab while dark: watched for style changes
 STYLE_CHANGE_EVENT = 100  # QEvent::StyleChange
 EFFECT_PROP = "freelab_effect"  # set on FreeLab's own graphics effects
-# Text smoothing while dark: grayscale. ClearType's colored edges are computed for the colors
-# a text is drawn on; in mapped areas text is drawn dark on light and then turned light on
-# dark, which leaves orange and blue fringes. QFont::NoSubpixelAntialias, by number for
-# PythonQt builds that lack the name.
-NO_SUBPIXEL_ANTIALIAS = 0x0800
+
 CHECKED_PROP = "freelab_checked"  # the size ("WxH") at which the widget was last looked at for fixed light painting
 ISLAND_PROP = "freelab_island"  # found to paint light: "island" or "selective"
 SHEET_PROP = "freelab_sheet"  # the widget's own stylesheet
@@ -429,7 +432,7 @@ LIGHT_OKL = oklab(LIGHT_GRAY, LIGHT_GRAY, LIGHT_GRAY)[0]
 def map_rgb(r, g, b):
     """Map a light-theme color to its dark-theme counterpart (0-255 channels)."""
     l, a, bb = oklab(r, g, b)
-    k = _chroma_factor(l)
+    k = 0.0 if max(r, g, b) - min(r, g, b) <= NEUTRAL_SPREAD else _chroma_factor(l)
     l2 = DARK_OKL + (1.0 - l) * (LIGHT_OKL - DARK_OKL)
     for _ in range(20):
         rgb = _oklab_to_bytes(l2, a * k, bb * k)
@@ -858,7 +861,7 @@ EFFECT_MIN_L = {"island": 0.0, "selective": WHITE_L, "edges": WHITE_L, "picker":
 # dark: map only the near-white and the near-black, and leave the paper and syntax colors.
 EDGES_MAX_DARK_L = 0.06
 EFFECT_MAX_DARK_L = {"edges": EDGES_MAX_DARK_L}
-EDGES_PARENTS = ("QsciScintilla",)  # their viewport (QWidget#qt_scrollarea_viewport) paints the text
+EDGES_PARENTS = ("QsciScintilla", "YSelectableTree", "YSelectableList")  # their viewport paints the content: editors, and lists that draw white badges
 
 
 def _effect_classes():
@@ -1111,6 +1114,8 @@ def _make_island(widget):
         widget.setProperty(SHEET_PROP, own)
         widget.setProperty(DARK_SHEET_PROP, combined)
         widget.setStyleSheet(combined)
+    else:
+        _note_sheet_as_seen(widget)
     _set_effect(widget, record, "island")
     _enqueue(_descendants(widget), "dark")  # each undoes what dark mode did to it
 
@@ -1271,12 +1276,14 @@ def process(widget):
         widget.setProperty(CHECKED_PROP, _size_key(widget))  # sweeps need not queue it again at this size
     name = _class_name(widget)
     if any(word in name for word in SKIP_CLASS_WORDS) and name not in PICKER_CLASSES:
+        _note_sheet_as_seen(widget)
         return
     canvas = state["canvas"]
     if _island_ancestor(widget, canvas) is not None:
         _undo_widget(widget, keep_props=True, keep_placeholder=True)  # the island maps it as drawn in light mode
         _set_placeholder(widget)
         _show_original_icon(widget)
+        _note_sheet_as_seen(widget)
         return
     kind = widget_kind(widget, canvas)
     if kind == "island":
@@ -1432,9 +1439,21 @@ def _unchecked(widget):
 
 
 def _restyled(widget):
-    """True when FontLab replaced the stylesheet dark mode set (cheap enough for every sweep)."""
+    """True when FontLab replaced the stylesheet dark mode set, or gave a widget its first one
+    (cheap enough for every sweep)."""
     ours = widget.property(DARK_SHEET_PROP)
-    return ours is not None and _prop(widget, "styleSheet") != ours
+    sheet = _prop(widget, "styleSheet")
+    if ours is None:
+        return bool(sheet)
+    return sheet != ours
+
+
+def _note_sheet_as_seen(widget):
+    """For widgets whose stylesheet dark mode leaves as it is (inside an island, skipped): remember
+    it, so sweeps take only a later change for a restyle."""
+    sheet = _prop(widget, "styleSheet")
+    if sheet:
+        widget.setProperty(DARK_SHEET_PROP, sheet)
 
 
 def _connect_timeout(timer, callback):
@@ -1515,14 +1534,6 @@ def _restore_preferences():
 # On and off
 # ---------------------------------------------------------------------------
 
-def _grayscale_font(font):
-    QFont = _gui("QFont")
-    result = QFont(font)
-    strategy = getattr(QFont, "NoSubpixelAntialias", NO_SUBPIXEL_ANTIALIAS)
-    result.setStyleStrategy(int(result.styleStrategy()) | int(strategy))
-    return result
-
-
 def _app_is_dark(app, QPalette):
     return app.palette().color(QPalette.Window).name() == PALETTE[0][1]
 
@@ -1550,7 +1561,7 @@ def apply_dark():
         if fusion is not None:
             app.setStyle(fusion)
         app.setPalette(build_palette(QPalette, QColor))
-        app.setFont(_grayscale_font(state["saved"]["font"]))
+        app.setFont(state["saved"]["font"])  # undoes the grayscale text smoothing an earlier version set
     state["on"] = True
     state["module"] = sys.modules.get(MODULE_NAME) or state.get("module")  # see _module()
     # Every version of this file loaded so far stays referenced: Qt still calls into older ones

@@ -11,7 +11,7 @@
 
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 5
+#define FREELAB_PIXELS_VERSION 6
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -150,6 +150,9 @@ static int oklab_to_linear(double l, double a, double b, double *r, double *g, d
  * less and less, down to CHROMA_MIN_FACTOR at white: tinted whites and pastels turn gray. */
 #define CHROMA_FULL_BELOW 0.65
 #define CHROMA_MIN_FACTOR 0.25
+/* A color whose channels spread this little (max - min, 0-255) comes out pure gray: ClearType's
+ * colored text edges, drawn dark on light and then mapped, would otherwise stay colored. */
+#define NEUTRAL_SPREAD 60
 /* No mapped color may reach the selective threshold (HLS lightness 0.9): one that would is darkened. */
 #define MAX_HLS_LIGHTNESS 0.89
 
@@ -195,8 +198,10 @@ static void map_rgb(uint8_t *r8, uint8_t *g8, uint8_t *b8, double dark_l, double
 {
     double l, a, b, l2, k;
     int i;
+    uint8_t maxc = *r8 > *g8 ? (*r8 > *b8 ? *r8 : *b8) : (*g8 > *b8 ? *g8 : *b8);
+    uint8_t minc = *r8 < *g8 ? (*r8 < *b8 ? *r8 : *b8) : (*g8 < *b8 ? *g8 : *b8);
     linear_to_oklab(SRGB_TO_LINEAR[*r8], SRGB_TO_LINEAR[*g8], SRGB_TO_LINEAR[*b8], &l, &a, &b);
-    k = chroma_factor(l);
+    k = maxc - minc <= NEUTRAL_SPREAD ? 0.0 : chroma_factor(l);
     l2 = dark_l + (1.0 - l) * (light_l - dark_l);
     for (i = 0; i < 20; i++) {
         oklab_to_bytes(l2, a * k, b * k, r8, g8, b8);
