@@ -114,13 +114,14 @@ ISLAND_CLASSES = frozenset((
 ISLAND_NAMES = frozenset((("QListWidget", "historyList"),))  # its selected row is painted light
 MARGIN_PARENTS = ("CodeEditor",)  # an unnamed narrow QWidget child is the line-number margin
 MARGIN_MAX_WIDTH = 80
-CANVAS_PARENTS = ("YSketchBoard", "GlyphWindow")  # a canvas is a plain QWidget child of these
+# A canvas is a plain QWidget child of these, with this name (None: any name). Only the glyph
+# window's QWidget#widget: its other plain children (the text bar) are interface.
+CANVAS_RULES = (("YSketchBoard", None), ("GlyphWindow", "widget"))
 TITLE_CLASSES = ("YPanel",)  # panels paint their title strip themselves, above their children
 TITLE_MAX_HEIGHT = 40
 SKIP_CLASS_WORDS = ("ColorPicker", "ColorSource", "OpacityBar", "Eyedropper", "QDesktopScreenWidget")
 # Mark-color buttons: the swatch keeps its color; only the white of "no color" turns dark.
-PICKER_CLASSES = ("QtColorPicker",)
-PICKER_MIN_L = 0.72  # its light-gray frame darkens too, below the usual selective threshold; swatch colors stay
+# Color pickers keep their look, the white "no color" slot included (the owner preferred that to a half-dark frame).
 
 # Panels (YPanel) paint their whole background a fixed #edeeef, which shows wherever their
 # content paints none: beside tabs, behind scroll bars, under translucent labels. Their tab
@@ -157,7 +158,7 @@ SWEEP_MS = 750  # how often to look for widgets FontLab created or showed
 FULL_SWEEP_EVERY = 40  # every Nth sweep revisits every widget (replaced stylesheets, new icons)
 FOCUS_DRAIN_MS = 80  # a window that takes focus is darkened at once, up to this long, before it paints light
 MAX_ERRORS = 50
-NATIVE_VERSION = 6
+NATIVE_VERSION = 7
 
 ID_PROP = "freelab_id"  # dynamic properties FreeLab sets on widgets, all removed by restore()
 SEEN_PROP = "freelab_seen"
@@ -429,10 +430,11 @@ DARK_OKL = oklab(DARK_GRAY, DARK_GRAY, DARK_GRAY)[0]
 LIGHT_OKL = oklab(LIGHT_GRAY, LIGHT_GRAY, LIGHT_GRAY)[0]
 
 
-def map_rgb(r, g, b):
+def map_rgb(r, g, b, neutral=None):
     """Map a light-theme color to its dark-theme counterpart (0-255 channels)."""
+    neutral = NEUTRAL_SPREAD if neutral is None else neutral
     l, a, bb = oklab(r, g, b)
-    k = 0.0 if max(r, g, b) - min(r, g, b) <= NEUTRAL_SPREAD else _chroma_factor(l)
+    k = 0.0 if max(r, g, b) - min(r, g, b) <= neutral else _chroma_factor(l)
     l2 = DARK_OKL + (1.0 - l) * (LIGHT_OKL - DARK_OKL)
     for _ in range(20):
         rgb = _oklab_to_bytes(l2, a * k, bb * k)
@@ -526,7 +528,7 @@ def _native():
                 if lib.freelab_pixels_version() == NATIVE_VERSION:
                     mapper = lib.freelab_map_lightness
                     mapper.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_double, ctypes.c_double, ctypes.c_double,
-                                       ctypes.c_double]
+                                       ctypes.c_double, ctypes.c_int]
                     mapper.restype = None
                     stats = lib.freelab_pixel_stats
                     stats.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_int, ctypes.c_double, ctypes.c_double,
@@ -538,7 +540,7 @@ def _native():
                     collect.restype = ctypes.c_int64
                     keyed = lib.freelab_map_keyed
                     keyed.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.POINTER(ctypes.c_uint32), ctypes.c_int64,
-                                      ctypes.c_double, ctypes.c_double]
+                                      ctypes.c_double, ctypes.c_double, ctypes.c_int]
                     keyed.restype = None
                     state["native"] = (mapper, stats, collect, keyed)
                 else:
@@ -553,11 +555,13 @@ def _address(image):
     return ctypes.addressof(ctypes.c_char.from_buffer(image.bits()))
 
 
-def map_image(image, min_l=0.0, keys=None, max_dark_l=-1.0):
+def map_image(image, min_l=0.0, keys=None, ink_below=-1.0, neutral=None):
     """Return a Format_ARGB32 copy of a QImage with its lightness mapped like map_rgb.
 
-    Only pixels at min_l or lighter are mapped (0 maps all), and those at max_dark_l
-    or darker when it is not negative; with keys (0xRRGGBB
+    Only pixels at min_l or lighter are mapped (0 maps all); pixels darker than
+    ink_below, when it is above 0, move toward light text by their coverage; with
+    neutral, colors whose channels spread that little turn gray (NEUTRAL_SPREAD by
+    default, 0 for content that must keep its colors); with keys (0xRRGGBB
     integers), only pixels of exactly those colors. Without the native helper
     (or if its buffer cannot be reached) a full mapping inverts the colors
     instead, which also flips their hue, and a partial one does nothing.
@@ -565,14 +569,16 @@ def map_image(image, min_l=0.0, keys=None, max_dark_l=-1.0):
     QImage = _gui("QImage")
     image = image.convertToFormat(QImage.Format_ARGB32)
     native = _native()
+    neutral = NEUTRAL_SPREAD if neutral is None else neutral
     if native is not None:
         try:
             count = image.width() * image.height()
             if keys:
                 import ctypes
-                native[3](_address(image), count, (ctypes.c_uint32 * len(keys))(*keys), len(keys), DARK_OKL, LIGHT_OKL)
+                native[3](_address(image), count, (ctypes.c_uint32 * len(keys))(*keys), len(keys), DARK_OKL, LIGHT_OKL,
+                          neutral)
             else:
-                native[0](_address(image), count, DARK_OKL, LIGHT_OKL, min_l, max_dark_l)
+                native[0](_address(image), count, DARK_OKL, LIGHT_OKL, min_l, ink_below, neutral)
             return image
         except Exception as exc:
             _note_error("map_image", exc)
@@ -856,12 +862,17 @@ def _restore_icons(obj, record):
 # ---------------------------------------------------------------------------
 
 _EFFECTS = {}
-EFFECT_MIN_L = {"island": 0.0, "selective": WHITE_L, "edges": WHITE_L, "picker": PICKER_MIN_L}
+EFFECT_MIN_L = {"island": 0.0, "selective": WHITE_L, "edges": WHITE_L}
 # "edges": editors (QScintilla) paint black text and a white margin on a paper that is already
-# dark: map only the near-white and the near-black, and leave the paper and syntax colors.
-EDGES_MAX_DARK_L = 0.06
-EFFECT_MAX_DARK_L = {"edges": EDGES_MAX_DARK_L}
-EDGES_PARENTS = ("QsciScintilla", "YSelectableTree", "YSelectableList")  # their viewport paints the content: editors, and lists that draw white badges
+# dark (#1e1e1e, lightness 0.118): map the near-white, move pixels darker than the paper toward
+# light text by their coverage (which keeps the text's smoothing), and leave the paper and
+# syntax colors.
+EDGES_INK_BELOW = 0.115
+EFFECT_INK_BELOW = {"edges": EDGES_INK_BELOW}
+EDGES_PARENTS = ("QsciScintilla",)  # their viewport (QWidget#qt_scrollarea_viewport) paints the text
+# Content keeps every color: anchors, nodes, and marks carry meaning even when muted.
+# Interface islands turn faint colors gray (NEUTRAL_SPREAD), which removes ClearType fringes.
+CONTENT_CLASSES = ("FontCellChart", "CellChart", "YNibShape", "YStrokeShape", "YBrushStrokePreview", "FontPreviewWidget")
 
 
 def _effect_classes():
@@ -880,14 +891,14 @@ def _effect_classes():
             pixmap = effect.sourcePixmap(Qt.LogicalCoordinates, offset, QGraphicsEffect.NoPad)
             return pixmap, offset
 
-        def draw_mapped(painter, pixmap, offset, area, min_l, keys=None, max_dark_l=-1.0):
+        def draw_mapped(painter, pixmap, offset, area, min_l, keys=None, ink_below=-1.0, neutral=None):
             """Draw the part of pixmap that lands on `area` (painter coordinates), mapped."""
             area = area.intersected(QRect(offset, pixmap.size()))
             if painter.hasClipping():
                 area = area.intersected(painter.clipBoundingRect().toAlignedRect())
             if not area.isEmpty():
                 part = pixmap.copy(area.translated(-offset.x(), -offset.y())).toImage()
-                painter.drawImage(area.topLeft(), map_image(part, min_l, keys, max_dark_l))
+                painter.drawImage(area.topLeft(), map_image(part, min_l, keys, ink_below, neutral))
 
         class MapEffect(QGraphicsEffect):
             """Draw the widget with its pixels' lightness mapped (all of them, or only those at freelab_min_l and up)."""
@@ -896,7 +907,7 @@ def _effect_classes():
                 try:
                     pixmap, offset = source(self)
                     draw_mapped(painter, pixmap, offset, QRect(offset, pixmap.size()), self.freelab_min_l,
-                                self.freelab_keys, self.freelab_max_dark_l)
+                                self.freelab_keys, self.freelab_ink_below, self.freelab_neutral)
                 except Exception as exc:
                     _note_error("effect", exc)
                     self.drawSource(painter)
@@ -929,14 +940,13 @@ def title_height(panel):
 
 
 def widget_kind(widget, canvas=True):
-    """"island", "selective", "edges", "picker", "keyed", "fill", "title", or None: how dark mode treats this widget beyond its stylesheet."""
+    """"island", "selective", "edges", "keyed", "fill", "title", or None: how dark mode treats this widget beyond its stylesheet."""
     cls = _class_name(widget)
     if cls in ISLAND_CLASSES or (cls, _prop(widget, "objectName")) in ISLAND_NAMES:
         return "island"
     if cls in KEYED_CLASSES:
         return "keyed"
-    if cls in PICKER_CLASSES:
-        return "picker"
+
     parent = widget.parentWidget()
     if parent is not None:
         parent_cls = _class_name(parent)
@@ -945,7 +955,7 @@ def widget_kind(widget, canvas=True):
                 return "edges"
             if parent_cls in MARGIN_PARENTS and _prop(widget, "width") <= MARGIN_MAX_WIDTH:
                 return "island"
-            if canvas and parent_cls in CANVAS_PARENTS:
+            if canvas and _is_canvas(widget, parent_cls):
                 return "island"
     if cls in FILL_CLASSES:
         return "fill"
@@ -953,6 +963,20 @@ def widget_kind(widget, canvas=True):
         return "title"
     found = widget.property(ISLAND_PROP)
     return str(found) if found else None
+
+
+def _is_canvas(widget, parent_cls):
+    return any(parent_cls == rule_parent and name in (None, _prop(widget, "objectName"))
+               for rule_parent, name in CANVAS_RULES)
+
+
+def is_content(widget):
+    """Glyph canvases, font cells, previews: their colors (anchors, nodes, marks) are kept."""
+    if _class_name(widget) in CONTENT_CLASSES:
+        return True
+    parent = widget.parentWidget()
+    return (_class_name(widget) == "QWidget" and parent is not None
+            and _is_canvas(widget, _class_name(parent)))
 
 
 def _island_ancestor(widget, canvas):
@@ -1051,7 +1075,8 @@ def _set_effect(widget, record, kind, keys=None):
     effect.freelab_widget = widget
     effect.freelab_min_l = EFFECT_MIN_L.get(kind, 0.0)
     effect.freelab_keys = keys
-    effect.freelab_max_dark_l = EFFECT_MAX_DARK_L.get(kind, -1.0)
+    effect.freelab_ink_below = EFFECT_INK_BELOW.get(kind, -1.0)
+    effect.freelab_neutral = 0 if kind == "island" and is_content(widget) else NEUTRAL_SPREAD
     effect.setProperty(EFFECT_PROP, kind)
     widget.setGraphicsEffect(effect)  # deletes any effect FreeLab set before
     record["effect"], record["kind"] = effect, kind  # PythonQt deletes it if no Python reference is kept
@@ -1275,7 +1300,7 @@ def process(widget):
     if visible_unchecked:
         widget.setProperty(CHECKED_PROP, _size_key(widget))  # sweeps need not queue it again at this size
     name = _class_name(widget)
-    if any(word in name for word in SKIP_CLASS_WORDS) and name not in PICKER_CLASSES:
+    if any(word in name for word in SKIP_CLASS_WORDS):
         _note_sheet_as_seen(widget)
         return
     canvas = state["canvas"]
@@ -1299,7 +1324,7 @@ def process(widget):
                 _make_island(widget)
                 return
     _darken_icons(widget)
-    if kind in ("selective", "edges", "picker", "title"):
+    if kind in ("selective", "edges", "title"):
         _set_effect(widget, _record(widget), kind)
     elif kind == "keyed" and widget.isVisible():
         record = _record(widget)

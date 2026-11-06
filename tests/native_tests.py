@@ -26,14 +26,14 @@ def _load():
         return None
     lib = ctypes.CDLL(DLL)
     lib.freelab_map_lightness.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_double, ctypes.c_double,
-                                          ctypes.c_double, ctypes.c_double]
+                                          ctypes.c_double, ctypes.c_double, ctypes.c_int]
     lib.freelab_pixel_stats.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_int, ctypes.c_double,
                                         ctypes.c_double, ctypes.POINTER(ctypes.c_int64)]
     lib.freelab_light_colors.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_double, ctypes.c_int,
                                          ctypes.POINTER(ctypes.c_uint32), ctypes.c_int64]
     lib.freelab_light_colors.restype = ctypes.c_int64
     lib.freelab_map_keyed.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.POINTER(ctypes.c_uint32), ctypes.c_int64,
-                                      ctypes.c_double, ctypes.c_double]
+                                      ctypes.c_double, ctypes.c_double, ctypes.c_int]
     return lib
 
 
@@ -44,9 +44,10 @@ def pixels(colors, alpha=255):
     return bytearray(b"".join(struct.pack("<BBBB", b, g, r, alpha) for r, g, b in colors))
 
 
-def run_map(lib, buf, min_l=0.0, max_dark_l=-1.0):
+def run_map(lib, buf, min_l=0.0, ink_below=-1.0, neutral=dm.NEUTRAL_SPREAD):
     array = (ctypes.c_char * len(buf)).from_buffer(buf)
-    lib.freelab_map_lightness(ctypes.addressof(array), len(buf) // 4, dm.DARK_OKL, dm.LIGHT_OKL, min_l, max_dark_l)
+    lib.freelab_map_lightness(ctypes.addressof(array), len(buf) // 4, dm.DARK_OKL, dm.LIGHT_OKL, min_l, ink_below,
+                              neutral)
 
 
 @unittest.skipIf(LIB is None, "native helper not built: run tools/build-native.ps1 (%s)" % DLL)
@@ -76,15 +77,23 @@ class NativeTests(unittest.TestCase):
         self.assertEqual(out[1], dm.map_rgb(240, 240, 240))
         self.assertEqual(out[2:], colors[2:], "below WHITE_L: untouched")
 
-    def test_edges_map_near_white_and_near_black_only(self):
-        colors = [(255, 255, 255), (0, 0, 0), (30, 30, 30), (40, 160, 60), (12, 12, 12)]  # paper #1e1e1e, green syntax
+    def test_edges_map_white_and_ink_by_coverage(self):
+        colors = [(255, 255, 255), (0, 0, 0), (30, 30, 30), (40, 160, 60), (15, 15, 15)]  # paper #1e1e1e, green syntax
         buf = pixels(colors)
-        run_map(LIB, buf, min_l=dm.WHITE_L, max_dark_l=dm.EDGES_MAX_DARK_L)
+        run_map(LIB, buf, min_l=dm.WHITE_L, ink_below=dm.EDGES_INK_BELOW)
         out = [tuple(buf[4 * i + 2 - k] for k in range(3)) for i in range(len(colors))]
         self.assertEqual(out[0], dm.map_rgb(255, 255, 255))
-        self.assertEqual(out[1], dm.map_rgb(0, 0, 0))
+        self.assertEqual(out[1], (219, 219, 219), "full ink: light text")
         self.assertEqual(out[2:4], colors[2:4], "the paper and the syntax colors stay")
-        self.assertEqual(out[4], dm.map_rgb(12, 12, 12))
+        self.assertTrue(30 < out[4][0] < 219, "a smoothed edge pixel lands between paper and text: %r" % (out[4],))
+
+    def test_content_keeps_muted_colors(self):
+        node = (106, 160, 106)  # a muted green node: channels spread by 54
+        ui, content = pixels([node]), pixels([node])
+        run_map(LIB, ui)
+        run_map(LIB, content, neutral=0)
+        self.assertEqual(ui[0], ui[1])  # gray in the interface
+        self.assertGreater(content[1], content[0] + 10, "still green on the canvas")
 
     def test_stats(self):
         colors = [(255, 255, 255)] * 3 + [(0, 0, 0)] * 2 + [(128, 128, 128)]
@@ -115,7 +124,7 @@ class KeyedTests(unittest.TestCase):
         buf = pixels(colors)
         keys = (ctypes.c_uint32 * 1)(0xcacbcc)
         array = (ctypes.c_char * len(buf)).from_buffer(buf)
-        LIB.freelab_map_keyed(ctypes.addressof(array), 3, keys, 1, dm.DARK_OKL, dm.LIGHT_OKL)
+        LIB.freelab_map_keyed(ctypes.addressof(array), 3, keys, 1, dm.DARK_OKL, dm.LIGHT_OKL, dm.NEUTRAL_SPREAD)
         out = [tuple(buf[4 * i + 2 - k] for k in range(3)) for i in range(3)]
         expected = dm.map_rgb(202, 203, 204)
         self.assertLessEqual(max(abs(a - b) for a, b in zip(out[0], expected)), 1)

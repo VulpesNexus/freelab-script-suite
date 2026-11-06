@@ -145,6 +145,7 @@ class ColorTests(unittest.TestCase):
             self.assertLessEqual(max(out) - min(out), 18, (rgb, out))
             self.assertLess(dm._lightness(*out), 0.25)
 
+
     def test_cleartype_fringes_and_faint_tints_turn_gray(self):
         for rgb in ((220, 200, 160), (200, 220, 255), (255, 240, 230), (90, 70, 60)):
             out = dm.map_rgb(*rgb)
@@ -167,6 +168,15 @@ class ColorTests(unittest.TestCase):
                 rgb = QColor(value).rgba[:3]
                 self.assertLess(dm._lightness(*rgb), dm.WHITE_L, value)
 
+
+class ContentTests(DarkModeCase):
+    def test_content_islands_keep_every_color(self):
+        self.on()
+        self.assertEqual(self.canvas.effect.freelab_neutral, 0, "anchors and nodes keep their colors")
+        self.assertEqual(self.search.effect.freelab_neutral, dm.NEUTRAL_SPREAD)
+        node = (106, 160, 106)
+        out = dm.map_rgb(*node, neutral=0)
+        self.assertGreater(out[1], out[0] + 10)
 
 class SheetTests(unittest.TestCase):
     def test_formats(self):
@@ -258,11 +268,13 @@ class CoverageTests(unittest.TestCase):
 class KindTests(DarkModeCase):
     def test_kinds(self):
         self.assertEqual(dm.widget_kind(self.search), "island")
-        self.assertEqual(dm.widget_kind(FakeWidget("QtColorPicker", "colorMark")), "picker")
+        self.assertIsNone(dm.widget_kind(FakeWidget("QtColorPicker", "colorMark")), "color pickers are left as they are")
         viewport = FakeWidget("QWidget", "qt_scrollarea_viewport", parent=FakeWidget("QsciScintilla", "XmlCode"))
         self.assertEqual(dm.widget_kind(viewport), "edges")
         badges = FakeWidget("QWidget", "qt_scrollarea_viewport", parent=FakeWidget("YSelectableTree", "listClasses"))
-        self.assertEqual(dm.widget_kind(badges), "edges")
+        self.assertIsNone(dm.widget_kind(badges), "the Classes badges stay as FontLab draws them")
+        text_bar = FakeWidget("QWidget", "widgetString", parent=FakeWidget("GlyphWindow", "GlyphWindow"))
+        self.assertIsNone(dm.widget_kind(text_bar), "only the glyph window's QWidget#widget is its canvas")
         self.assertEqual(dm.widget_kind(FakeWidget("YContinueWidget", "widgetContinue")), "island")
         self.assertEqual(dm.widget_kind(FakeWidget("YTabWidget", parent=FakeWidget("QSplitter"))), "fill")
         self.assertEqual(dm.widget_kind(FakeWidget("FontCellChart", "fontChartView")), "island")
