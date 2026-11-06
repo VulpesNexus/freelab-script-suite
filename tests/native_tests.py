@@ -36,6 +36,9 @@ def _load():
     lib.freelab_map_keyed.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_int64, ctypes.POINTER(ctypes.c_uint32),
                                       ctypes.c_int64, ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_double,
                                       ctypes.c_uint32]
+    lib.freelab_map_anchors.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_int64, ctypes.c_int, ctypes.c_double,
+                                        ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_int]
+    lib.freelab_map_anchors.restype = ctypes.c_int64
     return lib
 
 
@@ -51,6 +54,34 @@ def run_map(lib, buf, min_l=0.0, ink_below=-1.0, keep_tint=0.0, width=None, edge
     count = len(buf) // 4
     lib.freelab_map_lightness(ctypes.addressof(array), count, width or count, dm.DARK_OKL, dm.LIGHT_OKL, min_l,
                               ink_below, keep_tint, edge_neutral)
+
+
+def anchors(lib, buf, width, mode, keep_tint=0.0, apply=1):
+    array = (ctypes.c_char * len(buf)).from_buffer(buf)
+    return lib.freelab_map_anchors(ctypes.addressof(array), len(buf) // 4, width, dm.ANCHOR_MODES[mode], dm.DARK_OKL,
+                                   dm.LIGHT_OKL, keep_tint, dm.BACKGROUND_OKL, apply)
+
+
+def rgb_at(buf, i):
+    return tuple(buf[4 * i + 2 - k] for k in range(3))
+
+
+def text_rows(paper, ink, rows=14, width=40, blend=None):
+    """A line of "text" on paper: 1-pixel vertical strokes of ink every 6 pixels on rows 3 to 10,
+    each with a blend pixel beside it (pixel 1 is ink, pixel 2 the blend, pixel 0 paper, on those rows)."""
+    out = []
+    for y in range(rows):
+        for x in range(width):
+            if 3 <= y <= 10 and x % 6 == 1:
+                out.append(ink)
+            elif 3 <= y <= 10 and x % 6 == 2 and blend is not None:
+                out.append(blend)
+            else:
+                out.append(paper)
+    return out
+
+
+TEXT_ROW = 3 * 40  # the first pixel of the first row with text in text_rows
 
 
 def keyed(lib, buf, keys, width, min_l=-1.0, target=0):
@@ -89,7 +120,7 @@ class NativeTests(unittest.TestCase):
     def test_edges_map_white_and_ink_by_coverage(self):
         colors = [(255, 255, 255), (0, 0, 0), (30, 30, 30), (40, 160, 60), (15, 15, 15)]  # paper #1e1e1e, green syntax
         buf = pixels(colors)
-        run_map(LIB, buf, min_l=dm.WHITE_L, ink_below=dm.EDGES_INK_BELOW)
+        run_map(LIB, buf, min_l=dm.WHITE_L, ink_below=0.115)  # the pixel-by-pixel ink path, still exported
         out = [tuple(buf[4 * i + 2 - k] for k in range(3)) for i in range(len(colors))]
         self.assertEqual(out[0], dm.map_rgb(255, 255, 255))
         self.assertEqual(out[1], (219, 219, 219), "full ink: light text")
@@ -113,6 +144,82 @@ class NativeTests(unittest.TestCase):
         white, black, half = (buf[0], buf[4], buf[8])
         self.assertLessEqual(abs(half - (white + black) / 2.0), 1.5)
 
+    def test_ink_on_dark_paper_turns_light_and_blends_follow(self):
+        paper, ink, half = (41, 41, 41), (0, 0, 0), (20, 20, 20)
+        buf = pixels(text_rows(paper, ink, blend=half))
+        anchors(LIB, buf, 40, "ink")
+        self.assertEqual(rgb_at(buf, 0), paper, "the dark paper stays")
+        light = rgb_at(buf, TEXT_ROW + 1)
+        self.assertEqual(light, dm.map_rgb(*ink), "black text becomes light text")
+        expected = paper[0] + (light[0] - paper[0]) * (paper[0] - half[0]) / float(paper[0])
+        self.assertLessEqual(abs(rgb_at(buf, TEXT_ROW + 2)[0] - expected), 2, "smoothing is the same blend of the mapped colors")
+
+    def test_colored_dark_ink_keeps_its_hue(self):
+        buf = pixels(text_rows((41, 41, 41), (58, 63, 127)))  # the navy of FontLab's Export Profiles list
+        anchors(LIB, buf, 40, "ink")
+        r, g, b = rgb_at(buf, TEXT_ROW + 1)
+        self.assertGreater(b, r + 30, "still blue")
+        self.assertGreater(dm.oklab(r, g, b)[0], 0.6, "and light")
+
+    def test_light_text_and_dark_surfaces_stay(self):
+        colors = text_rows((30, 30, 30), (220, 220, 220), blend=(125, 125, 125))
+        buf = pixels(colors)
+        self.assertEqual(anchors(LIB, buf, 40, "ink"), 0)
+        self.assertEqual(bytes(buf), bytes(pixels(colors)))
+
+    def test_cleartype_fringes_of_light_text_stay(self):
+        # Native light text: a blue fringe left of each stroke and a yellow one right of it (seen in FontLab).
+        width, colors = 42, []
+        for y in range(14):
+            for x in range(width):
+                band = 3 <= y <= 10
+                if band and x % 6 == 1:
+                    colors.append((30, 62, 125))
+                elif band and x % 6 == 2:
+                    colors.append((220, 220, 220))
+                elif band and x % 6 == 3:
+                    colors.append((188, 188, 125))
+                else:
+                    colors.append((30, 30, 30))
+        buf = pixels(colors)
+        self.assertEqual(anchors(LIB, buf, width, "ink"), 0, "light text and its fringes are left as drawn")
+
+    def test_light_badges_turn_dark_without_touching_light_text_beside_them(self):
+        # Gray text (192) on a dark row, and a gray badge (160) with black text: all on one gray line.
+        width, rows = 60, 14
+        colors = []
+        for y in range(rows):
+            for x in range(width):
+                if 30 <= x < 56 and 2 <= y < 12:
+                    colors.append((0, 0, 0) if x % 5 == 2 and 5 <= y < 9 else (160, 160, 160))
+                elif x < 20 and x % 4 == 1:
+                    colors.append((192, 192, 192))
+                elif x < 20 and x % 4 == 2:
+                    colors.append((90, 90, 90))  # smoothing of the light text
+                else:
+                    colors.append((31, 31, 31))
+        buf = pixels(colors)
+        anchors(LIB, buf, width, "ink")
+        self.assertEqual(rgb_at(buf, 1), (192, 192, 192), "light text stays")
+        self.assertEqual(rgb_at(buf, 2), (90, 90, 90), "and so does its smoothing")
+        badge = rgb_at(buf, 2 * width + 31)
+        self.assertLess(badge[0], 120, "the badge turns dark: %r" % (badge,))
+        self.assertGreater(rgb_at(buf, 6 * width + 32)[0], 150, "its black text turns light")
+
+    def test_all_mode_maps_white_paper_and_black_text(self):
+        buf = pixels(text_rows((255, 255, 255), (0, 0, 0), blend=(128, 128, 128)))
+        anchors(LIB, buf, 40, "all")
+        white, black, half = rgb_at(buf, 0), rgb_at(buf, TEXT_ROW + 1), rgb_at(buf, TEXT_ROW + 2)
+        self.assertEqual(white, dm.map_rgb(255, 255, 255))
+        self.assertEqual(black, dm.map_rgb(0, 0, 0))
+        self.assertLessEqual(abs(half[0] - (white[0] + black[0]) / 2.0), 2)
+
+    def test_detection_writes_nothing(self):
+        colors = text_rows((41, 41, 41), (0, 0, 0))
+        buf = pixels(colors)
+        self.assertGreater(anchors(LIB, buf, 40, "ink", apply=0), 0)
+        self.assertEqual(bytes(buf), bytes(pixels(colors)))
+
     def test_keyed_also_maps_near_white(self):
         buf = pixels([(250, 250, 250), (60, 60, 60)])
         keyed(LIB, buf, [0xcacbcc], 2, dm.WHITE_L)
@@ -123,7 +230,7 @@ class NativeTests(unittest.TestCase):
         # One row: a flat pink mark area, then a ClearType-like fringe pixel next to dark text.
         row = [(255, 205, 205)] * 3 + [(235, 200, 160), (40, 40, 40)]
         buf = pixels(row)
-        run_map(LIB, buf, keep_tint=1.0, width=len(row), edge_neutral=dm.EDGE_NEUTRAL)
+        run_map(LIB, buf, keep_tint=1.0, width=len(row), edge_neutral=0.12)
         out = [tuple(buf[4 * i + 2 - k] for k in range(3)) for i in range(len(row))]
         self.assertGreater(out[1][0], out[1][1] + 5, "the mark keeps its pink")
         self.assertEqual(max(out[3]) - min(out[3]), 0, "the fringe turns gray: %r" % (out[3],))

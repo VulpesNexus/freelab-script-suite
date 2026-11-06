@@ -51,6 +51,8 @@ class DarkModeCase(unittest.TestCase):
         self.app = qtfakes.install(remove_placeholder=not self.placeholder)
         self._patched = {}
         self.patch("detect_light", lambda widget: widget.light)
+        self.patch("detect_ink", lambda widget: getattr(widget, "ink", None))
+        self.patch("_relight_editors", lambda app: None)
         self.patch("dark_icon", lambda icon, owner=None: Mapped(icon))
         self.patch("dark_pixmap", lambda pixmap: Mapped(pixmap))
         self.patch("_process_windows", lambda: [])
@@ -227,14 +229,21 @@ class ShadeAndPickerTests(DarkModeCase):
         picker = FakeWidget("QtColorPicker", "colorMark", parent=self.content, sheet=u"QtColorPicker{color: lightGray;}")
         self.on()
         self.assertEqual(picker.styleSheet, u"QtColorPicker{color: lightGray;}" + dm.PICKER_FRAME)
-        self.assertIsNone(picker.effect)
+        self.assertEqual(picker.effect.freelab_kind, "picker", "only its arrow is mapped")
         self.off()
         self.assertEqual(picker.styleSheet, u"QtColorPicker{color: lightGray;}")
+        self.assertIsNone(picker.effect)
 
-    def test_content_islands_neutralize_edges_only(self):
+    def test_swatches_are_drawn_unmapped_by_the_effect_above_them(self):
+        self.odd.light = "ink"
+        slot = FakeWidget("QToolButton", "flagRed", parent=self.odd, inherits=("QAbstractButton",))
         self.on()
-        self.assertEqual(self.canvas.effect.freelab_edge_neutral, dm.EDGE_NEUTRAL)
-        self.assertEqual(self.search.effect.freelab_edge_neutral, 0.0)
+        self.assertEqual(list(self.odd.effect.freelab_protect.values()), [slot])
+
+    def test_content_islands_keep_their_tints(self):
+        self.on()
+        self.assertEqual(self.canvas.effect.freelab_keep_tint, dm.KEEP_TINT_CONTENT)
+        self.assertEqual(self.search.effect.freelab_keep_tint, 0.0)
 
     def test_dock_frame_ends_take_the_mapped_frame_color(self):
         self.on()
@@ -336,11 +345,11 @@ class SheetTests(unittest.TestCase):
 class ClassifyTests(unittest.TestCase):
     def test_classify_render(self):
         self.assertIsNone(dm.classify_render(10, 10, (100, 2, 0), True))
-        self.assertEqual(dm.classify_render(10, 10, (100, 24, 0), True), "selective", "an editor's white margin")
+        self.assertEqual(dm.classify_render(10, 10, (100, 24, 0), True), "ink", "an editor's white margin")
         self.assertIsNone(dm.classify_render(10, 10, (100, 24, 0), False))
         self.assertEqual(dm.classify_render(10, 10, (100, 25, 1), True), "island")
-        self.assertEqual(dm.classify_render(10, 10, (100, 25, 0), True), "selective")
-        self.assertEqual(dm.classify_render(10, 10, (100, 90, 50), False), "selective")  # containers never flip whole
+        self.assertEqual(dm.classify_render(10, 10, (100, 25, 0), True), "ink")
+        self.assertEqual(dm.classify_render(10, 10, (100, 90, 50), False), "ink")  # containers never flip whole
         self.assertIsNone(dm.classify_render(0, 0, (0, 0, 0), True))
 
 
@@ -363,7 +372,7 @@ class CoverageTests(unittest.TestCase):
     def test_container_mostly_covered_is_selective(self):
         box = FakeWidget("QWidget", width=100, height=100)
         FakeWidget("QWidget", parent=box, width=100, height=80)
-        self.assertEqual(dm.detect_light(box), "selective")
+        self.assertEqual(dm.detect_light(box), "ink")
 
     def test_hidden_children_do_not_count(self):
         box = FakeWidget("QWidget", width=100, height=100)
@@ -450,12 +459,12 @@ class OnOffTests(DarkModeCase):
         self.assertEqual(self.kind(self.ruler), "island")
         self.assertEqual(qtfakes.Preferences.color_workspace, QColor("#ffacacac"), "workspace untouched")
 
-    def test_fill_title_selective_and_icons(self):
+    def test_fill_title_ink_and_icons(self):
         self.on()
         self.assertTrue(self.tabs.autoFillBackground)
         self.assertEqual(self.kind(self.panel), "title")
-        self.assertEqual(self.kind(self.odd), "selective")
-        self.assertEqual(self.odd.effect.freelab_min_l, dm.WHITE_L)
+        self.assertEqual(self.kind(self.odd), "ink", "found as \"selective\" by FreeLab 0.2: now ink")
+        self.assertEqual(self.odd.effect.freelab_kind, "ink")
         self.assertIsInstance(self.button.icon, Mapped)
         self.assertIsInstance(self.action.icon, Mapped)
 

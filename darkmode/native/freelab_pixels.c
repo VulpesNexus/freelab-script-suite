@@ -9,12 +9,26 @@
  * Build: tools/build-native.ps1 (clang or MSVC, 64-bit, without the C runtime: the DLL imports nothing).
  */
 
+#include <stddef.h>
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 9
+#define FREELAB_PIXELS_VERSION 24
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
+
+/* ...and calls memcpy for struct copies. A byte loop: -fno-builtin keeps it from becoming a call to itself. */
+#if defined(_MSC_VER) && !defined(__clang__)
+#pragma function(memcpy)
+#endif
+void *memcpy(void *dst, const void *src, size_t n)
+{
+    unsigned char *d = (unsigned char *)dst;
+    const unsigned char *s = (const unsigned char *)src;
+    while (n--)
+        *d++ = *s++;
+    return dst;
+}
 
 #ifdef _WIN32
 #define EXPORT __declspec(dllexport)
@@ -372,4 +386,678 @@ EXPORT void freelab_map_keyed(uint8_t *pixels, int64_t count, int64_t width, con
             }
         }
     }
+}
+
+/* ---------------------------------------------------------------------------
+ * Anchor blends: smoothing-correct mapping of what FontLab paints.
+ *
+ * A widget paints a few flat colors (its "anchors": backgrounds, text, frames) and
+ * smooths their edges with blends of two of them. Mapping each pixel on its own moves
+ * blends to the wrong brightness (text looked ragged or haloed). Here the anchors are
+ * found first (the most frequent opaque colors), each is mapped or kept, and every other
+ * pixel that is a blend of two anchors (within a tolerance that covers ClearType's
+ * colored edges) becomes the same blend of their mapped colors: smoothing stays smooth,
+ * and ClearType fringes turn neutral. A frequent color that is itself only a blend
+ * (smoothing between a background and darker text) is not an anchor. Where several
+ * pairs would explain a pixel (gray text, gray rows, and gray badges all lie on one
+ * line), the anchors found around the pixel decide.
+ *
+ * mode ANCHORS_ALL (islands, light paper): every anchor is mapped (keep_tint as given).
+ * mode ANCHORS_INK (the dark interface): only what is wrong on a dark interface is mapped:
+ * white surfaces and lines; light, low-color surfaces (badges, light rows); and dark
+ * "ink" (text-like shapes darker than the main background, or dark and colored), which
+ * becomes light ink of the same hue. Light text, dark surfaces, and colored surfaces stay.
+ * main_default: the OKLab lightness beneath, for a widget that paints no background of its own.
+ * Returns how many pixels changed (with apply 0, nothing is written: detection).
+ * --------------------------------------------------------------------------- */
+#define ANCHORS_INK 0
+#define ANCHORS_ALL 1
+#define ANCHORS_RELIGHT 2 /* back to light: a dark main paper turns white, light gray text black, the rest stays */
+#define RELIGHT_PAPER_OKL 0.35
+#define RELIGHT_TEXT_OKL 0.75
+#define RELIGHT_SPREAD 30
+#define RELIGHT_BLEND_TOLERANCE 0.08 /* tight: syntax colors lie near the line from a dark paper to white */
+#define HASH_SIZE 16384 /* a power of two */
+#define MEMO_SIZE 8192 /* a power of two */
+#define MAX_ANCHORS 32
+#define MAX_CANDIDATES 48 /* frequent colors looked at; blends among them are dropped */
+#define ANCHOR_MIN_ALPHA 200
+#define WHITE_HLS 0.9
+#define SURFACE_RUN 4.0 /* mean run, across and down, of a surface's pixels */
+#define LINE_RUN 8.0 /* mean run, across or down, of a (white) line's pixels */
+#define LONG_LINE_RUN 24.0 /* a dark color this long and thin is a separator, not text (stems are shorter) */
+#define LIGHT_SURFACE_RUN 6.0 /* a light surface is solid one way at least (badges, rows), unlike most text strokes */
+#define BACKGROUND_SHARE 0.2 /* a color covering this much is a background, never ink */
+#define FRINGE_SHARE 0.4 /* a dark, colored pixel this often right beside light ones is ClearType smoothing of light text */
+#define FRINGE_LIGHT 0.5 /* HLS lightness of "light" for that, */
+#define FRINGE_LIGHTER 0.25 /* and at least this much lighter than the pixel */
+#define LIGHT_SURFACE_OKL 0.6
+#define LIGHT_SURFACE_SPREAD 60
+#define INK_MAX_OKL 0.5
+#define INK_BELOW_MAIN 0.1 /* ink is at least this much darker (OKLab L) than the main background */
+#define INK_CHROMA 0.05 /* or this colored */
+#define BLEND_TOLERANCE 0.25 /* of the distance between the two anchors */
+#define LOCAL_BLEND_TOLERANCE 0.45 /* when both anchors are right around the pixel (strong ClearType fringes on small text) */
+#define BLEND_MIN_TOLERANCE 12.0
+#define BLEND_ANCHOR_TOLERANCE 6.0 /* a candidate this close to a blend of two others is a blend */
+#define NEAR_ANCHOR 40.0 /* translucent pixels: their color is an anchor's if this close */
+#define NEIGHBORHOOD 2 /* anchors within this many pixels decide between pairs */
+#define MAX_INDEXED (1 << 22) /* pixels: larger images resolve pairs without neighborhoods */
+#define SAMPLE_ABOVE (1 << 20) /* pixels: larger images are counted on every other row */
+
+static uint32_t h_key[HASH_SIZE], h_gen[HASH_SIZE];
+static int64_t h_count[HASH_SIZE], h_hruns[HASH_SIZE], h_vruns[HASH_SIZE], h_beside_light[HASH_SIZE];
+static int8_t h_anchor[HASH_SIZE];
+static uint32_t m_key[MEMO_SIZE], m_mask[MEMO_SIZE], m_val[MEMO_SIZE], m_gen[MEMO_SIZE];
+static int8_t a_index[MAX_INDEXED];
+static uint32_t generation = 0;
+
+typedef struct {
+    double r, g, b;
+    double mr, mg, mb; /* mapped (equal to r, g, b when kept) */
+    double hrun, vrun, okl, chroma, oa, ob;
+    int64_t count, slot, beside_light;
+    int surface, line, long_line, mapped;
+} Anchor;
+
+static Anchor anchors[MAX_CANDIDATES];
+static int anchor_count;
+
+static uint32_t hash32(uint32_t x)
+{
+    x ^= x >> 16;
+    x *= 0x7feb352dU;
+    x ^= x >> 15;
+    x *= 0x846ca68bU;
+    x ^= x >> 16;
+    return x;
+}
+
+static int64_t color_slot(uint32_t key, int insert)
+{
+    uint32_t i = hash32(key) & (HASH_SIZE - 1);
+    int probe;
+    for (probe = 0; probe < 64; probe++) {
+        if (h_gen[i] != generation) {
+            if (!insert)
+                return -1;
+            h_gen[i] = generation;
+            h_key[i] = key;
+            h_count[i] = h_hruns[i] = h_vruns[i] = h_beside_light[i] = 0;
+            h_anchor[i] = -1;
+            return i;
+        }
+        if (h_key[i] == key)
+            return i;
+        i = (i + 1) & (HASH_SIZE - 1);
+    }
+    return -1; /* table crowded: the color is not counted */
+}
+
+static int memo_get(uint32_t key, uint32_t mask, uint32_t *value)
+{
+    uint32_t i = hash32(key ^ hash32(mask)) & (MEMO_SIZE - 1);
+    int probe;
+    for (probe = 0; probe < 8; probe++) {
+        if (m_gen[i] != generation)
+            return 0;
+        if (m_key[i] == key && m_mask[i] == mask) {
+            *value = m_val[i];
+            return 1;
+        }
+        i = (i + 1) & (MEMO_SIZE - 1);
+    }
+    return 0;
+}
+
+static void memo_put(uint32_t key, uint32_t mask, uint32_t value)
+{
+    uint32_t i = hash32(key ^ hash32(mask)) & (MEMO_SIZE - 1);
+    int probe;
+    for (probe = 0; probe < 8; probe++) {
+        if (m_gen[i] != generation || (m_key[i] == key && m_mask[i] == mask)) {
+            m_gen[i] = generation;
+            m_key[i] = key;
+            m_mask[i] = mask;
+            m_val[i] = value;
+            return;
+        }
+        i = (i + 1) & (MEMO_SIZE - 1);
+    }
+}
+
+static double sqrt_pos(double x)
+{
+    double y;
+    int i;
+    if (x <= 0.0)
+        return 0.0;
+    y = x > 1.0 ? x : 1.0;
+    for (i = 0; i < 60; i++)
+        y = 0.5 * (y + x / y);
+    return y;
+}
+
+static uint8_t clamp_byte(double v)
+{
+    if (v <= 0.0)
+        return 0;
+    if (v >= 255.0)
+        return 255;
+    return (uint8_t)(v + 0.5);
+}
+
+static uint32_t pack(double r, double g, double b)
+{
+    return ((uint32_t)clamp_byte(r) << 16) | ((uint32_t)clamp_byte(g) << 8) | clamp_byte(b);
+}
+
+static void oklab_of(uint32_t rgb, double *l, double *chroma)
+{
+    double a, b;
+    linear_to_oklab(SRGB_TO_LINEAR[(rgb >> 16) & 255], SRGB_TO_LINEAR[(rgb >> 8) & 255], SRGB_TO_LINEAR[rgb & 255],
+                    l, &a, &b);
+    *chroma = sqrt_pos(a * a + b * b);
+}
+
+static void oklab_ab(uint32_t rgb, double *a, double *b)
+{
+    double l;
+    linear_to_oklab(SRGB_TO_LINEAR[(rgb >> 16) & 255], SRGB_TO_LINEAR[(rgb >> 8) & 255], SRGB_TO_LINEAR[rgb & 255],
+                    &l, a, b);
+}
+
+/* A dark colored candidate whose hue matches readable (lighter) text-like color: that color's
+ * smoothing against a dark background (red error text in the Output panel), not ink. */
+#define SAME_HUE_COS 0.9
+static int smoothing_of_readable(int k)
+{
+    const Anchor *c = &anchors[k];
+    int j;
+    for (j = 0; j < anchor_count; j++) {
+        const Anchor *o = &anchors[j];
+        double dot;
+        if (j == k || o->surface || o->long_line || o->okl < INK_MAX_OKL || o->okl <= c->okl || o->chroma < INK_CHROMA)
+            continue;
+        dot = (c->oa * o->oa + c->ob * o->ob) / (c->chroma * o->chroma);
+        if (dot >= SAME_HUE_COS)
+            return 1;
+    }
+    return 0;
+}
+
+static uint32_t mapped_one(uint32_t rgb, double dark_l, double light_l, double keep_tint)
+{
+    uint8_t r = (uint8_t)(rgb >> 16), g = (uint8_t)(rgb >> 8), b = (uint8_t)rgb;
+    map_rgb(&r, &g, &b, dark_l, light_l, keep_tint);
+    return ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
+}
+
+/* The fallback for a pixel no anchor or blend explains. */
+static uint32_t lone_color(uint32_t rgb, int mode, double dark_l, double light_l, double keep_tint)
+{
+    if (mode == ANCHORS_RELIGHT)
+        return rgb;
+    if (mode == ANCHORS_ALL)
+        return mapped_one(rgb, dark_l, light_l, keep_tint);
+    if (lightness((uint8_t)(rgb >> 16), (uint8_t)(rgb >> 8), (uint8_t)rgb) >= WHITE_HLS)
+        return mapped_one(rgb, dark_l, light_l, 0.0); /* stray white: as the selective mapping did */
+    return rgb;
+}
+
+/* How far (squared) color c lies from the segment a-b, and where along it (t, 0 to 1). */
+static double blend_fit(double r, double g, double b, const Anchor *a, const Anchor *o, double *t_out, double *ee_out)
+{
+    double dr = r - a->r, dg = g - a->g, db = b - a->b;
+    double er = o->r - a->r, eg = o->g - a->g, eb = o->b - a->b;
+    double ee = er * er + eg * eg + eb * eb, t, xr, xg, xb;
+    *ee_out = ee;
+    if (ee <= 0.0) {
+        *t_out = 0.0;
+        return dr * dr + dg * dg + db * db;
+    }
+    t = (dr * er + dg * eg + db * eb) / ee;
+    if (t < 0.0)
+        t = 0.0;
+    if (t > 1.0)
+        t = 1.0;
+    xr = dr - t * er;
+    xg = dg - t * eg;
+    xb = db - t * eb;
+    *t_out = t;
+    return xr * xr + xg * xg + xb * xb;
+}
+
+/* A text-like candidate lying between a surface more frequent than itself and either another
+ * surface (a badge's rounded edge) or darker (or more colored) text-like candidate, of any
+ * frequency, is smoothing between them, not a color of its own. Smoothing between a background
+ * and lighter text is left alone: it stays as it is anyway. */
+static int is_blend(int k, int n)
+{
+    const Anchor *c = &anchors[k];
+    int i, j;
+    if (c->surface || c->long_line)
+        return 0;
+    for (i = 0; i < k; i++) {
+        const Anchor *s = &anchors[i];
+        if (!s->surface)
+            continue;
+        for (j = 0; j < n; j++) {
+            const Anchor *ink = &anchors[j];
+            double t, ee;
+            if (j == i || j == k || ink->long_line)
+                continue;
+            if (!ink->surface && !(ink->okl < c->okl || ink->chroma > c->chroma + 0.02))
+                continue;
+            if (blend_fit(c->r, c->g, c->b, s, ink, &t, &ee) <= BLEND_ANCHOR_TOLERANCE * BLEND_ANCHOR_TOLERANCE
+                && t > 0.03 && t < 0.97)
+                return 1;
+        }
+    }
+    return 0;
+}
+
+/* True when a horizontal neighbor of pixel i (of color c) is light, and much lighter than it. */
+static int beside_light_pixel(const uint32_t *p, int64_t i, int64_t x, int64_t width, int64_t count, uint32_t c)
+{
+    const uint8_t *own = (const uint8_t *)&p[i];
+    double floor = lightness(own[2], own[1], own[0]) + FRINGE_LIGHTER;
+    int side;
+    if (floor < FRINGE_LIGHT)
+        floor = FRINGE_LIGHT;
+    for (side = -1; side <= 1; side += 2) {
+        int64_t j = i + side;
+        const uint8_t *q;
+        if ((side < 0 && x == 0) || (side > 0 && (j >= count || (width > 0 && x + 1 >= width))))
+            continue;
+        if ((p[j] >> 24) < ANCHOR_MIN_ALPHA || (p[j] & 0xffffff) == c)
+            continue;
+        q = (const uint8_t *)&p[j];
+        if (lightness(q[2], q[1], q[0]) >= floor)
+            return 1;
+    }
+    return 0;
+}
+
+/* Relighting: every color between the paper (anchor 0) and another color is that color's smoothing,
+ * however frequent (text on a dark paper smooths through many dark shades). */
+static void drop_paper_blends(void)
+{
+    int keep[MAX_ANCHORS], k, j, n = 0;
+    for (k = 0; k < anchor_count; k++) {
+        keep[k] = 1;
+        for (j = 1; j < anchor_count && k > 0; j++) {
+            double t, ee, res;
+            if (j == k || anchors[j].surface || anchors[j].long_line)
+                continue; /* toward text colors only: the margin, a surface, is no text */
+            res = blend_fit(anchors[k].r, anchors[k].g, anchors[k].b, &anchors[0], &anchors[j], &t, &ee);
+            if (t > 0.05 && t < 0.95 && res <= RELIGHT_BLEND_TOLERANCE * RELIGHT_BLEND_TOLERANCE * ee + 144.0) {
+                keep[k] = 0;
+                break;
+            }
+        }
+    }
+    for (k = 0; k < anchor_count; k++) {
+        if (keep[k])
+            anchors[n++] = anchors[k];
+    }
+    anchor_count = n;
+}
+
+static void find_anchors(const uint32_t *p, int64_t count, int64_t width, int mode, double dark_l, double light_l,
+                         double keep_tint, double main_default)
+{
+    int64_t i, total = 0, last_slot = -1, min_count;
+    int k, j, n;
+    double main_l = main_default;
+    int text_found = 0;
+    generation++;
+    if (generation == 0)
+        generation = 1;
+    for (i = 0; i < count; i++) {
+        uint32_t v = p[i], c = v & 0xffffff;
+        int64_t x = width > 0 ? i % width : i, slot;
+        int left_same, up_same;
+        if (count > SAMPLE_ABOVE && width > 0 && x == 0 && (i / width) % 2 == 1) {
+            i += width - 1; /* large images (a glyph canvas): every other row is enough to find the anchors */
+            last_slot = -1;
+            continue;
+        }
+        if ((v >> 24) < ANCHOR_MIN_ALPHA) {
+            last_slot = -1;
+            continue;
+        }
+        left_same = x > 0 && (p[i - 1] >> 24) >= ANCHOR_MIN_ALPHA && (p[i - 1] & 0xffffff) == c;
+        up_same = width > 0 && i >= width && (p[i - width] >> 24) >= ANCHOR_MIN_ALPHA && (p[i - width] & 0xffffff) == c;
+        slot = left_same && last_slot >= 0 ? last_slot : color_slot(c, 1);
+        last_slot = slot;
+        if (slot < 0)
+            continue;
+        h_count[slot]++;
+        h_hruns[slot] += !left_same;
+        h_vruns[slot] += !up_same;
+        if (beside_light_pixel(p, i, x, width, count, c))
+            h_beside_light[slot]++;
+        total++;
+    }
+    n = 0;
+    min_count = total / 4000 > 3 ? total / 4000 : 3;
+    for (i = 0; i < HASH_SIZE; i++) {
+        int64_t c = h_count[i];
+        if (h_gen[i] != generation || c < min_count)
+            continue;
+        if (n == MAX_CANDIDATES && c <= anchors[MAX_CANDIDATES - 1].count)
+            continue;
+        k = n < MAX_CANDIDATES ? n++ : MAX_CANDIDATES - 1;
+        while (k > 0 && anchors[k - 1].count < c) { /* most frequent first */
+            anchors[k] = anchors[k - 1];
+            k--;
+        }
+        anchors[k].r = (double)((h_key[i] >> 16) & 255);
+        anchors[k].g = (double)((h_key[i] >> 8) & 255);
+        anchors[k].b = (double)(h_key[i] & 255);
+        anchors[k].count = c;
+        anchors[k].slot = i;
+        anchors[k].beside_light = h_beside_light[i];
+        anchors[k].hrun = (double)c / (double)(h_hruns[i] > 0 ? h_hruns[i] : 1);
+        anchors[k].vrun = (double)c / (double)(h_vruns[i] > 0 ? h_vruns[i] : 1);
+    }
+    for (k = 0; k < n; k++) {
+        Anchor *a = &anchors[k];
+        a->surface = a->hrun >= SURFACE_RUN && a->vrun >= SURFACE_RUN;
+        a->line = !a->surface && (a->hrun >= LINE_RUN || a->vrun >= LINE_RUN);
+        a->long_line = !a->surface && (a->hrun >= LONG_LINE_RUN || a->vrun >= LONG_LINE_RUN);
+        oklab_of(pack(a->r, a->g, a->b), &a->okl, &a->chroma);
+        oklab_ab(pack(a->r, a->g, a->b), &a->oa, &a->ob);
+    }
+    /* Drop blends (see is_blend), judged among all candidates before any is dropped. */
+    {
+        int keep[MAX_CANDIDATES];
+        for (k = 0; k < n; k++)
+            keep[k] = !is_blend(k, n);
+        anchor_count = 0;
+        for (k = 0; k < n; k++) {
+            if (keep[k] && anchor_count < MAX_ANCHORS)
+                anchors[anchor_count++] = anchors[k];
+        }
+    }
+    if (anchor_count > 0 && anchors[0].surface)
+        main_l = anchors[0].okl; /* else the widget paints no background: what lies beneath (main_default) */
+    if (mode == ANCHORS_RELIGHT && anchor_count > 2)
+        drop_paper_blends();
+    for (j = 0; j < anchor_count; j++) {
+        Anchor *a = &anchors[j];
+        uint32_t rgb = pack(a->r, a->g, a->b), out = rgb;
+        double hls = lightness((uint8_t)a->r, (uint8_t)a->g, (uint8_t)a->b);
+        uint8_t px[3];
+        px[2] = (uint8_t)a->r;
+        px[1] = (uint8_t)a->g;
+        px[0] = (uint8_t)a->b;
+        a->mapped = 0;
+        if (mode == ANCHORS_RELIGHT) {
+            if (spread_of(px) <= RELIGHT_SPREAD && a->surface && a->okl < RELIGHT_PAPER_OKL && j == 0) {
+                out = 0xffffff;
+                a->mapped = 1;
+            } else if (spread_of(px) <= RELIGHT_SPREAD && !a->surface && a->okl >= RELIGHT_TEXT_OKL && !text_found) {
+                text_found = 1; /* the editor's own text color: the most frequent light one */
+                out = 0x000000;
+                a->mapped = 1;
+            }
+        } else if (mode == ANCHORS_ALL) {
+            out = mapped_one(rgb, dark_l, light_l, keep_tint);
+            a->mapped = 1;
+        } else if (hls >= WHITE_HLS && (a->surface || a->line)) {
+            out = mapped_one(rgb, dark_l, light_l, 0.0);
+            a->mapped = 1;
+        } else if (a->surface && (a->hrun >= LIGHT_SURFACE_RUN || a->vrun >= LIGHT_SURFACE_RUN)
+                   && a->okl >= LIGHT_SURFACE_OKL && spread_of(px) <= LIGHT_SURFACE_SPREAD) {
+            out = mapped_one(rgb, dark_l, light_l, 0.0);
+            a->mapped = 1;
+        } else if (!a->long_line && (double)a->count < BACKGROUND_SHARE * (double)total && a->okl < INK_MAX_OKL
+                   && (a->okl <= main_l - INK_BELOW_MAIN
+                       || (a->chroma >= INK_CHROMA && (double)a->beside_light < FRINGE_SHARE * (double)a->count
+                           && !smoothing_of_readable(j)))) {
+            out = mapped_one(rgb, dark_l, light_l, a->chroma >= INK_CHROMA ? 1.0 : 0.0);
+            a->mapped = 1;
+        }
+        a->mr = (double)((out >> 16) & 255);
+        a->mg = (double)((out >> 8) & 255);
+        a->mb = (double)(out & 255);
+        h_anchor[a->slot] = (int8_t)j;
+    }
+}
+
+/* Which anchor each pixel is (-1: none), for neighborhoods. */
+static void index_pixels(const uint32_t *p, int64_t count)
+{
+    int64_t i;
+    uint32_t last = 0;
+    int8_t last_index = -1;
+    int have = 0;
+    for (i = 0; i < count; i++) {
+        uint32_t v = p[i];
+        if ((v >> 24) < ANCHOR_MIN_ALPHA) {
+            a_index[i] = -1;
+            continue;
+        }
+        if (!have || v != last) {
+            int64_t slot = color_slot(v & 0xffffff, 0);
+            last_index = slot >= 0 ? h_anchor[slot] : -1;
+            last = v;
+            have = 1;
+        }
+        a_index[i] = last_index;
+    }
+}
+
+static uint32_t neighborhood(int64_t i, int64_t count, int64_t width)
+{
+    uint32_t mask = 0;
+    int64_t x = i % width, y = i / width, rows = count / width, dx, dy;
+    for (dy = -NEIGHBORHOOD; dy <= NEIGHBORHOOD; dy++) {
+        int64_t yy = y + dy;
+        if (yy < 0 || yy >= rows)
+            continue;
+        for (dx = -NEIGHBORHOOD; dx <= NEIGHBORHOOD; dx++) {
+            int64_t xx = x + dx;
+            int8_t a;
+            if (xx < 0 || xx >= width)
+                continue;
+            a = a_index[yy * width + xx];
+            if (a >= 0)
+                mask |= 1U << a;
+        }
+    }
+    return mask;
+}
+
+/* The best pair for color (r, g, b): both anchors in `both` if possible, else at least one in `one`. */
+static int best_pair(double r, double g, double b, uint32_t both, uint32_t one, double local_tolerance, int *pa, int *pb,
+                     double *pt)
+{
+    double best = -1.0;
+    int j, k;
+    for (j = 0; j < anchor_count; j++) {
+        for (k = j + 1; k < anchor_count; k++) {
+            double t, ee, res, tol;
+            int in_both = ((both >> j) & 1) && ((both >> k) & 1);
+            int in_one = ((one >> j) & 1) || ((one >> k) & 1);
+            if (!in_both && !in_one)
+                continue;
+            res = blend_fit(r, g, b, &anchors[j], &anchors[k], &t, &ee);
+            if (ee <= 0.0)
+                continue;
+            tol = (in_both ? local_tolerance * local_tolerance : BLEND_TOLERANCE * BLEND_TOLERANCE) * ee;
+            if (tol < BLEND_MIN_TOLERANCE * BLEND_MIN_TOLERANCE)
+                tol = BLEND_MIN_TOLERANCE * BLEND_MIN_TOLERANCE;
+            if (res > tol)
+                continue;
+            if (!in_both)
+                res += 1e9; /* a pair from around the pixel always wins */
+            if (best < 0.0 || res < best) {
+                best = res;
+                *pa = j;
+                *pb = k;
+                *pt = t;
+            }
+        }
+    }
+    return best >= 0.0;
+}
+
+/* tint: how much of a pixel's color beyond the blend that explains it is kept (content keeps its
+ * small tinted details, such as node fills and handles; the interface and text edges keep none). */
+static uint32_t resolve(uint32_t c, int translucent, uint32_t mask, int mode, double dark_l, double light_l,
+                        double keep_tint, double tint)
+{
+    double r = (double)((c >> 16) & 255), g = (double)((c >> 8) & 255), b = (double)(c & 255);
+    double best = -1.0, t = 0.0;
+    int a_i = -1, b_i = -1, j;
+    uint32_t all = anchor_count >= 32 ? 0xffffffffU : ((1U << anchor_count) - 1U);
+    if (translucent) { /* smoothed edges against nothing: the color is the shape's own */
+        for (j = 0; j < anchor_count; j++) {
+            double dr = r - anchors[j].r, dg = g - anchors[j].g, db = b - anchors[j].b;
+            double d2 = dr * dr + dg * dg + db * db;
+            if (d2 <= NEAR_ANCHOR * NEAR_ANCHOR && (best < 0.0 || d2 < best)) {
+                best = d2;
+                a_i = j;
+            }
+        }
+        if (a_i >= 0) {
+            Anchor *a = &anchors[a_i];
+            if (!a->mapped)
+                return c;
+            return pack(a->mr + r - a->r, a->mg + g - a->g, a->mb + b - a->b);
+        }
+        return lone_color(c, mode, dark_l, light_l, keep_tint);
+    }
+    for (j = 0; j < anchor_count; j++) {
+        if (anchors[j].r == r && anchors[j].g == g && anchors[j].b == b)
+            return pack(anchors[j].mr, anchors[j].mg, anchors[j].mb);
+    }
+    if (mode == ANCHORS_ALL) {
+        /* Where everything is mapped, the linear mapping of low-color pixels already keeps blends
+         * blends (it is affine): only colored pixels need a pair, which spares the many colors of
+         * a font window's smoothed glyphs the search. */
+        uint8_t px[3];
+        px[2] = (uint8_t)r;
+        px[1] = (uint8_t)g;
+        px[0] = (uint8_t)b;
+        if (spread_of(px) <= LINEAR_SPREAD)
+            return mapped_one(c, dark_l, light_l, tint);
+    }
+    if (!(mask && best_pair(r, g, b, mask, mask, LOCAL_BLEND_TOLERANCE, &a_i, &b_i, &t))
+        && !best_pair(r, g, b, all, all, BLEND_TOLERANCE, &a_i, &b_i, &t))
+        return lone_color(c, mode, dark_l, light_l, tint);
+    {
+        Anchor *a = &anchors[a_i], *o = &anchors[b_i];
+        double xr = r - (a->r + t * (o->r - a->r)), xg = g - (a->g + t * (o->g - a->g)), xb = b - (a->b + t * (o->b - a->b));
+        if (!a->mapped && !o->mapped)
+            return c;
+        return pack(a->mr + t * (o->mr - a->mr) + tint * xr, a->mg + t * (o->mg - a->mg) + tint * xg,
+                    a->mb + t * (o->mb - a->mb) + tint * xb);
+    }
+}
+
+/* ClearType puts colored fringes beside dark text strokes: a pixel this much lighter or darker
+ * than a horizontal neighbor keeps no tint, even in content. Fainter lines (handles) keep theirs. */
+#define FRINGE_STEP 0.3
+
+static int sharp_edge(const uint32_t *p, int64_t i, int64_t width, int64_t count)
+{
+    const uint8_t *px = (const uint8_t *)&p[i];
+    double l = lightness(px[2], px[1], px[0]);
+    int64_t x = i % width;
+    if (x > 0) {
+        const uint8_t *q = (const uint8_t *)&p[i - 1];
+        double d = l - lightness(q[2], q[1], q[0]);
+        if (d >= FRINGE_STEP || -d >= FRINGE_STEP)
+            return 1;
+    }
+    if (x + 1 < width && i + 1 < count) {
+        const uint8_t *q = (const uint8_t *)&p[i + 1];
+        double d = l - lightness(q[2], q[1], q[0]);
+        if (d >= FRINGE_STEP || -d >= FRINGE_STEP)
+            return 1;
+    }
+    return 0;
+}
+
+EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width, int mode, double dark_l,
+                                   double light_l, double keep_tint, double main_default, int apply)
+{
+    uint32_t *p = (uint32_t *)pixels;
+    uint32_t last_in = 0, last_out = 0;
+    int have_last = 0, any_mapped = 0, j, local, tinted, last_edge = 0;
+    int64_t i, changed = 0;
+    find_anchors(p, count, width, mode, dark_l, light_l, keep_tint, main_default);
+    for (j = 0; j < anchor_count; j++)
+        any_mapped |= anchors[j].mapped;
+    if (!any_mapped && mode == ANCHORS_RELIGHT)
+        return 0;
+    if (!any_mapped) {
+        /* Nothing to map but stray whites (a pure white pixel that is no anchor). */
+        for (i = 0; i < count; i++) {
+            uint8_t *px = pixels + 4 * i;
+            if (px[3] > 0 && lightness(px[2], px[1], px[0]) >= WHITE_HLS) {
+                changed++;
+                if (apply)
+                    map_rgb(&px[2], &px[1], &px[0], dark_l, light_l, 0.0);
+            }
+        }
+        return changed;
+    }
+    /* Neighborhoods matter where kept and mapped anchors could explain the same pixel. */
+    local = mode != ANCHORS_ALL && width > 0 && count <= MAX_INDEXED;
+    if (local)
+        index_pixels(p, count);
+    tinted = mode == ANCHORS_ALL && keep_tint > 0.0 && width > 0;
+    for (i = 0; i < count; i++) {
+        uint32_t v = p[i], alpha = v >> 24, c, key, out, mask = 0;
+        int edge;
+        if (alpha == 0)
+            continue;
+        if (local && alpha >= ANCHOR_MIN_ALPHA && a_index[i] < 0)
+            mask = neighborhood(i, count, width);
+        edge = tinted && sharp_edge(p, i, width, count);
+        if (have_last && v == last_in && edge == last_edge && (!local || mask == 0 || a_index[i] >= 0)) {
+            if (last_out != v) {
+                changed++;
+                if (apply)
+                    p[i] = last_out;
+            }
+            continue;
+        }
+        c = v & 0xffffff;
+        key = c | (alpha < ANCHOR_MIN_ALPHA ? 0x1000000U : 0U) | (edge ? 0x2000000U : 0U);
+        if (!memo_get(key, mask, &out)) {
+            out = resolve(c, alpha < ANCHOR_MIN_ALPHA, mask, mode, dark_l, light_l, keep_tint,
+                          mode == ANCHORS_ALL && !edge ? keep_tint : 0.0);
+            memo_put(key, mask, out);
+        }
+        out |= v & 0xff000000U;
+        last_in = v;
+        last_out = out;
+        last_edge = edge;
+        have_last = mask == 0;
+        if (out != v) {
+            changed++;
+            if (apply)
+                p[i] = out;
+        }
+    }
+    return changed;
+}
+
+/* Diagnostics: the anchors of the last call, as 0xRRGGBB, counts, and flags (1 mapped, 2 surface,
+ * 4 line, 8 long line), at most max of them; returns how many there were. */
+EXPORT int64_t freelab_last_anchors(uint32_t *rgb, int64_t *counts, int *flags, int64_t max)
+{
+    int64_t j;
+    for (j = 0; j < anchor_count && j < max; j++) {
+        rgb[j] = pack(anchors[j].r, anchors[j].g, anchors[j].b);
+        counts[j] = anchors[j].count;
+        flags[j] = anchors[j].mapped | (anchors[j].surface << 1) | (anchors[j].line << 2) | (anchors[j].long_line << 3);
+    }
+    return anchor_count;
 }
