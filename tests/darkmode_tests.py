@@ -53,7 +53,7 @@ class DarkModeCase(unittest.TestCase):
         self.patch("detect_light", lambda widget: widget.light)
         self.patch("dark_icon", lambda icon, owner=None: Mapped(icon))
         self.patch("dark_pixmap", lambda pixmap: Mapped(pixmap))
-        self.patch("_process_windows", lambda visible_only=True: [])
+        self.patch("_process_windows", lambda: [])
         self.patch("frame_keys", lambda widget: list(getattr(widget, "keys", [])))
         self.build_tree()
         self.original_app = (self.app.style().objectName, self.app.palette(), self.app.styleSheet)
@@ -452,31 +452,61 @@ class TimerTests(DarkModeCase):
 
 
 class TitleBarTests(DarkModeCase):
-    def test_title_bars_follow_dark_mode(self):
-        dark = {101: False, 102: False, 103: False}  # 103: hidden
+    def test_title_bars_are_set_once_per_window(self):
+        alive = set([101, 102])
         calls = []
-
-        def windows(visible_only=True):
-            return [101, 102] if visible_only else [101, 102, 103]
-
-        def set_bar(hwnd, value):
-            calls.append((hwnd, value))
-            dark[hwnd] = value
-
-        self.patch("_process_windows", windows)
-        self.patch("_set_title_bar", set_bar)
-        self.patch("_title_bar_is_dark", lambda hwnd: dark[hwnd])
+        self.patch("_process_windows", lambda: sorted(alive))
+        self.patch("_set_title_bar", lambda hwnd, dark: calls.append((hwnd, dark)))
+        self.patch("_is_window", lambda hwnd: hwnd in alive)
         old_platform = sys.platform
         sys.platform = "win32"
         try:
             dm.dark_title_bars(True)
-            dm.dark_title_bars(True)  # already dark: not again
-            dark[103] = True  # made dark while it was shown, hidden since
+            dm.dark_title_bars(True)  # every sweep: nothing again (each call makes Windows redo the frame)
+            alive.discard(102)
+            alive.add(103)
+            dm.dark_title_bars(True)  # a new window, and a closed one forgotten
             dm.dark_title_bars(False)
         finally:
             sys.platform = old_platform
-        self.assertEqual(calls, [(101, True), (102, True), (101, False), (102, False), (103, False)])
+        self.assertEqual(calls, [(101, True), (102, True), (103, True), (101, False), (103, False)])
 
+
+class QueueTests(DarkModeCase):
+    def test_a_widget_is_queued_once(self):
+        dm.apply_dark()
+        before = len(dm._state()["queue"])
+        dm._enqueue(self.app.allWidgets(), "dark")
+        self.assertEqual(len(dm._state()["queue"]), before)
+
+    def test_sweeps_do_not_requeue_handled_widgets(self):
+        self.on()
+        for _ in range(3):
+            dm._sweep()
+        self.assertEqual(dm._state()["queue"], [], "island contents, swatches, and islands are checked too")
+
+    def test_saved_workspace_is_not_overwritten(self):
+        dm.save_settings({"saved_workspace": u"#ffacacac"})
+        qtfakes.Preferences.color_workspace = QColor("#ffffffff")  # FontLab reset after a crash with dark mode on
+        self.on()
+        self.assertEqual(self.settings()["saved_workspace"], u"#ffacacac")
+        self.off()
+        self.assertEqual(qtfakes.Preferences.color_workspace, QColor("#ffacacac"))
+
+    def test_switching_off_finishes_at_once(self):
+        self.on()
+        dm.restore()
+        self.assertEqual(dm._state()["queue"], [])
+        self.assertEqual(self.content.styleSheet, PANEL_SHEET)
+
+    def test_reentered_work_does_nothing(self):
+        dm.apply_dark()
+        state = dm._state()
+        state["busy"] = True
+        size = len(state["queue"])
+        dm._work()
+        self.assertEqual(len(state["queue"]), size)
+        state["busy"] = False
 
 class ReviewTests(DarkModeCase):
     """Cases found by the independent review of 2026-11-06."""

@@ -138,17 +138,18 @@ WORKSPACE_DARK = "#fff0f0f0"
 SLICE_MS = 20  # work per timer slice, so FontLab stays responsive
 SWEEP_MS = 750  # how often to look for widgets FontLab created or showed
 FULL_SWEEP_EVERY = 40  # every Nth sweep revisits every widget (replaced stylesheets, new icons)
-FOCUS_DRAIN_MS = 150  # a window that takes focus is darkened at once, up to this long, before it paints light
+FOCUS_DRAIN_MS = 80  # a window that takes focus is darkened at once, up to this long, before it paints light
 MAX_ERRORS = 50
 NATIVE_VERSION = 3
 
 ID_PROP = "freelab_id"  # dynamic properties FreeLab sets on widgets, all removed by restore()
 SEEN_PROP = "freelab_seen"
+QUEUED_PROP = "freelab_queued"  # in the work queue already: never queued twice
 CHECKED_PROP = "freelab_checked"  # rendered once to look for fixed light painting
 ISLAND_PROP = "freelab_island"  # found to paint light: "island" or "selective"
 SHEET_PROP = "freelab_sheet"  # the widget's own stylesheet
 DARK_SHEET_PROP = "freelab_sheet_dark"  # what dark mode set instead
-PROPS = (ID_PROP, SEEN_PROP, CHECKED_PROP, ISLAND_PROP, SHEET_PROP, DARK_SHEET_PROP)
+PROPS = (ID_PROP, SEEN_PROP, QUEUED_PROP, CHECKED_PROP, ISLAND_PROP, SHEET_PROP, DARK_SHEET_PROP)
 
 NAMED_COLORS = {
     "white": (255, 255, 255), "black": (0, 0, 0), "whitesmoke": (245, 245, 245),
@@ -250,6 +251,20 @@ def _text(exc):
         return u"%s" % (exc,)
     except Exception:
         return repr(exc)
+
+
+SLOW_MS = 100  # with "log": true in darkmode.json, steps slower than this are written to darkmode.log
+
+
+def _log(message):
+    """Append a line to darkmode.log when logging is on (the setting is read once per switch-on)."""
+    if not _state().get("log"):
+        return
+    try:
+        with open(os.path.join(state_dir(), "darkmode.log"), "a") as handle:
+            handle.write("%s %s\n" % (time.strftime("%H:%M:%S"), message))
+    except (IOError, OSError):
+        pass
 
 
 def _note_error(where, exc):
@@ -911,8 +926,8 @@ DWMWA_USE_IMMERSIVE_DARK_MODE = 20  # Windows 10 20H1 and later; 19 before that
 SWP_FLAGS = 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020  # NOSIZE, NOMOVE, NOZORDER, NOACTIVATE, FRAMECHANGED
 
 
-def _process_windows(visible_only=True):
-    """Handles of this process's top-level windows (PythonQt cannot return winId())."""
+def _process_windows():
+    """Handles of this process's visible top-level windows (PythonQt cannot return winId())."""
     import ctypes
     from ctypes import wintypes
     user32 = ctypes.windll.user32
@@ -922,7 +937,7 @@ def _process_windows(visible_only=True):
     def collect(hwnd, _lparam):
         owner = wintypes.DWORD()
         user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
-        if owner.value == pid and (not visible_only or user32.IsWindowVisible(hwnd)):
+        if owner.value == pid and user32.IsWindowVisible(hwnd):
             found.append(int(hwnd))
         return True
 
@@ -942,26 +957,35 @@ def _set_title_bar(hwnd, dark):
     ctypes.windll.user32.SetWindowPos(handle, None, 0, 0, 0, 0, SWP_FLAGS)  # redraw the frame now
 
 
-def _title_bar_is_dark(hwnd):
+def _is_window(hwnd):
     import ctypes
-    value = ctypes.c_int(0)
-    result = ctypes.windll.dwmapi.DwmGetWindowAttribute(ctypes.c_void_p(hwnd), DWMWA_USE_IMMERSIVE_DARK_MODE,
-                                                         ctypes.byref(value), ctypes.sizeof(value))
-    return result == 0 and value.value != 0
+    return bool(ctypes.windll.user32.IsWindow(ctypes.c_void_p(hwnd)))
 
 
 def dark_title_bars(dark):
-    """Ask Windows to draw FontLab's visible title bars dark, or light again.
+    """Ask Windows to draw FontLab's visible title bars dark (each window once), or light again.
 
-    Each window is asked for its current setting, so a new window that reuses
-    an old handle is not skipped, and nothing has to be remembered.
+    Once per window: every call also makes Windows recompute the window's frame,
+    and repeating that on a dialog that is still opening kept it relaying itself
+    out without end. Handles of destroyed windows are forgotten, so a new window
+    that reuses one is darkened too.
     """
     if sys.platform != "win32":
         return
+    state = _state()
+    done = state.setdefault("dark_windows", set())
     try:
-        for hwnd in _process_windows(visible_only=dark):  # back to light: hidden ones too
-            if _title_bar_is_dark(hwnd) != dark:
-                _set_title_bar(hwnd, dark)
+        for hwnd in [h for h in done if not _is_window(h)]:
+            done.discard(hwnd)
+        if dark:
+            for hwnd in _process_windows():
+                if hwnd not in done:
+                    done.add(hwnd)
+                    _set_title_bar(hwnd, True)
+        else:
+            for hwnd in list(done):
+                _set_title_bar(hwnd, False)
+            done.clear()
     except Exception as exc:
         _note_error("title bar", exc)
 
@@ -986,6 +1010,9 @@ def process(widget):
     for ancestor in reversed(pending):
         process(ancestor)
     widget.setProperty(SEEN_PROP, True)
+    visible_unchecked = widget.isVisible() and widget.property(CHECKED_PROP) is None
+    if visible_unchecked:
+        widget.setProperty(CHECKED_PROP, True)  # whatever happens below, sweeps need not queue it again
     name = _class_name(widget)
     if any(word in name for word in SKIP_CLASS_WORDS):
         return
@@ -1000,17 +1027,14 @@ def process(widget):
         _make_island(widget)
         return
     _darken_sheet(widget)
-    if kind is None and widget.property(CHECKED_PROP) is None and widget.isVisible():
+    if kind is None and visible_unchecked:
         found = detect_light(widget)  # before its icons are mapped light
         if found:
             widget.setProperty(ISLAND_PROP, found)
             kind = found
             if found == "island":
-                widget.setProperty(CHECKED_PROP, True)
                 _make_island(widget)
                 return
-    if widget.isVisible():
-        widget.setProperty(CHECKED_PROP, True)
     _darken_icons(widget)
     if kind in ("selective", "title"):
         _set_effect(widget, _record(widget), kind)
@@ -1028,20 +1052,41 @@ def process(widget):
 
 
 def _enqueue(widgets, action):
-    """Queue (action, widget) pairs; the queue is a stack, so the last ones queued run first."""
+    """Queue (action, widget) pairs, each widget once; the queue is a stack, so the last ones queued run first."""
     queue = _state()["queue"]
-    queue.extend((action, widget) for widget in widgets)
+    for widget in widgets:
+        if widget.property(QUEUED_PROP) != action:
+            widget.setProperty(QUEUED_PROP, action)
+            queue.append((action, widget))
     _start_worker()
 
 
 def _work():
     state = _state()
+    if state.get("busy"):
+        _log("re-entered work (queue %d)" % len(state["queue"]))
+        return  # re-entered from inside processing (a Qt signal or paint): the outer loop carries on
+    state["busy"] = True
+    started = time.time()
+    try:
+        _work_slice(state)
+    finally:
+        state["busy"] = False
+        elapsed = (time.time() - started) * 1000
+        if elapsed > SLOW_MS:
+            _log("slow slice %.0f ms, queue now %d" % (elapsed, len(state["queue"])))
+
+
+def _work_slice(state):
     deadline = time.time() + SLICE_MS / 1000.0
     queue = state["queue"]
     while queue and time.time() < deadline:
         action, widget = queue.pop()
         if not _alive(widget):
             continue
+        if widget.property(QUEUED_PROP) != action:
+            continue  # superseded by a later entry for the other action
+        widget.setProperty(QUEUED_PROP, None)
         try:
             if action == "dark":
                 if state["on"]:
@@ -1063,7 +1108,7 @@ def run_queue():
 def _sweep():
     """Timer: queue widgets FontLab created or showed since the last sweep."""
     state = _state()
-    if not state["on"]:
+    if not state["on"] or state.get("busy"):
         return
     app = _qt()[0].instance()
     if app is None:
@@ -1074,6 +1119,8 @@ def _sweep():
             if full or w.property(SEEN_PROP) is None or (w.property(CHECKED_PROP) is None and w.isVisible())]
     if todo:
         _enqueue(todo, "dark")
+        if len(todo) > 200 and not full:
+            _log("sweep %d queued %d (queue %d)" % (state["sweeps"], len(todo), len(state["queue"])))
     dark_title_bars(True)  # windows opened since the last sweep
     for key, record in list(state["records"].items()):
         if not _alive(record["obj"]):
@@ -1089,7 +1136,7 @@ def _focus_hook(*_args):
 
 def _on_focus():
     state = _state()
-    if not state["on"]:
+    if not state["on"] or state.get("busy"):
         return
     try:
         _sweep()
@@ -1167,8 +1214,10 @@ def _darken_preferences():
     current = _argb(prefs.colorWorkspace)
     if current != WORKSPACE_DARK:
         settings = load_settings()
-        settings["saved_workspace"] = current
-        save_settings(settings)
+        # Keep an earlier original: after a crash with dark mode on, the current color may not be the user's.
+        if not settings.get("saved_workspace"):
+            settings["saved_workspace"] = current
+            save_settings(settings)
         prefs.colorWorkspace = _qt()[2](WORKSPACE_DARK)
 
 
@@ -1204,7 +1253,9 @@ def apply_dark():
             "style": _prop(app.style(), "objectName") or ORIGINAL_STYLE_FALLBACK,
             "palette": QPalette(app.palette()),
         }
-    state["canvas"] = bool(load_settings().get("canvas", True))
+    settings = load_settings()
+    state["canvas"] = bool(settings.get("canvas", True))
+    state["log"] = bool(settings.get("log", False))
     if not (state["on"] and _app_is_dark(app, QPalette)):  # a style change repolishes every widget: only when needed
         fusion = QStyleFactory.create("Fusion")
         if fusion is not None:
@@ -1264,9 +1315,10 @@ def restore():
     sheet = _prop(app, "styleSheet") or u""
     if STYLESHEET_MARK in sheet:  # left by FreeLab 0.1, which also styled menus through the application
         app.setStyleSheet(_strip_ours(sheet))
-    widgets = list(app.allWidgets())
-    _enqueue([w for w in widgets if not w.isVisible()], "light")  # stylesheets: in slices
-    _enqueue([w for w in widgets if w.isVisible()], "light")
+    # Stylesheets, at once: switching off is rare and asked for, and a half-restored
+    # interface (should anything interrupt the slices) is worse than a short freeze.
+    _enqueue(list(app.allWidgets()), "light")
+    run_queue()
 
 
 def status():
