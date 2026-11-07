@@ -1947,8 +1947,11 @@ def _drop_stray_effect(widget):
 INDICATOR_BORDER = {"dark": "#8c8c92", "medium": "#a8a8ae"}
 
 
+LEAVE_ALONE_PROP = "freelabLeaveAlone"  # set by FreeLab's own tools on what they draw themselves (previews)
+
+
 def _left_alone(widget, name):
-    return (name in SKIP_CLASSES or any(word in name for word in SKIP_CLASS_WORDS)
+    return (name in SKIP_CLASSES or any(word in name for word in SKIP_CLASS_WORDS) or bool(widget.property(LEAVE_ALONE_PROP))
             or (widget.inherits("QAbstractButton") and (_prop(widget, "objectName") or u"").startswith(SWATCH_NAME_PREFIXES))
             or (widget.inherits("QAbstractSlider") and _within(widget, COLOR_SLIDER_PANELS)))
 
