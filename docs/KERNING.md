@@ -20,6 +20,34 @@ Both are measured by FreeLab's native core (*kerning/native/freelab_kern.c*) on 
 - **halfkern** ([behdad/halfkern](https://github.com/behdad/halfkern), Copyright 2022 Google LLC, Apache License 2.0): each glyph gets an envelope, its ink over a halo that fades out over about a tenth of the em at half strength; the measure is the overlap of the two envelopes, the sum of their squared products. The halo grows until *ll*, *nn*, and *oo* agree within a factor of two, as halfkern's does, and FreeLab interpolates between whole pixels where the overlap crosses the band. Checked against halfkern itself on the same renderings (Georgia, 19 pairs): the same kerning for every pair, including the two it cannot kern.
 - **Contour distance**, after Matthew Skala's description of Tsukurimashou's kerning ([freetype-devel, June 2012](https://lists.nongnu.org/archive/html/freetype-devel/2012-06/msg00118.html)); written from that description, not from its code. Each glyph's left and right edges are found row by row, and their angle is limited (an edge moves at most 0.6 pixels across a row), so that a shape reaches out into the rows above and below it: a period cannot slide under an apostrophe. The measure is the average over the rows of the inverse cube of the gap between the facing edges, found by bisection. A tightening stops where the two glyphs' ink comes within 2% of the em.
 - **FontLab's own** autokern (`flPackage.autoKern`, FontLab 8's "K1"), which returns its value without writing it. It is coarse: on the owner's test font it gave −56 for most pairs it tightened.
+- **Learned**, FreeLab's own: gradient-boosted trees trained on how fonts are kerned. Its inputs are both methods' readings, the gap between the pair's facing ink in 16 height bands, the two advances, and the font's own spacing (its *nn*, *oo*, and *HH*), all as shares of the em, measured by the same code as the other methods. It has two stages: one decides whether a pair is kerned at all, the other how much (a single one learned to say 0, since most common pairs are not kerned). The model, *kerning/learned_model.json*, is evaluated in plain Python.
+
+### What the learned method learned from, and how it was checked
+
+*kerning/train/dataset.py* reads the fonts installed on the computer it runs on, and keeps only those whose name table declares the SIL Open Font License or the Apache License, and that kern: of the 4,074 fonts installed on the owner's computer, 747. Fonts that kern fewer than 5% of the common pairs, the same Latin design under another name, and fonts whose *l*, *n*, and *o* cannot be measured were left out: 782,693 pairs from 562 fonts in 189 families, with the kerning each font applies read through HarfBuzz. The measurements stay on that computer; only the trained model is in the repository. *kerning/train/train.py* trains and checks it.
+
+Each family was held out in turn (five folds, no family in both parts), and the methods' suggestions compared with the held-out fonts' kerning, in units of a 1000-unit em:
+
+| Method | Mean error, all pairs | Mean error, kerned pairs | Within 20 units |
+|---|---|---|---|
+| No kerning at all | 9.3 | 38.4 | 85% |
+| halfkern | 17.2 | 22.7 | 69% |
+| Contour distance | 27.1 | 32.0 | 56% |
+| Average of the two | 21.9 | 25.2 | 63% |
+| **Learned** | **8.6** | **21.5** | **85%** |
+
+halfkern and contour distance are scored here with their default strengths; in Auto Kerning, the font's own kerning tunes them, which narrows the gap. The learned method is the only one that beats leaving most pairs alone while also coming closest on the pairs the fonts do kern.
+
+These are averages over many fonts; one font can go the other way. The owner's test font, left out of training (`train.py --exclude`) and analyzed in Auto Kerning with its own kerning tuning every method:
+
+| Method | Mean error, all 7,068 pairs | Mean error, the font's 2,640 kerned pairs | Mean error, its unkerned pairs |
+|---|---|---|---|
+| halfkern | 21.6 | 31.2 | 15.9 |
+| Contour distance | 16.6 | 26.9 | 10.5 |
+| Average of the two | 18.7 | 28.2 | 13.1 |
+| **Learned** | **14.1** | 31.2 | **3.9** |
+
+Learned is closest overall because it leaves alone what the font leaves alone, but on that font's kerned pairs, contour distance came closer: Learned left some at 0 (*xj*, *r.*) that the font kerns. That is why the suggestions default to the average of halfkern and contour distance, with Learned one click away, and why each pair's methods are shown side by side.
 
 The two methods often disagree on pairs with diagonals and overhangs (contour distance tightens *To* and *TA* more), and agree on most others. On a font with kerning, contour distance came closer to the designer's own pairs (*LT*: designer −178, contour −154, halfkern −109).
 

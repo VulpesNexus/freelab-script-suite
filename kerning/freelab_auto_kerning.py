@@ -441,18 +441,17 @@ def learned_model(path=None):
         try:
             with io.open(path, encoding="utf-8") as handle:
                 data = json.load(handle)
-            _MODEL[path] = data if data.get("format") == 1 else None
+            _MODEL[path] = data if data.get("format") == 2 else None
         except (IOError, OSError, ValueError):
             _MODEL[path] = None
     return _MODEL[path]
 
 
-def predict(model, features):
-    """The learned kerning of a pair, as a share of the em: the sum of the trees' leaves. A node is
-    [feature, threshold, missing goes left, left, right, is leaf, value]; a feature at most the
-    threshold goes left, as scikit-learn's trees do."""
-    total = model["baseline"]
-    for tree in model["trees"]:
+def tree_sum(stage, features):
+    """A stage's baseline plus its trees' leaves. A node is [feature, threshold, missing goes left,
+    left, right, is leaf, value]; a feature at most the threshold goes left, as in scikit-learn."""
+    total = stage["baseline"]
+    for tree in stage["trees"]:
         node = tree[0]
         while not node[5]:
             value = features[node[0]]
@@ -460,6 +459,16 @@ def predict(model, features):
             node = tree[node[3] if left else node[4]]
         total += node[6]
     return total
+
+
+def predict(model, features):
+    """The learned kerning of a pair, as a share of the em: 0 unless the classifier finds the pair
+    kerned (its probability at least the model's cut), else the regressor's amount."""
+    raw = tree_sum(model["classifier"], features)
+    chance = 1.0 / (1.0 + math.exp(-raw)) if raw > -30 else 0.0
+    if chance < model["cut"]:
+        return 0.0
+    return tree_sum(model["regressor"], features)
 
 
 def to_units(pixels, em, upm, tighten=TIGHTEN, loosen=LOOSEN):

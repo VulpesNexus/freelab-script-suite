@@ -4,8 +4,11 @@ families it never saw, and export it for Auto Kerning.
     python kerning/train/train.py [--data <dataset.npz>] [--export]
 
 Cross-validation is grouped by family: no family is ever in both the training and the test part.
-Errors are in units of a 1000-unit em. --export writes kerning/learned_model.json (gradient-boosted
-trees, evaluated by Auto Kerning in plain Python) when the model beats every other method.
+Errors are in units of a 1000-unit em. The model has two stages, gradient-boosted trees each: a
+classifier says whether a pair is kerned at all, and a regressor, trained on kerned pairs only, how
+much. (One regressor learned to say 0: most common pairs are not kerned.) --export writes
+kerning/learned_model.json, evaluated by Auto Kerning in plain Python, when the model beats every
+other method both overall and on the pairs the fonts kern.
 
 Python 3 with numpy and scikit-learn.
 """
@@ -17,7 +20,7 @@ import sys
 import time
 
 import numpy as np
-from sklearn.ensemble import HistGradientBoostingRegressor
+from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor
 from sklearn.model_selection import GroupKFold
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -26,8 +29,10 @@ os.environ["FREELAB_NO_AUTOSTART"] = "1"
 import freelab_auto_kerning as ak  # noqa: E402
 
 MODEL_FILE = os.path.join(HERE, os.pardir, "learned_model.json")
-PARAMS = dict(loss="absolute_error", max_iter=250, learning_rate=0.08, max_leaf_nodes=31, min_samples_leaf=40,
-              l2_regularization=1.0, random_state=0)
+PARAMS = dict(max_iter=150, learning_rate=0.08, max_leaf_nodes=31, min_samples_leaf=40, l2_regularization=1.0,
+              random_state=0)
+KERNED = 5 / 1000.0  # a pair kerned by at least this share of the em counts as kerned
+CUT = 0.4  # the classifier's probability from which a pair is kerned (0.4 beat 0.5 and 0.6 on kerned pairs)
 FEATURES = (["halfkern", "contour", "left kind", "right kind"] + ["spacing " + p for p in ak.SPACING_PAIRS]
             + ["left advance", "right advance"] + ["gap %d" % b for b in range(ak.PROFILE_BANDS)])
 
@@ -53,38 +58,59 @@ def usable_columns(x):
 
 
 def fit(x, y):
+    """(classifier, regressor, columns): whether a pair is kerned, and how much where it is."""
     columns = usable_columns(x)
-    return HistGradientBoostingRegressor(**PARAMS).fit(x[:, columns], y), columns
+    kerned = np.abs(y) >= KERNED
+    classifier = HistGradientBoostingClassifier(**PARAMS).fit(x[:, columns], kerned)
+    regressor = HistGradientBoostingRegressor(loss="squared_error", **PARAMS).fit(x[kerned][:, columns], y[kerned])
+    return classifier, regressor, columns
 
 
-def export(model, columns, info):
+def predict(classifier, regressor, columns, x):
+    chance = classifier.predict_proba(x[:, columns])[:, 1]
+    return np.where(chance >= CUT, regressor.predict(x[:, columns]), 0.0)
+
+
+def stage(model, columns):
     trees = []
     for predictors in model._predictors:
         nodes = predictors[0].nodes
-        trees.append([[columns[int(n["feature_idx"])], round(float(n["num_threshold"]), 6), int(n["missing_go_to_left"]),
+        trees.append([[columns[int(n["feature_idx"])], float(n["num_threshold"]), int(n["missing_go_to_left"]),
                        int(n["left"]), int(n["right"]), int(n["is_leaf"]), round(float(n["value"]), 7)] for n in nodes])
-    data = {"format": 1, "features": FEATURES, "baseline": float(np.ravel(model._baseline_prediction)[0]),
-            "trees": trees, "info": info}
-    with open(MODEL_FILE, "w", encoding="utf-8", newline="\n") as handle:
+    return {"baseline": float(np.ravel(model._baseline_prediction)[0]), "trees": trees}
+
+
+def export(classifier, regressor, columns, info, path=None):
+    data = {"format": 2, "features": FEATURES, "cut": CUT, "classifier": stage(classifier, columns),
+            "regressor": stage(regressor, columns), "info": info}
+    with open(path or MODEL_FILE, "w", encoding="utf-8", newline="\n") as handle:
         json.dump(data, handle, separators=(",", ":"))
-    return MODEL_FILE
+    return path or MODEL_FILE
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", default=os.path.join(ak.state_dir(), "kerning-train", "dataset.npz"))
     parser.add_argument("--export", action="store_true")
+    parser.add_argument("--exclude", default="", help="leave out the fonts whose file name contains this (a held-out test)")
+    parser.add_argument("--model", default=MODEL_FILE, help="where --export writes the model")
     args = parser.parse_args()
     data = np.load(args.data)
-    x, y, groups = data["x"].astype(np.float64), data["y"].astype(np.float64), data["group"]
+    x, y, groups, fonts = data["x"].astype(np.float64), data["y"].astype(np.float64), data["group"], data["font"]
+    if args.exclude:
+        left_out = [i for i, name in enumerate(data["fonts"]) if args.exclude.lower() in str(name).lower()]
+        keep = ~np.isin(fonts, left_out)
+        x, y, groups, fonts = x[keep], y[keep], groups[keep], fonts[keep]
+        print("left out %d fonts matching %r" % (len(left_out), args.exclude))
+    font_count = len(np.unique(fonts))
 
-    print("%d pairs, %d fonts, %d families; %.0f%% kerned" % (len(y), len(data["fonts"]), len(set(groups)), 100 * (y != 0).mean()))
+    print("%d pairs, %d fonts, %d families; %.0f%% kerned" % (len(y), font_count, len(set(groups)), 100 * (y != 0).mean()))
     folds = GroupKFold(n_splits=5)
     results = {name: [] for name in ("zero", "halfkern", "contour", "average", "learned")}
     started = time.time()
     for fold, (train, test) in enumerate(folds.split(x, y, groups)):
-        model, columns = fit(x[train], y[train])
-        predictions = dict(baselines(x[test]), learned=model.predict(x[test][:, columns]))
+        classifier, regressor, columns = fit(x[train], y[train])
+        predictions = dict(baselines(x[test]), learned=predict(classifier, regressor, columns, x[test]))
         for name, predicted in predictions.items():
             results[name].append(scores(y[test], predicted))
         print("fold %d done (%.0f s)" % (fold + 1, time.time() - started), flush=True)
@@ -95,16 +121,18 @@ def main():
         summary[name] = mean
         print("%-9s %8.1f %12.1f %9.0f%% %9.0f%%" % (name, mean["mae"], mean["mae kerned"], 100 * mean["within 10"],
                                                      100 * mean["within 20"]))
-    best_other = min(summary[n]["mae"] for n in summary if n != "learned")
+    others = [n for n in summary if n != "learned"]
     if args.export:
-        if summary["learned"]["mae"] >= best_other:
-            print("not exported: the learned model does not beat the other methods")
+        if (summary["learned"]["mae"] >= min(summary[n]["mae"] for n in others)
+                or summary["learned"]["mae kerned"] >= min(summary[n]["mae kerned"] for n in others)):
+            print("not exported: the learned model does not beat the other methods on both measures")
             return
-        model, columns = fit(x, y)
-        info = {"trained": time.strftime("%Y-%m-%d"), "pairs": int(len(y)), "fonts": int(len(data["fonts"])),
+        classifier, regressor, columns = fit(x, y)
+        info = {"trained": time.strftime("%Y-%m-%d"), "pairs": int(len(y)), "fonts": int(font_count),
                 "families": int(len(set(groups))), "licenses": "SIL Open Font License and Apache License fonts only",
                 "cross-validation": summary}
-        print("exported", export(model, columns, info))
+        export(classifier, regressor, columns, info, args.model)
+        print("exported the model")
 
 
 if __name__ == "__main__":

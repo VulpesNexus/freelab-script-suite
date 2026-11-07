@@ -172,7 +172,7 @@ def main():
     if args.limit:
         fonts = fonts[:args.limit]
     print("%d open-licensed kerned fonts" % len(fonts), flush=True)
-    xs, ys, groups, pairs, sources = [], [], [], [], []
+    xs, ys, groups, pairs, sources, font_rows = [], [], [], [], [], []
     families, seen, skipped = {}, set(), {"unkerned": 0, "duplicate": 0}
     started = time.time()
     for number, (path, index, family, licence) in enumerate(fonts, 1):
@@ -196,6 +196,7 @@ def main():
         xs.append(x)
         ys.append(y)
         groups.append(np.full(len(y), group, dtype=np.int32))
+        font_rows.append(np.full(len(y), len(sources), dtype=np.int32))  # the row's font, in `fonts`
         pairs += names
         sources.append("%s#%d %s" % (os.path.basename(path), index, licence))
         if number % 20 == 0:
@@ -204,7 +205,7 @@ def main():
     if not os.path.isdir(folder):
         os.makedirs(folder)
     np.savez_compressed(args.out, x=np.concatenate(xs), y=np.concatenate(ys), group=np.concatenate(groups),
-                        pair=np.array(pairs), fonts=np.array(sources))
+                        font=np.concatenate(font_rows), pair=np.array(pairs), fonts=np.array(sources))
     print("wrote %s: %d pairs from %d fonts in %d families (%.0f s; left out: %d barely kerned, %d duplicates)"
           % (args.out, sum(len(y) for y in ys), len(sources), len(families), time.time() - started,
              skipped["unkerned"], skipped["duplicate"]))

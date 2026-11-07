@@ -141,11 +141,16 @@ class ArithmeticTests(unittest.TestCase):
 
     def test_learned_trees_are_walked_as_scikit_learn_does(self):
         # one tree: feature 0 at most -0.05 goes left (-0.04), above it right (0.0); missing goes right
-        model = {"baseline": -0.01, "trees": [[[0, -0.05, 0, 1, 2, 0, 0.0], [0, 0, 0, 0, 0, 1, -0.04], [0, 0, 0, 0, 0, 1, 0.0]]]}
+        stage = {"baseline": -0.01, "trees": [[[0, -0.05, 0, 1, 2, 0, 0.0], [0, 0, 0, 0, 0, 1, -0.04], [0, 0, 0, 0, 0, 1, 0.0]]]}
+        self.assertAlmostEqual(ak.tree_sum(stage, [-0.1]), -0.05)
+        self.assertAlmostEqual(ak.tree_sum(stage, [-0.05]), -0.05, msg="at the threshold: left")
+        self.assertAlmostEqual(ak.tree_sum(stage, [0.2]), -0.01)
+        self.assertAlmostEqual(ak.tree_sum(stage, [None]), -0.01, msg="a missing feature follows the node's side")
+        # two stages: kerned when the classifier's probability reaches the cut (feature 0 below 0 here)
+        classifier = {"baseline": 0.0, "trees": [[[0, 0.0, 0, 1, 2, 0, 0.0], [0, 0, 0, 0, 0, 1, 2.0], [0, 0, 0, 0, 0, 1, -2.0]]]}
+        model = {"cut": 0.4, "classifier": classifier, "regressor": stage}
         self.assertAlmostEqual(ak.predict(model, [-0.1]), -0.05)
-        self.assertAlmostEqual(ak.predict(model, [-0.05]), -0.05, msg="at the threshold: left")
-        self.assertAlmostEqual(ak.predict(model, [0.2]), -0.01)
-        self.assertAlmostEqual(ak.predict(model, [None]), -0.01, msg="a missing feature follows the node's side")
+        self.assertEqual(ak.predict(model, [0.2]), 0.0, "not kerned: 0")
         self.assertIsNone(ak.learned_model(os.path.join(HERE, "no such model.json")))
 
     def test_first_halo_is_halfkerns(self):
