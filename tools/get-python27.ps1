@@ -1,5 +1,5 @@
 # Fetch the Python Software Foundation's Python 2.7.18 (64-bit) NuGet package
-# into %LOCALAPPDATA%\FreeLab\python27, for testing the listener under the
+# into %LOCALAPPDATA%\FreeLab\python27, for testing dark mode under the
 # Python that FontLab 7 embeds. Nothing is installed: no registry, no PATH.
 #
 # It does not go inside the repository: Python 2.7 opens files through the
