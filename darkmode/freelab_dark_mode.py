@@ -1771,6 +1771,14 @@ def _protect(widget):
                              # partial repaints kept bands of that
 
 
+def _drawn_natively(widget):
+    """Painted dark by the native engine's hooks (a hooked island, a list's native ink)."""
+    try:
+        return bool(widget.property(HOOKED_PROP) or widget.property(NATIVE_INK_PROP))
+    except Exception:  # deleted meanwhile
+        return False
+
+
 def _protect_effects_inside(widget, effect):
     """Have a new effect draw unmapped the widgets inside it that already have an effect."""
     protect = getattr(effect, "freelab_protect", None)
@@ -1779,7 +1787,9 @@ def _protect_effects_inside(widget, effect):
     own = widget.property(ID_PROP)
     for key, record in list(_state()["records"].items()):
         inner = record.get("obj")
-        if record.get("effect") is None or inner is None or record.get("kind") == "title":
+        if inner is None or record.get("kind") == "title":
+            continue
+        if record.get("effect") is None and not _drawn_natively(inner):
             continue
         if own is not None and key == int(own):
             continue  # Qt's isAncestorOf is true for the widget itself
@@ -2773,6 +2783,7 @@ def _hook_island(widget):
     first = widget.property(HOOKED_PROP) is None
     _clear_effect(widget, _record(widget))  # an effect dark mode set before it was found in a hooked island
     widget.setProperty(HOOKED_PROP, True)
+    _protect(widget)  # dark as it is painted: an effect around it (the font window's ink) must not map it again
     _darken_sheet(widget)
     _darken_icons(widget)
     if first:
@@ -2826,6 +2837,7 @@ def _native_ink(widget):
     """A list's viewport: its dark pens are mapped by the hooks, with no effect."""
     _clear_effect(widget, _record(widget))
     widget.setProperty(NATIVE_INK_PROP, True)
+    _protect(widget)
     state = _state()
     pointer = _sci_pointer(widget)
     if pointer and pointer not in state.setdefault("ink_addresses", []):

@@ -656,6 +656,8 @@ class EngineTests(DarkModeCase):
         self.assertEqual(hooks.calls[:2], ["set_palette", "install"])
         self.assertIsNone(self.kind(self.search), "an island FontLab paints: hooked, no effect")
         self.assertTrue(self.search.property(dm.HOOKED_PROP))
+        self.assertIn(self.search, list(self.dock.effect.freelab_protect.values()),
+                      "dark as it is painted: the dock's effect must not map it again")
         self.assertTrue(self.canvas.property(dm.HOOKED_PROP))
         self.assertTrue(popup.property(dm.HOOKED_PROP), "FontLab's own painting inside a hooked island: hooked too")
         self.assertIsNone(self.edit.property(dm.HOOKED_PROP), "a line edit (Qt draws it) inside one: processed as any")
