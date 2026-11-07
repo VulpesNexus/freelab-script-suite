@@ -201,6 +201,14 @@ class ContentTests(DarkModeCase):
         self.assertEqual(qtfakes.Preferences.color_workspace, QColor("#ffacacac"), "the workspace color is left too")
         self.assertIsNotNone(self.search.effect, "the interface is still dark")
 
+    def test_dark_interface_mode_keeps_content_out_of_the_ink_around_it(self):
+        dm.save_settings({"content": False})
+        self.odd.light = "ink"
+        cells = FakeWidget("FontCellChart", "fontChartView", parent=self.odd, inherits=("FontCellChart",))
+        self.on()
+        self.assertIsNone(cells.effect)
+        self.assertIn(cells, list(self.odd.effect.freelab_protect.values()), "drawn as FontLab paints it")
+
 
 class ShadeAndPickerTests(DarkModeCase):
     def tearDown(self):

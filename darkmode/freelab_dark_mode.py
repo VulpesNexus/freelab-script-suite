@@ -210,7 +210,7 @@ SWEEP_MS = 750  # how often to look for widgets FontLab created or showed
 FULL_SWEEP_EVERY = 40  # every Nth sweep revisits every widget (replaced stylesheets, new icons)
 FOCUS_DRAIN_MS = 80  # a window that takes focus is darkened at once, up to this long, before it paints light
 MAX_ERRORS = 50
-NATIVE_VERSION = 89
+NATIVE_VERSION = 90
 
 ID_PROP = "freelab_id"  # dynamic properties FreeLab sets on widgets, all removed by restore()
 SEEN_PROP = "freelab_seen"
@@ -923,6 +923,7 @@ def dark_pixmap(pixmap):
 
 
 SWATCH_CHROMA = 80  # max - min of the channels: clearly colored
+GRAY_ICON_SHARE = 0.15  # a list icon this little colored is gray: mapped
 SWATCH_SHARE = 0.4  # an icon this colored is a color swatch (mark colors): left as it is
 SWATCH_FILL = 0.5  # and this filled: a swatch is a solid shape; a thin colored glyph (the red Y and X of
                    # TrueType Hinting's direction buttons, black stems included) is an icon
@@ -942,6 +943,26 @@ def is_swatch(image):
             channels = (color.red(), color.green(), color.blue())
             colored += max(channels) - min(channels) >= SWATCH_CHROMA
     return opaque >= SWATCH_FILL * 144 and colored >= SWATCH_SHARE * opaque
+
+
+def icon_is_gray(icon):
+    """Mostly gray: a list's light-mode page icon, which is mapped; colorful ones (format logos) are not."""
+    QImage, QColor, Qt = _gui("QImage"), _gui("QColor"), _core("Qt")
+    sizes = list(icon.availableSizes())
+    pixmap = icon.pixmap(sizes[0] if sizes else _core("QSize")(16, 16))
+    if pixmap.isNull():
+        return False
+    small = pixmap.toImage().convertToFormat(QImage.Format_ARGB32).scaled(12, 12, Qt.IgnoreAspectRatio, Qt.FastTransformation)
+    opaque = colored = 0
+    for y in range(12):
+        for x in range(12):
+            color = QColor.fromRgba(small.pixel(x, y))
+            if color.alpha() < 128:
+                continue
+            opaque += 1
+            channels = (color.red(), color.green(), color.blue())
+            colored += max(channels) - min(channels) >= SWATCH_CHROMA
+    return opaque > 0 and colored <= GRAY_ICON_SHARE * opaque
 
 
 def icon_is_swatch(icon):
@@ -1045,8 +1066,8 @@ def _swap_item_icons(widget):
         key = icon.cacheKey()
         if key in state["mapped_keys"] or key in state["swatches"]:
             continue
-        if key not in state["icon_cache"] and icon_is_swatch(icon):
-            state["swatches"].add(key)
+        if key not in state["icon_cache"] and (icon_is_swatch(icon) or not icon_is_gray(icon)):
+            state["swatches"].add(key)  # colorful (Export Profiles' format logos): left as drawn, mapped they turned jagged
             continue
         new = state["icon_cache"].get(key)
         if new is None:
@@ -1210,7 +1231,10 @@ def _effect_classes():
                                         0.0, None, -1.0, 0.0, MARGIN_OKL)
                             whole = QRect(offset.x() + margin, offset.y(), pixmap.width() - margin, pixmap.height())
                         if light_paper(pixmap, margin):
-                            anchors = "all"  # paper the editor took from a light palette: map it whole
+                            # paper the editor took from a light palette: mapped whole, but its syntax colors of
+                            # middle lightness (blue keys, red numbers) kept, as on a dark paper (inverted, the
+                            # keys turned a dim blue)
+                            anchors = "icon"
                     # Fields paint an opaque background, so their light text keeps ClearType's colored
                     # fringes even inside an effect: grays, unless text is selected (the blue highlight).
                     gray = getattr(self, "freelab_gray", False) and not (
@@ -1422,6 +1446,11 @@ def _protect_effects_inside(widget, effect):
                 protect[key] = inner
         except Exception:  # deleted meanwhile
             continue
+    if not _state()["canvas"]:  # "dark interface": the light content inside keeps FontLab's look
+        for inner in _descendants(widget):
+            if inner is not widget and is_content(inner):
+                _record(inner)
+                protect[int(inner.property(ID_PROP))] = inner
 
 
 def _drop_stray_effect(widget):
@@ -1855,6 +1884,7 @@ def process(widget):
     canvas = state["canvas"]
     if not canvas and is_content(widget):
         _note_sheet_as_seen(widget)  # "dark interface" mode: canvases, font cells, and previews keep FontLab's look
+        _protect(widget)  # and the ink effect of the window around them must not map them (garbled cells)
         return
     if _island_ancestor(widget, canvas) is not None:
         _undo_widget(widget, keep_props=True, keep_placeholder=True)  # the island maps it as drawn in light mode

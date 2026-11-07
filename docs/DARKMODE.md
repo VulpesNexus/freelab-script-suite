@@ -39,7 +39,7 @@ Known island classes are listed in the script; a glyph window's canvas is its `Q
 
 ## Options
 
-*Scripts > FreeLab: Dark Mode Settings* chooses the look (FontLab's own light look; dark; or a dark interface with FontLab's light glyph canvases, font cells, and previews), the shade (dark grays, where white becomes #1f1f1f, or medium grays, where it becomes #3c3c3c, with a lighter palette), and whether to follow Windows: dark while Windows apps are set to dark (`AppsUseLightTheme` = 0), checked every 3 seconds, so it switches as Windows does. Switching by hand (*Toggle Dark Mode*) stops following Windows. The settings live in *darkmode.json*: `enabled`, `content` (the older `canvas` still counts), `shade`, and `follow_windows`.
+*Scripts > FreeLab > Dark Mode Settings* chooses the theme, dark or automatic (dark while Windows apps are set to dark, `AppsUseLightTheme` = 0, checked every 3 seconds, so it switches as Windows does; FontLab's own light look otherwise), mixed (a dark interface with FontLab's light glyph canvases, font cells, and previews, which the ink of the windows around them leaves as drawn), and the shade (dark grays, where white becomes #1f1f1f, or medium grays, where it becomes #3c3c3c, with a lighter palette). Each change shows at once; Cancel puts back what was there. There is no light choice: switching off is *Toggle Dark Mode*. An editor whose paper came from a light palette is mapped with the icon rule, which keeps its syntax colors of middle lightness. Switching by hand (*Toggle Dark Mode*) stops following Windows. The settings live in *darkmode.json*: `enabled`, `content` (the older `canvas` still counts), `shade`, and `follow_windows`.
 
 ## Platforms and builds
 

@@ -2,11 +2,11 @@
 # -*- coding: utf-8 -*-
 """FreeLab dark mode settings, from FontLab's Scripts menu.
 
-Theme: FontLab's own light look, dark, or mixed (a dark interface with
-FontLab's light glyph canvases, font cells, and previews). Shade: how dark the
-grays are. Automatic: light while Windows apps are light, the dark theme chosen
-above while they are dark, switching as Windows does. The choice applies at once
-and is kept for the next launch.
+Theme: dark, or automatic (dark while Windows apps are dark, FontLab's own light
+look while they are light, switching as Windows does). Mixed keeps FontLab's
+light glyph canvases, font cells, and previews in a dark interface. Shade: how
+dark the grays are. Every change shows at once; Cancel puts back what was there.
+Switching dark mode off is Scripts > FreeLab > Toggle Dark Mode.
 
 Valid Python 2.7 (FontLab 7) and Python 3.
 """
@@ -18,19 +18,16 @@ import sys
 
 DARK_MODE_MODULE = "freelab_dark_mode"
 DARK_MODE_FILE = "freelab_dark_mode.py"
-LOOKS = (
-    ("light", "Light (FontLab's default)"),
-    ("dark", "Dark"),
-    ("interface", "Mixed (dark interface, light canvases)"),
-)
+THEMES = (("dark", "Dark"), ("automatic", "Automatic (matches system theme)"))
+MIXED = "Mixed (dark interface, light canvases)"
 SHADES = (("dark", "Dark grays"), ("medium", "Medium grays"))
-AUTOMATIC = "Automatic (matches system theme)"
 
 
 def dark_mode_module():
     """The running dark mode, or the one next to this file, loaded without switching anything."""
-    module = sys.modules.get(DARK_MODE_MODULE)
-    if module is not None:
+    held = getattr(sys, "_freelab_dark_mode", None)  # dark mode's state keeps the running version
+    module = (held.get("module") if isinstance(held, dict) else None) or sys.modules.get(DARK_MODE_MODULE)
+    if module is not None and hasattr(module, "load_settings"):  # not a stub a failed load left
         return module
     here = os.path.dirname(os.path.abspath(globals().get("__file__") or "."))
     path = os.path.join(here, DARK_MODE_FILE)
@@ -55,17 +52,21 @@ def dark_mode_module():
     return module
 
 
-def current_look(settings, dm):
-    if not settings.get("enabled"):
-        return "light"
-    return "dark" if dm.content_setting(settings) else "interface"
+def current_choice(settings, dm):
+    """What the dialog shows: (theme, mixed, shade)."""
+    theme = "automatic" if settings.get("follow_windows") else "dark"
+    return theme, not dm.content_setting(settings), settings.get("shade", "dark")
 
 
 def show_dialog():
     from PythonQt.QtGui import QDialog, QVBoxLayout, QHBoxLayout, QRadioButton, QCheckBox, QPushButton, QLabel
+    from PythonQt.QtGui import QButtonGroup
     from PythonQt.QtCore import Qt
     dm = dark_mode_module()
     settings = dm.load_settings()
+    before = dict(dark=bool(settings.get("enabled")), content=dm.content_setting(settings),
+                  follow_windows=bool(settings.get("follow_windows")), shade=settings.get("shade", "dark"))
+    theme, mixed, shade = current_choice(settings, dm)
     dialog = QDialog()
     dialog.setWindowTitle("FreeLab Dark Mode")
     # No "?" in the title bar: it offered help this dialog does not have.
@@ -73,47 +74,24 @@ def show_dialog():
     dialog.setWindowFlags(Qt.WindowFlags(flags & ~int(Qt.WindowContextHelpButtonHint)))
     layout = QVBoxLayout(dialog)
     layout.addWidget(QLabel("Theme:"))
-    look = current_look(settings, dm)
-    buttons = {}
-    for key, label in LOOKS:
+    themes, shades = {}, {}
+    theme_group, shade_group = QButtonGroup(dialog), QButtonGroup(dialog)  # each its own exclusive group
+    for key, label in THEMES:
         button = QRadioButton(label)
-        button.setChecked(key == look)
+        button.setChecked(key == theme)
         layout.addWidget(button)
-        buttons[key] = button
+        theme_group.addButton(button)
+        themes[key] = button
+    mixed_box = QCheckBox(MIXED)
+    mixed_box.setChecked(mixed)
+    layout.addWidget(mixed_box)
     layout.addWidget(QLabel("Shade:"))
-    shade = settings.get("shade", "dark")
-    shade_buttons = {}
     for key, label in SHADES:
         button = QRadioButton(label)
         button.setChecked(key == shade)
         layout.addWidget(button)
-        shade_buttons[key] = button
-    # Two groups of radio buttons in one dialog: each group needs its own exclusive QButtonGroup.
-    from PythonQt.QtGui import QButtonGroup
-    look_group, shade_group = QButtonGroup(dialog), QButtonGroup(dialog)
-    for button in buttons.values():
-        look_group.addButton(button)
-    for button in shade_buttons.values():
         shade_group.addButton(button)
-    follow = QCheckBox(AUTOMATIC)
-    follow.setChecked(bool(settings.get("follow_windows")))
-    layout.addWidget(follow)
-
-    def update(*_args):
-        """Automatic leaves light to Windows: the light theme is not a choice then, and the dark one
-        (dark or mixed) and its shade are. Shades mean nothing to the light theme."""
-        auto = follow.isChecked()
-        buttons["light"].setEnabled(not auto)
-        if auto and buttons["light"].isChecked():
-            buttons["dark"].setChecked(True)
-        light = buttons["light"].isChecked() and not auto
-        for button in shade_buttons.values():
-            button.setEnabled(not light)
-
-    for button in buttons.values():
-        button.connect("toggled(bool)", update)
-    follow.connect("toggled(bool)", update)
-    update()
+        shades[key] = button
     row = QHBoxLayout()
     row.addStretch(1)
     ok, cancel = QPushButton("OK"), QPushButton("Cancel")
@@ -123,19 +101,34 @@ def show_dialog():
     layout.addLayout(row)
     ok.connect("clicked()", dialog.accept)
     cancel.connect("clicked()", dialog.reject)
+
+    def chosen():
+        follow = themes["automatic"].isChecked()
+        picked = [key for key, button in shades.items() if button.isChecked()]
+        return dict(dark=True, content=not mixed_box.isChecked(), follow_windows=follow,
+                    shade=picked[0] if picked else "dark")
+
+    shown = {"value": None}
+
+    def preview(*_args):
+        """Each change shows at once (applied as OK would; Cancel puts back what was there)."""
+        choice = chosen()
+        if choice != shown["value"]:
+            shown["value"] = choice
+            dm.configure(**choice)
+
+    for button in list(themes.values()) + list(shades.values()):
+        button.connect("toggled(bool)", preview)
+    mixed_box.connect("toggled(bool)", preview)
     if not dialog.exec_():
+        if shown["value"] is not None:
+            dm.configure(**before)
         return None
-    chosen = [key for key, button in buttons.items() if button.isChecked()]
-    chosen = chosen[0] if chosen else look
-    # Following Windows needs a dark look to switch to: "light" with it means the full dark look.
-    content = chosen != "interface"
-    dark = chosen != "light" or follow.isChecked()
-    chosen_shade = [key for key, button in shade_buttons.items() if button.isChecked()]
-    result = dm.configure(dark=dark, content=content, follow_windows=follow.isChecked(),
-                          shade=chosen_shade[0] if chosen_shade else shade)
-    print("FreeLab dark mode: %s%s." % (
-        dict(LOOKS)["interface" if dark and not content else ("dark" if dark else "light")],
-        ", following Windows" if result.get("follow_windows") else ""))
+    result = dm.configure(**chosen())
+    print("FreeLab dark mode: %s%s, %s." % (
+        "automatic" if result.get("follow_windows") else "dark",
+        ", mixed" if not dm.content_setting(result) else "",
+        dict(SHADES).get(result.get("shade", "dark"), "Dark grays").lower()))
     return result
 
 

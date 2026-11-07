@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 89
+#define FREELAB_PIXELS_VERSION 90
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -1277,11 +1277,8 @@ static uint32_t resolve(uint32_t c, int translucent, uint32_t mask, int mode, do
         px[2] = (uint8_t)r;
         px[1] = (uint8_t)g;
         px[0] = (uint8_t)b;
-        if (spread_of(px) > LINEAR_SPREAD && (best_pair(r, g, b, mask, mask, LOCAL_BLEND_TOLERANCE, &a_i, &b_i, &t)
-                                              || best_pair(r, g, b, 0U, all, BLEND_TOLERANCE, &a_i, &b_i, &t))) {
-            Anchor *a = &anchors[a_i], *o = &anchors[b_i];
-            return pack(a->ir + t * (o->ir - a->ir), a->ig + t * (o->ig - a->ig), a->ib + t * (o->ib - a->ib));
-        }
+        if (spread_of(px) > LINEAR_SPREAD)
+            return c; /* clearly colored (a logo in a selected row of Export Profiles): as drawn, not inverted */
         return all_color(c, ANCHORS_ALL, dark_l, light_l, 0.0);
     }
     if (mode == ANCHORS_ALL || mode == ANCHORS_ICON) {
