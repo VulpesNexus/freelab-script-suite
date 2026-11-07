@@ -589,6 +589,66 @@ class LeaveAloneTests(DarkModeCase):
         self.assertEqual(button.icon.label, "pair", "its icon as it is")
 
 
+    def test_left_alone_icons_are_never_swapped(self):
+        # Auto Kerning's previews once came back mapped (dark gray glyphs): the swap itself refuses them
+        button = FakeWidget("QToolButton", "preview", parent=self.content, icon=FakeIcon("pair"),
+                            inherits=("QAbstractButton",))
+        button.setProperty(dm.LEAVE_ALONE_PROP, True)
+        self.on()
+        dm._darken_icons(button)
+        dm._swap_icon(button)
+        self.assertEqual(button.icon.label, "pair")
+
+
+class LabelPixmap(object):
+    def __init__(self, side=16):
+        self.side = side
+        self.key = FakeIcon().key
+
+    def isNull(self):
+        return False
+
+    def cacheKey(self):
+        return self.key
+
+    def width(self):
+        return self.side
+
+    def height(self):
+        return self.side
+
+
+class InkLabelTests(DarkModeCase):
+    # The font window's mark flag (QLabel#labelMark): mapped, then mapped again by the window's ink
+    # effect, its pole turned black. Inside the ink effect, a label's image is mapped once, by the effect.
+    def test_a_label_inside_the_ink_effect_keeps_its_image(self):
+        self.odd.light = "ink"
+        flag = FakeWidget("QLabel", "labelMark", parent=self.odd, inherits=("QLabel",))
+        original = flag.pixmap = LabelPixmap()
+        self.on()
+        self.assertIsNotNone(self.odd.effect)
+        self.assertIs(flag.pixmap, original)
+
+    def test_a_label_mapped_before_the_ink_effect_gets_its_image_back(self):
+        box = FakeWidget("QWidget", "box", parent=self.content)
+        flag = FakeWidget("QLabel", "labelMark", parent=box, inherits=("QLabel",))
+        original = flag.pixmap = LabelPixmap()
+        self.on()
+        self.assertIsInstance(flag.pixmap, Mapped)
+        dm._set_effect(box, dm._record(box), "ink")
+        self.assertIs(flag.pixmap, original)
+        self.assertNotIn("pixmap", dm._record(flag), "nothing left to restore when switching off")
+
+    def test_an_image_fontlab_replaced_meanwhile_stays(self):
+        box = FakeWidget("QWidget", "box", parent=self.content)
+        flag = FakeWidget("QLabel", "labelMark", parent=box, inherits=("QLabel",))
+        flag.pixmap = LabelPixmap()
+        self.on()
+        newer = flag.pixmap = LabelPixmap()  # FontLab's own, set after the swap
+        dm._set_effect(box, dm._record(box), "ink")
+        self.assertIs(flag.pixmap, newer)
+
+
 class PlainInputTests(DarkModeCase):
     def test_a_plain_combo_box_gets_no_effect(self):
         # FreeLab's own dialogs: Qt's combo boxes and spin boxes with no stylesheet anywhere. Their

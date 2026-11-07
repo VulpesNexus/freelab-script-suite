@@ -215,7 +215,7 @@ SWEEP_MS = 750  # how often to look for widgets FontLab created or showed
 FULL_SWEEP_EVERY = 40  # every Nth sweep revisits every widget (replaced stylesheets, new icons)
 FOCUS_DRAIN_MS = 80  # a window that takes focus is darkened at once, up to this long, before it paints light
 MAX_ERRORS = 50
-NATIVE_VERSION = 103
+NATIVE_VERSION = 104
 
 ID_PROP = "freelab_id"  # dynamic properties FreeLab sets on widgets, all removed by restore()
 SEEN_PROP = "freelab_seen"
@@ -1124,6 +1124,8 @@ def icon_is_swatch(icon):
 
 
 def _swap_icon(obj):
+    if obj.property(LEAVE_ALONE_PROP):
+        return
     state = _state()
     icon = _prop(obj, "icon")
     if icon is None or icon.isNull():
@@ -1153,10 +1155,42 @@ def _swap_pixmap(label):
         return
     if pixmap.width() > MAX_ICON_SIDE or pixmap.height() > MAX_ICON_SIDE:
         return
+    if _under_ink(label):
+        return  # the ink effect around it maps its image as drawn (see _unswap_labels_inside)
     new = dark_pixmap(pixmap)
     state["mapped_keys"].add(new.cacheKey())
     _record(label)["pixmap"] = pixmap
     label.setPixmap(new)
+
+
+def _under_ink(widget):
+    """Inside a widget FreeLab's ink effect maps (within its window)."""
+    current = widget
+    while not current.isWindow():
+        current = current.parentWidget()
+        if current is None:
+            return False
+        record = _record(current, create=False)
+        if record is not None and record.get("kind") == "ink" and record.get("effect") is not None and _ours(current, record):
+            return True
+    return False
+
+
+def _unswap_labels_inside(widget):
+    """Give the labels inside a widget that now gets the ink effect their images back as FontLab drew
+    them. Mapped twice, a mapped image went wrong: the font window's mark flag (red, with a black pole
+    made light) lay beside the white "no flag" slot, and the ink effect read the light pole as
+    smoothing between the dark paper and that white, and turned it dark again. Its black pole as
+    drawn is plain ink, which the effect maps light."""
+    state = _state()
+    for record in list(state["records"].values()):
+        label = record.get("obj")
+        if "pixmap" not in record or label is None or not _alive(label) or not widget.isAncestorOf(label):
+            continue
+        original = record.pop("pixmap")
+        current = _prop(label, "pixmap")
+        if current is not None and current.cacheKey() in state["mapped_keys"]:
+            label.setPixmap(original)  # else FontLab set another image since: it stays
 
 
 def _show_original_icon(widget):
@@ -1174,6 +1208,8 @@ def _show_original_icon(widget):
 
 
 def _darken_icons(widget):
+    if widget.property(LEAVE_ALONE_PROP):
+        return  # FreeLab's own pictures (Auto Kerning's previews): drawn for the palette, never mapped
     if widget.inherits("QTreeWidget") or widget.inherits("QListWidget"):
         _swap_item_icons(widget)
     if widget.inherits("QAbstractButton"):
@@ -2106,6 +2142,8 @@ def _set_effect(widget, record, kind, keys=None):
         _protect(widget)
         if kind != "picker":
             _protect_effects_inside(widget, effect)
+    if kind == "ink":
+        _unswap_labels_inside(widget)
 
 
 def _gray_text(widget):

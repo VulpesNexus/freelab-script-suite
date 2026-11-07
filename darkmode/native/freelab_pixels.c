@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 103
+#define FREELAB_PIXELS_VERSION 104
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -1037,6 +1037,10 @@ static void find_anchors(const uint32_t *p, int64_t count, int64_t width, int mo
     int k, j, n;
     double main_l = main_default, share_of;
     int text_found = 0;
+    /* Without a background of its own (a list painted on nothing: the font window's categories),
+     * its dark gray text and headers were drawn for light paper: dim ink however close to the
+     * dark gray beneath they come (kept, they nearly vanished and their smoothing turned dark). */
+    int paper_found = 0;
     generation++;
     if (generation == 0)
         generation = 1;
@@ -1133,9 +1137,10 @@ static void find_anchors(const uint32_t *p, int64_t count, int64_t width, int mo
      * nothing (FontLab's Unicode ranges and codepages lists) would pass for the background. Dim
      * marks (a field's gray frame drawn on nothing) keep the share of the opaque pixels. */
     share_of = (double)total;
-    if (anchor_count > 0 && anchors[0].surface && (double)anchors[0].count >= MAIN_MIN_AREA_SHARE * (double)area)
+    if (anchor_count > 0 && anchors[0].surface && (double)anchors[0].count >= MAIN_MIN_AREA_SHARE * (double)area) {
         main_l = anchors[0].okl;
-    else
+        paper_found = 1;
+    } else
         share_of = (double)area;
     if (mode == ANCHORS_RELIGHT && anchor_count > 2)
         drop_paper_blends();
@@ -1184,8 +1189,9 @@ static void find_anchors(const uint32_t *p, int64_t count, int64_t width, int mo
             out = mapped_one(rgb, dark_l, light_l, a->chroma >= INK_CHROMA ? 1.0 : 0.0);
             a->mapped = 1;
         } else if (!a->surface && !a->long_line && a->chroma < INK_CHROMA && a->okl < DIM_INK_MAX_OKL
-                   && a->okl >= main_l + DIM_INK_ABOVE_MAIN && (double)a->count < BACKGROUND_SHARE * (double)total
-                   && !fringe_of_lighter_color(j)) {
+                   && a->okl >= main_l + (paper_found ? DIM_INK_ABOVE_MAIN : -INK_BELOW_MAIN)
+                   && (double)a->count < BACKGROUND_SHARE * (double)total
+                   && (!paper_found || !fringe_of_lighter_color(j))) { /* (that test reads anchor 0 as the paper) */
             double light = gray_byte(light_l);
             out = mapped_one(rgb, dark_l, light_l, 0.0);
             out = pack(((out >> 16) & 255) + (light - ((out >> 16) & 255)) * DIM_INK_LIFT,
