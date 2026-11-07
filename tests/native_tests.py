@@ -177,6 +177,27 @@ class NativeTests(unittest.TestCase):
         r, g, b = rgb_at(buf, TEXT_ROW + 1)
         self.assertGreater(dm.oklab(r, g, b)[0], 0.6, "the navy turns light")
 
+    def test_a_logo_in_a_light_row_keeps_its_color_and_smooth_edges(self):
+        # A selected light row (turning dark) holding a blue logo, with a half-blend pixel at its edge.
+        width, colors = 40, []
+        for y in range(14):
+            for x in range(width):
+                if y < 2 or y > 11:
+                    colors.append((41, 41, 41))
+                elif 10 <= x <= 15 and 4 <= y <= 9:
+                    colors.append((30, 90, 230))
+                elif x == 16 and 4 <= y <= 9:
+                    colors.append((126, 160, 243))  # halfway between the logo and the row
+                else:
+                    colors.append((222, 230, 255))
+        buf = pixels(colors)
+        anchors(LIB, buf, width, "ink")
+        row, logo, edge = rgb_at(buf, 5 * width + 25), rgb_at(buf, 5 * width + 12), rgb_at(buf, 5 * width + 16)
+        self.assertLess(dm.oklab(*row)[0], 0.4, "the row turns dark")
+        self.assertEqual(logo, (30, 90, 230), "the logo as drawn")
+        for k in range(3):
+            self.assertTrue(min(row[k], logo[k]) - 3 <= edge[k] <= max(row[k], logo[k]) + 3, "its edge between the two: %r" % (edge,))
+
     def test_light_text_and_dark_surfaces_stay(self):
         colors = text_rows((30, 30, 30), (220, 220, 220), blend=(125, 125, 125))
         buf = pixels(colors)

@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 90
+#define FREELAB_PIXELS_VERSION 92
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -1277,6 +1277,28 @@ static uint32_t resolve(uint32_t c, int translucent, uint32_t mask, int mode, do
         px[2] = (uint8_t)r;
         px[1] = (uint8_t)g;
         px[0] = (uint8_t)b;
+        {
+            /* the logo's smoothing toward the row: the blend of the row as it turns and the logo as drawn
+             * (inverted alone, it ringed the logo) */
+            uint32_t colored = 0;
+            for (j = 0; j < anchor_count; j++) {
+                uint8_t q[3];
+                q[2] = (uint8_t)anchors[j].r;
+                q[1] = (uint8_t)anchors[j].g;
+                q[0] = (uint8_t)anchors[j].b;
+                if (((mask >> j) & 1U) && spread_of(q) > LINEAR_SPREAD)
+                    colored |= 1U << j;
+            }
+            if (colored && best_pair(r, g, b, mask, mask, LOCAL_BLEND_TOLERANCE, &a_i, &b_i, &t)
+                && (((colored >> a_i) & 1U) != ((colored >> b_i) & 1U))) {
+                Anchor *a = &anchors[a_i], *o = &anchors[b_i];
+                double ar = (colored >> a_i) & 1U ? a->r : a->ir, ag = (colored >> a_i) & 1U ? a->g : a->ig,
+                       ab = (colored >> a_i) & 1U ? a->b : a->ib;
+                double or_ = (colored >> b_i) & 1U ? o->r : o->ir, og = (colored >> b_i) & 1U ? o->g : o->ig,
+                       ob = (colored >> b_i) & 1U ? o->b : o->ib;
+                return pack(ar + t * (or_ - ar), ag + t * (og - ag), ab + t * (ob - ab));
+            }
+        }
         if (spread_of(px) > LINEAR_SPREAD)
             return c; /* clearly colored (a logo in a selected row of Export Profiles): as drawn, not inverted */
         return all_color(c, ANCHORS_ALL, dark_l, light_l, 0.0);
