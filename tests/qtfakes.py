@@ -151,6 +151,9 @@ class FakeIcon(object):
     def cacheKey(self):
         return self.key
 
+    def availableSizes(self):
+        return []  # no pixels to look at: never white artwork
+
 
 class QGraphicsEffect(object):
     def __init__(self):
@@ -285,6 +288,9 @@ class FakeWidget(QObject):
                 return True
             parent = parent.parentWidget()
         return False
+
+    def update(self, *rect):
+        self.updates = getattr(self, "updates", 0) + 1
 
     def isVisible(self):
         return self.visible

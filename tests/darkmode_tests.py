@@ -577,6 +577,43 @@ class FakeHooks(object):
         return 24
 
 
+class ListIconTests(DarkModeCase):
+    """Restoring a list's icons goes through the items it has then: FontLab deletes and rebuilds
+    items, and a deleted item is no Qt object Python can tell is gone (writing through one crashed
+    FontLab when switching off after Export Profiles was closed)."""
+
+    def test_icons_are_put_back_through_the_current_items(self):
+        class Item(object):
+            def __init__(self, icon):
+                self._icon, self.dead = icon, False
+
+            def icon(self):
+                return self._icon
+
+            def setIcon(self, icon):
+                assert not self.dead, "written through a deleted item"
+                self._icon = icon
+
+        class ListWidget(FakeWidget):
+            pass
+
+        lst = ListWidget("QListWidget", parent=self.main, inherits=("QListWidget",))
+        page = FakeIcon("page")
+        lst.rows = [Item(page)]
+        self.patch("_list_items", lambda widget: list(widget.rows))
+        self.patch("icon_is_swatch", lambda icon: False)
+        self.patch("icon_is_gray", lambda icon: True)
+        self.patch("dark_icon", lambda icon: FakeIcon("mapped " + icon.label))
+        dm._state()  # the session state, with its caches
+        dm._swap_item_icons(lst)
+        self.assertEqual(lst.rows[0].icon().label, "mapped page")
+        old = lst.rows[0]
+        old.dead = True  # FontLab rebuilt the list: the old item is gone, a new one shows the mapped icon
+        lst.rows = [Item(old.icon())]
+        dm._restore_item_icons(lst, dm._record(lst))
+        self.assertEqual(lst.rows[0].icon().label, "page")
+
+
 class EngineTests(DarkModeCase):
     def save(self, **values):
         settings = dm.load_settings()
