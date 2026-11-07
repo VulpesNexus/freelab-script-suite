@@ -577,6 +577,18 @@ class FakeHooks(object):
         return 24
 
 
+class LeaveAloneTests(DarkModeCase):
+    def test_a_widget_can_ask_to_be_left_alone(self):
+        # Auto Kerning's preview buttons draw pairs in the palette's own colors: mapped as icons, they
+        # would have turned dark
+        button = FakeWidget("QToolButton", "preview", parent=self.content, icon=FakeIcon("pair"),
+                            inherits=("QAbstractButton",), light="ink")
+        button.setProperty(dm.LEAVE_ALONE_PROP, True)
+        self.on()
+        self.assertIsNone(button.effect)
+        self.assertEqual(button.icon.label, "pair", "its icon as it is")
+
+
 class PlainInputTests(DarkModeCase):
     def test_a_plain_combo_box_gets_no_effect(self):
         # FreeLab's own dialogs: Qt's combo boxes and spin boxes with no stylesheet anywhere. Their
