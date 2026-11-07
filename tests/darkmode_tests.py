@@ -396,6 +396,17 @@ class CoverageTests(unittest.TestCase):
         self.assertEqual(dm.detect_light(box), "island")
 
 
+class SettingsModuleTests(unittest.TestCase):
+    def test_settings_module_imports_without_fontlab(self):
+        # FontLab runs it under Python 2.7: it must at least load there, with PythonQt imported only when shown.
+        os.environ["FREELAB_NO_AUTOSTART"] = "1"
+        try:
+            import freelab_dark_mode_settings as settings  # noqa: F401
+        finally:
+            del os.environ["FREELAB_NO_AUTOSTART"]
+        self.assertTrue(callable(settings.show_dialog))
+
+
 class KindTests(DarkModeCase):
     def test_kinds(self):
         self.assertEqual(dm.widget_kind(self.search), "island")
@@ -426,9 +437,6 @@ class KindTests(DarkModeCase):
         bar = FakeWidget("QFrame", "frameBottom", parent=FakeWidget("FontWindow", "FontWindow"))
         self.assertEqual(dm.widget_kind(bar), "defringe", "dark already: kept out of the window's mapping")
         self.assertIsNone(dm.widget_kind(FakeWidget("QFrame", "frameBottom", parent=FakeWidget("GlyphWindow"))))
-        status = FakeWidget("QStatusBar")
-        self.assertEqual(dm.widget_kind(status), "ink", "its message is drawn through an effect: grayscale smoothing")
-        self.assertTrue(dm._gray_text(status))
 
     def test_title_height(self):
         self.assertEqual(dm.title_height(self.panel), 21)

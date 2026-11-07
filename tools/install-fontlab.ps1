@@ -27,7 +27,6 @@ param([switch]$Uninstall, [string]$ScriptsDir, [string]$StartupScript, [string]$
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
-$utf8 = New-Object System.Text.UTF8Encoding $false
 
 if ($ScriptsDir) { $scripts = $ScriptsDir }
 else {
@@ -79,8 +78,49 @@ function ConvertTo-PyLiteral([string]$s) {
     return $sb.ToString()
 }
 
+# FontLab's startup script is read as strict UTF-8 (a BOM is kept) and written back with its own
+# line endings, and only when it changes. A file that is not UTF-8, or whose FreeLab markers are
+# not paired, is left alone: rewriting it would replace characters or delete the user's code.
 $current = ''
-if (Test-Path $startup) { $current = [System.IO.File]::ReadAllText($startup) -replace "`r`n", "`n" }
+$normalized = ''
+$bom = $false
+$crlf = $false
+if (Test-Path $startup) {
+    $bytes = [System.IO.File]::ReadAllBytes($startup)
+    $bom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
+    $skip = 0
+    if ($bom) { $skip = 3 }
+    $strict = New-Object System.Text.UTF8Encoding $false, $true
+    try { $original = $strict.GetString($bytes, $skip, $bytes.Length - $skip) }
+    catch {
+        Write-Output "$startup is not UTF-8 text, so it is left as it is. Save it as UTF-8 and run this again."
+        exit 1
+    }
+    $crlf = $original.Contains("`r`n")
+    $normalized = $original -replace "`r`n", "`n"
+    $current = $normalized
+}
+function Test-Paired([string]$text, [string]$open, [string]$close) {
+    return ([regex]::Matches($text, '(?m)^' + $open)).Count -eq ([regex]::Matches($text, '(?m)^' + $close + '[ \t]*$')).Count
+}
+if (-not (Test-Paired $current ([regex]::Escape($begin)) ([regex]::Escape($end))) -or
+    -not (Test-Paired $current '# >>> FreeLab \(managed' '# <<< FreeLab')) {
+    Write-Output "$startup has a FreeLab begin marker without its end marker, or the reverse, so it is left as it is. Remove the broken block by hand and run this again."
+    exit 1
+}
+function Test-Changed([string]$text) {
+    return $text.TrimEnd("`n") -ne $normalized.TrimEnd("`n")
+}
+function Save-Startup([string]$text) {
+    if ((Test-Path $startup) -and -not (Test-Path "$startup.freelab-backup")) {
+        [System.IO.File]::Copy($startup, "$startup.freelab-backup")
+        Write-Host "Kept the original startup script as $startup.freelab-backup"
+    }
+    $folder = Split-Path -Parent $startup
+    if (-not (Test-Path $folder)) { New-Item -ItemType Directory -Path $folder | Out-Null }
+    if ($crlf) { $text = $text -replace "`n", "`r`n" }
+    [System.IO.File]::WriteAllText($startup, $text, (New-Object System.Text.UTF8Encoding $bom))
+}
 $legacy = [regex]::IsMatch($current, $legacyPattern)
 if ($legacy) { $current = [regex]::Replace($current, $legacyPattern, "`n").TrimEnd("`n") + "`n" }
 function Write-LegacyNote {
@@ -111,10 +151,23 @@ if ($Uninstall) {
         Write-Output "Removed $settingsFile"
     }
     if (Test-Path $startup) {
-        [System.IO.File]::WriteAllText($startup, (Remove-Block $current), $utf8)
-        Write-Output "Removed the FreeLab tools block from $startup"
-        Write-LegacyNote
+        $text = Remove-Block $current
+        if (Test-Changed $text) {
+            Save-Startup $text
+            Write-Output "Removed the FreeLab tools block from $startup"
+            Write-LegacyNote
+        }
     }
+    # The stylesheet images dark mode mapped, and its log.
+    $cache = Join-Path $StateDir 'cache'
+    if (Test-Path $cache) {
+        foreach ($dir in Get-ChildItem $cache -Directory -Filter 'images-*') {
+            [System.IO.Directory]::Delete($dir.FullName, $true); Write-Output "Removed $($dir.FullName)"
+        }
+        if (-not (Get-ChildItem $cache -Force)) { [System.IO.Directory]::Delete($cache) }
+    }
+    $log = Join-Path $StateDir 'darkmode.log'
+    if (Test-Path $log) { [System.IO.File]::Delete($log); Write-Output "Removed $log" }
     foreach ($f in $files) {
         foreach ($dir in @($scripts, $rootScripts)) {  # the Scripts folder itself held them before 0.3
             $target = Join-Path $dir $f.Name
@@ -149,6 +202,13 @@ else {
     catch {
         Write-Output "Could not build the native helper: $_"
         Write-Output 'Dark mode still works, with plain inversion in the widgets FontLab paints itself. Install LLVM or Visual Studio with the C++ tools, then run tools\build-native.ps1.'
+    }
+}
+if ((Test-Path $native) -and (Test-Path $BinDir)) {
+    # Earlier versions: FontLab keeps the one it loaded locked until it quits, so a locked one waits for the next install.
+    foreach ($dll in Get-ChildItem $BinDir -Filter 'freelab_pixels*.dll') {
+        if ($dll.Name -eq $nativeName) { continue }
+        try { [System.IO.File]::Delete($dll.FullName); Write-Output "Removed the superseded $($dll.FullName)" } catch { }
     }
 }
 
@@ -194,14 +254,12 @@ except Exception:
 $end
 "@ -replace "`r`n", "`n"
 
-if ((Test-Path $startup) -and -not (Test-Path "$startup.freelab-backup")) {
-    [System.IO.File]::Copy($startup, "$startup.freelab-backup")
-    Write-Output "Kept the original startup script as $startup.freelab-backup"
-}
-$folder = Split-Path -Parent $startup
-if (-not (Test-Path $folder)) { New-Item -ItemType Directory -Path $folder | Out-Null }
 $text = (Remove-Block $current).TrimEnd("`n")
 if ($text) { $text += "`n" }
-[System.IO.File]::WriteAllText($startup, $text + $block + "`n", $utf8)
-Write-Output "Added the FreeLab tools block to $startup"
-Write-LegacyNote
+$text += $block + "`n"
+if (Test-Changed $text) {
+    Save-Startup $text
+    Write-Output "Added the FreeLab tools block to $startup"
+    Write-LegacyNote
+}
+else { Write-Output "The FreeLab tools block in $startup is up to date" }

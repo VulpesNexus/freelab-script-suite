@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 100
+#define FREELAB_PIXELS_VERSION 101
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -323,16 +323,27 @@ EXPORT void freelab_map_lightness(uint8_t *pixels, int64_t count, int64_t width,
 }
 /* Gray text's ClearType fringes in an area already dark (a bar dark mode's stylesheet darkened,
  * drawn opaque, so its text got subpixel smoothing): each fringe pixel becomes the mean of its
- * channels, the coverage grayscale smoothing would give. Kept as they are:
+ * channels, the coverage grayscale smoothing would give. Row by row, colored pixels form runs;
+ * a run is a fringe when its strongest channel flips (the two sides of a thin stem) or when a
+ * light neutral pixel (a text core: DEFRINGE_TEXT_STEP above the ground) lies within
+ * DEFRINGE_REACH pixels of it. Kept as they are:
  * - neutral pixels;
- * - colors with a channel darker than the ground (the darkest neutral pixel): a fringe of gray
- *   text on a gray ground has every channel between the two;
- * - runs of DEFRINGE_MIN_RUN or more colored pixels in a row whose strongest channel is the
- *   same: colored text and its own smoothing. A fringe is one or two pixels at a stem's side,
- *   and its strongest channel flips from one side of the stem to the other. */
+ * - colors with a channel darker than the ground: a fringe of gray text on a gray ground has
+ *   every channel between the two. The ground is the most frequent opaque neutral gray, so a
+ *   darker field or outline does not lower it;
+ * - runs of DEFRINGE_MIN_RUN or more pixels of one strongest channel (colored text and its own
+ *   smoothing), and colored runs with no text core beside them (a vertical colored line, a
+ *   swatch edge).
+ * The pixels are changed in place, so text cores are flagged from each row's original pixels
+ * first (rows wider than DEFRINGE_MAX_WIDTH are left as they are). */
 #define DEFRINGE_NEUTRAL 6
 #define DEFRINGE_FLOOR_TOLERANCE 8
 #define DEFRINGE_MIN_RUN 3
+#define DEFRINGE_TEXT_STEP 24
+#define DEFRINGE_REACH 2
+#define DEFRINGE_MAX_WIDTH 16384
+
+static uint8_t defringe_core[DEFRINGE_MAX_WIDTH];
 
 static int strongest_channel(const uint8_t *px)
 {
@@ -344,42 +355,62 @@ static int min_channel(const uint8_t *px)
     return px[0] < px[1] ? (px[0] < px[2] ? px[0] : px[2]) : (px[1] < px[2] ? px[1] : px[2]);
 }
 
+static int colored(const uint8_t *px)
+{
+    return px[3] != 0 && spread_of(px) > DEFRINGE_NEUTRAL;
+}
+
 EXPORT void freelab_defringe(uint8_t *pixels, int64_t count, int64_t width, int max_spread)
 {
-    int floor = 256;
-    int64_t i, row;
-    if (width <= 0)
+    int64_t histogram[256];
+    int64_t i, row, best = 0;
+    int ground = -1, v;
+    if (width <= 0 || width > DEFRINGE_MAX_WIDTH)
         return;
+    for (v = 0; v < 256; v++)
+        histogram[v] = 0;
     for (i = 0; i < count; i++) {
         const uint8_t *px = pixels + 4 * i;
-        if (px[3] == 255 && spread_of(px) <= DEFRINGE_NEUTRAL && min_channel(px) < floor)
-            floor = min_channel(px);
+        if (px[3] == 255 && spread_of(px) <= DEFRINGE_NEUTRAL)
+            histogram[min_channel(px)]++;
     }
-    if (floor == 256)
-        return;  /* no neutral pixel: nothing to tell fringes by */
+    for (v = 0; v < 256; v++) {
+        if (histogram[v] > best) {
+            best = histogram[v];
+            ground = v;
+        }
+    }
+    if (ground < 0)
+        return;  /* no opaque neutral pixel: nothing to tell fringes by (a transparent source smooths in grays already) */
     for (row = 0; row + width <= count; row += width) {
-        int64_t x = 0;
+        int64_t x = 0, k;
+        for (k = 0; k < width; k++) {
+            const uint8_t *px = pixels + 4 * (row + k);
+            defringe_core[k] = (uint8_t)(px[3] != 0 && spread_of(px) <= DEFRINGE_NEUTRAL
+                                         && min_channel(px) >= ground + DEFRINGE_TEXT_STEP);
+        }
         while (x < width) {
-            int64_t start = x, k;
-            int same = 1, channel;
-            const uint8_t *first = pixels + 4 * (row + x);
-            if (first[3] == 0 || spread_of(first) <= DEFRINGE_NEUTRAL) {
+            int64_t start = x;
+            int same = 1, channel, core = 0;
+            if (!colored(pixels + 4 * (row + x))) {
                 x++;
                 continue;
             }
-            channel = strongest_channel(first);
-            while (x < width) {
-                const uint8_t *px = pixels + 4 * (row + x);
-                if (px[3] == 0 || spread_of(px) <= DEFRINGE_NEUTRAL)
-                    break;
-                same = same && strongest_channel(px) == channel;
+            channel = strongest_channel(pixels + 4 * (row + x));
+            while (x < width && colored(pixels + 4 * (row + x))) {
+                same = same && strongest_channel(pixels + 4 * (row + x)) == channel;
                 x++;
             }
             if (same && x - start >= DEFRINGE_MIN_RUN)
                 continue;  /* colored text */
+            for (k = start - DEFRINGE_REACH; k < x + DEFRINGE_REACH; k++)
+                if (k >= 0 && k < width && defringe_core[k])
+                    core = 1;
+            if (same && !core)
+                continue;  /* no text beside it: a colored line or a swatch's edge */
             for (k = start; k < x; k++) {
                 uint8_t *px = pixels + 4 * (row + k);
-                if (spread_of(px) > max_spread || min_channel(px) + DEFRINGE_FLOOR_TOLERANCE < floor)
+                if (spread_of(px) > max_spread || min_channel(px) + DEFRINGE_FLOOR_TOLERANCE < ground)
                     continue;
                 px[0] = px[1] = px[2] = (uint8_t)((px[0] + px[1] + px[2] + 1) / 3);
             }
@@ -428,7 +459,6 @@ EXPORT int64_t freelab_light_colors(const uint8_t *pixels, int64_t count, double
     return found;
 }
 
-/* Map only pixels whose color (0xRRGGBB, alpha ignored) is one of keys. */
 /* Map pixels whose color (0xRRGGBB, alpha ignored) is one of keys, and, when min_l is above 0,
  * pixels at least that light too (the dock's frame corners, which a render alone may not show). */
 EXPORT void freelab_map_keyed(uint8_t *pixels, int64_t count, int64_t width, const uint32_t *keys, int64_t nkeys,

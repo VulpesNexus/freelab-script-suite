@@ -6,13 +6,13 @@ Run this file from FontLab's Scripts menu to switch dark mode on or off; the
 choice is remembered. With the FreeLab startup hook installed
 (tools/install-fontlab.ps1), FontLab applies the remembered choice at launch.
 
-FontLab 7 has no theme: it colors its interface three ways, and dark mode
-handles each.
+FontLab 7 has no theme: it colors its interface in three main ways, and dark
+mode handles each (docs/DARKMODE.md lists every case).
 
 1. The application palette and style: switched to Fusion with a dark palette.
 2. About a thousand widgets carry their own stylesheet with fixed light
-   colors, which win over the palette. Each is rewritten with every color's
-   lightness inverted (hue and saturation kept).
+   colors, which win over the palette. Each is rewritten with its colors
+   mapped to dark mode's grays (colored ones keep their hue).
 3. Some widgets paint fixed colors in FontLab's own code: the glyph canvas,
    rulers, tab bars, search fields, previews, list rows, and more. Those that
    paint mostly light become "islands": they keep their original light look,
@@ -172,8 +172,8 @@ PICKER_FRAME = u"\nQtColorPicker { border: 1px solid #55555a; border-radius: 2px
 # A picker draws its swatch at the left, about as wide as it is tall, and a dark arrow after this
 # gap: the "picker" effect maps only the arrow's side.
 PICKER_ARROW_GAP = 3
-# Mark-color buttons: the swatch keeps its color; only the white of "no color" turns dark.
-# Color pickers keep their look, the white "no color" slot included (the owner preferred that to a half-dark frame).
+# Color pickers and mark-color buttons keep their look, the white "no color" slot included (the owner
+# preferred that to a half-dark frame).
 
 # Panels (YPanel) paint their whole background a fixed #edeeef, which shows wherever their
 # content paints none: beside tabs, behind scroll bars, under translucent labels. Their tab
@@ -210,7 +210,7 @@ SWEEP_MS = 750  # how often to look for widgets FontLab created or showed
 FULL_SWEEP_EVERY = 40  # every Nth sweep revisits every widget (replaced stylesheets, new icons)
 FOCUS_DRAIN_MS = 80  # a window that takes focus is darkened at once, up to this long, before it paints light
 MAX_ERRORS = 50
-NATIVE_VERSION = 100
+NATIVE_VERSION = 101
 
 ID_PROP = "freelab_id"  # dynamic properties FreeLab sets on widgets, all removed by restore()
 SEEN_PROP = "freelab_seen"
@@ -272,8 +272,17 @@ def save_settings(data):
     folder = os.path.dirname(path)
     if folder and not os.path.isdir(folder):
         os.makedirs(folder)
-    with open(path, "w") as handle:
+    # Written beside it, then moved over it: a write cut short (FontLab killed, a full disk) must not
+    # leave a truncated file, which reads as no settings and would lose the saved workspace color.
+    temp = path + ".tmp"
+    with open(temp, "w") as handle:
         json.dump(data, handle)
+    try:
+        os.replace(temp, path)  # Python 3
+    except AttributeError:  # Python 2.7 cannot rename over a file on Windows
+        if os.path.exists(path):
+            os.remove(path)
+        os.rename(temp, path)
 
 
 # ---------------------------------------------------------------------------
@@ -636,9 +645,10 @@ def _native():
                     anchors.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_int64, ctypes.c_int, ctypes.c_double,
                                         ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_int]
                     anchors.restype = ctypes.c_int64
-                    defringe = lib.freelab_defringe
-                    defringe.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_int64, ctypes.c_int]
-                    defringe.restype = None
+                    defringe = getattr(lib, "freelab_defringe", None)  # optional: a build without it still maps
+                    if defringe is not None:
+                        defringe.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_int64, ctypes.c_int]
+                        defringe.restype = None
                     state["native"] = (mapper, stats, collect, keyed, anchors, defringe)
                 else:
                     _note_error("native", "version mismatch")
@@ -706,7 +716,7 @@ def defringe_image(image):
     """
     image = image.convertToFormat(_gui("QImage").Format_ARGB32)
     native = _native()
-    if native is not None:
+    if native is not None and native[5] is not None:
         try:
             native[5](_address(image), image.width() * image.height(), image.width(), DEFRINGE_MAX_SPREAD)
         except Exception as exc:
@@ -714,7 +724,7 @@ def defringe_image(image):
     return image
 
 
-DEFRINGE_MAX_SPREAD = 160
+DEFRINGE_MAX_SPREAD = 255  # any fringe: the ground and the text cores decide, not the spread
 
 
 def ink_count(image):
@@ -1130,20 +1140,25 @@ def _restore_icons(obj, record):
 
 _EFFECTS = {}
 EFFECT_MIN_L = {"keyed": WHITE_L}
-# Effect kinds, all drawn by anchor blends (see map_image) except "keyed":
+# Effect kinds. Drawn by anchor blends (see map_image):
 # "island": everything mapped (a widget kept in FontLab's light look).
 # "ink": on the dark interface, only what is wrong there: white and light surfaces, and dark
 #   text or icons (FontLab paints list rows, badges, and previews in fixed colors).
 # "edges": editors (QScintilla): their white margin mapped to gray numbers, then "ink" on a paper
 #   that is already dark, or everything on a paper taken from a light palette.
+# "subpixel": ClearType black text (TrueType Hinting's preview), mapped channel by channel.
 # "relight": after switching off, an editor whose paper stayed dark, mapped light again.
+# Drawn otherwise:
+# "keyed": only the listed frame colors mapped. "title": a panel drawn as it is, its title strip
+#   mapped. "picker": the swatch as it is, the arrow beside it mapped. "defringe": a widget dark
+#   already, drawn as it is, its gray text's ClearType fringes made gray (freelab_defringe).
 EDGES_PARENTS = ("QsciScintilla",)  # their viewport (QWidget#qt_scrollarea_viewport) paints the text
 # Scroll areas whose viewport paints item rows or text, in colors of FontLab's own: "ink".
 INK_VIEW_PARENTS = ("QAbstractItemView", "QTextEdit", "QPlainTextEdit", "QtnPropertyView")
 # Tiny light text that ClearType draws as blue and yellow fringes with no light core (the font window's
 # "Name: Encoding: None Index" selectors): any effect draws it through a transparent image, where text
 # gets grayscale smoothing; the ink mapping leaves light text as it is.
-GRAYSCALE_TEXT_CLASSES = ("YSelector", "QStatusBar")  # the status bar draws its message straight on dark
+GRAYSCALE_TEXT_CLASSES = ("YSelector",)
 STYLE_DRAWN_BUTTONS = ("QRadioButton", "QCheckBox", "QPushButton")  # never ink by render detection
 # Bars dark mode's stylesheet already darkens inside a window drawn through the ink effect: kept
 # out of its mapping (which garbled their labels) and drawn with their text's ClearType fringes
@@ -1255,8 +1270,10 @@ def _effect_classes():
                         if painter.hasClipping():
                             area = area.intersected(painter.clipBoundingRect().toAlignedRect())
                         if not area.isEmpty():
-                            part = pixmap.copy(area.translated(-offset.x(), -offset.y())).toImage()
-                            painter.drawImage(area.topLeft(), defringe_image(part))
+                            # decided on the whole widget (its ground), drawn where it is repainted
+                            image = defringe_image(pixmap.toImage())
+                            painter.drawImage(area.topLeft(), image, area.translated(-offset.x(), -offset.y()))
+                        keep_unmapped(self, painter, pixmap, offset)
                         return
                     anchors = {"island": "all", "subpixel": "subpixel"}.get(kind, "ink")
                     if kind == "edges":
@@ -1384,7 +1401,7 @@ def title_height(panel):
 
 
 def widget_kind(widget, canvas=True):
-    """"island", "ink", "edges", "keyed", "fill", "title", "defringe", or None: how dark mode treats this widget beyond its stylesheet."""
+    """"island", "ink", "edges", "subpixel", "keyed", "fill", "title", "defringe", or None: how dark mode treats this widget beyond its stylesheet."""
     cls = _class_name(widget)
     if _is_one_of(widget, cls, ISLAND_CLASSES) or (cls, _prop(widget, "objectName")) in ISLAND_NAMES:
         return "island"
@@ -1501,19 +1518,6 @@ def _drop_stray_effect(widget):
     record = _record(widget, create=False)
     if record is None or record.get("effect") is None:
         widget.setGraphicsEffect(None)
-
-
-def _inside_effect(widget):
-    """True when an ancestor already maps this widget's painting (an "ink" or "edges" effect draws it too)."""
-    current = widget
-    while not current.isWindow():
-        current = current.parentWidget()
-        if current is None:
-            return False
-        record = _record(current, create=False)
-        if record is not None and record.get("kind") in ("ink", "edges") and _ours(current, record):
-            return True
-    return False
 
 
 # Check boxes and radio buttons: Fusion frames them a little darker than the window color,

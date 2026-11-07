@@ -394,21 +394,37 @@ class NativeTests(unittest.TestCase):
         LIB.freelab_pixel_stats(ctypes.addressof(array), len(buf) // 4, dm.AUTO_MIN_ALPHA, dm.WHITE_L, dm.BLACK_L, counts)
         self.assertEqual(tuple(counts), (6, 3, 2))
 
+    def defringe(self, rows):
+        buf = pixels([px for row in rows for px in row])
+        array = (ctypes.c_char * len(buf)).from_buffer(buf)
+        LIB.freelab_defringe(ctypes.addressof(array), len(buf) // 4, len(rows[0]), dm.DEFRINGE_MAX_SPREAD)
+        width = 4 * len(rows[0])
+        return [buf[i:i + width] for i in range(0, len(buf), width)]
+
     def test_defringe(self):
-        g, text = (52, 52, 52), (172, 172, 172)
+        g, text, field = (52, 52, 52), (172, 172, 172), (20, 20, 20)
         left, right = (190, 132, 77), (77, 132, 190)  # a gray stem's fringes: the strongest channel flips
         dark_blue = (0, 78, 154)  # a channel below the ground
         light_blue, blue_edge = (67, 133, 214), (56, 85, 118)  # colored text: a run of one strongest channel
-        rows = [[g, left, text, right, g, g, g],
-                [g, dark_blue, g, blue_edge, light_blue, blue_edge, g]]
-        buf = pixels(rows[0] + rows[1])
-        array = (ctypes.c_char * len(buf)).from_buffer(buf)
-        LIB.freelab_defringe(ctypes.addressof(array), len(buf) // 4, 7, dm.DEFRINGE_MAX_SPREAD)
-        self.assertEqual(buf[:28], pixels([g, (133, 133, 133), text, (133, 133, 133), g, g, g]),
-                         "gray text's fringes: the mean of their channels")
-        self.assertEqual(buf[28:], pixels(rows[1]), "colors darker than the ground and colored text unchanged")
+        rows = [[g, left, text, right, g, g, g, field],
+                [g, dark_blue, g, blue_edge, light_blue, blue_edge, g, g],
+                [g, g, left, right, g, g, g, g]]  # a thin stem: no neutral core, the flip tells it
+        out = self.defringe(rows)
+        mean_left, mean_pair = (133, 133, 133), (133, 133, 133)
+        self.assertEqual(out[0], pixels([g, mean_left, text, (133, 133, 133), g, g, g, field]),
+                         "gray text's fringes beside its core: the mean of their channels")
+        self.assertEqual(out[1], pixels(rows[1]), "colors darker than the ground and colored text unchanged")
+        self.assertEqual(out[2], pixels([g, g, mean_pair, mean_pair, g, g, g, g]))
+
+    def test_defringe_keeps_lone_colors(self):
+        g, line, blend = (45, 45, 48), (61, 111, 180), (91, 43, 43)
+        rows = [[g, g, line, g, g, blend, g, (14, 14, 14)]] * 3  # a vertical blue line, a red edge, a dark pixel
+        out = self.defringe(rows)
+        self.assertEqual(b"".join(out), pixels([px for row in rows for px in row]),
+                         "no text core beside them: a colored line and a swatch edge stay colored")
 
 
+@unittest.skipIf(LIB is None, "native helper not built: run tools/build-native.ps1 (%s)" % DLL)
 class KeyedTests(unittest.TestCase):
     def test_light_colors_are_distinct_light_and_opaque(self):
         buf = pixels([(202, 203, 204), (45, 45, 48), (202, 203, 204), (163, 163, 165)]) + pixels([(250, 250, 250)], alpha=10)

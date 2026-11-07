@@ -24,7 +24,8 @@ PY27_DIR = Path(os.environ.get("FREELAB_PY27_DIR") or Path(os.environ.get("LOCAL
 PY27 = PY27_DIR / "tools" / "python.exe"
 NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 PY27_FILES = (
-    "darkmode/freelab_dark_mode.py", "tests/qtfakes.py", "tests/darkmode_tests.py",
+    "darkmode/freelab_dark_mode.py", "darkmode/freelab_dark_mode_settings.py", "tests/qtfakes.py",
+    "tests/darkmode_tests.py",
 )
 PY27_SUITES = ("tests/darkmode_tests.py",)
 

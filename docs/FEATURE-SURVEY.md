@@ -19,7 +19,7 @@ FontLab 7 has a basic built-in autokern for selected pairs. Its managing directo
 | [HTLetterspacer](https://github.com/huertatipografica/HTLetterspacer), kernagic, FittingRoom | GPL-3.0 | read only, unless FreeLab becomes GPL |
 | Kern On, iKern | commercial | Glyphs-only and a paid service |
 
-A FreeLab kerner would be its own: a minimum-distance or bubble model over outlines, read through the listener and written with FontLab's kerning API.
+A FreeLab kerner would be its own: a minimum-distance or bubble model over outlines, run inside FontLab, reading outlines and writing kerning through FontLab's own API.
 
 ## Kerning pairs and classes
 

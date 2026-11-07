@@ -345,13 +345,13 @@ class FakeApp(object):
         self.roots = []
         self.style_sets = 0
         self._font = QFont()
+        self.signals = {}
 
     def font(self):
         return QFont(self._font)
 
     def setFont(self, font):
         self._font = QFont(font)
-        self.signals = {}
 
     def connect(self, signal, callback):
         self.signals.setdefault(signal, []).append(callback)
