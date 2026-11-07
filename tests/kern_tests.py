@@ -25,8 +25,9 @@ HEIGHT = 60  # the ink's height, in pixels
 PAD = 30  # room around the ink
 
 
-def stems(name, widths, gaps, left_bearing, right_bearing):
-    """A glyph of solid vertical stems (widths, separated by gaps), with its sidebearings in pixels."""
+def stems(name, widths, gaps, left_bearing, right_bearing, rows=(0, HEIGHT)):
+    """A glyph of solid vertical stems (widths, separated by gaps), with its sidebearings in pixels;
+    rows: the ink's top and bottom rows, counted down from the ink's top (all of it by default)."""
     ink = sum(widths) + sum(gaps)
     width = PAD + left_bearing + ink + right_bearing + PAD
     height = HEIGHT + 2 * PAD
@@ -34,7 +35,7 @@ def stems(name, widths, gaps, left_bearing, right_bearing):
     x = PAD + left_bearing
     for index, stem in enumerate(widths):
         for column in range(x, x + stem):
-            for row in range(PAD, PAD + HEIGHT):
+            for row in range(PAD + rows[0], PAD + rows[1]):
                 data[row * width + column] = 255
         x += stem + (gaps[index] if index < len(gaps) else 0)
     advance = left_bearing + ink + right_bearing
@@ -59,6 +60,16 @@ class ArithmeticTests(unittest.TestCase):
     def test_factors_stay_in_range(self):
         tighten, _ = ak.fit_factors([(-10, -500), (-20, -900), (-5, -300)])
         self.assertEqual(tighten, ak.FACTOR_RANGE[1])
+
+    def test_spread_and_average_of_the_methods(self):
+        self.assertEqual(ak.spread([-40, -60, None]), 20)
+        self.assertEqual(ak.spread([-40]), 0)
+        self.assertEqual(ak.average([-40, -61]), -50)  # -50.5, halves up in both Pythons
+        self.assertIsNone(ak.average([None, None]))
+
+    def test_contour_distance_has_its_own_default_strength(self):
+        self.assertEqual(ak.fit_factors([], ak.DEFAULT_FACTORS["contour"]), (1.0, 1.0))
+        self.assertEqual(ak.fit_factors([]), (ak.TIGHTEN, ak.LOOSEN))
 
     def test_first_halo_is_halfkerns(self):
         self.assertEqual(ak.first_bias(100), 10)  # halfkern: kernel 21 pixels at 100 pixels per em
@@ -115,6 +126,50 @@ class CoreTests(unittest.TestCase):
         band = ak.calibrate(CORE, [narrow, wide, stem("o")], 100)
         self.assertGreaterEqual(band.bias, ak.first_bias(100))
         self.assertGreater(band.low, band.high / 2)
+
+
+@unittest.skipIf(CORE is None, "auto kerning core not built: run tools/build-native.ps1 -Kern (%s)" % ak.kern_library_path())
+class ContourTests(unittest.TestCase):
+    def band(self):
+        refs = [stem("l"), stem("n"), stem("o")]
+        return ak.contour_band(CORE, refs, refs)
+
+    def suggest(self, left, right, min_gap=0.0):
+        return ak.suggest_contour_pixels(CORE, left, right, self.band(), float(PAD), min_gap)
+
+    def test_profiles_find_the_ink_edges(self):
+        left, right, limited_left, limited_right = CORE.contours(stem("l"), ak.CONTOUR_SLOPE)
+        row = PAD + HEIGHT // 2
+        self.assertAlmostEqual(left[row], PAD + 10, places=2)  # where the coverage crosses half (128 of 255)
+        self.assertAlmostEqual(right[row], PAD + 20, places=2)
+        self.assertGreater(left[0], 1e8, "no ink in the top row")
+        self.assertLess(limited_left[0], 1e8, "the limited contour reaches every row")
+
+    def test_a_pair_spaced_like_the_references_needs_no_kerning(self):
+        self.assertEqual(self.suggest(stem("l"), stem("l")), 0.0)
+
+    def test_a_wide_gap_tightens_and_a_tight_one_loosens(self):
+        wide = self.suggest(stem("wide", right_bearing=25), stem("l"))
+        tight = self.suggest(stem("tight", right_bearing=0), stem("r", left_bearing=0))
+        self.assertLess(wide, 0)
+        self.assertGreater(tight, 0)
+
+    def test_a_tightening_keeps_the_minimum_ink_gap(self):
+        far = stem("far", right_bearing=40)
+        free = self.suggest(far, stem("l"))
+        kept = self.suggest(far, stem("l"), min_gap=25.0)
+        self.assertLess(free, kept, "the gap rule stops the tightening early")
+        _, raw_right, _, _ = far.contours(CORE)
+        raw_left, _, _, _ = stem("l").contours(CORE)
+        gap = CORE.closest(raw_right, raw_left, far.height, ak.base_offset(far, stem("l")) - kept)
+        self.assertAlmostEqual(gap, 25.0, places=3)
+
+    def test_the_angle_limit_reaches_into_rows_without_ink(self):
+        period = stems("period", [8], [], 10, 10, rows=(HEIGHT - 8, HEIGHT))
+        _, raw_right, _, limited_right = period.contours(CORE)
+        bottom, above = PAD + HEIGHT - 4, PAD + HEIGHT - 4 - 20
+        self.assertLess(raw_right[above], -1e8, "no ink 20 rows above the period")
+        self.assertAlmostEqual(limited_right[above], raw_right[bottom] - 16 * ak.CONTOUR_SLOPE, places=3)
 
 
 if __name__ == "__main__":

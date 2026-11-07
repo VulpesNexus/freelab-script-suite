@@ -1,29 +1,31 @@
 # Auto kerning
 
-*Scripts > FreeLab > Auto Kerning* suggests kerning for the Latin pairs of the font's current master, lists each suggestion beside the kerning the font has, and writes only the pairs you leave checked.
+*Scripts > FreeLab > Auto Kerning* suggests kerning for the Latin pairs of the font's current master by two methods and FontLab's own, shows how far they agree beside the kerning the font has, and writes only the pairs you leave checked.
 
 ## Using it
 
 1. Open the font, and pick the master to kern.
-2. Click *Analyze*. Every pair of the Latin letters, figures, and punctuation the font has is measured (two marks of punctuation side by side are skipped); about 6,600 pairs take three to four seconds.
-3. The list shows the pairs the font does not kern yet whose suggestion is at least the given number of units (20 by default), largest first. *Show* narrows it to letters, letters and punctuation, figures, or everything. Selecting a pair draws it between two H's as it is set now and as suggested.
-4. *Include pairs the font kerns* lists the font's own pairs too, where the suggestion differs from them. They are never checked for you: they are the designer's choices, some of which the method does not model (a j tucked under the letter before it).
-5. Uncheck what you disagree with, and click *Write checked pairs*: each is written to the master as a pair of glyphs (a suggestion of 0 removes the pair). Writing goes straight into the open font: close it without saving to take it all back.
+2. Click *Analyze*. Every pair of the Latin letters, figures, and punctuation the font has is measured by both methods (two marks of punctuation side by side are skipped); about 7,000 pairs take five seconds.
+3. The list shows the pairs the font does not kern yet whose value to write is at least the given number of units (20 by default). For them, FontLab's own autokern is asked too (a call per pair). *Show* narrows the list to letters, letters and punctuation, figures, or everything.
+4. The columns: each method's value, *Spread* (how far the three lie apart), and *Write*, from the source chosen in *Write values from*: the average of halfkern and contour distance (the default), either of them, or FontLab's. *Best agreement first* puts the pairs where the methods agree at the top, the safest to accept together; *Largest change first* the boldest. Selecting a pair draws it between two H's as it is set now and as it would be written.
+5. *Include pairs the font kerns* lists the font's own pairs too. They are never checked for you: they are the designer's choices, some of which the methods do not model (a j tucked under the letter before it).
+6. Uncheck what you disagree with, and click *Write checked pairs*: each is written to the master as a pair of glyphs (a value of 0 removes the pair). Writing goes straight into the open font: close it without saving to take it all back.
 
-Kerning the font already has counts as your models: with at least three tightenings in it, suggestions are scaled to match how strongly you tighten (and the same for loosenings). Without them, tightenings are applied at half strength, as halfkern applies them.
+The kerning the font already has acts as a model: with at least three tightenings in it, each method's tightenings are scaled to match how strongly the designer tightens, and the same for loosenings. Without them, halfkern's tightenings are applied at half strength, as halfkern applies them, and contour distance's in full.
 
-## How it measures
+## The methods
 
-The method is [halfkern](https://github.com/behdad/halfkern)'s (Copyright 2022 Google LLC, Apache License 2.0), measured by FreeLab's own native core (*kerning/native/freelab_kern.c*):
+Both are measured by FreeLab's native core (*kerning/native/freelab_kern.c*) on glyphs rendered from FontLab's outlines at 200 pixels per em, and both hold each kind of pair to its own references, pairs the designer spaced on purpose and that are set with no kerning: capitals to *HH*, *HO*, *OH*, and *OO*; lowercase to *ll*, *nn*, and *oo*; figures to *0* and *8*; pairs across cases to the references of both sides; punctuation to the kind of the letter beside it. A pair is moved until its measure falls within the band its references span.
 
-- Each glyph is rendered from FontLab's outlines at 200 pixels per em (halfkern renders at 100), and gets an envelope: its ink, over a halo that fades out over about a tenth of the em, at half strength.
-- Two glyphs set side by side overlap in their halos. The overlap of a pair, the sum of the squared products of the two envelopes, is held within a band taken from pairs the designer spaced on purpose: halfkern takes it from *ll*, *nn*, and *oo*, and the halo grows until those three agree within a factor of two. A pair is moved a pixel at a time until its overlap enters the band; FreeLab then interpolates where it crosses, for values finer than a pixel.
-- FreeLab gives each kind of pair its own band: capitals from *HH*, *HO*, *OH*, and *OO*; lowercase from *ll*, *nn*, and *oo*; figures from *0* and *8*; pairs across cases from the references of both sides; punctuation takes the band of the letter beside it. A single lowercase band, as halfkern has, loosened straight capitals (*HH*, *MN*) that the designer had spaced as wanted.
+- **halfkern** ([behdad/halfkern](https://github.com/behdad/halfkern), Copyright 2022 Google LLC, Apache License 2.0): each glyph gets an envelope, its ink over a halo that fades out over about a tenth of the em at half strength; the measure is the overlap of the two envelopes, the sum of their squared products. The halo grows until *ll*, *nn*, and *oo* agree within a factor of two, as halfkern's does, and FreeLab interpolates between whole pixels where the overlap crosses the band. Checked against halfkern itself on the same renderings (Georgia, 19 pairs): the same kerning for every pair, including the two it cannot kern.
+- **Contour distance**, after Matthew Skala's description of Tsukurimashou's kerning ([freetype-devel, June 2012](https://lists.nongnu.org/archive/html/freetype-devel/2012-06/msg00118.html)); written from that description, not from its code. Each glyph's left and right edges are found row by row, and their angle is limited (an edge moves at most 0.6 pixels across a row), so that a shape reaches out into the rows above and below it: a period cannot slide under an apostrophe. The measure is the average over the rows of the inverse cube of the gap between the facing edges, found by bisection. A tightening stops where the two glyphs' ink comes within 2% of the em.
+- **FontLab's own** autokern (`flPackage.autoKern`, FontLab 8's "K1"), which returns its value without writing it. It is coarse: on the owner's test font it gave −56 for most pairs it tightened.
 
-The core was checked against halfkern itself on the same renderings (Georgia, 19 pairs): the same kerning for every pair, including the two it cannot kern. The envelopes differ by about 1.5 levels in 255, from an exact Euclidean distance transform where halfkern uses fast marching.
+The two methods often disagree on pairs with diagonals and overhangs (contour distance tightens *To* and *TA* more), and agree on most others. On a font with kerning, contour distance came closer to the designer's own pairs (*LT*: designer −178, contour −154, halfkern −109).
 
 ## Limits
 
 - Kerning classes are not read or written yet: every suggestion is a pair of glyphs. A font with kerning classes gets glyph pairs, which override its classes.
-- Latin only. Japanese kana are spaced with `palt` more than with pairs ([FEATURE-SURVEY.md](FEATURE-SURVEY.md)); they come next.
-- The method has blind spots of its own: halfkern loosens *Ty* in Georgia, where the T's bar meets the y's arms, and cannot kern *VA* there. Review before writing.
+- Latin only. Japanese kana are spaced with `palt` more than with pairs ([FEATURE-SURVEY.md](FEATURE-SURVEY.md)); contour distance, tuned for Japanese in Tsukurimashou, is the base for them.
+- Each method has blind spots: halfkern loosens *Ty* in Georgia, where the T's bar meets the y's arms, and cannot kern *VA* there. Review before writing.
+- Other published methods, and the one not to implement (Apple's, patented until 2033), are in [FEATURE-SURVEY.md](FEATURE-SURVEY.md).

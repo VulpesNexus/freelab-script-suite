@@ -10,12 +10,16 @@
  *
  * No C runtime and no imports: every buffer comes from the caller.
  *
+ * A second method measures contours instead: the average inverse cube of the distances between the
+ * facing edges of the two glyphs, row by row, after Matthew Skala's description of Tsukurimashou's
+ * kerning (freetype-devel, June 2012); written from that description, not from its code.
+ *
  * Images are 8-bit coverage (0 to 255), rows `stride` bytes apart. Envelopes are written packed
  * (`width` bytes a row) and share one height, so a pair lines up row for row on the baseline.
  */
 #include <stdint.h>
 
-#define FREELAB_KERN_VERSION 1
+#define FREELAB_KERN_VERSION 2
 
 #ifdef _WIN32
 #define EXPORT __declspec(dllexport)
@@ -195,5 +199,125 @@ EXPORT int freelab_kern_pair(const uint8_t *l, int lw, const uint8_t *r, int rw,
     }
     *kern_out = kern;
     *s_out = s;
+    return 1;
+}
+
+
+/* ---- contour distance ---------------------------------------------------------------------- */
+
+#define NO_INK 1e9 /* a left profile with no ink in the row; the right profile holds -NO_INK */
+
+/* Each row's left and right ink edges, where the coverage crosses half, between pixel centres
+ * (x + 0.5): left[y] and right[y], or NO_INK and -NO_INK in a row without ink. Returns the
+ * number of rows with ink. */
+EXPORT int freelab_kern_profiles(const uint8_t *cov, int w, int h, int stride, double *left, double *right)
+{
+    int x, y, rows = 0;
+    for (y = 0; y < h; y++) {
+        const uint8_t *row = cov + (int64_t)y * stride;
+        left[y] = NO_INK;
+        right[y] = -NO_INK;
+        for (x = 0; x < w; x++) {
+            if (row[x] >= 128) {
+                double before = x > 0 ? row[x - 1] : 0;
+                left[y] = (x - 0.5) + (128.0 - before) / ((double)row[x] - before);
+                break;
+            }
+        }
+        if (x == w)
+            continue;
+        rows++;
+        for (x = w - 1; x >= 0; x--) {
+            if (row[x] >= 128) {
+                double after = x < w - 1 ? row[x + 1] : 0;
+                right[y] = (x + 0.5) + ((double)row[x] - 128.0) / ((double)row[x] - after);
+                break;
+            }
+        }
+    }
+    return rows;
+}
+
+/* The contour with its angle limited: it moves at most `slope` pixels across for each row up or
+ * down, so a shape reaches out at that angle into the rows above and below it (a period's edge
+ * rises toward an apostrophe above the pair, which then cannot slide over it). */
+EXPORT void freelab_kern_extend(double *profile, int h, double slope, int is_right)
+{
+    int y;
+    for (y = 1; y < h; y++) {
+        double reach = is_right ? profile[y - 1] - slope : profile[y - 1] + slope;
+        if (is_right ? reach > profile[y] : reach < profile[y])
+            profile[y] = reach;
+    }
+    for (y = h - 2; y >= 0; y--) {
+        double reach = is_right ? profile[y + 1] - slope : profile[y + 1] + slope;
+        if (is_right ? reach > profile[y] : reach < profile[y])
+            profile[y] = reach;
+    }
+}
+
+/* The pair's measure with the left image at `offset` in the right one's pixels: the mean over the
+ * rows of 1 / gap^3, each gap at least `floor` pixels. Rows where either contour is missing count
+ * for nothing. */
+EXPORT double freelab_kern_contour_measure(const double *right_of_left, const double *left_of_right, int h,
+                                           double offset, double floor)
+{
+    double total = 0.0;
+    int y;
+    for (y = 0; y < h; y++) {
+        double gap;
+        if (right_of_left[y] <= -NO_INK / 2 || left_of_right[y] >= NO_INK / 2)
+            continue;
+        gap = left_of_right[y] - (right_of_left[y] + offset);
+        if (gap < floor)
+            gap = floor;
+        total += 1.0 / (gap * gap * gap);
+    }
+    return total / (h > 0 ? h : 1);
+}
+
+/* The narrowest gap between the raw contours (no angle limit), with the left image at `offset`. */
+EXPORT double freelab_kern_closest(const double *right_of_left, const double *left_of_right, int h, double offset)
+{
+    double closest = NO_INK;
+    int y;
+    for (y = 0; y < h; y++) {
+        double gap;
+        if (right_of_left[y] <= -NO_INK / 2 || left_of_right[y] >= NO_INK / 2)
+            continue;
+        gap = left_of_right[y] - (right_of_left[y] + offset);
+        if (gap < closest)
+            closest = gap;
+    }
+    return closest;
+}
+
+/* The kerning (pixels, negative closer) that brings the measure into [low, high], found by
+ * bisection within `range` pixels either way: 0 when it is already there. Returns 0 when the band
+ * cannot be reached within range. */
+EXPORT int freelab_kern_contour_pair(const double *right_of_left, const double *left_of_right, int h, double base_offset,
+                                     double range, double floor, double low, double high, double *kern_out)
+{
+    double m = freelab_kern_contour_measure(right_of_left, left_of_right, h, base_offset, floor), target, a, b;
+    int i, closer;
+    if (m >= low && m <= high) {
+        *kern_out = 0.0;
+        return 1;
+    }
+    closer = m < low; /* too little interaction: the pair is too loose */
+    target = closer ? low : high;
+    a = 0.0;
+    b = closer ? -range : range;
+    if (closer ? freelab_kern_contour_measure(right_of_left, left_of_right, h, base_offset - b, floor) < target
+               : freelab_kern_contour_measure(right_of_left, left_of_right, h, base_offset - b, floor) > target)
+        return 0;
+    for (i = 0; i < 60; i++) { /* the measure grows as the pair closes in */
+        double mid = 0.5 * (a + b), mm = freelab_kern_contour_measure(right_of_left, left_of_right, h, base_offset - mid, floor);
+        if (closer ? mm < target : mm > target)
+            a = mid;
+        else
+            b = mid;
+    }
+    *kern_out = 0.5 * (a + b);
     return 1;
 }

@@ -2,13 +2,20 @@
 # -*- coding: utf-8 -*-
 """FreeLab auto kerning, from FontLab's Scripts menu.
 
-Suggests kerning for the Latin pairs of the current font's current master, shows each beside the
-kerning the font has, and writes only the pairs you approve. The method is halfkern's
-(https://github.com/behdad/halfkern, Copyright 2022 Google LLC, Apache License 2.0), measured by
-FreeLab's own native core (kerning/native/freelab_kern.c): every glyph gets an envelope, a halo
-around its ink; a pair moves until the overlap of the two envelopes falls within a band taken from
-the font's own ll, nn, and oo. Tightenings are applied at half strength, as halfkern does, or at the
-strength the font's existing kerning shows (its pairs act as models).
+Suggests kerning for the Latin pairs of the current font's current master, by two methods and
+FontLab's own, shows them beside the kerning the font has and how far they agree, and writes only
+the pairs you approve.
+
+- halfkern's method (https://github.com/behdad/halfkern, Copyright 2022 Google LLC, Apache License
+  2.0): every glyph gets an envelope, a halo around its ink; a pair moves until the overlap of the
+  two envelopes falls within a band taken from pairs the designer spaced (ll, nn, oo, and others).
+- Contour distance, after Matthew Skala's description of Tsukurimashou's kerning (freetype-devel,
+  June 2012): the average inverse cube of the distances between the two glyphs' facing contours,
+  their angles limited, held within a band taken from the same pairs.
+- FontLab's own autokern (flPackage.autoKern), asked for the listed pairs only.
+
+Both methods are measured by FreeLab's native core (kerning/native/freelab_kern.c). The font's
+existing kerning acts as a model: each method's tightenings and loosenings are scaled to match it.
 
 Valid Python 2.7 (FontLab 7) and Python 3. The core below needs no Qt and no FontLab.
 """
@@ -19,8 +26,8 @@ import math
 import os
 import sys
 
-VERSION = "0.1.0"
-KERN_VERSION = 1  # FREELAB_KERN_VERSION in kerning/native/freelab_kern.c
+VERSION = "0.2.0"
+KERN_VERSION = 2  # FREELAB_KERN_VERSION in kerning/native/freelab_kern.c
 EM_PIXELS = 200  # rendering size, pixels per em (halfkern renders at 100; finer steps here)
 HALO_SHARE = 0.1  # the envelope's halo, as a share of the em (halfkern's starting kernel)
 PAD_SHARE = 0.3  # room around each glyph image for the halo and the search, as a share of the em
@@ -29,12 +36,20 @@ TUNING = (u"l", u"n", u"o")  # spaced right by the designer: the halo and the lo
 # other with no kerning (HH, HO, OH, OO for capitals; Hn or Oo across cases). halfkern takes one band
 # from lowercase alone, which loosened straight capitals (HH, MN) the designer had spaced as wanted.
 REFERENCES = {"upper": (u"H", u"O"), "lower": TUNING, "figure": (u"0", u"8")}
-TIGHTEN = 0.5  # halfkern applies half of a tightening
-LOOSEN = 1.0
+CONTOUR_SLOPE = 0.6  # a contour moves at most this many pixels across per row (its angle limit)
+CONTOUR_FLOOR = 1.0  # gaps narrower than this many pixels count as this narrow
+MIN_GAP_SHARE = 0.02  # contour distance never tightens a pair's ink closer than this share of the em
+METHODS = (("halfkern", "halfkern"), ("contour", "Contour"), ("fontlab", "FontLab"))
+DEFAULT_FACTORS = {"halfkern": (0.5, 1.0),  # halfkern applies half of a tightening
+                   "contour": (1.0, 1.0)}
+TIGHTEN, LOOSEN = DEFAULT_FACTORS["halfkern"]
 FACTOR_RANGE = (0.1, 1.5)  # a factor fitted to the font's kerning stays within this
-MODELS_MIN = 3  # fewer existing pairs than this: halfkern's factors
+MODELS_MIN = 3  # fewer existing pairs than this: the method's default factors
 TOLERANCE_UNITS = 20  # a suggestion this close to the current value is not listed (about 2% of the em)
 SHOW = (("letters", "Letters"), ("punctuation", "Letters and punctuation"), ("figures", "Figures"), ("all", "Everything"))
+SOURCES = (("average", "Average of halfkern and Contour"), ("halfkern", "halfkern"), ("contour", "Contour"),
+           ("fontlab", "FontLab (listed pairs only)"))
+ORDERS = (("change", "Largest change first"), ("agreement", "Best agreement first"))
 PREVIEW_SIZE = 64  # pixels per em in the dialog's preview
 LETTERS = u"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 FIGURES = u"0123456789"
@@ -69,6 +84,14 @@ class Core(object):
         lib.freelab_kern_overlap.restype = d
         lib.freelab_kern_overlap.argtypes = [p, i, p, i, i, i, i]
         lib.freelab_kern_pair.argtypes = [p, i, p, i, i, i, i, d, d, i, ctypes.POINTER(i), ctypes.POINTER(d)]
+        lib.freelab_kern_profiles.argtypes = [p, i, i, i, p, p]
+        lib.freelab_kern_extend.argtypes = [p, i, d, i]
+        lib.freelab_kern_extend.restype = None
+        lib.freelab_kern_contour_measure.restype = d
+        lib.freelab_kern_contour_measure.argtypes = [p, p, i, d, d]
+        lib.freelab_kern_closest.restype = d
+        lib.freelab_kern_closest.argtypes = [p, p, i, d]
+        lib.freelab_kern_contour_pair.argtypes = [p, p, i, d, d, d, d, d, ctypes.POINTER(d)]
         self.lib = lib
         self._scratch = None
 
@@ -93,6 +116,30 @@ class Core(object):
             return None
         return kern.value, s.value
 
+    def contours(self, glyph, slope):
+        """(raw left, raw right, limited left, limited right) edge profiles, a value per row."""
+        ctypes = self.ctypes
+        h = glyph.height
+        left, right = (ctypes.c_double * h)(), (ctypes.c_double * h)()
+        self.lib.freelab_kern_profiles(glyph.coverage, glyph.width, h, glyph.stride, left, right)
+        limited_left, limited_right = (ctypes.c_double * h)(*left), (ctypes.c_double * h)(*right)
+        self.lib.freelab_kern_extend(limited_left, h, slope, 0)
+        self.lib.freelab_kern_extend(limited_right, h, slope, 1)
+        return left, right, limited_left, limited_right
+
+    def contour_measure(self, right_of_left, left_of_right, h, offset, floor):
+        return self.lib.freelab_kern_contour_measure(right_of_left, left_of_right, h, offset, floor)
+
+    def closest(self, right_of_left, left_of_right, h, offset):
+        return self.lib.freelab_kern_closest(right_of_left, left_of_right, h, offset)
+
+    def contour_pair(self, right_of_left, left_of_right, h, offset, reach, floor, low, high):
+        kern = self.ctypes.c_double()
+        if not self.lib.freelab_kern_contour_pair(right_of_left, left_of_right, h, offset, reach, floor, low, high,
+                                                  self.ctypes.byref(kern)):
+            return None
+        return kern.value
+
 
 class Glyph(object):
     """One glyph's coverage image: `coverage` holds height rows of `stride` bytes; the glyph's origin
@@ -103,11 +150,17 @@ class Glyph(object):
         self.width, self.height, self.stride = width, height, stride
         self.origin_x, self.advance = origin_x, advance
         self._envelopes = {}
+        self._contours = None
 
     def envelope(self, core, bias):
         if bias not in self._envelopes:
             self._envelopes[bias] = core.envelope(self, bias)
         return self._envelopes[bias]
+
+    def contours(self, core):
+        if self._contours is None:
+            self._contours = core.contours(self, CONTOUR_SLOPE)
+        return self._contours
 
 
 def base_offset(left, right):
@@ -121,7 +174,7 @@ class Band(object):
 
 
 def first_bias(em):
-    width = int(round(2 * HALO_SHARE * em))
+    width = round_units(2 * HALO_SHARE * em)
     if width % 2 == 0:
         width += 1
     return width // 2
@@ -155,7 +208,7 @@ def category(ch):
 
 
 def reference_band(core, lefts, rights, bias):
-    """The band of the references set with each other with no kerning, or None without them."""
+    """The halfkern band of the references set with each other with no kerning, or None without them."""
     overlaps = []
     for left in lefts:
         for right in rights:
@@ -166,6 +219,20 @@ def reference_band(core, lefts, rights, bias):
     if not overlaps:
         return None
     return Band(bias, min(overlaps), max(overlaps))
+
+
+def contour_band(core, lefts, rights):
+    """The contour-distance band of the references set with each other with no kerning, or None."""
+    measures = []
+    for left in lefts:
+        for right in rights:
+            _, _, _, right_of_left = left.contours(core)
+            _, _, left_of_right, _ = right.contours(core)
+            measures.append(core.contour_measure(right_of_left, left_of_right, left.height, base_offset(left, right),
+                                                 CONTOUR_FLOOR))
+    if not measures:
+        return None
+    return Band(None, min(measures), max(measures))
 
 
 def pair_kinds(left_char, right_char):
@@ -182,8 +249,8 @@ def pair_kinds(left_char, right_char):
 
 
 def suggest_pixels(core, left, right, band):
-    """The pair's kerning in pixels (negative is tighter; not yet scaled), refined between whole
-    steps where the overlap crosses the band, or None when no step within reach does."""
+    """halfkern: the pair's kerning in pixels (negative is tighter; not yet scaled), refined between
+    whole steps where the overlap crosses the band, or None when no step within reach does."""
     left_env, right_env = left.envelope(core, band.bias), right.envelope(core, band.bias)
     if left_env is None or right_env is None:
         return None
@@ -204,17 +271,39 @@ def suggest_pixels(core, left, right, band):
     return before + (kern - before) * share
 
 
+def suggest_contour_pixels(core, left, right, band, reach, min_gap):
+    """Contour distance: the pair's kerning in pixels, or None when the band is out of reach. A
+    tightening stops where the raw contours come within min_gap pixels (unless the pair is set
+    closer than that already)."""
+    _, raw_right_of_left, _, right_of_left = left.contours(core)
+    raw_left_of_right, _, left_of_right, _ = right.contours(core)
+    offset = base_offset(left, right)
+    kern = core.contour_pair(right_of_left, left_of_right, left.height, offset, reach, CONTOUR_FLOOR, band.low, band.high)
+    if kern is None:
+        return None
+    if kern < 0:
+        closest = core.closest(raw_right_of_left, raw_left_of_right, left.height, offset - kern)
+        if closest < min_gap:
+            kern = min(0.0, kern + (min_gap - closest))
+    return kern
+
+
+def round_units(value):
+    """Halves up, the same in Python 2.7 (which rounds them away from zero) and 3 (to even)."""
+    return int(math.floor(value + 0.5))
+
+
 def to_units(pixels, em, upm, tighten=TIGHTEN, loosen=LOOSEN):
     value = pixels * upm / em
     value *= tighten if value < 0 else loosen
-    return int(round(value))
+    return round_units(value)
 
 
-def fit_factors(samples):
+def fit_factors(samples, defaults=(TIGHTEN, LOOSEN)):
     """The tightening and loosening factors that best turn raw suggestions (units, unscaled) into
-    the designer's kerning, from (raw, designer) pairs; halfkern's where too few pairs show one."""
+    the designer's kerning, from (raw, designer) pairs; the defaults where too few pairs show one."""
     factors = []
-    for sign, default in ((-1, TIGHTEN), (1, LOOSEN)):
+    for sign, default in zip((-1, 1), defaults):
         chosen = [(raw, value) for raw, value in samples if raw * sign > 0 and value * sign > 0]
         if len(chosen) < MODELS_MIN:
             factors.append(default)
@@ -222,6 +311,17 @@ def fit_factors(samples):
         factor = sum(raw * value for raw, value in chosen) / sum(raw * raw for raw, _ in chosen)
         factors.append(min(FACTOR_RANGE[1], max(FACTOR_RANGE[0], factor)))
     return tuple(factors)
+
+
+def spread(values):
+    """How far the methods' values lie apart (0 with one or none)."""
+    known = [v for v in values if v is not None]
+    return max(known) - min(known) if len(known) > 1 else 0
+
+
+def average(values):
+    known = [v for v in values if v is not None]
+    return round_units(sum(known) / len(known)) if known else None
 
 
 # ---------------------------------------------------------------------------
@@ -313,7 +413,7 @@ class FontLabGlyphs(object):
         stride = image.bytesPerLine()
         address = ctypes.addressof(ctypes.c_char.from_buffer(image.bits()))
         coverage = (ctypes.c_uint8 * (stride * height)).from_buffer_copy(ctypes.string_at(address, stride * height))
-        advance = int(round(self.advances[name] * scale))
+        advance = round_units(self.advances[name] * scale)
         glyph = Glyph(name, coverage, width, height, stride, origin_x, advance)
         self.images[name] = glyph
         return glyph
@@ -324,19 +424,44 @@ def current_kerning(kerning, left, right):
         value = kerning.get((left, right))
     except Exception:
         return 0
-    return int(round(value or 0))
+    return round_units(value or 0)
+
+
+def fontlab_autokern(package, master, left, right):
+    """FontLab's own autokern for the pair: flPackage.autoKern returns it (as text or a number)
+    without writing it. None when it gives nothing."""
+    try:
+        value = package.autoKern(package.findName(left), package.findName(right), master)
+        return round_units(float(value))
+    except Exception:
+        return None
 
 
 class Suggestion(object):
-    def __init__(self, left_char, right_char, left, right, current, raw, value):
+    def __init__(self, left_char, right_char, left, right, current):
         self.left_char, self.right_char = left_char, right_char
         self.left, self.right = left, right
-        self.current, self.raw, self.value = current, raw, value
+        self.current = current
+        self.raw = {}  # method: units before its factors
+        self.values = {}  # method: units to write; "fontlab" once asked
+
+    def value(self, source):
+        if source == "average":
+            return average([self.values.get("halfkern"), self.values.get("contour")])
+        return self.values.get(source)
+
+    def spread(self):
+        return spread([self.values.get(method) for method, _ in METHODS])
+
+
+class Analysis(object):
+    def __init__(self, suggestions, factors, bands):
+        self.suggestions, self.factors, self.bands = suggestions, factors, bands
 
 
 def analyze(package, master, characters=None, em=EM_PIXELS, progress=None, core=None):
-    """Suggestions for every pair of the characters (Latin by default) the font has, with the
-    factors fitted to its existing kerning. progress(done, total) may return False to stop."""
+    """Suggestions by both methods for every pair of the characters (Latin by default) the font has,
+    each method's factors fitted to its existing kerning. progress(done, total) may return False to stop."""
     core = core or Core()
     glyphs = FontLabGlyphs(package, master, em)
     chars = [(ch, name) for ch, name in font_glyphs(package, characters or latin_characters()) if glyphs.add(name)]
@@ -349,13 +474,16 @@ def analyze(package, master, characters=None, em=EM_PIXELS, progress=None, core=
     band = calibrate(core, tuning, em, max_bias=glyphs.pad)
     references = dict((kind, [glyphs.image(names[ch]) for ch in chars_ if ch in names])
                       for kind, chars_ in REFERENCES.items())
-    bands = {}
+    halo_bands, contour_bands = {}, {}
     for left_kind in references:
         for right_kind in references:
-            bands[(left_kind, right_kind)] = (reference_band(core, references[left_kind], references[right_kind], band.bias)
-                                              or band)
+            lefts, rights = references[left_kind], references[right_kind]
+            halo_bands[(left_kind, right_kind)] = reference_band(core, lefts, rights, band.bias) or band
+            contour_bands[(left_kind, right_kind)] = (contour_band(core, lefts, rights)
+                                                      or contour_band(core, tuning, tuning))
+    reach, min_gap = float(glyphs.pad), MIN_GAP_SHARE * em
     kerning = package.kerning(master)
-    raw, total, done = [], len(chars) * len(chars), 0
+    suggestions, total, done = [], len(chars) * len(chars), 0
     for left_char, left in chars:
         left_glyph = glyphs.image(left)
         for right_char, right in chars:
@@ -365,17 +493,25 @@ def analyze(package, master, characters=None, em=EM_PIXELS, progress=None, core=
             kinds = pair_kinds(left_char, right_char)
             if kinds is None:
                 continue
-            pixels = suggest_pixels(core, left_glyph, glyphs.image(right), bands[kinds])
-            if pixels is None:
-                continue
-            units = pixels * glyphs.upm / em
-            raw.append((left_char, right_char, left, right, current_kerning(kerning, left, right), units))
-    tighten, loosen = fit_factors([(units, current) for _, _, _, _, current, units in raw if current])
-    suggestions = []
-    for left_char, right_char, left, right, current, units in raw:
-        value = int(round(units * (tighten if units < 0 else loosen)))
-        suggestions.append(Suggestion(left_char, right_char, left, right, current, units, value))
-    return suggestions, (tighten, loosen), band
+            right_glyph = glyphs.image(right)
+            s = Suggestion(left_char, right_char, left, right, current_kerning(kerning, left, right))
+            halo = suggest_pixels(core, left_glyph, right_glyph, halo_bands[kinds])
+            contour = suggest_contour_pixels(core, left_glyph, right_glyph, contour_bands[kinds], reach, min_gap)
+            for method, pixels in (("halfkern", halo), ("contour", contour)):
+                if pixels is not None:
+                    s.raw[method] = pixels * glyphs.upm / em
+            if s.raw:
+                suggestions.append(s)
+    factors = {}
+    for method in ("halfkern", "contour"):
+        samples = [(s.raw[method], s.current) for s in suggestions if s.current and method in s.raw]
+        factors[method] = fit_factors(samples, DEFAULT_FACTORS[method])
+        tighten, loosen = factors[method]
+        for s in suggestions:
+            if method in s.raw:
+                units = s.raw[method]
+                s.values[method] = round_units(units * (tighten if units < 0 else loosen))
+    return Analysis(suggestions, factors, (halo_bands, contour_bands))
 
 
 # ---------------------------------------------------------------------------
@@ -383,7 +519,7 @@ def analyze(package, master, characters=None, em=EM_PIXELS, progress=None, core=
 # ---------------------------------------------------------------------------
 
 class AutoKerningDialog(object):
-    COLUMNS = ("Pair", "Current", "Suggested", "Change")
+    COLUMNS = ("Pair", "Current", "halfkern", "Contour", "FontLab", "Spread", "Write")
 
     def __init__(self):
         QtCore, QtGui = _qt()
@@ -393,10 +529,10 @@ class AutoKerningDialog(object):
         if self.package is None or self.package.isNull:
             raise RuntimeError("open a font first")
         self.master = self.package.master
-        self.suggestions, self.stop = [], False
+        self.analysis, self.suggestions, self.stop = None, [], False
         dialog = self.dialog = QtGui.QDialog()
         dialog.setWindowTitle("FreeLab Auto Kerning")
-        dialog.resize(560, 640)
+        dialog.resize(640, 680)
         layout = QtGui.QVBoxLayout(dialog)
         self.status = QtGui.QLabel("%s, master %s. Latin letters, figures, and punctuation." % (self.package.tfn, self.master))
         self.status.setWordWrap(True)
@@ -413,13 +549,25 @@ class AutoKerningDialog(object):
         for _, label in SHOW:
             self.show_kind.addItem(label)
         row.addWidget(self.show_kind)
-        # Pairs the font kerns already are the designer's choices (a j tucked under the letter before
-        # it, which the method does not model): hidden unless asked for, and never checked for writing.
-        self.include_kerned = QtGui.QCheckBox("Include pairs the font kerns")
-        row.addWidget(self.include_kerned)
         row.addStretch(1)
         self.analyze_button = QtGui.QPushButton("Analyze")
         row.addWidget(self.analyze_button)
+        layout.addLayout(row)
+        row = QtGui.QHBoxLayout()
+        row.addWidget(QtGui.QLabel("Write values from"))
+        self.source = QtGui.QComboBox()
+        for _, label in SOURCES:
+            self.source.addItem(label)
+        row.addWidget(self.source)
+        self.order = QtGui.QComboBox()
+        for _, label in ORDERS:
+            self.order.addItem(label)
+        row.addWidget(self.order)
+        # Pairs the font kerns already are the designer's choices (a j tucked under the letter before
+        # it, which the methods do not model): hidden unless asked for, and never checked for writing.
+        self.include_kerned = QtGui.QCheckBox("Include pairs the font kerns")
+        row.addWidget(self.include_kerned)
+        row.addStretch(1)
         layout.addLayout(row)
         self.table = QtGui.QTableWidget(0, len(self.COLUMNS))
         self.table.setHorizontalHeaderLabels(list(self.COLUMNS))
@@ -450,21 +598,21 @@ class AutoKerningDialog(object):
         self.table.connect("itemSelectionChanged()", self.show_preview)
         self.tolerance.connect("valueChanged(int)", lambda value: self.refilter())
         self.show_kind.connect("currentIndexChanged(int)", lambda index: self.refilter())
+        self.source.connect("currentIndexChanged(int)", lambda index: self.refilter())
+        self.order.connect("currentIndexChanged(int)", lambda index: self.refilter())
         self.include_kerned.connect("toggled(bool)", lambda on: self.refilter())
-        self.all_suggestions, self.factors = [], (TIGHTEN, LOOSEN)
 
     def show(self):
         self.dialog.show()
         self.dialog.raise_()
 
-    def progress(self, done, total):
+    def progress(self, done, total, what="Measuring pairs"):
         QtCore, QtGui = _qt()
-        self.status.setText("Measuring pairs: %d of %d" % (done, total))
+        self.status.setText("%s: %d of %d" % (what, done, total))
         QtGui.QApplication.processEvents()
         return not self.stop
 
     def run(self):
-        QtCore, QtGui = _qt()
         self.analyze_button.setEnabled(False)
         self.apply_button.setEnabled(False)
         try:
@@ -477,7 +625,7 @@ class AutoKerningDialog(object):
         if result is None:
             self.status.setText("Stopped.")
             return
-        self.all_suggestions, self.factors, _band = result
+        self.analysis = result
         self.refilter()
 
     def shown(self, suggestion):
@@ -491,22 +639,46 @@ class AutoKerningDialog(object):
             return "figure" in kinds
         return True
 
+    def ask_fontlab(self, suggestions):
+        """FontLab's own value for the pairs not asked yet (a call per pair)."""
+        missing = [s for s in suggestions if "fontlab" not in s.values]
+        for index, s in enumerate(missing):
+            s.values["fontlab"] = fontlab_autokern(self.package, self.master, s.left, s.right)
+            if index % 50 == 0:
+                self.progress(index, len(missing), "Asking FontLab")
+
     def refilter(self):
-        if not self.all_suggestions:
+        if self.analysis is None:
             return
-        tighten, loosen = self.factors
+        source = SOURCES[self.source.currentIndex][0]
         tolerance = self.tolerance.value
         include = self.include_kerned.checked
-        listed = [s for s in self.all_suggestions
-                  if abs(s.value - s.current) >= tolerance and self.shown(s) and (include or not s.current)]
-        listed.sort(key=lambda s: -abs(s.value - s.current))
-        self.suggestions = listed
-        models = "from the font's kerning" if (tighten, loosen) != (TIGHTEN, LOOSEN) else "halfkern's (too few pairs in the font)"
-        self.status.setText("%d pairs measured; %d listed differ by %d units or more. Tightenings at %.0f%%, loosenings at %.0f%%, %s."
-                            % (len(self.all_suggestions), len(listed), tolerance, tighten * 100, loosen * 100, models))
-        self.fill_table()
+        candidates = [s for s in self.analysis.suggestions if self.shown(s) and (include or not s.current)]
 
-    def fill_table(self):
+        def differs(s, key):
+            value = s.value(key)
+            return value is not None and abs(value - s.current) >= tolerance
+
+        # FontLab is asked only about pairs either method lists (asking about every pair takes long)
+        flagged = [s for s in candidates if differs(s, "halfkern") or differs(s, "contour") or differs(s, "average")]
+        self.ask_fontlab(flagged)
+        listed = [s for s in flagged if differs(s, source)]
+        if ORDERS[self.order.currentIndex][0] == "agreement":
+            listed.sort(key=lambda s: (s.spread(), -abs(s.value(source) - s.current)))
+        else:
+            listed.sort(key=lambda s: -abs(s.value(source) - s.current))
+        self.suggestions = listed
+        summary = []
+        for method in ("halfkern", "contour"):
+            tighten, loosen = self.analysis.factors[method]
+            fitted = (tighten, loosen) != DEFAULT_FACTORS[method]
+            summary.append("%s tightens at %.0f%%%s" % (dict(METHODS)[method], tighten * 100,
+                                                       " (from the font's kerning)" if fitted else ""))
+        self.status.setText("%d pairs measured; %d listed differ by %d units or more. %s."
+                            % (len(self.analysis.suggestions), len(listed), tolerance, "; ".join(summary)))
+        self.fill_table(source)
+
+    def fill_table(self, source):
         QtCore, QtGui = _qt()
         table = self.table
         table.setRowCount(len(self.suggestions))
@@ -516,13 +688,16 @@ class AutoKerningDialog(object):
             pair.setCheckState(QtCore.Qt.Unchecked if s.current else QtCore.Qt.Checked)  # the designer's pairs: opt in
             pair.setToolTip("%s %s" % (s.left, s.right))
             table.setItem(row, 0, pair)
-            for column, value in ((1, s.current), (2, s.value), (3, s.value - s.current)):
-                item = QtGui.QTableWidgetItem("%+d" % value if column == 3 else str(value))
+            cells = (s.current, s.values.get("halfkern"), s.values.get("contour"), s.values.get("fontlab"),
+                     s.spread(), s.value(source))
+            for column, value in enumerate(cells, 1):
+                item = QtGui.QTableWidgetItem(u"–" if value is None else str(value))
                 item.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
                 item.setTextAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
                 table.setItem(row, column, item)
         table.resizeColumnsToContents()
         self.apply_button.setEnabled(bool(self.suggestions))
+        self.show_preview()  # the selected row may hold another pair now
 
     def check_all(self, on):
         """Check every new pair, or uncheck everything; pairs the font kerns are checked one by one."""
@@ -532,12 +707,14 @@ class AutoKerningDialog(object):
             self.table.item(row, 0).setCheckState(QtCore.Qt.Checked if checked else QtCore.Qt.Unchecked)
 
     def show_preview(self):
-        """The selected pair as it is set now and as suggested, in the dialog's own colors."""
+        """The selected pair as it is set now and as it would be written, in the dialog's own colors."""
         QtCore, QtGui = _qt()
         rows = self.table.selectionModel().selectedRows()
-        if not rows:
+        if not rows or rows[0].row() >= len(self.suggestions):
+            self.preview.clear()
             return
         s = self.suggestions[rows[0].row()]
+        value = s.value(SOURCES[self.source.currentIndex][0]) or 0
         width, height = max(300, self.preview.width), 2 * PREVIEW_SIZE + 40
         pixmap = QtGui.QPixmap(width, height)
         palette = self.dialog.palette
@@ -547,7 +724,7 @@ class AutoKerningDialog(object):
         upm = float(self.package.upm)
         scale = float(PREVIEW_SIZE) / upm
         names = [self.package.findName(n) for n in ("H", s.left, s.right, "H")]
-        for line, (label, kern) in enumerate((("Now", s.current), ("Suggested", s.value))):
+        for line, (label, kern) in enumerate((("Now", s.current), ("Written", value))):
             painter.setPen(palette.color(QtGui.QPalette.Text))
             painter.drawText(8, 22 + line * (PREVIEW_SIZE + 12), label)
             x = 100.0
@@ -566,13 +743,17 @@ class AutoKerningDialog(object):
 
     def write(self):
         QtCore, QtGui = _qt()
+        source = SOURCES[self.source.currentIndex][0]
         kerning = self.package.kerning(self.master)
         written = 0
         for row, s in enumerate(self.suggestions):
             if self.table.item(row, 0).checkState() != QtCore.Qt.Checked:
                 continue
-            if s.value:
-                kerning[(s.left, s.right)] = s.value
+            value = s.value(source)
+            if value is None:
+                continue
+            if value:
+                kerning[(s.left, s.right)] = value
             elif kerning.get((s.left, s.right)) is not None:
                 kerning.remove((s.left, s.right))  # `del kerning[pair]` removes it but raises in PyCXX
             written += 1
