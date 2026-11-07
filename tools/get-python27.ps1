@@ -35,7 +35,8 @@ try {
 
     $staging = "$dest.partial"
     if (Test-Path $staging) { [System.IO.Directory]::Delete($staging, $true) }
-    if (Test-Path $dest) { [System.IO.Directory]::Delete($dest, $true) }  # left by an interrupted run
+    # An interrupted run leaves only the staging folder: anything at the destination is someone else's.
+    if (Test-Path $dest) { throw "$dest exists but holds no tools\python.exe: move it away, or set FREELAB_PY27_DIR to another folder." }
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     [System.IO.Compression.ZipFile]::ExtractToDirectory($nupkg, $staging)
     [System.IO.Directory]::Move($staging, $dest)

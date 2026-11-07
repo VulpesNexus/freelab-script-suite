@@ -19,7 +19,7 @@ FreeLab MCP, the separate `freelab-mcp` repository, lets an AI app such as Claud
 
 ## Install
 
-With FontLab closed, run *tools/install-fontlab.ps1*. It copies the dark-mode scripts into FontLab's user *Scripts* folder (*Documents\FontLab\FontLab 7\Scripts\FreeLab*), adds a marked block to FontLab's startup script that applies dark mode at launch when it was left on, and builds the native helper into *%LOCALAPPDATA%\FreeLab\bin*. The original startup script is kept as *startupScript.py.freelab-backup*, and `-Uninstall` takes it all out again, leaving FreeLab MCP's files alone. Scripts run from that folder, not from this repository: Python 2.7 cannot open files whose path the Windows ANSI code page cannot spell.
+Start FontLab once, so that it writes its startup script, then quit it and run *tools/install-fontlab.ps1*. It copies the dark-mode scripts into FontLab's user *Scripts* folder (*Documents\FontLab\FontLab 7\Scripts\FreeLab*), adds a marked block to FontLab's startup script that applies dark mode at launch when it was left on, and builds the native helper into *%LOCALAPPDATA%\FreeLab\bin*. The original startup script is kept as *startupScript.py.freelab-backup*, and `-Uninstall` takes it all out again, leaving FreeLab MCP's files alone. Either way it also removes the single block that FreeLab wrote before the MCP and the tools were split, which started the MCP listener too; run FreeLab MCP's installer with `-ListenerAtLaunch` to keep that. The startup script must be UTF-8 text, and its line endings are kept. Scripts run from that folder, not from this repository: Python 2.7 cannot open files whose path the Windows ANSI code page cannot spell.
 
 ## Tests
 

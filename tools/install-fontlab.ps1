@@ -58,6 +58,18 @@ function Remove-Block([string]$text) {
     return [regex]::Replace($text, $pattern, "`n").TrimEnd("`n") + "`n"
 }
 
+# The block put where it already is (the other repository's block keeps its place), or appended.
+function Set-Block([string]$text, [string]$newBlock) {
+    $re = New-Object System.Text.RegularExpressions.Regex ([regex]::Escape($begin) + '(?s:.*?)' + [regex]::Escape($end) + '[^\n]*')
+    if ($re.IsMatch($text)) {
+        $evaluator = [System.Text.RegularExpressions.MatchEvaluator] { param($m) $newBlock }.GetNewClosure()
+        return $re.Replace($text, $evaluator, 1)
+    }
+    $text = $text.TrimEnd("`n")
+    if ($text) { $text += "`n" }
+    return $text + $newBlock + "`n"
+}
+
 # The one block FreeLab wrote before the MCP and the tools became separate repositories
 # (dark mode and the listener together). Either installer takes it out and says so.
 $legacyPattern = '(?s)\n?# >>> FreeLab \(managed.*?# <<< FreeLab[ \t]*(\n|$)'
@@ -120,6 +132,12 @@ function Save-Startup([string]$text) {
     if (-not (Test-Path $folder)) { New-Item -ItemType Directory -Path $folder | Out-Null }
     if ($crlf) { $text = $text -replace "`n", "`r`n" }
     [System.IO.File]::WriteAllText($startup, $text, (New-Object System.Text.UTF8Encoding $bom))
+}
+if (-not $Uninstall -and -not (Test-Path $startup)) {
+    # FontLab writes its own startup script (its default imports) when it first starts; one made here
+    # holding only this block could keep FontLab from writing it.
+    Write-Output "FontLab has not made its startup script yet ($startup): start FontLab once, quit it, and run this again."
+    exit 1
 }
 $legacy = [regex]::IsMatch($current, $legacyPattern)
 if ($legacy) { $current = [regex]::Replace($current, $legacyPattern, "`n").TrimEnd("`n") + "`n" }
@@ -254,9 +272,7 @@ except Exception:
 $end
 "@ -replace "`r`n", "`n"
 
-$text = (Remove-Block $current).TrimEnd("`n")
-if ($text) { $text += "`n" }
-$text += $block + "`n"
+$text = Set-Block $current $block
 if (Test-Changed $text) {
     Save-Startup $text
     Write-Output "Added the FreeLab tools block to $startup"
