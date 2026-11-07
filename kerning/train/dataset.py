@@ -28,8 +28,9 @@ os.environ["FREELAB_NO_AUTOSTART"] = "1"
 import freelab_auto_kerning as ak  # noqa: E402
 
 MIN_KERNED_SHARE = 0.05  # a font kerning fewer of the common pairs than this has no kerning to learn from
-FONT_DIRS = (os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts"),
-             os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "Windows", "Fonts"))
+FONT_DIRS = tuple(os.path.join(base, *parts) for base, parts in (
+    (os.environ.get("WINDIR") or os.environ.get("SystemRoot"), ("Fonts",)),
+    (os.environ.get("LOCALAPPDATA"), ("Microsoft", "Windows", "Fonts"))) if base)
 OPEN_LICENSES = (("open font license", "OFL"), ("scripts.sil.org/ofl", "OFL"), ("openfontlicense", "OFL"),
                  ("apache license", "Apache"), ("apache.org/licenses", "Apache"))
 
