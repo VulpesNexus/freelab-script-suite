@@ -175,6 +175,8 @@ PICKER_FRAME = u"\nQtColorPicker { border: 1px solid #55555a; border-radius: 2px
 # A picker draws its swatch at the left, about as wide as it is tall, inside a light frame of its own,
 # and a dark arrow after this gap: the "picker" effect maps all of it but the swatch's inside (the
 # frame on the swatch's side stayed white).
+PICKER_SWATCH_GAP = 3  # the swatch's side ends this far past a square as tall as the picker
+PICKER_KEEP_CHROMA = 48  # around the swatch's inside, pixels this colored keep their color
 # Color pickers and mark-color buttons keep their look, the white "no color" slot included (the owner
 # preferred that to a half-dark frame).
 
@@ -1414,6 +1416,12 @@ def _effect_classes():
                                 # Some pickers paint "no color" transparent: give them the white slot others paint.
                                 painter.fillRect(inside.translated(offset), Qt.white)
                             painter.drawPixmap(inside.translated(offset), pixmap, inside)
+                        # Around that square, only the light frame is mapped: a picker that paints its
+                        # swatch at full height (the mark color's) keeps its color to the edges.
+                        split = min(pixmap.width(), pixmap.height() + PICKER_SWATCH_GAP)
+                        colored = _colored_part(image, QRect(0, 0, split, pixmap.height()))
+                        if colored is not None:
+                            painter.drawImage(offset, colored)
                         return
                     if kind == "defringe":  # dark already (its stylesheet): only its text's fringes made gray
                         area = whole
@@ -1819,6 +1827,22 @@ def is_content(widget):
     parent = widget.parentWidget()
     return (_class_name(widget) == "QWidget" and parent is not None
             and _is_canvas(widget, _class_name(parent)))
+
+
+def _colored_part(image, area):
+    """The clearly colored pixels of image within area (the rest transparent), or None if none."""
+    QImage = _gui("QImage")
+    part = image.copy(area).convertToFormat(QImage.Format_ARGB32)
+    any_colored = False
+    for y in range(part.height()):
+        for x in range(part.width()):
+            value = part.pixel(x, y)
+            r, g, b = (value >> 16) & 255, (value >> 8) & 255, value & 255
+            if ((value >> 24) & 255) and max(r, g, b) - min(r, g, b) >= PICKER_KEEP_CHROMA:
+                any_colored = True
+            else:
+                part.setPixel(x, y, 0)
+    return part if any_colored else None
 
 
 def _frame_picker(widget):
