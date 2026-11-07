@@ -4,10 +4,10 @@
 
 ## Using it
 
-1. Open the font, and pick the master to kern.
-2. Click *Analyze*. Every pair of the Latin letters, figures, and punctuation the font has is measured by both methods (two marks of punctuation side by side are skipped); about 7,000 pairs take five seconds.
-3. The list shows the pairs the font does not kern yet whose value to write is at least the given number of units (20 by default). For them, FontLab's own autokern is asked too (a call per pair). *Show* narrows the list to letters, letters and punctuation, figures, or everything.
-4. The columns: each method's value, *Spread* (how far the three lie apart), and *Write*, from the source chosen in *Write values from*: the average of halfkern and contour distance (the default), either of them, or FontLab's. *Best agreement first* puts the pairs where the methods agree at the top, the safest to accept together; *Largest change first* the boldest. Selecting a pair draws it between two H's as it is set now and as it would be written.
+1. Open the font, pick the master to kern, and run the script: it analyzes the master as it opens (*Analyze* runs it again). Every pair of the Latin letters, figures, and punctuation the font has is measured by both methods (two marks of punctuation side by side are skipped); about 7,000 pairs take five seconds.
+2. The list holds the pairs the font does not kern yet that either method would change by at least the given number of units (20 by default); FontLab's own autokern is asked about them too (a call per pair). *Show* narrows it to letters, letters and punctuation, or figures, and *Common pairs* to the pairs worth kerning even in a font kerned only in part: those common in the text of 24 languages and kerned in fonts ([andre-fuchs/kerning-pairs](https://github.com/andre-fuchs/kerning-pairs), MIT; *kerning/common_pairs.txt*).
+3. The columns: each method's value, *Spread* (how far the three lie apart), and *Write*, from *Write values from*: the average of halfkern and contour distance (the default), either of them, or FontLab's. Changing it changes only that column, never the list or its order. The order: largest change, best agreement (the safest pairs to accept together), most common, or alphabetical.
+4. Selecting a pair draws it between two H's as it is set now, by each method, and as it will be written, and *This pair uses* picks another method, or the current kerning, for that pair alone; the Write column names the choice.
 5. *Include pairs the font kerns* lists the font's own pairs too. They are never checked for you: they are the designer's choices, some of which the methods do not model (a j tucked under the letter before it).
 6. Uncheck what you disagree with, and click *Write checked pairs*: each is written to the master as a pair of glyphs (a value of 0 removes the pair). Writing goes straight into the open font: close it without saving to take it all back.
 

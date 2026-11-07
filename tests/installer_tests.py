@@ -85,6 +85,7 @@ class InstallerTests(unittest.TestCase):
         self.assertFalse((self.bin / "freelab_kern-v0.dll").exists(), "and a superseded auto kerning core")
         self.assertTrue((self.bin / ("freelab_kern-v%s.dll" % KERN)).exists())
         self.assertTrue((self.scripts / "FreeLab" / "freelab_auto_kerning.py").exists(), "Auto Kerning is in the FreeLab submenu")
+        self.assertTrue((self.scripts / "FreeLab" / "common_pairs.txt").exists(), "with its list of common pairs")
         before = self.read()
         code, out = self.run_installer()
         self.assertEqual((code, self.read()), (0, before), "a second install changes nothing")

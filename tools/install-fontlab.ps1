@@ -44,7 +44,8 @@ else { $startup = Join-Path $env:LOCALAPPDATA 'FontLab\FontLab 7\startupScript.p
 $files = @(
     @{ From = 'darkmode\freelab_dark_mode.py'; Name = 'freelab_dark_mode.py' },
     @{ From = 'darkmode\freelab_dark_mode_settings.py'; Name = 'freelab_dark_mode_settings.py' },
-    @{ From = 'kerning\freelab_auto_kerning.py'; Name = 'freelab_auto_kerning.py' }
+    @{ From = 'kerning\freelab_auto_kerning.py'; Name = 'freelab_auto_kerning.py' },
+    @{ From = 'kerning\common_pairs.txt'; Name = 'common_pairs.txt' }
 )
 if (-not $BinDir) { $BinDir = Join-Path $env:LOCALAPPDATA 'FreeLab\bin' }
 if (-not $StateDir) { $StateDir = Join-Path $env:LOCALAPPDATA 'FreeLab' }

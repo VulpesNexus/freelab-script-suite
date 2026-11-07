@@ -7,6 +7,7 @@ skipped, and run_tests.py reports the skip. Valid Python 2.7 and Python 3.
 from __future__ import absolute_import, division, print_function
 
 import ctypes
+import io
 import os
 import sys
 import unittest
@@ -70,6 +71,28 @@ class ArithmeticTests(unittest.TestCase):
     def test_contour_distance_has_its_own_default_strength(self):
         self.assertEqual(ak.fit_factors([], ak.DEFAULT_FACTORS["contour"]), (1.0, 1.0))
         self.assertEqual(ak.fit_factors([]), (ak.TIGHTEN, ak.LOOSEN))
+
+    def test_common_pairs_are_ranked_without_the_notice(self):
+        ranks = ak.common_pairs(os.path.join(HERE, os.pardir, "kerning", ak.COMMON_PAIRS_FILE))
+        self.assertGreater(len(ranks), 3000)
+        self.assertTrue(all(len(pair) == 2 and not pair.startswith(u"#") for pair in ranks))
+        self.assertLess(ranks[u"To"], ranks[u"fj"], "To is more relevant")
+        self.assertEqual(ak.common_pairs(os.path.join(HERE, "no such file")), {})
+
+    def test_a_pair_can_use_another_method(self):
+        s = ak.Suggestion(u"T", u"o", "T", "o", 0)
+        s.values = {"halfkern": -80, "contour": -120, "fontlab": -56}
+        self.assertEqual(s.to_write("average"), -100)
+        s.override = "fontlab"
+        self.assertEqual(s.to_write("average"), -56, "the pair's own choice wins")
+        s.override = "current"
+        self.assertEqual(s.to_write("halfkern"), 0)
+
+    def test_no_qt_name_fontlabs_pythonqt_lacks(self):
+        # QPalette.PlaceholderText (Qt 5.12) is missing from FontLab 7's PythonQt: asking for it
+        # mid-painting left a painter open on a freed pixmap, and FontLab aborted.
+        source = io.open(ak.__file__.replace(".pyc", ".py"), encoding="utf-8").read()
+        self.assertNotIn("QPalette.PlaceholderText)", source)
 
     def test_first_halo_is_halfkerns(self):
         self.assertEqual(ak.first_bias(100), 10)  # halfkern: kernel 21 pixels at 100 pixels per em
