@@ -228,7 +228,47 @@ class NativeTests(unittest.TestCase):
                     colors.append((30, 30, 30))
         buf = pixels(colors)
         anchors(LIB, buf, width, "ink")
-        self.assertEqual(rgb_at(buf, 6 * width + 2), (30, 30, 78))
+        r, g, b = rgb_at(buf, 6 * width + 2)
+        self.assertLess(dm.oklab(r, g, b)[0], 0.4, "stays dark: smoothing between the paper and the blue")
+        self.assertLessEqual(max(r, g, b) - min(r, g, b), 40, "its navy tint is gone: the plain blend of the two")
+
+    def test_a_tick_on_a_blue_box_stays_white_and_an_unticked_box_gets_a_frame(self):
+        # A list delegate's check boxes on nothing: a white tick on a blue box, and a white square.
+        width, rows, buf = 40, 14, bytearray()
+        for y in range(rows):
+            for x in range(width):
+                if 1 <= y <= 12 and 1 <= x <= 12:
+                    tick = (y == 7 and 4 <= x <= 9) or (x == 6 and 4 <= y <= 9)
+                    buf += struct.pack("<BBBB", 255, 255, 255, 255) if tick else struct.pack("<BBBB", 0xf9, 0x9b, 0x41, 255)
+                elif 1 <= y <= 12 and 21 <= x <= 32:
+                    buf += struct.pack("<BBBB", 255, 255, 255, 255)
+                else:
+                    buf += struct.pack("<BBBB", 0, 0, 0, 0)
+        anchors(LIB, buf, width, "ink")
+        self.assertEqual(rgb_at(buf, 7 * width + 6), (255, 255, 255), "the tick")
+        self.assertEqual(rgb_at(buf, 7 * width + 21), (0x8c, 0x8c, 0x92), "the unticked box's edge: a frame")
+        self.assertLess(rgb_at(buf, 7 * width + 26)[0], 100, "its inside: dark")
+
+    def test_subpixel_text_keeps_each_channel_coverage(self):
+        # ClearType black text on white paper: a fringe pixel's channels are the paper times (1 - coverage).
+        width, colors = 40, []
+        for y in range(14):
+            for x in range(width):
+                if 3 <= y <= 10 and x % 6 == 1:
+                    colors.append((0, 0, 0))
+                elif 3 <= y <= 10 and x % 6 == 2:
+                    colors.append((255, 128, 0))  # coverage 0, 0.5, 1
+                else:
+                    colors.append((255, 255, 255))
+        buf = pixels(colors)
+        anchors(LIB, buf, width, "subpixel")
+        paper, text = rgb_at(buf, 0), rgb_at(buf, TEXT_ROW + 1)
+        self.assertLess(paper[0], 80, "the paper turns dark")
+        self.assertGreater(text[0], 180, "the text light")
+        r, g, b = rgb_at(buf, TEXT_ROW + 2)
+        self.assertLessEqual(abs(r - paper[0]), 2, "no red coverage: the paper")
+        self.assertLessEqual(abs(b - text[2]), 2, "full blue coverage: the text")
+        self.assertLessEqual(abs(g - (paper[1] + text[1]) / 2.0), 3, "half green coverage: halfway")
 
     def test_gray_fringes_of_colored_text_are_not_dim_marks(self):
         # Blue syntax on a dark editor paper fringes in gray-teal (#59757d), which must not be lifted.

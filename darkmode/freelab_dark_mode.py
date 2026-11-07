@@ -163,8 +163,7 @@ TITLE_MAX_HEIGHT = 40
 # which must show the real mark colors.
 SKIP_CLASSES = ("ColorPickerItem", "ColorPickerButton", "QtColorPicker", "QDesktopScreenWidget",
                 "YHueBar", "YSaturationBar", "YColorBar", "YColorPreview", "YColorRing", "ColorMap",  # color controls (audit of FontLab 7.2's classes)
-                "YSimpleSlider",  # drawn from the palette: its white knob is right on dark already
-                "RenderWidget")  # TrueType Hinting's preview: ClearType's subpixel colors cannot be inverted
+                "YSimpleSlider")  # drawn from the palette: its white knob is right on dark already
 SKIP_CLASS_WORDS = ("ColorSource", "OpacityBar", "Eyedropper")
 SWATCH_NAME_PREFIXES = ("flag",)
 # Color pickers keep their swatch (the white "no color" slot included), but their button frame,
@@ -211,7 +210,7 @@ SWEEP_MS = 750  # how often to look for widgets FontLab created or showed
 FULL_SWEEP_EVERY = 40  # every Nth sweep revisits every widget (replaced stylesheets, new icons)
 FOCUS_DRAIN_MS = 80  # a window that takes focus is darkened at once, up to this long, before it paints light
 MAX_ERRORS = 50
-NATIVE_VERSION = 50
+NATIVE_VERSION = 65
 
 ID_PROP = "freelab_id"  # dynamic properties FreeLab sets on widgets, all removed by restore()
 SEEN_PROP = "freelab_seen"
@@ -650,7 +649,7 @@ def _address(image):
     return ctypes.addressof(ctypes.c_char.from_buffer(image.bits()))
 
 
-ANCHOR_MODES = {"ink": 0, "all": 1, "relight": 2, "icon": 3}
+ANCHOR_MODES = {"ink": 0, "all": 1, "relight": 2, "icon": 3, "subpixel": 4}
 
 
 def map_image(image, min_l=0.0, keys=None, ink_below=-1.0, keep_tint=0.0, light_l=None, edge_neutral=0.0, edge_target=0,
@@ -692,7 +691,7 @@ def map_image(image, min_l=0.0, keys=None, ink_below=-1.0, keep_tint=0.0, light_
         except Exception as exc:
             _note_error("map_image", exc)
             _state()["native"] = None
-    if anchors in ("all", "icon") or (not anchors and min_l <= 0.0 and not keys):
+    if anchors in ("all", "icon", "subpixel") or (not anchors and min_l <= 0.0 and not keys):
         image.invertPixels()
     return image
 
@@ -1038,11 +1037,33 @@ EFFECT_MIN_L = {"keyed": WHITE_L}
 EDGES_PARENTS = ("QsciScintilla",)  # their viewport (QWidget#qt_scrollarea_viewport) paints the text
 # Scroll areas whose viewport paints item rows or text, in colors of FontLab's own: "ink".
 INK_VIEW_PARENTS = ("QAbstractItemView", "QTextEdit", "QPlainTextEdit", "QtnPropertyView")
+# Tiny light text that ClearType draws as blue and yellow fringes with no light core (the font window's
+# "Name: Encoding: None Index" selectors): any effect draws it through a transparent image, where text
+# gets grayscale smoothing; the ink mapping leaves light text as it is.
+GRAYSCALE_TEXT_CLASSES = ("YSelector",)
+GRAYSCALE_TEXT_NAMES = ("labelMode",)  # the colon between those selectors
+# Text drawn with ClearType on purpose (TrueType Hinting's preview): each channel's coverage is kept
+# and redrawn light on dark ("subpixel" mapping), which inverting lightness cannot do.
+SUBPIXEL_CLASSES = ("RenderWidget",)
 LEGACY_KINDS = {"selective": "ink"}  # recorded on widgets by FreeLab 0.2 before the anchor blends
 
 # Content keeps every color: anchors, nodes, and marks carry meaning even when muted.
 # Interface islands keep no tint of low-color pixels (LINEAR_SPREAD), which removes ClearType fringes.
 CONTENT_CLASSES = ("FontCellChart", "CellChart", "YNibShape", "YStrokeShape", "YBrushStrokePreview", "FontPreviewWidget")
+
+
+def gray_image(image):
+    """The image in grays (its alpha kept): ClearType's colored fringes become plain smoothing."""
+    QImage = _gui("QImage")
+    try:
+        gray = image.convertToFormat(QImage.Format_Grayscale8)
+    except Exception:  # an older Qt: leave it in color
+        return image
+    alpha = image.convertToFormat(QImage.Format_Alpha8) if image.hasAlphaChannel() else None
+    out = gray.convertToFormat(QImage.Format_ARGB32)
+    if alpha is not None:
+        out.setAlphaChannel(alpha)
+    return out
 
 
 def _effect_classes():
@@ -1062,13 +1083,15 @@ def _effect_classes():
             return pixmap, offset
 
         def draw_mapped(painter, pixmap, offset, area, min_l, keys=None, ink_below=-1.0, keep_tint=0.0, light_l=None,
-                        edge_neutral=0.0, edge_target=0, anchors=None, dark_l=None):
+                        edge_neutral=0.0, edge_target=0, anchors=None, dark_l=None, gray=False):
             """Draw the part of pixmap that lands on `area` (painter coordinates), mapped."""
             area = area.intersected(QRect(offset, pixmap.size()))
             if painter.hasClipping():
                 area = area.intersected(painter.clipBoundingRect().toAlignedRect())
             if not area.isEmpty():
                 part = pixmap.copy(area.translated(-offset.x(), -offset.y())).toImage()
+                if gray:
+                    part = gray_image(part)
                 painter.drawImage(area.topLeft(), map_image(part, min_l, keys, ink_below, keep_tint, light_l, edge_neutral,
                                                             edge_target, anchors, dark_l))
 
@@ -1101,7 +1124,7 @@ def _effect_classes():
                                                                    pixmap.width() - split, pixmap.height()),
                                     0.0, None, -1.0, 0.0, None, 0.0, 0, "all")
                         return
-                    anchors = "all" if kind == "island" else "ink"
+                    anchors = {"island": "all", "subpixel": "subpixel"}.get(kind, "ink")
                     if kind == "edges":
                         margin = editor_margin(pixmap)
                         if margin:
@@ -1110,8 +1133,12 @@ def _effect_classes():
                             whole = QRect(offset.x() + margin, offset.y(), pixmap.width() - margin, pixmap.height())
                         if light_paper(pixmap, margin):
                             anchors = "all"  # paper the editor took from a light palette: map it whole
+                    # Fields paint an opaque background, so their light text keeps ClearType's colored
+                    # fringes even inside an effect: grays, unless text is selected (the blue highlight).
+                    gray = getattr(self, "freelab_gray", False) and not (
+                        self.freelab_widget.inherits("QLineEdit") and _prop(self.freelab_widget, "hasSelectedText"))
                     draw_mapped(painter, pixmap, offset, whole, 0.0, None, -1.0, self.freelab_keep_tint, None, 0.0, 0,
-                                anchors)
+                                anchors, None, gray)
                     keep_unmapped(self, painter, pixmap, offset)
                 except Exception as exc:
                     _note_error("effect", exc)
@@ -1143,9 +1170,16 @@ def _effect_classes():
                     pixmap, offset = source(self)
                     painter.drawPixmap(offset, pixmap)
                     height = title_height(self.freelab_widget)
-                    if height > 0:  # by anchor blends: a hovered title's colored text stays smooth
-                        draw_mapped(painter, pixmap, offset, QRect(offset.x(), offset.y(), pixmap.width(), height), 0.0,
-                                    None, -1.0, 0.0, None, 0.0, 0, "all")
+                    if height > 0:
+                        # Gray first: a hovered title's text is black, with ClearType fringes saturated enough
+                        # to be anchors of their own, which kept their blue and orange.
+                        area = QRect(offset.x(), offset.y(), pixmap.width(), height)
+                        if painter.hasClipping():
+                            area = area.intersected(painter.clipBoundingRect().toAlignedRect())
+                        if not area.isEmpty():
+                            part = pixmap.copy(area.translated(-offset.x(), -offset.y())).toImage()
+                            part = gray_image(part)
+                            painter.drawImage(area.topLeft(), map_image(part, 0.0, None, -1.0, 0.0, None, 0.0, 0, "all"))
                 except Exception as exc:
                     _note_error("title", exc)
                     self.drawSource(painter)
@@ -1230,6 +1264,11 @@ def widget_kind(widget, canvas=True):
                 return "island"
             if _prop(widget, "objectName") == "qt_scrollarea_viewport" and any(parent.inherits(c) for c in INK_VIEW_PARENTS):
                 return "ink"
+    if (cls in GRAYSCALE_TEXT_CLASSES or (cls == "QLabel" and _prop(widget, "objectName") in GRAYSCALE_TEXT_NAMES)
+            or widget.inherits("QLineEdit")):  # fields: typed and placeholder text
+        return "ink"
+    if cls in SUBPIXEL_CLASSES:
+        return "subpixel"
     if cls in FILL_CLASSES:
         return "fill"
     if cls in TITLE_CLASSES:
@@ -1468,6 +1507,7 @@ def _set_effect(widget, record, kind, keys=None):
     effect.freelab_keep_tint = KEEP_TINT_CONTENT if content else 0.0
     effect.freelab_edge_target = frame_target(keys) if keys else 0
     effect.freelab_kind = kind
+    effect.freelab_gray = kind == "ink" and _gray_text(widget)
     effect.setProperty(EFFECT_PROP, kind)
     widget.setGraphicsEffect(effect)  # deletes any effect FreeLab set before
     record["effect"], record["kind"] = effect, kind  # PythonQt deletes it if no Python reference is kept
@@ -1477,6 +1517,12 @@ def _set_effect(widget, record, kind, keys=None):
         _protect(widget)
         if kind != "picker":
             _protect_effects_inside(widget, effect)
+
+
+def _gray_text(widget):
+    """Fields and selectors: drawn in grays before mapping (their light text's ClearType fringes)."""
+    return (_class_name(widget) in GRAYSCALE_TEXT_CLASSES or widget.inherits("QLineEdit")
+            or (_class_name(widget) == "QLabel" and _prop(widget, "objectName") in GRAYSCALE_TEXT_NAMES))
 
 
 def _clear_effect(widget, record):
@@ -1756,7 +1802,7 @@ def process(widget):
         if found:
             widget.setProperty(ISLAND_PROP, found)
             kind = found
-    if kind in ("ink", "edges", "title"):
+    if kind in ("ink", "edges", "title", "subpixel"):
         _set_effect(widget, _record(widget), kind)
     elif kind == "keyed" and widget.isVisible():
         record = _record(widget)

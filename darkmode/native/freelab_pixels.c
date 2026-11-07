@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 50
+#define FREELAB_PIXELS_VERSION 65
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -414,6 +414,8 @@ EXPORT void freelab_map_keyed(uint8_t *pixels, int64_t count, int64_t width, con
 #define ANCHORS_ALL 1
 #define ANCHORS_RELIGHT 2 /* back to light: a dark main paper turns white, light gray text black, the rest stays */
 #define ANCHORS_ICON 3 /* as ANCHORS_ALL, but colored parts of middle lightness (blue guides, green fills) stay */
+#define ANCHORS_SUBPIXEL 4 /* as ANCHORS_ALL, for ClearType text drawn on purpose (TrueType Hinting's preview):
+                              each channel's coverage between the paper and the text is kept */
 #define ICON_KEEP_CHROMA 0.08
 #define ICON_KEEP_MIN_OKL 0.4
 #define ICON_KEEP_MAX_OKL 0.85
@@ -442,6 +444,8 @@ EXPORT void freelab_map_keyed(uint8_t *pixels, int64_t count, int64_t width, con
 #define FRINGE_LIGHT 0.4 /* HLS lightness of "light" for that, */
 #define FRINGE_LIGHTER 0.15 /* and at least this much lighter than the pixel */
 #define LIGHT_SURFACE_OKL 0.6
+#define MAIN_MIN_AREA_SHARE 0.1 /* the most frequent surface is the background only if it covers this much of the image
+                                  * (an unticked box in a list painted on nothing is not) */
 #define ON_LIGHT_SHARE 0.5 /* a text color this often inside a light surface (touching it, not the background) */
 #define LIGHT_SURFACE_SPREAD 60
 #define INK_MAX_OKL 0.5
@@ -711,6 +715,11 @@ static int is_blend(int k, int n)
                 continue;
             if (!ink->surface && !(ink->okl < c->okl || ink->chroma > c->chroma + 0.02))
                 continue;
+            if (c->touches != ~(uint64_t)0 && !((c->touches >> i) & 1U) && !((c->touches >> j) & 1U))
+                continue; /* a blend touches one of its ends at least (text fringes chain, but touch the paper) */
+            if (c->touches != ~(uint64_t)0 && !((c->touches >> i) & 1U) && c->count > ink->count)
+                continue; /* away from the surface and more frequent than the other end: a color of its own
+                           * (a check box's blue, between white and its own darker edge) */
             if (ink->surface && !((c->touches >> j) & 1U))
                 continue; /* a surface's edge touches it: gray text on a dark row lies between it and a white surface
                              * too (text fringes chain through each other, so text ink needs no touch) */
@@ -977,7 +986,7 @@ static void find_anchors(const uint32_t *p, int64_t count, int64_t width, int mo
      * nothing (FontLab's Unicode ranges and codepages lists) would pass for the background. Dim
      * marks (a field's gray frame drawn on nothing) keep the share of the opaque pixels. */
     share_of = (double)total;
-    if (anchor_count > 0 && anchors[0].surface)
+    if (anchor_count > 0 && anchors[0].surface && (double)anchors[0].count >= MAIN_MIN_AREA_SHARE * (double)area)
         main_l = anchors[0].okl;
     else
         share_of = (double)area;
@@ -1002,9 +1011,9 @@ static void find_anchors(const uint32_t *p, int64_t count, int64_t width, int mo
                 out = 0x000000;
                 a->mapped = 1;
             }
-        } else if (mode == ANCHORS_ALL || mode == ANCHORS_ICON) {
-            out = all_color(rgb, mode, dark_l, light_l, keep_tint);
-            a->mapped = out != rgb || mode == ANCHORS_ALL;
+        } else if (mode == ANCHORS_ALL || mode == ANCHORS_ICON || mode == ANCHORS_SUBPIXEL) {
+            out = all_color(rgb, mode == ANCHORS_SUBPIXEL ? ANCHORS_ALL : mode, dark_l, light_l, keep_tint);
+            a->mapped = out != rgb || mode != ANCHORS_ICON;
         } else if (hls >= WHITE_HLS && (a->surface || a->line)) {
             out = mapped_one(rgb, dark_l, light_l, 0.0);
             a->mapped = 1;
@@ -1103,6 +1112,7 @@ static double anchor_spread(const Anchor *a)
     return hi - lo;
 }
 
+#define DEFRINGE_CHROMA 0.08 /* text this colored loses ClearType's fringes toward the paper */
 #define FAR_PAIR_EXTRA_SPREAD 40.0 /* a far pair's blend is at most this much more colored than its anchors */
 #define FAR_PAIR_MAX_DISTANCE 30.0 /* and this far (RGB) from the line between them, however long the line */
 
@@ -1227,8 +1237,15 @@ static uint32_t resolve(uint32_t c, int translucent, uint32_t mask, int mode, do
     {
         Anchor *a = &anchors[a_i], *o = &anchors[b_i];
         double xr = r - (a->r + t * (o->r - a->r)), xg = g - (a->g + t * (o->g - a->g)), xb = b - (a->b + t * (o->b - a->b));
-        if (!a->mapped && !o->mapped)
+        if (!a->mapped && !o->mapped) {
+            /* Colored syntax kept on an editor's dark paper (blue keys): ClearType's navy fringes between
+             * the paper and the text become their plain blend, so the text keeps its weight. Gray text
+             * keeps its fringes (blending those thinned it). */
+            if (mode == ANCHORS_INK && ((mask >> a_i) & 1U) && ((mask >> b_i) & 1U) && (a_i == 0 || b_i == 0)
+                && anchors[0].surface && (anchors[a_i == 0 ? b_i : a_i].chroma >= DEFRINGE_CHROMA))
+                return pack(a->r + t * (o->r - a->r), a->g + t * (o->g - a->g), a->b + t * (o->b - a->b));
             return c;
+        }
         return pack(a->mr + t * (o->mr - a->mr) + tint * xr, a->mg + t * (o->mg - a->mg) + tint * xg,
                     a->mb + t * (o->mb - a->mb) + tint * xb);
     }
@@ -1258,13 +1275,118 @@ static int sharp_edge(const uint32_t *p, int64_t i, int64_t width, int64_t count
     return 0;
 }
 
+/* Ink mode: a white pixel with only colored pixels around it, besides white ones (a check box's tick
+ * on its blue box, a white glyph on a colored button), is drawn right for any interface and stays;
+ * the same white elsewhere (an unticked box, a white row) is mapped. */
+#define WHITE_MARK_REACH 1
+#define WHITE_MARK_OWN_HLS 0.8 /* the mark's own smoothing toward its colored box */
+#define WHITE_MARK_TEST_HLS 0.6 /* pixels this light are tested: the mark, and its smoothing */
+#define WHITE_MARK_SPREAD 50
+
+static int white_on_colored(const uint32_t *p, int64_t i, int64_t width, int64_t count)
+{
+    int64_t x, y, dx, dy, rows;
+    int colored = 0;
+    if (width <= 0)
+        return 0;
+    x = i % width;
+    y = i / width;
+    rows = count / width;
+    for (dy = -WHITE_MARK_REACH; dy <= WHITE_MARK_REACH; dy++) {
+        for (dx = -WHITE_MARK_REACH; dx <= WHITE_MARK_REACH; dx++) {
+            const uint8_t *q;
+            if (x + dx < 0 || x + dx >= width || y + dy < 0 || y + dy >= rows)
+                continue;
+            q = (const uint8_t *)&p[(y + dy) * width + x + dx];
+            if (lightness(q[2], q[1], q[0]) >= WHITE_MARK_OWN_HLS && q[3] >= ANCHOR_MIN_ALPHA)
+                continue; /* the mark itself */
+            if (q[3] < ANCHOR_MIN_ALPHA || spread_of(q) < WHITE_MARK_SPREAD)
+                return 0; /* beside nothing, or beside gray: not on a colored control */
+            colored = 1;
+        }
+    }
+    return colored;
+}
+
+/* Ink mode: the edge of a small white shape drawn on nothing (an unticked box a list's delegate paints
+ * as a white square) gets a frame color: mapped whole, the box was a dark square with no outline. */
+#define BOX_MAX_RUN 16
+#define BOX_FRAME 0x8c8c92U /* INDICATOR_BORDER["dark"] in freelab_dark_mode.py */
+
+static int white_run(const uint32_t *p, int64_t i, int64_t step, int64_t limit, int64_t width, int horizontal)
+{
+    int64_t n = 0, j = i;
+    while (n <= BOX_MAX_RUN) {
+        const uint8_t *q;
+        j += step;
+        if (j < 0 || j >= limit || (horizontal && (j / width) != (i / width)))
+            break;
+        q = (const uint8_t *)&p[j];
+        if (q[3] < ANCHOR_MIN_ALPHA || lightness(q[2], q[1], q[0]) < WHITE_HLS)
+            break;
+        n++;
+    }
+    return (int)n;
+}
+
+static int small_box_edge(const uint32_t *p, int64_t i, int64_t width, int64_t count)
+{
+    int64_t x = i % width, nb[4];
+    int side, beside_nothing = 0;
+    nb[0] = x > 0 ? i - 1 : -1;
+    nb[1] = x + 1 < width ? i + 1 : -1;
+    nb[2] = i - width;
+    nb[3] = i + width < count ? i + width : -1;
+    for (side = 0; side < 4; side++)
+        beside_nothing |= nb[side] < 0 || (p[nb[side]] >> 24) < ANCHOR_MIN_ALPHA;
+    if (!beside_nothing)
+        return 0;
+    return white_run(p, i, -1, count, width, 1) + white_run(p, i, 1, count, width, 1) + 1 <= BOX_MAX_RUN
+           && white_run(p, i, -width, count, width, 0) + white_run(p, i, width, count, width, 0) + 1 <= BOX_MAX_RUN;
+}
+
+/* ANCHORS_SUBPIXEL: TrueType Hinting's preview draws black text with ClearType on white paper (the main
+ * surface), each channel being paper * (1 - coverage), the coverage differing per channel (the
+ * subpixels). Each channel's coverage is kept and drawn from the mapped paper toward the mapped text
+ * color: the subpixel structure stays exact while the text turns light. Elsewhere (the gutter's
+ * colored numbers on their own gray) the plain mapping applies. */
+static uint32_t subpixel_color(uint32_t c, double dark_l, double light_l)
+{
+    const Anchor *paper = &anchors[0];
+    uint32_t text = all_color(0x000000U, ANCHORS_ALL, dark_l, light_l, 0.0);
+    double v[3], pc[3], mp[3], mt[3], out[3];
+    int ch;
+    v[0] = (double)((c >> 16) & 255);
+    v[1] = (double)((c >> 8) & 255);
+    v[2] = (double)(c & 255);
+    pc[0] = paper->r;
+    pc[1] = paper->g;
+    pc[2] = paper->b;
+    mp[0] = paper->mr;
+    mp[1] = paper->mg;
+    mp[2] = paper->mb;
+    mt[0] = (double)((text >> 16) & 255);
+    mt[1] = (double)((text >> 8) & 255);
+    mt[2] = (double)(text & 255);
+    for (ch = 0; ch < 3; ch++) {
+        double cov = pc[ch] > 0.0 ? 1.0 - v[ch] / pc[ch] : 0.0;
+        if (cov < 0.0)
+            cov = 0.0;
+        if (cov > 1.0)
+            cov = 1.0;
+        out[ch] = mp[ch] + cov * (mt[ch] - mp[ch]);
+    }
+    return pack(out[0], out[1], out[2]);
+}
+
 EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width, int mode, double dark_l,
                                    double light_l, double keep_tint, double main_default, int apply)
 {
     uint32_t *p = (uint32_t *)pixels;
     uint32_t last_in = 0, last_out = 0;
     int have_last = 0, any_mapped = 0, j, local, tinted, last_edge = 0;
-    uint32_t paper_bit, other_surfaces;
+    uint32_t paper_bit, other_surfaces, other_surface_bits;
+    int white_marks = 0;
     int64_t i, changed = 0;
     find_anchors(p, count, width, mode, dark_l, light_l, keep_tint, main_default);
     for (j = 0; j < anchor_count; j++)
@@ -1276,6 +1398,14 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
         for (i = 0; i < count; i++) {
             uint8_t *px = pixels + 4 * i;
             if (px[3] > 0 && lightness(px[2], px[1], px[0]) >= WHITE_HLS) {
+                if (mode == ANCHORS_INK && white_on_colored(p, i, width, count))
+                    continue;
+                if (mode == ANCHORS_INK && width > 0 && small_box_edge(p, i, width, count)) {
+                    changed++;
+                    if (apply)
+                        p[i] = (p[i] & 0xff000000U) | BOX_FRAME;
+                    continue;
+                }
                 changed++;
                 if (apply)
                     map_rgb(&px[2], &px[1], &px[0], dark_l, light_l, 0.0);
@@ -1284,14 +1414,18 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
         return changed;
     }
     /* Neighborhoods matter where kept and mapped anchors could explain the same pixel. */
-    local = (mode == ANCHORS_INK || mode == ANCHORS_RELIGHT) && width > 0 && count <= MAX_INDEXED;
+    local = (mode == ANCHORS_INK || mode == ANCHORS_RELIGHT || mode == ANCHORS_SUBPIXEL) && width > 0 && count <= MAX_INDEXED;
     if (local)
         index_pixels(p, count);
     tinted = (mode == ANCHORS_ALL || mode == ANCHORS_ICON) && keep_tint > 0.0 && width > 0;
     /* Text smoothing lies between the paper and the text, even where the pixels around are all
      * fringes (ClearType's navy and red beside blue syntax on a dark editor): the kept paper always
      * counts as around, or a far pair of text colors (blue and black ink) claimed those fringes. */
+    other_surface_bits = 0;
+    for (j = 1; j < anchor_count; j++)
+        other_surface_bits |= anchors[j].surface ? 1U << j : 0U;
     paper_bit = mode == ANCHORS_INK && anchor_count > 1 && anchors[0].surface && !anchors[0].mapped ? 1U : 0U;
+    white_marks = mode == ANCHORS_INK;
     main_bit = paper_bit;
     other_surfaces = 0;
     for (j = 1; j < anchor_count; j++)
@@ -1301,6 +1435,20 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
         int edge;
         if (alpha == 0)
             continue;
+        if (white_marks && alpha >= ANCHOR_MIN_ALPHA
+            && lightness((uint8_t)(v >> 16), (uint8_t)(v >> 8), (uint8_t)v) >= WHITE_MARK_TEST_HLS
+            && white_on_colored(p, i, width, count)) { /* the mark and its smoothing toward the box */
+            have_last = 0;
+            continue;
+        }
+        if (white_marks && alpha >= ANCHOR_MIN_ALPHA && width > 0
+            && lightness((uint8_t)(v >> 16), (uint8_t)(v >> 8), (uint8_t)v) >= WHITE_HLS && small_box_edge(p, i, width, count)) {
+            changed++;
+            if (apply)
+                p[i] = (v & 0xff000000U) | BOX_FRAME;
+            have_last = 0;
+            continue;
+        }
         if (local && alpha >= ANCHOR_MIN_ALPHA && a_index[i] < 0)
             mask = neighborhood(i, count, width);
         if (mask && !(mask & other_surfaces))
@@ -1315,6 +1463,26 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
             continue;
         }
         c = v & 0xffffff;
+        if (mode == ANCHORS_SUBPIXEL) {
+            int a_here = local ? a_index[i] : -1;
+            /* only surfaces map as anchors: ClearType's frequent fringe colors are anchors too, and
+             * mapped as such kept their orange and blue */
+            uint32_t around = local ? neighborhood(i, count, width) : 0U;
+            if (a_here >= 0 && anchors[a_here].surface)
+                out = pack(anchors[a_here].mr, anchors[a_here].mg, anchors[a_here].mb);
+            else if (anchor_count > 0 && anchors[0].surface && (around & 1U) && !(around & other_surface_bits))
+                out = subpixel_color(c, dark_l, light_l); /* text on the main paper */
+            else
+                out = all_color(c, ANCHORS_ALL, dark_l, light_l, 0.0);
+            out |= v & 0xff000000U;
+            have_last = 0;
+            if (out != v) {
+                changed++;
+                if (apply)
+                    p[i] = out;
+            }
+            continue;
+        }
         key = c | (alpha < ANCHOR_MIN_ALPHA ? 0x1000000U : 0U) | (edge ? 0x2000000U : 0U);
         if (!memo_get(key, mask, &out)) {
             out = resolve(c, alpha < ANCHOR_MIN_ALPHA, mask, mode, dark_l, light_l, keep_tint,
