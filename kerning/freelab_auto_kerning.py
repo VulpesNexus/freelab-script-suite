@@ -55,7 +55,6 @@ SOURCES = (("average", "Average of halfkern and Contour"), ("halfkern", "halfker
 ORDERS = (("change", "Largest change first"), ("agreement", "Best agreement first"), ("common", "Most common first"),
           ("alphabet", "Alphabetical"))
 PREVIEW_SIZE = 40  # pixels per em in the dialog's preview
-PREVIEW_ROW = 50  # pixels between the preview's lines
 COMMON_PAIRS_FILE = "common_pairs.txt"  # beside this script
 CACHE_VERSION = 1  # raise when the measuring changes in a way the settings below do not show
 # The learned method's features: the gap between a pair's facing edges in height bands, from below
@@ -769,12 +768,15 @@ def analyze(package, master, characters=None, em=EM_PIXELS, progress=None, core=
 # The dialog
 # ---------------------------------------------------------------------------
 
-OVERRIDES = (("", "Write values from (above)"), ("average", "Average of halfkern and Contour"), ("halfkern", "halfkern"),
-             ("contour", "Contour"), ("learned", "Learned"), ("fontlab", "FontLab"), ("current", "Keep the current kerning"))
+# The preview's choices, a button each: clicking one picks it for the selected pair alone.
+CHOICES = (("current", "Now"), ("average", "Average"), ("halfkern", "halfkern"), ("contour", "Contour"),
+           ("learned", "Learned"), ("fontlab", "FontLab"))
+LEAVE_ALONE_PROP = "freelabLeaveAlone"  # dark mode leaves the preview's pictures as they are drawn
+CHOICE_SHEET = u"QToolButton:checked { border: 2px solid palette(highlight); border-radius: 3px; }"  # the pair's choice, plain to see
 
 
 class AutoKerningDialog(object):
-    COLUMNS = ("Pair", "Current", "halfkern", "Contour", "Learned", "FontLab", "Spread", "Write")
+    COLUMNS = ("Pair", "Current", "halfkern", "Contour", "Learned", "FontLab", "Spread", "Suggested")
 
     def __init__(self):
         QtCore, QtGui = _qt()
@@ -812,7 +814,7 @@ class AutoKerningDialog(object):
         row.addWidget(self.analyze_button)
         layout.addLayout(row)
         row = QtGui.QHBoxLayout()
-        row.addWidget(QtGui.QLabel("Write values from"))
+        row.addWidget(QtGui.QLabel("Suggested values from"))
         self.source = self.combo(SOURCES)
         row.addWidget(self.source)
         self.order = self.combo(ORDERS)
@@ -831,18 +833,23 @@ class AutoKerningDialog(object):
         self.table.verticalHeader().setDefaultSectionSize(QtGui.QFontMetrics(self.table.font).height() + 6)  # PythonQt has no widget.fontMetrics()
         self.table.horizontalHeader().setSectionResizeMode(QtGui.QHeaderView.Stretch)  # the columns share the width
         layout.addWidget(self.table, 1)
-        preview_row = QtGui.QHBoxLayout()
-        self.preview = QtGui.QLabel()
-        self.preview.setMinimumHeight(6 * PREVIEW_ROW + 12)
-        preview_row.addWidget(self.preview, 1)
-        choice = QtGui.QVBoxLayout()
-        choice.addWidget(QtGui.QLabel("This pair uses"))
-        self.override = self.combo(OVERRIDES)
-        self.override.setEnabled(False)
-        choice.addWidget(self.override)
-        choice.addStretch(1)
-        preview_row.addLayout(choice)
-        layout.addLayout(preview_row)
+        self.preview_note = QtGui.QLabel("Select a pair to compare the methods; click one to use it for that pair.")
+        layout.addWidget(self.preview_note)
+        grid = QtGui.QGridLayout()
+        self.choice_group = QtGui.QButtonGroup(dialog)
+        self.choice_buttons = {}
+        for number, (key, label) in enumerate(CHOICES):
+            button = QtGui.QToolButton()
+            button.setCheckable(True)
+            button.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
+            button.setSizePolicy(QtGui.QSizePolicy.Expanding, QtGui.QSizePolicy.Fixed)
+            button.setProperty(LEAVE_ALONE_PROP, True)
+            button.setStyleSheet(CHOICE_SHEET)
+            button.setEnabled(False)
+            self.choice_group.addButton(button, number)
+            self.choice_buttons[key] = button
+            grid.addWidget(button, number // 2, number % 2)
+        layout.addLayout(grid)
         buttons = QtGui.QHBoxLayout()
         self.all_button = QtGui.QPushButton("Check new pairs")
         self.none_button = QtGui.QPushButton("Check none")
@@ -866,7 +873,7 @@ class AutoKerningDialog(object):
         self.tolerance.connect("valueChanged(int)", lambda value: self.refilter())
         self.include_kerned.connect("toggled(bool)", lambda on: self.refilter())
         self.source.connect("currentIndexChanged(int)", lambda index: self.refresh_values())  # the list stays as it is
-        self.override.connect("currentIndexChanged(int)", lambda index: self.choose(index))
+        self.choice_group.connect("buttonClicked(int)", lambda number: self.choose(CHOICES[number][0]))
 
     def current_font(self):
         """FontLab's current font, or None when no font is open (FontLab then hands an empty package)."""
@@ -1025,11 +1032,11 @@ class AutoKerningDialog(object):
         for column, value in enumerate(cells, 1):
             text = u"\u2013" if value is None else str(value)
             if column == len(self.COLUMNS) - 1 and s.override:
-                text = u"%s (%s)" % (text, dict(OVERRIDES)[s.override].split(" ")[0].lower())  # chosen for this pair
+                text = u"%s (%s)" % (text, dict(CHOICES)[s.override].lower())  # chosen for this pair
             self.table.item(row, column).setText(text)
 
     def refresh_values(self):
-        """Another source: only the Write column and the preview change."""
+        """Another source: only the Suggested column and the preview change."""
         source = self.source_key()
         for row, s in enumerate(self.suggestions):
             self.fill_row(row, s, source)
@@ -1046,71 +1053,66 @@ class AutoKerningDialog(object):
         rows = self.table.selectionModel().selectedRows()
         if not rows or rows[0].row() >= len(self.suggestions):
             self.selected = None
-            self.preview.clear()
-            self.override.setEnabled(False)
+            for button in self.choice_buttons.values():
+                button.setEnabled(False)
+                button.setText(u"")
+                button.setIcon(_qt()[1].QIcon())
             return
         self.selected = rows[0].row()
-        s = self.suggestions[self.selected]
-        keys = [key for key, _ in OVERRIDES]
-        self.override.blockSignals(True)
-        self.override.setCurrentIndex(keys.index(s.override or ""))
-        self.override.blockSignals(False)
-        self.override.setEnabled(True)
-        self.show_preview(s)
+        self.show_preview(self.suggestions[self.selected])
 
-    def choose(self, index):
-        """This pair's own source, from the preview's choice."""
+    def choose(self, key):
+        """The clicked method for the selected pair alone; the dialog's source again clears the choice."""
         if self.selected is None:
             return
         s = self.suggestions[self.selected]
-        s.override = OVERRIDES[index][0] or None
+        s.override = None if key == self.source_key() else key
         self.fill_row(self.selected, s, self.source_key())
         self.show_preview(s)
 
     def show_preview(self, s):
-        """The pair between two H's: as set now, by each method, and as it will be written."""
+        """Each choice's button: the pair between two H's as that method sets it, its value, and the
+        one the pair will take checked."""
         QtCore, QtGui = _qt()
         source = self.source_key()
-        lines = [("Now", s.current), ("halfkern", s.values.get("halfkern")), ("Contour", s.values.get("contour")),
-                 ("Learned", s.values.get("learned")), ("FontLab", s.values.get("fontlab")), ("Written", s.to_write(source))]
-        width, height = max(320, self.preview.width), len(lines) * PREVIEW_ROW + 12
+        chosen = s.override or source
         palette = self.dialog.palette
-        text = palette.color(QtGui.QPalette.Text)
-        faint = QtGui.QColor(text)
-        faint.setAlpha(150)  # PythonQt in FontLab 7 has no QPalette.PlaceholderText (asking for it crashed FontLab)
+        text = palette.color(QtGui.QPalette.Text)  # (FontLab 7's PythonQt lacks the placeholder text role)
         scale = float(PREVIEW_SIZE) / float(self.package.upm)
         glyphs = [self.package.findName(n) for n in ("H", s.left, s.right, "H")]
         paths = [(glyph.getLayerByName(self.master), layer_path(glyph.getLayerByName(self.master)))
                  for glyph in glyphs if glyph is not None and not glyph.isNull]
-        pixmap = QtGui.QPixmap(width, height)
-        pixmap.fill(palette.color(QtGui.QPalette.Base))
-        painter = QtGui.QPainter(pixmap)
-        try:  # ended before anything else can fail: a painter left open on a freed pixmap aborts FontLab
-            self.paint_preview(painter, lines, paths, scale, text, faint)
-        finally:
-            painter.end()
-        self.preview.setPixmap(pixmap)
+        width = int(sum(layer.advanceWidth for layer, _ in paths) * scale) + 2 * PREVIEW_SIZE
+        for key, label in CHOICES:
+            button, kern = self.choice_buttons[key], s.value(key)
+            button.setText(u"%s\n%s" % (label, u"\u2013" if kern is None else kern))
+            button.setEnabled(kern is not None)
+            button.setChecked(key == chosen)
+            if kern is None:
+                button.setIcon(QtGui.QIcon())
+                continue
+            pixmap = QtGui.QPixmap(width, int(PREVIEW_SIZE * 1.3))
+            pixmap.fill(QtGui.QColor(0, 0, 0, 0))
+            painter = QtGui.QPainter(pixmap)
+            try:  # ended before anything else can fail: a painter left open on a freed pixmap aborts FontLab
+                self.paint_pair(painter, paths, scale, kern, text)
+            finally:
+                painter.end()
+            button.setIcon(QtGui.QIcon(pixmap))
+            button.setIconSize(pixmap.size())
 
     @staticmethod
-    def paint_preview(painter, lines, paths, scale, text, faint):
+    def paint_pair(painter, paths, scale, kern, color):
         QtCore, QtGui = _qt()
         painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
-        for line, (label, kern) in enumerate(lines):
-            top = 6 + line * PREVIEW_ROW
-            painter.setPen(text)
-            painter.drawText(8, top + PREVIEW_ROW // 2, label)
-            painter.setPen(faint)
-            painter.drawText(8, top + PREVIEW_ROW // 2 + 16, u"\u2013" if kern is None else str(kern))
-            if kern is None:
-                continue
-            x = 110.0
-            for index, (layer, path) in enumerate(paths):
-                painter.save()
-                painter.translate(x, top + PREVIEW_SIZE * 0.95)
-                painter.scale(scale, -scale)
-                painter.fillPath(path, QtGui.QBrush(text))
-                painter.restore()
-                x += layer.advanceWidth * scale + (kern * scale if index == 1 else 0)
+        x = float(PREVIEW_SIZE) / 2
+        for index, (layer, path) in enumerate(paths):
+            painter.save()
+            painter.translate(x, PREVIEW_SIZE * 1.05)
+            painter.scale(scale, -scale)
+            painter.fillPath(path, QtGui.QBrush(color))
+            painter.restore()
+            x += layer.advanceWidth * scale + (kern * scale if index == 1 else 0)
 
     def write(self):
         QtCore, QtGui = _qt()
