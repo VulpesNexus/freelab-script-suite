@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 92
+#define FREELAB_PIXELS_VERSION 98
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -416,6 +416,7 @@ EXPORT void freelab_map_keyed(uint8_t *pixels, int64_t count, int64_t width, con
 #define ANCHORS_ALL 1
 #define ANCHORS_RELIGHT 2 /* back to light: a dark main paper turns white, light gray text black, the rest stays */
 #define ANCHORS_ICON 3 /* as ANCHORS_ALL, but colored parts of middle lightness (blue guides, green fills) stay */
+#define ANCHORS_SUBPIXEL_SYNTAX 5 /* as ANCHORS_SUBPIXEL, for an editor on light paper: colored syntax, never black assumed */
 #define ANCHORS_SUBPIXEL 4 /* as ANCHORS_ALL, for ClearType text drawn on purpose (TrueType Hinting's preview):
                               each channel's coverage between the paper and the text is kept */
 #define ICON_KEEP_CHROMA 0.08
@@ -1493,37 +1494,96 @@ static int small_box_edge(const uint32_t *p, int64_t i, int64_t width, int64_t c
     return 1;
 }
 
-/* ANCHORS_SUBPIXEL: TrueType Hinting's preview draws black text with ClearType on white paper (the main
- * surface), each channel being paper * (1 - coverage), the coverage differing per channel (the
- * subpixels). Each channel's coverage is kept and drawn from the mapped paper toward the mapped text
- * color: the subpixel structure stays exact while the text turns light. Elsewhere (the gutter's
- * colored numbers on their own gray) the plain mapping applies. */
-static uint32_t subpixel_color(uint32_t c, double dark_l, double light_l)
+/* ANCHORS_SUBPIXEL: text drawn with ClearType on light paper (TrueType Hinting's preview; an editor
+ * that took its paper from a light palette). Each channel is paper * (1 - coverage) + text * coverage,
+ * the coverage differing per channel (the subpixels). The text is the color around the pixel that
+ * explains it and lies farthest from the paper (a blue key's core, black; a fringe explains itself
+ * but lies nearer); its dark-mode color keeps it if of middle lightness and colored (syntax colors),
+ * else turns its lightness. Each channel's coverage is redrawn from the mapped paper toward that color:
+ * ClearType's own light-on-dark rendering, the subpixel structure kept. */
+#define SUBPIXEL_MIN_CONTRAST 30.0
+
+static double rgb_channel(uint32_t c, int ch)
+{
+    return (double)((c >> (16 - 8 * ch)) & 255U);
+}
+
+static uint32_t subpixel_text_mapped(uint32_t t, double dark_l, double light_l)
+{
+    if (icon_keeps(t))
+        return t;
+    return all_color(t, ANCHORS_ALL, dark_l, light_l, 0.0);
+}
+
+static int mode_icon_fallback; /* set per call: editors (colored syntax) */
+
+static uint32_t subpixel_color(uint32_t c, uint32_t mask, double dark_l, double light_l)
 {
     const Anchor *paper = &anchors[0];
-    uint32_t text = all_color(0x000000U, ANCHORS_ALL, dark_l, light_l, 0.0);
-    double v[3], pc[3], mp[3], mt[3], out[3];
-    int ch;
-    v[0] = (double)((c >> 16) & 255);
-    v[1] = (double)((c >> 8) & 255);
-    v[2] = (double)(c & 255);
-    pc[0] = paper->r;
-    pc[1] = paper->g;
-    pc[2] = paper->b;
-    mp[0] = paper->mr;
-    mp[1] = paper->mg;
-    mp[2] = paper->mb;
-    mt[0] = (double)((text >> 16) & 255);
-    mt[1] = (double)((text >> 8) & 255);
-    mt[2] = (double)(text & 255);
-    for (ch = 0; ch < 3; ch++) {
-        double cov = pc[ch] > 0.0 ? 1.0 - v[ch] / pc[ch] : 0.0;
-        if (cov < 0.0)
-            cov = 0.0;
-        if (cov > 1.0)
-            cov = 1.0;
-        out[ch] = mp[ch] + cov * (mt[ch] - mp[ch]);
+    uint32_t pc = pack(paper->r, paper->g, paper->b), mp = pack(paper->mr, paper->mg, paper->mb);
+    uint32_t text = 0x000000U, mt;
+    double best = 1e9, cov[3], best_cov[3], out[3];
+    int j, ch, found = 0;
+    for (j = 1; j <= anchor_count; j++) {
+        uint32_t t;
+        double err = 0.0, sum = 0.0, dist = 0.0, score;
+        int valid = 0;
+        if (j < anchor_count) {
+            const Anchor *a = &anchors[j];
+            if (!mode_icon_fallback)
+                continue; /* the hinting preview's text is black: its ClearType colors are fringes, never text */
+            if (!((mask >> j) & 1U) || a->surface || a->okl >= paper->okl - 0.15)
+                continue;
+            t = pack(a->r, a->g, a->b);
+        } else {
+            uint8_t px[3];
+            px[2] = (uint8_t)(c >> 16);
+            px[1] = (uint8_t)(c >> 8);
+            px[0] = (uint8_t)c;
+            if (found || (mode_icon_fallback && spread_of(px) > LINEAR_SPREAD))
+                break; /* a strongly colored pixel with no text color around (a rare red digit): as icons map */
+            t = 0x000000U; /* else the smoothing of dark text with no core of its own (a thin quote): black */
+        }
+        for (ch = 0; ch < 3; ch++) {
+            double p = rgb_channel(pc, ch), f = rgb_channel(t, ch), v = rgb_channel(c, ch);
+            dist += (p - f) * (p - f);
+            if (p - f >= SUBPIXEL_MIN_CONTRAST || f - p >= SUBPIXEL_MIN_CONTRAST) {
+                cov[ch] = (p - v) / (p - f);
+                err += cov[ch] < 0.0 ? -cov[ch] : cov[ch] > 1.0 ? cov[ch] - 1.0 : 0.0;
+                sum += cov[ch];
+                valid++;
+            } else {
+                cov[ch] = -1000.0;
+            }
+        }
+        if (!valid)
+            continue;
+        for (ch = 0; ch < 3; ch++) {
+            if (cov[ch] == -1000.0)
+                cov[ch] = sum / valid;
+            cov[ch] = cov[ch] < 0.0 ? 0.0 : cov[ch] > 1.0 ? 1.0 : cov[ch];
+        }
+        score = 10.0 * err - sqrt_pos(dist) / 442.0;
+        if (score < best) {
+            best = score;
+            text = t;
+            found = 1;
+            best_cov[0] = cov[0];
+            best_cov[1] = cov[1];
+            best_cov[2] = cov[2];
+        }
     }
+    if (!found) /* no text color around (a rare red digit): its own dark-mode color, as icons map */
+        return subpixel_text_mapped(c, dark_l, light_l);
+    mt = subpixel_text_mapped(text, dark_l, light_l);
+    if (mode_icon_fallback) {
+        /* editors: one coverage per pixel, the channels' mean: gray smoothing, as the Features panel's
+         * editor draws (ClearType's per-channel colors read as fringes on a dark paper) */
+        double mean = (best_cov[0] + best_cov[1] + best_cov[2]) / 3.0;
+        best_cov[0] = best_cov[1] = best_cov[2] = mean;
+    }
+    for (ch = 0; ch < 3; ch++)
+        out[ch] = rgb_channel(mp, ch) + best_cov[ch] * (rgb_channel(mt, ch) - rgb_channel(mp, ch));
     return pack(out[0], out[1], out[2]);
 }
 
@@ -1601,6 +1661,9 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
     uint32_t left_orig = 0;
     double paper_hls;
     int64_t i, changed = 0;
+    mode_icon_fallback = mode == ANCHORS_SUBPIXEL_SYNTAX;
+    if (mode_icon_fallback)
+        mode = ANCHORS_SUBPIXEL;
     find_anchors(p, count, width, mode, dark_l, light_l, keep_tint, main_default);
     for (j = 0; j < anchor_count; j++)
         any_mapped |= anchors[j].mapped;
@@ -1705,7 +1768,7 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
             if (a_here >= 0 && anchors[a_here].surface)
                 out = pack(anchors[a_here].mr, anchors[a_here].mg, anchors[a_here].mb);
             else if (anchor_count > 0 && anchors[0].surface && (around & 1U) && !(around & other_surface_bits))
-                out = subpixel_color(c, dark_l, light_l); /* text on the main paper */
+                out = subpixel_color(c, around | (a_here >= 0 ? 1U << a_here : 0U), dark_l, light_l); /* text on the main paper */
             else
                 out = all_color(c, ANCHORS_ALL, dark_l, light_l, 0.0);
             out |= v & 0xff000000U;

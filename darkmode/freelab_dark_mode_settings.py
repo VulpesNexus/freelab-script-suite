@@ -21,6 +21,7 @@ DARK_MODE_FILE = "freelab_dark_mode.py"
 THEMES = (("dark", "Dark"), ("automatic", "Automatic (matches system theme)"))
 MIXED = "Mixed (dark interface, light canvases)"
 SHADES = (("dark", "Dark grays"), ("medium", "Medium grays"))
+SYSTEM_CHECK_MS = 2000  # how often the open dialog looks at Windows' theme
 
 
 def dark_mode_module():
@@ -117,9 +118,25 @@ def show_dialog():
             shown["value"] = choice
             dm.configure(**choice)
 
+    def system_light(*_args):
+        """Under Automatic while Windows is light, FontLab is light: mixed and the shade do nothing until
+        Windows turns dark, so they are grayed out; checked again every few seconds while the dialog is
+        open, so a theme that changes on a schedule shows here too."""
+        idle = themes["automatic"].isChecked() and not dm.windows_is_dark()
+        mixed_box.setEnabled(not idle)
+        for button in shades.values():
+            button.setEnabled(not idle)
+
     for button in list(themes.values()) + list(shades.values()):
         button.connect("toggled(bool)", preview)
     mixed_box.connect("toggled(bool)", preview)
+    themes["automatic"].connect("toggled(bool)", system_light)
+    from PythonQt.QtCore import QTimer
+    watch = QTimer(dialog)
+    watch.setInterval(SYSTEM_CHECK_MS)
+    watch.connect("timeout()", system_light)
+    watch.start()
+    system_light()
     if not dialog.exec_():
         if shown["value"] is not None:
             dm.configure(**before)

@@ -210,7 +210,7 @@ SWEEP_MS = 750  # how often to look for widgets FontLab created or showed
 FULL_SWEEP_EVERY = 40  # every Nth sweep revisits every widget (replaced stylesheets, new icons)
 FOCUS_DRAIN_MS = 80  # a window that takes focus is darkened at once, up to this long, before it paints light
 MAX_ERRORS = 50
-NATIVE_VERSION = 92
+NATIVE_VERSION = 98
 
 ID_PROP = "freelab_id"  # dynamic properties FreeLab sets on widgets, all removed by restore()
 SEEN_PROP = "freelab_seen"
@@ -649,7 +649,7 @@ def _address(image):
     return ctypes.addressof(ctypes.c_char.from_buffer(image.bits()))
 
 
-ANCHOR_MODES = {"ink": 0, "all": 1, "relight": 2, "icon": 3, "subpixel": 4}
+ANCHOR_MODES = {"ink": 0, "all": 1, "relight": 2, "icon": 3, "subpixel": 4, "syntax": 5}
 
 
 def map_image(image, min_l=0.0, keys=None, ink_below=-1.0, keep_tint=0.0, light_l=None, edge_neutral=0.0, edge_target=0,
@@ -691,7 +691,7 @@ def map_image(image, min_l=0.0, keys=None, ink_below=-1.0, keep_tint=0.0, light_
         except Exception as exc:
             _note_error("map_image", exc)
             _state()["native"] = None
-    if anchors in ("all", "icon", "subpixel") or (not anchors and min_l <= 0.0 and not keys):
+    if anchors in ("all", "icon", "subpixel", "syntax") or (not anchors and min_l <= 0.0 and not keys):
         image.invertPixels()
     return image
 
@@ -1225,16 +1225,18 @@ def _effect_classes():
                         return
                     anchors = {"island": "all", "subpixel": "subpixel"}.get(kind, "ink")
                     if kind == "edges":
-                        margin = editor_margin(pixmap)
-                        if margin:
-                            draw_mapped(painter, pixmap, offset, QRect(offset.x(), offset.y(), margin, pixmap.height()),
-                                        0.0, None, -1.0, 0.0, MARGIN_OKL)
-                            whole = QRect(offset.x() + margin, offset.y(), pixmap.width() - margin, pixmap.height())
-                        if light_paper(pixmap, margin):
-                            # paper the editor took from a light palette: mapped whole, but its syntax colors of
-                            # middle lightness (blue keys, red numbers) kept, as on a dark paper (inverted, the
-                            # keys turned a dim blue)
-                            anchors = "icon"
+                        if light_paper(pixmap, 0):
+                            # paper the editor took from a light palette: its ClearType text redrawn per channel
+                            # toward each syntax color's dark-mode color (blue keys and red numbers kept), as
+                            # ClearType draws light text on dark; inverting lightness left every edge fringed. Mapped
+                            # in one piece, margin included: on white paper every column looks like the margin
+                            anchors = "syntax"
+                        else:
+                            margin = editor_margin(pixmap)
+                            if margin:
+                                draw_mapped(painter, pixmap, offset, QRect(offset.x(), offset.y(), margin, pixmap.height()),
+                                            0.0, None, -1.0, 0.0, MARGIN_OKL)
+                                whole = QRect(offset.x() + margin, offset.y(), pixmap.width() - margin, pixmap.height())
                     # Fields paint an opaque background, so their light text keeps ClearType's colored
                     # fringes even inside an effect: grays, unless text is selected (the blue highlight).
                     gray = getattr(self, "freelab_gray", False) and not (
