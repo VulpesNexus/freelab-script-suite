@@ -407,6 +407,117 @@ class SettingsModuleTests(unittest.TestCase):
         self.assertTrue(callable(settings.show_dialog))
 
 
+class FakeSci(object):
+    """SendScintilla on a fake editor: style colors, caret, and caret line, as Scintilla's BGR integers."""
+
+    def __init__(self, fore, back, caret=0x000000, caret_line=0xffffff):
+        self.colors = {}
+        for style in range(40):
+            self.colors[(dm.SCI_STYLESETFORE, style)] = fore.get(style, 0x000000)
+            self.colors[(dm.SCI_STYLESETBACK, style)] = back.get(style, 0xffffff)
+        self.colors[(dm.SCI_SETCARETFORE, None)] = caret
+        self.colors[(dm.SCI_SETCARETLINEBACK, None)] = caret_line
+        self.sets = 0
+
+    def __call__(self, pointer, message, w, l):
+        getters = {dm.SCI_STYLEGETFORE: dm.SCI_STYLESETFORE, dm.SCI_STYLEGETBACK: dm.SCI_STYLESETBACK}
+        if message in getters:
+            return self.colors[(getters[message], w)]
+        if message == dm.SCI_GETCARETFORE:
+            return self.colors[(dm.SCI_SETCARETFORE, None)]
+        if message == dm.SCI_GETCARETLINEBACK:
+            return self.colors[(dm.SCI_SETCARETLINEBACK, None)]
+        self.sets += 1
+        if message in (dm.SCI_STYLESETFORE, dm.SCI_STYLESETBACK):
+            self.colors[(message, w)] = l
+        else:
+            self.colors[(message, None)] = w
+        return 0
+
+
+class LightPalette(object):
+    class White(object):
+        def red(self):
+            return 255
+
+        green = blue = red
+
+    def color(self, role):
+        return self.White()
+
+
+class EditorTests(DarkModeCase):
+    NAVY, RED, WHITE, DARK = 0xad7559, 0x6d6fd6, 0xffffff, 0x1e1e1e  # BGR
+
+    def setUp(self):
+        DarkModeCase.setUp(self)
+        self.patch("_sci_pointer", lambda widget: 0x1000)
+        self.editor = FakeWidget("QsciScintilla", "JsonCode")
+
+    def use(self, sci):
+        self.patch("_sci_send", lambda: sci)
+        return sci
+
+    def rgb(self, value):
+        return dm._bgr_to_rgb(value)
+
+    def test_text_colors_keep_their_hue(self):
+        self.assertEqual(dm.editor_text_rgb((0, 0, 0)), tuple(dm.map_rgb(0, 0, 0)), "black text: light gray")
+        r, g, b = dm.editor_text_rgb((0x59, 0x75, 0xad))
+        self.assertGreater(b, r + 40, "navy keys stay blue")
+        self.assertGreaterEqual(dm.oklab(r, g, b)[0], dm.EDITOR_TEXT_MIN_L - 0.02)
+        self.assertEqual(dm.editor_paper_rgb((0x1e, 0x1e, 0x1e)), (0x1e, 0x1e, 0x1e), "dark paper kept")
+        self.assertLess(dm._lightness(*dm.editor_paper_rgb((255, 255, 255))), 0.3, "white paper mapped dark")
+
+    def test_editor_is_colored_natively_and_put_back(self):
+        sci = self.use(FakeSci({0: 0x000000, 4: self.NAVY, 1: self.RED}, {s: self.DARK for s in range(40)}))
+        dm._state()["on"] = True
+        record = dm._record(self.editor)
+        self.assertTrue(dm._darken_editor(self.editor, record))
+        fore0 = self.rgb(sci.colors[(dm.SCI_STYLESETFORE, 0)])
+        self.assertGreater(dm._lightness(*fore0), 0.6, "black text drawn light")
+        self.assertFalse(dm._editor_restyled(self.editor, record))
+        sets = sci.sets
+        dm._darken_editor(self.editor, record)
+        self.assertEqual(sci.sets, sets, "nothing set twice")
+        sci.colors[(dm.SCI_STYLESETFORE, 0)] = 0x000000  # FontLab restyles the editor
+        self.assertTrue(dm._editor_restyled(self.editor, record))
+        dm._darken_editor(self.editor, record)
+        self.assertGreater(dm._lightness(*self.rgb(sci.colors[(dm.SCI_STYLESETFORE, 0)])), 0.6)
+        dm._restore_editor(self.editor, record)  # still on: FontLab's own colors back, as they were
+        self.assertEqual(sci.colors[(dm.SCI_STYLESETFORE, 4)], self.NAVY)
+        self.assertEqual(sci.colors[(dm.SCI_STYLESETBACK, 0)], self.DARK)
+        self.assertNotIn("sci", record)
+
+    def test_switching_off_gives_dark_made_editors_light_paper(self):
+        sci = self.use(FakeSci({0: 0x000000, 11: 0xdcdcdc}, {s: self.DARK for s in range(40)}))
+        state = dm._state()
+        state["on"] = True
+        record = dm._record(self.editor)
+        dm._darken_editor(self.editor, record)
+        state["on"] = False
+        state["saved"] = {"palette": LightPalette()}
+        dm._restore_editor(self.editor, record)
+        self.assertEqual(sci.colors[(dm.SCI_STYLESETBACK, 0)], self.WHITE, "dark paper made light")
+        self.assertEqual(sci.colors[(dm.SCI_STYLESETFORE, 0)], 0x000000, "black text kept")
+        self.assertLess(dm._lightness(*self.rgb(sci.colors[(dm.SCI_STYLESETFORE, 11)])), 0.4, "light gray text made dark")
+
+    def test_a_color_fontlab_changed_meanwhile_is_left(self):
+        sci = self.use(FakeSci({4: self.NAVY}, {}))
+        dm._state()["on"] = True
+        record = dm._record(self.editor)
+        dm._darken_editor(self.editor, record)
+        sci.colors[(dm.SCI_STYLESETFORE, 4)] = self.RED
+        dm._restore_editor(self.editor, record)
+        self.assertEqual(sci.colors[(dm.SCI_STYLESETFORE, 4)], self.RED)
+
+    def test_without_scintilla_nothing_happens(self):
+        self.patch("_sci_send", lambda: None)
+        record = dm._record(self.editor)
+        self.assertFalse(dm._darken_editor(self.editor, record))
+        self.assertNotIn("sci", record)
+
+
 class KindTests(DarkModeCase):
     def test_kinds(self):
         self.assertEqual(dm.widget_kind(self.search), "island")

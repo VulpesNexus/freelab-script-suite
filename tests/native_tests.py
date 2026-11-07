@@ -394,6 +394,19 @@ class NativeTests(unittest.TestCase):
         LIB.freelab_pixel_stats(ctypes.addressof(array), len(buf) // 4, dm.AUTO_MIN_ALPHA, dm.WHITE_L, dm.BLACK_L, counts)
         self.assertEqual(tuple(counts), (6, 3, 2))
 
+    def test_light_text_on_a_kept_color_stays(self):
+        # a selected font cell: white paper above, its blue header holding white text (content keeps colors)
+        width, white, blue = 24, (255, 255, 255), (31, 98, 162)
+        rows = [[white] * width for _ in range(3)]
+        for y in range(3, 14):
+            rows.append([white if 7 <= y <= 9 and 10 <= x <= 13 else blue for x in range(width)])
+        buf = pixels([px for row in rows for px in row])
+        anchors(LIB, buf, width, "all", keep_tint=dm.KEEP_TINT_CONTENT)
+        at = lambda x, y: tuple(buf[4 * (y * width + x) + k] for k in (2, 1, 0))
+        self.assertEqual(at(11, 8), white, "the text on the header stays white")
+        self.assertEqual(at(2, 8), blue, "the header keeps its blue")
+        self.assertLess(max(at(5, 1)), 100, "the paper turns dark")
+
     def defringe(self, rows):
         buf = pixels([px for row in rows for px in row])
         array = (ctypes.c_char * len(buf)).from_buffer(buf)

@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 101
+#define FREELAB_PIXELS_VERSION 102
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -1457,6 +1457,70 @@ static int sharp_edge(const uint32_t *p, int64_t i, int64_t width, int64_t count
     return 0;
 }
 
+/* Content (islands that keep colors): light text on a colored surface it keeps, such as a selected
+ * font cell's name on its blue header, stays as drawn: mapped with the white paper, it turned dark on
+ * the blue, with light fringes. A light pixel qualifies when, walking each way past light pixels (the
+ * text and its smoothing), the same saturated color of middle lightness comes within reach. White
+ * paper beside a colored band is open on some side (the cell's gray frame, or more paper). */
+#define LIGHT_ON_COLOR_TEST_HLS 0.5
+#define LIGHT_ON_COLOR_SAME_HUE_COS2 0.64 /* cos 0.8, squared */
+#define LIGHT_ON_COLOR_REACH 10
+#define LIGHT_ON_COLOR_SPREAD 100 /* the band: strongly colored (ClearType's smoothing on it is less so) */
+#define LIGHT_ON_COLOR_SMOOTHING_SPREAD 40
+#define LIGHT_ON_COLOR_SMOOTHING_HLS 0.3
+#define LIGHT_ON_COLOR_MIN_HLS 0.2
+#define LIGHT_ON_COLOR_MAX_HLS 0.62
+
+static int light_on_kept_color(const uint32_t *p, int64_t i, int64_t width, int64_t count)
+{
+    int64_t x, y, rows;
+    int dir, have = 0;
+    double hr = 0.0, hg = 0.0, hb = 0.0;
+    const uint8_t *self = (const uint8_t *)&p[i];
+    double l0 = lightness(self[2], self[1], self[0]);
+    if (width <= 0 || l0 < LIGHT_ON_COLOR_TEST_HLS)
+        return 0;
+    x = i % width;
+    y = i / width;
+    rows = count / width;
+    for (dir = 0; dir < 4; dir++) {
+        int64_t sx = dir == 0 ? 1 : dir == 1 ? -1 : 0, sy = dir == 2 ? 1 : dir == 3 ? -1 : 0, k;
+        int found = 0;
+        for (k = 1; k <= LIGHT_ON_COLOR_REACH && !found; k++) {
+            const uint8_t *q;
+            double lq;
+            int64_t xx = x + sx * k, yy = y + sy * k;
+            if (xx < 0 || xx >= width || yy < 0 || yy >= rows)
+                return 0;
+            q = (const uint8_t *)&p[yy * width + xx];
+            if (q[3] < ANCHOR_MIN_ALPHA)
+                return 0;
+            lq = lightness(q[2], q[1], q[0]);
+            if (spread_of(q) >= LIGHT_ON_COLOR_SPREAD && lq >= LIGHT_ON_COLOR_MIN_HLS && lq <= LIGHT_ON_COLOR_MAX_HLS) {
+                /* one surface on every side: the same hue (the band's blue, or its blend with the text) */
+                double m = (q[0] + q[1] + q[2]) / 3.0, vr = q[2] - m, vg = q[1] - m, vb = q[0] - m;
+                if (have) {
+                    double dot = vr * hr + vg * hg + vb * hb;
+                    if (dot <= 0.0 || dot * dot < LIGHT_ON_COLOR_SAME_HUE_COS2 * (vr * vr + vg * vg + vb * vb) * (hr * hr + hg * hg + hb * hb))
+                        return 0;
+                } else {
+                    hr = vr;
+                    hg = vg;
+                    hb = vb;
+                    have = 1;
+                }
+                found = 1;
+            } else if (lq < LIGHT_ON_COLOR_TEST_HLS
+                       && (spread_of(q) < LIGHT_ON_COLOR_SMOOTHING_SPREAD || lq < LIGHT_ON_COLOR_SMOOTHING_HLS)) {
+                return 0; /* dark or gray: not on the colored surface */
+            } /* else light (the text) or the text's colored smoothing: walked past */
+        }
+        if (!found)
+            return 0;
+    }
+    return 1;
+}
+
 /* Ink mode: a white pixel with only colored pixels around it, besides white ones (a check box's tick
  * on its blue box, a white glyph on a colored button), is drawn right for any interface and stays;
  * the same white elsewhere (an unticked box, a white row) is mapped. */
@@ -1768,8 +1832,15 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
     white_marks = mode == ANCHORS_INK && width > 0 && count <= MAX_INDEXED;
     paper_hls = anchor_count > 0 && anchors[0].surface ? lightness((uint8_t)anchors[0].r, (uint8_t)anchors[0].g, (uint8_t)anchors[0].b) : 0.15;
     fringes = (mode == ANCHORS_ALL || mode == ANCHORS_ICON) && keep_tint > 0.0 && width > 0 && count <= MAX_INDEXED;
-    for (i = 0; fringes && i < count; i++) /* on the pixels as drawn, before any is mapped */
-        white_mark[i] = (p[i] >> 24) >= ANCHOR_MIN_ALPHA && cleartype_fringe(p, i, width, count) ? 3 : 0;
+    for (i = 0; fringes && i < count; i++) { /* on the pixels as drawn, before any is mapped */
+        white_mark[i] = 0;
+        if ((p[i] >> 24) < ANCHOR_MIN_ALPHA)
+            continue;
+        if (light_on_kept_color(p, i, width, count))
+            white_mark[i] = 4; /* light text on a colored surface the content keeps: kept as drawn */
+        else if (cleartype_fringe(p, i, width, count))
+            white_mark[i] = 3;
+    }
     for (i = 0; white_marks && i < count; i++) {
         uint32_t v = p[i];
         double l = lightness((uint8_t)(v >> 16), (uint8_t)(v >> 8), (uint8_t)v);
@@ -1829,6 +1900,10 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
         if (alpha == 0)
             continue;
         if (white_marks && white_mark[i] == 1) { /* the mark and its smoothing toward the box */
+            have_last = 0;
+            continue;
+        }
+        if (fringes && white_mark[i] == 4) {
             have_last = 0;
             continue;
         }
