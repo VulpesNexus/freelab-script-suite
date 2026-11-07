@@ -39,7 +39,7 @@ REFERENCES = {"upper": (u"H", u"O"), "lower": TUNING, "figure": (u"0", u"8")}
 CONTOUR_SLOPE = 0.6  # a contour moves at most this many pixels across per row (its angle limit)
 CONTOUR_FLOOR = 1.0  # gaps narrower than this many pixels count as this narrow
 MIN_GAP_SHARE = 0.02  # contour distance never tightens a pair's ink closer than this share of the em
-METHODS = (("halfkern", "halfkern"), ("contour", "Contour"), ("learned", "Learned"), ("fontlab", "FontLab"))
+METHODS = (("halfkern", "halfkern"), ("contour", "Contour"), ("learned", "FreeLab"), ("fontlab", "FontLab"))  # "learned": FreeLab's own
 MEASURED = ("halfkern", "contour", "learned")  # computed here, cached, and scaled to the font's kerning
 DEFAULT_FACTORS = {"halfkern": (0.5, 1.0),  # halfkern applies half of a tightening
                    "contour": (1.0, 1.0),
@@ -51,10 +51,10 @@ TOLERANCE_UNITS = 20  # a suggestion this close to the current value is not list
 SHOW = (("all", "Everything"), ("letters", "Letters"), ("punctuation", "Letters and punctuation"), ("figures", "Figures"))
 PAIRS = (("all", "All pairs"), ("common", "Common pairs"))
 SOURCES = (("average", "Average of halfkern and Contour"), ("halfkern", "halfkern"), ("contour", "Contour"),
-           ("learned", "Learned"), ("fontlab", "FontLab"))
+           ("learned", "FreeLab"), ("fontlab", "FontLab"))
 ORDERS = (("change", "Largest change first"), ("agreement", "Best agreement first"), ("common", "Most common first"),
           ("alphabet", "Alphabetical"))
-PREVIEW_SIZE = 40  # pixels per em in the dialog's preview
+PREVIEW_SIZE = 64  # pixels per em in the dialog's preview
 COMMON_PAIRS_FILE = "common_pairs.txt"  # beside this script
 CACHE_VERSION = 1  # raise when the measuring changes in a way the settings below do not show
 # The learned method's features: the gap between a pair's facing edges in height bands, from below
@@ -601,11 +601,110 @@ class FontLabGlyphs(object):
 
 
 def current_kerning(kerning, left, right):
+    """A glyph pair's own entry only: kerning classes are not looked at (see FontKerning)."""
     try:
         value = kerning.get((left, right))
     except Exception:
         return 0
     return round_units(value or 0)
+
+
+CLASS_SIDES = {"left": ("KernLeft", "KernBothSide"), "right": ("KernRight", "KernBothSide")}
+
+
+def _text(name):
+    return name if not isinstance(name, bytes) else name.decode("utf-8", "replace")
+
+
+class FontKerning(object):
+    """A master's kerning as FontLab applies it, classes included, and where a pair's value goes.
+
+    fgKerning.get((left, right)) reads a pair's own entry and misses class kerning. FontLab's
+    getPlainPairsDict() resolves the classes. Writing kerning[(a, b)] takes a name that is also a
+    class's as the class (a class may share its first glyph's name: class T holds T, Tcaron...), so
+    a pair is written to the most specific entry that applies to it, or else to its classes'
+    pair, and only where the names say what they mean.
+    """
+
+    def __init__(self, kerning):
+        self.kerning = kerning
+        self.plain = None
+        try:
+            self.plain = dict(((_text(left), _text(right)), value)
+                              for (left, right), value in kerning.getPlainPairsDict().items())
+        except Exception:
+            pass
+        self.classes, self.members = set(), {}
+        self.left_class, self.right_class = {}, {}
+        try:
+            for name, (members, side) in kerning.groups.items():
+                name = _text(name)
+                self.classes.add(name)
+                self.members[name] = [_text(m) for m in members]
+                for member in self.members[name]:
+                    if side in CLASS_SIDES["left"]:
+                        self.left_class.setdefault(member, name)
+                    if side in CLASS_SIDES["right"]:
+                        self.right_class.setdefault(member, name)
+        except Exception:
+            pass
+        self.entries = set()  # ((left, is class), (right, is class)) of every explicit pair
+        try:
+            for pair in kerning.keys():
+                self.entries.add(((_text(pair.left.id), str(pair.left.mode) == "groupMode"),
+                                  (_text(pair.right.id), str(pair.right.mode) == "groupMode")))
+        except Exception:
+            pass
+
+    def current(self, left, right):
+        if self.plain is None:
+            return current_kerning(self.kerning, left, right)
+        return round_units(self.plain.get((left, right)) or 0)
+
+    def candidates(self, left, right):
+        """The entries that could kern the pair, most specific first: glyphs, then classes."""
+        left_class, right_class = self.left_class.get(left), self.right_class.get(right)
+        found = [((left, False), (right, False))]
+        if right_class:
+            found.append(((left, False), (right_class, True)))
+        if left_class:
+            found.append(((left_class, True), (right, False)))
+        if left_class and right_class:
+            found.append(((left_class, True), (right_class, True)))
+        return found
+
+    def writable(self, entry):
+        """A name written means a class exactly when a class has that name."""
+        return all((name in self.classes) == is_class for name, is_class in entry)
+
+    def target(self, left, right):
+        """(entry, remove when 0) for a pair: the entry that sets its value now, or else its classes'
+        pair (or its glyphs' when it has none); None when that entry cannot be named for writing."""
+        found = self.candidates(left, right)
+        for index, entry in enumerate(found):
+            if entry in self.entries:
+                below = any(other in self.entries for other in found[index + 1:])
+                return (entry, not below) if self.writable(entry) else None
+        return (found[-1], True) if self.writable(found[-1]) else None
+
+    def reach(self, entry):
+        """How many glyph pairs an entry kerns."""
+        size = lambda name, is_class: len(self.members.get(name, ())) if is_class else 1
+        return size(*entry[0]) * size(*entry[1])
+
+    @staticmethod
+    def describe(entry):
+        name = lambda text, is_class: (u"class %s" % text) if is_class else text
+        return u"%s \N{MULTIPLICATION SIGN} %s" % (name(*entry[0]), name(*entry[1]))
+
+    def write(self, entry, value, remove):
+        key = (entry[0][0], entry[1][0])
+        if value or not remove:
+            self.kerning[key] = value
+            self.entries.add(entry)
+        elif entry in self.entries:
+            self.kerning.remove(key)  # `del kerning[pair]` removes it but raises in PyCXX
+            self.entries.discard(entry)
 
 
 def fontlab_autokern(package, master, left, right):
@@ -717,7 +816,7 @@ def analyze(package, master, characters=None, em=EM_PIXELS, progress=None, core=
         return measuring
 
     reach = float(glyphs.pad)
-    kerning = package.kerning(master)
+    kerning = FontKerning(package.kerning(master))
     suggestions, total, done, measured, reused = [], len(chars) * len(chars), 0, 0, 0
     pairs = {}
     for left_char, left in chars:
@@ -748,7 +847,7 @@ def analyze(package, master, characters=None, em=EM_PIXELS, progress=None, core=
                          None if contour is None else contour * glyphs.upm / em, None, learned]
                 measured += 1
             pairs[key] = entry
-            s = Suggestion(left_char, right_char, left, right, current_kerning(kerning, left, right))
+            s = Suggestion(left_char, right_char, left, right, kerning.current(left, right))
             for method, units in ((MEASURED[0], entry[0]), (MEASURED[1], entry[1]), (MEASURED[2], entry[3])):
                 if units is not None:
                     s.raw[method] = units
@@ -777,15 +876,32 @@ def analyze(package, master, characters=None, em=EM_PIXELS, progress=None, core=
 # The dialog
 # ---------------------------------------------------------------------------
 
-# The preview's choices, a button each: clicking one picks it for the selected pair alone.
+# The preview's choices, a button each: clicking one picks it for the selected pair alone. Its
+# number picks it from the keyboard while the list has the focus.
 CHOICES = (("current", "Now"), ("average", "Average"), ("halfkern", "halfkern"), ("contour", "Contour"),
-           ("learned", "Learned"), ("fontlab", "FontLab"))
+           ("learned", "FreeLab"), ("fontlab", "FontLab"))
 LEAVE_ALONE_PROP = "freelabLeaveAlone"  # dark mode leaves the preview's pictures as they are drawn
 CHOICE_SHEET = u"QToolButton:checked { border: 2px solid palette(highlight); border-radius: 3px; }"  # the pair's choice, plain to see
+PREVIEW_TEXT_WIDTH = 92  # pixels beside a preview's glyphs for its method and value
+PICKED_ALPHA = 70  # the tint of a row whose value was picked by hand: the highlight color, this opaque
+COLUMN_CHOICES = {1: "current", 2: "halfkern", 3: "contour", 4: "learned", 5: "fontlab"}  # double-clicked cells
+
+HELP = u"""<b>FreeLab Auto Kerning</b><br>
+Suggests kerning for the font's Latin pairs and writes only the pairs you check.<br><br>
+<b>The list</b>: each method's value beside the font's current one. Check the pairs to write;
+pairs the font kerns already start unchecked.<br>
+<b>Choosing a value for one pair</b>: click a preview below the list, double-click a value in the
+list, or press its number (1 Now, 2 Average, 3 halfkern, 4 Contour, 5 FreeLab, 6 FontLab) while
+the list has the focus. A pair picked by hand is tinted; Backspace or Reset gives it the suggested
+value again.<br>
+<b>Keys in the list</b>: arrows move, Space checks or unchecks the pair, 1 to 6 pick, Backspace resets.<br>
+<b>Kerning classes</b>: a pair is written where its value comes from: its own pair, or else its
+classes' pair, which kerns every glyph of both classes. The line under the list says which.<br><br>
+Click this help's ? button, then any control, for what it does."""
 
 
 class AutoKerningDialog(object):
-    COLUMNS = ("Pair", "Current", "halfkern", "Contour", "Learned", "FontLab", "Spread", "Suggested")
+    COLUMNS = ("Pair", "Current", "halfkern", "Contour", "FreeLab", "FontLab", "Spread", "Suggested")
 
     def __init__(self):
         QtCore, QtGui = _qt()
@@ -794,10 +910,12 @@ class AutoKerningDialog(object):
         self.package = self.current_font()
         self.master = self.package.master if self.package is not None else None
         self.analysis, self.suggestions, self.stop, self.selected = None, [], False, None
+        self.font_kerning = None
         self.common = common_pairs()
         dialog = self.dialog = QtGui.QDialog()
         dialog.setWindowTitle("FreeLab Auto Kerning")
-        dialog.resize(680, 820)
+        dialog.setWhatsThis(HELP)
+        dialog.resize(760, 940)
         layout = QtGui.QVBoxLayout(dialog)
         self.status = QtGui.QLabel(self.font_line())
         self.status.setWordWrap(True)
@@ -808,30 +926,44 @@ class AutoKerningDialog(object):
         self.tolerance.setRange(1, 200)
         self.tolerance.setValue(TOLERANCE_UNITS)
         self.tolerance.setSuffix(" units")
+        self.tolerance.setWhatsThis("A pair is listed when a method would change its kerning by at least this much.")
         row.addWidget(self.tolerance)
         row.addWidget(QtGui.QLabel("Show"))
         self.show_kind = self.combo(SHOW)
+        self.show_kind.setWhatsThis("Which characters' pairs are listed.")
         row.addWidget(self.show_kind)
         self.pairs = self.combo(PAIRS)
         self.pairs.setToolTip("Common pairs: frequent in the text of 24 languages and kerned in fonts "
                               "(andre-fuchs/kerning-pairs), worth kerning even in a font kerned in part")
+        self.pairs.setWhatsThis("All pairs, or only the pairs frequent in text and usually kerned.")
         if not self.common:
             self.pairs.setEnabled(False)
         row.addWidget(self.pairs)
         row.addStretch(1)
         self.analyze_button = QtGui.QPushButton("Analyze")
+        self.analyze_button.setWhatsThis("Measures the font's current master again. Pairs whose glyphs have not "
+                                         "changed since the last analysis are not measured again.")
         row.addWidget(self.analyze_button)
         layout.addLayout(row)
         row = QtGui.QHBoxLayout()
         row.addWidget(QtGui.QLabel("Suggested values from"))
         self.source = self.combo(SOURCES)
+        self.source.setWhatsThis("The method whose values fill the Suggested column and are written, for every "
+                                 "pair not picked by hand. Changing it does not change the list.")
         row.addWidget(self.source)
         self.order = self.combo(ORDERS)
+        self.order.setWhatsThis("The order of the list.")
         row.addWidget(self.order)
         # Pairs the font kerns already are the designer's choices (a j tucked under the letter before
         # it, which the methods do not model): hidden unless asked for, and never checked for writing.
         self.include_kerned = QtGui.QCheckBox("Include pairs the font kerns")
+        self.include_kerned.setWhatsThis("Also lists the pairs the font kerns already, its kerning classes "
+                                          "included. They start unchecked.")
         row.addWidget(self.include_kerned)
+        self.only_picked = QtGui.QCheckBox("Only pairs picked by hand")
+        self.only_picked.setWhatsThis("Lists only the pairs whose value you picked yourself.")
+        self.only_picked.setVisible(False)
+        row.addWidget(self.only_picked)
         row.addStretch(1)
         layout.addLayout(row)
         self.table = QtGui.QTableWidget(0, len(self.COLUMNS))
@@ -841,19 +973,32 @@ class AutoKerningDialog(object):
         self.table.verticalHeader().setVisible(False)
         self.table.verticalHeader().setDefaultSectionSize(QtGui.QFontMetrics(self.table.font).height() + 6)  # PythonQt has no widget.fontMetrics()
         self.table.horizontalHeader().setSectionResizeMode(QtGui.QHeaderView.Stretch)  # the columns share the width
+        self.table.setWhatsThis(u"The pairs, each method's value, and the value to write (Suggested). "
+                                u"Double-click a value to use it for that pair, or press 1 to 6; Space checks "
+                                u"the pair; Backspace gives it the suggested value again.")
         layout.addWidget(self.table, 1)
+        note_row = QtGui.QHBoxLayout()
         self.preview_note = QtGui.QLabel("Select a pair to compare the methods; click one to use it for that pair.")
-        layout.addWidget(self.preview_note)
+        self.preview_note.setWordWrap(True)
+        note_row.addWidget(self.preview_note, 1)
+        self.reset_button = QtGui.QPushButton("Reset")
+        self.reset_button.setToolTip("Give this pair the suggested value again")
+        self.reset_button.setWhatsThis("Gives the selected pair the value of the source chosen above, undoing a pick.")
+        self.reset_button.setEnabled(False)
+        note_row.addWidget(self.reset_button)
+        layout.addLayout(note_row)
         grid = QtGui.QGridLayout()
         self.choice_group = QtGui.QButtonGroup(dialog)
         self.choice_buttons = {}
         for number, (key, label) in enumerate(CHOICES):
             button = QtGui.QToolButton()
             button.setCheckable(True)
-            button.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
+            button.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)  # its method and value are in its picture
             button.setSizePolicy(QtGui.QSizePolicy.Expanding, QtGui.QSizePolicy.Fixed)
             button.setProperty(LEAVE_ALONE_PROP, True)
             button.setStyleSheet(CHOICE_SHEET)
+            button.setToolTip(u"%s: click to use it for this pair (key %d in the list)" % (label, number + 1))
+            button.setWhatsThis(u"The pair as %s sets it, between two H's. Click to use it for this pair." % label)
             button.setEnabled(False)
             self.choice_group.addButton(button, number)
             self.choice_buttons[key] = button
@@ -861,8 +1006,11 @@ class AutoKerningDialog(object):
         layout.addLayout(grid)
         buttons = QtGui.QHBoxLayout()
         self.all_button = QtGui.QPushButton("Check new pairs")
+        self.all_button.setWhatsThis("Checks every listed pair the font does not kern yet.")
         self.none_button = QtGui.QPushButton("Check none")
         self.apply_button = QtGui.QPushButton("Write checked pairs")
+        self.apply_button.setWhatsThis("Writes the Suggested value of every checked pair to the current master, "
+                                       "where the pair's value comes from: see Kerning classes in the help.")
         self.close_button = QtGui.QPushButton("Close")
         for button in (self.all_button, self.none_button):
             buttons.addWidget(button)
@@ -876,13 +1024,33 @@ class AutoKerningDialog(object):
         self.none_button.connect("clicked()", lambda: self.check_all(False))
         self.apply_button.connect("clicked()", self.write)
         self.close_button.connect("clicked()", dialog.close)
+        self.reset_button.connect("clicked()", self.reset)
         self.table.connect("itemSelectionChanged()", self.select)
+        self.table.connect("cellDoubleClicked(int,int)", self.double_clicked)
         for widget in (self.show_kind, self.pairs, self.order):
             widget.connect("currentIndexChanged(int)", lambda index: self.refilter())
         self.tolerance.connect("valueChanged(int)", lambda value: self.refilter())
         self.include_kerned.connect("toggled(bool)", lambda on: self.refilter())
+        self.only_picked.connect("toggled(bool)", lambda on: self.refilter())
         self.source.connect("currentIndexChanged(int)", lambda index: self.refresh_values())  # the list stays as it is
         self.choice_group.connect("buttonClicked(int)", lambda number: self.choose(CHOICES[number][0]))
+        self.keys = self.make_keys()
+
+    def make_keys(self):
+        """The list's keys: 1 to 6 pick, Backspace resets, Space checks. Only while the list has the focus."""
+        QtCore, QtGui = _qt()
+        made = []
+        try:
+            actions = [(str(number + 1), (lambda key=key: self.choose(key))) for number, (key, _) in enumerate(CHOICES)]
+            actions += [("Backspace", self.reset), ("Delete", self.reset), ("Space", self.toggle_check)]
+            for sequence, action in actions:
+                shortcut = QtGui.QShortcut(QtGui.QKeySequence(sequence), self.table)
+                shortcut.setContext(QtCore.Qt.WidgetShortcut)
+                shortcut.connect("activated()", action)
+                made.append(shortcut)  # kept: PythonQt deletes what Python no longer holds
+        except Exception:
+            pass  # no shortcuts: the buttons and double-clicks still work
+        return made
 
     def current_font(self):
         """FontLab's current font, or None when no font is open (FontLab then hands an empty package)."""
@@ -942,6 +1110,7 @@ class AutoKerningDialog(object):
             self.status.setText("Stopped.")
             return
         self.analysis = result
+        self.font_kerning = FontKerning(self.package.kerning(self.master))
         self.refilter()
 
     def source_key(self):
@@ -971,6 +1140,15 @@ class AutoKerningDialog(object):
         if missing:
             self.analysis.remember_fontlab()
 
+    def picked_count(self):
+        return sum(1 for s in self.analysis.suggestions if s.override) if self.analysis is not None else 0
+
+    def update_picked(self):
+        """The "picked by hand" filter, shown while a pair is picked (or while it is on)."""
+        count = self.picked_count()
+        self.only_picked.setText(u"Only pairs picked by hand (%d)" % count)
+        self.only_picked.setVisible(bool(count) or self.only_picked.checked)
+
     def refilter(self):
         """The list: pairs either method would change by the tolerance or more, whatever source writes
         (choosing another source changes only what is written, not the list or its order)."""
@@ -979,15 +1157,19 @@ class AutoKerningDialog(object):
         tolerance = self.tolerance.value
         include = self.include_kerned.checked
         common_only = PAIRS[self.pairs.currentIndex][0] == "common"
+        picked_only = self.only_picked.checked
 
         def differs(s, key):
             value = s.value(key)
             return value is not None and abs(value - s.current) >= tolerance
 
-        listed = [s for s in self.analysis.suggestions
-                  if self.shown(s) and (include or not s.current)
-                  and (not common_only or s.left_char + s.right_char in self.common)
-                  and (differs(s, "halfkern") or differs(s, "contour") or differs(s, "average"))]
+        if picked_only:
+            listed = [s for s in self.analysis.suggestions if s.override]
+        else:
+            listed = [s for s in self.analysis.suggestions
+                      if self.shown(s) and (include or not s.current)
+                      and (not common_only or s.left_char + s.right_char in self.common)
+                      and (differs(s, "halfkern") or differs(s, "contour") or differs(s, "average"))]
         self.ask_fontlab(listed)
         order = ORDERS[self.order.currentIndex][0]
         change = lambda s: -abs((s.value("average") or 0) - s.current)
@@ -1010,8 +1192,11 @@ class AutoKerningDialog(object):
         work = (u"%d pairs: %d measured, %d unchanged since the last analysis" % (len(analysis.suggestions), analysis.measured,
                                                                                analysis.reused)
                 if analysis.reused else u"%d pairs measured" % len(analysis.suggestions))
-        self.status.setText(u"%s, master %s. %s; %d listed, where a method changes them by %d units or more.\n%s."
-                            % (self.package.tfn, self.master, work, len(listed), tolerance, "; ".join(summary)))
+        what = (u"%d listed, picked by hand" % len(listed) if picked_only
+                else u"%d listed, where a method changes them by %d units or more" % (len(listed), tolerance))
+        self.status.setText(u"%s, master %s. %s; %s.\n%s."
+                            % (self.package.tfn, self.master, work, what, "; ".join(summary)))
+        self.update_picked()
         self.fill_table()
 
     def fill_table(self):
@@ -1023,7 +1208,6 @@ class AutoKerningDialog(object):
             pair = QtGui.QTableWidgetItem(s.left_char + s.right_char)
             pair.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsUserCheckable)
             pair.setCheckState(QtCore.Qt.Unchecked if s.current else QtCore.Qt.Checked)  # the designer's pairs: opt in
-            pair.setToolTip("%s %s" % (s.left, s.right))
             table.setItem(row, 0, pair)
             for column in range(1, len(self.COLUMNS)):
                 item = QtGui.QTableWidgetItem()
@@ -1034,15 +1218,36 @@ class AutoKerningDialog(object):
         self.apply_button.setEnabled(bool(self.suggestions))
         self.select()
 
+    def target_text(self, s):
+        """Where the pair's value is written, for its tooltip and the line under the list."""
+        if self.font_kerning is None:
+            return u""
+        target = self.font_kerning.target(s.left, s.right)
+        if target is None:
+            return u"Not written: its value comes from an entry FontLab's scripting cannot name."
+        entry = target[0]
+        reach = self.font_kerning.reach(entry)
+        if reach > 1:
+            return u"Writes to %s, which kerns %d glyph pairs." % (FontKerning.describe(entry), reach)
+        return u"Writes to the pair %s alone." % FontKerning.describe(entry)
+
     def fill_row(self, row, s, source):
         QtCore, QtGui = _qt()
         cells = (s.current, s.values.get("halfkern"), s.values.get("contour"), s.values.get("learned"),
                  s.values.get("fontlab"), s.spread(), s.to_write(source))
+        tint = QtGui.QColor(self.dialog.palette.color(QtGui.QPalette.Highlight))
+        tint.setAlpha(PICKED_ALPHA)
         for column, value in enumerate(cells, 1):
-            text = u"\u2013" if value is None else str(value)
-            if column == len(self.COLUMNS) - 1 and s.override:
-                text = u"%s (%s)" % (text, dict(CHOICES)[s.override].lower())  # chosen for this pair
-            self.table.item(row, column).setText(text)
+            self.table.item(row, column).setText(u"\N{EN DASH}" if value is None else str(value))
+        suggested = self.table.item(row, len(self.COLUMNS) - 1)
+        font = QtGui.QFont(self.table.font)
+        font.setBold(bool(s.override))
+        suggested.setFont(font)
+        suggested.setToolTip(u"Picked by hand: %s. Backspace or Reset gives it the suggested value."
+                             % dict(CHOICES)[s.override] if s.override else u"")
+        for column in range(len(self.COLUMNS)):
+            self.table.item(row, column).setBackground(QtGui.QBrush(tint) if s.override else QtGui.QBrush())
+        self.table.item(row, 0).setToolTip(u"%s %s. %s" % (s.left, s.right, self.target_text(s)))
 
     def refresh_values(self):
         """Another source: only the Suggested column and the preview change."""
@@ -1058,53 +1263,88 @@ class AutoKerningDialog(object):
             checked = on and not self.suggestions[row].current
             self.table.item(row, 0).setCheckState(QtCore.Qt.Checked if checked else QtCore.Qt.Unchecked)
 
+    def toggle_check(self):
+        QtCore, QtGui = _qt()
+        if self.selected is None:
+            return
+        item = self.table.item(self.selected, 0)
+        item.setCheckState(QtCore.Qt.Unchecked if item.checkState() == QtCore.Qt.Checked else QtCore.Qt.Checked)
+
     def select(self):
         rows = self.table.selectionModel().selectedRows()
         if not rows or rows[0].row() >= len(self.suggestions):
             self.selected = None
+            self.reset_button.setEnabled(False)
+            self.preview_note.setText("Select a pair to compare the methods; click one to use it for that pair.")
             for button in self.choice_buttons.values():
                 button.setEnabled(False)
-                button.setText(u"")
                 button.setIcon(_qt()[1].QIcon())
             return
         self.selected = rows[0].row()
         self.show_preview(self.suggestions[self.selected])
 
     def choose(self, key):
-        """The clicked method for the selected pair alone; the dialog's source again clears the choice."""
+        """The method for the selected pair alone; the dialog's source again clears the choice."""
         if self.selected is None:
             return
         s = self.suggestions[self.selected]
+        if s.value(key) is None:
+            return
         s.override = None if key == self.source_key() else key
         self.fill_row(self.selected, s, self.source_key())
         self.show_preview(s)
+        self.update_picked()
+
+    def reset(self):
+        if self.selected is None:
+            return
+        s = self.suggestions[self.selected]
+        s.override = None
+        self.fill_row(self.selected, s, self.source_key())
+        self.show_preview(s)
+        self.update_picked()
+
+    def double_clicked(self, row, column):
+        """A method's value double-clicked: that value for the pair; the Suggested one: reset."""
+        if row >= len(self.suggestions):
+            return
+        self.table.selectRow(row)
+        self.selected = row
+        if column in COLUMN_CHOICES:
+            self.choose(COLUMN_CHOICES[column])
+        elif column == len(self.COLUMNS) - 1:
+            self.reset()
 
     def show_preview(self, s):
-        """Each choice's button: the pair between two H's as that method sets it, its value, and the
-        one the pair will take checked."""
+        """Each choice's button: the pair between two H's as that method sets it, its name and value
+        beside it (all in one picture, drawn in the dialog's text color), and the one the pair takes
+        checked."""
         QtCore, QtGui = _qt()
         source = self.source_key()
         chosen = s.override or source
+        self.reset_button.setEnabled(bool(s.override))
+        picked = (u"Picked by hand: %s. " % dict(CHOICES)[s.override]) if s.override else u""
+        self.preview_note.setText(u"%s%s %s" % (picked, s.left_char + s.right_char, self.target_text(s)))
         palette = self.dialog.palette
-        text = palette.color(QtGui.QPalette.Text)  # (FontLab 7's PythonQt lacks the placeholder text role)
+        text = palette.color(QtGui.QPalette.WindowText)  # (FontLab 7's PythonQt lacks the placeholder text role)
         scale = float(PREVIEW_SIZE) / float(self.package.upm)
         glyphs = [self.package.findName(n) for n in ("H", s.left, s.right, "H")]
         paths = [(glyph.getLayerByName(self.master), layer_path(glyph.getLayerByName(self.master)))
                  for glyph in glyphs if glyph is not None and not glyph.isNull]
-        width = int(sum(layer.advanceWidth for layer, _ in paths) * scale) + 2 * PREVIEW_SIZE
-        for key, label in CHOICES:
+        strip = int(sum(layer.advanceWidth for layer, _ in paths) * scale) + PREVIEW_SIZE
+        font = QtGui.QFont(self.dialog.font)
+        for number, (key, label) in enumerate(CHOICES):
             button, kern = self.choice_buttons[key], s.value(key)
-            button.setText(u"%s\n%s" % (label, u"\u2013" if kern is None else kern))
             button.setEnabled(kern is not None)
             button.setChecked(key == chosen)
-            if kern is None:
-                button.setIcon(QtGui.QIcon())
-                continue
-            pixmap = QtGui.QPixmap(width, int(PREVIEW_SIZE * 1.3))
+            pixmap = QtGui.QPixmap(strip + PREVIEW_TEXT_WIDTH, int(PREVIEW_SIZE * 1.35))
             pixmap.fill(QtGui.QColor(0, 0, 0, 0))
             painter = QtGui.QPainter(pixmap)
             try:  # ended before anything else can fail: a painter left open on a freed pixmap aborts FontLab
-                self.paint_pair(painter, paths, scale, kern, text)
+                if kern is not None:
+                    self.paint_pair(painter, paths, scale, kern, text)
+                self.paint_label(painter, font, text, strip, pixmap.height(), label,
+                                 u"\N{EN DASH}" if kern is None else str(kern), number + 1)
             finally:
                 painter.end()
             button.setIcon(QtGui.QIcon(pixmap))
@@ -1123,27 +1363,74 @@ class AutoKerningDialog(object):
             painter.restore()
             x += layer.advanceWidth * scale + (kern * scale if index == 1 else 0)
 
+    @staticmethod
+    def paint_label(painter, font, color, left, height, label, value, key):
+        """The method's name (bold), its value, and its key, in the picture: a button's own text
+        took other colors than the dialog's under some styles."""
+        QtCore, QtGui = _qt()
+        painter.setPen(color)
+        bold = QtGui.QFont(font)
+        bold.setBold(True)
+        line = QtGui.QFontMetrics(font).height()
+        top = (height - 3 * line) // 2
+        flags = int(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
+        painter.setFont(bold)
+        painter.drawText(QtCore.QRect(left, top, PREVIEW_TEXT_WIDTH, line), flags, label)
+        painter.setFont(font)
+        painter.drawText(QtCore.QRect(left, top + line, PREVIEW_TEXT_WIDTH, line), flags, value)
+        faint = QtGui.QColor(color)
+        faint.setAlpha(120)
+        painter.setPen(faint)
+        painter.drawText(QtCore.QRect(left, top + 2 * line, PREVIEW_TEXT_WIDTH, line), flags, u"key %d" % key)
+
     def write(self):
+        """Each checked pair's value, written where it applies (FontKerning.target). Pairs sharing an
+        entry (a class pair) with other checked pairs get the value of the most common of them."""
         QtCore, QtGui = _qt()
         source = self.source_key()
-        kerning = self.package.kerning(self.master)
-        written = 0
+        kerning = FontKerning(self.package.kerning(self.master))
+        plans, unnamed = {}, 0
         for row, s in enumerate(self.suggestions):
             if self.table.item(row, 0).checkState() != QtCore.Qt.Checked:
                 continue
             value = s.to_write(source)
             if value is None or value == s.current:
                 continue
-            if value:
-                kerning[(s.left, s.right)] = value
-            elif kerning.get((s.left, s.right)) is not None:
-                kerning.remove((s.left, s.right))  # `del kerning[pair]` removes it but raises in PyCXX
-            written += 1
+            target = kerning.target(s.left, s.right)
+            if target is None:
+                unnamed += 1
+                continue
+            plans.setdefault(target[0], []).append((self.rank(s), s, value, target[1]))
+        shared = classes = 0
+        written = []
+        for entry, wanted in plans.items():
+            wanted.sort(key=lambda plan: plan[0])
+            _, _, value, remove = wanted[0]
+            if len(set(plan[2] for plan in wanted)) > 1:
+                shared += len(wanted) - 1
+            kerning.write(entry, value, remove)
+            if kerning.reach(entry) > 1:
+                classes += 1
+            written.extend(plan[1] for plan in wanted)
         try:
             self.fontlab.flItems.notifyPackageContentUpdated(self.package.id)
         except Exception:
             pass
-        self.status.setText("Wrote %d pairs to master %s." % (written, self.master))
+        self.font_kerning = FontKerning(self.package.kerning(self.master))
+        for s in self.analysis.suggestions:
+            s.current = self.font_kerning.current(s.left, s.right)
+        for s in written:
+            s.override = None
+        lines = [u"Wrote %d entries for %d pairs to master %s%s." % (
+            len(plans), len(written), self.master,
+            u" (%d of them kerning class pairs, which kern their classes' other glyphs too)" % classes if classes else u"")]
+        if shared:
+            lines.append(u"%d pairs shared an entry with a commoner pair and took its value." % shared)
+        if unnamed:
+            lines.append(u"%d pairs were not written: their value comes from an entry FontLab's scripting cannot name." % unnamed)
+        self.update_picked()
+        self.fill_table()
+        self.status.setText(u" ".join(lines))
 
 
 def main():

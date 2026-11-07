@@ -7,11 +7,15 @@
 1. Open the font, pick the master to kern, and run the script: it analyzes the master as it opens, and *Analyze* analyzes the font that is current then. Every pair of the Latin letters, figures, and punctuation the font has is measured by both methods (two marks of punctuation side by side are skipped); about 7,000 pairs take two to five seconds. Each master's results are remembered (in *%LOCALAPPDATA%\FreeLab\kerning-cache*, under a hash of the font's path; uninstalling removes them): the next analysis measures only the pairs whose glyphs changed, and everything again when a reference glyph (l, n, o, H, O, 0, 8) did.
 2. The list holds the pairs the font does not kern yet that either method would change by at least the given number of units (20 by default); FontLab's own autokern is asked about them too (a call per pair). *Show* narrows it to letters, letters and punctuation, or figures, and *Common pairs* to the pairs worth kerning even in a font kerned only in part: those common in the text of 24 languages and kerned in fonts ([andre-fuchs/kerning-pairs](https://github.com/andre-fuchs/kerning-pairs), MIT; *kerning/common_pairs.txt*).
 3. The columns: each method's value, *Spread* (how far they lie apart), and *Suggested*, from *Suggested values from*: the average of halfkern and contour distance (the default), any one method, or FontLab's. Changing it changes only that column, never the list or its order. The order: largest change, best agreement (the safest pairs to accept together), most common, or alphabetical.
-4. Selecting a pair draws it between two H's as it is set now and by each method, a button each; the one it will take is checked. Clicking another picks it for that pair alone (*Now* keeps the current kerning), and the Suggested column names the choice; clicking the dialog's own source again clears it.
+4. Selecting a pair draws it between two H's as it is set now and by each method, a button each, with the method's name, value, and key; the one it will take is checked. Clicking another picks it for that pair alone (*Now* keeps the current kerning), and so do double-clicking a value in the list and pressing its number (1 *Now*, 2 *Average*, 3 halfkern, 4 *Contour*, 5 *FreeLab*, 6 *FontLab*) while the list has the focus. A pair picked by hand is tinted, its Suggested value bold, and *Only pairs picked by hand* appears to list them; *Reset*, Backspace, or double-clicking its Suggested value gives it the suggested value again. Space checks or unchecks the selected pair. The line above the buttons says where the pair's value will be written (see *Kerning classes*). The dialog's ? button, then a click on any control, explains it.
 5. *Include pairs the font kerns* lists the font's own pairs too. They are never checked for you: they are the designer's choices, some of which the methods do not model (a j tucked under the letter before it).
-6. Uncheck what you disagree with, and click *Write checked pairs*: each is written to the master as a pair of glyphs (a value of 0 removes the pair). Writing goes straight into the open font: close it without saving to take it all back.
+6. Uncheck what you disagree with, and click *Write checked pairs*. Each pair is written where its value comes from (see *Kerning classes*); a value of 0 removes the entry unless a class pair would then apply. Picks end once written, and the list shows the font's new values. Writing goes straight into the open font: close it without saving to take it all back.
 
 The kerning the font already has acts as a model: with at least three tightenings in it, each method's tightenings are scaled to match how strongly the designer tightens, and the same for loosenings. Without them, halfkern's tightenings are applied at half strength, as halfkern applies them, and contour distance's in full.
+
+### Kerning classes
+
+*Current* is the kerning FontLab applies to the pair, its classes included (`getPlainPairsDict()`): a font kerned by classes (class *T* against class *o*) shows those values, not 0. A pair is written to the entry its value comes from now: its own pair if it has one, or else the pair of its classes, or of its class and the other glyph. With none, it goes to its classes' pair (or its glyphs' where they have no class). A class pair kerns every glyph of both classes (*Tcaron* with *oacute* too); the line above the buttons and the pair's tooltip name it and count its pairs. Checked pairs that share one entry get the value of the most common of them, and the status says how many. FontLab's scripting takes a name that is also a class's as the class, so a glyph pair whose glyph shares a class's name (glyph *T* in class *T*) cannot be written on its own: such a pair is skipped and counted.
 
 ## The methods
 
@@ -20,9 +24,9 @@ Both are measured by FreeLab's native core (*kerning/native/freelab_kern.c*) on 
 - **halfkern** ([behdad/halfkern](https://github.com/behdad/halfkern), Copyright 2022 Google LLC, Apache License 2.0): each glyph gets an envelope, its ink over a halo that fades out over about a tenth of the em at half strength; the measure is the overlap of the two envelopes, the sum of their squared products. The halo grows until *ll*, *nn*, and *oo* agree within a factor of two, as halfkern's does, and FreeLab interpolates between whole pixels where the overlap crosses the band. Checked against halfkern itself on the same renderings (Georgia, 19 pairs): the same kerning for every pair, including the two it cannot kern.
 - **Contour distance**, after Matthew Skala's description of Tsukurimashou's kerning ([freetype-devel, June 2012](https://lists.nongnu.org/archive/html/freetype-devel/2012-06/msg00118.html)); written from that description, not from its code. Each glyph's left and right edges are found row by row, and their angle is limited (an edge moves at most 0.6 pixels across a row), so that a shape reaches out into the rows above and below it: a period cannot slide under an apostrophe. The measure is the average over the rows of the inverse cube of the gap between the facing edges, found by bisection. A tightening stops where the two glyphs' ink comes within 2% of the em.
 - **FontLab's own** autokern (`flPackage.autoKern`, FontLab 8's "K1"), which returns its value without writing it. It is coarse: on the owner's test font it gave −56 for most pairs it tightened.
-- **Learned**, FreeLab's own: gradient-boosted trees trained on how fonts are kerned. Its inputs are both methods' readings, the gap between the pair's facing ink in 16 height bands, the two advances, and the font's own spacing (its *nn*, *oo*, and *HH*), all as shares of the em, measured by the same code as the other methods. It has two stages: one decides whether a pair is kerned at all, the other how much (a single one learned to say 0, since most common pairs are not kerned). The model, *kerning/learned_model.json*, is evaluated in plain Python.
+- **FreeLab**, FreeLab's own learned method: gradient-boosted trees trained on how fonts are kerned. Its inputs are both methods' readings, the gap between the pair's facing ink in 16 height bands, the two advances, and the font's own spacing (its *nn*, *oo*, and *HH*), all as shares of the em, measured by the same code as the other methods. It has two stages: one decides whether a pair is kerned at all, the other how much (a single one learned to say 0, since most common pairs are not kerned). The model, *kerning/learned_model.json*, is evaluated in plain Python.
 
-### What the learned method learned from, and how it was checked
+### What the FreeLab method learned from, and how it was checked
 
 *kerning/train/dataset.py* reads the fonts installed on the computer it runs on, and keeps only those whose name table declares the SIL Open Font License or the Apache License, and that kern: of the 4,074 fonts installed on the owner's computer, 747. Fonts that kern fewer than 5% of the common pairs, the same Latin design under another name, and fonts whose *l*, *n*, and *o* cannot be measured were left out: 782,693 pairs from 562 fonts in 189 families, with the kerning each font applies read through HarfBuzz. The measurements stay on that computer; only the trained model is in the repository. *kerning/train/train.py* trains and checks it.
 
@@ -34,20 +38,20 @@ Each family was held out in turn (five folds, no family in both parts), and the 
 | halfkern | 17.2 | 22.7 | 69% |
 | Contour distance | 27.1 | 32.0 | 56% |
 | Average of the two | 21.9 | 25.2 | 63% |
-| **Learned** | **8.6** | **21.5** | **85%** |
+| **FreeLab** | **8.6** | **21.5** | **85%** |
 
-halfkern and contour distance are scored here with their default strengths; in Auto Kerning, the font's own kerning tunes them, which narrows the gap. The learned method is the only one that beats leaving most pairs alone while also coming closest on the pairs the fonts do kern.
+halfkern and contour distance are scored here with their default strengths; in Auto Kerning, the font's own kerning tunes them, which narrows the gap. The FreeLab method is the only one that beats leaving most pairs alone while also coming closest on the pairs the fonts do kern.
 
-These are averages over many fonts; one font can go the other way. The owner's test font, left out of training (`train.py --exclude`) and analyzed in Auto Kerning with its own kerning tuning every method:
+These are averages over many fonts; one font can go the other way. The owner's test font, left out of training (`train.py --exclude`), on its 1,395 common pairs with its kerning as HarfBuzz applies it, classes included (818 kerned), each method's strength fitted to that kerning as Auto Kerning fits it:
 
-| Method | Mean error, all 7,068 pairs | Mean error, the font's 2,640 kerned pairs | Mean error, its unkerned pairs |
-|---|---|---|---|
-| halfkern | 21.6 | 31.2 | 15.9 |
-| Contour distance | 16.6 | 26.9 | 10.5 |
-| Average of the two | 18.7 | 28.2 | 13.1 |
-| **Learned** | **14.1** | 31.2 | **3.9** |
+| Method | Mean error, all pairs | Kerned pairs | Unkerned pairs | Within 20 units |
+|---|---|---|---|---|
+| No kerning at all | 32.9 | 55.4 | 1.1 | 55% |
+| halfkern | 30.0 | 34.2 | 24.2 | 47% |
+| Contour distance | **22.8** | **29.9** | 12.7 | **63%** |
+| FreeLab | 24.5 | 37.8 | **5.7** | 60% |
 
-Learned is closest overall because it leaves alone what the font leaves alone, but on that font's kerned pairs, contour distance came closer: Learned left some at 0 (*xj*, *r.*) that the font kerns. That is why the suggestions default to the average of halfkern and contour distance, with Learned one click away, and why each pair's methods are shown side by side.
+FreeLab leaves alone what the font leaves alone, but on that font's kerned pairs contour distance came closer: FreeLab leaves some at 0 that the font kerns. That is why the suggestions default to the average of halfkern and contour distance, with FreeLab one click away, and why each pair's methods are shown side by side. (An earlier version of this check read only the font's glyph pairs, missing its class kerning, and favored FreeLab wrongly.)
 
 The two methods often disagree on pairs with diagonals and overhangs (contour distance tightens *To* and *TA* more), and agree on most others. On a font with kerning, contour distance came closer to the designer's own pairs (*LT*: designer −178, contour −154, halfkern −109).
 
@@ -60,13 +64,13 @@ Auto Kerning lists pairs of these characters only: the letters A to Z and a to z
 | halfkern | any glyphs: it measures shapes | the Latin references *l*, *n*, *o*, *H*, *O*, *0*, *8*; another script needs references of its own (*н* and *о* for Cyrillic, for instance) |
 | Contour distance | any glyphs | the same Latin references; Tsukurimashou tuned the method for Latin, Japanese, and Korean, with other settings for each |
 | FontLab's own | any glyph pair | nothing of FreeLab's: FontLab's own settings |
-| Learned | the pairs it was trained on | Latin pairs of open-licensed fonts only: elsewhere its values are guesses |
+| FreeLab | the pairs it was trained on | Latin pairs of open-licensed fonts only: elsewhere its values are guesses |
 
-Accented letters usually take their base letter's kerning through kerning classes, which Auto Kerning does not write yet. Japanese kana are spaced with `palt` more than with pairs ([FEATURE-SURVEY.md](FEATURE-SURVEY.md)).
+Accented letters take their base letter's kerning where the font's classes hold both: a pair written to a class pair kerns them too. Japanese kana are spaced with `palt` more than with pairs ([FEATURE-SURVEY.md](FEATURE-SURVEY.md)).
 
 ## Limits
 
-- Kerning classes are not read or written yet: every suggestion is a pair of glyphs. A font with kerning classes gets glyph pairs, which override its classes.
+- Classes are read and written, not made: a font without classes gets glyph pairs, and its accented letters keep their own kerning.
 - Latin only (see *Scripts and characters*); contour distance, tuned for Japanese in Tsukurimashou, is the base for kana.
 - Each method has blind spots: halfkern loosens *Ty* in Georgia, where the T's bar meets the y's arms, and cannot kern *VA* there. Review before writing.
 - Other published methods, and the one not to implement (Apple's, patented until 2033), are in [FEATURE-SURVEY.md](FEATURE-SURVEY.md).

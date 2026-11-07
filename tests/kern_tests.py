@@ -158,6 +158,101 @@ class ArithmeticTests(unittest.TestCase):
         self.assertEqual(ak.first_bias(200), 20)
 
 
+class FakeKerningObject(object):
+    def __init__(self, name, is_class):
+        self.id, self.mode = name, "groupMode" if is_class else "glyphMode"
+
+
+class FakeKerningPair(object):
+    def __init__(self, entry):
+        self.left, self.right = FakeKerningObject(*entry[0]), FakeKerningObject(*entry[1])
+
+
+class FakeKerning(object):
+    """fgKerning as FontLab 7 behaves (found live): a name written means a class when a class has
+    that name, and getPlainPairsDict() resolves classes, the most specific entry winning."""
+
+    def __init__(self, groups, entries):
+        self.groups = FakeGroups(groups)
+        self.stored = dict(entries)  # ((left, is class), (right, is class)): value
+
+    def keys(self):
+        return [FakeKerningPair(entry) for entry in self.stored]
+
+    def entry(self, key):
+        return tuple((name, name in self.groups.data) for name in key)
+
+    def __setitem__(self, key, value):
+        self.stored[self.entry(key)] = value
+
+    def remove(self, key):
+        del self.stored[self.entry(key)]
+
+    def getPlainPairsDict(self):
+        kerning = ak.FontKerning.__new__(ak.FontKerning)  # the same class lookup, on these groups
+        kerning.left_class, kerning.right_class = {}, {}
+        for name, (members, side) in self.groups.data.items():
+            for member in members:
+                if side in ak.CLASS_SIDES["left"]:
+                    kerning.left_class.setdefault(member, name)
+                if side in ak.CLASS_SIDES["right"]:
+                    kerning.right_class.setdefault(member, name)
+        glyphs = set(m for members, _ in self.groups.data.values() for m in members) | set(
+            name for entry in self.stored for name, is_class in entry if not is_class)
+        plain = {}
+        for left in glyphs:
+            for right in glyphs:
+                for entry in kerning.candidates(left, right):
+                    if entry in self.stored:
+                        plain[(left, right)] = self.stored[entry]
+                        break
+        return plain
+
+
+class FakeGroups(object):
+    def __init__(self, data):
+        self.data = data
+
+    def items(self):
+        return list(self.data.items())
+
+
+class KerningClassTests(unittest.TestCase):
+    GROUPS = {"T": (["T", "Tcaron"], "KernBothSide"), "o": (["o", "oacute"], "KernLeft"),
+              "o1": (["o", "oacute"], "KernRight"), "A": (["A", "Aacute"], "KernLeft")}
+
+    def kerning(self, entries):
+        return ak.FontKerning(FakeKerning(dict(self.GROUPS), entries))
+
+    def test_current_values_include_class_kerning(self):
+        k = self.kerning({(("T", True), ("o1", True)): -172, (("T", False), ("oacute", False)): -150})
+        self.assertEqual(k.current("T", "o"), -172, "from the classes' pair")
+        self.assertEqual(k.current("T", "oacute"), -150, "a glyph pair wins over its classes'")
+        self.assertEqual(k.current("o", "T"), 0)
+
+    def test_a_pair_is_written_where_its_value_comes_from(self):
+        k = self.kerning({(("T", True), ("o1", True)): -172})
+        self.assertEqual(k.target("T", "o"), ((("T", True), ("o1", True)), True), "its classes' pair")
+        self.assertEqual(k.reach(k.target("T", "o")[0]), 4)
+        self.assertEqual(k.target("V", "o"), ((("V", False), ("o1", True)), True), "no class on the left: the glyph")
+
+    def test_a_glyph_named_like_a_class_cannot_be_written_alone(self):
+        # kerning[("A", "V")] writes class A: the glyph pair A V cannot be named, so it is not written
+        k = self.kerning({(("A", False), ("V", False)): -50})
+        self.assertIsNone(k.target("A", "V"))
+
+    def test_a_zero_removes_an_entry_unless_a_class_pair_lies_below(self):
+        k = self.kerning({(("Tcaron", False), ("o1", True)): -20, (("T", True), ("o1", True)): -172})
+        entry, remove = k.target("Tcaron", "o")
+        self.assertEqual(entry, (("Tcaron", False), ("o1", True)))
+        self.assertFalse(remove, "removing it would leave the class value: 0 is written")
+        k.write(entry, 0, remove)
+        self.assertEqual(ak.FontKerning(k.kerning).current("Tcaron", "o"), 0)
+        entry, remove = k.target("T", "o")
+        k.write(entry, 0, remove)
+        self.assertNotIn(entry, k.kerning.stored, "the last entry for the pair: removed")
+
+
 @unittest.skipIf(CORE is None, "auto kerning core not built: run tools/build-native.ps1 -Kern (%s)" % ak.kern_library_path())
 class CoreTests(unittest.TestCase):
     def test_envelope_is_ink_then_a_fading_halo(self):
