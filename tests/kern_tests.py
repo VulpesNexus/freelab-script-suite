@@ -139,6 +139,15 @@ class ArithmeticTests(unittest.TestCase):
         self.assertNotEqual(ak.path_signature(Path(square), 500), ak.path_signature(Path(moved), 500))
         self.assertNotEqual(ak.path_signature(Path(square), 500), ak.path_signature(Path(square), 510))
 
+    def test_learned_trees_are_walked_as_scikit_learn_does(self):
+        # one tree: feature 0 at most -0.05 goes left (-0.04), above it right (0.0); missing goes right
+        model = {"baseline": -0.01, "trees": [[[0, -0.05, 0, 1, 2, 0, 0.0], [0, 0, 0, 0, 0, 1, -0.04], [0, 0, 0, 0, 0, 1, 0.0]]]}
+        self.assertAlmostEqual(ak.predict(model, [-0.1]), -0.05)
+        self.assertAlmostEqual(ak.predict(model, [-0.05]), -0.05, msg="at the threshold: left")
+        self.assertAlmostEqual(ak.predict(model, [0.2]), -0.01)
+        self.assertAlmostEqual(ak.predict(model, [None]), -0.01, msg="a missing feature follows the node's side")
+        self.assertIsNone(ak.learned_model(os.path.join(HERE, "no such model.json")))
+
     def test_first_halo_is_halfkerns(self):
         self.assertEqual(ak.first_bias(100), 10)  # halfkern: kernel 21 pixels at 100 pixels per em
         self.assertEqual(ak.first_bias(200), 20)

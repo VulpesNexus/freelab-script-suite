@@ -23,9 +23,22 @@ Both are measured by FreeLab's native core (*kerning/native/freelab_kern.c*) on 
 
 The two methods often disagree on pairs with diagonals and overhangs (contour distance tightens *To* and *TA* more), and agree on most others. On a font with kerning, contour distance came closer to the designer's own pairs (*LT*: designer −178, contour −154, halfkern −109).
 
+## Scripts and characters
+
+Auto Kerning lists pairs of these characters only: the letters A to Z and a to z, the figures 0 to 9, and the punctuation `. , : ; ! ? ' " - ( ) [ ] { } / & *`, the curly quotes, guillemets, and the en and em dashes. Any other character, accented Latin letters (é, Å, ł) included, is not measured, not listed, and never written: its pairs keep the kerning the font gives them.
+
+| Method | What it could measure | What it is set for |
+|---|---|---|
+| halfkern | any glyphs: it measures shapes | the Latin references *l*, *n*, *o*, *H*, *O*, *0*, *8*; another script needs references of its own (*н* and *о* for Cyrillic, for instance) |
+| Contour distance | any glyphs | the same Latin references; Tsukurimashou tuned the method for Latin, Japanese, and Korean, with other settings for each |
+| FontLab's own | any glyph pair | nothing of FreeLab's: FontLab's own settings |
+| Learned | the pairs it was trained on | Latin pairs of open-licensed fonts only: elsewhere its values are guesses |
+
+Accented letters usually take their base letter's kerning through kerning classes, which Auto Kerning does not write yet. Japanese kana are spaced with `palt` more than with pairs ([FEATURE-SURVEY.md](FEATURE-SURVEY.md)).
+
 ## Limits
 
 - Kerning classes are not read or written yet: every suggestion is a pair of glyphs. A font with kerning classes gets glyph pairs, which override its classes.
-- Latin only. Japanese kana are spaced with `palt` more than with pairs ([FEATURE-SURVEY.md](FEATURE-SURVEY.md)); contour distance, tuned for Japanese in Tsukurimashou, is the base for them.
+- Latin only (see *Scripts and characters*); contour distance, tuned for Japanese in Tsukurimashou, is the base for kana.
 - Each method has blind spots: halfkern loosens *Ty* in Georgia, where the T's bar meets the y's arms, and cannot kern *VA* there. Review before writing.
 - Other published methods, and the one not to implement (Apple's, patented until 2033), are in [FEATURE-SURVEY.md](FEATURE-SURVEY.md).

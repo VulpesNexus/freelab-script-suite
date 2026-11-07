@@ -39,9 +39,11 @@ REFERENCES = {"upper": (u"H", u"O"), "lower": TUNING, "figure": (u"0", u"8")}
 CONTOUR_SLOPE = 0.6  # a contour moves at most this many pixels across per row (its angle limit)
 CONTOUR_FLOOR = 1.0  # gaps narrower than this many pixels count as this narrow
 MIN_GAP_SHARE = 0.02  # contour distance never tightens a pair's ink closer than this share of the em
-METHODS = (("halfkern", "halfkern"), ("contour", "Contour"), ("fontlab", "FontLab"))
+METHODS = (("halfkern", "halfkern"), ("contour", "Contour"), ("learned", "Learned"), ("fontlab", "FontLab"))
+MEASURED = ("halfkern", "contour", "learned")  # computed here, cached, and scaled to the font's kerning
 DEFAULT_FACTORS = {"halfkern": (0.5, 1.0),  # halfkern applies half of a tightening
-                   "contour": (1.0, 1.0)}
+                   "contour": (1.0, 1.0),
+                   "learned": (1.0, 1.0)}
 TIGHTEN, LOOSEN = DEFAULT_FACTORS["halfkern"]
 FACTOR_RANGE = (0.1, 1.5)  # a factor fitted to the font's kerning stays within this
 MODELS_MIN = 3  # fewer existing pairs than this: the method's default factors
@@ -49,13 +51,21 @@ TOLERANCE_UNITS = 20  # a suggestion this close to the current value is not list
 SHOW = (("all", "Everything"), ("letters", "Letters"), ("punctuation", "Letters and punctuation"), ("figures", "Figures"))
 PAIRS = (("all", "All pairs"), ("common", "Common pairs"))
 SOURCES = (("average", "Average of halfkern and Contour"), ("halfkern", "halfkern"), ("contour", "Contour"),
-           ("fontlab", "FontLab"))
+           ("learned", "Learned"), ("fontlab", "FontLab"))
 ORDERS = (("change", "Largest change first"), ("agreement", "Best agreement first"), ("common", "Most common first"),
           ("alphabet", "Alphabetical"))
 PREVIEW_SIZE = 40  # pixels per em in the dialog's preview
 PREVIEW_ROW = 50  # pixels between the preview's lines
 COMMON_PAIRS_FILE = "common_pairs.txt"  # beside this script
 CACHE_VERSION = 1  # raise when the measuring changes in a way the settings below do not show
+# The learned method's features: the gap between a pair's facing edges in height bands, from below
+# the baseline to above the capitals (shares of the em), besides both methods' readings.
+PROFILE_BANDS = 16
+BAND_RANGE = (-0.25, 1.0)
+GAP_CAP = 0.6  # gaps wider than this share of the em count as this wide
+KIND_CODES = {"upper": 0, "lower": 1, "figure": 2, "punctuation": 3}
+SPACING_PAIRS = (u"nn", u"oo", u"HH")  # the font's own spacing, as features
+LEARNED_MODEL_FILE = "learned_model.json"  # beside this script: trees trained by kerning/train/train.py
 LETTERS = u"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 FIGURES = u"0123456789"
 PUNCTUATION = u".,:;!?'\"-()[]{}/&*‘’“”«»–—"
@@ -78,10 +88,13 @@ def common_pairs(path=None):
     return ranks
 
 
-def method_fingerprint():
-    """What the measuring depends on: a cache made with other settings is not reused."""
-    return u"%d %d %d %r %r %r %r %r %r" % (CACHE_VERSION, KERN_VERSION, EM_PIXELS, HALO_SHARE, PAD_SHARE, CONTOUR_SLOPE,
-                                          CONTOUR_FLOOR, MIN_GAP_SHARE, sorted(REFERENCES.items()))
+def method_fingerprint(model=None):
+    """What the measuring depends on: a cache made with other settings (or another learned model)
+    is not reused."""
+    trained = (model or {}).get("info", {})
+    return u"%d %d %d %r %r %r %r %r %r %r" % (CACHE_VERSION, KERN_VERSION, EM_PIXELS, HALO_SHARE, PAD_SHARE, CONTOUR_SLOPE,
+                                             CONTOUR_FLOOR, MIN_GAP_SHARE, sorted(REFERENCES.items()),
+                                             (trained.get("trained"), trained.get("pairs")) if model else None)
 
 
 def cache_path(font_key, master):
@@ -220,10 +233,11 @@ class Glyph(object):
     """One glyph's coverage image: `coverage` holds height rows of `stride` bytes; the glyph's origin
     is at column origin_x, on the same baseline row in every image; advance in whole pixels."""
 
-    def __init__(self, name, coverage, width, height, stride, origin_x, advance):
+    def __init__(self, name, coverage, width, height, stride, origin_x, advance, baseline=None):
         self.name, self.coverage = name, coverage
         self.width, self.height, self.stride = width, height, stride
         self.origin_x, self.advance = origin_x, advance
+        self.baseline = baseline  # the baseline's row (every image shares it)
         self._envelopes = {}
         self._contours = None
 
@@ -368,6 +382,87 @@ def round_units(value):
     return int(math.floor(value + 0.5))
 
 
+def gap_profile(core, left, right, em):
+    """The narrowest gap between the pair's facing ink (no kerning) in each height band, as a share
+    of the em (at most GAP_CAP), or None in a band where either glyph has no ink."""
+    _, raw_right_of_left, _, _ = left.contours(core)
+    raw_left_of_right, _, _, _ = right.contours(core)
+    offset = base_offset(left, right)
+    low, high = BAND_RANGE
+    step = (high - low) / PROFILE_BANDS
+    gaps = []
+    for band in range(PROFILE_BANDS):
+        top = left.baseline - int(round((low + (band + 1) * step) * em))
+        bottom = left.baseline - int(round((low + band * step) * em))
+        narrowest = None
+        for row in range(max(0, top), min(left.height, bottom)):
+            if raw_right_of_left[row] < -1e8 or raw_left_of_right[row] > 1e8:
+                continue
+            gap = raw_left_of_right[row] - (raw_right_of_left[row] + offset)
+            if narrowest is None or gap < narrowest:
+                narrowest = gap
+        gaps.append(None if narrowest is None else min(GAP_CAP, narrowest / em))
+    return gaps
+
+
+def closest_gap(core, left, right, em):
+    """The narrowest gap between the two glyphs' ink, no kerning, as a share of the em (or None)."""
+    _, raw_right_of_left, _, _ = left.contours(core)
+    raw_left_of_right, _, _, _ = right.contours(core)
+    gap = core.closest(raw_right_of_left, raw_left_of_right, left.height, base_offset(left, right))
+    return None if gap > 1e8 else gap / em
+
+
+def font_spacing(core, glyph_of, em):
+    """The font's own spacing: the narrowest gaps of nn, oo, and HH (None for a pair it lacks)."""
+    spacing = []
+    for pair in SPACING_PAIRS:
+        left, right = glyph_of(pair[0]), glyph_of(pair[1])
+        spacing.append(closest_gap(core, left, right, em) if left is not None and right is not None else None)
+    return spacing
+
+
+def pair_features(core, left_char, right_char, left, right, em, spacing, halo_pixels, contour_pixels):
+    """The learned method's inputs for a pair: both methods' readings, the pair's kinds, the font's
+    spacing, the advances, and the gap profile; all in shares of the em, None where unknown."""
+    return ([None if halo_pixels is None else halo_pixels / em, None if contour_pixels is None else contour_pixels / em,
+             KIND_CODES[category(left_char)], KIND_CODES[category(right_char)]] + list(spacing)
+            + [left.advance / em, right.advance / em] + gap_profile(core, left, right, em))
+
+
+_MODEL = {}
+
+
+def learned_model(path=None):
+    """The learned method's trees (learned_model.json beside this script), or None without them."""
+    path = path or os.path.join(os.path.dirname(os.path.abspath(globals().get("__file__") or ".")), LEARNED_MODEL_FILE)
+    if path not in _MODEL:
+        import io
+        import json
+        try:
+            with io.open(path, encoding="utf-8") as handle:
+                data = json.load(handle)
+            _MODEL[path] = data if data.get("format") == 1 else None
+        except (IOError, OSError, ValueError):
+            _MODEL[path] = None
+    return _MODEL[path]
+
+
+def predict(model, features):
+    """The learned kerning of a pair, as a share of the em: the sum of the trees' leaves. A node is
+    [feature, threshold, missing goes left, left, right, is leaf, value]; a feature at most the
+    threshold goes left, as scikit-learn's trees do."""
+    total = model["baseline"]
+    for tree in model["trees"]:
+        node = tree[0]
+        while not node[5]:
+            value = features[node[0]]
+            left = node[2] if value is None else value <= node[1]
+            node = tree[node[3] if left else node[4]]
+        total += node[6]
+    return total
+
+
 def to_units(pixels, em, upm, tighten=TIGHTEN, loosen=LOOSEN):
     value = pixels * upm / em
     value *= tighten if value < 0 else loosen
@@ -492,7 +587,7 @@ class FontLabGlyphs(object):
         address = ctypes.addressof(ctypes.c_char.from_buffer(image.bits()))
         coverage = (ctypes.c_uint8 * (stride * height)).from_buffer_copy(ctypes.string_at(address, stride * height))
         advance = round_units(self.advances[name] * scale)
-        glyph = Glyph(name, coverage, width, height, stride, origin_x, advance)
+        glyph = Glyph(name, coverage, width, height, stride, origin_x, advance, baseline)
         self.images[name] = glyph
         return glyph
 
@@ -554,8 +649,31 @@ class Analysis(object):
             if "fontlab" in s.values:
                 entry = pairs.get(u"%s %s" % (s.left, s.right))
                 if entry is not None:
-                    entry[2] = s.values["fontlab"]
+                    entry[2] = s.values["fontlab"]  # [halfkern, contour, FontLab, learned]
         save_cache(self.cache_file, self.cache)
+
+
+def make_bands(core, image_of, chars, em, max_bias):
+    """Both methods' bands for each kind of pair, from the font's references; image_of(ch) gives the
+    Glyph of a character in chars. Shared by Auto Kerning and the learned method's training."""
+    tuning = [image_of(ch) for ch in TUNING]
+    band = calibrate(core, tuning, em, max_bias=max_bias)
+    references = dict((kind, [image_of(ch) for ch in refs if ch in chars]) for kind, refs in REFERENCES.items())
+    halo_bands, contour_bands = {}, {}
+    for left_kind in references:
+        for right_kind in references:
+            lefts, rights = references[left_kind], references[right_kind]
+            halo_bands[(left_kind, right_kind)] = reference_band(core, lefts, rights, band.bias) or band
+            contour_bands[(left_kind, right_kind)] = contour_band(core, lefts, rights) or contour_band(core, tuning, tuning)
+    return {"core": core, "halo": halo_bands, "contour": contour_bands, "bias": band.bias}
+
+
+def measure_pair(tools, left_char, right_char, left, right, em, reach):
+    """(halfkern, contour distance) raw kerning of a pair in pixels, either None when out of reach."""
+    kinds = pair_kinds(left_char, right_char)
+    halo = suggest_pixels(tools["core"], left, right, tools["halo"][kinds])
+    contour = suggest_contour_pixels(tools["core"], left, right, tools["contour"][kinds], reach, MIN_GAP_SHARE * em)
+    return halo, contour
 
 
 def font_key(package):
@@ -576,30 +694,21 @@ def analyze(package, master, characters=None, em=EM_PIXELS, progress=None, core=
     reference_names = sorted(set(names[ch] for chars_ in REFERENCES.values() for ch in chars_ if ch in names))
     references_signature = u" ".join(glyphs.signatures[n] for n in reference_names)
     cache_file = cache_file if cache_file is not None else cache_path(font_key(package), master)
+    model = learned_model()
     old = load_cache(cache_file) or {}
-    valid = old.get("method") == method_fingerprint() and old.get("references") == references_signature
+    valid = old.get("method") == method_fingerprint(model) and old.get("references") == references_signature
     old_signatures = old.get("signatures", {}) if valid else {}
     old_pairs = old.get("pairs", {}) if valid else {}
     measuring = {}  # made only when a pair must be measured
 
     def tools():
         if not measuring:
-            core_ = core or Core()
-            tuning = [glyphs.image(names[ch]) for ch in TUNING]
-            band = calibrate(core_, tuning, em, max_bias=glyphs.pad)
-            references = dict((kind, [glyphs.image(names[ch]) for ch in chars_ if ch in names])
-                              for kind, chars_ in REFERENCES.items())
-            halo_bands, contour_bands = {}, {}
-            for left_kind in references:
-                for right_kind in references:
-                    lefts, rights = references[left_kind], references[right_kind]
-                    halo_bands[(left_kind, right_kind)] = reference_band(core_, lefts, rights, band.bias) or band
-                    contour_bands[(left_kind, right_kind)] = (contour_band(core_, lefts, rights)
-                                                              or contour_band(core_, tuning, tuning))
-            measuring.update(core=core_, halo=halo_bands, contour=contour_bands)
+            measuring.update(make_bands(core or Core(), lambda ch: glyphs.image(names[ch]), names, em, glyphs.pad))
+            if model is not None:
+                measuring["spacing"] = font_spacing(measuring["core"], lambda ch: glyphs.image(names[ch]) if ch in names else None, em)
         return measuring
 
-    reach, min_gap = float(glyphs.pad), MIN_GAP_SHARE * em
+    reach = float(glyphs.pad)
     kerning = package.kerning(master)
     suggestions, total, done, measured, reused = [], len(chars) * len(chars), 0, 0, 0
     pairs = {}
@@ -617,18 +726,22 @@ def analyze(package, master, characters=None, em=EM_PIXELS, progress=None, core=
                      and old_signatures.get(right) == glyphs.signatures[right])
             if fresh:
                 reused += 1
-                entry = list(entry) + [None] * (3 - len(entry))
+                entry = list(entry) + [None] * (4 - len(entry))
             else:
                 t = tools()
                 left_glyph, right_glyph = glyphs.image(left), glyphs.image(right)
-                halo = suggest_pixels(t["core"], left_glyph, right_glyph, t["halo"][kinds])
-                contour = suggest_contour_pixels(t["core"], left_glyph, right_glyph, t["contour"][kinds], reach, min_gap)
+                halo, contour = measure_pair(t, left_char, right_char, left_glyph, right_glyph, em, reach)
+                learned = None
+                if model is not None:
+                    features = pair_features(t["core"], left_char, right_char, left_glyph, right_glyph, em, t["spacing"],
+                                             halo, contour)
+                    learned = predict(model, features) * glyphs.upm
                 entry = [None if halo is None else halo * glyphs.upm / em,
-                         None if contour is None else contour * glyphs.upm / em, None]
+                         None if contour is None else contour * glyphs.upm / em, None, learned]
                 measured += 1
             pairs[key] = entry
             s = Suggestion(left_char, right_char, left, right, current_kerning(kerning, left, right))
-            for method, units in zip(("halfkern", "contour"), entry[:2]):
+            for method, units in ((MEASURED[0], entry[0]), (MEASURED[1], entry[1]), (MEASURED[2], entry[3])):
                 if units is not None:
                     s.raw[method] = units
             if entry[2] is not None:
@@ -636,7 +749,7 @@ def analyze(package, master, characters=None, em=EM_PIXELS, progress=None, core=
             if s.raw:
                 suggestions.append(s)
     factors = {}
-    for method in ("halfkern", "contour"):
+    for method in MEASURED:
         samples = [(s.raw[method], s.current) for s in suggestions if s.current and method in s.raw]
         factors[method] = fit_factors(samples, DEFAULT_FACTORS[method])
         tighten, loosen = factors[method]
@@ -644,7 +757,7 @@ def analyze(package, master, characters=None, em=EM_PIXELS, progress=None, core=
             if method in s.raw:
                 units = s.raw[method]
                 s.values[method] = round_units(units * (tighten if units < 0 else loosen))
-    cache = {"method": method_fingerprint(), "references": references_signature,
+    cache = {"method": method_fingerprint(model), "references": references_signature,
              "signatures": dict((name, glyphs.signatures[name]) for _, name in chars), "pairs": pairs}
     if cache_file:
         save_cache(cache_file, cache)
@@ -657,11 +770,11 @@ def analyze(package, master, characters=None, em=EM_PIXELS, progress=None, core=
 # ---------------------------------------------------------------------------
 
 OVERRIDES = (("", "Write values from (above)"), ("average", "Average of halfkern and Contour"), ("halfkern", "halfkern"),
-             ("contour", "Contour"), ("fontlab", "FontLab"), ("current", "Keep the current kerning"))
+             ("contour", "Contour"), ("learned", "Learned"), ("fontlab", "FontLab"), ("current", "Keep the current kerning"))
 
 
 class AutoKerningDialog(object):
-    COLUMNS = ("Pair", "Current", "halfkern", "Contour", "FontLab", "Spread", "Write")
+    COLUMNS = ("Pair", "Current", "halfkern", "Contour", "Learned", "FontLab", "Spread", "Write")
 
     def __init__(self):
         QtCore, QtGui = _qt()
@@ -720,7 +833,7 @@ class AutoKerningDialog(object):
         layout.addWidget(self.table, 1)
         preview_row = QtGui.QHBoxLayout()
         self.preview = QtGui.QLabel()
-        self.preview.setMinimumHeight(5 * PREVIEW_ROW + 12)
+        self.preview.setMinimumHeight(6 * PREVIEW_ROW + 12)
         preview_row.addWidget(self.preview, 1)
         choice = QtGui.QVBoxLayout()
         choice.addWidget(QtGui.QLabel("This pair uses"))
@@ -872,7 +985,7 @@ class AutoKerningDialog(object):
             listed.sort(key=change)
         self.suggestions = listed
         summary = []
-        for method in ("halfkern", "contour"):
+        for method in [m for m in MEASURED if any(m in s.raw for s in self.analysis.suggestions)]:
             tighten, loosen = self.analysis.factors[method]
             fitted = (tighten, loosen) != DEFAULT_FACTORS[method]
             summary.append("%s tightens at %.0f%%%s" % (dict(METHODS)[method], tighten * 100,
@@ -907,8 +1020,8 @@ class AutoKerningDialog(object):
 
     def fill_row(self, row, s, source):
         QtCore, QtGui = _qt()
-        cells = (s.current, s.values.get("halfkern"), s.values.get("contour"), s.values.get("fontlab"),
-                 s.spread(), s.to_write(source))
+        cells = (s.current, s.values.get("halfkern"), s.values.get("contour"), s.values.get("learned"),
+                 s.values.get("fontlab"), s.spread(), s.to_write(source))
         for column, value in enumerate(cells, 1):
             text = u"\u2013" if value is None else str(value)
             if column == len(self.COLUMNS) - 1 and s.override:
@@ -959,7 +1072,7 @@ class AutoKerningDialog(object):
         QtCore, QtGui = _qt()
         source = self.source_key()
         lines = [("Now", s.current), ("halfkern", s.values.get("halfkern")), ("Contour", s.values.get("contour")),
-                 ("FontLab", s.values.get("fontlab")), ("Written", s.to_write(source))]
+                 ("Learned", s.values.get("learned")), ("FontLab", s.values.get("fontlab")), ("Written", s.to_write(source))]
         width, height = max(320, self.preview.width), len(lines) * PREVIEW_ROW + 12
         palette = self.dialog.palette
         text = palette.color(QtGui.QPalette.Text)
