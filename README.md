@@ -32,5 +32,6 @@ It runs everything under Python 3, including the native helper's tests, then the
 ## More
 
 - [docs/DARKMODE.md](docs/DARKMODE.md): how FontLab 7 colors itself, and how dark mode turns each part dark.
+- [docs/NATIVE.md](docs/NATIVE.md): the experimental native dark mode, and how it compares with the script version.
 - [docs/ROADMAP.md](docs/ROADMAP.md): what comes next.
 - [docs/FEATURE-SURVEY.md](docs/FEATURE-SURVEY.md): what already exists for dark mode, kerning, diacritics, and feature code.
