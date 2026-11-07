@@ -423,6 +423,9 @@ class KindTests(DarkModeCase):
         self.assertIsNone(dm.widget_kind(wide))
         history = FakeWidget("QListWidget", "historyList")
         self.assertEqual(dm.widget_kind(history), "island")
+        status = FakeWidget("QStatusBar")
+        self.assertEqual(dm.widget_kind(status), "ink", "its message is drawn through an effect: grayscale smoothing")
+        self.assertTrue(dm._gray_text(status))
 
     def test_title_height(self):
         self.assertEqual(dm.title_height(self.panel), 21)

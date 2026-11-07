@@ -1122,7 +1122,7 @@ INK_VIEW_PARENTS = ("QAbstractItemView", "QTextEdit", "QPlainTextEdit", "QtnProp
 # Tiny light text that ClearType draws as blue and yellow fringes with no light core (the font window's
 # "Name: Encoding: None Index" selectors): any effect draws it through a transparent image, where text
 # gets grayscale smoothing; the ink mapping leaves light text as it is.
-GRAYSCALE_TEXT_CLASSES = ("YSelector",)
+GRAYSCALE_TEXT_CLASSES = ("YSelector", "QStatusBar")  # the status bar draws its message straight on dark
 STYLE_DRAWN_BUTTONS = ("QRadioButton", "QCheckBox", "QPushButton")  # never ink by render detection
 GRAYSCALE_TEXT_NAMES = ("labelMode",)  # the colon between those selectors
 # Text drawn with ClearType on purpose (TrueType Hinting's preview): each channel's coverage is kept
