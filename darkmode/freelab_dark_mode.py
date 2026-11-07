@@ -169,9 +169,9 @@ SWATCH_NAME_PREFIXES = ("flag",)
 # Color pickers keep their swatch (the white "no color" slot included), but their button frame,
 # drawn white by the style, gets this thin dark border instead (appended to their own stylesheet).
 PICKER_FRAME = u"\nQtColorPicker { border: 1px solid #55555a; border-radius: 2px; background: transparent; }"
-# A picker draws its swatch at the left, about as wide as it is tall, and a dark arrow after this
-# gap: the "picker" effect maps only the arrow's side.
-PICKER_ARROW_GAP = 3
+# A picker draws its swatch at the left, about as wide as it is tall, inside a light frame of its own,
+# and a dark arrow after this gap: the "picker" effect maps all of it but the swatch's inside (the
+# frame on the swatch's side stayed white).
 # Color pickers and mark-color buttons keep their look, the white "no color" slot included (the owner
 # preferred that to a half-dark frame).
 
@@ -838,7 +838,8 @@ def map_sheet_images(sheet, mapped_path):
 
 def _mapped_resource(resource):
     """A dark copy of one of FontLab's resource images (arrows, check boxes, info-bar icons that its
-    stylesheets name), saved once per shade; None for pictures, color swatches, and failures."""
+    stylesheets name), saved once per shade; None for pictures, color swatches, white artwork (the
+    logo in the Welcome dialog's bottom bar), and failures."""
     state = _state()
     cache = state.setdefault("sheet_images", {})
     key = (state.get("shade", "dark"), resource)
@@ -849,7 +850,7 @@ def _mapped_resource(resource):
         QImage = _gui("QImage")
         image = QImage(resource)
         if (not image.isNull() and image.width() <= MAX_ICON_SIDE and image.height() <= MAX_ICON_SIDE
-                and not is_swatch(image)):
+                and not is_swatch(image) and not is_white_artwork(image)):  # FontLab's logo stays white
             folder = os.path.join(state_dir(), "cache", "images-%s-%s-%d" % (VERSION, key[0], NATIVE_VERSION))
             if not os.path.isdir(folder):
                 os.makedirs(folder)
@@ -866,6 +867,18 @@ def _mapped_resource(resource):
         path = None
     cache[key] = path
     return path
+
+
+def _shows_white_artwork(widget):
+    """A label whose stylesheet shows only white artwork (the Welcome dialog's logo)."""
+    if not widget.inherits("QLabel"):
+        return False
+    sheet = widget.property(SHEET_PROP) or _prop(widget, "styleSheet") or u""
+    resources = [m.group(2) for m in _SHEET_IMAGE_RE.finditer(sheet)]
+    if not resources:
+        return False
+    QImage = _gui("QImage")
+    return all(is_white_artwork(QImage(resource)) for resource in resources)
 
 
 def _darken_sheet(widget):
@@ -963,6 +976,88 @@ def dark_icon(icon, owner=None):
     return result
 
 
+SOFT_SPREAD = 24  # channels at most this far apart: a gray pixel
+SOFT_DARK = 128  # grays darker than this are lightened; lighter ones and colors stay
+SOFT_BLACK_TO = 219  # black becomes this light gray (dark mode's text), continuous at SOFT_DARK
+SOFT_STROKE_CLEAR = 0.5  # a dark gray region at least this much bordered by transparency is a stroke
+
+
+LOGO_MIN_SIDE = 24  # list icons this large are pictures (Export Profiles' format logos), not line icons
+
+
+def _logo_icon(icon):
+    """A logo rather than a line icon: colorful, or drawn large (format logos keep their white pages
+    and plates; mapped whole, the pages turned dark and the discs gray)."""
+    sizes = list(icon.availableSizes())
+    large = any(size.width() >= LOGO_MIN_SIDE and size.height() >= LOGO_MIN_SIDE for size in sizes)
+    return large or not icon_is_gray(icon)
+
+
+def soft_icon(icon, owner=None):
+    """A QIcon whose dark gray and black parts are lightened, every colored or light pixel kept: for
+    colorful logos (Export Profiles' formats), whose braces, slashes, and gray letters vanished on dark."""
+    QIcon, QPixmap = _gui("QIcon"), _gui("QPixmap")
+    sizes = list(icon.availableSizes()) or [_core("QSize")(16, 16)]
+    result = QIcon()
+    for size in sizes:
+        for mode in (QIcon.Normal, QIcon.Disabled, QIcon.Active, QIcon.Selected):
+            for icon_state in (QIcon.Off, QIcon.On):
+                pixmap = icon.pixmap(size, mode, icon_state)
+                if not pixmap.isNull():
+                    result.addPixmap(QPixmap.fromImage(soften_image(pixmap.toImage())), mode, icon_state)
+    return result
+
+
+def soften_image(image):
+    """Lighten the dark gray strokes of a colorful logo: regions of dark gray bordered mostly by
+    transparency (braces, slashes, a letter's gray half). Dark plates behind white or colored parts
+    (the black VAR boxes, FontLab's disc shadow, a dark tile) stay, as does every other pixel."""
+    QImage = _gui("QImage")
+    image = image.convertToFormat(QImage.Format_ARGB32)  # straight alpha: colors as drawn
+    w, h = image.width(), image.height()
+    pixels = [[image.pixel(x, y) for x in range(w)] for y in range(h)]
+
+    def dark_gray(value):
+        if ((value >> 24) & 255) < 64:
+            return False
+        r, g, b = (value >> 16) & 255, (value >> 8) & 255, value & 255
+        return max(r, g, b) - min(r, g, b) <= SOFT_SPREAD and (r + g + b) // 3 < SOFT_DARK
+
+    dark = [[dark_gray(pixels[y][x]) for x in range(w)] for y in range(h)]
+    seen = set()
+    for y0 in range(h):
+        for x0 in range(w):
+            if not dark[y0][x0] or (x0, y0) in seen:
+                continue
+            seen.add((x0, y0))
+            stack, region, clear, border = [(x0, y0)], [], 0, 0
+            while stack:
+                x, y = stack.pop()
+                region.append((x, y))
+                for dy in (-1, 0, 1):
+                    for dx in (-1, 0, 1):
+                        nx, ny = x + dx, y + dy
+                        if not (0 <= nx < w and 0 <= ny < h):
+                            clear += 1
+                            border += 1
+                        elif dark[ny][nx]:
+                            if (nx, ny) not in seen:
+                                seen.add((nx, ny))
+                                stack.append((nx, ny))
+                        else:
+                            border += 1
+                            clear += ((pixels[ny][nx] >> 24) & 255) < 64
+            if not border or clear < SOFT_STROKE_CLEAR * border:
+                continue  # a plate: it stays dark
+            for x, y in region:
+                value = pixels[y][x]
+                r, g, b = (value >> 16) & 255, (value >> 8) & 255, value & 255
+                gray = (r + g + b) // 3
+                light = SOFT_BLACK_TO - gray * (SOFT_BLACK_TO - SOFT_DARK) // SOFT_DARK
+                image.setPixel(x, y, (value & 0xff000000) | (light << 16) | (light << 8) | light)
+    return image
+
+
 def dark_pixmap(pixmap):
     """A label's image mapped; white artwork (FontLab's logo) stays as it is. Button icons do not get
     that rule: a toggled button's white icon, kept, turned black under the button's ink effect."""
@@ -982,7 +1077,7 @@ def is_white_artwork(image):
         return False
     small = image.convertToFormat(QImage.Format_ARGB32)
     if small.width() > ARTWORK_SAMPLE or small.height() > ARTWORK_SAMPLE:
-        small = small.scaled(ARTWORK_SAMPLE, ARTWORK_SAMPLE, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        small = small.scaled(ARTWORK_SAMPLE, ARTWORK_SAMPLE, Qt.KeepAspectRatio, Qt.FastTransformation)  # no blending: its own pixels
     seen = clear = False
     for y in range(small.height()):
         for x in range(small.width()):
@@ -1132,38 +1227,43 @@ def _list_items(widget):
 
 
 def _swap_item_icons(widget):
-    """Item icons of FontLab's lists (Font Info's and Preferences' pages): drawn for light mode, the
-    gray ones nearly vanished on dark. Mapped as button icons are; the originals are kept to put back."""
+    """Item icons of FontLab's lists (Font Info's and Preferences' pages, Export Profiles' formats, in
+    any column): drawn for light mode, the gray ones nearly vanished on dark. Gray icons are mapped as
+    button icons are; colorful ones (format logos) only get their dark gray and black parts lightened
+    (mapped whole, they turned jagged); swatches stay. The originals are kept to put back."""
     state = _state()
     record = _record(widget)
     kept = record.setdefault("item_icons", [])
+    tree = widget.inherits("QTreeWidget")
+    columns = range(max(1, _prop(widget, "columnCount") or 1)) if tree else [None]
     for item in _list_items(widget):
-        icon = item.icon(0) if widget.inherits("QTreeWidget") else item.icon()
-        if icon is None or icon.isNull():
-            continue
-        key = icon.cacheKey()
-        if key in state["mapped_keys"] or key in state["swatches"]:
-            continue
-        if key not in state["icon_cache"] and (icon_is_swatch(icon) or not icon_is_gray(icon)):
-            state["swatches"].add(key)  # colorful (Export Profiles' format logos): left as drawn, mapped they turned jagged
-            continue
-        new = state["icon_cache"].get(key)
-        if new is None:
-            new = state["icon_cache"][key] = dark_icon(icon)
-            state["mapped_keys"].add(new.cacheKey())
-            state["originals"][new.cacheKey()] = icon
-        kept.append((item, icon))
-        if widget.inherits("QTreeWidget"):
-            item.setIcon(0, new)
-        else:
-            item.setIcon(new)
+        for column in columns:
+            icon = item.icon(column) if tree else item.icon()
+            if icon is None or icon.isNull():
+                continue
+            key = icon.cacheKey()
+            if key in state["mapped_keys"] or key in state["swatches"]:
+                continue
+            new = state["icon_cache"].get(key)
+            if new is None:
+                if icon_is_swatch(icon):
+                    state["swatches"].add(key)
+                    continue
+                new = state["icon_cache"][key] = soft_icon(icon) if _logo_icon(icon) else dark_icon(icon)
+                state["mapped_keys"].add(new.cacheKey())
+                state["originals"][new.cacheKey()] = icon
+            kept.append((item, column, icon))
+            if tree:
+                item.setIcon(column, new)
+            else:
+                item.setIcon(new)
 
 
 def _restore_item_icons(widget, record):
-    for item, icon in record.pop("item_icons", []):
+    for item, column, icon in record.pop("item_icons", []):
         try:
             if widget.inherits("QTreeWidget"):
-                item.setIcon(0, icon)
+                item.setIcon(column, icon)
             else:
                 item.setIcon(icon)
         except Exception:  # FontLab rebuilt the list meanwhile
@@ -1297,18 +1397,17 @@ def _effect_classes():
                     if kind == "relight":  # an editor left dark after switching off: its dark paper white, its light text black
                         draw_mapped(painter, pixmap, offset, whole, 0.0, None, -1.0, 0.0, None, 0.0, 0, "relight")
                         return
-                    if kind == "picker":  # the swatch as it is; the dark arrow beside it mapped light
+                    if kind == "picker":  # the swatch as it is; its frame and the dark arrow beside it mapped
                         side = pixmap.height() - 2  # the swatch: a square at the left, inside a 2-px frame
                         image = pixmap.toImage()
-                        probe_x, probe_y = side // 4 + 1, side // 4 + 1  # off the "no color" diagonal
-                        if side > 6 and _gui("QColor").fromRgba(image.pixel(probe_x, probe_y)).alpha() < 200:
-                            # Some pickers paint "no color" transparent: give them the white slot others paint.
-                            painter.fillRect(QRect(offset.x() + 3, offset.y() + 3, side - 4, side - 4), Qt.white)
-                        painter.drawPixmap(offset, pixmap)
-                        split = min(pixmap.width(), pixmap.height() + PICKER_ARROW_GAP)
-                        draw_mapped(painter, pixmap, offset, QRect(offset.x() + split, offset.y(),
-                                                                   pixmap.width() - split, pixmap.height()),
-                                    0.0, None, -1.0, 0.0, None, 0.0, 0, "all")
+                        draw_mapped(painter, pixmap, offset, whole, 0.0, None, -1.0, 0.0, None, 0.0, 0, "all")
+                        if side > 6:
+                            inside = QRect(3, 3, side - 4, side - 4)  # the swatch within the frame FontLab paints light
+                            probe_x, probe_y = side // 4 + 1, side // 4 + 1  # off the "no color" diagonal
+                            if _gui("QColor").fromRgba(image.pixel(probe_x, probe_y)).alpha() < 200:
+                                # Some pickers paint "no color" transparent: give them the white slot others paint.
+                                painter.fillRect(inside.translated(offset), Qt.white)
+                            painter.drawPixmap(inside.translated(offset), pixmap, inside)
                         return
                     if kind == "defringe":  # dark already (its stylesheet): only its text's fringes made gray
                         area = whole
@@ -2190,6 +2289,8 @@ def process(widget):
     _darken_sheet(widget)
     if widget.inherits("QsciScintilla"):
         _recolor_editor(widget)  # after its stylesheet: a repolish could reset QScintilla's defaults
+    if kind is None and visible_unchecked and _shows_white_artwork(widget):
+        visible_unchecked = False  # FontLab's logo: white on purpose, no effect (the ink effect blackened its edges)
     if kind is None and visible_unchecked:
         found = detect_light(widget)  # before its icons are mapped light
         found = LEGACY_KINDS.get(found, found)
