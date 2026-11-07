@@ -22,7 +22,14 @@ $name = if ($Hooks) { 'freelab_hooks' } else { 'freelab_pixels' }
 $match = [regex]::Match([System.IO.File]::ReadAllText($source), '#define FREELAB_PIXELS_VERSION (\d+)')
 if (-not $match.Success) { throw 'FREELAB_PIXELS_VERSION not found in freelab_pixels.c' }
 # Versioned name: FontLab keeps a loaded DLL locked, so a newer build must not need the same file.
-if (-not $Out) { $Out = Join-Path $env:LOCALAPPDATA ('FreeLab\bin\' + $name + '-v' + $match.Groups[1].Value + '.dll') }
+$version = $match.Groups[1].Value
+if ($Hooks) {
+    # Named after both versions: FontLab keeps a loaded library locked, and the hooks change on their own.
+    $hooksMatch = [regex]::Match([System.IO.File]::ReadAllText((Join-Path $repo 'darkmode\native\freelab_hooks.c')), '#define FREELAB_HOOKS_VERSION (\d+)')
+    if (-not $hooksMatch.Success) { throw 'FREELAB_HOOKS_VERSION not found in freelab_hooks.c' }
+    $version = $hooksMatch.Groups[1].Value + '-' + $version
+}
+if (-not $Out) { $Out = Join-Path $env:LOCALAPPDATA ('FreeLab\bin\' + $name + '-v' + $version + '.dll') }
 $work = Join-Path ([System.IO.Path]::GetTempPath()) ('freelab-build-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $work | Out-Null
 try {

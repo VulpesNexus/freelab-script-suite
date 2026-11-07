@@ -2115,9 +2115,11 @@ def process(widget):
     if visible_unchecked:
         widget.setProperty(CHECKED_PROP, _size_key(widget))  # sweeps need not queue it again at this size
     name = _class_name(widget)
+    hooked = state.get("engine") == "native" and state.get("hooked")
     if name == "QtColorPicker":
         _frame_picker(widget)
-        _set_effect(widget, _record(widget), "picker")
+        if not hooked:  # natively, the swatch keeps its color and the arrow is mapped as it is drawn
+            _set_effect(widget, _record(widget), "picker")
         _protect(widget)
         return
     if _left_alone(widget, name):
@@ -2128,6 +2130,9 @@ def process(widget):
     if not canvas and is_content(widget):
         _note_sheet_as_seen(widget)  # "dark interface" mode: canvases, font cells, and previews keep FontLab's look
         _protect(widget)  # and the ink effect of the window around them must not map them (garbled cells)
+        return
+    if hooked:
+        _process_native(widget, widget_kind(widget, canvas))
         return
     if _island_ancestor(widget, canvas) is not None:
         _undo_widget(widget, keep_props=True, keep_placeholder=True)  # the island maps it as drawn in light mode
@@ -2165,6 +2170,24 @@ def process(widget):
             keys = frame_keys(widget)
             if keys:
                 _set_effect(widget, record, "keyed", keys)
+    elif kind == "fill":
+        record = _record(widget)
+        if "autofill" not in record:
+            record["autofill"] = bool(_prop(widget, "autoFillBackground"))
+            widget.setAutoFillBackground(True)
+
+
+def _process_native(widget, kind):
+    """The native engine's share of process(): what Qt draws, as the script engine does; nothing of
+    what FontLab paints itself, which the hooks map (no effects, no light islands, no detection)."""
+    _darken_sheet(widget)
+    if widget.inherits("QsciScintilla"):
+        _recolor_editor(widget)
+    _darken_icons(widget)
+    if kind in ("edges", "subpixel"):
+        # an editor's margin (QScintilla paints it from its own colors, not hooked), and ClearType
+        # previews (TrueType Hinting's: black text drawn per subpixel, which a color rule leaves fringed)
+        _set_effect(widget, _record(widget), kind)
     elif kind == "fill":
         record = _record(widget)
         if "autofill" not in record:
@@ -2239,6 +2262,8 @@ def _sweep():
     todo = [w for w in app.allWidgets()
             if full or w.property(SEEN_PROP) is None or (w.isVisible() and (_unchecked(w) or _restyled(w)))]
     if todo:
+        if state.get("hooked") and any(w.property(SEEN_PROP) is None for w in todo):
+            _update_kept(app)  # new widgets: new pickers or content to leave as FontLab draws it
         _hook_menus(todo)
         _enqueue(todo, "dark")
         if len(todo) > 200 and not full:
@@ -2451,7 +2476,201 @@ def _watch_windows(follow):
         _stop_timer(state, "theme_watch")
 
 
-def configure(dark=None, content=None, follow_windows=None, shade=None):
+# ---------------------------------------------------------------------------
+# The native engine (darkmode/native/freelab_hooks.c)
+# ---------------------------------------------------------------------------
+# Two engines darken what FontLab paints itself (the glyph canvas, font cells, previews, panel
+# titles, dock frames): "script" maps the pixels those widgets drew, through graphics effects;
+# "native" maps the colors FontLab hands to Qt, in the hooks library, before anything is drawn.
+# Everything Qt draws itself (palette, Fusion, stylesheets, icons, title bars, editors) is the same
+# in both. If the native engine cannot start (no library, another Qt build), the script engine runs.
+ENGINES = ("script", "native")
+HOOKS_VERSION = 7
+PALETTE_GROUPS, PALETTE_ROLES = 3, 21
+
+
+def engine_setting(settings):
+    engine = settings.get("engine", "script")
+    return engine if engine in ENGINES else "script"
+
+
+def hooks_path():
+    name = "freelab_hooks-v%d-%d.dll" % (HOOKS_VERSION, NATIVE_VERSION)  # both: a loaded library stays locked
+    return os.environ.get("FREELAB_HOOKS_DLL") or os.path.join(state_dir(), "bin", name)
+
+
+def _hooks():
+    """The hooks library, loaded once per FontLab session (its import-table state lives in it), or None."""
+    holder = _state()
+    lib = holder.get("hooks_lib")
+    if lib is not None and holder.get("hooks_lib_path") == hooks_path():
+        return lib
+    path = hooks_path()
+    if not os.path.isfile(path):
+        raise RuntimeError("the native engine's library is missing: %s (tools/install-fontlab.ps1 builds it)" % path)
+    import ctypes
+    lib = ctypes.PyDLL(path)  # keeps the interpreter lock: the wrappers never call back into Python
+    if lib.freelab_hooks_version() != HOOKS_VERSION * 1000 + NATIVE_VERSION:
+        raise RuntimeError("the native engine's library is another version")
+    lib.freelab_hooks_init.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    lib.freelab_hooks_add_module.argtypes = [ctypes.c_void_p]
+    lib.freelab_hooks_set_palette.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    lib.freelab_hooks_install.argtypes = [ctypes.c_double, ctypes.c_double, ctypes.c_double]
+    lib.freelab_hooks_set_keep.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    kernel32 = ctypes.WinDLL("kernel32")
+    kernel32.GetModuleHandleW.restype = ctypes.c_void_p
+    kernel32.GetModuleHandleW.argtypes = [ctypes.c_wchar_p]
+    qtgui = kernel32.GetModuleHandleW(u"Qt5Gui.dll")
+    virtual_protect = ctypes.cast(kernel32.VirtualProtect, ctypes.c_void_p).value
+    if not qtgui or lib.freelab_hooks_init(qtgui, virtual_protect) != 1:
+        raise RuntimeError("Qt is not the build the native engine knows (Qt 5.14.2)")
+    found = lib.freelab_hooks_add_module(kernel32.GetModuleHandleW(None))  # FontLab's own program
+    if found not in (-2,) and found < HOOKS_MIN_FOUND:
+        raise RuntimeError("FontLab's program imports only %d of the calls the native engine maps" % found)
+    holder["hooks_lib"], holder["hooks_lib_path"] = lib, path
+    return lib
+
+
+HOOKS_MIN_FOUND = 19  # of 24: FontLab 7.2's program imports all of them
+
+
+def _palette_table(palette):
+    """A palette's colors as 0xAARRGGBB, groups (Active, Disabled, Inactive) by roles."""
+    import ctypes
+    QPalette = _gui("QPalette")
+    table = (ctypes.c_uint32 * (PALETTE_GROUPS * PALETTE_ROLES))()
+    groups = (QPalette.Active, QPalette.Disabled, QPalette.Inactive)
+    for g, group in enumerate(groups):
+        for role in range(PALETTE_ROLES):
+            try:
+                table[g * PALETTE_ROLES + role] = palette.color(group, role).rgba() & 0xffffffff
+            except Exception:
+                table[g * PALETTE_ROLES + role] = 0
+    return table
+
+
+NATIVE_SETTLE_MS = 15000  # the native engine counts as started once it has run this long
+NATIVE_FELL_BACK = ("FreeLab dark mode: FontLab closed while the native engine was starting, so the script "
+                    "engine runs instead. To try the native engine again, choose it in Scripts > FreeLab > "
+                    "Dark Mode Settings.")
+
+
+def _install_hooks(app):
+    """Start the native engine: FontLab's palette reads answer light, its painting is mapped. True when on.
+
+    A guard against a crash at start: darkmode.json holds native_pending from just before the hooks go
+    in until the engine has run NATIVE_SETTLE_MS. Found at the next start, it means FontLab closed
+    while the engine was starting (most likely a crash): the script engine runs from then on.
+    """
+    state = _state()
+    settings = load_settings()
+    if settings.pop("native_pending", None):
+        settings["engine"] = "script"
+        save_settings(settings)
+        state["engine"] = "script"
+        _note_error("native engine", "FontLab closed while it was starting; the script engine runs instead")
+        print(NATIVE_FELL_BACK)
+        return False
+    settings["native_pending"] = True
+    save_settings(settings)
+    try:
+        lib = _hooks()
+        import ctypes
+        dark, light = _palette_table(app.palette()), _palette_table(state["saved"]["palette"])
+        lib.freelab_hooks_set_palette(ctypes.addressof(dark), ctypes.addressof(light))
+        lib.freelab_hooks_install(DARK_OKL, LIGHT_OKL, KEEP_TINT_CONTENT)
+        state["hooked"], state["hooked_lib"] = True, lib
+        _update_kept(app)
+    except Exception as exc:
+        _clear_native_pending()
+        _note_error("native engine", exc)
+        state["engine"] = "script"  # falls back: dark mode still works, through effects
+        return False
+    _repaint_all(app)
+    _core("QTimer").singleShot(NATIVE_SETTLE_MS, _native_settled)
+    return True
+
+
+def _clear_native_pending():
+    settings = load_settings()
+    if settings.pop("native_pending", None):
+        save_settings(settings)
+
+
+def _native_settled():
+    try:
+        if _state().get("hooked"):
+            _clear_native_pending()
+    except Exception as exc:  # a Qt timer callback must not raise
+        _note_error("native engine", exc)
+
+
+KEPT_CLASSES = ("QtColorPicker", "ColorPickerItem", "ColorPickerButton")  # swatches show their real colors
+
+
+def _kept_widget(widget, canvas):
+    name = _class_name(widget)
+    if name in KEPT_CLASSES or _left_alone(widget, name) or name in SUBPIXEL_CLASSES:
+        return True  # swatches; and ClearType previews, which keep the script's subpixel mapping
+    return not canvas and is_content(widget)  # Mixed: canvases, cells, and previews keep FontLab's look
+
+
+def _update_kept(app):
+    """Tell the hooks which widgets to leave as FontLab draws them (their addresses, from Qt's own
+    description of each widget). Run again by sweeps: FontLab makes new pickers as panels open."""
+    state = _state()
+    lib = state.get("hooked_lib")
+    if lib is None or not state.get("hooked"):
+        return
+    import ctypes
+    addresses = []
+    for widget in app.allWidgets():
+        try:
+            if _kept_widget(widget, state["canvas"]):
+                pointer = _sci_pointer(widget)
+                if pointer:
+                    addresses.append(pointer)
+        except Exception:
+            pass
+    if addresses != state.get("kept_addresses"):
+        table = (ctypes.c_uint64 * max(1, len(addresses)))(*addresses)
+        lib.freelab_hooks_set_keep(ctypes.addressof(table), len(addresses))
+        state["kept_addresses"] = addresses
+
+
+def _remove_hooks(app):
+    state = _state()
+    if not state.get("hooked"):
+        return
+    state["hooked"] = False
+    _clear_native_pending()  # switched off in order: no crash to guard against
+    try:
+        state["hooked_lib"].freelab_hooks_remove()
+    except Exception as exc:
+        _note_error("native engine", exc)
+    _repaint_all(app)
+
+
+def _repaint_all(app):
+    try:
+        _gui("QPixmapCache").clear()  # pixmaps drawn before (light, or dark) are drawn again
+    except Exception:
+        pass
+    for widget in app.allWidgets():
+        try:
+            if widget.isVisible():
+                widget.update()
+        except Exception:
+            pass
+
+
+def native():
+    """True when the native engine is the one running."""
+    state = _state()
+    return state["on"] and state.get("engine") == "native" and bool(state.get("hooked"))
+
+
+def configure(dark=None, content=None, follow_windows=None, shade=None, engine=None):
     """Change the options and apply them now; None leaves an option as it is. Returns the settings."""
     settings = load_settings()
     old_content = content_setting(settings)
@@ -2465,13 +2684,16 @@ def configure(dark=None, content=None, follow_windows=None, shade=None):
         settings.pop("canvas", None)
     if follow_windows is not None:
         settings["follow_windows"] = bool(follow_windows)
+    old_engine = engine_setting(settings)
+    if engine is not None:
+        settings["engine"] = engine if engine in ENGINES else "script"
     save_settings(settings)
     follow = bool(settings.get("follow_windows"))
     want_dark = windows_is_dark() if follow else bool(settings.get("enabled"))
     state = _state()
     if state["on"] and (not want_dark or content_setting(settings) != old_content
-                        or settings.get("shade", "dark") != old_shade):
-        restore()  # a change of content mode or shade is rebuilt from scratch
+                        or settings.get("shade", "dark") != old_shade or engine_setting(settings) != old_engine):
+        restore()  # a change of content mode, shade, or engine is rebuilt from scratch
     if want_dark and not state["on"]:
         apply_dark()
     _watch_windows(follow)
@@ -2641,6 +2863,7 @@ def apply_dark():
     state["saved"].setdefault("font", _gui("QFont")(app.font()))  # a state kept from before fonts were saved
     settings = load_settings()
     state["canvas"] = content_setting(settings)
+    state["engine"] = engine_setting(settings)
     state["log"] = bool(settings.get("log", False))
     shade = set_shade(settings.get("shade", "dark"))
     state["shade"] = shade
@@ -2653,7 +2876,9 @@ def apply_dark():
     state["on"] = True
     _keep_module(state)
     state["queue"][:] = [item for item in state["queue"] if item[0] == "dark"]  # switching off may not have finished
-    _darken_preferences()
+    if state["engine"] == "native":
+        _install_hooks(app)  # falls back to the script engine when it cannot start
+    _darken_preferences()  # a near-white workspace, which either engine maps to dark mode's canvas
     dark_title_bars(True)
     widgets = list(app.allWidgets())
     _enqueue([w for w in widgets if not w.isVisible()], "dark")
@@ -2680,6 +2905,8 @@ def restore():
     saved = state["saved"]
     if app is None or saved is None:
         return
+    if app is not None:
+        _remove_hooks(app)
     for record in list(state["records"].values()):  # effects, palettes, icons: quick, all at once
         obj = record["obj"]
         if not _alive(obj):
@@ -2756,7 +2983,8 @@ def status():
     return {
         "version": VERSION, "on": state["on"], "queue": len(state["queue"]), "records": len(state["records"]),
         "islands": kinds.count("island"), "titles": kinds.count("title"), "native": _native() is not None,
-        "canvas": state["canvas"], "errors": list(state["errors"][-10:]),
+        "canvas": state["canvas"], "engine": state.get("engine", "script"), "hooked": bool(state.get("hooked")),
+        "errors": list(state["errors"][-10:]),
         "original_style": (state["saved"] or {}).get("style_chain"),
     }
 

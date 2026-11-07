@@ -1,24 +1,33 @@
-/* FreeLab native dark mode (experimental): FontLab's own colors, mapped as FontLab paints with them.
+/* FreeLab native dark mode: FontLab's own painting, mapped as FontLab hands its colors to Qt.
  *
- * The script version of dark mode maps the pixels widgets have drawn. This one changes the colors
- * before anything is drawn: it points the entries of FontLab 7.exe's import table for Qt's
- * color-carrying painting calls at wrappers that map the color, then call Qt, which then draws dark
- * itself, text smoothing included. Only FontLab's import table changes; Qt's code is untouched, and
- * removing the hooks writes the original addresses back.
+ * The native engine is the script engine without its pixel effects. Qt's own widgets are darkened as
+ * the script does (dark palette, Fusion, stylesheets, icons, title bars, editors), and everything
+ * FontLab paints itself (the glyph canvas, font cells, previews, panel titles, dock frames) is mapped
+ * here instead of through effects: the entries of FontLab 7.exe's import table for Qt's
+ * color-carrying painting calls point at wrappers that map the color, then call Qt, which then draws
+ * dark itself, text smoothing included. Only FontLab's import table changes; Qt's code is untouched,
+ * and removing the hooks writes the original addresses back.
  *
- * Colors are mapped where they are used, on the painter (setPen, setBrush, fillRect, fillPath,
- * setBackground) and in fills, never where they are made: FontLab builds most pens and brushes once
- * and keeps them (mapped at construction, those made before the hooks stayed light, and those made
- * after would be mapped twice when used), and a QColor it makes may be a mark color it saves in a
- * font. A pen or brush is mapped on a temporary copy; FontLab's own object is never changed.
+ * Three rules keep every color mapped exactly once:
+ * - FontLab's code works in light colors. Under the dark palette, a color it reads from a palette is
+ *   already dark; mapped again it would turn light. So FontLab's own palette reads (QPalette::color,
+ *   QPalette::brush) answer with the light palette's color wherever the palette holds the dark
+ *   palette's color for that slot.
+ * - Colors are mapped only where they reach the screen: on a painter whose device is a widget or a
+ *   pixmap. Painting into an image stays light, so an image FontLab renders and keeps (its glyph
+ *   cells) is mapped once when it is drawn on screen, and an image it saves (an export) is never dark.
+ * - Colors are mapped where they are used (setPen, setBrush, fillRect, fillPath, setBackground), on
+ *   temporary copies, never where they are made: FontLab keeps its pens and brushes, and a QColor it
+ *   makes may be a mark color it saves in a font.
  *
- * No C runtime and no imports: the caller passes the module bases and VirtualProtect. The Qt 5
- * ABI (Qt 5.14.2, MSVC x64) is what FontLab 7 ships: on x64 a member function takes `this` as its
- * first argument, and one returning a class by value takes the return slot next.
+ * No C runtime and no imports: the caller passes the module bases and VirtualProtect. The Qt 5 ABI
+ * (Qt 5.14.2, MSVC x64) is what FontLab 7 ships: on x64 a member function takes `this` first, and
+ * one returning a class by value takes the return slot next; every Qt function used is looked up by
+ * its decorated name first, and nothing is hooked when one is missing.
  */
 #include "freelab_pixels.c"
 
-#define FREELAB_HOOKS_VERSION 4
+#define FREELAB_HOOKS_VERSION 7
 
 typedef int (*virtual_protect_fn)(void *, size_t, uint32_t, uint32_t *);
 #define PAGE_READWRITE_ 0x04
@@ -29,24 +38,55 @@ typedef struct {
     uint16_t alpha, red, green, blue, pad;
 } qcolor;
 #define QCOLOR_INVALID 0
+#define QCOLOR_RGB 1
 #define QIMAGE_RGB32 4
 #define QIMAGE_ARGB32 5
 #define QIMAGE_ARGB32_PREMULTIPLIED 6
-#define QCOLOR_RGB 1
 
-/* QPen and QBrush hold one pointer; room for a temporary copy. */
+/* QPen and QBrush hold one pointer; room for a copy. */
 typedef struct {
     void *d[2];
 } qhandle;
 
+/* QInternal::PaintDeviceFlags: what a painter paints on. */
+#define DEVICE_WIDGET 1
+#define DEVICE_PIXMAP 2
+#define DEVICE_IMAGE 3
+
 static virtual_protect_fn vprotect;
 static int hooks_on;
 static double hook_dark_l = 0.18, hook_light_l = 0.88;
+static uint32_t map_devices = (1U << DEVICE_WIDGET) | (1U << DEVICE_PIXMAP);
+static double hook_keep_tint = 1.0; /* content keeps its tints (a selected cell's pale blue), as the script's islands do */
+
+/* Widgets whose painting is left as FontLab draws it (color swatches and pickers; in Mixed, the
+ * canvases, cells, and previews): sorted QWidget addresses. A widget's QPaintDevice part follows
+ * its QObject part (a table pointer and d_ptr, 16 bytes), so a painter's widget device, less 16, is
+ * the widget. */
+#define KEEP_MAX 4096
+#define QPAINTDEVICE_IN_QWIDGET 16
+static uintptr_t keep_widgets[KEEP_MAX];
+static int keep_count;
+
+static int kept_widget(const void *device)
+{
+    uintptr_t widget = (uintptr_t)device - QPAINTDEVICE_IN_QWIDGET;
+    int lo = 0, hi = keep_count - 1;
+    while (lo <= hi) {
+        int mid = (lo + hi) / 2;
+        if (keep_widgets[mid] == widget)
+            return 1;
+        if (keep_widgets[mid] < widget)
+            lo = mid + 1;
+        else
+            hi = mid - 1;
+    }
+    return 0;
+}
 
 /* Qt functions called directly (resolved from Qt5Gui's export table). */
 static uint32_t (*qt_color_rgba)(const qcolor *);
 static void *(*qt_color_from_global)(qcolor *, int);
-static void (*qt_image_fill_color)(void *, const qcolor *);
 static int (*qt_image_format)(const void *);
 static int (*qt_pen_is_solid)(const void *);
 static qcolor *(*qt_pen_color)(const void *, qcolor *);
@@ -56,6 +96,7 @@ static void (*qt_pen_dtor)(void *);
 static int (*qt_brush_style)(const void *);
 static const qcolor *(*qt_brush_color)(const void *);
 static void *(*qt_brush_copy)(void *, const void *);
+static void *(*qt_brush_from_color)(void *, const qcolor *, int);
 static void (*qt_brush_set_color)(void *, const qcolor *);
 static void (*qt_brush_dtor)(void *);
 static void *(*qt_image_copy)(void *, const void *);
@@ -65,6 +106,12 @@ static uint8_t *(*qt_image_bits)(void *);
 static int (*qt_image_width)(const void *);
 static int (*qt_image_height)(const void *);
 static int (*qt_image_bytes_per_line)(const void *);
+static void *(*qt_painter_device)(const void *);
+static int64_t (*qt_pixmap_cache_key)(const void *);
+static void *(*qt_pixmap_to_image)(const void *, void *);
+static void *(*qt_pixmap_from_image)(void *, const void *, int);
+static void (*qt_pixmap_dtor)(void *);
+static int (*qt_palette_current_group)(const void *);
 
 static struct {
     const char *name;
@@ -72,7 +119,6 @@ static struct {
 } qt_needed[] = {
     {"?rgba@QColor@@QEBAIXZ", (void **)&qt_color_rgba},
     {"??0QColor@@QEAA@W4GlobalColor@Qt@@@Z", (void **)&qt_color_from_global},
-    {"?fill@QImage@@QEAAXAEBVQColor@@@Z", (void **)&qt_image_fill_color},
     {"?format@QImage@@QEBA?AW4Format@1@XZ", (void **)&qt_image_format},
     {"?isSolid@QPen@@QEBA_NXZ", (void **)&qt_pen_is_solid},
     {"?color@QPen@@QEBA?AVQColor@@XZ", (void **)&qt_pen_color},
@@ -82,6 +128,7 @@ static struct {
     {"?style@QBrush@@QEBA?AW4BrushStyle@Qt@@XZ", (void **)&qt_brush_style},
     {"?color@QBrush@@QEBAAEBVQColor@@XZ", (void **)&qt_brush_color},
     {"??0QBrush@@QEAA@AEBV0@@Z", (void **)&qt_brush_copy},
+    {"??0QBrush@@QEAA@AEBVQColor@@W4BrushStyle@Qt@@@Z", (void **)&qt_brush_from_color},
     {"?setColor@QBrush@@QEAAXAEBVQColor@@@Z", (void **)&qt_brush_set_color},
     {"??1QBrush@@QEAA@XZ", (void **)&qt_brush_dtor},
     {"??0QImage@@QEAA@AEBV0@@Z", (void **)&qt_image_copy},
@@ -91,17 +138,22 @@ static struct {
     {"?width@QImage@@QEBAHXZ", (void **)&qt_image_width},
     {"?height@QImage@@QEBAHXZ", (void **)&qt_image_height},
     {"?bytesPerLine@QImage@@QEBAHXZ", (void **)&qt_image_bytes_per_line},
+    {"?device@QPainter@@QEBAPEAVQPaintDevice@@XZ", (void **)&qt_painter_device},
+    {"?cacheKey@QPixmap@@QEBA_JXZ", (void **)&qt_pixmap_cache_key},
+    {"?toImage@QPixmap@@QEBA?AVQImage@@XZ", (void **)&qt_pixmap_to_image},
+    {"?fromImage@QPixmap@@SA?AV1@AEBVQImage@@V?$QFlags@W4ImageConversionFlag@Qt@@@@@Z", (void **)&qt_pixmap_from_image},
+    {"??1QPixmap@@UEAA@XZ", (void **)&qt_pixmap_dtor},
+    {"?currentColorGroup@QPalette@@QEBA?AW4ColorGroup@1@XZ", (void **)&qt_palette_current_group},
 };
 #define QT_NEEDED (int)(sizeof(qt_needed) / sizeof(qt_needed[0]))
 
-/* The hooked imports: name, wrapper, original. */
+/* The hooked imports: name and wrapper; originals are Qt's own exports. */
 enum {
     H_FILL_RECT, H_FILL_RECTF, H_FILL_XYWH, H_FILL_XYWH_GLOBAL, H_SET_PEN_COLOR, H_SET_PEN, H_SET_BRUSH,
-    H_FILL_RECT_BRUSH, H_FILL_RECTF_BRUSH, H_FILL_XYWH_BRUSH, H_FILL_PATH, H_SET_BACKGROUND,
-    H_PIXMAP_FILL, H_IMAGE_FILL_PIXEL, H_IMAGE_FILL_GLOBAL, H_GRADIENT_STOP,
-    /* images: FontLab's cached glyph renderings, drawn as mapped copies (pixmaps and paths observed only) */
-    H_DRAW_IMAGE_PT, H_DRAW_IMAGE_RECT_SRC, H_DRAW_IMAGE_XY, H_DRAW_IMAGE_RECTF, H_DRAW_PIXMAP_RECT,
-    H_DRAW_PIXMAP_PT, H_DRAW_PATH, H_IMAGE_FROM_DATA,
+    H_FILL_RECT_BRUSH, H_FILL_RECTF_BRUSH, H_FILL_XYWH_BRUSH, H_FILL_PATH, H_SET_BACKGROUND, H_PIXMAP_FILL,
+    H_DRAW_IMAGE_PT, H_DRAW_IMAGE_RECT_SRC, H_DRAW_IMAGE_XY, H_DRAW_IMAGE_RECTF,
+    H_PALETTE_COLOR_GROUP, H_PALETTE_COLOR, H_PALETTE_BRUSH_GROUP,
+    H_PAINTER_ON, H_PAINTER_BEGIN, H_DRAW_PIXMAP_RECT, H_DRAW_PIXMAP_PT,
     H_COUNT
 };
 static const char *hook_names[H_COUNT] = {
@@ -118,34 +170,46 @@ static const char *hook_names[H_COUNT] = {
     "?fillPath@QPainter@@QEAAXAEBVQPainterPath@@AEBVQBrush@@@Z",
     "?setBackground@QPainter@@QEAAXAEBVQBrush@@@Z",
     "?fill@QPixmap@@QEAAXAEBVQColor@@@Z",
-    "?fill@QImage@@QEAAXI@Z",
-    "?fill@QImage@@QEAAXW4GlobalColor@Qt@@@Z",
-    "?setColorAt@QGradient@@QEAAXNAEBVQColor@@@Z",
     "?drawImage@QPainter@@QEAAXAEBVQPointF@@AEBVQImage@@@Z",
     "?drawImage@QPainter@@QEAAXAEBVQRect@@AEBVQImage@@0V?$QFlags@W4ImageConversionFlag@Qt@@@@@Z",
     "?drawImage@QPainter@@QEAAXHHAEBVQImage@@HHHHV?$QFlags@W4ImageConversionFlag@Qt@@@@@Z",
     "?drawImage@QPainter@@QEAAXAEBVQRectF@@AEBVQImage@@@Z",
+    "?color@QPalette@@QEBAAEBVQColor@@W4ColorGroup@1@W4ColorRole@1@@Z",
+    "?color@QPalette@@QEBAAEBVQColor@@W4ColorRole@1@@Z",
+    "?brush@QPalette@@QEBAAEBVQBrush@@W4ColorGroup@1@W4ColorRole@1@@Z",
+    "??0QPainter@@QEAA@PEAVQPaintDevice@@@Z",
+    "?begin@QPainter@@QEAA_NPEAVQPaintDevice@@@Z",
     "?drawPixmap@QPainter@@QEAAXAEBVQRect@@AEBVQPixmap@@@Z",
     "?drawPixmap@QPainter@@QEAAXAEBVQPointF@@AEBVQPixmap@@@Z",
-    "?drawPath@QPainter@@QEAAXAEBVQPainterPath@@@Z",
-    "??0QImage@@QEAA@PEAEHHHW4Format@0@P6AXPEAX@Z2@Z",
 };
+#define MODULES 4
 static void *originals[H_COUNT];
-static void **slots[H_COUNT];
+static void **slots[MODULES][H_COUNT];
+static int module_count;
 static int64_t hook_calls[H_COUNT];
 static int64_t hook_changed[H_COUNT];
 
 /* ---- the color rule --------------------------------------------------------------------------- */
 
-/* Interface colors as the script maps them (lightness inverted in OKLab, grays to dark mode's grays);
- * clearly colored ones of middle lightness or lighter (selection blues, marks, node colors) kept. */
+/* Colors as the script maps them (lightness inverted in OKLab, grays to dark mode's grays); clearly
+ * colored ones of middle lightness or lighter (selection blues, marks, node colors) kept. */
 static uint32_t map_qrgb(uint32_t rgb)
 {
     double l, chroma;
     oklab_of(rgb & 0xffffffU, &l, &chroma);
     if (chroma >= CONTENT_KEEP_CHROMA && l >= CONTENT_KEEP_MIN_OKL)
         return rgb;
-    return (rgb & 0xff000000U) | (mapped_one(rgb & 0xffffffU, hook_dark_l, hook_light_l, 0.0) & 0xffffffU);
+    return (rgb & 0xff000000U) | (mapped_one(rgb & 0xffffffU, hook_dark_l, hook_light_l, hook_keep_tint) & 0xffffffU);
+}
+
+static void set_qcolor(qcolor *out, uint32_t argb)
+{
+    out->spec = QCOLOR_RGB;
+    out->alpha = (uint16_t)(((argb >> 24) & 255) * 0x101);
+    out->red = (uint16_t)(((argb >> 16) & 255) * 0x101);
+    out->green = (uint16_t)(((argb >> 8) & 255) * 0x101);
+    out->blue = (uint16_t)((argb & 255) * 0x101);
+    out->pad = 0;
 }
 
 /* out = the dark-mode counterpart of c; returns 1 when it differs. */
@@ -153,26 +217,42 @@ static int map_qcolor(const qcolor *c, qcolor *out)
 {
     uint32_t argb, mapped;
     *out = *c;
-    if (!hooks_on || c->spec == QCOLOR_INVALID || qt_color_rgba == 0)
+    if (c->spec == QCOLOR_INVALID)
         return 0;
     argb = qt_color_rgba(c);
     mapped = map_qrgb(argb);
     if (mapped == argb)
         return 0;
-    out->spec = QCOLOR_RGB;
-    out->alpha = (uint16_t)(((argb >> 24) & 255) * 0x101);
-    out->red = (uint16_t)(((mapped >> 16) & 255) * 0x101);
-    out->green = (uint16_t)(((mapped >> 8) & 255) * 0x101);
-    out->blue = (uint16_t)((mapped & 255) * 0x101);
-    out->pad = 0;
+    set_qcolor(out, mapped);
     return 1;
 }
 
-static void global_color(int global, qcolor *out)
+/* The painter paints where colors are mapped: on a widget or a pixmap, mapping on. Its device's
+ * devType() is the second entry of QPaintDevice's table of virtual functions (after the destructor). */
+static int on_screen(const void *painter)
 {
-    out->spec = QCOLOR_INVALID;
-    if (qt_color_from_global)
-        qt_color_from_global(out, global);
+    void *device;
+    int type;
+    if (!hooks_on)
+        return 0;
+    device = qt_painter_device(painter);
+    if (!device)
+        return 0;
+    type = ((int (*)(const void *))((void ***)device)[0][1])(device);
+    if (type <= 0 || type >= 32 || !((map_devices >> type) & 1U))
+        return 0;
+    return !(type == DEVICE_WIDGET && keep_count && kept_widget(device));
+}
+
+/* White pens stay white: FontLab draws white lines and text only where they stand out, on a color
+ * (a selected cell's blue header) or on dark; mapped with the white paper, they turned dark. White
+ * fills are still mapped (they are the paper). */
+static int white_pen(const qcolor *c)
+{
+    uint32_t rgb = qt_color_rgba(c);
+    uint32_t r = (rgb >> 16) & 255, g = (rgb >> 8) & 255, b = rgb & 255;
+    uint32_t lo = r < g ? (r < b ? r : b) : (g < b ? g : b), hi = r > g ? (r > b ? r : b) : (g > b ? g : b);
+    return lo >= 235 && hi - lo <= 12;
 }
 
 /* The pen to paint with: pen itself, or a mapped copy in tmp (then *copied is 1; destroy it after). */
@@ -180,10 +260,10 @@ static const void *mapped_pen(const void *pen, qhandle *tmp, int *copied)
 {
     qcolor c, m;
     *copied = 0;
-    if (!hooks_on || !qt_pen_is_solid(pen))
+    if (!qt_pen_is_solid(pen))
         return pen; /* a gradient or texture pen: setColor would replace it */
     qt_pen_color(pen, &c);
-    if (!map_qcolor(&c, &m))
+    if (c.spec == QCOLOR_INVALID || white_pen(&c) || !map_qcolor(&c, &m))
         return pen;
     qt_pen_copy(tmp, pen);
     qt_pen_set_color(tmp, &m);
@@ -199,8 +279,6 @@ static const void *mapped_brush(const void *brush, qhandle *tmp, int *copied)
     qcolor m;
     int style;
     *copied = 0;
-    if (!hooks_on)
-        return brush;
     style = qt_brush_style(brush);
     if (style < BRUSH_SOLID || style > BRUSH_LAST_PATTERN)
         return brush;
@@ -212,116 +290,40 @@ static const void *mapped_brush(const void *brush, qhandle *tmp, int *copied)
     return tmp;
 }
 
-/* ---- wrappers ----------------------------------------------------------------------------------- */
+/* ---- the light palette FontLab's code sees ------------------------------------------------------ */
 
-typedef void (*fill_rect_fn)(void *, const void *, const void *);
-typedef void (*fill_xywh_fn)(void *, int, int, int, int, const void *);
-typedef void (*fill_xywh_global_fn)(void *, int, int, int, int, int);
-typedef void (*one_arg_fn)(void *, const void *);
-typedef void (*image_fill_pixel_fn)(void *, uint32_t);
-typedef void (*image_fill_global_fn)(void *, int);
-typedef void (*gradient_stop_fn)(void *, double, const qcolor *);
+#define GROUPS 3 /* Active, Disabled, Inactive */
+#define ROLES 21
+#define GROUP_CURRENT 4
+static int have_palette;
+static uint32_t palette_dark[GROUPS][ROLES], palette_light[GROUPS][ROLES];
+static qcolor light_colors[GROUPS][ROLES];
+static qhandle light_brushes[GROUPS][ROLES];
+static uint8_t light_brush_made[GROUPS][ROLES];
+static int64_t palette_swapped;
 
-#define COLOR_WRAPPER(fn_name, index, call)              \
-    {                                                   \
-        qcolor m;                                       \
-        hook_calls[index]++;                            \
-        hook_changed[index] += map_qcolor(c, &m);       \
-        call;                                           \
-    }
-
-static void w_fill_rect(void *p, const void *r, const qcolor *c) COLOR_WRAPPER(w_fill_rect, H_FILL_RECT, ((fill_rect_fn)originals[H_FILL_RECT])(p, r, &m))
-static void w_fill_rectf(void *p, const void *r, const qcolor *c) COLOR_WRAPPER(w_fill_rectf, H_FILL_RECTF, ((fill_rect_fn)originals[H_FILL_RECTF])(p, r, &m))
-static void w_fill_xywh(void *p, int x, int y, int w, int h, const qcolor *c) COLOR_WRAPPER(w_fill_xywh, H_FILL_XYWH, ((fill_xywh_fn)originals[H_FILL_XYWH])(p, x, y, w, h, &m))
-static void w_set_pen_color(void *p, const qcolor *c) COLOR_WRAPPER(w_set_pen_color, H_SET_PEN_COLOR, ((one_arg_fn)originals[H_SET_PEN_COLOR])(p, &m))
-static void w_pixmap_fill(void *p, const qcolor *c) COLOR_WRAPPER(w_pixmap_fill, H_PIXMAP_FILL, ((one_arg_fn)originals[H_PIXMAP_FILL])(p, &m))
-static void w_gradient_stop(void *g, double at, const qcolor *c) COLOR_WRAPPER(w_gradient_stop, H_GRADIENT_STOP, ((gradient_stop_fn)originals[H_GRADIENT_STOP])(g, at, &m))
-
-static void w_fill_xywh_global(void *painter, int x, int y, int w, int h, int global)
+static int resolved_group(const void *palette, int group)
 {
-    qcolor c, m;
-    hook_calls[H_FILL_XYWH_GLOBAL]++;
-    global_color(global, &c);
-    if (hooks_on && originals[H_FILL_XYWH] && c.spec != QCOLOR_INVALID && map_qcolor(&c, &m)) {
-        hook_changed[H_FILL_XYWH_GLOBAL]++;
-        ((fill_xywh_fn)originals[H_FILL_XYWH])(painter, x, y, w, h, &m);
-        return;
-    }
-    ((fill_xywh_global_fn)originals[H_FILL_XYWH_GLOBAL])(painter, x, y, w, h, global);
+    if (group == GROUP_CURRENT)
+        group = qt_palette_current_group(palette);
+    return group >= 0 && group < GROUPS ? group : -1;
 }
 
-static void w_set_pen(void *painter, const void *pen)
+/* The light palette's slot for a color the dark palette holds there, or -1. */
+static int light_slot(int group, int role, const qcolor *real)
 {
-    qhandle tmp;
-    int copied;
-    const void *use;
-    hook_calls[H_SET_PEN]++;
-    use = mapped_pen(pen, &tmp, &copied);
-    hook_changed[H_SET_PEN] += copied;
-    ((one_arg_fn)originals[H_SET_PEN])(painter, use);
-    if (copied)
-        qt_pen_dtor(&tmp);
+    if (!hooks_on || !have_palette || group < 0 || role < 0 || role >= ROLES || real->spec == QCOLOR_INVALID)
+        return -1;
+    return qt_color_rgba(real) == palette_dark[group][role] ? group * ROLES + role : -1;
 }
 
-#define BRUSH_WRAPPER(index, call)                       \
-    {                                                   \
-        qhandle tmp;                                    \
-        int copied;                                     \
-        const void *use;                                \
-        hook_calls[index]++;                            \
-        use = mapped_brush(brush, &tmp, &copied);       \
-        hook_changed[index] += copied;                  \
-        call;                                           \
-        if (copied)                                     \
-            qt_brush_dtor(&tmp);                        \
-    }
-
-static void w_set_brush(void *p, const void *brush) BRUSH_WRAPPER(H_SET_BRUSH, ((one_arg_fn)originals[H_SET_BRUSH])(p, use))
-static void w_set_background(void *p, const void *brush) BRUSH_WRAPPER(H_SET_BACKGROUND, ((one_arg_fn)originals[H_SET_BACKGROUND])(p, use))
-static void w_fill_rect_brush(void *p, const void *r, const void *brush) BRUSH_WRAPPER(H_FILL_RECT_BRUSH, ((fill_rect_fn)originals[H_FILL_RECT_BRUSH])(p, r, use))
-static void w_fill_rectf_brush(void *p, const void *r, const void *brush) BRUSH_WRAPPER(H_FILL_RECTF_BRUSH, ((fill_rect_fn)originals[H_FILL_RECTF_BRUSH])(p, r, use))
-static void w_fill_path(void *p, const void *path, const void *brush) BRUSH_WRAPPER(H_FILL_PATH, ((fill_rect_fn)originals[H_FILL_PATH])(p, path, use))
-static void w_fill_xywh_brush(void *p, int x, int y, int w, int h, const void *brush) BRUSH_WRAPPER(H_FILL_XYWH_BRUSH, ((fill_xywh_fn)originals[H_FILL_XYWH_BRUSH])(p, x, y, w, h, use))
-
-/* QImage::fill(uint) takes a pixel value in the image's own format: mapped only for the 32-bit RGB
- * formats with an opaque value (an index or a premultiplied value would be something else). */
-static void w_image_fill_pixel(void *image, uint32_t pixel)
-{
-    hook_calls[H_IMAGE_FILL_PIXEL]++;
-    if (hooks_on && qt_image_format) {
-        int format = qt_image_format(image);
-        if ((format == QIMAGE_RGB32 || format == QIMAGE_ARGB32 || format == QIMAGE_ARGB32_PREMULTIPLIED)
-            && (format == QIMAGE_RGB32 || (pixel >> 24) == 255)) {
-            uint32_t mapped = map_qrgb(pixel | 0xff000000U);
-            if ((mapped & 0xffffffU) != (pixel & 0xffffffU)) {
-                hook_changed[H_IMAGE_FILL_PIXEL]++;
-                pixel = (pixel & 0xff000000U) | (mapped & 0xffffffU);
-            }
-        }
-    }
-    ((image_fill_pixel_fn)originals[H_IMAGE_FILL_PIXEL])(image, pixel);
-}
-
-static void w_image_fill_global(void *image, int global)
-{
-    qcolor c, m;
-    hook_calls[H_IMAGE_FILL_GLOBAL]++;
-    global_color(global, &c);
-    if (hooks_on && qt_image_fill_color && c.spec != QCOLOR_INVALID && map_qcolor(&c, &m)) {
-        hook_changed[H_IMAGE_FILL_GLOBAL]++;
-        qt_image_fill_color(image, &m);
-        return;
-    }
-    ((image_fill_global_fn)originals[H_IMAGE_FILL_GLOBAL])(image, global);
-}
-
-/* ---- images ------------------------------------------------------------------------------------
- * FontLab draws its glyph cells (and other content) from images it rendered once and keeps: no color
- * passes through Qt for those, so the image itself is mapped. Each is mapped once, into a copy kept
- * under the image's cacheKey, which Qt changes whenever the image's pixels change: a re-rendered
- * cell is a new key, and a stale copy is never drawn. The copies live in a fixed table (no C runtime
- * here); the oldest gives way. Pixels are unpremultiplied, mapped with map_qrgb (with a small memo
- * of recent colors), and premultiplied again, so smoothing toward transparency survives. */
+/* ---- images --------------------------------------------------------------------------------------
+ * FontLab draws its glyph cells (and other content) from images it rendered and keeps. Each image
+ * drawn on screen is mapped once, into a copy kept under the image's cacheKey, which Qt changes
+ * whenever the image's pixels change: a re-rendered cell is a new key, and a stale copy is never
+ * drawn. The copies live in a fixed table (no C runtime here); the oldest gives way. Pixels are
+ * unpremultiplied, mapped with map_qrgb (with a small memo of recent colors), and premultiplied again,
+ * so smoothing toward transparency survives. */
 #define IMAGE_SLOTS 1024
 #define QIMAGE_SIZE 64 /* room for a QImage (32 bytes in Qt 5) */
 #define MEMO 4096
@@ -385,15 +387,13 @@ static void map_image_pixels(void *image, int format)
     }
 }
 
-/* The image to draw: a mapped copy of image, or image itself (mapping off, another format, or busy). */
+/* The image to draw: a mapped copy of image, or image itself (another format, or busy). */
 static const void *mapped_image(const void *image)
 {
     int format, i, slot = -1;
     int64_t key;
     uint64_t oldest = ~0ULL;
     const void *result = image;
-    if (!hooks_on || !qt_image_copy)
-        return image;
     format = qt_image_format(image);
     if (format != QIMAGE_RGB32 && format != QIMAGE_ARGB32 && format != QIMAGE_ARGB32_PREMULTIPLIED)
         return image;
@@ -433,6 +433,109 @@ done:
     return result;
 }
 
+/* ---- pixmaps -----------------------------------------------------------------------------------
+ * A pixmap FontLab paints while the hooks are in is dark already (its painter's device is a
+ * pixmap, mapped); one it painted before (a cached thumbnail) or loaded is light. The painters
+ * FontLab begins on pixmaps are noted (the pixmap's cacheKey after begin, which detaches it and so
+ * gives it its final key), and any other pixmap it draws on screen is drawn as a mapped copy, made
+ * through an image, kept under its cacheKey like the images. */
+#define DARK_KEYS 4096
+#define PIXMAP_SLOTS 512
+#define QPIXMAP_SIZE 64
+static int64_t dark_keys[DARK_KEYS];
+static int dark_key_next;
+static struct {
+    int64_t key;
+    uint64_t stamp;
+    int used;
+    uint8_t pixmap[QPIXMAP_SIZE];
+} pixmap_cache[PIXMAP_SLOTS];
+static int64_t pixmaps_mapped, pixmaps_reused;
+
+static void note_painting(const void *painter)
+{
+    void *device;
+    if (!hooks_on)
+        return;
+    device = qt_painter_device(painter);
+    if (device && ((int (*)(const void *))((void ***)device)[0][1])(device) == DEVICE_PIXMAP) {
+        dark_keys[dark_key_next] = qt_pixmap_cache_key(device);
+        dark_key_next = (dark_key_next + 1) % DARK_KEYS;
+    }
+}
+
+static int painted_dark(int64_t key)
+{
+    int i;
+    for (i = 0; i < DARK_KEYS; i++)
+        if (dark_keys[i] == key && key != 0)
+            return 1;
+    return 0;
+}
+
+static const void *mapped_pixmap(const void *pixmap)
+{
+    int i, slot = -1, format;
+    int64_t key;
+    uint64_t oldest = ~0ULL;
+    uint8_t image[QIMAGE_SIZE];
+    const void *result = pixmap;
+    key = qt_pixmap_cache_key(pixmap);
+    if (key == 0 || painted_dark(key))
+        return pixmap;
+    if (__sync_lock_test_and_set(&image_busy, 1))
+        return pixmap;
+    for (i = 0; i < PIXMAP_SLOTS; i++) {
+        if (pixmap_cache[i].used && pixmap_cache[i].key == key) {
+            pixmap_cache[i].stamp = ++image_clock;
+            pixmaps_reused++;
+            result = pixmap_cache[i].pixmap;
+            goto done;
+        }
+        if (!pixmap_cache[i].used) {
+            if (oldest != 0) {
+                oldest = 0;
+                slot = i;
+            }
+        } else if (pixmap_cache[i].stamp < oldest) {
+            oldest = pixmap_cache[i].stamp;
+            slot = i;
+        }
+    }
+    if (slot < 0)
+        goto done;
+    qt_pixmap_to_image(pixmap, image);
+    format = qt_image_format(image);
+    if (format == QIMAGE_RGB32 || format == QIMAGE_ARGB32 || format == QIMAGE_ARGB32_PREMULTIPLIED) {
+        map_image_pixels(image, format);
+        if (pixmap_cache[slot].used)
+            qt_pixmap_dtor(pixmap_cache[slot].pixmap);
+        qt_pixmap_from_image(pixmap_cache[slot].pixmap, image, 0);
+        pixmap_cache[slot].key = key;
+        pixmap_cache[slot].stamp = ++image_clock;
+        pixmap_cache[slot].used = 1;
+        pixmaps_mapped++;
+        result = pixmap_cache[slot].pixmap;
+    }
+    qt_image_dtor(image);
+done:
+    __sync_lock_release(&image_busy);
+    return result;
+}
+
+static void clear_pixmap_cache(void)
+{
+    int i;
+    for (i = 0; i < PIXMAP_SLOTS; i++) {
+        if (pixmap_cache[i].used) {
+            qt_pixmap_dtor(pixmap_cache[i].pixmap);
+            pixmap_cache[i].used = 0;
+        }
+    }
+    for (i = 0; i < DARK_KEYS; i++)
+        dark_keys[i] = 0;
+}
+
 static void clear_image_cache(void)
 {
     int i;
@@ -444,84 +547,214 @@ static void clear_image_cache(void)
     }
 }
 
-/* Observed calls: image formats drawn, and wrapped from FontLab's own buffers (QImage::Format values). */
-#define FORMATS 32
-static int64_t drawn_formats[FORMATS];
-static int64_t wrapped_formats[FORMATS];
+/* ---- wrappers ----------------------------------------------------------------------------------- */
 
-static void note_drawn(const void *image)
+typedef void (*two_fn)(void *, const void *, const void *);
+typedef void (*xywh_fn)(void *, int, int, int, int, const void *);
+typedef void (*xywh_global_fn)(void *, int, int, int, int, int);
+typedef void (*one_fn)(void *, const void *);
+typedef void (*rect_src_fn)(void *, const void *, const void *, const void *, int);
+typedef void (*xy_image_fn)(void *, int, int, const void *, int, int, int, int, int);
+typedef const qcolor *(*palette_color_group_fn)(const void *, int, int);
+typedef const qcolor *(*palette_color_fn)(const void *, int);
+typedef const void *(*palette_brush_group_fn)(const void *, int, int);
+
+#define ORIGINAL(index, type) ((type)originals[index])
+
+/* A color argument, mapped on screen. */
+#define COLOR_ON_SCREEN(index, painter, call_with)                    \
+    {                                                                 \
+        qcolor m;                                                     \
+        const qcolor *use = c;                                        \
+        hook_calls[index]++;                                          \
+        if (on_screen(painter) && map_qcolor(c, &m)) {                \
+            hook_changed[index]++;                                    \
+            use = &m;                                                 \
+        }                                                             \
+        call_with;                                                    \
+    }
+
+static void w_fill_rect(void *p, const void *r, const qcolor *c) COLOR_ON_SCREEN(H_FILL_RECT, p, ORIGINAL(H_FILL_RECT, two_fn)(p, r, use))
+static void w_fill_rectf(void *p, const void *r, const qcolor *c) COLOR_ON_SCREEN(H_FILL_RECTF, p, ORIGINAL(H_FILL_RECTF, two_fn)(p, r, use))
+static void w_fill_xywh(void *p, int x, int y, int w, int h, const qcolor *c) COLOR_ON_SCREEN(H_FILL_XYWH, p, ORIGINAL(H_FILL_XYWH, xywh_fn)(p, x, y, w, h, use))
+static void w_set_pen_color(void *p, const qcolor *c)
 {
-    int format = qt_image_format ? qt_image_format(image) : 0;
-    drawn_formats[format >= 0 && format < FORMATS ? format : 0]++;
+    qcolor m;
+    const qcolor *use = c;
+    hook_calls[H_SET_PEN_COLOR]++;
+    if (on_screen(p) && c->spec != QCOLOR_INVALID && !white_pen(c) && map_qcolor(c, &m)) {
+        hook_changed[H_SET_PEN_COLOR]++;
+        use = &m;
+    }
+    ORIGINAL(H_SET_PEN_COLOR, one_fn)(p, use);
 }
 
-typedef void (*draw_two_fn)(void *, const void *, const void *);
-typedef void (*draw_rect_src_fn)(void *, const void *, const void *, const void *, int);
-typedef void (*draw_xy_fn)(void *, int, int, const void *, int, int, int, int, int);
-typedef void (*draw_path_fn)(void *, const void *);
-typedef void *(*image_from_data_fn)(void *, uint8_t *, int, int, int, int, void *, void *);
-
-static void w_draw_image_pt(void *p, const void *at, const void *image)
+static void w_fill_xywh_global(void *p, int x, int y, int w, int h, int global)
 {
-    hook_calls[H_DRAW_IMAGE_PT]++;
-    note_drawn(image);
-    ((draw_two_fn)originals[H_DRAW_IMAGE_PT])(p, at, mapped_image(image));
+    qcolor c, m;
+    hook_calls[H_FILL_XYWH_GLOBAL]++;
+    if (on_screen(p)) {
+        c.spec = QCOLOR_INVALID;
+        qt_color_from_global(&c, global);
+        if (map_qcolor(&c, &m)) {
+            hook_changed[H_FILL_XYWH_GLOBAL]++;
+            ORIGINAL(H_FILL_XYWH, xywh_fn)(p, x, y, w, h, &m);
+            return;
+        }
+    }
+    ORIGINAL(H_FILL_XYWH_GLOBAL, xywh_global_fn)(p, x, y, w, h, global);
 }
 
-static void w_draw_image_rect_src(void *p, const void *target, const void *image, const void *source, int flags)
+static void w_pixmap_fill(void *pixmap, const qcolor *c)
 {
-    hook_calls[H_DRAW_IMAGE_RECT_SRC]++;
-    note_drawn(image);
-    ((draw_rect_src_fn)originals[H_DRAW_IMAGE_RECT_SRC])(p, target, mapped_image(image), source, flags);
+    qcolor m;
+    const qcolor *use = c;
+    hook_calls[H_PIXMAP_FILL]++;
+    if (hooks_on && map_qcolor(c, &m)) { /* a pixmap is screen-side (backing, caches) */
+        hook_changed[H_PIXMAP_FILL]++;
+        use = &m;
+    }
+    ORIGINAL(H_PIXMAP_FILL, one_fn)(pixmap, use);
 }
 
-static void w_draw_image_xy(void *p, int x, int y, const void *image, int sx, int sy, int sw, int sh, int flags)
+static void w_set_pen(void *p, const void *pen)
 {
-    hook_calls[H_DRAW_IMAGE_XY]++;
-    note_drawn(image);
-    ((draw_xy_fn)originals[H_DRAW_IMAGE_XY])(p, x, y, mapped_image(image), sx, sy, sw, sh, flags);
+    qhandle tmp;
+    int copied = 0;
+    const void *use = pen;
+    hook_calls[H_SET_PEN]++;
+    if (on_screen(p))
+        use = mapped_pen(pen, &tmp, &copied);
+    hook_changed[H_SET_PEN] += copied;
+    ORIGINAL(H_SET_PEN, one_fn)(p, use);
+    if (copied)
+        qt_pen_dtor(&tmp);
 }
 
-static void w_draw_image_rectf(void *p, const void *target, const void *image)
+/* A brush argument, mapped on screen. */
+#define BRUSH_ON_SCREEN(index, painter, call_with)                   \
+    {                                                                \
+        qhandle tmp;                                                 \
+        int copied = 0;                                              \
+        const void *use = brush;                                     \
+        hook_calls[index]++;                                         \
+        if (on_screen(painter))                                      \
+            use = mapped_brush(brush, &tmp, &copied);                \
+        hook_changed[index] += copied;                               \
+        call_with;                                                   \
+        if (copied)                                                  \
+            qt_brush_dtor(&tmp);                                     \
+    }
+
+static void w_set_brush(void *p, const void *brush) BRUSH_ON_SCREEN(H_SET_BRUSH, p, ORIGINAL(H_SET_BRUSH, one_fn)(p, use))
+static void w_set_background(void *p, const void *brush) BRUSH_ON_SCREEN(H_SET_BACKGROUND, p, ORIGINAL(H_SET_BACKGROUND, one_fn)(p, use))
+static void w_fill_rect_brush(void *p, const void *r, const void *brush) BRUSH_ON_SCREEN(H_FILL_RECT_BRUSH, p, ORIGINAL(H_FILL_RECT_BRUSH, two_fn)(p, r, use))
+static void w_fill_rectf_brush(void *p, const void *r, const void *brush) BRUSH_ON_SCREEN(H_FILL_RECTF_BRUSH, p, ORIGINAL(H_FILL_RECTF_BRUSH, two_fn)(p, r, use))
+static void w_fill_path(void *p, const void *path, const void *brush) BRUSH_ON_SCREEN(H_FILL_PATH, p, ORIGINAL(H_FILL_PATH, two_fn)(p, path, use))
+static void w_fill_xywh_brush(void *p, int x, int y, int w, int h, const void *brush) BRUSH_ON_SCREEN(H_FILL_XYWH_BRUSH, p, ORIGINAL(H_FILL_XYWH_BRUSH, xywh_fn)(p, x, y, w, h, use))
+
+/* An image argument, drawn as a mapped copy on screen. */
+#define IMAGE_ON_SCREEN(index, painter, call_with)                    \
+    {                                                                 \
+        const void *use = image;                                      \
+        hook_calls[index]++;                                          \
+        if (on_screen(painter))                                       \
+            use = mapped_image(image);                                \
+        hook_changed[index] += use != image;                          \
+        call_with;                                                    \
+    }
+
+static void w_draw_image_pt(void *p, const void *at, const void *image) IMAGE_ON_SCREEN(H_DRAW_IMAGE_PT, p, ORIGINAL(H_DRAW_IMAGE_PT, two_fn)(p, at, use))
+static void w_draw_image_rect_src(void *p, const void *target, const void *image, const void *source, int flags) IMAGE_ON_SCREEN(H_DRAW_IMAGE_RECT_SRC, p, ORIGINAL(H_DRAW_IMAGE_RECT_SRC, rect_src_fn)(p, target, use, source, flags))
+static void w_draw_image_xy(void *p, int x, int y, const void *image, int sx, int sy, int sw, int sh, int flags) IMAGE_ON_SCREEN(H_DRAW_IMAGE_XY, p, ORIGINAL(H_DRAW_IMAGE_XY, xy_image_fn)(p, x, y, use, sx, sy, sw, sh, flags))
+static void w_draw_image_rectf(void *p, const void *target, const void *image) IMAGE_ON_SCREEN(H_DRAW_IMAGE_RECTF, p, ORIGINAL(H_DRAW_IMAGE_RECTF, two_fn)(p, target, use))
+
+static const qcolor *w_palette_color_group(const void *palette, int group, int role)
 {
-    hook_calls[H_DRAW_IMAGE_RECTF]++;
-    note_drawn(image);
-    ((draw_two_fn)originals[H_DRAW_IMAGE_RECTF])(p, target, mapped_image(image));
+    const qcolor *real = ORIGINAL(H_PALETTE_COLOR_GROUP, palette_color_group_fn)(palette, group, role);
+    int slot = light_slot(resolved_group(palette, group), role, real);
+    hook_calls[H_PALETTE_COLOR_GROUP]++;
+    if (slot < 0)
+        return real;
+    palette_swapped++;
+    hook_changed[H_PALETTE_COLOR_GROUP]++;
+    return &light_colors[slot / ROLES][slot % ROLES];
+}
+
+static const qcolor *w_palette_color(const void *palette, int role)
+{
+    const qcolor *real = ORIGINAL(H_PALETTE_COLOR, palette_color_fn)(palette, role);
+    int slot = light_slot(resolved_group(palette, GROUP_CURRENT), role, real);
+    hook_calls[H_PALETTE_COLOR]++;
+    if (slot < 0)
+        return real;
+    palette_swapped++;
+    hook_changed[H_PALETTE_COLOR]++;
+    return &light_colors[slot / ROLES][slot % ROLES];
+}
+
+static const void *w_palette_brush_group(const void *palette, int group, int role)
+{
+    const void *real = ORIGINAL(H_PALETTE_BRUSH_GROUP, palette_brush_group_fn)(palette, group, role);
+    int g = resolved_group(palette, group), slot;
+    hook_calls[H_PALETTE_BRUSH_GROUP]++;
+    if (qt_brush_style(real) != BRUSH_SOLID)
+        return real;
+    slot = light_slot(g, role, qt_brush_color(real));
+    if (slot < 0 || !light_brush_made[slot / ROLES][slot % ROLES])
+        return real;
+    palette_swapped++;
+    hook_changed[H_PALETTE_BRUSH_GROUP]++;
+    return &light_brushes[slot / ROLES][slot % ROLES];
+}
+
+typedef void *(*painter_on_fn)(void *, void *);
+typedef char (*painter_begin_fn)(void *, void *);
+
+static void *w_painter_on(void *painter, void *device)
+{
+    void *result = ORIGINAL(H_PAINTER_ON, painter_on_fn)(painter, device);
+    hook_calls[H_PAINTER_ON]++;
+    note_painting(painter);
+    return result;
+}
+
+static char w_painter_begin(void *painter, void *device)
+{
+    char result = ORIGINAL(H_PAINTER_BEGIN, painter_begin_fn)(painter, device);
+    hook_calls[H_PAINTER_BEGIN]++;
+    if (result)
+        note_painting(painter);
+    return result;
 }
 
 static void w_draw_pixmap_rect(void *p, const void *target, const void *pixmap)
 {
+    const void *use = pixmap;
     hook_calls[H_DRAW_PIXMAP_RECT]++;
-    ((draw_two_fn)originals[H_DRAW_PIXMAP_RECT])(p, target, pixmap);
+    if (on_screen(p))
+        use = mapped_pixmap(pixmap);
+    hook_changed[H_DRAW_PIXMAP_RECT] += use != pixmap;
+    ORIGINAL(H_DRAW_PIXMAP_RECT, two_fn)(p, target, use);
 }
 
 static void w_draw_pixmap_pt(void *p, const void *at, const void *pixmap)
 {
+    const void *use = pixmap;
     hook_calls[H_DRAW_PIXMAP_PT]++;
-    ((draw_two_fn)originals[H_DRAW_PIXMAP_PT])(p, at, pixmap);
-}
-
-static void w_draw_path(void *p, const void *path)
-{
-    hook_calls[H_DRAW_PATH]++;
-    ((draw_path_fn)originals[H_DRAW_PATH])(p, path);
-}
-
-static void *w_image_from_data(void *image, uint8_t *data, int w, int h, int bytes_per_line, int format, void *cleanup,
-                               void *info)
-{
-    hook_calls[H_IMAGE_FROM_DATA]++;
-    wrapped_formats[format >= 0 && format < FORMATS ? format : 0]++;
-    return ((image_from_data_fn)originals[H_IMAGE_FROM_DATA])(image, data, w, h, bytes_per_line, format, cleanup, info);
+    if (on_screen(p))
+        use = mapped_pixmap(pixmap);
+    hook_changed[H_DRAW_PIXMAP_PT] += use != pixmap;
+    ORIGINAL(H_DRAW_PIXMAP_PT, two_fn)(p, at, use);
 }
 
 static void *wrappers[H_COUNT] = {
     (void *)w_fill_rect, (void *)w_fill_rectf, (void *)w_fill_xywh, (void *)w_fill_xywh_global,
     (void *)w_set_pen_color, (void *)w_set_pen, (void *)w_set_brush, (void *)w_fill_rect_brush,
     (void *)w_fill_rectf_brush, (void *)w_fill_xywh_brush, (void *)w_fill_path, (void *)w_set_background,
-    (void *)w_pixmap_fill, (void *)w_image_fill_pixel, (void *)w_image_fill_global, (void *)w_gradient_stop,
-    (void *)w_draw_image_pt, (void *)w_draw_image_rect_src, (void *)w_draw_image_xy, (void *)w_draw_image_rectf,
-    (void *)w_draw_pixmap_rect, (void *)w_draw_pixmap_pt, (void *)w_draw_path, (void *)w_image_from_data,
+    (void *)w_pixmap_fill, (void *)w_draw_image_pt, (void *)w_draw_image_rect_src, (void *)w_draw_image_xy,
+    (void *)w_draw_image_rectf, (void *)w_palette_color_group, (void *)w_palette_color, (void *)w_palette_brush_group,
+    (void *)w_painter_on, (void *)w_painter_begin, (void *)w_draw_pixmap_rect, (void *)w_draw_pixmap_pt,
 };
 
 /* ---- PE tables ---------------------------------------------------------------------------------- */
@@ -626,6 +859,11 @@ static int resolve_qt(const uint8_t *qtgui)
         if (!*qt_needed[i].slot)
             return 0;
     }
+    for (i = 0; i < H_COUNT; i++) {
+        originals[i] = find_export(qtgui, hook_names[i]);
+        if (!originals[i])
+            return 0;
+    }
     return 1;
 }
 
@@ -636,40 +874,89 @@ EXPORT int freelab_hooks_version(void)
     return FREELAB_HOOKS_VERSION * 1000 + FREELAB_PIXELS_VERSION;
 }
 
-/* Resolve what the wrappers call; returns the number of hookable imports found in the module,
- * or -1 when one of Qt's functions is missing (another Qt build: nothing is hooked). */
-EXPORT int freelab_hooks_init(uint8_t *module, uint8_t *qtgui, void *virtual_protect)
+/* Resolve every Qt function used; 1, or 0 when one is missing (another Qt build: nothing is hooked). */
+EXPORT int freelab_hooks_init(uint8_t *qtgui, void *virtual_protect)
 {
-    int i, found = 0;
     vprotect = (virtual_protect_fn)virtual_protect;
-    if (!resolve_qt(qtgui))
+    return resolve_qt(qtgui);
+}
+
+/* A module whose imports from Qt5Gui are hooked (FontLab 7.exe); returns how many of its imports were found. */
+EXPORT int freelab_hooks_add_module(uint8_t *module)
+{
+    int i, found = 0, m;
+    for (m = 0; m < module_count; m++)
+        if (slots[m][0] && (uint8_t *)slots[m][0] >= module && (uint8_t *)slots[m][0] < module + 0x10000000)
+            return -2; /* added already */
+    if (module_count >= MODULES)
         return -1;
+    m = module_count++;
     for (i = 0; i < H_COUNT; i++) {
-        if (!slots[i]) {
-            slots[i] = find_import_slot(module, "Qt5Gui.dll", hook_names[i]);
-            originals[i] = slots[i] ? *slots[i] : 0;
-        }
-        found += slots[i] != 0;
+        slots[m][i] = find_import_slot(module, "Qt5Gui.dll", hook_names[i]);
+        found += slots[m][i] != 0;
     }
     return found;
 }
 
-/* Point the import slots at the wrappers (mapping on); returns how many were hooked. */
-EXPORT int freelab_hooks_install(double dark_l, double light_l)
+/* The dark palette dark mode set and the light one FontLab had, as 0xAARRGGBB, groups x roles. */
+EXPORT int freelab_hooks_set_palette(const uint32_t *dark, const uint32_t *light)
 {
-    int i, hooked = 0;
+    int g, r;
+    if (!qt_brush_from_color)
+        return 0;
+    for (g = 0; g < GROUPS; g++) {
+        for (r = 0; r < ROLES; r++) {
+            palette_dark[g][r] = dark[g * ROLES + r];
+            palette_light[g][r] = light[g * ROLES + r];
+            set_qcolor(&light_colors[g][r], palette_light[g][r]);
+            if (light_brush_made[g][r])
+                qt_brush_dtor(&light_brushes[g][r]);
+            qt_brush_from_color(&light_brushes[g][r], &light_colors[g][r], BRUSH_SOLID);
+            light_brush_made[g][r] = 1;
+        }
+    }
+    have_palette = 1;
+    return GROUPS * ROLES;
+}
+
+/* The widgets left as FontLab draws them (any order; at most KEEP_MAX); returns how many are kept. */
+EXPORT int freelab_hooks_set_keep(const uint64_t *widgets, int count)
+{
+    int i, j, n = 0;
+    for (i = 0; i < count && n < KEEP_MAX; i++)
+        keep_widgets[n++] = (uintptr_t)widgets[i];
+    for (i = 1; i < n; i++) { /* insertion sort: a few hundred at most */
+        uintptr_t v = keep_widgets[i];
+        for (j = i - 1; j >= 0 && keep_widgets[j] > v; j--)
+            keep_widgets[j + 1] = keep_widgets[j];
+        keep_widgets[j + 1] = v;
+    }
+    keep_count = n;
+    return n;
+}
+
+/* Point the import slots at the wrappers (mapping on); returns how many were hooked. */
+EXPORT int freelab_hooks_install(double dark_l, double light_l, double keep_tint)
+{
+    int i, m, hooked = 0;
     if (!vprotect)
         return -1;
     hook_dark_l = dark_l;
     hook_light_l = light_l;
+    hook_keep_tint = keep_tint;
+    clear_image_cache(); /* a new shade: copies made with the old one are stale */
+    clear_pixmap_cache();
+    for (i = 0; i < 4096; i++)
+        memo_used[i] = 0;
     hooks_on = 1;
-    for (i = 0; i < H_COUNT; i++)
-        if (slots[i] && originals[i] && write_slot(slots[i], wrappers[i]))
-            hooked++;
+    for (m = 0; m < module_count; m++)
+        for (i = 0; i < H_COUNT; i++)
+            if (slots[m][i] && *slots[m][i] != wrappers[i] && write_slot(slots[m][i], wrappers[i]))
+                hooked++;
     return hooked;
 }
 
-/* Mapping on or off without touching the slots (the wrappers then pass colors through). */
+/* Mapping on or off without touching the slots (the wrappers then pass everything through). */
 EXPORT void freelab_hooks_enable(int on)
 {
     hooks_on = on;
@@ -678,34 +965,18 @@ EXPORT void freelab_hooks_enable(int on)
 /* Write the original addresses back; returns how many slots were restored. */
 EXPORT int freelab_hooks_remove(void)
 {
-    int i, restored = 0;
+    int i, m, restored = 0;
     hooks_on = 0;
-    for (i = 0; i < H_COUNT; i++)
-        if (slots[i] && originals[i] && *slots[i] == wrappers[i] && write_slot(slots[i], originals[i]))
-            restored++;
+    for (m = 0; m < module_count; m++)
+        for (i = 0; i < H_COUNT; i++)
+            if (slots[m][i] && *slots[m][i] == wrappers[i] && write_slot(slots[m][i], originals[i]))
+                restored++;
     clear_image_cache(); /* the slots point at Qt again: no wrapper can be drawing a copy now */
+    clear_pixmap_cache();
     return restored;
 }
 
 /* calls[i], changed[i] for each hook, in the order of hook_names; returns H_COUNT. */
-/* Image formats seen: drawn[f] and wrapped[f] for each QImage::Format value f below max. */
-/* Images mapped (new copies) and reused (copies drawn again). */
-EXPORT void freelab_hooks_image_counts(int64_t *mapped, int64_t *reused)
-{
-    *mapped = images_mapped;
-    *reused = images_reused;
-}
-
-EXPORT int freelab_hooks_formats(int64_t *drawn, int64_t *wrapped, int max)
-{
-    int i;
-    for (i = 0; i < FORMATS && i < max; i++) {
-        drawn[i] = drawn_formats[i];
-        wrapped[i] = wrapped_formats[i];
-    }
-    return FORMATS;
-}
-
 EXPORT int freelab_hooks_counts(int64_t *calls, int64_t *changed, int max)
 {
     int i;
@@ -716,24 +987,43 @@ EXPORT int freelab_hooks_counts(int64_t *calls, int64_t *changed, int max)
     return H_COUNT;
 }
 
-/* Tests only: bind the wrappers to Qt's own functions (no import table involved), and hand out a
- * wrapper's address, so a test process can call each wrapper on real Qt objects. */
+/* Images mapped (new copies) and reused (copies drawn again); pixmaps the same. */
+EXPORT void freelab_hooks_image_counts(int64_t *mapped, int64_t *reused)
+{
+    *mapped = images_mapped;
+    *reused = images_reused;
+}
+
+EXPORT void freelab_hooks_pixmap_counts(int64_t *mapped, int64_t *reused)
+{
+    *mapped = pixmaps_mapped;
+    *reused = pixmaps_reused;
+}
+
+/* Tests only: wrappers bound with no import table (resolve_qt sets every original), a wrapper's
+ * address, the device types mapped, and the devType of a painter's device. */
 EXPORT int freelab_hooks_test_bind(uint8_t *qtgui, double dark_l, double light_l)
 {
-    int i, bound = 0;
     if (!resolve_qt(qtgui))
         return -1;
-    for (i = 0; i < H_COUNT; i++) {
-        originals[i] = find_export(qtgui, hook_names[i]);
-        bound += originals[i] != 0;
-    }
     hook_dark_l = dark_l;
     hook_light_l = light_l;
     hooks_on = 1;
-    return bound;
+    return H_COUNT;
 }
 
 EXPORT void *freelab_hooks_test_wrapper(int index)
 {
     return index >= 0 && index < H_COUNT ? wrappers[index] : 0;
+}
+
+EXPORT void freelab_hooks_test_devices(uint32_t mask)
+{
+    map_devices = mask;
+}
+
+EXPORT int freelab_hooks_test_device_type(const void *painter)
+{
+    void *device = qt_painter_device(painter);
+    return device ? ((int (*)(const void *))((void ***)device)[0][1])(device) : -1;
 }

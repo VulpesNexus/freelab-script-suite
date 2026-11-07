@@ -542,6 +542,95 @@ class EditorTests(DarkModeCase):
         self.assertNotIn("sci", record)
 
 
+class FakeHooks(object):
+    """The native engine's library, faked: what dark mode asks of it."""
+
+    def __init__(self):
+        self.calls = []
+
+    def freelab_hooks_set_palette(self, dark, light):
+        self.calls.append("set_palette")
+        return 63
+
+    def freelab_hooks_install(self, dark_l, light_l, keep_tint):
+        self.calls.append("install")
+        return 24
+
+    def freelab_hooks_set_keep(self, widgets, count):
+        self.calls.append("set_keep")
+        return count
+
+    def freelab_hooks_remove(self):
+        self.calls.append("remove")
+        return 24
+
+
+class EngineTests(DarkModeCase):
+    def save(self, **values):
+        settings = dm.load_settings()
+        settings.update(values)
+        dm.save_settings(settings)
+
+    def test_engine_setting(self):
+        self.assertEqual(dm.engine_setting({}), "script")
+        self.assertEqual(dm.engine_setting({"engine": "native"}), "native")
+        self.assertEqual(dm.engine_setting({"engine": "warp"}), "script")
+
+    def test_native_without_its_library_falls_back_to_the_script_engine(self):
+        self.save(engine="native")
+        self.on()
+        status = dm.status()
+        self.assertEqual((status["engine"], status["hooked"]), ("script", False))
+        self.assertTrue(any("native engine" in e for e in status["errors"]))
+        self.assertEqual(self.kind(self.search), "island", "the script engine's effects are in place")
+        self.assertNotIn("native_pending", self.settings(), "nothing left to guard")
+
+    def test_a_crash_while_starting_turns_the_native_engine_off(self):
+        self.save(engine="native", native_pending=True)
+        self.patch("_hooks", lambda: self.fail("the hooks must not go in again"))
+        self.on()
+        self.assertEqual(dm.status()["engine"], "script")
+        self.assertEqual(self.settings().get("engine"), "script")
+        self.assertNotIn("native_pending", self.settings())
+
+    def test_native_engine_maps_no_pixels_of_what_fontlab_paints(self):
+        hooks = FakeHooks()
+        self.patch("_hooks", lambda: hooks)
+        self.patch("_palette_table", lambda palette: (dm.ctypes_array(1) if hasattr(dm, "ctypes_array") else __import__("ctypes").c_uint32(0)))
+        self.save(engine="native")
+        del qtfakes.QTimer.single_shots[:]
+        self.on()
+        status = dm.status()
+        self.assertEqual((status["engine"], status["hooked"]), ("native", True), status["errors"])
+        self.assertEqual(hooks.calls[:2], ["set_palette", "install"])
+        self.assertIsNone(self.kind(self.search), "no island")
+        self.assertIsNone(self.kind(self.panel), "no title effect")
+        self.assertNotEqual(self.search.styleSheet, u"QWidget{background:white;}", "Qt draws stylesheets: darkened as ever")
+        self.assertTrue(self.settings().get("native_pending"), "guarded until it has run a while")
+        settle = [cb for ms, cb in qtfakes.QTimer.single_shots if ms == dm.NATIVE_SETTLE_MS]
+        self.assertEqual(len(settle), 1)
+        settle[0]()
+        self.assertNotIn("native_pending", self.settings())
+        self.off()
+        self.assertIn("remove", hooks.calls)
+        self.assertFalse(dm.status()["hooked"])
+
+    def test_switching_engines_rebuilds(self):
+        hooks = FakeHooks()
+        self.patch("_hooks", lambda: hooks)
+        self.patch("_palette_table", lambda palette: __import__("ctypes").c_uint32(0))
+        self.on()
+        self.assertEqual(self.kind(self.search), "island")
+        dm.configure(dark=True, engine="native")
+        dm.run_queue()
+        self.assertEqual((dm.status()["engine"], dm.status()["hooked"]), ("native", True), dm.status()["errors"])
+        self.assertIsNone(self.kind(self.search))
+        dm.configure(dark=True, engine="script")
+        dm.run_queue()
+        self.assertEqual(self.kind(self.search), "island")
+        self.assertIn("remove", hooks.calls)
+
+
 class KindTests(DarkModeCase):
     def test_kinds(self):
         self.assertEqual(dm.widget_kind(self.search), "island")

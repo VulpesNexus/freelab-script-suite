@@ -391,6 +391,11 @@ class QApplication(object):
 
 class QTimer(object):
     made = []
+    single_shots = []  # (ms, callback) of every QTimer.singleShot
+
+    @staticmethod
+    def singleShot(ms, callback):
+        QTimer.single_shots.append((ms, callback))
 
     def __init__(self):
         self.single = False

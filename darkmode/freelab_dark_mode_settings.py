@@ -21,6 +21,9 @@ DARK_MODE_FILE = "freelab_dark_mode.py"
 THEMES = (("dark", "Dark"), ("automatic", "Automatic (matches system theme)"))
 MIXED = "Mixed (dark interface, light canvases)"
 SHADES = (("dark", "Dark grays"), ("medium", "Medium grays"))
+ENGINES = (("script", "Script (maps the pixels FontLab drew)"),
+           ("native", "Native (maps FontLab's colors as it paints; experimental)"))
+ENGINE_NOTE = "The engine changes when you click OK; it takes a few seconds."
 SYSTEM_CHECK_MS = 2000  # how often the open dialog looks at Windows' theme
 
 
@@ -67,6 +70,8 @@ def show_dialog():
     settings = dm.load_settings()
     before = dict(dark=bool(settings.get("enabled")), content=dm.content_setting(settings),
                   follow_windows=bool(settings.get("follow_windows")), shade=settings.get("shade", "dark"))
+    has_engines = hasattr(dm, "engine_setting")  # a dark mode from before the native engine has one
+    engine = dm.engine_setting(settings) if has_engines else "script"
     theme, mixed, shade = current_choice(settings, dm)
     dialog = QDialog()
     dialog.setWindowTitle("FreeLab Dark Mode")
@@ -93,6 +98,21 @@ def show_dialog():
         layout.addWidget(button)
         shade_group.addButton(button)
         shades[key] = button
+    engines = {}
+    if has_engines:
+        layout.addWidget(QLabel("Engine:"))
+        engine_group = QButtonGroup(dialog)
+        native_ready = os.path.isfile(dm.hooks_path())
+        for key, label in ENGINES:
+            if key == "native" and not native_ready:
+                label += " (not installed: run tools\\install-fontlab.ps1)"
+            button = QRadioButton(label)
+            button.setChecked(key == engine)
+            button.setEnabled(key != "native" or native_ready)
+            layout.addWidget(button)
+            engine_group.addButton(button)
+            engines[key] = button
+        layout.addWidget(QLabel(ENGINE_NOTE))
     row = QHBoxLayout()
     row.addStretch(1)
     ok, cancel = QPushButton("OK"), QPushButton("Cancel")
@@ -126,6 +146,8 @@ def show_dialog():
         mixed_box.setEnabled(not idle)
         for button in shades.values():
             button.setEnabled(not idle)
+        for key, button in engines.items():
+            button.setEnabled(not idle and (key != "native" or os.path.isfile(dm.hooks_path())))
 
     for button in list(themes.values()) + list(shades.values()):
         button.connect("toggled(bool)", preview)
@@ -141,11 +163,16 @@ def show_dialog():
         if shown["value"] is not None:
             dm.configure(**before)
         return None
-    result = dm.configure(**chosen())
-    print("FreeLab dark mode: %s%s, %s." % (
+    final = chosen()
+    picked = [key for key, button in engines.items() if button.isChecked()]
+    if picked:
+        final["engine"] = picked[0]  # applied on OK only: switching engines takes several seconds
+    result = dm.configure(**final)
+    print("FreeLab dark mode: %s%s, %s%s." % (
         "automatic" if result.get("follow_windows") else "dark",
         ", mixed" if not dm.content_setting(result) else "",
-        dict(SHADES).get(result.get("shade", "dark"), "Dark grays").lower()))
+        dict(SHADES).get(result.get("shade", "dark"), "Dark grays").lower(),
+        ", native engine" if has_engines and dm.engine_setting(result) == "native" else ""))
     return result
 
 

@@ -1,41 +1,53 @@
-# Native dark mode (experimental)
+# The native engine
 
-A second way to make FontLab 7 dark, to be offered beside the script version: if one misbehaves on someone's machine, they can try the other.
+Dark mode has two engines, chosen in *Scripts > FreeLab > Dark Mode Settings > Engine*. Both darken Qt's own widgets the same way: a dark palette, Fusion, recolored stylesheets, mapped icons, dark title bars, and editors colored natively ([DARKMODE.md](DARKMODE.md)). They differ in what FontLab paints itself: the glyph canvas, font cells, previews, panel titles, and dock frames.
+
+- **Script:** each of those widgets is drawn offscreen through a graphics effect, and the pixels it drew are mapped.
+- **Native:** the colors FontLab hands to Qt are mapped before anything is drawn, and Qt draws dark itself.
+
+If the native engine cannot start (its library is missing, or Qt is another build), the script engine runs and the reason shows in `status()["errors"]`.
+
+## How it is applied to a FontLab install
+
+Nothing in FontLab's own folder changes, on disk or in the registry, beyond what the script engine already does (the workspace color, put back on switching off). *tools/install-fontlab.ps1* does what it did, and one thing more:
+
+1. It copies *freelab_dark_mode.py* and *freelab_dark_mode_settings.py* into FontLab's *Scripts\FreeLab* folder, and adds the FreeLab tools block to FontLab's *startupScript.py*.
+2. It builds two libraries into *%LOCALAPPDATA%\FreeLab\bin*: the pixel helper (*freelab_pixels-v103.dll*) and the native engine (*freelab_hooks-v7-103.dll*), from the C sources in *darkmode/native*, with clang or MSVC.
+
+At each FontLab launch, the startup block runs dark mode, which reads *%LOCALAPPDATA%\FreeLab\darkmode.json*. With the native engine chosen, it loads *freelab_hooks* into FontLab's process with `ctypes` and points about two dozen entries of the in-memory import table of *FontLab 7.exe* at the library's wrappers. That change lasts only while FontLab runs: switching dark mode off writes the original addresses back, and quitting FontLab ends it. *-Uninstall* removes both libraries, the scripts, the startup block, and the settings.
 
 ## How it works
 
-The script version maps the pixels widgets have drawn ([DARKMODE.md](DARKMODE.md)). The native version changes the colors before anything is drawn. *darkmode/native/freelab_hooks.c* points the entries of *FontLab 7.exe*'s import table for Qt's color-carrying painting calls at wrappers that map the color, then call Qt, which then draws dark itself, text smoothing included.
+*darkmode/native/freelab_hooks.c* hooks FontLab's imports from the stock Qt 5.14.2 *Qt5Gui.dll*. All of FontLab's own painting code is in *FontLab 7.exe*, and every Qt function the library uses is looked up by its decorated name first: with any missing, nothing is hooked.
 
-- **The surface is small.** All of FontLab's own painting code is in *FontLab 7.exe*; its other modules are PythonQt and QScintilla. It paints through 16 color-carrying entry points of the stock Qt 5.14.2 *Qt5Gui.dll*: `QPainter::fillRect` (with a color, a global color, or a brush), `setPen` (a color or a pen), `setBrush`, `fillPath`, `setBackground`, `QPixmap::fill`, `QImage::fill`, and `QGradient::setColorAt`.
-- **Images are mapped once.** FontLab renders its glyph cells into images it keeps, premultiplied ARGB32 (about 600 drawn per full font window), and puts them on screen with `QPainter::drawImage`: no color passes through Qt for those. Each image drawn is mapped once into a copy kept under its `cacheKey`, which Qt changes whenever the image's pixels change, so a re-rendered cell is mapped anew and a stale copy is never drawn. Pixels are unpremultiplied, mapped, and premultiplied again, so smoothing toward transparency survives. The copies live in a fixed table of 1,024 (no C runtime in the library); the oldest gives way.
-- **Colors are mapped where they are used, never where they are made.** FontLab builds most pens and brushes once and keeps them: mapped at construction, those made before the hooks stayed light, and those made after would be mapped a second time when used. A `QColor` FontLab makes may also be a mark color it saves in a font. A pen or brush is mapped on a temporary copy, and FontLab's own object never changes.
-- **Only FontLab's import table changes.** Qt's code is untouched; removing the hooks writes the original addresses back, and a pass-through switch maps nothing while the hooks stay in place.
-- **The same color rule as the script:** lightness inverted in OKLab, grays to dark mode's grays, and clearly colored colors of middle lightness or lighter (selection blues, marks, nodes) kept.
-- The library has no C runtime and no imports; FontLab's Python passes it the module bases and `VirtualProtect`. It needs Qt 5.14.2's MSVC x64 exports, checked at start: with another Qt build, nothing is hooked.
+- **Colors at the point of use.** `QPainter::setPen` (a color or a pen), `setBrush`, `fillRect` (a color, a global color, or a brush), `fillPath`, `setBackground`, and `QPixmap::fill` map their color, on a temporary copy of the pen or brush; FontLab's own objects never change. Mapping where colors are made would miss the pens and brushes FontLab made before and keeps, and could change a mark color it saves in a font.
+- **Only on screen.** Colors are mapped only on a painter whose device is a widget or a pixmap (`QPaintDevice::devType`, the second entry of its table of virtual functions). Painting into an image stays light: an image FontLab exports is never dark.
+- **Images and pixmaps, once.** FontLab draws its glyph cells from images it renders and keeps (premultiplied ARGB32, about 600 per font window). Each is drawn as a mapped copy made once and kept under its `cacheKey`, which Qt changes when its pixels change; smoothing toward transparency survives. Pixmaps FontLab painted before the hooks, or loaded, get the same; those it paints while the hooks are in are dark already (the painters it begins on pixmaps are noted).
+- **A light palette for FontLab's code.** Under the dark palette, a color FontLab reads from a palette is already dark, and mapped again it would turn light. Its palette reads (`QPalette::color`, `QPalette::brush`) answer with the light palette's color wherever the palette holds the dark palette's color for that slot.
+- **The color rule** is the script's: lightness inverted in OKLab, tints kept (a selected cell's pale blue); clearly colored colors of middle lightness or lighter (selection blues, marks, nodes) kept. White pens stay white: FontLab draws white lines and text only where they stand out, on a color or on dark.
+- **Left as FontLab draws them:** color swatches and pickers, ClearType previews (TrueType Hinting's, which keep the script engine's subpixel mapping), and in *Mixed*, the canvases, cells, and previews. Dark mode passes their addresses (from Qt's own description of each widget), and a painter on one of them maps nothing.
+- **A guard against a crash at start.** *darkmode.json* holds `native_pending` from just before the hooks go in until the engine has run 15 seconds. Found at the next start, it means FontLab closed while the engine was starting: the script engine runs from then on, and the *Output* panel says why.
 
-## Status (2026-11-07)
+The library has no C runtime and no imports; dark mode passes it Qt5Gui's base and `VirtualProtect`. *tests/hooks_selftest.py* calls every wrapper on real Qt objects with FontLab's own *Qt5Gui.dll*, in a separate process, so a fault ends only the test.
 
-- *tests/hooks_selftest.py* calls every wrapper on real Qt objects in a separate process with FontLab's own *Qt5Gui.dll*: all 16 map as they should, and the pens and brushes passed in stay untouched.
-- Live in FontLab 7.2.0, with the script version off: all 16 imports hooked and removed again without trouble; one full window repaint went through about 3,600 hooked calls, about half of them changing a color. With mapping on, the font window's cell chart draws natively dark (cell backgrounds, glyph names, separators, the selected cell). With mapping off, the window is pixel for pixel FontLab's own.
-- Version 4 maps the cached cell images too: the font window's cells, glyphs included, draw natively dark, with the selected cell's blue kept. One full repaint mapped 342 images and reused 316 copies; a full window grab took about 115 ms with the hooks in.
-- Not covered yet: pixmaps FontLab draws (`drawPixmap`, observed, not mapped), the glyph canvas, and Qt's own widgets, which the native version still darkens the script's way (palette, stylesheets, title bars), only without pixel effects.
+## Status (2026-11-07, hooks version 7)
 
-## Next
+Seen live in FontLab 7.2.0:
 
-1. The glyph canvas and pixmaps: see what they draw through (the observed `drawPixmap` and `drawPath` counts) and map what still comes out light.
-2. Tell content from interface: the glyph canvas and cells keep their colors under the script version's content rule; the painter's device says which widget is being painted.
-3. A loader in the script: palette, stylesheets, title bars, and editors as now, the hooks instead of effects, and a setting to choose between the two versions.
-4. Exports and printing: painting into images FontLab saves (font previews, glyph images) and onto printers must not be mapped.
+- The font window (cells, glyphs, names, the selected cell, the bottom bar), the glyph window (canvas, outline, nodes, rulers, the glyph strip), the panels (Elements, Transform, TrueType Hinting, Kerning, History, Output, Source), and *Mixed* match the script engine's look. A full main-window repaint took 37 to 100 ms, against 270 ms with the script engine.
+- Switching on and off twice in a row, and switching between engines, left nothing behind and noted no error.
 
-## The two versions
+Not seen yet: dialogs (*Font Info*, *Preferences*, *Export*), the metrics and kerning windows, and working in the glyph window (selections, dragging, previews of tools). In *Mixed*, the font cells' name strips stay dark where the script engine leaves them light.
 
-| | Script version | Native version |
+## The two engines
+
+| | Script engine | Native engine |
 |---|---|---|
-| **How** | Maps the pixels widgets drew, after the fact | Maps the colors FontLab hands to Qt, before drawing |
-| **Text** | ClearType text on light, remapped: fringes need rules (defringe, subpixel, syntax) | Qt draws light text on dark itself: smoothing as in any dark application |
-| **Speed** | Every effect widget is drawn offscreen and mapped: tens of milliseconds per large repaint | A color mapped per call: about the cost of drawing |
-| **Partial repaints** | A small repaint can map differently from a full one (the reason for several fixes) | Nothing to differ: each color is mapped the same way every time |
-| **Reach** | Anything drawn, cached images included | Only colors FontLab passes to Qt; cached images need a fresh render |
-| **Risk** | Python and Qt effects only: a mistake looks wrong | Native code inside FontLab: a mistake in a wrapper can crash FontLab |
-| **Compatibility** | Any FontLab 7 build whose widgets it knows | Only Qt 5.14.2 (MSVC x64) exports; checked at start, off otherwise |
-| **Maturity** | Tuned on most of FontLab's surfaces | Experimental |
+| **How** | Maps the pixels FontLab's widgets drew, after the fact | Maps the colors FontLab hands to Qt, before drawing |
+| **Text** | ClearType text drawn for light, remapped: fringes need rules (defringe, subpixel, syntax) | Qt draws light text on dark itself: smoothing as in any dark application |
+| **Speed** | Every effect widget is drawn offscreen and mapped: about 270 ms for a full main window | A color mapped per call, an image once: about 40 to 100 ms |
+| **Partial repaints** | A small repaint can map differently from a full one (the reason for several fixes) | Each color is mapped the same way every time |
+| **Reach** | Anything drawn, cached images included | Colors FontLab passes to Qt, and the images and pixmaps it draws |
+| **Risk** | Python and Qt effects only: a mistake looks wrong | Native code inside FontLab: a mistake in a wrapper can crash FontLab (the start guard then falls back) |
+| **Compatibility** | Any FontLab 7 build whose widgets it knows | Qt 5.14.2 (MSVC x64) only; checked at start, script engine otherwise |
+| **Maturity** | Tuned on most of FontLab's surfaces | New; the same surfaces seen, dialogs not yet |
