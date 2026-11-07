@@ -412,7 +412,7 @@ class FakeSci(object):
 
     def __init__(self, fore, back, caret=0x000000, caret_line=0xffffff):
         self.colors = {}
-        for style in range(40):
+        for style in range(256):
             self.colors[(dm.SCI_STYLESETFORE, style)] = fore.get(style, 0x000000)
             self.colors[(dm.SCI_STYLESETBACK, style)] = back.get(style, 0xffffff)
         self.colors[(dm.SCI_SETCARETFORE, None)] = caret
@@ -470,7 +470,7 @@ class EditorTests(DarkModeCase):
         self.assertLess(dm._lightness(*dm.editor_paper_rgb((255, 255, 255))), 0.3, "white paper mapped dark")
 
     def test_editor_is_colored_natively_and_put_back(self):
-        sci = self.use(FakeSci({0: 0x000000, 4: self.NAVY, 1: self.RED}, {s: self.DARK for s in range(40)}))
+        sci = self.use(FakeSci({0: 0x000000, 4: self.NAVY, 1: self.RED}, {s: self.DARK for s in range(256)}))
         dm._state()["on"] = True
         record = dm._record(self.editor)
         self.assertTrue(dm._darken_editor(self.editor, record))
@@ -490,7 +490,7 @@ class EditorTests(DarkModeCase):
         self.assertNotIn("sci", record)
 
     def test_switching_off_gives_dark_made_editors_light_paper(self):
-        sci = self.use(FakeSci({0: 0x000000, 11: 0xdcdcdc}, {s: self.DARK for s in range(40)}))
+        sci = self.use(FakeSci({0: 0x000000, 11: 0xdcdcdc}, {s: self.DARK for s in range(256)}))
         state = dm._state()
         state["on"] = True
         record = dm._record(self.editor)
@@ -501,6 +501,30 @@ class EditorTests(DarkModeCase):
         self.assertEqual(sci.colors[(dm.SCI_STYLESETBACK, 0)], self.WHITE, "dark paper made light")
         self.assertEqual(sci.colors[(dm.SCI_STYLESETFORE, 0)], 0x000000, "black text kept")
         self.assertLess(dm._lightness(*self.rgb(sci.colors[(dm.SCI_STYLESETFORE, 11)])), 0.4, "light gray text made dark")
+
+    def test_light_gray_text_stays_light(self):
+        self.assertGreater(dm._lightness(*dm.editor_text_rgb((0xdc, 0xdc, 0xdc))), 0.6, "palette text on dark paper")
+
+    def test_a_restyle_of_any_lexer_style_is_noticed(self):
+        sci = self.use(FakeSci({5: self.NAVY}, {s: self.DARK for s in range(256)}))
+        dm._state()["on"] = True
+        record = dm._record(self.editor)
+        dm._darken_editor(self.editor, record)
+        self.assertFalse(dm._editor_restyled(self.editor, record))
+        sci.colors[(dm.SCI_STYLESETFORE, 5)] = self.NAVY
+        self.assertTrue(dm._editor_restyled(self.editor, record))
+
+    def test_switching_off_leaves_a_light_made_editor_its_light_grays(self):
+        sci = self.use(FakeSci({37: 0xc0c0c0}, {}))  # white paper: made in light mode
+        state = dm._state()
+        state["on"] = True
+        record = dm._record(self.editor)
+        dm._darken_editor(self.editor, record)
+        state["on"] = False
+        state["saved"] = {"palette": LightPalette()}
+        dm._restore_editor(self.editor, record)
+        self.assertEqual(sci.colors[(dm.SCI_STYLESETFORE, 37)], 0xc0c0c0)
+        self.assertEqual(sci.colors[(dm.SCI_STYLESETBACK, 0)], self.WHITE)
 
     def test_a_color_fontlab_changed_meanwhile_is_left(self):
         sci = self.use(FakeSci({4: self.NAVY}, {}))

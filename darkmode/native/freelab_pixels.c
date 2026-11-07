@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 102
+#define FREELAB_PIXELS_VERSION 103
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -569,7 +569,7 @@ static int64_t h_count[HASH_SIZE], h_hruns[HASH_SIZE], h_vruns[HASH_SIZE], h_bes
 static int8_t h_anchor[HASH_SIZE];
 static uint32_t m_key[MEMO_SIZE], m_mask[MEMO_SIZE], m_val[MEMO_SIZE], m_gen[MEMO_SIZE];
 static int8_t a_index[MAX_INDEXED];
-static uint8_t white_mark[MAX_INDEXED]; /* decided on the pixels as drawn: 1 a white mark kept, 2 a box edge (ink);
+static uint8_t white_mark[MAX_INDEXED]; /* decided on the pixels as drawn: 1 a white mark kept, 2 a box edge (ink); 4 light text on a kept color (content);
                                          * 3 a ClearType fringe (content) */
 static uint32_t generation = 0;
 
@@ -1460,26 +1460,99 @@ static int sharp_edge(const uint32_t *p, int64_t i, int64_t width, int64_t count
 /* Content (islands that keep colors): light text on a colored surface it keeps, such as a selected
  * font cell's name on its blue header, stays as drawn: mapped with the white paper, it turned dark on
  * the blue, with light fringes. A light pixel qualifies when, walking each way past light pixels (the
- * text and its smoothing), the same saturated color of middle lightness comes within reach. White
- * paper beside a colored band is open on some side (the cell's gray frame, or more paper). */
+ * text and its smoothing), a band comes within reach: a color the content keeps (all_color), strongly
+ * saturated, of middle lightness, one hue on every side, and LIGHT_ON_COLOR_THICK pixels thick on
+ * one side at least (between letters it is thin; a node's 1-px outline is thin on every side). Walking off the image (a partial
+ * repaint's edge) neither proves nor disproves, but two sides must reach the band. near_band holds,
+ * per pixel, which sides have a band pixel within reach, so most pixels are rejected at once. */
 #define LIGHT_ON_COLOR_TEST_HLS 0.5
-#define LIGHT_ON_COLOR_SAME_HUE_COS2 0.64 /* cos 0.8, squared */
 #define LIGHT_ON_COLOR_REACH 10
 #define LIGHT_ON_COLOR_SPREAD 100 /* the band: strongly colored (ClearType's smoothing on it is less so) */
 #define LIGHT_ON_COLOR_SMOOTHING_SPREAD 40
 #define LIGHT_ON_COLOR_SMOOTHING_HLS 0.3
 #define LIGHT_ON_COLOR_MIN_HLS 0.2
 #define LIGHT_ON_COLOR_MAX_HLS 0.62
+#define LIGHT_ON_COLOR_THICK 3
+#define LIGHT_ON_COLOR_SAME_HUE_COS2 0.64 /* cos 0.8, squared */
+#define NEAR_BAND 0x10 /* the pixel is a band pixel; bits 1, 2, 4, 8: one within reach left, right, up, down */
+
+static uint8_t near_band[MAX_INDEXED];
+
+static int band_pixel(const uint8_t *q)
+{
+    double lq, l, chroma;
+    if (q[3] < ANCHOR_MIN_ALPHA || spread_of(q) < LIGHT_ON_COLOR_SPREAD)
+        return 0;
+    lq = lightness(q[2], q[1], q[0]);
+    if (lq < LIGHT_ON_COLOR_MIN_HLS || lq > LIGHT_ON_COLOR_MAX_HLS)
+        return 0;
+    oklab_of(((uint32_t)q[2] << 16) | ((uint32_t)q[1] << 8) | q[0], &l, &chroma);
+    return chroma >= CONTENT_KEEP_CHROMA && l >= CONTENT_KEEP_MIN_OKL; /* kept as drawn by all_color */
+}
+
+static int same_hue(const uint8_t *q, double hr, double hg, double hb)
+{
+    double m = (q[0] + q[1] + q[2]) / 3.0, vr = q[2] - m, vg = q[1] - m, vb = q[0] - m;
+    double dot = vr * hr + vg * hg + vb * hb;
+    return dot > 0.0 && dot * dot >= LIGHT_ON_COLOR_SAME_HUE_COS2 * (vr * vr + vg * vg + vb * vb) * (hr * hr + hg * hg + hb * hb);
+}
+
+/* Fill near_band for the image; returns 0 when there is no band pixel at all. */
+static int find_bands(const uint32_t *p, int64_t count, int64_t width)
+{
+    int64_t i, x, y, rows = count / width, any = 0;
+    for (i = 0; i < count; i++) {
+        near_band[i] = band_pixel((const uint8_t *)&p[i]) ? NEAR_BAND : 0;
+        any |= near_band[i];
+    }
+    if (!any)
+        return 0;
+    for (y = 0; y < rows; y++) {
+        int64_t last = -1000;
+        for (x = 0; x < width; x++) { /* a band pixel to the left */
+            if (x - last <= LIGHT_ON_COLOR_REACH)
+                near_band[y * width + x] |= 1;
+            if (near_band[y * width + x] & NEAR_BAND)
+                last = x;
+        }
+        last = 1000000000;
+        for (x = width - 1; x >= 0; x--) { /* to the right */
+            if (last - x <= LIGHT_ON_COLOR_REACH)
+                near_band[y * width + x] |= 2;
+            if (near_band[y * width + x] & NEAR_BAND)
+                last = x;
+        }
+    }
+    for (x = 0; x < width; x++) {
+        int64_t last = -1000;
+        for (y = 0; y < rows; y++) { /* above */
+            if (y - last <= LIGHT_ON_COLOR_REACH)
+                near_band[y * width + x] |= 4;
+            if (near_band[y * width + x] & NEAR_BAND)
+                last = y;
+        }
+        last = 1000000000;
+        for (y = rows - 1; y >= 0; y--) { /* below */
+            if (last - y <= LIGHT_ON_COLOR_REACH)
+                near_band[y * width + x] |= 8;
+            if (near_band[y * width + x] & NEAR_BAND)
+                last = y;
+        }
+    }
+    return 1;
+}
 
 static int light_on_kept_color(const uint32_t *p, int64_t i, int64_t width, int64_t count)
 {
     int64_t x, y, rows;
-    int dir, have = 0;
+    int dir, have = 0, hits = 0, thick = 0, sides;
     double hr = 0.0, hg = 0.0, hb = 0.0;
     const uint8_t *self = (const uint8_t *)&p[i];
-    double l0 = lightness(self[2], self[1], self[0]);
-    if (width <= 0 || l0 < LIGHT_ON_COLOR_TEST_HLS)
+    if (width <= 0 || lightness(self[2], self[1], self[0]) < LIGHT_ON_COLOR_TEST_HLS)
         return 0;
+    sides = (near_band[i] & 1) + ((near_band[i] >> 1) & 1) + ((near_band[i] >> 2) & 1) + ((near_band[i] >> 3) & 1);
+    if (sides < 2)
+        return 0; /* the quick test: no band within reach on two sides */
     x = i % width;
     y = i / width;
     rows = count / width;
@@ -1490,26 +1563,37 @@ static int light_on_kept_color(const uint32_t *p, int64_t i, int64_t width, int6
             const uint8_t *q;
             double lq;
             int64_t xx = x + sx * k, yy = y + sy * k;
-            if (xx < 0 || xx >= width || yy < 0 || yy >= rows)
-                return 0;
+            if (xx < 0 || xx >= width || yy < 0 || yy >= rows) {
+                found = 2; /* off the image: undecided */
+                break;
+            }
             q = (const uint8_t *)&p[yy * width + xx];
             if (q[3] < ANCHOR_MIN_ALPHA)
                 return 0;
             lq = lightness(q[2], q[1], q[0]);
-            if (spread_of(q) >= LIGHT_ON_COLOR_SPREAD && lq >= LIGHT_ON_COLOR_MIN_HLS && lq <= LIGHT_ON_COLOR_MAX_HLS) {
-                /* one surface on every side: the same hue (the band's blue, or its blend with the text) */
-                double m = (q[0] + q[1] + q[2]) / 3.0, vr = q[2] - m, vg = q[1] - m, vb = q[0] - m;
-                if (have) {
-                    double dot = vr * hr + vg * hg + vb * hb;
-                    if (dot <= 0.0 || dot * dot < LIGHT_ON_COLOR_SAME_HUE_COS2 * (vr * vr + vg * vg + vb * vb) * (hr * hr + hg * hg + hb * hb))
-                        return 0;
-                } else {
-                    hr = vr;
-                    hg = vg;
-                    hb = vb;
+            if (band_pixel(q)) {
+                int64_t t;
+                double m = (q[0] + q[1] + q[2]) / 3.0;
+                if (have && !same_hue(q, hr, hg, hb))
+                    return 0;
+                if (!have) {
+                    hr = q[2] - m;
+                    hg = q[1] - m;
+                    hb = q[0] - m;
                     have = 1;
                 }
+                for (t = 1; t < LIGHT_ON_COLOR_THICK; t++) { /* a band, not an outline */
+                    const uint8_t *r;
+                    int64_t tx = xx + sx * t, ty = yy + sy * t;
+                    if (tx < 0 || tx >= width || ty < 0 || ty >= rows)
+                        break;
+                    r = (const uint8_t *)&p[ty * width + tx];
+                    if (!band_pixel(r) || !same_hue(r, hr, hg, hb))
+                        break;
+                }
+                thick += t == LIGHT_ON_COLOR_THICK; /* between letters it is thin; above or below text, thick */
                 found = 1;
+                hits++;
             } else if (lq < LIGHT_ON_COLOR_TEST_HLS
                        && (spread_of(q) < LIGHT_ON_COLOR_SMOOTHING_SPREAD || lq < LIGHT_ON_COLOR_SMOOTHING_HLS)) {
                 return 0; /* dark or gray: not on the colored surface */
@@ -1518,7 +1602,7 @@ static int light_on_kept_color(const uint32_t *p, int64_t i, int64_t width, int6
         if (!found)
             return 0;
     }
-    return 1;
+    return hits >= 2 && thick >= 1;
 }
 
 /* Ink mode: a white pixel with only colored pixels around it, besides white ones (a check box's tick
@@ -1817,7 +1901,7 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
     uint32_t last_in = 0, last_out = 0;
     int have_last = 0, any_mapped = 0, j, local, tinted, last_edge = 0;
     uint32_t paper_bit, other_surfaces, other_surface_bits;
-    int white_marks = 0, fringes = 0;
+    int white_marks = 0, fringes = 0, bands = 0;
     uint32_t left_orig = 0;
     double paper_hls;
     int64_t i, changed = 0;
@@ -1832,11 +1916,12 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
     white_marks = mode == ANCHORS_INK && width > 0 && count <= MAX_INDEXED;
     paper_hls = anchor_count > 0 && anchors[0].surface ? lightness((uint8_t)anchors[0].r, (uint8_t)anchors[0].g, (uint8_t)anchors[0].b) : 0.15;
     fringes = (mode == ANCHORS_ALL || mode == ANCHORS_ICON) && keep_tint > 0.0 && width > 0 && count <= MAX_INDEXED;
+    bands = fringes && find_bands(p, count, width);
     for (i = 0; fringes && i < count; i++) { /* on the pixels as drawn, before any is mapped */
         white_mark[i] = 0;
         if ((p[i] >> 24) < ANCHOR_MIN_ALPHA)
             continue;
-        if (light_on_kept_color(p, i, width, count))
+        if (bands && light_on_kept_color(p, i, width, count))
             white_mark[i] = 4; /* light text on a colored surface the content keeps: kept as drawn */
         else if (cleartype_fringe(p, i, width, count))
             white_mark[i] = 3;

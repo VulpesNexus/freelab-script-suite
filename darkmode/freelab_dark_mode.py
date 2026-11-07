@@ -210,7 +210,7 @@ SWEEP_MS = 750  # how often to look for widgets FontLab created or showed
 FULL_SWEEP_EVERY = 40  # every Nth sweep revisits every widget (replaced stylesheets, new icons)
 FOCUS_DRAIN_MS = 80  # a window that takes focus is darkened at once, up to this long, before it paints light
 MAX_ERRORS = 50
-NATIVE_VERSION = 102
+NATIVE_VERSION = 103
 
 ID_PROP = "freelab_id"  # dynamic properties FreeLab sets on widgets, all removed by restore()
 SEEN_PROP = "freelab_seen"
@@ -1278,15 +1278,19 @@ def _effect_classes():
                     anchors = {"island": "all", "subpixel": "subpixel"}.get(kind, "ink")
                     editor = self.freelab_widget.parentWidget() if kind == "edges" else None
                     editor_record = _record(editor, create=False) if editor is not None else None
-                    if editor_record is not None and editor_record.get("sci"):
+                    native = editor_record is not None and editor_record.get("sci")
+                    if native and _editor_restyled(editor, editor_record):
+                        # FontLab set its own colors again: this paint goes through the pixel mapping below,
+                        # and the editor is colored anew right after it
+                        native = False
+                        _core("QTimer").singleShot(0, lambda: _recolor_editor(editor))
+                    if native:
                         # colored natively (see _darken_editor): its text as drawn, only the margin mapped
                         painter.drawPixmap(offset, pixmap)
                         margin = editor_margin(pixmap)
                         if margin:
                             draw_mapped(painter, pixmap, offset, QRect(offset.x(), offset.y(), margin, pixmap.height()),
                                         0.0, None, -1.0, 0.0, MARGIN_OKL)
-                        if _editor_restyled(editor, editor_record):  # FontLab set its colors again: after this paint
-                            _core("QTimer").singleShot(0, lambda: _recolor_editor(editor))
                         return
                     if kind == "edges":
                         if light_paper(pixmap, 0):
@@ -1412,7 +1416,8 @@ SCI_SEND = "?SendScintilla@QsciScintillaBase@@QEBAJIKJ@Z"  # long SendScintilla(
 SCI_STYLESETFORE, SCI_STYLESETBACK, SCI_STYLEGETFORE, SCI_STYLEGETBACK = 2051, 2052, 2481, 2482
 SCI_SETCARETFORE, SCI_GETCARETFORE = 2069, 2138
 SCI_SETCARETLINEBACK, SCI_GETCARETLINEBACK = 2098, 2097
-SCI_STYLES = tuple(s for s in range(40) if s != 33)  # lexer styles and the predefined ones; 33 (line numbers) is the margin's
+SCI_STYLES = tuple(s for s in range(256) if s != 33)  # every style (QScintilla numbers its own down from 255); 33, line numbers, is the margin's
+SCI_CHECKED_STYLES = 40  # lexer and predefined styles: compared on every repaint
 EDITOR_GRAY_SPREAD = 24  # editor text with less spread than this is gray (black text, gray comments)
 EDITOR_TEXT_MIN_L = 0.76  # colored text is lightened to at least this OKLab lightness, its hue kept
 _SCI = {}
@@ -1438,7 +1443,8 @@ def _sci_pointer(widget):
     """The editor's C++ address, from Qt's own description of it ("QsciScintilla(0x..., name=...)")."""
     import re
     match = re.match(r"\s*\w+\((0x[0-9a-fA-F]+)", repr(widget))
-    return int(match.group(1), 16) if match else None
+    pointer = int(match.group(1), 16) if match else 0
+    return pointer or None
 
 
 def _bgr_to_rgb(value):
@@ -1450,9 +1456,11 @@ def _rgb_to_bgr(rgb):
 
 
 def editor_text_rgb(rgb):
-    """An editor style's text color in dark mode: grays inverted, colors lightened with their hue kept."""
+    """An editor style's text color in dark mode: dark grays made light (light ones kept, as stylesheet
+    text is: an editor made under the dark palette has light gray text already), colors lightened with
+    their hue kept."""
     if max(rgb) - min(rgb) < EDITOR_GRAY_SPREAD:
-        return tuple(map_rgb(*rgb))
+        return tuple(recolor(rgb, "color"))
     l, a, b = oklab(*rgb)
     return tuple(_oklab_to_bytes(max(l, EDITOR_TEXT_MIN_L), a, b))
 
@@ -1502,7 +1510,6 @@ def _darken_editor(widget, record):
         sci["set"][key] = value
         if value != current:
             _sci_set(send, pointer, setter, style, value)
-    sci["check"] = _sci_get(send, pointer, SCI_STYLEGETFORE, 0), _sci_get(send, pointer, SCI_STYLEGETBACK, 32)
     return True
 
 
@@ -1520,14 +1527,19 @@ def _recolor_editor(widget):
 
 
 def _editor_restyled(widget, record):
-    """True when FontLab has set its own colors again since dark mode set its own (style 0 or the paper)."""
+    """True when FontLab has set its own colors again since dark mode set its own: any lexer or
+    predefined style, the caret, or the caret line (higher styles wait for the sweep)."""
     sci = record.get("sci")
     send = _sci_send()
     pointer = _sci_pointer(widget) if sci and send is not None else None
     if pointer is None:
         return False
-    now = _sci_get(send, pointer, SCI_STYLEGETFORE, 0), _sci_get(send, pointer, SCI_STYLEGETBACK, 32)
-    return now != sci.get("check")
+    for getter, setter, style, _rule in _editor_keys():
+        if style is not None and style >= SCI_CHECKED_STYLES:
+            continue
+        if _sci_get(send, pointer, getter, style) != sci["set"].get((setter, style)):
+            return True
+    return False
 
 
 def _restore_editor(widget, record):
@@ -1542,7 +1554,11 @@ def _restore_editor(widget, record):
     pointer = _sci_pointer(widget) if sci and send is not None else None
     if pointer is None:
         return
-    relight = not _state()["on"]
+    # relit only when FontLab made it under the dark palette (its own paper dark): an editor made in
+    # light mode keeps its own light-gray styles (indent guides, whitespace)
+    paper_key = (SCI_STYLESETBACK, 32)
+    relight = (not _state()["on"] and paper_key in sci["orig"]
+               and _lightness(*_bgr_to_rgb(sci["orig"][paper_key])) < 0.3)
     saved = _state().get("saved") or {}
     paper = saved.get("palette")
     light_paper_rgb = None
@@ -2123,9 +2139,9 @@ def process(widget):
     if kind == "island":
         _make_island(widget)
         return
-    if widget.inherits("QsciScintilla"):
-        _recolor_editor(widget)
     _darken_sheet(widget)
+    if widget.inherits("QsciScintilla"):
+        _recolor_editor(widget)  # after its stylesheet: a repolish could reset QScintilla's defaults
     if kind is None and visible_unchecked:
         found = detect_light(widget)  # before its icons are mapped light
         found = LEGACY_KINDS.get(found, found)

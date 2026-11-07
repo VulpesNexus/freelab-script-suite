@@ -5,6 +5,7 @@ the native helper already "built" there; nothing of FontLab's is touched. Skippe
 PowerShell is missing.
 """
 
+import os
 import re
 import shutil
 import subprocess
@@ -102,6 +103,52 @@ class InstallerTests(unittest.TestCase):
         code, out = self.run_installer("-Uninstall")
         self.assertEqual((code, self.read()), (0, MINE + MCP), out)
         self.assertNotIn("Removed the FreeLab tools block", out)
+
+    def test_block_replaced_in_place_is_whole_even_with_a_dollar_in_the_path(self):
+        self.scripts = self.tmp / "Scripts $& $1"
+        (self.scripts / "FreeLab").mkdir(parents=True)
+        self.write(MINE + b"# >>> FreeLab tools (managed)\nold = 1\n# <<< FreeLab tools\n" + MCP)
+        code, out = self.run_installer()
+        self.assertEqual(code, 0, out)
+        text = self.read()
+        self.assertEqual(text.count(b"# >>> FreeLab tools"), 1)
+        self.assertIn(b"_freelab_tools_startup()", text)
+        self.assertIn(b"Scripts $& $1", text, "the path is written as it is")
+
+    def test_a_duplicated_block_becomes_one(self):
+        block = b"# >>> FreeLab tools (managed)\nold = 1\n# <<< FreeLab tools\n"
+        self.write(MINE + block + MCP + block)
+        code, out = self.run_installer()
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.read().count(b"# >>> FreeLab tools"), 1)
+
+    def test_markers_in_the_wrong_order_are_refused(self):
+        data = MINE + b"# <<< FreeLab tools\nmine = 2\n# >>> FreeLab tools (managed)\nmine = 3\n"
+        self.write(data)
+        code, out = self.run_installer()
+        self.assertEqual((code, self.read()), (1, data), out)
+
+    def test_removing_a_block_at_the_top_leaves_no_blank_line(self):
+        self.write(b"# >>> FreeLab tools (managed)\nold = 1\n# <<< FreeLab tools\n" + MINE)
+        code, out = self.run_installer("-Uninstall")
+        self.assertEqual((code, self.read()), (0, MINE), out)
+
+    def test_an_unchanged_file_is_not_rewritten(self):
+        self.write(MINE + MCP)
+        self.assertEqual(self.run_installer()[0], 0)
+        before = self.startup.stat().st_mtime_ns
+        os.utime(self.startup, ns=(before - 10 ** 9, before - 10 ** 9))
+        stamp = self.startup.stat().st_mtime_ns
+        self.assertEqual(self.run_installer()[0], 0)
+        self.assertEqual(self.startup.stat().st_mtime_ns, stamp)
+
+    def test_non_utf8_file_without_markers_is_left_alone(self):
+        data = b"# -*- coding: cp1252 -*-\n# caf\xe9\n"
+        self.write(data)
+        code, out = self.run_installer()
+        self.assertEqual((code, self.read()), (1, data), "the block cannot be added: " + out)
+        code, out = self.run_installer("-Uninstall")
+        self.assertEqual((code, self.read()), (0, data), out)
 
     def test_unpaired_marker_is_refused(self):
         data = MINE + b"# >>> FreeLab tools (managed)\nuser = 1\n"

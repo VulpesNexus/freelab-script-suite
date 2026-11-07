@@ -54,16 +54,24 @@ $begin = '# >>> FreeLab tools'
 $end = '# <<< FreeLab tools'
 
 function Remove-Block([string]$text) {
-    $pattern = '(?s)\n?' + [regex]::Escape($begin) + '.*?' + [regex]::Escape($end) + '[^\n]*\n?'
-    return [regex]::Replace($text, $pattern, "`n").TrimEnd("`n") + "`n"
+    $re = New-Object System.Text.RegularExpressions.Regex ('(?s)\n?' + [regex]::Escape($begin) + '.*?' + [regex]::Escape($end) + '[^\n]*\n?')
+    # a block at the very top leaves no blank first line; elsewhere one line break stays between its neighbors
+    $evaluator = [System.Text.RegularExpressions.MatchEvaluator] { param($m) if ($m.Index -eq 0) { '' } else { "`n" } }
+    return $re.Replace($text, $evaluator).TrimEnd("`n") + "`n"
 }
 
 # The block put where it already is (the other repository's block keeps its place), or appended.
 function Set-Block([string]$text, [string]$newBlock) {
     $re = New-Object System.Text.RegularExpressions.Regex ([regex]::Escape($begin) + '(?s:.*?)' + [regex]::Escape($end) + '[^\n]*')
     if ($re.IsMatch($text)) {
-        $evaluator = [System.Text.RegularExpressions.MatchEvaluator] { param($m) $newBlock }.GetNewClosure()
-        return $re.Replace($text, $evaluator, 1)
+        # the first copy replaced, any later one (a duplicated block) taken out
+        $seen = @{ first = $true }
+        $evaluator = [System.Text.RegularExpressions.MatchEvaluator] {
+            param($m)
+            if ($seen.first) { $seen.first = $false; return $newBlock }
+            return ''
+        }.GetNewClosure()
+        return $re.Replace($text, $evaluator)
     }
     $text = $text.TrimEnd("`n")
     if ($text) { $text += "`n" }
@@ -95,6 +103,7 @@ function ConvertTo-PyLiteral([string]$s) {
 # not paired, is left alone: rewriting it would replace characters or delete the user's code.
 $current = ''
 $normalized = ''
+$notUtf8 = $false
 $bom = $false
 $crlf = $false
 if (Test-Path $startup) {
@@ -103,17 +112,39 @@ if (Test-Path $startup) {
     $skip = 0
     if ($bom) { $skip = 3 }
     $strict = New-Object System.Text.UTF8Encoding $false, $true
+    $original = $null
     try { $original = $strict.GetString($bytes, $skip, $bytes.Length - $skip) }
     catch {
-        Write-Output "$startup is not UTF-8 text, so it is left as it is. Save it as UTF-8 and run this again."
-        exit 1
+        # Not UTF-8 (an ANSI file with a coding line, say): read as ASCII only to look for FreeLab's markers.
+        # With none, there is nothing of FreeLab's in it, and it is changed only if this run must add a block.
+        if ([System.Text.Encoding]::ASCII.GetString($bytes).Contains('# >>> FreeLab') -or
+            [System.Text.Encoding]::ASCII.GetString($bytes).Contains('# <<< FreeLab')) {
+            Write-Output "$startup is not UTF-8 text and holds a FreeLab block, so it is left as it is. Save it as UTF-8 and run this again."
+            exit 1
+        }
+        $notUtf8 = $true
     }
-    $crlf = $original.Contains("`r`n")
-    $normalized = $original -replace "`r`n", "`n"
-    $current = $normalized
+    if ($null -ne $original) {
+        $crlf = $original.Contains("`r`n")
+        $normalized = $original -replace "`r`n", "`n"
+        $current = $normalized
+    }
 }
+# Each begin marker must be followed by its end marker before the next begin: counting them was not
+# enough (an end marker above its begin marker let a later install delete the code between them).
 function Test-Paired([string]$text, [string]$open, [string]$close) {
-    return ([regex]::Matches($text, '(?m)^' + $open)).Count -eq ([regex]::Matches($text, '(?m)^' + $close + '[ \t]*$')).Count
+    $inside = $false
+    foreach ($line in $text -split "`n") {
+        if ($line -match ('^' + $open)) {
+            if ($inside) { return $false }
+            $inside = $true
+        }
+        elseif ($line -match ('^' + $close + '[ \t]*$')) {
+            if (-not $inside) { return $false }
+            $inside = $false
+        }
+    }
+    return -not $inside
 }
 if (-not (Test-Paired $current ([regex]::Escape($begin)) ([regex]::Escape($end))) -or
     -not (Test-Paired $current '# >>> FreeLab \(managed' '# <<< FreeLab')) {
@@ -124,6 +155,10 @@ function Test-Changed([string]$text) {
     return $text.TrimEnd("`n") -ne $normalized.TrimEnd("`n")
 }
 function Save-Startup([string]$text) {
+    if ($notUtf8) {
+        Write-Output "$startup is not UTF-8 text, so the FreeLab block was not added. Save it as UTF-8 and run this again."
+        exit 1
+    }
     if ((Test-Path $startup) -and -not (Test-Path "$startup.freelab-backup")) {
         [System.IO.File]::Copy($startup, "$startup.freelab-backup")
         Write-Host "Kept the original startup script as $startup.freelab-backup"
@@ -168,6 +203,7 @@ if ($Uninstall) {
         [System.IO.File]::Delete($settingsFile)
         Write-Output "Removed $settingsFile"
     }
+    if (Test-Path "$settingsFile.tmp") { [System.IO.File]::Delete("$settingsFile.tmp") }  # a save cut short
     if (Test-Path $startup) {
         $text = Remove-Block $current
         if (Test-Changed $text) {
