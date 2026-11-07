@@ -24,6 +24,19 @@ FontLab 7 has a basic built-in autokern for selected pairs. Its managing directo
 
 A FreeLab kerner would be its own: a minimum-distance or bubble model over outlines, run inside FontLab, reading outlines and writing kerning through FontLab's own API. halfkern's approach (blurred shapes, overlap calibrated on the font's own *ll*, *nn*, and *oo*) is the most promising open method, and its Apache license allows porting it; FontLab 7's Python has no numpy, so its heavy part would go into FreeLab's native helper (C), as dark mode's pixel work does.
 
+**Optical kerning (2026-11-08).** Adobe's *Optical* kerning (InDesign, Illustrator) is not described anywhere public; forum claims that it descends from URW's or iKern's work are unverified. Methods that are public, and their standing:
+
+| Method | Standing | How it measures |
+|---|---|---|
+| FontLab 7's own autokern (`flPackage.autoKern(left, right, master)`) | built in | returns its suggestion as text (−29 for *To* on the owner's test font) without writing it; the "K1" of FontLab 8 |
+| Neville and Fox, [US 5,803,629](https://patents.google.com/patent/US5803629) (1997) | patent expired 2017: free to implement | each outline sampled at 100 heights; the gaps between the facing intercepts, filtered to the nearer ones (a 33% or 78% cut), set the spacing from their mean less their standard deviation |
+| Karow and MacMillan (Adobe), [US 6,624,814](https://patents.google.com/patent/US6624814) | expired 2016 | optical margins and size-dependent metrics; its kerning values come from Karow's automatic method, EP 0 465 704 (URW, 1991, expired) |
+| Refstrup and others (Apple), [US 9,208,589](https://patents.google.com/patent/US9208589) | **active until 2033: not to be implemented** | the closest distance between the facing edges, kept above a threshold |
+| Tsukurimashou (Matthew Skala), [described on freetype-devel, 2012](https://lists.nongnu.org/archive/html/freetype-devel/2012-06/msg00118.html) | method public (the code is GPL: implemented from the description only) | the average inverse cube of the distances between the two glyphs' facing contours, whose angles are limited (a period cannot slide under an apostrophe), kerned to a constant; tuned separately for Latin, Japanese, and Korean |
+| FontForge's optical separation ([old manual](https://fontforge.org/archive/autowidth.html)) | method public (code GPL) | gaps at heights a hundredth of the em apart where both glyphs have ink, averaged with weights 1 / (gap + em/50)²; "handwaving", by its own account |
+| [Coupler](https://jrgdrs.github.io/Coupler) | no license: ideas only | 16 horizontal zones, facing margins averaged per pair against the *oo* (or *OO*) baseline, smoothed; a minimum ink gap |
+| iKern (Igino Marini) | commercial; theory described, algorithms unpublished | a model of the interaction between shapes |
+
 **Japanese.** Kana and punctuation in Japanese fonts are spaced with `palt` (proportional widths, a GPOS single adjustment) more than with pairs; layout engines apply `palt` first and kerning on top of it ([W3C discussion, 2023](https://lists.w3.org/Archives/Public/public-i18n-japanese/2023AprJun/0048.html)). No open tool that generates `palt` values automatically was found; [Gen Interface JP](https://github.com/yamatoiizuka/gen-interface-jp) sets them by hand for 48 punctuation glyphs.
 
 ## Kerning pairs and classes
