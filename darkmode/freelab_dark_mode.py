@@ -874,6 +874,25 @@ def _mapped_resource(resource):
     return path
 
 
+PLAIN_INPUTS = ("QComboBox", "QAbstractSpinBox", "QLineEdit")
+
+
+def _plain_input(widget):
+    """A combo box, spin box, or field of Qt's with no stylesheet on it or around it (FreeLab's own
+    dialogs): Fusion draws it from the dark palette alone. The ink effect, which its dark outlines
+    and arrows set off, garbled its text and hid its arrows."""
+    if not any(widget.inherits(c) for c in PLAIN_INPUTS):
+        return False
+    current = widget
+    while current is not None:
+        if current.property(SHEET_PROP) or _prop(current, "styleSheet"):
+            return False
+        if current.isWindow():
+            return True
+        current = current.parentWidget()
+    return True
+
+
 def _shows_white_artwork(widget):
     """A label whose stylesheet shows only white artwork (the Welcome dialog's logo), or a button
     whose icon has white artwork (a checked state's white mark): no effect over them."""
@@ -2367,6 +2386,8 @@ def process(widget):
         _recolor_editor(widget)  # after its stylesheet: a repolish could reset QScintilla's defaults
     if kind is None and visible_unchecked and _shows_white_artwork(widget):
         visible_unchecked = False  # FontLab's logo: white on purpose, no effect (the ink effect blackened its edges)
+    if _plain_input(widget):
+        kind, visible_unchecked = None, False  # Fusion draws it from the dark palette: right as it is
     if kind is None and visible_unchecked:
         found = detect_light(widget)  # before its icons are mapped light
         found = LEGACY_KINDS.get(found, found)

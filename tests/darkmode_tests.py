@@ -577,6 +577,19 @@ class FakeHooks(object):
         return 24
 
 
+class PlainInputTests(DarkModeCase):
+    def test_a_plain_combo_box_gets_no_effect(self):
+        # FreeLab's own dialogs: Qt's combo boxes and spin boxes with no stylesheet anywhere. Their
+        # dark outlines set off the ink detection, whose effect garbled their text and hid their arrows.
+        dialog = FakeWidget("QDialog", parent=None, window=True)
+        combo = FakeWidget("QComboBox", parent=dialog, inherits=("QComboBox",), light="ink")
+        styled = FakeWidget("QComboBox", parent=self.content, inherits=("QComboBox",), light="ink")
+        self.app.roots.append(dialog)
+        self.on()
+        self.assertIsNone(combo.effect)
+        self.assertIsNotNone(styled.effect, "under FontLab's stylesheets the ink detection stays")
+
+
 class ProtectionTests(DarkModeCase):
     def test_a_replaced_effect_still_draws_color_controls_unmapped(self):
         # a dock's keyed effect is replaced when its frame colors are read again; the Color panel's
