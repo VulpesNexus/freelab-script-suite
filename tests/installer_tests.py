@@ -44,6 +44,8 @@ class InstallerTests(unittest.TestCase):
         (self.bin / ("freelab_kern-v%s.dll" % KERN)).write_bytes(b"")
         (self.bin / "freelab_kern-v0.dll").write_bytes(b"")
         (self.state / "darkmode.log").write_text("log")
+        (self.state / "kerning-cache").mkdir()
+        (self.state / "kerning-cache" / "0123.json").write_text("{}")
         (self.state / "listener.json").write_text("{}")  # FreeLab MCP's: never touched here
 
     def tearDown(self):
@@ -108,6 +110,7 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in (self.scripts / "FreeLab").iterdir()), ["freelab_listener.py"])
         self.assertFalse((self.state / "cache").exists())
         self.assertFalse((self.state / "darkmode.log").exists())
+        self.assertFalse((self.state / "kerning-cache").exists(), "Auto Kerning's remembered analyses go too")
         self.assertTrue((self.state / "listener.json").exists(), "FreeLab MCP's state stays")
 
     def test_uninstall_without_a_block_leaves_the_file_alone(self):

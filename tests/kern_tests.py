@@ -94,6 +94,51 @@ class ArithmeticTests(unittest.TestCase):
         source = io.open(ak.__file__.replace(".pyc", ".py"), encoding="utf-8").read()
         self.assertNotIn("QPalette.PlaceholderText)", source)
 
+    def test_the_cache_is_named_by_a_hash_and_survives_a_round_trip(self):
+        import shutil
+        import tempfile
+        folder = tempfile.mkdtemp(prefix="freelab-kern-cache-")
+        try:
+            old = os.environ.get("LOCALAPPDATA")
+            os.environ["LOCALAPPDATA"] = folder
+            try:
+                path = ak.cache_path(u"fonts/Secret Name.vfc", u"Regular")
+            finally:
+                if old is None:
+                    del os.environ["LOCALAPPDATA"]
+                else:
+                    os.environ["LOCALAPPDATA"] = old
+            self.assertNotIn("Secret", path, "no font name or path in the cache's name")
+            self.assertEqual(path, ak.cache_path(u"fonts/Secret Name.vfc", u"Regular").replace(
+                ak.state_dir(), os.path.join(folder, u"FreeLab")))
+            data = {"method": ak.method_fingerprint(), "pairs": {u"T o": [-80.5, -120.0, None]}}
+            ak.save_cache(path, data)
+            self.assertEqual(ak.load_cache(path), data)
+            self.assertIsNone(ak.load_cache(path + u".missing"))
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
+
+    def test_a_glyph_signature_follows_its_outline_and_width(self):
+        class Element(object):
+            def __init__(self, kind, x, y):
+                self.type, self.x, self.y = kind, x, y
+
+        class Path(object):
+            def __init__(self, points):
+                self.points = points
+
+            def elementCount(self):
+                return len(self.points)
+
+            def elementAt(self, index):
+                return Element(*self.points[index])
+
+        square = [(0, 0, 0), (1, 100, 0), (1, 100, 100), (1, 0, 100)]
+        moved = [(0, 0, 0), (1, 101, 0), (1, 100, 100), (1, 0, 100)]
+        self.assertEqual(ak.path_signature(Path(square), 500), ak.path_signature(Path(list(square)), 500))
+        self.assertNotEqual(ak.path_signature(Path(square), 500), ak.path_signature(Path(moved), 500))
+        self.assertNotEqual(ak.path_signature(Path(square), 500), ak.path_signature(Path(square), 510))
+
     def test_first_halo_is_halfkerns(self):
         self.assertEqual(ak.first_bias(100), 10)  # halfkern: kernel 21 pixels at 100 pixels per em
         self.assertEqual(ak.first_bias(200), 20)

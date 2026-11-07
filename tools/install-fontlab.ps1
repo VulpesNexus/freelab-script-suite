@@ -232,6 +232,9 @@ if ($Uninstall) {
     }
     $log = Join-Path $StateDir 'darkmode.log'
     if (Test-Path $log) { [System.IO.File]::Delete($log); Write-Output "Removed $log" }
+    # Auto Kerning's remembered analyses.
+    $kernCache = Join-Path $StateDir 'kerning-cache'
+    if (Test-Path $kernCache) { [System.IO.Directory]::Delete($kernCache, $true); Write-Output "Removed $kernCache" }
     foreach ($f in $files) {
         foreach ($dir in @($scripts, $rootScripts)) {  # the Scripts folder itself held them before 0.3
             $target = Join-Path $dir $f.Name

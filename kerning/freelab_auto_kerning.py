@@ -55,6 +55,7 @@ ORDERS = (("change", "Largest change first"), ("agreement", "Best agreement firs
 PREVIEW_SIZE = 40  # pixels per em in the dialog's preview
 PREVIEW_ROW = 50  # pixels between the preview's lines
 COMMON_PAIRS_FILE = "common_pairs.txt"  # beside this script
+CACHE_VERSION = 1  # raise when the measuring changes in a way the settings below do not show
 LETTERS = u"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 FIGURES = u"0123456789"
 PUNCTUATION = u".,:;!?'\"-()[]{}/&*‘’“”«»–—"
@@ -75,6 +76,59 @@ def common_pairs(path=None):
     except (IOError, OSError):
         pass
     return ranks
+
+
+def method_fingerprint():
+    """What the measuring depends on: a cache made with other settings is not reused."""
+    return u"%d %d %d %r %r %r %r %r %r" % (CACHE_VERSION, KERN_VERSION, EM_PIXELS, HALO_SHARE, PAD_SHARE, CONTOUR_SLOPE,
+                                          CONTOUR_FLOOR, MIN_GAP_SHARE, sorted(REFERENCES.items()))
+
+
+def cache_path(font_key, master):
+    """The cache file of one font's master: named by a hash, so no path or name is stored in it."""
+    import hashlib
+    digest = hashlib.sha1((u"%s|%s" % (font_key, master)).encode("utf-8")).hexdigest()[:20]
+    return os.path.join(state_dir(), u"kerning-cache", u"%s.json" % digest)
+
+
+def load_cache(path):
+    import io
+    import json
+    try:
+        with io.open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+        return data if isinstance(data, dict) else None
+    except (IOError, OSError, ValueError):
+        return None
+
+
+def save_cache(path, data):
+    import io
+    import json
+    try:
+        folder = os.path.dirname(path)
+        if not os.path.isdir(folder):
+            os.makedirs(folder)
+        text = json.dumps(data, sort_keys=True)
+        if not isinstance(text, type(u"")):
+            text = text.decode("utf-8")
+        with io.open(path + u".new", "w", encoding="utf-8") as handle:
+            handle.write(text)
+        if os.path.exists(path):
+            os.remove(path)
+        os.rename(path + u".new", path)
+    except (IOError, OSError):
+        pass  # no cache: the next run measures everything again
+
+
+def path_signature(path, advance):
+    """A glyph's outline and width, hashed: a pair is measured again when either glyph's changes."""
+    import hashlib
+    digest = hashlib.sha1((u"%.2f;" % advance).encode("ascii"))
+    for index in range(path.elementCount()):
+        element = path.elementAt(index)
+        digest.update((u"%d %.2f %.2f;" % (element.type, element.x, element.y)).encode("ascii"))
+    return digest.hexdigest()[:16]
 
 
 def state_dir():
@@ -391,7 +445,7 @@ class FontLabGlyphs(object):
         self.upm = float(package.upm)
         self.scale = em / self.upm
         self.pad = int(math.ceil(PAD_SHARE * em))
-        self.paths, self.advances = {}, {}
+        self.paths, self.advances, self.signatures = {}, {}, {}
         self.top = self.bottom = 0.0
         self.images = {}
 
@@ -405,6 +459,7 @@ class FontLabGlyphs(object):
             return False
         rect = path.boundingRect()
         self.paths[name], self.advances[name] = path, layer.advanceWidth
+        self.signatures[name] = path_signature(path, layer.advanceWidth)
         self.top = max(self.top, rect.bottom())  # font units grow upward: the rect's bottom is the ink's top
         self.bottom = min(self.bottom, rect.top())
         return True
@@ -485,37 +540,70 @@ class Suggestion(object):
 
 
 class Analysis(object):
-    def __init__(self, suggestions, factors, bands):
+    def __init__(self, suggestions, factors, bands, measured=0, reused=0, cache=None, cache_file=None):
         self.suggestions, self.factors, self.bands = suggestions, factors, bands
+        self.measured, self.reused = measured, reused
+        self.cache, self.cache_file = cache, cache_file
+
+    def remember_fontlab(self):
+        """Keep FontLab's values in the cache too (asked a pair at a time, they are slow)."""
+        if self.cache is None or not self.cache_file:
+            return
+        pairs = self.cache.setdefault("pairs", {})
+        for s in self.suggestions:
+            if "fontlab" in s.values:
+                entry = pairs.get(u"%s %s" % (s.left, s.right))
+                if entry is not None:
+                    entry[2] = s.values["fontlab"]
+        save_cache(self.cache_file, self.cache)
 
 
-def analyze(package, master, characters=None, em=EM_PIXELS, progress=None, core=None):
+def font_key(package):
+    return package.path or u"unsaved:%s" % package.tfn
+
+
+def analyze(package, master, characters=None, em=EM_PIXELS, progress=None, core=None, cache_file=None):
     """Suggestions by both methods for every pair of the characters (Latin by default) the font has,
-    each method's factors fitted to its existing kerning. progress(done, total) may return False to stop."""
-    core = core or Core()
+    each method's factors fitted to its existing kerning. Pairs whose glyphs are unchanged since the
+    last analysis (the cache of this font's master) are not measured again; every pair is when a
+    reference glyph changed. progress(done, total) may return False to stop."""
     glyphs = FontLabGlyphs(package, master, em)
     chars = [(ch, name) for ch, name in font_glyphs(package, characters or latin_characters()) if glyphs.add(name)]
     names = dict(chars)
-    tuning = []
     for ch in TUNING:
         if ch not in names:
-            raise ValueError("the font has no %s, which sets the spacing the kerning follows" % ch)
-        tuning.append(glyphs.image(names[ch]))
-    band = calibrate(core, tuning, em, max_bias=glyphs.pad)
-    references = dict((kind, [glyphs.image(names[ch]) for ch in chars_ if ch in names])
-                      for kind, chars_ in REFERENCES.items())
-    halo_bands, contour_bands = {}, {}
-    for left_kind in references:
-        for right_kind in references:
-            lefts, rights = references[left_kind], references[right_kind]
-            halo_bands[(left_kind, right_kind)] = reference_band(core, lefts, rights, band.bias) or band
-            contour_bands[(left_kind, right_kind)] = (contour_band(core, lefts, rights)
-                                                      or contour_band(core, tuning, tuning))
+            raise ValueError(u'this font has no \u201c%s\u201d. Auto Kerning needs l, n, and o: their spacing sets the kerning.' % ch)
+    reference_names = sorted(set(names[ch] for chars_ in REFERENCES.values() for ch in chars_ if ch in names))
+    references_signature = u" ".join(glyphs.signatures[n] for n in reference_names)
+    cache_file = cache_file if cache_file is not None else cache_path(font_key(package), master)
+    old = load_cache(cache_file) or {}
+    valid = old.get("method") == method_fingerprint() and old.get("references") == references_signature
+    old_signatures = old.get("signatures", {}) if valid else {}
+    old_pairs = old.get("pairs", {}) if valid else {}
+    measuring = {}  # made only when a pair must be measured
+
+    def tools():
+        if not measuring:
+            core_ = core or Core()
+            tuning = [glyphs.image(names[ch]) for ch in TUNING]
+            band = calibrate(core_, tuning, em, max_bias=glyphs.pad)
+            references = dict((kind, [glyphs.image(names[ch]) for ch in chars_ if ch in names])
+                              for kind, chars_ in REFERENCES.items())
+            halo_bands, contour_bands = {}, {}
+            for left_kind in references:
+                for right_kind in references:
+                    lefts, rights = references[left_kind], references[right_kind]
+                    halo_bands[(left_kind, right_kind)] = reference_band(core_, lefts, rights, band.bias) or band
+                    contour_bands[(left_kind, right_kind)] = (contour_band(core_, lefts, rights)
+                                                              or contour_band(core_, tuning, tuning))
+            measuring.update(core=core_, halo=halo_bands, contour=contour_bands)
+        return measuring
+
     reach, min_gap = float(glyphs.pad), MIN_GAP_SHARE * em
     kerning = package.kerning(master)
-    suggestions, total, done = [], len(chars) * len(chars), 0
+    suggestions, total, done, measured, reused = [], len(chars) * len(chars), 0, 0, 0
+    pairs = {}
     for left_char, left in chars:
-        left_glyph = glyphs.image(left)
         for right_char, right in chars:
             done += 1
             if progress is not None and done % 200 == 0 and progress(done, total) is False:
@@ -523,13 +611,28 @@ def analyze(package, master, characters=None, em=EM_PIXELS, progress=None, core=
             kinds = pair_kinds(left_char, right_char)
             if kinds is None:
                 continue
-            right_glyph = glyphs.image(right)
+            key = u"%s %s" % (left, right)
+            entry = old_pairs.get(key)
+            fresh = (entry is not None and old_signatures.get(left) == glyphs.signatures[left]
+                     and old_signatures.get(right) == glyphs.signatures[right])
+            if fresh:
+                reused += 1
+                entry = list(entry) + [None] * (3 - len(entry))
+            else:
+                t = tools()
+                left_glyph, right_glyph = glyphs.image(left), glyphs.image(right)
+                halo = suggest_pixels(t["core"], left_glyph, right_glyph, t["halo"][kinds])
+                contour = suggest_contour_pixels(t["core"], left_glyph, right_glyph, t["contour"][kinds], reach, min_gap)
+                entry = [None if halo is None else halo * glyphs.upm / em,
+                         None if contour is None else contour * glyphs.upm / em, None]
+                measured += 1
+            pairs[key] = entry
             s = Suggestion(left_char, right_char, left, right, current_kerning(kerning, left, right))
-            halo = suggest_pixels(core, left_glyph, right_glyph, halo_bands[kinds])
-            contour = suggest_contour_pixels(core, left_glyph, right_glyph, contour_bands[kinds], reach, min_gap)
-            for method, pixels in (("halfkern", halo), ("contour", contour)):
-                if pixels is not None:
-                    s.raw[method] = pixels * glyphs.upm / em
+            for method, units in zip(("halfkern", "contour"), entry[:2]):
+                if units is not None:
+                    s.raw[method] = units
+            if entry[2] is not None:
+                s.values["fontlab"] = entry[2]
             if s.raw:
                 suggestions.append(s)
     factors = {}
@@ -541,7 +644,12 @@ def analyze(package, master, characters=None, em=EM_PIXELS, progress=None, core=
             if method in s.raw:
                 units = s.raw[method]
                 s.values[method] = round_units(units * (tighten if units < 0 else loosen))
-    return Analysis(suggestions, factors, (halo_bands, contour_bands))
+    cache = {"method": method_fingerprint(), "references": references_signature,
+             "signatures": dict((name, glyphs.signatures[name]) for _, name in chars), "pairs": pairs}
+    if cache_file:
+        save_cache(cache_file, cache)
+    return Analysis(suggestions, factors, (measuring.get("halo"), measuring.get("contour")), measured, reused,
+                    cache, cache_file)
 
 
 # ---------------------------------------------------------------------------
@@ -559,17 +667,15 @@ class AutoKerningDialog(object):
         QtCore, QtGui = _qt()
         import fontlab
         self.fontlab = fontlab
-        self.package = fontlab.flWorkspace.instance().currentPackage
-        if self.package is None or self.package.isNull:
-            raise RuntimeError("open a font first")
-        self.master = self.package.master
+        self.package = self.current_font()
+        self.master = self.package.master if self.package is not None else None
         self.analysis, self.suggestions, self.stop, self.selected = None, [], False, None
         self.common = common_pairs()
         dialog = self.dialog = QtGui.QDialog()
         dialog.setWindowTitle("FreeLab Auto Kerning")
         dialog.resize(680, 820)
         layout = QtGui.QVBoxLayout(dialog)
-        self.status = QtGui.QLabel("%s, master %s. Latin letters, figures, and punctuation." % (self.package.tfn, self.master))
+        self.status = QtGui.QLabel(self.font_line())
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
         row = QtGui.QHBoxLayout()
@@ -649,6 +755,18 @@ class AutoKerningDialog(object):
         self.source.connect("currentIndexChanged(int)", lambda index: self.refresh_values())  # the list stays as it is
         self.override.connect("currentIndexChanged(int)", lambda index: self.choose(index))
 
+    def current_font(self):
+        """FontLab's current font, or None when no font is open (FontLab then hands an empty package)."""
+        package = self.fontlab.flWorkspace.instance().currentPackage
+        if package is None or package.isNull or not package.glyphsCount:
+            return None
+        return package
+
+    def font_line(self):
+        if self.package is None:
+            return u"No font is open. Open one, then click Analyze."
+        return u"%s, master %s. Latin letters, figures, and punctuation." % (self.package.tfn, self.master)
+
     @staticmethod
     def combo(choices):
         QtCore, QtGui = _qt()
@@ -670,12 +788,24 @@ class AutoKerningDialog(object):
         return not self.stop
 
     def run(self):
+        """Analyze the font that is current now (another may have been opened since the dialog was)."""
+        package = self.current_font()
+        if package is None:
+            self.package, self.analysis, self.suggestions = None, None, []
+            self.table.setRowCount(0)
+            self.status.setText(self.font_line())
+            return
+        if self.package is None or font_key(package) != font_key(self.package) or package.master != self.master:
+            self.analysis, self.suggestions = None, []
+            self.table.setRowCount(0)
+        self.package, self.master = package, package.master
         self.analyze_button.setEnabled(False)
         self.apply_button.setEnabled(False)
         try:
             result = analyze(self.package, self.master, progress=self.progress)
         except Exception as exc:
-            self.status.setText("Could not analyze: %s" % exc)
+            message = u"%s" % exc
+            self.status.setText(u"%s\n%s" % (self.font_line(), message[:1].upper() + message[1:]))
             return
         finally:
             self.analyze_button.setEnabled(True)
@@ -709,6 +839,8 @@ class AutoKerningDialog(object):
             s.values["fontlab"] = fontlab_autokern(self.package, self.master, s.left, s.right)
             if index % 50 == 0:
                 self.progress(index, len(missing), "Asking FontLab")
+        if missing:
+            self.analysis.remember_fontlab()
 
     def refilter(self):
         """The list: pairs either method would change by the tolerance or more, whatever source writes
@@ -745,8 +877,12 @@ class AutoKerningDialog(object):
             fitted = (tighten, loosen) != DEFAULT_FACTORS[method]
             summary.append("%s tightens at %.0f%%%s" % (dict(METHODS)[method], tighten * 100,
                                                        " (from the font's kerning)" if fitted else ""))
-        self.status.setText("%d pairs measured; %d listed, where a method changes them by %d units or more.\n%s."
-                            % (len(self.analysis.suggestions), len(listed), tolerance, "; ".join(summary)))
+        analysis = self.analysis
+        work = (u"%d pairs: %d measured, %d unchanged since the last analysis" % (len(analysis.suggestions), analysis.measured,
+                                                                               analysis.reused)
+                if analysis.reused else u"%d pairs measured" % len(analysis.suggestions))
+        self.status.setText(u"%s, master %s. %s; %d listed, where a method changes them by %d units or more.\n%s."
+                            % (self.package.tfn, self.master, work, len(listed), tolerance, "; ".join(summary)))
         self.fill_table()
 
     def fill_table(self):
