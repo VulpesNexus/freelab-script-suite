@@ -923,7 +923,9 @@ def dark_pixmap(pixmap):
 
 
 SWATCH_CHROMA = 80  # max - min of the channels: clearly colored
-GRAY_ICON_SHARE = 0.15  # a list icon this little colored is gray: mapped
+GRAY_ICON_SHARE = 0.5  # a list icon at most this colored is mapped (Autohinting's has colored parts, kept as
+                       # icons keep them); colorful logos (Export Profiles' formats) are not: mapped, they turned jagged
+GRAY_ICON_MIN_ALPHA = 32  # faint line icons count too (Grid & Guides draws no pixel half opaque at 16 px)
 SWATCH_SHARE = 0.4  # an icon this colored is a color swatch (mark colors): left as it is
 SWATCH_FILL = 0.5  # and this filled: a swatch is a solid shape; a thin colored glyph (the red Y and X of
                    # TrueType Hinting's direction buttons, black stems included) is an icon
@@ -957,12 +959,12 @@ def icon_is_gray(icon):
     for y in range(12):
         for x in range(12):
             color = QColor.fromRgba(small.pixel(x, y))
-            if color.alpha() < 128:
+            if color.alpha() < GRAY_ICON_MIN_ALPHA:
                 continue
             opaque += 1
             channels = (color.red(), color.green(), color.blue())
             colored += max(channels) - min(channels) >= SWATCH_CHROMA
-    return opaque > 0 and colored <= GRAY_ICON_SHARE * opaque
+    return colored <= GRAY_ICON_SHARE * opaque  # an icon with nothing visible at this size counts as gray
 
 
 def icon_is_swatch(icon):
