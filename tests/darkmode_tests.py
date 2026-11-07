@@ -556,9 +556,17 @@ class FakeHooks(object):
         self.calls.append("install")
         return 24
 
-    def freelab_hooks_set_keep(self, widgets, count):
-        self.calls.append("set_keep")
+    def freelab_hooks_set_hooked(self, widgets, count):
+        self.calls.append("set_hooked")
+        self.hooked = count
         return count
+
+    def freelab_hooks_set_ink(self, widgets, count):
+        self.calls.append("set_ink")
+        return count
+
+    def freelab_hooks_add_ink_module(self, module):
+        return 2
 
     def freelab_hooks_set_subpixel(self, widgets, count, background_okl):
         self.calls.append("set_subpixel")
@@ -603,13 +611,18 @@ class EngineTests(DarkModeCase):
         self.patch("_hooks", lambda: hooks)
         self.patch("_palette_table", lambda palette: (dm.ctypes_array(1) if hasattr(dm, "ctypes_array") else __import__("ctypes").c_uint32(0)))
         self.save(engine="native")
+        popup = FakeWidget("YPopupHost", parent=self.canvas)  # FontLab's labels over the glyph canvas
         del qtfakes.QTimer.single_shots[:]
         self.on()
         status = dm.status()
         self.assertEqual((status["engine"], status["hooked"]), ("native", True), status["errors"])
         self.assertEqual(hooks.calls[:2], ["set_palette", "install"])
-        self.assertIsNone(self.kind(self.search), "no island")
-        self.assertIsNone(self.kind(self.panel), "no title effect")
+        self.assertIsNone(self.kind(self.search), "an island FontLab paints: hooked, no effect")
+        self.assertTrue(self.search.property(dm.HOOKED_PROP))
+        self.assertTrue(self.canvas.property(dm.HOOKED_PROP))
+        self.assertTrue(popup.property(dm.HOOKED_PROP), "FontLab's own painting inside a hooked island: hooked too")
+        self.assertIsNone(self.edit.property(dm.HOOKED_PROP), "a line edit (Qt draws it) inside one: processed as any")
+        self.assertEqual(self.kind(self.panel), "title", "the script engine's other effects stay")
         self.assertNotEqual(self.search.styleSheet, u"QWidget{background:white;}", "Qt draws stylesheets: darkened as ever")
         self.assertTrue(self.settings().get("native_pending"), "guarded until it has run a while")
         settle = [cb for ms, cb in qtfakes.QTimer.single_shots if ms == dm.NATIVE_SETTLE_MS]

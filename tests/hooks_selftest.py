@@ -15,12 +15,14 @@ from ctypes import c_void_p, c_int, c_uint32, c_double, c_char
 QT = r"C:\Program Files\Fontlab\FontLab 7"
 os.add_dll_directory(QT)
 gui = ctypes.CDLL(os.path.join(QT, "Qt5Gui.dll"))
+widgets_lib = ctypes.CDLL(os.path.join(QT, "Qt5Widgets.dll"))
 hooks = ctypes.CDLL(os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else "freelab_hooks.dll"))
 k32 = ctypes.WinDLL("kernel32")
 k32.GetModuleHandleW.restype = c_void_p
 base = k32.GetModuleHandleW("Qt5Gui.dll")
-HOOKS = 23
-hooks.freelab_hooks_set_keep.argtypes = [c_void_p, c_int]
+widgets_base = k32.GetModuleHandleW("Qt5Widgets.dll")
+HOOKS = 29
+hooks.freelab_hooks_set_hooked.argtypes = [c_void_p, c_int]
 WIDGET, PIXMAP, IMAGE = 1, 2, 3
 
 
@@ -29,8 +31,8 @@ def okl_gray(byte):
     return lin ** (1 / 3)
 
 
-hooks.freelab_hooks_test_bind.argtypes = [c_void_p, c_double, c_double]
-bound = hooks.freelab_hooks_test_bind(base, okl_gray(31), okl_gray(219))
+hooks.freelab_hooks_test_bind.argtypes = [c_void_p, c_void_p, c_double, c_double]
+bound = hooks.freelab_hooks_test_bind(base, widgets_base, okl_gray(31), okl_gray(219))
 print("bound", bound, "of", HOOKS)
 hooks.freelab_hooks_test_wrapper.restype = c_void_p
 hooks.freelab_hooks_test_device_type.argtypes = [c_void_p]
@@ -171,6 +173,8 @@ got = painting(img, lambda p: (wrapper(5, c_void_p, c_void_p)(p, addr(white_pen)
 check("setPen(white pen): white kept", got, 0xffffff)
 got = painting(img, lambda p: (wrapper(4, c_void_p, c_void_p)(p, addr(white)), pen_rgba(painter_pen(p)))[1])
 check("setPen(white): white kept", got, 0xffffff)
+got = painting(img, lambda p: (wrapper(4, c_void_p, c_void_p)(p, addr(color(0xed, 0xee, 0xef))), pen_rgba(painter_pen(p)))[1])
+check("setPen(near white): mapped", got, "dark")
 got = painting(img, lambda p: (wrapper(6, c_void_p, c_void_p)(p, addr(white_brush)), color_rgba(brush_color(painter_brush(p))))[1])
 check("setBrush(white brush)", got, "dark")
 blue_brush = brush(color(31, 120, 220))
@@ -179,12 +183,10 @@ check("setBrush(mid blue) kept", got, 0x1f78dc)
 painting(img, lambda p: wrapper(11, c_void_p, c_void_p)(p, addr(white_brush)))
 results.append(True)
 
-# a keep list that does not name this painter's device changes nothing
+# the hooked widgets: any order, as many as given
 others = (ctypes.c_uint64 * 3)(0x30000, 0x10000, 0x20000)
-hooks.freelab_hooks_set_keep(addr(others), 3)
-painting(img, lambda p: wrapper(0, c_void_p, c_void_p, c_void_p)(p, addr(rect), addr(white)))
-check("kept widgets elsewhere: still mapped", image_pixel(addr(img), 2, 2), "dark")
-hooks.freelab_hooks_set_keep(addr(others), 0)
+check("set_hooked takes the widgets", hooks.freelab_hooks_set_hooked(addr(others), 3), 3)
+hooks.freelab_hooks_set_hooked(addr(others), 0)
 
 # images drawn: a mapped copy, made once and reused; the image itself never changes
 target = image(fill=0xff000000)
@@ -224,11 +226,38 @@ hooks.freelab_hooks_set_palette(addr(dark_table), addr(light_table))
 pal = buf(); palette_ctor(addr(pal), addr(color(240, 240, 240)))
 palette_set_color(addr(pal), ACTIVE, TEXT, addr(color(0xdc, 0xdc, 0xdc)))
 palette_set_color(addr(pal), ACTIVE, BASE, addr(color(0x1e, 0x1e, 0x1e)))
-check("QPalette::color(Active, Text): light", color_rgba(wrapper(17, c_void_p, c_int, c_int, restype=c_void_p)(addr(pal), ACTIVE, TEXT)), 0x000000)
+read_text = lambda: color_rgba(wrapper(17, c_void_p, c_int, c_int, restype=c_void_p)(addr(pal), ACTIVE, TEXT))
+check("no hooked painter: the dark palette's color", read_text(), 0xdcdcdc)
+# a painter made through the hooks, on a surface they map: light while it is active
+canvas = image()
+tracked = buf()
+wrapper(22, c_void_p, c_void_p, restype=c_void_p)(addr(tracked), addr(canvas))
+check("QPalette::color(Active, Text): light", read_text(), 0x000000)
 check("QPalette::color(Text): light", color_rgba(wrapper(18, c_void_p, c_int, restype=c_void_p)(addr(pal), TEXT)), 0x000000)
 check("QPalette::brush(Active, Base): light", color_rgba(brush_color(wrapper(19, c_void_p, c_int, c_int, restype=c_void_p)(addr(pal), ACTIVE, BASE))), 0xffffff)
+palette_white = wrapper(17, c_void_p, c_int, c_int, restype=c_void_p)(addr(pal), ACTIVE, BASE)
+wrapper(4, c_void_p, c_void_p)(addr(tracked), palette_white)
+check("setPen(the palette's white): mapped", pen_rgba(painter_pen(addr(tracked))), "dark")
 palette_set_color(addr(pal), ACTIVE, TEXT, addr(color(0x12, 0x34, 0x56)))
-check("a color of FontLab's own: as it is", color_rgba(wrapper(17, c_void_p, c_int, c_int, restype=c_void_p)(addr(pal), ACTIVE, TEXT)), 0x123456)
+check("a color of FontLab's own: as it is", read_text(), 0x123456)
+palette_set_color(addr(pal), ACTIVE, TEXT, addr(color(0xdc, 0xdc, 0xdc)))
+# read back, the pen and brush are FontLab's own colors (it makes colors from them)
+wrapper(4, c_void_p, c_void_p)(addr(tracked), addr(black))
+check("pen read back: the color set, not the mapped", pen_rgba(wrapper(27, c_void_p, restype=c_void_p)(addr(tracked))), 0x000000)
+check("the painter itself draws the mapped", pen_rgba(painter_pen(addr(tracked))), "light")
+wrapper(6, c_void_p, c_void_p)(addr(tracked), addr(white_brush))
+check("brush read back: the color set", color_rgba(brush_color(wrapper(28, c_void_p, restype=c_void_p)(addr(tracked)))), 0xffffff)
+check("the painter's brush: mapped", color_rgba(brush_color(painter_brush(addr(tracked)))), "dark")
+wrapper(25, c_void_p, restype=ctypes.c_bool)(addr(tracked))
+check("ended: the dark palette's color again", read_text(), 0xdcdcdc)
+check("begun again: light", (wrapper(24, c_void_p, c_void_p, restype=ctypes.c_bool)(addr(tracked), addr(canvas)), read_text())[1], 0x000000)
+wrapper(23, c_void_p)(addr(tracked))
+check("destroyed: the dark palette's color", read_text(), 0xdcdcdc)
+hooks.freelab_hooks_test_devices(1 << WIDGET)
+other = buf()
+wrapper(22, c_void_p, c_void_p, restype=c_void_p)(addr(other), addr(canvas))
+check("a painter on a surface not mapped: dark", read_text(), 0xdcdcdc)
+wrapper(23, c_void_p)(addr(other))
 
 calls = (ctypes.c_int64 * HOOKS)(); changed = (ctypes.c_int64 * HOOKS)()
 hooks.freelab_hooks_counts(calls, changed, HOOKS)

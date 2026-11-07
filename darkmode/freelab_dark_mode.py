@@ -224,7 +224,21 @@ ISLAND_PROP = "freelab_island"  # found by rendering: "island" or "ink"
 SHEET_PROP = "freelab_sheet"  # the widget's own stylesheet
 DARK_SHEET_PROP = "freelab_sheet_dark"  # what dark mode set instead
 MENU_HOOK_PROP = "freelab_menu_hooked"  # aboutToShow connected (kept: the hook stays, idle while off)
-PROPS = (ID_PROP, SEEN_PROP, QUEUED_PROP, WATCHED_PROP, CHECKED_PROP, ISLAND_PROP, SHEET_PROP, DARK_SHEET_PROP)
+HOOKED_PROP = "freelabHooked"  # an island the native engine's hooks map, rather than an effect
+NATIVE_INK_PROP = "freelabNativeInk"  # a list whose dark pens the native engine maps, rather than the ink effect
+# Lists whose rows Qt draws, in colors FontLab puts in their data: under the native engine, their
+# viewports' dark pens are mapped as they are set (in FontLab's program and in Qt5Widgets), with no
+# effect. Only lists whose delegates leave the drawing to Qt (Metrics' sets colors only); a delegate
+# of FontLab's that paints its rows (FontAudit's badges, the Elements tree) keeps the ink effect.
+NATIVE_INK_DELEGATES = ("QStyledItemDelegate", "QItemDelegate", "MetricsDataDelegate")
+# Islands Qt draws (from their stylesheet), out of the hooks' reach: the script engine's island
+# under either engine (the continue edge's white line stayed white).
+SCRIPT_ISLAND_CLASSES = ("YContinueWidget",)
+# FontLab's classes built on widgets Qt draws: inside a hooked island they are processed as any
+# widget (a search field's line edit keeps its placeholder's ink), not hooked.
+QT_DRAWN_BASES = ("QLineEdit", "QAbstractButton", "QAbstractScrollArea", "QAbstractSpinBox", "QComboBox",
+                  "QLabel", "QAbstractSlider", "QTabBar")
+PROPS = (ID_PROP, SEEN_PROP, QUEUED_PROP, WATCHED_PROP, CHECKED_PROP, ISLAND_PROP, SHEET_PROP, DARK_SHEET_PROP, HOOKED_PROP, NATIVE_INK_PROP)
 
 NAMED_COLORS = {
     "white": (255, 255, 255), "black": (0, 0, 0), "whitesmoke": (245, 245, 245),
@@ -950,7 +964,38 @@ def dark_icon(icon, owner=None):
 
 
 def dark_pixmap(pixmap):
-    return _gui("QPixmap").fromImage(map_image(pixmap.toImage(), anchors="icon"))
+    """A label's image mapped; white artwork (FontLab's logo) stays as it is. Button icons do not get
+    that rule: a toggled button's white icon, kept, turned black under the button's ink effect."""
+    image = pixmap.toImage()
+    return _gui("QPixmap").fromImage(image if is_white_artwork(image) else map_image(image, anchors="icon"))
+
+
+ARTWORK_WHITE = 235  # every visible pixel at least this light, on transparency: white artwork
+ARTWORK_SAMPLE = 24  # sides of the scaled copy looked at
+
+
+def is_white_artwork(image):
+    """White artwork on transparency (FontLab's logo, white glyphs on icons meant for color): drawn
+    white on purpose, it stays white; mapped as paper, the logo turned black."""
+    QImage, Qt = _gui("QImage"), _core("Qt")
+    if image.isNull() or not image.hasAlphaChannel():
+        return False
+    small = image.convertToFormat(QImage.Format_ARGB32)
+    if small.width() > ARTWORK_SAMPLE or small.height() > ARTWORK_SAMPLE:
+        small = small.scaled(ARTWORK_SAMPLE, ARTWORK_SAMPLE, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+    seen = clear = False
+    for y in range(small.height()):
+        for x in range(small.width()):
+            value = small.pixel(x, y)
+            alpha = (value >> 24) & 255
+            if alpha < 255:
+                clear = True
+            if alpha < 64:
+                continue  # smoothing toward transparency: blended, not the artwork's color
+            if min((value >> 16) & 255, (value >> 8) & 255, value & 255) < ARTWORK_WHITE:
+                return False
+            seen = True
+    return seen and clear
 
 
 SWATCH_CHROMA = 80  # max - min of the channels: clearly colored
@@ -1732,8 +1777,8 @@ def _island_ancestor(widget, canvas):
         parent = current.parentWidget()
         if parent is None:
             return None
-        if widget_kind(parent, canvas) == "island":
-            return parent
+        if parent.property(HOOKED_PROP) is None and widget_kind(parent, canvas) == "island":
+            return parent  # (a hooked island maps only its own painting: its children are processed as any)
         current = parent
     return None
 
@@ -2115,11 +2160,9 @@ def process(widget):
     if visible_unchecked:
         widget.setProperty(CHECKED_PROP, _size_key(widget))  # sweeps need not queue it again at this size
     name = _class_name(widget)
-    hooked = state.get("engine") == "native" and state.get("hooked")
     if name == "QtColorPicker":
         _frame_picker(widget)
-        if not hooked:  # natively, the swatch keeps its color and the arrow is mapped as it is drawn
-            _set_effect(widget, _record(widget), "picker")
+        _set_effect(widget, _record(widget), "picker")
         _protect(widget)
         return
     if _left_alone(widget, name):
@@ -2131,8 +2174,8 @@ def process(widget):
         _note_sheet_as_seen(widget)  # "dark interface" mode: canvases, font cells, and previews keep FontLab's look
         _protect(widget)  # and the ink effect of the window around them must not map them (garbled cells)
         return
-    if hooked:
-        _process_native(widget, widget_kind(widget, canvas))
+    if _in_hooked_island(widget):
+        _hook_island(widget)  # FontLab's own painting inside a hooked island (the canvas's labels): mapped as it
         return
     if _island_ancestor(widget, canvas) is not None:
         _undo_widget(widget, keep_props=True, keep_placeholder=True)  # the island maps it as drawn in light mode
@@ -2142,7 +2185,7 @@ def process(widget):
         return
     kind = widget_kind(widget, canvas)
     if kind == "island":
-        _make_island(widget)
+        _island(widget)
         return
     _darken_sheet(widget)
     if widget.inherits("QsciScintilla"):
@@ -2154,7 +2197,7 @@ def process(widget):
             widget.setProperty(ISLAND_PROP, found)
             kind = found
             if found == "island":
-                _make_island(widget)
+                _island(widget)
                 return
     _darken_icons(widget)
     if kind is None and visible_unchecked:
@@ -2162,7 +2205,9 @@ def process(widget):
         if found:
             widget.setProperty(ISLAND_PROP, found)
             kind = found
-    if kind in ("ink", "edges", "title", "subpixel", "defringe"):
+    if kind == "ink" and _native_ink_target(widget):
+        _native_ink(widget)
+    elif kind in ("ink", "edges", "title", "subpixel", "defringe"):
         _set_effect(widget, _record(widget), kind)
     elif kind == "keyed" and widget.isVisible():
         record = _record(widget)
@@ -2170,37 +2215,6 @@ def process(widget):
             keys = frame_keys(widget)
             if keys:
                 _set_effect(widget, record, "keyed", keys)
-    elif kind == "fill":
-        record = _record(widget)
-        if "autofill" not in record:
-            record["autofill"] = bool(_prop(widget, "autoFillBackground"))
-            widget.setAutoFillBackground(True)
-
-
-def _item_view_viewport(widget):
-    parent = widget.parentWidget()
-    return (parent is not None and _prop(widget, "objectName") == "qt_scrollarea_viewport"
-            and any(parent.inherits(c) for c in INK_VIEW_PARENTS))
-
-
-def _process_native(widget, kind):
-    """The native engine's share of process(): what Qt draws, as the script engine does; nothing of
-    what FontLab paints itself, which the hooks map (no effects, no light islands, no detection)."""
-    _darken_sheet(widget)
-    if widget.inherits("QsciScintilla"):
-        _recolor_editor(widget)
-    _darken_icons(widget)
-    if kind == "subpixel":
-        state = _state()
-        pointer = _sci_pointer(widget)
-        if pointer and pointer not in (state.get("kept_addresses") or []):
-            _update_kept(_qt()[0].instance())  # kept before its effect: never mapped twice
-    if kind in ("edges", "subpixel") or (kind == "ink" and _item_view_viewport(widget)):
-        # an editor's margin (QScintilla paints it from its own colors, not hooked); ClearType previews
-        # (left to the hooks' keep list, see _kept_widget); and lists, whose rows Qt's own item delegates draw in colors FontLab puts in the list's data (the
-        # Metrics panel's black widths), out of the hooks' reach: the ink mapping changes only what is
-        # wrong on the dark interface, so what the hooks mapped passes through
-        _set_effect(widget, _record(widget), kind)
     elif kind == "fill":
         record = _record(widget)
         if "autofill" not in record:
@@ -2275,8 +2289,8 @@ def _sweep():
     todo = [w for w in app.allWidgets()
             if full or w.property(SEEN_PROP) is None or (w.isVisible() and (_unchecked(w) or _restyled(w)))]
     if todo:
-        if state.get("hooked") and any(w.property(SEEN_PROP) is None for w in todo):
-            _update_kept(app)  # new widgets: new pickers or content to leave as FontLab draws it
+        if state.get("hooked") and full:
+            _update_hooked(app)  # forgets islands FontLab deleted (their addresses may be reused)
         _hook_menus(todo)
         _enqueue(todo, "dark")
         if len(todo) > 200 and not full:
@@ -2492,13 +2506,13 @@ def _watch_windows(follow):
 # ---------------------------------------------------------------------------
 # The native engine (darkmode/native/freelab_hooks.c)
 # ---------------------------------------------------------------------------
-# Two engines darken what FontLab paints itself (the glyph canvas, font cells, previews, panel
-# titles, dock frames): "script" maps the pixels those widgets drew, through graphics effects;
-# "native" maps the colors FontLab hands to Qt, in the hooks library, before anything is drawn.
-# Everything Qt draws itself (palette, Fusion, stylesheets, icons, title bars, editors) is the same
-# in both. If the native engine cannot start (no library, another Qt build), the script engine runs.
+# Two engines darken the islands, the surfaces FontLab paints itself in fixed light colors (the glyph
+# canvas, font cells, previews, rulers): "script" gives each FontLab's light look and maps the pixels
+# it drew, through a graphics effect; "native" maps the colors FontLab hands to Qt as it paints them,
+# in the hooks library, before anything is drawn. Everything else (palette, Fusion, stylesheets,
+# icons, title bars, editors, lists, the other effects) is the same in both. If the native engine cannot start (no library, another Qt build), the script engine runs.
 ENGINES = ("script", "native")
-HOOKS_VERSION = 10
+HOOKS_VERSION = 17
 PALETTE_GROUPS, PALETTE_ROLES = 3, 21
 
 
@@ -2525,18 +2539,21 @@ def _hooks():
     lib = ctypes.PyDLL(path)  # keeps the interpreter lock: the wrappers never call back into Python
     if lib.freelab_hooks_version() != HOOKS_VERSION * 1000 + NATIVE_VERSION:
         raise RuntimeError("the native engine's library is another version")
-    lib.freelab_hooks_init.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    lib.freelab_hooks_init.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
     lib.freelab_hooks_add_module.argtypes = [ctypes.c_void_p]
     lib.freelab_hooks_set_palette.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
     lib.freelab_hooks_install.argtypes = [ctypes.c_double, ctypes.c_double, ctypes.c_double]
-    lib.freelab_hooks_set_keep.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    lib.freelab_hooks_set_hooked.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    lib.freelab_hooks_set_ink.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    lib.freelab_hooks_add_ink_module.argtypes = [ctypes.c_void_p]
     lib.freelab_hooks_set_subpixel.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_double]
     kernel32 = ctypes.WinDLL("kernel32")
     kernel32.GetModuleHandleW.restype = ctypes.c_void_p
     kernel32.GetModuleHandleW.argtypes = [ctypes.c_wchar_p]
     qtgui = kernel32.GetModuleHandleW(u"Qt5Gui.dll")
     virtual_protect = ctypes.cast(kernel32.VirtualProtect, ctypes.c_void_p).value
-    if not qtgui or lib.freelab_hooks_init(qtgui, virtual_protect) != 1:
+    qtwidgets = kernel32.GetModuleHandleW(u"Qt5Widgets.dll")
+    if not qtgui or not qtwidgets or lib.freelab_hooks_init(qtgui, virtual_protect, qtwidgets) != 1:
         raise RuntimeError("Qt is not the build the native engine knows (Qt 5.14.2)")
     found = lib.freelab_hooks_add_module(kernel32.GetModuleHandleW(None))  # FontLab's own program
     if found not in (-2,) and found < HOOKS_MIN_FOUND:
@@ -2544,11 +2561,12 @@ def _hooks():
     svg = kernel32.GetModuleHandleW(u"Qt5Svg.dll")
     if svg:  # FontLab draws some artwork (its logo) by handing an SVG to QSvgRenderer, which paints in Qt5Svg
         lib.freelab_hooks_add_module(svg)
+    lib.freelab_hooks_add_ink_module(qtwidgets)  # its pens, for the lists' rows it draws (the ink viewports only)
     holder["hooks_lib"], holder["hooks_lib_path"] = lib, path
     return lib
 
 
-HOOKS_MIN_FOUND = 19  # of 23: FontLab 7.2's program imports all of them
+HOOKS_MIN_FOUND = 25  # of 29: FontLab 7.2's program imports all of them
 
 
 def _palette_table(palette):
@@ -2610,7 +2628,8 @@ def _install_hooks(app):
         lib.freelab_hooks_set_palette(ctypes.addressof(dark), ctypes.addressof(light))
         lib.freelab_hooks_install(DARK_OKL, LIGHT_OKL, KEEP_TINT_CONTENT)
         state["hooked"], state["hooked_lib"] = True, lib
-        _update_kept(app)
+        state["hooked_addresses"], state["ink_addresses"] = [], []
+        _update_hooked(app)
     except Exception as exc:
         _clear_native_pending()
         _note_error("native engine", exc)
@@ -2636,44 +2655,137 @@ def _native_settled():
         _note_error("native engine", exc)
 
 
-KEPT_CLASSES = ("QtColorPicker", "ColorPickerItem", "ColorPickerButton")  # swatches show their real colors
-
-
-def _kept_widget(widget, canvas):
-    name = _class_name(widget)
-    if name in KEPT_CLASSES or _left_alone(widget, name) or name in SUBPIXEL_CLASSES:
-        # swatches show their real colors; ClearType previews (TrueType Hinting's) keep the script
-        # engine's subpixel effect, which maps the whole preview as drawn (mapped line by line, as
-        # FontLab draws it, its fringes stayed colored)
-        return True
-    return not canvas and is_content(widget)  # Mixed: canvases, cells, and previews keep FontLab's look
-
-
-def _update_kept(app):
-    """Tell the hooks which widgets to leave as FontLab draws them (their addresses, from Qt's own
-    description of each widget). Run again by sweeps: FontLab makes new pickers as panels open."""
+def _island(widget):
+    """An island: the native engine hooks one FontLab paints itself; otherwise (the script engine, or
+    an item view, whose rows Qt draws) the script engine's light look and effect."""
     state = _state()
-    lib = state.get("hooked_lib")
-    if lib is None or not state.get("hooked"):
+    if state.get("engine") == "native" and state.get("hooked") and _hookable(widget):
+        _hook_island(widget)
+    else:
+        _make_island(widget)
+
+
+def _child_widgets(widget):
+    """The widgets inside `widget`, from its own children (not a scan of every widget, as
+    _descendants does: a hooked island is met hundreds of times at start)."""
+    found, pending = [], [widget]
+    while pending:
+        for child in pending.pop().children():
+            try:
+                if child.isWidgetType():
+                    found.append(child)
+                    pending.append(child)
+            except Exception:
+                pass
+    return found
+
+
+def _in_hooked_island(widget):
+    """A widget of FontLab's own class (Qt's start with Q) inside a hooked island: the script engine's
+    island effect covers it, so the hooks map it too."""
+    if _class_name(widget).startswith("Q") or widget.property(HOOKED_PROP):
+        return False
+    if any(widget.inherits(base) for base in QT_DRAWN_BASES):
+        return False
+    state = _state()
+    if state.get("engine") != "native" or not state.get("hooked"):
+        return False
+    current = widget
+    while not current.isWindow():
+        current = current.parentWidget()
+        if current is None:
+            return False
+        if current.property(HOOKED_PROP):
+            return True
+    return False
+
+
+def _hookable(widget):
+    if widget.inherits("QAbstractItemView") or _class_name(widget) in SCRIPT_ISLAND_CLASSES:
+        return False
+    parent = widget.parentWidget()
+    return not (parent is not None and parent.inherits("QAbstractItemView"))
+
+
+def _hook_island(widget):
+    """Leave the island's painting to the hooks: no light look, no effect. Qt still draws its
+    stylesheet and icons, which are darkened as any widget's."""
+    first = widget.property(HOOKED_PROP) is None
+    _clear_effect(widget, _record(widget))  # an effect dark mode set before it was found in a hooked island
+    widget.setProperty(HOOKED_PROP, True)
+    _darken_sheet(widget)
+    _darken_icons(widget)
+    if first:
+        _enqueue([w for w in _child_widgets(widget) if _in_hooked_island(w)], "dark")
+    state = _state()
+    pointer = _sci_pointer(widget)
+    if pointer and pointer not in state.setdefault("hooked_addresses", []):
+        state["hooked_addresses"].append(pointer)
+        _send_hooked(state)
+
+
+def _update_hooked(app):
+    """The hooked islands' addresses, rebuilt from the living widgets (FontLab deletes and makes
+    windows; a deleted island's address may come back as another widget's)."""
+    state = _state()
+    if state.get("hooked_lib") is None or not state.get("hooked"):
         return
-    import ctypes
-    addresses, previews = [], []
+    addresses, inks = [], []
     for widget in app.allWidgets():
         try:
-            if _kept_widget(widget, state["canvas"]):
+            hooked, ink = widget.property(HOOKED_PROP), widget.property(NATIVE_INK_PROP)
+            if hooked or ink:
                 pointer = _sci_pointer(widget)
                 if pointer:
-                    addresses.append(pointer)
+                    (addresses if hooked else inks).append(pointer)
         except Exception:
             pass
-    if addresses != state.get("kept_addresses"):
-        table = (ctypes.c_uint64 * max(1, len(addresses)))(*addresses)
-        lib.freelab_hooks_set_keep(ctypes.addressof(table), len(addresses))
-        state["kept_addresses"] = addresses
-    if previews != state.get("subpixel_addresses"):
-        table = (ctypes.c_uint64 * max(1, len(previews)))(*previews)
-        lib.freelab_hooks_set_subpixel(ctypes.addressof(table), len(previews), BACKGROUND_OKL)
-        state["subpixel_addresses"] = previews
+    if addresses != state.get("hooked_addresses"):
+        state["hooked_addresses"] = addresses
+        _send_hooked(state)
+    if inks != state.get("ink_addresses"):
+        state["ink_addresses"] = inks
+        _send_ink(state)
+
+
+def _native_ink_target(widget):
+    state = _state()
+    if state.get("engine") != "native" or not state.get("hooked"):
+        return False
+    parent = widget.parentWidget()
+    if _prop(widget, "objectName") != "qt_scrollarea_viewport" or parent is None or not parent.inherits("QAbstractItemView"):
+        return False
+    delegates = [parent.itemDelegate()]
+    model = parent.model()
+    for column in range(min(model.columnCount() if model is not None else 0, 64)):
+        delegates.append(parent.itemDelegateForColumn(column))
+    return all(d is None or _class_name(d) in NATIVE_INK_DELEGATES for d in delegates)
+
+
+def _native_ink(widget):
+    """A list's viewport: its dark pens are mapped by the hooks, with no effect."""
+    _clear_effect(widget, _record(widget))
+    widget.setProperty(NATIVE_INK_PROP, True)
+    state = _state()
+    pointer = _sci_pointer(widget)
+    if pointer and pointer not in state.setdefault("ink_addresses", []):
+        state["ink_addresses"].append(pointer)
+        _send_ink(state)
+    widget.update()
+
+
+def _send_ink(state):
+    import ctypes
+    addresses = state["ink_addresses"]
+    table = (ctypes.c_uint64 * max(1, len(addresses)))(*addresses)
+    state["hooked_lib"].freelab_hooks_set_ink(ctypes.addressof(table), len(addresses))
+
+
+def _send_hooked(state):
+    import ctypes
+    addresses = state["hooked_addresses"]
+    table = (ctypes.c_uint64 * max(1, len(addresses)))(*addresses)
+    state["hooked_lib"].freelab_hooks_set_hooked(ctypes.addressof(table), len(addresses))
 
 
 def _remove_hooks(app):
