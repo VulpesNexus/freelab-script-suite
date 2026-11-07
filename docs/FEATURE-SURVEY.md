@@ -1,6 +1,6 @@
 # Feature survey
 
-What already exists for the features the owner asked for, surveyed on 2026-11-06 before anything was built. A research agent did the survey; the licenses and activity dates of the repositories below, TypeRig's tags, and the FontLab 7 calls named here were checked again against GitHub and FontLab's FontLab 7 reference. The judgments about how good each tool is come from forum posts and manuals, and are marked where unverified.
+What already exists for the features the owner asked for, surveyed on 2026-11-06 before anything was built, and again for kerning on 2026-11-08. A research agent did the survey; the licenses and activity dates of the repositories below, TypeRig's tags, and the FontLab 7 calls named here were checked again against GitHub and FontLab's FontLab 7 reference. The judgments about how good each tool is come from forum posts and manuals, and are marked where unverified.
 
 ## Dark mode
 
@@ -12,14 +12,19 @@ FontLab 7 has a basic built-in autokern for selected pairs. Its managing directo
 
 | Prior art | License | Notes |
 |---|---|---|
+| [behdad/halfkern](https://github.com/behdad/halfkern) | Apache-2.0 (Google, 2022) | "essentially a font auto-kerning tool masqueraded as a kerning audit tool": blurs the two glyphs' renderings (a signed distance field by default) and spaces them until the blurs overlap by an amount calibrated on *ll*, *nn*, and *oo*; prints suggested values and does not write them into the font. Python 3 with numpy, scipy, cairo, FreeType, and HarfBuzz; last commit June 2024 |
 | [mekkablue/Glyphs-Scripts](https://github.com/mekkablue/Glyphs-Scripts) "Auto Bumper" | Apache-2.0 | minimum-distance kerning for Glyphs; logic portable |
 | [Tosche/BubbleKern](https://github.com/Tosche/BubbleKern) | Apache-2.0 | bubble-distance kerning for Glyphs; logic portable |
 | [simoncozens/kerndeterminer](https://github.com/simoncozens/kerndeterminer) | MIT and Apache-2.0 | Rust with Python bindings; warns it does not suit Latin |
 | [simoncozens/atokern](https://github.com/simoncozens/atokern) | none on GitHub | neural kerner; do not copy |
+| "Learning to Kern" ([arXiv 2402.14313](https://arxiv.org/abs/2402.14313), Kyushu University, 2024) | paper; no code found | pairwise and set-wise (transformer) models over letter images, about 5.3 px average error on about 2,500 Google Fonts; compared against FontForge's autokern |
 | [HTLetterspacer](https://github.com/huertatipografica/HTLetterspacer), kernagic, FittingRoom | GPL-3.0 | read only, unless FreeLab becomes GPL |
-| Kern On, iKern | commercial | Glyphs-only and a paid service |
+| Kern On, iKern | commercial | Glyphs-only and a paid service. Kern On works from a few "model" pairs the designer kerns, and compares glyphs and pairs to kern the rest ([manual](https://kern-on.com/manual)) |
+| FontLab 8 | commercial | a newer autokern algorithm (K2, beside the old K1), *Kern to Distance* (the pair's closest contours at a given distance), and automatic kerning classes ([FontLab 8 help](https://help.fontlab.com/fontlab/8/whats-new/whats-new-06-metrics-kerning/)); no internals published |
 
-A FreeLab kerner would be its own: a minimum-distance or bubble model over outlines, run inside FontLab, reading outlines and writing kerning through FontLab's own API.
+A FreeLab kerner would be its own: a minimum-distance or bubble model over outlines, run inside FontLab, reading outlines and writing kerning through FontLab's own API. halfkern's approach (blurred shapes, overlap calibrated on the font's own *ll*, *nn*, and *oo*) is the most promising open method, and its Apache license allows porting it; FontLab 7's Python has no numpy, so its heavy part would go into FreeLab's native helper (C), as dark mode's pixel work does.
+
+**Japanese.** Kana and punctuation in Japanese fonts are spaced with `palt` (proportional widths, a GPOS single adjustment) more than with pairs; layout engines apply `palt` first and kerning on top of it ([W3C discussion, 2023](https://lists.w3.org/Archives/Public/public-i18n-japanese/2023AprJun/0048.html)). No open tool that generates `palt` values automatically was found; [Gen Interface JP](https://github.com/yamatoiizuka/gen-interface-jp) sets them by hand for 48 punctuation glyphs.
 
 ## Kerning pairs and classes
 
@@ -28,7 +33,7 @@ FontLab 7 loads pair lists in its *Pairs & Phrases* panel and has *Font > Kernin
 | Prior art | License | Notes |
 |---|---|---|
 | [andre-fuchs/kerning-pairs](https://github.com/andre-fuchs/kerning-pairs) | MIT | ranked Latin pair lists for 24 languages; shippable as data |
-| [kateliev/TypeRig](https://github.com/kateliev/TypeRig) at tag `v1.9.0-Py2.7` (or `v1.5.0-py27`) | MPL-2.0 | FontLab 7 era: pair strings and export, class building from composites and name suffixes; reusable with file-level copyleft |
+| [kateliev/TypeRig](https://github.com/kateliev/TypeRig) at tag `v1.9.0-Py2.7` (or `v1.5.0-py27`) | MPL-2.0 for those tags; AGPL-3.0 since 5 November 2026 | FontLab 7 era: pair strings and export, class building from composites and name suffixes. Its NOTICE now reserves text and data mining, AI training included: not to be fed to AI tools, so not used here |
 | mekkablue Kerning scripts | Apache-2.0 | group setting, string mixers, crash finders; logic portable |
 
 FontLab 7's `flPackage.getAllGroups()` and `flPackage.kerning(master)` are the calls to build on.
@@ -43,4 +48,4 @@ FontLab 7's auto features already write `liga` and `dlig` from glyph names (for 
 
 ## Licensing
 
-Reusable: MIT, Apache-2.0, and BSD code, with notices kept. MPL-2.0 (TypeRig): reusable, and modified TypeRig files stay MPL. GPL-3.0: read only. No license: never copied.
+Reusable: MIT, Apache-2.0, and BSD code, with notices kept. GPL-3.0 and AGPL-3.0: read only. No license: never copied. A work whose rightholders reserve text and data mining (TypeRig's NOTICE): not processed with AI tools at all.
