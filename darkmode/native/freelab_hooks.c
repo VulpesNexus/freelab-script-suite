@@ -18,7 +18,7 @@
  */
 #include "freelab_pixels.c"
 
-#define FREELAB_HOOKS_VERSION 2
+#define FREELAB_HOOKS_VERSION 4
 
 typedef int (*virtual_protect_fn)(void *, size_t, uint32_t, uint32_t *);
 #define PAGE_READWRITE_ 0x04
@@ -29,6 +29,9 @@ typedef struct {
     uint16_t alpha, red, green, blue, pad;
 } qcolor;
 #define QCOLOR_INVALID 0
+#define QIMAGE_RGB32 4
+#define QIMAGE_ARGB32 5
+#define QIMAGE_ARGB32_PREMULTIPLIED 6
 #define QCOLOR_RGB 1
 
 /* QPen and QBrush hold one pointer; room for a temporary copy. */
@@ -55,6 +58,13 @@ static const qcolor *(*qt_brush_color)(const void *);
 static void *(*qt_brush_copy)(void *, const void *);
 static void (*qt_brush_set_color)(void *, const qcolor *);
 static void (*qt_brush_dtor)(void *);
+static void *(*qt_image_copy)(void *, const void *);
+static void (*qt_image_dtor)(void *);
+static int64_t (*qt_image_cache_key)(const void *);
+static uint8_t *(*qt_image_bits)(void *);
+static int (*qt_image_width)(const void *);
+static int (*qt_image_height)(const void *);
+static int (*qt_image_bytes_per_line)(const void *);
 
 static struct {
     const char *name;
@@ -74,6 +84,13 @@ static struct {
     {"??0QBrush@@QEAA@AEBV0@@Z", (void **)&qt_brush_copy},
     {"?setColor@QBrush@@QEAAXAEBVQColor@@@Z", (void **)&qt_brush_set_color},
     {"??1QBrush@@QEAA@XZ", (void **)&qt_brush_dtor},
+    {"??0QImage@@QEAA@AEBV0@@Z", (void **)&qt_image_copy},
+    {"??1QImage@@UEAA@XZ", (void **)&qt_image_dtor},
+    {"?cacheKey@QImage@@QEBA_JXZ", (void **)&qt_image_cache_key},
+    {"?bits@QImage@@QEAAPEAEXZ", (void **)&qt_image_bits},
+    {"?width@QImage@@QEBAHXZ", (void **)&qt_image_width},
+    {"?height@QImage@@QEBAHXZ", (void **)&qt_image_height},
+    {"?bytesPerLine@QImage@@QEBAHXZ", (void **)&qt_image_bytes_per_line},
 };
 #define QT_NEEDED (int)(sizeof(qt_needed) / sizeof(qt_needed[0]))
 
@@ -82,6 +99,9 @@ enum {
     H_FILL_RECT, H_FILL_RECTF, H_FILL_XYWH, H_FILL_XYWH_GLOBAL, H_SET_PEN_COLOR, H_SET_PEN, H_SET_BRUSH,
     H_FILL_RECT_BRUSH, H_FILL_RECTF_BRUSH, H_FILL_XYWH_BRUSH, H_FILL_PATH, H_SET_BACKGROUND,
     H_PIXMAP_FILL, H_IMAGE_FILL_PIXEL, H_IMAGE_FILL_GLOBAL, H_GRADIENT_STOP,
+    /* images: FontLab's cached glyph renderings, drawn as mapped copies (pixmaps and paths observed only) */
+    H_DRAW_IMAGE_PT, H_DRAW_IMAGE_RECT_SRC, H_DRAW_IMAGE_XY, H_DRAW_IMAGE_RECTF, H_DRAW_PIXMAP_RECT,
+    H_DRAW_PIXMAP_PT, H_DRAW_PATH, H_IMAGE_FROM_DATA,
     H_COUNT
 };
 static const char *hook_names[H_COUNT] = {
@@ -101,6 +121,14 @@ static const char *hook_names[H_COUNT] = {
     "?fill@QImage@@QEAAXI@Z",
     "?fill@QImage@@QEAAXW4GlobalColor@Qt@@@Z",
     "?setColorAt@QGradient@@QEAAXNAEBVQColor@@@Z",
+    "?drawImage@QPainter@@QEAAXAEBVQPointF@@AEBVQImage@@@Z",
+    "?drawImage@QPainter@@QEAAXAEBVQRect@@AEBVQImage@@0V?$QFlags@W4ImageConversionFlag@Qt@@@@@Z",
+    "?drawImage@QPainter@@QEAAXHHAEBVQImage@@HHHHV?$QFlags@W4ImageConversionFlag@Qt@@@@@Z",
+    "?drawImage@QPainter@@QEAAXAEBVQRectF@@AEBVQImage@@@Z",
+    "?drawPixmap@QPainter@@QEAAXAEBVQRect@@AEBVQPixmap@@@Z",
+    "?drawPixmap@QPainter@@QEAAXAEBVQPointF@@AEBVQPixmap@@@Z",
+    "?drawPath@QPainter@@QEAAXAEBVQPainterPath@@@Z",
+    "??0QImage@@QEAA@PEAEHHHW4Format@0@P6AXPEAX@Z2@Z",
 };
 static void *originals[H_COUNT];
 static void **slots[H_COUNT];
@@ -257,9 +285,6 @@ static void w_fill_xywh_brush(void *p, int x, int y, int w, int h, const void *b
 
 /* QImage::fill(uint) takes a pixel value in the image's own format: mapped only for the 32-bit RGB
  * formats with an opaque value (an index or a premultiplied value would be something else). */
-#define QIMAGE_RGB32 4
-#define QIMAGE_ARGB32 5
-#define QIMAGE_ARGB32_PREMULTIPLIED 6
 static void w_image_fill_pixel(void *image, uint32_t pixel)
 {
     hook_calls[H_IMAGE_FILL_PIXEL]++;
@@ -290,11 +315,213 @@ static void w_image_fill_global(void *image, int global)
     ((image_fill_global_fn)originals[H_IMAGE_FILL_GLOBAL])(image, global);
 }
 
+/* ---- images ------------------------------------------------------------------------------------
+ * FontLab draws its glyph cells (and other content) from images it rendered once and keeps: no color
+ * passes through Qt for those, so the image itself is mapped. Each is mapped once, into a copy kept
+ * under the image's cacheKey, which Qt changes whenever the image's pixels change: a re-rendered
+ * cell is a new key, and a stale copy is never drawn. The copies live in a fixed table (no C runtime
+ * here); the oldest gives way. Pixels are unpremultiplied, mapped with map_qrgb (with a small memo
+ * of recent colors), and premultiplied again, so smoothing toward transparency survives. */
+#define IMAGE_SLOTS 1024
+#define QIMAGE_SIZE 64 /* room for a QImage (32 bytes in Qt 5) */
+#define MEMO 4096
+static struct {
+    int64_t key;
+    uint64_t stamp;
+    int used;
+    uint8_t image[QIMAGE_SIZE];
+} image_cache[IMAGE_SLOTS];
+static uint64_t image_clock;
+static volatile long image_busy;
+static uint32_t memo_in[MEMO], memo_out[MEMO];
+static uint8_t memo_used[MEMO];
+static int64_t images_mapped, images_reused;
+
+static uint32_t memo_map(uint32_t rgb)
+{
+    uint32_t h = (rgb * 2654435761U) >> 20; /* 12 bits */
+    if (memo_used[h] && memo_in[h] == rgb)
+        return memo_out[h];
+    memo_in[h] = rgb;
+    memo_out[h] = map_qrgb(rgb | 0xff000000U) & 0xffffffU;
+    memo_used[h] = 1;
+    return memo_out[h];
+}
+
+static void map_image_pixels(void *image, int format)
+{
+    uint8_t *bits = qt_image_bits(image); /* detaches: the copy gets pixels of its own */
+    int w = qt_image_width(image), h = qt_image_height(image), stride = qt_image_bytes_per_line(image), x, y;
+    if (!bits || w <= 0 || h <= 0)
+        return;
+    for (y = 0; y < h; y++) {
+        uint32_t *row = (uint32_t *)(bits + (int64_t)y * stride);
+        for (x = 0; x < w; x++) {
+            uint32_t v = row[x], a = format == QIMAGE_RGB32 ? 255 : v >> 24, r, g, b, m;
+            if (a == 0)
+                continue;
+            r = (v >> 16) & 255;
+            g = (v >> 8) & 255;
+            b = v & 255;
+            if (format == QIMAGE_ARGB32_PREMULTIPLIED && a < 255) {
+                r = r * 255 / a;
+                g = g * 255 / a;
+                b = b * 255 / a;
+                if (r > 255) r = 255;
+                if (g > 255) g = 255;
+                if (b > 255) b = 255;
+            }
+            m = memo_map((r << 16) | (g << 8) | b);
+            r = (m >> 16) & 255;
+            g = (m >> 8) & 255;
+            b = m & 255;
+            if (format == QIMAGE_ARGB32_PREMULTIPLIED && a < 255) {
+                r = (r * a + 127) / 255;
+                g = (g * a + 127) / 255;
+                b = (b * a + 127) / 255;
+            }
+            row[x] = (format == QIMAGE_RGB32 ? (v & 0xff000000U) : (a << 24)) | (r << 16) | (g << 8) | b;
+        }
+    }
+}
+
+/* The image to draw: a mapped copy of image, or image itself (mapping off, another format, or busy). */
+static const void *mapped_image(const void *image)
+{
+    int format, i, slot = -1;
+    int64_t key;
+    uint64_t oldest = ~0ULL;
+    const void *result = image;
+    if (!hooks_on || !qt_image_copy)
+        return image;
+    format = qt_image_format(image);
+    if (format != QIMAGE_RGB32 && format != QIMAGE_ARGB32 && format != QIMAGE_ARGB32_PREMULTIPLIED)
+        return image;
+    if (__sync_lock_test_and_set(&image_busy, 1))
+        return image; /* another thread is mapping: drawn as it is this once */
+    key = qt_image_cache_key(image);
+    for (i = 0; i < IMAGE_SLOTS; i++) {
+        if (image_cache[i].used && image_cache[i].key == key) {
+            image_cache[i].stamp = ++image_clock;
+            images_reused++;
+            result = image_cache[i].image;
+            goto done;
+        }
+        if (!image_cache[i].used) {
+            if (oldest != 0) {
+                oldest = 0;
+                slot = i;
+            }
+        } else if (image_cache[i].stamp < oldest) {
+            oldest = image_cache[i].stamp;
+            slot = i;
+        }
+    }
+    if (slot < 0)
+        goto done;
+    if (image_cache[slot].used)
+        qt_image_dtor(image_cache[slot].image);
+    qt_image_copy(image_cache[slot].image, image);
+    map_image_pixels(image_cache[slot].image, format);
+    image_cache[slot].key = key;
+    image_cache[slot].stamp = ++image_clock;
+    image_cache[slot].used = 1;
+    images_mapped++;
+    result = image_cache[slot].image;
+done:
+    __sync_lock_release(&image_busy);
+    return result;
+}
+
+static void clear_image_cache(void)
+{
+    int i;
+    for (i = 0; i < IMAGE_SLOTS; i++) {
+        if (image_cache[i].used) {
+            qt_image_dtor(image_cache[i].image);
+            image_cache[i].used = 0;
+        }
+    }
+}
+
+/* Observed calls: image formats drawn, and wrapped from FontLab's own buffers (QImage::Format values). */
+#define FORMATS 32
+static int64_t drawn_formats[FORMATS];
+static int64_t wrapped_formats[FORMATS];
+
+static void note_drawn(const void *image)
+{
+    int format = qt_image_format ? qt_image_format(image) : 0;
+    drawn_formats[format >= 0 && format < FORMATS ? format : 0]++;
+}
+
+typedef void (*draw_two_fn)(void *, const void *, const void *);
+typedef void (*draw_rect_src_fn)(void *, const void *, const void *, const void *, int);
+typedef void (*draw_xy_fn)(void *, int, int, const void *, int, int, int, int, int);
+typedef void (*draw_path_fn)(void *, const void *);
+typedef void *(*image_from_data_fn)(void *, uint8_t *, int, int, int, int, void *, void *);
+
+static void w_draw_image_pt(void *p, const void *at, const void *image)
+{
+    hook_calls[H_DRAW_IMAGE_PT]++;
+    note_drawn(image);
+    ((draw_two_fn)originals[H_DRAW_IMAGE_PT])(p, at, mapped_image(image));
+}
+
+static void w_draw_image_rect_src(void *p, const void *target, const void *image, const void *source, int flags)
+{
+    hook_calls[H_DRAW_IMAGE_RECT_SRC]++;
+    note_drawn(image);
+    ((draw_rect_src_fn)originals[H_DRAW_IMAGE_RECT_SRC])(p, target, mapped_image(image), source, flags);
+}
+
+static void w_draw_image_xy(void *p, int x, int y, const void *image, int sx, int sy, int sw, int sh, int flags)
+{
+    hook_calls[H_DRAW_IMAGE_XY]++;
+    note_drawn(image);
+    ((draw_xy_fn)originals[H_DRAW_IMAGE_XY])(p, x, y, mapped_image(image), sx, sy, sw, sh, flags);
+}
+
+static void w_draw_image_rectf(void *p, const void *target, const void *image)
+{
+    hook_calls[H_DRAW_IMAGE_RECTF]++;
+    note_drawn(image);
+    ((draw_two_fn)originals[H_DRAW_IMAGE_RECTF])(p, target, mapped_image(image));
+}
+
+static void w_draw_pixmap_rect(void *p, const void *target, const void *pixmap)
+{
+    hook_calls[H_DRAW_PIXMAP_RECT]++;
+    ((draw_two_fn)originals[H_DRAW_PIXMAP_RECT])(p, target, pixmap);
+}
+
+static void w_draw_pixmap_pt(void *p, const void *at, const void *pixmap)
+{
+    hook_calls[H_DRAW_PIXMAP_PT]++;
+    ((draw_two_fn)originals[H_DRAW_PIXMAP_PT])(p, at, pixmap);
+}
+
+static void w_draw_path(void *p, const void *path)
+{
+    hook_calls[H_DRAW_PATH]++;
+    ((draw_path_fn)originals[H_DRAW_PATH])(p, path);
+}
+
+static void *w_image_from_data(void *image, uint8_t *data, int w, int h, int bytes_per_line, int format, void *cleanup,
+                               void *info)
+{
+    hook_calls[H_IMAGE_FROM_DATA]++;
+    wrapped_formats[format >= 0 && format < FORMATS ? format : 0]++;
+    return ((image_from_data_fn)originals[H_IMAGE_FROM_DATA])(image, data, w, h, bytes_per_line, format, cleanup, info);
+}
+
 static void *wrappers[H_COUNT] = {
     (void *)w_fill_rect, (void *)w_fill_rectf, (void *)w_fill_xywh, (void *)w_fill_xywh_global,
     (void *)w_set_pen_color, (void *)w_set_pen, (void *)w_set_brush, (void *)w_fill_rect_brush,
     (void *)w_fill_rectf_brush, (void *)w_fill_xywh_brush, (void *)w_fill_path, (void *)w_set_background,
     (void *)w_pixmap_fill, (void *)w_image_fill_pixel, (void *)w_image_fill_global, (void *)w_gradient_stop,
+    (void *)w_draw_image_pt, (void *)w_draw_image_rect_src, (void *)w_draw_image_xy, (void *)w_draw_image_rectf,
+    (void *)w_draw_pixmap_rect, (void *)w_draw_pixmap_pt, (void *)w_draw_path, (void *)w_image_from_data,
 };
 
 /* ---- PE tables ---------------------------------------------------------------------------------- */
@@ -456,10 +683,29 @@ EXPORT int freelab_hooks_remove(void)
     for (i = 0; i < H_COUNT; i++)
         if (slots[i] && originals[i] && *slots[i] == wrappers[i] && write_slot(slots[i], originals[i]))
             restored++;
+    clear_image_cache(); /* the slots point at Qt again: no wrapper can be drawing a copy now */
     return restored;
 }
 
 /* calls[i], changed[i] for each hook, in the order of hook_names; returns H_COUNT. */
+/* Image formats seen: drawn[f] and wrapped[f] for each QImage::Format value f below max. */
+/* Images mapped (new copies) and reused (copies drawn again). */
+EXPORT void freelab_hooks_image_counts(int64_t *mapped, int64_t *reused)
+{
+    *mapped = images_mapped;
+    *reused = images_reused;
+}
+
+EXPORT int freelab_hooks_formats(int64_t *drawn, int64_t *wrapped, int max)
+{
+    int i;
+    for (i = 0; i < FORMATS && i < max; i++) {
+        drawn[i] = drawn_formats[i];
+        wrapped[i] = wrapped_formats[i];
+    }
+    return FORMATS;
+}
+
 EXPORT int freelab_hooks_counts(int64_t *calls, int64_t *changed, int max)
 {
     int i;

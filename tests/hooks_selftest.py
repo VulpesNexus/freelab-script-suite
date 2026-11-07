@@ -25,7 +25,8 @@ def okl_gray(byte):
 
 hooks.freelab_hooks_test_bind.argtypes = [c_void_p, c_double, c_double]
 bound = hooks.freelab_hooks_test_bind(base, okl_gray(31), okl_gray(219))
-print("bound", bound, "of 16")
+HOOKS = 24
+print("bound", bound, "of", HOOKS)
 hooks.freelab_hooks_test_wrapper.restype = c_void_p
 KEEP = []
 
@@ -166,8 +167,48 @@ d = c_void_p.from_address(addr(vec)).value  # QVector's QArrayData*: size at 4, 
 first = d + ctypes.c_int64.from_address(d + 16).value  # QPair<double, QColor>: the color at 8
 check("QGradient::setColorAt(white)", color_rgba(first + 8), "dark")
 
-calls = (ctypes.c_int64 * 16)(); changed = (ctypes.c_int64 * 16)()
-hooks.freelab_hooks_counts(calls, changed, 16)
+# images: drawn as a mapped copy, kept and reused; FontLab's own image never changes
+draw_image_pt = fn("?drawImage@QPainter@@QEAAXAEBVQPointF@@AEBVQImage@@@Z", c_void_p, c_void_p, c_void_p)
+src = image()
+image_fill = fn("?fill@QImage@@QEAAXI@Z", c_void_p, c_uint32)
+image_fill(addr(src), 0xffffffff)
+target = image()
+image_fill(addr(target), 0xff000000)
+origin = (c_double * 2)(0.0, 0.0)
+painting(target, lambda p: wrapper(16, c_void_p, c_void_p, c_void_p)(p, addr(origin), addr(src)))
+check("drawImage(point, white image) mapped", image_pixel(addr(target), 3, 3), "dark")
+check("the image itself is untouched", image_pixel(addr(src), 3, 3), 0xffffff)
+image_fill(addr(target), 0xff000000)
+painting(target, lambda p: wrapper(18, c_void_p, c_int, c_int, c_void_p, c_int, c_int, c_int, c_int, c_int)(p, 0, 0, addr(src), 0, 0, -1, -1, 0))
+check("drawImage(x, y, white image) mapped", image_pixel(addr(target), 3, 3), "dark")
+mapped_n, reused_n = ctypes.c_int64(), ctypes.c_int64()
+hooks.freelab_hooks_image_counts(ctypes.byref(mapped_n), ctypes.byref(reused_n))
+check("mapped once, then reused", mapped_n.value * 16 + reused_n.value, 0x11)
+# a glyph's smoothed edge: half-transparent black in a premultiplied image comes out half-transparent light
+premul = buf(); image_ctor(addr(premul), 4, 4, 6)
+image_fill(addr(premul), 0x80000000)
+light_target = image()
+image_fill(addr(light_target), 0x00000000)
+painting(light_target, lambda p: wrapper(16, c_void_p, c_void_p, c_void_p)(p, addr(origin), addr(premul)))
+edge = image_pixel(addr(light_target), 1, 1)
+results.append(0x70 <= (edge >> 24) <= 0x90 and (edge & 0xff) > 150)
+print("%-40s %08x %s" % ("premultiplied edge: alpha kept, color light", edge, "ok" if results[-1] else "WRONG"))
+painter_set_brush_raw = fn("?setBrush@QPainter@@QEAAXAEBVQBrush@@@Z", c_void_p, c_void_p)
+image_fill(addr(target), 0xff000000)
+painting(target, lambda p: (painter_set_brush_raw(p, addr(white_brush)), wrapper(22, c_void_p, c_void_p)(p, addr(path)))[1])
+check("drawPath(white brush, unhooked) as is", image_pixel(addr(target), 4, 4), 0xffffff)
+pixels = (ctypes.c_uint32 * 16)(*([0xff336699] * 16))
+wrapped = buf()
+wrapper(23, c_void_p, c_void_p, c_int, c_int, c_int, c_int, c_void_p, c_void_p, restype=c_void_p)(
+    addr(wrapped), addr(pixels), 4, 4, 16, ARGB32, None, None)
+check("QImage(data) wraps the buffer", image_pixel(addr(wrapped), 1, 1), 0x336699)
+drawn, wrapped_f = (ctypes.c_int64 * 32)(), (ctypes.c_int64 * 32)()
+hooks.freelab_hooks_formats(drawn, wrapped_f, 32)
+check("formats noted (ARGB32 drawn twice)", drawn[ARGB32], 2)
+check("formats noted (ARGB32 wrapped once)", wrapped_f[ARGB32], 1)
+
+calls = (ctypes.c_int64 * HOOKS)(); changed = (ctypes.c_int64 * HOOKS)()
+hooks.freelab_hooks_counts(calls, changed, HOOKS)
 print("calls  ", list(calls)); print("changed", list(changed))
-print("ALL OK" if all(results) and bound == 16 else "FAILURES")
-sys.exit(0 if all(results) and bound == 16 else 1)
+print("ALL OK" if all(results) and bound == HOOKS else "FAILURES")
+sys.exit(0 if all(results) and bound == HOOKS else 1)
