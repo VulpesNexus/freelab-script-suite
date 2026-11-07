@@ -239,6 +239,30 @@ class NativeTests(unittest.TestCase):
         self.assertEqual(rgb_at(buf, TEXT_ROW + 2), dm.map_rgb(0, 0, 0), "its smoothing too, alpha kept")
         self.assertEqual(buf[4 * (TEXT_ROW + 2) + 3], 120)
 
+    def test_dark_gray_text_drawn_on_nothing_turns_light(self):
+        # The font window's categories: headers and empty categories in dark gray, close to the dark
+        # gray beneath, and a light badge more frequent than that text (taken for the paper, it made
+        # the text a "fringe" between the badge and a red flag).
+        width, buf = 60, bytearray()
+        for y in range(40):
+            for x in range(width):
+                gray = (0x3c, 0x3c, 0x3c) if x < 24 else (0, 0, 0)  # gray headers, black items
+                if 3 <= y <= 10 and x % 6 == 1:
+                    buf += struct.pack("<BBBB", gray[2], gray[1], gray[0], 255)
+                elif 3 <= y <= 10 and x % 6 == 2:
+                    buf += struct.pack("<BBBB", gray[2], gray[1], gray[0], 120)
+                elif 30 <= y <= 32:
+                    buf += struct.pack("<BBBB", 0xd5, 0xcb, 0xcb, 255)  # the badges
+                elif y == 35 and x < 3:
+                    buf += struct.pack("<BBBB", 0x2c, 0x27, 0xc1, 255)  # the flag's red
+                else:
+                    buf += struct.pack("<BBBB", 0, 0, 0, 0)
+        anchors(LIB, buf, width, "ink")
+        text = rgb_at(buf, 3 * width + 1)
+        self.assertGreater(min(text), 0x90, "light on the dark interface: %r" % (text,))
+        self.assertGreater(min(rgb_at(buf, 3 * width + 2)), 0x90, "its smoothing too")
+        self.assertEqual(buf[4 * (3 * width + 2) + 3], 120, "alpha kept")
+
     def test_a_gray_frame_drawn_on_nothing_stays(self):
         # A glyph-panel field: only its 1-pixel gray frame is opaque.
         buf = bytearray()
