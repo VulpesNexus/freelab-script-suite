@@ -994,7 +994,9 @@ def dark_icon(icon, owner=None):
                 pixmap = icon.pixmap(size, mode, icon_state)
                 if not pixmap.isNull():
                     image = pixmap.toImage()
-                    if not is_white_artwork(image):  # a white check on a checked button's blue: white on purpose
+                    if is_white_artwork(image):  # a white check on a checked button's blue: white on purpose
+                        image = whitened(image)
+                    else:
                         image = map_image(image, anchors="icon")
                     result.addPixmap(QPixmap.fromImage(image), mode, icon_state)
     return result
@@ -1004,11 +1006,24 @@ def dark_pixmap(pixmap):
     """A label's image mapped; white artwork (FontLab's logo) stays as it is. Button icons do not get
     that rule: a toggled button's white icon, kept, turned black under the button's ink effect."""
     image = pixmap.toImage()
-    return _gui("QPixmap").fromImage(image if is_white_artwork(image) else map_image(image, anchors="icon"))
+    return _gui("QPixmap").fromImage(whitened(image) if is_white_artwork(image) else map_image(image, anchors="icon"))
 
 
 ARTWORK_WHITE = 235  # every visible pixel at least this light, on transparency: white artwork
 ARTWORK_SAMPLE = 24  # sides of the scaled copy looked at
+
+
+def whitened(image):
+    """White artwork with every pixel white, its transparency kept: its faint edge pixels (dark in
+    some of FontLab's icons) made a dark halo on the gray of a checked button."""
+    QImage = _gui("QImage")
+    image = image.convertToFormat(QImage.Format_ARGB32)  # straight alpha
+    for y in range(image.height()):
+        for x in range(image.width()):
+            alpha = (image.pixel(x, y) >> 24) & 255
+            if alpha:
+                image.setPixel(x, y, (alpha << 24) | 0xffffff)
+    return image
 
 
 def is_white_artwork(image):
@@ -1751,7 +1766,8 @@ def _frame_picker(widget):
 
 def _protect(widget):
     """Have every mapping effect above this widget draw it unmapped (swatches keep their real colors)."""
-    _record(widget)  # gives it an id
+    _record(widget)["protected"] = True  # gives it an id; effects made later (a dock's keyed effect is
+                                         # replaced when its frame colors are read again) protect it too
     key = int(widget.property(ID_PROP))
     current = widget
     while not current.isWindow():
@@ -1789,7 +1805,7 @@ def _protect_effects_inside(widget, effect):
         inner = record.get("obj")
         if inner is None or record.get("kind") == "title":
             continue
-        if record.get("effect") is None and not _drawn_natively(inner):
+        if record.get("effect") is None and not record.get("protected") and not _drawn_natively(inner):
             continue
         if own is not None and key == int(own):
             continue  # Qt's isAncestorOf is true for the widget itself
@@ -2270,6 +2286,8 @@ def process(widget):
                 _island(widget)
                 return
     _darken_icons(widget)
+    if widget.inherits("QAbstractButton") and _icon_has_white_artwork(_prop(widget, "icon")):
+        _protect(widget)  # its white mark as it is: the dock's keyed effect turned the white middles dark
     if kind is None and visible_unchecked:
         found = detect_ink(widget)
         if found:

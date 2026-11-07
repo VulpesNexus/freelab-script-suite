@@ -577,6 +577,17 @@ class FakeHooks(object):
         return 24
 
 
+class ProtectionTests(DarkModeCase):
+    def test_a_replaced_effect_still_draws_color_controls_unmapped(self):
+        # a dock's keyed effect is replaced when its frame colors are read again; the Color panel's
+        # wheel, which has no effect of its own, was then mapped (its white corner turned dark)
+        self.on()
+        self.assertIn(self.swatch, list(self.dock.effect.freelab_protect.values()))
+        record = dm._record(self.dock)
+        dm._set_effect(self.dock, record, "keyed", [0xcacbcc])
+        self.assertIn(self.swatch, list(self.dock.effect.freelab_protect.values()), "protected by the new effect too")
+
+
 class ListIconTests(DarkModeCase):
     """Restoring a list's icons goes through the items it has then: FontLab deletes and rebuilds
     items, and a deleted item is no Qt object Python can tell is gone (writing through one crashed
