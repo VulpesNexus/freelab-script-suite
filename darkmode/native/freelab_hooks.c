@@ -28,7 +28,7 @@
  */
 #include "freelab_pixels.c"
 
-#define FREELAB_HOOKS_VERSION 9
+#define FREELAB_HOOKS_VERSION 10
 
 typedef int (*virtual_protect_fn)(void *, size_t, uint32_t, uint32_t *);
 #define PAGE_READWRITE_ 0x04
@@ -173,7 +173,7 @@ enum {
     H_FILL_RECT_BRUSH, H_FILL_RECTF_BRUSH, H_FILL_XYWH_BRUSH, H_FILL_PATH, H_SET_BACKGROUND, H_PIXMAP_FILL,
     H_DRAW_IMAGE_PT, H_DRAW_IMAGE_RECT_SRC, H_DRAW_IMAGE_XY, H_DRAW_IMAGE_RECTF,
     H_PALETTE_COLOR_GROUP, H_PALETTE_COLOR, H_PALETTE_BRUSH_GROUP,
-    H_DRAW_PIXMAP_RECT, H_DRAW_PIXMAP_PT,
+    H_DRAW_PIXMAP_RECT, H_DRAW_PIXMAP_PT, H_CURSOR_FROM_PIXMAP,
     H_COUNT
 };
 static const char *hook_names[H_COUNT] = {
@@ -199,6 +199,7 @@ static const char *hook_names[H_COUNT] = {
     "?brush@QPalette@@QEBAAEBVQBrush@@W4ColorGroup@1@W4ColorRole@1@@Z",
     "?drawPixmap@QPainter@@QEAAXAEBVQRect@@AEBVQPixmap@@@Z",
     "?drawPixmap@QPainter@@QEAAXAEBVQPointF@@AEBVQPixmap@@@Z",
+    "??0QCursor@@QEAA@AEBVQPixmap@@HH@Z",
 };
 #define MODULES 4
 static void *originals[H_COUNT];
@@ -380,11 +381,52 @@ static uint32_t memo_map(uint32_t rgb)
     return memo_out[h];
 }
 
+/* White artwork on transparency (FontLab's logo, white icons): every visible pixel near-white. It
+ * is drawn white on purpose, on a color or on dark; mapped as paper, the logo turned dark. */
+#define ARTWORK_WHITE 235
+static int white_artwork(const uint8_t *bits, int w, int h, int stride, int format)
+{
+    int x, y, seen = 0;
+    if (format == QIMAGE_RGB32)
+        return 0; /* opaque: paper */
+    for (y = 0; y < h; y++) {
+        const uint32_t *row = (const uint32_t *)(bits + (int64_t)y * stride);
+        for (x = 0; x < w; x++) {
+            uint32_t v = row[x], a = v >> 24, r = (v >> 16) & 255, g = (v >> 8) & 255, b = v & 255;
+            if (a == 0)
+                continue;
+            if (format == QIMAGE_ARGB32_PREMULTIPLIED) {
+                r = r * 255 / a;
+                g = g * 255 / a;
+                b = b * 255 / a;
+            }
+            if (r < ARTWORK_WHITE || g < ARTWORK_WHITE || b < ARTWORK_WHITE)
+                return 0;
+            seen = 1;
+        }
+    }
+    return seen;
+}
+
+static int has_transparency(const uint8_t *bits, int w, int h, int stride)
+{
+    int x, y;
+    for (y = 0; y < h; y++) {
+        const uint32_t *row = (const uint32_t *)(bits + (int64_t)y * stride);
+        for (x = 0; x < w; x++)
+            if ((row[x] >> 24) < 255)
+                return 1;
+    }
+    return 0;
+}
+
 static void map_image_pixels(void *image, int format, int mode)
 {
     uint8_t *bits = qt_image_bits(image); /* detaches: the copy gets pixels of its own */
     int w = qt_image_width(image), h = qt_image_height(image), stride = qt_image_bytes_per_line(image), x, y;
     if (!bits || w <= 0 || h <= 0)
+        return;
+    if (mode != SCREEN_SUBPIXEL && has_transparency(bits, w, h, stride) && white_artwork(bits, w, h, stride, format))
         return;
     if (mode == SCREEN_SUBPIXEL && stride == w * 4) {
         /* opaque ClearType text on paper: the pixel helper's subpixel mapping, as the script engine's */
@@ -736,13 +778,70 @@ static void w_draw_pixmap_pt(void *p, const void *at, const void *pixmap)
     ORIGINAL(H_DRAW_PIXMAP_PT, two_fn)(p, at, use);
 }
 
+/* Cursors: FontLab paints a cursor's shadow in a palette color (Base, it seems): white from the
+ * light palette its code sees, where under the dark palette it was near-black. In a cursor it makes
+ * from a pixmap, half-transparent pure white (the shadow) becomes the dark palette's Base; the
+ * opaque arrow and outline are left. The cursor is made from a recolored copy. */
+typedef void *(*cursor_from_pixmap_fn)(void *, const void *, int, int);
+static void *w_cursor_from_pixmap(void *cursor, const void *pixmap, int hot_x, int hot_y)
+{
+    uint8_t image[QIMAGE_SIZE], copy[QPIXMAP_SIZE];
+    void *result;
+    uint32_t shadow;
+    int format, w, h, stride, x, y, changed = 0;
+    uint8_t *bits;
+    hook_calls[H_CURSOR_FROM_PIXMAP]++;
+    if (!hooks_on || !have_palette)
+        return ORIGINAL(H_CURSOR_FROM_PIXMAP, cursor_from_pixmap_fn)(cursor, pixmap, hot_x, hot_y);
+    shadow = palette_dark[0][9] & 0xffffffU; /* Active, Base */
+    qt_pixmap_to_image(pixmap, image);
+    format = qt_image_format(image);
+    bits = (format == QIMAGE_ARGB32 || format == QIMAGE_ARGB32_PREMULTIPLIED) ? qt_image_bits(image) : 0;
+    w = qt_image_width(image);
+    h = qt_image_height(image);
+    stride = qt_image_bytes_per_line(image);
+    for (y = 0; bits && y < h; y++) {
+        uint32_t *row = (uint32_t *)(bits + (int64_t)y * stride);
+        for (x = 0; x < w; x++) {
+            uint32_t v = row[x], a = v >> 24, r = (v >> 16) & 255, g = (v >> 8) & 255, b = v & 255;
+            if (a == 0 || a == 255)
+                continue;
+            if (format == QIMAGE_ARGB32_PREMULTIPLIED) {
+                r = r * 255 / a;
+                g = g * 255 / a;
+                b = b * 255 / a;
+            }
+            if (r >= 250 && g >= 250 && b >= 250) {
+                uint32_t sr = (shadow >> 16) & 255, sg = (shadow >> 8) & 255, sb = shadow & 255;
+                if (format == QIMAGE_ARGB32_PREMULTIPLIED) {
+                    sr = (sr * a + 127) / 255;
+                    sg = (sg * a + 127) / 255;
+                    sb = (sb * a + 127) / 255;
+                }
+                row[x] = (a << 24) | (sr << 16) | (sg << 8) | sb;
+                changed = 1;
+            }
+        }
+    }
+    if (!changed) {
+        qt_image_dtor(image);
+        return ORIGINAL(H_CURSOR_FROM_PIXMAP, cursor_from_pixmap_fn)(cursor, pixmap, hot_x, hot_y);
+    }
+    hook_changed[H_CURSOR_FROM_PIXMAP]++;
+    qt_pixmap_from_image(copy, image, 0);
+    result = ORIGINAL(H_CURSOR_FROM_PIXMAP, cursor_from_pixmap_fn)(cursor, copy, hot_x, hot_y);
+    qt_pixmap_dtor(copy);
+    qt_image_dtor(image);
+    return result;
+}
+
 static void *wrappers[H_COUNT] = {
     (void *)w_fill_rect, (void *)w_fill_rectf, (void *)w_fill_xywh, (void *)w_fill_xywh_global,
     (void *)w_set_pen_color, (void *)w_set_pen, (void *)w_set_brush, (void *)w_fill_rect_brush,
     (void *)w_fill_rectf_brush, (void *)w_fill_xywh_brush, (void *)w_fill_path, (void *)w_set_background,
     (void *)w_pixmap_fill, (void *)w_draw_image_pt, (void *)w_draw_image_rect_src, (void *)w_draw_image_xy,
     (void *)w_draw_image_rectf, (void *)w_palette_color_group, (void *)w_palette_color, (void *)w_palette_brush_group,
-    (void *)w_draw_pixmap_rect, (void *)w_draw_pixmap_pt,
+    (void *)w_draw_pixmap_rect, (void *)w_draw_pixmap_pt, (void *)w_cursor_from_pixmap,
 };
 
 /* ---- PE tables ---------------------------------------------------------------------------------- */

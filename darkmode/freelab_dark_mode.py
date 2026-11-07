@@ -2498,7 +2498,7 @@ def _watch_windows(follow):
 # Everything Qt draws itself (palette, Fusion, stylesheets, icons, title bars, editors) is the same
 # in both. If the native engine cannot start (no library, another Qt build), the script engine runs.
 ENGINES = ("script", "native")
-HOOKS_VERSION = 9
+HOOKS_VERSION = 10
 PALETTE_GROUPS, PALETTE_ROLES = 3, 21
 
 
@@ -2548,7 +2548,7 @@ def _hooks():
     return lib
 
 
-HOOKS_MIN_FOUND = 18  # of 22: FontLab 7.2's program imports all of them
+HOOKS_MIN_FOUND = 19  # of 23: FontLab 7.2's program imports all of them
 
 
 def _palette_table(palette):

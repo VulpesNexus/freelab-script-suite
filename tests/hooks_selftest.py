@@ -19,7 +19,7 @@ hooks = ctypes.CDLL(os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else "freel
 k32 = ctypes.WinDLL("kernel32")
 k32.GetModuleHandleW.restype = c_void_p
 base = k32.GetModuleHandleW("Qt5Gui.dll")
-HOOKS = 22
+HOOKS = 23
 hooks.freelab_hooks_set_keep.argtypes = [c_void_p, c_int]
 WIDGET, PIXMAP, IMAGE = 1, 2, 3
 
@@ -203,6 +203,15 @@ painting(light_target, lambda p: wrapper(13, c_void_p, c_void_p, c_void_p)(p, ad
 edge = image_pixel(addr(light_target), 1, 1)
 results.append(0x70 <= (edge >> 24) <= 0x90 and (edge & 0xff) > 150)
 print("%-46s %08x %s" % ("premultiplied edge: alpha kept, color light", edge, "ok" if results[-1] else "WRONG"))
+
+# white artwork on transparency (FontLab's logo) is drawn white; it is no paper
+set_pixel = fn("?setPixel@QImage@@QEAAXHHI@Z", c_void_p, c_int, c_int, c_uint32)
+art = image(fill=0x00000000)
+for x in range(2, 6):
+    set_pixel(addr(art), x, 3, 0xffffffff)
+target = image(fill=0xff000000)
+painting(target, lambda p: wrapper(13, c_void_p, c_void_p, c_void_p)(p, addr(origin), addr(art)))
+check("white artwork on transparency: drawn white", image_pixel(addr(target), 3, 3), 0xffffff)
 
 # palette reads: the light color wherever the palette holds the dark palette's color for the slot
 ACTIVE, TEXT, BASE, ROLES = 0, 6, 9, 21
