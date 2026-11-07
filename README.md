@@ -7,7 +7,7 @@ Tools for FontLab, gathered in one place: an MCP server that lets an AI app such
 ## What is here
 
 - *listener/freelab_listener.py*: a script you run inside FontLab. It answers requests on `127.0.0.1` only, from FontLab's main thread.
-- *darkmode/*: *Scripts > FreeLab: Toggle Dark Mode* turns FontLab 7 dark (panels, tool bar, rulers, canvas, icons, and title bar) and back, without a restart, and remembers the choice for the next launch. *Scripts > FreeLab: Dark Mode Settings* offers a dark interface with FontLab's light canvas, and following Windows' light or dark mode. How it works, and what it costs: [docs/DARKMODE.md](docs/DARKMODE.md).
+- *darkmode/*: *Scripts > FreeLab > Toggle Dark Mode* turns FontLab 7 dark (panels, tool bar, rulers, canvas, icons, and title bar) and back, without a restart, and remembers the choice for the next launch. *Scripts > FreeLab > Dark Mode Settings* chooses the theme (light, dark, or mixed: a dark interface with FontLab's light canvases), the shade of gray, and whether to follow Windows' light or dark mode. How it works, and what it costs: [docs/DARKMODE.md](docs/DARKMODE.md).
 - *server/*: the MCP server your AI app starts. It never touches FontLab directly; it passes each tool call to the listener.
 - *tests/*: the test gate (*run_tests.py*).
 - *tools/*: helper scripts.
@@ -29,7 +29,7 @@ Tools for FontLab, gathered in one place: an MCP server that lets an AI app such
 
 ## Use
 
-1. In FontLab, choose *Scripts > FreeLab: Start Listener* (or open the file in the *Scripting* panel and run it). The *Output* panel shows the listener's version and port. Run it again to restart it; start it again after every FontLab launch, or install with `-ListenerAtLaunch` to have FontLab start it at every launch.
+1. In FontLab, choose *Scripts > FreeLab > Start Listener* (or open the file in the *Scripting* panel and run it). The *Output* panel shows the listener's version and port. Run it again to restart it; start it again after every FontLab launch, or install with `-ListenerAtLaunch` to have FontLab start it at every launch.
 2. Ask the AI app, for example, "check the FontLab connection" or "describe the glyph A".
 
 Tools: `fontlab_status`, `get_current_font`, `list_glyphs`, `get_glyph`, `get_glyph_outline`, and `run_python`, which runs code inside FontLab for probing. `launch_fontlab`, `quit_fontlab`, and `restart_fontlab` start and close FontLab when you ask; quitting is refused while any font or the workspace has unsaved changes.

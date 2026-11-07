@@ -1,11 +1,12 @@
-#FLM: FreeLab: Dark Mode Settings
+#FLM: Dark Mode Settings
 # -*- coding: utf-8 -*-
 """FreeLab dark mode settings, from FontLab's Scripts menu.
 
-Look: FontLab's own light look, dark, or a dark interface with FontLab's light
-glyph canvases, font cells, and previews. And whether to follow Windows: dark
-while Windows apps are set to dark, light otherwise, switching as Windows does.
-The choice applies at once and is kept for the next launch.
+Theme: FontLab's own light look, dark, or mixed (a dark interface with
+FontLab's light glyph canvases, font cells, and previews). Shade: how dark the
+grays are. Automatic: light while Windows apps are light, the dark theme chosen
+above while they are dark, switching as Windows does. The choice applies at once
+and is kept for the next launch.
 
 Valid Python 2.7 (FontLab 7) and Python 3.
 """
@@ -18,11 +19,12 @@ import sys
 DARK_MODE_MODULE = "freelab_dark_mode"
 DARK_MODE_FILE = "freelab_dark_mode.py"
 LOOKS = (
-    ("light", "Light: FontLab's own look"),
+    ("light", "Light (FontLab's default)"),
     ("dark", "Dark"),
-    ("interface", "Dark interface, light glyphs and canvas"),
+    ("interface", "Mixed (dark interface, light canvases)"),
 )
 SHADES = (("dark", "Dark grays"), ("medium", "Medium grays"))
+AUTOMATIC = "Automatic (matches system theme)"
 
 
 def dark_mode_module():
@@ -61,12 +63,16 @@ def current_look(settings, dm):
 
 def show_dialog():
     from PythonQt.QtGui import QDialog, QVBoxLayout, QHBoxLayout, QRadioButton, QCheckBox, QPushButton, QLabel
+    from PythonQt.QtCore import Qt
     dm = dark_mode_module()
     settings = dm.load_settings()
     dialog = QDialog()
     dialog.setWindowTitle("FreeLab Dark Mode")
+    # No "?" in the title bar: it offered help this dialog does not have.
+    flags = int(dialog.windowFlags()) if callable(dialog.windowFlags) else int(dialog.windowFlags)
+    dialog.setWindowFlags(Qt.WindowFlags(flags & ~int(Qt.WindowContextHelpButtonHint)))
     layout = QVBoxLayout(dialog)
-    layout.addWidget(QLabel("Look:"))
+    layout.addWidget(QLabel("Theme:"))
     look = current_look(settings, dm)
     buttons = {}
     for key, label in LOOKS:
@@ -89,9 +95,25 @@ def show_dialog():
         look_group.addButton(button)
     for button in shade_buttons.values():
         shade_group.addButton(button)
-    follow = QCheckBox("Follow Windows: dark while Windows apps are dark (uses the dark look chosen above)")
+    follow = QCheckBox(AUTOMATIC)
     follow.setChecked(bool(settings.get("follow_windows")))
     layout.addWidget(follow)
+
+    def update(*_args):
+        """Automatic leaves light to Windows: the light theme is not a choice then, and the dark one
+        (dark or mixed) and its shade are. Shades mean nothing to the light theme."""
+        auto = follow.isChecked()
+        buttons["light"].setEnabled(not auto)
+        if auto and buttons["light"].isChecked():
+            buttons["dark"].setChecked(True)
+        light = buttons["light"].isChecked() and not auto
+        for button in shade_buttons.values():
+            button.setEnabled(not light)
+
+    for button in buttons.values():
+        button.connect("toggled(bool)", update)
+    follow.connect("toggled(bool)", update)
+    update()
     row = QHBoxLayout()
     row.addStretch(1)
     ok, cancel = QPushButton("OK"), QPushButton("Cancel")

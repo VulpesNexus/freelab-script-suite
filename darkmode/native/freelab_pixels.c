@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 85
+#define FREELAB_PIXELS_VERSION 89
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -446,6 +446,8 @@ EXPORT void freelab_map_keyed(uint8_t *pixels, int64_t count, int64_t width, con
 #define FRINGE_LIGHT 0.4 /* HLS lightness of "light" for that, */
 #define FRINGE_LIGHTER 0.15 /* and at least this much lighter than the pixel */
 #define LIGHT_SURFACE_OKL 0.6
+#define CONTENT_KEEP_CHROMA 0.1
+#define CONTENT_KEEP_MIN_OKL 0.45
 #define DEFRINGE_CHROMA 0.05 /* text this colored loses ClearType's fringes toward the paper */
 #define MAIN_MIN_AREA_SHARE 0.1 /* the most frequent surface is the background only if it covers this much of the image
                                   * (an unticked box in a list painted on nothing is not) */
@@ -609,6 +611,8 @@ static int readable_partner(int k)
         const Anchor *o = &anchors[j];
         if (j == k || o->surface || o->long_line || o->okl < INK_MAX_OKL || o->okl <= c->okl || o->chroma < INK_CHROMA)
             continue;
+        if (c->touches != ~(uint64_t)0 && !((c->touches >> j) & 1U))
+            continue; /* smoothing touches the text it smooths (Export Profiles' navy names are no smoothing of its blue boxes) */
         if ((c->oa * o->oa + c->ob * o->ob) / (c->chroma * o->chroma) >= SAME_HUE_COS)
             return j;
     }
@@ -624,6 +628,8 @@ static int smoothing_of_readable(int k)
         double dot;
         if (j == k || o->surface || o->long_line || o->okl < INK_MAX_OKL || o->okl <= c->okl || o->chroma < INK_CHROMA)
             continue;
+        if (c->touches != ~(uint64_t)0 && !((c->touches >> j) & 1U))
+            continue; /* smoothing touches the text it smooths (Export Profiles' navy names are no smoothing of its blue boxes) */
         dot = (c->oa * o->oa + c->ob * o->ob) / (c->chroma * o->chroma);
         if (dot >= SAME_HUE_COS)
             return 1;
@@ -675,6 +681,15 @@ static uint32_t all_color(uint32_t rgb, int mode, double dark_l, double light_l,
 {
     if (mode == ANCHORS_ICON && icon_keeps(rgb))
         return rgb;
+    if (mode == ANCHORS_ALL && keep_tint > 0.0) {
+        /* Content (the glyph canvas): a clearly colored mark of middle lightness or lighter (yellow or
+         * orange outlines, red nodes, blue labels) reads on dark as drawn; inverted, a yellow outline
+         * turned dark olive on the dark canvas and looked thin and jagged. Muted fills still turn. */
+        double l, chroma;
+        oklab_of(rgb, &l, &chroma);
+        if (chroma >= CONTENT_KEEP_CHROMA && l >= CONTENT_KEEP_MIN_OKL)
+            return rgb;
+    }
     return mapped_one(rgb, dark_l, light_l, keep_tint);
 }
 
@@ -1410,7 +1425,7 @@ static int white_on_colored(const uint32_t *p, int64_t i, int64_t width, int64_t
 /* Ink mode: the edge of a small white shape drawn on nothing (an unticked box a list's delegate paints
  * as a white square) gets a frame color: mapped whole, the box was a dark square with no outline. */
 #define BOX_INK_HLS 0.45 /* darker than an unticked box's own gray frame */
-#define BOX_FRAME 0x8c8c92U /* INDICATOR_BORDER["dark"] in freelab_dark_mode.py */
+#define BOX_FRAME 0x999999U /* the gray FontLab draws on the box's top and left: the added sides match it */
 
 static int white_run(const uint32_t *p, int64_t i, int64_t step, int64_t limit, int64_t width, int horizontal)
 {
@@ -1497,6 +1512,7 @@ static uint32_t subpixel_color(uint32_t c, double dark_l, double light_l)
  * pixel with a pixel of the opposite hue this close along its row is such a fringe (the canvas's
  * measurement labels) and keeps no tint; colored text and marks have no opposite hue beside them. */
 #define CLEARTYPE_REACH 3
+#define GRAY_TEXT_STEP 0.08 /* black text on a dark editor paper differs from it this little */
 #define FRINGE_MAX_SPREAD 110 /* colored text itself (a red digit's core) is more saturated than its fringes */
 #define CLEARTYPE_MIN_SPREAD 24
 #define CLEARTYPE_OPPOSITE_COS -0.5
@@ -1549,7 +1565,7 @@ static int beside_gray_text(const uint32_t *p, int64_t i, int64_t width, int64_t
         if (q[3] < ANCHOR_MIN_ALPHA || spread_of(q) >= CLEARTYPE_MIN_SPREAD)
             continue;
         l = lightness(q[2], q[1], q[0]);
-        if (l - paper_l >= 0.25 || paper_l - l >= 0.25)
+        if (l - paper_l >= GRAY_TEXT_STEP || paper_l - l >= GRAY_TEXT_STEP)
             return 1;
     }
     return 0;
@@ -1688,10 +1704,11 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
                           (mode == ANCHORS_ALL || mode == ANCHORS_ICON) && !edge ? keep_tint : 0.0);
             memo_put(key, mask, out);
         }
-        if (white_marks && white_mark[i] == 3 && (out & 0xffffffU) == c) {
+        if (white_marks && white_mark[i] == 3) {
+            /* a ClearType fringe of gray text, kept or mapped: the gray of its (mapped) lightness */
             double l, chroma;
             uint32_t g;
-            oklab_of(c, &l, &chroma);
+            oklab_of(out & 0xffffffU, &l, &chroma);
             g = (uint32_t)gray_byte(l);
             out = (g << 16) | (g << 8) | g;
             out |= v & 0xff000000U;

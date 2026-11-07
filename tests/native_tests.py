@@ -161,6 +161,22 @@ class NativeTests(unittest.TestCase):
         self.assertGreater(b, r + 30, "still blue")
         self.assertGreater(dm.oklab(r, g, b)[0], 0.6, "and light")
 
+    def test_colored_ink_is_not_smoothing_of_a_lighter_color_it_does_not_touch(self):
+        # Export Profiles: navy names, and blue check boxes elsewhere in the list.
+        width, colors = 40, []
+        for y in range(14):
+            for x in range(width):
+                if 3 <= y <= 10 and x % 6 == 1 and x < 24:
+                    colors.append((58, 63, 127))
+                elif 3 <= y <= 6 and 30 <= x <= 33:
+                    colors.append((65, 155, 249))
+                else:
+                    colors.append((41, 41, 41))
+        buf = pixels(colors)
+        anchors(LIB, buf, width, "ink")
+        r, g, b = rgb_at(buf, TEXT_ROW + 1)
+        self.assertGreater(dm.oklab(r, g, b)[0], 0.6, "the navy turns light")
+
     def test_light_text_and_dark_surfaces_stay(self):
         colors = text_rows((30, 30, 30), (220, 220, 220), blend=(125, 125, 125))
         buf = pixels(colors)
@@ -246,7 +262,7 @@ class NativeTests(unittest.TestCase):
                     buf += struct.pack("<BBBB", 0, 0, 0, 0)
         anchors(LIB, buf, width, "ink")
         self.assertEqual(rgb_at(buf, 7 * width + 6), (255, 255, 255), "the tick")
-        self.assertEqual(rgb_at(buf, 7 * width + 21), (0x8c, 0x8c, 0x92), "the unticked box's edge: a frame")
+        self.assertEqual(rgb_at(buf, 7 * width + 21), (0x99, 0x99, 0x99), "the unticked box's edge: a frame")
         self.assertLess(rgb_at(buf, 7 * width + 26)[0], 100, "its inside: dark")
 
     def test_subpixel_text_keeps_each_channel_coverage(self):

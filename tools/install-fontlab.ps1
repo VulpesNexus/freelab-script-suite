@@ -1,7 +1,8 @@
 # Install FreeLab's FontLab 7 scripts for the current user, or remove them.
 #
 #   install-fontlab.ps1             copy the listener and the dark-mode scripts into
-#                                   FontLab 7's Scripts folder, and add the FreeLab
+#                                   FontLab 7's Scripts\FreeLab folder (a FreeLab
+#                                   submenu of the Scripts menu), and add the FreeLab
 #                                   block to FontLab's startupScript.py
 #   install-fontlab.ps1 -Uninstall  remove that block, the two copied scripts, the
 #                                   native helper, and dark mode's settings, putting
@@ -35,6 +36,8 @@ else {
     if (-not $dataPath) { $dataPath = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'FontLab\FontLab 7' }
     $scripts = Join-Path ($dataPath -replace '/', '\') 'Scripts'
 }
+$rootScripts = $scripts
+$scripts = Join-Path $rootScripts 'FreeLab'  # its own submenu of the Scripts menu
 if ($StartupScript) { $startup = $StartupScript }
 else { $startup = Join-Path $env:LOCALAPPDATA 'FontLab\FontLab 7\startupScript.py' }
 $files = @(
@@ -82,7 +85,7 @@ if ($Uninstall) {
         $saved = $null
         try { $saved = ([System.IO.File]::ReadAllText($settingsFile) | ConvertFrom-Json).saved_workspace } catch { }
         if ($saved -and (Get-Process -Name $ProcessName -ErrorAction SilentlyContinue)) {
-            Write-Output 'FontLab is running with dark mode on: switch dark mode off (Scripts > FreeLab: Toggle Dark Mode), quit FontLab, and run -Uninstall again.'
+            Write-Output 'FontLab is running with dark mode on: switch dark mode off (Scripts > FreeLab > Toggle Dark Mode), quit FontLab, and run -Uninstall again.'
             exit 1
         }
         if ($saved) {
@@ -101,8 +104,13 @@ if ($Uninstall) {
         Write-Output "Removed the FreeLab block from $startup"
     }
     foreach ($f in $files) {
-        $target = Join-Path $scripts $f.Name
-        if (Test-Path $target) { [System.IO.File]::Delete($target); Write-Output "Removed $target" }
+        foreach ($dir in @($scripts, $rootScripts)) {  # the Scripts folder itself held them before 0.3
+            $target = Join-Path $dir $f.Name
+            if (Test-Path $target) { [System.IO.File]::Delete($target); Write-Output "Removed $target" }
+        }
+    }
+    if ((Test-Path $scripts) -and -not (Get-ChildItem $scripts -Force)) {
+        [System.IO.Directory]::Delete($scripts); Write-Output "Removed $scripts"
     }
     if (Test-Path $BinDir) {
         foreach ($dll in Get-ChildItem $BinDir -Filter 'freelab_pixels*.dll') {
@@ -118,6 +126,8 @@ foreach ($f in $files) {
     $target = Join-Path $scripts $f.Name
     [System.IO.File]::Copy((Join-Path $repo $f.From), $target, $true)
     Write-Output "Copied $($f.Name) to $scripts"
+    $old = Join-Path $rootScripts $f.Name  # before 0.3 they sat in the Scripts folder itself
+    if (Test-Path $old) { [System.IO.File]::Delete($old); Write-Output "Removed the old $old" }
 }
 
 $native = Join-Path $BinDir $nativeName

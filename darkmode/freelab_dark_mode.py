@@ -1,4 +1,4 @@
-#FLM: FreeLab: Toggle Dark Mode
+#FLM: Toggle Dark Mode
 # -*- coding: utf-8 -*-
 """FreeLab dark mode for FontLab's interface.
 
@@ -210,7 +210,7 @@ SWEEP_MS = 750  # how often to look for widgets FontLab created or showed
 FULL_SWEEP_EVERY = 40  # every Nth sweep revisits every widget (replaced stylesheets, new icons)
 FOCUS_DRAIN_MS = 80  # a window that takes focus is darkened at once, up to this long, before it paints light
 MAX_ERRORS = 50
-NATIVE_VERSION = 85
+NATIVE_VERSION = 89
 
 ID_PROP = "freelab_id"  # dynamic properties FreeLab sets on widgets, all removed by restore()
 SEEN_PROP = "freelab_seen"
@@ -1002,6 +1002,8 @@ def _show_original_icon(widget):
 
 
 def _darken_icons(widget):
+    if widget.inherits("QTreeWidget") or widget.inherits("QListWidget"):
+        _swap_item_icons(widget)
     if widget.inherits("QAbstractButton"):
         _swap_icon(widget)
     elif widget.inherits("QLabel"):
@@ -1014,7 +1016,64 @@ def _darken_icons(widget):
                 _note_error("action icon", exc)
 
 
+def _list_items(widget):
+    """The items of a QTreeWidget (all levels) or a QListWidget."""
+    items = []
+    if widget.inherits("QTreeWidget"):
+        pending = [widget.topLevelItem(i) for i in range(_prop(widget, "topLevelItemCount"))]
+        while pending:
+            item = pending.pop()
+            if item is None:
+                continue
+            items.append(item)
+            pending.extend(item.child(i) for i in range(item.childCount()))
+    else:
+        items = [widget.item(i) for i in range(_prop(widget, "count"))]
+    return [item for item in items if item is not None]
+
+
+def _swap_item_icons(widget):
+    """Item icons of FontLab's lists (Font Info's and Preferences' pages): drawn for light mode, the
+    gray ones nearly vanished on dark. Mapped as button icons are; the originals are kept to put back."""
+    state = _state()
+    record = _record(widget)
+    kept = record.setdefault("item_icons", [])
+    for item in _list_items(widget):
+        icon = item.icon(0) if widget.inherits("QTreeWidget") else item.icon()
+        if icon is None or icon.isNull():
+            continue
+        key = icon.cacheKey()
+        if key in state["mapped_keys"] or key in state["swatches"]:
+            continue
+        if key not in state["icon_cache"] and icon_is_swatch(icon):
+            state["swatches"].add(key)
+            continue
+        new = state["icon_cache"].get(key)
+        if new is None:
+            new = state["icon_cache"][key] = dark_icon(icon)
+            state["mapped_keys"].add(new.cacheKey())
+            state["originals"][new.cacheKey()] = icon
+        kept.append((item, icon))
+        if widget.inherits("QTreeWidget"):
+            item.setIcon(0, new)
+        else:
+            item.setIcon(new)
+
+
+def _restore_item_icons(widget, record):
+    for item, icon in record.pop("item_icons", []):
+        try:
+            if widget.inherits("QTreeWidget"):
+                item.setIcon(0, icon)
+            else:
+                item.setIcon(icon)
+        except Exception:  # FontLab rebuilt the list meanwhile
+            continue
+
+
 def _restore_icons(obj, record):
+    if "item_icons" in record:
+        _restore_item_icons(obj, record)
     if "icon" in record:
         obj.setIcon(record.pop("icon"))
     if "pixmap" in record:
@@ -1041,6 +1100,7 @@ INK_VIEW_PARENTS = ("QAbstractItemView", "QTextEdit", "QPlainTextEdit", "QtnProp
 # "Name: Encoding: None Index" selectors): any effect draws it through a transparent image, where text
 # gets grayscale smoothing; the ink mapping leaves light text as it is.
 GRAYSCALE_TEXT_CLASSES = ("YSelector",)
+STYLE_DRAWN_BUTTONS = ("QRadioButton", "QCheckBox", "QPushButton")  # never ink by render detection
 GRAYSCALE_TEXT_NAMES = ("labelMode",)  # the colon between those selectors
 # Text drawn with ClearType on purpose (TrueType Hinting's preview): each channel's coverage is kept
 # and redrawn light on dark ("subpixel" mapping), which inverting lightness cannot do.
@@ -1083,12 +1143,30 @@ def _effect_classes():
             return pixmap, offset
 
         def draw_mapped(painter, pixmap, offset, area, min_l, keys=None, ink_below=-1.0, keep_tint=0.0, light_l=None,
-                        edge_neutral=0.0, edge_target=0, anchors=None, dark_l=None, gray=False):
-            """Draw the part of pixmap that lands on `area` (painter coordinates), mapped."""
+                        edge_neutral=0.0, edge_target=0, anchors=None, dark_l=None, gray=False, analyze=None):
+            """Draw the part of pixmap that lands on `area` (painter coordinates), mapped.
+
+            analyze: a larger rect (painter coordinates) whose pixels decide the mapping, of which
+            only the repainted part is drawn: the ink mapping weighs colors against each other, and
+            a few repainted rows alone (a clicked page in Font Info's list, an edited line in Source)
+            came out differently from the whole widget.
+            """
             area = area.intersected(QRect(offset, pixmap.size()))
             if painter.hasClipping():
                 area = area.intersected(painter.clipBoundingRect().toAlignedRect())
-            if not area.isEmpty():
+            if area.isEmpty():
+                return
+            if analyze is not None:
+                analyze = analyze.intersected(QRect(offset, pixmap.size()))
+                if analyze.contains(area) and analyze != area:
+                    part = pixmap.copy(analyze.translated(-offset.x(), -offset.y())).toImage()
+                    if gray:
+                        part = gray_image(part)
+                    mapped = map_image(part, min_l, keys, ink_below, keep_tint, light_l, edge_neutral, edge_target,
+                                       anchors, dark_l)
+                    painter.drawImage(area.topLeft(), mapped, area.translated(-analyze.x(), -analyze.y()))
+                    return
+            if True:
                 part = pixmap.copy(area.translated(-offset.x(), -offset.y())).toImage()
                 if gray:
                     part = gray_image(part)
@@ -1138,7 +1216,7 @@ def _effect_classes():
                     gray = getattr(self, "freelab_gray", False) and not (
                         self.freelab_widget.inherits("QLineEdit") and _prop(self.freelab_widget, "hasSelectedText"))
                     draw_mapped(painter, pixmap, offset, whole, 0.0, None, -1.0, self.freelab_keep_tint, None, 0.0, 0,
-                                anchors, None, gray)
+                                anchors, None, gray, QRect(whole) if kind in ("ink", "edges") else None)
                     keep_unmapped(self, painter, pixmap, offset)
                 except Exception as exc:
                     _note_error("effect", exc)
@@ -1427,6 +1505,8 @@ def detect_ink(widget):
     width, height = _prop(widget, "width"), _prop(widget, "height")
     if width * height < AUTO_MIN_AREA or widget.isWindow() or _shows_picture(widget):
         return None
+    if any(widget.inherits(c) for c in STYLE_DRAWN_BUTTONS):
+        return None  # the style draws them from the dark palette: mapped as ink, radio circles turned jagged
     if widget.inherits("QAbstractButton") and _swapped_icon(widget):
         return None  # its icon is mapped already; a colored icon (the red Y of TrueType Hinting) read as ink,
         # and the effect then lightened the checked button's rounded corners
@@ -2466,7 +2546,7 @@ def toggle():
     if settings.get("follow_windows"):
         settings["follow_windows"] = False  # switching by hand stops following Windows
         _watch_windows(False)
-        message += " (No longer following Windows: Scripts > FreeLab: Dark Mode Settings turns that back on.)"
+        message += " (No longer following Windows: Scripts > FreeLab > Dark Mode Settings turns that back on.)"
     save_settings(settings)
     print(message)
     return enabled
