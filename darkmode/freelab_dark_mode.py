@@ -162,7 +162,9 @@ TITLE_MAX_HEIGHT = 40
 # the font window's mark slots (QToolButton#flagRed and the like, colored by their stylesheets),
 # which must show the real mark colors.
 SKIP_CLASSES = ("ColorPickerItem", "ColorPickerButton", "QtColorPicker", "QDesktopScreenWidget",
-                "YHueBar", "YSaturationBar", "YColorBar", "YColorPreview", "YColorRing", "ColorMap")  # color controls (audit of FontLab 7.2's classes)
+                "YHueBar", "YSaturationBar", "YColorBar", "YColorPreview", "YColorRing", "ColorMap",  # color controls (audit of FontLab 7.2's classes)
+                "YSimpleSlider",  # drawn from the palette: its white knob is right on dark already
+                "RenderWidget")  # TrueType Hinting's preview: ClearType's subpixel colors cannot be inverted
 SKIP_CLASS_WORDS = ("ColorSource", "OpacityBar", "Eyedropper")
 SWATCH_NAME_PREFIXES = ("flag",)
 # Color pickers keep their swatch (the white "no color" slot included), but their button frame,
@@ -209,7 +211,7 @@ SWEEP_MS = 750  # how often to look for widgets FontLab created or showed
 FULL_SWEEP_EVERY = 40  # every Nth sweep revisits every widget (replaced stylesheets, new icons)
 FOCUS_DRAIN_MS = 80  # a window that takes focus is darkened at once, up to this long, before it paints light
 MAX_ERRORS = 50
-NATIVE_VERSION = 34
+NATIVE_VERSION = 50
 
 ID_PROP = "freelab_id"  # dynamic properties FreeLab sets on widgets, all removed by restore()
 SEEN_PROP = "freelab_seen"
@@ -222,6 +224,7 @@ CHECKED_PROP = "freelab_checked"  # the size ("WxH") at which the widget was las
 ISLAND_PROP = "freelab_island"  # found by rendering: "island" or "ink"
 SHEET_PROP = "freelab_sheet"  # the widget's own stylesheet
 DARK_SHEET_PROP = "freelab_sheet_dark"  # what dark mode set instead
+MENU_HOOK_PROP = "freelab_menu_hooked"  # aboutToShow connected (kept: the hook stays, idle while off)
 PROPS = (ID_PROP, SEEN_PROP, QUEUED_PROP, WATCHED_PROP, CHECKED_PROP, ISLAND_PROP, SHEET_PROP, DARK_SHEET_PROP)
 
 NAMED_COLORS = {
@@ -922,10 +925,12 @@ def dark_pixmap(pixmap):
 
 SWATCH_CHROMA = 80  # max - min of the channels: clearly colored
 SWATCH_SHARE = 0.4  # an icon this colored is a color swatch (mark colors): left as it is
+SWATCH_FILL = 0.5  # and this filled: a swatch is a solid shape; a thin colored glyph (the red Y and X of
+                   # TrueType Hinting's direction buttons, black stems included) is an icon
 
 
 def is_swatch(image):
-    """True for an image that is mostly clearly colored: a color swatch, which must keep its color."""
+    """True for an image that is mostly filled and clearly colored: a color swatch, which must keep its color."""
     QImage, QColor, Qt = _gui("QImage"), _gui("QColor"), _core("Qt")
     small = image.convertToFormat(QImage.Format_ARGB32).scaled(12, 12, Qt.IgnoreAspectRatio, Qt.FastTransformation)
     opaque = colored = 0
@@ -937,7 +942,7 @@ def is_swatch(image):
             opaque += 1
             channels = (color.red(), color.green(), color.blue())
             colored += max(channels) - min(channels) >= SWATCH_CHROMA
-    return opaque > 0 and colored >= SWATCH_SHARE * opaque
+    return opaque >= SWATCH_FILL * 144 and colored >= SWATCH_SHARE * opaque
 
 
 def icon_is_swatch(icon):
@@ -1383,7 +1388,15 @@ def detect_ink(widget):
     width, height = _prop(widget, "width"), _prop(widget, "height")
     if width * height < AUTO_MIN_AREA or widget.isWindow() or _shows_picture(widget):
         return None
+    if widget.inherits("QAbstractButton") and _swapped_icon(widget):
+        return None  # its icon is mapped already; a colored icon (the red Y of TrueType Hinting) read as ink,
+        # and the effect then lightened the checked button's rounded corners
     return classify_ink(width, height, ink_count(own_render(widget)))
+
+
+def _swapped_icon(button):
+    icon = _prop(button, "icon")
+    return icon is not None and not icon.isNull() and icon.cacheKey() in _state()["mapped_keys"]
 
 
 def _visible_child_widgets(widget):
@@ -1825,6 +1838,7 @@ def _sweep():
     todo = [w for w in app.allWidgets()
             if full or w.property(SEEN_PROP) is None or (w.isVisible() and (_unchecked(w) or _restyled(w)))]
     if todo:
+        _hook_menus(todo)
         _enqueue(todo, "dark")
         if len(todo) > 200 and not full:
             _log("sweep %d queued %d (queue %d)" % (state["sweeps"], len(todo), len(state["queue"])))
@@ -1872,6 +1886,44 @@ def _hook_focus(app):
             state["focus_hooked"] = True
     except Exception as exc:
         _note_error("focus hook", exc)
+
+
+def _hook_menus(widgets):
+    """Darken a menu as it opens (QMenu.aboutToShow), not at the next sweep: a menu opened right
+    after switching on, while thousands of widgets wait in the queue, flashed light. The hook stays
+    connected (a menu is never hooked twice) and does nothing while dark mode is off."""
+    for widget in widgets:
+        try:
+            if not widget.inherits("QMenu") or widget.property(MENU_HOOK_PROP) is not None:
+                continue
+            if widget.connect("aboutToShow()", _menu_hook(widget)) is not False:
+                widget.setProperty(MENU_HOOK_PROP, True)
+        except Exception as exc:
+            _note_error("menu hook", exc)
+
+
+def _menu_hook(menu):
+    def shown():
+        module = _module()
+        if module is not None:
+            module._on_menu_shown(menu)
+    return shown
+
+
+def _on_menu_shown(menu):
+    state = _state()
+    if not state["on"] or state.get("busy") or not _alive(menu):
+        return
+    state["busy"] = True  # the worker must not re-enter from a signal sent while processing
+    try:
+        for widget in [menu] + _descendants(menu):
+            if widget.property(SEEN_PROP) is None or widget.property(QUEUED_PROP) == "dark":
+                widget.setProperty(QUEUED_PROP, None)
+                process(widget)
+    except Exception as exc:  # a Qt signal handler must not raise
+        _note_error("menu", exc)
+    finally:
+        state["busy"] = False
 
 
 def _size_key(widget):
@@ -2207,6 +2259,7 @@ def apply_dark():
     _enqueue([w for w in widgets if w.isVisible()], "dark")  # visible ones first
     _start_timer(state, "sweeper", SWEEP_MS, _sweep)
     _hook_focus(app)  # stays connected; it does nothing while dark mode is off
+    _hook_menus(widgets)
 
 
 def restore():

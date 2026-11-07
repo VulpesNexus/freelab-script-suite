@@ -253,6 +253,15 @@ class FakeWidget(QObject):
         self.filters = []
         self.rewrap = False  # True: graphicsEffect() returns a new wrapper, as PythonQt may
         self._actions = []
+        self.connections = {}  # signal -> callables, as connect() made them
+
+    def connect(self, signal, slot):
+        self.connections.setdefault(signal, []).append(slot)
+        return True
+
+    def emit(self, signal):
+        for slot in self.connections.get(signal, []):
+            slot()
 
     def parentWidget(self):
         return self._parent

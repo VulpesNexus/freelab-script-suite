@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 34
+#define FREELAB_PIXELS_VERSION 50
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -442,6 +442,7 @@ EXPORT void freelab_map_keyed(uint8_t *pixels, int64_t count, int64_t width, con
 #define FRINGE_LIGHT 0.4 /* HLS lightness of "light" for that, */
 #define FRINGE_LIGHTER 0.15 /* and at least this much lighter than the pixel */
 #define LIGHT_SURFACE_OKL 0.6
+#define ON_LIGHT_SHARE 0.5 /* a text color this often inside a light surface (touching it, not the background) */
 #define LIGHT_SURFACE_SPREAD 60
 #define INK_MAX_OKL 0.5
 #define INK_BELOW_MAIN 0.1 /* ink is at least this much darker (OKLab L) than the main background */
@@ -468,12 +469,19 @@ typedef struct {
     double r, g, b;
     double mr, mg, mb; /* mapped (equal to r, g, b when kept) */
     double hrun, vrun, okl, chroma, oa, ob;
-    int64_t count, slot, beside_light;
+    int64_t count, slot, beside_light, on_light;
+    uint64_t touches; /* candidates right beside its pixels (all when not surveyed) */
+    double light_okl; /* the lightest light surface it lies inside (on_light) */
+    double ir, ig, ib; /* mapped as an island would (ink mode, inside a light surface) */
     int surface, line, long_line, mapped;
 } Anchor;
 
 static Anchor anchors[MAX_CANDIDATES];
 static int anchor_count;
+static uint32_t light_bits; /* ink mode: anchors that are light surfaces turned dark */
+static uint32_t main_bit; /* ink mode: the kept main background (anchor 0), when there is one */
+static Anchor candidates[MAX_CANDIDATES]; /* diagnostics: the candidates of the last call */
+static int candidate_count, candidate_dropped[MAX_CANDIDATES];
 
 static uint32_t hash32(uint32_t x)
 {
@@ -690,6 +698,8 @@ static int is_blend(int k, int n)
     int i, j;
     if (c->surface || c->long_line)
         return 0;
+    if (c->okl < c->light_okl && (double)c->on_light >= ON_LIGHT_SHARE * (double)c->count)
+        return 0; /* gray text on a light row lies between the background and a white surface too */
     for (i = 0; i < k; i++) {
         const Anchor *s = &anchors[i];
         if (!s->surface)
@@ -701,19 +711,24 @@ static int is_blend(int k, int n)
                 continue;
             if (!ink->surface && !(ink->okl < c->okl || ink->chroma > c->chroma + 0.02))
                 continue;
+            if (ink->surface && !((c->touches >> j) & 1U))
+                continue; /* a surface's edge touches it: gray text on a dark row lies between it and a white surface
+                             * too (text fringes chain through each other, so text ink needs no touch) */
             if (blend_fit(c->r, c->g, c->b, s, ink, &t, &ee) <= BLEND_ANCHOR_TOLERANCE * BLEND_ANCHOR_TOLERANCE
                 && t > 0.03 && t < 0.97)
                 return 1;
         }
-        /* ClearType's fringes of light text on a light surface (white digits on a gray badge): mostly
-         * right beside the lighter text, and roughly between it and the surface. */
-        if ((double)c->beside_light >= LIGHT_FRINGE_SHARE * (double)c->count) {
+        /* ClearType's fringes of light text on a light surface (white digits on a gray badge): beside
+         * the lighter text (touching it, where neighbors were surveyed; else often right beside much
+         * lighter pixels: ClearType chains its fringes), and roughly between it and the surface. */
+        if (c->okl > s->okl
+            && (c->touches != ~(uint64_t)0 || (double)c->beside_light >= LIGHT_FRINGE_SHARE * (double)c->count)) {
             for (j = 0; j < n; j++) {
                 const Anchor *text = &anchors[j];
                 double t, ee;
                 if (j == i || j == k || text->surface || text->long_line || text->okl <= c->okl
-                    || c->count > 2 * text->count)
-                    continue; /* a fringe is rarer than the text it smooths */
+                    || c->count > 2 * text->count || !((c->touches >> j) & 1U))
+                    continue; /* a fringe is rarer than the text it smooths, and beside it */
                 if (blend_fit(c->r, c->g, c->b, s, text, &t, &ee) <= LOCAL_BLEND_TOLERANCE * LOCAL_BLEND_TOLERANCE * ee
                     && t > 0.03 && t < 0.97)
                     return 1;
@@ -768,6 +783,95 @@ static void drop_paper_blends(void)
             anchors[n++] = anchors[k];
     }
     anchor_count = n;
+}
+
+/* Surfaces the ink mapping turns dark: white ones, and light low-color ones solid one way. */
+static int light_surface_candidate(const Anchor *a)
+{
+    uint8_t px[3];
+    px[2] = (uint8_t)a->r;
+    px[1] = (uint8_t)a->g;
+    px[0] = (uint8_t)a->b;
+    if (!a->surface)
+        return 0;
+    if (lightness(px[2], px[1], px[0]) >= WHITE_HLS)
+        return 1;
+    return (a->hrun >= LIGHT_SURFACE_RUN || a->vrun >= LIGHT_SURFACE_RUN) && a->okl >= LIGHT_SURFACE_OKL
+           && spread_of(px) <= LIGHT_SURFACE_SPREAD;
+}
+
+static int candidate_at(const uint32_t *p, int64_t i)
+{
+    int64_t slot;
+    if ((p[i] >> 24) < ANCHOR_MIN_ALPHA)
+        return -1;
+    slot = color_slot(p[i] & 0xffffff, 0);
+    return slot >= 0 ? h_anchor[slot] : -1;
+}
+
+/* For each text-like candidate: which candidates touch its pixels, and (ink mode) how many of its
+ * pixels lie inside a light surface that turns dark (touching it, not the main background): text on
+ * a selected light row or a white badge turns light with it; a light surface's smoothed edge touches
+ * the background too. Large images are not surveyed: everything counts as touching. */
+static void survey_neighbors(const uint32_t *p, int64_t count, int64_t width, int n)
+{
+    int8_t kind[MAX_CANDIDATES]; /* 1: a light surface; 2: the main background */
+    int k, any = 0, main_found = 0;
+    int64_t i;
+    for (k = 0; k < n; k++) {
+        kind[k] = 0;
+        h_anchor[anchors[k].slot] = (int8_t)k;
+        if (light_surface_candidate(&anchors[k])) {
+            kind[k] = 1;
+            any = 1;
+        } else if (anchors[k].surface && !main_found) {
+            kind[k] = 2;
+            main_found = 1;
+        }
+    }
+    for (k = 0; k < n; k++)
+        anchors[k].touches = width > 0 && count <= SAMPLE_ABOVE ? 0U : ~(uint64_t)0;
+    for (i = 0; width > 0 && count <= SAMPLE_ABOVE && i < count; i++) {
+        int c = candidate_at(p, i), light = -1, main = 0, side;
+        int64_t x = i % width, nb[4];
+        if (c < 0 || anchors[c].surface)
+            continue;
+        nb[0] = x > 0 ? i - 1 : -1;
+        nb[1] = x + 1 < width && i + 1 < count ? i + 1 : -1;
+        nb[2] = i >= width ? i - width : -1;
+        nb[3] = i + width < count ? i + width : -1;
+        for (side = 0; side < 4; side++) {
+            int o = nb[side] >= 0 ? candidate_at(p, nb[side]) : -1;
+            if (o >= 0)
+                anchors[c].touches |= (uint64_t)1 << o;
+            if (o >= 0 && kind[o] == 1 && (light < 0 || anchors[o].okl > anchors[light].okl))
+                light = o;
+            else if (o >= 0 && kind[o] == 2)
+                main = 1;
+        }
+        if (light >= 0 && !main) {
+            anchors[c].on_light++;
+            if (anchors[light].okl > anchors[c].light_okl)
+                anchors[c].light_okl = anchors[light].okl;
+        }
+    }
+    for (k = 0; k < n; k++)
+        h_anchor[anchors[k].slot] = -1;
+}
+
+/* A colored candidate inside a light surface that touches darker text there is ClearType's fringe
+ * of that text (bluish, orange): it turns gray, not dark blue; colored text itself keeps its hue. */
+static int fringe_of_darker_text(int k)
+{
+    const Anchor *c = &anchors[k];
+    int j;
+    for (j = 0; j < anchor_count; j++) {
+        const Anchor *o = &anchors[j];
+        if (j != k && !o->surface && ((c->touches >> j) & 1U) && o->okl < c->okl - 0.05
+            && (double)o->on_light >= ON_LIGHT_SHARE * (double)o->count)
+            return 1;
+    }
+    return 0;
 }
 
 static void find_anchors(const uint32_t *p, int64_t count, int64_t width, int mode, double dark_l, double light_l,
@@ -836,16 +940,36 @@ static void find_anchors(const uint32_t *p, int64_t count, int64_t width, int mo
         a->long_line = !a->surface && (a->hrun >= LONG_LINE_RUN || a->vrun >= LONG_LINE_RUN);
         oklab_of(pack(a->r, a->g, a->b), &a->okl, &a->chroma);
         oklab_ab(pack(a->r, a->g, a->b), &a->oa, &a->ob);
+        a->on_light = 0;
+        a->light_okl = 0.0;
     }
+    survey_neighbors(p, count, width, n);
     /* Drop blends (see is_blend), judged among all candidates before any is dropped. */
     {
-        int keep[MAX_CANDIDATES];
-        for (k = 0; k < n; k++)
+        int keep[MAX_CANDIDATES], moved[MAX_CANDIDATES];
+        for (k = 0; k < n; k++) {
             keep[k] = !is_blend(k, n);
+            candidates[k] = anchors[k];
+            candidate_dropped[k] = !keep[k];
+        }
+        candidate_count = n;
         anchor_count = 0;
         for (k = 0; k < n; k++) {
-            if (keep[k] && anchor_count < MAX_ANCHORS)
+            moved[k] = -1;
+            if (keep[k] && anchor_count < MAX_ANCHORS) {
+                moved[k] = anchor_count;
                 anchors[anchor_count++] = anchors[k];
+            }
+        }
+        for (k = 0; k < anchor_count; k++) { /* renumber what each kept anchor touches */
+            uint64_t was = anchors[k].touches, now = 0;
+            if (was == ~(uint64_t)0)
+                continue;
+            for (j = 0; j < n; j++) {
+                if (((was >> j) & 1U) && moved[j] >= 0)
+                    now |= (uint64_t)1 << moved[j];
+            }
+            anchors[k].touches = now;
         }
     }
     /* A widget that paints no background (what lies beneath shows through: main_default) has only
@@ -859,6 +983,7 @@ static void find_anchors(const uint32_t *p, int64_t count, int64_t width, int mo
         share_of = (double)area;
     if (mode == ANCHORS_RELIGHT && anchor_count > 2)
         drop_paper_blends();
+    light_bits = 0;
     for (j = 0; j < anchor_count; j++) {
         Anchor *a = &anchors[j];
         uint32_t rgb = pack(a->r, a->g, a->b), out = rgb;
@@ -887,6 +1012,13 @@ static void find_anchors(const uint32_t *p, int64_t count, int64_t width, int mo
                    && a->okl >= LIGHT_SURFACE_OKL && spread_of(px) <= LIGHT_SURFACE_SPREAD) {
             out = mapped_one(rgb, dark_l, light_l, 0.0);
             a->mapped = 1;
+        } else if (!a->surface && !a->long_line && a->okl <= a->light_okl + 0.01
+                   && (double)a->on_light >= ON_LIGHT_SHARE * (double)a->count) {
+            /* text darker than the light surface it lies in turns as that surface does, as an island
+             * (ClearType's palest fringes too); white text on a gray badge, lighter than it, stays */
+            int colored = a->chroma >= INK_CHROMA && !fringe_of_darker_text(j);
+            out = colored ? mapped_one(rgb, dark_l, light_l, 1.0) : all_color(rgb, ANCHORS_ALL, dark_l, light_l, 0.0);
+            a->mapped = 1;
         } else if (!a->long_line && (double)a->count < BACKGROUND_SHARE * share_of && a->okl < INK_MAX_OKL
                    && (!a->surface || a->okl <= SURFACE_INK_MAX_OKL)
                    && (a->okl <= main_l - INK_BELOW_MAIN
@@ -903,6 +1035,14 @@ static void find_anchors(const uint32_t *p, int64_t count, int64_t width, int mo
                        ((out >> 8) & 255) + (light - ((out >> 8) & 255)) * DIM_INK_LIFT,
                        (out & 255) + (light - (out & 255)) * DIM_INK_LIFT);
             a->mapped = 1;
+        }
+        if (mode == ANCHORS_INK) {
+            uint32_t island = all_color(rgb, ANCHORS_ALL, dark_l, light_l, 0.0);
+            a->ir = (double)((island >> 16) & 255);
+            a->ig = (double)((island >> 8) & 255);
+            a->ib = (double)(island & 255);
+            if (a->mapped && light_surface_candidate(a))
+                light_bits |= 1U << j;
         }
         a->mr = (double)((out >> 16) & 255);
         a->mg = (double)((out >> 8) & 255);
@@ -956,10 +1096,20 @@ static uint32_t neighborhood(int64_t i, int64_t count, int64_t width)
 }
 
 /* The best pair for color (r, g, b): both anchors in `both` if possible, else at least one in `one`. */
+static double anchor_spread(const Anchor *a)
+{
+    double hi = a->r > a->g ? (a->r > a->b ? a->r : a->b) : (a->g > a->b ? a->g : a->b);
+    double lo = a->r < a->g ? (a->r < a->b ? a->r : a->b) : (a->g < a->b ? a->g : a->b);
+    return hi - lo;
+}
+
+#define FAR_PAIR_EXTRA_SPREAD 40.0 /* a far pair's blend is at most this much more colored than its anchors */
+#define FAR_PAIR_MAX_DISTANCE 30.0 /* and this far (RGB) from the line between them, however long the line */
+
 static int best_pair(double r, double g, double b, uint32_t both, uint32_t one, double local_tolerance, int *pa, int *pb,
                      double *pt)
 {
-    double best = -1.0;
+    double best = -1.0, hi = r > g ? (r > b ? r : b) : (g > b ? g : b), lo = r < g ? (r < b ? r : b) : (g < b ? g : b);
     int j, k;
     for (j = 0; j < anchor_count; j++) {
         for (k = j + 1; k < anchor_count; k++) {
@@ -974,10 +1124,21 @@ static int best_pair(double r, double g, double b, uint32_t both, uint32_t one, 
             tol = (in_both ? local_tolerance * local_tolerance : BLEND_TOLERANCE * BLEND_TOLERANCE) * ee;
             if (tol < BLEND_MIN_TOLERANCE * BLEND_MIN_TOLERANCE)
                 tol = BLEND_MIN_TOLERANCE * BLEND_MIN_TOLERANCE;
+            if (!in_both && tol > FAR_PAIR_MAX_DISTANCE * FAR_PAIR_MAX_DISTANCE)
+                tol = FAR_PAIR_MAX_DISTANCE * FAR_PAIR_MAX_DISTANCE;
             if (res > tol)
                 continue;
-            if (!in_both)
+            if (!in_both) {
+                /* Spread is convex: a blend is no more colored than the more colored of its two ends.
+                 * Far pairs keep to that (a red digit fitted the long black-to-white line within its
+                 * loose tolerance and turned white); pairs from around the pixel explain ClearType's
+                 * colored fringes, which exceed it. */
+                double ends = anchor_spread(&anchors[j]) > anchor_spread(&anchors[k]) ? anchor_spread(&anchors[j])
+                                                                                       : anchor_spread(&anchors[k]);
+                if (hi - lo > ends + FAR_PAIR_EXTRA_SPREAD)
+                    continue;
                 res += 1e9; /* a pair from around the pixel always wins */
+            }
             if (best < 0.0 || res < best) {
                 best = res;
                 *pa = j;
@@ -991,6 +1152,20 @@ static int best_pair(double r, double g, double b, uint32_t both, uint32_t one, 
 
 /* tint: how much of a pixel's color beyond the blend that explains it is kept (content keeps its
  * small tinted details, such as node fills and handles; the interface and text edges keep none). */
+/* A pixel lighter than the light surfaces around it: smoothing of white text on a gray badge, which
+ * stays light while the badge turns dark, unlike dark text inside a light row. */
+static int lighter_than_light_surface(uint32_t c, uint32_t surfaces)
+{
+    double l, chroma, surface_l = 0.0;
+    int j;
+    for (j = 0; j < anchor_count; j++) {
+        if (((surfaces >> j) & 1U) && anchors[j].okl > surface_l)
+            surface_l = anchors[j].okl;
+    }
+    oklab_of(c, &l, &chroma);
+    return l > surface_l + 0.01;
+}
+
 static uint32_t resolve(uint32_t c, int translucent, uint32_t mask, int mode, double dark_l, double light_l,
                         double keep_tint, double tint)
 {
@@ -1019,6 +1194,22 @@ static uint32_t resolve(uint32_t c, int translucent, uint32_t mask, int mode, do
         if (anchors[j].r == r && anchors[j].g == g && anchors[j].b == b)
             return pack(anchors[j].mr, anchors[j].mg, anchors[j].mb);
     }
+    if (mode == ANCHORS_INK && (mask & light_bits) && !(mask & main_bit)
+        && !lighter_than_light_surface(c, mask & light_bits)) { /* inside it, not at its edge */
+        /* Beside a light surface that turns dark (a selected row, a white thumbnail), everything
+         * turns as an island does: its rare marks (a digit, a glyph's gray edges) have no anchor
+         * of their own, and pairs with far dark colors put them dark on the now dark surface. */
+        uint8_t px[3];
+        px[2] = (uint8_t)r;
+        px[1] = (uint8_t)g;
+        px[0] = (uint8_t)b;
+        if (spread_of(px) > LINEAR_SPREAD && (best_pair(r, g, b, mask, mask, LOCAL_BLEND_TOLERANCE, &a_i, &b_i, &t)
+                                              || best_pair(r, g, b, 0U, all, BLEND_TOLERANCE, &a_i, &b_i, &t))) {
+            Anchor *a = &anchors[a_i], *o = &anchors[b_i];
+            return pack(a->ir + t * (o->ir - a->ir), a->ig + t * (o->ig - a->ig), a->ib + t * (o->ib - a->ib));
+        }
+        return all_color(c, ANCHORS_ALL, dark_l, light_l, 0.0);
+    }
     if (mode == ANCHORS_ALL || mode == ANCHORS_ICON) {
         /* Where everything is mapped, the linear mapping of low-color pixels already keeps blends
          * blends (it is affine): only colored pixels need a pair, which spares the many colors of
@@ -1031,7 +1222,7 @@ static uint32_t resolve(uint32_t c, int translucent, uint32_t mask, int mode, do
             return all_color(c, mode, dark_l, light_l, tint);
     }
     if (!(mask && best_pair(r, g, b, mask, mask, LOCAL_BLEND_TOLERANCE, &a_i, &b_i, &t))
-        && !best_pair(r, g, b, all, all, BLEND_TOLERANCE, &a_i, &b_i, &t))
+        && !best_pair(r, g, b, 0U, all, BLEND_TOLERANCE, &a_i, &b_i, &t))
         return lone_color(c, mode, dark_l, light_l, tint);
     {
         Anchor *a = &anchors[a_i], *o = &anchors[b_i];
@@ -1073,7 +1264,7 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
     uint32_t *p = (uint32_t *)pixels;
     uint32_t last_in = 0, last_out = 0;
     int have_last = 0, any_mapped = 0, j, local, tinted, last_edge = 0;
-    uint32_t paper_bit;
+    uint32_t paper_bit, other_surfaces;
     int64_t i, changed = 0;
     find_anchors(p, count, width, mode, dark_l, light_l, keep_tint, main_default);
     for (j = 0; j < anchor_count; j++)
@@ -1101,6 +1292,10 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
      * fringes (ClearType's navy and red beside blue syntax on a dark editor): the kept paper always
      * counts as around, or a far pair of text colors (blue and black ink) claimed those fringes. */
     paper_bit = mode == ANCHORS_INK && anchor_count > 1 && anchors[0].surface && !anchors[0].mapped ? 1U : 0U;
+    main_bit = paper_bit;
+    other_surfaces = 0;
+    for (j = 1; j < anchor_count; j++)
+        other_surfaces |= anchors[j].surface ? 1U << j : 0U;
     for (i = 0; i < count; i++) {
         uint32_t v = p[i], alpha = v >> 24, c, key, out, mask = 0;
         int edge;
@@ -1108,8 +1303,8 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
             continue;
         if (local && alpha >= ANCHOR_MIN_ALPHA && a_index[i] < 0)
             mask = neighborhood(i, count, width);
-        if (mask)
-            mask |= paper_bit;
+        if (mask && !(mask & other_surfaces))
+            mask |= paper_bit; /* not on another surface (a light row): the paper is around */
         edge = tinted && sharp_edge(p, i, width, count);
         if (have_last && v == last_in && edge == last_edge && (!local || mask == 0 || a_index[i] >= 0)) {
             if (last_out != v) {
@@ -1138,6 +1333,25 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
         }
     }
     return changed;
+}
+
+/* Diagnostics: the candidates of the last call before blends were dropped: 0xRRGGBB, and per
+ * candidate six numbers: count, flags (1 dropped, 2 surface, 4 line, 8 long line), beside_light,
+ * on_light, touches (low 32 bits), and OKLab lightness times 1000. */
+EXPORT int64_t freelab_last_candidates(uint32_t *rgb, int64_t *info, int64_t max)
+{
+    int64_t k;
+    for (k = 0; k < candidate_count && k < max; k++) {
+        const Anchor *a = &candidates[k];
+        rgb[k] = pack(a->r, a->g, a->b);
+        info[6 * k] = a->count;
+        info[6 * k + 1] = candidate_dropped[k] | (a->surface ? 2 : 0) | (a->line ? 4 : 0) | (a->long_line ? 8 : 0);
+        info[6 * k + 2] = a->beside_light;
+        info[6 * k + 3] = a->on_light;
+        info[6 * k + 4] = (int64_t)(a->touches & 0xffffffffU);
+        info[6 * k + 5] = (int64_t)(a->okl * 1000.0);
+    }
+    return candidate_count;
 }
 
 /* Diagnostics: the anchors of the last call, as 0xRRGGBB, counts, and flags (1 mapped, 2 surface,

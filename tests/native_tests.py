@@ -221,7 +221,7 @@ class NativeTests(unittest.TestCase):
                 if band and y == 6 and x % 10 == 2:
                     colors.append((30, 30, 78))  # navy fringe
                 elif band and x % 10 <= 4:
-                    colors.append((50, 88, 173))  # blue
+                    colors.append((50, 88, 173) if (x + y) % 2 else (60, 100, 180))  # blue strokes, no surface
                 elif band and x % 10 == 7:
                     colors.append((10, 0, 10))  # black ink
                 else:

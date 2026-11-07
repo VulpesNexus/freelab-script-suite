@@ -557,6 +557,17 @@ class OnOffTests(DarkModeCase):
         self.off()
         self.assertEqual(self.app.styleSheet, u"QLabel{}")
 
+    def test_menus_are_darkened_as_they_open(self):
+        dm.apply_dark()  # the queue is not run: a menu opened now must not wait for it
+        self.assertEqual(len(self.menu.connections["aboutToShow()"]), 1)
+        self.assertIsNone(self.menu.property(dm.SEEN_PROP))
+        self.menu.emit("aboutToShow()")
+        self.assertTrue(self.menu.property(dm.SEEN_PROP))
+        self.off()
+        self.on()
+        self.assertEqual(len(self.menu.connections["aboutToShow()"]), 1, "hooked once, across switches")
+        self.assertEqual(dm._state()["errors"], [])
+
     def test_deleted_widgets_are_skipped(self):
         dm.apply_dark()
         self.label.deleted = True
