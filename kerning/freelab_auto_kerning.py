@@ -254,6 +254,8 @@ def layer_path(layer):
     for shape in layer.shapes:
         transform = shape.transform
         for contour in shape.contours:
+            if contour is None:  # FontLab lists an empty contour as None in some glyphs
+                continue
             path.addPath(transform.map(contour.path()))
     return path
 
@@ -411,6 +413,10 @@ class AutoKerningDialog(object):
         for _, label in SHOW:
             self.show_kind.addItem(label)
         row.addWidget(self.show_kind)
+        # Pairs the font kerns already are the designer's choices (a j tucked under the letter before
+        # it, which the method does not model): hidden unless asked for, and never checked for writing.
+        self.include_kerned = QtGui.QCheckBox("Include pairs the font kerns")
+        row.addWidget(self.include_kerned)
         row.addStretch(1)
         self.analyze_button = QtGui.QPushButton("Analyze")
         row.addWidget(self.analyze_button)
@@ -419,13 +425,13 @@ class AutoKerningDialog(object):
         self.table.setHorizontalHeaderLabels(list(self.COLUMNS))
         self.table.setSelectionBehavior(QtGui.QAbstractItemView.SelectRows)
         self.table.verticalHeader().setVisible(False)
-        self.table.verticalHeader().setDefaultSectionSize(self.table.fontMetrics().height + 6)
+        self.table.verticalHeader().setDefaultSectionSize(QtGui.QFontMetrics(self.table.font).height() + 6)  # PythonQt has no widget.fontMetrics()
         layout.addWidget(self.table, 1)
         self.preview = QtGui.QLabel()
         self.preview.setMinimumHeight(2 * PREVIEW_SIZE + 44)
         layout.addWidget(self.preview)
         buttons = QtGui.QHBoxLayout()
-        self.all_button = QtGui.QPushButton("Check all")
+        self.all_button = QtGui.QPushButton("Check new pairs")
         self.none_button = QtGui.QPushButton("Check none")
         self.apply_button = QtGui.QPushButton("Write checked pairs")
         self.close_button = QtGui.QPushButton("Close")
@@ -444,6 +450,7 @@ class AutoKerningDialog(object):
         self.table.connect("itemSelectionChanged()", self.show_preview)
         self.tolerance.connect("valueChanged(int)", lambda value: self.refilter())
         self.show_kind.connect("currentIndexChanged(int)", lambda index: self.refilter())
+        self.include_kerned.connect("toggled(bool)", lambda on: self.refilter())
         self.all_suggestions, self.factors = [], (TIGHTEN, LOOSEN)
 
     def show(self):
@@ -489,7 +496,9 @@ class AutoKerningDialog(object):
             return
         tighten, loosen = self.factors
         tolerance = self.tolerance.value
-        listed = [s for s in self.all_suggestions if abs(s.value - s.current) >= tolerance and self.shown(s)]
+        include = self.include_kerned.checked
+        listed = [s for s in self.all_suggestions
+                  if abs(s.value - s.current) >= tolerance and self.shown(s) and (include or not s.current)]
         listed.sort(key=lambda s: -abs(s.value - s.current))
         self.suggestions = listed
         models = "from the font's kerning" if (tighten, loosen) != (TIGHTEN, LOOSEN) else "halfkern's (too few pairs in the font)"
@@ -504,7 +513,7 @@ class AutoKerningDialog(object):
         for row, s in enumerate(self.suggestions):
             pair = QtGui.QTableWidgetItem(s.left_char + s.right_char)
             pair.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsUserCheckable)
-            pair.setCheckState(QtCore.Qt.Checked)
+            pair.setCheckState(QtCore.Qt.Unchecked if s.current else QtCore.Qt.Checked)  # the designer's pairs: opt in
             pair.setToolTip("%s %s" % (s.left, s.right))
             table.setItem(row, 0, pair)
             for column, value in ((1, s.current), (2, s.value), (3, s.value - s.current)):
@@ -516,9 +525,11 @@ class AutoKerningDialog(object):
         self.apply_button.setEnabled(bool(self.suggestions))
 
     def check_all(self, on):
+        """Check every new pair, or uncheck everything; pairs the font kerns are checked one by one."""
         QtCore, QtGui = _qt()
         for row in range(self.table.rowCount):
-            self.table.item(row, 0).setCheckState(QtCore.Qt.Checked if on else QtCore.Qt.Unchecked)
+            checked = on and not self.suggestions[row].current
+            self.table.item(row, 0).setCheckState(QtCore.Qt.Checked if checked else QtCore.Qt.Unchecked)
 
     def show_preview(self):
         """The selected pair as it is set now and as suggested, in the dialog's own colors."""
@@ -562,11 +573,8 @@ class AutoKerningDialog(object):
                 continue
             if s.value:
                 kerning[(s.left, s.right)] = s.value
-            else:
-                try:
-                    del kerning[(s.left, s.right)]
-                except Exception:
-                    pass
+            elif kerning.get((s.left, s.right)) is not None:
+                kerning.remove((s.left, s.right))  # `del kerning[pair]` removes it but raises in PyCXX
             written += 1
         try:
             self.fontlab.flItems.notifyPackageContentUpdated(self.package.id)

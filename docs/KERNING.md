@@ -6,8 +6,9 @@
 
 1. Open the font, and pick the master to kern.
 2. Click *Analyze*. Every pair of the Latin letters, figures, and punctuation the font has is measured (two marks of punctuation side by side are skipped); about 6,600 pairs take three to four seconds.
-3. The list shows the pairs whose suggestion differs from the current kerning by at least the given number of units (20 by default), largest first. *Show* narrows it to letters, letters and punctuation, figures, or everything. Selecting a pair draws it between two H's as it is set now and as suggested.
-4. Uncheck what you disagree with, and click *Write checked pairs*: each is written to the master as a pair of glyphs (a suggestion of 0 removes the pair).
+3. The list shows the pairs the font does not kern yet whose suggestion is at least the given number of units (20 by default), largest first. *Show* narrows it to letters, letters and punctuation, figures, or everything. Selecting a pair draws it between two H's as it is set now and as suggested.
+4. *Include pairs the font kerns* lists the font's own pairs too, where the suggestion differs from them. They are never checked for you: they are the designer's choices, some of which the method does not model (a j tucked under the letter before it).
+5. Uncheck what you disagree with, and click *Write checked pairs*: each is written to the master as a pair of glyphs (a suggestion of 0 removes the pair). Writing goes straight into the open font: close it without saving to take it all back.
 
 Kerning the font already has counts as your models: with at least three tightenings in it, suggestions are scaled to match how strongly you tighten (and the same for loosenings). Without them, tightenings are applied at half strength, as halfkern applies them.
 
