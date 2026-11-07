@@ -1,6 +1,6 @@
-# Install FreeLab's FontLab 7 tools (dark mode) for the current user, or remove them.
+# Install FreeLab's FontLab 7 tools (dark mode, auto kerning) for the current user, or remove them.
 #
-#   install-fontlab.ps1             copy the dark-mode scripts into FontLab 7's
+#   install-fontlab.ps1             copy the dark-mode and auto kerning scripts into FontLab 7's
 #                                   Scripts\FreeLab folder (a FreeLab submenu of the
 #                                   Scripts menu), and add the FreeLab tools block to
 #                                   FontLab's startupScript.py
@@ -11,7 +11,8 @@
 # FreeLab MCP, a separate repository, installs its listener beside these with a
 # startup block of its own: either can be installed or removed without the other.
 #
-# Install also builds dark mode's native pixel helper and its native engine (tools/build-native.ps1)
+# Install also builds dark mode's native pixel helper, its native engine, and the auto kerning
+# core (tools/build-native.ps1)
 # into %LOCALAPPDATA%\FreeLab\bin when it is missing; without a compiler, dark
 # mode still works, with plain inversion in the widgets FontLab paints itself.
 # The first install keeps the original startup script as
@@ -42,7 +43,8 @@ if ($StartupScript) { $startup = $StartupScript }
 else { $startup = Join-Path $env:LOCALAPPDATA 'FontLab\FontLab 7\startupScript.py' }
 $files = @(
     @{ From = 'darkmode\freelab_dark_mode.py'; Name = 'freelab_dark_mode.py' },
-    @{ From = 'darkmode\freelab_dark_mode_settings.py'; Name = 'freelab_dark_mode_settings.py' }
+    @{ From = 'darkmode\freelab_dark_mode_settings.py'; Name = 'freelab_dark_mode_settings.py' },
+    @{ From = 'kerning\freelab_auto_kerning.py'; Name = 'freelab_auto_kerning.py' }
 )
 if (-not $BinDir) { $BinDir = Join-Path $env:LOCALAPPDATA 'FreeLab\bin' }
 if (-not $StateDir) { $StateDir = Join-Path $env:LOCALAPPDATA 'FreeLab' }
@@ -54,6 +56,9 @@ $nativeName = 'freelab_pixels-v' + $pixelsVersion + '.dll'
 # The native engine's library (darkmode/native/freelab_hooks.c), named after both versions.
 $hooksSource = [System.IO.File]::ReadAllText((Join-Path $repo 'darkmode\native\freelab_hooks.c'))
 $hooksName = 'freelab_hooks-v' + [regex]::Match($hooksSource, '#define FREELAB_HOOKS_VERSION (\d+)').Groups[1].Value + '-' + $pixelsVersion + '.dll'
+# The auto kerning core (kerning/native/freelab_kern.c).
+$kernSource = [System.IO.File]::ReadAllText((Join-Path $repo 'kerning\native\freelab_kern.c'))
+$kernName = 'freelab_kern-v' + [regex]::Match($kernSource, '#define FREELAB_KERN_VERSION (\d+)').Groups[1].Value + '.dll'
 $begin = '# >>> FreeLab tools'
 $end = '# <<< FreeLab tools'
 
@@ -236,7 +241,7 @@ if ($Uninstall) {
         [System.IO.Directory]::Delete($scripts); Write-Output "Removed $scripts"
     }
     if (Test-Path $BinDir) {
-        foreach ($dll in @(Get-ChildItem $BinDir -Filter 'freelab_pixels*.dll') + @(Get-ChildItem $BinDir -Filter 'freelab_hooks*.dll')) {
+        foreach ($dll in @(Get-ChildItem $BinDir -Filter 'freelab_pixels*.dll') + @(Get-ChildItem $BinDir -Filter 'freelab_hooks*.dll') + @(Get-ChildItem $BinDir -Filter 'freelab_kern*.dll')) {
             try { [System.IO.File]::Delete($dll.FullName); Write-Output "Removed $($dll.FullName)" }
             catch { Write-Output "Could not remove $($dll.FullName) (FontLab is using it): delete it after quitting FontLab." }
         }
@@ -268,10 +273,16 @@ elseif (Test-Path $native) {  # the same compiler builds it
     try { & (Join-Path $PSScriptRoot 'build-native.ps1') -Hooks -Out $hooks }
     catch { Write-Output "Could not build the native engine: $_ (the script engine still works)." }
 }
+$kern = Join-Path $BinDir $kernName
+if (Test-Path $kern) { Write-Output "Auto kerning core present: $kern" }
+elseif (Test-Path $native) {  # the same compiler builds it
+    try { & (Join-Path $PSScriptRoot 'build-native.ps1') -Kern -Out $kern }
+    catch { Write-Output "Could not build the auto kerning core: $_ (Auto Kerning needs it)." }
+}
 if ((Test-Path $native) -and (Test-Path $BinDir)) {
     # Earlier versions: FontLab keeps the one it loaded locked until it quits, so a locked one waits for the next install.
-    foreach ($dll in @(Get-ChildItem $BinDir -Filter 'freelab_pixels*.dll') + @(Get-ChildItem $BinDir -Filter 'freelab_hooks*.dll')) {
-        if ($dll.Name -eq $nativeName -or $dll.Name -eq $hooksName) { continue }
+    foreach ($dll in @(Get-ChildItem $BinDir -Filter 'freelab_pixels*.dll') + @(Get-ChildItem $BinDir -Filter 'freelab_hooks*.dll') + @(Get-ChildItem $BinDir -Filter 'freelab_kern*.dll')) {
+        if ($dll.Name -eq $nativeName -or $dll.Name -eq $hooksName -or $dll.Name -eq $kernName) { continue }
         try { [System.IO.File]::Delete($dll.FullName); Write-Output "Removed the superseded $($dll.FullName)" } catch { }
     }
 }

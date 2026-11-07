@@ -20,6 +20,7 @@ POWERSHELL = shutil.which("powershell.exe") if sys.platform == "win32" else None
 NO_WINDOW = 0x08000000
 VERSION = re.search(r"#define FREELAB_PIXELS_VERSION (\d+)", (ROOT / "darkmode" / "native" / "freelab_pixels.c").read_text()).group(1)
 HOOKS = re.search(r"#define FREELAB_HOOKS_VERSION (\d+)", (ROOT / "darkmode" / "native" / "freelab_hooks.c").read_text()).group(1)
+KERN = re.search(r"#define FREELAB_KERN_VERSION (\d+)", (ROOT / "kerning" / "native" / "freelab_kern.c").read_text()).group(1)
 
 LEGACY = b"# >>> FreeLab (managed by FreeLab tools/install-fontlab.ps1; -Uninstall removes it)\ndef _freelab_startup():\n    pass\n# <<< FreeLab\n"
 MCP = b"# >>> FreeLab MCP (managed by FreeLab MCP tools/install-fontlab.ps1; -Uninstall removes it)\nmcp = 1\n# <<< FreeLab MCP\n"
@@ -40,6 +41,8 @@ class InstallerTests(unittest.TestCase):
         (self.bin / ("freelab_hooks-v%s-%s.dll" % (HOOKS, VERSION))).write_bytes(b"")
         (self.bin / "freelab_pixels-v1.dll").write_bytes(b"")
         (self.bin / "freelab_hooks-v1-1.dll").write_bytes(b"")
+        (self.bin / ("freelab_kern-v%s.dll" % KERN)).write_bytes(b"")
+        (self.bin / "freelab_kern-v0.dll").write_bytes(b"")
         (self.state / "darkmode.log").write_text("log")
         (self.state / "listener.json").write_text("{}")  # FreeLab MCP's: never touched here
 
@@ -79,6 +82,9 @@ class InstallerTests(unittest.TestCase):
         self.assertFalse((self.bin / "freelab_pixels-v1.dll").exists(), "a superseded helper is retired")
         self.assertFalse((self.bin / "freelab_hooks-v1-1.dll").exists(), "and a superseded native engine")
         self.assertTrue((self.bin / ("freelab_hooks-v%s-%s.dll" % (HOOKS, VERSION))).exists())
+        self.assertFalse((self.bin / "freelab_kern-v0.dll").exists(), "and a superseded auto kerning core")
+        self.assertTrue((self.bin / ("freelab_kern-v%s.dll" % KERN)).exists())
+        self.assertTrue((self.scripts / "FreeLab" / "freelab_auto_kerning.py").exists(), "Auto Kerning is in the FreeLab submenu")
         before = self.read()
         code, out = self.run_installer()
         self.assertEqual((code, self.read()), (0, before), "a second install changes nothing")

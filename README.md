@@ -1,6 +1,6 @@
 # FreeLab
 
-Tools for FontLab 7 that run inside it, starting with a dark mode for its whole interface.
+Tools for FontLab 7 that run inside it: a dark mode for its whole interface, and auto kerning.
 
 **Status: 0.3.0.** Dark mode runs in FontLab 7.2.
 
@@ -9,6 +9,7 @@ FreeLab MCP, the separate `freelab-mcp` repository, lets an AI app such as Claud
 ## What is here
 
 - *darkmode/*: *Scripts > FreeLab > Toggle Dark Mode* turns FontLab 7 dark (panels, tool bar, rulers, canvas, icons, and title bar) and back, without a restart, and remembers the choice for the next launch. *Scripts > FreeLab > Dark Mode Settings* chooses dark or automatic (following Windows' light or dark mode), mixed (a dark interface with FontLab's light canvases), and the shade of gray, each change shown at once, and the engine: *Script* maps the pixels FontLab drew, *Native* (experimental) the colors FontLab paints with ([docs/NATIVE.md](docs/NATIVE.md)). How it works, and what it costs: [docs/DARKMODE.md](docs/DARKMODE.md).
+- *kerning/*: *Scripts > FreeLab > Auto Kerning* suggests kerning for the Latin pairs of the current master, after halfkern's method, and writes the pairs you approve: [docs/KERNING.md](docs/KERNING.md).
 - *tests/*: the test gate (*run_tests.py*).
 - *tools/*: the installer, the native helper's build script, and the test gate's Python 2.7 fetcher.
 
@@ -32,6 +33,7 @@ It runs everything under Python 3, including the native helper's tests, then the
 ## More
 
 - [docs/DARKMODE.md](docs/DARKMODE.md): how FontLab 7 colors itself, and how dark mode turns each part dark.
+- [docs/KERNING.md](docs/KERNING.md): auto kerning, how it measures, and its limits.
 - [docs/NATIVE.md](docs/NATIVE.md): dark mode's native engine (experimental), how it is applied to FontLab, and how it compares with the script engine.
 - [docs/ROADMAP.md](docs/ROADMAP.md): what comes next.
 - [docs/FEATURE-SURVEY.md](docs/FEATURE-SURVEY.md): what already exists for dark mode, kerning, diacritics, and feature code.

@@ -1,9 +1,10 @@
 # Build darkmode/native/freelab_pixels.c into a 64-bit DLL for FontLab's Python.
 #
-#   build-native.ps1 [-Out <path>] [-Hooks]
+#   build-native.ps1 [-Out <path>] [-Hooks | -Kern]
 #
 # -Hooks builds the experimental native dark mode instead (darkmode/native/freelab_hooks.c, which
-# includes freelab_pixels.c), into freelab_hooks-v<version>.dll.
+# includes freelab_pixels.c), into freelab_hooks-v<version>.dll. -Kern builds the auto kerning
+# core instead (kerning/native/freelab_kern.c), into freelab_kern-v<version>.dll.
 #
 # The default output is %LOCALAPPDATA%\FreeLab\bin\freelab_pixels-v<version>.dll, where the
 # dark-mode script looks for it. Without the DLL, dark mode still works, with
@@ -13,14 +14,20 @@
 #
 # ASCII only: Windows PowerShell 5.1 reads a BOM-less script in the ANSI code page.
 
-param([string]$Out, [switch]$Hooks)
+param([string]$Out, [switch]$Hooks, [switch]$Kern)
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 $source = Join-Path $repo 'darkmode\native\freelab_pixels.c'
 $name = if ($Hooks) { 'freelab_hooks' } else { 'freelab_pixels' }
-$match = [regex]::Match([System.IO.File]::ReadAllText($source), '#define FREELAB_PIXELS_VERSION (\d+)')
-if (-not $match.Success) { throw 'FREELAB_PIXELS_VERSION not found in freelab_pixels.c' }
+$versionName = 'FREELAB_PIXELS_VERSION'
+if ($Kern) {
+    $source = Join-Path $repo 'kerning\native\freelab_kern.c'
+    $name = 'freelab_kern'
+    $versionName = 'FREELAB_KERN_VERSION'
+}
+$match = [regex]::Match([System.IO.File]::ReadAllText($source), '#define ' + $versionName + ' (\d+)')
+if (-not $match.Success) { throw ($versionName + ' not found in ' + (Split-Path -Leaf $source)) }
 # Versioned name: FontLab keeps a loaded DLL locked, so a newer build must not need the same file.
 $version = $match.Groups[1].Value
 if ($Hooks) {
