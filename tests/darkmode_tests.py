@@ -560,6 +560,10 @@ class FakeHooks(object):
         self.calls.append("set_keep")
         return count
 
+    def freelab_hooks_set_subpixel(self, widgets, count, background_okl):
+        self.calls.append("set_subpixel")
+        return count
+
     def freelab_hooks_remove(self):
         self.calls.append("remove")
         return 24
@@ -587,6 +591,7 @@ class EngineTests(DarkModeCase):
 
     def test_a_crash_while_starting_turns_the_native_engine_off(self):
         self.save(engine="native", native_pending=True)
+        dm._state().pop("native_pending_mine", None)  # the mark is an earlier session's
         self.patch("_hooks", lambda: self.fail("the hooks must not go in again"))
         self.on()
         self.assertEqual(dm.status()["engine"], "script")
@@ -614,6 +619,23 @@ class EngineTests(DarkModeCase):
         self.off()
         self.assertIn("remove", hooks.calls)
         self.assertFalse(dm.status()["hooked"])
+
+    def test_applying_again_while_on_keeps_the_hooks(self):
+        # the re-applies after a switch (0, 1.5, and 5 s) came while the start was still settling,
+        # took their own mark for a crash, and ran the script engine over the hooks
+        hooks = FakeHooks()
+        self.patch("_hooks", lambda: hooks)
+        self.patch("_palette_table", lambda palette: __import__("ctypes").c_uint32(0))
+        self.save(engine="native", enabled=True)
+        self.on()
+        dm.apply_dark()
+        dm.run_queue()
+        dm._reapply_if_on()
+        dm.run_queue()
+        status = dm.status()
+        self.assertEqual((status["engine"], status["hooked"], status["errors"]), ("native", True, []))
+        self.assertEqual(hooks.calls.count("install"), 1)
+        self.assertIsNone(self.kind(self.search), "no script effects over the hooks")
 
     def test_switching_engines_rebuilds(self):
         hooks = FakeHooks()

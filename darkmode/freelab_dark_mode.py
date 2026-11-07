@@ -2177,6 +2177,12 @@ def process(widget):
             widget.setAutoFillBackground(True)
 
 
+def _item_view_viewport(widget):
+    parent = widget.parentWidget()
+    return (parent is not None and _prop(widget, "objectName") == "qt_scrollarea_viewport"
+            and any(parent.inherits(c) for c in INK_VIEW_PARENTS))
+
+
 def _process_native(widget, kind):
     """The native engine's share of process(): what Qt draws, as the script engine does; nothing of
     what FontLab paints itself, which the hooks map (no effects, no light islands, no detection)."""
@@ -2184,9 +2190,16 @@ def _process_native(widget, kind):
     if widget.inherits("QsciScintilla"):
         _recolor_editor(widget)
     _darken_icons(widget)
-    if kind in ("edges", "subpixel"):
-        # an editor's margin (QScintilla paints it from its own colors, not hooked), and ClearType
-        # previews (TrueType Hinting's: black text drawn per subpixel, which a color rule leaves fringed)
+    if kind == "subpixel":
+        state = _state()
+        pointer = _sci_pointer(widget)
+        if pointer and pointer not in (state.get("kept_addresses") or []):
+            _update_kept(_qt()[0].instance())  # kept before its effect: never mapped twice
+    if kind in ("edges", "subpixel") or (kind == "ink" and _item_view_viewport(widget)):
+        # an editor's margin (QScintilla paints it from its own colors, not hooked); ClearType previews
+        # (left to the hooks' keep list, see _kept_widget); and lists, whose rows Qt's own item delegates draw in colors FontLab puts in the list's data (the
+        # Metrics panel's black widths), out of the hooks' reach: the ink mapping changes only what is
+        # wrong on the dark interface, so what the hooks mapped passes through
         _set_effect(widget, _record(widget), kind)
     elif kind == "fill":
         record = _record(widget)
@@ -2485,7 +2498,7 @@ def _watch_windows(follow):
 # Everything Qt draws itself (palette, Fusion, stylesheets, icons, title bars, editors) is the same
 # in both. If the native engine cannot start (no library, another Qt build), the script engine runs.
 ENGINES = ("script", "native")
-HOOKS_VERSION = 7
+HOOKS_VERSION = 9
 PALETTE_GROUPS, PALETTE_ROLES = 3, 21
 
 
@@ -2517,6 +2530,7 @@ def _hooks():
     lib.freelab_hooks_set_palette.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
     lib.freelab_hooks_install.argtypes = [ctypes.c_double, ctypes.c_double, ctypes.c_double]
     lib.freelab_hooks_set_keep.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    lib.freelab_hooks_set_subpixel.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_double]
     kernel32 = ctypes.WinDLL("kernel32")
     kernel32.GetModuleHandleW.restype = ctypes.c_void_p
     kernel32.GetModuleHandleW.argtypes = [ctypes.c_wchar_p]
@@ -2527,11 +2541,14 @@ def _hooks():
     found = lib.freelab_hooks_add_module(kernel32.GetModuleHandleW(None))  # FontLab's own program
     if found not in (-2,) and found < HOOKS_MIN_FOUND:
         raise RuntimeError("FontLab's program imports only %d of the calls the native engine maps" % found)
+    svg = kernel32.GetModuleHandleW(u"Qt5Svg.dll")
+    if svg:  # FontLab draws some artwork (its logo) by handing an SVG to QSvgRenderer, which paints in Qt5Svg
+        lib.freelab_hooks_add_module(svg)
     holder["hooks_lib"], holder["hooks_lib_path"] = lib, path
     return lib
 
 
-HOOKS_MIN_FOUND = 19  # of 24: FontLab 7.2's program imports all of them
+HOOKS_MIN_FOUND = 18  # of 22: FontLab 7.2's program imports all of them
 
 
 def _palette_table(palette):
@@ -2563,8 +2580,20 @@ def _install_hooks(app):
     while the engine was starting (most likely a crash): the script engine runs from then on.
     """
     state = _state()
+    if state.get("hooked"):
+        # applied again while on (the re-applies after a switch, a sweep of settings): the hooks are
+        # in; only the palette FontLab's code sees is brought up to date
+        try:
+            import ctypes
+            dark, light = _palette_table(app.palette()), _palette_table(state["saved"]["palette"])
+            state["hooked_lib"].freelab_hooks_set_palette(ctypes.addressof(dark), ctypes.addressof(light))
+        except Exception as exc:
+            _note_error("native engine", exc)
+        return True
     settings = load_settings()
-    if settings.pop("native_pending", None):
+    # A mark this FontLab session set is its own start, still settling (state lives as long as FontLab
+    # does); only one left by an earlier session means FontLab closed while the engine was starting.
+    if settings.pop("native_pending", None) and not state.get("native_pending_mine"):
         settings["engine"] = "script"
         save_settings(settings)
         state["engine"] = "script"
@@ -2573,6 +2602,7 @@ def _install_hooks(app):
         return False
     settings["native_pending"] = True
     save_settings(settings)
+    state["native_pending_mine"] = True
     try:
         lib = _hooks()
         import ctypes
@@ -2585,6 +2615,7 @@ def _install_hooks(app):
         _clear_native_pending()
         _note_error("native engine", exc)
         state["engine"] = "script"  # falls back: dark mode still works, through effects
+        _remove_hooks(app)  # never both engines at once
         return False
     _repaint_all(app)
     _core("QTimer").singleShot(NATIVE_SETTLE_MS, _native_settled)
@@ -2611,7 +2642,10 @@ KEPT_CLASSES = ("QtColorPicker", "ColorPickerItem", "ColorPickerButton")  # swat
 def _kept_widget(widget, canvas):
     name = _class_name(widget)
     if name in KEPT_CLASSES or _left_alone(widget, name) or name in SUBPIXEL_CLASSES:
-        return True  # swatches; and ClearType previews, which keep the script's subpixel mapping
+        # swatches show their real colors; ClearType previews (TrueType Hinting's) keep the script
+        # engine's subpixel effect, which maps the whole preview as drawn (mapped line by line, as
+        # FontLab draws it, its fringes stayed colored)
+        return True
     return not canvas and is_content(widget)  # Mixed: canvases, cells, and previews keep FontLab's look
 
 
@@ -2623,7 +2657,7 @@ def _update_kept(app):
     if lib is None or not state.get("hooked"):
         return
     import ctypes
-    addresses = []
+    addresses, previews = [], []
     for widget in app.allWidgets():
         try:
             if _kept_widget(widget, state["canvas"]):
@@ -2636,6 +2670,10 @@ def _update_kept(app):
         table = (ctypes.c_uint64 * max(1, len(addresses)))(*addresses)
         lib.freelab_hooks_set_keep(ctypes.addressof(table), len(addresses))
         state["kept_addresses"] = addresses
+    if previews != state.get("subpixel_addresses"):
+        table = (ctypes.c_uint64 * max(1, len(previews)))(*previews)
+        lib.freelab_hooks_set_subpixel(ctypes.addressof(table), len(previews), BACKGROUND_OKL)
+        state["subpixel_addresses"] = previews
 
 
 def _remove_hooks(app):

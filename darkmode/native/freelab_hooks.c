@@ -13,9 +13,10 @@
  *   already dark; mapped again it would turn light. So FontLab's own palette reads (QPalette::color,
  *   QPalette::brush) answer with the light palette's color wherever the palette holds the dark
  *   palette's color for that slot.
- * - Colors are mapped only where they reach the screen: on a painter whose device is a widget or a
- *   pixmap. Painting into an image stays light, so an image FontLab renders and keeps (its glyph
- *   cells) is mapped once when it is drawn on screen, and an image it saves (an export) is never dark.
+ * - Colors are mapped only where they reach the screen: on a painter whose device is a widget.
+ *   Painting into an image or a pixmap stays light, so an image or pixmap FontLab renders and keeps
+ *   (its glyph cells, thumbnails) is mapped once when it is drawn on a widget, one it saves (an
+ *   export) is never dark, and the cursors it paints into pixmaps keep their black shadows.
  * - Colors are mapped where they are used (setPen, setBrush, fillRect, fillPath, setBackground), on
  *   temporary copies, never where they are made: FontLab keeps its pens and brushes, and a QColor it
  *   makes may be a mark color it saves in a font.
@@ -27,7 +28,7 @@
  */
 #include "freelab_pixels.c"
 
-#define FREELAB_HOOKS_VERSION 7
+#define FREELAB_HOOKS_VERSION 9
 
 typedef int (*virtual_protect_fn)(void *, size_t, uint32_t, uint32_t *);
 #define PAGE_READWRITE_ 0x04
@@ -56,7 +57,7 @@ typedef struct {
 static virtual_protect_fn vprotect;
 static int hooks_on;
 static double hook_dark_l = 0.18, hook_light_l = 0.88;
-static uint32_t map_devices = (1U << DEVICE_WIDGET) | (1U << DEVICE_PIXMAP);
+static uint32_t map_devices = 1U << DEVICE_WIDGET; /* pixmaps stay light: cursors are painted into them */
 static double hook_keep_tint = 1.0; /* content keeps its tints (a selected cell's pale blue), as the script's islands do */
 
 /* Widgets whose painting is left as FontLab draws it (color swatches and pickers; in Mixed, the
@@ -67,6 +68,25 @@ static double hook_keep_tint = 1.0; /* content keeps its tints (a selected cell'
 #define QPAINTDEVICE_IN_QWIDGET 16
 static uintptr_t keep_widgets[KEEP_MAX];
 static int keep_count;
+
+/* ClearType previews (TrueType Hinting's): the images drawn on them are black text rendered per
+ * subpixel on light paper, mapped with the pixel helper's subpixel mapping (each channel's coverage
+ * redrawn from the dark paper toward light text) instead of the color rule, which left the fringes
+ * colored. Few: a plain list. */
+#define SUBPIXEL_MAX 64
+static uintptr_t subpixel_widgets[SUBPIXEL_MAX];
+static int subpixel_count;
+static double subpixel_background_okl = 0.2;
+
+static int subpixel_widget(const void *device)
+{
+    uintptr_t widget = (uintptr_t)device - QPAINTDEVICE_IN_QWIDGET;
+    int i;
+    for (i = 0; i < subpixel_count; i++)
+        if (subpixel_widgets[i] == widget)
+            return 1;
+    return 0;
+}
 
 static int kept_widget(const void *device)
 {
@@ -153,7 +173,7 @@ enum {
     H_FILL_RECT_BRUSH, H_FILL_RECTF_BRUSH, H_FILL_XYWH_BRUSH, H_FILL_PATH, H_SET_BACKGROUND, H_PIXMAP_FILL,
     H_DRAW_IMAGE_PT, H_DRAW_IMAGE_RECT_SRC, H_DRAW_IMAGE_XY, H_DRAW_IMAGE_RECTF,
     H_PALETTE_COLOR_GROUP, H_PALETTE_COLOR, H_PALETTE_BRUSH_GROUP,
-    H_PAINTER_ON, H_PAINTER_BEGIN, H_DRAW_PIXMAP_RECT, H_DRAW_PIXMAP_PT,
+    H_DRAW_PIXMAP_RECT, H_DRAW_PIXMAP_PT,
     H_COUNT
 };
 static const char *hook_names[H_COUNT] = {
@@ -177,8 +197,6 @@ static const char *hook_names[H_COUNT] = {
     "?color@QPalette@@QEBAAEBVQColor@@W4ColorGroup@1@W4ColorRole@1@@Z",
     "?color@QPalette@@QEBAAEBVQColor@@W4ColorRole@1@@Z",
     "?brush@QPalette@@QEBAAEBVQBrush@@W4ColorGroup@1@W4ColorRole@1@@Z",
-    "??0QPainter@@QEAA@PEAVQPaintDevice@@@Z",
-    "?begin@QPainter@@QEAA_NPEAVQPaintDevice@@@Z",
     "?drawPixmap@QPainter@@QEAAXAEBVQRect@@AEBVQPixmap@@@Z",
     "?drawPixmap@QPainter@@QEAAXAEBVQPointF@@AEBVQPixmap@@@Z",
 };
@@ -227,9 +245,12 @@ static int map_qcolor(const qcolor *c, qcolor *out)
     return 1;
 }
 
-/* The painter paints where colors are mapped: on a widget or a pixmap, mapping on. Its device's
- * devType() is the second entry of QPaintDevice's table of virtual functions (after the destructor). */
-static int on_screen(const void *painter)
+/* Where the painter paints: 0 where nothing is mapped, 1 on a widget whose colors are mapped, 2 on a
+ * ClearType preview (colors mapped, images mapped per subpixel). Its device's devType() is the
+ * second entry of QPaintDevice's table of virtual functions (after the destructor). */
+#define SCREEN_PLAIN 1
+#define SCREEN_SUBPIXEL 2
+static int screen_mode(const void *painter)
 {
     void *device;
     int type;
@@ -241,7 +262,16 @@ static int on_screen(const void *painter)
     type = ((int (*)(const void *))((void ***)device)[0][1])(device);
     if (type <= 0 || type >= 32 || !((map_devices >> type) & 1U))
         return 0;
-    return !(type == DEVICE_WIDGET && keep_count && kept_widget(device));
+    if (type != DEVICE_WIDGET)
+        return SCREEN_PLAIN;
+    if (keep_count && kept_widget(device))
+        return 0;
+    return subpixel_count && subpixel_widget(device) ? SCREEN_SUBPIXEL : SCREEN_PLAIN;
+}
+
+static int on_screen(const void *painter)
+{
+    return screen_mode(painter) != 0;
 }
 
 /* White pens stay white: FontLab draws white lines and text only where they stand out, on a color
@@ -350,12 +380,18 @@ static uint32_t memo_map(uint32_t rgb)
     return memo_out[h];
 }
 
-static void map_image_pixels(void *image, int format)
+static void map_image_pixels(void *image, int format, int mode)
 {
     uint8_t *bits = qt_image_bits(image); /* detaches: the copy gets pixels of its own */
     int w = qt_image_width(image), h = qt_image_height(image), stride = qt_image_bytes_per_line(image), x, y;
     if (!bits || w <= 0 || h <= 0)
         return;
+    if (mode == SCREEN_SUBPIXEL && stride == w * 4) {
+        /* opaque ClearType text on paper: the pixel helper's subpixel mapping, as the script engine's */
+        freelab_map_anchors(bits, (int64_t)w * h, w, ANCHORS_SUBPIXEL, hook_dark_l, hook_light_l, 0.0,
+                            subpixel_background_okl, 1);
+        return;
+    }
     for (y = 0; y < h; y++) {
         uint32_t *row = (uint32_t *)(bits + (int64_t)y * stride);
         for (x = 0; x < w; x++) {
@@ -388,7 +424,7 @@ static void map_image_pixels(void *image, int format)
 }
 
 /* The image to draw: a mapped copy of image, or image itself (another format, or busy). */
-static const void *mapped_image(const void *image)
+static const void *mapped_image(const void *image, int mode)
 {
     int format, i, slot = -1;
     int64_t key;
@@ -399,7 +435,7 @@ static const void *mapped_image(const void *image)
         return image;
     if (__sync_lock_test_and_set(&image_busy, 1))
         return image; /* another thread is mapping: drawn as it is this once */
-    key = qt_image_cache_key(image);
+    key = qt_image_cache_key(image) * 2 + (mode == SCREEN_SUBPIXEL); /* a copy per mapping */
     for (i = 0; i < IMAGE_SLOTS; i++) {
         if (image_cache[i].used && image_cache[i].key == key) {
             image_cache[i].stamp = ++image_clock;
@@ -422,7 +458,7 @@ static const void *mapped_image(const void *image)
     if (image_cache[slot].used)
         qt_image_dtor(image_cache[slot].image);
     qt_image_copy(image_cache[slot].image, image);
-    map_image_pixels(image_cache[slot].image, format);
+    map_image_pixels(image_cache[slot].image, format, mode);
     image_cache[slot].key = key;
     image_cache[slot].stamp = ++image_clock;
     image_cache[slot].used = 1;
@@ -434,16 +470,10 @@ done:
 }
 
 /* ---- pixmaps -----------------------------------------------------------------------------------
- * A pixmap FontLab paints while the hooks are in is dark already (its painter's device is a
- * pixmap, mapped); one it painted before (a cached thumbnail) or loaded is light. The painters
- * FontLab begins on pixmaps are noted (the pixmap's cacheKey after begin, which detaches it and so
- * gives it its final key), and any other pixmap it draws on screen is drawn as a mapped copy, made
- * through an image, kept under its cacheKey like the images. */
-#define DARK_KEYS 4096
+ * Pixmaps are light, as FontLab paints or loads them: one it draws on a widget is drawn as a mapped
+ * copy, made through an image, kept under its cacheKey like the images. */
 #define PIXMAP_SLOTS 512
 #define QPIXMAP_SIZE 64
-static int64_t dark_keys[DARK_KEYS];
-static int dark_key_next;
 static struct {
     int64_t key;
     uint64_t stamp;
@@ -452,28 +482,7 @@ static struct {
 } pixmap_cache[PIXMAP_SLOTS];
 static int64_t pixmaps_mapped, pixmaps_reused;
 
-static void note_painting(const void *painter)
-{
-    void *device;
-    if (!hooks_on)
-        return;
-    device = qt_painter_device(painter);
-    if (device && ((int (*)(const void *))((void ***)device)[0][1])(device) == DEVICE_PIXMAP) {
-        dark_keys[dark_key_next] = qt_pixmap_cache_key(device);
-        dark_key_next = (dark_key_next + 1) % DARK_KEYS;
-    }
-}
-
-static int painted_dark(int64_t key)
-{
-    int i;
-    for (i = 0; i < DARK_KEYS; i++)
-        if (dark_keys[i] == key && key != 0)
-            return 1;
-    return 0;
-}
-
-static const void *mapped_pixmap(const void *pixmap)
+static const void *mapped_pixmap(const void *pixmap, int mode)
 {
     int i, slot = -1, format;
     int64_t key;
@@ -481,8 +490,9 @@ static const void *mapped_pixmap(const void *pixmap)
     uint8_t image[QIMAGE_SIZE];
     const void *result = pixmap;
     key = qt_pixmap_cache_key(pixmap);
-    if (key == 0 || painted_dark(key))
+    if (key == 0)
         return pixmap;
+    key = key * 2 + (mode == SCREEN_SUBPIXEL);
     if (__sync_lock_test_and_set(&image_busy, 1))
         return pixmap;
     for (i = 0; i < PIXMAP_SLOTS; i++) {
@@ -507,7 +517,7 @@ static const void *mapped_pixmap(const void *pixmap)
     qt_pixmap_to_image(pixmap, image);
     format = qt_image_format(image);
     if (format == QIMAGE_RGB32 || format == QIMAGE_ARGB32 || format == QIMAGE_ARGB32_PREMULTIPLIED) {
-        map_image_pixels(image, format);
+        map_image_pixels(image, format, mode);
         if (pixmap_cache[slot].used)
             qt_pixmap_dtor(pixmap_cache[slot].pixmap);
         qt_pixmap_from_image(pixmap_cache[slot].pixmap, image, 0);
@@ -532,8 +542,6 @@ static void clear_pixmap_cache(void)
             pixmap_cache[i].used = 0;
         }
     }
-    for (i = 0; i < DARK_KEYS; i++)
-        dark_keys[i] = 0;
 }
 
 static void clear_image_cache(void)
@@ -609,11 +617,8 @@ static void w_pixmap_fill(void *pixmap, const qcolor *c)
 {
     qcolor m;
     const qcolor *use = c;
-    hook_calls[H_PIXMAP_FILL]++;
-    if (hooks_on && map_qcolor(c, &m)) { /* a pixmap is screen-side (backing, caches) */
-        hook_changed[H_PIXMAP_FILL]++;
-        use = &m;
-    }
+    hook_calls[H_PIXMAP_FILL]++; /* observed only: pixmaps stay light, mapped when drawn on a widget */
+    (void)m;
     ORIGINAL(H_PIXMAP_FILL, one_fn)(pixmap, use);
 }
 
@@ -657,9 +662,10 @@ static void w_fill_xywh_brush(void *p, int x, int y, int w, int h, const void *b
 #define IMAGE_ON_SCREEN(index, painter, call_with)                    \
     {                                                                 \
         const void *use = image;                                      \
+        int mode = screen_mode(painter);                              \
         hook_calls[index]++;                                          \
-        if (on_screen(painter))                                       \
-            use = mapped_image(image);                                \
+        if (mode)                                                     \
+            use = mapped_image(image, mode);                          \
         hook_changed[index] += use != image;                          \
         call_with;                                                    \
     }
@@ -708,32 +714,13 @@ static const void *w_palette_brush_group(const void *palette, int group, int rol
     return &light_brushes[slot / ROLES][slot % ROLES];
 }
 
-typedef void *(*painter_on_fn)(void *, void *);
-typedef char (*painter_begin_fn)(void *, void *);
-
-static void *w_painter_on(void *painter, void *device)
-{
-    void *result = ORIGINAL(H_PAINTER_ON, painter_on_fn)(painter, device);
-    hook_calls[H_PAINTER_ON]++;
-    note_painting(painter);
-    return result;
-}
-
-static char w_painter_begin(void *painter, void *device)
-{
-    char result = ORIGINAL(H_PAINTER_BEGIN, painter_begin_fn)(painter, device);
-    hook_calls[H_PAINTER_BEGIN]++;
-    if (result)
-        note_painting(painter);
-    return result;
-}
-
 static void w_draw_pixmap_rect(void *p, const void *target, const void *pixmap)
 {
     const void *use = pixmap;
+    int mode = screen_mode(p);
     hook_calls[H_DRAW_PIXMAP_RECT]++;
-    if (on_screen(p))
-        use = mapped_pixmap(pixmap);
+    if (mode)
+        use = mapped_pixmap(pixmap, mode);
     hook_changed[H_DRAW_PIXMAP_RECT] += use != pixmap;
     ORIGINAL(H_DRAW_PIXMAP_RECT, two_fn)(p, target, use);
 }
@@ -741,9 +728,10 @@ static void w_draw_pixmap_rect(void *p, const void *target, const void *pixmap)
 static void w_draw_pixmap_pt(void *p, const void *at, const void *pixmap)
 {
     const void *use = pixmap;
+    int mode = screen_mode(p);
     hook_calls[H_DRAW_PIXMAP_PT]++;
-    if (on_screen(p))
-        use = mapped_pixmap(pixmap);
+    if (mode)
+        use = mapped_pixmap(pixmap, mode);
     hook_changed[H_DRAW_PIXMAP_PT] += use != pixmap;
     ORIGINAL(H_DRAW_PIXMAP_PT, two_fn)(p, at, use);
 }
@@ -754,7 +742,7 @@ static void *wrappers[H_COUNT] = {
     (void *)w_fill_rectf_brush, (void *)w_fill_xywh_brush, (void *)w_fill_path, (void *)w_set_background,
     (void *)w_pixmap_fill, (void *)w_draw_image_pt, (void *)w_draw_image_rect_src, (void *)w_draw_image_xy,
     (void *)w_draw_image_rectf, (void *)w_palette_color_group, (void *)w_palette_color, (void *)w_palette_brush_group,
-    (void *)w_painter_on, (void *)w_painter_begin, (void *)w_draw_pixmap_rect, (void *)w_draw_pixmap_pt,
+    (void *)w_draw_pixmap_rect, (void *)w_draw_pixmap_pt,
 };
 
 /* ---- PE tables ---------------------------------------------------------------------------------- */
@@ -932,6 +920,18 @@ EXPORT int freelab_hooks_set_keep(const uint64_t *widgets, int count)
         keep_widgets[j + 1] = v;
     }
     keep_count = n;
+    return n;
+}
+
+/* The ClearType previews (any order; at most SUBPIXEL_MAX), and the paper lightness the subpixel
+ * mapping uses (BACKGROUND_OKL); returns how many. */
+EXPORT int freelab_hooks_set_subpixel(const uint64_t *widgets, int count, double background_okl)
+{
+    int i, n = 0;
+    for (i = 0; i < count && n < SUBPIXEL_MAX; i++)
+        subpixel_widgets[n++] = (uintptr_t)widgets[i];
+    subpixel_count = n;
+    subpixel_background_okl = background_okl;
     return n;
 }
 

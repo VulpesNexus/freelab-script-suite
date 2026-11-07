@@ -19,7 +19,7 @@ hooks = ctypes.CDLL(os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else "freel
 k32 = ctypes.WinDLL("kernel32")
 k32.GetModuleHandleW.restype = c_void_p
 base = k32.GetModuleHandleW("Qt5Gui.dll")
-HOOKS = 24
+HOOKS = 22
 hooks.freelab_hooks_set_keep.argtypes = [c_void_p, c_int]
 WIDGET, PIXMAP, IMAGE = 1, 2, 3
 
@@ -171,10 +171,6 @@ got = painting(img, lambda p: (wrapper(5, c_void_p, c_void_p)(p, addr(white_pen)
 check("setPen(white pen): white kept", got, 0xffffff)
 got = painting(img, lambda p: (wrapper(4, c_void_p, c_void_p)(p, addr(white)), pen_rgba(painter_pen(p)))[1])
 check("setPen(white): white kept", got, 0xffffff)
-fresh = buf()
-wrapper(20, c_void_p, c_void_p, restype=c_void_p)(addr(fresh), addr(img))  # QPainter(device) through the hook
-check("a painter made through the hook paints", hooks.freelab_hooks_test_device_type(addr(fresh)), IMAGE)
-painter_end(addr(fresh))
 got = painting(img, lambda p: (wrapper(6, c_void_p, c_void_p)(p, addr(white_brush)), color_rgba(brush_color(painter_brush(p))))[1])
 check("setBrush(white brush)", got, "dark")
 blue_brush = brush(color(31, 120, 220))
