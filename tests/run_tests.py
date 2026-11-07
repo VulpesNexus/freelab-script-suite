@@ -1,4 +1,4 @@
-"""Run every FreeLab test: listener and server under Python 3, then the listener under Python 2.7.
+"""Run every FreeLab test: dark mode and its native helper under Python 3, then dark mode under Python 2.7.
 
 FontLab 7 embeds Python 2.7, so the Python 2.7 run is part of the gate. Get that
 interpreter with tools/get-python27.ps1 (it lands in %LOCALAPPDATA%\\FreeLab, or
@@ -24,10 +24,9 @@ PY27_DIR = Path(os.environ.get("FREELAB_PY27_DIR") or Path(os.environ.get("LOCAL
 PY27 = PY27_DIR / "tools" / "python.exe"
 NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 PY27_FILES = (
-    "listener/freelab_listener.py", "tests/fakes.py", "tests/listener_tests.py",
     "darkmode/freelab_dark_mode.py", "tests/qtfakes.py", "tests/darkmode_tests.py",
 )
-PY27_SUITES = ("tests/listener_tests.py", "tests/darkmode_tests.py")
+PY27_SUITES = ("tests/darkmode_tests.py",)
 
 
 def run_py3() -> tuple[bool, list[str]]:
@@ -79,12 +78,12 @@ def main() -> int:
     parser.add_argument("--skip-native", action="store_true", help="do not fail when the native helper is not built")
     args = parser.parse_args()
 
-    print("== Python %s: listener, dark mode, native helper, and server" % sys.version.split()[0])
+    print("== Python %s: dark mode and native helper" % sys.version.split()[0])
     ok3, skipped = run_py3()
     for reason in skipped:
         print("SKIPPED: %s" % reason)
 
-    print("\n== Python 2.7: listener and dark mode")
+    print("\n== Python 2.7: dark mode")
     ok27 = run_py27()
     if ok27 is None:
         print("Python 2.7 not found at %s; run tools/get-python27.ps1." % PY27)

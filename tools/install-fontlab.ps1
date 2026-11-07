@@ -1,12 +1,15 @@
-# Install FreeLab's FontLab 7 scripts for the current user, or remove them.
+# Install FreeLab's FontLab 7 tools (dark mode) for the current user, or remove them.
 #
-#   install-fontlab.ps1             copy the listener and the dark-mode scripts into
-#                                   FontLab 7's Scripts\FreeLab folder (a FreeLab
-#                                   submenu of the Scripts menu), and add the FreeLab
-#                                   block to FontLab's startupScript.py
-#   install-fontlab.ps1 -Uninstall  remove that block, the two copied scripts, the
-#                                   native helper, and dark mode's settings, putting
-#                                   back the workspace color dark mode replaced
+#   install-fontlab.ps1             copy the dark-mode scripts into FontLab 7's
+#                                   Scripts\FreeLab folder (a FreeLab submenu of the
+#                                   Scripts menu), and add the FreeLab tools block to
+#                                   FontLab's startupScript.py
+#   install-fontlab.ps1 -Uninstall  remove that block, the copied scripts, the native
+#                                   helper, and dark mode's settings, putting back the
+#                                   workspace color dark mode replaced
+#
+# FreeLab MCP, a separate repository, installs its listener beside these with a
+# startup block of its own: either can be installed or removed without the other.
 #
 # Install also builds dark mode's native pixel helper (tools/build-native.ps1)
 # into %LOCALAPPDATA%\FreeLab\bin when it is missing; without a compiler, dark
@@ -19,9 +22,7 @@
 
 # -ScriptsDir, -StartupScript, -BinDir, -StateDir, -RegistryKey, and -ProcessName override the
 # locations and the FontLab process name, for testing.
-# -ListenerAtLaunch also starts the MCP listener at every FontLab launch, so an AI app can
-# reach FontLab (and its launch_fontlab tool can start it) without a click in FontLab.
-param([switch]$Uninstall, [switch]$ListenerAtLaunch, [string]$ScriptsDir, [string]$StartupScript, [string]$BinDir,
+param([switch]$Uninstall, [string]$ScriptsDir, [string]$StartupScript, [string]$BinDir,
       [string]$StateDir, [string]$RegistryKey, [string]$ProcessName = 'FontLab 7')
 
 $ErrorActionPreference = 'Stop'
@@ -41,7 +42,6 @@ $scripts = Join-Path $rootScripts 'FreeLab'  # its own submenu of the Scripts me
 if ($StartupScript) { $startup = $StartupScript }
 else { $startup = Join-Path $env:LOCALAPPDATA 'FontLab\FontLab 7\startupScript.py' }
 $files = @(
-    @{ From = 'listener\freelab_listener.py'; Name = 'freelab_listener.py' },
     @{ From = 'darkmode\freelab_dark_mode.py'; Name = 'freelab_dark_mode.py' },
     @{ From = 'darkmode\freelab_dark_mode_settings.py'; Name = 'freelab_dark_mode_settings.py' }
 )
@@ -51,13 +51,17 @@ if (-not $RegistryKey) { $RegistryKey = 'HKCU:\Software\Fontlab\fontlab7' }
 $darkWorkspace = '#fff0f0f0'  # WORKSPACE_DARK in darkmode/freelab_dark_mode.py
 $source = [System.IO.File]::ReadAllText((Join-Path $repo 'darkmode\native\freelab_pixels.c'))
 $nativeName = 'freelab_pixels-v' + [regex]::Match($source, '#define FREELAB_PIXELS_VERSION (\d+)').Groups[1].Value + '.dll'
-$begin = '# >>> FreeLab'
-$end = '# <<< FreeLab'
+$begin = '# >>> FreeLab tools'
+$end = '# <<< FreeLab tools'
 
 function Remove-Block([string]$text) {
     $pattern = '(?s)\n?' + [regex]::Escape($begin) + '.*?' + [regex]::Escape($end) + '[^\n]*\n?'
     return [regex]::Replace($text, $pattern, "`n").TrimEnd("`n") + "`n"
 }
+
+# The one block FreeLab wrote before the MCP and the tools became separate repositories
+# (dark mode and the listener together). Either installer takes it out and says so.
+$legacyPattern = '(?s)\n?# >>> FreeLab \(managed.*?# <<< FreeLab[ \t]*(\n|$)'
 
 # A Python string literal that is pure ASCII: backslashes doubled, everything
 # outside ASCII as \uXXXX, so Python 2 reads it whatever the code page.
@@ -77,6 +81,13 @@ function ConvertTo-PyLiteral([string]$s) {
 
 $current = ''
 if (Test-Path $startup) { $current = [System.IO.File]::ReadAllText($startup) -replace "`r`n", "`n" }
+$legacy = [regex]::IsMatch($current, $legacyPattern)
+if ($legacy) { $current = [regex]::Replace($current, $legacyPattern, "`n").TrimEnd("`n") + "`n" }
+function Write-LegacyNote {
+    if ($legacy) {
+        Write-Output 'Removed the combined FreeLab block of earlier versions, which also started the MCP listener. To keep that, run tools\install-fontlab.ps1 -ListenerAtLaunch from FreeLab MCP.'
+    }
+}
 
 if ($Uninstall) {
     # Dark mode keeps FontLab's own workspace color in darkmode.json while it is on.
@@ -89,9 +100,9 @@ if ($Uninstall) {
             exit 1
         }
         if ($saved) {
-            $current = $null
-            try { $current = (Get-ItemProperty $RegistryKey -Name 'color.workspace' -ErrorAction Stop).'color.workspace' } catch { }
-            if ($current -eq $darkWorkspace) {
+            $workspace = $null
+            try { $workspace = (Get-ItemProperty $RegistryKey -Name 'color.workspace' -ErrorAction Stop).'color.workspace' } catch { }
+            if ($workspace -eq $darkWorkspace) {
                 Set-ItemProperty $RegistryKey -Name 'color.workspace' -Value $saved
                 Write-Output "Put FontLab's workspace color back to $saved"
             }
@@ -101,7 +112,8 @@ if ($Uninstall) {
     }
     if (Test-Path $startup) {
         [System.IO.File]::WriteAllText($startup, (Remove-Block $current), $utf8)
-        Write-Output "Removed the FreeLab block from $startup"
+        Write-Output "Removed the FreeLab tools block from $startup"
+        Write-LegacyNote
     }
     foreach ($f in $files) {
         foreach ($dir in @($scripts, $rootScripts)) {  # the Scripts folder itself held them before 0.3
@@ -141,11 +153,9 @@ else {
 }
 
 $darkPath = ConvertTo-PyLiteral (Join-Path $scripts 'freelab_dark_mode.py')
-$listenerPath = ConvertTo-PyLiteral (Join-Path $scripts 'freelab_listener.py')
-$startListener = if ($ListenerAtLaunch) { 'True' } else { 'False' }
 $block = @"
 $begin (managed by FreeLab tools/install-fontlab.ps1; -Uninstall removes it)
-def _freelab_load(name, path):
+def _freelab_tools_load(name, path):
     import os, sys
     if not os.path.isfile(path):
         return None
@@ -170,22 +180,15 @@ def _freelab_load(name, path):
         del os.environ["FREELAB_NO_AUTOSTART"]
     sys.modules[name] = module
     return module
-def _freelab_startup():
+def _freelab_tools_startup():
     try:
-        module = _freelab_load("freelab_dark_mode", $darkPath)
+        module = _freelab_tools_load("freelab_dark_mode", $darkPath)
         if module is not None:
             module.startup()
     except Exception as exc:
         print("FreeLab dark mode at startup: %s" % (exc,))
-    if ${startListener}:
-        try:
-            module = _freelab_load("freelab_listener", $listenerPath)
-            if module is not None:
-                module.main()
-        except Exception as exc:
-            print("FreeLab listener at startup: %s" % (exc,))
 try:
-    _freelab_startup()
+    _freelab_tools_startup()
 except Exception:
     pass
 $end
@@ -200,4 +203,5 @@ if (-not (Test-Path $folder)) { New-Item -ItemType Directory -Path $folder | Out
 $text = (Remove-Block $current).TrimEnd("`n")
 if ($text) { $text += "`n" }
 [System.IO.File]::WriteAllText($startup, $text + $block + "`n", $utf8)
-Write-Output "Added the FreeLab block to $startup"
+Write-Output "Added the FreeLab tools block to $startup"
+Write-LegacyNote

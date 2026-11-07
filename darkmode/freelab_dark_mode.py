@@ -42,7 +42,7 @@ import re
 import sys
 import time
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 MODULE_NAME = "freelab_dark_mode"
 REAPPLY_DELAYS_MS = (0, 1500, 5000)  # FontLab may restyle itself after the startup script runs
 ORIGINAL_STYLE_FALLBACK = "windowsvista"  # Qt's default on Windows; the only style plugin FontLab 7 ships

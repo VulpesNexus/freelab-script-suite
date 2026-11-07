@@ -1,6 +1,6 @@
 # Dark mode
 
-FontLab 7 has no theme to switch: it colors its interface in several independent ways, and *darkmode/freelab_dark_mode.py* handles each. Everything below was found live in FontLab 7.2.0 (Qt 5.14.2) on 2026-11-06, through the FreeLab listener.
+FontLab 7 has no theme to switch: it colors its interface in several independent ways, and *darkmode/freelab_dark_mode.py* handles each. Everything below was found live in FontLab 7.2.0 (Qt 5.14.2) on 2026-11-06, through the listener of FreeLab MCP (the separate `freelab-mcp` repository).
 
 ## How FontLab 7 colors itself
 

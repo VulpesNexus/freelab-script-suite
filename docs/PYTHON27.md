@@ -2,7 +2,7 @@
 
 FontLab 7 for Windows does not carry its own Python. Its *PythonQt.dll* links *python27.dll*, so scripting works only when a 64-bit Python 2.7 is installed where FontLab finds it; the FontLab 7 installer offers one, and FontLab's support pages recommend letting it install the bundled version. FontLab ships its own Python packages (fontTools and its documentation tools) in *Resources\python\2.7\site-packages* of its program folder.
 
-Without that Python, FontLab still starts, but the *Scripting* panel, the *Scripts* menu, and the startup script do nothing, and so does the FreeLab listener.
+Without that Python, FontLab still starts, but the *Scripting* panel, the *Scripts* menu, and the startup script do nothing, and so does FreeLab's dark mode.
 
 ## Check
 
@@ -17,8 +17,8 @@ The 32-bit installer (*python-2.7.18.msi*, the one python.org lists first) does 
 
 ## Paths
 
-Python 2.7 opens files through the Windows ANSI code page. A script whose path that code page cannot spell, such as a folder with an en dash on a Japanese-locale system, cannot be run, so keep the listener in FontLab's own *Scripts* folder.
+Python 2.7 opens files through the Windows ANSI code page. A script whose path that code page cannot spell, such as a folder with an en dash on a Japanese-locale system, cannot be run, so FreeLab's installer copies its scripts into FontLab's own *Scripts* folder.
 
 ## The test interpreter
 
-*tools/get-python27.ps1* is separate: it fetches the official Python 2.7.18 NuGet package into *%LOCALAPPDATA%\FreeLab\python27* so the test gate can run the listener under the real 2.7. It installs nothing, and FontLab does not use it.
+*tools/get-python27.ps1* is separate: it fetches the official Python 2.7.18 NuGet package into *%LOCALAPPDATA%\FreeLab\python27* so the test gate can run dark mode's tests under the real 2.7. It installs nothing, and FontLab does not use it.
