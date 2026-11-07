@@ -210,7 +210,7 @@ SWEEP_MS = 750  # how often to look for widgets FontLab created or showed
 FULL_SWEEP_EVERY = 40  # every Nth sweep revisits every widget (replaced stylesheets, new icons)
 FOCUS_DRAIN_MS = 80  # a window that takes focus is darkened at once, up to this long, before it paints light
 MAX_ERRORS = 50
-NATIVE_VERSION = 98
+NATIVE_VERSION = 100
 
 ID_PROP = "freelab_id"  # dynamic properties FreeLab sets on widgets, all removed by restore()
 SEEN_PROP = "freelab_seen"
@@ -636,7 +636,10 @@ def _native():
                     anchors.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_int64, ctypes.c_int, ctypes.c_double,
                                         ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_int]
                     anchors.restype = ctypes.c_int64
-                    state["native"] = (mapper, stats, collect, keyed, anchors)
+                    defringe = lib.freelab_defringe
+                    defringe.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_int64, ctypes.c_int]
+                    defringe.restype = None
+                    state["native"] = (mapper, stats, collect, keyed, anchors, defringe)
                 else:
                     _note_error("native", "version mismatch")
             except Exception as exc:
@@ -694,6 +697,24 @@ def map_image(image, min_l=0.0, keys=None, ink_below=-1.0, keep_tint=0.0, light_
     if anchors in ("all", "icon", "subpixel", "syntax") or (not anchors and min_l <= 0.0 and not keys):
         image.invertPixels()
     return image
+
+
+def defringe_image(image):
+    """A Format_ARGB32 copy of a QImage whose gray text's ClearType fringes are gray (real colors kept).
+
+    Without the native helper, the copy is unchanged.
+    """
+    image = image.convertToFormat(_gui("QImage").Format_ARGB32)
+    native = _native()
+    if native is not None:
+        try:
+            native[5](_address(image), image.width() * image.height(), image.width(), DEFRINGE_MAX_SPREAD)
+        except Exception as exc:
+            _note_error("defringe", exc)
+    return image
+
+
+DEFRINGE_MAX_SPREAD = 160
 
 
 def ink_count(image):
@@ -1124,6 +1145,10 @@ INK_VIEW_PARENTS = ("QAbstractItemView", "QTextEdit", "QPlainTextEdit", "QtnProp
 # gets grayscale smoothing; the ink mapping leaves light text as it is.
 GRAYSCALE_TEXT_CLASSES = ("YSelector", "QStatusBar")  # the status bar draws its message straight on dark
 STYLE_DRAWN_BUTTONS = ("QRadioButton", "QCheckBox", "QPushButton")  # never ink by render detection
+# Bars dark mode's stylesheet already darkens inside a window drawn through the ink effect: kept
+# out of its mapping (which garbled their labels) and drawn with their text's ClearType fringes
+# made gray. (parent class, object name)
+DEFRINGE_NAMES = (("FontWindow", "frameBottom"),)
 GRAYSCALE_TEXT_NAMES = ("labelMode",)  # the colon between those selectors
 # Text drawn with ClearType on purpose (TrueType Hinting's preview): each channel's coverage is kept
 # and redrawn light on dark ("subpixel" mapping), which inverting lightness cannot do.
@@ -1224,6 +1249,14 @@ def _effect_classes():
                         draw_mapped(painter, pixmap, offset, QRect(offset.x() + split, offset.y(),
                                                                    pixmap.width() - split, pixmap.height()),
                                     0.0, None, -1.0, 0.0, None, 0.0, 0, "all")
+                        return
+                    if kind == "defringe":  # dark already (its stylesheet): only its text's fringes made gray
+                        area = whole
+                        if painter.hasClipping():
+                            area = area.intersected(painter.clipBoundingRect().toAlignedRect())
+                        if not area.isEmpty():
+                            part = pixmap.copy(area.translated(-offset.x(), -offset.y())).toImage()
+                            painter.drawImage(area.topLeft(), defringe_image(part))
                         return
                     anchors = {"island": "all", "subpixel": "subpixel"}.get(kind, "ink")
                     if kind == "edges":
@@ -1351,7 +1384,7 @@ def title_height(panel):
 
 
 def widget_kind(widget, canvas=True):
-    """"island", "ink", "edges", "keyed", "fill", "title", or None: how dark mode treats this widget beyond its stylesheet."""
+    """"island", "ink", "edges", "keyed", "fill", "title", "defringe", or None: how dark mode treats this widget beyond its stylesheet."""
     cls = _class_name(widget)
     if _is_one_of(widget, cls, ISLAND_CLASSES) or (cls, _prop(widget, "objectName")) in ISLAND_NAMES:
         return "island"
@@ -1361,6 +1394,8 @@ def widget_kind(widget, canvas=True):
     parent = widget.parentWidget()
     if parent is not None:
         parent_cls = _class_name(parent)
+        if (parent_cls, _prop(widget, "objectName")) in DEFRINGE_NAMES:
+            return "defringe"
         if cls == "QWidget":
             if parent_cls in EDGES_PARENTS and _prop(widget, "objectName") == "qt_scrollarea_viewport":
                 return "edges"  # the text area, not the scroll bar containers
@@ -1916,7 +1951,7 @@ def process(widget):
         if found:
             widget.setProperty(ISLAND_PROP, found)
             kind = found
-    if kind in ("ink", "edges", "title", "subpixel"):
+    if kind in ("ink", "edges", "title", "subpixel", "defringe"):
         _set_effect(widget, _record(widget), kind)
     elif kind == "keyed" and widget.isVisible():
         record = _record(widget)

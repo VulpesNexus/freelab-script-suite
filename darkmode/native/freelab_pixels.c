@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 98
+#define FREELAB_PIXELS_VERSION 100
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -321,6 +321,72 @@ EXPORT void freelab_map_lightness(uint8_t *pixels, int64_t count, int64_t width,
         have_last = 1;
     }
 }
+/* Gray text's ClearType fringes in an area already dark (a bar dark mode's stylesheet darkened,
+ * drawn opaque, so its text got subpixel smoothing): each fringe pixel becomes the mean of its
+ * channels, the coverage grayscale smoothing would give. Kept as they are:
+ * - neutral pixels;
+ * - colors with a channel darker than the ground (the darkest neutral pixel): a fringe of gray
+ *   text on a gray ground has every channel between the two;
+ * - runs of DEFRINGE_MIN_RUN or more colored pixels in a row whose strongest channel is the
+ *   same: colored text and its own smoothing. A fringe is one or two pixels at a stem's side,
+ *   and its strongest channel flips from one side of the stem to the other. */
+#define DEFRINGE_NEUTRAL 6
+#define DEFRINGE_FLOOR_TOLERANCE 8
+#define DEFRINGE_MIN_RUN 3
+
+static int strongest_channel(const uint8_t *px)
+{
+    return px[2] >= px[1] && px[2] >= px[0] ? 2 : (px[1] >= px[0] ? 1 : 0);
+}
+
+static int min_channel(const uint8_t *px)
+{
+    return px[0] < px[1] ? (px[0] < px[2] ? px[0] : px[2]) : (px[1] < px[2] ? px[1] : px[2]);
+}
+
+EXPORT void freelab_defringe(uint8_t *pixels, int64_t count, int64_t width, int max_spread)
+{
+    int floor = 256;
+    int64_t i, row;
+    if (width <= 0)
+        return;
+    for (i = 0; i < count; i++) {
+        const uint8_t *px = pixels + 4 * i;
+        if (px[3] == 255 && spread_of(px) <= DEFRINGE_NEUTRAL && min_channel(px) < floor)
+            floor = min_channel(px);
+    }
+    if (floor == 256)
+        return;  /* no neutral pixel: nothing to tell fringes by */
+    for (row = 0; row + width <= count; row += width) {
+        int64_t x = 0;
+        while (x < width) {
+            int64_t start = x, k;
+            int same = 1, channel;
+            const uint8_t *first = pixels + 4 * (row + x);
+            if (first[3] == 0 || spread_of(first) <= DEFRINGE_NEUTRAL) {
+                x++;
+                continue;
+            }
+            channel = strongest_channel(first);
+            while (x < width) {
+                const uint8_t *px = pixels + 4 * (row + x);
+                if (px[3] == 0 || spread_of(px) <= DEFRINGE_NEUTRAL)
+                    break;
+                same = same && strongest_channel(px) == channel;
+                x++;
+            }
+            if (same && x - start >= DEFRINGE_MIN_RUN)
+                continue;  /* colored text */
+            for (k = start; k < x; k++) {
+                uint8_t *px = pixels + 4 * (row + k);
+                if (spread_of(px) > max_spread || min_channel(px) + DEFRINGE_FLOOR_TOLERANCE < floor)
+                    continue;
+                px[0] = px[1] = px[2] = (uint8_t)((px[0] + px[1] + px[2] + 1) / 3);
+            }
+        }
+    }
+}
+
 /* counts[0]: pixels with alpha >= min_alpha; counts[1]: of those, lightness >= white_l;
  * counts[2]: of those, lightness <= black_l. */
 EXPORT void freelab_pixel_stats(const uint8_t *pixels, int64_t count, int min_alpha, double white_l, double black_l,

@@ -39,6 +39,8 @@ def _load():
     lib.freelab_map_anchors.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_int64, ctypes.c_int, ctypes.c_double,
                                         ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_int]
     lib.freelab_map_anchors.restype = ctypes.c_int64
+    lib.freelab_defringe.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_int64, ctypes.c_int]
+    lib.freelab_defringe.restype = None
     return lib
 
 
@@ -392,8 +394,21 @@ class NativeTests(unittest.TestCase):
         LIB.freelab_pixel_stats(ctypes.addressof(array), len(buf) // 4, dm.AUTO_MIN_ALPHA, dm.WHITE_L, dm.BLACK_L, counts)
         self.assertEqual(tuple(counts), (6, 3, 2))
 
+    def test_defringe(self):
+        g, text = (52, 52, 52), (172, 172, 172)
+        left, right = (190, 132, 77), (77, 132, 190)  # a gray stem's fringes: the strongest channel flips
+        dark_blue = (0, 78, 154)  # a channel below the ground
+        light_blue, blue_edge = (67, 133, 214), (56, 85, 118)  # colored text: a run of one strongest channel
+        rows = [[g, left, text, right, g, g, g],
+                [g, dark_blue, g, blue_edge, light_blue, blue_edge, g]]
+        buf = pixels(rows[0] + rows[1])
+        array = (ctypes.c_char * len(buf)).from_buffer(buf)
+        LIB.freelab_defringe(ctypes.addressof(array), len(buf) // 4, 7, dm.DEFRINGE_MAX_SPREAD)
+        self.assertEqual(buf[:28], pixels([g, (133, 133, 133), text, (133, 133, 133), g, g, g]),
+                         "gray text's fringes: the mean of their channels")
+        self.assertEqual(buf[28:], pixels(rows[1]), "colors darker than the ground and colored text unchanged")
 
-@unittest.skipIf(LIB is None, "native helper not built: run tools/build-native.ps1 (%s)" % DLL)
+
 class KeyedTests(unittest.TestCase):
     def test_light_colors_are_distinct_light_and_opaque(self):
         buf = pixels([(202, 203, 204), (45, 45, 48), (202, 203, 204), (163, 163, 165)]) + pixels([(250, 250, 250)], alpha=10)
