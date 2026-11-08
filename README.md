@@ -37,3 +37,9 @@ It runs everything under Python 3, including the native helper's tests, then the
 - [docs/NATIVE.md](docs/NATIVE.md): dark mode's native engine (experimental), how it is applied to FontLab, and how it compares with the script engine.
 - [docs/ROADMAP.md](docs/ROADMAP.md): what comes next.
 - [docs/FEATURE-SURVEY.md](docs/FEATURE-SURVEY.md): what already exists for dark mode, kerning, diacritics, and feature code.
+
+## License
+
+**GPL-3.0-or-later** ([LICENSE](LICENSE)). Copyright © 2026 Vixen420. It comes with no warranty.
+
+Auto kerning ports [halfkern](https://github.com/behdad/halfkern)'s method (Copyright 2022 Google LLC, Apache License 2.0), and *kerning/common_pairs.txt* comes from [andre-fuchs/kerning-pairs](https://github.com/andre-fuchs/kerning-pairs) (MIT License, its notice kept in the file). The FreeLab method's model was trained on fonts under the SIL Open Font License and the Apache License only.
