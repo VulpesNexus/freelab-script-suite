@@ -19,6 +19,19 @@ The kerning the font already has acts as a model: with at least three tightening
 
 The classes are the font's own, made in FontLab's Classes panel: Auto Kerning reads and writes through them, and never makes, changes, or removes one.
 
+### Suggested classes
+
+*Suggest classes…* proposes kerning classes for the master, to review before any is made. Each side is its own set of classes: *first in a pair* groups glyphs by their right side (FontLab's left, or 1st, classes), *second in a pair* by their left side.
+
+- **From the corpus**: *kerning/train/classes.py* reads the kerning classes of the same open-licensed fonts the FreeLab method learned from (173 families class their kerning) and counts, for each pair of characters and each side, how many families put them in one class. The counts are *kerning/class_model.json*.
+- **An accented letter** joins its base letter where most families class the two together on that side (*À* with *A* almost always; *Ŀ* with *L* only on one side). For a pair the corpus has not seen, it joins where the two kern alike in this font.
+- **Base letters** share a class where most families class them so (*n* with *m* and *h*, *o* with *c*, *e*, and *q*, the straight-stemmed capitals on their left) and every two of them kern alike in this font: within 2% of the em against each of a few partners (*H*, *O*, *o*, *n*, *v*, *T*, and others), measured by halfkern and contour distance.
+- **Members that kern unlike** the class's first glyph by 3% of the em or more are named with the difference, in units: where an accent reaches toward a neighbor (*ì* beside *f*), the class may want an exception.
+- **The font's classes come first**: a suggestion makes a class (named *kern1_* or *kern2_* and its first glyph) only where none of its glyphs has one on that side, or adds glyphs to the one class they share, unless that class kerns both sides. Suggestions that overlap several classes are shown and left as they are, and so are the classes the font has already.
+- **Moving pairs**: with *Move each new class's first glyph's pairs into the class* (on by default), a new class takes over its first glyph's own pairs on that side, so every member kerns as that glyph did.
+
+On the owner's test font, left out of the counts, 61 of the suggestions were classes the font has already.
+
 ## The methods
 
 Both are measured by FreeLab's native core (*kerning/native/freelab_kern.c*) on glyphs rendered from FontLab's outlines at 200 pixels per em, and both hold each kind of pair to its own references, pairs the designer spaced on purpose and that are set with no kerning: capitals to *HH*, *HO*, *OH*, and *OO*; lowercase to *ll*, *nn*, and *oo*; figures to *0* and *8*; pairs across cases to the references of both sides; punctuation to the kind of the letter beside it. A pair is moved until its measure falls within the band its references span.

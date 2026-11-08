@@ -179,6 +179,9 @@ class FakeKerning(object):
     def keys(self):
         return [FakeKerningPair(entry) for entry in self.stored]
 
+    def items(self):
+        return [(FakeKerningPair(entry), value) for entry, value in self.stored.items()]
+
     def entry(self, key):
         return tuple((name, name in self.groups.data) for name in key)
 
@@ -223,6 +226,9 @@ class FakeGroups(object):
 
     def items(self):
         return list(self.data.items())
+
+    def __setitem__(self, name, value):
+        self.data[name] = (list(value[0]), value[1])
 
 
 class KerningClassTests(unittest.TestCase):
@@ -372,3 +378,62 @@ class ContourTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ClassSuggestionTests(unittest.TestCase):
+    def test_signatures_match_within_the_tolerance(self):
+        one = [0.0, -0.05, 0.02, None]
+        self.assertTrue(ak.signatures_match(one, [0.01, -0.05, 0.03, 0.2]))
+        self.assertFalse(ak.signatures_match(one, [0.0, -0.1, 0.02, None]), "one partner kerned 5% apart")
+        self.assertFalse(ak.signatures_match([0.0, None, None, None], [0.0, None, None, None]), "too few partners")
+        self.assertAlmostEqual(ak.signature_gap(one, [0.0, -0.08, 0.02, None]), 0.03)
+
+    def test_base_letter(self):
+        self.assertEqual(ak.base_letter(u"\u00c1"), u"A")
+        self.assertEqual(ak.base_letter(u"\u013f"), u"L", "L with middle dot, a compatibility decomposition")
+        self.assertEqual(ak.base_letter(u"\u0141"), u"\u0141", "L with stroke has none")
+        self.assertEqual(ak.base_letter(u"."), u".")
+
+    def test_classes_from_the_corpus_and_the_fonts_kerning(self):
+        names = {u"o": "o", u"\u00f6": "odieresis", u"\u0151": "ohungarumlaut", u"c": "c", u"e": "e", u"b": "b",
+                 u"\u014f": "obreve"}
+        alike, apart = [0.0, -0.02, 0.01], [0.0, -0.09, 0.01]
+        signatures = {"second": {u"o": alike, u"\u00f6": alike, u"\u0151": alike, u"\u014f": apart, u"c": alike,
+                                 u"e": alike, u"b": apart},
+                      "first": {u"o": alike, u"\u00f6": apart, u"\u0151": alike, u"\u014f": alike, u"c": apart,
+                                u"e": apart, u"b": alike}}
+        model = {"second": {(u"c", u"o"): 0.8, (u"o", u"c"): 0.8, (u"e", u"o"): 0.74, (u"o", u"e"): 0.74,
+                            (u"c", u"e"): 0.78, (u"e", u"c"): 0.78, (u"b", u"o"): 0.1, (u"o", u"b"): 0.1,
+                            (u"o", u"\u00f6"): 0.99, (u"o", u"\u0151"): 0.1},
+                 "first": {(u"b", u"o"): 0.75, (u"o", u"b"): 0.75, (u"o", u"\u00f6"): 0.98}}
+        classes = ak.suggest_classes(names, lambda ch, side: signatures[side][ch], model)
+        # second: o with c and e (the corpus, and they kern alike); \u00f6 with o by the corpus; \u0151 rarely
+        # classed with o by the corpus, so apart; \u014f unseen by the corpus and kerning unlike o, apart
+        self.assertEqual(classes["second"], [[u"c", u"e", u"o", u"\u00f6"]])
+        # first: \u00f6 joins by the corpus though it kerns unlike o; \u0151 and \u014f, unseen, kern alike
+        self.assertEqual(classes["first"], [[u"b", u"o", u"\u00f6", u"\u014f", u"\u0151"]])
+
+    def test_plans_keep_the_fonts_classes_and_name_odd_members(self):
+        k = ak.FontKerning(FakeKerning({"o1": (["o", "oacute"], "KernRight"), "T": (["T"], "KernBothSide")},
+                                       {(("b", False), ("o1", True)): -20, (("b", False), ("x", False)): -10}))
+        names = {u"o": "o", u"\u00f3": "oacute", u"\u00f6": "odieresis", u"b": "b", u"\u00fe": "thorn", u"T": "T",
+                 u"\u0162": "Tcedilla"}
+        signatures = {u"b": [0.0, 0.0, 0.0], u"\u00fe": [0.0, -0.05, 0.0]}
+        signature_of = lambda ch, side: signatures.get(ch, [0.0, 0.0, 0.0])
+        plans = ak.plan_classes({"second": [[u"o", u"\u00f3", u"\u00f6"]], "first": [[u"b", u"\u00fe"]]}, names, k,
+                                signature_of, 1000.0)
+        plans += ak.plan_classes({"first": [[u"T", u"\u0162"]]}, names, k)
+        self.assertEqual([p.action for p in plans], ["new", "add", "overlap"])
+        new, add, both = plans
+        self.assertEqual((new.name, new.glyphs), ("kern1_b", ["b", "thorn"]))
+        self.assertEqual(new.differs, [(u"\u00fe", 50)], "thorn kerns 50 units unlike b against a partner")
+        self.assertIn(u"thorn" if False else u"\u00fe (50 units)", new.describe())
+        self.assertEqual((add.existing, add.adding), ("o1", ["odieresis"]))
+        made, extended, moved = ak.apply_class_plans(k, [new, add])
+        self.assertEqual((made, extended, moved), (1, 1, 2))
+        stored = k.kerning.stored
+        self.assertEqual(stored[(("kern1_b", True), ("o1", True))], -20, "b's pairs moved to its new class")
+        self.assertEqual(stored[(("kern1_b", True), ("x", False))], -10)
+        self.assertNotIn((("b", False), ("o1", True)), stored)
+        self.assertEqual(k.kerning.groups.data["o1"], (["o", "oacute", "odieresis"], "KernRight"))
+        self.assertEqual(k.kerning.groups.data["kern1_b"], (["b", "thorn"], "KernLeft"))

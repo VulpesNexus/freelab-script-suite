@@ -634,12 +634,13 @@ class FontKerning(object):
                               for (left, right), value in kerning.getPlainPairsDict().items())
         except Exception:
             pass
-        self.classes, self.members = set(), {}
+        self.classes, self.members, self.class_flags = set(), {}, {}
         self.left_class, self.right_class = {}, {}
         try:
             for name, (members, side) in kerning.groups.items():
                 name = _text(name)
                 self.classes.add(name)
+                self.class_flags[name] = str(side)
                 self.members[name] = [_text(m) for m in members]
                 for member in self.members[name]:
                     if side in CLASS_SIDES["left"]:
@@ -649,10 +650,13 @@ class FontKerning(object):
         except Exception:
             pass
         self.entries = set()  # ((left, is class), (right, is class)) of every explicit pair
+        self.values = {}  # entry: its value
         try:
-            for pair in kerning.keys():
-                self.entries.add(((_text(pair.left.id), str(pair.left.mode) == "groupMode"),
-                                  (_text(pair.right.id), str(pair.right.mode) == "groupMode")))
+            for pair, value in kerning.items():
+                entry = ((_text(pair.left.id), str(pair.left.mode) == "groupMode"),
+                         (_text(pair.right.id), str(pair.right.mode) == "groupMode"))
+                self.entries.add(entry)
+                self.values[entry] = value
         except Exception:
             pass
 
@@ -893,6 +897,268 @@ def analyze(package, master, characters=None, em=EM_PIXELS, progress=None, core=
 
 
 # ---------------------------------------------------------------------------
+# Suggested kerning classes
+# ---------------------------------------------------------------------------
+
+CLASS_MODEL_FILE = "class_model.json"  # beside this script: kerning/train/classes.py counts it from the corpus
+MERGE_RATE = 0.5  # two base letters may share a class when at least this share of the corpus's families class them so
+CLASS_SIDES_LABELS = {"first": "First in a pair (the glyph's right side)", "second": "Second in a pair (the glyph's left side)"}
+CLASS_FLAGS = {"first": "KernLeft", "second": "KernRight"}  # FontLab's flags: KernLeft classes come first in pairs
+CLASS_PREFIX = {"first": "kern1_", "second": "kern2_"}
+
+_CLASS_MODEL = {}
+
+
+def class_model(path=None):
+    """{side: {(a, b): share of families classing them together}} from class_model.json, or None."""
+    path = path or os.path.join(os.path.dirname(os.path.abspath(globals().get("__file__") or ".")), CLASS_MODEL_FILE)
+    if path not in _CLASS_MODEL:
+        import io
+        import json
+        try:
+            with io.open(path, encoding="utf-8") as handle:
+                data = json.load(handle)
+            model = None
+            if data.get("format") == 1:
+                model = {}
+                for side, rows in data["sides"].items():
+                    rates = model[side] = {}
+                    for pair, together, apart in rows:
+                        rates[(pair[0], pair[1])] = rates[(pair[1], pair[0])] = together / float(together + apart)
+            _CLASS_MODEL[path] = model
+        except (IOError, OSError, ValueError, KeyError, TypeError):
+            _CLASS_MODEL[path] = None
+    return _CLASS_MODEL[path]
+
+
+def class_characters():
+    """The characters classes are suggested for: Latin letters to Latin Extended-B, figures, punctuation."""
+    import unicodedata
+    letters = [unichr_(code) for code in range(0x41, 0x250) if unicodedata.category(unichr_(code)).startswith("L")]
+    return letters + [ch for ch in FIGURES + PUNCTUATION]
+
+
+def unichr_(code):
+    try:
+        return unichr(code)  # noqa: F821 (Python 2)
+    except NameError:
+        return chr(code)
+
+
+def base_letter(ch):
+    """The letter a character is built on (A for À, L for Ŀ), or the character itself."""
+    import unicodedata
+    decomposed = unicodedata.normalize("NFKD", ch)
+    return decomposed[0] if decomposed and decomposed[0].isalpha() and ch.isalpha() else ch
+
+
+SIGNATURE_PARTNERS = {"first": u"HOonvTAy.", "second": u"HOonvTLrf"}  # what a side is kerned against, as seen beside it
+SIGNATURE_TOLERANCE = 0.02  # two sides kern alike when every partner's kerning differs by at most this share of the em
+SIGNATURE_MIN = 3  # partners both sides need, measured, to be compared
+DIFFERS_NOTE = 0.03  # a member kerning this much differently from its class's first glyph is named (an exception may be due)
+
+
+def kind_character(ch):
+    """The character whose kind (capital, lowercase, figure) sets a pair's references: its base letter."""
+    base = base_letter(ch)
+    return base if base in LETTERS + FIGURES else ch
+
+
+def side_signature(tools, image_of, names, ch, side, em, reach):
+    """How a side kerns: for each partner of SIGNATURE_PARTNERS the font has, the average of halfkern's
+    and contour distance's raw kerning of the pair (the side facing the partner), as a share of the em;
+    None where neither measures it."""
+    found = []
+    for partner in SIGNATURE_PARTNERS[side]:
+        if partner not in names:
+            found.append(None)
+            continue
+        left, right = (ch, partner) if side == "first" else (partner, ch)
+        if pair_kinds(kind_character(left), kind_character(right)) is None:
+            found.append(None)
+            continue
+        halo, contour = measure_pair(tools, kind_character(left), kind_character(right), image_of(left), image_of(right),
+                                     em, reach)
+        values = [v for v in (halo, contour) if v is not None]
+        found.append(sum(values) / len(values) / float(em) if values else None)
+    return found
+
+
+def signature_gap(one, other):
+    """The largest difference between two signatures' measured partners, or None with too few."""
+    both = [abs(a - b) for a, b in zip(one or [], other or []) if a is not None and b is not None]
+    return max(both) if len(both) >= SIGNATURE_MIN else None
+
+
+def signatures_match(one, other, tolerance=SIGNATURE_TOLERANCE):
+    gap = signature_gap(one, other)
+    return gap is not None and gap <= tolerance
+
+
+def suggest_classes(names, signature_of, model):
+    """{side: [[character, ...], ...]} classes for the characters of names ({character: glyph name}).
+    An accented letter joins its base where most of the corpus's families class the two together on
+    that side (model, from class_model), or, for a pair the corpus has not seen, where the two kern
+    alike in this font. Base letters share a class where most families class them so and every two
+    of them kern alike here. signature_of(character, side) gives a side_signature, or None."""
+    result = {}
+    for side in ("first", "second"):
+        signatures = {}
+
+        def signature(ch):
+            if ch not in signatures:
+                signatures[ch] = signature_of(ch, side)
+            return signatures[ch]
+
+        rates = (model or {}).get(side, {})
+        groups, loners = {}, set()  # base: [members]; letters kept apart from their base
+        for ch in sorted(names):
+            base = base_letter(ch)
+            if base == ch or base not in names:
+                groups.setdefault(ch, [ch])
+                continue
+            rate = rates.get((base, ch))
+            joins = rate >= MERGE_RATE if rate is not None else signatures_match(signature(base), signature(ch))
+            if joins:
+                groups.setdefault(base, [base]).append(ch)
+            else:
+                groups[ch] = [ch]
+                loners.add(ch)
+        bases = sorted(b for b in groups if b not in loners)
+        candidates = sorted(((rates.get((a, b), 0.0), a, b) for i, a in enumerate(bases) for b in bases[i + 1:]
+                             if rates.get((a, b), 0.0) >= MERGE_RATE), reverse=True)
+        joined = dict((base, [base]) for base in groups)  # base: the bases of its class (one shared list)
+        for rate, a, b in candidates:
+            if joined[a] is joined[b]:
+                continue
+            together = joined[a] + joined[b]
+            if all(signatures_match(signature(x), signature(y)) for i, x in enumerate(together) for y in together[i + 1:]):
+                for base in together:
+                    joined[base] = together
+        classes, seen = [], set()
+        for base in sorted(groups):
+            key = id(joined[base])
+            if key in seen:
+                continue
+            seen.add(key)
+            members = []
+            for member_base in sorted(joined[base], key=lambda b: (b not in LETTERS, b)):
+                members.extend(groups[member_base])
+            if len(members) > 1:
+                classes.append(members)
+        result[side] = classes
+    return result
+
+
+class ClassPlan(object):
+    """One suggested class against the font's classes: action "new" (a class to make), "add" (glyphs
+    to add to an existing class), "same" (the font has it), or "overlap" (members in several classes,
+    or a class that kerns both sides: left as it is)."""
+
+    def __init__(self, side, members, names, kerning, differs=None):
+        self.side, self.members = side, members
+        self.differs = differs or []  # (character, units): members kerning unlike the first one
+        self.glyphs = [names[ch] for ch in members]
+        lookup = kerning.left_class if side == "first" else kerning.right_class
+        found = sorted(set(lookup[g] for g in self.glyphs if g in lookup))
+        self.existing, self.adding = None, []
+        self.name = None
+        if not found:
+            self.action = "new"
+            self.name = class_name(kerning, CLASS_PREFIX[side] + self.glyphs[0])
+            self.adding = list(self.glyphs)
+        elif len(found) > 1:
+            self.action, self.reason = "overlap", u"its glyphs are in %d classes: %s" % (len(found), u", ".join(found))
+            self.existing = found
+        else:
+            self.existing = found[0]
+            self.adding = [g for g in self.glyphs if g not in kerning.members.get(self.existing, [])]
+            if not self.adding:
+                self.action = "same"
+            elif kerning.class_flags.get(self.existing) == "KernBothSide":
+                self.action, self.reason = "overlap", u"class %s kerns both sides" % self.existing
+            else:
+                self.action = "add"
+
+    def describe(self):
+        text = self.describe_action()
+        if self.differs:
+            text += u" — kerns unlike %s: %s" % (self.members[0], u", ".join(
+                u"%s (%d units)" % pair for pair in self.differs))
+        return text
+
+    def describe_action(self):
+        glyphs = u" ".join(self.members)
+        if self.action == "new":
+            return u"New class %s: %s" % (self.name, glyphs)
+        if self.action == "add":
+            return u"Add %s to class %s" % (u" ".join(self.adding), self.existing)
+        if self.action == "same":
+            return u"Class %s already: %s" % (self.existing, glyphs)
+        return u"%s: left as it is (%s)" % (glyphs, self.reason)
+
+
+def class_name(kerning, wanted):
+    name, number = wanted, 2
+    while name in kerning.classes:
+        name, number = u"%s%d" % (wanted, number), number + 1
+    return name
+
+
+def plan_classes(suggested, names, kerning, signature_of=None, upm=1000.0):
+    """The suggestions against the font's classes; with signature_of, each notes the members that kern
+    unlike its first glyph by DIFFERS_NOTE or more (in font units)."""
+    plans = []
+    for side in ("first", "second"):
+        for members in suggested.get(side, []):
+            differs = []
+            if signature_of is not None:
+                first = signature_of(members[0], side)
+                for ch in members[1:]:
+                    gap = signature_gap(first, signature_of(ch, side))
+                    if gap is not None and gap >= DIFFERS_NOTE:
+                        differs.append((ch, int(round(gap * upm))))
+            plans.append(ClassPlan(side, members, names, kerning, differs))
+    return plans
+
+
+def apply_class_plans(kerning, plans, move_base_kerning=True):
+    """Make the "new" classes and extend the "add" ones (kerning: a FontKerning). With
+    move_base_kerning, a new class takes over the explicit pairs of its first glyph on its side (its
+    members then share them); they are removed from that glyph. Returns (classes made, extended, pairs moved)."""
+    made = extended = moved = 0
+    groups = kerning.kerning.groups
+    for plan in plans:
+        if plan.action == "new":
+            groups[plan.name] = (list(plan.glyphs), CLASS_FLAGS[plan.side])
+            kerning.classes.add(plan.name)
+            kerning.members[plan.name] = list(plan.glyphs)
+            kerning.class_flags[plan.name] = CLASS_FLAGS[plan.side]
+            made += 1
+            if move_base_kerning:
+                base = (plan.glyphs[0], False)
+                at = 0 if plan.side == "first" else 1
+                for entry in sorted(e for e in kerning.entries if e[at] == base):
+                    value = kerning.values.get(entry)
+                    if value is None:
+                        continue
+                    moved_to = ((plan.name, True), entry[1]) if at == 0 else (entry[0], (plan.name, True))
+                    if moved_to in kerning.entries:
+                        continue
+                    kerning.write(moved_to, value, False)
+                    kerning.values[moved_to] = value
+                    kerning.write(entry, 0, True)
+                    kerning.values.pop(entry, None)
+                    moved += 1
+        elif plan.action == "add":
+            members = kerning.members[plan.existing] + [g for g in plan.adding if g not in kerning.members[plan.existing]]
+            groups[plan.existing] = (members, kerning.class_flags[plan.existing])
+            kerning.members[plan.existing] = members
+            extended += 1
+    return made, extended, moved
+
+
+# ---------------------------------------------------------------------------
 # The dialog
 # ---------------------------------------------------------------------------
 
@@ -1038,11 +1304,15 @@ class AutoKerningDialog(object):
         self.all_button = QtGui.QPushButton("Check new pairs")
         self.all_button.setWhatsThis("Checks every listed pair the font does not kern yet.")
         self.none_button = QtGui.QPushButton("Check none")
+        self.classes_button = QtGui.QPushButton(u"Suggest classes…")
+        self.classes_button.setWhatsThis("Suggests kerning classes for this master, from the open-licensed fonts FreeLab "
+                                         "learned from and this font's own outlines, to review before any is made.")
+        self.class_dialog = None
         self.apply_button = QtGui.QPushButton("Write checked pairs")
         self.apply_button.setWhatsThis("Writes the Suggested value of every checked pair to the current master, "
                                        "where the pair's value comes from: see Kerning classes in the help.")
         self.close_button = QtGui.QPushButton("Close")
-        for button in (self.all_button, self.none_button):
+        for button in (self.all_button, self.none_button, self.classes_button):
             buttons.addWidget(button)
         buttons.addStretch(1)
         buttons.addWidget(self.apply_button)
@@ -1053,6 +1323,7 @@ class AutoKerningDialog(object):
         self.all_button.connect("clicked()", lambda: self.check_all(True))
         self.none_button.connect("clicked()", lambda: self.check_all(False))
         self.apply_button.connect("clicked()", self.write)
+        self.classes_button.connect("clicked()", self.suggest_classes)
         self.close_button.connect("clicked()", dialog.close)
         self.reset_button.connect("clicked()", self.reset)
         self.table.connect("itemSelectionChanged()", self.select)
@@ -1066,6 +1337,11 @@ class AutoKerningDialog(object):
         self.choice_group.connect("buttonClicked(int)", lambda number: self.choose(CHOICES[number][0]))
         self.keys = self.make_keys()
         self.watcher = self.watch_palette()
+
+    def suggest_classes(self):
+        if self.class_dialog is None:
+            self.class_dialog = ClassDialog(self)  # kept: PythonQt deletes a dialog with no Python reference
+        self.class_dialog.show()
 
     def make_keys(self):
         """The list's keys: 1 to 6 pick, Backspace resets, Space checks. Only while the list has the focus."""
@@ -1524,6 +1800,177 @@ class AutoKerningDialog(object):
         self.update_picked()
         self.fill_table()
         self.status.setText(u" ".join(lines))
+
+
+def font_class_suggestions(package, master, core=None, em=EM_PIXELS, model=None):
+    """(plans, names): the classes suggested for a master, planned against its own classes."""
+    glyphs = FontLabGlyphs(package, master, em)
+    found = [(ch, name) for ch, name in font_glyphs(package, class_characters()) if glyphs.add(name)]
+    names = dict(found)
+    for ch in TUNING:
+        if ch not in names:
+            raise ValueError(u"this font has no “%s”: "
+                             u"its spacing is what glyphs are compared by." % ch)
+    image_of = lambda ch: glyphs.image(names[ch])
+    tools = make_bands(core or Core(), image_of, names, em, glyphs.pad)
+    signatures = {}
+
+    def signature_of(ch, side):
+        if (ch, side) not in signatures:
+            signatures[(ch, side)] = side_signature(tools, image_of, names, ch, side, em, float(glyphs.pad))
+        return signatures[(ch, side)]
+
+    suggested = suggest_classes(names, signature_of, model if model is not None else class_model())
+    return plan_classes(suggested, names, FontKerning(package.kerning(master)), signature_of, glyphs.upm), names
+
+
+class ClassDialog(object):
+    """Suggested kerning classes for the current master: review, check, and create."""
+
+    def __init__(self, owner):
+        QtCore, QtGui = _qt()
+        self.owner = owner
+        parent = owner.dialog
+        dialog = self.dialog = QtGui.QDialog(parent)
+        dialog.setWindowTitle("FreeLab Kerning Classes")
+        dialog.setWhatsThis(CLASS_HELP)
+        dialog.resize(720, 640)
+        layout = QtGui.QVBoxLayout(dialog)
+        self.status = QtGui.QLabel(u"")
+        self.status.setWordWrap(True)
+        layout.addWidget(self.status)
+        self.tree = QtGui.QTreeWidget()
+        self.tree.setHeaderLabels(["Suggestion"])
+        self.tree.setWhatsThis(u"Each class suggested for this master: checked ones are made (or extended) when you click "
+                               u"Create checked classes. Gray ones are shown for reference and left as they are.")
+        layout.addWidget(self.tree, 1)
+        self.move = QtGui.QCheckBox("Move each new class's first glyph's pairs into the class")
+        self.move.setChecked(True)
+        self.move.setWhatsThis(u"A new class made from A, \N{LATIN CAPITAL LETTER A WITH GRAVE}, ... takes over A's own pairs on "
+                               u"that side, so every member kerns as A does. Without it, the class starts with no kerning.")
+        layout.addWidget(self.move)
+        buttons = QtGui.QHBoxLayout()
+        self.all_button = QtGui.QPushButton("Check all")
+        self.none_button = QtGui.QPushButton("Check none")
+        self.apply_button = QtGui.QPushButton("Create checked classes")
+        self.close_button = QtGui.QPushButton("Close")
+        for button in (self.all_button, self.none_button):
+            buttons.addWidget(button)
+        buttons.addStretch(1)
+        buttons.addWidget(self.apply_button)
+        buttons.addWidget(self.close_button)
+        layout.addLayout(buttons)
+        self.all_button.connect("clicked()", lambda: self.check_all(True))
+        self.none_button.connect("clicked()", lambda: self.check_all(False))
+        self.apply_button.connect("clicked()", self.apply)
+        self.close_button.connect("clicked()", dialog.close)
+        self.plans = []
+
+    def show(self):
+        QtCore, QtGui = _qt()
+        self.dialog.show()
+        self.dialog.raise_()
+        QtCore.QTimer.singleShot(50, self.run)
+
+    def run(self):
+        QtCore, QtGui = _qt()
+        package, master = self.owner.package, self.owner.master
+        if package is None:
+            self.status.setText(u"No font is open. Open one, then run Auto Kerning again.")
+            return
+        if class_model() is None:
+            self.status.setText(u"The class model (%s) is missing beside the script: reinstall FreeLab." % CLASS_MODEL_FILE)
+            return
+        self.status.setText(u"Comparing the glyphs' sides\N{HORIZONTAL ELLIPSIS}")
+        QtGui.QApplication.processEvents()
+        try:
+            self.plans, _ = font_class_suggestions(package, master)
+        except Exception as exc:
+            self.status.setText(u"%s" % exc)
+            return
+        self.fill()
+
+    def fill(self):
+        QtCore, QtGui = _qt()
+        self.tree.clear()  # (items are found again by walking the tree, never kept: PythonQt deletes them here)
+        counts = {}
+        for side in ("first", "second"):
+            top = QtGui.QTreeWidgetItem([CLASS_SIDES_LABELS[side]])
+            self.tree.addTopLevelItem(top)
+            order = {"new": 0, "add": 0, "overlap": 1, "same": 2}  # what can be made first, what the font has last
+            for index, plan in sorted(enumerate(self.plans), key=lambda pair: (order[pair[1].action], pair[0])):
+                if plan.side != side:
+                    continue
+                counts[plan.action] = counts.get(plan.action, 0) + 1
+                item = QtGui.QTreeWidgetItem([plan.describe()])
+                item.setData(0, QtCore.Qt.UserRole, index)
+                if plan.action in ("new", "add"):
+                    item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsUserCheckable | QtCore.Qt.ItemIsSelectable)
+                    item.setCheckState(0, QtCore.Qt.Checked)
+                else:
+                    item.setFlags(QtCore.Qt.ItemIsSelectable)  # shown, not made: drawn disabled
+                item.setToolTip(0, u"Glyphs: %s" % u" ".join(plan.glyphs))
+                top.addChild(item)
+            top.setExpanded(True)
+        plural = lambda count, one, many: u"%d %s" % (count, one if count == 1 else many)
+        self.status.setText(u"%s, master %s: %s, %s, %s, %s (they overlap its classes). Nothing is changed until you "
+                            u"create them." % (self.owner.package.tfn, self.owner.master,
+                                               plural(counts.get("new", 0), u"new class", u"new classes"),
+                                               plural(counts.get("add", 0), u"class to extend", u"classes to extend"),
+                                               plural(counts.get("same", 0), u"the font has already", u"the font has already"),
+                                               plural(counts.get("overlap", 0), u"left as it is", u"left as they are")))
+        self.apply_button.setEnabled(bool(counts.get("new") or counts.get("add")))
+
+    def items(self):
+        found = []
+        for top_index in range(self.tree.topLevelItemCount):
+            top = self.tree.topLevelItem(top_index)
+            for child in range(top.childCount()):
+                found.append(top.child(child))
+        return found
+
+    def check_all(self, on):
+        QtCore, QtGui = _qt()
+        for item in self.items():
+            if item.flags() & QtCore.Qt.ItemIsUserCheckable:
+                item.setCheckState(0, QtCore.Qt.Checked if on else QtCore.Qt.Unchecked)
+
+    def apply(self):
+        QtCore, QtGui = _qt()
+        chosen = []
+        for item in self.items():
+            if item.flags() & QtCore.Qt.ItemIsUserCheckable and item.checkState(0) == QtCore.Qt.Checked:
+                chosen.append(self.plans[int(item.data(0, QtCore.Qt.UserRole))])
+        if not chosen:
+            return
+        package, master = self.owner.package, self.owner.master
+        kerning = FontKerning(package.kerning(master))
+        made, extended, moved = apply_class_plans(kerning, chosen, self.move.checked)
+        try:
+            self.owner.fontlab.flItems.notifyPackageContentUpdated(package.id)
+        except Exception:
+            pass
+        self.run()
+        self.status.setText(u"Made %d classes and extended %d%s. Writing goes straight into the open font: close it "
+                            u"without saving to take it back. %s" % (
+                                made, extended, u", and moved %d pairs into them" % moved if moved else u"",
+                                self.status.text))
+        self.owner.run()  # Auto Kerning reads the classes again
+
+
+CLASS_HELP = u"""<b>FreeLab Kerning Classes</b><br>
+Suggests kerning classes for this master: glyphs that kern alike, on the side that faces the pair.<br><br>
+<b>How</b>: an accented letter joins its base letter where its side matches the base's in this font's
+outlines (its accent no nearer the side than the base's ink). Base letters share a class where most
+of the open-licensed fonts FreeLab learned from class them so (n with m and h, o with c, e, and q) and
+every two of them match in this font.<br>
+<b>Sides</b>: <i>First in a pair</i> classes group glyphs by their right side (FontLab's left, or 1st,
+classes); <i>second in a pair</i> by their left side.<br>
+<b>The font's classes come first</b>: a suggestion makes a class only where none of its glyphs has one
+on that side, or adds glyphs to the one class they share. Suggestions overlapping several classes,
+or a class that kerns both sides, are shown and left as they are.<br><br>
+Click this help's ? button, then any control, for what it does."""
+
 
 
 def main():
