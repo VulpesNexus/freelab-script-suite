@@ -188,6 +188,14 @@ class FakeKerning(object):
     def remove(self, key):
         del self.stored[self.entry(key)]
 
+    renames = None
+
+    def renameGroup(self, old, new):
+        self.renames = (self.renames or []) + [(old, new)]
+        self.groups.data[new] = self.groups.data.pop(old)
+        self.stored = dict((tuple((new if (name, is_class) == (old, True) else name, is_class) for name, is_class in entry), value)
+                           for entry, value in self.stored.items())
+
     def getPlainPairsDict(self):
         kerning = ak.FontKerning.__new__(ak.FontKerning)  # the same class lookup, on these groups
         kerning.left_class, kerning.right_class = {}, {}
@@ -236,10 +244,23 @@ class KerningClassTests(unittest.TestCase):
         self.assertEqual(k.reach(k.target("T", "o")[0]), 4)
         self.assertEqual(k.target("V", "o"), ((("V", False), ("o1", True)), True), "no class on the left: the glyph")
 
-    def test_a_glyph_named_like_a_class_cannot_be_written_alone(self):
-        # kerning[("A", "V")] writes class A: the glyph pair A V cannot be named, so it is not written
+    def test_a_glyph_named_like_a_class_is_written_with_the_class_out_of_the_way(self):
+        # kerning[("A", "V")] would write class A: the class is renamed while the glyph pair is written
         k = self.kerning({(("A", False), ("V", False)): -50})
-        self.assertIsNone(k.target("A", "V"))
+        entry, remove = k.target("A", "V")
+        self.assertEqual(entry, (("A", False), ("V", False)))
+        self.assertEqual(k.hidden(entry), ["A"])
+        k.write(entry, -70, remove)
+        self.assertEqual(k.kerning.stored[entry], -70)
+        self.assertNotIn((("A", True), ("V", False)), k.kerning.stored, "class A untouched")
+        self.assertIn("A", k.kerning.groups.data, "and named A again")
+        self.assertEqual(k.kerning.renames, [("A", "A__freelab"), ("A__freelab", "A")])
+
+    def test_an_entry_lists_the_glyph_pairs_it_kerns(self):
+        k = self.kerning({})
+        self.assertEqual(k.pairs((("T", True), ("o1", True))),
+                         [("T", "o"), ("T", "oacute"), ("Tcaron", "o"), ("Tcaron", "oacute")])
+        self.assertEqual(k.reach((("V", False), ("o1", True))), 2)
 
     def test_a_zero_removes_an_entry_unless_a_class_pair_lies_below(self):
         k = self.kerning({(("Tcaron", False), ("o1", True)): -20, (("T", True), ("o1", True)): -172})
