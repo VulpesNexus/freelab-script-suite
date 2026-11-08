@@ -1054,7 +1054,13 @@ class AutoKerningDialog(object):
 
     def current_font(self):
         """FontLab's current font, or None when no font is open (FontLab then hands an empty package)."""
-        package = self.fontlab.flWorkspace.instance().currentPackage
+        workspace = self.fontlab.flWorkspace.instance()
+        try:
+            if not workspace.packages():
+                return None  # nothing open: FontLab still hands a placeholder package with one glyph
+        except Exception:
+            pass
+        package = workspace.currentPackage
         if package is None or package.isNull or not package.glyphsCount:
             return None
         return package
@@ -1324,7 +1330,7 @@ class AutoKerningDialog(object):
         chosen = s.override or source
         self.reset_button.setEnabled(bool(s.override))
         picked = (u"Picked by hand: %s. " % dict(CHOICES)[s.override]) if s.override else u""
-        self.preview_note.setText(u"%s%s %s" % (picked, s.left_char + s.right_char, self.target_text(s)))
+        self.preview_note.setText(u"%sThe pair %s: %s" % (picked, s.left_char + s.right_char, self.target_text(s)[:1].lower() + self.target_text(s)[1:]))
         palette = self.dialog.palette
         text = palette.color(QtGui.QPalette.WindowText)  # (FontLab 7's PythonQt lacks the placeholder text role)
         scale = float(PREVIEW_SIZE) / float(self.package.upm)
