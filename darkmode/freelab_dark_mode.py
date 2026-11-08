@@ -929,9 +929,36 @@ def _light_text_label(widget):
     if _color_lightness(parent.palette.color(QPalette.Window)) > DARK_PARENT_MAX:
         return False
     if not widget.isVisible():
+        return False  # decided once shown: a hidden page's label may come to lie on a light badge
+    try:
+        geometry = _prop(widget, "geometry")
+        key = (widget.palette.color(QPalette.WindowText).name(), geometry.width(), geometry.height(),
+               _record(parent) and int(parent.property(ID_PROP)))  # the record gives the parent its id
+    except Exception:
         return True
-    try:  # what is painted beneath it, as its parent paints that spot (a parent may paint a light badge)
-        image = parent.grab(_prop(widget, "geometry")).toImage()
+    record = _record(widget)
+    cached = record.get("light_label")
+    if cached is not None and cached[0] == key:
+        return cached[1]  # sweeps revisit every label: the parent is grabbed again only when this changes
+    result = _dark_ground(parent, geometry)
+    record["light_label"] = (key, result)
+    return result
+
+
+def _dark_ground(parent, rect):
+    """Whether the parent paints rect dark, read as the parent draws it without FreeLab's effect: a
+    parent with the ink effect would show a light badge already mapped dark (grab draws a widget
+    through its own effect), and the label on it would be kept light on the light badge."""
+    effect = parent.graphicsEffect()
+    paused = effect is not None and _ours(parent) and bool(_prop(effect, "enabled"))
+    try:
+        if paused:
+            effect.setEnabled(False)
+        try:
+            image = parent.grab(rect).toImage()
+        finally:
+            if paused:
+                effect.setEnabled(True)
         width, height = image.width(), image.height()
     except Exception:
         return True
@@ -1173,7 +1200,7 @@ def icon_is_swatch(icon):
 
 
 def _swap_icon(obj):
-    if obj.property(LEAVE_ALONE_PROP):
+    if _asked_to_be_left_alone(obj):
         return
     state = _state()
     icon = _prop(obj, "icon")
@@ -1213,7 +1240,9 @@ def _swap_pixmap(label):
 
 
 def _under_ink(widget):
-    """Inside a widget FreeLab's ink effect maps (within its window)."""
+    """Inside a widget FreeLab's ink effect maps (within its window), with nothing between them that
+    the effect draws unmapped: a protected widget (the defringe bar, a left-alone one), a hooked
+    island, or a list the native ink paints keep their images as dark mode made them."""
     current = widget
     while not current.isWindow():
         current = current.parentWidget()
@@ -1222,6 +1251,8 @@ def _under_ink(widget):
         record = _record(current, create=False)
         if record is not None and record.get("kind") == "ink" and record.get("effect") is not None and _ours(current, record):
             return True
+        if (record is not None and record.get("protected")) or _drawn_natively(current):
+            return False
     return False
 
 
@@ -1236,6 +1267,8 @@ def _unswap_labels_inside(widget):
         label = record.get("obj")
         if "pixmap" not in record or label is None or not _alive(label) or not widget.isAncestorOf(label):
             continue
+        if not _under_ink(label):
+            continue  # a protected widget between them: the effect draws it unmapped, the mapped image stays
         original = record.pop("pixmap")
         current = _prop(label, "pixmap")
         if current is not None and current.cacheKey() in state["mapped_keys"]:
@@ -1257,7 +1290,7 @@ def _show_original_icon(widget):
 
 
 def _darken_icons(widget):
-    if widget.property(LEAVE_ALONE_PROP):
+    if _asked_to_be_left_alone(widget):
         return  # FreeLab's own pictures (Auto Kerning's previews): drawn for the palette, never mapped
     if widget.inherits("QTreeWidget") or widget.inherits("QListWidget"):
         _swap_item_icons(widget)
@@ -1293,6 +1326,24 @@ LOGO_ROWS_MAX = 200  # visible rows looked at per paint
 LOGO_MIN_SIDE = 24  # a list icon drawn this large or larger is a picture (Export Profiles' formats are 32 px)
 
 
+def _visible_columns(view, count, width):
+    """The columns of a view that lie on its viewport (every column of a view that cannot say): a wide
+    table under the ink effect asked the model for every column of every visible row on each paint."""
+    if not hasattr(view, "columnViewportPosition") or not hasattr(view, "columnWidth"):
+        return list(range(count))
+    found = []
+    for column in range(count):
+        try:
+            if hasattr(view, "isColumnHidden") and view.isColumnHidden(column):
+                continue
+            left = view.columnViewportPosition(column)
+            if left < width and left + view.columnWidth(column) > 0:
+                found.append(column)
+        except Exception:
+            return list(range(count))
+    return found
+
+
 def _logo_rects(view):
     """The viewport rectangles of the visible logo icons in a list (the style's decoration place:
     at the left of the cell, centered), for icons dark mode leaves as FontLab draws them."""
@@ -1312,11 +1363,12 @@ def _logo_rects(view):
     if not first.isValid():
         return []
     index = first
+    columns = _visible_columns(view, model.columnCount(first.parent()), viewport.width)
     for _ in range(LOGO_ROWS_MAX):
         row_rect = view.visualRect(index)
         if not index.isValid() or row_rect.top() > viewport.height:
             break
-        for column in range(model.columnCount(index.parent())):
+        for column in columns:
             cell = model.index(index.row(), column, index.parent())
             icon = model.data(cell, Qt.DecorationRole)
             if icon is None or not hasattr(icon, "availableSizes") or icon.isNull():  # icons only (not pixmaps)
@@ -2035,8 +2087,24 @@ INDICATOR_BORDER = {"dark": "#8c8c92", "medium": "#a8a8ae"}
 LEAVE_ALONE_PROP = "freelabLeaveAlone"  # set by FreeLab's own tools on what they draw themselves (previews)
 
 
+def _asked_to_be_left_alone(obj):
+    """The widget, or one of its ancestors within its window, carries LEAVE_ALONE_PROP (a FreeLab
+    tool may mark a whole panel of previews). An action counts by its own property."""
+    current = obj
+    try:
+        while current is not None:
+            if current.property(LEAVE_ALONE_PROP):
+                return True
+            if not current.isWidgetType() or current.isWindow():
+                return False
+            current = current.parentWidget()
+    except Exception:  # deleted meanwhile
+        return False
+    return False
+
+
 def _left_alone(widget, name):
-    return (name in SKIP_CLASSES or any(word in name for word in SKIP_CLASS_WORDS) or bool(widget.property(LEAVE_ALONE_PROP))
+    return (name in SKIP_CLASSES or any(word in name for word in SKIP_CLASS_WORDS) or _asked_to_be_left_alone(widget)
             or (widget.inherits("QAbstractButton") and (_prop(widget, "objectName") or u"").startswith(SWATCH_NAME_PREFIXES))
             or (widget.inherits("QAbstractSlider") and _within(widget, COLOR_SLIDER_PANELS)))
 
@@ -2805,7 +2873,7 @@ def _watch_windows(follow):
 # in the hooks library, before anything is drawn. Everything else (palette, Fusion, stylesheets,
 # icons, title bars, editors, lists, the other effects) is the same in both. If the native engine cannot start (no library, another Qt build), the script engine runs.
 ENGINES = ("script", "native")
-HOOKS_VERSION = 17
+HOOKS_VERSION = 18
 PALETTE_GROUPS, PALETTE_ROLES = 3, 21
 
 

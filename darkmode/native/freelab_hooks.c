@@ -28,7 +28,7 @@
  */
 #include "freelab_pixels.c"
 
-#define FREELAB_HOOKS_VERSION 17
+#define FREELAB_HOOKS_VERSION 18
 
 typedef int (*virtual_protect_fn)(void *, size_t, uint32_t, uint32_t *);
 #define PAGE_READWRITE_ 0x04
@@ -551,10 +551,11 @@ static int light_slot(const void *palette, int group, int role, const qcolor *re
 #define QIMAGE_SIZE 64 /* room for a QImage (32 bytes in Qt 5) */
 #define MEMO 4096
 static struct {
+    uint8_t image[QIMAGE_SIZE]; /* first: a QImage kept here has its pointers 8-byte aligned (after the
+                                 * fields below it sat at offset 20) */
     int64_t key;
     uint64_t stamp;
     int used;
-    uint8_t image[QIMAGE_SIZE];
 } image_cache[IMAGE_SLOTS];
 static uint64_t image_clock;
 static volatile long image_busy;
@@ -709,10 +710,10 @@ done:
 #define PIXMAP_SLOTS 512
 #define QPIXMAP_SIZE 64
 static struct {
+    uint8_t pixmap[QPIXMAP_SIZE]; /* first, 8-byte aligned, as the images' */
     int64_t key;
     uint64_t stamp;
     int used;
-    uint8_t pixmap[QPIXMAP_SIZE];
 } pixmap_cache[PIXMAP_SLOTS];
 static int64_t pixmaps_mapped, pixmaps_reused;
 
@@ -721,7 +722,8 @@ static const void *mapped_pixmap(const void *pixmap, int mode)
     int i, slot = -1, format;
     int64_t key;
     uint64_t oldest = ~0ULL;
-    uint8_t image[QIMAGE_SIZE];
+    int64_t image_storage[QIMAGE_SIZE / 8]; /* a QImage on the stack, 8-byte aligned */
+    uint8_t *image = (uint8_t *)image_storage;
     const void *result = pixmap;
     key = qt_pixmap_cache_key(pixmap);
     if (key == 0)

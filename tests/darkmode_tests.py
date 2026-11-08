@@ -18,7 +18,7 @@ os.environ["FREELAB_NO_AUTOSTART"] = "1"
 
 import qtfakes  # noqa: E402
 import freelab_dark_mode as dm  # noqa: E402
-from qtfakes import FakeWidget, FakeIcon, QAction, QColor, QPalette  # noqa: E402
+from qtfakes import FakeGeometry, FakeWidget, FakeIcon, QAction, QColor, QPalette  # noqa: E402
 
 PANEL_SHEET = u"QWidget{background:#edeeef;color:black;}\nQToolButton{background-color:white;}"
 DARK_PANEL_SHEET = dm.recolor_sheet(PANEL_SHEET)
@@ -589,6 +589,15 @@ class LeaveAloneTests(DarkModeCase):
         self.assertEqual(button.icon.label, "pair", "its icon as it is")
 
 
+    def test_a_marked_container_leaves_its_children_alone(self):
+        panel = FakeWidget("QWidget", "previews", parent=self.content)
+        panel.setProperty(dm.LEAVE_ALONE_PROP, True)
+        button = FakeWidget("QToolButton", "preview", parent=panel, icon=FakeIcon("pair"),
+                            inherits=("QAbstractButton",), light="ink")
+        self.on()
+        self.assertIsNone(button.effect)
+        self.assertEqual(button.icon.label, "pair")
+
     def test_left_alone_icons_are_never_swapped(self):
         # Auto Kerning's previews once came back mapped (dark gray glyphs): the swap itself refuses them
         button = FakeWidget("QToolButton", "preview", parent=self.content, icon=FakeIcon("pair"),
@@ -618,6 +627,26 @@ class LabelPixmap(object):
         return self.side
 
 
+class VisibleColumnTests(unittest.TestCase):
+    class View(object):
+        def __init__(self, hidden=()):
+            self.hidden = hidden
+
+        def columnViewportPosition(self, column):
+            return column * 100 - 30  # scrolled 30 pixels to the right
+
+        def columnWidth(self, column):
+            return 100
+
+        def isColumnHidden(self, column):
+            return column in self.hidden
+
+    def test_only_the_columns_on_screen(self):
+        self.assertEqual(dm._visible_columns(self.View(), 8, 250), [0, 1, 2])
+        self.assertEqual(dm._visible_columns(self.View(hidden=(1,)), 8, 250), [0, 2])
+        self.assertEqual(dm._visible_columns(object(), 3, 250), [0, 1, 2], "a list: its one column, or all")
+
+
 class InkLabelTests(DarkModeCase):
     # The font window's mark flag (QLabel#labelMark): mapped, then mapped again by the window's ink
     # effect, its pole turned black. Inside the ink effect, a label's image is mapped once, by the effect.
@@ -638,6 +667,21 @@ class InkLabelTests(DarkModeCase):
         dm._set_effect(box, dm._record(box), "ink")
         self.assertIs(flag.pixmap, original)
         self.assertNotIn("pixmap", dm._record(flag), "nothing left to restore when switching off")
+
+    def test_a_protected_widget_between_keeps_its_labels_images(self):
+        # the ink effect draws a protected widget (the defringe bar) unmapped: an image inside it stays
+        # as dark mode mapped it, and is never handed back to the effect
+        box = FakeWidget("QWidget", "box", parent=self.content)
+        bar = FakeWidget("QFrame", "frameBottom", parent=box)
+        icon = FakeWidget("QLabel", "labelIcon", parent=bar, inherits=("QLabel",))
+        icon.pixmap = LabelPixmap()
+        self.on()
+        mapped = icon.pixmap
+        self.assertIsInstance(mapped, Mapped)
+        dm._protect(bar)
+        dm._set_effect(box, dm._record(box), "ink")
+        self.assertFalse(dm._under_ink(icon))
+        self.assertIs(icon.pixmap, mapped)
 
     def test_an_image_fontlab_replaced_meanwhile_stays(self):
         box = FakeWidget("QWidget", "box", parent=self.content)
@@ -664,6 +708,39 @@ class LightLabelTests(DarkModeCase):
         label = self.title_label(u"SEARCH HISTORY")
         self.on()
         self.assertTrue(dm._record(label).get("protected"))
+
+    def test_a_light_badge_under_the_parents_ink_is_read_unmapped(self):
+        # the parent's own ink effect shows its light badge dark in a grab: read with the effect paused,
+        # the label on the badge is not protected (it would be drawn light on light)
+        label = self.title_label(u"3")
+        panel = label.parentWidget()
+        panel.light = "ink"
+        panel.ground, panel.mapped_ground = 0xf0f0f0, 0x303030
+        self.on()
+        self.assertIsNotNone(panel.effect)
+        self.assertFalse(dm._record(label).get("protected"))
+        self.assertTrue(panel.grabs and not any(panel.grabs), "grabbed with the effect paused")
+        self.assertTrue(panel.effect.enabled, "and the effect on again")
+
+    def test_the_ground_is_grabbed_again_only_when_the_label_changes(self):
+        label = self.title_label(u"SEARCH HISTORY")
+        panel = label.parentWidget()
+        panel.ground = 0x292929
+        self.on()
+        self.assertTrue(dm._record(label).get("protected"))
+        grabs = len(panel.grabs)
+        self.assertTrue(dm._light_text_label(label))
+        self.assertEqual(len(panel.grabs), grabs, "a sweep's second look reads the cache")
+        label.geometry = FakeGeometry(140, 20)
+        dm._light_text_label(label)
+        self.assertEqual(len(panel.grabs), grabs + 1, "resized: looked at again")
+
+    def test_a_hidden_label_is_decided_when_shown(self):
+        label = self.title_label(u"BOOKMARKS")
+        label.visible = False
+        self.on()
+        record = dm._record(label, create=False) or {}
+        self.assertFalse(record.get("protected"), "not protected unseen: it may come to lie on a light badge")
 
     def test_rich_text_dark_text_or_a_light_parent_are_not(self):
         rich = self.title_label(u'<span style="color:#ff0000">2</span> selected')

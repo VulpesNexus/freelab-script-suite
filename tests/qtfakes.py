@@ -160,6 +160,9 @@ class QGraphicsEffect(object):
         self.enabled = True
         self._props = {}
 
+    def setEnabled(self, value):
+        self.enabled = value
+
     def property(self, name):
         return self._props.get(name)
 
@@ -257,6 +260,18 @@ class FakeWidget(QObject):
         self.rewrap = False  # True: graphicsEffect() returns a new wrapper, as PythonQt may
         self._actions = []
         self.connections = {}  # signal -> callables, as connect() made them
+        self.geometry = FakeGeometry(width, height)
+        self.ground = None  # the color grab() shows (an int 0xrrggbb); None: grab() is not available
+        self.mapped_ground = None  # the color it shows through an enabled effect, if other
+        self.grabs = []  # for each grab(): whether the widget's effect was enabled then
+
+    def grab(self, rect=None):
+        if self.ground is None:
+            raise AttributeError("grab")
+        enabled = self.effect is not None and getattr(self.effect, "enabled", True)
+        self.grabs.append(enabled)
+        color = self.mapped_ground if enabled and self.mapped_ground is not None else self.ground
+        return FakeImage(color)
 
     def connect(self, signal, slot):
         self.connections.setdefault(signal, []).append(slot)
@@ -341,6 +356,36 @@ class FakeWidget(QObject):
         for child in self._children:
             for widget in child.walk():
                 yield widget
+
+
+class FakeGeometry(object):
+    def __init__(self, width, height):
+        self._width, self._height = width, height
+
+    def width(self):
+        return self._width
+
+    def height(self):
+        return self._height
+
+
+class FakeImage(object):
+    """What grab().toImage() gives: one color everywhere."""
+
+    def __init__(self, color, width=40, height=12):
+        self.color, self._width, self._height = color, width, height
+
+    def toImage(self):
+        return self
+
+    def width(self):
+        return self._width
+
+    def height(self):
+        return self._height
+
+    def pixel(self, x, y):
+        return 0xff000000 | self.color
 
 
 class FakeApp(object):
