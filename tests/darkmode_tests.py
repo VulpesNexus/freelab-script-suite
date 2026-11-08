@@ -649,6 +649,33 @@ class InkLabelTests(DarkModeCase):
         self.assertIs(flag.pixmap, newer)
 
 
+class LightLabelTests(DarkModeCase):
+    # The font window's "SEARCH HISTORY" header: light gray text from the dark palette, on its dark
+    # panel. The window's ink effect mapped it among the window's colors and broke it up.
+    def title_label(self, text, parent_window="#292929", ink="#afafaf", sheet=u"QLabel{padding-left: 2px;}"):
+        panel = FakeWidget("QWidget", "historyWidget", parent=self.content)
+        panel.palette.setColor(QPalette.Window, QColor(parent_window))
+        label = FakeWidget("YTitleLabel", "historyLabel", parent=panel, sheet=sheet, inherits=("QLabel",))
+        label.text = text
+        label.palette.setColor(QPalette.WindowText, QColor(ink))
+        return label
+
+    def test_light_text_from_the_dark_palette_is_protected(self):
+        label = self.title_label(u"SEARCH HISTORY")
+        self.on()
+        self.assertTrue(dm._record(label).get("protected"))
+
+    def test_rich_text_dark_text_or_a_light_parent_are_not(self):
+        rich = self.title_label(u'<span style="color:#ff0000">2</span> selected')
+        dark = self.title_label(u"Name", ink="#202020")
+        on_light = self.title_label(u"Name", parent_window="#f0f0f0")
+        colored = self.title_label(u"Name", sheet=u"QLabel{color: #ffffff;}")
+        self.on()
+        for label in (rich, dark, on_light, colored):
+            record = dm._record(label, create=False) or {}
+            self.assertFalse(record.get("protected"), label.text)
+
+
 class PlainInputTests(DarkModeCase):
     def test_a_plain_combo_box_gets_no_effect(self):
         # FreeLab's own dialogs: Qt's combo boxes and spin boxes with no stylesheet anywhere. Their
