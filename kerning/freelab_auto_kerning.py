@@ -912,7 +912,9 @@ class AutoKerningDialog(object):
         self.analysis, self.suggestions, self.stop, self.selected = None, [], False, None
         self.font_kerning = None
         self.common = common_pairs()
-        dialog = self.dialog = QtGui.QDialog()
+        # FontLab's main window as its parent: a parentless dialog counts as a main window of its own,
+        # and kept FontLab running, the dialog alone on screen, after FontLab's window was closed.
+        dialog = self.dialog = QtGui.QDialog(self.main_window()) if self.main_window() is not None else QtGui.QDialog()
         dialog.setWindowTitle("FreeLab Auto Kerning")
         dialog.setWhatsThis(HELP)
         dialog.resize(760, 940)
@@ -1051,6 +1053,17 @@ class AutoKerningDialog(object):
         except Exception:
             pass  # no shortcuts: the buttons and double-clicks still work
         return made
+
+    @staticmethod
+    def main_window():
+        QtCore, QtGui = _qt()
+        try:
+            for widget in QtGui.QApplication.topLevelWidgets():
+                if widget.objectName == "MainWindow":
+                    return widget
+        except Exception:
+            pass
+        return None
 
     def current_font(self):
         """FontLab's current font, or None when no font is open (FontLab then hands an empty package)."""
