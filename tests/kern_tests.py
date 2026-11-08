@@ -376,9 +376,6 @@ class ContourTests(unittest.TestCase):
         self.assertAlmostEqual(limited_right[above], raw_right[bottom] - 16 * ak.CONTOUR_SLOPE, places=3)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class ClassSuggestionTests(unittest.TestCase):
     def test_signatures_match_within_the_tolerance(self):
@@ -429,11 +426,62 @@ class ClassSuggestionTests(unittest.TestCase):
         self.assertEqual(new.differs, [(u"\u00fe", 50)], "thorn kerns 50 units unlike b against a partner")
         self.assertIn(u"thorn" if False else u"\u00fe (50 units)", new.describe())
         self.assertEqual((add.existing, add.adding), ("o1", ["odieresis"]))
-        made, extended, moved = ak.apply_class_plans(k, [new, add])
-        self.assertEqual((made, extended, moved), (1, 1, 2))
+        made, extended, moved, kept = ak.apply_class_plans(k, [new, add])
+        self.assertEqual((made, extended, moved, kept), (1, 1, 2, 0))
         stored = k.kerning.stored
         self.assertEqual(stored[(("kern1_b", True), ("o1", True))], -20, "b's pairs moved to its new class")
         self.assertEqual(stored[(("kern1_b", True), ("x", False))], -10)
         self.assertNotIn((("b", False), ("o1", True)), stored)
         self.assertEqual(k.kerning.groups.data["o1"], (["o", "oacute", "odieresis"], "KernRight"))
         self.assertEqual(k.kerning.groups.data["kern1_b"], (["b", "thorn"], "KernLeft"))
+
+
+class ReviewFixTests(unittest.TestCase):
+    def test_a_glyph_against_the_class_that_bears_its_name(self):
+        # glyph o has no first-position class; class o (second position) holds c, e, and o
+        k = ak.FontKerning(FakeKerning({"o": (["c", "e", "o"], "KernRight")}, {}))
+        entry, remove = k.target("o", "e")
+        self.assertEqual(entry, (("o", False), ("o", True)))
+        k.write(entry, -30, remove)
+        self.assertEqual(k.kerning.stored, {(("o", False), ("o", True)): -30}, "glyph o against class o, not the pair oo")
+        self.assertEqual(ak.FontKerning(k.kerning).current("o", "e"), -30)
+
+    def test_a_member_keeps_its_own_value_when_a_class_takes_it_in(self):
+        # T o is -80 (glyph pair); class TT against odieresis is -60 (the member's own entry)
+        k = ak.FontKerning(FakeKerning({"TT": (["T", "Tcaron"], "KernLeft")},
+                                       {(("T", False), ("o", False)): -80, (("TT", True), ("odieresis", False)): -60}))
+        names = {u"o": "o", u"\u00f6": "odieresis", u"T": "T", u"\u0164": "Tcaron"}
+        plans = ak.plan_classes({"second": [[u"o", u"\u00f6"]]}, names, k)
+        self.assertEqual([p.action for p in plans], ["new"])
+        made, extended, moved, kept = ak.apply_class_plans(k, plans)
+        after = ak.FontKerning(k.kerning)
+        self.assertEqual(after.current("T", "o"), -80, "moved into the class")
+        self.assertEqual(after.current("T", "odieresis"), -60, "the member's own value kept")
+        self.assertEqual(after.current("Tcaron", "odieresis"), -60)
+        self.assertEqual((made, moved, kept), (1, 1, 1))
+
+    def test_letters_of_their_own_take_their_case_references(self):
+        self.assertEqual(ak.kind_character(u"\u00f8"), u"n", "o with stroke: lowercase")
+        self.assertEqual(ak.kind_character(u"\u00d8"), u"H")
+        self.assertEqual(ak.kind_character(u"\u00e9"), u"e")
+        self.assertEqual(ak.kind_character(u"."), u".")
+
+    def test_band_edges_round_as_in_python_3(self):
+        self.assertEqual([ak.round_half_even(v) for v in (12.5, 13.5, -0.5, 2.4, 2.6)], [12, 14, 0, 2, 3])
+
+    def test_a_model_for_other_features_is_not_used(self):
+        import json
+        import tempfile
+        handle, path = tempfile.mkstemp(suffix=".json")
+        os.close(handle)
+        try:
+            with io.open(path, "wb") as out:
+                out.write(json.dumps({"format": 2, "features": ["one", "two"], "cut": 0.4,
+                                      "classifier": {"baseline": 0, "trees": []}, "regressor": {"baseline": 0, "trees": []}}).encode("utf-8"))
+            self.assertIsNone(ak.learned_model(path))
+        finally:
+            os.remove(path)
+
+
+if __name__ == "__main__":
+    unittest.main()

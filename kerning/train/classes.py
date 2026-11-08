@@ -60,25 +60,27 @@ def class_kerning(font):
     for index in sorted(lookups):
         lookup = table.LookupList.Lookup[index]
         for subtable in lookup.SubTable:
-            if lookup.LookupType == 9:  # extension
-                subtable = subtable.ExtSubTable
-            if getattr(subtable, "LookupType", lookup.LookupType) != 2 or subtable.Format != 2:
+            kind = lookup.LookupType
+            if kind == 9:  # extension: the wrapper names the type of what it holds
+                kind, subtable = subtable.ExtensionLookupType, subtable.ExtSubTable
+            if kind != 2 or subtable.Format != 2:
                 continue
             for side, classdef in (("first", subtable.ClassDef1), ("second", subtable.ClassDef2)):
                 classes = {}
                 for glyph, number in (classdef.classDefs if classdef else {}).items():
                     if number:
                         classes.setdefault(number, set()).add(glyph)
-                if side == "first":  # ClassDef1 covers only glyphs of the coverage
-                    covered = set(subtable.Coverage.glyphs)
+                if side == "first":  # ClassDef1 covers only glyphs of the coverage; the rest of it is class 0,
+                    covered = set(subtable.Coverage.glyphs)  # a class of its own (its row of the subtable)
                     classes = dict((n, members & covered) for n, members in classes.items())
+                    classes[0] = covered - set(g for members in classes.values() for g in members)
                 found[side].append([members for members in classes.values() if members])
     return found if any(found.values()) else None
 
 
 def family_counts(font):
-    """{side: {(a, b): together}} for one font: together True when a subtable classes a and b
-    together, False when one classes them apart (together wins)."""
+    """{side: {(a, b): together}} for one font: together when most of the subtables that class both
+    a and b class them together (a font may split its kerning over subtables with other classes)."""
     classes = class_kerning(font)
     if classes is None:
         return None
@@ -100,8 +102,10 @@ def family_counts(font):
             chars = sorted(located)
             for i, a in enumerate(chars):
                 for b in chars[i + 1:]:
-                    together = located[a] == located[b]
-                    seen[(a, b)] = seen.get((a, b), False) or together
+                    votes = seen.setdefault((a, b), [0, 0])
+                    votes[0 if located[a] == located[b] else 1] += 1
+        for pair, (together, apart) in list(seen.items()):
+            seen[pair] = together > apart
     return counts
 
 
@@ -113,7 +117,7 @@ def main():
     args = parser.parse_args()
     started = time.time()
     totals = dict((side, {}) for side in SIDES)
-    families_done, used = set(), 0
+    families_done, used, designs = set(), 0, set()
     for path, index, family, licence in dataset.open_fonts():
         if family in families_done or (args.exclude and args.exclude.lower() in os.path.basename(path).lower()):
             continue
@@ -126,6 +130,10 @@ def main():
             continue
         if not counts:
             continue  # kerned by pairs alone: another font of the family may class
+        design = tuple(sorted((side, tuple(sorted(counts[side].items()))) for side in SIDES))
+        if design in designs:
+            continue  # the same classes under another family name (a split family, a copy)
+        designs.add(design)
         families_done.add(family)
         used += 1
         for side in SIDES:

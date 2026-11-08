@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.join(HERE, os.pardir))
 os.environ["FREELAB_NO_AUTOSTART"] = "1"
 import freelab_auto_kerning as ak  # noqa: E402
 
+SHAPING_FEATURES = {"kern": True, "liga": False, "clig": False, "dlig": False, "hlig": False, "calt": False}
 MIN_KERNED_SHARE = 0.05  # a font kerning fewer of the common pairs than this has no kerning to learn from
 FONT_DIRS = tuple(os.path.join(base, *parts) for base, parts in (
     (os.environ.get("WINDIR") or os.environ.get("SystemRoot"), ("Fonts",)),
@@ -121,15 +122,17 @@ class FreeTypeGlyphs(object):
 
 
 def kerning_of(path, index, pairs):
-    """The kerning the font applies to each pair (font units), as HarfBuzz shapes it."""
+    """The kerning the font applies to each pair (font units), as HarfBuzz shapes it: Latin, English,
+    left to right, with ligatures and contextual alternates off (an fi ligature's advance is not
+    kerning)."""
     import uharfbuzz as hb
     font = hb.Font(hb.Face(hb.Blob.from_file_path(path), index))
 
     def advance(text):
         buf = hb.Buffer()
         buf.add_str(text)
-        buf.guess_segment_properties()
-        hb.shape(font, buf)
+        buf.direction, buf.script, buf.language = "ltr", "Latn", "en"
+        hb.shape(font, buf, SHAPING_FEATURES)
         return sum(p.x_advance for p in buf.glyph_positions)
 
     singles = {}

@@ -23,6 +23,7 @@ Valid Python 2.7 (FontLab 7) and Python 3. The core below needs no Qt and no Fon
 from __future__ import absolute_import, division, print_function
 
 import math
+import time
 import os
 import sys
 
@@ -381,6 +382,15 @@ def round_units(value):
     return int(math.floor(value + 0.5))
 
 
+def round_half_even(value):
+    """round() as Python 3 does it (halves to even), under Python 2 too: the band edges of
+    gap_profile must fall on the rows the training used."""
+    floor = math.floor(value)
+    if value - floor > 0.5 or (value - floor == 0.5 and floor % 2 == 1):
+        floor += 1
+    return int(floor)
+
+
 def gap_profile(core, left, right, em):
     """The narrowest gap between the pair's facing ink (no kerning) in each height band, as a share
     of the em (at most GAP_CAP), or None in a band where either glyph has no ink."""
@@ -391,8 +401,8 @@ def gap_profile(core, left, right, em):
     step = (high - low) / PROFILE_BANDS
     gaps = []
     for band in range(PROFILE_BANDS):
-        top = left.baseline - int(round((low + (band + 1) * step) * em))
-        bottom = left.baseline - int(round((low + band * step) * em))
+        top = left.baseline - round_half_even(((low + (band + 1) * step) * em))
+        bottom = left.baseline - round_half_even(((low + band * step) * em))
         narrowest = None
         for row in range(max(0, top), min(left.height, bottom)):
             if raw_right_of_left[row] < -1e8 or raw_left_of_right[row] > 1e8:
@@ -441,7 +451,8 @@ def learned_model(path=None):
         try:
             with io.open(path, encoding="utf-8") as handle:
                 data = json.load(handle)
-            _MODEL[path] = data if data.get("format") == 2 else None
+            features = 4 + len(SPACING_PAIRS) + 2 + PROFILE_BANDS  # pair_features' length
+            _MODEL[path] = data if data.get("format") == 2 and len(data.get("features", [])) == features else None
         except (IOError, OSError, ValueError):
             _MODEL[path] = None
     return _MODEL[path]
@@ -711,7 +722,6 @@ class FontKerning(object):
         class j) is named while that class is renamed out of the way, and the class renamed back:
         renaming a class keeps its pairs (checked in FontLab 7.2: pairs, classes, and the applied
         kerning identical after the round trip)."""
-        key = (entry[0][0], entry[1][0])
         renamed = []
         try:
             for name in self.hidden(entry):
@@ -720,6 +730,9 @@ class FontKerning(object):
                     spare += u"_"
                 self.kerning.renameGroup(name, spare)
                 renamed.append((name, spare))
+            # a side that is the renamed class itself (glyph o against class o) goes by its spare name
+            spares = dict(renamed)
+            key = tuple(spares.get(name, name) if is_class else name for name, is_class in entry)
             if value or not remove:
                 self.kerning[key] = value
                 self.entries.add(entry)
@@ -727,8 +740,22 @@ class FontKerning(object):
                 self.kerning.remove(key)  # `del kerning[pair]` removes it but raises in PyCXX
                 self.entries.discard(entry)
         finally:
+            failed = []
             for name, spare in reversed(renamed):
-                self.kerning.renameGroup(spare, name)
+                try:
+                    self.kerning.renameGroup(spare, name)
+                except Exception:
+                    failed.append(u"%s (now %s)" % (name, spare))
+            if failed:
+                raise RuntimeError(u"FontLab did not rename these classes back: %s. Rename them in the Classes panel."
+                                   % u", ".join(failed))
+
+    def resolving(self, left, right):
+        """The entry that sets a glyph pair's value now, or None."""
+        for entry in self.candidates(left, right):
+            if entry in self.entries:
+                return entry
+        return None
 
 
 def fontlab_autokern(package, master, left, right):
@@ -749,6 +776,7 @@ class Suggestion(object):
         self.raw = {}  # method: units before its factors
         self.values = {}  # method: units to write; "fontlab" once asked
         self.override = None  # a method chosen for this pair alone
+        self.checked = None  # the user's check in the list; None until the list shows it
 
     def value(self, source):
         if source == "average":
@@ -823,7 +851,7 @@ def analyze(package, master, characters=None, em=EM_PIXELS, progress=None, core=
         if ch not in names:
             raise ValueError(u'this font has no \u201c%s\u201d. Auto Kerning needs l, n, and o: their spacing sets the kerning.' % ch)
     reference_names = sorted(set(names[ch] for chars_ in REFERENCES.values() for ch in chars_ if ch in names))
-    references_signature = u" ".join(glyphs.signatures[n] for n in reference_names)
+    references_signature = u" ".join(glyphs.signatures[n] for n in reference_names) + u" upm %s" % glyphs.upm
     cache_file = cache_file if cache_file is not None else cache_path(font_key(package), master)
     model = learned_model()
     old = load_cache(cache_file) or {}
@@ -924,6 +952,8 @@ def class_model(path=None):
                 for side, rows in data["sides"].items():
                     rates = model[side] = {}
                     for pair, together, apart in rows:
+                        if together + apart <= 0:
+                            continue
                         rates[(pair[0], pair[1])] = rates[(pair[1], pair[0])] = together / float(together + apart)
             _CLASS_MODEL[path] = model
         except (IOError, OSError, ValueError, KeyError, TypeError):
@@ -961,7 +991,11 @@ DIFFERS_NOTE = 0.03  # a member kerning this much differently from its class's f
 def kind_character(ch):
     """The character whose kind (capital, lowercase, figure) sets a pair's references: its base letter."""
     base = base_letter(ch)
-    return base if base in LETTERS + FIGURES else ch
+    if base in LETTERS + FIGURES:
+        return base
+    if ch.isalpha():  # a letter of its own (o with stroke, dotless i): its case's references
+        return u"H" if ch.isupper() else u"n"
+    return ch
 
 
 def side_signature(tools, image_of, names, ch, side, em, reach):
@@ -1122,11 +1156,34 @@ def plan_classes(suggested, names, kerning, signature_of=None, upm=1000.0):
     return plans
 
 
+def own_values(kerning, plans):
+    """{(left, right): value} of the glyph pairs whose value comes from an entry naming a glyph a plan
+    puts in a class: a member's own kerning, which the class's pairs must not override."""
+    found = {}
+    for plan in plans:
+        at = 0 if plan.side == "first" else 1
+        members = plan.glyphs[1:] if plan.action == "new" else plan.adding
+        for member in members:
+            for entry in kerning.entries:
+                if entry[at] != (member, False):
+                    continue
+                other_name, other_is_class = entry[1 - at]
+                others = kerning.members.get(other_name, []) if other_is_class else [other_name]
+                for other in others:
+                    pair = (member, other) if at == 0 else (other, member)
+                    if kerning.resolving(*pair) == entry:
+                        found[pair] = kerning.values.get(entry)
+    return found
+
+
 def apply_class_plans(kerning, plans, move_base_kerning=True):
     """Make the "new" classes and extend the "add" ones (kerning: a FontKerning). With
     move_base_kerning, a new class takes over the explicit pairs of its first glyph on its side (its
-    members then share them); they are removed from that glyph. Returns (classes made, extended, pairs moved)."""
+    members then share them); they are removed from that glyph. A member whose own entry set a pair
+    that a class entry would now override gets that value back as a glyph pair. Returns (classes
+    made, extended, pairs moved, own values kept)."""
     made = extended = moved = 0
+    own = own_values(kerning, plans)
     groups = kerning.kerning.groups
     for plan in plans:
         if plan.action == "new":
@@ -1155,7 +1212,13 @@ def apply_class_plans(kerning, plans, move_base_kerning=True):
             groups[plan.existing] = (members, kerning.class_flags[plan.existing])
             kerning.members[plan.existing] = members
             extended += 1
-    return made, extended, moved
+    after = FontKerning(kerning.kerning)
+    kept = 0
+    for (left, right), value in sorted(own.items()):
+        if value is not None and after.current(left, right) != round_units(value):
+            after.write(((left, False), (right, False)), value, False)
+            kept += 1
+    return made, extended, moved, kept
 
 
 # ---------------------------------------------------------------------------
@@ -1199,7 +1262,8 @@ class AutoKerningDialog(object):
         self.package = self.current_font()
         self.master = self.package.master if self.package is not None else None
         self.analysis, self.suggestions, self.stop, self.selected = None, [], False, None
-        self.font_kerning = None
+        self.font_kerning, self.kerning_read = None, 0.0
+        self.busy = self.refilter_again = False
         self.common = common_pairs()
         # FontLab's main window as its parent: a parentless dialog counts as a main window of its own,
         # and kept FontLab running, the dialog alone on screen, after FontLab's window was closed.
@@ -1410,6 +1474,19 @@ class AutoKerningDialog(object):
 
     def run(self):
         """Analyze the font that is current now (another may have been opened since the dialog was)."""
+        if self.busy:
+            return  # a click while measuring or asking FontLab: the work under way finishes first
+        self.busy = True
+        try:
+            self.run_once()
+        finally:
+            self.busy = False
+            self.analyze_button.setEnabled(True)
+            if self.refilter_again:
+                self.refilter_again = False
+                self.refilter()
+
+    def run_once(self):
         package = self.current_font()
         if package is None:
             self.package, self.analysis, self.suggestions = None, None, []
@@ -1428,14 +1505,19 @@ class AutoKerningDialog(object):
             message = u"%s" % exc
             self.status.setText(u"%s\n%s" % (self.font_line(), message[:1].upper() + message[1:]))
             return
-        finally:
-            self.analyze_button.setEnabled(True)
         if result is None:
             self.status.setText("Stopped.")
             return
+        self.harvest_checks()
+        if self.analysis is not None:  # the same font and master: its picks and checks carry over
+            before = dict(((old.left, old.right), old) for old in self.analysis.suggestions)
+            for new in result.suggestions:
+                old = before.get((new.left, new.right))
+                if old is not None:
+                    new.override, new.checked = old.override, old.checked
         self.analysis = result
-        self.font_kerning = FontKerning(self.package.kerning(self.master))
-        self.refilter()
+        self.refresh_kerning()
+        self.refilter(inside_run=True)
 
     def source_key(self):
         return SOURCES[self.source.currentIndex][0]
@@ -1473,11 +1555,24 @@ class AutoKerningDialog(object):
         self.only_picked.setText(u"Only pairs picked by hand (%d)" % count)
         self.only_picked.setVisible(bool(count) or self.only_picked.checked)
 
-    def refilter(self):
+    def refilter(self, inside_run=False):
         """The list: pairs either method would change by the tolerance or more, whatever source writes
         (choosing another source changes only what is written, not the list or its order)."""
         if self.analysis is None:
             return
+        if self.busy and not inside_run:
+            self.refilter_again = True  # a setting changed while FontLab was asked: done after
+            return
+        if not inside_run:
+            self.busy = True
+            try:
+                return self.refilter(inside_run=True)
+            finally:
+                self.busy = False
+                if self.refilter_again:
+                    self.refilter_again = False
+                    self.refilter()
+        self.harvest_checks()
         tolerance = self.tolerance.value
         include = self.include_kerned.checked
         common_only = PAIRS[self.pairs.currentIndex][0] == "common"
@@ -1531,7 +1626,8 @@ class AutoKerningDialog(object):
         for row, s in enumerate(self.suggestions):
             pair = QtGui.QTableWidgetItem(s.left_char + s.right_char)
             pair.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsUserCheckable)
-            pair.setCheckState(QtCore.Qt.Unchecked if s.current else QtCore.Qt.Checked)  # the designer's pairs: opt in
+            checked = s.checked if s.checked is not None else not s.current  # the designer's pairs: opt in
+            pair.setCheckState(QtCore.Qt.Checked if checked else QtCore.Qt.Unchecked)
             table.setItem(row, 0, pair)
             for column in range(1, len(self.COLUMNS)):
                 item = QtGui.QTableWidgetItem()
@@ -1577,6 +1673,14 @@ class AutoKerningDialog(object):
             self.fill_row(row, s, source)
         self.select()
 
+    def harvest_checks(self):
+        """The list's checks, kept on its suggestions before the list is filled again (rows read anew)."""
+        QtCore, QtGui = _qt()
+        for row in range(min(self.table.rowCount, len(self.suggestions))):
+            item = self.table.item(row, 0)
+            if item is not None:
+                self.suggestions[row].checked = item.checkState() == QtCore.Qt.Checked
+
     def check_all(self, on):
         """Check every new pair, or uncheck everything; pairs the font kerns are checked one by one."""
         QtCore, QtGui = _qt()
@@ -1603,7 +1707,12 @@ class AutoKerningDialog(object):
                 button.setIcon(_qt()[1].QIcon())
             return
         self.selected = rows[0].row()
+        if self.package is not None and time.time() - self.kerning_read > 1.0:
+            self.refresh_kerning()
         self.show_preview(self.suggestions[self.selected])
+
+    def refresh_kerning(self):
+        self.font_kerning, self.kerning_read = FontKerning(self.package.kerning(self.master)), time.time()
 
     def choose(self, key):
         """The method for the selected pair alone; the dialog's source again clears the choice."""
@@ -1699,10 +1808,13 @@ class AutoKerningDialog(object):
         palette = self.dialog.palette
         text = palette.color(QtGui.QPalette.WindowText)  # (FontLab 7's PythonQt lacks the placeholder text role)
         scale = float(PREVIEW_SIZE) / float(self.package.upm)
-        glyphs = [self.package.findName(n) for n in ("H", s.left, s.right, "H")]
-        paths = [(glyph.getLayerByName(self.master), layer_path(glyph.getLayerByName(self.master)))
-                 for glyph in glyphs if glyph is not None and not glyph.isNull]
-        strip = int(sum(layer.advanceWidth for layer, _ in paths) * scale) + PREVIEW_SIZE
+        paths = []  # (layer, path, role): the pair between two H's, when the font has an H
+        for name, role in (("H", "side"), (s.left, "left"), (s.right, "right"), ("H", "side")):
+            glyph = self.package.findName(name)
+            layer = glyph.getLayerByName(self.master) if glyph is not None and not glyph.isNull else None
+            if layer is not None:
+                paths.append((layer, layer_path(layer), role))
+        strip = int(sum(layer.advanceWidth for layer, _, _ in paths) * scale) + PREVIEW_SIZE
         font = QtGui.QFont(self.dialog.font)
         for number, (key, label) in enumerate(CHOICES):
             button, kern = self.choice_buttons[key], s.value(key)
@@ -1726,16 +1838,16 @@ class AutoKerningDialog(object):
         QtCore, QtGui = _qt()
         painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
         x = float(PREVIEW_SIZE) / 2
-        for index, (layer, path) in enumerate(paths):
+        for layer, path, role in paths:
             painter.save()
             painter.translate(x, PREVIEW_SIZE * 1.05)
             painter.scale(scale, -scale)
             ink = QtGui.QColor(color)
-            if index in (0, len(paths) - 1):
+            if role == "side":
                 ink.setAlpha(SIDE_ALPHA)  # the H's: dimmed
             painter.fillPath(path, QtGui.QBrush(ink))
             painter.restore()
-            x += layer.advanceWidth * scale + (kern * scale if index == 1 else 0)
+            x += layer.advanceWidth * scale + (kern * scale if role == "left" else 0)
 
     @staticmethod
     def paint_label(painter, font, color, left, height, label, value, key):
@@ -1759,47 +1871,68 @@ class AutoKerningDialog(object):
 
     def write(self):
         """Each checked pair's value, written where it applies (FontKerning.target). Pairs sharing an
-        entry (a class pair) with other checked pairs get the value of the most common of them."""
+        entry (a class pair) with other checked pairs get the value of the most common of them, even
+        when that one keeps its current value; ties go to the first in alphabetical order."""
         QtCore, QtGui = _qt()
+        if self.busy:
+            return
+        self.harvest_checks()
         source = self.source_key()
         kerning = FontKerning(self.package.kerning(self.master))
         plans = {}
-        for row, s in enumerate(self.suggestions):
-            if self.table.item(row, 0).checkState() != QtCore.Qt.Checked:
+        for s in self.suggestions:
+            if not s.checked:
                 continue
             value = s.to_write(source)
-            if value is None or value == s.current:
+            if value is None:
                 continue
             target = kerning.target(s.left, s.right)
-            plans.setdefault(target[0], []).append((self.rank(s), s, value, target[1]))
-        shared = classes = 0
-        written = []
-        for entry, wanted in plans.items():
-            wanted.sort(key=lambda plan: plan[0])
-            _, _, value, remove = wanted[0]
-            if len(set(plan[2] for plan in wanted)) > 1:
-                shared += len(wanted) - 1
-            kerning.write(entry, value, remove)
-            if kerning.reach(entry) > 1:
-                classes += 1
-            written.extend(plan[1] for plan in wanted)
+            plans.setdefault(target[0], []).append(((self.rank(s), s.left_char, s.right_char), s, value, target[1]))
+        shared = classes = entries = 0
+        written, error = [], None
         try:
-            self.fontlab.flItems.notifyPackageContentUpdated(self.package.id)
-        except Exception:
-            pass
-        self.font_kerning = FontKerning(self.package.kerning(self.master))
+            for entry, wanted in sorted(plans.items()):
+                wanted.sort(key=lambda plan: plan[0])
+                _, first, value, remove = wanted[0]
+                if len(set(plan[2] for plan in wanted)) > 1:
+                    shared += len(wanted) - 1
+                if value == first.current:
+                    continue  # the commonest pair keeps its value: the entry stays as it is
+                kerning.write(entry, value, remove)
+                entries += 1
+                if kerning.reach(entry) > 1:
+                    classes += 1
+                written.extend(plan[1] for plan in wanted)
+        except Exception as exc:  # what was written stays written, and is reported
+            error = exc
+        self.after_writing(self.package)
+        self.refresh_kerning()
         for s in self.analysis.suggestions:
             s.current = self.font_kerning.current(s.left, s.right)
         for s in written:
             s.override = None
         lines = [u"Wrote %d entries for %d pairs to master %s%s." % (
-            len(plans), len(written), self.master,
+            entries, len(written), self.master,
             u" (%d of them kerning class pairs, which kern their classes' other glyphs too)" % classes if classes else u"")]
         if shared:
             lines.append(u"%d pairs shared an entry with a commoner pair and took its value." % shared)
+        if error is not None:
+            lines.append(u"Stopped by an error: %s" % error)
         self.update_picked()
         self.fill_table()
         self.status.setText(u" ".join(lines))
+
+    def after_writing(self, package):
+        """FontLab told of the change, and the font marked modified: a script's kerning writes leave it
+        unmarked, and FontLab would close it without asking to save."""
+        try:
+            self.fontlab.flItems.notifyPackageContentUpdated(package.id)
+        except Exception:
+            pass
+        try:
+            package.setFlag(2, True)  # ofChanged
+        except Exception:
+            pass
 
 
 def font_class_suggestions(package, master, core=None, em=EM_PIXELS, model=None):
@@ -1874,7 +2007,11 @@ class ClassDialog(object):
 
     def run(self):
         QtCore, QtGui = _qt()
-        package, master = self.owner.package, self.owner.master
+        package = self.owner.current_font()
+        master = package.master if package is not None else None
+        self.package, self.master, self.plans = package, master, []
+        self.tree.clear()
+        self.apply_button.setEnabled(False)
         if package is None:
             self.status.setText(u"No font is open. Open one, then run Auto Kerning again.")
             return
@@ -1914,7 +2051,7 @@ class ClassDialog(object):
             top.setExpanded(True)
         plural = lambda count, one, many: u"%d %s" % (count, one if count == 1 else many)
         self.status.setText(u"%s, master %s: %s, %s, %s, %s (they overlap its classes). Nothing is changed until you "
-                            u"create them." % (self.owner.package.tfn, self.owner.master,
+                            u"create them." % (self.package.tfn, self.master,
                                                plural(counts.get("new", 0), u"new class", u"new classes"),
                                                plural(counts.get("add", 0), u"class to extend", u"classes to extend"),
                                                plural(counts.get("same", 0), u"the font has already", u"the font has already"),
@@ -1943,27 +2080,49 @@ class ClassDialog(object):
                 chosen.append(self.plans[int(item.data(0, QtCore.Qt.UserRole))])
         if not chosen:
             return
-        package, master = self.owner.package, self.owner.master
-        kerning = FontKerning(package.kerning(master))
-        made, extended, moved = apply_class_plans(kerning, chosen, self.move.checked)
+        package, master = self.package, self.master
+        current = self.owner.current_font()
+        if current is None or font_key(current) != font_key(package) or current.master != master:
+            self.run()
+            self.status.setText(u"The font or master changed since these suggestions: here are this one's. Review them "
+                                u"before creating any. " + self.status.text)
+            return
+        fresh, _ = font_class_suggestions(package, master)  # the font as it is now: names free, classes as listed
+        key = lambda plan: (plan.side, tuple(plan.members), plan.action, plan.name, plan.existing, tuple(plan.adding))
+        wanted = set(key(plan) for plan in chosen)
+        chosen = [plan for plan in fresh if key(plan) in wanted]
+        if len(chosen) != len(wanted):
+            self.plans = fresh
+            self.fill()
+            self.status.setText(u"The font's classes changed since these suggestions: they are worked out again. Review "
+                                u"them before creating any. " + self.status.text)
+            return
+        error = None
+        made = extended = moved = kept = 0
         try:
-            self.owner.fontlab.flItems.notifyPackageContentUpdated(package.id)
-        except Exception:
-            pass
+            made, extended, moved, kept = apply_class_plans(FontKerning(package.kerning(master)), chosen, self.move.checked)
+        except Exception as exc:  # what was made stays made, and is reported
+            error = exc
+        self.owner.after_writing(package)
         self.run()
-        self.status.setText(u"Made %d classes and extended %d%s. Writing goes straight into the open font: close it "
-                            u"without saving to take it back. %s" % (
-                                made, extended, u", and moved %d pairs into them" % moved if moved else u"",
-                                self.status.text))
-        self.owner.run()  # Auto Kerning reads the classes again
+        notes = [u"Made %d classes and extended %d%s." % (made, extended, u", and moved %d pairs into them" % moved
+                                                           if moved else u"")]
+        if kept:
+            notes.append(u"%d glyph pairs kept their own value as an exception." % kept)
+        if error is not None:
+            notes.append(u"Stopped by an error: %s" % error)
+        notes.append(u"Writing goes straight into the open font: close it without saving to take it back.")
+        self.status.setText(u" ".join(notes) + u" " + self.status.text)
+        if self.owner.package is not None and font_key(self.owner.package) == font_key(package):
+            self.owner.run()  # Auto Kerning reads the classes again
 
 
 CLASS_HELP = u"""<b>FreeLab Kerning Classes</b><br>
 Suggests kerning classes for this master: glyphs that kern alike, on the side that faces the pair.<br><br>
-<b>How</b>: an accented letter joins its base letter where its side matches the base's in this font's
-outlines (its accent no nearer the side than the base's ink). Base letters share a class where most
-of the open-licensed fonts FreeLab learned from class them so (n with m and h, o with c, e, and q) and
-every two of them match in this font.<br>
+<b>How</b>: an accented letter joins its base letter where most of the open-licensed fonts FreeLab
+learned from class the two together on that side. Base letters share a class where most of those
+fonts class them so (n with m and h, o with c, e, and q) and every two of them kern alike in this
+font. Members that kern unlike the first one are named, with the difference.<br>
 <b>Sides</b>: <i>First in a pair</i> classes group glyphs by their right side (FontLab's left, or 1st,
 classes); <i>second in a pair</i> by their left side.<br>
 <b>The font's classes come first</b>: a suggestion makes a class only where none of its glyphs has one

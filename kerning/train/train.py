@@ -30,7 +30,7 @@ import freelab_auto_kerning as ak  # noqa: E402
 
 MODEL_FILE = os.path.join(HERE, os.pardir, "learned_model.json")
 PARAMS = dict(max_iter=150, learning_rate=0.08, max_leaf_nodes=31, min_samples_leaf=40, l2_regularization=1.0,
-              random_state=0)
+              random_state=0, early_stopping=False)  # (its own validation split would mix families: every tree kept)
 KERNED = 5 / 1000.0  # a pair kerned by at least this share of the em counts as kerned
 CUT = 0.4  # the classifier's probability from which a pair is kerned (0.4 beat 0.5 and 0.6 on kerned pairs)
 FEATURES = (["halfkern", "contour", "left kind", "right kind"] + ["spacing " + p for p in ak.SPACING_PAIRS]

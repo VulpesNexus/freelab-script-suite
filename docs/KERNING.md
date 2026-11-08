@@ -23,14 +23,14 @@ The classes are the font's own, made in FontLab's Classes panel: Auto Kerning re
 
 *Suggest classes…* proposes kerning classes for the master, to review before any is made. Each side is its own set of classes: *first in a pair* groups glyphs by their right side (FontLab's left, or 1st, classes), *second in a pair* by their left side.
 
-- **From the corpus**: *kerning/train/classes.py* reads the kerning classes of the same open-licensed fonts the FreeLab method learned from (173 families class their kerning) and counts, for each pair of characters and each side, how many families put them in one class. The counts are *kerning/class_model.json*.
+- **From the corpus**: *kerning/train/classes.py* reads the kerning classes of the same open-licensed fonts the FreeLab method learned from (155 families, once the same classes under another family name count once, class their kerning; where a font splits its kerning over subtables, a pair counts as classed together where most of them do) and counts, for each pair of characters and each side, how many families put them in one class. The counts are *kerning/class_model.json*.
 - **An accented letter** joins its base letter where most families class the two together on that side (*À* with *A* almost always; *Ŀ* with *L* only on one side). For a pair the corpus has not seen, it joins where the two kern alike in this font.
 - **Base letters** share a class where most families class them so (*n* with *m* and *h*, *o* with *c*, *e*, and *q*, the straight-stemmed capitals on their left) and every two of them kern alike in this font: within 2% of the em against each of a few partners (*H*, *O*, *o*, *n*, *v*, *T*, and others), measured by halfkern and contour distance.
 - **Members that kern unlike** the class's first glyph by 3% of the em or more are named with the difference, in units: where an accent reaches toward a neighbor (*ì* beside *f*), the class may want an exception.
 - **The font's classes come first**: a suggestion makes a class (named *kern1_* or *kern2_* and its first glyph) only where none of its glyphs has one on that side, or adds glyphs to the one class they share, unless that class kerns both sides. Suggestions that overlap several classes are shown and left as they are, and so are the classes the font has already.
 - **Moving pairs**: with *Move each new class's first glyph's pairs into the class* (on by default), a new class takes over its first glyph's own pairs on that side, so every member kerns as that glyph did.
 
-On the owner's test font, left out of the counts, 61 of the suggestions were classes the font has already.
+On the owner's test font, left out of the counts, 60 of the suggestions were classes the font has already.
 
 ## The methods
 
@@ -43,28 +43,28 @@ Both are measured by FreeLab's native core (*kerning/native/freelab_kern.c*) on 
 
 ### What the FreeLab method learned from, and how it was checked
 
-*kerning/train/dataset.py* reads the fonts installed on the computer it runs on, and keeps only those whose name table declares the SIL Open Font License or the Apache License, and that kern: of the 4,074 fonts installed on the owner's computer, 747. Fonts that kern fewer than 5% of the common pairs, the same Latin design under another name, and fonts whose *l*, *n*, and *o* cannot be measured were left out: 782,693 pairs from 562 fonts in 189 families, with the kerning each font applies read through HarfBuzz. The measurements stay on that computer; only the trained model is in the repository. *kerning/train/train.py* trains and checks it.
+*kerning/train/dataset.py* reads the fonts installed on the computer it runs on, and keeps only those whose name table declares the SIL Open Font License or the Apache License, and that kern: of the 4,074 fonts installed on the owner's computer, 747. Fonts that kern fewer than 5% of the common pairs, the same Latin design under another name, and fonts whose *l*, *n*, and *o* cannot be measured were left out: 777,113 pairs from 558 fonts in 186 families, with the kerning each font applies read through HarfBuzz, ligatures and contextual alternates off (an *fi* ligature is not kerning). The measurements stay on that computer; only the trained model is in the repository. *kerning/train/train.py* trains and checks it.
 
-Each family was held out in turn (five folds, no family in both parts), and the methods' suggestions compared with the held-out fonts' kerning, in units of a 1000-unit em:
+The families were split into five folds, each held out once (no family in both parts), and the methods' suggestions compared with the held-out fonts' kerning, in units of a 1000-unit em:
 
 | Method | Mean error, all pairs | Mean error, kerned pairs | Within 20 units |
 |---|---|---|---|
-| No kerning at all | 9.3 | 38.4 | 85% |
-| halfkern | 17.2 | 22.7 | 69% |
-| Contour distance | 27.1 | 32.0 | 56% |
-| Average of the two | 21.9 | 25.2 | 63% |
-| **FreeLab** | **8.6** | **21.5** | **85%** |
+| No kerning at all | 9.3 | 38.2 | 85% |
+| halfkern | 17.1 | 22.4 | 69% |
+| Contour distance | 26.9 | 32.0 | 57% |
+| Average of the two | 21.7 | 25.1 | 63% |
+| **FreeLab** | **8.6** | **21.1** | **85%** |
 
 halfkern and contour distance are scored here with their default strengths; in Auto Kerning, the font's own kerning tunes them, which narrows the gap. The FreeLab method is the only one that beats leaving most pairs alone while also coming closest on the pairs the fonts do kern.
 
-These are averages over many fonts; one font can go the other way. The owner's test font, left out of training (`train.py --exclude`), on its 1,395 common pairs with its kerning as HarfBuzz applies it, classes included (818 kerned), each method's strength fitted to that kerning as Auto Kerning fits it:
+These are averages over many fonts; one font can go the other way. The owner's test font, left out of training (`train.py --exclude`), on its 1,395 common pairs with its kerning as HarfBuzz applies it, classes included (817 kerned), each method's strength fitted to that kerning as Auto Kerning fits it:
 
 | Method | Mean error, all pairs | Kerned pairs | Unkerned pairs | Within 20 units |
 |---|---|---|---|---|
-| No kerning at all | 32.9 | 55.4 | 1.1 | 55% |
-| halfkern | 30.0 | 34.2 | 24.2 | 47% |
-| Contour distance | **22.8** | **29.9** | 12.7 | **63%** |
-| FreeLab | 24.5 | 37.8 | **5.7** | 60% |
+| No kerning at all | 32.8 | 55.3 | 1.1 | 55% |
+| halfkern | 29.9 | 34.0 | 24.1 | 47% |
+| Contour distance | **22.7** | **29.7** | 12.7 | **63%** |
+| FreeLab | 23.8 | 36.8 | **5.5** | 61% |
 
 FreeLab leaves alone what the font leaves alone, but on that font's kerned pairs contour distance came closer: FreeLab leaves some at 0 that the font kerns. That is why the suggestions default to the average of halfkern and contour distance, with FreeLab one click away, and why each pair's methods are shown side by side. (An earlier version of this check read only the font's glyph pairs, missing its class kerning, and favored FreeLab wrongly.)
 
