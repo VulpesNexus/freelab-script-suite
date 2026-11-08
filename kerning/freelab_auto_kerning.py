@@ -522,6 +522,27 @@ def _qt():
     return QtCore, QtGui
 
 
+def _property(widget, name):
+    """A Qt property's value (PythonQt gives properties as attributes, some builds as methods)."""
+    value = getattr(widget, name)
+    return value() if callable(value) else value
+
+
+def _keep_room_when_hidden(widget):
+    """Hides the widget, keeping its room in the layout; False (and the widget shown, disabled) on a Qt
+    without retainSizeWhenHidden."""
+    QtCore, QtGui = _qt()
+    try:
+        policy = _property(widget, "sizePolicy")
+        policy.setRetainSizeWhenHidden(True)
+        widget.setSizePolicy(policy)
+        widget.setVisible(False)
+        return True
+    except Exception:
+        widget.setEnabled(False)
+        return False
+
+
 def latin_characters():
     return LETTERS + FIGURES + PUNCTUATION
 
@@ -933,6 +954,7 @@ MERGE_RATE = 0.5  # two base letters may share a class when at least this share 
 CLASS_SIDES_LABELS = {"first": "First in a pair (the glyph's right side)", "second": "Second in a pair (the glyph's left side)"}
 CLASS_FLAGS = {"first": "KernLeft", "second": "KernRight"}  # FontLab's flags: KernLeft classes come first in pairs
 CLASS_PREFIX = {"first": "kern1_", "second": "kern2_"}
+CLASS_COLUMNS = ("Class", "Glyphs", "What happens", "May need pairs of their own")
 
 _CLASS_MODEL = {}
 
@@ -1024,6 +1046,17 @@ def signature_gap(one, other):
     return max(both) if len(both) >= SIGNATURE_MIN else None
 
 
+def loosest_difference(one, other):
+    """(other minus one, partner index) where other kerns loosest next to one (its accent or part reaching
+    toward that partner), or None with too few partners. Where other measures tighter, the methods read
+    air beside an accent the partner does not reach (an accent above T's bar): a class value leaves
+    that pair a little loose, never colliding, so it is not counted."""
+    both = [(b - a, index) for index, (a, b) in enumerate(zip(one or [], other or [])) if a is not None and b is not None]
+    if len(both) < SIGNATURE_MIN:
+        return None
+    return max(both, key=lambda found: (found[0], -found[1]))
+
+
 def signatures_match(one, other, tolerance=SIGNATURE_TOLERANCE):
     gap = signature_gap(one, other)
     return gap is not None and gap <= tolerance
@@ -1091,7 +1124,8 @@ class ClassPlan(object):
 
     def __init__(self, side, members, names, kerning, differs=None):
         self.side, self.members = side, members
-        self.differs = differs or []  # (character, units): members kerning unlike the first one
+        self.differs = differs or []  # (character, units, partner): members kerning unlike the first one (units
+        # below zero: the member kerns that much tighter than the first one beside the partner)
         self.glyphs = [names[ch] for ch in members]
         lookup = kerning.left_class if side == "first" else kerning.right_class
         found = sorted(set(lookup[g] for g in self.glyphs if g in lookup))
@@ -1117,9 +1151,42 @@ class ClassPlan(object):
     def describe(self):
         text = self.describe_action()
         if self.differs:
-            text += u" — kerns unlike %s: %s" % (self.members[0], u", ".join(
-                u"%s (%d units)" % pair for pair in self.differs))
+            text += u" \N{EM DASH} may need pairs of their own: " + self.describe_differs()
         return text
+
+    def pair_text(self, ch, partner):
+        return ch + partner if self.side == "first" else partner + ch
+
+    def describe_differs(self):
+        """Each member kerning unlike the first one, as the pair where it differs most (an e acute beside
+        T: "...T 52 units looser than eT")."""
+        return u"; ".join(u"%s %d units %s than %s" % (self.pair_text(ch, partner), abs(units),
+                                                      u"tighter" if units < 0 else u"looser",
+                                                      self.pair_text(self.members[0], partner))
+                          for ch, units, partner in self.differs)
+
+    def characters(self, glyphs):
+        """The characters of some of this plan's glyphs, in its order."""
+        return [ch for ch, glyph in zip(self.members, self.glyphs) if glyph in glyphs]
+
+    def columns(self):
+        """(class, glyphs, what happens) as the classes dialog lists them."""
+        glyphs = u" ".join(self.members)
+        if self.action == "new":
+            return self.name, glyphs, u"New class"
+        if self.action == "add":
+            staying = [ch for ch, glyph in zip(self.members, self.glyphs) if glyph not in self.adding]
+            return self.existing, u" ".join(self.characters(self.adding)), (
+                u"Added to the class" + (u" (with %s)" % u" ".join(staying) if staying else u""))
+        if self.action == "same":
+            return self.existing, glyphs, u"The font has it"
+        existing = u", ".join(self.existing) if isinstance(self.existing, list) else (self.existing or u"")
+        return existing, glyphs, u"Left as it is: " + self.reason
+
+    def key(self):
+        """What this plan does, comparable across two workings-out (lists made tuples: hashable)."""
+        existing = tuple(self.existing) if isinstance(self.existing, list) else self.existing
+        return (self.side, tuple(self.members), self.action, self.name, existing, tuple(self.adding))
 
     def describe_action(self):
         glyphs = u" ".join(self.members)
@@ -1149,9 +1216,9 @@ def plan_classes(suggested, names, kerning, signature_of=None, upm=1000.0):
             if signature_of is not None:
                 first = signature_of(members[0], side)
                 for ch in members[1:]:
-                    gap = signature_gap(first, signature_of(ch, side))
-                    if gap is not None and gap >= DIFFERS_NOTE:
-                        differs.append((ch, int(round(gap * upm))))
+                    found = loosest_difference(first, signature_of(ch, side))
+                    if found is not None and found[0] >= DIFFERS_NOTE:
+                        differs.append((ch, int(round(found[0] * upm)), SIGNATURE_PARTNERS[side][found[1]]))
             plans.append(ClassPlan(side, members, names, kerning, differs))
     return plans
 
@@ -1235,6 +1302,7 @@ PREVIEW_TEXT_WIDTH = 92  # pixels beside a preview's glyphs for its method and v
 PICKED_ALPHA = 70  # the tint of a row whose value was picked by hand: the highlight color, this opaque
 SIDE_ALPHA = 110  # the H's on either side of a preview's pair, dimmed: the pair is what to look at
 RELATED_SHOWN = 30  # glyph pairs named under the preview's note; the rest are counted, all in its tooltip
+PICKED_ROOM = 8888  # the widest count the "picked by hand" filter keeps room for
 PALETTE_EVENTS = (38, 39)  # QEvent ApplicationPaletteChange, PaletteChange: dark mode switched
 COLUMN_CHOICES = {1: "current", 2: "halfkern", 3: "contour", 4: "learned", 5: "fontlab"}  # double-clicked cells
 
@@ -1311,13 +1379,15 @@ class AutoKerningDialog(object):
         row.addWidget(self.order)
         # Pairs the font kerns already are the designer's choices (a j tucked under the letter before
         # it, which the methods do not model): hidden unless asked for, and never checked for writing.
-        self.include_kerned = QtGui.QCheckBox("Include pairs that are already kerned")
-        self.include_kerned.setWhatsThis("Also lists the pairs the font kerns already, its kerning classes "
-                                          "included. They start unchecked.")
+        self.include_kerned = QtGui.QCheckBox("Include existing kerned pairs")
+        self.include_kerned.setWhatsThis("Also lists the pairs the font kerns already, through its classes too, "
+                                          "and the pairs written here since. They start unchecked.")
         row.addWidget(self.include_kerned)
-        self.only_picked = QtGui.QCheckBox("Only pairs picked by hand")
+        self.only_picked = QtGui.QCheckBox(u"Only pairs picked by hand (%d)" % PICKED_ROOM)
         self.only_picked.setWhatsThis("Lists only the pairs whose value you picked yourself.")
-        self.only_picked.setVisible(False)
+        # Its room is kept from the start, so the window does not grow when the first pair is picked
+        self.only_picked.setMinimumWidth(_property(self.only_picked, "sizeHint").width())
+        self.picked_room_kept = _keep_room_when_hidden(self.only_picked)
         row.addWidget(self.only_picked)
         row.addStretch(1)
         layout.addLayout(row)
@@ -1553,7 +1623,11 @@ class AutoKerningDialog(object):
         """The "picked by hand" filter, shown while a pair is picked (or while it is on)."""
         count = self.picked_count()
         self.only_picked.setText(u"Only pairs picked by hand (%d)" % count)
-        self.only_picked.setVisible(bool(count) or self.only_picked.checked)
+        wanted = bool(count) or self.only_picked.checked
+        if self.picked_room_kept:
+            self.only_picked.setVisible(wanted)
+        else:  # (a Qt without retainSizeWhenHidden: shown throughout, usable while a pair is picked)
+            self.only_picked.setEnabled(wanted)
 
     def refilter(self, inside_run=False):
         """The list: pairs either method would change by the tolerance or more, whatever source writes
@@ -1967,15 +2041,20 @@ class ClassDialog(object):
         dialog = self.dialog = QtGui.QDialog(parent)
         dialog.setWindowTitle("FreeLab Kerning Classes")
         dialog.setWhatsThis(CLASS_HELP)
-        dialog.resize(720, 640)
+        dialog.resize(900, 640)
         layout = QtGui.QVBoxLayout(dialog)
         self.status = QtGui.QLabel(u"")
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
         self.tree = QtGui.QTreeWidget()
-        self.tree.setHeaderLabels(["Suggestion"])
+        self.tree.setColumnCount(len(CLASS_COLUMNS))
+        self.tree.setHeaderLabels(list(CLASS_COLUMNS))
         self.tree.setWhatsThis(u"Each class suggested for this master: checked ones are made (or extended) when you click "
-                               u"Create checked classes. Gray ones are shown for reference and left as they are.")
+                               u"Create checked classes. Gray ones are shown for reference and left as they are. "
+                               u"<i>May need pairs of their own</i> names the members that need looser kerning than the "
+                               u"class's first glyph (an accent reaching toward the neighbor), at the pair where they "
+                               u"differ most: the class's value would bring them too close there, so check those pairs "
+                               u"after kerning the class.")
         layout.addWidget(self.tree, 1)
         self.move = QtGui.QCheckBox("Move each new class's first glyph's pairs into the class")
         self.move.setChecked(True)
@@ -2031,24 +2110,33 @@ class ClassDialog(object):
         QtCore, QtGui = _qt()
         self.tree.clear()  # (items are found again by walking the tree, never kept: PythonQt deletes them here)
         counts = {}
+        bold = QtGui.QFont(self.tree.font)
+        bold.setBold(True)
         for side in ("first", "second"):
             top = QtGui.QTreeWidgetItem([CLASS_SIDES_LABELS[side]])
             self.tree.addTopLevelItem(top)
+            top.setFirstColumnSpanned(True)
             order = {"new": 0, "add": 0, "overlap": 1, "same": 2}  # what can be made first, what the font has last
             for index, plan in sorted(enumerate(self.plans), key=lambda pair: (order[pair[1].action], pair[0])):
                 if plan.side != side:
                     continue
                 counts[plan.action] = counts.get(plan.action, 0) + 1
-                item = QtGui.QTreeWidgetItem([plan.describe()])
+                item = QtGui.QTreeWidgetItem(list(plan.columns()) + [plan.describe_differs()])
                 item.setData(0, QtCore.Qt.UserRole, index)
                 if plan.action in ("new", "add"):
                     item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsUserCheckable | QtCore.Qt.ItemIsSelectable)
                     item.setCheckState(0, QtCore.Qt.Checked)
                 else:
                     item.setFlags(QtCore.Qt.ItemIsSelectable)  # shown, not made: drawn disabled
-                item.setToolTip(0, u"Glyphs: %s" % u" ".join(plan.glyphs))
+                tip = u"%s\nGlyphs: %s" % (plan.describe(), u" ".join(plan.glyphs))  # (plain: members may be < or &)
+                for column in range(len(CLASS_COLUMNS)):
+                    item.setToolTip(column, tip)
+                for column in (0, 1):  # the class and its letters stand out
+                    item.setFont(column, bold)
                 top.addChild(item)
             top.setExpanded(True)
+        for column in range(len(CLASS_COLUMNS) - 1):
+            self.tree.resizeColumnToContents(column)
         plural = lambda count, one, many: u"%d %s" % (count, one if count == 1 else many)
         self.status.setText(u"%s, master %s: %s, %s, %s, %s (they overlap its classes). Nothing is changed until you "
                             u"create them." % (self.package.tfn, self.master,
@@ -2088,9 +2176,8 @@ class ClassDialog(object):
                                 u"before creating any. " + self.status.text)
             return
         fresh, _ = font_class_suggestions(package, master)  # the font as it is now: names free, classes as listed
-        key = lambda plan: (plan.side, tuple(plan.members), plan.action, plan.name, plan.existing, tuple(plan.adding))
-        wanted = set(key(plan) for plan in chosen)
-        chosen = [plan for plan in fresh if key(plan) in wanted]
+        wanted = set(plan.key() for plan in chosen)
+        chosen = [plan for plan in fresh if plan.key() in wanted]
         if len(chosen) != len(wanted):
             self.plans = fresh
             self.fill()
@@ -2122,7 +2209,11 @@ Suggests kerning classes for this master: glyphs that kern alike, on the side th
 <b>How</b>: an accented letter joins its base letter where most of the open-licensed fonts FreeLab
 learned from class the two together on that side. Base letters share a class where most of those
 fonts class them so (n with m and h, o with c, e, and q) and every two of them kern alike in this
-font. Members that kern unlike the first one are named, with the difference.<br>
+font.<br>
+<b>May need pairs of their own</b>: members that need kerning looser than the class's first glyph by
+3% of the em or more, each at the pair where it differs most (an e with an accent beside T: the accent
+stops it from tucking under T's bar as far as e does). The class's value will not fit that pair: check
+it after kerning the class, and give it a value of its own if needed.<br>
 <b>Sides</b>: <i>First in a pair</i> classes group glyphs by their right side (FontLab's left, or 1st,
 classes); <i>second in a pair</i> by their left side.<br>
 <b>The font's classes come first</b>: a suggestion makes a class only where none of its glyphs has one

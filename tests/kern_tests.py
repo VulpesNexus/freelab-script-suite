@@ -415,7 +415,7 @@ class ClassSuggestionTests(unittest.TestCase):
                                        {(("b", False), ("o1", True)): -20, (("b", False), ("x", False)): -10}))
         names = {u"o": "o", u"\u00f3": "oacute", u"\u00f6": "odieresis", u"b": "b", u"\u00fe": "thorn", u"T": "T",
                  u"\u0162": "Tcedilla"}
-        signatures = {u"b": [0.0, 0.0, 0.0], u"\u00fe": [0.0, -0.05, 0.0]}
+        signatures = {u"b": [0.0, 0.0, 0.0], u"\u00fe": [0.0, 0.05, -0.06]}
         signature_of = lambda ch, side: signatures.get(ch, [0.0, 0.0, 0.0])
         plans = ak.plan_classes({"second": [[u"o", u"\u00f3", u"\u00f6"]], "first": [[u"b", u"\u00fe"]]}, names, k,
                                 signature_of, 1000.0)
@@ -423,8 +423,10 @@ class ClassSuggestionTests(unittest.TestCase):
         self.assertEqual([p.action for p in plans], ["new", "add", "overlap"])
         new, add, both = plans
         self.assertEqual((new.name, new.glyphs), ("kern1_b", ["b", "thorn"]))
-        self.assertEqual(new.differs, [(u"\u00fe", 50)], "thorn kerns 50 units unlike b against a partner")
-        self.assertIn(u"thorn" if False else u"\u00fe (50 units)", new.describe())
+        self.assertEqual(new.differs, [(u"\u00fe", 50, u"O")], "thorn kerns 50 units looser than b beside O (tighter is not noted)")
+        self.assertIn(u"\u00feO 50 units looser than bO", new.describe())
+        self.assertEqual(new.columns(), (u"kern1_b", u"b \u00fe", u"New class"))
+        self.assertEqual(add.columns(), (u"o1", u"\u00f6", u"Added to the class (with o \u00f3)"))
         self.assertEqual((add.existing, add.adding), ("o1", ["odieresis"]))
         made, extended, moved, kept = ak.apply_class_plans(k, [new, add])
         self.assertEqual((made, extended, moved, kept), (1, 1, 2, 0))
@@ -434,6 +436,28 @@ class ClassSuggestionTests(unittest.TestCase):
         self.assertNotIn((("b", False), ("o1", True)), stored)
         self.assertEqual(k.kerning.groups.data["o1"], (["o", "oacute", "odieresis"], "KernRight"))
         self.assertEqual(k.kerning.groups.data["kern1_b"], (["b", "thorn"], "KernLeft"))
+
+
+class ClassDialogFixTests(unittest.TestCase):
+    def test_every_plan_has_a_hashable_key(self):
+        # an overlap's existing is a list of classes: comparing plans before creating them hashed it
+        k = ak.FontKerning(FakeKerning({"h": (["h"], "KernLeft"), "n": (["n"], "KernLeft")}, {}))
+        names = {u"h": "h", u"n": "n", u"m": "m"}
+        plans = ak.plan_classes({"first": [[u"h", u"m", u"n"]]}, names, k)
+        self.assertEqual([p.action for p in plans], ["overlap"])
+        self.assertEqual(len(set(p.key() for p in plans)), 1)
+        self.assertEqual(plans[0].columns()[0], u"h, n")
+
+    def test_a_looser_member_at_its_widest_partner(self):
+        # second side: partners H O o n v T L r f; the member kerns 40 units looser beside T (index 5)
+        first, member = [0.0, 0.0, 0.0, 0.0, 0.0, -0.08], [0.0, 0.01, 0.0, 0.0, 0.0, -0.04]
+        self.assertEqual(ak.loosest_difference(first, member)[1], 5)
+        k = ak.FontKerning(FakeKerning({}, {}))
+        names = {u"a": "a", u"\u00e1": "aacute"}
+        plans = ak.plan_classes({"second": [[u"a", u"\u00e1"]]}, names, k,
+                                lambda ch, side: first if ch == u"a" else member, 1000.0)
+        self.assertEqual(plans[0].differs, [(u"\u00e1", 40, u"T")])
+        self.assertEqual(plans[0].describe_differs(), u"T\u00e1 40 units looser than Ta")
 
 
 class ReviewFixTests(unittest.TestCase):
