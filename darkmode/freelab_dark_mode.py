@@ -893,6 +893,55 @@ def _plain_input(widget):
     return True
 
 
+LIGHT_LABEL_MIN = 0.6  # a label's text this light (HLS lightness), on a parent this dark or darker,
+DARK_PARENT_MAX = 0.4  # is drawn for the dark interface already
+LABEL_DARK_SHARE = 0.8  # when this share of what lies beneath it is that dark too
+
+
+def _color_lightness(color):
+    name = color.name()  # "#rrggbb"
+    return _lightness(int(name[1:3], 16), int(name[3:5], 16), int(name[5:7], 16))
+
+
+def _light_text_label(widget):
+    """A text label drawn from the dark palette: light text, no image, no colors of its own in its
+    stylesheet or text, on a dark parent and dark ground. Right as drawn, it is protected from the
+    ink effect around it, which mapped it among the whole window's colors: the font window's light
+    gray "SEARCH HISTORY" and "BOOKMARKS" headers, too few pixels to weigh, were read as smoothing
+    toward a white slot of its toolbar, and broke up."""
+    if not widget.inherits("QLabel"):
+        return False
+    text = getattr(widget, "text", None)
+    text = text() if callable(text) else text
+    if not text or u"<" in text:
+        return False  # (rich text brings colors of its own: the font window's selection count)
+    pixmap = getattr(widget, "pixmap", None)
+    pixmap = pixmap() if callable(pixmap) else pixmap
+    if pixmap is not None and not pixmap.isNull():
+        return False
+    sheet = (_prop(widget, "styleSheet") or u"").lower()
+    if "color" in sheet or "background" in sheet or "image" in sheet:
+        return False
+    QPalette = _qt()[1]
+    parent = widget.parentWidget()
+    if parent is None or _color_lightness(widget.palette.color(QPalette.WindowText)) < LIGHT_LABEL_MIN:
+        return False
+    if _color_lightness(parent.palette.color(QPalette.Window)) > DARK_PARENT_MAX:
+        return False
+    if not widget.isVisible():
+        return True
+    try:  # what is painted beneath it, as its parent paints that spot (a parent may paint a light badge)
+        image = parent.grab(_prop(widget, "geometry")).toImage()
+        width, height = image.width(), image.height()
+    except Exception:
+        return True
+    if not width or not height:
+        return True
+    samples = [image.pixel(x, y) for y in range(0, height, max(1, height // 4)) for x in range(0, width, max(1, width // 12))]
+    dark = sum(1 for v in samples if _lightness((v >> 16) & 255, (v >> 8) & 255, v & 255) <= DARK_PARENT_MAX)
+    return dark >= LABEL_DARK_SHARE * len(samples)
+
+
 def _shows_white_artwork(widget):
     """A label whose stylesheet shows only white artwork (the Welcome dialog's logo), or a button
     whose icon has white artwork (a checked state's white mark): no effect over them."""
@@ -2429,6 +2478,9 @@ def process(widget):
         visible_unchecked = False  # FontLab's logo: white on purpose, no effect (the ink effect blackened its edges)
     if _plain_input(widget):
         kind, visible_unchecked = None, False  # Fusion draws it from the dark palette: right as it is
+    elif kind is None and _light_text_label(widget):
+        _protect(widget)  # light text from the dark palette: no effect above may map it again
+        visible_unchecked = False
     if kind is None and visible_unchecked:
         found = detect_light(widget)  # before its icons are mapped light
         found = LEGACY_KINDS.get(found, found)
