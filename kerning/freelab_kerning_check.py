@@ -26,6 +26,8 @@ MIN_DISTANCE_SHARE = 0.02  # a kerned pair's ink closer than this share of the e
 TINY_UNITS = 5  # entries smaller than this (font units) are listed for cleanup, unchecked
 SIGN_TOLERANCE = 10  # a value counts as tightening or loosening beyond this many units, between masters
 PROGRESS_EVERY = 2000  # pairs between two looks at the event loop while checking
+PREVIEW_EM = 120  # pixels per em in the pair previews
+PAIR_ALPHA = 185  # each glyph of a previewed pair this opaque: where they overlap, the ink is denser
 COLLISION_MODES = (("relative", "closer than their base letter beside the same glyph"), ("absolute", "closer than that, absolutely"))
 
 
@@ -68,6 +70,11 @@ def load_auto_kerning():
             os.environ["FREELAB_NO_AUTOSTART"] = old
     module._freelab_stamp = stamp
     return module
+
+
+def counted(number, one, many=None):
+    """"1 pair", "2 pairs": a count with its noun in the right number."""
+    return u"%d %s" % (number, one if number == 1 else (many or one + u"s"))
 
 
 def round_units(value):
@@ -174,6 +181,10 @@ class Cleanup(object):
         self.entry, self.value, self.kind, self.reason, self.checked = entry, value, kind, reason, checked
 
 
+CLEANUP_COUNTS = {"missing": (u"entry naming what is gone", u"entries naming what is gone"),
+                  "overridden": (u"entry overridden everywhere", u"entries overridden everywhere"),
+                  "redundant": (u"entry changing nothing", u"entries changing nothing"),
+                  "tiny": (u"tiny value", u"tiny values")}
 CLEANUP_KINDS = (("missing", "Names what is gone"), ("overridden", "Overridden everywhere"),
                  ("redundant", "Changes nothing"), ("tiny", "Tiny value"))
 
@@ -222,6 +233,14 @@ def find_cleanup(kerning, glyph_exists, tiny=TINY_UNITS):
     order = dict((kind, index) for index, (kind, _) in enumerate(CLEANUP_KINDS))
     found.sort(key=lambda c: (order[c.kind], describe(c.entry)))
     return found
+
+
+def value_without(kerning, entry, left, right):
+    """The kerning a glyph pair would get without one entry: the next entry that applies to it."""
+    for candidate in kerning.candidates(left, right):
+        if candidate != entry and candidate in kerning.entries:
+            return round_units(kerning.values.get(candidate) or 0)
+    return 0
 
 
 class MasterDifference(object):
@@ -385,8 +404,25 @@ class KerningCheckDialog(object):
         self.font_label = QtGui.QLabel(u"")
         self.font_label.setWordWrap(True)
         layout.addWidget(self.font_label)
-        self.tabs = QtGui.QTabWidget()
-        layout.addWidget(self.tabs, 1)
+        # A tab bar over plain pages: a QTabWidget's themed page drew its buttons with light frames in dark mode
+        self.tabs = QtGui.QTabBar()
+        self.tabs.setExpanding(False)
+        layout.addWidget(self.tabs)
+        self.pages = QtGui.QStackedWidget()
+        layout.addWidget(self.pages, 1)
+        previews = QtGui.QHBoxLayout()
+        self.previews = []
+        for _ in range(3):
+            label = QtGui.QLabel()
+            label.setProperty(self.ak.LEAVE_ALONE_PROP, True)  # dark mode leaves the drawn pictures alone
+            label.setAlignment(QtCore.Qt.AlignCenter)
+            label.setMinimumHeight(int(PREVIEW_EM * 1.7))
+            label.setWhatsThis(u"The selected pair as it is set now and with its fix (Collisions), or with and "
+                               u"without its entry (Cleanup); its glyphs are drawn see-through, so where their ink "
+                               u"overlaps it is denser.")
+            previews.addWidget(label, 1)
+            self.previews.append(label)
+        layout.addLayout(previews)
 
         self.collisions = Tab(QtGui, ("Pair", "Kerning", "Distance", "Fix", "Set by", "Compared with"),
                               "Write checked fixes")
@@ -446,7 +482,8 @@ class KerningCheckDialog(object):
                 tab.buttons.addStretch(1)
                 tab.buttons.addWidget(tab.action)
                 tab.action.setEnabled(False)
-            self.tabs.addTab(tab.widget, label)
+            self.tabs.addTab(label)
+            self.pages.addWidget(tab.widget)
 
         buttons = QtGui.QHBoxLayout()
         self.glyph_window_button = QtGui.QPushButton("Show in Glyph window")
@@ -464,9 +501,13 @@ class KerningCheckDialog(object):
         self.collisions.action.connect("clicked()", self.write_fixes)
         self.cleanup.action.connect("clicked()", self.remove_entries)
         self.glyph_window_button.connect("clicked()", self.show_in_glyph_window)
+        for tab in (self.collisions, self.cleanup, self.masters):
+            tab.tree.connect("itemSelectionChanged()", self.update_previews)
+        self.tabs.connect("currentChanged(int)", self.switch_page)
         self.close_button.connect("clicked()", dialog.close)
         self.package = self.master = None
         self.busy = False
+        self.ak.plain_buttons(dialog)
         self.read_font()
 
     # -- the font ------------------------------------------------------------
@@ -494,7 +535,9 @@ class KerningCheckDialog(object):
         if not self.minimum.value and not getattr(self, "minimum_set", False):
             self.minimum.setValue(round_units(MIN_DISTANCE_SHARE * upm))
             self.minimum_set = True
-        self.font_label.setText(u"%s, master %s (%d masters)." % (self.package.tfn, self.master, self.package.mastersCount))
+        count = self.package.mastersCount
+        self.font_label.setText(u"%s, master %s (%d %s)." % (self.package.tfn, self.master, count,
+                                                             u"master" if count == 1 else u"masters"))
         return True
 
     def kerning(self, master=None):
@@ -616,7 +659,7 @@ class KerningCheckDialog(object):
                 tab.status.setText(u"FontLab did not give this master's kerning with its classes applied.")
                 return
             names = set(name for pair in kerning.plain for name in pair)
-            tab.status.setText(u"Drawing %d glyphs\N{HORIZONTAL ELLIPSIS}" % len(names))
+            tab.status.setText(u"Drawing %s\N{HORIZONTAL ELLIPSIS}" % counted(len(names), u"glyph"))
             QtGui.QApplication.processEvents()
             ink = InkDistances(self.ak, self.package, self.master, names)
             minimum = self.minimum.value
@@ -649,8 +692,8 @@ class KerningCheckDialog(object):
         parents = {}
         for key in order:
             if len(groups[key]) > 1:
-                parents[key] = self.add_group(tab, (u"%s \N{EM DASH} %d pairs" % (glyph_text(self.package, key),
-                                                                               len(groups[key])),))
+                parents[key] = self.add_group(tab, (u"%s \N{EM DASH} %s" % (glyph_text(self.package, key),
+                                                                               counted(len(groups[key]), u"pair")),))
                 parents[key].setFirstColumnSpanned(True)
         for index, c in enumerate(found):
             where = kerning.describe(c.entry) if c.entry is not None else u""
@@ -671,8 +714,9 @@ class KerningCheckDialog(object):
         tight = sum(1 for value in kerning.plain.values() if value is not None and value < 0)
         what = (u"within %d units, and that much closer than their base letter beside the same glyph" % minimum if relative
                 else u"closer than %d units" % minimum)
-        tab.status.setText(u"%d of the %d pairs kerned tighter come %s, kerning applied." % (len(found), tight, what)
-                           if found else u"None of the %d pairs kerned tighter comes %s." % (tight, what))
+        tab.status.setText(u"%d of the %s kerned tighter %s %s, kerning applied." % (
+            len(found), counted(tight, u"pair"), u"comes" if len(found) == 1 else u"come", what)
+            if found else u"None of the %s kerned tighter comes %s." % (counted(tight, u"pair"), what))
 
     def write_fixes(self):
         if self.busy or not self.same_font():
@@ -694,9 +738,10 @@ class KerningCheckDialog(object):
             error = exc
         self.after_writing()
         self.check_collisions()
-        notes = [u"Wrote %d pairs of their own." % written]
+        notes = [u"Wrote %s of %s own." % (counted(written, u"pair"), u"its" if written == 1 else u"their")]
         if stale:
-            notes.append(u"%d pairs had changed since the check and were left as they are." % stale)
+            notes.append(u"%s had changed since the check and %s left as %s." % (
+                counted(stale, u"pair"), u"was" if stale == 1 else u"were", u"it was" if stale == 1 else u"they were"))
         if error is not None:
             notes.append(u"Stopped by an error: %s" % error)
         notes.append(u"Close the font without saving to take it back.")
@@ -726,9 +771,10 @@ class KerningCheckDialog(object):
         counts = {}
         for c in found:
             counts[c.kind] = counts.get(c.kind, 0) + 1
-        tab.status.setText(u"%d of %d entries listed: %s." % (
-            len(found), len(kerning.entries), u", ".join(u"%d %s" % (counts[kind], label.lower())
-                                                       for kind, label in CLEANUP_KINDS if kind in counts) or u"none"))
+        tab.status.setText(u"%d of %s listed: %s." % (
+            len(found), counted(len(kerning.entries), u"entry", u"entries"),
+            u", ".join(counted(counts[kind], *CLEANUP_COUNTS[kind]) for kind, _ in CLEANUP_KINDS if kind in counts)
+            or u"none"))
 
     def remove_entries(self):
         if self.busy or not self.same_font():
@@ -750,9 +796,10 @@ class KerningCheckDialog(object):
             error = exc
         self.after_writing()
         self.check_cleanup()
-        notes = [u"Removed %d entries." % removed]
+        notes = [u"Removed %s." % counted(removed, u"entry", u"entries")]
         if stale:
-            notes.append(u"%d had changed since the check and were left as they are." % stale)
+            notes.append(u"%d had changed since the check and %s left as %s." % (
+                stale, u"was" if stale == 1 else u"were", u"it was" if stale == 1 else u"they were"))
         if error is not None:
             notes.append(u"Stopped by an error: %s" % error)
         notes.append(u"Close the font without saving to take it back.")
@@ -773,13 +820,17 @@ class KerningCheckDialog(object):
         for index, d in enumerate(found):
             self.add_row(tab, index, (d.subject, u"; ".join(u"%s %s" % pair for pair in d.values), d.reason), False, False)
         self.resize(tab)
-        tab.status.setText(u"%d differences between %d masters." % (len(found), len(masters)) if found
+        tab.status.setText(u"%s between %d masters." % (counted(len(found), u"difference"), len(masters)) if found
                            else u"The %d masters kern the same entries, with the same signs." % len(masters))
 
     # -- looking at a pair ----------------------------------------------
 
-    def selected_pair(self):
-        """The glyph pair of the selected row (an entry's first pair), or None."""
+    def switch_page(self, index):
+        self.pages.setCurrentIndex(index)
+        self.update_previews()
+
+    def selected_finding(self):
+        """The finding of the selected row (a group's first one), or None."""
         QtCore, QtGui = _qt()
         tab = (self.collisions, self.cleanup, self.masters)[self.tabs.currentIndex]
         items = tab.tree.selectedItems()
@@ -790,7 +841,77 @@ class KerningCheckDialog(object):
             if not item.childCount():
                 return None
             item = item.child(0)
-        finding = tab.findings[int(item.data(0, QtCore.Qt.UserRole))]
+        return tab.findings[int(item.data(0, QtCore.Qt.UserRole))]
+
+    def update_previews(self):
+        """The selected pair drawn: now and with its fix, beside its base pair (Collisions); with and
+        without its entry (Cleanup)."""
+        finding = self.selected_finding() if self.package is not None else None
+        shown = []
+        try:
+            if isinstance(finding, Collision):
+                shown = [(finding.pair(), finding.value, u"Now: %d" % finding.value),
+                         (finding.pair(), finding.fix, u"With the fix: %d" % finding.fix)]
+                if finding.reference is not None:
+                    shown.append((finding.reference, finding.value, u"Its base pair: %d" % finding.value))
+            elif isinstance(finding, Cleanup):
+                kerning = self.kerning()
+                pairs = kerning.pairs(finding.entry)
+                if pairs:
+                    now = kerning.current(*pairs[0])
+                    without = value_without(kerning, finding.entry, *pairs[0])
+                    shown = [(pairs[0], now, u"Now: %d" % now), (pairs[0], without, u"Without the entry: %d" % without)]
+        except Exception:
+            shown = []
+        for index, label in enumerate(self.previews):
+            if index < len(shown):
+                pair, value, caption = shown[index]
+                label.setPixmap(self.pair_picture(pair[0], pair[1], value, caption))
+            else:
+                label.clear()
+
+    def pair_picture(self, left, right, value, caption):
+        """A glyph pair at a kerning value, both glyphs see-through in the dialog's text color, its
+        caption under it."""
+        QtCore, QtGui = _qt()
+        ak = self.ak
+        layers = []
+        for name in (left, right):
+            glyph = self.package.findName(name)
+            layer = glyph.getLayerByName(self.master) if glyph is not None and not glyph.isNull else None
+            if layer is None:
+                return QtGui.QPixmap()
+            layers.append((layer, ak.layer_path(layer)))
+        scale = float(PREVIEW_EM) / float(self.package.upm)
+        margin = PREVIEW_EM // 4
+        width = int((layers[0][0].advanceWidth + max(0, layers[1][0].advanceWidth + value)) * scale) + 2 * margin
+        line = QtGui.QFontMetrics(self.dialog.font).height()
+        height = int(PREVIEW_EM * 1.35) + line
+        pixmap = QtGui.QPixmap(max(width, 2 * margin), height)
+        pixmap.fill(QtGui.QColor(0, 0, 0, 0))
+        color = self.dialog.palette.color(QtGui.QPalette.WindowText)
+        ink = QtGui.QColor(color)
+        ink.setAlpha(PAIR_ALPHA)
+        painter = QtGui.QPainter(pixmap)
+        try:  # ended before anything else can fail: a painter left open on a freed pixmap aborts FontLab
+            painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+            x = float(margin)
+            for index, (layer, path) in enumerate(layers):
+                painter.save()
+                painter.translate(x, PREVIEW_EM * 1.05)
+                painter.scale(scale, -scale)
+                painter.fillPath(path, QtGui.QBrush(ink))
+                painter.restore()
+                x += (layer.advanceWidth + (value if index == 0 else 0)) * scale
+            painter.setPen(color)
+            painter.drawText(QtCore.QRect(0, height - line, pixmap.width(), line), int(QtCore.Qt.AlignCenter), caption)
+        finally:
+            painter.end()
+        return pixmap
+
+    def selected_pair(self):
+        """The glyph pair of the selected row (an entry's first pair), or None."""
+        finding = self.selected_finding()
         if isinstance(finding, Collision):
             return finding.pair()
         if isinstance(finding, Cleanup):

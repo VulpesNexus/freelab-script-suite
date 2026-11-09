@@ -69,6 +69,11 @@ def load_auto_kerning():
     return module
 
 
+def counted(number, one, many=None):
+    """"1 pair", "2 pairs": a count with its noun in the right number."""
+    return u"%d %s" % (number, one if number == 1 else (many or one + u"s"))
+
+
 def round_units(value):
     return int(math.floor(value + 0.5))
 
@@ -271,6 +276,7 @@ class AutoSpacingDialog(object):
         self.package = self.master = None
         self.spacings, self.listed, self.composites = [], [], {}
         self.busy = False
+        self.ak.plain_buttons(dialog)
 
     # -- the font ------------------------------------------------------------
 
@@ -415,12 +421,17 @@ class AutoSpacingDialog(object):
             changes = dict((s.name, s.changes(tolerance)) for s in self.listed)
             moves = composite_moves(self.composites, changes)
             following = sum(1 for move in moves.values() if move is not None)
-            self.composites_note.setText(u"%d glyphs built from components follow the listed letters%s." % (
-                following, u"; %d built on two of them are left as they are" % sum(1 for m in moves.values() if m is None)
+            left_out = sum(1 for m in moves.values() if m is None)
+            self.composites_note.setText(u"%s built from components %s the listed letters%s." % (
+                counted(following, u"glyph"), u"follows" if following == 1 else u"follow",
+                u"; %d built on two of them %s left as %s" % (left_out, u"is" if left_out == 1 else u"are",
+                                                             u"it is" if left_out == 1 else u"they are")
                 if any(m is None for m in moves.values()) else u""))
-            self.status.setText(u"%s, master %s: %d of %d drawn glyphs have a side %d units or more from the "
-                                u"suggestion. Nothing changes until you click Space checked glyphs."
-                                % (self.package.tfn, self.master, len(self.listed), len(self.spacings), tolerance))
+            self.status.setText(u"%s, master %s: %d of %s %s a side %s or more from the suggestion. Nothing changes "
+                                u"until you click Space checked glyphs."
+                                % (self.package.tfn, self.master, len(self.listed),
+                                   counted(len(self.spacings), u"drawn glyph"), u"has" if len(self.listed) == 1 else u"have",
+                                   counted(tolerance, u"unit")))
         self.select()
 
     def harvest(self):
@@ -563,10 +574,11 @@ class AutoSpacingDialog(object):
         except Exception as exc:  # what was changed stays changed, and is reported
             error = exc
         self.after_writing()
-        notes = [u"Spaced %d glyphs%s." % (len(changed), u", and %d glyphs built on them followed" % moved
+        notes = [u"Spaced %s%s." % (counted(len(changed), u"glyph"), u", and %s built on them followed" % counted(moved, u"glyph")
                                            if self.follow.checked and changed else u"")]
         if stale:
-            notes.append(u"%d had changed since the analysis and were left as they are." % stale)
+            notes.append(u"%d had changed since the analysis and %s left as %s." % (
+                stale, u"was" if stale == 1 else u"were", u"it was" if stale == 1 else u"they were"))
         if error is not None:
             notes.append(u"Stopped by an error: %s" % error)
         notes.append(u"The kerning was set for the old spacing: run Auto Kerning again. Close the font without "

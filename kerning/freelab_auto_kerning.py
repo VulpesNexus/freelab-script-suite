@@ -842,14 +842,52 @@ def proof_text(left, right, contexts=PROOF_CONTEXTS):
     return u"/space".join(lines)
 
 
+GLYPH_TAB_ACTION = "actionOpen_Editor_Window"  # FontLab's Window > New Glyph Tab
+
+
 def show_in_glyph_window(fontlab, text):
-    """Opens the text (FontLab's /glyphname syntax) in a Glyph window, as typing it would; the error's
-    text, or None."""
+    """Opens a new Glyph tab (FontLab's own New Glyph Tab) and sets its text (FontLab's /glyphname
+    syntax), as typing it would; the error's text, or None. requestContent alone sets the text of the
+    active Glyph window only, and does nothing without one."""
+    QtCore, QtGui = _qt()
     try:
-        fontlab.flItems.requestContent(fontlab.fgSymbolList(text, True), 0)
+        symbols = fontlab.fgSymbolList(text, True)
+    except Exception as exc:
+        return u"%s" % exc
+    action = None
+    main = AutoKerningDialog.main_window()
+    if main is not None:
+        for candidate in main.findChildren(QtGui.QAction):
+            if candidate.objectName == GLYPH_TAB_ACTION:
+                action = candidate
+                break
+    if action is None:
+        return u"FontLab's New Glyph Tab command was not found"
+
+    def fill():
+        try:
+            fontlab.flItems.requestContent(symbols, 0)
+        except Exception:
+            pass
+
+    try:
+        action.trigger()
+        QtCore.QTimer.singleShot(150, fill)  # once the new tab is the active Glyph window
         return None
     except Exception as exc:
         return u"%s" % exc
+
+
+def plain_buttons(dialog):
+    """No default button in a FreeLab dialog: Qt frames the default one in a light color dark mode
+    leaves light (and Enter in a field would click it)."""
+    QtCore, QtGui = _qt()
+    try:
+        for button in dialog.findChildren(QtGui.QPushButton):
+            button.setAutoDefault(False)
+            button.setDefault(False)
+    except Exception:
+        pass
 
 
 def fontlab_autokern(package, master, left, right):
@@ -1601,6 +1639,7 @@ class AutoKerningDialog(object):
         self.choice_group.connect("buttonClicked(int)", lambda number: self.choose(CHOICES[number][0]))
         self.keys = self.make_keys()
         self.watcher = self.watch_palette()
+        plain_buttons(dialog)
 
     def suggest_classes(self):
         if self.class_dialog is None:
@@ -2230,6 +2269,7 @@ class ClassDialog(object):
         self.exceptions_button.connect("clicked()", self.write_exceptions)
         self.close_button.connect("clicked()", dialog.close)
         self.plans, self.names, self.exceptions = [], {}, []
+        plain_buttons(dialog)
 
     def show(self):
         QtCore, QtGui = _qt()

@@ -42,7 +42,7 @@ On the owner's test font, left out of the counts, 60 of the suggestions were cla
 - **Cleanup**: entries that change nothing (every pair they cover gets the same value without them), entries overridden for every pair they cover, entries naming a class with no members or a glyph the font lacks (these three checked), and values smaller than the size set (5 units to start with; unchecked, to look at first). Entries are judged most specific first, each as if those found before it were removed: an exception equal to its class's value is listed, and the class entry it falls back on is not.
 - **Masters**: entries kerned in some masters and not others, entries tightening in one master and loosening in another (an instance between them may collide), and classes whose members differ between masters. A list only: masters differ on purpose as often as by mistake.
 
-*Show in Glyph window* opens the selected row's pair (a group's first pair, an entry's first glyph pair) in a Glyph window.
+Selecting a row draws its pair under the list, its two glyphs see-through so that overlapping ink shows denser: now, with its fix, and its base pair (Collisions), or with and without the entry (Cleanup). *Show in Glyph window* opens the selected row's pair (a group's first pair, an entry's first glyph pair) in a new Glyph tab, as FontLab's *Window > New Glyph Tab* does, then sets its text.
 
 On the owner's test font (22,665 pairs kerned tighter, most through classes), the collision check takes about 2.5 seconds and lists 2,735 pairs, mostly accented and barred letters under tall marks (*Ť*, *Ŧ*, *ŧ*, *î*, *Ý*, *ĵ*); cleanup lists 34 values under 5 units and nothing else.
 
