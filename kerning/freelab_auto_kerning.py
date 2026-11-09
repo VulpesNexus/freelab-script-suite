@@ -1119,16 +1119,16 @@ class Log(object):
         self.view.clear()
 
 
-GRID_SHEETS = {"table": u"QTableView { gridline-color: rgba(128, 128, 128, 90); }",
-               "tree": u"QTreeView::item { border-right: 1px solid rgba(128, 128, 128, 90); "
-                       u"border-bottom: 1px solid rgba(128, 128, 128, 90); } "
+GRID_SHEETS = {"table": u"QTableView { gridline-color: rgba(128, 128, 128, 128); }",
+               "tree": u"QTreeView::item { border-right: 1px solid rgba(128, 128, 128, 128); "
+                       u"border-bottom: 1px solid rgba(128, 128, 128, 128); } "
                        u"QTreeView::item:selected { background: palette(highlight); color: palette(highlighted-text); }"}
 # (a stylesheet's item rule takes the items' drawing over: without its selected rule, a selected row
 # showed no highlight)
 
 
 def grid_lines(view):
-    """Lines between a list's cells, a gray at a third of full strength over either palette."""
+    """Lines between a list's cells: a mid gray at half strength, over either palette."""
     try:
         view.setStyleSheet(GRID_SHEETS["table" if view.inherits("QTableView") else "tree"])
     except Exception:
