@@ -1,4 +1,4 @@
-"""Tests of FreeLab's accented glyphs (planning and placing marks) and feature code (ligatures and
+"""Tests of FreeLab's Diacritics (planning and placing marks) and feature code (ligatures and
 alternates that take turns). Valid Python 2.7 and Python 3; the feature parser's checks run where
 fontTools is installed."""
 
@@ -12,7 +12,7 @@ os.environ["FREELAB_NO_AUTOSTART"] = "1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, os.pardir, "diacritics"))
 sys.path.insert(0, os.path.join(HERE, os.pardir, "features"))
-import freelab_accents as ac  # noqa: E402
+import freelab_diacritics as ac  # noqa: E402
 import freelab_feature_code as fc  # noqa: E402
 
 try:
@@ -75,6 +75,68 @@ def inks():
             "Y": ac.Ink(10, 0, 590, 700, advance=600),
             "acute": ac.Ink(0, 500, 100, 600), "circumflex": ac.Ink(0, 500, 200, 600),
             "period": ac.Ink(0, 0, 100, 100), "dotaccent": ac.Ink(0, 500, 100, 600)}
+
+
+class ScriptTests(unittest.TestCase):
+    """Greek and Cyrillic: the script's own marks, the tonos at a capital's left, joined marks, names."""
+
+    def setUp(self):
+        self.font = ac.Font(["Alpha", "alpha", "iota", "tonos", "dieresis", "dieresistonos", "ii-cy", "brevecomb-cy",
+                             "breve", "i-cy", "dotlessi", "acute"],
+                            [("Alpha", 0x391), ("alpha", 0x3B1), ("iota", 0x3B9), ("tonos", 0x384),
+                             ("dieresis", 0xA8), ("dieresistonos", 0x385), ("ii-cy", 0x438), ("i-cy", 0x456),
+                             ("dotlessi", 0x131), ("breve", 0x2D8), ("acute", 0xB4)])
+        self.names = {0x386: u"Alphatonos", 0x3AC: u"alphatonos", 0x439: u"iishort-cy", 0x390: u"iotadieresistonos"}
+
+    def plan(self, codes):
+        saved = ac._NAMES.copy()
+        try:
+            ac._NAMES.clear()
+            ac._NAMES[os.path.join(os.path.dirname(os.path.abspath(ac.__file__)), ac.NAMES_FILE)] = self.names
+            return dict((r.code, r) for r in ac.plan(self.font, [ac.unichr_(code) for code in codes]))
+        finally:
+            ac._NAMES.clear()
+            ac._NAMES.update(saved)
+
+    def test_greek_takes_its_tonos_at_a_capitals_left(self):
+        found = self.plan([0x386, 0x3AC])
+        capital, small = found[0x386], found[0x3AC]
+        self.assertEqual((capital.marks[0].glyph, capital.marks[0].side), ("tonos", "left"))
+        self.assertEqual((small.marks[0].glyph, small.marks[0].side), ("tonos", "above"))
+        self.assertEqual((capital.name, small.name), (u"Alphatonos", u"alphatonos"), "Glyphs' names")
+        ink = {"Alpha": ac.Ink(10, 0, 600, 700, advance=620), "tonos": ac.Ink(0, 520, 80, 720)}.get
+        parts, width = ac.place(capital, ink, ac.Placement(1000, MODEL))
+        alpha, tonos = parts
+        self.assertEqual(width, 620 + alpha[3], "wider by as much as the letter moved right")
+        self.assertLessEqual(tonos[3] + 80, alpha[3] + 10 - 25, "the tonos left of the letter, a gap between")
+        self.assertEqual(tonos[3], 10, "the tonos keeps the letter's left sidebearing")
+        self.assertEqual(tonos[4] + 720, 700, "its top level with the capital's")
+
+    def test_greek_joins_dialytika_and_tonos(self):
+        self.assertEqual([m.glyph for m in self.plan([0x390])[0x390].marks], ["dieresistonos"], "the font's glyph for both")
+        self.font.names.discard("dieresistonos")
+        del self.font.by_code[0x385]
+        joined = self.plan([0x390])[0x390].marks[0]
+        self.assertTrue(joined.joined)
+        self.assertEqual([p[0] for p in joined.parts], ["dieresis", "tonos"], "else its two marks, over each other")
+        box, laid = ac.mark_ink(joined, {"dieresis": ac.Ink(0, 500, 200, 560), "tonos": ac.Ink(0, 520, 60, 700)}.get,
+                                ac.Placement(1000), "lower")
+        self.assertEqual((laid[1][3] + 30, laid[1][4] + 520), (100, 500), "the tonos centered on the dots, bottoms level")
+
+    def test_cyrillic_short_i_and_yi(self):
+        found = self.plan([0x439, 0x457])
+        self.assertEqual(found[0x439].marks[0].glyph, "brevecomb-cy", "Cyrillic's own breve first")
+        self.assertEqual(found[0x439].name, u"iishort-cy")
+        self.assertEqual(found[0x457].base, "dotlessi", "the Ukrainian i takes the dotless i under its dieresis")
+
+    def test_marks_moved_by_hand(self):
+        recipe = ac.Recipe(u"x", "xacute", "x", [ac.Mark("acute", "above", [("acute", 1.0, 1.0, 0.0, 0.0)])])
+        ink = {"acute": ac.Ink(0, 0, 100, 100)}.get
+        parts = [("x", 1.0, 1.0, 0, 0), ("acute", 1.0, 1.0, 200, 500)]
+        self.assertEqual(ac.adjusted(recipe, parts, ink), parts, "nothing moved")
+        recipe.adjust = {0: [10, -20, 2.0, 0.5]}
+        moved = ac.adjusted(recipe, parts, ink)[1]
+        self.assertEqual(moved, ("acute", 2.0, 0.5, 160, 505), "scaled about its center (250, 550), then moved")
 
 
 class PlaceTests(unittest.TestCase):

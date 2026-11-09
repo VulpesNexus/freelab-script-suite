@@ -47,13 +47,17 @@ $files = @(
     @{ From = 'kerning\freelab_auto_kerning.py'; Name = 'freelab_auto_kerning.py' },
     @{ From = 'kerning\freelab_kerning_check.py'; Name = 'freelab_kerning_check.py' },
     @{ From = 'spacing\freelab_auto_spacing.py'; Name = 'freelab_auto_spacing.py' },
-    @{ From = 'diacritics\freelab_accents.py'; Name = 'freelab_accents.py' },
+    @{ From = 'diacritics\freelab_diacritics.py'; Name = 'freelab_diacritics.py' },
     @{ From = 'diacritics\mark_model.json'; Name = 'mark_model.json' },
+    @{ From = 'diacritics\glyph_names.json'; Name = 'glyph_names.json' },
+    @{ From = 'diacritics\GlyphData_LICENSE'; Name = 'GlyphData_LICENSE' },
     @{ From = 'features\freelab_feature_code.py'; Name = 'freelab_feature_code.py' },
     @{ From = 'kerning\common_pairs.txt'; Name = 'common_pairs.txt' },
     @{ From = 'kerning\learned_model.json'; Name = 'learned_model.json' },
     @{ From = 'kerning\class_model.json'; Name = 'class_model.json' }
 )
+# Scripts FreeLab once installed under other names: removed on install and uninstall.
+$retired = @('freelab_accents.py')  # Accented Glyphs, now Diacritics
 if (-not $BinDir) { $BinDir = Join-Path $env:LOCALAPPDATA 'FreeLab\bin' }
 if (-not $StateDir) { $StateDir = Join-Path $env:LOCALAPPDATA 'FreeLab' }
 if (-not $RegistryKey) { $RegistryKey = 'HKCU:\Software\Fontlab\fontlab7' }
@@ -242,9 +246,9 @@ if ($Uninstall) {
     # Auto Kerning's remembered analyses.
     $kernCache = Join-Path $StateDir 'kerning-cache'
     if (Test-Path $kernCache) { [System.IO.Directory]::Delete($kernCache, $true); Write-Output "Removed $kernCache" }
-    foreach ($f in $files) {
+    foreach ($name in @($files | ForEach-Object { $_.Name }) + $retired) {
         foreach ($dir in @($scripts, $rootScripts)) {  # the Scripts folder itself held them before 0.3
-            $target = Join-Path $dir $f.Name
+            $target = Join-Path $dir $name
             if (Test-Path $target) { [System.IO.File]::Delete($target); Write-Output "Removed $target" }
         }
     }
@@ -267,6 +271,10 @@ foreach ($f in $files) {
     Write-Output "Copied $($f.Name) to $scripts"
     $old = Join-Path $rootScripts $f.Name  # before 0.3 they sat in the Scripts folder itself
     if (Test-Path $old) { [System.IO.File]::Delete($old); Write-Output "Removed the old $old" }
+}
+foreach ($name in $retired) {
+    $old = Join-Path $scripts $name
+    if (Test-Path $old) { [System.IO.File]::Delete($old); Write-Output "Removed the retired $old" }
 }
 
 $native = Join-Path $BinDir $nativeName

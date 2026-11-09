@@ -879,17 +879,26 @@ def show_in_glyph_window(fontlab, text):
 
 
 def notify_changed(fontlab, package, title, glyphs=()):
-    """FontLab told of a script's changes (its windows redraw them) and the font marked modified: a
-    script's writes leave it unmarked, and FontLab would close it without asking to save.
-    notifyPackageContentUpdated(package.id) fails in FontLab 7.2 (PyCXX cannot pass the id as an int),
-    so each changed glyph is updated and the change announced as FontLab's own commands do."""
+    """FontLab told of a script's changes, as one step of its History, and its windows redrawn.
+
+    The step records the whole font (notifyChangesApplied's third argument: its objects and theirs):
+    a step that recorded only the glyphs it changed left the font's list of glyphs out, and undoing a
+    later step then put back a list without the glyphs a script had added (and FontLab complained of
+    the components it could not find). notifyPackageContentUpdated takes the font's fontgate id
+    (fgPackage.id): given flPackage.id, PyCXX cannot pass it as an int. Without it, the Font window
+    does not show glyphs a script added. The font is marked modified: a script's writes leave it
+    unmarked, and FontLab would close it without asking to save."""
     for glyph in glyphs:
         try:
             glyph.update()
         except Exception:
             pass
     try:
-        fontlab.flItems.notifyChangesApplied(title, list(glyphs) if glyphs else package, True)
+        fontlab.flItems.notifyChangesApplied(title, package, True)
+    except Exception:
+        pass
+    try:
+        fontlab.flItems.notifyPackageContentUpdated(package.fgPackage.id)
     except Exception:
         pass
     try:
@@ -898,13 +907,22 @@ def notify_changed(fontlab, package, title, glyphs=()):
         pass
 
 
+def history_state(package):
+    """The font's place in FontLab's History (it changes with each step, undo, and redo), or None."""
+    try:
+        return package.currentHistoryState()
+    except Exception:
+        return None
+
+
 # Scripts > FreeLab, in the order a font is usually made, then dark mode, then FreeLab MCP's: FontLab
 # lists a folder's scripts by file name and has no separators of its own.
-MENU_GROUPS = (("Accented Glyphs", "Auto Spacing", "Auto Kerning", "Kerning Check", "Feature Code"),
+MENU_GROUPS = (("Diacritics", "Auto Spacing", "Auto Kerning", "Kerning Check", "Feature Code"),
                ("Toggle Dark Mode", "Dark Mode Settings"),
                ("Start Listener", "Stop Listener"))
 MENU_TITLE, SCRIPTS_MENU = "FreeLab", "menuScripts"
 MENU_ORDER_PROP = "freelab_menu_order"
+MENU_HOOK_VERSION = 2  # the Scripts menu's property holds it: an older hook found there is replaced
 
 
 def menu_order(texts, groups=MENU_GROUPS):
@@ -942,7 +960,13 @@ def arrange_menu(menu):
 
 def hook_menu_order():
     """Arranges Scripts > FreeLab each time the Scripts menu opens (FontLab builds the submenu anew on
-    Refresh Scripts). Called once at startup by FreeLab's block of FontLab's startup script."""
+    Refresh Scripts). Called at startup by FreeLab's block of FontLab's startup script, and by each
+    FreeLab script as it opens.
+
+    The handler finds arrange_menu in the module loaded last, and holds on to its own: Python 2
+    empties a module's globals (to None) once nothing holds the module, and a script loaded again
+    (after a reinstall) replaces it in sys.modules. The first hook held nothing, and stopped working
+    silently after a reinstall."""
     QtCore, QtGui = _qt()
     main = AutoKerningDialog.main_window()
     if main is None:
@@ -952,21 +976,31 @@ def hook_menu_order():
         if menu.objectName == SCRIPTS_MENU:
             scripts = menu
             break
-    if scripts is None or scripts.property(MENU_ORDER_PROP) is not None:
+    if scripts is None:
         return False
+    try:
+        version = int(scripts.property(MENU_ORDER_PROP) or 0)
+    except (TypeError, ValueError):
+        version = 1  # the first hook set True
+    if version >= MENU_HOOK_VERSION:
+        return False
+    holder = [sys.modules.get(__name__), arrange_menu]
 
     def shown():
         try:
+            latest = sys.modules.get(__name__)
+            arrange = getattr(latest, "arrange_menu", None) or holder[1]
             for action in scripts.actions():
                 submenu = action.menu()
                 if submenu is not None and action.text.replace(u"&", u"") == MENU_TITLE:
-                    arrange_menu(submenu)
+                    arrange(submenu)
         except Exception:
             pass  # a signal handler must not raise
 
     scripts.connect("aboutToShow()", shown)
-    scripts.setProperty(MENU_ORDER_PROP, True)
-    sys._freelab_menu_order = shown  # kept: PythonQt drops a slot no Python object holds
+    scripts.setProperty(MENU_ORDER_PROP, MENU_HOOK_VERSION)
+    sys._freelab_menu_order = (shown, holder)  # kept: PythonQt drops a slot no Python object holds
+    shown()
     return True
 
 
@@ -980,6 +1014,234 @@ def plain_buttons(dialog):
             button.setDefault(False)
     except Exception:
         pass
+
+
+# ---------------------------------------------------------------------------
+# What every FreeLab dialog shares: rich status lines, a log, grid lines, button states, the font's
+# History watched, and previews whose neighbors can be clicked
+# ---------------------------------------------------------------------------
+
+def html(text):
+    """Text made safe for a rich-text label."""
+    return (u"%s" % text).replace(u"&", u"&amp;").replace(u"<", u"&lt;").replace(u">", u"&gt;")
+
+
+def b(value):
+    """A value in bold, in a status line."""
+    return u"<b>%s</b>" % html(value)
+
+
+def i(name):
+    """A button's or a setting's name in italics, in a status line."""
+    return u"<i>%s</i>" % html(name)
+
+
+def rich(label):
+    """The label shows rich text (bold values, italic names)."""
+    QtCore, QtGui = _qt()
+    try:
+        label.setTextFormat(QtCore.Qt.RichText)
+    except Exception:
+        pass
+    return label
+
+
+LOG_LINES = 4  # the log's height, in lines
+LOG_KEPT = 200  # entries kept
+LOG_COLORS = {"warning": ((224, 160, 40), (150, 95, 0)), "error": ((240, 96, 86), (190, 30, 20)),
+              "done": ((120, 200, 120), (30, 120, 40))}  # (on a dark background, on a light one)
+
+
+class Log(object):
+    """A few lines under a dialog's list: what each action did, done in green, warnings in amber,
+    errors in red, newest first. The dialog's top line keeps to what the list shows."""
+
+    def __init__(self):
+        QtCore, QtGui = _qt()
+        view = self.view = QtGui.QTextEdit()
+        view.setReadOnly(True)
+        line = QtGui.QFontMetrics(view.font).lineSpacing()
+        view.setFixedHeight(int(line * LOG_LINES + 12))
+        view.setWhatsThis(u"What this window did, newest first: done in green, warnings in amber, errors in red.")
+        self.entries = []
+
+    def add(self, text, level="info"):
+        """text is rich text already (html(), b(), and i() make its parts)."""
+        QtCore, QtGui = _qt()
+        try:
+            stamp = time.strftime("%H:%M")
+            color = LOG_COLORS.get(level)
+            if color is not None:
+                base = self.view.palette.color(QtGui.QPalette.Base)
+                rgb = color[0] if base.lightness() < 128 else color[1]
+                text = u'<span style="color:#%02x%02x%02x">%s</span>' % (rgb[0], rgb[1], rgb[2], text)
+            self.entries.insert(0, u"%s&nbsp; %s" % (stamp, text))
+            del self.entries[LOG_KEPT:]
+            self.view.setHtml(u"<br>".join(self.entries))
+        except Exception:
+            pass
+
+    def clear(self):
+        self.entries = []
+        self.view.clear()
+
+
+GRID_SHEETS = {"table": u"QTableView { gridline-color: rgba(128, 128, 128, 90); }",
+               "tree": u"QTreeView::item { border-right: 1px solid rgba(128, 128, 128, 90); "
+                       u"border-bottom: 1px solid rgba(128, 128, 128, 90); } "
+                       u"QTreeView::item:selected { background: palette(highlight); color: palette(highlighted-text); }"}
+# (a stylesheet's item rule takes the items' drawing over: without its selected rule, a selected row
+# showed no highlight)
+
+
+def grid_lines(view):
+    """Lines between a list's cells, a gray at a third of full strength over either palette."""
+    try:
+        view.setStyleSheet(GRID_SHEETS["table" if view.inherits("QTableView") else "tree"])
+    except Exception:
+        pass
+
+
+def flat_combo(box):
+    """A combo box inside a list's cell: no frame of its own."""
+    try:
+        box.setFrame(False)
+    except Exception:
+        pass
+    return box
+
+
+def enable(button, on):
+    """A button clickable only when it would do something."""
+    try:
+        if bool(_property(button, "enabled")) != bool(on):
+            button.setEnabled(bool(on))
+    except Exception:
+        pass
+
+
+def checks_of(items, checked):
+    """(any checked, any unchecked) over checkable items: whether Check none and Check all would do
+    anything."""
+    some_on = some_off = False
+    for item in items:
+        if checked(item):
+            some_on = True
+        else:
+            some_off = True
+        if some_on and some_off:
+            break
+    return some_on, some_off
+
+
+HISTORY_POLL_MS = 700  # how often an open dialog looks whether the font's History moved
+
+
+def history_mark(package):
+    return (font_key(package), history_state(package)) if package is not None else None
+
+
+def watch_history(owner):
+    """While owner's dialog is shown, calls owner.history_moved() when the font's place in FontLab's
+    History differs from owner.seen_history: an undo, a redo, or an edit made in FontLab meanwhile.
+    The owner sets seen_history (history_mark) after its own analysis and writes. Keep the timer."""
+    QtCore, QtGui = _qt()
+    timer = QtCore.QTimer()
+    timer.setInterval(HISTORY_POLL_MS)
+
+    def tick():
+        try:
+            if not _property(owner.dialog, "visible") or getattr(owner, "busy", False):
+                return
+            package, seen = getattr(owner, "package", None), getattr(owner, "seen_history", None)
+            if package is None or seen is None:
+                return
+            now = history_mark(package)
+            if now != seen:
+                owner.seen_history = now
+                owner.history_moved()
+        except Exception:
+            pass  # a timer's handler must not raise
+
+    timer.connect("timeout()", tick)
+    timer.start()
+    return timer
+
+
+class ClickRegions(object):
+    """Spans of a widget's picture (a label's pixmap, or a button's icon, drawn centered) that can be
+    clicked: each (left, right, key) across the picture, in its pixels. A click on one calls
+    on_click(key) instead of the widget's own click; the pointer becomes a hand over one."""
+
+    def __init__(self, widget, on_click, tip=u""):
+        QtCore, QtGui = _qt()
+        self.widget, self.on_click, self.tip = widget, on_click, tip
+        self.regions, self.size = [], (0, 0)
+        regions = self
+
+        class Filter(QtCore.QTimer):  # PythonQt has no QObject to subclass; a timer will do
+            def eventFilter(self, obj, event):
+                try:
+                    kind = event.type()
+                    if kind in (2, 3, 4):  # MouseButtonPress, -Release, -DblClick
+                        key = regions.hit(event)
+                        if key is not None:
+                            if kind == 3:
+                                QtCore.QTimer.singleShot(0, lambda: regions.on_click(key))
+                            return True  # the widget's own click does not happen
+                    elif kind == 5:  # MouseMove
+                        over = regions.hit(event) is not None
+                        obj.setCursor(QtCore.Qt.PointingHandCursor if over else QtCore.Qt.ArrowCursor)
+                        obj.setToolTip(regions.tip if over else (obj.property("freelabTip") or u""))
+                except Exception:
+                    pass  # an event filter must never raise
+                return False
+
+        self.filter = Filter()
+        try:
+            widget.setMouseTracking(True)
+            widget.setProperty("freelabTip", _property(widget, "toolTip"))
+            widget.installEventFilter(self.filter)
+        except Exception:
+            pass
+
+    def set(self, regions, size):
+        self.regions, self.size = list(regions), (size.width(), size.height()) if hasattr(size, "width") else size
+
+    def hit(self, event):
+        if not self.regions:
+            return None
+        try:
+            pos = event.pos()
+            x, y = pos.x(), pos.y()
+            rect = _property(self.widget, "rect")
+        except Exception:
+            return None
+        width, height = self.size
+        x -= (rect.width() - width) / 2.0
+        y -= (rect.height() - height) / 2.0
+        if not 0 <= y <= height:
+            return None
+        for x0, x1, key in self.regions:
+            if x0 <= x < x1:
+                return key
+        return None
+
+
+def open_auto_kerning_at(left, right):
+    """Auto Kerning, opened (or brought forward) on the pair of the glyphs named left and right; the
+    error's text, or None."""
+    held = getattr(sys, "_freelab_auto_kerning", None)
+    try:
+        if held is None or not _property(held.dialog, "visible"):
+            main(focus=(left, right))
+        else:
+            held.dialog.raise_()
+            held.dialog.activateWindow()
+            held.focus_pair(left, right)
+        return None
+    except Exception as exc:
+        return u"%s" % exc
 
 
 def fontlab_autokern(package, master, left, right):
@@ -1561,10 +1823,14 @@ Suggests kerning for the font's Latin pairs and writes only the pairs you check.
 <b>The list</b>: each method's value beside the font's current one. Check the pairs to write;
 pairs the font kerns already start unchecked.<br>
 <b>Choosing a value for one pair</b>: click a preview below the list, double-click a value in the
-list, or press its number (1 Now, 2 Average, 3 halfkern, 4 Contour, 5 FreeLab, 6 FontLab) while
-the list has the focus. A pair picked by hand is tinted; Backspace or Reset gives it the suggested
-value again.<br>
-<b>Keys in the list</b>: arrows move, Space checks or unchecks the pair, 1 to 6 pick, Backspace resets.<br>
+list, or press Ctrl and its number (1 Now, 2 Average, 3 halfkern, 4 Contour, 5 FreeLab, 6 FontLab)
+while the list has the focus. A pair picked by hand is tinted; Backspace or Reset pair gives it the
+suggested value again. Restore suggestions puts every check and pick back as the list first came.<br>
+<b>Keys in the list</b>: arrows move, a letter jumps to the pairs starting with it, Space checks or
+unchecks the pair, Ctrl+1 to Ctrl+6 pick, Backspace resets.<br>
+<b>The H's around a pair</b>: click one, in any preview, to go to its pair with the pair's glyph
+beside it (H and T for HTo).<br>
+<b>The pair's name</b>: double-click it to open the pair in a Glyph window.<br>
 <b>Kerning classes</b>: a pair is written where its value comes from: its own pair, or else its
 classes' pair, which kerns every glyph of both classes. The line under the list says which.<br><br>
 Click this help's ? button, then any control, for what it does."""
@@ -1590,9 +1856,11 @@ class AutoKerningDialog(object):
         dialog.setWhatsThis(HELP)
         dialog.resize(760, 940)
         layout = QtGui.QVBoxLayout(dialog)
-        self.status = QtGui.QLabel(self.font_line())
+        self.status = rich(QtGui.QLabel(self.font_line()))
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
+        self.log = Log()
+        self.seen_history, self.first_pass, self.pinned = None, True, set()
         row = QtGui.QHBoxLayout()
         row.addWidget(QtGui.QLabel("List changes of at least"))
         self.tolerance = QtGui.QSpinBox()
@@ -1649,14 +1917,16 @@ class AutoKerningDialog(object):
         self.table.verticalHeader().setDefaultSectionSize(QtGui.QFontMetrics(self.table.font).height() + 6)  # PythonQt has no widget.fontMetrics()
         self.table.horizontalHeader().setSectionResizeMode(QtGui.QHeaderView.Stretch)  # the columns share the width
         self.table.setWhatsThis(u"The pairs, each method's value, and the value to write (Suggested). "
-                                u"Double-click a value to use it for that pair, or press 1 to 6; Space checks "
-                                u"the pair; Backspace gives it the suggested value again.")
+                                u"Double-click a value to use it for that pair, or press Ctrl+1 to Ctrl+6; Space "
+                                u"checks the pair; Backspace gives it the suggested value again. Double-click a "
+                                u"pair's name to open it in a Glyph window.")
+        grid_lines(self.table)
         layout.addWidget(self.table, 1)
         note_row = QtGui.QHBoxLayout()
         self.preview_note = QtGui.QLabel("Select a pair to compare the methods; click one to use it for that pair.")
         self.preview_note.setWordWrap(True)
         note_row.addWidget(self.preview_note, 1)
-        self.reset_button = QtGui.QPushButton("Reset")
+        self.reset_button = QtGui.QPushButton("Reset pair")
         self.reset_button.setToolTip("Give this pair the suggested value again")
         self.reset_button.setWhatsThis("Gives the selected pair the value of the source chosen above, undoing a pick.")
         self.reset_button.setEnabled(False)
@@ -1682,17 +1952,25 @@ class AutoKerningDialog(object):
             button.setSizePolicy(QtGui.QSizePolicy.Expanding, QtGui.QSizePolicy.Fixed)
             button.setProperty(LEAVE_ALONE_PROP, True)
             button.setStyleSheet(CHOICE_SHEET)
-            button.setToolTip(u"%s: click to use it for this pair (key %d in the list)" % (label, number + 1))
+            button.setToolTip(u"%s: click to use it for this pair (Ctrl+%d in the list)" % (label, number + 1))
             button.setWhatsThis(u"The pair as %s sets it, between two H's. Click to use it for this pair." % label)
             button.setEnabled(False)
             self.choice_group.addButton(button, number)
             self.choice_buttons[key] = button
             grid.addWidget(button, number // 2, number % 2)
+            _keep_room_when_hidden(button)  # drawn once a pair is selected
+        self.neighbors = dict((key, ClickRegions(button, self.focus_neighbor,
+                                                 u"Click to go to this H's pair with the glyph beside it"))
+                              for key, button in self.choice_buttons.items())
         layout.addLayout(grid)
+        layout.addWidget(self.log.view)
         buttons = QtGui.QHBoxLayout()
         self.all_button = QtGui.QPushButton("Check new pairs")
         self.all_button.setWhatsThis("Checks every listed pair the font does not kern yet.")
         self.none_button = QtGui.QPushButton("Check none")
+        self.restore_button = QtGui.QPushButton("Restore suggestions")
+        self.restore_button.setWhatsThis("Puts every check and every value picked by hand back as the list first "
+                                         "came, after the last analysis.")
         self.classes_button = QtGui.QPushButton(u"Suggest classes…")
         self.classes_button.setWhatsThis("Suggests kerning classes for this master, from the open-licensed fonts FreeLab "
                                          "learned from and this font's own outlines, to review before any is made.")
@@ -1704,7 +1982,7 @@ class AutoKerningDialog(object):
         self.apply_button.setWhatsThis("Writes the Suggested value of every checked pair to the current master, "
                                        "where the pair's value comes from: see Kerning classes in the help.")
         self.close_button = QtGui.QPushButton("Close")
-        for button in (self.all_button, self.none_button, self.classes_button, self.check_button):
+        for button in (self.all_button, self.none_button, self.restore_button, self.classes_button, self.check_button):
             buttons.addWidget(button)
         buttons.addStretch(1)
         buttons.addWidget(self.apply_button)
@@ -1714,6 +1992,9 @@ class AutoKerningDialog(object):
         self.analyze_button.connect("clicked()", self.run)
         self.all_button.connect("clicked()", lambda: self.check_all(True))
         self.none_button.connect("clicked()", lambda: self.check_all(False))
+        self.restore_button.connect("clicked()", self.restore)
+        self.buttons_due = False
+        self.table.connect("itemChanged(QTableWidgetItem*)", lambda item: self.update_buttons_soon())
         self.apply_button.connect("clicked()", self.write)
         self.classes_button.connect("clicked()", self.suggest_classes)
         self.close_button.connect("clicked()", dialog.close)
@@ -1731,7 +2012,10 @@ class AutoKerningDialog(object):
         self.choice_group.connect("buttonClicked(int)", lambda number: self.choose(CHOICES[number][0]))
         self.keys = self.make_keys()
         self.watcher = self.watch_palette()
+        self.history_timer = watch_history(self)
+        self.focus = None  # a pair to go to once the analysis is done (opened from another script)
         plain_buttons(dialog)
+        self.update_buttons()
 
     def suggest_classes(self):
         if self.class_dialog is None:
@@ -1745,20 +2029,21 @@ class AutoKerningDialog(object):
         contexts = [c for c in PROOF_CONTEXTS if self.package.findName(c) is not None]
         error = show_in_glyph_window(self.fontlab, proof_text(s.left, s.right, contexts or [s.left]))
         if error:
-            self.preview_note.setText(u"FontLab did not open the pair: %s" % error)
+            self.log.add(u"FontLab did not open the pair: %s" % html(error), "error")
 
     def open_kerning_check(self):
         """Kerning Check, the script beside this one, on the same font."""
         error = open_sibling_script(KERNING_CHECK_FILE, KERNING_CHECK_MODULE)
         if error:
-            self.status.setText(u"Kerning Check did not open: %s" % error)
+            self.log.add(u"Kerning Check did not open: %s" % html(error), "error")
 
     def make_keys(self):
-        """The list's keys: 1 to 6 pick, Backspace resets, Space checks. Only while the list has the focus."""
+        """The list's keys: Ctrl+1 to Ctrl+6 pick (a plain number or letter jumps to the pairs starting
+        with it, as in any list), Backspace resets, Space checks. Only while the list has the focus."""
         QtCore, QtGui = _qt()
         made = []
         try:
-            actions = [(str(number + 1), (lambda key=key: self.choose(key))) for number, (key, _) in enumerate(CHOICES)]
+            actions = [("Ctrl+%d" % (number + 1), (lambda key=key: self.choose(key))) for number, (key, _) in enumerate(CHOICES)]
             actions += [("Backspace", self.reset), ("Delete", self.reset), ("Space", self.toggle_check)]
             for sequence, action in actions:
                 shortcut = QtGui.QShortcut(QtGui.QKeySequence(sequence), self.table)
@@ -1795,8 +2080,8 @@ class AutoKerningDialog(object):
 
     def font_line(self):
         if self.package is None:
-            return u"No font is open. Open one, then click Analyze."
-        return u"%s, master %s. Latin letters, figures, and punctuation." % (self.package.tfn, self.master)
+            return u"No font is open. Open one, then click %s." % i("Analyze")
+        return u"%s, master %s. Latin letters, figures, and punctuation." % (b(self.package.tfn), b(self.master))
 
     @staticmethod
     def combo(choices):
@@ -1814,7 +2099,7 @@ class AutoKerningDialog(object):
 
     def progress(self, done, total, what="Measuring pairs"):
         QtCore, QtGui = _qt()
-        self.status.setText("%s: %d of %d" % (what, done, total))
+        self.status.setText(u"%s: %s of %s\N{HORIZONTAL ELLIPSIS}" % (what, b(done), b(total)))
         QtGui.QApplication.processEvents()
         return not self.stop
 
@@ -1831,6 +2116,10 @@ class AutoKerningDialog(object):
             if self.refilter_again:
                 self.refilter_again = False
                 self.refilter()
+            self.seen_history = history_mark(self.package)
+            if self.focus is not None and self.analysis is not None:
+                focus, self.focus = self.focus, None
+                self.focus_pair(*focus)
 
     def run_once(self):
         package = self.current_font()
@@ -1849,10 +2138,12 @@ class AutoKerningDialog(object):
             result = analyze(self.package, self.master, progress=self.progress)
         except Exception as exc:
             message = u"%s" % exc
-            self.status.setText(u"%s\n%s" % (self.font_line(), message[:1].upper() + message[1:]))
+            self.status.setText(self.font_line())
+            self.log.add(html(message[:1].upper() + message[1:]), "error")
             return
         if result is None:
-            self.status.setText("Stopped.")
+            self.status.setText(self.font_line())
+            self.log.add(u"Stopped.", "warning")
             return
         self.harvest_checks()
         if self.analysis is not None:  # the same font and master: its picks and checks carry over
@@ -1936,9 +2227,10 @@ class AutoKerningDialog(object):
             listed = [s for s in self.analysis.suggestions if s.override]
         else:
             listed = [s for s in self.analysis.suggestions
-                      if self.shown(s) and (include or not s.current)
-                      and (not common_only or s.left_char + s.right_char in self.common)
-                      and (differs(s, "halfkern") or differs(s, "contour") or differs(s, "average"))]
+                      if (s.left, s.right) in self.pinned
+                      or (self.shown(s) and (include or not s.current)
+                          and (not common_only or s.left_char + s.right_char in self.common)
+                          and (differs(s, "halfkern") or differs(s, "contour") or differs(s, "average")))]
         self.ask_fontlab(listed)
         order = ORDERS[self.order.currentIndex][0]
         change = lambda s: -abs((s.value("average") or 0) - s.current)
@@ -1958,13 +2250,16 @@ class AutoKerningDialog(object):
             summary.append("%s tightens at %.0f%%%s" % (dict(METHODS)[method], tighten * 100,
                                                        " (from the font's kerning)" if fitted else ""))
         analysis = self.analysis
-        work = (u"%d pairs: %d measured, %d unchanged since the last analysis" % (len(analysis.suggestions), analysis.measured,
-                                                                               analysis.reused)
-                if analysis.reused else u"%d pairs measured" % len(analysis.suggestions))
-        what = (u"%d listed, picked by hand" % len(listed) if picked_only
-                else u"%d listed" % len(listed))
-        self.status.setText(u"%s, master %s. %s; %s.\n%s."
-                            % (self.package.tfn, self.master, work, what, "; ".join(summary)))
+        work = (u"%s pairs: %s measured, %s unchanged since the last analysis" % (
+                    b(len(analysis.suggestions)), b(analysis.measured), b(analysis.reused))
+                if analysis.reused else u"%s pairs measured" % b(len(analysis.suggestions)))
+        what = (u"%s listed, picked by hand" % b(len(listed)) if picked_only
+                else u"%s listed" % b(len(listed)))
+        self.status.setText(u"%s, master %s. %s; %s.<br>%s."
+                            % (b(self.package.tfn), b(self.master), work, what, html("; ".join(summary))))
+        if self.first_pass:
+            self.first_pass = False
+            self.log.add(u"Analyzed %s, master %s: %s pairs listed." % (b(self.package.tfn), b(self.master), b(len(listed))))
         self.update_picked()
         self.fill_table()
 
@@ -1985,8 +2280,8 @@ class AutoKerningDialog(object):
                 item.setTextAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
                 table.setItem(row, column, item)
             self.fill_row(row, s, source)
-        self.apply_button.setEnabled(bool(self.suggestions))
         self.select()
+        self.update_buttons()
 
     def target_text(self, s):
         """Where the pair's value is written, for its tooltip and the line under the list."""
@@ -2037,6 +2332,126 @@ class AutoKerningDialog(object):
         for row in range(self.table.rowCount):
             checked = on and not self.suggestions[row].current
             self.table.item(row, 0).setCheckState(QtCore.Qt.Checked if checked else QtCore.Qt.Unchecked)
+        self.update_buttons()
+
+    def row_checked(self, row):
+        QtCore, QtGui = _qt()
+        item = self.table.item(row, 0)
+        return item is not None and item.checkState() == QtCore.Qt.Checked
+
+    def update_buttons_soon(self):
+        """Once, after the changes under way (filling the list changes every row)."""
+        QtCore, QtGui = _qt()
+        if not self.buttons_due:
+            self.buttons_due = True
+            QtCore.QTimer.singleShot(0, self.update_buttons)
+
+    def update_buttons(self):
+        """Each button clickable only when it would do something."""
+        self.buttons_due = False
+        rows = range(min(self.table.rowCount, len(self.suggestions)))
+        checked = [self.row_checked(row) for row in rows]
+        enable(self.all_button, any(not on and not self.suggestions[row].current for row, on in zip(rows, checked)))
+        enable(self.none_button, any(checked))
+        enable(self.apply_button, any(checked))
+        enable(self.restore_button, self.edited())
+        enable(self.classes_button, self.package is not None)
+        enable(self.check_button, self.package is not None)
+
+    def edited(self):
+        """Whether a check or a value differs from how the list first came."""
+        if self.analysis is None:
+            return False
+        self.harvest_checks()
+        return any(s.override or (s.checked is not None and s.checked != (not s.current))
+                   for s in self.analysis.suggestions)
+
+    def restore(self):
+        """Every check and pick back as the list first came after the last analysis."""
+        if self.analysis is None:
+            return
+        for s in self.analysis.suggestions:
+            s.override, s.checked = None, None
+        self.update_picked()
+        self.fill_table()
+        self.log.add(u"Checks and values restored as suggested.")
+
+    def focus_neighbor(self, key):
+        """An H beside a preview's pair clicked: its pair with the glyph beside it."""
+        if self.selected is None:
+            return
+        s = self.suggestions[self.selected]
+        if key == "before":
+            self.focus_pair(u"H", s.left)
+        else:
+            self.focus_pair(s.right, u"H")
+
+    def focus_pair(self, left, right):
+        """The pair of the glyphs named left and right, selected in the list: listed whatever the
+        filters (it stays listed until the next analysis), and measured first when it was not."""
+        if self.analysis is None or self.package is None:
+            self.focus = (left, right)
+            return
+        found = [s for s in self.analysis.suggestions if (s.left, s.right) == (left, right)]
+        if not found:
+            s = self.measure_one(left, right)
+            if s is None:
+                self.log.add(u"The pair %s %s could not be measured: Auto Kerning measures pairs of encoded "
+                             u"glyphs." % (b(left), b(right)), "warning")
+                return
+            self.analysis.suggestions.append(s)
+            found = [s]
+        self.pinned.add((left, right))
+        self.refilter()
+        for row, s in enumerate(self.suggestions):
+            if (s.left, s.right) == (left, right):
+                self.table.selectRow(row)
+                self.table.scrollToItem(self.table.item(row, 0))
+                self.table.setFocus()
+                return
+
+    def measure_one(self, left, right):
+        """A suggestion for one pair outside the analysis (an accented letter's), its values scaled
+        by the analysis's factors."""
+        package = self.package
+        chars = []
+        for name in (left, right):
+            glyph = package.findName(name)
+            code = glyph.fgGlyph.unicode if glyph is not None else 0
+            if not code:
+                return None
+            chars.append(unichr_(code))
+        wanted = list(TUNING) + [ch for chars_ in REFERENCES.values() for ch in chars_] + chars
+        try:
+            result = analyze(package, self.master, characters=u"".join(sorted(set(wanted))), cache_file="")
+        except Exception:
+            return None
+        for s in result.suggestions if result is not None else []:
+            if (s.left, s.right) == (left, right):
+                for method, units in s.raw.items():
+                    tighten, loosen = self.analysis.factors.get(method, DEFAULT_FACTORS[method])
+                    s.values[method] = round_units(units * (tighten if units < 0 else loosen))
+                return s
+        return None
+
+    def history_moved(self):
+        """An undo, a redo, or an edit in FontLab: the current values read again."""
+        if self.analysis is None or self.package is None:
+            return
+        self.refresh_kerning()
+        changed = 0
+        for s in self.analysis.suggestions:
+            now = self.font_kerning.current(s.left, s.right)
+            if now != s.current:
+                s.current = now
+                changed += 1
+        if changed:
+            self.harvest_checks()
+            for row, s in enumerate(self.suggestions):
+                self.fill_row(row, s, self.source_key())
+            self.select()
+            self.log.add(u"The font's History moved (an undo, a redo, or an edit): %s read again. Click %s "
+                         u"if outlines changed." % (b(counted(changed, u"current value")), i("Analyze")))
 
     def toggle_check(self):
         QtCore, QtGui = _qt()
@@ -2056,7 +2471,10 @@ class AutoKerningDialog(object):
             for button in self.choice_buttons.values():
                 button.setEnabled(False)
                 button.setIcon(_qt()[1].QIcon())
+                button.setVisible(False)
             return
+        for button in self.choice_buttons.values():
+            button.setVisible(True)
         self.selected = rows[0].row()
         if self.package is not None and time.time() - self.kerning_read > 1.0:
             self.refresh_kerning()
@@ -2087,12 +2505,15 @@ class AutoKerningDialog(object):
         self.update_picked()
 
     def double_clicked(self, row, column):
-        """A method's value double-clicked: that value for the pair; the Suggested one: reset."""
+        """A method's value double-clicked: that value for the pair; the Suggested one: reset; the
+        pair's name: the pair in a Glyph window."""
         if row >= len(self.suggestions):
             return
         self.table.selectRow(row)
         self.selected = row
-        if column in COLUMN_CHOICES:
+        if column == 0:
+            self.show_in_glyph_window()
+        elif column in COLUMN_CHOICES:
             self.choose(COLUMN_CHOICES[column])
         elif column == len(self.COLUMNS) - 1:
             self.reset()
@@ -2175,21 +2596,26 @@ class AutoKerningDialog(object):
             pixmap = QtGui.QPixmap(strip + PREVIEW_TEXT_WIDTH, int(PREVIEW_SIZE * 1.35))
             pixmap.fill(QtGui.QColor(0, 0, 0, 0))
             painter = QtGui.QPainter(pixmap)
+            spans = []
             try:  # ended before anything else can fail: a painter left open on a freed pixmap aborts FontLab
                 if kern is not None:
-                    self.paint_pair(painter, paths, scale, kern, text)
+                    spans = self.paint_pair(painter, paths, scale, kern, text)
                 self.paint_label(painter, font, text, strip, pixmap.height(), label,
                                  u"\N{EN DASH}" if kern is None else str(kern), number + 1)
             finally:
                 painter.end()
             button.setIcon(QtGui.QIcon(pixmap))
             button.setIconSize(pixmap.size())
+            self.neighbors[key].set(spans, pixmap.size())
 
     @staticmethod
     def paint_pair(painter, paths, scale, kern, color):
+        """Draws the pair between its H's; the H's spans across the picture, (left, right, "before" or
+        "after"), to be clicked."""
         QtCore, QtGui = _qt()
         painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
         x = float(PREVIEW_SIZE) / 2
+        spans, seen_pair = [], False
         for layer, path, role in paths:
             painter.save()
             painter.translate(x, PREVIEW_SIZE * 1.05)
@@ -2199,7 +2625,13 @@ class AutoKerningDialog(object):
                 ink.setAlpha(SIDE_ALPHA)  # the H's: dimmed
             painter.fillPath(path, QtGui.QBrush(ink))
             painter.restore()
-            x += layer.advanceWidth * scale + (kern * scale if role == "left" else 0)
+            advance = layer.advanceWidth * scale + (kern * scale if role == "left" else 0)
+            if role == "side":
+                spans.append((x, x + layer.advanceWidth * scale, "after" if seen_pair else "before"))
+            else:
+                seen_pair = True
+            x += advance
+        return spans
 
     @staticmethod
     def paint_label(painter, font, color, left, height, label, value, key):
@@ -2219,7 +2651,7 @@ class AutoKerningDialog(object):
         faint = QtGui.QColor(color)
         faint.setAlpha(120)
         painter.setPen(faint)
-        painter.drawText(QtCore.QRect(left, top + 2 * line, PREVIEW_TEXT_WIDTH, line), flags, u"key %d" % key)
+        painter.drawText(QtCore.QRect(left, top + 2 * line, PREVIEW_TEXT_WIDTH, line), flags, u"Ctrl+%d" % key)
 
     def write(self):
         """Each checked pair's value, written where it applies (FontKerning.target). Pairs sharing an
@@ -2268,11 +2700,12 @@ class AutoKerningDialog(object):
             u" (%d of them kerning class pairs, which kern their classes' other glyphs too)" % classes if classes else u"")]
         if shared:
             lines.append(u"%d pairs shared an entry with a commoner pair and took its value." % shared)
-        if error is not None:
-            lines.append(u"Stopped by an error: %s" % error)
         self.update_picked()
         self.fill_table()
-        self.status.setText(u" ".join(lines))
+        self.log.add(html(u" ".join(lines)), "done" if entries else "info")
+        if error is not None:
+            self.log.add(u"Stopped by an error: %s" % html(error), "error")
+        self.seen_history = history_mark(self.package)
 
     def after_writing(self, package):
         """FontLab told of the change, and the font marked modified: a script's kerning writes leave it
@@ -2564,7 +2997,8 @@ Click this help's ? button, then any control, for what it does."""
 
 
 
-def main():
+def main(focus=None):
+    """Opens Auto Kerning; focus: a pair of glyph names to select once the font is analyzed."""
     held = getattr(sys, "_freelab_auto_kerning", None)
     if held is not None:
         try:
@@ -2577,6 +3011,8 @@ def main():
         print("FreeLab Auto Kerning: %s" % exc)
         return
     sys._freelab_auto_kerning = dialog  # kept: PythonQt deletes a dialog with no Python reference
+    dialog.focus = focus
+    hook_menu_order()
     dialog.show()
 
 

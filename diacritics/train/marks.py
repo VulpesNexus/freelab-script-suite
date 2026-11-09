@@ -7,7 +7,7 @@ the em: each mark's gap to the ink below it (the letter's, or the mark under it 
 it, its center's offset from the center of the letter's top (or bottom) fifth as a share of the
 letter's width, its height against the same mark alone, and how far the whole glyph reaches above the
 font's ascender or below its descender. The medians, per mark, case, and letter, are
-diacritics/mark_model.json: Accented Glyphs places marks by them in a font with no composites of its
+diacritics/mark_model.json: Diacritics places marks by them in a font with no composites of its
 own to learn from.
 
     python diacritics/train/marks.py [--out <file.json>] [--limit N]
@@ -27,7 +27,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, os.pardir, os.pardir, "kerning", "train"))
 sys.path.insert(0, os.path.join(HERE, os.pardir))
 import dataset  # noqa: E402  (the corpus: open-licensed fonts installed here)
-import freelab_accents as ac  # noqa: E402  (the marks' names and sides)
+import freelab_diacritics as ac  # noqa: E402  (the marks' names and sides)
 
 MODEL_FILE = os.path.join(HERE, os.pardir, "mark_model.json")
 RANGES = ((0x00C0, 0x0250), (0x1E00, 0x1F00))

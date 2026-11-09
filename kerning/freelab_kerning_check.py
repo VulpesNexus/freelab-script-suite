@@ -28,7 +28,11 @@ SIGN_TOLERANCE = 10  # a value counts as tightening or loosening beyond this man
 PROGRESS_EVERY = 2000  # pairs between two looks at the event loop while checking
 PREVIEW_EM = 120  # pixels per em in the pair previews
 PAIR_ALPHA = 185  # each glyph of a previewed pair this opaque: where they overlap, the ink is denser
-COLLISION_MODES = (("relative", "closer than their base letter beside the same glyph"), ("absolute", "closer than that, absolutely"))
+# The settings row reads as a sentence: "List kerned pairs whose ink comes within 20 units, and that
+# much closer than with the plain letter" / "... within 20 units of each other, whatever the letters".
+COLLISION_MODES = (("relative", u"and that much closer than with the plain letter (\N{LATIN CAPITAL LETTER T WITH CARON}o against To)"),
+                   ("absolute", u"of each other, whatever the letters"))
+TABS = ("collisions", "cleanup", "masters")
 
 
 def load_auto_kerning():
@@ -362,8 +366,11 @@ it is a pair of its own, so the class kerns its other glyphs as before.<br>
 pair they cover has a value of its own), entries naming a class or glyph that is gone (checked), and
 values smaller than the size you set (unchecked: look at them first).<br>
 <b>Masters</b>: entries some masters kern and others do not, entries tightening in one master and
-loosening in another, and classes whose members differ between masters.<br><br>
-Select a row and click <i>Show in Glyph window</i> to look at the pair with FontLab's own tools.
+loosening in another, and classes whose members differ between masters (a font with one master has
+nothing to compare).<br><br>
+Each list is checked as its tab is first shown, and again after an undo or an edit in FontLab.
+Double-click a row's pair (or select it and click <i>Show in Glyph window</i>) to look at it with
+FontLab's own tools. <i>Restore suggestions</i> puts a list's checks back as it first came.
 Click this help's ? button, then any control, for what it does."""
 
 
@@ -376,6 +383,7 @@ class Tab(object):
         self.settings = QtGui.QHBoxLayout()
         self.layout.addLayout(self.settings)
         self.status = QtGui.QLabel(u"")
+        self.status.setTextFormat(1)  # Qt.RichText: bold values
         self.status.setWordWrap(True)
         self.layout.addWidget(self.status)
         self.tree = QtGui.QTreeWidget()
@@ -386,7 +394,10 @@ class Tab(object):
         self.buttons = QtGui.QHBoxLayout()
         self.layout.addLayout(self.buttons)
         self.action = QtGui.QPushButton(action) if action else None
-        self.findings = []
+        self.restore = QtGui.QPushButton("Restore suggestions") if action else None
+        if self.restore is not None:
+            self.restore.setWhatsThis(u"Puts this list's checks back as it first came.")
+        self.findings, self.first_checks = [], []
 
 
 class KerningCheckDialog(object):
@@ -401,9 +412,11 @@ class KerningCheckDialog(object):
         dialog.setWhatsThis(HELP)
         dialog.resize(820, 640)
         layout = QtGui.QVBoxLayout(dialog)
-        self.font_label = QtGui.QLabel(u"")
+        self.font_label = self.ak.rich(QtGui.QLabel(u""))
         self.font_label.setWordWrap(True)
         layout.addWidget(self.font_label)
+        self.log = self.ak.Log()
+        self.seen_history, self.stale, self.buttons_due = None, set(TABS), False
         # A tab bar over plain pages: a QTabWidget's themed page drew its buttons with light frames in dark mode
         self.tabs = QtGui.QTabBar()
         self.tabs.setExpanding(False)
@@ -427,22 +440,25 @@ class KerningCheckDialog(object):
         self.collisions = Tab(QtGui, ("Pair", "Kerning", "Distance", "Fix", "Set by", "Compared with"),
                               "Write checked fixes")
         tab = self.collisions
-        tab.settings.addWidget(QtGui.QLabel("List pairs"))
+        tab.settings.addWidget(QtGui.QLabel("List kerned pairs whose ink comes within"))
         self.minimum = QtGui.QSpinBox()
         self.minimum.setRange(-200, 400)
         self.minimum.setSuffix(" units")
-        self.minimum.setWhatsThis("How much closer than their class's first pair (or, by the absolute measure, how "
-                                  "close) a pair's ink must come to be listed.")
+        self.minimum.setWhatsThis("The narrowest distance between the two glyphs' ink, at the kerning FontLab applies, "
+                                  "for a pair to be listed (0: pairs that touch; below 0: pairs that overlap by "
+                                  "more than that).")
         tab.settings.addWidget(self.minimum)
         self.mode = QtGui.QComboBox()
         for _, label in COLLISION_MODES:
             self.mode.addItem(label)
-        self.mode.setWhatsThis(u"<i>Closer than their class's first pair</i>: a class's value brings an accented "
-                               u"or wider member closer than the pair the value was set on "
-                               u"(\N{LATIN CAPITAL LETTER T WITH CARON}o against To). This suits any font, also one "
-                               u"whose letters join on "
-                               u"purpose. <i>Closer than that, absolutely</i>: any kerned pair whose ink comes "
-                               u"closer than the distance set (0: pairs that touch).")
+        self.mode.setWhatsThis(u"How both glyphs' ink is measured: the narrowest horizontal distance between them, "
+                               u"row by row, at the pair's kerning.<br><i>And that much closer than with the plain "
+                               u"letter</i>: a pair is listed when it comes within the distance set, and comes that "
+                               u"much closer than the same pair with its plain letter "
+                               u"(\N{LATIN CAPITAL LETTER T WITH CARON}o against To, "
+                               u"\N{LATIN CAPITAL LETTER T WITH STROKE}o against To) at the same value: what a class's value does to an accented or wider member. It suits any "
+                               u"font, also one whose letters touch on purpose.<br><i>Of each other, whatever the "
+                               u"letters</i>: every kerned pair that comes within the distance set, accented or not.")
         tab.settings.addWidget(self.mode)
         self.collisions_button = QtGui.QPushButton("Check")
         tab.settings.addWidget(self.collisions_button)
@@ -478,12 +494,16 @@ class KerningCheckDialog(object):
                               u"whose sign flips, classes whose members differ.")
 
         for tab, label in ((self.collisions, "Collisions"), (self.cleanup, "Cleanup"), (self.masters, "Masters")):
+            self.ak.grid_lines(tab.tree)
             if tab.action is not None:
+                tab.buttons.addWidget(tab.restore)
                 tab.buttons.addStretch(1)
                 tab.buttons.addWidget(tab.action)
                 tab.action.setEnabled(False)
+                tab.restore.setEnabled(False)
             self.tabs.addTab(label)
             self.pages.addWidget(tab.widget)
+        layout.addWidget(self.log.view)
 
         buttons = QtGui.QHBoxLayout()
         self.glyph_window_button = QtGui.QPushButton("Show in Glyph window")
@@ -503,12 +523,18 @@ class KerningCheckDialog(object):
         self.glyph_window_button.connect("clicked()", self.show_in_glyph_window)
         for tab in (self.collisions, self.cleanup, self.masters):
             tab.tree.connect("itemSelectionChanged()", self.update_previews)
+            tab.tree.connect("itemChanged(QTreeWidgetItem*,int)", lambda item, column: self.update_buttons_soon())
+            tab.tree.connect("itemDoubleClicked(QTreeWidgetItem*,int)", self.double_clicked)
+            if tab.restore is not None:
+                tab.restore.connect("clicked()", lambda tab=tab: self.restore(tab))
         self.tabs.connect("currentChanged(int)", self.switch_page)
         self.close_button.connect("clicked()", dialog.close)
         self.package = self.master = None
         self.busy = False
         self.ak.plain_buttons(dialog)
         self.read_font()
+        self.history_timer = self.ak.watch_history(self)
+        self.update_buttons()
 
     # -- the font ------------------------------------------------------------
 
@@ -529,15 +555,17 @@ class KerningCheckDialog(object):
         self.package = self.current_font()
         self.master = self.package.master if self.package is not None else None
         if self.package is None:
-            self.font_label.setText(u"No font is open. Open one, then click Check.")
+            self.font_label.setText(u"No font is open. Open one, then click %s." % self.ak.i("Check"))
             return False
         upm = float(self.package.upm)
         if not self.minimum.value and not getattr(self, "minimum_set", False):
             self.minimum.setValue(round_units(MIN_DISTANCE_SHARE * upm))
             self.minimum_set = True
         count = self.package.mastersCount
-        self.font_label.setText(u"%s, master %s (%d %s)." % (self.package.tfn, self.master, count,
-                                                             u"master" if count == 1 else u"masters"))
+        b = self.ak.b
+        self.font_label.setText(u"%s, master %s (%s)." % (b(self.package.tfn), b(self.master), b(counted(count, u"master"))))
+        self.tabs.setTabEnabled(2, count > 1)
+        self.tabs.setTabToolTip(2, u"" if count > 1 else u"This font has one master: nothing to compare.")
         return True
 
     def kerning(self, master=None):
@@ -552,20 +580,70 @@ class KerningCheckDialog(object):
         for tab in (self.collisions, self.cleanup, self.masters):
             tab.tree.clear()
             tab.findings = []
-            if tab.action is not None:
-                tab.action.setEnabled(False)
         self.read_font()
-        self.font_label.setText(self.font_label.text + u" The font or master changed: check again.")
+        self.update_buttons()
+        self.log.add(u"The font or master changed since the check: check again.", "warning")
         return False
 
     def progress(self, tab, done, total, what):
         QtCore, QtGui = _qt()
-        tab.status.setText(u"%s %d of %d\N{HORIZONTAL ELLIPSIS}" % (what, done, total))
+        tab.status.setText(u"%s %s of %s\N{HORIZONTAL ELLIPSIS}" % (what, self.ak.b(done), self.ak.b(total)))
         QtGui.QApplication.processEvents()
         return True
 
     def after_writing(self):
         self.ak.notify_changed(self.fontlab, self.package, u"FreeLab Kerning Check")
+
+    # -- buttons, the History, the tabs -------------------------------------
+
+    def tab_of(self, key):
+        return getattr(self, key)
+
+    def current_tab(self):
+        return self.tab_of(TABS[self.tabs.currentIndex])
+
+    def update_buttons_soon(self):
+        QtCore, QtGui = _qt()
+        if not self.buttons_due:
+            self.buttons_due = True
+            QtCore.QTimer.singleShot(0, self.update_buttons)
+
+    def update_buttons(self):
+        """Each button clickable only when it would do something."""
+        QtCore, QtGui = _qt()
+        self.buttons_due = False
+        for tab in (self.collisions, self.cleanup):
+            rows = self.rows(tab)
+            checks = [item.checkState(0) == QtCore.Qt.Checked for item in rows]
+            self.ak.enable(tab.action, any(checks) and not self.busy)
+            self.ak.enable(tab.restore, checks != tab.first_checks[:len(checks)] or len(checks) != len(tab.first_checks))
+        finding = self.selected_finding() if self.package is not None else None
+        self.ak.enable(self.glyph_window_button, isinstance(finding, (Collision, Cleanup)))
+
+    def first_checks_of(self, tab):
+        QtCore, QtGui = _qt()
+        tab.first_checks = [item.checkState(0) == QtCore.Qt.Checked for item in self.rows(tab)]
+
+    def restore(self, tab):
+        QtCore, QtGui = _qt()
+        for item, on in zip(self.rows(tab), tab.first_checks):
+            item.setCheckState(0, QtCore.Qt.Checked if on else QtCore.Qt.Unchecked)
+        self.update_buttons()
+        self.log.add(u"Checks restored as suggested.")
+
+    def double_clicked(self, item, column):
+        if column == 0:
+            self.show_in_glyph_window()
+
+    def check(self, key):
+        {"collisions": self.check_collisions, "cleanup": self.check_cleanup, "masters": self.check_masters}[key]()
+
+    def history_moved(self):
+        """An undo, a redo, or an edit in FontLab: the list shown is checked again, the others when shown."""
+        self.stale = set(TABS)
+        key = TABS[self.tabs.currentIndex]
+        self.log.add(u"The font's History moved (an undo, a redo, or an edit): checked again.")
+        self.check(key)
 
     # -- the lists ---------------------------------------------------------
 
@@ -669,7 +747,8 @@ class KerningCheckDialog(object):
                                     lambda done, total: self.progress(tab, done, total, u"Checking pair"),
                                     lambda name, key: is_variant(name, key, char_of))
         except Exception as exc:
-            tab.status.setText(u"%s" % exc)
+            tab.status.setText(u"")
+            self.log.add(self.ak.html(exc), "error")
             return
         finally:
             self.busy = False
@@ -703,13 +782,14 @@ class KerningCheckDialog(object):
                                       u"%d" % round_units(c.gap), u"%d" % c.fix, where, compared), True, True, tip,
                          parents.get(c.variant or c.left))
         self.resize(tab)
-        tab.action.setEnabled(bool(found))
+        self.checked_now(tab, "collisions")
         tight = sum(1 for value in kerning.plain.values() if value is not None and value < 0)
-        what = (u"within %d units, and that much closer than their base letter beside the same glyph" % minimum if relative
-                else u"closer than %d units" % minimum)
-        tab.status.setText(u"%d of the %s kerned tighter %s %s, kerning applied." % (
-            len(found), counted(tight, u"pair"), u"comes" if len(found) == 1 else u"come", what)
-            if found else u"None of the %s kerned tighter comes %s." % (counted(tight, u"pair"), what))
+        b = self.ak.b
+        what = (u"within %s, and that much closer than with the plain letter" % b(counted(minimum, u"unit")) if relative
+                else u"within %s of each other" % b(counted(minimum, u"unit")))
+        tab.status.setText(u"%s of the %s kerned tighter %s %s, kerning applied." % (
+            b(len(found)), b(counted(tight, u"pair")), u"comes" if len(found) == 1 else u"come", what)
+            if found else u"None of the %s kerned tighter comes %s." % (b(counted(tight, u"pair")), what))
 
     def write_fixes(self):
         if self.busy or not self.same_font():
@@ -731,14 +811,16 @@ class KerningCheckDialog(object):
             error = exc
         self.after_writing()
         self.check_collisions()
-        notes = [u"Wrote %s of %s own." % (counted(written, u"pair"), u"its" if written == 1 else u"their")]
+        b = self.ak.b
+        self.log.add(u"Wrote %s of %s own (Edit &gt; Undo takes %s back)." % (
+            b(counted(written, u"pair")), u"its" if written == 1 else u"their", u"it" if written == 1 else u"them"),
+            "done" if written else "info")
         if stale:
-            notes.append(u"%s had changed since the check and %s left as %s." % (
-                counted(stale, u"pair"), u"was" if stale == 1 else u"were", u"it was" if stale == 1 else u"they were"))
+            self.log.add(u"%s had changed since the check and %s left as %s." % (
+                b(counted(stale, u"pair")), u"was" if stale == 1 else u"were", u"it was" if stale == 1 else u"they were"),
+                "warning")
         if error is not None:
-            notes.append(u"Stopped by an error: %s" % error)
-        notes.append(u"Close the font without saving to take it back.")
-        tab.status.setText(u" ".join(notes) + u" " + tab.status.text)
+            self.log.add(u"Stopped by an error: %s" % self.ak.html(error), "error")
 
     def check_cleanup(self):
         if self.busy or not self.read_font():
@@ -760,12 +842,12 @@ class KerningCheckDialog(object):
             self.add_row(tab, index, (kerning.describe(c.entry), u"%d" % c.value, u"%s: %s" % (kinds[c.kind], c.reason)),
                          True, c.checked)
         self.resize(tab)
-        tab.action.setEnabled(bool(found))
+        self.checked_now(tab, "cleanup")
         counts = {}
         for c in found:
             counts[c.kind] = counts.get(c.kind, 0) + 1
-        tab.status.setText(u"%d of %s listed: %s." % (
-            len(found), counted(len(kerning.entries), u"entry", u"entries"),
+        tab.status.setText(u"%s of %s listed: %s." % (
+            self.ak.b(len(found)), self.ak.b(counted(len(kerning.entries), u"entry", u"entries")),
             u", ".join(counted(counts[kind], *CLEANUP_COUNTS[kind]) for kind, _ in CLEANUP_KINDS if kind in counts)
             or u"none"))
 
@@ -789,14 +871,15 @@ class KerningCheckDialog(object):
             error = exc
         self.after_writing()
         self.check_cleanup()
-        notes = [u"Removed %s." % counted(removed, u"entry", u"entries")]
+        b = self.ak.b
+        self.log.add(u"Removed %s (Edit &gt; Undo puts %s back)." % (
+            b(counted(removed, u"entry", u"entries")), u"it" if removed == 1 else u"them"), "done" if removed else "info")
         if stale:
-            notes.append(u"%d had changed since the check and %s left as %s." % (
-                stale, u"was" if stale == 1 else u"were", u"it was" if stale == 1 else u"they were"))
+            self.log.add(u"%s had changed since the check and %s left as %s." % (
+                b(counted(stale, u"entry", u"entries")), u"was" if stale == 1 else u"were", u"it was" if stale == 1 else u"they were"),
+                "warning")
         if error is not None:
-            notes.append(u"Stopped by an error: %s" % error)
-        notes.append(u"Close the font without saving to take it back.")
-        tab.status.setText(u" ".join(notes) + u" " + tab.status.text)
+            self.log.add(u"Stopped by an error: %s" % self.ak.html(error), "error")
 
     def check_masters(self):
         if self.busy or not self.read_font():
@@ -804,6 +887,7 @@ class KerningCheckDialog(object):
         tab = self.masters
         tab.tree.clear()
         masters = list(self.package.masters)
+        self.checked_now(tab, "masters")
         if len(masters) < 2:
             tab.findings = []
             tab.status.setText(u"This font has one master: nothing to compare.")
@@ -813,14 +897,26 @@ class KerningCheckDialog(object):
         for index, d in enumerate(found):
             self.add_row(tab, index, (d.subject, u"; ".join(u"%s %s" % pair for pair in d.values), d.reason), False, False)
         self.resize(tab)
-        tab.status.setText(u"%s between %d masters." % (counted(len(found), u"difference"), len(masters)) if found
-                           else u"The %d masters kern the same entries, with the same signs." % len(masters))
+        b = self.ak.b
+        tab.status.setText(u"%s between %s masters." % (b(counted(len(found), u"difference")), b(len(masters))) if found
+                           else u"The %s masters kern the same entries, with the same signs." % b(len(masters)))
 
     # -- looking at a pair ----------------------------------------------
 
+    def checked_now(self, tab, key):
+        """A list just checked: its first checks kept (Restore suggestions), the History seen."""
+        self.stale.discard(key)
+        self.first_checks_of(tab)
+        self.seen_history = self.ak.history_mark(self.package)
+        self.update_buttons()
+
     def switch_page(self, index):
+        QtCore, QtGui = _qt()
         self.pages.setCurrentIndex(index)
         self.update_previews()
+        key = TABS[index]
+        if key in self.stale and self.package is not None:
+            QtCore.QTimer.singleShot(0, lambda: self.check(key))  # checked as it is first shown
 
     def selected_finding(self):
         """The finding of the selected row (a group's first one), or None."""
@@ -862,6 +958,7 @@ class KerningCheckDialog(object):
                 label.setPixmap(self.pair_picture(pair[0], pair[1], value, caption))
             else:
                 label.clear()
+        self.update_buttons_soon()
 
     def pair_picture(self, left, right, value, caption):
         """A glyph pair at a kerning value, both glyphs see-through in the dialog's text color, its
@@ -921,11 +1018,14 @@ class KerningCheckDialog(object):
         contexts = [c for c in self.ak.PROOF_CONTEXTS if self.package.findName(c) is not None]
         error = self.ak.show_in_glyph_window(self.fontlab, self.ak.proof_text(pair[0], pair[1], contexts or [pair[0]]))
         if error:
-            self.font_label.setText(u"FontLab did not open the pair: %s" % error)
+            self.log.add(u"FontLab did not open the pair: %s" % self.ak.html(error), "error")
 
     def show(self):
+        QtCore, QtGui = _qt()
         self.dialog.show()
         self.dialog.raise_()
+        if self.package is not None:
+            QtCore.QTimer.singleShot(50, lambda: self.check(TABS[self.tabs.currentIndex]))  # checked as it opens
 
 
 def main():
@@ -941,6 +1041,7 @@ def main():
         print("FreeLab Kerning Check: %s" % exc)
         return
     sys._freelab_kerning_check = dialog  # kept: PythonQt deletes a dialog with no Python reference
+    dialog.ak.hook_menu_order()
     dialog.show()
 
 

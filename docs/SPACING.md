@@ -7,9 +7,9 @@
 1. Space the references by eye first: *H* and *n*, then *O* and *o* (Walter Tracy's method), and *l*, *0*, and *8*. They set the spacing everything else is measured against, and the script never changes them.
 2. Run the script: it measures the master as it opens (about a second for 150 glyphs). *Letters* covers the Latin letters to Latin Extended-B; *Letters and figures* adds the figures (leave them out while they are tabular, one width for all); the last choice adds punctuation.
 3. The list holds the glyphs with a side at least the given number of units (6 by default) from its suggestion: each side's sidebearing now, the change suggested (below 0: closer to its neighbors), and the width after. Selecting a glyph draws it between two of its references on each side, as it is and as suggested.
-4. Uncheck what you disagree with, and click *Space checked glyphs*. A glyph's outline moves by its left change and its width changes by both. *Show in Glyph window* opens the glyph between its references in a Glyph window, to adjust it by hand.
+4. Uncheck what you disagree with, and click *Space checked glyphs*. A glyph's outline moves by its left change and its width changes by both. *Show in Glyph window*, or double-clicking the glyph's name, opens the glyph between its references in a Glyph window, to adjust it by hand. Clicking a reference beside the glyph in a preview opens that pair in Auto Kerning. *Restore suggestions* puts the checks back as the list first came.
 
-Changes go straight into the open font: close it without saving to take them back. The font's kerning was set for the old sidebearings, so run Auto Kerning afterward, with *Include existing kerned pairs*, to see which pairs now want other values.
+Changes go straight into the open font, as one step of FontLab's History: *Edit > Undo* takes them back, and the dialog measures the glyphs again after an undo, a redo, or an edit in FontLab. What a write did goes to the log under the previews. The font's kerning was set for the old sidebearings, so run Auto Kerning afterward, with *Include existing kerned pairs*, to see which pairs now want other values.
 
 ## How it measures
 

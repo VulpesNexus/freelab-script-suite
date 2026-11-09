@@ -317,6 +317,9 @@ code is kept.<br>
 set takes its next alternate (X.2, X.3, or X.alt1...), so repeated letters vary as handwriting does.
 The nearest earlier form decides; a space or punctuation ends the look back. Ligatures come first:
 where liga makes l_l of ll, the alternates take turns around it.<br><br>
+The code is made again as you change the choices. Click a ligature's feature to change it;
+double-click a ligature or a letter to see it in a Glyph window. <i>Restore suggestions</i> puts the
+choices back as they first came.<br><br>
 Click this help's ? button, then any control, for what it does."""
 
 
@@ -332,9 +335,11 @@ class FeatureCodeDialog(object):
         dialog.setWhatsThis(HELP)
         dialog.resize(820, 860)
         layout = QtGui.QVBoxLayout(dialog)
-        self.status = QtGui.QLabel(u"")
+        self.status = self.ak.rich(QtGui.QLabel(u""))
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
+        self.log = self.ak.Log()
+        self.seen_history, self.first_choices, self.first_checks = None, [], []
 
         layout.addWidget(self.heading(QtGui, u"Ligatures"))
         self.ligature_tree = QtGui.QTreeWidget()
@@ -342,9 +347,11 @@ class FeatureCodeDialog(object):
         self.ligature_tree.setHeaderLabels(["Ligature", "Replaces", "Feature"])
         self.ligature_tree.setRootIsDecorated(False)
         self.ligature_tree.setIconSize(QtCore.QSize(ICON_SIZE, ICON_SIZE))
-        self.ligature_tree.setWhatsThis(u"Each ligature, what it replaces, and the feature it goes in. Standard "
-                                        u"ligatures are on unless a user turns them off; discretionary ones off "
-                                        u"unless turned on.")
+        self.ligature_tree.setWhatsThis(u"Each ligature, what it replaces, and the feature it goes in (click it to "
+                                        u"change it). Standard ligatures are on unless a user turns them off; "
+                                        u"discretionary ones off unless turned on.")
+        self.ligature_tree.setProperty(self.ak.LEAVE_ALONE_PROP, True)  # its pictures are drawn in the dialog's colors
+        self.ak.grid_lines(self.ligature_tree)
         layout.addWidget(self.ligature_tree, 2)
 
         layout.addWidget(self.heading(QtGui, u"Alternates that take turns"))
@@ -361,11 +368,13 @@ class FeatureCodeDialog(object):
         layout.addLayout(row)
         self.alternate_tree = QtGui.QTreeWidget()
         self.alternate_tree.setColumnCount(3)
-        self.alternate_tree.setHeaderLabels(["Letter", "Its forms, in turn", "Note"])
+        self.alternate_tree.setHeaderLabels(["Letter", "Cycle", "Note"])
         self.alternate_tree.setRootIsDecorated(False)
         self.alternate_tree.setIconSize(QtCore.QSize(ICON_SIZE * 3, ICON_SIZE))
-        self.alternate_tree.setWhatsThis(u"The letters with alternates (named X.2, X.alt1, or X.calt1). Checked "
-                                         u"letters take turns.")
+        self.alternate_tree.setWhatsThis(u"The letters with alternates (named X.2, X.alt1, or X.calt1), and their "
+                                         u"cycle: the forms they take in turn. Checked letters take turns.")
+        self.alternate_tree.setProperty(self.ak.LEAVE_ALONE_PROP, True)
+        self.ak.grid_lines(self.alternate_tree)
         layout.addWidget(self.alternate_tree, 1)
 
         layout.addWidget(self.heading(QtGui, u"The code"))
@@ -375,26 +384,32 @@ class FeatureCodeDialog(object):
                                u"marker lines, the rest of each feature as it is.")
         layout.addWidget(self.code, 2)
 
+        layout.addWidget(self.log.view)
         buttons = QtGui.QHBoxLayout()
-        self.refresh_button = QtGui.QPushButton("Show the code")
-        self.write_button = QtGui.QPushButton("Write the features")
-        self.write_button.setWhatsThis(u"Writes liga, dlig, and calt as shown to the font's features.")
+        self.restore_button = QtGui.QPushButton("Restore suggestions")
+        self.restore_button.setWhatsThis(u"Puts every ligature's feature and every letter's check back as they first came.")
+        self.write_button = QtGui.QPushButton("Write the code")
+        self.write_button.setWhatsThis(u"Writes liga, dlig, and calt as shown to the font's features (Update the code: "
+                                       u"FreeLab's code is in them already, and changes).")
         self.close_button = QtGui.QPushButton("Close")
-        buttons.addWidget(self.refresh_button)
+        buttons.addWidget(self.restore_button)
         buttons.addStretch(1)
         buttons.addWidget(self.write_button)
         buttons.addWidget(self.close_button)
         layout.addLayout(buttons)
-        self.refresh_button.connect("clicked()", self.make_code)
+        self.restore_button.connect("clicked()", self.restore)
         self.write_button.connect("clicked()", self.write)
         self.close_button.connect("clicked()", dialog.close)
         self.look_back.connect("valueChanged(int)", lambda value: self.make_code())
-        self.ligature_tree.connect("itemChanged(QTreeWidgetItem*,int)", lambda item, column: None)
+        self.ligature_tree.connect("itemClicked(QTreeWidgetItem*,int)", self.feature_clicked)
+        self.ligature_tree.connect("itemDoubleClicked(QTreeWidgetItem*,int)", self.double_clicked)
+        self.alternate_tree.connect("itemDoubleClicked(QTreeWidgetItem*,int)", self.double_clicked)
         self.alternate_tree.connect("itemChanged(QTreeWidgetItem*,int)", lambda item, column: self.make_code())
         self.package = None
-        self.names, self.letters, self.found, self.sets, self.combos = [], [], [], {}, []
+        self.names, self.letters, self.found, self.sets = [], [], [], {}
         self.texts, self.prefix = {}, u""
         self.ak.plain_buttons(dialog)
+        self.history_timer = self.ak.watch_history(self)
 
     @staticmethod
     def heading(QtGui, text):
@@ -421,8 +436,8 @@ class FeatureCodeDialog(object):
         package = self.package = self.current_font()
         self.ligature_tree.clear()
         self.alternate_tree.clear()
-        self.combos = []
         self.write_button.setEnabled(False)
+        self.restore_button.setEnabled(False)
         if package is None:
             self.status.setText(u"No font is open. Open one, then run Feature Code again.")
             return
@@ -453,25 +468,22 @@ class FeatureCodeDialog(object):
         for index, lig in enumerate(self.found):
             item = QtGui.QTreeWidgetItem([lig.glyph, u" ".join(lig.parts), u""])
             item.setFont(0, bold)
+            item.setData(0, QtCore.Qt.UserRole, index)
             icon = self.picture([lig.glyph])
             if icon is not None:
                 item.setIcon(0, QtGui.QIcon(icon))
-            item.setToolTip(1, u"Now: %s" % (dict(CHOICES)[lig.now] if lig.now else u"in no feature"))
+            item.setToolTip(1, u"Now: %s." % (dict(CHOICES)[lig.now] if lig.now else u"in no feature"))
+            item.setToolTip(2, u"Click to choose its feature.")
             self.ligature_tree.addTopLevelItem(item)
-            combo = QtGui.QComboBox()
-            for _, label in CHOICES:
-                combo.addItem(label)
-            combo.setCurrentIndex([key for key, _ in CHOICES].index(lig.choice))
-            combo.connect("currentIndexChanged(int)", lambda choice, lig=lig: self.choose(lig, choice))
-            self.ligature_tree.setItemWidget(item, 2, combo)
-            self.combos.append(combo)  # kept: PythonQt deletes what Python no longer holds
+            self.show_choice(item, lig)
+        self.first_choices = [lig.choice for lig in self.found]
         self.ligature_tree.blockSignals(False)
         self.alternate_tree.blockSignals(True)
         used = used_in([name for forms in self.sets.values() for name in forms], self.texts)
         for base in sorted(self.sets):
             forms = [base] + self.sets[base]
             jobs = [u"%s in %s" % (name, u", ".join(used[name])) for name in self.sets[base] if name in used]
-            note = (u"The font's code uses %s already: left out, so as not to undo it" % u"; ".join(jobs)) if jobs else u""
+            note = (u"The font's code uses %s already: left out, so as not to undo it." % u"; ".join(jobs)) if jobs else u""
             item = QtGui.QTreeWidgetItem([base, u", ".join(forms), note])
             item.setFont(0, bold)
             item.setData(0, QtCore.Qt.UserRole, base)
@@ -483,14 +495,85 @@ class FeatureCodeDialog(object):
                 item.setIcon(1, QtGui.QIcon(icon))
             self.alternate_tree.addTopLevelItem(item)
         self.alternate_tree.blockSignals(False)
+        self.first_checks = self.alternate_checks()
         for tree in (self.ligature_tree, self.alternate_tree):
             tree.resizeColumnToContents(0)
             tree.resizeColumnToContents(1)
         self.make_code()
+        self.seen_history = self.ak.history_mark(package)
 
-    def choose(self, lig, choice):
-        lig.choice = CHOICES[choice][0]
+    @staticmethod
+    def show_choice(item, lig):
+        item.setText(2, u"%s  \N{BLACK DOWN-POINTING SMALL TRIANGLE}" % dict(CHOICES)[lig.choice])
+
+    def feature_clicked(self, item, column):
+        """A ligature's feature clicked: a menu of the three, its own checked."""
+        QtCore, QtGui = _qt()
+        if column != 2:
+            return
+        index = int(item.data(0, QtCore.Qt.UserRole))
+        lig = self.found[index]
+        menu = QtGui.QMenu(self.dialog)
+        actions = []
+        for key, label in CHOICES:
+            action = menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(key == lig.choice)
+            actions.append((action, key))
+        rect = self.ligature_tree.visualItemRect(item)
+        left = self.ligature_tree.header().sectionPosition(2)
+        where = self.ligature_tree.viewport().mapToGlobal(QtCore.QPoint(left, rect.bottom()))
+        picked = menu.exec_(where)
+        for action, key in actions:
+            if picked is not None and action.text == picked.text and key != lig.choice:
+                lig.choice = key
+                self.show_choice(item, lig)
+                self.make_code()
+                break
+
+    def alternate_checks(self):
+        QtCore, QtGui = _qt()
+        return [self.alternate_tree.topLevelItem(row).checkState(0) == QtCore.Qt.Checked
+                for row in range(self.alternate_tree.topLevelItemCount)]
+
+    def restore(self):
+        """The features and checks as they first came."""
+        QtCore, QtGui = _qt()
+        for row, (lig, choice) in enumerate(zip(self.found, self.first_choices)):
+            lig.choice = choice
+            self.show_choice(self.ligature_tree.topLevelItem(row), lig)
+        self.alternate_tree.blockSignals(True)
+        for row, on in enumerate(self.first_checks):
+            self.alternate_tree.topLevelItem(row).setCheckState(0, QtCore.Qt.Checked if on else QtCore.Qt.Unchecked)
+        self.alternate_tree.blockSignals(False)
         self.make_code()
+        self.log.add(u"Choices restored as suggested.")
+
+    def double_clicked(self, item, column):
+        """A ligature's glyphs, or a letter's forms, in a Glyph window, as the features set them."""
+        QtCore, QtGui = _qt()
+        if column == 2 and item.treeWidget() is self.ligature_tree:
+            return
+        if item.treeWidget() is self.ligature_tree:
+            lig = self.found[int(item.data(0, QtCore.Qt.UserRole))]
+            text = u"".join(u"/" + name for name in lig.parts) + u"/space/" + lig.glyph
+        else:
+            base = u"%s" % item.data(0, QtCore.Qt.UserRole)
+            text = u"".join(u"/" + name for name in [base] * 4)
+        error = self.ak.show_in_glyph_window(self.fontlab, text)
+        if error:
+            self.log.add(u"FontLab did not open them: %s" % self.ak.html(error), "error")
+
+    def history_moved(self):
+        """An undo, a redo, or an edit in FontLab: the font read again, the choices kept where they still apply."""
+        choices = dict((lig.glyph, lig.choice) for lig in self.found)
+        self.run()
+        for row, lig in enumerate(self.found):
+            if lig.glyph in choices and choices[lig.glyph] != lig.choice:
+                lig.choice = choices[lig.glyph]
+                self.show_choice(self.ligature_tree.topLevelItem(row), lig)
+        self.make_code()
+        self.log.add(u"The font's History moved (an undo, a redo, or an edit): read again.")
 
     def picture(self, names):
         """Glyphs side by side, in the dialog's text color."""
@@ -558,12 +641,20 @@ class FeatureCodeDialog(object):
                 if problem:
                     problems.append(u"%s: %s" % (tag, problem))
         self.code.setPlainText(u"\n".join(shown))
-        self.write_button.setEnabled(bool(texts) and not problems)
+        present = any((BEGIN % kind) in (self.texts.get(tag) or u"")
+                      for tag, kind in (("liga", "ligatures"), ("dlig", "ligatures"), ("calt", "alternates")))
+        changes = any(texts[tag] != self.texts.get(tag) for tag in texts)
+        self.write_button.setText(u"Update the code" if present else u"Write the code")
+        self.ak.enable(self.write_button, bool(texts) and changes and not problems)
+        self.ak.enable(self.restore_button, [lig.choice for lig in self.found] != self.first_choices
+                       or self.alternate_checks() != self.first_checks)
         counts = dict((key, sum(1 for lig in self.found if lig.choice == key)) for key, _ in CHOICES)
-        self.status.setText(u"%s: %s (%d standard, %d discretionary, %d off); %s with alternates taking turns.%s" % (
-            self.package.tfn, counted(len(self.found), u"ligature"), counts["liga"], counts["dlig"], counts["off"],
-            counted(len(self.cycling()), u"letter"),
-            (u" The code has problems, so nothing can be written: " + u"; ".join(problems)) if problems else u""))
+        b = self.ak.b
+        self.status.setText(u"%s: %s (%s standard, %s discretionary, %s off); %s with alternates taking turns.%s%s" % (
+            b(self.package.tfn), b(counted(len(self.found), u"ligature")), b(counts["liga"]), b(counts["dlig"]),
+            b(counts["off"]), b(counted(len(self.cycling()), u"letter")),
+            u" The font has this code already." if texts and not changes else u"",
+            (u" The code has problems, so nothing can be written: " + self.ak.html(u"; ".join(problems))) if problems else u""))
 
     def write(self):
         if self.package is None:
@@ -571,13 +662,14 @@ class FeatureCodeDialog(object):
         current = self.current_font()
         if current is None or self.ak.font_key(current) != self.ak.font_key(self.package):
             self.run()
-            self.status.setText(u"The font changed: here is this one's code. " + self.status.text)
+            self.log.add(u"The font changed: here is this one's code. Nothing was written.", "warning")
             return
         features = self.package.fgPackage.features
         if any((features.get_feature(tag) if tag in features.keys() else None) != self.texts.get(tag)
                for tag in ("liga", "dlig", "calt")):
             self.run()
-            self.status.setText(u"The features changed since they were read: here they are again. " + self.status.text)
+            self.log.add(u"The features changed since they were read: here they are again. Nothing was written.",
+                         "warning")
             return
         texts = self.new_texts()
         written, error = [], None
@@ -590,12 +682,11 @@ class FeatureCodeDialog(object):
             error = exc
         self.ak.notify_changed(self.fontlab, self.package, u"FreeLab Feature Code")
         self.run()
-        notes = [u"Wrote %s." % u", ".join(written) if written else u"Wrote nothing."]
+        self.log.add(u"Wrote %s. Compile the features in FontLab's Features panel to try them; Edit &gt; Undo takes "
+                     u"them back." % self.ak.b(u", ".join(written)) if written else u"Wrote nothing.",
+                     "done" if written else "info")
         if error is not None:
-            notes.append(u"Stopped by an error: %s" % error)
-        notes.append(u"Compile the features in FontLab's Features panel to try them; close the font without saving "
-                     u"to take them back.")
-        self.status.setText(u" ".join(notes) + u" " + self.status.text)
+            self.log.add(u"Stopped by an error: %s" % self.ak.html(error), "error")
 
     def show(self):
         QtCore, QtGui = _qt()
@@ -617,6 +708,7 @@ def main():
         print("FreeLab Feature Code: %s" % exc)
         return
     sys._freelab_feature_code = dialog  # kept: PythonQt deletes a dialog with no Python reference
+    dialog.ak.hook_menu_order()
     dialog.show()
 
 

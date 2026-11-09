@@ -26,4 +26,5 @@ The code is a `calt` lookup (contextual alternates, on unless the user turns it 
 
 - Only simple ligature rules (glyph names in, one glyph out) are listed; contextual rules and rules with classes stay as they are, where they are.
 - The look back counts glyphs of letters (letters, their alternates, ligatures, and accented letters of the font); a mark or a symbol between ends it.
-- Writing goes straight into the open font. Compile the features in FontLab's *Features* panel to try them; close the font without saving to take them back.
+- Writing goes straight into the open font, as one step of FontLab's History: *Edit > Undo* takes it back. Compile the features in FontLab's *Features* panel to try them.
+- The code is made again as the choices change. Click a ligature's feature to choose another; the *Cycle* column shows the forms a letter takes in turn. Double-click a ligature or a letter to see it in a Glyph window. *Write the code* becomes *Update the code* once FreeLab's code is in the font, and grays out while the font has the code shown. *Restore suggestions* puts the choices back as they first came; the log says what was written.

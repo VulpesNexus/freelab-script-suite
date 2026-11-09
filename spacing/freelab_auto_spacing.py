@@ -184,7 +184,9 @@ are not spaced: they follow the letters they are built on, their accents kept ov
 <b>After spacing</b>: the font's kerning was set for the old sidebearings. Run Auto Kerning again,
 with <i>Include existing kerned pairs</i>, to see which pairs now want other values.<br>
 <b>Preview</b>: the selected glyph between its references, as it is (left) and as suggested
-(right).<br><br>
+(right). Click a reference beside it to open that pair in Auto Kerning; double-click a glyph's name
+to open it in a Glyph window.<br>
+<b>Restore suggestions</b> puts the checks back as the list first came.<br><br>
 Click this help's ? button, then any control, for what it does."""
 
 
@@ -202,9 +204,11 @@ class AutoSpacingDialog(object):
         dialog.setWhatsThis(HELP)
         dialog.resize(720, 760)
         layout = QtGui.QVBoxLayout(dialog)
-        self.status = QtGui.QLabel(u"")
+        self.status = self.ak.rich(QtGui.QLabel(u""))
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
+        self.log = self.ak.Log()
+        self.seen_history, self.first_checks = None, {}
         row = QtGui.QHBoxLayout()
         self.group = QtGui.QComboBox()
         for _, label in GROUPS:
@@ -230,7 +234,9 @@ class AutoSpacingDialog(object):
         self.tree.setHeaderLabels(list(self.COLUMNS))
         self.tree.setRootIsDecorated(False)
         self.tree.setWhatsThis(u"Each glyph's sidebearings now and the change suggested for each side (below 0: "
-                               u"closer to its neighbors), and its width after. Checked glyphs are changed.")
+                               u"closer to its neighbors), and its width after. Checked glyphs are changed. "
+                               u"Double-click a glyph's name to open it in a Glyph window.")
+        self.ak.grid_lines(self.tree)
         layout.addWidget(self.tree, 1)
         self.composites_note = QtGui.QLabel(u"")
         self.composites_note.setWordWrap(True)
@@ -243,6 +249,8 @@ class AutoSpacingDialog(object):
             label.setMinimumHeight(int(PREVIEW_SIZE * 1.6))
             label.setAlignment(QtCore.Qt.AlignCenter)
             previews.addWidget(label, 1)
+        self.neighbors = [self.ak.ClickRegions(label, self.open_pair, u"Click to open this pair in Auto Kerning")
+                          for label in (self.preview_now, self.preview_after)]
         layout.addLayout(previews)
         self.follow = QtGui.QCheckBox("Glyphs built from components follow the letters they are built on")
         self.follow.setChecked(True)
@@ -250,15 +258,18 @@ class AutoSpacingDialog(object):
                                  u"over the e and takes e's change of width. Without it, its e moves under the "
                                  u"acute (the e's outline moves) and its width stays.")
         layout.addWidget(self.follow)
+        layout.addWidget(self.log.view)
         buttons = QtGui.QHBoxLayout()
         self.all_button = QtGui.QPushButton("Check all")
         self.none_button = QtGui.QPushButton("Check none")
+        self.restore_button = QtGui.QPushButton("Restore suggestions")
+        self.restore_button.setWhatsThis(u"Puts the checks back as the list first came after the analysis.")
         self.glyph_window_button = QtGui.QPushButton("Show in Glyph window")
         self.apply_button = QtGui.QPushButton("Space checked glyphs")
         self.apply_button.setWhatsThis(u"Changes the sidebearings of the checked glyphs in the current master (their "
                                        u"outlines move, their widths change), and the glyphs built on them.")
         self.close_button = QtGui.QPushButton("Close")
-        for button in (self.all_button, self.none_button, self.glyph_window_button):
+        for button in (self.all_button, self.none_button, self.restore_button, self.glyph_window_button):
             buttons.addWidget(button)
         buttons.addStretch(1)
         buttons.addWidget(self.apply_button)
@@ -269,14 +280,19 @@ class AutoSpacingDialog(object):
         self.tolerance.connect("valueChanged(int)", lambda value: self.fill())
         self.all_button.connect("clicked()", lambda: self.check_all(True))
         self.none_button.connect("clicked()", lambda: self.check_all(False))
+        self.restore_button.connect("clicked()", self.restore)
+        self.tree.connect("itemChanged(QTreeWidgetItem*,int)", lambda item, column: self.update_buttons_soon())
+        self.tree.connect("itemDoubleClicked(QTreeWidgetItem*,int)", self.double_clicked)
         self.glyph_window_button.connect("clicked()", self.show_in_glyph_window)
         self.apply_button.connect("clicked()", self.apply)
         self.close_button.connect("clicked()", dialog.close)
         self.tree.connect("itemSelectionChanged()", self.select)
         self.package = self.master = None
         self.spacings, self.listed, self.composites = [], [], {}
-        self.busy = False
+        self.busy = self.buttons_due = False
+        self.history_timer = self.ak.watch_history(self)
         self.ak.plain_buttons(dialog)
+        self.update_buttons()
 
     # -- the font ------------------------------------------------------------
 
@@ -314,16 +330,20 @@ class AutoSpacingDialog(object):
             package = self.package = self.current_font()
             self.master = package.master if package is not None else None
             if package is None:
-                self.status.setText(u"No font is open. Open one, then click Analyze.")
+                self.status.setText(u"No font is open. Open one, then click %s." % self.ak.i("Analyze"))
                 return
             self.status.setText(u"Measuring\N{HORIZONTAL ELLIPSIS}")
             QtGui.QApplication.processEvents()
             self.spacings, self.composites = self.measure(package, self.master)
         except Exception as exc:
-            self.status.setText(u"%s" % exc)
+            message = u"%s" % exc
+            self.status.setText(u"")
+            self.log.add(self.ak.html(message[:1].upper() + message[1:]), "error")
             return
         finally:
             self.busy = False
+            self.seen_history = self.ak.history_mark(self.package)
+        self.first_checks = dict((s.name, s.checked) for s in self.spacings)
         self.fill()
 
     def measure(self, package, master):
@@ -416,7 +436,7 @@ class AutoSpacingDialog(object):
             self.tree.addTopLevelItem(item)
         for column in range(len(self.COLUMNS)):
             self.tree.resizeColumnToContents(column)
-        self.apply_button.setEnabled(bool(self.listed))
+        self.update_buttons()
         if self.package is not None:
             changes = dict((s.name, s.changes(tolerance)) for s in self.listed)
             moves = composite_moves(self.composites, changes)
@@ -427,11 +447,13 @@ class AutoSpacingDialog(object):
                 u"; %d built on two of them %s left as %s" % (left_out, u"is" if left_out == 1 else u"are",
                                                              u"it is" if left_out == 1 else u"they are")
                 if any(m is None for m in moves.values()) else u""))
-            self.status.setText(u"%s, master %s: %d of %s %s a side %s or more from the suggestion. Nothing changes "
-                                u"until you click Space checked glyphs."
-                                % (self.package.tfn, self.master, len(self.listed),
-                                   counted(len(self.spacings), u"drawn glyph"), u"has" if len(self.listed) == 1 else u"have",
-                                   counted(tolerance, u"unit")))
+            ak = self.ak
+            self.status.setText(u"%s, master %s: %s of %s %s a side %s or more from the suggestion. Nothing changes "
+                                u"until you click %s."
+                                % (ak.b(self.package.tfn), ak.b(self.master), ak.b(len(self.listed)),
+                                   ak.b(counted(len(self.spacings), u"drawn glyph")),
+                                   u"has" if len(self.listed) == 1 else u"have", ak.b(counted(tolerance, u"unit")),
+                                   ak.i(u"Space checked glyphs")))
         self.select()
 
     def harvest(self):
@@ -446,6 +468,52 @@ class AutoSpacingDialog(object):
         QtCore, QtGui = _qt()
         for row in range(self.tree.topLevelItemCount):
             self.tree.topLevelItem(row).setCheckState(0, QtCore.Qt.Checked if on else QtCore.Qt.Unchecked)
+        self.update_buttons()
+
+    def update_buttons_soon(self):
+        QtCore, QtGui = _qt()
+        if not self.buttons_due:
+            self.buttons_due = True
+            QtCore.QTimer.singleShot(0, self.update_buttons)
+
+    def update_buttons(self):
+        """Each button clickable only when it would do something."""
+        QtCore, QtGui = _qt()
+        self.buttons_due = False
+        items = [self.tree.topLevelItem(row) for row in range(self.tree.topLevelItemCount)]
+        some_on, some_off = self.ak.checks_of(items, lambda item: item.checkState(0) == QtCore.Qt.Checked)
+        self.ak.enable(self.all_button, some_off)
+        self.ak.enable(self.none_button, some_on)
+        self.ak.enable(self.apply_button, some_on and not self.busy)
+        self.harvest()
+        self.ak.enable(self.restore_button, any(self.first_checks.get(s.name, s.checked) != s.checked for s in self.listed))
+        self.ak.enable(self.glyph_window_button, self.selected() is not None)
+
+    def restore(self):
+        """The checks back as the list first came after the analysis."""
+        for s in self.spacings:
+            s.checked = self.first_checks.get(s.name, s.checked)
+        self.fill()
+        self.log.add(u"Checks restored as suggested.")
+
+    def double_clicked(self, item, column):
+        if column == 0:
+            self.show_in_glyph_window()
+
+    def history_moved(self):
+        """An undo, a redo, or an edit in FontLab: the glyphs measured again, as they are now."""
+        self.log.add(u"The font's History moved (an undo, a redo, or an edit): measured again.")
+        self.run()
+
+    def open_pair(self, key):
+        """A reference beside the glyph clicked: that pair in Auto Kerning."""
+        s = self.selected()
+        if s is None:
+            return
+        side, reference = key
+        error = self.ak.open_auto_kerning_at(*((reference, s.name) if side == "before" else (s.name, reference)))
+        if error:
+            self.log.add(u"Auto Kerning did not open: %s" % self.ak.html(error), "error")
 
     def selected(self):
         QtCore, QtGui = _qt()
@@ -459,18 +527,24 @@ class AutoSpacingDialog(object):
 
     def select(self):
         s = self.selected()
-        self.glyph_window_button.setEnabled(s is not None)
+        self.ak.enable(self.glyph_window_button, s is not None)
         if s is None or self.package is None:
             self.preview_now.clear()
             self.preview_after.clear()
+            for regions in self.neighbors:
+                regions.set([], (0, 0))
             return
         left, right = s.changes(self.tolerance.value)
-        self.preview_now.setPixmap(self.picture(s, 0, 0, u"Now"))
-        self.preview_after.setPixmap(self.picture(s, left, right, u"Suggested"))
+        for label, regions, (l, r, text) in zip((self.preview_now, self.preview_after), self.neighbors,
+                                                 ((0, 0, u"Now"), (left, right, u"Suggested"))):
+            pixmap, spans = self.picture(s, l, r, text)
+            label.setPixmap(pixmap)
+            regions.set(spans, pixmap.size())
 
     def picture(self, s, left, right, label):
-        """The glyph between two of its references on each side, its sidebearings changed by left and
-        right, in the dialog's text color, the references dimmed."""
+        """(picture, spans): the glyph between two of its references on each side, its sidebearings
+        changed by left and right, in the dialog's text color, the references dimmed; the references'
+        spans across the picture, (left, right, (side, name)), to be clicked."""
         QtCore, QtGui = _qt()
         ak = self.ak
         reference = reference_for(ak.kind_character(s.char), ak.category)
@@ -487,12 +561,17 @@ class AutoSpacingDialog(object):
         pixmap.fill(QtGui.QColor(0, 0, 0, 0))
         color = self.dialog.palette.color(QtGui.QPalette.WindowText)
         painter = QtGui.QPainter(pixmap)
+        spans, seen = [], False
         try:  # ended before anything else can fail: a painter left open on a freed pixmap aborts FontLab
             painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
             painter.setPen(color)
             painter.drawText(QtCore.QRect(0, 0, width, int(PREVIEW_SIZE * 0.35)), int(QtCore.Qt.AlignCenter), label)
             x = float(PREVIEW_SIZE) / 2
             for layer, path, is_glyph in sequence:
+                if is_glyph:
+                    seen = True
+                else:
+                    spans.append((x, x + layer.advanceWidth * scale, ("after" if seen else "before", reference_glyph[0][1])))
                 painter.save()
                 painter.translate(x + (left * scale if is_glyph else 0), PREVIEW_SIZE * 1.3)
                 painter.scale(scale, -scale)
@@ -504,7 +583,7 @@ class AutoSpacingDialog(object):
                 x += layer.advanceWidth * scale + ((left + right) * scale if is_glyph else 0)
         finally:
             painter.end()
-        return pixmap
+        return pixmap, spans
 
     def show_in_glyph_window(self):
         s = self.selected()
@@ -516,7 +595,7 @@ class AutoSpacingDialog(object):
         text = u"/space".join(u"/%s/%s/%s/%s/%s" % (r, r, s.name, r, r) for r in names) or u"/%s" % s.name
         error = ak.show_in_glyph_window(self.fontlab, text)
         if error:
-            self.status.setText(u"FontLab did not open the glyph: %s" % error)
+            self.log.add(u"FontLab did not open the glyph: %s" % ak.html(error), "error")
 
     # -- changing the font ----------------------------------------------
 
@@ -528,7 +607,8 @@ class AutoSpacingDialog(object):
         current = self.current_font()
         if current is None or self.ak.font_key(current) != self.ak.font_key(self.package) or current.master != self.master:
             self.run()
-            self.status.setText(u"The font or master changed since the analysis: here is this one's. " + self.status.text)
+            self.log.add(u"The font or master changed since the analysis: here is this one's. Nothing was spaced.",
+                         "warning")
             return
         tolerance = self.tolerance.value
         chosen = [s for s in self.listed if s.checked]
@@ -574,17 +654,19 @@ class AutoSpacingDialog(object):
         except Exception as exc:  # what was changed stays changed, and is reported
             error = exc
         self.after_writing()
-        notes = [u"Spaced %s%s." % (counted(len(changed), u"glyph"), u", and %s built on them followed" % counted(moved, u"glyph")
-                                           if self.follow.checked and changed else u"")]
+        ak = self.ak
+        self.log.add(u"Spaced %s%s. The kerning was set for the old spacing: run Auto Kerning again. Edit &gt; "
+                     u"Undo (or the History panel) takes it back." % (
+                         ak.b(counted(len(changed), u"glyph")),
+                         u", and %s built on them followed" % ak.b(counted(moved, u"glyph")) if self.follow.checked and changed else u""),
+                     "done" if changed else "info")
         if stale:
-            notes.append(u"%d had changed since the analysis and %s left as %s." % (
-                stale, u"was" if stale == 1 else u"were", u"it was" if stale == 1 else u"they were"))
+            self.log.add(u"%s had changed since the analysis and %s left as %s." % (
+                ak.b(counted(stale, u"glyph")), u"was" if stale == 1 else u"were", u"it was" if stale == 1 else u"they were"),
+                "warning")
         if error is not None:
-            notes.append(u"Stopped by an error: %s" % error)
-        notes.append(u"The kerning was set for the old spacing: run Auto Kerning again. Close the font without "
-                     u"saving to take it all back.")
+            self.log.add(u"Stopped by an error: %s" % ak.html(error), "error")
         self.run()
-        self.status.setText(u" ".join(notes) + u" " + self.status.text)
 
     def touched(self, glyph):
         try:
@@ -615,6 +697,7 @@ def main():
         print("FreeLab Auto Spacing: %s" % exc)
         return
     sys._freelab_auto_spacing = dialog  # kept: PythonQt deletes a dialog with no Python reference
+    dialog.ak.hook_menu_order()
     dialog.show()
 
 
