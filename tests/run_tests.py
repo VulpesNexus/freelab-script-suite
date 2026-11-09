@@ -25,7 +25,8 @@ PY27 = PY27_DIR / "tools" / "python.exe"
 NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 PY27_FILES = (
     "darkmode/freelab_dark_mode.py", "darkmode/freelab_dark_mode_settings.py", "tests/qtfakes.py",
-    "tests/darkmode_tests.py", "kerning/freelab_auto_kerning.py", "kerning/common_pairs.txt", "tests/kern_tests.py",
+    "tests/darkmode_tests.py", "kerning/freelab_auto_kerning.py", "kerning/freelab_kerning_check.py", "kerning/common_pairs.txt",
+    "tests/kern_tests.py",
 )
 PY27_SUITES = ("tests/darkmode_tests.py", "tests/kern_tests.py")
 

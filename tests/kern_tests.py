@@ -507,5 +507,97 @@ class ReviewFixTests(unittest.TestCase):
             os.remove(path)
 
 
+import freelab_kerning_check as kc  # noqa: E402
+
+
+def fake_font(groups, entries):
+    return ak.FontKerning(FakeKerning(groups, entries))
+
+
+class KerningUpgradeTests(unittest.TestCase):
+    def test_a_noted_pair_gets_a_value_of_its_own(self):
+        # class e (first side) holds e and eacute; class e against T is -80; eacute measures 52 units looser by T
+        k = fake_font({"e": (["e", "eacute"], "KernLeft")}, {(("e", True), ("T", False)): -80})
+        names = {u"e": "e", u"E": "eacute", u"T": "T"}  # (E stands for e acute: the test stays ASCII)
+        base, member = [0.0] * 9, [0.0] * 9
+        member[5] = 0.052  # SIGNATURE_PARTNERS["first"][5] is T
+        plans = ak.plan_classes({"first": [[u"e", u"E"]]}, names, k, lambda ch, side: base if ch == u"e" else member, 1000.0)
+        self.assertEqual(plans[0].action, "same")
+        found = ak.noted_exceptions(k, plans, names)
+        self.assertEqual([(e.pair, e.current, e.value) for e in found], [(("eacute", "T"), -80, -28)])
+        self.assertEqual(ak.write_exceptions(k, found), 1)
+        after = ak.FontKerning(k.kerning)
+        self.assertEqual((after.current("eacute", "T"), after.current("e", "T")), (-28, -80))
+
+    def test_no_exception_where_the_member_has_its_own_value_or_none_is_tightened(self):
+        k = fake_font({"e": (["e", "eacute"], "KernLeft")},
+                      {(("e", True), ("T", False)): -80, (("eacute", False), ("T", False)): -40,
+                       (("e", True), ("V", False)): 10})
+        plan = ak.ClassPlan("first", [u"e", u"E"], {u"e": "e", u"E": "eacute"}, k, [(u"E", 52, u"T"), (u"E", 40, u"V")])
+        self.assertEqual(ak.noted_exceptions(k, [plan], {u"e": "e", u"E": "eacute", u"T": "T", u"V": "V"}), [])
+
+    def test_collisions_closest_first_with_their_fix(self):
+        k = fake_font({"T": (["T", "Tcaron"], "KernLeft")},
+                      {(("T", True), ("o", False)): -90, (("T", False), ("a", False)): -60, (("V", False), ("o", False)): 5})
+        gaps = {("T", "o"): 30.0, ("Tcaron", "o"): -12.0, ("T", "a"): 8.0}
+        found = kc.find_collisions(k, lambda left, right, value: gaps.get((left, right)), 20, relative=False)
+        self.assertEqual([(c.pair(), c.value, c.fix) for c in found],
+                         [(("Tcaron", "o"), -90, -58), (("T", "a"), -60, -48)])
+        self.assertEqual(found[0].entry, (("T", True), ("o", False)), "Tcaron o takes its class's value")
+
+    def test_cleanup_kinds(self):
+        k = fake_font({"C": (["c", "ccedilla"], "KernLeft"), "gone": ([], "KernLeft")},
+                      {(("C", True), ("T", False)): -50,
+                       (("c", False), ("T", False)): -50,  # the class gives the same: changes nothing
+                       (("ccedilla", False), ("T", False)): 0,  # an exception of 0 against -50: kept
+                       (("x", False), ("T", False)): -30,  # no glyph x
+                       (("gone", True), ("T", False)): -20,  # a class with no members
+                       (("C", True), ("V", False)): -3,  # tiny
+                       (("c", False), ("V", False)): -40, (("ccedilla", False), ("V", False)): -40})
+        found = kc.find_cleanup(k, lambda name: name != "x", 5)
+        kinds = dict((c.entry, c.kind) for c in found)
+        self.assertEqual(kinds, {(("x", False), ("T", False)): "missing", (("gone", True), ("T", False)): "missing",
+                                 (("C", True), ("V", False)): "overridden", (("c", False), ("T", False)): "redundant"})
+        self.assertTrue(all(c.checked for c in found))
+        tiny = kc.find_cleanup(fake_font({}, {(("a", False), ("b", False)): -3}), lambda name: True, 5)
+        self.assertEqual([(c.kind, c.checked) for c in tiny], [("tiny", False)])
+
+    def test_collisions_against_the_class_pair(self):
+        # T T overlaps by design (joined crossbars); Tcaron T overlaps 40 units more; T a is a pair of its own;
+        # class signs holds unlike shapes (plus, approxequal): C plus is not compared with C approxequal
+        k = fake_font({"T": (["T", "Tcaron"], "KernBothSide"), "signs": (["approxequal", "plus"], "KernRight"),
+                       "C": (["C", "Ccaron"], "KernLeft")},
+                      {(("T", True), ("T", True)): -268, (("T", False), ("a", False)): -60,
+                       (("C", True), ("signs", True)): -15})
+        gaps = {("T", "T"): -266.0, ("Tcaron", "T"): -306.0, ("T", "Tcaron"): -270.0, ("Tcaron", "Tcaron"): -300.0,
+                ("T", "a"): -50.0, ("C", "approxequal"): 378.0, ("C", "plus"): 6.0, ("Ccaron", "plus"): -1.0,
+                ("Ccaron", "approxequal"): 370.0}
+        found = kc.find_collisions(k, lambda left, right, value: gaps.get((left, right)), 20)
+        self.assertEqual([(c.pair(), c.fix, c.reference) for c in found],
+                         [(("Tcaron", "T"), -228, ("T", "T")), (("Tcaron", "Tcaron"), -238, ("T", "Tcaron"))])
+
+    def test_variants_of_a_key_glyph(self):
+        chars = {"w": u"w", "won": u"\N{WON SIGN}", "T": u"T", "Tcaron": u"\N{LATIN CAPITAL LETTER T WITH CARON}",
+                 "Tbar": u"\N{LATIN CAPITAL LETTER T WITH STROKE}", "f": u"f", "f_f_t": None, "j": u"j", "j.2": None}
+        char_of = chars.get
+        self.assertTrue(kc.is_variant("Tcaron", "T", char_of))
+        self.assertTrue(kc.is_variant("Tbar", "T", char_of), "a barred letter has no decomposition")
+        self.assertTrue(kc.is_variant("j.2", "j", char_of), "an alternate")
+        self.assertFalse(kc.is_variant("won", "w", char_of), "a currency sign named after w")
+        self.assertFalse(kc.is_variant("f_f_t", "f", char_of), "a ligature")
+
+    def test_masters_compared(self):
+        regular = fake_font({"o": (["o"], "KernRight")}, {(("T", False), ("o", True)): -60, (("V", False), ("a", False)): -20})
+        bold = fake_font({"o": (["o", "oacute"], "KernRight")}, {(("T", False), ("o", True)): 30})
+        found = kc.compare_masters([("Regular", regular), ("Bold", bold)])
+        self.assertEqual([(d.kind, d.subject) for d in found],
+                         [("sign", u"T \N{MULTIPLICATION SIGN} class o"), ("missing", u"V \N{MULTIPLICATION SIGN} a"),
+                          ("class", u"class o")])
+        self.assertEqual(kc.compare_masters([("Regular", regular)]), [])
+
+    def test_proof_text_names_each_glyph(self):
+        self.assertEqual(ak.proof_text("T", "eacute", ["H", "n"]), u"/H/H/T/eacute/H/H/space/n/n/T/eacute/n/n")
+
+
 if __name__ == "__main__":
     unittest.main()

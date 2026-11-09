@@ -45,6 +45,7 @@ $files = @(
     @{ From = 'darkmode\freelab_dark_mode.py'; Name = 'freelab_dark_mode.py' },
     @{ From = 'darkmode\freelab_dark_mode_settings.py'; Name = 'freelab_dark_mode_settings.py' },
     @{ From = 'kerning\freelab_auto_kerning.py'; Name = 'freelab_auto_kerning.py' },
+    @{ From = 'kerning\freelab_kerning_check.py'; Name = 'freelab_kerning_check.py' },
     @{ From = 'kerning\common_pairs.txt'; Name = 'common_pairs.txt' },
     @{ From = 'kerning\learned_model.json'; Name = 'learned_model.json' },
     @{ From = 'kerning\class_model.json'; Name = 'class_model.json' }

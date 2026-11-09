@@ -522,6 +522,59 @@ def _qt():
     return QtCore, QtGui
 
 
+KERNING_CHECK_FILE, KERNING_CHECK_MODULE = "freelab_kerning_check.py", "freelab_kerning_check"
+
+
+def load_sibling(file_name, module_name):
+    """A FreeLab script beside this one, loaded as a module without starting it (its main() not run);
+    loaded again when its file changed (a reinstall)."""
+    here = os.path.dirname(os.path.abspath(globals().get("__file__") or "."))
+    path = os.path.join(here, file_name)
+    try:
+        stamp = os.path.getmtime(path)
+    except OSError:
+        stamp = None
+    held = sys.modules.get(module_name)
+    if held is not None and hasattr(held, "main") and getattr(held, "_freelab_stamp", None) == stamp:
+        return held
+    old = os.environ.get("FREELAB_NO_AUTOSTART")
+    os.environ["FREELAB_NO_AUTOSTART"] = "1"
+    try:
+        if sys.version_info[0] == 2:
+            import imp
+            module = imp.new_module(module_name)
+            module.__file__ = path
+            sys.modules[module_name] = module
+            with open(path, "rb") as handle:  # open() takes a unicode path through the wide Windows API
+                source = handle.read()
+            exec(compile(source, file_name, "exec", 0, True), module.__dict__)
+        else:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location(module_name, path)
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[module_name] = module
+            spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(module_name, None)  # no half-loaded stub left behind
+        raise
+    finally:
+        if old is None:
+            os.environ.pop("FREELAB_NO_AUTOSTART", None)
+        else:
+            os.environ["FREELAB_NO_AUTOSTART"] = old
+    module._freelab_stamp = stamp
+    return module
+
+
+def open_sibling_script(file_name, module_name):
+    """Runs a FreeLab script beside this one (its main()); the error's text, or None."""
+    try:
+        load_sibling(file_name, module_name).main()
+        return None
+    except Exception as exc:
+        return u"%s" % exc
+
+
 def _property(widget, name):
     """A Qt property's value (PythonQt gives properties as attributes, some builds as methods)."""
     value = getattr(widget, name)
@@ -779,6 +832,26 @@ class FontKerning(object):
         return None
 
 
+PROOF_CONTEXTS = (u"H", u"n", u"o")  # each line of a Glyph window proof: the pair between two of these
+
+
+def proof_text(left, right, contexts=PROOF_CONTEXTS):
+    """FontLab text (glyph names after slashes) for a pair between two of each context glyph, a
+    line each: /H/H/T/o/H/H, /n/n/T/o/n/n, ..."""
+    lines = [u"/%s/%s/%s/%s/%s/%s" % (c, c, left, right, c, c) for c in contexts]
+    return u"/space".join(lines)
+
+
+def show_in_glyph_window(fontlab, text):
+    """Opens the text (FontLab's /glyphname syntax) in a Glyph window, as typing it would; the error's
+    text, or None."""
+    try:
+        fontlab.flItems.requestContent(fontlab.fgSymbolList(text, True), 0)
+        return None
+    except Exception as exc:
+        return u"%s" % exc
+
+
 def fontlab_autokern(package, master, left, right):
     """FontLab's own autokern for the pair: flPackage.autoKern returns it (as text or a number)
     without writing it. None when it gives nothing."""
@@ -955,6 +1028,8 @@ CLASS_SIDES_LABELS = {"first": "First in a pair (the glyph's right side)", "seco
 CLASS_FLAGS = {"first": "KernLeft", "second": "KernRight"}  # FontLab's flags: KernLeft classes come first in pairs
 CLASS_PREFIX = {"first": "kern1_", "second": "kern2_"}
 CLASS_COLUMNS = ("Class", "Glyphs", "What happens", "May need pairs of their own")
+CLASS_EXCEPTIONS_LABEL = "Pairs too close with their class's value (each given a value of its own when written)"
+EXCEPTION_ROLE_BASE = 100000  # a row's data at or above this: a pair too close (its index above it), not a class
 
 _CLASS_MODEL = {}
 
@@ -1223,6 +1298,51 @@ def plan_classes(suggested, names, kerning, signature_of=None, upm=1000.0):
     return plans
 
 
+class NotedException(object):
+    """A glyph pair a class's value brings too close (a noted member beside its partner), and the
+    value of its own that loosens it by the measured difference."""
+
+    def __init__(self, plan_index, pair, text, current, value):
+        self.plan_index, self.pair, self.text = plan_index, pair, text
+        self.current, self.value = current, value
+
+    def entry(self):
+        return ((self.pair[0], False), (self.pair[1], False))
+
+
+def noted_exceptions(kerning, plans, names):
+    """The noted pairs (ClassPlan.differs) that take their class's tightening now: the member kerns
+    beside the partner exactly as the class's first glyph does, below zero. Each gets that value
+    loosened by the measured difference, never past zero (an accent that collides unkerned is a
+    matter of spacing). kerning is a FontKerning; names maps characters to glyph names."""
+    found = []
+    for index, plan in enumerate(plans):
+        first = names.get(plan.members[0])
+        for ch, units, partner in plan.differs:
+            member, other = names.get(ch), names.get(partner)
+            if not (first and member and other):
+                continue
+            pair = (member, other) if plan.side == "first" else (other, member)
+            base = (first, other) if plan.side == "first" else (other, first)
+            current = kerning.current(*pair)
+            if current >= 0 or current != kerning.current(*base):
+                continue
+            value = min(0, current + units)
+            if value != current:
+                found.append(NotedException(index, pair, plan.pair_text(ch, partner), current, value))
+    return found
+
+
+def write_exceptions(kerning, exceptions):
+    """Each exception as a glyph pair of its own (0 kept as an entry: it overrides the class); the
+    number written."""
+    written = 0
+    for exception in exceptions:
+        kerning.write(exception.entry(), exception.value, False)
+        written += 1
+    return written
+
+
 def own_values(kerning, plans):
     """{(left, right): value} of the glyph pairs whose value comes from an entry naming a glyph a plan
     puts in a class: a member's own kerning, which the class's pairs must not override."""
@@ -1411,6 +1531,11 @@ class AutoKerningDialog(object):
         self.reset_button.setWhatsThis("Gives the selected pair the value of the source chosen above, undoing a pick.")
         self.reset_button.setEnabled(False)
         note_row.addWidget(self.reset_button)
+        self.glyph_window_button = QtGui.QPushButton(u"Show in Glyph window")
+        self.glyph_window_button.setWhatsThis(u"Opens the selected pair in a Glyph window, between H's, n's, and o's, "
+                                              u"to look at it (and edit it) with FontLab's own tools.")
+        self.glyph_window_button.setEnabled(False)
+        note_row.addWidget(self.glyph_window_button)
         layout.addLayout(note_row)
         self.related = QtGui.QLabel(u"")
         self.related.setWordWrap(True)
@@ -1442,11 +1567,14 @@ class AutoKerningDialog(object):
         self.classes_button.setWhatsThis("Suggests kerning classes for this master, from the open-licensed fonts FreeLab "
                                          "learned from and this font's own outlines, to review before any is made.")
         self.class_dialog = None
+        self.check_button = QtGui.QPushButton(u"Check kerning…")
+        self.check_button.setWhatsThis(u"Opens Kerning Check: pairs whose kerning makes them collide, entries that "
+                                       u"do nothing or name what is gone, and differences between masters.")
         self.apply_button = QtGui.QPushButton("Write checked pairs")
         self.apply_button.setWhatsThis("Writes the Suggested value of every checked pair to the current master, "
                                        "where the pair's value comes from: see Kerning classes in the help.")
         self.close_button = QtGui.QPushButton("Close")
-        for button in (self.all_button, self.none_button, self.classes_button):
+        for button in (self.all_button, self.none_button, self.classes_button, self.check_button):
             buttons.addWidget(button)
         buttons.addStretch(1)
         buttons.addWidget(self.apply_button)
@@ -1460,6 +1588,8 @@ class AutoKerningDialog(object):
         self.classes_button.connect("clicked()", self.suggest_classes)
         self.close_button.connect("clicked()", dialog.close)
         self.reset_button.connect("clicked()", self.reset)
+        self.glyph_window_button.connect("clicked()", self.show_in_glyph_window)
+        self.check_button.connect("clicked()", self.open_kerning_check)
         self.table.connect("itemSelectionChanged()", self.select)
         self.table.connect("cellDoubleClicked(int,int)", self.double_clicked)
         for widget in (self.show_kind, self.pairs, self.order):
@@ -1476,6 +1606,21 @@ class AutoKerningDialog(object):
         if self.class_dialog is None:
             self.class_dialog = ClassDialog(self)  # kept: PythonQt deletes a dialog with no Python reference
         self.class_dialog.show()
+
+    def show_in_glyph_window(self):
+        if self.selected is None or self.package is None:
+            return
+        s = self.suggestions[self.selected]
+        contexts = [c for c in PROOF_CONTEXTS if self.package.findName(c) is not None]
+        error = show_in_glyph_window(self.fontlab, proof_text(s.left, s.right, contexts or [s.left]))
+        if error:
+            self.preview_note.setText(u"FontLab did not open the pair: %s" % error)
+
+    def open_kerning_check(self):
+        """Kerning Check, the script beside this one, on the same font."""
+        error = open_sibling_script(KERNING_CHECK_FILE, KERNING_CHECK_MODULE)
+        if error:
+            self.status.setText(u"Kerning Check did not open: %s" % error)
 
     def make_keys(self):
         """The list's keys: 1 to 6 pick, Backspace resets, Space checks. Only while the list has the focus."""
@@ -1774,6 +1919,7 @@ class AutoKerningDialog(object):
         if not rows or rows[0].row() >= len(self.suggestions):
             self.selected = None
             self.reset_button.setEnabled(False)
+            self.glyph_window_button.setEnabled(False)
             self.preview_note.setText("Select a pair to compare the methods; click one to use it for that pair.")
             self.related.setVisible(False)
             for button in self.choice_buttons.values():
@@ -1875,6 +2021,7 @@ class AutoKerningDialog(object):
         source = self.source_key()
         chosen = s.override or source
         self.reset_button.setEnabled(bool(s.override))
+        self.glyph_window_button.setEnabled(True)
         picked = (u"Picked by hand: %s. " % dict(CHOICES)[s.override]) if s.override else u""
         target = self.target_text(s)
         self.preview_note.setText(u"%sThe pair %s: %s" % (picked, s.left_char + s.right_char, target[:1].lower() + target[1:]))
@@ -2065,18 +2212,24 @@ class ClassDialog(object):
         self.all_button = QtGui.QPushButton("Check all")
         self.none_button = QtGui.QPushButton("Check none")
         self.apply_button = QtGui.QPushButton("Create checked classes")
+        self.exceptions_button = QtGui.QPushButton("Write checked pairs")
+        self.exceptions_button.setWhatsThis(u"Gives each checked pair of <i>Pairs too close with their class's "
+                                            u"value</i> the value shown, as a pair of its own: the class kerns "
+                                            u"its other glyphs as before.")
         self.close_button = QtGui.QPushButton("Close")
         for button in (self.all_button, self.none_button):
             buttons.addWidget(button)
         buttons.addStretch(1)
         buttons.addWidget(self.apply_button)
+        buttons.addWidget(self.exceptions_button)
         buttons.addWidget(self.close_button)
         layout.addLayout(buttons)
         self.all_button.connect("clicked()", lambda: self.check_all(True))
         self.none_button.connect("clicked()", lambda: self.check_all(False))
         self.apply_button.connect("clicked()", self.apply)
+        self.exceptions_button.connect("clicked()", self.write_exceptions)
         self.close_button.connect("clicked()", dialog.close)
-        self.plans = []
+        self.plans, self.names, self.exceptions = [], {}, []
 
     def show(self):
         QtCore, QtGui = _qt()
@@ -2088,9 +2241,10 @@ class ClassDialog(object):
         QtCore, QtGui = _qt()
         package = self.owner.current_font()
         master = package.master if package is not None else None
-        self.package, self.master, self.plans = package, master, []
+        self.package, self.master, self.plans, self.exceptions = package, master, [], []
         self.tree.clear()
         self.apply_button.setEnabled(False)
+        self.exceptions_button.setEnabled(False)
         if package is None:
             self.status.setText(u"No font is open. Open one, then run Auto Kerning again.")
             return
@@ -2100,7 +2254,8 @@ class ClassDialog(object):
         self.status.setText(u"Comparing the glyphs' sides\N{HORIZONTAL ELLIPSIS}")
         QtGui.QApplication.processEvents()
         try:
-            self.plans, _ = font_class_suggestions(package, master)
+            self.plans, self.names = font_class_suggestions(package, master)
+            self.exceptions = noted_exceptions(FontKerning(package.kerning(master)), self.plans, self.names)
         except Exception as exc:
             self.status.setText(u"%s" % exc)
             return
@@ -2135,6 +2290,30 @@ class ClassDialog(object):
                     item.setFont(column, bold)
                 top.addChild(item)
             top.setExpanded(True)
+        if self.exceptions:
+            top = QtGui.QTreeWidgetItem([CLASS_EXCEPTIONS_LABEL])
+            self.tree.addTopLevelItem(top)
+            top.setFirstColumnSpanned(True)
+            for index, exception in enumerate(self.exceptions):
+                plan = self.plans[exception.plan_index]
+                class_name = plan.existing if isinstance(plan.existing, (type(u""), str)) else u""
+                item = QtGui.QTreeWidgetItem([class_name, exception.text,
+                                              u"Its own value: %d \N{RIGHTWARDS ARROW} %d" % (exception.current, exception.value),
+                                              u", ".join(d for d in plan.describe_differs().split(u"; ")
+                                                         if d.startswith(exception.text + u" "))])
+                item.setData(0, QtCore.Qt.UserRole, EXCEPTION_ROLE_BASE + index)
+                item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsUserCheckable | QtCore.Qt.ItemIsSelectable)
+                item.setCheckState(0, QtCore.Qt.Checked)
+                tip = (u"%s %s now takes %d from its class; written as a pair of its own, it gets %d (an estimate: "
+                       u"look at it after writing)." % (exception.pair[0], exception.pair[1], exception.current,
+                                                        exception.value))
+                for column in range(len(CLASS_COLUMNS)):
+                    item.setToolTip(column, tip)
+                for column in (0, 1):
+                    item.setFont(column, bold)
+                top.addChild(item)
+            top.setExpanded(True)
+        self.exceptions_button.setEnabled(bool(self.exceptions))
         for column in range(len(CLASS_COLUMNS) - 1):
             self.tree.resizeColumnToContents(column)
         plural = lambda count, one, many: u"%d %s" % (count, one if count == 1 else many)
@@ -2146,17 +2325,52 @@ class ClassDialog(object):
                                                plural(counts.get("overlap", 0), u"left as it is", u"left as they are")))
         self.apply_button.setEnabled(bool(counts.get("new") or counts.get("add")))
 
-    def items(self):
+    def items(self, exceptions=False):
+        """The rows of suggested classes, or of pairs too close (exceptions True)."""
+        QtCore, QtGui = _qt()
         found = []
         for top_index in range(self.tree.topLevelItemCount):
             top = self.tree.topLevelItem(top_index)
             for child in range(top.childCount()):
-                found.append(top.child(child))
+                item = top.child(child)
+                if (int(item.data(0, QtCore.Qt.UserRole)) >= EXCEPTION_ROLE_BASE) == exceptions:
+                    found.append(item)
         return found
+
+    def write_exceptions(self):
+        """The checked pairs too close, each written as a pair of its own."""
+        QtCore, QtGui = _qt()
+        chosen = [self.exceptions[int(item.data(0, QtCore.Qt.UserRole)) - EXCEPTION_ROLE_BASE]
+                  for item in self.items(exceptions=True) if item.checkState(0) == QtCore.Qt.Checked]
+        if not chosen:
+            return
+        package, master = self.package, self.master
+        current = self.owner.current_font()
+        if current is None or font_key(current) != font_key(package) or current.master != master:
+            self.run()
+            self.status.setText(u"The font or master changed since these pairs were measured: here are this one's. "
+                                + self.status.text)
+            return
+        kerning = FontKerning(package.kerning(master))
+        stale = [e for e in chosen if kerning.current(*e.pair) != e.current]
+        error, written = None, 0
+        try:
+            written = write_exceptions(kerning, [e for e in chosen if e not in stale])
+        except Exception as exc:  # what was written stays written, and is reported
+            error = exc
+        self.owner.after_writing(package)
+        self.run()
+        notes = [u"Wrote %d pairs of their own." % written]
+        if stale:
+            notes.append(u"%d pairs had changed since they were measured and were left as they are." % len(stale))
+        if error is not None:
+            notes.append(u"Stopped by an error: %s" % error)
+        notes.append(u"Writing goes straight into the open font: close it without saving to take it back.")
+        self.status.setText(u" ".join(notes) + u" " + self.status.text)
 
     def check_all(self, on):
         QtCore, QtGui = _qt()
-        for item in self.items():
+        for item in self.items() + self.items(exceptions=True):
             if item.flags() & QtCore.Qt.ItemIsUserCheckable:
                 item.setCheckState(0, QtCore.Qt.Checked if on else QtCore.Qt.Unchecked)
 
@@ -2212,8 +2426,10 @@ fonts class them so (n with m and h, o with c, e, and q) and every two of them k
 font.<br>
 <b>May need pairs of their own</b>: members that need kerning looser than the class's first glyph by
 3% of the em or more, each at the pair where it differs most (an e with an accent beside T: the accent
-stops it from tucking under T's bar as far as e does). The class's value will not fit that pair: check
-it after kerning the class, and give it a value of its own if needed.<br>
+stops it from tucking under T's bar as far as e does). The class's value will not fit that pair.<br>
+<b>Pairs too close with their class's value</b>: the noted pairs the class tightens now, each with a
+value of its own: the class's, loosened by the difference measured (never past 0). <i>Write checked
+pairs</i> writes them as glyph pairs, which the class's value no longer reaches.<br>
 <b>Sides</b>: <i>First in a pair</i> classes group glyphs by their right side (FontLab's left, or 1st,
 classes); <i>second in a pair</i> by their left side.<br>
 <b>The font's classes come first</b>: a suggestion makes a class only where none of its glyphs has one
