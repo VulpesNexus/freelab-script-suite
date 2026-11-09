@@ -47,6 +47,8 @@ $files = @(
     @{ From = 'kerning\freelab_auto_kerning.py'; Name = 'freelab_auto_kerning.py' },
     @{ From = 'kerning\freelab_kerning_check.py'; Name = 'freelab_kerning_check.py' },
     @{ From = 'spacing\freelab_auto_spacing.py'; Name = 'freelab_auto_spacing.py' },
+    @{ From = 'diacritics\freelab_accents.py'; Name = 'freelab_accents.py' },
+    @{ From = 'features\freelab_feature_code.py'; Name = 'freelab_feature_code.py' },
     @{ From = 'kerning\common_pairs.txt'; Name = 'common_pairs.txt' },
     @{ From = 'kerning\learned_model.json'; Name = 'learned_model.json' },
     @{ From = 'kerning\class_model.json'; Name = 'class_model.json' }

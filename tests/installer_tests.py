@@ -92,6 +92,8 @@ class InstallerTests(unittest.TestCase):
         self.assertTrue((self.scripts / "FreeLab" / "class_model.json").exists(), "and its class model")
         self.assertTrue((self.scripts / "FreeLab" / "freelab_kerning_check.py").exists(), "Kerning Check beside it")
         self.assertTrue((self.scripts / "FreeLab" / "freelab_auto_spacing.py").exists(), "and Auto Spacing")
+        self.assertTrue((self.scripts / "FreeLab" / "freelab_accents.py").exists(), "and Accented Glyphs")
+        self.assertTrue((self.scripts / "FreeLab" / "freelab_feature_code.py").exists(), "and Feature Code")
         before = self.read()
         code, out = self.run_installer()
         self.assertEqual((code, self.read()), (0, before), "a second install changes nothing")
