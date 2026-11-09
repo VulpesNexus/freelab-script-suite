@@ -878,6 +878,26 @@ def show_in_glyph_window(fontlab, text):
         return u"%s" % exc
 
 
+def notify_changed(fontlab, package, title, glyphs=()):
+    """FontLab told of a script's changes (its windows redraw them) and the font marked modified: a
+    script's writes leave it unmarked, and FontLab would close it without asking to save.
+    notifyPackageContentUpdated(package.id) fails in FontLab 7.2 (PyCXX cannot pass the id as an int),
+    so each changed glyph is updated and the change announced as FontLab's own commands do."""
+    for glyph in glyphs:
+        try:
+            glyph.update()
+        except Exception:
+            pass
+    try:
+        fontlab.flItems.notifyChangesApplied(title, list(glyphs) if glyphs else package, True)
+    except Exception:
+        pass
+    try:
+        package.setFlag(2, True)  # ofChanged
+    except Exception:
+        pass
+
+
 def plain_buttons(dialog):
     """No default button in a FreeLab dialog: Qt frames the default one in a light color dark mode
     leaves light (and Enter in a field would click it)."""
@@ -2185,14 +2205,7 @@ class AutoKerningDialog(object):
     def after_writing(self, package):
         """FontLab told of the change, and the font marked modified: a script's kerning writes leave it
         unmarked, and FontLab would close it without asking to save."""
-        try:
-            self.fontlab.flItems.notifyPackageContentUpdated(package.id)
-        except Exception:
-            pass
-        try:
-            package.setFlag(2, True)  # ofChanged
-        except Exception:
-            pass
+        notify_changed(self.fontlab, package, u"FreeLab Auto Kerning")
 
 
 def font_class_suggestions(package, master, core=None, em=EM_PIXELS, model=None):

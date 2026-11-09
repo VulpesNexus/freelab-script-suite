@@ -592,15 +592,8 @@ class AutoSpacingDialog(object):
         except Exception:
             pass
 
-    def after_writing(self):
-        try:
-            self.fontlab.flItems.notifyPackageContentUpdated(self.package.id)
-        except Exception:
-            pass
-        try:
-            self.package.setFlag(2, True)  # ofChanged: a script's changes may leave the font unmarked
-        except Exception:
-            pass
+    def after_writing(self, glyphs=()):
+        self.ak.notify_changed(self.fontlab, self.package, u"FreeLab Auto Spacing", glyphs)
 
     def show(self):
         QtCore, QtGui = _qt()

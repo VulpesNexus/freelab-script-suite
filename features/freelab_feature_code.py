@@ -588,14 +588,7 @@ class FeatureCodeDialog(object):
                     written.append(tag)
         except Exception as exc:
             error = exc
-        try:
-            self.fontlab.flItems.notifyPackageContentUpdated(self.package.id)
-        except Exception:
-            pass
-        try:
-            self.package.setFlag(2, True)  # ofChanged
-        except Exception:
-            pass
+        self.ak.notify_changed(self.fontlab, self.package, u"FreeLab Feature Code")
         self.run()
         notes = [u"Wrote %s." % u", ".join(written) if written else u"Wrote nothing."]
         if error is not None:

@@ -565,14 +565,7 @@ class KerningCheckDialog(object):
         return True
 
     def after_writing(self):
-        try:
-            self.fontlab.flItems.notifyPackageContentUpdated(self.package.id)
-        except Exception:
-            pass
-        try:
-            self.package.setFlag(2, True)  # ofChanged: a script's kerning writes leave the font unmarked
-        except Exception:
-            pass
+        self.ak.notify_changed(self.fontlab, self.package, u"FreeLab Kerning Check")
 
     # -- the lists ---------------------------------------------------------
 

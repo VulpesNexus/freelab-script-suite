@@ -46,6 +46,15 @@ class PlanTests(unittest.TestCase):
         self.assertTrue(found[O_HORN_DOT].missing and u"horn" in found[O_HORN_DOT].missing)
 
 
+class RefillTests(unittest.TestCase):
+    def test_an_empty_glyph_is_planned_again_under_its_name(self):
+        f = ac.Font(["a", "caron", "acaron"], [("a", 0x61), ("acaron", 0x01CE)], empty=["acaron"])
+        found = ac.plan(f, [A_CARON])
+        self.assertEqual([(r.name, r.refill) for r in found], [("acaron", True)])
+        full = ac.Font(["a", "caron", "acaron"], [("a", 0x61), ("acaron", 0x01CE)])
+        self.assertEqual(ac.plan(full, [A_CARON]), [], "a drawn glyph is left alone")
+
+
 class PlaceTests(unittest.TestCase):
     def test_marks_sit_as_the_fonts_own(self):
         inks = {"a": ac.Ink(10, 0, 350, 480, top_center=200, advance=367),

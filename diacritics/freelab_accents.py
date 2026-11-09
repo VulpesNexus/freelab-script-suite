@@ -69,11 +69,13 @@ def case_of(ch):
 
 
 class Font(object):
-    """What the planning reads of a font: its glyph names and their code points."""
+    """What the planning reads of a font: its glyph names, their code points, and which glyphs are
+    empty (a character with an empty glyph is planned again, under that glyph's name)."""
 
-    def __init__(self, names, unicodes):
+    def __init__(self, names, unicodes, empty=()):
         self.names = set(names)
         self.by_code = dict((code, name) for name, code in unicodes if code)
+        self.empty = set(empty)
 
     def glyph_for(self, ch):
         return self.by_code.get(ord(ch))
@@ -87,6 +89,7 @@ class Recipe(object):
         self.marks = marks or []  # [(glyph name, side, root, borrowed root or None)]
         self.missing = missing  # what the font lacks, or None
         self.checked = True
+        self.refill = False  # its glyph is in the font, empty: filled under its own name
 
     @property
     def code(self):
@@ -126,7 +129,8 @@ def plan(font, characters):
     """A Recipe for each character the font lacks that decomposes into a letter and marks."""
     recipes = []
     for ch in characters:
-        if ord(ch) in font.by_code or not unicodedata.category(ch).startswith("L"):
+        existing = font.by_code.get(ord(ch))
+        if (existing and existing not in font.empty) or not unicodedata.category(ch).startswith("L"):
             continue
         decomposed = unicodedata.normalize("NFD", ch)
         if len(decomposed) < 2:
@@ -150,7 +154,10 @@ def plan(font, characters):
         if lacking:
             recipes.append(Recipe(ch, missing=u"a %s" % u", a ".join(lacking)))
             continue
-        recipes.append(Recipe(ch, glyph_name(font, name_base, [root for _, _, root, _ in marks], ord(ch)), base, marks))
+        name = existing or glyph_name(font, name_base, [root for _, _, root, _ in marks], ord(ch))
+        recipe = Recipe(ch, name, base, marks)
+        recipe.refill = bool(existing)
+        recipes.append(recipe)
     return recipes
 
 
@@ -391,6 +398,14 @@ def _rect(QtCore, x, y, w, h):
     return path
 
 
+def is_empty(glyph):
+    """True for a glyph with no layer, or none with shapes (an earlier FreeLab build left 257 such)."""
+    try:
+        return not any(layer.shapes for layer in glyph.layers)
+    except Exception:
+        return False
+
+
 def component_parts(layer):
     """[(glyph, dx, dy)] of a layer made only of components, or None."""
     parts = []
@@ -497,7 +512,13 @@ class AccentsDialog(object):
 
     def font(self, package):
         glyphs = list(package.fgPackage.glyphs)
-        return Font([g.name for g in glyphs], [(g.name, g.unicode) for g in glyphs])
+        empty = []
+        for g in glyphs:
+            if g.unicode and 0xC0 <= g.unicode < 0x1F00:  # (only accented letters' glyphs are looked at)
+                glyph = package.findName(g.name)
+                if glyph is not None and is_empty(glyph):
+                    empty.append(g.name)
+        return Font([g.name for g in glyphs], [(g.name, g.unicode) for g in glyphs], empty)
 
     def characters(self):
         ranges = SETS[self.set_box.currentIndex][2]
@@ -561,7 +582,8 @@ class AccentsDialog(object):
             top.setData(0, QtCore.Qt.UserRole, -1)
             for index in indexes:
                 r = self.recipes[index]
-                item = QtGui.QTreeWidgetItem([r.char, r.name or u"", r.describe()])
+                item = QtGui.QTreeWidgetItem([r.char, r.name or u"", r.describe() + (
+                    u" (its glyph is in the font, empty: filled when built)" if getattr(r, "refill", False) else u"")])
                 item.setData(0, QtCore.Qt.UserRole, index)
                 item.setFont(0, bold)
                 item.setToolTip(2, u"U+%04X %s" % (r.code, unicodedata.name(r.char, u"")))
@@ -699,15 +721,24 @@ class AccentsDialog(object):
             if master not in self.inks:
                 self.inks[master], self.placements[master] = self.learn(package, master)
         fontlab = self.fontlab
-        made, skipped, error = [], [], None
+        made, skipped, error, touched = [], [], None, []
         try:
             for r in chosen:
-                if package.findName(r.name) is not None or package.findUnicode(r.code) is not None:
+                glyph = package.findName(r.name)
+                if glyph is not None and not is_empty(glyph):
                     skipped.append(r.char)  # made meanwhile
                     continue
-                glyph = fontlab.flGlyph()
-                glyph.name = r.name
-                glyph.fgGlyph.unicode = r.code
+                if glyph is None:
+                    if package.findUnicode(r.code) is not None:
+                        skipped.append(r.char)
+                        continue
+                    new = fontlab.flGlyph()
+                    new.name = r.name
+                    new.fgGlyph.unicode = r.code
+                    package.addGlyph(new)  # (FontLab adds a copy, without layers: they are made on the font's glyph)
+                    glyph = package.findName(r.name)
+                    if glyph is None:
+                        raise RuntimeError(u"FontLab did not add %s" % r.name)
                 for master in masters:
                     ink, placement = self.inks[master], self.placements[master]
                     if ink(r.base) is None or any(ink(m[0]) is None for m in r.marks):
@@ -722,20 +753,13 @@ class AccentsDialog(object):
                         components.append(component)
                     layer = glyph.getLayerByName(master, True)
                     layer.setGlyphComponents(components, float(width), package, False)
-                package.addGlyph(glyph)
-                if package.findName(r.name) is None:
-                    raise RuntimeError(u"FontLab did not add %s" % r.name)
+                touched.append(glyph)
+                if is_empty(package.findName(r.name)):
+                    raise RuntimeError(u"FontLab left %s empty" % r.name)
                 made.append(r.char)
         except Exception as exc:  # what was made stays made, and is reported
             error = exc
-        try:
-            fontlab.flItems.notifyPackageContentUpdated(package.id)
-        except Exception:
-            pass
-        try:
-            package.setFlag(2, True)  # ofChanged
-        except Exception:
-            pass
+        self.ak.notify_changed(fontlab, package, u"FreeLab Accented Glyphs", touched)
         notes = [u"Built %s: %s." % (counted(len(made), u"glyph"), u"".join(made)) if made else u"Built none."]
         if skipped:
             notes.append(u"%s had been made meanwhile and %s left as %s." % (
