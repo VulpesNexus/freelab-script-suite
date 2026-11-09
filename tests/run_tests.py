@@ -28,8 +28,10 @@ PY27_FILES = (
     "tests/darkmode_tests.py", "kerning/freelab_auto_kerning.py", "kerning/freelab_kerning_check.py", "kerning/common_pairs.txt",
     "tests/kern_tests.py", "spacing/freelab_auto_spacing.py", "tests/spacing_tests.py",
     "diacritics/freelab_diacritics.py", "features/freelab_feature_code.py", "tests/glyphtools_tests.py",
+    "cjk/freelab_cjk_spacing.py", "tests/cjk_tests.py",
 )
-PY27_SUITES = ("tests/darkmode_tests.py", "tests/kern_tests.py", "tests/spacing_tests.py", "tests/glyphtools_tests.py")
+PY27_SUITES = ("tests/darkmode_tests.py", "tests/kern_tests.py", "tests/spacing_tests.py", "tests/glyphtools_tests.py",
+               "tests/cjk_tests.py")
 
 
 def run_py3() -> tuple[bool, list[str]]:

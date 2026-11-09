@@ -601,10 +601,10 @@ class KerningUpgradeTests(unittest.TestCase):
 
 class MenuOrderTests(unittest.TestCase):
     def test_working_order_then_dark_mode_then_mcp(self):
-        texts = ["Diacritics", "Auto Kerning", "Auto Spacing", "Toggle Dark Mode", "Dark Mode Settings",
+        texts = ["Diacritics", "Auto Kerning", "Auto Spacing", "CJK Spacing", "Toggle Dark Mode", "Dark Mode Settings",
                  "Feature Code", "Kerning Check", "Start Listener", "Something New"]
         self.assertEqual(ak.menu_order(texts),
-                         ["Diacritics", "Auto Spacing", "Auto Kerning", "Kerning Check", "Feature Code", None,
+                         ["Diacritics", "Auto Spacing", "CJK Spacing", "Auto Kerning", "Kerning Check", "Feature Code", None,
                           "Toggle Dark Mode", "Dark Mode Settings", None, "Start Listener", None, "Something New"])
         self.assertEqual(ak.menu_order(["Auto Kerning"]), ["Auto Kerning"], "no separator around a lone group")
 

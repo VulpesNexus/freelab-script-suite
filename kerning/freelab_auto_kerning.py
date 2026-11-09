@@ -917,7 +917,7 @@ def history_state(package):
 
 # Scripts > FreeLab, in the order a font is usually made, then dark mode, then FreeLab MCP's: FontLab
 # lists a folder's scripts by file name and has no separators of its own.
-MENU_GROUPS = (("Diacritics", "Auto Spacing", "Auto Kerning", "Kerning Check", "Feature Code"),
+MENU_GROUPS = (("Diacritics", "Auto Spacing", "CJK Spacing", "Auto Kerning", "Kerning Check", "Feature Code"),
                ("Toggle Dark Mode", "Dark Mode Settings"),
                ("Start Listener", "Stop Listener"))
 MENU_TITLE, SCRIPTS_MENU = "FreeLab", "menuScripts"

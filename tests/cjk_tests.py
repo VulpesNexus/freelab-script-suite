@@ -1,0 +1,80 @@
+"""Tests of FreeLab's CJK Spacing (palt and halt trims, and their feature code). Valid Python 2.7 and
+Python 3."""
+
+from __future__ import absolute_import, division, print_function
+
+import os
+import sys
+import unittest
+
+os.environ["FREELAB_NO_AUTOSTART"] = "1"
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, os.pardir, "cjk"))
+import freelab_cjk_spacing as cj  # noqa: E402
+
+MODEL = {"format": 1, "palt": {"hiragana": [0.08, 0.06], "punctuation": [0.07, 0.07], "U+3001": [0.05, 0.19]},
+         "halt": {"U+3001": [0.0, -0.5], "U+300C": [-0.5, -0.5]}}
+
+
+class TrimTests(unittest.TestCase):
+    def test_kinds(self):
+        self.assertEqual(cj.kind_of(0x3042), "hiragana")
+        self.assertEqual(cj.kind_of(0x3041), "small hiragana")
+        self.assertEqual(cj.kind_of(0x30AB), "katakana")
+        self.assertEqual(cj.kind_of(0x3001), "punctuation")
+        self.assertEqual(cj.kind_of(0xFF08), "punctuation")
+        self.assertEqual(cj.kind_of(0xAC00), "hangul")
+        self.assertIsNone(cj.kind_of(0x4E00), "kanji stay full width")
+
+    def test_kana_trimmed_to_its_ink_and_the_corpus_sides(self):
+        trim = cj.suggest(cj.Trim(0x3042, "a-hira", "hiragana", 1000, 150, 880), MODEL, 1000.0)
+        self.assertEqual(trim.palt, (80 - 150, 730 + 140 - 1000), "the ink moves left to 80, the width becomes 870")
+        self.assertEqual(trim.width_after(), 870)
+        self.assertIsNone(trim.halt, "halt is for punctuation")
+
+    def test_punctuation_takes_its_own_sides_and_half_width(self):
+        comma = cj.suggest(cj.Trim(0x3001, "ideographiccomma", "punctuation", 1000, 100, 300), MODEL, 1000.0)
+        self.assertEqual(comma.palt, (-50, 200 + 240 - 1000))
+        self.assertEqual(comma.halt, (0, -500))
+
+    def test_proportional_glyphs_and_tiny_trims_are_left_alone(self):
+        narrow = cj.suggest(cj.Trim(0x3042, "a-hira", "hiragana", 600, 50, 550), MODEL, 1000.0)
+        self.assertIsNone(narrow.palt, "narrower than 90% of the em: proportional already")
+        tight = cj.suggest(cj.Trim(0x3042, "a-hira", "hiragana", 1000, 81, 941), MODEL, 1000.0)
+        self.assertIsNone(tight.palt, "within the tolerance on both sides")
+
+    def test_plan_lists_only_what_changes(self):
+        glyphs = [(0x3042, "a-hira", 1000, 150, 880), (0x4E00, "uni4E00", 1000, 50, 950), (0xAC00, "ga-ko", 1000, 50, 950)]
+        self.assertEqual([t.name for t in cj.plan(glyphs, MODEL, 1000.0)], ["a-hira"], "kanji and Hangul stay")
+
+
+class CodeTests(unittest.TestCase):
+    def trims(self):
+        a = cj.suggest(cj.Trim(0x3042, "a-hira", "hiragana", 1000, 150, 880), MODEL, 1000.0)
+        comma = cj.suggest(cj.Trim(0x3001, "ideographiccomma", "punctuation", 1000, 100, 300), MODEL, 1000.0)
+        return [a, comma]
+
+    def test_new_features(self):
+        texts = cj.texts_for(self.trims(), {})
+        self.assertIn(u"feature palt {", texts["palt"])
+        self.assertIn(u"  pos a-hira <-70 0 -130 0>;", texts["palt"])
+        self.assertIn(u"  pos ideographiccomma <0 0 -500 0>;", texts["halt"])
+        self.assertTrue(texts["palt"].rstrip().endswith(u"} palt;"))
+
+    def test_the_rest_is_kept_and_an_old_block_replaced(self):
+        old = (u"feature palt {\n#> feature\n  pos x <1 0 2 0>;\n#< feature\n" + cj.BEGIN % "palt" + u"\n  pos old <1 0 1 0>;\n"
+               + cj.END % "palt" + u"\n} palt;\n")
+        trims = self.trims()
+        trims[1].checked = False
+        text = cj.texts_for(trims, {"palt": old}, halt_on=False)["palt"]
+        self.assertNotIn(u"pos old", text)
+        self.assertIn(u"#/> feature", text, "FontLab's automatic block handed back")
+        self.assertIn(u"pos x <1 0 2 0>;", text)
+        self.assertNotIn(u"ideographiccomma", text, "unchecked")
+        self.assertEqual(text.count(cj.BEGIN % "palt"), 1)
+        block = cj.block_of("palt", text)
+        self.assertEqual(block, u"feature palt {\n  pos a-hira <-70 0 -130 0>;\n} palt;\n")
+
+
+if __name__ == "__main__":
+    unittest.main()

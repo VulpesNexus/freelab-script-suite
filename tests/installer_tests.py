@@ -97,6 +97,8 @@ class InstallerTests(unittest.TestCase):
         self.assertTrue((self.scripts / "FreeLab" / "glyph_names.json").exists(), "and Glyphs' glyph names")
         self.assertTrue((self.scripts / "FreeLab" / "GlyphData_LICENSE").exists(), "with their notice")
         self.assertTrue((self.scripts / "FreeLab" / "freelab_feature_code.py").exists(), "and Feature Code")
+        self.assertTrue((self.scripts / "FreeLab" / "freelab_cjk_spacing.py").exists(), "and CJK Spacing")
+        self.assertTrue((self.scripts / "FreeLab" / "palt_model.json").exists(), "with its trims")
         before = self.read()
         code, out = self.run_installer()
         self.assertEqual((code, self.read()), (0, before), "a second install changes nothing")

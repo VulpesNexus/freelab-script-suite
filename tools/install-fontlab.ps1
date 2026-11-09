@@ -52,6 +52,8 @@ $files = @(
     @{ From = 'diacritics\glyph_names.json'; Name = 'glyph_names.json' },
     @{ From = 'diacritics\GlyphData_LICENSE'; Name = 'GlyphData_LICENSE' },
     @{ From = 'features\freelab_feature_code.py'; Name = 'freelab_feature_code.py' },
+    @{ From = 'cjk\freelab_cjk_spacing.py'; Name = 'freelab_cjk_spacing.py' },
+    @{ From = 'cjk\palt_model.json'; Name = 'palt_model.json' },
     @{ From = 'kerning\common_pairs.txt'; Name = 'common_pairs.txt' },
     @{ From = 'kerning\learned_model.json'; Name = 'learned_model.json' },
     @{ From = 'kerning\class_model.json'; Name = 'class_model.json' }

@@ -1,6 +1,6 @@
 # FreeLab
 
-Tools for FontLab 7 that run inside it: a dark mode for its whole interface, auto kerning, auto spacing, diacritics, and feature code.
+Tools for FontLab 7 that run inside it: a dark mode for its whole interface, auto kerning, auto spacing, CJK spacing, diacritics, and feature code.
 
 **Status: 0.3.0.** Dark mode runs in FontLab 7.2.
 
@@ -12,11 +12,12 @@ FreeLab MCP, the separate `freelab-mcp` repository, lets an AI app such as Claud
 - *kerning/*: *Scripts > FreeLab > Auto Kerning* suggests kerning for the Latin pairs of the current master by halfkern's method, contour distance, and FontLab's own, shows how far they agree, and writes the pairs you approve; *Kerning Check* lists colliding pairs, entries that do nothing, and differences between masters: [docs/KERNING.md](docs/KERNING.md).
 - *spacing/*: *Scripts > FreeLab > Auto Spacing* suggests sidebearings for the drawn Latin letters of the current master, measured against the font's own straight references, shows each glyph as it is and as suggested, and changes the glyphs you approve; glyphs built from components follow: [docs/SPACING.md](docs/SPACING.md).
 - *diacritics/*: *Scripts > FreeLab > Diacritics* builds the Latin, Greek, and Cyrillic letters with diacritics the font lacks from its letters and marks, placing each mark as the font's own accented glyphs do, no anchors needed, with an editor to move and scale each mark by hand: [docs/DIACRITICS.md](docs/DIACRITICS.md).
+- *cjk/*: *Scripts > FreeLab > CJK Spacing* writes palt and halt for a Japanese font's full-width kana and punctuation, trimmed as the open-licensed CJK fonts trim theirs: [docs/CJK.md](docs/CJK.md).
 - *features/*: *Scripts > FreeLab > Feature Code* sets each ligature to standard, discretionary, or off, and writes alternates that take turns (for handwriting): [docs/FEATURE-CODE.md](docs/FEATURE-CODE.md).
 - *tests/*: the test gate (*run_tests.py*).
 - *tools/*: the installer, the native helper's build script, and the test gate's Python 2.7 fetcher.
 
-*Scripts > FreeLab* lists the font tools in the order a font is usually made (Diacritics, Auto Spacing, Auto Kerning, Kerning Check, Feature Code), then dark mode, then FreeLab MCP's, with separators between them: FontLab lists a folder's scripts by file name, so FreeLab's startup block arranges the menu each time *Scripts* opens.
+*Scripts > FreeLab* lists the font tools in the order a font is usually made (Diacritics, Auto Spacing, CJK Spacing, Auto Kerning, Kerning Check, Feature Code), then dark mode, then FreeLab MCP's, with separators between them: FontLab lists a folder's scripts by file name, so FreeLab's startup block arranges the menu each time *Scripts* opens.
 
 The font tools share their ways: a log under the list (done in green, warnings in amber, errors in red), *Restore suggestions* to put every check back as the list first came, buttons that gray out when they would do nothing, a double-click on a glyph or pair to open it in a Glyph window, a click on a preview's neighboring letter to open that pair in Auto Kerning, and a fresh look at the font after an undo, a redo, or an edit in FontLab. Each write is one step of FontLab's History: *Edit > Undo* takes it back.
 
@@ -42,7 +43,7 @@ It runs everything under Python 3, including the native helper's tests, then the
 - [docs/DARKMODE.md](docs/DARKMODE.md): how FontLab 7 colors itself, and how dark mode turns each part dark.
 - [docs/KERNING.md](docs/KERNING.md): auto kerning, how it measures, and its limits.
 - [docs/SPACING.md](docs/SPACING.md): auto spacing, how it measures, and its limits.
-- [docs/DIACRITICS.md](docs/DIACRITICS.md) and [docs/FEATURE-CODE.md](docs/FEATURE-CODE.md): diacritics and feature code.
+- [docs/DIACRITICS.md](docs/DIACRITICS.md), [docs/CJK.md](docs/CJK.md), and [docs/FEATURE-CODE.md](docs/FEATURE-CODE.md): diacritics, CJK spacing, and feature code.
 - [docs/NATIVE.md](docs/NATIVE.md): dark mode's native engine (experimental), how it is applied to FontLab, and how it compares with the script engine.
 - [docs/ROADMAP.md](docs/ROADMAP.md): what comes next.
 - [docs/FEATURE-SURVEY.md](docs/FEATURE-SURVEY.md): what already exists for dark mode, kerning, diacritics, and feature code.
@@ -51,4 +52,4 @@ It runs everything under Python 3, including the native helper's tests, then the
 
 **GPL-3.0-or-later** ([LICENSE](LICENSE)). Copyright © 2026 Vixen420. It comes with no warranty.
 
-Auto kerning ports [halfkern](https://github.com/behdad/halfkern)'s method (Copyright 2022 Google LLC, Apache License 2.0), and *kerning/common_pairs.txt* comes from [andre-fuchs/kerning-pairs](https://github.com/andre-fuchs/kerning-pairs) (MIT License, its notice kept in the file). Diacritics names glyphs as glyphsLib's *GlyphData.xml* does (MIT License, Copyright (c) 2016 Georg Seifert, its notice in *diacritics/GlyphData_LICENSE*). The FreeLab method's model, the kerning class counts, and Diacritics' mark placements were learned from fonts under the SIL Open Font License and the Apache License only; only measurements are kept, no font data.
+Auto kerning ports [halfkern](https://github.com/behdad/halfkern)'s method (Copyright 2022 Google LLC, Apache License 2.0), and *kerning/common_pairs.txt* comes from [andre-fuchs/kerning-pairs](https://github.com/andre-fuchs/kerning-pairs) (MIT License, its notice kept in the file). Diacritics names glyphs as glyphsLib's *GlyphData.xml* does (MIT License, Copyright (c) 2016 Georg Seifert, its notice in *diacritics/GlyphData_LICENSE*). The FreeLab method's model, the kerning class counts, Diacritics' mark placements, and CJK Spacing's trims were learned from fonts under the SIL Open Font License and the Apache License only; only measurements are kept, no font data.
