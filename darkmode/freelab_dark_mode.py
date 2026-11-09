@@ -229,6 +229,8 @@ ISLAND_PROP = "freelab_island"  # found by rendering: "island" or "ink"
 SHEET_PROP = "freelab_sheet"  # the widget's own stylesheet
 DARK_SHEET_PROP = "freelab_sheet_dark"  # what dark mode set instead
 MENU_HOOK_PROP = "freelab_menu_hooked"  # aboutToShow connected (kept: the hook stays, idle while off)
+SEPARATOR_PROP = "freelab_menu_separators"  # the stylesheet a menu's lighter separators were set as
+SEPARATOR_LIGHTER = 190  # a menu separator's color: the window color this much lighter (Fusion's is hardly seen)
 HOOKED_PROP = "freelabHooked"  # an island the native engine's hooks map, rather than an effect
 NATIVE_INK_PROP = "freelabNativeInk"  # a list whose dark pens the native engine maps, rather than the ink effect
 # Lists whose rows Qt draws, in colors FontLab puts in their data: under the native engine, their
@@ -1003,6 +1005,8 @@ def _darken_sheet(widget):
     sheet = _prop(widget, "styleSheet")
     if not sheet:
         return
+    if sheet == widget.property(SEPARATOR_PROP):
+        return  # a menu's lighter separators: drawn as set
     ours = widget.property(DARK_SHEET_PROP)
     if sheet == ours:
         return  # already ours
@@ -2389,6 +2393,10 @@ def _undo_widget(widget, keep_props=False, keep_placeholder=False):
         _restore_icons(widget, record)
         _drop_record(widget, record)
     if widget.inherits("QMenu"):
+        try:
+            _restore_separators(widget)
+        except Exception as exc:
+            _note_error("menu separators", exc)
         for action in widget.actions():
             action_record = _record(action, create=False)
             if action_record is not None:
@@ -2724,12 +2732,47 @@ def _menu_hook(menu):
     return shown
 
 
+def lighter_name(name, factor):
+    """#rrggbb with each channel times factor percent, at most 255 (QColor.lighter, for grays)."""
+    channels = [int(name[i:i + 2], 16) for i in (1, 3, 5)]
+    return u"#" + u"".join(u"%02x" % min(255, int(round(c * factor / 100.0))) for c in channels)
+
+
+def separator_sheet(color_name):
+    """The stylesheet a dark menu's separators are drawn with: a line of the given color."""
+    return u"QMenu::separator { height: 1px; background: %s; margin: 4px 8px; }" % color_name
+
+
+def _lighten_separators(menu):
+    """Fusion draws a menu separator in a shade of the window color barely apart from it on a dark
+    menu; a menu with no stylesheet of its own gets lighter ones (taken off again with dark mode)."""
+    if menu.property(SEPARATOR_PROP) is not None or _prop(menu, "styleSheet"):
+        return
+    window = _prop(menu, "palette").color(_gui("QPalette").Window).name()
+    sheet = separator_sheet(lighter_name(window, SEPARATOR_LIGHTER))
+    menu.setProperty(SEPARATOR_PROP, sheet)
+    menu.setStyleSheet(sheet)
+
+
+def _restore_separators(menu):
+    sheet = menu.property(SEPARATOR_PROP)
+    if sheet is None:
+        return
+    if _prop(menu, "styleSheet") == sheet:
+        menu.setStyleSheet(u"")  # else FontLab restyled it since: keep FontLab's
+    menu.setProperty(SEPARATOR_PROP, None)
+
+
 def _on_menu_shown(menu):
     state = _state()
     if not state["on"] or state.get("busy") or not _alive(menu):
         return
     state["busy"] = True  # the worker must not re-enter from a signal sent while processing
     try:
+        try:
+            _lighten_separators(menu)
+        except Exception as exc:
+            _note_error("menu separators", exc)
         for widget in [menu] + _descendants(menu):
             if widget.property(SEEN_PROP) is None or widget.property(QUEUED_PROP) == "dark":
                 widget.setProperty(QUEUED_PROP, None)

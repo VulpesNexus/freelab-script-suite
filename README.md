@@ -16,6 +16,8 @@ FreeLab MCP, the separate `freelab-mcp` repository, lets an AI app such as Claud
 - *tests/*: the test gate (*run_tests.py*).
 - *tools/*: the installer, the native helper's build script, and the test gate's Python 2.7 fetcher.
 
+*Scripts > FreeLab* lists the font tools in the order a font is usually made (Accented Glyphs, Auto Spacing, Auto Kerning, Kerning Check, Feature Code), then dark mode, then FreeLab MCP's, with separators between them: FontLab lists a folder's scripts by file name, so FreeLab's startup block arranges the menu each time *Scripts* opens.
+
 ## Requirements
 
 - FontLab 7 for Windows (developed against 7.2.0), with its Python working. FontLab 7 runs scripts with a **64-bit** Python 2.7 installed on the system (a 32-bit one does not work); the FontLab 7 installer offers one. If *Window > Panels > Scripting* cannot run a one-line `print(1)`, fix that first: [docs/PYTHON27.md](docs/PYTHON27.md).

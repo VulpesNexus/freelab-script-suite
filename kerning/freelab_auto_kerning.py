@@ -898,6 +898,78 @@ def notify_changed(fontlab, package, title, glyphs=()):
         pass
 
 
+# Scripts > FreeLab, in the order a font is usually made, then dark mode, then FreeLab MCP's: FontLab
+# lists a folder's scripts by file name and has no separators of its own.
+MENU_GROUPS = (("Accented Glyphs", "Auto Spacing", "Auto Kerning", "Kerning Check", "Feature Code"),
+               ("Toggle Dark Mode", "Dark Mode Settings"),
+               ("Start Listener", "Stop Listener"))
+MENU_TITLE, SCRIPTS_MENU = "FreeLab", "menuScripts"
+MENU_ORDER_PROP = "freelab_menu_order"
+
+
+def menu_order(texts, groups=MENU_GROUPS):
+    """The texts in the groups' order, None between groups; any text no group names goes last."""
+    order = []
+    known = set(text for group in groups for text in group)
+    rest = [text for text in texts if text not in known]
+    for group in list(groups) + [tuple(rest)]:
+        present = [text for text in group if text in texts]
+        if present:
+            if order:
+                order.append(None)
+            order.extend(present)
+    return order
+
+
+def arrange_menu(menu):
+    """Puts a FreeLab menu's actions in menu_order, with separators between the groups; nothing
+    changes when they are in order already."""
+    actions = list(menu.actions())
+    current = [None if action.isSeparator() else action.text.replace(u"&", u"") for action in actions]
+    by_text = dict((action.text.replace(u"&", u""), action) for action in actions if not action.isSeparator())
+    wanted = menu_order([text for text in current if text is not None])
+    if current == wanted:
+        return False
+    for action in actions:
+        menu.removeAction(action)
+    for text in wanted:
+        if text is None:
+            menu.addSeparator()
+        else:
+            menu.addAction(by_text[text])
+    return True
+
+
+def hook_menu_order():
+    """Arranges Scripts > FreeLab each time the Scripts menu opens (FontLab builds the submenu anew on
+    Refresh Scripts). Called once at startup by FreeLab's block of FontLab's startup script."""
+    QtCore, QtGui = _qt()
+    main = AutoKerningDialog.main_window()
+    if main is None:
+        return False
+    scripts = None
+    for menu in main.findChildren(QtGui.QMenu):
+        if menu.objectName == SCRIPTS_MENU:
+            scripts = menu
+            break
+    if scripts is None or scripts.property(MENU_ORDER_PROP) is not None:
+        return False
+
+    def shown():
+        try:
+            for action in scripts.actions():
+                submenu = action.menu()
+                if submenu is not None and action.text.replace(u"&", u"") == MENU_TITLE:
+                    arrange_menu(submenu)
+        except Exception:
+            pass  # a signal handler must not raise
+
+    scripts.connect("aboutToShow()", shown)
+    scripts.setProperty(MENU_ORDER_PROP, True)
+    sys._freelab_menu_order = shown  # kept: PythonQt drops a slot no Python object holds
+    return True
+
+
 def plain_buttons(dialog):
     """No default button in a FreeLab dialog: Qt frames the default one in a light color dark mode
     leaves light (and Enter in a field would click it)."""

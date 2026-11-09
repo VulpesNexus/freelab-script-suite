@@ -298,6 +298,7 @@ if ((Test-Path $native) -and (Test-Path $BinDir)) {
 }
 
 $darkPath = ConvertTo-PyLiteral (Join-Path $scripts 'freelab_dark_mode.py')
+$kernPath = ConvertTo-PyLiteral (Join-Path $scripts 'freelab_auto_kerning.py')
 $block = @"
 $begin (managed by FreeLab tools/install-fontlab.ps1; -Uninstall removes it)
 def _freelab_tools_load(name, path):
@@ -332,6 +333,12 @@ def _freelab_tools_startup():
             module.startup()
     except Exception as exc:
         print("FreeLab dark mode at startup: %s" % (exc,))
+    try:
+        tools = _freelab_tools_load("freelab_auto_kerning", $kernPath)
+        if tools is not None:
+            tools.hook_menu_order()  # Scripts > FreeLab in working order, with separators
+    except Exception as exc:
+        print("FreeLab menu at startup: %s" % (exc,))
 try:
     _freelab_tools_startup()
 except Exception:
