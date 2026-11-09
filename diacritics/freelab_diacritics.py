@@ -761,7 +761,9 @@ ANCHOR_MODEL_FILE = "anchor_model.json"
 ANCHOR_BLOCK = "anchors"
 ANCHOR_BEGIN, ANCHOR_END = u"# >>> FreeLab %s (made by FreeLab Diacritics)", u"# <<< FreeLab %s"
 FONTLAB_AUTO, FONTLAB_HANDED = u"#> feature", u"#/> feature"
-MARK_FEATURES = {"mark": "Mark Positioning", "mkmk": "Mark to Mark Positioning"}
+MARK_FEATURES = {"mark": "Mark Positioning", "mkmk": "Mark to Mark Positioning",
+                 "ccmp": "Glyph Composition/Decomposition", "pres": "Pre-base Substitutions"}
+CODE_FEATURES = ("ccmp", "pres", "mark", "mkmk")  # the features the Mark anchors tab writes, in this order
 DEFAULT_ANCHOR = {"base_gap": 0.0, "base_offset": 0.0, "mark_gap": 0.06, "mark_offset": 0.0, "mark_to_mark": 0.01}
 
 
@@ -781,8 +783,9 @@ def load_anchor_model(path=None):
 class AnchorGlyph(object):
     """A base or a mark of a script, with the anchors to add ({name: (x, y)}) and those it has."""
 
-    def __init__(self, name, code, role, ink, existing=None):
+    def __init__(self, name, code, role, ink, existing=None, parts=0):
         self.name, self.code, self.role, self.ink = name, code, role, ink  # ink: an Ink
+        self.parts = parts  # a ligature's letters
         self.existing = dict(existing or {})
         self.anchors = {}  # name: (x, y), the ones to add
         self.adjust = {}  # name: [dx, dy], moved by hand
@@ -856,28 +859,83 @@ def mark_side_of(ink, x_height):
     return "top" if (ink.bottom + ink.top) / 2.0 >= 0.5 * x_height else "bottom"
 
 
+LETTER_HEIGHT_FROM_SCRIPT = ("latin",)  # per-letter placement across only: heights by the script's rule
+
+
+def letter_row(model, script, side, code):
+    """(share across, gap) where the corpus's fonts land a mark on this letter (shaped.py), or None."""
+    if not code:
+        return None
+    entry = model.get("letters", {}).get(u"%s %s" % (script, side), {}).get(u"%04X" % code)
+    if not entry or len(entry) < 3 or entry[2] < MIN_ROW_FONTS:
+        return None
+    return entry[0], entry[1]
+
+
+def ligature_point(model, script, side, ink, part, parts, upm):
+    """Where a ligature's part takes a mark (part 1 is read first: the right one, in Arabic): two-part
+    ligatures as the corpus's set theirs, others split evenly."""
+    learned = model.get("ligature", {}).get(side)
+    if parts == 2 and learned and len(learned) == 2:
+        share, gap = learned[part - 1]
+    else:
+        share, gap = 1.0 - (part - 0.5) / parts, anchor_row(model, script, side)["base_gap"]
+    x = ink.left + share * ink.width
+    return (x, ink.top + gap * upm) if side == "top" else (x, ink.bottom - gap * upm)
+
+
 def plan_anchors(glyphs, model, script, upm, x_height):
     """AnchorGlyphs with their anchors to add: bases get top and bottom, each mark the anchor it
-    attaches by (_top or _bottom) and the one the next mark attaches to (top or bottom). glyphs:
-    [(name, code, "base" or "mark", Ink, {existing anchor: (x, y)})]. Anchors the glyph has already
-    are kept as they are. A base's anchor sits over (under) the center of its ink's top (bottom)
-    fifth, a mark's under (over) its ink's center, as far as the corpus's fonts of that script set
-    them."""
+    attaches by (_top or _bottom) and the one the next mark attaches to (top or bottom), a ligature
+    top_1, bottom_1, top_2, and so on (one pair per letter it joins), a reph _reph and every base a
+    reph anchor. glyphs: [(name, code, "base", "mark", "ligature" or "reph", Ink, {existing anchor: (x,
+    y)}[, letters joined])]. Anchors the glyph has already are kept as they are. A base's anchor sits
+    where the corpus's fonts land a mark on that letter (shaped.py, all their means at once: a Thai
+    mark beside po pla's ascender), else over (under) the center of its ink's top (bottom) fifth, as
+    the script's fonts set it; a mark's under (over) its ink's center."""
     upm = float(upm)
     planned = []
-    for name, code, role, ink, existing in glyphs:
+    rows = [tuple(entry) + (0,) * (6 - len(entry)) for entry in glyphs]
+    marks = {}
+    for name, code, role, ink, existing, parts in rows:  # marks first: their sides and widths place the bases'
+        if role == "mark" and ink is not None and ink.width > 0:
+            marks.setdefault(mark_side_of(ink, x_height), []).append(ink.width)
+    widths = dict((side, median(found)) for side, found in marks.items())
+    has_reph = any(row[2] == "reph" for row in rows)
+    reph = model.get("reph")
+    for name, code, role, ink, existing, parts in rows:
         if ink is None or ink.width <= 0:
             continue
-        g = AnchorGlyph(name, code, role, ink, existing)
+        g = AnchorGlyph(name, code, role, ink, existing, parts)
         if role == "base":
             for side in ("top", "bottom"):
                 row = anchor_row(model, script, side)
-                if side == "top":
+                learned = letter_row(model, script, side, code)
+                if learned is not None:  # the mark's ink lands there: its own anchor sits mark_offset and mark_gap off it
+                    share, gap = learned
+                    x = ink.left + share * ink.width + row["mark_offset"] * widths.get(side, 0.0)
+                    # (Latin's heights: its script's rule, which landed marks closer, by a leave-one-font-out test)
+                    lift = (gap - row["mark_gap"]) * upm if script not in LETTER_HEIGHT_FROM_SCRIPT else row["base_gap"] * upm
+                    point = (x, ink.top + lift) if side == "top" else (x, ink.bottom - lift)
+                elif side == "top":
                     point = (ink.top_center + row["base_offset"] * ink.width, ink.top + row["base_gap"] * upm)
                 else:
                     point = (ink.bottom_center + row["base_offset"] * ink.width, ink.bottom - row["base_gap"] * upm)
                 if side not in g.existing:
                     g.anchors[side] = (round(point[0]), round(point[1]))
+            if has_reph and reph and "reph" not in g.existing:
+                g.anchors[u"reph"] = (round(ink.left + reph["share"] * ink.width), round(ink.top + reph["gap"] * upm))
+        elif role == "ligature":
+            for part in range(1, max(parts, 2) + 1):
+                for side in ("top", "bottom"):
+                    anchor = u"%s_%d" % (side, part)
+                    if anchor not in g.existing:
+                        x, y = ligature_point(model, script, side, ink, part, max(parts, 2), upm)
+                        g.anchors[anchor] = (round(x), round(y))
+        elif role == "reph":
+            g.side = u"reph"
+            if u"_reph" not in g.existing:  # the reph's ink lands at the base's reph anchor, its bottom center there
+                g.anchors[u"_reph"] = (round(ink.center), round(ink.bottom))
         else:
             side = g.side = mark_side_of(ink, x_height)
             row = anchor_row(model, script, side)
@@ -897,11 +955,169 @@ def plan_anchors(glyphs, model, script, upm, x_height):
     return planned
 
 
+# Thai: the corpus's convention (25 of its 27 Thai families): a tone mark after a mark above takes its
+# smaller form; yo ying, tho than, do chada, to patak, ru, and lu their forms without the part a vowel
+# below would meet; lo chula its shorter form under a mark above. (Their narrower marks for po pla's
+# ascender are left out: anchors set each mark beside it already.)
+THAI_ABOVE = (0x0E31, 0x0E34, 0x0E35, 0x0E36, 0x0E37, 0x0E47, 0x0E48, 0x0E49, 0x0E4A, 0x0E4B, 0x0E4C, 0x0E4D, 0x0E4E)
+THAI_BELOW = (0x0E38, 0x0E39, 0x0E3A)
+THAI_TONES = (0x0E48, 0x0E49, 0x0E4A, 0x0E4B, 0x0E4C)
+THAI_SHORTENED = ((0x0E0D, ("less", "short")), (0x0E10, ("less", "short")), (0x0E0E, ("short", "less")),
+                  (0x0E0F, ("short", "less")), (0x0E24, ("short",)), (0x0E26, ("short",)))
+THAI_LO_CHULA = 0x0E2C
+I_MATRA = 0x093F
+DEVANAGARI_CONSONANTS = tuple(range(0x0915, 0x093A))
+LIGATURE_FORMS = (u"<isolated>", u"<final>", u"<initial>", u"<medial>")
+# Glyphs' names for the letters whose forms the rules look for (GlyphData.xml, MIT License: see
+# GlyphData_LICENSE): a form is found by its letter's font name, this one, or uniXXXX, case and hyphens
+# aside (yoYing-thai.less, yoYingthai.less, uni0E0D.less)
+NICE_NAMES = {0x0E0D: u"yoYing-thai", 0x0E0E: u"doChada-thai", 0x0E0F: u"toPatak-thai", 0x0E10: u"thoThan-thai",
+              0x0E24: u"ru-thai", 0x0E26: u"lu-thai", 0x0E2C: u"loChula-thai", 0x0E48: u"maiEk-thai",
+              0x0E49: u"maiTho-thai", 0x0E4A: u"maiTri-thai", 0x0E4B: u"maiChattawa-thai", 0x0E4C: u"thanthakhat-thai",
+              0x093F: u"iMatra-deva"}
+
+
+def _plain(name):
+    return name.lower().replace(u"-", u"")
+
+
+def forms_of(names, base, code):
+    """{suffix: glyph name} of the font's forms of a letter: glyphs named after it, a period, and a suffix."""
+    stems = set(_plain(stem) for stem in (base, NICE_NAMES.get(code), u"uni%04X" % code) if stem)
+    found = {}
+    for name in sorted(names):
+        stem, dot, suffix = name.partition(u".")
+        if dot and suffix and _plain(stem) in stems:
+            found.setdefault(suffix, name)
+    return found
+
+
+class Rule(object):
+    """A substitution the Mark anchors tab writes: its feature, the form it puts in (name), its line of
+    code, when it applies (text), and a sample to draw in the reference font."""
+    role = "rule"
+
+    def __init__(self, feature, name, line, text, sample=u""):
+        self.feature, self.name, self.line, self.text, self.sample = feature, name, line, text, sample
+        self.code, self.parts, self.checked, self.side, self.ink = 0, 0, True, None, None
+        self.anchors, self.existing, self.adjust = {}, {}, {}
+
+    def placed(self):
+        return {}
+
+
+def thai_rules(names_by_code, names):
+    """Rules for the Thai forms the font has (by its glyphs' names: uni0E48.small, maiek-thai.small)."""
+    def form(code, suffixes):
+        base = names_by_code.get(code)
+        forms = forms_of(names, base, code) if base else {}
+        for suffix in suffixes:
+            if suffix in forms:
+                return forms[suffix]
+        return None
+    found = []
+    below = [names_by_code[c] for c in THAI_BELOW if c in names_by_code]
+    above = [names_by_code[c] for c in THAI_ABOVE if c in names_by_code]
+    if below:
+        for code, suffixes in THAI_SHORTENED:
+            short = form(code, suffixes)
+            if short:
+                found.append(Rule("ccmp", short, u"sub %s' [%s] by %s;" % (names_by_code[code], u" ".join(below), short),
+                                  u"before a vowel below", unichr_(code) + unichr_(THAI_BELOW[0])))
+    if above:
+        for code in THAI_TONES:
+            small = form(code, ("small",))
+            if small:
+                found.append(Rule("ccmp", small, u"sub [%s] %s' by %s;" % (u" ".join(above), names_by_code[code], small),
+                                  u"after a mark above", u"\u0E01\u0E34" + unichr_(code)))
+        short = form(THAI_LO_CHULA, ("short",))
+        if short:
+            found.append(Rule("ccmp", short, u"sub %s' [%s] by %s;" % (names_by_code[THAI_LO_CHULA], u" ".join(above), short),
+                              u"under a mark above", unichr_(THAI_LO_CHULA) + u"\u0E48"))
+    return found
+
+
+def i_matra_rules(names_by_code, names, reach_of, advance_of, model):
+    """Rules picking, before each consonant, the i-matra whose hook reaches into it as far as the
+    corpus's fonts reach into that consonant (a share of its advance), among the font's i-matras
+    (uni093F.01, iMatra-deva.a03: named after its own). reach_of(name): how far a glyph's ink reaches
+    past its advance; advance_of(name): its advance; both None for a glyph not drawn."""
+    nominal = names_by_code.get(I_MATRA)
+    if not nominal:
+        return []
+    candidates = [nominal] + sorted(n for n in forms_of(names, nominal, I_MATRA).values() if u"_" not in n)
+    if len(candidates) < 2:
+        return []
+    reaches = dict((n, reach_of(n)) for n in candidates)
+    reaches = dict((n, r) for n, r in reaches.items() if r is not None)
+    if nominal not in reaches or len(reaches) < 2:
+        return []
+    groups = {}
+    for code in DEVANAGARI_CONSONANTS:
+        consonant, learned = names_by_code.get(code), model.get("i_matra", {}).get(u"%04X" % code)
+        advance = advance_of(consonant) if consonant else None
+        if not consonant or not learned or not advance:
+            continue
+        target = learned[0] * advance
+        best = min(sorted(reaches), key=lambda n: abs(reaches[n] - target))
+        if best != nominal:
+            groups.setdefault(best, []).append((code, consonant))
+    found = []
+    for variant in sorted(groups):
+        members = groups[variant]
+        found.append(Rule("pres", variant, u"sub %s' [%s] by %s;" % (nominal, u" ".join(n for _, n in members), variant),
+                          u"before %s" % u" ".join(unichr_(c) for c, _ in members),
+                          unichr_(members[0][0]) + unichr_(I_MATRA)))
+    return found
+
+
+def ligature_parts(name, code, arabic_names):
+    """How many letters an Arabic ligature glyph joins (0 for none): by its Unicode decomposition
+    (lam with alef, U+FEFB, joins 2), its uniXXXXYYYY name, or its name's parts (lam_alef-ar: lam-ar and
+    alef-ar, among the font's Arabic letters)."""
+    if code:
+        decomposition = unicodedata.decomposition(unichr_(code))
+        if not decomposition.startswith(LIGATURE_FORMS):
+            return 0
+        letters = [p for p in decomposition.split()[1:]
+                   if unicodedata.category(unichr_(int(p, 16))).startswith(u"L")]
+        return len(letters) if len(letters) >= 2 else 0
+    stem = name.split(u".")[0]
+    if stem.startswith(u"uni") and len(stem) >= 11 and (len(stem) - 3) % 4 == 0:
+        try:
+            codes = [int(stem[i:i + 4], 16) for i in range(3, len(stem), 4)]
+        except ValueError:
+            codes = []
+        if codes and all(anchor_script(c) == "arabic" and unicodedata.category(unichr_(c)).startswith(u"L") for c in codes):
+            return len(codes)
+        return 0
+    if u"_" not in stem:
+        return 0
+    parts = stem.split(u"_")
+    suffix = u""
+    for mark in (u"-ar", u"-arab"):
+        if parts[-1].endswith(mark):
+            suffix = mark
+    named = [part if (not suffix or part.endswith(suffix)) else part + suffix for part in parts]
+    return len(named) if len(named) >= 2 and all(part in arabic_names for part in named) else 0
+
+
+def is_reph(name):
+    """A Devanagari reph's glyph (rephdeva, Reph.dv, dvReph, uni0930094D.rphf), not one joined with a matra
+    or a bindu, nor Marathi's eyelash ra."""
+    lowered = name.lower()
+    if lowered.endswith(u".rphf"):
+        return True
+    return u"reph" in lowered.split(u".")[0] and not any(w in lowered for w in (u"matra", u"anusvara", u"bindu", u"candra",
+                                                                                 u"eyelash"))
+
+
 def mark_code(glyphs):
     """{"mark": [lines], "mkmk": [lines]} attaching the marks to the bases and to each other, from every
     anchor the glyphs will have (only checked glyphs, and glyphs with anchors of their own)."""
-    marks = [g for g in glyphs if g.role == "mark" and (g.checked or g.existing)]
+    marks = [g for g in glyphs if g.role in ("mark", "reph") and (g.checked or g.existing)]
     bases = [g for g in glyphs if g.role == "base" and (g.checked or g.existing)]
+    ligatures = [g for g in glyphs if g.role == "ligature" and (g.checked or g.existing)]
     classes = {}
     lines = {"mark": [], "mkmk": []}
     for g in sorted(marks, key=lambda g: g.name):
@@ -916,7 +1132,18 @@ def mark_code(glyphs):
                   for side in sorted(classes) if side in placed]
         if attach:
             lines["mark"].append(u"pos base %s %s;" % (g.name, u" ".join(attach)))
+    for g in sorted(ligatures, key=lambda g: g.name):
+        placed = g.placed()
+        components = []
+        for part in range(1, max(g.parts, 2) + 1):
+            attach = [u"<anchor %d %d> mark @MC_%s" % (placed[u"%s_%d" % (side, part)][0], placed[u"%s_%d" % (side, part)][1], side)
+                      for side in sorted(classes) if side != u"reph" and u"%s_%d" % (side, part) in placed]
+            components.append(u" ".join(attach) if attach else u"<anchor NULL>")
+        if any(c != u"<anchor NULL>" for c in components):
+            lines["mark"].append(u"pos ligature %s %s;" % (g.name, u" ligComponent ".join(components)))
     for g in sorted(marks, key=lambda g: g.name):
+        if g.role == "reph":
+            continue  # nothing attaches to the reph
         placed = g.placed()
         attach = [u"<anchor %d %d> mark @MC_%s" % (placed[side][0], placed[side][1], side)
                   for side in sorted(classes) if side in placed]
@@ -958,14 +1185,19 @@ def freelab_feature(tag, old, lines, block=ANCHOR_BLOCK, titles=MARK_FEATURES):
 
 
 def mark_texts(glyphs, old_texts):
-    """{tag: new code} for mark and mkmk (a feature with nothing of FreeLab's and nothing to add is
-    left out)."""
+    """{tag: new code} for mark and mkmk, and the substitutions' features (ccmp, pres) (a feature with
+    nothing of FreeLab's and nothing to add is left out)."""
     lines = mark_code(glyphs)
+    for rule in glyphs:
+        if rule.role == "rule":
+            lines.setdefault(rule.feature, [])
+            if rule.checked:
+                lines[rule.feature].append(rule.line)
     new = {}
-    for tag in ("mark", "mkmk"):
+    for tag in CODE_FEATURES:
         old = old_texts.get(tag)
-        if lines[tag] or (ANCHOR_BEGIN % ANCHOR_BLOCK) in (old or u""):
-            new[tag] = freelab_feature(tag, old, lines[tag])
+        if lines.get(tag) or (ANCHOR_BEGIN % ANCHOR_BLOCK) in (old or u""):
+            new[tag] = freelab_feature(tag, old, lines.get(tag, []))
     return new
 
 
@@ -1527,11 +1759,11 @@ class AnchorPage(object):
         self.script_name.hide()
         row.addWidget(self.script_name)
         row.addSpacing(12)
-        self.code_box = QtGui.QCheckBox(u"Write the mark and mkmk code")
+        self.code_box = QtGui.QCheckBox(u"Write the feature code")
         self.code_box.setChecked(True)
-        self.code_box.setWhatsThis(u"Also writes the mark and mkmk features that attach the marks by these anchors, "
-                                   u"between FreeLab's marker lines (a font with one master: anchors are the same "
-                                   u"in every master only then).")
+        self.code_box.setWhatsThis(u"Also writes the mark and mkmk features that attach the marks by these anchors "
+                                   u"(and the checked substitutions: ccmp, pres), between FreeLab's marker lines (a "
+                                   u"font with one master: anchors are the same in every master only then).")
         row.addWidget(self.code_box)
         row.addStretch(1)
         layout.addLayout(row)
@@ -1631,20 +1863,31 @@ class AnchorPage(object):
         roles = {}
         takes_marks = base_letters(script, self.model)
         self.left_out = 0
+        arabic_names = set(fg.name for fg in package.fgPackage.glyphs if fg.unicode and anchor_script(fg.unicode) == "arabic")
         for fg in package.fgPackage.glyphs:
             code = fg.unicode
             if code and anchor_script(code) == script:
                 category = unicodedata.category(unichr_(code))
                 if category in ("Mn", "Me"):
-                    roles[fg.name] = ("mark", code)
+                    roles[fg.name] = ("mark", code, 0)
                 elif category.startswith("L"):
+                    parts = ligature_parts(fg.name, code, arabic_names) if script == "arabic" else 0
+                    if parts:
+                        roles[fg.name] = ("ligature", code, parts)
+                        continue
                     if takes_marks is not None and code not in takes_marks:
                         self.left_out += 1
                         continue
-                    roles[fg.name] = ("base", code)
+                    roles[fg.name] = ("base", code, 0)
         found = []
         for fg in package.fgPackage.glyphs:
             role = roles.get(fg.name) or (roles.get(fg.name.split(u".")[0]) if not fg.unicode else None)
+            if role is None and not fg.unicode:
+                if script == "arabic":
+                    parts = ligature_parts(fg.name, 0, arabic_names)
+                    role = ("ligature", 0, parts) if parts else None
+                elif script == "devanagari" and is_reph(fg.name):
+                    role = ("reph", 0, 0)
             if role is None:
                 continue
             glyph = package.findName(fg.name)
@@ -1657,8 +1900,27 @@ class AnchorPage(object):
                     existing[u"%s" % anchor.name] = (anchor.point.x(), anchor.point.y())
             except Exception:
                 pass
-            found.append((fg.name, fg.unicode or role[1], role[0], ink(fg.name), existing))
+            found.append((fg.name, fg.unicode or role[1], role[0], ink(fg.name), existing, role[2]))
         return found
+
+    def rules_for(self, script, ink):
+        """The substitutions the font's own forms allow (Thai's smaller and shortened forms, Devanagari's
+        i-matras), as Rules."""
+        package = self.package
+        names_by_code = dict((fg.unicode, fg.name) for fg in package.fgPackage.glyphs if fg.unicode)
+        names = set(fg.name for fg in package.fgPackage.glyphs)
+        if script == "thai":
+            return thai_rules(names_by_code, names)
+        if script == "devanagari":
+            def reach_of(name):
+                found = ink(name)
+                advance = ink.path(name)[1]
+                return found.right - advance if found is not None else None
+
+            def advance_of(name):
+                return ink.path(name)[1] or None
+            return i_matra_rules(names_by_code, names, reach_of, advance_of, self.model)
+        return []
 
     def plan_for(self, master):
         package = self.package
@@ -1702,6 +1964,7 @@ class AnchorPage(object):
             self.update_buttons()
             return
         self.glyphs, self.ink = self.plan_for(self.master)
+        self.glyphs = self.glyphs + self.rules_for(self.script(), self.ink)
         for g in self.glyphs:
             if g.name in kept:
                 g.checked, g.adjust = kept[g.name][0], kept[g.name][1]
@@ -1713,14 +1976,18 @@ class AnchorPage(object):
         self.code_box.setEnabled(package.mastersCount == 1)
         self.fill()
         bases = [g for g in self.glyphs if g.role == "base"]
-        marks = [g for g in self.glyphs if g.role == "mark"]
+        marks = [g for g in self.glyphs if g.role in ("mark", "reph")]
+        others = [counted(n, one, many) for n, one, many in (
+            (sum(1 for g in self.glyphs if g.role == "ligature"), u"ligature", None),
+            (sum(1 for g in self.glyphs if g.role == "rule"), u"substitution", None)) if n]
         b = ak.b
         rows = self.model.get("anchors", {}).get(u"%s top" % self.script(), {})
         left_out = getattr(self, "left_out", 0)
-        self.status.setText(u"%s, master %s, %s: %s and %s; %s get anchors, placed as %s of the corpus's %s fonts place "
+        self.status.setText(u"%s, master %s, %s: %s and %s%s; %s get anchors, placed as %s of the corpus's %s fonts place "
                             u"theirs.%s%s Nothing changes until you click %s." % (
                                 b(package.tfn), b(self.master), b(self.script().capitalize()),
                                 b(counted(len(bases), u"base")), b(counted(len(marks), u"mark")),
+                                u"".join(u", %s" % b(text) for text in others),
                                 b(sum(1 for g in self.glyphs if g.anchors)), b(rows.get("fonts", 0)),
                                 self.script().capitalize(),
                                 u" %s that take no marks (in Unicode's letters and the corpus's fonts) %s left out." % (
@@ -1736,8 +2003,9 @@ class AnchorPage(object):
         self.tree.clear()
         bold = QtGui.QFont(self.tree.font)
         bold.setBold(True)
-        for role, title in (("base", u"Bases"), ("mark", u"Marks")):
-            members = [(index, g) for index, g in enumerate(self.glyphs) if g.role == role]
+        for roles, title in ((("base",), u"Bases"), (("ligature",), u"Ligatures"), (("mark", "reph"), u"Marks"),
+                             (("rule",), u"Substitutions")):
+            members = [(index, g) for index, g in enumerate(self.glyphs) if g.role in roles]
             if not members:
                 continue
             top = QtGui.QTreeWidgetItem([u"%s (%d)" % (title, len(members))])
@@ -1749,7 +2017,7 @@ class AnchorPage(object):
                 item = QtGui.QTreeWidgetItem([unichr_(g.code) if g.code else u"", g.name, u"", u""])
                 item.setData(0, QtCore.Qt.UserRole, index)
                 item.setFont(0, bold)
-                if g.anchors:
+                if g.anchors or g.role == "rule":
                     item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsUserCheckable)
                     item.setCheckState(0, QtCore.Qt.Checked if g.checked else QtCore.Qt.Unchecked)
                 else:
@@ -1765,8 +2033,19 @@ class AnchorPage(object):
     def refresh_item(self, item, g):
         QtCore, QtGui = _qt()
         placed = g.placed()
+        if g.role == "rule":
+            item.setText(2, g.line)
+            item.setText(3, u"%s (%s)." % (g.text[:1].upper() + g.text[1:], g.feature))
+            icon = self.owner_picture(g)
+            if icon is not None:
+                item.setIcon(0, QtGui.QIcon(icon))
+            return
         item.setText(2, u", ".join(u"%s %d %d" % (name, placed[name][0], placed[name][1]) for name in sorted(g.anchors)))
         notes = []
+        if g.role == "ligature":
+            notes.append(u"joins %d letters" % max(g.parts, 2))
+        if g.role == "reph":
+            notes.append(u"the reph: every base gets its anchor")
         if g.existing:
             notes.append(u"has %s already" % u", ".join(sorted(g.existing)))
         if g.adjust:
@@ -1868,13 +2147,22 @@ class AnchorPage(object):
     # -- the editor: a sample mark attached ---------------------------------------------
 
     def samples(self, g):
-        """The glyphs drawn with g: for a base, a mark above and one below; for a mark, a base."""
-        if g.role == "base":
+        """The glyphs drawn with g: for a base, a mark above and one below (and the reph); for a
+        ligature, a mark above and one below on each of its letters (anchor top_1, bottom_1, ...); for
+        a mark (the reph), a base."""
+        if g.role in ("base", "ligature"):
             found = []
-            for side in ("top", "bottom"):
-                mark = next((m for m in self.glyphs if m.role == "mark" and m.side == side and (u"_" + side) in m.placed()), None)
-                found.append((side, mark))
+            sides = ("top", "bottom", "reph") if g.role == "base" else ("top", "bottom")
+            for side in sides:
+                mark = next((m for m in self.glyphs if m.role in ("mark", "reph") and m.side == side
+                             and (u"_" + side) in m.placed()), None)
+                if g.role == "ligature":
+                    found.extend((u"%s_%d" % (side, part), mark) for part in range(1, max(g.parts, 2) + 1))
+                else:
+                    found.append((side, mark))
             return found
+        if g.role == "rule":
+            return []
         base = next((b for b in self.glyphs if b.role == "base" and b.code and g.side in b.placed()), None)
         return [(g.side, base)]
 
@@ -1890,8 +2178,16 @@ class AnchorPage(object):
     def reference_text(self, g):
         """The characters the reference draws for g: its letter with each sample mark (a base), or the
         sample letter with it (a mark); none for a glyph of no character."""
-        if g is None or not g.code:
+        if g is None:
             return u""
+        if g.role == "rule":
+            return g.sample
+        if g.role == "reph":
+            return u"\u0930\u094D\u0915"
+        if not g.code:
+            return u""
+        if g.role == "ligature":
+            return unichr_(g.code)
         if g.role == "base":
             marks = [m for _, m in self.samples(g) if m is not None and m.code]
             if not marks:
@@ -1921,12 +2217,15 @@ class AnchorPage(object):
     def scene(self, g):
         placed = g.placed()
         parts, ranges, self.edits = [], [], []
-        if g.role == "base":
+        if g.role == "rule":
+            parts.append((g.name, 1.0, 1.0, 0.0, 0.0))
+            advance = self.ink.path(g.name)[1]
+        elif g.role in ("base", "ligature"):
             parts.append((g.name, 1.0, 1.0, 0.0, 0.0))
             for side, mark in self.samples(g):
                 if mark is None or side not in placed:
                     continue
-                own = mark.placed()[u"_" + side]
+                own = mark.placed()[u"_" + side.split(u"_")[0]]
                 parts.append((mark.name, 1.0, 1.0, placed[side][0] - own[0], placed[side][1] - own[1]))
                 ranges.append((len(parts) - 1, len(parts)))
                 self.edits.append((g, side, 1))
@@ -2022,7 +2321,7 @@ class AnchorPage(object):
             self.owner.log.add(u"The font changed: here is this one's list. Nothing was added.", "warning")
             return
         chosen = dict((g.name, g) for g in self.glyphs if g.checked and g.anchors)
-        if not chosen:
+        if not chosen and not any(g.checked for g in self.glyphs if g.role == "rule"):
             return
         new_texts = mark_texts(self.glyphs, self.texts) if self.code_box.checked else {}
         if new_texts:
@@ -2032,7 +2331,7 @@ class AnchorPage(object):
             except Exception:
                 pass
             if fc is not None:
-                problem = fc.check_code(u"languagesystem DFLT dflt;\n" + u"".join(new_texts.get(t, u"") for t in ("mark", "mkmk")),
+                problem = fc.check_code(u"languagesystem DFLT dflt;\n" + u"".join(new_texts.get(t, u"") for t in CODE_FEATURES),
                                         self.names)
                 if problem:
                     self.owner.log.add(u"The mark code has problems, so nothing was written: %s" % self.ak.html(problem), "error")
@@ -2061,7 +2360,7 @@ class AnchorPage(object):
                     if glyph not in touched:
                         touched.append(glyph)
             features = package.fgPackage.features
-            for tag in ("mark", "mkmk"):
+            for tag in CODE_FEATURES:
                 if tag in new_texts and new_texts[tag] != self.texts.get(tag):
                     features.set_feature(tag, new_texts[tag])
         except Exception as exc:
@@ -2069,7 +2368,8 @@ class AnchorPage(object):
         self.ak.notify_changed(self.fontlab, package, u"FreeLab Diacritics anchors", touched)
         self.owner.log.add(u"Added %s to %s%s. Edit &gt; Undo takes it back." % (
             self.ak.b(counted(added, u"anchor")), self.ak.b(counted(len(touched), u"glyph")),
-            u", and wrote the mark and mkmk code" if new_texts else u""), "done" if added else "info")
+            u", and wrote the %s code" % u", ".join(t for t in CODE_FEATURES if t in new_texts) if new_texts else u""),
+            "done" if added or new_texts else "info")
         if error is not None:
             self.owner.log.add(u"Stopped by an error: %s" % self.ak.html(error), "error")
         self.run(keep_script=True)

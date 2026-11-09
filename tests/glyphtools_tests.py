@@ -222,6 +222,92 @@ class AnchorTests(unittest.TestCase):
             self.assertIsNone(fc.check_code(block, ["ko", "maiek", "phinthu", "koold"]))
 
 
+class ScriptFeatureTests(unittest.TestCase):
+    """Per-letter anchors, Arabic ligatures, the Devanagari reph and i-matras, Thai forms."""
+    MODEL = {"anchors": {"thai top": {"base_gap": -0.06, "base_offset": 0.43, "mark_gap": 0.1, "mark_offset": 0.4,
+                                      "mark_to_mark": 0.01, "fonts": 28},
+                         "arabic top": {"base_gap": 0.07, "base_offset": 0.0, "mark_gap": 0.02, "mark_offset": 0.0,
+                                        "fonts": 7},
+                         "arabic bottom": {"base_gap": 0.07, "base_offset": 0.0, "mark_gap": 0.02, "mark_offset": 0.0,
+                                           "fonts": 7}},
+             "letters": {"thai top": {"0E1B": [0.55, -0.12, 28], "0E01": [0.9, 0.08, 2]}},
+             "reph": {"share": 0.77, "gap": -0.01, "fonts": 30},
+             "ligature": {"top": [[0.72, 0.0], [0.22, -0.08]], "bottom": [[0.74, -0.06], [0.27, 0.03]], "fonts": 19},
+             "i_matra": {"0915": [0.56, 30], "0916": [0.88, 30]}}
+
+    def test_letter_placement(self):
+        glyphs = [("popla", 0xE1B, "base", ac.Ink(0, 0, 500, 700, top_center=450, bottom_center=250), {}),
+                  ("koKai", 0xE01, "base", ac.Ink(0, 0, 500, 500, top_center=250, bottom_center=250), {}),
+                  ("maiek", 0xE48, "mark", ac.Ink(-150, 600, -50, 700), {})]
+        found = dict((g.name, g) for g in ac.plan_anchors(glyphs, self.MODEL, "thai", 1000, 500))
+        # the mark's ink lands at 55% across, 0.12 em below the ascender's top; its own anchor sits
+        # 0.4 of its width right of its center and 0.1 em under it
+        self.assertEqual(found["popla"].anchors["top"], (315, 480))
+        self.assertEqual(found["koKai"].anchors["top"], (round(250 + 0.43 * 500), 440),
+                         "from 2 fonts only: the script's own rule")
+
+    def test_ligature(self):
+        self.assertEqual(ac.ligature_parts(u"uniFEFB", 0xFEFB, set()), 2)
+        self.assertEqual(ac.ligature_parts(u"lam_alef-ar", 0, set([u"lam-ar", u"alef-ar"])), 2)
+        self.assertEqual(ac.ligature_parts(u"lam_alef-ar.fina", 0, set([u"lam-ar", u"alef-ar"])), 2)
+        self.assertEqual(ac.ligature_parts(u"uni06440627", 0, set()), 2)
+        self.assertEqual(ac.ligature_parts(u"f_f", 0, set()), 0)
+        self.assertEqual(ac.ligature_parts(u"beh-ar", 0x0628, set()), 0)
+        glyphs = [("lam_alef-ar", 0, "ligature", ac.Ink(0, 0, 400, 800), {}, 2),
+                  ("fatha-ar", 0x064E, "mark", ac.Ink(100, 900, 200, 950), {}),
+                  ("kasra-ar", 0x0650, "mark", ac.Ink(100, -150, 200, -100), {})]
+        found = dict((g.name, g) for g in ac.plan_anchors(glyphs, self.MODEL, "arabic", 1000, 500))
+        lig = found["lam_alef-ar"]
+        self.assertEqual(lig.anchors["top_1"], (288, 800), "the first letter, lam, on the right")
+        self.assertEqual(lig.anchors["top_2"], (88, 720))
+        self.assertEqual(lig.anchors["bottom_1"], (296, 60))
+        lines = ac.mark_code(list(found.values()))["mark"]
+        self.assertIn(u"pos ligature lam_alef-ar <anchor 296 60> mark @MC_bottom <anchor 288 800> mark @MC_top "
+                      u"ligComponent <anchor 108 -30> mark @MC_bottom <anchor 88 720> mark @MC_top;", lines)
+
+    def test_reph(self):
+        for name in (u"rephdeva", u"Reph.dv", u"dvReph", u"uni0930094D.rphf"):
+            self.assertTrue(ac.is_reph(name), name)
+        for name in (u"iMatra_reph-deva", u"RephBindu.dv", u"ka-deva", u"eyelashRephdeva"):
+            self.assertFalse(ac.is_reph(name), name)
+        glyphs = [("ka-deva", 0x0915, "base", ac.Ink(0, 0, 600, 700, top_center=300, bottom_center=300), {}),
+                  ("reph-deva", 0, "reph", ac.Ink(-200, 750, -50, 950), {})]
+        found = dict((g.name, g) for g in ac.plan_anchors(glyphs, self.MODEL, "devanagari", 1000, 500))
+        self.assertEqual(found["ka-deva"].anchors["reph"], (462, 690))
+        self.assertEqual(found["reph-deva"].anchors, {u"_reph": (-125, 750)})
+        lines = ac.mark_code(list(found.values()))["mark"]
+        self.assertIn(u"markClass reph-deva <anchor -125 750> @MC_reph;", lines)
+        self.assertTrue(any(line.startswith(u"pos base ka-deva") and u"mark @MC_reph" in line for line in lines))
+
+    def test_i_matra(self):
+        names_by_code = {0x093F: u"iMatra-deva", 0x0915: u"ka-deva", 0x0916: u"kha-deva"}
+        names = set([u"iMatra-deva", u"iMatra-deva.01", u"iMatra-deva.02", u"ka-deva", u"kha-deva"])
+        reaches = {u"iMatra-deva": 200, u"iMatra-deva.01": 330, u"iMatra-deva.02": 520}
+        advances = {u"ka-deva": 600, u"kha-deva": 600}
+        rules = ac.i_matra_rules(names_by_code, names, reaches.get, advances.get, self.MODEL)
+        self.assertEqual([r.line for r in rules], [u"sub iMatra-deva' [ka-deva] by iMatra-deva.01;",
+                                                   u"sub iMatra-deva' [kha-deva] by iMatra-deva.02;"])
+        self.assertEqual(ac.i_matra_rules(names_by_code, set([u"iMatra-deva"]), reaches.get, advances.get, self.MODEL), [],
+                         "one i-matra: nothing to pick")
+
+    def test_thai_rules(self):
+        names_by_code = {0x0E0D: u"uni0E0D", 0x0E38: u"uni0E38", 0x0E34: u"uni0E34", 0x0E48: u"uni0E48", 0x0E49: u"uni0E49"}
+        names = set(names_by_code.values()) | set([u"uni0E0D.less", u"uni0E48.small"])
+        lines = [r.line for r in ac.thai_rules(names_by_code, names)]
+        self.assertEqual(lines, [u"sub uni0E0D' [uni0E38] by uni0E0D.less;",
+                                 u"sub [uni0E34 uni0E48 uni0E49] uni0E48' by uni0E48.small;"])
+        self.assertEqual([r.line for r in ac.thai_rules({0x0E0D: u"uni0E0D", 0x0E38: u"uni0E38"},
+                                                        set([u"uni0E0D", u"uni0E38", u"yoYingthai.less"]))],
+                         [u"sub uni0E0D' [uni0E38] by yoYingthai.less;"], "named after Glyphs' name for the letter")
+        rules = ac.thai_rules(names_by_code, names)
+        rules[1].checked = False
+        texts = ac.mark_texts(rules, {})
+        self.assertIn(u"sub uni0E0D' [uni0E38] by uni0E0D.less;", texts["ccmp"])
+        self.assertNotIn(u"uni0E48.small", texts["ccmp"], "unchecked: left out")
+        if HAVE_FONTTOOLS:
+            self.assertIsNone(fc.check_code(u"languagesystem DFLT dflt;\n" + texts["ccmp"], sorted(names)))
+
+
 class PlaceTests(unittest.TestCase):
     def test_a_bare_font_places_by_the_model_letter_by_letter(self):
         placement = ac.Placement(1000.0, MODEL)

@@ -9,6 +9,10 @@ ink top (below its ink bottom) the base's anchor sits, and how far across from t
 base's top (bottom) fifth, as a share of its width; how far below the mark's ink (above, for marks
 below) the mark's anchor sits; and, for mark-to-mark, how far above a mark's ink its own anchor sits.
 The medians, per script and side, are diacritics/anchor_model.json: Diacritics places anchors by them.
+Then it shapes text with each font (diacritics/train/shaped.py, through HarfBuzz): where a sample mark
+lands on each letter, the reph on a consonant, how far the i-matra picked before each consonant reaches
+into it, and where two-part ligatures' marks attach; the medians, from at least MIN_FONTS fonts each, are
+the model's "letters", "reph", "i_matra", and "ligature".
 It also counts, per script, the letters each font attaches marks to (its encoded glyph or a form of
 it named after it, beh-ar.init): the letters at least BASE_SHARE of the fonts having them attach marks
 to are the script's bases, the letters Diacritics gives anchors to where Unicode composes none.
@@ -32,11 +36,13 @@ sys.path.insert(0, os.path.join(HERE, os.pardir))
 os.environ["FREELAB_NO_AUTOSTART"] = "1"
 import dataset  # noqa: E402  (the corpus's folders and its license check)
 import freelab_diacritics as dia  # noqa: E402  (the scripts' ranges)
+import shaped  # noqa: E402  (beside this file: where marks land as HarfBuzz shapes them)
 
 MODEL_FILE = os.path.join(HERE, os.pardir, "anchor_model.json")
 CORPUS_DIR = os.path.join(os.environ.get("LOCALAPPDATA", ""), "FreeLab", "corpus")
 MIN_FONTS = 2
 BASE_SHARE = 0.5  # of the fonts having a letter, those attaching marks to it, for it to be a base
+MIN_LETTER_FONTS = 3  # a letter's own placement, from at least this many fonts
 BAND = 0.2  # the share of a base's ink, at its top or bottom, whose center an anchor is measured from
 
 
@@ -193,6 +199,27 @@ def measure(path):
     return out, letters
 
 
+def measure_shaped(path):
+    """shaped.py's measures of one font: {"letters": {(script, side, code): (share, gap)}, "reph": (share,
+    gap) or None, "i_matra": {code: reach}, "ligatures": {(side, part): [(share, gap)]}}."""
+    import unicodedata
+    from fontTools.ttLib import TTFont
+    font = TTFont(path)
+    cmap = font["cmap"].getBestCmap() or {}
+    shaper = shaped.Shaper(path)
+    by_script = {}
+    for code in cmap:
+        script = dia.anchor_script(code)
+        if script and unicodedata.category(chr(code)).startswith("L"):
+            by_script.setdefault(script, []).append(code)
+    letters = {}
+    for script, codes in by_script.items():
+        for (side, code), value in shaped.letter_placements(shaper, cmap, script, sorted(codes)).items():
+            letters[(script, side, code)] = value
+    return {"letters": letters, "reph": shaped.reph_placement(shaper, cmap),
+            "i_matra": shaped.i_matra_reach(shaper, cmap), "ligatures": shaped.ligature_anchors(font)}
+
+
 def fonts():
     from fontTools.ttLib import TTFont
     found, seen = [], set()
@@ -221,12 +248,26 @@ def main():
     parser.add_argument("--out", default=MODEL_FILE)
     args = parser.parse_args()
     per_font, letter_counts = [], {}
+    landed, rephs, i_matras, ligatures = {}, [], {}, {}
     for path, family in fonts():
         try:
             measured, letters = measure(path)
         except Exception as exc:
             print("  %s: %s" % (family, exc))
             continue
+        try:
+            found = measure_shaped(path)
+        except Exception as exc:
+            print("  %s: not shaped: %s" % (family, exc))
+            found = {"letters": {}, "reph": None, "i_matra": {}, "ligatures": {}}
+        for key, value in found["letters"].items():
+            landed.setdefault(key, []).append(value)
+        if found["reph"] is not None:
+            rephs.append(found["reph"])
+        for code, reach in found["i_matra"].items():
+            i_matras.setdefault(code, []).append(reach)
+        for key, values in found["ligatures"].items():
+            ligatures.setdefault(key, []).append(shaped.median_pair(values))
         for script, (has, attached) in letters.items():
             if not attached:
                 continue  # marks of other scripts only: says nothing of this one's letters
@@ -251,6 +292,23 @@ def main():
         if row:
             row["fonts"] = families
             model["anchors"]["%s %s" % (script, side)] = row
+    model["letters"] = {}
+    for (script, side, code), values in sorted(landed.items()):
+        if len(values) >= MIN_LETTER_FONTS:
+            share, gap = shaped.median_pair(values)
+            model["letters"].setdefault("%s %s" % (script, side), {})["%04X" % code] = [
+                round(share, 3), round(gap, 4), len(values)]
+    if len(rephs) >= MIN_FONTS:
+        share, gap = shaped.median_pair(rephs)
+        model["reph"] = {"share": round(share, 3), "gap": round(gap, 4), "fonts": len(rephs)}
+    model["i_matra"] = dict(("%04X" % code, [round(statistics.median(values), 3), len(values)])
+                            for code, values in sorted(i_matras.items()) if len(values) >= MIN_FONTS)
+    model["ligature"] = {}
+    for side in ("top", "bottom"):
+        parts = [ligatures.get((side, part), []) for part in (0, 1)]
+        if all(len(values) >= MIN_FONTS for values in parts):
+            model["ligature"][side] = [[round(v, 4) for v in shaped.median_pair(values)] for values in parts]
+            model["ligature"]["fonts"] = max(model["ligature"].get("fonts", 0), min(len(values) for values in parts))
     model["bases"] = {}
     for script, counts in sorted(letter_counts.items()):
         bases = sorted(code for code, (having, attaching) in counts.items()
@@ -259,7 +317,9 @@ def main():
             model["bases"][script] = ["%04X" % code for code in bases]
     with io.open(args.out, "w", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps(model, indent=1, sort_keys=True) + "\n")
-    print("%d fonts measured" % len(per_font))
+    print("%d fonts measured; letters placed: %s; reph from %d fonts; i-matra for %d consonants; ligatures: %s" % (
+        len(per_font), dict((key, len(value)) for key, value in model["letters"].items()), len(rephs),
+        len(model["i_matra"]), model["ligature"]))
     for key, row in sorted(model["anchors"].items()):
         print("  %s: %s" % (key, row))
 
