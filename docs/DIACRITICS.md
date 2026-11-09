@@ -56,7 +56,7 @@ On the owner's test font (no anchors; 106 composites, most of them with marks pl
 - Glyphs whose caron is drawn as an apostrophe (*ď*, *ľ*, *ť*, *Ľ*) are not built from a caron: Unicode decomposes them with one, but fonts draw them otherwise.
 - Marks are made smaller, not redrawn: a stack that needs flatter marks (as fonts draw for Vietnamese capitals) is better drawn by hand.
 - A mark that always attaches (cedilla, ogonek) attaches as the corpus's do; a drafted cedilla (a comma) is only a placeholder.
-- The corpus model is measured on Latin, Greek, and Cyrillic composites (163 families); a Greek capital's left-hand marks are left out of it, as they are not above it.
+- The corpus model is measured on Latin, Greek, and Cyrillic composites (202 families); a Greek capital's left-hand marks are left out of it, as they are not above it.
 
 ## Mark anchors
 

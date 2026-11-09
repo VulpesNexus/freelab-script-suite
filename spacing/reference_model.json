@@ -1,41 +1,41 @@
 {
- "families": 337,
+ "families": 398,
  "format": 1,
  "references": {
   "0": {
    "by": "height",
    "height_of": "H",
-   "left": 0.0628,
-   "right": 0.0605,
-   "spread": 1.013
+   "left": 0.063,
+   "right": 0.0614,
+   "spread": 0.987
   },
   "H": {
    "by": "height",
    "height_of": "H",
-   "left": 0.0786,
-   "right": 0.0744,
-   "spread": 1.766
+   "left": 0.0793,
+   "right": 0.0756,
+   "spread": 1.785
   },
   "O": {
    "by": "height",
    "height_of": "H",
-   "left": 0.0642,
-   "right": 0.0635,
-   "spread": 1.145
+   "left": 0.0648,
+   "right": 0.0642,
+   "spread": 1.088
   },
   "n": {
    "by": "height",
    "height_of": "x",
-   "left": 0.0913,
-   "right": 0.0842,
-   "spread": 1.94
+   "left": 0.0918,
+   "right": 0.0864,
+   "spread": 1.972
   },
   "o": {
    "by": "height",
    "height_of": "x",
-   "left": 0.0786,
-   "right": 0.0781,
-   "spread": 1.134
+   "left": 0.0801,
+   "right": 0.0794,
+   "spread": 1.082
   }
  }
 }

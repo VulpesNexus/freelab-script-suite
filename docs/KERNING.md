@@ -57,17 +57,17 @@ Both are measured by FreeLab's native core (*kerning/native/freelab_kern.c*) on 
 
 ### What the FreeLab method learned from, and how it was checked
 
-*kerning/train/dataset.py* reads the fonts installed on the computer it runs on and those in FreeLab's corpus folder (*%LOCALAPPDATA%\FreeLab\corpus*, open-licensed fonts fetched from Google Fonts), and keeps only those whose name table declares the SIL Open Font License or the Apache License, with no proprietary terms beside it (*Segoe UI Historic* names Apache-licensed components in a Microsoft license, and is left out), and that kern: 779 on the owner's computer. Fonts that kern fewer than 5% of the common pairs, the same Latin design under another name, and fonts whose *l*, *n*, and *o* cannot be measured were left out: 800,713 pairs from 575 fonts in 203 families, with the kerning each font applies read through HarfBuzz, ligatures and contextual alternates off (an *fi* ligature is not kerning). The measurements stay on that computer; only the trained model is in the repository. *kerning/train/train.py* trains and checks it.
+*kerning/train/dataset.py* reads the fonts installed on the computer it runs on and those in FreeLab's corpus folder (*%LOCALAPPDATA%\FreeLab\corpus*, open-licensed fonts fetched from Google Fonts), and keeps only those whose name table declares the SIL Open Font License or the Apache License, with no proprietary terms beside it (*Segoe UI Historic* names Apache-licensed components in a Microsoft license, and is left out), and that kern: 838 on the owner's computer. Fonts that kern fewer than 5% of the common pairs, the same Latin design under another name, and fonts whose *l*, *n*, and *o* cannot be measured were left out: 856,513 pairs from 615 fonts in 240 families, with the kerning each font applies read through HarfBuzz, ligatures and contextual alternates off (an *fi* ligature is not kerning). The measurements stay on that computer; only the trained model is in the repository. *kerning/train/train.py* trains and checks it.
 
 The families were split into five folds, each held out once (no family in both parts), and the methods' suggestions compared with the held-out fonts' kerning, in units of a 1000-unit em:
 
 | Method | Mean error, all pairs | Mean error, kerned pairs | Within 20 units |
 |---|---|---|---|
-| No kerning at all | 9.3 | 38.3 | 85% |
-| halfkern | 17.2 | 22.5 | 69% |
-| Contour distance | 27.1 | 32.0 | 56% |
-| Average of the two | 21.8 | 25.2 | 63% |
-| **FreeLab** | **8.7** | **21.3** | **84%** |
+| No kerning at all | 9.4 | 38.4 | 85% |
+| halfkern | 17.3 | 22.5 | 69% |
+| Contour distance | 27.2 | 31.7 | 56% |
+| Average of the two | 21.9 | 24.9 | 63% |
+| **FreeLab** | **8.6** | **21.1** | **85%** |
 
 halfkern and contour distance are scored here with their default strengths; in Auto Kerning, the font's own kerning tunes them, which narrows the gap. The FreeLab method is the only one that beats leaving most pairs alone while also coming closest on the pairs the fonts do kern.
 
