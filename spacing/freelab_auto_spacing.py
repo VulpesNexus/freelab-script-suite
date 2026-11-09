@@ -330,7 +330,8 @@ class AutoSpacingDialog(object):
         self.spacings, self.listed, self.composites = [], [], {}
         self.busy = self.buttons_due = False
         self.reference_model = load_reference_model()
-        self.flagging = self.ak.flag_menu(self.tree, self, lambda: [self.selected().name] if self.selected() else [])
+        self.flagging = self.ak.flag_menu(self.tree, self, lambda: [self.selected().name] if self.selected() else [],
+                                          self.row_names)
         self.unspaced_references = []
         self.history_timer = self.ak.watch_history(self)
         self.ak.plain_buttons(dialog)
@@ -361,8 +362,8 @@ class AutoSpacingDialog(object):
             import unicodedata
             for fg in self.package.fgPackage.glyphs:
                 code = fg.unicode
-                if not code:
-                    continue
+                if not code or code > sys.maxunicode:
+                    continue  # (past U+FFFF, FontLab's narrow Python has no single character for it)
                 ch = ak.unichr_(code)
                 if unicodedata.category(ch)[0] in "LNPS" and ch not in chosen:
                     chosen.append(ch)  # each spaced against its case's reference (H, n, or 0; n for symbols)
@@ -632,6 +633,13 @@ class AutoSpacingDialog(object):
             return None
         index = int(items[0].data(0, QtCore.Qt.UserRole))
         return self.listed[index] if index < len(self.listed) else None
+
+    def row_names(self, item):
+        """The glyph of a row (none for a section's heading): its flag shown."""
+        QtCore, QtGui = _qt()
+        data = item.data(0, QtCore.Qt.UserRole)
+        index = int(data) if data is not None else -1
+        return [self.listed[index].name] if 0 <= index < len(self.listed) else []
 
     # -- the previews -----------------------------------------------------
 

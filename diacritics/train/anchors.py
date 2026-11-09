@@ -9,6 +9,9 @@ ink top (below its ink bottom) the base's anchor sits, and how far across from t
 base's top (bottom) fifth, as a share of its width; how far below the mark's ink (above, for marks
 below) the mark's anchor sits; and, for mark-to-mark, how far above a mark's ink its own anchor sits.
 The medians, per script and side, are diacritics/anchor_model.json: Diacritics places anchors by them.
+It also counts, per script, the letters each font attaches marks to (its encoded glyph or a form of
+it named after it, beh-ar.init): the letters at least BASE_SHARE of the fonts having them attach marks
+to are the script's bases, the letters Diacritics gives anchors to where Unicode composes none.
 
     python diacritics/train/anchors.py [--out <file.json>]
 
@@ -33,6 +36,7 @@ import freelab_diacritics as dia  # noqa: E402  (the scripts' ranges)
 MODEL_FILE = os.path.join(HERE, os.pardir, "anchor_model.json")
 CORPUS_DIR = os.path.join(os.environ.get("LOCALAPPDATA", ""), "FreeLab", "corpus")
 MIN_FONTS = 2
+BASE_SHARE = 0.5  # of the fonts having a letter, those attaching marks to it, for it to be a base
 BAND = 0.2  # the share of a base's ink, at its top or bottom, whose center an anchor is measured from
 
 
@@ -91,13 +95,37 @@ def band_center(glyph_set, name, low, high):
     return (min(xs) + max(xs)) / 2.0 if xs else None
 
 
+def attached_letters(font, subs, script_of):
+    """{script: (letters it has, letters it attaches marks to)}: code points, a letter attached when its
+    glyph, or a glyph named after it (its name before a period), is a base of a mark attachment."""
+    import unicodedata
+    cmap = font["cmap"].getBestCmap() or {}
+    attached_names = set()
+    for sub in subs:
+        for base, record in zip(sub.BaseCoverage.glyphs, sub.BaseArray.BaseRecord):
+            if any(anchor is not None for anchor in record.BaseAnchor):
+                attached_names.add(base)
+                attached_names.add(base.split(".")[0])
+    found = {}
+    for code, name in cmap.items():
+        script = script_of.get(name)
+        if not script or not unicodedata.category(chr(code)).startswith("L"):
+            continue
+        has, attached = found.setdefault(script, (set(), set()))
+        has.add(code)
+        if name in attached_names:
+            attached.add(code)
+    return found
+
+
 def measure(path):
     """{(script, side): {"base_gap": [], "base_offset": [], "mark_gap": [], "mark_offset": [],
-    "mark_top": []}} of one font, in shares of the em (offsets across: of the base's width)."""
+    "mark_top": []}} of one font, in shares of the em (offsets across: of the base's width), and
+    attached_letters'."""
     from fontTools.ttLib import TTFont
     font = TTFont(path)
     if "GPOS" not in font:
-        return {}
+        return {}, {}
     upm = float(font["head"].unitsPerEm)
     cmap = font["cmap"].getBestCmap() or {}
     script_of = {}
@@ -106,9 +134,10 @@ def measure(path):
         if script:
             script_of.setdefault(name, script)
     if not script_of:
-        return {}
+        return {}, {}
     out = {}
     subs = lookups(font, POSITIONING, 4)
+    letters = attached_letters(font, subs, script_of)
     names = set()
     for sub in subs:
         names.update(sub.MarkCoverage.glyphs)
@@ -161,7 +190,7 @@ def measure(path):
                 data = out.setdefault((script_of[mark2], side), {"base_gap": [], "base_offset": [], "mark_gap": [], "mark_offset": []})
                 edge = ink2[3] if side == "top" else ink2[1]
                 data.setdefault("mark_to_mark", []).append(abs(anchor.YCoordinate - edge) / upm)
-    return out
+    return out, letters
 
 
 def fonts():
@@ -191,13 +220,21 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--out", default=MODEL_FILE)
     args = parser.parse_args()
-    per_font = []
+    per_font, letter_counts = [], {}
     for path, family in fonts():
         try:
-            measured = measure(path)
+            measured, letters = measure(path)
         except Exception as exc:
             print("  %s: %s" % (family, exc))
             continue
+        for script, (has, attached) in letters.items():
+            if not attached:
+                continue  # marks of other scripts only: says nothing of this one's letters
+            counts = letter_counts.setdefault(script, {})
+            for code in has:
+                count = counts.setdefault(code, [0, 0])
+                count[0] += 1
+                count[1] += code in attached
         if measured:
             per_font.append((family, measured))
             print("  %s: %s" % (family, ", ".join(sorted("%s %s" % key for key in measured))))
@@ -214,6 +251,12 @@ def main():
         if row:
             row["fonts"] = families
             model["anchors"]["%s %s" % (script, side)] = row
+    model["bases"] = {}
+    for script, counts in sorted(letter_counts.items()):
+        bases = sorted(code for code, (having, attaching) in counts.items()
+                       if having >= MIN_FONTS and attaching >= BASE_SHARE * having)
+        if bases:
+            model["bases"][script] = ["%04X" % code for code in bases]
     with io.open(args.out, "w", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps(model, indent=1, sort_keys=True) + "\n")
     print("%d fonts measured" % len(per_font))

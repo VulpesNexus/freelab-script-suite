@@ -422,14 +422,19 @@ class CJKSpacingDialog(object):
         self.hangul_box.connect("currentIndexChanged(int)", lambda index: self.plan_hangul())
         ak.plain_buttons(dialog)
         self.history_timer = ak.watch_history(self)
-        self.flagging = ak.flag_menu(self.tree, self, self.flag_names)
+        self.flagging = ak.flag_menu(self.tree, self, self.flag_names, self.row_names)
 
     def flag_names(self):
         QtCore, QtGui = _qt()
         items = self.tree.selectedItems()
         if not items:
             return []
-        index = int(items[0].data(0, QtCore.Qt.UserRole))
+        return self.row_names(items[0])
+
+    def row_names(self, item):
+        QtCore, QtGui = _qt()
+        data = item.data(0, QtCore.Qt.UserRole)
+        index = int(data) if data is not None else -1
         return [self.trims[index].name] if 0 <= index < len(self.trims) else []
 
     def current_font(self):

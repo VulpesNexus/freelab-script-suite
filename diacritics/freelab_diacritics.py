@@ -798,11 +798,57 @@ class AnchorGlyph(object):
         return found
 
 
+MIN_ROW_FONTS = 3  # a script's anchor medians from fewer fonts than this give way to Latin's
+
+
 def anchor_row(model, script, side):
     row = dict(DEFAULT_ANCHOR)
-    found = model.get("anchors", {}).get(u"%s %s" % (script, side)) or model.get("anchors", {}).get(u"latin %s" % side)
+    anchors = model.get("anchors", {})
+    found = anchors.get(u"%s %s" % (script, side))
+    if not found or found.get("fonts", 0) < MIN_ROW_FONTS:
+        found = anchors.get(u"latin %s" % side)
     row.update(found or {})
     return row
+
+
+_ROOTS = []
+COMPOSED_SCRIPTS = ("latin", "greek", "cyrillic")  # Unicode precomposes their letters with marks widely
+
+
+def composing_roots():
+    """The code points Unicode composes letters with marks on: the first of each canonical
+    decomposition (the Basic Multilingual Plane's) whose rest are marks, all the way down (a for the
+    letters with dieresis and macron, not a with dieresis), and the dotless i and j that take marks above."""
+    if not _ROOTS:
+        found = set([0x0131, 0x0237])
+        for code in range(0x00C0, 0xFFFF):
+            if 0xD800 <= code < 0xE000:
+                continue
+            ch = unichr_(code)
+            decomposition = unicodedata.decomposition(ch)
+            if not decomposition or decomposition.startswith(u"<"):
+                continue
+            parts = unicodedata.normalize("NFD", ch)
+            if len(parts) > 1 and all(unicodedata.category(c).startswith("M") for c in parts[1:]):
+                found.add(ord(parts[0]))
+        _ROOTS.append(found)
+    return _ROOTS[0]
+
+
+def base_letters(script, model):
+    """The code points of a script's letters that take marks, or None (any letter): those Unicode
+    composes with marks, and those the corpus's fonts of the script attach marks to (save letters
+    Unicode has precomposed: their marks are built in)."""
+    roots = set(code for code in composing_roots() if anchor_script(code) == script)
+    corpus = set()
+    for text in model.get("bases", {}).get(script, ()):
+        code = int(text, 16)
+        if code <= 0xFFFF and unicodedata.normalize("NFD", unichr_(code)) == unichr_(code):
+            corpus.add(code)
+    if not corpus and script not in COMPOSED_SCRIPTS:
+        return None  # a few compositions (Myanmar's) do not say which of its letters take marks
+    found = roots | corpus
+    return found or None
 
 
 def mark_side_of(ink, x_height):
@@ -1131,6 +1177,46 @@ def has_character(family, code):
         return False
 
 
+# Families with other scripts' letters and marks (Windows' own, then Google's Noto): a reference for them
+SCRIPT_FAMILIES = {"arabic": ("Noto Naskh Arabic", "Noto Sans Arabic", "Segoe UI", "Arial", "Tahoma"),
+                   "hebrew": ("Noto Sans Hebrew", "Segoe UI", "Arial", "Tahoma"),
+                   "devanagari": ("Noto Sans Devanagari", "Noto Serif Devanagari", "Nirmala UI", "Mangal"),
+                   "thai": ("Noto Sans Thai", "Noto Serif Thai", "Leelawadee UI", "Tahoma"),
+                   "lao": ("Noto Sans Lao", "Leelawadee UI"),
+                   "khmer": ("Noto Sans Khmer", "Noto Serif Khmer", "Khmer UI", "Leelawadee UI"),
+                   "myanmar": ("Noto Sans Myanmar", "Myanmar Text")}
+DOTTED_CIRCLE = 0x25CC  # what a mark is drawn on without a letter
+
+
+def script_families(script):
+    return SCRIPT_FAMILIES.get(script, ())
+
+
+def reference_picture(text, family, palette):
+    """text drawn in a font family, centered in the reference column (made smaller to fit across), in
+    the dialog's text color."""
+    QtCore, QtGui = _qt()
+    font = QtGui.QFont(family)
+    size = int(REFERENCE_WIDTH * 0.62)
+    font.setPixelSize(size)
+    path = QtGui.QPainterPath()
+    path.addText(QtCore.QPointF(0, 0), font, text)
+    box = path.boundingRect()
+    scale = min(1.0, REFERENCE_WIDTH * 0.92 / box.width()) if box.width() > 0 else 1.0
+    pixmap = QtGui.QPixmap(REFERENCE_WIDTH, int(size * 1.6))
+    pixmap.fill(QtGui.QColor(0, 0, 0, 0))
+    painter = QtGui.QPainter(pixmap)
+    try:  # ended before anything else can fail
+        painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        painter.translate(REFERENCE_WIDTH / 2.0, size * 1.15)
+        painter.scale(scale, scale)
+        painter.translate(-box.left() - box.width() / 2.0, 0)
+        painter.fillPath(path, QtGui.QBrush(palette.color(QtGui.QPalette.WindowText)))
+    finally:
+        painter.end()
+    return pixmap
+
+
 def make_editor(owner):
     """The mark editor: a widget drawing the selected glyph between its neighbors, its marks clickable,
     movable, and scalable (PythonQt subclasses Qt widgets in Python; the class is made once Qt is in)."""
@@ -1433,6 +1519,14 @@ class AnchorPage(object):
         self.script_box = QtGui.QComboBox()
         self.script_box.setWhatsThis(u"The script whose bases and marks get anchors: those the font has marks of.")
         row.addWidget(self.script_box)
+        self.script_name = QtGui.QLabel(u"")  # in its place when the font has marks of one script only
+        bold = QtGui.QFont(self.script_name.font)
+        bold.setBold(True)
+        self.script_name.setFont(bold)
+        self.script_name.setWhatsThis(u"The script whose bases and marks get anchors: the only one the font has marks of.")
+        self.script_name.hide()
+        row.addWidget(self.script_name)
+        row.addSpacing(12)
         self.code_box = QtGui.QCheckBox(u"Write the mark and mkmk code")
         self.code_box.setChecked(True)
         self.code_box.setWhatsThis(u"Also writes the mark and mkmk features that attach the marks by these anchors, "
@@ -1451,12 +1545,33 @@ class AnchorPage(object):
                                u"and the one the next mark attaches to). Anchors a glyph has already are kept. "
                                u"Checked glyphs get theirs.")
         layout.addWidget(self.tree, 3)
-        lower = QtGui.QVBoxLayout()
+        lower = QtGui.QHBoxLayout()
+        reference = QtGui.QVBoxLayout()
+        title = QtGui.QLabel(u"Reference")
+        bold = QtGui.QFont(title.font)
+        bold.setBold(True)
+        title.setFont(bold)
+        reference.addWidget(title)
+        self.reference = QtGui.QLabel()
+        self.reference.setProperty(ak.LEAVE_ALONE_PROP, True)
+        self.reference.setAlignment(QtCore.Qt.AlignCenter)
+        self.reference.setFixedWidth(REFERENCE_WIDTH)
+        self.reference.setMinimumHeight(EDITOR_HEIGHT - 60)
+        self.reference.setWhatsThis(u"The selected glyph's letter with the sample marks, in the reference font picked "
+                                    u"on the first tab (its own marks placed by its own features), to compare.")
+        reference.addWidget(self.reference, 1)
+        self.reference_note = QtGui.QLabel(u"")
+        self.reference_note.setWordWrap(True)
+        self.reference_note.setFixedWidth(REFERENCE_WIDTH)
+        reference.addWidget(self.reference_note)
+        lower.addLayout(reference)
+        editing = QtGui.QVBoxLayout()
         self.editor = make_editor(self)
         self.editor.setProperty(ak.LEAVE_ALONE_PROP, True)
         self.editor.setWhatsThis(u"The selected glyph with a mark attached by its anchors. " + ANCHOR_HELP_NOTE +
                                  u" Drag the mark or press the arrow keys (Shift: 10 units).")
-        lower.addWidget(self.editor, 1)
+        editing.addWidget(self.editor, 1)
+        lower.addLayout(editing, 1)
         hint_row = QtGui.QHBoxLayout()
         self.hint = QtGui.QLabel(ANCHOR_HELP_NOTE)
         self.hint.setWordWrap(True)
@@ -1464,7 +1579,7 @@ class AnchorPage(object):
         self.reset_button = QtGui.QPushButton(u"Reset anchors")
         self.reset_button.setWhatsThis(u"Puts the selected glyph's anchors back where they were suggested.")
         hint_row.addWidget(self.reset_button)
-        lower.addLayout(hint_row)
+        editing.addLayout(hint_row)
         layout.addLayout(lower, 2)
         buttons = QtGui.QHBoxLayout()
         self.all_button = QtGui.QPushButton(u"Check all")
@@ -1510,9 +1625,12 @@ class AnchorPage(object):
         return [script for script, _ in ANCHOR_SCRIPTS if script in found]
 
     def collect(self, package, master, script, ink):
-        """[(name, code, role, Ink, existing anchors)] of the script's bases and marks: encoded letters and
-        marks, and their unencoded forms (beh-ar.init, ka-khmer.sub) by the name before the period."""
+        """[(name, code, role, Ink, existing anchors)] of the script's bases and marks: encoded letters that
+        take marks (base_letters) and marks, and their unencoded forms (beh-ar.init, ka-khmer.sub, i.2) by
+        the name before the period."""
         roles = {}
+        takes_marks = base_letters(script, self.model)
+        self.left_out = 0
         for fg in package.fgPackage.glyphs:
             code = fg.unicode
             if code and anchor_script(code) == script:
@@ -1520,6 +1638,9 @@ class AnchorPage(object):
                 if category in ("Mn", "Me"):
                     roles[fg.name] = ("mark", code)
                 elif category.startswith("L"):
+                    if takes_marks is not None and code not in takes_marks:
+                        self.left_out += 1
+                        continue
                     roles[fg.name] = ("base", code)
         found = []
         for fg in package.fgPackage.glyphs:
@@ -1571,6 +1692,10 @@ class AnchorPage(object):
             self.script_box.clear()
             for script in self.scripts:
                 self.script_box.addItem(script.capitalize())
+            one = len(self.scripts) == 1
+            self.script_box.setVisible(not one)
+            self.script_name.setVisible(one)
+            self.script_name.setText(self.scripts[0].capitalize() if one else u"")
             self.loading = False
         if not self.scripts:
             self.status.setText(u"%s has no combining marks (Unicode's nonspacing marks): nothing to attach." % ak.b(package.tfn))
@@ -1591,12 +1716,16 @@ class AnchorPage(object):
         marks = [g for g in self.glyphs if g.role == "mark"]
         b = ak.b
         rows = self.model.get("anchors", {}).get(u"%s top" % self.script(), {})
+        left_out = getattr(self, "left_out", 0)
         self.status.setText(u"%s, master %s, %s: %s and %s; %s get anchors, placed as %s of the corpus's %s fonts place "
-                            u"theirs.%s Nothing changes until you click %s." % (
+                            u"theirs.%s%s Nothing changes until you click %s." % (
                                 b(package.tfn), b(self.master), b(self.script().capitalize()),
                                 b(counted(len(bases), u"base")), b(counted(len(marks), u"mark")),
                                 b(sum(1 for g in self.glyphs if g.anchors)), b(rows.get("fonts", 0)),
                                 self.script().capitalize(),
+                                u" %s that take no marks (in Unicode's letters and the corpus's fonts) %s left out." % (
+                                    b(counted(left_out, u"letter")), u"is" if left_out == 1 else u"are")
+                                if left_out else u"",
                                 u" With several masters, the mark and mkmk code is left to FontLab's automatic features "
                                 u"(they read the anchors of each master)." if package.mastersCount > 1 else u"",
                                 ak.i(u"Add checked anchors")))
@@ -1730,6 +1859,12 @@ class AnchorPage(object):
         index = int(items[0].data(0, QtCore.Qt.UserRole))
         return self.glyphs[index] if 0 <= index < len(self.glyphs) else None
 
+    def row_names(self, item):
+        QtCore, QtGui = _qt()
+        data = item.data(0, QtCore.Qt.UserRole)
+        index = int(data) if data is not None else -1
+        return [self.glyphs[index].name] if 0 <= index < len(self.glyphs) else []
+
     # -- the editor: a sample mark attached ---------------------------------------------
 
     def samples(self, g):
@@ -1749,7 +1884,39 @@ class AnchorPage(object):
         self.editor.scene = self.scene(g) if g is not None else None
         self.editor.update()
         self.hint.setText(ANCHOR_HELP_NOTE)
+        self.draw_reference(g)
         self.update_buttons()
+
+    def reference_text(self, g):
+        """The characters the reference draws for g: its letter with each sample mark (a base), or the
+        sample letter with it (a mark); none for a glyph of no character."""
+        if g is None or not g.code:
+            return u""
+        if g.role == "base":
+            marks = [m for _, m in self.samples(g) if m is not None and m.code]
+            if not marks:
+                return unichr_(g.code)
+            return u" ".join(unichr_(g.code) + unichr_(m.code) for m in marks)
+        side, base = self.samples(g)[0]
+        return unichr_(base.code) + unichr_(g.code) if base is not None and base.code else unichr_(DOTTED_CIRCLE) + unichr_(g.code)
+
+    def draw_reference(self, g):
+        text = self.reference_text(g)
+        if not text:
+            self.reference.clear()
+            self.reference_note.setText(u"" if g is None else u"%s is no character's glyph: no reference." % g.name)
+            return
+        codes = [ord(c) for c in text if c != u" "]
+        family, chosen = self.owner.reference_family(codes, script_families(self.script()))
+        if family is None:
+            self.reference.clear()
+            self.reference_note.setText(u"No reference font has %s." % text)
+            return
+        self.reference.setPixmap(reference_picture(text, family, self.owner.dialog.palette))
+        if family == chosen:
+            self.reference_note.setText(u"%s in %s." % (text, family))
+        else:
+            self.reference_note.setText(u"%s lacks %s: shown in %s." % (chosen, text, family))
 
     def scene(self, g):
         placed = g.placed()
@@ -2054,9 +2221,9 @@ class AccentsDialog(object):
         self.model = load_model()
         ak.plain_buttons(dialog)
         self.history_timer = ak.watch_history(self)
-        self.flagging = [ak.flag_menu(self.tree, self, self.flag_names),
+        self.flagging = [ak.flag_menu(self.tree, self, self.flag_names, self.row_names),
                          ak.flag_menu(self.anchors.tree, self, lambda: [self.anchors.selected().name]
-                                      if self.anchors.selected() is not None else [])]
+                                      if self.anchors.selected() is not None else [], self.anchors.row_names)]
         self.update_buttons()
 
     def flag_names(self):
@@ -2065,6 +2232,16 @@ class AccentsDialog(object):
         if r is None:
             return []
         return [r.name] if self.in_font(r) else [r.base] if r.base else []
+
+    def row_names(self, item):
+        """A row's glyph, if the font has it (its flag shown); none for a section's heading."""
+        QtCore, QtGui = _qt()
+        data = item.data(0, QtCore.Qt.UserRole)
+        index = int(data) if data is not None else -1
+        if not 0 <= index < len(self.recipes):
+            return []
+        r = self.recipes[index]
+        return [r.name] if self.package is not None and r.name and self.package.findName(r.name) is not None else []
 
     def current_font(self):
         workspace = self.fontlab.flWorkspace.instance()
@@ -2512,6 +2689,15 @@ class AccentsDialog(object):
             self.choosing_reference = False
         self.draw_reference(self.selected())
 
+    def reference_family(self, codes, more=()):
+        """(family, chosen): the first of the chosen reference font, those picked before, and the known
+        families (more: a script's) that has every one of the code points, or None; and the chosen one."""
+        chosen = u"%s" % _property(self.reference_font, "currentFont").family()
+        for candidate in [chosen] + self.reference_history + list(REFERENCE_FAMILIES) + list(more):
+            if all(has_character(candidate, code) for code in codes):
+                return candidate, chosen
+        return None, chosen
+
     def reference_changed(self):
         if self.choosing_reference:
             return
@@ -2522,6 +2708,8 @@ class AccentsDialog(object):
         self.settings["reference"] = family
         write_settings(self.ak, self.settings)
         self.draw_reference(self.selected())
+        if self.anchors_read:
+            self.anchors.draw_reference(self.anchors.selected())
 
     def draw_reference(self, r):
         QtCore, QtGui = _qt()
@@ -2529,32 +2717,12 @@ class AccentsDialog(object):
             self.reference.clear()
             self.reference_note.setText(u"")
             return
-        chosen = u"%s" % _property(self.reference_font, "currentFont").family()
-        family = None
-        for candidate in [chosen] + self.reference_history + list(REFERENCE_FAMILIES):
-            if has_character(candidate, r.code):
-                family = candidate
-                break
+        family, chosen = self.reference_family([r.code], script_families(script_of(r.char)))
         if family is None:
             self.reference.clear()
             self.reference_note.setText(u"No reference font has %s." % r.char)
             return
-        font = QtGui.QFont(family)
-        size = int(REFERENCE_WIDTH * 0.62)
-        font.setPixelSize(size)
-        path = QtGui.QPainterPath()
-        path.addText(QtCore.QPointF(0, 0), font, r.char)
-        box = path.boundingRect()
-        pixmap = QtGui.QPixmap(REFERENCE_WIDTH, int(size * 1.6))
-        pixmap.fill(QtGui.QColor(0, 0, 0, 0))
-        painter = QtGui.QPainter(pixmap)
-        try:  # ended before anything else can fail
-            painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
-            painter.translate((REFERENCE_WIDTH - box.width()) / 2.0 - box.left(), size * 1.15)
-            painter.fillPath(path, QtGui.QBrush(self.dialog.palette.color(QtGui.QPalette.WindowText)))
-        finally:
-            painter.end()
-        self.reference.setPixmap(pixmap)
+        self.reference.setPixmap(reference_picture(r.char, family, self.dialog.palette))
         if family == chosen:
             self.reference_note.setText(u"%s in %s." % (r.char, family))
         else:
@@ -2597,13 +2765,14 @@ class AccentsDialog(object):
             if master not in self.inks:
                 self.inks[master], self.placements[master] = self.learn(package, master)
         fontlab = self.fontlab
-        made, skipped, error, touched = [], [], None, []
+        made, skipped, failed, error, touched = [], [], [], None, []
         try:
             for r in chosen:
                 glyph = package.findName(r.name)
                 if glyph is not None and not is_empty(glyph):
                     skipped.append(r.char)  # made meanwhile
                     continue
+                added = glyph is None
                 if glyph is None:
                     if package.findUnicode(r.code) is not None:
                         skipped.append(r.char)
@@ -2615,6 +2784,7 @@ class AccentsDialog(object):
                     glyph = package.findName(r.name)
                     if glyph is None:
                         raise RuntimeError(u"FontLab did not add %s" % r.name)
+                placed = False
                 for master in masters:
                     ink, placement = self.inks[master], self.placements[master]
                     if ink(r.base) is None:
@@ -2624,6 +2794,7 @@ class AccentsDialog(object):
                     r.checked = checked
                     if parts is None:
                         continue
+                    placed = True
                     components = []
                     for name, sx, sy, dx, dy in parts:
                         component = fontlab.GlyphComponent(name)
@@ -2631,9 +2802,13 @@ class AccentsDialog(object):
                         components.append(component)
                     layer = glyph.getLayerByName(master, True)
                     layer.setGlyphComponents(components, float(width), package, False)
+                if not placed or is_empty(package.findName(r.name)):
+                    # Nothing of it drawn: said why, and a glyph added for it taken out again
+                    failed.append((r.char, self.why_empty(r, masters, placed)))
+                    if added:
+                        package.deleteGlyph(package.findName(r.name))
+                    continue
                 touched.append(glyph)
-                if is_empty(package.findName(r.name)):
-                    raise RuntimeError(u"FontLab left %s empty" % r.name)
                 made.append(r.char)
         except Exception as exc:  # what was made stays made, and is reported
             error = exc
@@ -2648,9 +2823,24 @@ class AccentsDialog(object):
             self.log.add(u"%s had been made meanwhile and %s left as %s." % (
                 b(u"".join(skipped)), u"was" if len(skipped) == 1 else u"were",
                 u"it was" if len(skipped) == 1 else u"they were"), "warning")
+        for char, why in failed:
+            self.log.add(u"%s was not built: %s." % (b(char), self.ak.html(why)), "warning")
         if error is not None:
             self.log.add(u"Stopped by an error: %s" % self.ak.html(error), "error")
         self.run()
+
+    def why_empty(self, r, masters, placed):
+        """Why a recipe came out with nothing drawn: the first of its glyphs with no outline, master by
+        master, else FontLab not keeping its components."""
+        if placed:
+            return u"FontLab did not keep its components (%s)" % u" + ".join(
+                [r.base] + [part[0] for mark in r.marks for part in mark.parts])
+        for master in masters:
+            ink = self.inks[master]
+            for name in [r.base] + [part[0] for mark in r.marks for part in mark.parts]:
+                if ink(name) is None:
+                    return u"%s has no outline in master %s" % (name, master)
+        return u"its marks could not be placed"
 
     def show(self):
         QtCore, QtGui = _qt()

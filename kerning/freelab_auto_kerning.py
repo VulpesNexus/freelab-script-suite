@@ -1120,6 +1120,16 @@ def size_dialog(dialog):
     dialog.resize(width, height)
 
 
+def room_below(window):
+    """Pixels between a window's bottom edge (its frame's) and the bottom of its screen's free area."""
+    QtCore, QtGui = _qt()
+    try:
+        area = QtGui.QApplication.desktop().availableGeometry(window)
+        return max(0, area.bottom() - _property(window, "frameGeometry").bottom())
+    except Exception:
+        return 0
+
+
 def section_row(item, tree):
     """A list's row heading a section: bold, with room above it."""
     QtCore, QtGui = _qt()
@@ -1158,7 +1168,7 @@ class Log(object):
         self.line = QtGui.QFontMetrics(view.font).lineSpacing()
         view.setFixedHeight(LOG_HEIGHT[0] if LOG_HEIGHT else int(self.line * LOG_LINES + 12))
         view.setWhatsThis(u"What this window did, newest first: done in green, warnings in amber, errors in red. "
-                          u"Drag its bottom edge to make it taller.")
+                          u"Drag its bottom edge to make it taller: the window's bottom edge moves with it.")
         self.entries = []
         self.widget = QtGui.QWidget()
         box = QtGui.QVBoxLayout(self.widget)
@@ -1168,7 +1178,7 @@ class Log(object):
         grip = self.grip = QtGui.QFrame()
         grip.setFixedHeight(6)
         grip.setCursor(QtCore.Qt.SizeVerCursor)
-        grip.setToolTip(u"Drag to make the log taller or shorter")
+        grip.setToolTip(u"Drag to make the log and the window taller or shorter")
         box.addWidget(grip)
         log = self
 
@@ -1177,12 +1187,22 @@ class Log(object):
                 try:
                     kind = event.type()
                     if kind == 2:  # MouseButtonPress
-                        log.start = (event.globalPos().y(), _property(log.view, "height"))
+                        window = log.view.window()
+                        log.start = (event.globalPos().y(), _property(log.view, "height"), window,
+                                     _property(window, "height"), room_below(window))
                         return True
                     if kind == 5 and getattr(log, "start", None):  # MouseMove, the button held
-                        y, height = log.start
+                        y, height, window, window_height, room = log.start
                         wanted = max(int(log.line * 2 + 12), min(int(log.line * 40), height + event.globalPos().y() - y))
-                        log.view.setFixedHeight(wanted)
+                        # The window's bottom edge moves with the log's, as far as the screen goes (the
+                        # list keeps its height); past it, the log takes the list's room.
+                        grown = window_height + min(wanted - height, room)
+                        if wanted < _property(log.view, "height"):
+                            log.view.setFixedHeight(wanted)
+                            window.resize(_property(window, "width"), grown)
+                        else:
+                            window.resize(_property(window, "width"), grown)
+                            log.view.setFixedHeight(wanted)
                         del LOG_HEIGHT[:]
                         LOG_HEIGHT.append(wanted)
                         return True
@@ -1364,30 +1384,193 @@ class ClickRegions(object):
 FLAG_COLORS = ((u"Red", 1), (u"Green", 121), (u"Cyan", 181), (u"Blue", 241), (u"Magenta", 301), (u"None", 0))
 
 
-def flag_menu(view, owner, names_of_selection):
-    """A right-click menu on a list: the selected row's glyphs flagged in FontLab, as its Flag menu
-    does, to find them again later (the Font window shows the flag; Select > Same Flag gathers them).
-    names_of_selection() gives the glyphs' names; owner has package, fontlab, log, and seen_history.
-    The handler is returned: keep it."""
-    QtCore, QtGui = _qt()
+FLAG_TINT = 80  # the alpha of a flagged row's tint: its flag's color, readable under either palette's text
+FLAG_ROLE = 0x0100 + 77  # Qt.UserRole + 77: a cell's flag tint (a list's stylesheet item rule hides BackgroundRole)
 
-    def show(pos):
+
+def flag_color(mark, alpha=255):
+    """The color FontLab shows for a flag (glyph.mark: a hue plus one)."""
+    QtCore, QtGui = _qt()
+    color = QtGui.QColor()
+    color.setHsv((int(mark) - 1) % 360, 190, 235, alpha)
+    return color
+
+
+def flag_menu(view, owner, names_of_selection, names_of_row=None, column=0):
+    """A list's flags: see FlagMenu. Keep what it returns."""
+    return FlagMenu(view, owner, names_of_selection, names_of_row, column)
+
+
+class FlagMenu(object):
+    """A right-click menu on a list: the selected row's glyphs flagged in FontLab, as its Flag menu
+    does, to find them again later (the Font window shows the flag; Select > Same Flag gathers them),
+    and the next or previous flagged row (F3, Shift+F3). With names_of_row (a tree's item, or a
+    table's row number, to its glyphs' names), each row whose glyph has a flag shows its color in
+    the given column, read again whenever the list is filled. names_of_selection() gives the selected
+    row's glyphs; owner has package, fontlab, log, dialog, and seen_history."""
+
+    def __init__(self, view, owner, names_of_selection, names_of_row=None, column=0):
+        QtCore, QtGui = _qt()
+        self.view, self.owner, self.column = view, owner, column
+        self.names_of_selection, self.names_of_row = names_of_selection, names_of_row
+        self.due = False
+        self.table = view.inherits("QTableWidget")
+        view.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        view.connect("customContextMenuRequested(QPoint)", self.show)
+        self.shortcuts = []
+        for keys, step in (("F3", 1), ("Shift+F3", -1)):
+            shortcut = QtGui.QShortcut(QtGui.QKeySequence(keys), view)
+            shortcut.setContext(QtCore.Qt.WidgetWithChildrenShortcut)
+            shortcut.connect("activated()", (lambda step: lambda: self.go(step))(step))
+            self.shortcuts.append(shortcut)
+        if names_of_row is not None:
+            role = FLAG_ROLE
+
+            class Tint(QtGui.QStyledItemDelegate):  # (Qt classes held here: a dropped module's globals turn None)
+                def paint(self, painter, option, index):
+                    try:
+                        color = index.data(role)
+                        if color is not None:
+                            painter.fillRect(option.rect, color)
+                    except Exception:
+                        pass
+                    QtGui.QStyledItemDelegate.paint(self, painter, option, index)
+
+            self.delegate = Tint(view)
+            view.setItemDelegateForColumn(column, self.delegate)
+            model = view.model()
+            model.connect("rowsInserted(QModelIndex,int,int)", lambda *args: self.soon())
+            model.connect("modelReset()", lambda: self.soon())
+
+    # -- the rows --------------------------------------------------------------------
+
+    def rows(self):
+        """[(a tree's item or a table's row, the glyphs' names)], in the list's order."""
+        found = []
+        if self.names_of_row is None:
+            return found
+        if self.table:
+            for row in range(_property(self.view, "rowCount")):
+                found.append((row, self.names_safely(row)))
+            return found
+        pending = [self.view.topLevelItem(i) for i in range(_property(self.view, "topLevelItemCount"))][::-1]
+        while pending:
+            item = pending.pop()
+            found.append((item, self.names_safely(item)))
+            pending.extend(item.child(i) for i in reversed(range(item.childCount())))
+        return found
+
+    def names_safely(self, handle):
         try:
-            names = [n for n in (names_of_selection() or []) if n]
-            package = owner.package
-            if not names or package is None:
+            return [n for n in (self.names_of_row(handle) or []) if n]
+        except Exception:
+            return []
+
+    def marks(self, names, cache):
+        package = self.owner.package
+        found = []
+        for name in names:
+            if name not in cache:
+                glyph = package.findName(name) if package is not None else None
+                try:
+                    cache[name] = int(glyph.mark) if glyph is not None and not glyph.isNull else 0
+                except Exception:
+                    cache[name] = 0
+            found.append(cache[name])
+        return found
+
+    def soon(self):
+        QtCore, QtGui = _qt()
+        if not self.due:
+            self.due = True
+            QtCore.QTimer.singleShot(0, self.refresh)
+
+    def refresh(self):
+        """Each row's cell tinted with the flag of its first flagged glyph, or plain."""
+        QtCore, QtGui = _qt()
+        self.due = False
+        if self.names_of_row is None:
+            return
+        cache = {}
+        blocked = self.view.signalsBlocked()
+        self.view.blockSignals(True)  # a tint is no edit: the dialog's itemChanged must not hear it
+        try:
+            for handle, names in self.rows():
+                flagged = [m for m in self.marks(names, cache) if m]
+                color = flag_color(flagged[0], FLAG_TINT) if flagged else None
+                if self.table:
+                    item = self.view.item(handle, self.column)
+                    if item is not None:
+                        item.setData(FLAG_ROLE, color)
+                else:
+                    handle.setData(self.column, FLAG_ROLE, color)
+        except Exception:
+            pass  # a list emptied meanwhile
+        finally:
+            self.view.blockSignals(blocked)
+        self.view.viewport().update()
+
+    def go(self, step):
+        """The next (step 1) or previous (-1) row with a flagged glyph selected, around the list's end."""
+        cache = {}
+        rows = [(handle, bool([m for m in self.marks(names, cache) if m])) for handle, names in self.rows()]
+        if not any(flagged for _, flagged in rows):
+            try:
+                self.owner.log.add(u"No row of this list has a flagged glyph.", "warning")
+            except Exception:
+                pass
+            return
+        if self.table:
+            current = _property(self.view, "currentRow")
+            at = current if current >= 0 else -1
+        else:
+            item = _property(self.view, "currentItem")
+            at = next((i for i, (handle, _) in enumerate(rows) if item is not None and handle is item), -1)
+        count = len(rows)
+        for k in range(1, count + 1):
+            i = (at + step * k) % count
+            handle, flagged = rows[i]
+            if flagged:
+                if self.table:
+                    self.view.selectRow(handle)
+                    self.view.scrollToItem(self.view.item(handle, 0))
+                else:
+                    self.view.setCurrentItem(handle)
+                    self.view.scrollToItem(handle)
                 return
+
+    # -- the menu --------------------------------------------------------------------
+
+    def show(self, pos):
+        QtCore, QtGui = _qt()
+        try:
+            owner = self.owner
+            names = [n for n in (self.names_of_selection() or []) if n]
             menu = QtGui.QMenu(owner.dialog)
-            title = menu.addAction(u"Flag %s in FontLab" % u" and ".join(names))
-            title.setEnabled(False)
-            menu.addSeparator()
             actions = []
-            for label, value in FLAG_COLORS:
-                action = menu.addAction(label)
-                actions.append((action, label, value))
+            if names and owner.package is not None:
+                title = menu.addAction(u"Flag %s in FontLab" % u" and ".join(names))
+                title.setEnabled(False)
+                for label, value in FLAG_COLORS:
+                    action = menu.addAction(label)
+                    if value:
+                        pixmap = QtGui.QPixmap(12, 12)
+                        pixmap.fill(flag_color(value))
+                        action.setIcon(QtGui.QIcon(pixmap))
+                    actions.append((action, label, value))
+                menu.addSeparator()
+            following = menu.addAction(u"Next flagged row\tF3")
+            previous = menu.addAction(u"Previous flagged row\tShift+F3")
+            view = self.view
             where = view.viewport().mapToGlobal(pos) if hasattr(view, "viewport") else view.mapToGlobal(pos)
             picked = menu.exec_(where)
             if picked is None:
+                return
+            if picked.text == following.text:
+                self.go(1)
+                return
+            if picked.text == previous.text:
+                self.go(-1)
                 return
             for action, label, value in actions:
                 if action.text == picked.text:
@@ -1395,17 +1578,14 @@ def flag_menu(view, owner, names_of_selection):
                     break
         except Exception as exc:
             try:
-                owner.log.add(u"Flagging did not work: %s" % html(exc), "error")
+                self.owner.log.add(u"Flagging did not work: %s" % html(exc), "error")
             except Exception:
                 pass
 
-    view.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
-    view.connect("customContextMenuRequested(QPoint)", show)
-    return show
-
 
 def flag_glyphs(owner, names, label, value):
-    """The glyphs flagged (or unflagged) in FontLab, as one step of its History."""
+    """The glyphs flagged (or unflagged) in FontLab, as one step of its History; the owner's lists'
+    tints read again."""
     package = owner.package
     glyphs = []
     for name in names:
@@ -1417,9 +1597,13 @@ def flag_glyphs(owner, names, label, value):
         return
     notify_changed(owner.fontlab, package, u"FreeLab flag", glyphs)
     owner.seen_history = history_mark(package)  # its own step: nothing to read again
+    menus = getattr(owner, "flagging", None)
+    for menu in (menus if isinstance(menus, list) else [menus]):
+        if isinstance(menu, FlagMenu):
+            menu.refresh()
     if value:
-        owner.log.add(u"Flagged %s %s in FontLab (Select &gt; Same Flag gathers them again)." % (
-            b(u", ".join(g.name for g in glyphs)), html(label.lower())), "done")
+        owner.log.add(u"Flagged %s %s in FontLab (Select &gt; Same Flag gathers them again; F3 goes to the next "
+                      u"flagged row here)." % (b(u", ".join(g.name for g in glyphs)), html(label.lower())), "done")
     else:
         owner.log.add(u"Took the flag off %s." % b(u", ".join(g.name for g in glyphs)), "done")
 
@@ -1654,10 +1838,14 @@ def class_characters():
 
 
 def unichr_(code):
+    """A code point's character; the replacement character past U+FFFF on a narrow Python 2 (FontLab
+    7's), which has none of them as one character."""
     try:
         return unichr(code)  # noqa: F821 (Python 2)
     except NameError:
         return chr(code)
+    except ValueError:
+        return u"\N{REPLACEMENT CHARACTER}"
 
 
 def base_letter(ch):
@@ -2211,7 +2399,9 @@ class AutoKerningDialog(object):
         self.history_timer = watch_history(self)
         self.flagging = flag_menu(self.table, self, lambda: [self.suggestions[self.selected].left,
                                                               self.suggestions[self.selected].right]
-                                  if self.selected is not None else [])
+                                  if self.selected is not None else [],
+                                  lambda row: [self.suggestions[row].left, self.suggestions[row].right]
+                                  if row < len(self.suggestions) else [])
         self.focus = None  # a pair to go to once the analysis is done (opened from another script)
         plain_buttons(dialog)
         self.update_buttons()

@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 104
+#define FREELAB_PIXELS_VERSION 105
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -1622,6 +1622,8 @@ static int light_on_kept_color(const uint32_t *p, int64_t i, int64_t width, int6
 #define WHITE_MARK_PURE_SPREAD 20 /* a white mark is pure white; its smoothing toward the box is colored */
 #define WHITE_MARK_TEST_HLS 0.6 /* pixels this light are tested: the mark, and its smoothing */
 #define WHITE_MARK_SPREAD 25 /* colored enough for a control (a pale tinted row, spread 22, is not) */
+#define WHITE_MARK_STEP 0.05 /* the control is darker than the mark and its smoothing by this much (HLS): a flat light
+                              * colored area (a selected flag swatch, dfbbbf) is no mark on a control of its own color */
 
 static int white_run(const uint32_t *p, int64_t i, int64_t step, int64_t limit, int64_t width, int horizontal);
 
@@ -1629,9 +1631,10 @@ static int white_on_colored(const uint32_t *p, int64_t i, int64_t width, int64_t
 {
     int64_t x, y, dx, dy, rows;
     int colored = 0;
-    double hr = 0.0, hg = 0.0, hb = 0.0;
+    double hr = 0.0, hg = 0.0, hb = 0.0, own;
     if (width <= 0)
         return 0;
+    own = lightness((uint8_t)(p[i] >> 16), (uint8_t)(p[i] >> 8), (uint8_t)p[i]);
     if (white_run(p, i, -1, count, width, 1) + white_run(p, i, 1, count, width, 1) + 1 > BOX_MAX_RUN
         || white_run(p, i, -width, count, width, 0) + white_run(p, i, width, count, width, 0) + 1 > BOX_MAX_RUN)
         return 0; /* a mark is small (a tick in its box): a white row beside text's light fringes is no mark */
@@ -1652,7 +1655,8 @@ static int white_on_colored(const uint32_t *p, int64_t i, int64_t width, int64_t
                 q = (const uint8_t *)&p[yy * width + xx];
                 if (q[3] >= ANCHOR_MIN_ALPHA && lightness(q[2], q[1], q[0]) >= WHITE_HLS && spread_of(q) <= WHITE_MARK_PURE_SPREAD)
                     continue;
-                if (q[3] < ANCHOR_MIN_ALPHA || spread_of(q) < WHITE_MARK_SPREAD || lightness(q[2], q[1], q[0]) < WHITE_MARK_CONTROL_HLS)
+                if (q[3] < ANCHOR_MIN_ALPHA || spread_of(q) < WHITE_MARK_SPREAD || lightness(q[2], q[1], q[0]) < WHITE_MARK_CONTROL_HLS
+                    || lightness(q[2], q[1], q[0]) > own - WHITE_MARK_STEP)
                     return 0;
                 found = 1;
             }
@@ -1671,6 +1675,8 @@ static int white_on_colored(const uint32_t *p, int64_t i, int64_t width, int64_t
             if (q[3] < ANCHOR_MIN_ALPHA || spread_of(q) < WHITE_MARK_SPREAD
                 || lightness(q[2], q[1], q[0]) < WHITE_MARK_CONTROL_HLS)
                 return 0; /* beside nothing, gray, or dark (black text's ClearType fringes): no colored control */
+            if (lightness(q[2], q[1], q[0]) > own - WHITE_MARK_STEP && (p[i] & 0xffffffU) != (*(const uint32_t *)q & 0xffffffU))
+                return 0; /* as light as the pixel and another color: no control around a mark */
             {
                 /* one control color (its blue and lighter blue smoothing): ClearType's fringes of black
                  * text on a white row come in opposite hues, and the white between them is no mark */

@@ -168,9 +168,12 @@ class ScriptTests(unittest.TestCase):
 
 class AnchorTests(unittest.TestCase):
     MODEL = {"anchors": {"thai top": {"base_gap": -0.06, "base_offset": 0.43, "mark_gap": 0.1, "mark_offset": 0.45,
-                                      "mark_to_mark": 0.01},
+                                      "mark_to_mark": 0.01, "fonts": 7},
+                         "thai bottom": {"base_gap": 0.3, "base_offset": 0.4, "mark_gap": 0.3, "mark_offset": 0.5,
+                                         "fonts": 2},
                          "latin bottom": {"base_gap": 0.0, "base_offset": 0.0, "mark_gap": 0.04, "mark_offset": 0.0,
-                                          "mark_to_mark": 0.01}}}
+                                          "mark_to_mark": 0.01, "fonts": 119}},
+             "bases": {"thai": ["0E01", "0E02"], "latin": ["00E4", "0142"]}}
 
     def plan(self):
         glyphs = [("ko", 0xE01, "base", ac.Ink(50, 0, 550, 500, top_center=300, bottom_center=300), {}),
@@ -183,12 +186,21 @@ class AnchorTests(unittest.TestCase):
         found = self.plan()
         ko, maiek, phinthu = found["ko"], found["maiek"], found["phinthu"]
         self.assertEqual(ko.anchors["top"], (515, 440), "right of its top's center, a little under its top, as Thai sets it")
-        self.assertEqual(ko.anchors["bottom"], (300, 0), "the corpus's Latin, where Thai has no row")
+        self.assertEqual(ko.anchors["bottom"], (300, 0), "the corpus's Latin, where Thai's row is from too few fonts")
         self.assertEqual(maiek.side, "top")
         self.assertEqual(maiek.anchors, {u"_top": (-105, 500), u"top": (-105, 710)})
         self.assertEqual(phinthu.side, "bottom")
         self.assertEqual(phinthu.anchors, {u"bottom": (-100, -210)}, "its own _bottom is kept")
         self.assertFalse(found["koold"].checked, "nothing to add")
+
+    def test_base_letters(self):
+        latin = ac.base_letters("latin", self.MODEL)
+        for ch in u"aeiwAW\u0131\u00f8\u0142":
+            self.assertIn(ord(ch), latin, ch)
+        for ch in u"\u00aa\u0192\u1e85\u00e4":  # ordfeminine, florin, wdieresis; a with dieresis is precomposed
+            self.assertNotIn(ord(ch), latin, ch)
+        self.assertEqual(ac.base_letters("thai", self.MODEL), set([0xE01, 0xE02]), "the corpus's, Unicode composing none")
+        self.assertIsNone(ac.base_letters("myanmar", self.MODEL), "nothing known: every letter")
 
     def test_mark_code(self):
         found = self.plan()

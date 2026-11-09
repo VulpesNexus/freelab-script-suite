@@ -32,6 +32,7 @@ MIN_KERNED_SHARE = 0.05  # a font kerning fewer of the common pairs than this ha
 FONT_DIRS = tuple(os.path.join(base, *parts) for base, parts in (
     (os.environ.get("WINDIR") or os.environ.get("SystemRoot"), ("Fonts",)),
     (os.environ.get("LOCALAPPDATA"), ("Microsoft", "Windows", "Fonts"))) if base)
+CORPUS_DIR = os.path.join(os.environ.get("LOCALAPPDATA", ""), "FreeLab", "corpus")  # open-licensed fonts fetched for the corpus
 OPEN_LICENSES = (("open font license", "OFL"), ("scripts.sil.org/ofl", "OFL"), ("openfontlicense", "OFL"),
                  ("apache license", "Apache"), ("apache.org/licenses", "Apache"))
 
@@ -60,7 +61,7 @@ def open_fonts():
     """(path, index, family, license) of the open-licensed, kerned fonts with l, n, and o."""
     from fontTools.ttLib import TTCollection, TTFont
     found = []
-    for folder in FONT_DIRS:
+    for folder in FONT_DIRS + (CORPUS_DIR,):
         for pattern in ("*.ttf", "*.otf", "*.ttc", "*.otc"):
             for path in sorted(glob.glob(os.path.join(folder, pattern))):
                 try:

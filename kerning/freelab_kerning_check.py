@@ -532,7 +532,8 @@ class KerningCheckDialog(object):
         self.ak.plain_buttons(dialog)
         self.read_font()
         self.history_timer = self.ak.watch_history(self)
-        self.flagging = [self.ak.flag_menu(tab.tree, self, lambda: list(self.selected_pair() or []))
+        self.flagging = [self.ak.flag_menu(tab.tree, self, lambda: list(self.selected_pair() or []),
+                                           (lambda tab: lambda item: self.row_names(tab, item))(tab))
                          for tab in (self.collisions, self.cleanup, self.masters)]
         self.update_buttons()
 
@@ -999,6 +1000,19 @@ class KerningCheckDialog(object):
         finally:
             painter.end()
         return pixmap
+
+    def row_names(self, tab, item):
+        """The glyphs of a row (none for a group's heading, or an entry of classes): their flags shown."""
+        QtCore, QtGui = _qt()
+        data = item.data(0, QtCore.Qt.UserRole)
+        index = int(data) if data is not None else -1
+        if not 0 <= index < len(tab.findings):
+            return []
+        finding = tab.findings[index]
+        if hasattr(finding, "pair"):
+            return list(finding.pair() or [])
+        entry = getattr(finding, "entry", None) or ()
+        return [u"%s" % side for side in entry if not (u"%s" % side).startswith(u"@")]
 
     def selected_pair(self):
         """The glyph pair of the selected row (an entry's first pair), or None."""

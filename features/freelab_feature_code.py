@@ -443,14 +443,22 @@ class FeatureCodeDialog(object):
         self.ligature_model = load_ligature_model()
         self.ak.plain_buttons(dialog)
         self.history_timer = self.ak.watch_history(self)
-        self.flagging = [self.ak.flag_menu(self.ligature_tree, self, lambda: self.selected_names(self.ligature_tree)),
-                         self.ak.flag_menu(self.alternate_tree, self, lambda: self.selected_names(self.alternate_tree))]
+        self.flagging = [self.ak.flag_menu(self.ligature_tree, self, lambda: self.selected_names(self.ligature_tree),
+                                           lambda item: self.item_names(self.ligature_tree, item)),
+                         self.ak.flag_menu(self.alternate_tree, self, lambda: self.selected_names(self.alternate_tree),
+                                           lambda item: self.item_names(self.alternate_tree, item))]
 
     def selected_names(self, tree):
         QtCore, QtGui = _qt()
         items = tree.selectedItems()
         if not items:
             return []
+        return self.item_names(tree, items[0])
+
+    def item_names(self, tree, item):
+        """A row's glyphs (a ligature; a glyph and its forms): their flags shown."""
+        QtCore, QtGui = _qt()
+        items = [item]
         if tree is self.ligature_tree:
             index = int(items[0].data(0, QtCore.Qt.UserRole))
             return [self.found[index].glyph] if 0 <= index < len(self.found) else []
