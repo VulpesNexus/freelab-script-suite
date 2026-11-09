@@ -1015,8 +1015,8 @@ class KerningCheckDialog(object):
         pair = self.selected_pair()
         if pair is None:
             return
-        contexts = [c for c in self.ak.PROOF_CONTEXTS if self.package.findName(c) is not None]
-        error = self.ak.show_in_glyph_window(self.fontlab, self.ak.proof_text(pair[0], pair[1], contexts or [pair[0]]))
+        contexts = self.ak.proof_contexts(self.package, list(pair))
+        error = self.ak.show_in_glyph_window(self.fontlab, self.ak.proof_text(pair[0], pair[1], contexts))
         if error:
             self.log.add(u"FontLab did not open the pair: %s" % self.ak.html(error), "error")
 

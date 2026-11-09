@@ -599,6 +599,33 @@ class KerningUpgradeTests(unittest.TestCase):
         self.assertEqual(ak.proof_text("T", "eacute", ["H", "n"]), u"/H/H/T/eacute/H/H/space/n/n/T/eacute/n/n")
 
 
+class ProofTests(unittest.TestCase):
+    class Glyph(object):
+        def __init__(self, name, code):
+            self.name, self.isNull = name, False
+            self.fgGlyph = type("Fg", (), {"unicode": code})()
+
+    class Package(object):
+        def __init__(self, glyphs):
+            self.by_name = dict((name, ProofTests.Glyph(name, code)) for name, code in glyphs)
+            self.by_code = dict((code, self.by_name[name]) for name, code in glyphs if code)
+
+        def findName(self, name):
+            return self.by_name.get(name)
+
+        def findUnicode(self, code):
+            return self.by_code.get(code)
+
+    def test_contexts_follow_the_script(self):
+        package = self.Package([("H", 0x48), ("n", 0x6E), ("o", 0x6F), ("Eta", 0x397), ("nu", 0x3BD), ("omicron", 0x3BF),
+                                ("Ka", 0x41A), ("zero", 0x30), ("T", 0x54), ("kappa", 0x3BA), ("x.alt", 0)])
+        self.assertEqual(ak.proof_contexts(package, ["T", "o"]), ["H", "n", "o"])
+        self.assertEqual(ak.proof_contexts(package, ["kappa", "nu"]), ["Eta", "nu", "omicron"], "Greek's own")
+        self.assertEqual(ak.proof_contexts(package, ["Ka", "o"]), ["H", "n", "o"], "no Cyrillic controls: Latin's")
+        self.assertEqual(ak.proof_contexts(package, ["zero", "T"]), ["zero", "H", "n"], "figures between zeros")
+        self.assertEqual(ak.proof_contexts(package, ["x.alt", "T"]), ["H", "n", "o"], "an unencoded glyph: the next one's")
+
+
 class MenuOrderTests(unittest.TestCase):
     def test_working_order_then_dark_mode_then_mcp(self):
         texts = ["Diacritics", "Auto Kerning", "Auto Spacing", "CJK Spacing", "Toggle Dark Mode", "Dark Mode Settings",

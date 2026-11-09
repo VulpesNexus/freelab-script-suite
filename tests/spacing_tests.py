@@ -14,6 +14,23 @@ import freelab_auto_kerning as ak  # noqa: E402
 import freelab_auto_spacing as sp  # noqa: E402
 
 
+class ReferenceTests(unittest.TestCase):
+    MODEL = {"references": {"H": {"by": "height", "height_of": "H", "left": 0.08, "right": 0.075},
+                            "o": {"by": "width", "height_of": "x", "left": 0.2, "right": 0.2}}}
+
+    def test_unspaced(self):
+        self.assertTrue(sp.unspaced(0, 40, 1000), "a side at its ink")
+        self.assertTrue(sp.unspaced(10, 50, 1000), "one side five times the other")
+        self.assertFalse(sp.unspaced(50, 55, 1000))
+        self.assertFalse(sp.unspaced(25, 30, 1000), "tight is not unspaced")
+
+    def test_reference_changes_from_the_corpus(self):
+        self.assertEqual(sp.reference_changes(u"H", 0, 0, 600, {"H": 700}, self.MODEL), (56, 53))
+        self.assertEqual(sp.reference_changes(u"o", 10, 30, 400, {"x": 500}, self.MODEL), (70, 50), "by its ink's width")
+        self.assertIsNone(sp.reference_changes(u"n", 0, 0, 400, {"x": 500}, self.MODEL), "not in the model")
+        self.assertIsNone(sp.reference_changes(u"H", 0, 0, 600, {}, self.MODEL), "no cap height")
+
+
 class SpacingTests(unittest.TestCase):
     def test_each_side_takes_what_its_reference_pair_asks(self):
         # T's right side wants 30 units less beside H; its left side 12 more; a's sides beside n

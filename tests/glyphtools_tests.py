@@ -231,6 +231,16 @@ class LigatureTests(unittest.TestCase):
                        u"#< feature", u"} liga;", u""])
     NAMES = ["f", "t", "c", "l", "f_f", "f_f_t", "l_l.dlig", "parenleft", "parenright", "copyright"]
 
+    def test_the_corpus_places_what_the_font_does_not(self):
+        names = ["f", "i", "c", "t", "q", "f_i", "c_t", "q_q"]
+        chars = {"f": u"f", "i": u"i", "c": u"c", "t": u"t", "q": u"q"}
+        model = {"ligatures": {u"fi": [161, 8], u"ct": [2, 40]}}
+        found = dict((l.glyph, l) for l in fc.ligatures(names, {}, chars, model))
+        self.assertEqual(found["f_i"].choice, "liga")
+        self.assertIn(u"161 of the 169", found["f_i"].why)
+        self.assertEqual(found["c_t"].choice, "dlig")
+        self.assertEqual(found["q_q"].choice, "dlig", "unknown to the corpus: discretionary")
+
     def test_found_and_moved(self):
         found = fc.ligatures(self.NAMES, {"liga": self.LIGA})
         self.assertEqual([(l.glyph, l.now, l.choice) for l in found],

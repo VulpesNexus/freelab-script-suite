@@ -119,6 +119,43 @@ def suggest_spacing(glyphs, measure, kind_of, category):
     return glyphs
 
 
+REFERENCE_MODEL_FILE = "reference_model.json"
+UNSPACED_SHARE = 0.005  # a reference side closer to its ink than this share of the em counts as unspaced
+UNSPACED_RATIO = 3.0  # and so does one side more than this many times the other
+
+
+def load_reference_model(path=None):
+    """How the corpus spaces the references (reference_model.json beside this script), or {}."""
+    import io
+    import json
+    path = path or os.path.join(os.path.dirname(os.path.abspath(globals().get("__file__") or ".")), REFERENCE_MODEL_FILE)
+    try:
+        with io.open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+        return data if data.get("format") == 1 else {}
+    except (IOError, OSError, ValueError):
+        return {}
+
+
+def unspaced(left, right, upm):
+    """Whether a reference's sidebearings look not spaced yet: a side at its ink, or lopsided."""
+    low, high = min(left, right), max(left, right)
+    return low < UNSPACED_SHARE * upm or high > UNSPACED_RATIO * max(low, 1.0)
+
+
+def reference_changes(char, left, right, width, heights, model):
+    """(left change, right change) bringing a reference to the corpus's spacing: its sidebearings as
+    shares of its height (heights: {"H": cap height, "x": x-height}) or of its ink's width, as the
+    model measures them; None where the model or the height is missing."""
+    row = model.get("references", {}).get(char)
+    if not row:
+        return None
+    base = width if row["by"] == "width" else heights.get(row["height_of"])
+    if not base:
+        return None
+    return round_units(row["left"] * base - left), round_units(row["right"] * base - right)
+
+
 def composite_moves(composites, changes):
     """How each composite follows the glyphs it is built on: {composite name: (shift of its other
     components, change of its width)}. composites maps a composite to its base component's glyph
@@ -290,6 +327,8 @@ class AutoSpacingDialog(object):
         self.package = self.master = None
         self.spacings, self.listed, self.composites = [], [], {}
         self.busy = self.buttons_due = False
+        self.reference_model = load_reference_model()
+        self.unspaced_references = []
         self.history_timer = self.ak.watch_history(self)
         self.ak.plain_buttons(dialog)
         self.update_buttons()
@@ -345,6 +384,13 @@ class AutoSpacingDialog(object):
             self.seen_history = self.ak.history_mark(self.package)
         self.first_checks = dict((s.name, s.checked) for s in self.spacings)
         self.fill()
+        if self.unspaced_references:
+            self.log.add(u"This font's references look unspaced (a side at its ink, or one side three times the other): "
+                         u"%s come first, unchecked, spaced as %s open-licensed families space theirs. If the font is not "
+                         u"spaced yet, check them, space them, then click %s: the other glyphs are measured against them. "
+                         u"A font tight on purpose leaves them unchecked." % (
+                             self.ak.b(u", ".join(self.unspaced_references)),
+                             self.ak.b(self.reference_model.get("families", 0)), self.ak.i(u"Analyze")), "warning")
 
     def measure(self, package, master):
         """(spacings, composites) of the master: the drawn glyphs' suggestions, and the composites
@@ -397,6 +443,7 @@ class AutoSpacingDialog(object):
             left, right, width = ink_sides(layer)
             spacings.append(Spacing(ch, name, ak.category(ak.kind_character(ch)), left, right, width))
         suggest_spacing(spacings, measure, ak.kind_character, ak.category)
+        self.unspaced_references = self.space_references(package, master, names, spacings)
         # every composite of the font, not only those of the characters measured (alternates, ligatures)
         for fg in package.fgPackage.glyphs:
             name = fg.name
@@ -411,6 +458,47 @@ class AutoSpacingDialog(object):
                 composites[name] = (parts[0], parts[1:])
         return spacings, composites
 
+    def space_references(self, package, master, names, spacings):
+        """Where the references (H and n) look unspaced, a row for each reference from the corpus's
+        spacing, put first and unchecked: a font tight on purpose looks the same (its letters touch),
+        so spacing them is the designer's choice. The references' characters, or []."""
+        model = self.reference_model
+        if not model:
+            return []
+        upm = float(package.upm)
+        sides, heights = {}, {}
+        for ch in (u"H", u"x", u"O", u"n", u"o", u"0"):
+            name = names.get(ch) or (package.findUnicode(ord(ch)).name if package.findUnicode(ord(ch)) is not None else None)
+            glyph = package.findName(name) if name else None
+            layer = glyph.getLayerByName(master) if glyph is not None else None
+            if layer is None:
+                continue
+            box = layer.boundingBox
+            if box.width() <= 0:
+                continue
+            left, right, width = ink_sides(layer)
+            sides[ch] = (name, left, right, width)
+            if ch in (u"H", u"x", u"n"):
+                heights.setdefault(u"x" if ch == u"n" else ch, box.height())  # (n's height where there is no x)
+        if not any(unspaced(sides[ch][1], sides[ch][2], upm) for ch in (u"H", u"n") if ch in sides):
+            return []
+        ak = self.ak
+        found = []
+        for ch in (u"H", u"O", u"n", u"o", u"0"):
+            if ch not in sides:
+                continue
+            name, left, right, width = sides[ch]
+            changes = reference_changes(ch, left, right, width - left - right, heights, model)  # (its ink's width)
+            if changes is None:
+                continue
+            s = Spacing(ch, name, ak.category(ch), left, right, width)
+            s.left_change, s.right_change = changes
+            s.reference = True
+            s.checked = False
+            spacings.insert(len(found), s)
+            found.append(ch)
+        return found
+
     # -- the list ---------------------------------------------------------
 
     def fill(self):
@@ -424,7 +512,8 @@ class AutoSpacingDialog(object):
         sign = lambda value: u"%+d" % value if value else u"0"
         for index, s in enumerate(self.listed):
             left, right = s.changes(tolerance)
-            item = QtGui.QTreeWidgetItem([u"%s  %s" % (s.char, s.name), u"%d" % round_units(s.left), sign(left),
+            item = QtGui.QTreeWidgetItem([u"%s  %s%s" % (s.char, s.name, u" (reference)" if getattr(s, "reference", False) else u""),
+                                          u"%d" % round_units(s.left), sign(left),
                                           u"%d" % round_units(s.right), sign(right),
                                           u"%d" % round_units(s.advance + left + right)])
             item.setData(0, QtCore.Qt.UserRole, index)

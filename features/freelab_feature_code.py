@@ -55,9 +55,10 @@ def unichr_(code):
 class Ligature(object):
     """A ligature glyph, the glyphs it replaces, and the feature it is in now and is set to."""
 
-    def __init__(self, glyph, parts, now, choice=None):
+    def __init__(self, glyph, parts, now, choice=None, why=None):
         self.glyph, self.parts, self.now = glyph, tuple(parts), now  # now: "liga", "dlig", or None
         self.choice = choice or now or "dlig"
+        self.why = why  # what set its first choice, for its tooltip
 
 
 def rules_of(text):
@@ -72,25 +73,54 @@ def rules_of(text):
     return found
 
 
-def ligatures(names, features):
+def ligatures(names, features, chars=None, model=None):
     """Every ligature of a font: the rules of its liga and dlig, then each glyph whose name joins
-    glyphs of the font with _ (f_f_t: f f t; l_l.dlig: l l), in the feature its suffix names (dlig
-    unless .liga). features maps a tag to its code."""
+    glyphs of the font with _ (f_f_t: f f t; l_l.dlig: l l), in the feature its suffix names; with no
+    suffix, in the one most of the corpus's families put it in (model: {characters: [liga families,
+    dlig families]}, chars: {glyph: its character}), else dlig. features maps a tag to its code."""
     names = set(names)
+    chars, counts_of = chars or {}, (model or {}).get("ligatures", {})
     found, seen = [], set()
     for tag in ("liga", "dlig"):
         for parts, glyph in rules_of(features.get(tag)):
             if (parts, glyph) not in seen:
                 seen.add((parts, glyph))
-                found.append(Ligature(glyph, parts, tag))
+                found.append(Ligature(glyph, parts, tag, why=u"the font's own %s" % tag))
     made = set(glyph for _, glyph in seen)
     for name in sorted(names):
         stem, _, suffix = name.partition(u".")
         parts = stem.split(u"_")
         if name in made or len(parts) < 2 or not all(part in names for part in parts):
             continue
-        found.append(Ligature(name, parts, None, "liga" if suffix == u"liga" else "dlig"))
+        if suffix in (u"liga", u"dlig"):
+            found.append(Ligature(name, parts, None, suffix, u"its name's .%s" % suffix))
+            continue
+        key = u"".join(chars.get(part) or u"\0" for part in parts)
+        counts = counts_of.get(key) if u"\0" not in key else None
+        if counts:
+            choice = "liga" if counts[0] >= counts[1] else "dlig"
+            why = u"%d of the %d corpus families with it put it in %s" % (
+                max(counts), counts[0] + counts[1], choice)
+            found.append(Ligature(name, parts, None, choice, why))
+        else:
+            found.append(Ligature(name, parts, None, "dlig", u"no corpus family has it: discretionary, to be safe"))
     return found
+
+
+LIGATURE_MODEL_FILE = "ligature_model.json"
+
+
+def load_ligature_model(path=None):
+    """The corpus's ligature counts (ligature_model.json beside this script), or {}."""
+    import io
+    import json
+    path = path or os.path.join(os.path.dirname(os.path.abspath(globals().get("__file__") or ".")), LIGATURE_MODEL_FILE)
+    try:
+        with io.open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+        return data if data.get("format") == 1 else {}
+    except (IOError, OSError, ValueError):
+        return {}
 
 
 def feature_text(tag, old, rules, block_name, managed=None):
@@ -308,7 +338,9 @@ HELP = u"""<b>FreeLab Feature Code</b><br>
 Writes the OpenType code for the font's ligatures, and for alternates that take turns. The code is
 shown, and checked, before anything is written.<br><br>
 <b>Ligatures</b>: each ligature with what it replaces, set to Standard (liga, on unless a user turns
-it off), Discretionary (dlig, off unless a user turns it on), or Off. Applications let users switch
+it off), Discretionary (dlig, off unless a user turns it on), or Off. A ligature the font's code and
+name do not place starts where most of the open-licensed fonts FreeLab learned from put it (f_i in
+liga, c_t in dlig); its feature's tooltip says why. Applications let users switch
 both: in InDesign and Illustrator, the Ligatures and Discretionary Ligatures options; on the web,
 font-variant-ligatures. A feature written here is handed back from FontLab's automatic features (its
 "#> feature" line becomes "#/> feature"), so FontLab no longer rewrites it on export; the rest of its
@@ -408,6 +440,7 @@ class FeatureCodeDialog(object):
         self.package = None
         self.names, self.letters, self.found, self.sets = [], [], [], {}
         self.texts, self.prefix = {}, u""
+        self.ligature_model = load_ligature_model()
         self.ak.plain_buttons(dialog)
         self.history_timer = self.ak.watch_history(self)
 
@@ -460,7 +493,8 @@ class FeatureCodeDialog(object):
             return all(is_letter(part) for part in stem.split(u"_") if part) if stem else False
 
         self.letters = [name for name in self.names if letter_like(name)]
-        self.found = ligatures(self.names, self.texts)
+        self.found = ligatures(self.names, self.texts,
+                               dict((name, unichr_(code)) for name, code in codes.items() if code), self.ligature_model)
         self.sets = alternate_sets(self.names, is_letter)
         bold = QtGui.QFont(self.ligature_tree.font)
         bold.setBold(True)
@@ -473,7 +507,7 @@ class FeatureCodeDialog(object):
             if icon is not None:
                 item.setIcon(0, QtGui.QIcon(icon))
             item.setToolTip(1, u"Now: %s." % (dict(CHOICES)[lig.now] if lig.now else u"in no feature"))
-            item.setToolTip(2, u"Click to choose its feature.")
+            item.setToolTip(2, u"Click to choose its feature. First set by %s." % (lig.why or u"default"))
             self.ligature_tree.addTopLevelItem(item)
             self.show_choice(item, lig)
         self.first_choices = [lig.choice for lig in self.found]

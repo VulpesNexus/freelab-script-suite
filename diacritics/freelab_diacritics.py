@@ -1715,7 +1715,7 @@ class AccentsDialog(object):
         if not self.in_font(r):
             self.log.add(u"%s is not in the font yet: build it first." % self.ak.b(r.char), "warning")
             return
-        contexts = [c for c in (u"H", u"n", u"o") if self.package.findName(c) is not None] or [r.name]
+        contexts = self.ak.proof_contexts(self.package, [r.name])
         text = u"/space".join(u"/%s/%s/%s/%s/%s" % (c, c, r.name, c, c) for c in contexts)
         error = self.ak.show_in_glyph_window(self.fontlab, text)
         if error:

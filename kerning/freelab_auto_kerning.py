@@ -835,6 +835,39 @@ class FontKerning(object):
 PROOF_CONTEXTS = (u"H", u"n", u"o")  # each line of a Glyph window proof: the pair between two of these
 
 
+# The control characters a pair is proofed between, by its script: a straight capital, a straight and
+# a round lowercase, as type designers proof (Walter Tracy's method); figures between zeros too.
+PROOF_SCRIPTS = (("GREEK", u"\u0397\u03bd\u03bf"), ("CYRILLIC", u"\u041d\u043d\u043e"), ("ARMENIAN", u"\u0540\u0576\u0585"),
+                 ("HEBREW", u"\u05d4\u05df\u05e1"), ("ARABIC", u"\u0627\u0646\u0647"), ("DIGIT", u"0Hn"))
+
+
+def proof_contexts(package, names):
+    """The glyph names to proof glyphs between, in the script of the first of them that is encoded
+    (H, n, and o for Latin; Greek's Eta, nu, omicron; Cyrillic's En, en, o; zeros for figures): only
+    those the font has, else Latin's, else the glyphs themselves."""
+    import unicodedata
+    controls = u"Hno"
+    for name in names:
+        glyph = package.findName(name)
+        code = glyph.fgGlyph.unicode if glyph is not None else 0
+        if code:
+            title = unicodedata.name(unichr_(code), u"")
+            for word, chars in PROOF_SCRIPTS:
+                if word in title.split():
+                    controls = chars
+                    break
+            break
+    for chars in (controls, u"Hno"):
+        found = []
+        for ch in chars:
+            glyph = package.findUnicode(ord(ch))
+            if glyph is not None and not glyph.isNull and glyph.name not in found:
+                found.append(glyph.name)
+        if found:
+            return found
+    return list(names[:1])
+
+
 def proof_text(left, right, contexts=PROOF_CONTEXTS):
     """FontLab text (glyph names after slashes) for a pair between two of each context glyph, a
     line each: /H/H/T/o/H/H, /n/n/T/o/n/n, ..."""
@@ -2026,8 +2059,7 @@ class AutoKerningDialog(object):
         if self.selected is None or self.package is None:
             return
         s = self.suggestions[self.selected]
-        contexts = [c for c in PROOF_CONTEXTS if self.package.findName(c) is not None]
-        error = show_in_glyph_window(self.fontlab, proof_text(s.left, s.right, contexts or [s.left]))
+        error = show_in_glyph_window(self.fontlab, proof_text(s.left, s.right, proof_contexts(self.package, [s.left, s.right])))
         if error:
             self.log.add(u"FontLab did not open the pair: %s" % html(error), "error")
 
