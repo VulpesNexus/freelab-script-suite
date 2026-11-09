@@ -99,6 +99,8 @@ class InstallerTests(unittest.TestCase):
         self.assertTrue((self.scripts / "FreeLab" / "freelab_feature_code.py").exists(), "and Feature Code")
         self.assertTrue((self.scripts / "FreeLab" / "freelab_cjk_spacing.py").exists(), "and CJK Spacing")
         self.assertTrue((self.scripts / "FreeLab" / "palt_model.json").exists(), "with its trims")
+        self.assertTrue((self.scripts / "FreeLab" / "hangul_model.json").exists(), "and its Hangul widths")
+        self.assertTrue((self.scripts / "FreeLab" / "anchor_model.json").exists(), "and Diacritics' anchors")
         self.assertTrue((self.scripts / "FreeLab" / "ligature_model.json").exists(), "the corpus's ligatures")
         self.assertTrue((self.scripts / "FreeLab" / "reference_model.json").exists(), "and its references' spacing")
         before = self.read()

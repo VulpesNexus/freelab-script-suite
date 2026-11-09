@@ -24,7 +24,8 @@ AUTO_KERNING_FILE, AUTO_KERNING_MODULE = "freelab_auto_kerning.py", "freelab_aut
 SPACING_REFERENCES = {"upper": u"H", "lower": u"n", "figure": u"0"}  # each kind's straight reference
 FIXED = u"HOlno08"  # the references and tuning glyphs of the methods: never changed
 TOLERANCE_UNITS = 6  # a side whose suggestion is closer than this to its sidebearing is left out
-GROUPS = (("letters", "Letters"), ("figures", "Letters and figures"), ("all", "Letters, figures, and punctuation"))
+GROUPS = (("letters", "Letters"), ("figures", "Letters and figures"), ("all", "Letters, figures, and punctuation"),
+          ("everything", "Everything: every glyph with a character"))  # (other scripts and symbols too, by case)
 PREVIEW_SIZE = 80  # pixels per em in the previews
 SIDE_ALPHA = 110  # the references beside the glyph, dimmed
 
@@ -239,9 +240,9 @@ class AutoSpacingDialog(object):
         dialog = self.dialog = QtGui.QDialog(main) if main is not None else QtGui.QDialog()
         dialog.setWindowTitle("FreeLab Auto Spacing")
         dialog.setWhatsThis(HELP)
-        dialog.resize(720, 760)
+        self.ak.size_dialog(dialog)
         layout = QtGui.QVBoxLayout(dialog)
-        self.status = self.ak.rich(QtGui.QLabel(u""))
+        self.status = self.ak.status_label()
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
         self.log = self.ak.Log()
@@ -251,7 +252,8 @@ class AutoSpacingDialog(object):
         for _, label in GROUPS:
             self.group.addItem(label)
         self.group.setWhatsThis(u"Which glyphs to space. Figures are often tabular (one width for all): leave them "
-                                u"out unless they are proportional.")
+                                u"out unless they are proportional. Everything: every glyph with a character (other "
+                                u"scripts' letters by their case, symbols beside n).")
         row.addWidget(self.group)
         row.addWidget(QtGui.QLabel("List changes of at least"))
         self.tolerance = QtGui.QSpinBox()
@@ -289,13 +291,13 @@ class AutoSpacingDialog(object):
         self.neighbors = [self.ak.ClickRegions(label, self.open_pair, u"Click to open this pair in Auto Kerning")
                           for label in (self.preview_now, self.preview_after)]
         layout.addLayout(previews)
-        self.follow = QtGui.QCheckBox("Glyphs built from components follow the letters they are built on")
+        self.follow = QtGui.QCheckBox("Glyphs built from components follow the letters they are built on.")
         self.follow.setChecked(True)
         self.follow.setWhatsThis(u"\N{LATIN SMALL LETTER E WITH ACUTE} built from e and an acute keeps its acute "
                                  u"over the e and takes e's change of width. Without it, its e moves under the "
                                  u"acute (the e's outline moves) and its width stays.")
         layout.addWidget(self.follow)
-        layout.addWidget(self.log.view)
+        layout.addWidget(self.log.widget)
         buttons = QtGui.QHBoxLayout()
         self.all_button = QtGui.QPushButton("Check all")
         self.none_button = QtGui.QPushButton("Check none")
@@ -328,6 +330,7 @@ class AutoSpacingDialog(object):
         self.spacings, self.listed, self.composites = [], [], {}
         self.busy = self.buttons_due = False
         self.reference_model = load_reference_model()
+        self.flagging = self.ak.flag_menu(self.tree, self, lambda: [self.selected().name] if self.selected() else [])
         self.unspaced_references = []
         self.history_timer = self.ak.watch_history(self)
         self.ak.plain_buttons(dialog)
@@ -354,6 +357,15 @@ class AutoSpacingDialog(object):
         chosen = letters + (list(ak.FIGURES) if group in ("figures", "all") else [])
         if group == "all":
             chosen += list(ak.PUNCTUATION)
+        if group == "everything" and self.package is not None:
+            import unicodedata
+            for fg in self.package.fgPackage.glyphs:
+                code = fg.unicode
+                if not code:
+                    continue
+                ch = ak.unichr_(code)
+                if unicodedata.category(ch)[0] in "LNPS" and ch not in chosen:
+                    chosen.append(ch)  # each spaced against its case's reference (H, n, or 0; n for symbols)
         return chosen
 
     def run(self):
@@ -579,9 +591,18 @@ class AutoSpacingDialog(object):
         self.ak.enable(self.glyph_window_button, self.selected() is not None)
 
     def restore(self):
-        """The checks back as the list first came after the analysis."""
+        """The checks back as the list first came after the analysis (set on the rows themselves: filling
+        the list reads its checks first)."""
+        QtCore, QtGui = _qt()
         for s in self.spacings:
             s.checked = self.first_checks.get(s.name, s.checked)
+        self.tree.blockSignals(True)
+        for row in range(self.tree.topLevelItemCount):
+            item = self.tree.topLevelItem(row)
+            index = int(item.data(0, QtCore.Qt.UserRole))
+            if index < len(self.listed):
+                item.setCheckState(0, QtCore.Qt.Checked if self.listed[index].checked else QtCore.Qt.Unchecked)
+        self.tree.blockSignals(False)
         self.fill()
         self.log.add(u"Checks restored as suggested.")
 

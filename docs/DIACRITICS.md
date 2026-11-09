@@ -1,10 +1,10 @@
 # Diacritics
 
-*Scripts > FreeLab > Diacritics* builds the letters with diacritics a font lacks (Latin, Greek, and Cyrillic), as glyphs of components, in every master. Nothing is made until you click *Build checked glyphs*. It needs no groundwork in the font: no anchors, no accented glyphs to learn from, no *.case* marks, not even marks. Where the font has some, it follows them. It was called Accented Glyphs: not every diacritic is an accent (a cedilla, an ogonek, a hook, a breathing).
+*Scripts > FreeLab > Diacritics* builds the letters with diacritics a font lacks (Latin, Greek, polytonic Greek, and Cyrillic), as glyphs of components, in every master, on its first tab; on its second, *Mark anchors*, it places the anchors and writes the mark features by which scripts that attach their marks (Khmer, Thai, Arabic, Devanagari, and others) set them. Nothing is made until you click *Build checked glyphs*. It needs no groundwork in the font: no anchors, no accented glyphs to learn from, no *.case* marks, not even marks. Where the font has some, it follows them. It was called Accented Glyphs: not every diacritic is an accent (a cedilla, an ogonek, a hook, a breathing).
 
 ## What it builds
 
-- **Which characters**: every character of the chosen set (*Character set:* Latin-1 to Latin Extended-B, Latin Extended Additional, Greek, Cyrillic, or *All*) that the font lacks and that Unicode's canonical decomposition splits into a letter and marks (*ǎ* is *a* with a caron, *й* is *и* with a breve). A script the font has no letters of is left out, and the top line says so. A glyph left empty (by FreeLab's first version, which added glyphs without their layers) is listed again and filled under its own name.
+- **Which characters**: every character of the chosen set (*Character set:* Latin-1 to Latin Extended-B, Latin Extended Additional, Greek, Greek Extended (polytonic), Cyrillic, or *All*) that the font lacks and that Unicode's canonical decomposition splits into a letter and marks (*ǎ* is *a* with a caron, *й* is *и* with a breve). A script the font has no letters of is left out, and the top line says so. A glyph left empty (by FreeLab's first version, which added glyphs without their layers) is listed again and filled under its own name.
 - **Which marks**, in this order:
   1. The font's own, by name (*caroncomb*, *caron*) or code point; for capitals, its *.case* form first; the script's own form before all (Greek's *tonos* for an acute, Cyrillic's *brevecomb-cy* for the short i's breve).
   2. For a mark below, its twin above (a dot below from the dot accent, a macron below from the macron; a comma below from the comma).
@@ -19,6 +19,7 @@
 - **Across**: each mark is centered on the center of the letter's top fifth (bottom fifth for marks below; the ogonek hangs from the right end of it), offset by a share of the letter's width. That share is the font's habit on that side and case, all its marks pooled (so a breve and a caron agree on *i*), or the corpus's, plus how far the corpus puts marks on that very letter from its habit: over *b*'s bowl rather than its stem (43% of its width), *K* and *Y* almost centered. A slanted hand's lowercase habit does not carry over to capitals.
 - **Stacks**: marks stack the way the corpus stacks each pair. An acute or a hook above sits beside a circumflex, to its right and a little lower than its top, as Vietnamese is set; a tilde over a circumflex, or a macron over a dieresis, sits on it, about 0.05 em apart.
 - **Greek capitals** carry their tonos (and breathings) at their left, the mark's top level with the capital's, 0.03 em away; the glyph is made wider by as much, so the mark keeps the letter's left sidebearing.
+- **Polytonic Greek**: a breathing and its accent are one mark, the font's own (*psilioxia*, *dasiavaria*) or its two marks side by side, the breathing first, 0.025 em apart; a perispomeni sits on its breathing (*psiliperispomeni*) or dialytika; the dialytika takes its tonos or varia between its dots. The iota subscript goes under a small letter (*ᾳ*), and after a capital as an adscript (*ᾼ*: the font's *prosgegrammeni*, else its iota), on the baseline, the glyph made wider. A capital's breathings and accents sit at its left, as one.
 
 ## Room above and below
 
@@ -30,7 +31,7 @@ Under the list, the selected glyph is drawn large between its letter and a lette
 
 - Click a mark to select it (it is drawn in the highlight color, in a frame with handles). Drag it, or press the arrow keys (Shift: 10 units), to move it; Shift while dragging keeps it on one axis.
 - Drag a corner of the frame to scale the mark both ways (Shift: in proportion), or a side to scale it one way; the opposite corner or side stays put.
-- Tab selects the next mark, Backspace puts the selected one back, Escape deselects; *Reset marks* puts all of the glyph's marks back.
+- Tab selects the next mark, Backspace puts the selected one back, Escape deselects; *Reset diacritics* (*Reset diacritic* for a glyph with one) puts all of the glyph's marks back.
 - The changes stay with the glyph as you go down the list, its row's picture follows, and they are built. A mark moved by hand moves by as much in every master, scaled about its own center.
 - Click the letter beside the glyph to open that pair in Auto Kerning, once the glyph is built (Auto Kerning measures the font's glyphs).
 
@@ -38,7 +39,7 @@ Under the list, the selected glyph is drawn large between its letter and a lette
 
 ## Reference
 
-Left of the editor, the selected character is drawn in another font, to compare. At first that is the installed font, among families known for wide coverage (Noto Sans, Gentium Plus, Charis SIL, DejaVu Sans, Segoe UI, Arial, and others), with the most of the listed characters; pick another in its list, and the choice is remembered (*%LOCALAPPDATA%\FreeLab\diacritics.json*). A font that lacks the character says so rather than drawing another's.
+Left of the editor, the selected character is drawn in another font, to compare. At first that is the installed font, among families known for wide coverage (Noto Sans, Gentium Plus, Charis SIL, DejaVu Sans, Segoe UI, Arial, and others), with the most of the listed characters; pick another in its list, and the choice is remembered (*%LOCALAPPDATA%\FreeLab\diacritics.json*). A font that lacks the character (as QRawFont reads the font itself: Windows would otherwise draw another font's glyph under its name) gives way to the font picked before it, or to the next of those families, and the note says so ("Fette Mikado lacks ĭ: shown in Noto Sans.").
 
 ## The list, the log, and the History
 
@@ -55,5 +56,17 @@ On the owner's test font (no anchors; 106 composites, most of them with marks pl
 - Glyphs whose caron is drawn as an apostrophe (*ď*, *ľ*, *ť*, *Ľ*) are not built from a caron: Unicode decomposes them with one, but fonts draw them otherwise.
 - Marks are made smaller, not redrawn: a stack that needs flatter marks (as fonts draw for Vietnamese capitals) is better drawn by hand.
 - A mark that always attaches (cedilla, ogonek) attaches as the corpus's do; a drafted cedilla (a comma) is only a placeholder.
-- Greek's polytonic letters (Greek Extended) and scripts whose marks are positioned by the font's mark features rather than built as glyphs (Khmer, Thai, Arabic, Devanagari) are not built yet: for those, what Diacritics would place is anchors, for FontLab's automatic *mark* and *mkmk* features.
-- The corpus model was measured on Latin letters; Greek and Cyrillic marks are placed by the font's own habit and the Latin marks' gaps.
+- The corpus model is measured on Latin, Greek, and Cyrillic composites (163 families); a Greek capital's left-hand marks are left out of it, as they are not above it.
+
+## Mark anchors
+
+Scripts whose marks are not precomposed (Khmer, Thai, Lao, Myanmar, Arabic, Hebrew, Devanagari, and the combining marks of any script) are set by the font's mark features: each mark's anchor meets its base's. The *Mark anchors* tab places them, for the script you pick among those the font has marks of:
+
+- **Bases** (the script's letters, and their unencoded forms, *beh-ar.init*, by the name before the period) get *top* and *bottom* anchors; **marks** (Unicode's nonspacing marks) get the anchor they attach by (*_top* or *_bottom*, by where their ink sits: above or below half the x-height) and the one the next mark attaches to (*top* or *bottom*), for mark-to-mark. Anchors a glyph has already are kept.
+- **Where**: a base's anchor over (under) the center of its ink's top (bottom) fifth, a mark's under (over) the center of its ink, by how the corpus's fonts of that script place theirs: *diacritics/train/anchors.py* reads the *mark*, *abvm*, and *blwm* features of 143 open-licensed fonts (Noto Sans and Serif Khmer, Thai, Arabic, Devanagari, Battambang, Hanuman, Sarabun, Amiri, Hind, Mukta, and others) into *diacritics/anchor_model.json*. Thai and Devanagari set their marks right of center (Thai's top anchor at 43% of the base's width right of center, its marks' at their right edge), Arabic 0.10 em above the ink, Khmer 0.07 em.
+- **By hand**: the selected glyph is drawn with a mark attached; drag the mark, or press the arrow keys (Shift: 10 units), to move the glyph's anchor (a base's where the mark should sit, a mark's own so that it sits as shown).
+- **The code**: *Add checked anchors* adds them in every master, each measured on its own, and, for a font with one master, writes the *mark* and *mkmk* features between FreeLab's marker lines (`markClass` per mark, `pos base` per base, `pos mark` per mark), checked by fontTools' feature parser first. With several masters, the code is left to FontLab's automatic features, which read each master's anchors.
+
+Tried on fonts of the corpus, their own anchors taken away, the marks land a median 31 units (Noto Sans Thai) to 47 units (Sarabun) across and 27 to 35 up from where the fonts put them; Arabic is roughest (36 across, 117 up in Amiri, whose marks keep heights of their own). The anchors are a start, to adjust by eye.
+
+Not yet: ligature anchors (Arabic's *lam-alef*, *top_1* and *top_2*), Thai's tone marks lowered where there is no vowel above (a contextual substitution, not an anchor), and Devanagari's reph and matras, which take substitutions too.

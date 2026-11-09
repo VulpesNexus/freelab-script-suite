@@ -377,14 +377,12 @@ Click this help's ? button, then any control, for what it does."""
 class Tab(object):
     """One list: its settings row, its tree, its status, its action button."""
 
-    def __init__(self, QtGui, columns, action):
+    def __init__(self, QtGui, columns, action, make_status):
         self.widget = QtGui.QWidget()
         self.layout = QtGui.QVBoxLayout(self.widget)
         self.settings = QtGui.QHBoxLayout()
         self.layout.addLayout(self.settings)
-        self.status = QtGui.QLabel(u"")
-        self.status.setTextFormat(1)  # Qt.RichText: bold values
-        self.status.setWordWrap(True)
+        self.status = make_status()  # rich text (bold values), a line per sentence
         self.layout.addWidget(self.status)
         self.tree = QtGui.QTreeWidget()
         self.tree.setColumnCount(len(columns))
@@ -410,9 +408,9 @@ class KerningCheckDialog(object):
         dialog = self.dialog = QtGui.QDialog(main) if main is not None else QtGui.QDialog()
         dialog.setWindowTitle("FreeLab Kerning Check")
         dialog.setWhatsThis(HELP)
-        dialog.resize(820, 640)
+        self.ak.size_dialog(dialog)
         layout = QtGui.QVBoxLayout(dialog)
-        self.font_label = self.ak.rich(QtGui.QLabel(u""))
+        self.font_label = self.ak.status_label()
         self.font_label.setWordWrap(True)
         layout.addWidget(self.font_label)
         self.log = self.ak.Log()
@@ -438,7 +436,7 @@ class KerningCheckDialog(object):
         layout.addLayout(previews)
 
         self.collisions = Tab(QtGui, ("Pair", "Kerning", "Distance", "Fix", "Set by", "Compared with"),
-                              "Write checked fixes")
+                              "Write checked fixes", self.ak.status_label)
         tab = self.collisions
         tab.settings.addWidget(QtGui.QLabel("List kerned pairs whose ink comes within"))
         self.minimum = QtGui.QSpinBox()
@@ -469,7 +467,7 @@ class KerningCheckDialog(object):
         tab.action.setWhatsThis(u"Writes each checked pair's fix as a pair of its own (the class it takes its value "
                                 u"from kerns its other glyphs as before).")
 
-        self.cleanup = Tab(QtGui, ("Entry", "Value", "Why"), "Remove checked entries")
+        self.cleanup = Tab(QtGui, ("Entry", "Value", "Why"), "Remove checked entries", self.ak.status_label)
         tab = self.cleanup
         tab.settings.addWidget(QtGui.QLabel("Values smaller than"))
         self.tiny = QtGui.QSpinBox()
@@ -485,7 +483,7 @@ class KerningCheckDialog(object):
                               u"(unchecked).")
         tab.action.setWhatsThis(u"Removes the checked entries from the current master.")
 
-        self.masters = Tab(QtGui, ("Entry or class", "Values", "Why"), None)
+        self.masters = Tab(QtGui, ("Entry or class", "Values", "Why"), None, self.ak.status_label)
         tab = self.masters
         self.masters_button = QtGui.QPushButton("Compare masters")
         tab.settings.addWidget(self.masters_button)
@@ -503,7 +501,7 @@ class KerningCheckDialog(object):
                 tab.restore.setEnabled(False)
             self.tabs.addTab(label)
             self.pages.addWidget(tab.widget)
-        layout.addWidget(self.log.view)
+        layout.addWidget(self.log.widget)
 
         buttons = QtGui.QHBoxLayout()
         self.glyph_window_button = QtGui.QPushButton("Show in Glyph window")
@@ -534,6 +532,8 @@ class KerningCheckDialog(object):
         self.ak.plain_buttons(dialog)
         self.read_font()
         self.history_timer = self.ak.watch_history(self)
+        self.flagging = [self.ak.flag_menu(tab.tree, self, lambda: list(self.selected_pair() or []))
+                         for tab in (self.collisions, self.cleanup, self.masters)]
         self.update_buttons()
 
     # -- the font ------------------------------------------------------------
@@ -767,6 +767,7 @@ class KerningCheckDialog(object):
                 parents[key] = self.add_group(tab, (u"%s \N{EM DASH} %s" % (glyph_text(self.package, key),
                                                                                counted(len(groups[key]), u"pair")),))
                 parents[key].setFirstColumnSpanned(True)
+                self.ak.section_row(parents[key], tab.tree)
         for index, c in enumerate(found):
             where = kerning.describe(c.entry) if c.entry is not None else u""
             if c.reference is not None:

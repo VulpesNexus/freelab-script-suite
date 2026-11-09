@@ -1,0 +1,129 @@
+{
+ "anchors": {
+  "arabic bottom": {
+   "base_gap": 0.07,
+   "base_offset": 0.0049,
+   "fonts": 7,
+   "mark_gap": 0.017,
+   "mark_offset": 0.0,
+   "mark_to_mark": 0.021
+  },
+  "arabic top": {
+   "base_gap": 0.07,
+   "base_offset": -0.0075,
+   "fonts": 7,
+   "mark_gap": 0.02,
+   "mark_offset": 0.0009,
+   "mark_to_mark": 0.01
+  },
+  "cyrillic bottom": {
+   "base_gap": -0.724,
+   "base_offset": 0.0,
+   "fonts": 2,
+   "mark_gap": -0.2865,
+   "mark_offset": -0.0004
+  },
+  "cyrillic top": {
+   "base_gap": 0.0358,
+   "base_offset": 0.0,
+   "fonts": 9,
+   "mark_gap": -0.0058,
+   "mark_offset": 0.0,
+   "mark_to_mark": 0.0186
+  },
+  "devanagari bottom": {
+   "base_gap": 0.0,
+   "base_offset": 0.054,
+   "fonts": 14,
+   "mark_gap": -0.0137,
+   "mark_offset": 0.1068,
+   "mark_to_mark": 0.009
+  },
+  "devanagari top": {
+   "base_gap": 0.0,
+   "base_offset": 0.2557,
+   "fonts": 14,
+   "mark_gap": 0.058,
+   "mark_offset": 0.4171,
+   "mark_to_mark": 0.0215
+  },
+  "greek bottom": {
+   "base_gap": -0.3459,
+   "base_offset": -0.2294,
+   "fonts": 2,
+   "mark_gap": -0.0286,
+   "mark_offset": 0.1738
+  },
+  "greek top": {
+   "base_gap": -0.009,
+   "base_offset": 0.0,
+   "fonts": 4,
+   "mark_gap": 0.0622,
+   "mark_offset": -0.0688,
+   "mark_to_mark": 0.0367
+  },
+  "hebrew bottom": {
+   "base_gap": -0.001,
+   "base_offset": -0.4332,
+   "fonts": 2,
+   "mark_gap": 0.0639,
+   "mark_offset": -0.5382
+  },
+  "hebrew top": {
+   "base_gap": -0.3126,
+   "base_offset": -0.5185,
+   "fonts": 2,
+   "mark_gap": 0.372,
+   "mark_offset": -0.5556
+  },
+  "khmer bottom": {
+   "base_gap": 0.01,
+   "base_offset": 0.0007,
+   "fonts": 6,
+   "mark_gap": 0.05,
+   "mark_offset": 0.0016
+  },
+  "khmer top": {
+   "base_gap": 0.069,
+   "base_offset": -0.0026,
+   "fonts": 6,
+   "mark_gap": 0.0,
+   "mark_offset": 0.0,
+   "mark_to_mark": 0.0555
+  },
+  "latin bottom": {
+   "base_gap": -0.008,
+   "base_offset": 0.0,
+   "fonts": 118,
+   "mark_gap": 0.04,
+   "mark_offset": 0.0002,
+   "mark_to_mark": 0.006
+  },
+  "latin top": {
+   "base_gap": 0.0,
+   "base_offset": 0.0,
+   "fonts": 125,
+   "mark_gap": 0.061,
+   "mark_offset": 0.0,
+   "mark_to_mark": 0.0095
+  },
+  "thai bottom": {
+   "base_gap": -0.0075,
+   "base_offset": 0.4164,
+   "fonts": 7,
+   "mark_gap": 0.063,
+   "mark_offset": 0.5,
+   "mark_to_mark": 0.015
+  },
+  "thai top": {
+   "base_gap": -0.06,
+   "base_offset": 0.434,
+   "fonts": 7,
+   "mark_gap": 0.105,
+   "mark_offset": 0.4504,
+   "mark_to_mark": 0.002
+  }
+ },
+ "fonts": 140,
+ "format": 1
+}

@@ -30,7 +30,8 @@ import dataset  # noqa: E402  (the corpus: open-licensed fonts installed here)
 import freelab_diacritics as ac  # noqa: E402  (the marks' names and sides)
 
 MODEL_FILE = os.path.join(HERE, os.pardir, "mark_model.json")
-RANGES = ((0x00C0, 0x0250), (0x1E00, 0x1F00))
+CORPUS_DIR = os.path.join(os.environ.get("LOCALAPPDATA", ""), "FreeLab", "corpus")  # OFL fonts from Google Fonts
+RANGES = ((0x00C0, 0x0250), (0x1E00, 0x1F00), (0x0370, 0x0400), (0x0400, 0x0530), (0x1F00, 0x2000))
 MIN_FONTS = 5  # a median from fewer fonts than this is left out
 DOTLESS = {"i": 0x0131, "j": 0x0237}
 
@@ -40,7 +41,7 @@ def fonts():
     import glob
     from fontTools.ttLib import TTCollection, TTFont
     found = []
-    for folder in dataset.FONT_DIRS:
+    for folder in tuple(dataset.FONT_DIRS) + (CORPUS_DIR,):
         for pattern in ("*.ttf", "*.ttc"):
             for path in sorted(glob.glob(os.path.join(folder, pattern))):
                 try:
@@ -105,7 +106,9 @@ def measure_font(path, index):
             base = ink(glyf, components[0].glyphName)
             if base is None or base[2] - base[0] <= 0:
                 continue
-            case = "upper" if ch.isupper() else "lower"
+            case = ac.case_of(ch)
+            if case == "upper" and ac.script_of(ch) == "greek" and any(ord(m) in ac.LEFT_OF_CAPITALS for m in decomposed[1:]):
+                continue  # a Greek capital's tonos or breathing sits at its left, not above it
             width = float(base[2] - base[0])
             top, bottom = base[3], base[1]
             glyph_top, glyph_bottom = base[3], base[1]

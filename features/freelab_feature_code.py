@@ -365,9 +365,9 @@ class FeatureCodeDialog(object):
         dialog = self.dialog = QtGui.QDialog(main) if main is not None else QtGui.QDialog()
         dialog.setWindowTitle("FreeLab Feature Code")
         dialog.setWhatsThis(HELP)
-        dialog.resize(820, 860)
+        self.ak.size_dialog(dialog)
         layout = QtGui.QVBoxLayout(dialog)
-        self.status = self.ak.rich(QtGui.QLabel(u""))
+        self.status = self.ak.status_label()
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
         self.log = self.ak.Log()
@@ -416,7 +416,7 @@ class FeatureCodeDialog(object):
                                u"marker lines, the rest of each feature as it is.")
         layout.addWidget(self.code, 2)
 
-        layout.addWidget(self.log.view)
+        layout.addWidget(self.log.widget)
         buttons = QtGui.QHBoxLayout()
         self.restore_button = QtGui.QPushButton("Restore suggestions")
         self.restore_button.setWhatsThis(u"Puts every ligature's feature and every letter's check back as they first came.")
@@ -443,6 +443,19 @@ class FeatureCodeDialog(object):
         self.ligature_model = load_ligature_model()
         self.ak.plain_buttons(dialog)
         self.history_timer = self.ak.watch_history(self)
+        self.flagging = [self.ak.flag_menu(self.ligature_tree, self, lambda: self.selected_names(self.ligature_tree)),
+                         self.ak.flag_menu(self.alternate_tree, self, lambda: self.selected_names(self.alternate_tree))]
+
+    def selected_names(self, tree):
+        QtCore, QtGui = _qt()
+        items = tree.selectedItems()
+        if not items:
+            return []
+        if tree is self.ligature_tree:
+            index = int(items[0].data(0, QtCore.Qt.UserRole))
+            return [self.found[index].glyph] if 0 <= index < len(self.found) else []
+        base = u"%s" % items[0].data(0, QtCore.Qt.UserRole)
+        return [base] + list(self.sets.get(base, []))
 
     @staticmethod
     def heading(QtGui, text):

@@ -23,6 +23,7 @@ Valid Python 2.7 (FontLab 7) and Python 3. The core below needs no Qt and no Fon
 from __future__ import absolute_import, division, print_function
 
 import math
+import re
 import time
 import os
 import sys
@@ -952,7 +953,7 @@ def history_state(package):
 # lists a folder's scripts by file name and has no separators of its own.
 MENU_GROUPS = (("Diacritics", "Auto Spacing", "CJK Spacing", "Auto Kerning", "Kerning Check", "Feature Code"),
                ("Toggle Dark Mode", "Dark Mode Settings"),
-               ("Start Listener", "Stop Listener"))
+               ("Start MCP Listener", "Stop MCP Listener", "Start Listener", "Stop Listener"))  # (FreeLab MCP's, old names too)
 MENU_TITLE, SCRIPTS_MENU = "FreeLab", "menuScripts"
 MENU_ORDER_PROP = "freelab_menu_order"
 MENU_HOOK_VERSION = 2  # the Scripts menu's property holds it: an older hook found there is replaced
@@ -1079,24 +1080,122 @@ def rich(label):
     return label
 
 
+SENTENCE_END = re.compile(u"([.!?]|\N{HORIZONTAL ELLIPSIS})((?:</[bi]>)?)\\s+(?=[A-Z<(\u00c0-\u024f])")
+
+
+def sentences(text):
+    """Rich text with a line per sentence (a status line's sentences each start a line)."""
+    return SENTENCE_END.sub(lambda m: m.group(1) + m.group(2) + u"<br>", u"%s" % text).replace(u"\n", u"<br>")
+
+
+def status_label(text=u"", plain=False):
+    """A dialog's top line: rich text (or plain), wrapped, a line per sentence (its setText splits them)."""
+    QtCore, QtGui = _qt()
+
+    class StatusLabel(QtGui.QLabel):
+        def setText(self, text):
+            QtGui.QLabel.setText(self, SENTENCE_END.sub(lambda m: m.group(1) + m.group(2) + u"\n", u"%s" % text)
+                                 if plain else sentences(text))
+
+    label = StatusLabel()
+    if not plain:
+        rich(label)
+    label.setWordWrap(True)
+    label.setText(text)
+    return label
+
+
+DIALOG_SIZE = 1000  # pixels: each FreeLab window opens this wide and tall, or as near as the screen allows
+
+
+def size_dialog(dialog):
+    """1000 by 1000 pixels, or the most the screen's free area allows."""
+    QtCore, QtGui = _qt()
+    width = height = DIALOG_SIZE
+    try:
+        area = QtGui.QApplication.desktop().availableGeometry(dialog)
+        width, height = min(width, area.width() - 40), min(height, area.height() - 60)
+    except Exception:
+        pass
+    dialog.resize(width, height)
+
+
+def section_row(item, tree):
+    """A list's row heading a section: bold, with room above it."""
+    QtCore, QtGui = _qt()
+    try:
+        bold = QtGui.QFont(tree.font)
+        bold.setBold(True)
+        item.setFont(0, bold)
+        line = QtGui.QFontMetrics(bold).height()
+        item.setSizeHint(0, QtCore.QSize(0, int(line * 2.1)))
+        item.setTextAlignment(0, int(QtCore.Qt.AlignLeft | QtCore.Qt.AlignBottom))
+    except Exception:
+        pass
+    return item
+
+
 LOG_LINES = 4  # the log's height, in lines
 LOG_KEPT = 200  # entries kept
 LOG_COLORS = {"warning": ((224, 160, 40), (150, 95, 0)), "error": ((240, 96, 86), (190, 30, 20)),
               "done": ((120, 200, 120), (30, 120, 40))}  # (on a dark background, on a light one)
 
 
+LOG_HEIGHT = []  # the log's height as last dragged, kept for the next window (pixels)
+
+
 class Log(object):
     """A few lines under a dialog's list: what each action did, done in green, warnings in amber,
-    errors in red, newest first. The dialog's top line keeps to what the list shows."""
+    errors in red, newest first. The dialog's top line keeps to what the list shows. Its bottom edge
+    drags to make it taller (widget: the log and that edge, to put in a layout)."""
 
     def __init__(self):
         QtCore, QtGui = _qt()
         view = self.view = QtGui.QTextEdit()
         view.setReadOnly(True)
-        line = QtGui.QFontMetrics(view.font).lineSpacing()
-        view.setFixedHeight(int(line * LOG_LINES + 12))
-        view.setWhatsThis(u"What this window did, newest first: done in green, warnings in amber, errors in red.")
+        # Left to the palette: dark mode's mapping of text views left its scroll bar light
+        view.setProperty(LEAVE_ALONE_PROP, True)
+        self.line = QtGui.QFontMetrics(view.font).lineSpacing()
+        view.setFixedHeight(LOG_HEIGHT[0] if LOG_HEIGHT else int(self.line * LOG_LINES + 12))
+        view.setWhatsThis(u"What this window did, newest first: done in green, warnings in amber, errors in red. "
+                          u"Drag its bottom edge to make it taller.")
         self.entries = []
+        self.widget = QtGui.QWidget()
+        box = QtGui.QVBoxLayout(self.widget)
+        box.setContentsMargins(0, 0, 0, 0)
+        box.setSpacing(0)
+        box.addWidget(view)
+        grip = self.grip = QtGui.QFrame()
+        grip.setFixedHeight(6)
+        grip.setCursor(QtCore.Qt.SizeVerCursor)
+        grip.setToolTip(u"Drag to make the log taller or shorter")
+        box.addWidget(grip)
+        log = self
+
+        class Drag(QtCore.QTimer):  # PythonQt has no QObject to subclass; a timer will do
+            def eventFilter(self, obj, event):
+                try:
+                    kind = event.type()
+                    if kind == 2:  # MouseButtonPress
+                        log.start = (event.globalPos().y(), _property(log.view, "height"))
+                        return True
+                    if kind == 5 and getattr(log, "start", None):  # MouseMove, the button held
+                        y, height = log.start
+                        wanted = max(int(log.line * 2 + 12), min(int(log.line * 40), height + event.globalPos().y() - y))
+                        log.view.setFixedHeight(wanted)
+                        del LOG_HEIGHT[:]
+                        LOG_HEIGHT.append(wanted)
+                        return True
+                    if kind == 3:  # MouseButtonRelease
+                        log.start = None
+                        return True
+                except Exception:
+                    pass  # an event filter must never raise
+                return False
+
+        self.start = None
+        self.drag = Drag()
+        grip.installEventFilter(self.drag)
 
     def add(self, text, level="info"):
         """text is rich text already (html(), b(), and i() make its parts)."""
@@ -1259,6 +1358,70 @@ class ClickRegions(object):
             if x0 <= x < x1:
                 return key
         return None
+
+
+# FontLab's flags (its Flag menu: the glyph's mark, a hue plus one; 0 for none), as the lists offer them
+FLAG_COLORS = ((u"Red", 1), (u"Green", 121), (u"Cyan", 181), (u"Blue", 241), (u"Magenta", 301), (u"None", 0))
+
+
+def flag_menu(view, owner, names_of_selection):
+    """A right-click menu on a list: the selected row's glyphs flagged in FontLab, as its Flag menu
+    does, to find them again later (the Font window shows the flag; Select > Same Flag gathers them).
+    names_of_selection() gives the glyphs' names; owner has package, fontlab, log, and seen_history.
+    The handler is returned: keep it."""
+    QtCore, QtGui = _qt()
+
+    def show(pos):
+        try:
+            names = [n for n in (names_of_selection() or []) if n]
+            package = owner.package
+            if not names or package is None:
+                return
+            menu = QtGui.QMenu(owner.dialog)
+            title = menu.addAction(u"Flag %s in FontLab" % u" and ".join(names))
+            title.setEnabled(False)
+            menu.addSeparator()
+            actions = []
+            for label, value in FLAG_COLORS:
+                action = menu.addAction(label)
+                actions.append((action, label, value))
+            where = view.viewport().mapToGlobal(pos) if hasattr(view, "viewport") else view.mapToGlobal(pos)
+            picked = menu.exec_(where)
+            if picked is None:
+                return
+            for action, label, value in actions:
+                if action.text == picked.text:
+                    flag_glyphs(owner, names, label, value)
+                    break
+        except Exception as exc:
+            try:
+                owner.log.add(u"Flagging did not work: %s" % html(exc), "error")
+            except Exception:
+                pass
+
+    view.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+    view.connect("customContextMenuRequested(QPoint)", show)
+    return show
+
+
+def flag_glyphs(owner, names, label, value):
+    """The glyphs flagged (or unflagged) in FontLab, as one step of its History."""
+    package = owner.package
+    glyphs = []
+    for name in names:
+        glyph = package.findName(name)
+        if glyph is not None and not glyph.isNull:
+            glyph.mark = value
+            glyphs.append(glyph)
+    if not glyphs:
+        return
+    notify_changed(owner.fontlab, package, u"FreeLab flag", glyphs)
+    owner.seen_history = history_mark(package)  # its own step: nothing to read again
+    if value:
+        owner.log.add(u"Flagged %s %s in FontLab (Select &gt; Same Flag gathers them again)." % (
+            b(u", ".join(g.name for g in glyphs)), html(label.lower())), "done")
+    else:
+        owner.log.add(u"Took the flag off %s." % b(u", ".join(g.name for g in glyphs)), "done")
 
 
 def open_auto_kerning_at(left, right):
@@ -1452,7 +1615,7 @@ MERGE_RATE = 0.5  # two base letters may share a class when at least this share 
 CLASS_SIDES_LABELS = {"first": "First in a pair (the glyph's right side)", "second": "Second in a pair (the glyph's left side)"}
 CLASS_FLAGS = {"first": "KernLeft", "second": "KernRight"}  # FontLab's flags: KernLeft classes come first in pairs
 CLASS_PREFIX = {"first": "kern1_", "second": "kern2_"}
-CLASS_COLUMNS = ("Class", "Glyphs", "What happens", "May need pairs of their own")
+CLASS_COLUMNS = ("Class", "Glyphs", "Outcome", "May need pairs of their own")
 CLASS_EXCEPTIONS_LABEL = "Pairs too close with their class's value (each given a value of its own when written)"
 EXCEPTION_ROLE_BASE = 100000  # a row's data at or above this: a pair too close (its index above it), not a class
 
@@ -1673,15 +1836,15 @@ class ClassPlan(object):
         """(class, glyphs, what happens) as the classes dialog lists them."""
         glyphs = u" ".join(self.members)
         if self.action == "new":
-            return self.name, glyphs, u"New class"
+            return self.name, glyphs, u"New class."
         if self.action == "add":
             staying = [ch for ch, glyph in zip(self.members, self.glyphs) if glyph not in self.adding]
             return self.existing, u" ".join(self.characters(self.adding)), (
-                u"Added to the class" + (u" (with %s)" % u" ".join(staying) if staying else u""))
+                u"Added to the class" + (u" (with %s)" % u" ".join(staying) if staying else u"") + u".")
         if self.action == "same":
-            return self.existing, glyphs, u"The font has it"
+            return self.existing, glyphs, u"Nothing: the font has this class already."
         existing = u", ".join(self.existing) if isinstance(self.existing, list) else (self.existing or u"")
-        return existing, glyphs, u"Left as it is: " + self.reason
+        return existing, glyphs, u"Left as it is: " + self.reason.rstrip(u".") + u"."
 
     def key(self):
         """What this plan does, comparable across two workings-out (lists made tuples: hashable)."""
@@ -1887,9 +2050,9 @@ class AutoKerningDialog(object):
         dialog = self.dialog = QtGui.QDialog(self.main_window()) if self.main_window() is not None else QtGui.QDialog()
         dialog.setWindowTitle("FreeLab Auto Kerning")
         dialog.setWhatsThis(HELP)
-        dialog.resize(760, 940)
+        size_dialog(dialog)
         layout = QtGui.QVBoxLayout(dialog)
-        self.status = rich(QtGui.QLabel(self.font_line()))
+        self.status = status_label(self.font_line())
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
         self.log = Log()
@@ -1996,7 +2159,7 @@ class AutoKerningDialog(object):
                                                  u"Click to go to this H's pair with the glyph beside it"))
                               for key, button in self.choice_buttons.items())
         layout.addLayout(grid)
-        layout.addWidget(self.log.view)
+        layout.addWidget(self.log.widget)
         buttons = QtGui.QHBoxLayout()
         self.all_button = QtGui.QPushButton("Check new pairs")
         self.all_button.setWhatsThis("Checks every listed pair the font does not kern yet.")
@@ -2046,6 +2209,9 @@ class AutoKerningDialog(object):
         self.keys = self.make_keys()
         self.watcher = self.watch_palette()
         self.history_timer = watch_history(self)
+        self.flagging = flag_menu(self.table, self, lambda: [self.suggestions[self.selected].left,
+                                                              self.suggestions[self.selected].right]
+                                  if self.selected is not None else [])
         self.focus = None  # a pair to go to once the analysis is done (opened from another script)
         plain_buttons(dialog)
         self.update_buttons()
@@ -2777,10 +2943,9 @@ class ClassDialog(object):
         dialog = self.dialog = QtGui.QDialog(parent)
         dialog.setWindowTitle("FreeLab Kerning Classes")
         dialog.setWhatsThis(CLASS_HELP)
-        dialog.resize(900, 640)
+        size_dialog(dialog)
         layout = QtGui.QVBoxLayout(dialog)
-        self.status = QtGui.QLabel(u"")
-        self.status.setWordWrap(True)
+        self.status = status_label(plain=True)  # (its text names glyphs, which rich text could misread)
         layout.addWidget(self.status)
         self.tree = QtGui.QTreeWidget()
         self.tree.setColumnCount(len(CLASS_COLUMNS))
@@ -2792,7 +2957,7 @@ class ClassDialog(object):
                                u"differ most: the class's value would bring them too close there, so check those pairs "
                                u"after kerning the class.")
         layout.addWidget(self.tree, 1)
-        self.move = QtGui.QCheckBox("Move each new class's first glyph's pairs into the class")
+        self.move = QtGui.QCheckBox("Move each new class's first glyph's pairs into the class.")
         self.move.setChecked(True)
         self.move.setWhatsThis(u"A new class made from A, \N{LATIN CAPITAL LETTER A WITH GRAVE}, ... takes over A's own pairs on "
                                u"that side, so every member kerns as A does. Without it, the class starts with no kerning.")
@@ -2861,6 +3026,7 @@ class ClassDialog(object):
             top = QtGui.QTreeWidgetItem([CLASS_SIDES_LABELS[side]])
             self.tree.addTopLevelItem(top)
             top.setFirstColumnSpanned(True)
+            section_row(top, self.tree)
             order = {"new": 0, "add": 0, "overlap": 1, "same": 2}  # what can be made first, what the font has last
             for index, plan in sorted(enumerate(self.plans), key=lambda pair: (order[pair[1].action], pair[0])):
                 if plan.side != side:
@@ -2884,6 +3050,7 @@ class ClassDialog(object):
             top = QtGui.QTreeWidgetItem([CLASS_EXCEPTIONS_LABEL])
             self.tree.addTopLevelItem(top)
             top.setFirstColumnSpanned(True)
+            section_row(top, self.tree)
             for index, exception in enumerate(self.exceptions):
                 plan = self.plans[exception.plan_index]
                 class_name = plan.existing if isinstance(plan.existing, (type(u""), str)) else u""

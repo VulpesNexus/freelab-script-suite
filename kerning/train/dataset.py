@@ -36,8 +36,15 @@ OPEN_LICENSES = (("open font license", "OFL"), ("scripts.sil.org/ofl", "OFL"), (
                  ("apache license", "Apache"), ("apache.org/licenses", "Apache"))
 
 
+# Words of proprietary terms: a font whose license text has them is not open-licensed, even where it
+# names an open license for some part of it (Segoe UI Historic's Apache-licensed Noto components).
+PROPRIETARY = ("microsoft supplied font", "any other use is prohibited", "end user license agreement")
+
+
 def license_of(font):
     text = " ".join(str(r) for r in font["name"].names if r.nameID in (13, 14)).lower()
+    if any(marker in text for marker in PROPRIETARY):
+        return None
     for marker, name in OPEN_LICENSES:
         if marker in text:
             return name

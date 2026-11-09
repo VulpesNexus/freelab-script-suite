@@ -648,25 +648,36 @@ class VisibleColumnTests(unittest.TestCase):
 
 
 class InkLabelTests(DarkModeCase):
-    # The font window's mark flag (QLabel#labelMark): mapped, then mapped again by the window's ink
-    # effect, its pole turned black. Inside the ink effect, a label's image is mapped once, by the effect.
+    # Inside the ink effect, a label's image is mapped once, by the effect (a label mapped first, then
+    # mapped again by the effect, went wrong). The font window's mark flag is the exception: the effect
+    # left its black pole black, so dark mode maps its image and has the effect draw it as it is.
     def test_a_label_inside_the_ink_effect_keeps_its_image(self):
         self.odd.light = "ink"
-        flag = FakeWidget("QLabel", "labelMark", parent=self.odd, inherits=("QLabel",))
-        original = flag.pixmap = LabelPixmap()
+        label = FakeWidget("QLabel", "labelIcon", parent=self.odd, inherits=("QLabel",))
+        original = label.pixmap = LabelPixmap()
         self.on()
         self.assertIsNotNone(self.odd.effect)
-        self.assertIs(flag.pixmap, original)
+        self.assertIs(label.pixmap, original)
 
     def test_a_label_mapped_before_the_ink_effect_gets_its_image_back(self):
         box = FakeWidget("QWidget", "box", parent=self.content)
-        flag = FakeWidget("QLabel", "labelMark", parent=box, inherits=("QLabel",))
-        original = flag.pixmap = LabelPixmap()
+        label = FakeWidget("QLabel", "labelIcon", parent=box, inherits=("QLabel",))
+        original = label.pixmap = LabelPixmap()
         self.on()
-        self.assertIsInstance(flag.pixmap, Mapped)
+        self.assertIsInstance(label.pixmap, Mapped)
         dm._set_effect(box, dm._record(box), "ink")
-        self.assertIs(flag.pixmap, original)
-        self.assertNotIn("pixmap", dm._record(flag), "nothing left to restore when switching off")
+        self.assertIs(label.pixmap, original)
+        self.assertNotIn("pixmap", dm._record(label), "nothing left to restore when switching off")
+
+    def test_the_mark_flag_is_mapped_and_drawn_as_mapped(self):
+        self.odd.light = "ink"
+        flag = FakeWidget("QLabel", "labelMark", parent=self.odd, inherits=("QLabel",))
+        flag.pixmap = LabelPixmap()
+        self.on()
+        self.assertIsInstance(flag.pixmap, Mapped, "its pole made light")
+        self.assertTrue(dm._record(flag).get("protected"), "the ink effect draws it unmapped")
+        dm._set_effect(self.odd, dm._record(self.odd), "ink")
+        self.assertIsInstance(flag.pixmap, Mapped, "not handed back to the effect")
 
     def test_a_protected_widget_between_keeps_its_labels_images(self):
         # the ink effect draws a protected widget (the defringe bar) unmapped: an image inside it stays
@@ -685,7 +696,7 @@ class InkLabelTests(DarkModeCase):
 
     def test_an_image_fontlab_replaced_meanwhile_stays(self):
         box = FakeWidget("QWidget", "box", parent=self.content)
-        flag = FakeWidget("QLabel", "labelMark", parent=box, inherits=("QLabel",))
+        flag = FakeWidget("QLabel", "labelIcon", parent=box, inherits=("QLabel",))
         flag.pixmap = LabelPixmap()
         self.on()
         newer = flag.pixmap = LabelPixmap()  # FontLab's own, set after the swap

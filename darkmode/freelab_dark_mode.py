@@ -1028,10 +1028,15 @@ def _watcher():
         class StyleWatcher(QTimer):
             def eventFilter(self, obj, event):
                 try:
-                    if event.type() == STYLE_CHANGE_EVENT:
+                    kind = event.type()
+                    if kind == STYLE_CHANGE_EVENT:
                         module = _module()
                         if module is not None:
                             module._on_style_change(obj)
+                    elif kind == PAINT_EVENT and obj.property(MARK_FLAG_PROP):
+                        module = _module()
+                        if module is not None:
+                            module._on_flag_paint(obj)
                 except Exception as exc:  # an event filter must never raise
                     _note_error("watcher", exc)
                 return False
@@ -1226,6 +1231,13 @@ def _swap_icon(obj):
 
 
 MAX_ICON_SIDE = 64  # label images larger than this are pictures (artwork, previews), left as they are
+# The font window's mark flag (a red flag on a black pole): its image is mapped by dark mode, and the
+# ink effect around it draws it as mapped (protected). Left to the effect, as other labels inside it
+# are, its pole stayed black: the effect read the thin black line beside the red as the flag's own.
+# FontLab hands it a new image for each glyph's mark; a paint of an image not mapped yet swaps it.
+MARK_FLAG_NAMES = ("labelMark",)
+MARK_FLAG_PROP = "freelabMarkFlag"
+PAINT_EVENT = 12
 
 
 def _swap_pixmap(label):
@@ -1235,12 +1247,28 @@ def _swap_pixmap(label):
         return
     if pixmap.width() > MAX_ICON_SIDE or pixmap.height() > MAX_ICON_SIDE:
         return
-    if _under_ink(label):
+    flag = (_prop(label, "objectName") or u"") in MARK_FLAG_NAMES
+    if not flag and _under_ink(label):
         return  # the ink effect around it maps its image as drawn (see _unswap_labels_inside)
     new = dark_pixmap(pixmap)
     state["mapped_keys"].add(new.cacheKey())
     _record(label)["pixmap"] = pixmap
     label.setPixmap(new)
+    if flag:
+        _protect(label)  # drawn as mapped, not mapped again by an effect around it
+        label.setProperty(MARK_FLAG_PROP, True)
+        _watch(label)
+
+
+def _on_flag_paint(label):
+    """The mark flag paints: an image FontLab set since (another glyph's mark) is mapped in turn."""
+    state = _state()
+    if not state["on"]:
+        return
+    pixmap = _prop(label, "pixmap")
+    if pixmap is not None and not pixmap.isNull() and pixmap.cacheKey() not in state["mapped_keys"]:
+        QTimer = _qt()[4]
+        QTimer.singleShot(0, lambda: _swap_pixmap(label) if _alive(label) else None)
 
 
 def _under_ink(widget):
@@ -1271,6 +1299,8 @@ def _unswap_labels_inside(widget):
         label = record.get("obj")
         if "pixmap" not in record or label is None or not _alive(label) or not widget.isAncestorOf(label):
             continue
+        if record.get("protected"):
+            continue  # the mark flag: drawn as dark mode mapped it
         if not _under_ink(label):
             continue  # a protected widget between them: the effect draws it unmapped, the mapped image stays
         original = record.pop("pixmap")

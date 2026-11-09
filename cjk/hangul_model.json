@@ -1,0 +1,32 @@
+{
+ "fixed_fonts": 11,
+ "fixed_width": 0.9,
+ "format": 1,
+ "proportional": {
+  "horizontal": [
+   0.0275,
+   0.025
+  ],
+  "horizontal final": [
+   0.0279,
+   0.0275
+  ],
+  "mixed": [
+   0.0289,
+   0.0585
+  ],
+  "mixed final": [
+   0.0329,
+   0.0555
+  ],
+  "vertical": [
+   0.0335,
+   0.055
+  ],
+  "vertical final": [
+   0.0352,
+   0.055
+  ]
+ },
+ "proportional_fonts": 8
+}

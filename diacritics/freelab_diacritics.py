@@ -50,10 +50,25 @@ SPACING_MARKS = {0x0300: 0x0060, 0x0301: 0x00B4, 0x0302: 0x02C6, 0x0303: 0x02DC,
                  0x0345: 0x037A}  # each combining mark's spacing form, found by its code point
 # A script's own forms of a mark, looked for first: (names, spacing code point). Greek's acute is its
 # tonos, steeper; Cyrillic's short i takes a breve of its own in many fonts.
-SCRIPT_MARKS = {("greek", "acute"): (("tonos",), 0x0384), ("cyrillic", "breve"): (("brevecomb-cy", "breve-cy"), None)}
-# Two marks Greek draws as one (the tonos between the dialytika's dots): the font's glyph for both, or
-# its two marks set over each other.
-JOINED_MARKS = {("greek", (0x0308, 0x0301)): ("dieresistonos", 0x0385)}
+SCRIPT_MARKS = {("greek", "acute"): (("tonos", "oxia"), 0x0384), ("greek", "grave"): (("varia",), 0x1FEF),
+                ("cyrillic", "breve"): (("brevecomb-cy", "breve-cy"), None)}
+# Two marks Greek draws as one: the font's glyph for both (by name or code point), or its two marks
+# set over each other (the tonos between the dialytika's dots), side by side (a breathing and its
+# accent, the breathing first), or one on the other (the perispomeni over a breathing).
+JOINED_MARKS = {("greek", (0x0308, 0x0301)): ("dieresistonos", 0x0385, "over"),
+                ("greek", (0x0308, 0x0300)): ("dialytikavaria", 0x1FED, "over"),
+                ("greek", (0x0308, 0x0342)): ("dialytikaperispomeni", 0x1FC1, "stacked"),
+                ("greek", (0x0313, 0x0301)): ("psilioxia", 0x1FCE, "beside"),
+                ("greek", (0x0313, 0x0300)): ("psilivaria", 0x1FCD, "beside"),
+                ("greek", (0x0313, 0x0342)): ("psiliperispomeni", 0x1FCF, "stacked"),
+                ("greek", (0x0314, 0x0301)): ("dasiaoxia", 0x1FDE, "beside"),
+                ("greek", (0x0314, 0x0300)): ("dasiavaria", 0x1FDD, "beside"),
+                ("greek", (0x0314, 0x0342)): ("dasiaperispomeni", 0x1FDF, "stacked")}
+JOINED_GAP_SHARE = 0.025  # the gap between two joined marks, side by side or one on the other, as a share of the em
+# A Greek capital's iota subscript is written after it (the prosgegrammeni, an adscript): its glyph,
+# by code point or name, else the iota.
+ADSCRIPT = ((0x1FBE,), ("prosgegrammeni", "iotaadscript"), 0x03B9)
+ADSCRIPT_GAP_SHARE = 0.03  # between a capital and its adscript, as a share of the em
 # Greek capitals carry these at their left, not above (Ά, Ἀ): the glyph made wider for them.
 LEFT_OF_CAPITALS = (0x0301, 0x0300, 0x0313, 0x0314, 0x0342)
 LEFT_GAP_SHARE = 0.03  # the gap between a mark at a capital's left and the capital, as a share of the em
@@ -66,7 +81,8 @@ DRAFTS = {"dotaccent": ((0x002E,), 1, False), "dieresis": ((0x002E,), 2, False),
           "ring": ((0x00B0,), 1, False), "tilde": ((0x007E,), 1, False), "circumflex": ((0x005E,), 1, False),
           "caron": ((0x005E,), 1, True), "grave": ((0x0060,), 1, False), "acute": ((0x00B4,), 1, False),
           "hungarumlaut": ((0x00B4,), 2, False), "dblgrave": ((0x0060,), 2, False), "commaaccent": ((0x002C,), 1, False),
-          "cedilla": ((0x002C,), 1, False)}
+          "cedilla": ((0x002C,), 1, False), "commaabove": ((0x2019, 0x0027), 1, False),
+          "commareversedabove": ((0x2018,), 1, False), "perispomeni": ((0x007E,), 1, False)}
 DRAFT_SPACING = 0.5  # two drafted dots apart by this share of a dot's width
 DOTLESS = {u"i": (u"\u0131", ("dotlessi", "idotless")), u"j": (u"\u0237", ("dotlessj", "jdotless", "uni0237")),
            u"\u0456": (u"\u0131", ("dotlessi", "idotless")),  # Cyrillic i and je: the Latin dotless forms
@@ -74,8 +90,9 @@ DOTLESS = {u"i": (u"\u0131", ("dotlessi", "idotless")), u"j": (u"\u0237", ("dotl
 SETS = (("latin", "Latin-1, Latin Extended-A and -B", ((0x00C0, 0x0250),)),
         ("additional", "Latin Extended Additional (Vietnamese, and more)", ((0x1E00, 0x1F00),)),
         ("greek", "Greek", ((0x0370, 0x0400),)),
+        ("polytonic", "Greek Extended (polytonic)", ((0x1F00, 0x2000),)),
         ("cyrillic", "Cyrillic", ((0x0400, 0x0530),)),
-        ("all", "All", ((0x00C0, 0x0250), (0x1E00, 0x1F00), (0x0370, 0x0400), (0x0400, 0x0530))))
+        ("all", "All", ((0x00C0, 0x0250), (0x1E00, 0x1F00), (0x0370, 0x0400), (0x1F00, 0x2000), (0x0400, 0x0530))))
 NAMES_FILE = "glyph_names.json"
 BAND_SHARE = 0.2  # the top or bottom share of a letter's ink whose center a mark centers on
 DEFAULT_GAP_SHARE = 0.05  # a mark's gap to its letter, as a share of the em, with no model and no example
@@ -90,6 +107,8 @@ def side_of(code):
     """Where a combining mark goes: "above", "below", or "right" (the horn)."""
     if code == 0x031B:
         return "right"
+    if code == 0x0345:  # the iota subscript (its combining class, 240, is its own)
+        return "below"
     return "below" if unicodedata.combining(unichr_(code)) in (202, 220) else "above"
 
 
@@ -105,7 +124,8 @@ def unichr_(code):
 
 
 def case_of(ch):
-    return "upper" if ch.isupper() else "lower"
+    """"upper" or "lower"; Greek's capitals with an iota adscript (titlecase letters) are capitals."""
+    return "upper" if ch.isupper() or unicodedata.category(ch) == "Lt" else "lower"
 
 
 def script_of(ch):
@@ -116,6 +136,28 @@ def script_of(ch):
     if name.startswith(u"CYRILLIC"):
         return "cyrillic"
     return "latin"
+
+
+# Scripts whose marks the font's mark features attach (anchors): each one's code point ranges.
+ANCHOR_SCRIPTS = (("latin", ((0x0041, 0x0250), (0x0300, 0x0370), (0x1E00, 0x1F00))),
+                  ("greek", ((0x0370, 0x0400), (0x1F00, 0x2000))),
+                  ("cyrillic", ((0x0400, 0x0530),)),
+                  ("hebrew", ((0x0590, 0x0600), (0xFB1D, 0xFB50))),
+                  ("arabic", ((0x0600, 0x0700), (0x0750, 0x0780), (0x08A0, 0x0900), (0xFB50, 0xFE00), (0xFE70, 0xFF00))),
+                  ("devanagari", ((0x0900, 0x0980), (0xA8E0, 0xA900))),
+                  ("thai", ((0x0E00, 0x0E80),)),
+                  ("lao", ((0x0E80, 0x0F00),)),
+                  ("myanmar", ((0x1000, 0x10A0),)),
+                  ("khmer", ((0x1780, 0x1800), (0x19E0, 0x1A00))))
+
+
+def anchor_script(code):
+    """The script of a code point, among ANCHOR_SCRIPTS, or None."""
+    for script, ranges in ANCHOR_SCRIPTS:
+        for low, high in ranges:
+            if low <= code < high:
+                return script
+    return None
 
 
 _NAMES = {}
@@ -268,27 +310,37 @@ def plan(font, characters):
             base = font.glyph_for(dotless_char) or next((n for n in dotless_names if n in font.names), base)
         marks, lacking = [], []
         script, case = script_of(ch), case_of(ch)
-        joined = JOINED_MARKS.get((script, tuple(codes)))
-        if joined is not None:
-            glyph = joined[0] if joined[0] in font.names else font.by_code.get(joined[1])
-            if glyph:
-                marks.append(Mark(joined[0], "above", [(glyph, 1.0, 1.0, 0.0, 0.0)]))
+        steps, at = [], 0  # each mark's code point, or a pair of them Greek joins
+        while at < len(codes):
+            pair = tuple(codes[at:at + 2])
+            if len(pair) == 2 and (script, pair) in JOINED_MARKS:
+                steps.append(pair)
+                at += 2
             else:
-                parts = [make_mark(font, code, case, script) for code in codes]
-                if any(part is None for part in parts):
-                    lacking.append(joined[0])
-                else:
-                    marks.append(Mark(joined[0], "above", [part.parts[0] for part in parts],
-                                      u"its marks set over each other", joined=True))
-            codes = []
-        for code in codes:
-            mark = make_mark(font, code, case, script)
-            if mark is None:
-                lacking.append(MARKS.get(code) or u"U+%04X" % code)
+                steps.append(codes[at])
+                at += 1
+        for step in steps:
+            if isinstance(step, tuple):
+                mark = joined_mark(font, script, case, step)
+                if mark is None:
+                    lacking.append(JOINED_MARKS[(script, step)][0])
+                    continue
+                left = all(code in LEFT_OF_CAPITALS + (0x0313, 0x0314) for code in step)
+            elif step == 0x0345 and script == "greek" and case == "upper":
+                mark = adscript_mark(font)
+                if mark is None:
+                    lacking.append(u"prosgegrammeni")
+                    continue
+                left = False
             else:
-                if script == "greek" and case == "upper" and code in LEFT_OF_CAPITALS:
-                    mark.side = "left"
-                marks.append(mark)
+                mark = make_mark(font, step, case, script)
+                if mark is None:
+                    lacking.append(MARKS.get(step) or u"U+%04X" % step)
+                    continue
+                left = step in LEFT_OF_CAPITALS
+            if script == "greek" and case == "upper" and left:
+                mark.side = "left"
+            marks.append(mark)
         if lacking:
             recipes.append(Recipe(ch, missing=u"a %s" % u", a ".join(lacking)))
             continue
@@ -297,6 +349,36 @@ def plan(font, characters):
         recipe.refill = bool(existing)
         recipes.append(recipe)
     return recipes
+
+
+def joined_mark(font, script, case, codes):
+    """The Mark for two marks Greek joins: the font's glyph for both, else its two marks joined (over
+    each other, side by side, or one on the other); None when it lacks one."""
+    name, code, how = JOINED_MARKS[(script, codes)]
+    names = [name, glyph_names().get(code)]
+    if case == "upper":
+        names = [n + u".case" for n in names if n] + names
+    glyph = next((n for n in names if n and n in font.names), None) or font.by_code.get(code)
+    if glyph:
+        return Mark(name, "above", [(glyph, 1.0, 1.0, 0.0, 0.0)])
+    parts = [make_mark(font, c, case, script) for c in codes]
+    if any(part is None for part in parts):
+        return None
+    note = {"over": u"its marks set over each other", "beside": u"its marks side by side",
+            "stacked": u"one mark on the other"}[how]
+    return Mark(name, "above", [part.parts[0] for part in parts], note, joined=how)
+
+
+def adscript_mark(font):
+    """The Mark of a Greek capital's iota adscript, after the letter: the font's prosgegrammeni, or its
+    iota; None when it has neither."""
+    codes, names, iota = ADSCRIPT
+    glyph = next((font.by_code[c] for c in codes if c in font.by_code), None)
+    glyph = glyph or next((n for n in names if n in font.names), None) or font.by_code.get(iota)
+    if glyph is None:
+        return None
+    return Mark("prosgegrammeni", "adscript", [(glyph, 1.0, 1.0, 0.0, 0.0)],
+                None if glyph != font.by_code.get(iota) else u"the iota, as an adscript")
 
 
 def glyph_name(font, base, roots, code, names=None):
@@ -495,9 +577,21 @@ def mark_ink(mark, ink_of, placement, case):
         ink = inks[0]
         if wanted and ink.top - ink.bottom > 0:
             scale = min(1.5, max(0.3, wanted / float(ink.top - ink.bottom)))
+    gap = JOINED_GAP_SHARE * placement.upm
     for (glyph, sx, sy, _, _), ink in zip(mark.parts, inks):
         sx, sy = sx * scale, sy * scale
-        if mark.joined:  # over each other: centered on the first, their bottoms level
+        if mark.joined == "stacked" and laid:  # on the first: centered over it
+            first, (_, fsx, fsy, fx, fy) = inks[0], laid[0]
+            center = fx + fsx * (first.left + first.right) / 2.0
+            laid.append((glyph, sx, sy, center - sx * (ink.left + ink.right) / 2.0,
+                         fy + fsy * first.top + gap - sy * ink.bottom))
+            continue
+        if mark.joined == "beside" and laid:  # after the first, a little apart, their bottoms level
+            first, (_, fsx, fsy, fx, fy) = inks[0], laid[0]
+            laid.append((glyph, sx, sy, fx + fsx * first.right + gap - sx * ink.left,
+                         fy + fsy * first.bottom - sy * ink.bottom))
+            continue
+        if mark.joined in (True, "over"):  # over each other: centered on the first, their bottoms level
             first = inks[0]
             center = laid[0][3] + laid[0][1] * (first.left + first.right) / 2.0 if laid else sx * (first.left + first.right) / 2.0
             laid.append((glyph, sx, sy, center - sx * (ink.left + ink.right) / 2.0, sy * (first.bottom - ink.bottom)))
@@ -523,11 +617,19 @@ def layout(recipe, ink_of, placement, letter, gap_share=1.0, stack_share=1.0, sc
     top, bottom = base.top, base.bottom
     previous = {"above": None, "below": None}
     left_edge = base.left
+    adscript = 0
     for mark in recipe.marks:
         box, laid = mark_ink(mark, ink_of, placement, case)
         if box is None:
             return None, None, None, 0
         side = mark.side
+        if side == "adscript":  # after a Greek capital, on the baseline
+            gap = ADSCRIPT_GAP_SHARE * placement.upm
+            start = base.advance + gap
+            for glyph, sx, sy, x, yy in laid:
+                parts.append((glyph, sx, sy, round(x - box.left + start), round(yy - box.bottom + base.bottom)))
+            adscript = gap + box.width + max(base.left, 0)
+            continue
         if side == "left":  # at a capital's left, its top level with the capital's (Greek)
             gap = LEFT_GAP_SHARE * placement.upm * gap_share
             height = (box.top - box.bottom) * scale
@@ -567,7 +669,7 @@ def layout(recipe, ink_of, placement, letter, gap_share=1.0, stack_share=1.0, sc
     widen = max(0, int(round(base.left - left_edge)))
     if widen:  # everything moves right, so the mark keeps the letter's left sidebearing
         parts = [(glyph, sx, sy, x + widen, y) for glyph, sx, sy, x, y in parts]
-    return parts, top, bottom, widen
+    return parts, top, bottom, widen + int(round(adscript))
 
 
 def mark_ranges(recipe):
@@ -649,6 +751,176 @@ def finished(recipe, parts, ink_of):
     if recipe.adjust:
         recipe.notes.append(u"marks placed by hand")
     return adjusted(recipe, parts, ink_of)
+
+
+# ---------------------------------------------------------------------------
+# Mark anchors (scripts whose marks the font's mark features attach)
+# ---------------------------------------------------------------------------
+
+ANCHOR_MODEL_FILE = "anchor_model.json"
+ANCHOR_BLOCK = "anchors"
+ANCHOR_BEGIN, ANCHOR_END = u"# >>> FreeLab %s (made by FreeLab Diacritics)", u"# <<< FreeLab %s"
+FONTLAB_AUTO, FONTLAB_HANDED = u"#> feature", u"#/> feature"
+MARK_FEATURES = {"mark": "Mark Positioning", "mkmk": "Mark to Mark Positioning"}
+DEFAULT_ANCHOR = {"base_gap": 0.0, "base_offset": 0.0, "mark_gap": 0.06, "mark_offset": 0.0, "mark_to_mark": 0.01}
+
+
+def load_anchor_model(path=None):
+    """The corpus's anchor placements (anchor_model.json beside this script), or {}."""
+    import io
+    import json
+    path = path or os.path.join(os.path.dirname(os.path.abspath(globals().get("__file__") or ".")), ANCHOR_MODEL_FILE)
+    try:
+        with io.open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+        return data if data.get("format") == 1 else {}
+    except (IOError, OSError, ValueError):
+        return {}
+
+
+class AnchorGlyph(object):
+    """A base or a mark of a script, with the anchors to add ({name: (x, y)}) and those it has."""
+
+    def __init__(self, name, code, role, ink, existing=None):
+        self.name, self.code, self.role, self.ink = name, code, role, ink  # ink: an Ink
+        self.existing = dict(existing or {})
+        self.anchors = {}  # name: (x, y), the ones to add
+        self.adjust = {}  # name: [dx, dy], moved by hand
+        self.side = None  # a mark's side: "top" or "bottom"
+        self.checked = True
+
+    def placed(self):
+        """{name: (x, y)} of every anchor it will have: its own, and those to add, as moved by hand."""
+        found = dict(self.existing)
+        for name, (x, y) in self.anchors.items():
+            dx, dy = self.adjust.get(name, (0, 0))
+            found[name] = (round(x + dx), round(y + dy))
+        return found
+
+
+def anchor_row(model, script, side):
+    row = dict(DEFAULT_ANCHOR)
+    found = model.get("anchors", {}).get(u"%s %s" % (script, side)) or model.get("anchors", {}).get(u"latin %s" % side)
+    row.update(found or {})
+    return row
+
+
+def mark_side_of(ink, x_height):
+    """Where a mark goes, by its ink: above when its middle is at least halfway up the x-height."""
+    return "top" if (ink.bottom + ink.top) / 2.0 >= 0.5 * x_height else "bottom"
+
+
+def plan_anchors(glyphs, model, script, upm, x_height):
+    """AnchorGlyphs with their anchors to add: bases get top and bottom, each mark the anchor it
+    attaches by (_top or _bottom) and the one the next mark attaches to (top or bottom). glyphs:
+    [(name, code, "base" or "mark", Ink, {existing anchor: (x, y)})]. Anchors the glyph has already
+    are kept as they are. A base's anchor sits over (under) the center of its ink's top (bottom)
+    fifth, a mark's under (over) its ink's center, as far as the corpus's fonts of that script set
+    them."""
+    upm = float(upm)
+    planned = []
+    for name, code, role, ink, existing in glyphs:
+        if ink is None or ink.width <= 0:
+            continue
+        g = AnchorGlyph(name, code, role, ink, existing)
+        if role == "base":
+            for side in ("top", "bottom"):
+                row = anchor_row(model, script, side)
+                if side == "top":
+                    point = (ink.top_center + row["base_offset"] * ink.width, ink.top + row["base_gap"] * upm)
+                else:
+                    point = (ink.bottom_center + row["base_offset"] * ink.width, ink.bottom - row["base_gap"] * upm)
+                if side not in g.existing:
+                    g.anchors[side] = (round(point[0]), round(point[1]))
+        else:
+            side = g.side = mark_side_of(ink, x_height)
+            row = anchor_row(model, script, side)
+            x = ink.center + row["mark_offset"] * ink.width
+            if side == "top":
+                own, onward = (x, ink.bottom - row["mark_gap"] * upm), (x, ink.top + row["mark_to_mark"] * upm)
+            else:
+                own, onward = (x, ink.top + row["mark_gap"] * upm), (x, ink.bottom - row["mark_to_mark"] * upm)
+            for anchor, point in ((u"_" + side, own), (side, onward)):
+                if anchor not in g.existing:
+                    g.anchors[anchor] = (round(point[0]), round(point[1]))
+        if g.anchors:
+            planned.append(g)
+        else:
+            g.checked = False
+            planned.append(g)
+    return planned
+
+
+def mark_code(glyphs):
+    """{"mark": [lines], "mkmk": [lines]} attaching the marks to the bases and to each other, from every
+    anchor the glyphs will have (only checked glyphs, and glyphs with anchors of their own)."""
+    marks = [g for g in glyphs if g.role == "mark" and (g.checked or g.existing)]
+    bases = [g for g in glyphs if g.role == "base" and (g.checked or g.existing)]
+    classes = {}
+    lines = {"mark": [], "mkmk": []}
+    for g in sorted(marks, key=lambda g: g.name):
+        for name, (x, y) in sorted(g.placed().items()):
+            if name.startswith(u"_"):
+                side = name[1:]
+                classes.setdefault(side, []).append(g.name)
+                lines["mark"].append(u"markClass %s <anchor %d %d> @MC_%s;" % (g.name, x, y, side))
+    for g in sorted(bases, key=lambda g: g.name):
+        placed = g.placed()
+        attach = [u"<anchor %d %d> mark @MC_%s" % (placed[side][0], placed[side][1], side)
+                  for side in sorted(classes) if side in placed]
+        if attach:
+            lines["mark"].append(u"pos base %s %s;" % (g.name, u" ".join(attach)))
+    for g in sorted(marks, key=lambda g: g.name):
+        placed = g.placed()
+        attach = [u"<anchor %d %d> mark @MC_%s" % (placed[side][0], placed[side][1], side)
+                  for side in sorted(classes) if side in placed]
+        if attach:
+            lines["mkmk"].append(u"pos mark %s %s;" % (g.name, u" ".join(attach)))
+    return lines
+
+
+def freelab_feature(tag, old, lines, block=ANCHOR_BLOCK, titles=MARK_FEATURES):
+    """A feature's code with FreeLab's block (lines) before its closing line: an older FreeLab block
+    taken out, the rest kept, FontLab's automatic block handed back ("#/> feature")."""
+    import re
+    begin, end = ANCHOR_BEGIN % block, ANCHOR_END % block
+    kept, inside = [], False
+    for line in (old or u"").splitlines():
+        stripped = line.strip()
+        if stripped == begin:
+            inside = True
+            continue
+        if stripped == end:
+            inside = False
+            continue
+        if inside:
+            continue
+        if stripped.startswith(FONTLAB_AUTO):
+            line = line.replace(FONTLAB_AUTO, FONTLAB_HANDED, 1)
+        kept.append(line)
+    closing = None
+    for index in range(len(kept) - 1, -1, -1):
+        if re.match(r"^\s*}\s*%s\s*;" % re.escape(tag), kept[index]):
+            closing = index
+            break
+    if closing is None:
+        kept = [u"feature %s {" % tag, u"# %s" % titles.get(tag, tag), u""]
+        closing = len(kept)
+        kept.append(u"} %s;" % tag)
+    body = [begin] + [u"  %s" % line for line in lines] + [end] if lines else []
+    return u"\n".join(kept[:closing] + body + kept[closing:]) + u"\n"
+
+
+def mark_texts(glyphs, old_texts):
+    """{tag: new code} for mark and mkmk (a feature with nothing of FreeLab's and nothing to add is
+    left out)."""
+    lines = mark_code(glyphs)
+    new = {}
+    for tag in ("mark", "mkmk"):
+        old = old_texts.get(tag)
+        if lines[tag] or (ANCHOR_BEGIN % ANCHOR_BLOCK) in (old or u""):
+            new[tag] = freelab_feature(tag, old, lines[tag])
+    return new
 
 
 # ---------------------------------------------------------------------------
@@ -835,6 +1107,30 @@ def write_settings(ak, data):
         pass
 
 
+def has_character(family, code):
+    """Whether an installed font family itself has a character: QRawFont reads the family's own font
+    (QFontMetrics.inFontUcs4 answers for Windows' fallback fonts too, and drew another font's glyph
+    as the chosen one's)."""
+    QtCore, QtGui = _qt()
+    font = QtGui.QFont(family)
+    try:
+        if u"%s" % QtGui.QFontInfo(font).family() != u"%s" % family:
+            return False  # not installed: Qt picked another
+    except Exception:
+        pass
+    try:
+        raw = QtGui.QRawFont.fromFont(font)
+        valid = raw.isValid
+        if valid() if callable(valid) else valid:
+            return bool(raw.supportsCharacter(code))
+    except Exception:
+        pass
+    try:
+        return bool(QtGui.QFontMetrics(font).inFontUcs4(code))
+    except Exception:
+        return False
+
+
 def make_editor(owner):
     """The mark editor: a widget drawing the selected glyph between its neighbors, its marks clickable,
     movable, and scalable (PythonQt subclasses Qt widgets in Python; the class is made once Qt is in)."""
@@ -909,7 +1205,7 @@ def make_editor(owner):
             if self.scene is None or self.view is None:
                 return None
             boxes = dict(self.mark_boxes())
-            if self.selected in boxes:
+            if self.selected in boxes and not self.scene.get("move_only"):
                 for name, (hx, hy) in self.handles(boxes[self.selected]).items():
                     if abs(x - hx) <= HANDLE + 2 and abs(y - hy) <= HANDLE + 2:
                         return ("handle", name)
@@ -982,7 +1278,7 @@ def make_editor(owner):
                 painter.drawRect(QtCore.QRectF(left, top, right - left, bottom - top))
                 painter.setPen(QtGui.QPen(highlight, 1))
                 painter.setBrush(QtGui.QBrush(palette.color(QtGui.QPalette.Base)))
-                for hx, hy in self.handles(boxes[self.selected]).values():
+                for hx, hy in ([] if scene.get("move_only") else self.handles(boxes[self.selected]).values()):
                     painter.drawRect(QtCore.QRectF(hx - HANDLE, hy - HANDLE, 2 * HANDLE, 2 * HANDLE))
 
         # -- the mouse and the keys ---------------------------------------------
@@ -1112,6 +1408,506 @@ def make_editor(owner):
     return MarkEditor()
 
 
+ANCHOR_HELP_NOTE = (u"Moving the sample mark moves the selected glyph's anchor: a base's anchor where the mark should "
+                    u"sit, a mark's own so it sits as shown.")
+
+
+class AnchorPage(object):
+    """The Mark anchors tab: anchors for a script's bases and marks, and the mark and mkmk code that
+    attaches them, for scripts whose marks the font's features place (Khmer, Thai, Arabic, Devanagari,
+    and the combining marks of any script)."""
+    COLUMNS = ("Glyph", "Name", "Anchors to add", "Note")
+
+    def __init__(self, owner):
+        QtCore, QtGui = _qt()
+        self.owner, self.ak, self.fontlab = owner, owner.ak, owner.fontlab
+        ak = self.ak
+        self.widget = QtGui.QWidget()
+        layout = QtGui.QVBoxLayout(self.widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.status = ak.status_label()
+        self.status.setWordWrap(True)
+        layout.addWidget(self.status)
+        row = QtGui.QHBoxLayout()
+        row.addWidget(QtGui.QLabel(u"Script:"))
+        self.script_box = QtGui.QComboBox()
+        self.script_box.setWhatsThis(u"The script whose bases and marks get anchors: those the font has marks of.")
+        row.addWidget(self.script_box)
+        self.code_box = QtGui.QCheckBox(u"Write the mark and mkmk code")
+        self.code_box.setChecked(True)
+        self.code_box.setWhatsThis(u"Also writes the mark and mkmk features that attach the marks by these anchors, "
+                                   u"between FreeLab's marker lines (a font with one master: anchors are the same "
+                                   u"in every master only then).")
+        row.addWidget(self.code_box)
+        row.addStretch(1)
+        layout.addLayout(row)
+        self.tree = QtGui.QTreeWidget()
+        self.tree.setColumnCount(len(self.COLUMNS))
+        self.tree.setHeaderLabels(list(self.COLUMNS))
+        self.tree.setIconSize(QtCore.QSize(ICON_SIZE, ICON_SIZE))
+        self.tree.setProperty(ak.LEAVE_ALONE_PROP, True)
+        ak.grid_lines(self.tree)
+        self.tree.setWhatsThis(u"The script's bases (top and bottom anchors) and marks (the anchor each attaches by, "
+                               u"and the one the next mark attaches to). Anchors a glyph has already are kept. "
+                               u"Checked glyphs get theirs.")
+        layout.addWidget(self.tree, 3)
+        lower = QtGui.QVBoxLayout()
+        self.editor = make_editor(self)
+        self.editor.setProperty(ak.LEAVE_ALONE_PROP, True)
+        self.editor.setWhatsThis(u"The selected glyph with a mark attached by its anchors. " + ANCHOR_HELP_NOTE +
+                                 u" Drag the mark or press the arrow keys (Shift: 10 units).")
+        lower.addWidget(self.editor, 1)
+        hint_row = QtGui.QHBoxLayout()
+        self.hint = QtGui.QLabel(ANCHOR_HELP_NOTE)
+        self.hint.setWordWrap(True)
+        hint_row.addWidget(self.hint, 1)
+        self.reset_button = QtGui.QPushButton(u"Reset anchors")
+        self.reset_button.setWhatsThis(u"Puts the selected glyph's anchors back where they were suggested.")
+        hint_row.addWidget(self.reset_button)
+        lower.addLayout(hint_row)
+        layout.addLayout(lower, 2)
+        buttons = QtGui.QHBoxLayout()
+        self.all_button = QtGui.QPushButton(u"Check all")
+        self.none_button = QtGui.QPushButton(u"Check none")
+        self.restore_button = QtGui.QPushButton(u"Restore suggestions")
+        self.restore_button.setWhatsThis(u"Puts every check and every anchor moved by hand back as the list first came.")
+        self.write_button = QtGui.QPushButton(u"Add checked anchors")
+        self.write_button.setWhatsThis(u"Adds the checked glyphs' anchors in every master, each measured on its own, and "
+                                       u"writes the mark and mkmk code when asked. Edit > Undo takes it back.")
+        for button in (self.all_button, self.none_button, self.restore_button):
+            buttons.addWidget(button)
+        buttons.addStretch(1)
+        buttons.addWidget(self.write_button)
+        layout.addLayout(buttons)
+        self.script_box.connect("currentIndexChanged(int)", lambda index: self.run(keep_script=True))
+        self.all_button.connect("clicked()", lambda: self.check_all(True))
+        self.none_button.connect("clicked()", lambda: self.check_all(False))
+        self.restore_button.connect("clicked()", self.restore)
+        self.reset_button.connect("clicked()", self.reset_anchors)
+        self.write_button.connect("clicked()", self.write)
+        self.code_box.connect("toggled(bool)", lambda on: self.update_buttons())
+        self.tree.connect("itemSelectionChanged()", self.select)
+        self.tree.connect("itemChanged(QTreeWidgetItem*,int)", lambda item, column: self.changed())
+        self.tree.connect("itemDoubleClicked(QTreeWidgetItem*,int)", lambda item, column: self.show_in_glyph_window())
+        self.glyphs, self.first_checks, self.texts, self.names = [], {}, {}, []
+        self.package = self.master = None
+        self.model = load_anchor_model()
+        self.ink = None
+        self.buttons_due = False
+        self.loading = False
+
+    # -- the font --------------------------------------------------------------------
+
+    def scripts_present(self, package):
+        """The scripts the font has marks of, in ANCHOR_SCRIPTS' order."""
+        found = set()
+        for fg in package.fgPackage.glyphs:
+            code = fg.unicode
+            if code and unicodedata.category(unichr_(code)) in ("Mn", "Me"):
+                script = anchor_script(code)
+                if script:
+                    found.add(script)
+        return [script for script, _ in ANCHOR_SCRIPTS if script in found]
+
+    def collect(self, package, master, script, ink):
+        """[(name, code, role, Ink, existing anchors)] of the script's bases and marks: encoded letters and
+        marks, and their unencoded forms (beh-ar.init, ka-khmer.sub) by the name before the period."""
+        roles = {}
+        for fg in package.fgPackage.glyphs:
+            code = fg.unicode
+            if code and anchor_script(code) == script:
+                category = unicodedata.category(unichr_(code))
+                if category in ("Mn", "Me"):
+                    roles[fg.name] = ("mark", code)
+                elif category.startswith("L"):
+                    roles[fg.name] = ("base", code)
+        found = []
+        for fg in package.fgPackage.glyphs:
+            role = roles.get(fg.name) or (roles.get(fg.name.split(u".")[0]) if not fg.unicode else None)
+            if role is None:
+                continue
+            glyph = package.findName(fg.name)
+            layer = glyph.getLayerByName(master) if glyph is not None else None
+            if layer is None:
+                continue
+            existing = {}
+            try:
+                for anchor in layer.anchors:
+                    existing[u"%s" % anchor.name] = (anchor.point.x(), anchor.point.y())
+            except Exception:
+                pass
+            found.append((fg.name, fg.unicode or role[1], role[0], ink(fg.name), existing))
+        return found
+
+    def plan_for(self, master):
+        package = self.package
+        ink = FontLabInk(self.ak, package, master)
+        x_height = getattr(package, "xHeight_value", 0) or 0.5 * package.upm
+        script = self.script()
+        return plan_anchors(self.collect(package, master, script, ink), self.model, script, package.upm, x_height), ink
+
+    def script(self):
+        return self.scripts[self.script_box.currentIndex] if self.scripts and self.script_box.currentIndex >= 0 else "latin"
+
+    def run(self, keep_script=False):
+        QtCore, QtGui = _qt()
+        if self.loading:
+            return
+        ak = self.ak
+        kept = dict((g.name, (g.checked, dict(g.adjust))) for g in self.glyphs)
+        package = self.package = self.owner.current_font()
+        self.tree.blockSignals(True)
+        self.tree.clear()
+        self.tree.blockSignals(False)
+        self.glyphs = []
+        if package is None:
+            self.status.setText(u"No font is open.")
+            self.update_buttons()
+            return
+        self.master = package.master
+        if not keep_script:
+            self.loading = True
+            self.scripts = self.scripts_present(package)
+            self.script_box.clear()
+            for script in self.scripts:
+                self.script_box.addItem(script.capitalize())
+            self.loading = False
+        if not self.scripts:
+            self.status.setText(u"%s has no combining marks (Unicode's nonspacing marks): nothing to attach." % ak.b(package.tfn))
+            self.update_buttons()
+            return
+        self.glyphs, self.ink = self.plan_for(self.master)
+        for g in self.glyphs:
+            if g.name in kept:
+                g.checked, g.adjust = kept[g.name][0], kept[g.name][1]
+        self.first_checks = dict((g.name, g.checked) for g in self.glyphs)
+        features = package.fgPackage.features
+        self.texts = dict((tag, features.get_feature(tag)) for tag in features.keys())
+        self.names = [g.name for g in package.fgPackage.glyphs]
+        self.code_box.setChecked(package.mastersCount == 1 and self.code_box.checked)
+        self.code_box.setEnabled(package.mastersCount == 1)
+        self.fill()
+        bases = [g for g in self.glyphs if g.role == "base"]
+        marks = [g for g in self.glyphs if g.role == "mark"]
+        b = ak.b
+        rows = self.model.get("anchors", {}).get(u"%s top" % self.script(), {})
+        self.status.setText(u"%s, master %s, %s: %s and %s; %s get anchors, placed as %s of the corpus's %s fonts place "
+                            u"theirs.%s Nothing changes until you click %s." % (
+                                b(package.tfn), b(self.master), b(self.script().capitalize()),
+                                b(counted(len(bases), u"base")), b(counted(len(marks), u"mark")),
+                                b(sum(1 for g in self.glyphs if g.anchors)), b(rows.get("fonts", 0)),
+                                self.script().capitalize(),
+                                u" With several masters, the mark and mkmk code is left to FontLab's automatic features "
+                                u"(they read the anchors of each master)." if package.mastersCount > 1 else u"",
+                                ak.i(u"Add checked anchors")))
+
+    def fill(self):
+        QtCore, QtGui = _qt()
+        self.tree.blockSignals(True)
+        self.tree.clear()
+        bold = QtGui.QFont(self.tree.font)
+        bold.setBold(True)
+        for role, title in (("base", u"Bases"), ("mark", u"Marks")):
+            members = [(index, g) for index, g in enumerate(self.glyphs) if g.role == role]
+            if not members:
+                continue
+            top = QtGui.QTreeWidgetItem([u"%s (%d)" % (title, len(members))])
+            top.setData(0, QtCore.Qt.UserRole, -1)
+            self.tree.addTopLevelItem(top)
+            top.setFirstColumnSpanned(True)
+            self.ak.section_row(top, self.tree)
+            for index, g in members:
+                item = QtGui.QTreeWidgetItem([unichr_(g.code) if g.code else u"", g.name, u"", u""])
+                item.setData(0, QtCore.Qt.UserRole, index)
+                item.setFont(0, bold)
+                if g.anchors:
+                    item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsUserCheckable)
+                    item.setCheckState(0, QtCore.Qt.Checked if g.checked else QtCore.Qt.Unchecked)
+                else:
+                    item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable)
+                self.refresh_item(item, g)
+                top.addChild(item)
+            top.setExpanded(True)
+        for column in range(len(self.COLUMNS) - 1):
+            self.tree.resizeColumnToContents(column)
+        self.tree.blockSignals(False)
+        self.update_buttons()
+
+    def refresh_item(self, item, g):
+        QtCore, QtGui = _qt()
+        placed = g.placed()
+        item.setText(2, u", ".join(u"%s %d %d" % (name, placed[name][0], placed[name][1]) for name in sorted(g.anchors)))
+        notes = []
+        if g.existing:
+            notes.append(u"has %s already" % u", ".join(sorted(g.existing)))
+        if g.adjust:
+            notes.append(u"moved by hand")
+        if g.role == "mark" and g.side:
+            notes.insert(0, u"above" if g.side == "top" else u"below")
+        item.setText(3, (u"; ".join(notes) + u".") if notes else u"")
+        icon = self.owner_picture(g)
+        if icon is not None:
+            item.setIcon(0, QtGui.QIcon(icon))
+
+    def owner_picture(self, g):
+        """The glyph alone, in the dialog's text color."""
+        QtCore, QtGui = _qt()
+        path, advance = self.ink.path(g.name)
+        if path is None:
+            return None
+        size = ICON_SIZE
+        scale = float(size) / float(self.package.upm)
+        box = path.boundingRect()
+        pixmap = QtGui.QPixmap(max(int(max(advance, box.right()) * scale - min(0, box.left()) * scale) + 8, 8), int(size * 1.45))
+        pixmap.fill(QtGui.QColor(0, 0, 0, 0))
+        painter = QtGui.QPainter(pixmap)
+        try:
+            painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+            painter.translate(4 - min(0, box.left()) * scale, size * 1.1)
+            painter.scale(scale, -scale)
+            painter.fillPath(path, QtGui.QBrush(self.owner.dialog.palette.color(QtGui.QPalette.WindowText)))
+        finally:
+            painter.end()
+        return pixmap
+
+    def items(self):
+        found = []
+        for row in range(self.tree.topLevelItemCount):
+            top = self.tree.topLevelItem(row)
+            for child in range(top.childCount()):
+                found.append(top.child(child))
+        return found
+
+    def harvest(self):
+        QtCore, QtGui = _qt()
+        for item in self.items():
+            index = int(item.data(0, QtCore.Qt.UserRole))
+            if 0 <= index < len(self.glyphs) and item.flags() & QtCore.Qt.ItemIsUserCheckable:
+                self.glyphs[index].checked = item.checkState(0) == QtCore.Qt.Checked
+
+    def check_all(self, on):
+        QtCore, QtGui = _qt()
+        self.tree.blockSignals(True)
+        for item in self.items():
+            if item.flags() & QtCore.Qt.ItemIsUserCheckable:
+                item.setCheckState(0, QtCore.Qt.Checked if on else QtCore.Qt.Unchecked)
+        self.tree.blockSignals(False)
+        self.update_buttons()
+
+    def changed(self):
+        QtCore, QtGui = _qt()
+        if not self.buttons_due:
+            self.buttons_due = True
+            QtCore.QTimer.singleShot(0, self.update_buttons)
+
+    def update_buttons(self):
+        QtCore, QtGui = _qt()
+        self.buttons_due = False
+        ak = self.ak
+        self.harvest()
+        checkable = [g for g in self.glyphs if g.anchors]
+        ak.enable(self.all_button, any(not g.checked for g in checkable))
+        ak.enable(self.none_button, any(g.checked for g in checkable))
+        ak.enable(self.write_button, any(g.checked for g in checkable))
+        ak.enable(self.restore_button, any(g.adjust or self.first_checks.get(g.name, g.checked) != g.checked
+                                           for g in self.glyphs))
+        g = self.selected()
+        ak.enable(self.reset_button, g is not None and bool(g.adjust))
+
+    def restore(self):
+        for g in self.glyphs:
+            g.adjust = {}
+            g.checked = self.first_checks.get(g.name, g.checked)
+        self.fill()
+        self.select()
+        self.owner.log.add(u"Anchor checks and positions restored as suggested.")
+
+    def selected(self):
+        QtCore, QtGui = _qt()
+        items = self.tree.selectedItems()
+        if not items:
+            return None
+        index = int(items[0].data(0, QtCore.Qt.UserRole))
+        return self.glyphs[index] if 0 <= index < len(self.glyphs) else None
+
+    # -- the editor: a sample mark attached ---------------------------------------------
+
+    def samples(self, g):
+        """The glyphs drawn with g: for a base, a mark above and one below; for a mark, a base."""
+        if g.role == "base":
+            found = []
+            for side in ("top", "bottom"):
+                mark = next((m for m in self.glyphs if m.role == "mark" and m.side == side and (u"_" + side) in m.placed()), None)
+                found.append((side, mark))
+            return found
+        base = next((b for b in self.glyphs if b.role == "base" and b.code and g.side in b.placed()), None)
+        return [(g.side, base)]
+
+    def select(self):
+        g = self.selected()
+        self.editor.selected = None
+        self.editor.scene = self.scene(g) if g is not None else None
+        self.editor.update()
+        self.hint.setText(ANCHOR_HELP_NOTE)
+        self.update_buttons()
+
+    def scene(self, g):
+        placed = g.placed()
+        parts, ranges, self.edits = [], [], []
+        if g.role == "base":
+            parts.append((g.name, 1.0, 1.0, 0.0, 0.0))
+            for side, mark in self.samples(g):
+                if mark is None or side not in placed:
+                    continue
+                own = mark.placed()[u"_" + side]
+                parts.append((mark.name, 1.0, 1.0, placed[side][0] - own[0], placed[side][1] - own[1]))
+                ranges.append((len(parts) - 1, len(parts)))
+                self.edits.append((g, side, 1))
+            advance = self.ink.path(g.name)[1]
+        else:
+            side, base = self.samples(g)[0]
+            if base is None:
+                return None
+            target = base.placed()[side]
+            own = placed[u"_" + side]
+            parts = [(base.name, 1.0, 1.0, 0.0, 0.0), (g.name, 1.0, 1.0, target[0] - own[0], target[1] - own[1])]
+            ranges = [(1, 2)]
+            self.edits.append((g, u"_" + side, -1))
+            advance = self.ink.path(base.name)[1]
+        box = parts_box(parts, self.ink)
+        if box is None:
+            return None
+        upm = float(self.package.upm)
+        return {"glyphs": [(parts, max(advance, box[2] - min(0, box[0])), "new")], "parts": parts, "ranges": ranges,
+                "ink": self.ink, "upm": upm, "top": max(box[3], upm * 0.8) + upm * 0.05,
+                "bottom": min(box[1], -upm * 0.25) - upm * 0.05, "room": (), "letters": (None, None), "move_only": True}
+
+    def adjust_of(self, index):
+        if index is None or index >= len(getattr(self, "edits", [])):
+            return [0.0, 0.0, 1.0, 1.0]
+        g, name, sign = self.edits[index]
+        dx, dy = g.adjust.get(name, (0, 0))
+        return [sign * dx, sign * dy, 1.0, 1.0]
+
+    def set_adjust(self, index, change, final):
+        """The sample mark moved: the selected glyph's anchor moved with it (a mark's own the other way)."""
+        if index is None or index >= len(getattr(self, "edits", [])):
+            return
+        g, name, sign = self.edits[index]
+        dx, dy = round(change[0] * sign, 1), round(change[1] * sign, 1)
+        if abs(dx) < 0.5 and abs(dy) < 0.5:
+            g.adjust.pop(name, None)
+        else:
+            g.adjust[name] = [dx, dy]
+        selected = self.editor.selected
+        self.editor.scene = self.scene(self.selected())
+        self.editor.selected = selected
+        self.editor.update()
+        self.mark_selected(index)
+        if final:
+            for item in self.items():
+                index_ = int(item.data(0, _qt()[0].Qt.UserRole))
+                if 0 <= index_ < len(self.glyphs) and self.glyphs[index_] is g:
+                    self.tree.blockSignals(True)
+                    self.refresh_item(item, g)
+                    self.tree.blockSignals(False)
+            self.update_buttons()
+
+    def mark_selected(self, index):
+        if index is None or index >= len(getattr(self, "edits", [])):
+            self.hint.setText(ANCHOR_HELP_NOTE)
+            return
+        g, name, sign = self.edits[index]
+        x, y = g.placed().get(name, (0, 0))
+        self.hint.setText(u"%s's %s anchor: %d, %d. Drag the mark or press the arrow keys (Shift: 10 units); Backspace "
+                          u"puts it back." % (g.name, name, x, y))
+
+    def neighbor_clicked(self, role):
+        pass
+
+    def reset_anchors(self):
+        g = self.selected()
+        if g is None:
+            return
+        g.adjust = {}
+        self.fill()
+        self.update_buttons()
+
+    def show_in_glyph_window(self):
+        g = self.selected()
+        if g is None or self.package is None:
+            return
+        error = self.ak.show_in_glyph_window(self.fontlab, u"/%s" % g.name)
+        if error:
+            self.owner.log.add(u"FontLab did not open the glyph: %s" % self.ak.html(error), "error")
+
+    # -- writing -----------------------------------------------------------------------
+
+    def write(self):
+        QtCore, QtGui = _qt()
+        self.harvest()
+        package = self.package
+        if package is None:
+            return
+        current = self.owner.current_font()
+        if current is None or self.ak.font_key(current) != self.ak.font_key(package):
+            self.run()
+            self.owner.log.add(u"The font changed: here is this one's list. Nothing was added.", "warning")
+            return
+        chosen = dict((g.name, g) for g in self.glyphs if g.checked and g.anchors)
+        if not chosen:
+            return
+        new_texts = mark_texts(self.glyphs, self.texts) if self.code_box.checked else {}
+        if new_texts:
+            fc = None
+            try:
+                fc = self.ak.load_sibling("freelab_feature_code.py", "freelab_feature_code")
+            except Exception:
+                pass
+            if fc is not None:
+                problem = fc.check_code(u"languagesystem DFLT dflt;\n" + u"".join(new_texts.get(t, u"") for t in ("mark", "mkmk")),
+                                        self.names)
+                if problem:
+                    self.owner.log.add(u"The mark code has problems, so nothing was written: %s" % self.ak.html(problem), "error")
+                    return
+        added, touched, error = 0, [], None
+        try:
+            for master in list(package.masters) or [self.master]:
+                planned = dict((g.name, g) for g in self.plan_for(master)[0])
+                for name, g in chosen.items():
+                    here = planned.get(name)
+                    if here is None:
+                        continue
+                    here.adjust = g.adjust
+                    glyph = package.findName(name)
+                    layer = glyph.getLayerByName(master) if glyph is not None else None
+                    if layer is None:
+                        continue
+                    for anchor_name in sorted(here.anchors):
+                        if layer.findAnchor(anchor_name) is not None:
+                            continue
+                        x, y = here.placed()[anchor_name]
+                        pin = self.fontlab.flPinPoint(QtCore.QPointF(float(x), float(y)))
+                        pin.name = anchor_name
+                        layer.addAnchor(pin)
+                        added += 1
+                    if glyph not in touched:
+                        touched.append(glyph)
+            features = package.fgPackage.features
+            for tag in ("mark", "mkmk"):
+                if tag in new_texts and new_texts[tag] != self.texts.get(tag):
+                    features.set_feature(tag, new_texts[tag])
+        except Exception as exc:
+            error = exc
+        self.ak.notify_changed(self.fontlab, package, u"FreeLab Diacritics anchors", touched)
+        self.owner.log.add(u"Added %s to %s%s. Edit &gt; Undo takes it back." % (
+            self.ak.b(counted(added, u"anchor")), self.ak.b(counted(len(touched), u"glyph")),
+            u", and wrote the mark and mkmk code" if new_texts else u""), "done" if added else "info")
+        if error is not None:
+            self.owner.log.add(u"Stopped by an error: %s" % self.ak.html(error), "error")
+        self.run(keep_script=True)
+
+
 class AccentsDialog(object):
     COLUMNS = ("Glyph", "Name", "Built from")
 
@@ -1124,9 +1920,20 @@ class AccentsDialog(object):
         dialog = self.dialog = QtGui.QDialog(main) if main is not None else QtGui.QDialog()
         dialog.setWindowTitle("FreeLab Diacritics")
         dialog.setWhatsThis(HELP)
-        dialog.resize(900, 1000)
-        layout = QtGui.QVBoxLayout(dialog)
-        self.status = ak.rich(QtGui.QLabel(u""))
+        self.ak.size_dialog(dialog)
+        outer = QtGui.QVBoxLayout(dialog)
+        # A tab bar over plain pages (a QTabWidget's themed page frames its buttons in light colors in dark mode)
+        self.tabs = QtGui.QTabBar()
+        self.tabs.setExpanding(False)
+        outer.addWidget(self.tabs)
+        self.pages = QtGui.QStackedWidget()
+        outer.addWidget(self.pages, 1)
+        letters_page = QtGui.QWidget()
+        layout = QtGui.QVBoxLayout(letters_page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.pages.addWidget(letters_page)
+        self.tabs.addTab(u"Letters with diacritics")
+        self.status = ak.status_label()
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
         self.log = ak.Log()
@@ -1184,16 +1991,15 @@ class AccentsDialog(object):
                                  u"it back. Click the letter beside it to open the pair in Auto Kerning.")
         editing.addWidget(self.editor, 1)
         hint_row = QtGui.QHBoxLayout()
-        self.hint = QtGui.QLabel(u"Click a mark to move or scale it.")
+        self.hint = QtGui.QLabel(u"Click a diacritic to move or scale it.")
         self.hint.setWordWrap(True)
         hint_row.addWidget(self.hint, 1)
-        self.reset_marks_button = QtGui.QPushButton(u"Reset marks")
-        self.reset_marks_button.setWhatsThis(u"Puts this glyph's marks back where they were suggested.")
+        self.reset_marks_button = QtGui.QPushButton(u"Reset diacritics")
+        self.reset_marks_button.setWhatsThis(u"Puts this glyph's diacritics back where they were suggested.")
         hint_row.addWidget(self.reset_marks_button)
         editing.addLayout(hint_row)
         lower.addLayout(editing, 1)
         layout.addLayout(lower, 2)
-        layout.addWidget(self.log.view)
 
         buttons = QtGui.QHBoxLayout()
         self.all_button = QtGui.QPushButton("Check all")
@@ -1211,8 +2017,19 @@ class AccentsDialog(object):
             buttons.addWidget(button)
         buttons.addStretch(1)
         buttons.addWidget(self.build_button)
-        buttons.addWidget(self.close_button)
         layout.addLayout(buttons)
+        self.anchors = AnchorPage(self)
+        self.pages.addWidget(self.anchors.widget)
+        self.tabs.addTab(u"Mark anchors")
+        self.tabs.setTabToolTip(1, u"Anchors and mark features for scripts whose marks are attached, not built "
+                                   u"(Khmer, Thai, Arabic, Devanagari, and the combining marks of any script)")
+        outer.addWidget(self.log.widget)
+        closing = QtGui.QHBoxLayout()
+        closing.addStretch(1)
+        closing.addWidget(self.close_button)
+        outer.addLayout(closing)
+        self.anchors_read = False
+        self.tabs.connect("currentChanged(int)", self.switch_page)
         self.set_box.connect("currentIndexChanged(int)", lambda index: self.run())
         self.all_button.connect("clicked()", lambda: self.check_all(True))
         self.none_button.connect("clicked()", lambda: self.check_all(False))
@@ -1230,10 +2047,24 @@ class AccentsDialog(object):
         self.first_checks, self.seen_history, self.buttons_due, self.busy = {}, None, False, False
         self.settings = read_settings(ak)
         self.choosing_reference = False
+        self.reference_history = []
+        family = self.settings.get("reference")
+        if family:
+            self.reference_history.append(family)
         self.model = load_model()
         ak.plain_buttons(dialog)
         self.history_timer = ak.watch_history(self)
+        self.flagging = [ak.flag_menu(self.tree, self, self.flag_names),
+                         ak.flag_menu(self.anchors.tree, self, lambda: [self.anchors.selected().name]
+                                      if self.anchors.selected() is not None else [])]
         self.update_buttons()
+
+    def flag_names(self):
+        """The selected glyph, or its letter while it is not built."""
+        r = self.selected()
+        if r is None:
+            return []
+        return [r.name] if self.in_font(r) else [r.base] if r.base else []
 
     def current_font(self):
         workspace = self.fontlab.flWorkspace.instance()
@@ -1344,6 +2175,7 @@ class AccentsDialog(object):
             top = QtGui.QTreeWidgetItem([u"%s (%d)" % (title, len(indexes))])
             self.tree.addTopLevelItem(top)
             top.setFirstColumnSpanned(True)
+            self.ak.section_row(top, self.tree)
             top.setData(0, QtCore.Qt.UserRole, -1)
             for index in indexes:
                 r = self.recipes[index]
@@ -1452,6 +2284,7 @@ class AccentsDialog(object):
         r = self.selected()
         ak.enable(self.glyph_window_button, r is not None and self.in_font(r))
         ak.enable(self.reset_marks_button, r is not None and bool(r.adjust))
+        self.reset_marks_button.setText(u"Reset diacritic" if r is not None and len(r.marks) == 1 else u"Reset diacritics")
 
     def restore(self):
         """Every check and every mark as the list first came."""
@@ -1474,11 +2307,20 @@ class AccentsDialog(object):
         glyph = self.package.findName(r.name) if self.package is not None and r.name else None
         return glyph is not None and not is_empty(glyph)
 
+    def switch_page(self, index):
+        QtCore, QtGui = _qt()
+        self.pages.setCurrentIndex(index)
+        if index == 1 and not self.anchors_read:
+            self.anchors_read = True
+            QtCore.QTimer.singleShot(0, self.anchors.run)  # read as the tab is first shown
+
     def history_moved(self):
         """An undo, a redo, or an edit in FontLab: the font read again (checks and marks moved by hand
         kept)."""
         self.log.add(u"The font's History moved (an undo, a redo, or an edit): read again.")
         self.run()
+        if self.anchors_read:
+            self.anchors.run(keep_script=True)
 
     # -- the editor ----------------------------------------------------------------
 
@@ -1495,7 +2337,7 @@ class AccentsDialog(object):
             return
         self.editor.scene = self.scene(r)
         self.editor.update()
-        self.hint.setText(u"Click a mark to move or scale it.")
+        self.hint.setText(u"Click a diacritic to move or scale it.")
         self.draw_reference(r)
         self.update_buttons()
 
@@ -1556,7 +2398,7 @@ class AccentsDialog(object):
     def mark_selected(self, index):
         r = self.selected()
         if r is None or index is None or index >= len(r.marks):
-            self.hint.setText(u"Click a mark to move or scale it.")
+            self.hint.setText(u"Click a diacritic to move or scale it.")
             return
         dx, dy, kx, ky = self.adjust_of(index)
         mark = r.marks[index]
@@ -1673,7 +2515,11 @@ class AccentsDialog(object):
     def reference_changed(self):
         if self.choosing_reference:
             return
-        self.settings["reference"] = _property(self.reference_font, "currentFont").family()
+        family = u"%s" % _property(self.reference_font, "currentFont").family()
+        if family in self.reference_history:
+            self.reference_history.remove(family)
+        self.reference_history.insert(0, family)  # the fonts picked before: the fallbacks, latest first
+        self.settings["reference"] = family
         write_settings(self.ak, self.settings)
         self.draw_reference(self.selected())
 
@@ -1683,12 +2529,17 @@ class AccentsDialog(object):
             self.reference.clear()
             self.reference_note.setText(u"")
             return
-        font = QtGui.QFont(_property(self.reference_font, "currentFont"))
-        family = font.family()
-        if not QtGui.QFontMetrics(font).inFontUcs4(r.code):
+        chosen = u"%s" % _property(self.reference_font, "currentFont").family()
+        family = None
+        for candidate in [chosen] + self.reference_history + list(REFERENCE_FAMILIES):
+            if has_character(candidate, r.code):
+                family = candidate
+                break
+        if family is None:
             self.reference.clear()
-            self.reference_note.setText(u"%s does not have %s." % (family, r.char))
+            self.reference_note.setText(u"No reference font has %s." % r.char)
             return
+        font = QtGui.QFont(family)
         size = int(REFERENCE_WIDTH * 0.62)
         font.setPixelSize(size)
         path = QtGui.QPainterPath()
@@ -1704,7 +2555,10 @@ class AccentsDialog(object):
         finally:
             painter.end()
         self.reference.setPixmap(pixmap)
-        self.reference_note.setText(u"%s in %s." % (r.char, family))
+        if family == chosen:
+            self.reference_note.setText(u"%s in %s." % (r.char, family))
+        else:
+            self.reference_note.setText(u"%s lacks %s: shown in %s." % (chosen, r.char, family))
 
     # -- the Glyph window ----------------------------------------------------------
 

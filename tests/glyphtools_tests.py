@@ -129,6 +129,33 @@ class ScriptTests(unittest.TestCase):
         self.assertEqual(found[0x439].name, u"iishort-cy")
         self.assertEqual(found[0x457].base, "dotlessi", "the Ukrainian i takes the dotless i under its dieresis")
 
+    def test_polytonic(self):
+        self.font = ac.Font(["Alpha", "alpha", "omega", "Omega", "psilicomb", "oxia", "perispomeni", "iota",
+                             "ypogegrammenicomb", "prosgegrammeni"],
+                            [("Alpha", 0x391), ("alpha", 0x3B1), ("omega", 0x3C9), ("Omega", 0x3A9), ("oxia", 0x1FFD),
+                             ("perispomeni", 0x1FC0), ("iota", 0x3B9), ("prosgegrammeni", 0x1FBE)])
+        self.font.names.add("psilicomb")
+        self.font.by_code[0x1FBF] = "psilicomb"  # (found as the psili's spacing form)
+        found = self.plan([0x1F04, 0x1F0C, 0x1FB3, 0x1FBC, 0x1F66])
+        small = found[0x1F04]  # alpha with psili and oxia
+        self.assertEqual([(m.root, m.joined, [p[0] for p in m.parts]) for m in small.marks],
+                         [("psilioxia", "beside", ["psilicomb", "oxia"])], "the breathing and its accent side by side")
+        self.assertEqual(found[0x1F0C].marks[0].side, "left", "at a capital's left, as one")
+        self.assertEqual((found[0x1FB3].marks[0].root, found[0x1FB3].marks[0].side), ("ypogegrammeni", "below"))
+        adscript = found[0x1FBC].marks[0]
+        self.assertEqual((adscript.glyph, adscript.side), ("prosgegrammeni", "adscript"))
+        self.assertEqual([m.joined for m in found[0x1F66].marks], ["stacked"], "omega with psili and perispomeni")
+        inks = {"psilicomb": ac.Ink(0, 500, 60, 640), "oxia": ac.Ink(0, 500, 90, 700), "perispomeni": ac.Ink(0, 520, 150, 580),
+                "Alpha": ac.Ink(10, 0, 600, 700, advance=620), "prosgegrammeni": ac.Ink(0, 0, 40, 500)}.get
+        box, laid = ac.mark_ink(small.marks[0], inks, ac.Placement(1000), "lower")
+        self.assertEqual(laid[1][3], 60 + 25, "the oxia 0.025 em after the breathing")
+        stacked = found[0x1F66].marks[0]
+        box, laid = ac.mark_ink(stacked, inks, ac.Placement(1000), "lower")
+        self.assertEqual((laid[1][3] + 75, laid[1][4] + 520), (30, 640 + 25), "centered over the breathing, 0.025 em up")
+        parts, width = ac.place(found[0x1FBC], inks, ac.Placement(1000, MODEL))
+        self.assertEqual(parts[1][3:], (650, 0), "after the capital, 0.03 em past its width, on the baseline")
+        self.assertEqual(width, 620 + 30 + 40 + 10)
+
     def test_marks_moved_by_hand(self):
         recipe = ac.Recipe(u"x", "xacute", "x", [ac.Mark("acute", "above", [("acute", 1.0, 1.0, 0.0, 0.0)])])
         ink = {"acute": ac.Ink(0, 0, 100, 100)}.get
@@ -137,6 +164,50 @@ class ScriptTests(unittest.TestCase):
         recipe.adjust = {0: [10, -20, 2.0, 0.5]}
         moved = ac.adjusted(recipe, parts, ink)[1]
         self.assertEqual(moved, ("acute", 2.0, 0.5, 160, 505), "scaled about its center (250, 550), then moved")
+
+
+class AnchorTests(unittest.TestCase):
+    MODEL = {"anchors": {"thai top": {"base_gap": -0.06, "base_offset": 0.43, "mark_gap": 0.1, "mark_offset": 0.45,
+                                      "mark_to_mark": 0.01},
+                         "latin bottom": {"base_gap": 0.0, "base_offset": 0.0, "mark_gap": 0.04, "mark_offset": 0.0,
+                                          "mark_to_mark": 0.01}}}
+
+    def plan(self):
+        glyphs = [("ko", 0xE01, "base", ac.Ink(50, 0, 550, 500, top_center=300, bottom_center=300), {}),
+                  ("maiek", 0xE48, "mark", ac.Ink(-200, 600, -100, 700), {}),
+                  ("phinthu", 0xE3A, "mark", ac.Ink(-150, -200, -50, -100), {"_bottom": (-100, 0)}),
+                  ("koold", 0, "base", ac.Ink(50, 0, 550, 500), {"top": (1, 2), "bottom": (3, 4)})]
+        return dict((g.name, g) for g in ac.plan_anchors(glyphs, self.MODEL, "thai", 1000, 500))
+
+    def test_bases_and_marks(self):
+        found = self.plan()
+        ko, maiek, phinthu = found["ko"], found["maiek"], found["phinthu"]
+        self.assertEqual(ko.anchors["top"], (515, 440), "right of its top's center, a little under its top, as Thai sets it")
+        self.assertEqual(ko.anchors["bottom"], (300, 0), "the corpus's Latin, where Thai has no row")
+        self.assertEqual(maiek.side, "top")
+        self.assertEqual(maiek.anchors, {u"_top": (-105, 500), u"top": (-105, 710)})
+        self.assertEqual(phinthu.side, "bottom")
+        self.assertEqual(phinthu.anchors, {u"bottom": (-100, -210)}, "its own _bottom is kept")
+        self.assertFalse(found["koold"].checked, "nothing to add")
+
+    def test_mark_code(self):
+        found = self.plan()
+        found["ko"].adjust["top"] = [5, -10]
+        lines = ac.mark_code(list(found.values()))
+        self.assertIn(u"markClass maiek <anchor -105 500> @MC_top;", lines["mark"])
+        self.assertIn(u"markClass phinthu <anchor -100 0> @MC_bottom;", lines["mark"])
+        self.assertIn(u"pos base ko <anchor 300 0> mark @MC_bottom <anchor 520 430> mark @MC_top;", lines["mark"],
+                      "moved by hand")
+        self.assertIn(u"pos base koold <anchor 3 4> mark @MC_bottom <anchor 1 2> mark @MC_top;", lines["mark"],
+                      "a base's own anchors count")
+        self.assertIn(u"pos mark maiek <anchor -105 710> mark @MC_top;", lines["mkmk"])
+        old = u"\n".join([u"feature mark {", u"#> feature", u"#< feature", u"} mark;", u""])
+        texts = ac.mark_texts(list(found.values()), {"mark": old})
+        self.assertIn(u"#/> feature", texts["mark"])
+        self.assertTrue(texts["mkmk"].startswith(u"feature mkmk {"))
+        if HAVE_FONTTOOLS:
+            block = u"languagesystem DFLT dflt;\n" + texts["mark"] + texts["mkmk"]
+            self.assertIsNone(fc.check_code(block, ["ko", "maiek", "phinthu", "koold"]))
 
 
 class PlaceTests(unittest.TestCase):

@@ -48,6 +48,30 @@ class TrimTests(unittest.TestCase):
         self.assertEqual([t.name for t in cj.plan(glyphs, MODEL, 1000.0)], ["a-hira"], "kanji and Hangul stay")
 
 
+class HangulTests(unittest.TestCase):
+    MODEL = {"fixed_width": 0.9, "proportional": {"vertical": [0.03, 0.055], "horizontal": [0.0275, 0.025]}}
+
+    def test_shapes(self):
+        self.assertEqual(cj.hangul_shape(0xAC00), "vertical", "ga: its vowel beside")
+        self.assertEqual(cj.hangul_shape(0xAC01), "vertical final")
+        self.assertEqual(cj.hangul_shape(0xACE0), "horizontal", "go: its vowel under")
+        self.assertEqual(cj.hangul_shape(0xACFC), "mixed", "gwa: beside and under")
+        self.assertEqual(cj.hangul_shape(0xD7A3), "vertical final", "the last syllable, hih")
+
+    def test_one_width_centers_the_ink(self):
+        change = cj.hangul_change(0xAC00, "ga", 1000, 100, 860, "fixed", self.MODEL, 1000.0)
+        self.assertEqual((change.advance, change.shift), (900, 70 - 100), "900 wide, its 760 units of ink centered")
+        same = cj.hangul_change(0xAC00, "ga", 920, 80, 840, "fixed", self.MODEL, 1000.0, width=920)
+        self.assertIsNone(same, "the font's own width, centered already")
+
+    def test_proportional_by_shape(self):
+        change = cj.hangul_change(0xACE0, "go", 1000, 100, 860, "proportional", self.MODEL, 1000.0)
+        self.assertEqual((change.shift, change.advance), (-72, 813), "27.5 and 812.5, rounded half up")
+        self.assertIsNone(cj.hangul_change(0xACFC, "gwa", 1000, 100, 860, "proportional", self.MODEL, 1000.0),
+                          "a shape the model lacks")
+        self.assertIsNone(cj.hangul_change(0xAC00, "ga", 1000, 100, 860, "leave", self.MODEL, 1000.0))
+
+
 class CodeTests(unittest.TestCase):
     def trims(self):
         a = cj.suggest(cj.Trim(0x3042, "a-hira", "hiragana", 1000, 150, 880), MODEL, 1000.0)

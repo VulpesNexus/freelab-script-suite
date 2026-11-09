@@ -12,10 +12,14 @@ Writes the OpenType code that sets a Japanese font's full-width kana and punctua
   mark's half-width setting, as those fonts set it (an opening bracket keeps its right half, a comma
   its left).
 
+- Hangul widths: none of the corpus's Korean fonts kerns Hangul or puts it in palt; they set every
+  syllable at one width (0.9 em, the median) or give each its own, its sidebearings by its shape
+  (cjk/hangul_model.json, measured by cjk/train/hangul.py). On request, the font's syllables are set
+  either way: their outlines moved and their widths changed, in every master.
+
 Shows each glyph's trim and the text set both ways before anything is written, and writes only the
 glyphs you leave checked, between FreeLab's marker lines in palt and halt (the rest of each feature
-kept). Hangul is left at full width, as the corpus's Korean fonts leave it: proportional Korean comes
-from kerning.
+kept).
 
 Valid Python 2.7 (FontLab 7) and Python 3. The planning below the Qt line needs no Qt and no FontLab.
 """
@@ -27,6 +31,14 @@ import re
 import sys
 
 MODEL_FILE = "palt_model.json"
+HANGUL_MODEL_FILE = "hangul_model.json"
+HANGUL_MODES = (("leave", u"Leave as they are"), ("fixed", u"One width for all, ink centered"),
+                ("proportional", u"Proportional, by syllable shape"))
+HANGUL_SHAPES = (("vertical", u"Vowel beside (\uac00)"), ("vertical final", u"Vowel beside, final (\uac01)"),
+                 ("horizontal", u"Vowel under (\uace0)"), ("horizontal final", u"Vowel under, final (\uace1)"),
+                 ("mixed", u"Vowel beside and under (\uacfc)"), ("mixed final", u"Vowel beside and under, final (\uacfd)"))
+HANGUL_TOLERANCE = 2  # a syllable moved and widened by less than this is left alone
+KOREAN_SAMPLE = u"\ud55c\uae00 \uae00\uaf34\uc740 \uc774\ub807\uac8c \ubcf4\uc785\ub2c8\ub2e4."
 FULL_WIDTH_SHARE = 0.9  # a glyph narrower than this share of the em is proportional already: left alone
 TOLERANCE_UNITS = 4  # a trim smaller than this on both sides is not listed
 BEGIN, END = u"# >>> FreeLab %s (made by FreeLab CJK Spacing)", u"# <<< FreeLab %s"
@@ -56,6 +68,19 @@ def kind_of(code):
     return None
 
 
+VERTICAL_VOWELS = (0, 1, 2, 3, 4, 5, 6, 7, 20)  # a, ae, ya, yae, eo, e, yeo, ye, i: beside the initial
+HORIZONTAL_VOWELS = (8, 12, 13, 17, 18)  # o, yo, u, yu, eu: under it; the others are both
+
+
+def hangul_shape(code):
+    """A Hangul syllable's shape: its vowel beside its initial ("vertical": 가), under it
+    ("horizontal": 고), or both ("mixed": 과), with " final" for a final consonant (각)."""
+    index = code - 0xAC00
+    vowel, final = (index % 588) // 28, index % 28
+    shape = "vertical" if vowel in VERTICAL_VOWELS else "horizontal" if vowel in HORIZONTAL_VOWELS else "mixed"
+    return shape + (" final" if final else "")
+
+
 def unichr_(code):
     try:
         return unichr(code)  # noqa: F821 (Python 2)
@@ -65,11 +90,11 @@ def unichr_(code):
         return u"\N{REPLACEMENT CHARACTER}"
 
 
-def load_model(path=None):
-    """The CJK fonts' trims (palt_model.json beside this script), or {}."""
+def load_model(path=None, name=MODEL_FILE):
+    """The CJK fonts' trims (palt_model.json beside this script), or another model there, or {}."""
     import io
     import json
-    path = path or os.path.join(os.path.dirname(os.path.abspath(globals().get("__file__") or ".")), MODEL_FILE)
+    path = path or os.path.join(os.path.dirname(os.path.abspath(globals().get("__file__") or ".")), name)
     try:
         with io.open(path, encoding="utf-8") as handle:
             data = json.load(handle)
@@ -126,6 +151,43 @@ def plan(glyphs, model, upm):
         if trim.palt or trim.halt:
             trims.append(trim)
     return trims
+
+
+class HangulChange(object):
+    """A Hangul syllable set anew: its outline moved by shift, its width made advance."""
+
+    def __init__(self, code, name, shape, shift, advance, old_advance):
+        self.code, self.name, self.shape = code, name, shape
+        self.shift, self.advance, self.old_advance = shift, advance, old_advance
+
+
+def half_up(value):
+    """Rounded half up, as both Pythons do it alike (Python 3's round goes to the even number)."""
+    import math
+    return int(math.floor(value + 0.5))
+
+
+def hangul_change(code, name, advance, left, right, mode, model, upm, width=None):
+    """A syllable's change for a mode ("fixed": one width, its ink centered; "proportional": the
+    corpus's sidebearings for its shape), or None when it stays within the tolerance."""
+    shape = hangul_shape(code)
+    ink = right - left
+    if mode == "fixed":
+        new_advance = half_up(width if width else (model.get("fixed_width") or 0.9) * upm)
+        new_left = (new_advance - ink) / 2.0
+    elif mode == "proportional":
+        sides = model.get("proportional", {}).get(shape)
+        if not sides:
+            return None
+        new_left = sides[0] * upm
+        new_advance = ink + (sides[0] + sides[1]) * upm
+    else:
+        return None
+    shift = half_up(new_left - left)
+    new_advance = half_up(new_advance)
+    if abs(shift) < HANGUL_TOLERANCE and abs(new_advance - advance) < HANGUL_TOLERANCE:
+        return None
+    return HangulChange(code, name, shape, shift, new_advance, advance)
 
 
 def value_rule(name, value):
@@ -273,9 +335,9 @@ class CJKSpacingDialog(object):
         dialog = self.dialog = QtGui.QDialog(main) if main is not None else QtGui.QDialog()
         dialog.setWindowTitle("FreeLab CJK Spacing")
         dialog.setWhatsThis(HELP)
-        dialog.resize(760, 820)
+        self.ak.size_dialog(dialog)
         layout = QtGui.QVBoxLayout(dialog)
-        self.status = ak.rich(QtGui.QLabel(u""))
+        self.status = ak.status_label()
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
         self.log = ak.Log()
@@ -288,6 +350,16 @@ class CJKSpacingDialog(object):
         self.halt_box.setWhatsThis(u"Writes halt: each punctuation mark set in half the em, as the corpus's fonts set it.")
         row.addWidget(self.palt_box)
         row.addWidget(self.halt_box)
+        row.addWidget(QtGui.QLabel(u"Hangul:"))
+        self.hangul_box = QtGui.QComboBox()
+        for _, label in HANGUL_MODES:
+            self.hangul_box.addItem(label)
+        self.hangul_box.setWhatsThis(u"How the font's Hangul syllables are set: as they are; all at one width (the font's "
+                                     u"own where its syllables share one, else the corpus's 0.9 em), each one's ink "
+                                     u"centered; or proportionally, each with the sidebearings the corpus's proportional "
+                                     u"Korean fonts give its shape. Their outlines move and their widths change, in every "
+                                     u"master.")
+        row.addWidget(self.hangul_box)
         row.addStretch(1)
         layout.addLayout(row)
         self.tree = QtGui.QTreeWidget()
@@ -315,7 +387,7 @@ class CJKSpacingDialog(object):
             label.setToolTip(caption)
             layout.addWidget(label)
             self.previews.append((label, caption))
-        layout.addWidget(self.log.view)
+        layout.addWidget(self.log.widget)
         buttons = QtGui.QHBoxLayout()
         self.all_button = QtGui.QPushButton("Check all")
         self.none_button = QtGui.QPushButton("Check none")
@@ -345,8 +417,20 @@ class CJKSpacingDialog(object):
         self.trims, self.first_checks, self.texts, self.names = [], [], {}, []
         self.seen_history, self.busy, self.buttons_due = None, False, False
         self.model = load_model()
+        self.hangul_model = load_model(name=HANGUL_MODEL_FILE)
+        self.hangul_glyphs, self.hangul, self.hangul_checks, self.hangul_width = [], [], {}, None
+        self.hangul_box.connect("currentIndexChanged(int)", lambda index: self.plan_hangul())
         ak.plain_buttons(dialog)
         self.history_timer = ak.watch_history(self)
+        self.flagging = ak.flag_menu(self.tree, self, self.flag_names)
+
+    def flag_names(self):
+        QtCore, QtGui = _qt()
+        items = self.tree.selectedItems()
+        if not items:
+            return []
+        index = int(items[0].data(0, QtCore.Qt.UserRole))
+        return [self.trims[index].name] if 0 <= index < len(self.trims) else []
 
     def current_font(self):
         workspace = self.fontlab.flWorkspace.instance()
@@ -379,11 +463,13 @@ class CJKSpacingDialog(object):
             return
         master = package.master
         glyphs, hangul = [], 0
+        self.hangul_glyphs = []
         for fg in package.fgPackage.glyphs:
             code = fg.unicode
             kind = kind_of(code) if code else None
             if kind == "hangul":
                 hangul += 1
+                self.hangul_glyphs.append((code, fg.name))
             if kind not in KINDS:
                 continue
             glyph = package.findName(fg.name)
@@ -400,25 +486,79 @@ class CJKSpacingDialog(object):
         self.trims = plan(glyphs, self.model, float(package.upm))
         for t in self.trims:
             t.checked = kept.get(t.name, t.checked)
+        if not glyphs and hangul and u"%s" % self.sample.text == SAMPLE:
+            self.sample.setText(KOREAN_SAMPLE)
+        self.hangul_box.setEnabled(bool(hangul))
+        self.hangul = []
+        if hangul and HANGUL_MODES[self.hangul_box.currentIndex][0] != "leave":
+            self.measure_hangul()
         self.fill()
         self.first_checks = [True for _ in self.trims]
         b = ak.b
         full = sum(1 for g in glyphs if g[2] >= FULL_WIDTH_SHARE * package.upm)
+        korean = (u" Its %s Hangul syllables: none of the corpus's Korean fonts kerns or trims Hangul; choose how to "
+                  u"set their widths under %s." % (b(hangul), ak.i(u"Hangul:"))) if hangul else u""
         if not full:
             self.status.setText(u"%s, master %s, has no full-width kana or CJK punctuation: nothing to trim.%s" % (
-                ak.b(package.tfn), ak.b(master),
-                (u" Its %s Hangul syllables stay full width (see the help)." % ak.b(hangul)) if hangul else u""))
-            self.seen_history = ak.history_mark(package)
-            self.update_buttons()
-            return
-        self.status.setText(u"%s, master %s: %s of the %s full-width kana and punctuation %s a trim (palt: %s, halt: "
-                            u"%s). Nothing is written until you click %s.%s" % (
-                                b(package.tfn), b(master), b(len(self.trims)), b(full),
-                                u"gets" if len(self.trims) == 1 else u"get",
-                                b(sum(1 for t in self.trims if t.palt)), b(sum(1 for t in self.trims if t.halt)),
-                                ak.i(u"Write the code"),
-                                (u" Its %s Hangul syllables stay full width (see the help)." % b(hangul)) if hangul else u""))
+                b(package.tfn), b(master), korean))
+        else:
+            self.status.setText(u"%s, master %s: %s of the %s full-width kana and punctuation %s a trim (palt: %s, halt: "
+                                u"%s). Nothing is written until you click %s.%s" % (
+                                    b(package.tfn), b(master), b(len(self.trims)), b(full),
+                                    u"gets" if len(self.trims) == 1 else u"get",
+                                    b(sum(1 for t in self.trims if t.palt)), b(sum(1 for t in self.trims if t.halt)),
+                                    ak.i(self.write_button.text), korean))
         self.seen_history = ak.history_mark(package)
+        self.draw_previews()
+
+    # -- Hangul -----------------------------------------------------------------------
+
+    def hangul_mode(self):
+        return HANGUL_MODES[self.hangul_box.currentIndex][0]
+
+    def measure_hangul(self, master=None):
+        """The changes the chosen Hangul mode makes to the master's syllables (and the width it sets)."""
+        QtCore, QtGui = _qt()
+        package = self.package
+        master = master or package.master
+        mode = self.hangul_mode()
+        upm = float(package.upm)
+        measured = []
+        for count, (code, name) in enumerate(self.hangul_glyphs):
+            glyph = package.findName(name)
+            layer = glyph.getLayerByName(master) if glyph is not None else None
+            if layer is None:
+                continue
+            box = layer.boundingBox
+            if box.width() > 0:
+                measured.append((code, name, layer.advanceWidth, box.left(), box.right()))
+            if count % 1000 == 999:
+                self.status.setText(u"Measuring Hangul: %s of %s\N{HORIZONTAL ELLIPSIS}" % (
+                    self.ak.b(count + 1), self.ak.b(len(self.hangul_glyphs))))
+                QtGui.QApplication.processEvents()
+        widths = sorted(set(int(round(m[2])) for m in measured))
+        width = None
+        if mode == "fixed":
+            width = widths[len(widths) // 2] if 0 < len(widths) <= 3 else (self.hangul_model.get("fixed_width") or 0.9) * upm
+        self.hangul_width = width
+        changes = [hangul_change(code, name, advance, left, right, mode, self.hangul_model, upm, width)
+                   for code, name, advance, left, right in measured]
+        changes = [c for c in changes if c is not None]
+        if master == package.master:
+            self.hangul = changes
+        return changes
+
+    def plan_hangul(self):
+        if self.package is None:
+            return
+        self.hangul = []
+        if self.hangul_glyphs and self.hangul_mode() != "leave":
+            self.measure_hangul()
+            self.log.add(u"Hangul, %s: %s would change%s." % (
+                self.ak.html(HANGUL_MODES[self.hangul_box.currentIndex][1].lower()),
+                self.ak.b(counted(len(self.hangul), u"syllable")),
+                u" (one width: %d units)" % self.hangul_width if self.hangul_width else u""))
+        self.fill()
         self.draw_previews()
 
     def fill(self):
@@ -435,6 +575,7 @@ class CJKSpacingDialog(object):
             top.setData(0, QtCore.Qt.UserRole, -1)
             self.tree.addTopLevelItem(top)
             top.setFirstColumnSpanned(True)
+            self.ak.section_row(top, self.tree)
             for index, t in members:
                 item = QtGui.QTreeWidgetItem([t.char, t.name, u"%d" % t.advance,
                                               u"%+d, %+d" % t.palt if t.palt else u"\N{EN DASH}",
@@ -450,6 +591,29 @@ class CJKSpacingDialog(object):
                 icon = self.picture([(t.name, 0, 0)], ICON_SIZE)
                 if icon is not None:
                     item.setIcon(0, QtGui.QIcon(icon))
+                top.addChild(item)
+            top.setExpanded(True)
+        if self.hangul:
+            top = QtGui.QTreeWidgetItem([u"Hangul (%s)" % counted(len(self.hangul), u"syllable")])
+            top.setData(0, QtCore.Qt.UserRole, -1)
+            self.tree.addTopLevelItem(top)
+            top.setFirstColumnSpanned(True)
+            self.ak.section_row(top, self.tree)
+            for number, (shape, label) in enumerate(HANGUL_SHAPES):
+                members = [c for c in self.hangul if c.shape == shape]
+                if not members:
+                    continue
+                middle = lambda values: sorted(values)[len(values) // 2]
+                item = QtGui.QTreeWidgetItem([label, counted(len(members), u"syllable"),
+                                              u"%d" % middle([c.old_advance for c in members]),
+                                              u"moved %+d" % middle([c.shift for c in members]),
+                                              u"%d" % middle([c.advance for c in members]), u""])
+                item.setData(0, QtCore.Qt.UserRole, -10 - number)
+                item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsUserCheckable)
+                item.setCheckState(0, QtCore.Qt.Checked if self.hangul_checks.get(shape, True) else QtCore.Qt.Unchecked)
+                item.setToolTip(3, u"The median move of their outlines, and (next) their median width after.")
+                for column in range(2, len(self.COLUMNS)):
+                    item.setTextAlignment(column, int(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter))
                 top.addChild(item)
             top.setExpanded(True)
         for column in range(len(self.COLUMNS)):
@@ -471,6 +635,11 @@ class CJKSpacingDialog(object):
             index = int(item.data(0, QtCore.Qt.UserRole))
             if 0 <= index < len(self.trims):
                 self.trims[index].checked = item.checkState(0) == QtCore.Qt.Checked
+            elif index <= -10:
+                self.hangul_checks[HANGUL_SHAPES[-10 - index][0]] = item.checkState(0) == QtCore.Qt.Checked
+
+    def hangul_chosen(self):
+        return [c for c in self.hangul if self.hangul_checks.get(c.shape, True)]
 
     def check_all(self, on):
         QtCore, QtGui = _qt()
@@ -498,8 +667,11 @@ class CJKSpacingDialog(object):
         new = texts_for(self.trims, self.texts, self.palt_box.checked, self.halt_box.checked) if self.package else {}
         present = any((BEGIN % tag) in (self.texts.get(tag) or u"") for tag in ("palt", "halt"))
         changes = any(new[tag] != self.texts.get(tag) for tag in new)
-        self.write_button.setText(u"Update the code" if present else u"Write the code")
-        ak.enable(self.write_button, changes)
+        widths = bool(self.hangul_chosen())
+        what = (u"Update the code" if present else u"Write the code") if changes else u""
+        self.write_button.setText(u"%s and Hangul widths" % what if what and widths else what or
+                                  (u"Set Hangul widths" if widths else u"Write the code"))
+        ak.enable(self.write_button, changes or widths)
         self.draw_previews()
 
     def restore(self):
@@ -551,6 +723,7 @@ class CJKSpacingDialog(object):
         if self.package is None:
             return
         by_code = dict((t.code, t) for t in self.trims if t.checked and t.palt)
+        by_code.update((c.code, c) for c in self.hangul_chosen())
         names = dict((g.unicode, g.name) for g in self.package.fgPackage.glyphs if g.unicode)
         text = u"%s" % self.sample.text
         for (label, caption), trimmed in zip(self.previews, (False, True)):
@@ -560,7 +733,10 @@ class CJKSpacingDialog(object):
                 if name is None:
                     continue
                 trim = by_code.get(ord(ch)) if trimmed else None
-                placed.append((name, trim.palt[0], trim.palt[1]) if trim else (name, 0, 0))
+                if isinstance(trim, HangulChange):
+                    placed.append((name, trim.shift, trim.advance - trim.old_advance))
+                else:
+                    placed.append((name, trim.palt[0], trim.palt[1]) if trim else (name, 0, 0))
             pixmap = self.picture(placed, PREVIEW_EM) if placed else None
             if pixmap is None:
                 label.clear()
@@ -605,12 +781,15 @@ class CJKSpacingDialog(object):
         if problems:
             self.log.add(u"The code has problems, so nothing was written: %s" % self.ak.html(u"; ".join(problems)), "error")
             return
-        written, error = [], None
+        written, error, syllables = [], None, 0
+        shapes = set(c.shape for c in self.hangul_chosen())
         try:
             for tag in ("palt", "halt"):
                 if tag in new and new[tag] != self.texts.get(tag):
                     features.set_feature(tag, new[tag])
                     written.append(tag)
+            if shapes:
+                syllables = self.write_hangul(package, shapes)
         except Exception as exc:
             error = exc
         self.ak.notify_changed(self.fontlab, package, u"FreeLab CJK Spacing")
@@ -618,10 +797,38 @@ class CJKSpacingDialog(object):
         if written:
             self.log.add(u"Wrote %s. Compile the features in FontLab's Features panel to try them; Edit &gt; Undo "
                          u"takes them back." % self.ak.b(u" and ".join(written)), "done")
-        else:
+        if syllables:
+            self.log.add(u"Set %s in every master; the font's kerning of Hangul, if any, was set for the old widths. "
+                         u"Edit &gt; Undo takes it back." % self.ak.b(counted(syllables, u"syllable width", u"syllable widths")),
+                         "done")
+        if not written and not syllables:
             self.log.add(u"Wrote nothing.")
         if error is not None:
             self.log.add(u"Stopped by an error: %s" % self.ak.html(error), "error")
+
+    def write_hangul(self, package, shapes):
+        """Each chosen syllable set anew in every master (each measured on its own): its shapes moved
+        (components and outlines alike, by their transforms) and its width changed. How many changed."""
+        QtCore, QtGui = _qt()
+        done = 0
+        for master in list(package.masters) or [package.master]:
+            for change in self.measure_hangul(master):
+                if change.shape not in shapes:
+                    continue
+                glyph = package.findName(change.name)
+                layer = glyph.getLayerByName(master) if glyph is not None else None
+                if layer is None:
+                    continue
+                for shape in layer.shapes:
+                    t = shape.transform
+                    shape.transform = QtGui.QTransform(t.m11(), t.m12(), t.m21(), t.m22(), t.dx() + change.shift, t.dy())
+                layer.advanceWidth = change.advance
+                try:
+                    glyph.update()
+                except Exception:
+                    pass
+                done += 1
+        return done
 
     def show(self):
         QtCore, QtGui = _qt()
