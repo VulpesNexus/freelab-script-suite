@@ -41,6 +41,32 @@ Built in and scriptable. *Font > Generate Glyphs* builds accented glyphs from re
 
 FontLab 7's auto features already write `liga` and `dlig` from glyph names (for example `f_f_i`, and names with a `.liga` or `.dlig` suffix) between `#>` and `#<` markers, keeping code outside them; this was reported by the survey from FontLab's manual and not checked on this machine. No Python call to trigger it was found. FontLab 7's `fgFont.features` (`fgOTLayout`) has `keys()`, `get_feature(tag)`, and `set_feature(tag, text)`, so FreeLab can generate the code itself and write it. Prior art: tphinney's `Generate-substitutions.py` (Apache-2.0, FontLab Studio 5) and mekkablue's feature scripts (Apache-2.0).
 
+Contextual alternates for handwriting (surveyed 2026-11-09): FontLab 7's auto features write no `calt` (its [release notes](https://help.fontlab.com/fontlab/7/manual/Release-Notes-7264-4/) list the suffix rules: `.alt1` lands in `ss01`), so cycling alternates is hand-written code. Known techniques: Tal Leming's [OpenType Cookbook](https://opentypecookbook.com/common-techniques/) (endless cycle, duplicate eliminator, quantum; no license stated, ideas only), Glyphs' [DEFAULT, ALT1, ALT2 classes](https://glyphsapp.com/learn/features-part-3-advanced-contextual-alternates), Underware's [Liza Pro](https://underware.nl/case-studies/random-vs-clever) (a rotator and a swapper looking back along the line), and mekkablue's *Create Pseudorandom calt Feature* (Apache-2.0). Large `calt` code can overflow a lookup's 16-bit offsets ([Simon Cozens](https://simoncozens.github.io/gsub-overflow)).
+
+## Quality checks
+
+Surveyed on 2026-11-09 by a research agent; the claims below are from FontLab's manual and forum, linked.
+
+FontLab 7's FontAudit ([manual](https://help.fontlab.com/fontlab/7/manual/FontAudit/), [panel](https://help.fontlab.com/fontlab/7/manual/FontAudit-panel/)) checks outlines only: missing extremes, flat curves, collinear handles, inflections, semi-horizontal and semi-vertical vectors, short segments, and the like. It flags them on the contour in the Glyph window and lists them in a panel with Fix buttons, for the current glyph. Across the font, *Check Glyphs* marks each problem glyph's cell with a small red triangle; there is no font-wide list with pictures, and selecting the flagged glyphs was still a user request in [2022](https://forum.fontlab.com/fontlab-8/selecting-the-font-audit-marked-glyphs/) and [2024](https://forum.fontlab.com/fontlab-8/feature-suggestion-select-glyphs-with-fontaudit-problems/). It does not check vertical metrics, language coverage, accented glyphs against their base's sidebearings, figure widths, or kerning collisions (FontLab 8's *Audit Exceptions* does the last).
+
+| Prior art | License | What to learn from it |
+|---|---|---|
+| [jenskutilek/RedArrow-Glyphs](https://github.com/jenskutilek/RedArrow-Glyphs) | none shown | arrows on the outline, and *Select Glyphs With Outline Errors* to open them in a tab |
+| [typesupply/glyph-nanny](https://github.com/typesupply/glyph-nanny) | MIT | a live report while drawing; stray points, crossed handles, stems against stem snaps |
+| [mekkablue/Glyphs-Scripts](https://github.com/mekkablue/Glyphs-Scripts) finders | Apache-2.0 | each check opens its glyphs in a tab: path, component, spacing, tabular, composite consistency |
+| [fonttools/fontbakery](https://github.com/fonttools/fontbakery) | Apache-2.0 | an HTML report on the compiled font, each check with its rationale |
+
+## Proofing
+
+| Prior art | License | What it shows |
+|---|---|---|
+| [adobe-type-tools/drawBotProofing](https://github.com/adobe-type-tools/drawBotProofing) | MIT | one PDF proof per question: glyph grids, figure spacing, vertical metrics, accents in words, spacing strings, waterfalls, overlays of fonts |
+| [silnrsi/fontproof](https://github.com/silnrsi/fontproof) | MIT | PDF waterfalls, Unicode charts, feature on/off comparisons, preset spacing and kerning texts |
+| [impallari/Font-Testing-Page](https://github.com/impallari/Font-Testing-Page) | MIT (texts CC BY-SA 3.0) | an HTML page to drop a font on: sizes, Adhesion text, kerning, diacritics of 103 languages |
+| Adhesion Text ([Typographica](https://typographica.org/?p=3760)) | idea | real words made only of the letters drawn so far |
+| [hoeflerco/proofs](https://github.com/hoeflerco/proofs) | CC BY-NC-SA 4.0 | texts that isolate each letter's shape and fit; non-commercial, so not shipped with FreeLab |
+| [googlefonts/diffenator2](https://github.com/googlefonts/diffenator2) | Apache-2.0 | HTML proofs, and words set in two versions of a font with their differences |
+
 ## Licensing
 
 Reusable: MIT, Apache-2.0, and BSD code, with notices kept. MPL-2.0 (TypeRig): reusable, and modified TypeRig files stay MPL. GPL-3.0: read only. No license: never copied.
