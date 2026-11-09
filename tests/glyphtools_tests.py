@@ -39,11 +39,105 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(found[A_CARON].name, u"uni01CE", "acaron is another glyph's name already")
         self.assertEqual(found[I_CARON].base, "dotlessi", "a mark above takes the dotless i")
         self.assertEqual(found[I_CARON].name, u"icaron", "named after the letter, not its dotless form")
-        self.assertEqual(found[CAP_A_CARON].marks[0][0], "caron.case", "a capital takes the .case mark")
-        self.assertEqual(found[A_DOT_BELOW].marks[0][:2], ("dotaccent", "below"))
-        self.assertEqual(found[A_DOT_BELOW].marks[0][3], "dotbelow", "borrowed from its twin above")
-        self.assertEqual([m[0] for m in found[O_CIRCUMFLEX_ACUTE].marks], ["circumflex", "acute"])
+        self.assertEqual(found[CAP_A_CARON].marks[0].glyph, "caron.case", "a capital takes the .case mark")
+        dot = found[A_DOT_BELOW].marks[0]
+        self.assertEqual((dot.glyph, dot.side, dot.note), ("dotaccent", "below", u"for dotbelow"), "its twin above")
+        self.assertEqual([m.glyph for m in found[O_CIRCUMFLEX_ACUTE].marks], ["circumflex", "acute"])
         self.assertTrue(found[O_HORN_DOT].missing and u"horn" in found[O_HORN_DOT].missing)
+
+    def test_a_bare_font_drafts_its_marks_from_punctuation(self):
+        bare = ac.Font(["a", "o", "period", "asciicircum", "hyphen", "comma"],
+                       [("a", 0x61), ("o", 0x6F), ("period", 0x2E), ("asciicircum", 0x5E), ("hyphen", 0x2D),
+                        ("comma", 0x2C)])
+        found = dict((r.char, r) for r in ac.plan(bare, [A_CARON, ac.unichr_(0xE4), A_DOT_BELOW, ac.unichr_(0x14D),
+                                                        ac.unichr_(0xE1)]))
+        caron = found[A_CARON].marks[0]
+        self.assertEqual((caron.glyph, caron.parts[0][2] < 0, caron.note), ("asciicircum", True, u"draft for caron"),
+                         "a caron of an upside-down ^")
+        self.assertEqual([p[0] for p in found[ac.unichr_(0xE4)].marks[0].parts], ["period", "period"], "a dieresis of two periods")
+        self.assertEqual(found[A_DOT_BELOW].marks[0].glyph, "period")
+        self.assertEqual(found[ac.unichr_(0x14D)].marks[0].glyph, "hyphen", "a macron of the hyphen")
+        self.assertTrue(found[ac.unichr_(0xE1)].missing, "no acute to draft from")
+
+
+MODEL = {"format": 1,
+         "gap": {"acute lower": 0.05, "acute upper": 0.05, "circumflex lower": 0.05, "dotaccent upper": 0.06},
+         "side_gap": {"above lower": 0.05, "above upper": 0.05, "below lower": 0.04},
+         "side_offset": {"above lower": 0.0, "above upper": 0.0},
+         "offset": {"b above *": 0.43, "Y above *": 0.02},
+         "pair_gap": {"circumflex+acute lower": -0.016}, "pair_offset": {"circumflex+acute lower": 0.44},
+         "stack_gap": {"above lower": 0.025}, "height": {"dotaccent lower": 0.11, "dotaccent upper": 0.11}}
+
+
+def inks():
+    return {"b": ac.Ink(50, 0, 450, 700, top_center=70, advance=500),
+            "o": ac.Ink(40, -10, 460, 480, advance=500),
+            "Y": ac.Ink(10, 0, 590, 700, advance=600),
+            "acute": ac.Ink(0, 500, 100, 600), "circumflex": ac.Ink(0, 500, 200, 600),
+            "period": ac.Ink(0, 0, 100, 100), "dotaccent": ac.Ink(0, 500, 100, 600)}
+
+
+class PlaceTests(unittest.TestCase):
+    def test_a_bare_font_places_by_the_model_letter_by_letter(self):
+        placement = ac.Placement(1000.0, MODEL)
+        b_acute = ac.Recipe(u"x", u"x", "b", [ac.Mark("acute", "above", [("acute", 1.0, 1.0, 0.0, 0.0)])])
+        parts, width = ac.place(b_acute, inks().get, placement, letter=u"b")
+        self.assertEqual(width, 500)
+        glyph, sx, sy, x, y = parts[1]
+        self.assertEqual(y, 700 + 50 - 500, "the model's gap above b's ascender")
+        self.assertEqual(x + 50, 70 + round(0.43 * 400), "over b's bowl, as the fonts put it, not its stem")
+
+    def test_a_capital_is_centered_whatever_the_fonts_lowercase_habit(self):
+        placement = ac.Placement(1000.0, MODEL)
+        # the font's own lowercase marks sit far right (a slanted hand): capitals do not inherit that
+        placement.learn([("o", [("acute", 300, -10)])] * 3, inks().get, lambda name: "lower")
+        dot = ac.Recipe(ac.unichr_(0x1E8E), u"Ydotaccent", "Y", [ac.Mark("dotaccent", "above", [("dotaccent", 1.0, 1.0, 0.0, 0.0)])])
+        parts, _ = ac.place(dot, inks().get, placement)
+        center = parts[1][3] + 50
+        self.assertLess(abs(center - (300 + 0.02 * 580)), 2, "centered on Y, as the fonts put it")
+
+    def test_an_acute_sits_beside_a_circumflex(self):
+        placement = ac.Placement(1000.0, MODEL)
+        recipe = ac.Recipe(O_CIRCUMFLEX_ACUTE, u"x", "o", [ac.Mark("circumflex", "above", [("circumflex", 1.0, 1.0, 0.0, 0.0)]),
+                                                         ac.Mark("acute", "above", [("acute", 1.0, 1.0, 0.0, 0.0)])])
+        parts, _ = ac.place(recipe, inks().get, placement)
+        circumflex_top = parts[1][4] + 600  # (the circumflex's ink runs from 500 to 600 in its own glyph)
+        self.assertEqual(parts[2][4] + 500, circumflex_top - 16, "its bottom a little under the circumflex's top")
+        self.assertEqual(parts[2][3] + 50, 250 + round(0.44 * 420), "to the right, as Vietnamese sets it")
+
+    def test_a_stack_too_tall_for_the_line_is_made_compact(self):
+        placement = ac.Placement(1000.0, MODEL)
+        recipe = ac.Recipe(O_CIRCUMFLEX_ACUTE, u"x", "o", [ac.Mark("circumflex", "above", [("circumflex", 1.0, 1.0, 0.0, 0.0)]),
+                                                         ac.Mark("circumflex", "above", [("circumflex", 1.0, 1.0, 0.0, 0.0)])])
+        roomy = ac.Metrics(1000, 800, -200)  # room up to 1000
+        parts, _ = ac.place(recipe, inks().get, placement, roomy)
+        self.assertEqual(recipe.notes, [], "fits as it is")
+        tight = ac.Metrics(1000, 600, -500)  # room up to 700
+        parts, _ = ac.place(recipe, inks().get, placement, tight)
+        self.assertIn(u"gaps closed", recipe.notes[0])
+        top = max(p[4] + 600 * p[2] for p in parts[1:])
+        self.assertLessEqual(top, 700 + 1)
+        self.assertTrue(recipe.checked)
+        hopeless = ac.Metrics(1000, 300, -700)  # room up to 500: the letter alone
+        ac.place(recipe, inks().get, placement, hopeless)
+        self.assertIn(u"too tall", recipe.notes[-1])
+        self.assertFalse(recipe.checked, "left unchecked, to draw by hand")
+
+    def test_a_drafted_dot_is_sized_as_marks_are(self):
+        placement = ac.Placement(1000.0, MODEL)
+        recipe = ac.Recipe(ac.unichr_(0x1E8E), u"Ydotaccent", "Y",
+                           [ac.Mark("dotaccent", "above", [("period", 1.0, 1.0, 0.0, 0.0)], u"draft for dotaccent")])
+        parts, _ = ac.place(recipe, inks().get, placement)
+        self.assertAlmostEqual(parts[1][1], 1.1, 2, "the period at 110%: a dot accent is 0.11 em high")
+        self.assertEqual(parts[1][4], 700 + 60, "its bottom the model's gap above Y")
+
+    def test_the_fonts_own_placements_pool_per_case(self):
+        placement = ac.Placement(1000.0, MODEL)
+        placement.learn([("o", [("acute", 210, -10)]), ("o", [("circumflex", 160, -10)]), ("o", [("acute", 210, -10)])],
+                        inks().get, lambda name: "lower")
+        self.assertEqual(placement.gap("acute", "above", "lower"), 10, "its own gap, from its own composites")
+        breve, caron = (placement.offset(u"i", root, "above", "lower") for root in ("breve", "caron"))
+        self.assertEqual(breve, caron, "all marks agree on a letter: the font's habit is pooled")
 
 
 class RefillTests(unittest.TestCase):
@@ -53,27 +147,6 @@ class RefillTests(unittest.TestCase):
         self.assertEqual([(r.name, r.refill) for r in found], [("acaron", True)])
         full = ac.Font(["a", "caron", "acaron"], [("a", 0x61), ("acaron", 0x01CE)])
         self.assertEqual(ac.plan(full, [A_CARON]), [], "a drawn glyph is left alone")
-
-
-class PlaceTests(unittest.TestCase):
-    def test_marks_sit_as_the_fonts_own(self):
-        inks = {"a": ac.Ink(10, 0, 350, 480, top_center=200, advance=367),
-                "acute": ac.Ink(20, 510, 230, 590), "caron": ac.Ink(0, 500, 200, 580),
-                "circumflex": ac.Ink(0, 500, 220, 580), "e": ac.Ink(4, 0, 314, 478, top_center=170, advance=312)}
-        placement = ac.Placement(1000.0)
-        # the font's aacute: the acute 20 units above a's ink, its center 18 units right of a's top center
-        placement.learn([("a", [("acute", 93, -10)])], inks.get, lambda name: "lower")
-        self.assertEqual(placement.where("acute", "above", "lower"), (20, 18))
-        self.assertEqual(placement.where("caron", "above", "lower"), (20, 18), "unseen: the side's median")
-        recipe = ac.Recipe(ac.unichr_(0x011B), u"ecaron", "e", [("caron", "above", "caron", None)])
-        parts, width = ac.place(recipe, inks.get, placement)
-        self.assertEqual(width, 312)
-        self.assertEqual(parts[1], ("caron", 170 + 18 - 100, 478 + 20 - 500))
-        stacked = ac.Recipe(O_CIRCUMFLEX_ACUTE, u"x", "e", [("circumflex", "above", "circumflex", None),
-                                                           ("acute", "above", "acute", None)])
-        parts, _ = ac.place(stacked, inks.get, placement)
-        circumflex_top = 580 + parts[1][2]
-        self.assertEqual(510 + parts[2][2] - circumflex_top, 20, "the acute stacked on the circumflex, the same gap")
 
 
 class LearnableTests(unittest.TestCase):

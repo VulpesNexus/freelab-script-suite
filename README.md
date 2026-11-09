@@ -49,4 +49,4 @@ It runs everything under Python 3, including the native helper's tests, then the
 
 **GPL-3.0-or-later** ([LICENSE](LICENSE)). Copyright © 2026 Vixen420. It comes with no warranty.
 
-Auto kerning ports [halfkern](https://github.com/behdad/halfkern)'s method (Copyright 2022 Google LLC, Apache License 2.0), and *kerning/common_pairs.txt* comes from [andre-fuchs/kerning-pairs](https://github.com/andre-fuchs/kerning-pairs) (MIT License, its notice kept in the file). The FreeLab method's model was trained on fonts under the SIL Open Font License and the Apache License only.
+Auto kerning ports [halfkern](https://github.com/behdad/halfkern)'s method (Copyright 2022 Google LLC, Apache License 2.0), and *kerning/common_pairs.txt* comes from [andre-fuchs/kerning-pairs](https://github.com/andre-fuchs/kerning-pairs) (MIT License, its notice kept in the file). The FreeLab method's model, the kerning class counts, and Accented Glyphs' mark placements were learned from fonts under the SIL Open Font License and the Apache License only; only measurements are kept, no font data.
