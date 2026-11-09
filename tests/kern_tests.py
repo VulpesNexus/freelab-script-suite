@@ -231,6 +231,25 @@ class FakeGroups(object):
         self.data[name] = (list(value[0]), value[1])
 
 
+class FlagCellTests(unittest.TestCase):
+    def test_segments(self):
+        self.assertEqual(ak.flag_segments(u"#eb3c3c", 10, 100), [(10, 100, u"#eb3c3c")], "one glyph: the whole cell")
+        self.assertEqual(ak.flag_segments(u"#eb3c3c,#3c3ceb", 10, 100), [(10, 50, u"#eb3c3c"), (60, 50, u"#3c3ceb")],
+                         "a pair: each glyph's flag on its half")
+        self.assertEqual(ak.flag_segments(u",#3c3ceb", 0, 101), [(50, 51, u"#3c3ceb")], "only the right one flagged")
+        self.assertEqual(ak.flag_segments(None, 0, 100), [])
+
+    def test_colors_text(self):
+        saved = ak.flag_color
+        try:
+            ak.flag_color = lambda mark, alpha=255: type("C", (), {"name": lambda self: u"#%06d" % mark})()
+            self.assertEqual(ak.flag_colors_text([1, 241]), u"#000001,#000241")
+            self.assertEqual(ak.flag_colors_text([0, 241]), u",#000241")
+            self.assertIsNone(ak.flag_colors_text([0, 0]))
+        finally:
+            ak.flag_color = saved
+
+
 class KerningClassTests(unittest.TestCase):
     GROUPS = {"T": (["T", "Tcaron"], "KernBothSide"), "o": (["o", "oacute"], "KernLeft"),
               "o1": (["o", "oacute"], "KernRight"), "A": (["A", "Aacute"], "KernLeft")}

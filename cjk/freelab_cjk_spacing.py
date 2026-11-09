@@ -340,6 +340,7 @@ class CJKSpacingDialog(object):
         self.status = ak.status_label()
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
+        layout.addWidget(ak.separator())
         self.log = ak.Log()
         row = QtGui.QHBoxLayout()
         self.palt_box = QtGui.QCheckBox("Proportional widths (palt)")

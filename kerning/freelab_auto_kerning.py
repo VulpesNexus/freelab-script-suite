@@ -1385,7 +1385,38 @@ FLAG_COLORS = ((u"Red", 1), (u"Green", 121), (u"Cyan", 181), (u"Blue", 241), (u"
 
 
 FLAG_TINT = 80  # the alpha of a flagged row's tint: its flag's color, readable under either palette's text
-FLAG_ROLE = 0x0100 + 77  # Qt.UserRole + 77: a cell's flag tint (a list's stylesheet item rule hides BackgroundRole)
+FLAG_ROLE = 0x0100 + 77  # Qt.UserRole + 77: a cell's flag colors (a list's stylesheet item rule hides BackgroundRole)
+FLAG_BAR = 3  # pixels: the opaque bar of a flag's color along a flagged cell's bottom, shown over a selected row too
+
+
+def flag_colors_text(marks):
+    """A cell's flag colors as stored in FLAG_ROLE: one per glyph of the row, "#rrggbb" or "" for none,
+    joined by commas (a pair's left and right halves); None when no glyph is flagged."""
+    if not any(marks):
+        return None
+    return u",".join(flag_color(m).name() if m else u"" for m in marks)
+
+
+def flag_segments(text, left, width):
+    """[(x, width, "#rrggbb")] of a cell's flagged parts: the cell split evenly among the row's glyphs."""
+    names = (text or u"").split(u",")
+    found = []
+    for k, name in enumerate(names):
+        x0 = left + width * k // len(names)
+        x1 = left + width * (k + 1) // len(names)
+        if name:
+            found.append((x0, x1 - x0, name))
+    return found
+
+
+def separator():
+    """A thin line between a window's top text and its fields: a mid gray at half strength, as the
+    lists' cell lines."""
+    QtCore, QtGui = _qt()
+    line = QtGui.QFrame()
+    line.setFixedHeight(1)
+    line.setStyleSheet(u"QFrame { border: none; background: rgba(128, 128, 128, 128); }")
+    return line
 
 
 def flag_color(mark, alpha=255):
@@ -1406,14 +1437,18 @@ class FlagMenu(object):
     does, to find them again later (the Font window shows the flag; Select > Same Flag gathers them),
     and the next or previous flagged row (F3, Shift+F3). With names_of_row (a tree's item, or a
     table's row number, to its glyphs' names), each row whose glyph has a flag shows its color in
-    the given column, read again whenever the list is filled. names_of_selection() gives the selected
-    row's glyphs; owner has package, fontlab, log, dialog, and seen_history."""
+    the given column: a tint, and a bar along the bottom that a selected row shows too; a pair's
+    cell split in two, each glyph's flag on its own half. Read again whenever the list is filled or
+    its items replaced. names_of_selection() gives the selected row's glyphs; owner has package,
+    fontlab, log, dialog, and seen_history."""
 
     def __init__(self, view, owner, names_of_selection, names_of_row=None, column=0):
         QtCore, QtGui = _qt()
         self.view, self.owner, self.column = view, owner, column
         self.names_of_selection, self.names_of_row = names_of_selection, names_of_row
         self.due = False
+        self.refreshing = False
+        self.cache = {}  # glyph name: its flag, until the list is filled again or a flag is set here
         self.table = view.inherits("QTableWidget")
         view.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         view.connect("customContextMenuRequested(QPoint)", self.show)
@@ -1424,23 +1459,34 @@ class FlagMenu(object):
             shortcut.connect("activated()", (lambda step: lambda: self.go(step))(step))
             self.shortcuts.append(shortcut)
         if names_of_row is not None:
-            role = FLAG_ROLE
+            role, bar, tint, segments = FLAG_ROLE, FLAG_BAR, FLAG_TINT, flag_segments
 
-            class Tint(QtGui.QStyledItemDelegate):  # (Qt classes held here: a dropped module's globals turn None)
+            class Tint(QtGui.QStyledItemDelegate):  # (what it uses held here: a dropped module's globals turn None)
                 def paint(self, painter, option, index):
+                    parts = []
                     try:
-                        color = index.data(role)
-                        if color is not None:
-                            painter.fillRect(option.rect, color)
+                        rect = option.rect
+                        parts = segments(index.data(role), rect.left(), rect.width())
+                        for x, width, name in parts:
+                            color = QtGui.QColor(name)
+                            color.setAlpha(tint)
+                            painter.fillRect(QtCore.QRect(x, rect.top(), width, rect.height()), color)
+                    except Exception:
+                        parts = []
+                    QtGui.QStyledItemDelegate.paint(self, painter, option, index)
+                    try:  # over the row as drawn: a selected row's highlight covers the tint, not the bar
+                        for x, width, name in parts:
+                            painter.fillRect(QtCore.QRect(x, rect.bottom() - bar + 1, width, bar), QtGui.QColor(name))
                     except Exception:
                         pass
-                    QtGui.QStyledItemDelegate.paint(self, painter, option, index)
 
             self.delegate = Tint(view)
             view.setItemDelegateForColumn(column, self.delegate)
             model = view.model()
-            model.connect("rowsInserted(QModelIndex,int,int)", lambda *args: self.soon())
-            model.connect("modelReset()", lambda: self.soon())
+            model.connect("rowsInserted(QModelIndex,int,int)", lambda *args: self.soon(True))
+            model.connect("modelReset()", lambda: self.soon(True))
+            # (a list filled again with as many rows replaces its items: Auto Kerning's order and filters)
+            model.connect("dataChanged(QModelIndex,QModelIndex)", lambda *args: self.soon())
 
     # -- the rows --------------------------------------------------------------------
 
@@ -1479,8 +1525,12 @@ class FlagMenu(object):
             found.append(cache[name])
         return found
 
-    def soon(self):
+    def soon(self, filled=False):
         QtCore, QtGui = _qt()
+        if self.refreshing:
+            return  # its own tints
+        if filled:
+            self.cache = {}  # filled again (an undo, another font): flags read anew
         if not self.due:
             self.due = True
             QtCore.QTimer.singleShot(0, self.refresh)
@@ -1491,29 +1541,28 @@ class FlagMenu(object):
         self.due = False
         if self.names_of_row is None:
             return
-        cache = {}
         blocked = self.view.signalsBlocked()
         self.view.blockSignals(True)  # a tint is no edit: the dialog's itemChanged must not hear it
+        self.refreshing = True
         try:
             for handle, names in self.rows():
-                flagged = [m for m in self.marks(names, cache) if m]
-                color = flag_color(flagged[0], FLAG_TINT) if flagged else None
+                text = flag_colors_text(self.marks(names, self.cache))
                 if self.table:
                     item = self.view.item(handle, self.column)
-                    if item is not None:
-                        item.setData(FLAG_ROLE, color)
-                else:
-                    handle.setData(self.column, FLAG_ROLE, color)
+                    if item is not None and item.data(FLAG_ROLE) != text:
+                        item.setData(FLAG_ROLE, text)
+                elif handle.data(self.column, FLAG_ROLE) != text:
+                    handle.setData(self.column, FLAG_ROLE, text)
         except Exception:
             pass  # a list emptied meanwhile
         finally:
+            self.refreshing = False
             self.view.blockSignals(blocked)
         self.view.viewport().update()
 
     def go(self, step):
         """The next (step 1) or previous (-1) row with a flagged glyph selected, around the list's end."""
-        cache = {}
-        rows = [(handle, bool([m for m in self.marks(names, cache) if m])) for handle, names in self.rows()]
+        rows = [(handle, any(self.marks(names, self.cache))) for handle, names in self.rows()]
         if not any(flagged for _, flagged in rows):
             try:
                 self.owner.log.add(u"No row of this list has a flagged glyph.", "warning")
@@ -1600,6 +1649,7 @@ def flag_glyphs(owner, names, label, value):
     menus = getattr(owner, "flagging", None)
     for menu in (menus if isinstance(menus, list) else [menus]):
         if isinstance(menu, FlagMenu):
+            menu.cache = {}
             menu.refresh()
     if value:
         owner.log.add(u"Flagged %s %s in FontLab (Select &gt; Same Flag gathers them again; F3 goes to the next "
@@ -2243,6 +2293,7 @@ class AutoKerningDialog(object):
         self.status = status_label(self.font_line())
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
+        layout.addWidget(separator())
         self.log = Log()
         self.seen_history, self.first_pass, self.pinned = None, True, set()
         row = QtGui.QHBoxLayout()

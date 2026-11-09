@@ -382,6 +382,10 @@ class Tab(object):
         self.layout = QtGui.QVBoxLayout(self.widget)
         self.settings = QtGui.QHBoxLayout()
         self.layout.addLayout(self.settings)
+        line = self.line = QtGui.QFrame()  # (as Auto Kerning's separator: a mid gray at half strength)
+        line.setFixedHeight(1)
+        line.setStyleSheet(u"QFrame { border: none; background: rgba(128, 128, 128, 128); }")
+        self.layout.addWidget(line)
         self.status = make_status()  # rich text (bold values), a line per sentence
         self.layout.addWidget(self.status)
         self.tree = QtGui.QTreeWidget()

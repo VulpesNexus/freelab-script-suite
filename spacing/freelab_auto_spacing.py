@@ -245,6 +245,7 @@ class AutoSpacingDialog(object):
         self.status = self.ak.status_label()
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
+        layout.addWidget(self.ak.separator())
         self.log = self.ak.Log()
         self.seen_history, self.first_checks = None, {}
         row = QtGui.QHBoxLayout()
