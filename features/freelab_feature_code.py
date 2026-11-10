@@ -580,7 +580,7 @@ class FeatureCodeDialog(object):
         box = QtGui.QVBoxLayout(widget)
         box.setContentsMargins(0, 0, 0, 0)
         self.splitter.addWidget(widget)
-        self.splitter.setStretchFactor(self.splitter.count - 1, stretch)
+        self.splitter.setStretchFactor(self.splitter.indexOf(widget), stretch)
         return box
 
     def show_choice(self, item, lig):
