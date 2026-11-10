@@ -311,6 +311,209 @@ class MastersTests(unittest.TestCase):
         self.assertEqual([(f.master, f.kind) for f in found], [(u"Light", "missing")])
 
 
+class NamesTests(unittest.TestCase):
+    def test_short_names(self):
+        self.assertEqual(fc.short_name(u(0x159)), u"r with caron")
+        self.assertEqual(fc.short_name(u(0x158)), u"R with caron")
+        self.assertEqual(fc.short_name(u(0x14A)), u"capital eng", "a capital named by a word")
+        self.assertEqual(fc.short_name(u(0x67E)), u"peh", "no case: the letter's name")
+        self.assertEqual(fc.short_name(u(0x301)), u"combining acute accent")
+        self.assertEqual(fc.short_name(u(0x2BC)), u"modifier letter apostrophe")
+        self.assertEqual(fc.short_name(u"n" + u(0x308)), u"n with diaeresis", "a letter and a mark, no one character")
+        self.assertEqual(fc.short_name(u(0x113) + u(0x301)), u"e with macron and acute accent")
+
+    def test_labels(self):
+        self.assertEqual(fc.code_label(u"n" + u(0x308)), u"U+006E U+0308")
+        self.assertEqual(fc.code_label(u(0x1E900)), u"U+1E900")
+        self.assertEqual(fc.shown_text(u(0x301)), fc.DOTTED_CIRCLE + u(0x301), "a mark on a dotted circle")
+        self.assertEqual(fc.case_partner(u(0x259)), u(0x18F))
+        self.assertEqual(fc.case_partner(u(0x18F)), u(0x259))
+        self.assertIsNone(fc.case_partner(u(0xDF)), "sharp s: its capital is two letters")
+        self.assertIsNone(fc.case_partner(u"!"))
+
+
+class AddTests(unittest.TestCase):
+    """The characters to add, ranked; the languages a checked set completes."""
+
+    def results(self):
+        schwa, small_schwa, eng, small_eng = u(0x18F), u(0x259), u(0x14A), u(0x14B)
+        base = u"a b c"
+        languages = [language(base + u" " + schwa + u" " + small_schwa, name=u"Azeri", speakers=30),
+                     language(base + u" " + schwa + u" " + small_schwa, name=u"Atayal", speakers=1),
+                     language(base + u" " + small_eng + u" " + u(0x1B4), name=u"Wolof", speakers=5),
+                     language(base + u" " + small_eng, name=u"Sami", speakers=2),
+                     language(base, u"q", name=u"Loans", speakers=3),
+                     language(base + u" x y z w", name=u"Far", speakers=100)]
+        f = font([0x61, 0x62, 0x63, 0x73])
+        return [fc.check_language(l, f) for l in languages], (schwa, small_schwa, eng, small_eng)
+
+    def test_ranked_by_languages_completed(self):
+        results, (schwa, small_schwa, eng, small_eng) = self.results()
+        rows = fc.add_rows(results)
+        self.assertEqual([row.items for row in rows][:2], [[schwa, small_schwa], [small_eng]])
+        self.assertEqual([r.language.name for r in rows[0].completing], [u"Azeri", u"Atayal"], "the most spoken first")
+        self.assertEqual([r.language.name for r in rows[1].completing], [u"Sami"])
+        self.assertEqual([r.language.name for r in rows[1].needing], [u"Sami", u"Wolof"])
+        wolof = [row for row in rows if row.items == [u(0x1B4)]][0]
+        self.assertEqual(wolof.completing, [], "Wolof needs eng too")
+        self.assertIn(u"Wolof (with " + small_eng + u")", fc.row_languages_text(wolof))
+        self.assertNotIn(u"x", [i for row in rows for i in row.items], "a missed language's characters are not listed")
+        loans = [row for row in rows if row.items == [u"q"]][0]
+        self.assertTrue(loans.auxiliary(), "missing only auxiliary characters: those")
+
+    def test_gained_as_sets(self):
+        results, (schwa, small_schwa, eng, small_eng) = self.results()
+        names = lambda checked: sorted(r.language.name for r in fc.languages_gained(results, checked))
+        self.assertEqual(names([schwa]), [], "half of what Azeri needs")
+        self.assertEqual(names([schwa, small_schwa]), [u"Atayal", u"Azeri"])
+        self.assertEqual(names([small_eng]), [u"Sami"])
+        self.assertEqual(names([small_eng, u(0x1B4)]), [u"Sami", u"Wolof"], "Wolof once both are checked")
+        self.assertEqual(names([u"q"]), [u"Loans"])
+
+    def test_gain_text(self):
+        results, (schwa, small_schwa, _, _) = self.results()
+        self.assertEqual(fc.gain_text(0, []), u"Check characters to see how many languages they complete.")
+        self.assertEqual(fc.gain_text(1, []), u"With 1 character checked: no language is complete yet")
+        gained = fc.languages_gained(results, [schwa, small_schwa])
+        self.assertEqual(fc.gain_text(2, gained), u"With 2 characters checked: +2 languages (Latin)")
+        self.assertEqual(fc.gain_text(2, gained[:1], lambda text: u"<b>%s</b>" % text),
+                         u"With 2 characters checked: <b>+1 language</b> (Latin)")
+        greek = fc.check_language(language(u(0x3B1), script=u"Greek", name=u"Greek"), font([]))
+        self.assertEqual(fc.gain_text(3, gained + [greek]), u"With 3 characters checked: +3 languages (Latin 2, Greek 1)")
+
+    def test_compact_missing(self):
+        results, (schwa, small_schwa, _, _) = self.results()
+        self.assertEqual(fc.compact_missing(results[0]), schwa + u" " + small_schwa)
+        r = fc.check_language(language(u"a b c d"), font([0x61]))
+        self.assertEqual(fc.compact_missing(r), u"b c +1")
+        self.assertEqual(fc.compact_missing(results[4]), u"q", "its auxiliary ones")
+
+    def test_script_text_and_bar(self):
+        results, _ = self.results()
+        s = fc.ScriptCoverage(u"Latin", results, True)
+        self.assertEqual(fc.script_text(s), u"0 of 6 languages \N{MIDDLE DOT} 5 within reach")
+        self.assertEqual(sum(fc.bar_widths([275, 99, 195], 150)), 150)
+        self.assertEqual(fc.bar_widths([1, 0, 1000], 100), [1, 0, 99], "a count shows, however small")
+        self.assertEqual(fc.bar_widths([0, 0, 0], 100), [0, 0, 0])
+
+    def test_language_search(self):
+        results, _ = self.results()
+        czech = fc.check_language(fc.Language(u"ces", u"Czech", u"\N{LATIN SMALL LETTER C WITH CARON}e\N{LATIN SMALL LETTER S WITH CARON}tina",
+                                              u"Latin", u"living", u"verified", 0, [u"a"], [], u""), font([0x61]))
+        self.assertTrue(fc.language_matches(czech, u"cze"))
+        self.assertTrue(fc.language_matches(czech, u"\N{LATIN CAPITAL LETTER C WITH CARON}E\N{LATIN SMALL LETTER S WITH CARON}"),
+                        "the autonym, any case")
+        self.assertTrue(fc.language_matches(czech, u"ces"))
+        self.assertFalse(fc.language_matches(czech, u"slov"))
+
+
+class DiagramTests(unittest.TestCase):
+    def test_lines_merged_when_equal(self):
+        m = fc.VerticalMetrics(upm=1000, typo_ascender=900, hhea_ascender=900, win_ascent=1000, cap_height=700,
+                               x_height=500, typo_descender=-250, hhea_descender=-250, win_descent=250)
+        lines = fc.diagram_lines(m)
+        self.assertEqual([(l.value, l.label()) for l in lines],
+                         [(1000, u"winAscent 1000"), (900, u"typo and hhea ascender 900"), (700, u"cap height 700"),
+                          (500, u"x-height 500"), (0, u"baseline 0"),
+                          (-250, u"typo and hhea descender, winDescent -250")])
+        self.assertEqual(lines[-1].kind, "win", "the win kind wins")
+
+    def test_suggested_lines(self):
+        m = fc.VerticalMetrics(upm=1000, typo_ascender=900, hhea_ascender=900, typo_descender=-250,
+                               hhea_descender=-250, win_ascent=900, win_descent=250)
+        extents = [fc.Extent("A", 0x41, "R", -300, 1100)]
+        suggestions, _ = fc.suggest_metrics(m, extents, mode="keep")
+        dashed = [(l.value, l.label()) for l in fc.diagram_lines(m, suggestions) if l.kind == "suggested"]
+        self.assertEqual(dashed, [(1100, u"winAscent 1100"), (-300, u"winDescent -300")], "the values that change only")
+
+    def test_merge_names(self):
+        self.assertEqual(fc.merge_names([u"winAscent", u"typo ascender", u"hhea ascender"]),
+                         u"winAscent, typo and hhea ascender")
+        self.assertEqual(fc.merge_names([u"cap height"]), u"cap height")
+
+    def test_spread_labels(self):
+        placed = fc.spread_labels([10, 12, 13, 50], 10)
+        self.assertEqual(placed[3], 50, "alone: where it is wanted")
+        self.assertTrue(all(b - a >= 10 - 1e-9 for a, b in zip(placed, placed[1:])), placed)
+        self.assertAlmostEqual(sum(placed[:3]) / 3.0, (10 + 12 + 13) / 3.0, msg="a crowd centered on its lines")
+        placed = fc.spread_labels([5, 0], 10, low=0)
+        self.assertEqual(placed, [10, 0], "the order kept, within bounds, any order given")
+        self.assertEqual(fc.spread_labels([100, 99], 10, high=100), [100, 90])
+
+    def test_extremes(self):
+        extents = [fc.Extent(n, None, m, b, t) for n, m, b, t in
+                   [("A", "L", 0, 700), ("Aring", "L", 0, 900), ("Aring", "B", 0, 950), ("p", "B", -250, 500),
+                    ("g", "L", -230, 500), ("bracket", "B", -260, 920), ("dot", "L", -50, 40)]]
+        tallest, deepest = fc.extreme_glyphs(extents, 2)
+        self.assertEqual([(e.name, e.master) for e in tallest], [("Aring", "B"), ("bracket", "B")])
+        self.assertEqual([e.name for e in deepest], ["p", "g"], "a glyph in one list only")
+
+    def test_clipped(self):
+        m = fc.VerticalMetrics(upm=1000, win_ascent=1000, win_descent=250)
+        extents = [fc.Extent(n, None, ma, b, t) for n, ma, b, t in
+                   [("Aring", "L", 0, 1010), ("Aring", "B", 0, 1080), ("g", "B", -300, 500), ("H", "B", 0, 700)]]
+        found = fc.clipped_glyphs(m, extents)
+        self.assertEqual([(c.extent.name, c.extent.master, c.above, c.below) for c in found],
+                         [("Aring", "B", 80, 0), ("g", "B", 0, 50)], "each glyph once, in its worst master")
+        self.assertEqual([c.extent.master for c in fc.clipped_glyphs(m, extents, "L")], ["L"])
+        self.assertEqual(fc.clipped_glyphs(fc.VerticalMetrics(upm=1000), extents), [], "no win values: nothing known")
+
+    def test_check_lines(self):
+        m = fc.VerticalMetrics(upm=1000, win_ascent=1000, win_descent=250, typo_ascender=950, typo_descender=-250,
+                               typo_line_gap=0, hhea_ascender=950, hhea_descender=-250, hhea_line_gap=0, use_typo=True,
+                               cap_height=700)
+        extents = [fc.Extent("Aring", 0xC5, "B", 0, 1082), fc.Extent("Agrave", 0xC0, "B", 0, 900),
+                   fc.Extent("g", 0x67, "B", -300, 500)]
+        lines = fc.check_lines(m, extents, fc.check_metrics(m, extents))
+        texts = [(line.state, line.text) for line in lines]
+        self.assertEqual(texts[:2], [("warn", u"Windows clips 1 glyph at the top, up to 82 units (Aring)"),
+                                     ("warn", u"Windows clips 1 glyph at the bottom, up to 50 units (g)")])
+        self.assertEqual(lines[0].glyphs, [u"Aring"])
+        for passed in (u"Use Typo Metrics is on", u"hhea and typo values match", u"Line gaps are 0",
+                       u"The line is 120% of the em", u"A grave stays under the line's ascender",
+                       u"Capitals are centered in the line"):
+            self.assertIn(("ok", passed), texts)
+        self.assertEqual([line.state for line in lines], sorted((line.state for line in lines),
+                                                               key=["warn", "info", "ok"].index), "problems first")
+        gaps = fc.VerticalMetrics(upm=1000, typo_ascender=750, typo_descender=-250, typo_line_gap=200,
+                                  hhea_ascender=750, hhea_descender=-250, hhea_line_gap=100)
+        texts = [line.text for line in fc.check_lines(gaps, [], fc.check_metrics(gaps, []))]
+        self.assertIn(u"Line gaps 100 and 200: set them to 0 and add them to the ascender and descender", texts)
+        self.assertIn(u"winAscent and winDescent are not set", texts)
+        self.assertIn(u"FontLab did not say whether Use Typo Metrics is on", texts)
+        unset = fc.VerticalMetrics(upm=1000, typo_ascender=750, typo_descender=-250, typo_line_gap=0)
+        self.assertIn(u"The hhea values are not set in Font Info",
+                      [line.text for line in fc.check_lines(unset, [], fc.check_metrics(unset, []))])
+
+
+class MasterRowsTests(unittest.TestCase):
+    def found(self):
+        I = fc.Incompatibility
+        return [I(u"o", u"Bold", 1, "start", u"Start point 1 node on from where Light's would match"),
+                I(u"a", u"Bold", 2, "nodes", u"12 nodes, 14 in Light"), I(u"a", u"Black", None, "missing", u"No layer"),
+                I(u"e", u"Bold", None, "anchors", u"Lacks anchor top"), I(u"e", u"Black", None, "anchors", u"Lacks anchor top"),
+                I(u"n", u"Bold", 1, "direction", u"Runs clockwise, counterclockwise in Light")]
+
+    def test_counts_and_order(self):
+        found = self.found()
+        self.assertEqual(fc.problem_counts(found), [("missing", u"No layer", 1), ("nodes", u"Node counts", 1),
+                                                    ("direction", u"Directions", 1), ("start", u"Start points", 1),
+                                                    ("anchors", u"Anchors", 1)])
+        self.assertEqual([g for g, _ in fc.glyph_problems(found)], [u"a", u"n", u"o", u"e"], "the worst first")
+        self.assertEqual([g for g, _ in fc.glyph_problems(found, set(["anchors", "start"]))], [u"o", u"e"])
+
+    def test_master_marks(self):
+        problems = [f for f in self.found() if f.glyph == u"a"]
+        self.assertEqual(fc.master_states(problems, [u"Light", u"Regular", u"Bold", u"Black"], u"Light"),
+                         ["reference", "ok", "grave", "missing"])
+        anchors = [f for f in self.found() if f.glyph == u"e"]
+        self.assertEqual(fc.master_states(anchors, [u"Light", u"Bold"], u"Light"), ["reference", "minor"])
+
+    def test_problem_sentence(self):
+        problems = [f for f in self.found() if f.glyph == u"a" and f.master == u"Bold"]
+        self.assertEqual(fc.problem_sentence(problems), u"Contour 2: 12 nodes, 14 in Light.")
+
+
 # ---------------------------------------------------------------------------
 # The dialog, run on fakes: any Qt call is accepted and does nothing; the font is a small fake of
 # FontLab's (two masters, a glyph that does not interpolate, an anchored letter and mark). This
@@ -535,23 +738,38 @@ class DialogTests(unittest.TestCase):
         self.assertTrue(found, "e with acute, composed by the anchors")
         self.assertIn((u"e" + u(0x301), (0x65, (0x301,))),
                       [(unicodedata.normalize("NFD", c), r) for c, r in found[0].composed])
+        dialog.nearly.value, dialog.show_absent.checked = 30, True  # (the fake font has five letters)
+        dialog.check_coverage()
+        self.assertTrue(dialog.rows, "characters to add, the scripts the font lacks shown too")
+        dialog.checked = set(dialog.rows[0].items)
+        dialog.update_gain()
+        dialog.mark_needed(dialog.rows[0].needing[0])
+        dialog.update_buttons()
 
     def test_metrics(self):
         dialog = self.dialog()
-        dialog.mode.currentIndex, dialog.share.value = 0, 120
+        dialog.mode_new.checked, dialog.share.value = True, 120
         dialog.check_vertical()
         clipped = [f for f in dialog.metrics.findings if isinstance(f, fc.MetricFinding) and f.kind == "clip-top"]
         self.assertEqual([(f.glyphs[0][1], f.value) for f in clipped], [(u"Agrave", 100), (u"Agrave", 100)])
         self.assertTrue(dialog.suggestions)
-        dialog.metrics_picture(u"Agrave", u"Bold")
+        self.assertEqual([(c.extent.name, c.above) for c in dialog.clipped], [(u"Agrave", 100)], "once, its worst master")
+        self.assertTrue(any(line.state == "ok" for line in dialog.check_rows), "passed checks listed too")
+        dialog.draw_diagram()
+        dialog.mode_new.checked = False
+        dialog.suggest()
+        self.assertEqual(dialog.mode(), "keep")
 
     def test_masters(self):
         dialog = self.dialog()
         dialog.reference.currentText, dialog.reference.currentIndex = u"Regular", 0
+        for _, _, chip in dialog.chips:
+            chip.checked = True
         dialog.check_masters()
         found = sorted((f.glyph, f.master, f.kind) for f in dialog.masters.findings)
         self.assertEqual(found, [(u"o", u"Bold", "direction")], "eacute, in Regular only, does not vary")
-        dialog.outline_picture(u"o", u"Bold", 1)
+        self.assertEqual(dialog.glyph_names, [u"o"])
+        dialog.draw_comparison()
 
 
 if __name__ == "__main__":

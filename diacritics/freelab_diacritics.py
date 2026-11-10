@@ -2454,11 +2454,14 @@ class AnchorPage(object):
         self.editor.update()
         self.mark_selected(index)
         if final:
+            Qt = _qt()[0].Qt
             for item in self.items():
-                index_ = int(item.data(0, _qt()[0].Qt.UserRole))
+                index_ = int(item.data(0, Qt.UserRole))
                 if 0 <= index_ < len(self.glyphs) and self.glyphs[index_] is g:
                     self.tree.blockSignals(True)
                     self.refresh_item(item, g)
+                    if g.pending() and item.flags() & Qt.ItemIsUserCheckable:
+                        item.setCheckState(0, Qt.Checked)  # moved by hand: to be written
                     self.tree.blockSignals(False)
             self.update_buttons()
 
