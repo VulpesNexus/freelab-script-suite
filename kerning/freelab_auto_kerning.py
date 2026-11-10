@@ -2,9 +2,9 @@
 # -*- coding: utf-8 -*-
 """FreeLab auto kerning, from FontLab's Scripts menu.
 
-Suggests kerning for the Latin pairs of the current font's current master, by two methods and
-FontLab's own, shows them beside the kerning the font has and how far they agree, and writes only
-the pairs you approve.
+Suggests kerning for the pairs of the current font's current master, one script at a time (Latin,
+kana as palt sets them, Armenian, Georgian), by two methods and FontLab's own, shows them beside the
+kerning the font has and how far they agree, and writes only the pairs you approve.
 
 - halfkern's method (https://github.com/behdad/halfkern, Copyright 2022 Google LLC, Apache License
   2.0): every glyph gets an envelope, a halo around its ink; a pair moves until the overlap of the
@@ -58,13 +58,14 @@ ORDERS = (("change", "Largest change first"), ("agreement", "Best agreement firs
           ("alphabet", "Alphabetical"))
 PREVIEW_SIZE = 64  # pixels per em in the dialog's preview
 COMMON_PAIRS_FILE = "common_pairs.txt"  # beside this script
+SCRIPT_PAIRS_FILE = "script_pairs.txt"  # beside it: kana, Armenian, and Georgian pairs (kerning/train/script_pairs.py)
 CACHE_VERSION = 1  # raise when the measuring changes in a way the settings below do not show
 # The learned method's features: the gap between a pair's facing edges in height bands, from below
 # the baseline to above the capitals (shares of the em), besides both methods' readings.
 PROFILE_BANDS = 16
 BAND_RANGE = (-0.25, 1.0)
 GAP_CAP = 0.6  # gaps wider than this share of the em count as this wide
-KIND_CODES = {"upper": 0, "lower": 1, "figure": 2, "punctuation": 3}
+KIND_CODES = {"upper": 0, "lower": 1, "figure": 2, "punctuation": 3, "kana": 4}
 SPACING_PAIRS = (u"nn", u"oo", u"HH")  # the font's own spacing, as features
 LEARNED_MODEL_FILE = "learned_model.json"  # beside this script: trees trained by kerning/train/train.py
 LETTERS = u"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
@@ -72,36 +73,101 @@ FIGURES = u"0123456789"
 PUNCTUATION = u".,:;!?'\"-()[]{}/&*‘’“”«»–—"
 
 
+def _characters(*ranges):
+    """The characters of code point ranges (first, last), as one string (all in the BMP)."""
+    found = []
+    for first, last in ranges:
+        for code in range(first, last + 1):
+            try:
+                found.append(unichr(code))  # noqa: F821 (Python 2)
+            except NameError:
+                found.append(chr(code))
+    return u"".join(found)
+
+
+# The other scripts Auto Kerning measures, one script at a time, each held to references of its own
+# as Latin is to H, O, l, n, and o: a straight letter and a round one per case, set with themselves
+# with no kerning. Kana are measured as palt sets them (see KANA_SETTINGS); Georgian has Mkhedruli
+# (lowercase) and Mtavruli (its capitals, for all-capital text). Ranges are written out: FontLab's
+# Python 2.7 knows Unicode 5.2, which has no Mtavruli and calls Mkhedruli uncased letters.
+KANA_LETTERS = _characters((0x3041, 0x3096), (0x309D, 0x309E), (0x30A1, 0x30FA), (0x30FC, 0x30FE))
+KANA_PUNCTUATION = (_characters((0x3001, 0x3002), (0x3008, 0x3011), (0x3014, 0x3015), (0x301C, 0x301C),
+                                (0x30FB, 0x30FB), (0xFF01, 0xFF01), (0xFF08, 0xFF09), (0xFF0C, 0xFF0C),
+                                (0xFF0E, 0xFF0E), (0xFF1A, 0xFF1B), (0xFF1F, 0xFF1F), (0x2025, 0x2026))
+                    + u"‘’“”")
+ARMENIAN_CAPITALS = _characters((0x0531, 0x0556))
+ARMENIAN_LETTERS = ARMENIAN_CAPITALS + _characters((0x0561, 0x0587))
+ARMENIAN_PUNCTUATION = _characters((0x055A, 0x055E), (0x0589, 0x058A)) + u",.:()«»-–—"
+MTAVRULI = _characters((0x1C90, 0x1CBA), (0x1CBD, 0x1CBF))
+GEORGIAN_LETTERS = _characters((0x10D0, 0x10FA), (0x10FD, 0x10FF)) + MTAVRULI
+GEORGIAN_PUNCTUATION = u".,:;!?'\"-()„“”«»–—"
+SCRIPTS = (("latin", "Latin"), ("kana", "Kana"), ("armenian", "Armenian"), ("georgian", "Georgian"))
+SCRIPT_LETTERS = {"latin": LETTERS, "kana": KANA_LETTERS, "armenian": ARMENIAN_LETTERS, "georgian": GEORGIAN_LETTERS}
+SCRIPT_PUNCTUATION = {"latin": PUNCTUATION, "kana": KANA_PUNCTUATION, "armenian": ARMENIAN_PUNCTUATION,
+                      "georgian": GEORGIAN_PUNCTUATION}
+# Each script's references by kind of letter (as REFERENCES for Latin), the three letters its halo is
+# tuned on (as TUNING), and its controls: a straight lowercase, a round lowercase, and a straight
+# capital, as n, o, and H are Latin's (the font's spacing for the learned method). Kana have one
+# kind: hiragana, katakana, small kana, and the long vowel mark share one body; their halo is tuned on
+# RO alone (the halo grows until RO's envelopes meet across its palt spacing: no three kana agreed
+# within a factor of two in every palt font tried), and their references are a square, a round, and
+# an open kana (RO, NO, I), the band wide enough that most pairs palt sets evenly are left alone.
+SCRIPT_REFERENCES = {"latin": REFERENCES,
+                     "kana": {"kana": (u"ロ", u"の", u"い")},
+                     "armenian": {"upper": (u"Ո", u"Օ"), "lower": (u"ո", u"ս", u"օ")},
+                     "georgian": {"upper": (u"Ი", u"Ო"), "lower": (u"ი", u"ო", u"ს")}}
+SCRIPT_TUNING = {"latin": TUNING, "kana": (u"ロ",), "armenian": (u"ո", u"ս", u"օ"),
+                 "georgian": (u"ი", u"ო", u"ს")}
+SCRIPT_CONTROLS = {"latin": u"noH", "kana": u"いのロ", "armenian": u"ոօՈ", "georgian": u"იოᲘ"}
+SCRIPT_SIDE = {"latin": u"H", "kana": u"ロ", "armenian": u"Ո", "georgian": u"ი"}  # a pair is previewed between two of these
+SCRIPT_PROOF = {"kana": u"ロのい", "armenian": u"Ոոօ", "georgian": u"Იიო"}  # and proofed in a Glyph window between these
+SCRIPT_LINES = {"latin": u"Latin letters, figures, and punctuation", "kana": u"Kana and Japanese punctuation, as palt sets them",
+                "armenian": u"Armenian letters and punctuation",
+                "georgian": u"Georgian letters (Mkhedruli, and Mtavruli where the font has them) and punctuation"}
+SCRIPT_MIN_LETTERS = 20  # a font has a script when it has its tuning letters and at least this many of its letters
+KANA_SETTINGS = (("palt", "as the font's palt sets them"), ("proportional", "proportional already"))
+FULL_WIDTH_SHARE = 0.9  # kana wider than this share of the em are full width (as CJK Spacing has it)
+
+
 def common_pairs(path=None):
-    """{pair: rank} from common_pairs.txt (andre-fuchs/kerning-pairs, MIT): pairs common in text and
-    kerned in fonts, most relevant first. Empty when the file is missing."""
-    path = path or os.path.join(os.path.dirname(os.path.abspath(globals().get("__file__") or ".")), COMMON_PAIRS_FILE)
+    """{pair: rank} from common_pairs.txt (andre-fuchs/kerning-pairs, MIT): Latin pairs common in text
+    and kerned in fonts, most relevant first; then script_pairs.txt's kana, Armenian, and Georgian
+    pairs common in text (kerning/train/script_pairs.py). Only path's pairs when given. Empty when
+    the files are missing."""
+    here = os.path.dirname(os.path.abspath(globals().get("__file__") or "."))
+    paths = [path] if path else [os.path.join(here, COMMON_PAIRS_FILE), os.path.join(here, SCRIPT_PAIRS_FILE)]
     ranks = {}
-    try:
-        import io
-        with io.open(path, encoding="utf-8") as handle:
-            for line in handle:
-                pair = line.rstrip(u"\n")
-                if len(pair) == 2 and not pair.startswith(u"#") and pair not in ranks:
-                    ranks[pair] = len(ranks)
-    except (IOError, OSError):
-        pass
+    for one in paths:
+        try:
+            import io
+            with io.open(one, encoding="utf-8") as handle:
+                for line in handle:
+                    pair = line.rstrip(u"\r\n")
+                    if len(pair) == 2 and not pair.startswith(u"#") and pair not in ranks:
+                        ranks[pair] = len(ranks)
+        except (IOError, OSError):
+            pass
     return ranks
 
 
-def method_fingerprint(model=None):
+def method_fingerprint(model=None, script="latin"):
     """What the measuring depends on: a cache made with other settings (or another learned model)
     is not reused."""
     trained = (model or {}).get("info", {})
+    references = sorted(SCRIPT_REFERENCES[script].items())
+    if script != "latin":
+        references = (script, references, SCRIPT_TUNING[script], SCRIPT_CONTROLS[script])
     return u"%d %d %d %r %r %r %r %r %r %r" % (CACHE_VERSION, KERN_VERSION, EM_PIXELS, HALO_SHARE, PAD_SHARE, CONTOUR_SLOPE,
-                                             CONTOUR_FLOOR, MIN_GAP_SHARE, sorted(REFERENCES.items()),
+                                             CONTOUR_FLOOR, MIN_GAP_SHARE, references,
                                              (trained.get("trained"), trained.get("pairs")) if model else None)
 
 
-def cache_path(font_key, master):
-    """The cache file of one font's master: named by a hash, so no path or name is stored in it."""
+def cache_path(font_key, master, script="latin"):
+    """The cache file of one font's master (and script, past Latin): named by a hash, so no path or
+    name is stored in it."""
     import hashlib
-    digest = hashlib.sha1((u"%s|%s" % (font_key, master)).encode("utf-8")).hexdigest()[:20]
+    key = u"%s|%s" % (font_key, master) + (u"" if script == "latin" else u"|%s" % script)
+    digest = hashlib.sha1(key.encode("utf-8")).hexdigest()[:20]
     return os.path.join(state_dir(), u"kerning-cache", u"%s.json" % digest)
 
 
@@ -286,15 +352,108 @@ def calibrate(core, tuning, em, max_bias=None):
         if low > high / 2:
             return Band(bias, low, high)
         bias += 1
-    raise ValueError("no halo makes ll, nn, and oo agree")
+    raise ValueError(u"no halo makes %s agree" % u", ".join(u"%s%s" % (g.name, g.name) for g in tuning))
 
 
 def category(ch):
+    """A character's kind: "upper", "lower", "figure", "kana", or "punctuation" (anything else)."""
     if ch in LETTERS:
         return "upper" if ch.isupper() else "lower"
     if ch in FIGURES:
         return "figure"
+    if ch in ARMENIAN_LETTERS:
+        return "upper" if ch in ARMENIAN_CAPITALS else "lower"
+    if ch in GEORGIAN_LETTERS:
+        return "upper" if ch in MTAVRULI else "lower"
+    if ch in KANA_LETTERS:
+        return "kana"
     return "punctuation"
+
+
+def script_of(ch):
+    """The script of a letter Auto Kerning measures ("latin" for the figures too), or None."""
+    if ch in LETTERS or ch in FIGURES:
+        return "latin"
+    for script, letters in SCRIPT_LETTERS.items():
+        if ch in letters:
+            return script
+    return None
+
+
+def script_characters(script):
+    """The characters a script's analysis measures: its letters (and figures, for Latin) and punctuation."""
+    return SCRIPT_LETTERS[script] + (FIGURES if script == "latin" else u"") + SCRIPT_PUNCTUATION[script]
+
+
+def script_pairs(pairs, script):
+    """The pairs (strings of two characters) with a letter of the script and nothing of another."""
+    found = set()
+    for pair in pairs:
+        scripts = set(script_of(ch) for ch in pair)
+        if script in scripts and scripts <= set([script, None]):
+            found.add(pair)
+    return found
+
+
+def font_scripts(characters):
+    """The scripts a font can be kerned in, from the characters it has: their tuning letters and at
+    least SCRIPT_MIN_LETTERS of their letters (Latin first)."""
+    have = set(characters)
+    found = []
+    for script, _ in SCRIPTS:
+        letters = sum(1 for ch in SCRIPT_LETTERS[script] if ch in have)
+        if all(ch in have for ch in SCRIPT_TUNING[script]) and letters >= SCRIPT_MIN_LETTERS:
+            found.append(script)
+    return found
+
+
+# palt's rules as FontLab's feature code (FEA) holds them, CJK Spacing's among them:
+# "pos a-hira <-70 0 -130 0>;" (x placement, y placement, x advance, y advance), "pos a-hira -130;"
+# (x advance alone), the glyph also as a [list] or an @class.
+FEA_COMMENT = re.compile(u"#[^\n]*")
+FEA_CLASS = re.compile(u"(@[A-Za-z0-9_.\\-]+)\\s*=\\s*\\[([^\\]]*)\\]\\s*;")
+FEA_SINGLE = re.compile(u"\\bpos(?:ition)?\\s+(\\[[^\\]]*\\]|@[A-Za-z0-9_.\\-]+|[A-Za-z0-9_.\\-]+)\\s*"
+                        u"(?:<\\s*(-?\\d+)\\s+(-?\\d+)\\s+(-?\\d+)\\s+(-?\\d+)\\s*>|(-?\\d+))\\s*;")
+
+
+def palt_adjustments(text, prefix=u""):
+    """{glyph name: (x placement, x advance)} of the single adjustments in palt's code (classes
+    defined in it or in the features' prefix are expanded; a glyph's first rule wins, as palt.py reads
+    a font's). Pair rules and anything else are left out."""
+    classes = {}
+    for source in (prefix or u"", text or u""):
+        for name, members in FEA_CLASS.findall(FEA_COMMENT.sub(u"", source)):
+            classes[name] = members.split()
+    found = {}
+    for match in FEA_SINGLE.finditer(FEA_COMMENT.sub(u"", text or u"")):
+        target, x, _, advance, _, alone = match.groups()
+        if target.startswith(u"["):
+            names = []
+            for item in target[1:-1].split():
+                names.extend(classes.get(item, []) if item.startswith(u"@") else [item])
+        elif target.startswith(u"@"):
+            names = classes.get(target, [])
+        else:
+            names = [target]
+        value = (0, int(alone)) if alone is not None else (int(x), int(advance))
+        for name in names:
+            found.setdefault(name, value)
+    return found
+
+
+def kana_setting(advances, upm, adjustments):
+    """How the font's kana are set, from their advances {glyph name: width} and palt's adjustments:
+    "proportional" when most are narrower than full width already (FULL_WIDTH_SHARE), "palt" when
+    palt narrows most of them (by any amount: Source Han's palt leaves many kana above 90% of the
+    em), None when they are full width and palt does not narrow them (kerning them would fight the
+    full-width setting: CJK Spacing writes palt first)."""
+    if not advances:
+        return None
+    limit = FULL_WIDTH_SHARE * upm
+    if sum(1 for width in advances.values() if width < limit) * 2 > len(advances):
+        return "proportional"
+    narrowed = sum(1 for name in advances if adjustments.get(name, (0, 0))[1] < 0)
+    return "palt" if narrowed * 2 > len(advances) else None
 
 
 def reference_band(core, lefts, rights, bias):
@@ -423,11 +582,12 @@ def closest_gap(core, left, right, em):
     return None if gap > 1e8 else gap / em
 
 
-def font_spacing(core, glyph_of, em):
-    """The font's own spacing: the narrowest gaps of nn, oo, and HH (None for a pair it lacks)."""
+def font_spacing(core, glyph_of, em, script="latin"):
+    """The font's own spacing: the narrowest gaps of nn, oo, and HH (None for a pair it lacks); in
+    another script, of its controls (SCRIPT_CONTROLS) set the same way."""
     spacing = []
-    for pair in SPACING_PAIRS:
-        left, right = glyph_of(pair[0]), glyph_of(pair[1])
+    for ch in SCRIPT_CONTROLS[script]:
+        left, right = glyph_of(ch), glyph_of(ch)
         spacing.append(closest_gap(core, left, right, em) if left is not None and right is not None else None)
     return spacing
 
@@ -471,6 +631,12 @@ def tree_sum(stage, features):
             node = tree[node[3] if left else node[4]]
         total += node[6]
     return total
+
+
+def learned_scripts(model):
+    """The scripts Auto Kerning uses the learned model for: those its training checked it on (its
+    info's "scripts"; Latin alone for a model that does not say)."""
+    return (model or {}).get("info", {}).get("scripts") or ["latin"]
 
 
 def predict(model, features):
@@ -625,12 +791,14 @@ def layer_path(layer):
 
 
 class FontLabGlyphs(object):
-    """Glyph images of one master, rendered with Qt from FontLab's outlines."""
+    """Glyph images of one master, rendered with Qt from FontLab's outlines; adjustments {glyph name:
+    (x placement, x advance)} set glyphs as a feature does (kana as palt sets them)."""
 
-    def __init__(self, package, master, em=EM_PIXELS):
+    def __init__(self, package, master, em=EM_PIXELS, adjustments=None):
         import ctypes
         self.ctypes = ctypes
         self.package, self.master, self.em = package, master, em
+        self.adjustments = adjustments or {}
         self.upm = float(package.upm)
         self.scale = em / self.upm
         self.pad = int(math.ceil(PAD_SHARE * em))
@@ -646,9 +814,17 @@ class FontLabGlyphs(object):
         path = layer_path(layer)
         if path.isEmpty():
             return False
+        advance = layer.advanceWidth
+        if name in self.adjustments:
+            QtCore, QtGui = _qt()
+            placement, extra = self.adjustments[name]
+            shift = QtGui.QTransform()
+            shift.translate(placement, 0)
+            path = shift.map(path)
+            advance += extra
         rect = path.boundingRect()
-        self.paths[name], self.advances[name] = path, layer.advanceWidth
-        self.signatures[name] = path_signature(path, layer.advanceWidth)
+        self.paths[name], self.advances[name] = path, advance
+        self.signatures[name] = path_signature(path, advance)
         self.top = max(self.top, rect.bottom())  # font units grow upward: the rect's bottom is the ink's top
         self.bottom = min(self.bottom, rect.top())
         return True
@@ -845,13 +1021,18 @@ PROOF_SCRIPTS = (("GREEK", u"\u0397\u03bd\u03bf"), ("CYRILLIC", u"\u041d\u043d\u
 def proof_contexts(package, names):
     """The glyph names to proof glyphs between, in the script of the first of them that is encoded
     (H, n, and o for Latin; Greek's Eta, nu, omicron; Cyrillic's En, en, o; zeros for figures): only
-    those the font has, else Latin's, else the glyphs themselves."""
+    those the font has, else Latin's, else the glyphs themselves. Kana, Armenian, and Georgian take
+    the controls Auto Kerning measures them by (SCRIPT_PROOF)."""
     import unicodedata
     controls = u"Hno"
     for name in names:
         glyph = package.findName(name)
         code = glyph.fgGlyph.unicode if glyph is not None else 0
         if code:
+            script = script_of(unichr_(code))
+            if script in SCRIPT_PROOF:
+                controls = SCRIPT_PROOF[script]
+                break
             title = unicodedata.name(unichr_(code), u"")
             for word, chars in PROOF_SCRIPTS:
                 if word in title.split():
@@ -951,7 +1132,7 @@ def history_state(package):
 
 # Scripts > FreeLab, in the order a font is usually made, then dark mode, then FreeLab MCP's: FontLab
 # lists a folder's scripts by file name and has no separators of its own.
-MENU_GROUPS = (("Diacritics", "Auto Spacing", "CJK Spacing", "Auto Kerning", "Kerning Check", "Feature Code"),
+MENU_GROUPS = (("Diacritics", "Auto Spacing", "CJK Spacing", "Auto Kerning", "Kerning Check", "Font Check", "Feature Code"),
                ("Toggle Dark Mode", "Dark Mode Settings"),
                ("Start MCP Listener", "Stop MCP Listener", "Start Listener", "Stop Listener"))  # (FreeLab MCP's, old names too)
 MENU_TITLE, SCRIPTS_MENU = "FreeLab", "menuScripts"
@@ -1863,12 +2044,36 @@ class Analysis(object):
         save_cache(self.cache_file, self.cache)
 
 
-def make_bands(core, image_of, chars, em, max_bias):
-    """Both methods' bands for each kind of pair, from the font's references; image_of(ch) gives the
-    Glyph of a character in chars. Shared by Auto Kerning and the learned method's training."""
-    tuning = [image_of(ch) for ch in TUNING]
-    band = calibrate(core, tuning, em, max_bias=max_bias)
-    references = dict((kind, [image_of(ch) for ch in refs if ch in chars]) for kind, refs in REFERENCES.items())
+def touching_bias(core, groups, bias, limit):
+    """The smallest halo from bias up (to limit) at which every pair of each group of references
+    overlaps (a group without glyphs is passed over)."""
+    while bias < limit:
+        bands = [reference_band(core, refs, refs, bias) for refs in groups if refs]
+        if all(band is None or band.low > 0 for band in bands):
+            return bias
+        bias += 1
+    return bias
+
+
+def make_bands(core, image_of, chars, em, max_bias, script="latin"):
+    """Both methods' bands for each kind of pair, from the font's references in the script (Latin's:
+    H, O, l, n, o, 0, 8); image_of(ch) gives the Glyph of a character in chars. Shared by Auto
+    Kerning, Auto Spacing, and the learned method's training."""
+    tuning = [image_of(ch) for ch in SCRIPT_TUNING[script]]
+    try:
+        band = calibrate(core, tuning, em, max_bias=max_bias)
+    except ValueError:
+        if script == "latin" or len(tuning) < 3:
+            raise
+        tuning = tuning[:2]  # (Georgian's san spaced far looser than in and on in some fonts: the halo from those two)
+        band = calibrate(core, tuning, em, max_bias=max_bias)
+    references = dict((kind, [image_of(ch) for ch in refs if ch in chars]) for kind, refs in SCRIPT_REFERENCES[script].items())
+    if script != "latin":
+        # The halo also reaches across every reference pair: a band whose loosest pair has no overlap
+        # at all could not tighten anything (kana's references sit far apart under palt).
+        bias = touching_bias(core, list(references.values()), band.bias, max_bias or em)
+        if bias != band.bias:
+            band = reference_band(core, tuning, tuning, bias) or Band(bias, band.low, band.high)
     halo_bands, contour_bands = {}, {}
     for left_kind in references:
         for right_kind in references:
@@ -1890,32 +2095,41 @@ def font_key(package):
     return package.path or u"unsaved:%s" % package.tfn
 
 
-def analyze(package, master, characters=None, em=EM_PIXELS, progress=None, core=None, cache_file=None):
-    """Suggestions by both methods for every pair of the characters (Latin by default) the font has,
-    each method's factors fitted to its existing kerning. Pairs whose glyphs are unchanged since the
-    last analysis (the cache of this font's master) are not measured again; every pair is when a
-    reference glyph changed. progress(done, total) may return False to stop."""
-    glyphs = FontLabGlyphs(package, master, em)
-    chars = [(ch, name) for ch, name in font_glyphs(package, characters or latin_characters()) if glyphs.add(name)]
+def analyze(package, master, characters=None, em=EM_PIXELS, progress=None, core=None, cache_file=None, script="latin",
+            adjustments=None, pairs=None):
+    """Suggestions by both methods for every pair of the characters (the script's by default: Latin's
+    letters, figures, and punctuation) the font has, each method's factors fitted to its existing
+    kerning; only the pairs in pairs (strings of two characters) when given. adjustments {glyph name:
+    (x placement, x advance)} set the glyphs as a feature does (kana as palt sets them). Pairs whose
+    glyphs are unchanged since the last analysis (the cache of this font's master and script) are not
+    measured again; every pair is when a reference glyph changed. progress(done, total) may return
+    False to stop."""
+    glyphs = FontLabGlyphs(package, master, em, adjustments)
+    chars = [(ch, name) for ch, name in font_glyphs(package, characters or script_characters(script)) if glyphs.add(name)]
     names = dict(chars)
-    for ch in TUNING:
+    tuning = SCRIPT_TUNING[script]
+    for ch in tuning:
         if ch not in names:
-            raise ValueError(u'this font has no \u201c%s\u201d. Auto Kerning needs l, n, and o: their spacing sets the kerning.' % ch)
-    reference_names = sorted(set(names[ch] for chars_ in REFERENCES.values() for ch in chars_ if ch in names))
+            raise ValueError(u"this font has no \N{LEFT DOUBLE QUOTATION MARK}%s\N{RIGHT DOUBLE QUOTATION MARK}. Auto Kerning "
+                             u"needs %s: their spacing sets the kerning." % (ch, u", ".join(tuning[:-1]) + u", and " + tuning[-1]))
+    reference_names = sorted(set(names[ch] for chars_ in SCRIPT_REFERENCES[script].values() for ch in chars_ if ch in names))
     references_signature = u" ".join(glyphs.signatures[n] for n in reference_names) + u" upm %s" % glyphs.upm
-    cache_file = cache_file if cache_file is not None else cache_path(font_key(package), master)
+    cache_file = cache_file if cache_file is not None else cache_path(font_key(package), master, script)
     model = learned_model()
+    if script not in learned_scripts(model):
+        model = None  # trained on other scripts: its values here would be guesses
     old = load_cache(cache_file) or {}
-    valid = old.get("method") == method_fingerprint(model) and old.get("references") == references_signature
+    valid = old.get("method") == method_fingerprint(model, script) and old.get("references") == references_signature
     old_signatures = old.get("signatures", {}) if valid else {}
     old_pairs = old.get("pairs", {}) if valid else {}
     measuring = {}  # made only when a pair must be measured
 
     def tools():
         if not measuring:
-            measuring.update(make_bands(core or Core(), lambda ch: glyphs.image(names[ch]), names, em, glyphs.pad))
+            measuring.update(make_bands(core or Core(), lambda ch: glyphs.image(names[ch]), names, em, glyphs.pad, script))
             if model is not None:
-                measuring["spacing"] = font_spacing(measuring["core"], lambda ch: glyphs.image(names[ch]) if ch in names else None, em)
+                measuring["spacing"] = font_spacing(measuring["core"], lambda ch: glyphs.image(names[ch]) if ch in names else None,
+                                                    em, script)
         return measuring
 
     reach = float(glyphs.pad)
@@ -1928,7 +2142,7 @@ def analyze(package, master, characters=None, em=EM_PIXELS, progress=None, core=
             if progress is not None and done % 200 == 0 and progress(done, total) is False:
                 return None
             kinds = pair_kinds(left_char, right_char)
-            if kinds is None:
+            if kinds is None or (pairs is not None and left_char + right_char not in pairs):
                 continue
             key = u"%s %s" % (left, right)
             entry = old_pairs.get(key)
@@ -1967,7 +2181,7 @@ def analyze(package, master, characters=None, em=EM_PIXELS, progress=None, core=
             if method in s.raw:
                 units = s.raw[method]
                 s.values[method] = round_units(units * (tighten if units < 0 else loosen))
-    cache = {"method": method_fingerprint(model), "references": references_signature,
+    cache = {"method": method_fingerprint(model, script), "references": references_signature,
              "signatures": dict((name, glyphs.signatures[name]) for _, name in chars), "pairs": pairs}
     if cache_file:
         save_cache(cache_file, cache)
@@ -2047,10 +2261,16 @@ DIFFERS_NOTE = 0.03  # a member kerning this much differently from its class's f
 
 
 def kind_character(ch):
-    """The character whose kind (capital, lowercase, figure) sets a pair's references: its base letter."""
+    """The character whose kind (capital, lowercase, figure) sets a pair's references: its base letter;
+    for a kana, Armenian, or Georgian letter, its script's straight control of its case (RO for kana,
+    Armenian's vo, Georgian's in)."""
     base = base_letter(ch)
     if base in LETTERS + FIGURES:
         return base
+    script = script_of(ch)
+    if script in SCRIPT_PROOF:
+        controls = SCRIPT_CONTROLS[script]
+        return controls[2] if category(ch) in ("upper", "kana") else controls[0]
     if ch.isalpha():  # a letter of its own (o with stroke, dotless i): its case's references
         return u"H" if ch.isupper() else u"n"
     return ch
@@ -2388,7 +2608,9 @@ PALETTE_EVENTS = (38, 39)  # QEvent ApplicationPaletteChange, PaletteChange: dar
 COLUMN_CHOICES = {1: "current", 2: "halfkern", 3: "contour", 4: "learned", 5: "fontlab"}  # double-clicked cells
 
 HELP = u"""<b>FreeLab Auto Kerning</b><br>
-Suggests kerning for the font's Latin pairs and writes only the pairs you check.<br><br>
+Suggests kerning for the font's pairs, one script at a time (Latin, kana, Armenian, Georgian: the
+<i>Script</i> list offers those the font has), and writes only the pairs you check. Kana are kerned as
+the font's palt sets them, on top of it.<br><br>
 <b>The list</b>: each method's value beside the font's current one. Check the pairs to write;
 pairs the font kerns already start unchecked.<br>
 <b>Choosing a value for one pair</b>: click a preview below the list, double-click a value in the
@@ -2397,8 +2619,8 @@ while the list has the focus. A pair picked by hand is tinted; Backspace or Rese
 suggested value again. Restore suggestions puts every check and pick back as the list first came.<br>
 <b>Keys in the list</b>: arrows move, a letter jumps to the pairs starting with it, Space checks or
 unchecks the pair, Ctrl+1 to Ctrl+6 pick, Backspace resets.<br>
-<b>The H's around a pair</b>: click one, in any preview, to go to its pair with the pair's glyph
-beside it (H and T for HTo).<br>
+<b>The H's around a pair</b> (the script's own straight letter past Latin): click one, in any
+preview, to go to its pair with the pair's glyph beside it (H and T for HTo).<br>
 <b>The pair's name</b>: double-click it to open the pair in a Glyph window.<br>
 <b>Kerning classes</b>: a pair is written where its value comes from: its own pair, or else its
 classes' pair, which kerns every glyph of both classes. The line under the list says which.<br><br>
@@ -2418,6 +2640,7 @@ class AutoKerningDialog(object):
         self.font_kerning, self.kerning_read = None, 0.0
         self.busy = self.refilter_again = False
         self.common = common_pairs()
+        self.script, self.adjustments, self.side = "latin", {}, u"H"  # the script analyzed, palt's adjustments, the preview's sides
         # FontLab's main window as its parent: a parentless dialog counts as a main window of its own,
         # and kept FontLab running, the dialog alone on screen, after FontLab's window was closed.
         dialog = self.dialog = QtGui.QDialog(self.main_window()) if self.main_window() is not None else QtGui.QDialog()
@@ -2439,6 +2662,14 @@ class AutoKerningDialog(object):
         self.tolerance.setSuffix(" units")
         self.tolerance.setWhatsThis("A pair is listed when a method would change its kerning by at least this much.")
         row.addWidget(self.tolerance)
+        row.addWidget(QtGui.QLabel("Script"))
+        self.script_box = QtGui.QComboBox()
+        self.script_keys = ["latin"]
+        self.script_box.addItem(dict(SCRIPTS)["latin"])
+        self.script_box.setWhatsThis(u"The script whose pairs are measured and listed: those the font has (its letters "
+                                     u"and the letters its spacing is measured by). Kana are measured as the font's palt "
+                                     u"sets them (or as they are, when they are proportional already).")
+        row.addWidget(self.script_box)
         row.addWidget(QtGui.QLabel("Show"))
         self.show_kind = self.combo(SHOW)
         self.show_kind.setWhatsThis("Which characters' pairs are listed.")
@@ -2575,6 +2806,7 @@ class AutoKerningDialog(object):
         self.table.connect("cellDoubleClicked(int,int)", self.double_clicked)
         for widget in (self.show_kind, self.pairs, self.order):
             widget.connect("currentIndexChanged(int)", lambda index: self.refilter())
+        self.script_box.connect("activated(int)", lambda index: self.run())  # (by the user: refilling it starts nothing)
         self.tolerance.connect("valueChanged(int)", lambda value: self.refilter())
         self.include_kerned.connect("toggled(bool)", lambda on: self.refilter())
         self.only_picked.connect("toggled(bool)", lambda on: self.refilter())
@@ -2655,7 +2887,60 @@ class AutoKerningDialog(object):
     def font_line(self):
         if self.package is None:
             return u"No font is open. Open one, then click %s." % i("Analyze")
-        return u"%s, master %s. Latin letters, figures, and punctuation." % (b(self.package.tfn), b(self.master))
+        return u"%s, master %s. %s." % (b(self.package.tfn), b(self.master), SCRIPT_LINES[self.script])
+
+    def fill_scripts(self, package, wanted=None):
+        """The script list: the scripts the font has; the script to analyze: wanted (or the last one)
+        where the font has it, else its first."""
+        found = font_scripts([ch for ch, _ in font_glyphs(package, u"".join(SCRIPT_LETTERS[key] for key, _ in SCRIPTS))])
+        chosen = next((key for key in (wanted, self.script) if key in found), found[0] if found else "latin")
+        keys = found or ["latin"]
+        if keys != self.script_keys:
+            self.script_box.blockSignals(True)
+            self.script_box.clear()
+            for key in keys:
+                self.script_box.addItem(dict(SCRIPTS)[key])
+            self.script_box.blockSignals(False)
+            self.script_keys = keys
+        self.script_box.setCurrentIndex(keys.index(chosen) if chosen in keys else 0)
+        self.script_box.setEnabled(len(keys) > 1)
+        return chosen
+
+    def script_note(self):
+        """The script analyzed, for the status line: kana say how they are set."""
+        if self.script != "kana":
+            return dict(SCRIPTS)[self.script]
+        if self.adjustments:
+            return u"kana as palt sets them (its common pairs)"
+        return u"proportional kana (their common pairs)"
+
+    def chosen_script(self):
+        index = self.script_box.currentIndex
+        return self.script_keys[index] if 0 <= index < len(self.script_keys) else "latin"
+
+    def kana_adjustments(self, package, master):
+        """palt's adjustments of the font's kana, read from its feature code; ValueError when its kana
+        are full width and palt does not set them proportionally (kerning them would fight the
+        full-width setting)."""
+        adjustments = {}
+        try:
+            features = package.fgPackage.features
+            prefix = features.get_prefix() if hasattr(features, "get_prefix") else u""
+            if "palt" in list(features.keys()):
+                adjustments = palt_adjustments(features.get_feature("palt"), prefix)
+        except Exception:
+            adjustments = {}
+        advances = {}
+        for ch, name in font_glyphs(package, KANA_LETTERS):
+            layer = package.findName(name).getLayerByName(master)
+            if layer is not None:
+                advances[name] = layer.advanceWidth
+        setting = kana_setting(advances, float(package.upm), adjustments)
+        if setting is None:
+            raise ValueError(u"this font's kana are full width, and its palt does not set them proportionally: kerned, "
+                             u"they would be kerned in full-width text too. Write palt with CJK Spacing first, then analyze "
+                             u"the kana again.")
+        return adjustments if setting == "palt" else {}
 
     @staticmethod
     def combo(choices):
@@ -2709,7 +2994,18 @@ class AutoKerningDialog(object):
         self.analyze_button.setEnabled(False)
         self.apply_button.setEnabled(False)
         try:
-            result = analyze(self.package, self.master, progress=self.progress)
+            script = self.fill_scripts(package, self.chosen_script())
+            if script != self.script:
+                self.analysis, self.suggestions = None, []
+                self.table.setRowCount(0)
+            self.script = script
+            self.adjustments = self.kana_adjustments(package, self.master) if script == "kana" else {}
+            sides = font_glyphs(package, SCRIPT_SIDE[script]) or font_glyphs(package, u"H")
+            self.side = sides[0][1] if sides else u"H"
+            # kana: the pairs common in text only (all of them, some 45,000, would each be listed and asked of FontLab)
+            pairs = script_pairs(self.common, script) if script == "kana" else None
+            result = analyze(self.package, self.master, progress=self.progress, script=script, adjustments=self.adjustments,
+                             pairs=pairs)
         except Exception as exc:
             message = u"%s" % exc
             self.status.setText(self.font_line())
@@ -2737,9 +3033,9 @@ class AutoKerningDialog(object):
         kind = SHOW[self.show_kind.currentIndex][0]
         kinds = (category(suggestion.left_char), category(suggestion.right_char))
         if kind == "letters":
-            return all(k in ("upper", "lower") for k in kinds)
+            return all(k in ("upper", "lower", "kana") for k in kinds)
         if kind == "punctuation":
-            return all(k in ("upper", "lower", "punctuation") for k in kinds)
+            return all(k in ("upper", "lower", "kana", "punctuation") for k in kinds)
         if kind == "figures":
             return "figure" in kinds
         return True
@@ -2829,8 +3125,8 @@ class AutoKerningDialog(object):
                 if analysis.reused else u"%s pairs measured" % b(len(analysis.suggestions)))
         what = (u"%s listed, picked by hand" % b(len(listed)) if picked_only
                 else u"%s listed" % b(len(listed)))
-        self.status.setText(u"%s, master %s. %s; %s.<br>%s."
-                            % (b(self.package.tfn), b(self.master), work, what, html("; ".join(summary))))
+        self.status.setText(u"%s, master %s, %s. %s; %s.<br>%s."
+                            % (b(self.package.tfn), b(self.master), b(self.script_note()), work, what, html("; ".join(summary))))
         if self.first_pass:
             self.first_pass = False
             self.log.add(u"Analyzed %s, master %s: %s pairs listed." % (b(self.package.tfn), b(self.master), b(len(listed))))
@@ -2956,9 +3252,9 @@ class AutoKerningDialog(object):
             return
         s = self.suggestions[self.selected]
         if key == "before":
-            self.focus_pair(u"H", s.left)
+            self.focus_pair(self.side, s.left)
         else:
-            self.focus_pair(s.right, u"H")
+            self.focus_pair(s.right, self.side)
 
     def focus_pair(self, left, right):
         """The pair of the glyphs named left and right, selected in the list: listed whatever the
@@ -2995,9 +3291,11 @@ class AutoKerningDialog(object):
             if not code:
                 return None
             chars.append(unichr_(code))
-        wanted = list(TUNING) + [ch for chars_ in REFERENCES.values() for ch in chars_] + chars
+        script = self.script
+        wanted = list(SCRIPT_TUNING[script]) + [ch for chars_ in SCRIPT_REFERENCES[script].values() for ch in chars_] + chars
         try:
-            result = analyze(package, self.master, characters=u"".join(sorted(set(wanted))), cache_file="")
+            result = analyze(package, self.master, characters=u"".join(sorted(set(wanted))), cache_file="", script=script,
+                             adjustments=self.adjustments)
         except Exception:
             return None
         for s in result.suggestions if result is not None else []:
@@ -3155,13 +3453,19 @@ class AutoKerningDialog(object):
         palette = self.dialog.palette
         text = palette.color(QtGui.QPalette.WindowText)  # (FontLab 7's PythonQt lacks the placeholder text role)
         scale = float(PREVIEW_SIZE) / float(self.package.upm)
-        paths = []  # (layer, path, role): the pair between two H's, when the font has an H
-        for name, role in (("H", "side"), (s.left, "left"), (s.right, "right"), ("H", "side")):
+        paths = []  # (advance, path, role): the pair between two H's (the script's straight letter), when the font has one
+        for name, role in ((self.side, "side"), (s.left, "left"), (s.right, "right"), (self.side, "side")):
             glyph = self.package.findName(name)
             layer = glyph.getLayerByName(self.master) if glyph is not None and not glyph.isNull else None
             if layer is not None:
-                paths.append((layer, layer_path(layer), role))
-        strip = int(sum(layer.advanceWidth for layer, _, _ in paths) * scale) + PREVIEW_SIZE
+                path, advance = layer_path(layer), layer.advanceWidth
+                if name in self.adjustments:  # kana as palt sets them
+                    placement, extra = self.adjustments[name]
+                    shift = QtGui.QTransform()
+                    shift.translate(placement, 0)
+                    path, advance = shift.map(path), advance + extra
+                paths.append((advance, path, role))
+        strip = int(sum(advance for advance, _, _ in paths) * scale) + PREVIEW_SIZE
         font = QtGui.QFont(self.dialog.font)
         for number, (key, label) in enumerate(CHOICES):
             button, kern = self.choice_buttons[key], s.value(key)
@@ -3190,7 +3494,7 @@ class AutoKerningDialog(object):
         painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
         x = float(PREVIEW_SIZE) / 2
         spans, seen_pair = [], False
-        for layer, path, role in paths:
+        for width, path, role in paths:
             painter.save()
             painter.translate(x, PREVIEW_SIZE * 1.05)
             painter.scale(scale, -scale)
@@ -3199,9 +3503,9 @@ class AutoKerningDialog(object):
                 ink.setAlpha(SIDE_ALPHA)  # the H's: dimmed
             painter.fillPath(path, QtGui.QBrush(ink))
             painter.restore()
-            advance = layer.advanceWidth * scale + (kern * scale if role == "left" else 0)
+            advance = width * scale + (kern * scale if role == "left" else 0)
             if role == "side":
-                spans.append((x, x + layer.advanceWidth * scale, "after" if seen_pair else "before"))
+                spans.append((x, x + width * scale, "after" if seen_pair else "before"))
             else:
                 seen_pair = True
             x += advance

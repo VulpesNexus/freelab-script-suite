@@ -2,11 +2,14 @@
 substitutes, contextual positioning), so what is measured is what a reader sees.
 
 Per font, in shares of the em (across: of the base's ink width, from its left):
-- letters: for each letter of a script, where a sample mark above and one below land: the mark's ink
-  center across, and the gap between the mark's ink and the letter's;
-- reph (Devanagari): where the reph (ra and virama before a consonant) lands on a few consonants;
-- i-matra (Devanagari): how far the i-matra the font picks before each consonant reaches into it, as
-  a share of the consonant's advance (fonts with several i-matras only);
+- letters: for each letter of a script, where a sample mark of each side lands (above and below, and
+  Hebrew's dagesh inside the letter, holam at its top left, shin dot at shin's top right): the mark's
+  ink center across, and the gap between the mark's ink and the letter's (for the dagesh, its ink's
+  middle as a share of the letter's height);
+- reph (Devanagari, Bengali, Gujarati): where the reph (ra and virama before a consonant) lands on a
+  few consonants;
+- i-matra (Devanagari, Bengali, Gujarati): how far the i-matra the font picks before each consonant
+  reaches into it, as a share of the consonant's advance (fonts with several i-matras only);
 - ligatures (Arabic): where the font's mark-to-ligature anchors sit on its two-part ligatures, per
   part (the first part, read first, is on the right).
 
@@ -15,14 +18,23 @@ Used by anchors.py. Python 3 with uharfbuzz and fonttools.
 
 import statistics
 
-# A mark above and one below for each script (None: none to sample)
-SAMPLE_MARKS = {"latin": (0x0301, 0x0323), "greek": (0x0301, None), "cyrillic": (0x0301, 0x0323),
-                "hebrew": (0x05B9, 0x05B7), "arabic": (0x064E, 0x0650), "devanagari": (0x0902, 0x0941),
-                "thai": (0x0E48, 0x0E38), "lao": (0x0EC8, 0x0EB8), "myanmar": (0x1036, 0x102F),
-                "khmer": (0x17B7, 0x17BB)}
-REPH_CONSONANTS = (0x0915, 0x0916, 0x0917, 0x091C, 0x0924, 0x0928, 0x092A, 0x092E, 0x0938, 0x0939)
+import freelab_diacritics as dia  # (diacritics/, on the path anchors.py sets)
+
+# A sample mark for each side a script's marks take (above, below, and Hebrew's others: see
+# freelab_diacritics.MARK_CLASSES)
+SAMPLE_MARKS = dia.SAMPLE_MARKS
+SIDE_LETTERS = {("hebrew", "topright"): (0x05E9,)}  # a side sampled on these letters only (the shin dot on shin)
+# The reph: ra, virama, and the consonants it is sampled on, per script
+REPH = {"devanagari": (0x0930, 0x094D, (0x0915, 0x0916, 0x0917, 0x091C, 0x0924, 0x0928, 0x092A, 0x092E, 0x0938, 0x0939)),
+        "bengali": (0x09B0, 0x09CD, (0x0995, 0x0996, 0x0997, 0x099C, 0x09A4, 0x09A8, 0x09AA, 0x09AE, 0x09B8, 0x09B9)),
+        "gujarati": (0x0AB0, 0x0ACD, (0x0A95, 0x0A96, 0x0A97, 0x0A9C, 0x0AA4, 0x0AA8, 0x0AAA, 0x0AAE, 0x0AB8, 0x0AB9))}
+REPH_CONSONANTS = REPH["devanagari"][2]
 DEVANAGARI_CONSONANTS = tuple(range(0x0915, 0x093A)) + tuple(range(0x0958, 0x0960))
 I_MATRA = 0x093F
+# The pre-base i-matra and the consonants it goes before, per script
+I_MATRAS = {"devanagari": (I_MATRA, DEVANAGARI_CONSONANTS),
+            "bengali": (0x09BF, tuple(range(0x0995, 0x09BA)) + (0x09DC, 0x09DD, 0x09DF)),
+            "gujarati": (0x0ABF, tuple(range(0x0A95, 0x0ABA)))}
 FATHA, KASRA = 0x064E, 0x0650  # the marks that tell a ligature's top anchors from its bottom ones
 
 
@@ -92,33 +104,43 @@ def base_and_mark(placed, base_gid):
 
 def letter_placements(shaper, cmap, script, codes):
     """{(side, code): (share across, gap)}: a sample mark's ink on each letter (composed into one
-    glyph, as Latin's often are, says nothing and is left out)."""
+    glyph, as Latin's often are, says nothing and is left out); for the center (Hebrew's dagesh),
+    (share across, the middle of the mark's ink as a share of the letter's height)."""
     found = {}
-    for side, mark in zip(("top", "bottom"), SAMPLE_MARKS.get(script, (None, None))):
-        if mark is None or mark not in cmap:
+    for side, mark in sorted(SAMPLE_MARKS.get(script, {}).items()):
+        if mark not in cmap:
             continue
+        only = SIDE_LETTERS.get((script, side))
         for code in codes:
+            if only and code not in only:
+                continue
             pair = base_and_mark(shaper.shape(chr(code) + chr(mark)), shaper.nominal(code))
             if pair is None:
                 continue
             base, mark_glyph = pair
-            if base.width <= 0:
+            if base.width <= 0 or base.top <= base.bottom:
                 continue
             share = (mark_glyph.center - base.left) / base.width
-            gap = (mark_glyph.bottom - base.top) if side == "top" else (base.bottom - mark_glyph.top)
+            if side == "center":
+                found[(side, code)] = (share, ((mark_glyph.bottom + mark_glyph.top) / 2.0 - base.bottom) / (base.top - base.bottom))
+                continue
+            gap = (mark_glyph.bottom - base.top) if side.startswith("top") else (base.bottom - mark_glyph.top)
             found[(side, code)] = (share, gap / shaper.upem)
     return found
 
 
-def reph_placement(shaper, cmap):
+def reph_placement(shaper, cmap, script="devanagari"):
     """(share across, gap) of the reph's ink on a few consonants (medians), or None."""
-    if 0x0930 not in cmap or 0x094D not in cmap:
+    if script not in REPH:
+        return None
+    ra, virama, consonants = REPH[script]
+    if ra not in cmap or virama not in cmap:
         return None
     shares, gaps = [], []
-    for code in REPH_CONSONANTS:
+    for code in consonants:
         if code not in cmap:
             continue
-        pair = base_and_mark(shaper.shape(chr(0x0930) + chr(0x094D) + chr(code)), shaper.nominal(code))
+        pair = base_and_mark(shaper.shape(chr(ra) + chr(virama) + chr(code)), shaper.nominal(code))
         if pair is None:
             continue
         base, reph = pair
@@ -131,17 +153,21 @@ def reph_placement(shaper, cmap):
     return statistics.median(shares), statistics.median(gaps)
 
 
-def i_matra_reach(shaper, cmap):
+def i_matra_reach(shaper, cmap, script="devanagari", nominal=None):
     """{consonant: reach}: how far the i-matra picked before it reaches into it (its ink's right edge past
     the consonant's pen position), as a share of the consonant's advance; {} for a font with one
-    i-matra for all."""
-    if I_MATRA not in cmap:
+    i-matra for all. nominal, a dict: filled with {consonant: whether the pick is the font's nominal
+    i-matra}."""
+    if script not in I_MATRAS:
+        return {}
+    sign, consonants = I_MATRAS[script]
+    if sign not in cmap:
         return {}
     found, picked = {}, set()
-    for code in DEVANAGARI_CONSONANTS:
+    for code in consonants:
         if code not in cmap:
             continue
-        placed = shaper.shape(chr(code) + chr(I_MATRA))
+        placed = shaper.shape(chr(code) + chr(sign))
         if placed is None or len(placed) != 2:
             continue
         matra, consonant = placed  # the i-matra is drawn first, left of its consonant
@@ -149,7 +175,13 @@ def i_matra_reach(shaper, cmap):
             continue
         picked.add(matra.gid)
         found[code] = (matra.right - consonant.pen) / float(consonant.advance)
-    return found if len(picked) >= 2 else {}
+        if nominal is not None:
+            nominal[code] = matra.gid == shaper.nominal(sign)
+    if len(picked) < 2:
+        if nominal is not None:
+            nominal.clear()
+        return {}
+    return found
 
 
 def ligature_anchors(font):

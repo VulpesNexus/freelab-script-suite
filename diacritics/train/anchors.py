@@ -2,24 +2,33 @@
 and Apache License fonts only, as kerning/train/dataset.py finds them, plus FreeLab's corpus folder,
 %LOCALAPPDATA%\\FreeLab\\corpus, where OFL fonts from Google Fonts were put).
 
-Scripts whose marks are not precomposed (Khmer, Thai, Arabic, Devanagari, and the combining marks of
-any script) are set by the font's mark features: a mark's anchor meets its base's. For each font, each
-mark-to-base attachment of those scripts is measured, in shares of the em: how far above the base's
-ink top (below its ink bottom) the base's anchor sits, and how far across from the center of the
-base's top (bottom) fifth, as a share of its width; how far below the mark's ink (above, for marks
-below) the mark's anchor sits; and, for mark-to-mark, how far above a mark's ink its own anchor sits.
+Scripts whose marks are not precomposed (Khmer, Thai, Arabic, Hebrew, Devanagari, Bengali, Gujarati,
+Tamil, and the combining marks of any script) are set by the font's mark features: a mark's anchor
+meets its base's. For each font, each mark-to-base attachment of those scripts is measured, in shares
+of the em: how far above the base's ink top (below its ink bottom) the base's anchor sits, and how far
+across from the center of the base's top (bottom) fifth, as a share of its width; how far below the
+mark's ink (above, for marks below) the mark's anchor sits; and, for mark-to-mark, how far above a
+mark's ink its own anchor sits.
 The medians, per script and side, are diacritics/anchor_model.json: Diacritics places anchors by them.
+Marks of other classes (freelab_diacritics.MARK_CLASSES: Hebrew's dagesh inside the letter, its holam
+at the top left) are left out of these medians.
 Then it shapes text with each font (diacritics/train/shaped.py, through HarfBuzz): where a sample mark
-lands on each letter, the reph on a consonant, how far the i-matra picked before each consonant reaches
-into it, and where two-part ligatures' marks attach; the medians, from at least MIN_FONTS fonts each, are
-the model's "letters", "reph", "i_matra", and "ligature".
+of each side lands on each letter (from the fonts attaching that script's marks: a font that leaves
+them where they are drawn says nothing of where they go), the reph on a consonant (Devanagari, Bengali,
+Gujarati), how far the i-matra picked before each consonant reaches into it, and where two-part
+ligatures' marks attach; the medians, from at least MIN_FONTS fonts each, are the model's "letters",
+"reph" (per script), "i_matra" (per consonant: the median reach, the fonts, and the share of them that
+pick their nominal i-matra before it), and "ligature".
 It also counts, per script, the letters each font attaches marks to (its encoded glyph or a form of
 it named after it, beh-ar.init): the letters at least BASE_SHARE of the fonts having them attach marks
 to are the script's bases, the letters Diacritics gives anchors to where Unicode composes none.
 
-    python diacritics/train/anchors.py [--out <file.json>]
+    python diacritics/train/anchors.py [--out <file.json>] [--all-fonts]
 
-Python 3 with fonttools. Only the measurements leave the fonts; the fonts are not copied.
+--all-fonts counts every font's shaped placements, attaching that script's marks or not (as the first
+models did).
+
+Python 3 with fonttools and uharfbuzz. Only the measurements leave the fonts; the fonts are not copied.
 """
 
 import argparse
@@ -141,6 +150,7 @@ def measure(path):
             script_of.setdefault(name, script)
     if not script_of:
         return {}, {}
+    code_of = dict((name, code) for code, name in cmap.items())
     out = {}
     subs = lookups(font, POSITIONING, 4)
     letters = attached_letters(font, subs, script_of)
@@ -153,8 +163,8 @@ def measure(path):
         marks = sub.MarkCoverage.glyphs
         bases = sub.BaseCoverage.glyphs
         for mark, record in zip(marks, sub.MarkArray.MarkRecord):
-            if mark not in script_of or mark not in ink:
-                continue
+            if mark not in script_of or mark not in ink or code_of.get(mark) in dia.MARK_CLASSES:
+                continue  # (a dagesh's or a holam's anchors say nothing of marks over and under the letter)
             anchor = record.MarkAnchor
             m_left, m_bottom, m_right, m_top = ink[mark][:4]
             mark_center_y = (m_bottom + m_top) / 2.0
@@ -184,7 +194,7 @@ def measure(path):
                     data["base_offset"].append((base_anchor.XCoordinate - center) / width)
     for sub in lookups(font, ("mkmk",) + POSITIONING, 6):
         for mark2, record in zip(sub.Mark2Coverage.glyphs, sub.Mark2Array.Mark2Record):
-            if mark2 not in script_of:
+            if mark2 not in script_of or code_of.get(mark2) in dia.MARK_CLASSES:
                 continue
             ink2 = ink.get(mark2) or inks(font, [mark2]).get(mark2)
             if ink2 is None:
@@ -200,8 +210,9 @@ def measure(path):
 
 
 def measure_shaped(path):
-    """shaped.py's measures of one font: {"letters": {(script, side, code): (share, gap)}, "reph": (share,
-    gap) or None, "i_matra": {code: reach}, "ligatures": {(side, part): [(share, gap)]}}."""
+    """shaped.py's measures of one font: {"letters": {(script, side, code): (share, gap)}, "reph": {script:
+    (share, gap)}, "i_matra": {code: (reach, the nominal i-matra picked)}, "ligatures": {(side, part): [(share,
+    gap)]}}."""
     import unicodedata
     from fontTools.ttLib import TTFont
     font = TTFont(path)
@@ -216,8 +227,16 @@ def measure_shaped(path):
     for script, codes in by_script.items():
         for (side, code), value in shaped.letter_placements(shaper, cmap, script, sorted(codes)).items():
             letters[(script, side, code)] = value
-    return {"letters": letters, "reph": shaped.reph_placement(shaper, cmap),
-            "i_matra": shaped.i_matra_reach(shaper, cmap), "ligatures": shaped.ligature_anchors(font)}
+    rephs, i_matras = {}, {}
+    for script in shaped.REPH:
+        found = shaped.reph_placement(shaper, cmap, script)
+        if found is not None:
+            rephs[script] = found
+    for script in shaped.I_MATRAS:
+        nominal = {}
+        for code, reach in shaped.i_matra_reach(shaper, cmap, script, nominal).items():
+            i_matras[code] = (reach, nominal.get(code, False))
+    return {"letters": letters, "reph": rephs, "i_matra": i_matras, "ligatures": shaped.ligature_anchors(font)}
 
 
 def fonts():
@@ -246,9 +265,11 @@ def fonts():
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--out", default=MODEL_FILE)
+    parser.add_argument("--all-fonts", action="store_true",
+                        help="count shaped placements from fonts not attaching that script's marks too")
     args = parser.parse_args()
     per_font, letter_counts = [], {}
-    landed, rephs, i_matras, ligatures = {}, [], {}, {}
+    landed, rephs, i_matras, ligatures = {}, {}, {}, {}
     for path, family in fonts():
         try:
             measured, letters = measure(path)
@@ -259,13 +280,15 @@ def main():
             found = measure_shaped(path)
         except Exception as exc:
             print("  %s: not shaped: %s" % (family, exc))
-            found = {"letters": {}, "reph": None, "i_matra": {}, "ligatures": {}}
+            found = {"letters": {}, "reph": {}, "i_matra": {}, "ligatures": {}}
+        attaching = set(script for script, (has, attached) in letters.items() if attached)
         for key, value in found["letters"].items():
-            landed.setdefault(key, []).append(value)
-        if found["reph"] is not None:
-            rephs.append(found["reph"])
-        for code, reach in found["i_matra"].items():
-            i_matras.setdefault(code, []).append(reach)
+            if args.all_fonts or key[0] in attaching:
+                landed.setdefault(key, []).append(value)
+        for script, value in found["reph"].items():
+            rephs.setdefault(script, []).append(value)
+        for code, picked in found["i_matra"].items():
+            i_matras.setdefault(code, []).append(picked)
         for key, values in found["ligatures"].items():
             ligatures.setdefault(key, []).append(shaped.median_pair(values))
         for script, (has, attached) in letters.items():
@@ -298,10 +321,13 @@ def main():
             share, gap = shaped.median_pair(values)
             model["letters"].setdefault("%s %s" % (script, side), {})["%04X" % code] = [
                 round(share, 3), round(gap, 4), len(values)]
-    if len(rephs) >= MIN_FONTS:
-        share, gap = shaped.median_pair(rephs)
-        model["reph"] = {"share": round(share, 3), "gap": round(gap, 4), "fonts": len(rephs)}
-    model["i_matra"] = dict(("%04X" % code, [round(statistics.median(values), 3), len(values)])
+    model["reph"] = {}
+    for script, values in sorted(rephs.items()):
+        if len(values) >= MIN_FONTS:
+            share, gap = shaped.median_pair(values)
+            model["reph"][script] = {"share": round(share, 3), "gap": round(gap, 4), "fonts": len(values)}
+    model["i_matra"] = dict(("%04X" % code, [round(statistics.median(v[0] for v in values), 3), len(values),
+                                             round(sum(1 for v in values if v[1]) / float(len(values)), 2)])
                             for code, values in sorted(i_matras.items()) if len(values) >= MIN_FONTS)
     model["ligature"] = {}
     for side in ("top", "bottom"):
@@ -317,8 +343,8 @@ def main():
             model["bases"][script] = ["%04X" % code for code in bases]
     with io.open(args.out, "w", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps(model, indent=1, sort_keys=True) + "\n")
-    print("%d fonts measured; letters placed: %s; reph from %d fonts; i-matra for %d consonants; ligatures: %s" % (
-        len(per_font), dict((key, len(value)) for key, value in model["letters"].items()), len(rephs),
+    print("%d fonts measured; letters placed: %s; reph: %s; i-matra for %d consonants; ligatures: %s" % (
+        len(per_font), dict((key, len(value)) for key, value in model["letters"].items()), model["reph"],
         len(model["i_matra"]), model["ligature"]))
     for key, row in sorted(model["anchors"].items()):
         print("  %s: %s" % (key, row))

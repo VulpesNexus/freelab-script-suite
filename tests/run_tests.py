@@ -25,13 +25,14 @@ PY27 = PY27_DIR / "tools" / "python.exe"
 NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 PY27_FILES = (
     "darkmode/freelab_dark_mode.py", "darkmode/freelab_dark_mode_settings.py", "tests/qtfakes.py",
-    "tests/darkmode_tests.py", "kerning/freelab_auto_kerning.py", "kerning/freelab_kerning_check.py", "kerning/common_pairs.txt",
+    "tests/darkmode_tests.py", "kerning/freelab_auto_kerning.py", "kerning/freelab_kerning_check.py", "kerning/common_pairs.txt", "kerning/script_pairs.txt",
     "tests/kern_tests.py", "spacing/freelab_auto_spacing.py", "tests/spacing_tests.py",
     "diacritics/freelab_diacritics.py", "features/freelab_feature_code.py", "tests/glyphtools_tests.py",
-    "cjk/freelab_cjk_spacing.py", "tests/cjk_tests.py",
+    "cjk/freelab_cjk_spacing.py", "tests/cjk_tests.py", "tests/features_tests.py",
+    "checks/freelab_font_check.py", "checks/language_coverage.json", "tests/fontcheck_tests.py",
 )
 PY27_SUITES = ("tests/darkmode_tests.py", "tests/kern_tests.py", "tests/spacing_tests.py", "tests/glyphtools_tests.py",
-               "tests/cjk_tests.py")
+               "tests/cjk_tests.py", "tests/features_tests.py", "tests/fontcheck_tests.py")
 
 
 def run_py3() -> tuple[bool, list[str]]:

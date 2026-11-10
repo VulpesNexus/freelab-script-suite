@@ -654,6 +654,209 @@ class MenuOrderTests(unittest.TestCase):
                           "Toggle Dark Mode", "Dark Mode Settings", None, "Start Listener", None, "Something New"])
         self.assertEqual(ak.menu_order(["Auto Kerning"]), ["Auto Kerning"], "no separator around a lone group")
 
+    def test_font_check_follows_kerning_check(self):
+        texts = ["Feature Code", "Font Check", "Kerning Check", "Auto Kerning"]
+        self.assertEqual(ak.menu_order(texts), ["Auto Kerning", "Kerning Check", "Font Check", "Feature Code"])
+
+
+ARMENIAN_VO, ARMENIAN_SMALL_VO = u"\N{ARMENIAN CAPITAL LETTER VO}", u"\N{ARMENIAN SMALL LETTER VO}"
+GEORGIAN_IN, MTAVRULI_IN = u"\N{GEORGIAN LETTER IN}", ak.unichr_(0x1C98)  # (Python 2.7 has no Mtavruli names)
+KANA_RO, KANA_NO, KANA_I = u"\N{KATAKANA LETTER RO}", u"\N{HIRAGANA LETTER NO}", u"\N{HIRAGANA LETTER I}"
+
+
+class ScriptTests(unittest.TestCase):
+    def test_kinds_of_the_other_scripts(self):
+        self.assertEqual(ak.category(ARMENIAN_VO), "upper")
+        self.assertEqual(ak.category(ARMENIAN_SMALL_VO), "lower")
+        self.assertEqual(ak.category(MTAVRULI_IN), "upper", "Mtavruli: Georgian's capitals")
+        self.assertEqual(ak.category(GEORGIAN_IN), "lower", "Mkhedruli")
+        for ch in (KANA_RO, u"\N{HIRAGANA LETTER SMALL TU}", u"\N{KATAKANA-HIRAGANA PROLONGED SOUND MARK}"):
+            self.assertEqual(ak.category(ch), "kana", "small kana and the long vowel mark are kana too")
+        self.assertEqual(ak.category(u"\N{IDEOGRAPHIC FULL STOP}"), "punctuation")
+        self.assertEqual(ak.category(u"\N{ARMENIAN FULL STOP}"), "punctuation")
+        self.assertEqual(ak.pair_kinds(KANA_NO, u"\N{IDEOGRAPHIC COMMA}"), ("kana", "kana"), "punctuation beside a kana: the kana's band")
+        self.assertIsNone(ak.pair_kinds(u"\N{IDEOGRAPHIC COMMA}", u"\N{LEFT CORNER BRACKET}"))
+
+    def test_script_of_a_character(self):
+        self.assertEqual([ak.script_of(ch) for ch in (u"a", u"7", ARMENIAN_VO, MTAVRULI_IN, GEORGIAN_IN, KANA_RO, u".", u"\N{CJK UNIFIED IDEOGRAPH-4E00}")],
+                         ["latin", "latin", "armenian", "georgian", "georgian", "kana", None, None])
+
+    def test_a_scripts_characters(self):
+        self.assertIn(u"7", ak.script_characters("latin"))
+        self.assertNotIn(u"7", ak.script_characters("armenian"), "figures are Latin's")
+        self.assertIn(u"\N{ARMENIAN COMMA}", ak.script_characters("armenian"))
+        self.assertIn(u"\N{IDEOGRAPHIC FULL STOP}", ak.script_characters("kana"))
+        self.assertEqual(len(ak.MTAVRULI), 46)
+
+    def test_the_scripts_a_font_has(self):
+        latin = ak.LETTERS
+        self.assertEqual(ak.font_scripts(latin + ak.KANA_LETTERS + ak.ARMENIAN_LETTERS), ["latin", "kana", "armenian"])
+        self.assertEqual(ak.font_scripts(latin + ak.KANA_LETTERS.replace(KANA_RO, u"")), ["latin"], "kana without RO: not measured")
+        self.assertEqual(ak.font_scripts(u"lno" + ak.GEORGIAN_LETTERS[:12]), [], "too few letters of either")
+        mkhedruli = ak.GEORGIAN_LETTERS.replace(MTAVRULI_IN, u"")
+        self.assertEqual(ak.font_scripts(mkhedruli), ["georgian"], "Mtavruli are not needed")
+
+    def test_palt_rules_are_read_from_feature_code(self):
+        prefix = u"@narrow = [a-hira i-hira];\n"
+        code = (u"feature palt {\n# Proportional Alternate Widths\n"
+                u"# >>> FreeLab palt (made by FreeLab CJK Spacing)\n"
+                u"  pos ka-kata <-70 0 -130 0>;\n"
+                u"  pos ka-kata <-10 0 -20 0>;  # a second rule: the first wins\n"
+                u"  pos @narrow <-50 0 -100 0>;\n"
+                u"  pos [u-hira @local] -80;\n"
+                u"  pos ka-kata ki-kata -20;  # a pair: not palt's single adjustment\n"
+                u"  @local = [e-hira];\n"
+                u"# <<< FreeLab palt\n} palt;\n")
+        self.assertEqual(ak.palt_adjustments(code, prefix),
+                         {"ka-kata": (-70, -130), "a-hira": (-50, -100), "i-hira": (-50, -100), "u-hira": (0, -80),
+                          "e-hira": (0, -80)})
+        self.assertEqual(ak.palt_adjustments(u"", u""), {})
+        self.assertEqual(ak.palt_adjustments(None), {})
+
+    def test_how_the_kana_are_set(self):
+        upm = 1000.0
+        full = {"a": 1000, "i": 1000, "u": 1000}
+        self.assertIsNone(ak.kana_setting(full, upm, {}), "full width and no palt: not kerned")
+        self.assertEqual(ak.kana_setting(full, upm, {"a": (-80, -150), "i": (-60, -120)}), "palt")
+        self.assertIsNone(ak.kana_setting(full, upm, {"a": (-80, -150)}), "palt narrows too few of them")
+        self.assertEqual(ak.kana_setting(full, upm, {"a": (-20, -40), "i": (-30, -50), "u": (0, 0)}), "palt",
+                         "a light palt (Source Han's leaves many kana wider than 90% of the em)")
+        self.assertEqual(ak.kana_setting({"a": 760, "i": 820, "u": 1000}, upm, {}), "proportional")
+        self.assertIsNone(ak.kana_setting({}, upm, {}))
+
+    @unittest.skipIf(not os.path.isfile(os.path.join(HERE, os.pardir, "kerning", ak.SCRIPT_PAIRS_FILE)),
+                     "kerning/script_pairs.txt not copied beside the script (run_tests.py's Python 2.7 files)")
+    def test_common_pairs_add_the_other_scripts_after_latin(self):
+        latin =ak.common_pairs(os.path.join(HERE, os.pardir, "kerning", ak.COMMON_PAIRS_FILE))
+        every = ak.common_pairs()
+        self.assertTrue(all(every[pair] == rank for pair, rank in latin.items()), "Latin's ranks unchanged")
+        others = [pair for pair in every if pair not in latin]
+        self.assertGreater(len(others), 3000)
+        self.assertTrue(all(every[pair] >= len(latin) for pair in others))
+        scripts = set(ak.script_of(ch) for pair in others for ch in pair) - set([None])
+        self.assertEqual(scripts, set(["kana", "armenian", "georgian"]))
+        self.assertIn(u"\N{HIRAGANA LETTER SMALL TU}\N{HIRAGANA LETTER TE}", every, "a pair of a small kana")
+        self.assertIn(u"\N{ARMENIAN SMALL LETTER VO}\N{ARMENIAN SMALL LETTER YIWN}", every, "Armenian's ou")
+        self.assertTrue(any(ak.category(pair[0]) == "upper" for pair in others if ak.script_of(pair[0]) == "georgian"),
+                        "Mtavruli pairs, for all-capital text")
+
+    def test_a_scripts_pairs(self):
+        pairs = [KANA_RO + KANA_NO, KANA_NO + u"\N{IDEOGRAPHIC FULL STOP}", u"To", KANA_RO + u"o", u".,",
+                 ARMENIAN_SMALL_VO + u","]
+        self.assertEqual(ak.script_pairs(pairs, "kana"), set([KANA_RO + KANA_NO, KANA_NO + u"\N{IDEOGRAPHIC FULL STOP}"]),
+                         "kana beside a mark, not beside a Latin letter")
+        self.assertEqual(ak.script_pairs(pairs, "armenian"), set([ARMENIAN_SMALL_VO + u","]))
+
+    def test_each_script_has_a_cache_of_its_own(self):
+        self.assertEqual(ak.cache_path(u"font.vfc", u"Regular"), ak.cache_path(u"font.vfc", u"Regular", "latin"),
+                         "Latin's cache is where it was")
+        self.assertNotEqual(ak.cache_path(u"font.vfc", u"Regular"), ak.cache_path(u"font.vfc", u"Regular", "kana"))
+        self.assertEqual(ak.method_fingerprint(None), ak.method_fingerprint(None, "latin"))
+        self.assertNotEqual(ak.method_fingerprint(None), ak.method_fingerprint(None, "armenian"))
+
+    def test_the_learned_model_is_used_for_its_scripts_only(self):
+        self.assertEqual(ak.learned_scripts(None), ["latin"])
+        self.assertEqual(ak.learned_scripts({"info": {"trained": "2026-11-10"}}), ["latin"], "an older model: Latin's")
+        self.assertEqual(ak.learned_scripts({"info": {"scripts": ["latin", "armenian"]}}), ["latin", "armenian"])
+        self.assertNotIn("kana", ak.learned_scripts(ak.learned_model()), "no kana model: too few fonts kern kana")
+
+    def test_a_letter_takes_its_scripts_references(self):
+        self.assertEqual(ak.kind_character(u"\N{ARMENIAN SMALL LETTER BEN}"), ARMENIAN_SMALL_VO)
+        self.assertEqual(ak.kind_character(u"\N{ARMENIAN CAPITAL LETTER BEN}"), ARMENIAN_VO)
+        self.assertEqual(ak.kind_character(ak.unichr_(0x1C91)), MTAVRULI_IN, "Mtavruli ban: Mtavruli in")
+        self.assertEqual(ak.kind_character(u"\N{GEORGIAN LETTER BAN}"), GEORGIAN_IN)
+        self.assertEqual(ak.kind_character(u"\N{HIRAGANA LETTER GA}"), KANA_RO)
+        self.assertEqual(ak.kind_character(u"\N{LATIN SMALL LETTER O WITH STROKE}"), u"n", "Latin as before")
+
+    def test_the_references_of_each_script_are_its_own_letters(self):
+        for script, _ in ak.SCRIPTS:
+            letters = ak.SCRIPT_LETTERS[script] + (ak.FIGURES if script == "latin" else u"")
+            for chars in list(ak.SCRIPT_REFERENCES[script].values()) + [ak.SCRIPT_TUNING[script], ak.SCRIPT_CONTROLS[script]]:
+                self.assertTrue(all(ch in letters for ch in chars), script)
+            self.assertIn(ak.SCRIPT_SIDE[script], letters)
+
+
+class ScriptProofTests(unittest.TestCase):
+    def test_kana_armenian_and_georgian_are_proofed_between_their_own_letters(self):
+        names = [("ro", 0x30ED), ("no", 0x306E), ("i", 0x3044), ("ka", 0x30AB), ("Vo", 0x548), ("vo", 0x578),
+                 ("oh", 0x585), ("ben", 0x562), ("in", 0x10D8), ("on", 0x10DD), ("ban", 0x10D1), ("H", 0x48), ("n", 0x6E), ("o", 0x6F)]
+        package = ProofTests.Package(names)
+        self.assertEqual(ak.proof_contexts(package, ["ka", "no"]), ["ro", "no", "i"])
+        self.assertEqual(ak.proof_contexts(package, ["ben", "vo"]), ["Vo", "vo", "oh"])
+        self.assertEqual(ak.proof_contexts(package, ["ban", "in"]), ["in", "on"], "no Mtavruli in this font: Mkhedruli's")
+
+
+@unittest.skipIf(CORE is None, "auto kerning core not built: run tools/build-native.ps1 -Kern (%s)" % ak.kern_library_path())
+class ScriptBandTests(unittest.TestCase):
+    def test_a_loose_third_tuning_letter_is_left_out_of_the_halo(self):
+        # in and on agree; san is spaced so loosely that no halo within reach makes it agree with them:
+        # the halo is in and on's, grown until san's envelopes meet too (every reference pair overlaps)
+        glyphs = {GEORGIAN_IN: stem("in"), u"\N{GEORGIAN LETTER ON}": stem("on"),
+                  u"\N{GEORGIAN LETTER SAN}": stem("san", left_bearing=20, right_bearing=20)}
+        tools = ak.make_bands(CORE, glyphs.get, glyphs, 100, PAD, "georgian")
+        self.assertGreater(tools["bias"], ak.calibrate(CORE, [stem("in"), stem("on")], 100).bias)
+        self.assertLess(tools["bias"], PAD)
+        self.assertGreater(tools["halo"][("lower", "lower")].low, 0, "every reference pair overlaps")
+        latin = {u"l": stem("l"), u"n": stem("n"), u"o": stem("o", left_bearing=60, right_bearing=60)}
+        self.assertRaises(ValueError, ak.make_bands, CORE, latin.get, latin, 100, PAD)
+
+    def test_kana_are_measured_by_their_own_band(self):
+        glyphs = {KANA_RO: stem("ro"), KANA_NO: stem("no", left_bearing=12, right_bearing=12), KANA_I: stem("i")}
+        tools = ak.make_bands(CORE, glyphs.get, glyphs, 100, PAD, "kana")
+        self.assertEqual(sorted(tools["halo"]), [("kana", "kana")])
+        loose = stem("ku", left_bearing=30, right_bearing=30)
+        halo, contour = ak.measure_pair(tools, u"\N{KATAKANA LETTER KU}", KANA_RO, loose, stem("ro"), 100, float(PAD))
+        self.assertLess(halo, 0, "a kana spaced looser than the references tightens")
+        self.assertLess(contour, 0)
+        halo, contour = ak.measure_pair(tools, KANA_RO, KANA_I, stem("ro"), stem("i"), 100, float(PAD))
+        self.assertEqual(halo, 0.0, "spaced as the references: left alone")
+
+
+@unittest.skipIf(sys.version_info[0] < 3, "the pairs are counted by a Python 3 training script")
+class ScriptPairCountTests(unittest.TestCase):
+    def setUp(self):
+        sys.path.insert(0, os.path.join(HERE, os.pardir, "kerning", "train"))
+        import script_pairs
+        self.sp = script_pairs
+
+    def test_pairs_of_letters_and_of_a_letter_and_a_mark(self):
+        counts = self.sp.count_pairs([u"ab, c.. ab"], u"abc", u",.")
+        self.assertEqual(dict(counts), {u"ab": 2, u"b,": 1, u"c.": 1}, "no pair across a space, none of two marks")
+
+    def test_all_capital_pairs_follow_the_lowercase_ones(self):
+        counts = self.sp.with_capitals({u"ab": 8, u"a,": 4, u"Ab": 2}, lambda ch: ch.upper() if ch in u"ab" else None)
+        self.assertEqual(counts[u"AB"], 8 * self.sp.CAPITALS_SHARE)
+        self.assertEqual(counts[u"A,"], 4 * self.sp.CAPITALS_SHARE)
+        self.assertEqual(counts[u"Ab"], 2, "a capital already there is not counted again")
+        self.assertEqual(self.sp.mtavruli(GEORGIAN_IN), MTAVRULI_IN)
+        self.assertIsNone(self.sp.mtavruli(u"a"))
+        self.assertIsNone(self.sp.armenian_capital(u"\N{ARMENIAN SMALL LIGATURE ECH YIWN}"), "a ligature has no one capital")
+
+    def test_pairs_are_kept_until_they_cover_the_share(self):
+        counts = {u"ab": 50, u"bc": 30, u"cd": 15, u"de": 5}
+        self.assertEqual(self.sp.kept(counts, 0.8), [u"ab", u"bc"])
+        self.assertEqual(self.sp.kept(counts, 0.81), [u"ab", u"bc", u"cd"])
+
+    def test_aozora_texts_lose_their_ruby_notes_and_colophon(self):
+        import tempfile
+        import zipfile
+        rule = self.sp.HEADER_RULE
+        text = (u"Title\r\n" + rule + u"\r\nkey to the marks\r\n" + rule + u"\r\n"
+                u"\N{CJK UNIFIED IDEOGRAPH-732B}\N{LEFT DOUBLE ANGLE BRACKET}\N{HIRAGANA LETTER NE}\N{HIRAGANA LETTER KO}"
+                u"\N{RIGHT DOUBLE ANGLE BRACKET}\N{HIRAGANA LETTER DE}\N{HIRAGANA LETTER A}\N{HIRAGANA LETTER RU}"
+                u"\N{FULLWIDTH LEFT SQUARE BRACKET}\N{FULLWIDTH NUMBER SIGN}note\N{FULLWIDTH RIGHT SQUARE BRACKET}"
+                u"\N{IDEOGRAPHIC FULL STOP}\r\n" + self.sp.FOOTER + u"source\r\n")
+        handle, path = tempfile.mkstemp(suffix=".zip")
+        os.close(handle)
+        try:
+            with zipfile.ZipFile(path, "w") as archive:
+                archive.writestr("work.txt", text.encode("cp932"))
+            clean = self.sp.aozora_text(path)
+        finally:
+            os.remove(path)
+        self.assertEqual(clean.strip(), u"\N{CJK UNIFIED IDEOGRAPH-732B}\N{HIRAGANA LETTER DE}\N{HIRAGANA LETTER A}"
+                                        u"\N{HIRAGANA LETTER RU}\N{IDEOGRAPHIC FULL STOP}")
+
 
 if __name__ == "__main__":
     unittest.main()

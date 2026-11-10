@@ -26,6 +26,10 @@ A glyph narrower than 90% of the em is proportional already and is left alone, a
 
 The list groups the glyphs by kind, each with its width, its palt trim, its width after, and its halt setting; checked glyphs are written. Under it, a sample (yours to type) is set as it is and with palt, in the font's glyphs. The log says what was written; *Restore suggestions* puts the checks back; double-click a glyph to see it in a Glyph window. The list is read again after an undo, a redo, or an edit in FontLab.
 
+## Kana kerning, after palt
+
+palt trims each kana alone; some pairs still sit unevenly (a katakana with an open side beside another, a kana before the ideographic comma or full stop). *Auto Kerning*, with *Script* set to *Kana*, kerns those pairs on top of palt: it reads the font's palt from its feature code (written here or by hand, as single adjustments), measures the kana as palt sets them, and writes pair kerning only for what palt leaves uneven, never undoing a trim. A font whose kana are full width and have no palt is not kerned: write palt here first. See [KERNING.md](KERNING.md#kana-armenian-and-georgian).
+
 ## Hangul
 
 None of the 16 open-licensed Korean families looked at (Noto Sans and Serif KR, IBM Plex Sans KR, Gothic A1, Gowun Batang and Dodum, Jua, Dongle, Black Han Sans, and others) kerns Hangul or puts it in palt. Half set every syllable at one width (0.77 to 1.0 em; 0.9 em the median); the other half give each syllable its own width, by design. So Korean is made proportional by its widths, and *Hangul:* sets them:

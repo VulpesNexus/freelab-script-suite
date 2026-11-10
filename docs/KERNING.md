@@ -1,13 +1,13 @@
 # Auto kerning
 
-*Scripts > FreeLab > Auto Kerning* suggests kerning for the Latin pairs of the font's current master by two methods and FontLab's own, shows how far they agree beside the kerning the font has, and writes only the pairs you leave checked.
+*Scripts > FreeLab > Auto Kerning* suggests kerning for the pairs of the font's current master, one script at a time (Latin, kana, Armenian, or Georgian), by two methods and FontLab's own, shows how far they agree beside the kerning the font has, and writes only the pairs you leave checked.
 
 ## Using it
 
-1. Open the font, pick the master to kern, and run the script: it analyzes the master as it opens, and *Analyze* analyzes the font that is current then. Every pair of the Latin letters, figures, and punctuation the font has is measured by both methods (two marks of punctuation side by side are skipped); about 7,000 pairs take two to five seconds. Each master's results are remembered (in *%LOCALAPPDATA%\FreeLab\kerning-cache*, under a hash of the font's path; uninstalling removes them): the next analysis measures only the pairs whose glyphs changed, and everything again when a reference glyph (l, n, o, H, O, 0, 8) did.
-2. The list holds the pairs the font does not kern yet that either method would change by at least the given number of units (20 by default); FontLab's own autokern is asked about them too (a call per pair). *Show* narrows it to letters, letters and punctuation, or figures, and *Common pairs* to the pairs worth kerning even in a font kerned only in part: those common in the text of 24 languages and kerned in fonts ([andre-fuchs/kerning-pairs](https://github.com/andre-fuchs/kerning-pairs), MIT; *kerning/common_pairs.txt*).
+1. Open the font, pick the master to kern, and run the script: it analyzes the master as it opens, and *Analyze* analyzes the font that is current then. *Script* lists the scripts the font has, Latin first (see [Kana, Armenian, and Georgian](#kana-armenian-and-georgian)); choosing another analyzes it. Every pair of the script's letters, figures (Latin's), and punctuation the font has is measured by both methods (two marks of punctuation side by side are skipped); about 7,000 pairs take two to five seconds. Each master's results are remembered, each script's apart (in *%LOCALAPPDATA%\FreeLab\kerning-cache*, under a hash of the font's path; uninstalling removes them): the next analysis measures only the pairs whose glyphs changed, and everything again when a reference glyph (l, n, o, H, O, 0, 8) did.
+2. The list holds the pairs the font does not kern yet that either method would change by at least the given number of units (20 by default); FontLab's own autokern is asked about them too (a call per pair). *Show* narrows it to letters, letters and punctuation, or figures, and *Common pairs* to the pairs worth kerning even in a font kerned only in part: those common in the text of 24 languages and kerned in fonts ([andre-fuchs/kerning-pairs](https://github.com/andre-fuchs/kerning-pairs), MIT; *kerning/common_pairs.txt*), and for the other scripts those common in their text (*kerning/script_pairs.txt*, see below).
 3. The columns: each method's value, *Spread* (how far they lie apart), and *Suggested*, from *Suggested values from*: the average of halfkern and contour distance (the default), any one method, or FontLab's. Changing it changes only that column, never the list or its order. The order: largest change, best agreement (the safest pairs to accept together), most common, or alphabetical.
-4. Selecting a pair draws it between two dimmed H's as it is set now and by each method, a button each (drawn once a pair is selected), with the method's name, value, and key; the one it will take is checked. Clicking another picks it for that pair alone (*Now* keeps the current kerning), and so do double-clicking a value in the list and pressing Ctrl and its number (Ctrl+1 *Now*, Ctrl+2 *Average*, Ctrl+3 halfkern, Ctrl+4 *Contour*, Ctrl+5 *FreeLab*, Ctrl+6 *FontLab*) while the list has the focus (a plain letter or number jumps to the pairs starting with it, as in any list). Clicking one of the H's around the pair, in any button, goes to that H's pair with the glyph beside it (*H* and *T* for *HTo*): it is listed whatever the filters, and measured first when it was not (an accented letter's pair). A pair picked by hand is tinted, its Suggested value bold, and *Only pairs picked by hand* appears to list them; *Reset pair*, Backspace, or double-clicking its Suggested value gives it the suggested value again; *Restore suggestions* puts every check and pick back as the list first came. Space checks or unchecks the selected pair. The line above the buttons says where the pair's value will be written, and the list under it which other glyph pairs that entry kerns (see *Kerning classes*). *Show in Glyph window*, or double-clicking the pair's name, opens the pair between H's, n's, and o's in a Glyph window, to look at it with FontLab's own tools (between the pair's own script's controls where the font has them: Greek's Eta, nu, and omicron, Cyrillic's En, en, and o, zeros for figures). What a write did goes to the log under the previews; after an undo, a redo, or an edit in FontLab, the current values are read again. The dialog's ? button, then a click on any control, explains it.
+4. Selecting a pair draws it between two dimmed H's (in the other scripts their own straight letter: kana's RO, Armenian's vo, Georgian's in) as it is set now and by each method, a button each (drawn once a pair is selected), with the method's name, value, and key; the one it will take is checked. Clicking another picks it for that pair alone (*Now* keeps the current kerning), and so do double-clicking a value in the list and pressing Ctrl and its number (Ctrl+1 *Now*, Ctrl+2 *Average*, Ctrl+3 halfkern, Ctrl+4 *Contour*, Ctrl+5 *FreeLab*, Ctrl+6 *FontLab*) while the list has the focus (a plain letter or number jumps to the pairs starting with it, as in any list). Clicking one of the H's around the pair, in any button, goes to that H's pair with the glyph beside it (*H* and *T* for *HTo*): it is listed whatever the filters, and measured first when it was not (an accented letter's pair). A pair picked by hand is tinted, its Suggested value bold, and *Only pairs picked by hand* appears to list them; *Reset pair*, Backspace, or double-clicking its Suggested value gives it the suggested value again; *Restore suggestions* puts every check and pick back as the list first came. Space checks or unchecks the selected pair. The line above the buttons says where the pair's value will be written, and the list under it which other glyph pairs that entry kerns (see *Kerning classes*). *Show in Glyph window*, or double-clicking the pair's name, opens the pair between H's, n's, and o's in a Glyph window, to look at it with FontLab's own tools (between the pair's own script's controls where the font has them: Greek's Eta, nu, and omicron, Cyrillic's En, en, and o, kana's RO, NO, and I, Armenian's Vo, vo, and oh, Georgian's In, in, and on, zeros for figures). What a write did goes to the log under the previews; after an undo, a redo, or an edit in FontLab, the current values are read again. The dialog's ? button, then a click on any control, explains it.
 5. *Include existing kerned pairs* lists the pairs the font kerns too, those written since included. They are never checked for you: they are the designer's choices, some of which the methods do not model (a j tucked under the letter before it).
 6. Uncheck what you disagree with, and click *Write checked pairs*. Each pair is written where its value comes from (see *Kerning classes*); a value of 0 removes the entry unless a class pair would then apply. Picks end once written, and the list shows the font's new values. Writing goes straight into the open font: close it without saving to take it all back.
 
@@ -84,22 +84,93 @@ FreeLab leaves alone what the font leaves alone, but on that font's kerned pairs
 
 The two methods often disagree on pairs with diagonals and overhangs (contour distance tightens *To* and *TA* more), and agree on most others. On a font with kerning, contour distance came closer to the designer's own pairs (*LT*: designer −178, contour −154, halfkern −109).
 
+## Kana, Armenian, and Georgian
+
+*Script* offers each of these where the font has its references (below) and at least 20 of its letters. Each is analyzed on its own, its pairs and their kerning listed and written as Latin's are.
+
+### What the fonts do
+
+Before any method was chosen, the open-licensed fonts were surveyed: 67 of the 68 Japanese families of Google Fonts (M PLUS 1 Code, monospaced, left out), the Armenian and Georgian ones, and the open-licensed fonts installed on the owner's computer, each pair of their kana (or letters) and punctuation shaped by HarfBuzz with and without kern.
+
+- **Kana**: of those 67 families (a font of each), 14 have palt and 8 kern kana: Noto Sans JP (Source Han Sans, 818 pairs), Noto Serif JP (Source Han Serif, 3,936), IBM Plex Sans JP (2,685), Stick (2,026), Klee One (1,136), and Tsukimi Rounded (332), all with palt; Cherry Bomb One (8,431), whose kana are proportional; and LINE Seed JP (6,887), whose kana are full width with no palt (Slackside One kerns a single pair). Of the open-licensed fonts installed, Otomanopee One (24,109, proportional) adds a design; GenEi Gothic and Satsuki Gendai Mincho repeat Source Han's. Every one of them puts its kana pairs in kern, applied the same with palt on or off. What they kern: katakana with open sides (*アノ*, *クム*, *ケイ*), kana before the comma and full stop (*す。*, *ア、*: 305 of Noto Sans JP's 818 pairs), small kana (*っ*, *ゃ*), and the long vowel mark.
+- **Armenian**: Google Sans kerns 2,705 pairs (its question mark, set over the vowel, most of all), Noto Sans Armenian 568, Noto Serif Armenian 346; Handjet, a pixel design, none.
+- **Georgian**: Google Sans kerns 539 pairs, most of them Mtavruli or punctuation; Noto Sans Georgian kerns 848, and Noto Serif Georgian 1,237.
+
+Kana are kerned by too few designs for the FreeLab method to learn from (it was tried, below), so kana take the measured methods, halfkern and contour distance, with references of their own. Armenian and Georgian take them too, and the FreeLab method as trained on Latin: held out on their families, it came closer than the measured methods, and training it on their pairs as well did not help (see *The FreeLab method in other scripts*).
+
+### Kana
+
+- **On top of palt**: kana are measured as the font's palt sets them, so the kerning adds only what palt leaves uneven and never undoes a trim. palt is read from the font's feature code (single adjustments, `pos a-hira <-70 0 -130 0>;` as CJK Spacing writes them, `[lists]` and `@classes` too). Kana proportional already (most narrower than 90% of the em) are measured as they are. Full-width kana that palt does not narrow are not kerned at all: kerned, they would be kerned in full-width text too. Write palt with CJK Spacing first.
+- **Where the kerning goes**: into the font's kerning, FontLab's kern feature, as every font above kerns its kana: their kana pairs apply the same with palt on or off (HarfBuzz applies kern by default), so in full-width text too unless the application turns kerning off there.
+- **References**: one kind for all kana, hiragana, katakana, small kana, and the long vowel mark alike: a square, a round, and an open kana, RO, NO, and I (ロ, の, い), set with each other under palt with no kerning. The band they span is wide, so that most pairs palt sets evenly are left alone. The halo is tuned on RO and grows until every pair of references overlaps: under palt, kana sit far apart, and no three kana agreed within a factor of two in every font tried. Small kana, the long vowel mark, and punctuation beside a kana (*す。*, *ア、*, the pairs fonts kern most) are held to the same band.
+- **Pairs**: the 2,970 kana pairs common in text are measured (all of them, some 45,000, would each be listed and asked of FontLab), counted in 600 public-domain works of Aozora Bunko in modern orthography, the ruby and the library's notes taken out; together they make up 95% of the pairs of kana and punctuation in those texts.
+- **Previews** are drawn as palt sets the kana. FontLab's Glyph window sets them as the glyphs' widths are, full width where palt narrows them: *Show in Glyph window* proofs a pair between RO, NO, and I, without palt.
+
+### Armenian and Georgian
+
+- **Armenian**: capitals against vo and oh (Ո, Օ), lowercase against vo, seh, and oh (ո, ս, օ), the halo tuned on the lowercase three; previews and proofs between vo, the capital too.
+- **Georgian**: Mkhedruli against in, on, and san (ი, ო, ს), Mtavruli against their capitals (Ი, Ო), the halo tuned on in, on, and san, or on in and on alone where san is spaced far looser (Noto Serif Georgian); fonts without Mtavruli are kerned in Mkhedruli alone.
+- **Pairs**: 1,614 Armenian and 1,113 Georgian pairs, counted in the introductions of 1,200 Armenian and 680 Georgian Wikipedia articles (Creative Commons Attribution-ShareAlike 4.0; see *kerning/script_pairs.txt*), 99% of their letter pairs. All-capital pairs (Armenian capitals, Mtavruli) are the lowercase pairs set in capitals.
+
+### How close they come
+
+Each method on the common pairs of the corpus fonts that kern the script, against the font's own kerning, in units of a 1000-unit em, each method's strength fitted to that kerning as Auto Kerning fits it (the average of halfkern and contour distance, the default suggestion; *corr.* is its correlation with the font's kerning on the pairs the font kerns):
+
+| Font | Script | Kerned pairs | Error on all pairs (none / average) | Error on kerned pairs (none / average) | Corr. |
+|---|---|---|---|---|---|
+| Noto Sans JP | kana, palt | 196 of 2,970 | 2.3 / 10.3 | 34.4 / 23.6 | 0.45 |
+| Noto Serif JP | kana, palt | 246 | 2.8 / 12.4 | 33.7 / 30.5 | 0.62 |
+| IBM Plex Sans JP | kana, palt | 382 | 3.8 / 18.7 | 29.9 / 26.9 | 0.53 |
+| Klee One | kana, palt | 344 | 5.2 / 13.0 | 45.2 / 43.3 | 0.61 |
+| Stick | kana, palt | 270 | 5.1 / 22.2 | 56.2 / 32.1 | 0.59 |
+| Cherry Bomb One | kana, proportional | 1,562 | 15.5 / 24.9 | 29.4 / 8.9 | 0.92 |
+| Otomanopee One | kana, proportional | 1,861 | 33.7 / 32.3 | 53.8 / 19.9 | 0.85 |
+| Google Sans | Armenian | 721 of 1,614 | 9.9 / 10.5 | 22.2 / 15.3 | 0.68 |
+| Noto Sans Armenian | Armenian | 134 | 2.6 / 7.2 | 30.8 / 20.7 | 0.65 |
+| Noto Serif Armenian | Armenian | 121 | 2.5 / 11.4 | 32.8 / 20.1 | 0.71 |
+| Google Sans | Georgian | 105 of 1,113 | 2.2 / 4.7 | 23.1 / 10.1 | 0.88 |
+| Noto Sans Georgian | Georgian | 258 | 3.6 / 8.2 | 15.4 / 7.5 | 0.72 |
+| Noto Serif Georgian | Georgian | 375 | 6.7 / 11.5 | 19.8 / 15.8 | 0.50 |
+
+As for Latin, leaving every pair alone comes closest over all pairs where a font kerns few of them; the methods come closer on the pairs it does kern, most where it kerns many (Cherry Bomb One and Otomanopee One, whose kana are proportional). Contour distance follows Noto Serif Georgian far more closely than halfkern does (a correlation of 0.59 against 0.35).
+
+### The FreeLab method in other scripts
+
+*kerning/train/train.py* scores each script on its own, the same five folds by family, so that adding a script's pairs can be checked not to make Latin's worse. The corpus's Armenian, Georgian, and kana fonts (above) were measured beside the Latin training set (*dataset.py --scripts*), and the model trained on Latin alone, then on Latin, Armenian, and Georgian, then on all four. Mean error in units of a 1000-unit em, all pairs / pairs the fonts kern, each method at its default strength:
+
+| Script | Pairs (families) | No kerning | Average of halfkern and contour | FreeLab, trained on Latin | FreeLab, trained on Latin, Armenian, and Georgian | FreeLab, trained on all four |
+|---|---|---|---|---|---|---|
+| Latin | 856,513 (240) | 9.4 / 38.4 | 21.9 / 25.0 | **8.5 / 20.9** | 8.5 / 21.1 | 8.5 / 21.1 |
+| Armenian | 4,842 (3) | 5.0 / 34.1 | 10.7 / 24.9 | 7.2 / 22.5 | 7.2 / 22.3 | 7.4 / 22.4 |
+| Georgian | 3,339 (3) | 4.1 / 27.2 | 7.9 / 14.6 | **5.9 / 9.2** | 6.1 / 10.5 | 5.8 / 10.4 |
+| Kana | 20,787 (7) | 7.9 / 42.3 | 18.6 / 29.6 | 7.9 / 42.3 | 8.1 / 42.3 | 7.6 / 37.8 |
+
+The model trained on Latin alone is kept (its trees are the ones *kerning/learned_model.json* had) and used for Armenian and Georgian; their own pairs, from three families each, made Latin's and Georgian's kerned pairs a little worse. For kana it says 0 almost throughout, and trained on kana too it still misses most of what the fonts kern: kana keep halfkern and contour distance.
+
 ## Scripts and characters
 
-Auto Kerning lists pairs of these characters only: the letters A to Z and a to z, the figures 0 to 9, and the punctuation `. , : ; ! ? ' " - ( ) [ ] { } / & *`, the curly quotes, guillemets, and the en and em dashes. Any other character, accented Latin letters (é, Å, ł) included, is not measured, not listed, and never written: its pairs keep the kerning the font gives them.
+Auto Kerning lists pairs of these characters only, a script at a time:
+
+- **Latin**: the letters A to Z and a to z, the figures 0 to 9, and the punctuation `. , : ; ! ? ' " - ( ) [ ] { } / & *`, the curly quotes, guillemets, and the en and em dashes.
+- **Kana**: hiragana and katakana (small kana, the iteration marks, and the long vowel mark included), with the ideographic comma and full stop, the corner, angle, and lenticular brackets, the full-width comma, full stop, colon, semicolon, question and exclamation marks, and parentheses, the middle dot, the wave dash, the ellipsis, and the curly quotes.
+- **Armenian**: the capitals and small letters (U+0531 to U+0587), with Armenian's apostrophe, emphasis mark, exclamation mark, comma, question mark, full stop, and hyphen, and the Latin comma, full stop, colon, parentheses, guillemets, hyphen, and dashes.
+- **Georgian**: Mkhedruli (U+10D0 to U+10FF) and Mtavruli (U+1C90 to U+1CBF), with Latin's punctuation and the low and high double quotes.
+
+Any other character, accented Latin letters (é, Å, ł) and kanji included, is not measured, not listed, and never written: its pairs keep the kerning the font gives them.
 
 | Method | What it could measure | What it is set for |
 |---|---|---|
-| halfkern | any glyphs: it measures shapes | the Latin references *l*, *n*, *o*, *H*, *O*, *0*, *8*; another script needs references of its own (*н* and *о* for Cyrillic, for instance) |
-| Contour distance | any glyphs | the same Latin references; Tsukurimashou tuned the method for Latin, Japanese, and Korean, with other settings for each |
+| halfkern | any glyphs: it measures shapes | each script's references: Latin's *l*, *n*, *o*, *H*, *O*, *0*, *8*, and those above; another script needs references of its own (*н* and *о* for Cyrillic, for instance) |
+| Contour distance | any glyphs | the same references; Tsukurimashou tuned the method for Latin, Japanese, and Korean, with other settings for each |
 | FontLab's own | any glyph pair | nothing of FreeLab's: FontLab's own settings |
-| FreeLab | the pairs it was trained on | Latin pairs of open-licensed fonts only: elsewhere its values are guesses |
+| FreeLab | the pairs it was trained on | Latin pairs of open-licensed fonts; used for Armenian and Georgian too, where it was checked on families it never saw; not for kana |
 
-Accented letters take their base letter's kerning where the font's classes hold both: a pair written to a class pair kerns them too. Japanese kana are spaced with `palt` more than with pairs ([FEATURE-SURVEY.md](FEATURE-SURVEY.md)).
+Accented letters take their base letter's kerning where the font's classes hold both: a pair written to a class pair kerns them too.
 
 ## Limits
 
-- Classes are used, not made: a font without classes gets glyph pairs, and its accented letters keep their own kerning.
-- Latin only (see *Scripts and characters*); contour distance, tuned for Japanese in Tsukurimashou, is the base for kana.
+- Classes are used, not made: a font without classes gets glyph pairs, and its accented letters keep their own kerning. Classes are suggested for Latin only.
+- Latin, kana, Armenian, and Georgian (see *Scripts and characters*); pairs across scripts (a katakana word before a Latin one) are not measured.
+- Kana are kerned only as palt sets them or where they are proportional already; their kerning applies wherever kern does, full-width text included, as in the fonts that kern kana.
 - Each method has blind spots: halfkern loosens *Ty* in Georgia, where the T's bar meets the y's arms, and cannot kern *VA* there. Review before writing.
 - Other published methods, and the one not to implement (Apple's, patented until 2033), are in [FEATURE-SURVEY.md](FEATURE-SURVEY.md).

@@ -145,6 +145,9 @@ ANCHOR_SCRIPTS = (("latin", ((0x0041, 0x0250), (0x0300, 0x0370), (0x1E00, 0x1F00
                   ("hebrew", ((0x0590, 0x0600), (0xFB1D, 0xFB50))),
                   ("arabic", ((0x0600, 0x0700), (0x0750, 0x0780), (0x08A0, 0x0900), (0xFB50, 0xFE00), (0xFE70, 0xFF00))),
                   ("devanagari", ((0x0900, 0x0980), (0xA8E0, 0xA900))),
+                  ("bengali", ((0x0980, 0x0A00),)),
+                  ("gujarati", ((0x0A80, 0x0B00),)),
+                  ("tamil", ((0x0B80, 0x0C00),)),
                   ("thai", ((0x0E00, 0x0E80),)),
                   ("lao", ((0x0E80, 0x0F00),)),
                   ("myanmar", ((0x1000, 0x10A0),)),
@@ -859,17 +862,68 @@ def mark_side_of(ink, x_height):
     return "top" if (ink.bottom + ink.top) / 2.0 >= 0.5 * x_height else "bottom"
 
 
+# Marks that attach elsewhere than over or under the letter's middle, by code point, as most of the
+# corpus's Hebrew fonts set them (27 of its 30 Hebrew families attach their points): the dagesh (and
+# mapiq) inside the letter; the holam and the sin dot at its top left, the shin dot at shin's top right;
+# of the cantillation marks (10 families have them), pashta and telisha qetana at the top left, yetiv
+# and dehi at the bottom right.
+MARK_CLASSES = {0x05BC: "center", 0x05B9: "topleft", 0x05BA: "topleft", 0x05C2: "topleft", 0x05C1: "topright",
+                0x0599: "topleft", 0x05A9: "topleft", 0x059A: "bottomright", 0x05AD: "bottomright"}
+SIDE_FAMILY = {"topleft": "top", "topright": "top", "bottomright": "bottom", "center": "center"}
+SIDE_BASES = {"topright": (0x05E9,)}  # a side only these letters (and their forms) take: the shin dot's, shin
+
+
+def anchor_side(code, ink, x_height):
+    """Where a mark goes: its class (MARK_CLASSES), else above or below by its ink (top, bottom)."""
+    return MARK_CLASSES.get(code) or mark_side_of(ink, x_height)
+
+
 LETTER_HEIGHT_FROM_SCRIPT = ("latin",)  # per-letter placement across only: heights by the script's rule
+# The marks whose landing on each letter the corpus's per-letter placements are (diacritics/train/shaped.py
+# samples them), per script and side: a base's anchor is set so that this mark lands there, the others
+# then sitting as their own anchors say (Thai's right-aligned)
+SAMPLE_MARKS = {"latin": {"top": 0x0301, "bottom": 0x0323}, "greek": {"top": 0x0301},
+                "cyrillic": {"top": 0x0301, "bottom": 0x0323},
+                "hebrew": {"top": 0x05BF, "bottom": 0x05B7, "center": 0x05BC, "topleft": 0x05B9, "topright": 0x05C1},
+                "arabic": {"top": 0x064E, "bottom": 0x0650}, "devanagari": {"top": 0x0902, "bottom": 0x0941},
+                "bengali": {"top": 0x0981, "bottom": 0x09C1}, "gujarati": {"top": 0x0A82, "bottom": 0x0AC1},
+                "tamil": {"top": 0x0BCD}, "thai": {"top": 0x0E48, "bottom": 0x0E38},
+                "lao": {"top": 0x0EC8, "bottom": 0x0EB8}, "myanmar": {"top": 0x1036, "bottom": 0x102F},
+                "khmer": {"top": 0x17B7, "bottom": 0x17BB}}
 
 
 def letter_row(model, script, side, code):
-    """(share across, gap) where the corpus's fonts land a mark on this letter (shaped.py), or None."""
+    """(share across, gap) where the corpus's fonts land a mark on this letter (shaped.py), or None; for
+    the center (a dagesh), (share across, share up) of the letter's ink."""
     if not code:
         return None
     entry = model.get("letters", {}).get(u"%s %s" % (script, side), {}).get(u"%04X" % code)
     if not entry or len(entry) < 3 or entry[2] < MIN_ROW_FONTS:
         return None
     return entry[0], entry[1]
+
+
+def side_row(model, script, side):
+    """The median, over the script's letters, of where the corpus's fonts land a mark of this side (for a
+    letter the corpus has too little of), or None."""
+    rows = [entry for entry in model.get("letters", {}).get(u"%s %s" % (script, side), {}).values()
+            if len(entry) >= 3 and entry[2] >= MIN_ROW_FONTS]
+    if not rows:
+        return None
+    return median([entry[0] for entry in rows]), median([entry[1] for entry in rows])
+
+
+# Scripts whose ra and virama before a consonant make a reph over it: (ra, virama, a consonant to show it on)
+REPH_SCRIPTS = {"devanagari": (0x0930, 0x094D, 0x0915), "bengali": (0x09B0, 0x09CD, 0x0995),
+                "gujarati": (0x0AB0, 0x0ACD, 0x0A95)}
+
+
+def reph_row(model, script):
+    """{"share", "gap", "fonts"}: where the corpus's fonts of a script land the reph, or None."""
+    found = model.get("reph") or {}
+    if "share" in found:  # (the first models: Devanagari's only)
+        return found if script == "devanagari" else None
+    return found.get(script)
 
 
 def ligature_point(model, script, side, ink, part, parts, upm):
@@ -884,43 +938,67 @@ def ligature_point(model, script, side, ink, part, parts, upm):
     return (x, ink.top + gap * upm) if side == "top" else (x, ink.bottom - gap * upm)
 
 
+def base_point(model, script, side, code, ink, upm, widths):
+    """(x, y) of a base's anchor of a side: where the corpus's fonts land a mark on this letter (the mark's
+    ink there, so the anchor sits as far off it as the mark's own anchor sits off the mark's ink), else by
+    the script's rule: over (under) the center of the ink's top (bottom) fifth; a corner's at the ink's
+    left or right end; the center's in the middle of the ink, as the script's letters take it."""
+    family = SIDE_FAMILY.get(side, side)
+    learned = letter_row(model, script, side, code)
+    if family == "center":
+        learned = learned or side_row(model, script, side)
+        share, up = learned if learned is not None else (0.5, 0.5)
+        return ink.left + share * ink.width, ink.bottom + up * (ink.top - ink.bottom)
+    row = anchor_row(model, script, family)
+    if side != family:  # a corner (the holam's): the mark's own anchor is under (over) its ink's center
+        learned = learned or side_row(model, script, side)
+        share, gap = learned if learned is not None else (1.0 if side.endswith(u"right") else 0.0, None)
+        lift = (gap - row["mark_gap"]) * upm if gap is not None else row["base_gap"] * upm
+        x = ink.left + share * ink.width
+        return (x, ink.top + lift) if family == "top" else (x, ink.bottom - lift)
+    if learned is not None:  # the mark's ink lands there: its own anchor sits mark_offset and mark_gap off it
+        share, gap = learned
+        x = ink.left + share * ink.width + row["mark_offset"] * widths.get(side, 0.0)
+        # (Latin's heights: its script's rule, which landed marks closer, by a leave-one-font-out test)
+        lift = (gap - row["mark_gap"]) * upm if script not in LETTER_HEIGHT_FROM_SCRIPT else row["base_gap"] * upm
+        return (x, ink.top + lift) if side == "top" else (x, ink.bottom - lift)
+    if side == "top":
+        return ink.top_center + row["base_offset"] * ink.width, ink.top + row["base_gap"] * upm
+    return ink.bottom_center + row["base_offset"] * ink.width, ink.bottom - row["base_gap"] * upm
+
+
 def plan_anchors(glyphs, model, script, upm, x_height):
     """AnchorGlyphs with their anchors to add: bases get top and bottom, each mark the anchor it
     attaches by (_top or _bottom) and the one the next mark attaches to (top or bottom), a ligature
     top_1, bottom_1, top_2, and so on (one pair per letter it joins), a reph _reph and every base a
-    reph anchor. glyphs: [(name, code, "base", "mark", "ligature" or "reph", Ink, {existing anchor: (x,
-    y)}[, letters joined])]. Anchors the glyph has already are kept as they are. A base's anchor sits
-    where the corpus's fonts land a mark on that letter (shaped.py, all their means at once: a Thai
-    mark beside po pla's ascender), else over (under) the center of its ink's top (bottom) fifth, as
-    the script's fonts set it; a mark's under (over) its ink's center."""
+    reph anchor. Marks of other classes (MARK_CLASSES: Hebrew's dagesh, center; its holam, topleft) take
+    that anchor alone, and the bases one for it (shin alone a topright, for the shin dot). glyphs: [(name,
+    code, "base", "mark", "ligature" or "reph", Ink, {existing anchor: (x, y)}[, letters joined])].
+    Anchors the glyph has already are kept as they are. A base's anchor sits where the corpus's fonts
+    land a mark on that letter (shaped.py, all their means at once: a Thai mark beside po pla's
+    ascender), else by its script's rule (base_point); a mark's under (over) its ink's center."""
     upm = float(upm)
     planned = []
     rows = [tuple(entry) + (0,) * (6 - len(entry)) for entry in glyphs]
-    marks = {}
+    marks, sampled = {}, {}
+    samples = SAMPLE_MARKS.get(script, {})
     for name, code, role, ink, existing, parts in rows:  # marks first: their sides and widths place the bases'
         if role == "mark" and ink is not None and ink.width > 0:
-            marks.setdefault(mark_side_of(ink, x_height), []).append(ink.width)
-    widths = dict((side, median(found)) for side, found in marks.items())
+            side = anchor_side(code, ink, x_height)
+            marks.setdefault(side, []).append(ink.width)
+            if code == samples.get(side) and u"." not in name:  # the mark whose landing the letters' placements are
+                sampled[side] = ink.width
+    widths = dict((side, sampled.get(side, median(found))) for side, found in marks.items())
+    special = sorted(side for side in marks if side in SIDE_FAMILY)  # the sides besides top and bottom the marks take
     has_reph = any(row[2] == "reph" for row in rows)
-    reph = model.get("reph")
+    reph = reph_row(model, script)
     for name, code, role, ink, existing, parts in rows:
         if ink is None or ink.width <= 0:
             continue
         g = AnchorGlyph(name, code, role, ink, existing, parts)
         if role == "base":
-            for side in ("top", "bottom"):
-                row = anchor_row(model, script, side)
-                learned = letter_row(model, script, side, code)
-                if learned is not None:  # the mark's ink lands there: its own anchor sits mark_offset and mark_gap off it
-                    share, gap = learned
-                    x = ink.left + share * ink.width + row["mark_offset"] * widths.get(side, 0.0)
-                    # (Latin's heights: its script's rule, which landed marks closer, by a leave-one-font-out test)
-                    lift = (gap - row["mark_gap"]) * upm if script not in LETTER_HEIGHT_FROM_SCRIPT else row["base_gap"] * upm
-                    point = (x, ink.top + lift) if side == "top" else (x, ink.bottom - lift)
-                elif side == "top":
-                    point = (ink.top_center + row["base_offset"] * ink.width, ink.top + row["base_gap"] * upm)
-                else:
-                    point = (ink.bottom_center + row["base_offset"] * ink.width, ink.bottom - row["base_gap"] * upm)
+            for side in ["top", "bottom"] + [s for s in special if s not in SIDE_BASES or code in SIDE_BASES[s]]:
+                point = base_point(model, script, side, code, ink, upm, widths)
                 if side not in g.existing:
                     g.anchors[side] = (round(point[0]), round(point[1]))
             if has_reph and reph and "reph" not in g.existing:
@@ -937,14 +1015,25 @@ def plan_anchors(glyphs, model, script, upm, x_height):
             if u"_reph" not in g.existing:  # the reph's ink lands at the base's reph anchor, its bottom center there
                 g.anchors[u"_reph"] = (round(ink.center), round(ink.bottom))
         else:
-            side = g.side = mark_side_of(ink, x_height)
-            row = anchor_row(model, script, side)
-            x = ink.center + row["mark_offset"] * ink.width
-            if side == "top":
-                own, onward = (x, ink.bottom - row["mark_gap"] * upm), (x, ink.top + row["mark_to_mark"] * upm)
+            side = g.side = anchor_side(code, ink, x_height)
+            family = SIDE_FAMILY.get(side, side)
+            points = []
+            if family == "center":  # its ink's center meets the base's center anchor
+                points.append((u"_" + side, (ink.center, (ink.bottom + ink.top) / 2.0)))
+            elif side != family:  # at a letter's corner: centered on its ink; nothing stacks on it
+                row = anchor_row(model, script, family)
+                gap = row["mark_gap"] * upm
+                points.append((u"_" + side, (ink.center, ink.bottom - gap if family == "top" else ink.top + gap)))
             else:
-                own, onward = (x, ink.top + row["mark_gap"] * upm), (x, ink.bottom - row["mark_to_mark"] * upm)
-            for anchor, point in ((u"_" + side, own), (side, onward)):
+                row = anchor_row(model, script, side)
+                x = ink.center + row["mark_offset"] * ink.width
+                if side == "top":
+                    points += [(u"_top", (x, ink.bottom - row["mark_gap"] * upm)),
+                               (u"top", (x, ink.top + row["mark_to_mark"] * upm))]
+                else:
+                    points += [(u"_bottom", (x, ink.top + row["mark_gap"] * upm)),
+                               (u"bottom", (x, ink.bottom - row["mark_to_mark"] * upm))]
+            for anchor, point in points:
                 if anchor not in g.existing:
                     g.anchors[anchor] = (round(point[0]), round(point[1]))
         if g.anchors:
@@ -967,23 +1056,51 @@ THAI_SHORTENED = ((0x0E0D, ("less", "short")), (0x0E10, ("less", "short")), (0x0
 THAI_LO_CHULA = 0x0E2C
 I_MATRA = 0x093F
 DEVANAGARI_CONSONANTS = tuple(range(0x0915, 0x093A))
+# The pre-base i-matra and the consonants it goes before, per script: several fonts draw it in lengths
+# whose hook reaches into the consonant (Devanagari's, 30 fonts; Gujarati's, 11 of the corpus's 12
+# Gujarati families; Bengali's, 6 of 11, for its longer consonants)
+I_MATRAS = {"devanagari": (I_MATRA, DEVANAGARI_CONSONANTS),
+            "bengali": (0x09BF, tuple(range(0x0995, 0x09BA)) + (0x09DC, 0x09DD, 0x09DF)),
+            "gujarati": (0x0ABF, tuple(range(0x0A95, 0x0ABA)))}
+NOMINAL_SHARE = 0.5  # a consonant most of the corpus's fonts keep their nominal i-matra before gets no rule
 LIGATURE_FORMS = (u"<isolated>", u"<final>", u"<initial>", u"<medial>")
 # Glyphs' names for the letters whose forms the rules look for (GlyphData.xml, MIT License: see
-# GlyphData_LICENSE): a form is found by its letter's font name, this one, or uniXXXX, case and hyphens
-# aside (yoYing-thai.less, yoYingthai.less, uni0E0D.less)
+# GlyphData_LICENSE): a form is found by its letter's font name, this one (or with another common tag
+# of its script: iMatra-gujr for iMatra-gujarati), or uniXXXX, case and hyphens aside (yoYing-thai.less,
+# yoYingthai.less, uni0E0D.less)
 NICE_NAMES = {0x0E0D: u"yoYing-thai", 0x0E0E: u"doChada-thai", 0x0E0F: u"toPatak-thai", 0x0E10: u"thoThan-thai",
               0x0E24: u"ru-thai", 0x0E26: u"lu-thai", 0x0E2C: u"loChula-thai", 0x0E48: u"maiEk-thai",
               0x0E49: u"maiTho-thai", 0x0E4A: u"maiTri-thai", 0x0E4B: u"maiChattawa-thai", 0x0E4C: u"thanthakhat-thai",
-              0x093F: u"iMatra-deva"}
+              0x093F: u"iMatra-deva", 0x09BF: u"iMatra-beng", 0x0ABF: u"iMatra-gujarati"}
+# The tags fonts name a script's glyphs with (Glyphs' first: -hb, -deva, -beng, -gujarati, -tamil)
+SCRIPT_TAGS = {"hebrew": (u"hb", u"hebr", u"hebrew"), "devanagari": (u"deva", u"dv", u"dev", u"devanagari"),
+               "bengali": (u"beng", u"bn", u"bng", u"bengali", u"bangla"),
+               "gujarati": (u"gujarati", u"gujr", u"gj", u"guj"), "tamil": (u"tamil", u"taml", u"tml"),
+               "thai": (u"thai",)}
 
 
 def _plain(name):
     return name.lower().replace(u"-", u"")
 
 
+def nice_names(code):
+    """Glyphs' name for a code point (NICE_NAMES, else glyph_names.json), and the same with each other
+    common tag of its script (iMatra-gujarati, iMatra-gujr, iMatra-gj, iMatra-guj)."""
+    nice = NICE_NAMES.get(code) or glyph_names().get(code)
+    if not nice:
+        return []
+    found = [nice]
+    stem, dash, tag = nice.rpartition(u"-")
+    if dash:
+        for tags in SCRIPT_TAGS.values():
+            if tag in tags:
+                found += [u"%s-%s" % (stem, other) for other in tags if other != tag]
+    return found
+
+
 def forms_of(names, base, code):
     """{suffix: glyph name} of the font's forms of a letter: glyphs named after it, a period, and a suffix."""
-    stems = set(_plain(stem) for stem in (base, NICE_NAMES.get(code), u"uni%04X" % code) if stem)
+    stems = set(_plain(stem) for stem in [base, u"uni%04X" % code] + nice_names(code) if stem)
     found = {}
     for name in sorted(names):
         stem, dot, suffix = name.partition(u".")
@@ -1037,15 +1154,30 @@ def thai_rules(names_by_code, names):
     return found
 
 
-def i_matra_rules(names_by_code, names, reach_of, advance_of, model):
+def i_matra_variants(names, nominal, code):
+    """The font's other i-matras: glyphs named after the nominal one (uni093F.01, iMatra-deva.a03, gjmI.alt02),
+    or its name with other digits (MatraI3.gj for MatraI.gj, ivowelsign2gujr for ivowelsigngujr; not for a
+    uniXXXX name, whose digits are its code point); none joined with another glyph (_)."""
+    import re
+    found = set(forms_of(names, nominal, code).values())
+    if not re.match(u"^uni[0-9A-Fa-f]{4}", nominal):
+        key = re.sub(u"[0-9]+", u"", nominal.lower())
+        found.update(n for n in names if n != nominal and re.sub(u"[0-9]+", u"", n.lower()) == key)
+    return sorted(n for n in found if u"_" not in n and n != nominal)
+
+
+def i_matra_rules(names_by_code, names, reach_of, advance_of, model, script="devanagari"):
     """Rules picking, before each consonant, the i-matra whose hook reaches into it as far as the
     corpus's fonts reach into that consonant (a share of its advance), among the font's i-matras
-    (uni093F.01, iMatra-deva.a03: named after its own). reach_of(name): how far a glyph's ink reaches
-    past its advance; advance_of(name): its advance; both None for a glyph not drawn."""
-    nominal = names_by_code.get(I_MATRA)
+    (i_matra_variants); none before a consonant most of those fonts keep their nominal i-matra before
+    (Bengali's shorter consonants). reach_of(name): how far a glyph's ink reaches past its advance;
+    advance_of(name): its advance; both None for a glyph not drawn."""
+    matra, consonants = I_MATRAS.get(script, (None, ()))
+    nominal = names_by_code.get(matra) if matra else None
     if not nominal:
         return []
-    candidates = [nominal] + sorted(n for n in forms_of(names, nominal, I_MATRA).values() if u"_" not in n)
+    encoded = set(names_by_code.values())
+    candidates = [nominal] + [n for n in i_matra_variants(names, nominal, matra) if n not in encoded]
     if len(candidates) < 2:
         return []
     reaches = dict((n, reach_of(n)) for n in candidates)
@@ -1053,10 +1185,10 @@ def i_matra_rules(names_by_code, names, reach_of, advance_of, model):
     if nominal not in reaches or len(reaches) < 2:
         return []
     groups = {}
-    for code in DEVANAGARI_CONSONANTS:
+    for code in consonants:
         consonant, learned = names_by_code.get(code), model.get("i_matra", {}).get(u"%04X" % code)
         advance = advance_of(consonant) if consonant else None
-        if not consonant or not learned or not advance:
+        if not consonant or not learned or not advance or (len(learned) > 2 and learned[2] > NOMINAL_SHARE):
             continue
         target = learned[0] * advance
         best = min(sorted(reaches), key=lambda n: abs(reaches[n] - target))
@@ -1067,7 +1199,7 @@ def i_matra_rules(names_by_code, names, reach_of, advance_of, model):
         members = groups[variant]
         found.append(Rule("pres", variant, u"sub %s' [%s] by %s;" % (nominal, u" ".join(n for _, n in members), variant),
                           u"before %s" % u" ".join(unichr_(c) for c, _ in members),
-                          unichr_(members[0][0]) + unichr_(I_MATRA)))
+                          unichr_(members[0][0]) + unichr_(matra)))
     return found
 
 
@@ -1102,14 +1234,47 @@ def ligature_parts(name, code, arabic_names):
     return len(named) if len(named) >= 2 and all(part in arabic_names for part in named) else 0
 
 
-def is_reph(name):
-    """A Devanagari reph's glyph (rephdeva, Reph.dv, dvReph, uni0930094D.rphf), not one joined with a matra
-    or a bindu, nor Marathi's eyelash ra."""
+def name_script(name):
+    """The reph script a glyph's name names, by its tag (Reph.bn, gjReph, rephdeva, reph-gujarati) or its
+    code points (uni09B009CD), or None."""
+    import re
     lowered = name.lower()
+    codes = re.findall(u"(?:uni|u)([0-9a-f]{4})", lowered)
+    for code in codes:
+        script = anchor_script(int(code, 16))
+        if script:
+            return script
+    words = [w for w in re.split(u"[._-]", lowered) if w]
+    for script, tags in sorted(SCRIPT_TAGS.items()):
+        for word in words:
+            core = word.replace(u"reph", u"") if u"reph" in word else word
+            if core in tags:
+                return script
+    return None
+
+
+def is_reph(name, script=None):
+    """A reph's glyph (rephdeva, Reph.dv, dvReph, uni0930094D.rphf, Reph.bn, gjReph, reph-gujarati, and ra and
+    virama by their code points, uni09B009CD), not one joined with a matra, a vowel sign, or a bindu
+    (bSignIiReph, ivowelsignrephgujr, gjmII_Reph), nor Marathi's eyelash ra; of the given script, when given, unless its name names another."""
+    import re
+    lowered = name.lower()
+    named = name_script(name)
+    if script is not None and named is not None and named != script:
+        return False
     if lowered.endswith(u".rphf"):
         return True
-    return u"reph" in lowered.split(u".")[0] and not any(w in lowered for w in (u"matra", u"anusvara", u"bindu", u"candra",
-                                                                                 u"eyelash"))
+    stem = lowered.split(u".")[0]
+    for ra, virama, _ in REPH_SCRIPTS.values():
+        if stem == u"uni%04x%04x" % (ra, virama):
+            return True
+    if u"reph" not in stem or any(w in lowered for w in (u"matra", u"anusvara", u"bindu", u"candra", u"eyelash", u"sign",
+                                                         u"vowel", u"mark")):
+        return False
+    tags = set(tag for tags in SCRIPT_TAGS.values() for tag in tags)
+    # joined with something else (gjmII_Reph: the ii-matra and the reph), not a script tag (bn_reph) or an alternate's
+    return all(u"reph" in part or part.split(u"-")[0] in tags or re.match(u"^alt[0-9]*$", part)
+               for part in stem.split(u"_"))
 
 
 def mark_code(glyphs):
@@ -1411,7 +1576,11 @@ def has_character(family, code):
 
 # Families with other scripts' letters and marks (Windows' own, then Google's Noto): a reference for them
 SCRIPT_FAMILIES = {"arabic": ("Noto Naskh Arabic", "Noto Sans Arabic", "Segoe UI", "Arial", "Tahoma"),
-                   "hebrew": ("Noto Sans Hebrew", "Segoe UI", "Arial", "Tahoma"),
+                   "hebrew": ("Noto Serif Hebrew", "Noto Sans Hebrew", "Frank Ruhl Libre", "David", "Segoe UI", "Arial",
+                              "Tahoma"),
+                   "bengali": ("Noto Sans Bengali", "Noto Serif Bengali", "Hind Siliguri", "Nirmala UI", "Vrinda"),
+                   "gujarati": ("Noto Sans Gujarati", "Noto Serif Gujarati", "Hind Vadodara", "Nirmala UI", "Shruti"),
+                   "tamil": ("Noto Sans Tamil", "Noto Serif Tamil", "Hind Madurai", "Nirmala UI", "Latha"),
                    "devanagari": ("Noto Sans Devanagari", "Noto Serif Devanagari", "Nirmala UI", "Mangal"),
                    "thai": ("Noto Sans Thai", "Noto Serif Thai", "Leelawadee UI", "Tahoma"),
                    "lao": ("Noto Sans Lao", "Leelawadee UI"),
@@ -1732,8 +1901,8 @@ ANCHOR_HELP_NOTE = (u"Moving the sample mark moves the selected glyph's anchor: 
 
 class AnchorPage(object):
     """The Mark anchors tab: anchors for a script's bases and marks, and the mark and mkmk code that
-    attaches them, for scripts whose marks the font's features place (Khmer, Thai, Arabic, Devanagari,
-    and the combining marks of any script)."""
+    attaches them, for scripts whose marks the font's features place (Khmer, Thai, Arabic, Hebrew,
+    Devanagari, Bengali, Gujarati, Tamil, and the combining marks of any script)."""
     COLUMNS = ("Glyph", "Name", "Anchors to add", "Note")
 
     def __init__(self, owner):
@@ -1887,7 +2056,7 @@ class AnchorPage(object):
                 if script == "arabic":
                     parts = ligature_parts(fg.name, 0, arabic_names)
                     role = ("ligature", 0, parts) if parts else None
-                elif script == "devanagari" and is_reph(fg.name):
+                elif script in REPH_SCRIPTS and is_reph(fg.name, script):
                     role = ("reph", 0, 0)
             if role is None:
                 continue
@@ -1905,14 +2074,14 @@ class AnchorPage(object):
         return found
 
     def rules_for(self, script, ink):
-        """The substitutions the font's own forms allow (Thai's smaller and shortened forms, Devanagari's
-        i-matras), as Rules."""
+        """The substitutions the font's own forms allow (Thai's smaller and shortened forms, the i-matras
+        of Devanagari, Bengali, and Gujarati), as Rules."""
         package = self.package
         names_by_code = dict((fg.unicode, fg.name) for fg in package.fgPackage.glyphs if fg.unicode)
         names = set(fg.name for fg in package.fgPackage.glyphs)
         if script == "thai":
             return thai_rules(names_by_code, names)
-        if script == "devanagari":
+        if script in I_MATRAS:
             def reach_of(name):
                 found = ink(name)
                 advance = ink.path(name)[1]
@@ -1920,7 +2089,7 @@ class AnchorPage(object):
 
             def advance_of(name):
                 return ink.path(name)[1] or None
-            return i_matra_rules(names_by_code, names, reach_of, advance_of, self.model)
+            return i_matra_rules(names_by_code, names, reach_of, advance_of, self.model, script)
         return []
 
     def plan_for(self, master):
@@ -2153,7 +2322,10 @@ class AnchorPage(object):
         a mark (the reph), a base."""
         if g.role in ("base", "ligature"):
             found = []
-            sides = ("top", "bottom", "reph") if g.role == "base" else ("top", "bottom")
+            sides = ["top", "bottom"]
+            if g.role == "base":  # and the other sides its marks take (Hebrew's dagesh, holam), and the reph
+                sides += sorted(set(m.side for m in self.glyphs if m.role == "mark" and m.side in SIDE_FAMILY
+                                    and m.side in g.placed())) + ["reph"]
             for side in sides:
                 mark = next((m for m in self.glyphs if m.role in ("mark", "reph") and m.side == side
                              and (u"_" + side) in m.placed()), None)
@@ -2184,7 +2356,8 @@ class AnchorPage(object):
         if g.role == "rule":
             return g.sample
         if g.role == "reph":
-            return u"\u0930\u094D\u0915"
+            ra, virama, consonant = REPH_SCRIPTS.get(self.script(), REPH_SCRIPTS["devanagari"])
+            return unichr_(ra) + unichr_(virama) + unichr_(consonant)
         if not g.code:
             return u""
         if g.role == "ligature":
@@ -2379,10 +2552,12 @@ class AnchorPage(object):
 class AccentsDialog(object):
     COLUMNS = ("Glyph", "Name", "Built from")
 
-    def __init__(self):
+    def __init__(self, characters=None):
+        """characters: letters handed over (Font Check's missing ones), listed first as their own set."""
         QtCore, QtGui = _qt()
         import fontlab
         self.fontlab = fontlab
+        self.given = [c for c in (characters or []) if c]
         ak = self.ak = load_auto_kerning()
         main = ak.AutoKerningDialog.main_window()
         dialog = self.dialog = QtGui.QDialog(main) if main is not None else QtGui.QDialog()
@@ -2409,9 +2584,11 @@ class AccentsDialog(object):
         row = QtGui.QHBoxLayout()
         row.addWidget(QtGui.QLabel("Character set:"))
         self.set_box = QtGui.QComboBox()
+        if self.given:
+            self.set_box.addItem(u"From Font Check (%s)" % ak.counted(len(self.given), u"letter"))
         for _, label, _ in SETS:
             self.set_box.addItem(label)
-        self.set_box.setCurrentIndex(len(SETS) - 1)
+        self.set_box.setCurrentIndex(0 if self.given else len(SETS) - 1)
         self.set_box.setWhatsThis(u"The Unicode blocks whose missing letters with diacritics are listed.")
         row.addWidget(self.set_box)
         row.addStretch(1)
@@ -2491,7 +2668,8 @@ class AccentsDialog(object):
         self.pages.addWidget(self.anchors.widget)
         self.tabs.addTab(u"Mark anchors")
         self.tabs.setTabToolTip(1, u"Anchors and mark features for scripts whose marks are attached, not built "
-                                   u"(Khmer, Thai, Arabic, Devanagari, and the combining marks of any script)")
+                                   u"(Khmer, Thai, Arabic, Hebrew, Devanagari, Bengali, Gujarati, Tamil, and the combining "
+                                   u"marks of any script)")
         outer.addWidget(self.log.widget)
         closing = QtGui.QHBoxLayout()
         closing.addStretch(1)
@@ -2568,7 +2746,12 @@ class AccentsDialog(object):
         return Font([g.name for g in glyphs], [(g.name, g.unicode) for g in glyphs], empty)
 
     def characters(self):
-        ranges = SETS[self.set_box.currentIndex][2]
+        index = self.set_box.currentIndex
+        if self.given:
+            if index == 0:
+                return list(self.given)
+            index -= 1
+        ranges = SETS[index][2]
         return [unichr_(code) for low, high in ranges for code in range(low, high)]
 
     def learn(self, package, master):
@@ -3157,7 +3340,8 @@ def _property(widget, name):
     return value() if callable(value) else value
 
 
-def main():
+def main(characters=None):
+    """Opens Diacritics; characters (Font Check's missing letters) are listed as a set of their own."""
     held = getattr(sys, "_freelab_diacritics", None)
     if held is not None:
         try:
@@ -3165,7 +3349,7 @@ def main():
         except Exception:
             pass
     try:
-        dialog = AccentsDialog()
+        dialog = AccentsDialog(characters)
     except Exception as exc:
         print("FreeLab Diacritics: %s" % exc)
         return

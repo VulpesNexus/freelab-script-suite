@@ -46,6 +46,9 @@ $files = @(
     @{ From = 'darkmode\freelab_dark_mode_settings.py'; Name = 'freelab_dark_mode_settings.py' },
     @{ From = 'kerning\freelab_auto_kerning.py'; Name = 'freelab_auto_kerning.py' },
     @{ From = 'kerning\freelab_kerning_check.py'; Name = 'freelab_kerning_check.py' },
+    @{ From = 'checks\freelab_font_check.py'; Name = 'freelab_font_check.py' },
+    @{ From = 'checks\language_coverage.json'; Name = 'language_coverage.json' },
+    @{ From = 'checks\language_coverage_LICENSE'; Name = 'language_coverage_LICENSE' },
     @{ From = 'spacing\freelab_auto_spacing.py'; Name = 'freelab_auto_spacing.py' },
     @{ From = 'diacritics\freelab_diacritics.py'; Name = 'freelab_diacritics.py' },
     @{ From = 'diacritics\mark_model.json'; Name = 'mark_model.json' },
@@ -59,6 +62,7 @@ $files = @(
     @{ From = 'cjk\palt_model.json'; Name = 'palt_model.json' },
     @{ From = 'cjk\hangul_model.json'; Name = 'hangul_model.json' },
     @{ From = 'kerning\common_pairs.txt'; Name = 'common_pairs.txt' },
+    @{ From = 'kerning\script_pairs.txt'; Name = 'script_pairs.txt' },
     @{ From = 'kerning\learned_model.json'; Name = 'learned_model.json' },
     @{ From = 'kerning\class_model.json'; Name = 'class_model.json' }
 )

@@ -308,6 +308,116 @@ class ScriptFeatureTests(unittest.TestCase):
             self.assertIsNone(fc.check_code(u"languagesystem DFLT dflt;\n" + texts["ccmp"], sorted(names)))
 
 
+class MoreScriptTests(unittest.TestCase):
+    """Hebrew's dagesh, holam, and shin dot; the reph and i-matras of Bengali and Gujarati; Tamil."""
+    MODEL = {"anchors": {"hebrew top": {"base_gap": 0.05, "base_offset": 0.0, "mark_gap": 0.04, "mark_offset": 0.0,
+                                        "mark_to_mark": 0.02, "fonts": 25},
+                         "hebrew bottom": {"base_gap": 0.03, "base_offset": 0.0, "mark_gap": 0.05, "mark_offset": 0.0,
+                                           "mark_to_mark": 0.02, "fonts": 25}},
+             "letters": {"hebrew center": {"05D1": [0.4, 0.5, 20], "05D3": [0.3, 0.6, 20]},
+                         "hebrew topleft": {"05D1": [0.0, 0.1, 20]},
+                         "hebrew topright": {"05E9": [0.9, 0.1, 20]}},
+             "reph": {"devanagari": {"share": 0.77, "gap": -0.01, "fonts": 30},
+                      "bengali": {"share": 0.8, "gap": 0.02, "fonts": 9}},
+             "i_matra": {"0A95": [0.3, 10], "0A96": [0.7, 10]}}
+
+    def test_scripts(self):
+        for code, script in ((0x05D0, "hebrew"), (0x0995, "bengali"), (0x0A95, "gujarati"), (0x0B95, "tamil"),
+                             (0x0915, "devanagari")):
+            self.assertEqual(ac.anchor_script(code), script)
+
+    def hebrew(self):
+        glyphs = [("bet-hb", 0x05D1, "base", ac.Ink(0, 0, 500, 500), {}),
+                  ("he-hb", 0x05D4, "base", ac.Ink(0, 0, 600, 500), {}),
+                  ("shin-hb", 0x05E9, "base", ac.Ink(0, 0, 700, 500), {}),
+                  ("patah-hb", 0x05B7, "mark", ac.Ink(-300, -120, -100, -80), {}),
+                  ("dagesh-hb", 0x05BC, "mark", ac.Ink(-260, 230, -220, 270), {}),
+                  ("holam-hb", 0x05B9, "mark", ac.Ink(-260, 560, -220, 600), {}),
+                  ("shindot-hb", 0x05C1, "mark", ac.Ink(-160, 560, -120, 600), {})]
+        return dict((g.name, g) for g in ac.plan_anchors(glyphs, self.MODEL, "hebrew", 1000, 500))
+
+    def test_hebrew_marks_of_other_classes(self):
+        found = self.hebrew()
+        self.assertEqual(found["dagesh-hb"].anchors, {u"_center": (-240, 250)}, "the center of its ink, nothing onward")
+        self.assertEqual(found["holam-hb"].anchors, {u"_topleft": (-240, 520)}, "under its ink's center by the gap")
+        self.assertEqual(found["shindot-hb"].side, u"topright")
+        self.assertEqual(found["patah-hb"].side, u"bottom")
+        bet, he, shin = found["bet-hb"], found["he-hb"], found["shin-hb"]
+        self.assertEqual(bet.anchors["center"], (200, 250), "where the corpus lands the dagesh in bet")
+        self.assertEqual(he.anchors["center"], (210, 275), "a letter the corpus has too little of: its letters' median")
+        self.assertEqual(bet.anchors["topleft"], (0, 560), "the holam's ink 0.1 em over bet's, at its left")
+        self.assertEqual(he.anchors["topleft"], (0, 560))
+        self.assertNotIn("topright", bet.anchors, "the shin dot's anchor: shin's only")
+        self.assertEqual(shin.anchors["topright"], (630, 560))
+        lines = ac.mark_code(list(found.values()))
+        self.assertIn(u"markClass dagesh-hb <anchor -240 250> @MC_center;", lines["mark"])
+        self.assertIn(u"pos base bet-hb <anchor 250 -30> mark @MC_bottom <anchor 200 250> mark @MC_center "
+                      u"<anchor 0 560> mark @MC_topleft;", lines["mark"])
+        self.assertTrue(any(line.startswith(u"pos base shin-hb") and u"mark @MC_topright" in line for line in lines["mark"]))
+        self.assertFalse(any(u"dagesh-hb" in line for line in lines["mkmk"]), "nothing stacks on a dagesh")
+        if HAVE_FONTTOOLS:
+            texts = ac.mark_texts(list(found.values()), {})
+            self.assertIsNone(fc.check_code(u"languagesystem DFLT dflt;\n" + texts["mark"] + texts["mkmk"],
+                                            sorted(found)))
+
+    def test_hebrew_without_a_model(self):
+        glyphs = [("bet-hb", 0x05D1, "base", ac.Ink(0, 0, 500, 500), {}),
+                  ("dagesh-hb", 0x05BC, "mark", ac.Ink(-260, 230, -220, 270), {}),
+                  ("holam-hb", 0x05B9, "mark", ac.Ink(-260, 560, -220, 600), {})]
+        bet = dict((g.name, g) for g in ac.plan_anchors(glyphs, {}, "hebrew", 1000, 500))["bet-hb"]
+        self.assertEqual(bet.anchors["center"], (250, 250), "the middle of its ink")
+        self.assertEqual(bet.anchors["topleft"][0], 0, "its ink's left end")
+
+    def test_reph(self):
+        self.assertEqual(ac.reph_row(self.MODEL, "bengali")["share"], 0.8)
+        self.assertIsNone(ac.reph_row(self.MODEL, "gujarati"))
+        self.assertEqual(ac.reph_row({"reph": {"share": 0.77, "gap": 0.0}}, "devanagari")["share"], 0.77, "the first models")
+        self.assertIsNone(ac.reph_row({"reph": {"share": 0.77, "gap": 0.0}}, "bengali"))
+        for name in (u"Reph.bn", u"bn_reph", u"bnReph", u"uni09B009CD", u"reph-beng", u"bReph"):
+            self.assertTrue(ac.is_reph(name, "bengali"), name)
+        for name in (u"Reph.gj", u"gjReph", u"rephgujr", u"uni0AB00ACD", u"reph-gujarati"):
+            self.assertTrue(ac.is_reph(name, "gujarati"), name)
+            self.assertFalse(ac.is_reph(name, "bengali"), name)
+        self.assertFalse(ac.is_reph(u"rephdeva", "bengali"), "another script's reph")
+        self.assertTrue(ac.is_reph(u"Reph_alt2.bn", "bengali"), "an alternate")
+        for name in (u"gjmII_Reph", u"bSignIiReph", u"ivowelsignrephgujr", u"bAuMarkReph"):
+            self.assertFalse(ac.is_reph(name), name + u": joined with a vowel sign")
+        self.assertTrue(ac.is_reph(u"rephleftgujr", "gujarati"))
+        glyphs = [("ka-beng", 0x0995, "base", ac.Ink(0, 0, 600, 700), {}),
+                  ("reph-beng", 0, "reph", ac.Ink(-200, 750, -50, 950), {})]
+        found = dict((g.name, g) for g in ac.plan_anchors(glyphs, self.MODEL, "bengali", 1000, 500))
+        self.assertEqual(found["ka-beng"].anchors["reph"], (480, 720))
+
+    def test_i_matra(self):
+        names_by_code = {0x0ABF: u"MatraI.gj", 0x0A95: u"Ka.gj", 0x0A96: u"Kha.gj"}
+        names = set([u"MatraI.gj", u"MatraI1.gj", u"MatraI2.gj", u"MatraII.gj", u"MatraI_Reph.gj", u"Ka.gj", u"Kha.gj"])
+        self.assertEqual(ac.i_matra_variants(names, u"MatraI.gj", 0x0ABF), [u"MatraI1.gj", u"MatraI2.gj"],
+                         "its name with other digits, not the ii-matra nor a ligature")
+        self.assertEqual(ac.i_matra_variants(set([u"uni0ABF", u"uni0ABF.alt01", u"uni0AB1"]), u"uni0ABF", 0x0ABF),
+                         [u"uni0ABF.alt01"], "a uniXXXX name's digits are its code point")
+        self.assertEqual(ac.i_matra_variants(set([u"ivowelsigngujr", u"ivowelsign3gujr"]), u"ivowelsigngujr", 0x0ABF),
+                         [u"ivowelsign3gujr"])
+        self.assertEqual(ac.i_matra_variants(set([u"uni0ABF", u"iMatra-gujr.long"]), u"uni0ABF", 0x0ABF),
+                         [u"iMatra-gujr.long"], "Glyphs' name with another common tag of the script")
+        reaches = {u"MatraI.gj": 100, u"MatraI1.gj": 180, u"MatraI2.gj": 420}
+        advances = {u"Ka.gj": 600, u"Kha.gj": 600}
+        rules = ac.i_matra_rules(names_by_code, names, reaches.get, advances.get, self.MODEL, "gujarati")
+        self.assertEqual([r.line for r in rules], [u"sub MatraI.gj' [Ka.gj] by MatraI1.gj;",
+                                                   u"sub MatraI.gj' [Kha.gj] by MatraI2.gj;"])
+        self.assertEqual(ac.i_matra_rules(names_by_code, names, reaches.get, advances.get, self.MODEL), [],
+                         "Devanagari's i-matra: the font has none")
+        kept = dict(self.MODEL, i_matra={"0A95": [0.3, 10, 0.2], "0A96": [0.7, 10, 0.8]})
+        self.assertEqual([r.line for r in ac.i_matra_rules(names_by_code, names, reaches.get, advances.get, kept, "gujarati")],
+                         [u"sub MatraI.gj' [Ka.gj] by MatraI1.gj;"], "most fonts keep their nominal i-matra before kha")
+
+    def test_tamil(self):
+        glyphs = [("ka-tamil", 0x0B95, "base", ac.Ink(0, 0, 600, 500), {}),
+                  ("pulli-tamil", 0x0BCD, "mark", ac.Ink(-200, 560, -100, 660), {})]
+        found = dict((g.name, g) for g in ac.plan_anchors(glyphs, {}, "tamil", 1000, 500))
+        self.assertEqual(found["pulli-tamil"].side, "top")
+        self.assertIn("top", found["ka-tamil"].anchors)
+
+
 class PlaceTests(unittest.TestCase):
     def test_a_bare_font_places_by_the_model_letter_by_letter(self):
         placement = ac.Placement(1000.0, MODEL)

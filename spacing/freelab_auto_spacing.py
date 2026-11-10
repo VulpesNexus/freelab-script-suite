@@ -2,9 +2,10 @@
 # -*- coding: utf-8 -*-
 """FreeLab auto spacing, from FontLab's Scripts menu.
 
-Suggests sidebearings for the drawn Latin letters of the current master, so that each sits beside the
-font's straight references (H for capitals, n for lowercase) as the references sit beside each other,
-measured by Auto Kerning's two methods (halfkern's and contour distance). Shows each glyph between
+Suggests sidebearings for the drawn letters of the current master (Latin, Armenian, Georgian, and
+proportional kana), so that each sits beside the font's straight references (H for capitals, n for
+lowercase; their own in the other scripts) as the references sit beside each other, measured by Auto
+Kerning's two methods (halfkern's and contour distance). Shows each glyph between
 its references as it is and as suggested, and changes only the glyphs you leave checked. Glyphs
 built from components follow the letters they are built on.
 
@@ -22,7 +23,16 @@ import sys
 
 AUTO_KERNING_FILE, AUTO_KERNING_MODULE = "freelab_auto_kerning.py", "freelab_auto_kerning"
 SPACING_REFERENCES = {"upper": u"H", "lower": u"n", "figure": u"0"}  # each kind's straight reference
-FIXED = u"HOlno08"  # the references and tuning glyphs of the methods: never changed
+# The other scripts' straight references by kind (Auto Kerning's SCRIPT_CONTROLS), and the round
+# reference each straight one is proofed with
+SCRIPT_SPACING_REFERENCES = {"armenian": {"upper": u"\N{ARMENIAN CAPITAL LETTER VO}", "lower": u"\N{ARMENIAN SMALL LETTER VO}"},
+                             "georgian": {"upper": u"Ი", "lower": u"\N{GEORGIAN LETTER IN}"},
+                             "kana": {"kana": u"\N{KATAKANA LETTER RO}"}}
+ROUND_REFERENCES = {u"H": u"O", u"n": u"o", u"0": u"8", u"\N{ARMENIAN CAPITAL LETTER VO}": u"\N{ARMENIAN CAPITAL LETTER OH}",
+                    u"\N{ARMENIAN SMALL LETTER VO}": u"\N{ARMENIAN SMALL LETTER OH}",
+                    u"Ი": u"Ო",
+                    u"\N{GEORGIAN LETTER IN}": u"\N{GEORGIAN LETTER ON}", u"\N{KATAKANA LETTER RO}": u"\N{HIRAGANA LETTER NO}"}
+FIXED = u"HOlno08"  # the references and tuning glyphs of the methods: never changed (the other scripts' too, below)
 TOLERANCE_UNITS = 6  # a side whose suggestion is closer than this to its sidebearing is left out
 GROUPS = (("letters", "Letters"), ("figures", "Letters and figures"), ("all", "Letters, figures, and punctuation"),
           ("everything", "Everything: every glyph with a character"))  # (other scripts and symbols too, by case)
@@ -102,19 +112,35 @@ class Spacing(object):
         return any(self.changes(tolerance))
 
 
-def reference_for(kind_char, category):
+def reference_for(kind_char, category, script_of=None):
     """A character's straight reference, by the kind of its base letter: H, n, or 0; n for
-    punctuation (set among lowercase most)."""
+    punctuation (set among lowercase most). With script_of, an Armenian or Georgian letter takes its
+    script's own (vo, in) and a kana RO."""
+    script = script_of(kind_char) if script_of is not None else None
+    if script in SCRIPT_SPACING_REFERENCES:
+        own = SCRIPT_SPACING_REFERENCES[script]
+        return own.get(category(kind_char)) or list(own.values())[0]
     return SPACING_REFERENCES.get(category(kind_char), SPACING_REFERENCES["lower"])
 
 
-def suggest_spacing(glyphs, measure, kind_of, category):
+def fixed_characters(ak):
+    """The references and tuning letters of every script: never changed."""
+    found = set(FIXED)
+    for script, _ in ak.SCRIPTS:
+        found.update(ak.SCRIPT_TUNING[script])
+        for chars in ak.SCRIPT_REFERENCES[script].values():
+            found.update(chars)
+    return found
+
+
+def suggest_spacing(glyphs, measure, kind_of, category, script_of=None):
     """Each Spacing's suggested changes: its right side as the pair (glyph, reference) asks (the
     kerning that pair would want is what its right sidebearing lacks), its left side as (reference,
     glyph) asks. measure(left char, right char) gives that kerning in font units, or None;
-    kind_of(char) the character whose kind sets its references (its base letter)."""
+    kind_of(char) the character whose kind sets its references (its base letter); script_of, the
+    script of a letter, for the other scripts' own references (see reference_for)."""
     for g in glyphs:
-        reference = reference_for(kind_of(g.char), category)
+        reference = reference_for(kind_of(g.char), category, script_of)
         g.right_change = measure(g.char, reference)
         g.left_change = measure(reference, g.char)
     return glyphs
@@ -122,6 +148,13 @@ def suggest_spacing(glyphs, measure, kind_of, category):
 
 REFERENCE_MODEL_FILE = "reference_model.json"
 UNSPACED_SHARE = 0.005  # a reference side closer to its ink than this share of the em counts as unspaced
+# Each script's straight references (looked at for unspaced sides) and all its references (spaced
+# from the corpus when a straight one looks unspaced): Latin's, Armenian's, Georgian's.
+REFERENCE_GROUPS = ((u"Hn", u"HOno0"),
+                    (u"Ոո",
+                     u"ՈՕո"
+                     u"օ"),
+                    (u"Იი", u"ᲘᲝიო"))
 UNSPACED_RATIO = 3.0  # and so does one side more than this many times the other
 
 
@@ -142,6 +175,16 @@ def unspaced(left, right, upm):
     """Whether a reference's sidebearings look not spaced yet: a side at its ink, or lopsided."""
     low, high = min(left, right), max(left, right)
     return low < UNSPACED_SHARE * upm or high > UNSPACED_RATIO * max(low, 1.0)
+
+
+def references_to_space(sides, upm, groups=REFERENCE_GROUPS):
+    """The references to space from the corpus, by script: all of a script's (those in sides, {char:
+    (name, left, right, width)}) where one of its straight references looks unspaced."""
+    found = []
+    for straight, every in groups:
+        if any(unspaced(sides[ch][1], sides[ch][2], upm) for ch in straight if ch in sides):
+            found.extend(ch for ch in every if ch in sides)
+    return found
 
 
 def reference_changes(char, left, right, width, heights, model):
@@ -210,14 +253,18 @@ def ink_sides(layer):
 
 
 HELP = u"""<b>FreeLab Auto Spacing</b><br>
-Suggests sidebearings for the drawn Latin letters of this master, so that each sits beside its
+Suggests sidebearings for the drawn letters of this master, so that each sits beside its
 straight reference (H for capitals, n for lowercase, 0 for figures) as the references sit beside each
 other. Changes only the glyphs you leave checked.<br><br>
+<b>Scripts</b>: Latin; Armenian, against its own vo (capital and small) and oh; Georgian, against
+its own in and on (Mkhedruli, and Mtavruli where the font has them); kana where they are
+proportional already, against RO, NO, and I (full-width kana are set proportionally by palt: CJK
+Spacing). A script whose references the font lacks is spaced by case against H and n.<br><br>
 <b>How</b>: Auto Kerning's two methods measure the pair of the glyph and its reference on each side
 (T beside H, H beside T); the kerning they would want there, averaged, is what that sidebearing
 lacks. A side measured within the tolerance is left as it is.<br>
 <b>The references are yours</b>: H, O, l, n, o, 0, and 8 set the spacing (as in Walter Tracy's
-method: space H and n, then O and o, by eye) and are never changed. Glyphs built from components
+method: space H and n, then O and o, by eye) and are never changed, nor are the other scripts'. Glyphs built from components
 are not spaced: they follow the letters they are built on, their accents kept over them.<br>
 <b>After spacing</b>: the font's kerning was set for the old sidebearings. Run Auto Kerning again,
 with <i>Include existing kerned pairs</i>, to see which pairs now want other values.<br>
@@ -356,9 +403,10 @@ class AutoSpacingDialog(object):
         ak = self.ak
         group = GROUPS[self.group.currentIndex][0]
         letters = [ch for ch in ak.class_characters() if ch.isalpha()]
+        letters += list(ak.ARMENIAN_LETTERS + ak.GEORGIAN_LETTERS + ak.KANA_LETTERS)  # (kana only where proportional)
         chosen = letters + (list(ak.FIGURES) if group in ("figures", "all") else [])
         if group == "all":
-            chosen += list(ak.PUNCTUATION)
+            chosen += list(ak.PUNCTUATION) + [ch for ch in ak.ARMENIAN_PUNCTUATION if ch not in ak.PUNCTUATION]
         if group == "everything" and self.package is not None:
             import unicodedata
             for fg in self.package.fgPackage.glyphs:
@@ -413,26 +461,41 @@ class AutoSpacingDialog(object):
         em = ak.EM_PIXELS
         glyphs = ak.FontLabGlyphs(package, master, em)
         wanted = self.characters()
-        references = set(SPACING_REFERENCES.values()) | set(ak.TUNING) | set(u"HO08")
-        found = [(ch, name) for ch, name in ak.font_glyphs(package, list(references) + wanted) if glyphs.add(name)]
+        fixed = fixed_characters(ak)
+        found = [(ch, name) for ch, name in ak.font_glyphs(package, sorted(fixed) + wanted) if glyphs.add(name)]
         names = dict(found)
-        for ch in ak.TUNING:
-            if ch not in names:
-                raise ValueError(u"this font has no \N{LEFT DOUBLE QUOTATION MARK}%s\N{RIGHT DOUBLE QUOTATION MARK}: "
-                                 u"its spacing is what the others are measured by." % ch)
-        image_of = lambda ch: glyphs.image(names[ch])
-        tools = ak.make_bands(ak.Core(), image_of, names, em, glyphs.pad)
-        reach = float(glyphs.pad)
         upm = glyphs.upm
+        scripts = [script for script, _ in ak.SCRIPTS if all(ch in names for ch in ak.SCRIPT_TUNING[script])
+                   and (script != "kana" or self.kana_proportional(package, master, names, upm))]
+        if not scripts:  # (Latin's l, n, and o first: most fonts have them)
+            raise ValueError(u"this font has no \N{LEFT DOUBLE QUOTATION MARK}%s\N{RIGHT DOUBLE QUOTATION MARK}: "
+                             u"its spacing is what the others are measured by." % next(ch for ch in ak.TUNING if ch not in names))
+        image_of = lambda ch: glyphs.image(names[ch])
+        core = ak.Core()
+        tools = {}
+        for script in scripts:
+            try:
+                tools[script] = ak.make_bands(core, image_of, names, em, glyphs.pad, script)
+            except ValueError:
+                if script == "latin":
+                    raise
+                # (no halo makes its tuning letters agree: its letters are spaced by case against H and n)
+        scripts = [script for script in scripts if script in tools]
+        reach = float(glyphs.pad)
         tighten, loosen = ak.DEFAULT_FACTORS["halfkern"]
+        self.scripts = scripts
+        kind_of = self.kind_of
 
         def measure(left, right):
             if left not in names or right not in names:
                 return None
-            kind_left, kind_right = ak.kind_character(left), ak.kind_character(right)
-            if ak.pair_kinds(kind_left, kind_right) is None:
+            kind_left, kind_right = kind_of(left), kind_of(right)
+            if kind_left is None or kind_right is None or ak.pair_kinds(kind_left, kind_right) is None:
                 return None
-            halo, contour = ak.measure_pair(tools, kind_left, kind_right, image_of(left), image_of(right), em, reach)
+            script = ak.script_of(kind_left if ak.category(kind_left) != "punctuation" else kind_right) or "latin"
+            if script not in tools:
+                return None
+            halo, contour = ak.measure_pair(tools[script], kind_left, kind_right, image_of(left), image_of(right), em, reach)
             values = []
             if halo is not None:
                 units = halo * upm / em
@@ -444,7 +507,7 @@ class AutoSpacingDialog(object):
         spacings, composites = [], {}
         seen = set()
         for ch, name in found:
-            if name in seen or ch in FIXED:
+            if name in seen or ch in fixed or kind_of(ch) is None:
                 continue
             seen.add(name)
             layer = package.findName(name).getLayerByName(master)
@@ -455,8 +518,8 @@ class AutoSpacingDialog(object):
             if ch not in wanted:
                 continue
             left, right, width = ink_sides(layer)
-            spacings.append(Spacing(ch, name, ak.category(ak.kind_character(ch)), left, right, width))
-        suggest_spacing(spacings, measure, ak.kind_character, ak.category)
+            spacings.append(Spacing(ch, name, ak.category(kind_of(ch)), left, right, width))
+        suggest_spacing(spacings, measure, kind_of, ak.category, ak.script_of)
         self.unspaced_references = self.space_references(package, master, names, spacings)
         # every composite of the font, not only those of the characters measured (alternates, ligatures)
         for fg in package.fgPackage.glyphs:
@@ -472,6 +535,31 @@ class AutoSpacingDialog(object):
                 composites[name] = (parts[0], parts[1:])
         return spacings, composites
 
+    def kind_of(self, ch):
+        """The character whose kind sets ch's references (Auto Kerning's kind_character), in a script
+        this font is measured in; a letter of another script by its case (H or n), as before; None
+        for a kana when the font's kana are not measured (full width: CJK Spacing's palt sets them)."""
+        ak = self.ak
+        kind = ak.kind_character(ch)
+        script = ak.script_of(kind)
+        if script is None or script in getattr(self, "scripts", ("latin",)):
+            return kind
+        if script == "kana":
+            return None
+        return u"H" if ak.category(ch) == "upper" else u"n"
+
+    def kana_proportional(self, package, master, names, upm):
+        """Whether the font's kana are proportional already (their widths their own): only then are
+        they spaced here. Full-width kana are set proportionally by palt (CJK Spacing)."""
+        ak = self.ak
+        advances = {}
+        for ch in ak.KANA_LETTERS:
+            if ch in names:
+                layer = package.findName(names[ch]).getLayerByName(master)
+                if layer is not None:
+                    advances[names[ch]] = layer.advanceWidth
+        return ak.kana_setting(advances, upm, {}) == "proportional"
+
     def space_references(self, package, master, names, spacings):
         """Where the references (H and n) look unspaced, a row for each reference from the corpus's
         spacing, put first and unchecked: a font tight on purpose looks the same (its letters touch),
@@ -481,7 +569,7 @@ class AutoSpacingDialog(object):
             return []
         upm = float(package.upm)
         sides, heights = {}, {}
-        for ch in (u"H", u"x", u"O", u"n", u"o", u"0"):
+        for ch in (u"H", u"x", u"O", u"n", u"o", u"0") + tuple(ch for _, group in REFERENCE_GROUPS[1:] for ch in group):
             name = names.get(ch) or (package.findUnicode(ord(ch)).name if package.findUnicode(ord(ch)) is not None else None)
             glyph = package.findName(name) if name else None
             layer = glyph.getLayerByName(master) if glyph is not None else None
@@ -494,11 +582,11 @@ class AutoSpacingDialog(object):
             sides[ch] = (name, left, right, width)
             if ch in (u"H", u"x", u"n"):
                 heights.setdefault(u"x" if ch == u"n" else ch, box.height())  # (n's height where there is no x)
-        if not any(unspaced(sides[ch][1], sides[ch][2], upm) for ch in (u"H", u"n") if ch in sides):
-            return []
+            elif ord(ch) > 0x7F:
+                heights[ch] = box.height()  # (the other scripts' straight references give their own heights)
         ak = self.ak
         found = []
-        for ch in (u"H", u"O", u"n", u"o", u"0"):
+        for ch in references_to_space(sides, upm):
             if ch not in sides:
                 continue
             name, left, right, width = sides[ch]
@@ -666,7 +754,7 @@ class AutoSpacingDialog(object):
         spans across the picture, (left, right, (side, name)), to be clicked."""
         QtCore, QtGui = _qt()
         ak = self.ak
-        reference = reference_for(ak.kind_character(s.char), ak.category)
+        reference = reference_for(self.kind_of(s.char) or s.char, ak.category, ak.script_of)
         reference_glyph = ak.font_glyphs(self.package, [reference])
         sequence = []
         for ch, name in reference_glyph * 2 + [(s.char, s.name)] + reference_glyph * 2:
@@ -709,8 +797,8 @@ class AutoSpacingDialog(object):
         if s is None:
             return
         ak = self.ak
-        reference = reference_for(ak.kind_character(s.char), ak.category)
-        names = [name for _, name in ak.font_glyphs(self.package, [reference, u"o" if reference == u"n" else u"O"])]
+        reference = reference_for(self.kind_of(s.char) or s.char, ak.category, ak.script_of)
+        names = [name for _, name in ak.font_glyphs(self.package, [reference, ROUND_REFERENCES.get(reference, u"O")])]
         text = u"/space".join(u"/%s/%s/%s/%s/%s" % (r, r, s.name, r, r) for r in names) or u"/%s" % s.name
         error = ak.show_in_glyph_window(self.fontlab, text)
         if error:

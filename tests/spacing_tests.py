@@ -51,6 +51,31 @@ class SpacingTests(unittest.TestCase):
         self.assertEqual(sp.reference_for(u"7", ak.category), u"0")
         self.assertEqual(sp.reference_for(u"?", ak.category), u"n", "punctuation sits among lowercase most")
 
+    def test_other_scripts_take_their_own_references(self):
+        vo, small_vo = u"\N{ARMENIAN CAPITAL LETTER VO}", u"\N{ARMENIAN SMALL LETTER VO}"
+        refs = lambda ch: sp.reference_for(ak.kind_character(ch), ak.category, ak.script_of)
+        self.assertEqual(refs(u"\N{ARMENIAN CAPITAL LETTER BEN}"), vo)
+        self.assertEqual(refs(u"\N{ARMENIAN SMALL LETTER BEN}"), small_vo)
+        self.assertEqual(refs(ak.unichr_(0x1C91)), ak.unichr_(0x1C98), "Mtavruli against Mtavruli in")
+        self.assertEqual(refs(u"\N{GEORGIAN LETTER BAN}"), u"\N{GEORGIAN LETTER IN}")
+        self.assertEqual(refs(u"\N{HIRAGANA LETTER KA}"), u"\N{KATAKANA LETTER RO}")
+        self.assertEqual(refs(u"T"), u"H", "Latin as before")
+        self.assertEqual(sp.reference_for(u"T", ak.category), u"H", "without script_of: Latin's")
+        self.assertEqual(sp.ROUND_REFERENCES[small_vo], u"\N{ARMENIAN SMALL LETTER OH}")
+        fixed = sp.fixed_characters(ak)
+        for ch in (u"H", small_vo, u"\N{GEORGIAN LETTER ON}", u"\N{HIRAGANA LETTER NO}"):
+            self.assertIn(ch, fixed, "a reference is never changed")
+
+    def test_references_to_space_by_script(self):
+        vo, small_vo, oh = u"\N{ARMENIAN CAPITAL LETTER VO}", u"\N{ARMENIAN SMALL LETTER VO}", u"\N{ARMENIAN SMALL LETTER OH}"
+        sides = {u"H": ("H", 50, 50, 700), u"n": ("n", 40, 38, 500), u"o": ("o", 35, 35, 500),
+                 vo: ("Vo", 0, 0, 600), small_vo: ("vo", 40, 40, 500), oh: ("oh", 36, 36, 500)}
+        self.assertEqual(sp.references_to_space(sides, 1000), [vo, small_vo, oh], "Armenian's capital vo is unspaced")
+        sides[vo] = ("Vo", 50, 50, 600)
+        self.assertEqual(sp.references_to_space(sides, 1000), [])
+        sides[u"n"] = ("n", 0, 2, 500)
+        self.assertEqual(sp.references_to_space(sides, 1000), [u"H", u"n", u"o"], "Latin's alone")
+
     def test_composites_follow_their_base(self):
         composites = {"eacute": ("e", ["acute"]), "ecircumflexacute": ("ecircumflex", ["acute"]),
                       "ecircumflex": ("e", ["circumflex"]), "f_e": ("f", ["e"]), "aacute": ("a", ["acute"])}
