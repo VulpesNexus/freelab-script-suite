@@ -49,6 +49,24 @@ KIND_LABELS = {"hiragana": "Hiragana", "small hiragana": "Small hiragana", "kata
                "small katakana": "Small katakana", "punctuation": "Punctuation and full-width forms",
                "hangul": "Hangul"}
 SAMPLE = u"「カタカナ、ひらがな。」（テスト）"
+SAMPLES = (("ja", u"Japanese", SAMPLE), ("ko", u"Korean", KOREAN_SAMPLE),
+           ("zh-hans", u"Chinese (Simplified)", u"\N{LEFT CORNER BRACKET}\u7b80\u4f53\u4e2d\u6587\N{FULLWIDTH COMMA}"
+                                              u"\u6807\u70b9\N{IDEOGRAPHIC FULL STOP}\N{RIGHT CORNER BRACKET}"
+                                              u"\N{FULLWIDTH LEFT PARENTHESIS}\u6d4b\u8bd5\N{FULLWIDTH RIGHT PARENTHESIS}"),
+           ("zh-hant", u"Chinese (Traditional)", u"\N{LEFT CORNER BRACKET}\u7e41\u9ad4\u4e2d\u6587\N{FULLWIDTH COMMA}"
+                                                u"\u6a19\u9ede\N{IDEOGRAPHIC FULL STOP}\N{RIGHT CORNER BRACKET}"
+                                                u"\N{FULLWIDTH LEFT PARENTHESIS}\u6e2c\u8a66\N{FULLWIDTH RIGHT PARENTHESIS}"))
+# One sample per writing system the trims serve: kana and punctuation (Japanese), Hangul (Korean), and
+# the hanzi forms of each Chinese standard, with the full-width punctuation palt trims. The one the
+# font covers best is shown first; the field takes any text of one's own.
+
+
+def best_sample(codes):
+    """The index in SAMPLES of the sample the font covers most of (codes: the font's code points; its
+    full-width punctuation counted too), the first on a tie."""
+    def covered(text):
+        return sum(1 for ch in text if not ch.isspace() and ord(ch) in codes)
+    return max(range(len(SAMPLES)), key=lambda index: (covered(SAMPLES[index][2]), -index))
 SMALL_KANA = set([0x3041, 0x3043, 0x3045, 0x3047, 0x3049, 0x3063, 0x3083, 0x3085, 0x3087, 0x308E, 0x3095, 0x3096,
                   0x30A1, 0x30A3, 0x30A5, 0x30A7, 0x30A9, 0x30C3, 0x30E3, 0x30E5, 0x30E7, 0x30EE, 0x30F5, 0x30F6])
 
@@ -367,7 +385,7 @@ class CJKSpacingDialog(object):
         self.tree.setColumnCount(len(self.COLUMNS))
         self.tree.setHeaderLabels(list(self.COLUMNS))
         self.tree.setIconSize(QtCore.QSize(ICON_SIZE, ICON_SIZE))
-        self.tree.viewport().setProperty(ak.LEAVE_ALONE_PROP, True)  # its pictures are drawn in the dialog's colors
+        self.tree.setProperty(ak.LEAVE_ALONE_PROP, True)  # its pictures are drawn in the dialog's colors
         ak.grid_lines(self.tree)
         self.tree.setWhatsThis(u"Each full-width kana and punctuation mark with its trims: palt's x placement and x "
                                u"advance, the width after, and halt's. Checked glyphs are written. Double-click one "
@@ -375,6 +393,12 @@ class CJKSpacingDialog(object):
         layout.addWidget(self.tree, 1)
         sample_row = QtGui.QHBoxLayout()
         sample_row.addWidget(QtGui.QLabel(u"Sample:"))
+        self.sample_box = QtGui.QComboBox()
+        for _, label, _ in SAMPLES:
+            self.sample_box.addItem(label)
+        self.sample_box.setWhatsThis(u"A sample per writing system (the one the font covers best is chosen as it is "
+                                     u"read); the field beside it takes text of your own.")
+        sample_row.addWidget(self.sample_box)
         self.sample = QtGui.QLineEdit(SAMPLE)
         self.sample.setWhatsThis(u"The text the previews set, as it is and with palt.")
         sample_row.addWidget(self.sample, 1)
@@ -412,6 +436,7 @@ class CJKSpacingDialog(object):
         self.palt_box.connect("toggled(bool)", lambda on: self.update_buttons())
         self.halt_box.connect("toggled(bool)", lambda on: self.update_buttons())
         self.sample.connect("textChanged(QString)", lambda text: self.draw_previews())
+        self.sample_box.connect("activated(int)", lambda index: self.sample.setText(SAMPLES[index][2]))
         self.tree.connect("itemChanged(QTreeWidgetItem*,int)", lambda item, column: self.changed())
         self.tree.connect("itemDoubleClicked(QTreeWidgetItem*,int)", lambda item, column: self.show_in_glyph_window(item))
         self.package = None
@@ -492,8 +517,10 @@ class CJKSpacingDialog(object):
         self.trims = plan(glyphs, self.model, float(package.upm))
         for t in self.trims:
             t.checked = kept.get(t.name, t.checked)
-        if not glyphs and hangul and u"%s" % self.sample.text == SAMPLE:
-            self.sample.setText(KOREAN_SAMPLE)
+        if u"%s" % self.sample.text in [text for _, _, text in SAMPLES]:  # (text of one's own is kept)
+            index = best_sample(set(fg.unicode for fg in package.fgPackage.glyphs if fg.unicode))
+            self.sample_box.setCurrentIndex(index)
+            self.sample.setText(SAMPLES[index][2])
         self.hangul_box.setEnabled(bool(hangul))
         self.hangul = []
         if hangul and HANGUL_MODES[self.hangul_box.currentIndex][0] != "leave":

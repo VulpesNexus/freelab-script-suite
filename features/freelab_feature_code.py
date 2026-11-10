@@ -1599,7 +1599,7 @@ class FeatureCodeDialog(object):
         self.ligature_tree.setWhatsThis(u"Each ligature, what it replaces, and the feature it goes in (pick it to "
                                         u"change it). Standard ligatures are on unless a user turns them off; "
                                         u"discretionary ones off unless turned on.")
-        self.ligature_tree.viewport().setProperty(self.ak.LEAVE_ALONE_PROP, True)  # its pictures are drawn in the dialog's colors
+        self.ligature_tree.setProperty(self.ak.LEAVE_ALONE_PROP, True)  # its pictures are drawn in the dialog's colors
         self.ak.grid_lines(self.ligature_tree)
         part.addWidget(self.ligature_tree, 1)
 
@@ -1623,7 +1623,7 @@ class FeatureCodeDialog(object):
         self.alternate_tree.setIconSize(QtCore.QSize(ICON_SIZE * 3, ICON_SIZE))
         self.alternate_tree.setWhatsThis(u"The letters with alternates (named X.2, X.alt1, or X.calt1), and their "
                                          u"cycle: the forms they take in turn. Checked letters take turns.")
-        self.alternate_tree.viewport().setProperty(self.ak.LEAVE_ALONE_PROP, True)
+        self.alternate_tree.setProperty(self.ak.LEAVE_ALONE_PROP, True)
         self.ak.grid_lines(self.alternate_tree)
         part.addWidget(self.alternate_tree, 1)
 
@@ -1642,7 +1642,7 @@ class FeatureCodeDialog(object):
                                      u"under it (click its arrow). A checked feature is written, with its checked "
                                      u"rows; a set's name (the Becomes column of its row) is what applications show, "
                                      u"and you can edit it. Amber rows are warnings to review: they change nothing.")
-        self.forms_tree.viewport().setProperty(self.ak.LEAVE_ALONE_PROP, True)
+        self.forms_tree.setProperty(self.ak.LEAVE_ALONE_PROP, True)
         self.ak.grid_lines(self.forms_tree)
         box.addWidget(self.forms_tree, 1)
         self.pages.addWidget(forms_page)

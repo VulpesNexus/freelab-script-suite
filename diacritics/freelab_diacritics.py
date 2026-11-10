@@ -796,12 +796,20 @@ class AnchorGlyph(object):
         self.checked = True
 
     def placed(self):
-        """{name: (x, y)} of every anchor it will have: its own, and those to add, as moved by hand."""
-        found = dict(self.existing)
-        for name, (x, y) in self.anchors.items():
+        """{name: (x, y)} of every anchor it will have: its own and those to add, as moved by hand."""
+        found = {}
+        for name, (x, y) in list(self.existing.items()) + list(self.anchors.items()):
             dx, dy = self.adjust.get(name, (0, 0))
             found[name] = (round(x + dx), round(y + dy))
         return found
+
+    def moved(self):
+        """The names of the anchors it has that were moved by hand (to move when written)."""
+        return sorted(name for name in self.existing if name not in self.anchors and name in self.adjust)
+
+    def pending(self):
+        """Whether writing it would change the font: anchors to add, or its own moved."""
+        return bool(self.anchors) or bool(self.moved())
 
 
 MIN_ROW_FONTS = 3  # a script's anchor medians from fewer fonts than this give way to Latin's
@@ -1941,7 +1949,7 @@ class AnchorPage(object):
         self.tree.setColumnCount(len(self.COLUMNS))
         self.tree.setHeaderLabels(list(self.COLUMNS))
         self.tree.setIconSize(QtCore.QSize(ICON_SIZE, ICON_SIZE))
-        self.tree.viewport().setProperty(ak.LEAVE_ALONE_PROP, True)
+        self.tree.setProperty(ak.LEAVE_ALONE_PROP, True)
         ak.grid_lines(self.tree)
         self.tree.setWhatsThis(u"The script's bases (top and bottom anchors) and marks (the anchor each attaches by, "
                                u"and the one the next mark attaches to). Anchors a glyph has already are kept. "
@@ -2187,7 +2195,7 @@ class AnchorPage(object):
                 item = QtGui.QTreeWidgetItem([unichr_(g.code) if g.code else u"", g.name, u"", u""])
                 item.setData(0, QtCore.Qt.UserRole, index)
                 item.setFont(0, bold)
-                if g.anchors or g.role == "rule":
+                if g.anchors or g.existing or g.role == "rule":  # (its own anchors can be moved and written)
                     item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsUserCheckable)
                     item.setCheckState(0, QtCore.Qt.Checked if g.checked else QtCore.Qt.Unchecked)
                 else:
@@ -2210,7 +2218,8 @@ class AnchorPage(object):
             if icon is not None:
                 item.setIcon(0, QtGui.QIcon(icon))
             return
-        item.setText(2, u", ".join(u"%s %d %d" % (name, placed[name][0], placed[name][1]) for name in sorted(g.anchors)))
+        item.setText(2, u", ".join([u"%s %d %d" % (name, placed[name][0], placed[name][1]) for name in sorted(g.anchors)] +
+                                   [u"%s moved to %d %d" % (name, placed[name][0], placed[name][1]) for name in g.moved()]))
         notes = []
         if g.role == "ligature":
             notes.append(u"joins %d letters" % max(g.parts, 2))
@@ -2286,7 +2295,7 @@ class AnchorPage(object):
         checkable = [g for g in self.glyphs if g.anchors]
         ak.enable(self.all_button, any(not g.checked for g in checkable))
         ak.enable(self.none_button, any(g.checked for g in checkable))
-        ak.enable(self.write_button, any(g.checked for g in checkable))
+        ak.enable(self.write_button, any(g.checked and g.pending() for g in self.glyphs))
         ak.enable(self.restore_button, any(g.adjust or self.first_checks.get(g.name, g.checked) != g.checked
                                            for g in self.glyphs))
         g = self.selected()
@@ -2466,11 +2475,19 @@ class AnchorPage(object):
         pass
 
     def reset_anchors(self):
+        """The selected glyph's anchors back where they were placed (or are), its row and the editor too."""
+        QtCore, QtGui = _qt()
         g = self.selected()
         if g is None:
             return
         g.adjust = {}
-        self.fill()
+        for item in self.items():
+            index = int(item.data(0, QtCore.Qt.UserRole))
+            if 0 <= index < len(self.glyphs) and self.glyphs[index] is g:
+                self.tree.blockSignals(True)
+                self.refresh_item(item, g)
+                self.tree.blockSignals(False)
+        self.select()  # the editor drawn again (the list's refill alone left the mark where it was dragged)
         self.update_buttons()
 
     def show_in_glyph_window(self):
@@ -2494,7 +2511,7 @@ class AnchorPage(object):
             self.run()
             self.owner.log.add(u"The font changed: here is this one's list. Nothing was added.", "warning")
             return
-        chosen = dict((g.name, g) for g in self.glyphs if g.checked and g.anchors)
+        chosen = dict((g.name, g) for g in self.glyphs if g.checked and g.pending())
         if not chosen and not any(g.checked for g in self.glyphs if g.role == "rule"):
             return
         new_texts = mark_texts(self.glyphs, self.texts) if self.code_box.checked else {}
@@ -2510,7 +2527,7 @@ class AnchorPage(object):
                 if problem:
                     self.owner.log.add(u"The mark code has problems, so nothing was written: %s" % self.ak.html(problem), "error")
                     return
-        added, touched, error = 0, [], None
+        added, moved, touched, error = 0, 0, [], None
         try:
             for master in list(package.masters) or [self.master]:
                 planned = dict((g.name, g) for g in self.plan_for(master)[0])
@@ -2531,6 +2548,13 @@ class AnchorPage(object):
                         pin.name = anchor_name
                         layer.addAnchor(pin)
                         added += 1
+                    for anchor_name in here.moved():  # its own anchors moved by hand (flPinPoint.point, proven)
+                        anchor = layer.findAnchor(anchor_name)
+                        if anchor is None:
+                            continue
+                        x, y = here.placed()[anchor_name]
+                        anchor.point = QtCore.QPointF(float(x), float(y))
+                        moved += 1
                     if glyph not in touched:
                         touched.append(glyph)
             features = package.fgPackage.features
@@ -2540,10 +2564,11 @@ class AnchorPage(object):
         except Exception as exc:
             error = exc
         self.ak.notify_changed(self.fontlab, package, u"FreeLab Diacritics anchors", touched)
-        self.owner.log.add(u"Added %s to %s%s. Edit &gt; Undo takes it back." % (
-            self.ak.b(counted(added, u"anchor")), self.ak.b(counted(len(touched), u"glyph")),
+        self.owner.log.add(u"Added %s%s to %s%s. Edit &gt; Undo takes it back." % (
+            self.ak.b(counted(added, u"anchor")), (u" and moved %s" % self.ak.b(moved)) if moved else u"",
+            self.ak.b(counted(len(touched), u"glyph")),
             u", and wrote the %s code" % u", ".join(t for t in CODE_FEATURES if t in new_texts) if new_texts else u""),
-            "done" if added or new_texts else "info")
+            "done" if added or moved or new_texts else "info")
         if error is not None:
             self.owner.log.add(u"Stopped by an error: %s" % self.ak.html(error), "error")
         self.run(keep_script=True)
@@ -2597,7 +2622,7 @@ class AccentsDialog(object):
         self.tree.setColumnCount(len(self.COLUMNS))
         self.tree.setHeaderLabels(list(self.COLUMNS))
         self.tree.setIconSize(QtCore.QSize(ICON_SIZE, ICON_SIZE))
-        self.tree.viewport().setProperty(ak.LEAVE_ALONE_PROP, True)  # its pictures are drawn in the dialog's colors
+        self.tree.setProperty(ak.LEAVE_ALONE_PROP, True)  # its pictures are drawn in the dialog's colors
         ak.grid_lines(self.tree)
         self.tree.setWhatsThis(u"The letters with diacritics this font lacks: those that can be built (checked ones "
                                u"are built), and, at the end, those that need a mark the font does not have. "

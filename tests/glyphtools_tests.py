@@ -175,6 +175,16 @@ class AnchorTests(unittest.TestCase):
                                           "mark_to_mark": 0.01, "fonts": 119}},
              "bases": {"thai": ["0E01", "0E02"], "latin": ["00E4", "0142"]}}
 
+    def test_own_anchors_move_by_hand(self):
+        g = ac.AnchorGlyph("a", 0x61, "base", None, existing={"top": (250, 600)})
+        g.anchors = {"bottom": (250, 0)}
+        self.assertFalse(g.moved())
+        g.adjust = {"top": [10, -5], "bottom": [3, 0]}
+        self.assertEqual(g.placed(), {"top": (260, 595), "bottom": (253, 0)})
+        self.assertEqual(g.moved(), ["top"], "its own anchor, moved, is written as a move; bottom is added")
+        g.anchors = {}
+        self.assertTrue(g.pending(), "nothing to add, one to move")
+
     def plan(self):
         glyphs = [("ko", 0xE01, "base", ac.Ink(50, 0, 550, 500, top_center=300, bottom_center=300), {}),
                   ("maiek", 0xE48, "mark", ac.Ink(-200, 600, -100, 700), {}),

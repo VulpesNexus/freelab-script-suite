@@ -355,7 +355,8 @@ def _freelab_tools_startup():
     try:
         tools = _freelab_tools_load("freelab_auto_kerning", $kernPath)
         if tools is not None:
-            tools.hook_menu_order()  # Scripts > FreeLab in working order, with separators
+            # Scripts > FreeLab in working order, with separators (once FontLab has built the menu)
+            getattr(tools, "hook_menu_order_soon", tools.hook_menu_order)()
     except Exception as exc:
         print("FreeLab menu at startup: %s" % (exc,))
 try:

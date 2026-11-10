@@ -1234,10 +1234,49 @@ def hook_menu_order():
     return True
 
 
+MENU_HOOK_RETRY_MS = 500  # how often FreeLab's startup block looks again for the Scripts menu,
+MENU_HOOK_TRIES = 240  # and for how long (two minutes): at launch, FontLab runs it before its main window is built
+
+
+def menu_hooked():
+    """Whether the Scripts menu carries the current hook."""
+    QtCore, QtGui = _qt()
+    main = AutoKerningDialog.main_window()
+    if main is None:
+        return False
+    for menu in main.findChildren(QtGui.QMenu):
+        if menu.objectName == SCRIPTS_MENU:
+            try:
+                return int(menu.property(MENU_ORDER_PROP) or 0) >= MENU_HOOK_VERSION
+            except (TypeError, ValueError):
+                return False
+    return False
+
+
+def hook_menu_order_soon(tries=MENU_HOOK_TRIES):
+    """hook_menu_order, now or as soon as FontLab has built its Scripts menu (FreeLab's startup block
+    runs before the main window exists: the menu kept FontLab's alphabetical order until a FreeLab
+    script was opened)."""
+    QtCore, QtGui = _qt()
+    try:
+        hook_menu_order()
+        if menu_hooked() or tries <= 0:
+            return
+    except Exception:
+        pass
+    retry = lambda: hook_menu_order_soon(tries - 1)
+    # held, with this module: PythonQt drops a slot no Python object holds, and Python 2 empties a
+    # dropped module's globals (a FreeLab script loading auto kerning again replaces it in sys.modules)
+    sys._freelab_menu_retry = (retry, sys.modules.get(__name__))
+    QtCore.QTimer.singleShot(MENU_HOOK_RETRY_MS, retry)
+
+
 def plain_buttons(dialog):
     """No default button in a FreeLab dialog: Qt frames the default one in a light color dark mode
-    leaves light (and Enter in a field would click it)."""
+    leaves light (and Enter in a field would click it). Called as each dialog is built: its scroll
+    bars made flat too (flat_scroll_bars)."""
     QtCore, QtGui = _qt()
+    flat_scroll_bars(dialog)
     try:
         for button in dialog.findChildren(QtGui.QPushButton):
             button.setAutoDefault(False)
@@ -1307,6 +1346,35 @@ def status_label(text=u"", plain=False):
 
 
 DIALOG_SIZE = 1000  # pixels: each FreeLab window opens this wide and tall, or as near as the screen allows
+
+
+SCROLL_SHEET = (u"QScrollBar:vertical { background: transparent; width: 12px; margin: 0; } "
+                u"QScrollBar:horizontal { background: transparent; height: 12px; margin: 0; } "
+                u"QScrollBar::handle { background: rgba(128, 128, 128, 110); border-radius: 4px; margin: 2px; } "
+                u"QScrollBar::handle:vertical { min-height: 24px; } "
+                u"QScrollBar::handle:horizontal { min-width: 24px; } "
+                u"QScrollBar::handle:hover { background: rgba(128, 128, 128, 170); } "
+                u"QScrollBar::handle:pressed { background: rgba(128, 128, 128, 220); } "
+                u"QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; border: none; background: none; } "
+                u"QScrollBar::add-page, QScrollBar::sub-page { background: none; }")
+# FreeLab's scroll bars: flat, a mid gray at the strength of the lists' lines, over either palette.
+# Windows' own style draws its scroll bars light whatever the palette: left alone by dark mode (in
+# the lists whose pictures it must not map) its thumb came out hollow, and mapped it flickered as the
+# pointer passed over it (a hover repaints the bar alone).
+
+
+def flat_scroll_bars(dialog):
+    """SCROLL_SHEET on each scroll bar of a dialog's lists and text views, on the bars themselves: a
+    stylesheet on the dialog would reach its combo boxes and fields, which dark mode leaves to the
+    palette only when no stylesheet lies on them or around them."""
+    QtCore, QtGui = _qt()
+    try:
+        for view in dialog.findChildren(QtGui.QAbstractScrollArea):
+            for bar in (view.verticalScrollBar(), view.horizontalScrollBar()):
+                if bar is not None and (_property(bar, "styleSheet") or u"") != SCROLL_SHEET:
+                    bar.setStyleSheet(SCROLL_SHEET)
+    except Exception:
+        pass
 
 
 def size_dialog(dialog):

@@ -24,7 +24,7 @@ A glyph narrower than 90% of the em is proportional already and is left alone, a
 
 ## The dialog
 
-The list groups the glyphs by kind, each with its width, its palt trim, its width after, and its halt setting; checked glyphs are written. Under it, a sample (yours to type) is set as it is and with palt, in the font's glyphs. The log says what was written; *Restore suggestions* puts the checks back; double-click a glyph to see it in a Glyph window. The list is read again after an undo, a redo, or an edit in FontLab.
+The list groups the glyphs by kind, each with its width, its palt trim, its width after, and its halt setting; checked glyphs are written. Under it, a sample is set as it is and with palt, in the font's glyphs: Japanese, Korean, Simplified Chinese, or Traditional Chinese, the one the font covers best chosen as it is read, or text of your own. The log says what was written; *Restore suggestions* puts the checks back; double-click a glyph to see it in a Glyph window. The list is read again after an undo, a redo, or an edit in FontLab.
 
 ## Kana kerning, after palt
 
