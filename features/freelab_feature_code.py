@@ -349,7 +349,7 @@ code is kept.<br>
 set takes its next alternate (X.2, X.3, or X.alt1...), so repeated letters vary as handwriting does.
 The nearest earlier form decides; a space or punctuation ends the look back. Ligatures come first:
 where liga makes l_l of ll, the alternates take turns around it.<br><br>
-The code is made again as you change the choices. Click a ligature's feature to change it;
+The code is made again as you change the choices. Pick a ligature's feature in its box; drag between the parts to give one more room;
 double-click a ligature or a letter to see it in a Glyph window. <i>Restore suggestions</i> puts the
 choices back as they first came.<br><br>
 Click this help's ? button, then any control, for what it does."""
@@ -374,20 +374,27 @@ class FeatureCodeDialog(object):
         self.log = self.ak.Log()
         self.seen_history, self.first_choices, self.first_checks = None, [], []
 
-        layout.addWidget(self.heading(QtGui, u"Ligatures"))
+        # The three parts share the height in a splitter: drag between them to see more of one
+        self.splitter = QtGui.QSplitter(QtCore.Qt.Vertical)
+        self.splitter.setChildrenCollapsible(False)
+        self.splitter.setWhatsThis(u"Drag the space between two parts up or down to give one more room.")
+        layout.addWidget(self.splitter, 1)
+        part = self.part(QtGui, 2)
+        part.addWidget(self.heading(QtGui, u"Ligatures"))
         self.ligature_tree = QtGui.QTreeWidget()
         self.ligature_tree.setColumnCount(3)
         self.ligature_tree.setHeaderLabels(["Ligature", "Replaces", "Feature"])
         self.ligature_tree.setRootIsDecorated(False)
         self.ligature_tree.setIconSize(QtCore.QSize(ICON_SIZE, ICON_SIZE))
-        self.ligature_tree.setWhatsThis(u"Each ligature, what it replaces, and the feature it goes in (click it to "
+        self.ligature_tree.setWhatsThis(u"Each ligature, what it replaces, and the feature it goes in (pick it to "
                                         u"change it). Standard ligatures are on unless a user turns them off; "
                                         u"discretionary ones off unless turned on.")
-        self.ligature_tree.setProperty(self.ak.LEAVE_ALONE_PROP, True)  # its pictures are drawn in the dialog's colors
+        self.ligature_tree.viewport().setProperty(self.ak.LEAVE_ALONE_PROP, True)  # its pictures are drawn in the dialog's colors
         self.ak.grid_lines(self.ligature_tree)
-        layout.addWidget(self.ligature_tree, 2)
+        part.addWidget(self.ligature_tree, 1)
 
-        layout.addWidget(self.heading(QtGui, u"Alternates that take turns"))
+        part = self.part(QtGui, 1)
+        part.addWidget(self.heading(QtGui, u"Alternates that take turns"))
         row = QtGui.QHBoxLayout()
         row.addWidget(QtGui.QLabel("Look back over at most"))
         self.look_back = QtGui.QSpinBox()
@@ -398,7 +405,7 @@ class FeatureCodeDialog(object):
                                     u"the next alternate (0: only side by side).")
         row.addWidget(self.look_back)
         row.addStretch(1)
-        layout.addLayout(row)
+        part.addLayout(row)
         self.alternate_tree = QtGui.QTreeWidget()
         self.alternate_tree.setColumnCount(3)
         self.alternate_tree.setHeaderLabels(["Letter", "Cycle", "Note"])
@@ -406,16 +413,17 @@ class FeatureCodeDialog(object):
         self.alternate_tree.setIconSize(QtCore.QSize(ICON_SIZE * 3, ICON_SIZE))
         self.alternate_tree.setWhatsThis(u"The letters with alternates (named X.2, X.alt1, or X.calt1), and their "
                                          u"cycle: the forms they take in turn. Checked letters take turns.")
-        self.alternate_tree.setProperty(self.ak.LEAVE_ALONE_PROP, True)
+        self.alternate_tree.viewport().setProperty(self.ak.LEAVE_ALONE_PROP, True)
         self.ak.grid_lines(self.alternate_tree)
-        layout.addWidget(self.alternate_tree, 1)
+        part.addWidget(self.alternate_tree, 1)
 
-        layout.addWidget(self.heading(QtGui, u"The code"))
+        part = self.part(QtGui, 2)
+        part.addWidget(self.heading(QtGui, u"The code"))
         self.code = QtGui.QPlainTextEdit()
         self.code.setReadOnly(True)
         self.code.setWhatsThis(u"The code to be written, feature by feature: FreeLab's blocks between their "
                                u"marker lines, the rest of each feature as it is.")
-        layout.addWidget(self.code, 2)
+        part.addWidget(self.code, 1)
 
         layout.addWidget(self.log.widget)
         buttons = QtGui.QHBoxLayout()
@@ -434,11 +442,11 @@ class FeatureCodeDialog(object):
         self.write_button.connect("clicked()", self.write)
         self.close_button.connect("clicked()", dialog.close)
         self.look_back.connect("valueChanged(int)", lambda value: self.make_code())
-        self.ligature_tree.connect("itemClicked(QTreeWidgetItem*,int)", self.feature_clicked)
         self.ligature_tree.connect("itemDoubleClicked(QTreeWidgetItem*,int)", self.double_clicked)
         self.alternate_tree.connect("itemDoubleClicked(QTreeWidgetItem*,int)", self.double_clicked)
         self.alternate_tree.connect("itemChanged(QTreeWidgetItem*,int)", lambda item, column: self.make_code())
         self.package = None
+        self.combos = []  # each ligature's feature box, by its index in found (held: PythonQt deletes what Python does not)
         self.names, self.letters, self.found, self.sets = [], [], [], {}
         self.texts, self.prefix = {}, u""
         self.ligature_model = load_ligature_model()
@@ -489,7 +497,8 @@ class FeatureCodeDialog(object):
     def run(self):
         QtCore, QtGui = _qt()
         package = self.package = self.current_font()
-        self.ligature_tree.clear()
+        self.ligature_tree.clear()  # (its boxes go with its rows)
+        self.combos = []
         self.alternate_tree.clear()
         self.write_button.setEnabled(False)
         self.restore_button.setEnabled(False)
@@ -529,8 +538,15 @@ class FeatureCodeDialog(object):
             if icon is not None:
                 item.setIcon(0, QtGui.QIcon(icon))
             item.setToolTip(1, u"Now: %s." % (dict(CHOICES)[lig.now] if lig.now else u"in no feature"))
-            item.setToolTip(2, u"Click to choose its feature. First set by %s." % (lig.why or u"default"))
+            item.setToolTip(2, u"Its feature. First set by %s." % (lig.why or u"default"))
             self.ligature_tree.addTopLevelItem(item)
+            combo = self.ak.flat_combo(QtGui.QComboBox())
+            for _, label in CHOICES:
+                combo.addItem(label)
+            combo.setToolTip(u"Its feature. First set by %s." % (lig.why or u"default"))
+            combo.connect("currentIndexChanged(int)", lambda choice, lig=lig: self.choose(lig, choice))
+            self.ligature_tree.setItemWidget(item, 2, combo)
+            self.combos.append(combo)
             self.show_choice(item, lig)
         self.first_choices = [lig.choice for lig in self.found]
         self.ligature_tree.blockSignals(False)
@@ -558,34 +574,32 @@ class FeatureCodeDialog(object):
         self.make_code()
         self.seen_history = self.ak.history_mark(package)
 
-    @staticmethod
-    def show_choice(item, lig):
-        item.setText(2, u"%s  \N{BLACK DOWN-POINTING SMALL TRIANGLE}" % dict(CHOICES)[lig.choice])
+    def part(self, QtGui, stretch):
+        """A part of the splitter: its layout, to fill (stretch: its share of the height at first)."""
+        widget = QtGui.QWidget()
+        box = QtGui.QVBoxLayout(widget)
+        box.setContentsMargins(0, 0, 0, 0)
+        self.splitter.addWidget(widget)
+        self.splitter.setStretchFactor(self.splitter.count - 1, stretch)
+        return box
 
-    def feature_clicked(self, item, column):
-        """A ligature's feature clicked: a menu of the three, its own checked."""
+    def show_choice(self, item, lig):
+        """A ligature's feature shown in its row's box (signals held: showing it is no choice)."""
         QtCore, QtGui = _qt()
-        if column != 2:
-            return
         index = int(item.data(0, QtCore.Qt.UserRole))
-        lig = self.found[index]
-        menu = QtGui.QMenu(self.dialog)
-        actions = []
-        for key, label in CHOICES:
-            action = menu.addAction(label)
-            action.setCheckable(True)
-            action.setChecked(key == lig.choice)
-            actions.append((action, key))
-        rect = self.ligature_tree.visualItemRect(item)
-        left = self.ligature_tree.header().sectionPosition(2)
-        where = self.ligature_tree.viewport().mapToGlobal(QtCore.QPoint(left, rect.bottom()))
-        picked = menu.exec_(where)
-        for action, key in actions:
-            if picked is not None and action.text == picked.text and key != lig.choice:
-                lig.choice = key
-                self.show_choice(item, lig)
-                self.make_code()
-                break
+        if not 0 <= index < len(self.combos):
+            return
+        combo = self.combos[index]
+        combo.blockSignals(True)
+        combo.setCurrentIndex([key for key, _ in CHOICES].index(lig.choice))
+        combo.blockSignals(False)
+
+    def choose(self, lig, choice):
+        """A ligature's feature chosen in its box."""
+        key = CHOICES[choice][0]
+        if key != lig.choice:
+            lig.choice = key
+            self.make_code()
 
     def alternate_checks(self):
         QtCore, QtGui = _qt()

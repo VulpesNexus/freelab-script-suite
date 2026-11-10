@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 105
+#define FREELAB_PIXELS_VERSION 106
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -513,6 +513,7 @@ EXPORT void freelab_map_keyed(uint8_t *pixels, int64_t count, int64_t width, con
 #define ANCHORS_RELIGHT 2 /* back to light: a dark main paper turns white, light gray text black, the rest stays */
 #define ANCHORS_ICON 3 /* as ANCHORS_ALL, but colored parts of middle lightness (blue guides, green fills) stay */
 #define ANCHORS_SUBPIXEL_SYNTAX 5 /* as ANCHORS_SUBPIXEL, for an editor on light paper: colored syntax, never black assumed */
+#define ANCHORS_INK_LIST 6 /* as ANCHORS_INK, for a list's rows: drawn on nothing, its gray sub-items and glyph icons are ink too */
 #define ANCHORS_SUBPIXEL 4 /* as ANCHORS_ALL, for ClearType text drawn on purpose (TrueType Hinting's preview):
                               each channel's coverage between the paper and the text is kept */
 #define ICON_KEEP_CHROMA 0.08
@@ -523,6 +524,20 @@ EXPORT void freelab_map_keyed(uint8_t *pixels, int64_t count, int64_t width, con
 #define DIM_INK_ABOVE_MAIN 0.08
 #define DIM_INK_MAX_OKL 0.58
 #define DIM_INK_LIFT 0.35
+#define DIM_INK_MAX_OKL_BARE 0.66 /* on nothing (a list painting no background), gray drawn for a light ground: sub-items */
+/* Glyph icons drawn on nothing, for a light ground (the font window's sidebar): FontLab draws them dark
+ * gray, solid enough to pass for surfaces, and its badges as dark tiles behind white letters, in the
+ * same colors. Each connected shape decides: none lighter than GLYPH_ICON_LIGHT_HLS inside its box, an
+ * icon, mapped as ink; light text inside, a badge, drawn as it is (a black badge mapped light lost its
+ * white letter). */
+#define GLYPH_ICON_MAX_OKL 0.5
+#define GLYPH_ICON_MAX_SIDE 48 /* pixels: a shape this large both ways (or four times as long) is a panel */
+#define GLYPH_ICON_LIGHT_HLS 0.8
+#define GLYPH_BADGE_MIN_LIGHT 4 /* light pixels in a shape's box: a badge's letters, */
+#define GLYPH_BADGE_LIGHT_SHARE 0.04 /* as a share of the shape's own pixels */
+#define GLYPH_SOLID_SHARE 0.7 /* a shape filling this much of its box is a block, not a glyph */
+#define GLYPH_ICON_NEAR 4 /* per channel: a pixel of the shape's color (premultiplied rounding of translucent text) */
+#define GLYPH_ICON_GROW 24 /* per channel: the shape goes on through its blends with a translucent fill (a flag's tint) */
 #define RELIGHT_PAPER_OKL 0.35
 #define RELIGHT_TEXT_OKL 0.75
 #define RELIGHT_SPREAD 30
@@ -571,6 +586,10 @@ static uint32_t m_key[MEMO_SIZE], m_mask[MEMO_SIZE], m_val[MEMO_SIZE], m_gen[MEM
 static int8_t a_index[MAX_INDEXED];
 static uint8_t white_mark[MAX_INDEXED]; /* decided on the pixels as drawn: 1 a white mark kept, 2 a box edge (ink); 4 light text on a kept color (content);
                                          * 3 a ClearType fringe (content) */
+static uint8_t icon_px[MAX_INDEXED]; /* ink mode on nothing: 1 a glyph icon's pixel, mapped; 2 seen; 3 a badge's, kept */
+static int32_t icon_queue[MAX_INDEXED]; /* a shape's pixels, found in turn */
+static int last_paper_found; /* the last call found a main background */
+static int mode_list; /* set per call: a list's rows (ANCHORS_INK_LIST) */
 static uint32_t generation = 0;
 
 typedef struct {
@@ -1142,6 +1161,7 @@ static void find_anchors(const uint32_t *p, int64_t count, int64_t width, int mo
         paper_found = 1;
     } else
         share_of = (double)area;
+    last_paper_found = paper_found;
     if (mode == ANCHORS_RELIGHT && anchor_count > 2)
         drop_paper_blends();
     light_bits = 0;
@@ -1188,7 +1208,8 @@ static void find_anchors(const uint32_t *p, int64_t count, int64_t width, int mo
                                || ((double)a->beside_light < FRINGE_SHARE * (double)a->count && !smoothing_of_readable(j)))))) {
             out = mapped_one(rgb, dark_l, light_l, a->chroma >= INK_CHROMA ? 1.0 : 0.0);
             a->mapped = 1;
-        } else if (!a->surface && !a->long_line && a->chroma < INK_CHROMA && a->okl < DIM_INK_MAX_OKL
+        } else if (!a->surface && !a->long_line && a->chroma < INK_CHROMA
+                   && a->okl < (paper_found || !mode_list ? DIM_INK_MAX_OKL : DIM_INK_MAX_OKL_BARE)
                    && a->okl >= main_l + (paper_found ? DIM_INK_ABOVE_MAIN : -INK_BELOW_MAIN)
                    && (double)a->count < BACKGROUND_SHARE * (double)total
                    && (!paper_found || !fringe_of_lighter_color(j))) { /* (that test reads anchor 0 as the paper) */
@@ -1906,18 +1927,134 @@ static int beside_gray_text(const uint32_t *p, int64_t i, int64_t width, int64_t
     return 0;
 }
 
+static int near_rgb(uint32_t a, uint32_t b, int tolerance)
+{
+    int k;
+    for (k = 0; k < 24; k += 8) {
+        int d = (int)((a >> k) & 255) - (int)((b >> k) & 255);
+        if (d > tolerance || d < -tolerance)
+            return 0;
+    }
+    return 1;
+}
+
+/* A pixel of a light surface the mapping turns dark (a selected row): no letter of a badge. */
+static int light_row_pixel(int64_t at)
+{
+    return a_index[at] >= 0 && anchors[a_index[at]].mapped && light_surface_candidate(&anchors[a_index[at]]);
+}
+
+/* A dark, low-color anchor whose shapes decide one by one (see GLYPH_ICON_MAX_OKL). */
+static int glyph_icon_anchor(const Anchor *a, int64_t area)
+{
+    return !a->long_line && a->chroma < INK_CHROMA && a->okl < GLYPH_ICON_MAX_OKL
+           && (double)a->count < BACKGROUND_SHARE * (double)area;
+}
+
+/* Fills icon_px for an image painted on nothing (ink mode, no main background, a_index made): the
+ * pixels of each connected shape of a dark gray anchor, translucent edges included, 1 for an icon
+ * (mapped as ink), 3 for a badge (kept as drawn); returns whether any shape was found. */
+static int find_glyph_icons(const uint32_t *p, int64_t count, int64_t width)
+{
+    int64_t i, rows = count / width;
+    int32_t *queue = icon_queue;
+    int j, found = 0, which[MAX_ANCHORS];
+    uint32_t colors[MAX_ANCHORS];
+    for (j = 0; j < anchor_count; j++) {
+        if (glyph_icon_anchor(&anchors[j], count)) {
+            which[found] = j;
+            colors[found++] = pack(anchors[j].r, anchors[j].g, anchors[j].b);
+        }
+    }
+    if (!found)
+        return 0;
+    for (i = 0; i < count; i++)
+        icon_px[i] = 0;
+    for (i = 0; i < count; i++) {
+        int64_t head = 0, tail = 0, k, x0, x1, y0, y1, x, y, light = 0;
+        uint32_t rgb = 0;
+        const Anchor *a = NULL;
+        int verdict;
+        if (icon_px[i] || (p[i] >> 24) == 0)
+            continue;
+        for (j = 0; j < found && a == NULL; j++) { /* (gray text drawn translucent: none of its pixels is the anchor itself) */
+            if (near_rgb(p[i], colors[j], GLYPH_ICON_NEAR)) {
+                a = &anchors[which[j]];
+                rgb = colors[j];
+            }
+        }
+        if (a == NULL)
+            continue;
+        icon_px[i] = 2;
+        queue[tail++] = (int32_t)i;
+        x0 = x1 = i % width;
+        y0 = y1 = i / width;
+        while (head < tail) {
+            int64_t q = queue[head++], qx = q % width, qy = q / width, n[4];
+            int d;
+            if (qx < x0) x0 = qx;
+            if (qx > x1) x1 = qx;
+            if (qy < y0) y0 = qy;
+            if (qy > y1) y1 = qy;
+            n[0] = qx > 0 ? q - 1 : -1;
+            n[1] = qx + 1 < width ? q + 1 : -1;
+            n[2] = qy > 0 ? q - width : -1;
+            n[3] = qy + 1 < rows ? q + width : -1;
+            for (d = 0; d < 4; d++) {
+                int64_t m = n[d];
+                if (m >= 0 && !icon_px[m] && (p[m] >> 24) > 0 && near_rgb(p[m], rgb, GLYPH_ICON_GROW)) {
+                    icon_px[m] = 2;
+                    queue[tail++] = (int32_t)m;
+                }
+            }
+        }
+        if ((x1 - x0 >= GLYPH_ICON_MAX_SIDE && y1 - y0 >= GLYPH_ICON_MAX_SIDE) || x1 - x0 >= 4 * GLYPH_ICON_MAX_SIDE
+            || y1 - y0 >= 4 * GLYPH_ICON_MAX_SIDE)
+            continue; /* a panel: as the anchor decided (a word, joined through its smoothing, is long but low) */
+        for (y = y0; y <= y1; y++) {
+            for (x = x0; x <= x1; x++) {
+                int64_t at = y * width + x;
+                uint32_t v = p[at];
+                if ((v >> 24) >= ANCHOR_MIN_ALPHA && !light_row_pixel(at)
+                    && lightness((uint8_t)(v >> 16), (uint8_t)(v >> 8), (uint8_t)v) >= GLYPH_ICON_LIGHT_HLS)
+                    light++;
+            }
+        }
+        /* light letters on it: a badge; a light pixel or two (a tag's hole): an icon */
+        if (light >= GLYPH_BADGE_MIN_LIGHT && (double)light >= GLYPH_BADGE_LIGHT_SHARE * (double)tail) {
+            verdict = 3;
+            for (y = y0; y <= y1; y++) { /* its letters and their smoothing too, as drawn */
+                for (x = x0; x <= x1; x++) {
+                    int64_t at = y * width + x;
+                    if (!icon_px[at] && (p[at] >> 24) > 0 && !light_row_pixel(at))
+                        icon_px[at] = 3;
+                }
+            }
+        } else if ((double)tail >= GLYPH_SOLID_SHARE * (double)((x1 - x0 + 1) * (y1 - y0 + 1)) && x1 - x0 >= 5 && y1 - y0 >= 5)
+            verdict = 2; /* a filled block (a selected row's dark branch cell): as the anchor decided */
+        else
+            verdict = a->mapped ? 2 : 1; /* dark text already mapped as ink stays so */
+        for (k = 0; k < tail; k++)
+            icon_px[queue[k]] = (uint8_t)verdict;
+    }
+    return 1;
+}
+
 EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width, int mode, double dark_l,
                                    double light_l, double keep_tint, double main_default, int apply)
 {
     uint32_t *p = (uint32_t *)pixels;
     uint32_t last_in = 0, last_out = 0;
-    int have_last = 0, any_mapped = 0, j, local, tinted, last_edge = 0;
+    int have_last = 0, any_mapped = 0, j, local, tinted, last_edge = 0, glyph_icons = 0;
     uint32_t paper_bit, other_surfaces, other_surface_bits;
     int white_marks = 0, fringes = 0, bands = 0;
     uint32_t left_orig = 0;
     double paper_hls;
     int64_t i, changed = 0;
     mode_icon_fallback = mode == ANCHORS_SUBPIXEL_SYNTAX;
+    mode_list = mode == ANCHORS_INK_LIST;
+    if (mode_list)
+        mode = ANCHORS_INK;
     if (mode_icon_fallback)
         mode = ANCHORS_SUBPIXEL;
     find_anchors(p, count, width, mode, dark_l, light_l, keep_tint, main_default);
@@ -1978,6 +2115,7 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
     local = (mode == ANCHORS_INK || mode == ANCHORS_RELIGHT || mode == ANCHORS_SUBPIXEL) && width > 0 && count <= MAX_INDEXED;
     if (local)
         index_pixels(p, count);
+    glyph_icons = local && mode_list && !last_paper_found && find_glyph_icons(p, count, width);
     tinted = (mode == ANCHORS_ALL || mode == ANCHORS_ICON) && keep_tint > 0.0 && width > 0;
     /* Text smoothing lies between the paper and the text, even where the pixels around are all
      * fringes (ClearType's navy and red beside blue syntax on a dark editor): the kept paper always
@@ -1996,6 +2134,16 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
         left_orig = v; /* as drawn, before this pixel is mapped */
         if (alpha == 0)
             continue;
+        if (glyph_icons && (icon_px[i] == 1 || icon_px[i] == 3)) {
+            out = icon_px[i] == 1 ? (mapped_one(v & 0xffffffU, dark_l, light_l, 0.0) | (v & 0xff000000U)) : v;
+            have_last = 0;
+            if (out != v) {
+                changed++;
+                if (apply)
+                    p[i] = out;
+            }
+            continue;
+        }
         if (white_marks && white_mark[i] == 1) { /* the mark and its smoothing toward the box */
             have_last = 0;
             continue;
@@ -2091,6 +2239,14 @@ EXPORT void freelab_last_marks(uint8_t *out, int64_t count)
     int64_t i;
     for (i = 0; i < count && i < MAX_INDEXED; i++)
         out[i] = white_mark[i];
+}
+
+/* Diagnostics: each pixel's shape verdict of the last call (see icon_px; 0 when that pass did not run). */
+EXPORT void freelab_last_icons(uint8_t *out, int64_t count)
+{
+    int64_t i;
+    for (i = 0; i < count && i < MAX_INDEXED; i++)
+        out[i] = icon_px[i];
 }
 
 /* Diagnostics: the candidates of the last call before blends were dropped: 0xRRGGBB, and per

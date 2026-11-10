@@ -956,7 +956,7 @@ MENU_GROUPS = (("Diacritics", "Auto Spacing", "CJK Spacing", "Auto Kerning", "Ke
                ("Start MCP Listener", "Stop MCP Listener", "Start Listener", "Stop Listener"))  # (FreeLab MCP's, old names too)
 MENU_TITLE, SCRIPTS_MENU = "FreeLab", "menuScripts"
 MENU_ORDER_PROP = "freelab_menu_order"
-MENU_HOOK_VERSION = 2  # the Scripts menu's property holds it: an older hook found there is replaced
+MENU_HOOK_VERSION = 3  # the Scripts menu's property holds it: an older hook found there is replaced
 
 
 def menu_order(texts, groups=MENU_GROUPS):
@@ -1020,16 +1020,31 @@ def hook_menu_order():
         return False
     holder = [sys.modules.get(__name__), arrange_menu]
 
+    def arrange_latest(submenu):
+        latest = sys.modules.get(__name__)
+        (getattr(latest, "arrange_menu", None) or holder[1])(submenu)
+
     def shown():
         try:
-            latest = sys.modules.get(__name__)
-            arrange = getattr(latest, "arrange_menu", None) or holder[1]
             for action in scripts.actions():
                 submenu = action.menu()
                 if submenu is not None and action.text.replace(u"&", u"") == MENU_TITLE:
-                    arrange(submenu)
+                    arrange_latest(submenu)
+                    # FontLab may fill the submenu again after this (Refresh Scripts builds it anew, its
+                    # actions added as it opens): arranged again as the submenu itself opens
+                    if not submenu.property(MENU_ORDER_PROP):
+                        slot = lambda menu=submenu: submenu_shown(menu)
+                        holder.append(slot)  # (held: PythonQt drops a slot no Python object holds)
+                        submenu.connect("aboutToShow()", slot)
+                        submenu.setProperty(MENU_ORDER_PROP, MENU_HOOK_VERSION)
         except Exception:
             pass  # a signal handler must not raise
+
+    def submenu_shown(menu):
+        try:
+            arrange_latest(menu)
+        except Exception:
+            pass
 
     scripts.connect("aboutToShow()", shown)
     scripts.setProperty(MENU_ORDER_PROP, MENU_HOOK_VERSION)
@@ -1063,6 +1078,11 @@ def html(text):
 def b(value):
     """A value in bold, in a status line."""
     return u"<b>%s</b>" % html(value)
+
+
+def counted(number, one, many=None):
+    """"1 pair", "2 pairs": a count with its noun in the right number."""
+    return u"%d %s" % (number, one if number == 1 else (many or one + u"s"))
 
 
 def i(name):
@@ -1130,16 +1150,20 @@ def room_below(window):
         return 0
 
 
+SECTION_LINES = 1.7  # a section heading row's height, in lines
+
+
 def section_row(item, tree):
-    """A list's row heading a section: bold, with room above it."""
+    """A list's row heading a section: bold, a little taller, its text level with its arrow and check
+    box (set at the bottom of a taller row, it sat below them, on the next row's line)."""
     QtCore, QtGui = _qt()
     try:
         bold = QtGui.QFont(tree.font)
         bold.setBold(True)
         item.setFont(0, bold)
         line = QtGui.QFontMetrics(bold).height()
-        item.setSizeHint(0, QtCore.QSize(0, int(line * 2.1)))
-        item.setTextAlignment(0, int(QtCore.Qt.AlignLeft | QtCore.Qt.AlignBottom))
+        item.setSizeHint(0, QtCore.QSize(0, int(line * SECTION_LINES)))
+        item.setTextAlignment(0, int(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter))
     except Exception:
         pass
     return item
@@ -1378,6 +1402,117 @@ class ClickRegions(object):
             if x0 <= x < x1:
                 return key
         return None
+
+
+PAIR_PREVIEW_EM = 120  # pixels per em in the pair previews of Kerning Check and Kerning Classes
+PAIR_ALPHA = 185  # each glyph of a previewed pair this opaque: where they overlap, the ink is denser
+ADJUST_ROOM = 0.5  # of the em: room right of an adjustable preview's pair, for dragging its right glyph apart
+ADJUST_SHIFT_STEP = 10  # units per Left or Right press with Shift held (1 without)
+
+
+def pair_pixmap(package, master, left, right, value, caption, color, font, room=False, width=None):
+    """A glyph pair at a kerning value, both glyphs see-through in color (where their ink overlaps it
+    is denser), its caption under it in font; an empty pixmap when a glyph is missing. room: space at
+    the right to drag the right glyph into; width: the picture's width (kept while one is dragged)."""
+    QtCore, QtGui = _qt()
+    layers = []
+    for name in (left, right):
+        glyph = package.findName(name)
+        layer = glyph.getLayerByName(master) if glyph is not None and not glyph.isNull else None
+        if layer is None:
+            return QtGui.QPixmap()
+        layers.append((layer, layer_path(layer)))
+    em = PAIR_PREVIEW_EM
+    scale = float(em) / float(package.upm)
+    margin = em // 4
+    if width is None:
+        width = int((layers[0][0].advanceWidth + max(0, layers[1][0].advanceWidth + value)) * scale) + 2 * margin
+        if room:
+            width += int(em * ADJUST_ROOM)
+    line = QtGui.QFontMetrics(font).height()
+    height = int(em * 1.35) + line
+    pixmap = QtGui.QPixmap(max(width, 2 * margin), height)
+    pixmap.fill(QtGui.QColor(0, 0, 0, 0))
+    ink = QtGui.QColor(color)
+    ink.setAlpha(PAIR_ALPHA)
+    painter = QtGui.QPainter(pixmap)
+    try:  # ended before anything else can fail: a painter left open on a freed pixmap aborts FontLab
+        painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        painter.setFont(font)
+        x = float(margin)
+        for index, (layer, path) in enumerate(layers):
+            painter.save()
+            painter.translate(x, em * 1.05)
+            painter.scale(scale, -scale)
+            painter.fillPath(path, QtGui.QBrush(ink))
+            painter.restore()
+            x += (layer.advanceWidth + (value if index == 0 else 0)) * scale
+        painter.setPen(color)
+        painter.drawText(QtCore.QRect(0, height - line, pixmap.width(), line), int(QtCore.Qt.AlignCenter), caption)
+    finally:
+        painter.end()
+    return pixmap
+
+
+class PairDrag(object):
+    """A pair preview whose right glyph is dragged left or right (only across: kerning) to adjust a
+    value, which follows as it moves; clicked, Left and Right nudge it (Shift: ADJUST_SHIFT_STEP
+    units), Up and Down step to the list's next or previous row. get() gives the value now (None: the
+    preview shows nothing adjustable), put(value) sets it, step(1 or -1) selects another row, and
+    scale() gives the preview's pixels per font unit."""
+
+    def __init__(self, label, get, put, step, scale):
+        QtCore, QtGui = _qt()
+        self.start = None
+        drag = self
+        label.setMouseTracking(True)
+        label.setFocusPolicy(QtCore.Qt.ClickFocus)
+        label.setToolTip(u"Drag the right glyph left or right to adjust; or click, then press Left or Right "
+                         u"(with Shift: %d units)" % ADJUST_SHIFT_STEP)
+
+        class Filter(QtCore.QTimer):  # PythonQt has no QObject to subclass; a timer will do
+            def eventFilter(self, obj, event):
+                try:
+                    kind = event.type()
+                    if kind == 2:  # MouseButtonPress
+                        value = get()
+                        drag.start = (event.pos().x(), value) if value is not None else None
+                        return False  # (the label still takes the focus, for the keys)
+                    if kind == 5:  # MouseMove
+                        if drag.start is not None:
+                            x, value = drag.start
+                            put(value + int(round((event.pos().x() - x) / scale())))
+                            return True
+                        obj.setCursor(QtCore.Qt.SizeHorCursor if get() is not None else QtCore.Qt.ArrowCursor)
+                    elif kind == 3:  # MouseButtonRelease
+                        drag.start = None
+                    elif kind == 6:  # KeyPress
+                        key = event.key()
+                        if key in (QtCore.Qt.Key_Up, QtCore.Qt.Key_Down):
+                            step(1 if key == QtCore.Qt.Key_Down else -1)
+                            return True
+                        value = get()
+                        if value is not None and key in (QtCore.Qt.Key_Left, QtCore.Qt.Key_Right):
+                            shift = int(event.modifiers()) & int(QtCore.Qt.ShiftModifier)
+                            by = ADJUST_SHIFT_STEP if shift else 1
+                            put(value + (by if key == QtCore.Qt.Key_Right else -by))
+                            return True
+                except Exception:
+                    pass  # an event filter must never raise
+                return False
+
+        self.filter = Filter()
+        label.installEventFilter(self.filter)
+
+
+def select_next_row(tree, step):
+    """The row below (step 1) or above (-1) a tree's current one made current."""
+    current = tree.currentItem()
+    if current is None:
+        return
+    other = tree.itemBelow(current) if step > 0 else tree.itemAbove(current)
+    if other is not None:
+        tree.setCurrentItem(other)
 
 
 # FontLab's flags (its Flag menu: the glyph's mark, a hue plus one; 0 for none), as the lists offer them
@@ -3186,11 +3321,14 @@ class ClassDialog(object):
         dialog.setWhatsThis(CLASS_HELP)
         size_dialog(dialog)
         layout = QtGui.QVBoxLayout(dialog)
-        self.status = status_label(plain=True)  # (its text names glyphs, which rich text could misread)
+        self.status = status_label()  # (names in it made safe by html())
+        self.status.setWordWrap(True)
         layout.addWidget(self.status)
+        layout.addWidget(separator())
         self.tree = QtGui.QTreeWidget()
         self.tree.setColumnCount(len(CLASS_COLUMNS))
         self.tree.setHeaderLabels(list(CLASS_COLUMNS))
+        grid_lines(self.tree)
         self.tree.setWhatsThis(u"Each class suggested for this master: checked ones are made (or extended) when you click "
                                u"Create checked classes. Gray ones are shown for reference and left as they are. "
                                u"<i>May need pairs of their own</i> names the members that need looser kerning than the "
@@ -3198,6 +3336,25 @@ class ClassDialog(object):
                                u"differ most: the class's value would bring them too close there, so check those pairs "
                                u"after kerning the class.")
         layout.addWidget(self.tree, 1)
+        previews = QtGui.QHBoxLayout()
+        self.previews = []
+        for _ in range(3):
+            label = QtGui.QLabel()
+            label.setProperty(LEAVE_ALONE_PROP, True)  # dark mode leaves the drawn pictures alone
+            label.setAlignment(QtCore.Qt.AlignCenter)
+            label.setMinimumHeight(int(PAIR_PREVIEW_EM * 1.7))
+            label.setWhatsThis(u"A pair too close with its class's value: as it is now, adjusted (the value of its "
+                               u"own it would be written with), and its base pair (the class's first glyph beside "
+                               u"the same partner). Drag the adjusted pair's right glyph left or right to change "
+                               u"that value.")
+            previews.addWidget(label, 1)
+            self.previews.append(label)
+        layout.addLayout(previews)
+        self.adjust_width = None
+        self.adjusting = PairDrag(self.previews[1], self.adjusted_value, self.set_exception_value,
+                                  lambda step: select_next_row(self.tree, step),
+                                  lambda: float(PAIR_PREVIEW_EM) / float(self.package.upm))
+        self.tree.connect("itemSelectionChanged()", self.update_previews)
         self.move = QtGui.QCheckBox("Move each new class's first glyph's pairs into the class.")
         self.move.setChecked(True)
         self.move.setWhatsThis(u"A new class made from A, \N{LATIN CAPITAL LETTER A WITH GRAVE}, ... takes over A's own pairs on "
@@ -3225,6 +3382,7 @@ class ClassDialog(object):
         self.exceptions_button.connect("clicked()", self.write_exceptions)
         self.close_button.connect("clicked()", dialog.close)
         self.plans, self.names, self.exceptions = [], {}, []
+        self.package = self.master = None
         plain_buttons(dialog)
 
     def show(self):
@@ -3253,7 +3411,7 @@ class ClassDialog(object):
             self.plans, self.names = font_class_suggestions(package, master)
             self.exceptions = noted_exceptions(FontKerning(package.kerning(master)), self.plans, self.names)
         except Exception as exc:
-            self.status.setText(u"%s" % exc)
+            self.status.setText(html(exc))
             return
         self.fill()
 
@@ -3314,14 +3472,77 @@ class ClassDialog(object):
         self.exceptions_button.setEnabled(bool(self.exceptions))
         for column in range(len(CLASS_COLUMNS) - 1):
             self.tree.resizeColumnToContents(column)
-        plural = lambda count, one, many: u"%d %s" % (count, one if count == 1 else many)
+        plural = lambda count, one, many: u"%s %s" % (b(count), one if count == 1 else many)
         self.status.setText(u"%s, master %s: %s, %s, %s, %s (they overlap its classes). Nothing is changed until you "
-                            u"create them." % (self.package.tfn, self.master,
+                            u"create them." % (b(self.package.tfn), b(self.master),
                                                plural(counts.get("new", 0), u"new class", u"new classes"),
                                                plural(counts.get("add", 0), u"class to extend", u"classes to extend"),
                                                plural(counts.get("same", 0), u"the font has already", u"the font has already"),
                                                plural(counts.get("overlap", 0), u"left as it is", u"left as they are")))
         self.apply_button.setEnabled(bool(counts.get("new") or counts.get("add")))
+        self.update_previews()
+
+    # -- the previews of a pair too close -----------------------------------
+
+    def selected_exception(self):
+        """The selected row's pair too close with its class's value, or None."""
+        QtCore, QtGui = _qt()
+        items = self.tree.selectedItems()
+        if not items or self.package is None:
+            return None
+        data = items[0].data(0, QtCore.Qt.UserRole)
+        index = int(data) - EXCEPTION_ROLE_BASE if data is not None else -1
+        return self.exceptions[index] if 0 <= index < len(self.exceptions) else None
+
+    def adjusted_value(self):
+        exception = self.selected_exception()
+        return exception.value if exception is not None else None
+
+    def picture(self, pair, value, caption, room=False, width=None):
+        QtCore, QtGui = _qt()
+        return pair_pixmap(self.package, self.master, pair[0], pair[1], value, caption,
+                           self.dialog.palette.color(QtGui.QPalette.WindowText), self.dialog.font, room, width)
+
+    def update_previews(self):
+        """The selected pair too close: now, adjusted, and its base pair (the class's first glyph)."""
+        shown = []
+        exception = self.selected_exception()
+        try:
+            if exception is not None:
+                plan = self.plans[exception.plan_index]
+                first = self.names.get(plan.members[0])
+                shown = [(exception.pair, exception.current, u"Now: %d" % exception.current, False),
+                         (exception.pair, exception.value, u"Adjusted: %d" % exception.value, True)]
+                if first:
+                    base = (first, exception.pair[1]) if plan.side == "first" else (exception.pair[0], first)
+                    shown.append((base, exception.current, u"Base pair: %d" % exception.current, False))
+        except Exception:
+            shown = []
+        self.adjust_width = None
+        for index, label in enumerate(self.previews):
+            if index < len(shown):
+                pair, value, caption, room = shown[index]
+                picture = self.picture(pair, value, caption, room)
+                if room:
+                    self.adjust_width = picture.width()  # kept while dragging: the left glyph stays put
+                label.setPixmap(picture)
+            else:
+                label.clear()
+
+    def set_exception_value(self, value):
+        """The selected pair's own value set by hand (never past 0, as suggested): drawn again, its row
+        shown and checked."""
+        QtCore, QtGui = _qt()
+        exception = self.selected_exception()
+        if exception is None or value == exception.value:
+            return
+        exception.value = value
+        self.previews[1].setPixmap(self.picture(exception.pair, value, u"Adjusted: %d" % value, width=self.adjust_width))
+        for item in self.items(exceptions=True):
+            if self.exceptions[int(item.data(0, QtCore.Qt.UserRole)) - EXCEPTION_ROLE_BASE] is exception:
+                item.setText(2, u"Its own value: %d \N{RIGHTWARDS ARROW} %d" % (exception.current, value))
+                item.setCheckState(0, QtCore.Qt.Checked)
+                break
 
     def items(self, exceptions=False):
         """The rows of suggested classes, or of pairs too close (exceptions True)."""
@@ -3362,7 +3583,7 @@ class ClassDialog(object):
         if stale:
             notes.append(u"%d pairs had changed since they were measured and were left as they are." % len(stale))
         if error is not None:
-            notes.append(u"Stopped by an error: %s" % error)
+            notes.append(u"Stopped by an error: %s" % html(error))
         notes.append(u"Writing goes straight into the open font: close it without saving to take it back.")
         self.status.setText(u" ".join(notes) + u" " + self.status.text)
 
@@ -3409,7 +3630,7 @@ class ClassDialog(object):
         if kept:
             notes.append(u"%d glyph pairs kept their own value as an exception." % kept)
         if error is not None:
-            notes.append(u"Stopped by an error: %s" % error)
+            notes.append(u"Stopped by an error: %s" % html(error))
         notes.append(u"Writing goes straight into the open font: close it without saving to take it back.")
         self.status.setText(u" ".join(notes) + u" " + self.status.text)
         if self.owner.package is not None and font_key(self.owner.package) == font_key(package):

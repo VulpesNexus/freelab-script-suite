@@ -1772,7 +1772,7 @@ class AnchorPage(object):
         self.tree.setColumnCount(len(self.COLUMNS))
         self.tree.setHeaderLabels(list(self.COLUMNS))
         self.tree.setIconSize(QtCore.QSize(ICON_SIZE, ICON_SIZE))
-        self.tree.setProperty(ak.LEAVE_ALONE_PROP, True)
+        self.tree.viewport().setProperty(ak.LEAVE_ALONE_PROP, True)
         ak.grid_lines(self.tree)
         self.tree.setWhatsThis(u"The script's bases (top and bottom anchors) and marks (the anchor each attaches by, "
                                u"and the one the next mark attaches to). Anchors a glyph has already are kept. "
@@ -2420,7 +2420,7 @@ class AccentsDialog(object):
         self.tree.setColumnCount(len(self.COLUMNS))
         self.tree.setHeaderLabels(list(self.COLUMNS))
         self.tree.setIconSize(QtCore.QSize(ICON_SIZE, ICON_SIZE))
-        self.tree.setProperty(ak.LEAVE_ALONE_PROP, True)  # its pictures are drawn in the dialog's colors
+        self.tree.viewport().setProperty(ak.LEAVE_ALONE_PROP, True)  # its pictures are drawn in the dialog's colors
         ak.grid_lines(self.tree)
         self.tree.setWhatsThis(u"The letters with diacritics this font lacks: those that can be built (checked ones "
                                u"are built), and, at the end, those that need a mark the font does not have. "

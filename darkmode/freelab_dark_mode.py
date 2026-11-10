@@ -215,7 +215,7 @@ SWEEP_MS = 750  # how often to look for widgets FontLab created or showed
 FULL_SWEEP_EVERY = 40  # every Nth sweep revisits every widget (replaced stylesheets, new icons)
 FOCUS_DRAIN_MS = 80  # a window that takes focus is darkened at once, up to this long, before it paints light
 MAX_ERRORS = 50
-NATIVE_VERSION = 105
+NATIVE_VERSION = 106
 
 ID_PROP = "freelab_id"  # dynamic properties FreeLab sets on widgets, all removed by restore()
 SEEN_PROP = "freelab_seen"
@@ -683,7 +683,7 @@ def _address(image):
     return ctypes.addressof(ctypes.c_char.from_buffer(image.bits()))
 
 
-ANCHOR_MODES = {"ink": 0, "all": 1, "relight": 2, "icon": 3, "subpixel": 4, "syntax": 5}
+ANCHOR_MODES = {"ink": 0, "all": 1, "relight": 2, "icon": 3, "subpixel": 4, "syntax": 5, "list": 6}
 
 
 def map_image(image, min_l=0.0, keys=None, ink_below=-1.0, keep_tint=0.0, light_l=None, edge_neutral=0.0, edge_target=0,
@@ -1624,6 +1624,8 @@ def _effect_classes():
                         keep_unmapped(self, painter, pixmap, offset)
                         return
                     anchors = {"island": "all", "subpixel": "subpixel"}.get(kind, "ink")
+                    if kind == "ink" and getattr(self, "freelab_list", False):
+                        anchors = "list"
                     editor = self.freelab_widget.parentWidget() if kind == "edges" else None
                     editor_record = _record(editor, create=False) if editor is not None else None
                     native = editor_record is not None and editor_record.get("sci")
@@ -2284,6 +2286,9 @@ def _set_effect(widget, record, kind, keys=None):
     effect.freelab_edge_target = frame_target(keys) if keys else 0
     effect.freelab_kind = kind
     effect.freelab_gray = kind == "ink" and _gray_text(widget)
+    # a list's rows (the font window's sidebar): drawn on nothing, gray sub-items and dark glyph icons are ink too
+    parent = widget.parentWidget()
+    effect.freelab_list = kind == "ink" and parent is not None and parent.inherits("QAbstractItemView")
     effect.setProperty(EFFECT_PROP, kind)
     widget.setGraphicsEffect(effect)  # deletes any effect FreeLab set before
     record["effect"], record["kind"] = effect, kind  # PythonQt deletes it if no Python reference is kept

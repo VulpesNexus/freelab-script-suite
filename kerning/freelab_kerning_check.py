@@ -26,12 +26,12 @@ MIN_DISTANCE_SHARE = 0.02  # a kerned pair's ink closer than this share of the e
 TINY_UNITS = 5  # entries smaller than this (font units) are listed for cleanup, unchecked
 SIGN_TOLERANCE = 10  # a value counts as tightening or loosening beyond this many units, between masters
 PROGRESS_EVERY = 2000  # pairs between two looks at the event loop while checking
-PREVIEW_EM = 120  # pixels per em in the pair previews
-PAIR_ALPHA = 185  # each glyph of a previewed pair this opaque: where they overlap, the ink is denser
 # The settings row reads as a sentence: "List kerned pairs whose ink comes within 20 units, and that
-# much closer than with the plain letter" / "... within 20 units of each other, whatever the letters".
-COLLISION_MODES = (("relative", u"and that much closer than with the plain letter (\N{LATIN CAPITAL LETTER T WITH CARON}o against To)"),
-                   ("absolute", u"of each other, whatever the letters"))
+# many units closer than without the accent" / "... within 20 units of each other, accented or not".
+COLLISION_MODES = (("relative", u"and that many units closer than without the accent "
+                                u"(\N{LATIN CAPITAL LETTER T WITH CARON}o vs. To)"),
+                   ("absolute", u"of each other, accented or not"))
+PAIR_SETS = (("all", u"kerned pairs"), ("common", u"common kerned pairs"))
 TABS = ("collisions", "cleanup", "masters")
 
 
@@ -360,8 +360,10 @@ class InkDistances(object):
 HELP = u"""<b>FreeLab Kerning Check</b><br>
 Three lists for the current font's kerning. Nothing changes until you click a list's button.<br><br>
 <b>Collisions</b>: kerned pairs whose ink comes closer than the distance you set, at the kerning
-FontLab applies (kerning classes included). The fix is the value that keeps that distance; written,
-it is a pair of its own, so the class kerns its other glyphs as before.<br>
+FontLab applies (kerning classes included), all of them or only those common in text. The fix is
+the value that keeps that distance; written, it is a pair of its own, so the class kerns its other
+glyphs as before. If a fix looks off, drag the <i>Adjusted</i> preview's right glyph left or right
+(or click it and press Left or Right, with Shift for 10 units): the fix follows.<br>
 <b>Cleanup</b>: entries that change nothing (their pairs get the same value without them, or each
 pair they cover has a value of its own), entries naming a class or glyph that is gone (checked), and
 values smaller than the size you set (unchecked: look at them first).<br>
@@ -431,18 +433,31 @@ class KerningCheckDialog(object):
             label = QtGui.QLabel()
             label.setProperty(self.ak.LEAVE_ALONE_PROP, True)  # dark mode leaves the drawn pictures alone
             label.setAlignment(QtCore.Qt.AlignCenter)
-            label.setMinimumHeight(int(PREVIEW_EM * 1.7))
-            label.setWhatsThis(u"The selected pair as it is set now and with its fix (Collisions), or with and "
-                               u"without its entry (Cleanup); its glyphs are drawn see-through, so where their ink "
-                               u"overlaps it is denser.")
+            label.setMinimumHeight(int(self.ak.PAIR_PREVIEW_EM * 1.7))
+            label.setWhatsThis(u"The selected pair as it is set now and adjusted: with its fix (Collisions), or "
+                               u"without its entry (Cleanup), beside its base pair; its glyphs are drawn see-through, "
+                               u"so where their ink overlaps it is denser.")
             previews.addWidget(label, 1)
             self.previews.append(label)
         layout.addLayout(previews)
+        self.adjust_width = None
+        self.adjusting = self.ak.PairDrag(self.previews[1], self.adjusted_value,
+                                          lambda value: self.set_fix(self.adjustable(), value),
+                                          lambda step: self.ak.select_next_row(self.current_tab().tree, step),
+                                          self.units_scale)
 
         self.collisions = Tab(QtGui, ("Pair", "Kerning", "Distance", "Fix", "Set by", "Compared with"),
                               "Write checked fixes", self.ak.status_label)
         tab = self.collisions
-        tab.settings.addWidget(QtGui.QLabel("List kerned pairs whose ink comes within"))
+        tab.settings.addWidget(QtGui.QLabel("List"))
+        self.pair_set = QtGui.QComboBox()
+        for _, label in PAIR_SETS:
+            self.pair_set.addItem(label)
+        self.pair_set.setWhatsThis(u"All kerned pairs, or only those common in text (frequent in 24 languages and "
+                                   u"kerned in fonts: the list Auto Kerning's Common pairs uses).")
+        tab.settings.addWidget(self.pair_set)
+        self.common = None  # {two characters: rank}, read when first needed
+        tab.settings.addWidget(QtGui.QLabel("whose ink comes within"))
         self.minimum = QtGui.QSpinBox()
         self.minimum.setRange(-200, 400)
         self.minimum.setSuffix(" units")
@@ -454,13 +469,14 @@ class KerningCheckDialog(object):
         for _, label in COLLISION_MODES:
             self.mode.addItem(label)
         self.mode.setWhatsThis(u"How both glyphs' ink is measured: the narrowest horizontal distance between them, "
-                               u"row by row, at the pair's kerning.<br><i>And that much closer than with the plain "
-                               u"letter</i>: a pair is listed when it comes within the distance set, and comes that "
-                               u"much closer than the same pair with its plain letter "
-                               u"(\N{LATIN CAPITAL LETTER T WITH CARON}o against To, "
-                               u"\N{LATIN CAPITAL LETTER T WITH STROKE}o against To) at the same value: what a class's value does to an accented or wider member. It suits any "
-                               u"font, also one whose letters touch on purpose.<br><i>Of each other, whatever the "
-                               u"letters</i>: every kerned pair that comes within the distance set, accented or not.")
+                               u"row by row, at the pair's kerning.<br><i>And that many units closer than without "
+                               u"the accent</i>: a pair is listed when its ink comes within the distance set, and "
+                               u"also comes closer by at least as many units than the same pair without the accent "
+                               u"or stroke, at the same value (\N{LATIN CAPITAL LETTER T WITH CARON}o against To, "
+                               u"\N{LATIN CAPITAL LETTER T WITH STROKE}o against To): what a class's value does to "
+                               u"an accented or wider member. It suits any font, also one whose letters touch on "
+                               u"purpose.<br><i>Of each other, accented or not</i>: every kerned pair whose ink "
+                               u"comes within the distance set.")
         tab.settings.addWidget(self.mode)
         self.collisions_button = QtGui.QPushButton("Check")
         tab.settings.addWidget(self.collisions_button)
@@ -748,9 +764,18 @@ class KerningCheckDialog(object):
                     chars[name] = text if len(text) == 1 and text != name else None
                 return chars[name]
 
+            common_only = PAIR_SETS[self.pair_set.currentIndex][0] == "common"
+            if common_only and self.common is None:
+                self.common = self.ak.common_pairs()
+
+            def common(left, right):
+                return (char_of(left) or u"\N{REPLACEMENT CHARACTER}") + (char_of(right) or u"\N{REPLACEMENT CHARACTER}") in self.common
+
             found = find_collisions(kerning, ink.closest_at, minimum, relative,
                                     lambda done, total: self.progress(tab, done, total, u"Checking pair"),
                                     lambda name, key: is_variant(name, key, char_of))
+            if common_only:
+                found = [c for c in (found or []) if common(c.left, c.right)]
         except Exception as exc:
             tab.status.setText(u"")
             self.log.add(self.ak.html(exc), "error")
@@ -771,8 +796,7 @@ class KerningCheckDialog(object):
             if len(groups[key]) > 1:
                 parents[key] = self.add_group(tab, (u"%s \N{EM DASH} %s" % (glyph_text(self.package, key),
                                                                                counted(len(groups[key]), u"pair")),))
-                parents[key].setFirstColumnSpanned(True)
-                self.ak.section_row(parents[key], tab.tree)
+                parents[key].setFirstColumnSpanned(True)  # (a row as the others: its text level with its arrow)
         for index, c in enumerate(found):
             where = kerning.describe(c.entry) if c.entry is not None else u""
             if c.reference is not None:
@@ -789,13 +813,15 @@ class KerningCheckDialog(object):
                          parents.get(c.variant or c.left))
         self.resize(tab)
         self.checked_now(tab, "collisions")
-        tight = sum(1 for value in kerning.plain.values() if value is not None and value < 0)
+        tight = sum(1 for pair, value in kerning.plain.items() if value is not None and value < 0
+                    and (not common_only or common(*pair)))
         b = self.ak.b
-        what = (u"within %s, and that much closer than with the plain letter" % b(counted(minimum, u"unit")) if relative
-                else u"within %s of each other" % b(counted(minimum, u"unit")))
+        what = (u"within %s, and that many units closer than without the accent" % b(counted(minimum, u"unit"))
+                if relative else u"within %s of each other" % b(counted(minimum, u"unit")))
+        pairs = b(counted(tight, u"common pair" if common_only else u"pair"))
         tab.status.setText(u"%s of the %s kerned tighter %s %s, kerning applied." % (
-            b(len(found)), b(counted(tight, u"pair")), u"comes" if len(found) == 1 else u"come", what)
-            if found else u"None of the %s kerned tighter comes %s." % (b(counted(tight, u"pair")), what))
+            b(len(found)), pairs, u"comes" if len(found) == 1 else u"come", what)
+            if found else u"None of the %s kerned tighter comes %s." % (pairs, what))
 
     def write_fixes(self):
         if self.busy or not self.same_font():
@@ -946,64 +972,69 @@ class KerningCheckDialog(object):
         try:
             if isinstance(finding, Collision):
                 shown = [(finding.pair(), finding.value, u"Now: %d" % finding.value),
-                         (finding.pair(), finding.fix, u"With the fix: %d" % finding.fix)]
+                         (finding.pair(), finding.fix, u"Adjusted: %d" % finding.fix)]
                 if finding.reference is not None:
-                    shown.append((finding.reference, finding.value, u"Its base pair: %d" % finding.value))
+                    shown.append((finding.reference, finding.value, u"Base pair: %d" % finding.value))
             elif isinstance(finding, Cleanup):
                 kerning = self.kerning()
                 pairs = kerning.pairs(finding.entry)
                 if pairs:
                     now = kerning.current(*pairs[0])
                     without = value_without(kerning, finding.entry, *pairs[0])
-                    shown = [(pairs[0], now, u"Now: %d" % now), (pairs[0], without, u"Without the entry: %d" % without)]
+                    shown = [(pairs[0], now, u"Now: %d" % now), (pairs[0], without, u"Adjusted: %d" % without)]
         except Exception:
             shown = []
+        self.adjust_width = None
         for index, label in enumerate(self.previews):
             if index < len(shown):
                 pair, value, caption = shown[index]
-                label.setPixmap(self.pair_picture(pair[0], pair[1], value, caption))
+                adjustable = index == 1 and isinstance(finding, Collision)
+                picture = self.pair_picture(pair[0], pair[1], value, caption, room=adjustable)
+                if adjustable:
+                    self.adjust_width = picture.width()  # kept while dragging: the left glyph stays put
+                label.setPixmap(picture)
             else:
                 label.clear()
         self.update_buttons_soon()
 
-    def pair_picture(self, left, right, value, caption):
-        """A glyph pair at a kerning value, both glyphs see-through in the dialog's text color, its
-        caption under it."""
+    # -- the Adjusted preview, dragged ---------------------------------------
+
+    def adjustable(self):
+        """The selected collision, while the Collisions list is shown: its fix can be adjusted."""
+        finding = self.selected_finding() if self.package is not None else None
+        return finding if isinstance(finding, Collision) and self.tabs.currentIndex == 0 else None
+
+    def adjusted_value(self):
+        """The selected collision's fix, which the Adjusted preview adjusts (None: nothing to adjust)."""
+        finding = self.adjustable()
+        return finding.fix if finding is not None else None
+
+    def units_scale(self):
+        """Preview pixels per font unit."""
+        return float(self.ak.PAIR_PREVIEW_EM) / float(self.package.upm)
+
+    def set_fix(self, finding, value):
+        """A collision's fix set by hand: the Adjusted preview drawn again, its row's Fix shown and checked."""
         QtCore, QtGui = _qt()
-        ak = self.ak
-        layers = []
-        for name in (left, right):
-            glyph = self.package.findName(name)
-            layer = glyph.getLayerByName(self.master) if glyph is not None and not glyph.isNull else None
-            if layer is None:
-                return QtGui.QPixmap()
-            layers.append((layer, ak.layer_path(layer)))
-        scale = float(PREVIEW_EM) / float(self.package.upm)
-        margin = PREVIEW_EM // 4
-        width = int((layers[0][0].advanceWidth + max(0, layers[1][0].advanceWidth + value)) * scale) + 2 * margin
-        line = QtGui.QFontMetrics(self.dialog.font).height()
-        height = int(PREVIEW_EM * 1.35) + line
-        pixmap = QtGui.QPixmap(max(width, 2 * margin), height)
-        pixmap.fill(QtGui.QColor(0, 0, 0, 0))
-        color = self.dialog.palette.color(QtGui.QPalette.WindowText)
-        ink = QtGui.QColor(color)
-        ink.setAlpha(PAIR_ALPHA)
-        painter = QtGui.QPainter(pixmap)
-        try:  # ended before anything else can fail: a painter left open on a freed pixmap aborts FontLab
-            painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
-            x = float(margin)
-            for index, (layer, path) in enumerate(layers):
-                painter.save()
-                painter.translate(x, PREVIEW_EM * 1.05)
-                painter.scale(scale, -scale)
-                painter.fillPath(path, QtGui.QBrush(ink))
-                painter.restore()
-                x += (layer.advanceWidth + (value if index == 0 else 0)) * scale
-            painter.setPen(color)
-            painter.drawText(QtCore.QRect(0, height - line, pixmap.width(), line), int(QtCore.Qt.AlignCenter), caption)
-        finally:
-            painter.end()
-        return pixmap
+        if finding is None or value == finding.fix:
+            return
+        finding.fix = value
+        self.previews[1].setPixmap(self.pair_picture(finding.left, finding.right, value, u"Adjusted: %d" % value,
+                                                     width=self.adjust_width))
+        tab = self.collisions
+        for item in self.rows(tab):
+            if tab.findings[int(item.data(0, QtCore.Qt.UserRole))] is finding:
+                item.setText(3, u"%d" % value)
+                item.setCheckState(0, QtCore.Qt.Checked)
+                break
+
+    def pair_picture(self, left, right, value, caption, room=False, width=None):
+        """A glyph pair at a kerning value in the dialog's text color, its caption under it (see
+        Auto Kerning's pair_pixmap)."""
+        QtCore, QtGui = _qt()
+        return self.ak.pair_pixmap(self.package, self.master, left, right, value, caption,
+                                   self.dialog.palette.color(QtGui.QPalette.WindowText), self.dialog.font,
+                                   room, width)
 
     def row_names(self, tab, item):
         """The glyphs of a row (none for a group's heading, or an entry of classes): their flags shown."""

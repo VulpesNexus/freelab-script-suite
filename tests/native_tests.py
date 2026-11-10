@@ -485,6 +485,45 @@ class KeyedTests(unittest.TestCase):
         self.assertLessEqual(max(abs(a - b) for a, b in zip(out[0], expected)), 1)
         self.assertEqual(out[1:], colors[1:])
 
+    @staticmethod
+    def sidebar(width=64, height=96):
+        """A list's rows drawn on nothing, for a light ground (the font window's sidebar): a dark gray
+        glyph icon, a dark gray badge with a white letter, black text, and gray sub-item text, over\n        empty rows (no color covers enough to be its background)."""
+        icon, badge, white, black, gray = (64, 65, 66), (64, 65, 66), (255, 255, 255), (0, 0, 0), (124, 124, 124)
+        image = {}
+        for y in range(4, 14):  # the icon: a frame of strokes, 8 by 10, a third filled
+            for x in range(4, 12):
+                if x in (4, 11) or y in (4, 8, 13):
+                    image[(x, y)] = icon
+        for y in range(4, 20):  # the badge: 16 by 16, a white bar for its letter
+            for x in range(20, 36):
+                image[(x, y)] = white if 26 <= x <= 27 and 7 <= y <= 16 else badge
+        for y in range(4, 14):  # black text and gray text: 1-pixel strokes
+            for x in range(40, 50, 3):
+                image[(x, y)] = black
+            for x in range(52, 62, 3):
+                image[(x, y)] = gray
+        out = bytearray()
+        for y in range(height):
+            for x in range(width):
+                color = image.get((x, y))
+                out += struct.pack("<BBBB", color[2], color[1], color[0], 255) if color else b"\0\0\0\0"
+        return out
+
+    def test_list_mode_maps_glyph_icons_and_gray_rows_on_nothing(self):
+        width = 64
+        ink, listed = self.sidebar(), self.sidebar()
+        anchors(LIB, ink, width, "ink")
+        anchors(LIB, listed, width, "list")
+        at = lambda buf, x, y: rgb_at(buf, y * width + x)
+        self.assertEqual(at(ink, 4, 6), (64, 65, 66), "ink mode: a dark surface on nothing stays")
+        self.assertGreater(at(listed, 4, 6)[0], 150, "list mode: the glyph icon turns light")
+        self.assertEqual(at(listed, 21, 5), (64, 65, 66), "the badge stays as drawn")
+        self.assertEqual(at(listed, 26, 10), (255, 255, 255), "its white letter too")
+        self.assertGreater(at(listed, 40, 6)[0], 150, "black text turns light")
+        self.assertEqual(at(ink, 52, 6), (124, 124, 124), "ink mode: mid gray on nothing stays")
+        self.assertGreater(at(listed, 52, 6)[0], 150, "list mode: gray sub-item text turns light")
+
 
 if __name__ == "__main__":
     unittest.main()

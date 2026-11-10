@@ -367,7 +367,7 @@ class CJKSpacingDialog(object):
         self.tree.setColumnCount(len(self.COLUMNS))
         self.tree.setHeaderLabels(list(self.COLUMNS))
         self.tree.setIconSize(QtCore.QSize(ICON_SIZE, ICON_SIZE))
-        self.tree.setProperty(ak.LEAVE_ALONE_PROP, True)  # its pictures are drawn in the dialog's colors
+        self.tree.viewport().setProperty(ak.LEAVE_ALONE_PROP, True)  # its pictures are drawn in the dialog's colors
         ak.grid_lines(self.tree)
         self.tree.setWhatsThis(u"Each full-width kana and punctuation mark with its trims: palt's x placement and x "
                                u"advance, the width after, and halt's. Checked glyphs are written. Double-click one "
