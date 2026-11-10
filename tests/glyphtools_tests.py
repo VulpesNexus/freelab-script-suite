@@ -520,6 +520,15 @@ class LigatureTests(unittest.TestCase):
         self.assertEqual(found["c_t"].choice, "dlig")
         self.assertEqual(found["q_q"].choice, "dlig", "unknown to the corpus: discretionary")
 
+    def test_forms_and_mark_stacks_are_no_ligatures(self):
+        names = ["f", "i", "I", "J", "tildecomb", "acutecomb", "f_i", "f_i.sc", "f_i.ss01", "I_J.loclNLD",
+                 "tildecomb_acutecomb"]
+        chars = {"f": u"f", "i": u"i", "I": u"I", "J": u"J", "tildecomb": u"\N{COMBINING TILDE}",
+                 "acutecomb": u"\N{COMBINING ACUTE ACCENT}"}
+        found = [l.glyph for l in fc.ligatures(names, {}, chars, {})]
+        self.assertEqual(found, ["f_i"], "a ligature's small cap or set form, a locl form, and stacked marks: "
+                                         "their own features'")
+
     def test_found_and_moved(self):
         found = fc.ligatures(self.NAMES, {"liga": self.LIGA})
         self.assertEqual([(l.glyph, l.now, l.choice) for l in found],

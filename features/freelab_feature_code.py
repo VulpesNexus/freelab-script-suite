@@ -105,7 +105,11 @@ def ligatures(names, features, chars=None, model=None):
         if suffix in (u"liga", u"dlig"):
             found.append(Ligature(name, parts, None, suffix, u"its name's .%s" % suffix))
             continue
+        if suffix:
+            continue  # a form of a ligature (.sc, .ss01, .case) or a localized one (.loclNLD): its own feature's
         key = u"".join(chars.get(part) or u"\0" for part in parts)
+        if u"\0" not in key and all(unicodedata.category(c).startswith(u"M") for c in key):
+            continue  # marks stacked (tildecomb_acutecomb): ccmp's, not a ligature to set
         counts = counts_of.get(key) if u"\0" not in key else None
         if counts:
             choice = "liga" if counts[0] >= counts[1] else "dlig"

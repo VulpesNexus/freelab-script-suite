@@ -267,7 +267,9 @@ class MastersTests(unittest.TestCase):
 
     def test_missing_and_counts(self):
         light = fc.Outline([contour(SQUARE), contour(TRIANGLE)])
-        self.assertEqual(self.compare(light, None), [(u"Bold", None, "missing")])
+        self.assertEqual(self.compare(light, None), [], "in one master only: a glyph that does not vary")
+        three = fc.compare_glyph(u"g", [(u"Light", light), (u"Regular", light), (u"Bold", None)])
+        self.assertEqual([(f.master, f.kind) for f in three], [(u"Bold", "missing")], "two have it, one lacks it")
         self.assertEqual(self.compare(light, fc.Outline([contour(SQUARE)])), [(u"Bold", None, "contours")])
         self.assertEqual(self.compare(light, fc.Outline([contour(SQUARE), contour(SQUARE)])), [(u"Bold", 2, "nodes")])
         self.assertEqual(self.compare(light, fc.Outline([contour(TRIANGLE), contour(SQUARE)])), [(u"Bold", None, "order")])
@@ -548,7 +550,7 @@ class DialogTests(unittest.TestCase):
         dialog.reference.currentText, dialog.reference.currentIndex = u"Regular", 0
         dialog.check_masters()
         found = sorted((f.glyph, f.master, f.kind) for f in dialog.masters.findings)
-        self.assertEqual(found, [(u"eacute", u"Bold", "missing"), (u"o", u"Bold", "direction")])
+        self.assertEqual(found, [(u"o", u"Bold", "direction")], "eacute, in Regular only, does not vary")
         dialog.outline_picture(u"o", u"Bold", 1)
 
 

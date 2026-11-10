@@ -30,6 +30,7 @@ AUTO_KERNING_FILE, AUTO_KERNING_MODULE = "freelab_auto_kerning.py", "freelab_aut
 DIACRITICS_FILE, DIACRITICS_MODULE = "freelab_diacritics.py", "freelab_diacritics"
 LANGUAGES_FILE = "language_coverage.json"  # beside this script: checks/train/languages.py makes it from Hyperglot
 TABS = ("coverage", "metrics", "masters")
+LANGUAGE_COLUMN_MAX = 360  # pixels: the Coverage list's language names, at most (longer ones elided, their tooltip whole)
 NEARLY_MISSING = 3  # a language missing at most this many base characters (and marks) is nearly covered
 SCRIPT_MINIMUM = 5  # a font with fewer of a script's characters than this has none of it (its languages summed up)
 LINE_SHARE = 1.2  # Google Fonts: typo (and hhea) ascender plus descender at 120% of the em for a new font
@@ -698,12 +699,15 @@ def compare_glyph(name, outlines):
     with the first that has the glyph (None: the master lacks it)."""
     found = []
     present = [(master, outline) for master, outline in outlines if outline is not None]
-    if not present:
+    if len(present) < 2:
+        # In one master only: a glyph that does not vary (FontLab gives a variable font's glyphs layers only
+        # in the masters where they differ; .notdef, spaces, and joiners have the default's alone)
         return found
     reference_master, reference = present[0]
     for master, outline in outlines:
         if outline is None:
-            found.append(Incompatibility(name, master, None, "missing", u"Missing in this master"))
+            found.append(Incompatibility(name, master, None, "missing", u"No layer in this master, though %d have "
+                                                                          u"one" % len(present)))
     for master, outline in present[1:]:
         found.extend(compare_outline(name, reference_master, reference, master, outline))
     return found
@@ -1037,6 +1041,7 @@ class FontCheckDialog(object):
         self.mode = QtGui.QComboBox()
         for _, label in MODES:
             self.mode.addItem(label)
+        self.mode.setSizeAdjustPolicy(QtGui.QComboBox.AdjustToContents)  # (its choices are sentences)
         self.mode.setWhatsThis(u"<i>A new font</i>: the line at the share of the em you set, capitals centered "
                                u"in it, clear of A grave and the deepest descender.<br><i>An update</i>: the line "
                                u"spacing of the released font kept (Google Fonts asks that documents do not "
@@ -1369,6 +1374,8 @@ class FontCheckDialog(object):
         finally:
             tab.tree.setUpdatesEnabled(True)
         self.resize(tab)
+        if tab.tree.columnWidth(0) > LANGUAGE_COLUMN_MAX:  # (a long autonym pushed the other columns out of sight)
+            tab.tree.setColumnWidth(0, LANGUAGE_COLUMN_MAX)
         present = [s for s in scripts if s.present]
         totals = dict((level, sum(s.count(level) for s in present)) for level, _ in LEVELS)
         composed = sum(1 for s in present for r in s.results if r.composed and r.level != "missed")

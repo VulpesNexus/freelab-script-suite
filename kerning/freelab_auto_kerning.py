@@ -2135,14 +2135,15 @@ def analyze(package, master, characters=None, em=EM_PIXELS, progress=None, core=
     reach = float(glyphs.pad)
     kerning = FontKerning(package.kerning(master))
     suggestions, total, done, measured, reused = [], len(chars) * len(chars), 0, 0, 0
-    pairs = {}
+    wanted = set(pairs) if pairs is not None else None
+    cached = {}  # (not pairs: that names the pairs asked for)
     for left_char, left in chars:
         for right_char, right in chars:
             done += 1
             if progress is not None and done % 200 == 0 and progress(done, total) is False:
                 return None
             kinds = pair_kinds(left_char, right_char)
-            if kinds is None or (pairs is not None and left_char + right_char not in pairs):
+            if kinds is None or (wanted is not None and left_char + right_char not in wanted):
                 continue
             key = u"%s %s" % (left, right)
             entry = old_pairs.get(key)
@@ -2163,7 +2164,7 @@ def analyze(package, master, characters=None, em=EM_PIXELS, progress=None, core=
                 entry = [None if halo is None else halo * glyphs.upm / em,
                          None if contour is None else contour * glyphs.upm / em, None, learned]
                 measured += 1
-            pairs[key] = entry
+            cached[key] = entry
             s = Suggestion(left_char, right_char, left, right, kerning.current(left, right))
             for method, units in ((MEASURED[0], entry[0]), (MEASURED[1], entry[1]), (MEASURED[2], entry[3])):
                 if units is not None:
@@ -2182,7 +2183,7 @@ def analyze(package, master, characters=None, em=EM_PIXELS, progress=None, core=
                 units = s.raw[method]
                 s.values[method] = round_units(units * (tighten if units < 0 else loosen))
     cache = {"method": method_fingerprint(model, script), "references": references_signature,
-             "signatures": dict((name, glyphs.signatures[name]) for _, name in chars), "pairs": pairs}
+             "signatures": dict((name, glyphs.signatures[name]) for _, name in chars), "pairs": cached}
     if cache_file:
         save_cache(cache_file, cache)
     return Analysis(suggestions, factors, (measuring.get("halo"), measuring.get("contour")), measured, reused,
@@ -2893,6 +2894,10 @@ class AutoKerningDialog(object):
         """The script list: the scripts the font has; the script to analyze: wanted (or the last one)
         where the font has it, else its first."""
         found = font_scripts([ch for ch, _ in font_glyphs(package, u"".join(SCRIPT_LETTERS[key] for key, _ in SCRIPTS))])
+        first, self.scripts_filled = not getattr(self, "scripts_filled", False), True
+        if first and len(found) > 1:
+            # first opened: the script the font has most letters of (a kana font with a few Latin letters opens on kana)
+            wanted = max(found, key=lambda key: len(font_glyphs(package, SCRIPT_LETTERS[key])))
         chosen = next((key for key in (wanted, self.script) if key in found), found[0] if found else "latin")
         keys = found or ["latin"]
         if keys != self.script_keys:
