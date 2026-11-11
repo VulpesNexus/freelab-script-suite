@@ -1570,14 +1570,51 @@ def compile_box():
     return box
 
 
-def compiled_note(box):
-    """After writing: compiled (when the box is checked), and what the log says of it."""
+COMPILE_READ_MS = 400  # after the click: FontLab's Output panel read for what the compiler said
+COMPILE_ERROR_MARKS = (u"[F]", u"[E]", u"error", u"Error")
+
+
+def output_text():
+    """FontLab's Output panel's text (where the compiler writes its errors), or None."""
+    QtGui = _qt()[1]
+    for widget in QtGui.QApplication.instance().allWidgets():
+        try:
+            if widget.objectName == "textOutput" and widget.inherits("QTextEdit"):
+                return u"%s" % widget.toPlainText()
+        except Exception:
+            continue
+    return None
+
+
+def compiled_note(box, log=None):
+    """After writing: compiled (when the box is checked), and what the log says of it. With log, what the
+    compiler printed in FontLab's Output panel is read just after: an error goes in the log, in red."""
+    QtCore = _qt()[0]
     if box is None or not box.checked:
         return u" Compile the features in FontLab's <i>Features</i> panel to try it."
-    if compile_features():
+    before = output_text()
+    if not compile_features():
+        return (u" Not compiled: FontLab's <i>Features</i> panel was never opened in this session (<i>Window &gt; "
+                u"Panels &gt; Features</i>); compile there.")
+    if log is None or before is None:
         return u" Compiled: see the <i>Features</i> panel for any error."
-    return (u" Not compiled: FontLab's <i>Features</i> panel was never opened in this session (<i>Window &gt; "
-            u"Panels &gt; Features</i>); compile there.")
+
+    def read():
+        try:
+            after = output_text() or u""
+            said = after[len(before):] if after.startswith(before) else after
+            errors = [line.strip() for line in said.splitlines() if any(mark in line for mark in COMPILE_ERROR_MARKS)]
+            if errors:
+                log.add(u"The features did not compile: %s" % html(u" ".join(errors[:3])), "error")
+        except Exception:
+            pass  # a timer's handler must not raise
+    _COMPILE_READS.append(read)
+    del _COMPILE_READS[:-8]
+    QtCore.QTimer.singleShot(COMPILE_READ_MS, read)
+    return u" Compiled."
+
+
+_COMPILE_READS = []  # (held: PythonQt drops a slot no Python object holds)
 
 
 def plain_buttons(dialog):
@@ -1718,6 +1755,25 @@ def watch_states(dialog):
 def html(text):
     """Text made safe for a rich-text label."""
     return (u"%s" % text).replace(u"&", u"&amp;").replace(u"<", u"&lt;").replace(u">", u"&gt;")
+
+
+GLYPH_LINK = u"glyph:"
+
+
+def glyph_links(chars):
+    """Characters as links a dialog's log handler selects (Log.link_handler gets u"glyph:" and the code
+    point in hex): u"Ñ Ť" in a line, each clickable."""
+    return u" ".join(u'<a href="%s%04X">%s</a>' % (GLYPH_LINK, ord(ch[0]), html(ch)) for ch in chars if ch)
+
+
+def linked_char(target):
+    """The character a glyph link names, or None."""
+    if not target.startswith(GLYPH_LINK):
+        return None
+    try:
+        return unichr_(int(target[len(GLYPH_LINK):], 16))
+    except ValueError:
+        return None
 
 
 def b(value):
@@ -1877,8 +1933,13 @@ class Log(object):
 
     def __init__(self):
         QtCore, QtGui = _qt()
-        view = self.view = QtGui.QTextEdit()
+        view = self.view = QtGui.QTextBrowser()  # (a text view whose links can be clicked: glyphs named in a line)
         view.setReadOnly(True)
+        view.setOpenLinks(False)
+        view.setOpenExternalLinks(False)
+        self.link_handler = None
+        self.link_slot = lambda url: self.link_clicked(url)
+        view.connect("anchorClicked(QUrl)", self.link_slot)
         # Left to the palette: dark mode's mapping of text views left its scroll bar light
         view.setProperty(LEAVE_ALONE_PROP, True)
         self.line = QtGui.QFontMetrics(view.font).lineSpacing()
@@ -1942,10 +2003,21 @@ class Log(object):
             if color is not None:
                 base = self.view.palette.color(QtGui.QPalette.Base)
                 rgb = color[0] if base.lightness() < 128 else color[1]
+                # links (glyphs to select) in the line's own color, underlined: not the palette's blue
+                text = text.replace(u'<a href=', u'<a style="color:#%02x%02x%02x" href=' % (rgb[0], rgb[1], rgb[2]))
                 text = u'<span style="color:#%02x%02x%02x">%s</span>' % (rgb[0], rgb[1], rgb[2], text)
             self.entries.insert(0, u"%s&nbsp; %s" % (stamp, text))
             del self.entries[LOG_KEPT:]
             self.view.setHtml(u"<br>".join(self.entries))
+        except Exception:
+            pass
+
+    def link_clicked(self, url):
+        """A link in a line clicked: handed to the dialog's handler (its text: the link's target)."""
+        try:
+            target = u"%s" % (url.toString() if hasattr(url, "toString") else url)
+            if self.link_handler is not None:
+                self.link_handler(target)
         except Exception:
             pass
 

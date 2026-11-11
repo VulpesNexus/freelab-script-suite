@@ -46,6 +46,7 @@ SHOWCASE_SIZE = 28  # points: diacritics, figures, and punctuation
 MASTERS_SIZES = (28, 12)  # points: each master's line on the masters page
 STRING_GAP = 0.6  # of the em, between two strings
 LINE_SHARE = 1.25  # a line is at least this many times its size tall
+SCOPE_LANGUAGES_MAX = 120  # languages offered in the Proof dropdown, the most spoken first
 MAX_SAMPLES = 6  # languages per script in the text section, the most spoken first
 SCRIPT_MINIMUM = 5  # a script's letters the font needs before its letters stand in for its text
 ALPHABET_MAX = 120  # characters at most, when a script's letters stand in for its text
@@ -780,8 +781,10 @@ def thin_scripts(font, languages, groups):
         if language.script in shown or language.script not in TEXT_SCRIPTS:
             continue
         present = found.setdefault(language.script, [])
-        for ch in language.base:  # letters only (an emoji font's keycap figures are none)
-            if ch not in present and category(ord(ch[0])).startswith(u"L") and has_character(codes, ch):
+        for ch in language.base:  # its script's letters only (keycap figures, Latin letters a Cyrillic orthography lists)
+            kind = script_case(ord(ch[0]))
+            if (ch not in present and category(ord(ch[0])).startswith(u"L") and kind is not None
+                    and kind[0] == (u"%s" % language.script).upper() and has_character(codes, ch)):
                 present.append(ch)
     return [(script, u"".join(found[script])) for script in TEXT_SCRIPTS if found.get(script)]
 
@@ -1281,6 +1284,58 @@ class Proof(object):
         return counts
 
 
+def encoded_code(font, name):
+    """A glyph's code point, or for an unencoded one (a.ss01) its base's (a's), or None."""
+    code = font.code_of(name)
+    if code is None and u"." in name:
+        by_name = getattr(font, "_by_name", None)
+        if by_name is None:
+            by_name = font._by_name = dict((n, c) for c, n in font.cmap.items())
+        code = by_name.get(name.split(u".")[0])
+    return code
+
+
+def glyph_script(font, name):
+    """The script word of a glyph (u"LATIN", u"CYRILLIC"), for an encoded letter or an unencoded form of
+    one (a.ss01: a's); None for figures, punctuation, symbols, and the rest."""
+    code = encoded_code(font, name)
+    if code is None:
+        return None
+    kind = script_case(code)
+    return kind[0] if kind and kind[0] != "FIGURE" else None
+
+
+def scope_names(font, scope, languages=()):
+    """The glyph names a proof scope keeps: ("script", word): that script's letters; ("language", Language):
+    its base and auxiliary letters; with every glyph that is no letter (figures, punctuation, symbols)."""
+    kind, value = scope
+    if kind == "language":
+        wanted = set()
+        for chars in (value.base, getattr(value, "auxiliary", None) or []):
+            for ch in chars:
+                for c in ch:
+                    wanted.add(ord(c))
+    kept = set()
+    for name in font.glyphs:
+        script = glyph_script(font, name)
+        if script is None:
+            kept.add(name)
+        elif kind == "script" and script == value:
+            kept.add(name)
+        elif kind == "language" and encoded_code(font, name) in wanted:
+            kept.add(name)
+    return kept
+
+
+def restricted(font, names):
+    """A copy of a ProofFont that has only names (its kerning between them too)."""
+    keep = [name for name in font.glyphs if name in names]
+    codes = dict((name, font.codes.get(name, ())) for name in keep)
+    kerning = dict((pair, value) for pair, value in font.kerning.items() if pair[0] in names and pair[1] in names)
+    return ProofFont(font.family, font.master, font.upm, keep, codes, font._advance, kerning, font.ascender,
+                     font.descender, font._ink, font._colored)
+
+
 def build_proof(fonts, options=None, languages=(), date=None, info=None):
     """The pages of a proof of fonts (a ProofFont per master, the first the one the text is chosen
     for): an about block, the font's info (info: [(label, text)], None for none), the masters side by
@@ -1642,6 +1697,15 @@ class ProofDialog(object):
                                     u"<i>Common pairs</i> uses).")
         row.addWidget(self.pairs_box)
         row.addSpacing(12)
+        row.addWidget(QtGui.QLabel("Proof"))
+        self.scope_box = QtGui.QComboBox()
+        self.scope_box.setWhatsThis(u"What the proof covers: every script the font has, one of them (its letters, with "
+                                    u"the figures, punctuation, and symbols), or, after the line, one language the "
+                                    u"font covers (its letters; the text section shows its sample alone).")
+        self.scopes = [None]
+        self.scope_box.addItem(u"Every script")
+        row.addWidget(self.scope_box)
+        row.addSpacing(12)
         row.addWidget(QtGui.QLabel("Colors"))
         self.colors_box = QtGui.QComboBox()
         for _, label in COLOR_MODES:
@@ -1745,7 +1809,7 @@ class ProofDialog(object):
         later = self.rebuild_timer.start
         for box in self.section_boxes.values():
             box.connect("toggled(bool)", lambda on: later())
-        for box in (self.masters_box, self.page_box, self.pairs_box):
+        for box in (self.masters_box, self.page_box, self.pairs_box, self.scope_box):
             box.connect("currentIndexChanged(int)", lambda index: later())
         for edit in (self.waterfall_edit, self.text_edit):
             edit.connect("editingFinished()", later)
@@ -2007,6 +2071,47 @@ class ProofDialog(object):
         except Exception as exc:
             self.log.add(u"The sample texts could not be checked: %s" % self.ak.html(exc), "warning")
 
+    def fill_scopes(self, font, languages):
+        """The scopes the font offers (made once per font): its scripts with letters, then the languages it
+        covers whole (every base letter), the most spoken first; the choice kept where it still is."""
+        key = self.ak.font_key(self.package)
+        if getattr(self, "scopes_font", None) == key:
+            return
+        self.scopes_font = key
+        current = self.scopes[max(0, self.scope_box.currentIndex)] if self.scopes else None
+        counts = {}
+        for name in font.glyphs:
+            script = glyph_script(font, name)
+            if script is not None and font.has(name):
+                counts[script] = counts.get(script, 0) + 1
+        scripts = sorted((word for word, n in counts.items() if n >= SCRIPT_MINIMUM), key=lambda word: -counts[word])
+        codes = set(code for code, name in font.cmap.items() if font.has(name))
+        covered = [language for language in languages
+                   if language.base and all(has_character(codes, ch) for ch in language.base)]
+        covered.sort(key=lambda language: -(language.speakers or 0))
+        self.scope_box.blockSignals(True)
+        try:
+            self.scope_box.clear()
+            self.scopes = [None]
+            self.scope_box.addItem(u"Every script")
+            for word in scripts:
+                self.scopes.append(("script", word))
+                self.scope_box.addItem(u"%s only" % SCRIPT_LABELS.get(word, word.title()))
+            if covered:
+                self.scope_box.insertSeparator(self.scope_box.count)
+                self.scopes.append(None)  # (the separator's place)
+                for language in covered[:SCOPE_LANGUAGES_MAX]:
+                    self.scopes.append(("language", language))
+                    self.scope_box.addItem(u"%s (%s)" % (language.name, language.script))
+            index = 0
+            for at, scope in enumerate(self.scopes):
+                if scope is not None and current is not None and scope[0] == current[0] and (
+                        scope[1] == current[1] if scope[0] == "script" else scope[1].name == current[1].name):
+                    index = at
+            self.scope_box.setCurrentIndex(index)
+        finally:
+            self.scope_box.blockSignals(False)
+
     def rebuild(self):
         """The proof laid out again from the settings (the font read where it changed)."""
         QtCore, QtGui = _qt()
@@ -2026,7 +2131,18 @@ class ProofDialog(object):
             masters = self.masters() if self.masters_box.currentIndex == 1 else [self.master]
             fonts = [self.proof_font(master) for master in masters]
             options = self.options()
-            self.proof = build_proof(fonts, options, self.load_languages(), info=self.font_info())
+            languages = self.load_languages()
+            self.fill_scopes(fonts[0], languages)
+            scope = self.scopes[max(0, self.scope_box.currentIndex)] if self.scopes else None
+            if scope is not None:
+                names = scope_names(fonts[0], scope)
+                fonts = [restricted(font, names) for font in fonts]
+                if scope[0] == "language":
+                    languages = [scope[1]]
+                else:  # the languages written in that script (all of them, where none is named so: Han)
+                    same = [language for language in languages if (u"%s" % language.script).upper() == scope[0]]
+                    languages = same or languages
+            self.proof = build_proof(fonts, options, languages, info=self.font_info())
             self.page_options = options
             self.note_font(fonts[0], options)
         except Exception as exc:

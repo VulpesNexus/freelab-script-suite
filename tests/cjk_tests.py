@@ -155,6 +155,21 @@ class SampleTests(unittest.TestCase):
         self.assertEqual(cj.SAMPLES[cj.best_sample(codes_of("zh-hant"))][0], "zh-hant")
 
 
+class OwnCodeTests(unittest.TestCase):
+    OLD = u"""feature palt {
+  pos uni3042 <-10 0 -20 0>;
+  pos [uni3044 uni3046] <-5 0 -10 0>;
+  pos @kana <0 0 0 0>;
+# >>> FreeLab palt (made by FreeLab CJK Spacing)
+  pos uni3048 <-1 0 -2 0>;
+# <<< FreeLab palt
+} palt;"""
+
+    def test_the_fonts_own_single_positions_are_found(self):
+        self.assertEqual(sorted(cj.font_positioned("palt", self.OLD)), [u"uni3042", u"uni3044", u"uni3046"],
+                         "not FreeLab's block, not a class")
+
+
 class MissTests(unittest.TestCase):
     def test_a_sample_showing_none_of_the_fonts_cjk_characters_names_them(self):
         codes = {0x41, 0x3030, 0x303D, 0x1F600}  # an emoji font: a wavy dash and a part mark

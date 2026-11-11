@@ -2398,6 +2398,12 @@ def make_editor(owner):
             """The glyph opened in a Glyph window (Diacritics: the built glyph, else its letter)."""
             try:
                 found = self.hit(event.pos().x(), event.pos().y())
+                if event.button() == QtCore.Qt.LeftButton and found is not None and found[0] == "glyph":
+                    switch = getattr(owner, "neighbor_double_clicked", None)
+                    if switch is not None:
+                        self.drag = None
+                        switch(found[1])
+                    return
                 if event.button() == QtCore.Qt.LeftButton and (found is None or found[0] != "glyph"):  # (not a neighbor)
                     self.drag = None
                     opened = getattr(owner, "editor_double_clicked", None) or getattr(owner, "show_in_glyph_window", None)
@@ -3166,6 +3172,7 @@ class AccentsDialog(object):
         layout.addWidget(self.status)
         layout.addWidget(ak.separator())
         self.log = ak.Log()
+        self.log.link_handler = lambda target: self.log_link(target)
         row = QtGui.QHBoxLayout()
         row.addWidget(QtGui.QLabel("Character set:"))
         self.set_box = QtGui.QComboBox()
@@ -3686,18 +3693,18 @@ class AccentsDialog(object):
             self.log.add(u"Lined up the marks %s of %s with %s's %s (its %s at %s): %s." % (
                 side, b(counted(len(moves), group[:-1] if len(moves) == 1 else group)), b(r.char),
                 html(r.marks[index].root), edge, b(int(round(line))),
-                u" ".join(html(other.char) for other, _, _ in moves)), "done")
+                self.ak.glyph_links([other.char for other, _, _ in moves])), "done")
         else:
             self.log.add(u"The marks %s of the %s like %s already sit at its height." % (side, group, b(r.char)))
         by_reason = {}
         for other, why in left_out:
             by_reason.setdefault(why, []).append(other.char)
         for why, chars in sorted(by_reason.items()):
-            self.log.add(u"Left as they are, %s: %s." % (why, b(u" ".join(chars))), "warning")
+            self.log.add(u"Left as they are, %s: %s." % (why, self.ak.glyph_links(chars)), "warning")
         if close:
             self.log.add(u"%s now %s within %d units of %s letter or another mark: %s. Look at %s." % (
                 b(counted(len(close), u"letter")), u"comes" if len(close) == 1 else u"come", round(TOUCH_SHARE * 1000),
-                u"its" if len(close) == 1 else u"their", b(u" ".join(close)), u"it" if len(close) == 1 else u"them"),
+                u"its" if len(close) == 1 else u"their", self.ak.glyph_links(close), u"it" if len(close) == 1 else u"them"),
                 "warning")
         self.select()
         self.update_buttons()
@@ -3707,6 +3714,8 @@ class AccentsDialog(object):
         for r in self.recipes:
             r.adjust, r.applied = {}, None
             r.checked = self.first_checks.get(r.char, r.checked)
+        for r in self.recipes:  # measured again as suggested: an overlap from a moved mark is gone with it
+            r.touches = self.closeness(r) if not r.missing else u""
         self.fill()
         self.select()
         self.log.add(u"Checks and marks restored as suggested.")
@@ -4003,11 +4012,11 @@ class AccentsDialog(object):
                 self.tree.blockSignals(False)
         b = self.ak.b
         self.log.add(u"Placed the diacritics of %s as on %s: %s." % (
-            b(counted(len(touched), u"letter")), b(r.char), u" ".join(self.ak.html(t.char) for t in touched)), "done")
+            b(counted(len(touched), u"letter")), b(r.char), self.ak.glyph_links([t.char for t in touched])), "done")
         if close:
             self.log.add(u"%s %s within %d units of %s letter or another mark: %s. Look at %s." % (
                 b(counted(len(close), u"letter")), u"comes" if len(close) == 1 else u"come", round(TOUCH_SHARE * 1000),
-                u"its" if len(close) == 1 else u"their", b(u" ".join(close)), u"it" if len(close) == 1 else u"them"),
+                u"its" if len(close) == 1 else u"their", self.ak.glyph_links(close), u"it" if len(close) == 1 else u"them"),
                 "warning")
         self.fill_strip(r)
         self.update_buttons()
@@ -4064,6 +4073,36 @@ class AccentsDialog(object):
             self.refresh_item(item, r)
             self.tree.blockSignals(False)
         self.update_buttons()
+
+    def neighbor_double_clicked(self, role):
+        """A letter beside the edited glyph double-clicked: that letter selected in the list, when it is one
+        with diacritics of its own (the sibling); the plain letter has none to place."""
+        scene = self.editor.scene
+        if scene is None or role != "after":
+            return
+        sibling = scene["letters"][1]
+        other = next((r for r in self.recipes if r.name == sibling and not r.missing), None)
+        if other is not None:
+            self.select_recipe(other)
+
+    def select_recipe(self, recipe):
+        """recipe's row selected (its section opened) and shown."""
+        item = self.item_of(recipe)
+        if item is None:
+            return False
+        parent = item.parent()
+        if parent is not None:
+            parent.setExpanded(True)
+        self.tree.setCurrentItem(item)
+        self.tree.scrollToItem(item)
+        return True
+
+    def log_link(self, target):
+        """A glyph named in the log clicked: its row selected (the log lists letters to look at)."""
+        ch = self.ak.linked_char(target)
+        other = next((r for r in self.recipes if r.char == ch), None) if ch else None
+        if other is None or not self.select_recipe(other):
+            self.log.add(u"%s is not in the list now." % self.ak.b(ch or target), "warning")
 
     def neighbor_clicked(self, role):
         """The letter beside the edited glyph clicked: their pair in Auto Kerning, once the glyph is built."""
@@ -4353,6 +4392,18 @@ class AccentsDialog(object):
             self.log.add(u"Rebuilt %s from %s letter and marks, in place: %s. <i>Edit &gt; Undo</i> takes %s back." % (
                 b(counted(len(rebuilt), u"glyph")), u"its" if len(rebuilt) == 1 else u"their",
                 self.ak.html(u"".join(rebuilt)), u"it" if len(rebuilt) == 1 else u"them"), "done")
+        close = []
+        for r in chosen:  # built in spite of a mark too close: named, to look at
+            if r.char in made or r.char in rebuilt:
+                try:
+                    if self.closeness(r):
+                        close.append(r.char)
+                except Exception:
+                    pass
+        if close:
+            self.log.add(u"%s built with a mark within %d units of %s letter or another mark: %s. Look at %s." % (
+                b(counted(len(close), u"glyph")), round(TOUCH_SHARE * 1000), u"its" if len(close) == 1 else u"their",
+                self.ak.glyph_links(close), u"it" if len(close) == 1 else u"them"), "warning")
         if skipped:
             self.log.add(u"%s had been made meanwhile and %s left as %s." % (
                 b(u"".join(skipped)), u"was" if len(skipped) == 1 else u"were",

@@ -305,12 +305,41 @@ def feature_text(tag, old, rules):
     return u"\n".join(kept[:closing] + block + kept[closing:]) + u"\n"
 
 
-def texts_for(trims, old_texts, palt_on=True, halt_on=True):
-    """{tag: new code} for palt and halt from the checked trims."""
+def font_positioned(tag, text):
+    """The glyphs a feature's own code (outside FreeLab's block) positions one by one (pos a-hira <...>;
+    pos [a b] <...>;): FreeLab's rules for them would be a second value, which the compiler refuses
+    ("Duplicate single positioning glyph with different values")."""
+    import re
+    begin, end = BEGIN % tag, END % tag
+    found, inside = set(), False
+    for line in (text or u"").splitlines():
+        stripped = line.split(u"#")[0].strip() if line.strip() not in (begin, end) else line.strip()
+        if line.strip() == begin:
+            inside = True
+            continue
+        if line.strip() == end:
+            inside = False
+            continue
+        if inside or not stripped.startswith(u"pos"):
+            continue
+        match = re.match(u"pos\\s+(\\[[^\\]]*\\]|[^\\s\\[<]+)", stripped)
+        if not match:
+            continue
+        target = match.group(1).strip(u"[]").split()
+        found.update(name for name in target if not name.startswith(u"@"))
+    return found
+
+
+def texts_for(trims, old_texts, palt_on=True, halt_on=True, kept=None):
+    """{tag: new code} for palt and halt from the checked trims. Glyphs the feature's own code positions
+    already keep it (no second value); kept, when given, gets {tag: [their names]}."""
     chosen = [t for t in trims if t.checked]
     new = {}
     for tag, on, value in (("palt", palt_on, lambda t: t.palt), ("halt", halt_on, lambda t: t.halt)):
-        rules = [value_rule(t.name, value(t)) for t in chosen if value(t)] if on else []
+        own = font_positioned(tag, old_texts.get(tag))
+        if kept is not None and on:
+            kept[tag] = [t.name for t in chosen if value(t) and t.name in own]
+        rules = [value_rule(t.name, value(t)) for t in chosen if value(t) and t.name not in own] if on else []
         old = old_texts.get(tag)
         if rules or (BEGIN % tag) in (old or u""):  # (an empty feature is not made; an old block is taken out)
             new[tag] = feature_text(tag, old, rules)
@@ -994,7 +1023,16 @@ class CJKSpacingDialog(object):
             self.log.add(u"The font changed: here is this one's list. Nothing was written.", "warning")
             return
         features = package.fgPackage.features
-        new = texts_for(self.trims, self.texts, self.palt_box.checked, self.halt_box.checked)
+        kept = {}
+        new = texts_for(self.trims, self.texts, self.palt_box.checked, self.halt_box.checked, kept)
+        for tag, names in sorted(kept.items()):
+            if names:
+                self.log.add(u"%s %s positioned by the font's own %s code already: %s %s it, not FreeLab's trim "
+                             u"(two values for one glyph do not compile): %s." % (
+                                 self.ak.b(counted(len(names), u"glyph")), u"is" if len(names) == 1 else u"are", tag,
+                                 u"it keeps" if len(names) == 1 else u"they keep", tag,
+                                 self.ak.html(u" ".join(names[:30]) + (u" \N{HORIZONTAL ELLIPSIS}" if len(names) > 30 else u""))),
+                             "warning")
         fc = None
         try:
             fc = self.ak.load_sibling("freelab_feature_code.py", "freelab_feature_code")
@@ -1025,7 +1063,7 @@ class CJKSpacingDialog(object):
         if written:
             them = u"it" if len(written) == 1 else u"them"
             self.log.add(u"Wrote %s; <i>Edit &gt; Undo</i> takes %s back.%s" % (
-                self.ak.b(u" and ".join(written)), them, self.ak.compiled_note(self.compile_box)), "done")
+                self.ak.b(u" and ".join(written)), them, self.ak.compiled_note(self.compile_box, self.log)), "done")
         if syllables:
             self.log.add(u"Set %s in every master; the font's kerning of Hangul, if any, was set for the old widths. "
                          u"<i>Edit &gt; Undo</i> takes it back." % self.ak.b(counted(syllables, u"syllable width", u"syllable widths")),

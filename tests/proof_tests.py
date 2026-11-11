@@ -237,6 +237,26 @@ class StringTests(unittest.TestCase):
         self.assertTrue(all(spaced for _, spaced in rows[u"Punctuation"]), "each mark apart")
 
 
+class ScopeTests(unittest.TestCase):
+    def test_a_script_keeps_its_letters_and_the_common_glyphs(self):
+        greek = u"".join(u(code) for code in range(0x3B1, 0x3BA))
+        font = make_font(u"abcxyz019.," + greek, extra=[u"a.ss01"], kerning={(u"a", u"b"): -10, (u"a", greek[0]): -5})
+        kept = fp.scope_names(font, ("script", u"LATIN"))
+        self.assertIn(u"a", kept)
+        self.assertIn(u"a.ss01", kept, "an alternate of a Latin letter")
+        self.assertIn(u"0", kept, "figures stay")
+        self.assertNotIn(greek[0], kept)
+        small = fp.restricted(font, kept)
+        self.assertEqual(small.kerning, {(u"a", u"b"): -10}, "pairs within the scope only")
+
+    def test_a_language_keeps_its_letters(self):
+        font = make_font(u"abcdefghijklmnopqrstuvwxyzñé .,")
+        spanish = type("L", (), {"base": [u"a", u"b", u"ñ"], "auxiliary": [u"é"]})()
+        kept = fp.scope_names(font, ("language", spanish))
+        letters = sorted(font.code_of(n) for n in kept if fp.glyph_script(font, n))
+        self.assertEqual(letters, sorted(ord(c) for c in u"abñé"))
+
+
 class SampleTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

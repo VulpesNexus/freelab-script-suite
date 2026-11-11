@@ -2815,6 +2815,7 @@ class FeatureCodeDialog(object):
                 item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsUserCheckable)
                 item.setCheckState(0, QtCore.Qt.Checked if any(form.on for form in forms) else QtCore.Qt.Unchecked)
                 tree.addTopLevelItem(item)
+                item.setFirstColumnSpanned(True)  # (its check box and count whole, not cut by the first column)
                 for form in forms:
                     child = QtGui.QTreeWidgetItem([form.name, u"", u""])
                     child.setData(0, QtCore.Qt.UserRole, u"\t" + form.name)
@@ -2822,6 +2823,12 @@ class FeatureCodeDialog(object):
                     child.setCheckState(0, QtCore.Qt.Checked if form.on else QtCore.Qt.Unchecked)
                     item.addChild(child)
             tree.resizeColumnToContents(0)
+            try:  # room for a row's indent, its check box, and its picture at least
+                least = tree.indentation * 2 + 24 + tree.iconSize.width() + 40
+                if tree.columnWidth(0) < least:
+                    tree.setColumnWidth(0, least)
+            except Exception:
+                pass
         finally:
             tree.blockSignals(False)
         if self.package is None:
@@ -3412,7 +3419,7 @@ class FeatureCodeDialog(object):
         self.make_code()
         them = u"it" if len(written) == 1 else u"them"
         self.log.add(u"Wrote %s; <i>Edit &gt; Undo</i> takes %s back.%s" % (
-            self.ak.b(u", ".join(written)), them, self.ak.compiled_note(self.compile_box)) if written else u"Wrote nothing.",
+            self.ak.b(u", ".join(written)), them, self.ak.compiled_note(self.compile_box, self.log)) if written else u"Wrote nothing.",
             "done" if written else "info")
         if skipped is not None:
             self.log.add(u"locl was not written: the prefix could not be (%s). Add these lines to the prefix in "

@@ -1020,13 +1020,16 @@ def both_thumb(path_a, path_b, colors, size=THUMB_SIZE):
 def comparison_pixmap(width, height, a, b, colors, font):
     """The selected glyph from both fonts at one scale, in three panels: the first font's (text
     color), both overlaid, the second's (highlight color); the baseline and each advance width drawn
-    thin; a font without the glyph as a dashed empty frame. a, b: (caption, path or None, advance)."""
+    thin; a font without the glyph as a dashed empty frame. a, b: (caption, path or None, advance), and
+    optionally a color glyph's parts [(path, QColor)]: its own panel draws it in its colors (the overlay
+    keeps the two comparison colors)."""
     QtCore, QtGui = _qt()
     pixmap = new_pixmap(width, height)
     text, highlight = colors["text"], colors["highlight"]
     line_height = QtGui.QFontMetrics(font).height()
     xs, ys = [], [0.0]
-    for _, path, advance in (a, b):
+    for side in (a, b):
+        path, advance = side[1], side[2]
         box = ink_box(path)
         if box is not None:
             xs += [box[0], box[2]]
@@ -1051,7 +1054,9 @@ def comparison_pixmap(width, height, a, b, colors, font):
             y0 = 12 + room_y / 2.0 + (bottom + top) / 2.0 * scale
             painter.setPen(QtGui.QPen(qcolor(GRAY, LINE_ALPHA)))
             painter.drawLine(QtCore.QPointF(index * third + 8, y0), QtCore.QPointF((index + 1) * third - 8, y0))
-            for (_, path, advance), color in drawn:
+            for side, color in drawn:
+                path, advance = side[1], side[2]
+                parts = side[3] if len(side) > 3 and len(drawn) == 1 else None
                 if path is None:
                     if len(drawn) == 1:
                         pen = QtGui.QPen(qcolor(GRAY, 200), 1.2, QtCore.Qt.DashLine)
@@ -1071,7 +1076,11 @@ def comparison_pixmap(width, height, a, b, colors, font):
                 painter.save()
                 painter.translate(x0, y0)
                 painter.scale(scale, -scale)
-                painter.fillPath(path, QtGui.QBrush(color))
+                if parts:  # a color glyph alone in its panel: its own colors
+                    for part, part_color in parts:
+                        painter.fillPath(part, QtGui.QBrush(part_color))
+                else:
+                    painter.fillPath(path, QtGui.QBrush(color))
                 painter.restore()
             painter.setFont(font)
             painter.setPen(caption_color)
@@ -1176,6 +1185,11 @@ class CompareDialog(object):
         self.choice_a = self.combo(u"The first font and master: the current font to start with. Its glyph names are "
                                    u"the ones listed, and its glyphs are flagged by a right-click.")
         settings.addWidget(self.choice_a)
+        self.swap_button = QtGui.QToolButton()
+        self.swap_button.setText(u"\N{LEFTWARDS ARROW OVER RIGHTWARDS ARROW}")
+        self.swap_button.setAutoRaise(True)
+        self.swap_button.setToolTip(u"Swap the two fonts (and compare again, if they were compared).")
+        settings.addWidget(self.swap_button)
         settings.addWidget(QtGui.QLabel("with"))
         self.choice_b = self.combo(u"The second font and master: another open font, or another master of the first.")
         settings.addWidget(self.choice_b)
@@ -1223,6 +1237,7 @@ class CompareDialog(object):
         self.close_button.connect("clicked()", dialog.close)
         self.compare_button.connect("clicked()", self.compare)
         self.open_button.connect("clicked()", self.open_font)
+        self.swap_button.connect("clicked()", self.swap)
         self.choice_a.connect("currentIndexChanged(int)", lambda index: self.choice_changed())
         self.choice_b.connect("currentIndexChanged(int)", lambda index: self.choice_changed())
         self.tabs.connect("currentChanged(int)", self.switch_page)
@@ -1511,6 +1526,21 @@ class CompareDialog(object):
                 self.log.add(u"Could not choose the font just opened: %s" % self.ak.html(exc), "error")
         self.open_look = look
         QtCore.QTimer.singleShot(self.OPEN_WAIT_MS, look)
+
+    def swap(self):
+        """The first font and the second exchanged; compared again when they had been."""
+        a, b = self.choice_a.currentIndex, self.choice_b.currentIndex
+        if a < 0 or b < 0:
+            return
+        compared = self.sides is not None
+        self.filling = True
+        try:
+            self.choice_a.setCurrentIndex(b)
+            self.choice_b.setCurrentIndex(a)
+        finally:
+            self.filling = False
+        if compared:
+            self.compare()
 
     def read_fonts(self):
         """The combo boxes filled with the open fonts and their masters, the choices kept where they still
@@ -1985,7 +2015,14 @@ class CompareDialog(object):
             for side, name in ((first, r.a), (second, r.b)):
                 picture = side.paths.get(name) if name is not None else None
                 path, advance = picture if picture else (None, 0.0)
-                sides.append((side.label, path, advance))
+                parts = None
+                if path is not None:
+                    try:
+                        layer = self.layer_of(side.package, name, side.master)
+                        parts = self.ak.layer_parts(layer) if layer is not None else None
+                    except Exception:
+                        parts = None
+                sides.append((side.label, path, advance, parts))
             width = int(_prop(self.comparison, "width") or 0) or 600
             height = int(_prop(self.comparison, "height") or 0) or 400
             self.comparison.setPixmap(comparison_pixmap(width, height, sides[0], sides[1], self.colors(),
