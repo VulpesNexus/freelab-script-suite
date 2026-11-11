@@ -31,10 +31,11 @@ PY27_FILES = (
     "cjk/freelab_cjk_spacing.py", "tests/cjk_tests.py", "tests/features_tests.py",
     "checks/freelab_font_check.py", "checks/language_coverage.json", "tests/fontcheck_tests.py",
     "compare/freelab_font_compare.py", "tests/compare_tests.py", "proof/freelab_proof.py", "tests/proof_tests.py",
+    "windows/freelab_tabs.py", "tests/tabs_tests.py",
 )
 PY27_SUITES = ("tests/darkmode_tests.py", "tests/kern_tests.py", "tests/spacing_tests.py", "tests/glyphtools_tests.py",
                "tests/cjk_tests.py", "tests/features_tests.py", "tests/fontcheck_tests.py",
-               "tests/compare_tests.py", "tests/proof_tests.py")
+               "tests/compare_tests.py", "tests/proof_tests.py", "tests/tabs_tests.py")
 
 
 def run_py3() -> tuple[bool, list[str]]:

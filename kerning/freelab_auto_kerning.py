@@ -1257,7 +1257,7 @@ def history_state(package):
 # lists a folder's scripts by file name and has no separators of its own.
 MENU_GROUPS = (("Diacritics", "Auto Spacing", "CJK Spacing", "Auto Kerning", "Kerning Check", "Font Check", "Font Compare",
                 "Feature Code", "Proof"),
-               ("Toggle Dark Mode", "Dark Mode Settings"),
+               ("Toggle Dark Mode", "Dark Mode Settings", "Toggle Tab Docking"),
                ("Start MCP Listener", "Stop MCP Listener", "Start Listener", "Stop Listener"))  # (FreeLab MCP's, old names too)
 MENU_TITLE, SCRIPTS_MENU = "FreeLab", "menuScripts"
 MENU_ORDER_PROP = "freelab_menu_order"

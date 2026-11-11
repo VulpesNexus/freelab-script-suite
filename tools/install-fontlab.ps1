@@ -44,6 +44,7 @@ else { $startup = Join-Path $env:LOCALAPPDATA 'FontLab\FontLab 7\startupScript.p
 $files = @(
     @{ From = 'darkmode\freelab_dark_mode.py'; Name = 'freelab_dark_mode.py' },
     @{ From = 'darkmode\freelab_dark_mode_settings.py'; Name = 'freelab_dark_mode_settings.py' },
+    @{ From = 'windows\freelab_tabs.py'; Name = 'freelab_tabs.py' },
     @{ From = 'kerning\freelab_auto_kerning.py'; Name = 'freelab_auto_kerning.py' },
     @{ From = 'kerning\freelab_kerning_check.py'; Name = 'freelab_kerning_check.py' },
     @{ From = 'checks\freelab_font_check.py'; Name = 'freelab_font_check.py' },
@@ -320,6 +321,7 @@ if ((Test-Path $native) -and (Test-Path $BinDir)) {
 
 $darkPath = ConvertTo-PyLiteral (Join-Path $scripts 'freelab_dark_mode.py')
 $kernPath = ConvertTo-PyLiteral (Join-Path $scripts 'freelab_auto_kerning.py')
+$tabsPath = ConvertTo-PyLiteral (Join-Path $scripts 'freelab_tabs.py')
 $block = @"
 $begin (managed by FreeLab tools/install-fontlab.ps1; -Uninstall removes it)
 def _freelab_tools_load(name, path):
@@ -361,6 +363,12 @@ def _freelab_tools_startup():
             getattr(tools, "hook_menu_order_soon", tools.hook_menu_order)()
     except Exception as exc:
         print("FreeLab menu at startup: %s" % (exc,))
+    try:
+        tabs = _freelab_tools_load("freelab_tabs", $tabsPath)
+        if tabs is not None:
+            tabs.startup()  # document tabs reorder and dock back as Photoshop's do (unless switched off)
+    except Exception as exc:
+        print("FreeLab tab docking at startup: %s" % (exc,))
 try:
     _freelab_tools_startup()
 except Exception:
