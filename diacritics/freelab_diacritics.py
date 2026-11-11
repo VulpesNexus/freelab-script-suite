@@ -967,9 +967,31 @@ def placed_mark_box(recipe, index, ink_of, placement, metrics):
     return parts_box(parts[first:last], ink_of)
 
 
+# Marks joined to their letter line up only with their own kind, by the edge fonts keep level (the
+# corpus's 140 Latin fonts: ogonek bottoms level across A, E, I, U in half of them exactly, three in four
+# within 6/1000 of the em; true cedillas (C, S, T) within 5; horn tops on O and U level; the vertical
+# caron's top level on d, l, t, and the capital L's set 37/1000 lower, its own group by case)
+ATTACHED_EDGES = {"ogonek": "bottom", "cedilla": "bottom", "horn": "top", "vertical caron": "top"}
+
+
+def attached_kind(mark):
+    """"ogonek", "cedilla" (a true one, not the comma fonts draw for it), "horn", "vertical caron", or None."""
+    if mark.root == "ogonek":
+        return "ogonek"
+    if mark.root == "cedilla" and not mark.convention:
+        return "cedilla"
+    if mark.side == "right" or mark.root == "horn":
+        return "horn"
+    if mark.side == "topright":
+        return "vertical caron"
+    return None
+
+
 def line_up_exclusion(recipe, index):
     """Why a recipe's mark is never lined up with others, or None: placed by a rule of its own."""
     mark = recipe.marks[index]
+    if attached_kind(mark):
+        return u"joined to its letter (ogonek, cedilla, horn, vertical caron): each lines up with its own kind"
     if mark.side not in LINE_UP_SIDES:
         return u"placed beside or on its letter (horn, vertical caron, Greek capitals' marks, kana)"
     if mark.root in LINE_UP_ATTACHED:
@@ -988,6 +1010,9 @@ def line_up_plan(recipes, recipe, index, ink_of, placement, metrics, upm):
     index, how far it moves up)] for the marks of its group; [(other, why)] for the same side and case
     left as they are (their own rule, stacked, or on a taller or shorter letter)."""
     mark = recipe.marks[index]
+    kind = attached_kind(mark)
+    if kind is not None:
+        return line_up_attached(recipes, recipe, index, kind, ink_of, placement, metrics)
     box = placed_mark_box(recipe, index, ink_of, placement, metrics)
     base = ink_of(recipe.base)
     if box is None or base is None or line_up_exclusion(recipe, index):
@@ -1046,6 +1071,37 @@ def component_marks(layer):
         except Exception:
             continue
     return found[1:]
+
+
+def line_up_attached(recipes, recipe, index, kind, ink_of, placement, metrics):
+    """line_up_plan for a mark joined to its letter: the same kind on letters of the same case, its far
+    edge (ATTACHED_EDGES) level with the reference's; a letter where it is stacked with another mark on
+    its side is left out."""
+    box = placed_mark_box(recipe, index, ink_of, placement, metrics)
+    if box is None:
+        return None, [], []
+    bottom = ATTACHED_EDGES[kind] == "bottom"
+    line = box[1] if bottom else box[3]
+    case = case_of(recipe.char)
+    moves, left_out = [], []
+    for other in recipes:
+        if other is recipe or other.missing or case_of(other.char) != case:
+            continue
+        at = next((i for i, m in enumerate(other.marks) if attached_kind(m) == kind), None)
+        if at is None:
+            continue
+        side = other.marks[at].side
+        if len([m for m in other.marks if m.side == side]) > 1:
+            left_out.append((other, u"stacked with another mark on the same side"))
+            continue
+        other_box = placed_mark_box(other, at, ink_of, placement, metrics)
+        if other_box is None:
+            left_out.append((other, u"not placed"))
+            continue
+        rise = line - (other_box[1] if bottom else other_box[3])
+        if abs(rise) >= 0.5:
+            moves.append((other, at, rise))
+    return line, moves, left_out
 
 
 def mark_ranges(recipe):
@@ -3739,7 +3795,10 @@ class AccentsDialog(object):
         self.reset_marks_button.setText(u"Reset diacritic" if r is not None and len(r.marks) == 1 else u"Reset diacritics")
         index = self.line_up_index(r)
         ak.enable(self.line_up_button, index is not None)
-        self.line_up_button.setText(u"Line up marks %s" % r.marks[index].side if index is not None else u"Line up marks")
+        kind = attached_kind(r.marks[index]) if index is not None else None
+        self.line_up_button.setText(u"Line up marks" if index is None else (
+            u"Line up %ss" % ("vertical caron" if kind == "vertical caron" else kind) if kind else
+            u"Line up marks %s" % r.marks[index].side))
 
     def line_up_index(self, r):
         """The mark of r to line others up with: the one selected in the editor, else its first above or
@@ -3749,7 +3808,7 @@ class AccentsDialog(object):
         chosen = self.editor.selected
         order = ([chosen] if chosen is not None and chosen < len(r.marks) else []) + list(range(len(r.marks)))
         for index in order:
-            if line_up_exclusion(r, index) is None:
+            if line_up_exclusion(r, index) is None or attached_kind(r.marks[index]):
                 return index
         return None
 
@@ -3770,7 +3829,10 @@ class AccentsDialog(object):
         if line is None:
             return
         side = r.marks[index].side
-        edge = u"bottom" if side == "above" else u"top"
+        kind = attached_kind(r.marks[index])
+        edge = (ATTACHED_EDGES[kind] if kind else (u"bottom" if side == "above" else u"top"))
+        if kind:
+            side = u"(%ss)" % kind
         group = u"capitals" if case_of(r.char) == "upper" else u"lowercase letters"
         for other, at, rise in moves:
             change = list(other.adjust.get(at, [0.0, 0.0, 1.0, 1.0]))

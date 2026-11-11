@@ -363,6 +363,27 @@ class LineUpTests(unittest.TestCase):
         self.assertIsNotNone(ac.line_up_exclusion(ccedil, 0), "a cedilla keeps its own place")
 
 
+class AttachedLineUpTests(unittest.TestCase):
+    def test_ogoneks_line_up_with_ogoneks_only(self):
+        model = {"format": 1, "gap": {}, "side_offset": {}}
+        ink = {"a": ac.Ink(40, -10, 460, 480, advance=500), "e": ac.Ink(40, -10, 440, 470, advance=480),
+               "ogonek": ac.Ink(0, -200, 90, 0), "acute": ac.Ink(0, 500, 100, 600)}.get
+        placement = ac.Placement(1000, model)
+
+        def recipe(code, base, *marks):
+            return ac.Recipe(ac.unichr_(code), base=base,
+                             marks=[ac.Mark(root, side, [(glyph, 1.0, 1.0, 0.0, 0.0)]) for root, side, glyph in marks])
+        aogonek = recipe(0x105, "a", ("ogonek", "below", "ogonek"))
+        eogonek = recipe(0x119, "e", ("ogonek", "below", "ogonek"))
+        eacute = recipe(0xE9, "e", ("acute", "above", "acute"))
+        aogonek.adjust = {0: [0.0, -15.0, 1.0, 1.0]}  # lowered by hand: the reference
+        line, moves, left_out = ac.line_up_plan([aogonek, eogonek, eacute], aogonek, 0, ink, placement, None, 1000.0)
+        self.assertEqual([other.char for other, _, _ in moves], [eogonek.char], "the other ogonek, not the acute")
+        eogonek.adjust = {0: [0.0, moves[0][2], 1.0, 1.0]}
+        self.assertAlmostEqual(ac.placed_mark_box(eogonek, 0, ink, placement, None)[1], line, 3, "bottoms level")
+        self.assertIn(u"joined", ac.line_up_exclusion(aogonek, 0), "never lined up with the marks below at large")
+
+
 class AnchorTests(unittest.TestCase):
     MODEL = {"anchors": {"thai top": {"base_gap": -0.06, "base_offset": 0.43, "mark_gap": 0.1, "mark_offset": 0.45,
                                       "mark_to_mark": 0.01, "fonts": 7},
