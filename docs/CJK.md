@@ -7,7 +7,7 @@
 - **palt** (proportional alternate widths): each full-width kana, CJK punctuation mark, and full-width form is trimmed to its ink and the sidebearings the open-licensed CJK fonts give theirs. Applications turn palt on for proportional Japanese (InDesign's *Proportional Metrics*, CSS `font-feature-settings: "palt"`).
 - **halt** (alternate half widths): each punctuation mark set in half the em, as those fonts set it: an opening bracket keeps its right half, a comma or full stop its left.
 
-Each rule is a single adjustment, `pos a-hira <-70 0 -130 0>;`: the ink moves by the first number (x placement) and the width changes by the third (x advance). They sit between FreeLab's marker lines in palt and halt; the rest of each feature is kept, and FontLab's automatic block is handed back (its `#> feature` line becomes `#/> feature`), as Feature Code does. Writing is one step of FontLab's History: *Edit > Undo* takes it back. Compile the features in FontLab's *Features* panel to try them.
+Each rule is a single adjustment, `pos a-hira <-70 0 -130 0>;`: the ink moves by the first number (x placement) and the width changes by the third (x advance). They sit between FreeLab's marker lines in palt and halt; the rest of each feature is kept, and FontLab's automatic block is handed back (its `#> feature` line becomes `#/> feature`), as Feature Code does. Writing is one step of FontLab's History: *Edit > Undo* takes it back. With *Compile after writing* (on by default) the features are compiled right after, by the *Features* panel's own *Compile* button (FontLab has no call for it; the panel must have been opened once in the session); off, compile them in the *Features* panel to try them.
 
 ## Where the trims come from
 

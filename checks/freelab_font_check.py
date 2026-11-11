@@ -185,7 +185,17 @@ def load_languages(path=None):
     texts = data["texts"]
     statuses = data.get("status", {})
     found = []
+    # An orthography without an autonym of its own takes another one's of the same language (Japanese in
+    # hiragana: its kanji one, 日本語), one of the same script family first: Hyperglot gives some only once.
+    families = {u"Hiragana": u"japanese", u"Katakana": u"japanese", u"Kanji": u"japanese"}
+    named = {}
+    for iso, name, autonym, script, _, _, _, _, _, _ in data["orthographies"]:
+        if autonym:
+            named.setdefault((iso, families.get(script, script)), autonym)
+            named.setdefault((iso, None), autonym)
     for iso, name, autonym, script, status, validity, speakers, base, auxiliary, marks in data["orthographies"]:
+        if not autonym:
+            autonym = named.get((iso, families.get(script, script))) or named.get((iso, None)) or u""
         found.append(Language(iso, name, autonym, script, statuses.get(status, status), validity, speakers,
                               texts[base].split(u" ") if texts[base] else [],
                               texts[auxiliary].split(u" ") if texts[auxiliary] else [], marks))
