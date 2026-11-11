@@ -549,9 +549,9 @@ class AutoSpacingDialog(object):
         upm = glyphs.upm
         scripts = [script for script, _ in ak.SCRIPTS if all(ch in names for ch in ak.SCRIPT_TUNING[script])
                    and (script != "kana" or self.kana_proportional(package, master, names, upm))]
-        if not scripts:  # (Latin's l, n, and o first: most fonts have them)
-            raise ValueError(u"this font has no \N{LEFT DOUBLE QUOTATION MARK}%s\N{RIGHT DOUBLE QUOTATION MARK}: "
-                             u"its spacing is what the others are measured by." % next(ch for ch in ak.TUNING if ch not in names))
+        if not scripts:  # (Latin's l, n, and o named: most fonts have them)
+            raise ValueError(ak.missing_references(package, ak.TUNING, [ch for ch in ak.TUNING if ch not in names],
+                                                   u"Auto Spacing", u"their spacing is what the others are measured by"))
         image_of = lambda ch: glyphs.image(names[ch])
         core = ak.Core()
         self.settle_passes = 1
@@ -787,6 +787,7 @@ class AutoSpacingDialog(object):
         self.ak.enable(self.restore_button, any(self.first_checks.get(s.name, s.checked) != s.checked for s in self.listed))
         self.ak.enable(self.glyph_window_button, self.selected() is not None)
         self.ak.enable(self.kerning_button, bool(self.spaced) and not self.busy)
+        self.ak.enable(self.follow, bool(items))  # nothing listed: nothing for it to act on
 
     def check_kerning(self):
         """Kerning Check on the glyphs the last spacing changed."""

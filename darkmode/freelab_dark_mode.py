@@ -1108,6 +1108,75 @@ def dark_icon(icon, owner=None):
     return result
 
 
+LOGO_KEEP_CHROMA = 48  # max - min of the channels: a logo's colored part (its blue T, its teal O), kept as drawn
+LOGO_PALE = 120  # a colored pixel with every channel this light or lighter is smoothing toward white
+
+
+def _chroma(value):
+    r, g, b = (value >> 16) & 255, (value >> 8) & 255, value & 255
+    return max(r, g, b) - min(r, g, b)
+
+
+def keep_colors(original, mapped):
+    """mapped with original's clearly colored pixels put back (both Format_ARGB32, one size): a logo's
+    colors are its own, its dark shading included (mapped as ink, a blue T's navy turned pale). Its
+    edges were smoothed toward white: a paler pixel beside a colored one becomes that color, as
+    transparent as it was mixed with white, so the edge is smooth on any row."""
+    width, height = min(original.width(), mapped.width()), min(original.height(), mapped.height())
+    kept = set()
+    for y in range(height):
+        for x in range(width):
+            value = original.pixel(x, y)
+            darkest = min((value >> 16) & 255, (value >> 8) & 255, value & 255)
+            if (value >> 24) & 255 and _chroma(value) >= LOGO_KEEP_CHROMA and darkest < LOGO_PALE:
+                mapped.setPixel(x, y, value)
+                kept.add((x, y))
+    for y in range(height):
+        for x in range(width):
+            if (x, y) in kept:
+                continue
+            value = original.pixel(x, y)
+            alpha = (value >> 24) & 255
+            if not alpha:
+                continue
+            near = [original.pixel(x + dx, y + dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)
+                    if (x + dx, y + dy) in kept]
+            if not near:
+                continue
+            color = max(near, key=_chroma)
+            shares = []
+            for shift in (16, 8, 0):
+                c, v = (color >> shift) & 255, (value >> shift) & 255
+                if 255 - c >= 40:
+                    if v < c - 8:
+                        shares = None  # darker than the color: no mix with white (another part of the logo)
+                        break
+                    shares.append(max(0.0, min(1.0, (255.0 - v) / (255.0 - c))))
+            if not shares:
+                continue
+            share = sum(shares) / len(shares)
+            mapped.setPixel(x, y, (int(round(share * alpha)) << 24) | (color & 0xffffff))
+    return mapped
+
+
+def dark_logo(icon, map_grays=True):
+    """A logo (a picture in a list: Export Profiles' formats) mapped as icons are, its colors kept;
+    without map_grays, only its colored edges cleaned of their smoothing toward white."""
+    QIcon, QPixmap, QImage = _gui("QIcon"), _gui("QPixmap"), _gui("QImage")
+    result = QIcon()
+    sizes = list(icon.availableSizes()) or [_core("QSize")(32, 32)]
+    for size in sizes:
+        for mode in (QIcon.Normal, QIcon.Disabled, QIcon.Active, QIcon.Selected):
+            for icon_state in (QIcon.Off, QIcon.On):
+                pixmap = icon.pixmap(size, mode, icon_state)
+                if pixmap.isNull():
+                    continue
+                original = pixmap.toImage().convertToFormat(QImage.Format_ARGB32)
+                mapped = map_image(original, anchors="icon") if map_grays else original.copy()
+                result.addPixmap(QPixmap.fromImage(keep_colors(original, mapped)), mode, icon_state)
+    return result
+
+
 def dark_pixmap(pixmap):
     """A label's image mapped; white artwork (FontLab's logo) stays as it is. Button icons do not get
     that rule: a toggled button's white icon, kept, turned black under the button's ink effect."""
@@ -1420,13 +1489,18 @@ def _logo_icon(icon, state):
     large = any(s.width() >= LOGO_MIN_SIDE for s in icon.availableSizes())  # a picture, not a line icon
     if mapped:
         return icon if large else False  # dark already: its own smoothing, over the dark row
-    if icon_is_swatch(icon) or not icon_is_gray(icon):
+    if icon_is_swatch(icon):
         return icon  # as FontLab draws it
+    if not icon_is_gray(icon):  # colorful: as drawn, its colored edges cleaned (smoothed toward white, ragged on dark)
+        clean = state["icon_cache"].get(("clean", key))
+        if clean is None:
+            clean = state["icon_cache"][("clean", key)] = dark_logo(icon, False) if large else icon
+        return clean
     if not large:
         return False
     dark = state["icon_cache"].get(key)
     if dark is None:
-        dark = state["icon_cache"][key] = dark_icon(icon)
+        dark = state["icon_cache"][key] = dark_logo(icon)
         state["mapped_keys"].add(dark.cacheKey())
         state["originals"][dark.cacheKey()] = icon
     return dark
@@ -1494,7 +1568,8 @@ def _swap_item_icons(widget):
             continue
         new = state["icon_cache"].get(key)
         if new is None:
-            new = state["icon_cache"][key] = dark_icon(icon)
+            large = any(s.width() >= LOGO_MIN_SIDE for s in icon.availableSizes())  # a logo: its colors kept
+            new = state["icon_cache"][key] = dark_logo(icon) if large else dark_icon(icon)
             state["mapped_keys"].add(new.cacheKey())
             state["originals"][new.cacheKey()] = icon
         record["item_icons"] = True

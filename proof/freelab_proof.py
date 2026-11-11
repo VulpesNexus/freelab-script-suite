@@ -279,7 +279,7 @@ class ProofFont(object):
     ink(name): (xmin, xmax) of the glyph's outline, or None (zero-width glyphs are centered by it)."""
 
     def __init__(self, family, master, upm, glyphs, codes, advance, kerning=None, ascender=None, descender=None,
-                 ink=None):
+                 ink=None, colored=None):
         self.family, self.master = family, master
         self.upm = float(upm or 1000)
         self.glyphs = list(glyphs)
@@ -297,6 +297,7 @@ class ProofFont(object):
         if self.ascender - self.descender <= 0:
             self.ascender, self.descender = 0.8 * self.upm, -0.2 * self.upm
         self._ink = ink
+        self._colored = colored
 
     def advance(self, name):
         if name not in self.widths:
@@ -312,6 +313,20 @@ class ProofFont(object):
 
     def width(self, name):
         return self.advance(name) or 0.0
+
+    def colored(self, name):
+        """Drawn in colors of its own (a color font's emoji)."""
+        try:
+            return bool(self._colored(name)) if self._colored is not None else False
+        except Exception:
+            return False
+
+    def textual(self, name):
+        """In the font, with ink, and drawn in one ink: a letter, figure, or mark of punctuation a text
+        sets (an emoji font's blank keycap figures and its color punctuation are not)."""
+        if not self.has(name) or self.colored(name):
+            return False
+        return self._ink is None or self.ink(name) is not None
 
     def kern(self, left, right):
         return self.kerning.get((left, right), 0)
@@ -831,7 +846,7 @@ def spacing_strings(font):
     for name in font.glyphs:
         code = font.code_of(name)
         kind = script_case(code) if code is not None else None
-        if kind is None or kind[0] not in SPACED_SCRIPTS or not font.has(name) or category(code) == u"Lm":
+        if kind is None or kind[0] not in SPACED_SCRIPTS or not font.textual(name) or category(code) == u"Lm":
             continue
         controls = font.controls(kind)
         if controls is None:
@@ -903,9 +918,12 @@ def figure_rows(font):
     for code, name in sorted(font.cmap.items()):
         if font.has(name) and code > 0x20:
             by_kind.setdefault(category(code), []).append(name)
-    digits = by_kind.get(u"Nd", [])
-    punctuation = [name for kind in (u"Pc", u"Pd", u"Ps", u"Pe", u"Pi", u"Pf", u"Po") for name in by_kind.get(kind, [])]
-    symbols = [name for kind in (u"Sc", u"Sm", u"So") for name in by_kind.get(kind, [])]
+    digits = [name for name in by_kind.get(u"Nd", []) if font.textual(name)]
+    marks = [name for kind in (u"Pc", u"Pd", u"Ps", u"Pe", u"Pi", u"Pf", u"Po") for name in by_kind.get(kind, [])]
+    punctuation = [name for name in marks if font.textual(name)]
+    # a color font's emoji coded as figures or punctuation (‼, 〰) are shown with its symbols
+    symbols = [name for name in by_kind.get(u"Nd", []) + marks if font.colored(name)]
+    symbols += [name for kind in (u"Sc", u"Sm", u"So") for name in by_kind.get(kind, [])]
     upper, lower = font.controls(("LATIN", "upper")), font.controls(("LATIN", "lower"))
     capital = upper[0] if upper else None
     small = lower[0] if lower else None
@@ -1860,6 +1878,13 @@ class ProofDialog(object):
                 self.color_parts[key] = None
         return self.color_parts[key]
 
+    def colored(self, master, name):
+        """Drawn in colors of its own: color layers (COLR), or a picture (SVG or bitmap)."""
+        if self.parts(master, name) is not None:
+            return True
+        layer = self.layer(master, name)
+        return layer is not None and self.ak.is_picture_layer(layer)
+
     def ink(self, master, name):
         path = self.path(master, name)
         if path is None or path.isEmpty():
@@ -1902,7 +1927,8 @@ class ProofDialog(object):
             self.log.add(u"Could not read master %s's kerning: %s" % (self.ak.b(master), self.ak.html(exc)), "warning")
         family = u"%s" % (getattr(package, "tfn", None) or u"Font")
         font = ProofFont(family, master, package.upm, names, codes, advance, kerning,
-                         metric("ascender_value"), metric("descender_value"), lambda name: self.ink(master, name))
+                         metric("ascender_value"), metric("descender_value"), lambda name: self.ink(master, name),
+                         lambda name: self.colored(master, name))
         self.fonts[master] = font
         return font
 

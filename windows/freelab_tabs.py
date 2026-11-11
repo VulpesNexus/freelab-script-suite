@@ -4,20 +4,24 @@
 
 FontLab 7 turns a tab into a window of its own whenever it is dropped anywhere, even on the tab
 bar it came from, and only Window > Docking > Merge Window brings it back. FontLab handles the drag
-itself (before any Qt event filter sees the mouse), so this works from the two signals its tab
-widgets send, tabDragged and tabDropped:
+itself, before any Qt event filter sees the mouse moves (and takes the tab out of its bar as the
+drag starts), so this follows the drag from outside: a press on a document tab notes the tab, and a
+short timer then watches the mouse until its button is released.
 
-- While a tab of the main window is dragged along the tab bar, it moves to the place under the
-  mouse, as Photoshop's tabs do.
-- A tab dropped on or near the main window's tab bar (within TEAR_MARGIN pixels) goes back into
-  the main window at that place, from the main window or from a window of its own. FontLab makes
-  the window first; it is merged back at once.
-- A tab dropped farther away becomes a window, as before.
-- A window of its own gets a Dock button beside its tabs, and a double-click on one of its tabs
-  docks it too.
+- While the mouse is on or near the main window's tab bar (within TEAR_MARGIN pixels), a marker
+  shows where the tab will go.
+- Released there, the tab goes into the main window at that place, from the main window or from a
+  window of its own (FontLab may make that window first; it is merged back at once, and a window
+  the tab left empty is closed).
+- Released farther away, the tab is a window of its own, as FontLab makes it.
+- A window of its own gets a Dock button beside its tabs; a double-click on one of its tabs docks it.
 
 Runs at FontLab's start (FreeLab's startup block). Scripts > FreeLab > Toggle Tab Docking switches
 it off and on; the choice is kept in %LOCALAPPDATA%\\FreeLab\\tabs.json.
+
+Every timer, connection, and filter calls through _dispatcher, which looks the module up when it is
+called: Python 2 empties a module's globals once nothing holds it, and a reloaded module (or a
+second copy) must not leave callbacks that fail.
 """
 from __future__ import absolute_import, division, print_function
 
@@ -26,10 +30,14 @@ import os
 import sys
 
 MODULE_NAME = "freelab_tabs"
-TEAR_MARGIN = 48  # pixels around the main tab bar where a dropped tab docks back (Photoshop's feel)
+TEAR_MARGIN = 40  # pixels around the main tab bar where a released tab docks back (Photoshop's feel)
 WATCH_MS = 1000  # how often new tab widgets (a new window, a reopened font) are looked for
+POLL_MS = 25  # how often a drag in progress is followed
+DOCK_DELAY_MS = 60  # after the release, so FontLab has finished its own drop first
+MARKER_WIDTH = 4
 MAIN_FRAME_NAME = "YDropTargetContainer"  # the main window's document area
 WATCHED_PROP = "freelab_tabs"
+LEAVE_ALONE_PROP = "freelabLeaveAlone"  # dark mode leaves the marker as drawn
 DOCK_BUTTON_NAME = "freelabDockButton"
 MERGE_WINDOW = "actionMerge_Window"
 
@@ -42,9 +50,31 @@ def _qt():
 def _state():
     state = getattr(sys, "_freelab_tabs_state", None)
     if state is None:
-        state = sys._freelab_tabs_state = {"on": False, "held": [], "pending": [], "drag": None}
-    state.setdefault("pending", [])
+        state = sys._freelab_tabs_state = {"on": False}
+    for key, value in (("held", []), ("pending", []), ("drag", None)):
+        state.setdefault(key, value)
     return state
+
+
+def _dispatcher():
+    """call(name, *args): the function of that name in this module as loaded now, called while tab
+    docking is on; errors printed, never raised (into a Qt slot or filter). Uses only what its
+    closure holds, so it keeps working when this copy of the module is gone."""
+    modules, name, holder = sys.modules, MODULE_NAME, sys
+
+    def call(function, *args):
+        try:
+            state = getattr(holder, "_freelab_tabs_state", None) or {}
+            module = modules.get(name) or state.get("module")
+            if module is not None and state.get("on"):
+                return getattr(module, function)(*args)
+        except Exception as exc:
+            try:
+                print("FreeLab tab docking: %s" % (exc,))
+            except Exception:
+                pass
+        return None
+    return call
 
 
 def state_dir():
@@ -90,8 +120,7 @@ def _class(widget):
 
 def main_window():
     QtGui = _qt()[1]
-    app = QtGui.QApplication.instance()
-    for widget in app.topLevelWidgets():
+    for widget in QtGui.QApplication.instance().topLevelWidgets():
         if widget.inherits("QMainWindow") and _class(widget) == "MainWindow":
             return widget
     return None
@@ -129,21 +158,46 @@ def cursor_pos():
     return _qt()[1].QCursor.pos()
 
 
+def button_down():
+    """The primary mouse button held, as Windows has it now (FontLab's drag keeps Qt's own idea of the
+    buttons from being updated)."""
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        key = 0x02 if user32.GetSystemMetrics(23) else 0x01  # SM_SWAPBUTTON: the right button is primary
+        return bool(user32.GetAsyncKeyState(key) & 0x8000)
+    except Exception:
+        return bool(int(_qt()[1].QApplication.mouseButtons()) & 1)
+
+
+def drag_distance():
+    """Qt's drag start distance (PythonQt gives it as a property of the application, not a call)."""
+    QtGui = _qt()[1]
+    for source in (QtGui.QApplication.instance(), QtGui.QApplication):
+        value = getattr(source, "startDragDistance", None)
+        try:
+            value = value() if callable(value) else value
+            if value:
+                return int(value)
+        except Exception:
+            pass
+    return 10
+
+
 def near_bar(bar, tab_widget, point, margin=TEAR_MARGIN):
     """True when a global point lies on the tab bar's strip (the tab widget's width) or within margin of it."""
     if bar is None or tab_widget is None or not bar.isVisible():
         return False
     local = bar.mapFromGlobal(point)
     across = tab_widget.mapFromGlobal(point)
-    height = bar.height
     return (-margin <= across.x() <= tab_widget.width + margin
-            and -margin <= local.y() <= height + margin)
+            and -margin <= local.y() <= bar.height + margin)
 
 
 def drop_slot(bar, point, page_of, page):
-    """Where a tab dropped at a global point goes among the bar's other tabs (page itself left out, if
-    still there): before the first tab whose middle lies right of the mouse, else last. page_of(index)
-    is the tab's widget. FontLab's Sketchboard stays first."""
+    """Where a tab released at a global point goes among the bar's other tabs (page itself left out,
+    if still there): before the first tab whose middle lies right of the mouse, else last.
+    page_of(index) is the tab's widget. FontLab's Sketchboard stays first."""
     x = bar.mapFromGlobal(point).x()
     slot = 0
     others = [k for k in range(bar.count) if page_of(k) is not page]
@@ -156,44 +210,140 @@ def drop_slot(bar, point, page_of, page):
     return slot
 
 
+def marker_x(bar, page_of, page, slot):
+    """The x (in the bar) of the gap a tab goes into: the left edge of the tab it goes before, or the
+    right edge of the last."""
+    others = [k for k in range(bar.count) if page_of(k) is not page]
+    if not others:
+        return 0
+    if slot < len(others):
+        return bar.tabRect(others[slot]).left()
+    last = bar.tabRect(others[-1])
+    return last.left() + last.width()
+
+
 # ---------------------------------------------------------------------------
-# Dragging and dropping
+# Following a drag
 # ---------------------------------------------------------------------------
 
 def on_pressed(tab_widget, index):
-    """A press on a document tab (the bar's event filter): the tab a drag would take. FontLab takes it
-    out of the bar as the drag starts, so it is noted here."""
-    _state()["drag"] = (tab_widget, tab_widget.widget(index)) if index >= 0 else None
+    """A press on a document tab (the bar's event filter): the tab a drag would take, then the mouse
+    followed until it is released. FontLab takes the tab out of its bar as the drag starts."""
+    state = _state()
+    if index < 0:
+        state["drag"] = None
+        return
+    state["drag"] = {"page": tab_widget.widget(index), "start": cursor_pos(), "started": False}
+    timer = state.get("poll_timer")
+    if timer is not None:
+        timer.start()
 
 
 def on_dropped(tab_widget):
-    """A tab is dropped (FontLab's signal, after it made a window of it): on or near the main tab bar,
-    it is docked back where the mouse is."""
-    QtCore = _qt()[0]
+    """FontLab's drop signal: no longer used (the release is followed instead); kept for connections
+    an earlier version made in this FontLab session."""
+    return None
+
+
+def poll():
+    """While a drag is followed: the marker where the tab would go; at the release, the tab docked
+    back if it is on or near the main tab bar."""
+    QtCore, QtGui = _qt()
     state = _state()
-    drag, state["drag"] = state["drag"], None
-    if not state["on"] or drag is None or drag[0] is not tab_widget or drag[1] is None:
+    drag = state.get("drag")
+    if drag is None:
+        _stop_polling()
         return
-    page = drag[1]
-    bar, main = main_tabs()
     point = cursor_pos()
+    if button_down():
+        if not drag["started"]:
+            moved = abs(point.x() - drag["start"].x()) + abs(point.y() - drag["start"].y())
+            drag["started"] = moved >= drag_distance()
+        if drag["started"]:
+            show_marker(drag["page"], point)
+        return
+    _stop_polling()
+    hide_marker()
+    state["drag"] = None
+    if not drag["started"] or drag["page"] is None:
+        return
+    bar, main = main_tabs()
     if main is None or not near_bar(bar, main, point):
-        return  # dropped away: a window of its own, as FontLab made it
-    slot = drop_slot(bar, point, main.widget, page)
-    later = lambda: _dock_safely(page, slot)
+        return  # released away: a window of its own, as FontLab made it
+    page, slot = drag["page"], drop_slot(bar, point, main.widget, drag["page"])
+    later = (lambda call: lambda: call("dock_after_drop", page, slot))(_dispatcher())
     state["pending"].append(later)
-    QtCore.QTimer.singleShot(0, later)
+    del state["pending"][:-16]  # the last few kept alive until they have run
+    QtCore.QTimer.singleShot(DOCK_DELAY_MS, later)
 
 
-def _dock_safely(page, target):
-    try:
-        dock(page, target)
-    except Exception as exc:
-        print("FreeLab tab docking: %s" % (exc,))
-    finally:
-        pending = _state()["pending"]
-        del pending[:-16]  # the last few kept alive until they have run
+def _stop_polling():
+    timer = _state().get("poll_timer")
+    if timer is not None:
+        timer.stop()
 
+
+def dock_after_drop(page, slot):
+    dock(page, slot)
+    refresh_main()
+
+
+def refresh_main():
+    """Repaint the main window's document area: FontLab's blue drop highlight stayed on it after a
+    tab it was showing a drop for was docked by Merge Window instead."""
+    QtGui = _qt()[1]
+    bar, main = main_tabs()
+    frame = main.parentWidget() if main is not None else None
+    if frame is None:
+        return
+    for widget in [frame] + list(frame.findChildren(QtGui.QWidget)):
+        if widget.isVisible():
+            widget.update()
+
+
+def _marker():
+    QtCore, QtGui = _qt()
+    state = _state()
+    marker = state.get("marker")
+    if marker is None:
+        marker = QtGui.QWidget(None, QtCore.Qt.ToolTip | QtCore.Qt.FramelessWindowHint)
+        marker.setAttribute(QtCore.Qt.WA_ShowWithoutActivating, True)
+        marker.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, True)
+        marker.setProperty(LEAVE_ALONE_PROP, True)
+        marker.setAutoFillBackground(True)
+        state["marker"] = marker
+    return marker
+
+
+def show_marker(page, point):
+    """The marker at the gap the tab would go into, when the mouse is on or near the main tab bar."""
+    QtCore, QtGui = _qt()
+    bar, main = main_tabs()
+    if main is None or not near_bar(bar, main, point):
+        hide_marker()
+        return
+    slot = drop_slot(bar, point, main.widget, page)
+    x = marker_x(bar, main.widget, page, slot)
+    marker = _marker()
+    palette = marker.palette
+    palette.setColor(QtGui.QPalette.Window, QtGui.QApplication.palette().color(QtGui.QPalette.Highlight))
+    marker.setPalette(palette)
+    top_left = bar.mapToGlobal(QtCore.QPoint(x - MARKER_WIDTH // 2, 0))
+    marker.setGeometry(top_left.x(), top_left.y(), MARKER_WIDTH, max(8, bar.height))
+    if not marker.isVisible():
+        marker.show()
+    marker.raise_()
+
+
+def hide_marker():
+    marker = _state().get("marker")
+    if marker is not None and marker.isVisible():
+        marker.hide()
+
+
+# ---------------------------------------------------------------------------
+# Docking
+# ---------------------------------------------------------------------------
 
 def holder_of(page):
     """The window of its own (a YFrameWindow) whose tabs hold page, or None."""
@@ -223,7 +373,8 @@ def merge_window(frame):
 
 
 def dock(page, target=None):
-    """Put a document tab into the main window (merging the window that holds it), at target if given."""
+    """Put a document tab into the main window (merging the window that holds it), at target if given;
+    a window it left empty is closed (FontLab keeps it open, and merging it does nothing)."""
     bar, main = main_tabs()
     if main is None:
         return False
@@ -237,17 +388,25 @@ def dock(page, target=None):
             return False
     if target is not None and 0 <= target < bar.count and target != at:
         bar.moveTab(at, target)
-        at = target
-    main.setCurrentIndex(at)
     for widget, frame in document_tab_widgets():
         if frame.isWindow() and frame.isVisible() and widget.count == 0:
-            frame.close()  # the window the tab came from, left empty (FontLab keeps it open; merging it does nothing)
+            frame.close()
     main.setCurrentIndex(main.indexOf(page))
+    window = main_window()
+    if window is not None:
+        window.activateWindow()
     return True
 
 
+def dock_frame(tab_widget):
+    page = tab_widget.currentWidget()
+    if page is not None:
+        dock(page)
+        refresh_main()
+
+
 # ---------------------------------------------------------------------------
-# Windows of their own: a Dock button, and a double-click on a tab
+# Hooks: a filter on each document tab bar, a Dock button on each window of its own
 # ---------------------------------------------------------------------------
 
 def _add_dock_button(tab_widget):
@@ -260,119 +419,103 @@ def _add_dock_button(tab_widget):
     button.setText(u"Dock")
     button.setAutoRaise(True)
     button.setToolTip(u"Put this window's tabs back into the main window (or double-click a tab)")
-    handler = lambda *args: _call("dock_frame", tab_widget)
+    handler = (lambda call: lambda *args: call("dock_frame", tab_widget))(_dispatcher())
     _state()["held"].append(handler)
     button.connect("clicked()", handler)
     tab_widget.setCornerWidget(button, corner)
     button.show()
 
 
-def dock_frame(tab_widget):
-    page = tab_widget.currentWidget()
-    if page is not None:
-        dock(page)
-
-
-def _module():
-    """This module as loaded last (a reload replaces the code every connection and filter calls)."""
-    return sys.modules.get(MODULE_NAME) or _state().get("module")
-
-
-def _call(name, *args):
-    try:
-        module = _module()
-        if module is not None and module._state()["on"]:
-            return getattr(module, name)(*args)
-    except Exception as exc:  # a slot or a filter must not raise into FontLab
-        print("FreeLab tab docking: %s" % (exc,))
-    return None
-
-
 def _filter_class():
     QtCore = _qt()[0]
     state = _state()
-    if "filter_class" not in state:
+    if "filter_class_v2" not in state:
+        call = _dispatcher()
+
         class TabPresses(QtCore.QTimer):  # PythonQt has no QObject to subclass; a timer will do
-            """On a document tab bar: a press notes the tab a drag would take; a double-click on a tab
-            of a window of its own docks that window."""
+            """On a document tab bar: a press starts following a possible drag; a double-click on a
+            tab of a window of its own docks that window."""
 
             def eventFilter(self, obj, event):
                 try:
                     kind = event.type()
                     if kind == QtCore.QEvent.MouseButtonPress and event.button() == QtCore.Qt.LeftButton:
-                        _call("on_pressed", obj.parentWidget(), obj.tabAt(event.pos()))
+                        call("on_pressed", obj.parentWidget(), obj.tabAt(event.pos()))
                     elif kind == QtCore.QEvent.MouseButtonDblClick and obj.tabAt(event.pos()) >= 0:
                         tab_widget = obj.parentWidget()
                         frame = tab_widget.parentWidget() if tab_widget is not None else None
-                        if frame is not None and frame.isWindow() and _module()._state()["on"]:
-                            later = lambda: _call("dock_frame", tab_widget)
-                            _module()._state()["pending"].append(later)
-                            QtCore.QTimer.singleShot(0, later)
+                        if frame is not None and frame.isWindow():
+                            QtCore.QTimer.singleShot(0, lambda: call("dock_frame", tab_widget))
                             return True
                 except Exception:
                     pass  # an event filter must never raise
                 return False
-        state["filter_class"] = TabPresses
-    return state["filter_class"]
+        state["filter_class_v2"] = TabPresses
+    return state["filter_class_v2"]
 
 
 def watch():
-    """Hook every document tab widget not seen yet (FontLab's drop signal, a filter on its bar), and
-    give windows of their own their Dock button."""
+    """Hook every document tab bar not seen yet, and give windows of their own their Dock button."""
+    QtCore, QtGui = _qt()
     state = _state()
-    if not state["on"]:
-        return
     for tab_widget, frame in document_tab_widgets():
         try:
             if frame.isWindow():
-                button = tab_widget.findChild(_qt()[1].QToolButton, DOCK_BUTTON_NAME)
+                button = tab_widget.findChild(QtGui.QToolButton, DOCK_BUTTON_NAME)
                 if button is None:
                     _add_dock_button(tab_widget)
-                elif tab_widget.cornerWidget(_qt()[0].Qt.TopRightCorner) is None:  # put back after an off
-                    tab_widget.setCornerWidget(button, _qt()[0].Qt.TopRightCorner)
+                elif tab_widget.cornerWidget(QtCore.Qt.TopRightCorner) is None:  # put back after an off
+                    tab_widget.setCornerWidget(button, QtCore.Qt.TopRightCorner)
                     button.show()
             bar = _bar_of(tab_widget)
-            if bar is not None and bar.property(WATCHED_PROP) is None:
+            if bar is not None and bar.property(WATCHED_PROP) != 2:
                 presses = _filter_class()()
                 state["held"].append(presses)
                 bar.installEventFilter(presses)
-                bar.setProperty(WATCHED_PROP, True)
-            if tab_widget.property(WATCHED_PROP) is None:
-                dropped = (lambda tw: lambda *args: _call("on_dropped", tw))(tab_widget)
-                state["held"].append(dropped)
-                tab_widget.connect("tabDropped(YTab*,QPoint)", dropped)
-                tab_widget.setProperty(WATCHED_PROP, True)
+                bar.setProperty(WATCHED_PROP, 2)  # (1 or True: an earlier version's filter, which does nothing now)
         except Exception as exc:
             print("FreeLab tab docking: %s" % (exc,))
 
 
-def start():
+def _timer(key, interval, function):
+    """A fresh timer calling function through the dispatcher (an earlier one stopped and replaced)."""
     QtCore = _qt()[0]
     state = _state()
+    old = state.get(key)
+    if old is not None:
+        old.stop()
+    timer = QtCore.QTimer()
+    timer.setInterval(interval)
+    tick = (lambda call: lambda: call(function))(_dispatcher())
+    state[key + "_tick"] = tick
+    timer.connect("timeout()", tick)
+    state[key] = timer
+    return timer
+
+
+def start():
+    state = _state()
     state["on"] = True
-    state["module"] = sys.modules.get(__name__)  # what the connections call, should FontLab drop it
-    if state.get("timer") is None:
-        timer = QtCore.QTimer()
-        timer.setInterval(WATCH_MS)
-        tick = lambda: _call("watch")
-        state["tick"] = tick
-        timer.connect("timeout()", tick)
-        state["timer"] = timer
-    state["timer"].start()
+    state["module"] = sys.modules.get(__name__)  # what the dispatcher calls, should FontLab drop it
+    _timer("timer", WATCH_MS, "watch").start()
+    _timer("poll_timer", POLL_MS, "poll")
     watch()
 
 
 def stop():
-    """Off: FontLab's own ways again. Connections stay (they do nothing while off); Dock buttons go."""
-    QtGui = _qt()[1]
+    """Off: FontLab's own ways again. Filters stay (they do nothing while off); Dock buttons go."""
+    QtCore, QtGui = _qt()
     state = _state()
     state["on"] = False
-    if state.get("timer") is not None:
-        state["timer"].stop()
+    state["drag"] = None
+    for key in ("timer", "poll_timer"):
+        if state.get(key) is not None:
+            state[key].stop()
+    hide_marker()
     for tab_widget, frame in document_tab_widgets():
         button = tab_widget.findChild(QtGui.QToolButton, DOCK_BUTTON_NAME)
         if button is not None:
-            tab_widget.setCornerWidget(None, _qt()[0].Qt.TopRightCorner)
+            tab_widget.setCornerWidget(None, QtCore.Qt.TopRightCorner)
             button.hide()
 
 
@@ -387,8 +530,8 @@ def toggle():
     on = not _state()["on"]
     if on:
         start()
-        message = (u"FreeLab tab docking is on: drag tabs along the tab bar to reorder them; a tab dropped "
-                   u"near the tab bar goes back into the main window. Run this script again to switch it off.")
+        message = (u"FreeLab tab docking is on: drag a tab along the tab bar to move it; released on or near "
+                   u"the tab bar, a tab goes back into the main window. Run this script again to switch it off.")
     else:
         stop()
         message = u"FreeLab tab docking is off: FontLab's own tab dragging again."

@@ -2746,6 +2746,18 @@ class FeatureCodeDialog(object):
         return key, dict((form.name, form.on) for form in self.small_forms), \
             dict((set_key, dict(setting)) for set_key, setting in self.small_setup.items())
 
+    def drawn_in_ink(self, name):
+        """A glyph a figure form can be scaled from: outlines in the current master, in one ink (an emoji
+        font's blank keycap figures and its color glyphs are not)."""
+        try:
+            glyph = self.package.findName(name)
+            layer = glyph.getLayerByName(self.package.master) if glyph is not None and not glyph.isNull else None
+            if layer is None or self.ak.is_picture_layer(layer) or self.ak.layer_parts(layer) is not None:
+                return False
+            return not self.ak.layer_path(layer, False).isEmpty()
+        except Exception:
+            return True  # (unknown: left to the builder, as before)
+
     def read_small_forms(self, info):
         """The figure forms the font lacks, and their first settings (those kept from the last read of
         the same font where there are some)."""
@@ -2760,7 +2772,7 @@ class FeatureCodeDialog(object):
         except Exception:
             upm = 1000.0
         try:
-            self.small_forms = missing_small_forms(info)
+            self.small_forms = [form for form in missing_small_forms(info) if self.drawn_in_ink(form.base)]
             self.small_first = small_settings(info, cap, upm)
         except Exception as exc:  # a font the builders did not foresee: the rest still works
             self.small_forms, self.small_first = [], {}

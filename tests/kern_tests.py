@@ -47,6 +47,17 @@ def stem(name, left_bearing=10, right_bearing=10, width=10):
     return stems(name, [width], [], left_bearing, right_bearing)
 
 
+class MissingReferenceTests(unittest.TestCase):
+    def test_all_missing_names_none(self):
+        text = ak.missing_references(object(), ak.TUNING, list(ak.TUNING), u"Auto Kerning", u"their spacing sets the kerning")
+        self.assertEqual(text, u"Auto Kerning needs l, n, and o: their spacing sets the kerning.")
+
+    def test_some_missing_are_named(self):
+        text = ak.missing_references(object(), ak.TUNING, [u"l", u"o"], u"Auto Kerning", u"their spacing sets the kerning")
+        self.assertTrue(text.startswith(u"This font has no \N{LEFT DOUBLE QUOTATION MARK}l\N{RIGHT DOUBLE QUOTATION MARK} or "), text)
+        self.assertIn(u"Auto Kerning needs l, n, and o", text)
+
+
 class ArithmeticTests(unittest.TestCase):
     def test_units_halve_tightenings_as_halfkern_does(self):
         self.assertEqual(ak.to_units(-10.0, 200, 1000), -25)  # -50 units, halved

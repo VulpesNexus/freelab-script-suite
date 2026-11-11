@@ -901,6 +901,28 @@ def color_kind(package, sample=48):
     return None
 
 
+def joined(items, word=u"and"):
+    """u"l", u"l and n", u"l, n, and o" (the serial comma)."""
+    items = list(items)
+    if len(items) < 3:
+        return (u" %s " % word).join(items)
+    return u"%s, %s %s" % (u", ".join(items[:-1]), word, items[-1])
+
+
+def missing_references(package, needed, missing, tool, why):
+    """The sentence for a tool that cannot start without the font's reference letters (needed, of
+    which missing are not in the font): the missing ones named only when some are there; for a color
+    font without any, why there is nothing to do."""
+    if len(missing) == len(needed):
+        if color_kind(package):
+            return (u"%s is a color font: emoji are set on one width and are not kerned or spaced against "
+                    u"letters, so %s has nothing to work from (it needs %s: %s)." % (
+                        package.tfn, tool, joined(needed), why))
+        return u"%s needs %s: %s." % (tool, joined(needed), why)
+    quoted = [u"\N{LEFT DOUBLE QUOTATION MARK}%s\N{RIGHT DOUBLE QUOTATION MARK}" % ch for ch in missing]
+    return u"This font has no %s. %s needs %s: %s." % (joined(quoted, u"or"), tool, joined(needed), why)
+
+
 def color_note(package):
     """A sentence for a script's log about a color font, or u"" for one drawn in one ink."""
     kind = color_kind(package)
@@ -1261,7 +1283,7 @@ MENU_GROUPS = (("Diacritics", "Auto Spacing", "CJK Spacing", "Auto Kerning", "Ke
                ("Start MCP Listener", "Stop MCP Listener", "Start Listener", "Stop Listener"))  # (FreeLab MCP's, old names too)
 MENU_TITLE, SCRIPTS_MENU = "FreeLab", "menuScripts"
 MENU_ORDER_PROP = "freelab_menu_order"
-MENU_HOOK_VERSION = 3  # the Scripts menu's property holds it: an older hook found there is replaced
+MENU_HOOK_VERSION = 4  # the Scripts menu's property holds it: an older hook found there is replaced
 
 
 def menu_order(texts, groups=MENU_GROUPS):
@@ -1498,6 +1520,116 @@ def plain_buttons(dialog):
             button.setDefault(False)
     except Exception:
         pass
+    watch_states(dialog)
+
+
+# A dialog's states kept in step with what it shows, every STATES_MS while it is shown: Check all and
+# Check none (and the like) grayed out when the list beside them has nothing to check, and a
+# dropdown with one choice drawn as its text (no arrow, nothing to open).
+STATES_MS = 300
+CHECK_BUTTON_TEXTS = (u"Check all", u"Check none", u"Check only")
+SINGLE_PROP = "freelab_single_choice"
+SINGLE_SHEET = (u"QComboBox { border: none; background: transparent; padding-left: 0px; } "
+                u"QComboBox::drop-down { width: 0px; border: none; } QComboBox::down-arrow { image: none; width: 0px; }")
+
+
+def _ancestors(widget):
+    chain = []
+    while widget is not None:
+        chain.append(widget)
+        widget = widget.parentWidget()
+    return chain
+
+
+def _shared_depth(a, b):
+    """How deep the nearest widget holding both a and b lies (more: closer together)."""
+    up = _ancestors(b)
+    for depth, widget in enumerate(_ancestors(a)):
+        if widget in up:
+            return -depth
+    return -1000
+
+
+def has_checkable_items(view):
+    """True when a tree or list widget shows an item with a check box."""
+    QtCore = _qt()[0]
+    checkable = QtCore.Qt.ItemIsUserCheckable
+    if view.inherits("QTreeWidget"):
+        pending = [view.topLevelItem(i) for i in range(view.topLevelItemCount)]
+        while pending:
+            item = pending.pop()
+            if item is None:
+                continue
+            if int(item.flags()) & int(checkable):
+                return True
+            pending.extend(item.child(i) for i in range(item.childCount()))
+        return False
+    if view.inherits("QListWidget"):
+        return any(int(view.item(i).flags()) & int(checkable) for i in range(view.count))
+    return True  # a view of another kind: left to its dialog
+
+
+def single_choice(combo):
+    """A dropdown with one choice (or none) drawn as its text; a real dropdown again once it has more."""
+    QtCore = _qt()[0]
+    single = combo.count <= 1 and not combo.editable
+    if single == bool(combo.property(SINGLE_PROP)):
+        return
+    if single:
+        combo.setProperty(SINGLE_PROP, combo.styleSheet or u" ")  # its own sheet, put back later
+        combo.setStyleSheet(SINGLE_SHEET)
+        combo.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, True)
+        combo.setFocusPolicy(QtCore.Qt.NoFocus)
+    else:
+        sheet = u"%s" % combo.property(SINGLE_PROP)
+        combo.setProperty(SINGLE_PROP, None)
+        combo.setStyleSheet(sheet.strip())
+        combo.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, False)
+        combo.setFocusPolicy(QtCore.Qt.StrongFocus)
+
+
+def update_states(dialog, hidden_too=False):
+    QtGui = _qt()[1]
+    if not hidden_too and not _property(dialog, "visible"):
+        return
+    for combo in dialog.findChildren(QtGui.QComboBox):
+        try:
+            single_choice(combo)
+        except Exception:
+            pass
+    buttons = [b for b in dialog.findChildren(QtGui.QPushButton)
+               if any((u"%s" % b.text).startswith(t) for t in CHECK_BUTTON_TEXTS)]
+    if not buttons:
+        return
+    views = [v for v in dialog.findChildren(QtGui.QAbstractItemView)
+             if v.inherits("QTreeWidget") or v.inherits("QListWidget")]
+    for button in buttons:
+        mates = sorted(views, key=lambda v: -_shared_depth(button, v))
+        if mates and not has_checkable_items(mates[0]) and button.isEnabled():
+            button.setEnabled(False)  # nothing listed: the dialog enables it again once something is
+
+
+def watch_states(dialog):
+    """Keep dialog's states in step (update_states) while it lives; the timer is the dialog's child."""
+    QtCore = _qt()[0]
+    holder = getattr(sys, "_freelab_state_watchers", None)
+    if holder is None:
+        holder = sys._freelab_state_watchers = []
+    timer = QtCore.QTimer(dialog)
+    timer.setInterval(STATES_MS)
+    modules, name = sys.modules, __name__
+
+    def tick():
+        try:  # through the module as loaded now (a reloaded one empties this copy's globals)
+            module = modules.get(name)
+            if module is not None:
+                module.update_states(dialog)
+        except Exception:
+            pass  # a timer's handler must not raise
+    timer.connect("timeout()", tick)
+    holder.append(tick)
+    del holder[:-64]
+    timer.start()
 
 
 # ---------------------------------------------------------------------------
@@ -2476,10 +2608,9 @@ def analyze(package, master, characters=None, em=EM_PIXELS, progress=None, core=
     chars = [(ch, name) for ch, name in font_glyphs(package, characters or script_characters(script)) if glyphs.add(name)]
     names = dict(chars)
     tuning = SCRIPT_TUNING[script]
-    for ch in tuning:
-        if ch not in names:
-            raise ValueError(u"this font has no \N{LEFT DOUBLE QUOTATION MARK}%s\N{RIGHT DOUBLE QUOTATION MARK}. Auto Kerning "
-                             u"needs %s: their spacing sets the kerning." % (ch, u", ".join(tuning[:-1]) + u", and " + tuning[-1]))
+    missing = [ch for ch in tuning if ch not in names]
+    if missing:
+        raise ValueError(missing_references(package, tuning, missing, u"Auto Kerning", u"their spacing sets the kerning"))
     reference_names = sorted(set(names[ch] for chars_ in SCRIPT_REFERENCES[script].values() for ch in chars_ if ch in names))
     references_signature = u" ".join(glyphs.signatures[n] for n in reference_names) + u" upm %s" % glyphs.upm
     cache_file = cache_file if cache_file is not None else cache_path(font_key(package), master, script)
@@ -4008,10 +4139,10 @@ def font_class_suggestions(package, master, core=None, em=EM_PIXELS, model=None)
     glyphs = FontLabGlyphs(package, master, em)
     found = [(ch, name) for ch, name in font_glyphs(package, class_characters()) if glyphs.add(name)]
     names = dict(found)
-    for ch in TUNING:
-        if ch not in names:
-            raise ValueError(u"this font has no “%s”: "
-                             u"its spacing is what glyphs are compared by." % ch)
+    missing = [ch for ch in TUNING if ch not in names]
+    if missing:
+        raise ValueError(missing_references(package, TUNING, missing, u"Suggesting classes",
+                                            u"their spacing is what glyphs are compared by"))
     image_of = lambda ch: glyphs.image(names[ch])
     tools = make_bands(core or Core(), image_of, names, em, glyphs.pad)
     signatures = {}
@@ -4115,6 +4246,7 @@ class ClassDialog(object):
         self.tree.clear()
         self.apply_button.setEnabled(False)
         self.exceptions_button.setEnabled(False)
+        self.move.setEnabled(False)  # (back on once classes are listed)
         if package is None:
             self.status.setText(u"No font is open. Open one, then run <i>Auto Kerning</i> again.")
             return
@@ -4127,8 +4259,10 @@ class ClassDialog(object):
             self.plans, self.names = font_class_suggestions(package, master)
             self.exceptions = noted_exceptions(FontKerning(package.kerning(master)), self.plans, self.names)
         except Exception as exc:
-            self.status.setText(html(exc))
+            message = u"%s" % exc
+            self.status.setText(html(message[:1].upper() + message[1:]))
             return
+        self.move.setEnabled(bool(self.plans))
         self.fill()
 
     def fill(self):

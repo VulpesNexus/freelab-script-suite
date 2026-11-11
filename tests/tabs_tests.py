@@ -32,6 +32,12 @@ class Rect(object):
     def center(self):
         return Point(self.left_ + self.width_ // 2, BAR_HEIGHT // 2)
 
+    def left(self):
+        return self.left_
+
+    def width(self):
+        return self.width_
+
 
 class Page(object):
     def __init__(self, kind="FontWindow"):
@@ -84,6 +90,20 @@ class SlotTests(unittest.TestCase):
         dragged = self.pages[3]
         self.assertEqual(self.slot(990, dragged), 3, "the last of the three others")
         self.assertEqual(self.slot(110, dragged), 1)
+
+
+class MarkerTests(unittest.TestCase):
+    def test_the_marker_sits_in_the_gap(self):
+        pages = [Page("YSketchBoard"), Page(), Page()]
+        bar = Bar(3)
+        dragged = Page()
+        self.assertEqual(ft.marker_x(bar, lambda i: pages[i], dragged, 1), TAB_WIDTH, "before the second tab")
+        self.assertEqual(ft.marker_x(bar, lambda i: pages[i], dragged, 3), 3 * TAB_WIDTH, "after the last")
+
+    def test_the_dragged_tab_still_on_the_bar_is_skipped(self):
+        pages = [Page("YSketchBoard"), Page(), Page()]
+        bar = Bar(3)
+        self.assertEqual(ft.marker_x(bar, lambda i: pages[i], pages[1], 1), 2 * TAB_WIDTH)
 
 
 class NearTests(unittest.TestCase):
