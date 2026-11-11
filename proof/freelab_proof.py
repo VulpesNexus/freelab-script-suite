@@ -55,6 +55,7 @@ NOTE = u"Kerning applied; OpenType features not applied"
 KERNING_SETS = (("all", u"every kerned pair"), ("common", u"common pairs only"))
 COLOR_MODES = (("window", u"As the window"), ("print", u"Print (black on white)"))
 PRINT_COLORS = ((0, 0, 0), (255, 255, 255))  # (ink, paper)
+DARK_COLORS = ((235, 235, 235), (30, 30, 30))  # the second choice beside a light window: light on dark
 INFO_LABEL_WIDTH = 110.0  # points left of the font info's values, for their names
 INFO_TEXT_MAX = 1200  # characters of one font info field shown (a license's whole text is cut)
 
@@ -2088,14 +2089,22 @@ class ProofDialog(object):
         background colors, or black on white."""
         QtCore, QtGui = _qt()
         mode = self.color_mode()
-        if mode != "window":
-            return page_colors(mode)
         try:
             palette = self.ak._property(self.dialog, "palette")
             rgb = lambda color: (color.red(), color.green(), color.blue())
-            return page_colors(mode, rgb(palette.color(QtGui.QPalette.Text)), rgb(palette.color(QtGui.QPalette.Base)))
+            ink, paper = rgb(palette.color(QtGui.QPalette.Text)), rgb(palette.color(QtGui.QPalette.Base))
         except Exception:
             return page_colors("print")
+        dark_window = 0.299 * paper[0] + 0.587 * paper[1] + 0.114 * paper[2] < 128
+        # the second choice is the other of the two: black on white beside a dark window, light on dark
+        # beside a light one (black on white twice said nothing)
+        try:
+            self.colors_box.setItemText(1, u"Print (black on white)" if dark_window else u"Dark (white on black)")
+        except Exception:
+            pass
+        if mode == "window":
+            return page_colors(mode, ink, paper)
+        return PRINT_COLORS if dark_window else DARK_COLORS
 
     def pixel_ratio(self):
         """Device pixels per pixel of the preview (above 1 on a scaled display), 1 where Qt does not say."""

@@ -469,8 +469,17 @@ class CJKSpacingDialog(object):
                                  u"Thousand Character Classic, each with full-width punctuation; or text of your own.")
         sample_row.addWidget(self.sample, 1)
         layout.addLayout(sample_row)
-        self.previews = []
-        for caption in (u"Now", u"With palt"):
+        self.previews, self.preview_captions = [], []
+        for number, caption in enumerate((u"Now", u"With palt")):
+            if number:
+                layout.addWidget(ak.separator())
+            title = QtGui.QLabel(caption)
+            quiet = QtGui.QFont(title.font)
+            quiet.setPointSizeF(quiet.pointSizeF() * 0.9)
+            title.setFont(quiet)
+            title.setEnabled(False)  # (drawn in the quiet text color)
+            layout.addWidget(title)
+            self.preview_captions.append(title)
             label = QtGui.QLabel()
             label.setProperty(ak.LEAVE_ALONE_PROP, True)
             label.setAlignment(QtCore.Qt.AlignCenter)
@@ -495,6 +504,8 @@ class CJKSpacingDialog(object):
         for button in (self.all_button, self.none_button, self.restore_button):
             buttons.addWidget(button)
         buttons.addStretch(1)
+        self.compile_box = ak.compile_box()
+        buttons.addWidget(self.compile_box)
         buttons.addWidget(self.write_button)
         buttons.addWidget(self.close_button)
         layout.addLayout(buttons)
@@ -503,8 +514,8 @@ class CJKSpacingDialog(object):
         self.restore_button.connect("clicked()", self.restore)
         self.write_button.connect("clicked()", self.write)
         self.close_button.connect("clicked()", dialog.close)
-        self.palt_box.connect("toggled(bool)", lambda on: self.update_buttons())
-        self.halt_box.connect("toggled(bool)", lambda on: self.update_buttons())
+        self.palt_box.connect("toggled(bool)", lambda on: self.toggled())
+        self.halt_box.connect("toggled(bool)", lambda on: self.toggled())
         self.sample.connect("textChanged(QString)", lambda text: self.draw_previews())
         self.sample_box.connect("activated(int)", lambda index: self.sample.setText(SAMPLES[index][2]))
         self.tree.connect("itemChanged(QTreeWidgetItem*,int)", lambda item, column: self.changed())
@@ -702,17 +713,36 @@ class CJKSpacingDialog(object):
         self.fill()
         self.draw_previews()
 
+    def toggled(self):
+        """palt or halt switched: the list shows what is written now (counts, columns), the previews too."""
+        try:
+            self.harvest()
+            self.fill()
+            self.draw_previews()
+        except Exception as exc:
+            self.log.add(u"Could not show the change: %s" % self.ak.html(exc), "error")
+        self.update_buttons()
+
     def fill(self):
         QtCore, QtGui = _qt()
         self.tree.blockSignals(True)
         self.tree.clear()
         bold = QtGui.QFont(self.tree.font)
         bold.setBold(True)
+        palt_on, halt_on = self.palt_box.checked, self.halt_box.checked
+        try:
+            dimmed = QtGui.QBrush(self.dialog.palette.color(QtGui.QPalette.Disabled, QtGui.QPalette.Text))
+        except Exception:
+            dimmed = None
         for kind in KINDS:
             members = [(index, t) for index, t in enumerate(self.trims) if t.kind == kind]
             if not members:
                 continue
-            top = QtGui.QTreeWidgetItem([u"%s (%d)" % (KIND_LABELS[kind], len(members))])
+            written = sum(1 for _, t in members if (t.palt and palt_on) or (t.halt and halt_on))
+            off = [tag for tag, on in ((u"palt", palt_on), (u"halt", halt_on)) if not on]
+            heading = u"%s (%d)" % (KIND_LABELS[kind], len(members)) if not off else u"%s (%d of %d trimmed: %s off)" % (
+                KIND_LABELS[kind], written, len(members), u" and ".join(off))
+            top = QtGui.QTreeWidgetItem([heading])
             top.setData(0, QtCore.Qt.UserRole, -1)
             self.tree.addTopLevelItem(top)
             top.setFirstColumnSpanned(True)
@@ -729,6 +759,9 @@ class CJKSpacingDialog(object):
                 item.setToolTip(3, u"x placement, x advance: the ink moves by the first, the width changes by the second.")
                 for column in range(2, len(self.COLUMNS)):
                     item.setTextAlignment(column, int(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter))
+                if dimmed is not None:  # what is not written, as off
+                    for column in ((3, 4) if not palt_on else ()) + ((5,) if not halt_on else ()):
+                        item.setForeground(column, dimmed)
                 icon = self.picture([(t.name, 0, 0)], ICON_SIZE)
                 if icon is not None:
                     item.setIcon(0, QtGui.QIcon(icon))
@@ -906,7 +939,12 @@ class CJKSpacingDialog(object):
         room = self.preview_width = self.preview_room()
         upm = float(self.package.upm) or 1000.0
         advances = {}
-        for (label, caption), trimmed in zip(self.previews, (False, True)):
+        palt_on = self.palt_box.checked
+        try:
+            self.preview_captions[1].setText(u"With palt" if palt_on else u"With palt (off: palt is not written)")
+        except Exception:
+            pass
+        for (label, caption), trimmed in zip(self.previews, (False, palt_on)):
             placed, chars, widths = [], [], []
             for ch in text:
                 name = names.get(ord(ch))
@@ -986,8 +1024,8 @@ class CJKSpacingDialog(object):
         self.run()
         if written:
             them = u"it" if len(written) == 1 else u"them"
-            self.log.add(u"Wrote %s. Compile the features in FontLab's <i>Features</i> panel to try %s; <i>Edit &gt; "
-                         u"Undo</i> takes %s back." % (self.ak.b(u" and ".join(written)), them, them), "done")
+            self.log.add(u"Wrote %s; <i>Edit &gt; Undo</i> takes %s back.%s" % (
+                self.ak.b(u" and ".join(written)), them, self.ak.compiled_note(self.compile_box)), "done")
         if syllables:
             self.log.add(u"Set %s in every master; the font's kerning of Hangul, if any, was set for the old widths. "
                          u"<i>Edit &gt; Undo</i> takes it back." % self.ak.b(counted(syllables, u"syllable width", u"syllable widths")),

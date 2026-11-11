@@ -928,12 +928,18 @@ def mark_signature(mark):
     return (tuple(part[0] for part in mark.parts), mark.side)
 
 
-def same_mark_recipes(recipes, recipe):
-    """The buildable recipes with one of recipe's marks on the same side (either case), in list order:
-    the letters to look at after placing a mark on one (a circumflex on C: A, E, c, e...)."""
-    wanted = set(mark_signature(mark) for mark in recipe.marks)
-    return [other for other in recipes
-            if not other.missing and any(mark_signature(mark) in wanted for mark in other.marks)]
+def same_mark_recipes(recipes, signature):
+    """(alone, combined): the buildable recipes with the mark of that signature (its glyphs and side), in
+    list order, either case; alone: it is their only mark; combined: it is one of their marks (a
+    macron with an acute). The letters to look at after placing the mark on one."""
+    alone, combined = [], []
+    for other in recipes:
+        if other.missing:
+            continue
+        signatures = [mark_signature(mark) for mark in other.marks]
+        if signature in signatures:
+            (alone if len(signatures) == 1 else combined).append(other)
+    return alone, combined
 
 
 # Lining up marks: every mark above (or below) of a group set with its edge nearest the letter (a mark
@@ -1015,6 +1021,31 @@ def line_up_plan(recipes, recipe, index, ink_of, placement, metrics, upm):
                 continue
         left_out.append((other, why))
     return line, moves, left_out
+
+
+def shift_words(dx, dy):
+    """u"12 right, 8 down": how far the suggested mark sits from the current one."""
+    words = []
+    if dx:
+        words.append(u"%d %s" % (abs(dx), u"right" if dx > 0 else u"left"))
+    if dy:
+        words.append(u"%d %s" % (abs(dy), u"up" if dy > 0 else u"down"))
+    return u", ".join(words) or u"in place"
+
+
+def component_marks(layer):
+    """[(glyph name, x scale, y scale, x, y)] of a layer's components after the first (its letter)."""
+    found = []
+    for shape in layer.shapes:
+        try:
+            if not shape.isComponent:
+                continue
+            name = shape.shapeData.componentGlyph
+            t = shape.transform
+            found.append((u"%s" % name, t.m11(), t.m22(), t.dx(), t.dy()))
+        except Exception:
+            continue
+    return found[1:]
 
 
 def mark_ranges(recipe):
@@ -2273,8 +2304,7 @@ def make_editor(owner):
                     return
                 kind, what = found
                 if kind == "glyph":
-                    owner.neighbor_clicked(what)
-                    return
+                    return  # (the letters beside it are there to compare: Check kerning of these glyphs looks at pairs)
                 if kind == "mark":
                     self.select(what)
                     box = dict(self.mark_boxes()).get(what)
@@ -2467,7 +2497,7 @@ class AnchorPage(object):
         layout.addWidget(self.tree, 3)
         lower = QtGui.QHBoxLayout()
         reference = QtGui.QVBoxLayout()
-        title = QtGui.QLabel(u"Reference")
+        title = self.reference_title = QtGui.QLabel(u"Reference")
         bold = QtGui.QFont(title.font)
         bold.setBold(True)
         title.setFont(bold)
@@ -2861,6 +2891,9 @@ class AnchorPage(object):
     def select(self):
         g = self.selected()
         self.editor.selected = None
+        for widget in (self.reference_title, self.reference, self.reference_note, self.editor, self.hint,
+                       self.reset_button):
+            widget.setVisible(g is not None)  # (empty, the preview's parts only took room)
         self.editor.scene = self.scene(g) if g is not None else None
         self.editor.update()
         self.hint.setText(ANCHOR_HELP_NOTE)
@@ -3143,7 +3176,7 @@ class AccentsDialog(object):
         self.set_box.setCurrentIndex(0 if self.given else len(SETS) - 1)
         self.set_box.setWhatsThis(u"The Unicode blocks whose missing letters with diacritics are listed.")
         row.addWidget(self.set_box)
-        self.existing_box = QtGui.QCheckBox(u"List the font's own letters too, to rebuild")
+        self.existing_box = QtGui.QCheckBox(u"Also list existing glyphs")
         self.existing_box.setWhatsThis(u"Also lists the letters with diacritics the font already has (Latin, Greek, "
                                        u"and Cyrillic), in a section of their own, unchecked: each shown beside its "
                                        u"glyph as the font has it, to compare. Placements applied to related letters "
@@ -3190,7 +3223,7 @@ class AccentsDialog(object):
 
         lower = QtGui.QHBoxLayout()
         reference = QtGui.QVBoxLayout()
-        title = QtGui.QLabel(u"Reference")
+        title = self.reference_title = QtGui.QLabel(u"Reference")
         bold = QtGui.QFont(title.font)
         bold.setBold(True)
         title.setFont(bold)
@@ -3220,7 +3253,7 @@ class AccentsDialog(object):
                                  u"the letter's box center or top center, a guide drawn; <i>Alt</i>: no snapping) or "
                                  u"press the arrow keys "
                                  u"to move it, drag its frame to scale it; <i>Tab</i> selects the next mark, <i>Backspace</i> "
-                                 u"puts it back. Click the letter beside it to open the pair in <i>Auto Kerning</i>; "
+                                 u"puts it back; "
                                  u"double-click the glyph to open it (or, not built yet, its letter) in a <i>Glyph</i> "
                                  u"window.")
         editing.addWidget(self.editor, 1)
@@ -3412,6 +3445,7 @@ class AccentsDialog(object):
     def run(self):
         QtCore, QtGui = _qt()
         kept = dict((r.char, (r.checked, dict(r.adjust), r.applied)) for r in self.recipes)
+        self.shift_cache = {}
         same_font = self.package is not None
         self.tree.clear()
         self.recipes = []
@@ -3446,6 +3480,7 @@ class AccentsDialog(object):
             self.fill()
         self.seen_history = self.ak.history_mark(package)
         self.choose_reference()
+        self.select()  # the preview and the strip as the list is now (after an undo in FontLab: read again)
 
     def fill(self):
         QtCore, QtGui = _qt()
@@ -3459,10 +3494,13 @@ class AccentsDialog(object):
         except Exception:
             dimmed = None
         buildable = [index for index, r in enumerate(self.recipes) if not r.missing and not r.existing]
-        rebuilt = [index for index, r in enumerate(self.recipes) if not r.missing and r.existing]
+        rebuilt = [index for index, r in enumerate(self.recipes) if not r.missing and r.existing
+                   and self.existing_shift(r) != (0, 0)]
+        same = [index for index, r in enumerate(self.recipes) if not r.missing and r.existing
+                and self.existing_shift(r) == (0, 0)]
         lacking = [index for index, r in enumerate(self.recipes) if r.missing]
-        groups = ((u"Can be built", buildable), (u"In the font: check to rebuild", rebuilt),
-                  (u"Need a mark or letter the font lacks", lacking))
+        groups = ((u"Can be built", buildable), (u"Existing glyphs: check to rebuild", rebuilt),
+                  (u"Existing glyphs placed as suggested", same), (u"Need a mark or letter the font lacks", lacking))
         for title, indexes in groups:
             if not indexes:
                 continue
@@ -3522,6 +3560,11 @@ class AccentsDialog(object):
         if icon is not None:
             item.setIcon(0, QtGui.QIcon(icon))
         text = r.describe() + (u" (its glyph is in the font, empty: filled when built)" if r.refill else u"")
+        if r.existing:
+            shift = self.existing_shift(r)
+            text += (u" \N{EM DASH} placed as suggested" if shift == (0, 0) else
+                     (u" \N{EM DASH} suggested: mark %s" % shift_words(*shift)) if shift else
+                     u" \N{EM DASH} drawn, not built of components: compare by eye")
         notes = list(r.notes) + ([r.touches] if r.touches else [])
         if notes:
             text += u" \N{EM DASH} " + u"; ".join(notes)
@@ -3697,14 +3740,30 @@ class AccentsDialog(object):
 
     # -- the editor ----------------------------------------------------------------
 
+    def strip_signature(self, r):
+        """The mark the strip follows: kept while going through the strip's own letters (a letter with
+        two marks keeps the strip on the mark it was reached by), else the selected or first mark."""
+        kept = getattr(self, "strip_kept", None)
+        if kept is not None and r is not None and any(mark_signature(m) == kept for m in r.marks):
+            return kept
+        if r is None or r.missing or not r.marks:
+            return None
+        chosen = self.editor.selected
+        mark = r.marks[chosen] if chosen is not None and chosen < len(r.marks) else r.marks[0]
+        return mark_signature(mark)
+
     def fill_strip(self, r):
-        """The related letters' buttons (made once, reused: a button made here is never deleted)."""
+        """The related letters' buttons (made once, reused: a button made here is never deleted): those
+        with the mark alone, then, after a bar, those with it among other marks."""
         QtCore, QtGui = _qt()
-        related = same_mark_recipes(self.recipes, r) if r is not None and not r.missing else []
+        signature = self.strip_signature(r)
+        self.strip_kept = signature
+        alone, combined = same_mark_recipes(self.recipes, signature) if signature else ([], [])
+        related = alone + ([None] if alone and combined else []) + combined
         while len(self.strip_buttons) < len(related):
             button = QtGui.QToolButton()
             button.setAutoRaise(True)
-            button.setCheckable(True)
+            button.setProperty(self.ak.LEAVE_ALONE_PROP, True)  # its colors set here, from the dialog's palette
             font = QtGui.QFont(button.font)
             font.setPointSizeF(font.pointSizeF() * 1.3)
             button.setFont(font)
@@ -3715,15 +3774,35 @@ class AccentsDialog(object):
             self.strip_layout.insertWidget(index, button)
             self.strip_buttons.append(button)
         self.strip_recipes = related
+        palette = self.dialog.palette
+        accent = palette.color(QtGui.QPalette.Highlight).name()
+        text = palette.color(QtGui.QPalette.WindowText).name()
+        quiet = palette.color(QtGui.QPalette.Disabled, QtGui.QPalette.WindowText).name()
+        warn = u"#d9a13b"
         for at, button in enumerate(self.strip_buttons):
-            if at < len(related):
-                other = related[at]
-                button.setText(other.char)
-                button.setToolTip(u"%s: %s" % (other.name, other.describe()))
-                button.setChecked(other is r)
-                button.show()
-            else:
+            if at >= len(related):
                 button.hide()
+                continue
+            other = related[at]
+            if other is None:  # the bar between letters with the mark alone and with it among others
+                button.setText(u"|")
+                button.setToolTip(u"After the bar: letters with this mark among others.")
+                button.setStyleSheet(u"QToolButton { border: none; color: %s; }" % quiet)
+                button.setEnabled(False)
+                button.show()
+                continue
+            button.setEnabled(True)
+            button.setText(other.char)
+            state = (u" \N{EM DASH} moved by hand" if other.adjust else u"") + (
+                u" \N{EM DASH} %s" % other.touches if other.touches else u"")
+            button.setToolTip(u"%s: %s%s" % (other.name, other.describe(), state))
+            color = text if other is not r else accent
+            if other.touches:
+                color = warn
+            border = (u"border: none; border-bottom: 2px solid %s;" % accent) if other is r else u"border: none;"
+            weight = u"font-weight: bold;" if other.adjust or other is r else u""
+            button.setStyleSheet(u"QToolButton { %s color: %s; %s padding: 1px 3px; }" % (border, color, weight))
+            button.show()
         self.strip_label.setEnabled(bool(related))
         current = related.index(r) if r in related else -1
         if current >= 0:
@@ -3732,7 +3811,7 @@ class AccentsDialog(object):
     def strip_clicked(self, at):
         try:
             related = getattr(self, "strip_recipes", [])
-            if 0 <= at < len(related):
+            if 0 <= at < len(related) and related[at] is not None:
                 item = self.item_of(related[at])
                 if item is not None:
                     self.tree.setCurrentItem(item)
@@ -3740,9 +3819,52 @@ class AccentsDialog(object):
         except Exception as exc:
             self.log.add(u"Could not select that letter: %s" % self.ak.html(exc), "error")
 
+    def existing_shift(self, r):
+        """(dx, dy) from the font's mark to the suggested one, rounded (0, 0: placed as suggested), for a
+        listed glyph the font has, built of components; None when it is drawn (compared by eye)."""
+        cache = getattr(self, "shift_cache", None)
+        if cache is None:
+            cache = self.shift_cache = {}
+        key = (r.char, repr(sorted(r.adjust.items())))
+        if key in cache:
+            return cache[key]
+        result = None
+        ink, placement = self.inks.get(self.master), self.placements.get(self.master)
+        try:
+            glyph = self.package.findName(r.existing) if r.existing else None
+            layer = glyph.getLayerByName(self.master) if glyph is not None else None
+            marks = component_marks(layer) if layer is not None else []
+            if marks and ink is not None and placement is not None and r.marks:
+                current = parts_box(marks, ink)
+                suggested = None
+                ranges = mark_ranges(r)
+                checked = r.checked
+                parts, _ = place(r, ink, placement, self.metrics(self.package))
+                r.checked = checked
+                if parts is not None:
+                    suggested = parts_box(parts[ranges[0][0]:ranges[-1][1]], ink)
+                if current is not None and suggested is not None:
+                    above = r.marks[0].side != "below"
+                    dx = round((suggested[0] + suggested[2]) / 2.0 - (current[0] + current[2]) / 2.0)
+                    dy = round((suggested[1] - current[1]) if above else (suggested[3] - current[3]))
+                    result = (int(dx), int(dy))
+        except Exception:
+            result = None
+        cache[key] = result
+        return result
+
+    def show_preview_parts(self, on):
+        """The preview's parts (reference, editor, its hint and buttons, the strip) shown only while a glyph
+        is selected: empty, they only took room."""
+        for widget in (self.reference_title, self.reference_font, self.reference, self.reference_note, self.editor,
+                       self.hint, self.reset_marks_button, self.propagate_button, self.line_up_button,
+                       self.strip_label, self.strip_area):
+            widget.setVisible(on)
+
     def select(self):
         r = self.selected()
         self.editor.selected = None
+        self.show_preview_parts(r is not None)
         self.fill_strip(r)
         if r is None or r.missing:
             self.editor.scene = None
@@ -3775,7 +3897,9 @@ class AccentsDialog(object):
         letter = self.font(self.package).glyph_for(base_char)
         if recipe.existing and ink.path(recipe.existing)[0] is not None:  # the font's own, to compare
             glyphs.append(([(recipe.existing, 1.0, 1.0, 0.0, 0.0)], ink.path(recipe.existing)[1], "existing"))
-            captions = {"existing": u"In the font", "new": u"FreeLab"}
+            shift = self.existing_shift(recipe)
+            captions = {"existing": u"Current", "new": u"Suggested" + (u" (the same)" if shift == (0, 0) else (
+                u" (mark %s)" % shift_words(*shift) if shift else u""))}
         elif letter:
             glyphs.append(([(letter, 1.0, 1.0, 0.0, 0.0)], ink.path(letter)[1], "before"))
         glyphs.append((parts, width, "new"))
@@ -3885,6 +4009,7 @@ class AccentsDialog(object):
                 b(counted(len(close), u"letter")), u"comes" if len(close) == 1 else u"come", round(TOUCH_SHARE * 1000),
                 u"its" if len(close) == 1 else u"their", b(u" ".join(close)), u"it" if len(close) == 1 else u"them"),
                 "warning")
+        self.fill_strip(r)
         self.update_buttons()
 
     def closeness(self, recipe):

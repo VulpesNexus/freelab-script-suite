@@ -1179,6 +1179,10 @@ class CompareDialog(object):
         settings.addWidget(QtGui.QLabel("with"))
         self.choice_b = self.combo(u"The second font and master: another open font, or another master of the first.")
         settings.addWidget(self.choice_b)
+        self.open_button = QtGui.QPushButton(u"Open a font\N{HORIZONTAL ELLIPSIS}")
+        self.open_button.setWhatsThis(u"Opens a font file in FontLab (as <i>File &gt; Open</i> does) and chooses it "
+                                      u"as the second font, to compare without opening it first.")
+        settings.addWidget(self.open_button)
         settings.addSpacing(12)
         settings.addWidget(QtGui.QLabel("Ignore differences up to"))
         self.threshold = QtGui.QSpinBox()
@@ -1218,6 +1222,7 @@ class CompareDialog(object):
         layout.addLayout(buttons)
         self.close_button.connect("clicked()", dialog.close)
         self.compare_button.connect("clicked()", self.compare)
+        self.open_button.connect("clicked()", self.open_font)
         self.choice_a.connect("currentIndexChanged(int)", lambda index: self.choice_changed())
         self.choice_b.connect("currentIndexChanged(int)", lambda index: self.choice_changed())
         self.tabs.connect("currentChanged(int)", self.switch_page)
@@ -1463,6 +1468,49 @@ class CompareDialog(object):
             except Exception:
                 found = []
         return found
+
+    OPEN_FILTER = u"Fonts (*.vfc *.vfj *.vfb *.otf *.ttf *.otc *.ttc *.woff *.woff2 *.ufo *.glyphs *.designspace);;All files (*)"
+    OPEN_WAIT_MS, OPEN_TRIES = 500, 120  # FontLab opens a font in the background: looked for twice a second, a minute
+
+    def open_font(self):
+        """A font file picked and opened in FontLab; once it is in, chosen as the second font."""
+        QtCore, QtGui = _qt()
+        path = QtGui.QFileDialog.getOpenFileName(self.dialog, u"Open a font to compare", u"", self.OPEN_FILTER)
+        path = u"%s" % (path[0] if isinstance(path, (tuple, list)) else path or u"")
+        if not path:
+            return
+        before = set(self.ak.font_key(p) for p in self.open_fonts())
+        try:
+            self.fontlab.flItems.requestLoadingFont(path)
+        except Exception as exc:
+            self.log.add(u"FontLab did not open %s: %s" % (self.ak.i(os.path.basename(path)), self.ak.html(exc)), "error")
+            return
+        self.log.add(u"Opening %s in FontLab\N{HORIZONTAL ELLIPSIS}" % self.ak.i(os.path.basename(path)))
+        self.open_tries = 0
+
+        def look():
+            try:
+                new = [p for p in self.open_fonts() if self.ak.font_key(p) not in before]
+                if not new:
+                    self.open_tries += 1
+                    if self.open_tries < self.OPEN_TRIES:
+                        QtCore.QTimer.singleShot(self.OPEN_WAIT_MS, self.open_look)
+                    else:
+                        self.log.add(u"%s did not open (or FontLab is waiting for an answer in a dialog)."
+                                     % self.ak.i(os.path.basename(path)), "warning")
+                    return
+                self.read_fonts()
+                key = self.ak.font_key(new[0])
+                for index, (font_index, master) in enumerate(self.choices):
+                    if self.ak.font_key(self.fonts[font_index]) == key:
+                        self.choice_b.setCurrentIndex(index)
+                        break
+                self.log.add(u"Opened %s: chosen as the second font. Click %s." % (
+                    self.ak.b(new[0].tfn), self.ak.i(u"Compare")), "done")
+            except Exception as exc:
+                self.log.add(u"Could not choose the font just opened: %s" % self.ak.html(exc), "error")
+        self.open_look = look
+        QtCore.QTimer.singleShot(self.OPEN_WAIT_MS, look)
 
     def read_fonts(self):
         """The combo boxes filled with the open fonts and their masters, the choices kept where they still

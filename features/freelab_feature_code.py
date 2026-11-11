@@ -2010,16 +2010,18 @@ CHECK_MARK_SCALE = 3  # the check mark is drawn this many times the box's size (
 CHECK_SHEET_MARK = u"/* FreeLab check boxes */"
 
 
-def check_box_sheet(size, mark=None, fill=u"palette(highlight)", frame=CHECK_FRAME):
+def check_box_sheet(size, mark=None, fill=u"palette(highlight)", frame=CHECK_FRAME, selected_frame=u"white"):
     """Stylesheet rules for a list's check boxes: unchecked, a box framed in a mid gray on the row's own
     background; checked, a box filled with fill (the list's highlight color), with the check mark
-    (mark: an image file's path; None: filled only)."""
+    (mark: an image file's path; None: filled only). On a selected row (the same highlight) each box
+    is framed in selected_frame (the highlighted text's color), so it still stands out."""
     image = u' image: url("%s");' % mark.replace(u"\\", u"/") if mark else u""
     return (u"%s QTreeView::indicator { width: %dpx; height: %dpx; border: 1px solid %s; border-radius: 2px; "
             u"background: transparent; } "
             u"QTreeView::indicator:checked { border: 1px solid %s; background: %s;%s } "
-            u"QTreeView::indicator:indeterminate { background: %s; }" % (CHECK_SHEET_MARK, size, size, frame, fill, fill,
-                                                                         image, frame))
+            u"QTreeView::indicator:indeterminate { background: %s; } "
+            u"QTreeView::indicator:selected { border: 1px solid %s; }" % (CHECK_SHEET_MARK, size, size, frame, fill, fill,
+                                                                        image, frame, selected_frame))
 
 
 def check_mark_file(QtCore, QtGui, color, size):
@@ -2080,7 +2082,8 @@ def style_check_boxes(QtCore, QtGui, tree, base):
     except Exception:
         mark = None
     tree.setStyleSheet(u"")  # (polished again: the palette's colors read anew)
-    tree.setStyleSheet((base + u" " if base else u"") + check_box_sheet(size, mark, fill))
+    tree.setStyleSheet((base + u" " if base else u"") + check_box_sheet(size, mark, fill, CHECK_FRAME,
+                                                                      u"rgb(%d, %d, %d)" % rgb))
 
 
 def watch_check_boxes(dialog, trees):
@@ -2250,6 +2253,8 @@ class FeatureCodeDialog(object):
         self.close_button = QtGui.QPushButton("Close")
         buttons.addWidget(self.restore_button)
         buttons.addStretch(1)
+        self.compile_box = self.ak.compile_box()
+        buttons.addWidget(self.compile_box)
         buttons.addWidget(self.write_button)
         buttons.addWidget(self.close_button)
         layout.addLayout(buttons)
@@ -3406,9 +3411,9 @@ class FeatureCodeDialog(object):
         self.apply_form_state(forms)
         self.make_code()
         them = u"it" if len(written) == 1 else u"them"
-        self.log.add(u"Wrote %s. Compile the features in FontLab's <i>Features</i> panel to try %s; <i>Edit &gt; Undo</i> "
-                     u"takes %s back." % (self.ak.b(u", ".join(written)), them, them) if written else u"Wrote nothing.",
-                     "done" if written else "info")
+        self.log.add(u"Wrote %s; <i>Edit &gt; Undo</i> takes %s back.%s" % (
+            self.ak.b(u", ".join(written)), them, self.ak.compiled_note(self.compile_box)) if written else u"Wrote nothing.",
+            "done" if written else "info")
         if skipped is not None:
             self.log.add(u"locl was not written: the prefix could not be (%s). Add these lines to the prefix in "
                          u"FontLab's <i>Features</i> panel, then write again: %s" % (

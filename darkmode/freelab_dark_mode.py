@@ -3006,9 +3006,54 @@ def lighter_name(name, factor):
     return u"#" + u"".join(u"%02x" % min(255, int(round(c * factor / 100.0))) for c in channels)
 
 
-def separator_sheet(color_name):
-    """The stylesheet a dark menu's separators are drawn with: a line of the given color."""
-    return u"QMenu::separator { height: 1px; background: %s; margin: 4px 8px; }" % color_name
+def separator_sheet(color_name, check=None):
+    """The stylesheet a dark menu's separators are drawn with: a line of the given color; with check (an
+    image file's path), its ticked items show a bare check mark, as Windows' light menus do, not
+    Fusion's framed box."""
+    sheet = u"QMenu::separator { height: 1px; background: %s; margin: 4px 8px; }" % color_name
+    if check:
+        sheet += (u" QMenu::indicator:non-exclusive:checked { image: url(\"%s\"); border: none; background: transparent; "
+                  u"width: 16px; height: 16px; }" % check.replace(u"\\", u"/"))
+    return sheet
+
+
+MENU_CHECK_SIDE = 16  # pixels, the check mark of a ticked menu item
+
+
+def menu_check_file(color):
+    """A bare check mark in color (a QColor), as a PNG in FreeLab's folder of temporary files (made once
+    per color): its path, or None."""
+    QPainter, QPixmap, QPen, QPainterPath = _gui("QPainter"), _gui("QPixmap"), _gui("QPen"), _gui("QPainterPath")
+    Qt = _core("Qt")
+    temporary = u"%s" % _core("QDir").tempPath()
+    if not temporary or not os.path.isabs(temporary):
+        return None
+    folder = os.path.join(temporary, u"FreeLab")
+    path = os.path.join(folder, u"menu-check-%s.png" % color.name()[1:])
+    if os.path.isfile(path):
+        return path
+    if not os.path.isdir(folder):
+        os.makedirs(folder)
+    scale = 4
+    side = MENU_CHECK_SIDE * scale
+    pixmap = QPixmap(side, side)
+    pixmap.fill(_gui("QColor")(0, 0, 0, 0))
+    painter = QPainter(pixmap)
+    try:
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        pen = QPen(color, 1.6 * scale)
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        painter.setPen(pen)
+        mark = QPainterPath()
+        mark.moveTo(0.25 * side, 0.52 * side)
+        mark.lineTo(0.43 * side, 0.70 * side)
+        mark.lineTo(0.76 * side, 0.32 * side)
+        painter.drawPath(mark)
+    finally:
+        painter.end()
+    small = pixmap.scaled(MENU_CHECK_SIDE, MENU_CHECK_SIDE, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+    return path if small.save(path) else None
 
 
 def _lighten_separators(menu):
@@ -3016,8 +3061,13 @@ def _lighten_separators(menu):
     menu; a menu with no stylesheet of its own gets lighter ones (taken off again with dark mode)."""
     if menu.property(SEPARATOR_PROP) is not None or _prop(menu, "styleSheet"):
         return
-    window = _prop(menu, "palette").color(_gui("QPalette").Window).name()
-    sheet = separator_sheet(lighter_name(window, SEPARATOR_LIGHTER))
+    palette = _prop(menu, "palette")
+    window = palette.color(_gui("QPalette").Window).name()
+    try:
+        check = menu_check_file(palette.color(_gui("QPalette").WindowText))
+    except Exception:
+        check = None
+    sheet = separator_sheet(lighter_name(window, SEPARATOR_LIGHTER), check)
     menu.setProperty(SEPARATOR_PROP, sheet)
     menu.setStyleSheet(sheet)
 

@@ -1476,14 +1476,27 @@ def add_tools_button(dialog, current, log=None):
         button.setMenu(menu)
         button.setPopupMode(QtGui.QToolButton.InstantPopup)
         button.setStyleSheet(u"QToolButton::menu-indicator { image: none; width: 0px; }")  # (the lines say "menu")
-        if first is not None:  # a widget: it and the button share a row
+        # Windows shows no title-bar "?" beside minimize and maximize: the help button is here instead
+        help_button = QtGui.QToolButton()
+        help_button.setAutoRaise(True)
+        help_button.setText(u"?")
+        bold = QtGui.QFont(help_button.font)
+        bold.setBold(True)
+        help_button.setFont(bold)
+        help_button.setToolTip(u"What's this? Click it, then a control, to read what the control does.")
+        whats_this = lambda *args: QtGui.QWhatsThis.enterWhatsThisMode()
+        held.append(whats_this)
+        help_button.connect("clicked()", whats_this)
+        if first is not None:  # a widget: it and the buttons share a row
             layout.removeWidget(first)
             row = QtGui.QHBoxLayout()
             row.setContentsMargins(0, 0, 0, 0)
             row.addWidget(first, 1)
+            row.addWidget(help_button, 0, QtCore.Qt.AlignTop)
             row.addWidget(button, 0, QtCore.Qt.AlignTop)
             layout.insertLayout(0, row)
-        else:  # a row already: the button at its end
+        else:  # a row already: the buttons at its end
+            first_row.addWidget(help_button, 0, QtCore.Qt.AlignTop)
             first_row.addWidget(button, 0, QtCore.Qt.AlignTop)
         _TOOL_BUTTONS.append((button, menu, held))  # (PythonQt drops what no Python object holds)
         return button
@@ -1526,6 +1539,45 @@ def hook_menu_order_soon(tries=MENU_HOOK_TRIES):
     # dropped module's globals (a FreeLab script loading auto kerning again replaces it in sys.modules)
     sys._freelab_menu_retry = (retry, sys.modules.get(__name__))
     QtCore.QTimer.singleShot(MENU_HOOK_RETRY_MS, retry)
+
+
+COMPILE_TIP = u"Compile features ("  # the Features panel's button (its tooltip names its shortcut after this)
+
+
+def compile_features():
+    """Compile the current font's features as the Features panel's button does (FontLab has no call for
+    it): True once clicked, False when the panel was never made (open it once: Window > Panels)."""
+    QtGui = _qt()[1]
+    for widget in QtGui.QApplication.instance().allWidgets():
+        try:
+            if (widget.inherits("QAbstractButton") and widget.objectName == "buttonCompile"
+                    and (u"%s" % widget.toolTip).startswith(COMPILE_TIP)):
+                widget.click()
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def compile_box():
+    """The "Compile after writing" check box a dialog that writes feature code shows beside its button."""
+    QtGui = _qt()[1]
+    box = QtGui.QCheckBox(u"Compile after writing")
+    box.setChecked(True)
+    box.setWhatsThis(u"Compiles the font's features right after the code is written, as the <i>Features</i> panel's "
+                     u"<i>Compile</i> button does, so the new code can be tried at once. Off: the code is only "
+                     u"written (the font's other feature code may not compile yet, or a large font takes a while).")
+    return box
+
+
+def compiled_note(box):
+    """After writing: compiled (when the box is checked), and what the log says of it."""
+    if box is None or not box.checked:
+        return u" Compile the features in FontLab's <i>Features</i> panel to try it."
+    if compile_features():
+        return u" Compiled: see the <i>Features</i> panel for any error."
+    return (u" Not compiled: FontLab's <i>Features</i> panel was never opened in this session (<i>Window &gt; "
+            u"Panels &gt; Features</i>); compile there.")
 
 
 def plain_buttons(dialog):
