@@ -363,7 +363,7 @@ Three lists for the current font's kerning. Nothing changes until you click a li
 FontLab applies (kerning classes included), all of them or only those common in text. The fix is
 the value that keeps that distance; written, it is a pair of its own, so the class kerns its other
 glyphs as before. If a fix looks off, drag the <i>Adjusted</i> preview's right glyph left or right
-(or click it and press Left or Right, with Shift for 10 units): the fix follows.<br>
+(or click it and press <i>Left</i> or <i>Right</i>, with <i>Shift</i> for 10 units): the fix follows.<br>
 <b>Cleanup</b>: entries that change nothing (their pairs get the same value without them, or each
 pair they cover has a value of its own), entries naming a class or glyph that is gone (checked), and
 values smaller than the size you set (unchecked: look at them first).<br>
@@ -373,7 +373,7 @@ nothing to compare).<br><br>
 Each list is checked as its tab is first shown, and again after an undo or an edit in FontLab.
 Double-click a row's pair (or select it and click <i>Show in Glyph window</i>) to look at it with
 FontLab's own tools. <i>Restore suggestions</i> puts a list's checks back as it first came.
-Click this help's ? button, then any control, for what it does."""
+Click this help's <i>?</i> button, then any control, for what it does."""
 
 
 class Tab(object):
@@ -434,8 +434,8 @@ class KerningCheckDialog(object):
             label.setProperty(self.ak.LEAVE_ALONE_PROP, True)  # dark mode leaves the drawn pictures alone
             label.setAlignment(QtCore.Qt.AlignCenter)
             label.setMinimumHeight(int(self.ak.PAIR_PREVIEW_EM * 1.7))
-            label.setWhatsThis(u"The selected pair as it is set now and adjusted: with its fix (Collisions), or "
-                               u"without its entry (Cleanup), beside its base pair; its glyphs are drawn see-through, "
+            label.setWhatsThis(u"The selected pair as it is set now and adjusted: with its fix (<i>Collisions</i>), or "
+                               u"without its entry (<i>Cleanup</i>), beside its base pair; its glyphs are drawn see-through, "
                                u"so where their ink overlaps it is denser.")
             previews.addWidget(label, 1)
             self.previews.append(label)
@@ -454,7 +454,7 @@ class KerningCheckDialog(object):
         for _, label in PAIR_SETS:
             self.pair_set.addItem(label)
         self.pair_set.setWhatsThis(u"All kerned pairs, or only those common in text (frequent in 24 languages and "
-                                   u"kerned in fonts: the list Auto Kerning's Common pairs uses).")
+                                   u"kerned in fonts: the list <i>Auto Kerning</i>'s <i>Common pairs</i> uses).")
         tab.settings.addWidget(self.pair_set)
         self.common = None  # {two characters: rank}, read when first needed
         tab.settings.addWidget(QtGui.QLabel("whose ink comes within"))
@@ -525,7 +525,7 @@ class KerningCheckDialog(object):
 
         buttons = QtGui.QHBoxLayout()
         self.glyph_window_button = QtGui.QPushButton("Show in Glyph window")
-        self.glyph_window_button.setWhatsThis(u"Opens the selected row's pair in a Glyph window, between H's, n's, "
+        self.glyph_window_button.setWhatsThis(u"Opens the selected row's pair in a <i>Glyph</i> window, between H's, n's, "
                                               u"and o's.")
         self.close_button = QtGui.QPushButton("Close")
         buttons.addWidget(self.glyph_window_button)
@@ -845,7 +845,7 @@ class KerningCheckDialog(object):
         self.after_writing()
         self.check_collisions()
         b = self.ak.b
-        self.log.add(u"Wrote %s of %s own (Edit &gt; Undo takes %s back)." % (
+        self.log.add(u"Wrote %s of %s own (<i>Edit &gt; Undo</i> takes %s back)." % (
             b(counted(written, u"pair")), u"its" if written == 1 else u"their", u"it" if written == 1 else u"them"),
             "done" if written else "info")
         if stale:
@@ -905,7 +905,7 @@ class KerningCheckDialog(object):
         self.after_writing()
         self.check_cleanup()
         b = self.ak.b
-        self.log.add(u"Removed %s (Edit &gt; Undo puts %s back)." % (
+        self.log.add(u"Removed %s (<i>Edit &gt; Undo</i> puts %s back)." % (
             b(counted(removed, u"entry", u"entries")), u"it" if removed == 1 else u"them"), "done" if removed else "info")
         if stale:
             self.log.add(u"%s had changed since the check and %s left as %s." % (

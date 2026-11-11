@@ -1303,7 +1303,7 @@ def add_tools_button(dialog, current, log=None):
             else:
                 def chosen(title=title):
                     if not open_tool(title) and log is not None:
-                        log.add(u"%s is not in Scripts &gt; FreeLab: run Refresh Scripts, or reinstall FreeLab." % b(title),
+                        log.add(u"%s is not in <i>Scripts &gt; FreeLab</i>: run <i>Refresh Scripts</i>, or reinstall FreeLab." % b(title),
                                 "warning")
                 held.append(chosen)
                 action.connect("triggered()", chosen)
@@ -1825,8 +1825,8 @@ class PairDrag(object):
         drag = self
         label.setMouseTracking(True)
         label.setFocusPolicy(QtCore.Qt.ClickFocus)
-        label.setToolTip(u"Drag the right glyph left or right to adjust; or click, then press Left or Right "
-                         u"(with Shift: %d units)." % ADJUST_SHIFT_STEP)
+        label.setToolTip(u"Drag the right glyph left or right to adjust; or click, then press <i>Left</i> or <i>Right</i> "
+                         u"(with <i>Shift</i>: %d units)." % ADJUST_SHIFT_STEP)
 
         class Filter(QtCore.QTimer):  # PythonQt has no QObject to subclass; a timer will do
             def eventFilter(self, obj, event):
@@ -2145,7 +2145,7 @@ def flag_glyphs(owner, names, label, value):
             menu.cache = {}
             menu.refresh()
     if value:
-        owner.log.add(u"Flagged %s %s in FontLab (Select &gt; Same Flag gathers them again; F3 goes to the next "
+        owner.log.add(u"Flagged %s %s in FontLab (<i>Select &gt; Same Flag</i> gathers them again; <i>F3</i> goes to the next "
                       u"flagged row here)." % (b(u", ".join(g.name for g in glyphs)), html(label.lower())), "done")
     else:
         owner.log.add(u"Took the flag off %s." % b(u", ".join(g.name for g in glyphs)), "done")
@@ -2792,17 +2792,17 @@ the font's palt sets them, on top of it.<br><br>
 <b>The list</b>: each method's value beside the font's current one. Check the pairs to write;
 pairs the font kerns already start unchecked.<br>
 <b>Choosing a value for one pair</b>: click a preview below the list, double-click a value in the
-list, or press Ctrl and its number (1 Now, 2 Average, 3 halfkern, 4 Contour, 5 FreeLab, 6 FontLab)
-while the list has the focus. A pair picked by hand is tinted; Backspace or Reset pair gives it the
-suggested value again. Restore suggestions puts every check and pick back as the list first came.<br>
-<b>Keys in the list</b>: arrows move, a letter jumps to the pairs starting with it, Space checks or
-unchecks the pair, Ctrl+1 to Ctrl+6 pick, Backspace resets.<br>
+list, or press <i>Ctrl</i> and its number (1 Now, 2 Average, 3 halfkern, 4 Contour, 5 FreeLab, 6 FontLab)
+while the list has the focus. A pair picked by hand is tinted; <i>Backspace</i> or <i>Reset pair</i> gives it the
+suggested value again. <i>Restore suggestions</i> puts every check and pick back as the list first came.<br>
+<b>Keys in the list</b>: arrows move, a letter jumps to the pairs starting with it, <i>Space</i> checks or
+unchecks the pair, <i>Ctrl+1</i> to <i>Ctrl+6</i> pick, <i>Backspace</i> resets.<br>
 <b>The H's around a pair</b> (the script's own straight letter past Latin): click one, in any
 preview, to go to its pair with the pair's glyph beside it (H and T for HTo).<br>
-<b>The pair's name</b>: double-click it to open the pair in a Glyph window.<br>
+<b>The pair's name</b>: double-click it to open the pair in a <i>Glyph</i> window.<br>
 <b>Kerning classes</b>: a pair is written where its value comes from: its own pair, or else its
 classes' pair, which kerns every glyph of both classes. The line under the list says which.<br><br>
-Click this help's ? button, then any control, for what it does."""
+Click this help's <i>?</i> button, then any control, for what it does."""
 
 
 class AutoKerningDialog(object):
@@ -2853,7 +2853,7 @@ class AutoKerningDialog(object):
         self.show_kind.setWhatsThis("Which characters' pairs are listed.")
         row.addWidget(self.show_kind)
         self.pairs = self.combo(PAIRS)
-        self.pairs.setToolTip("Common pairs: frequent in the text of 24 languages and kerned in fonts "
+        self.pairs.setToolTip("<i>Common pairs</i>: frequent in the text of 24 languages and kerned in fonts "
                               "(andre-fuchs/kerning-pairs), worth kerning even in a font kerned in part.")
         self.pairs.setWhatsThis("All pairs, or only the pairs frequent in text and usually kerned.")
         if not self.common:
@@ -2896,9 +2896,9 @@ class AutoKerningDialog(object):
         self.table.verticalHeader().setDefaultSectionSize(QtGui.QFontMetrics(self.table.font).height() + 6)  # PythonQt has no widget.fontMetrics()
         self.table.horizontalHeader().setSectionResizeMode(QtGui.QHeaderView.Stretch)  # the columns share the width
         self.table.setWhatsThis(u"The pairs, each method's value, and the value to write (Suggested). "
-                                u"Double-click a value to use it for that pair, or press Ctrl+1 to Ctrl+6; Space "
-                                u"checks the pair; Backspace gives it the suggested value again. Double-click a "
-                                u"pair's name to open it in a Glyph window.")
+                                u"Double-click a value to use it for that pair, or press <i>Ctrl+1</i> to <i>Ctrl+6</i>; "
+                                u"<i>Space</i> checks the pair; <i>Backspace</i> gives it the suggested value again. "
+                                u"Double-click a pair's name to open it in a <i>Glyph</i> window.")
         grid_lines(self.table)
         layout.addWidget(self.table, 1)
         note_row = QtGui.QHBoxLayout()
@@ -2911,7 +2911,7 @@ class AutoKerningDialog(object):
         self.reset_button.setEnabled(False)
         note_row.addWidget(self.reset_button)
         self.glyph_window_button = QtGui.QPushButton(u"Show in Glyph window")
-        self.glyph_window_button.setWhatsThis(u"Opens the selected pair in a Glyph window, between H's, n's, and o's, "
+        self.glyph_window_button.setWhatsThis(u"Opens the selected pair in a <i>Glyph</i> window, between H's, n's, and o's, "
                                               u"to look at it (and edit it) with FontLab's own tools.")
         self.glyph_window_button.setEnabled(False)
         note_row.addWidget(self.glyph_window_button)
@@ -2931,7 +2931,7 @@ class AutoKerningDialog(object):
             button.setSizePolicy(QtGui.QSizePolicy.Expanding, QtGui.QSizePolicy.Fixed)
             button.setProperty(LEAVE_ALONE_PROP, True)
             button.setStyleSheet(CHOICE_SHEET)
-            button.setToolTip(u"%s: click to use it for this pair (Ctrl+%d in the list)." % (label, number + 1))
+            button.setToolTip(u"%s: click to use it for this pair (<i>Ctrl+%d</i> in the list)." % (html(label), number + 1))
             button.setWhatsThis(u"The pair as %s sets it, between two H's. Click to use it for this pair." % label)
             button.setEnabled(False)
             self.choice_group.addButton(button, number)
@@ -2939,7 +2939,7 @@ class AutoKerningDialog(object):
             grid.addWidget(button, number // 2, number % 2)
             _keep_room_when_hidden(button)  # drawn once a pair is selected
         self.neighbors = dict((key, ClickRegions(button, self.focus_neighbor,
-                                                 u"Click to go to this H's pair with the glyph beside it"))
+                                                 u"Click to go to this H's pair with the glyph beside it."))
                               for key, button in self.choice_buttons.items())
         layout.addLayout(grid)
         layout.addWidget(self.log.widget)
@@ -2955,7 +2955,7 @@ class AutoKerningDialog(object):
                                          "learned from and this font's own outlines, to review before any is made.")
         self.class_dialog = None
         self.check_button = QtGui.QPushButton(u"Check kerning…")
-        self.check_button.setWhatsThis(u"Opens Kerning Check: pairs whose kerning makes them collide, entries that "
+        self.check_button.setWhatsThis(u"Opens <i>Kerning Check</i>: pairs whose kerning makes them collide, entries that "
                                        u"do nothing or name what is gone, and differences between masters.")
         self.apply_button = QtGui.QPushButton("Write checked pairs")
         self.apply_button.setWhatsThis("Writes the Suggested value of every checked pair to the current master, "
@@ -3020,7 +3020,7 @@ class AutoKerningDialog(object):
         """Kerning Check, the script beside this one, on the same font."""
         error = open_sibling_script(KERNING_CHECK_FILE, KERNING_CHECK_MODULE)
         if error:
-            self.log.add(u"Kerning Check did not open: %s" % html(error), "error")
+            self.log.add(u"<i>Kerning Check</i> did not open: %s" % html(error), "error")
 
     def make_keys(self):
         """The list's keys: Ctrl+1 to Ctrl+6 pick (a plain number or letter jumps to the pairs starting
@@ -3358,8 +3358,8 @@ class AutoKerningDialog(object):
         font = QtGui.QFont(self.table.font)
         font.setBold(bool(s.override))
         suggested.setFont(font)
-        suggested.setToolTip(u"Picked by hand: %s. Backspace or Reset gives it the suggested value."
-                             % dict(CHOICES)[s.override] if s.override else u"")
+        suggested.setToolTip(u"Picked by hand: %s. <i>Backspace</i> or <i>Reset pair</i> gives it the suggested value."
+                             % html(dict(CHOICES)[s.override]) if s.override else u"")
         for column in range(len(self.COLUMNS)):
             self.table.item(row, column).setBackground(QtGui.QBrush(tint) if s.override else QtGui.QBrush())
         self.table.item(row, 0).setToolTip(u"%s %s. %s" % (s.left, s.right, self.target_text(s)))
@@ -3819,7 +3819,7 @@ class ClassDialog(object):
         self.tree.setHeaderLabels(list(CLASS_COLUMNS))
         grid_lines(self.tree)
         self.tree.setWhatsThis(u"Each class suggested for this master: checked ones are made (or extended) when you click "
-                               u"Create checked classes. Gray ones are shown for reference and left as they are. "
+                               u"<i>Create checked classes</i>. Gray ones are shown for reference and left as they are. "
                                u"<i>May need pairs of their own</i> names the members that need looser kerning than the "
                                u"class's first glyph (an accent reaching toward the neighbor), at the pair where they "
                                u"differ most: the class's value would bring them too close there, so check those pairs "
@@ -3889,7 +3889,7 @@ class ClassDialog(object):
         self.apply_button.setEnabled(False)
         self.exceptions_button.setEnabled(False)
         if package is None:
-            self.status.setText(u"No font is open. Open one, then run Auto Kerning again.")
+            self.status.setText(u"No font is open. Open one, then run <i>Auto Kerning</i> again.")
             return
         if class_model() is None:
             self.status.setText(u"The class model (%s) is missing beside the script: reinstall FreeLab." % CLASS_MODEL_FILE)
@@ -4146,7 +4146,7 @@ classes); <i>second in a pair</i> by their left side.<br>
 <b>The font's classes come first</b>: a suggestion makes a class only where none of its glyphs has one
 on that side, or adds glyphs to the one class they share. Suggestions overlapping several classes,
 or a class that kerns both sides, are shown and left as they are.<br><br>
-Click this help's ? button, then any control, for what it does."""
+Click this help's <i>?</i> button, then any control, for what it does."""
 
 
 

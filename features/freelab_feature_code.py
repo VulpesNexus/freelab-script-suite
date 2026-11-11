@@ -304,8 +304,19 @@ FORM_TITLES = {
     "lnum": u"Lining Figures", "onum": u"Oldstyle Figures", "pnum": u"Proportional Figures",
     "tnum": u"Tabular Figures"}
 SET_TAGS = tuple(u"ss%02d" % n for n in range(1, 21)) + tuple(u"cv%02d" % n for n in range(1, 100))
-FORM_ORDER = ("locl", "case", "frac", "numr", "dnom", "sups", "subs", "sinf", "ordn", "smcp", "c2sc",
+FORM_ORDER = ("aalt", "locl", "case", "frac", "numr", "dnom", "sups", "subs", "sinf", "ordn", "smcp", "c2sc",
               "lnum", "onum", "pnum", "tnum") + SET_TAGS  # (locl first: the forms it makes are the ones the others see)
+FORM_TITLES["aalt"] = u"Access All Alternates"
+# Features whose alternates aalt gathers (one glyph for another): what InDesign and Illustrator offer as
+# a selected character's alternates, in place and in their Glyphs panel. Contextual features (frac,
+# ordn), locl (one language's), and ligatures are not alternates.
+ALTERNATE_FEATURES = ("case", "smcp", "c2sc", "pcap", "c2pc", "unic", "lnum", "onum", "pnum", "tnum", "zero",
+                      "sups", "subs", "sinf", "numr", "dnom", "salt", "swsh", "cswh", "titl", "hist", "ornm",
+                      "nalt") + SET_TAGS
+# An ASCII character and the spacing accent drawn for text that look alike: each offered as the other's
+# alternate (the character stays: a search still finds the tilde typed).
+ASCII_VARIANTS = ((0x7E, 0x2DC, u"tilde"), (0x5E, 0x2C6, u"circumflex"), (0x60, 0x2CB, u"grave accent"),
+                  (0x22, 0x2DD, u"double acute"), (0x27, 0x2B9, u"prime"))
 for _tag in SET_TAGS:
     FORM_TITLES[_tag] = (u"Stylistic Set %d" if _tag.startswith(u"ss") else u"Character Variant %d") % int(_tag[2:])
 LOCL_SUFFIX = re.compile(r"^locl([A-Z]{3,})$")
@@ -1236,6 +1247,79 @@ def set_features(info, texts):
     return found
 
 
+# -- Access All Alternates --------------------------------------------------------------
+
+ALTERNATE_CODE = re.compile(r"^\s*sub(?:stitute)?\s+\S+\s+(?:by|from)\s+\S", re.M)
+
+
+def has_alternates(text):
+    """Whether a feature's code substitutes a glyph (or a class) by another, or from a set."""
+    return bool(text and ALTERNATE_CODE.search(text))
+
+
+def aalt_feature(info, texts, made):
+    """aalt from the font's alternate features (each referred to: "feature case;"), those FreeLab writes
+    as they are checked when written, and each ASCII character with the spacing accent the font draws
+    like it (and the other way round). made: the other form features; texts: the font's features."""
+    rows = []
+    tags = [tag for tag in ALTERNATE_FEATURES
+            if has_alternates(texts.get(tag)) or any(f.tag == tag for f in made if f is not None)]
+    for tag in tags:
+        rows.append(FormRule(u"feature " + tag, [], tag, tag, u"its alternates (%s)" % FORM_TITLES.get(tag, tag),
+                             u"feature %s;" % tag, kind="feature"))
+    for ascii_code, accent_code, label in ASCII_VARIANTS:
+        ascii_glyph, accent = info.glyph(ascii_code), info.glyph(accent_code)
+        if ascii_glyph and accent and ascii_glyph != accent:
+            note = u"the %s typed as %s, offered as the %s, and back" % (label, unichr_(ascii_code), unichr_(accent_code))
+            rows.append(FormRule(ascii_glyph, [ascii_glyph, accent], ascii_glyph, accent, note,
+                                 u"sub %s from [%s];" % (ascii_glyph, accent), kind="ascii"))
+            rows.append(FormRule(accent, [accent, ascii_glyph], accent, ascii_glyph, u"", u"sub %s from [%s];" % (
+                accent, ascii_glyph), kind="ascii"))
+    if not rows:
+        return None
+    others = [f for f in made if f is not None]
+
+    def make_aalt(rules, feature):
+        """aalt's statements, a feature referred to only while it has code: the font's own, or FreeLab's
+        checked (else the compiler stops at a feature with no rules)."""
+        lines = []
+        for rule in rules:
+            if rule.data.get("kind") == "feature":
+                tag = rule.source
+                written = any(f.tag == tag and f.on and f.checked() for f in others)
+                own = has_alternates(strip_block(texts.get(tag), FORMS))
+                if not (written or own):
+                    continue
+            lines.append(rule.line)
+        return lines
+
+    return FormFeature("aalt", rows, make_aalt,
+                       u"What InDesign and Illustrator offer as a selected character's alternates (in place and in "
+                       u"their <i>Glyphs</i> panel): every one-for-one alternate of the font's features, and the "
+                       u"ASCII characters' look-alike accents")
+
+
+def aalt_first(features):
+    """The font's features with aalt first (the feature compiler takes aalt only before the others; a
+    feature FontLab adds goes last): each taken out and put back in order. True when they moved."""
+    keys = list(features.keys())
+    if u"aalt" not in keys or keys[0] == u"aalt":
+        return False
+    saved = [(tag, features.get_feature(tag)) for tag in keys]
+    try:
+        for tag in keys:
+            features.remove(tag)
+        for tag, text in [item for item in saved if item[0] == u"aalt"] + [item for item in saved if item[0] != u"aalt"]:
+            features.set_feature(tag, text)
+    except Exception:
+        have = set(features.keys())
+        for tag, text in saved:  # nothing lost: whatever is missing put back
+            if tag not in have:
+                features.set_feature(tag, text)
+        raise
+    return True
+
+
 # -- The features in the font ------------------------------------------------------------------
 
 def strip_block(text, block_name):
@@ -1335,6 +1419,7 @@ def form_features(info, texts):
     figures, default = figure_features(info)
     made.extend(figures[tag] for tag in ("lnum", "onum", "pnum", "tnum"))
     made.extend(set_features(info, texts))
+    made.append(aalt_feature(info, texts, made))
     by_tag = dict((feature.tag, feature) for feature in made if feature is not None)
     for tag, text in texts.items():
         if tag not in by_tag and (BEGIN % FORMS) in (text or u""):
@@ -1448,6 +1533,8 @@ def forms_check(features, texts, systems, names, cache=None):
     for feature in features:
         text = texts.get(feature.tag)
         block = freelab_block(feature.tag, text, FORMS) if text else None
+        if block and feature.tag == "aalt":  # (the features it refers to are checked with their own code)
+            block = u"\n".join(line for line in block.splitlines() if not re.match(r"^\s*feature\s+\w+\s*;", line))
         if block:
             code = head + block
             if code not in cache:
@@ -1518,13 +1605,13 @@ HELP = u"""<b>FreeLab Feature Code</b><br>
 Writes the OpenType code for the font's ligatures, for alternates that take turns, and for the forms
 its glyph names call for. The code is shown, and checked, before anything is written.<br><br>
 <b>Ligatures and alternates</b> (the first tab):<br>
-<b>Ligatures</b>: each ligature with what it replaces, set to Standard (liga, on unless a user turns
-it off), Discretionary (dlig, off unless a user turns it on), or Off. A ligature the font's code and
+<b>Ligatures</b>: each ligature with what it replaces, set to <i>Standard</i> (liga, on unless a user turns
+it off), <i>Discretionary</i> (dlig, off unless a user turns it on), or <i>Off</i>. A ligature the font's code and
 name do not place starts where most of the open-licensed fonts FreeLab learned from put it (f_i in
 liga, c_t in dlig); its feature's tooltip says why. Applications let users switch
-both: in InDesign and Illustrator, the Ligatures and Discretionary Ligatures options; on the web,
+both: in InDesign and Illustrator, the <i>Ligatures</i> and <i>Discretionary Ligatures</i> options; on the web,
 font-variant-ligatures. A feature written here is handed back from FontLab's automatic features (its
-"#> feature" line becomes "#/> feature"), so FontLab no longer rewrites it; the rest of its
+"#&gt; feature" line becomes "#/&gt; feature"), so FontLab no longer rewrites it; the rest of its
 code is kept.<br>
 <b>Alternates that take turns</b> (calt, on unless turned off): a letter repeated within the letters
 set takes its next alternate (X.2, X.3, or X.alt1...), so repeated letters vary as handwriting does.
@@ -1540,9 +1627,9 @@ feature the font's code has by hand starts unchecked, as does one FontLab's auto
 makes the same way; a warning row (figures of a tabular set that do not share one width) is for you
 to review, and changes nothing.<br><br>
 The code is made again as you change the choices. Pick a ligature's feature in its box; drag between the parts to give one more room;
-double-click a ligature, a letter, or a form to see it in a Glyph window. <i>Restore suggestions</i> puts the
+double-click a ligature, a letter, or a form to see it in a <i>Glyph</i> window. <i>Restore suggestions</i> puts the
 choices back as they first came.<br><br>
-Click this help's ? button, then any control, for what it does."""
+Click this help's <i>?</i> button, then any control, for what it does."""
 
 TABS = (u"Ligatures and alternates", u"Forms")
 FORM_ICON_WIDTH = 3  # a form row's picture: this many icons wide
@@ -1663,7 +1750,7 @@ class FeatureCodeDialog(object):
                                          u"set's name back as they first came.")
         self.write_button = QtGui.QPushButton("Write the code")
         self.write_button.setWhatsThis(u"Writes the features as shown (liga, dlig, calt, and the checked forms) to the "
-                                       u"font, and the language systems locl needs to its prefix (Update the code: "
+                                       u"font, and the language systems locl needs to its prefix (<i>Update the code</i>: "
                                        u"FreeLab's code is in them already, and changes).")
         self.close_button = QtGui.QPushButton("Close")
         buttons.addWidget(self.restore_button)
@@ -1753,7 +1840,7 @@ class FeatureCodeDialog(object):
         self.write_button.setEnabled(False)
         self.restore_button.setEnabled(False)
         if package is None:
-            self.status.setText(u"No font is open. Open one, then run Feature Code again.")
+            self.status.setText(u"No font is open. Open one, then run <i>Feature Code</i> again.")
             self.forms_label.setText(u"")
             return
         glyphs = list(package.fgPackage.glyphs)
@@ -2296,6 +2383,8 @@ class FeatureCodeDialog(object):
             for tag in self.tags_shown(texts):
                 features.set_feature(tag, texts[tag])
                 written.append(tag)
+            if u"aalt" in written and aalt_first(features):
+                written[written.index(u"aalt")] = u"aalt (first among the features)"
         except Exception as exc:
             error = exc
         self.ak.notify_changed(self.fontlab, self.package, u"FreeLab Feature Code")
@@ -2304,12 +2393,12 @@ class FeatureCodeDialog(object):
         self.apply_form_state(forms)
         self.make_code()
         them = u"it" if len(written) == 1 else u"them"
-        self.log.add(u"Wrote %s. Compile the features in FontLab's Features panel to try %s; Edit &gt; Undo takes "
-                     u"%s back." % (self.ak.b(u", ".join(written)), them, them) if written else u"Wrote nothing.",
+        self.log.add(u"Wrote %s. Compile the features in FontLab's <i>Features</i> panel to try %s; <i>Edit &gt; Undo</i> "
+                     u"takes %s back." % (self.ak.b(u", ".join(written)), them, them) if written else u"Wrote nothing.",
                      "done" if written else "info")
         if skipped is not None:
             self.log.add(u"locl was not written: the prefix could not be (%s). Add these lines to the prefix in "
-                         u"FontLab's Features panel, then write again: %s" % (
+                         u"FontLab's <i>Features</i> panel, then write again: %s" % (
                              self.ak.html(skipped), self.ak.html(u" ".join(u"languagesystem %s %s;" % pair for pair in
                                                                            sorted(language_systems(self.locl()))))),
                          "warning")

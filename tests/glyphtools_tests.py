@@ -175,6 +175,22 @@ class AnchorTests(unittest.TestCase):
                                           "mark_to_mark": 0.01, "fonts": 119}},
              "bases": {"thai": ["0E01", "0E02"], "latin": ["00E4", "0142"]}}
 
+    def test_placements_apply_to_related_letters(self):
+        def recipe(ch, base, *marks):
+            return ac.Recipe(ch, base=base, marks=[ac.Mark(root, side, [(glyph, 1.0, 1.0, 0.0, 0.0)]) for root, side, glyph in marks])
+        circ = ("circumflex", "top", "circumflexcomb.case")
+        c, g, j = recipe(u"\N{LATIN CAPITAL LETTER C WITH CIRCUMFLEX}", "C", circ), \
+            recipe(u"\N{LATIN CAPITAL LETTER G WITH CIRCUMFLEX}", "G", circ), \
+            recipe(u"\N{LATIN CAPITAL LETTER J WITH CIRCUMFLEX}", "J", circ)
+        small = recipe(u"\N{LATIN SMALL LETTER C WITH CIRCUMFLEX}", "c", ("circumflex", "top", "circumflexcomb"))
+        acute = recipe(u"\N{LATIN CAPITAL LETTER C WITH ACUTE}", "C", ("acute", "top", "acutecomb.case"))
+        stacked = recipe(u"\N{LATIN CAPITAL LETTER A WITH CIRCUMFLEX AND ACUTE}", "A", circ, ("acute", "top", "acutecomb.case"))
+        missing = recipe(u"\N{LATIN CAPITAL LETTER H WITH CIRCUMFLEX}", "H", circ)
+        missing.missing = u"H"
+        found = ac.related_marks([c, g, j, small, acute, stacked, missing], c, 0)
+        self.assertEqual([(r.char, at) for r, at in found], [(g.char, 0), (j.char, 0), (stacked.char, 0)],
+                         "the same capital circumflex, first on its side; not lowercase, not another mark, not missing")
+
     def test_own_anchors_move_by_hand(self):
         g = ac.AnchorGlyph("a", 0x61, "base", None, existing={"top": (250, 600)})
         g.anchors = {"bottom": (250, 0)}

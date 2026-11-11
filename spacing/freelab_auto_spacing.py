@@ -258,21 +258,21 @@ straight reference (H for capitals, n for lowercase, 0 for figures) as the refer
 other. Changes only the glyphs you leave checked.<br><br>
 <b>Scripts</b>: Latin; Armenian, against its own vo (capital and small) and oh; Georgian, against
 its own in and on (Mkhedruli, and Mtavruli where the font has them); kana where they are
-proportional already, against RO, NO, and I (full-width kana are set proportionally by palt: CJK
-Spacing). A script whose references the font lacks is spaced by case against H and n.<br><br>
-<b>How</b>: Auto Kerning's two methods measure the pair of the glyph and its reference on each side
+proportional already, against RO, NO, and I (full-width kana are set proportionally by palt: <i>CJK
+Spacing</i>). A script whose references the font lacks is spaced by case against H and n.<br><br>
+<b>How</b>: <i>Auto Kerning</i>'s two methods measure the pair of the glyph and its reference on each side
 (T beside H, H beside T); the kerning they would want there, averaged, is what that sidebearing
 lacks. A side measured within the tolerance is left as it is.<br>
 <b>The references are yours</b>: H, O, l, n, o, 0, and 8 set the spacing (as in Walter Tracy's
 method: space H and n, then O and o, by eye) and are never changed, nor are the other scripts'. Glyphs built from components
 are not spaced: they follow the letters they are built on, their accents kept over them.<br>
-<b>After spacing</b>: the font's kerning was set for the old sidebearings. Run Auto Kerning again,
+<b>After spacing</b>: the font's kerning was set for the old sidebearings. Run <i>Auto Kerning</i> again,
 with <i>Include existing kerned pairs</i>, to see which pairs now want other values.<br>
 <b>Preview</b>: the selected glyph between its references, as it is (left) and as suggested
-(right). Click a reference beside it to open that pair in Auto Kerning; double-click a glyph's name
-to open it in a Glyph window.<br>
-<b>Restore suggestions</b> puts the checks back as the list first came.<br><br>
-Click this help's ? button, then any control, for what it does."""
+(right). Click a reference beside it to open that pair in <i>Auto Kerning</i>; double-click a glyph's name
+to open it in a <i>Glyph</i> window.<br>
+<i>Restore suggestions</i> puts the checks back as the list first came.<br><br>
+Click this help's <i>?</i> button, then any control, for what it does."""
 
 
 class AutoSpacingDialog(object):
@@ -300,7 +300,7 @@ class AutoSpacingDialog(object):
         for _, label in GROUPS:
             self.group.addItem(label)
         self.group.setWhatsThis(u"Which glyphs to space. Figures are often tabular (one width for all): leave them "
-                                u"out unless they are proportional. Everything: every glyph with a character (other "
+                                u"out unless they are proportional. <i>Everything</i>: every glyph with a character (other "
                                 u"scripts' letters by their case, symbols beside n).")
         row.addWidget(self.group)
         row.addWidget(QtGui.QLabel("List changes of at least"))
@@ -322,7 +322,7 @@ class AutoSpacingDialog(object):
         self.tree.setRootIsDecorated(False)
         self.tree.setWhatsThis(u"Each glyph's sidebearings now and the change suggested for each side (below 0: "
                                u"closer to its neighbors), and its width after. Checked glyphs are changed. "
-                               u"Double-click a glyph's name to open it in a Glyph window.")
+                               u"Double-click a glyph's name to open it in a <i>Glyph</i> window.")
         self.ak.grid_lines(self.tree)
         layout.addWidget(self.tree, 1)
         self.composites_note = QtGui.QLabel(u"")
@@ -336,7 +336,7 @@ class AutoSpacingDialog(object):
             label.setMinimumHeight(int(PREVIEW_SIZE * 1.6))
             label.setAlignment(QtCore.Qt.AlignCenter)
             previews.addWidget(label, 1)
-        self.neighbors = [self.ak.ClickRegions(label, self.open_pair, u"Click to open this pair in Auto Kerning")
+        self.neighbors = [self.ak.ClickRegions(label, self.open_pair, u"Click to open this pair in <i>Auto Kerning</i>.")
                           for label in (self.preview_now, self.preview_after)]
         layout.addLayout(previews)
         self.follow = QtGui.QCheckBox("Glyphs built from components follow the letters they are built on.")
@@ -423,7 +423,6 @@ class AutoSpacingDialog(object):
         if self.busy:
             return
         QtCore, QtGui = _qt()
-        ak = self.ak
         self.busy = True
         self.tree.clear()
         self.spacings, self.listed = [], []
@@ -714,7 +713,7 @@ class AutoSpacingDialog(object):
         side, reference = key
         error = self.ak.open_auto_kerning_at(*((reference, s.name) if side == "before" else (s.name, reference)))
         if error:
-            self.log.add(u"Auto Kerning did not open: %s" % self.ak.html(error), "error")
+            self.log.add(u"<i>Auto Kerning</i> did not open: %s" % self.ak.html(error), "error")
 
     def selected(self):
         QtCore, QtGui = _qt()
@@ -863,8 +862,8 @@ class AutoSpacingDialog(object):
             error = exc
         self.after_writing()
         ak = self.ak
-        self.log.add(u"Spaced %s%s. The kerning was set for the old spacing: run Auto Kerning again. Edit &gt; "
-                     u"Undo (or the History panel) takes it back." % (
+        self.log.add(u"Spaced %s%s. The kerning was set for the old spacing: run <i>Auto Kerning</i> again. "
+                     u"<i>Edit &gt; Undo</i> (or the <i>History</i> panel) takes it back." % (
                          ak.b(counted(len(changed), u"glyph")),
                          u", and %s built on them followed" % ak.b(counted(moved, u"glyph")) if self.follow.checked and changed else u""),
                      "done" if changed else "info")

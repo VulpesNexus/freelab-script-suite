@@ -336,9 +336,9 @@ written.<br>
 <b>The previews</b>: the sample text set as it is, and with palt, in the font's glyphs. Type your own
 sample.<br>
 <b>Hangul</b> stays full width, as the corpus's Korean fonts leave it in palt: proportional Korean
-comes from kerning (Auto Kerning, once it measures Hangul).<br>
-<b>Restore suggestions</b> puts every check back as the list first came.<br><br>
-Click this help's ? button, then any control, for what it does."""
+comes from kerning (<i>Auto Kerning</i>, once it measures Hangul).<br>
+<i>Restore suggestions</i> puts every check back as the list first came.<br><br>
+Click this help's <i>?</i> button, then any control, for what it does."""
 
 
 class CJKSpacingDialog(object):
@@ -389,7 +389,7 @@ class CJKSpacingDialog(object):
         ak.grid_lines(self.tree)
         self.tree.setWhatsThis(u"Each full-width kana and punctuation mark with its trims: palt's x placement and x "
                                u"advance, the width after, and halt's. Checked glyphs are written. Double-click one "
-                               u"to see it in a Glyph window.")
+                               u"to see it in a <i>Glyph</i> window.")
         layout.addWidget(self.tree, 1)
         sample_row = QtGui.QHBoxLayout()
         sample_row.addWidget(QtGui.QLabel(u"Sample:"))
@@ -420,7 +420,7 @@ class CJKSpacingDialog(object):
         self.restore_button.setWhatsThis(u"Puts every check back as the list first came.")
         self.write_button = QtGui.QPushButton("Write the code")
         self.write_button.setWhatsThis(u"Writes palt and halt for the checked glyphs, between FreeLab's marker lines; the "
-                                       u"rest of each feature is kept. Edit > Undo takes it back.")
+                                       u"rest of each feature is kept. <i>Edit &gt; Undo</i> takes it back.")
         self.close_button = QtGui.QPushButton("Close")
         for button in (self.all_button, self.none_button, self.restore_button):
             buttons.addWidget(button)
@@ -486,7 +486,7 @@ class CJKSpacingDialog(object):
         self.trims = []
         package = self.package = self.current_font()
         if package is None:
-            self.status.setText(u"No font is open. Open one, then run CJK Spacing again.")
+            self.status.setText(u"No font is open. Open one, then run <i>CJK Spacing</i> again.")
             self.update_buttons()
             return
         if not self.model:
@@ -830,11 +830,11 @@ class CJKSpacingDialog(object):
         self.run()
         if written:
             them = u"it" if len(written) == 1 else u"them"
-            self.log.add(u"Wrote %s. Compile the features in FontLab's Features panel to try %s; Edit &gt; Undo "
-                         u"takes %s back." % (self.ak.b(u" and ".join(written)), them, them), "done")
+            self.log.add(u"Wrote %s. Compile the features in FontLab's <i>Features</i> panel to try %s; <i>Edit &gt; "
+                         u"Undo</i> takes %s back." % (self.ak.b(u" and ".join(written)), them, them), "done")
         if syllables:
             self.log.add(u"Set %s in every master; the font's kerning of Hangul, if any, was set for the old widths. "
-                         u"Edit &gt; Undo takes it back." % self.ak.b(counted(syllables, u"syllable width", u"syllable widths")),
+                         u"<i>Edit &gt; Undo</i> takes it back." % self.ak.b(counted(syllables, u"syllable width", u"syllable widths")),
                          "done")
         if not written and not syllables:
             self.log.add(u"Wrote nothing.")

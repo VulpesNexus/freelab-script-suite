@@ -31,7 +31,6 @@ Valid Python 2.7 (FontLab 7) and Python 3. The planning below the Qt line needs 
 
 from __future__ import absolute_import, division, print_function
 
-import math
 import os
 import sys
 import unicodedata
@@ -232,6 +231,7 @@ class Recipe(object):
         self.refill = False  # its glyph is in the font, empty: filled under its own name
         self.notes = []  # what placing it took (marks made smaller, too tall)
         self.adjust = {}  # mark index: [dx, dy, x scale, y scale], set by hand (about the mark's center)
+        self.touches = u""  # after a placement was applied from another letter: how close a mark comes
 
     @property
     def code(self):
@@ -673,6 +673,31 @@ def layout(recipe, ink_of, placement, letter, gap_share=1.0, stack_share=1.0, sc
     if widen:  # everything moves right, so the mark keeps the letter's left sidebearing
         parts = [(glyph, sx, sy, x + widen, y) for glyph, sx, sy, x, y in parts]
     return parts, top, bottom, widen + int(round(adscript))
+
+
+def placement_key(recipe, index):
+    """What makes two recipes' marks the same for a placement made by hand: the mark's glyphs, its
+    side, its place among the marks on that side (a circumflex alone, or under an acute), and the
+    letter's case (capitals take their marks higher than lowercase letters do)."""
+    mark = recipe.marks[index]
+    same_side = [m for m in recipe.marks if m.side == mark.side]
+    return (tuple(part[0] for part in mark.parts), mark.side, same_side.index(mark), case_of(recipe.char))
+
+
+def related_marks(recipes, recipe, index):
+    """[(another recipe, its mark's index)]: the buildable recipes with the same mark (placement_key), the
+    one a placement made by hand on recipe's mark index most likely suits too (a circumflex raised on
+    C suits the other capitals with a circumflex)."""
+    key = placement_key(recipe, index)
+    found = []
+    for other in recipes:
+        if other is recipe or other.missing:
+            continue
+        for at in range(len(other.marks)):
+            if placement_key(other, at) == key:
+                found.append((other, at))
+                break
+    return found
 
 
 def mark_ranges(recipe):
@@ -1484,6 +1509,7 @@ def is_empty(glyph):
 
 
 UNWRAP_DEPTH = 4  # components inside components followed this deep
+TOUCH_SHARE = 0.012  # of the em: a mark placed from another letter this close to its letter or another mark is named
 
 
 def unwrapped(package, master, name, sx, sy, dx, dy):
@@ -1535,19 +1561,19 @@ anchors needed). Nothing is made until you click <i>Build checked glyphs</i>.<br
 built from. Capitals take a mark's .case form where the font has one; i and j take their dotless
 forms under a mark above. A mark the font lacks is borrowed (a dot below from the dot accent) or
 drafted from its punctuation, and the list says so. Characters that cannot be built say what the
-font lacks. Double-click a glyph the font has to open it in a Glyph window.<br>
+font lacks. Double-click a glyph the font has to open it in a <i>Glyph</i> window.<br>
 <b>The editor</b> (under the list): the selected glyph between its letter and a letter the font has
-with the same base. Click a mark to select it; drag it, or press the arrow keys (Shift: 10 units),
-to move it; drag a corner or a side of its frame to scale it (Shift on a corner: in proportion);
-Tab selects the next mark, Backspace puts the selected one back. Your changes stay with the glyph as
+with the same base. Click a mark to select it; drag it, or press the arrow keys (<i>Shift</i>: 10 units),
+to move it; drag a corner or a side of its frame to scale it (<i>Shift</i> on a corner: in proportion);
+<i>Tab</i> selects the next mark, <i>Backspace</i> puts the selected one back. Your changes stay with the glyph as
 you go down the list, and are built. The dashed lines are the room a 120% line spacing leaves.
-Click the letter beside it to open the pair in Auto Kerning (once the glyph is built).<br>
+Click the letter beside it to open the pair in <i>Auto Kerning</i> (once the glyph is built).<br>
 <b>Reference</b>: the character in another font (the installed font with the most of the listed
 characters, or one you pick), to compare.<br>
-<b>Restore suggestions</b> puts every check and every mark back as the list first came.<br>
+<i>Restore suggestions</i> puts every check and every mark back as the list first came.<br>
 <b>Masters</b>: each glyph is built in every master, each measured on its own; marks moved by hand
 move by as much in every master.<br><br>
-Click this help's ? button, then any control, for what it does."""
+Click this help's <i>?</i> button, then any control, for what it does."""
 
 EDITOR_HEIGHT = 300  # pixels, the editor's least height
 REFERENCE_WIDTH = 170  # pixels, the reference's column
@@ -2010,7 +2036,7 @@ class AnchorPage(object):
         self.editor = make_editor(self)
         self.editor.setProperty(ak.LEAVE_ALONE_PROP, True)
         self.editor.setWhatsThis(u"The selected glyph with a mark attached by its anchors. " + ANCHOR_HELP_NOTE +
-                                 u" Drag the mark or press the arrow keys (Shift: 10 units).")
+                                 u" Drag the mark or press the arrow keys (<i>Shift</i>: 10 units).")
         editing.addWidget(self.editor, 1)
         lower.addLayout(editing, 1)
         hint_row = QtGui.QHBoxLayout()
@@ -2029,7 +2055,7 @@ class AnchorPage(object):
         self.restore_button.setWhatsThis(u"Puts every check and every anchor moved by hand back as the list first came.")
         self.write_button = QtGui.QPushButton(u"Add checked anchors")
         self.write_button.setWhatsThis(u"Adds the checked glyphs' anchors in every master, each measured on its own, and "
-                                       u"writes the mark and mkmk code when asked. Edit > Undo takes it back.")
+                                       u"writes the mark and mkmk code when asked. <i>Edit &gt; Undo</i> takes it back.")
         for button in (self.all_button, self.none_button, self.restore_button):
             buttons.addWidget(button)
         buttons.addStretch(1)
@@ -2502,8 +2528,8 @@ class AnchorPage(object):
             return
         g, name, sign = self.edits[index]
         x, y = g.placed().get(name, (0, 0))
-        self.hint.setText(u"%s's %s anchor: %d, %d. Drag the mark or press the arrow keys (Shift: 10 units); Backspace "
-                          u"puts it back." % (g.name, name, x, y))
+        self.hint.setText(u"%s's %s anchor: %d, %d. Drag the mark or press the arrow keys (<i>Shift</i>: 10 units); "
+                          u"<i>Backspace</i> puts it back." % (self.ak.html(g.name), self.ak.html(name), x, y))
 
     def neighbor_clicked(self, role):
         pass
@@ -2598,7 +2624,7 @@ class AnchorPage(object):
         except Exception as exc:
             error = exc
         self.ak.notify_changed(self.fontlab, package, u"FreeLab Diacritics anchors", touched)
-        self.owner.log.add(u"Added %s%s to %s%s. Edit &gt; Undo takes it back." % (
+        self.owner.log.add(u"Added %s%s to %s%s. <i>Edit &gt; Undo</i> takes it back." % (
             self.ak.b(counted(added, u"anchor")), (u" and moved %s" % self.ak.b(moved)) if moved else u"",
             self.ak.b(counted(len(touched), u"glyph")),
             u", and wrote the %s code" % u", ".join(t for t in CODE_FEATURES if t in new_texts) if new_texts else u""),
@@ -2660,7 +2686,7 @@ class AccentsDialog(object):
         ak.grid_lines(self.tree)
         self.tree.setWhatsThis(u"The letters with diacritics this font lacks: those that can be built (checked ones "
                                u"are built), and, at the end, those that need a mark the font does not have. "
-                               u"Double-click a glyph the font has to open it in a Glyph window.")
+                               u"Double-click a glyph the font has to open it in a <i>Glyph</i> window.")
         layout.addWidget(self.tree, 3)
 
         lower = QtGui.QHBoxLayout()
@@ -2692,8 +2718,8 @@ class AccentsDialog(object):
         self.editor.setProperty(ak.LEAVE_ALONE_PROP, True)  # dark mode leaves what it draws alone
         self.editor.setWhatsThis(u"The selected glyph as it would be built, between its letter and a letter the font "
                                  u"has with the same base. Click a mark to select it, drag it or press the arrow keys "
-                                 u"to move it, drag its frame to scale it; Tab selects the next mark, Backspace puts "
-                                 u"it back. Click the letter beside it to open the pair in Auto Kerning.")
+                                 u"to move it, drag its frame to scale it; <i>Tab</i> selects the next mark, <i>Backspace</i> "
+                                 u"puts it back. Click the letter beside it to open the pair in <i>Auto Kerning</i>.")
         editing.addWidget(self.editor, 1)
         hint_row = QtGui.QHBoxLayout()
         self.hint = QtGui.QLabel(u"Click a diacritic to move or scale it.")
@@ -2702,6 +2728,15 @@ class AccentsDialog(object):
         self.reset_marks_button = QtGui.QPushButton(u"Reset diacritics")
         self.reset_marks_button.setWhatsThis(u"Puts this glyph's diacritics back where they were suggested.")
         hint_row.addWidget(self.reset_marks_button)
+        self.propagate_button = QtGui.QPushButton(u"Apply to related letters")
+        self.propagate_button.setWhatsThis(u"Moves and scales the same diacritic on the related letters as on this "
+                                           u"one: the same mark, on the same side and at the same place in its "
+                                           u"stack, over letters of the same case (a circumflex raised on <i>C</i>: "
+                                           u"every capital with a circumflex). Letters where the mark then comes "
+                                           u"within %d units of its letter or another mark are named in the log and "
+                                           u"in their row, to look at; <i>Reset diacritics</i> on a row puts it back."
+                                           % round(TOUCH_SHARE * 1000))
+        hint_row.addWidget(self.propagate_button)
         editing.addLayout(hint_row)
         lower.addLayout(editing, 1)
         layout.addLayout(lower, 2)
@@ -2712,11 +2747,11 @@ class AccentsDialog(object):
         self.restore_button = QtGui.QPushButton("Restore suggestions")
         self.restore_button.setWhatsThis(u"Puts every check, and every mark moved by hand, back as the list first came.")
         self.glyph_window_button = QtGui.QPushButton("Show in Glyph window")
-        self.glyph_window_button.setWhatsThis(u"Opens the selected glyph in a Glyph window, between H's, n's, and o's "
+        self.glyph_window_button.setWhatsThis(u"Opens the selected glyph in a <i>Glyph</i> window, between H's, n's, and o's "
                                               u"(only a glyph the font has: build it first).")
         self.build_button = QtGui.QPushButton("Build checked glyphs")
         self.build_button.setWhatsThis(u"Adds each checked glyph to the font, with its Unicode value, built from its "
-                                       u"letter and marks as components, in every master. Edit > Undo takes it back.")
+                                       u"letter and marks as components, in every master. <i>Edit &gt; Undo</i> takes it back.")
         self.close_button = QtGui.QPushButton("Close")
         for button in (self.all_button, self.none_button, self.restore_button, self.glyph_window_button):
             buttons.addWidget(button)
@@ -2742,6 +2777,7 @@ class AccentsDialog(object):
         self.restore_button.connect("clicked()", self.restore)
         self.glyph_window_button.connect("clicked()", self.show_in_glyph_window)
         self.reset_marks_button.connect("clicked()", self.reset_marks)
+        self.propagate_button.connect("clicked()", self.propagate)
         self.build_button.connect("clicked()", self.build)
         self.close_button.connect("clicked()", dialog.close)
         self.tree.connect("itemSelectionChanged()", self.select)
@@ -2852,7 +2888,7 @@ class AccentsDialog(object):
         package = self.package = self.current_font()
         self.master = package.master if package is not None else None
         if package is None:
-            self.status.setText(u"No font is open. Open one, then run Diacritics again.")
+            self.status.setText(u"No font is open. Open one, then run <i>Diacritics</i> again.")
             self.update_buttons()
             return
         self.status.setText(u"Reading the font\N{HORIZONTAL ELLIPSIS}")
@@ -2947,10 +2983,11 @@ class AccentsDialog(object):
         if icon is not None:
             item.setIcon(0, QtGui.QIcon(icon))
         text = r.describe() + (u" (its glyph is in the font, empty: filled when built)" if r.refill else u"")
-        if r.notes:
-            text += u" \N{EM DASH} " + u"; ".join(r.notes)
+        notes = list(r.notes) + ([r.touches] if r.touches else [])
+        if notes:
+            text += u" \N{EM DASH} " + u"; ".join(notes)
         item.setText(2, text + u".")
-        item.setToolTip(2, (u"; ".join(r.notes) + u".") if r.notes else u"")
+        item.setToolTip(2, (u"; ".join(notes) + u".") if notes else u"")
 
     def recipe_items(self):
         found = []
@@ -3006,6 +3043,10 @@ class AccentsDialog(object):
         r = self.selected()
         ak.enable(self.glyph_window_button, r is not None and self.in_font(r))
         ak.enable(self.reset_marks_button, r is not None and bool(r.adjust))
+        targets = self.propagation_targets(r) if r is not None and r.adjust else []
+        ak.enable(self.propagate_button, bool(targets))
+        self.propagate_button.setText(u"Apply to %s" % counted(len(set(id(t) for t, _, _ in targets)), u"related letter")
+                                      if targets else u"Apply to related letters")
         self.reset_marks_button.setText(u"Reset diacritic" if r is not None and len(r.marks) == 1 else u"Reset diacritics")
 
     def restore(self):
@@ -3126,14 +3167,96 @@ class AccentsDialog(object):
         mark = r.marks[index]
         moved = u", moved %d, %d" % (round(dx), round(dy)) if (dx or dy) else u""
         sized = u", at %d%% \N{MULTIPLICATION SIGN} %d%%" % (round(kx * 100), round(ky * 100)) if (kx != 1 or ky != 1) else u""
-        self.hint.setText(u"%s%s%s. Arrows move it (Shift: 10 units); its frame scales it; Backspace puts it back."
-                          % (mark.label(), moved, sized))
+        self.hint.setText(u"%s%s%s. Arrows move it (<i>Shift</i>: 10 units); its frame scales it; <i>Backspace</i> puts it "
+                          u"back." % (self.ak.html(mark.label()), moved, sized))
+
+    # -- a placement made by hand, applied to the related letters ---------------------
+
+    def propagation_targets(self, r):
+        """[(recipe, its mark index, the change)] the selected recipe's marks moved by hand would apply to."""
+        found = []
+        for index, change in sorted(r.adjust.items()):
+            if index < len(r.marks):
+                found.extend((other, at, change) for other, at in related_marks(self.recipes, r, index))
+        return found
+
+    def propagate(self):
+        """The selected letter's diacritics, as moved and scaled by hand, given to the related letters;
+        those whose mark then comes too close to their letter or another mark named."""
+        r = self.selected()
+        if r is None or not r.adjust:
+            return
+        targets = self.propagation_targets(r)
+        if not targets:
+            return
+        touched, close = [], []
+        for other, at, change in targets:
+            other.adjust[at] = list(change)
+            if other not in touched:
+                touched.append(other)
+        for other in touched:
+            other.touches = self.closeness(other)
+            if other.touches:
+                close.append(other.char)
+            item = self.item_of(other)
+            if item is not None:
+                self.tree.blockSignals(True)
+                self.refresh_item(item, other)
+                self.tree.blockSignals(False)
+        b = self.ak.b
+        self.log.add(u"Placed the diacritics of %s as on %s." % (b(counted(len(touched), u"letter")), b(r.char)), "done")
+        if close:
+            self.log.add(u"%s %s within %d units of %s letter or another mark: %s. Look at %s." % (
+                b(counted(len(close), u"letter")), u"comes" if len(close) == 1 else u"come", round(TOUCH_SHARE * 1000),
+                u"its" if len(close) == 1 else u"their", b(u" ".join(close)), u"it" if len(close) == 1 else u"them"),
+                "warning")
+        self.update_buttons()
+
+    def closeness(self, recipe):
+        """How close the recipe's marks come, placed, to its letter or to each other: u"" when none
+        comes within TOUCH_SHARE of the em, else a note for its row."""
+        QtCore, QtGui = _qt()
+        ink = self.inks.get(self.master)
+        placement = self.placements.get(self.master)
+        if ink is None or placement is None:
+            return u""
+        try:
+            checked = recipe.checked
+            parts, _ = place(recipe, ink, placement, self.metrics(self.package))
+            recipe.checked = checked
+            if parts is None:
+                return u""
+            gap = TOUCH_SHARE * float(self.package.upm)
+
+            def path_of(chosen):
+                whole = QtGui.QPainterPath()
+                for glyph, sx, sy, x, y in chosen:
+                    path = ink.path(glyph)[0]
+                    if path is not None:
+                        whole.addPath(QtGui.QTransform(sx, 0.0, 0.0, sy, x, y).map(path))
+                return whole
+
+            ranges = mark_ranges(recipe)
+            for index, (first, last) in enumerate(ranges):
+                mark = path_of(parts[first:last])
+                others = path_of([parts[0]] + [part for at, (f, l) in enumerate(ranges) if at != index for part in parts[f:l]])
+                if mark.intersects(others):
+                    return u"%s overlaps its letter or another mark" % recipe.marks[index].label()
+                stroker = QtGui.QPainterPathStroker()
+                stroker.setWidth(2.0 * gap)
+                if stroker.createStroke(mark).intersects(others):
+                    return u"%s comes within %d units of its letter or another mark" % (recipe.marks[index].label(),
+                                                                                     round(gap))
+        except Exception:
+            return u""
+        return u""
 
     def reset_marks(self):
         r = self.selected()
         if r is None:
             return
         r.adjust = {}
+        r.touches = u""
         self.select()
         item = self.item_of(r)
         if item is not None:
@@ -3150,13 +3273,13 @@ class AccentsDialog(object):
             return
         letter, sibling = scene["letters"]
         if not self.in_font(r):
-            self.log.add(u"%s is not built yet: Auto Kerning measures the font's glyphs. Build it first." % self.ak.b(r.char),
+            self.log.add(u"%s is not built yet: <i>Auto Kerning</i> measures the font's glyphs. Build it first." % self.ak.b(r.char),
                          "warning")
             return
         pair = (letter, r.name) if role == "before" else (r.name, sibling)
         error = self.ak.open_auto_kerning_at(*pair)
         if error:
-            self.log.add(u"Auto Kerning did not open: %s" % self.ak.html(error), "error")
+            self.log.add(u"<i>Auto Kerning</i> did not open: %s" % self.ak.html(error), "error")
 
     def picture(self, recipe, size):
         """The recipe drawn as it would be built, in the dialog's text color."""
@@ -3365,7 +3488,7 @@ class AccentsDialog(object):
         b = self.ak.b
         if made:
             one = len(made) == 1
-            self.log.add(u"Built %s: %s. %s at the end of the font; Edit &gt; Undo takes %s back." % (
+            self.log.add(u"Built %s: %s. %s at the end of the font; <i>Edit &gt; Undo</i> takes %s back." % (
                 b(counted(len(made), u"glyph")), self.ak.html(u"".join(made)), u"It is" if one else u"They are",
                 u"it" if one else u"them"), "done")
         else:

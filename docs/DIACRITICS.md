@@ -32,6 +32,7 @@ Under the list, the selected glyph is drawn large between its letter and a lette
 - Click a mark to select it (it is drawn in the highlight color, in a frame with handles). Drag it, or press the arrow keys (Shift: 10 units), to move it; Shift while dragging keeps it on one axis.
 - Drag a corner of the frame to scale the mark both ways (Shift: in proportion), or a side to scale it one way; the opposite corner or side stays put.
 - Tab selects the next mark, Backspace puts the selected one back, Escape deselects; *Reset diacritics* (*Reset diacritic* for a glyph with one) puts all of the glyph's marks back.
+- *Apply to related letters* gives the diacritics moved or scaled by hand on the selected letter to the related ones: the same mark, on the same side and at the same place in its stack, over letters of the same case (a circumflex raised on C: every capital with a circumflex). Each letter's mark is then measured against its letter and its other marks, outlines and all: one that overlaps or comes within 12 units (per 1000) is named in the log and in its row, to look at; *Reset diacritics* on its row puts it back.
 - The changes stay with the glyph as you go down the list, its row's picture follows, and they are built. A mark moved by hand moves by as much in every master, scaled about its own center.
 - Click the letter beside the glyph to open that pair in Auto Kerning, once the glyph is built (Auto Kerning measures the font's glyphs).
 

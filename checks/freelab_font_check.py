@@ -1465,7 +1465,7 @@ does not write the values: set them in <i>File &gt; Font Info</i>.<br>
 the selected glyph drawn in the master compared with and in another, the contour at fault highlighted
 and its nodes numbered.<br><br>
 Each view is checked as its tab is first shown, and again after an undo or an edit in FontLab. Click
-this help's ? button, then any control, for what it does."""
+this help's <i>?</i> button, then any control, for what it does."""
 
 AMBER = (230, 150, 30)  # within reach, warnings
 RED = (222, 64, 52)  # clipped ink, masters that cannot interpolate
@@ -2186,7 +2186,7 @@ class FontCheckDialog(object):
         layout.addWidget(self.log.widget)
         buttons = QtGui.QHBoxLayout()
         self.glyph_window_button = QtGui.QPushButton("Show in Glyph window")
-        self.glyph_window_button.setWhatsThis(u"Opens a Glyph window: a language's missing characters (FontLab's "
+        self.glyph_window_button.setWhatsThis(u"Opens a <i>Glyph</i> window: a language's missing characters (FontLab's "
                                               u"placeholders) and the ones it composes, the checked characters, or the "
                                               u"selected glyph.")
         self.close_button = QtGui.QPushButton("Close")
@@ -2338,7 +2338,7 @@ class FontCheckDialog(object):
         box.addWidget(self.add_tree, 1)
         row = QtGui.QHBoxLayout()
         self.diacritics_button = QtGui.QPushButton("Build with Diacritics")
-        self.diacritics_button.setWhatsThis(u"Opens Diacritics on the checked characters it can build from the font's "
+        self.diacritics_button.setWhatsThis(u"Opens <i>Diacritics</i> on the checked characters it can build from the font's "
                                             u"letters and marks (you check them there before anything is made).")
         self.copy_chars_button = QtGui.QPushButton("Copy characters")
         self.copy_chars_button.setWhatsThis(u"Copies the checked characters (or the selected row's) as text.")
@@ -2367,7 +2367,7 @@ class FontCheckDialog(object):
         self.language_tree = self.tree(("Language", "Missing"), icon=(DOT_SIZE, DOT_SIZE))
         self.language_tree.setWhatsThis(u"A dot per language: covered (the highlight color), within reach (amber), "
                                         u"missed (gray); within reach, the characters it misses. Selecting one marks "
-                                        u"them in the list at the left; double-click shows them in a Glyph window.")
+                                        u"them in the list at the left; double-click shows them in a <i>Glyph</i> window.")
         box.addWidget(self.language_tree, 1)
         halves.addWidget(left)
         halves.addWidget(right)
@@ -2412,9 +2412,9 @@ class FontCheckDialog(object):
         side.addWidget(self.values_tree)
         row = QtGui.QHBoxLayout()
         self.copy_button = QtGui.QPushButton("Copy suggested values")
-        self.copy_button.setWhatsThis(u"Copies the suggested values as text, to set them in Font Info.")
+        self.copy_button.setWhatsThis(u"Copies the suggested values as text, to set them in <i>Font Info</i>.")
         self.font_info_button = QtGui.QPushButton("Open Font Info")
-        self.font_info_button.setWhatsThis(u"Opens FontLab's Font Info, where these values are set.")
+        self.font_info_button.setWhatsThis(u"Opens FontLab's <i>Font Info</i>, where these values are set.")
         row.addWidget(self.copy_button)
         row.addWidget(self.font_info_button)
         row.addStretch(1)
@@ -2436,7 +2436,7 @@ class FontCheckDialog(object):
         side.addLayout(row)
         self.mode_keep = QtGui.QRadioButton("Released font: keep its line spacing")
         self.mode_keep.setWhatsThis(u"Keeps the line spacing of the released font (Google Fonts asks that documents do "
-                                    u"not reflow): only the win values and Use Typo Metrics change.")
+                                    u"not reflow): only the win values and <i>Use Typo Metrics</i> change.")
         side.addWidget(self.mode_keep)
         side.addStretch(1)
         body.addLayout(side)
@@ -2474,7 +2474,7 @@ class FontCheckDialog(object):
         self.clipped_list.setProperty(ak.LEAVE_ALONE_PROP, True)
         self.clipped_list.setFixedHeight(CLIP_TILE[1] + 28)
         self.clipped_list.setWhatsThis(u"The glyphs Windows clips, the worst first: the part cut off in red, by how "
-                                       u"many units under it. Double-click one to open it in a Glyph window; right-click "
+                                       u"many units under it. Double-click one to open it in a <i>Glyph</i> window; right-click "
                                        u"to flag it.")
         tab.layout.addWidget(self.clipped_list)
 
@@ -2695,7 +2695,7 @@ class FontCheckDialog(object):
                                        else u"Build with Diacritics")
         self.diacritics_button.setToolTip(
             u"" if buildable else u"Check characters or select a row first." if not chosen else
-            u"Diacritics cannot build %s from the font's letters and marks." % (
+            u"<i>Diacritics</i> cannot build %s from the font's letters and marks." % (
                 u"this character" if len(chosen) == 1 else u"any of these characters"))
         ak.enable(self.copy_chars_button, bool(chosen))
         self.copy_chars_button.setText(u"Copy %s" % counted(len(chosen), u"character") if chosen else u"Copy characters")
@@ -3068,7 +3068,7 @@ class FontCheckDialog(object):
                 font = dm.Font([u"%s" % g.name for g in fgs], [(u"%s" % g.name, g.unicode) for g in fgs])
                 found = set(recipe.char for recipe in dm.plan(font, candidates) if not recipe.missing)
         except Exception as exc:
-            self.log.add(u"Diacritics could not be asked: %s" % self.ak.html(exc), "warning")
+            self.log.add(u"<i>Diacritics</i> could not be asked: %s" % self.ak.html(exc), "warning")
         self.buildable = found
         return found
 
@@ -3100,13 +3100,13 @@ class FontCheckDialog(object):
             dm = self.diacritics_module()
             try:
                 dm.main(characters=chars)  # a Diacritics that lists the letters given only
-                self.log.add(u"Diacritics lists %s: check them there, then build." % b(u" ".join(chars)), "done")
+                self.log.add(u"<i>Diacritics</i> lists %s: check them there, then build." % b(u" ".join(chars)), "done")
             except TypeError:
                 dm.main()  # (a Diacritics that takes no letters lists every one it can build)
-                self.log.add(u"Diacritics lists every letter with diacritics it can build, %s among them." % b(
+                self.log.add(u"<i>Diacritics</i> lists every letter with diacritics it can build, %s among them." % b(
                     u" ".join(chars)), "done")
         except Exception as exc:
-            self.log.add(u"Diacritics did not open: %s" % self.ak.html(exc), "error")
+            self.log.add(u"<i>Diacritics</i> did not open: %s" % self.ak.html(exc), "error")
 
     def copy_characters(self):
         QtCore, QtGui = _qt()
@@ -3390,7 +3390,7 @@ class FontCheckDialog(object):
         try:
             self.fontlab.flItems.requestFontInfoDlg()
         except Exception as exc:
-            self.log.add(u"FontLab did not open Font Info: %s. Open it from the File menu." % self.ak.html(exc), "warning")
+            self.log.add(u"FontLab did not open <i>Font Info</i>: %s. Open it from the <i>File</i> menu." % self.ak.html(exc), "warning")
 
     # -- Masters -------------------------------------------------------------------
 
@@ -3628,7 +3628,7 @@ class FontCheckDialog(object):
             return
         error = self.ak.show_in_glyph_window(self.fontlab, text)
         if error:
-            self.log.add(u"FontLab did not open a Glyph window: %s" % self.ak.html(error), "error")
+            self.log.add(u"FontLab did not open a <i>Glyph</i> window: %s" % self.ak.html(error), "error")
 
     def show(self):
         QtCore, QtGui = _qt()

@@ -68,6 +68,50 @@ class IndexTests(unittest.TestCase):
         self.assertEqual(info.glyph(0x2044), u"fraction")
 
 
+class AaltTests(unittest.TestCase):
+    def test_alternates_gathered(self):
+        info = make_info([u"hyphen.case", u"a.ss01"], codes=[(u"asciitilde", 0x7E), (u"tilde", 0x2DC),
+                                                          (u"asciicircum", 0x5E)])
+        texts = {u"salt": u"feature salt {\n  sub a by a.ss01;\n} salt;\n", u"liga": u"feature liga {\n  sub f i by f_i;\n} liga;\n"}
+        features, _ = fc.form_features(info, texts)
+        aalt = by_tag(features)[u"aalt"]
+        code = lines_of(aalt)
+        for line in (u"feature case;", u"feature salt;", u"feature ss01;", u"sub asciitilde from [tilde];",
+                     u"sub tilde from [asciitilde];"):
+            self.assertIn(line, code)
+        self.assertNotIn(u"feature liga;", code, "ligatures are no alternates")
+        self.assertNotIn(u"asciicircum", code, "no spacing circumflex in the font: no pair")
+        by_tag(features)[u"case"].on = False
+        self.assertNotIn(u"feature case;", lines_of(aalt), "a feature with no code is not referred to")
+        if HAVE_FONTTOOLS:
+            texts_now = fc.forms_texts(features, texts)
+            whole = u"languagesystem DFLT dflt;\n" + texts_now[u"aalt"] + texts[u"salt"] + texts_now[u"ss01"]
+            self.assertIsNone(parse(whole, info.names + [u"f_i", u"f"]))
+
+    def test_aalt_first(self):
+        class Features(object):
+            def __init__(self, tags):
+                self.order = [(tag, u"feature %s {\n} %s;\n" % (tag, tag)) for tag in tags]
+
+            def keys(self):
+                return [tag for tag, _ in self.order]
+
+            def get_feature(self, tag):
+                return dict(self.order)[tag]
+
+            def remove(self, tag):
+                self.order = [item for item in self.order if item[0] != tag]
+
+            def set_feature(self, tag, text):
+                self.remove(tag)
+                self.order.append((tag, text))
+
+        features = Features([u"liga", u"case", u"aalt"])
+        self.assertTrue(fc.aalt_first(features))
+        self.assertEqual(features.keys(), [u"aalt", u"liga", u"case"])
+        self.assertFalse(fc.aalt_first(features), "first already")
+
+
 class CaseTests(unittest.TestCase):
     def test_case_forms(self):
         info = make_info([u"hyphen.case", u"parenleft.case", u"acutecomb.case", u"periodcentered.loclCAT",
@@ -401,7 +445,7 @@ class FeatureTextTests(unittest.TestCase):
         info = make_info(extra, codes=[(u"Scedilla", 0x15E), (u"Scommaaccent", 0x218)])
         features, _ = fc.form_features(info, {})
         tags = [feature.tag for feature in features]
-        self.assertEqual(tags, ["locl", "case", "frac", "numr", "dnom", "sups", "subs", "sinf", "ordn", "smcp", "c2sc",
+        self.assertEqual(tags, ["aalt", "locl", "case", "frac", "numr", "dnom", "sups", "subs", "sinf", "ordn", "smcp", "c2sc",
                                 "lnum", "onum", "pnum", "tnum", "ss01", "cv01"])
         texts = fc.forms_texts(features, {})
         systems = fc.language_systems(by_tag(features)["locl"])
@@ -714,7 +758,7 @@ class DialogTests(unittest.TestCase):
                                 u"@x = [a];\n")
         dialog = self.dialog(features)
         tags = [item.data(0, USER_ROLE) for item in dialog.forms_tree.items]
-        self.assertEqual(tags, ["locl", "case", "frac", "numr", "dnom", "ordn", "smcp", "c2sc", "pnum", "tnum",
+        self.assertEqual(tags, ["aalt", "locl", "case", "frac", "numr", "dnom", "ordn", "smcp", "c2sc", "pnum", "tnum",
                                 "ss01"])
         self.assertIn(u"ss01", dialog.name_edits)
         self.assertEqual(dialog.name_edits["ss01"].text, u"Alternate a")
