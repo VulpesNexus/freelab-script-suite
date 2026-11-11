@@ -455,6 +455,168 @@ class FeatureTextTests(unittest.TestCase):
             self.assertIsNone(parse(whole, info.names))
 
 
+def figure_measures(extra=None, figure_box=(20, -10, 480, 710), width=500):
+    """(widths, bounds) of lining figures (all one box), a and o, plus extra {name: (width, box)}."""
+    widths, bounds = {}, {}
+    for name in DIGIT_NAMES:
+        widths[name], bounds[name] = width, figure_box
+    widths[u"a"], bounds[u"a"] = 480, (30, -10, 450, 510)
+    widths[u"o"], bounds[u"o"] = 520, (30, -10, 490, 510)
+    for name, (advance, box) in (extra or {}).items():
+        widths[name], bounds[name] = advance, box
+    return widths, bounds
+
+
+def groups_of(forms):
+    found = {}
+    for form in forms:
+        found.setdefault(form.group, []).append(form)
+    return found
+
+
+class SmallFormTests(unittest.TestCase):
+    """The figure forms Feature Code builds: what the font lacks, their names, settings, and placements."""
+
+    def test_missing_forms_and_default_names(self):
+        info = make_info([], base=True)
+        groups = groups_of(fc.missing_small_forms(info))
+        self.assertEqual(sorted(groups), ["dnom", "numr", "subs", "subscript", "superscript", "sups"],
+                         "the ordinal indicators are in the base font")
+        self.assertEqual([f.name for f in groups["numr"]], [d + u".numr" for d in DIGIT_NAMES])
+        self.assertEqual([f.name for f in groups["subs"]][:2], [u"zero.subs", u"one.subs"])
+        self.assertEqual([f.name for f in groups["superscript"]][:4], [u"uni2070", u"uni00B9", u"uni00B2", u"uni00B3"])
+        self.assertEqual(groups["superscript"][2].code, 0xB2)
+        self.assertEqual(groups["superscript"][2].figure, u"two")
+        self.assertEqual(groups["subscript"][0].name, u"uni2080")
+        self.assertTrue(all(f.code is None for f in groups["numr"]))
+
+    def test_names_follow_the_font(self):
+        info = make_info([u"one.numerator", u"one.inferior"],
+                         codes=[(u"twosuperior", 0xB2), (u"onesuperior", 0xB9)])
+        groups = groups_of(fc.missing_small_forms(info))
+        self.assertEqual(groups["numr"][0].name, u"zero.numerator")
+        self.assertNotIn(u"one.numerator", [f.name for f in groups["numr"]])
+        self.assertEqual(groups["subs"][0].name, u"zero.inferior")
+        self.assertEqual([f.name for f in groups["superscript"]][:2], [u"zerosuperior", u"threesuperior"])
+        self.assertEqual(groups["subscript"][0].name, u"zeroinferior")
+        self.assertNotIn(u"one.sups", [f.name for f in groups["sups"]], "1 has its Unicode superior: sups takes it")
+        self.assertNotIn(u"two.sups", [f.name for f in groups["sups"]])
+        self.assertIn(u"three.sups", [f.name for f in groups["sups"]])
+
+    def test_taken_name_and_ordinals(self):
+        info = make_info([u"uni2074"], base=False,
+                         codes=[(u"a", 0x61), (u"o", 0x6F)] + [(name, 0x30 + n) for n, name in enumerate(DIGIT_NAMES)])
+        groups = groups_of(fc.missing_small_forms(info))
+        self.assertNotIn(u"uni2074", [f.name for f in groups["superscript"]], "a glyph by that name: not built beside it")
+        self.assertEqual([(f.name, f.base, f.code) for f in groups["ordn"]],
+                         [(u"ordfeminine", u"a", 0xAA), (u"ordmasculine", u"o", 0xBA)])
+
+    def test_corpus_settings(self):
+        widths, bounds = figure_measures()
+        info = make_info([], widths=widths, bounds=bounds)
+        settings = fc.small_settings(info, 700.0)
+        self.assertEqual(settings["numr"]["scale"], 0.57)
+        self.assertEqual(settings["numr"]["baseline"], int(round(710 * (1 - 0.57))), "its top at the figures' top")
+        self.assertEqual(settings["dnom"]["baseline"], 0)
+        self.assertEqual(settings["sups"]["baseline"], int(round(0.51 * 700)))
+        self.assertEqual(settings["subs"]["baseline"], int(round(-0.17 * 700)))
+        self.assertEqual(settings["ordn"]["baseline"], int(round(1.01 * 700 - 0.66 * 510)))
+        self.assertEqual(settings["sups"]["width"], 1.12)
+        self.assertEqual(settings["sups"]["why"], u"As most open-licensed fonts.")
+
+    def test_settings_from_the_font(self):
+        # 1, 2, 3 drawn at 0.6 of the figures, their baseline at 400: the superiors' settings; the
+        # numerators take their size
+        drawn = dict((name, (330, (12, 400 + 0.6 * -10, 288, 400 + 0.6 * 710))) for name in
+                     (u"onesuperior", u"twosuperior", u"threesuperior"))
+        widths, bounds = figure_measures(drawn)
+        info = make_info([], codes=[(u"onesuperior", 0xB9), (u"twosuperior", 0xB2), (u"threesuperior", 0xB3)],
+                         widths=widths, bounds=bounds)
+        settings = fc.small_settings(info, 700.0)
+        self.assertAlmostEqual(settings["sups"]["scale"], 0.6)
+        self.assertEqual(settings["sups"]["baseline"], 400)
+        self.assertEqual(settings["sups"]["width"], 1.1)
+        self.assertEqual(settings["sups"]["why"], u"As the font's 3 drawn forms.")
+        self.assertAlmostEqual(settings["numr"]["scale"], 0.6)
+        self.assertEqual(settings["numr"]["baseline"], int(round(710 * 0.4)))
+        self.assertIn(u"other small figures", settings["numr"]["why"])
+
+    def test_scaled_placement(self):
+        widths, bounds = figure_measures()
+        info = make_info([], widths=widths, bounds=bounds)
+        forms = fc.missing_small_forms(info)
+        settings = fc.small_settings(info, 700.0)
+        plans = fc.plan_small_forms(info, forms, settings)
+        plan = plans[u"two.numr"]
+        width = int(round(500 * 0.57 * 1.12))
+        self.assertEqual(plan.how, "scaled")
+        self.assertEqual(plan.width, width)
+        self.assertEqual(plan.parts, [(u"two", 0.57, 0.57, int(round((width - 500 * 0.57) / 2.0)),
+                                       settings["numr"]["baseline"])])
+        self.assertEqual(plans[u"two.dnom"].parts[0][4], 0)
+        self.assertEqual(plans[u"uni00B2"].how, "copied", "the Unicode superior is a copy of two.sups, built too")
+        self.assertEqual(plans[u"uni00B2"].parts, [(u"two.sups", 1.0, 1.0, 0, 0)])
+        self.assertEqual(plans[u"uni00B2"].width, plans[u"two.sups"].width)
+        self.assertEqual(fc.flat_parts(plans, u"uni00B2"), plans[u"two.sups"].parts)
+        self.assertIn(u"two at 57%, raised", fc.describe_placement(plan))
+        [form for form in forms if form.name == u"two.sups"][0].on = False
+        plans = fc.plan_small_forms(info, forms, settings)
+        self.assertEqual(plans[u"uni00B2"].how, "scaled", "two.sups not built: the figure scaled")
+        self.assertEqual(plans[u"uni00B2"].parts, plans[u"two.sups"].parts)
+
+    def test_unknown_width(self):
+        info = make_info([])
+        plans = fc.plan_small_forms(info, fc.missing_small_forms(info), fc.small_settings(info, 700.0))
+        self.assertIsNone(plans[u"two.numr"])
+        self.assertIn(u"not built", fc.describe_placement(None))
+
+    def test_moved_from_a_drawn_set(self):
+        drawn = dict((name + u".dnom", (300, (10, -6, 270, 404))) for name in DIGIT_NAMES)
+        widths, bounds = figure_measures(drawn)
+        info = make_info([name + u".dnom" for name in DIGIT_NAMES], widths=widths, bounds=bounds)
+        forms = fc.missing_small_forms(info)
+        self.assertNotIn("dnom", groups_of(forms))
+        settings = fc.small_settings(info, 700.0)
+        plans = fc.plan_small_forms(info, forms, settings)
+        plan = plans[u"two.numr"]
+        self.assertEqual(plan.how, "moved")
+        self.assertEqual(plan.width, 300)
+        dnom_baseline = -6 - (410 / 720.0) * -10
+        self.assertEqual(plan.parts, [(u"two.dnom", 1.0, 1.0, 0, int(round(settings["numr"]["baseline"] - dnom_baseline)))])
+        self.assertIn(u"two.dnom (drawn), raised", fc.describe_placement(plan))
+
+    def test_oldstyle_defaults_scale_lining_forms(self):
+        widths, bounds = figure_measures({u"zero": (500, (20, -10, 480, 460))})
+        extra = [name + u".lf" for name in DIGIT_NAMES]
+        for name in extra:
+            widths[name], bounds[name] = 520, (20, -10, 500, 710)
+        info = make_info(extra, widths=widths, bounds=bounds)
+        form = [f for f in fc.missing_small_forms(info) if f.name == u"two.numr"][0]
+        self.assertEqual((form.base, form.figure), (u"two.lf", u"two"))
+
+    def test_rescaled_baseline_keeps_the_top(self):
+        setting = {"scale": 0.57, "baseline": 305, "width": 1.12, "top_of": 710}
+        self.assertEqual(fc.rescaled_baseline(setting, 0.5), int(round(305 + 0.07 * 710)))
+        self.assertEqual(fc.rescaled_baseline(dict(setting, top_of=None), 0.5), 305)
+
+    def test_build_label(self):
+        self.assertEqual(fc.build_label(0), u"Build checked glyphs")
+        self.assertEqual(fc.build_label(1), u"Build 1 checked glyph")
+        self.assertEqual(fc.build_label(12), u"Build 12 checked glyphs")
+
+    def test_built_forms_reach_the_features(self):
+        """Once built (the font read again), the forms features take them."""
+        info = make_info([])
+        names = [form.name for form in fc.missing_small_forms(info)]
+        codes = [(form.name, form.code) for form in fc.missing_small_forms(info) if form.code]
+        built = make_info([name for name in names if not dict(codes).get(name)], codes=codes)
+        features = by_tag(fc.form_features(built, {})[0])
+        for tag in ("frac", "numr", "dnom", "sups", "subs", "sinf"):
+            self.assertIn(tag, features)
+        self.assertIn(u"sub zero by zero.sups;", lines_of(features["sups"]))
+        self.assertEqual(fc.missing_small_forms(built), [], "nothing left to build")
+
+
 # ---------------------------------------------------------------------------
 # The dialog, run on fakes: Qt's classes accept any call (the trees keep their rows, data, and
 # checks); the font is a small fake of FontLab's. This catches mistakes in the dialog's own code
@@ -572,6 +734,25 @@ class FakeTree(Anything):
         return 100
 
 
+class FakeButton(Anything):
+    def __init__(self, text=u""):
+        self.text, self.enabled, self.slots = text, True, {}
+
+    def setText(self, text):
+        self.text = text
+
+    def setEnabled(self, on):
+        self.enabled = on
+
+    def connect(self, signal, slot):
+        self.slots.setdefault(signal, []).append(slot)
+
+
+class FakeQTransform(Anything):
+    def __init__(self, *args):
+        self.args = args
+
+
 class FakeEdit(Anything):
     def __init__(self, text=u""):
         self.text, self.slots = text, {}
@@ -658,9 +839,79 @@ class FakeGlyph(object):
     def __init__(self, name, code):
         self.name, self.isNull, self.mark, self.fgGlyph = name, False, 0, FakeFgGlyph(name, code)
 
-    def getLayerByName(self, master):
+    def getLayerByName(self, master, create=False):
         code = self.fgGlyph.unicode
         return FakeLayer(500 + 10 * (code - 0x30) if code and 0x30 <= code <= 0x39 else 500)  # proportional figures
+
+
+class FakeCodeGlyph(object):
+    """A built glyph's fgGlyph: setting its code point is recorded."""
+
+    def __init__(self, name, events):
+        self.name, self.events, self.code = name, events, None
+
+    @property
+    def unicode(self):
+        return self.code
+
+    @unicode.setter
+    def unicode(self, code):
+        self.code = code
+        self.events.append(("code", self.name))
+
+    @property
+    def unicodes(self):
+        return [self.code] if self.code else []
+
+
+class FakeBuiltLayer(object):
+    def __init__(self, name, events):
+        self.name, self.events, self.shapes, self.advanceWidth, self.isNull = name, events, [], 0, False
+        self.components = []
+
+    def setGlyphComponents(self, components, width, package, flag):
+        self.components, self.advanceWidth = list(components), width
+        self.shapes = [FakeShape(((0, 300, 300, 720),))]
+        self.events.append(("layer", self.name))
+
+
+class FakeBuiltGlyph(object):
+    """A glyph a script adds: its layers made on it."""
+
+    def __init__(self, name, events):
+        self.name, self.isNull, self.mark, self.events = name, False, 0, events
+        self.fgGlyph = FakeCodeGlyph(name, events)
+        self.made = {}
+
+    @property
+    def layers(self):
+        return list(self.made.values())
+
+    def getLayerByName(self, master, create=False):
+        if master not in self.made and create:
+            self.made[master] = FakeBuiltLayer(self.name, self.events)
+        return self.made.get(master)
+
+
+class FakeNewGlyph(object):
+    def __init__(self):
+        self.name = None
+
+
+class FakeComponent(object):
+    def __init__(self, name):
+        self.name, self.transform = name, None
+
+
+class FakeItems(object):
+    def __init__(self):
+        self.steps, self.updates = [], 0
+
+    def notifyChangesApplied(self, title, package, whole):
+        self.steps.append(title)
+
+    def notifyPackageContentUpdated(self, key):
+        self.updates += 1
 
 
 class FakeFeatures(object):
@@ -697,10 +948,29 @@ class FakePackage(object):
         self.fgPackage.glyphs = [g.fgGlyph for g in self.glyphs]
         self.fgPackage.features = features
         self.isNull, self.glyphsCount, self.upm, self.tfn, self.path = False, len(self.glyphs), 1000, u"Fake", u"fake.vfc"
-        self.master = u"Regular"
+        self.master, self.masters, self.capsHeight_value, self.events = u"Regular", [u"Regular"], 700.0, []
 
     def findName(self, name):
         return self.by_name.get(name)
+
+    def findUnicode(self, code):
+        for glyph in self.glyphs:
+            if glyph.fgGlyph.unicode == code:
+                return glyph
+        return None
+
+    def addGlyph(self, glyph):
+        added = FakeBuiltGlyph(glyph.name, self.events)
+        self.events.append(("add", glyph.name))
+        self.glyphs.append(added)
+        self.by_name[added.name] = added
+        self.fgPackage.glyphs.append(added.fgGlyph)
+        self.glyphsCount = len(self.glyphs)
+
+    def deleteGlyph(self, glyph):
+        self.glyphs.remove(glyph)
+        self.fgPackage.glyphs.remove(glyph.fgGlyph)
+        del self.by_name[glyph.name]
 
     def currentHistoryState(self):
         return 1
@@ -734,7 +1004,8 @@ class DialogTests(unittest.TestCase):
     def dialog(self, features):
         qt = Anything()
         qt.QtCore = _FakeQtModule({"Qt": FakeQt})
-        qt.QtGui = _FakeQtModule({"QTreeWidget": FakeTree, "QTreeWidgetItem": FakeItem, "QLineEdit": FakeEdit})
+        qt.QtGui = _FakeQtModule({"QTreeWidget": FakeTree, "QTreeWidgetItem": FakeItem, "QLineEdit": FakeEdit,
+                                  "QPushButton": FakeButton, "QTransform": FakeQTransform})
         package = FakePackage(features)
         workspace = Anything()
         workspace.packages = lambda: [package]
@@ -742,6 +1013,8 @@ class DialogTests(unittest.TestCase):
         fontlab = Anything()
         fontlab.flWorkspace = Anything()
         fontlab.flWorkspace.instance = lambda: workspace
+        fontlab.flGlyph, fontlab.GlyphComponent, fontlab.flItems = FakeNewGlyph, FakeComponent, FakeItems()
+        self.fontlab = fontlab
         sys.modules["PythonQt"], sys.modules["fontlab"] = qt, fontlab
         dialog = fc.FeatureCodeDialog()
         self.logged = []
@@ -794,6 +1067,62 @@ class DialogTests(unittest.TestCase):
         self.assertNotIn("locl", features.texts)
         self.assertIn("smcp", features.texts, "the rest written")
         self.assertTrue([t for level, t in self.logged if level == "warning" and u"locl was not written" in t])
+
+    def small_section(self, dialog, group):
+        return [item for item in dialog.small_tree.items if item.data(0, USER_ROLE) == group][0]
+
+    def test_figure_forms_built(self):
+        dialog = self.dialog(FakeFeatures({}))
+        package = dialog.package
+        self.assertEqual([item.data(0, USER_ROLE) for item in dialog.small_tree.items],
+                         ["sups", "superscript", "subs", "subscript"], "numerators, denominators, a, and o drawn")
+        self.assertEqual(dialog.build_button.text, u"Build 40 checked glyphs")
+        self.assertTrue(dialog.build_button.enabled)
+        self.small_section(dialog, "subscript").setCheckState(0, UNCHECKED)
+        self.assertEqual(dialog.build_button.text, u"Build 30 checked glyphs")
+        self.assertEqual(self.small_section(dialog, "subscript").child(0).checkState(0), UNCHECKED)
+        sups = self.small_section(dialog, "sups")
+        dialog.small_expanded(sups)  # (its pictures drawn)
+        self.assertIn(u"two at 59%, raised 357 units", sups.child(2).text(1))
+        self.assertIn(u"a start to draw over", sups.child(2).text(2))
+        self.assertTrue(self.small_section(dialog, "superscript").child(2).text(2).startswith(u"U+00B2 "))
+        dialog.small_clicked(sups.child(2), 0)
+        self.assertEqual(dialog.small_set_index, fc.SMALL_SETS.index("sups"))
+        dialog.small_setting("scale", 50)
+        self.assertEqual(dialog.small_plans[u"two.sups"].parts[0][1], 0.5)
+        self.assertIn(u"two at 50%", sups.child(2).text(1))
+        dialog.restore()
+        self.assertEqual(dialog.small_plans[u"two.sups"].parts[0][1], 0.59)
+        self.assertEqual(dialog.build_button.text, u"Build 40 checked glyphs", "the checks restored too")
+        self.small_section(dialog, "subscript").setCheckState(0, UNCHECKED)
+        self.small_section(dialog, "subs").child(0).setCheckState(0, UNCHECKED)  # zero.subs
+        self.assertEqual(dialog.build_button.text, u"Build 29 checked glyphs")
+        dialog.build_small_forms()
+        self.assertEqual(self.fontlab.flItems.steps, [u"FreeLab Feature Code"], "one step of the History")
+        two = package.findName(u"two.sups")
+        self.assertEqual(two.made[u"Regular"].advanceWidth, float(int(round(520 * 0.59 * 1.12))))
+        component = two.made[u"Regular"].components[0]
+        self.assertEqual(component.name, u"two")
+        self.assertEqual(component.transform.args[:4], (0.59, 0.0, 0.0, 0.59))
+        self.assertEqual(component.transform.args[5], 357.0)
+        superior = package.findName(u"uni00B2")
+        self.assertEqual(superior.fgGlyph.unicode, 0xB2)
+        self.assertEqual([c.name for c in superior.made[u"Regular"].components], [u"two.sups"], "a copy of two.sups")
+        self.assertLess(package.events.index(("layer", u"uni00B2")), package.events.index(("code", u"uni00B2")),
+                        "the code point set once its layer is made")
+        self.assertLess(package.events.index(("add", u"two.sups")), package.events.index(("add", u"uni00B2")))
+        self.assertIsNone(package.findName(u"uni2080"), "unchecked: not built")
+        self.assertIsNone(package.findName(u"zero.subs"))
+        done = [t for level, t in self.logged if level == "done"]
+        self.assertTrue(done and u"Built <b>29 glyphs</b>" in done[-1], self.logged)
+        # The font read again: the forms take them, and what is left keeps its checks
+        tags = [item.data(0, USER_ROLE) for item in dialog.forms_tree.items]
+        self.assertIn("sups", tags)
+        self.assertIn("subs", tags)
+        self.assertEqual([item.data(0, USER_ROLE) for item in dialog.small_tree.items], ["subs", "subscript"])
+        self.assertEqual(dialog.build_button.text, u"Build checked glyphs")
+        self.assertFalse(dialog.build_button.enabled)
+        self.assertFalse([t for level, t in self.logged if level in ("error", "warning")], self.logged)
 
     def test_history_keeps_choices(self):
         dialog = self.dialog(FakeFeatures({}))

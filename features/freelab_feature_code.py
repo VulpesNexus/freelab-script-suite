@@ -24,6 +24,10 @@ Two kinds of OpenType code a font's glyph names alone do not settle:
   of its substitutions one more; a feature the font's code has by hand starts unchecked, as does one
   FontLab's automatic code already makes the same way. Each sits in its feature between FreeLab's
   marker lines; FontLab's automatic code for that feature is replaced and the feature handed back.
+- Figure forms to build (under the forms): the numerators, denominators, superiors, inferiors, Unicode
+  superscript and subscript figures, and ordinal indicators the font lacks, each a component of its
+  figure (or a, o) scaled and moved as the open-licensed corpus places them (or as the font's own small
+  figures), named as the font names its forms; built in one History step, then read as forms.
 
 Shows the code before anything is written, checked by fontTools' feature parser.
 
@@ -1545,6 +1549,324 @@ def forms_check(features, texts, systems, names, cache=None):
 
 
 # ---------------------------------------------------------------------------
+# Figure forms to build: the numerators, denominators, superiors, inferiors, Unicode superscript and
+# subscript figures, and ordinal indicators the font lacks, each planned as a component of its figure
+# (or letter), scaled and moved
+# ---------------------------------------------------------------------------
+
+DIGIT_WORDS = (u"zero", u"one", u"two", u"three", u"four", u"five", u"six", u"seven", u"eight", u"nine")
+SUPERSCRIPT_FIGURES = (0x2070, 0xB9, 0xB2, 0xB3, 0x2074, 0x2075, 0x2076, 0x2077, 0x2078, 0x2079)  # 0 to 9
+SUBSCRIPT_FIGURES = tuple(range(0x2080, 0x208A))
+ORDINAL_LETTERS = ((u"a", 0xAA, u"ordfeminine"), (u"o", 0xBA, u"ordmasculine"))
+LINING_SUFFIXES = ("lf", "tf", "plf", "tlf", "lnum")  # scaled instead of oldstyle default figures
+SMALL_SETS = ("numr", "dnom", "sups", "subs", "ordn")  # each with its own scale, baseline, and width
+SMALL_SET_TITLES = {"numr": u"Numerators", "dnom": u"Denominators", "sups": u"Superiors and superscripts",
+                    "subs": u"Inferiors and subscripts", "ordn": u"Ordinal indicators"}
+SET_SUFFIXES = {"numr": NUMR_SUFFIXES, "dnom": DNOM_SUFFIXES, "sups": SUPS_SUFFIXES, "subs": SUBS_SUFFIXES}
+# The build list's sections: (group, the set whose settings it takes, title)
+SMALL_GROUPS = (
+    ("numr", "numr", u"Numerators"), ("dnom", "dnom", u"Denominators"), ("sups", "sups", u"Superiors"),
+    ("superscript", "sups", u"Superscript figures (\N{SUPERSCRIPT ONE}\N{SUPERSCRIPT TWO}\N{SUPERSCRIPT THREE}"
+                            u"\N{SUPERSCRIPT FOUR}\N{HORIZONTAL ELLIPSIS})"),
+    ("subs", "subs", u"Inferiors"),
+    ("subscript", "subs", u"Subscript figures (\N{SUBSCRIPT ZERO}\N{SUBSCRIPT ONE}\N{SUBSCRIPT TWO}"
+                          u"\N{HORIZONTAL ELLIPSIS})"),
+    ("ordn", "ordn", u"Ordinal indicators (\N{FEMININE ORDINAL INDICATOR} \N{MASCULINE ORDINAL INDICATOR})"))
+# The medians of 182 open-licensed families (features/train/figure_forms.py, 2026-11-11). Scale: a form's
+# ink height over its figure's (numerators and denominators 0.57 in 49 families, superiors 0.59 in 68,
+# Unicode superscript figures 0.59 in 143, inferiors 0.59 in 63; the letters of the ordinal indicators
+# 0.66 of a and o in 164). Width: its advance over the scaled figure's (1.12: a little more room around
+# the small figure than scaling gives).
+CORPUS_SCALE = {"numr": 0.57, "dnom": 0.57, "sups": 0.59, "subs": 0.59, "ordn": 0.66}
+CORPUS_WIDTH = {"numr": 1.12, "dnom": 1.12, "sups": 1.12, "subs": 1.11, "ordn": 1.07}
+# Where they sit: a numerator's top at the figures' top (1.01 of the cap height in the corpus), a
+# denominator on the baseline, a superior's baseline at 0.51 of the cap height, an inferior's at -0.17,
+# an ordinal indicator's top at 1.01 of it
+SUPS_BASELINE, SUBS_BASELINE, ORDINAL_TOP = 0.51, -0.17, 1.01
+# A whole drawn set another set is moved from (unscaled) rather than scaling the figures, by preference
+DRAWN_SOURCES = {"numr": ("dnom", "sups", "subs"), "dnom": ("numr", "subs", "sups"),
+                 "sups": ("numr", "dnom", "subs"), "subs": ("dnom", "numr", "sups")}
+
+
+def median(values):
+    values = sorted(values)
+    if not values:
+        return None
+    middle = len(values) // 2
+    return values[middle] if len(values) % 2 else (values[middle - 1] + values[middle]) / 2.0
+
+
+class SmallForm(object):
+    """A figure form (or ordinal indicator) the font lacks: its glyph name, its section of the list
+    (group), the set whose settings it takes, the glyph it is scaled from (base: the figure, its lining
+    form, or a letter), the figure or letter it is a form of, and its code point (a Unicode
+    character's), or None."""
+
+    def __init__(self, name, group, set_key, base, code=None, figure=None):
+        self.name, self.group, self.set_key, self.base, self.code = name, group, set_key, base, code
+        self.figure = figure or base
+        self.on = self.first_on = True
+
+
+class Placement(object):
+    """How a planned glyph is made: its parts [(glyph, sx, sy, dx, dy)], its advance width, and how:
+    "scaled" from its figure, "moved" from a drawn form of another set, or "copied" from its own set's
+    form of the figure (a Unicode superscript figure from the .sups one)."""
+
+    def __init__(self, parts, width, how, source):
+        self.parts, self.width, self.how, self.source = parts, width, how, source
+
+
+def small_suffix(info, suffixes):
+    """The suffix the font names a set's figures with (the one most of its figures have), else the
+    first one (numr, dnom, sups, subs)."""
+    counts = [sum(1 for figure in info.figures() if figure and figure in info.index.get(suffix, {}))
+              for suffix in suffixes]
+    best = max(counts) if counts else 0
+    return suffixes[counts.index(best)] if best else suffixes[0]
+
+
+def encoded_name(info, code, digit, styles):
+    """A Unicode figure's glyph name: as the font names its others (styles: (codes, ending); a font
+    with onesuperior gets foursuperior, and fourinferior), else uniXXXX; None where the name is taken
+    (by a glyph without the code point: not built beside it)."""
+    ending = None
+    for codes, word in styles:
+        if any(info.glyph(other) == DIGIT_WORDS[n] + word for n, other in enumerate(codes)):
+            ending = styles[0][1]
+            break
+    name = DIGIT_WORDS[digit] + ending if ending else u"uni%04X" % code
+    return None if name in info.has else name
+
+
+def scaling_source(info, figure):
+    """The glyph a figure's small forms are scaled from: the figure, or its lining form where the default
+    figures are oldstyle (small figures are lining in the corpus)."""
+    if measured_style(info, info.glyph_of.get(u"0"), info.glyph_of.get(u"8")) == "old":
+        lining = info.form(figure, LINING_SUFFIXES)
+        if lining:
+            return lining
+    return figure
+
+
+def missing_small_forms(info):
+    """[SmallForm] of what the font lacks, section by section: each figure's numerator and denominator
+    (no .numr, .dnom form); its superior and inferior (no .sups or .subs form and no Unicode character
+    the features take instead); the Unicode superscript and subscript figures; and the ordinal
+    indicators. Names follow the font's: its suffix for the set (one.numerator: two.numerator), its
+    names for the Unicode figures (twosuperior: foursuperior), else .numr, .dnom, .sups, .subs, and
+    uniXXXX."""
+    found = []
+    figures = [(digit, figure) for digit, figure in enumerate(info.figures()) if figure]
+    for set_key in ("numr", "dnom", "sups", "subs"):
+        suffixes = SET_SUFFIXES[set_key]
+        suffix = small_suffix(info, suffixes)
+        encoded = unicode_forms(info, "<super>" if set_key == "sups" else "<sub>") if set_key in ("sups", "subs") else {}
+        for digit, figure in figures:
+            name = u"%s.%s" % (figure, suffix)
+            if not info.form(figure, suffixes) and not encoded.get(figure) and name not in info.has:
+                found.append(SmallForm(name, set_key, set_key, scaling_source(info, figure), figure=figure))
+        if set_key in ("sups", "subs"):
+            codes = SUPERSCRIPT_FIGURES if set_key == "sups" else SUBSCRIPT_FIGURES
+            styles = ((SUPERSCRIPT_FIGURES, u"superior"),) if set_key == "sups" else \
+                ((SUBSCRIPT_FIGURES, u"inferior"), (SUPERSCRIPT_FIGURES, u"superior"))
+            for digit, figure in figures:
+                name = encoded_name(info, codes[digit], digit, styles) if info.glyph(codes[digit]) is None else None
+                if name:
+                    found.append(SmallForm(name, "superscript" if set_key == "sups" else "subscript", set_key,
+                                           scaling_source(info, figure), codes[digit], figure))
+    for letter, code, name in ORDINAL_LETTERS:
+        base = info.glyph_of.get(letter)
+        if base and info.glyph(code) is None and name not in info.has:
+            found.append(SmallForm(name, "ordn", "ordn", base, code))
+    return found
+
+
+def form_measure(info, form, figure):
+    """(scale, baseline, width) of a drawn small form against its figure: its ink height over the
+    figure's, where the figure's baseline lands once scaled (the form's lowest point less the scaled
+    figure's), and its advance over the scaled figure's (None where a width is not known); None where
+    their ink is not known."""
+    fig, box = info.bounds.get(figure), info.bounds.get(form)
+    if not fig or not box or fig[3] - fig[1] <= 0:
+        return None
+    scale = (box[3] - box[1]) / float(fig[3] - fig[1])
+    if not 0.2 < scale < 0.95:
+        return None
+    advance, figure_advance = info.widths.get(form), info.widths.get(figure)
+    width = advance / (scale * figure_advance) if advance and figure_advance else None
+    return scale, box[1] - scale * fig[1], width
+
+
+def set_members(info, set_key):
+    """[(figure, form)]: the font's drawn forms of a set (a superior or inferior set takes in the
+    Unicode superscript or subscript figures)."""
+    found = []
+    codes = {"sups": SUPERSCRIPT_FIGURES, "subs": SUBSCRIPT_FIGURES}.get(set_key)
+    for digit, figure in enumerate(info.figures()):
+        if not figure:
+            continue
+        form = info.form(figure, SET_SUFFIXES[set_key])
+        if form:
+            found.append((figure, form))
+        if codes and info.glyph(codes[digit]):
+            found.append((figure, info.glyph(codes[digit])))
+    return found
+
+
+def figure_top(info):
+    """The figures' top (the median of their ink tops), or None where their ink is not known."""
+    tops = [info.bounds[name][3] for name in (scaling_source(info, f) for f in info.figures() if f)
+            if info.bounds.get(name)]
+    return median(tops)
+
+
+def small_settings(info, cap, upm=1000):
+    """{set: {"scale", "baseline", "width", "why", "top_of"}}: each set's first settings. Scale and width
+    are the medians of the font's own drawn forms of the set where it has some, else of its other small
+    figures, else the corpus's. The baseline (where the scaled figure's baseline goes, in font units) is
+    the font's own where it has some; else a numerator's top is the figures' top, a denominator sits on
+    the baseline, superiors and inferiors where the corpus puts them, and an ordinal indicator's top at
+    the font's other indicator's top, else where the corpus puts it. top_of: the height whose scaled top
+    stays put when the scale changes (numerators and ordinal indicators), else None."""
+    top = figure_top(info)
+    cap = cap if cap and cap > 0 else (top or 0.7 * upm)
+    top = top or cap
+    measured = {}
+    for set_key in ("numr", "dnom", "sups", "subs"):
+        measured[set_key] = [m for m in (form_measure(info, form, scaling_source(info, figure))
+                                         for figure, form in set_members(info, set_key)) if m]
+    every = [m for set_key in ("numr", "dnom", "sups", "subs") for m in measured[set_key]]
+    settings = {}
+    for set_key in ("numr", "dnom", "sups", "subs"):
+        own = measured[set_key]
+        widths = [m[2] for m in (own or every) if m[2]]
+        if own:
+            scale, baseline = median(m[0] for m in own), median(m[1] for m in own)
+            why = u"As the font's %s." % counted(len(own), u"drawn form")
+        else:
+            scale = median(m[0] for m in every) if every else CORPUS_SCALE[set_key]
+            baseline = {"numr": top * (1 - scale), "dnom": 0.0, "sups": SUPS_BASELINE * cap,
+                        "subs": SUBS_BASELINE * cap}[set_key]
+            why = (u"Sized as the font's other small figures, placed as most open-licensed fonts." if every else
+                   u"As most open-licensed fonts.")
+        settings[set_key] = {"scale": round(scale, 2), "baseline": int(round(baseline)),
+                             "width": round(median(widths), 2) if widths else CORPUS_WIDTH[set_key], "why": why,
+                             "top_of": top if set_key == "numr" else None}
+    letters = [info.bounds.get(info.glyph_of.get(letter)) for letter, _, _ in ORDINAL_LETTERS]
+    letter_top = max([box[3] for box in letters if box] or [0.5 * cap])
+    drawn = [info.bounds.get(info.glyph(code)) for _, code, _ in ORDINAL_LETTERS]
+    drawn = [box[3] for box in drawn if box]
+    scale = CORPUS_SCALE["ordn"]
+    settings["ordn"] = {"scale": scale, "baseline": int(round((max(drawn) if drawn else ORDINAL_TOP * cap) -
+                                                             scale * letter_top)),
+                        "width": CORPUS_WIDTH["ordn"], "top_of": letter_top,
+                        "why": u"Top at the font's other indicator's, sized as most open-licensed fonts." if drawn else
+                        u"As most open-licensed fonts."}
+    return settings
+
+
+def rescaled_baseline(setting, scale):
+    """A set's baseline once its scale changes: where its top stays put (numerators, ordinal
+    indicators), moved to keep it there; else as it was."""
+    top_of = setting.get("top_of")
+    if not top_of:
+        return setting["baseline"]
+    return int(round(setting["baseline"] + (setting["scale"] - scale) * top_of))
+
+
+def complete_sets(info):
+    """{set: {figure: form}} of the font's drawn sets (by suffix) that have all ten figures."""
+    found = {}
+    figures = [f for f in info.figures() if f]
+    for set_key, suffixes in SET_SUFFIXES.items():
+        forms = dict((f, info.form(f, suffixes)) for f in figures)
+        if len(figures) == len(DIGITS) and all(forms.values()):
+            found[set_key] = forms
+    return found
+
+
+def plan_small_forms(info, forms, settings, advance=None):
+    """{name: Placement, or None where it cannot be placed (its glyph's width unknown)} of each form. A
+    Unicode figure takes its set's form of the figure where the font has it or it is checked to be built
+    too (a copy, in place); a form of a set the font lacks a figure of is moved from a whole drawn set
+    of another (unscaled); else it is its figure scaled, moved to its set's baseline, and centered in
+    its width. advance: a glyph's advance width (the current master's measured ones by default)."""
+    advance = advance or info.widths.get
+    complete = complete_sets(info)
+    planned = dict(((form.set_key, form.figure), form.name) for form in forms
+                   if form.on and form.group in ("sups", "subs"))
+    plans = {}
+    for form in sorted(forms, key=lambda f: f.group in ("superscript", "subscript")):  # (sets first: copied after)
+        plans[form.name] = place_small_form(info, form, settings[form.set_key], complete, planned, plans, advance)
+    return plans
+
+
+def place_small_form(info, form, setting, complete, planned, plans, advance):
+    if form.group in ("superscript", "subscript"):
+        own = info.form(form.figure, SET_SUFFIXES[form.set_key])
+        if own and advance(own):
+            return Placement([(own, 1.0, 1.0, 0, 0)], advance(own), "copied", own)
+        own = planned.get((form.set_key, form.figure))
+        if own and plans.get(own) is not None:
+            return Placement([(own, 1.0, 1.0, 0, 0)], plans[own].width, "copied", own)
+    for other in DRAWN_SOURCES.get(form.set_key, ()):
+        drawn = complete.get(other, {}).get(form.figure)
+        measure = form_measure(info, drawn, scaling_source(info, form.figure)) if drawn else None
+        if measure and advance(drawn):
+            return Placement([(drawn, 1.0, 1.0, 0, int(round(setting["baseline"] - measure[1])))], advance(drawn),
+                             "moved", drawn)
+    width = advance(form.base)
+    if not width:
+        return None
+    scale = setting["scale"]
+    new = int(round(width * scale * setting["width"]))
+    return Placement([(form.base, scale, scale, int(round((new - width * scale) / 2.0)), int(setting["baseline"]))],
+                     new, "scaled", form.base)
+
+
+def flat_parts(plans, name, depth=4):
+    """A plan's parts down to glyphs of the font: a part that is another planned glyph replaced by
+    that one's parts, moved with it (to draw a glyph before it is built)."""
+    plan = plans.get(name)
+    if plan is None:
+        return []
+    found = []
+    for glyph, sx, sy, dx, dy in plan.parts:
+        if glyph in plans and depth:
+            for inner, isx, isy, idx, idy in flat_parts(plans, glyph, depth - 1):
+                found.append((inner, sx * isx, sy * isy, sx * idx + dx, sy * idy + dy))
+        else:
+            found.append((glyph, sx, sy, dx, dy))
+    return found
+
+
+def moved_words(dy):
+    return u"on the baseline" if not dy else (u"raised %d units" % dy if dy > 0 else u"lowered %d units" % -dy)
+
+
+def describe_placement(plan):
+    """A build row's words for how its glyph is made."""
+    if plan is None:
+        return u"its figure's width could not be read: not built"
+    glyph, sx, _, _, dy = plan.parts[0]
+    if plan.how == "copied":
+        return u"%s, in place" % glyph
+    if plan.how == "moved":
+        return u"%s (drawn), %s" % (glyph, u"in place" if not dy else moved_words(dy))
+    return u"%s at %d%%, %s, width %d" % (glyph, int(round(sx * 100)), moved_words(dy), plan.width)
+
+
+SMALL_NOTES = {"scaled": u"scaled: a start to draw over (scaling thins its strokes)",
+               "moved": u"a drawn small figure, moved", "copied": u"its set's glyph, with the code point"}
+
+
+def build_label(count):
+    """The build button's words for this many checked glyphs."""
+    return u"Build %s" % counted(count, u"checked glyph") if count else u"Build checked glyphs"
+
+
+# ---------------------------------------------------------------------------
 # FontLab
 # ---------------------------------------------------------------------------
 
@@ -1597,6 +1919,45 @@ def _qt():
     return QtCore, QtGui
 
 
+UNWRAP_DEPTH = 4  # components inside components followed this deep
+
+
+def unwrapped(package, master, name, sx, sy, dx, dy):
+    """A scaled part (name, sx, sy, dx, dy) whose glyph is one component only replaced by the glyph it
+    points to, the transforms combined: FontLab 7 refused a whole layer (setGlyphComponents made none)
+    whose scaled component pointed to such a glyph (Diacritics' finding). Unscaled parts as given."""
+    if sx == 1.0 and sy == 1.0:
+        return name, sx, sy, dx, dy
+    for _ in range(UNWRAP_DEPTH):
+        try:
+            glyph = package.findName(name)
+            layer = glyph.getLayerByName(master) if glyph is not None and not glyph.isNull else None
+            shapes = list(layer.shapes) if layer is not None else []
+            if len(shapes) != 1 or not shapes[0].isComponent:
+                break
+            inner = shapes[0].transform
+            if abs(inner.m12()) > 1e-6 or abs(inner.m21()) > 1e-6:
+                break  # rotated or slanted inside: kept whole
+            inner_name = shapes[0].shapeData.componentGlyph
+            if not inner_name:
+                break
+            name, dx, dy = inner_name, sx * inner.dx() + dx, sy * inner.dy() + dy
+            sx, sy = sx * inner.m11(), sy * inner.m22()
+        except Exception:
+            break
+    return name, sx, sy, dx, dy
+
+
+def is_empty(glyph):
+    """A glyph with nothing drawn in any layer (or none at all)."""
+    if glyph is None:
+        return True
+    try:
+        return not any(layer.shapes for layer in glyph.layers)
+    except Exception:
+        return False
+
+
 def counted(number, one, many=None):
     return u"%d %s" % (number, one if number == 1 else (many or one + u"s"))
 
@@ -1625,7 +1986,14 @@ tnum (.tf, .lf, .osf, .tosf...), and the stylistic sets (.ss01 to .ss20, each wi
 and character variants (.cv01...). Check a feature to write it, and its rows to keep them in it. A
 feature the font's code has by hand starts unchecked, as does one FontLab's automatic code already
 makes the same way; a warning row (figures of a tabular set that do not share one width) is for you
-to review, and changes nothing.<br><br>
+to review, and changes nothing.<br>
+<b>Figure forms to build</b> (under the forms): the numerators, denominators, superiors, inferiors,
+Unicode superscript and subscript figures, and ordinal indicators the font lacks, each made of its
+figure (or a or o) as a component, scaled and raised or lowered as most open-licensed fonts place
+them (or as the font's own small figures, where it has some). Pick a set in the settings row to change
+its scale, baseline, and width. Scaling thins the strokes: a built form is a start to draw over.
+<i>Build checked glyphs</i> adds them in one step of FontLab's History; the font is read again, and
+the forms above take them.<br><br>
 The code is made again as you change the choices. Pick a ligature's feature in its box; drag between the parts to give one more room;
 double-click a ligature, a letter, or a form to see it in a <i>Glyph</i> window. <i>Restore suggestions</i> puts the
 choices back as they first came.<br><br>
@@ -1720,6 +2088,11 @@ class FeatureCodeDialog(object):
         self.forms_label = QtGui.QLabel(u"")
         self.forms_label.setWordWrap(True)
         box.addWidget(self.forms_label)
+        self.forms_parts = QtGui.QSplitter(QtCore.Qt.Vertical)
+        self.forms_parts.setChildrenCollapsible(False)
+        self.forms_parts.setWhatsThis(u"Drag the space between two parts up or down to give one more room.")
+        box.addWidget(self.forms_parts, 1)
+        forms_box = self.part(QtGui, 3, self.forms_parts)
         self.forms_tree = QtGui.QTreeWidget()
         self.forms_tree.setColumnCount(3)
         self.forms_tree.setHeaderLabels(["Feature", "Becomes", "Note"])
@@ -1731,7 +2104,10 @@ class FeatureCodeDialog(object):
                                      u"and you can edit it. Amber rows are warnings to review: they change nothing.")
         self.forms_tree.setProperty(self.ak.LEAVE_ALONE_PROP, True)
         self.ak.grid_lines(self.forms_tree)
-        box.addWidget(self.forms_tree, 1)
+        forms_box.addWidget(self.forms_tree, 1)
+        self.small_forms, self.small_plans, self.small_info = [], {}, None
+        self.small_setup, self.small_first, self.small_set_index = {}, {}, 0
+        self.build_part(QtCore, QtGui, self.part(QtGui, 2, self.forms_parts))
         self.pages.addWidget(forms_page)
 
         part = self.part(QtGui, 2)
@@ -1746,8 +2122,8 @@ class FeatureCodeDialog(object):
         layout.addWidget(self.log.widget)
         buttons = QtGui.QHBoxLayout()
         self.restore_button = QtGui.QPushButton("Restore suggestions")
-        self.restore_button.setWhatsThis(u"Puts every ligature's feature, every letter's and form's check, and every "
-                                         u"set's name back as they first came.")
+        self.restore_button.setWhatsThis(u"Puts every ligature's feature, every letter's, form's, and figure form's "
+                                         u"check, every set's name, and the build settings back as they first came.")
         self.write_button = QtGui.QPushButton("Write the code")
         self.write_button.setWhatsThis(u"Writes the features as shown (liga, dlig, calt, and the checked forms) to the "
                                        u"font, and the language systems locl needs to its prefix (<i>Update the code</i>: "
@@ -1830,7 +2206,11 @@ class FeatureCodeDialog(object):
 
     def run(self):
         QtCore, QtGui = _qt()
+        kept = self.small_state()  # (the builds' checks and settings, kept for the same font)
         package = self.package = self.current_font()
+        if kept is not None and (package is None or self.ak.font_key(package) != kept[0]):
+            kept = None
+        self.small_kept = kept
         self.ligature_tree.clear()  # (its boxes go with its rows)
         self.combos = []
         self.alternate_tree.clear()
@@ -1842,6 +2222,8 @@ class FeatureCodeDialog(object):
         if package is None:
             self.status.setText(u"No font is open. Open one, then run <i>Feature Code</i> again.")
             self.forms_label.setText(u"")
+            self.small_forms, self.small_plans, self.small_info = [], {}, None
+            self.show_small_forms()
             return
         glyphs = list(package.fgPackage.glyphs)
         self.names = [g.name for g in glyphs]
@@ -1935,6 +2317,7 @@ class FeatureCodeDialog(object):
         except Exception as exc:  # a font the builders did not foresee: the ligatures still work
             self.forms, self.figures = [], None
             self.log.add(u"The forms could not be read: %s" % self.ak.html(exc), "error")
+        self.read_small_forms(info)
         tree = self.forms_tree
         tree.blockSignals(True)
         for feature in self.forms:
@@ -1983,17 +2366,19 @@ class FeatureCodeDialog(object):
                                      u"nothing to write here.")
 
     def measures(self, codes):
-        """(widths, bounds, contours) the form builders use: the figures' advance widths and ink, and the
-        contours' boxes of a, g, and their alternates (read in the current master; any that cannot be
+        """(widths, bounds, contours) the form builders use: the advance widths and ink of the figures and
+        their forms, the Unicode superscript and subscript figures, a, o, and the ordinal indicators, and
+        the contours' boxes of a, g, and their alternates (read in the current master; any that cannot be
         read are left out)."""
         widths, bounds, contours = {}, {}, {}
         master = self.package.master
         wanted = []
+        small = set(unichr_(code) for code in SUPERSCRIPT_FIGURES + SUBSCRIPT_FIGURES + (0xAA, 0xBA))
         for name in self.names:
             stem = name.split(u".")[0]
             code = codes.get(stem) or codes.get(name)
             char = unichr_(code[0]) if code else None
-            if char and (char in DIGITS or char in (u"a", u"g")):
+            if char and (char in DIGITS or char in (u"a", u"g", u"o") or char in small):
                 wanted.append((name, char))
         for name, char in wanted:
             try:
@@ -2154,6 +2539,493 @@ class FeatureCodeDialog(object):
         text = prefix_text(self.prefix, systems)
         return text if text != self.prefix else None
 
+    # -- figure forms to build ----------------------------------------------------------
+
+    def build_part(self, QtCore, QtGui, part):
+        """The Forms tab's lower part: the figure forms the font lacks, their settings, and the build."""
+        part.addWidget(self.heading(QtGui, u"Figure forms to build"))
+        self.small_label = QtGui.QLabel(u"")
+        self.small_label.setWordWrap(True)
+        part.addWidget(self.small_label)
+        row = QtGui.QHBoxLayout()
+        row.addWidget(QtGui.QLabel(u"Settings of"))
+        self.small_set = QtGui.QComboBox()
+        for key in SMALL_SETS:
+            self.small_set.addItem(SMALL_SET_TITLES[key])
+        self.small_set.setWhatsThis(u"The set whose settings the boxes beside show and change (clicking a row "
+                                    u"picks its set).")
+        row.addWidget(self.small_set)
+        row.addWidget(QtGui.QLabel(u"Scale"))
+        self.small_scale = QtGui.QSpinBox()
+        self.small_scale.setRange(20, 95)
+        self.small_scale.setSuffix(u"%")
+        self.small_scale.setWhatsThis(u"The size of the set's glyphs, of their figure's (or letter's). Numerators and "
+                                      u"ordinal indicators keep their top where it is; the others their baseline.")
+        row.addWidget(self.small_scale)
+        row.addWidget(QtGui.QLabel(u"Baseline at"))
+        self.small_baseline = QtGui.QSpinBox()
+        self.small_baseline.setRange(-3000, 3000)
+        self.small_baseline.setSuffix(u" units")
+        self.small_baseline.setWhatsThis(u"Where the scaled figure's baseline goes, in font units above the font's "
+                                         u"baseline (below it, negative).")
+        row.addWidget(self.small_baseline)
+        row.addWidget(QtGui.QLabel(u"Width"))
+        self.small_width = QtGui.QSpinBox()
+        self.small_width.setRange(50, 200)
+        self.small_width.setSuffix(u"%")
+        self.small_width.setWhatsThis(u"The advance width, of the scaled figure's: above 100%, a little more room "
+                                      u"around the small figure (most open-licensed fonts give them 112%).")
+        row.addWidget(self.small_width)
+        self.small_reset = QtGui.QPushButton(u"Suggested")
+        self.small_reset.setWhatsThis(u"Puts the set's scale, baseline, and width back as first suggested.")
+        row.addWidget(self.small_reset)
+        self.small_why = QtGui.QLabel(u"")
+        row.addWidget(self.small_why, 1)
+        part.addLayout(row)
+        self.small_tree = QtGui.QTreeWidget()
+        self.small_tree.setColumnCount(3)
+        self.small_tree.setHeaderLabels(["Glyph", "Made of", "Note"])
+        self.small_tree.setRootIsDecorated(True)
+        self.small_tree.setIconSize(QtCore.QSize(ICON_SIZE * 2, ICON_SIZE))
+        self.small_tree.setWhatsThis(u"The figure forms the font lacks, by set (click a set's arrow): each glyph, what "
+                                     u"it would be made of, drawn beside its figure, and its code point. Checked "
+                                     u"glyphs are built.")
+        self.small_tree.setProperty(self.ak.LEAVE_ALONE_PROP, True)
+        self.ak.grid_lines(self.small_tree)
+        part.addWidget(self.small_tree, 1)
+        row = QtGui.QHBoxLayout()
+        row.addStretch(1)
+        self.build_button = QtGui.QPushButton(build_label(0))
+        self.build_button.setWhatsThis(u"Adds the checked glyphs to the font, made of components as shown, in one "
+                                       u"step of FontLab's History. The font is read again: the forms above take "
+                                       u"them.")
+        self.build_button.setEnabled(False)
+        row.addWidget(self.build_button)
+        part.addLayout(row)
+        self.small_set.connect("currentIndexChanged(int)", self.small_set_picked)
+        self.small_scale.connect("valueChanged(int)", lambda value: self.small_setting("scale", value))
+        self.small_baseline.connect("valueChanged(int)", lambda value: self.small_setting("baseline", value))
+        self.small_width.connect("valueChanged(int)", lambda value: self.small_setting("width", value))
+        self.small_reset.connect("clicked()", self.small_suggested)
+        self.small_tree.connect("itemChanged(QTreeWidgetItem*,int)", self.small_checked)
+        self.small_tree.connect("itemExpanded(QTreeWidgetItem*)", self.small_expanded)
+        self.small_tree.connect("itemClicked(QTreeWidgetItem*,int)", self.small_clicked)
+        self.build_button.connect("clicked()", self.build_small_forms)
+
+    def small_state(self):
+        """(the font's key, {name: checked}, the settings) of the builds, or None before a font is read."""
+        if getattr(self, "package", None) is None or not self.small_setup:
+            return None
+        try:
+            key = self.ak.font_key(self.package)
+        except Exception:
+            return None
+        return key, dict((form.name, form.on) for form in self.small_forms), \
+            dict((set_key, dict(setting)) for set_key, setting in self.small_setup.items())
+
+    def read_small_forms(self, info):
+        """The figure forms the font lacks, and their first settings (those kept from the last read of
+        the same font where there are some)."""
+        self.small_info = info
+        cap = None
+        try:
+            cap = float(self.package.capsHeight_value)
+        except Exception:
+            cap = None
+        try:
+            upm = float(self.package.upm)
+        except Exception:
+            upm = 1000.0
+        try:
+            self.small_forms = missing_small_forms(info)
+            self.small_first = small_settings(info, cap, upm)
+        except Exception as exc:  # a font the builders did not foresee: the rest still works
+            self.small_forms, self.small_first = [], {}
+            self.log.add(u"The figure forms to build could not be read: %s" % self.ak.html(exc), "error")
+        self.small_setup = dict((key, dict(setting)) for key, setting in self.small_first.items())
+        kept = getattr(self, "small_kept", None)
+        if kept is not None:
+            for form in self.small_forms:
+                form.on = kept[1].get(form.name, form.on)
+            for key, setting in kept[2].items():
+                if key in self.small_setup:
+                    self.small_setup[key].update((k, setting[k]) for k in ("scale", "baseline", "width"))
+        self.show_small_forms()
+
+    def small_form(self, name):
+        for form in self.small_forms:
+            if form.name == name:
+                return form
+        return None
+
+    def show_small_forms(self):
+        """The build list made again: a section per set the font lacks forms of, a row per form."""
+        QtCore, QtGui = _qt()
+        tree = self.small_tree
+        tree.blockSignals(True)
+        try:
+            tree.clear()
+            for group, set_key, title in SMALL_GROUPS:
+                forms = [form for form in self.small_forms if form.group == group]
+                if not forms:
+                    continue
+                item = QtGui.QTreeWidgetItem([title, u"", u""])
+                self.ak.section_row(item, tree)
+                item.setData(0, QtCore.Qt.UserRole, group)
+                item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsUserCheckable)
+                item.setCheckState(0, QtCore.Qt.Checked if any(form.on for form in forms) else QtCore.Qt.Unchecked)
+                tree.addTopLevelItem(item)
+                for form in forms:
+                    child = QtGui.QTreeWidgetItem([form.name, u"", u""])
+                    child.setData(0, QtCore.Qt.UserRole, u"\t" + form.name)
+                    child.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsUserCheckable)
+                    child.setCheckState(0, QtCore.Qt.Checked if form.on else QtCore.Qt.Unchecked)
+                    item.addChild(child)
+            tree.resizeColumnToContents(0)
+        finally:
+            tree.blockSignals(False)
+        if self.package is None:
+            self.small_label.setText(u"")
+        elif self.small_forms:
+            self.small_label.setText(
+                u"The font lacks %s. Each is made of its figure (or a or o) as a component, scaled and moved, or of a "
+                u"drawn small figure where the font has a whole set of them: a start, not a drawing. Scaling thins "
+                u"the strokes (a figure at 60%% has stems 60%% as thick; most fonts' drawn small figures have "
+                u"ink about 7%% wider than scaling gives): draw over them, or draw your own. Built, the features above "
+                u"take them." % (
+                    self.ak.b(counted(len(self.small_forms), u"figure form"))))
+        elif self.small_info is not None and not any(self.small_info.figures()):
+            self.small_label.setText(u"The font has no figures 0 to 9 to build small forms of.")
+        else:
+            self.small_label.setText(u"The font has every figure form FreeLab builds: numerators, denominators, "
+                                     u"superiors, inferiors, their Unicode characters, and the ordinal indicators.")
+        self.small_set_picked(self.small_set_index)
+        self.replan()
+
+    def replan(self):
+        """The forms planned again (a check or a setting changed): each row's words, and the pictures of
+        the open sections."""
+        QtCore, QtGui = _qt()
+        try:
+            self.small_plans = plan_small_forms(self.small_info, self.small_forms, self.small_setup) \
+                if self.small_info is not None and self.small_forms else {}
+        except Exception as exc:
+            self.small_plans = {}
+            self.log.add(u"The figure forms could not be planned: %s" % self.ak.html(exc), "error")
+        tree = self.small_tree
+        tree.blockSignals(True)
+        try:
+            for row in range(tree.topLevelItemCount):
+                item = tree.topLevelItem(row)
+                group = u"%s" % item.data(0, QtCore.Qt.UserRole)
+                on = sum(1 for form in self.small_forms if form.group == group and form.on)
+                total = sum(1 for form in self.small_forms if form.group == group)
+                item.setText(1, u"%d of %s checked" % (on, counted(total, u"glyph")))
+                for index in range(item.childCount()):
+                    child = item.child(index)
+                    form = self.small_form((u"%s" % child.data(0, QtCore.Qt.UserRole))[1:])
+                    if form is not None:
+                        plan = self.small_plans.get(form.name)
+                        words = describe_placement(plan)
+                        child.setText(1, words)
+                        child.setToolTip(1, words)
+                        note = u"; ".join(text for text in (
+                            u"U+%04X %s" % (form.code, unichr_(form.code)) if form.code else u"",
+                            SMALL_NOTES.get(plan.how if plan is not None else None, u"")) if text)
+                        child.setText(2, note)
+                        child.setToolTip(2, note)
+                if item.data(1, QtCore.Qt.UserRole):
+                    self.small_pictures(item)
+        finally:
+            tree.blockSignals(False)
+        self.update_small_buttons()
+
+    def small_expanded(self, item):
+        """A set opened: its rows' pictures drawn now."""
+        QtCore, QtGui = _qt()
+        self.small_tree.blockSignals(True)
+        try:
+            item.setData(1, QtCore.Qt.UserRole, True)
+            self.small_pictures(item)
+        except Exception:
+            pass
+        finally:
+            self.small_tree.blockSignals(False)
+
+    def small_pictures(self, item):
+        QtCore, QtGui = _qt()
+        for index in range(item.childCount()):
+            child = item.child(index)
+            form = self.small_form((u"%s" % child.data(0, QtCore.Qt.UserRole))[1:])
+            icon = self.planned_picture(form) if form is not None else None
+            if icon is not None:
+                child.setIcon(1, QtGui.QIcon(icon))
+
+    def planned_picture(self, form):
+        """The figure (or letter) and the glyph planned of it, side by side as the font would set them, in
+        the dialog's text color; None where a part cannot be drawn."""
+        QtCore, QtGui = _qt()
+        plan = self.small_plans.get(form.name)
+        if plan is None:
+            return None
+        master = self.package.master
+
+        def layer_of(name):
+            glyph = self.package.findName(name)
+            return glyph.getLayerByName(master) if glyph is not None and not glyph.isNull else None
+
+        figure = layer_of(form.figure)
+        parts = []
+        for name, sx, sy, dx, dy in flat_parts(self.small_plans, form.name):
+            layer = layer_of(name)
+            if layer is None:
+                return None
+            parts.append((self.ak.layer_path(layer), sx, sy, dx, dy))
+        if figure is None or not parts:
+            return None
+        scale = ICON_SIZE * 0.75 / float(self.package.upm)
+        gap = ICON_SIZE * 0.2
+        width = int((figure.advanceWidth + plan.width) * scale + gap * 2)
+        pixmap = QtGui.QPixmap(max(width, 4), ICON_SIZE)
+        pixmap.fill(QtGui.QColor(0, 0, 0, 0))
+        color = self.dialog.palette.color(QtGui.QPalette.WindowText)
+        painter = QtGui.QPainter(pixmap)
+        try:  # ended before anything else can fail: a painter left open on a freed pixmap aborts FontLab
+            painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+            painter.save()
+            painter.translate(0.0, ICON_SIZE * 0.78)
+            painter.scale(scale, -scale)
+            painter.fillPath(self.ak.layer_path(figure), QtGui.QBrush(color))
+            painter.restore()
+            painter.save()
+            painter.translate(figure.advanceWidth * scale + gap, ICON_SIZE * 0.78)
+            painter.scale(scale, -scale)
+            for path, sx, sy, dx, dy in parts:
+                painter.fillPath(QtGui.QTransform(sx, 0.0, 0.0, sy, float(dx), float(dy)).map(path), QtGui.QBrush(color))
+            painter.restore()
+        finally:
+            painter.end()
+        return pixmap
+
+    def small_checked(self, item, column):
+        """A row's or a set's check changed (a set's checks all its rows)."""
+        QtCore, QtGui = _qt()
+        if column != 0:
+            return
+        on = item.checkState(0) == QtCore.Qt.Checked
+        key = u"%s" % item.data(0, QtCore.Qt.UserRole)
+        if key.startswith(u"\t"):
+            form = self.small_form(key[1:])
+            if form is None or form.on == on:
+                return
+            form.on = on
+        else:
+            for form in self.small_forms:
+                if form.group == key:
+                    form.on = on
+        self.show_small_checks()
+        self.replan()
+
+    def show_small_checks(self):
+        """Every build row's check as the model has it (rows found again by walking the tree)."""
+        QtCore, QtGui = _qt()
+        tree = self.small_tree
+        tree.blockSignals(True)
+        try:
+            for row in range(tree.topLevelItemCount):
+                item = tree.topLevelItem(row)
+                group = u"%s" % item.data(0, QtCore.Qt.UserRole)
+                ons = [form.on for form in self.small_forms if form.group == group]
+                item.setCheckState(0, QtCore.Qt.Checked if any(ons) else QtCore.Qt.Unchecked)
+                for index in range(item.childCount()):
+                    child = item.child(index)
+                    form = self.small_form((u"%s" % child.data(0, QtCore.Qt.UserRole))[1:])
+                    if form is not None:
+                        child.setCheckState(0, QtCore.Qt.Checked if form.on else QtCore.Qt.Unchecked)
+        finally:
+            tree.blockSignals(False)
+
+    def small_clicked(self, item, column):
+        """A row clicked: its set's settings shown."""
+        QtCore, QtGui = _qt()
+        key = u"%s" % item.data(0, QtCore.Qt.UserRole)
+        form = self.small_form(key[1:]) if key.startswith(u"\t") else None
+        set_key = form.set_key if form is not None else dict((g, s) for g, s, _ in SMALL_GROUPS).get(key)
+        if set_key in SMALL_SETS and SMALL_SETS.index(set_key) != self.small_set_index:
+            self.small_set.blockSignals(True)
+            self.small_set.setCurrentIndex(SMALL_SETS.index(set_key))
+            self.small_set.blockSignals(False)
+            self.small_set_picked(SMALL_SETS.index(set_key))
+
+    def small_set_picked(self, index):
+        """A set picked in the settings row: its settings shown in the boxes (signals held: showing them
+        changes nothing)."""
+        self.small_set_index = index if 0 <= index < len(SMALL_SETS) else 0
+        setting = self.small_setup.get(SMALL_SETS[self.small_set_index])
+        boxes = (self.small_scale, self.small_baseline, self.small_width)
+        for box in boxes:
+            box.blockSignals(True)
+        try:
+            if setting is not None:
+                self.small_scale.setValue(int(round(setting["scale"] * 100)))
+                self.small_baseline.setValue(int(setting["baseline"]))
+                self.small_width.setValue(int(round(setting["width"] * 100)))
+                self.small_why.setText(u"Suggested: %s" % self.ak.html(setting.get("why") or u""))
+            else:
+                self.small_why.setText(u"")
+        finally:
+            for box in boxes:
+                box.blockSignals(False)
+
+    def small_setting(self, key, value):
+        """A setting of the picked set changed in its box."""
+        setting = self.small_setup.get(SMALL_SETS[self.small_set_index])
+        if setting is None:
+            return
+        if key == "scale":
+            scale = value / 100.0
+            if abs(scale - setting["scale"]) < 1e-9:
+                return
+            baseline = rescaled_baseline(setting, scale)
+            setting["scale"] = scale
+            if baseline != setting["baseline"]:
+                setting["baseline"] = baseline
+                self.small_baseline.blockSignals(True)
+                self.small_baseline.setValue(baseline)
+                self.small_baseline.blockSignals(False)
+        elif key == "baseline":
+            setting["baseline"] = int(value)
+        else:
+            setting["width"] = value / 100.0
+        self.replan()
+
+    def small_suggested(self):
+        """The picked set's settings back as first suggested."""
+        set_key = SMALL_SETS[self.small_set_index]
+        if set_key in self.small_first:
+            self.small_setup[set_key] = dict(self.small_first[set_key])
+            self.small_set_picked(self.small_set_index)
+            self.replan()
+
+    def small_changed(self):
+        return any(form.on != form.first_on for form in self.small_forms) or any(
+            self.small_setup.get(key, {}).get(k) != setting.get(k) for key, setting in self.small_first.items()
+            for k in ("scale", "baseline", "width"))
+
+    def update_small_buttons(self):
+        count = sum(1 for form in self.small_forms if form.on and self.small_plans.get(form.name) is not None)
+        self.build_button.setText(build_label(count))
+        self.ak.enable(self.build_button, count > 0)
+        self.ak.enable(self.restore_button, self.restorable())
+
+    def restorable(self):
+        return [lig.choice for lig in self.found] != self.first_choices or self.alternate_checks() != self.first_checks \
+            or self.forms_changed() or self.small_changed()
+
+    def has_code(self, package, code):
+        try:
+            return package.findUnicode(code) is not None
+        except Exception:
+            return False
+
+    def build_small_forms(self):
+        """The checked figure forms added to the font, made of components as planned, in every master
+        (placed by the current master's measures; widths from each master's own glyphs), as one step of
+        FontLab's History; a code point set once its glyph's layers are made."""
+        QtCore, QtGui = _qt()
+        if self.package is None or self.small_info is None:
+            return
+        chosen = [form for form in self.small_forms if form.on]
+        if not chosen:
+            return
+        package = self.package
+        current = self.current_font()
+        if current is None or self.ak.font_key(current) != self.ak.font_key(package):
+            self.run()
+            self.log.add(u"The font changed since the list was made: here is this one's. Nothing was built.", "warning")
+            return
+        fontlab = self.fontlab
+        try:
+            masters = list(package.masters)
+        except Exception:
+            masters = []
+        masters = masters or [package.master]
+        plans = {}
+
+        def plans_of(master):
+            if master not in plans:
+                def advance(name):
+                    glyph = package.findName(name)
+                    layer = glyph.getLayerByName(master) if glyph is not None and not glyph.isNull else None
+                    return layer.advanceWidth if layer is not None else None
+                plans[master] = plan_small_forms(self.small_info, self.small_forms, self.small_setup, advance)
+            return plans[master]
+
+        made, skipped, failed, error, touched = [], [], [], None, []
+        try:
+            for master in masters:
+                plans_of(master)  # (each master planned before anything is added)
+            for form in sorted(chosen, key=lambda f: f.group in ("superscript", "subscript")):
+                if package.findName(form.name) is not None or (form.code and self.has_code(package, form.code)):
+                    skipped.append(form.name)  # made meanwhile
+                    continue
+                new = fontlab.flGlyph()
+                new.name = form.name
+                # (its code point set once its layers are made: given before, FontLab kept none of them)
+                package.addGlyph(new)  # (FontLab adds a copy, without layers: they are made on the font's glyph)
+                glyph = package.findName(form.name)
+                if glyph is None:
+                    raise RuntimeError(u"FontLab did not add %s" % form.name)
+                placed = False
+                for master in masters:
+                    plan = plans_of(master).get(form.name)
+                    if plan is None or any(package.findName(part[0]) is None for part in plan.parts):
+                        continue  # its figure not drawn in this master, or the glyph it copies not built
+                    components = []
+                    for part in plan.parts:
+                        name, sx, sy, dx, dy = unwrapped(package, master, *part)
+                        component = fontlab.GlyphComponent(name)
+                        component.transform = QtGui.QTransform(sx, 0.0, 0.0, sy, float(round(dx)), float(round(dy)))
+                        components.append(component)
+                    layer = glyph.getLayerByName(master, True)
+                    layer.setGlyphComponents(components, float(plan.width), package, False)
+                    placed = True
+                if not placed or is_empty(package.findName(form.name)):
+                    failed.append((form.name, u"FontLab did not keep its components" if placed else
+                                   u"its figure has no width in any master"))
+                    package.deleteGlyph(package.findName(form.name))
+                    continue
+                if form.code:
+                    package.findName(form.name).fgGlyph.unicode = form.code
+                touched.append(glyph)
+                made.append(form.name)
+        except Exception as exc:  # what was made stays made, and is reported
+            error = exc
+        self.ak.notify_changed(fontlab, package, u"FreeLab Feature Code", touched)
+        b = self.ak.b
+        if made:
+            one = len(made) == 1
+            self.log.add(u"Built %s: %s. %s at the end of the font; <i>Edit &gt; Undo</i> takes %s back. Scaling thins "
+                         u"strokes: draw over what was scaled. The forms above take %s now: check their features "
+                         u"and write the code." % (
+                             b(counted(len(made), u"glyph")), self.ak.html(u", ".join(made)),
+                             u"It is" if one else u"They are", u"it" if one else u"them", u"it" if one else u"them"),
+                         "done")
+        else:
+            self.log.add(u"Built none.")
+        if skipped:
+            self.log.add(u"%s had been made meanwhile and %s left as %s." % (
+                b(u", ".join(skipped)), u"was" if len(skipped) == 1 else u"were",
+                u"it was" if len(skipped) == 1 else u"they were"), "warning")
+        for name, why in failed:
+            self.log.add(u"%s was not built: %s." % (b(name), self.ak.html(why)), "warning")
+        if error is not None:
+            self.log.add(u"Stopped by an error: %s" % self.ak.html(error), "error")
+        forms = self.form_state()
+        self.run()
+        self.apply_form_state(forms)
+        self.make_code()
+
     # -- the rest -----------------------------------------------------------------------
 
     def part(self, QtGui, stretch, splitter=None):
@@ -2191,7 +3063,7 @@ class FeatureCodeDialog(object):
                 for row in range(self.alternate_tree.topLevelItemCount)]
 
     def restore(self):
-        """The features, checks, and names as they first came."""
+        """The features, checks, names, and build settings as they first came."""
         QtCore, QtGui = _qt()
         for row, (lig, choice) in enumerate(zip(self.found, self.first_choices)):
             lig.choice = choice
@@ -2205,6 +3077,12 @@ class FeatureCodeDialog(object):
             for rule in feature.rules:
                 rule.on = rule.first_on
         self.show_forms()
+        for form in self.small_forms:
+            form.on = form.first_on
+        self.small_setup = dict((key, dict(setting)) for key, setting in self.small_first.items())
+        self.show_small_checks()
+        self.small_set_picked(self.small_set_index)
+        self.replan()
         self.make_code()
         self.log.add(u"Choices restored as suggested.")
 
@@ -2329,8 +3207,7 @@ class FeatureCodeDialog(object):
         changes = bool(texts and any(texts[tag] != self.texts.get(tag) for tag in texts)) or prefix is not None
         self.write_button.setText(u"Update the code" if present else u"Write the code")
         self.ak.enable(self.write_button, changes and not problems)
-        self.ak.enable(self.restore_button, [lig.choice for lig in self.found] != self.first_choices
-                       or self.alternate_checks() != self.first_checks or self.forms_changed())
+        self.ak.enable(self.restore_button, self.restorable())
         counts = dict((key, sum(1 for lig in self.found if lig.choice == key)) for key, _ in CHOICES)
         b = self.ak.b
         checked = [feature.tag for feature in self.forms if feature.on and feature.checked()]

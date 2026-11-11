@@ -2,7 +2,8 @@
 # -*- coding: utf-8 -*-
 """FreeLab Font Check, from FontLab's Scripts menu.
 
-Three views of the current font, each read-only:
+Three views of the current font; nothing in the font changes until a button that writes is clicked
+(Write suggested values, Fix), each write one step of FontLab's History:
 
 - Coverage: the scripts the font has, each with a bar of its languages covered, within reach (the
   few characters missing named), and missed, from Hyperglot's orthographies
@@ -13,11 +14,13 @@ Three views of the current font, each read-only:
 - Vertical metrics: a diagram of the font's tallest and deepest glyphs on its line metrics (typo,
   hhea, win), the ink Windows clips in red; the values now and as Google Fonts' vertical metrics
   guidance suggests; its checks, passed or not; the glyphs Windows clips (beyond winAscent and
-  winDescent, in any master, and by how much). FreeLab does not write the values: they are set in
-  Font Info.
+  winDescent, in any master, and by how much). Write suggested values sets the font info's typo,
+  hhea, and win values and Use Typo Metrics (never the masters' own metrics).
 - Masters: what keeps masters from interpolating, glyph by glyph: contours, nodes and their types,
   start points, directions, components and their order, anchors, and glyphs some masters lack; the
-  glyph drawn in two masters, the contour at fault highlighted.
+  glyph drawn in two masters, the contour at fault highlighted. Fix sets right what needs no
+  designer (the contours' order, directions, start points, the components' order) in the masters
+  other than the reference.
 
 Valid Python 2.7 (FontLab 7) and Python 3. The checks above the Qt line need no Qt and no FontLab.
 """
@@ -513,7 +516,12 @@ class Suggestion(object):
         self.key, self.label, self.now, self.value = key, label, now, value
 
     def changes(self):
+        if self.now is None and self.value == 0 and self.key in ZERO_READS_UNSET:
+            return False  # (0 reads as not set: written, it would read as not set again)
         return self.now is None or self.now != self.value
+
+
+ZERO_READS_UNSET = ("typo_ascender", "typo_descender", "hhea_ascender", "hhea_descender", "win_ascent", "win_descent")
 
 
 SUGGESTED = (("typo_ascender", u"Typo ascender"), ("typo_descender", u"Typo descender"),
@@ -634,17 +642,23 @@ class Contour(object):
 
 class Outline(object):
     """What interpolation needs of a glyph in one master: its contours (components apart), its
-    components' glyph names in order, and its anchors' names."""
+    components' glyph names in order, and its anchors' names. blocks: how many of the contours each
+    of its shapes holds, in order (None: not known; contours are reordered within their shape only)."""
 
-    def __init__(self, contours=(), components=(), anchors=()):
+    def __init__(self, contours=(), components=(), anchors=(), blocks=None):
         self.contours = list(contours)
         self.components = list(components)
         self.anchors = list(anchors)
+        self.blocks = list(blocks) if blocks is not None else None
 
 
 class Incompatibility(object):
-    def __init__(self, glyph, master, contour, kind, text):
+    """A difference from the reference master; fixable: Font Check can set it right (the contours'
+    order, a direction, a start point, the components' order), else it needs the designer."""
+
+    def __init__(self, glyph, master, contour, kind, text, fixable=False):
         self.glyph, self.master, self.contour, self.kind, self.text = glyph, master, contour, kind, text
+        self.fixable = fixable
 
 
 def normalized(nodes):
@@ -708,6 +722,198 @@ def rotation_of(types, wanted):
     return None
 
 
+def is_off_curve(kind):
+    return u"%s" % kind in (u"off", u"offcurve")
+
+
+def turned_over(contour, other):
+    """Whether two closed contours run opposite ways (their directions plain: clear_area)."""
+    return bool(contour.closed and other.closed and clear_area(contour) and clear_area(other)
+                and (contour.area() > 0) != (other.area() > 0))
+
+
+def signed_shift(shift, count):
+    """A start's shift as nodes on (above 0) or back (below 0), the shorter way round."""
+    shift %= count
+    return shift if shift <= count // 2 else shift - count
+
+
+def best_rotation(reference, contour):
+    """The start (nodes on, or back below 0) at which the contour's node types match the
+    reference's and its points fit them best (centered and scaled to its size), or None when no
+    start makes the types match."""
+    count = len(contour.nodes)
+    if count != len(reference.nodes) or not count:
+        return None
+    types, wanted = contour.types(), reference.types()
+    a, b = normalized(reference.nodes), normalized(contour.nodes)
+    best, best_cost = None, None
+    for shift in range(count):
+        if all(types[(at + shift) % count] == wanted[at] for at in range(count)):
+            cost = sum((a[at][0] - b[(at + shift) % count][0]) ** 2 + (a[at][1] - b[(at + shift) % count][1]) ** 2
+                       for at in range(count))
+            if best_cost is None or cost < best_cost - 1e-12:
+                best, best_cost = shift, cost
+    return None if best is None else signed_shift(best, count)
+
+
+def reversed_contour(contour):
+    """A contour run the other way, its first node kept first (as FontLab's flContour.reverse())."""
+    nodes = contour.nodes
+    return Contour(nodes[:1] + nodes[:0:-1], contour.closed)
+
+
+def rotated_contour(contour, index):
+    """A contour whose first node is its node index (as FontLab's flContour.setStartPoint(index))."""
+    return Contour(contour.nodes[index:] + contour.nodes[:index], contour.closed)
+
+
+def contour_fix(reference, contour):
+    """(reverse, start) that make a contour match the reference's: reverse it (FontLab keeps its first
+    node first), then make its node start (an index, 0: as it is) the first; None when no such fix
+    makes them compatible (other node counts or types, an open contour's start, or a start that
+    would fall on an off-curve node: FontLab moves the start onto on-curve nodes only)."""
+    count = len(contour.nodes)
+    if contour.closed != reference.closed or count != len(reference.nodes) or not count:
+        return None
+    reverse = turned_over(contour, reference)
+    model = reversed_contour(contour) if reverse else contour
+    if model.types() == reference.types():
+        shift = start_shift(reference, model)
+    else:
+        shift = best_rotation(reference, model)
+        if shift is None:
+            return None
+    index = shift % count
+    if index and (not contour.closed or is_off_curve(model.nodes[index][2])):
+        return None
+    return reverse, index
+
+
+def matching_cost(reference, contour, reference_box, box):
+    """How unlike two contours are, for putting a master's contours in the reference's order: not at
+    all comparable (other node counts), else where they sit and how large they are in their glyph's
+    box, plus one when their node types match in no direction and from no start."""
+    if len(contour.nodes) != len(reference.nodes) or not contour.nodes:
+        return None
+
+    def place(c, outline_box):
+        left, bottom, size = outline_box
+        xs, ys = [n[0] for n in c.nodes], [n[1] for n in c.nodes]
+        return ((sum(xs) / float(len(xs)) - left) / size, (sum(ys) / float(len(ys)) - bottom) / size,
+                (max(xs) - min(xs)) / size, (max(ys) - min(ys)) / size)
+
+    a, b = place(reference, reference_box), place(contour, box)
+    cost = math.hypot(a[0] - b[0], a[1] - b[1]) + abs(a[2] - b[2]) + abs(a[3] - b[3])
+    types, wanted = contour.types(), reference.types()
+    if rotation_of(types, wanted) is None and rotation_of(types[::-1], wanted) is None:
+        cost += 1.0
+    return cost
+
+
+def outline_box(contours):
+    """(left, bottom, size) of contours' nodes: size the larger of width and height (1 when none)."""
+    xs = [n[0] for c in contours for n in c.nodes]
+    ys = [n[1] for c in contours for n in c.nodes]
+    if not xs:
+        return 0.0, 0.0, 1.0
+    return min(xs), min(ys), float(max(max(xs) - min(xs), max(ys) - min(ys)) or 1.0)
+
+
+def assignment(cost):
+    """The cheapest one-to-one assignment of rows to columns of a square cost matrix (Kuhn and
+    Munkres' method, O(n^3)): [column of each row]."""
+    n = len(cost)
+    infinite = float("inf")
+    u, v, p, way = [0.0] * (n + 1), [0.0] * (n + 1), [0] * (n + 1), [0] * (n + 1)
+    for row in range(1, n + 1):
+        p[0], j0 = row, 0
+        least, used = [infinite] * (n + 1), [False] * (n + 1)
+        while True:
+            used[j0] = True
+            i0, delta, j1 = p[j0], infinite, 0
+            for j in range(1, n + 1):
+                if not used[j]:
+                    here = cost[i0 - 1][j - 1] - u[i0] - v[j]
+                    if here < least[j]:
+                        least[j], way[j] = here, j0
+                    if least[j] < delta:
+                        delta, j1 = least[j], j
+            for j in range(n + 1):
+                if used[j]:
+                    u[p[j]] += delta
+                    v[j] -= delta
+                else:
+                    least[j] -= delta
+            j0 = j1
+            if p[j0] == 0:
+                break
+        while j0:
+            j1 = way[j0]
+            p[j0] = p[j1]
+            j0 = j1
+    found = [0] * n
+    for j in range(1, n + 1):
+        found[p[j] - 1] = j - 1
+    return found
+
+
+UNMATCHED = 1e6  # the cost of pairing contours of other node counts: never chosen when another way exists
+
+
+def match_contours(reference, contours):
+    """A master's contours in the reference's order: [the master's contour at each of the reference's
+    places], matched by node count (required), node types, and where they sit and how large they are
+    in the glyph; None when no matching pairs every contour with one of its node count."""
+    if len(reference) != len(contours):
+        return None
+    if not contours:
+        return []
+    reference_box, box = outline_box(reference), outline_box(contours)
+    costs = []
+    for at, r in enumerate(reference):
+        row = []
+        for k, c in enumerate(contours):
+            cost = matching_cost(r, c, reference_box, box)
+            row.append(UNMATCHED if cost is None else cost + 1e-9 * abs(at - k))  # (ties: kept in place)
+        costs.append(row)
+    order = assignment(costs)
+    if any(costs[at][k] >= UNMATCHED for at, k in enumerate(order)):
+        return None
+    return order
+
+
+def within_blocks(order, blocks):
+    """Whether a reordering keeps every contour in its own shape (blocks: contours per shape; None:
+    one shape)."""
+    if blocks is None:
+        return True
+    owner, start = {}, 0
+    for number, size in enumerate(blocks):
+        for k in range(start, start + size):
+            owner[k] = number
+        start += size
+    return all(k in owner and at in owner and owner[k] == owner[at] for at, k in enumerate(order))
+
+
+def component_order(reference, components):
+    """The master's components in the reference's order: [the master's component at each of the
+    reference's places], the same names taken in turn; None when they are in that order already, or
+    are not the same components."""
+    if components == reference or sorted(components) != sorted(reference):
+        return None
+    used, order = set(), []
+    for name in reference:
+        k = next(k for k, other in enumerate(components) if other == name and k not in used)
+        used.add(k)
+        order.append(k)
+    return order
+
+
+def moved_text(shift):
+    return counted(abs(shift), u"node") + (u" on" if shift > 0 else u" back")
+
+
 def node_kind(kind):
     return {u"on": u"on-curve", u"off": u"off-curve", u"curve": u"curve", u"line": u"line"}.get(u"%s" % kind, u"%s" % kind)
 
@@ -735,18 +941,24 @@ def compare_outline(name, reference_master, reference, master, outline):
     found = []
     ref = reference_master
 
-    def add(contour, kind, text):
-        found.append(Incompatibility(name, master, contour, kind, text))
+    def add(contour, kind, text, fixable=False):
+        found.append(Incompatibility(name, master, contour, kind, text, fixable() if callable(fixable) else fixable))
 
     if len(outline.contours) != len(reference.contours):
         add(None, "contours", u"%s, %d in %s" % (counted(len(outline.contours), u"contour"), len(reference.contours), ref))
     else:
         sizes, wanted = [len(c.nodes) for c in outline.contours], [len(c.nodes) for c in reference.contours]
         reordered = sizes != wanted and sorted(sizes) == sorted(wanted)
+        pairs = list(enumerate(zip(outline.contours, reference.contours)))
         if reordered:
+            order = match_contours(reference.contours, outline.contours)
             add(None, "order", u"Contours in another order than in %s (their node counts: %s; %s in %s)" % (
-                ref, u" ".join(u"%d" % s for s in sizes), u" ".join(u"%d" % s for s in wanted), ref))
-        for at, (contour, other) in enumerate(zip(outline.contours, reference.contours)):
+                ref, u" ".join(u"%d" % s for s in sizes), u" ".join(u"%d" % s for s in wanted), ref),
+                order is not None and within_blocks(order, outline.blocks))
+            if order is not None:  # each contour compared with its match in the reference
+                place = dict((k, at) for at, k in enumerate(order))
+                pairs = [(k, (outline.contours[k], reference.contours[place[k]])) for k in range(len(order))]
+        for at, (contour, other) in pairs:
             number = at + 1
             if contour.closed != other.closed:
                 add(number, "open", u"%s here, %s in %s" % (u"Closed" if contour.closed else u"Open",
@@ -757,28 +969,32 @@ def compare_outline(name, reference_master, reference, master, outline):
                 continue
             types, wanted_types = contour.types(), other.types()
             area, other_area = contour.area(), other.area()
-            turned = (contour.closed and other.closed and clear_area(contour) and clear_area(other)
-                      and (area > 0) != (other_area > 0))
+            turned = turned_over(contour, other)
+            fixable = lambda contour=contour, other=other: contour_fix(other, contour) is not None  # (asked once found)
             if types != wanted_types:
                 if turned and rotation_of(types[::-1], wanted_types) is not None:
                     add(number, "direction", u"Runs %s, %s in %s (reversed: its node types match the other way "
-                                             u"round)" % (turning(area), turning(other_area), ref))
+                                             u"round)" % (turning(area), turning(other_area), ref), fixable)
+                    continue
+                shift = best_rotation(other, contour) if contour.closed and other.closed and not turned else None
+                if shift:
+                    add(number, "start", u"Start point %s from where %s's would match (its node types match from "
+                                         u"there)" % (moved_text(shift), ref), fixable)
                     continue
                 index = next(i for i in range(len(types)) if types[i] != wanted_types[i])
                 add(number, "types", u"Node %d is %s, %s in %s" % (index + 1, node_kind(types[index]),
                                                                     node_kind(wanted_types[index]), ref))
                 continue
             if turned:
-                add(number, "direction", u"Runs %s, %s in %s" % (turning(area), turning(other_area), ref))
+                add(number, "direction", u"Runs %s, %s in %s" % (turning(area), turning(other_area), ref), fixable)
                 continue
             shift = start_shift(other, contour)
             if shift:
-                add(number, "start", u"Start point %s from where %s's would match" % (
-                    counted(abs(shift), u"node") + (u" on" if shift > 0 else u" back"), ref))
+                add(number, "start", u"Start point %s from where %s's would match" % (moved_text(shift), ref), fixable)
     if outline.components != reference.components:
         if sorted(outline.components) == sorted(reference.components):
             add(None, "components", u"Components in another order: %s; %s in %s" % (
-                u", ".join(outline.components), u", ".join(reference.components), ref))
+                u", ".join(outline.components), u", ".join(reference.components), ref), True)
         else:
             add(None, "components", u"Components %s; %s in %s" % (
                 u", ".join(outline.components) or u"none", u", ".join(reference.components) or u"none", ref))
@@ -800,6 +1016,164 @@ MASTER_KINDS = (("missing", (u"glyph missing in a master", u"glyphs missing in a
                 ("nodes", (u"node count", u"node counts")), ("types", (u"node type", u"node types")),
                 ("direction", (u"direction", u"directions")), ("start", (u"start point", u"start points")),
                 ("components", (u"component list", u"component lists")), ("anchors", (u"anchor set", u"anchor sets")))
+
+
+class FixPlan(object):
+    """What Font Check sets right in a glyph's layer in one master to match the reference master:
+    order (the master's contour at each of the reference's places; None: kept), contours [(place
+    after the order, reverse, start index, node count)]: reverse the contour (its first node kept
+    first), then make its node start the first; components (the master's component at each of the
+    reference's places; None: kept) and the reference's component names."""
+
+    def __init__(self, order=None, contours=(), components=None, names=()):
+        self.order, self.contours, self.components, self.names = order, list(contours), components, list(names)
+
+    def empty(self):
+        return self.order is None and not self.contours and self.components is None
+
+
+def plan_fixes(reference, outline):
+    """The FixPlan that makes a master's outline match the reference's as far as it can without the
+    designer: its contours in the reference's order (matched by node count, node types, and place, and
+    kept within their shapes), each contour's direction and start point, its components' order.
+    Everything else (contour and node counts, node types, open contours, components, anchors) is left
+    as it is."""
+    plan = FixPlan()
+    if len(outline.contours) == len(reference.contours):
+        contours = list(outline.contours)
+        sizes, wanted = [len(c.nodes) for c in contours], [len(c.nodes) for c in reference.contours]
+        if sizes != wanted and sorted(sizes) == sorted(wanted):
+            order = match_contours(reference.contours, contours)
+            if order is not None and within_blocks(order, outline.blocks):
+                plan.order = order if order != list(range(len(order))) else None
+                contours = [outline.contours[k] for k in order]
+            else:
+                contours = None
+        for at, (contour, other) in enumerate(zip(contours or [], reference.contours)):
+            fix = contour_fix(other, contour)
+            if fix is not None and (fix[0] or fix[1]):
+                plan.contours.append((at, fix[0], fix[1], len(contour.nodes)))
+    plan.components = component_order(reference.components, outline.components)
+    if plan.components is not None:
+        plan.names = list(reference.components)
+    return plan
+
+
+def apply_plan(outline, plan):
+    """The Outline a FixPlan makes of a master's outline (what FontLab should read back)."""
+    contours = [outline.contours[k] for k in plan.order] if plan.order is not None else list(outline.contours)
+    for at, reverse, index, _ in plan.contours:
+        contour = reversed_contour(contours[at]) if reverse else contours[at]
+        contours[at] = rotated_contour(contour, index) if index else contour
+    components = [outline.components[k] for k in plan.components] if plan.components is not None else outline.components
+    return Outline(contours, components, outline.anchors, outline.blocks)
+
+
+def plan_steps(plan, reference_master):
+    """What a FixPlan does, in short phrases: "contours put in Regular's order", "contour 2 reversed,
+    its start point moved 1 node on"."""
+    steps = []
+    if plan.order is not None:
+        steps.append(u"contours put in %s's order" % reference_master)
+    for at, reverse, index, count in plan.contours:
+        moved = u"start point moved %s" % moved_text(signed_shift(index, count)) if index else u""
+        if reverse:
+            steps.append(u"contour %d reversed" % (at + 1) + (u", its " + moved if moved else u""))
+        else:
+            steps.append(u"contour %d's %s" % (at + 1, moved))
+    if plan.components is not None:
+        steps.append(u"components put in %s's order" % reference_master)
+    return steps
+
+
+def same_outline(one, other, tolerance=0.5):
+    """Whether two outlines have the same contours (open or closed, nodes, their types and places,
+    within tolerance units) and components, in the same order."""
+    if one is None or other is None or len(one.contours) != len(other.contours) or one.components != other.components:
+        return False
+    for a, b in zip(one.contours, other.contours):
+        if a.closed != b.closed or len(a.nodes) != len(b.nodes):
+            return False
+        for p, q in zip(a.nodes, b.nodes):
+            if u"%s" % p[2] != u"%s" % q[2] or abs(p[0] - q[0]) > tolerance or abs(p[1] - q[1]) > tolerance:
+                return False
+    return True
+
+
+FIX_WORDS = {"order": u"the contours' order", "direction": u"the direction", "start": u"the start point",
+             "components": u"the components' order"}
+DESIGNER_WORDS = {"missing": u"the missing layer (add it)", "contours": u"the contour count (add or remove contours)",
+                  "order": u"the contours' order (their shapes or node types do not allow it: reorder them by hand)",
+                  "open": u"the open contour (open or close it)", "nodes": u"the node count (add or remove nodes)",
+                  "types": u"the node types (make them match)",
+                  "direction": u"the direction (reversed, the node types still differ)",
+                  "start": u"the start point (it would fall on an off-curve node, or the contour is open)",
+                  "components": u"the components (add or remove them)", "anchors": u"the anchors (add or remove them)"}
+FIX_LABELS = {"all": u"Fixable", "some": u"Partly fixable", "none": u"Needs the designer"}
+
+
+def fix_state(problems):
+    """"all", "some", or "none": how many of a glyph's problems Font Check can fix."""
+    fixable = [f for f in problems if f.fixable]
+    return "none" if not fixable else "all" if len(fixable) == len(problems) else "some"
+
+
+def word_list(words):
+    """"a", "a and b", "a, b, and c"."""
+    if len(words) < 3:
+        return u" and ".join(words)
+    return u", ".join(words[:-1]) + u", and " + words[-1]
+
+
+def fix_sentence(problems):
+    """What Fix sets right of a glyph's problems and what needs the designer, in one sentence."""
+    fixes, left = [], []
+    for kind, _ in MASTER_KINDS:
+        if any(f.kind == kind and f.fixable for f in problems):
+            fixes.append(FIX_WORDS[kind])
+        if any(f.kind == kind and not f.fixable for f in problems):
+            left.append(DESIGNER_WORDS[kind])
+    if not fixes and not left:
+        return u""
+    if not left:
+        return u"Fix sets %s right." % word_list(fixes)
+    rest = u"%s %s the designer" % (word_list(left), u"needs" if len(left) == 1 else u"need")
+    if not fixes:
+        return u"Needs the designer: %s." % word_list(left)
+    return u"Fix sets %s right; %s." % (word_list(fixes), rest)
+
+
+# ---------------------------------------------------------------------------
+# Vertical metrics written: the fields of FontLab's font info (fgPackage.info) each suggestion sets
+# ---------------------------------------------------------------------------
+
+INFO_FIELDS = (("typo_ascender", "openTypeOS2TypoAscender"), ("typo_descender", "openTypeOS2TypoDescender"),
+               ("typo_line_gap", "openTypeOS2TypoLineGap"), ("hhea_ascender", "openTypeHheaAscender"),
+               ("hhea_descender", "openTypeHheaDescender"), ("hhea_line_gap", "openTypeHheaLineGap"),
+               ("win_ascent", "openTypeOS2WinAscent"), ("win_descent", "openTypeOS2WinDescent"))
+USE_TYPO_BIT = 7  # OS/2 fsSelection: Use Typo Metrics
+
+
+def metric_writes(suggestions):
+    """[Suggestion] of the suggested values that differ from the font's and can be written (font info
+    fields and Use Typo Metrics; the masters' own metrics are not among them)."""
+    fields = dict(INFO_FIELDS)
+    return [s for s in suggestions if s.value is not None and s.changes() and (s.key in fields or s.key == "use_typo")]
+
+
+def selection_with(bits, on, bit=USE_TYPO_BIT):
+    """OS/2 fsSelection's bits (a list of bit numbers, as FontLab keeps them) with bit set or cleared."""
+    found = set(int(b) for b in bits or [])
+    if on:
+        found.add(bit)
+    else:
+        found.discard(bit)
+    return sorted(found)
+
+
+def write_text(s):
+    """A value written, for the log: "Typo ascender 800 → 965"."""
+    return u"%s %s \N{RIGHTWARDS ARROW} %s" % (s.label, now_text(s), suggestion_text(s))
 
 
 # ---------------------------------------------------------------------------
@@ -1396,7 +1770,7 @@ def read_metrics(package):
 def read_outline(layer):
     """A layer's Outline: contours of its own shapes (their transforms applied), its components' glyph
     names, its anchors' names; None when it cannot be read."""
-    contours, components = [], []
+    contours, components, blocks = [], [], []
     try:
         shapes = list(layer.shapes)
     except Exception:
@@ -1418,6 +1792,7 @@ def read_outline(layer):
         except Exception:
             matrix = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
         a, b, c, d, dx, dy = matrix
+        held = 0
         for contour in shape.contours:
             if contour is None:  # FontLab lists an empty contour as None in some glyphs
                 continue
@@ -1430,7 +1805,153 @@ def read_outline(layer):
             except Exception:
                 closed = True
             contours.append(Contour(nodes, closed))
-    return Outline(contours, components, anchor_names(layer))
+            held += 1
+        blocks.append(held)
+    return Outline(contours, components, anchor_names(layer), blocks)
+
+
+# ---------------------------------------------------------------------------
+# FontLab: fixing the masters (proven live on 2026-11-11: flContour.reverse(), setStartPoint() with an
+# on-curve node's index, clone(), flShape.clearContours() and addContours(clones, True); not proven:
+# flLayer.reorderShapes(), used for the components' order, and flShapeData.id)
+# ---------------------------------------------------------------------------
+
+class FixError(Exception):
+    pass
+
+
+def is_component(shape):
+    try:
+        return bool(shape.isComponent)
+    except Exception:
+        return False
+
+
+def own_shapes(layer):
+    """[(shape, [its contours, None for an empty one])] of a layer's shapes that are not components,
+    in order (read_outline's)."""
+    return [(shape, list(shape.contours)) for shape in list(layer.shapes) if not is_component(shape)]
+
+
+def shape_ids(layer):
+    """The ids of the shape data of a layer's own shapes (two masters sharing one would change
+    together), as texts; empty when FontLab does not say."""
+    found = set()
+    try:
+        shapes = list(layer.shapes)
+    except Exception:
+        return found
+    for shape in shapes:
+        if is_component(shape):
+            continue
+        try:
+            ident = shape.shapeData.id
+            if ident:
+                found.add(u"%s" % ident)
+        except Exception:
+            pass
+    return found
+
+
+def shape_signature(shape):
+    """What tells a layer's shapes apart when their order is read back: a component's glyph and
+    offset, or a shape's contours' node counts."""
+    if is_component(shape):
+        try:
+            name = u"%s" % shape.shapeData.componentGlyph
+        except Exception:
+            name = u"?"
+        try:
+            t = shape.transform
+            offset = (round_units(t.dx()), round_units(t.dy()))
+        except Exception:
+            offset = None
+        return ("component", name, offset)
+    try:
+        return ("shape", tuple(len(c.nodes()) for c in shape.contours if c is not None))
+    except Exception:
+        return ("shape", None)
+
+
+def permutation_to(current, target):
+    """[the place in current of what goes at each place of target] (equal items taken in turn)."""
+    used, order = set(), []
+    for item in target:
+        k = next(k for k, other in enumerate(current) if other == item and k not in used)
+        used.add(k)
+        order.append(k)
+    return order
+
+
+def inverse(order):
+    found = [0] * len(order)
+    for at, k in enumerate(order):
+        found[k] = at
+    return found
+
+
+def reorder_components(layer, names):
+    """The layer's components put in the order of names (the reference's), its other shapes kept in
+    place, by flLayer.reorderShapes (unproven: its argument's meaning is read back, the indexes taken
+    either way, then the shapes themselves); FixError when the order did not change as wanted."""
+    signatures = [shape_signature(shape) for shape in list(layer.shapes)]
+    places = [at for at, s in enumerate(signatures) if s[0] == "component"]
+    order = component_order(list(names), [signatures[at][1] for at in places])
+    if order is None:
+        return
+    target = list(signatures)
+    for place, k in zip(places, order):
+        target[place] = signatures[places[k]]
+    for attempt in ("take", "put", "shapes"):
+        shapes = list(layer.shapes)
+        current = [shape_signature(shape) for shape in shapes]
+        if current == target:
+            return
+        try:
+            take = permutation_to(current, target)
+        except StopIteration:
+            raise FixError(u"FontLab changed the layer's shapes")
+        argument = take if attempt == "take" else inverse(take) if attempt == "put" else [shapes[k] for k in take]
+        try:
+            layer.reorderShapes(argument)
+        except Exception:
+            pass
+    if [shape_signature(shape) for shape in list(layer.shapes)] != target:
+        raise FixError(u"FontLab did not reorder the components")
+
+
+def apply_fix(layer, plan):
+    """A FixPlan carried out on a FontLab layer (FixError, or FontLab's own error, when a step
+    failed: the steps before it are done)."""
+    if plan.order is not None:
+        start = 0
+        for shape, contours in own_shapes(layer):
+            present = [c for c in contours if c is not None]
+            wanted = [plan.order[k] - start for k in range(start, start + len(present))]
+            if any(not 0 <= k < len(present) for k in wanted):
+                raise FixError(u"its contours would move from one shape to another")
+            if wanted != list(range(len(present))):
+                if len(present) != len(contours):
+                    raise FixError(u"a shape lists an empty contour")
+                clones = [present[k].clone() for k in wanted]
+                shape.clearContours()
+                shape.addContours(clones, True)
+            start += len(present)
+    if plan.contours:
+        flat = [c for _, contours in own_shapes(layer) for c in contours if c is not None]
+        for at, reverse, index, _ in plan.contours:
+            contour = flat[at]
+            if reverse:
+                contour.reverse()
+            if index and contour.setStartPoint(index) is False:
+                raise FixError(u"FontLab did not move the start point of contour %d" % (at + 1))
+    if plan.components is not None:
+        reorder_components(layer, plan.names)
+    for shape, _ in own_shapes(layer):
+        try:
+            shape.update()
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -1449,7 +1970,8 @@ def _prop(obj, name):
 
 
 HELP = u"""<b>FreeLab Font Check</b><br>
-Three views of the current font. Nothing in the font changes.<br><br>
+Three views of the current font. Nothing in the font changes until you click <i>Write suggested
+values</i> or <i>Fix</i>; each is one step of <i>Edit &gt; Undo</i>.<br><br>
 <b>Coverage</b>: the scripts the font has, each with a bar (covered, within reach, missed) from
 Hyperglot's orthographies; click one to see only its languages. At the left, the characters to add,
 ranked by the languages each completes on its own: check some, and the line above the list says how
@@ -1459,11 +1981,15 @@ A letter the font lacks as one character counts when its anchors compose it from
 mark (the language says <i>composed</i>).<br>
 <b>Vertical metrics</b>: the font's tallest and deepest glyphs drawn on its line metrics (winAscent,
 typo and hhea, cap height, x-height), the ink Windows clips in red, the suggested values dashed; the
-values now and suggested; the checks Google Fonts' guidance asks for; the glyphs Windows clips. FreeLab
-does not write the values: set them in <i>File &gt; Font Info</i>.<br>
+values now and suggested; the checks Google Fonts' guidance asks for; the glyphs Windows clips.
+<i>Write suggested values</i> sets the font's typo, hhea, and win values and <i>Use Typo Metrics</i>
+(those that differ); the masters' ascender, descender, x-height, and cap height, which FontLab draws
+with, are left as they are.<br>
 <b>Masters</b>: the glyphs that keep the masters from interpolating, worst first, a mark per master;
 the selected glyph drawn in the master compared with and in another, the contour at fault highlighted
-and its nodes numbered.<br><br>
+and its nodes numbered. <i>Fix</i> sets right, in the other masters, the contours' order, directions,
+start points, and the components' order; contour and node counts, node types, missing layers, and
+anchors need the designer. The master compared with never changes.<br><br>
 Each view is checked as its tab is first shown, and again after an undo or an edit in FontLab. Click
 this help's <i>?</i> button, then any control, for what it does."""
 
@@ -2154,6 +2680,8 @@ class FontCheckDialog(object):
         self.check_rows, self.clipped = [], []
         self.capitals, self.letters = True, None
         self.problems, self.glyph_names, self.compare_masters = [], [], []
+        self.fixable_names = set()  # the glyphs listed with problems Fix sets right
+        self.fix_unchecked, self.fix_basis = set(), None  # rows unchecked by hand (for this font and reference)
         self.pictures = {}  # (kind, key): an icon drawn (the characters to add)
         self.drawing_failed = False
         self.filters, self.redraws = [], {}
@@ -2411,10 +2939,23 @@ class FontCheckDialog(object):
         self.values_tree.setWhatsThis(u"The font's line metrics now and as suggested (in bold where they differ).")
         side.addWidget(self.values_tree)
         row = QtGui.QHBoxLayout()
+        self.write_button = QtGui.QPushButton("Write suggested values")
+        self.write_button.setWhatsThis(u"Writes the suggested values that differ into the font's info: the typo, hhea, "
+                                       u"and win values and <i>Use Typo Metrics</i>, for the whole font, then checks again; "
+                                       u"the log lists each value, old and new, and <i>Put back old values</i> undoes it "
+                                       u"(FontLab's <i>Edit &gt; Undo</i> does not cover the font info). "
+                                       u"The masters' ascender, descender, x-height, and cap height (the metrics FontLab "
+                                       u"draws with) are not changed.")
         self.copy_button = QtGui.QPushButton("Copy suggested values")
-        self.copy_button.setWhatsThis(u"Copies the suggested values as text, to set them in <i>Font Info</i>.")
+        self.copy_button.setWhatsThis(u"Copies the suggested values as text.")
         self.font_info_button = QtGui.QPushButton("Open Font Info")
         self.font_info_button.setWhatsThis(u"Opens FontLab's <i>Font Info</i>, where these values are set.")
+        row.addWidget(self.write_button)
+        self.put_back_button = QtGui.QPushButton("Put back old values")
+        self.put_back_button.setWhatsThis(u"Puts the font info back as it was before <i>Write suggested values</i>: "
+                                          u"FontLab's <i>Edit &gt; Undo</i> does not cover the font info.")
+        self.put_back_button.setEnabled(False)
+        row.addWidget(self.put_back_button)
         row.addWidget(self.copy_button)
         row.addWidget(self.font_info_button)
         row.addStretch(1)
@@ -2481,6 +3022,8 @@ class FontCheckDialog(object):
         self.metrics_button.connect("clicked()", self.check_vertical)
         self.mode_new.connect("toggled(bool)", lambda on: self.suggest())
         self.share.connect("valueChanged(int)", lambda value: self.suggest())
+        self.write_button.connect("clicked()", self.write_suggestions)
+        self.put_back_button.connect("clicked()", self.put_back_values)
         self.copy_button.connect("clicked()", self.copy_suggestions)
         self.font_info_button.connect("clicked()", self.open_font_info)
         self.checks_tree.connect("itemSelectionChanged()", self.check_selected)
@@ -2514,13 +3057,33 @@ class FontCheckDialog(object):
         chips.addStretch(1)
         tab.layout.addLayout(chips)
         halves = QtGui.QSplitter(QtCore.Qt.Horizontal)
-        self.glyph_tree = self.tree(("Glyph", "Masters"), icon=(THUMB_SIZE, THUMB_SIZE))
+        left = QtGui.QWidget()
+        box = QtGui.QVBoxLayout(left)
+        box.setContentsMargins(0, 0, 4, 0)
+        self.glyph_tree = self.tree(("Glyph", "Masters", "Fix"), icon=(THUMB_SIZE, THUMB_SIZE))
         self.glyph_tree.setWhatsThis(u"The glyphs that keep the masters from interpolating, the worst first, with a "
                                      u"mark per master in order: a ring for the master compared with, red where the "
                                      u"glyph cannot interpolate (a dashed square: no layer), amber where it "
                                      u"interpolates oddly (direction, start point, components, anchors), a faint dot "
-                                     u"where all is well. Right-click to flag a glyph.")
-        halves.addWidget(self.glyph_tree)
+                                     u"where all is well. <i>Fix</i> says whether Font Check can set its problems "
+                                     u"right (checked to start) or they need the designer. Right-click to flag a glyph.")
+        box.addWidget(self.glyph_tree, 1)
+        row = QtGui.QHBoxLayout()
+        self.fix_checked_button = QtGui.QPushButton("Fix checked")
+        self.fix_checked_button.setWhatsThis(u"Sets right, in the checked glyphs, what needs no designer: the contours' "
+                                             u"order, directions, start points, and the components' order, in every "
+                                             u"master but the one compared with (which never changes). One step of "
+                                             u"<i>Edit &gt; Undo</i>; the masters are compared again and the log says "
+                                             u"what was fixed. Contour and node counts, node types, missing layers, and "
+                                             u"anchors are left to you.")
+        self.fix_this_button = QtGui.QPushButton("Fix this")
+        self.fix_this_button.setWhatsThis(u"Sets right what needs no designer in the selected glyph, as <i>Fix checked</i> "
+                                          u"does.")
+        row.addWidget(self.fix_checked_button)
+        row.addWidget(self.fix_this_button)
+        row.addStretch(1)
+        box.addLayout(row)
+        halves.addWidget(left)
         right = QtGui.QWidget()
         box = QtGui.QVBoxLayout(right)
         box.setContentsMargins(4, 0, 0, 0)
@@ -2547,6 +3110,9 @@ class FontCheckDialog(object):
         tab.layout.addWidget(halves, 1)
         self.masters_button.connect("clicked()", self.check_masters)
         self.glyph_tree.connect("itemSelectionChanged()", self.glyph_selected)
+        self.glyph_tree.connect("itemChanged(QTreeWidgetItem*,int)", lambda item, column: self.fix_checks_changed())
+        self.fix_checked_button.connect("clicked()", self.fix_checked)
+        self.fix_this_button.connect("clicked()", self.fix_selected)
         self.glyph_tree.connect("itemDoubleClicked(QTreeWidgetItem*,int)", lambda item, column: self.show_in_glyph_window())
         self.compare_master.connect("currentIndexChanged(int)", lambda index: self.draw_comparison())
         self.watch_resize(self.comparison, "comparison")
@@ -2700,6 +3266,21 @@ class FontCheckDialog(object):
         ak.enable(self.copy_chars_button, bool(chosen))
         self.copy_chars_button.setText(u"Copy %s" % counted(len(chosen), u"character") if chosen else u"Copy characters")
         ak.enable(self.copy_button, bool(self.suggestions))
+        writes = metric_writes(self.suggestions) if self.package is not None else []
+        ak.enable(self.write_button, bool(writes) and not self.busy)
+        self.write_button.setText(u"Write %s" % counted(len(writes), u"suggested value") if writes
+                                  else u"Write suggested values")
+        self.write_button.setToolTip(u"" if writes else u"The font's values are as suggested." if self.suggestions
+                                     else u"Check the vertical metrics first.")
+        fixing = self.checked_fix_glyphs() if self.package is not None else []
+        ak.enable(self.fix_checked_button, bool(fixing) and not self.busy)
+        self.fix_checked_button.setText(u"Fix %s" % counted(len(fixing), u"checked glyph") if fixing else u"Fix checked")
+        self.fix_checked_button.setToolTip(u"" if fixing else u"Check glyphs Font Check can fix (their row says so)."
+                                           if self.fixable_names else u"No glyph listed has a problem Font Check can fix.")
+        name = self.selected_glyph() if self.package is not None else None
+        ak.enable(self.fix_this_button, name in self.fixable_names and not self.busy)
+        self.fix_this_button.setToolTip(u"" if name in self.fixable_names else u"Select a glyph first." if name is None
+                                        else u"This glyph's problems need the designer.")
         ak.enable(self.font_info_button, self.package is not None)
         ak.enable(self.glyph_window_button, self.package is not None and bool(self.glyph_window_text()))
 
@@ -3178,8 +3759,11 @@ class FontCheckDialog(object):
         warnings = sum(1 for line in self.check_rows if line.state == "warn")
         text = u"%s clipped on Windows, %s, across %s." % (
             b(counted(clipped, u"glyph")), b(counted(warnings, u"warning")), b(counted(len(self.master_names()), u"master")))
-        if any(s.changes() for s in self.suggestions):
-            text += u" FreeLab does not write the suggested values: set them in %s." % ak.i("File > Font Info")
+        writes = metric_writes(self.suggestions)
+        if writes:
+            text += u" %s %s the font: %s writes %s (one step of %s)." % (
+                b(counted(len(writes), u"suggested value")), u"differs from" if len(writes) == 1 else u"differ from",
+                ak.i("Write suggested values"), u"it" if len(writes) == 1 else u"them", ak.i("Edit > Undo"))
         else:
             text += u" The font's values are as suggested."
         tab.status.setText(text)
@@ -3386,6 +3970,122 @@ class FontCheckDialog(object):
         except Exception as exc:
             self.log.add(u"Could not copy: %s" % self.ak.html(exc), "error")
 
+    def same_font(self):
+        """True while the font checked is still the current one; else the view is checked again."""
+        current = self.current_font()
+        if current is not None and self.package is not None and self.ak.font_key(current) == self.ak.font_key(self.package):
+            return True
+        self.log.add(u"The font changed since the check: checked again. Nothing was written.", "warning")
+        self.stale = set(TABS)
+        self.check(self.current_key())
+        return False
+
+    def write_suggestions(self):
+        """The suggested values that differ written into the font info (fgPackage.info: font-wide), the old
+        ones kept for Put back old values (FontLab's History does not cover the font info: found live); the
+        view checked again."""
+        b = self.ak.b
+        if self.busy or self.package is None or self.metric_values is None or not self.same_font():
+            return
+        writes = metric_writes(self.suggestions)
+        if not writes:
+            self.log.add(u"The font's values are as suggested: nothing to write.")
+            return
+        fields = dict(INFO_FIELDS)
+        done, failed = [], []
+        self.busy = True
+        try:
+            info = self.package.fgPackage.info
+            old = {}  # the values before, to put back (FontLab's History does not cover the font info)
+            for key, field in INFO_FIELDS:
+                try:
+                    old[key] = getattr(info, field)
+                except Exception:
+                    pass
+            try:
+                old["use_typo"] = list(info.openTypeOS2Selection or [])
+            except Exception:
+                pass
+            for s in writes:
+                try:
+                    if s.key == "use_typo":
+                        info.openTypeOS2Selection = selection_with(info.openTypeOS2Selection, bool(s.value))
+                    else:
+                        setattr(info, fields[s.key], float(s.value))
+                except Exception as exc:
+                    failed.append(u"%s (%s)" % (s.label, exc))
+                    continue
+                done.append(s)
+            info = self.package.fgPackage.info  # read again: what FontLab kept
+            for s in list(done):
+                try:
+                    if s.key == "use_typo":
+                        now = USE_TYPO_BIT in [int(bit) for bit in (info.openTypeOS2Selection or [])]
+                        kept = now == bool(s.value)
+                    else:
+                        now = getattr(info, fields[s.key])
+                        kept = now is not None and round_units(float(now)) == round_units(s.value)
+                except Exception as exc:
+                    now, kept = exc, False
+                if not kept:
+                    done.remove(s)
+                    failed.append(u"%s (FontLab kept %s)" % (s.label, u"nothing" if now is None else now))
+        except Exception as exc:
+            failed.append(u"%s" % exc)
+        finally:
+            self.busy = False
+        if done or failed:
+            self.ak.notify_changed(self.fontlab, self.package, u"FreeLab Font Check: vertical metrics")
+        if done:
+            self.put_back = (self.ak.font_key(self.package), old, [s.key for s in done])
+            self.log.add(u"Wrote %s into the font info: %s. FontLab's <i>Edit &gt; Undo</i> does not take the font "
+                         u"info back: <i>Put back old values</i> does." % (
+                             b(counted(len(done), u"value")), self.ak.html(u"; ".join(write_text(s) for s in done))), "done")
+        self.update_put_back()
+        if failed:
+            self.log.add(u"Not written: %s." % self.ak.html(u"; ".join(failed)), "error")
+        self.check_vertical()
+
+    def update_put_back(self):
+        """Put back old values: clickable while the font written to is the one checked."""
+        held = getattr(self, "put_back", None)
+        self.ak.enable(self.put_back_button, bool(held) and self.package is not None
+                       and self.ak.font_key(self.package) == held[0])
+
+    def put_back_values(self):
+        """The font info as it was before the last write (FontLab's History does not cover it)."""
+        held = getattr(self, "put_back", None)
+        if not held or self.package is None or self.ak.font_key(self.package) != held[0]:
+            return
+        _, old, keys = held
+        fields = dict(INFO_FIELDS)
+        info = self.package.fgPackage.info
+        restored, failed = [], []
+        for key in keys:
+            if key not in old:
+                failed.append(key)
+                continue
+            try:
+                if key == "use_typo":
+                    info.openTypeOS2Selection = old[key]
+                elif old[key] is not None:
+                    setattr(info, fields[key], float(old[key]))
+                else:
+                    failed.append(key)  # (an unset value cannot be unset again: left as written)
+                    continue
+                restored.append(key)
+            except Exception as exc:
+                failed.append(u"%s (%s)" % (key, exc))
+        self.put_back = None
+        self.ak.notify_changed(self.fontlab, self.package, u"FreeLab Font Check: vertical metrics put back")
+        b = self.ak.b
+        if restored:
+            self.log.add(u"Put back %s as they were." % b(counted(len(restored), u"value")), "done")
+        if failed:
+            self.log.add(u"Not put back: %s." % self.ak.html(u", ".join(failed)), "warning")
+        self.check_vertical()
+        self.update_put_back()
+
     def open_font_info(self):
         try:
             self.fontlab.flItems.requestFontInfoDlg()
@@ -3412,6 +4112,9 @@ class FontCheckDialog(object):
             self.checked_now("masters")
             return
         reference = self.reference_name()
+        basis = (ak.font_key(self.package), reference)
+        if basis != self.fix_basis:  # another font or reference: every fixable row checked again
+            self.fix_basis, self.fix_unchecked = basis, set()
         order = [reference] + [m for m in masters if m != reference]
         self.busy = True
         found, unread = [], []
@@ -3472,8 +4175,10 @@ class FontCheckDialog(object):
         reference = self.reference_name()
         rows = glyph_problems(self.problems, self.kinds_on())
         self.glyph_names = [name for name, _ in rows]
+        self.fixable_names = set(name for name, problems in rows if fix_state(problems) != "none")
         icon = (max(THUMB_SIZE, (MARK_SIZE + 4) * len(masters)), THUMB_SIZE)
         tree.setIconSize(QtCore.QSize(icon[0], icon[1]))
+        quiet = QtGui.QBrush(faded(colors["text"], QUIET_ALPHA))
         self.filling = True
         tree.setUpdatesEnabled(False)
         try:
@@ -3482,7 +4187,13 @@ class FontCheckDialog(object):
                 states = master_states(problems, masters, reference)
                 tip = u"\n".join(u"%s: %s" % (master, problem_sentence([f for f in problems if f.master == master]))
                                  for master in masters if any(f.master == master for f in problems))
-                item = self.item((name, u""), name, tip)
+                state = fix_state(problems)
+                item = self.item((name, u"", FIX_LABELS[state]), name, tip + u"\n" + fix_sentence(problems))
+                if state != "none":
+                    item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsUserCheckable)
+                    item.setCheckState(0, QtCore.Qt.Unchecked if name in self.fix_unchecked else QtCore.Qt.Checked)
+                else:
+                    item.setForeground(2, quiet)
                 for master in [reference] + masters:
                     layer = self.layer(name, master)
                     if layer is not None:
@@ -3490,7 +4201,7 @@ class FontCheckDialog(object):
                         break
                 item.setIcon(1, self.icon(marks_pixmap, states, colors, icon))
                 tree.addTopLevelItem(item)
-            self.fit_columns(tree, (COLUMN_MAX,))
+            self.fit_columns(tree, (COLUMN_MAX, None))
         finally:
             tree.setUpdatesEnabled(True)
             self.filling = False
@@ -3571,13 +4282,133 @@ class FontCheckDialog(object):
             self.comparison.clear()
             self.log.add(u"The comparison could not be drawn: %s" % self.ak.html(exc), "warning")
         if problems:
-            self.problem_label.setText(u"%s in %s: %s" % (self.ak.b(name), self.ak.b(master),
-                                                          self.ak.html(problem_sentence(problems))))
+            self.problem_label.setText(u"%s in %s: %s %s" % (self.ak.b(name), self.ak.b(master),
+                                                             self.ak.html(problem_sentence(problems)),
+                                                             self.ak.html(fix_sentence(problems))))
         elif master:
             self.problem_label.setText(u"%s in %s interpolates with %s." % (self.ak.b(name), self.ak.b(master),
                                                                            self.ak.b(reference)))
         else:
             self.problem_label.setText(u"")
+
+    def fix_checks_changed(self):
+        """A row's check clicked: kept by name (the list is filled again as chips are toggled)."""
+        QtCore, QtGui = _qt()
+        if self.filling:
+            return
+        for item in self.top_items(self.glyph_tree):
+            name = self.data_of(item, None)
+            name = u"%s" % name if name is not None else None
+            if name in self.fixable_names:
+                if item.checkState(0) == QtCore.Qt.Checked:
+                    self.fix_unchecked.discard(name)
+                else:
+                    self.fix_unchecked.add(name)
+        self.update_buttons()
+
+    def checked_fix_glyphs(self):
+        """The glyphs listed, fixable, and checked."""
+        QtCore, QtGui = _qt()
+        found = []
+        for item in self.top_items(self.glyph_tree):
+            name = self.data_of(item, None)
+            name = u"%s" % name if name is not None else None
+            if name in self.fixable_names and item.checkState(0) == QtCore.Qt.Checked:
+                found.append(name)
+        return found
+
+    def fix_checked(self):
+        self.fix_glyphs(self.checked_fix_glyphs())
+
+    def fix_selected(self):
+        name = self.selected_glyph()
+        if name in self.fixable_names:
+            self.fix_glyphs([name])
+
+    def fix_glyphs(self, names):
+        """What needs no designer set right in the glyphs named, in every master but the reference
+        (which never changes), as one step of FontLab's History; the masters compared again."""
+        ak, b = self.ak, self.ak.b
+        if self.busy or not names or self.package is None or not self.same_font():
+            return
+        reference = self.reference_name()
+        masters = [m for m in self.master_names() if m != reference]
+        before = set((f.glyph, f.master, f.kind, f.contour) for f in self.problems)
+        done, failed, touched = [], [], []
+        self.busy = True
+        try:
+            for name in names:
+                glyph = self.package.findName(name)
+                reference_layer = self.layer(name, reference)
+                original = read_outline(reference_layer) if reference_layer is not None else None
+                if glyph is None or original is None:
+                    failed.append(u"%s: no layer in %s to match" % (name, reference))
+                    continue
+                shared = shape_ids(reference_layer)
+                for master in masters:
+                    layer = self.layer(name, master)
+                    outline = read_outline(layer) if layer is not None else None
+                    if outline is None:
+                        continue
+                    plan = plan_fixes(original, outline)
+                    if plan.empty():
+                        continue
+                    if shared & shape_ids(layer):
+                        failed.append(u"%s in %s: its shapes are shared with %s, which would change too" % (
+                            name, master, reference))
+                        continue
+                    if glyph not in touched:
+                        touched.append(glyph)
+                    try:
+                        apply_fix(layer, plan)
+                    except Exception as exc:
+                        failed.append(u"%s in %s: %s" % (name, master, exc))
+                        continue
+                    if same_outline(read_outline(layer), apply_plan(outline, plan)):
+                        done.append(u"%s in %s (%s)" % (name, master, u"; ".join(plan_steps(plan, reference))))
+                    else:
+                        failed.append(u"%s in %s: it did not read back as planned (%s), look at it" % (
+                            name, master, u"; ".join(plan_steps(plan, reference))))
+                if not same_outline(read_outline(reference_layer), original):
+                    failed.append(u"%s in %s: the master compared with changed too (a shared element?)" % (name, reference))
+        except Exception as exc:
+            failed.append(u"%s" % exc)
+        finally:
+            self.busy = False
+        if touched:
+            ak.notify_changed(self.fontlab, self.package, u"FreeLab Font Check: masters", touched)
+        undo = u" <i>Edit &gt; Undo</i> takes %s back." % (u"it" if len(touched) == 1 else u"them") if touched else u""
+        if done:
+            shown = done[:20] + ([u"%d more" % (len(done) - 20)] if len(done) > 20 else [])
+            self.log.add(u"Fixed %s: %s.%s" % (b(counted(len(done), u"glyph layer")), ak.html(u"; ".join(shown)), undo),
+                         "done")
+        if failed:
+            self.log.add(u"Not fixed: %s.%s" % (ak.html(u"; ".join(failed[:20])), u"" if done else undo), "error")
+        if not done and not failed:
+            self.log.add(u"Nothing to fix: the masters already match where Font Check can set them right.")
+        selected = self.selected_glyph()
+        self.stale.add("metrics")
+        self.check_masters()
+        after = [f for f in self.problems if (f.glyph, f.master, f.kind, f.contour) not in before]
+        elsewhere = sorted(set(f.glyph for f in after if f.glyph not in names))
+        if elsewhere:
+            self.log.add(u"New problems in %s since the fix (a shared element changed with it?): %s." % (
+                counted(len(elsewhere), u"other glyph"), ak.html(u", ".join(elsewhere[:20]))), "warning")
+        left = sorted(set(f.glyph for f in self.problems if f.glyph in names))
+        designer = [g for g in left if g not in self.fixable_names]
+        if designer:
+            self.log.add(u"%s still %s problems that need the designer: %s." % (
+                b(counted(len(designer), u"glyph")), u"has" if len(designer) == 1 else u"have",
+                ak.html(u", ".join(designer[:20]))))
+        unfixed = [g for g in left if g in self.fixable_names]
+        if unfixed:
+            self.log.add(u"%s still %s problems Fix sets right: %s. Look at %s in a <i>Glyph</i> window." % (
+                b(counted(len(unfixed), u"glyph")), u"has" if len(unfixed) == 1 else u"have",
+                ak.html(u", ".join(unfixed[:20])), u"it" if len(unfixed) == 1 else u"them"), "warning")
+        for item in self.top_items(self.glyph_tree):
+            if selected is not None and u"%s" % self.data_of(item, u"") == selected:
+                self.glyph_tree.setCurrentItem(item)
+                break
 
     # -- the Glyph window --------------------------------------------------------
 

@@ -45,6 +45,46 @@ The *Forms* tab lists one row per feature the font's glyph names call for, with 
 - **ss01** to **ss20**, **cv01** to **cv99**: one feature per suffix, its name written as `featureNames { name "..."; };` (a character variant's as `cvParameters`), first in the feature. The name is suggested from what the set changes and can be edited in the feature's row: *Single-story a* where the outlines tell (an *a* whose counter reaches near its top is single-story, a *g* of three contours double-story; read from the contours' boxes in the current master), else *Alternate a and g*, *Alternate figures*, *Alternate capitals*, or *Alternate A, E, F, and others*. A name the font's own code gives the set is kept and shown, not edited.
 - **aalt** (Access All Alternates): what InDesign and Illustrator offer as a selected character's alternates, in place and in their *Glyphs* panel. It refers to every feature with one-for-one alternates (`feature case;`, `feature ss01;`, and the like: case, small caps, figures, superiors and inferiors, salt, swash, titling, the sets), only while it has code, and offers each ASCII character the font draws a look-alike spacing accent for (~ and ˜, ^ and ˆ, ` and ˋ, " and ˝, ' and ʹ) as the other's alternate: the character typed stays, so a search still finds it. Written, aalt is moved first among the font's features (the compiler takes it only there; a feature FontLab adds goes last).
 
+### Figure forms to build
+
+Under the forms, *Figure forms to build* lists what the font lacks for those features, in sections (click a section's arrow for its glyphs, each drawn beside its figure as it would be built):
+
+- **Numerators** and **denominators**: each figure without a *.numr* (or *.numerator*) or *.dnom* (or *.denominator*) form.
+- **Superiors** and **inferiors**: each figure without a *.sups* or *.subs* form and without the Unicode character `sups` or `subs` takes instead.
+- **Superscript figures** (U+2070, U+00B9, U+00B2, U+00B3, U+2074 to U+2079) and **subscript figures** (U+2080 to U+2089) the font does not encode.
+- **Ordinal indicators**: *ª* and *º*, where the font has *a* or *o* but not them.
+
+Names follow the font's: the suffix most of its figures use for the set (*one.numerator* in the font: *two.numerator*), and its names for the Unicode figures (*onesuperior*: *foursuperior*, and *fourinferior*); else *.numr*, *.dnom*, *.sups*, *.subs*, and *uniXXXX*, and *ordfeminine* and *ordmasculine*. A name a glyph without the code point already has is not built beside it.
+
+Each is made of components:
+
+- **Scaled**: the figure (its lining form where the default figures are oldstyle; *a* or *o* for an ordinal indicator), scaled, raised or lowered to its set's baseline, and centered in a width a little wider than the scaled figure's.
+- **Copied**: a Unicode superscript or subscript figure is its set's form of the figure (*uni00B2* is *two.sups*), where the font has it or it is checked to be built too.
+- **Moved**: where the font has a whole drawn set (all ten figures), a set it lacks is that set moved, unscaled, to its own baseline: drawn small figures beat scaled ones.
+
+The settings row shows and changes one set's scale (of the figure's height), baseline (where the scaled figure's baseline goes, in font units), and width (of the scaled figure's advance); clicking a row picks its set, and *Suggested* puts the set's settings back. Changing the scale of the numerators or of the ordinal indicators keeps their top where it is. The first settings are the font's own where it has drawn forms of the set (the medians of their scale, baseline, and width); a set it has none of takes the size of its other small figures, else the corpus's; and is placed as the corpus places it: a numerator's top at the figures' top, a denominator on the baseline, a superior's baseline at 0.51 of the cap height, an inferior's at −0.17, an ordinal indicator's top at 1.01 of the cap height (or at the font's other indicator's top). Cap height is the current master's.
+
+*Build checked glyphs* (*Build 12 checked glyphs*: the count of the checked rows that can be built) adds them at the end of the font in every master, as one step of FontLab's History: *Edit > Undo* takes them back. Each glyph's code point is set once its layers are made. Placements come from the current master's measures; widths from each master's own figures. The font is then read again, and the forms above take the new glyphs (a feature that was not there, such as `sups`, now has its row): check it and write the code.
+
+Scaling thins strokes: a figure at 59% has stems 59% as thick as the figure's, where the corpus's drawn small figures have ink about 7% wider than scaling gives. FreeLab does not compensate the weight; a built form is a start to draw over, and the window says so.
+
+The settings come from *features/train/figure_forms.py*, which measures the small figures of the open-licensed fonts in *%LOCALAPPDATA%\FreeLab\corpus* (182 families with lining default figures; 6 with oldstyle defaults left out). Medians, with the quartiles:
+
+| Set | Families | Scale | Baseline (of cap height) | Top (of cap height) | Advance over the scaled figure's |
+| --- | --- | --- | --- | --- | --- |
+| *.numr* | 49 | 0.57 (0.53–0.61) | 0.45 (0.40–0.48) | 1.01 (1.00–1.02) | 1.12 (1.05–1.19) |
+| *.dnom* | 49 | 0.57 (0.53–0.61) | 0.00 (−0.01–0.00) | 0.54 (0.53–0.61) | 1.12 (1.04–1.19) |
+| *.sups* | 68 | 0.59 (0.53–0.62) | 0.51 (0.45–0.59) | 1.11 (1.01–1.16) | 1.12 (1.05–1.17) |
+| *.subs* | 63 | 0.59 (0.53–0.62) | −0.17 (−0.23–−0.13) | 0.42 (0.36–0.51) | 1.11 (1.04–1.16) |
+| *.sinf* | 41 | 0.53 (0.53–0.60) | −0.15 (−0.22–−0.13) | 0.42 (0.33–0.51) | 1.12 (1.09–1.18) |
+| Superscript figures | 143 | 0.59 (0.53–0.63) | 0.49 (0.41–0.57) | 1.03 (1.00–1.16) | 1.13 (1.06–1.20) |
+| Subscript figures | 77 | 0.60 (0.53–0.61) | −0.17 (−0.24–−0.13) | 0.41 (0.35–0.50) | 1.11 (1.04–1.17) |
+| *ª*, *º* (their letter) | 164 | 0.66 of *a*, *o* (0.61–0.70) | 0.54 (0.50–0.57) | 1.01 (1.00–1.03) | 1.07 (1.03–1.13) |
+
+Their advance is 0.63 of the figure's; their ink is 1.07 times as wide as the scaled figure's (1.03 for the ordinal indicators). In 5 of the 49 families the numerators are the superior glyphs.
+
+Taking the small figures out of the 36 corpus families with all ten *.numr* and planning them again from the corpus settings, the planned glyphs land within a median of 0.007 of the cap height of the drawn numerators' tops and 0.003 of the drawn denominators' bottoms (355 glyphs each); their advance within 8% of the drawn one's; their left side bearing 0.02 to 0.03 of the cap height larger (the drawn ones are wider). The few superiors among those families sit higher and smaller than most (0.10 of the cap height above the planned ones): the settings row is there for such a font.
+
 ### What starts checked
 
 Every feature starts checked, but:
@@ -71,4 +111,5 @@ A survey of the glyph names of 400 open-licensed families (*%LOCALAPPDATA%\FreeL
 - FreeLab's block goes at the end of a feature (first, for a set's name). Where the feature's own code sets a language (`language TRK;`) before it, the block would apply to that language only: the row says so.
 - `frac` turns every figure of the selected text into a numerator until the bar: in *1 1/2*, select only *1/2*.
 - `aalt` is not updated with the new forms.
+- Built figure forms are scaled outlines, not drawings: their strokes are thinner than the figures', and nothing compensates the weight. Placements are measured in the current master and used in every master. Superscript and subscript signs (⁺, ₋), letters (ⁿ, ₐ), and the bar under some ordinal indicators are not built.
 - Where FontLab cannot write the prefix from a script, `locl` is not written (its languages would lose the font's other features), and the log gives the lines to add to the prefix by hand. Writing the prefix uses `set_prefix`, which mirrors the proven `get_prefix` but has not yet been tried in FontLab.

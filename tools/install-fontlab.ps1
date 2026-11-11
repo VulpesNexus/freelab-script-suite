@@ -47,6 +47,8 @@ $files = @(
     @{ From = 'kerning\freelab_auto_kerning.py'; Name = 'freelab_auto_kerning.py' },
     @{ From = 'kerning\freelab_kerning_check.py'; Name = 'freelab_kerning_check.py' },
     @{ From = 'checks\freelab_font_check.py'; Name = 'freelab_font_check.py' },
+    @{ From = 'compare\freelab_font_compare.py'; Name = 'freelab_font_compare.py' },
+    @{ From = 'proof\freelab_proof.py'; Name = 'freelab_proof.py' },
     @{ From = 'checks\language_coverage.json'; Name = 'language_coverage.json' },
     @{ From = 'checks\language_coverage_LICENSE'; Name = 'language_coverage_LICENSE' },
     @{ From = 'spacing\freelab_auto_spacing.py'; Name = 'freelab_auto_spacing.py' },

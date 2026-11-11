@@ -25,11 +25,12 @@ def language(base, auxiliary=u"", marks=u"", script=u"Latin", name=u"Test", spea
 
 def font(codes, anchors=None):
     """A font of the code points; anchors {code: [anchor names]} put marks on letters."""
-    attaches = None
-    if anchors is not None:
-        def attaches(base, mark):
-            wanted = set(name[1:] for name in anchors.get(mark, []) if name.startswith(u"_"))
-            return bool(wanted & set(anchors.get(base, [])))
+    if anchors is None:
+        return fc.FontCharacters(codes, None)
+
+    def attaches(base, mark):
+        wanted = set(name[1:] for name in anchors.get(mark, []) if name.startswith(u"_"))
+        return bool(wanted & set(anchors.get(base, [])))
     return fc.FontCharacters(codes, attaches)
 
 
@@ -514,6 +515,191 @@ class MasterRowsTests(unittest.TestCase):
         self.assertEqual(fc.problem_sentence(problems), u"Contour 2: 12 nodes, 14 in Light.")
 
 
+def curve(points_and_types):
+    return fc.Contour([(x, y, t) for x, y, t in points_and_types])
+
+
+# An o: its outer contour counterclockwise, on-curve extremes and off-curve handles between them; its
+# counter clockwise. A bowl with a straight side (types not symmetric: only one start matches).
+O_OUTER = [(250, 0, u"on"), (400, 0, u"off"), (500, 100, u"off"), (500, 250, u"on"), (500, 400, u"off"),
+           (400, 500, u"off"), (250, 500, u"on"), (100, 500, u"off"), (0, 400, u"off"), (0, 250, u"on"),
+           (0, 100, u"off"), (100, 0, u"off")]
+O_INNER = [(250, 100, u"on"), (150, 100, u"off"), (100, 150, u"off"), (100, 250, u"on"), (100, 350, u"off"),
+           (150, 400, u"off"), (250, 400, u"on"), (350, 400, u"off"), (400, 350, u"off"), (400, 250, u"on"),
+           (400, 150, u"off"), (350, 100, u"off")]
+D_BOWL = [(0, 0, u"on"), (300, 0, u"on"), (450, 0, u"off"), (550, 150, u"off"), (550, 350, u"on"),
+          (550, 550, u"off"), (450, 700, u"off"), (300, 700, u"on"), (0, 700, u"on")]
+DOT = [(200, 600, u"on"), (300, 600, u"on"), (300, 700, u"on")]
+
+
+def bolder(nodes, dx=30, dy=10):
+    """A heavier master: the same structure, points moved apart from the middle."""
+    return [(x + (dx if x > 250 else -dx), y + (dy if y > 300 else -dy), t) for x, y, t in nodes]
+
+
+class FixPlanTests(unittest.TestCase):
+    """Masters: what Fix sets right, planned without FontLab, then the plan's result compared again."""
+
+    def problems(self, reference, outline):
+        return fc.compare_glyph(u"g", [(u"Regular", reference), (u"Bold", outline)])
+
+    def fixed(self, reference, outline):
+        plan = fc.plan_fixes(reference, outline)
+        return plan, fc.apply_plan(outline, plan)
+
+    def test_fontlab_like_edits(self):
+        nodes = [(0, 0, u"on"), (1, 0, u"off"), (2, 0, u"on"), (3, 0, u"on")]
+        self.assertEqual(fc.reversed_contour(fc.Contour(nodes)).nodes, [nodes[0], nodes[3], nodes[2], nodes[1]],
+                         "the first node kept first, as flContour.reverse()")
+        self.assertEqual(fc.rotated_contour(fc.Contour(nodes), 2).nodes, nodes[2:] + nodes[:2], "setStartPoint(2)")
+
+    def test_direction_and_start_fixed(self):
+        reference = fc.Outline([curve(O_OUTER), curve(O_INNER)])
+        bold = [bolder(O_OUTER), bolder(O_INNER)]
+        planted = fc.Outline([curve(bold[0][::-1]), curve(bold[1][3:] + bold[1][:3])])
+        found = self.problems(reference, planted)
+        self.assertEqual([(f.contour, f.kind, f.fixable) for f in found], [(1, "direction", True), (2, "start", True)])
+        plan, result = self.fixed(reference, planted)
+        self.assertEqual([(at, reverse) for at, reverse, _, _ in plan.contours], [(0, True), (1, False)])
+        self.assertEqual(self.problems(reference, result), [], "compatible once fixed")
+        self.assertEqual(result.contours[0].nodes, curve(bold[0]).nodes, "back to the heavier master's own drawing")
+        self.assertEqual(fc.plan_steps(plan, u"Regular"), [u"contour 1 reversed, its start point moved 1 node on",
+                                                           u"contour 2's start point moved 3 nodes back"])
+
+    def test_start_by_node_types(self):
+        reference = fc.Outline([curve(D_BOWL)])
+        moved = bolder(D_BOWL)
+        moved = moved[4:] + moved[:4]  # onto another on-curve node: the node types no longer line up
+        found = self.problems(reference, fc.Outline([curve(moved)]))
+        self.assertEqual([(f.kind, f.fixable) for f in found], [("start", True)])
+        self.assertIn(u"node types match from there", found[0].text)
+        plan, result = self.fixed(reference, fc.Outline([curve(moved)]))
+        self.assertEqual(self.problems(reference, result), [])
+
+    def test_off_curve_start_left_to_the_designer(self):
+        reference = fc.Outline([curve([(0, 0, u"off"), (100, 0, u"on"), (100, 100, u"off"), (0, 100, u"on"),
+                                       (-50, 50, u"on")])])
+        moved = reference.contours[0].nodes[1:] + reference.contours[0].nodes[:1]
+        found = self.problems(reference, fc.Outline([fc.Contour(moved)]))
+        self.assertEqual([(f.kind, f.fixable) for f in found], [("start", False)], "the start would be off-curve")
+        self.assertTrue(fc.plan_fixes(reference, fc.Outline([fc.Contour(moved)])).empty())
+        self.assertIn(u"needs the designer", fc.fix_sentence(found).lower())
+
+    def test_contour_order(self):
+        reference = fc.Outline([curve(D_BOWL), curve(DOT), contour(SQUARE)])
+        bold = fc.Outline([contour([(x, y + 5) for x, y in SQUARE]), curve(bolder(D_BOWL)), curve(DOT)])
+        found = self.problems(reference, bold)
+        self.assertEqual([(f.kind, f.fixable) for f in found], [("order", True)])
+        plan, result = self.fixed(reference, bold)
+        self.assertEqual(plan.order, [1, 2, 0])
+        self.assertEqual(self.problems(reference, result), [])
+        self.assertEqual(fc.plan_steps(plan, u"Regular"), [u"contours put in Regular's order"])
+        split = fc.Outline(bold.contours, blocks=[1, 2])  # its contours in two shapes: none may cross
+        self.assertEqual([(f.kind, f.fixable) for f in self.problems(reference, split)], [("order", False)])
+        self.assertTrue(fc.plan_fixes(reference, split).empty())
+
+    def test_order_matched_by_place(self):
+        # two dots of one node count: told apart by where they sit once the order is wrong anyway
+        left_dot, right_dot = [(0, 0), (50, 0), (25, 40)], [(400, 0), (450, 0), (425, 40)]
+        reference = fc.Outline([contour(left_dot), contour(SQUARE), contour(right_dot)])
+        bold = fc.Outline([contour(right_dot), contour(left_dot), contour(SQUARE)])
+        self.assertEqual(fc.match_contours(reference.contours, bold.contours), [1, 2, 0])
+        plan, result = self.fixed(reference, bold)
+        self.assertTrue(fc.same_outline(result, reference))
+
+    def test_order_then_direction(self):
+        reference = fc.Outline([curve(D_BOWL), curve(DOT)])
+        bold = fc.Outline([curve(DOT[::-1]), curve(D_BOWL)])
+        plan, result = self.fixed(reference, bold)
+        self.assertEqual(plan.order, [1, 0])
+        self.assertEqual([(at, reverse) for at, reverse, _, _ in plan.contours], [(1, True)])
+        self.assertEqual(self.problems(reference, result), [])
+
+    def test_designer_problems_untouched(self):
+        reference = fc.Outline([contour(SQUARE), contour(TRIANGLE)], [u"a"], [u"top"])
+        bold = fc.Outline([contour(SQUARE[::-1]), contour(SQUARE)], [u"b"], [])
+        found = self.problems(reference, bold)
+        self.assertEqual(sorted((f.kind, f.fixable) for f in found),
+                         [("anchors", False), ("components", False), ("direction", True), ("nodes", False)])
+        self.assertEqual(fc.fix_state(found), "some")
+        plan = fc.plan_fixes(reference, bold)
+        self.assertEqual(([at for at, _, _, _ in plan.contours], plan.order, plan.components), ([0], None, None))
+        self.assertEqual(fc.fix_sentence(found), u"Fix sets the direction right; the node count (add or remove nodes), "
+                                                 u"the components (add or remove them), and the anchors (add or remove "
+                                                 u"them) need the designer.")
+        types = fc.Outline([fc.Contour([(0, 0, u"on"), (100, 0, u"off"), (100, 100, u"on"), (0, 100, u"on")])])
+        self.assertTrue(fc.plan_fixes(fc.Outline([contour(SQUARE)]), types).empty(), "node types: left alone")
+        self.assertEqual(fc.fix_state(self.problems(fc.Outline([contour(SQUARE)]), types)), "none")
+
+    def test_open_contour_start_not_moved(self):
+        line = [(0, 0), (100, 0), (100, 100), (0, 100)]
+        reference = fc.Outline([fc.Contour([(x, y, u"on") for x, y in line], closed=False)])
+        moved = fc.Outline([fc.Contour([(x, y, u"on") for x, y in line[1:] + line[:1]], closed=False)])
+        self.assertTrue(fc.plan_fixes(reference, moved).empty(), "an open contour's start is its end")
+
+    def test_components(self):
+        self.assertEqual(fc.component_order([u"a", u"acutecomb"], [u"acutecomb", u"a"]), [1, 0])
+        self.assertEqual(fc.component_order([u"a", u"dot", u"dot"], [u"dot", u"a", u"dot"]), [1, 0, 2],
+                         "the same names taken in turn")
+        self.assertIsNone(fc.component_order([u"a"], [u"a"]))
+        self.assertIsNone(fc.component_order([u"a"], [u"b"]))
+        reference = fc.Outline([], [u"a", u"acutecomb"])
+        plan, result = self.fixed(reference, fc.Outline([], [u"acutecomb", u"a"]))
+        self.assertEqual((result.components, plan.names), ([u"a", u"acutecomb"], [u"a", u"acutecomb"]))
+
+    def test_reference_left_alone(self):
+        reference = fc.Outline([curve(O_OUTER)])
+        kept = [n for n in reference.contours[0].nodes]
+        self.fixed(reference, fc.Outline([curve(O_OUTER[::-1])]))
+        self.assertEqual(reference.contours[0].nodes, kept)
+
+    def test_assignment(self):
+        import itertools
+        import random
+        rng = random.Random(7)
+        for n in range(1, 7):
+            for _ in range(20):
+                cost = [[rng.randint(0, 30) for _ in range(n)] for _ in range(n)]
+                found = fc.assignment(cost)
+                best = min(sum(cost[i][p[i]] for i in range(n)) for p in itertools.permutations(range(n)))
+                self.assertEqual(sorted(found), list(range(n)))
+                self.assertEqual(sum(cost[i][found[i]] for i in range(n)), best)
+
+    def test_blocks(self):
+        self.assertTrue(fc.within_blocks([1, 0, 2], [2, 1]))
+        self.assertFalse(fc.within_blocks([2, 1, 0], [2, 1]))
+        self.assertTrue(fc.within_blocks([2, 1, 0], None))
+
+    def test_fix_texts(self):
+        I = fc.Incompatibility
+        fixable = [I(u"o", u"Bold", 1, "direction", u"", True), I(u"o", u"Bold", 2, "start", u"", True)]
+        self.assertEqual(fc.fix_state(fixable), "all")
+        self.assertEqual(fc.fix_sentence(fixable), u"Fix sets the direction and the start point right.")
+        designer = [I(u"a", u"Bold", None, "missing", u"")]
+        self.assertEqual(fc.fix_sentence(designer), u"Needs the designer: the missing layer (add it).")
+        self.assertEqual(fc.FIX_LABELS[fc.fix_state(designer)], u"Needs the designer")
+
+
+class MetricWritesTests(unittest.TestCase):
+    def test_writes(self):
+        m = fc.VerticalMetrics(upm=1000, cap_height=700, typo_ascender=950, typo_descender=-250, typo_line_gap=0,
+                               hhea_ascender=None, hhea_descender=-250, hhea_line_gap=0, win_ascent=1000,
+                               win_descent=300, use_typo=False)
+        extents = [fc.Extent("A", 0x41, "R", -300, 1000)]
+        suggestions, _ = fc.suggest_metrics(m, extents)
+        writes = fc.metric_writes(suggestions)
+        self.assertEqual([s.key for s in writes], ["hhea_ascender", "use_typo"], "those that differ only")
+        self.assertEqual(fc.write_text(writes[0]), u"hhea ascender not set \N{RIGHTWARDS ARROW} 950")
+        self.assertEqual(fc.write_text(writes[-1]), u"Use Typo Metrics off \N{RIGHTWARDS ARROW} on")
+        self.assertEqual(fc.selection_with([0, 6], True), [0, 6, 7])
+        self.assertEqual(fc.selection_with([7, 0], True), [0, 7])
+        self.assertEqual(fc.selection_with([7], False), [])
+        self.assertEqual(fc.selection_with(None, True), [7])
+        same = fc.VerticalMetrics(**dict((s.key, s.value) for s in suggestions))
+        same.upm, same.cap_height = 1000, 700
+        self.assertEqual(fc.metric_writes(fc.suggest_metrics(same, extents)[0]), [], "as suggested: nothing to write")
+
+
 # ---------------------------------------------------------------------------
 # The dialog, run on fakes: any Qt call is accepted and does nothing; the font is a small fake of
 # FontLab's (two masters, a glyph that does not interpolate, an anchored letter and mark). This
@@ -567,14 +753,36 @@ class FakeNode(object):
 
 
 class FakeContour(object):
+    """A contour as FontLab edits it: reverse() keeps the first node first; setStartPoint takes an
+    on-curve node only (an off-curve one did nothing live)."""
+
     def __init__(self, points):
-        self.points, self.closed = points, True
+        self.items = [p if len(p) == 3 else (p[0], p[1], u"on") for p in points]
+        self.closed = True
+
+    @property
+    def points(self):
+        return [(x, y) for x, y, _ in self.items]
 
     def nodes(self):
-        return [FakeNode(x, y) for x, y in self.points]
+        return [FakeNode(x, y, t) for x, y, t in self.items]
 
     def path(self):
         return self.points
+
+    def reverse(self):
+        self.items = self.items[:1] + self.items[:0:-1]
+
+    def setStartPoint(self, index):
+        if self.items[index][2] != u"on":
+            return False
+        self.items = self.items[index:] + self.items[:index]
+        return True
+
+    def clone(self):
+        found = FakeContour(self.items)
+        found.closed = self.closed
+        return found
 
 
 class FakeTransform(object):
@@ -600,6 +808,12 @@ class FakeShape(object):
         self.shapeData.componentGlyph = component
         self.transform = FakeTransform()
 
+    def clearContours(self):
+        self.contours = []
+
+    def addContours(self, contours, notify):
+        self.contours.extend(contours)
+
 
 class FakeAnchor(object):
     def __init__(self, name):
@@ -610,6 +824,10 @@ class FakeLayer(object):
     def __init__(self, shapes, anchors=(), advance=500):
         self.shapes, self.anchors, self.advanceWidth = shapes, [FakeAnchor(a) for a in anchors], advance
         self.isNull = False
+
+    def reorderShapes(self, order):
+        """The new order: the index of the shape each place takes (one reading of the unproven call)."""
+        self.shapes = [self.shapes[k] for k in order]
 
 
 class FakePath(object):
@@ -663,7 +881,15 @@ class FakePackage(object):
                   FakeGlyph(u"o", 0x6F, {u"Regular": FakeLayer([FakeShape([square(500)])]),
                                          u"Bold": FakeLayer([FakeShape([square(500)[::-1]])])}),
                   FakeGlyph(u"eacute", None, {u"Regular": FakeLayer([FakeShape(component=u"e"),
-                                                                     FakeShape(component=u"acutecomb")])})]
+                                                                     FakeShape(component=u"acutecomb")])}),
+                  FakeGlyph(u"Hacute", None, {u"Regular": FakeLayer([FakeShape(component=u"H"),
+                                                                     FakeShape(component=u"acutecomb")]),
+                                              u"Bold": FakeLayer([FakeShape(component=u"acutecomb"),
+                                                                  FakeShape(component=u"H")])}),
+                  FakeGlyph(u"i", 0x69, {u"Regular": FakeLayer([FakeShape([square(500), [(0, 600), (100, 600), (50, 700)]])]),
+                                         u"Bold": FakeLayer([FakeShape([[(0, 600), (120, 600), (60, 710)], square(520)])])}),
+                  FakeGlyph(u"x", 0x78, {u"Regular": FakeLayer([FakeShape([square(500)])]),
+                                         u"Bold": FakeLayer([FakeShape([[(0, 0), (400, 0), (200, 500)]])])})]
         self.by_name = dict((g.name, g) for g in glyphs)
         self.fgPackage = Anything()
         self.fgPackage.glyphs = [g.fgGlyph for g in glyphs]
@@ -688,6 +914,49 @@ class FakePackage(object):
         return 1
 
 
+class ReorderShapesTests(unittest.TestCase):
+    """flLayer.reorderShapes is unproven: whichever way it reads its list, the components end in the
+    reference's order and the other shapes stay where they are."""
+
+    def layer(self, reorder):
+        layer = FakeLayer([FakeShape(component=u"c"), FakeShape([square(100)]), FakeShape(component=u"a"),
+                           FakeShape(component=u"b")])
+        layer.reorderShapes = lambda order: reorder(layer, order)
+        return layer
+
+    def names(self, layer):
+        return [s.shapeData.componentGlyph if s.isComponent else u"(contours)" for s in layer.shapes]
+
+    def test_any_reading(self):
+        def take(layer, order):
+            layer.shapes = [layer.shapes[k] for k in order]
+
+        def put(layer, order):
+            shapes = list(layer.shapes)
+            for k, at in enumerate(order):
+                layer.shapes[at] = shapes[k]
+
+        def shapes_only(layer, order):
+            if any(isinstance(item, int) for item in order):
+                raise TypeError("expected flShape")
+            layer.shapes = list(order)
+
+        for reorder in (take, put, shapes_only):
+            layer = self.layer(reorder)
+            fc.reorder_components(layer, [u"a", u"b", u"c"])  # (a cycle of three: taking and putting differ)
+            self.assertEqual(self.names(layer), [u"a", u"(contours)", u"b", u"c"], reorder.__name__)
+
+    def test_refused(self):
+        layer = self.layer(lambda layer, order: None)
+        self.assertRaises(fc.FixError, fc.reorder_components, layer, [u"a", u"b", u"c"])
+
+    def test_contours_reordered_within_their_shape(self):
+        layer = FakeLayer([FakeShape([square(100), [(0, 0), (10, 0), (5, 10)]]), FakeShape([square(300)])])
+        fc.apply_fix(layer, fc.FixPlan(order=[1, 0, 2]))
+        self.assertEqual([[len(c.points) for c in s.contours] for s in layer.shapes], [[3, 4], [4]])
+        self.assertRaises(fc.FixError, fc.apply_fix, layer, fc.FixPlan(order=[2, 1, 0]))
+
+
 class DialogTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -696,10 +965,8 @@ class DialogTests(unittest.TestCase):
         cls.saved = dict((name, sys.modules.get(name)) for name in ("PythonQt", "fontlab", fc.AUTO_KERNING_MODULE))
         qt = Anything()
         qt.QtCore, qt.QtGui = _FakeQtModule(), _FakeQtModule()
-        package = FakePackage()
-        workspace = Anything()
-        workspace.packages = lambda: [package]
-        workspace.currentPackage = package
+        workspace = cls.workspace = Anything()
+        workspace.packages = lambda: [workspace.currentPackage]
         fontlab = Anything()
         fontlab.flWorkspace = Anything()
         fontlab.flWorkspace.instance = lambda: workspace
@@ -724,6 +991,7 @@ class DialogTests(unittest.TestCase):
                 sys.modules[name] = module
 
     def dialog(self):
+        self.workspace.currentPackage = FakePackage()  # (a font of its own: the fixes and writes change it)
         dialog = fc.FontCheckDialog()
         self.assertIsNone(dialog.failed, dialog.failed)
         dialog.log.add = lambda text, level="info": self.fail(text) if level == "error" else None
@@ -766,10 +1034,62 @@ class DialogTests(unittest.TestCase):
         for _, _, chip in dialog.chips:
             chip.checked = True
         dialog.check_masters()
-        found = sorted((f.glyph, f.master, f.kind) for f in dialog.masters.findings)
-        self.assertEqual(found, [(u"o", u"Bold", "direction")], "eacute, in Regular only, does not vary")
-        self.assertEqual(dialog.glyph_names, [u"o"])
+        found = sorted((f.glyph, f.master, f.kind, f.fixable) for f in dialog.masters.findings)
+        self.assertEqual(found, [(u"Hacute", u"Bold", "components", True), (u"i", u"Bold", "order", True),
+                                 (u"o", u"Bold", "direction", True), (u"x", u"Bold", "nodes", False)],
+                         "eacute, in Regular only, does not vary")
+        self.assertEqual(dialog.glyph_names, [u"i", u"x", u"Hacute", u"o"])
+        self.assertEqual(dialog.fixable_names, set([u"i", u"Hacute", u"o"]))
         dialog.draw_comparison()
+        dialog.update_buttons()
+
+    def test_fix(self):
+        dialog = self.dialog()
+        dialog.reference.currentText, dialog.reference.currentIndex = u"Regular", 0
+        for _, _, chip in dialog.chips:
+            chip.checked = True
+        dialog.check_masters()
+        package = dialog.package
+        regular = [(c.items, c.closed) for g in package.by_name.values() for layer in [g.getLayerByName(u"Regular")]
+                   if layer is not None for s in layer.shapes for c in s.contours]
+        logged = []
+        dialog.log.add = lambda text, level="info": logged.append((level, text))
+        dialog.fix_glyphs([u"o", u"i", u"Hacute", u"x"])
+        self.assertEqual([level for level, _ in logged if level in ("error", "warning")], [], logged)
+        found = sorted((f.glyph, f.master, f.kind) for f in dialog.masters.findings)
+        self.assertEqual(found, [(u"x", u"Bold", "nodes")], "what needs the designer only")
+        self.assertEqual([c.points for c in package.findName(u"o").getLayerByName(u"Bold").shapes[0].contours],
+                         [square(500)], "reversed, its start where Regular's is")
+        bold_i = package.findName(u"i").getLayerByName(u"Bold").shapes[0].contours
+        self.assertEqual([len(c.points) for c in bold_i], [4, 3], "the stem first, as in Regular")
+        self.assertEqual([s.shapeData.componentGlyph for s in package.findName(u"Hacute").getLayerByName(u"Bold").shapes],
+                         [u"H", u"acutecomb"])
+        self.assertEqual([(c.items, c.closed) for g in package.by_name.values() for layer in [g.getLayerByName(u"Regular")]
+                          if layer is not None for s in layer.shapes for c in s.contours], regular,
+                         "the master compared with never changes")
+        done = [text for level, text in logged if level == "done"]
+        self.assertTrue(done and u"3 glyph layers" in done[0], logged)
+        self.assertIn(u"contour 1 reversed", done[0])
+        self.assertTrue(any(u"need the designer" in text and u"x" in text for _, text in logged), logged)
+
+    def test_write_metrics(self):
+        dialog = self.dialog()
+        dialog.mode_new.checked, dialog.share.value = True, 120
+        dialog.check_vertical()
+        writes = fc.metric_writes(dialog.suggestions)
+        self.assertTrue(writes)
+        info = dialog.package.fgPackage.info
+        logged = []
+        dialog.log.add = lambda text, level="info": logged.append((level, text))
+        dialog.write_suggestions()
+        self.assertEqual([level for level, _ in logged if level == "error"], [], logged)
+        values = dict((s.key, s.value) for s in dialog.suggestions)
+        self.assertEqual((info.openTypeOS2TypoAscender, info.openTypeHheaAscender, info.openTypeOS2WinAscent),
+                         (values["typo_ascender"], values["hhea_ascender"], 1100))
+        self.assertEqual(info.openTypeOS2Selection, [7])
+        self.assertEqual(fc.metric_writes(dialog.suggestions), [], "checked again: as suggested")
+        self.assertEqual(dialog.package.ascender_value, 750, "the master's own metrics left alone")
+        self.assertTrue(any(level == "done" and u"Wrote" in text for level, text in logged), logged)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,2145 @@
+#FLM: Font Compare
+# -*- coding: utf-8 -*-
+"""FreeLab Font Compare, from FontLab's Scripts menu.
+
+Two open fonts, or two masters of one font, compared glyph by glyph, read-only:
+
+- Glyphs: those only in one; names and code points; advance widths and sidebearings; outlines
+  (contour and node counts, how far nodes moved, and how much the shapes differ: the area of the
+  two outlines' symmetric difference, as a share of the ink); components; anchors. A list of the
+  glyphs that differ, the worst first, a chip per kind of difference to filter it, and the selected
+  glyph drawn from both, overlaid and side by side, its differences in one sentence.
+- Kerning: the glyph pairs kerned differently (class kerning resolved to glyph pairs, as FontLab
+  applies it), the largest difference first, and the pair drawn in both.
+- Features: the features (and the prefix and the Classes panel's classes) only in one, and the code
+  that differs, line by line.
+
+Nothing in either font changes. Valid Python 2.7 (FontLab 7) and Python 3. The comparisons above
+the Qt line need no Qt and no FontLab.
+"""
+
+from __future__ import absolute_import, division, print_function
+
+import difflib
+import math
+import os
+import sys
+
+AUTO_KERNING_FILE, AUTO_KERNING_MODULE = "freelab_auto_kerning.py", "freelab_auto_kerning"
+TABS = ("glyphs", "kerning", "features")
+THRESHOLD = 1  # units: metrics, anchors, nodes, components, and kerning differing by at most this are alike
+SHAPE_SHARE = 0.002  # outlines differ when their symmetric difference passes this share of the ink
+SHAPE_ROWS = 160  # scan lines across a glyph's height, measuring its area
+CURVE_STEPS = 8  # straight pieces per curve, measuring its area
+PROGRESS_EVERY = 100  # glyphs between two looks at the event loop
+DIFF_CONTEXT = 3  # unchanged lines shown around each change of a feature's code
+ROWS_SHOWN = 2000  # glyphs or pairs listed at most, the worst first (two weights of a family differ everywhere)
+
+
+def load_auto_kerning():
+    """Auto Kerning beside this script, as a module (its dialog not opened): the dialogs' shared
+    helpers come from it."""
+    here = os.path.dirname(os.path.abspath(globals().get("__file__") or "."))
+    path = os.path.join(here, AUTO_KERNING_FILE)
+    try:
+        stamp = os.path.getmtime(path)
+    except OSError:
+        stamp = None
+    held = sys.modules.get(AUTO_KERNING_MODULE)
+    if held is not None and hasattr(held, "FontKerning") and getattr(held, "_freelab_stamp", None) == stamp:
+        return held  # (loaded again after a reinstall)
+    old = os.environ.get("FREELAB_NO_AUTOSTART")
+    os.environ["FREELAB_NO_AUTOSTART"] = "1"
+    try:
+        if sys.version_info[0] == 2:
+            import imp
+            module = imp.new_module(AUTO_KERNING_MODULE)
+            module.__file__ = path
+            sys.modules[AUTO_KERNING_MODULE] = module
+            with open(path, "rb") as handle:  # open() takes a unicode path through the wide Windows API
+                source = handle.read()
+            exec(compile(source, AUTO_KERNING_FILE, "exec", 0, True), module.__dict__)
+        else:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location(AUTO_KERNING_MODULE, path)
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[AUTO_KERNING_MODULE] = module
+            spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(AUTO_KERNING_MODULE, None)
+        raise
+    finally:
+        if old is None:
+            os.environ.pop("FREELAB_NO_AUTOSTART", None)
+        else:
+            os.environ["FREELAB_NO_AUTOSTART"] = old
+    module._freelab_stamp = stamp
+    return module
+
+
+def counted(number, one, many=None):
+    """"1 glyph", "2 glyphs": a count with its noun in the right number."""
+    return u"%d %s" % (number, one if number == 1 else (many or one + u"s"))
+
+
+def grouped(number):
+    """1234 as "1,234"."""
+    return u"{:,}".format(int(number))
+
+
+def round_units(value):
+    return int(math.floor(value + 0.5))
+
+
+def signed(value):
+    """+12, -3, 0."""
+    value = round_units(value)
+    return u"%+d" % value if value else u"0"
+
+
+def code_text(code):
+    return u"U+%04X" % code
+
+
+# ---------------------------------------------------------------------------
+# The two sides
+# ---------------------------------------------------------------------------
+
+def choice_text(font_name, master, masters_count):
+    """A font and master as the combo boxes list them: the font's name, its master's after a dot when
+    it has several."""
+    return font_name if masters_count <= 1 else u"%s \N{MIDDLE DOT} %s" % (font_name, master)
+
+
+def side_labels(a, b):
+    """The two sides' names in sentences: a and b are (font key, font name, master, masters count).
+    Two masters of one font go by their masters; two fonts by their names (and their masters when
+    they have several); fonts of one name by their files' names, or else as first and second."""
+    (key_a, name_a, master_a, count_a), (key_b, name_b, master_b, count_b) = a, b
+    if key_a == key_b:
+        if master_a != master_b:
+            return master_a, master_b
+        return u"first", u"second"
+    if name_a == name_b:
+        file_a, file_b = os.path.basename(u"%s" % key_a), os.path.basename(u"%s" % key_b)
+        if file_a and file_b and file_a != file_b:
+            name_a, name_b = file_a, file_b
+    label_a, label_b = choice_text(name_a, master_a, count_a), choice_text(name_b, master_b, count_b)
+    if label_a == label_b:
+        return u"%s (first)" % label_a, u"%s (second)" % label_b
+    return label_a, label_b
+
+
+# ---------------------------------------------------------------------------
+# Glyphs matched
+# ---------------------------------------------------------------------------
+
+def match_glyphs(glyphs_a, glyphs_b):
+    """The glyphs of two fonts paired: by name, then a glyph left over in each with a code point in
+    common (uni00E9 and eacute). glyphs_a, glyphs_b: [(name, code points)]. Returns (pairs [(name in
+    a, name in b)] in a's order, names only in a, names only in b)."""
+    names_b = set(name for name, _ in glyphs_b)
+    names_a = set(name for name, _ in glyphs_a)
+    pairs = []
+    left_a = []
+    for name, codes in glyphs_a:
+        if name in names_b:
+            pairs.append((name, name))
+        else:
+            left_a.append((name, codes))
+    left_b = [(name, codes) for name, codes in glyphs_b if name not in names_a]
+    by_code = {}
+    for name, codes in left_b:
+        for code in codes:
+            by_code.setdefault(code, []).append(name)
+    taken = set()
+    only_a = []
+    for name, codes in left_a:
+        found = None
+        for code in codes:
+            candidates = [n for n in by_code.get(code, []) if n not in taken]
+            if len(candidates) == 1:
+                found = candidates[0]
+                break
+        if found is None:
+            only_a.append(name)
+        else:
+            taken.add(found)
+            pairs.append((name, found))
+    only_b = [name for name, _ in left_b if name not in taken]
+    return pairs, only_a, only_b
+
+
+# ---------------------------------------------------------------------------
+# Outlines: contours are lists of nodes (x, y, type), type "off" for an off-curve point
+# ---------------------------------------------------------------------------
+
+def is_on(node):
+    return len(node) < 3 or u"%s" % node[2] not in (u"off", u"offcurve")
+
+
+def _midpoint(p, q):
+    return ((p[0] + q[0]) / 2.0, (p[1] + q[1]) / 2.0, True)
+
+
+def _quadratic(points, p0, p1, p2, steps):
+    for k in range(1, steps + 1):
+        t = k / float(steps)
+        u_ = 1.0 - t
+        points.append((u_ * u_ * p0[0] + 2 * u_ * t * p1[0] + t * t * p2[0],
+                       u_ * u_ * p0[1] + 2 * u_ * t * p1[1] + t * t * p2[1]))
+
+
+def _cubic(points, p0, p1, p2, p3, steps):
+    for k in range(1, steps + 1):
+        t = k / float(steps)
+        u_ = 1.0 - t
+        a, b, c, d = u_ * u_ * u_, 3 * u_ * u_ * t, 3 * u_ * t * t, t * t * t
+        points.append((a * p0[0] + b * p1[0] + c * p2[0] + d * p3[0],
+                       a * p0[1] + b * p1[1] + c * p2[1] + d * p3[1]))
+
+
+def flatten(nodes, steps=CURVE_STEPS, quadratic=False):
+    """A closed contour as a polygon [(x, y)]: two off-curve points between on-curve ones make a cubic
+    curve (PostScript), one a quadratic; more make TrueType's quadratic spline, an on-curve point
+    implied midway between each two. quadratic: two off-curve points are a TrueType spline too."""
+    points = [(float(n[0]), float(n[1]), is_on(n)) for n in nodes]
+    if not points:
+        return []
+    if not any(p[2] for p in points):  # TrueType: a contour of off-curve points only
+        points = [_midpoint(points[-1], points[0])] + points
+    first = next(k for k, p in enumerate(points) if p[2])
+    points = points[first:] + points[:first]
+    polygon = [(points[0][0], points[0][1])]
+    current, offs = points[0], []
+    for point in points[1:] + points[:1]:
+        if not point[2]:
+            offs.append(point)
+            continue
+        if not offs:
+            polygon.append((point[0], point[1]))
+        elif len(offs) == 2 and not quadratic:
+            _cubic(polygon, current, offs[0], offs[1], point, steps)
+        else:
+            start = current
+            for k in range(len(offs) - 1):
+                middle = _midpoint(offs[k], offs[k + 1])
+                _quadratic(polygon, start, offs[k], middle, steps)
+                start = middle
+            _quadratic(polygon, start, offs[-1], point, steps)
+        current, offs = point, []
+    polygon.pop()  # (back at the first point)
+    return polygon
+
+
+def scan_spans(polygons, rows):
+    """For each scan line's y (rows, evenly spaced, rising), the [(x0, x1)] spans inside the polygons
+    (nonzero winding, as FontLab fills)."""
+    crossings = [[] for _ in rows]
+    if not rows:
+        return []
+    y0 = rows[0]
+    step = (rows[1] - rows[0]) if len(rows) > 1 else 1.0
+    last = len(rows) - 1
+    for polygon in polygons:
+        count = len(polygon)
+        for k in range(count):
+            x1, y1 = polygon[k]
+            x2, y2 = polygon[(k + 1) % count]
+            if y1 == y2:
+                continue
+            low, high = (y1, y2) if y1 < y2 else (y2, y1)
+            first = max(0, int(math.ceil((low - y0) / step)))
+            end = min(last, int(math.ceil((high - y0) / step)) - 1)
+            direction = 1 if y2 > y1 else -1
+            slope = (x2 - x1) / (y2 - y1)
+            for row in range(first, end + 1):
+                y = y0 + row * step
+                if low <= y < high:
+                    crossings[row].append((x1 + (y - y1) * slope, direction))
+    found = []
+    for row in crossings:
+        row.sort()
+        spans, winding, start = [], 0, None
+        for x, direction in row:
+            before = winding
+            winding += direction
+            if before == 0 and winding != 0:
+                start = x
+            elif before != 0 and winding == 0:
+                spans.append((start, x))
+        found.append(spans)
+    return found
+
+
+def _spans_length(spans):
+    return sum(x1 - x0 for x0, x1 in spans)
+
+
+def _overlap_length(one, other):
+    total, i, j = 0.0, 0, 0
+    while i < len(one) and j < len(other):
+        low, high = max(one[i][0], other[j][0]), min(one[i][1], other[j][1])
+        if high > low:
+            total += high - low
+        if one[i][1] < other[j][1]:
+            i += 1
+        else:
+            j += 1
+    return total
+
+
+def shape_areas(contours_a, contours_b, rows=SHAPE_ROWS, quadratic=False):
+    """(area of a's ink, area of b's ink, area of their symmetric difference), measured on scan lines
+    across both outlines' height; overlapping contours count once."""
+    polygons_a = [p for p in (flatten(c, quadratic=quadratic) for c in contours_a) if len(p) > 2]
+    polygons_b = [p for p in (flatten(c, quadratic=quadratic) for c in contours_b) if len(p) > 2]
+    ys = [y for polygon in polygons_a + polygons_b for _, y in polygon]
+    if not ys or max(ys) <= min(ys):
+        return 0.0, 0.0, 0.0
+    low, high = min(ys), max(ys)
+    step = (high - low) / float(rows)
+    centers = [low + (k + 0.5) * step for k in range(rows)]
+    spans_a, spans_b = scan_spans(polygons_a, centers), scan_spans(polygons_b, centers)
+    area_a = area_b = apart = 0.0
+    for one, other in zip(spans_a, spans_b):
+        length_a, length_b = _spans_length(one), _spans_length(other)
+        area_a += length_a
+        area_b += length_b
+        apart += length_a + length_b - 2 * _overlap_length(one, other)
+    return area_a * step, area_b * step, apart * step
+
+
+def shape_share(contours_a, contours_b, quadratic=False):
+    """How much two outlines differ: their symmetric difference as a share of the larger one's ink
+    (0 alike, 1 where one has no ink, up to 2 for two shapes apart)."""
+    area_a, area_b, apart = shape_areas(contours_a, contours_b, quadratic=quadratic)
+    largest = max(area_a, area_b)
+    return apart / largest if largest > 0 else 0.0
+
+
+def node_counts(contours):
+    return [len(c) for c in contours]
+
+
+def moved_most(contours_a, contours_b):
+    """(how far the node that moved most moved, its contour's number from 1) for outlines of the same
+    contour and node counts; None for others."""
+    if node_counts(contours_a) != node_counts(contours_b):
+        return None
+    farthest, where = 0.0, 0
+    for number, (one, other) in enumerate(zip(contours_a, contours_b), 1):
+        for p, q in zip(one, other):
+            distance = math.hypot(float(p[0]) - float(q[0]), float(p[1]) - float(q[1]))
+            if distance > farthest:
+                farthest, where = distance, number
+    return farthest, where
+
+
+def same_nodes(contours_a, contours_b, threshold):
+    """Whether two outlines have the same nodes, in whatever order (start points, contour order)."""
+    grid = float(max(threshold, 1))
+
+    def points(contours):
+        return sorted((round_units(float(p[0]) / grid), round_units(float(p[1]) / grid), is_on(p))
+                      for c in contours for p in c)
+
+    return points(contours_a) == points(contours_b)
+
+
+# ---------------------------------------------------------------------------
+# Glyphs compared
+# ---------------------------------------------------------------------------
+
+class GlyphData(object):
+    """A glyph's layer as compared: its code points, advance width, the ink's left and right (its
+    components' too; None: no ink), its own contours [[(x, y, type)]], components [(glyph name,
+    (xx, xy, yx, yy, dx, dy))], and anchors [(name, x, y)]."""
+
+    def __init__(self, name, codes=(), advance=0.0, ink=None, contours=(), components=(), anchors=()):
+        self.name, self.codes = name, list(codes)
+        self.advance, self.ink = float(advance), ink
+        self.contours = [list(c) for c in contours]
+        self.components = list(components)
+        self.anchors = list(anchors)
+
+    def scaled(self, factor):
+        """The glyph at another em (factor: the other font's units per em over this one's)."""
+        if factor == 1:
+            return self
+        s = float(factor)
+        ink = None if self.ink is None else (self.ink[0] * s, self.ink[1] * s)
+        contours = [[(p[0] * s, p[1] * s) + tuple(p[2:]) for p in c] for c in self.contours]
+        components = [(name, m[:4] + (m[4] * s, m[5] * s)) for name, m in self.components]
+        anchors = [(name, x * s, y * s) for name, x, y in self.anchors]
+        return GlyphData(self.name, self.codes, self.advance * s, ink, contours, components, anchors)
+
+    def renamed(self, names):
+        """Its components named as the other font names their glyphs (names: this font's to the other's)."""
+        if not names:
+            return self
+        components = [(names.get(name, name), m) for name, m in self.components]
+        return GlyphData(self.name, self.codes, self.advance, self.ink, self.contours, components, self.anchors)
+
+
+class Difference(object):
+    """One kind of difference of a glyph: its kind (GLYPH_KINDS), the clause that says it, a short
+    form for the list, and a score that ranks glyphs of the same kind."""
+
+    def __init__(self, kind, text, short, score=0.0):
+        self.kind, self.text, self.short, self.score = kind, text, short, score
+
+
+GLYPH_KINDS = ("only_a", "only_b", "outline", "components", "codes", "metrics", "anchors")
+KIND_LABELS = {"codes": u"Names and code points", "outline": u"Outlines", "components": u"Components",
+               "metrics": u"Metrics", "anchors": u"Anchors"}
+KIND_WEIGHT = {"only_a": 5, "only_b": 5, "outline": 4, "components": 3, "codes": 3, "metrics": 2, "anchors": 1}
+
+
+def kind_label(kind, labels, masters=False):
+    """A chip's label: "Only in Bold" (two masters: "No layer in Regular", the other side's)."""
+    if kind in ("only_a", "only_b"):
+        if masters:
+            return u"No layer in %s" % labels[1 if kind == "only_a" else 0]
+        return u"Only in %s" % labels[0 if kind == "only_a" else 1]
+    return KIND_LABELS[kind]
+
+
+def codes_list(codes):
+    return u" ".join(code_text(c) for c in sorted(codes)) or u"none"
+
+
+def compare_metrics(a, b, threshold, upm):
+    clauses, shorts, largest = [], [], 0.0
+    pairs = [(u"width", a.advance, b.advance)]
+    if a.ink is not None and b.ink is not None:
+        pairs.append((u"left side", a.ink[0], b.ink[0]))
+        pairs.append((u"right side", a.advance - a.ink[1], b.advance - b.ink[1]))
+    for name, one, other in pairs:
+        one, other = round_units(one), round_units(other)
+        if abs(other - one) > threshold:
+            clauses.append(u"%s %d and %d (%s)" % (name, one, other, signed(other - one)))
+            shorts.append(u"%s %s" % (name, signed(other - one)))
+            largest = max(largest, abs(other - one))
+    if not clauses:
+        return None
+    return Difference("metrics", u"; ".join(clauses), u", ".join(shorts), largest / float(upm or 1000))
+
+
+def compare_outline(a, b, threshold, quadratic=False):
+    contours_a, contours_b = a.contours, b.contours
+    if contours_a == contours_b:
+        return None
+    counts_a, counts_b = node_counts(contours_a), node_counts(contours_b)
+    clauses = []
+    short = None
+    if len(counts_a) != len(counts_b):
+        clauses.append(u"%s and %d" % (counted(len(counts_a), u"contour"), len(counts_b)))
+        short = u"contours %d, %d" % (len(counts_a), len(counts_b))
+    elif counts_a != counts_b:
+        clauses.append(u"%s and %d" % (counted(sum(counts_a), u"node"), sum(counts_b)))
+        short = u"nodes %d, %d" % (sum(counts_a), sum(counts_b))
+    share = shape_share(contours_a, contours_b, quadratic) if (contours_a or contours_b) else 0.0
+    if share > SHAPE_SHARE:
+        clauses.append(u"the shapes differ by %s of the ink" % percent(share))
+        short = short or u"outline %s" % percent(share)
+    moved = moved_most(contours_a, contours_b)
+    if moved is not None and moved[0] > threshold:
+        if share <= SHAPE_SHARE and same_nodes(contours_a, contours_b, threshold):
+            clauses.append(u"the same nodes in another order (start points or contour order)")
+            short = short or u"node order"
+        else:
+            clauses.append(u"nodes moved up to %s (contour %d)" % (counted(round_units(moved[0]), u"unit"), moved[1]))
+            short = short or u"nodes moved %d" % round_units(moved[0])
+    if not clauses:
+        return None
+    score = share + (1.0 if len(counts_a) != len(counts_b) or counts_a != counts_b else 0.0)
+    return Difference("outline", u"; ".join(clauses), short, score)
+
+
+def percent(share):
+    """A share as a percentage: 0.4%, 4.1%, 12%."""
+    value = share * 100.0
+    if value >= 10:
+        return u"%d%%" % round_units(value)
+    return u"%.1f%%" % value
+
+
+def compare_components(a, b, threshold, labels):
+    names_a, names_b = [n for n, _ in a.components], [n for n, _ in b.components]
+    clauses, shorts = [], []
+    for name in names_a:
+        if name not in names_b:
+            clauses.append(u"component %s only in %s" % (name, labels[0]))
+    for name in names_b:
+        if name not in names_a:
+            clauses.append(u"component %s only in %s" % (name, labels[1]))
+    if clauses:
+        shorts.append(u"components")
+    common = [n for n in names_a if n in names_b]
+    if not clauses and names_a != names_b and sorted(names_a) == sorted(names_b):
+        clauses.append(u"components in another order")
+        shorts.append(u"component order")
+    used = set()
+    for name, matrix in a.components:
+        others = [(k, m) for k, (n, m) in enumerate(b.components) if n == name and k not in used]
+        if name not in common or not others:
+            continue
+        k, other = others[0]
+        used.add(k)
+        dx, dy = other[4] - matrix[4], other[5] - matrix[5]
+        if abs(dx) > threshold or abs(dy) > threshold:
+            clauses.append(u"component %s moved by (%s, %s)" % (name, signed(dx), signed(dy)))
+            shorts.append(u"component moved")
+        if any(abs(float(p) - float(q)) > 0.001 for p, q in zip(matrix[:4], other[:4])):
+            clauses.append(u"component %s scaled or turned" % name)
+            shorts.append(u"component scaled")
+    if not clauses:
+        return None
+    return Difference("components", u"; ".join(clauses), shorts[0], float(len(clauses)))
+
+
+def compare_anchors(a, b, threshold, labels):
+    by_a = dict((name, (x, y)) for name, x, y in a.anchors)
+    by_b = dict((name, (x, y)) for name, x, y in b.anchors)
+    clauses = []
+    for name, _, _ in a.anchors:
+        if name not in by_b:
+            clauses.append(u"anchor %s only in %s" % (name, labels[0]))
+    for name, _, _ in b.anchors:
+        if name not in by_a:
+            clauses.append(u"anchor %s only in %s" % (name, labels[1]))
+    for name, x, y in a.anchors:
+        if name in by_b:
+            dx, dy = by_b[name][0] - x, by_b[name][1] - y
+            if abs(dx) > threshold or abs(dy) > threshold:
+                clauses.append(u"anchor %s moved by (%s, %s)" % (name, signed(dx), signed(dy)))
+    if not clauses:
+        return None
+    return Difference("anchors", u"; ".join(clauses), counted(len(clauses), u"anchor"), float(len(clauses)))
+
+
+def compare_codes(a, b):
+    clauses = []
+    if a.name != b.name:
+        clauses.append(u"named %s and %s" % (a.name, b.name))
+    if sorted(a.codes) != sorted(b.codes):
+        clauses.append(u"code points %s and %s" % (codes_list(a.codes), codes_list(b.codes)))
+    if not clauses:
+        return None
+    return Difference("codes", u"; ".join(clauses), u"renamed" if a.name != b.name else u"code points", 1.0)
+
+
+def compare_glyph(a, b, threshold=THRESHOLD, labels=(u"A", u"B"), upm=1000.0, masters=False, quadratic=False):
+    """[Difference] between a glyph's two GlyphData (None: not in that font, or no layer in that master),
+    b at a's em already."""
+    if a is None and b is None:
+        return []
+    if a is None or b is None:
+        kind = "only_b" if a is None else "only_a"
+        if masters:
+            text = u"no layer in %s" % labels[0 if a is None else 1]
+        else:
+            text = u"only in %s" % labels[1 if a is None else 0]
+        return [Difference(kind, text, text, 0.0)]
+    found = []
+    for difference in (compare_codes(a, b), compare_outline(a, b, threshold, quadratic),
+                       compare_components(a, b, threshold, labels), compare_metrics(a, b, threshold, upm),
+                       compare_anchors(a, b, threshold, labels)):
+        if difference is not None:
+            found.append(difference)
+    return found
+
+
+class GlyphResult(object):
+    """A glyph's differences: its name in each font (None: not there, or no layer)."""
+
+    def __init__(self, a, b, differences):
+        self.a, self.b, self.differences = a, b, list(differences)
+
+    @property
+    def name(self):
+        return self.a if self.a is not None else self.b
+
+    def kinds(self):
+        return set(d.kind for d in self.differences)
+
+    def caption(self):
+        """Its name, and the other font's when they differ: "uni00E9 / eacute"."""
+        if self.a is not None and self.b is not None and self.a != self.b:
+            return u"%s / %s" % (self.a, self.b)
+        return self.name
+
+    def short(self):
+        return u" \N{MIDDLE DOT} ".join(d.short for d in self.differences)
+
+    def sentence(self, labels):
+        """Its differences in one sentence: "a, Regular and Bold: width 520 and 540 (+20); ...". """
+        if any(d.kind in ("only_a", "only_b") for d in self.differences):
+            return u"%s: %s." % (self.caption(), self.differences[0].text)
+        return u"%s, %s and %s: %s." % (self.caption(), labels[0], labels[1], u"; ".join(d.text for d in self.differences))
+
+
+def glyph_counts(results):
+    """{kind: glyphs with it}."""
+    found = {}
+    for result in results:
+        for kind in result.kinds():
+            found[kind] = found.get(kind, 0) + 1
+    return found
+
+
+def glyph_rows(results, kinds=None):
+    """The results with a difference of the given kinds (None: any), the worst first: the gravest
+    kind, then the largest score (how much the shapes differ, how far the metrics), then by name."""
+    shown = [r for r in results if kinds is None or r.kinds() & set(kinds)]
+
+    def key(r):
+        weight = max(KIND_WEIGHT.get(d.kind, 1) for d in r.differences)
+        return (-weight, -sum(d.score for d in r.differences if KIND_WEIGHT.get(d.kind, 1) == weight),
+                -len(r.differences), r.name)
+
+    return sorted(shown, key=key)
+
+
+# ---------------------------------------------------------------------------
+# Kerning compared
+# ---------------------------------------------------------------------------
+
+def resolve_entries(values, members):
+    """Glyph pairs and the value each gets from a master's entries ({((left, is class), (right, is
+    class)): value}, as FontKerning reads them), the most specific entry winning as FontLab applies
+    them: glyph and glyph, glyph and class, class and glyph, then class and class."""
+    rank = {(False, False): 0, (False, True): 1, (True, False): 2, (True, True): 3}
+    best = {}
+    for ((left, left_class), (right, right_class)), value in values.items():
+        level = rank[(bool(left_class), bool(right_class))]
+        lefts = members.get(left, []) if left_class else [left]
+        rights = members.get(right, []) if right_class else [right]
+        for one in lefts:
+            for other in rights:
+                held = best.get((one, other))
+                if held is None or level < held[0]:
+                    best[(one, other)] = (level, value)
+    return dict((pair, value) for pair, (_, value) in best.items())
+
+
+class KernDifference(object):
+    """A glyph pair kerned differently: its names (the first font's), its value in each (0: not kerned),
+    and its kind: only_a, only_b, value, or absent (a glyph of it is missing in a font)."""
+
+    def __init__(self, left, right, a, b, kind):
+        self.left, self.right, self.a, self.b, self.kind = left, right, a, b, kind
+
+    @property
+    def delta(self):
+        return self.b - self.a
+
+
+KERN_KINDS = ("only_a", "only_b", "value", "absent")
+
+
+def kern_label(kind, labels):
+    return {"only_a": u"Only in %s" % labels[0], "only_b": u"Only in %s" % labels[1],
+            "value": u"Other values", "absent": u"Glyphs one font lacks"}[kind]
+
+
+def kerning_diff(a, b, threshold=0, rename=None, glyphs_a=None, glyphs_b=None):
+    """[KernDifference] between two masters' kerning ({(left, right): value}, classes resolved), b
+    in the first font's units already, the largest difference first. rename: b's glyph names to a's;
+    glyphs_a, glyphs_b: each font's glyphs (a's names), to tell pairs a font cannot have."""
+    rename = rename or {}
+    b = dict(((rename.get(left, left), rename.get(right, right)), value) for (left, right), value in b.items())
+    found = []
+    for pair in set(a) | set(b):
+        one, other = round_units(a.get(pair) or 0), round_units(b.get(pair) or 0)
+        if abs(other - one) <= threshold:
+            continue
+        left, right = pair
+        if (glyphs_a is not None and (left not in glyphs_a or right not in glyphs_a)) or \
+                (glyphs_b is not None and (left not in glyphs_b or right not in glyphs_b)):
+            kind = "absent"
+        elif not other:
+            kind = "only_a"
+        elif not one:
+            kind = "only_b"
+        else:
+            kind = "value"
+        found.append(KernDifference(left, right, one, other, kind))
+    found.sort(key=lambda d: (-abs(d.delta), d.left, d.right))
+    return found
+
+
+def kern_counts(found):
+    counts_ = {}
+    for d in found:
+        counts_[d.kind] = counts_.get(d.kind, 0) + 1
+    return counts_
+
+
+# ---------------------------------------------------------------------------
+# Features compared
+# ---------------------------------------------------------------------------
+
+PREFIX, CLASSES = u"Prefix", u"Classes"  # the code before the features, and the Classes panel's classes
+
+
+def code_lines(text):
+    """A feature's code as lines: line ends made one, trailing spaces and the blank lines at either end
+    dropped (they change nothing)."""
+    lines = [line.rstrip() for line in (text or u"").replace(u"\r\n", u"\n").replace(u"\r", u"\n").split(u"\n")]
+    while lines and not lines[-1]:
+        lines.pop()
+    while lines and not lines[0]:
+        lines.pop(0)
+    return lines
+
+
+def line_diff(a, b, context=DIFF_CONTEXT):
+    """[(sign, line)] of what differs between two texts: " " a line in both, "-" only in a, "+" only
+    in b, "@" lines left out (unchanged); [] when they are alike."""
+    lines_a, lines_b = code_lines(a), code_lines(b)
+    if lines_a == lines_b:
+        return []
+    matcher = difflib.SequenceMatcher(None, lines_a, lines_b, False)
+    rows = []
+    for group in matcher.get_grouped_opcodes(context):
+        if rows or group[0][1] > 0 or group[0][3] > 0:
+            rows.append((u"@", u""))
+        for tag, i1, i2, j1, j2 in group:
+            if tag == "equal":
+                rows.extend((u" ", line) for line in lines_a[i1:i2])
+                continue
+            if tag in ("replace", "delete"):
+                rows.extend((u"-", line) for line in lines_a[i1:i2])
+            if tag in ("replace", "insert"):
+                rows.extend((u"+", line) for line in lines_b[j1:j2])
+        if group[-1][2] < len(lines_a) or group[-1][4] < len(lines_b):
+            rows.append((u"@", u""))
+    while len(rows) > 1 and rows[-1][0] == u"@" and rows[-2][0] == u"@":
+        rows.pop()
+    return rows
+
+
+class FeatureDifference(object):
+    """A feature (or the prefix, or the classes): its tag, its kind (only_a, only_b, differs, same),
+    its code in each, and the lines that differ."""
+
+    def __init__(self, tag, kind, a, b, rows):
+        self.tag, self.kind, self.a, self.b, self.rows = tag, kind, a, b, rows
+
+    @property
+    def added(self):
+        return sum(1 for sign, _ in self.rows if sign == u"+")
+
+    @property
+    def removed(self):
+        return sum(1 for sign, _ in self.rows if sign == u"-")
+
+
+def feature_diff(a, b):
+    """[FeatureDifference] of two fonts' features, each [(tag, code)] in its font's order: a's order,
+    then b's own (the prefix first, the classes last)."""
+    by_a, by_b = dict(a), dict(b)
+    found = []
+    tags = [t for t, _ in a] + [t for t, _ in b if t not in by_a]
+    tags.sort(key=lambda t: {PREFIX: 0, CLASSES: 2}.get(t, 1))  # (a stable sort: the fonts' order kept)
+    for tag in tags:
+        if tag not in by_b:
+            found.append(FeatureDifference(tag, "only_a", by_a[tag], None, [(u"-", line) for line in code_lines(by_a[tag])]))
+        elif tag not in by_a:
+            found.append(FeatureDifference(tag, "only_b", None, by_b[tag], [(u"+", line) for line in code_lines(by_b[tag])]))
+        else:
+            rows = line_diff(by_a[tag], by_b[tag])
+            found.append(FeatureDifference(tag, "differs" if rows else "same", by_a[tag], by_b[tag], rows))
+    return found
+
+
+def classes_text(groups):
+    """The Classes panel's feature classes as code, a line each, by name: [(name, glyph names)]."""
+    return u"\n".join(u"@%s = [%s];" % (name, u" ".join(members)) for name, members in sorted(groups))
+
+
+def feature_state(f, labels):
+    """The Difference column of a feature's row."""
+    if f.kind == "only_a":
+        return u"only in %s" % labels[0]
+    if f.kind == "only_b":
+        return u"only in %s" % labels[1]
+    if f.kind == "same":
+        return u"alike"
+    parts = []
+    if f.removed:
+        parts.append(u"%s only in %s" % (counted(f.removed, u"line"), labels[0]))
+    if f.added:
+        parts.append(u"%s only in %s" % (counted(f.added, u"line"), labels[1]))
+    return u", ".join(parts) or u"differs"
+
+
+def html_escape(text):
+    return (u"%s" % text).replace(u"&", u"&amp;").replace(u"<", u"&lt;").replace(u">", u"&gt;")
+
+
+def blend(base, tint, share):
+    """"#rrggbb" of tint laid over base at a share (both (r, g, b))."""
+    return u"#%02x%02x%02x" % tuple(int(round(b_ * (1 - share) + t * share)) for b_, t in zip(base, tint))
+
+
+def diff_html(rows, labels, base, text, removed=(222, 64, 52), added=(64, 168, 92)):
+    """A feature's lines that differ as rich text: lines only in the first font on a red tint, a minus
+    before them; lines only in the second on a green tint, a plus; lines left out as an ellipsis.
+    base and text: the view's colors (r, g, b)."""
+    color = u"#%02x%02x%02x" % tuple(text)
+    tints = {u"-": blend(base, removed, 0.28), u"+": blend(base, added, 0.28)}
+    quiet = blend(base, text, 0.55)
+    signs = {u"-": u"\N{MINUS SIGN}", u"+": u"+", u" ": u" "}
+    parts = [u'<table cellspacing="0" cellpadding="1" width="100%%" style="color:%s">' % color,
+             u'<tr><td colspan="2" style="color:%s">%s %s &nbsp; + %s</td></tr>' % (
+                 quiet, u"\N{MINUS SIGN}", html_escape(labels[0]), html_escape(labels[1]))]
+    for sign, line in rows:
+        if sign == u"@":
+            parts.append(u'<tr><td></td><td style="color:%s">\N{HORIZONTAL ELLIPSIS}</td></tr>' % quiet)
+            continue
+        style = u' style="background-color:%s"' % tints[sign] if sign in tints else u""
+        parts.append(u'<tr%s><td width="14"><pre style="margin:0">%s</pre></td><td><pre style="margin:0">%s</pre></td></tr>'
+                     % (style, signs[sign], html_escape(line) or u" "))
+    parts.append(u"</table>")
+    return u"".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# FontLab: reading a glyph (every call guarded: only those noted in docs/FONT-COMPARE.md are proven)
+# ---------------------------------------------------------------------------
+
+def glyph_codes(fg):
+    """A fontgate glyph's code points (its unicodes, else its unicode)."""
+    try:
+        codes = [int(code) for code in (fg.unicodes or []) if code]
+    except Exception:
+        codes = []
+    if not codes:
+        try:
+            codes = [int(fg.unicode)] if fg.unicode else []
+        except Exception:
+            codes = []
+    return codes
+
+
+def shape_matrix(shape):
+    try:
+        t = shape.transform
+        return (float(t.m11()), float(t.m12()), float(t.m21()), float(t.m22()), float(t.dx()), float(t.dy()))
+    except Exception:
+        return (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+
+
+def anchor_points(layer):
+    """[(name, x, y)] of a layer's anchors (flPinPoint.point, as Diacritics reads it)."""
+    found = []
+    try:
+        for anchor in layer.anchors:
+            try:
+                point = anchor.point
+                found.append((u"%s" % anchor.name, float(point.x()), float(point.y())))
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return found
+
+
+def read_layer(name, codes, layer):
+    """A layer's GlyphData (its ink not yet measured), or None when it cannot be read."""
+    contours, components = [], []
+    try:
+        shapes = list(layer.shapes)
+    except Exception:
+        return None
+    for shape in shapes:
+        try:
+            component = bool(shape.isComponent)
+        except Exception:
+            component = False
+        matrix = shape_matrix(shape)
+        if component:
+            try:
+                base = u"%s" % shape.shapeData.componentGlyph
+            except Exception:
+                base = u"?"
+            components.append((base, matrix))
+            continue
+        a, b, c, d, dx, dy = matrix
+        for contour in shape.contours:
+            if contour is None:  # FontLab lists an empty contour as None in some glyphs
+                continue
+            nodes = []
+            for node in contour.nodes():
+                x, y = float(node.x), float(node.y)
+                nodes.append((a * x + c * y + dx, b * x + d * y + dy, u"%s" % node.type))
+            contours.append(nodes)
+    try:
+        advance = float(layer.advanceWidth)
+    except Exception:
+        advance = 0.0
+    return GlyphData(name, codes, advance, None, contours, components, anchor_points(layer))
+
+
+# ---------------------------------------------------------------------------
+# The dialog (Qt)
+# ---------------------------------------------------------------------------
+
+def _qt():
+    from PythonQt import QtCore, QtGui
+    return QtCore, QtGui
+
+
+def _prop(obj, name):
+    """A Qt property's value: an attribute in PythonQt (a method in some builds)."""
+    value = getattr(obj, name)
+    return value() if callable(value) else value
+
+
+HELP = u"""<b>FreeLab Font Compare</b><br>
+Two open fonts, or two masters of one font, compared glyph by glyph. Nothing in either font
+changes.<br><br>
+Choose them in <i>Compare</i> and <i>with</i> (the current font first), then click <i>Compare</i>.
+Differences of at most the units set are left out (metrics, anchors, nodes, components, kerning).
+A font of another em is scaled to the first one's.<br><br>
+<b>Glyphs</b>: a chip per kind of difference, each showing or hiding its glyphs; the glyphs that
+differ, the worst first, both drawn small; the selected glyph from both fonts, the first in the text
+color and the second in the highlight color, overlaid in the middle, its differences in one sentence
+under it. How much two outlines differ is the area where one has ink and the other not, as a share of
+the ink: a node moved shows.<br>
+<b>Kerning</b>: the glyph pairs kerned differently, classes resolved as FontLab applies them, the
+largest difference first, and the selected pair drawn in both.<br>
+<b>Features</b>: the features only in one font, and the lines of code that differ, removed in red and
+added in green.<br><br>
+Compared again after an undo or an edit in either font. Click this help's <i>?</i> button, then any
+control, for what it does."""
+
+GRAY = (128, 128, 128)
+LINE_ALPHA = 128  # the lists' lines: a mid gray at half strength
+QUIET_ALPHA = 150
+FIRST_ALPHA = 120  # the first font's ink, overlaid
+SECOND_ALPHA = 150  # the second's, in the highlight color
+THUMB_SIZE = 32
+COLUMN_MAX = 260  # pixels: a list's first column at most
+KERN_PREVIEW_GAP = 6  # pixels between the two pair pictures
+
+
+def qcolor(rgb, alpha=255):
+    QtCore, QtGui = _qt()
+    return QtGui.QColor(rgb[0], rgb[1], rgb[2], alpha)
+
+
+def faded(color, alpha):
+    QtCore, QtGui = _qt()
+    found = QtGui.QColor(color)
+    found.setAlpha(alpha)
+    return found
+
+
+def new_pixmap(width, height):
+    QtCore, QtGui = _qt()
+    pixmap = QtGui.QPixmap(max(1, int(width)), max(1, int(height)))
+    pixmap.fill(QtGui.QColor(0, 0, 0, 0))
+    return pixmap
+
+
+def text_width(font, text):
+    QtCore, QtGui = _qt()
+    return QtGui.QFontMetrics(font).width(text)
+
+
+def elided(font, text, width):
+    """text cut to fit width pixels, an ellipsis at its end."""
+    if text_width(font, text) <= width:
+        return text
+    while text and text_width(font, text + u"\N{HORIZONTAL ELLIPSIS}") > width:
+        text = text[:-1]
+    return text + u"\N{HORIZONTAL ELLIPSIS}" if text else u""
+
+
+def ink_box(path):
+    """(left, bottom, right, top) of a glyph's ink in font units, or None (no ink)."""
+    if path is None or path.isEmpty():
+        return None
+    rect = path.boundingRect()  # font units grow upward: the rect's top() is the ink's bottom
+    return rect.left(), rect.top(), rect.right(), rect.bottom()
+
+
+def both_thumb(path_a, path_b, colors, size=THUMB_SIZE):
+    """A glyph from both fonts, small: the first in the text color, the second in the highlight color,
+    see-through, at one scale."""
+    QtCore, QtGui = _qt()
+    pixmap = new_pixmap(size, size)
+    boxes = [box for box in (ink_box(path_a), ink_box(path_b)) if box is not None]
+    if not boxes:
+        return pixmap
+    left, bottom = min(b_[0] for b_ in boxes), min(b_[1] for b_ in boxes)
+    right, top = max(b_[2] for b_ in boxes), max(b_[3] for b_ in boxes)
+    scale = min((size - 6) / float(max(right - left, 1.0)), (size - 6) / float(max(top - bottom, 1.0)))
+    painter = QtGui.QPainter(pixmap)
+    try:  # ended before anything else can fail: a painter left open on a freed pixmap aborts FontLab
+        painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        painter.translate(size / 2.0 - (left + right) / 2.0 * scale, size / 2.0 + (bottom + top) / 2.0 * scale)
+        painter.scale(scale, -scale)
+        two = path_a is not None and path_b is not None
+        if path_a is not None:
+            painter.fillPath(path_a, QtGui.QBrush(faded(colors["text"], FIRST_ALPHA + 40 if two else 220)))
+        if path_b is not None:
+            painter.fillPath(path_b, QtGui.QBrush(faded(colors["highlight"], SECOND_ALPHA if two else 220)))
+    finally:
+        painter.end()
+    return pixmap
+
+
+def comparison_pixmap(width, height, a, b, colors, font):
+    """The selected glyph from both fonts at one scale, in three panels: the first font's (text
+    color), both overlaid, the second's (highlight color); the baseline and each advance width drawn
+    thin; a font without the glyph as a dashed empty frame. a, b: (caption, path or None, advance)."""
+    QtCore, QtGui = _qt()
+    pixmap = new_pixmap(width, height)
+    text, highlight = colors["text"], colors["highlight"]
+    line_height = QtGui.QFontMetrics(font).height()
+    xs, ys = [], [0.0]
+    for _, path, advance in (a, b):
+        box = ink_box(path)
+        if box is not None:
+            xs += [box[0], box[2]]
+            ys += [box[1], box[3]]
+        if path is not None:
+            xs += [0.0, float(advance)]
+    if len(xs) < 2:
+        xs, ys = [0.0, 500.0], [0.0, 700.0]
+    left, right, bottom, top = min(xs), max(xs), min(ys), max(ys)
+    third = width / 3.0
+    room_y = height - line_height - 28
+    scale = min((third - 28) / float(max(1.0, right - left)), room_y / float(max(1.0, top - bottom)))
+    if scale <= 0:
+        return pixmap
+    painter = QtGui.QPainter(pixmap)
+    try:
+        painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        panels = ((a[0], [(a, faded(text, 210))], text), (u"Both", [(a, faded(text, FIRST_ALPHA)), (b, faded(highlight, SECOND_ALPHA))], text),
+                  (b[0], [(b, faded(highlight, 210))], highlight))
+        for index, (caption, drawn, caption_color) in enumerate(panels):
+            x0 = index * third + third / 2.0 - (left + right) / 2.0 * scale
+            y0 = 12 + room_y / 2.0 + (bottom + top) / 2.0 * scale
+            painter.setPen(QtGui.QPen(qcolor(GRAY, LINE_ALPHA)))
+            painter.drawLine(QtCore.QPointF(index * third + 8, y0), QtCore.QPointF((index + 1) * third - 8, y0))
+            for (_, path, advance), color in drawn:
+                if path is None:
+                    if len(drawn) == 1:
+                        pen = QtGui.QPen(qcolor(GRAY, 200), 1.2, QtCore.Qt.DashLine)
+                        painter.setPen(pen)
+                        painter.setBrush(QtGui.QBrush())
+                        frame = QtCore.QRectF(x0 + left * scale, y0 - top * scale, (right - left) * scale,
+                                              (top - bottom) * scale)
+                        painter.drawRect(frame)
+                        painter.setPen(faded(text, QUIET_ALPHA))
+                        painter.drawText(frame, int(QtCore.Qt.AlignCenter), u"Not there")
+                    continue
+                pen = QtGui.QPen(faded(color, 150), 1.0, QtCore.Qt.DashLine)
+                painter.setPen(pen)
+                for x in (0.0, float(advance)):
+                    painter.drawLine(QtCore.QPointF(x0 + x * scale, y0 - top * scale - 4),
+                                     QtCore.QPointF(x0 + x * scale, y0 - bottom * scale + 4))
+                painter.save()
+                painter.translate(x0, y0)
+                painter.scale(scale, -scale)
+                painter.fillPath(path, QtGui.QBrush(color))
+                painter.restore()
+            painter.setFont(font)
+            painter.setPen(caption_color)
+            painter.drawText(QtCore.QRectF(index * third, height - line_height - 6, third, line_height),
+                             int(QtCore.Qt.AlignCenter), elided(font, caption, int(third) - 8))
+        painter.setPen(QtGui.QPen(qcolor(GRAY, LINE_ALPHA)))
+        for index in (1, 2):
+            painter.drawLine(QtCore.QPointF(index * third, 8), QtCore.QPointF(index * third, height - 8))
+    finally:
+        painter.end()
+    return pixmap
+
+
+def stacked_pixmap(pixmaps, gap=KERN_PREVIEW_GAP):
+    """Pictures one under the other, centered."""
+    QtCore, QtGui = _qt()
+    shown = [p for p in pixmaps if p is not None and not p.isNull()]
+    if not shown:
+        return QtGui.QPixmap()
+    width = max(p.width() for p in shown)
+    height = sum(p.height() for p in shown) + gap * (len(shown) - 1)
+    pixmap = new_pixmap(width, height)
+    painter = QtGui.QPainter(pixmap)
+    try:
+        y = 0
+        for p in shown:
+            painter.drawPixmap(int((width - p.width()) / 2), int(y), p)
+            y += p.height() + gap
+    finally:
+        painter.end()
+    return pixmap
+
+
+class Side(object):
+    """A font and master chosen: its package, master, label in sentences, and glyph names."""
+
+    def __init__(self, package, master, label):
+        self.package, self.master, self.label = package, master, label
+        self.paths = {}  # glyph name: its QPainterPath, for the glyphs listed
+
+
+class SecondWatch(object):
+    """The second font's History watched too (watch_history takes one font per owner)."""
+
+    def __init__(self, owner):
+        self.owner = owner
+        self.package = self.seen_history = None
+
+    @property
+    def dialog(self):
+        return self.owner.dialog
+
+    @property
+    def busy(self):
+        return self.owner.busy
+
+    def history_moved(self):
+        self.owner.history_moved()
+
+
+class CompareDialog(object):
+    def __init__(self):
+        self.failed = None
+        self.dialog = None
+        try:
+            self.build()
+        except Exception as exc:  # a half-built dialog crashed FontLab: never raised from here
+            self.failed = exc
+
+    # -- building ------------------------------------------------------------
+
+    def build(self):
+        QtCore, QtGui = _qt()
+        import fontlab
+        self.fontlab = fontlab
+        ak = self.ak = load_auto_kerning()
+        self.package = None  # the first font: flags, and its History watched
+        self.seen_history = None
+        self.second = SecondWatch(self)
+        self.busy = self.filling = False
+        self.fonts, self.choices = [], []  # open fonts (the current first); (font index, master) per combo entry
+        self.sides = None  # (Side, Side) compared
+        self.masters_mode = False
+        self.results, self.glyph_names = [], []
+        self.kern_rows, self.kern_shown = [], []
+        self.feature_rows, self.feature_shown = [], []
+        self.rename = {}  # the second font's glyph names to the first's (matched by code point)
+        self.filters, self.redraws = [], {}
+        self.drawing_failed = False
+        main = ak.AutoKerningDialog.main_window()
+        dialog = QtGui.QDialog(main) if main is not None else QtGui.QDialog()
+        self.dialog = dialog
+        dialog.setWindowTitle("FreeLab Font Compare")
+        dialog.setWhatsThis(HELP)
+        ak.size_dialog(dialog)
+        layout = QtGui.QVBoxLayout(dialog)
+        self.font_label = ak.status_label()
+        layout.addWidget(self.font_label)
+        layout.addWidget(ak.separator())
+        settings = QtGui.QHBoxLayout()
+        settings.addWidget(QtGui.QLabel("Compare"))
+        self.choice_a = self.combo(u"The first font and master: the current font to start with. Its glyph names are "
+                                   u"the ones listed, and its glyphs are flagged by a right-click.")
+        settings.addWidget(self.choice_a)
+        settings.addWidget(QtGui.QLabel("with"))
+        self.choice_b = self.combo(u"The second font and master: another open font, or another master of the first.")
+        settings.addWidget(self.choice_b)
+        settings.addSpacing(12)
+        settings.addWidget(QtGui.QLabel("Ignore differences up to"))
+        self.threshold = QtGui.QSpinBox()
+        self.threshold.setRange(0, 100)
+        self.threshold.setValue(THRESHOLD)
+        self.threshold.setSuffix(u" units")
+        self.threshold.setWhatsThis(u"Widths, sidebearings, anchors, nodes, components, and kerning values that differ "
+                                    u"by at most this many units count as alike.")
+        settings.addWidget(self.threshold)
+        self.compare_button = QtGui.QPushButton("Compare")
+        settings.addWidget(self.compare_button)
+        settings.addStretch(1)
+        layout.addLayout(settings)
+        self.log = ak.Log()
+        # A tab bar over plain pages, as in Font Check: a QTabWidget's page drew light frames in dark mode
+        self.tabs = QtGui.QTabBar()
+        self.tabs.setExpanding(False)
+        layout.addWidget(self.tabs)
+        self.pages = QtGui.QStackedWidget()
+        layout.addWidget(self.pages, 1)
+        self.redraw_timer = QtCore.QTimer()
+        self.redraw_timer.setSingleShot(True)
+        self.redraw_timer.setInterval(80)
+        self.redraw_timer.connect("timeout()", self.redraw_now)
+        for build, label in ((self.build_glyphs, u"Glyphs"), (self.build_kerning, u"Kerning"),
+                             (self.build_features, u"Features")):
+            page = build(QtCore, QtGui)
+            self.tabs.addTab(label)
+            self.pages.addWidget(page)
+        layout.addWidget(self.log.widget)
+        buttons = QtGui.QHBoxLayout()
+        self.glyph_window_button = QtGui.QPushButton("Show in Glyph window")
+        self.glyph_window_button.setWhatsThis(u"Opens a <i>Glyph</i> window on the selected glyph or pair, in FontLab's "
+                                              u"current font (when it is one of the two).")
+        self.close_button = QtGui.QPushButton("Close")
+        buttons.addWidget(self.glyph_window_button)
+        buttons.addStretch(1)
+        buttons.addWidget(self.close_button)
+        layout.addLayout(buttons)
+        self.glyph_window_button.connect("clicked()", self.show_in_glyph_window)
+        self.close_button.connect("clicked()", dialog.close)
+        self.compare_button.connect("clicked()", self.compare)
+        self.choice_a.connect("currentIndexChanged(int)", lambda index: self.choice_changed())
+        self.choice_b.connect("currentIndexChanged(int)", lambda index: self.choice_changed())
+        self.tabs.connect("currentChanged(int)", self.switch_page)
+        ak.add_tools_button(dialog, "Font Compare", getattr(self, "log", None))  # (the other font tools, a click away)
+        ak.plain_buttons(dialog)
+        self.read_fonts()
+        self.history_timer = ak.watch_history(self)
+        self.second_timer = ak.watch_history(self.second)
+        self.flagging = [ak.flag_menu(self.glyph_tree, self, self.selected_glyphs, self.row_glyph),
+                         ak.flag_menu(self.kern_tree, self, self.selected_glyphs, self.row_pair)]
+        self.update_buttons()
+
+    def combo(self, tip):
+        QtCore, QtGui = _qt()
+        box = QtGui.QComboBox()
+        try:
+            box.setSizeAdjustPolicy(QtGui.QComboBox.AdjustToMinimumContentsLengthWithIcon)
+            box.setMinimumContentsLength(22)  # (a long name elided, not pushing the row past the window)
+        except Exception:
+            pass
+        box.setWhatsThis(tip)
+        return box
+
+    def tree(self, columns, icon=None):
+        """A list: no root decoration, no horizontal scrolling (long texts elided, whole in tooltips),
+        grid lines, pictures of the given size (its pictures drawn in the dialog's colors)."""
+        QtCore, QtGui = _qt()
+        tree = QtGui.QTreeWidget()
+        tree.setColumnCount(len(columns))
+        tree.setHeaderLabels(list(columns))
+        tree.setRootIsDecorated(False)
+        try:
+            tree.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        except Exception:
+            pass
+        if icon is not None:
+            tree.setIconSize(QtCore.QSize(icon, icon))
+            tree.setProperty(self.ak.LEAVE_ALONE_PROP, True)  # (as Font Check's: its scroll bars are FreeLab's flat ones)
+        self.ak.grid_lines(tree)
+        return tree
+
+    def picture_label(self, minimum):
+        """A label showing a picture drawn to its size (redrawn as it is resized)."""
+        QtCore, QtGui = _qt()
+        label = QtGui.QLabel()
+        label.setProperty(self.ak.LEAVE_ALONE_PROP, True)  # dark mode leaves the drawn pictures alone
+        label.setAlignment(QtCore.Qt.AlignCenter)
+        try:
+            label.setSizePolicy(QtGui.QSizePolicy.Ignored, QtGui.QSizePolicy.Ignored)  # (its picture never sizes it)
+        except Exception:
+            pass
+        label.setMinimumSize(minimum[0], minimum[1])
+        return label
+
+    def watch_resize(self, widget, key):
+        """The picture of widget drawn again (redraw_now's key) a moment after it is resized."""
+        QtCore, QtGui = _qt()
+        owner = self
+
+        class Resized(QtCore.QTimer):  # PythonQt has no QObject to subclass; a timer will do
+            def eventFilter(self, obj, event):
+                try:
+                    if event.type() == 14:  # Resize
+                        owner.redraws[key] = True
+                        owner.redraw_timer.start()
+                except Exception:
+                    pass  # an event filter must never raise
+                return False
+
+        found = Resized()
+        widget.installEventFilter(found)
+        self.filters.append(found)
+
+    def redraw_now(self):
+        keys, self.redraws = list(self.redraws), {}
+        for key in keys:
+            try:
+                if key == "comparison":
+                    self.draw_comparison()
+                elif key == "pair":
+                    self.draw_pair()
+            except Exception:
+                pass  # a timer's handler must not raise
+
+    def page(self, QtGui):
+        widget = QtGui.QWidget()
+        box = QtGui.QVBoxLayout(widget)
+        box.setContentsMargins(0, 0, 0, 0)
+        status = self.ak.status_label()
+        box.addWidget(status)
+        return widget, box, status
+
+    def chip_row(self, kinds, on_toggle, tip):
+        QtCore, QtGui = _qt()
+        row = QtGui.QHBoxLayout()
+        chips = []
+        for kind in kinds:
+            chip = QtGui.QToolButton()
+            chip.setCheckable(True)
+            chip.setChecked(kind != "absent")
+            chip.setWhatsThis(tip)
+            chip.setVisible(False)
+            chip.connect("toggled(bool)", lambda on: on_toggle())
+            row.addWidget(chip)
+            chips.append((kind, chip))
+        row.addStretch(1)
+        return row, chips
+
+    def build_glyphs(self, QtCore, QtGui):
+        ak = self.ak
+        widget, box, self.glyph_status = self.page(QtGui)
+        row, self.glyph_chips = self.chip_row(GLYPH_KINDS, self.fill_glyphs,
+                                              u"Shows or hides the glyphs with this kind of difference (the count: glyphs).")
+        box.addLayout(row)
+        halves = QtGui.QSplitter(QtCore.Qt.Horizontal)
+        self.glyph_tree = self.tree(("Glyph", "Differences"), icon=THUMB_SIZE)
+        self.glyph_tree.setWhatsThis(u"The glyphs that differ, the worst first (only in one font, then outlines, "
+                                     u"components, names and code points, metrics, anchors), each drawn from both "
+                                     u"fonts: the first in the text color, the second in the highlight color. "
+                                     u"Right-click to flag a glyph in the first font.")
+        halves.addWidget(self.glyph_tree)
+        right = QtGui.QWidget()
+        side = QtGui.QVBoxLayout(right)
+        side.setContentsMargins(4, 0, 0, 0)
+        self.comparison = self.picture_label((360, 260))
+        self.comparison.setWhatsThis(u"The selected glyph from the first font (left, in the text color), both overlaid "
+                                     u"(middle), and from the second (right, in the highlight color), at one scale; "
+                                     u"the dashed lines are the advance widths. A font without the glyph shows a "
+                                     u"dashed empty frame.")
+        side.addWidget(self.comparison, 1)
+        self.difference_label = ak.status_label()
+        side.addWidget(self.difference_label)
+        halves.addWidget(right)
+        halves.setStretchFactor(0, 2)
+        halves.setStretchFactor(1, 3)
+        box.addWidget(halves, 1)
+        self.glyph_tree.connect("itemSelectionChanged()", self.glyph_selected)
+        self.glyph_tree.connect("itemDoubleClicked(QTreeWidgetItem*,int)", lambda item, column: self.show_in_glyph_window())
+        self.watch_resize(self.comparison, "comparison")
+        return widget
+
+    def build_kerning(self, QtCore, QtGui):
+        widget, box, self.kern_status = self.page(QtGui)
+        row, self.kern_chips = self.chip_row(KERN_KINDS, self.fill_kerning,
+                                             u"Shows or hides these pairs (the count: pairs). Pairs of a glyph one font "
+                                             u"lacks are hidden to start with: the Glyphs tab lists those glyphs.")
+        box.addLayout(row)
+        halves = QtGui.QSplitter(QtCore.Qt.Horizontal)
+        self.kern_tree = self.tree(("Pair", "First", "Second", "Difference"))
+        self.kern_tree.setWhatsThis(u"The glyph pairs kerned differently, the largest difference first: the value in "
+                                    u"each font (0: not kerned) and the second's minus the first's. Class kerning is "
+                                    u"resolved to its glyph pairs, as FontLab applies it. Right-click to flag a pair's "
+                                    u"glyphs in the first font.")
+        halves.addWidget(self.kern_tree)
+        self.pair_picture = self.picture_label((280, 200))
+        self.pair_picture.setWhatsThis(u"The selected pair in the first font (text color) and in the second (highlight "
+                                       u"color), each at its own value.")
+        halves.addWidget(self.pair_picture)
+        halves.setStretchFactor(0, 3)
+        halves.setStretchFactor(1, 2)
+        box.addWidget(halves, 1)
+        self.kern_tree.connect("itemSelectionChanged()", self.draw_pair)
+        self.kern_tree.connect("itemDoubleClicked(QTreeWidgetItem*,int)", lambda item, column: self.show_in_glyph_window())
+        self.watch_resize(self.pair_picture, "pair")
+        return widget
+
+    def build_features(self, QtCore, QtGui):
+        ak = self.ak
+        widget, box, self.feature_status = self.page(QtGui)
+        row = QtGui.QHBoxLayout()
+        self.show_same = QtGui.QCheckBox("Show the features that are alike")
+        self.show_same.setWhatsThis(u"Lists the features whose code is the same in both fonts too.")
+        row.addWidget(self.show_same)
+        row.addStretch(1)
+        box.addLayout(row)
+        halves = QtGui.QSplitter(QtCore.Qt.Horizontal)
+        self.feature_tree = self.tree(("Feature", "Difference"))
+        self.feature_tree.setWhatsThis(u"The features only in one font or whose code differs, in the first font's order; "
+                                       u"<i>Prefix</i> is the code before the features, <i>Classes</i> the classes of the "
+                                       u"Classes panel.")
+        halves.addWidget(self.feature_tree)
+        self.diff_view = QtGui.QTextEdit()
+        self.diff_view.setReadOnly(True)
+        self.diff_view.setProperty(ak.LEAVE_ALONE_PROP, True)  # (as the log: its colors are the palette's, its tints drawn)
+        self.diff_view.setWhatsThis(u"The selected feature's code: lines only in the first font on red, after a minus; "
+                                    u"lines only in the second on green, after a plus; three lines around each change, "
+                                    u"the rest left out.")
+        halves.addWidget(self.diff_view)
+        halves.setStretchFactor(0, 1)
+        halves.setStretchFactor(1, 3)
+        box.addWidget(halves, 1)
+        self.show_same.connect("toggled(bool)", lambda on: self.fill_features())
+        self.feature_tree.connect("itemSelectionChanged()", self.feature_selected)
+        return widget
+
+    # -- the fonts -----------------------------------------------------------
+
+    def current_font(self):
+        workspace = self.fontlab.flWorkspace.instance()
+        try:
+            if not workspace.packages():
+                return None
+        except Exception:
+            pass
+        package = workspace.currentPackage
+        if package is None or package.isNull or not package.glyphsCount:
+            return None
+        return package
+
+    def open_fonts(self):
+        """The open fonts, the current one first."""
+        current = self.current_font()
+        found = [current] if current is not None else []
+        keys = set(self.ak.font_key(p) for p in found)
+        try:
+            listed = list(self.fontlab.flWorkspace.instance().packages())
+        except Exception:
+            listed = []
+        for item in listed:
+            try:
+                package = self.fontlab.flPackage(item)
+                if package is None or package.isNull or not package.glyphsCount:
+                    continue
+                key = self.ak.font_key(package)
+            except Exception:
+                continue
+            if key not in keys:
+                keys.add(key)
+                found.append(package)
+        return found
+
+    @staticmethod
+    def masters_of(package):
+        try:
+            found = [u"%s" % name for name in package.masters]
+        except Exception:
+            found = []
+        if not found:
+            try:
+                found = [u"%s" % package.master]
+            except Exception:
+                found = []
+        return found
+
+    def read_fonts(self):
+        """The combo boxes filled with the open fonts and their masters, the choices kept where they still
+        are; False (and said so) when no font is open."""
+        wanted = [self.chosen(box) for box in (self.choice_a, self.choice_b)]
+        wanted = [None if w is None else (self.ak.font_key(w[0]), w[1]) for w in wanted]
+        self.fonts = self.open_fonts()
+        self.choices = []
+        texts = []
+        for index, package in enumerate(self.fonts):
+            masters = self.masters_of(package)
+            for master in masters:
+                self.choices.append((index, master))
+                texts.append(choice_text(u"%s" % package.tfn, master, len(masters)))
+        keys = [(self.ak.font_key(self.fonts[i]), m) for i, m in self.choices]
+        self.filling = True
+        try:
+            for box, want in ((self.choice_a, wanted[0]), (self.choice_b, wanted[1])):
+                box.clear()
+                for text in texts:
+                    box.addItem(text)
+            first = self.default_first(keys, wanted[0])
+            second = self.default_second(keys, first, wanted[1])
+            if first is not None:
+                self.choice_a.setCurrentIndex(first)
+            if second is not None:
+                self.choice_b.setCurrentIndex(second)
+        finally:
+            self.filling = False
+        if not self.fonts:
+            self.font_label.setText(u"No font is open. Open two fonts, or one with two masters, then click %s."
+                                    % self.ak.i("Compare"))
+            return False
+        if len(self.choices) < 2:
+            self.font_label.setText(u"Only %s is open, with one master: open another font to compare it with, then click "
+                                    u"%s." % (self.ak.b(self.fonts[0].tfn), self.ak.i("Compare")))
+        elif self.sides is None:
+            self.font_label.setText(u"Choose two fonts, or two masters of one font, then click %s." % self.ak.i("Compare"))
+        return True
+
+    def default_first(self, keys, wanted):
+        if wanted in keys:
+            return keys.index(wanted)
+        if not keys:
+            return None
+        try:
+            current = (self.ak.font_key(self.fonts[0]), u"%s" % self.fonts[0].master)
+            if current in keys:
+                return keys.index(current)
+        except Exception:
+            pass
+        return 0
+
+    def default_second(self, keys, first, wanted):
+        """What was chosen, or the next open font's current master, or the first font's next master."""
+        if wanted in keys and keys.index(wanted) != first:
+            return keys.index(wanted)
+        if first is None or len(keys) < 2:
+            return first
+        font = keys[first][0]
+        for index, package in enumerate(self.fonts):
+            key = self.ak.font_key(package)
+            if key == font:
+                continue
+            try:
+                master = u"%s" % package.master
+            except Exception:
+                master = None
+            if (key, master) in keys:
+                return keys.index((key, master))
+            return next(k for k, (f, _) in enumerate(keys) if f == key)
+        return next((k for k, (f, _) in enumerate(keys) if f == font and k != first), first)
+
+    def chosen(self, box):
+        """(package, master) chosen in a combo box, or None."""
+        index = _prop(box, "currentIndex") if self.choices else -1
+        if index is None or not 0 <= index < len(self.choices):
+            return None
+        font, master = self.choices[index]
+        return self.fonts[font], master
+
+    def choice_changed(self):
+        if self.filling or self.busy:
+            return
+        self.update_buttons()
+        if self.sides is not None:
+            self.font_label.setText(u"Click %s to compare the fonts chosen." % self.ak.i("Compare"))
+
+    def colors(self):
+        QtCore, QtGui = _qt()
+        palette = _prop(self.dialog, "palette")
+        return {"text": palette.color(QtGui.QPalette.WindowText), "base": palette.color(QtGui.QPalette.Window),
+                "highlight": palette.color(QtGui.QPalette.Highlight)}
+
+    def icon(self, draw, *args):
+        """A QIcon of a picture drawn (an empty one, and a warning once per window, when drawing failed)."""
+        QtCore, QtGui = _qt()
+        try:
+            return QtGui.QIcon(draw(*args))
+        except Exception as exc:
+            if not self.drawing_failed:
+                self.drawing_failed = True
+                self.log.add(u"A picture could not be drawn: %s" % self.ak.html(exc), "warning")
+            return QtGui.QIcon()
+
+    def progress(self, done, total, what):
+        QtCore, QtGui = _qt()
+        self.font_label.setText(u"%s %s of %s\N{HORIZONTAL ELLIPSIS}" % (what, self.ak.b(grouped(done)), self.ak.b(grouped(total))))
+        QtGui.QApplication.processEvents()
+
+    # -- comparing -----------------------------------------------------------
+
+    def glyph_list(self, package):
+        return [(u"%s" % fg.name, glyph_codes(fg)) for fg in package.fgPackage.glyphs]
+
+    def layer_of(self, package, name, master):
+        glyph = package.findName(name)
+        if glyph is None or glyph.isNull:
+            return None
+        layer = glyph.getLayerByName(master)
+        if layer is None or getattr(layer, "isNull", False):
+            return None
+        return layer
+
+    def read_glyph(self, side, name, codes, factor=1.0):
+        """(GlyphData, (its path, its advance width) scaled by factor) of a glyph in a side's master,
+        (None, None) without a layer there."""
+        QtCore, QtGui = _qt()
+        layer = self.layer_of(side.package, name, side.master)
+        if layer is None:
+            return None, None
+        data = read_layer(name, codes, layer)
+        if data is None:
+            raise ValueError(u"%s could not be read in %s" % (name, side.label))
+        path = self.ak.layer_path(layer)
+        box = ink_box(path)
+        data.ink = None if box is None else (box[0], box[2])
+        if factor != 1:
+            transform = QtGui.QTransform()
+            transform.scale(factor, factor)
+            path = transform.map(path)
+        return data, (path, data.advance * factor)
+
+    def kerning_of(self, side):
+        """A master's kerning, {(left, right): value}, classes resolved as FontLab applies them."""
+        kerning = self.ak.FontKerning(side.package.kerning(side.master))
+        if kerning.plain is not None:
+            return dict((pair, value) for pair, value in kerning.plain.items() if value)
+        return resolve_entries(kerning.values, kerning.members)
+
+    @staticmethod
+    def features_of(package):
+        """[(tag, code)] of a font's features, its prefix first and the Classes panel's classes last."""
+        found = []
+        features = package.fgPackage.features
+        try:
+            prefix = features.get_prefix() or u""
+        except Exception:
+            prefix = u""
+        if code_lines(prefix):
+            found.append((PREFIX, u"%s" % prefix))
+        for tag in features.keys():
+            found.append((u"%s" % tag, u"%s" % (features.get_feature(tag) or u"")))
+        try:
+            groups = [(u"%s" % g[1], [u"%s" % n for n in g[4]]) for g in package.getAllGroups() if not g[0]]
+        except Exception:
+            groups = []
+        if groups:
+            found.append((CLASSES, classes_text(groups)))
+        return found
+
+    def compare(self):
+        """Both choices compared: glyphs, kerning, and features."""
+        if self.busy:
+            return
+        self.read_fonts()
+        a, b = self.chosen(self.choice_a), self.chosen(self.choice_b)
+        ak = self.ak
+        if a is None or b is None:
+            self.update_buttons()
+            return
+        if ak.font_key(a[0]) == ak.font_key(b[0]) and a[1] == b[1]:
+            self.font_label.setText(u"Choose two fonts, or two masters of one font, to compare.")
+            self.update_buttons()
+            return
+        self.busy = True
+        ak.enable(self.compare_button, False)
+        try:
+            self.run(a, b)
+        except Exception as exc:
+            self.font_label.setText(u"The comparison stopped: see the log.")
+            self.log.add(ak.html(exc), "error")
+        finally:
+            self.busy = False
+        self.update_buttons()
+
+    def run(self, a, b):
+        ak, b_ = self.ak, self.ak.b
+        (package_a, master_a), (package_b, master_b) = a, b
+        same = ak.font_key(package_a) == ak.font_key(package_b)
+        labels = side_labels((ak.font_key(package_a), u"%s" % package_a.tfn, master_a, len(self.masters_of(package_a))),
+                             (ak.font_key(package_b), u"%s" % package_b.tfn, master_b, len(self.masters_of(package_b))))
+        first, second = Side(package_a, master_a, labels[0]), Side(package_b, master_b, labels[1])
+        upm_a, upm_b = float(package_a.upm or 1000), float(package_b.upm or 1000)
+        factor = upm_a / upm_b if upm_b else 1.0
+        threshold = int(_prop(self.threshold, "value") or 0)
+        glyphs_a, glyphs_b = self.glyph_list(package_a), self.glyph_list(package_b)
+        codes_a, codes_b = dict(glyphs_a), dict(glyphs_b)
+        pairs, only_a, only_b = match_glyphs(glyphs_a, glyphs_b)
+        self.rename = rename = dict((name_b, name_a) for name_a, name_b in pairs if name_a != name_b)
+        results, unread = [], []
+        total = len(pairs) + len(only_a) + len(only_b)
+        for done, (name_a, name_b) in enumerate(pairs):
+            if done % PROGRESS_EVERY == 0:
+                self.progress(done, total, u"Comparing glyph")
+            try:
+                data_a, picture_a = self.read_glyph(first, name_a, codes_a.get(name_a, []))
+                data_b, picture_b = self.read_glyph(second, name_b, codes_b.get(name_b, []), factor)
+            except Exception:
+                unread.append(name_a)
+                continue
+            if data_b is not None:
+                data_b = data_b.scaled(factor).renamed(rename)
+            found = compare_glyph(data_a, data_b, threshold, labels, upm_a, same)
+            if found:
+                results.append(GlyphResult(name_a if data_a is not None else None,
+                                           name_b if data_b is not None else None, found))
+                first.paths[name_a], second.paths[name_b] = picture_a, picture_b
+        for side, names, kind in ((first, only_a, "only_a"), (second, only_b, "only_b")):
+            for name in names:
+                try:
+                    side.paths[name] = self.read_glyph(side, name, [], factor if side is second else 1.0)[1]
+                except Exception:
+                    side.paths[name] = None
+                text = u"only in %s" % side.label
+                results.append(GlyphResult(name if kind == "only_a" else None, name if kind == "only_b" else None,
+                                           [Difference(kind, text, text)]))
+        self.sides, self.masters_mode, self.results = (first, second), same, results
+        self.progress(total, total, u"Comparing glyph")
+        if unread:
+            self.log.add(u"Could not read %s: %s." % (counted(len(unread), u"glyph"), ak.html(u", ".join(unread[:20]))
+                                                     + (u"\N{HORIZONTAL ELLIPSIS}" if len(unread) > 20 else u"")), "warning")
+            unread = []
+
+        try:
+            kern_a = self.kerning_of(first)
+            kern_b = dict((pair, value * factor) for pair, value in self.kerning_of(second).items())
+            known_a = set(name for name, _ in glyphs_a)
+            known_b = set(rename.get(name, name) for name, _ in glyphs_b)
+            self.kern_rows = kerning_diff(kern_a, kern_b, threshold, rename, known_a, known_b)
+        except Exception as exc:
+            self.kern_rows = []
+            unread.append(u"kerning (%s)" % ak.html(exc))
+        if same:
+            self.feature_rows = []
+        else:
+            try:
+                self.feature_rows = feature_diff(self.features_of(package_a), self.features_of(package_b))
+            except Exception as exc:
+                self.feature_rows = []
+                unread.append(u"features (%s)" % ak.html(exc))
+        for what in unread:
+            self.log.add(u"Could not read the %s." % what, "warning")
+
+        self.package = package_a
+        self.seen_history = ak.history_mark(package_a)
+        self.second.package = None if same else package_b
+        self.second.seen_history = None if same else ak.history_mark(package_b)
+        both = len(pairs)
+        text = u"Compared %s with %s: %s in both" % (b_(labels[0]), b_(labels[1]), b_(counted(both, u"glyph")))
+        if not same:
+            text += u", %s only in %s, %s only in %s" % (b_(grouped(len(only_a))), html_escape(labels[0]),
+                                                         b_(grouped(len(only_b))), html_escape(labels[1]))
+        text += u"."
+        if factor != 1:
+            text += u" %s has %s units per em, %s has %s: its values are scaled to %s." % (
+                html_escape(labels[1]), b_(round_units(upm_b)), html_escape(labels[0]), b_(round_units(upm_a)), b_(round_units(upm_a)))
+        self.font_label.setText(text)
+        self.log.add(u"Compared %s with %s." % (b_(labels[0]), b_(labels[1])), "done")
+        self.fill_chips()
+        self.fill_glyphs()
+        self.fill_kerning()
+        self.fill_features()
+
+    def history_moved(self):
+        """An undo, a redo, or an edit in either font: compared again."""
+        QtCore, QtGui = _qt()
+        if self.sides is None:
+            return
+        self.log.add(u"A font's History moved (an undo, a redo, or an edit): compared again.")
+        QtCore.QTimer.singleShot(0, self.compare)
+
+    # -- the tabs and buttons ------------------------------------------------
+
+    def switch_page(self, index):
+        self.pages.setCurrentIndex(index)
+        self.update_buttons()
+        self.redraws.update({"comparison": True, "pair": True})  # (its size may have changed while hidden)
+        self.redraw_timer.start()
+
+    def current_key(self):
+        index = _prop(self.tabs, "currentIndex")
+        return TABS[index] if 0 <= index < len(TABS) else TABS[0]
+
+    def update_buttons(self):
+        ak = self.ak
+        ak.enable(self.compare_button, not self.busy and len(self.choices) > 1)
+        ak.enable(self.glyph_window_button, self.sides is not None and bool(
+            self.selected_names() or self.selected_names(second=True)))
+        tab_texts = (u"Glyphs", u"Kerning", u"Features")
+        if self.sides is not None:
+            tab_texts = (u"Glyphs %s" % grouped(len(self.results)), u"Kerning %s" % grouped(
+                sum(1 for d in self.kern_rows if d.kind != "absent")),
+                u"Features %s" % grouped(sum(1 for f in self.feature_rows if f.kind != "same")))
+        for index, text in enumerate(tab_texts):
+            try:
+                self.tabs.setTabText(index, text)
+            except Exception:
+                pass
+
+    def labels(self):
+        return (self.sides[0].label, self.sides[1].label) if self.sides is not None else (u"first", u"second")
+
+    @staticmethod
+    def item(texts, data, tip=u""):
+        QtCore, QtGui = _qt()
+        item = QtGui.QTreeWidgetItem(list(texts))
+        item.setData(0, QtCore.Qt.UserRole, data)
+        item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable)
+        if tip:
+            for column in range(len(texts)):
+                item.setToolTip(column, tip)
+        return item
+
+    @staticmethod
+    def index_of(item):
+        QtCore, QtGui = _qt()
+        if item is None:
+            return -1
+        try:
+            data = item.data(0, QtCore.Qt.UserRole)
+            return int(data) if data is not None else -1
+        except (TypeError, ValueError):
+            return -1
+
+    @staticmethod
+    def selected_item(view):
+        try:
+            items = view.selectedItems()
+        except Exception:
+            return None
+        return items[0] if items else None
+
+    @staticmethod
+    def top_items(tree):
+        return [tree.topLevelItem(i) for i in range(_prop(tree, "topLevelItemCount"))]
+
+    def fit_columns(self, tree, widths):
+        for column, most in enumerate(widths):
+            tree.resizeColumnToContents(column)
+            if most is not None and tree.columnWidth(column) > most:
+                tree.setColumnWidth(column, most)
+
+    def select_first(self, tree, otherwise):
+        items = self.top_items(tree)
+        if items:
+            tree.setCurrentItem(items[0])
+        else:
+            otherwise()
+
+    # -- Glyphs --------------------------------------------------------------
+
+    def fill_chips(self):
+        labels = self.labels()
+        counts_ = glyph_counts(self.results)
+        for kind, chip in self.glyph_chips:
+            count = counts_.get(kind, 0)
+            chip.setText(u"%s %s" % (kind_label(kind, labels, self.masters_mode), grouped(count)))
+            chip.setChecked(True)
+            chip.setVisible(bool(count))
+        counts_ = kern_counts(self.kern_rows)
+        for kind, chip in self.kern_chips:
+            count = counts_.get(kind, 0)
+            chip.setText(u"%s %s" % (kern_label(kind, labels), grouped(count)))
+            chip.setChecked(kind != "absent")
+            chip.setVisible(bool(count))
+
+    @staticmethod
+    def kinds_on(chips):
+        return set(kind for kind, chip in chips if _prop(chip, "checked"))
+
+    def fill_glyphs(self):
+        QtCore, QtGui = _qt()
+        if self.sides is None:
+            return
+        tree, colors = self.glyph_tree, self.colors()
+        first, second = self.sides
+        labels = self.labels()
+        found = glyph_rows(self.results, self.kinds_on(self.glyph_chips))
+        rows = self.glyph_names = found[:ROWS_SHOWN]
+        self.filling = True
+        tree.setUpdatesEnabled(False)
+        try:
+            tree.clear()
+            for index, r in enumerate(rows):
+                item = self.item((r.caption(), r.short()), index, r.sentence(labels))
+                picture_a = first.paths.get(r.a) if r.a is not None else None
+                picture_b = second.paths.get(r.b) if r.b is not None else None
+                item.setIcon(0, self.icon(both_thumb, picture_a[0] if picture_a else None,
+                                          picture_b[0] if picture_b else None, colors))
+                tree.addTopLevelItem(item)
+            self.fit_columns(tree, (COLUMN_MAX,))
+        finally:
+            tree.setUpdatesEnabled(True)
+            self.filling = False
+        changed = len(self.results)
+        if self.results:
+            text = u"%s %s." % (self.ak.b(counted(changed, u"glyph")), u"differs" if changed == 1 else u"differ")
+            if len(rows) < len(found):
+                text += u" The %s worst shown." % self.ak.b(grouped(len(rows)))
+            elif len(rows) != changed:
+                text += u" %s shown." % self.ak.b(grouped(len(rows)))
+        else:
+            text = u"The glyphs are alike: names, code points, metrics, outlines, components, and anchors."
+        self.glyph_status.setText(text)
+        self.select_first(tree, self.glyph_selected)
+
+    def selected_result(self):
+        index = self.index_of(self.selected_item(self.glyph_tree))
+        rows = self.glyph_names
+        return rows[index] if 0 <= index < len(rows) else None
+
+    def first_name(self, r):
+        """A row's glyph in the first font (two masters of one font: the glyph, whatever master lacks it)."""
+        if r is None:
+            return None
+        return r.a if r.a is not None else (r.b if self.masters_mode else None)
+
+    def row_glyph(self, item):
+        index = self.index_of(item)
+        rows = self.glyph_names
+        name = self.first_name(rows[index] if 0 <= index < len(rows) else None)
+        return [name] if name is not None else []
+
+    def glyph_selected(self):
+        if self.filling:
+            return
+        self.draw_comparison()
+        self.update_buttons()
+
+    def draw_comparison(self):
+        if self.filling:
+            return
+        r = self.selected_result()
+        if r is None or self.sides is None:
+            self.comparison.clear()
+            self.difference_label.setText(u"")
+            return
+        first, second = self.sides
+        try:
+            sides = []
+            for side, name in ((first, r.a), (second, r.b)):
+                picture = side.paths.get(name) if name is not None else None
+                path, advance = picture if picture else (None, 0.0)
+                sides.append((side.label, path, advance))
+            width = int(_prop(self.comparison, "width") or 0) or 600
+            height = int(_prop(self.comparison, "height") or 0) or 400
+            self.comparison.setPixmap(comparison_pixmap(width, height, sides[0], sides[1], self.colors(),
+                                                        _prop(self.dialog, "font")))
+        except Exception as exc:
+            self.comparison.clear()
+            self.log.add(u"The comparison could not be drawn: %s" % self.ak.html(exc), "warning")
+        self.difference_label.setText(self.ak.html(r.sentence(self.labels())))
+
+    # -- Kerning -------------------------------------------------------------
+
+    def fill_kerning(self):
+        if self.sides is None:
+            return
+        tree, labels = self.kern_tree, self.labels()
+        on = self.kinds_on(self.kern_chips)
+        found = [d for d in self.kern_rows if d.kind in on]
+        rows = self.kern_shown = found[:ROWS_SHOWN]
+        try:
+            tree.setHeaderLabels([u"Pair", labels[0], labels[1], u"Difference"])
+        except Exception:
+            pass
+        self.filling = True
+        tree.setUpdatesEnabled(False)
+        try:
+            tree.clear()
+            for index, d in enumerate(rows):
+                tip = u"%s %s: %d in %s, %d in %s." % (d.left, d.right, d.a, labels[0], d.b, labels[1])
+                if d.kind == "absent":
+                    tip += u" A glyph of the pair is missing in one font."
+                item = self.item((u"%s %s" % (d.left, d.right), u"%d" % d.a, u"%d" % d.b, signed(d.delta)), index, tip)
+                tree.addTopLevelItem(item)
+            self.fit_columns(tree, (COLUMN_MAX, None, None))
+        finally:
+            tree.setUpdatesEnabled(True)
+            self.filling = False
+        counts_ = kern_counts(self.kern_rows)
+        listed = sum(n for kind, n in counts_.items() if kind != "absent")
+        b = self.ak.b
+        if listed:
+            text = u"%s kerned differently: %s only in %s, %s only in %s, %s with other values." % (
+                b(counted(listed, u"glyph pair")), b(grouped(counts_.get("only_a", 0))), html_escape(labels[0]),
+                b(grouped(counts_.get("only_b", 0))), html_escape(labels[1]), b(grouped(counts_.get("value", 0))))
+        else:
+            text = u"The pairs of glyphs both fonts have are kerned alike."
+        if counts_.get("absent"):
+            text += u" %s of a glyph one font lacks." % b(counted(counts_["absent"], u"pair"))
+        if len(rows) < len(found):
+            text += u" The %s largest differences shown." % b(grouped(len(rows)))
+        self.kern_status.setText(text)
+        self.select_first(tree, self.draw_pair)
+
+    def selected_pair(self):
+        index = self.index_of(self.selected_item(self.kern_tree))
+        return self.kern_shown[index] if 0 <= index < len(self.kern_shown) else None
+
+    def row_pair(self, item):
+        index = self.index_of(item)
+        d = self.kern_shown[index] if 0 <= index < len(self.kern_shown) else None
+        return [d.left, d.right] if d is not None else []
+
+    def draw_pair(self):
+        if self.filling:
+            return
+        d = self.selected_pair()
+        if d is None or self.sides is None:
+            self.pair_picture.clear()
+            self.update_buttons()
+            return
+        first, second = self.sides
+        back = dict((one, other) for other, one in self.rename.items())  # the first font's names to the second's
+        font = _prop(self.dialog, "font")
+        colors = self.colors()
+        try:
+            factor = float(first.package.upm) / float(second.package.upm)
+        except Exception:
+            factor = 1.0
+        try:
+            pictures = [self.ak.pair_pixmap(first.package, first.master, d.left, d.right, d.a,
+                                            u"%s: %d" % (first.label, d.a), colors["text"], font),
+                        self.ak.pair_pixmap(second.package, second.master, back.get(d.left, d.left),
+                                            back.get(d.right, d.right), int(round(d.b / factor)) if factor else d.b,
+                                            u"%s: %d" % (second.label, d.b), colors["highlight"], font)]
+            self.pair_picture.setPixmap(stacked_pixmap(pictures))
+        except Exception as exc:
+            self.pair_picture.clear()
+            self.log.add(u"The pair could not be drawn: %s" % self.ak.html(exc), "warning")
+        self.update_buttons()
+
+    # -- Features ------------------------------------------------------------
+
+    def fill_features(self):
+        if self.sides is None:
+            return
+        tree, labels = self.feature_tree, self.labels()
+        same_shown = bool(_prop(self.show_same, "checked"))
+        rows = [f for f in self.feature_rows if same_shown or f.kind != "same"]
+        self.feature_shown = rows
+        self.filling = True
+        try:
+            tree.clear()
+            for index, f in enumerate(rows):
+                state = feature_state(f, labels)
+                tree.addTopLevelItem(self.item((f.tag, state), index, u"%s: %s." % (f.tag, state)))
+            self.fit_columns(tree, (COLUMN_MAX,))
+        finally:
+            self.filling = False
+        b = self.ak.b
+        if self.masters_mode:
+            text = u"Two masters of one font share their features and classes."
+        elif not self.feature_rows:
+            text = u"Neither font has features."
+        else:
+            differing = [f for f in self.feature_rows if f.kind != "same"]
+            if differing:
+                text = u"%s differ: %s only in %s, %s only in %s, %s with code that differs." % (
+                    b(counted(len(differing), u"feature")),
+                    b(grouped(sum(1 for f in differing if f.kind == "only_a"))), html_escape(labels[0]),
+                    b(grouped(sum(1 for f in differing if f.kind == "only_b"))), html_escape(labels[1]),
+                    b(grouped(sum(1 for f in differing if f.kind == "differs"))))
+                if len(differing) == 1:
+                    text = text.replace(u" differ:", u" differs:")
+            else:
+                text = u"The %s are alike." % b(counted(len(self.feature_rows), u"feature"))
+        self.feature_status.setText(text)
+        self.select_first(tree, self.feature_selected)
+
+    def feature_selected(self):
+        if self.filling:
+            return
+        index = self.index_of(self.selected_item(self.feature_tree))
+        f = self.feature_shown[index] if 0 <= index < len(self.feature_shown) else None
+        if f is None:
+            self.diff_view.clear()
+            return
+        QtCore, QtGui = _qt()
+        palette = _prop(self.diff_view, "palette")
+        base, text = palette.color(QtGui.QPalette.Base), palette.color(QtGui.QPalette.Text)
+        rgb = lambda c: (c.red(), c.green(), c.blue())
+        rows = f.rows if f.kind != "same" else [(u" ", line) for line in code_lines(f.a)]
+        self.diff_view.setHtml(diff_html(rows, self.labels(), rgb(base), rgb(text)))
+
+    # -- the Glyph window ----------------------------------------------------
+
+    def selected_glyphs(self):
+        """The first font's glyphs selected in the view shown (flags, the Glyph window)."""
+        return self.selected_names(second=False)
+
+    def selected_names(self, second=False):
+        """The glyphs selected in the view shown, as the first font names them (second: the second)."""
+        key = self.current_key()
+        if key == "glyphs":
+            r = self.selected_result()
+            if r is None:
+                return []
+            name = r.b if second else self.first_name(r)
+            return [name] if name is not None else []
+        if key == "kerning":
+            d = self.selected_pair()
+            if d is None:
+                return []
+            if second:
+                back = dict((one, other) for other, one in self.rename.items())  # the first font's names to the second's
+                return [back.get(d.left, d.left), back.get(d.right, d.right)]
+            return [d.left, d.right]
+        return []
+
+    def show_in_glyph_window(self):
+        """The selected glyph (between the font's H's, n's, or o's) or pair in a Glyph window of FontLab's
+        current font, in its names there."""
+        if self.sides is None:
+            return
+        ak = self.ak
+        current = self.current_font()
+        first, second = self.sides
+        key = ak.font_key(current) if current is not None else None
+        if key == ak.font_key(first.package):
+            package, names = first.package, self.selected_names()
+        elif key == ak.font_key(second.package):
+            package, names = second.package, self.selected_names(second=True)
+        else:
+            self.log.add(u"FontLab opens a <i>Glyph</i> window on its current font, which is neither of the two.", "warning")
+            return
+        if not names:
+            self.log.add(u"The current font lacks this glyph.", "warning")
+            return
+        if len(names) == 2:
+            try:
+                contexts = ak.proof_contexts(package, names)
+            except Exception:
+                contexts = list(ak.PROOF_CONTEXTS)
+            text = ak.proof_text(names[0], names[1], contexts)
+        else:
+            try:
+                contexts = ak.proof_contexts(package, names[:1])
+            except Exception:
+                contexts = []
+            context = contexts[0] if contexts else None
+            text = u"/%s/%s/%s/%s/%s" % (context, context, names[0], context, context) if context and context != names[0] \
+                else u"/%s" % names[0]
+        error = ak.show_in_glyph_window(self.fontlab, text)
+        if error:
+            self.log.add(u"FontLab did not open a <i>Glyph</i> window: %s" % ak.html(error), "error")
+
+    def show(self):
+        QtCore, QtGui = _qt()
+        self.dialog.show()
+        self.dialog.raise_()
+        if len(self.choices) > 1:
+            QtCore.QTimer.singleShot(50, self.compare)  # compared as it opens
+
+
+def main():
+    held = getattr(sys, "_freelab_font_compare", None)
+    if held is not None:
+        try:
+            held.dialog.close()
+        except Exception:
+            pass
+    dialog = CompareDialog()
+    sys._freelab_font_compare = dialog  # kept, even half-built: PythonQt deletes a dialog with no Python reference
+    if dialog.failed is not None:
+        print("FreeLab Font Compare: %s" % dialog.failed)
+        try:
+            dialog.dialog.close()
+        except Exception:
+            pass
+        return
+    try:
+        dialog.ak.hook_menu_order()
+    except Exception:
+        pass
+    dialog.show()
+
+
+if not os.environ.get("FREELAB_NO_AUTOSTART") and __name__ != "freelab_font_compare":
+    main()

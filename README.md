@@ -1,6 +1,6 @@
 # FreeLab
 
-Tools for FontLab 7 that run inside it: a dark mode for its whole interface, auto kerning, auto spacing, CJK spacing, diacritics, feature code, and a font check.
+Tools for FontLab 7 that run inside it: a dark mode for its whole interface, auto kerning, auto spacing, CJK spacing, diacritics, feature code, a font check, a font comparison, and PDF proofs.
 
 **Status: 0.3.0.** Dark mode runs in FontLab 7.2.
 
@@ -14,11 +14,13 @@ FreeLab MCP, the separate `freelab-mcp` repository, lets an AI app such as Claud
 - *diacritics/*: *Scripts > FreeLab > Diacritics* builds the Latin, Greek (polytonic too), and Cyrillic letters with diacritics the font lacks from its letters and marks, placing each mark as the font's own accented glyphs do, no anchors needed, with an editor to move and scale each mark by hand; and places the anchors and mark features of scripts that attach their marks (Hebrew, Arabic, Devanagari, Bengali, Gujarati, Tamil, Thai, Khmer): [docs/DIACRITICS.md](docs/DIACRITICS.md).
 - *cjk/*: *Scripts > FreeLab > CJK Spacing* writes palt and halt for a Japanese font's full-width kana and punctuation, trimmed as the open-licensed CJK fonts trim theirs, and sets Hangul at one width or proportionally, as Korean fonts do: [docs/CJK.md](docs/CJK.md).
 - *features/*: *Scripts > FreeLab > Feature Code* sets each ligature to standard, discretionary, or off, writes alternates that take turns (for handwriting), and writes the features of the font's forms (case, locl, fractions, superiors and inferiors, ordinals, small caps, figure styles, and named stylistic sets): [docs/FEATURE-CODE.md](docs/FEATURE-CODE.md).
+- *compare/*: *Scripts > FreeLab > Font Compare* compares two open fonts, or two masters of one font: the glyphs only in one, code points, metrics, outlines (how much their shapes differ), components, and anchors, drawn overlaid; the kerning, class kerning resolved; and the feature code, line by line. It changes nothing: [docs/FONT-COMPARE.md](docs/FONT-COMPARE.md).
+- *proof/*: *Scripts > FreeLab > Proof* makes a PDF proof of the current font from its own outlines (character set, waterfalls, text in each script it covers, kerning and spacing strings, diacritics, and figures and punctuation) for the current master or each one, kerning applied, OpenType features not: [docs/PROOF.md](docs/PROOF.md).
 - *checks/*: *Scripts > FreeLab > Font Check* ranks the characters to add by the languages they would complete, by script (and hands them to Diacritics), draws the font's vertical metrics over its tallest and deepest glyphs with suggested values, and compares the masters' outlines side by side where they do not interpolate: [docs/FONT-CHECK.md](docs/FONT-CHECK.md).
 - *tests/*: the test gate (*run_tests.py*).
 - *tools/*: the installer, the native helper's build script, and the test gate's Python 2.7 fetcher.
 
-*Scripts > FreeLab* lists the font tools in the order a font is usually made (Diacritics, Auto Spacing, CJK Spacing, Auto Kerning, Kerning Check, Font Check, Feature Code), then dark mode, then FreeLab MCP's, with separators between them: FontLab lists a folder's scripts by file name, so FreeLab's startup block arranges the menu each time *Scripts* opens.
+*Scripts > FreeLab* lists the font tools in the order a font is usually made (Diacritics, Auto Spacing, CJK Spacing, Auto Kerning, Kerning Check, Font Check, Font Compare, Feature Code, Proof), then dark mode, then FreeLab MCP's, with separators between them: FontLab lists a folder's scripts by file name, so FreeLab's startup block arranges the menu each time *Scripts* opens.
 
 The font tools share their ways: a window of 1000 by 1000 pixels (or what the screen allows), a menu button at its top right that opens any other font tool, a top line with a sentence per line, a log under the list (done in green, warnings in amber, errors in red; drag its bottom edge to make it taller, and the window's bottom edge moves with it), *Restore suggestions* to put every check back as the list first came, a right-click on a row to flag its glyphs in FontLab (as its *Flag* menu does, to find them again with *Select > Same Flag* or the *Flag* section of the Font window's sidebar), a row tinted with its glyph's flag color, with a bar of it that shows on a selected row too (a pair's cell split in two, each glyph's flag on its own half), F3 and Shift+F3 to go to the next and previous flagged row, buttons that gray out when they would do nothing, a double-click on a glyph or pair to open it in a Glyph window, a click on a preview's neighboring letter to open that pair in Auto Kerning, and a fresh look at the font after an undo, a redo, or an edit in FontLab. Each write is one step of FontLab's History: *Edit > Undo* takes it back.
 
@@ -44,7 +46,7 @@ It runs everything under Python 3, including the native helper's tests, then the
 - [docs/DARKMODE.md](docs/DARKMODE.md): how FontLab 7 colors itself, and how dark mode turns each part dark.
 - [docs/KERNING.md](docs/KERNING.md): auto kerning, how it measures, and its limits.
 - [docs/SPACING.md](docs/SPACING.md): auto spacing, how it measures, and its limits.
-- [docs/DIACRITICS.md](docs/DIACRITICS.md), [docs/CJK.md](docs/CJK.md), [docs/FEATURE-CODE.md](docs/FEATURE-CODE.md), and [docs/FONT-CHECK.md](docs/FONT-CHECK.md): diacritics, CJK spacing, feature code, and the font check.
+- [docs/DIACRITICS.md](docs/DIACRITICS.md), [docs/CJK.md](docs/CJK.md), [docs/FEATURE-CODE.md](docs/FEATURE-CODE.md), [docs/FONT-CHECK.md](docs/FONT-CHECK.md), [docs/FONT-COMPARE.md](docs/FONT-COMPARE.md), and [docs/PROOF.md](docs/PROOF.md): diacritics, CJK spacing, feature code, the font check, the font comparison, and proofs.
 - [docs/NATIVE.md](docs/NATIVE.md): dark mode's native engine (experimental), how it is applied to FontLab, and how it compares with the script engine.
 - [docs/ROADMAP.md](docs/ROADMAP.md): what comes next.
 - [docs/FEATURE-SURVEY.md](docs/FEATURE-SURVEY.md): what already exists for dark mode, kerning, diacritics, and feature code.
