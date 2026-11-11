@@ -364,6 +364,9 @@ def buildable_candidates(results, ranges):
     for r in results:
         for item in r.missing + r.auxiliary_missing:
             codes = code_points(item)
+            if len(codes) == 1 and 0x0300 <= codes[0] < 0x0370 and item not in found:
+                found.append(item)  # a combining mark: Diacritics makes it of the mark it comes from (macron below of the macron)
+                continue
             if len(codes) != 1 or not any(low <= codes[0] < high for low, high in ranges):
                 continue
             parts = code_points(unicodedata.normalize("NFD", item))

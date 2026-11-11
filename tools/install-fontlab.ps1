@@ -284,8 +284,14 @@ if ($Uninstall) {
 if (-not (Test-Path $scripts)) { New-Item -ItemType Directory -Path $scripts | Out-Null }
 foreach ($f in $files) {
     $target = Join-Path $scripts $f.Name
-    [System.IO.File]::Copy((Join-Path $repo $f.From), $target, $true)
-    Write-Output "Copied $($f.Name) to $scripts"
+    $from = Join-Path $repo $f.From
+    # A file already there as it is stays (FontLab holds a font it registered open: it could not be replaced)
+    $same = (Test-Path $target) -and ((Get-FileHash $from).Hash -eq (Get-FileHash $target).Hash)
+    if ($same) { Write-Output "Kept $($f.Name) (unchanged)" }
+    else {
+        try { [System.IO.File]::Copy($from, $target, $true); Write-Output "Copied $($f.Name) to $scripts" }
+        catch { Write-Output "Could not replace $($f.Name), which FontLab holds open: quit FontLab and run this again. ($($_.Exception.Message))" }
+    }
     $old = Join-Path $rootScripts $f.Name  # before 0.3 they sat in the Scripts folder itself
     if (Test-Path $old) { [System.IO.File]::Delete($old); Write-Output "Removed the old $old" }
 }

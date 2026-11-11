@@ -45,6 +45,21 @@ class PlanTests(unittest.TestCase):
         self.assertEqual([m.glyph for m in found[O_CIRCUMFLEX_ACUTE].marks], ["circumflex", "acute"])
         self.assertTrue(found[O_HORN_DOT].missing and u"horn" in found[O_HORN_DOT].missing)
 
+    def test_combining_marks_are_made_as_glyphs_of_their_own(self):
+        bare = ac.Font(["o", "macron", "underscore", "period"],
+                       [("o", 0x6F), ("macron", 0xAF), ("underscore", 0x5F), ("period", 0x2E)])
+        found = dict((r.char, r) for r in ac.plan(bare, [ac.unichr_(0x0331), ac.unichr_(0x0332), ac.unichr_(0x0323),
+                                                        ac.unichr_(0x0301)]))
+        below = found[ac.unichr_(0x0331)]
+        self.assertTrue(below.standalone)
+        self.assertEqual((below.name, below.base), ("macronbelowcomb", "o"), "placed as on o")
+        self.assertEqual(found[ac.unichr_(0x0332)].marks[0].glyph, "underscore", "the low line of the underscore")
+        self.assertEqual(found[ac.unichr_(0x0323)].marks[0].glyph, "period", "the dot below of the period")
+        self.assertTrue(found[ac.unichr_(0x0301)].missing, "no acute to draft from")
+        ink = {"m": ac.Ink(100, 500, 300, 560)}.get
+        parts = ac.standalone_parts([("o", 1, 1, 0, 0), ("m", 1, 1, 40, -620)], ink)
+        self.assertEqual(parts, [("m", 1, 1, -200.0, -620)], "the letter taken out, the mark centered on 0")
+
     def test_a_bare_font_drafts_its_marks_from_punctuation(self):
         bare = ac.Font(["a", "o", "period", "asciicircum", "hyphen", "comma"],
                        [("a", 0x61), ("o", 0x6F), ("period", 0x2E), ("asciicircum", 0x5E), ("hyphen", 0x2D),

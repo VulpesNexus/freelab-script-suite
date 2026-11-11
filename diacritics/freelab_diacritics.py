@@ -46,6 +46,9 @@ MARKS = {0x0300: "grave", 0x0301: "acute", 0x0302: "circumflex", 0x0303: "tilde"
          0x0330: "tildebelow", 0x0331: "macronbelow", 0x0313: "commaabove", 0x0314: "commareversedabove",
          0x0342: "perispomeni", 0x0345: "ypogegrammeni", 0x0312: "commaturnedabove",
          0x0315: "caronvertical",  # (the comma above right: the apostrophe-like caron of d, t, l, and L)
+         0x032C: "caronbelow", 0x032F: "breveinvertedbelow", 0x0316: "gravebelow", 0x0317: "acutebelow",
+         0x0320: "minusbelow", 0x0332: "lowline", 0x030D: "verticallineabove", 0x0329: "verticallinebelow",
+         0x031F: "plusbelow", 0x0310: "candrabindu",
          0x3099: "dakuten", 0x309A: "handakuten"}  # (the kana voicing marks)
 SPACING_MARKS = {0x0300: 0x0060, 0x0301: 0x00B4, 0x0302: 0x02C6, 0x0303: 0x02DC, 0x0304: 0x00AF, 0x0306: 0x02D8,
                  0x0307: 0x02D9, 0x0308: 0x00A8, 0x030A: 0x02DA, 0x030B: 0x02DD, 0x030C: 0x02C7, 0x0327: 0x00B8,
@@ -112,7 +115,10 @@ LEFT_OF_CAPITALS = (0x0301, 0x0300, 0x0313, 0x0314, 0x0342)
 LEFT_GAP_SHARE = 0.03  # the gap between a mark at a capital's left and the capital, as a share of the em
 BORROWED = {"dotbelow": "dotaccent", "dieresisbelow": "dieresis", "ringbelow": "ring", "macronbelow": "macron",
             "tildebelow": "tilde", "brevebelow": "breve", "circumflexbelow": "circumflex",
-            "commaaccent": "comma"}  # a mark below the font lacks: its twin above (or the comma), moved under
+            "commaaccent": "comma", "caronbelow": "caron", "breveinvertedbelow": "breveinverted",
+            "gravebelow": "grave", "acutebelow": "acute", "minusbelow": "macron",
+            "verticallinebelow": "verticallineabove"}  # a mark below the font lacks: its twin above (or the comma), moved under
+FLIPPED_TWINS = {"breveinverted": "breve", "breveinvertedbelow": "breve"}  # a mark of another, upside down
 # A mark the font lacks altogether, drafted from its punctuation: (code points, how many side by side,
 # flipped upside down, or True turned about: both ways). Marks below draft from their twins above.
 DRAFTS = {"dotaccent": ((0x002E,), 1, False), "dieresis": ((0x002E,), 2, False), "macron": ((0x002D, 0x2013), 1, False),
@@ -125,7 +131,11 @@ DRAFTS = {"dotaccent": ((0x002E,), 1, False), "dieresis": ((0x002E,), 2, False),
           # left quote, else the comma turned about; the kana's marks of a double quote and the degree sign
           "caronvertical": ((0x2019, 0x02BC, 0x002C), 1, False),
           "commaturnedabove": (((0x02BB, 0x2018), 1, False), ((0x002C,), 1, "turned")),
-          "dakuten": ((0x201D, 0x0022), 1, False), "handakuten": ((0x00B0, 0x02DA), 1, False)}
+          "dakuten": ((0x201D, 0x0022), 1, False), "handakuten": ((0x00B0, 0x02DA), 1, False),
+          # the inverted breve of the breve flipped; a vertical line of the straight quote (or the bar); the low
+          # line of the underscore; the plus below of the plus sign; candrabindu of the breve (its dot left out)
+          "breveinverted": ((0x02D8,), 1, True), "verticallineabove": ((0x0027, 0x007C), 1, False),
+          "lowline": ((0x005F,), 1, False), "plusbelow": ((0x002B,), 1, False), "candrabindu": ((0x02D8,), 1, False)}
 
 
 def draft_ways(root):
@@ -362,6 +372,7 @@ class Recipe(object):
         self.checked = True
         self.refill = False  # its glyph is in the font, empty: filled under its own name
         self.existing = None  # the font's own drawn glyph, listed to be rebuilt (never checked at first)
+        self.standalone = False  # a combining mark made as a glyph of its own (placed as on base, centered at 0)
         self.notes = []  # what placing it took (marks made smaller, too tall)
         self.adjust = {}  # mark index: [dx, dy, x scale, y scale], set by hand (about the mark's center)
         self.touches = u""  # after a placement was applied from another letter: how close a mark comes
@@ -374,6 +385,9 @@ class Recipe(object):
     def describe(self):
         if self.missing:
             return u"needs %s" % self.missing
+        if self.standalone:
+            return u"a combining mark, %s: placed as on %s, then centered on the origin, zero width" % (
+                self.marks[0].label(), self.base)
         return u" + ".join([self.base] + [mark.label() for mark in self.marks])
 
 
@@ -420,6 +434,12 @@ def make_mark(font, code, case, script="latin"):
         glyph = find_mark(font, twin, case) or (font.by_code.get(0x002C) if twin == "comma" else None)
         if glyph:
             return Mark(root, side, [(glyph, 1.0, 1.0, 0.0, 0.0)], u"for %s" % mark_word(root))
+    flipped = FLIPPED_TWINS.get(root)  # an inverted breve: the font's breve, upside down
+    if flipped:
+        glyph = find_mark(font, flipped, case)
+        if glyph:
+            return Mark(root, side, [(glyph, 1.0, -1.0, 0.0, 0.0)], u"for %s, of the %s upside down" % (
+                mark_word(root), mark_word(flipped)))
     draft_root = root if root in DRAFTS else twin if twin in DRAFTS else None
     for codes, count, flipped in draft_ways(draft_root):
         found = next((c for c in codes if c in font.by_code), None)
@@ -438,6 +458,36 @@ def make_mark(font, code, case, script="latin"):
 REBUILT_SCRIPTS = ("latin", "greek", "cyrillic")
 
 
+STANDALONE_ON = (u"o", u"n", u"x")  # the letter a combining mark is placed on to be drawn alone (its height)
+
+
+def mark_recipe(font, ch):
+    """A Recipe for a combining mark the font lacks, made as a glyph of its own from what its letters'
+    marks come from (its twin above for a mark below, or punctuation): placed as on o, then centered on
+    the glyph's origin, zero width (standalone)."""
+    code = ord(ch)
+    mark = make_mark(font, code, "lower")
+    letter = next((font.glyph_for(c) for c in STANDALONE_ON if font.glyph_for(c)), None)
+    if mark is None:
+        return Recipe(ch, missing=u"%s or a glyph to draft it from" % with_article(mark_word(MARKS.get(code))))
+    if letter is None:
+        return Recipe(ch, missing=u"a letter to place it on (o, n, or x)")
+    name = glyph_names().get(code) or (u"uni%04X" % code)
+    recipe = Recipe(ch, name, letter, [mark])
+    recipe.standalone = True
+    return recipe
+
+
+def standalone_parts(parts, ink_of):
+    """A standalone mark's parts: the letter it was placed on taken out, the mark centered on x = 0."""
+    marks = parts[1:]
+    box = parts_box(marks, ink_of)
+    if box is None:
+        return marks
+    shift = -(box[0] + box[2]) / 2.0
+    return [(glyph, sx, sy, x + shift, y) for glyph, sx, sy, x, y in marks]
+
+
 def plan(font, characters, include_existing=False):
     """A Recipe for each character the font lacks that decomposes into a letter and marks; with
     include_existing, also for those it has (Latin, Greek, Cyrillic), to be rebuilt, unchecked."""
@@ -445,6 +495,10 @@ def plan(font, characters, include_existing=False):
     for ch in characters:
         existing = font.by_code.get(ord(ch))
         drawn = bool(existing) and existing not in font.empty
+        if unicodedata.category(ch) == "Mn" and ord(ch) in MARKS and ord(ch) not in (0x3099, 0x309A):
+            if not drawn:
+                recipes.append(mark_recipe(font, ch))
+            continue
         if not unicodedata.category(ch).startswith("L"):
             continue
         if drawn and not (include_existing and script_of(ch) in REBUILT_SCRIPTS):
@@ -4509,6 +4563,8 @@ class AccentsDialog(object):
                     if parts is None:
                         continue
                     placed = True
+                    if r.standalone:
+                        parts, width = standalone_parts(parts, ink), 0
                     components = []
                     for part in parts:
                         name, sx, sy, dx, dy = unwrapped(package, master, *part)
