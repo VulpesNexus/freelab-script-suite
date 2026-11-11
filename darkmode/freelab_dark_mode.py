@@ -215,7 +215,7 @@ SWEEP_MS = 750  # how often to look for widgets FontLab created or showed
 FULL_SWEEP_EVERY = 40  # every Nth sweep revisits every widget (replaced stylesheets, new icons)
 FOCUS_DRAIN_MS = 80  # a window that takes focus is darkened at once, up to this long, before it paints light
 MAX_ERRORS = 50
-NATIVE_VERSION = 106
+NATIVE_VERSION = 107
 
 ID_PROP = "freelab_id"  # dynamic properties FreeLab sets on widgets, all removed by restore()
 SEEN_PROP = "freelab_seen"
@@ -1803,7 +1803,8 @@ def _effect_classes():
         def draw_selected(effect, painter, pixmap, offset):
             """A list's selected rows as Qt drew them, over the mapping: their highlight and light text
             are the dark palette's already, and mapped again the text's smoothing came out fringed
-            (Export Profiles). A selected row with dark ink in it (FontLab's own colors) stays mapped."""
+            (Export Profiles); ClearType's colored fringes made gray. A selected row with dark ink in it
+            (FontLab's own colors) stays mapped."""
             view = effect.freelab_widget.parentWidget()
             if view is None or not view.inherits("QAbstractItemView"):
                 return
@@ -1820,7 +1821,9 @@ def _effect_classes():
                         if painter.hasClipping():
                             area = area.intersected(painter.clipBoundingRect().toAlignedRect())
                         if not area.isEmpty():
-                            painter.drawPixmap(area, pixmap, area.translated(-offset.x(), -offset.y()))
+                            # ClearType's fringes of the light text made gray (orange and blue around white letters)
+                            source = area.translated(-offset.x(), -offset.y())
+                            painter.drawImage(area.topLeft(), defringe_image(image.copy(source)))
             except Exception as exc:
                 _note_error("list selection", exc)
 

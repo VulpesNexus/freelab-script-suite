@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 106
+#define FREELAB_PIXELS_VERSION 107
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -590,6 +590,53 @@ static uint8_t icon_px[MAX_INDEXED]; /* ink mode on nothing: 1 a glyph icon's pi
 static int32_t icon_queue[MAX_INDEXED]; /* a shape's pixels, found in turn */
 static int last_paper_found; /* the last call found a main background */
 static int mode_list; /* set per call: a list's rows (ANCHORS_INK_LIST) */
+
+/* A list's rows are drawn on nothing, so their text's smoothing is its transparency. Dark text
+ * mapped light keeps that coverage, and light on dark looks heavier than dark on light did: the
+ * small counters of bold text (e, p, O in Export Profiles) filled in. The partly covered pixels of
+ * light ink get less coverage (a power of it), as text drawn light on dark is. */
+#define LIGHT_SMOOTHING_POWER 12 /* coverage ** (1 + 12 / 20): ** 1.6, bold counters open, small text whole */
+#define LIGHT_SMOOTHING_MIN_HLS 0.55
+static uint8_t smoothing_table[256];
+static int smoothing_table_made;
+
+static void thin_light_smoothing(uint32_t *p, int64_t count)
+{
+    int64_t i;
+    if (!smoothing_table_made) {
+        int a;
+        for (a = 0; a < 256; a++) {
+            double x = a / 255.0, y = 1.0, base = x;
+            int k;
+            /* x ** (1 + LIGHT_SMOOTHING_POWER / 20) without the C runtime: x times a root found by bisection */
+            double lo = 0.0, hi = 1.0;
+            for (k = 0; k < 40; k++) { /* r with r ** 20 == x ** LIGHT_SMOOTHING_POWER */
+                double mid = (lo + hi) / 2.0, m = 1.0, t = 1.0;
+                int e;
+                for (e = 0; e < 20; e++)
+                    m *= mid;
+                for (e = 0; e < LIGHT_SMOOTHING_POWER; e++)
+                    t *= base;
+                if (m < t)
+                    lo = mid;
+                else
+                    hi = mid;
+            }
+            y = x * lo;
+            smoothing_table[a] = (uint8_t)(y * 255.0 + 0.5);
+        }
+        smoothing_table[255] = 255;
+        smoothing_table_made = 1;
+    }
+    for (i = 0; i < count; i++) {
+        uint32_t v = p[i], a = v >> 24;
+        if (a == 0 || a == 255)
+            continue;
+        if (lightness((uint8_t)(v >> 16), (uint8_t)(v >> 8), (uint8_t)v) < LIGHT_SMOOTHING_MIN_HLS)
+            continue;
+        p[i] = ((uint32_t)smoothing_table[a] << 24) | (v & 0xffffffU);
+    }
+}
 static uint32_t generation = 0;
 
 typedef struct {
@@ -2229,6 +2276,8 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
                 p[i] = out;
         }
     }
+    if (mode_list && apply)
+        thin_light_smoothing(p, count);
     return changed;
 }
 
