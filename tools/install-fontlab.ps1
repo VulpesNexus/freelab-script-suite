@@ -60,6 +60,8 @@ $files = @(
     @{ From = 'diacritics\GlyphData_LICENSE'; Name = 'GlyphData_LICENSE' },
     @{ From = 'features\freelab_feature_code.py'; Name = 'freelab_feature_code.py' },
     @{ From = 'features\ligature_model.json'; Name = 'ligature_model.json' },
+    @{ From = 'features\freelab_alternates.py'; Name = 'freelab_alternates.py' },
+    @{ From = 'features\alternates_model.json'; Name = 'alternates_model.json' },
     @{ From = 'spacing\reference_model.json'; Name = 'reference_model.json' },
     @{ From = 'cjk\freelab_cjk_spacing.py'; Name = 'freelab_cjk_spacing.py' },
     @{ From = 'cjk\palt_model.json'; Name = 'palt_model.json' },

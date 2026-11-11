@@ -2000,7 +2000,7 @@ double-click a ligature, a letter, or a form to see it in a <i>Glyph</i> window.
 choices back as they first came.<br><br>
 Click this help's <i>?</i> button, then any control, for what it does."""
 
-TABS = (u"Ligatures and alternates", u"Forms")
+TABS = (u"Ligatures and alternates", u"Forms", u"Stylistic alternates")
 FORM_ICON_WIDTH = 3  # a form row's picture: this many icons wide
 
 # The check boxes of a list whose pictures dark mode leaves alone (LEAVE_ALONE_PROP): the style drew
@@ -2158,6 +2158,7 @@ class FeatureCodeDialog(object):
             self.tabs.addTab(label)
         self.tabs.setTabToolTip(0, u"Ligatures (liga, dlig) and alternates that take turns (calt)")
         self.tabs.setTabToolTip(1, u"Forms: case, locl, fractions and figures, small capitals, stylistic sets")
+        self.tabs.setTabToolTip(2, u"Alternates fonts commonly offer, as starting copies; variants that take turns")
         top.addWidget(self.tabs)
         self.pages = QtGui.QStackedWidget()
         top.addWidget(self.pages, 1)
@@ -2231,6 +2232,15 @@ class FeatureCodeDialog(object):
         self.small_setup, self.small_first, self.small_set_index = {}, {}, 0
         self.build_part(QtCore, QtGui, self.part(QtGui, 2, self.forms_parts))
         self.pages.addWidget(forms_page)
+        self.alternates = None
+        try:  # the Stylistic alternates tab (freelab_alternates.py, beside this script)
+            module = self.ak.load_sibling("freelab_alternates.py", "freelab_alternates")
+            self.alternates = module.AlternatesPage(self)
+            self.pages.addWidget(self.alternates.widget)
+        except Exception as exc:
+            missing = QtGui.QLabel(u"The Stylistic alternates tab could not be made (%s): reinstall FreeLab." % exc)
+            missing.setWordWrap(True)
+            self.pages.addWidget(missing)
 
         part = self.part(QtGui, 2)
         part.addWidget(self.heading(QtGui, u"The code"))
@@ -2286,7 +2296,10 @@ class FeatureCodeDialog(object):
                          self.ak.flag_menu(self.forms_tree, self, lambda: self.selected_names(self.forms_tree),
                                            lambda item: self.item_names(self.forms_tree, item))]
         try:  # the lists' check boxes plain to see in either palette (their pictures stay unmapped)
-            self.check_watcher = watch_check_boxes(dialog, [self.alternate_tree, self.forms_tree, self.small_tree])
+            trees = [self.alternate_tree, self.forms_tree, self.small_tree]
+            if self.alternates is not None:
+                trees.append(self.alternates.tree)
+            self.check_watcher = watch_check_boxes(dialog, trees)
         except Exception:
             self.check_watcher = None
 
@@ -2422,6 +2435,11 @@ class FeatureCodeDialog(object):
         self.checked_code = {}
         self.read_forms(glyphs)
         self.make_code()
+        if self.alternates is not None:
+            try:
+                self.alternates.fill()
+            except Exception as exc:
+                self.log.add(u"The Stylistic alternates tab could not be read: %s" % self.ak.html(exc), "error")
         self.seen_history = self.ak.history_mark(package)
 
     # -- forms --------------------------------------------------------------------------
