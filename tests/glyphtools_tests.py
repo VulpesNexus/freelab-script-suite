@@ -388,6 +388,19 @@ class AnchorTests(unittest.TestCase):
         self.assertEqual([(r.char, at) for r, at in found], [(g.char, 0), (j.char, 0), (stacked.char, 0)],
                          "the same capital circumflex, first on its side; not lowercase, not another mark, not missing")
 
+    def test_letters_get_the_anchors_their_precomposed_forms_need(self):
+        sides = ac.composed_sides()
+        self.assertEqual(sides[ord(u"B")][0], set([u"top", u"bottom"]), "B: dot above, dot below, macron below")
+        self.assertIn(u"ogonek", sides[ord(u"a")][0])
+        self.assertIn(u"horn", sides[ord(u"O")][0])
+        self.assertTrue(sides[ord(u"a")][1], "a stacks marks (a with circumflex and acute)")
+        self.assertNotIn(ord(u"x") + 0x1000, sides)
+        g = ac.AnchorGlyph("B", 0x42, "base", None)
+        g.anchors = {"top": (0, 0), "bottom": (0, 0)}
+        self.assertEqual(ac.base_group(g), u"Marks above and below")
+        g.stacks = True
+        self.assertTrue(ac.base_group(g).startswith(u"Stacking"))
+
     def test_own_anchors_move_by_hand(self):
         g = ac.AnchorGlyph("a", 0x61, "base", None, existing={"top": (250, 600)})
         g.anchors = {"bottom": (250, 0)}

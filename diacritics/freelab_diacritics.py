@@ -1246,6 +1246,8 @@ def load_anchor_model(path=None):
 
 
 class AnchorGlyph(object):
+    stacks = False  # a base whose precomposed letters stack marks (composed_sides)
+
     """A base or a mark of a script, with the anchors to add ({name: (x, y)}) and those it has."""
 
     def __init__(self, name, code, role, ink, existing=None, parts=0):
@@ -1339,7 +1341,69 @@ def mark_side_of(ink, x_height):
 # and dehi at the bottom right.
 MARK_CLASSES = {0x05BC: "center", 0x05B9: "topleft", 0x05BA: "topleft", 0x05C2: "topleft", 0x05C1: "topright",
                 0x0599: "topleft", 0x05A9: "topleft", 0x059A: "bottomright", 0x05AD: "bottomright"}
-SIDE_FAMILY = {"topleft": "top", "topright": "top", "bottomright": "bottom", "center": "center"}
+SIDE_FAMILY = {"topleft": "top", "topright": "top", "bottomright": "bottom", "center": "center",
+               "ogonek": "bottom", "horn": "top"}
+# Latin's marks that attach at a letter's side, with anchors of their own (as most fonts name them): the
+# ogonek at the bottom right, the horn at the top right
+SIDE_MARKS = {0x0328: "ogonek", 0x031B: "horn"}
+MARK_CLASSES.update(SIDE_MARKS)
+_SIDES = {}
+
+
+def composed_sides():
+    """{base code point: (set of anchors its precomposed letters need, whether it stacks marks)} for the
+    letters Unicode composes with marks: top for marks above, bottom for marks below, ogonek and horn
+    for theirs; it stacks when one of its letters has two marks on one side (Vietnamese \u1ea5).
+    B: top and bottom (\u1e02, \u1e04, \u1e06); a letter with none is no base."""
+    if not _SIDES:
+        for code in range(0x00C0, 0xFFFF):
+            if 0xD800 <= code < 0xE000:
+                continue
+            decomposed = unicodedata.normalize("NFD", unichr_(code))
+            if len(decomposed) < 2 or not all(unicodedata.combining(c) or ord(c) in SIDE_MARKS for c in decomposed[1:]):
+                continue
+            entry = _SIDES.setdefault(ord(decomposed[0]), [set(), False])
+            counts = {}
+            for c in decomposed[1:]:
+                mark = ord(c)
+                where = SIDE_MARKS.get(mark) or {"above": "top", "topright": "top", "below": "bottom"}.get(side_of(mark))
+                if where is None:
+                    continue
+                entry[0].add(where)
+                counts[where] = counts.get(where, 0) + 1
+            if any(n > 1 for n in counts.values()):
+                entry[1] = True
+        for dotless in (0x0131, 0x0237):  # the dotless i and j take the marks above i and j take
+            _SIDES[dotless] = [set(["top"]), False]
+    return _SIDES
+
+
+def side_point(side, ink, upm):
+    """A base's ogonek (its ink's bottom right, on the baseline) or horn anchor (its ink's top right)."""
+    if side == "ogonek":
+        return ink.right, max(ink.bottom, 0)
+    return ink.right, ink.top - 0.04 * upm
+
+
+def base_group(g):
+    """The section of the Bases a letter of a precomposed script is listed in, by the marks it takes."""
+    if g.stacks:
+        return u"Stacking marks (one on another: mark to mark)"
+    sides = set(g.anchors) | set(g.existing)
+    if sides & set(SIDE_MARKS.values()):
+        return u"With side marks too (ogonek, horn)"
+    if u"top" in sides and u"bottom" in sides:
+        return u"Marks above and below"
+    if u"top" in sides:
+        return u"Marks above only"
+    if u"bottom" in sides:
+        return u"Marks below only"
+    return u"Other letters"
+
+
+BASE_GROUP_ORDER = (u"Marks above and below", u"Marks above only", u"Marks below only",
+                    u"With side marks too (ogonek, horn)", u"Stacking marks (one on another: mark to mark)",
+                    u"Other letters")
 SIDE_BASES = {"topright": (0x05E9,)}  # a side only these letters (and their forms) take: the shin dot's, shin
 
 
@@ -1467,8 +1531,19 @@ def plan_anchors(glyphs, model, script, upm, x_height):
             continue
         g = AnchorGlyph(name, code, role, ink, existing, parts)
         if role == "base":
-            for side in ["top", "bottom"] + [s for s in special if s not in SIDE_BASES or code in SIDE_BASES[s]]:
-                point = base_point(model, script, side, code, ink, upm, widths)
+            composed = composed_sides().get(code) if script in COMPOSED_SCRIPTS and code else None
+            if composed is not None:  # the sides its precomposed letters need, no more (B: top and bottom; a: and ogonek)
+                g.stacks = composed[1]
+                sides = [side for side in ("top", "bottom") if side in composed[0]]
+                sides += [side for side in sorted(composed[0]) if side in SIDE_MARKS.values()]
+            else:
+                sides = ["top", "bottom"] + [s for s in special if s not in SIDE_MARKS.values()
+                                             and (s not in SIDE_BASES or code in SIDE_BASES[s])]
+            for side in sides:
+                if side in SIDE_MARKS.values():
+                    point = side_point(side, ink, upm)
+                else:
+                    point = base_point(model, script, side, code, ink, upm, widths)
                 if side not in g.existing:
                     g.anchors[side] = (round(point[0]), round(point[1]))
             if has_reph and reph and "reph" not in g.existing:
@@ -1490,6 +1565,10 @@ def plan_anchors(glyphs, model, script, upm, x_height):
             points = []
             if family == "center":  # its ink's center meets the base's center anchor
                 points.append((u"_" + side, (ink.center, (ink.bottom + ink.top) / 2.0)))
+            elif side == "ogonek":  # its top right meets the letter's bottom right
+                points.append((u"_ogonek", (ink.right, ink.top)))
+            elif side == "horn":  # its bottom left meets the letter's top right
+                points.append((u"_horn", (ink.left, ink.bottom)))
             elif side != family:  # at a letter's corner: centered on its ink; nothing stacks on it
                 row = anchor_row(model, script, family)
                 gap = row["mark_gap"] * upm
@@ -2737,6 +2816,21 @@ class AnchorPage(object):
             self.tree.addTopLevelItem(top)
             top.setFirstColumnSpanned(True)
             self.ak.section_row(top, self.tree)
+            parents = {}
+            if roles == ("base",) and self.script() in COMPOSED_SCRIPTS:  # by the marks each takes
+                groups = {}
+                for index, g in members:
+                    groups.setdefault(base_group(g), []).append(index)
+                for label in BASE_GROUP_ORDER:
+                    if label in groups:
+                        section = QtGui.QTreeWidgetItem([u"%s (%d)" % (label, len(groups[label]))])
+                        section.setData(0, QtCore.Qt.UserRole, -1)
+                        top.addChild(section)
+                        section.setFirstColumnSpanned(True)
+                        self.ak.section_row(section, self.tree)
+                        section.setExpanded(True)
+                        for index in groups[label]:
+                            parents[index] = section
             for index, g in members:
                 item = QtGui.QTreeWidgetItem([unichr_(g.code) if g.code else u"", g.name, u"", u""])
                 item.setData(0, QtCore.Qt.UserRole, index)
@@ -2747,7 +2841,7 @@ class AnchorPage(object):
                 else:
                     item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable)
                 self.refresh_item(item, g)
-                top.addChild(item)
+                parents.get(index, top).addChild(item)
             top.setExpanded(True)
         for column in range(len(self.COLUMNS) - 1):
             self.tree.resizeColumnToContents(column)
@@ -2804,11 +2898,14 @@ class AnchorPage(object):
         return pixmap
 
     def items(self):
+        """Every row under the top sections, at any depth (the Bases' own sections and their letters)."""
         found = []
-        for row in range(self.tree.topLevelItemCount):
-            top = self.tree.topLevelItem(row)
-            for child in range(top.childCount()):
-                found.append(top.child(child))
+        pending = [self.tree.topLevelItem(row) for row in range(self.tree.topLevelItemCount)]
+        while pending:
+            item = pending.pop(0)
+            for child in range(item.childCount()):
+                found.append(item.child(child))
+                pending.append(item.child(child))
         return found
 
     def harvest(self):
