@@ -294,6 +294,154 @@ class SampleTests(unittest.TestCase):
         self.assertEqual(fp.waterfall_line(bare, [])[0], [u"x", u"y", u"z"])
 
 
+def fold(char):
+    """A character's lowercase (Turkish dotted capital I as i), the character itself where its
+    lowercase is longer."""
+    if char == u"\N{LATIN CAPITAL LETTER I WITH DOT ABOVE}":
+        return u"i"
+    low = char.lower()
+    return low if len(low) == len(char) else char
+
+
+# Hyperglot letters a pangram leaves out, and why
+PANGRAM_EXEMPT = {
+    ("ukr", u"\N{CYRILLIC SMALL LETTER E}"): u"Hyperglot 0.8.2 lists Russian's e for Ukrainian, which never writes it",
+}
+KEPT_SAMPLES = (("eng", "Latin"), ("vie", "Latin"), ("jpn", "Hiragana"), ("jpn", "Katakana"))  # public domain, not ours
+HANGUL_BASIC = (u"KIYEOK NIEUN TIKEUT RIEUL MIEUM PIEUP SIOS IEUNG CIEUC CHIEUCH KHIEUKH THIEUTH PHIEUPH HIEUH".split(),
+                u"A YA EO YEO O YO U YU EU I".split())
+
+
+def missing_letters(text, base, iso, script):
+    """The letters of base (Hyperglot's, each case) the text lacks: a letter counts in either case, a
+    compatibility character (Dutch ij) as its letters, a Hebrew letter with a dot as its letter."""
+    import unicodedata
+    have = unicodedata.normalize("NFC", u"".join(fold(ch) for ch in text))
+    missing = []
+    for entry in base:
+        letter = unicodedata.normalize("NFC", u"".join(fold(ch) for ch in entry))
+        if (iso, letter) in PANGRAM_EXEMPT or letter in have or letter in missing:
+            continue
+        if unicodedata.normalize("NFKC", letter) in have:
+            continue
+        if script == "Hebrew" and unicodedata.normalize("NFD", letter)[0] in have:
+            continue  # (a pointed letter: the proof does not position marks; its letter stands)
+        missing.append(letter)
+    return missing
+
+
+def missing_jamo(text):
+    """The basic consonants (as initials or finals) and basic vowels of Hangul a text lacks."""
+    import unicodedata
+    found = set()
+    for ch in text:
+        index = ord(ch) - 0xAC00
+        if 0 <= index < 11172:
+            found.add(unicodedata.name(u(0x1100 + index // 588)).split()[-1])
+            found.add(unicodedata.name(u(0x1161 + index % 588 // 28)).split()[-1])
+            if index % 28:
+                found.add(unicodedata.name(u(0x11A7 + index % 28)).split()[-1])
+    return [name for names in HANGUL_BASIC for name in names if name not in found]
+
+
+class PangramTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.bases = dict(((language.iso, language.script), language.base)
+                         for language in fp.load_languages(LANGUAGES_FILE))
+
+    def test_each_pangram_has_every_letter_of_its_language(self):
+        checked = []
+        for iso, script, text in fp.SAMPLES:
+            if (iso, script) in KEPT_SAMPLES:
+                continue
+            if script == "Hangul":
+                self.assertEqual(missing_jamo(text), [], "%s lacks these jamo" % iso)
+            else:
+                self.assertIn((iso, script), self.bases, iso)
+                self.assertEqual(missing_letters(text, self.bases[(iso, script)], iso, script), [],
+                                 "%s lacks these letters" % iso)
+            checked.append(iso)
+        for iso in ("dan", "hrv", "cat", "lit", "kor", "spa", "fra", "deu", "rus", "ell", "hye", "heb"):
+            self.assertIn(iso, checked)
+
+    def test_the_check_finds_a_missing_letter(self):
+        base = self.bases[("deu", "Latin")]
+        self.assertEqual(missing_letters(u"The quick brown fox jumps over the lazy dog.", base, "deu", "Latin"),
+                         [u"\N{LATIN SMALL LETTER A WITH DIAERESIS}", u"\N{LATIN SMALL LETTER O WITH DIAERESIS}",
+                          u"\N{LATIN SMALL LETTER U WITH DIAERESIS}", u"\N{LATIN SMALL LETTER SHARP S}"])
+        self.assertEqual(missing_jamo(u"\N{HANGUL SYLLABLE GA}"), HANGUL_BASIC[0][1:] + HANGUL_BASIC[1][1:])
+
+    def test_samples_use_only_the_language_and_plain_punctuation(self):
+        import unicodedata
+        for iso, script, text in fp.SAMPLES:
+            if (iso, script) in KEPT_SAMPLES or script == "Hangul":
+                continue
+            base = set(unicodedata.normalize("NFC", ch) for ch in self.bases[(iso, script)])
+            for ch in text:
+                if unicodedata.category(ch).startswith(u"L"):
+                    self.assertIn(ch, base, u"%s: %s is not among its letters" % (iso, ch))
+
+
+class InfoTests(unittest.TestCase):
+    class Info(object):
+        familyName, styleName = u"Test Sans", u"Bold"
+        versionMajor, versionMinor = 2, 5
+        openTypeNameDesigner = u"  A   Designer "
+        designer = u"not this one"
+        copyright = u"Copyright line one\r\nline two"
+        trademark = u""
+        openTypeNameLicense = u"x" * (fp.INFO_TEXT_MAX + 30)
+        openTypeNameLicenseURL = None
+        openTypeHeadCreated = fp.MAC_EPOCH + 1700000000.0  # counted from 1904
+
+        def openTypeNameDescription(self):  # a method: never called
+            raise AssertionError("called")
+
+    def test_rows_in_order_without_the_empty_ones(self):
+        rows = fp.info_rows(self.Info(), u"Test Sans Bold", 1000.0, [u"Regular", u"Bold"])
+        labels = [label for label, _ in rows]
+        self.assertEqual(labels, [u"Family", u"Style", u"Font name", u"Version", u"Designer", u"Copyright", u"License",
+                                  u"Created", u"Units per em", u"Masters"])
+        values = dict(rows)
+        self.assertEqual(values[u"Version"], u"2.005")
+        self.assertEqual(values[u"Designer"], u"A Designer", "the first name with a value, its spaces made single")
+        self.assertEqual(values[u"Copyright"], u"Copyright line one\nline two")
+        self.assertTrue(values[u"License"].startswith(u"x" * fp.INFO_TEXT_MAX + u"\N{HORIZONTAL ELLIPSIS} (30 characters more)"))
+        self.assertEqual(values[u"Created"], u"2023-11-14")
+        self.assertEqual(values[u"Units per em"], u"1000")
+        self.assertEqual(values[u"Masters"], u"Regular, Bold (2)")
+
+    def test_nothing_known(self):
+        self.assertEqual(fp.info_rows(None), [])
+        self.assertEqual(fp.info_rows(object(), upm=1000), [(u"Units per em", u"1000")])
+        self.assertEqual(fp.info_date(1700000000), u"2023-11-14", "from 1970")
+        self.assertEqual(fp.info_date(u"2020/01/31 12:00:00"), u"2020/01/31 12:00:00")
+
+    def test_the_info_follows_the_about_block(self):
+        font = make_font()
+        rows = [(u"Family", u"Test Sans"), (u"License", u"word " * 300)]
+        proof = fp.build_proof([font], fp.Options(["charset"]), [], u"2026-11-11", info=rows)
+        self.assertEqual(proof.pages[0].sections[:2], ["about", "info"])
+        texts = [item for page in proof.pages for item in page.items if item.kind == "text"]
+        labels = [item for item in texts if item.text == u"License"]
+        self.assertEqual(len(labels), 1, "a field's name once, on its first line")
+        lines = [item for item in texts if item.text.startswith(u"word")]
+        self.assertGreater(len(lines), 3)
+        self.assertTrue(all(item.x == labels[0].x + fp.INFO_LABEL_WIDTH for item in lines))
+        bare = fp.build_proof([font], fp.Options(["charset"]), [], u"2026-11-11", info=[])
+        self.assertIn(u"FontLab gave none of the font's info.",
+                      [item.text for item in bare.pages[0].items if item.kind == "text"])
+
+    def test_colors(self):
+        self.assertEqual(fp.page_colors("print", (200, 200, 200), (30, 30, 30)), ((0, 0, 0), (255, 255, 255)))
+        self.assertEqual(fp.page_colors("window", (200, 200, 200), (30, 30, 30)), ((200, 200, 200), (30, 30, 30)))
+        self.assertEqual(fp.page_colors("window"), fp.PRINT_COLORS, "no palette: black on white")
+        self.assertEqual(fp.colors_label("window", (230, 230, 230), (40, 40, 40)), u"the window's: light on dark")
+        self.assertEqual(fp.colors_label("print", (0, 0, 0), (255, 255, 255)), u"black on white")
+        self.assertAlmostEqual(fp.fit_scale((300, 300), (600, 800)), 0.375, msg="the page's height decides")
+
+
 class ProofTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -534,6 +682,41 @@ class DialogTests(unittest.TestCase):
         self.assertIsNone(dialog.proof)
         dialog.save_pdf()
         dialog.show_in_glyph_window()
+
+    def test_the_font_info_page_and_the_colors(self):
+        dialog = self.dialog(fake_font())
+        dialog.languages = []
+        dialog.rebuild()
+        self.assertEqual(dialog.proof.pages[0].sections[:2], ["about", "info"])
+        self.assertIn((u"Font name", u"Fake Sans"), dialog.info, "(FontLab's info a fake here: the package's own)")
+        self.assertIn((u"Masters", u"Regular, Bold (2)"), dialog.info)
+        self.assertEqual(dialog.color_mode(), "window")
+        self.assertEqual([len(rgb) for rgb in dialog.colors()], [3, 3], "the fake palette's colors")
+        dialog.colors_box.currentIndex = 1
+        self.assertEqual(dialog.color_mode(), "print")
+        self.assertEqual(dialog.colors(), fp.PRINT_COLORS)
+        self.assertTrue(dialog.defaults_changed())
+        dialog.show_page()
+
+    def test_a_pdf_moved_away_is_said_once_and_its_button_grays_out(self):
+        dialog = self.dialog(fake_font())
+        said = []
+        dialog.log.add = lambda text, level="info": said.append((level, text))
+        states, enable = [], dialog.ak.enable
+        dialog.ak.enable = lambda button, on: states.append((button, on))
+        try:
+            dialog.saved = os.path.join(HERE, u"no such proof.pdf")
+            dialog.open_pdf()
+        finally:
+            dialog.ak.enable = enable
+        self.assertEqual(len(said), 1)
+        self.assertEqual(said[0][0], "warning")
+        self.assertIn(u"not there anymore", said[0][1])
+        self.assertIn((dialog.open_button, False), states)
+        dialog.update_buttons()
+        self.assertEqual(len(said), 1, "said once")
+        dialog.saved = os.path.abspath(__file__)
+        self.assertTrue(dialog.saved_there())
 
 
 if __name__ == "__main__":

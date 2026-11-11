@@ -614,6 +614,87 @@ class KerningUpgradeTests(unittest.TestCase):
                           ("class", u"class o")])
         self.assertEqual(kc.compare_masters([("Regular", regular)]), [])
 
+    def test_lists_limited_to_some_glyphs(self):
+        # after Diacritics built Tcaron (or moved its caron): only the pairs and entries with it
+        k = fake_font({"T": (["T", "Tcaron"], "KernLeft")},
+                      {(("T", True), ("o", False)): -90, (("V", False), ("a", False)): -60,
+                       (("V", False), ("o", False)): -3, (("Tcaron", False), ("a", False)): -60,
+                       (("T", True), ("a", False)): -60})
+        gaps = {("T", "o"): 30.0, ("Tcaron", "o"): -12.0, ("V", "a"): 8.0, ("Tcaron", "a"): 9.0, ("T", "a"): 9.0}
+        closest = lambda left, right, value: gaps.get((left, right))
+        found = kc.find_collisions(k, closest, 20, relative=False, only=set(["Tcaron"]))
+        self.assertEqual([c.pair() for c in found], [("Tcaron", "o"), ("Tcaron", "a")], "V a left out")
+        self.assertEqual(len(kc.find_collisions(k, closest, 20, relative=False)), 4, "every pair without a limit")
+        measured = []
+        kc.find_collisions(k, lambda left, right, value: measured.append((left, right)), 20, relative=False,
+                           only=set(["Tcaron"]))
+        self.assertTrue(all("Tcaron" in pair for pair in measured), "the other pairs are not even measured")
+        self.assertEqual([pair for pair, _ in kc.tight_pairs(k, set(["Tcaron"]))], [("Tcaron", "a"), ("Tcaron", "o")])
+
+        cleanup = kc.find_cleanup(k, lambda name: True, 5)
+        self.assertEqual(sorted(c.entry for c in cleanup),
+                         [(("Tcaron", False), ("a", False)), (("V", False), ("o", False))])
+        limited = kc.limited_cleanup(k, cleanup, set(["Tcaron"]))
+        self.assertEqual([c.entry for c in limited], [(("Tcaron", False), ("a", False))], "the exception equal to its class's")
+        self.assertEqual([c.entry for c in kc.limited_cleanup(k, cleanup, set(["T"]))], [], "neither names T nor a class holding it")
+        self.assertEqual(len(kc.limited_cleanup(k, cleanup, None)), 2)
+        self.assertTrue(kc.involves(k, (("T", True), ("o", False)), ["Tcaron"]), "a class side: its members")
+        self.assertFalse(kc.involves(k, (("V", False), ("a", False)), ["Tcaron"]))
+        self.assertEqual(kc.entry_glyphs(k, (("T", True), ("o", False))), set(["T", "Tcaron", "o"]))
+
+    def test_masters_limited_to_some_glyphs(self):
+        regular = fake_font({"o": (["o"], "KernRight"), "A": (["A"], "KernLeft")},
+                            {(("T", False), ("o", True)): -60, (("V", False), ("a", False)): -20})
+        bold = fake_font({"o": (["o", "oacute"], "KernRight"), "A": (["A", "Aacute"], "KernLeft")},
+                         {(("T", False), ("o", True)): 30})
+        found = kc.compare_masters([("Regular", regular), ("Bold", bold)], only=set(["oacute"]))
+        self.assertEqual([(d.kind, d.subject) for d in found],
+                         [("sign", u"T \N{MULTIPLICATION SIGN} class o"), ("class", u"class o")],
+                         "class o holds oacute in Bold: its entry and the class; V a and class A left out")
+        self.assertEqual(found[0].entry, (("T", False), ("o", True)))
+        self.assertEqual(len(kc.compare_masters([("Regular", regular), ("Bold", bold)])), 4)
+
+    def test_the_line_over_limited_lists(self):
+        self.assertEqual(kc.limit_line([u"L", u"l"], u"Diacritics built"), u"Pairs with the 2 glyphs Diacritics built: L l")
+        self.assertEqual(kc.limit_line([u"L"], u"Diacritics built"), u"Pairs with the glyph Diacritics built: L")
+        self.assertEqual(kc.limit_line([u"a", u"b", u"c"], None, shown=2), u"Pairs with these 3 glyphs: a b \N{HORIZONTAL ELLIPSIS}")
+        self.assertEqual(kc.limit_line([u"a"]), u"Pairs with this glyph: a")
+
+    def test_glyphs_handed_over_by_name_or_as_glyphs(self):
+        glyph = type("Glyph", (), {"name": u"Ldot"})()
+        self.assertEqual(kc.glyph_names([glyph, "ldot", u"Ldot", None]), [u"Ldot", u"ldot"])
+        self.assertEqual(kc.glyph_names(None), [])
+
+    def test_buttons_count_their_checked_rows(self):
+        self.assertEqual(kc.action_text("cleanup", 0), u"Clean up checked entries")
+        self.assertEqual(kc.action_text("cleanup", 1), u"Clean up 1 checked entry")
+        self.assertEqual(kc.action_text("cleanup", 3), u"Clean up 3 checked entries")
+        self.assertEqual(kc.action_text("collisions", 1), u"Write 1 checked fix")
+        self.assertEqual(kc.action_text("collisions", 2), u"Write 2 checked fixes")
+        self.assertEqual(ak.checks_of([True, False], bool), (True, True))
+        self.assertEqual(ak.checks_of([], bool), (False, False), "an empty list: neither Check all nor Check none")
+
+    def test_main_takes_the_glyphs_without_qt(self):
+        import contextlib
+        try:
+            from io import StringIO
+        except ImportError:  # pragma: no cover
+            from StringIO import StringIO
+        out = StringIO() if sys.version_info[0] >= 3 else io.BytesIO()
+        redirect = getattr(contextlib, "redirect_stdout", None)
+        if redirect is None:
+            saved, sys.stdout = sys.stdout, out
+            try:
+                kc.main(glyphs=["Ldot"], reason=u"Diacritics built")
+                kc.main(["Ldot"], why=u"Diacritics moved marks of")
+            finally:
+                sys.stdout = saved
+        else:
+            with redirect(out):
+                kc.main(glyphs=["Ldot"], reason=u"Diacritics built")
+                kc.main(["Ldot"], why=u"Diacritics moved marks of")
+        self.assertIn("FreeLab Kerning Check", out.getvalue(), "no Qt here: said so, nothing raised")
+
     def test_proof_text_names_each_glyph(self):
         self.assertEqual(ak.proof_text("T", "eacute", ["H", "n"]), u"/H/H/T/eacute/H/H/space/n/n/T/eacute/n/n")
 
@@ -774,6 +855,39 @@ class ScriptTests(unittest.TestCase):
             for chars in list(ak.SCRIPT_REFERENCES[script].values()) + [ak.SCRIPT_TUNING[script], ak.SCRIPT_CONTROLS[script]]:
                 self.assertTrue(all(ch in letters for ch in chars), script)
             self.assertIn(ak.SCRIPT_SIDE[script], letters)
+
+
+class AllScriptsTests(unittest.TestCase):
+    def test_all_scripts_is_offered_for_two_scripts_or_more(self):
+        self.assertEqual(ak.script_choices(["latin", "kana"]), ["latin", "kana", ak.ALL_SCRIPTS])
+        self.assertEqual(ak.script_choices(["latin"]), ["latin"])
+        self.assertEqual(ak.script_choices([]), ["latin"])
+        self.assertEqual(ak.script_label(ak.ALL_SCRIPTS), u"All scripts")
+        self.assertEqual(ak.script_label("armenian"), u"Armenian")
+
+    def test_a_pairs_script(self):
+        self.assertEqual(ak.pair_script(KANA_NO, u"\N{IDEOGRAPHIC FULL STOP}"), "kana")
+        self.assertEqual(ak.pair_script(u",", ARMENIAN_SMALL_VO), "armenian", "a mark takes its partner's")
+        self.assertEqual(ak.pair_script(u".", u","), "latin")
+
+    def test_each_scripts_analysis_merged_into_one_list(self):
+        def suggestion(left, right, raw):
+            s = ak.Suggestion(left, right, left, right, 0)
+            s.raw["halfkern"] = raw
+            return s
+        latin = ak.Analysis([suggestion(u"T", u"o", -80), suggestion(u"V", u"a", -60)],
+                            {"halfkern": (0.5, 1.0)}, (None, None), measured=2)
+        kana = ak.Analysis([suggestion(KANA_RO, KANA_NO, -40)], {"halfkern": (0.8, 1.0)}, (None, None), measured=1, reused=4)
+        merged = ak.MergedAnalysis([("latin", latin), ("kana", kana)])
+        self.assertEqual([(s.left, s.script) for s in merged.suggestions], [(u"T", "latin"), (u"V", "latin"), (KANA_RO, "kana")])
+        self.assertEqual((merged.measured, merged.reused), (3, 4))
+        self.assertEqual(ak.factors_of(merged, "kana"), {"halfkern": (0.8, 1.0)}, "each script keeps its own factors")
+        self.assertEqual(ak.factors_of(latin, "kana"), {"halfkern": (0.5, 1.0)}, "one script's analysis: its factors")
+        self.assertEqual(ak.factor_summary(merged), [u"halfkern tightens at 50% in Latin, 80% (from the font's kerning) in Kana"])
+        self.assertEqual(ak.factor_summary(latin), [u"halfkern tightens at 50%"])
+        same = ak.MergedAnalysis([("latin", latin), ("kana", ak.Analysis([suggestion(KANA_RO, KANA_I, -10)],
+                                                                         {"halfkern": (0.5, 1.0)}, (None, None)))])
+        self.assertEqual(ak.factor_summary(same), [u"halfkern tightens at 50%"], "alike in every script: said once")
 
 
 class ScriptProofTests(unittest.TestCase):

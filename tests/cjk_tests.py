@@ -100,5 +100,85 @@ class CodeTests(unittest.TestCase):
         self.assertEqual(block, u"feature palt {\n  pos a-hira <-70 0 -130 0>;\n} palt;\n")
 
 
+class SampleTests(unittest.TestCase):
+    def sample(self, key):
+        return dict((k, text) for k, _, text in cj.SAMPLES)[key]
+
+    def test_the_iroha_has_every_kana_once(self):
+        kana = [ch for ch in self.sample("ja") if 0x3041 <= ord(ch) <= 0x3096]
+        inside = self.sample("ja").split(u"\N{RIGHT CORNER BRACKET}")[0]
+        poem = [ch for ch in inside if 0x3041 <= ord(ch) <= 0x3096]
+        self.assertEqual(len(poem), 47)
+        self.assertEqual(len(set(poem)), 47, "each kana once")
+        self.assertTrue(set(kana) >= set(poem))
+        for mark in u"\N{LEFT CORNER BRACKET}\N{RIGHT CORNER BRACKET}\N{IDEOGRAPHIC COMMA}\N{IDEOGRAPHIC FULL STOP}" \
+                    u"\N{FULLWIDTH LEFT PARENTHESIS}\N{FULLWIDTH RIGHT PARENTHESIS}":
+            self.assertIn(mark, self.sample("ja"), "palt's punctuation shows")
+
+    def test_the_hangul_pangram_has_every_basic_jamo(self):
+        import unicodedata
+        found = set()
+        for ch in self.sample("ko"):
+            index = ord(ch) - 0xAC00
+            if 0 <= index < 11172:
+                found.add(unicodedata.name(cj.unichr_(0x1100 + index // 588)).split()[-1])
+                found.add(unicodedata.name(cj.unichr_(0x1161 + index % 588 // 28)).split()[-1])
+                if index % 28:
+                    found.add(unicodedata.name(cj.unichr_(0x11A7 + index % 28)).split()[-1])
+        basic = (u"KIYEOK NIEUN TIKEUT RIEUL MIEUM PIEUP SIOS IEUNG CIEUC CHIEUCH KHIEUKH THIEUTH PHIEUPH HIEUH "
+                 u"A YA EO YEO O YO U YU EU I").split()
+        self.assertEqual([name for name in basic if name not in found], [])
+
+    def test_the_thousand_character_classic_repeats_no_character(self):
+        for key in ("zh-hans", "zh-hant"):
+            text = self.sample(key)
+            han = [ch for ch in text if 0x4E00 <= ord(ch) <= 0x9FFF]
+            self.assertEqual(len(han), 27, key)  # 24 of the poem, and its title
+            self.assertEqual(len(set(han)), len(han), key)
+            self.assertIn(u"\N{FULLWIDTH COMMA}", text)
+        simplified, traditional = self.sample("zh-hans"), self.sample("zh-hant")
+        self.assertIn(u"\N{CJK UNIFIED IDEOGRAPH-9EC4}", simplified, "yellow, simplified")
+        self.assertIn(u"\N{CJK UNIFIED IDEOGRAPH-9EC3}", traditional, "yellow, traditional")
+        self.assertEqual(len(simplified), len(traditional))
+
+    def test_the_sample_a_font_covers_best(self):
+        def codes_of(*keys):
+            return set(ord(ch) for key in keys for ch in self.sample(key))
+        kana = set(range(0x3041, 0x3097)) | set(range(0x30A1, 0x30FB))
+        hangul = set(range(0xAC00, 0xAC00 + 3000)) | codes_of("ko")
+        han = set(range(0x4E00, 0x4E00 + 5000)) | codes_of("zh-hans")
+        self.assertEqual(cj.SAMPLES[cj.best_sample(kana | codes_of("ja"))][0], "ja")
+        self.assertEqual(cj.SAMPLES[cj.best_sample(hangul | kana | codes_of("ja"))][0], "ko",
+                         "a Korean font with kana: Korean")
+        self.assertEqual(cj.SAMPLES[cj.best_sample(han | kana | codes_of("ja"))][0], "zh-hans",
+                         "a Chinese font with kana: Chinese")
+        self.assertEqual(cj.SAMPLES[cj.best_sample(codes_of("zh-hant"))][0], "zh-hant")
+
+
+class LineTests(unittest.TestCase):
+    def test_lines_fit_the_room(self):
+        chars = list(u"abcdefgh")
+        self.assertEqual(cj.break_lines(chars, [10] * 8, 30), [(0, 3), (3, 6), (6, 8)])
+        self.assertEqual(cj.break_lines(chars, [10] * 8, 1000), [(0, 8)])
+        self.assertEqual(cj.break_lines(chars[:2], [50, 50], 30), [(0, 1), (1, 2)], "too wide alone: alone")
+
+    def test_kinsoku(self):
+        text = u"\N{LEFT CORNER BRACKET}\N{HIRAGANA LETTER I}\N{HIRAGANA LETTER RO}\N{IDEOGRAPHIC COMMA}" \
+               u"\N{HIRAGANA LETTER HA}\N{HIRAGANA LETTER SMALL TU}\N{HIRAGANA LETTER NI}"
+        lines = cj.break_lines(list(text), [10] * len(text), 30)
+        starts = [text[start] for start, _ in lines]
+        ends = [text[end - 1] for _, end in lines]
+        self.assertNotIn(u"\N{IDEOGRAPHIC COMMA}", starts, "no comma first on a line")
+        self.assertNotIn(u"\N{HIRAGANA LETTER SMALL TU}", starts, "no small kana first")
+        self.assertNotIn(u"\N{LEFT CORNER BRACKET}", ends, "no opening bracket last")
+        self.assertEqual(u"".join(text[a:b] for a, b in lines), text)
+
+    def test_korean_breaks_at_spaces(self):
+        text = u"\N{HANGUL SYLLABLE GA}\N{HANGUL SYLLABLE NA} \N{HANGUL SYLLABLE DA}\N{HANGUL SYLLABLE RA}" \
+               u"\N{HANGUL SYLLABLE MA}"
+        lines = cj.break_lines(list(text), [10] * len(text), 40)
+        self.assertEqual(lines, [(0, 2), (3, 6)], "after the space, which is dropped")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -76,6 +76,53 @@ class SpacingTests(unittest.TestCase):
         sides[u"n"] = ("n", 0, 2, 500)
         self.assertEqual(sp.references_to_space(sides, 1000), [u"H", u"n", u"o"], "Latin's alone")
 
+    def test_changes_settle_in_one_analysis(self):
+        # the methods want T's right side 40 units tighter and its left side 30 looser, but each measure
+        # closes half of a tightening (halfkern's factor): measured once, T's right side moves 20;
+        # spaced again it would ask for 10 more, then 5: the several clicks the list took
+        targets = {("T", "right"): -40, ("T", "left"): 30, ("a", "right"): -9}
+
+        def measure_at(moved):
+            def measure(left, right):
+                glyph, side = (right, "left") if left in u"Hn" else (left, "right")
+                if (glyph, side) not in targets:
+                    return None
+                done = moved.get(glyph, (0, 0))[0 if side == "left" else 1]
+                gap = targets[(glyph, side)] - done
+                return int(gap * (0.5 if gap < 0 else 1.0))  # (truncated: the same in Python 2 and 3)
+            return measure
+
+        glyphs = [sp.Spacing(u"T", "T", "upper", 20, 25, 500), sp.Spacing(u"a", "a", "lower", 30, 20, 450)]
+        sp.suggest_spacing(glyphs, measure_at({}), ak.kind_character, ak.category)
+        t, a = glyphs
+        self.assertEqual((t.left_change, t.right_change), (30, -20), "one measure: half of the tightening")
+        passes = sp.settle_spacing(glyphs, measure_at, ak.kind_character, ak.category, settle=2)
+        self.assertEqual((t.left_change, t.right_change), (30, -38), "measured again until the step is under 2 units")
+        self.assertEqual(a.right_change, -7)
+        self.assertEqual(passes, 5)
+        self.assertEqual(measure_at({"T": (30, -38)})(u"T", u"H"), -1, "the next analysis asks nothing worth listing")
+        capped = [sp.Spacing(u"T", "T", "upper", 20, 25, 500)]
+        sp.suggest_spacing(capped, measure_at({}), ak.kind_character, ak.category)
+        self.assertEqual(sp.settle_spacing(capped, measure_at, ak.kind_character, ak.category, settle=2, passes=2), 2)
+        self.assertEqual(capped[0].right_change, -30, "the passes are capped")
+
+    def test_a_side_that_overshoots_takes_half_the_way_back(self):
+        def measure_at(moved):
+            done = moved.get("T", (0, 0))[1]
+            return lambda left, right: (12 if done else -40) if left == u"T" else None  # past its target after a step
+        glyphs = [sp.Spacing(u"T", "T", "upper", 20, 25, 500)]
+        sp.suggest_spacing(glyphs, measure_at({}), ak.kind_character, ak.category)
+        self.assertEqual(sp.settle_spacing(glyphs, measure_at, ak.kind_character, ak.category, settle=2), 2)
+        self.assertEqual(glyphs[0].right_change, -34, "-40, then half of the 12 back: it settles between")
+        self.assertIsNone(glyphs[0].left_change, "an unmeasured side stays unmeasured")
+
+    def test_apply_note_says_what_one_click_took(self):
+        self.assertEqual(sp.apply_note(1, 0, 6), u"")
+        self.assertEqual(sp.apply_note(2, 1, 6),
+                         u"It took 2 passes: measured again after spacing, 1 glyph still had a side 6 units or more off, "
+                         u"and was spaced again (the measuring's pixels round each change a little).")
+        self.assertIn(u"the other 20 glyphs measured against them again", sp.apply_note(1, 0, 6, 20))
+
     def test_composites_follow_their_base(self):
         composites = {"eacute": ("e", ["acute"]), "ecircumflexacute": ("ecircumflex", ["acute"]),
                       "ecircumflex": ("e", ["circumflex"]), "f_e": ("f", ["e"]), "aacute": ("a", ["acute"])}

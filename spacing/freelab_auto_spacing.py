@@ -37,6 +37,10 @@ TOLERANCE_UNITS = 6  # a side whose suggestion is closer than this to its sidebe
 GROUPS = (("letters", "Letters"), ("figures", "Letters and figures"), ("all", "Letters, figures, and punctuation"),
           ("everything", "Everything: every glyph with a character"))  # (other scripts and symbols too, by case)
 PREVIEW_SIZE = 80  # pixels per em in the previews
+SETTLE_PASSES = 6  # an analysis measures each change again, with it made, at most this many times
+SETTLE_SHARE = 0.002  # a side has settled when measuring it again asks less than this share of the em more
+KERNING_BUTTON = u"Check kerning of these glyphs\N{HORIZONTAL ELLIPSIS}"  # Kerning Check on the glyphs just spaced
+APPLY_PASSES = 3  # Space checked glyphs writes, measures again, and writes what is still off, at most this many times
 SIDE_ALPHA = 110  # the references beside the glyph, dimmed
 
 
@@ -144,6 +148,67 @@ def suggest_spacing(glyphs, measure, kind_of, category, script_of=None):
         g.right_change = measure(g.char, reference)
         g.left_change = measure(reference, g.char)
     return glyphs
+
+
+def settle_spacing(glyphs, measure_at, kind_of, category, script_of=None, settle=2, passes=SETTLE_PASSES):
+    """Each Spacing's changes (from suggest_spacing) measured again with them made, until they settle;
+    the passes measured (1 when nothing needed another).
+
+    One measure does not land where the methods want a side: halfkern closes half of a tightening at
+    a time (Auto Kerning's DEFAULT_FACTORS), and the measuring is not linear (bands, pixels), so a
+    glyph spaced once asks for more when measured again; spacing the checked glyphs took several
+    clicks, each listing fewer glyphs. Here each pass measures the sides still moving with the
+    changes so far made: measure_at(moved) gives a measure as suggest_spacing's, with the glyphs set
+    as moved says ({glyph name: (left change, right change)}). A side settles when the next step is
+    under settle units, or when it overshoots (its sign flips: half of it is taken, the target lying
+    between), or when it can no longer be measured (it keeps what it had)."""
+    moving = {}
+    for g in glyphs:
+        for side in ("left", "right"):
+            change = getattr(g, side + "_change")
+            if change is not None and abs(change) >= settle:
+                moving[(g.name, side)] = change  # its last step
+    done = 1
+    while moving and done < passes:
+        moved = dict((g.name, (g.left_change or 0, g.right_change or 0)) for g in glyphs
+                     if g.left_change or g.right_change)
+        measure = measure_at(moved)
+        done += 1
+        still = {}
+        for g in glyphs:
+            sides = [side for side in ("left", "right") if (g.name, side) in moving]
+            if not sides:
+                continue
+            reference = reference_for(kind_of(g.char), category, script_of)
+            for side in sides:
+                step = measure(reference, g.char) if side == "left" else measure(g.char, reference)
+                if step is None:
+                    continue
+                last = moving[(g.name, side)]
+                settled = abs(step) < settle
+                if step * last < 0:
+                    step = int(step / 2.0)  # overshot: the target lies between (toward zero)
+                    settled = True
+                setattr(g, side + "_change", getattr(g, side + "_change") + step)
+                if not settled:
+                    still[(g.name, side)] = step
+        moving = still
+    return done
+
+
+def apply_note(passes, again, tolerance, references_first=0):
+    """What a click on Space checked glyphs took, for the log: passes writes, again glyphs spaced again
+    after the first (still a side tolerance units or more off when measured again), and how many glyphs
+    were measured again against references spaced first. Empty when one pass did it all."""
+    notes = []
+    if references_first:
+        notes.append(u"The references were spaced first, and the other %s measured against them again: their "
+                     u"changes differ from the list's." % counted(references_first, u"glyph"))
+    if passes > 1:
+        notes.append(u"It took %d passes: measured again after spacing, %s still had a side %s or more off, and %s "
+                     u"spaced again (the measuring's pixels round each change a little)." % (
+                         passes, counted(again, u"glyph"), counted(tolerance, u"unit"), u"was" if again == 1 else u"were"))
+    return u" ".join(notes)
 
 
 REFERENCE_MODEL_FILE = "reference_model.json"
@@ -266,8 +331,15 @@ lacks. A side measured within the tolerance is left as it is.<br>
 <b>The references are yours</b>: H, O, l, n, o, 0, and 8 set the spacing (as in Walter Tracy's
 method: space H and n, then O and o, by eye) and are never changed, nor are the other scripts'. Glyphs built from components
 are not spaced: they follow the letters they are built on, their accents kept over them.<br>
-<b>After spacing</b>: the font's kerning was set for the old sidebearings. Run <i>Auto Kerning</i> again,
-with <i>Include existing kerned pairs</i>, to see which pairs now want other values.<br>
+<b>One click</b>: each suggestion is measured again with its change made, until it settles (halfkern
+closes half of a tightening at a time, so one measure leaves part of it), and the list shows where
+each glyph ends up. If you check references, they are spaced first and the other glyphs measured
+against them again. After writing, the glyphs are measured again, and any still off by the tolerance
+are spaced again in the same step; the log says how many passes it took.<br>
+<b>After spacing</b>: the font's kerning was set for the old sidebearings. <i>Check kerning of these
+glyphs</i> opens <i>Kerning Check</i> on the glyphs just spaced (collisions and cleanup for them alone);
+run <i>Auto Kerning</i> again, with <i>Include existing kerned pairs</i>, to see which pairs now want
+other values.<br>
 <b>Preview</b>: the selected glyph between its references, as it is (left) and as suggested
 (right). Click a reference beside it to open that pair in <i>Auto Kerning</i>; double-click a glyph's name
 to open it in a <i>Glyph</i> window.<br>
@@ -352,11 +424,17 @@ class AutoSpacingDialog(object):
         self.restore_button = QtGui.QPushButton("Restore suggestions")
         self.restore_button.setWhatsThis(u"Puts the checks back as the list first came after the analysis.")
         self.glyph_window_button = QtGui.QPushButton("Show in Glyph window")
+        self.kerning_button = QtGui.QPushButton(KERNING_BUTTON)
+        self.kerning_button.setWhatsThis(u"Opens <i>Kerning Check</i> on the glyphs the last <i>Space checked glyphs</i> "
+                                         u"changed (and those built on them that followed): their kerning was set for "
+                                         u"the old spacing, and its collisions and cleanup are listed for them alone.")
+        self.spaced = []  # the glyphs the last spacing changed: their kerning is checked on request
         self.apply_button = QtGui.QPushButton("Space checked glyphs")
         self.apply_button.setWhatsThis(u"Changes the sidebearings of the checked glyphs in the current master (their "
                                        u"outlines move, their widths change), and the glyphs built on them.")
         self.close_button = QtGui.QPushButton("Close")
-        for button in (self.all_button, self.none_button, self.restore_button, self.glyph_window_button):
+        for button in (self.all_button, self.none_button, self.restore_button, self.glyph_window_button,
+                       self.kerning_button):
             buttons.addWidget(button)
         buttons.addStretch(1)
         buttons.addWidget(self.apply_button)
@@ -372,9 +450,11 @@ class AutoSpacingDialog(object):
         self.tree.connect("itemDoubleClicked(QTreeWidgetItem*,int)", self.double_clicked)
         self.glyph_window_button.connect("clicked()", self.show_in_glyph_window)
         self.apply_button.connect("clicked()", self.apply)
+        self.kerning_button.connect("clicked()", self.check_kerning)
         self.close_button.connect("clicked()", dialog.close)
         self.tree.connect("itemSelectionChanged()", self.select)
         self.package = self.master = None
+        self.settle_passes = 1
         self.spacings, self.listed, self.composites = [], [], {}
         self.busy = self.buttons_due = False
         self.reference_model = load_reference_model()
@@ -454,9 +534,11 @@ class AutoSpacingDialog(object):
                              self.ak.b(u", ".join(self.unspaced_references)),
                              self.ak.b(self.reference_model.get("families", 0)), self.ak.i(u"Analyze")), "warning")
 
-    def measure(self, package, master):
-        """(spacings, composites) of the master: the drawn glyphs' suggestions, and the composites
-        {name: (base glyph, other components' glyphs)}."""
+    def measure(self, package, master, only=None):
+        """(spacings, composites) of the master: the drawn glyphs' suggestions, each measured again with
+        its change made until it settles (settle_spacing), and the composites {name: (base glyph, other
+        components' glyphs)}. only: glyph names; when given, only their suggestions (no reference rows,
+        no composites)."""
         ak = self.ak
         em = ak.EM_PIXELS
         glyphs = ak.FontLabGlyphs(package, master, em)
@@ -472,6 +554,7 @@ class AutoSpacingDialog(object):
                              u"its spacing is what the others are measured by." % next(ch for ch in ak.TUNING if ch not in names))
         image_of = lambda ch: glyphs.image(names[ch])
         core = ak.Core()
+        self.settle_passes = 1
         tools = {}
         for script in scripts:
             try:
@@ -486,23 +569,40 @@ class AutoSpacingDialog(object):
         self.scripts = scripts
         kind_of = self.kind_of
 
-        def measure(left, right):
-            if left not in names or right not in names:
-                return None
-            kind_left, kind_right = kind_of(left), kind_of(right)
-            if kind_left is None or kind_right is None or ak.pair_kinds(kind_left, kind_right) is None:
-                return None
-            script = ak.script_of(kind_left if ak.category(kind_left) != "punctuation" else kind_right) or "latin"
-            if script not in tools:
-                return None
-            halo, contour = ak.measure_pair(tools[script], kind_left, kind_right, image_of(left), image_of(right), em, reach)
-            values = []
-            if halo is not None:
-                units = halo * upm / em
-                values.append(units * (tighten if units < 0 else loosen))
-            if contour is not None:
-                values.append(contour * upm / em)
-            return round_units(sum(values) / len(values)) if values else None
+        def measuring(images):
+            """The kerning a pair of characters wants (font units), with the glyphs as images draws them."""
+            def measure(left, right):
+                if left not in names or right not in names:
+                    return None
+                kind_left, kind_right = kind_of(left), kind_of(right)
+                if kind_left is None or kind_right is None or ak.pair_kinds(kind_left, kind_right) is None:
+                    return None
+                script = ak.script_of(kind_left if ak.category(kind_left) != "punctuation" else kind_right) or "latin"
+                if script not in tools:
+                    return None
+                halo, contour = ak.measure_pair(tools[script], kind_left, kind_right, images.image(names[left]),
+                                                images.image(names[right]), em, reach)
+                values = []
+                if halo is not None:
+                    units = halo * upm / em
+                    values.append(units * (tighten if units < 0 else loosen))
+                if contour is not None:
+                    values.append(contour * upm / em)
+                return round_units(sum(values) / len(values)) if values else None
+            return measure
+
+        measure = measuring(glyphs)
+        fixed_names = set(name for ch, name in found if ch in fixed)
+
+        def measure_at(moved):
+            """The measuring with glyphs moved ({name: (left change, right change)}): drawn again, their
+            outlines shifted by the left change and their widths changed by both, as spacing does."""
+            again = ak.FontLabGlyphs(package, master, em, dict((name, (left, left + right))
+                                                               for name, (left, right) in moved.items()))
+            for name in sorted(fixed_names | set(moved)):
+                again.add(name)
+            again.top, again.bottom = glyphs.top, glyphs.bottom  # (the same height and baseline as the bands')
+            return measuring(again)
 
         spacings, composites = [], {}
         seen = set()
@@ -515,11 +615,15 @@ class AutoSpacingDialog(object):
             if parts and all(parts):
                 composites[name] = (parts[0], parts[1:])  # built from components: follows them
                 continue
-            if ch not in wanted:
+            if ch not in wanted or (only is not None and name not in only):
                 continue
             left, right, width = ink_sides(layer)
             spacings.append(Spacing(ch, name, ak.category(kind_of(ch)), left, right, width))
         suggest_spacing(spacings, measure, kind_of, ak.category, ak.script_of)
+        self.settle_passes = settle_spacing(spacings, measure_at, kind_of, ak.category, ak.script_of,
+                                            max(1, round_units(SETTLE_SHARE * upm)))
+        if only is not None:
+            return spacings, {}
         self.unspaced_references = self.space_references(package, master, names, spacings)
         # every composite of the font, not only those of the characters measured (alternates, ligatures)
         for fg in package.fgPackage.glyphs:
@@ -644,7 +748,10 @@ class AutoSpacingDialog(object):
                                 % (ak.b(self.package.tfn), ak.b(self.master), ak.b(len(self.listed)),
                                    ak.b(counted(len(self.spacings), u"drawn glyph")),
                                    u"has" if len(self.listed) == 1 else u"have", ak.b(counted(tolerance, u"unit")),
-                                   ak.i(u"Space checked glyphs")))
+                                   ak.i(u"Space checked glyphs"))
+                                + (u" Each change was measured again with it made, until the changes settled (%s "
+                                   u"passes): halfkern closes half of a tightening at a time, so one measure leaves part "
+                                   u"of it." % ak.b(self.settle_passes) if getattr(self, "settle_passes", 1) > 1 else u""))
         self.select()
 
     def harvest(self):
@@ -679,6 +786,15 @@ class AutoSpacingDialog(object):
         self.harvest()
         self.ak.enable(self.restore_button, any(self.first_checks.get(s.name, s.checked) != s.checked for s in self.listed))
         self.ak.enable(self.glyph_window_button, self.selected() is not None)
+        self.ak.enable(self.kerning_button, bool(self.spaced) and not self.busy)
+
+    def check_kerning(self):
+        """Kerning Check on the glyphs the last spacing changed."""
+        if not self.spaced:
+            return
+        error = self.ak.open_kerning_check(self.spaced, u"Auto Spacing spaced")
+        if error:
+            self.log.add(u"<i>Kerning Check</i> did not open: %s" % self.ak.html(error), "error")
 
     def restore(self):
         """The checks back as the list first came after the analysis (set on the rows themselves: filling
@@ -807,7 +923,10 @@ class AutoSpacingDialog(object):
     # -- changing the font ----------------------------------------------
 
     def apply(self):
-        QtCore, QtGui = _qt()
+        """The checked glyphs spaced, as one step of the History. The references among them first, the
+        others then measured against them again; after writing, the glyphs are measured again and those
+        still a side the tolerance or more off are spaced again (APPLY_PASSES at most): one click lands
+        where the next analysis would ask nothing more."""
         if self.busy or self.package is None:
             return
         self.harvest()
@@ -821,52 +940,61 @@ class AutoSpacingDialog(object):
         chosen = [s for s in self.listed if s.checked]
         if not chosen:
             return
-        package, master = self.package, self.master
-        changed, stale, error = {}, 0, None
+        references = [s for s in chosen if getattr(s, "reference", False)]
+        others = [s for s in chosen if not getattr(s, "reference", False)]
+        totals, stale, error, moved = {}, 0, None, []
+        passes, again, measured_again, unread = 0, 0, 0, False
+        self.busy = True
         try:
-            for s in chosen:
-                glyph = package.findName(s.name)
-                layer = glyph.getLayerByName(master) if glyph is not None else None
-                if layer is None:
-                    continue
-                left_now, right_now, width_now = ink_sides(layer)
-                if abs(left_now - s.left) > 0.5 or abs(right_now - s.right) > 0.5:
-                    stale += 1  # edited since the analysis: measured again next time
-                    continue
-                left, right = s.changes(tolerance)
-                if left:
-                    shift = QtGui.QTransform()
-                    shift.translate(left, 0)
-                    layer.applyTransform(shift)  # the outline's nodes move (checked in FontLab 7.2)
-                layer.advanceWidth = width_now + left + right
-                changed[s.name] = (left, right)
-                self.touched(glyph)
-            moved = 0
+            batches = [references, others] if references and others else [chosen]
+            written = []
+            for number, batch in enumerate(batches):
+                last = number == len(batches) - 1
+                if number:  # the references were spaced: the others measured against them as they are now
+                    if not self.reads_back(written):
+                        unread = True
+                        break
+                    batch = self.measured_again(batch, tolerance)
+                    measured_again = len(others)
+                for attempt in range(APPLY_PASSES):
+                    written, stale_now = self.write_spacings(batch, tolerance, totals)
+                    stale += stale_now
+                    if last:
+                        passes = attempt + 1
+                    if not written or attempt == APPLY_PASSES - 1 or not last:
+                        break  # (the references are written once: they are not measured, but spaced from the corpus)
+                    if not self.reads_back(written):
+                        unread = True
+                        break
+                    batch = self.measured_again([s for s, _, _ in written], tolerance)
+                    if not batch:
+                        break
+                    if last and attempt == 0:
+                        again = len(batch)
             if self.follow.checked:
-                for name, move in composite_moves(self.composites, changed).items():
-                    if move is None:
-                        continue
-                    glyph = package.findName(name)
-                    layer = glyph.getLayerByName(master) if glyph is not None else None
-                    if layer is None:
-                        continue
-                    shift, width_change = move
-                    for shape in layer.shapes[1:]:  # the accents: kept over the base, whose outline moved
-                        transform = QtGui.QTransform(shape.transform)
-                        transform.translate(shift, 0)
-                        shape.transform = transform
-                    layer.advanceWidth = layer.advanceWidth + width_change
-                    self.touched(glyph)
-                    moved += 1
+                moved = self.follow_composites(totals)
         except Exception as exc:  # what was changed stays changed, and is reported
             error = exc
+        finally:
+            self.busy = False
         self.after_writing()
         ak = self.ak
-        self.log.add(u"Spaced %s%s. The kerning was set for the old spacing: run <i>Auto Kerning</i> again. "
-                     u"<i>Edit &gt; Undo</i> (or the <i>History</i> panel) takes it back." % (
-                         ak.b(counted(len(changed), u"glyph")),
-                         u", and %s built on them followed" % ak.b(counted(moved, u"glyph")) if self.follow.checked and changed else u""),
-                     "done" if changed else "info")
+        self.spaced = sorted(totals) + sorted(name for name in moved if name not in totals)
+        lines = [u"Spaced %s%s." % (ak.b(counted(len(totals), u"glyph")),
+                                    u", and %s built on them followed" % ak.b(counted(len(moved), u"glyph"))
+                                    if self.follow.checked and totals else u"")]
+        note = apply_note(passes, again, tolerance, measured_again if not unread else 0)
+        if note:
+            lines.append(ak.html(note))
+        if totals:
+            lines.append(u"The kerning was set for the old spacing: click %s to see whether pairs with these glyphs now "
+                         u"collide, or run <i>Auto Kerning</i> again with <i>Include existing kerned pairs</i>." % ak.i(
+                             KERNING_BUTTON))
+        lines.append(u"<i>Edit &gt; Undo</i> (or the <i>History</i> panel) takes it back.")
+        self.log.add(u" ".join(lines), "done" if totals else "info")
+        if unread:
+            self.log.add(u"FontLab did not give the new outlines back at once, so the glyphs could not be measured again "
+                         u"before the step ended: the list shows what is left, to space with another click.", "warning")
         if stale:
             self.log.add(u"%s had changed since the analysis and %s left as %s." % (
                 ak.b(counted(stale, u"glyph")), u"was" if stale == 1 else u"were", u"it was" if stale == 1 else u"they were"),
@@ -874,6 +1002,79 @@ class AutoSpacingDialog(object):
         if error is not None:
             self.log.add(u"Stopped by an error: %s" % ak.html(error), "error")
         self.run()
+
+    def write_spacings(self, rows, tolerance, totals):
+        """Each row's changes written (its outline moved by the left change, its width changed by both),
+        added up in totals {name: (left, right)}. ([(row, left, right) written], rows edited since they
+        were measured: left as they are)."""
+        QtCore, QtGui = _qt()
+        package, master = self.package, self.master
+        written, stale = [], 0
+        for s in rows:
+            glyph = package.findName(s.name)
+            layer = glyph.getLayerByName(master) if glyph is not None else None
+            if layer is None:
+                continue
+            left_now, right_now, width_now = ink_sides(layer)
+            if abs(left_now - s.left) > 0.5 or abs(right_now - s.right) > 0.5:
+                stale += 1  # edited since the analysis: measured again next time
+                continue
+            left, right = s.changes(tolerance)
+            if not left and not right:
+                continue
+            if left:
+                shift = QtGui.QTransform()
+                shift.translate(left, 0)
+                layer.applyTransform(shift)  # the outline's nodes move (checked in FontLab 7.2)
+            layer.advanceWidth = width_now + left + right
+            before = totals.get(s.name, (0, 0))
+            totals[s.name] = (before[0] + left, before[1] + right)
+            written.append((s, left, right))
+            self.touched(glyph)
+        return written, stale
+
+    def reads_back(self, written):
+        """Whether the glyphs just written read back as written (their ink's sides moved by the changes):
+        only then can they be measured again before the History step ends."""
+        package, master = self.package, self.master
+        for s, left, right in written:
+            glyph = package.findName(s.name)
+            layer = glyph.getLayerByName(master) if glyph is not None else None
+            if layer is None:
+                return False
+            left_now, right_now, _ = ink_sides(layer)
+            if abs(left_now - (s.left + left)) > 0.5 or abs(right_now - (s.right + right)) > 0.5:
+                return False
+        return True
+
+    def measured_again(self, rows, tolerance):
+        """The rows' glyphs measured again as they are now: those with a side tolerance units or more
+        off, as new rows."""
+        spacings, _ = self.measure(self.package, self.master, only=set(s.name for s in rows))
+        return [s for s in spacings if s.listed(tolerance)]
+
+    def follow_composites(self, totals):
+        """The composites built on the glyphs spaced, moved with them (totals: each glyph's changes in
+        all); the names of those moved."""
+        QtCore, QtGui = _qt()
+        package, master = self.package, self.master
+        moved = []
+        for name, move in composite_moves(self.composites, totals).items():
+            if move is None:
+                continue
+            glyph = package.findName(name)
+            layer = glyph.getLayerByName(master) if glyph is not None else None
+            if layer is None:
+                continue
+            shift, width_change = move
+            for shape in layer.shapes[1:]:  # the accents: kept over the base, whose outline moved
+                transform = QtGui.QTransform(shape.transform)
+                transform.translate(shift, 0)
+                shape.transform = transform
+            layer.advanceWidth = layer.advanceWidth + width_change
+            self.touched(glyph)
+            moved.append(name)
+        return moved
 
     def touched(self, glyph):
         try:

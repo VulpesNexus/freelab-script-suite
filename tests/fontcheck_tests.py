@@ -124,9 +124,9 @@ class CoverageTests(unittest.TestCase):
         import freelab_diacritics as dm
         result = fc.check_language(language(u"r " + u(0x159) + u" " + u(0x13E)), font([0x72]))
         candidates = fc.buildable_candidates([result], [pair for _, _, pairs in dm.SETS for pair in pairs])
-        diacritics_font = dm.Font([u"r", u"caron", u"l"], [(u"r", 0x72), (u"l", 0x6C)])
+        diacritics_font = dm.Font([u"r", u"caron", u"l", u"quoteright"], [(u"r", 0x72), (u"l", 0x6C), (u"quoteright", 0x2019)])
         built = [r.char for r in dm.plan(diacritics_font, candidates) if not r.missing]
-        self.assertEqual(built, [u(0x159), u(0x13E)], "r and l with a caron, from the font's caron")
+        self.assertEqual(built, [u(0x159), u(0x13E)], "r with the font's caron; l with the vertical caron drafted from its apostrophe")
 
 
 class LanguageDataTests(unittest.TestCase):
@@ -221,7 +221,7 @@ class MetricsTests(unittest.TestCase):
         texts = u" | ".join(f.text for f in fc.check_metrics(m, self.extents([("Agrave", 0xC0, "R", 0, 900)])))
         for expected in (u"Use Typo Metrics is off", u"hhea ascender (950) and typo ascender (750) differ",
                          u"hhea line gap (0) and typo line gap (200) differ", u"typo line gap is 200",
-                         u"A grave reaches 900", u"Capitals are not centered"):
+                         u(0xC0) + u" reaches 900", u"Capitals are not centered"):
             self.assertIn(expected, texts)
         self.assertNotIn(u"The line is", texts, "750 + 250 + 200: 120% of the em")
         unset = fc.check_metrics(fc.VerticalMetrics(upm=1000), [])
@@ -382,6 +382,26 @@ class AddTests(unittest.TestCase):
         greek = fc.check_language(language(u(0x3B1), script=u"Greek", name=u"Greek"), font([]))
         self.assertEqual(fc.gain_text(3, gained + [greek]), u"With 3 characters checked: +3 languages (Latin 2, Greek 1)")
 
+    def test_check_buttons(self):
+        results, (schwa, small_schwa, eng, small_eng) = self.results()
+        rows = fc.add_rows(results)
+        listed = set(i for row in rows for i in row.items)
+        targets = fc.checks_for(rows, set(), set([small_eng]))
+        self.assertEqual(targets["all"], listed)
+        self.assertIsNone(targets["none"], "nothing checked: grayed out")
+        self.assertEqual(targets["buildable"], set([small_eng]), "the rows Diacritics can build, only")
+        targets = fc.checks_for(rows, listed, set([small_eng]))
+        self.assertIsNone(targets["all"], "everything checked: grayed out")
+        self.assertEqual(targets["none"], set())
+        self.assertEqual(targets["buildable"], set([small_eng]), "the others unchecked")
+        self.assertIsNone(fc.checks_for(rows, set([small_eng]), set([small_eng]))["buildable"], "already so")
+        self.assertIsNone(fc.checks_for(rows, set(), set())["buildable"], "Diacritics builds none of them")
+        self.assertEqual(fc.checks_for(rows, set(), set([schwa]))["buildable"], set([schwa, small_schwa]),
+                         "a row checks whole: a capital with its small letter")
+        hidden = u(0x3B1)  # checked in a row another script's filter hides
+        self.assertEqual(fc.checks_for(rows, set([hidden]), set())["all"], listed | set([hidden]), "kept")
+        self.assertIsNone(fc.checks_for([], set(), set())["all"], "no row listed")
+
     def test_compact_missing(self):
         results, (schwa, small_schwa, _, _) = self.results()
         self.assertEqual(fc.compact_missing(results[0]), schwa + u" " + small_schwa)
@@ -471,7 +491,7 @@ class DiagramTests(unittest.TestCase):
                                      ("warn", u"Windows clips 1 glyph at the bottom, up to 50 units (g)")])
         self.assertEqual(lines[0].glyphs, [u"Aring"])
         for passed in (u"Use Typo Metrics is on", u"hhea and typo values match", u"Line gaps are 0",
-                       u"The line is 120% of the em", u"A grave stays under the line's ascender",
+                       u"The line is 120% of the em", u(0xC0) + u" stays under the line's ascender",
                        u"Capitals are centered in the line"):
             self.assertIn(("ok", passed), texts)
         self.assertEqual([line.state for line in lines], sorted((line.state for line in lines),
@@ -1013,10 +1033,20 @@ class DialogTests(unittest.TestCase):
         dialog.update_gain()
         dialog.mark_needed(dialog.rows[0].needing[0])
         dialog.update_buttons()
+        dialog.set_checks("all")
+        self.assertEqual(dialog.checked, set(i for row in dialog.rows for i in row.items))
+        dialog.set_checks("none")
+        self.assertEqual(dialog.checked, set())
+        dialog.buildable = set([dialog.rows[-1].items[0]])
+        dialog.set_checks("buildable")
+        self.assertEqual(dialog.checked, set(dialog.rows[-1].items))
+        dialog.set_checks("buildable")  # (grayed out: nothing changes)
+        self.assertEqual(dialog.checked, set(dialog.rows[-1].items))
 
     def test_metrics(self):
         dialog = self.dialog()
-        dialog.mode_new.checked, dialog.share.value = True, 120
+        dialog.mode_share.checked, dialog.share.value = True, 120
+        self.assertEqual(dialog.mode(), "share")
         dialog.check_vertical()
         clipped = [f for f in dialog.metrics.findings if isinstance(f, fc.MetricFinding) and f.kind == "clip-top"]
         self.assertEqual([(f.glyphs[0][1], f.value) for f in clipped], [(u"Agrave", 100), (u"Agrave", 100)])
@@ -1024,8 +1054,8 @@ class DialogTests(unittest.TestCase):
         self.assertEqual([(c.extent.name, c.above) for c in dialog.clipped], [(u"Agrave", 100)], "once, its worst master")
         self.assertTrue(any(line.state == "ok" for line in dialog.check_rows), "passed checks listed too")
         dialog.draw_diagram()
-        dialog.mode_new.checked = False
-        dialog.suggest()
+        dialog.mode_share.checked = False
+        dialog.mode_changed()
         self.assertEqual(dialog.mode(), "keep")
 
     def test_masters(self):
@@ -1074,7 +1104,7 @@ class DialogTests(unittest.TestCase):
 
     def test_write_metrics(self):
         dialog = self.dialog()
-        dialog.mode_new.checked, dialog.share.value = True, 120
+        dialog.mode_share.checked, dialog.share.value = True, 120
         dialog.check_vertical()
         writes = fc.metric_writes(dialog.suggestions)
         self.assertTrue(writes)

@@ -38,7 +38,7 @@ LANGUAGES_FILE = "language_coverage.json"  # beside this script: checks/train/la
 TABS = ("coverage", "metrics", "masters")
 NEARLY_MISSING = 3  # a language missing at most this many base characters (and marks) is within reach
 SCRIPT_MINIMUM = 5  # a font with fewer of a script's characters than this has none of it (its languages summed up)
-LINE_SHARE = 1.2  # Google Fonts: typo (and hhea) ascender plus descender at 120% of the em for a new font
+LINE_SHARE = 1.2  # Google Fonts: typo (and hhea) ascender plus descender at 120% of the em, suggested to start with
 LINE_RANGE = (1.2, 1.3)  # ... and between 120% and 130% for Latin, Greek, and Cyrillic fonts
 CENTER_TOLERANCE_SHARE = 0.02  # capitals count as centered in the line within this share of the em
 WIN_SLACK_SHARE = 0.05  # winAscent or winDescent this share of the em past the ink is looser than needed
@@ -479,7 +479,8 @@ def check_metrics(m, extents, capitals=True):
         a_grave = [e for e in extents if e.code == 0xC0]
         tallest = max(a_grave, key=lambda e: e.top) if a_grave else None
         if tallest is not None and tallest.top > ascender:
-            found.append(MetricFinding("settings", "advice", u"A grave reaches %d, above the line's ascender (%d): some "
+            found.append(MetricFinding("settings", "advice", u"\N{LATIN CAPITAL LETTER A WITH GRAVE} reaches %d, above "
+                                       u"the line's ascender (%d): some "
                                        u"macOS applications then place the first line by it" % (
                                            round_units(tallest.top), ascender),
                                        [(tallest.master, tallest.name, round_units(tallest.top - ascender))],
@@ -528,18 +529,20 @@ SUGGESTED = (("typo_ascender", u"Typo ascender"), ("typo_descender", u"Typo desc
              ("typo_line_gap", u"Typo line gap"), ("hhea_ascender", u"hhea ascender"),
              ("hhea_descender", u"hhea descender"), ("hhea_line_gap", u"hhea line gap"),
              ("win_ascent", u"winAscent"), ("win_descent", u"winDescent"), ("use_typo", u"Use Typo Metrics"))
-MODES = (("new", u"a new font (the line at"), ("keep", u"an update, keeping its line spacing"))
+MODES = (("share", u"Line spacing at a share of the em"), ("keep", u"Keep the font's current line spacing"))
+# (the designer's choice: a line spacing to suggest, or, for an update of a released font, the one it has)
 
 
-def suggest_metrics(m, extents, capitals=True, mode="new", share=LINE_SHARE, letters=None):
+def suggest_metrics(m, extents, capitals=True, mode="share", share=LINE_SHARE, letters=None):
     """([Suggestion], [note]) of vertical metrics following Google Fonts' guidance.
 
-    New font: the line share times the em, capitals centered in it (or the font's ascender and
-    descender scaled to it), raised to clear A grave and lowered to clear the deepest descender of a
-    to z (Greek, Cyrillic), line gaps of 0, hhea equal to typo, win at the ink's highest and lowest
-    points in every master, Use Typo Metrics on; for a font of another script, the line also raised
-    and lowered to clear its letters' ink (letters: their code points). Update: the line as it was (typo kept if Use Typo
-    Metrics was on, else the old win values become typo), win and Use Typo Metrics as for a new font."""
+    "share": the line spacing at the share of the em set, capitals centered in it (or the font's
+    ascender and descender scaled to it), raised to clear A grave and lowered to clear the deepest
+    descender of a to z (Greek, Cyrillic), line gaps of 0, hhea equal to typo, win at the ink's
+    highest and lowest points in every master, Use Typo Metrics on; for a font of another script, the
+    line also raised and lowered to clear its letters' ink (letters: their code points). "keep" (an
+    update of a released font): the font's current line spacing (typo kept if Use Typo Metrics was
+    on, else the old win values become typo), win and Use Typo Metrics as for "share"."""
     upm = float(m.upm or 1000)
     notes = []
     bottom, top = family_extent(extents)
@@ -556,32 +559,33 @@ def suggest_metrics(m, extents, capitals=True, mode="new", share=LINE_SHARE, let
     if mode == "keep":
         if m.use_typo is True and (m.typo_ascender or m.typo_descender):
             ascender, descender, gap = m.typo_ascender, m.typo_descender, m.typo_line_gap or 0
-            notes.append(u"Use Typo Metrics was on: the typo values keep the line as it was.")
+            notes.append(u"Use Typo Metrics was on: the typo values keep the font's line spacing.")
         elif m.win_ascent and m.win_descent:
             ascender, descender, gap = m.win_ascent, -m.win_descent, 0
             notes.append(u"Use Typo Metrics was off: the old win values become the typo values, so Windows keeps "
-                         u"the line as it was.")
+                         u"the font's line spacing.")
         else:
-            notes.append(u"Nothing to keep (neither typo nor win values are set): suggested as for a new font.")
+            notes.append(u"The font has no line spacing to keep (neither typo nor win values are set): suggested "
+                         u"at the share of the em set.")
     if ascender is None:
         line = share * upm
         cap = m.cap_height or tallest((0x48,)) or 0.7 * upm
         if capitals:
             ascender = round_units((line - cap) / 2.0 + cap)
             descender = ascender - round_units(line)
-            notes.append(u"The line is %d%% of the em, capitals centered in it." % round_units(share * 100))
+            notes.append(u"The line spacing is %d%% of the em, capitals centered in it." % round_units(share * 100))
         else:
             high = m.ascender or top or 0.8 * upm
             low = m.descender or bottom or -0.2 * upm
             ascender = round_units(line * high / float(high - low))
             descender = ascender - round_units(line)
-            notes.append(u"The line is %d%% of the em, shared as the font's ascender and descender are." %
+            notes.append(u"The line spacing is %d%% of the em, shared as the font's ascender and descender are." %
                          round_units(share * 100))
         gap = 0
         a_grave = tallest((0xC0,))
         if a_grave is not None and a_grave > ascender:
             ascender = int(math.ceil(a_grave))
-            notes.append(u"The ascender is raised to A grave's top (%d)." % ascender)
+            notes.append(u"The ascender is raised to the top of \N{LATIN CAPITAL LETTER A WITH GRAVE} (%d)." % ascender)
         low = deepest(LOWERCASE_DEPTH) if capitals else None
         if low is not None and low < descender:
             descender = int(math.floor(low))
@@ -1348,6 +1352,22 @@ def gain_text(checked_count, gained, bold=None):
     return head + u"%s (%s)" % (bold(count) if bold else count, where)
 
 
+CHECK_BUTTONS = (("all", u"Check all"), ("none", u"Check none"), ("buildable", u"Check only what Diacritics can build"))
+
+
+def checks_for(rows, checked, buildable):
+    """What each check button over "Add these" would leave checked, {key: set of characters}, None
+    for a button that would change nothing (it is grayed out): "all" adds every row listed to the
+    checks, "none" clears them, "buildable" checks the rows listed with a character Diacritics can
+    build (buildable), and nothing else. rows: the AddRows listed; checked: the characters checked."""
+    checked, buildable = set(checked), set(buildable or ())
+    listed = set(item for row in rows for item in row.items)
+    can = set(item for row in rows if any(c in buildable for c in row.items) for item in row.items)
+    found = {"all": checked | listed, "none": set(), "buildable": can}
+    return dict((key, None if value == checked or (key == "buildable" and not can) else value)
+                for key, value in found.items())
+
+
 def compact_missing(r, shown=2):
     """A language's missing characters, compact: "ß", or "Ǎ ǎ +1" (its base characters and marks, or
     its auxiliary ones when it misses only those)."""
@@ -1615,11 +1635,13 @@ def check_lines(m, extents, findings, capitals=True):
                                 u"Latin, Greek, and Cyrillic."))
         if by.get("agrave"):
             f = by["agrave"][0]
-            warn.append(CheckLine("warn", u"A grave reaches above the line's ascender, by %d" % f.glyphs[0][2],
+            warn.append(CheckLine("warn", u"\N{LATIN CAPITAL LETTER A WITH GRAVE} reaches above the line's ascender, "
+                                  u"by %d" % f.glyphs[0][2],
                                   f.text, [f.glyphs[0][1]]))
         elif any(e.code == 0xC0 for e in extents):
-            ok.append(CheckLine("ok", u"A grave stays under the line's ascender",
-                                u"Some macOS applications place the first line by A grave's top."))
+            ok.append(CheckLine("ok", u"\N{LATIN CAPITAL LETTER A WITH GRAVE} stays under the line's ascender",
+                                u"Some macOS applications place the first line by the top of "
+                                u"\N{LATIN CAPITAL LETTER A WITH GRAVE}."))
         if by.get("center"):
             info.append(CheckLine("info", u"Capitals are not centered in the line", tip("center")))
         elif capitals and m.cap_height:
@@ -1971,18 +1993,21 @@ def _prop(obj, name):
 
 HELP = u"""<b>FreeLab Font Check</b><br>
 Three views of the current font. Nothing in the font changes until you click <i>Write suggested
-values</i> or <i>Fix</i>; each is one step of <i>Edit &gt; Undo</i>.<br><br>
+values</i> or <i>Fix</i>. A fix is one step of <i>Edit &gt; Undo</i>; the font info written is not in FontLab's
+History: <i>Put back old values</i> takes it back.<br><br>
 <b>Coverage</b>: the scripts the font has, each with a bar (covered, within reach, missed) from
 Hyperglot's orthographies; click one to see only its languages. At the left, the characters to add,
-ranked by the languages each completes on its own: check some, and the line above the list says how
-many languages they complete together. At the right, the languages: find one by name, or show only
+ranked by the languages each completes on its own: check some (or all, none, or only those
+<i>Diacritics</i> can build), and the line above the list says how many languages they complete
+together. At the right, the languages: find one by name, or show only
 the covered, within reach, or missed ones; selecting one marks the characters it needs at the left.
 A letter the font lacks as one character counts when its anchors compose it from the font's letter and
 mark (the language says <i>composed</i>).<br>
 <b>Vertical metrics</b>: the font's tallest and deepest glyphs drawn on its line metrics (winAscent,
 typo and hhea, cap height, x-height), the ink Windows clips in red, the suggested values dashed; the
-values now and suggested; the checks Google Fonts' guidance asks for; the glyphs Windows clips.
-<i>Write suggested values</i> sets the font's typo, hhea, and win values and <i>Use Typo Metrics</i>
+values now and suggested, for the line spacing you set (a share of the em), or keeping the font's
+current line spacing for an update of a released font; the checks Google Fonts' guidance asks for;
+the glyphs Windows clips. <i>Write suggested values</i> sets the font's typo, hhea, and win values and <i>Use Typo Metrics</i>
 (those that differ); the masters' ascender, descender, x-height, and cap height, which FontLab draws
 with, are left as they are.<br>
 <b>Masters</b>: the glyphs that keep the masters from interpolating, worst first, a mark per master;
@@ -2012,6 +2037,17 @@ DIAGRAM_NAME_MIN = 64  # pixels: room for a glyph's name under it in the diagram
 SCRIPT_SHEET = (u"QTreeView::item:selected { background: rgba(128, 128, 128, 70); color: palette(text); } "
                 u"QTreeView { selection-background-color: rgba(128, 128, 128, 70); }")
 # (the script clicked shows in a faint gray: its bar's covered part is in the highlight color)
+CHIP_SHEET = (u"QToolButton { background: transparent; color: rgba(128, 128, 128, 255); "
+              u"border: 1px solid rgba(128, 128, 128, 110); border-radius: 10px; padding: 2px 10px; } "
+              u"QToolButton:hover { color: palette(window-text); border: 1px solid rgba(128, 128, 128, 200); } "
+              u"QToolButton:checked { color: palette(highlighted-text); background: palette(highlight); "
+              u"border: 1px solid palette(highlight); } "
+              u"QToolButton:checked:hover { border: 1px solid palette(window-text); } "
+              u"QToolButton:disabled { color: rgba(128, 128, 128, 110); }")
+# FreeLab's chips (as Font Compare's): flat, a kind shown filled in the highlight color, a kind hidden
+# as a gray outline, over either palette, set on each chip (never on the dialog, whose fields dark
+# mode then maps) and left alone by dark mode, as Auto Kerning's TAB_SHEET is. Windows' own style
+# drew a checked tool button light whatever the palette: mapped, it came out garbled, white in dark mode.
 LANGUAGE_FILTERS = ((None, u"All"), ("covered", u"Covered"), ("nearly", u"Within reach"), ("missed", u"Missed"))
 STATE_LABELS = {"covered": u"Covered", "nearly": u"Within reach", "missed": u"Missed"}
 
@@ -2727,6 +2763,11 @@ class FontCheckDialog(object):
         self.close_button.connect("clicked()", dialog.close)
         ak.add_tools_button(dialog, "Font Check", getattr(self, "log", None))  # (the other font tools, a click away)
         ak.plain_buttons(dialog)
+        try:  # the check boxes drawn plain to see in either palette (the lists' pictures stay unmapped)
+            fc = ak.load_sibling("freelab_feature_code.py", "freelab_feature_code")
+            self.check_watcher = fc.watch_check_boxes(dialog, [self.add_tree, self.glyph_tree])
+        except Exception:
+            self.check_watcher = None
         self.read_font()
         self.history_timer = ak.watch_history(self)
         self.flagging = [ak.flag_menu(self.glyph_tree, self, self.selected_glyphs, self.row_glyph),
@@ -2858,6 +2899,25 @@ class FontCheckDialog(object):
         box.addWidget(self.heading(u"Add these to reach more languages"))
         self.gain_label = ak.status_label()
         box.addWidget(self.gain_label)
+        row = QtGui.QHBoxLayout()
+        self.check_buttons, self.check_slots = {}, []
+        tips = {"all": u"Checks every character listed below (the checks of other scripts' rows are kept).",
+                "none": u"Unchecks every character, those of other scripts' rows too.",
+                "buildable": u"Checks the characters listed that <i>Diacritics</i> can build from the font's letters "
+                             u"and marks, and unchecks the others."}
+        def clicked(key):
+            return lambda: self.set_checks(key)  # (no argument PythonQt could fill)
+
+        for key, label in CHECK_BUTTONS:
+            button = QtGui.QPushButton(label)
+            button.setWhatsThis(tips[key])
+            slot = clicked(key)
+            button.connect("clicked()", slot)
+            self.check_slots.append(slot)
+            row.addWidget(button)
+            self.check_buttons[key] = button
+        row.addStretch(1)
+        box.addLayout(row)
         self.add_tree = self.tree(("", "Character", "", "Languages"), icon=CHAR_ICON)
         self.add_tree.setWhatsThis(u"The characters the languages within reach miss, the ones completing the most "
                                    u"languages on their own first (+N: the languages it completes alone; a capital and "
@@ -2961,23 +3021,29 @@ class FontCheckDialog(object):
         row.addStretch(1)
         side.addLayout(row)
         row = QtGui.QHBoxLayout()
-        self.mode_new = QtGui.QRadioButton("New font: line at")
-        self.mode_new.setChecked(True)
-        self.mode_new.setWhatsThis(u"Suggests the line at the share of the em set, capitals centered in it, clear of "
-                                   u"A grave and the deepest descender, line gaps of 0, hhea equal to typo.")
+        self.mode_share = QtGui.QRadioButton("Line spacing")
+        self.mode_share.setChecked(True)
+        self.mode_share.setWhatsThis(u"Suggests your font's line spacing (ascender plus descender) at the share of the em "
+                                     u"set, capitals centered in it, clear of <i>\N{LATIN CAPITAL LETTER A WITH GRAVE}</i> "
+                                     u"and the deepest descender, line gaps of 0, hhea equal to typo, win at the ink's "
+                                     u"extremes, and <i>Use Typo Metrics</i> on.")
         self.share = QtGui.QSpinBox()
         self.share.setRange(100, 200)
         self.share.setValue(int(LINE_SHARE * 100))
         self.share.setSuffix("% of the em")
-        self.share.setWhatsThis(u"The line's height (ascender plus descender) for a new font: Google Fonts asks "
-                                u"120% to 130% for Latin, Greek, and Cyrillic; tall scripts may need more.")
-        row.addWidget(self.mode_new)
+        self.share.setWhatsThis(u"The line spacing to suggest (ascender plus descender) as a share of the em: Google "
+                                u"Fonts asks 120% to 130% for Latin, Greek, and Cyrillic; tall scripts may need more.")
+        row.addWidget(self.mode_share)
         row.addWidget(self.share)
         row.addStretch(1)
         side.addLayout(row)
-        self.mode_keep = QtGui.QRadioButton("Released font: keep its line spacing")
-        self.mode_keep.setWhatsThis(u"Keeps the line spacing of the released font (Google Fonts asks that documents do "
-                                    u"not reflow): only the win values and <i>Use Typo Metrics</i> change.")
+        self.mode_keep = QtGui.QRadioButton("Keep the font's current line spacing")
+        self.mode_keep.setToolTip(u"For an update of a font already released: documents set in it do not reflow.")
+        self.mode_keep.setWhatsThis(u"For an update of a font already released: keeps its current line spacing, so "
+                                    u"documents set in it do not reflow (as Google Fonts asks). The typo values stay as "
+                                    u"they are when <i>Use Typo Metrics</i> is on, or else take the old win values, which "
+                                    u"Windows spaced lines by; the win values grow to the ink and <i>Use Typo Metrics</i> "
+                                    u"is turned on.")
         side.addWidget(self.mode_keep)
         side.addStretch(1)
         body.addLayout(side)
@@ -3020,7 +3086,7 @@ class FontCheckDialog(object):
         tab.layout.addWidget(self.clipped_list)
 
         self.metrics_button.connect("clicked()", self.check_vertical)
-        self.mode_new.connect("toggled(bool)", lambda on: self.suggest())
+        self.mode_share.connect("toggled(bool)", lambda on: self.mode_changed())
         self.share.connect("valueChanged(int)", lambda value: self.suggest())
         self.write_button.connect("clicked()", self.write_suggestions)
         self.put_back_button.connect("clicked()", self.put_back_values)
@@ -3049,7 +3115,10 @@ class FontCheckDialog(object):
             chip.setCheckable(True)
             chip.setChecked(True)
             chip.setText(label)
-            chip.setWhatsThis(u"Shows or hides the glyphs with this kind of problem (the count: glyphs).")
+            chip.setProperty(ak.LEAVE_ALONE_PROP, True)  # (drawn by CHIP_SHEET in the palette's colors)
+            chip.setStyleSheet(CHIP_SHEET)
+            chip.setWhatsThis(u"Shows or hides this kind of problem in the list (the count: glyphs with it). A glyph "
+                              u"left with no kind shown is hidden.")
             chip.setVisible(False)
             chip.connect("toggled(bool)", lambda on: self.fill_glyphs())
             chips.addWidget(chip)
@@ -3263,6 +3332,16 @@ class FontCheckDialog(object):
             u"" if buildable else u"Check characters or select a row first." if not chosen else
             u"<i>Diacritics</i> cannot build %s from the font's letters and marks." % (
                 u"this character" if len(chosen) == 1 else u"any of these characters"))
+        targets = self.check_targets() if self.package is not None else {}
+        can = any(item in (self.buildable or set()) for row in self.rows for item in row.items)
+        idle = {"all": u"Every character listed is checked." if self.rows else u"No character is listed.",
+                "none": u"No character is checked.",
+                "buildable": u"Only what <i>Diacritics</i> can build is checked." if can
+                else u"<i>Diacritics</i> can build none of the characters listed."}
+        for key, button in self.check_buttons.items():
+            on = targets.get(key) is not None
+            ak.enable(button, on)
+            button.setToolTip(u"" if on else idle[key])
         ak.enable(self.copy_chars_button, bool(chosen))
         self.copy_chars_button.setText(u"Copy %s" % counted(len(chosen), u"character") if chosen else u"Copy characters")
         ak.enable(self.copy_button, bool(self.suggestions))
@@ -3538,6 +3617,31 @@ class FontCheckDialog(object):
         self.update_gain()
         self.update_buttons()
 
+    def check_targets(self):
+        """checks_for of the rows listed (Diacritics asked once per check, as the rows' tooltips are)."""
+        buildable = self.buildable_set() if self.package is not None and self.rows else set()
+        return checks_for(self.rows, self.checked, buildable)
+
+    def set_checks(self, key):
+        """A check button clicked: the checks of "Add these" set as it says, in place (the rows,
+        their marks, and the selection kept)."""
+        QtCore, QtGui = _qt()
+        target = self.check_targets().get(key)
+        if target is None or self.filling:
+            return
+        self.checked = set(target)
+        self.filling = True  # (itemChanged must not read the checks back meanwhile)
+        try:
+            for item in self.top_items(self.add_tree):
+                index = self.index_of(item)
+                if 0 <= index < len(self.rows):
+                    item.setCheckState(0, QtCore.Qt.Checked if set(self.rows[index].items) <= self.checked
+                                       else QtCore.Qt.Unchecked)
+        finally:
+            self.filling = False
+        self.update_gain()
+        self.update_buttons()
+
     def update_gain(self):
         gained = languages_gained(self.results, self.checked)
         if not self.rows and not self.checked:
@@ -3676,15 +3780,15 @@ class FontCheckDialog(object):
             for item in self.add_tree.selectedItems():
                 if item.flags() & QtCore.Qt.ItemIsUserCheckable:
                     item.setCheckState(0, QtCore.Qt.Checked)
-        b = self.ak.b
+        i = self.ak.i  # (letters named in a message are in italics)
         try:
             dm = self.diacritics_module()
             try:
                 dm.main(characters=chars)  # a Diacritics that lists the letters given only
-                self.log.add(u"<i>Diacritics</i> lists %s: check them there, then build." % b(u" ".join(chars)), "done")
+                self.log.add(u"<i>Diacritics</i> lists %s: check them there, then build." % i(u" ".join(chars)), "done")
             except TypeError:
                 dm.main()  # (a Diacritics that takes no letters lists every one it can build)
-                self.log.add(u"<i>Diacritics</i> lists every letter with diacritics it can build, %s among them." % b(
+                self.log.add(u"<i>Diacritics</i> lists every letter with diacritics it can build, %s among them." % i(
                     u" ".join(chars)), "done")
         except Exception as exc:
             self.log.add(u"<i>Diacritics</i> did not open: %s" % self.ak.html(exc), "error")
@@ -3696,7 +3800,7 @@ class FontCheckDialog(object):
             return
         try:
             QtGui.QApplication.clipboard().setText(u" ".join(chars))
-            self.log.add(u"Copied %s." % self.ak.b(u" ".join(chars)), "done")
+            self.log.add(u"Copied %s." % self.ak.i(u" ".join(chars)), "done")
         except Exception as exc:
             self.log.add(u"Could not copy: %s" % self.ak.html(exc), "error")
 
@@ -3761,16 +3865,22 @@ class FontCheckDialog(object):
             b(counted(clipped, u"glyph")), b(counted(warnings, u"warning")), b(counted(len(self.master_names()), u"master")))
         writes = metric_writes(self.suggestions)
         if writes:
-            text += u" %s %s the font: %s writes %s (one step of %s)." % (
+            text += u" %s %s the font: %s writes %s (%s takes %s back)." % (
                 b(counted(len(writes), u"suggested value")), u"differs from" if len(writes) == 1 else u"differ from",
-                ak.i("Write suggested values"), u"it" if len(writes) == 1 else u"them", ak.i("Edit > Undo"))
+                ak.i("Write suggested values"), u"it" if len(writes) == 1 else u"them", ak.i("Put back old values"),
+                u"it" if len(writes) == 1 else u"them")
         else:
             text += u" The font's values are as suggested."
         tab.status.setText(text)
         self.checked_now("metrics")
 
     def mode(self):
-        return "new" if self.mode_new.checked else "keep"
+        return "share" if self.mode_share.checked else "keep"
+
+    def mode_changed(self):
+        """The strategy chosen: the share of the em asked for only to suggest a line spacing."""
+        self.ak.enable(self.share, self.mode() == "share")
+        self.suggest()
 
     def suggest(self):
         """The suggested values for the strategy chosen: the table and the diagram drawn again."""

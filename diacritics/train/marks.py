@@ -2,10 +2,12 @@
 Font License and Apache License fonts only, as kerning/train/dataset.py finds them).
 
 Every accented letter a TrueType font builds as a composite of its letter and its marks (Unicode's
-canonical decomposition, component by component, no scaled components) is measured, in shares of
-the em: each mark's gap to the ink below it (the letter's, or the mark under it in a stack) or above
-it, its center's offset from the center of the letter's top (or bottom) fifth as a share of the
-letter's width, its height against the same mark alone, and how far the whole glyph reaches above the
+canonical decomposition, component by component, no scaled components; for the letters fonts draw
+another mark on, freelab_diacritics.CONVENTIONS, that mark: Latvian's comma below for Unicode's
+cedilla) is measured, in shares of the em: each mark's gap to the ink below it (the letter's, or the
+mark under it in a stack) or above it, its center's offset from the center of the letter's top (or
+bottom) fifth as a share of the letter's width (the fifth of its outline, curves and all, as
+Diacritics cuts it in FontLab: not of its points, whose off-curve handles reach past the ink), its height against the same mark alone, and how far the whole glyph reaches above the
 font's ascender or below its descender. The medians, per mark, case, and letter, are
 diacritics/mark_model.json: Diacritics places marks by them in a font with no composites of its
 own to learn from.
@@ -28,12 +30,15 @@ sys.path.insert(0, os.path.join(HERE, os.pardir, os.pardir, "kerning", "train"))
 sys.path.insert(0, os.path.join(HERE, os.pardir))
 import dataset  # noqa: E402  (the corpus: open-licensed fonts installed here)
 import freelab_diacritics as ac  # noqa: E402  (the marks' names and sides)
+sys.path.insert(0, HERE)
+import conventions  # noqa: E402  (outlines cut in bands as FontLab cuts them)
 
 MODEL_FILE = os.path.join(HERE, os.pardir, "mark_model.json")
 CORPUS_DIR = os.path.join(os.environ.get("LOCALAPPDATA", ""), "FreeLab", "corpus")  # OFL fonts from Google Fonts
 RANGES = ((0x00C0, 0x0250), (0x1E00, 0x1F00), (0x0370, 0x0400), (0x0400, 0x0530), (0x1F00, 0x2000))
 MIN_FONTS = 5  # a median from fewer fonts than this is left out
 DOTLESS = {"i": 0x0131, "j": 0x0237}
+KEPT = ("kana",)  # the model's tables other scripts write (train/kana.py)
 
 
 def fonts():
@@ -58,20 +63,11 @@ def fonts():
     return found
 
 
-def ink(glyf, name):
+def ink(glyphset, name):
     """(xMin, yMin, xMax, yMax, top band center, bottom band center, bottom band right) of a glyph's
-    points (components decomposed), or None for an empty glyph."""
-    glyph = glyf[name]
-    coordinates, _, _ = glyph.getCoordinates(glyf)
-    points = list(coordinates)
-    if not points:
-        return None
-    xs, ys = [p[0] for p in points], [p[1] for p in points]
-    x0, y0, x1, y1 = min(xs), min(ys), max(xs), max(ys)
-    band = (y1 - y0) * ac.BAND_SHARE
-    top = [x for x, y in points if y >= y1 - band]
-    bottom = [x for x, y in points if y <= y0 + band]
-    return (x0, y0, x1, y1, (min(top) + max(top)) / 2.0, (min(bottom) + max(bottom)) / 2.0, max(bottom))
+    outline (components decomposed), or None for an empty glyph."""
+    found = conventions.ink_of(glyphset, name)
+    return found[:7] if found else None
 
 
 def measure_font(path, index):
@@ -82,6 +78,7 @@ def measure_font(path, index):
     font = TTCollection(path).fonts[index] if path.lower().endswith(".ttc") else TTFont(path)
     upm = float(font["head"].unitsPerEm)
     glyf = font["glyf"]
+    glyphset = font.getGlyphSet()
     cmap = font["cmap"].getBestCmap() or {}
     ascender, descender = font["hhea"].ascent, font["hhea"].descent
     alone = {}  # mark root, case: the mark's height when it is the only one
@@ -103,7 +100,7 @@ def measure_font(path, index):
             if components[0].glyphName not in base_names or any(
                     getattr(c, "transform", None) is not None for c in components):
                 continue
-            base = ink(glyf, components[0].glyphName)
+            base = ink(glyphset, components[0].glyphName)
             if base is None or base[2] - base[0] <= 0:
                 continue
             case = ac.case_of(ch)
@@ -114,12 +111,14 @@ def measure_font(path, index):
             glyph_top, glyph_bottom = base[3], base[1]
             stack = {"above": 0, "below": 0}
             previous = {"above": None, "below": None}
+            convention = ac.CONVENTIONS.get(code, {})
             for component, mark in zip(components[1:], decomposed[1:]):
-                root = ac.MARKS.get(ord(mark))
-                if root is None:
-                    break
-                side = ac.side_of(ord(mark))
-                mark_ink = ink(glyf, component.glyphName)
+                mark_code = convention.get(ord(mark), ord(mark))  # (the mark fonts draw: a comma below for a cedilla)
+                root = ac.MARKS.get(mark_code)
+                if root is None or ac.mark_key(component.glyphName) not in (root, ac.BORROWED.get(root)) and mark_code != ord(mark):
+                    break  # (a cedilla where most fonts draw a comma: the font's own way, not measured as a comma)
+                side = ac.side_of(mark_code)
+                mark_ink = ink(glyphset, component.glyphName)
                 if mark_ink is None:
                     break
                 x0, y0, x1, y1 = (mark_ink[0] + component.x, mark_ink[1] + component.y,
@@ -223,6 +222,12 @@ def main():
             families.add(family)
             per_font.append(records)
     result = model(per_font)
+    try:  # (what other scripts add to the model, the kana's placements, kept)
+        with io.open(args.out, encoding="utf-8") as handle:
+            old = json.load(handle)
+        result.update((key, value) for key, value in old.items() if key in KEPT)
+    except (IOError, OSError, ValueError):
+        pass
     text = json.dumps(result, indent=1, sort_keys=True)
     with io.open(args.out, "w", encoding="utf-8", newline="\n") as handle:
         handle.write(text + "\n")

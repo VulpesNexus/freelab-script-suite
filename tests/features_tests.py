@@ -976,6 +976,49 @@ class FakePackage(object):
         return 1
 
 
+class CheckBoxTests(unittest.TestCase):
+    def test_the_sheet_draws_boxes_plain_to_see(self):
+        sheet = fc.check_box_sheet(13, u"C:\\temp\\check.png", u"rgb(1, 2, 3)")
+        self.assertIn(u"QTreeView::indicator { width: 13px; height: 13px; border: 1px solid %s;" % fc.CHECK_FRAME, sheet)
+        self.assertIn(u'image: url("C:/temp/check.png")', sheet, "forward slashes")
+        self.assertIn(u"QTreeView::indicator:checked { border: 1px solid rgb(1, 2, 3); background: rgb(1, 2, 3);", sheet)
+        self.assertNotIn(u"image", fc.check_box_sheet(13), "no mark: filled only")
+
+    def test_the_list_keeps_its_own_sheet_and_dark_mode_switches_redraw(self):
+        class Tree(object):
+            palette, styleSheet = None, u"QTreeView::item { color: red; } " + fc.CHECK_SHEET_MARK + u" old rules"
+
+            def __init__(self):
+                self.sheets = []
+
+            def setStyleSheet(self, sheet):
+                self.sheets.append(sheet)
+
+            def style(self):
+                raise AttributeError("style")
+
+        tree = Tree()
+        fc.style_check_boxes(_FakeQtModule(), _FakeQtModule(), tree, u"QTreeView::item { color: red; }")
+        self.assertEqual(tree.sheets[0], u"", "cleared first: polished again")
+        self.assertTrue(tree.sheets[1].startswith(u"QTreeView::item { color: red; } " + fc.CHECK_SHEET_MARK))
+        self.assertIn(u"width: 13px", tree.sheets[1], "the style's size unknown: 13 pixels")
+        self.assertNotIn(u"image", tree.sheets[1], "no folder for the mark (a fake Qt): filled only")
+        saved = sys.modules.get("PythonQt")
+        qt = Anything()
+        qt.QtCore, qt.QtGui = _FakeQtModule(), _FakeQtModule()
+        sys.modules["PythonQt"] = qt
+        try:
+            watcher = fc.watch_check_boxes(Anything(), [tree])
+        finally:
+            if saved is None:
+                sys.modules.pop("PythonQt", None)
+            else:
+                sys.modules["PythonQt"] = saved
+        self.assertIsNotNone(watcher)
+        self.assertEqual(tree.sheets[-1].count(fc.CHECK_SHEET_MARK), 1, "the old rules replaced, not added to")
+        self.assertNotIn(u"old rules", tree.sheets[-1])
+
+
 class DialogTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -1030,6 +1073,7 @@ class DialogTests(unittest.TestCase):
         features = FakeFeatures({"liga": u"feature liga {\n#> feature\n  sub f i by f_i;\n#< feature\n} liga;\n"},
                                 u"@x = [a];\n")
         dialog = self.dialog(features)
+        self.assertIsNotNone(dialog.check_watcher, "the lists' check boxes drawn from the palette")
         tags = [item.data(0, USER_ROLE) for item in dialog.forms_tree.items]
         self.assertEqual(tags, ["aalt", "locl", "case", "frac", "numr", "dnom", "ordn", "smcp", "c2sc", "pnum", "tnum",
                                 "ss01"])

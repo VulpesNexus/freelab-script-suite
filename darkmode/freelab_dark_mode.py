@@ -1231,6 +1231,7 @@ def _swap_icon(obj):
 
 
 MAX_ICON_SIDE = 64  # label images larger than this are pictures (artwork, previews), left as they are
+COLOR_PICTURE_SIDE = 32  # a colorful label image this large or larger (a message box's icon) is left as drawn too
 # The font window's mark flag (a red flag on a black pole): its image is mapped by dark mode, and the
 # ink effect around it draws it as mapped (protected). Left to the effect, as other labels inside it
 # are, its pole stayed black: the effect read the thin black line beside the red as the flag's own.
@@ -1250,6 +1251,8 @@ def _swap_pixmap(label):
     flag = (_prop(label, "objectName") or u"") in MARK_FLAG_NAMES
     if not flag and _under_ink(label):
         return  # the ink effect around it maps its image as drawn (see _unswap_labels_inside)
+    if not flag and max(pixmap.width(), pixmap.height()) >= COLOR_PICTURE_SIDE and not icon_is_gray(_gui("QIcon")(pixmap)):
+        return  # a colorful picture (a message box's question mark): as drawn; mapped, its smoothed edges turned jagged
     new = dark_pixmap(pixmap)
     state["mapped_keys"].add(new.cacheKey())
     _record(label)["pixmap"] = pixmap
@@ -1381,6 +1384,11 @@ def _visible_columns(view, count, width):
 def _logo_rects(view):
     """The viewport rectangles of the visible logo icons in a list (the style's decoration place:
     at the left of the cell, centered), for icons dark mode leaves as FontLab draws them."""
+    return [rect for rect, _ in _logo_places(view)]
+
+
+def _logo_places(view):
+    """[(viewport rectangle, QIcon)] of the visible logo icons in a list (see _logo_rects)."""
     QRect, QPoint, Qt = _core("QRect"), _core("QPoint"), _core("Qt")
     QStyle = _gui("QStyle")
     model = view.model()
@@ -1414,7 +1422,7 @@ def _logo_rects(view):
                 logo = logos[key] = key not in state["mapped_keys"] and (large or icon_is_swatch(icon) or not icon_is_gray(icon))
             if logo:
                 r = view.visualRect(cell)
-                rects.append(QRect(r.x() + margin, r.y() + (r.height() - size) // 2, size, size))
+                rects.append((QRect(r.x() + margin, r.y() + (r.height() - size) // 2, size, size), icon))
         if view.inherits("QTreeView"):
             index = view.indexBelow(index)
         else:  # flat lists and tables: the next row of the model
@@ -1659,32 +1667,62 @@ def _effect_classes():
                     # fringes even inside an effect: grays, unless text is selected (the blue highlight).
                     gray = getattr(self, "freelab_gray", False) and not (
                         self.freelab_widget.inherits("QLineEdit") and _prop(self.freelab_widget, "hasSelectedText"))
-                    draw_mapped(painter, pixmap, offset, whole, 0.0, None, -1.0, self.freelab_keep_tint, None, 0.0, 0,
+                    logos, mapped_from = (logo_places(self), pixmap) if kind == "ink" else ([], pixmap)
+                    if logos:
+                        mapped_from = without_logos(pixmap, logos)
+                    draw_mapped(painter, mapped_from, offset, whole, 0.0, None, -1.0, self.freelab_keep_tint, None, 0.0, 0,
                                 anchors, None, gray, QRect(whole) if kind in ("ink", "edges") else None)
-                    if kind == "ink":
-                        keep_logos(self, painter, pixmap, offset)
+                    if logos:
+                        draw_logos(painter, pixmap, offset, logos)
                     keep_unmapped(self, painter, pixmap, offset)
                 except Exception as exc:
                     _note_error("effect", exc)
                     self.drawSource(painter)
 
-        def keep_logos(effect, painter, pixmap, offset):
-            """A list's logo icons (Export Profiles' formats) as FontLab draws them, over the ink mapping,
-            which inverted their dark parts with rough edges; the rows' text is still mapped."""
+        def logo_places(effect):
+            """[(rect, icon)] of a list's logo icons (Export Profiles' formats), or [] (not a list, or failed)."""
             view = effect.freelab_widget.parentWidget()
             if view is None or not view.inherits("QAbstractItemView"):
-                return
+                return []
             try:
-                rects = _logo_rects(view)
-            except Exception as exc:  # the mapping is drawn already: only the logos are left mapped
+                return _logo_places(view)
+            except Exception as exc:
                 _note_error("list logos", exc)
-                return
-            for rect in rects:
+                return []
+
+        def without_logos(pixmap, logos):
+            """A copy of the source with each logo's place filled with the row's color beside it (its top
+            left corner's pixel, the logo's margin): mapped, the row is whole, with no logo under the icons."""
+            QPainter = _gui("QPainter")
+            copy = pixmap.copy()
+            image = pixmap.toImage()
+            painter = QPainter(copy)
+            try:
+                painter.setCompositionMode(QPainter.CompositionMode_Source)
+                for rect, _ in logos:
+                    x, y = max(0, rect.x() - 1), max(0, rect.y())
+                    if 0 <= x < image.width() and 0 <= y < image.height():
+                        painter.fillRect(rect, _gui("QColor").fromRgba(image.pixel(x, y)))
+            finally:
+                painter.end()
+            return copy
+
+        def draw_logos(painter, pixmap, offset, logos):
+            """A list's logo icons drawn over the mapped rows, each from its own icon (its smoothing over
+            the dark row, not over FontLab's light one: copied pixels brought a light fringe, jagged)."""
+            for rect, icon in logos:
                 area = rect.translated(offset).intersected(QRect(offset, pixmap.size()))
                 if painter.hasClipping():
                     area = area.intersected(painter.clipBoundingRect().toAlignedRect())
-                if not area.isEmpty():
-                    painter.drawPixmap(area.topLeft(), pixmap, area.translated(-offset.x(), -offset.y()))
+                if area.isEmpty():
+                    continue
+                try:
+                    painter.save()
+                    painter.setClipRect(area)
+                    icon.paint(painter, rect.translated(offset))
+                    painter.restore()
+                except Exception as exc:
+                    _note_error("list logos", exc)
 
         def keep_unmapped(effect, painter, pixmap, offset):
             """Draw protected descendants (color swatches, mark slots, pickers) as they are, over the mapping."""

@@ -24,7 +24,13 @@ A glyph narrower than 90% of the em is proportional already and is left alone, a
 
 ## The dialog
 
-The list groups the glyphs by kind, each with its width, its palt trim, its width after, and its halt setting; checked glyphs are written. Under it, a sample is set as it is and with palt, in the font's glyphs: Japanese, Korean, Simplified Chinese, or Traditional Chinese, the one the font covers best chosen as it is read, or text of your own. The log says what was written; *Restore suggestions* puts the checks back; double-click a glyph to see it in a Glyph window. The list is read again after an undo, a redo, or an edit in FontLab.
+The list groups the glyphs by kind, each with its width, its palt trim, its width after, and its halt setting; checked glyphs are written. Its check boxes are drawn in the window's own colors (a gray frame, or the highlight color with a check mark), so they show in dark mode too, where the list's pictures are left as they are drawn. Under it, a sample is set as it is and with palt, in the font's glyphs, broken into as many lines as the window's width needs (never before a closing mark or a small kana, nor after an opening mark; Korean at its spaces). The samples, each with the full-width punctuation palt trims (「」、。（）, and the full-width comma ， in Chinese):
+
+- **Japanese**: the Iroha (11th century, in the public domain), every kana once.
+- **Korean**: a pangram written for FreeLab (GPL-3 with the code, as in Proof), with the 14 basic consonants and the 10 basic vowels: 토요일 아침, 키 큰 여행자가 푸른 바다 앞 야자수 그늘에서 휴식을 즐겼다 (on a Saturday morning, a tall traveler rested in the shade of a palm tree by the blue sea).
+- **Chinese**, Simplified and Traditional: a pangram of hanzi cannot be, so the opening lines of the Thousand Character Classic (in the public domain; no character in it twice), in each standard's forms.
+
+The one the font covers best is chosen as the font is read (the largest share of its characters, then the most glyphs of its own script, so a Korean or Chinese font that has kana gets its own), or type text of your own. The log says what was written; *Restore suggestions* puts the checks back; double-click a glyph to see it in a Glyph window. The list is read again after an undo, a redo, or an edit in FontLab.
 
 ## Kana kerning, after palt
 
@@ -37,7 +43,7 @@ None of the 16 open-licensed Korean families looked at (Noto Sans and Serif KR, 
 - **One width for all, ink centered**: the font's own width where its syllables share one, else the corpus's 0.9 em.
 - **Proportional, by syllable shape**: each syllable keeps its ink and takes the sidebearings the proportional fonts give its shape, measured by *cjk/train/hangul.py* into *cjk/hangul_model.json*: about 0.03 em on the left; on the right, 0.055 em when the vowel stands beside the initial (가, 과) and 0.025 em when it sits under it (고). Noto Sans KR, set this way, would range from 753 to 917 units instead of 920.
 
-The list shows the six shapes, each with its count, its median move, and its median width after; checked shapes are set, in every master (each measured on its own), their outlines and components moved and their widths changed. The sample becomes Korean for a font with Hangul and no kana. The font's kerning of Hangul, if it has any, was set for the old widths.
+The list shows the six shapes, each with its count, its median move, and its median width after; checked shapes are set, in every master (each measured on its own), their outlines and components moved and their widths changed. The sample becomes Korean for a font with more Hangul than kana or hanzi. The font's kerning of Hangul, if it has any, was set for the old widths.
 
 ## The rest
 

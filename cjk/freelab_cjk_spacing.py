@@ -38,7 +38,6 @@ HANGUL_SHAPES = (("vertical", u"Vowel beside (\uac00)"), ("vertical final", u"Vo
                  ("horizontal", u"Vowel under (\uace0)"), ("horizontal final", u"Vowel under, final (\uace1)"),
                  ("mixed", u"Vowel beside and under (\uacfc)"), ("mixed final", u"Vowel beside and under, final (\uacfd)"))
 HANGUL_TOLERANCE = 2  # a syllable moved and widened by less than this is left alone
-KOREAN_SAMPLE = u"\ud55c\uae00 \uae00\uaf34\uc740 \uc774\ub807\uac8c \ubcf4\uc785\ub2c8\ub2e4."
 FULL_WIDTH_SHARE = 0.9  # a glyph narrower than this share of the em is proportional already: left alone
 TOLERANCE_UNITS = 4  # a trim smaller than this on both sides is not listed
 BEGIN, END = u"# >>> FreeLab %s (made by FreeLab CJK Spacing)", u"# <<< FreeLab %s"
@@ -48,25 +47,71 @@ KINDS = ("hiragana", "small hiragana", "katakana", "small katakana", "punctuatio
 KIND_LABELS = {"hiragana": "Hiragana", "small hiragana": "Small hiragana", "katakana": "Katakana",
                "small katakana": "Small katakana", "punctuation": "Punctuation and full-width forms",
                "hangul": "Hangul"}
-SAMPLE = u"「カタカナ、ひらがな。」（テスト）"
-SAMPLES = (("ja", u"Japanese", SAMPLE), ("ko", u"Korean", KOREAN_SAMPLE),
-           ("zh-hans", u"Chinese (Simplified)", u"\N{LEFT CORNER BRACKET}\u7b80\u4f53\u4e2d\u6587\N{FULLWIDTH COMMA}"
-                                              u"\u6807\u70b9\N{IDEOGRAPHIC FULL STOP}\N{RIGHT CORNER BRACKET}"
-                                              u"\N{FULLWIDTH LEFT PARENTHESIS}\u6d4b\u8bd5\N{FULLWIDTH RIGHT PARENTHESIS}"),
-           ("zh-hant", u"Chinese (Traditional)", u"\N{LEFT CORNER BRACKET}\u7e41\u9ad4\u4e2d\u6587\N{FULLWIDTH COMMA}"
-                                                u"\u6a19\u9ede\N{IDEOGRAPHIC FULL STOP}\N{RIGHT CORNER BRACKET}"
-                                                u"\N{FULLWIDTH LEFT PARENTHESIS}\u6e2c\u8a66\N{FULLWIDTH RIGHT PARENTHESIS}"))
-# One sample per writing system the trims serve: kana and punctuation (Japanese), Hangul (Korean), and
-# the hanzi forms of each Chinese standard, with the full-width punctuation palt trims. The one the
-# font covers best is shown first; the field takes any text of one's own.
+# One sample per writing system the trims serve, each set with the full-width punctuation palt trims:
+# the Iroha (Japanese, 11th century, public domain: every kana once), a Hangul pangram written for
+# FreeLab (GPL-3 with the code: the 14 basic consonants and the 10 basic vowels; Proof has it too), and
+# the opening lines of the Thousand Character Classic (public domain, no character twice: a pangram of
+# hanzi cannot be) in each Chinese standard's forms. The one the font covers best is shown first; the
+# field takes any text of one's own.
+SAMPLE = u"「いろはにほへと、ちりぬるを。わかよたれそ、つねならむ。うゐのおくやま、けふこえて。あさきゆめみし、ゑひもせす。」（いろはうた）"
+SAMPLES = (("ja", u"Japanese", SAMPLE),
+           ("ko", u"Korean", u"「토요일 아침, 키 큰 여행자가 푸른 바다 앞 야자수 그늘에서 휴식을 즐겼다.」"),
+           ("zh-hans", u"Chinese (Simplified)", u"「天地玄黄，宇宙洪荒。日月盈昃，辰宿列张。寒来暑往，秋收冬藏。」（千字文）"),
+           ("zh-hant", u"Chinese (Traditional)", u"「天地玄黃，宇宙洪荒。日月盈昃，辰宿列張。寒來暑往，秋收冬藏。」（千字文）"))
+SAMPLE_SCRIPTS = {"ja": ((0x3041, 0x30FA),), "ko": ((0xAC00, 0xD7A3),),
+                  "zh-hans": ((0x4E00, 0x9FFF), (0x3400, 0x4DBF)), "zh-hant": ((0x4E00, 0x9FFF), (0x3400, 0x4DBF))}
 
 
 def best_sample(codes):
-    """The index in SAMPLES of the sample the font covers most of (codes: the font's code points; its
-    full-width punctuation counted too), the first on a tie."""
-    def covered(text):
-        return sum(1 for ch in text if not ch.isspace() and ord(ch) in codes)
-    return max(range(len(SAMPLES)), key=lambda index: (covered(SAMPLES[index][2]), -index))
+    """The index in SAMPLES of the sample the font covers best (codes: the font's code points; its
+    full-width punctuation counted too): the largest share of its characters, then the most glyphs of
+    its own script in the font (a Korean or a Chinese font with kana is not shown the Iroha), then the
+    first."""
+    codes = set(codes)
+
+    def score(index):
+        key, _, text = SAMPLES[index]
+        chars = [ord(ch) for ch in text if not ch.isspace()]
+        share = round(sum(1 for code in chars if code in codes) / float(len(chars) or 1), 3)
+        own = sum(1 for code in codes for low, high in SAMPLE_SCRIPTS.get(key, ()) if low <= code <= high)
+        return (share, own, -index)
+    return max(range(len(SAMPLES)), key=score)
+
+
+# Kinsoku, as Japanese sets lines: never first on a line (closing marks, small kana, the long vowel
+# mark), never last (opening marks)
+NO_LINE_START = set(u"、。，．・：；？！）」』】〕〉》｝］ー々ぁぃぅぇぉっゃゅょゎゕゖァィゥェォッャュョヮヵヶ,.:;?!)]}")
+NO_LINE_END = set(u"「『（【〔〈《｛［([{")
+
+
+def break_lines(chars, widths, room):
+    """A sample's lines: [(start, end)] ranges of its characters, each line no wider than room
+    (widths: each character's, in the same unit), unless one character alone is. A line breaks after
+    a space where it has one (Korean), else between any two characters but not before a closing mark
+    or a small kana, nor after an opening mark; the spaces a break leaves at a line's start are dropped."""
+    lines, start, count = [], 0, len(chars)
+    while start < count:
+        while start < count and chars[start] == u" ":
+            start += 1
+        if start >= count:
+            break
+        width, end = 0.0, start
+        while end < count and (end == start or width + widths[end] <= room):
+            width += widths[end]
+            end += 1
+        if end < count:
+            spaces = [k for k in range(end, start, -1) if chars[k - 1] == u" "]
+            fits = [k for k in range(end, start, -1)
+                    if chars[k] not in NO_LINE_START and chars[k - 1] not in NO_LINE_END]
+            end = spaces[0] if spaces else (fits[0] if fits else end)
+        stop = end
+        while stop > start and chars[stop - 1] == u" ":
+            stop -= 1
+        lines.append((start, stop))
+        start = end
+    return lines
+
+
 SMALL_KANA = set([0x3041, 0x3043, 0x3045, 0x3047, 0x3049, 0x3063, 0x3083, 0x3085, 0x3087, 0x308E, 0x3095, 0x3096,
                   0x30A1, 0x30A3, 0x30A5, 0x30A7, 0x30A9, 0x30C3, 0x30E3, 0x30E5, 0x30E7, 0x30EE, 0x30F5, 0x30F6])
 
@@ -333,10 +378,12 @@ moves (x placement) and how much its width changes (x advance), trimmed to its i
 sidebearings the open-licensed CJK fonts give theirs (about 0.07 em on each side for kana; each
 punctuation mark its own: a comma keeps its left, an opening bracket its right). Checked glyphs are
 written.<br>
-<b>The previews</b>: the sample text set as it is, and with palt, in the font's glyphs. Type your own
-sample.<br>
-<b>Hangul</b> stays full width, as the corpus's Korean fonts leave it in palt: proportional Korean
-comes from kerning (<i>Auto Kerning</i>, once it measures Hangul).<br>
+<b>The previews</b>: the sample text set as it is, and with palt, in the font's glyphs, in as many
+lines as the window's width needs: the Iroha (every kana once), a Hangul pangram, or the opening of the
+Thousand Character Classic in Simplified or Traditional Chinese, each with full-width punctuation.
+Type your own sample.<br>
+<b>Hangul</b> stays out of palt, as the corpus's Korean fonts leave it: <i>Hangul:</i> sets the
+syllables' widths instead (one width for all, or each by its shape), in every master.<br>
 <i>Restore suggestions</i> puts every check back as the list first came.<br><br>
 Click this help's <i>?</i> button, then any control, for what it does."""
 
@@ -400,7 +447,9 @@ class CJKSpacingDialog(object):
                                      u"read); the field beside it takes text of your own.")
         sample_row.addWidget(self.sample_box)
         self.sample = QtGui.QLineEdit(SAMPLE)
-        self.sample.setWhatsThis(u"The text the previews set, as it is and with palt.")
+        self.sample.setWhatsThis(u"The text the previews set, as it is and with palt, in as many lines as the window's "
+                                 u"width needs: the Iroha (every kana once), a Hangul pangram, or the opening of the "
+                                 u"Thousand Character Classic, each with full-width punctuation; or text of your own.")
         sample_row.addWidget(self.sample, 1)
         layout.addLayout(sample_row)
         self.previews = []
@@ -409,6 +458,10 @@ class CJKSpacingDialog(object):
             label.setProperty(ak.LEAVE_ALONE_PROP, True)
             label.setAlignment(QtCore.Qt.AlignCenter)
             label.setMinimumHeight(int(PREVIEW_EM * 1.9))
+            try:  # its picture never holds the window wider: the sample is broken into lines to fit it
+                label.setSizePolicy(QtGui.QSizePolicy.Ignored, QtGui.QSizePolicy.Preferred)
+            except Exception:
+                pass
             label.setToolTip(caption)
             layout.addWidget(label)
             self.previews.append((label, caption))
@@ -450,6 +503,42 @@ class CJKSpacingDialog(object):
         ak.plain_buttons(dialog)
         self.history_timer = ak.watch_history(self)
         self.flagging = ak.flag_menu(self.tree, self, self.flag_names, self.row_names)
+        self.preview_width, self.watchers = None, []
+        self.watch_previews()
+        try:  # the check boxes drawn plain to see in either palette (the list's pictures stay unmapped)
+            fc = ak.load_sibling("freelab_feature_code.py", "freelab_feature_code")
+            self.watchers.append(fc.watch_check_boxes(self.dialog, [self.tree]))
+        except Exception:
+            pass
+
+    def watch_previews(self):
+        """The previews set again when their width changes (their lines break to fit it)."""
+        QtCore, QtGui = _qt()
+        owner = self
+
+        class Watcher(QtCore.QTimer):  # PythonQt has no QObject to subclass; a timer will do
+            def eventFilter(self, obj, event):
+                try:
+                    if event.type() == 14:  # Resize
+                        owner.redraw_timer.start()
+                except Exception:
+                    pass  # an event filter must never raise
+                return False
+
+        try:
+            self.redraw_timer = QtCore.QTimer()
+            self.redraw_timer.setSingleShot(True)
+            self.redraw_timer.setInterval(80)
+            self.redraw_timer.connect("timeout()", self.previews_resized)
+            watcher = Watcher()
+            self.previews[0][0].installEventFilter(watcher)
+            self.watchers.append(watcher)
+        except Exception:
+            pass
+
+    def previews_resized(self):
+        if self.preview_room() != self.preview_width:
+            self.draw_previews()
 
     def flag_names(self):
         QtCore, QtGui = _qt()
@@ -720,38 +809,54 @@ class CJKSpacingDialog(object):
 
     # -- pictures ------------------------------------------------------------------
 
-    def picture(self, placed, size, width=None):
-        """Glyphs [(name, x placement, x advance change)] set in a row, in the dialog's text color."""
+    def layer_of(self, name):
+        glyph = self.package.findName(name)
+        return glyph.getLayerByName(self.package.master) if glyph is not None and not glyph.isNull else None
+
+    def picture(self, placed, size, rows=None):
+        """Glyphs [(name, x placement, x advance change)] set in a row (or rows: lists of them, one line
+        each, under one another), in the dialog's text color."""
         QtCore, QtGui = _qt()
-        master = self.package.master
-        layers = []
-        for name, placement, advance in placed:
-            glyph = self.package.findName(name)
-            layer = glyph.getLayerByName(master) if glyph is not None and not glyph.isNull else None
-            if layer is not None:
-                layers.append((layer, placement, advance))
-        if not layers:
+        lines = []
+        for row in (rows if rows is not None else [placed]):
+            layers = []
+            for item in row:
+                layer = self.layer_of(item[0])
+                if layer is not None:
+                    layers.append((layer, item[1], item[2]))
+            lines.append(layers)
+        if not any(lines):
             return None
         upm = float(self.package.upm)
         scale = size / upm
-        total = sum(layer.advanceWidth + advance for layer, _, advance in layers)
-        pixmap = QtGui.QPixmap(max(int(total * scale) + 8, 4), int(size * 1.25))
+        total = max(sum(layer.advanceWidth + advance for layer, _, advance in layers) for layers in lines)
+        step = size * 1.25
+        pixmap = QtGui.QPixmap(max(int(total * scale) + 8, 4), int(step * len(lines)))
         pixmap.fill(QtGui.QColor(0, 0, 0, 0))
         color = self.dialog.palette.color(QtGui.QPalette.WindowText)
         painter = QtGui.QPainter(pixmap)
         try:  # ended before anything else can fail: a painter left open on a freed pixmap aborts FontLab
             painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
-            x = 4.0
-            for layer, placement, advance in layers:
-                painter.save()
-                painter.translate(x + placement * scale, size * 1.0)
-                painter.scale(scale, -scale)
-                painter.fillPath(self.ak.layer_path(layer), QtGui.QBrush(color))
-                painter.restore()
-                x += (layer.advanceWidth + advance) * scale
+            for number, layers in enumerate(lines):
+                x = 4.0
+                for layer, placement, advance in layers:
+                    painter.save()
+                    painter.translate(x + placement * scale, size * 1.0 + step * number)
+                    painter.scale(scale, -scale)
+                    painter.fillPath(self.ak.layer_path(layer), QtGui.QBrush(color))
+                    painter.restore()
+                    x += (layer.advanceWidth + advance) * scale
         finally:
             painter.end()
         return pixmap
+
+    def preview_room(self):
+        """The previews' width in pixels, for their lines (None where Qt does not say)."""
+        try:
+            width = int(self.ak._property(self.previews[0][0], "width"))
+            return width - 12 if width > 2 * PREVIEW_EM else None
+        except Exception:
+            return None
 
     def draw_previews(self):
         if self.package is None:
@@ -760,8 +865,11 @@ class CJKSpacingDialog(object):
         by_code.update((c.code, c) for c in self.hangul_chosen())
         names = dict((g.unicode, g.name) for g in self.package.fgPackage.glyphs if g.unicode)
         text = u"%s" % self.sample.text
+        room = self.preview_width = self.preview_room()
+        upm = float(self.package.upm) or 1000.0
+        advances = {}
         for (label, caption), trimmed in zip(self.previews, (False, True)):
-            placed = []
+            placed, chars, widths = [], [], []
             for ch in text:
                 name = names.get(ord(ch))
                 if name is None:
@@ -771,11 +879,21 @@ class CJKSpacingDialog(object):
                     placed.append((name, trim.shift, trim.advance - trim.old_advance))
                 else:
                     placed.append((name, trim.palt[0], trim.palt[1]) if trim else (name, 0, 0))
-            pixmap = self.picture(placed, PREVIEW_EM) if placed else None
+                if name not in advances:
+                    layer = self.layer_of(name)
+                    advances[name] = layer.advanceWidth if layer is not None else 0
+                chars.append(ch)
+                widths.append((advances[name] + placed[-1][2]) * PREVIEW_EM / upm)
+            rows = [placed[start:end] for start, end in break_lines(chars, widths, room)] if room else None
+            pixmap = self.picture(placed, PREVIEW_EM, rows) if placed else None
             if pixmap is None:
                 label.clear()
             else:
                 label.setPixmap(pixmap)
+                try:  # as tall as its lines
+                    label.setMinimumHeight(max(int(PREVIEW_EM * 1.9), int(pixmap.height()) + 8))
+                except Exception:
+                    pass
 
     def show_in_glyph_window(self, item):
         QtCore, QtGui = _qt()

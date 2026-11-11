@@ -570,8 +570,13 @@ class GlyphResult(object):
             return u"%s / %s" % (self.a, self.b)
         return self.name
 
-    def short(self):
-        return u" \N{MIDDLE DOT} ".join(d.short for d in self.differences)
+    def shown(self, kinds=None):
+        """Its differences of the given kinds (None: all of them)."""
+        return [d for d in self.differences if kinds is None or d.kind in kinds]
+
+    def short(self, kinds=None):
+        """Its differences of the given kinds (None: all) in short, for the list."""
+        return u" \N{MIDDLE DOT} ".join(d.short for d in self.shown(kinds))
 
     def sentence(self, labels):
         """Its differences in one sentence: "a, Regular and Bold: width 520 and 540 (+20); ...". """
@@ -590,14 +595,19 @@ def glyph_counts(results):
 
 
 def glyph_rows(results, kinds=None):
-    """The results with a difference of the given kinds (None: any), the worst first: the gravest
-    kind, then the largest score (how much the shapes differ, how far the metrics), then by name."""
-    shown = [r for r in results if kinds is None or r.kinds() & set(kinds)]
+    """The results with a difference of the given kinds (None: any), the worst first by those kinds
+    alone: the gravest kind, then the largest score (how much the shapes differ, how far the
+    metrics), then by name. A kind left out is left out of every row, not only of the glyphs that
+    have nothing else: an outline change moves the sidebearings too, so nearly every glyph whose
+    metrics differ differs otherwise as well, and hiding only those glyphs hid nothing."""
+    kinds = None if kinds is None else set(kinds)
+    shown = [r for r in results if r.shown(kinds)]
 
     def key(r):
-        weight = max(KIND_WEIGHT.get(d.kind, 1) for d in r.differences)
-        return (-weight, -sum(d.score for d in r.differences if KIND_WEIGHT.get(d.kind, 1) == weight),
-                -len(r.differences), r.name)
+        differences = r.shown(kinds)
+        weight = max(KIND_WEIGHT.get(d.kind, 1) for d in differences)
+        return (-weight, -sum(d.score for d in differences if KIND_WEIGHT.get(d.kind, 1) == weight),
+                -len(differences), r.name)
 
     return sorted(shown, key=key)
 
@@ -905,8 +915,9 @@ changes.<br><br>
 Choose them in <i>Compare</i> and <i>with</i> (the current font first), then click <i>Compare</i>.
 Differences of at most the units set are left out (metrics, anchors, nodes, components, kerning).
 A font of another em is scaled to the first one's.<br><br>
-<b>Glyphs</b>: a chip per kind of difference, each showing or hiding its glyphs; the glyphs that
-differ, the worst first, both drawn small; the selected glyph from both fonts, the first in the text
+<b>Glyphs</b>: a chip per kind of difference, each showing or hiding that kind in the list (a glyph
+with none of the kinds shown is left out); the glyphs that differ, the worst first by the kinds
+shown, both drawn small; the selected glyph from both fonts, the first in the text
 color and the second in the highlight color, overlaid in the middle, its differences in one sentence
 under it. How much two outlines differ is the area where one has ink and the other not, as a share of
 the ink: a node moved shows.<br>
@@ -914,8 +925,20 @@ the ink: a node moved shows.<br>
 largest difference first, and the selected pair drawn in both.<br>
 <b>Features</b>: the features only in one font, and the lines of code that differ, removed in red and
 added in green.<br><br>
-Compared again after an undo or an edit in either font. Click this help's <i>?</i> button, then any
-control, for what it does."""
+Right-click a glyph or a pair to flag it in the first font. Compared again after an undo or an edit
+in either font. Click this help's <i>?</i> button, then any control, for what it does."""
+
+CHIP_SHEET = (u"QToolButton { background: transparent; color: rgba(128, 128, 128, 255); "
+              u"border: 1px solid rgba(128, 128, 128, 110); border-radius: 10px; padding: 2px 10px; } "
+              u"QToolButton:hover { color: palette(window-text); border: 1px solid rgba(128, 128, 128, 200); } "
+              u"QToolButton:checked { color: palette(highlighted-text); background: palette(highlight); "
+              u"border: 1px solid palette(highlight); } "
+              u"QToolButton:checked:hover { border: 1px solid palette(window-text); } "
+              u"QToolButton:disabled { color: rgba(128, 128, 128, 110); }")
+# FreeLab's chips: flat, a kind shown filled in the highlight color, a kind hidden as a gray outline,
+# over either palette, set on each chip (never on the dialog, whose fields dark mode then maps) and
+# left alone by dark mode, as Auto Kerning's TAB_SHEET is. Windows' own style drew a checked tool
+# button light whatever the palette: mapped, it came out garbled, white in dark mode.
 
 GRAY = (128, 128, 128)
 LINE_ALPHA = 128  # the lists' lines: a mid gray at half strength
@@ -1186,16 +1209,13 @@ class CompareDialog(object):
             self.tabs.addTab(label)
             self.pages.addWidget(page)
         layout.addWidget(self.log.widget)
+        # No "Show in Glyph window": FontLab opens a Glyph window on its current font only, so a glyph
+        # of the other font (or of a font not current) would show in the wrong one
         buttons = QtGui.QHBoxLayout()
-        self.glyph_window_button = QtGui.QPushButton("Show in Glyph window")
-        self.glyph_window_button.setWhatsThis(u"Opens a <i>Glyph</i> window on the selected glyph or pair, in FontLab's "
-                                              u"current font (when it is one of the two).")
         self.close_button = QtGui.QPushButton("Close")
-        buttons.addWidget(self.glyph_window_button)
         buttons.addStretch(1)
         buttons.addWidget(self.close_button)
         layout.addLayout(buttons)
-        self.glyph_window_button.connect("clicked()", self.show_in_glyph_window)
         self.close_button.connect("clicked()", dialog.close)
         self.compare_button.connect("clicked()", self.compare)
         self.choice_a.connect("currentIndexChanged(int)", lambda index: self.choice_changed())
@@ -1298,6 +1318,8 @@ class CompareDialog(object):
             chip = QtGui.QToolButton()
             chip.setCheckable(True)
             chip.setChecked(kind != "absent")
+            chip.setProperty(self.ak.LEAVE_ALONE_PROP, True)  # (drawn by CHIP_SHEET in the palette's colors)
+            chip.setStyleSheet(CHIP_SHEET)
             chip.setWhatsThis(tip)
             chip.setVisible(False)
             chip.connect("toggled(bool)", lambda on: on_toggle())
@@ -1310,7 +1332,9 @@ class CompareDialog(object):
         ak = self.ak
         widget, box, self.glyph_status = self.page(QtGui)
         row, self.glyph_chips = self.chip_row(GLYPH_KINDS, self.fill_glyphs,
-                                              u"Shows or hides the glyphs with this kind of difference (the count: glyphs).")
+                                              u"Shows or hides this kind of difference in the list (the count: glyphs "
+                                              u"with it). A glyph left with no kind shown is hidden; the others are "
+                                              u"ranked by the kinds shown.")
         box.addLayout(row)
         halves = QtGui.QSplitter(QtCore.Qt.Horizontal)
         self.glyph_tree = self.tree(("Glyph", "Differences"), icon=THUMB_SIZE)
@@ -1335,7 +1359,6 @@ class CompareDialog(object):
         halves.setStretchFactor(1, 3)
         box.addWidget(halves, 1)
         self.glyph_tree.connect("itemSelectionChanged()", self.glyph_selected)
-        self.glyph_tree.connect("itemDoubleClicked(QTreeWidgetItem*,int)", lambda item, column: self.show_in_glyph_window())
         self.watch_resize(self.comparison, "comparison")
         return widget
 
@@ -1360,7 +1383,6 @@ class CompareDialog(object):
         halves.setStretchFactor(1, 2)
         box.addWidget(halves, 1)
         self.kern_tree.connect("itemSelectionChanged()", self.draw_pair)
-        self.kern_tree.connect("itemDoubleClicked(QTreeWidgetItem*,int)", lambda item, column: self.show_in_glyph_window())
         self.watch_resize(self.pair_picture, "pair")
         return widget
 
@@ -1748,8 +1770,6 @@ class CompareDialog(object):
     def update_buttons(self):
         ak = self.ak
         ak.enable(self.compare_button, not self.busy and len(self.choices) > 1)
-        ak.enable(self.glyph_window_button, self.sides is not None and bool(
-            self.selected_names() or self.selected_names(second=True)))
         tab_texts = (u"Glyphs", u"Kerning", u"Features")
         if self.sides is not None:
             tab_texts = (u"Glyphs %s" % grouped(len(self.results)), u"Kerning %s" % grouped(
@@ -1839,14 +1859,15 @@ class CompareDialog(object):
         tree, colors = self.glyph_tree, self.colors()
         first, second = self.sides
         labels = self.labels()
-        found = glyph_rows(self.results, self.kinds_on(self.glyph_chips))
+        kinds = self.kinds_on(self.glyph_chips)
+        found = glyph_rows(self.results, kinds)
         rows = self.glyph_names = found[:ROWS_SHOWN]
         self.filling = True
         tree.setUpdatesEnabled(False)
         try:
             tree.clear()
             for index, r in enumerate(rows):
-                item = self.item((r.caption(), r.short()), index, r.sentence(labels))
+                item = self.item((r.caption(), r.short(kinds)), index, r.sentence(labels))
                 picture_a = first.paths.get(r.a) if r.a is not None else None
                 picture_b = second.paths.get(r.b) if r.b is not None else None
                 item.setIcon(0, self.icon(both_thumb, picture_a[0] if picture_a else None,
@@ -1863,6 +1884,11 @@ class CompareDialog(object):
                 text += u" The %s worst shown." % self.ak.b(grouped(len(rows)))
             elif len(rows) != changed:
                 text += u" %s shown." % self.ak.b(grouped(len(rows)))
+            counts_ = glyph_counts(self.results)
+            hidden = [kind_label(kind, labels, self.masters_mode) for kind, _ in self.glyph_chips
+                      if counts_.get(kind) and kind not in kinds]
+            if hidden:
+                text += u" Hidden: %s." % html_escape(u", ".join(hidden))
         else:
             text = u"The glyphs are alike: names, code points, metrics, outlines, components, and anchors."
         self.glyph_status.setText(text)
@@ -2048,67 +2074,19 @@ class CompareDialog(object):
         rows = f.rows if f.kind != "same" else [(u" ", line) for line in code_lines(f.a)]
         self.diff_view.setHtml(diff_html(rows, self.labels(), rgb(base), rgb(text)))
 
-    # -- the Glyph window ----------------------------------------------------
+    # -- flags ---------------------------------------------------------------
 
     def selected_glyphs(self):
-        """The first font's glyphs selected in the view shown (flags, the Glyph window)."""
-        return self.selected_names(second=False)
-
-    def selected_names(self, second=False):
-        """The glyphs selected in the view shown, as the first font names them (second: the second)."""
+        """The first font's glyphs selected in the view shown, as it names them (flags). (No Glyph
+        window: FontLab opens one on its current font only, which may be neither of the two.)"""
         key = self.current_key()
         if key == "glyphs":
-            r = self.selected_result()
-            if r is None:
-                return []
-            name = r.b if second else self.first_name(r)
+            name = self.first_name(self.selected_result())
             return [name] if name is not None else []
         if key == "kerning":
             d = self.selected_pair()
-            if d is None:
-                return []
-            if second:
-                back = dict((one, other) for other, one in self.rename.items())  # the first font's names to the second's
-                return [back.get(d.left, d.left), back.get(d.right, d.right)]
-            return [d.left, d.right]
+            return [d.left, d.right] if d is not None else []
         return []
-
-    def show_in_glyph_window(self):
-        """The selected glyph (between the font's H's, n's, or o's) or pair in a Glyph window of FontLab's
-        current font, in its names there."""
-        if self.sides is None:
-            return
-        ak = self.ak
-        current = self.current_font()
-        first, second = self.sides
-        key = ak.font_key(current) if current is not None else None
-        if key == ak.font_key(first.package):
-            package, names = first.package, self.selected_names()
-        elif key == ak.font_key(second.package):
-            package, names = second.package, self.selected_names(second=True)
-        else:
-            self.log.add(u"FontLab opens a <i>Glyph</i> window on its current font, which is neither of the two.", "warning")
-            return
-        if not names:
-            self.log.add(u"The current font lacks this glyph.", "warning")
-            return
-        if len(names) == 2:
-            try:
-                contexts = ak.proof_contexts(package, names)
-            except Exception:
-                contexts = list(ak.PROOF_CONTEXTS)
-            text = ak.proof_text(names[0], names[1], contexts)
-        else:
-            try:
-                contexts = ak.proof_contexts(package, names[:1])
-            except Exception:
-                contexts = []
-            context = contexts[0] if contexts else None
-            text = u"/%s/%s/%s/%s/%s" % (context, context, names[0], context, context) if context and context != names[0] \
-                else u"/%s" % names[0]
-        error = ak.show_in_glyph_window(self.fontlab, text)
-        if error:
-            self.log.add(u"FontLab did not open a <i>Glyph</i> window: %s" % ak.html(error), "error")
 
     def show(self):
         QtCore, QtGui = _qt()

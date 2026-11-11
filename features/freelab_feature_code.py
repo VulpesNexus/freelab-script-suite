@@ -1977,10 +1977,11 @@ code is kept.<br>
 <b>Alternates that take turns</b> (calt, on unless turned off): a letter repeated within the letters
 set takes its next alternate (X.2, X.3, or X.alt1...), so repeated letters vary as handwriting does.
 The nearest earlier form decides; a space or punctuation ends the look back. Ligatures come first:
-where liga makes l_l of ll, the alternates take turns around it.<br><br>
+where liga makes l_l of <i>ll</i>, the alternates take turns around it.<br><br>
 <b>Forms</b> (the second tab): one row per feature, its substitutions under it (click its arrow):
-case (.case), locl (Romanian and Moldavian S and T with a comma below, Catalan l\N{MIDDLE DOT}l, Dutch
-\N{LATIN SMALL LETTER I WITH ACUTE}j, the Turkic dotted i, and any .loclXXX glyph), frac, numr, and dnom
+case (.case), locl (Romanian and Moldavian <i>S</i> and <i>T</i> with a comma below, Catalan
+<i>l\N{MIDDLE DOT}l</i>, Dutch <i>\N{LATIN SMALL LETTER I WITH ACUTE}j</i>, the Turkic dotted <i>i</i>, and any
+.loclXXX glyph), frac, numr, and dnom
 (.numr, .dnom), sups, subs, and sinf, ordn, smcp and c2sc (.sc, .smcp, .c2sc), lnum, onum, pnum, and
 tnum (.tf, .lf, .osf, .tosf...), and the stylistic sets (.ss01 to .ss20, each with a name you can edit)
 and character variants (.cv01...). Check a feature to write it, and its rows to keep them in it. A
@@ -1989,7 +1990,7 @@ makes the same way; a warning row (figures of a tabular set that do not share on
 to review, and changes nothing.<br>
 <b>Figure forms to build</b> (under the forms): the numerators, denominators, superiors, inferiors,
 Unicode superscript and subscript figures, and ordinal indicators the font lacks, each made of its
-figure (or a or o) as a component, scaled and raised or lowered as most open-licensed fonts place
+figure (or <i>a</i> or <i>o</i>) as a component, scaled and raised or lowered as most open-licensed fonts place
 them (or as the font's own small figures, where it has some). Pick a set in the settings row to change
 its scale, baseline, and width. Scaling thins the strokes: a built form is a start to draw over.
 <i>Build checked glyphs</i> adds them in one step of FontLab's History; the font is read again, and
@@ -2001,6 +2002,124 @@ Click this help's <i>?</i> button, then any control, for what it does."""
 
 TABS = (u"Ligatures and alternates", u"Forms")
 FORM_ICON_WIDTH = 3  # a form row's picture: this many icons wide
+
+# The check boxes of a list whose pictures dark mode leaves alone (LEAVE_ALONE_PROP): the style drew
+# them nearly invisible on a dark palette, so a stylesheet draws them from the palette instead
+CHECK_FRAME = u"rgb(140, 140, 146)"  # an unchecked box's frame: a mid gray, plain on either background
+CHECK_MARK_SCALE = 3  # the check mark is drawn this many times the box's size (sharp on a scaled display)
+CHECK_SHEET_MARK = u"/* FreeLab check boxes */"
+
+
+def check_box_sheet(size, mark=None, fill=u"palette(highlight)", frame=CHECK_FRAME):
+    """Stylesheet rules for a list's check boxes: unchecked, a box framed in a mid gray on the row's own
+    background; checked, a box filled with fill (the list's highlight color), with the check mark
+    (mark: an image file's path; None: filled only)."""
+    image = u' image: url("%s");' % mark.replace(u"\\", u"/") if mark else u""
+    return (u"%s QTreeView::indicator { width: %dpx; height: %dpx; border: 1px solid %s; border-radius: 2px; "
+            u"background: transparent; } "
+            u"QTreeView::indicator:checked { border: 1px solid %s; background: %s;%s } "
+            u"QTreeView::indicator:indeterminate { background: %s; }" % (CHECK_SHEET_MARK, size, size, frame, fill, fill,
+                                                                         image, frame))
+
+
+def check_mark_file(QtCore, QtGui, color, size):
+    """A check mark in color (r, g, b) for a box of size pixels, drawn larger and saved as a PNG in
+    FreeLab's folder of the temporary files (once per color and size): its path, or None."""
+    temporary = u"%s" % QtCore.QDir.tempPath()
+    if not temporary or not os.path.isabs(temporary):
+        return None
+    folder = os.path.join(temporary, u"FreeLab")
+    path = os.path.join(folder, u"check-%02x%02x%02x-%d.png" % (color[0], color[1], color[2], size))
+    if os.path.isfile(path):
+        return path
+    if not os.path.isdir(folder):
+        os.makedirs(folder)
+    side = size * CHECK_MARK_SCALE
+    pixmap = QtGui.QPixmap(side, side)
+    pixmap.fill(QtGui.QColor(0, 0, 0, 0))
+    painter = QtGui.QPainter(pixmap)
+    try:  # ended whatever happens: a painter left open on a freed pixmap aborts FontLab
+        painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        pen = QtGui.QPen(QtGui.QColor(color[0], color[1], color[2]))
+        pen.setWidthF(side * 0.15)
+        pen.setCapStyle(QtCore.Qt.RoundCap)
+        pen.setJoinStyle(QtCore.Qt.RoundJoin)
+        painter.setPen(pen)
+        tick = QtGui.QPainterPath()
+        tick.moveTo(side * 0.2, side * 0.52)
+        tick.lineTo(side * 0.42, side * 0.74)
+        tick.lineTo(side * 0.8, side * 0.28)
+        painter.drawPath(tick)
+    finally:
+        painter.end()
+    return path if pixmap.save(path, "PNG") else None
+
+
+def style_check_boxes(QtCore, QtGui, tree, base):
+    """The list's check boxes drawn in its palette's colors (base: its own stylesheet, kept before them)."""
+    def color_of(palette, role, default):
+        try:
+            color = palette.color(role)
+            return (int(color.red()), int(color.green()), int(color.blue()))
+        except Exception:
+            return default
+
+    try:
+        palette = tree.palette() if callable(tree.palette) else tree.palette
+    except Exception:
+        palette = None
+    rgb = color_of(palette, QtGui.QPalette.HighlightedText, (255, 255, 255))
+    fill = u"rgb(%d, %d, %d)" % color_of(palette, QtGui.QPalette.Highlight, (48, 140, 198))
+    try:
+        size = int(tree.style().pixelMetric(QtGui.QStyle.PM_IndicatorWidth))
+    except Exception:
+        size = 13
+    size = max(11, min(24, size or 13))
+    try:
+        mark = check_mark_file(QtCore, QtGui, rgb, size)
+    except Exception:
+        mark = None
+    tree.setStyleSheet(u"")  # (polished again: the palette's colors read anew)
+    tree.setStyleSheet((base + u" " if base else u"") + check_box_sheet(size, mark, fill))
+
+
+def watch_check_boxes(dialog, trees):
+    """The trees' check boxes drawn plain to see in either palette, and drawn again when dark mode
+    switches; the watcher to keep a reference to (None where it could not be made)."""
+    QtCore, QtGui = _qt()
+    bases = []
+    for tree in trees:
+        sheet = tree.styleSheet() if callable(tree.styleSheet) else tree.styleSheet
+        sheet = u"%s" % (sheet or u"")
+        bases.append(sheet.split(CHECK_SHEET_MARK)[0].strip())
+
+    def restyle():
+        for tree, base in zip(trees, bases):
+            try:
+                style_check_boxes(QtCore, QtGui, tree, base)
+            except Exception:
+                pass
+
+    restyle()
+
+    class CheckWatcher(QtCore.QTimer):  # PythonQt has no QObject to subclass; a timer will do
+        def eventFilter(self, obj, event):
+            try:
+                if event.type() in (38, 39):  # the palette changed: dark mode switched
+                    self.start()
+            except Exception:
+                pass  # an event filter must never raise
+            return False
+
+    try:
+        watcher = CheckWatcher()
+        watcher.setSingleShot(True)
+        watcher.setInterval(0)
+        watcher.connect("timeout()", restyle)
+        dialog.installEventFilter(watcher)
+        return watcher
+    except Exception:
+        return None
 
 
 class FeatureCodeDialog(object):
@@ -2161,6 +2280,10 @@ class FeatureCodeDialog(object):
                                            lambda item: self.item_names(self.alternate_tree, item)),
                          self.ak.flag_menu(self.forms_tree, self, lambda: self.selected_names(self.forms_tree),
                                            lambda item: self.item_names(self.forms_tree, item))]
+        try:  # the lists' check boxes plain to see in either palette (their pictures stay unmapped)
+            self.check_watcher = watch_check_boxes(dialog, [self.alternate_tree, self.forms_tree, self.small_tree])
+        except Exception:
+            self.check_watcher = None
 
     def switch_page(self, index):
         self.pages.setCurrentIndex(index)
@@ -2688,7 +2811,8 @@ class FeatureCodeDialog(object):
             self.small_label.setText(u"")
         elif self.small_forms:
             self.small_label.setText(
-                u"The font lacks %s. Each is made of its figure (or a or o) as a component, scaled and moved, or of a "
+                u"The font lacks %s. Each is made of its figure (or <i>a</i> or <i>o</i>) as a component, scaled and "
+                u"moved, or of a "
                 u"drawn small figure where the font has a whole set of them: a start, not a drawing. Scaling thins "
                 u"the strokes (a figure at 60%% has stems 60%% as thick; most fonts' drawn small figures have "
                 u"ink about 7%% wider than scaling gives): draw over them, or draw your own. Built, the features above "

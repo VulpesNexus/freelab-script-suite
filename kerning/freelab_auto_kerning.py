@@ -124,6 +124,9 @@ SCRIPT_PROOF = {"kana": u"ロのい", "armenian": u"Ոոօ", "georgian": u"Ი�
 SCRIPT_LINES = {"latin": u"Latin letters, figures, and punctuation", "kana": u"Kana and Japanese punctuation, as palt sets them",
                 "armenian": u"Armenian letters and punctuation",
                 "georgian": u"Georgian letters (Mkhedruli, and Mtavruli where the font has them) and punctuation"}
+ALL_SCRIPTS = "all"  # the Script list's last choice, for a font with two scripts or more: each analyzed, one list
+ALL_SCRIPTS_LABEL = u"All scripts"
+ALL_SCRIPTS_LINE = u"Every script the font has, each against its own references, in one list"
 SCRIPT_MIN_LETTERS = 20  # a font has a script when it has its tuning letters and at least this many of its letters
 KANA_SETTINGS = (("palt", "as the font's palt sets them"), ("proportional", "proportional already"))
 FULL_WIDTH_SHARE = 0.9  # kana wider than this share of the em are full width (as CJK Spacing has it)
@@ -737,6 +740,18 @@ def open_sibling_script(file_name, module_name):
     """Runs a FreeLab script beside this one (its main()); the error's text, or None."""
     try:
         load_sibling(file_name, module_name).main()
+        return None
+    except Exception as exc:
+        return u"%s" % exc
+
+
+def open_kerning_check(glyphs=None, reason=None):
+    """Kerning Check on the current font, its lists limited to the pairs and entries with these glyphs
+    (names, or glyphs) when given; reason says what the caller did to them ("Auto Spacing spaced": the
+    line over the lists reads "Pairs with the 12 glyphs Auto Spacing spaced: ..."). The error's
+    text, or None."""
+    try:
+        load_sibling(KERNING_CHECK_FILE, KERNING_CHECK_MODULE).main(glyphs=glyphs, reason=reason)
         return None
     except Exception as exc:
         return u"%s" % exc
@@ -2222,6 +2237,73 @@ class Analysis(object):
         save_cache(self.cache_file, self.cache)
 
 
+def script_label(key):
+    """A Script list choice's label: the script's name, or All scripts."""
+    return ALL_SCRIPTS_LABEL if key == ALL_SCRIPTS else dict(SCRIPTS).get(key, key)
+
+
+def script_choices(found):
+    """The Script list's keys for the scripts a font has: each, then All scripts when there are two or more."""
+    keys = list(found) or ["latin"]
+    return keys + [ALL_SCRIPTS] if len(keys) > 1 else keys
+
+
+def pair_script(left_char, right_char, default="latin"):
+    """The script of a pair of characters: its letters' (a mark of punctuation takes its partner's)."""
+    return script_of(left_char) or script_of(right_char) or default
+
+
+class MergedAnalysis(Analysis):
+    """Several scripts' analyses in one list (All scripts): each pair measured by its own script, with
+    that script's references and factors (s.script says which)."""
+
+    def __init__(self, parts):
+        suggestions, seen = [], set()
+        for script, analysis in parts:
+            for s in analysis.suggestions:
+                if (s.left, s.right) not in seen:  # (no pair is in two scripts' lists: kept once if one were)
+                    seen.add((s.left, s.right))
+                    s.script = script
+                    suggestions.append(s)
+        first = parts[0][1] if parts else None
+        Analysis.__init__(self, suggestions, first.factors if first else {}, first.bands if first else (None, None),
+                          sum(a.measured for _, a in parts), sum(a.reused for _, a in parts))
+        self.parts = parts
+        self.script_factors = dict((script, analysis.factors) for script, analysis in parts)
+
+    def remember_fontlab(self):
+        for _, analysis in self.parts:
+            analysis.remember_fontlab()  # (its suggestions are this list's: FontLab's values are on them)
+
+
+def factors_of(analysis, script):
+    """A script's factors in an analysis (a merged one holds each script's)."""
+    return getattr(analysis, "script_factors", {}).get(script) or analysis.factors
+
+
+def factor_summary(analysis):
+    """How each method's tightening was scaled, for the status line: "halfkern tightens at 50%", and
+    per script where an analysis of All scripts scaled them differently."""
+    parts = getattr(analysis, "parts", None) or [(None, analysis)]
+    summary = []
+    for method in [m for m in MEASURED if any(m in s.raw for s in analysis.suggestions)]:
+        readings = []
+        for script, part in parts:
+            if method not in part.factors or not any(method in s.raw for s in part.suggestions):
+                continue
+            tighten, _ = part.factors[method]
+            fitted = part.factors[method] != DEFAULT_FACTORS[method]
+            readings.append((script, u"%.0f%%%s" % (tighten * 100, u" (from the font's kerning)" if fitted else u"")))
+        if not readings:
+            continue
+        if len(set(text for _, text in readings)) == 1:
+            summary.append(u"%s tightens at %s" % (dict(METHODS)[method], readings[0][1]))
+        else:
+            summary.append(u"%s tightens at %s" % (dict(METHODS)[method], u", ".join(
+                u"%s in %s" % (text, script_label(script)) for script, text in readings)))
+    return summary
+
+
 def touching_bias(core, groups, bias, limit):
     """The smallest halo from bias up (to limit) at which every pair of each group of references
     overlaps (a group without glyphs is passed over)."""
@@ -2788,7 +2870,8 @@ COLUMN_CHOICES = {1: "current", 2: "halfkern", 3: "contour", 4: "learned", 5: "f
 
 HELP = u"""<b>FreeLab Auto Kerning</b><br>
 Suggests kerning for the font's pairs, one script at a time (Latin, kana, Armenian, Georgian: the
-<i>Script</i> list offers those the font has), and writes only the pairs you check. Kana are kerned as
+<i>Script</i> list offers those the font has, and <i>All scripts</i>, each against its own references,
+in one list), and writes only the pairs you check. Kana are kerned as
 the font's palt sets them, on top of it.<br><br>
 <b>The list</b>: each method's value beside the font's current one. Check the pairs to write;
 pairs the font kerns already start unchecked.<br>
@@ -2820,6 +2903,7 @@ class AutoKerningDialog(object):
         self.busy = self.refilter_again = False
         self.common = common_pairs()
         self.script, self.adjustments, self.side = "latin", {}, u"H"  # the script analyzed, palt's adjustments, the preview's sides
+        self.sides = {}  # the preview's sides by script (All scripts: each pair between its own script's)
         # FontLab's main window as its parent: a parentless dialog counts as a main window of its own,
         # and kept FontLab running, the dialog alone on screen, after FontLab's window was closed.
         dialog = self.dialog = QtGui.QDialog(self.main_window()) if self.main_window() is not None else QtGui.QDialog()
@@ -2847,7 +2931,9 @@ class AutoKerningDialog(object):
         self.script_box.addItem(dict(SCRIPTS)["latin"])
         self.script_box.setWhatsThis(u"The script whose pairs are measured and listed: those the font has (its letters "
                                      u"and the letters its spacing is measured by). Kana are measured as the font's palt "
-                                     u"sets them (or as they are, when they are proportional already).")
+                                     u"sets them (or as they are, when they are proportional already). <i>All scripts</i> "
+                                     u"(for a font with two or more) analyzes each, against its own references, and lists "
+                                     u"their pairs together: a pair's characters show its script, and its tooltip names it.")
         row.addWidget(self.script_box)
         row.addWidget(QtGui.QLabel("Show"))
         self.show_kind = self.combo(SHOW)
@@ -3067,7 +3153,8 @@ class AutoKerningDialog(object):
     def font_line(self):
         if self.package is None:
             return u"No font is open. Open one, then click %s." % i("Analyze")
-        return u"%s, master %s. %s." % (b(self.package.tfn), b(self.master), SCRIPT_LINES[self.script])
+        return u"%s, master %s. %s." % (b(self.package.tfn), b(self.master),
+                                        ALL_SCRIPTS_LINE if self.script == ALL_SCRIPTS else SCRIPT_LINES[self.script])
 
     def fill_scripts(self, package, wanted=None):
         """The script list: the scripts the font has; the script to analyze: wanted (or the last one)
@@ -3077,13 +3164,13 @@ class AutoKerningDialog(object):
         if first and len(found) > 1:
             # first opened: the script the font has most letters of (a kana font with a few Latin letters opens on kana)
             wanted = max(found, key=lambda key: len(font_glyphs(package, SCRIPT_LETTERS[key])))
-        chosen = next((key for key in (wanted, self.script) if key in found), found[0] if found else "latin")
-        keys = found or ["latin"]
+        keys = script_choices(found)
+        chosen = next((key for key in (wanted, self.script) if key in keys), found[0] if found else "latin")
         if keys != self.script_keys:
             self.script_box.blockSignals(True)
             self.script_box.clear()
             for key in keys:
-                self.script_box.addItem(dict(SCRIPTS)[key])
+                self.script_box.addItem(script_label(key))
             self.script_box.blockSignals(False)
             self.script_keys = keys
         self.script_box.setCurrentIndex(keys.index(chosen) if chosen in keys else 0)
@@ -3092,6 +3179,9 @@ class AutoKerningDialog(object):
 
     def script_note(self):
         """The script analyzed, for the status line: kana say how they are set."""
+        if self.script == ALL_SCRIPTS:
+            parts = getattr(self.analysis, "parts", None) or []
+            return u"all scripts (%s)" % u", ".join(script_label(script) for script, _ in parts) if parts else u"all scripts"
         if self.script != "kana":
             return dict(SCRIPTS)[self.script]
         if self.adjustments:
@@ -3183,13 +3273,34 @@ class AutoKerningDialog(object):
                 self.analysis, self.suggestions = None, []
                 self.table.setRowCount(0)
             self.script = script
-            self.adjustments = self.kana_adjustments(package, self.master) if script == "kana" else {}
-            sides = font_glyphs(package, SCRIPT_SIDE[script]) or font_glyphs(package, u"H")
-            self.side = sides[0][1] if sides else u"H"
-            # kana: the pairs common in text only (all of them, some 45,000, would each be listed and asked of FontLab)
-            pairs = script_pairs(self.common, script) if script == "kana" else None
-            result = analyze(self.package, self.master, progress=self.progress, script=script, adjustments=self.adjustments,
-                             pairs=pairs)
+            scripts = [key for key in self.script_keys if key != ALL_SCRIPTS] if script == ALL_SCRIPTS else [script]
+            self.sides = {}
+            for key in scripts:
+                sides = font_glyphs(package, SCRIPT_SIDE[key]) or font_glyphs(package, u"H")
+                self.sides[key] = sides[0][1] if sides else u"H"
+            self.side = self.sides.get(scripts[0], u"H")
+            self.adjustments, parts = {}, []
+            for key in scripts:
+                try:
+                    adjustments = self.kana_adjustments(package, self.master) if key == "kana" else {}
+                except ValueError as exc:
+                    if len(scripts) == 1:
+                        raise
+                    self.log.add(u"Kana left out: %s" % html(u"%s" % exc), "warning")  # (the other scripts analyzed)
+                    continue
+                self.adjustments.update(adjustments)
+                # kana: the pairs common in text only (all of them, some 45,000, would each be listed and asked of FontLab)
+                pairs = script_pairs(self.common, key) if key == "kana" else None
+                what = u"Measuring %s pairs" % script_label(key) if len(scripts) > 1 else u"Measuring pairs"
+                part = analyze(self.package, self.master, progress=lambda done, total, what=what: self.progress(done, total, what),
+                               script=key, adjustments=adjustments, pairs=pairs)
+                if part is None:
+                    parts = None
+                    break
+                for s in part.suggestions:
+                    s.script = key
+                parts.append((key, part))
+            result = None if parts is None else (parts[0][1] if script != ALL_SCRIPTS else MergedAnalysis(parts))
         except Exception as exc:
             message = u"%s" % exc
             self.status.setText(self.font_line())
@@ -3297,12 +3408,7 @@ class AutoKerningDialog(object):
         else:
             listed.sort(key=change)
         self.suggestions = listed
-        summary = []
-        for method in [m for m in MEASURED if any(m in s.raw for s in self.analysis.suggestions)]:
-            tighten, loosen = self.analysis.factors[method]
-            fitted = (tighten, loosen) != DEFAULT_FACTORS[method]
-            summary.append("%s tightens at %.0f%%%s" % (dict(METHODS)[method], tighten * 100,
-                                                       " (from the font's kerning)" if fitted else ""))
+        summary = factor_summary(self.analysis)
         analysis = self.analysis
         work = (u"%s pairs: %s measured, %s unchanged since the last analysis" % (
                     b(len(analysis.suggestions)), b(analysis.measured), b(analysis.reused))
@@ -3363,7 +3469,8 @@ class AutoKerningDialog(object):
                              % html(dict(CHOICES)[s.override]) if s.override else u"")
         for column in range(len(self.COLUMNS)):
             self.table.item(row, column).setBackground(QtGui.QBrush(tint) if s.override else QtGui.QBrush())
-        self.table.item(row, 0).setToolTip(u"%s %s. %s" % (s.left, s.right, self.target_text(s)))
+        script = u" (%s)" % script_label(getattr(s, "script", self.script)) if self.script == ALL_SCRIPTS else u""
+        self.table.item(row, 0).setToolTip(u"%s %s%s. %s" % (s.left, s.right, script, self.target_text(s)))
 
     def refresh_values(self):
         """Another source: only the Suggested column and the preview change."""
@@ -3435,10 +3542,15 @@ class AutoKerningDialog(object):
         if self.selected is None:
             return
         s = self.suggestions[self.selected]
+        side = self.side_of(s)
         if key == "before":
-            self.focus_pair(self.side, s.left)
+            self.focus_pair(side, s.left)
         else:
-            self.focus_pair(s.right, self.side)
+            self.focus_pair(s.right, side)
+
+    def side_of(self, s):
+        """The glyph a pair is previewed between: its script's straight letter (H for Latin)."""
+        return self.sides.get(getattr(s, "script", self.script), self.side)
 
     def focus_pair(self, left, right):
         """The pair of the glyphs named left and right, selected in the list: listed whatever the
@@ -3476,16 +3588,21 @@ class AutoKerningDialog(object):
                 return None
             chars.append(unichr_(code))
         script = self.script
+        if script == ALL_SCRIPTS:  # the pair's own script, if the font's are analyzed
+            script = pair_script(chars[0], chars[1], self.script_keys[0])
+            if script not in self.script_keys:
+                script = self.script_keys[0]
         wanted = list(SCRIPT_TUNING[script]) + [ch for chars_ in SCRIPT_REFERENCES[script].values() for ch in chars_] + chars
         try:
             result = analyze(package, self.master, characters=u"".join(sorted(set(wanted))), cache_file="", script=script,
-                             adjustments=self.adjustments)
+                             adjustments=self.adjustments if script == "kana" else {})
         except Exception:
             return None
         for s in result.suggestions if result is not None else []:
             if (s.left, s.right) == (left, right):
+                s.script = script
                 for method, units in s.raw.items():
-                    tighten, loosen = self.analysis.factors.get(method, DEFAULT_FACTORS[method])
+                    tighten, loosen = factors_of(self.analysis, script).get(method, DEFAULT_FACTORS[method])
                     s.values[method] = round_units(units * (tighten if units < 0 else loosen))
                 return s
         return None
@@ -3638,7 +3755,8 @@ class AutoKerningDialog(object):
         text = palette.color(QtGui.QPalette.WindowText)  # (FontLab 7's PythonQt lacks the placeholder text role)
         scale = float(PREVIEW_SIZE) / float(self.package.upm)
         paths = []  # (advance, path, role): the pair between two H's (the script's straight letter), when the font has one
-        for name, role in ((self.side, "side"), (s.left, "left"), (s.right, "right"), (self.side, "side")):
+        side = self.side_of(s)
+        for name, role in ((side, "side"), (s.left, "left"), (s.right, "right"), (side, "side")):
             glyph = self.package.findName(name)
             layer = glyph.getLayerByName(self.master) if glyph is not None and not glyph.isNull else None
             if layer is not None:

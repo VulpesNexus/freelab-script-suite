@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 """FreeLab Diacritics, from FontLab's Scripts menu.
 
-Builds the letters with diacritics a font lacks (Latin, Greek, and Cyrillic), as glyphs of components
-(the base letter and its marks), in every master. Shows each one before anything is made, lets each
+Builds the letters with diacritics a font lacks (Latin, Greek, Cyrillic, and the voiced kana: ga is ka
+with a dakuten), as glyphs of components (the base letter and its marks), in every master. Shows each one before anything is made, lets each
 mark be moved and scaled by hand, and makes only the ones you leave checked. It needs no groundwork in
 the font: no anchors, no accented glyphs to learn from, no .case marks, not even marks.
 
@@ -12,7 +12,9 @@ the font: no anchors, no accented glyphs to learn from, no .case marks, not even
   (its .case form for capitals, where there is one), else its twin above for a mark below (a dot below
   from the dot accent), else a draft made of the font's punctuation (a dot accent of the period, a
   dieresis of two, a caron of an upside-down circumflex accent ^), sized as marks are in the
-  open-licensed fonts FreeLab learned from. i and j take their dotless forms under a mark above.
+  open-licensed fonts FreeLab learned from. i and j take their dotless forms under a mark above. Where
+  most fonts draw another mark than Unicode's decomposition names (CONVENTIONS: Latvian's comma below
+  for a cedilla, the vertical caron of d, t, l, and L), that mark.
 - Where the marks go: as the font's own accented glyphs place theirs, where it has some (their gap to
   the ink, and their offset from the center of the letter's top or bottom fifth, as a share of its
   width, pooled per case so that all marks agree); else as the open-licensed fonts place them
@@ -42,11 +44,48 @@ MARKS = {0x0300: "grave", 0x0301: "acute", 0x0302: "circumflex", 0x0303: "tilde"
          0x0323: "dotbelow", 0x0324: "dieresisbelow", 0x0325: "ringbelow", 0x0326: "commaaccent",
          0x0327: "cedilla", 0x0328: "ogonek", 0x032D: "circumflexbelow", 0x032E: "brevebelow",
          0x0330: "tildebelow", 0x0331: "macronbelow", 0x0313: "commaabove", 0x0314: "commareversedabove",
-         0x0342: "perispomeni", 0x0345: "ypogegrammeni"}
+         0x0342: "perispomeni", 0x0345: "ypogegrammeni", 0x0312: "commaturnedabove",
+         0x0315: "caronvertical",  # (the comma above right: the apostrophe-like caron of d, t, l, and L)
+         0x3099: "dakuten", 0x309A: "handakuten"}  # (the kana voicing marks)
 SPACING_MARKS = {0x0300: 0x0060, 0x0301: 0x00B4, 0x0302: 0x02C6, 0x0303: 0x02DC, 0x0304: 0x00AF, 0x0306: 0x02D8,
                  0x0307: 0x02D9, 0x0308: 0x00A8, 0x030A: 0x02DA, 0x030B: 0x02DD, 0x030C: 0x02C7, 0x0327: 0x00B8,
                  0x0328: 0x02DB, 0x0313: 0x1FBF, 0x0314: 0x1FFE, 0x0342: 0x1FC0,
-                 0x0345: 0x037A}  # each combining mark's spacing form, found by its code point
+                 0x0345: 0x037A, 0x3099: 0x309B, 0x309A: 0x309C}  # each combining mark's spacing form, by its code point
+# Other names fonts give a mark's glyph (for capitals, each with .case first), and other code points it is
+# encoded at (Adobe's comma below at U+F6C3)
+MARK_ALIASES = {"caronvertical": ("caroncomb.alt", "caron.alt", "caronverticalcomb", "caronvertical", "caroncommaaccent",
+                                  "caronslovak", "uni030C.alt", "commaaboverightcomb", "uni0315"),
+                "commaturnedabove": ("commaturnedabovecomb", "commaturnedabove", "commaaccentrotate", "uni0312"),
+                "commaaccent": ("commaaccentcomb", "commaaccent", "commabelowcomb", "uni0326"),
+                "dakuten": ("voicedcombkana", "dakutenkanacomb", "dakuten-kana", "dakuten", "uni3099", "voicedkana",
+                            "uni309B"),
+                "handakuten": ("semivoicedcombkana", "handakutenkanacomb", "handakuten-kana", "handakuten", "uni309A",
+                               "semivoicedkana", "uni309C")}
+MARK_CODES = {"commaaccent": (0xF6C3,)}
+# Letters whose mark fonts draw otherwise than Unicode's decomposition says, as most of the open-licensed
+# fonts do (diacritics/train/conventions.py, 433 families: the share of the fonts telling): Latvian's and
+# Livonian's G, K, L, N, R, and D take a comma below for Unicode's cedilla (224 of 232 fonts for G to 11 of
+# 18 for d; Marshallese draws a cedilla on L and N, Latvian is the more common), Latvian's small g a turned
+# comma above (155 of 180); Czech and Slovak d, t, l, and L the vertical caron, an apostrophe-like mark
+# right of the stem's top (190 of 214 for d, 168 of 210 for t, 200 of 220 for l, 200 of 225 for L).
+# {letter: {Unicode's mark: the fonts' mark}}
+COMMA_BELOW = {0x0327: 0x0326}
+CONVENTIONS = dict([(code, COMMA_BELOW) for code in (0x0122, 0x0136, 0x0137, 0x013B, 0x013C, 0x0145, 0x0146,
+                                                     0x0156, 0x0157, 0x1E10, 0x1E11)] +
+                   [(0x0123, {0x0327: 0x0312})] + [(code, {0x030C: 0x0315}) for code in (0x010F, 0x0165, 0x013E, 0x013D)])
+CONVENTION_NOTES = {(0x0327, 0x0326): u"the comma below fonts draw for Unicode's cedilla",
+                    (0x0327, 0x0312): u"the turned comma above fonts draw for Unicode's cedilla",
+                    (0x030C, 0x0315): u"the vertical caron fonts draw for Unicode's caron"}
+# The vertical caron: its ink's left this far right of the stem's top (the right end of the letter's top
+# fifth), its top this far over the letter's top, in shares of the em, per letter (the corpus's medians:
+# 190 fonts for d, 168 for t, 200 each for l and L), and its height (when drafted)
+VERTICAL_CARON = {u"d": (0.048, 0.0), u"l": (0.048, 0.0), u"t": (0.042, 0.1008), u"L": (0.091, 0.0), None: (0.053, 0.0)}
+VERTICAL_CARON_HEIGHT = 0.198
+# Where the kana's voicing marks go when the model says nothing (diacritics/train/kana.py, 42 families): the
+# mark's ink center from the right end and the top of its letter's ink, in shares of the em, per kana set
+KANA_PLACES = {("dakuten", "hiragana"): (-0.0493, -0.0645), ("dakuten", "katakana"): (-0.0365, -0.0253),
+               ("handakuten", "hiragana"): (-0.0828, -0.031), ("handakuten", "katakana"): (-0.0742, -0.001)}
+KANA_HEIGHT = {"dakuten": 0.215, "handakuten": 0.214}
 # A script's own forms of a mark, looked for first: (names, spacing code point). Greek's acute is its
 # tonos, steeper; Cyrillic's short i takes a breve of its own in many fonts.
 SCRIPT_MARKS = {("greek", "acute"): (("tonos", "oxia"), 0x0384), ("greek", "grave"): (("varia",), 0x1FEF),
@@ -75,13 +114,31 @@ BORROWED = {"dotbelow": "dotaccent", "dieresisbelow": "dieresis", "ringbelow": "
             "tildebelow": "tilde", "brevebelow": "breve", "circumflexbelow": "circumflex",
             "commaaccent": "comma"}  # a mark below the font lacks: its twin above (or the comma), moved under
 # A mark the font lacks altogether, drafted from its punctuation: (code points, how many side by side,
-# flipped upside down). Marks below draft from their twins above.
+# flipped upside down, or True turned about: both ways). Marks below draft from their twins above.
 DRAFTS = {"dotaccent": ((0x002E,), 1, False), "dieresis": ((0x002E,), 2, False), "macron": ((0x002D, 0x2013), 1, False),
           "ring": ((0x00B0,), 1, False), "tilde": ((0x007E,), 1, False), "circumflex": ((0x005E,), 1, False),
           "caron": ((0x005E,), 1, True), "grave": ((0x0060,), 1, False), "acute": ((0x00B4,), 1, False),
           "hungarumlaut": ((0x00B4,), 2, False), "dblgrave": ((0x0060,), 2, False), "commaaccent": ((0x002C,), 1, False),
           "cedilla": ((0x002C,), 1, False), "commaabove": ((0x2019, 0x0027), 1, False),
-          "commareversedabove": ((0x2018,), 1, False), "perispomeni": ((0x007E,), 1, False)}
+          "commareversedabove": ((0x2018,), 1, False), "perispomeni": ((0x007E,), 1, False),
+          # the vertical caron of an apostrophe (or the comma); the turned comma of a modifier turned comma or a
+          # left quote, else the comma turned about; the kana's marks of a double quote and the degree sign
+          "caronvertical": ((0x2019, 0x02BC, 0x002C), 1, False),
+          "commaturnedabove": (((0x02BB, 0x2018), 1, False), ((0x002C,), 1, "turned")),
+          "dakuten": ((0x201D, 0x0022), 1, False), "handakuten": ((0x00B0, 0x02DA), 1, False)}
+
+
+def draft_ways(root):
+    """The ways a mark is drafted, in order: [(code points, how many, flipped)]."""
+    found = DRAFTS.get(root)
+    if not found:
+        return []
+    return list(found) if isinstance(found[0][0], tuple) else [found]
+
+
+DRAFT_NAMES = {0x2019: u"quoteright", 0x02BC: u"the modifier apostrophe", 0x002C: u"the comma",
+               0x02BB: u"the modifier turned comma", 0x2018: u"quoteleft", 0x201D: u"quotedblright",
+               0x0022: u"the double quote", 0x00B0: u"the degree sign"}  # (drafts named after what they are made of)
 DRAFT_SPACING = 0.5  # two drafted dots apart by this share of a dot's width
 DOTLESS = {u"i": (u"\u0131", ("dotlessi", "idotless")), u"j": (u"\u0237", ("dotlessj", "jdotless", "uni0237")),
            u"\u0456": (u"\u0131", ("dotlessi", "idotless")),  # Cyrillic i and je: the Latin dotless forms
@@ -91,7 +148,10 @@ SETS = (("latin", "Latin-1, Latin Extended-A and -B", ((0x00C0, 0x0250),)),
         ("greek", "Greek", ((0x0370, 0x0400),)),
         ("polytonic", "Greek Extended (polytonic)", ((0x1F00, 0x2000),)),
         ("cyrillic", "Cyrillic", ((0x0400, 0x0530),)),
-        ("all", "All", ((0x00C0, 0x0250), (0x1E00, 0x1F00), (0x0370, 0x0400), (0x1F00, 0x2000), (0x0400, 0x0530))))
+        ("kana", "Kana with dakuten (Japanese)", ((0x3040, 0x3100),)),
+        ("all", "All", ((0x00C0, 0x0250), (0x1E00, 0x1F00), (0x0370, 0x0400), (0x1F00, 0x2000), (0x0400, 0x0530),
+                        (0x3040, 0x3100))))
+LISTED_SCRIPTS = ("greek", "cyrillic", "kana")  # listed only when the font has letters of them
 NAMES_FILE = "glyph_names.json"
 BAND_SHARE = 0.2  # the top or bottom share of a letter's ink whose center a mark centers on
 DEFAULT_GAP_SHARE = 0.05  # a mark's gap to its letter, as a share of the em, with no model and no example
@@ -103,12 +163,73 @@ MODEL_FILE = "mark_model.json"
 
 
 def side_of(code):
-    """Where a combining mark goes: "above", "below", or "right" (the horn)."""
+    """Where a combining mark goes: "above", "below", "right" (the horn), "topright" (the vertical caron, by
+    the stem's top), or "kana" (a voicing mark, at a kana's top right)."""
     if code == 0x031B:
         return "right"
+    if code == 0x0315:
+        return "topright"
+    if code in (0x3099, 0x309A):
+        return "kana"
     if code == 0x0345:  # the iota subscript (its combining class, 240, is its own)
         return "below"
     return "below" if unicodedata.combining(unichr_(code)) in (202, 220) else "above"
+
+
+# Mark roots as words, for what is written (a hook above, not a hookabove)
+MARK_WORDS = {"hookabove": u"hook above", "hungarumlaut": u"double acute", "dotaccent": u"dot above",
+              "dotbelow": u"dot below", "commaaccent": u"comma below", "dblgrave": u"double grave",
+              "breveinverted": u"inverted breve", "dieresisbelow": u"dieresis below", "ringbelow": u"ring below",
+              "circumflexbelow": u"circumflex below", "brevebelow": u"breve below", "tildebelow": u"tilde below",
+              "macronbelow": u"macron below", "commaabove": u"psili (comma above)",
+              "commareversedabove": u"dasia (reversed comma above)", "ypogegrammeni": u"ypogegrammeni (iota subscript)",
+              "caronvertical": u"vertical caron", "commaturnedabove": u"turned comma above",
+              "dieresistonos": u"dialytika with tonos", "dialytikavaria": u"dialytika with varia",
+              "dialytikaperispomeni": u"dialytika with perispomeni", "psilioxia": u"psili with oxia",
+              "psilivaria": u"psili with varia", "psiliperispomeni": u"psili with perispomeni",
+              "dasiaoxia": u"dasia with oxia", "dasiavaria": u"dasia with varia",
+              "dasiaperispomeni": u"dasia with perispomeni", "prosgegrammeni": u"prosgegrammeni (iota adscript)"}
+
+
+def mark_word(root):
+    return MARK_WORDS.get(root, root)
+
+
+def article(word):
+    """ "a" or "an" before a word, by its sound: an acute, an ogonek, an umlaut, an hour, an ypogegrammeni;
+    a hook, a horn, a ring, a cedilla, a unit, a U+0312, a one, a eu-."""
+    import re
+    w = (word or u"").strip().lower()
+    if not w:
+        return u"a"
+    if w.startswith((u"hour", u"honest", u"honor", u"heir")):
+        return u"an"
+    if w.startswith((u"one", u"once", u"eu", u"ewe", u"u+", u"uni", u"use", u"usu", u"uti", u"ubi", u"ura",
+                     u"ure", u"uri", u"uro")):
+        return u"a"
+    if re.match(u"^u[bcdfgjklmnpqrstvwxz][aeiou]", w) and not w.startswith((u"un", u"up", u"ut")):
+        return u"a"  # a unit, a usual (you-): not an umlaut, an upsilon, an unsure
+    if re.match(u"^y[bcdfghjklmnpqrstvwxz]", w):
+        return u"an"  # an ypogegrammeni, an ytterbium
+    if w[0] in u"aeiou":
+        return u"an"
+    if len(w) == 1 or not w[1].isalpha():  # a letter by its name: an F, an S, a K
+        return u"an" if w[0] in u"fhlmnrsx" else u"a"
+    return u"a"
+
+
+def with_article(word):
+    return u"%s %s" % (article(word), word)
+
+
+def listed(words):
+    """Words in a list: a, b, and c (an Oxford comma), a and b, or a."""
+    words = list(words)
+    if len(words) <= 1:
+        return u"".join(words)
+    if len(words) == 2:
+        return u"%s and %s" % tuple(words)
+    return u"%s, and %s" % (u", ".join(words[:-1]), words[-1])
 
 
 def unichr_(code):
@@ -128,13 +249,20 @@ def case_of(ch):
 
 
 def script_of(ch):
-    """"greek", "cyrillic", or "latin", by the character's Unicode name."""
+    """"greek", "cyrillic", "kana" (hiragana and katakana), or "latin", by the character's Unicode name."""
     name = unicodedata.name(ch, u"")
     if name.startswith(u"GREEK"):
         return "greek"
     if name.startswith(u"CYRILLIC"):
         return "cyrillic"
+    if name.startswith((u"HIRAGANA", u"KATAKANA")):
+        return "kana"
     return "latin"
+
+
+def kana_set(code):
+    """ "hiragana" or "katakana"."""
+    return "hiragana" if code < 0x30A0 else "katakana"
 
 
 # Scripts whose marks the font's mark features attach (anchors): each one's code point ranges.
@@ -205,6 +333,7 @@ class Mark(object):
     def __init__(self, root, side, parts, note=None, joined=False):
         self.root, self.side, self.parts, self.note = root, side, parts, note
         self.joined = joined  # its parts set over each other, centered (a dialytika with tonos), not side by side
+        self.convention = None  # why it is not the mark Unicode's decomposition names (a comma below for a cedilla)
 
     @property
     def glyph(self):
@@ -215,9 +344,12 @@ class Mark(object):
         text = names[0] if len(set(names)) == 1 and len(names) == 1 else u" ".join(names)
         if len(names) > 1 and len(set(names)) == 1:
             text = u"%s \N{MULTIPLICATION SIGN}%d" % (names[0], len(names))
-        if self.parts[0][2] < 0:
+        if self.parts[0][1] < 0 and self.parts[0][2] < 0:
+            text += u" turned"
+        elif self.parts[0][2] < 0:
             text += u" upside down"
-        return text + (u" (%s)" % self.note if self.note else u"")
+        notes = [n for n in (self.note, self.convention) if n]
+        return text + (u" (%s)" % u"; ".join(notes) if notes else u"")
 
 
 class Recipe(object):
@@ -232,6 +364,7 @@ class Recipe(object):
         self.notes = []  # what placing it took (marks made smaller, too tall)
         self.adjust = {}  # mark index: [dx, dy, x scale, y scale], set by hand (about the mark's center)
         self.touches = u""  # after a placement was applied from another letter: how close a mark comes
+        self.applied = None  # its adjust when it was last applied to the related letters (not again until moved)
 
     @property
     def code(self):
@@ -245,10 +378,12 @@ class Recipe(object):
 
 def find_mark(font, root, case, script="latin"):
     """A mark glyph of the font by its root (its .case form for capitals first; the script's own form
-    first, Greek's tonos for an acute), or None."""
-    candidates = [root + "comb", root]
-    if case == "upper":
-        candidates = [root + "comb.case", root + ".case"] + candidates
+    first, Greek's tonos for an acute; the names other fonts give it, uni0326 or caroncomb.alt), or None."""
+    codes = [code for code, mark_root in MARKS.items() if mark_root == root]
+    names = [root + "comb", root] + [u"uni%04X" % code for code in codes] + list(MARK_ALIASES.get(root, ()))
+    candidates = []
+    for name in names:
+        candidates += ([name + ".case"] if case == "upper" else []) + [name]
     own, own_code = SCRIPT_MARKS.get((script, root), ((), None))
     first = []
     for name in own:
@@ -258,12 +393,14 @@ def find_mark(font, root, case, script="latin"):
             return candidate
     if own_code and font.by_code.get(own_code):
         return font.by_code[own_code]
-    for code, mark_root in MARKS.items():
-        if mark_root == root:
-            for found_code in (code, SPACING_MARKS.get(code)):
-                found = font.by_code.get(found_code) if found_code else None
-                if found:
-                    return found
+    for code in codes:
+        for found_code in (code, SPACING_MARKS.get(code)):
+            found = font.by_code.get(found_code) if found_code else None
+            if found:
+                return found
+    for found_code in MARK_CODES.get(root, ()):
+        if font.by_code.get(found_code):
+            return font.by_code[found_code]
     return None
 
 
@@ -281,14 +418,17 @@ def make_mark(font, code, case, script="latin"):
     if twin:
         glyph = find_mark(font, twin, case) or (font.by_code.get(0x002C) if twin == "comma" else None)
         if glyph:
-            return Mark(root, side, [(glyph, 1.0, 1.0, 0.0, 0.0)], u"for %s" % root)
+            return Mark(root, side, [(glyph, 1.0, 1.0, 0.0, 0.0)], u"for %s" % mark_word(root))
     draft_root = root if root in DRAFTS else twin if twin in DRAFTS else None
-    if draft_root:
-        codes, count, flipped = DRAFTS[draft_root]
-        glyph = next((font.by_code[c] for c in codes if c in font.by_code), None)
-        if glyph:
-            parts = [(glyph, 1.0, -1.0 if flipped else 1.0, 0.0, 0.0) for _ in range(count)]
-            return Mark(root, side, parts, u"draft for %s" % root)
+    for codes, count, flipped in draft_ways(draft_root):
+        found = next((c for c in codes if c in font.by_code), None)
+        if found is None:
+            continue
+        sx, sy = (-1.0, -1.0) if flipped == "turned" else (1.0, -1.0 if flipped else 1.0)
+        parts = [(font.by_code[found], sx, sy, 0.0, 0.0) for _ in range(count)]
+        source = DRAFT_NAMES.get(found)
+        note = u"draft for %s" % mark_word(root) + (u", of %s" % source if source else u"")
+        return Mark(root, side, parts, note)
     return None
 
 
@@ -302,7 +442,9 @@ def plan(font, characters):
         decomposed = unicodedata.normalize("NFD", ch)
         if len(decomposed) < 2:
             continue
-        base_char, codes = decomposed[0], [ord(c) for c in decomposed[1:]]
+        base_char, unicode_codes = decomposed[0], [ord(c) for c in decomposed[1:]]
+        convention = CONVENTIONS.get(ord(ch), {})
+        codes = [convention.get(code, code) for code in unicode_codes]  # the mark fonts draw (Latvian's comma below)
         base = font.glyph_for(base_char)
         if base is None:
             recipes.append(Recipe(ch, missing=u"its letter %s" % base_char))
@@ -326,28 +468,36 @@ def plan(font, characters):
             if isinstance(step, tuple):
                 mark = joined_mark(font, script, case, step)
                 if mark is None:
-                    lacking.append(JOINED_MARKS[(script, step)][0])
+                    lacking.append(mark_word(JOINED_MARKS[(script, step)][0]))
                     continue
                 left = all(code in LEFT_OF_CAPITALS + (0x0313, 0x0314) for code in step)
             elif step == 0x0345 and script == "greek" and case == "upper":
                 mark = adscript_mark(font)
                 if mark is None:
-                    lacking.append(u"prosgegrammeni")
+                    lacking.append(mark_word(u"prosgegrammeni"))
                     continue
                 left = False
             else:
                 mark = make_mark(font, step, case, script)
                 if mark is None:
-                    lacking.append(MARKS.get(step) or u"U+%04X" % step)
+                    word = mark_word(MARKS.get(step)) if step in MARKS else u"U+%04X" % step
+                    if step not in unicode_codes:  # (fonts draw it for Unicode's: said so)
+                        original = next((c for c, by in convention.items() if by == step), None)
+                        word += u" (fonts draw it for Unicode's %s)" % mark_word(MARKS.get(original, u"mark"))
+                    lacking.append(word)
                     continue
                 left = step in LEFT_OF_CAPITALS
+                if step not in unicode_codes:  # a mark fonts draw for Unicode's: said why
+                    original = next((c for c, by in convention.items() if by == step), None)
+                    mark.convention = CONVENTION_NOTES.get((original, step))
             if script == "greek" and case == "upper" and left:
                 mark.side = "left"
             marks.append(mark)
         if lacking:
-            recipes.append(Recipe(ch, missing=u"a %s" % u", a ".join(lacking)))
+            recipes.append(Recipe(ch, missing=listed(with_article(word) for word in lacking)))
             continue
-        name = existing or glyph_name(font, name_base, [mark.root for mark in marks], ord(ch))
+        name = existing or glyph_name(font, name_base, [mark.root for mark in marks], ord(ch),
+                                      plain=script == "kana")
         recipe = Recipe(ch, name, base, marks)
         recipe.refill = bool(existing)
         recipes.append(recipe)
@@ -384,10 +534,20 @@ def adscript_mark(font):
                 None if glyph != font.by_code.get(iota) else u"the iota, as an adscript")
 
 
-def glyph_name(font, base, roots, code, names=None):
+def scripts_present(codes):
+    """The scripts of LISTED_SCRIPTS the font has letters of (by their code points)."""
+    found = set()
+    for code in codes:
+        if (0x0370 <= code < 0x0530 or 0x3040 <= code < 0x3100) and unicodedata.category(unichr_(code)).startswith(u"L"):
+            found.add(script_of(unichr_(code)))
+    return found
+
+
+def glyph_name(font, base, roots, code, names=None, plain=False):
     """Glyphs' name for the character (iishort-cy, Alphatonos), else the base glyph's name and the
-    marks' (adotbelow, acircumflexacute); uniXXXX when taken."""
-    for name in ((names if names is not None else glyph_names()).get(code), base + u"".join(roots)):
+    marks' (adotbelow, acircumflexacute), but for plain (kana: uni304C, as kana fonts name them); uniXXXX
+    when taken."""
+    for name in ((names if names is not None else glyph_names()).get(code), None if plain else base + u"".join(roots)):
         if name and name not in font.names:
             return name
     return u"uni%04X" % code
@@ -397,11 +557,13 @@ class Ink(object):
     """A glyph's ink, in font units: its box, and the center of its top and bottom fifths (where marks
     center), and the right end of its bottom fifth (where an ogonek hangs)."""
 
-    def __init__(self, left, bottom, right, top, top_center=None, bottom_center=None, bottom_right=None, advance=0):
+    def __init__(self, left, bottom, right, top, top_center=None, bottom_center=None, bottom_right=None, advance=0,
+                 top_right=None):
         self.left, self.bottom, self.right, self.top = left, bottom, right, top
         self.top_center = (left + right) / 2.0 if top_center is None else top_center
         self.bottom_center = (left + right) / 2.0 if bottom_center is None else bottom_center
         self.bottom_right = right if bottom_right is None else bottom_right
+        self.top_right = right if top_right is None else top_right  # the right end of its top fifth (d's stem)
         self.advance = advance
 
     @property
@@ -413,9 +575,23 @@ class Ink(object):
         return self.right - self.left
 
 
+ALIAS_ROOTS = dict((alias, root) for root, aliases in MARK_ALIASES.items() for alias in aliases)
+
+
 def mark_key(name):
-    """The root of a mark glyph's name: acutecomb.case and acute are both acute."""
+    """The root of a mark glyph's name: acutecomb.case and acute are both acute; caroncomb.alt is the
+    vertical caron, uni0326 the comma below."""
+    whole = name[:-5] if name.endswith(".case") else name
+    if whole in ALIAS_ROOTS:
+        return ALIAS_ROOTS[whole]
     root = name.split(".")[0]
+    if root in ALIAS_ROOTS:
+        return ALIAS_ROOTS[root]
+    if root.startswith(u"uni") and len(root) == 7:
+        try:
+            return MARKS.get(int(root[3:], 16), root)
+        except ValueError:
+            return root
     return root[:-4] if root.endswith("comb") else root
 
 
@@ -473,7 +649,7 @@ class Placement(object):
             for mark, dx, dy in marks:
                 ink = ink_of(mark)
                 side = mark_side(mark)
-                if ink is None or side in done or side == "right":
+                if ink is None or side in done or side in ("right", "topright", "kana"):
                     continue
                 done.add(side)
                 if side == "above":
@@ -530,14 +706,33 @@ class Placement(object):
         habit_model = self.model_value("side_offset", u"%s %s" % (side, case)) or 0.0
         own = self.sides.get((side, case), [])
         habit = median([o for _, o in own]) if len(own) >= OWN_EXAMPLES else habit_model
+        return habit + self.letter_shift(letter, root, side, case)
+
+    def letter_shift(self, letter, root, side, case):
+        """How far the model's fonts set marks off their habit on this very letter, as a share of its
+        width (over b's bowl, right of l's stem), or 0."""
+        habit_model = self.model_value("side_offset", u"%s %s" % (side, case)) or 0.0
         key = root if root in ("ogonek", "horn") else u"*"
         letter_offset = self.model_value("offset", u"%s %s %s" % (letter, side, key))
-        return habit + ((letter_offset - habit_model) if letter_offset is not None else 0.0)
+        return (letter_offset - habit_model) if letter_offset is not None else 0.0
 
     def height(self, root, case):
         """A mark's usual height in the model, in font units, or None."""
         value = self.model_value("height", u"%s %s" % (root, case), u"%s %s" % (root, other_case(case)))
+        if not value and root == "caronvertical":
+            value = VERTICAL_CARON_HEIGHT
+        if root in KANA_HEIGHT:
+            rows = [row for row in self.model.get("kana", {}).get(root, {}).values() if isinstance(row, list)]
+            value = median([row[2] for row in rows]) or KANA_HEIGHT[root]
         return value * self.upm if value else None
+
+    def kana_place(self, root, code):
+        """(across, up) of a kana's voicing mark: its ink's center from the right end and the top of the
+        letter's ink, in font units, as the corpus's fonts set it on that letter (else on its kana set)."""
+        table = self.model.get("kana", {}).get(root, {})
+        row = table.get(u"%04X" % code) or table.get(kana_set(code))
+        across, up = (row[0], row[1]) if row else KANA_PLACES.get((root, kana_set(code)), (-0.05, -0.04))
+        return across * self.upm, up * self.upm
 
 
 def learnable(code, parts):
@@ -548,11 +743,12 @@ def learnable(code, parts):
     decomposed = unicodedata.normalize("NFD", unichr_(code))
     if len(decomposed) != len(parts) or not decomposed[0].isalpha():
         return False
+    convention = CONVENTIONS.get(code, {})
     for (glyph, _, _), mark in zip(parts[1:], decomposed[1:]):
-        root = MARKS.get(ord(mark))
-        roots = (root, BORROWED.get(root)) + (("commaaccent",) if root == "cedilla" else ())
-        if root is None or mark_key(glyph) not in roots:  # (G, K, L, N, R with a comma below decompose
-            return False  # with a cedilla: Unicode's names for them predate the comma)
+        root = MARKS.get(convention.get(ord(mark), ord(mark)))  # (G, K, L, N, R with a comma below decompose
+        roots = (root, BORROWED.get(root))  # with a cedilla: Unicode's names for them predate the comma)
+        if root is None or mark_key(glyph) not in roots:
+            return False
     return True
 
 
@@ -648,6 +844,20 @@ def layout(recipe, ink_of, placement, letter, gap_share=1.0, stack_share=1.0, sc
             dy = base.top - (box.top - box.bottom) * 0.6 - box.bottom
             parts.extend((g, sx, sy, x + dx, y + dy) for g, sx, sy, x, y in laid)
             top = max(top, box.top + dy)
+            continue
+        if side in ("topright", "kana"):  # beside the stem's top (the vertical caron), or a kana's top right
+            if side == "topright":
+                gx, gy = VERTICAL_CARON.get(letter) or VERTICAL_CARON[None]
+                left_x, top_y = base.top_right + gx * placement.upm, base.top + gy * placement.upm
+            else:
+                across, up = placement.kana_place(mark.root, ord(letter[:1] or u" "))
+                left_x = base.right + across - box.width * scale / 2.0
+                top_y = base.top + up + (box.top - box.bottom) * scale / 2.0
+            for glyph, sx, sy, x, yy in laid:  # scaled about its top left, its box's top left there
+                px = (x - box.left) * scale + left_x
+                py = (yy - box.top) * scale + top_y
+                parts.append((glyph, sx * scale, sy * scale, round(px), round(py)))
+            top = max(top, top_y)
             continue
         stacked = previous[side]
         gap = placement.gap(mark.root, side, case, stacked) * (stack_share if stacked else gap_share)
@@ -779,6 +989,95 @@ def finished(recipe, parts, ink_of):
     if recipe.adjust:
         recipe.notes.append(u"marks placed by hand")
     return adjusted(recipe, parts, ink_of)
+
+
+# ---------------------------------------------------------------------------
+# Centers: snapping a dragged mark, and carrying a placement to related letters
+# ---------------------------------------------------------------------------
+
+SNAP_PIXELS = 5  # a dragged mark's center snaps to its letter's center within this many pixels
+CENTERED = 0.5  # font units: a mark this close to a center is centered on it
+
+
+def letter_centers(ink, x, side):
+    """[(x, label)] of the centers a mark of a side centers on, its letter's ink at x: the ink box's
+    center, and the center of its topmost ink (lowest, for a mark below) where that differs (a, r, G);
+    [] for a mark set beside its letter."""
+    if ink is None or side not in ("above", "below"):
+        return []
+    edge = ink.top_center if side == "above" else ink.bottom_center
+    if abs(edge - ink.center) < CENTERED:
+        return [(x + ink.center, u"center")]
+    return [(x + ink.center, u"box center"), (x + edge, u"top center" if side == "above" else u"bottom center")]
+
+
+def snap(value, targets, tolerance):
+    """(x, label) of the nearest of targets [(x, label)] within tolerance of value, or (None, None)."""
+    best = None
+    for x, label in targets:
+        if abs(x - value) <= tolerance and (best is None or abs(x - value) < abs(best[0] - value)):
+            best = (x, label)
+    return best if best is not None else (None, None)
+
+
+def mark_center(recipe, index, ink_of, placement, metrics=None):
+    """(placed parts, the center across of the recipe's mark index), as it would be built."""
+    checked, notes = recipe.checked, list(recipe.notes)
+    try:
+        parts, _ = place(recipe, ink_of, placement, metrics)
+    finally:
+        recipe.checked, recipe.notes = checked, notes
+    if parts is None:
+        return None, None
+    first, last = mark_ranges(recipe)[index]
+    box = parts_box(parts[first:last], ink_of)
+    return parts, ((box[0] + box[2]) / 2.0 if box else None)
+
+
+def carried_adjust(source, index, target, at, ink_of, placement, metrics=None):
+    """The hand's change of source's mark index, for target's mark at (the same mark: related_marks):
+    its rise and scale as they are; across, a mark the hand centered on a center of its letter (its box's,
+    or its top's) centered on the same center of the target's letter, else the mark's offset from its
+    letter's center carried in font units (centered stays centered on a wider letter), each letter
+    keeping its own shift where fonts set marks off center on it (over b's bowl, right of l's stem). A
+    mark beside its letter, stacked on another, or an ogonek takes the change as it is."""
+    change = list(source.adjust.get(index, [0.0, 0.0, 1.0, 1.0]))
+    mark = source.marks[index]
+    same_side = [m for m in source.marks if m.side == mark.side]
+    if mark.side not in ("above", "below") or mark.root == "ogonek" or same_side.index(mark) or abs(change[0]) < CENTERED:
+        return change
+    parts, center = mark_center(source, index, ink_of, placement, metrics)
+    base_ink = ink_of(source.base)
+    if center is None or base_ink is None:
+        return change
+    letter = unicodedata.normalize("NFD", source.char)[0]
+    case = case_of(source.char)
+    centers = letter_centers(base_ink, parts[0][3], mark.side)
+    kind = next((label for x, label in centers if abs(center - x) <= CENTERED), None)
+    saved = target.adjust.pop(at, None)
+    try:
+        target_parts, target_center = mark_center(target, at, ink_of, placement, metrics)
+    finally:
+        if saved is not None:
+            target.adjust[at] = saved
+    target_ink = ink_of(target.base)
+    if target_center is None or target_ink is None:
+        return change
+    target_letter = unicodedata.normalize("NFD", target.char)[0]
+    target_centers = dict((label, x) for x, label in letter_centers(target_ink, target_parts[0][3], mark.side))
+    edge_label = u"top center" if mark.side == "above" else u"bottom center"
+    if kind is not None:  # centered: on the same center of the target's letter (one center: both are it)
+        wanted = target_centers.get(kind if kind != u"center" else edge_label, target_centers.get(u"center"))
+        if wanted is None:
+            wanted = target_centers.get(u"center")
+    else:
+        edge = dict((label, x) for x, label in centers)
+        source_edge = edge.get(edge_label, edge.get(u"center"))
+        target_edge = target_centers.get(edge_label, target_centers.get(u"center"))
+        shift = placement.letter_shift(letter, mark.root, mark.side, case) * base_ink.width
+        target_shift = placement.letter_shift(target_letter, mark.root, mark.side, case) * target_ink.width
+        wanted = target_edge + target_shift + (center - source_edge - shift)
+    return [round(wanted - target_center, 2), change[1], change[2], change[3]]
 
 
 # ---------------------------------------------------------------------------
@@ -1489,7 +1788,7 @@ class FontLabInk(object):
                 upper, lower = part(top - band, top + 1), part(bottom - 1, bottom + band)
                 self.found[name] = Ink(left, bottom, right, top,
                                        upper.center().x() if upper else None, lower.center().x() if lower else None,
-                                       lower.right() if lower else None, advance)
+                                       lower.right() if lower else None, advance, upper.right() if upper else None)
         return self.found[name]
 
 
@@ -1554,16 +1853,20 @@ def component_parts(layer):
 
 
 HELP = u"""<b>FreeLab Diacritics</b><br>
-Builds the letters with diacritics this font lacks (Latin, Greek, Cyrillic) from its letters and
-marks, as glyphs of components, placing each mark as the font's own accented glyphs place theirs (no
+Builds the letters with diacritics this font lacks (Latin, Greek, Cyrillic, and the voiced kana) from its
+letters and marks, as glyphs of components, placing each mark as the font's own accented glyphs place theirs (no
 anchors needed). Nothing is made until you click <i>Build checked glyphs</i>.<br><br>
 <b>The list</b>: each character that can be built, drawn as it would be, with the glyphs it is
 built from. Capitals take a mark's .case form where the font has one; i and j take their dotless
 forms under a mark above. A mark the font lacks is borrowed (a dot below from the dot accent) or
 drafted from its punctuation, and the list says so. Characters that cannot be built say what the
-font lacks. Double-click a glyph the font has to open it in a <i>Glyph</i> window.<br>
+font lacks (select one to see it in the reference font). Where fonts draw another mark than Unicode's
+decomposition names (Latvian's comma below for a cedilla, the vertical caron of d, t, l, and L), that mark is
+used, and the row says why. Double-click a row to open its glyph (or, not built yet, its letter) in a
+<i>Glyph</i> window.<br>
 <b>The editor</b> (under the list): the selected glyph between its letter and a letter the font has
-with the same base. Click a mark to select it; drag it, or press the arrow keys (<i>Shift</i>: 10 units),
+with the same base. Click a mark to select it; drag it (its center snaps to the letter's center, a guide drawn;
+<i>Alt</i>: no snapping), or press the arrow keys (<i>Shift</i>: 10 units),
 to move it; drag a corner or a side of its frame to scale it (<i>Shift</i> on a corner: in proportion);
 <i>Tab</i> selects the next mark, <i>Backspace</i> puts the selected one back. Your changes stay with the glyph as
 you go down the list, and are built. The dashed lines are the room a 120% line spacing leaves.
@@ -1650,7 +1953,8 @@ SCRIPT_FAMILIES = {"arabic": ("Noto Naskh Arabic", "Noto Sans Arabic", "Segoe UI
                    "thai": ("Noto Sans Thai", "Noto Serif Thai", "Leelawadee UI", "Tahoma"),
                    "lao": ("Noto Sans Lao", "Leelawadee UI"),
                    "khmer": ("Noto Sans Khmer", "Noto Serif Khmer", "Khmer UI", "Leelawadee UI"),
-                   "myanmar": ("Noto Sans Myanmar", "Myanmar Text")}
+                   "myanmar": ("Noto Sans Myanmar", "Myanmar Text"),
+                   "kana": ("Noto Sans JP", "Noto Serif JP", "BIZ UDPGothic", "Yu Gothic", "Meiryo", "MS Gothic")}
 DOTTED_CIRCLE = 0x25CC  # what a mark is drawn on without a letter
 
 
@@ -1698,6 +2002,7 @@ def make_editor(owner):
             self.selected = None  # the index of the selected mark
             self.drag = None
             self.view = None  # (scale, x of the origin, y of the baseline)
+            self.snapped = None  # (x in the editor's units, label) of the center a dragged mark snapped to
 
         # -- geometry --------------------------------------------------------
 
@@ -1822,6 +2127,13 @@ def make_editor(owner):
                     painter.fillPath(path, QtGui.QBrush(color))
                     painter.restore()
                 x += advance
+            if self.snapped is not None and self.drag is not None:  # the center the dragged mark snapped to
+                guide = QtGui.QColor(highlight)
+                guide.setAlpha(170)
+                sx = x0 + self.snapped[0] * scale
+                painter.setPen(QtGui.QPen(guide, 1))
+                painter.drawLine(QtCore.QPointF(sx, 0), QtCore.QPointF(sx, _property(self, "rect").height()))
+                painter.drawText(QtCore.QPointF(sx + 4, 12), self.snapped[1])
             boxes = dict(self.mark_boxes())
             if self.selected in boxes:
                 left, top, right, bottom = self.screen_box(boxes[self.selected])
@@ -1851,7 +2163,9 @@ def make_editor(owner):
                     return
                 if kind == "mark":
                     self.select(what)
-                    self.drag = ("move", pos.x(), pos.y(), list(owner.adjust_of(what)), None)
+                    box = dict(self.mark_boxes()).get(what)
+                    center = (box[0] + box[2]) / 2.0 if box else None
+                    self.drag = ("move", pos.x(), pos.y(), list(owner.adjust_of(what)), center)
                 else:
                     box = dict(self.mark_boxes())[self.selected]
                     self.drag = ("scale", pos.x(), pos.y(), list(owner.adjust_of(self.selected)), (what, box))
@@ -1886,6 +2200,16 @@ def make_editor(owner):
                             dy = 0.0
                         else:
                             dx = 0.0
+                    alt = bool(int(event.modifiers()) & int(QtCore.Qt.AltModifier))
+                    self.snapped = None
+                    targets = getattr(owner, "snap_targets", None)
+                    if extra is not None and targets is not None and not alt and not (shift and dx == 0.0):
+                        origin = self.origin_of("new") or 0.0
+                        found = targets(self.selected)
+                        at, label = snap(extra + dx, [(x + origin, text) for x, text in found], SNAP_PIXELS / scale)
+                        if at is not None:  # its center on the letter's, the guide drawn while it holds
+                            dx += at - (extra + dx)
+                            self.snapped = (at, label)
                     owner.set_adjust(self.selected, [start[0] + dx, start[1] + dy, start[2], start[3]], final=False)
                 else:
                     handle, box = extra
@@ -1922,6 +2246,21 @@ def make_editor(owner):
             except Exception:
                 pass
             self.drag = None
+            if self.snapped is not None:
+                self.snapped = None
+                self.update()
+
+        def mouseDoubleClickEvent(self, event):
+            """The glyph opened in a Glyph window (Diacritics: the built glyph, else its letter)."""
+            try:
+                found = self.hit(event.pos().x(), event.pos().y())
+                if event.button() == QtCore.Qt.LeftButton and (found is None or found[0] != "glyph"):  # (not a neighbor)
+                    self.drag = None
+                    opened = getattr(owner, "editor_double_clicked", None) or getattr(owner, "show_in_glyph_window", None)
+                    if opened is not None:
+                        opened()
+            except Exception:
+                pass
 
         def keyPressEvent(self, event):
             try:
@@ -2686,7 +3025,8 @@ class AccentsDialog(object):
         ak.grid_lines(self.tree)
         self.tree.setWhatsThis(u"The letters with diacritics this font lacks: those that can be built (checked ones "
                                u"are built), and, at the end, those that need a mark the font does not have. "
-                               u"Double-click a glyph the font has to open it in a <i>Glyph</i> window.")
+                               u"Select a row to see its letter in the reference font. Double-click a row to open its "
+                               u"glyph (or, not built yet, its letter) in a <i>Glyph</i> window.")
         layout.addWidget(self.tree, 3)
 
         lower = QtGui.QHBoxLayout()
@@ -2717,9 +3057,13 @@ class AccentsDialog(object):
         self.editor = make_editor(self)
         self.editor.setProperty(ak.LEAVE_ALONE_PROP, True)  # dark mode leaves what it draws alone
         self.editor.setWhatsThis(u"The selected glyph as it would be built, between its letter and a letter the font "
-                                 u"has with the same base. Click a mark to select it, drag it or press the arrow keys "
+                                 u"has with the same base. Click a mark to select it, drag it (its center snaps to "
+                                 u"the letter's box center or top center, a guide drawn; <i>Alt</i>: no snapping) or "
+                                 u"press the arrow keys "
                                  u"to move it, drag its frame to scale it; <i>Tab</i> selects the next mark, <i>Backspace</i> "
-                                 u"puts it back. Click the letter beside it to open the pair in <i>Auto Kerning</i>.")
+                                 u"puts it back. Click the letter beside it to open the pair in <i>Auto Kerning</i>; "
+                                 u"double-click the glyph to open it (or, not built yet, its letter) in a <i>Glyph</i> "
+                                 u"window.")
         editing.addWidget(self.editor, 1)
         hint_row = QtGui.QHBoxLayout()
         self.hint = QtGui.QLabel(u"Click a diacritic to move or scale it.")
@@ -2732,7 +3076,11 @@ class AccentsDialog(object):
         self.propagate_button.setWhatsThis(u"Moves and scales the same diacritic on the related letters as on this "
                                            u"one: the same mark, on the same side and at the same place in its "
                                            u"stack, over letters of the same case (a circumflex raised on <i>C</i>: "
-                                           u"every capital with a circumflex). Letters where the mark then comes "
+                                           u"every capital with a circumflex). Across, a mark centered by hand "
+                                           u"(snapped to a center) is centered on each letter; else its offset from "
+                                           u"the letter's center is carried in units, each letter keeping where fonts "
+                                           u"set marks on it (right of <i>l</i>'s stem). Grayed once applied, until "
+                                           u"the mark is moved again. Letters where the mark then comes "
                                            u"within %d units of its letter or another mark are named in the log and "
                                            u"in their row, to look at; <i>Reset diacritics</i> on a row puts it back."
                                            % round(TOUCH_SHARE * 1000))
@@ -2752,8 +3100,13 @@ class AccentsDialog(object):
         self.build_button = QtGui.QPushButton("Build checked glyphs")
         self.build_button.setWhatsThis(u"Adds each checked glyph to the font, with its Unicode value, built from its "
                                        u"letter and marks as components, in every master. <i>Edit &gt; Undo</i> takes it back.")
+        self.kerning_button = QtGui.QPushButton(u"Check kerning of these glyphs")
+        self.kerning_button.setWhatsThis(u"Opens <i>Kerning Check</i> on the pairs with the glyphs built here (since "
+                                         u"this dialog opened): collisions their marks may cause, kerning to clean "
+                                         u"up.")
         self.close_button = QtGui.QPushButton("Close")
-        for button in (self.all_button, self.none_button, self.restore_button, self.glyph_window_button):
+        for button in (self.all_button, self.none_button, self.restore_button, self.glyph_window_button,
+                       self.kerning_button):
             buttons.addWidget(button)
         buttons.addStretch(1)
         buttons.addWidget(self.build_button)
@@ -2776,6 +3129,7 @@ class AccentsDialog(object):
         self.none_button.connect("clicked()", lambda: self.check_all(False))
         self.restore_button.connect("clicked()", self.restore)
         self.glyph_window_button.connect("clicked()", self.show_in_glyph_window)
+        self.kerning_button.connect("clicked()", self.check_kerning)
         self.reset_marks_button.connect("clicked()", self.reset_marks)
         self.propagate_button.connect("clicked()", self.propagate)
         self.build_button.connect("clicked()", self.build)
@@ -2785,6 +3139,7 @@ class AccentsDialog(object):
         self.tree.connect("itemDoubleClicked(QTreeWidgetItem*,int)", lambda item, column: self.show_in_glyph_window())
         self.reference_font.connect("currentFontChanged(QFont)", lambda font: self.reference_changed())
         self.package = self.master = None
+        self.built_names, self.built_font = [], None  # the glyphs built here, and their font's key
         self.recipes, self.inks, self.placements = [], {}, {}
         self.first_checks, self.seen_history, self.buttons_due, self.busy = {}, None, False, False
         self.settings = read_settings(ak)
@@ -2796,6 +3151,11 @@ class AccentsDialog(object):
         self.model = load_model()
         ak.add_tools_button(dialog, "Diacritics", getattr(self, "log", None))  # (the other font tools, a click away)
         ak.plain_buttons(dialog)
+        try:  # the check boxes drawn plain to see in either palette (the lists' pictures stay unmapped)
+            fc = ak.load_sibling("freelab_feature_code.py", "freelab_feature_code")
+            self.check_watcher = fc.watch_check_boxes(dialog, [self.tree, self.anchors.tree])
+        except Exception:
+            self.check_watcher = None
         self.history_timer = ak.watch_history(self)
         self.flagging = [ak.flag_menu(self.tree, self, self.flag_names, self.row_names),
                          ak.flag_menu(self.anchors.tree, self, lambda: [self.anchors.selected().name]
@@ -2835,7 +3195,7 @@ class AccentsDialog(object):
         glyphs = list(package.fgPackage.glyphs)
         empty = []
         for g in glyphs:
-            if g.unicode and 0xC0 <= g.unicode < 0x1F00:  # (only letters with diacritics are looked at)
+            if g.unicode and (0xC0 <= g.unicode < 0x2000 or 0x3040 <= g.unicode < 0x3100):  # (only those built here)
                 glyph = package.findName(g.name)
                 if glyph is not None and is_empty(glyph):
                     empty.append(g.name)
@@ -2880,7 +3240,7 @@ class AccentsDialog(object):
 
     def run(self):
         QtCore, QtGui = _qt()
-        kept = dict((r.char, (r.checked, dict(r.adjust))) for r in self.recipes)
+        kept = dict((r.char, (r.checked, dict(r.adjust), r.applied)) for r in self.recipes)
         same_font = self.package is not None
         self.tree.clear()
         self.recipes = []
@@ -2895,11 +3255,10 @@ class AccentsDialog(object):
         QtGui.QApplication.processEvents()
         try:
             font = self.font(package)
-            present = set(script_of(unichr_(code)) for code in font.by_code
-                          if 0x0370 <= code < 0x0530 and unicodedata.category(unichr_(code)).startswith(u"L"))
-            wanted = [ch for ch in self.characters() if script_of(ch) == "latin" or script_of(ch) in present]
+            present = scripts_present(font.by_code)
+            wanted = [ch for ch in self.characters() if script_of(ch) not in LISTED_SCRIPTS or script_of(ch) in present]
             self.absent = sorted(set(script_of(ch).capitalize() for ch in self.characters()
-                                     if script_of(ch) != "latin" and script_of(ch) not in present))
+                                     if script_of(ch) in LISTED_SCRIPTS and script_of(ch) not in present))
             self.recipes = plan(font, wanted)
             self.inks, self.placements = {}, {}
             self.inks[self.master], self.placements[self.master] = self.learn(package, self.master)
@@ -2912,7 +3271,7 @@ class AccentsDialog(object):
         if same_font:  # the hand's changes and checks carry over (an undo, another set)
             for r in self.recipes:
                 if r.char in kept:
-                    r.checked, r.adjust = kept[r.char][0], kept[r.char][1]
+                    r.checked, r.adjust, r.applied = kept[r.char]
             self.fill()
         self.seen_history = self.ak.history_mark(package)
         self.choose_reference()
@@ -2924,6 +3283,10 @@ class AccentsDialog(object):
         self.tree.clear()
         bold = QtGui.QFont(self.tree.font)
         bold.setBold(True)
+        try:
+            dimmed = QtGui.QBrush(self.dialog.palette.color(QtGui.QPalette.Disabled, QtGui.QPalette.Text))
+        except Exception:
+            dimmed = None
         buildable = [index for index, r in enumerate(self.recipes) if not r.missing]
         lacking = [index for index, r in enumerate(self.recipes) if r.missing]
         groups = ((u"Can be built", buildable), (u"Need a mark or letter the font lacks", lacking))
@@ -2941,9 +3304,12 @@ class AccentsDialog(object):
                 item.setData(0, QtCore.Qt.UserRole, index)
                 item.setFont(0, bold)
                 item.setToolTip(0, u"U+%04X %s" % (r.code, unicodedata.name(r.char, u"")))
-                if r.missing:
+                if r.missing:  # selectable (its reference letter shown), not checkable, its text dimmed
                     item.setText(2, r.describe() + u".")
-                    item.setFlags(QtCore.Qt.ItemIsSelectable)
+                    item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable)
+                    if dimmed is not None:
+                        for column in range(len(self.COLUMNS)):
+                            item.setForeground(column, dimmed)
                 else:
                     item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsUserCheckable)
                     self.refresh_item(item, r, first=True)
@@ -3041,10 +3407,13 @@ class AccentsDialog(object):
         ak.enable(self.restore_button, any(r.adjust or self.first_checks.get(r.char, r.checked) != r.checked
                                            for r in self.recipes))
         r = self.selected()
-        ak.enable(self.glyph_window_button, r is not None and self.in_font(r))
+        ak.enable(self.glyph_window_button, r is not None and self.glyph_to_show(r) is not None)
         ak.enable(self.reset_marks_button, r is not None and bool(r.adjust))
         targets = self.propagation_targets(r) if r is not None and r.adjust else []
-        ak.enable(self.propagate_button, bool(targets))
+        ak.enable(self.propagate_button, bool(targets) and r.applied != r.adjust)  # (applied: not again until moved)
+        built = self.kerning_names()
+        ak.enable(self.kerning_button, bool(built))
+        self.kerning_button.setText(u"Check kerning of this glyph" if len(built) == 1 else u"Check kerning of these glyphs")
         self.propagate_button.setText(u"Apply to %s" % counted(len(set(id(t) for t, _, _ in targets)), u"related letter")
                                       if targets else u"Apply to related letters")
         self.reset_marks_button.setText(u"Reset diacritic" if r is not None and len(r.marks) == 1 else u"Reset diacritics")
@@ -3052,7 +3421,7 @@ class AccentsDialog(object):
     def restore(self):
         """Every check and every mark as the list first came."""
         for r in self.recipes:
-            r.adjust = {}
+            r.adjust, r.applied = {}, None
             r.checked = self.first_checks.get(r.char, r.checked)
         self.fill()
         self.select()
@@ -3137,6 +3506,15 @@ class AccentsDialog(object):
         r = self.selected()
         return list(r.adjust.get(index, [0.0, 0.0, 1.0, 1.0])) if r is not None else [0.0, 0.0, 1.0, 1.0]
 
+    def snap_targets(self, index):
+        """[(x, label)] of the centers the selected glyph's mark index snaps to while dragged, in the glyph's
+        units: its letter's ink box center and top (bottom) center."""
+        r, scene = self.selected(), self.editor.scene
+        if r is None or scene is None or index is None or index >= len(r.marks):
+            return []
+        base = scene["parts"][0]
+        return letter_centers(scene["ink"](base[0]), base[3], r.marks[index].side)
+
     def set_adjust(self, index, change, final):
         """A mark moved or scaled by hand: drawn at once; its row's picture redrawn when done."""
         r = self.selected()
@@ -3189,11 +3567,19 @@ class AccentsDialog(object):
         targets = self.propagation_targets(r)
         if not targets:
             return
+        ink, placement = self.inks.get(self.master), self.placements.get(self.master)
+        metrics = self.metrics(self.package)
         touched, close = [], []
         for other, at, change in targets:
-            other.adjust[at] = list(change)
+            index = next((i for i, c in sorted(r.adjust.items()) if c is change), None)
+            try:  # its offset from its letter's center, not the change as it is (centered stays centered)
+                other.adjust[at] = carried_adjust(r, index, other, at, ink, placement, metrics) \
+                    if index is not None and ink is not None and placement is not None else list(change)
+            except Exception:
+                other.adjust[at] = list(change)
             if other not in touched:
                 touched.append(other)
+        r.applied = dict((key, list(value)) for key, value in r.adjust.items())
         for other in touched:
             other.touches = self.closeness(other)
             if other.touches:
@@ -3255,7 +3641,7 @@ class AccentsDialog(object):
         r = self.selected()
         if r is None:
             return
-        r.adjust = {}
+        r.adjust, r.applied = {}, None
         r.touches = u""
         self.select()
         item = self.item_of(r)
@@ -3398,18 +3784,65 @@ class AccentsDialog(object):
 
     # -- the Glyph window ----------------------------------------------------------
 
-    def show_in_glyph_window(self):
-        r = self.selected()
+    def glyph_to_show(self, r):
+        """The glyph a row opens in a Glyph window: the built one, else its letter (or None)."""
         if r is None or self.package is None:
+            return None
+        if self.in_font(r):
+            return r.name
+        try:
+            if r.base:
+                return r.base if self.package.findName(r.base) is not None else None
+            glyph = self.package.findUnicode(ord(unicodedata.normalize("NFD", r.char)[0]))  # (a row that cannot be built)
+            return glyph.name if glyph is not None and not glyph.isNull else None
+        except Exception:
+            return None
+
+    def show_in_glyph_window(self):
+        """The selected row's glyph between H's, n's, and o's in a Glyph window: the built glyph, else
+        its letter."""
+        r = self.selected()
+        name = self.glyph_to_show(r)
+        if name is None:
             return
-        if not self.in_font(r):
-            self.log.add(u"%s is not in the font yet: build it first." % self.ak.b(r.char), "warning")
-            return
-        contexts = self.ak.proof_contexts(self.package, [r.name])
-        text = u"/space".join(u"/%s/%s/%s/%s/%s" % (c, c, r.name, c, c) for c in contexts)
+        if name != r.name:
+            self.log.add(u"%s is not in the font yet: its letter %s opened instead." % (self.ak.b(r.char),
+                                                                                      self.ak.b(name)))
+        contexts = self.ak.proof_contexts(self.package, [name])
+        text = u"/space".join(u"/%s/%s/%s/%s/%s" % (c, c, name, c, c) for c in contexts)
         error = self.ak.show_in_glyph_window(self.fontlab, text)
         if error:
             self.log.add(u"FontLab did not open the glyph: %s" % self.ak.html(error), "error")
+
+    def editor_double_clicked(self):
+        self.show_in_glyph_window()
+
+    # -- Kerning Check on the glyphs built here ------------------------------------
+
+    def kerning_names(self):
+        """The glyphs built here that the font (the same one) still has."""
+        if self.package is None or not self.built_names:
+            return []
+        try:
+            if self.ak.font_key(self.package) != self.built_font:
+                return []
+            return [name for name in self.built_names if self.package.findName(name) is not None]
+        except Exception:
+            return []
+
+    def check_kerning(self):
+        """Kerning Check, its lists limited to the pairs with the glyphs built here."""
+        names = self.kerning_names()
+        if not names:
+            return
+        try:
+            module = self.ak.load_sibling("freelab_kerning_check.py", "freelab_kerning_check")
+            try:
+                module.main(glyphs=names, reason=u"Diacritics built")
+            except TypeError:  # (a Kerning Check that takes no glyphs: all its pairs)
+                module.main()
+        except Exception as exc:
+            self.log.add(u"<i>Kerning Check</i> did not open: %s" % self.ak.html(exc), "error")
 
     # -- building -----------------------------------------------------------------
 
@@ -3482,15 +3915,22 @@ class AccentsDialog(object):
                     package.findName(r.name).fgGlyph.unicode = r.code
                 touched.append(glyph)
                 made.append(r.char)
+                key = self.ak.font_key(package)
+                if self.built_font != key:
+                    self.built_names, self.built_font = [], key
+                if r.name not in self.built_names:
+                    self.built_names.append(r.name)
         except Exception as exc:  # what was made stays made, and is reported
             error = exc
         self.ak.notify_changed(fontlab, package, u"FreeLab Diacritics", touched)
         b = self.ak.b
         if made:
             one = len(made) == 1
-            self.log.add(u"Built %s: %s. %s at the end of the font; <i>Edit &gt; Undo</i> takes %s back." % (
-                b(counted(len(made), u"glyph")), self.ak.html(u"".join(made)), u"It is" if one else u"They are",
-                u"it" if one else u"them"), "done")
+            self.log.add(u"Built %s: %s. %s at the end of the font; <i>Edit &gt; Undo</i> takes %s back. "
+                         u"<i>Check kerning of %s</i> looks at %s pairs." % (
+                             b(counted(len(made), u"glyph")), self.ak.html(u"".join(made)), u"It is" if one else u"They are",
+                             u"it" if one else u"them", u"this glyph" if len(self.built_names) == 1 else u"these glyphs",
+                             u"its" if len(self.built_names) == 1 else u"their"), "done")
         else:
             self.log.add(u"Built none.")
         if skipped:

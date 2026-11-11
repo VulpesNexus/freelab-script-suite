@@ -127,7 +127,7 @@ def references(kerning, entry, left, right, variant_of):
     return found
 
 
-def find_collisions(kerning, closest_at, minimum, relative=True, progress=None, variant_of=None):
+def find_collisions(kerning, closest_at, minimum, relative=True, progress=None, variant_of=None, only=None):
     """Kerned pairs (tighter than zero) whose ink comes too close, closest first. closest_at(left,
     right, value) gives the narrowest gap between the pair's ink at that kerning, in font units
     (below zero where they overlap), or None where it cannot tell.
@@ -139,10 +139,10 @@ def find_collisions(kerning, closest_at, minimum, relative=True, progress=None, 
     glyph (a class of math signs) are not compared. variant_of(glyph, key) says whether a glyph is
     built on another (by default: its name starts with the other's).
     Not relative: a pair is listed when its ink comes closer than minimum units; its fix keeps them.
+    only: glyph names; when given, only the pairs with one of them are measured (see tight_pairs).
     progress(done, total) may return False to stop."""
     variant_of = variant_of or (lambda glyph, key: glyph.startswith(key))
-    plain = kerning.plain or {}
-    tight = sorted((pair, round_units(value)) for pair, value in plain.items() if value is not None and value < 0)
+    tight = tight_pairs(kerning, only)
     found = []
     for done, ((left, right), value) in enumerate(tight):
         if progress is not None and done % PROGRESS_EVERY == 0 and progress(done, len(tight)) is False:
@@ -175,6 +175,68 @@ def find_collisions(kerning, closest_at, minimum, relative=True, progress=None, 
         found.sort(key=lambda c: (c.gap - c.reference_gap, c.left, c.right))
     else:
         found.sort(key=lambda c: (c.gap, c.left, c.right))
+    return found
+
+
+def tight_pairs(kerning, only=None):
+    """[(glyph pair, value)] of the pairs kerned tighter than zero, kerning applied, sorted; only those
+    with a glyph of only (names) when given."""
+    plain = kerning.plain or {}
+    return sorted((pair, round_units(value)) for pair, value in plain.items() if value is not None and value < 0
+                  and (only is None or pair[0] in only or pair[1] in only))
+
+
+def entry_glyphs(kerning, entry):
+    """The glyph names an entry names or kerns: a glyph side's name, a class side's members."""
+    found = set()
+    for name, is_class in entry:
+        if is_class:
+            found.update(kerning.members.get(name, []))
+        else:
+            found.add(name)
+    return found
+
+
+def involves(kerning, entry, only):
+    """Whether an entry kerns (or names) one of the glyphs of only; True when only is None."""
+    return only is None or bool(entry_glyphs(kerning, entry) & set(only))
+
+
+def limited_cleanup(kerning, found, only):
+    """The cleanup findings whose entries kern or name a glyph of only (all of them when only is None).
+    The entries are judged with the whole kerning (find_cleanup), then limited: an entry is listed the
+    same, limited or not."""
+    return [c for c in found if involves(kerning, c.entry, only)]
+
+
+LIMIT_SHOWN = 24  # glyphs named in the line saying the lists are limited; the others stand as an ellipsis
+
+
+def limit_line(texts, reason=None, shown=LIMIT_SHOWN):
+    """The line over the lists while they are limited to some glyphs: "Pairs with the 12 glyphs
+    Diacritics built: ..." (reason: what the caller did, "Diacritics built"), or "Pairs with these 12
+    glyphs: ..."; texts are the glyphs' characters or names."""
+    count = len(texts)
+    listed = u" ".join(texts[:shown]) + (u" \N{HORIZONTAL ELLIPSIS}" if count > shown else u"")
+    if reason:
+        what = (u"the glyph %s" % reason) if count == 1 else (u"the %d glyphs %s" % (count, reason))
+    else:
+        what = u"this glyph" if count == 1 else u"these %d glyphs" % count
+    return u"Pairs with %s: %s" % (what, listed)
+
+
+def glyph_names(glyphs):
+    """Glyph names from what a caller hands over: names, or glyphs (anything with a name)."""
+    found = []
+    for glyph in glyphs or ():
+        name = getattr(glyph, "name", glyph)
+        if name is None:
+            continue
+        if isinstance(name, bytes):
+            name = name.decode("utf-8", "replace")
+        name = u"%s" % name
+        if name and name not in found:
+            found.append(name)
     return found
 
 
@@ -248,13 +310,15 @@ def value_without(kerning, entry, left, right):
 
 
 class MasterDifference(object):
-    def __init__(self, kind, subject, values, reason):
+    def __init__(self, kind, subject, values, reason, entry=None):
         self.kind, self.subject, self.values, self.reason = kind, subject, values, reason  # values: [(master, text)]
+        self.entry = entry  # the entry, or the class's name
 
 
-def compare_masters(kernings, tolerance=SIGN_TOLERANCE):
+def compare_masters(kernings, tolerance=SIGN_TOLERANCE, only=None):
     """[(master, kerning)] compared: entries kerned in some masters only, entries tightening in one
-    master and loosening in another, and classes whose members differ."""
+    master and loosening in another, and classes whose members differ. only: glyph names; when given,
+    only the entries kerning one of them (in any master) and the classes holding one."""
     masters = [master for master, _ in kernings]
     found = []
     if len(kernings) < 2:
@@ -263,6 +327,8 @@ def compare_masters(kernings, tolerance=SIGN_TOLERANCE):
     for _, kerning in kernings:
         entries |= set(kerning.entries)
     describe = kernings[0][1].describe
+    if only is not None:
+        entries = set(entry for entry in entries if any(involves(k, entry, only) for _, k in kernings))
     for entry in sorted(entries):
         values = [(master, round_units(k.values[entry]) if entry in k.entries else None) for master, k in kernings]
         present = [master for master, value in values if value is not None]
@@ -270,19 +336,22 @@ def compare_masters(kernings, tolerance=SIGN_TOLERANCE):
         shown = [(master, u"\N{EN DASH}" if value is None else u"%d" % value) for master, value in values]
         if len(present) < len(masters):
             missing = [master for master in masters if master not in present]
-            found.append(MasterDifference("missing", describe(entry), shown, u"not kerned in %s" % u", ".join(missing)))
+            found.append(MasterDifference("missing", describe(entry), shown, u"not kerned in %s" % u", ".join(missing),
+                                          entry))
         elif min(known) < -tolerance and max(known) > tolerance:
             found.append(MasterDifference("sign", describe(entry), shown,
                                           u"tightens in one master, loosens in another: an instance between them "
-                                          u"may collide"))
+                                          u"may collide", entry))
     names = set()
     for _, kerning in kernings:
         names |= set(kerning.classes)
     for name in sorted(names):
         sets = [(master, frozenset(k.members.get(name, [])) if name in k.classes else None) for master, k in kernings]
+        if only is not None and not any(members and members & set(only) for _, members in sets):
+            continue
         if len(set(members for _, members in sets)) > 1:
             shown = [(master, u"\N{EN DASH}" if members is None else u" ".join(sorted(members))) for master, members in sets]
-            found.append(MasterDifference("class", u"class %s" % name, shown, u"its members differ between masters"))
+            found.append(MasterDifference("class", u"class %s" % name, shown, u"its members differ between masters", name))
     return found
 
 
@@ -357,6 +426,16 @@ class InkDistances(object):
         return None if gap > 1e8 else gap * self.units_per_pixel
 
 
+ACTIONS = {"collisions": (u"Write checked fixes", u"Write %s", (u"checked fix", u"checked fixes")),
+           "cleanup": (u"Clean up checked entries", u"Clean up %s", (u"checked entry", u"checked entries"))}
+
+
+def action_text(key, count):
+    """A list's button, with the count of its checked rows: "Clean up 3 checked entries"."""
+    none, some, nouns = ACTIONS[key]
+    return some % counted(count, *nouns) if count else none
+
+
 HELP = u"""<b>FreeLab Kerning Check</b><br>
 Three lists for the current font's kerning. Nothing changes until you click a list's button.<br><br>
 <b>Collisions</b>: kerned pairs whose ink comes closer than the distance you set, at the kerning
@@ -370,9 +449,13 @@ values smaller than the size you set (unchecked: look at them first).<br>
 <b>Masters</b>: entries some masters kern and others do not, entries tightening in one master and
 loosening in another, and classes whose members differ between masters (a font with one master has
 nothing to compare).<br><br>
+<b>Opened from another script</b> (<i>Diacritics</i> after building or moving marks, <i>Auto Spacing</i>
+after spacing): the lists hold only the pairs and entries with the glyphs it changed, as the line over
+them says; <i>Show all</i> lists the whole font's.<br><br>
 Each list is checked as its tab is first shown, and again after an undo or an edit in FontLab.
 Double-click a row's pair (or select it and click <i>Show in Glyph window</i>) to look at it with
-FontLab's own tools. <i>Restore suggestions</i> puts a list's checks back as it first came.
+FontLab's own tools. <i>Check all</i> and <i>Check none</i> check or uncheck a whole list;
+<i>Restore suggestions</i> puts its checks back as it first came.
 Click this help's <i>?</i> button, then any control, for what it does."""
 
 
@@ -399,13 +482,17 @@ class Tab(object):
         self.layout.addLayout(self.buttons)
         self.action = QtGui.QPushButton(action) if action else None
         self.restore = QtGui.QPushButton("Restore suggestions") if action else None
+        self.check_all = QtGui.QPushButton("Check all") if action else None
+        self.check_none = QtGui.QPushButton("Check none") if action else None
         if self.restore is not None:
             self.restore.setWhatsThis(u"Puts this list's checks back as it first came.")
+            self.check_all.setWhatsThis(u"Checks every row of this list.")
+            self.check_none.setWhatsThis(u"Unchecks every row of this list.")
         self.findings, self.first_checks = [], []
 
 
 class KerningCheckDialog(object):
-    def __init__(self):
+    def __init__(self, glyphs=None, reason=None):
         QtCore, QtGui = _qt()
         import fontlab
         self.fontlab = fontlab
@@ -419,6 +506,25 @@ class KerningCheckDialog(object):
         self.font_label = self.ak.status_label()
         self.font_label.setWordWrap(True)
         layout.addWidget(self.font_label)
+        # The lists limited to some glyphs (another script's, after it changed them), and a way out
+        names = glyph_names(glyphs)
+        self.only, self.only_reason = (set(names) if names else None), reason
+        self.only_order = names
+        limit_row = QtGui.QHBoxLayout()
+        self.limit_label = QtGui.QLabel(u"")
+        self.ak.rich(self.limit_label)
+        self.limit_label.setWordWrap(True)
+        self.limit_label.setWhatsThis(u"The lists show only the pairs and entries with these glyphs: those another "
+                                      u"script just changed. <i>Show all</i> lists the whole font's.")
+        self.show_all_button = QtGui.QPushButton("Show all")
+        self.show_all_button.setWhatsThis(u"Lists every pair and entry of the font again, not only those with these glyphs.")
+        limit_row.addWidget(self.limit_label, 1)
+        limit_row.addWidget(self.show_all_button)
+        self.limit_widget = QtGui.QWidget()
+        self.limit_widget.setLayout(limit_row)
+        limit_row.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.limit_widget)
+        self.limit_widget.setVisible(False)
         self.log = self.ak.Log()
         self.seen_history, self.stale, self.buttons_due = None, set(TABS), False
         # A tab bar over plain pages: a QTabWidget's themed page drew its buttons with light frames in dark mode
@@ -447,7 +553,7 @@ class KerningCheckDialog(object):
                                           self.units_scale)
 
         self.collisions = Tab(QtGui, ("Pair", "Kerning", "Distance", "Fix", "Set by", "Compared with"),
-                              "Write checked fixes", self.ak.status_label)
+                              action_text("collisions", 0), self.ak.status_label)
         tab = self.collisions
         tab.settings.addWidget(QtGui.QLabel("List"))
         self.pair_set = QtGui.QComboBox()
@@ -487,7 +593,7 @@ class KerningCheckDialog(object):
         tab.action.setWhatsThis(u"Writes each checked pair's fix as a pair of its own (the class it takes its value "
                                 u"from kerns its other glyphs as before).")
 
-        self.cleanup = Tab(QtGui, ("Entry", "Value", "Why"), "Remove checked entries", self.ak.status_label)
+        self.cleanup = Tab(QtGui, ("Entry", "Value", "Why"), action_text("cleanup", 0), self.ak.status_label)
         tab = self.cleanup
         tab.settings.addWidget(QtGui.QLabel("Values smaller than"))
         self.tiny = QtGui.QSpinBox()
@@ -501,7 +607,7 @@ class KerningCheckDialog(object):
         tab.settings.addStretch(1)
         tab.tree.setWhatsThis(u"Entries that change nothing or name what is gone (checked), and tiny values "
                               u"(unchecked).")
-        tab.action.setWhatsThis(u"Removes the checked entries from the current master.")
+        tab.action.setWhatsThis(u"Cleans up: removes the checked entries from the current master.")
 
         self.masters = Tab(QtGui, ("Entry or class", "Values", "Why"), None, self.ak.status_label)
         tab = self.masters
@@ -514,11 +620,12 @@ class KerningCheckDialog(object):
         for tab, label in ((self.collisions, "Collisions"), (self.cleanup, "Cleanup"), (self.masters, "Masters")):
             self.ak.grid_lines(tab.tree)
             if tab.action is not None:
-                tab.buttons.addWidget(tab.restore)
+                for button in (tab.check_all, tab.check_none, tab.restore):
+                    tab.buttons.addWidget(button)
+                    button.setEnabled(False)
                 tab.buttons.addStretch(1)
                 tab.buttons.addWidget(tab.action)
                 tab.action.setEnabled(False)
-                tab.restore.setEnabled(False)
             self.tabs.addTab(label)
             self.pages.addWidget(tab.widget)
         layout.addWidget(self.log.widget)
@@ -545,6 +652,9 @@ class KerningCheckDialog(object):
             tab.tree.connect("itemDoubleClicked(QTreeWidgetItem*,int)", self.double_clicked)
             if tab.restore is not None:
                 tab.restore.connect("clicked()", lambda tab=tab: self.restore(tab))
+                tab.check_all.connect("clicked()", lambda tab=tab: self.check_every(tab, True))
+                tab.check_none.connect("clicked()", lambda tab=tab: self.check_every(tab, False))
+        self.show_all_button.connect("clicked()", self.show_all)
         self.tabs.connect("currentChanged(int)", self.switch_page)
         self.close_button.connect("clicked()", dialog.close)
         self.package = self.master = None
@@ -552,6 +662,7 @@ class KerningCheckDialog(object):
         self.ak.add_tools_button(dialog, "Kerning Check", getattr(self, "log", None))  # (the other font tools, a click away)
         self.ak.plain_buttons(dialog)
         self.read_font()
+        self.show_limit()
         self.history_timer = self.ak.watch_history(self)
         self.flagging = [self.ak.flag_menu(tab.tree, self, lambda: list(self.selected_pair() or []),
                                            (lambda tab: lambda item: self.row_names(tab, item))(tab))
@@ -616,6 +727,42 @@ class KerningCheckDialog(object):
     def after_writing(self):
         self.ak.notify_changed(self.fontlab, self.package, u"FreeLab Kerning Check")
 
+    # -- the lists limited to some glyphs ------------------------------------
+
+    def show_limit(self):
+        """The line over the lists while they are limited to some glyphs, with Show all; hidden when not."""
+        try:
+            if self.only is None:
+                self.limit_widget.setVisible(False)
+                return
+            texts = [glyph_text(self.package, name) if self.package is not None else name for name in self.only_order]
+            self.limit_label.setText(self.ak.html(limit_line(texts, self.only_reason)))
+            self.limit_widget.setVisible(True)
+        except Exception:
+            pass  # (the line is a courtesy: the lists stay limited, and Show all still works)
+
+    def limit_to(self, glyphs, reason=None):
+        """The lists limited to the pairs and entries with these glyphs (None: every one), checked again."""
+        names = glyph_names(glyphs)
+        self.only, self.only_order, self.only_reason = (set(names) if names else None), names, reason
+        self.show_limit()
+        self.stale = set(TABS)
+        if self.package is not None or self.read_font():
+            self.check(TABS[self.tabs.currentIndex])
+
+    def show_all(self):
+        """Show all: the limit dropped, every pair and entry of the font listed again."""
+        if self.only is None:
+            return
+        self.limit_to(None)
+        self.log.add(u"Every pair and entry of the font listed again, not only those with the glyphs given.")
+
+    def limited(self):
+        """" with these 12 glyphs", for a status line while the lists are limited; else nothing."""
+        if self.only is None:
+            return u""
+        return u" with %s" % (u"this glyph" if len(self.only) == 1 else u"these %d glyphs" % len(self.only))
+
     # -- buttons, the History, the tabs -------------------------------------
 
     def tab_of(self, key):
@@ -634,10 +781,19 @@ class KerningCheckDialog(object):
         """Each button clickable only when it would do something."""
         QtCore, QtGui = _qt()
         self.buttons_due = False
-        for tab in (self.collisions, self.cleanup):
+        for key, tab in (("collisions", self.collisions), ("cleanup", self.cleanup)):
             rows = self.rows(tab)
             checks = [item.checkState(0) == QtCore.Qt.Checked for item in rows]
-            self.ak.enable(tab.action, any(checks) and not self.busy)
+            some_on, some_off = self.ak.checks_of(checks, bool)
+            self.ak.enable(tab.action, some_on and not self.busy)
+            self.ak.enable(tab.check_all, some_off and not self.busy)
+            self.ak.enable(tab.check_none, some_on and not self.busy)
+            try:
+                text = action_text(key, sum(1 for on in checks if on))
+                if tab.action.text != text:
+                    tab.action.setText(text)
+            except Exception:
+                pass
             self.ak.enable(tab.restore, checks != tab.first_checks[:len(checks)] or len(checks) != len(tab.first_checks))
         finding = self.selected_finding() if self.package is not None else None
         self.ak.enable(self.glyph_window_button, isinstance(finding, (Collision, Cleanup)))
@@ -645,6 +801,13 @@ class KerningCheckDialog(object):
     def first_checks_of(self, tab):
         QtCore, QtGui = _qt()
         tab.first_checks = [item.checkState(0) == QtCore.Qt.Checked for item in self.rows(tab)]
+
+    def check_every(self, tab, on):
+        """Check all, or Check none: every row of the list (a group's row follows its rows)."""
+        QtCore, QtGui = _qt()
+        for item in self.rows(tab):
+            item.setCheckState(0, QtCore.Qt.Checked if on else QtCore.Qt.Unchecked)
+        self.update_buttons()
 
     def restore(self, tab):
         QtCore, QtGui = _qt()
@@ -751,7 +914,12 @@ class KerningCheckDialog(object):
             if kerning.plain is None:
                 tab.status.setText(u"FontLab did not give this master's kerning with its classes applied.")
                 return
-            names = set(name for pair in kerning.plain for name in pair)
+            only = self.only
+            if only is None:
+                names = set(name for pair in kerning.plain for name in pair)
+            else:  # the pairs with the glyphs given, and the key glyphs they are compared with
+                names = set(name for pair, _ in tight_pairs(kerning, only) for name in pair)
+                names.update(key for key in (key_glyph(kerning, name) for name in kerning.classes) if key)
             tab.status.setText(u"Drawing %s\N{HORIZONTAL ELLIPSIS}" % counted(len(names), u"glyph"))
             QtGui.QApplication.processEvents()
             ink = InkDistances(self.ak, self.package, self.master, names)
@@ -774,7 +942,7 @@ class KerningCheckDialog(object):
 
             found = find_collisions(kerning, ink.closest_at, minimum, relative,
                                     lambda done, total: self.progress(tab, done, total, u"Checking pair"),
-                                    lambda name, key: is_variant(name, key, char_of))
+                                    lambda name, key: is_variant(name, key, char_of), only)
             if common_only:
                 found = [c for c in (found or []) if common(c.left, c.right)]
         except Exception as exc:
@@ -814,12 +982,11 @@ class KerningCheckDialog(object):
                          parents.get(c.variant or c.left))
         self.resize(tab)
         self.checked_now(tab, "collisions")
-        tight = sum(1 for pair, value in kerning.plain.items() if value is not None and value < 0
-                    and (not common_only or common(*pair)))
+        tight = sum(1 for pair, _ in tight_pairs(kerning, self.only) if not common_only or common(*pair))
         b = self.ak.b
         what = (u"within %s, and that many units closer than without the accent" % b(counted(minimum, u"unit"))
                 if relative else u"within %s of each other" % b(counted(minimum, u"unit")))
-        pairs = b(counted(tight, u"common pair" if common_only else u"pair"))
+        pairs = b(counted(tight, u"common pair" if common_only else u"pair")) + self.limited()
         tab.status.setText(u"%s of the %s kerned tighter %s %s, kerning applied." % (
             b(len(found)), pairs, u"comes" if len(found) == 1 else u"come", what)
             if found else u"None of the %s kerned tighter comes %s." % (pairs, what))
@@ -868,7 +1035,7 @@ class KerningCheckDialog(object):
             glyph = package.findName(name)
             return glyph is not None and not glyph.isNull
 
-        found = find_cleanup(kerning, glyph_exists, self.tiny.value)
+        found = limited_cleanup(kerning, find_cleanup(kerning, glyph_exists, self.tiny.value), self.only)
         tab.findings = found
         kinds = dict(CLEANUP_KINDS)
         for index, c in enumerate(found):
@@ -879,8 +1046,9 @@ class KerningCheckDialog(object):
         counts = {}
         for c in found:
             counts[c.kind] = counts.get(c.kind, 0) + 1
-        tab.status.setText(u"%s of %s listed: %s." % (
-            self.ak.b(len(found)), self.ak.b(counted(len(kerning.entries), u"entry", u"entries")),
+        entries = sum(1 for entry in kerning.entries if involves(kerning, entry, self.only))
+        tab.status.setText(u"%s of %s%s listed: %s." % (
+            self.ak.b(len(found)), self.ak.b(counted(entries, u"entry", u"entries")), self.limited(),
             u", ".join(counted(counts[kind], *CLEANUP_COUNTS[kind]) for kind, _ in CLEANUP_KINDS if kind in counts)
             or u"none"))
 
@@ -925,14 +1093,20 @@ class KerningCheckDialog(object):
             tab.findings = []
             tab.status.setText(u"This font has one master: nothing to compare.")
             return
-        found = compare_masters([(master, self.kerning(master)) for master in masters])
+        found = compare_masters([(master, self.kerning(master)) for master in masters], only=self.only)
         tab.findings = found
         for index, d in enumerate(found):
             self.add_row(tab, index, (d.subject, u"; ".join(u"%s %s" % pair for pair in d.values), d.reason), False, False)
         self.resize(tab)
         b = self.ak.b
-        tab.status.setText(u"%s between %s masters." % (b(counted(len(found), u"difference")), b(len(masters))) if found
-                           else u"The %s masters kern the same entries, with the same signs." % b(len(masters)))
+        if self.only is None:
+            tab.status.setText(u"%s between %s masters." % (b(counted(len(found), u"difference")), b(len(masters))) if found
+                               else u"The %s masters kern the same entries, with the same signs." % b(len(masters)))
+        else:
+            tab.status.setText(u"%s between %s masters, in the entries and classes%s." % (
+                b(counted(len(found), u"difference")), b(len(masters)), self.limited()) if found
+                else u"The %s masters kern the entries%s the same, with the same signs, and their classes hold the "
+                     u"same glyphs." % (b(len(masters)), self.limited()))
 
     # -- looking at a pair ----------------------------------------------
 
@@ -1079,7 +1253,13 @@ class KerningCheckDialog(object):
             QtCore.QTimer.singleShot(50, lambda: self.check(TABS[self.tabs.currentIndex]))  # checked as it opens
 
 
-def main():
+def main(glyphs=None, reason=None, **options):
+    """Kerning Check on the current font. Another script that changed glyphs (built them, moved their
+    marks, spaced them) passes their names (or the glyphs) as glyphs, and what it did as reason
+    ("Diacritics built": "Pairs with the 12 glyphs Diacritics built: ..."): Collisions, Cleanup, and
+    Masters then list only the pairs and entries with those glyphs, until Show all is clicked."""
+    if reason is None:  # (a caller naming it otherwise: why=, source=, ...)
+        reason = next((value for value in options.values() if isinstance(value, (type(u""), str))), None)
     held = getattr(sys, "_freelab_kerning_check", None)
     if held is not None:
         try:
@@ -1087,7 +1267,7 @@ def main():
         except Exception:
             pass
     try:
-        dialog = KerningCheckDialog()
+        dialog = KerningCheckDialog(glyphs, reason)
     except Exception as exc:
         print("FreeLab Kerning Check: %s" % exc)
         return

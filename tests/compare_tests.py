@@ -222,6 +222,22 @@ class GlyphTests(unittest.TestCase):
         self.assertEqual([r.name for r in fcmp.glyph_rows(results, ["anchors", "metrics"])], [u"m", u"n"])
         self.assertEqual(fcmp.glyph_counts(results), {"anchors": 1, "outline": 2, "only_a": 1, "metrics": 1})
 
+    def test_rows_by_the_kinds_shown(self):
+        # A kind hidden leaves every row (an outline change moves the sidebearings too: hiding only the
+        # glyphs with metrics alone hid nothing), and the rows are ranked by the kinds shown
+        both = fcmp.GlyphResult(u"o", u"o", [fcmp.Difference("outline", u"", u"outline 4.1%", 0.04),
+                                             fcmp.Difference("metrics", u"", u"width +20", 0.02)])
+        metrics = fcmp.GlyphResult(u"m", u"m", [fcmp.Difference("metrics", u"", u"width +40", 0.04)])
+        outline = fcmp.GlyphResult(u"p", u"p", [fcmp.Difference("outline", u"", u"outline 1%", 0.01)])
+        results = [outline, metrics, both]
+        self.assertEqual(both.short(), u"outline 4.1% \N{MIDDLE DOT} width +20")
+        shown = set(["outline"])
+        self.assertEqual([r.name for r in fcmp.glyph_rows(results, shown)], [u"o", u"p"])
+        self.assertEqual([r.short(shown) for r in fcmp.glyph_rows(results, shown)], [u"outline 4.1%", u"outline 1%"])
+        self.assertEqual([r.name for r in fcmp.glyph_rows(results, ["metrics"])], [u"m", u"o"], "by the metrics alone")
+        self.assertEqual(fcmp.glyph_rows(results, []), [])
+        self.assertEqual([r.name for r in fcmp.glyph_rows(results)], [u"o", u"p", u"m"])
+
 
 class KerningTests(unittest.TestCase):
     def test_resolve_most_specific_first(self):
@@ -590,6 +606,16 @@ class DialogTests(unittest.TestCase):
         dialog.draw_pair()
         dialog.feature_selected()
         self.assertEqual(dialog.row_glyph(None), [])
+        chips = dict(dialog.glyph_chips)
+        chips["metrics"].checked = False
+        dialog.fill_glyphs()
+        self.assertIn(u"n", [r.name for r in dialog.glyph_names], "its anchors still shown")
+        chips["anchors"].checked = False
+        dialog.fill_glyphs()
+        self.assertNotIn(u"n", [r.name for r in dialog.glyph_names], "nothing of it shown")
+        self.assertFalse(hasattr(dialog, "glyph_window_button") or hasattr(dialog, "show_in_glyph_window"),
+                         "no Glyph window: FontLab opens it on its current font only")
+        self.assertEqual(dialog.selected_glyphs(), [])
         dialog.history_moved()
 
     def test_two_masters(self):

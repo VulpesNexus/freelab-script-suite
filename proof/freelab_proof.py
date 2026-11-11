@@ -35,7 +35,7 @@ LABEL_WIDTH = 36.0  # points left of a waterfall's or a paragraph's lines, for t
 SECTIONS = (("charset", u"Character set"), ("waterfall", u"Waterfall"), ("text", u"Text"),
             ("kerning", u"Kerning strings"), ("spacing", u"Spacing strings"), ("diacritics", u"Diacritics"),
             ("figures", u"Figures and punctuation"))
-TITLES = dict(SECTIONS, about=u"About this proof", masters=u"Masters")
+TITLES = dict(SECTIONS, about=u"About this proof", info=u"Font info", masters=u"Masters")
 WATERFALL_SIZES = (8, 9, 10, 11, 12, 14, 16, 18, 21, 24, 28, 32, 36, 48, 60, 72)
 TEXT_SIZES = (9, 11, 14)
 SIZE_RANGE = (4, 288)  # points: sizes typed outside this are left out
@@ -53,33 +53,69 @@ WATERFALL_MIN = 120  # characters of sample text the waterfall wants (it is cut 
 ALL_MASTERS = u"All masters"
 NOTE = u"Kerning applied; OpenType features not applied"
 KERNING_SETS = (("all", u"every kerned pair"), ("common", u"common pairs only"))
+COLOR_MODES = (("window", u"As the window"), ("print", u"Print (black on white)"))
+PRINT_COLORS = ((0, 0, 0), (255, 255, 255))  # (ink, paper)
+INFO_LABEL_WIDTH = 110.0  # points left of the font info's values, for their names
+INFO_TEXT_MAX = 1200  # characters of one font info field shown (a license's whole text is cut)
 
-# Short public-domain sample texts: traditional pangrams in long common use, the opening line of
-# Nguyen Du's Truyen Kieu (1820), and the Iroha (11th century). Each is used when the font covers
-# the language (Hyperglot's base characters) and has every character of the text.
+# Sample texts, each used when the font covers its language (Hyperglot's base characters) and has
+# every character of the text. The pangrams were written for FreeLab and are GPL-3 with the code:
+# each holds every base letter Hyperglot lists for its language (tests/proof_tests.py lists any one
+# missing), in a sentence a reader of the language finds plausible, foreign letters in names and
+# loanwords. Kept from the public domain: the English pangram (in print since 1885), the opening line
+# of Nguyen Du's Truyen Kieu (1820) for Vietnamese, and the Iroha (11th century), in hiragana and in
+# katakana.
 SAMPLES = (
     ("eng", "Latin", u"The quick brown fox jumps over the lazy dog."),
-    ("spa", "Latin", u"El veloz murciélago hindú comía feliz cardillo y kiwi."),
-    ("por", "Latin", u"Luís argüia à Júlia que «brações, fé, chá, óxido, pôr, zângão» eram palavras do português."),
-    ("deu", "Latin", u"Victor jagt zwölf Boxkämpfer quer über den großen Sylter Deich."),
-    ("fra", "Latin", u"Portez ce vieux whisky au juge blond qui fume."),
-    ("ita", "Latin", u"Quel vituperabile xenofobo zelante assaggia il whisky ed esclama: alleluja!"),
+    ("spa", "Latin", u"¡Qué extraño! ¿Sabías que Félix, el joven pingüino, bebió zumo de kiwi y whisky con un ñandú "
+                     u"en Panamá?"),
+    ("por", "Latin", u"No sábado à noite, o avô Kiko lê Molière e ouve Niccolò Paganini, enquanto a avó Júlia, de "
+                     u"pijama, põe gelo no whisky e faz um lanche de tâmaras e maçã: é a vida da família, sem luxo."),
+    ("deu", "Latin", u"Jörg fährt mit Xaver zum quirligen Yachthafen, wo beide bei Kälte Punsch aus großen Krügen "
+                     u"trinken."),
+    ("fra", "Latin", u"Où dîne Lætitia\N{NO-BREAK SPACE}? À L’Haÿ-les-Roses, chez sa sœur Zoé, qui fête Noël "
+                     u"et ses fiançailles avec Saül\N{NO-BREAK SPACE}: bœuf rôti, maïs, crêpes au goût exquis et "
+                     u"whisky âgé, au jardin de son père."),
+    ("ita", "Latin", u"Perché Fabrizio partì da Bogotá e andò a Córdoba, Medellín e Cancún? Laggiù c’è più quiete, e "
+                     u"il mare si vede già da lì."),
     ("vie", "Latin", u"Trăm năm trong cõi người ta, chữ tài chữ mệnh khéo là ghét nhau."),
-    ("tur", "Latin", u"Pijamalı hasta yağız şoföre çabucak güvendi."),
-    ("pol", "Latin", u"Pchnąć w tę łódź jeża lub ośm skrzyń fig."),
-    ("nld", "Latin", u"Pa's wijze lynx bezag vroom het fikse aquaduct."),
-    ("ron", "Latin", u"Fumegând hipnotic sașiul azvârle mreje în bălți."),
-    ("hun", "Latin", u"Árvíztűrő tükörfúrógép."),
-    ("ces", "Latin", u"Příliš žluťoučký kůň úpěl ďábelské ódy."),
-    ("swe", "Latin", u"Flygande bäckasiner söka hwila på mjuka tuvor."),
-    ("isl", "Latin", u"Kæmi ný öxi hér, ykist þjófum nú bæði víl og ádrepa."),
-    ("rus", "Cyrillic", u"Съешь же ещё этих мягких французских булок, да выпей чаю."),
-    ("ukr", "Cyrillic", u"Чуєш їх, доцю, га? Кумедна ж ти, прощайся без ґольфів!"),
-    ("ell", "Greek", u"Ξεσκεπάζω την ψυχοφθόρα βδελυγμία."),
-    ("hye", "Armenian", u"Բել դղյակի ձախ ժամն օֆ ազգությանը ցպահանջ չճշտած վնաս էր եւ փառք։"),
-    ("heb", "Hebrew", u"דג סקרן שט בים מאוכזב ולפתע מצא חברה"),
+    ("tur", "Latin", u"Xavier ile Quentin, Wi-Fi şifresini hâlâ bulamayınca sükûnetle çay içip garajda millî maçı "
+                     u"göz kırpmadan izlediler; doğrusu güzel bir geceydi."),
+    ("pol", "Latin", u"W piątek Xawery przyjechał starym volvo do Łodzi na fajny quiz, zjadł gorący żurek, wypił "
+                     u"herbatę z cytryną i chciał śpiewać do późna, choć słońce już zaszło."),
+    ("nld", "Latin", u"Na de reünie in België fêteerde de naïeve zoöloog Max zijn gasten aan de Côte d’Azur op crème "
+                     u"brûlée, pâté, whisky en een quiz. Wie wilde hem dáár naäpen? Ík niet, en jij óók niet; ú "
+                     u"misschien?"),
+    ("ron", "Latin", u"Vesel, șoferul de taxi Ștefan a băut un whisky cu gheață, a mâncat kiwi și a câștigat premiul "
+                     u"unui quiz la New York, în fața jurnaliștilor."),
+    ("hun", "Latin", u"Az őszülő, jókedvű Xavér egy pohár whiskyt ivott, és egy Quimby-dalt dúdolt, míg az utcán "
+                     u"hűvös nyári szél fújt."),
+    ("ces", "Latin", u"Ó, jak úžasné: Láďa, dobrý kuchař z Plzně, upekl v neděli quiche a žluťoučkou bábovku a "
+                     u"uvařil guláš; Xénie mu zahrála píseň na flétnu a pak vypili půl lahve whisky."),
+    ("swe", "Latin", u"Inför resan till Málaga åt Quentin müsli, drack whisky och köpte i Växjö två biljetter à "
+                     u"femtio kronor till ett idéseminarium med Zoë."),
+    ("isl", "Latin", u"Ýmsir gestir, þar á meðal Quentin, Zoe, Wolfgang og Cecilía, borðuðu lax, skyr, brauð og kæfu úti "
+                     u"við fjörðinn hjá Pétri á sólríkum degi."),
+    ("dan", "Latin", u"Quizværten Jørgen cyklede forbi Zoologisk Have med whisky, vaffelis og en xylofon på "
+                     u"bagagebæreren."),
+    ("hrv", "Latin", u"Max i Đuro gledali su u centru New Yorka film Quentina Tarantina, a navečer su zajedno uz "
+                     u"hladno pivo jeli ražnjiće i burek sa špinatom."),
+    ("cat", "Latin", u"Algú diu que la veïna, feliç després de l’òpera, va menjar kiwis i xocolata a la plaça, va "
+                     u"beure cafè i whisky i també va cantar una cançó al pingüí del zoo, allà mateix."),
+    ("lit", "Latin", u"Ryte Ąžuolas telefonu nuskenavo QR kodą, prisijungė prie Wi-Fi ir žaidė Xbox, o močiutė, "
+                     u"grįžusi iš vaikų choro šventės, glostė katę, gėrė kavą su citrina ir valgė sūrį bei zefyrą."),
+    ("rus", "Cyrillic", u"Шустрый ёжик вечером в цирке объелся пюре из фиников с хрустящей жимолостью, а эхо глухо "
+                        u"вздыхало."),
+    ("ukr", "Cyrillic", u"Юна ґава з’їла щедрий шматок цибулевого пирога, а їжак у фартусі пив чай із вишнями й "
+                        u"хутко казав, що сьогодні в нього є свято."),
+    ("ell", "Greek", u"Ο γέρος βοσκός ταΐζει τα ζώα, χαϊδεύει το ξανθό σκυλί, τρώει φρέσκο ψωμί και πίνει ζεστό τσάι "
+                     u"του βουνού, που πραΰνει ήσυχα την αϋπνία του."),
+    ("hye", "Armenian", u"Այդ օրը Երևանում փոքր աղջիկը ճաշին ժպտալով կերավ ձուկ, պանիր, չամիչ և ծիրան, խմեց զով թեյ, "
+                        u"իսկ հայրը գինի էր խմում ու ռադիոյով լսում ֆուտբոլի հաշիվը։"),
+    ("heb", "Hebrew", u"בקיץ, הילד הנבון שלך נסע עם אבא לחוף, ושם קיבל תפוח טעים וגזר מזקן חביב שהיה לו כלב צהוב."),
     ("jpn", "Hiragana", u"いろはにほへと ちりぬるを わかよたれそ つねならむ うゐのおくやま けふこえて あさきゆめみし ゑひもせす"),
     ("jpn", "Katakana", u"イロハニホヘト チリヌルヲ ワカヨタレソ ツネナラム ウヰノオクヤマ ケフコエテ アサキユメミシ ヱヒモセス"),
+    ("kor", "Hangul", u"토요일 아침, 키 큰 여행자가 푸른 바다 앞 야자수 그늘에서 휴식을 즐겼다."),
 )
 # Scripts whose text needs no shaping (each character its own glyph, in order); the others (Arabic,
 # the Indic scripts, Thai...) are left out of the text section, and said so.
@@ -555,6 +591,24 @@ class Layout(object):
     def heading(self, text):
         self.text(text, 13, "bold", gap=4.0, keep=40.0)
 
+    def field(self, label, text, size=8, label_width=INFO_LABEL_WIDTH):
+        """A named value: its name on its first line's left, the value broken into lines beside it
+        (each line of the value a paragraph)."""
+        height = size * 1.6
+        first = True
+        for paragraph in text.split(u"\n"):
+            if not paragraph.strip():
+                continue
+            for line in text_lines(paragraph.strip(), self.width() - label_width, size):
+                self.need(height)
+                if first:
+                    self.add("text", x=self.left, y=self.y, width=label_width - 6.0, height=height, text=label,
+                             size=size, style="quiet", align="left")
+                    first = False
+                self.add("text", x=self.left + label_width, y=self.y, width=self.width() - label_width, height=height,
+                         text=line, size=size, style="plain", align="left")
+                self.y += height
+
     def glyphs(self, font, placed, width, size, label=None, indent=0.0, align="left"):
         """A line of glyphs at size points per em (placed and width in font units)."""
         height = line_height(font, size)
@@ -872,6 +926,123 @@ def figure_rows(font):
 
 
 # ---------------------------------------------------------------------------
+# Font info
+# ---------------------------------------------------------------------------
+
+# The font info rows, each with the attribute names tried in turn on FontLab's font info (the first
+# with a value wins). None of the names is proven in FontLab 7 yet: one it lacks is skipped.
+INFO_FIELDS = (
+    (u"Family", ("familyName", "openTypeNamePreferredFamilyName", "styleMapFamilyName")),
+    (u"Style", ("styleName", "openTypeNamePreferredSubfamilyName", "styleMapStyleName")),
+    (u"Version", ("openTypeNameVersion", "version")),  # (after versionMajor and versionMinor)
+    (u"Designer", ("openTypeNameDesigner", "designer")),
+    (u"Designer URL", ("openTypeNameDesignerURL", "designerURL")),
+    (u"Manufacturer", ("openTypeNameManufacturer", "manufacturer")),
+    (u"Manufacturer URL", ("openTypeNameManufacturerURL", "manufacturerURL")),
+    (u"Vendor ID", ("openTypeOS2VendorID", "vendorID")),
+    (u"Copyright", ("copyright",)),
+    (u"Trademark", ("trademark",)),
+    (u"License", ("openTypeNameLicense", "license")),
+    (u"License URL", ("openTypeNameLicenseURL", "licenseURL")),
+    (u"Description", ("openTypeNameDescription", "description")),
+    (u"Created", ("openTypeHeadCreated", "created", "creationDate")),
+    (u"Modified", ("openTypeHeadModified", "modified", "modificationDate")),
+)
+INFO_DATES = (u"Created", u"Modified")
+MAC_EPOCH = 2082844800  # seconds from 1904-01-01 (OpenType's head dates count from it) to 1970-01-01
+
+
+def info_text(value):
+    """A font info value as text ("" when empty): a list's items joined, a whole float as an integer,
+    each line's spaces made single; a method (not a value) is never called."""
+    import numbers
+    if value is None or isinstance(value, bool) or callable(value):
+        return u""
+    if isinstance(value, (list, tuple)):
+        return u", ".join(text for text in (info_text(item) for item in value) if text)
+    if isinstance(value, float) and value == int(value):
+        value = int(value)
+    if isinstance(value, bytes):
+        text = value.decode("utf-8", "replace")
+    elif isinstance(value, numbers.Number):
+        text = u"%s" % value
+    else:
+        try:
+            text = u"%s" % (value,)
+        except Exception:
+            return u""
+    lines = (u" ".join(line.split()) for line in text.replace(u"\r\n", u"\n").replace(u"\r", u"\n").split(u"\n"))
+    return u"\n".join(line for line in lines if line)
+
+
+def info_date(value):
+    """A date of the font info as text: seconds (from 1970, or from 1904 as OpenType counts them) as
+    a day, a QDate or QDateTime by its own text, else the value as it reads."""
+    import numbers
+    if isinstance(value, numbers.Real) and not isinstance(value, bool):
+        seconds = float(value)
+        if seconds > 2.5e9:  # past 2049 from 1970: counted from 1904
+            seconds -= MAC_EPOCH
+        if seconds <= 0:
+            return u""
+        try:
+            return u"%s" % time.strftime("%Y-%m-%d", time.gmtime(seconds))
+        except Exception:
+            return u""
+    kind = type(value).__name__
+    if kind.startswith("QDate"):
+        try:
+            return info_text(value.toString("yyyy-MM-dd hh:mm" if kind == "QDateTime" else "yyyy-MM-dd"))
+        except Exception:
+            return u""
+    return info_text(value)
+
+
+def info_rows(info, name=None, upm=None, masters=()):
+    """[(label, text)] of a font's info, the empty fields left out: info is FontLab's font info (or
+    any object with such attributes, or None); name, upm, and masters are the font's own."""
+    def read(attribute):
+        try:
+            return getattr(info, attribute, None)
+        except Exception:
+            return None
+
+    def first(names, form):
+        for attribute in names:
+            text = form(read(attribute))
+            if text:
+                return text
+        return u""
+
+    found = []
+    for label, names in INFO_FIELDS:
+        text = u""
+        if label == u"Version":
+            major, minor = read("versionMajor"), read("versionMinor")
+            try:
+                if major is not None and minor is not None and not callable(major) and not callable(minor):
+                    text = u"%d.%03d" % (int(major), int(minor))
+            except (TypeError, ValueError):
+                text = u""
+        text = text or first(names, info_date if label in INFO_DATES else info_text)
+        if text:
+            found.append((label, text))
+        if label == u"Style" and info_text(name):
+            found.append((u"Font name", info_text(name)))
+    if info_text(upm):
+        found.append((u"Units per em", info_text(upm)))
+    if masters:
+        found.append((u"Masters", u"%s (%d)" % (u", ".join(info_text(m) for m in masters), len(masters))))
+    cut = []
+    for label, text in found:
+        if len(text) > INFO_TEXT_MAX:
+            rest = len(text) - INFO_TEXT_MAX
+            text = text[:INFO_TEXT_MAX].rstrip() + u"\N{HORIZONTAL ELLIPSIS} (%s more)" % counted(rest, u"character")
+        cut.append((label, text))
+    return cut
+
+
+# ---------------------------------------------------------------------------
 # The sections
 # ---------------------------------------------------------------------------
 
@@ -1036,6 +1207,16 @@ def section_figures(layout, font, size=SHOWCASE_SIZE):
         layout.lines(font, tokens, size, space=space)
 
 
+def section_info(layout, rows):
+    layout.heading(TITLES["info"])
+    layout.text(u"As FontLab's font info gives it; empty fields are left out.", style="quiet")
+    if not rows:
+        layout.text(u"FontLab gave none of the font's info.")
+        return
+    for label, text in rows:
+        layout.field(label, text)
+
+
 def section_masters(layout, fonts, line, rtl):
     layout.heading(TITLES["masters"])
     layout.text(u"The same text in each master, kerning applied.", style="quiet")
@@ -1063,9 +1244,10 @@ class Proof(object):
         return counts
 
 
-def build_proof(fonts, options=None, languages=(), date=None):
+def build_proof(fonts, options=None, languages=(), date=None, info=None):
     """The pages of a proof of fonts (a ProofFont per master, the first the one the text is chosen
-    for): an about block, the masters side by side (several masters), then each master's sections."""
+    for): an about block, the font's info (info: [(label, text)], None for none), the masters side by
+    side (several masters), then each master's sections."""
     options = options or Options()
     date = date or time.strftime("%Y-%m-%d")
     layout = Layout(page_size(options.page))
@@ -1088,6 +1270,9 @@ def build_proof(fonts, options=None, languages=(), date=None):
     if left_out:
         layout.text(u"No text for %s: shaping is not done." % u", ".join(left_out))
     layout.text(u"Made with FreeLab Proof, %s." % date, style="quiet")
+    if info is not None:  # (with the about block: which font, which version, before any glyph)
+        layout.begin("info", label)
+        section_info(layout, info)
     if len(fonts) > 1 and line:
         layout.begin("masters", label)
         section_masters(layout, fonts, line, rtl)
@@ -1144,6 +1329,22 @@ def _flag(owner, group, name):
 
 
 ALIGNS = {"left": "AlignLeft", "center": "AlignHCenter", "right": "AlignRight"}
+
+
+def page_colors(mode, ink=None, paper=None):
+    """(ink, paper) as (red, green, blue) for the pages, the PDF's and the preview's alike: the
+    window's text and background colors for "window" (when given), else black on white."""
+    if mode == "window" and ink is not None and paper is not None:
+        return tuple(int(c) for c in ink[:3]), tuple(int(c) for c in paper[:3])
+    return PRINT_COLORS
+
+
+def colors_label(mode, ink, paper):
+    """How the colors read, for the log: "black on white", or "the window's: light on dark"."""
+    if (tuple(ink), tuple(paper)) == PRINT_COLORS:
+        return u"black on white"
+    light = lambda rgb: 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2] >= 128
+    return u"the window's: %s on %s" % (u"light" if light(ink) else u"dark", u"light" if light(paper) else u"dark")
 
 
 class Renderer(object):
@@ -1214,9 +1415,9 @@ class Renderer(object):
 PDF_RESOLUTION = 600  # dots per inch the PDF's coordinates are given in (its outlines stay vectors)
 
 
-def write_pdf(QtCore, QtGui, path, pages, renderer, page_key="A4", title=u"", progress=None):
-    """Writes the pages to a PDF file; progress(done, total) after each page. Raises when the file
-    cannot be written."""
+def write_pdf(QtCore, QtGui, path, pages, renderer, page_key="A4", title=u"", progress=None, paper=None):
+    """Writes the pages to a PDF file, each filled with paper first (a QColor; None: left white);
+    progress(done, total) after each page. Raises when the file cannot be written."""
     writer = QtGui.QPdfWriter(path)
     try:
         writer.setPageSize(getattr(QtGui.QPagedPaintDevice, page_key))  # Qt 5 (FontLab 7's)
@@ -1238,9 +1439,12 @@ def write_pdf(QtCore, QtGui, path, pages, renderer, page_key="A4", title=u"", pr
         if not painter.isActive():
             raise IOError(u"Qt could not open %s for writing" % path)
         scale = PDF_RESOLUTION / 72.0
+        width, height = page_size(page_key)
         for index, page in enumerate(pages):
             if index:
                 writer.newPage()
+            if paper is not None:  # (a little past the page's edges: no white hairline at them)
+                painter.fillRect(QtCore.QRectF(-scale, -scale, (width + 2) * scale, (height + 2) * scale), paper)
             renderer.draw(painter, page, scale)
             if progress is not None:
                 progress(index + 1, len(pages))
@@ -1249,9 +1453,16 @@ def write_pdf(QtCore, QtGui, path, pages, renderer, page_key="A4", title=u"", pr
     return writer
 
 
-def page_pixmap(QtCore, QtGui, page, renderer, size, page_points, paper):
-    """A page drawn into a pixmap that fits size (width, height in pixels), on paper."""
-    scale = min(size[0] / page_points[0], size[1] / page_points[1])
+def fit_scale(size, page_points):
+    """Pixels per point for a page to fit size (width, height in pixels) whole."""
+    return max(0.01, min(size[0] / float(page_points[0]), size[1] / float(page_points[1])))
+
+
+def page_pixmap(QtCore, QtGui, page, renderer, size, page_points, paper, ratio=1.0):
+    """A page drawn into a pixmap that fits size (width, height in pixels) whole, on paper; ratio:
+    device pixels per pixel (a scaled display: drawn that much finer, so it stays crisp)."""
+    ratio = max(1.0, float(ratio or 1.0))
+    scale = fit_scale(size, page_points) * ratio
     width, height = max(1, int(page_points[0] * scale)), max(1, int(page_points[1] * scale))
     pixmap = QtGui.QPixmap(width, height)
     pixmap.fill(paper)
@@ -1263,6 +1474,11 @@ def page_pixmap(QtCore, QtGui, page, renderer, size, page_points, paper):
         painter.drawRect(0, 0, width - 1, height - 1)
     finally:
         painter.end()
+    if ratio != 1.0:
+        try:
+            pixmap.setDevicePixelRatio(ratio)
+        except Exception:  # (a Qt without it: drawn again at the window's pixels, or it would show too large)
+            return page_pixmap(QtCore, QtGui, page, renderer, size, page_points, paper)
     return pixmap
 
 
@@ -1307,10 +1523,13 @@ Pick the sections: the <b>character set</b> (every glyph with its name and code 
 from Font Check's language data), <b>kerning strings</b> (every kerned pair, or the common ones,
 between control letters: HH?HOHO, nn?nono), <b>spacing strings</b> (each letter as HHxHOxOO or
 nnxnoxoo, without kerning), <b>diacritics</b>, and <b>figures and punctuation</b>; for the current
-master, or for each master (with a page of the masters side by side).<br><br>
+master, or for each master (with a page of the masters side by side). The first page says what the
+proof shows and gives the font's info (names, version, designer, license, dates).<br><br>
 Kerning is applied as FontLab applies it, classes resolved. OpenType features are not: no ligatures,
 no contextual or localized forms, no mark positioning, so each character shows its own glyph, and
 scripts that need shaping (Arabic, the Indic scripts, Thai) get no text.<br><br>
+<i>Colors</i>: the PDF in this window's colors (light on dark in dark mode), or black on white for
+printing; the page beside the list shows the PDF as it will be.<br><br>
 The list shows the pages; select one to see it. <i>Save PDF</i> writes them all, <i>Open PDF</i> opens
 the file saved. <i>Show in Glyph window</i> opens the page's lines in FontLab.
 Click this help's <i>?</i> button, then any control, for what it does."""
@@ -1341,6 +1560,8 @@ class ProofDialog(object):
         self.proof = None
         self.page_options = Options()  # the settings the proof shown was laid out with
         self.saved = None
+        self.gone_said = False  # the log said the PDF saved last is not there anymore
+        self.info = None  # the font's info rows, read once per font
         self.common = None  # {two characters: rank}, read when first needed
         self.languages = None
         self.keep = []  # Python references to the slots and filters PythonQt does not hold
@@ -1376,6 +1597,15 @@ class ProofDialog(object):
                                     u"grows with them), or only the pairs common in text (the list <i>Auto Kerning</i>'s "
                                     u"<i>Common pairs</i> uses).")
         row.addWidget(self.pairs_box)
+        row.addSpacing(12)
+        row.addWidget(QtGui.QLabel("Colors"))
+        self.colors_box = QtGui.QComboBox()
+        for _, label in COLOR_MODES:
+            self.colors_box.addItem(label)
+        self.colors_box.setWhatsThis(u"The PDF's colors: this window's (its text on its background, light on dark in dark "
+                                     u"mode), or black on white, for printing. The page shown beside the list is the PDF "
+                                     u"as it will be.")
+        row.addWidget(self.colors_box)
         row.addStretch(1)
         layout.addLayout(row)
 
@@ -1421,13 +1651,16 @@ class ProofDialog(object):
             self.preview.setSizePolicy(QtGui.QSizePolicy.Ignored, QtGui.QSizePolicy.Ignored)
         except Exception:
             pass
-        self.preview.setWhatsThis(u"The selected page, drawn in this window's colors (the PDF is black on white).")
+        self.preview.setWhatsThis(u"The selected page as the PDF will be (in the colors <i>Colors</i> says), the whole "
+                                  u"page as large as the room here allows: drag the line beside the list, or make the "
+                                  u"window larger, to see it larger.")
         splitter.addWidget(self.page_list)
         splitter.addWidget(self.preview)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         try:
-            splitter.setSizes([240, 700])
+            splitter.setChildrenCollapsible(False)
+            splitter.setSizes([180, 820])  # the room to the page
         except Exception:
             pass
         layout.addWidget(splitter, 1)
@@ -1460,6 +1693,11 @@ class ProofDialog(object):
         self.preview_timer.setSingleShot(True)
         self.preview_timer.setInterval(120)
         self.preview_timer.connect("timeout()", self.show_page)
+        self.saved_timer = QtCore.QTimer()  # (the window activated: the PDF saved last looked for again)
+        self.saved_timer.setSingleShot(True)
+        self.saved_timer.setInterval(0)
+        self.saved_timer.connect("timeout()", self.update_buttons)
+        self.colors_box.connect("currentIndexChanged(int)", lambda index: self.preview_timer.start())
         later = self.rebuild_timer.start
         for box in self.section_boxes.values():
             box.connect("toggled(bool)", lambda on: later())
@@ -1482,7 +1720,8 @@ class ProofDialog(object):
         self.update_buttons()
 
     def watch_size(self):
-        """The preview drawn again when it is resized, or when dark mode switches."""
+        """The preview drawn again when it is resized, or when dark mode switches; the PDF saved last
+        looked for again when the window is activated (it may have been moved or deleted meanwhile)."""
         QtCore, QtGui = _qt()
         owner = self
         palette_events = tuple(getattr(self.ak, "PALETTE_EVENTS", (38, 39)))
@@ -1490,8 +1729,11 @@ class ProofDialog(object):
         class Watcher(QtCore.QTimer):  # PythonQt has no QObject to subclass; a timer will do
             def eventFilter(self, obj, event):
                 try:
-                    if event.type() == 14 or event.type() in palette_events:  # Resize, palette changes
+                    kind = event.type()
+                    if kind == 14 or kind in palette_events:  # Resize, palette changes
                         owner.preview_timer.start()
+                    elif kind == 24 and owner.saved:  # WindowActivate
+                        owner.saved_timer.start()
                 except Exception:
                     pass  # an event filter must never raise
                 return False
@@ -1521,7 +1763,7 @@ class ProofDialog(object):
     def read_font(self):
         """The current font and master (the cached glyphs dropped); False (and said so) when no font is open."""
         self.package = self.current_font()
-        self.fonts, self.paths, self.font_glyphs = {}, {}, None
+        self.fonts, self.paths, self.font_glyphs, self.info = {}, {}, None, None
         if self.package is None:
             self.master = None
             self.proof = None
@@ -1641,9 +1883,24 @@ class ProofDialog(object):
                              % self.ak.i(LANGUAGES_FILE), "warning")
         return self.languages
 
+    def font_info(self):
+        """The font's info rows (read once per font; [] and said so when FontLab gives none)."""
+        if self.info is None:
+            package = self.package
+            try:
+                info = package.fgPackage.info
+            except Exception:
+                info = None
+            try:
+                self.info = info_rows(info, getattr(package, "tfn", None), getattr(package, "upm", None), self.masters())
+            except Exception as exc:
+                self.info = []
+                self.log.add(u"The font's info could not be read: %s" % self.ak.html(exc), "warning")
+        return self.info
+
     def history_moved(self):
         """An undo, a redo, or an edit in FontLab: the font read again and the proof laid out again."""
-        self.fonts, self.paths, self.font_glyphs = {}, {}, None
+        self.fonts, self.paths, self.font_glyphs, self.info = {}, {}, None, None
         self.rebuild()
 
     # -- the proof ------------------------------------------------------------
@@ -1682,7 +1939,7 @@ class ProofDialog(object):
             masters = self.masters() if self.masters_box.currentIndex == 1 else [self.master]
             fonts = [self.proof_font(master) for master in masters]
             options = self.options()
-            self.proof = build_proof(fonts, options, self.load_languages())
+            self.proof = build_proof(fonts, options, self.load_languages(), info=self.font_info())
             self.page_options = options
         except Exception as exc:
             self.proof = None
@@ -1736,6 +1993,33 @@ class ProofDialog(object):
         row = self.page_list.currentRow
         return self.proof.pages[row] if 0 <= row < len(self.proof.pages) else None
 
+    def color_mode(self):
+        return COLOR_MODES[max(0, min(self.colors_box.currentIndex, len(COLOR_MODES) - 1))][0]
+
+    def colors(self):
+        """(ink, paper) as (red, green, blue), for the preview and the PDF alike: the window's text and
+        background colors, or black on white."""
+        QtCore, QtGui = _qt()
+        mode = self.color_mode()
+        if mode != "window":
+            return page_colors(mode)
+        try:
+            palette = self.ak._property(self.dialog, "palette")
+            rgb = lambda color: (color.red(), color.green(), color.blue())
+            return page_colors(mode, rgb(palette.color(QtGui.QPalette.Text)), rgb(palette.color(QtGui.QPalette.Base)))
+        except Exception:
+            return page_colors("print")
+
+    def pixel_ratio(self):
+        """Device pixels per pixel of the preview (above 1 on a scaled display), 1 where Qt does not say."""
+        for name in ("devicePixelRatioF", "devicePixelRatio"):
+            try:
+                value = getattr(self.preview, name)
+                return max(1.0, float(value() if callable(value) else value))
+            except Exception:
+                continue
+        return 1.0
+
     def show_page(self):
         QtCore, QtGui = _qt()
         page = self.selected_page()
@@ -1744,13 +2028,13 @@ class ProofDialog(object):
             self.update_buttons()
             return
         try:
-            palette = self.ak._property(self.dialog, "palette")
-            ink, paper = palette.color(QtGui.QPalette.Text), palette.color(QtGui.QPalette.Base)
-            renderer = Renderer(QtCore, QtGui, self.path, self.ak._property(self.dialog, "font").family(), ink)
-            size = (max(100, self.ak._property(self.preview, "width") - 8),
-                    max(100, self.ak._property(self.preview, "height") - 8))
+            ink, paper = self.colors()
+            renderer = Renderer(QtCore, QtGui, self.path, self.ak._property(self.dialog, "font").family(),
+                                QtGui.QColor(*ink))
+            size = (max(60, self.ak._property(self.preview, "width") - 2),
+                    max(60, self.ak._property(self.preview, "height") - 2))
             self.preview.setPixmap(page_pixmap(QtCore, QtGui, page, renderer, size, page_size(self.page_options.page),
-                                               paper))
+                                               QtGui.QColor(*paper), self.pixel_ratio()))
         except Exception as exc:
             self.preview.clear()
             self.log.add(u"The page could not be drawn: %s" % self.ak.html(exc), "error")
@@ -1761,7 +2045,7 @@ class ProofDialog(object):
     def defaults_changed(self):
         sections = [self.section_boxes[key].isChecked() for key, _ in SECTIONS]
         return (not all(sections) or self.page_box.currentIndex != 0 or self.pairs_box.currentIndex != 0
-                or self.masters_box.currentIndex != 0
+                or self.masters_box.currentIndex != 0 or self.colors_box.currentIndex != 0
                 or parse_sizes(self.waterfall_edit.text, ()) != tuple(float(s) for s in WATERFALL_SIZES)
                 or parse_sizes(self.text_edit.text, ()) != tuple(float(s) for s in TEXT_SIZES))
 
@@ -1769,7 +2053,7 @@ class ProofDialog(object):
         enable = self.ak.enable
         ready = self.proof is not None and bool(self.proof.pages) and not self.busy
         enable(self.save_button, ready)
-        enable(self.open_button, self.saved is not None and os.path.isfile(self.saved))
+        enable(self.open_button, self.saved_there())
         page = self.selected_page()
         enable(self.glyph_window_button, ready and page is not None and bool(page.runs()))
         try:
@@ -1777,12 +2061,27 @@ class ProofDialog(object):
         except Exception:
             enable(self.restore_button, True)
 
+    def saved_there(self):
+        """Whether the PDF saved last is still where it was saved; the log says once when it is not
+        (moved or deleted since)."""
+        if not self.saved:
+            return False
+        if os.path.isfile(self.saved):
+            self.gone_said = False
+            return True
+        if not self.gone_said:
+            self.gone_said = True
+            self.log.add(u"The PDF saved last, %s, is not there anymore: it was moved or deleted. Save it again to "
+                         u"open it." % self.ak.i(self.saved), "warning")
+        return False
+
     def restore_defaults(self):
         for box in self.section_boxes.values():
             box.setChecked(True)
         self.page_box.setCurrentIndex(0)
         self.pairs_box.setCurrentIndex(0)
         self.masters_box.setCurrentIndex(0)
+        self.colors_box.setCurrentIndex(0)
         self.waterfall_edit.setText(u" ".join(format_size(s) for s in WATERFALL_SIZES))
         self.text_edit.setText(u" ".join(format_size(s) for s in TEXT_SIZES))
         self.rebuild_timer.start()
@@ -1832,11 +2131,15 @@ class ProofDialog(object):
                 self.font_label.setText(u"Writing page %s of %s\N{HORIZONTAL ELLIPSIS}" % (b(done), b(total)))
                 QtGui.QApplication.processEvents()
 
-            renderer = Renderer(QtCore, QtGui, self.path, self.ak._property(self.dialog, "font").family())
+            ink, paper = self.colors()
+            renderer = Renderer(QtCore, QtGui, self.path, self.ak._property(self.dialog, "font").family(),
+                                QtGui.QColor(*ink))
             write_pdf(QtCore, QtGui, path, pages, renderer, self.page_options.page,
-                      u"%s proof" % self.package.tfn, progress)
+                      u"%s proof" % self.package.tfn, progress, None if paper == PRINT_COLORS[1] else QtGui.QColor(*paper))
             self.saved = path
-            self.log.add(u"Saved %s to %s." % (b(counted(len(pages), u"page")), self.ak.i(os.path.basename(path))), "done")
+            self.gone_said = False
+            self.log.add(u"Saved %s to %s, in %s." % (b(counted(len(pages), u"page")), self.ak.i(os.path.basename(path)),
+                                                      colors_label(self.color_mode(), ink, paper)), "done")
         except Exception as exc:
             self.log.add(u"The PDF could not be written: %s" % self.ak.html(exc), "error")
         finally:
@@ -1846,7 +2149,8 @@ class ProofDialog(object):
 
     def open_pdf(self):
         QtCore, QtGui = _qt()
-        if not self.saved or not os.path.isfile(self.saved):
+        if not self.saved_there():  # (the log says why; the button grays out)
+            self.update_buttons()
             return
         try:
             opened = QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(self.saved))

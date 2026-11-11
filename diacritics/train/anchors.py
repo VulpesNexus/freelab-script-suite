@@ -80,7 +80,6 @@ def lookups(font, tags, kind):
 def inks(font, names):
     """{glyph: (left, bottom, right, top, top band center, bottom band center)} in font units."""
     from fontTools.pens.boundsPen import BoundsPen
-    from fontTools.pens.recordingPen import DecomposingRecordingPen
     glyph_set = font.getGlyphSet()
     found = {}
     for name in names:

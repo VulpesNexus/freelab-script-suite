@@ -41,7 +41,7 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(found[I_CARON].name, u"icaron", "named after the letter, not its dotless form")
         self.assertEqual(found[CAP_A_CARON].marks[0].glyph, "caron.case", "a capital takes the .case mark")
         dot = found[A_DOT_BELOW].marks[0]
-        self.assertEqual((dot.glyph, dot.side, dot.note), ("dotaccent", "below", u"for dotbelow"), "its twin above")
+        self.assertEqual((dot.glyph, dot.side, dot.note), ("dotaccent", "below", u"for dot below"), "its twin above")
         self.assertEqual([m.glyph for m in found[O_CIRCUMFLEX_ACUTE].marks], ["circumflex", "acute"])
         self.assertTrue(found[O_HORN_DOT].missing and u"horn" in found[O_HORN_DOT].missing)
 
@@ -164,6 +164,170 @@ class ScriptTests(unittest.TestCase):
         recipe.adjust = {0: [10, -20, 2.0, 0.5]}
         moved = ac.adjusted(recipe, parts, ink)[1]
         self.assertEqual(moved, ("acute", 2.0, 0.5, 160, 505), "scaled about its center (250, 550), then moved")
+
+
+class ConventionTests(unittest.TestCase):
+    """Marks fonts draw otherwise than Unicode's decomposition: Latvian's comma below and turned comma, the
+    vertical caron; the names fonts give them; a and an."""
+
+    def test_latvian_takes_a_comma_below_not_a_cedilla(self):
+        f = ac.Font(["K", "k", "g", "commaaccentcomb", "commaaccentcomb.case", "cedillacomb", "S", "commaturnedabovecomb"],
+                    [("K", 0x4B), ("k", 0x6B), ("g", 0x67), ("S", 0x53), ("cedillacomb", 0x327), ("commaaccentcomb", 0x326)])
+        found = dict((r.code, r) for r in ac.plan(f, [ac.unichr_(c) for c in (0x136, 0x137, 0x123, 0x15E)]))
+        self.assertEqual(found[0x136].marks[0].glyph, "commaaccentcomb.case", "the capital's comma below")
+        self.assertEqual(found[0x137].marks[0].glyph, "commaaccentcomb")
+        self.assertIn(u"comma below fonts draw for Unicode's cedilla", found[0x137].marks[0].label())
+        g = found[0x123].marks[0]
+        self.assertEqual((g.glyph, g.side, g.root), ("commaturnedabovecomb", "above", "commaturnedabove"),
+                         "g takes a turned comma above")
+        self.assertEqual(found[0x15E].marks[0].glyph, "cedillacomb", "Turkish s keeps its cedilla")
+        self.assertIsNone(found[0x15E].marks[0].convention)
+        production = ac.Font(["N", "uni0326", "uni0326.case"], [("N", 0x4E), ("uni0326", 0x326)])
+        self.assertEqual(ac.plan(production, [ac.unichr_(0x145)])[0].marks[0].glyph, "uni0326.case",
+                         "a production name's .case form")
+
+    def test_drafts_of_the_comma_marks(self):
+        f = ac.Font(["g", "k", "d", "comma", "quoteright"],
+                    [("g", 0x67), ("k", 0x6B), ("d", 0x64), ("comma", 0x2C), ("quoteright", 0x2019)])
+        found = dict((r.code, r) for r in ac.plan(f, [ac.unichr_(c) for c in (0x123, 0x137, 0x10F)]))
+        turned = found[0x123].marks[0]
+        self.assertEqual(turned.parts[0][:3], ("comma", -1.0, -1.0), "the comma turned about")
+        self.assertIn(u"draft for turned comma above", turned.note)
+        self.assertIn(u"turned", turned.label())
+        self.assertEqual(found[0x137].marks[0].glyph, "comma", "the comma for a comma below")
+        caron = found[0x10F].marks[0]
+        self.assertEqual((caron.glyph, caron.side), ("quoteright", "topright"), "a vertical caron of quoteright")
+        self.assertIn(u"of quoteright", caron.label())
+        with_left = ac.Font(["g", "quoteleft", "comma"], [("g", 0x67), ("quoteleft", 0x2018), ("comma", 0x2C)])
+        self.assertEqual(ac.plan(with_left, [ac.unichr_(0x123)])[0].marks[0].parts[0][:3], ("quoteleft", 1.0, 1.0),
+                         "a left quote is a turned comma already")
+
+    def test_the_vertical_caron_beside_the_stem(self):
+        f = ac.Font(["d", "L", "caroncomb.alt", "caron"], [("d", 0x64), ("L", 0x4C), ("caron", 0x2C7)])
+        found = dict((r.code, r) for r in ac.plan(f, [ac.unichr_(c) for c in (0x10F, 0x13D, 0x10E)]))
+        self.assertEqual(found[0x10F].marks[0].glyph, "caroncomb.alt", "Glyphs' name for it")
+        self.assertEqual(found[0x13D].marks[0].glyph, "caroncomb.alt")
+        ink = {"d": ac.Ink(40, -10, 520, 760, top_right=520, advance=580), "caroncomb.alt": ac.Ink(0, 0, 60, 200)}.get
+        parts, width = ac.place(found[0x10F], ink, ac.Placement(1000, MODEL))
+        mark = parts[1]
+        self.assertEqual((mark[3], mark[4] + 200), (520 + 48, 760), "0.048 em right of the stem, its top level with d's")
+        self.assertEqual(width, 580)
+        self.assertNotIn(0x10E, [code for code in ac.CONVENTIONS], "D takes a plain caron, as fonts draw it")
+        bare = ac.Font(["l", "caron"], [("l", 0x6C), ("caron", 0x2C7)])
+        self.assertEqual(ac.plan(bare, [ac.unichr_(0x13E)])[0].describe(),
+                         u"needs a vertical caron (fonts draw it for Unicode's caron)", "not built from a v-shaped caron")
+
+    def test_names_fonts_give_marks(self):
+        for name, root in (("caroncomb.alt", "caronvertical"), ("caron.alt.case", "caronvertical"),
+                           ("uni0326", "commaaccent"), ("uni0326.case", "commaaccent"), ("commaaccentrotate", "commaturnedabove"),
+                           ("acutecomb.case", "acute"), ("uni0301", "acute"), ("uni3099", "dakuten")):
+            self.assertEqual(ac.mark_key(name), root, name)
+        self.assertTrue(ac.learnable(0x137, [("k", 0, 0), ("uni0326", 100, 0)]))
+        self.assertFalse(ac.learnable(0x137, [("k", 0, 0), ("cedillacomb", 100, 0)]), "Marshallese's cedilla: not learned from")
+        self.assertTrue(ac.learnable(0x10F, [("d", 0, 0), ("caroncomb.alt", 400, 0)]))
+
+    def test_a_and_an(self):
+        for word, expected in ((u"ogonek", u"an"), (u"acute", u"an"), (u"umlaut", u"an"), (u"horn", u"a"), (u"hook above", u"a"),
+                               (u"ring", u"a"), (u"cedilla", u"a"), (u"unit", u"a"), (u"U+0312", u"a"), (u"hour", u"an"),
+                               (u"ypogegrammeni (iota subscript)", u"an"), (u"upsilon", u"an"), (u"one", u"a"),
+                               (u"uvula", u"a"), (u"F", u"an"), (u"K", u"a"), (u"dakuten", u"a")):
+            self.assertEqual(ac.article(word), expected, word)
+        self.assertEqual(ac.listed([u"a", u"b", u"c"]), u"a, b, and c")
+        self.assertEqual(ac.listed([u"a", u"b"]), u"a and b")
+        bare = ac.Font(["a", "o"], [("a", 0x61), ("o", 0x6F)])
+        found = dict((r.code, r) for r in ac.plan(bare, [ac.unichr_(0x105), ac.unichr_(0x1EDB)]))
+        self.assertEqual(found[0x105].describe(), u"needs an ogonek")
+        self.assertEqual(found[0x1EDB].describe(), u"needs a horn and an acute")
+
+
+KANA_MODEL = {"kana": {"dakuten": {"304B": [-0.05, -0.06, 0.22, 30], "hiragana": [-0.04, -0.05, 0.21, 40]},
+                       "handakuten": {"hiragana": [-0.08, -0.03, 0.21, 39]}}}
+
+
+class KanaTests(unittest.TestCase):
+    GA, PA, KATA_VU, YORI = 0x304C, 0x3071, 0x30F4, 0x309E
+
+    def test_voiced_kana_are_built_from_their_letter_and_mark(self):
+        f = ac.Font(["uni304B", "uni306F", "uni30A6", "uni309D", "uni3099", "uni309C"],
+                    [("uni304B", 0x304B), ("uni306F", 0x306F), ("uni30A6", 0x30A6), ("uni309D", 0x309D),
+                     ("uni3099", 0x3099), ("uni309C", 0x309C)])
+        kana = [ac.unichr_(code) for low, high in dict((k, r) for k, _, r in ac.SETS)["kana"] for code in range(low, high)]
+        found = dict((r.code, r) for r in ac.plan(f, kana))
+        ga = found[self.GA]
+        self.assertEqual((ga.base, ga.marks[0].glyph, ga.marks[0].side, ga.name), ("uni304B", "uni3099", "kana", u"uni304C"))
+        self.assertEqual(found[self.PA].marks[0].glyph, "uni309C", "the spacing handakuten, the font having no combining one")
+        self.assertEqual(found[self.KATA_VU].base, "uni30A6", "katakana vu")
+        self.assertEqual(found[self.YORI].base, "uni309D", "the voiced iteration mark")
+        self.assertEqual(ac.scripts_present(f.by_code), set(["kana"]))
+        self.assertEqual(ac.script_of(ac.unichr_(self.GA)), "kana")
+
+    def test_placed_at_the_top_right_as_the_fonts_place_it(self):
+        f = ac.Font(["ka", "dakuten"], [("ka", 0x304B), ("dakuten", 0x3099)])
+        ga = ac.plan(f, [ac.unichr_(self.GA)])[0]
+        ink = {"ka": ac.Ink(80, -60, 860, 800, advance=1000), "dakuten": ac.Ink(0, 0, 160, 180)}.get
+        parts, width = ac.place(ga, ink, ac.Placement(1000, KANA_MODEL))
+        mark = parts[1]
+        self.assertEqual((mark[3] + 80, mark[4] + 90), (860 - 50, 800 - 60), "its center 0.05 em left of ka's right, "
+                                                                            "0.06 em under its top: ka's own row")
+        self.assertEqual(width, 1000)
+        parts, _ = ac.place(ga, ink, ac.Placement(1000))
+        self.assertEqual((parts[1][3] + 80, parts[1][4] + 90), (round(860 - 49.3), round(800 - 64.5)), "no model: the set's")
+
+    def test_drafted_or_missing(self):
+        f = ac.Font(["ka", "quotedblright"], [("ka", 0x304B), ("quotedblright", 0x201D)])
+        ga = ac.plan(f, [ac.unichr_(self.GA)])[0]
+        self.assertIn(u"draft for dakuten", ga.marks[0].note)
+        none = ac.Font(["ka"], [("ka", 0x304B)])
+        self.assertEqual(ac.plan(none, [ac.unichr_(self.GA)])[0].describe(), u"needs a dakuten")
+
+
+class CenterTests(unittest.TestCase):
+    """Snapping a dragged mark to its letter's centers, and carrying a placement to related letters."""
+
+    def test_centers_and_snap(self):
+        a = ac.Ink(40, -10, 460, 480, top_center=230)
+        self.assertEqual(ac.letter_centers(a, 10, "above"), [(260.0, u"box center"), (240, u"top center")])
+        o = ac.Ink(40, -10, 460, 480)
+        self.assertEqual(ac.letter_centers(o, 0, "below"), [(250.0, u"center")])
+        self.assertEqual(ac.letter_centers(o, 0, "kana"), [])
+        targets = ac.letter_centers(a, 10, "above")
+        self.assertEqual(ac.snap(243, targets, 5), (240, u"top center"), "the nearest within reach")
+        self.assertEqual(ac.snap(250, targets, 5), (None, None), "none within reach")
+
+    def recipe(self, char, base):
+        return ac.Recipe(char, base=base, marks=[ac.Mark("acute", "above", [("acute", 1.0, 1.0, 0.0, 0.0)])])
+
+    def test_centered_stays_centered_on_a_wider_letter(self):
+        model = {"format": 1, "gap": {"acute lower": 0.05}, "side_offset": {"above lower": 0.03}}
+        ink = {"o": ac.Ink(40, -10, 460, 480, advance=500), "ae": ac.Ink(40, -10, 840, 480, top_center=460, advance=880),
+               "acute": ac.Ink(0, 500, 100, 600)}.get
+        placement = ac.Placement(1000, model)
+        o, ae = self.recipe(ac.unichr_(0xF3), "o"), self.recipe(ac.unichr_(0x1FD), "ae")
+        parts, center = ac.mark_center(o, 0, ink, placement)
+        self.assertEqual(center, 250 + round(0.03 * 420), "the font's habit: 3% of o's width right")
+        o.adjust = {0: [250 - center, 20.0, 1.0, 1.0]}  # centered on o by hand, and raised
+        change = ac.carried_adjust(o, 0, ae, 0, ink, placement)
+        ae.adjust = {0: change}
+        self.assertEqual(ac.mark_center(ae, 0, ink, placement)[1], 460, "centered on ae's top center too")
+        self.assertEqual(change[1], 20.0, "raised as much")
+        o.adjust = {0: [250 - center + 10, 0.0, 1.0, 1.0]}  # 10 units right of o's center
+        ae.adjust = {0: ac.carried_adjust(o, 0, ae, 0, ink, placement)}
+        self.assertEqual(ac.mark_center(ae, 0, ink, placement)[1], 470, "10 units right of ae's center, in units")
+        o.adjust = {0: [0.0, 15.0, 1.0, 1.0]}
+        self.assertEqual(ac.carried_adjust(o, 0, ae, 0, ink, placement), [0.0, 15.0, 1.0, 1.0],
+                         "raised only: the change as it is")
+
+    def test_a_letters_own_shift_is_kept(self):
+        model = {"format": 1, "gap": {"acute lower": 0.05}, "side_offset": {"above lower": 0.0},
+                 "offset": {"l above *": 0.5}}
+        ink = {"o": ac.Ink(40, -10, 460, 480, advance=500), "l": ac.Ink(60, 0, 140, 760, advance=200),
+               "acute": ac.Ink(0, 500, 100, 600)}.get
+        placement = ac.Placement(1000, model)
+        o, l = self.recipe(ac.unichr_(0xF3), "o"), self.recipe(ac.unichr_(0x13A), "l")
+        o.adjust = {0: [6.0, 0.0, 1.0, 1.0]}  # 6 units right of o's center: not centered
+        l.adjust = {0: ac.carried_adjust(o, 0, l, 0, ink, placement)}
+        self.assertEqual(ac.mark_center(l, 0, ink, placement)[1], 100 + 0.5 * 80 + 6, "right of l's stem as fonts set it, "
+                                                                                     "and 6 units more")
 
 
 class AnchorTests(unittest.TestCase):
