@@ -6,7 +6,7 @@ Theme: dark, or automatic (dark while Windows apps are dark, FontLab's own light
 look while they are light, switching as Windows does). Mixed keeps FontLab's
 light glyph canvases, font cells, and previews in a dark interface. Shade: how
 dark the grays are. Every change shows at once; Cancel puts back what was there.
-Switching dark mode off is Scripts > FreeLab > Toggle Dark Mode.
+Switching dark mode off is Scripts > FreeLab > Dark Mode.
 
 Valid Python 2.7 (FontLab 7) and Python 3.
 """

@@ -1279,11 +1279,11 @@ def history_state(package):
 # lists a folder's scripts by file name and has no separators of its own.
 MENU_GROUPS = (("Diacritics", "Auto Spacing", "CJK Spacing", "Auto Kerning", "Kerning Check", "Font Check", "Font Compare",
                 "Feature Code", "Proof"),
-               ("Toggle Dark Mode", "Dark Mode Settings", "Toggle Tab Docking"),
+               ("Dark Mode", "Toggle Dark Mode", "Dark Mode Settings", "Tab Docking", "Toggle Tab Docking"),
                ("Start MCP Listener", "Stop MCP Listener", "Start Listener", "Stop Listener"))  # (FreeLab MCP's, old names too)
 MENU_TITLE, SCRIPTS_MENU = "FreeLab", "menuScripts"
 MENU_ORDER_PROP = "freelab_menu_order"
-MENU_HOOK_VERSION = 4  # the Scripts menu's property holds it: an older hook found there is replaced
+MENU_HOOK_VERSION = 5  # the Scripts menu's property holds it: an older hook found there is replaced
 
 
 def menu_order(texts, groups=MENU_GROUPS):
@@ -1300,9 +1300,29 @@ def menu_order(texts, groups=MENU_GROUPS):
     return order
 
 
+# The menu's switches, ticked while on: their text, and the state FreeLab keeps for them in sys.
+MENU_SWITCHES = {u"Dark Mode": "_freelab_dark_mode", u"Toggle Dark Mode": "_freelab_dark_mode",
+                 u"Tab Docking": "_freelab_tabs_state", u"Toggle Tab Docking": "_freelab_tabs_state"}
+
+
+def tick_switches(menu):
+    """Dark mode and tab docking ticked in the menu while they are on."""
+    for action in menu.actions():
+        holder = MENU_SWITCHES.get(action.text.replace(u"&", u""))
+        if holder is None:
+            continue
+        state = getattr(sys, holder, None) or {}
+        action.setCheckable(True)
+        action.setChecked(bool(state.get("on")))
+
+
 def arrange_menu(menu):
     """Puts a FreeLab menu's actions in menu_order, with separators between the groups; nothing
-    changes when they are in order already."""
+    changes when they are in order already. The switches are ticked while on."""
+    try:
+        tick_switches(menu)
+    except Exception:
+        pass
     actions = list(menu.actions())
     current = [None if action.isSeparator() else action.text.replace(u"&", u"") for action in actions]
     by_text = dict((action.text.replace(u"&", u""), action) for action in actions if not action.isSeparator())
@@ -1514,6 +1534,12 @@ def plain_buttons(dialog):
     bars made flat too (flat_scroll_bars)."""
     QtCore, QtGui = _qt()
     flat_scroll_bars(dialog)
+    try:  # minimize and maximize in the title bar too (set before the window shows: setting flags hides it)
+        if not _property(dialog, "visible"):
+            dialog.setWindowFlags(dialog.windowFlags() | QtCore.Qt.WindowMinimizeButtonHint
+                                  | QtCore.Qt.WindowMaximizeButtonHint)
+    except Exception:
+        pass
     try:
         for button in dialog.findChildren(QtGui.QPushButton):
             button.setAutoDefault(False)

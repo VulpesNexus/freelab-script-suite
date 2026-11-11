@@ -1,4 +1,4 @@
-#FLM: Toggle Tab Docking
+#FLM: Tab Docking
 # -*- coding: utf-8 -*-
 """FreeLab tab docking: FontLab's document tabs reorder and dock back the way Photoshop's do.
 
@@ -16,7 +16,7 @@ short timer then watches the mouse until its button is released.
 - Released farther away, the tab is a window of its own, as FontLab makes it.
 - A window of its own gets a Dock button beside its tabs; a double-click on one of its tabs docks it.
 
-Runs at FontLab's start (FreeLab's startup block). Scripts > FreeLab > Toggle Tab Docking switches
+Runs at FontLab's start (FreeLab's startup block). Scripts > FreeLab > Tab Docking switches
 it off and on; the choice is kept in %LOCALAPPDATA%\\FreeLab\\tabs.json.
 
 Every timer, connection, and filter calls through _dispatcher, which looks the module up when it is

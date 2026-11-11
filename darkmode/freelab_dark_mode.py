@@ -1,4 +1,4 @@
-#FLM: Toggle Dark Mode
+#FLM: Dark Mode
 # -*- coding: utf-8 -*-
 """FreeLab dark mode for FontLab's interface.
 

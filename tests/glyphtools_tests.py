@@ -330,6 +330,39 @@ class CenterTests(unittest.TestCase):
                                                                                      "and 6 units more")
 
 
+class LineUpTests(unittest.TestCase):
+    def test_marks_of_a_group_line_up_and_exceptions_are_named(self):
+        model = {"format": 1, "gap": {"acute lower": 0.05, "caron lower": 0.05, "circumflex lower": 0.05},
+                 "side_offset": {"above lower": 0.0}}
+        ink = {"o": ac.Ink(40, -10, 460, 480, advance=500), "e": ac.Ink(40, -10, 440, 470, advance=480),
+               "h": ac.Ink(60, 0, 440, 760, advance=500), "c": ac.Ink(40, -10, 420, 480, advance=460),
+               "acute": ac.Ink(0, 500, 100, 600), "caron": ac.Ink(0, 500, 140, 590),
+               "circumflex": ac.Ink(0, 500, 140, 600), "cedilla": ac.Ink(0, -200, 80, 0)}.get
+        placement = ac.Placement(1000, model)
+
+        def recipe(code, base, *marks):
+            return ac.Recipe(ac.unichr_(code), base=base,
+                             marks=[ac.Mark(root, side, [(glyph, 1.0, 1.0, 0.0, 0.0)]) for root, side, glyph in marks])
+        ecaron = recipe(0x11B, "e", ("caron", "above", "caron"))
+        oacute = recipe(0xF3, "o", ("acute", "above", "acute"))
+        hcirc = recipe(0x125, "h", ("circumflex", "above", "circumflex"))
+        ccedil = recipe(0xE7, "c", ("cedilla", "below", "cedilla"))
+        stacked = recipe(0x1EA5, "e", ("circumflex", "above", "circumflex"), ("acute", "above", "acute"))
+        ecaron.adjust = {0: [0.0, 25.0, 1.0, 1.0]}  # raised by hand: the reference
+        line, moves, left_out = ac.line_up_plan([ecaron, oacute, hcirc, ccedil, stacked], ecaron, 0, ink, placement,
+                                                None, 1000.0)
+        moved = dict((other.char, rise) for other, _, rise in moves)
+        self.assertIn(oacute.char, moved, "o's acute: the same group (lowercase, x-height)")
+        oacute.adjust = {0: [0.0, moved[oacute.char], 1.0, 1.0]}
+        self.assertAlmostEqual(ac.placed_mark_box(oacute, 0, ink, placement, None)[1], line, 3,
+                               "its bottom level with the caron's")
+        why = dict((other.char, reason) for other, reason in left_out)
+        self.assertIn(u"taller", why[hcirc.char], "h is taller: its circumflex is left as it is")
+        self.assertIn(u"stacked", why[stacked.char])
+        self.assertNotIn(ccedil.char, moved, "a mark below is another side")
+        self.assertIsNotNone(ac.line_up_exclusion(ccedil, 0), "a cedilla keeps its own place")
+
+
 class AnchorTests(unittest.TestCase):
     MODEL = {"anchors": {"thai top": {"base_gap": -0.06, "base_offset": 0.43, "mark_gap": 0.1, "mark_offset": 0.45,
                                       "mark_to_mark": 0.01, "fonts": 7},

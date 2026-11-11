@@ -223,7 +223,7 @@ if ($Uninstall) {
         $saved = $null
         try { $saved = ([System.IO.File]::ReadAllText($settingsFile) | ConvertFrom-Json).saved_workspace } catch { }
         if ($saved -and (Get-Process -Name $ProcessName -ErrorAction SilentlyContinue)) {
-            Write-Output 'FontLab is running with dark mode on: switch dark mode off (Scripts > FreeLab > Toggle Dark Mode), quit FontLab, and run -Uninstall again.'
+            Write-Output 'FontLab is running with dark mode on: switch dark mode off (Scripts > FreeLab > Dark Mode), quit FontLab, and run -Uninstall again.'
             exit 1
         }
         if ($saved) {

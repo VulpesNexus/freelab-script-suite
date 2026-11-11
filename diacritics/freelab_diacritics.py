@@ -361,6 +361,7 @@ class Recipe(object):
         self.missing = missing  # what the font lacks, or None
         self.checked = True
         self.refill = False  # its glyph is in the font, empty: filled under its own name
+        self.existing = None  # the font's own drawn glyph, listed to be rebuilt (never checked at first)
         self.notes = []  # what placing it took (marks made smaller, too tall)
         self.adjust = {}  # mark index: [dx, dy, x scale, y scale], set by hand (about the mark's center)
         self.touches = u""  # after a placement was applied from another letter: how close a mark comes
@@ -432,12 +433,21 @@ def make_mark(font, code, case, script="latin"):
     return None
 
 
-def plan(font, characters):
-    """A Recipe for each character the font lacks that decomposes into a letter and marks."""
+# The scripts whose letters the font has can be listed to be rebuilt (Latin, Greek, Cyrillic): not kana,
+# whose voiced forms fonts draw as letters of their own.
+REBUILT_SCRIPTS = ("latin", "greek", "cyrillic")
+
+
+def plan(font, characters, include_existing=False):
+    """A Recipe for each character the font lacks that decomposes into a letter and marks; with
+    include_existing, also for those it has (Latin, Greek, Cyrillic), to be rebuilt, unchecked."""
     recipes = []
     for ch in characters:
         existing = font.by_code.get(ord(ch))
-        if (existing and existing not in font.empty) or not unicodedata.category(ch).startswith("L"):
+        drawn = bool(existing) and existing not in font.empty
+        if not unicodedata.category(ch).startswith("L"):
+            continue
+        if drawn and not (include_existing and script_of(ch) in REBUILT_SCRIPTS):
             continue
         decomposed = unicodedata.normalize("NFD", ch)
         if len(decomposed) < 2:
@@ -447,7 +457,8 @@ def plan(font, characters):
         codes = [convention.get(code, code) for code in unicode_codes]  # the mark fonts draw (Latvian's comma below)
         base = font.glyph_for(base_char)
         if base is None:
-            recipes.append(Recipe(ch, missing=u"its letter %s" % base_char))
+            if not drawn:
+                recipes.append(Recipe(ch, missing=u"its letter %s" % base_char))
             continue
         name_base = base
         if base_char in DOTLESS and any(side_of(code) == "above" for code in codes):
@@ -494,12 +505,15 @@ def plan(font, characters):
                 mark.side = "left"
             marks.append(mark)
         if lacking:
-            recipes.append(Recipe(ch, missing=listed(with_article(word) for word in lacking)))
+            if not drawn:  # (a letter the font has, which could not be rebuilt: not listed)
+                recipes.append(Recipe(ch, missing=listed(with_article(word) for word in lacking)))
             continue
         name = existing or glyph_name(font, name_base, [mark.root for mark in marks], ord(ch),
                                       plain=script == "kana")
         recipe = Recipe(ch, name, base, marks)
-        recipe.refill = bool(existing)
+        recipe.refill = bool(existing) and not drawn
+        if drawn:
+            recipe.existing, recipe.checked = existing, False
         recipes.append(recipe)
     return recipes
 
@@ -908,6 +922,99 @@ def related_marks(recipes, recipe, index):
                 found.append((other, at))
                 break
     return found
+
+
+def mark_signature(mark):
+    return (tuple(part[0] for part in mark.parts), mark.side)
+
+
+def same_mark_recipes(recipes, recipe):
+    """The buildable recipes with one of recipe's marks on the same side (either case), in list order:
+    the letters to look at after placing a mark on one (a circumflex on C: A, E, c, e...)."""
+    wanted = set(mark_signature(mark) for mark in recipe.marks)
+    return [other for other in recipes
+            if not other.missing and any(mark_signature(mark) in wanted for mark in other.marks)]
+
+
+# Lining up marks: every mark above (or below) of a group set with its edge nearest the letter (a mark
+# above: its bottom) at the same height as the reference's. A group: the same side, the same case, and
+# letters of the same height (their ink tops, for marks above, within LINE_UP_HEIGHT_SHARE of the em of
+# the reference letter's; bottoms for marks below): h's circumflex is not set as low as e's.
+LINE_UP_SIDES = ("above", "below")
+LINE_UP_ATTACHED = ("cedilla", "ogonek", "horn")  # joined to the letter: their own place, never lined up
+LINE_UP_HEIGHT_SHARE = 0.06
+
+
+def placed_mark_box(recipe, index, ink_of, placement, metrics):
+    """(left, bottom, right, top) of a recipe's mark index as placed now (its hand changes too), or None."""
+    checked = recipe.checked
+    try:
+        parts, _ = place(recipe, ink_of, placement, metrics)
+    finally:
+        recipe.checked = checked
+    if parts is None:
+        return None
+    ranges = mark_ranges(recipe)
+    if index >= len(ranges):
+        return None
+    first, last = ranges[index]
+    return parts_box(parts[first:last], ink_of)
+
+
+def line_up_exclusion(recipe, index):
+    """Why a recipe's mark is never lined up with others, or None: placed by a rule of its own."""
+    mark = recipe.marks[index]
+    if mark.side not in LINE_UP_SIDES:
+        return u"placed beside or on its letter (horn, vertical caron, Greek capitals' marks, kana)"
+    if mark.root in LINE_UP_ATTACHED:
+        return u"attached to its letter (cedilla, ogonek)"
+    if mark.convention:
+        return u"a shape of its own on this letter (%s)" % mark.convention
+    if mark.joined:
+        return u"made of marks set together"
+    if len([m for m in recipe.marks if m.side == mark.side]) > 1:
+        return u"stacked with another mark on the same side"
+    return None
+
+
+def line_up_plan(recipes, recipe, index, ink_of, placement, metrics, upm):
+    """(line, moves, left_out): the height the reference mark's near edge sits at; [(other, its mark's
+    index, how far it moves up)] for the marks of its group; [(other, why)] for the same side and case
+    left as they are (their own rule, stacked, or on a taller or shorter letter)."""
+    mark = recipe.marks[index]
+    box = placed_mark_box(recipe, index, ink_of, placement, metrics)
+    base = ink_of(recipe.base)
+    if box is None or base is None or line_up_exclusion(recipe, index):
+        return None, [], []
+    above = mark.side == "above"
+    line = box[1] if above else box[3]
+    reach = base.top if above else base.bottom
+    case = case_of(recipe.char)
+    moves, left_out = [], []
+    for other in recipes:
+        if other is recipe or other.missing or case_of(other.char) != case:
+            continue
+        at = next((i for i, m in enumerate(other.marks) if m.side == mark.side), None)
+        if at is None:
+            continue
+        why = line_up_exclusion(other, at)
+        other_base = ink_of(other.base)
+        if why is None and other_base is not None:
+            other_reach = other_base.top if above else other_base.bottom
+            if abs(other_reach - reach) > LINE_UP_HEIGHT_SHARE * upm:
+                why = u"a %s letter" % ((u"taller" if other_reach > reach else u"shorter") if above else
+                                        (u"deeper" if other_reach < reach else u"shallower"))
+        if why is None:
+            other_box = placed_mark_box(other, at, ink_of, placement, metrics)
+            if other_box is None:
+                why = u"not placed"
+            else:
+                rise = line - (other_box[1] if above else other_box[3])
+                if abs(rise) >= 0.5:
+                    moves.append((other, at, rise))
+                continue
+        left_out.append((other, why))
+    return line, moves, left_out
 
 
 def mark_ranges(recipe):
@@ -1879,6 +1986,7 @@ move by as much in every master.<br><br>
 Click this help's <i>?</i> button, then any control, for what it does."""
 
 EDITOR_HEIGHT = 300  # pixels, the editor's least height
+STRIP_HEIGHT = 34  # pixels, the strip of letters with the same diacritic
 REFERENCE_WIDTH = 170  # pixels, the reference's column
 HANDLE = 4  # half the side of a frame's handle, in pixels
 SETTINGS_FILE = "diacritics.json"  # in FreeLab's state folder: the reference font chosen
@@ -2126,6 +2234,12 @@ def make_editor(owner):
                     painter.scale(scale * sx, -scale * sy)
                     painter.fillPath(path, QtGui.QBrush(color))
                     painter.restore()
+                caption = scene.get("captions", {}).get(role)
+                if caption:
+                    painter.setPen(QtGui.QPen(text))
+                    middle = x0 + (x + advance / 2.0) * scale
+                    painter.drawText(QtCore.QRectF(middle - 80, _property(self, "rect").height() - 18, 160, 16),
+                                     int(QtCore.Qt.AlignCenter), caption)
                 x += advance
             if self.snapped is not None and self.drag is not None:  # the center the dragged mark snapped to
                 guide = QtGui.QColor(highlight)
@@ -2834,6 +2948,20 @@ class AnchorPage(object):
         dx, dy = g.adjust.get(name, (0, 0))
         return [sign * dx, sign * dy, 1.0, 1.0]
 
+    def snap_targets(self, index):
+        """[(x, label)] the dragged sample mark's center snaps to, as on the Letters tab: its letter's box
+        center and top (or bottom) center, for anchors above and below."""
+        scene = self.editor.scene
+        if scene is None or index is None or index >= len(getattr(self, "edits", [])):
+            return []
+        name = self.edits[index][1].lstrip(u"_")
+        side = "above" if name.startswith(u"top") else ("below" if name.startswith(u"bottom") else None)
+        base = scene["parts"][0]
+        letter = scene["ink"](base[0])
+        if side is None or letter is None:
+            return []
+        return letter_centers(letter, base[3], side)
+
     def set_adjust(self, index, change, final):
         """The sample mark moved: the selected glyph's anchor moved with it (a mark's own the other way)."""
         if index is None or index >= len(getattr(self, "edits", [])):
@@ -3015,6 +3143,14 @@ class AccentsDialog(object):
         self.set_box.setCurrentIndex(0 if self.given else len(SETS) - 1)
         self.set_box.setWhatsThis(u"The Unicode blocks whose missing letters with diacritics are listed.")
         row.addWidget(self.set_box)
+        self.existing_box = QtGui.QCheckBox(u"List the font's own letters too, to rebuild")
+        self.existing_box.setWhatsThis(u"Also lists the letters with diacritics the font already has (Latin, Greek, "
+                                       u"and Cyrillic), in a section of their own, unchecked: each shown beside its "
+                                       u"glyph as the font has it, to compare. Placements applied to related letters "
+                                       u"and marks lined up reach them too, so a font can be made consistent; only "
+                                       u"those you check are rebuilt (their glyphs' outlines in each master replaced "
+                                       u"by the letter and marks as components; <i>Edit &gt; Undo</i> takes it back).")
+        row.addWidget(self.existing_box)
         row.addStretch(1)
         layout.addLayout(row)
         self.tree = QtGui.QTreeWidget()
@@ -3028,6 +3164,29 @@ class AccentsDialog(object):
                                u"Select a row to see its letter in the reference font. Double-click a row to open its "
                                u"glyph (or, not built yet, its letter) in a <i>Glyph</i> window.")
         layout.addWidget(self.tree, 3)
+        # The letters with the same diacritic as the selected one: a strip under the list to go from one
+        # to the next (Ĉ placed by hand, then Â, Ê, ĉ...), as FontLab's glyph strip does.
+        strip_row = QtGui.QHBoxLayout()
+        self.strip_label = QtGui.QLabel(u"Same diacritic:")
+        strip_row.addWidget(self.strip_label)
+        self.strip_area = QtGui.QScrollArea()
+        self.strip_area.setWidgetResizable(True)
+        self.strip_area.setFrameShape(QtGui.QFrame.NoFrame)
+        self.strip_area.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+        self.strip_area.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        self.strip_area.setFixedHeight(STRIP_HEIGHT)
+        strip = QtGui.QWidget()
+        self.strip_layout = QtGui.QHBoxLayout(strip)
+        self.strip_layout.setContentsMargins(0, 0, 0, 0)
+        self.strip_layout.setSpacing(2)
+        self.strip_layout.addStretch(1)
+        self.strip_area.setWidget(strip)
+        self.strip_area.setWhatsThis(u"The letters with the same diacritic as the selected glyph (on the same side, "
+                                     u"capitals and lowercase): click one to select it and see how the mark sits "
+                                     u"on it, after placing it by hand or applying it to related letters.")
+        strip_row.addWidget(self.strip_area, 1)
+        layout.addLayout(strip_row)
+        self.strip_buttons, self.strip_slots = [], []
 
         lower = QtGui.QHBoxLayout()
         reference = QtGui.QVBoxLayout()
@@ -3085,6 +3244,16 @@ class AccentsDialog(object):
                                            u"in their row, to look at; <i>Reset diacritics</i> on a row puts it back."
                                            % round(TOUCH_SHARE * 1000))
         hint_row.addWidget(self.propagate_button)
+        self.line_up_button = QtGui.QPushButton(u"Line up marks")
+        self.line_up_button.setWhatsThis(u"Sets every mark above (or below) of the same group at the same height as "
+                                         u"this glyph's: its bottom (a mark below: its top) level with this one's. A "
+                                         u"group: the same side, the same case, and letters of the same height "
+                                         u"(within %d%% of the em: h's circumflex is not set as low as e's). Marks "
+                                         u"placed by a rule of their own (cedilla, ogonek, horn, the vertical caron, "
+                                         u"conventions), stacked marks, and taller or shorter letters are left as they "
+                                         u"are and named in the log. Each moved mark counts as moved by hand: "
+                                         u"<i>Reset diacritics</i> on a row puts it back." % round(LINE_UP_HEIGHT_SHARE * 100))
+        hint_row.addWidget(self.line_up_button)
         editing.addLayout(hint_row)
         lower.addLayout(editing, 1)
         layout.addLayout(lower, 2)
@@ -3125,6 +3294,7 @@ class AccentsDialog(object):
         self.anchors_read = False
         self.tabs.connect("currentChanged(int)", self.switch_page)
         self.set_box.connect("currentIndexChanged(int)", lambda index: self.run())
+        self.existing_box.connect("toggled(bool)", lambda on: self.run())
         self.all_button.connect("clicked()", lambda: self.check_all(True))
         self.none_button.connect("clicked()", lambda: self.check_all(False))
         self.restore_button.connect("clicked()", self.restore)
@@ -3132,6 +3302,7 @@ class AccentsDialog(object):
         self.kerning_button.connect("clicked()", self.check_kerning)
         self.reset_marks_button.connect("clicked()", self.reset_marks)
         self.propagate_button.connect("clicked()", self.propagate)
+        self.line_up_button.connect("clicked()", self.line_up)
         self.build_button.connect("clicked()", self.build)
         self.close_button.connect("clicked()", dialog.close)
         self.tree.connect("itemSelectionChanged()", self.select)
@@ -3259,7 +3430,7 @@ class AccentsDialog(object):
             wanted = [ch for ch in self.characters() if script_of(ch) not in LISTED_SCRIPTS or script_of(ch) in present]
             self.absent = sorted(set(script_of(ch).capitalize() for ch in self.characters()
                                      if script_of(ch) in LISTED_SCRIPTS and script_of(ch) not in present))
-            self.recipes = plan(font, wanted)
+            self.recipes = plan(font, wanted, self.existing_box.checked)
             self.inks, self.placements = {}, {}
             self.inks[self.master], self.placements[self.master] = self.learn(package, self.master)
         except Exception as exc:
@@ -3287,9 +3458,11 @@ class AccentsDialog(object):
             dimmed = QtGui.QBrush(self.dialog.palette.color(QtGui.QPalette.Disabled, QtGui.QPalette.Text))
         except Exception:
             dimmed = None
-        buildable = [index for index, r in enumerate(self.recipes) if not r.missing]
+        buildable = [index for index, r in enumerate(self.recipes) if not r.missing and not r.existing]
+        rebuilt = [index for index, r in enumerate(self.recipes) if not r.missing and r.existing]
         lacking = [index for index, r in enumerate(self.recipes) if r.missing]
-        groups = ((u"Can be built", buildable), (u"Need a mark or letter the font lacks", lacking))
+        groups = ((u"Can be built", buildable), (u"In the font: check to rebuild", rebuilt),
+                  (u"Need a mark or letter the font lacks", lacking))
         for title, indexes in groups:
             if not indexes:
                 continue
@@ -3417,6 +3590,74 @@ class AccentsDialog(object):
         self.propagate_button.setText(u"Apply to %s" % counted(len(set(id(t) for t, _, _ in targets)), u"related letter")
                                       if targets else u"Apply to related letters")
         self.reset_marks_button.setText(u"Reset diacritic" if r is not None and len(r.marks) == 1 else u"Reset diacritics")
+        index = self.line_up_index(r)
+        ak.enable(self.line_up_button, index is not None)
+        self.line_up_button.setText(u"Line up marks %s" % r.marks[index].side if index is not None else u"Line up marks")
+
+    def line_up_index(self, r):
+        """The mark of r to line others up with: the one selected in the editor, else its first above or
+        below; None when it has none that can be (its own rule, stacked)."""
+        if r is None or r.missing:
+            return None
+        chosen = self.editor.selected
+        order = ([chosen] if chosen is not None and chosen < len(r.marks) else []) + list(range(len(r.marks)))
+        for index in order:
+            if line_up_exclusion(r, index) is None:
+                return index
+        return None
+
+    def line_up(self):
+        """Every mark of the selected one's group set at its height (line_up_plan); the others named."""
+        r = self.selected()
+        index = self.line_up_index(r)
+        ink, placement = self.inks.get(self.master), self.placements.get(self.master)
+        if index is None or ink is None or placement is None:
+            return
+        b, html = self.ak.b, self.ak.html
+        try:
+            line, moves, left_out = line_up_plan(self.recipes, r, index, ink, placement, self.metrics(self.package),
+                                                 float(self.package.upm))
+        except Exception as exc:
+            self.log.add(u"Could not line up the marks: %s" % html(exc), "error")
+            return
+        if line is None:
+            return
+        side = r.marks[index].side
+        edge = u"bottom" if side == "above" else u"top"
+        group = u"capitals" if case_of(r.char) == "upper" else u"lowercase letters"
+        for other, at, rise in moves:
+            change = list(other.adjust.get(at, [0.0, 0.0, 1.0, 1.0]))
+            change[1] += rise
+            other.adjust[at] = change
+        close = []
+        for other, _, _ in moves:
+            other.touches = self.closeness(other)
+            if other.touches:
+                close.append(other.char)
+            item = self.item_of(other)
+            if item is not None:
+                self.tree.blockSignals(True)
+                self.refresh_item(item, other)
+                self.tree.blockSignals(False)
+        if moves:
+            self.log.add(u"Lined up the marks %s of %s with %s's %s (its %s at %s): %s." % (
+                side, b(counted(len(moves), group[:-1] if len(moves) == 1 else group)), b(r.char),
+                html(r.marks[index].root), edge, b(int(round(line))),
+                u" ".join(html(other.char) for other, _, _ in moves)), "done")
+        else:
+            self.log.add(u"The marks %s of the %s like %s already sit at its height." % (side, group, b(r.char)))
+        by_reason = {}
+        for other, why in left_out:
+            by_reason.setdefault(why, []).append(other.char)
+        for why, chars in sorted(by_reason.items()):
+            self.log.add(u"Left as they are, %s: %s." % (why, b(u" ".join(chars))), "warning")
+        if close:
+            self.log.add(u"%s now %s within %d units of %s letter or another mark: %s. Look at %s." % (
+                b(counted(len(close), u"letter")), u"comes" if len(close) == 1 else u"come", round(TOUCH_SHARE * 1000),
+                u"its" if len(close) == 1 else u"their", b(u" ".join(close)), u"it" if len(close) == 1 else u"them"),
+                "warning")
+        self.select()
+        self.update_buttons()
 
     def restore(self):
         """Every check and every mark as the list first came."""
@@ -3456,9 +3697,53 @@ class AccentsDialog(object):
 
     # -- the editor ----------------------------------------------------------------
 
+    def fill_strip(self, r):
+        """The related letters' buttons (made once, reused: a button made here is never deleted)."""
+        QtCore, QtGui = _qt()
+        related = same_mark_recipes(self.recipes, r) if r is not None and not r.missing else []
+        while len(self.strip_buttons) < len(related):
+            button = QtGui.QToolButton()
+            button.setAutoRaise(True)
+            button.setCheckable(True)
+            font = QtGui.QFont(button.font)
+            font.setPointSizeF(font.pointSizeF() * 1.3)
+            button.setFont(font)
+            index = len(self.strip_buttons)
+            slot = (lambda at: lambda *args: self.strip_clicked(at))(index)
+            self.strip_slots.append(slot)
+            button.connect("clicked()", slot)
+            self.strip_layout.insertWidget(index, button)
+            self.strip_buttons.append(button)
+        self.strip_recipes = related
+        for at, button in enumerate(self.strip_buttons):
+            if at < len(related):
+                other = related[at]
+                button.setText(other.char)
+                button.setToolTip(u"%s: %s" % (other.name, other.describe()))
+                button.setChecked(other is r)
+                button.show()
+            else:
+                button.hide()
+        self.strip_label.setEnabled(bool(related))
+        current = related.index(r) if r in related else -1
+        if current >= 0:
+            self.strip_area.ensureWidgetVisible(self.strip_buttons[current])
+
+    def strip_clicked(self, at):
+        try:
+            related = getattr(self, "strip_recipes", [])
+            if 0 <= at < len(related):
+                item = self.item_of(related[at])
+                if item is not None:
+                    self.tree.setCurrentItem(item)
+                    self.tree.scrollToItem(item)
+        except Exception as exc:
+            self.log.add(u"Could not select that letter: %s" % self.ak.html(exc), "error")
+
     def select(self):
         r = self.selected()
         self.editor.selected = None
+        self.fill_strip(r)
         if r is None or r.missing:
             self.editor.scene = None
             self.editor.update()
@@ -3485,10 +3770,13 @@ class AccentsDialog(object):
         recipe.checked = checked
         if parts is None:
             return None
-        glyphs = []
+        glyphs, captions = [], {}
         base_char = unicodedata.normalize("NFD", recipe.char)[0]
         letter = self.font(self.package).glyph_for(base_char)
-        if letter:
+        if recipe.existing and ink.path(recipe.existing)[0] is not None:  # the font's own, to compare
+            glyphs.append(([(recipe.existing, 1.0, 1.0, 0.0, 0.0)], ink.path(recipe.existing)[1], "existing"))
+            captions = {"existing": u"In the font", "new": u"FreeLab"}
+        elif letter:
             glyphs.append(([(letter, 1.0, 1.0, 0.0, 0.0)], ink.path(letter)[1], "before"))
         glyphs.append((parts, width, "new"))
         sibling = self.sibling(recipe)
@@ -3500,7 +3788,7 @@ class AccentsDialog(object):
         bottom = min(metrics.bottom if metrics else -0.3 * upm, parts_box(parts, ink)[1]) - upm * 0.05
         return {"glyphs": glyphs, "parts": parts, "ranges": mark_ranges(recipe), "ink": ink, "upm": upm,
                 "top": top, "bottom": bottom, "room": (metrics.top, metrics.bottom) if metrics else (),
-                "letters": (letter, sibling)}
+                "letters": (letter, sibling), "captions": captions}
 
     def adjust_of(self, index):
         r = self.selected()
@@ -3590,7 +3878,8 @@ class AccentsDialog(object):
                 self.refresh_item(item, other)
                 self.tree.blockSignals(False)
         b = self.ak.b
-        self.log.add(u"Placed the diacritics of %s as on %s." % (b(counted(len(touched), u"letter")), b(r.char)), "done")
+        self.log.add(u"Placed the diacritics of %s as on %s: %s." % (
+            b(counted(len(touched), u"letter")), b(r.char), u" ".join(self.ak.html(t.char) for t in touched)), "done")
         if close:
             self.log.add(u"%s %s within %d units of %s letter or another mark: %s. Look at %s." % (
                 b(counted(len(close), u"letter")), u"comes" if len(close) == 1 else u"come", round(TOUCH_SHARE * 1000),
@@ -3866,11 +4155,11 @@ class AccentsDialog(object):
             if master not in self.inks:
                 self.inks[master], self.placements[master] = self.learn(package, master)
         fontlab = self.fontlab
-        made, skipped, failed, error, touched = [], [], [], None, []
+        made, skipped, failed, error, touched, rebuilt = [], [], [], None, [], []
         try:
             for r in chosen:
                 glyph = package.findName(r.name)
-                if glyph is not None and not is_empty(glyph):
+                if glyph is not None and not is_empty(glyph) and not r.existing:
                     skipped.append(r.char)  # made meanwhile
                     continue
                 added = glyph is None
@@ -3904,6 +4193,8 @@ class AccentsDialog(object):
                         component.transform = QtGui.QTransform(sx, 0.0, 0.0, sy, float(round(dx)), float(round(dy)))
                         components.append(component)
                     layer = glyph.getLayerByName(master, True)
+                    if r.existing:  # rebuilt: its outlines and components in this master replaced
+                        layer.removeAllShapes()
                     layer.setGlyphComponents(components, float(width), package, False)
                 if not placed or is_empty(package.findName(r.name)):
                     # Nothing of it drawn: said why, and a glyph added for it taken out again
@@ -3914,7 +4205,7 @@ class AccentsDialog(object):
                 if added:
                     package.findName(r.name).fgGlyph.unicode = r.code
                 touched.append(glyph)
-                made.append(r.char)
+                (rebuilt if r.existing else made).append(r.char)
                 key = self.ak.font_key(package)
                 if self.built_font != key:
                     self.built_names, self.built_font = [], key
@@ -3931,8 +4222,12 @@ class AccentsDialog(object):
                              b(counted(len(made), u"glyph")), self.ak.html(u"".join(made)), u"It is" if one else u"They are",
                              u"it" if one else u"them", u"this glyph" if len(self.built_names) == 1 else u"these glyphs",
                              u"its" if len(self.built_names) == 1 else u"their"), "done")
-        else:
+        elif not rebuilt:
             self.log.add(u"Built none.")
+        if rebuilt:
+            self.log.add(u"Rebuilt %s from %s letter and marks, in place: %s. <i>Edit &gt; Undo</i> takes %s back." % (
+                b(counted(len(rebuilt), u"glyph")), u"its" if len(rebuilt) == 1 else u"their",
+                self.ak.html(u"".join(rebuilt)), u"it" if len(rebuilt) == 1 else u"them"), "done")
         if skipped:
             self.log.add(u"%s had been made meanwhile and %s left as %s." % (
                 b(u"".join(skipped)), u"was" if len(skipped) == 1 else u"were",
