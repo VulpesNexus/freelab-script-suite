@@ -53,6 +53,26 @@ def parse(text, names):
     return fc.check_code(text, names) if HAVE_FONTTOOLS else None
 
 
+class StrokeTests(unittest.TestCase):
+    def test_a_square_grows_evenly(self):
+        square = [(0, 0, True), (100, 0, True), (100, 100, True), (0, 100, True)]  # counterclockwise, y up
+        moved = fc.offset_contour(square, 10)
+        self.assertEqual([tuple(round(v, 6) for v in p) for p in moved], [(-10, -10), (110, -10), (110, 110), (-10, 110)],
+                         "a corner moves 10 out both ways (the miter)")
+        self.assertEqual([tuple(round(v, 6) for v in p) for p in fc.offset_contour(square, 10, right=False)],
+                         [(10, 10), (90, 10), (90, 90), (10, 90)], "the other way round: inward")
+
+    def test_handles_move_with_their_point(self):
+        curve = [(0, 0, True), (50, 0, False), (100, 50, False), (100, 100, True), (0, 100, True)]
+        moved = fc.offset_contour(curve, 5)
+        self.assertEqual(moved[1][0] - curve[1][0], moved[0][0] - curve[0][0], "the handle leaving (0, 0) moves as it")
+        self.assertEqual(moved[2][1] - curve[2][1], moved[3][1] - curve[3][1], "the handle reaching (100, 100) moves as it")
+
+    def test_the_stem_across_the_middle(self):
+        inside = lambda x, y: 20 <= x <= 40 or 80 <= x <= 100  # two strokes of 20 (a zero's sides)
+        self.assertAlmostEqual(fc.stem_width(inside, (0, 0, 120, 200)), 20, delta=1)
+
+
 class IndexTests(unittest.TestCase):
     def test_suffix_anywhere(self):
         index = fc.forms_index([u"a", u"a.sc", u"a.ss01", u"a.sc.ss01", u".notdef", u"x.case"])

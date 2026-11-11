@@ -1721,6 +1721,98 @@ def figure_top(info):
     return median(tops)
 
 
+# Stroke weight kept while scaling: scaling a figure to 60% thins its strokes to 60%; most fonts' drawn small
+# figures have ink about 7% wider than scaling gives (the corpus's figure forms). A form built with STROKE_WEIGHT
+# above 100 is made of outlines (not components), offset outward until its strokes are that share of the
+# scaled ones: the same offset on both sides of each stroke, so it keeps its place.
+STROKE_WEIGHT = 107  # percent of the scaled strokes
+MITER_LIMIT = 2.0  # a sharp corner moves at most this many times the offset
+
+
+def offset_contour(points, distance, right=True):
+    """A closed contour's points [(x, y, on-curve)] moved outward by distance (inward when negative):
+    each on-curve point along the bisector of the normals of its two neighbors' directions (a corner
+    moves further, up to MITER_LIMIT times), each handle with its on-curve point (the one it leaves or
+    reaches), so curves keep their directions. right: the outside is right of the contour's direction
+    (PostScript's counterclockwise outer contours, y up); else left. Returns [(x, y)]."""
+    import math
+    count = len(points)
+    ons = [i for i, point in enumerate(points) if point[2]]
+    if not ons or not distance:
+        return [(x, y) for x, y, _ in points]
+
+    def away(i, step):
+        x, y = points[i][0], points[i][1]
+        for k in range(1, count):
+            q = points[(i + step * k) % count]
+            dx, dy = q[0] - x, q[1] - y
+            length = math.hypot(dx, dy)
+            if length > 1e-6:
+                return dx / length * step, dy / length * step
+        return None
+
+    def normal(d):
+        return (d[1], -d[0]) if right else (-d[1], d[0])
+
+    moves = {}
+    for i in ons:
+        din, dout = away(i, -1), away(i, 1)
+        if din is None or dout is None:
+            moves[i] = (0.0, 0.0)
+            continue
+        nin, nout = normal(din), normal(dout)
+        bx, by = nin[0] + nout[0], nin[1] + nout[1]
+        length = math.hypot(bx, by)
+        if length < 1e-6:
+            bx, by = nin
+        else:
+            bx, by = bx / length, by / length
+        cos_half = max(bx * nin[0] + by * nin[1], 1.0 / MITER_LIMIT)
+        moves[i] = (bx * distance / cos_half, by * distance / cos_half)
+    moved = []
+    for i, (x, y, on) in enumerate(points):
+        if on:
+            dx, dy = moves[i]
+        else:  # a handle: with the on-curve point it is nearer along the contour (it leaves or reaches it)
+            back = next(k for k in range(1, count + 1) if points[(i - k) % count][2])
+            ahead = next(k for k in range(1, count + 1) if points[(i + k) % count][2])
+            dx, dy = moves[(i - back) % count] if back <= ahead else moves[(i + ahead) % count]
+        moved.append((x + dx, y + dy))
+    return moved
+
+
+def signed_area(points):
+    """A closed contour's area by its points (positive: counterclockwise, y up), its handles counted as
+    corners: enough to tell its direction."""
+    total = 0.0
+    for i in range(len(points)):
+        x0, y0 = points[i][0], points[i][1]
+        x1, y1 = points[(i + 1) % len(points)][0], points[(i + 1) % len(points)][1]
+        total += x0 * y1 - x1 * y0
+    return total / 2.0
+
+
+def stem_width(contains, box, steps=400):
+    """The stroke width of a figure across its middle (its vertical strokes): the median length of the
+    runs inside it on a line at half its height. contains(x, y): inside; box: (left, bottom, right, top)."""
+    left, bottom, right, top = box
+    y = (bottom + top) / 2.0
+    step = max((right - left) / float(steps), 0.5)
+    runs, start, x = [], None, left - step
+    while x <= right + step:
+        inside = contains(x, y)
+        if inside and start is None:
+            start = x
+        elif not inside and start is not None:
+            runs.append(x - start)
+            start = None
+        x += step
+    if not runs:
+        return None
+    runs.sort()
+    return runs[len(runs) // 2]
+
+
 def small_settings(info, cap, upm=1000):
     """{set: {"scale", "baseline", "width", "why", "top_of"}}: each set's first settings. Scale and width
     are the medians of the font's own drawn forms of the set where it has some, else of its other small
@@ -1992,7 +2084,7 @@ to review, and changes nothing.<br>
 Unicode superscript and subscript figures, and ordinal indicators the font lacks, each made of its
 figure (or <i>a</i> or <i>o</i>) as a component, scaled and raised or lowered as most open-licensed fonts place
 them (or as the font's own small figures, where it has some). Pick a set in the settings row to change
-its scale, baseline, and width. Scaling thins the strokes: a built form is a start to draw over.
+its scale, baseline, and width, and the strokes kept (outlines thickened evenly; 100%: components). A built form is a start to refine.
 <i>Build checked glyphs</i> adds them in one step of FontLab's History; the font is read again, and
 the forms above take them.<br><br>
 The code is made again as you change the choices. Pick a ligature's feature in its box; drag between the parts to give one more room;
@@ -2740,6 +2832,17 @@ class FeatureCodeDialog(object):
         self.ak.grid_lines(self.small_tree)
         part.addWidget(self.small_tree, 1)
         row = QtGui.QHBoxLayout()
+        row.addWidget(QtGui.QLabel(u"Strokes"))
+        self.stroke_box = QtGui.QSpinBox()
+        self.stroke_box.setRange(100, 160)
+        self.stroke_box.setSuffix(u"%")
+        self.stroke_box.setValue(STROKE_WEIGHT)
+        self.stroke_box.setWhatsThis(u"How thick the built forms' strokes are, as a share of their scaled figure's: "
+                                     u"scaling a figure to 60%% thins its strokes to 60%%; drawn small figures are about "
+                                     u"7%% bolder than scaled ones (the corpus's fonts), hence %d%%. Above 100%%, each form "
+                                     u"is made of outlines (not components), offset outward evenly on both sides of each "
+                                     u"stroke; 100%%: components, scaled, as they are." % STROKE_WEIGHT)
+        row.addWidget(self.stroke_box)
         row.addStretch(1)
         self.build_button = QtGui.QPushButton(build_label(0))
         self.build_button.setWhatsThis(u"Adds the checked glyphs to the font, made of components as shown, in one "
@@ -2853,12 +2956,12 @@ class FeatureCodeDialog(object):
             self.small_label.setText(u"")
         elif self.small_forms:
             self.small_label.setText(
-                u"The font lacks %s. Each is made of its figure (or <i>a</i> or <i>o</i>) as a component, scaled and "
-                u"moved, or of a "
-                u"drawn small figure where the font has a whole set of them: a start, not a drawing. Scaling thins "
-                u"the strokes (a figure at 60%% has stems 60%% as thick; most fonts' drawn small figures have "
-                u"ink about 7%% wider than scaling gives): draw over them, or draw your own. Built, the features above "
-                u"take them." % (
+                u"The font lacks %s. Each is made of its figure (or <i>a</i> or <i>o</i>), scaled and moved, or of "
+                u"a drawn small figure where the font has a whole set of them. Scaling alone thins the strokes (a "
+                u"figure at 60%% has stems 60%% as thick); with <i>Strokes</i> above 100%%, the form is made of "
+                u"outlines thickened evenly to that share of the scaled strokes (drawn small figures are about 7%% "
+                u"bolder than scaled ones: 107%%), at 100%% of components. A start to refine, not a drawing. Built, the "
+                u"features above take them." % (
                     self.ak.b(counted(len(self.small_forms), u"figure form"))))
         elif self.small_info is not None and not any(self.small_info.figures()):
             self.small_label.setText(u"The font has no figures 0 to 9 to build small forms of.")
@@ -3023,6 +3126,67 @@ class FeatureCodeDialog(object):
             self.small_set.blockSignals(False)
             self.small_set_picked(SMALL_SETS.index(set_key))
 
+    def figure_stem(self, package, master):
+        """The font's figure stroke in a master (its zero's, else its one's), measured once."""
+        QtCore = _qt()[0]
+        if master in self.stems:
+            return self.stems[master]
+        found = None
+        for name in (u"zero", u"one"):
+            glyph = package.findName(name)
+            layer = glyph.getLayerByName(master) if glyph is not None and not glyph.isNull else None
+            if layer is None:
+                continue
+            path = self.ak.layer_path(layer)
+            rect = path.boundingRect()
+            if rect.isEmpty():
+                continue
+            found = stem_width(lambda x, y: path.contains(QtCore.QPointF(x, y)),
+                               (rect.left(), rect.top(), rect.right(), rect.bottom()))
+            if found:
+                break
+        self.stems[master] = found
+        return found
+
+    def outlines_with_strokes(self, package, master, plan, layer, weight):
+        """layer (empty, the new form's) made of copies of its parts' outlines, scaled and placed as planned,
+        then offset outward so their strokes are weight times the scaled ones; False (nothing added) when a
+        part is made of components or the figure's stroke cannot be measured: then built of components."""
+        QtGui = _qt()[1]
+        stem = self.figure_stem(package, master)
+        if not stem:
+            return False
+        copies = []
+        for part in plan.parts:
+            name, sx, sy, dx, dy = unwrapped(package, master, *part)
+            source = package.findName(name)
+            source_layer = source.getLayerByName(master) if source is not None else None
+            if source_layer is None or any(shape.isComponent for shape in source_layer.shapes):
+                return False
+            distance = stem * abs(sx) * (weight - 1.0) / 2.0
+            copies.append((source_layer, QtGui.QTransform(sx, 0.0, 0.0, sy, float(round(dx)), float(round(dy))), distance))
+        for source_layer, transform, distance in copies:
+            for shape in source_layer.shapes:
+                layer.addShape(shape.cloneTopLevel() if hasattr(shape, "cloneTopLevel") else shape.clone())
+                copy = layer.shapes[len(layer.shapes) - 1]
+                copy.applyTransform(transform)
+                contours = [c for c in copy.contours if c is not None]
+                if not contours:
+                    continue
+                shapes_points = [[(n.x, n.y, u"%s" % n.type == u"on") for n in c.nodes()] for c in contours]
+                biggest = max(shapes_points, key=lambda pts: abs(signed_area(pts)))
+                right = signed_area(biggest) > 0  # its outer contour counterclockwise (y up): the outside is right
+                own = copy.transform
+                local = (abs(own.m11() * own.m22()) ** 0.5) or 1.0  # (the offset in the contours' own units)
+                for contour in contours:
+                    nodes = contour.nodes()
+                    points = [(n.x, n.y, u"%s" % n.type == u"on") for n in nodes]
+                    for node, (x, y) in zip(nodes, offset_contour(points, distance / local, right)):
+                        node.x, node.y = x, y
+                    contour.update() if hasattr(contour, "update") else None
+        layer.advanceWidth = float(plan.width)
+        return True
+
     def small_set_picked(self, index):
         """A set picked in the settings row: its settings shown in the boxes (signals held: showing them
         changes nothing)."""
@@ -3127,7 +3291,8 @@ class FeatureCodeDialog(object):
                 plans[master] = plan_small_forms(self.small_info, self.small_forms, self.small_setup, advance)
             return plans[master]
 
-        made, skipped, failed, error, touched = [], [], [], None, []
+        made, skipped, failed, error, touched, thickened = [], [], [], None, [], []
+        self.stems = {}
         try:
             for master in masters:
                 plans_of(master)  # (each master planned before anything is added)
@@ -3147,13 +3312,18 @@ class FeatureCodeDialog(object):
                     plan = plans_of(master).get(form.name)
                     if plan is None or any(package.findName(part[0]) is None for part in plan.parts):
                         continue  # its figure not drawn in this master, or the glyph it copies not built
+                    layer = glyph.getLayerByName(master, True)
+                    weight = self.stroke_box.value / 100.0 if hasattr(self, "stroke_box") else 1.0
+                    if weight > 1.0 and self.outlines_with_strokes(package, master, plan, layer, weight):
+                        thickened.append(form.name)
+                        placed = True
+                        continue
                     components = []
                     for part in plan.parts:
                         name, sx, sy, dx, dy = unwrapped(package, master, *part)
                         component = fontlab.GlyphComponent(name)
                         component.transform = QtGui.QTransform(sx, 0.0, 0.0, sy, float(round(dx)), float(round(dy)))
                         components.append(component)
-                    layer = glyph.getLayerByName(master, True)
                     layer.setGlyphComponents(components, float(plan.width), package, False)
                     placed = True
                 if not placed or is_empty(package.findName(form.name)):
@@ -3171,11 +3341,15 @@ class FeatureCodeDialog(object):
         b = self.ak.b
         if made:
             one = len(made) == 1
-            self.log.add(u"Built %s: %s. %s at the end of the font; <i>Edit &gt; Undo</i> takes %s back. Scaling thins "
-                         u"strokes: draw over what was scaled. The forms above take %s now: check their features "
-                         u"and write the code." % (
+            kept = sorted(set(thickened))
+            strokes = (u"Made of outlines, strokes at %d%% of the scaled ones: %s." % (
+                self.stroke_box.value, self.ak.html(u", ".join(kept))) if kept else
+                u"Scaling thins strokes: draw over what was scaled.")
+            self.log.add(u"Built %s: %s. %s at the end of the font; <i>Edit &gt; Undo</i> takes %s back. %s The forms "
+                         u"above take %s now: check their features and write the code." % (
                              b(counted(len(made), u"glyph")), self.ak.html(u", ".join(made)),
-                             u"It is" if one else u"They are", u"it" if one else u"them", u"it" if one else u"them"),
+                             u"It is" if one else u"They are", u"it" if one else u"them", strokes,
+                             u"it" if one else u"them"),
                          "done")
         else:
             self.log.add(u"Built none.")
