@@ -752,6 +752,24 @@ def choose_samples(font, languages, samples=SAMPLES, most=MAX_SAMPLES):
     return groups, sorted(left_out)
 
 
+def thin_scripts(font, languages, groups):
+    """[(script, characters)] of the scripts the font has some letters of, but too few for any sample
+    text or for its letters to stand in (no group): the proof shows none of them, and says so."""
+    codes = set(code for code, name in font.cmap.items() if font.has(name))
+    shown = set(group.script for group in groups)
+    if any(group.script in HAN_SCRIPTS for group in groups):
+        shown.update(HAN_SCRIPTS)
+    found = {}
+    for language in languages:
+        if language.script in shown or language.script not in TEXT_SCRIPTS:
+            continue
+        present = found.setdefault(language.script, [])
+        for ch in language.base:  # letters only (an emoji font's keycap figures are none)
+            if ch not in present and category(ord(ch[0])).startswith(u"L") and has_character(codes, ch):
+                present.append(ch)
+    return [(script, u"".join(found[script])) for script in TEXT_SCRIPTS if found.get(script)]
+
+
 def waterfall_line(font, groups):
     """(glyph names with None for spaces, rtl) for the waterfall: sample text of the first script,
     else the font's letters, else its encoded glyphs."""
@@ -1349,11 +1367,13 @@ def colors_label(mode, ink, paper):
 
 class Renderer(object):
     """Draws a page's items with a QPainter, scale device pixels per point. path_of(master, name):
-    a glyph's QPainterPath in font units, y up (None: nothing to draw)."""
+    a glyph's QPainterPath in font units, y up (None: nothing to draw). parts_of(master, name): a color
+    glyph's [(QPainterPath, QColor)], drawn in its own colors whatever the ink (None: the ink)."""
 
-    def __init__(self, QtCore, QtGui, path_of, family=u"", ink=None):
+    def __init__(self, QtCore, QtGui, path_of, family=u"", ink=None, parts_of=None):
         self.QtCore, self.QtGui = QtCore, QtGui
         self.path_of = path_of
+        self.parts_of = parts_of
         self.family = family
         self.ink = QtGui.QColor(ink) if ink is not None else QtGui.QColor(0, 0, 0)
         self.quiet = QtGui.QColor(self.ink)
@@ -1393,7 +1413,12 @@ class Renderer(object):
                     painter.save()
                     painter.translate(item.x * scale + x * factor, item.baseline * scale)
                     painter.scale(factor, -factor)
-                    painter.fillPath(path, brush)
+                    parts = self.parts_of(item.master, name) if self.parts_of is not None else None
+                    if parts:  # a color glyph: as the font draws it, on any paper
+                        for part, color in parts:
+                            painter.fillPath(part, QtGui.QBrush(color))
+                    else:
+                        painter.fillPath(path, brush)
                     painter.restore()
             elif item.kind == "text":
                 font = self.font(max(1, int(round(item.size * scale))), item.style == "bold")
@@ -1556,7 +1581,7 @@ class ProofDialog(object):
         self.package = self.master = None
         self.busy = False
         self.seen_history = None
-        self.fonts, self.paths, self.font_glyphs = {}, {}, None
+        self.fonts, self.paths, self.font_glyphs, self.color_parts = {}, {}, None, {}
         self.proof = None
         self.page_options = Options()  # the settings the proof shown was laid out with
         self.saved = None
@@ -1763,7 +1788,7 @@ class ProofDialog(object):
     def read_font(self):
         """The current font and master (the cached glyphs dropped); False (and said so) when no font is open."""
         self.package = self.current_font()
-        self.fonts, self.paths, self.font_glyphs, self.info = {}, {}, None, None
+        self.fonts, self.paths, self.font_glyphs, self.info, self.color_parts = {}, {}, None, None, {}
         if self.package is None:
             self.master = None
             self.proof = None
@@ -1823,6 +1848,17 @@ class ProofDialog(object):
             except Exception:
                 self.paths[key] = None
         return self.paths[key]
+
+    def parts(self, master, name):
+        """A color glyph's parts in their own colors (ak.layer_parts), or None, kept."""
+        key = (master, name)
+        if key not in self.color_parts:
+            try:
+                layer = self.layer(master, name)
+                self.color_parts[key] = self.ak.layer_parts(layer) if layer is not None else None
+            except Exception:
+                self.color_parts[key] = None
+        return self.color_parts[key]
 
     def ink(self, master, name):
         path = self.path(master, name)
@@ -1900,7 +1936,7 @@ class ProofDialog(object):
 
     def history_moved(self):
         """An undo, a redo, or an edit in FontLab: the font read again and the proof laid out again."""
-        self.fonts, self.paths, self.font_glyphs, self.info = {}, {}, None, None
+        self.fonts, self.paths, self.font_glyphs, self.info, self.color_parts = {}, {}, None, None, {}
         self.rebuild()
 
     # -- the proof ------------------------------------------------------------
@@ -1919,6 +1955,30 @@ class ProofDialog(object):
             keep = common_filter(self.common, self.glyph_list()[1])
         return Options(sections, page, parse_sizes(self.waterfall_edit.text, WATERFALL_SIZES),
                        parse_sizes(self.text_edit.text, TEXT_SIZES), keep)
+
+    def note_font(self, font, options):
+        """Said once per font: a color font's glyphs, and scripts the font has letters of that its text
+        section cannot show (too few letters for any sample)."""
+        key = self.ak.font_key(self.package)
+        if key == getattr(self, "noted_font", None):
+            return
+        self.noted_font = key
+        note = self.ak.color_note(self.package)
+        if note:
+            self.log.add(note)
+        if "text" not in options.sections:
+            return
+        try:
+            languages = self.load_languages()
+            groups, _ = choose_samples(font, languages)
+            for script, characters in thin_scripts(font, languages, groups):
+                self.log.add(u"The font has %s of %s (%s), too few for a sample text or for its letters to stand in: "
+                             u"the text section shows none of them." % (
+                                 self.ak.b(counted(len(characters), u"letter")), self.ak.b(script),
+                                 self.ak.html(u" ".join(characters[:12]) + (u" …" if len(characters) > 12 else u""))),
+                             "warning")
+        except Exception as exc:
+            self.log.add(u"The sample texts could not be checked: %s" % self.ak.html(exc), "warning")
 
     def rebuild(self):
         """The proof laid out again from the settings (the font read where it changed)."""
@@ -1941,6 +2001,7 @@ class ProofDialog(object):
             options = self.options()
             self.proof = build_proof(fonts, options, self.load_languages(), info=self.font_info())
             self.page_options = options
+            self.note_font(fonts[0], options)
         except Exception as exc:
             self.proof = None
             self.log.add(u"The proof could not be laid out: %s" % self.ak.html(exc), "error")
@@ -2030,7 +2091,7 @@ class ProofDialog(object):
         try:
             ink, paper = self.colors()
             renderer = Renderer(QtCore, QtGui, self.path, self.ak._property(self.dialog, "font").family(),
-                                QtGui.QColor(*ink))
+                                QtGui.QColor(*ink), self.parts)
             size = (max(60, self.ak._property(self.preview, "width") - 2),
                     max(60, self.ak._property(self.preview, "height") - 2))
             self.preview.setPixmap(page_pixmap(QtCore, QtGui, page, renderer, size, page_size(self.page_options.page),
@@ -2133,7 +2194,7 @@ class ProofDialog(object):
 
             ink, paper = self.colors()
             renderer = Renderer(QtCore, QtGui, self.path, self.ak._property(self.dialog, "font").family(),
-                                QtGui.QColor(*ink))
+                                QtGui.QColor(*ink), self.parts)
             write_pdf(QtCore, QtGui, path, pages, renderer, self.page_options.page,
                       u"%s proof" % self.package.tfn, progress, None if paper == PRINT_COLORS[1] else QtGui.QColor(*paper))
             self.saved = path

@@ -78,6 +78,23 @@ def best_sample(codes):
     return max(range(len(SAMPLES)), key=score)
 
 
+CJK_RANGES = ((0x3000, 0x30FF), (0x3100, 0x31FF), (0x3400, 0x4DBF), (0x4E00, 0x9FFF), (0xAC00, 0xD7A3),
+              (0xF900, 0xFAFF), (0xFF00, 0xFFEF), (0x1100, 0x11FF), (0x3130, 0x318F))
+
+
+def sample_misses(codes, text):
+    """The font's CJK characters (sorted) when the sample text shows none of them, else []: the
+    preview would be empty, so the log names them."""
+    codes = set(codes)
+    if any(ord(ch) in codes for ch in text if not ch.isspace()):
+        return []
+    return [unichr_(code) for code in sorted(codes) if any(low <= code <= high for low, high in CJK_RANGES)]
+
+
+def counted_chars(number):
+    return u"%d CJK character%s" % (number, u"" if number == 1 else u"s")
+
+
 # Kinsoku, as Japanese sets lines: never first on a line (closing marks, small kana, the long vowel
 # mark), never last (opening marks)
 NO_LINE_START = set(u"、。，．・：；？！）」』】〕〉》｝］ー々ぁぃぅぇぉっゃゅょゎゕゖァィゥェォッャュョヮヵヶ,.:;?!)]}")
@@ -611,6 +628,7 @@ class CJKSpacingDialog(object):
             index = best_sample(set(fg.unicode for fg in package.fgPackage.glyphs if fg.unicode))
             self.sample_box.setCurrentIndex(index)
             self.sample.setText(SAMPLES[index][2])
+        self.note_font(package)
         self.hangul_box.setEnabled(bool(hangul))
         self.hangul = []
         if hangul and HANGUL_MODES[self.hangul_box.currentIndex][0] != "leave":
@@ -843,12 +861,32 @@ class CJKSpacingDialog(object):
                     painter.save()
                     painter.translate(x + placement * scale, size * 1.0 + step * number)
                     painter.scale(scale, -scale)
-                    painter.fillPath(self.ak.layer_path(layer), QtGui.QBrush(color))
+                    self.ak.fill_glyph(painter, self.ak.layer_path(layer), QtGui.QBrush(color), self.ak.layer_parts(layer))
                     painter.restore()
                     x += (layer.advanceWidth + advance) * scale
         finally:
             painter.end()
         return pixmap
+
+    def note_font(self, package):
+        """Said once per font and sample: a color font's glyphs, and a sample that shows none of the
+        font's CJK characters (its preview stays empty)."""
+        key = (self.ak.font_key(package), u"%s" % self.sample.text)
+        if key == getattr(self, "noted_font", None):
+            return
+        first = getattr(self, "noted_font", (None,))[0] != key[0]
+        self.noted_font = key
+        note = self.ak.color_note(package) if first else u""
+        if note:
+            self.log.add(note)
+        codes = set(fg.unicode for fg in package.fgPackage.glyphs if fg.unicode)
+        missed = sample_misses(codes, u"%s" % self.sample.text)
+        if missed:
+            shown = u" ".join(missed[:12]) + (u" …" if len(missed) > 12 else u"")
+            self.log.add(u"The sample shows none of the font's %s (%s): type text of your own with them in the "
+                         u"%s field to see them set." % (
+                             self.ak.b(counted_chars(len(missed))), self.ak.html(shown), self.ak.i(u"Sample")),
+                         "warning")
 
     def preview_room(self):
         """The previews' width in pixels, for their lines (None where Qt does not say)."""

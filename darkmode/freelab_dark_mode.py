@@ -1387,6 +1387,51 @@ def _logo_rects(view):
     return [rect for rect, _ in _logo_places(view)]
 
 
+SELECTED_INK_SHARE = 0.01  # a selected row with more near-black pixels than this holds dark ink: mapped
+SELECTED_ROWS_MAX = 200
+
+
+def _selected_rows(view, width, height):
+    """The viewport rectangles of a list's visible selected rows (full width), at most SELECTED_ROWS_MAX."""
+    QRect = _core("QRect")
+    selection = view.selectionModel() if hasattr(view, "selectionModel") else None
+    if selection is None:
+        return []
+    rows = {}
+    for index in list(selection.selectedIndexes())[:SELECTED_ROWS_MAX * 8]:
+        r = view.visualRect(index)
+        if r.isEmpty() or r.bottom() < 0 or r.top() > height:
+            continue
+        top, bottom = rows.get(r.top(), (r.top(), r.bottom()))
+        rows[r.top()] = (min(top, r.top()), max(bottom, r.bottom()))
+        if len(rows) >= SELECTED_ROWS_MAX:
+            break
+    return [QRect(0, top, width, bottom - top + 1).intersected(QRect(0, 0, width, height)) for top, bottom in rows.values()]
+
+
+def _logo_icon(icon, state):
+    """The icon a list's logo is drawn from over its mapped row, or False for a line icon the row's
+    mapping takes care of. A logo is a picture (LOGO_MIN_SIDE or larger), a swatch, or colorful. A
+    gray picture (Export Profiles' TrueType and OpenType badges) is drawn from its mapped copy:
+    left to the row's mapping, which also mapped the copy already put in the list, its edges came out
+    jagged."""
+    key = icon.cacheKey()
+    mapped = key in state["mapped_keys"]
+    large = any(s.width() >= LOGO_MIN_SIDE for s in icon.availableSizes())  # a picture, not a line icon
+    if mapped:
+        return icon if large else False  # dark already: its own smoothing, over the dark row
+    if icon_is_swatch(icon) or not icon_is_gray(icon):
+        return icon  # as FontLab draws it
+    if not large:
+        return False
+    dark = state["icon_cache"].get(key)
+    if dark is None:
+        dark = state["icon_cache"][key] = dark_icon(icon)
+        state["mapped_keys"].add(dark.cacheKey())
+        state["originals"][dark.cacheKey()] = icon
+    return dark
+
+
 def _logo_places(view):
     """[(viewport rectangle, QIcon)] of the visible logo icons in a list (see _logo_rects)."""
     QRect, QPoint, Qt = _core("QRect"), _core("QPoint"), _core("Qt")
@@ -1418,11 +1463,10 @@ def _logo_places(view):
             key = icon.cacheKey()
             logo = logos.get(key)
             if logo is None:
-                large = any(s.width() >= LOGO_MIN_SIDE for s in icon.availableSizes())  # a picture, not a line icon
-                logo = logos[key] = key not in state["mapped_keys"] and (large or icon_is_swatch(icon) or not icon_is_gray(icon))
+                logo = logos[key] = _logo_icon(icon, state)
             if logo:
                 r = view.visualRect(cell)
-                rects.append((QRect(r.x() + margin, r.y() + (r.height() - size) // 2, size, size), icon))
+                rects.append((QRect(r.x() + margin, r.y() + (r.height() - size) // 2, size, size), logo))
         if view.inherits("QTreeView"):
             index = view.indexBelow(index)
         else:  # flat lists and tables: the next row of the model
@@ -1672,12 +1716,38 @@ def _effect_classes():
                         mapped_from = without_logos(pixmap, logos)
                     draw_mapped(painter, mapped_from, offset, whole, 0.0, None, -1.0, self.freelab_keep_tint, None, 0.0, 0,
                                 anchors, None, gray, QRect(whole) if kind in ("ink", "edges") else None)
+                    if kind == "ink" and getattr(self, "freelab_list", False):
+                        draw_selected(self, painter, pixmap, offset)
                     if logos:
                         draw_logos(painter, pixmap, offset, logos)
                     keep_unmapped(self, painter, pixmap, offset)
                 except Exception as exc:
                     _note_error("effect", exc)
                     self.drawSource(painter)
+
+        def draw_selected(effect, painter, pixmap, offset):
+            """A list's selected rows as Qt drew them, over the mapping: their highlight and light text
+            are the dark palette's already, and mapped again the text's smoothing came out fringed
+            (Export Profiles). A selected row with dark ink in it (FontLab's own colors) stays mapped."""
+            view = effect.freelab_widget.parentWidget()
+            if view is None or not view.inherits("QAbstractItemView"):
+                return
+            try:
+                rows = _selected_rows(view, pixmap.width(), pixmap.height())
+                if not rows:
+                    return
+                image = pixmap.toImage()
+                for rect in rows:
+                    part = image.copy(rect)
+                    opaque, _, black = image_stats(part)
+                    if opaque and black <= SELECTED_INK_SHARE * opaque:
+                        area = rect.translated(offset)
+                        if painter.hasClipping():
+                            area = area.intersected(painter.clipBoundingRect().toAlignedRect())
+                        if not area.isEmpty():
+                            painter.drawPixmap(area, pixmap, area.translated(-offset.x(), -offset.y()))
+            except Exception as exc:
+                _note_error("list selection", exc)
 
         def logo_places(effect):
             """[(rect, icon)] of a list's logo icons (Export Profiles' formats), or [] (not a list, or failed)."""
@@ -2738,11 +2808,58 @@ def _sweep():
         if len(todo) > 200 and not full:
             _log("sweep %d queued %d (queue %d)" % (state["sweeps"], len(todo), len(state["queue"])))
     dark_title_bars(True)  # windows opened since the last sweep
+    _follow_color_font(full)
     if full:
         _prune_relit()
     for key, record in list(state["records"].items()):
         if not _alive(record["obj"]):
             del state["records"][key]
+
+
+COLOR_SAMPLE = 48  # glyphs looked at for SVG or bitmap pictures, after every glyph's color flag
+
+
+def font_in_color(package):
+    """True for a font that draws in color: shapes with their own colors (COLR, as FontLab imports
+    it), or pictures (SVG or bitmap glyphs). A few milliseconds."""
+    try:
+        glyphs = package.fgPackage.glyphs
+        for glyph in glyphs:
+            if glyph.hasColors():
+                return True
+        count, master = len(glyphs), package.master
+        for i in range(0, count, max(1, count // COLOR_SAMPLE)):
+            glyph = package.findName(glyphs[i].name)
+            layer = glyph.getLayerByName(master) if glyph is not None else None
+            if layer is not None and any(shape.shapeType == "ShapeImage" for shape in layer.shapes):
+                return True
+    except Exception:
+        return False
+    return False
+
+
+def _follow_color_font(full):
+    """A color font's own rules: while it is the current font, the native engine draws its pictures
+    and SVG glyphs as they are (what the user gets), mapping only what FontLab paints around them."""
+    state = _state()
+    lib = state.get("hooked_lib") if state.get("hooked") else None
+    if lib is None:
+        return
+    try:
+        import fontlab
+        package = fontlab.flWorkspace.instance().currentPackage
+        key = (package.tfn, package.master) if package is not None else None
+    except Exception:
+        return
+    if key == state.get("color_font_key") and not full:
+        return
+    on = bool(package is not None and font_in_color(package))
+    state["color_font_key"] = key
+    if on != state.get("color_content", False):
+        state["color_content"] = on
+        lib.freelab_hooks_set_color_content(1 if on else 0)
+        _log("a color font is %s" % ("current" if on else "no longer current"))
+        _repaint_all(_qt()[0].instance())
 
 
 def _module():
@@ -2989,7 +3106,7 @@ def _watch_windows(follow):
 # in the hooks library, before anything is drawn. Everything else (palette, Fusion, stylesheets,
 # icons, title bars, editors, lists, the other effects) is the same in both. If the native engine cannot start (no library, another Qt build), the script engine runs.
 ENGINES = ("script", "native")
-HOOKS_VERSION = 18
+HOOKS_VERSION = 19
 PALETTE_GROUPS, PALETTE_ROLES = 3, 21
 
 
@@ -3024,6 +3141,8 @@ def _hooks():
     lib.freelab_hooks_set_ink.argtypes = [ctypes.c_void_p, ctypes.c_int]
     lib.freelab_hooks_add_ink_module.argtypes = [ctypes.c_void_p]
     lib.freelab_hooks_set_subpixel.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_double]
+    lib.freelab_hooks_add_svg_module.argtypes = [ctypes.c_void_p]
+    lib.freelab_hooks_set_color_content.argtypes = [ctypes.c_int]
     kernel32 = ctypes.WinDLL("kernel32")
     kernel32.GetModuleHandleW.restype = ctypes.c_void_p
     kernel32.GetModuleHandleW.argtypes = [ctypes.c_wchar_p]
@@ -3037,7 +3156,7 @@ def _hooks():
         raise RuntimeError("FontLab's program imports only %d of the calls the native engine maps" % found)
     svg = kernel32.GetModuleHandleW(u"Qt5Svg.dll")
     if svg:  # FontLab draws some artwork (its logo) by handing an SVG to QSvgRenderer, which paints in Qt5Svg
-        lib.freelab_hooks_add_module(svg)
+        lib.freelab_hooks_add_svg_module(svg)  # left to Qt while a color font is current (its SVG glyphs)
     lib.freelab_hooks_add_ink_module(qtwidgets)  # its pens, for the lists' rows it draws (the ink viewports only)
     holder["hooks_lib"], holder["hooks_lib_path"] = lib, path
     return lib

@@ -1742,6 +1742,12 @@ class CompareDialog(object):
                 html_escape(labels[1]), b_(round_units(upm_b)), html_escape(labels[0]), b_(round_units(upm_a)), b_(round_units(upm_a)))
         self.font_label.setText(text)
         self.log.add(u"Compared %s with %s." % (b_(labels[0]), b_(labels[1])), "done")
+        noted = set()
+        for side in self.sides:
+            note = self.ak.color_note(side.package) if side.package.tfn not in noted else u""
+            noted.add(side.package.tfn)
+            if note:
+                self.log.add(note)
         self.fill_chips()
         self.fill_glyphs()
         self.fill_kerning()

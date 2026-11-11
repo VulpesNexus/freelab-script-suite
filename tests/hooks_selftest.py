@@ -215,6 +215,44 @@ target = image(fill=0xff000000)
 painting(target, lambda p: wrapper(13, c_void_p, c_void_p, c_void_p)(p, addr(origin), addr(art)))
 check("white artwork on transparency: drawn white", image_pixel(addr(target), 3, 3), 0xffffff)
 
+# text smoothed on opaque paper keeps its coverage: half-covered gray lands halfway between the ends
+paper = image(fill=0xffffffff)
+for x in range(2, 6):
+    set_pixel(addr(paper), x, 2, 0xff000000)
+    set_pixel(addr(paper), x, 3, 0xff808080)
+target = image(fill=0xff000000)
+painting(target, lambda p: wrapper(13, c_void_p, c_void_p, c_void_p)(p, addr(origin), addr(paper)))
+ink, half, ground = (image_pixel(addr(target), 3, y) & 0xff for y in (2, 3, 4))
+results.append(ground < half < ink and abs((half - ground) - (ink - ground) * 0.5) <= (ink - ground) * 0.12)
+print("%-46s %d %d %d %s" % ("opaque paper: smoothing keeps its coverage", ground, half, ink, "ok" if results[-1] else "WRONG"))
+
+# a color font's glyph picture (yellow and white on transparency): mapped normally, kept while in color
+emoji = image(fill=0x00000000)
+for x in range(1, 7):
+    set_pixel(addr(emoji), x, 2, 0xffffcc4d)
+    set_pixel(addr(emoji), x, 4, 0xffffffff)
+    set_pixel(addr(emoji), x, 5, 0xff000000)
+glyph = image(fill=0x00000000)
+for x in range(1, 7):
+    set_pixel(addr(glyph), x, 3, 0xff000000)
+hooks.freelab_hooks_set_color_content.argtypes = [c_int]
+
+
+def drawn(source):
+    out = image(fill=0xff808080)
+    painting(out, lambda p: wrapper(13, c_void_p, c_void_p, c_void_p)(p, addr(origin), addr(source)))
+    return out
+
+
+check("not in color: the emoji's white mapped", image_pixel(addr(drawn(emoji)), 3, 4), "dark")
+check("color on (no slots while unhooked)", hooks.freelab_hooks_set_color_content(1), 0)
+check("in color: the emoji's yellow kept", image_pixel(addr(drawn(emoji)), 3, 2), 0xffcc4d)
+check("in color: the emoji's white kept", image_pixel(addr(drawn(emoji)), 3, 4), 0xffffff)
+check("in color: the emoji's black kept", image_pixel(addr(drawn(emoji)), 3, 5), 0x000000)
+check("in color: a black glyph still mapped", image_pixel(addr(drawn(glyph)), 3, 3), "light")
+hooks.freelab_hooks_set_color_content(0)
+check("color off: the emoji's white mapped again", image_pixel(addr(drawn(emoji)), 3, 4), "dark")
+
 # palette reads: the light color wherever the palette holds the dark palette's color for the slot
 ACTIVE, TEXT, BASE, ROLES = 0, 6, 9, 21
 dark_table = (c_uint32 * (3 * ROLES))(*([0] * (3 * ROLES)))

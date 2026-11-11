@@ -792,7 +792,10 @@ def font_glyphs(package, characters):
     return found
 
 
-def layer_path(layer):
+def layer_path(layer, fallback=True):
+    """The layer's outlines as one QPainterPath. A layer drawn as a picture (an SVG or bitmap color
+    glyph, which FontLab does not hand to scripts) gives the outlines of the glyph's black-and-white
+    layer instead (the font's fallback outlines), if it has one."""
     QtCore, QtGui = _qt()
     path = QtGui.QPainterPath()
     path.setFillRule(QtCore.Qt.WindingFill)
@@ -802,7 +805,112 @@ def layer_path(layer):
             if contour is None:  # FontLab lists an empty contour as None in some glyphs
                 continue
             path.addPath(transform.map(contour.path()))
+    if fallback and path.isEmpty():
+        outlines = outline_layer(layer)
+        if outlines is not None:
+            return layer_path(outlines, False)
     return path
+
+
+PICTURE_SHAPE = "ShapeImage"  # an SVG or bitmap color glyph's element
+
+
+def is_picture_layer(layer):
+    try:
+        return any(shape.shapeType == PICTURE_SHAPE for shape in layer.shapes)
+    except Exception:
+        return False
+
+
+def outline_layer(layer):
+    """For a layer drawn as a picture: the glyph's other layer with outlines (an SVG font's
+    black-and-white glyphs, as FontLab imports them), or None."""
+    if not is_picture_layer(layer):
+        return None
+    try:
+        glyph = layer.glyph
+        for other in glyph.layers:
+            if other.name == layer.name or other.isMaskLayer or other.isService:
+                continue
+            if any(len(shape.contours) for shape in other.shapes):
+                return other
+    except Exception:
+        pass
+    return None
+
+
+BLACK_RGBA = 0xff000000
+
+
+def layer_parts(layer):
+    """[(QPainterPath, QColor)] for a layer whose shapes carry their own colors (a COLR color glyph,
+    as FontLab imports it), or None for a glyph drawn in one ink."""
+    QtCore, QtGui = _qt()
+    parts, colored = [], False
+    try:
+        for shape in layer.shapes:
+            color = shape.brush.color()
+            colored = colored or (color.rgba() & 0xffffffff) != BLACK_RGBA
+            path = QtGui.QPainterPath()
+            path.setFillRule(QtCore.Qt.WindingFill)
+            transform = shape.transform
+            for contour in shape.contours:
+                if contour is not None:
+                    path.addPath(transform.map(contour.path()))
+            if not path.isEmpty():
+                parts.append((path, QtGui.QColor(color)))
+    except Exception:
+        return None
+    return parts if colored and parts else None
+
+
+def fill_glyph(painter, path, brush, parts=None, transform=None):
+    """Fill a glyph: in the brush's ink, or, given layer_parts, each part in its own color (with the
+    brush's transparency), as the font draws it. transform maps the parts as the path was mapped."""
+    QtGui = _qt()[1]
+    if not parts:
+        painter.fillPath(path, brush)
+        return
+    alpha = brush.color().alphaF() if brush is not None else 1.0
+    for part, color in parts:
+        if transform is not None:
+            part = transform.map(part)
+        if alpha < 1.0:
+            color = QtGui.QColor(color)
+            color.setAlphaF(color.alphaF() * alpha)
+        painter.fillPath(part, QtGui.QBrush(color))
+
+
+def color_kind(package, sample=48):
+    """How a font draws in color: "layers" (shapes with their own colors: COLR), "pictures" (SVG or
+    bitmap glyphs), or None. A few milliseconds: every glyph's color flag, then a sample of glyphs."""
+    try:
+        glyphs = package.fgPackage.glyphs
+        for glyph in glyphs:
+            if glyph.hasColors():
+                return "layers"
+        count = len(glyphs)
+        master = package.master
+        for i in range(0, count, max(1, count // sample)):
+            glyph = package.findName(glyphs[i].name)
+            layer = glyph.getLayerByName(master) if glyph is not None else None
+            if layer is not None and is_picture_layer(layer):
+                return "pictures"
+    except Exception:
+        return None
+    return None
+
+
+def color_note(package):
+    """A sentence for a script's log about a color font, or u"" for one drawn in one ink."""
+    kind = color_kind(package)
+    name = b(package.tfn)
+    if kind == "layers":
+        return u"%s is a color font: its glyphs are shown in their own colors." % name
+    if kind == "pictures":
+        return (u"%s draws its glyphs as color pictures (SVG or bitmaps), which FontLab does not hand to "
+                u"scripts: their black-and-white outlines are shown instead, where the font has them." % name)
+    return u""
 
 
 class FontLabGlyphs(object):
@@ -1818,7 +1926,7 @@ def pair_pixmap(package, master, left, right, value, caption, color, font, room=
             painter.save()
             painter.translate(x, em * 1.05)
             painter.scale(scale, -scale)
-            painter.fillPath(path, QtGui.QBrush(ink))
+            fill_glyph(painter, path, QtGui.QBrush(ink), layer_parts(layer))
             painter.restore()
             x += (layer.advanceWidth + (value if index == 0 else 0)) * scale
         painter.setPen(color)

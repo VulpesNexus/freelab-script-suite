@@ -28,7 +28,7 @@
  */
 #include "freelab_pixels.c"
 
-#define FREELAB_HOOKS_VERSION 18
+#define FREELAB_HOOKS_VERSION 19
 
 typedef int (*virtual_protect_fn)(void *, size_t, uint32_t, uint32_t *);
 #define PAGE_READWRITE_ 0x04
@@ -257,6 +257,11 @@ static void *originals[H_COUNT];
 static void **slots[MODULES][H_COUNT];
 static int module_count;
 static int module_ink[MODULES]; /* Qt5Widgets: only its pens, through the ink wrappers */
+static int module_svg[MODULES]; /* Qt5Svg: FontLab's SVG artwork (its logo, a color font's SVG glyphs) */
+/* The current font draws in color (SVG, color layers, bitmaps): its pictures are what the user gets,
+ * so they are drawn as they are. Qt5Svg's slots point at Qt again (a color glyph's SVG is painted
+ * through it on the canvas), and a picture FontLab drew into an image (a glyph cell) is not mapped. */
+static int color_content;
 static int64_t hook_calls[H_COUNT];
 static int64_t hook_changed[H_COUNT];
 
@@ -613,17 +618,65 @@ static int has_transparency(const uint8_t *bits, int w, int h, int stride)
     return 0;
 }
 
+/* A picture, not ink: a color glyph (an emoji) FontLab drew into an image. Of its visible pixels, at
+ * least PICTURE_SHARE percent are colored, or (on transparency, where a glyph's ink is black) light;
+ * a glyph drawn in black, smoothed toward transparency, is none of these. */
+#define PICTURE_CHROMA 40 /* max - min of the channels */
+#define PICTURE_LIGHT 150 /* every channel at least this: white or light gray parts */
+#define PICTURE_SHARE 1
+#define PICTURE_MIN 4
+static int is_picture(const uint8_t *bits, int w, int h, int stride, int format, int clear)
+{
+    int x, y;
+    int64_t visible = 0, colored = 0;
+    for (y = 0; y < h; y++) {
+        const uint32_t *row = (const uint32_t *)(bits + (int64_t)y * stride);
+        for (x = 0; x < w; x++) {
+            uint32_t v = row[x], a = format == QIMAGE_RGB32 ? 255 : v >> 24, r, g, b, hi, lo;
+            if (a < 128)
+                continue; /* smoothing: blended, not the picture's own color */
+            r = (v >> 16) & 255;
+            g = (v >> 8) & 255;
+            b = v & 255;
+            if (format == QIMAGE_ARGB32_PREMULTIPLIED && a < 255) {
+                r = r * 255 / a;
+                g = g * 255 / a;
+                b = b * 255 / a;
+            }
+            hi = r > g ? (r > b ? r : b) : (g > b ? g : b);
+            lo = r < g ? (r < b ? r : b) : (g < b ? g : b);
+            visible++;
+            colored += hi - lo >= PICTURE_CHROMA || (clear && lo >= PICTURE_LIGHT);
+        }
+    }
+    return colored >= PICTURE_MIN && colored * 100 >= visible * PICTURE_SHARE;
+}
+
+/* Opaque images up to this many pixels are mapped by anchor blends (the script engine's islands):
+ * text smoothed on paper keeps its coverage, which a color-by-color mapping bent (edges too thin). */
+#define ANCHORED_MAX_PIXELS (1 << 20)
+
 static void map_image_pixels(void *image, int format, int mode)
 {
     uint8_t *bits = qt_image_bits(image); /* detaches: the copy gets pixels of its own */
     int w = qt_image_width(image), h = qt_image_height(image), stride = qt_image_bytes_per_line(image), x, y;
+    int clear;
     if (!bits || w <= 0 || h <= 0)
         return;
-    if (mode != SCREEN_SUBPIXEL && has_transparency(bits, w, h, stride) && white_artwork(bits, w, h, stride, format))
+    clear = has_transparency(bits, w, h, stride);
+    if (mode != SCREEN_SUBPIXEL && clear && white_artwork(bits, w, h, stride, format))
         return;
+    if (mode != SCREEN_SUBPIXEL && color_content && is_picture(bits, w, h, stride, format, clear))
+        return; /* a color glyph: drawn as the font has it */
     if (mode == SCREEN_SUBPIXEL && stride == w * 4) {
         /* opaque ClearType text on paper: the pixel helper's subpixel mapping, as the script engine's */
         freelab_map_anchors(bits, (int64_t)w * h, w, ANCHORS_SUBPIXEL, hook_dark_l, hook_light_l, 0.0,
+                            subpixel_background_okl, 1);
+        return;
+    }
+    if (!clear && stride == w * 4 && (int64_t)w * h <= ANCHORED_MAX_PIXELS) {
+        /* text or glyphs drawn on paper (an installed font's preview): mapped by anchor blends */
+        freelab_map_anchors(bits, (int64_t)w * h, w, ANCHORS_ALL, hook_dark_l, hook_light_l, hook_keep_tint,
                             subpixel_background_okl, 1);
         return;
     }
@@ -670,7 +723,7 @@ static const void *mapped_image(const void *image, int mode)
         return image;
     if (__sync_lock_test_and_set(&image_busy, 1))
         return image; /* another thread is mapping: drawn as it is this once */
-    key = qt_image_cache_key(image) * 2 + (mode == SCREEN_SUBPIXEL); /* a copy per mapping */
+    key = qt_image_cache_key(image) * 4 + (mode == SCREEN_SUBPIXEL) + 2 * color_content; /* a copy per mapping */
     for (i = 0; i < IMAGE_SLOTS; i++) {
         if (image_cache[i].used && image_cache[i].key == key) {
             image_cache[i].stamp = ++image_clock;
@@ -728,7 +781,7 @@ static const void *mapped_pixmap(const void *pixmap, int mode)
     key = qt_pixmap_cache_key(pixmap);
     if (key == 0)
         return pixmap;
-    key = key * 2 + (mode == SCREEN_SUBPIXEL);
+    key = key * 4 + (mode == SCREEN_SUBPIXEL) + 2 * color_content;
     if (__sync_lock_test_and_set(&image_busy, 1))
         return pixmap;
     for (i = 0; i < PIXMAP_SLOTS; i++) {
@@ -1237,6 +1290,18 @@ static void *wrapper_for(int module, int index)
     return index == H_SET_PEN_COLOR ? (void *)w_ink_set_pen_color : index == H_SET_PEN ? (void *)w_ink_set_pen : 0;
 }
 
+/* Of Qt5Svg's slots, those that carry colors (a painter's life and palette reads stay hooked: a
+ * painter noted through one wrapper is forgotten through another). */
+static int svg_color_hook(int index)
+{
+    return index != H_PAINTER_ON && index != H_PAINTER_OFF && index != H_PAINTER_BEGIN && index != H_PAINTER_END;
+}
+
+static int svg_left_alone(int module, int index)
+{
+    return module_svg[module] && color_content && svg_color_hook(index);
+}
+
 /* ---- PE tables ---------------------------------------------------------------------------------- */
 
 static uint32_t rd32(const uint8_t *p) { return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24); }
@@ -1474,9 +1539,50 @@ EXPORT int freelab_hooks_install(double dark_l, double light_l, double keep_tint
     hooks_on = 1;
     for (m = 0; m < module_count; m++)
         for (i = 0; i < H_COUNT; i++)
-            if (slots[m][i] && wrapper_for(m, i) && *slots[m][i] != wrapper_for(m, i) && write_slot(slots[m][i], wrapper_for(m, i)))
+            if (slots[m][i] && wrapper_for(m, i) && !svg_left_alone(m, i) && *slots[m][i] != wrapper_for(m, i) &&
+                write_slot(slots[m][i], wrapper_for(m, i)))
                 hooked++;
     return hooked;
+}
+
+/* Qt5Svg: as add_module, and its color-carrying slots point at Qt while the current font is in color. */
+EXPORT int freelab_hooks_add_svg_module(uint8_t *module)
+{
+    int before = module_count, found = freelab_hooks_add_module(module);
+    if (found >= 0 && module_count > before)
+        module_svg[module_count - 1] = 1;
+    return found;
+}
+
+/* The current font draws in color (1) or not (0): Qt5Svg's color slots go back to Qt or to the
+ * wrappers, and pictures drawn into images are drawn as they are. Returns how many slots changed. */
+EXPORT int freelab_hooks_set_color_content(int on)
+{
+    int i, m, changed = 0;
+    on = on != 0;
+    if (on == color_content)
+        return 0;
+    color_content = on;
+    if (!hooks_on)
+        return 0; /* install points the slots as they should be */
+    for (m = 0; m < module_count; m++) {
+        if (!module_svg[m])
+            continue;
+        for (i = 0; i < H_COUNT; i++) {
+            void *target;
+            if (!slots[m][i] || !svg_color_hook(i))
+                continue;
+            target = on ? originals[i] : wrapper_for(m, i);
+            if (*slots[m][i] != target && write_slot(slots[m][i], target))
+                changed++;
+        }
+    }
+    return changed;
+}
+
+EXPORT int freelab_hooks_color_content(void)
+{
+    return color_content;
 }
 
 /* Mapping on or off without touching the slots (the wrappers then pass everything through). */

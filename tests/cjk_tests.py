@@ -155,6 +155,18 @@ class SampleTests(unittest.TestCase):
         self.assertEqual(cj.SAMPLES[cj.best_sample(codes_of("zh-hant"))][0], "zh-hant")
 
 
+class MissTests(unittest.TestCase):
+    def test_a_sample_showing_none_of_the_fonts_cjk_characters_names_them(self):
+        codes = {0x41, 0x3030, 0x303D, 0x1F600}  # an emoji font: a wavy dash and a part mark
+        self.assertEqual(cj.sample_misses(codes, cj.SAMPLE), [cj.unichr_(0x3030), cj.unichr_(0x303D)])
+
+    def test_a_sample_showing_some_says_nothing(self):
+        self.assertEqual(cj.sample_misses({0x3044, 0x3030}, cj.SAMPLE), [])
+
+    def test_no_cjk_characters_no_note(self):
+        self.assertEqual(cj.sample_misses({0x41, 0x42}, cj.SAMPLE), [])
+
+
 class LineTests(unittest.TestCase):
     def test_lines_fit_the_room(self):
         chars = list(u"abcdefgh")

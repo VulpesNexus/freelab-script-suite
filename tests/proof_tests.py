@@ -284,6 +284,13 @@ class SampleTests(unittest.TestCase):
         self.assertTrue(hebrew_groups and hebrew_groups[0].rtl)
         self.assertIn(u"Arabic", left_out)
 
+    def test_scripts_too_thin_for_any_sample_are_named(self):
+        font = make_font(u"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz .," + u(0x3042) + u(0x3044))
+        groups, _ = fp.choose_samples(font, self.languages)
+        thin = dict(fp.thin_scripts(font, self.languages, groups))
+        self.assertNotIn(u"Latin", thin, "shown")
+        self.assertEqual(thin.get(u"Hiragana"), u(0x3042) + u(0x3044), "two kana: no sample, too few to stand in")
+
     def test_waterfall_line(self):
         font = make_font()
         groups, _ = fp.choose_samples(font, self.languages)

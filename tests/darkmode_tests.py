@@ -1503,6 +1503,66 @@ class OldQtTests(DarkModeCase):
         self.assertIn("Window", roles)
 
 
+class _Shape(object):
+    def __init__(self, kind):
+        self.shapeType = kind
+
+
+class _Layer(object):
+    def __init__(self, kinds):
+        self.shapes = [_Shape(k) for k in kinds]
+
+
+class _FgGlyph(object):
+    def __init__(self, name, colors=False):
+        self.name, self.colors = name, colors
+
+    def hasColors(self):
+        return self.colors
+
+
+class _Glyph(object):
+    def __init__(self, kinds):
+        self.layer = _Layer(kinds)
+
+    def getLayerByName(self, name):
+        return self.layer
+
+
+class _FgPackage(object):
+    def __init__(self, glyphs):
+        self.glyphs = glyphs
+
+
+class _Package(object):
+    master = "Regular"
+
+    def __init__(self, glyphs, kinds):
+        self.fgPackage = _FgPackage(glyphs)
+        self.kinds = kinds
+
+    def findName(self, name):
+        return _Glyph(self.kinds.get(name, ["ShapeContours"]))
+
+
+class ColorFontTests(unittest.TestCase):
+    def test_a_font_in_one_ink_is_not_in_color(self):
+        glyphs = [_FgGlyph("g%d" % i) for i in range(200)]
+        self.assertFalse(dm.font_in_color(_Package(glyphs, {})))
+
+    def test_colored_shapes_make_a_color_font(self):
+        glyphs = [_FgGlyph("g%d" % i, colors=(i == 150)) for i in range(200)]
+        self.assertTrue(dm.font_in_color(_Package(glyphs, {})))
+
+    def test_svg_pictures_make_a_color_font(self):
+        glyphs = [_FgGlyph("g%d" % i) for i in range(200)]
+        kinds = dict(("g%d" % i, ["ShapeImage"]) for i in range(100, 200))  # its emoji, after the letters
+        self.assertTrue(dm.font_in_color(_Package(glyphs, kinds)))
+
+    def test_a_failing_font_is_not_in_color(self):
+        self.assertFalse(dm.font_in_color(object()))
+
+
 def _ancestors(widget):
     parent = widget.parentWidget()
     while parent is not None:
