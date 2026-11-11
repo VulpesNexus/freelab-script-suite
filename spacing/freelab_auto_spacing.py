@@ -993,6 +993,9 @@ class AutoSpacingDialog(object):
                              KERNING_BUTTON))
         lines.append(u"<i>Edit &gt; Undo</i> (or the <i>History</i> panel) takes it back.")
         self.log.add(u" ".join(lines), "done" if totals else "info")
+        overhang = self.overhang_line() if self.follow.checked else u""
+        if overhang:
+            self.log.add(overhang, "warning")
         if unread:
             self.log.add(u"FontLab did not give the new outlines back at once, so the glyphs could not be measured again "
                          u"before the step ended: the list shows what is left, to space with another click.", "warning")
@@ -1056,10 +1059,14 @@ class AutoSpacingDialog(object):
 
     def follow_composites(self, totals):
         """The composites built on the glyphs spaced, moved with them (totals: each glyph's changes in
-        all); the names of those moved."""
+        all); the names of those moved. One whose marks would then stick out past its width (or before
+        its start) further than they did, by more than OVERHANG_SHARE of the em (a horn on a tighter O, a
+        vertical caron on d), is left as it was and kept in self.overhanging, to name: its marks would meet
+        the next letter."""
         QtCore, QtGui = _qt()
         package, master = self.package, self.master
-        moved = []
+        moved, self.overhanging = [], []
+        reach = OVERHANG_SHARE * float(package.upm)
         for name, move in composite_moves(self.composites, totals).items():
             if move is None:
                 continue
@@ -1068,6 +1075,9 @@ class AutoSpacingDialog(object):
             if layer is None:
                 continue
             shift, width_change = move
+            if mark_overhang(layer, shift, width_change) > reach:
+                self.overhanging.append(name)
+                continue
             for shape in layer.shapes[1:]:  # the accents: kept over the base, whose outline moved
                 transform = QtGui.QTransform(shape.transform)
                 transform.translate(shift, 0)
@@ -1076,6 +1086,21 @@ class AutoSpacingDialog(object):
             self.touched(glyph)
             moved.append(name)
         return moved
+
+    def overhang_line(self):
+        """The log's line naming the composites left as they were (follow_composites), or u""."""
+        names = getattr(self, "overhanging", [])
+        if not names:
+            return u""
+        chars = []
+        for name in names:
+            glyph = self.package.findName(name)
+            code = glyph.fgGlyph.unicode if glyph is not None else None
+            chars.append(self.ak.unichr_(code) if code else name)
+        return (u"%s left as %s: following %s letter, %s marks would stick out past %s width, toward the next "
+                u"letter: %s." % (self.ak.b(counted(len(names), u"glyph")), u"it was" if len(names) == 1 else u"they were",
+                                 u"its" if len(names) == 1 else u"their", u"its" if len(names) == 1 else u"their",
+                                 u"its" if len(names) == 1 else u"their", self.ak.b(u" ".join(chars))))
 
     def touched(self, glyph):
         try:
@@ -1091,6 +1116,27 @@ class AutoSpacingDialog(object):
         self.dialog.show()
         self.dialog.raise_()
         QtCore.QTimer.singleShot(50, self.run)
+
+
+OVERHANG_SHARE = 0.01  # of the em: how much further a composite's marks may stick out once it follows its letter
+
+
+def mark_overhang(layer, shift, width_change):
+    """How much further a composite's marks (its components after the first) would stick out past its
+    width, or before its start, once its letter's move is followed (shift: the outline's move across;
+    width_change: the advance's), in units; 0 when they would not."""
+    before = after = 0.0
+    width = float(layer.advanceWidth)
+    for shape in list(layer.shapes)[1:]:
+        try:
+            box = shape.boundingBox
+            box = box() if callable(box) else box
+            left, right = float(box.left()), float(box.right())
+        except Exception:
+            continue
+        before = max(before, right - width, -left)
+        after = max(after, right + shift - (width + width_change), -(left + shift))
+    return max(0.0, after - max(before, 0.0))
 
 
 def main():

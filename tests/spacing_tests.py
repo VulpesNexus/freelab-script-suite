@@ -31,6 +31,39 @@ class ReferenceTests(unittest.TestCase):
         self.assertIsNone(sp.reference_changes(u"H", 0, 0, 600, {}, self.MODEL), "no cap height")
 
 
+class _Box(object):
+    def __init__(self, left, right):
+        self.l, self.r = left, right
+
+    def left(self):
+        return self.l
+
+    def right(self):
+        return self.r
+
+
+class _Shape(object):
+    def __init__(self, left, right):
+        self.boundingBox = _Box(left, right)
+
+
+class _Layer(object):
+    def __init__(self, width, *boxes):
+        self.advanceWidth = width
+        self.shapes = [_Shape(*box) for box in boxes]
+
+
+class OverhangTests(unittest.TestCase):
+    def test_a_horn_past_a_tighter_width_is_caught(self):
+        horned = _Layer(600, (40, 560), (520, 640))  # O, and a horn 40 units past its width
+        self.assertEqual(sp.mark_overhang(horned, -10, -30), 20.0, "sticks out 20 units further once tighter")
+        self.assertEqual(sp.mark_overhang(horned, 10, 30), 0.0, "looser: no further")
+
+    def test_an_accent_over_the_letter_never_overhangs(self):
+        acute = _Layer(500, (40, 460), (200, 300))
+        self.assertEqual(sp.mark_overhang(acute, -20, -40), 0.0)
+
+
 class SpacingTests(unittest.TestCase):
     def test_each_side_takes_what_its_reference_pair_asks(self):
         # T's right side wants 30 units less beside H; its left side 12 more; a's sides beside n
