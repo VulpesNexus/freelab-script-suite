@@ -52,6 +52,8 @@ $files = @(
     @{ From = 'proof\freelab_proof.py'; Name = 'freelab_proof.py' },
     @{ From = 'checks\language_coverage.json'; Name = 'language_coverage.json' },
     @{ From = 'checks\language_coverage_LICENSE'; Name = 'language_coverage_LICENSE' },
+    @{ From = 'checks\autonym_fonts\FreeLabAutonyms.ttf'; Name = 'FreeLabAutonyms.ttf' },
+    @{ From = 'checks\autonym_fonts\FreeLabAutonyms_LICENSE'; Name = 'FreeLabAutonyms_LICENSE' },
     @{ From = 'spacing\freelab_auto_spacing.py'; Name = 'freelab_auto_spacing.py' },
     @{ From = 'diacritics\freelab_diacritics.py'; Name = 'freelab_diacritics.py' },
     @{ From = 'diacritics\mark_model.json'; Name = 'mark_model.json' },
