@@ -382,6 +382,7 @@ class AutoSpacingDialog(object):
                                           self.row_names)
         self.unspaced_references = []
         self.history_timer = self.ak.watch_history(self)
+        self.ak.add_tools_button(dialog, "Auto Spacing", getattr(self, "log", None))  # (the other font tools, a click away)
         self.ak.plain_buttons(dialog)
         self.update_buttons()
 

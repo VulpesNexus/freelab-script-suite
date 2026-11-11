@@ -1483,6 +1483,37 @@ def is_empty(glyph):
         return False
 
 
+UNWRAP_DEPTH = 4  # components inside components followed this deep
+
+
+def unwrapped(package, master, name, sx, sy, dx, dy):
+    """A part scaled or flipped, (name, sx, sy, dx, dy), with a glyph that is one component only (an
+    asciicircum that is a circumflex component) replaced by the glyph it points to, the transforms
+    combined: FontLab 7 refused a whole layer (setGlyphComponents made none) whose component was
+    scaled and flipped and pointed to such a glyph. Parts not scaled, and glyphs of their own, as given."""
+    if sx == 1.0 and sy == 1.0:
+        return name, sx, sy, dx, dy
+    for _ in range(UNWRAP_DEPTH):
+        try:
+            glyph = package.findName(name)
+            layer = glyph.getLayerByName(master) if glyph is not None and not glyph.isNull else None
+            shapes = list(layer.shapes) if layer is not None else []
+            if len(shapes) != 1 or not shapes[0].isComponent:
+                break
+            inner = shapes[0].transform
+            if abs(inner.m12()) > 1e-6 or abs(inner.m21()) > 1e-6:
+                break  # rotated or slanted inside: kept whole
+            inner_name = shapes[0].shapeData.componentGlyph
+            if not inner_name:
+                break
+            # outer (sx, sy, dx, dy) after inner (m11, m22, idx, idy): x -> sx * (m11 * x + idx) + dx
+            name, dx, dy = inner_name, sx * inner.dx() + dx, sy * inner.dy() + dy
+            sx, sy = sx * inner.m11(), sy * inner.m22()
+        except Exception:
+            break
+    return name, sx, sy, dx, dy
+
+
 def component_parts(layer):
     """[(glyph, dx, dy)] of a layer made only of components, or None."""
     parts = []
@@ -2727,6 +2758,7 @@ class AccentsDialog(object):
         if family:
             self.reference_history.append(family)
         self.model = load_model()
+        ak.add_tools_button(dialog, "Diacritics", getattr(self, "log", None))  # (the other font tools, a click away)
         ak.plain_buttons(dialog)
         self.history_timer = ak.watch_history(self)
         self.flagging = [ak.flag_menu(self.tree, self, self.flag_names, self.row_names),
@@ -3292,7 +3324,8 @@ class AccentsDialog(object):
                         continue
                     new = fontlab.flGlyph()
                     new.name = r.name
-                    new.fgGlyph.unicode = r.code
+                    # (its code point set once its layers are made: given before, FontLab kept none of the
+                    # layers made on it, live in Tsukimi Rounded 2026-11-11)
                     package.addGlyph(new)  # (FontLab adds a copy, without layers: they are made on the font's glyph)
                     glyph = package.findName(r.name)
                     if glyph is None:
@@ -3309,7 +3342,8 @@ class AccentsDialog(object):
                         continue
                     placed = True
                     components = []
-                    for name, sx, sy, dx, dy in parts:
+                    for part in parts:
+                        name, sx, sy, dx, dy = unwrapped(package, master, *part)
                         component = fontlab.GlyphComponent(name)
                         component.transform = QtGui.QTransform(sx, 0.0, 0.0, sy, float(round(dx)), float(round(dy)))
                         components.append(component)
@@ -3321,6 +3355,8 @@ class AccentsDialog(object):
                     if added:
                         package.deleteGlyph(package.findName(r.name))
                     continue
+                if added:
+                    package.findName(r.name).fgGlyph.unicode = r.code
                 touched.append(glyph)
                 made.append(r.char)
         except Exception as exc:  # what was made stays made, and is reported
@@ -3328,8 +3364,10 @@ class AccentsDialog(object):
         self.ak.notify_changed(fontlab, package, u"FreeLab Diacritics", touched)
         b = self.ak.b
         if made:
-            self.log.add(u"Built %s: %s. They are at the end of the font; Edit &gt; Undo takes them back." % (
-                b(counted(len(made), u"glyph")), self.ak.html(u"".join(made))), "done")
+            one = len(made) == 1
+            self.log.add(u"Built %s: %s. %s at the end of the font; Edit &gt; Undo takes %s back." % (
+                b(counted(len(made), u"glyph")), self.ak.html(u"".join(made)), u"It is" if one else u"They are",
+                u"it" if one else u"them"), "done")
         else:
             self.log.add(u"Built none.")
         if skipped:

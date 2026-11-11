@@ -1234,6 +1234,97 @@ def hook_menu_order():
     return True
 
 
+FONT_TOOLS = MENU_GROUPS[0]  # what the tools button of each FreeLab window lists (not dark mode, not FreeLab MCP)
+_TOOL_BUTTONS = []  # each tools button with its menu and slots, held
+
+
+def open_tool(title):
+    """Opens a FreeLab tool by its entry in Scripts > FreeLab, as FontLab runs it; False when the
+    entry is not there."""
+    QtCore, QtGui = _qt()
+    main = AutoKerningDialog.main_window()
+    if main is None:
+        return False
+    for menu in main.findChildren(QtGui.QMenu):
+        try:
+            if menu.objectName != SCRIPTS_MENU:
+                continue
+            for action in menu.actions():
+                submenu = action.menu()
+                if submenu is None or action.text.replace(u"&", u"") != MENU_TITLE:
+                    continue
+                for entry in submenu.actions():
+                    if not entry.isSeparator() and entry.text.replace(u"&", u"") == title:
+                        entry.trigger()
+                        return True
+        except Exception:
+            continue
+    return False
+
+
+def tools_icon(color, size=16):
+    """Three short lines (the usual menu sign), in color."""
+    QtCore, QtGui = _qt()
+    pixmap = QtGui.QPixmap(size, size)
+    pixmap.fill(QtGui.QColor(0, 0, 0, 0))
+    painter = QtGui.QPainter(pixmap)
+    try:
+        for y in (3, 7, 11):
+            painter.fillRect(2, y, size - 4, 2, color)
+    finally:
+        painter.end()
+    return pixmap
+
+
+def add_tools_button(dialog, current, log=None):
+    """A menu button at the right of a FreeLab window's first row, listing the font tools (FONT_TOOLS):
+    picking one opens it, as Scripts > FreeLab does; the window's own is grayed out. log: a Log told
+    when a tool could not be found."""
+    QtCore, QtGui = _qt()
+    try:
+        layout = dialog.layout()
+        if layout is None or not layout.count():
+            return None
+        first_item = layout.itemAt(0)
+        first, first_row = first_item.widget(), first_item.layout()
+        if first is None and first_row is None:
+            return None
+        button = QtGui.QToolButton()
+        button.setAutoRaise(True)
+        button.setToolTip(u"Open another FreeLab tool.")
+        button.setIcon(QtGui.QIcon(tools_icon(_property(dialog, "palette").color(QtGui.QPalette.WindowText))))
+        button.setProperty(LEAVE_ALONE_PROP, True)  # drawn in the dialog's colors
+        menu = QtGui.QMenu(button)
+        held = []
+        for title in FONT_TOOLS:
+            action = menu.addAction(title)
+            if title == current:
+                action.setEnabled(False)
+            else:
+                def chosen(title=title):
+                    if not open_tool(title) and log is not None:
+                        log.add(u"%s is not in Scripts &gt; FreeLab: run Refresh Scripts, or reinstall FreeLab." % b(title),
+                                "warning")
+                held.append(chosen)
+                action.connect("triggered()", chosen)
+        button.setMenu(menu)
+        button.setPopupMode(QtGui.QToolButton.InstantPopup)
+        button.setStyleSheet(u"QToolButton::menu-indicator { image: none; width: 0px; }")  # (the lines say "menu")
+        if first is not None:  # a widget: it and the button share a row
+            layout.removeWidget(first)
+            row = QtGui.QHBoxLayout()
+            row.setContentsMargins(0, 0, 0, 0)
+            row.addWidget(first, 1)
+            row.addWidget(button, 0, QtCore.Qt.AlignTop)
+            layout.insertLayout(0, row)
+        else:  # a row already: the button at its end
+            first_row.addWidget(button, 0, QtCore.Qt.AlignTop)
+        _TOOL_BUTTONS.append((button, menu, held))  # (PythonQt drops what no Python object holds)
+        return button
+    except Exception:
+        return None
+
+
 MENU_HOOK_RETRY_MS = 500  # how often FreeLab's startup block looks again for the Scripts menu,
 MENU_HOOK_TRIES = 240  # and for how long (two minutes): at launch, FontLab runs it before its main window is built
 
@@ -1363,6 +1454,16 @@ SCROLL_SHEET = (u"QScrollBar:vertical { background: transparent; width: 12px; ma
 # pointer passed over it (a hover repaints the bar alone).
 
 
+TAB_SHEET = (u"QTabBar::tab { background: transparent; color: rgba(128, 128, 128, 255); border: none; "
+             u"border-bottom: 2px solid transparent; padding: 5px 12px 4px 12px; margin-right: 2px; } "
+             u"QTabBar::tab:selected { color: palette(window-text); border-bottom: 2px solid palette(highlight); } "
+             u"QTabBar::tab:hover:!selected { color: palette(window-text); } "
+             u"QTabBar::tab:disabled { color: rgba(128, 128, 128, 110); }")
+# FreeLab's tab bars: flat, the chosen tab underlined in the highlight color, the others in a mid gray,
+# over either palette, and left alone by dark mode. Windows' own style drew the chosen tab light
+# whatever the palette: mapped, its text came out garbled, and the edges changed with the tab chosen.
+
+
 def flat_scroll_bars(dialog):
     """SCROLL_SHEET on each scroll bar of a dialog's lists and text views, on the bars themselves: a
     stylesheet on the dialog would reach its combo boxes and fields, which dark mode leaves to the
@@ -1373,6 +1474,14 @@ def flat_scroll_bars(dialog):
             for bar in (view.verticalScrollBar(), view.horizontalScrollBar()):
                 if bar is not None and (_property(bar, "styleSheet") or u"") != SCROLL_SHEET:
                     bar.setStyleSheet(SCROLL_SHEET)
+    except Exception:
+        pass
+    try:  # and its tab bars (TAB_SHEET)
+        for bar in dialog.findChildren(QtGui.QTabBar):
+            if (_property(bar, "styleSheet") or u"") != TAB_SHEET:
+                bar.setStyleSheet(TAB_SHEET)
+                bar.setProperty(LEAVE_ALONE_PROP, True)
+                bar.setDrawBase(False)
     except Exception:
         pass
 
@@ -1451,7 +1560,7 @@ class Log(object):
         grip = self.grip = QtGui.QFrame()
         grip.setFixedHeight(6)
         grip.setCursor(QtCore.Qt.SizeVerCursor)
-        grip.setToolTip(u"Drag to make the log and the window taller or shorter")
+        grip.setToolTip(u"Drag to make the log and the window taller or shorter.")
         box.addWidget(grip)
         log = self
 
@@ -1717,7 +1826,7 @@ class PairDrag(object):
         label.setMouseTracking(True)
         label.setFocusPolicy(QtCore.Qt.ClickFocus)
         label.setToolTip(u"Drag the right glyph left or right to adjust; or click, then press Left or Right "
-                         u"(with Shift: %d units)" % ADJUST_SHIFT_STEP)
+                         u"(with Shift: %d units)." % ADJUST_SHIFT_STEP)
 
         class Filter(QtCore.QTimer):  # PythonQt has no QObject to subclass; a timer will do
             def eventFilter(self, obj, event):
@@ -2745,7 +2854,7 @@ class AutoKerningDialog(object):
         row.addWidget(self.show_kind)
         self.pairs = self.combo(PAIRS)
         self.pairs.setToolTip("Common pairs: frequent in the text of 24 languages and kerned in fonts "
-                              "(andre-fuchs/kerning-pairs), worth kerning even in a font kerned in part")
+                              "(andre-fuchs/kerning-pairs), worth kerning even in a font kerned in part.")
         self.pairs.setWhatsThis("All pairs, or only the pairs frequent in text and usually kerned.")
         if not self.common:
             self.pairs.setEnabled(False)
@@ -2797,7 +2906,7 @@ class AutoKerningDialog(object):
         self.preview_note.setWordWrap(True)
         note_row.addWidget(self.preview_note, 1)
         self.reset_button = QtGui.QPushButton("Reset pair")
-        self.reset_button.setToolTip("Give this pair the suggested value again")
+        self.reset_button.setToolTip("Give this pair the suggested value again.")
         self.reset_button.setWhatsThis("Gives the selected pair the value of the source chosen above, undoing a pick.")
         self.reset_button.setEnabled(False)
         note_row.addWidget(self.reset_button)
@@ -2822,7 +2931,7 @@ class AutoKerningDialog(object):
             button.setSizePolicy(QtGui.QSizePolicy.Expanding, QtGui.QSizePolicy.Fixed)
             button.setProperty(LEAVE_ALONE_PROP, True)
             button.setStyleSheet(CHOICE_SHEET)
-            button.setToolTip(u"%s: click to use it for this pair (Ctrl+%d in the list)" % (label, number + 1))
+            button.setToolTip(u"%s: click to use it for this pair (Ctrl+%d in the list)." % (label, number + 1))
             button.setWhatsThis(u"The pair as %s sets it, between two H's. Click to use it for this pair." % label)
             button.setEnabled(False)
             self.choice_group.addButton(button, number)
@@ -2890,6 +2999,7 @@ class AutoKerningDialog(object):
                                   lambda row: [self.suggestions[row].left, self.suggestions[row].right]
                                   if row < len(self.suggestions) else [])
         self.focus = None  # a pair to go to once the analysis is done (opened from another script)
+        add_tools_button(dialog, "Auto Kerning", getattr(self, "log", None))  # (the other font tools, a click away)
         plain_buttons(dialog)
         self.update_buttons()
 
@@ -3646,11 +3756,13 @@ class AutoKerningDialog(object):
             s.current = self.font_kerning.current(s.left, s.right)
         for s in written:
             s.override = None
-        lines = [u"Wrote %d entries for %d pairs to master %s%s." % (
-            entries, len(written), self.master,
-            u" (%d of them kerning class pairs, which kern their classes' other glyphs too)" % classes if classes else u"")]
+        lines = [u"Wrote %s for %s to master %s%s." % (
+            counted(entries, u"entry", u"entries"), counted(len(written), u"pair"), self.master,
+            (u" (%s, which kern%s %s classes' other glyphs too)" % (
+                u"one of them a kerning class pair" if classes == 1 else u"%d of them kerning class pairs" % classes,
+                u"s" if classes == 1 else u"", u"its" if classes == 1 else u"their")) if classes else u"")]
         if shared:
-            lines.append(u"%d pairs shared an entry with a commoner pair and took its value." % shared)
+            lines.append(u"%s shared an entry with a commoner pair and took its value." % counted(shared, u"pair"))
         self.update_picked()
         self.fill_table()
         self.log.add(html(u" ".join(lines)), "done" if entries else "info")
@@ -3956,9 +4068,11 @@ class ClassDialog(object):
             error = exc
         self.owner.after_writing(package)
         self.run()
-        notes = [u"Wrote %d pairs of their own." % written]
+        notes = [u"Wrote %s of %s own." % (counted(written, u"pair"), u"its" if written == 1 else u"their")]
         if stale:
-            notes.append(u"%d pairs had changed since they were measured and were left as they are." % len(stale))
+            notes.append(u"%s changed since %s measured and %s left as %s." % (
+                counted(len(stale), u"pair"), u"it was" if len(stale) == 1 else u"they were",
+                u"was" if len(stale) == 1 else u"were", u"it is" if len(stale) == 1 else u"they are"))
         if error is not None:
             notes.append(u"Stopped by an error: %s" % html(error))
         notes.append(u"Writing goes straight into the open font: close it without saving to take it back.")
@@ -4002,10 +4116,11 @@ class ClassDialog(object):
             error = exc
         self.owner.after_writing(package)
         self.run()
-        notes = [u"Made %d classes and extended %d%s." % (made, extended, u", and moved %d pairs into them" % moved
-                                                           if moved else u"")]
+        notes = [u"Made %s and extended %d%s." % (counted(made, u"class", u"classes"), extended,
+                                                   u", and moved %s into them" % counted(moved, u"pair") if moved else u"")]
         if kept:
-            notes.append(u"%d glyph pairs kept their own value as an exception." % kept)
+            notes.append(u"%s kept %s own value as an exception." % (counted(kept, u"glyph pair"),
+                                                                    u"its" if kept == 1 else u"their"))
         if error is not None:
             notes.append(u"Stopped by an error: %s" % html(error))
         notes.append(u"Writing goes straight into the open font: close it without saving to take it back.")

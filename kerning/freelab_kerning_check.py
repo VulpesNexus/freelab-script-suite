@@ -549,6 +549,7 @@ class KerningCheckDialog(object):
         self.close_button.connect("clicked()", dialog.close)
         self.package = self.master = None
         self.busy = False
+        self.ak.add_tools_button(dialog, "Kerning Check", getattr(self, "log", None))  # (the other font tools, a click away)
         self.ak.plain_buttons(dialog)
         self.read_font()
         self.history_timer = self.ak.watch_history(self)

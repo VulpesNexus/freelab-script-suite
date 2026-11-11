@@ -1689,6 +1689,7 @@ class FeatureCodeDialog(object):
         self.forms, self.figures, self.checked_code = [], None, {}
         self.texts, self.prefix = {}, u""
         self.ligature_model = load_ligature_model()
+        self.ak.add_tools_button(dialog, "Feature Code", getattr(self, "log", None))  # (the other font tools, a click away)
         self.ak.plain_buttons(dialog)
         self.history_timer = self.ak.watch_history(self)
         self.flagging = [self.ak.flag_menu(self.ligature_tree, self, lambda: self.selected_names(self.ligature_tree),
@@ -1855,7 +1856,7 @@ class FeatureCodeDialog(object):
             item.setData(0, QtCore.Qt.UserRole, feature.tag)
             item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsUserCheckable)
             item.setCheckState(0, QtCore.Qt.Checked if feature.on else QtCore.Qt.Unchecked)
-            item.setToolTip(0, u"%s (%s): %s" % (feature.title(), feature.tag, counted(len(feature.rules), u"row")))
+            item.setToolTip(0, u"%s (%s): %s." % (feature.title(), feature.tag, counted(len(feature.rules), u"row")))
             item.setToolTip(2, item.text(2))
             if feature.tag not in SET_TAGS:
                 item.setText(1, u"%s (%d)" % (feature.title(), len(feature.rules)))
@@ -2302,8 +2303,9 @@ class FeatureCodeDialog(object):
         self.run()
         self.apply_form_state(forms)
         self.make_code()
-        self.log.add(u"Wrote %s. Compile the features in FontLab's Features panel to try them; Edit &gt; Undo takes "
-                     u"them back." % self.ak.b(u", ".join(written)) if written else u"Wrote nothing.",
+        them = u"it" if len(written) == 1 else u"them"
+        self.log.add(u"Wrote %s. Compile the features in FontLab's Features panel to try %s; Edit &gt; Undo takes "
+                     u"%s back." % (self.ak.b(u", ".join(written)), them, them) if written else u"Wrote nothing.",
                      "done" if written else "info")
         if skipped is not None:
             self.log.add(u"locl was not written: the prefix could not be (%s). Add these lines to the prefix in "

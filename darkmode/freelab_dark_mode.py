@@ -3360,7 +3360,15 @@ def _framed_style(fusion):
 
         class FreeLabStyle(QProxyStyle):
             def drawPrimitive(self, element, option, painter, widget=None):
-                QProxyStyle.drawPrimitive(self, element, option, painter, widget)
+                try:
+                    QProxyStyle.drawPrimitive(self, element, option, painter, widget)
+                except ValueError:
+                    # PythonQt found no overload for some options with their widget (a tool button's
+                    # menu arrow: a QStyleOptionToolButton): drawn without the widget, or not at all
+                    try:
+                        QProxyStyle.drawPrimitive(self, element, option, painter)
+                    except Exception:
+                        return
                 try:
                     which = int(element)
                     if which != check and which != radio:

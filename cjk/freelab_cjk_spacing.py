@@ -446,6 +446,7 @@ class CJKSpacingDialog(object):
         self.hangul_model = load_model(name=HANGUL_MODEL_FILE)
         self.hangul_glyphs, self.hangul, self.hangul_checks, self.hangul_width = [], [], {}, None
         self.hangul_box.connect("currentIndexChanged(int)", lambda index: self.plan_hangul())
+        ak.add_tools_button(dialog, "CJK Spacing", getattr(self, "log", None))  # (the other font tools, a click away)
         ak.plain_buttons(dialog)
         self.history_timer = ak.watch_history(self)
         self.flagging = ak.flag_menu(self.tree, self, self.flag_names, self.row_names)
@@ -828,8 +829,9 @@ class CJKSpacingDialog(object):
         self.ak.notify_changed(self.fontlab, package, u"FreeLab CJK Spacing")
         self.run()
         if written:
-            self.log.add(u"Wrote %s. Compile the features in FontLab's Features panel to try them; Edit &gt; Undo "
-                         u"takes them back." % self.ak.b(u" and ".join(written)), "done")
+            them = u"it" if len(written) == 1 else u"them"
+            self.log.add(u"Wrote %s. Compile the features in FontLab's Features panel to try %s; Edit &gt; Undo "
+                         u"takes %s back." % (self.ak.b(u" and ".join(written)), them, them), "done")
         if syllables:
             self.log.add(u"Set %s in every master; the font's kerning of Hangul, if any, was set for the old widths. "
                          u"Edit &gt; Undo takes it back." % self.ak.b(counted(syllables, u"syllable width", u"syllable widths")),

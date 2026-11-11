@@ -88,6 +88,17 @@ def load_auto_kerning():
     return module
 
 
+def sentence(text):
+    """A tooltip's or a check's text with a period at the end of each line that lacks one."""
+    lines = []
+    for line in (text or u"").split(u"\n"):
+        stripped = line.rstrip()
+        if stripped and stripped[-1] not in u".!?:\N{HORIZONTAL ELLIPSIS}":
+            stripped += u"."
+        lines.append(stripped)
+    return u"\n".join(lines)
+
+
 def counted(number, one, many=None):
     """"1 glyph", "2 glyphs": a count with its noun in the right number."""
     return u"%d %s" % (number, one if number == 1 else (many or one + u"s"))
@@ -2186,6 +2197,7 @@ class FontCheckDialog(object):
         self.glyph_window_button.connect("clicked()", self.show_in_glyph_window)
         self.tabs.connect("currentChanged(int)", self.switch_page)
         self.close_button.connect("clicked()", dialog.close)
+        ak.add_tools_button(dialog, "Font Check", getattr(self, "log", None))  # (the other font tools, a click away)
         ak.plain_buttons(dialog)
         self.read_font()
         self.history_timer = ak.watch_history(self)
@@ -2213,7 +2225,8 @@ class FontCheckDialog(object):
                 pass
         if icon is not None:
             tree.setIconSize(QtCore.QSize(icon[0], icon[1]))
-            tree.viewport().setProperty(self.ak.LEAVE_ALONE_PROP, True)
+            tree.setProperty(self.ak.LEAVE_ALONE_PROP, True)  # (the whole list: on its viewport alone, dark mode
+            # mapped the list and its pictures with it; its scroll bars are FreeLab's flat ones)
         if grid:
             self.ak.grid_lines(tree)
         return tree
@@ -2458,7 +2471,7 @@ class FontCheckDialog(object):
             pass
         self.clipped_list.setIconSize(QtCore.QSize(CLIP_TILE[0], CLIP_TILE[1]))
         self.clipped_list.setSelectionMode(QtGui.QAbstractItemView.ExtendedSelection)
-        self.clipped_list.viewport().setProperty(ak.LEAVE_ALONE_PROP, True)
+        self.clipped_list.setProperty(ak.LEAVE_ALONE_PROP, True)
         self.clipped_list.setFixedHeight(CLIP_TILE[1] + 28)
         self.clipped_list.setWhatsThis(u"The glyphs Windows clips, the worst first: the part cut off in red, by how "
                                        u"many units under it. Double-click one to open it in a Glyph window; right-click "
@@ -2566,6 +2579,8 @@ class FontCheckDialog(object):
         b = self.ak.b
         masters = self.master_names()
         self.font_label.setText(u"%s, master %s (%s)." % (b(package.tfn), b(self.master), b(counted(len(masters), u"master"))))
+        self.tabs.setTabEnabled(TABS.index("masters"), len(masters) > 1)
+        self.tabs.setTabToolTip(TABS.index("masters"), u"" if len(masters) > 1 else u"This font has one master: nothing to compare.")
         if [self.reference.itemText(index) for index in range(self.reference.count)] != masters:
             self.reference.clear()
             for name in masters:
@@ -2673,12 +2688,17 @@ class FontCheckDialog(object):
     def update_buttons(self):
         """Each button clickable only when it would do something."""
         ak = self.ak
-        buildable = self.buildable_checked() if self.checked else []
+        chosen = self.chosen_characters() if self.package is not None else []
+        buildable = self.buildable_checked() if chosen else []
         ak.enable(self.diacritics_button, bool(buildable))
+        self.diacritics_button.setText(u"Build %s with Diacritics" % counted(len(buildable), u"letter") if buildable
+                                       else u"Build with Diacritics")
         self.diacritics_button.setToolTip(
-            u"" if buildable else u"Check the characters to build first." if not self.checked else
-            u"Diacritics cannot build any of the checked characters from the font's letters and marks.")
-        ak.enable(self.copy_chars_button, bool(self.checked) or self.selected_row() is not None)
+            u"" if buildable else u"Check characters or select a row first." if not chosen else
+            u"Diacritics cannot build %s from the font's letters and marks." % (
+                u"this character" if len(chosen) == 1 else u"any of these characters"))
+        ak.enable(self.copy_chars_button, bool(chosen))
+        self.copy_chars_button.setText(u"Copy %s" % counted(len(chosen), u"character") if chosen else u"Copy characters")
         ak.enable(self.copy_button, bool(self.suggestions))
         ak.enable(self.font_info_button, self.package is not None)
         ak.enable(self.glyph_window_button, self.package is not None and bool(self.glyph_window_text()))
@@ -2699,7 +2719,7 @@ class FontCheckDialog(object):
         item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable)
         if tip:
             for column in range(len(texts)):
-                item.setToolTip(column, tip)
+                item.setToolTip(column, sentence(tip))
         return item
 
     @staticmethod
@@ -2944,7 +2964,7 @@ class FontCheckDialog(object):
         else:
             self.gain_label.setText(gain_text(len(self.checked), gained, self.ak.b))
         tip = u"\n".join(u"%s (%s)" % (r.language.label(), r.language.script) for r in gained[:40])
-        self.gain_label.setToolTip(tip)
+        self.gain_label.setToolTip(sentence(tip))
 
     def selected_row(self):
         item = self.selected_item(self.add_tree)
@@ -3052,16 +3072,29 @@ class FontCheckDialog(object):
         self.buildable = found
         return found
 
+    def chosen_characters(self):
+        """The checked characters, or, with none checked, the selected row's."""
+        if self.checked:
+            return sorted(self.checked, key=code_points)
+        row = self.selected_row()
+        return sorted(row.items, key=code_points) if row is not None else []
+
     def buildable_checked(self):
+        """The chosen characters Diacritics can build."""
         if self.package is None:
             return []
         can = self.buildable_set()
-        return sorted((c for c in self.checked if c in can), key=code_points)
+        return [c for c in self.chosen_characters() if c in can]
 
     def build_with_diacritics(self):
+        QtCore, QtGui = _qt()
         chars = self.buildable_checked()
         if not chars:
             return
+        if not self.checked:  # built from the selected row: its check follows
+            for item in self.add_tree.selectedItems():
+                if item.flags() & QtCore.Qt.ItemIsUserCheckable:
+                    item.setCheckState(0, QtCore.Qt.Checked)
         b = self.ak.b
         try:
             dm = self.diacritics_module()
@@ -3077,10 +3110,7 @@ class FontCheckDialog(object):
 
     def copy_characters(self):
         QtCore, QtGui = _qt()
-        chars = sorted(self.checked, key=code_points)
-        if not chars:
-            row = self.selected_row()
-            chars = list(row.items) if row is not None else []
+        chars = self.chosen_characters()
         if not chars:
             return
         try:
@@ -3233,7 +3263,7 @@ class FontCheckDialog(object):
         try:
             tree.clear()
             for index, line in enumerate(self.check_rows):
-                item = self.item((line.text,), index, line.tip)
+                item = self.item((sentence(line.text),), index, line.tip)
                 item.setIcon(0, icons[line.state])
                 if line.state == "ok":
                     item.setForeground(0, quiet)
