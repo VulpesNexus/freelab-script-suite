@@ -706,27 +706,31 @@ class Placement(object):
         self.sides = {}  # (side, case): [(gap, offset share)]
 
     def learn(self, composites, ink_of, case_of_glyph):
-        """composites: [(base glyph, [(mark glyph, dx, dy)])]; ink_of(name) gives an Ink (or None);
-        case_of_glyph(name) "upper" or "lower". Only each composite's first mark on a side counts."""
+        """composites: [(base glyph, [(mark glyph, dx, dy[, root, side])])], each mark moved as far from
+        the base as it sits in the composite (learned_marks), with the root and side of the character's
+        own mark where given (else the glyph's: a borrowed macron would count as one above); ink_of(name)
+        gives an Ink (or None); case_of_glyph(name) "upper" or "lower". Only each composite's first mark
+        on a side counts."""
         for base, marks in composites:
             base_ink = ink_of(base)
             if base_ink is None or base_ink.width <= 0:
                 continue
             case = case_of_glyph(base)
             done = set()
-            for mark, dx, dy in marks:
+            for entry in marks:
+                mark, dx, dy = entry[:3]
+                root = entry[3] if len(entry) > 3 else mark_key(mark)
+                side = entry[4] if len(entry) > 4 else mark_side(mark)
                 ink = ink_of(mark)
-                side = mark_side(mark)
-                if ink is None or side in done or side in ("right", "topright", "kana"):
+                if ink is None or side in done or side in ("right", "topright", "kana", "left"):
                     continue
                 done.add(side)
                 if side == "above":
                     found = (ink.bottom + dy - base_ink.top, (ink.center + dx - base_ink.top_center) / base_ink.width)
                 else:
-                    root = mark_key(mark)
                     reference = base_ink.bottom_right - ink.width / 2.0 if root == "ogonek" else base_ink.bottom_center
                     found = (base_ink.bottom - (ink.top + dy), (ink.center + dx - reference) / base_ink.width)
-                self.seen.setdefault((mark_key(mark), case), []).append(found)
+                self.seen.setdefault((root, case), []).append(found)
                 self.sides.setdefault((side, case), []).append(found)
 
     def model_value(self, table, *keys):
@@ -806,18 +810,33 @@ class Placement(object):
 def learnable(code, parts):
     """Whether a composite shows where marks go: its character decomposes into a letter and the marks
     its components are (an e acute of e and acute), not a fraction, a guillemet, or a middle dot."""
+    return learned_marks(code, parts) is not None
+
+
+def learned_marks(code, parts):
+    """A learnable composite's marks as Placement.learn takes them, [(mark glyph, dx, dy, root, side)], or
+    None: each moved as far from its letter as the components are (the base component's own move taken
+    off), with the root and side of the character's own mark (a macron borrowed for a macron below is a
+    mark below; a mark at a Greek capital's left is "left", on no side learned). parts: [(glyph, dx, dy)]."""
     if not code:
-        return False
-    decomposed = unicodedata.normalize("NFD", unichr_(code))
+        return None
+    ch = unichr_(code)
+    decomposed = unicodedata.normalize("NFD", ch)
     if len(decomposed) != len(parts) or not decomposed[0].isalpha():
-        return False
+        return None
     convention = CONVENTIONS.get(code, {})
-    for (glyph, _, _), mark in zip(parts[1:], decomposed[1:]):
-        root = MARKS.get(convention.get(ord(mark), ord(mark)))  # (G, K, L, N, R with a comma below decompose
+    left = script_of(ch) == "greek" and case_of(ch) == "upper"
+    base_dx, base_dy = parts[0][1], parts[0][2]
+    found = []
+    for (glyph, dx, dy), mark in zip(parts[1:], decomposed[1:]):
+        mark_code = convention.get(ord(mark), ord(mark))
+        root = MARKS.get(mark_code)  # (G, K, L, N, R with a comma below decompose
         roots = (root, BORROWED.get(root))  # with a cedilla: Unicode's names for them predate the comma)
         if root is None or mark_key(glyph) not in roots:
-            return False
-    return True
+            return None
+        side = "left" if left and ord(mark) in LEFT_OF_CAPITALS else side_of(mark_code)
+        found.append((glyph, dx - base_dx, dy - base_dy, root, side))
+    return found
 
 
 def mark_side(name):
@@ -1368,6 +1387,7 @@ def load_anchor_model(path=None):
 
 class AnchorGlyph(object):
     stacks = False  # a base whose precomposed letters stack marks (composed_sides)
+    elsewhere = False  # anchors to add in another master than the one planned (AnchorPage.run)
 
     """A base or a mark of a script, with the anchors to add ({name: (x, y)}) and those it has."""
 
@@ -1393,8 +1413,9 @@ class AnchorGlyph(object):
         return sorted(name for name in self.existing if name not in self.anchors and name in self.adjust)
 
     def pending(self):
-        """Whether writing it would change the font: anchors to add, or its own moved."""
-        return bool(self.anchors) or bool(self.moved())
+        """Whether writing it would change the font: anchors to add (here or in another master), or its own
+        moved."""
+        return bool(self.anchors) or bool(self.moved()) or self.elsewhere
 
 
 MIN_ROW_FONTS = 3  # a script's anchor medians from fewer fonts than this give way to Latin's
@@ -1800,6 +1821,10 @@ class Rule(object):
     def placed(self):
         return {}
 
+    def pending(self):
+        """No anchors to write (its line is written with the code, when checked)."""
+        return False
+
 
 def thai_rules(names_by_code, names):
     """Rules for the Thai forms the font has (by its glyphs' names: uni0E48.small, maiek-thai.small)."""
@@ -2186,13 +2211,18 @@ def unwrapped(package, master, name, sx, sy, dx, dy):
 
 
 def component_parts(layer):
-    """[(glyph, dx, dy)] of a layer made only of components, or None."""
+    """[(glyph, dx, dy)] of a layer made only of components, each only moved, or None (a component
+    scaled, flipped, rotated, or slanted: its ink is not its glyph's as measured, so it shows nothing)."""
     parts = []
     for shape in layer.shapes:
         try:
             if not shape.isComponent:
                 return None
-            parts.append((shape.shapeData.componentGlyph, shape.transform.dx(), shape.transform.dy()))
+            transform = shape.transform
+            if (abs(transform.m11() - 1) > 1e-6 or abs(transform.m22() - 1) > 1e-6 or abs(transform.m12()) > 1e-6
+                    or abs(transform.m21()) > 1e-6):
+                return None
+            parts.append((shape.shapeData.componentGlyph, transform.dx(), transform.dy()))
         except Exception:
             return None
     return parts or None
@@ -2267,7 +2297,7 @@ def write_settings(ak, data):
 def has_character(family, code):
     """Whether an installed font family itself has a character: QRawFont reads the family's own font
     (QFontMetrics.inFontUcs4 answers for Windows' fallback fonts too, and drew another font's glyph
-    as the chosen one's)."""
+    as the chosen one's); where it cannot, the answer is no."""
     QtCore, QtGui = _qt()
     font = QtGui.QFont(family)
     try:
@@ -2282,10 +2312,7 @@ def has_character(family, code):
             return bool(raw.supportsCharacter(code))
     except Exception:
         pass
-    try:
-        return bool(QtGui.QFontMetrics(font).inFontUcs4(code))
-    except Exception:
-        return False
+    return False
 
 
 # Families with other scripts' letters and marks (Windows' own, then Google's Noto): a reference for them
@@ -2867,6 +2894,7 @@ class AnchorPage(object):
             return
         ak = self.ak
         kept = dict((g.name, (g.checked, dict(g.adjust))) for g in self.glyphs)
+        old_key = self.owner.package_key(self.package)
         package = self.package = self.owner.current_font()
         self.tree.blockSignals(True)
         self.tree.clear()
@@ -2893,10 +2921,20 @@ class AnchorPage(object):
             self.update_buttons()
             return
         self.glyphs, self.ink = self.plan_for(self.master)
+        left_out = getattr(self, "left_out", 0)
+        elsewhere = set()  # the glyphs with anchors to add in another master (Bold lacking what Regular has)
+        for master in list(package.masters):
+            if master != self.master:
+                elsewhere.update(g.name for g in self.plan_for(master)[0] if g.anchors)
+        self.left_out = left_out
         self.glyphs = self.glyphs + self.rules_for(self.script(), self.ink)
         for g in self.glyphs:
-            if g.name in kept:
-                g.checked, g.adjust = kept[g.name][0], kept[g.name][1]
+            if g.role != "rule" and g.name in elsewhere:
+                g.elsewhere = g.checked = True
+        if old_key is not None and self.owner.package_key(package) == old_key:  # the same font: checks and moves carry over
+            for g in self.glyphs:
+                if g.name in kept:
+                    g.checked, g.adjust = kept[g.name][0], kept[g.name][1]
         self.first_checks = dict((g.name, g.checked) for g in self.glyphs)
         features = package.fgPackage.features
         self.texts = dict((tag, features.get_feature(tag)) for tag in features.keys())
@@ -2917,7 +2955,8 @@ class AnchorPage(object):
                                 b(package.tfn), b(self.master), b(self.script().capitalize()),
                                 b(counted(len(bases), u"base")), b(counted(len(marks), u"mark")),
                                 u"".join(u", %s" % b(text) for text in others),
-                                b(sum(1 for g in self.glyphs if g.anchors)), b(rows.get("fonts", 0)),
+                                b(sum(1 for g in self.glyphs if g.anchors or getattr(g, "elsewhere", False))),
+                                b(rows.get("fonts", 0)),
                                 self.script().capitalize(),
                                 u" %s that take no marks (in Unicode's letters and the corpus's fonts) %s left out." % (
                                     b(counted(left_out, u"letter")), u"is" if left_out == 1 else u"are")
@@ -2961,7 +3000,7 @@ class AnchorPage(object):
                 item = QtGui.QTreeWidgetItem([unichr_(g.code) if g.code else u"", g.name, u"", u""])
                 item.setData(0, QtCore.Qt.UserRole, index)
                 item.setFont(0, bold)
-                if g.anchors or g.existing or g.role == "rule":  # (its own anchors can be moved and written)
+                if g.anchors or g.existing or g.role == "rule" or g.elsewhere:  # (its own anchors can be moved and written)
                     item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsUserCheckable)
                     item.setCheckState(0, QtCore.Qt.Checked if g.checked else QtCore.Qt.Unchecked)
                 else:
@@ -2995,6 +3034,8 @@ class AnchorPage(object):
             notes.append(u"has %s already" % u", ".join(sorted(g.existing)))
         if g.adjust:
             notes.append(u"moved by hand")
+        if g.elsewhere:
+            notes.append(u"anchors to add in another master")
         if g.role == "mark" and g.side:
             notes.insert(0, ANCHOR_SIDE_WORDS.get(g.side, g.side))
         item.setText(3, (u"; ".join(notes) + u".") if notes else u"")
@@ -3061,10 +3102,10 @@ class AnchorPage(object):
         self.buttons_due = False
         ak = self.ak
         self.harvest()
-        checkable = [g for g in self.glyphs if g.anchors]
+        checkable = [g for g in self.glyphs if g.anchors or getattr(g, "elsewhere", False)]
         ak.enable(self.all_button, any(not g.checked for g in checkable))
         ak.enable(self.none_button, any(g.checked for g in checkable))
-        ak.enable(self.write_button, any(g.checked and g.pending() for g in self.glyphs))
+        ak.enable(self.write_button, any(g.checked and (g.pending() or g.role == "rule") for g in self.glyphs))
         ak.enable(self.restore_button, any(g.adjust or self.first_checks.get(g.name, g.checked) != g.checked
                                            for g in self.glyphs))
         g = self.selected()
@@ -3114,20 +3155,33 @@ class AnchorPage(object):
             return found
         if g.role == "rule":
             return []
-        base = next((b for b in self.glyphs if b.role == "base" and b.code and g.side in b.placed()), None)
-        return [(g.side, base)]
+        side = self.attach_side(g)
+        base = next((b for b in self.glyphs if b.role == "base" and b.code and side in b.placed()), None)
+        return [(side, base)]
+
+    def attach_side(self, g):
+        """The side a mark (the reph) attaches by: its class's, else that of an attaching anchor of its own
+        (an ogonek kept on its _bottom gets no _ogonek)."""
+        placed = g.placed()
+        if g.side is None or (u"_" + g.side) in placed:
+            return g.side
+        own = sorted(name[1:] for name in placed if name.startswith(u"_"))
+        return own[0] if own else g.side
 
     def select(self):
-        g = self.selected()
-        self.editor.selected = None
-        for widget in (self.reference_title, self.reference, self.reference_note, self.editor, self.hint,
-                       self.reset_button):
-            widget.setVisible(g is not None)  # (empty, the preview's parts only took room)
-        self.editor.scene = self.scene(g) if g is not None else None
-        self.editor.update()
-        self.hint.setText(ANCHOR_HELP_NOTE)
-        self.draw_reference(g)
-        self.update_buttons()
+        try:
+            g = self.selected()
+            self.editor.selected = None
+            for widget in (self.reference_title, self.reference, self.reference_note, self.editor, self.hint,
+                           self.reset_button):
+                widget.setVisible(g is not None)  # (empty, the preview's parts only took room)
+            self.editor.scene = self.scene(g) if g is not None else None
+            self.editor.update()
+            self.hint.setText(ANCHOR_HELP_NOTE)
+            self.draw_reference(g)
+            self.update_buttons()
+        except Exception as exc:  # (a slot's: nothing may escape to Qt)
+            self.owner.log.add(u"Could not show that glyph: %s" % self.ak.html(exc), "error")
 
     def reference_text(self, g):
         """The characters the reference draws for g: its letter with each sample mark (a base), or the
@@ -3178,19 +3232,19 @@ class AnchorPage(object):
         elif g.role in ("base", "ligature"):
             parts.append((g.name, 1.0, 1.0, 0.0, 0.0))
             for side, mark in self.samples(g):
-                if mark is None or side not in placed:
+                own = mark.placed().get(u"_" + side.split(u"_")[0]) if mark is not None else None
+                if own is None or side not in placed:
                     continue
-                own = mark.placed()[u"_" + side.split(u"_")[0]]
                 parts.append((mark.name, 1.0, 1.0, placed[side][0] - own[0], placed[side][1] - own[1]))
                 ranges.append((len(parts) - 1, len(parts)))
                 self.edits.append((g, side, 1))
             advance = self.ink.path(g.name)[1]
         else:
             side, base = self.samples(g)[0]
-            if base is None:
+            target = base.placed().get(side) if base is not None else None
+            own = placed.get(u"_" + side)
+            if target is None or own is None:
                 return None
-            target = base.placed()[side]
-            own = placed[u"_" + side]
             parts = [(base.name, 1.0, 1.0, 0.0, 0.0), (g.name, 1.0, 1.0, target[0] - own[0], target[1] - own[1])]
             ranges = [(1, 2)]
             self.edits.append((g, u"_" + side, -1))
@@ -3300,7 +3354,8 @@ class AnchorPage(object):
         if package is None:
             return
         current = self.owner.current_font()
-        if current is None or self.ak.font_key(current) != self.ak.font_key(package):
+        key = self.owner.package_key(current)
+        if key is None or key != self.owner.package_key(package):
             self.run()
             self.owner.log.add(u"The font changed: here is this one's list. Nothing was added.", "warning")
             return
@@ -3321,6 +3376,7 @@ class AnchorPage(object):
                     self.owner.log.add(u"The mark code has problems, so nothing was written: %s" % self.ak.html(problem), "error")
                     return
         added, moved, touched, error = 0, 0, [], None
+        written = set()  # (glyph, anchor) written in a master, as moved by hand
         try:
             for master in list(package.masters) or [self.master]:
                 planned = dict((g.name, g) for g in self.plan_for(master)[0])
@@ -3341,6 +3397,7 @@ class AnchorPage(object):
                         pin.name = anchor_name
                         layer.addAnchor(pin)
                         added += 1
+                        written.add((name, anchor_name))
                     for anchor_name in here.moved():  # its own anchors moved by hand (flPinPoint.point, proven)
                         anchor = layer.findAnchor(anchor_name)
                         if anchor is None:
@@ -3348,6 +3405,7 @@ class AnchorPage(object):
                         x, y = here.placed()[anchor_name]
                         anchor.point = QtCore.QPointF(float(x), float(y))
                         moved += 1
+                        written.add((name, anchor_name))
                     if glyph not in touched:
                         touched.append(glyph)
             features = package.fgPackage.features
@@ -3356,6 +3414,8 @@ class AnchorPage(object):
                     features.set_feature(tag, new_texts[tag])
         except Exception as exc:
             error = exc
+        for name, anchor_name in written:  # the font has these moves now (read again below): only those not written stay
+            chosen[name].adjust.pop(anchor_name, None)
         self.ak.notify_changed(self.fontlab, package, u"FreeLab Diacritics anchors", touched)
         self.owner.log.add(u"Added %s%s to %s%s. <i>Edit &gt; Undo</i> takes it back." % (
             self.ak.b(counted(added, u"anchor")), (u" and moved %s" % self.ak.b(moved)) if moved else u"",
@@ -3631,9 +3691,13 @@ class AccentsDialog(object):
         return package
 
     def package_key(self, package):
-        """The font's key (Auto Kerning's font_key), or None for no font or one closed since."""
+        """The font's key (Auto Kerning's font_key) with FontLab's id of it (two unsaved fonts of one name
+        share the key; PythonQt wraps each read of a font anew, so the wrapper tells nothing), or None for
+        no font or one closed since."""
         try:
-            return self.ak.font_key(package) if package is not None else None
+            if package is None:
+                return None
+            return self.ak.font_key(package), getattr(getattr(package, "fgPackage", None), "id", None)
         except Exception:
             return None
 
@@ -3670,8 +3734,9 @@ class AccentsDialog(object):
             glyph = package.findName(fg.name)
             layer = glyph.getLayerByName(master) if glyph is not None else None
             parts = component_parts(layer) if layer is not None else None
-            if parts and len(parts) > 1 and learnable(fg.unicode, parts):
-                composites.append((parts[0][0], parts[1:]))
+            marks = learned_marks(fg.unicode, parts) if parts and len(parts) > 1 else None
+            if marks is not None:
+                composites.append((parts[0][0], marks))
         by_name = dict((g.name, g.unicode) for g in package.fgPackage.glyphs)
 
         def glyph_case(name):
@@ -4515,7 +4580,7 @@ class AccentsDialog(object):
         if self.package is None or not self.built_names:
             return []
         try:
-            if self.ak.font_key(self.package) != self.built_font:
+            if self.package_key(self.package) != self.built_font:
                 return []
             return [name for name in self.built_names if self.package.findName(name) is not None]
         except Exception:
@@ -4547,7 +4612,8 @@ class AccentsDialog(object):
             return
         package = self.package
         current = self.current_font()
-        if current is None or self.ak.font_key(current) != self.ak.font_key(package):
+        key = self.package_key(current)
+        if key is None or key != self.package_key(package):
             self.run()
             self.log.add(u"The font changed since the list was made: here is this one's. Nothing was built.", "warning")
             return
@@ -4635,7 +4701,7 @@ class AccentsDialog(object):
                 if refused:
                     partial.append((r.char, r.existing, refused))
                 (rebuilt if r.existing else made).append(r.char)
-                key = self.ak.font_key(package)
+                key = self.package_key(package)
                 if self.built_font != key:
                     self.built_names, self.built_font = [], key
                 if r.name not in self.built_names:

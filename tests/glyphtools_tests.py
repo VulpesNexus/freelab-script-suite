@@ -454,6 +454,7 @@ class AnchorTests(unittest.TestCase):
         self.assertEqual(g.moved(), ["top"], "its own anchor, moved, is written as a move; bottom is added")
         g.anchors = {}
         self.assertTrue(g.pending(), "nothing to add, one to move")
+        self.assertFalse(ac.Rule("ccmp", "x.small", u"", u"").pending(), "a substitution writes no anchors")
 
     def plan(self):
         glyphs = [("ko", 0xE01, "base", ac.Ink(50, 0, 550, 500, top_center=300, bottom_center=300), {}),
@@ -796,6 +797,201 @@ class LearnableTests(unittest.TestCase):
     def test_past_the_basic_plane(self):
         self.assertEqual(len(ac.unichr_(0x1F600)), 1)
         self.assertEqual(len(fc.unichr_(0x1F600)), 1)
+
+    def test_a_borrowed_mark_is_learned_as_the_characters_own(self):
+        marks = ac.learned_marks(0x1E07, [("b", 0, 0), ("macroncomb", 150, -600)])  # b with macron below
+        self.assertEqual(marks, [("macroncomb", 150, -600, "macronbelow", "below")], "a macron below, not above")
+        ink = {"b": ac.Ink(0, 0, 500, 500), "k": ac.Ink(0, 0, 500, 500), "macroncomb": ac.Ink(0, 500, 200, 560)}.get
+        placement = ac.Placement(1000.0, MODEL)
+        placement.learn([("b", marks), ("k", ac.learned_marks(0x1E35, [("k", 0, 0), ("macroncomb", 150, -600)]))],
+                        ink, lambda name: "lower")
+        self.assertEqual([g for g, _ in placement.seen[("macronbelow", "lower")]], [40, 40], "40 under the letter")
+        self.assertNotIn(("macron", "lower"), placement.seen)
+        self.assertNotIn(("above", "lower"), placement.sides)
+        self.assertGreater(placement.gap("macron", "above", "lower"), 0, "a macron above still sits over its letter")
+        left = ac.learned_marks(0x386, [("Alpha", 0, 0), ("acutecomb", 10, 0)])
+        self.assertEqual(left[0][3:], ("acute", "left"), "a Greek capital's tonos at its left")
+        placement.learn([("Alpha", left)] * 3, {"Alpha": ac.Ink(10, 0, 600, 700), "acutecomb": ac.Ink(0, 500, 100, 700)}.get,
+                        lambda name: "upper")
+        self.assertNotIn(("above", "upper"), placement.sides, "not learned as a mark above")
+
+    def test_marks_are_measured_from_the_base_as_moved(self):
+        moved = ac.learned_marks(0xF3, [("o", 100, 40), ("acute", 300, 590)])
+        self.assertEqual(moved, ac.learned_marks(0xF3, [("o", 0, 0), ("acute", 200, 550)]), "the base's move taken off")
+        ink = {"o": ac.Ink(0, 0, 500, 500), "acute": ac.Ink(0, 0, 100, 100)}.get
+        placement = ac.Placement(1000.0, MODEL)
+        placement.learn([("o", moved)] * 3, ink, lambda name: "lower")
+        self.assertEqual(placement.seen[("acute", "lower")][0], (50, 0.0), "a gap of 50, centered")
+
+        class Transform(object):
+            def __init__(self, m11, m22, dx, dy):
+                self.values = (m11, m22, dx, dy)
+
+            def m11(self):
+                return self.values[0]
+
+            def m22(self):
+                return self.values[1]
+
+            def m12(self):
+                return 0.0
+
+            def m21(self):
+                return 0.0
+
+            def dx(self):
+                return self.values[2]
+
+            def dy(self):
+                return self.values[3]
+
+        class Shape(object):
+            isComponent = True
+
+            def __init__(self, name, transform):
+                self.shapeData, self.transform = Stub(componentGlyph=name), transform
+
+        moved_only = Stub(shapes=[Shape("o", Transform(1.0, 1.0, 100, 40)), Shape("acute", Transform(1.0, 1.0, 300, 590))])
+        self.assertEqual(ac.component_parts(moved_only), [("o", 100, 40), ("acute", 300, 590)])
+        scaled = Stub(shapes=[Shape("o", Transform(1.0, 1.0, 0, 0)), Shape("acute", Transform(1.2, 1.2, 300, 590))])
+        self.assertIsNone(ac.component_parts(scaled), "a scaled mark is not measured as its glyph: not learned from")
+
+
+class Stub(object):
+    """An object with the given attributes (FontLab's and Qt's, stubbed)."""
+
+    def __init__(self, **values):
+        self.__dict__.update(values)
+
+
+class ReferenceTests(unittest.TestCase):
+    def test_a_family_whose_own_font_cannot_be_read_has_nothing(self):
+        raw = {"font": None}
+
+        def from_font(font):
+            if raw["font"] is None:
+                raise RuntimeError("no QRawFont")
+            return raw["font"]
+        gui = Stub(QFont=lambda family: family, QFontInfo=lambda font: Stub(family=lambda: font),
+                   QRawFont=Stub(fromFont=from_font), QFontMetrics=lambda font: Stub(inFontUcs4=lambda code: True))
+        saved = ac._qt
+        try:
+            ac._qt = lambda: (None, gui)
+            self.assertFalse(ac.has_character(u"Arial", 0x41), "not as Windows' fallback fonts have it")
+            raw["font"] = Stub(isValid=True, supportsCharacter=lambda code: code == 0x41)
+            self.assertTrue(ac.has_character(u"Arial", 0x41))
+            self.assertFalse(ac.has_character(u"Arial", 0x42))
+        finally:
+            ac._qt = saved
+
+    def test_fonts_are_told_apart_by_their_id(self):
+        dialog = ac.AccentsDialog.__new__(ac.AccentsDialog)
+        dialog.ak = Stub(font_key=lambda package: package.path or u"unsaved:%s" % package.tfn)
+
+        def package(number):
+            return Stub(path=u"", tfn=u"Untitled", fgPackage=Stub(id=number))
+        self.assertNotEqual(dialog.package_key(package(1)), dialog.package_key(package(2)), "two unsaved fonts of one name")
+        self.assertEqual(dialog.package_key(package(1)), dialog.package_key(package(1)), "one font, read twice")
+        self.assertEqual(dialog.package_key(Stub(path=u"a.vfc", tfn=u"A")), (u"a.vfc", None))
+        self.assertIsNone(dialog.package_key(None))
+
+
+class AnchorPageTests(unittest.TestCase):
+    """The Mark anchors tab's editor and writing, FontLab's objects stubbed."""
+
+    def test_a_mark_kept_on_an_anchor_of_another_side(self):
+        inks = {"A": ac.Ink(10, 0, 590, 700, advance=600), "ogonekcomb": ac.Ink(-100, -200, 0, 0)}
+        glyphs = ac.plan_anchors([("A", 0x41, "base", inks["A"], {}),
+                                  ("ogonekcomb", 0x0328, "mark", inks["ogonekcomb"], {"_bottom": (-50, 0)})],
+                                 {}, "latin", 1000, 500)
+        page = ac.AnchorPage.__new__(ac.AnchorPage)
+        page.glyphs, page.package = glyphs, Stub(upm=1000)
+        page.ink = type("Ink", (object,), {"__call__": lambda self, name: inks.get(name),
+                                           "path": lambda self, name: (None, inks[name].advance)})()
+        a, ogonek = glyphs
+        self.assertEqual(ogonek.side, "ogonek")
+        self.assertNotIn(u"_ogonek", ogonek.placed(), "its own _bottom attaches it")
+        scene = page.scene(ogonek)
+        bottom = a.placed()[u"bottom"]
+        self.assertEqual(scene["parts"][1][3:], (bottom[0] + 50, bottom[1]), "hung on A's bottom by its _bottom")
+        self.assertEqual(page.edits, [(ogonek, u"_bottom", -1)])
+        self.assertIsNotNone(page.scene(a))
+        page.glyphs = [ogonek]
+        self.assertIsNone(page.scene(ogonek), "no base to hang it on: nothing drawn")
+
+    def page(self, layers):
+        """An AnchorPage over a font of one glyph, a, whose layers are {master: {anchor: (x, y)}}."""
+        class Anchor(object):
+            def __init__(self, point):
+                self.point, self.name = point, None
+
+        def point(x, y):
+            return Stub(x=lambda: x, y=lambda: y)
+
+        class Layer(object):
+            def __init__(self, anchors):
+                self.anchors = []
+                for name, (x, y) in anchors.items():
+                    anchor = Anchor(point(x, y))
+                    anchor.name = name
+                    self.anchors.append(anchor)
+
+            def findAnchor(self, name):
+                return next((anchor for anchor in self.anchors if anchor.name == name), None)
+
+            def addAnchor(self, anchor):
+                self.anchors.append(anchor)
+
+            def read(self):
+                return dict((anchor.name, (anchor.point.x(), anchor.point.y())) for anchor in self.anchors)
+
+        built = dict((master, Layer(anchors)) for master, anchors in layers.items())
+        glyph = Stub(getLayerByName=lambda master: built[master])
+        package = Stub(masters=sorted(layers), findName=lambda name: glyph if name == "a" else None)
+        ink = ac.Ink(40, -10, 460, 480, advance=500)
+        page = ac.AnchorPage.__new__(ac.AnchorPage)
+        page.package, page.master, page.texts = package, "Regular", {}
+        page.plan_for = lambda master: (ac.plan_anchors([("a", 0x61, "base", ink, built[master].read())], {}, "latin",
+                                                        1000, 500), None)
+        page.glyphs = page.plan_for("Regular")[0]
+        page.harvest = page.run = lambda keep_script=False: None
+        page.code_box = Stub(checked=False)
+        page.owner = Stub(current_font=lambda: package, package_key=lambda p: (u"a.vfc", 1) if p is not None else None,
+                          log=Stub(add=lambda text, kind="info": None))
+        page.ak = Stub(notify_changed=lambda *args: None, b=lambda text: u"%s" % text, html=lambda text: u"%s" % text)
+        page.fontlab = Stub(flPinPoint=lambda point: Anchor(point))
+        return page, built
+
+    def write(self, page):
+        saved = ac._qt
+        try:
+            ac._qt = lambda: (Stub(QPointF=lambda x, y: Stub(x=lambda: x, y=lambda: y)), None)
+            page.write()
+        finally:
+            ac._qt = saved
+
+    def test_a_move_written_is_not_written_again(self):
+        page, built = self.page({"Regular": {"top": (250, 600), "bottom": (250, 0), "ogonek": (460, 0)}})
+        g = page.glyphs[0]
+        g.adjust, g.checked = {"top": [10, 0]}, True
+        self.assertTrue(g.pending())
+        self.write(page)
+        self.assertEqual(built["Regular"].read()["top"], (260, 600))
+        self.assertEqual(g.adjust, {}, "the font has the move now")
+        again = page.plan_for("Regular")[0][0]
+        again.adjust = g.adjust  # (as the refresh carries it)
+        self.assertFalse(again.pending(), "nothing more to write")
+
+    def test_anchors_another_master_lacks(self):
+        page, built = self.page({"Regular": {"top": (250, 600), "bottom": (250, 0), "ogonek": (460, 0)}, "Bold": {}})
+        g = page.glyphs[0]
+        self.assertFalse(g.pending(), "Regular has them all")
+        g.elsewhere = g.checked = True  # (as the list finds Bold's planned)
+        self.assertTrue(g.pending())
+        self.write(page)
+        self.assertEqual(sorted(built["Bold"].read()), ["bottom", "ogonek", "top"], "Bold gets them")
+        self.assertEqual(built["Regular"].read(), {"top": (250, 600), "bottom": (250, 0), "ogonek": (460, 0)},
+                         "Regular as it was")
 
 
 class LigatureTests(unittest.TestCase):
