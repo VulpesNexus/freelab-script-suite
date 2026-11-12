@@ -902,6 +902,8 @@ def both_masters(make):
 
 
 class FakePackage(object):
+    made = 0
+
     def __init__(self):
         glyphs = [FakeGlyph(u"H", 0x48, both_masters(lambda: FakeLayer([FakeShape([square(700)])]))),
                   FakeGlyph(u"e", 0x65, both_masters(lambda: FakeLayer([FakeShape([square(500)])], [u"top"]))),
@@ -922,6 +924,8 @@ class FakePackage(object):
         self.by_name = dict((g.name, g) for g in glyphs)
         self.fgPackage = Anything()
         self.fgPackage.glyphs = [g.fgGlyph for g in glyphs]
+        FakePackage.made += 1
+        self.fgPackage.id = FakePackage.made  # (FontLab's: one per open font)
         self.fgPackage.info = Anything()
         for field, value in (("openTypeOS2WinAscent", 1000), ("openTypeOS2WinDescent", 250),
                              ("openTypeOS2TypoAscender", 800), ("openTypeOS2TypoDescender", -200),
@@ -1129,6 +1133,83 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(fc.metric_writes(dialog.suggestions), [], "checked again: as suggested")
         self.assertEqual(dialog.package.ascender_value, 750, "the master's own metrics left alone")
         self.assertTrue(any(level == "done" and u"Wrote" in text for level, text in logged), logged)
+
+    def written(self, unsaved=False, unset=()):
+        """A dialog that wrote its suggestions into its font (unsaved: no path; unset: info fields None)."""
+        dialog = self.dialog()
+        package = dialog.package
+        if unsaved:
+            package.path = None
+        for field in unset:
+            setattr(package.fgPackage.info, field, None)
+        dialog.mode_share.checked, dialog.share.value = True, 120
+        dialog.check_vertical()
+        dialog.log.add = lambda text, level="info": None
+        dialog.write_suggestions()
+        self.assertTrue(dialog.put_back)
+        return dialog, package
+
+    def test_put_back(self):
+        dialog, package = self.written()
+        info = package.fgPackage.info
+        logged = []
+        dialog.log.add = lambda text, level="info": logged.append((level, text))
+        dialog.put_back_values()
+        self.assertEqual((info.openTypeOS2TypoAscender, info.openTypeHheaAscender, info.openTypeOS2WinAscent),
+                         (800, 900, 1000), logged)
+        self.assertIsNone(dialog.put_back)
+        self.assertEqual([level for level, _ in logged if level in ("error", "warning")], [], logged)
+
+    def test_put_back_only_into_the_font_written_to(self):
+        """Two unsaved fonts of one family name share a font key: the old values of one never go into the other."""
+        dialog, written = self.written(unsaved=True)
+        other = FakePackage()
+        other.path = None
+        other.fgPackage.info.openTypeHheaAscender = 1100
+        self.assertEqual(self.ak.font_key(other), self.ak.font_key(written))
+        self.workspace.currentPackage = other
+        logged = []
+        dialog.log.add = lambda text, level="info": logged.append((level, text))
+        dialog.put_back_values()
+        self.assertEqual(other.fgPackage.info.openTypeHheaAscender, 1100, "the other font left alone")
+        self.assertTrue(any(level == "warning" and u"nothing was put back" in text for level, text in logged), logged)
+        self.assertTrue(dialog.put_back, "kept for the font written to")
+        self.workspace.currentPackage = written
+        dialog.put_back_values()
+        self.assertEqual(written.fgPackage.info.openTypeHheaAscender, 900)
+        self.assertIsNone(dialog.put_back)
+
+    def test_put_back_unset_and_refused(self):
+        """A value that was not set stays as written and is named; one FontLab refuses stays held."""
+        dialog, package = self.written(unset=("openTypeHheaAscender",))
+        self.assertIn("hhea_ascender", dialog.put_back[3])
+        info = package.fgPackage.info
+        written = info.openTypeHheaAscender
+        self.assertIsNotNone(written)
+
+        class Refusing(object):
+            def __setattr__(self, name, value):
+                if name == "openTypeOS2TypoAscender":
+                    raise ValueError("refused")
+                setattr(info, name, value)
+
+            def __getattr__(self, name):
+                return getattr(info, name)
+
+        package.fgPackage.info = Refusing()
+        logged = []
+        dialog.log.add = lambda text, level="info": logged.append((level, text))
+        dialog.put_back_values()
+        self.assertEqual(info.openTypeHheaAscender, written, "an unset value cannot be unset again")
+        self.assertEqual(info.openTypeOS2WinAscent, 1000)
+        self.assertNotEqual(info.openTypeOS2TypoAscender, 800)
+        self.assertTrue(any(u"hhea ascender was not set before; set to %d now" % written in text
+                            for level, text in logged if level == "warning"), logged)
+        self.assertEqual(dialog.put_back[2], ["typo_ascender"], "the refused value kept, the others done")
+        package.fgPackage.info = info
+        dialog.put_back_values()
+        self.assertEqual(info.openTypeOS2TypoAscender, 800)
+        self.assertIsNone(dialog.put_back)
 
 
 if __name__ == "__main__":

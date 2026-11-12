@@ -49,6 +49,9 @@ class MatchTests(unittest.TestCase):
         pairs, only_a, only_b = fcmp.match_glyphs(a, b)
         self.assertEqual(pairs, [], "two candidates: no guess")
         self.assertEqual((only_a, only_b), ([u"uni0041"], [u"A.one", u"A.two"]))
+        pairs, only_a, only_b = fcmp.match_glyphs(b, a)
+        self.assertEqual(pairs, [], "the fonts swapped: no guess either")
+        self.assertEqual((only_a, only_b), ([u"A.one", u"A.two"], [u"uni0041"]))
 
 
 class LabelTests(unittest.TestCase):
@@ -183,6 +186,12 @@ class GlyphTests(unittest.TestCase):
         other = glyph(u"eacute", components=[(u"e", IDENTITY), (u"gravecomb", IDENTITY)])
         self.assertEqual(fcmp.compare_glyph(one, other, 1, self.labels)[0].text,
                          u"component acutecomb only in Regular; component gravecomb only in Bold")
+        two = glyph(u"colon", components=[(u"dot", IDENTITY), (u"dot", (1, 0, 0, 1, 0, 400))])
+        one = glyph(u"colon", components=[(u"dot", IDENTITY)])
+        self.assertEqual(fcmp.compare_glyph(two, one, 1, self.labels)[0].text, u"component dot 2 times in Regular, 1 in Bold")
+        self.assertEqual(fcmp.compare_glyph(glyph(u"colon"), two, 1, self.labels)[0].text,
+                         u"component dot only in Bold (2 times)")
+        one = glyph(u"eacute", components=[(u"e", IDENTITY), (u"acutecomb", (1, 0, 0, 1, 100, 0))])
         scaled = glyph(u"eacute", components=[(u"e", IDENTITY), (u"acutecomb", (0.9, 0, 0, 0.9, 100, 0))])
         self.assertEqual(fcmp.compare_glyph(one, scaled, 1)[0].text, u"component acutecomb scaled or turned")
 
@@ -671,6 +680,12 @@ class DialogTests(unittest.TestCase):
             self.assertEqual(requested, [u"other.vfc", third.path])
             dialog.look_for_opened()
             self.assertEqual((dialog.open_tries, done()), (1, 1), "not in yet: looked for again")
+            earlier = first_font()
+            earlier.path = u"other.vfc"
+            packages.append(earlier)  # the file picked first comes in first
+            dialog.look_for_opened()
+            self.assertEqual((dialog.open_tries, done()), (2, 1), "not the file looked for: looked for again")
+            self.assertIsNotNone(dialog.opening)
             packages.append(third)
             dialog.look_for_opened()
             self.assertEqual(said[-1][0], "done")

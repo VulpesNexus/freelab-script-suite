@@ -2055,7 +2055,7 @@ def register_list_font(QtCore, QtGui):
 HELP = u"""<b>FreeLab Font Check</b><br>
 Three views of the current font. Nothing in the font changes until you click <i>Write suggested
 values</i> or <i>Fix</i>. A fix is one step of <i>Edit &gt; Undo</i>; the font info written is not in FontLab's
-History: <i>Put back old values</i> takes it back.<br><br>
+History: <i>Put back old values</i> takes it back (a value that was not set before stays as written).<br><br>
 <b>Coverage</b>: the scripts the font has, each with a bar (covered, within reach, missed) from
 Hyperglot's orthographies; click one to see only its languages. At the left, the characters to add,
 ranked by the languages each completes on its own: check some (or all, none, or only those
@@ -3084,8 +3084,8 @@ class FontCheckDialog(object):
         self.write_button = QtGui.QPushButton("Write suggested values")
         self.write_button.setWhatsThis(u"Writes the suggested values that differ into the font's info: the typo, hhea, "
                                        u"and win values and <i>Use Typo Metrics</i>, for the whole font, then checks again; "
-                                       u"the log lists each value, old and new, and <i>Put back old values</i> undoes it "
-                                       u"(FontLab's <i>Edit &gt; Undo</i> does not cover the font info). "
+                                       u"the log lists each value, old and new, and <i>Put back old values</i> puts back the "
+                                       u"values it replaced (FontLab's <i>Edit &gt; Undo</i> does not cover the font info). "
                                        u"The masters' ascender, descender, x-height, and cap height (the metrics FontLab "
                                        u"draws with) are not changed.")
         self.copy_button = QtGui.QPushButton("Copy suggested values")
@@ -3094,8 +3094,10 @@ class FontCheckDialog(object):
         self.font_info_button.setWhatsThis(u"Opens FontLab's <i>Font Info</i>, where these values are set.")
         row.addWidget(self.write_button)
         self.put_back_button = QtGui.QPushButton("Put back old values")
-        self.put_back_button.setWhatsThis(u"Puts the font info back as it was before <i>Write suggested values</i>: "
-                                          u"FontLab's <i>Edit &gt; Undo</i> does not cover the font info.")
+        self.put_back_button.setWhatsThis(u"Puts back the font info values <i>Write suggested values</i> replaced "
+                                          u"(FontLab's <i>Edit &gt; Undo</i> does not cover the font info), into the font "
+                                          u"written to only. A value that was not set before stays as written (FreeLab "
+                                          u"knows no way to unset one): the log names it; clear it in <i>Font Info</i>.")
         self.put_back_button.setEnabled(False)
         row.addWidget(self.put_back_button)
         row.addWidget(self.copy_button)
@@ -3285,7 +3287,7 @@ class FontCheckDialog(object):
     def read_font(self):
         """The current font and master; False (and said so) when no font is open."""
         package = self.current_font()
-        if package is not None and self.package is not None and self.ak.font_key(package) != self.ak.font_key(self.package):
+        if package is not None and self.package is not None and self.package_id(package) != self.package_id(self.package):
             self.stale = set(TABS)
         self.package = package
         self.master = package.master if package is not None else None
@@ -4162,10 +4164,21 @@ class FontCheckDialog(object):
         except Exception as exc:
             self.log.add(u"Could not copy: %s" % self.ak.html(exc), "error")
 
+    def package_id(self, package):
+        """(fontgate id, font key) of an open font: the key alone (its path, or its family name while
+        unsaved) is the same for two unsaved fonts of one name; the id (fgPackage.id) tells open fonts
+        apart, the same through every Python wrapper of one font (found live), whereas the wrappers
+        themselves differ at each read."""
+        try:
+            number = int(package.fgPackage.id)
+        except Exception:
+            number = None
+        return (number, self.ak.font_key(package))
+
     def same_font(self):
         """True while the font checked is still the current one; else the view is checked again."""
         current = self.current_font()
-        if current is not None and self.package is not None and self.ak.font_key(current) == self.ak.font_key(self.package):
+        if current is not None and self.package is not None and self.package_id(current) == self.package_id(self.package):
             return True
         self.log.add(u"The font changed since the check: checked again. Nothing was written.", "warning")
         self.stale = set(TABS)
@@ -4229,10 +4242,14 @@ class FontCheckDialog(object):
         if done or failed:
             self.ak.notify_changed(self.fontlab, self.package, u"FreeLab Font Check: vertical metrics")
         if done:
-            self.put_back = (self.ak.font_key(self.package), old, [s.key for s in done])
+            # (font, old values, keys written, keys that were unset before: no way to unset one is known, labels)
+            unset = [s.key for s in done if s.key != "use_typo" and s.key in old and old[s.key] is None]
+            self.put_back = (self.package_id(self.package), old, [s.key for s in done], unset,
+                             dict((s.key, s.label) for s in done))
             self.log.add(u"Wrote %s into the font info: %s. FontLab's <i>Edit &gt; Undo</i> does not take the font "
-                         u"info back: <i>Put back old values</i> does." % (
-                             b(counted(len(done), u"value")), self.ak.html(u"; ".join(write_text(s) for s in done))), "done")
+                         u"info back: <i>Put back old values</i> does%s." % (
+                             b(counted(len(done), u"value")), self.ak.html(u"; ".join(write_text(s) for s in done)),
+                             u" (except a value that was not set before: it stays as written)" if unset else u""), "done")
         self.update_put_back()
         if failed:
             self.log.add(u"Not written: %s." % self.ak.html(u"; ".join(failed)), "error")
@@ -4242,39 +4259,58 @@ class FontCheckDialog(object):
         """Put back old values: clickable while the font written to is the one checked."""
         held = getattr(self, "put_back", None)
         self.ak.enable(self.put_back_button, bool(held) and self.package is not None
-                       and self.ak.font_key(self.package) == held[0])
+                       and self.package_id(self.package) == held[0])
 
     def put_back_values(self):
-        """The font info as it was before the last write (FontLab's History does not cover it)."""
+        """The font info as it was before the last write (FontLab's History does not cover it), into the
+        font written to only, while it is the current one. A value that was not set before stays as
+        written (no way to unset a font info value is known): the log names it. A value FontLab refused
+        to take back stays held, for another click."""
         held = getattr(self, "put_back", None)
-        if not held or self.package is None or self.ak.font_key(self.package) != held[0]:
+        if not held:
             return
-        _, old, keys = held
+        current = self.current_font()
+        if current is None or self.package_id(current) != held[0]:
+            self.log.add(u"The font written to is not the current one: nothing was put back.", "warning")
+            self.update_put_back()
+            return
+        ident, old, keys, unset, labels = held
         fields = dict(INFO_FIELDS)
-        info = self.package.fgPackage.info
-        restored, failed = [], []
+        info = current.fgPackage.info
+        restored, failed, left, kept = [], [], [], []
         for key in keys:
+            label = labels.get(key, key)
+            if key in unset:
+                try:
+                    now = getattr(info, fields[key])
+                    now = u"%d" % round_units(float(now)) if now is not None else u"nothing"
+                except Exception:
+                    now = u"?"
+                left.append(u"%s was not set before; set to %s now: clear it in Font Info if you want it unset" % (label, now))
+                continue
             if key not in old:
-                failed.append(key)
+                left.append(u"%s (its old value could not be read)" % label)
                 continue
             try:
                 if key == "use_typo":
                     info.openTypeOS2Selection = old[key]
-                elif old[key] is not None:
-                    setattr(info, fields[key], float(old[key]))
                 else:
-                    failed.append(key)  # (an unset value cannot be unset again: left as written)
-                    continue
+                    setattr(info, fields[key], float(old[key]))
                 restored.append(key)
             except Exception as exc:
-                failed.append(u"%s (%s)" % (key, exc))
-        self.put_back = None
-        self.ak.notify_changed(self.fontlab, self.package, u"FreeLab Font Check: vertical metrics put back")
+                failed.append(u"%s (%s)" % (label, exc))
+                kept.append(key)
+        self.put_back = (ident, old, kept, [], labels) if kept else None
+        if restored or failed:
+            self.ak.notify_changed(self.fontlab, current, u"FreeLab Font Check: vertical metrics put back")
         b = self.ak.b
         if restored:
             self.log.add(u"Put back %s as they were." % b(counted(len(restored), u"value")), "done")
+        if left:
+            self.log.add(u"Not put back: %s." % self.ak.html(u"; ".join(left)), "warning")
         if failed:
-            self.log.add(u"Not put back: %s." % self.ak.html(u", ".join(failed)), "warning")
+            self.log.add(u"Not put back (FontLab refused; <i>Put back old values</i> tries again): %s." % self.ak.html(
+                u"; ".join(failed)), "warning")
         self.check_vertical()
         self.update_put_back()
 

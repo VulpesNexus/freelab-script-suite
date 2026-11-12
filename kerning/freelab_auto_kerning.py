@@ -1091,13 +1091,27 @@ class FontKerning(object):
 
     def target(self, left, right):
         """(entry, remove when 0) for a pair: the entry that sets its value now, or else its classes'
-        pair (or its glyphs' when it has none)."""
+        pair (or its glyphs' when it has none). A 0 removes the entry only when no pair it sets would
+        then take another entry's value (glyph A against class R, removed, would hand A/W to class L
+        against glyph W): it is written as 0 otherwise."""
         found = self.candidates(left, right)
-        for index, entry in enumerate(found):
+        for entry in found:
             if entry in self.entries:
-                below = any(other in self.entries for other in found[index + 1:])
-                return entry, not below
+                return entry, not self.exposes(entry)
         return found[-1], True
+
+    def exposes(self, entry):
+        """True when removing the entry would let another entry set a glyph pair it sets now."""
+        for left, right in self.pairs(entry):
+            found = self.candidates(left, right)
+            if entry not in found:
+                continue
+            index = found.index(entry)
+            if any(other in self.entries for other in found[:index]):
+                continue  # a more specific entry sets this pair: removing this one changes nothing
+            if any(other in self.entries for other in found[index + 1:]):
+                return True
+        return False
 
     def reach(self, entry):
         """How many glyph pairs an entry kerns."""
@@ -1119,11 +1133,15 @@ class FontKerning(object):
         renaming a class keeps its pairs (checked in FontLab 7.2: pairs, classes, and the applied
         kerning identical after the round trip)."""
         renamed = []
+        # a spare name is no class's, no name of the entry's (a glyph A__freelab would be read as the
+        # renamed class), and no other spare's
+        taken = set(self.classes) | set(name for name, _ in entry)
         try:
             for name in self.hidden(entry):
                 spare = name + u"__freelab"
-                while spare in self.classes:
+                while spare in taken:
                     spare += u"_"
+                taken.add(spare)
                 self.kerning.renameGroup(name, spare)
                 renamed.append((name, spare))
             # a side that is the renamed class itself (glyph o against class o) goes by its spare name

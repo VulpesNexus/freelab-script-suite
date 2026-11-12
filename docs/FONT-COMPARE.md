@@ -6,7 +6,7 @@ The window keeps the conventions of FreeLab's other dialogs and the look of the 
 
 ## Choosing what to compare
 
-*Compare* and *with* list every open font, and each master of a font with several (*Sans · Bold*). The current font's current master comes first; the second box starts on the next open font, or on the current font's next master when only one font is open. Choosing the same font and master in both says so. The arrows between the boxes swap the two (and compare again when they had been compared). *Open a font…* opens a font file in FontLab, as *File > Open* does, and chooses it as the second font once FontLab has opened it (looked for twice a second, for up to a minute; a file picked again before then is the one looked for); a file already open is chosen at once. *Compare* runs the comparison (it also runs as the window opens when there are two things to compare).
+*Compare* and *with* list every open font, and each master of a font with several (*Sans · Bold*). The current font's current master comes first; the second box starts on the next open font, or on the current font's next master when only one font is open. Choosing the same font and master in both says so. The arrows between the boxes swap the two (and compare again when they had been compared). *Open a font…* opens a font file in FontLab, as *File > Open* does, and chooses it as the second font once FontLab has opened it (looked for twice a second, for up to a minute; a file picked again before then is the one looked for, and while a file picked before it may still come in, only a font with the file's own path is taken); a file already open is chosen at once. *Compare* runs the comparison (it also runs as the window opens when there are two things to compare).
 
 In sentences and chips, the two sides go by their fonts' names (and their masters' when a font has several), by their masters' names when they are two masters of one font, by their files' names when two fonts share a name, and otherwise as *first* and *second*.
 
@@ -16,11 +16,11 @@ Comparing a font with itself at another point of its History is out of scope: Fo
 
 ## Glyphs
 
-Glyphs are paired by name. A glyph left over in each font with a code point in common is paired too (*uni00E9* and *eacute*), when no other leftover glyph shares that code point; the pair then differs in its name. The kinds of difference, gravest first:
+Glyphs are paired by name. A glyph left over in each font with a code point in common is paired too (*uni00E9* and *eacute*), when no other leftover glyph in either font shares that code point (so the pairs are the same whichever font comes first); the pair then differs in its name. The kinds of difference, gravest first:
 
 - **Only in one font**, or, for two masters, **no layer** in one master.
 - **Outlines** (the glyph's own contours; components are compared on their own): the number of contours, the number of nodes, how far the node that moved most moved (when both have the same contour and node counts), and how much the shapes differ. The measure of shape is the area where one outline has ink and the other has not (the symmetric difference of the two filled outlines, overlapping contours counted once and counters left empty, as FontLab fills them), as a share of the larger outline's ink: 0% for the same shape, 100% where one has no ink, and up to 200% for two shapes that do not overlap at all (a mark moved away). A shape counts as changed past 0.2% of its ink, about what a node moved by 10 units on a 700-unit letter changes. When the nodes moved but the shape did not, and the nodes are the same in another order, the sentence says so (*the same nodes in another order (start points or contour order)*).
-- **Components**: those only in one font (the second font's component names translated through the glyph pairs above), the same ones in another order, one moved (by its offset), and one scaled or turned.
+- **Components**: those only in one font (the second font's component names translated through the glyph pairs above), one used more times in one font than in the other (a colon of two dots against one), the same ones in another order, one moved (by its offset), and one scaled or turned.
 - **Names and code points**: a glyph paired by its code point, and code points that differ.
 - **Metrics**: the advance width, and the left and right sidebearings (the ink measured with components, as FontLab draws the glyph). A glyph with no ink compares its width only.
 - **Anchors**: those only in one font, and those moved.

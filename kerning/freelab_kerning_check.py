@@ -301,6 +301,27 @@ def find_cleanup(kerning, glyph_exists, tiny=TINY_UNITS):
     return found
 
 
+AUTOMATIC_KINDS = ("missing", "overridden", "redundant")  # checked for removal: they change nothing
+
+
+def still_removable(kerning, chosen, glyph_exists, tiny=TINY_UNITS):
+    """(the cleanup findings chosen that may still go, the number left) judged again on the kerning as
+    it is now: an entry whose value changed is left, and so is one that changed nothing at the check
+    but would change something now (an exception equal to its class pair's value, that value edited
+    since). The others may go in any order: find_cleanup judged each as if the ones found before it
+    were removed, and keeping some of those changes nothing either."""
+    fresh = dict((c.entry, c.kind) for c in find_cleanup(kerning, glyph_exists, tiny))
+    found, stale = [], 0
+    for c in chosen:
+        if c.entry not in kerning.entries or round_units(kerning.values.get(c.entry) or 0) != c.value:
+            stale += 1
+        elif c.kind in AUTOMATIC_KINDS and fresh.get(c.entry) not in AUTOMATIC_KINDS:
+            stale += 1
+        else:
+            found.append(c)
+    return found, stale
+
+
 def value_without(kerning, entry, left, right):
     """The kerning a glyph pair would get without one entry: the next entry that applies to it."""
     for candidate in kerning.candidates(left, right):
@@ -1028,14 +1049,8 @@ class KerningCheckDialog(object):
         tab = self.cleanup
         tab.tree.clear()
         tab.action.setEnabled(False)
-        package = self.package
         kerning = self.kerning()
-
-        def glyph_exists(name):
-            glyph = package.findName(name)
-            return glyph is not None and not glyph.isNull
-
-        found = limited_cleanup(kerning, find_cleanup(kerning, glyph_exists, self.tiny.value), self.only)
+        found = limited_cleanup(kerning, find_cleanup(kerning, self.glyph_exists, self.tiny.value), self.only)
         tab.findings = found
         kinds = dict(CLEANUP_KINDS)
         for index, c in enumerate(found):
@@ -1052,6 +1067,10 @@ class KerningCheckDialog(object):
             u", ".join(counted(counts[kind], *CLEANUP_COUNTS[kind]) for kind, _ in CLEANUP_KINDS if kind in counts)
             or u"none"))
 
+    def glyph_exists(self, name):
+        glyph = self.package.findName(name)
+        return glyph is not None and not glyph.isNull
+
     def remove_entries(self):
         if self.busy or not self.same_font():
             return
@@ -1062,10 +1081,8 @@ class KerningCheckDialog(object):
         kerning = self.kerning()
         removed, stale, error = 0, 0, None
         try:
+            chosen, stale = still_removable(kerning, chosen, self.glyph_exists, self.tiny.value)
             for c in chosen:
-                if c.entry not in kerning.entries or round_units(kerning.values.get(c.entry) or 0) != c.value:
-                    stale += 1
-                    continue
                 kerning.write(c.entry, 0, True)
                 removed += 1
         except Exception as exc:

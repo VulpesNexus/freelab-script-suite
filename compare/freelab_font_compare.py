@@ -136,8 +136,9 @@ def side_labels(a, b):
 
 def match_glyphs(glyphs_a, glyphs_b):
     """The glyphs of two fonts paired: by name, then a glyph left over in each with a code point in
-    common (uni00E9 and eacute). glyphs_a, glyphs_b: [(name, code points)]. Returns (pairs [(name in
-    a, name in b)] in a's order, names only in a, names only in b)."""
+    common (uni00E9 and eacute) when no other glyph left over in either font has it: the pairs are the
+    same whichever font comes first. glyphs_a, glyphs_b: [(name, code points)]. Returns (pairs [(name
+    in a, name in b)] in a's order, names only in a, names only in b)."""
     names_b = set(name for name, _ in glyphs_b)
     names_a = set(name for name, _ in glyphs_a)
     pairs = []
@@ -148,17 +149,20 @@ def match_glyphs(glyphs_a, glyphs_b):
         else:
             left_a.append((name, codes))
     left_b = [(name, codes) for name, codes in glyphs_b if name not in names_a]
-    by_code = {}
+    by_code, by_code_a = {}, {}
     for name, codes in left_b:
         for code in codes:
             by_code.setdefault(code, []).append(name)
+    for name, codes in left_a:
+        for code in codes:
+            by_code_a.setdefault(code, []).append(name)
     taken = set()
     only_a = []
     for name, codes in left_a:
         found = None
         for code in codes:
-            candidates = [n for n in by_code.get(code, []) if n not in taken]
-            if len(candidates) == 1:
+            candidates = by_code.get(code, [])
+            if len(candidates) == 1 and len(by_code_a[code]) == 1 and candidates[0] not in taken:
                 found = candidates[0]
                 break
         if found is None:
@@ -468,12 +472,16 @@ def percent(share):
 def compare_components(a, b, threshold, labels):
     names_a, names_b = [n for n, _ in a.components], [n for n, _ in b.components]
     clauses, shorts = [], []
-    for name in names_a:
-        if name not in names_b:
-            clauses.append(u"component %s only in %s" % (name, labels[0]))
-    for name in names_b:
-        if name not in names_a:
-            clauses.append(u"component %s only in %s" % (name, labels[1]))
+    # counted, not only named: a second dot removed leaves the name in both
+    for names, others, label, other_label in ((names_a, names_b, labels[0], labels[1]), (names_b, names_a, labels[1], labels[0])):
+        for k, name in enumerate(names):
+            if name in names[:k]:
+                continue
+            mine, theirs = names.count(name), others.count(name)
+            if not theirs:
+                clauses.append(u"component %s only in %s%s" % (name, label, u" (%d times)" % mine if mine > 1 else u""))
+            elif mine > theirs:
+                clauses.append(u"component %s %d times in %s, %d in %s" % (name, mine, label, theirs, other_label))
     if clauses:
         shorts.append(u"components")
     common = [n for n in names_a if n in names_b]
@@ -1518,8 +1526,11 @@ class CompareDialog(object):
             self.log.add(u"FontLab did not open %s: %s" % (self.ak.i(os.path.basename(path)), self.ak.html(exc)), "error")
             return
         self.log.add(u"Opening %s in FontLab\N{HORIZONTAL ELLIPSIS}" % self.ak.i(os.path.basename(path)))
-        # One poll pending at a time: a second font opened before the first came in is the one looked for
-        self.opening, self.open_tries = (path, before), 0
+        # One poll pending at a time: a second font opened before the first came in is the one looked for,
+        # and the files picked before it (superseded) may still come in first
+        earlier = getattr(self, "opening", None)
+        superseded = (earlier[2] | set([earlier[0]])) if earlier is not None else set()
+        self.opening, self.open_tries = (path, before, superseded), 0
         timer = getattr(self, "open_timer", None)
         if timer is None:
             timer = self.open_timer = QtCore.QTimer()
@@ -1529,25 +1540,30 @@ class CompareDialog(object):
         timer.start()
 
     def look_for_opened(self):
-        """The font being opened (open_font), chosen once it is in; looked for again until OPEN_TRIES."""
+        """The font being opened (open_font), chosen once it is in; looked for again until OPEN_TRIES.
+        The font with the file's path is taken; another font that came in is taken only while no file
+        picked before is on its way (a font opened from a binary file may not give its path), since it
+        may be that earlier file's."""
         opening = getattr(self, "opening", None)
         if opening is None:
             return
-        path, before = opening
+        path, before, superseded = opening
         try:
             new = [p for p in self.open_fonts() if self.ak.font_key(p) not in before]
-            if not new:
+            named = [p for p in new if getattr(p, "path", None) and self.same_file(p.path, path)]
+            found = named or ([] if superseded else new)
+            if not found:
                 self.open_tries += 1
                 if self.open_tries < self.OPEN_TRIES:
                     self.open_timer.start()
                 else:
                     self.opening = None
-                    self.log.add(u"%s did not open (or FontLab is waiting for an answer in a dialog)."
+                    self.log.add((u"%s was not among the fonts that came in: choose it in <i>with</i>." if new else
+                                  u"%s did not open (or FontLab is waiting for an answer in a dialog).")
                                  % self.ak.i(os.path.basename(path)), "warning")
                 return
             self.opening = None
-            named = [p for p in new if getattr(p, "path", None) and self.same_file(p.path, path)]
-            self.choose_second((named or new)[0], u"Opened %s")  # (the file's own, when another font came in too)
+            self.choose_second(found[0], u"Opened %s")  # (the file's own, when another font came in too)
         except Exception as exc:
             self.opening = None
             self.log.add(u"Could not choose the font just opened: %s" % self.ak.html(exc), "error")

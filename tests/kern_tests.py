@@ -309,6 +309,32 @@ class KerningClassTests(unittest.TestCase):
         k.write(entry, 0, remove)
         self.assertNotIn(entry, k.kerning.stored, "the last entry for the pair: removed")
 
+    def test_a_zero_keeps_an_entry_whose_other_pairs_would_take_another_value(self):
+        # glyph A against class R (V, W) -50, class L (A) against glyph W -80: a 0 written through A/V
+        # also sets A/W, which removing the entry would hand to L against W
+        groups = {"L": (["A"], "KernLeft"), "R": (["V", "W"], "KernRight")}
+        k = ak.FontKerning(FakeKerning(groups, {(("A", False), ("R", True)): -50, (("L", True), ("W", False)): -80}))
+        entry, remove = k.target("A", "V")
+        self.assertEqual(entry, (("A", False), ("R", True)))
+        self.assertFalse(remove, "A/W would become -80")
+        k.write(entry, 0, remove)
+        after = ak.FontKerning(k.kerning)
+        self.assertEqual((after.current("A", "V"), after.current("A", "W")), (0, 0))
+        k = ak.FontKerning(FakeKerning(groups, {(("A", False), ("R", True)): -50, (("A", False), ("W", False)): -10,
+                                                (("L", True), ("W", False)): -80}))
+        self.assertEqual(k.target("A", "V"), ((("A", False), ("R", True)), True), "A/W has its own entry: removed")
+
+    def test_a_spare_class_name_is_never_a_name_of_the_entry(self):
+        # class A renamed to A__freelab would turn the glyph A__freelab of the pair into that class
+        groups = {"A": (["A", "Aacute"], "KernLeft")}
+        k = ak.FontKerning(FakeKerning(groups, {}))
+        entry = (("A", False), ("A__freelab", False))
+        self.assertEqual(k.hidden(entry), ["A"])
+        k.write(entry, -30, False)
+        self.assertEqual(k.kerning.stored, {entry: -30}, "two glyphs, not glyph A against class A")
+        self.assertEqual(k.kerning.renames, [("A", "A__freelab_"), ("A__freelab_", "A")])
+        self.assertIn("A", k.kerning.groups.data)
+
 
 @unittest.skipIf(CORE is None, "auto kerning core not built: run tools/build-native.ps1 -Kern (%s)" % ak.kern_library_path())
 class CoreTests(unittest.TestCase):
@@ -591,6 +617,25 @@ class KerningUpgradeTests(unittest.TestCase):
         self.assertTrue(all(c.checked for c in found))
         tiny = kc.find_cleanup(fake_font({}, {(("a", False), ("b", False)): -3}), lambda name: True, 5)
         self.assertEqual([(c.kind, c.checked) for c in tiny], [("tiny", False)])
+
+    def test_cleanup_judged_again_before_removing(self):
+        # A V equals its class's -50 at the check; the class pair is then edited to -100: A V now sets A V
+        groups = {"A": (["A", "Aacute"], "KernLeft")}
+        entries = {(("A", True), ("V", False)): -50, (("A", False), ("V", False)): -50, (("x", False), ("V", False)): -20}
+        found = kc.find_cleanup(fake_font(groups, dict(entries)), lambda name: name != "x", 5)
+        self.assertEqual(sorted(c.entry for c in found), [(("A", False), ("V", False)), (("x", False), ("V", False))])
+        entries[(("A", True), ("V", False))] = -100
+        chosen, stale = kc.still_removable(fake_font(groups, entries), found, lambda name: name != "x", 5)
+        self.assertEqual(([c.entry for c in chosen], stale), ([(("x", False), ("V", False))], 1), "the exception kept")
+        entries[(("A", True), ("V", False))] = -50
+        chosen, stale = kc.still_removable(fake_font(groups, entries), found, lambda name: name != "x", 5)
+        self.assertEqual((len(chosen), stale), (2, 0), "nothing changed: both go")
+        chosen, stale = kc.still_removable(fake_font(groups, entries), found, lambda name: True, 5)
+        self.assertEqual(([c.entry for c in chosen], stale), ([(("A", False), ("V", False))], 1), "glyph x added since: left")
+        k = fake_font(groups, entries)
+        k.values[(("A", False), ("V", False))] = -60
+        chosen, stale = kc.still_removable(k, found, lambda name: name != "x", 5)
+        self.assertEqual(([c.entry for c in chosen], stale), ([(("x", False), ("V", False))], 1), "a value changed: left")
 
     def test_collisions_against_the_class_pair(self):
         # T T overlaps by design (joined crossbars); Tcaron T overlaps 40 units more; T a is a pair of its own;
