@@ -59,6 +59,10 @@ class PlanTests(unittest.TestCase):
         ink = {"m": ac.Ink(100, 500, 300, 560)}.get
         parts = ac.standalone_parts([("o", 1, 1, 0, 0), ("m", 1, 1, 40, -620)], ink)
         self.assertEqual(parts, [("m", 1, 1, -200.0, -620)], "the letter taken out, the mark centered on 0")
+        unencoded = ac.Font(["o", "acutecomb"], [("o", 0x6F), ("acutecomb", 0)])
+        acute = ac.plan(unencoded, [ac.unichr_(0x0301)])[0]
+        self.assertEqual((acute.name, acute.marks[0].glyph), (u"uni0301", "acutecomb"),
+                         "the font's unencoded acutecomb is not its own name")
 
     def test_a_bare_font_drafts_its_marks_from_punctuation(self):
         bare = ac.Font(["a", "o", "period", "asciicircum", "hyphen", "comma"],
@@ -423,6 +427,10 @@ class AnchorTests(unittest.TestCase):
         found = ac.related_marks([c, g, j, small, acute, stacked, missing], c, 0)
         self.assertEqual([(r.char, at) for r, at in found], [(g.char, 0), (j.char, 0), (stacked.char, 0)],
                          "the same capital circumflex, first on its side; not lowercase, not another mark, not missing")
+        caron = ac.Recipe(ac.unichr_(0x010C), base="C",
+                          marks=[ac.Mark("caron", "top", [("circumflexcomb.case", 1.0, -1.0, 0.0, 0.0)])])
+        self.assertEqual(ac.related_marks([caron, g], c, 0), [(g, 0)], "a caron of the circumflex upside down is no circumflex")
+        self.assertNotEqual(ac.mark_signature(caron.marks[0]), ac.mark_signature(c.marks[0]))
 
     def test_letters_get_the_anchors_their_precomposed_forms_need(self):
         sides = ac.composed_sides()
@@ -492,6 +500,17 @@ class AnchorTests(unittest.TestCase):
         if HAVE_FONTTOOLS:
             block = u"languagesystem DFLT dflt;\n" + texts["mark"] + texts["mkmk"]
             self.assertIsNone(fc.check_code(block, ["ko", "maiek", "phinthu", "koold"]))
+
+    def test_a_mark_attached_already_takes_no_other_class(self):
+        glyphs = [("horncomb", 0x031B, "mark", ac.Ink(0, 400, 80, 520), {"_topright": (0, 400)}),
+                  ("ogonekcomb", 0x0328, "mark", ac.Ink(-100, -200, 0, 0), {"_bottom": (-50, 0)}),
+                  ("tildecomb", 0x0303, "mark", ac.Ink(-100, 550, 100, 650), {})]
+        found = dict((g.name, g) for g in ac.plan_anchors(glyphs, self.MODEL, "latin", 1000, 500))
+        self.assertEqual(found["horncomb"].anchors, {}, "its _topright attaches it: no _horn")
+        self.assertNotIn(u"_ogonek", found["ogonekcomb"].anchors, "its _bottom attaches it")
+        self.assertIn(u"_top", found["tildecomb"].anchors, "a mark with no anchor of its own gets one")
+        classes = [line for line in ac.mark_code(list(found.values()))["mark"] if line.startswith(u"markClass horncomb")]
+        self.assertEqual(len(classes), 1, "one mark class")
 
 
 class ScriptFeatureTests(unittest.TestCase):
@@ -699,6 +718,9 @@ class PlaceTests(unittest.TestCase):
         glyph, sx, sy, x, y = parts[1]
         self.assertEqual(y, 700 + 50 - 500, "the model's gap above b's ascender")
         self.assertEqual(x + 50, 70 + round(0.43 * 400), "over b's bowl, as the fonts put it, not its stem")
+        undrawn = ac.Recipe(u"x", u"x", "q", [ac.Mark("acute", "above", [("acute", 1.0, 1.0, 0.0, 0.0)])])
+        self.assertEqual(ac.place(undrawn, inks().get, placement), (None, 0), "a letter with no outline: nothing placed")
+        self.assertIsNone(ac.placed_mark_box(undrawn, 0, inks().get, placement, None))
 
     def test_a_capital_is_centered_whatever_the_fonts_lowercase_habit(self):
         placement = ac.Placement(1000.0, MODEL)
