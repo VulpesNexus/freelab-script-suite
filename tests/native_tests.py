@@ -524,6 +524,52 @@ class KeyedTests(unittest.TestCase):
         self.assertEqual(at(ink, 52, 6), (124, 124, 124), "ink mode: mid gray on nothing stays")
         self.assertGreater(at(listed, 52, 6)[0], 150, "list mode: gray sub-item text turns light")
 
+    def test_list_mode_thins_only_the_edges_it_mapped(self):
+        # On nothing: black text (opaque) with its smoothing beside it, a smoothing pixel with nothing more
+        # opaque beside it, a block of text drawn translucent throughout (a gray sub-item), and light text
+        # with its smoothing, kept as drawn.
+        width, buf = 40, bytearray()
+        for y in range(14):
+            for x in range(width):
+                if 3 <= y <= 10 and x % 6 == 1:
+                    buf += struct.pack("<BBBB", 0, 0, 0, 255)
+                elif 3 <= y <= 10 and x % 6 in (2, 4):
+                    buf += struct.pack("<BBBB", 0, 0, 0, 120)
+                elif 11 <= y <= 13 and 30 <= x < 36:
+                    buf += struct.pack("<BBBB", 0, 0, 0, 153)
+                elif y == 0 and x < 20 and x % 2 == 0:
+                    buf += struct.pack("<BBBB", 192, 192, 192, 255)
+                elif y == 0 and x < 20:
+                    buf += struct.pack("<BBBB", 192, 192, 192, 120)
+                else:
+                    buf += struct.pack("<BBBB", 0, 0, 0, 0)
+        anchors(LIB, buf, width, "list")
+        alpha = lambda x, y: buf[4 * (y * width + x) + 3]
+        self.assertEqual(rgb_at(buf, TEXT_ROW + 2), dm.map_rgb(0, 0, 0), "the smoothing turns light")
+        self.assertLess(alpha(2, 3), 100, "and is thinned, beside the more opaque text")
+        self.assertEqual(alpha(4, 3), 120, "nothing more opaque beside it: as drawn")
+        self.assertEqual(rgb_at(buf, 12 * width + 32), dm.map_rgb(0, 0, 0), "the translucent block turns light")
+        self.assertEqual((alpha(32, 12), alpha(30, 12)), (153, 153), "its core and its edge keep their coverage")
+        self.assertEqual(rgb_at(buf, 1), (192, 192, 192), "light text stays")
+        self.assertEqual(alpha(1, 0), 120, "its smoothing, not mapped, is not thinned")
+
+    def test_with_no_anchor_everything_mapped_maps_each_pixel(self):
+        # No color three times (a gray ramp, one pixel): where every color is mapped, each pixel is mapped
+        # on its own; ink still maps only stray whites
+        ramp = [(g, g, g) for g in range(256)]
+        buf = pixels(ramp)
+        anchors(LIB, buf, 256, "all")
+        for i, rgb in enumerate(ramp):
+            self.assertEqual(rgb_at(buf, i), dm.map_rgb(*rgb), rgb)
+        for mode in ("all", "icon", "subpixel"):
+            one = pixels([(0, 0, 0)])
+            anchors(LIB, one, 1, mode)
+            self.assertEqual(rgb_at(one, 0), dm.map_rgb(0, 0, 0), mode)
+        one = pixels([(0, 0, 0), (255, 255, 255)])
+        anchors(LIB, one, 2, "ink")
+        self.assertEqual(rgb_at(one, 0), (0, 0, 0), "ink: dark on the dark interface is right as it is")
+        self.assertEqual(rgb_at(one, 1), dm.map_rgb(255, 255, 255), "a stray white is not")
+
 
 if __name__ == "__main__":
     unittest.main()

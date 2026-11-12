@@ -215,7 +215,7 @@ SWEEP_MS = 750  # how often to look for widgets FontLab created or showed
 FULL_SWEEP_EVERY = 40  # every Nth sweep revisits every widget (replaced stylesheets, new icons)
 FOCUS_DRAIN_MS = 80  # a window that takes focus is darkened at once, up to this long, before it paints light
 MAX_ERRORS = 50
-NATIVE_VERSION = 107
+NATIVE_VERSION = 108
 
 ID_PROP = "freelab_id"  # dynamic properties FreeLab sets on widgets, all removed by restore()
 SEEN_PROP = "freelab_seen"
@@ -2926,16 +2926,27 @@ def _sweep():
 COLOR_SAMPLE = 48  # glyphs looked at for SVG or bitmap pictures, after every glyph's color flag
 
 
+def _color_font_key(package):
+    """Which open font and master: FontLab's own number for the font (fgPackage.id, the same through
+    every Python wrapper of it; two reads of currentPackage give two wrappers), its name, and the
+    master. Two versions of one font (a mono and a color one) share the name and glyph count."""
+    try:
+        number = package.fgPackage.id
+    except Exception:
+        number = None
+    return (number, getattr(package, "tfn", None), package.master)
+
+
 def font_in_color(package, cache=None):
     """True for a font that draws in color: shapes with their own colors (COLR, as FontLab imports
     it), or pictures (SVG or bitmap glyphs). Every glyph is looked at, a long while for a large CJK
-    font: with a cache (a dict), the answer is kept per font and master until its glyph count
+    font: with a cache (a dict), the answer is kept per open font and master until its glyph count
     changes. Each test fails on its own, and the glyphs are never indexed by position (indexing
     FontLab's native sequences crashed FontLab 8, beyond the reach of try)."""
     try:
         glyphs = package.fgPackage.glyphs
         count, master = len(glyphs), package.master
-        key = (getattr(package, "tfn", None), master)
+        key = _color_font_key(package)
     except Exception:
         return False
     if cache is not None and cache.get(key, (None,))[0] == count:
@@ -2982,7 +2993,7 @@ def _follow_color_font(full):
     try:
         import fontlab
         package = fontlab.flWorkspace.instance().currentPackage
-        key = (package.tfn, package.master) if package is not None else None
+        key = _color_font_key(package) if package is not None else None
     except Exception:
         return
     if key == state.get("color_font_key") and not full:
@@ -3243,7 +3254,7 @@ def _watch_windows(follow):
 # in the hooks library, before anything is drawn. Everything else (palette, Fusion, stylesheets,
 # icons, title bars, editors, lists, the other effects) is the same in both. If the native engine cannot start (no library, another Qt build), the script engine runs.
 ENGINES = ("script", "native")
-HOOKS_VERSION = 19
+HOOKS_VERSION = 20
 PALETTE_GROUPS, PALETTE_ROLES = 3, 21
 
 
@@ -3359,7 +3370,9 @@ def _install_hooks(app):
         import ctypes
         dark, light = _palette_table(app.palette()), _palette_table(state["saved"]["palette"])
         lib.freelab_hooks_set_palette(ctypes.addressof(dark), ctypes.addressof(light))
-        lib.freelab_hooks_install(DARK_OKL, LIGHT_OKL, KEEP_TINT_CONTENT)
+        if lib.freelab_hooks_install(DARK_OKL, LIGHT_OKL, KEEP_TINT_CONTENT) < 0:
+            # a slot it could not write: the library put back the ones it had written
+            raise RuntimeError("the native engine could not hook FontLab's calls")
         state["hooked"], state["hooked_lib"] = True, lib
         state["hooked_addresses"], state["ink_addresses"] = [], []
         _update_hooked(app)

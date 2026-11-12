@@ -250,6 +250,13 @@ check("in color: the emoji's yellow kept", image_pixel(addr(drawn(emoji)), 3, 2)
 check("in color: the emoji's white kept", image_pixel(addr(drawn(emoji)), 3, 4), 0xffffff)
 check("in color: the emoji's black kept", image_pixel(addr(drawn(emoji)), 3, 5), 0x000000)
 check("in color: a black glyph still mapped", image_pixel(addr(drawn(glyph)), 3, 3), "light")
+accented = image(fill=0x00000000)  # black ink with a colored accent: a fifth of it, under a quarter
+for x in range(8):
+    set_pixel(addr(accented), x, 2, 0xff000000)
+    set_pixel(addr(accented), x, 3, 0xff000000)
+for x in range(2, 6):
+    set_pixel(addr(accented), x, 5, 0xffffcc4d)
+check("in color: a glyph with a colored accent mapped", image_pixel(addr(drawn(accented)), 3, 2), "light")
 hooks.freelab_hooks_set_color_content(0)
 check("color off: the emoji's white mapped again", image_pixel(addr(drawn(emoji)), 3, 4), "dark")
 
@@ -299,6 +306,37 @@ wrapper(23, c_void_p)(addr(other))
 
 calls = (ctypes.c_int64 * HOOKS)(); changed = (ctypes.c_int64 * HOOKS)()
 hooks.freelab_hooks_counts(calls, changed, HOOKS)
+
+# installing is all or none: a slot that cannot be written puts back the ones written before it.
+# Qt5Widgets' imports from Qt5Gui stand in for FontLab's (this process's own copy of them).
+k32.VirtualProtect.argtypes = [c_void_p, ctypes.c_size_t, c_uint32, ctypes.POINTER(c_uint32)]
+k32.VirtualProtect.restype = c_int
+protect_type = ctypes.CFUNCTYPE(c_int, c_void_p, ctypes.c_size_t, c_uint32, ctypes.POINTER(c_uint32))
+protect_calls = [0, None]  # calls so far, the call that fails
+
+
+def protect(address, size, new, old):
+    protect_calls[0] += 1
+    if protect_calls[0] == protect_calls[1]:
+        return 0
+    return k32.VirtualProtect(address, size, new, old)
+
+
+protect_fn = protect_type(protect)
+hooks.freelab_hooks_init.argtypes = [c_void_p, c_void_p, c_void_p]
+hooks.freelab_hooks_add_module.argtypes = [c_void_p]
+hooks.freelab_hooks_install.argtypes = [c_double, c_double, c_double]
+check("init with a VirtualProtect of the test's", hooks.freelab_hooks_init(base, ctypes.cast(protect_fn, c_void_p).value, widgets_base), 1)
+found = hooks.freelab_hooks_add_module(widgets_base)
+results.append(found >= 3)
+print("%-46s %d %s" % ("Qt5Widgets' slots found", found, "ok" if results[-1] else "WRONG"))
+protect_calls[:] = [0, 5]  # two calls a slot: the third slot fails
+check("a slot not written: install fails (-2)", hooks.freelab_hooks_install(okl_gray(31), okl_gray(219), 0.0) + 2, 0)
+check("and the slots written before it are put back", hooks.freelab_hooks_remove(), 0)
+protect_calls[:] = [0, None]
+installed = hooks.freelab_hooks_install(okl_gray(31), okl_gray(219), 0.0)
+check("every slot written: all hooked", installed, found)
+check("and all put back", hooks.freelab_hooks_remove(), found)
 print("calls  ", list(calls)); print("changed", list(changed))
 ok = all(results) and bound == HOOKS
 print("ALL OK" if ok else "FAILURES")

@@ -28,7 +28,7 @@
  */
 #include "freelab_pixels.c"
 
-#define FREELAB_HOOKS_VERSION 19
+#define FREELAB_HOOKS_VERSION 20
 
 typedef int (*virtual_protect_fn)(void *, size_t, uint32_t, uint32_t *);
 #define PAGE_READWRITE_ 0x04
@@ -260,7 +260,8 @@ static int module_ink[MODULES]; /* Qt5Widgets: only its pens, through the ink wr
 static int module_svg[MODULES]; /* Qt5Svg: FontLab's SVG artwork (its logo, a color font's SVG glyphs) */
 /* The current font draws in color (SVG, color layers, bitmaps): its pictures are what the user gets,
  * so they are drawn as they are. Qt5Svg's slots point at Qt again (a color glyph's SVG is painted
- * through it on the canvas), and a picture FontLab drew into an image (a glyph cell) is not mapped. */
+ * through it on the canvas), and a picture FontLab drew into an image (a glyph cell) is not mapped.
+ * Pixmaps (icons, the interface's artwork) are mapped as ever. */
 static int color_content;
 static int64_t hook_calls[H_COUNT];
 static int64_t hook_changed[H_COUNT];
@@ -620,10 +621,12 @@ static int has_transparency(const uint8_t *bits, int w, int h, int stride)
 
 /* A picture, not ink: a color glyph (an emoji) FontLab drew into an image. Of its visible pixels, at
  * least PICTURE_SHARE percent are colored, or (on transparency, where a glyph's ink is black) light;
- * a glyph drawn in black, smoothed toward transparency, is none of these. */
+ * a glyph drawn in black, smoothed toward transparency, is none of these. A quarter: a color glyph is
+ * mostly its colors (an emoji's fills and its light parts), while a gray glyph or icon with a colored
+ * accent or a few white highlights has some percent of them, and is ink to map (at 1%, it was not). */
 #define PICTURE_CHROMA 40 /* max - min of the channels */
 #define PICTURE_LIGHT 150 /* every channel at least this: white or light gray parts */
-#define PICTURE_SHARE 1
+#define PICTURE_SHARE 25
 #define PICTURE_MIN 4
 static int is_picture(const uint8_t *bits, int w, int h, int stride, int format, int clear)
 {
@@ -656,7 +659,8 @@ static int is_picture(const uint8_t *bits, int w, int h, int stride, int format,
  * text smoothed on paper keeps its coverage, which a color-by-color mapping bent (edges too thin). */
 #define ANCHORED_MAX_PIXELS (1 << 20)
 
-static void map_image_pixels(void *image, int format, int mode)
+/* pictures: an image FontLab drew (a glyph cell), which may hold a color glyph; a pixmap's is 0. */
+static void map_image_pixels(void *image, int format, int mode, int pictures)
 {
     uint8_t *bits = qt_image_bits(image); /* detaches: the copy gets pixels of its own */
     int w = qt_image_width(image), h = qt_image_height(image), stride = qt_image_bytes_per_line(image), x, y;
@@ -666,7 +670,7 @@ static void map_image_pixels(void *image, int format, int mode)
     clear = has_transparency(bits, w, h, stride);
     if (mode != SCREEN_SUBPIXEL && clear && white_artwork(bits, w, h, stride, format))
         return;
-    if (mode != SCREEN_SUBPIXEL && color_content && is_picture(bits, w, h, stride, format, clear))
+    if (pictures && mode != SCREEN_SUBPIXEL && color_content && is_picture(bits, w, h, stride, format, clear))
         return; /* a color glyph: drawn as the font has it */
     if (mode == SCREEN_SUBPIXEL && stride == w * 4) {
         /* opaque ClearType text on paper: the pixel helper's subpixel mapping, as the script engine's */
@@ -746,7 +750,7 @@ static const void *mapped_image(const void *image, int mode)
     if (image_cache[slot].used)
         qt_image_dtor(image_cache[slot].image);
     qt_image_copy(image_cache[slot].image, image);
-    map_image_pixels(image_cache[slot].image, format, mode);
+    map_image_pixels(image_cache[slot].image, format, mode, 1);
     image_cache[slot].key = key;
     image_cache[slot].stamp = ++image_clock;
     image_cache[slot].used = 1;
@@ -781,7 +785,7 @@ static const void *mapped_pixmap(const void *pixmap, int mode)
     key = qt_pixmap_cache_key(pixmap);
     if (key == 0)
         return pixmap;
-    key = key * 4 + (mode == SCREEN_SUBPIXEL) + 2 * color_content;
+    key = key * 4 + (mode == SCREEN_SUBPIXEL); /* the same copy in color or not: pictures are images' */
     if (__sync_lock_test_and_set(&image_busy, 1))
         return pixmap;
     for (i = 0; i < PIXMAP_SLOTS; i++) {
@@ -806,7 +810,7 @@ static const void *mapped_pixmap(const void *pixmap, int mode)
     qt_pixmap_to_image(pixmap, image);
     format = qt_image_format(image);
     if (format == QIMAGE_RGB32 || format == QIMAGE_ARGB32 || format == QIMAGE_ARGB32_PREMULTIPLIED) {
-        map_image_pixels(image, format, mode);
+        map_image_pixels(image, format, mode, 0);
         if (pixmap_cache[slot].used)
             qt_pixmap_dtor(pixmap_cache[slot].pixmap);
         qt_pixmap_from_image(pixmap_cache[slot].pixmap, image, 0);
@@ -1523,10 +1527,17 @@ EXPORT int freelab_hooks_set_subpixel(const uint64_t *widgets, int count, double
     return n;
 }
 
-/* Point the import slots at the wrappers (mapping on); returns how many were hooked. */
+/* What install wrote, to put back if a slot cannot be written. */
+static void *install_was[MODULES][H_COUNT];
+static uint8_t install_wrote[MODULES][H_COUNT];
+
+/* Point the import slots at the wrappers (mapping on); returns how many were hooked. All or none: when
+ * a slot cannot be written, the slots this call wrote get their addresses back, mapping is as it was,
+ * and it returns -2 (painters noted by one hook and never forgotten by another had kept FontLab's
+ * palette reads light). -1: not initialized. */
 EXPORT int freelab_hooks_install(double dark_l, double light_l, double keep_tint)
 {
-    int i, m, hooked = 0;
+    int i, m, hooked = 0, was_on = hooks_on, failed = 0;
     if (!vprotect)
         return -1;
     hook_dark_l = dark_l;
@@ -1539,10 +1550,35 @@ EXPORT int freelab_hooks_install(double dark_l, double light_l, double keep_tint
     hooks_on = 1;
     for (m = 0; m < module_count; m++)
         for (i = 0; i < H_COUNT; i++)
-            if (slots[m][i] && wrapper_for(m, i) && !svg_left_alone(m, i) && *slots[m][i] != wrapper_for(m, i) &&
-                write_slot(slots[m][i], wrapper_for(m, i)))
-                hooked++;
-    return hooked;
+            install_wrote[m][i] = 0;
+    for (m = 0; m < module_count && !failed; m++)
+        for (i = 0; i < H_COUNT && !failed; i++) {
+            void *was;
+            if (!slots[m][i] || !wrapper_for(m, i) || svg_left_alone(m, i) || *slots[m][i] == wrapper_for(m, i))
+                continue;
+            was = *slots[m][i];
+            if (!write_slot(slots[m][i], wrapper_for(m, i))) {
+                failed = 1;
+                break;
+            }
+            install_was[m][i] = was;
+            install_wrote[m][i] = 1;
+            hooked++;
+        }
+    if (!failed)
+        return hooked;
+    for (m = 0; m < module_count; m++)
+        for (i = 0; i < H_COUNT; i++)
+            if (install_wrote[m][i])
+                write_slot(slots[m][i], install_was[m][i]); /* one that stays a wrapper passes through while mapping is off */
+    hooks_on = was_on;
+    if (!was_on) { /* painters noted meanwhile, as remove forgets them */
+        for (i = 0; i < hooked_painter_count; i++)
+            drop_note(&painter_notes[i]);
+        hooked_painter_count = 0;
+        hooked_palette_count = 0;
+    }
+    return -2;
 }
 
 /* Qt5Svg: as add_module, and its color-carrying slots point at Qt while the current font is in color. */

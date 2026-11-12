@@ -9,6 +9,7 @@ import os
 import shutil
 import sys
 import tempfile
+import types
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -883,6 +884,19 @@ class EngineTests(DarkModeCase):
         self.assertIn("remove", hooks.calls)
         self.assertFalse(dm.status()["hooked"])
 
+    def test_hooks_that_cannot_all_go_in_fall_back_to_the_script_engine(self):
+        hooks = FakeHooks()
+        hooks.freelab_hooks_install = lambda dark_l, light_l, keep_tint: -2  # a slot it could not write
+        self.patch("_hooks", lambda: hooks)
+        self.patch("_palette_table", lambda palette: __import__("ctypes").c_uint32(0))
+        self.save(engine="native")
+        self.on()
+        status = dm.status()
+        self.assertEqual((status["engine"], status["hooked"]), ("script", False))
+        self.assertTrue(any("could not hook" in e for e in status["errors"]), status["errors"])
+        self.assertEqual(self.kind(self.search), "island", "the script engine's effects are in place")
+        self.assertNotIn("native_pending", self.settings(), "nothing left to guard")
+
     def test_applying_again_while_on_keeps_the_hooks(self):
         # the re-applies after a switch (0, 1.5, and 5 s) came while the start was still settling,
         # took their own mark for a crash, and ran the script engine over the hooks
@@ -1596,6 +1610,17 @@ class ColorFontTests(unittest.TestCase):
         glyphs.append(_FgGlyph("new"))
         self.assertTrue(dm.font_in_color(package, cache), "a glyph more: looked at anew")
 
+    def test_two_open_fonts_of_one_name_and_count_are_told_apart(self):
+        # a mono and a color version of one font: same name, master, and glyph count
+        mono = _Package([_FgGlyph("g%d" % i) for i in range(200)], {})
+        color = _Package([_FgGlyph("g%d" % i, colors=(i == 150)) for i in range(200)], {})
+        mono.tfn = color.tfn = "Font"
+        mono.fgPackage.id, color.fgPackage.id = 1, 2
+        cache = {}
+        self.assertFalse(dm.font_in_color(mono, cache))
+        self.assertTrue(dm.font_in_color(color, cache), "not the mono version's answer")
+        self.assertFalse(dm.font_in_color(mono, cache))
+
 
 class _Image(object):
     """A QImage's pixels (ARGB32), for keep_colors."""
@@ -1729,6 +1754,50 @@ class SelectedRowTests(DarkModeCase):
 
     def test_nothing_selected(self):
         self.assertEqual(dm._selected_rows(self.View(selected=set(), scrolled=0), 300, 100), [])
+
+
+class FollowColorFontTests(DarkModeCase):
+    def test_switching_between_two_versions_of_one_font_follows_the_current_one(self):
+        class Hooks(object):
+            def __init__(self):
+                self.flags = []
+
+            def freelab_hooks_set_color_content(self, on):
+                self.flags.append(on)
+                return 0
+
+        mono = _Package([_FgGlyph("g%d" % i) for i in range(200)], {})
+        color = _Package([_FgGlyph("g%d" % i, colors=(i == 150)) for i in range(200)], {})
+        mono.tfn = color.tfn = "Font"
+        mono.fgPackage.id, color.fgPackage.id = 1, 2
+        current = [mono]
+
+        class Workspace(object):
+            @property
+            def currentPackage(self):
+                return current[0]
+
+        fontlab = types.ModuleType("fontlab")
+        fontlab.flWorkspace = type("flWorkspace", (object,), {"instance": staticmethod(lambda: Workspace())})
+        saved = sys.modules.get("fontlab")
+        sys.modules["fontlab"] = fontlab
+        try:
+            hooks = Hooks()
+            state = dm._state()
+            state["hooked"], state["hooked_lib"] = True, hooks
+            dm._follow_color_font(False)
+            current[0] = color  # not a full sweep: the key alone tells the fonts apart
+            dm._follow_color_font(False)
+            current[0] = mono
+            dm._follow_color_font(False)
+        finally:
+            state["hooked"] = False
+            state.pop("hooked_lib", None)
+            if saved is None:
+                sys.modules.pop("fontlab", None)
+            else:
+                sys.modules["fontlab"] = saved
+        self.assertEqual(hooks.flags, [1, 0])
 
 
 class RestoreCacheTests(DarkModeCase):

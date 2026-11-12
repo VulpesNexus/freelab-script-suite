@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 107
+#define FREELAB_PIXELS_VERSION 108
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -594,13 +594,24 @@ static int mode_list; /* set per call: a list's rows (ANCHORS_INK_LIST) */
 /* A list's rows are drawn on nothing, so their text's smoothing is its transparency. Dark text
  * mapped light keeps that coverage, and light on dark looks heavier than dark on light did: the
  * small counters of bold text (e, p, O in Export Profiles) filled in. The partly covered pixels of
- * light ink get less coverage (a power of it), as text drawn light on dark is. */
+ * light ink get less coverage (a power of it), as text drawn light on dark is. Only the edges: a pixel
+ * the mapping changed, beside a more opaque one (a 4-neighbor). Gray sub-items drawn translucent
+ * throughout keep their cores, and light pixels drawn as they are (a badge's white letters) stay. */
 #define LIGHT_SMOOTHING_POWER 12 /* coverage ** (1 + 12 / 20): ** 1.6, bold counters open, small text whole */
 #define LIGHT_SMOOTHING_MIN_HLS 0.55
 static uint8_t smoothing_table[256];
 static int smoothing_table_made;
+static uint8_t thin_px[MAX_INDEXED]; /* a list's rows: 1 the mapping changed the pixel, 2 an edge thinned */
 
-static void thin_light_smoothing(uint32_t *p, int64_t count)
+static int more_opaque_beside(const uint32_t *p, int64_t i, int64_t width, int64_t count)
+{
+    uint32_t a = p[i] >> 24;
+    int64_t x = i % width;
+    return (x > 0 && (p[i - 1] >> 24) > a) || (x + 1 < width && (p[i + 1] >> 24) > a)
+           || (i >= width && (p[i - width] >> 24) > a) || (i + width < count && (p[i + width] >> 24) > a);
+}
+
+static void thin_light_smoothing(uint32_t *p, int64_t count, int64_t width)
 {
     int64_t i;
     if (!smoothing_table_made) {
@@ -628,13 +639,19 @@ static void thin_light_smoothing(uint32_t *p, int64_t count)
         smoothing_table[255] = 255;
         smoothing_table_made = 1;
     }
+    /* chosen first, written after: the alphas compared are the ones drawn */
     for (i = 0; i < count; i++) {
         uint32_t v = p[i], a = v >> 24;
-        if (a == 0 || a == 255)
+        if (thin_px[i] != 1 || a == 0 || a == 255)
             continue;
         if (lightness((uint8_t)(v >> 16), (uint8_t)(v >> 8), (uint8_t)v) < LIGHT_SMOOTHING_MIN_HLS)
             continue;
-        p[i] = ((uint32_t)smoothing_table[a] << 24) | (v & 0xffffffU);
+        if (more_opaque_beside(p, i, width, count))
+            thin_px[i] = 2;
+    }
+    for (i = 0; i < count; i++) {
+        if (thin_px[i] == 2)
+            p[i] = ((uint32_t)smoothing_table[p[i] >> 24] << 24) | (p[i] & 0xffffffU);
     }
 }
 static uint32_t generation = 0;
@@ -813,11 +830,11 @@ static int fringe_of_lighter_color(int k)
         return 0;
     for (j = 1; j < anchor_count; j++) {
         const Anchor *o = &anchors[j];
-        double t, ee;
+        double t, ee, res;
         if (j == k || o->surface || o->long_line || o->okl <= c->okl || o->chroma < INK_CHROMA)
             continue;
-        if (blend_fit(c->r, c->g, c->b, paper, o, &t, &ee) <= LOCAL_BLEND_TOLERANCE * LOCAL_BLEND_TOLERANCE * ee
-            && t > 0.03 && t < 0.97)
+        res = blend_fit(c->r, c->g, c->b, paper, o, &t, &ee); /* first: the comparison reads ee */
+        if (res <= LOCAL_BLEND_TOLERANCE * LOCAL_BLEND_TOLERANCE * ee && t > 0.03 && t < 0.97)
             return 1;
     }
     return 0;
@@ -933,12 +950,12 @@ static int is_blend(int k, int n)
             && (c->touches != ~(uint64_t)0 || (double)c->beside_light >= LIGHT_FRINGE_SHARE * (double)c->count)) {
             for (j = 0; j < n; j++) {
                 const Anchor *text = &anchors[j];
-                double t, ee;
+                double t, ee, res;
                 if (j == i || j == k || text->surface || text->long_line || text->okl <= c->okl
                     || c->count > 2 * text->count || !((c->touches >> j) & 1U))
                     continue; /* a fringe is rarer than the text it smooths, and beside it */
-                if (blend_fit(c->r, c->g, c->b, s, text, &t, &ee) <= LOCAL_BLEND_TOLERANCE * LOCAL_BLEND_TOLERANCE * ee
-                    && t > 0.03 && t < 0.97)
+                res = blend_fit(c->r, c->g, c->b, s, text, &t, &ee); /* first: the comparison reads ee */
+                if (res <= LOCAL_BLEND_TOLERANCE * LOCAL_BLEND_TOLERANCE * ee && t > 0.03 && t < 0.97)
                     return 1;
             }
         }
@@ -2094,7 +2111,7 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
     uint32_t last_in = 0, last_out = 0;
     int have_last = 0, any_mapped = 0, j, local, tinted, last_edge = 0, glyph_icons = 0;
     uint32_t paper_bit, other_surfaces, other_surface_bits;
-    int white_marks = 0, fringes = 0, bands = 0;
+    int white_marks = 0, fringes = 0, bands = 0, thin;
     uint32_t left_orig = 0;
     double paper_hls;
     int64_t i, changed = 0;
@@ -2105,6 +2122,9 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
     if (mode_icon_fallback)
         mode = ANCHORS_SUBPIXEL;
     find_anchors(p, count, width, mode, dark_l, light_l, keep_tint, main_default);
+    thin = mode_list && apply && width > 0 && count <= MAX_INDEXED; /* light ink's edges thinned after */
+    for (i = 0; thin && i < count; i++)
+        thin_px[i] = 0;
     for (j = 0; j < anchor_count; j++)
         any_mapped |= anchors[j].mapped;
     /* White marks and box edges are judged on the pixels as drawn, before any is mapped: mapped in
@@ -2138,7 +2158,11 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
     }
     if (!any_mapped && mode == ANCHORS_RELIGHT)
         return 0;
-    if (!any_mapped) {
+    /* Where everything is mapped (all, icon, subpixel), an image with no anchor mapped (none found, no
+     * color being there three times: a gray ramp, a single pixel; or, as an icon, every anchor kept)
+     * goes on below, each pixel by the mode's own fallback; ink, which maps only what is wrong on a
+     * dark interface, has nothing to map but stray whites. */
+    if (!any_mapped && mode != ANCHORS_ALL && mode != ANCHORS_ICON && mode != ANCHORS_SUBPIXEL) {
         /* Nothing to map but stray whites (a pure white pixel that is no anchor). */
         for (i = 0; i < count; i++) {
             uint8_t *px = pixels + 4 * i;
@@ -2188,6 +2212,8 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
                 changed++;
                 if (apply)
                     p[i] = out;
+                if (thin)
+                    thin_px[i] = 1;
             }
             continue;
         }
@@ -2203,6 +2229,8 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
             changed++;
             if (apply)
                 p[i] = (v & 0xff000000U) | BOX_FRAME;
+            if (thin)
+                thin_px[i] = 1;
             have_last = 0;
             continue;
         }
@@ -2219,6 +2247,8 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
                 changed++;
                 if (apply)
                     p[i] = last_out;
+                if (thin)
+                    thin_px[i] = 1;
             }
             continue;
         }
@@ -2240,6 +2270,8 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
                 changed++;
                 if (apply)
                     p[i] = out;
+                if (thin)
+                    thin_px[i] = 1;
             }
             continue;
         }
@@ -2262,6 +2294,8 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
                 changed++;
                 if (apply)
                     p[i] = out;
+                if (thin)
+                    thin_px[i] = 1;
             }
             continue;
         }
@@ -2274,10 +2308,12 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
             changed++;
             if (apply)
                 p[i] = out;
+            if (thin)
+                thin_px[i] = 1;
         }
     }
-    if (mode_list && apply)
-        thin_light_smoothing(p, count);
+    if (thin)
+        thin_light_smoothing(p, count, width);
     return changed;
 }
 
