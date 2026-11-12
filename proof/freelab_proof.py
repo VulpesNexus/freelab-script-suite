@@ -265,6 +265,13 @@ CONTROLS = {
 SCRIPT_LABELS = {"LATIN": u"Latin", "GREEK": u"Greek", "CYRILLIC": u"Cyrillic", "ARMENIAN": u"Armenian",
                  "GEORGIAN": u"Georgian", "HEBREW": u"Hebrew", "HIRAGANA": u"Hiragana", "KATAKANA": u"Katakana"}
 SPACED_SCRIPTS = ("LATIN", "GREEK", "CYRILLIC", "ARMENIAN", "GEORGIAN", "HEBREW", "HIRAGANA", "KATAKANA", "FIGURE")
+# First words of letters' Unicode names that name no script (MODIFIER LETTER CIRCUMFLEX ACCENT, CARON,
+# FEMININE ORDINAL INDICATOR, MICRO SIGN, FULLWIDTH LATIN CAPITAL LETTER A, DOUBLE-STRUCK CAPITAL C...):
+# a proof scope keeps such letters as it keeps symbols, and never offers them as a script of their own
+NOT_SCRIPTS = frozenset(("ALEF", "ANGSTROM", "BET", "BLACK", "CARON", "DALET", "DOUBLE", "EULER", "FEMININE",
+                         "FULLWIDTH", "GIMEL", "HALFWIDTH", "IDEOGRAPHIC", "INFORMATION", "KELVIN", "MASCULINE",
+                         "MASU", "MATHEMATICAL", "MICRO", "MODIFIER", "OHM", "PLANCK", "ROMAN", "SCRIPT",
+                         "SUBSCRIPT", "SUPERSCRIPT", "TURNED", "VEDIC", "VERTICAL"))
 CASE_LABELS = {"upper": u"capitals", "lower": u"lowercase", None: u"letters"}
 
 
@@ -679,8 +686,9 @@ class Layout(object):
 # ---------------------------------------------------------------------------
 
 class Language(object):
-    def __init__(self, iso, name, script, speakers, base):
+    def __init__(self, iso, name, script, speakers, base, auxiliary=None):
         self.iso, self.name, self.script, self.speakers, self.base = iso, name, script, speakers or 0, base
+        self.auxiliary = auxiliary or []
 
 
 def languages_path():
@@ -703,7 +711,9 @@ def load_languages(path=None):
     found = []
     for row in data["orthographies"]:
         iso, name, _autonym, script, _status, _validity, speakers, base = row[:8]
-        found.append(Language(iso, name, script, speakers, texts[base].split(u" ") if texts[base] else []))
+        auxiliary = row[8] if len(row) > 8 else None
+        found.append(Language(iso, name, script, speakers, texts[base].split(u" ") if texts[base] else [],
+                              texts[auxiliary].split(u" ") if auxiliary is not None and texts[auxiliary] else []))
     return found
 
 
@@ -1297,12 +1307,13 @@ def encoded_code(font, name):
 
 def glyph_script(font, name):
     """The script word of a glyph (u"LATIN", u"CYRILLIC"), for an encoded letter or an unencoded form of
-    one (a.ss01: a's); None for figures, punctuation, symbols, and the rest."""
+    one (a.ss01: a's); None for figures, punctuation, symbols, letters whose name names no script
+    (NOT_SCRIPTS), and the rest."""
     code = encoded_code(font, name)
     if code is None:
         return None
     kind = script_case(code)
-    return kind[0] if kind and kind[0] != "FIGURE" else None
+    return kind[0] if kind and kind[0] != "FIGURE" and kind[0] not in NOT_SCRIPTS else None
 
 
 def scope_names(font, scope, languages=()):
@@ -2106,7 +2117,8 @@ class ProofDialog(object):
             index = 0
             for at, scope in enumerate(self.scopes):
                 if scope is not None and current is not None and scope[0] == current[0] and (
-                        scope[1] == current[1] if scope[0] == "script" else scope[1].name == current[1].name):
+                        scope[1] == current[1] if scope[0] == "script"
+                        else (scope[1].iso, scope[1].script) == (current[1].iso, current[1].script)):
                     index = at
             self.scope_box.setCurrentIndex(index)
         finally:
@@ -2140,7 +2152,7 @@ class ProofDialog(object):
                 if scope[0] == "language":
                     languages = [scope[1]]
                 else:  # the languages written in that script (all of them, where none is named so: Han)
-                    same = [language for language in languages if (u"%s" % language.script).upper() == scope[0]]
+                    same = [language for language in languages if (u"%s" % language.script).upper() == scope[1]]
                     languages = same or languages
             self.proof = build_proof(fonts, options, languages, info=self.font_info())
             self.page_options = options
@@ -2258,6 +2270,7 @@ class ProofDialog(object):
         sections = [self.section_boxes[key].isChecked() for key, _ in SECTIONS]
         return (not all(sections) or self.page_box.currentIndex != 0 or self.pairs_box.currentIndex != 0
                 or self.masters_box.currentIndex != 0 or self.colors_box.currentIndex != 0
+                or self.scope_box.currentIndex > 0
                 or parse_sizes(self.waterfall_edit.text, ()) != tuple(float(s) for s in WATERFALL_SIZES)
                 or parse_sizes(self.text_edit.text, ()) != tuple(float(s) for s in TEXT_SIZES))
 
@@ -2294,6 +2307,7 @@ class ProofDialog(object):
         self.pairs_box.setCurrentIndex(0)
         self.masters_box.setCurrentIndex(0)
         self.colors_box.setCurrentIndex(0)
+        self.scope_box.setCurrentIndex(0)
         self.waterfall_edit.setText(u" ".join(format_size(s) for s in WATERFALL_SIZES))
         self.text_edit.setText(u" ".join(format_size(s) for s in TEXT_SIZES))
         self.rebuild_timer.start()

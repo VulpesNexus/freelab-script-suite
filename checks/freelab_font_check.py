@@ -361,10 +361,11 @@ def coverage(languages, font, nearly=NEARLY_MISSING, historical=False):
 
 def buildable_candidates(results, ranges):
     """The missing characters of the given coverages a letter-and-marks builder may make: single
-    characters in the ranges [(low, high)] that decompose into a letter and marks (in order, once)."""
+    characters in the ranges [(low, high)] that decompose into a letter and marks, and the combining
+    marks the languages need (in order, once)."""
     found = []
     for r in results:
-        for item in r.missing + r.auxiliary_missing:
+        for item in r.missing + r.auxiliary_missing + r.marks_missing:
             codes = code_points(item)
             if len(codes) == 1 and 0x0300 <= codes[0] < 0x0370 and item not in found:
                 found.append(item)  # a combining mark: Diacritics makes it of the mark it comes from (macron below of the macron)

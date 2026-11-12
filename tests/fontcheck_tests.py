@@ -120,6 +120,15 @@ class CoverageTests(unittest.TestCase):
         ranges = [(0xC0, 0x250), (0x370, 0x400)]
         self.assertEqual(fc.buildable_candidates([result], ranges), [u(0x159)], "in range, letter and marks only")
 
+    def test_missing_marks_are_candidates(self):
+        result = fc.check_language(language(u"a", marks=u(0x331) + u(0x5B4)), font([0x61]))
+        self.assertEqual(result.marks_missing, [u(0x331), u(0x5B4)])
+        ranges = [(0xC0, 0x250)]
+        self.assertEqual(fc.buildable_candidates([result], ranges), [u(0x331)], "a combining mark, not a Hebrew point")
+        import freelab_diacritics as dm
+        self.assertEqual([r.char for r in dm.plan(dm.Font([u"o", u"macron"], [(u"o", 0x6F), (u"macron", 0xAF)]),
+                                                  [u(0x331)])], [u(0x331)], "Diacritics plans the mark")
+
     def test_handed_to_diacritics(self):
         import freelab_diacritics as dm
         result = fc.check_language(language(u"r " + u(0x159) + u" " + u(0x13E)), font([0x72]))

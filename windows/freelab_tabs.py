@@ -296,8 +296,9 @@ def refresh_main():
     frame = main.parentWidget() if main is not None else None
     if frame is None:
         return
-    for widget in [frame] + list(frame.findChildren(QtGui.QWidget)):
-        if widget.isVisible():
+    # Not findChildren(QWidget): under PythonQt it returns an empty list. (isAncestorOf is true of the frame itself.)
+    for widget in QtGui.QApplication.instance().allWidgets():
+        if frame.isAncestorOf(widget) and widget.isVisible():
             widget.update()
 
 
@@ -367,6 +368,12 @@ def merge_window(frame):
     QtGui.QApplication.processEvents()
     if not actions[0].isEnabled():
         return False
+    try:
+        active = QtGui.QApplication.activeWindow()
+    except Exception:
+        active = None  # not known: merged as before
+    if active is not None and active is not frame and _class(active) == "YFrameWindow":
+        return False  # another window of its own is still the active one: Merge Window would merge that one
     actions[0].trigger()
     QtGui.QApplication.processEvents()
     return True
@@ -430,7 +437,7 @@ def _filter_class():
     QtCore = _qt()[0]
     state = _state()
     if "filter_class_v2" not in state:
-        call = _dispatcher()
+        call, holder = _dispatcher(), sys  # (the closure's: this module's globals may be gone when it runs)
 
         class TabPresses(QtCore.QTimer):  # PythonQt has no QObject to subclass; a timer will do
             """On a document tab bar: a press starts following a possible drag; a double-click on a
@@ -442,6 +449,8 @@ def _filter_class():
                     if kind == QtCore.QEvent.MouseButtonPress and event.button() == QtCore.Qt.LeftButton:
                         call("on_pressed", obj.parentWidget(), obj.tabAt(event.pos()))
                     elif kind == QtCore.QEvent.MouseButtonDblClick and obj.tabAt(event.pos()) >= 0:
+                        if not (getattr(holder, "_freelab_tabs_state", None) or {}).get("on"):
+                            return False  # off: the double-click is FontLab's
                         tab_widget = obj.parentWidget()
                         frame = tab_widget.parentWidget() if tab_widget is not None else None
                         if frame is not None and frame.isWindow():

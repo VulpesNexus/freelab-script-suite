@@ -267,7 +267,10 @@ if ($Uninstall) {
     foreach ($name in @($files | ForEach-Object { $_.Name }) + $retired) {
         foreach ($dir in @($scripts, $rootScripts)) {  # the Scripts folder itself held them before 0.3
             $target = Join-Path $dir $name
-            if (Test-Path $target) { [System.IO.File]::Delete($target); Write-Output "Removed $target" }
+            if (Test-Path $target) {
+                try { [System.IO.File]::Delete($target); Write-Output "Removed $target" }
+                catch { Write-Output "Could not remove $target (FontLab holds it open): quit FontLab and run this again." }
+            }
         }
     }
     if ((Test-Path $scripts) -and -not (Get-ChildItem $scripts -Force)) {
@@ -298,7 +301,10 @@ foreach ($f in $files) {
 }
 foreach ($name in $retired) {
     $old = Join-Path $scripts $name
-    if (Test-Path $old) { [System.IO.File]::Delete($old); Write-Output "Removed the retired $old" }
+    if (Test-Path $old) {
+        try { [System.IO.File]::Delete($old); Write-Output "Removed the retired $old" }
+        catch { Write-Output "Could not remove the retired $old (FontLab holds it open): quit FontLab and run this again." }
+    }
 }
 
 $native = Join-Path $BinDir $nativeName

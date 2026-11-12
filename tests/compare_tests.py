@@ -645,6 +645,73 @@ class DialogTests(unittest.TestCase):
         self.assertEqual([r.name for r in dialog.glyph_names], [u"a", u"b"], "the worst listed")
         self.assertEqual(len(dialog.kern_shown), 2)
 
+    def test_open_a_font(self):
+        first, second, third = first_font(), second_font(), two_master_font()
+        packages = [first, second]
+        dialog = self.dialog(packages)
+        self.workspace.packages = lambda: list(packages)  # (a font opened later is listed)
+        said, chosen, requested, picked = [], [], [], []
+        dialog.log.add = lambda text, level="info": said.append((level, text))
+        dialog.choice_b.setCurrentIndex = chosen.append
+        gui = sys.modules["PythonQt"].QtGui
+        gui.classes["QFileDialog"] = type("QFileDialog", (), {"getOpenFileName": staticmethod(lambda *args: picked[-1])})
+        fontlab = sys.modules["fontlab"]
+        fontlab.flItems = type("Items", (), {"requestLoadingFont": staticmethod(requested.append)})
+        try:
+            picked.append(second.path)
+            dialog.open_font()
+            self.assertEqual(requested, [], "open already: not opened again")
+            self.assertEqual(chosen[-1], 1)
+            self.assertIn(u"open already", said[-1][1])
+            done = lambda: len([text for level, text in said if level == "done"])
+            picked.append(u"other.vfc")
+            dialog.open_font()
+            picked.append(third.path)
+            dialog.open_font()
+            self.assertEqual(requested, [u"other.vfc", third.path])
+            dialog.look_for_opened()
+            self.assertEqual((dialog.open_tries, done()), (1, 1), "not in yet: looked for again")
+            packages.append(third)
+            dialog.look_for_opened()
+            self.assertEqual(said[-1][0], "done")
+            self.assertIn(u"Opened", said[-1][1])
+            self.assertEqual(done(), 2)
+            self.assertIs(dialog.fonts[dialog.choices[chosen[-1]][0]], third, "the font just opened")
+            dialog.look_for_opened()
+            self.assertEqual(done(), 2, "chosen once: the earlier request's poll is gone")
+        finally:
+            del gui.classes["QFileDialog"]
+            del fontlab.flItems
+
+    def test_a_color_glyph_at_its_font_scale(self):
+        a, b = first_font(), second_font()
+        b.upm = 2000
+        dialog = self.dialog([a, b])
+        dialog.log.add = lambda text, level="info": None
+        dialog.choice_a.currentIndex, dialog.choice_b.currentIndex = 0, 1
+        dialog.compare()
+        dialog.selected_result = lambda: next(r for r in dialog.results if r.a == u"o" and r.b == u"o")
+
+        class Transform(object):
+            def scale(self, x, y):
+                self.factor = x
+
+            def map(self, path):
+                return (self.factor, path)
+
+        gui, drawn = sys.modules["PythonQt"].QtGui, []
+        saved = fcmp.comparison_pixmap, self.ak.layer_parts
+        gui.classes["QTransform"] = Transform
+        fcmp.comparison_pixmap = lambda width, height, first, second, *rest: drawn.append((first, second))
+        self.ak.layer_parts = lambda layer: [(u"part", u"red")]
+        try:
+            dialog.draw_comparison()
+        finally:
+            del gui.classes["QTransform"]
+            fcmp.comparison_pixmap, self.ak.layer_parts = saved
+        self.assertEqual(drawn[0][0][3], [(u"part", u"red")])
+        self.assertEqual(drawn[0][1][3], [((0.5, u"part"), u"red")], "scaled as the second font's path")
+
     def test_one_font_one_master(self):
         dialog = self.dialog([first_font()])
         self.assertEqual(len(dialog.choices), 1)

@@ -256,6 +256,22 @@ class ScopeTests(unittest.TestCase):
         letters = sorted(font.code_of(n) for n in kept if fp.glyph_script(font, n))
         self.assertEqual(letters, sorted(ord(c) for c in u"abñé"))
 
+    def test_letters_whose_name_names_no_script_stay_in_every_scope(self):
+        odd = u"\N{FEMININE ORDINAL INDICATOR}\N{MICRO SIGN}\N{MODIFIER LETTER CIRCUMFLEX ACCENT}\N{CARON}"
+        font = make_font(u"abc" + odd + u"\N{GREEK SMALL LETTER ALPHA}")
+        self.assertEqual([fp.glyph_script(font, ch) for ch in odd], [None] * 4)
+        self.assertEqual(fp.glyph_script(font, u"a"), u"LATIN")
+        kept = fp.scope_names(font, ("script", u"GREEK"))
+        self.assertTrue(all(ch in kept for ch in odd))
+        self.assertNotIn(u"a", kept)
+
+    def test_languages_carry_their_auxiliary_letters(self):
+        languages = fp.load_languages(LANGUAGES_FILE)
+        icelandic = [language for language in languages if language.iso == u"isl" and language.script == u"Latin"]
+        self.assertEqual(len(icelandic), 1)
+        self.assertIn(u"\N{LATIN CAPITAL LIGATURE OE}", icelandic[0].auxiliary)
+        self.assertNotIn(u"\N{LATIN CAPITAL LIGATURE OE}", icelandic[0].base)
+
 
 class SampleTests(unittest.TestCase):
     @classmethod

@@ -1487,45 +1487,82 @@ class CompareDialog(object):
     OPEN_FILTER = u"Fonts (*.vfc *.vfj *.vfb *.otf *.ttf *.otc *.ttc *.woff *.woff2 *.ufo *.glyphs *.designspace);;All files (*)"
     OPEN_WAIT_MS, OPEN_TRIES = 500, 120  # FontLab opens a font in the background: looked for twice a second, a minute
 
+    @staticmethod
+    def same_file(a, b):
+        try:
+            return os.path.normcase(os.path.abspath(u"%s" % a)) == os.path.normcase(os.path.abspath(u"%s" % b))
+        except Exception:
+            return False
+
     def open_font(self):
-        """A font file picked and opened in FontLab; once it is in, chosen as the second font."""
+        """A font file picked and opened in FontLab; once it is in, chosen as the second font (at once
+        when it is open already)."""
         QtCore, QtGui = _qt()
         path = QtGui.QFileDialog.getOpenFileName(self.dialog, u"Open a font to compare", u"", self.OPEN_FILTER)
         path = u"%s" % (path[0] if isinstance(path, (tuple, list)) else path or u"")
         if not path:
             return
-        before = set(self.ak.font_key(p) for p in self.open_fonts())
+        fonts = self.open_fonts()
+        there = [p for p in fonts if getattr(p, "path", None) and self.same_file(p.path, path)]
+        if there:
+            self.opening = None  # (a font still being looked for is not chosen over this one)
+            try:
+                self.choose_second(there[0], u"%s is open already")
+            except Exception as exc:
+                self.log.add(u"Could not choose that font: %s" % self.ak.html(exc), "error")
+            return
+        before = set(self.ak.font_key(p) for p in fonts)
         try:
             self.fontlab.flItems.requestLoadingFont(path)
         except Exception as exc:
             self.log.add(u"FontLab did not open %s: %s" % (self.ak.i(os.path.basename(path)), self.ak.html(exc)), "error")
             return
         self.log.add(u"Opening %s in FontLab\N{HORIZONTAL ELLIPSIS}" % self.ak.i(os.path.basename(path)))
-        self.open_tries = 0
+        # One poll pending at a time: a second font opened before the first came in is the one looked for
+        self.opening, self.open_tries = (path, before), 0
+        timer = getattr(self, "open_timer", None)
+        if timer is None:
+            timer = self.open_timer = QtCore.QTimer()
+            timer.setSingleShot(True)
+            timer.setInterval(self.OPEN_WAIT_MS)
+            timer.connect("timeout()", self.look_for_opened)
+        timer.start()
 
-        def look():
-            try:
-                new = [p for p in self.open_fonts() if self.ak.font_key(p) not in before]
-                if not new:
-                    self.open_tries += 1
-                    if self.open_tries < self.OPEN_TRIES:
-                        QtCore.QTimer.singleShot(self.OPEN_WAIT_MS, self.open_look)
-                    else:
-                        self.log.add(u"%s did not open (or FontLab is waiting for an answer in a dialog)."
-                                     % self.ak.i(os.path.basename(path)), "warning")
-                    return
-                self.read_fonts()
-                key = self.ak.font_key(new[0])
-                for index, (font_index, master) in enumerate(self.choices):
-                    if self.ak.font_key(self.fonts[font_index]) == key:
-                        self.choice_b.setCurrentIndex(index)
-                        break
-                self.log.add(u"Opened %s: chosen as the second font. Click %s." % (
-                    self.ak.b(new[0].tfn), self.ak.i(u"Compare")), "done")
-            except Exception as exc:
-                self.log.add(u"Could not choose the font just opened: %s" % self.ak.html(exc), "error")
-        self.open_look = look
-        QtCore.QTimer.singleShot(self.OPEN_WAIT_MS, look)
+    def look_for_opened(self):
+        """The font being opened (open_font), chosen once it is in; looked for again until OPEN_TRIES."""
+        opening = getattr(self, "opening", None)
+        if opening is None:
+            return
+        path, before = opening
+        try:
+            new = [p for p in self.open_fonts() if self.ak.font_key(p) not in before]
+            if not new:
+                self.open_tries += 1
+                if self.open_tries < self.OPEN_TRIES:
+                    self.open_timer.start()
+                else:
+                    self.opening = None
+                    self.log.add(u"%s did not open (or FontLab is waiting for an answer in a dialog)."
+                                 % self.ak.i(os.path.basename(path)), "warning")
+                return
+            self.opening = None
+            named = [p for p in new if getattr(p, "path", None) and self.same_file(p.path, path)]
+            self.choose_second((named or new)[0], u"Opened %s")  # (the file's own, when another font came in too)
+        except Exception as exc:
+            self.opening = None
+            self.log.add(u"Could not choose the font just opened: %s" % self.ak.html(exc), "error")
+
+    def choose_second(self, package, said):
+        """An open font chosen as the second font, and said so (said: how the log's line starts, %s standing
+        for the font's name)."""
+        self.read_fonts()
+        key = self.ak.font_key(package)
+        for index, (font_index, master) in enumerate(self.choices):
+            if self.ak.font_key(self.fonts[font_index]) == key:
+                self.choice_b.setCurrentIndex(index)
+                break
+        self.log.add((said + u": chosen as the second font. Click %s.") % (
+            self.ak.b(package.tfn), self.ak.i(u"Compare")), "done")
 
     def swap(self):
         """The first font and the second exchanged; compared again when they had been."""
@@ -2011,6 +2048,8 @@ class CompareDialog(object):
             return
         first, second = self.sides
         try:
+            upm_a, upm_b = float(first.package.upm or 1000), float(second.package.upm or 1000)
+            factor = upm_a / upm_b if upm_b else 1.0  # the second font's paths are scaled to the first's em (run)
             sides = []
             for side, name in ((first, r.a), (second, r.b)):
                 picture = side.paths.get(name) if name is not None else None
@@ -2020,6 +2059,10 @@ class CompareDialog(object):
                     try:
                         layer = self.layer_of(side.package, name, side.master)
                         parts = self.ak.layer_parts(layer) if layer is not None else None
+                        if parts and side is second and factor != 1:
+                            transform = _qt()[1].QTransform()
+                            transform.scale(factor, factor)
+                            parts = [(transform.map(part), color) for part, color in parts]
                     except Exception:
                         parts = None
                 sides.append((side.label, path, advance, parts))

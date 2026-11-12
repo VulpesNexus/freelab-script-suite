@@ -123,6 +123,109 @@ class NearTests(unittest.TestCase):
         self.assertFalse(self.near(1000 + ft.TEAR_MARGIN + 1, 110), "beside the bar")
 
 
+class Widget(object):
+    """A widget of a fake PythonQt: its parent, whether it is a window, and its update() calls."""
+
+    def __init__(self, parent=None, window=False, kind="QWidget"):
+        self.parent, self.window, self.kind, self.updates = parent, window, kind, 0
+
+    def parentWidget(self):
+        return self.parent
+
+    def isWindow(self):
+        return self.window
+
+    def isVisible(self):
+        return True
+
+    def isAncestorOf(self, other):
+        while other is not None:
+            if other is self:
+                return True
+            other = other.parent
+        return False
+
+    def update(self):
+        self.updates += 1
+
+    def tabAt(self, pos):
+        return 0
+
+    def metaObject(self):
+        kind = self.kind
+        return type("Meta", (), {"className": lambda _self: kind})()
+
+
+class FakeQt(object):
+    """PythonQt's modules as the filter and the repaint use them, installed for one test."""
+
+    def __init__(self, widgets=()):
+        widgets = list(widgets)
+        app = type("App", (), {"allWidgets": lambda _self: widgets})()
+        self.QtGui = type("QtGui", (), {"QApplication": type("QApplication", (), {
+            "instance": staticmethod(lambda: app)})})
+        self.QtCore = type("QtCore", (), {
+            "QTimer": type("QTimer", (object,), {"singleShot": staticmethod(lambda ms, function: self.later.append(function))}),
+            "QEvent": type("QEvent", (), {"MouseButtonPress": 2, "MouseButtonDblClick": 4}),
+            "Qt": type("Qt", (), {"LeftButton": 1})})
+        self.later = []
+
+    def __enter__(self):
+        self.saved = (sys.modules.get("PythonQt"), getattr(sys, "_freelab_tabs_state", None))
+        sys.modules["PythonQt"] = self
+        sys._freelab_tabs_state = {"on": True}
+        return self
+
+    def __exit__(self, *exc):
+        module, state = self.saved
+        if module is None:
+            sys.modules.pop("PythonQt", None)
+        else:
+            sys.modules["PythonQt"] = module
+        if state is None:
+            del sys._freelab_tabs_state
+        else:
+            sys._freelab_tabs_state = state
+        return False
+
+
+class Event(object):
+    def __init__(self, kind):
+        self.kind = kind
+
+    def type(self):
+        return self.kind
+
+    def pos(self):
+        return Point(0, 0)
+
+
+class HookTests(unittest.TestCase):
+    def test_a_double_click_docks_only_while_on(self):
+        frame = Widget(window=True, kind="YFrameWindow")
+        bar = Widget(Widget(frame))
+        with FakeQt() as qt:
+            presses = ft._filter_class()()
+            self.assertTrue(presses.eventFilter(bar, Event(4)), "on: taken, to dock its window")
+            self.assertEqual(len(qt.later), 1)
+            sys._freelab_tabs_state["on"] = False
+            self.assertFalse(presses.eventFilter(bar, Event(4)), "off: left to FontLab")
+            self.assertEqual(len(qt.later), 1)
+
+    def test_the_repaint_reaches_the_frame_and_what_it_holds(self):
+        frame = Widget(kind="YFrameWindow")
+        inner, outside = Widget(Widget(frame)), Widget()
+        main = Widget(frame)
+        with FakeQt([frame, inner, outside]):
+            saved = ft.main_tabs
+            ft.main_tabs = lambda: (None, main)
+            try:
+                ft.refresh_main()
+            finally:
+                ft.main_tabs = saved
+        self.assertEqual((frame.updates, inner.updates, outside.updates), (1, 1, 0))
+
+
 class SettingTests(unittest.TestCase):
     def test_on_unless_switched_off(self):
         self.assertTrue(ft.enabled_setting({}))
