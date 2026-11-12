@@ -132,22 +132,30 @@ def show_dialog():
     shown = {"value": None}
 
     def preview(*_args):
-        """Each change shows at once (applied as OK would; Cancel puts back what was there)."""
-        choice = chosen()
-        if choice != shown["value"]:
-            shown["value"] = choice
-            dm.configure(**choice)
+        """Each change shows at once (applied as OK would; Cancel puts back what was there). A Qt slot:
+        nothing may escape it."""
+        try:
+            choice = chosen()
+            if choice != shown["value"]:
+                shown["value"] = choice
+                dm.configure(**choice)
+        except Exception as exc:
+            print("FreeLab dark mode: the change could not be shown (%r)." % (exc,))  # repr: ASCII in Python 2
 
     def system_light(*_args):
         """Under Automatic while Windows is light, FontLab is light: mixed and the shade do nothing until
         Windows turns dark, so they are grayed out; checked again every few seconds while the dialog is
-        open, so a theme that changes on a schedule shows here too."""
-        idle = themes["automatic"].isChecked() and not dm.windows_is_dark()
-        mixed_box.setEnabled(not idle)
-        for button in shades.values():
-            button.setEnabled(not idle)
-        for key, button in engines.items():
-            button.setEnabled(not idle and (key != "native" or os.path.isfile(dm.hooks_path())))
+        open, so a theme that changes on a schedule shows here too. A Qt slot and a timer's: nothing
+        may escape it."""
+        try:
+            idle = themes["automatic"].isChecked() and not dm.windows_is_dark()
+            mixed_box.setEnabled(not idle)
+            for button in shades.values():
+                button.setEnabled(not idle)
+            for key, button in engines.items():
+                button.setEnabled(not idle and (key != "native" or os.path.isfile(dm.hooks_path())))
+        except Exception:
+            pass  # the controls stay as they were; the next check tries again
 
     for button in list(themes.values()) + list(shades.values()):
         button.connect("toggled(bool)", preview)

@@ -1562,6 +1562,185 @@ class ColorFontTests(unittest.TestCase):
     def test_a_failing_font_is_not_in_color(self):
         self.assertFalse(dm.font_in_color(object()))
 
+    def test_pictures_are_found_without_a_color_flag(self):
+        class NoFlag(object):
+            def __init__(self, name):
+                self.name = name
+        glyphs = [NoFlag("g%d" % i) for i in range(200)]
+        kinds = dict(("g%d" % i, ["ShapeImage"]) for i in range(100, 200))
+        self.assertTrue(dm.font_in_color(_Package(glyphs, kinds)), "one test failing leaves the other")
+
+    def test_the_glyphs_are_never_indexed(self):
+        class Glyphs(object):  # FontLab's native sequence: indexing one crashed FontLab 8
+            def __init__(self, items):
+                self.items = items
+
+            def __len__(self):
+                return len(self.items)
+
+            def __iter__(self):
+                return iter(self.items)
+
+            def __getitem__(self, i):
+                raise AssertionError("indexed")
+        glyphs = Glyphs([_FgGlyph("g%d" % i) for i in range(200)])
+        kinds = dict(("g%d" % i, ["ShapeImage"]) for i in range(100, 200))
+        self.assertTrue(dm.font_in_color(_Package(glyphs, kinds)))
+
+    def test_the_answer_is_kept_until_the_glyph_count_changes(self):
+        glyphs = [_FgGlyph("g%d" % i) for i in range(200)]
+        package, cache = _Package(glyphs, {}), {}
+        self.assertFalse(dm.font_in_color(package, cache))
+        glyphs[150].colors = True
+        self.assertFalse(dm.font_in_color(package, cache), "kept: the font is not looked at again")
+        glyphs.append(_FgGlyph("new"))
+        self.assertTrue(dm.font_in_color(package, cache), "a glyph more: looked at anew")
+
+
+class _Image(object):
+    """A QImage's pixels (ARGB32), for keep_colors."""
+
+    def __init__(self, width, height, pixels=None):
+        self.w, self.h, self.pixels = width, height, dict(pixels or {})
+
+    def width(self):
+        return self.w
+
+    def height(self):
+        return self.h
+
+    def pixel(self, x, y):
+        return self.pixels.get((x, y), 0)
+
+    def setPixel(self, x, y, value):
+        self.pixels[(x, y)] = value
+
+    def copy(self):
+        return _Image(self.w, self.h, self.pixels)
+
+
+class KeepColorsTests(unittest.TestCase):
+    BLUE, WHITE, PALE = 0xff1060c0, 0xffffffff, 0xff90b8e8
+
+    def picture(self):
+        """A blue square on transparency, a white dot inside it, and a pale pixel on its right edge."""
+        pixels = dict(((x, y), self.BLUE) for x in range(1, 6) for y in range(1, 6))
+        pixels[(3, 3)] = self.WHITE
+        pixels[(6, 3)] = self.PALE
+        return _Image(7, 7, pixels)
+
+    def test_a_white_detail_inside_the_picture_stays(self):
+        original = self.picture()
+        result = dm.keep_colors(original, original.copy())
+        self.assertEqual(result.pixel(3, 3), self.WHITE, "the white ? of a question icon")
+        self.assertEqual(result.pixel(2, 2), self.BLUE)
+
+    def test_smoothing_toward_white_on_the_outline_is_cleaned(self):
+        original = self.picture()
+        value = dm.keep_colors(original, original.copy()).pixel(6, 3)
+        self.assertEqual(value & 0xffffff, self.BLUE & 0xffffff, "the edge takes the color beside it")
+        self.assertTrue(0 < value >> 24 < 255, "as transparent as it was mixed with white")
+
+
+class _Index(object):
+    def __init__(self, row):
+        self._row = row
+
+    def isValid(self):
+        return 0 <= self._row < 1000
+
+    def row(self):
+        return self._row
+
+    def parent(self):
+        return None
+
+
+class _Rect(object):
+    def __init__(self, x, y, w, h):
+        self.x, self.y, self.w, self.h = x, y, w, h
+
+    def top(self):
+        return self.y
+
+    def bottom(self):
+        return self.y + self.h - 1
+
+    def height(self):
+        return self.h
+
+    def isEmpty(self):
+        return self.w <= 0 or self.h <= 0
+
+    def intersected(self, other):
+        top, bottom = max(self.y, other.y), min(self.y + self.h, other.y + other.h)
+        return _Rect(self.x, top, self.w, bottom - top)
+
+
+class SelectedRowTests(DarkModeCase):
+    """A list's selected rows are found among the rows on screen, never by copying the whole selection."""
+
+    class Selection(object):
+        def __init__(self, rows):
+            self.rows = rows
+
+        def hasSelection(self):
+            return bool(self.rows)
+
+        def rowIntersectsSelection(self, row, parent):
+            return row in self.rows
+
+        def selectedIndexes(self):
+            raise AssertionError("the whole selection copied")
+
+    class Model(object):
+        def index(self, row, column, parent):
+            return _Index(row)
+
+    class View(object):
+        def __init__(self, selected, scrolled):
+            self.selection, self.model_, self.scrolled = SelectedRowTests.Selection(selected), SelectedRowTests.Model(), scrolled
+
+        def selectionModel(self):
+            return self.selection
+
+        def model(self):
+            return self.model_
+
+        def inherits(self, name):
+            return False
+
+        def indexAt(self, point):
+            return _Index(self.scrolled)
+
+        def visualRect(self, index):
+            return _Rect(0, (index.row() - self.scrolled) * 20, 300, 20)
+
+    def setUp(self):
+        DarkModeCase.setUp(self)
+        core = dm._core
+        self.patch("_core", lambda name: {"QRect": _Rect, "QPoint": lambda x, y: None}.get(name) or core(name))
+
+    def test_the_selected_rows_on_screen(self):
+        view = self.View(selected=set(range(1000)) - set([502]), scrolled=500)  # everything but one, scrolled down
+        rows = dm._selected_rows(view, 300, 100)
+        self.assertEqual([r.top() for r in rows], [0, 20, 60, 80], "rows 500, 501, 503, and 504")
+        self.assertEqual(rows[-1].height(), 20)
+
+    def test_nothing_selected(self):
+        self.assertEqual(dm._selected_rows(self.View(selected=set(), scrolled=0), 300, 100), [])
+
+
+class RestoreCacheTests(DarkModeCase):
+    def test_switching_off_forgets_the_list_logos_and_color_fonts(self):
+        self.on()
+        state = dm._state()
+        state["logo_keys"] = {1: "logo at the dark shade"}
+        state["color_fonts"] = {("Font", "Regular"): (200, True)}
+        self.off()
+        self.assertNotIn("logo_keys", state)
+        self.assertNotIn("color_fonts", state)
+
 
 def _ancestors(widget):
     parent = widget.parentWidget()

@@ -65,6 +65,10 @@ Mapping pixels in Python 2.7 would take seconds per frame. *darkmode/native/free
 
 Everything is recorded before it changes, and switching off puts it back without a restart: style, palette, stylesheets (unless FontLab replaced one meanwhile), palettes, icons, effects, fills, title bars, and the workspace color (unless it was changed meanwhile). The saved workspace color is kept in *darkmode.json* until then. Graphics effects FontLab sets itself are never replaced. An editor FontLab created while dark mode was on took its dark paper and light text from the palette, once. Its colors are set natively on switching off (see Editors above): white paper, and dark text where its text was light gray. Only where QScintilla's entry point cannot be reached does it get a "relight" effect instead, which maps that paper white and that text black, with some rough smoothing; restarting FontLab then gives the exact light look. `tools/install-fontlab.ps1 -Uninstall` also puts the workspace color back, and asks for dark mode to be switched off first when FontLab is running.
 
+## Known limits
+
+- **One color-font flag for all of FontLab.** Under the native engine, a color font's pictures are drawn as the font has them ([NATIVE.md](NATIVE.md)), but the flag that decides it is a single one, set from the current font. With two fonts open side by side, the color font's cells are mapped as ink while the other font is current, and while the color font is current, the other font's cells go through the picture test too. The answer is also kept until the font's glyph count changes, so a font that gains its first colors is taken for a color font once a glyph is added or removed, or once dark mode is switched off and on again.
+
 ## PythonQt traps met on the way
 
 - Qt properties read as values: `widget.styleSheet`, `app.style().objectName`, and `widget.palette` are not callable.

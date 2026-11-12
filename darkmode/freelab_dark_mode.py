@@ -1120,8 +1120,11 @@ def _chroma(value):
 def keep_colors(original, mapped):
     """mapped with original's clearly colored pixels put back (both Format_ARGB32, one size): a logo's
     colors are its own, its dark shading included (mapped as ink, a blue T's navy turned pale). Its
-    edges were smoothed toward white: a paler pixel beside a colored one becomes that color, as
-    transparent as it was mixed with white, so the edge is smooth on any row."""
+    edges were smoothed toward white: a paler pixel beside a colored one, on the picture's outline
+    (beside a transparent pixel or the image's border), becomes that color, as transparent as it was
+    mixed with white, so the edge is smooth on any row. A pale pixel inside the picture is its own
+    (the white "?" of a message box's blue question icon), left as it is: cleaned too, it turned
+    transparent and the "?" lost a pixel on each side."""
     width, height = min(original.width(), mapped.width()), min(original.height(), mapped.height())
     kept = set()
     for y in range(height):
@@ -1143,6 +1146,11 @@ def keep_colors(original, mapped):
                     if (x + dx, y + dy) in kept]
             if not near:
                 continue
+            outline = any(not (0 <= x + dx < width and 0 <= y + dy < height)
+                          or not (original.pixel(x + dx, y + dy) >> 24) & 255
+                          for dx in (-1, 0, 1) for dy in (-1, 0, 1))
+            if not outline:
+                continue  # inside the picture: a white detail, not smoothing toward white
             color = max(near, key=_chroma)
             shares = []
             for shift in (16, 8, 0):
@@ -1470,21 +1478,31 @@ SELECTED_ROWS_MAX = 200
 
 
 def _selected_rows(view, width, height):
-    """The viewport rectangles of a list's visible selected rows (full width), at most SELECTED_ROWS_MAX."""
-    QRect = _core("QRect")
+    """The viewport rectangles of a list's visible selected rows (full width): the rows on screen are
+    walked from the top, as _logo_places does, at most SELECTED_ROWS_MAX of them. A copy of the whole
+    selection, made on every paint, was slow under a long table with everything selected, and its
+    first indexes were not always the rows on screen."""
+    QRect, QPoint = _core("QRect"), _core("QPoint")
     selection = view.selectionModel() if hasattr(view, "selectionModel") else None
-    if selection is None:
+    model = view.model()
+    if selection is None or model is None or not selection.hasSelection():
         return []
-    rows = {}
-    for index in list(selection.selectedIndexes())[:SELECTED_ROWS_MAX * 8]:
-        r = view.visualRect(index)
-        if r.isEmpty() or r.bottom() < 0 or r.top() > height:
-            continue
-        top, bottom = rows.get(r.top(), (r.top(), r.bottom()))
-        rows[r.top()] = (min(top, r.top()), max(bottom, r.bottom()))
-        if len(rows) >= SELECTED_ROWS_MAX:
+    index = view.indexAt(QPoint(1, 1))
+    tree = view.inherits("QTreeView")
+    rows = []
+    for _ in range(SELECTED_ROWS_MAX):
+        if not index.isValid():
             break
-    return [QRect(0, top, width, bottom - top + 1).intersected(QRect(0, 0, width, height)) for top, bottom in rows.values()]
+        r = view.visualRect(index)
+        if r.top() >= height:
+            break
+        if not r.isEmpty() and r.bottom() >= 0 and selection.rowIntersectsSelection(index.row(), index.parent()):
+            rows.append(QRect(0, r.top(), width, r.height()).intersected(QRect(0, 0, width, height)))
+        if tree:
+            index = view.indexBelow(index)
+        else:  # flat lists and tables: the next row of the model
+            index = model.index(index.row() + 1, 0, index.parent())
+    return rows
 
 
 def _logo_icon(icon, state):
@@ -1801,7 +1819,9 @@ def _effect_classes():
                     draw_mapped(painter, mapped_from, offset, whole, 0.0, None, -1.0, self.freelab_keep_tint, None, 0.0, 0,
                                 anchors, None, gray, QRect(whole) if kind in ("ink", "edges") else None)
                     if kind == "ink" and getattr(self, "freelab_list", False):
-                        draw_selected(self, painter, pixmap, offset)
+                        # from the copy without logos: FontLab's logo, with its light fringe, showed through
+                        # the cleaned logo's smoothing drawn over it
+                        draw_selected(self, painter, mapped_from, offset)
                     if logos:
                         draw_logos(painter, pixmap, offset, logos)
                     keep_unmapped(self, painter, pixmap, offset)
@@ -2906,23 +2926,50 @@ def _sweep():
 COLOR_SAMPLE = 48  # glyphs looked at for SVG or bitmap pictures, after every glyph's color flag
 
 
-def font_in_color(package):
+def font_in_color(package, cache=None):
     """True for a font that draws in color: shapes with their own colors (COLR, as FontLab imports
-    it), or pictures (SVG or bitmap glyphs). A few milliseconds."""
+    it), or pictures (SVG or bitmap glyphs). Every glyph is looked at, a long while for a large CJK
+    font: with a cache (a dict), the answer is kept per font and master until its glyph count
+    changes. Each test fails on its own, and the glyphs are never indexed by position (indexing
+    FontLab's native sequences crashed FontLab 8, beyond the reach of try)."""
     try:
         glyphs = package.fgPackage.glyphs
-        for glyph in glyphs:
-            if glyph.hasColors():
-                return True
         count, master = len(glyphs), package.master
-        for i in range(0, count, max(1, count // COLOR_SAMPLE)):
-            glyph = package.findName(glyphs[i].name)
-            layer = glyph.getLayerByName(master) if glyph is not None else None
-            if layer is not None and any(shape.shapeType == "ShapeImage" for shape in layer.shapes):
-                return True
+        key = (getattr(package, "tfn", None), master)
     except Exception:
         return False
-    return False
+    if cache is not None and cache.get(key, (None,))[0] == count:
+        return cache[key][1]
+    step, names, colors, found = max(1, count // COLOR_SAMPLE), [], True, False
+    try:
+        for i, glyph in enumerate(glyphs):
+            if i % step == 0:
+                try:
+                    names.append(glyph.name)
+                except Exception:
+                    pass
+            if colors:
+                try:
+                    if glyph.hasColors():
+                        found = True
+                        break
+                except Exception:
+                    colors = False  # no color flag: the pictures are still looked for
+    except Exception:
+        pass
+    if not found:
+        try:
+            for name in names:
+                glyph = package.findName(name)
+                layer = glyph.getLayerByName(master) if glyph is not None else None
+                if layer is not None and any(shape.shapeType == "ShapeImage" for shape in layer.shapes):
+                    found = True
+                    break
+        except Exception:
+            pass
+    if cache is not None:
+        cache[key] = (count, found)
+    return found
 
 
 def _follow_color_font(full):
@@ -2940,7 +2987,7 @@ def _follow_color_font(full):
         return
     if key == state.get("color_font_key") and not full:
         return
-    on = bool(package is not None and font_in_color(package))
+    on = bool(package is not None and font_in_color(package, state.setdefault("color_fonts", {})))
     state["color_font_key"] = key
     if on != state.get("color_content", False):
         state["color_content"] = on
@@ -3770,6 +3817,8 @@ def restore():
     state["mapped_keys"].clear()
     state["originals"].clear()
     state["swatches"].clear()
+    state.pop("logo_keys", None)  # list logos mapped at this shade: another shade maps them anew
+    state.pop("color_fonts", None)  # fonts found in color or not: looked at anew when switched on
     if was_on:
         _restore_preferences()
     dark_title_bars(False)
