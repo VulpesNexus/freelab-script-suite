@@ -1709,7 +1709,8 @@ class SelectedRowTests(DarkModeCase):
         def __init__(self, rows):
             self.rows = rows
 
-        def hasSelection(self):
+        @property
+        def hasSelection(self):  # a property under PythonQt, as FontLab has it
             return bool(self.rows)
 
         def rowIntersectsSelection(self, row, parent):

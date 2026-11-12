@@ -1485,7 +1485,7 @@ def _selected_rows(view, width, height):
     QRect, QPoint = _core("QRect"), _core("QPoint")
     selection = view.selectionModel() if hasattr(view, "selectionModel") else None
     model = view.model()
-    if selection is None or model is None or not selection.hasSelection():
+    if selection is None or model is None or not _prop(selection, "hasSelection"):  # (a property in PythonQt)
         return []
     index = view.indexAt(QPoint(1, 1))
     tree = view.inherits("QTreeView")
