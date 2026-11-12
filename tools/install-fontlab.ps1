@@ -52,8 +52,8 @@ $files = @(
     @{ From = 'proof\freelab_proof.py'; Name = 'freelab_proof.py' },
     @{ From = 'checks\language_coverage.json'; Name = 'language_coverage.json' },
     @{ From = 'checks\language_coverage_LICENSE'; Name = 'language_coverage_LICENSE' },
-    @{ From = 'checks\autonym_fonts\FreeLabAutonyms.ttf'; Name = 'FreeLabAutonyms.ttf' },
-    @{ From = 'checks\autonym_fonts\FreeLabAutonyms_LICENSE'; Name = 'FreeLabAutonyms_LICENSE' },
+    @{ From = 'checks\language_font\FreeLabLanguages.ttf'; Name = 'FreeLabLanguages.ttf' },
+    @{ From = 'checks\language_font\FreeLabLanguages_LICENSE'; Name = 'FreeLabLanguages_LICENSE' },
     @{ From = 'spacing\freelab_auto_spacing.py'; Name = 'freelab_auto_spacing.py' },
     @{ From = 'diacritics\freelab_diacritics.py'; Name = 'freelab_diacritics.py' },
     @{ From = 'diacritics\mark_model.json'; Name = 'mark_model.json' },
@@ -74,7 +74,8 @@ $files = @(
     @{ From = 'kerning\class_model.json'; Name = 'class_model.json' }
 )
 # Scripts FreeLab once installed under other names: removed on install and uninstall.
-$retired = @('freelab_accents.py')  # Accented Glyphs, now Diacritics
+$retired = @('freelab_accents.py',  # Accented Glyphs, now Diacritics
+    'FreeLabAutonyms.ttf', 'FreeLabAutonyms_LICENSE')  # Font Check's first font, now FreeLabLanguages.ttf
 if (-not $BinDir) { $BinDir = Join-Path $env:LOCALAPPDATA 'FreeLab\bin' }
 if (-not $StateDir) { $StateDir = Join-Path $env:LOCALAPPDATA 'FreeLab' }
 if (-not $RegistryKey) { $RegistryKey = 'HKCU:\Software\Fontlab\fontlab7' }

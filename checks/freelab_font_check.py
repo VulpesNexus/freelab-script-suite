@@ -35,8 +35,10 @@ import unicodedata
 AUTO_KERNING_FILE, AUTO_KERNING_MODULE = "freelab_auto_kerning.py", "freelab_auto_kerning"
 DIACRITICS_FILE, DIACRITICS_MODULE = "freelab_diacritics.py", "freelab_diacritics"
 LANGUAGES_FILE = "language_coverage.json"  # beside this script: checks/train/languages.py makes it from Hyperglot
-AUTONYM_FONT_FILE = "FreeLabAutonyms.ttf"  # beside this script, or in autonym_fonts/: checks/train/autonym_fonts.py makes it
-AUTONYM_FAMILY = "FreeLab Autonyms"  # its family: Noto subsets (OFL) of the autonyms Qt finds in no installed font
+LIST_FONT_FILE = "FreeLabLanguages.ttf"  # beside this script, or in language_font/: checks/train/language_font.py makes it
+LIST_FONT_FOLDER = "language_font"
+LIST_FAMILY = "FreeLab Languages"  # its family: Noto subsets (OFL) of every character the languages list shows
+LIST_SCALE = 1.25  # the languages list's text, this many times the dialog's (easier to read)
 TABS = ("coverage", "metrics", "masters")
 NEARLY_MISSING = 3  # a language missing at most this many base characters (and marks) is within reach
 SCRIPT_MINIMUM = 5  # a font with fewer of a script's characters than this has none of it (its languages summed up)
@@ -171,25 +173,25 @@ def languages_path():
     return os.path.join(os.path.dirname(os.path.abspath(globals().get("__file__") or ".")), LANGUAGES_FILE)
 
 
-def autonym_font_path(here=None):
-    """The bundled autonym font: beside this script once installed (the installer copies files flat),
-    else in autonym_fonts/ (the repository); None when neither has it."""
+def list_font_path(here=None):
+    """The bundled languages list font: beside this script once installed (the installer copies files
+    flat), else in language_font/ (the repository); None when neither has it."""
     if here is None:
         here = os.path.dirname(os.path.abspath(globals().get("__file__") or "."))
-    for path in (os.path.join(here, AUTONYM_FONT_FILE), os.path.join(here, "autonym_fonts", AUTONYM_FONT_FILE)):
+    for path in (os.path.join(here, LIST_FONT_FILE), os.path.join(here, LIST_FONT_FOLDER, LIST_FONT_FILE)):
         if os.path.isfile(path):
             return path
     return None
 
 
-def with_fallback(family, fallback):
-    """A family list Qt 5 reads as the family, then fallback for the characters it lacks ("Segoe UI,
-    FreeLab Autonyms": QFontDatabase splits a family on commas, and the families after the first come
-    before the system's own fallbacks)."""
-    families = [f.strip() for f in (family or u"").split(u",") if f.strip()]
-    if fallback not in families:
-        families.append(fallback)
-    return u",".join(families)
+def scaled_size(point_size, pixel_size, scale=LIST_SCALE):
+    """("point", size) or ("pixel", size): a font's size times scale, in the unit it was given in (a
+    QFont has a point size, or -1 and a pixel size)."""
+    if point_size is not None and point_size > 0:
+        return "point", round(point_size * scale * 4) / 4.0  # (quarter points)
+    if pixel_size is not None and pixel_size > 0:
+        return "pixel", int(round(pixel_size * scale))
+    return None, None
 
 
 def load_languages(path=None):
@@ -2027,14 +2029,14 @@ def _prop(obj, name):
     return value() if callable(value) else value
 
 
-def register_autonym_font(QtCore, QtGui):
-    """FreeLab Autonyms registered with Qt once per FontLab session; its family, or None (no file, or Qt
-    refused it). Qt 5 on Windows searches only some installed fonts for a character the widget's font
-    lacks, so autonyms in Canadian syllabics, Tifinagh, Vai, Tai Viet, Tai Tham, Ethiopic, and others
-    showed as boxes; the bundled font has exactly those characters (checks/autonym_fonts)."""
-    if AUTONYM_FAMILY in [u"%s" % f for f in QtGui.QFontDatabase().families()]:
-        return AUTONYM_FAMILY
-    path = autonym_font_path()
+def register_list_font(QtCore, QtGui):
+    """FreeLab Languages registered with Qt once per FontLab session; its family, or None (no file, or
+    Qt refused it). In the dialog's font, Qt 5 took each character it lacks from another font: rare
+    scripts' autonyms showed as boxes and some Cyrillic ones spaced wide. The bundled font has every
+    character the languages list shows (checks/language_font), so the list is drawn in one design."""
+    if LIST_FAMILY in [u"%s" % f for f in QtGui.QFontDatabase().families()]:
+        return LIST_FAMILY
+    path = list_font_path()
     if path is None:
         return None
     if isinstance(path, bytes):  # (Python 2: the file system's encoding, for Qt's unicode path)
@@ -2867,16 +2869,23 @@ class FontCheckDialog(object):
         label.setFont(font)
         return label
 
-    def autonyms_drawn(self, tree):
-        """The list's font falls back on FreeLab Autonyms for the autonyms no installed font draws for Qt;
-        without the font file (or if Qt refuses it), the list keeps its font: this never raises."""
+    def use_list_font(self, tree):
+        """The languages list (its rows, section headings, and column headings) in FreeLab Languages, at
+        LIST_SCALE times the dialog's size: rows grow with it, and a section heading's bold font is made
+        from the list's (section_row). Without the font file, or if Qt refuses it, the list keeps its
+        family and is still enlarged; tooltips keep Qt's own font. This never raises."""
         try:
             QtCore, QtGui = _qt()
-            family = register_autonym_font(QtCore, QtGui)
+            font = QtGui.QFont(_prop(tree, "font"))
+            family = register_list_font(QtCore, QtGui)
             if family:
-                font = QtGui.QFont(_prop(tree, "font"))
-                font.setFamily(with_fallback(u"%s" % font.family(), family))
-                tree.setFont(font)
+                font.setFamily(family)
+            unit, size = scaled_size(font.pointSizeF(), font.pixelSize())
+            if unit == "point":
+                font.setPointSizeF(size)
+            elif unit == "pixel":
+                font.setPixelSize(size)
+            tree.setFont(font)
         except Exception:
             pass
 
@@ -3024,7 +3033,7 @@ class FontCheckDialog(object):
         row.addWidget(self.level_filter)
         box.addLayout(row)
         self.language_tree = self.tree(("Language", "Missing"), icon=(DOT_SIZE, DOT_SIZE))
-        self.autonyms_drawn(self.language_tree)
+        self.use_list_font(self.language_tree)
         self.language_tree.setWhatsThis(u"A dot per language: covered (the highlight color), within reach (amber), "
                                         u"missed (gray); within reach, the characters it misses. Selecting one marks "
                                         u"them in the list at the left; double-click shows them in a <i>Glyph</i> window.")
@@ -3762,7 +3771,7 @@ class FontCheckDialog(object):
                         item.setForeground(1, QtGui.QBrush(faded(colors["text"], QUIET_ALPHA)))
                     tree.addTopLevelItem(item)
                     self.language_rows.append(r)
-            self.fit_columns(tree, (int(COLUMN_MAX * 1.4),))
+            self.fit_columns(tree, (int(COLUMN_MAX * 1.4 * LIST_SCALE),))  # (its larger text)
         finally:
             tree.setUpdatesEnabled(True)
             self.filling = False
