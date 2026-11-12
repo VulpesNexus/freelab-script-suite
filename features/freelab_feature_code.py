@@ -2843,9 +2843,11 @@ class FeatureCodeDialog(object):
                                      u"is made of outlines (not components), offset outward evenly on both sides of each "
                                      u"stroke; 100%%: components, scaled, as they are." % STROKE_WEIGHT)
         row.addWidget(self.stroke_box)
+        self.stroke_box.connect("valueChanged(int)", lambda value: self.update_small_buttons())
         row.addStretch(1)
         self.build_button = QtGui.QPushButton(build_label(0))
-        self.build_button.setWhatsThis(u"Adds the checked glyphs to the font, made of components as shown, in one "
+        self.build_button.setWhatsThis(u"Adds the checked glyphs to the font, as shown (scaled forms with their "
+                                       u"strokes kept as Strokes says), in one "
                                        u"step of FontLab's History. The font is read again: the forms above take "
                                        u"them.")
         self.build_button.setEnabled(False)
@@ -3132,7 +3134,9 @@ class FeatureCodeDialog(object):
         if master in self.stems:
             return self.stems[master]
         found = None
-        for name in (u"zero", u"one"):
+        figures = self.small_info.figures() if self.small_info is not None else []
+        names = [name for name in figures[:2] if name] + [u"zero", u"one"]
+        for name in names:
             glyph = package.findName(name)
             layer = glyph.getLayerByName(master) if glyph is not None and not glyph.isNull else None
             if layer is None:
@@ -3148,23 +3152,28 @@ class FeatureCodeDialog(object):
         self.stems[master] = found
         return found
 
-    def outlines_with_strokes(self, package, master, plan, layer, weight):
-        """layer (empty, the new form's) made of copies of its parts' outlines, scaled and placed as planned,
-        then offset outward so their strokes are weight times the scaled ones; False (nothing added) when a
-        part is made of components or the figure's stroke cannot be measured: then built of components."""
+    def stroke_copies(self, package, master, plan, weight):
+        """What a scaled form's layer in a master is made of when its strokes are kept: [(source layer,
+        transform, offset)], its parts' outlines scaled and placed as planned, then offset outward so their
+        strokes are weight times the scaled ones; None when a part is made of components or the figure's
+        stroke cannot be measured (the form is then made of components). Nothing is added here."""
         QtGui = _qt()[1]
         stem = self.figure_stem(package, master)
         if not stem:
-            return False
+            return None
         copies = []
         for part in plan.parts:
             name, sx, sy, dx, dy = unwrapped(package, master, *part)
             source = package.findName(name)
             source_layer = source.getLayerByName(master) if source is not None else None
             if source_layer is None or any(shape.isComponent for shape in source_layer.shapes):
-                return False
+                return None
             distance = stem * abs(sx) * (weight - 1.0) / 2.0
             copies.append((source_layer, QtGui.QTransform(sx, 0.0, 0.0, sy, float(round(dx)), float(round(dy))), distance))
+        return copies
+
+    def add_stroke_copies(self, layer, copies, width):
+        """layer (empty, the new form's) made of the copies stroke_copies listed, offset."""
         for source_layer, transform, distance in copies:
             for shape in source_layer.shapes:
                 layer.addShape(shape.cloneTopLevel() if hasattr(shape, "cloneTopLevel") else shape.clone())
@@ -3184,8 +3193,7 @@ class FeatureCodeDialog(object):
                     for node, (x, y) in zip(nodes, offset_contour(points, distance / local, right)):
                         node.x, node.y = x, y
                     contour.update() if hasattr(contour, "update") else None
-        layer.advanceWidth = float(plan.width)
-        return True
+        layer.advanceWidth = float(width)
 
     def small_set_picked(self, index):
         """A set picked in the settings row: its settings shown in the boxes (signals held: showing them
@@ -3238,6 +3246,8 @@ class FeatureCodeDialog(object):
             self.replan()
 
     def small_changed(self):
+        if hasattr(self, "stroke_box") and self.stroke_box.value != STROKE_WEIGHT:
+            return True
         return any(form.on != form.first_on for form in self.small_forms) or any(
             self.small_setup.get(key, {}).get(k) != setting.get(k) for key, setting in self.small_first.items()
             for k in ("scale", "baseline", "width"))
@@ -3259,7 +3269,8 @@ class FeatureCodeDialog(object):
             return False
 
     def build_small_forms(self):
-        """The checked figure forms added to the font, made of components as planned, in every master
+        """The checked figure forms added to the font as planned (components, or outlines with their strokes
+        kept when Strokes is above 100% and every master allows it), in every master
         (placed by the current master's measures; widths from each master's own glyphs), as one step of
         FontLab's History; a code point set once its glyph's layers are made."""
         QtCore, QtGui = _qt()
@@ -3308,14 +3319,26 @@ class FeatureCodeDialog(object):
                 if glyph is None:
                     raise RuntimeError(u"FontLab did not add %s" % form.name)
                 placed = False
-                for master in masters:
-                    plan = plans_of(master).get(form.name)
-                    if plan is None or any(package.findName(part[0]) is None for part in plan.parts):
-                        continue  # its figure not drawn in this master, or the glyph it copies not built
+                usable = [(master, plans_of(master).get(form.name)) for master in masters]
+                usable = [(master, plan) for master, plan in usable if plan is not None and
+                          all(package.findName(part[0]) is not None for part in plan.parts)]
+                # (a scaled form only: a copied or moved one is the same as its drawn or built glyph; and
+                # outlines in every master or in none, so the masters stay compatible)
+                weight = self.stroke_box.value / 100.0 if hasattr(self, "stroke_box") else 1.0
+                outlines = {}
+                if weight > 1.0 and usable and all(plan.how == "scaled" for _, plan in usable):
+                    for master, plan in usable:
+                        copies = self.stroke_copies(package, master, plan, weight)
+                        if copies is None:
+                            outlines = {}
+                            break
+                        outlines[master] = copies
+                if outlines:
+                    thickened.append(form.name)
+                for master, plan in usable:
                     layer = glyph.getLayerByName(master, True)
-                    weight = self.stroke_box.value / 100.0 if hasattr(self, "stroke_box") else 1.0
-                    if weight > 1.0 and self.outlines_with_strokes(package, master, plan, layer, weight):
-                        thickened.append(form.name)
+                    if master in outlines:
+                        self.add_stroke_copies(layer, outlines[master], plan.width)
                         placed = True
                         continue
                     components = []
@@ -3419,6 +3442,8 @@ class FeatureCodeDialog(object):
         self.show_forms()
         for form in self.small_forms:
             form.on = form.first_on
+        if hasattr(self, "stroke_box"):
+            self.stroke_box.setValue(STROKE_WEIGHT)
         self.small_setup = dict((key, dict(setting)) for key, setting in self.small_first.items())
         self.show_small_checks()
         self.small_set_picked(self.small_set_index)

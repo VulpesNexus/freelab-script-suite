@@ -307,10 +307,21 @@ def feature_text(tag, old, rules):
 
 def font_positioned(tag, text):
     """The glyphs a feature's own code (outside FreeLab's block) positions one by one (pos a-hira <...>;
-    pos [a b] <...>;): FreeLab's rules for them would be a second value, which the compiler refuses
-    ("Duplicate single positioning glyph with different values")."""
+    pos [a b] <...>; position, enum pos; a class defined in that code, @KANA = [...];, by its glyphs):
+    FreeLab's rules for them would be a second value, which the compiler refuses ("Duplicate single
+    positioning glyph with different values"). A class defined elsewhere (the font's classes) is not read."""
     import re
     begin, end = BEGIN % tag, END % tag
+    classes = {}
+    for match in re.finditer(u"(@[A-Za-z0-9_.\\-]+)\\s*=\\s*\\[([^\\]]*)\\]", re.sub(u"#[^\\n]*", u"", text or u"")):
+        classes[match.group(1)] = match.group(2).split()
+
+    def members(name, depth=0):
+        if not name.startswith(u"@"):
+            return [name]
+        if depth > 8:
+            return []
+        return [g for part in classes.get(name, []) for g in members(part, depth + 1)]
     found, inside = set(), False
     for line in (text or u"").splitlines():
         stripped = line.split(u"#")[0].strip() if line.strip() not in (begin, end) else line.strip()
@@ -320,13 +331,13 @@ def font_positioned(tag, text):
         if line.strip() == end:
             inside = False
             continue
-        if inside or not stripped.startswith(u"pos"):
+        if inside:
             continue
-        match = re.match(u"pos\\s+(\\[[^\\]]*\\]|[^\\s\\[<]+)", stripped)
+        match = re.match(u"(?:enum\\s+)?(?:pos|position)\\s+(\\[[^\\]]*\\]|[^\\s\\[<]+)", stripped)
         if not match:
             continue
         target = match.group(1).strip(u"[]").split()
-        found.update(name for name in target if not name.startswith(u"@"))
+        found.update(glyph for name in target for glyph in members(name))
     return found
 
 
@@ -675,6 +686,7 @@ class CJKSpacingDialog(object):
             self.measure_hangul()
         self.fill()
         self.first_checks = [True for _ in self.trims]
+        self.update_buttons()  # (fill compared the checks with the last font's)
         b = ak.b
         full = sum(1 for g in glyphs if g[2] >= FULL_WIDTH_SHARE * package.upm)
         korean = (u" Its %s Hangul syllables: none of the corpus's Korean fonts kerns or trims Hangul; choose how to "
@@ -973,13 +985,15 @@ class CJKSpacingDialog(object):
             self.preview_captions[1].setText(u"With palt" if palt_on else u"With palt (off: palt is not written)")
         except Exception:
             pass
-        for (label, caption), trimmed in zip(self.previews, (False, palt_on)):
+        for index, (label, caption) in enumerate(self.previews):
             placed, chars, widths = [], [], []
             for ch in text:
                 name = names.get(ord(ch))
                 if name is None:
                     continue
-                trim = by_code.get(ord(ch)) if trimmed else None
+                trim = by_code.get(ord(ch)) if index == 1 else None
+                if trim is not None and not palt_on and not isinstance(trim, HangulChange):
+                    trim = None  # (palt not written; Hangul widths are)
                 if isinstance(trim, HangulChange):
                     placed.append((name, trim.shift, trim.advance - trim.old_advance))
                 else:

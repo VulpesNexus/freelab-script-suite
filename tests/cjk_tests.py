@@ -167,7 +167,16 @@ class OwnCodeTests(unittest.TestCase):
 
     def test_the_fonts_own_single_positions_are_found(self):
         self.assertEqual(sorted(cj.font_positioned("palt", self.OLD)), [u"uni3042", u"uni3044", u"uni3046"],
-                         "not FreeLab's block, not a class")
+                         "not FreeLab's block, not an undefined class")
+
+    def test_classes_defined_in_the_code_and_long_forms_are_read(self):
+        text = u"""feature palt {
+  @KANA = [uni304B uni304D];
+  @MORE = [@KANA uni304F];
+  position @MORE <-3 0 -6 0>;
+  enum pos [uni3051] <-1 0 -2 0>;
+} palt;"""
+        self.assertEqual(sorted(cj.font_positioned("palt", text)), [u"uni304B", u"uni304D", u"uni304F", u"uni3051"])
 
 
 class MissTests(unittest.TestCase):

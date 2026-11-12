@@ -209,7 +209,8 @@ class AlternatesPage(object):
         self.preview.setWhatsThis(u"The selected letter (else a) and its variants as they would be built.")
         layout.addWidget(self.preview, 1)
         self.slots = [lambda *args: self.make_copies(), lambda *args: self.build_variants(),
-                      lambda *args: self.draw_preview()]
+                      lambda *args: (self.draw_preview(), self.update_buttons()),
+                      lambda *args: self.update_buttons()]
         self.copy_button.connect("clicked()", self.slots[0])
         self.build_button.connect("clicked()", self.slots[1])
         for box in (self.scope_box, self.strength_box):
@@ -217,6 +218,7 @@ class AlternatesPage(object):
         for box in (self.count_box, self.seed_box):
             box.connect("valueChanged(int)", self.slots[2])
         self.tree.connect("itemSelectionChanged()", self.slots[2])
+        self.tree.connect("itemChanged(QTreeWidgetItem*,int)", self.slots[3])
 
     # -- reading ----------------------------------------------------------
 
@@ -237,6 +239,7 @@ class AlternatesPage(object):
         if package is None or self.model is None:
             self.note.setText(u"" if package is None else
                               u"The model (%s) is missing beside the script: reinstall FreeLab." % MODEL_FILE)
+            self.update_buttons()
             return
         rows, families, varied = self.model
         cmap, names = self.font_maps()
@@ -254,6 +257,7 @@ class AlternatesPage(object):
         for column in range(3):
             self.tree.resizeColumnToContents(column)
         self.draw_preview()
+        self.update_buttons()
 
     def checked_glyphs(self):
         QtCore = _qt()[0]
@@ -272,35 +276,70 @@ class AlternatesPage(object):
 
     # -- making -----------------------------------------------------------
 
-    def copy_glyph(self, source, name, matrix=None):
-        """A new glyph name, made of copies of source's shapes in the current master (each changed by matrix,
-        when given), with source's width; the new glyph, or None (no layer to copy)."""
+    def copy_glyph(self, source, name, matrix_of=None):
+        """A new glyph name, made of copies of source's shapes in every master that draws it (each changed by
+        matrix_of(that master's layer), when given), with source's widths; the new glyph, or None (the current
+        master does not draw it: nothing is added)."""
         QtCore, QtGui = _qt()
         package, fontlab = self.owner.package, self.owner.fontlab
-        master = package.master
         glyph = package.findName(source)
-        layer = glyph.getLayerByName(master) if glyph is not None else None
-        if layer is None or not len(layer.shapes):
+        if glyph is None:
+            return None
+        try:
+            masters = list(package.masters) or [package.master]
+        except Exception:
+            masters = [package.master]
+        if package.master not in masters:
+            masters.append(package.master)
+        layers = []
+        for master in masters:
+            layer = glyph.getLayerByName(master)
+            if layer is not None and len(layer.shapes):
+                layers.append((master, layer))
+        if package.master not in [master for master, _ in layers]:
             return None
         new = fontlab.flGlyph()
         new.name = name
         package.addGlyph(new)
         made = package.findName(name)
-        target = made.getLayerByName(master, True)
-        for shape in layer.shapes:
-            target.addShape(shape.cloneTopLevel() if hasattr(shape, "cloneTopLevel") else shape.clone())
-        if matrix is not None:
-            a, b, c, d, e, f = matrix
-            transform = QtGui.QTransform(a, b, c, d, e, f)
-            for shape in target.shapes:
-                shape.applyTransform(transform)
-        target.advanceWidth = layer.advanceWidth
+        for master, layer in layers:
+            target = made.getLayerByName(master, True)
+            for shape in layer.shapes:
+                target.addShape(shape.cloneTopLevel() if hasattr(shape, "cloneTopLevel") else shape.clone())
+            matrix = matrix_of(layer) if matrix_of is not None else None
+            if matrix is not None:
+                a, b, c, d, e, f = matrix
+                transform = QtGui.QTransform(a, b, c, d, e, f)
+                for shape in target.shapes:
+                    shape.applyTransform(transform)
+            target.advanceWidth = layer.advanceWidth
         return made
+
+    def same_font(self):
+        """True when the font open now is the one the tab was filled from; else the dialog is filled again
+        for it, with a note, and nothing is made."""
+        owner = self.owner
+        current = owner.current_font()
+        if current is not None and owner.package is not None and \
+                self.ak.font_key(current) == self.ak.font_key(owner.package):
+            return True
+        owner.run()
+        owner.log.add(u"The font changed since the list was made: here is this one's. Nothing was made.", "warning")
+        return False
+
+    def update_buttons(self):
+        """Each button grayed out when it has nothing to do."""
+        try:
+            has_font = self.owner.package is not None
+            self.ak.enable(self.copy_button, has_font and bool(self.checked_glyphs()))
+            self.ak.enable(self.build_button, has_font and bool(self.letters_in_scope()[0]))
+        except Exception:
+            pass
 
     def make_copies(self):
         package = self.owner.package
         chosen = self.checked_glyphs()
-        if package is None or not chosen:
+        if package is None or not chosen or not self.same_font():
             return
         cmap, names = self.font_maps()
         made, touched, error = [], [], None
@@ -335,14 +374,17 @@ class AlternatesPage(object):
                 ch = unichr(code)  # noqa: F821 (Python 2, FontLab's)
             except NameError:
                 ch = chr(code)
+            except ValueError:  # (FontLab's Python is a narrow build: no unichr above U+FFFF; no letters there in scope)
+                continue
             if u"." not in glyph and in_scope(ch, scope):
                 found.append(glyph)
         return found, names
 
     def build_variants(self):
         package = self.owner.package
-        if package is None:
+        if package is None or not self.same_font():
             return
+        package = self.owner.package
         glyphs, names = self.letters_in_scope()
         count, strength, seed = self.count_box.value, self.strength(), self.seed_box.value
         upm = float(package.upm)
@@ -352,15 +394,17 @@ class AlternatesPage(object):
                 layer = package.findName(glyph).getLayerByName(self.owner.package.master)
                 if layer is None or not len(layer.shapes):
                     continue
-                box = layer.boundingBox
-                cx, cy = box.center().x(), box.center().y()
                 for number in range(1, count + 1):
                     name = glyph + VARIANT_SUFFIX % number
                     if name in names:
                         kept.append(name)
                         continue
-                    matrix = variant_matrix(variant_params(glyph, number, strength, seed), cx, cy, upm)
-                    new = self.copy_glyph(glyph, name, matrix)
+                    params = variant_params(glyph, number, strength, seed)
+
+                    def matrix_of(master_layer, params=params):  # (around each master's own center)
+                        center = master_layer.boundingBox.center()
+                        return variant_matrix(params, center.x(), center.y(), upm)
+                    new = self.copy_glyph(glyph, name, matrix_of)
                     if new is not None:
                         names.add(name)
                         touched.append(new)
