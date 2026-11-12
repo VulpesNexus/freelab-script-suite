@@ -178,6 +178,17 @@ class OwnCodeTests(unittest.TestCase):
 } palt;"""
         self.assertEqual(sorted(cj.font_positioned("palt", text)), [u"uni304B", u"uni304D", u"uni304F", u"uni3051"])
 
+    def test_ranges_are_spelled_out_and_pair_rules_are_not_single_values(self):
+        text = u"""feature palt {
+  @KANA = [uni3041-uni3043];
+  @PUNCT = [uni3001];
+  pos @KANA <-10 0 -20 0>;
+  enum pos @PUNCT @KANA -40;
+  pos [cid00010-cid00011] <-1 0 -2 0>;
+} palt;"""
+        self.assertEqual(sorted(cj.font_positioned("palt", text)),
+                         [u"cid00010", u"cid00011", u"uni3041", u"uni3042", u"uni3043"], "uni3001 is only in a pair rule")
+
 
 class MissTests(unittest.TestCase):
     def test_a_sample_showing_none_of_the_fonts_cjk_characters_names_them(self):

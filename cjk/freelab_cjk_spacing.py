@@ -305,6 +305,29 @@ def feature_text(tag, old, rules):
     return u"\n".join(kept[:closing] + block + kept[closing:]) + u"\n"
 
 
+def expand_ranges(text):
+    """The glyph names of a class's members, a range among them (uni3041-uni3045, or cid00010-cid00012:
+    the same name with a number counting up, as the feature syntax allows) spelled out."""
+    import re
+    names = []
+    for token in text.split():
+        match = re.match(u"^(uni|u)([0-9A-Fa-f]{4,6})-(uni|u)([0-9A-Fa-f]{4,6})$", token) or             re.match(u"^(.*?)([0-9]+)-(.*?)([0-9]+)$", token)
+        if match and match.group(1) == match.group(3) and not token.startswith(u"@"):
+            prefix, first, last = match.group(1), match.group(2), match.group(4)
+            base = 16 if prefix in (u"uni", u"u") and match.re.pattern.startswith(u"^(uni") else 10
+            try:
+                start, end = int(first, base), int(last, base)
+            except ValueError:
+                names.append(token)
+                continue
+            if 0 <= end - start <= 5000 and len(first) == len(last):
+                form = (u"%%0%dX" if base == 16 else u"%%0%dd") % len(first)
+                names.extend(prefix + form % number for number in range(start, end + 1))
+                continue
+        names.append(token)
+    return names
+
+
 def font_positioned(tag, text):
     """The glyphs a feature's own code (outside FreeLab's block) positions one by one (pos a-hira <...>;
     pos [a b] <...>; position, enum pos; a class defined in that code, @KANA = [...];, by its glyphs):
@@ -314,7 +337,7 @@ def font_positioned(tag, text):
     begin, end = BEGIN % tag, END % tag
     classes = {}
     for match in re.finditer(u"(@[A-Za-z0-9_.\\-]+)\\s*=\\s*\\[([^\\]]*)\\]", re.sub(u"#[^\\n]*", u"", text or u"")):
-        classes[match.group(1)] = match.group(2).split()
+        classes[match.group(1)] = expand_ranges(match.group(2))
 
     def members(name, depth=0):
         if not name.startswith(u"@"):
@@ -333,10 +356,10 @@ def font_positioned(tag, text):
             continue
         if inside:
             continue
-        match = re.match(u"(?:enum\\s+)?(?:pos|position)\\s+(\\[[^\\]]*\\]|[^\\s\\[<]+)", stripped)
-        if not match:
-            continue
-        target = match.group(1).strip(u"[]").split()
+        match = re.match(u"(?:enum\\s+)?(?:pos|position)\\s+(\\[[^\\]]*\\]|[^\\s\\[<]+)\\s*(.*)$", stripped)
+        if not match or not match.group(2).startswith(u"<"):
+            continue  # (a pair or a contextual rule: its glyphs keep their single values)
+        target = expand_ranges(match.group(1).strip(u"[]"))
         found.update(glyph for name in target for glyph in members(name))
     return found
 

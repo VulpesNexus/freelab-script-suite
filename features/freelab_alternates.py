@@ -68,6 +68,16 @@ def stylistic_suffix(suffix):
     return head.startswith((u"ss", u"cv", u"salt", u"alt")) or head.isdigit()
 
 
+def package_id(package):
+    """FontLab's own number for an open font (fgPackage.id), the same through every Python wrapper of it
+    (two reads of currentPackage give different wrappers); None where it cannot be read. Two unsaved fonts
+    of one name share a font_key, not this."""
+    try:
+        return package.fgPackage.id
+    except Exception:
+        return None
+
+
 def free_set_name(glyph, names):
     """glyph's next stylistic set name the font does not have: a.ss01, else a.ss02..."""
     for number in range(1, 21):
@@ -321,7 +331,8 @@ class AlternatesPage(object):
         owner = self.owner
         current = owner.current_font()
         if current is not None and owner.package is not None and \
-                self.ak.font_key(current) == self.ak.font_key(owner.package):
+                self.ak.font_key(current) == self.ak.font_key(owner.package) and \
+                package_id(current) == package_id(owner.package):
             return True
         owner.run()
         owner.log.add(u"The font changed since the list was made: here is this one's. Nothing was made.", "warning")
