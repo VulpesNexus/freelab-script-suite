@@ -59,6 +59,10 @@ class OverhangTests(unittest.TestCase):
         self.assertEqual(sp.mark_overhang(horned, -10, -30), 20.0, "sticks out 20 units further once tighter")
         self.assertEqual(sp.mark_overhang(horned, 10, 30), 0.0, "looser: no further")
 
+    def test_each_side_is_weighed_against_itself(self):
+        mark = _Layer(500, (40, 460), (-30, 480))  # out 30 units on the left already
+        self.assertEqual(sp.mark_overhang(mark, 0, -45), 25.0, "grows out 25 units on the right")
+
     def test_an_accent_over_the_letter_never_overhangs(self):
         acute = _Layer(500, (40, 460), (200, 300))
         self.assertEqual(sp.mark_overhang(acute, -20, -40), 0.0)

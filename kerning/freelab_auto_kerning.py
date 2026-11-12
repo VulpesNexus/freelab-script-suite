@@ -1570,7 +1570,8 @@ def compile_box():
     return box
 
 
-COMPILE_READ_MS = 400  # after the click: FontLab's Output panel read for what the compiler said
+COMPILE_READ_MS = 400  # after the click: FontLab's Output panel read for what the compiler said, again while it grows
+COMPILE_READS_MAX = 8  # reads at most (a slow compile's output is read once it stops growing)
 COMPILE_ERROR_MARKS = (u"[F]", u"[E]", u"error", u"Error")
 
 
@@ -1598,11 +1599,26 @@ def compiled_note(box, log=None):
                 u"Panels &gt; Features</i>); compile there.")
     if log is None or before is None:
         return u" Compiled: see the <i>Features</i> panel for any error."
+    state = {"last": before, "reads": 0}
 
     def read():
         try:
             after = output_text() or u""
-            said = after[len(before):] if after.startswith(before) else after
+            state["reads"] += 1
+            if state["reads"] < COMPILE_READS_MAX and (after == before or after != state["last"]):
+                state["last"] = after  # nothing yet, or still growing: read again
+                QtCore.QTimer.singleShot(COMPILE_READ_MS, read)
+                return
+            if after == before:
+                log.add(u"FontLab's <i>Output</i> panel showed nothing from the compiler: see the <i>Features</i> "
+                        u"panel for any error.", "info")
+                return
+            if after.startswith(before):
+                said = after[len(before):]
+            else:  # the panel dropped its oldest text (or was cleared): what follows the old text's end
+                tail = before[-200:]
+                at = after.rfind(tail) if tail else -1
+                said = after[at + len(tail):] if at >= 0 else after
             errors = [line.strip() for line in said.splitlines() if any(mark in line for mark in COMPILE_ERROR_MARKS)]
             if errors:
                 log.add(u"The features did not compile: %s" % html(u" ".join(errors[:3])), "error")
@@ -1611,7 +1627,7 @@ def compiled_note(box, log=None):
     _COMPILE_READS.append(read)
     del _COMPILE_READS[:-8]
     QtCore.QTimer.singleShot(COMPILE_READ_MS, read)
-    return u" Compiled."
+    return u" Compiled: an error the compiler reports in FontLab's <i>Output</i> panel is added to this log."
 
 
 _COMPILE_READS = []  # (held: PythonQt drops a slot no Python object holds)
@@ -1666,21 +1682,27 @@ def _shared_depth(a, b):
 
 
 def has_checkable_items(view):
-    """True when a tree or list widget shows an item with a check box."""
+    """True when a tree or list widget shows an item with a check box: one given a check state (Qt makes
+    every item user-checkable by default, a section's heading row too, but draws a box only once a
+    check state is set)."""
     QtCore = _qt()[0]
-    checkable = QtCore.Qt.ItemIsUserCheckable
+    checkable, role = QtCore.Qt.ItemIsUserCheckable, QtCore.Qt.CheckStateRole
+
+    def boxed(item, state):
+        return bool(int(item.flags()) & int(checkable)) and state is not None
+
     if view.inherits("QTreeWidget"):
         pending = [view.topLevelItem(i) for i in range(view.topLevelItemCount)]
         while pending:
             item = pending.pop()
             if item is None:
                 continue
-            if int(item.flags()) & int(checkable):
+            if boxed(item, item.data(0, role)):
                 return True
             pending.extend(item.child(i) for i in range(item.childCount()))
         return False
-    if view.inherits("QListWidget"):
-        return any(int(view.item(i).flags()) & int(checkable) for i in range(view.count))
+    if view.inherits("QListWidget"):  # (a list's item has no column)
+        return any(boxed(view.item(i), view.item(i).data(role)) for i in range(view.count))
     return True  # a view of another kind: left to its dialog
 
 
@@ -1712,12 +1734,13 @@ def update_states(dialog, hidden_too=False):
             single_choice(combo)
         except Exception:
             pass
+    window = dialog.window()  # (a dialog opened from this one is a child too: its buttons and lists are its own)
     buttons = [b for b in dialog.findChildren(QtGui.QPushButton)
-               if any((u"%s" % b.text).startswith(t) for t in CHECK_BUTTON_TEXTS)]
+               if any((u"%s" % b.text).startswith(t) for t in CHECK_BUTTON_TEXTS) and b.window() == window]
     if not buttons:
         return
     views = [v for v in dialog.findChildren(QtGui.QAbstractItemView)
-             if v.inherits("QTreeWidget") or v.inherits("QListWidget")]
+             if (v.inherits("QTreeWidget") or v.inherits("QListWidget")) and v.window() == window]
     for button in buttons:
         mates = sorted(views, key=lambda v: -_shared_depth(button, v))
         if mates and not has_checkable_items(mates[0]) and button.isEnabled():
@@ -1725,25 +1748,57 @@ def update_states(dialog, hidden_too=False):
 
 
 def watch_states(dialog):
-    """Keep dialog's states in step (update_states) while it lives; the timer is the dialog's child."""
+    """Keep dialog's states in step (update_states) while it lives; the timer is the dialog's child. Once
+    the dialog is closed for good (gone), its timer stops, and its tick is let go when the next dialog
+    is watched."""
     QtCore = _qt()[0]
     holder = getattr(sys, "_freelab_state_watchers", None)
     if holder is None:
         holder = sys._freelab_state_watchers = []
     timer = QtCore.QTimer(dialog)
     timer.setInterval(STATES_MS)
-    modules, name = sys.modules, __name__
+    modules, name, own = sys.modules, __name__, update_states  # (no globals below: a reload empties them)
+    seen = []
+
+    def shown(widget):
+        value = widget.visible
+        return value() if callable(value) else value
+
+    def gone():
+        """Closed for good: shown once and hidden since, with the FreeLab dialog it was opened from (if
+        any) hidden too, or deleted (its wrapper raises). A FreeLab dialog is made anew when reopened."""
+        try:
+            if shown(dialog):
+                seen[:] = [True]
+                return False
+            if not seen:
+                return False  # not shown yet: still being built
+            owner = dialog.parentWidget()
+            return owner is None or not owner.inherits("QDialog") or not shown(owner)
+        except Exception:
+            return True
 
     def tick():
         try:  # through the module as loaded now (a reloaded one empties this copy's globals)
+            if gone():
+                timer.stop()
+                return
             module = modules.get(name)
-            if module is not None:
-                module.update_states(dialog)
+            (getattr(module, "update_states", None) or own)(dialog)
         except Exception:
             pass  # a timer's handler must not raise
+    tick.gone = gone
+
+    def dropped(held):
+        try:
+            check = getattr(held, "gone", None)
+            return check is not None and check()
+        except Exception:
+            return True
+    holder[:] = [held for held in holder if not dropped(held)]
     timer.connect("timeout()", tick)
     holder.append(tick)
-    del holder[:-64]
+    del holder[:-256]  # (only ticks of a copy loaded before this one, which cannot tell, can pile up)
     timer.start()
 
 
@@ -4480,6 +4535,8 @@ class ClassDialog(object):
                                                plural(counts.get("same", 0), u"the font has already", u"the font has already"),
                                                plural(counts.get("overlap", 0), u"left as it is", u"left as they are")))
         self.apply_button.setEnabled(bool(counts.get("new") or counts.get("add")))
+        for button in (self.all_button, self.none_button):  # (grayed by update_states while the list was empty)
+            button.setEnabled(True)
         self.update_previews()
 
     # -- the previews of a pair too close -----------------------------------

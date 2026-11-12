@@ -1212,7 +1212,8 @@ class KerningCheckDialog(object):
                                    room, width)
 
     def row_names(self, tab, item):
-        """The glyphs of a row (none for a group's heading, or an entry of classes): their flags shown."""
+        """The glyphs of a row (none for a group's heading, a class, or an entry's class sides): their flags
+        shown."""
         QtCore, QtGui = _qt()
         data = item.data(0, QtCore.Qt.UserRole)
         index = int(data) if data is not None else -1
@@ -1222,7 +1223,9 @@ class KerningCheckDialog(object):
         if hasattr(finding, "pair"):
             return list(finding.pair() or [])
         entry = getattr(finding, "entry", None) or ()
-        return [u"%s" % side for side in entry if not (u"%s" % side).startswith(u"@")]
+        if not isinstance(entry, tuple):
+            return []  # a class's name (Masters' class rows)
+        return [u"%s" % name for name, is_class in entry if not is_class]  # ((name, is class), (name, is class))
 
     def selected_pair(self):
         """The glyph pair of the selected row (an entry's first pair), or None."""
