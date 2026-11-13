@@ -295,7 +295,7 @@ def find_cleanup(kerning, glyph_exists, tiny=TINY_UNITS):
             below_text = u"the class pair's value" if value else u"no kerning"
             found.append(Cleanup(entry, value, "redundant", u"its pairs get %s (%d) without it" % (below_text, value), True))
         elif value and abs(value) < tiny:
-            found.append(Cleanup(entry, value, "tiny", u"smaller than %d units" % tiny, False))
+            found.append(Cleanup(entry, value, "tiny", u"smaller than %s" % counted(tiny, u"unit"), False))
     order = dict((kind, index) for index, (kind, _) in enumerate(CLEANUP_KINDS))
     found.sort(key=lambda c: (order[c.kind], describe(c.entry)))
     return found
@@ -587,7 +587,7 @@ class KerningCheckDialog(object):
         tab.settings.addWidget(QtGui.QLabel("whose ink comes within"))
         self.minimum = QtGui.QSpinBox()
         self.minimum.setRange(-200, 400)
-        self.minimum.setSuffix(" units")
+        self.suffix_slots = [self.ak.counted_suffix(self.minimum, u"unit")]  # ("1 unit", "2 units")
         self.minimum.setWhatsThis("The narrowest distance between the two glyphs' ink, at the kerning FontLab applies, "
                                   "for a pair to be listed (0: pairs that touch; below 0: pairs that overlap by "
                                   "more than that).")
@@ -620,7 +620,7 @@ class KerningCheckDialog(object):
         self.tiny = QtGui.QSpinBox()
         self.tiny.setRange(0, 50)
         self.tiny.setValue(TINY_UNITS)
-        self.tiny.setSuffix(" units")
+        self.suffix_slots.append(self.ak.counted_suffix(self.tiny, u"unit"))
         self.tiny.setWhatsThis("Entries smaller than this are listed too, unchecked (0: none).")
         tab.settings.addWidget(self.tiny)
         self.cleanup_button = QtGui.QPushButton("Check")
@@ -699,7 +699,7 @@ class KerningCheckDialog(object):
                 return None
         except Exception:
             pass
-        package = workspace.currentPackage
+        package = self.ak.window_font(self, workspace)  # this window's font
         if package is None or package.isNull or not package.glyphsCount:
             return None
         return package
@@ -984,20 +984,21 @@ class KerningCheckDialog(object):
         parents = {}
         for key in order:
             if len(groups[key]) > 1:
-                parents[key] = self.add_group(tab, (u"%s \N{EM DASH} %s" % (glyph_text(self.package, key),
-                                                                               counted(len(groups[key]), u"pair")),))
+                parents[key] = self.add_group(tab, (u"%s (%s)" % (glyph_text(self.package, key),
+                                                                  counted(len(groups[key]), u"pair")),))
                 parents[key].setFirstColumnSpanned(True)  # (a row as the others: its text level with its arrow)
         for index, c in enumerate(found):
             where = kerning.describe(c.entry) if c.entry is not None else u""
             if c.reference is not None:
                 compared = u"%s: %d" % (pair_text(self.package, *c.reference), round_units(c.reference_gap))
-                tip = (u"%s %s: %d now, its ink %d units apart, %d units closer than %s %s at the same value; %d sets it "
-                       u"as far apart." % (c.left, c.right, c.value, round_units(c.gap),
-                                           round_units(c.reference_gap - c.gap), c.reference[0], c.reference[1], c.fix))
+                tip = (u"%s %s: %d now, its ink %s apart, %s closer than %s %s at the same value; %d sets it "
+                       u"as far apart." % (c.left, c.right, c.value, counted(round_units(c.gap), u"unit"),
+                                           counted(round_units(c.reference_gap - c.gap), u"unit"),
+                                           c.reference[0], c.reference[1], c.fix))
             else:
                 compared = u""
-                tip = u"%s %s: %d now, its ink %d units apart; %d keeps %d units." % (
-                    c.left, c.right, c.value, round_units(c.gap), c.fix, minimum)
+                tip = u"%s %s: %d now, its ink %s apart; %d keeps %s." % (
+                    c.left, c.right, c.value, counted(round_units(c.gap), u"unit"), c.fix, counted(minimum, u"unit"))
             self.add_row(tab, index, (pair_text(self.package, c.left, c.right), u"%d" % c.value,
                                       u"%d" % round_units(c.gap), u"%d" % c.fix, where, compared), True, True, tip,
                          parents.get(c.variant or c.left))
@@ -1280,12 +1281,11 @@ def main(glyphs=None, reason=None, **options):
     Masters then list only the pairs and entries with those glyphs, until Show all is clicked."""
     if reason is None:  # (a caller naming it otherwise: why=, source=, ...)
         reason = next((value for value in options.values() if isinstance(value, (type(u""), str))), None)
-    held = getattr(sys, "_freelab_kerning_check", None)
-    if held is not None:
-        try:
-            held.dialog.close()
-        except Exception:
-            pass
+    try:  # this font's window shows it already: brought forward as it is
+        if glyphs is None and load_auto_kerning().raise_open("Kerning Check"):
+            return
+    except Exception:
+        pass
     try:
         dialog = KerningCheckDialog(glyphs, reason)
     except Exception as exc:
@@ -1293,6 +1293,10 @@ def main(glyphs=None, reason=None, **options):
         return
     sys._freelab_kerning_check = dialog  # kept: PythonQt deletes a dialog with no Python reference
     dialog.ak.hook_menu_order()
+    try:
+        dialog.ak.take_window("Kerning Check", dialog)  # its font's window: the tool shown there gives way
+    except Exception:
+        pass
     dialog.show()
 
 

@@ -63,13 +63,88 @@ class LabelTests(unittest.TestCase):
         self.assertEqual(fcmp.side_labels((u"a.vfc", u"Sans", u"Regular", 1), (u"b.vfc", u"Serif", u"Regular", 1)),
                          (u"Sans", u"Serif"))
         self.assertEqual(fcmp.side_labels((u"a.vfc", u"Sans", u"Bold", 2), (u"b.vfc", u"Serif", u"Regular", 1)),
-                         (u"Sans \N{MIDDLE DOT} Bold", u"Serif"))
+                         (u"Sans (Bold)", u"Serif"), "a master in parentheses, not after a dot")
 
     def test_two_versions_of_one_font(self):
         self.assertEqual(fcmp.side_labels((u"old/Sans.vfc", u"Sans", u"R", 1), (u"new/Sans-2.vfc", u"Sans", u"R", 1)),
                          (u"Sans.vfc", u"Sans-2.vfc"))
         self.assertEqual(fcmp.side_labels((u"old/Sans.vfc", u"Sans", u"R", 1), (u"new/Sans.vfc", u"Sans", u"R", 1)),
                          (u"Sans (first)", u"Sans (second)"))
+        self.assertEqual(fcmp.side_labels((u"old/Sans.vfc", u"Sans", u"Bold", 2), (u"new/Sans.vfc", u"Sans", u"Bold", 2)),
+                         (u"Sans (Bold, first)", u"Sans (Bold, second)"), "one pair of parentheses")
+
+    def test_two_unsaved_fonts_of_one_name(self):
+        # Both go by "unsaved:Sans": the caller, which knows them by FontLab's numbers, says they are two
+        a, b = (u"unsaved:Sans", u"Sans", u"Regular", 1), (u"unsaved:Sans", u"Sans", u"Regular", 1)
+        self.assertEqual(fcmp.side_labels(a, b), (u"first", u"second"))
+        self.assertEqual(fcmp.side_labels(a, b, False), (u"Sans (first)", u"Sans (second)"))
+        self.assertEqual(fcmp.side_labels((u"a.vfc", u"Sans", u"Regular", 2), (u"a.vfc", u"Sans", u"Bold", 2), True),
+                         (u"Regular", u"Bold"))
+
+
+class ChoiceTests(unittest.TestCase):
+    """The two dropdowns' rows, and the line saying what is missing."""
+
+    ELLIPSIS = u"\N{HORIZONTAL ELLIPSIS}"
+
+    def rows(self, fonts, own):
+        return [(kind, font, master, text) for kind, font, master, text in fcmp.second_entries(fonts, own)]
+
+    def test_first_lists_the_window_font_masters(self):
+        self.assertEqual(fcmp.first_entries((7, u"Sans", [u"Regular"], u"Sans.vfc")), [(7, u"Regular", u"Sans")])
+        self.assertEqual(fcmp.first_entries((7, u"Sans", [u"Regular", u"Bold"], u"")),
+                         [(7, u"Regular", u"Sans (Regular)"), (7, u"Bold", u"Sans (Bold)")])
+
+    def test_one_font_one_master_offers_only_a_file(self):
+        rows = self.rows([(7, u"Sans", [u"Regular"], u"Sans.vfc")], 7)
+        self.assertEqual(rows, [("none", None, None, u"Choose a font" + self.ELLIPSIS), ("separator", None, None, u""),
+                                ("open", None, None, u"Open a font" + self.ELLIPSIS)],
+                         "a font is not compared with itself")
+
+    def test_one_font_with_masters_offers_its_masters(self):
+        rows = self.rows([(7, u"Sans", [u"Regular", u"Bold"], u"Sans.vfc")], 7)
+        self.assertEqual([row[1:] for row in rows if row[0] == "font"],
+                         [(7, u"Regular", u"Sans (Regular)"), (7, u"Bold", u"Sans (Bold)")])
+
+    def test_other_fonts_first_then_the_own_masters(self):
+        fonts = [(7, u"Sans", [u"Regular", u"Bold"], u"Sans.vfc"), (9, u"Serif", [u"Regular"], u"Serif.vfc"),
+                 (12, u"Mono", [u"Light", u"Black"], u"")]
+        rows = self.rows(fonts, 7)
+        self.assertEqual([row[0] for row in rows], ["none", "font", "font", "font", "font", "font", "separator", "open"])
+        self.assertEqual([row[3] for row in rows[1:6]],
+                         [u"Serif", u"Mono (Light)", u"Mono (Black)", u"Sans (Regular)", u"Sans (Bold)"])
+        self.assertEqual(rows[1][1:3], (9, u"Regular"), "the other open font is the first to choose")
+
+    def test_fonts_of_one_name_told_apart_by_file(self):
+        fonts = [(7, u"Sans", [u"Regular"], u"Sans.vfc"), (9, u"Sans", [u"Regular"], u"Sans-2.vfc"),
+                 (12, u"Sans", [u"Regular", u"Bold"], u"")]
+        texts = [row[3] for row in self.rows(fonts, 7) if row[0] == "font"]
+        self.assertEqual(texts, [u"Sans (Sans-2.vfc)", u"Sans (Regular)", u"Sans (Bold)"])
+        self.assertEqual([row[1] for row in self.rows(fonts, 7) if row[0] == "font"], [9, 12, 12], "by number, not by name")
+
+    def test_no_dash_or_dot_between_data(self):
+        # The owner's rule: data beside data goes in parentheses, not after an interpunct or an em dash
+        import io
+        with io.open(fcmp.__file__.replace(".pyc", ".py"), encoding="utf-8") as handle:
+            source = handle.read()
+        escaped = [u" \\" + code + u" " for code in (u"N{EM DASH}", u"N{MIDDLE DOT}", u"u2014", u"u00b7", u"xb7")]
+        for mark in escaped + [u" \N{EM DASH} ", u" \N{MIDDLE DOT} "]:
+            self.assertNotIn(mark, source)
+        self.assertEqual(fcmp.choice_text(u"Sans", u"Bold", 1), u"Sans")
+        self.assertEqual(fcmp.choice_text(u"Sans", u"Bold", 2, u"Sans-2.vfc"), u"Sans (Bold, Sans-2.vfc)")
+
+    def test_what_is_missing(self):
+        line = fcmp.missing_line
+        self.assertIn(u"No font is open", line(None, 0, 0, False))
+        one = line(u"<b>Sans</b>", 0, 1, False)
+        self.assertIn(u"Only <b>Sans</b> is open, with one master.", one)
+        self.assertIn(u"<i>Open a font" + self.ELLIPSIS + u"</i>", one)
+        self.assertIn(u"the master to compare with", line(u"<b>Sans</b>", 0, 2, False))
+        self.assertEqual(line(u"<b>Sans</b>", 1, 1, False),
+                         u"Choose in <i>with</i> the font to compare <b>Sans</b> with, then click <i>Compare</i>.")
+        self.assertEqual(line(u"<b>Sans</b>", 3, 2, False), line(u"<b>Sans</b>", 1, 1, False))
+        self.assertEqual(line(u"<b>Sans</b>", 1, 1, True), u"", "both sides chosen: nothing is missing")
+        self.assertIn(u"the same master", line(u"<b>Sans</b>", 0, 2, True, True))
 
 
 class OutlineTests(unittest.TestCase):
@@ -239,7 +314,7 @@ class GlyphTests(unittest.TestCase):
         metrics = fcmp.GlyphResult(u"m", u"m", [fcmp.Difference("metrics", u"", u"width +40", 0.04)])
         outline = fcmp.GlyphResult(u"p", u"p", [fcmp.Difference("outline", u"", u"outline 1%", 0.01)])
         results = [outline, metrics, both]
-        self.assertEqual(both.short(), u"outline 4.1% \N{MIDDLE DOT} width +20")
+        self.assertEqual(both.short(), u"outline 4.1%; width +20", "no interpunct between a list cell's parts")
         shown = set(["outline"])
         self.assertEqual([r.name for r in fcmp.glyph_rows(results, shown)], [u"o", u"p"])
         self.assertEqual([r.short(shown) for r in fcmp.glyph_rows(results, shown)], [u"outline 4.1%", u"outline 1%"])
@@ -362,6 +437,87 @@ class _FakeQtModule(object):
         if name not in self.classes:
             self.classes[name] = _AnyMeta(name, (Anything,), {})
         return self.classes[name]
+
+
+class FakeCombo(Anything):
+    """A dropdown that keeps its rows and its current one as Qt's does: a separator is a row too (None
+    here), the first row added becomes the current one, and a change of the current row is signaled.
+    pick() is the user choosing a row (activated, which the code's own changes do not send)."""
+
+    def __init__(self, *args, **kwargs):
+        self.rows, self.currentIndex, self.slots, self.watchers, self.cleared = [], -1, {}, [], 0
+
+    @property
+    def count(self):
+        return len(self.rows)
+
+    def addItem(self, text):
+        self.rows.append(text)
+        if self.currentIndex < 0:
+            self.setCurrentIndex(0)
+
+    def insertSeparator(self, index):
+        self.rows.insert(index, None)
+
+    def clear(self):
+        self.rows, self.cleared = [], self.cleared + 1
+        self.setCurrentIndex(-1)
+
+    def setCurrentIndex(self, index):
+        if index != self.currentIndex:
+            self.currentIndex = index
+            for slot in self.slots.get("currentIndexChanged(int)", []):
+                slot(index)
+
+    def connect(self, signal, slot):
+        self.slots.setdefault(signal, []).append(slot)
+
+    def installEventFilter(self, watcher):
+        self.watchers.append(watcher)
+
+    def pick(self, index):
+        self.setCurrentIndex(index)
+        for slot in self.slots.get("activated(int)", []):
+            slot(index)
+
+
+class FakeSpin(Anything):
+    """A spin box that keeps its value and its suffix, and signals a change of value."""
+
+    def __init__(self, *args, **kwargs):
+        self.value, self.suffix, self.slots = 0, u"", {}
+
+    def inherits(self, name):
+        return name == "QSpinBox"
+
+    def setValue(self, value):
+        self.value = value
+        for slot in self.slots.get("valueChanged(int)", []):
+            slot(value)
+
+    def setSuffix(self, text):
+        self.suffix = text
+
+    def connect(self, signal, slot):
+        self.slots.setdefault(signal, []).append(slot)
+
+
+class FakeButton(Anything):
+    """A button that keeps whether it is enabled."""
+
+    def __init__(self, *args, **kwargs):
+        self.enabled = True
+
+    def setEnabled(self, on):
+        self.enabled = on
+
+
+class FakeEvent(object):
+    def __init__(self, kind):
+        self.kind = kind
+
+    def type(self):
+        return self.kind
 
 
 class FakeNode(object):
@@ -490,9 +646,13 @@ def box(top, right=400):
 
 
 class FakePackage(object):
+    numbers = [100]  # FontLab's number of each open font (fgPackage.id): what tells two fonts of one name apart
+
     def __init__(self, name, glyphs, kerning, features, masters=(u"Regular",), upm=1000):
         self.by_name = dict((g.name, g) for g in glyphs)
         self.fgPackage = Anything()
+        FakePackage.numbers[0] += 1
+        self.fgPackage.id = FakePackage.numbers[0]
         self.fgPackage.glyphs = [g.fgGlyph for g in glyphs]
         self.fgPackage.features = FakeFeatures(features)
         self.kernings = kerning
@@ -560,6 +720,8 @@ class DialogTests(unittest.TestCase):
         cls.saved = dict((name, sys.modules.get(name)) for name in ("PythonQt", "fontlab", fcmp.AUTO_KERNING_MODULE))
         qt = Anything()
         qt.QtCore, qt.QtGui = _FakeQtModule(), _FakeQtModule()
+        qt.QtGui.classes.update({"QComboBox": FakeCombo, "QSpinBox": FakeSpin, "QPushButton": FakeButton,
+                                 "QToolButton": FakeButton})
         cls.workspace = workspace = Anything()
         fontlab = Anything()
         fontlab.flWorkspace = Anything()
@@ -596,10 +758,41 @@ class DialogTests(unittest.TestCase):
             chip.checked = True
         return dialog
 
+    ELLIPSIS = u"\N{HORIZONTAL ELLIPSIS}"
+
+    def said(self, dialog):
+        """The top line's texts from now on."""
+        texts = []
+        dialog.font_label.setText = texts.append
+        return texts
+
+    def test_second_side_starts_empty(self):
+        first, second = first_font(), second_font()
+        dialog = self.dialog([first, second])
+        self.assertEqual(dialog.choice_a.rows, [u"Fake A"], "the first side: this window's font")
+        self.assertEqual(dialog.choice_b.rows, [u"Choose a font" + self.ELLIPSIS, u"Fake B", None,
+                                                u"Open a font" + self.ELLIPSIS])
+        self.assertEqual(dialog.choice_b.currentIndex, 0, "two fonts open: still the user's to choose")
+        self.assertIsNone(dialog.second_key)
+        self.assertFalse(dialog.compare_button.enabled, "grayed until both sides are chosen")
+        self.assertIn(u"Choose in <i>with</i> the font to compare <b>Fake A</b> with", dialog.missing())
+        dialog.compare()
+        self.assertIsNone(dialog.sides, "nothing compared")
+        texts = self.said(dialog)
+        dialog.choice_b.pick(1)
+        self.assertEqual(dialog.second_key, (second.fgPackage.id, u"Regular"))
+        self.assertTrue(dialog.compare_button.enabled)
+        self.assertEqual(dialog.missing(), u"")
+        self.assertEqual(texts[-1], u"Click <i>Compare</i> to compare the fonts chosen.")
+        self.assertFalse(dialog.swap_button.enabled, "two fonts: the first stays this window's")
+        dialog.choice_b.pick(0)
+        self.assertIsNone(dialog.second_key, "the placeholder row: no choice")
+        self.assertFalse(dialog.compare_button.enabled)
+        self.assertIn(u"Choose in <i>with</i>", texts[-1])
+
     def test_two_fonts(self):
         dialog = self.dialog([first_font(), second_font()])
-        self.assertEqual(len(dialog.choices), 2)
-        dialog.choice_a.currentIndex, dialog.choice_b.currentIndex = 0, 1
+        dialog.choice_b.pick(1)
         dialog.compare()
         found = dict((r.name, sorted(r.kinds())) for r in dialog.results)
         self.assertEqual(found, {u"o": ["outline"], u"n": ["anchors", "metrics"], u"a": ["only_a"], u"b": ["only_b"],
@@ -628,9 +821,19 @@ class DialogTests(unittest.TestCase):
         dialog.history_moved()
 
     def test_two_masters(self):
-        dialog = self.dialog([two_master_font()])
-        self.assertEqual(len(dialog.choices), 2)
-        dialog.choice_a.currentIndex, dialog.choice_b.currentIndex = 0, 1
+        font = two_master_font()
+        dialog = self.dialog([font])
+        self.assertEqual(dialog.choice_a.rows, [u"Fake (Regular)", u"Fake (Bold)"])
+        self.assertEqual(dialog.choice_b.rows, [u"Choose a font" + self.ELLIPSIS, u"Fake (Regular)", u"Fake (Bold)", None,
+                                                u"Open a font" + self.ELLIPSIS])
+        self.assertIn(u"the master to compare with", dialog.missing())
+        dialog.choice_b.pick(1)
+        self.assertIn(u"the same master", dialog.missing())
+        self.assertFalse(dialog.compare_button.enabled, "a master is not compared with itself")
+        dialog.compare()
+        self.assertIsNone(dialog.sides)
+        dialog.choice_b.pick(2)
+        self.assertTrue(dialog.compare_button.enabled and dialog.swap_button.enabled)
         dialog.compare()
         self.assertTrue(dialog.masters_mode)
         found = dict((r.name, [d.text for d in r.differences]) for r in dialog.results)
@@ -640,13 +843,64 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(dialog.kern_rows, [])
         self.assertEqual(dialog.feature_rows, [], "one font: its features are shared")
         self.assertEqual(dialog.first_name(dialog.results[-1]), u"o")
+        dialog.swap()
+        number = font.fgPackage.id
+        self.assertEqual((dialog.first_key(), dialog.second_key), ((number, u"Bold"), (number, u"Regular")))
+        self.assertEqual(dialog.labels(), (u"Bold", u"Regular"), "compared again, the other way")
+
+    def test_lists_follow_the_open_fonts(self):
+        first, second, namesake = first_font(), second_font(), second_font()
+        namesake.path = u"Fake B 2.vfc"
+        packages = [first]
+        dialog = self.dialog(packages)
+        self.workspace.packages = lambda: list(packages)
+        said = []
+        dialog.log.add = lambda text, level="info": said.append((level, text))
+        watch = dialog.choice_b.watchers[-1]
+        self.assertIn(watch, dialog.filters, "kept: PythonQt drops a filter no Python object holds")
+        self.assertEqual(len(dialog.choice_b.rows), 3, "one font, one master: only a file to open")
+        self.assertIn(u"Only <b>Fake A</b> is open, with one master.", dialog.missing())
+        cleared = dialog.choice_b.cleared
+        self.assertFalse(watch.eventFilter(dialog.choice_b, FakeEvent(2)), "the press goes on to the dropdown")
+        self.assertEqual(dialog.choice_b.cleared, cleared, "nothing changed: the list is left as it is")
+        packages.extend([second, namesake])  # opened in FontLab meanwhile
+        watch.eventFilter(dialog.choice_b, FakeEvent(5))
+        self.assertEqual(len(dialog.choice_b.rows), 3, "a mouse move reads nothing")
+        watch.eventFilter(dialog.choice_b, FakeEvent(2))  # the dropdown pressed: read before its list opens
+        self.assertEqual(dialog.choice_b.rows[1:3], [u"Fake B (Fake B.vfc)", u"Fake B (Fake B 2.vfc)"])
+        self.assertEqual(dialog.choice_b.currentIndex, 0, "still nothing chosen")
+        dialog.choice_b.pick(2)
+        self.assertEqual(dialog.second_key, (namesake.fgPackage.id, u"Regular"))
+        packages.remove(second)  # the other font of that name closed: the choice stays the font it was
+        watch.eventFilter(dialog.dialog, FakeEvent(24))  # the window active again
+        self.assertEqual(dialog.choice_b.rows[1:2], [u"Fake B"], "one of that name left: its file's name not needed")
+        self.assertEqual((dialog.choice_b.currentIndex, dialog.second_key), (1, (namesake.fgPackage.id, u"Regular")))
+        self.assertIs(dialog.chosen(dialog.choice_b)[0], namesake)
+        packages[:] = [first, second]  # the font chosen closed, and its namesake opened again
+        watch.eventFilter(dialog.dialog, FakeEvent(24))
+        self.assertEqual(dialog.choice_b.rows[1:2], [u"Fake B"])
+        self.assertEqual((dialog.choice_b.currentIndex, dialog.second_key), (0, None), "matched by number, not by name")
+        self.assertFalse(dialog.compare_button.enabled)
+        self.assertEqual(said[-1][0], "warning")
+        self.assertIn(u"no longer open", said[-1][1])
+        dialog.busy = True
+        packages.append(namesake)
+        watch.eventFilter(dialog.dialog, FakeEvent(24))
+        self.assertEqual(len(dialog.choice_b.rows), 4, "not read while comparing")
+
+    def test_units_follow_the_number(self):
+        dialog = self.dialog([first_font()])
+        spin = dialog.threshold
+        spin.setValue(fcmp.THRESHOLD)
+        self.assertEqual((fcmp.THRESHOLD, spin.suffix), (1, u" unit"), "as the window opens")
+        self.assertEqual([(spin.setValue(n), spin.suffix)[1] for n in (0, 1, 2)], [u" units", u" unit", u" units"])
 
     def test_rows_listed_at_most(self):
         saved = fcmp.ROWS_SHOWN
         fcmp.ROWS_SHOWN = 2
         try:
             dialog = self.dialog([first_font(), second_font()])
-            dialog.choice_a.currentIndex, dialog.choice_b.currentIndex = 0, 1
+            dialog.choice_b.pick(1)
             dialog.compare()
         finally:
             fcmp.ROWS_SHOWN = saved
@@ -659,24 +913,35 @@ class DialogTests(unittest.TestCase):
         packages = [first, second]
         dialog = self.dialog(packages)
         self.workspace.packages = lambda: list(packages)  # (a font opened later is listed)
-        said, chosen, requested, picked = [], [], [], []
+        said, requested, picked = [], [], []
         dialog.log.add = lambda text, level="info": said.append((level, text))
-        dialog.choice_b.setCurrentIndex = chosen.append
+        box = dialog.choice_b
         gui = sys.modules["PythonQt"].QtGui
         gui.classes["QFileDialog"] = type("QFileDialog", (), {"getOpenFileName": staticmethod(lambda *args: picked[-1])})
         fontlab = sys.modules["fontlab"]
         fontlab.flItems = type("Items", (), {"requestLoadingFont": staticmethod(requested.append)})
+        open_row = lambda: len(box.rows) - 1  # the dropdown's last row, after the separator
         try:
+            self.assertEqual(box.rows[-2:], [None, u"Open a font\N{HORIZONTAL ELLIPSIS}"])
+            self.assertFalse(hasattr(dialog, "open_button"), "the dropdown's row, not a button beside it")
+            picked.append(u"")  # the file dialog closed without a file
+            box.pick(open_row())
+            self.assertEqual((box.currentIndex, dialog.second_key, said), (0, None, []), "the choice is what it was")
+            picked.append(first.path)
+            box.pick(open_row())
+            self.assertEqual((box.currentIndex, said[-1][0]), (0, "warning"), "this window's own font, with one master")
             picked.append(second.path)
-            dialog.open_font()
+            box.pick(open_row())
             self.assertEqual(requested, [], "open already: not opened again")
-            self.assertEqual(chosen[-1], 1)
+            self.assertEqual((box.currentIndex, dialog.second_key), (1, (second.fgPackage.id, u"Regular")))
             self.assertIn(u"open already", said[-1][1])
+            self.assertTrue(dialog.compare_button.enabled)
             done = lambda: len([text for level, text in said if level == "done"])
             picked.append(u"other.vfc")
-            dialog.open_font()
+            box.pick(open_row())
+            self.assertEqual(box.currentIndex, 1, "the font chosen stays chosen until the file is in")
             picked.append(third.path)
-            dialog.open_font()
+            box.pick(open_row())
             self.assertEqual(requested, [u"other.vfc", third.path])
             dialog.look_for_opened()
             self.assertEqual((dialog.open_tries, done()), (1, 1), "not in yet: looked for again")
@@ -691,7 +956,8 @@ class DialogTests(unittest.TestCase):
             self.assertEqual(said[-1][0], "done")
             self.assertIn(u"Opened", said[-1][1])
             self.assertEqual(done(), 2)
-            self.assertIs(dialog.fonts[dialog.choices[chosen[-1]][0]], third, "the font just opened")
+            self.assertIs(dialog.chosen(box)[0], third, "the font just opened")
+            self.assertEqual(box.rows[box.currentIndex], u"Fake (Regular)", "its current master, shown in the dropdown")
             dialog.look_for_opened()
             self.assertEqual(done(), 2, "chosen once: the earlier request's poll is gone")
         finally:
@@ -703,7 +969,7 @@ class DialogTests(unittest.TestCase):
         b.upm = 2000
         dialog = self.dialog([a, b])
         dialog.log.add = lambda text, level="info": None
-        dialog.choice_a.currentIndex, dialog.choice_b.currentIndex = 0, 1
+        dialog.choice_b.pick(1)
         dialog.compare()
         dialog.selected_result = lambda: next(r for r in dialog.results if r.a == u"o" and r.b == u"o")
 
@@ -729,9 +995,35 @@ class DialogTests(unittest.TestCase):
 
     def test_one_font_one_master(self):
         dialog = self.dialog([first_font()])
-        self.assertEqual(len(dialog.choices), 1)
+        self.assertEqual(dialog.choice_a.rows, [u"Fake A"])
+        self.assertEqual(dialog.choice_b.rows, [u"Choose a font\N{HORIZONTAL ELLIPSIS}", None, u"Open a font\N{HORIZONTAL ELLIPSIS}"],
+                         "a font is not offered against itself")
+        self.assertFalse(dialog.compare_button.enabled)
         dialog.compare()
         self.assertIsNone(dialog.sides)
+
+    def test_no_font(self):
+        self.workspace.packages = lambda: []
+        self.workspace.currentPackage = None
+        dialog = fcmp.CompareDialog()
+        self.assertIsNone(dialog.failed, dialog.failed)
+        self.assertEqual((dialog.choice_a.rows, dialog.first_key(), dialog.second_key), ([], None, None))
+        self.assertIn(u"No font is open", dialog.missing())
+        self.assertFalse(dialog.compare_button.enabled)
+        dialog.compare()
+        self.assertIsNone(dialog.sides)
+
+    def test_one_feature_alike(self):
+        dialog = self.dialog([first_font(), second_font()])
+        dialog.choice_b.pick(1)
+        dialog.compare()
+        texts = []
+        dialog.feature_status.setText = texts.append
+        same = lambda tag: fcmp.FeatureDifference(tag, "same", u"", u"", [])
+        for rows in ([same(u"liga")], [same(u"liga"), same(u"kern")]):
+            dialog.feature_rows = rows
+            dialog.fill_features()
+        self.assertEqual(texts, [u"The one feature is alike in both.", u"The <b>2 features</b> are alike."])
 
 
 if __name__ == "__main__":

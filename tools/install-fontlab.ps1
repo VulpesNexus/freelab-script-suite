@@ -5,8 +5,9 @@
 #                                   Scripts menu), and add the FreeLab tools block to
 #                                   FontLab's startupScript.py
 #   install-fontlab.ps1 -Uninstall  remove that block, the copied scripts, the native
-#                                   helper, and dark mode's settings, putting back the
-#                                   workspace color dark mode replaced
+#                                   helper, dark mode's settings (putting back the
+#                                   workspace color dark mode replaced), the tools'
+#                                   window size, and Proof's settings
 #
 # FreeLab MCP, a separate repository, installs its listener beside these with a
 # startup block of its own: either can be installed or removed without the other.
@@ -52,8 +53,21 @@ $files = @(
     @{ From = 'proof\freelab_proof.py'; Name = 'freelab_proof.py' },
     @{ From = 'checks\language_coverage.json'; Name = 'language_coverage.json' },
     @{ From = 'checks\language_coverage_LICENSE'; Name = 'language_coverage_LICENSE' },
-    @{ From = 'checks\language_font\FreeLabLanguages.ttf'; Name = 'FreeLabLanguages.ttf' },
-    @{ From = 'checks\language_font\FreeLabLanguages_LICENSE'; Name = 'FreeLabLanguages_LICENSE' },
+    @{ From = 'checks\character_sets.json'; Name = 'character_sets.json' },
+    @{ From = 'checks\character_sets_LICENSE'; Name = 'character_sets_LICENSE' },
+    @{ From = 'checks\language_families.json'; Name = 'language_families.json' },
+    @{ From = 'checks\language_families_LICENSE'; Name = 'language_families_LICENSE' },
+    @{ From = 'checks\language_orthographies.json'; Name = 'language_orthographies.json' },
+    @{ From = 'checks\language_orthographies_LICENSE'; Name = 'language_orthographies_LICENSE' },
+    @{ From = 'checks\language_font\FreeLang-Essential.ttf'; Name = 'FreeLang-Essential.ttf' },
+    # Optional: the repository holds the Essential font alone, and each release publishes these four
+    # beside it (FreeLang-Extras.zip, unpacked into checks\language_font). Font Check works without
+    # them (their scripts are then left to the system's fonts), so a copy without them still installs.
+    @{ From = 'checks\language_font\FreeLang-CJK.ttf'; Name = 'FreeLang-CJK.ttf'; Optional = $true },
+    @{ From = 'checks\language_font\FreeLang-Extended-General.ttf'; Name = 'FreeLang-Extended-General.ttf'; Optional = $true },
+    @{ From = 'checks\language_font\FreeLang-Extended-Mongolian-Tibetan.ttf'; Name = 'FreeLang-Extended-Mongolian-Tibetan.ttf'; Optional = $true },
+    @{ From = 'checks\language_font\FreeLang-Extended-Duployan.ttf'; Name = 'FreeLang-Extended-Duployan.ttf'; Optional = $true },
+    @{ From = 'checks\language_font\FreeLang_LICENSE'; Name = 'FreeLang_LICENSE' },
     @{ From = 'spacing\freelab_auto_spacing.py'; Name = 'freelab_auto_spacing.py' },
     @{ From = 'diacritics\freelab_diacritics.py'; Name = 'freelab_diacritics.py' },
     @{ From = 'diacritics\mark_model.json'; Name = 'mark_model.json' },
@@ -62,7 +76,9 @@ $files = @(
     @{ From = 'diacritics\GlyphData_LICENSE'; Name = 'GlyphData_LICENSE' },
     @{ From = 'features\freelab_feature_code.py'; Name = 'freelab_feature_code.py' },
     @{ From = 'features\ligature_model.json'; Name = 'ligature_model.json' },
-    @{ From = 'features\freelab_alternates.py'; Name = 'freelab_alternates.py' },
+    # A helper module, no script of its own: FontLab lists every .py of the folder in the Scripts menu,
+    # so it goes in under the extension load_sibling (kerning/freelab_auto_kerning.py) also looks for.
+    @{ From = 'features\freelab_alternates.py'; Name = 'freelab_alternates.module' },
     @{ From = 'features\alternates_model.json'; Name = 'alternates_model.json' },
     @{ From = 'spacing\reference_model.json'; Name = 'reference_model.json' },
     @{ From = 'cjk\freelab_cjk_spacing.py'; Name = 'freelab_cjk_spacing.py' },
@@ -75,7 +91,15 @@ $files = @(
 )
 # Scripts FreeLab once installed under other names: removed on install and uninstall.
 $retired = @('freelab_accents.py',  # Accented Glyphs, now Diacritics
-    'FreeLabAutonyms.ttf', 'FreeLabAutonyms_LICENSE')  # Font Check's first font, now FreeLabLanguages.ttf
+    'freelab_alternates.py', 'freelab_alternates.pyc',  # listed in the menu as a script: now freelab_alternates.module
+    'FreeLabAutonyms.ttf', 'FreeLabAutonyms_LICENSE',  # Font Check's first font
+    'FreeLabLanguages.ttf', 'FreeLabLanguages_LICENSE',  # its second name
+    'FreeLang.ttf',  # one file before it became three (FreeLang-Essential.ttf, -CJK, -Extended)
+    'FreeLang-Extended.ttf')  # the third of three, before they became five (-Extended-General, and two more)
+# The files FreeLab put in the Scripts folder itself before 0.3 (its own submenu since): only these are
+# removed from there. The root's other files are the user's or another tool's, and some of FreeLab's
+# names (character_sets.json, language_families.json) are generic enough to be someone else's.
+$preSubfolder = @('freelab_dark_mode.py', 'freelab_dark_mode_settings.py')
 if (-not $BinDir) { $BinDir = Join-Path $env:LOCALAPPDATA 'FreeLab\bin' }
 if (-not $StateDir) { $StateDir = Join-Path $env:LOCALAPPDATA 'FreeLab' }
 if (-not $RegistryKey) { $RegistryKey = 'HKCU:\Software\Fontlab\fontlab7' }
@@ -264,13 +288,20 @@ if ($Uninstall) {
     # Auto Kerning's remembered analyses.
     $kernCache = Join-Path $StateDir 'kerning-cache'
     if (Test-Path $kernCache) { [System.IO.Directory]::Delete($kernCache, $true); Write-Output "Removed $kernCache" }
-    foreach ($name in @($files | ForEach-Object { $_.Name }) + $retired) {
-        foreach ($dir in @($scripts, $rootScripts)) {  # the Scripts folder itself held them before 0.3
-            $target = Join-Path $dir $name
-            if (Test-Path $target) {
-                try { [System.IO.File]::Delete($target); Write-Output "Removed $target" }
-                catch { Write-Output "Could not remove $target (FontLab holds it open): quit FontLab and run this again." }
-            }
+    # The size given to the tools' windows by hand, and Proof's summary settings.
+    foreach ($name in @('windows.json', 'proof.json')) {
+        $kept = Join-Path $StateDir $name
+        if (Test-Path $kept) {
+            try { [System.IO.File]::Delete($kept); Write-Output "Removed $kept" }
+            catch { Write-Output "Could not remove $kept (FontLab holds it open): quit FontLab and run this again." }
+        }
+    }
+    $installed = @(@($files | ForEach-Object { Join-Path $scripts $_.Name }) + @($retired | ForEach-Object { Join-Path $scripts $_ }) +
+        @($preSubfolder | ForEach-Object { Join-Path $rootScripts $_ }))  # (the Scripts folder itself held these before 0.3)
+    foreach ($target in $installed) {
+        if (Test-Path $target) {
+            try { [System.IO.File]::Delete($target); Write-Output "Removed $target" }
+            catch { Write-Output "Could not remove $target (FontLab holds it open): quit FontLab and run this again." }
         }
     }
     if ((Test-Path $scripts) -and -not (Get-ChildItem $scripts -Force)) {
@@ -289,6 +320,7 @@ if (-not (Test-Path $scripts)) { New-Item -ItemType Directory -Path $scripts | O
 foreach ($f in $files) {
     $target = Join-Path $scripts $f.Name
     $from = Join-Path $repo $f.From
+    if ($f.Optional -and -not (Test-Path $from)) { Write-Output "Skipped $($f.Name) (optional, not in this copy)"; continue }
     # A file already there as it is stays (FontLab holds a font it registered open: it could not be replaced)
     $same = (Test-Path $target) -and ((Get-FileHash $from).Hash -eq (Get-FileHash $target).Hash)
     if ($same) { Write-Output "Kept $($f.Name) (unchanged)" }
@@ -296,8 +328,13 @@ foreach ($f in $files) {
         try { [System.IO.File]::Copy($from, $target, $true); Write-Output "Copied $($f.Name) to $scripts" }
         catch { Write-Output "Could not replace $($f.Name), which FontLab holds open: quit FontLab and run this again. ($($_.Exception.Message))" }
     }
-    $old = Join-Path $rootScripts $f.Name  # before 0.3 they sat in the Scripts folder itself
-    if (Test-Path $old) { [System.IO.File]::Delete($old); Write-Output "Removed the old $old" }
+}
+foreach ($name in $preSubfolder) {  # before 0.3 they sat in the Scripts folder itself
+    $old = Join-Path $rootScripts $name
+    if (Test-Path $old) {
+        try { [System.IO.File]::Delete($old); Write-Output "Removed the old $old" }
+        catch { Write-Output "Could not remove the old $old (FontLab holds it open): quit FontLab and run this again." }
+    }
 }
 foreach ($name in $retired) {
     $old = Join-Path $scripts $name

@@ -449,6 +449,16 @@ def counted(number, one, many=None):
     return u"%d %s" % (number, one if number == 1 else (many or one + u"s"))
 
 
+def hangul_note(count, where, bold=lambda text: text):
+    """The status line's sentence about the font's Hangul syllables (count of them; where: the setting
+    to look under, as shown; bold: how the count is set off), u"" for a font without any. It follows
+    the count: "1 Hangul syllable ... its width", "2 Hangul syllables ... their widths"."""
+    if not count:
+        return u""
+    return (u" Its %s: none of the corpus's Korean fonts kerns or trims Hangul; choose how to set %s under %s." % (
+        bold(counted(count, u"Hangul syllable")), u"its width" if count == 1 else u"their widths", where))
+
+
 HELP = u"""<b>FreeLab CJK Spacing</b><br>
 Writes palt (proportional widths) and halt (half widths) for the font's full-width kana and
 punctuation, so that applications can set Japanese proportionally. Nothing is written until you
@@ -651,7 +661,7 @@ class CJKSpacingDialog(object):
                 return None
         except Exception:
             pass
-        package = workspace.currentPackage
+        package = self.ak.window_font(self, workspace)  # this window's font
         if package is None or package.isNull or not package.glyphsCount:
             return None
         return package
@@ -712,8 +722,7 @@ class CJKSpacingDialog(object):
         self.update_buttons()  # (fill compared the checks with the last font's)
         b = ak.b
         full = sum(1 for g in glyphs if g[2] >= FULL_WIDTH_SHARE * package.upm)
-        korean = (u" Its %s Hangul syllables: none of the corpus's Korean fonts kerns or trims Hangul; choose how to "
-                  u"set their widths under %s." % (b(hangul), ak.i(u"Hangul:"))) if hangul else u""
+        korean = hangul_note(hangul, ak.i(u"Hangul:"), b)
         if not full:
             self.status.setText(u"%s, master %s, has no full-width kana or CJK punctuation: nothing to trim.%s" % (
                 b(package.tfn), b(master), korean))
@@ -773,7 +782,7 @@ class CJKSpacingDialog(object):
             self.log.add(u"Hangul, %s: %s would change%s." % (
                 self.ak.html(HANGUL_MODES[self.hangul_box.currentIndex][1].lower()),
                 self.ak.b(counted(len(self.hangul), u"syllable")),
-                u" (one width: %d units)" % self.hangul_width if self.hangul_width else u""))
+                u" (one width: %s)" % counted(self.hangul_width, u"unit") if self.hangul_width else u""))
         self.fill()
         self.draw_previews()
 
@@ -1142,12 +1151,11 @@ class CJKSpacingDialog(object):
 
 
 def main():
-    held = getattr(sys, "_freelab_cjk_spacing", None)
-    if held is not None:
-        try:
-            held.dialog.close()
-        except Exception:
-            pass
+    try:  # this font's window shows it already: brought forward as it is
+        if load_auto_kerning().raise_open("CJK Spacing"):
+            return
+    except Exception:
+        pass
     try:
         dialog = CJKSpacingDialog()
     except Exception as exc:
@@ -1155,6 +1163,10 @@ def main():
         return
     sys._freelab_cjk_spacing = dialog  # kept: PythonQt deletes a dialog with no Python reference
     dialog.ak.hook_menu_order()
+    try:
+        dialog.ak.take_window("CJK Spacing", dialog)  # its font's window: the tool shown there gives way
+    except Exception:
+        pass
     dialog.show()
 
 

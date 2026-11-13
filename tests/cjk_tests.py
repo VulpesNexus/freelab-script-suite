@@ -227,5 +227,32 @@ class LineTests(unittest.TestCase):
         self.assertEqual(lines, [(0, 2), (3, 6)], "after the space, which is dropped")
 
 
+class WordingTests(unittest.TestCase):
+    """The owner's rules for interface texts: a text with a number follows it, and data beside data
+    goes in parentheses."""
+
+    def test_the_hangul_sentence_follows_its_count(self):
+        self.assertEqual(cj.hangul_note(0, u"Hangul:"), u"")
+        one, two = cj.hangul_note(1, u"Hangul:"), cj.hangul_note(2, u"Hangul:", lambda text: u"<b>%s</b>" % text)
+        self.assertTrue(one.startswith(u" Its 1 Hangul syllable: "), one)
+        self.assertTrue(one.endswith(u"choose how to set its width under Hangul:."), one)
+        self.assertTrue(two.startswith(u" Its <b>2 Hangul syllables</b>: "), two)
+        self.assertTrue(two.endswith(u"choose how to set their widths under Hangul:."), two)
+
+    def test_counted(self):
+        self.assertEqual([cj.counted(n, u"unit") for n in (0, 1, 2)], [u"0 units", u"1 unit", u"2 units"])
+        self.assertEqual([cj.counted_chars(n) for n in (0, 1, 2)],
+                         [u"0 CJK characters", u"1 CJK character", u"2 CJK characters"])
+
+    def test_no_dash_or_dot_between_data(self):
+        import io
+        with io.open(cj.__file__.replace(".pyc", ".py"), encoding="utf-8") as handle:
+            source = handle.read()
+        escaped = [u" \\" + code + u" " for code in (u"N{EM DASH}", u"N{MIDDLE DOT}", u"u2014", u"u00b7", u"xb7")]
+        for mark in escaped + [u" \N{EM DASH} ", u" \N{MIDDLE DOT} "]:
+            self.assertNotIn(mark, source)
+        self.assertNotIn(u"%d units", source, "a number's word through counted: 1 unit")
+
+
 if __name__ == "__main__":
     unittest.main()

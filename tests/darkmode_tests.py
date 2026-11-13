@@ -578,6 +578,17 @@ class FakeHooks(object):
         return 24
 
 
+class SelectedAsPaintedTests(unittest.TestCase):
+    """A selected row is drawn again as FontLab painted it only when that is light text on a dark row."""
+
+    def test_which_selected_rows_are_drawn_as_painted(self):
+        self.assertTrue(dm.selected_as_painted(5000, 300, 0), "Export Profiles: light text on the dark highlight")
+        self.assertFalse(dm.selected_as_painted(5000, 0, 400), "dark ink on it: mapped")
+        self.assertFalse(dm.selected_as_painted(5000, 4500, 0),
+                         "Preview Features' row under the pointer, near-white: mapped, or it stays a white band")
+        self.assertFalse(dm.selected_as_painted(0, 0, 0), "nothing drawn")
+
+
 class LeaveAloneTests(DarkModeCase):
     def test_a_widget_can_ask_to_be_left_alone(self):
         # Auto Kerning's preview buttons draw pairs in the palette's own colors: mapped as icons, they
@@ -776,6 +787,35 @@ class PlainInputTests(DarkModeCase):
         self.on()
         self.assertIsNone(combo.effect)
         self.assertIsNotNone(styled.effect, "under FontLab's stylesheets the ink detection stays")
+
+    def test_a_combo_box_that_lost_its_stylesheet_is_plain_again(self):
+        # FreeLab draws a dropdown with one choice as a label, through a stylesheet, and takes the
+        # stylesheet away when a second choice comes (Diacritics' Script dropdown). Dark mode kept the
+        # sheet it had seen, took the dropdown for a styled one ever after, and its ink effect garbled it.
+        dialog = FakeWidget("QDialog", parent=None, window=True)
+        combo = FakeWidget("QComboBox", parent=dialog, inherits=("QComboBox",), light="ink",
+                           sheet=u"QComboBox { border: none; background: transparent; }")
+        self.app.roots.append(dialog)
+        self.on()
+        self.assertIsNotNone(combo.effect, "styled: looked at as any widget")
+        combo.setStyleSheet(u"")
+        dm._sweep()
+        dm.run_queue()
+        self.assertIsNone(combo.effect)
+        self.assertIsNone(combo.property(dm.SHEET_PROP))
+        self.assertIsNone(combo.property(dm.ISLAND_PROP))
+        self.assertTrue(dm._plain_input(combo))
+
+    def test_a_widget_that_asks_later_to_be_left_alone_loses_its_effect(self):
+        dialog = FakeWidget("QDialog", parent=None, window=True)
+        combo = FakeWidget("QComboBox", parent=dialog, inherits=("QComboBox",), light="ink",
+                           sheet=u"QComboBox { color: red; }")
+        self.app.roots.append(dialog)
+        self.on()
+        self.assertIsNotNone(combo.effect)
+        combo.setProperty(dm.LEAVE_ALONE_PROP, True)
+        dm.process(combo)
+        self.assertIsNone(combo.effect)
 
 
 class ProtectionTests(DarkModeCase):
@@ -1052,6 +1092,41 @@ class OnOffTests(DarkModeCase):
         self.on()
         self.assertIsInstance(icon.pixmap, Mapped)
         self.assertEqual(art.pixmap.side, 400, "artwork such as the About picture stays")
+
+    def test_an_icon_held_at_twice_its_size_is_still_an_icon(self):
+        """FontLab's warning dialogs hold their 64-pixel question mark as 128 pixels for sharp screens:
+        counted in its own pixels it passed for artwork, and kept its light edge on the dark dialog."""
+        class Pixmap(object):
+            def __init__(self, side, ratio=None):
+                self.side, self.ratio = side, ratio
+                self.key = FakeIcon().key
+
+            def isNull(self):
+                return False
+
+            def cacheKey(self):
+                return self.key
+
+            def width(self):
+                return self.side
+
+            def height(self):
+                return self.side
+
+            def devicePixelRatio(self):
+                if self.ratio is None:
+                    raise AttributeError("an older Qt")
+                return self.ratio
+
+        sharp = FakeWidget("QLabel", parent=self.content, inherits=("QLabel",))
+        small = FakeWidget("QLabel", parent=self.content, inherits=("QLabel",))
+        plain = FakeWidget("QLabel", parent=self.content, inherits=("QLabel",))
+        sharp.pixmap, small.pixmap, plain.pixmap = Pixmap(60, 2.0), Pixmap(20), Pixmap(128, 1.0)
+        self.on()
+        self.assertIsInstance(sharp.pixmap, Mapped, "30 pixels as drawn: an icon")
+        self.assertIsInstance(small.pixmap, Mapped, "no ratio known: its own pixels")
+        self.assertEqual(plain.pixmap.side, 128, "128 pixels as drawn: a picture, left alone")
+        self.assertEqual(dm._pixel_ratio(Pixmap(128, 2.0)), 2.0)
 
     def test_icons_are_not_mapped_twice(self):
         self.on()

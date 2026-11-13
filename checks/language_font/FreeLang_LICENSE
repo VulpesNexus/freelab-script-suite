@@ -1,0 +1,1393 @@
+The fonts of FreeLang (FreeLang-Essential.ttf, FreeLang Essential; FreeLang-CJK.ttf, FreeLang CJK; FreeLang-Extended-General.ttf, FreeLang Extended General; FreeLang-Extended-Mongolian-Tibetan.ttf, FreeLang Extended Mongolian–Tibetan; FreeLang-Extended-Duployan.ttf, FreeLang Extended Duployan) are made of subsets of these fonts, merged and renamed by
+checks/train/language_font.py (each source font is in the font named after it):
+
+- Noto Sans, Version 2.015 (in Essential, CJK, Extended General, Extended Mongolian-Tibetan, Extended Duployan): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/latin-greek-cyrillic)
+- Noto Sans SC, Version 2.004-H2;hotconv 1.0.118;makeotfexe 2.5.65603 (in CJK): (c) 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'.
+- Noto Sans Coptic, Version 2.004 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/coptic)
+- Noto Sans Ethiopic, Version 2.102 (in Essential): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/ethiopic)
+- Noto Sans Osage, Version 2.002 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/osage)
+- Noto Sans Armenian, Version 2.008 (in Essential): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/armenian)
+- Noto Sans Hebrew, Version 3.001 (in Essential): Copyright 2024 The Noto Project Authors (https://github.com/notofonts/hebrew)
+- Noto Sans Arabic, Version 2.013 (in Essential): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/arabic)
+- Noto Sans Adlam, Version 3.002 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/adlam)
+- Noto Sans Syriac, Version 3.000 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/syriac)
+- Noto Sans Thaana, Version 3.001; ttfautohint (v1.8.4.7-5d5b) (in Essential): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/thaana)
+- Noto Sans NKo, Version 2.004 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/nko)
+- Noto Sans Samaritan, Version 2.001 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/samaritan)
+- Noto Sans Mandaic, Version 2.003 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/mandaic)
+- Noto Sans Devanagari, Version 2.007 (in Essential): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/devanagari)
+- Noto Sans Bengali, Version 3.011 (in Essential): Copyright 2025 The Noto Project Authors (https://github.com/notofonts/bengali)
+- Noto Sans Gurmukhi, Version 2.004 (in Essential): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/gurmukhi)
+- Noto Sans Gujarati, Version 2.106 (in Essential): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/gujarati)
+- Noto Sans Oriya, Version 2.007 (in Essential): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/oriya)
+- Noto Sans Tamil, Version 2.004 (in Essential): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/tamil)
+- Noto Sans Telugu, Version 2.005 (in Essential): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/telugu)
+- UnicodiaFunky, Version 3.1.3 (in Extended General, Essential): (c) 2021-2026 Mikhail Merkuryev SIL Open Font License 1.1
+- Noto Sans Kannada, Version 2.006 (in Essential): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/kannada)
+- Noto Sans Malayalam, Version 2.104 (in Essential): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/malayalam)
+- Noto Sans Sinhala, Version 3.000 (in Essential): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/sinhala)
+- Noto Sans Thai, Version 2.002 (in Essential): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/thai)
+- Noto Sans Lao, Version 2.003 (in Essential): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/lao)
+- Noto Serif Tibetan, Version 2.103 (in Extended Mongolian-Tibetan): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/tibetan)
+- Noto Sans Myanmar, Version 2.107 (in Essential): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/myanmar)
+- Noto Sans Georgian, Version 2.005 (in Essential): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/georgian)
+- Noto Sans KR, Version 2.004-H2;hotconv 1.0.118;makeotfexe 2.5.65603 (in CJK): (c) 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'.
+- Noto Sans Cherokee, Version 2.001 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/cherokee)
+- Noto Sans Canadian Aboriginal, Version 2.004 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/canadian-aboriginal)
+- Noto Sans Ogham, Version 2.001 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/ogham)
+- Noto Sans Runic, Version 2.002 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/runic)
+- Noto Sans Tagalog, Version 2.002 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/tagalog)
+- Noto Sans Hanunoo, Version 2.004 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/hanunoo)
+- Noto Sans Buhid, Version 2.001 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/buhid)
+- Noto Sans Tagbanwa, Version 2.001 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/tagbanwa)
+- Noto Sans Khmer, Version 2.004 (in Essential): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/khmer)
+- Noto Sans Mongolian, Version 3.103;fontc 1.0.0 (in Extended Mongolian-Tibetan): Copyright 2023 The Noto Project Authors (https://github.com/notofonts/mongolian)
+- Noto Sans Limbu, Version 2.005 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/limbu)
+- Noto Sans Tai Le, Version 2.002 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/tai-le)
+- Noto Sans New Tai Lue, Version 2.004 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/new-tai-lue)
+- Noto Sans Buginese, Version 2.002 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/buginese)
+- Noto Sans Tai Tham, Version 2.002; ttfautohint (v1.8.4.7-5d5b) (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/tai-tham)
+- Noto Sans Balinese, Version 2.006 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/balinese)
+- Noto Sans Sundanese, Version 2.005 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/sundanese)
+- Noto Sans Batak, Version 2.005 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/batak)
+- Noto Sans Lepcha, Version 2.006 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/lepcha)
+- Noto Sans Ol Chiki, Version 2.003 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/ol-chiki)
+- Andika, Version 7.000 (in Essential): Copyright (c) 2004-2025 SIL Global
+- Noto Sans Nandinagari, Version 1.003 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/nandinagari)
+- Noto Sans Syriac Western, Version 3.001 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/syriac)
+- Noto Naskh Arabic, Version 2.021 (in Essential): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/arabic)
+- Noto Sans Math, Version 3.000 (in Extended General): Copyright 2022 Google LLC. All Rights Reserved.
+- Noto Sans Symbols, Version 2.003 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/symbols)
+- Noto Sans Symbols 2, Version 2.008 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/symbols)
+- Noto Sans Mono, Version 2.014 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/latin-greek-cyrillic)
+- Noto Emoji, Version 3.002 (in Extended General): Copyright 2013 Google LLC
+- Noto Sans Glagolitic, Version 2.004 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/glagolitic)
+- Shafarik, Version 1.0  (in Extended General): Copyright 2014-2020 Aleksandr Andreev and Nikita Simmons (https://sci.ponomar.net/).
+- Noto Sans Tifinagh, Version 2.006 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/tifinagh)
+- Noto Sans Avestan, Version 2.003 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/avestan)
+- Noto Sans JP, Version 2.004-H2;hotconv 1.0.118;makeotfexe 2.5.65603 (in CJK): (c) 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'.
+- Noto Sans Yi, Version 2.002 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/yi)
+- Noto Sans Lisu, Version 2.102 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/lisu)
+- Noto Sans Vai, Version 2.001 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/vai)
+- Noto Sans Bamum, Version 2.002 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/bamum)
+- Noto Sans Syloti Nagri, Version 2.004 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/syloti-nagri)
+- Noto Sans PhagsPa, Version 2.004 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/phags-pa)
+- Noto Sans Saurashtra, Version 2.002 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/saurashtra)
+- Noto Sans Kayah Li, Version 2.002 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/kayah-li)
+- Noto Sans Rejang, Version 2.003 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/rejang)
+- Noto Sans Javanese, Version 2.005 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/javanese)
+- Noto Sans Cham, Version 2.005 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/cham)
+- Noto Sans Tai Viet, Version 2.004 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/tai-viet)
+- Noto Sans Meetei Mayek, Version 2.002 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/meetei-mayek)
+- Noto Sans Linear B, Version 2.002 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/linear-b)
+- Noto Sans Lycian, Version 2.002 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/lycian)
+- Noto Sans Carian, Version 2.002 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/carian)
+- Noto Sans Old Italic, Version 2.004 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/old-italic)
+- Noto Sans Gothic, Version 2.001 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/gothic)
+- Noto Sans Old Permic, Version 2.001 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/old-permic)
+- Noto Sans Ugaritic, Version 2.001 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/ugaritic)
+- Noto Sans Old Persian, Version 2.001 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/old-persian)
+- Noto Sans Deseret, Version 2.001 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/deseret)
+- Noto Sans Shavian, Version 2.001 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/shavian)
+- Noto Sans Osmanya, Version 2.001 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/osmanya)
+- Noto Sans Elbasan, Version 2.004 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/elbasan)
+- Noto Sans Caucasian Albanian, Version 2.005 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/caucasian-albanian)
+- Noto Sans Vithkuqi, Version 1.001 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/vithkuqi)
+- Noto Serif Todhri, Version 1.000 (in Extended General): Copyright 2024 The Noto Project Authors (https://github.com/notofonts/todhri)
+- Noto Sans Linear A, Version 2.002 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/linear-a)
+- Noto Sans Cypriot, Version 2.002 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/cypriot)
+- Noto Sans Imperial Aramaic, Version 2.002 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/imperial-aramaic)
+- Noto Sans Palmyrene, Version 2.001 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/palmyrene)
+- Noto Sans Nabataean, Version 2.001 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/nabataean)
+- Noto Sans Hatran, Version 2.001 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/hatran)
+- Noto Sans Phoenician, Version 2.001 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/phoenician)
+- Noto Sans Lydian, Version 2.002 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/lydian)
+- Noto Sans Meroitic, Version 2.002 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/meroitic)
+- Noto Sans Kharoshthi, Version 2.004 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/kharoshthi)
+- Noto Sans Old South Arabian, Version 2.001 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/old-south-arabian)
+- Noto Sans Old North Arabian, Version 2.001 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/old-north-arabian)
+- Noto Sans Manichaean, Version 2.005 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/manichaean)
+- Noto Sans Inscriptional Parthian, Version 2.004 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/inscriptional-parthian)
+- Noto Sans Inscriptional Pahlavi, Version 2.004 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/inscriptional-pahlavi)
+- Noto Sans Psalter Pahlavi, Version 2.003 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/psalter-pahlavi)
+- Noto Sans Old Turkic, Version 2.004 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/old-turkic)
+- Noto Sans Old Hungarian, Version 2.005 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/old-hungarian)
+- Noto Sans Hanifi Rohingya, Version 2.102 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/hanifi-rohingya)
+- Noto Serif Yezidi, Version 1.001 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/yezidi)
+- Noto Sans Old Sogdian, Version 2.003 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/old-sogdian)
+- Noto Sans Sogdian, Version 2.002 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/sogdian)
+- Noto Serif Old Uyghur, Version 1.005 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/old-uyghur)
+- Noto Sans Chorasmian, Version 1.004 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/chorasmian)
+- Noto Sans Elymaic, Version 1.002 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/elymaic)
+- Noto Sans Brahmi, Version 2.004 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/brahmi)
+- Noto Sans Kaithi, Version 2.006 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/kaithi)
+- Noto Sans Sora Sompeng, Version 2.101 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/sora-sompeng)
+- Noto Sans Chakma, Version 2.003 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/chakma)
+- Noto Sans Mahajani, Version 2.003 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/mahajani)
+- Noto Sans Sharada, Version 2.006 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/sharada)
+- Noto Sans Khojki, Version 2.005 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/khojki)
+- Noto Serif Khojki, Version 2.005 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/khojki)
+- Noto Sans Multani, Version 2.002 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/multani)
+- Noto Sans Khudawadi, Version 2.004 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/khudawadi)
+- Noto Sans Grantha, Version 2.005 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/grantha)
+- Daarage, Version 1.000 (in Extended General): Copyright (c) 2024 Prahlad Prasad Tantry and Mikhail Merkuryev
+- Noto Sans Newa, Version 2.007 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/newa)
+- Noto Sans Tirhuta, Version 2.003 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/tirhuta)
+- Noto Sans Siddham, Version 2.005 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/siddham)
+- Noto Sans Modi, Version 2.004 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/modi)
+- Noto Sans Takri, Version 2.005 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/takri)
+- Padauk Book, Version 6.000 (in Extended General): Copyright (c) 2001-2025 SIL Global (https://www.sil.org/)
+- Noto Serif Ahom, Version 2.007 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/ahom)
+- Noto Serif Dogra, Version 1.007 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/dogra)
+- Noto Sans Warang Citi, Version 3.002 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/warang-citi)
+- Noto Serif Dives Akuru, Version 1.001 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/dives-akuru)
+- Noto Sans Zanabazar Square, Version 2.006 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/zanabazar-square)
+- Noto Sans Soyombo, Version 2.001 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/soyombo)
+- Noto Sans Pau Cin Hau, Version 2.002 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/pau-cin-hau)
+- Noto Sans Sunuwar, Version 1.000 (in Extended General): Copyright 2021 The Noto Sunuwar Project Authors (https://github.com/ScriptEncodingInitiative/sunuwar)
+- Noto Sans Bhaiksuki, Version 2.002 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/bhaiksuki)
+- Noto Sans Marchen, Version 2.004 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/marchen)
+- Noto Sans Masaram Gondi, Version 1.005 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/masaram-gondi)
+- Noto Sans Gunjala Gondi, Version 1.004 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/gunjala-gondi)
+- Noto Serif Makasar, Version 1.001 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/makasar)
+- Noto Sans Kawi, Version 1.000 (in Extended General): Copyright 2023 The Noto Project Authors (https://github.com/notofonts/kawi)
+- Noto Sans Tamil Supplement, Version 2.001 (in Essential): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/tamil)
+- Noto Sans Cuneiform, Version 2.001 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/cuneiform)
+- Noto Sans Cypro Minoan, Version 1.503 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/cypro-minoan)
+- Noto Sans Egyptian Hieroglyphs, Version 2.002 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/egyptian-hieroglyphs)
+- Noto Sans Anatolian Hieroglyphs, Version 2.001 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/anatolian-hieroglyphs)
+- Noto Sans Mro, Version 2.001 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/mro)
+- Noto Sans Tangsa, Version 1.506 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/tangsa)
+- Noto Sans Bassa Vah, Version 2.002 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/bassa-vah)
+- Noto Sans Pahawh Hmong, Version 2.001 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/pahawh-hmong)
+- Kanchenjunga, Version 2.001 (in Extended General): Copyright (c) 2021-2024 SIL International
+- Noto Sans Medefaidrin, Version 1.002 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/medefaidrin)
+- Kedebideri, Version 3.001 (in Extended General): Copyright (c) 2007-2025 SIL Global
+- Noto Sans Miao, Version 2.004 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/miao)
+- Noto Serif Tangut, Version 2.170 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/tangut)
+- Noto Sans Duployan, Version 3.002 (in Extended Duployan): Copyright 2018-2019, 2022-2023 David Corbett. Copyright 2019-2022 Google LLC. All Rights Reserved.
+- Noto Znamenny Musical Notation, Version 1.003 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/znamenny)
+- Noto Music, Version 2.004;fontc 1.0.0 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/music)
+- Noto Serif NP Hmong, Version 1.001 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/nyiakeng-puachue-hmong)
+- Noto Serif Toto, Version 2.003 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/toto)
+- Noto Sans Wancho, Version 2.001 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/wancho)
+- Noto Sans Nag Mundari, Version 1.001 (in Extended General): Copyright 2023 The Noto Project Authors (https://github.com/notofonts/nag-mundari)
+- Noto Sans Mende Kikakui, Version 2.003 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/mende-kikakui)
+- Noto Sans Indic Siyaq Numbers, Version 2.002 (in Extended General): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/indic-siyaq-numbers)
+- Noto Serif Ottoman Siyaq, Version 1.006 (in Extended General): Copyright 2022 Google LLC. All Rights Reserved.
+- BabelStone Pseudographica, Version 16.0.0 (in Extended General): Copyright 2018-2024, Andrew West.
+
+They are licensed under the SIL Open Font License, Version 1.1, as are the fonts made of them. Their licenses, as
+their repositories and releases ship them (notofonts.github.io's fonts/LICENSE, google/fonts' OFL.txt, the
+OFL.txt of each release, and Unicodia's Fonts/LICENSE files for the fonts taken from its repository), follow.
+
+Daarage's name records declare no license: its license is the file Unicodia ships beside it
+(Fonts/LICENSE-Daarage), among the texts below, whole, under its copyright line.
+
+UnicodiaFunky's license file (Unicodia's Fonts/LICENSE-Funky) is a notice, not the license's text: it
+places the font under the SIL Open Font License (version 1.1, by the font's copyright record), its
+author's own glyphs under no condition at all, and names whose glyphs the others are. It is among the
+texts below, whole.
+
+------------------------------------------------------------------------
+
+Copyright 2022 The Noto Project Authors (https://github.com/notofonts/)
+
+This Font Software is licensed under the SIL Open Font License,
+Version 1.1.
+
+This license is copied below, and is also available with a FAQ at:
+http://scripts.sil.org/OFL
+
+-----------------------------------------------------------
+SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+-----------------------------------------------------------
+
+PREAMBLE
+The goals of the Open Font License (OFL) are to stimulate worldwide
+development of collaborative font projects, to support the font
+creation efforts of academic and linguistic communities, and to
+provide a free and open framework in which fonts may be shared and
+improved in partnership with others.
+
+The OFL allows the licensed fonts to be used, studied, modified and
+redistributed freely as long as they are not sold by themselves. The
+fonts, including any derivative works, can be bundled, embedded,
+redistributed and/or sold with any software provided that any reserved
+names are not used by derivative works. The fonts and derivatives,
+however, cannot be released under any other type of license. The
+requirement for fonts to remain under this license does not apply to
+any document created using the fonts or their derivatives.
+
+DEFINITIONS
+"Font Software" refers to the set of files released by the Copyright
+Holder(s) under this license and clearly marked as such. This may
+include source files, build scripts and documentation.
+
+"Reserved Font Name" refers to any names specified as such after the
+copyright statement(s).
+
+"Original Version" refers to the collection of Font Software
+components as distributed by the Copyright Holder(s).
+
+"Modified Version" refers to any derivative made by adding to,
+deleting, or substituting -- in part or in whole -- any of the
+components of the Original Version, by changing formats or by porting
+the Font Software to a new environment.
+
+"Author" refers to any designer, engineer, programmer, technical
+writer or other person who contributed to the Font Software.
+
+PERMISSION & CONDITIONS
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of the Font Software, to use, study, copy, merge, embed,
+modify, redistribute, and sell modified and unmodified copies of the
+Font Software, subject to the following conditions:
+
+1) Neither the Font Software nor any of its individual components, in
+Original or Modified Versions, may be sold by itself.
+
+2) Original or Modified Versions of the Font Software may be bundled,
+redistributed and/or sold with any software, provided that each copy
+contains the above copyright notice and this license. These can be
+included either as stand-alone text files, human-readable headers or
+in the appropriate machine-readable metadata fields within text or
+binary files as long as those fields can be easily viewed by the user.
+
+3) No Modified Version of the Font Software may use the Reserved Font
+Name(s) unless explicit written permission is granted by the
+corresponding Copyright Holder. This restriction only applies to the
+primary font name as presented to the users.
+
+4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
+Software shall not be used to promote, endorse or advertise any
+Modified Version, except to acknowledge the contribution(s) of the
+Copyright Holder(s) and the Author(s) or with their explicit written
+permission.
+
+5) The Font Software, modified or unmodified, in part or in whole,
+must be distributed entirely under this license, and must not be
+distributed under any other license. The requirement for fonts to
+remain under this license does not apply to any document created using
+the Font Software.
+
+TERMINATION
+This license becomes null and void if any of the above conditions are
+not met.
+
+DISCLAIMER
+THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
+DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
+OTHER DEALINGS IN THE FONT SOFTWARE.
+
+
+------------------------------------------------------------------------
+
+Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+This license is copied below, and is also available with a FAQ at:
+https://scripts.sil.org/OFL
+
+
+-----------------------------------------------------------
+SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+-----------------------------------------------------------
+
+PREAMBLE
+The goals of the Open Font License (OFL) are to stimulate worldwide
+development of collaborative font projects, to support the font creation
+efforts of academic and linguistic communities, and to provide a free and
+open framework in which fonts may be shared and improved in partnership
+with others.
+
+The OFL allows the licensed fonts to be used, studied, modified and
+redistributed freely as long as they are not sold by themselves. The
+fonts, including any derivative works, can be bundled, embedded, 
+redistributed and/or sold with any software provided that any reserved
+names are not used by derivative works. The fonts and derivatives,
+however, cannot be released under any other type of license. The
+requirement for fonts to remain under this license does not apply
+to any document created using the fonts or their derivatives.
+
+DEFINITIONS
+"Font Software" refers to the set of files released by the Copyright
+Holder(s) under this license and clearly marked as such. This may
+include source files, build scripts and documentation.
+
+"Reserved Font Name" refers to any names specified as such after the
+copyright statement(s).
+
+"Original Version" refers to the collection of Font Software components as
+distributed by the Copyright Holder(s).
+
+"Modified Version" refers to any derivative made by adding to, deleting,
+or substituting -- in part or in whole -- any of the components of the
+Original Version, by changing formats or by porting the Font Software to a
+new environment.
+
+"Author" refers to any designer, engineer, programmer, technical
+writer or other person who contributed to the Font Software.
+
+PERMISSION & CONDITIONS
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of the Font Software, to use, study, copy, merge, embed, modify,
+redistribute, and sell modified and unmodified copies of the Font
+Software, subject to the following conditions:
+
+1) Neither the Font Software nor any of its individual components,
+in Original or Modified Versions, may be sold by itself.
+
+2) Original or Modified Versions of the Font Software may be bundled,
+redistributed and/or sold with any software, provided that each copy
+contains the above copyright notice and this license. These can be
+included either as stand-alone text files, human-readable headers or
+in the appropriate machine-readable metadata fields within text or
+binary files as long as those fields can be easily viewed by the user.
+
+3) No Modified Version of the Font Software may use the Reserved Font
+Name(s) unless explicit written permission is granted by the corresponding
+Copyright Holder. This restriction only applies to the primary font name as
+presented to the users.
+
+4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
+Software shall not be used to promote, endorse or advertise any
+Modified Version, except to acknowledge the contribution(s) of the
+Copyright Holder(s) and the Author(s) or with their explicit written
+permission.
+
+5) The Font Software, modified or unmodified, in part or in whole,
+must be distributed entirely under this license, and must not be
+distributed under any other license. The requirement for fonts to
+remain under this license does not apply to any document created
+using the Font Software.
+
+TERMINATION
+This license becomes null and void if any of the above conditions are
+not met.
+
+DISCLAIMER
+THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
+DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
+OTHER DEALINGS IN THE FONT SOFTWARE.
+
+
+------------------------------------------------------------------------
+
+﻿Copyright (c) 2021-2026 Mikhail Merkuryev
+
+Licensed under SIL Open Font License
+
+EXCEPT MY GLYPHS: You just DO WHAT THE FUNK YOU WANT TO
+
+== Others’ glyphs: ==
+
+=== Latin, Cyrillic, Balinese, Japanese/Korean umlauts ===
+
+© Google Noto, SIL Open Font License
+
+Matrix for modifier chars is: W×65%, H×60% starting from char origin, and Y+407; old chars Y+120.
+Matrix for subscript chars is: W×65%, H×60% starting from char origin, and Y−96.
+
+
+=== Toto • unknown origin ===
+
+Probably someone from SIL International, SIL Open Font License
+Status: probably fully working, I tried to copy all tables
+
+
+=== Gothic • Junicode ===
+
+© Peter Baker, SIL Open Font License
+Status: diaeresis works, numbers do not
+Matrix is ×135%
+
+
+=== Coptic • NewAthena  ===
+
+© Society for Classical Studies, SIL Open Font License
+Status: at least as functional as Noto and NewAthena combined!
+
+
+== Status of MY scripts ==
+
+=== Cypro-Minoan ===
+
+Source of inspiration: Michael Everson’s Unicode tracings
+Status: should work
+
+
+=== Garay ===
+
+Source of glyphs: some poor Latin-mapped font
+Status: barely working, either improve or hand to other font
+
+
+=== Gurung Khema ===
+
+Source of inspiration: existing Gukh fonts
+Status: working somehow, lots of workarounds. Actual pull of U16 by Universal Shaping Engine may probably destroy everything but permit more precise typesetting
+
+Rationale:
+* All anusvaras housing a circle are smiles, and empty ones are ticks, like in handwritten specimen
+
+
+=== Makasar ===
+
+Source of inspiration: Makasar prince’s diaries, Anshuman Pandey’s font
+Status: working, just Arabic-Indic digits are absent
+
+Rationale:
+* Drawn like in Pandey’s font, sometimes more streamlined.
+* As this font is not of print quality, I decided to use rounded ends everywhere
+
+
+=== Nag Mundari ===
+
+Source of inspiration: educational Nag specimen
+Status: working
+
+
+=== Ol Onal ===
+
+Source of inspiration: alphabet written with marker + multilingual writings on idol
+Status: working, minor glyph problems, no danda
+
+Rationale:
+1. Backslash quill is common in all Indic scripts, Brahmic and alphabetical. I played with it in e.g. Q-like letter (DB Aw).
+2. Inverse contrast is also common. As Ol Onal is a really small script, it’s routinely repeated in e.g. Devanagari that’s more compact (IDK whether Devanagari is Bhumij or other local language). They mechanically compress fonts and get… you get point.
+3. I draw Noto’s drop everywhere curved thick line starts rather than ends. Just draw the letter with quill dipped into ink, or a really poor ballpoint — there were in 90s, I did not see such very-very long, and ≈2000 I wrote lectures with a rather good pen. (There were LOTS of bad copybooks, but that’s another thing.)
+4. As Ol Onal is a script w/o printed tradition, I was inspired with handwritten specimen. This approach proved good in Todhri, and I was probably right, SIL did the same with Kirat.
+5. I wanted to make glottal-8 smaller than normal letter, and I checked whether it’s possible.
+6. Position of umlauts in printed text is strange because of poor fontmaker’s skills and ASCII mapping. Handwritten text often draws them in more natural places.
+
+
+=== Todhri ===
+
+Source of inspiration: Michael Everson’s font, Johann von Hahn’s description, handwritten notes from Unicode request
+Status: working, no kerning because of doubtful R
+
+Rationale:
+* B: both closed and diverging letters are attested, and quick writing makes ends diverge. So I drew something in between.
+* R: drawn by printed sources, really doubtful
+* RR: the only handwritten specimen known to me is a mixture of Greek Rho and Latin P
+* T/C: somewhere in between printed and handwritten
+
+
+=== Sidetic ===
+
+Source of inspiration: none, though I looked a bot into actual inscriptions
+Status: working
+
+Rationale:
+* Thickness 90 is Noto’s standard
+
+
+== Stability policy ==
+
+WILL STAY:
+* Working scripts of decent quality made by me: Cypro-Minoan, Gurung Khema, Makasar, Nag, Ol Onal, Todhri, Sidetic
+* ASCII and other auxiliary characters
+* All of them MAY change style/metrics
+
+WILL PROBABLY DISAPPEAR when better font arrives:
+* Scripts made by others
+* Super/subscripts: while Unicodia’s main font is Cambria, won’t
+
+WILL SURELY DISAPPEAR:
+* Lone characters made to gag tofu
+* All non-functional scripts, both mine and others’
+* All craggy scripts, both mine and others’
+
+ALREADY DISAPPEARED and handing to other fonts
+* Ottoman Siyaq numbers → use Noto Ottoman Siyaq
+* Devanagari Jain symbols → use Noto Devanagari
+
+
+------------------------------------------------------------------------
+
+Copyright (c) 2004-2025 SIL Global  (https://www.sil.org/)
+with Reserved Font Names "Andika" and "SIL".
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+This license is copied below, and is also available with a FAQ at:
+https://openfontlicense.org
+
+
+-----------------------------------------------------------
+SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+-----------------------------------------------------------
+
+PREAMBLE
+The goals of the Open Font License (OFL) are to stimulate worldwide
+development of collaborative font projects, to support the font creation
+efforts of academic and linguistic communities, and to provide a free and
+open framework in which fonts may be shared and improved in partnership
+with others.
+
+The OFL allows the licensed fonts to be used, studied, modified and
+redistributed freely as long as they are not sold by themselves. The
+fonts, including any derivative works, can be bundled, embedded,
+redistributed and/or sold with any software provided that any reserved
+names are not used by derivative works. The fonts and derivatives,
+however, cannot be released under any other type of license. The
+requirement for fonts to remain under this license does not apply
+to any document created using the fonts or their derivatives.
+
+DEFINITIONS
+"Font Software" refers to the set of files released by the Copyright
+Holder(s) under this license and clearly marked as such. This may
+include source files, build scripts and documentation.
+
+"Reserved Font Name" refers to any names specified as such after the
+copyright statement(s).
+
+"Original Version" refers to the collection of Font Software components as
+distributed by the Copyright Holder(s).
+
+"Modified Version" refers to any derivative made by adding to, deleting,
+or substituting -- in part or in whole -- any of the components of the
+Original Version, by changing formats or by porting the Font Software to a
+new environment.
+
+"Author" refers to any designer, engineer, programmer, technical
+writer or other person who contributed to the Font Software.
+
+PERMISSION & CONDITIONS
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of the Font Software, to use, study, copy, merge, embed, modify,
+redistribute, and sell modified and unmodified copies of the Font
+Software, subject to the following conditions:
+
+1) Neither the Font Software nor any of its individual components,
+in Original or Modified Versions, may be sold by itself.
+
+2) Original or Modified Versions of the Font Software may be bundled,
+redistributed and/or sold with any software, provided that each copy
+contains the above copyright notice and this license. These can be
+included either as stand-alone text files, human-readable headers or
+in the appropriate machine-readable metadata fields within text or
+binary files as long as those fields can be easily viewed by the user.
+
+3) No Modified Version of the Font Software may use the Reserved Font
+Name(s) unless explicit written permission is granted by the corresponding
+Copyright Holder. This restriction only applies to the primary font name as
+presented to the users.
+
+4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
+Software shall not be used to promote, endorse or advertise any
+Modified Version, except to acknowledge the contribution(s) of the
+Copyright Holder(s) and the Author(s) or with their explicit written
+permission.
+
+5) The Font Software, modified or unmodified, in part or in whole,
+must be distributed entirely under this license, and must not be
+distributed under any other license. The requirement for fonts to
+remain under this license does not apply to any document created
+using the Font Software.
+
+TERMINATION
+This license becomes null and void if any of the above conditions are
+not met.
+
+DISCLAIMER
+THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
+DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
+OTHER DEALINGS IN THE FONT SOFTWARE.
+
+
+------------------------------------------------------------------------
+
+Copyright 2013 Google LLC
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+This license is copied below, and is also available with a FAQ at:
+https://scripts.sil.org/OFL
+
+
+-----------------------------------------------------------
+SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+-----------------------------------------------------------
+
+PREAMBLE
+The goals of the Open Font License (OFL) are to stimulate worldwide
+development of collaborative font projects, to support the font creation
+efforts of academic and linguistic communities, and to provide a free and
+open framework in which fonts may be shared and improved in partnership
+with others.
+
+The OFL allows the licensed fonts to be used, studied, modified and
+redistributed freely as long as they are not sold by themselves. The
+fonts, including any derivative works, can be bundled, embedded, 
+redistributed and/or sold with any software provided that any reserved
+names are not used by derivative works. The fonts and derivatives,
+however, cannot be released under any other type of license. The
+requirement for fonts to remain under this license does not apply
+to any document created using the fonts or their derivatives.
+
+DEFINITIONS
+"Font Software" refers to the set of files released by the Copyright
+Holder(s) under this license and clearly marked as such. This may
+include source files, build scripts and documentation.
+
+"Reserved Font Name" refers to any names specified as such after the
+copyright statement(s).
+
+"Original Version" refers to the collection of Font Software components as
+distributed by the Copyright Holder(s).
+
+"Modified Version" refers to any derivative made by adding to, deleting,
+or substituting -- in part or in whole -- any of the components of the
+Original Version, by changing formats or by porting the Font Software to a
+new environment.
+
+"Author" refers to any designer, engineer, programmer, technical
+writer or other person who contributed to the Font Software.
+
+PERMISSION & CONDITIONS
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of the Font Software, to use, study, copy, merge, embed, modify,
+redistribute, and sell modified and unmodified copies of the Font
+Software, subject to the following conditions:
+
+1) Neither the Font Software nor any of its individual components,
+in Original or Modified Versions, may be sold by itself.
+
+2) Original or Modified Versions of the Font Software may be bundled,
+redistributed and/or sold with any software, provided that each copy
+contains the above copyright notice and this license. These can be
+included either as stand-alone text files, human-readable headers or
+in the appropriate machine-readable metadata fields within text or
+binary files as long as those fields can be easily viewed by the user.
+
+3) No Modified Version of the Font Software may use the Reserved Font
+Name(s) unless explicit written permission is granted by the corresponding
+Copyright Holder. This restriction only applies to the primary font name as
+presented to the users.
+
+4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
+Software shall not be used to promote, endorse or advertise any
+Modified Version, except to acknowledge the contribution(s) of the
+Copyright Holder(s) and the Author(s) or with their explicit written
+permission.
+
+5) The Font Software, modified or unmodified, in part or in whole,
+must be distributed entirely under this license, and must not be
+distributed under any other license. The requirement for fonts to
+remain under this license does not apply to any document created
+using the Font Software.
+
+TERMINATION
+This license becomes null and void if any of the above conditions are
+not met.
+
+DISCLAIMER
+THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
+DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
+OTHER DEALINGS IN THE FONT SOFTWARE.
+
+
+------------------------------------------------------------------------
+
+Copyright 2013-2020 Aleksandr Andreev and Nikita Simmons (https://sci.ponomar.net/).
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+This license is copied below, and is also available with a FAQ at:
+https://scripts.sil.org/OFL
+
+-----------------------------------------------------------
+SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+-----------------------------------------------------------
+
+PREAMBLE
+The goals of the Open Font License (OFL) are to stimulate worldwide
+development of collaborative font projects, to support the font creation
+efforts of academic and linguistic communities, and to provide a free and
+open framework in which fonts may be shared and improved in partnership
+with others.
+
+The OFL allows the licensed fonts to be used, studied, modified and
+redistributed freely as long as they are not sold by themselves. The
+fonts, including any derivative works, can be bundled, embedded, 
+redistributed and/or sold with any software provided that any reserved
+names are not used by derivative works. The fonts and derivatives,
+however, cannot be released under any other type of license. The
+requirement for fonts to remain under this license does not apply
+to any document created using the fonts or their derivatives.
+
+DEFINITIONS
+"Font Software" refers to the set of files released by the Copyright
+Holder(s) under this license and clearly marked as such. This may
+include source files, build scripts and documentation.
+
+"Reserved Font Name" refers to any names specified as such after the
+copyright statement(s).
+
+"Original Version" refers to the collection of Font Software components as
+distributed by the Copyright Holder(s).
+
+"Modified Version" refers to any derivative made by adding to, deleting,
+or substituting -- in part or in whole -- any of the components of the
+Original Version, by changing formats or by porting the Font Software to a
+new environment.
+
+"Author" refers to any designer, engineer, programmer, technical
+writer or other person who contributed to the Font Software.
+
+PERMISSION & CONDITIONS
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of the Font Software, to use, study, copy, merge, embed, modify,
+redistribute, and sell modified and unmodified copies of the Font
+Software, subject to the following conditions:
+
+1) Neither the Font Software nor any of its individual components,
+in Original or Modified Versions, may be sold by itself.
+
+2) Original or Modified Versions of the Font Software may be bundled,
+redistributed and/or sold with any software, provided that each copy
+contains the above copyright notice and this license. These can be
+included either as stand-alone text files, human-readable headers or
+in the appropriate machine-readable metadata fields within text or
+binary files as long as those fields can be easily viewed by the user.
+
+3) No Modified Version of the Font Software may use the Reserved Font
+Name(s) unless explicit written permission is granted by the corresponding
+Copyright Holder. This restriction only applies to the primary font name as
+presented to the users.
+
+4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
+Software shall not be used to promote, endorse or advertise any
+Modified Version, except to acknowledge the contribution(s) of the
+Copyright Holder(s) and the Author(s) or with their explicit written
+permission.
+
+5) The Font Software, modified or unmodified, in part or in whole,
+must be distributed entirely under this license, and must not be
+distributed under any other license. The requirement for fonts to
+remain under this license does not apply to any document created
+using the Font Software.
+
+TERMINATION
+This license becomes null and void if any of the above conditions are
+not met.
+
+DISCLAIMER
+THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
+DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
+OTHER DEALINGS IN THE FONT SOFTWARE.
+
+
+------------------------------------------------------------------------
+
+Copyright (c) 2024 Prahlad Prasad Tantry and Mikhail Merkuryev
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+This license is copied below, and is also available with a FAQ at:
+http://scripts.sil.org/OFL
+
+
+-----------------------------------------------------------
+SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+-----------------------------------------------------------
+
+PREAMBLE
+The goals of the Open Font License (OFL) are to stimulate worldwide
+development of collaborative font projects, to support the font creation
+efforts of academic and linguistic communities, and to provide a free and
+open framework in which fonts may be shared and improved in partnership
+with others.
+
+The OFL allows the licensed fonts to be used, studied, modified and
+redistributed freely as long as they are not sold by themselves. The
+fonts, including any derivative works, can be bundled, embedded, 
+redistributed and/or sold with any software provided that any reserved
+names are not used by derivative works. The fonts and derivatives,
+however, cannot be released under any other type of license. The
+requirement for fonts to remain under this license does not apply
+to any document created using the fonts or their derivatives.
+
+DEFINITIONS
+"Font Software" refers to the set of files released by the Copyright
+Holder(s) under this license and clearly marked as such. This may
+include source files, build scripts and documentation.
+
+"Reserved Font Name" refers to any names specified as such after the
+copyright statement(s).
+
+"Original Version" refers to the collection of Font Software components as
+distributed by the Copyright Holder(s).
+
+"Modified Version" refers to any derivative made by adding to, deleting,
+or substituting -- in part or in whole -- any of the components of the
+Original Version, by changing formats or by porting the Font Software to a
+new environment.
+
+"Author" refers to any designer, engineer, programmer, technical
+writer or other person who contributed to the Font Software.
+
+PERMISSION & CONDITIONS
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of the Font Software, to use, study, copy, merge, embed, modify,
+redistribute, and sell modified and unmodified copies of the Font
+Software, subject to the following conditions:
+
+1) Neither the Font Software nor any of its individual components,
+in Original or Modified Versions, may be sold by itself.
+
+2) Original or Modified Versions of the Font Software may be bundled,
+redistributed and/or sold with any software, provided that each copy
+contains the above copyright notice and this license. These can be
+included either as stand-alone text files, human-readable headers or
+in the appropriate machine-readable metadata fields within text or
+binary files as long as those fields can be easily viewed by the user.
+
+3) No Modified Version of the Font Software may use the Reserved Font
+Name(s) unless explicit written permission is granted by the corresponding
+Copyright Holder. This restriction only applies to the primary font name as
+presented to the users.
+
+4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
+Software shall not be used to promote, endorse or advertise any
+Modified Version, except to acknowledge the contribution(s) of the
+Copyright Holder(s) and the Author(s) or with their explicit written
+permission.
+
+5) The Font Software, modified or unmodified, in part or in whole,
+must be distributed entirely under this license, and must not be
+distributed under any other license. The requirement for fonts to
+remain under this license does not apply to any document created
+using the Font Software.
+
+TERMINATION
+This license becomes null and void if any of the above conditions are
+not met.
+
+DISCLAIMER
+THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
+DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
+OTHER DEALINGS IN THE FONT SOFTWARE.
+
+
+------------------------------------------------------------------------
+
+Copyright (c) 2001-2025 SIL Global (https://www.sil.org/)
+with Reserved Font Names "Padauk", "Namkio", "Deemawso", and "SIL".
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+This license is copied below, and is also available with a FAQ at:
+https://openfontlicense.org
+
+
+-----------------------------------------------------------
+SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+-----------------------------------------------------------
+
+PREAMBLE
+The goals of the Open Font License (OFL) are to stimulate worldwide
+development of collaborative font projects, to support the font creation
+efforts of academic and linguistic communities, and to provide a free and
+open framework in which fonts may be shared and improved in partnership
+with others.
+
+The OFL allows the licensed fonts to be used, studied, modified and
+redistributed freely as long as they are not sold by themselves. The
+fonts, including any derivative works, can be bundled, embedded,
+redistributed and/or sold with any software provided that any reserved
+names are not used by derivative works. The fonts and derivatives,
+however, cannot be released under any other type of license. The
+requirement for fonts to remain under this license does not apply
+to any document created using the fonts or their derivatives.
+
+DEFINITIONS
+"Font Software" refers to the set of files released by the Copyright
+Holder(s) under this license and clearly marked as such. This may
+include source files, build scripts and documentation.
+
+"Reserved Font Name" refers to any names specified as such after the
+copyright statement(s).
+
+"Original Version" refers to the collection of Font Software components as
+distributed by the Copyright Holder(s).
+
+"Modified Version" refers to any derivative made by adding to, deleting,
+or substituting -- in part or in whole -- any of the components of the
+Original Version, by changing formats or by porting the Font Software to a
+new environment.
+
+"Author" refers to any designer, engineer, programmer, technical
+writer or other person who contributed to the Font Software.
+
+PERMISSION & CONDITIONS
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of the Font Software, to use, study, copy, merge, embed, modify,
+redistribute, and sell modified and unmodified copies of the Font
+Software, subject to the following conditions:
+
+1) Neither the Font Software nor any of its individual components,
+in Original or Modified Versions, may be sold by itself.
+
+2) Original or Modified Versions of the Font Software may be bundled,
+redistributed and/or sold with any software, provided that each copy
+contains the above copyright notice and this license. These can be
+included either as stand-alone text files, human-readable headers or
+in the appropriate machine-readable metadata fields within text or
+binary files as long as those fields can be easily viewed by the user.
+
+3) No Modified Version of the Font Software may use the Reserved Font
+Name(s) unless explicit written permission is granted by the corresponding
+Copyright Holder. This restriction only applies to the primary font name as
+presented to the users.
+
+4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
+Software shall not be used to promote, endorse or advertise any
+Modified Version, except to acknowledge the contribution(s) of the
+Copyright Holder(s) and the Author(s) or with their explicit written
+permission.
+
+5) The Font Software, modified or unmodified, in part or in whole,
+must be distributed entirely under this license, and must not be
+distributed under any other license. The requirement for fonts to
+remain under this license does not apply to any document created
+using the Font Software.
+
+TERMINATION
+This license becomes null and void if any of the above conditions are
+not met.
+
+DISCLAIMER
+THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
+DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
+OTHER DEALINGS IN THE FONT SOFTWARE.
+
+
+------------------------------------------------------------------------
+
+Copyright 2022 The Noto Project Authors (https://github.com/notofonts/dives-akuru)
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+This license is copied below, and is also available with a FAQ at:
+https://scripts.sil.org/OFL
+
+
+-----------------------------------------------------------
+SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+-----------------------------------------------------------
+
+PREAMBLE
+The goals of the Open Font License (OFL) are to stimulate worldwide
+development of collaborative font projects, to support the font creation
+efforts of academic and linguistic communities, and to provide a free and
+open framework in which fonts may be shared and improved in partnership
+with others.
+
+The OFL allows the licensed fonts to be used, studied, modified and
+redistributed freely as long as they are not sold by themselves. The
+fonts, including any derivative works, can be bundled, embedded, 
+redistributed and/or sold with any software provided that any reserved
+names are not used by derivative works. The fonts and derivatives,
+however, cannot be released under any other type of license. The
+requirement for fonts to remain under this license does not apply
+to any document created using the fonts or their derivatives.
+
+DEFINITIONS
+"Font Software" refers to the set of files released by the Copyright
+Holder(s) under this license and clearly marked as such. This may
+include source files, build scripts and documentation.
+
+"Reserved Font Name" refers to any names specified as such after the
+copyright statement(s).
+
+"Original Version" refers to the collection of Font Software components as
+distributed by the Copyright Holder(s).
+
+"Modified Version" refers to any derivative made by adding to, deleting,
+or substituting -- in part or in whole -- any of the components of the
+Original Version, by changing formats or by porting the Font Software to a
+new environment.
+
+"Author" refers to any designer, engineer, programmer, technical
+writer or other person who contributed to the Font Software.
+
+PERMISSION & CONDITIONS
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of the Font Software, to use, study, copy, merge, embed, modify,
+redistribute, and sell modified and unmodified copies of the Font
+Software, subject to the following conditions:
+
+1) Neither the Font Software nor any of its individual components,
+in Original or Modified Versions, may be sold by itself.
+
+2) Original or Modified Versions of the Font Software may be bundled,
+redistributed and/or sold with any software, provided that each copy
+contains the above copyright notice and this license. These can be
+included either as stand-alone text files, human-readable headers or
+in the appropriate machine-readable metadata fields within text or
+binary files as long as those fields can be easily viewed by the user.
+
+3) No Modified Version of the Font Software may use the Reserved Font
+Name(s) unless explicit written permission is granted by the corresponding
+Copyright Holder. This restriction only applies to the primary font name as
+presented to the users.
+
+4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
+Software shall not be used to promote, endorse or advertise any
+Modified Version, except to acknowledge the contribution(s) of the
+Copyright Holder(s) and the Author(s) or with their explicit written
+permission.
+
+5) The Font Software, modified or unmodified, in part or in whole,
+must be distributed entirely under this license, and must not be
+distributed under any other license. The requirement for fonts to
+remain under this license does not apply to any document created
+using the Font Software.
+
+TERMINATION
+This license becomes null and void if any of the above conditions are
+not met.
+
+DISCLAIMER
+THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
+DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
+OTHER DEALINGS IN THE FONT SOFTWARE.
+
+
+------------------------------------------------------------------------
+
+Copyright (c) 2021-2024 SIL International  (https://www.sil.org/)
+with Reserved Font Names "Kanchenjunga", "Andika", and "SIL".
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+This license is copied below, and is also available with a FAQ at:
+https://openfontlicense.org/
+
+
+-----------------------------------------------------------
+SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+-----------------------------------------------------------
+
+PREAMBLE
+The goals of the Open Font License (OFL) are to stimulate worldwide
+development of collaborative font projects, to support the font creation
+efforts of academic and linguistic communities, and to provide a free and
+open framework in which fonts may be shared and improved in partnership
+with others.
+
+The OFL allows the licensed fonts to be used, studied, modified and
+redistributed freely as long as they are not sold by themselves. The
+fonts, including any derivative works, can be bundled, embedded,
+redistributed and/or sold with any software provided that any reserved
+names are not used by derivative works. The fonts and derivatives,
+however, cannot be released under any other type of license. The
+requirement for fonts to remain under this license does not apply
+to any document created using the fonts or their derivatives.
+
+DEFINITIONS
+"Font Software" refers to the set of files released by the Copyright
+Holder(s) under this license and clearly marked as such. This may
+include source files, build scripts and documentation.
+
+"Reserved Font Name" refers to any names specified as such after the
+copyright statement(s).
+
+"Original Version" refers to the collection of Font Software components as
+distributed by the Copyright Holder(s).
+
+"Modified Version" refers to any derivative made by adding to, deleting,
+or substituting -- in part or in whole -- any of the components of the
+Original Version, by changing formats or by porting the Font Software to a
+new environment.
+
+"Author" refers to any designer, engineer, programmer, technical
+writer or other person who contributed to the Font Software.
+
+PERMISSION & CONDITIONS
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of the Font Software, to use, study, copy, merge, embed, modify,
+redistribute, and sell modified and unmodified copies of the Font
+Software, subject to the following conditions:
+
+1) Neither the Font Software nor any of its individual components,
+in Original or Modified Versions, may be sold by itself.
+
+2) Original or Modified Versions of the Font Software may be bundled,
+redistributed and/or sold with any software, provided that each copy
+contains the above copyright notice and this license. These can be
+included either as stand-alone text files, human-readable headers or
+in the appropriate machine-readable metadata fields within text or
+binary files as long as those fields can be easily viewed by the user.
+
+3) No Modified Version of the Font Software may use the Reserved Font
+Name(s) unless explicit written permission is granted by the corresponding
+Copyright Holder. This restriction only applies to the primary font name as
+presented to the users.
+
+4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
+Software shall not be used to promote, endorse or advertise any
+Modified Version, except to acknowledge the contribution(s) of the
+Copyright Holder(s) and the Author(s) or with their explicit written
+permission.
+
+5) The Font Software, modified or unmodified, in part or in whole,
+must be distributed entirely under this license, and must not be
+distributed under any other license. The requirement for fonts to
+remain under this license does not apply to any document created
+using the Font Software.
+
+TERMINATION
+This license becomes null and void if any of the above conditions are
+not met.
+
+DISCLAIMER
+THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
+DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
+OTHER DEALINGS IN THE FONT SOFTWARE.
+
+
+------------------------------------------------------------------------
+
+Copyright (c) 2007-2025, SIL Global (https://www.sil.org/),
+with Reserved Font Names "Kedebideri" and "SIL".
+Copyright (c) 2010-2024 Adobe (https://www.adobe.com/),
+with Reserved Font Name "Source" (Latin glyphs).
+
+This license is copied below, and is also available with an FAQ at:
+https://openfontlicense.org/
+
+-----------------------------------------------------------
+SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+-----------------------------------------------------------
+
+PREAMBLE
+The goals of the Open Font License (OFL) are to stimulate worldwide
+development of collaborative font projects, to support the font creation
+efforts of academic and linguistic communities, and to provide a free and
+open framework in which fonts may be shared and improved in partnership
+with others.
+
+The OFL allows the licensed fonts to be used, studied, modified and
+redistributed freely as long as they are not sold by themselves. The
+fonts, including any derivative works, can be bundled, embedded, 
+redistributed and/or sold with any software provided that any reserved
+names are not used by derivative works. The fonts and derivatives,
+however, cannot be released under any other type of license. The
+requirement for fonts to remain under this license does not apply
+to any document created using the fonts or their derivatives.
+
+DEFINITIONS
+"Font Software" refers to the set of files released by the Copyright
+Holder(s) under this license and clearly marked as such. This may
+include source files, build scripts and documentation.
+
+"Reserved Font Name" refers to any names specified as such after the
+copyright statement(s).
+
+"Original Version" refers to the collection of Font Software components as
+distributed by the Copyright Holder(s).
+
+"Modified Version" refers to any derivative made by adding to, deleting,
+or substituting -- in part or in whole -- any of the components of the
+Original Version, by changing formats or by porting the Font Software to a
+new environment.
+
+"Author" refers to any designer, engineer, programmer, technical
+writer or other person who contributed to the Font Software.
+
+PERMISSION & CONDITIONS
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of the Font Software, to use, study, copy, merge, embed, modify,
+redistribute, and sell modified and unmodified copies of the Font
+Software, subject to the following conditions:
+
+1) Neither the Font Software nor any of its individual components,
+in Original or Modified Versions, may be sold by itself.
+
+2) Original or Modified Versions of the Font Software may be bundled,
+redistributed and/or sold with any software, provided that each copy
+contains the above copyright notice and this license. These can be
+included either as stand-alone text files, human-readable headers or
+in the appropriate machine-readable metadata fields within text or
+binary files as long as those fields can be easily viewed by the user.
+
+3) No Modified Version of the Font Software may use the Reserved Font
+Name(s) unless explicit written permission is granted by the corresponding
+Copyright Holder. This restriction only applies to the primary font name as
+presented to the users.
+
+4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
+Software shall not be used to promote, endorse or advertise any
+Modified Version, except to acknowledge the contribution(s) of the
+Copyright Holder(s) and the Author(s) or with their explicit written
+permission.
+
+5) The Font Software, modified or unmodified, in part or in whole,
+must be distributed entirely under this license, and must not be
+distributed under any other license. The requirement for fonts to
+remain under this license does not apply to any document created
+using the Font Software.
+
+TERMINATION
+This license becomes null and void if any of the above conditions are
+not met.
+
+DISCLAIMER
+THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
+DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
+OTHER DEALINGS IN THE FONT SOFTWARE.
+
+
+------------------------------------------------------------------------
+
+Copyright (c) 2013, Andrew West (www.babelstone.co.uk),
+with Reserved Font Name BabelStone.
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+This license is copied below, and is also available with a FAQ at:
+http://scripts.sil.org/OFL
+
+
+-----------------------------------------------------------
+SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+-----------------------------------------------------------
+
+PREAMBLE
+The goals of the Open Font License (OFL) are to stimulate worldwide
+development of collaborative font projects, to support the font creation
+efforts of academic and linguistic communities, and to provide a free and
+open framework in which fonts may be shared and improved in partnership
+with others.
+
+The OFL allows the licensed fonts to be used, studied, modified and
+redistributed freely as long as they are not sold by themselves. The
+fonts, including any derivative works, can be bundled, embedded, 
+redistributed and/or sold with any software provided that any reserved
+names are not used by derivative works. The fonts and derivatives,
+however, cannot be released under any other type of license. The
+requirement for fonts to remain under this license does not apply
+to any document created using the fonts or their derivatives.
+
+DEFINITIONS
+"Font Software" refers to the set of files released by the Copyright
+Holder(s) under this license and clearly marked as such. This may
+include source files, build scripts and documentation.
+
+"Reserved Font Name" refers to any names specified as such after the
+copyright statement(s).
+
+"Original Version" refers to the collection of Font Software components as
+distributed by the Copyright Holder(s).
+
+"Modified Version" refers to any derivative made by adding to, deleting,
+or substituting -- in part or in whole -- any of the components of the
+Original Version, by changing formats or by porting the Font Software to a
+new environment.
+
+"Author" refers to any designer, engineer, programmer, technical
+writer or other person who contributed to the Font Software.
+
+PERMISSION & CONDITIONS
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of the Font Software, to use, study, copy, merge, embed, modify,
+redistribute, and sell modified and unmodified copies of the Font
+Software, subject to the following conditions:
+
+1) Neither the Font Software nor any of its individual components,
+in Original or Modified Versions, may be sold by itself.
+
+2) Original or Modified Versions of the Font Software may be bundled,
+redistributed and/or sold with any software, provided that each copy
+contains the above copyright notice and this license. These can be
+included either as stand-alone text files, human-readable headers or
+in the appropriate machine-readable metadata fields within text or
+binary files as long as those fields can be easily viewed by the user.
+
+3) No Modified Version of the Font Software may use the Reserved Font
+Name(s) unless explicit written permission is granted by the corresponding
+Copyright Holder. This restriction only applies to the primary font name as
+presented to the users.
+
+4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
+Software shall not be used to promote, endorse or advertise any
+Modified Version, except to acknowledge the contribution(s) of the
+Copyright Holder(s) and the Author(s) or with their explicit written
+permission.
+
+5) The Font Software, modified or unmodified, in part or in whole,
+must be distributed entirely under this license, and must not be
+distributed under any other license. The requirement for fonts to
+remain under this license does not apply to any document created
+using the Font Software.
+
+TERMINATION
+This license becomes null and void if any of the above conditions are
+not met.
+
+DISCLAIMER
+THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
+DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
+OTHER DEALINGS IN THE FONT SOFTWARE.

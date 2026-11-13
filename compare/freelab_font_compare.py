@@ -105,18 +105,25 @@ def code_text(code):
 # The two sides
 # ---------------------------------------------------------------------------
 
-def choice_text(font_name, master, masters_count):
-    """A font and master as the combo boxes list them: the font's name, its master's after a dot when
-    it has several."""
-    return font_name if masters_count <= 1 else u"%s \N{MIDDLE DOT} %s" % (font_name, master)
+PLACEHOLDER = u"Choose a font\N{HORIZONTAL ELLIPSIS}"  # the second dropdown before a choice is made
+OPEN_ENTRY = u"Open a font\N{HORIZONTAL ELLIPSIS}"  # its last row: a font file opened in FontLab, then chosen
 
 
-def side_labels(a, b):
+def choice_text(font_name, master, masters_count, note=None):
+    """A font and master as the dropdowns list them and the sentences name them: the font's name, with
+    its master in parentheses when it has several ("Sans (Bold)"); note: one more thing to tell it by
+    (its file's name, "first"), in the same parentheses."""
+    extras = ([master] if masters_count > 1 else []) + ([note] if note else [])
+    return u"%s (%s)" % (font_name, u", ".join(extras)) if extras else font_name
+
+
+def side_labels(a, b, same=None):
     """The two sides' names in sentences: a and b are (font key, font name, master, masters count).
     Two masters of one font go by their masters; two fonts by their names (and their masters when
-    they have several); fonts of one name by their files' names, or else as first and second."""
+    they have several); fonts of one name by their files' names, or else as first and second. same:
+    whether both are one font, when the caller knows (two unsaved fonts of one name share a key)."""
     (key_a, name_a, master_a, count_a), (key_b, name_b, master_b, count_b) = a, b
-    if key_a == key_b:
+    if key_a == key_b if same is None else same:
         if master_a != master_b:
             return master_a, master_b
         return u"first", u"second"
@@ -126,8 +133,55 @@ def side_labels(a, b):
             name_a, name_b = file_a, file_b
     label_a, label_b = choice_text(name_a, master_a, count_a), choice_text(name_b, master_b, count_b)
     if label_a == label_b:
-        return u"%s (first)" % label_a, u"%s (second)" % label_b
+        return choice_text(name_a, master_a, count_a, u"first"), choice_text(name_b, master_b, count_b, u"second")
     return label_a, label_b
+
+
+def first_entries(font):
+    """The first dropdown's rows, (font id, master, text): the window's own font, a row per master.
+    font: (font id, name, masters, file name)."""
+    font_id, name, masters, _ = font
+    return [(font_id, master, choice_text(name, master, len(masters))) for master in masters]
+
+
+def second_entries(fonts, own=None):
+    """The second dropdown's rows, (kind, font id, master, text): the placeholder shown until a choice is
+    made ("none"); the other open fonts in FontLab's order, a row per master ("font"); the window's own
+    font last, and only when it has several masters (a font is compared with itself master against
+    master); then, set apart ("separator"), the row that opens a font file ("open").
+    fonts: [(font id, name, masters, file name)]; own: the window's font's id. Fonts of one name are told
+    apart by their files' names."""
+    names = [name for _, name, _, _ in fonts]
+    rows = [("none", None, None, PLACEHOLDER)]
+    listed = [font for font in fonts if font[0] != own] + [font for font in fonts if font[0] == own and len(font[2]) > 1]
+    for font_id, name, masters, file_name in listed:
+        note = file_name if file_name and names.count(name) > 1 else None
+        for master in masters:
+            rows.append(("font", font_id, master, choice_text(name, master, len(masters), note)))
+    rows.append(("separator", None, None, u""))
+    rows.append(("open", None, None, OPEN_ENTRY))
+    return rows
+
+
+def missing_line(name, others, masters, chosen, same_master=False):
+    """What keeps Compare grayed, as the window's top line (rich text), or u"" when both sides are
+    chosen. name: the window's font, as shown (None: no font is open); others: how many other fonts are
+    open; masters: how many masters the window's font has; chosen: whether the second side is chosen;
+    same_master: it is the first side's own master."""
+    if name is None:
+        return u"No font is open. Open a font in FontLab, then choose the font to compare it with in <i>with</i>."
+    if chosen and same_master:
+        return (u"Both sides are the same master of %s: choose another master, or another font, in <i>with</i>."
+                % name)
+    if chosen:
+        return u""
+    if not others and masters <= 1:
+        return (u"Only %s is open, with one master. Choose <i>%s</i> in <i>with</i>, or open another font in "
+                u"FontLab, to have a font to compare it with." % (name, OPEN_ENTRY))
+    if not others:
+        return (u"Only %s is open. Choose in <i>with</i> the master to compare with, or <i>%s</i> for another "
+                u"font, then click <i>Compare</i>." % (name, OPEN_ENTRY))
+    return u"Choose in <i>with</i> the font to compare %s with, then click <i>Compare</i>." % name
 
 
 # ---------------------------------------------------------------------------
@@ -583,8 +637,9 @@ class GlyphResult(object):
         return [d for d in self.differences if kinds is None or d.kind in kinds]
 
     def short(self, kinds=None):
-        """Its differences of the given kinds (None: all) in short, for the list."""
-        return u" \N{MIDDLE DOT} ".join(d.short for d in self.shown(kinds))
+        """Its differences of the given kinds (None: all) in short, for the list: one after another, as
+        its sentence gives them (a kind's own parts are joined by commas)."""
+        return u"; ".join(d.short for d in self.shown(kinds))
 
     def sentence(self, labels):
         """Its differences in one sentence: "a, Regular and Bold: width 520 and 540 (+20); ...". """
@@ -920,7 +975,9 @@ def _prop(obj, name):
 HELP = u"""<b>FreeLab Font Compare</b><br>
 Two open fonts, or two masters of one font, compared glyph by glyph. Nothing in either font
 changes.<br><br>
-Choose them in <i>Compare</i> and <i>with</i> (the current font first), then click <i>Compare</i>.
+The first is this window's font (<i>Compare</i> lists its masters). Choose the second in <i>with</i>:
+another open font, another master of the first, or <i>Open a font\N{HORIZONTAL ELLIPSIS}</i> for a font
+file; then click <i>Compare</i>.
 Differences of at most the units set are left out (metrics, anchors, nodes, components, kerning).
 A font of another em is scaled to the first one's.<br><br>
 <b>Glyphs</b>: a chip per kind of difference, each showing or hiding that kind in the list (a glyph
@@ -1169,7 +1226,10 @@ class CompareDialog(object):
         self.seen_history = None
         self.second = SecondWatch(self)
         self.busy = self.filling = False
-        self.fonts, self.choices = [], []  # open fonts (the current first); (font index, master) per combo entry
+        self.fonts, self.by_id = [], {}  # the open fonts (this window's first), and each by FontLab's number of it
+        self.own_listed = False  # whether fonts starts with this window's font
+        self.first_rows, self.second_rows = [], []  # the dropdowns' rows (first_entries, second_entries)
+        self.second_key = None  # the second side chosen: (font number, master), or None
         self.sides = None  # (Side, Side) compared
         self.masters_mode = False
         self.results, self.glyph_names = [], []
@@ -1190,27 +1250,27 @@ class CompareDialog(object):
         layout.addWidget(ak.separator())
         settings = QtGui.QHBoxLayout()
         settings.addWidget(QtGui.QLabel("Compare"))
-        self.choice_a = self.combo(u"The first font and master: the current font to start with. Its glyph names are "
-                                   u"the ones listed, and its glyphs are flagged by a right-click.")
+        self.choice_a = self.combo(u"The first font: this window's, with a row for each of its masters. Its glyph "
+                                   u"names are the ones listed, and its glyphs are flagged by a right-click.")
         settings.addWidget(self.choice_a)
         self.swap_button = QtGui.QToolButton()
         self.swap_button.setText(u"\N{LEFTWARDS ARROW OVER RIGHTWARDS ARROW}")
         self.swap_button.setAutoRaise(True)
-        self.swap_button.setToolTip(u"Swap the two fonts (and compare again, if they were compared).")
+        self.swap_button.setToolTip(u"Swaps the two masters of this font, and compares again if they were compared. "
+                                    u"With another font chosen there is nothing to swap: the first is this window's font.")
         settings.addWidget(self.swap_button)
         settings.addWidget(QtGui.QLabel("with"))
-        self.choice_b = self.combo(u"The second font and master: another open font, or another master of the first.")
+        self.choice_b = self.combo(u"The second font: another font open in FontLab (a row for each master), or "
+                                   u"another master of the first. Its last row, <i>%s</i>, opens a font file in "
+                                   u"FontLab (as <i>File &gt; Open</i> does) and chooses it. The list follows the "
+                                   u"fonts FontLab has open." % OPEN_ENTRY)
         settings.addWidget(self.choice_b)
-        self.open_button = QtGui.QPushButton(u"Open a font\N{HORIZONTAL ELLIPSIS}")
-        self.open_button.setWhatsThis(u"Opens a font file in FontLab (as <i>File &gt; Open</i> does) and chooses it "
-                                      u"as the second font, to compare without opening it first.")
-        settings.addWidget(self.open_button)
         settings.addSpacing(12)
         settings.addWidget(QtGui.QLabel("Ignore differences up to"))
         self.threshold = QtGui.QSpinBox()
         self.threshold.setRange(0, 100)
         self.threshold.setValue(THRESHOLD)
-        self.threshold.setSuffix(u" units")
+        self.suffix_slot = ak.counted_suffix(self.threshold, u"unit")  # ("1 unit", "2 units")
         self.threshold.setWhatsThis(u"Widths, sidebearings, anchors, nodes, components, and kerning values that differ "
                                     u"by at most this many units count as alike.")
         settings.addWidget(self.threshold)
@@ -1244,10 +1304,12 @@ class CompareDialog(object):
         layout.addLayout(buttons)
         self.close_button.connect("clicked()", dialog.close)
         self.compare_button.connect("clicked()", self.compare)
-        self.open_button.connect("clicked()", self.open_font)
         self.swap_button.connect("clicked()", self.swap)
-        self.choice_a.connect("currentIndexChanged(int)", lambda index: self.choice_changed())
-        self.choice_b.connect("currentIndexChanged(int)", lambda index: self.choice_changed())
+        self.choice_slots = [lambda index: self.choice_changed(), lambda index: self.second_activated(index)]
+        self.choice_a.connect("currentIndexChanged(int)", self.choice_slots[0])
+        self.choice_b.connect("currentIndexChanged(int)", self.choice_slots[0])
+        self.choice_b.connect("activated(int)", self.choice_slots[1])  # (a row picked by the user, not by the code)
+        self.watch_fonts()
         self.tabs.connect("currentChanged(int)", self.switch_page)
         ak.add_tools_button(dialog, "Font Compare", getattr(self, "log", None))  # (the other font tools, a click away)
         ak.plain_buttons(dialog)
@@ -1317,6 +1379,29 @@ class CompareDialog(object):
 
         found = Resized()
         widget.installEventFilter(found)
+        self.filters.append(found)
+
+    REFRESH_EVENTS = (2, 8, 24)  # MouseButtonPress, FocusIn, WindowActivate
+
+    def watch_fonts(self):
+        """The dropdowns follow the fonts FontLab has open: read again as a dropdown is pressed or takes
+        the focus (before its list opens), and as the window becomes the active one (a font opened or
+        closed in FontLab meanwhile)."""
+        QtCore, QtGui = _qt()
+        owner = self
+
+        class Watch(QtCore.QTimer):  # PythonQt has no QObject to subclass; a timer will do
+            def eventFilter(self, obj, event):
+                try:
+                    if event.type() in owner.REFRESH_EVENTS and not owner.busy and not owner.filling:
+                        owner.read_fonts()
+                except Exception:
+                    pass  # an event filter must never raise
+                return False
+
+        found = Watch()
+        for widget in (self.dialog, self.choice_a, self.choice_b):
+            widget.installEventFilter(found)
         self.filters.append(found)
 
     def redraw_now(self):
@@ -1452,16 +1537,28 @@ class CompareDialog(object):
                 return None
         except Exception:
             pass
-        package = workspace.currentPackage
+        package = self.ak.window_font(self, workspace)  # this window's font
         if package is None or package.isNull or not package.glyphsCount:
             return None
         return package
 
+    def font_number(self, package):
+        """What tells an open font from every other: FontLab's number of it (fgPackage.id, the same through
+        every Python wrapper of the font), since two open fonts can share a name; its file, or its name,
+        where the number cannot be read. (Not named font_id: the window model keeps this window's font's
+        number in an attribute of that name.)"""
+        try:
+            found = package.fgPackage.id
+        except Exception:
+            found = None
+        return found if found is not None else self.ak.font_key(package)
+
     def open_fonts(self):
-        """The open fonts, the current one first."""
+        """The open fonts, this window's first (own_listed: whether it is there), each once."""
         current = self.current_font()
+        self.own_listed = current is not None
         found = [current] if current is not None else []
-        keys = set(self.ak.font_key(p) for p in found)
+        keys = set(self.font_number(p) for p in found)
         try:
             listed = list(self.fontlab.flWorkspace.instance().packages())
         except Exception:
@@ -1471,7 +1568,7 @@ class CompareDialog(object):
                 package = self.fontlab.flPackage(item)
                 if package is None or package.isNull or not package.glyphsCount:
                     continue
-                key = self.ak.font_key(package)
+                key = self.font_number(package)
             except Exception:
                 continue
             if key not in keys:
@@ -1503,8 +1600,8 @@ class CompareDialog(object):
             return False
 
     def open_font(self):
-        """A font file picked and opened in FontLab; once it is in, chosen as the second font (at once
-        when it is open already)."""
+        """The second dropdown's last row: a font file picked and opened in FontLab; once it is in, chosen
+        as the second font (at once when it is open already)."""
         QtCore, QtGui = _qt()
         path = QtGui.QFileDialog.getOpenFileName(self.dialog, u"Open a font to compare", u"", self.OPEN_FILTER)
         path = u"%s" % (path[0] if isinstance(path, (tuple, list)) else path or u"")
@@ -1519,7 +1616,7 @@ class CompareDialog(object):
             except Exception as exc:
                 self.log.add(u"Could not choose that font: %s" % self.ak.html(exc), "error")
             return
-        before = set(self.ak.font_key(p) for p in fonts)
+        before = set(self.font_number(p) for p in fonts)
         try:
             self.fontlab.flItems.requestLoadingFont(path)
         except Exception as exc:
@@ -1549,7 +1646,7 @@ class CompareDialog(object):
             return
         path, before, superseded = opening
         try:
-            new = [p for p in self.open_fonts() if self.ak.font_key(p) not in before]
+            new = [p for p in self.open_fonts() if self.font_number(p) not in before]
             named = [p for p in new if getattr(p, "path", None) and self.same_file(p.path, path)]
             found = named or ([] if superseded else new)
             if not found:
@@ -1572,115 +1669,179 @@ class CompareDialog(object):
         """An open font chosen as the second font, and said so (said: how the log's line starts, %s standing
         for the font's name)."""
         self.read_fonts()
-        key = self.ak.font_key(package)
-        for index, (font_index, master) in enumerate(self.choices):
-            if self.ak.font_key(self.fonts[font_index]) == key:
-                self.choice_b.setCurrentIndex(index)
-                break
+        key = self.font_number(package)
+        first = self.first_key()
+        masters = [row[2] for row in self.second_rows if row[0] == "font" and row[1] == key]
+        if first is not None and first[0] == key:  # a master of the first font: another than the first side's
+            masters = [master for master in masters if master != first[1]]
+        if not masters:  # this window's own font, with one master: not in the list
+            self.log.add(u"%s is the first font, and has one master: there is nothing to compare it with. "
+                         u"Choose another font in <i>with</i>." % self.ak.b(package.tfn), "warning")
+            return
+        try:
+            current = u"%s" % package.master
+        except Exception:
+            current = None
+        self.set_second((key, current if current in masters else masters[0]))
+        self.say_state(True)
+        self.update_buttons()
         self.log.add((said + u": chosen as the second font. Click %s.") % (
             self.ak.b(package.tfn), self.ak.i(u"Compare")), "done")
 
     def swap(self):
-        """The first font and the second exchanged; compared again when they had been."""
-        a, b = self.choice_a.currentIndex, self.choice_b.currentIndex
-        if a < 0 or b < 0:
+        """The two masters of this window's font exchanged; compared again when they had been. Two
+        fonts are not exchanged: the first side is the window's font."""
+        a, b = self.first_key(), self.second_key
+        if not self.can_swap():
             return
         compared = self.sides is not None
         self.filling = True
         try:
-            self.choice_a.setCurrentIndex(b)
-            self.choice_b.setCurrentIndex(a)
+            self.choice_a.setCurrentIndex([row[:2] for row in self.first_rows].index(b))
         finally:
             self.filling = False
+        self.set_second(a)
+        self.update_buttons()
         if compared:
             self.compare()
 
+    def can_swap(self):
+        a, b = self.first_key(), self.second_key
+        return a is not None and b is not None and a[0] == b[0] and a[1] != b[1] and b in [row[:2] for row in self.first_rows]
+
+    @staticmethod
+    def file_name(package):
+        """A font's file's name, to tell two fonts of one name apart; u"" for a font never saved."""
+        try:
+            return os.path.basename(u"%s" % (package.path or u""))
+        except Exception:
+            return u""
+
+    @staticmethod
+    def fill_box(box, texts):
+        """A dropdown's rows set (None: a separator, which takes a row of its own in Qt's count too)."""
+        box.clear()
+        for index, text in enumerate(texts):
+            if text is None:
+                try:
+                    box.insertSeparator(index)
+                except Exception:
+                    box.addItem(u"")  # (a Qt that will not: an empty row keeps the rows' numbers)
+            else:
+                box.addItem(text)
+
     def read_fonts(self):
-        """The combo boxes filled with the open fonts and their masters, the choices kept where they still
-        are; False (and said so) when no font is open."""
-        wanted = [self.chosen(box) for box in (self.choice_a, self.choice_b)]
-        wanted = [None if w is None else (self.ak.font_key(w[0]), w[1]) for w in wanted]
-        self.fonts = self.open_fonts()
-        self.choices = []
-        texts = []
-        for index, package in enumerate(self.fonts):
-            masters = self.masters_of(package)
-            for master in masters:
-                self.choices.append((index, master))
-                texts.append(choice_text(u"%s" % package.tfn, master, len(masters)))
-        keys = [(self.ak.font_key(self.fonts[i]), m) for i, m in self.choices]
+        """The dropdowns filled from the fonts FontLab has open now, each choice kept while its font (by
+        FontLab's number of it, not its name) and master are still there: the first lists this window's
+        font's masters, the second the other fonts (second_entries), empty until a choice is made. A
+        list that did not change is left as it is (it may be open). False when the window has no font."""
+        wanted = self.first_key()
+        fonts = self.open_fonts()
+        listed = [(self.font_number(p), u"%s" % p.tfn, self.masters_of(p), self.file_name(p)) for p in fonts]
+        self.fonts = fonts
+        self.by_id = dict((entry[0], package) for entry, package in zip(listed, fonts))
+        own = listed[0] if self.own_listed and listed else None
+        first = first_entries(own) if own is not None else []
+        second = second_entries(listed, own[0] if own is not None else None)
+        lost = False
         self.filling = True
         try:
-            for box, want in ((self.choice_a, wanted[0]), (self.choice_b, wanted[1])):
-                box.clear()
-                for text in texts:
-                    box.addItem(text)
-            first = self.default_first(keys, wanted[0])
-            second = self.default_second(keys, first, wanted[1])
-            if first is not None:
-                self.choice_a.setCurrentIndex(first)
-            if second is not None:
-                self.choice_b.setCurrentIndex(second)
+            if first != self.first_rows:
+                self.first_rows = first
+                self.fill_box(self.choice_a, [row[2] for row in first])
+                keys = [row[:2] for row in first]
+                if wanted not in keys and own is not None:
+                    try:  # the master FontLab shows, to start with
+                        wanted = (own[0], u"%s" % fonts[0].master)
+                    except Exception:
+                        wanted = None
+                if keys:
+                    self.choice_a.setCurrentIndex(keys.index(wanted) if wanted in keys else 0)
+            if second != self.second_rows:
+                self.second_rows = second
+                self.fill_box(self.choice_b, [None if row[0] == "separator" else row[3] for row in second])
+            held = self.second_key
+            lost = not self.set_second(held) and held is not None  # (its font closed, or its master gone)
         finally:
             self.filling = False
-        if not self.fonts:
-            self.font_label.setText(u"No font is open. Open two fonts, or one with two masters, then click %s."
-                                    % self.ak.i("Compare"))
-            return False
-        if len(self.choices) < 2:
-            self.font_label.setText(u"Only %s is open, with one master: open another font to compare it with, then click "
-                                    u"%s." % (self.ak.b(self.fonts[0].tfn), self.ak.i("Compare")))
-        elif self.sides is None:
-            self.font_label.setText(u"Choose two fonts, or two masters of one font, then click %s." % self.ak.i("Compare"))
-        return True
+        if lost:
+            self.log.add(u"The second font chosen is no longer open (or no longer has that master): choose again in "
+                         u"<i>with</i>.", "warning")
+        self.say_state()
+        self.update_buttons()
+        return own is not None
 
-    def default_first(self, keys, wanted):
-        if wanted in keys:
-            return keys.index(wanted)
-        if not keys:
-            return None
+    def set_second(self, key):
+        """The second side set to (font number, master), or to nothing (None, or a font or master that
+        is not listed): the placeholder shows. True when it is chosen."""
+        index = next((k for k, row in enumerate(self.second_rows) if row[0] == "font" and row[1:3] == tuple(key or ())), 0)
+        self.second_key = tuple(key) if index else None
+        filling, self.filling = self.filling, True
         try:
-            current = (self.ak.font_key(self.fonts[0]), u"%s" % self.fonts[0].master)
-            if current in keys:
-                return keys.index(current)
-        except Exception:
-            pass
-        return 0
+            if _prop(self.choice_b, "currentIndex") != index:
+                self.choice_b.setCurrentIndex(index)
+        finally:
+            self.filling = filling
+        return bool(index)
 
-    def default_second(self, keys, first, wanted):
-        """What was chosen, or the next open font's current master, or the first font's next master."""
-        if wanted in keys and keys.index(wanted) != first:
-            return keys.index(wanted)
-        if first is None or len(keys) < 2:
-            return first
-        font = keys[first][0]
-        for index, package in enumerate(self.fonts):
-            key = self.ak.font_key(package)
-            if key == font:
-                continue
-            try:
-                master = u"%s" % package.master
-            except Exception:
-                master = None
-            if (key, master) in keys:
-                return keys.index((key, master))
-            return next(k for k, (f, _) in enumerate(keys) if f == key)
-        return next((k for k, (f, _) in enumerate(keys) if f == font and k != first), first)
+    def first_key(self):
+        """(font number, master) of the first side, or None while the window has no font."""
+        index = _prop(self.choice_a, "currentIndex")
+        if not isinstance(index, int) or not 0 <= index < len(self.first_rows):
+            return None
+        return self.first_rows[index][:2]
 
     def chosen(self, box):
-        """(package, master) chosen in a combo box, or None."""
-        index = _prop(box, "currentIndex") if self.choices else -1
-        if index is None or not 0 <= index < len(self.choices):
-            return None
-        font, master = self.choices[index]
-        return self.fonts[font], master
+        """(package, master) chosen in a dropdown, or None."""
+        key = self.first_key() if box is self.choice_a else self.second_key
+        package = self.by_id.get(key[0]) if key is not None else None
+        return (package, key[1]) if package is not None else None
+
+    def missing(self):
+        """What keeps Compare grayed (missing_line), or u"" when both sides are chosen."""
+        own = self.fonts[0] if self.own_listed and self.fonts else None
+        first, second = self.first_key(), self.second_key
+        return missing_line(self.ak.b(own.tfn) if own is not None else None, len(self.fonts) - (1 if own is not None else 0),
+                            len(self.first_rows), second is not None, second is not None and second == first)
+
+    def say_state(self, changed=False):
+        """The top line: what is missing, while something is; that Compare can be clicked, before the
+        first comparison and after a choice changed (the lists below then show the last comparison)."""
+        text = self.missing()
+        if not text and (changed or self.sides is None):
+            text = u"Click %s to compare the fonts chosen." % self.ak.i("Compare")
+        if text:
+            self.font_label.setText(text)
+
+    def second_activated(self, index):
+        """A row of the second dropdown picked by the user: its last row opens a font file, the choice
+        staying what it was (the font opened is chosen once FontLab has it)."""
+        try:
+            kind = self.second_rows[index][0] if isinstance(index, int) and 0 <= index < len(self.second_rows) else None
+            if kind in ("open", "separator"):  # (neither is a font: the dropdown shows the choice again)
+                self.set_second(self.second_key)
+            if kind == "open":
+                self.open_font()
+        except Exception as exc:  # a signal's handler must not raise
+            self.log.add(u"Could not open a font: %s" % self.ak.html(exc), "error")
 
     def choice_changed(self):
+        """A dropdown's row changed (by the user: the code's own changes are made while filling)."""
         if self.filling or self.busy:
             return
-        self.update_buttons()
-        if self.sides is not None:
-            self.font_label.setText(u"Click %s to compare the fonts chosen." % self.ak.i("Compare"))
+        try:
+            index = _prop(self.choice_b, "currentIndex")
+            row = self.second_rows[index] if isinstance(index, int) and 0 <= index < len(self.second_rows) else None
+            if row is not None and row[0] == "font":
+                self.second_key = row[1:3]
+            elif row is not None and row[0] == "none":
+                self.second_key = None
+            elif row is not None:
+                return  # the row that opens a file: second_activated puts the choice back
+            self.say_state(True)
+            self.update_buttons()
+        except Exception:
+            pass  # a signal's handler must not raise
 
     def colors(self):
         QtCore, QtGui = _qt()
@@ -1769,15 +1930,10 @@ class CompareDialog(object):
         """Both choices compared: glyphs, kerning, and features."""
         if self.busy:
             return
-        self.read_fonts()
+        self.read_fonts()  # (and what is missing said, the button grayed)
         a, b = self.chosen(self.choice_a), self.chosen(self.choice_b)
         ak = self.ak
-        if a is None or b is None:
-            self.update_buttons()
-            return
-        if ak.font_key(a[0]) == ak.font_key(b[0]) and a[1] == b[1]:
-            self.font_label.setText(u"Choose two fonts, or two masters of one font, to compare.")
-            self.update_buttons()
+        if a is None or b is None or self.missing():
             return
         self.busy = True
         ak.enable(self.compare_button, False)
@@ -1793,9 +1949,10 @@ class CompareDialog(object):
     def run(self, a, b):
         ak, b_ = self.ak, self.ak.b
         (package_a, master_a), (package_b, master_b) = a, b
-        same = ak.font_key(package_a) == ak.font_key(package_b)
+        same = self.font_number(package_a) == self.font_number(package_b)
         labels = side_labels((ak.font_key(package_a), u"%s" % package_a.tfn, master_a, len(self.masters_of(package_a))),
-                             (ak.font_key(package_b), u"%s" % package_b.tfn, master_b, len(self.masters_of(package_b))))
+                             (ak.font_key(package_b), u"%s" % package_b.tfn, master_b, len(self.masters_of(package_b))),
+                             same)
         first, second = Side(package_a, master_a, labels[0]), Side(package_b, master_b, labels[1])
         upm_a, upm_b = float(package_a.upm or 1000), float(package_b.upm or 1000)
         factor = upm_a / upm_b if upm_b else 1.0
@@ -1906,7 +2063,9 @@ class CompareDialog(object):
 
     def update_buttons(self):
         ak = self.ak
-        ak.enable(self.compare_button, not self.busy and len(self.choices) > 1)
+        ready = self.first_key() is not None and self.second_key is not None and not self.missing()
+        ak.enable(self.compare_button, not self.busy and ready)  # grayed until both sides are chosen
+        ak.enable(self.swap_button, not self.busy and self.can_swap())
         tab_texts = (u"Glyphs", u"Kerning", u"Features")
         if self.sides is not None:
             tab_texts = (u"Glyphs %s" % grouped(len(self.results)), u"Kerning %s" % grouped(
@@ -2205,7 +2364,8 @@ class CompareDialog(object):
                 if len(differing) == 1:
                     text = text.replace(u" differ:", u" differs:")
             else:
-                text = u"The %s are alike." % b(counted(len(self.feature_rows), u"feature"))
+                text = (u"The one feature is alike in both." if len(self.feature_rows) == 1
+                    else u"The %s are alike." % b(counted(len(self.feature_rows), u"feature")))
         self.feature_status.setText(text)
         self.select_first(tree, self.feature_selected)
 
@@ -2241,18 +2401,15 @@ class CompareDialog(object):
     def show(self):
         QtCore, QtGui = _qt()
         self.dialog.show()
-        self.dialog.raise_()
-        if len(self.choices) > 1:
-            QtCore.QTimer.singleShot(50, self.compare)  # compared as it opens
+        self.dialog.raise_()  # (nothing compared as it opens: the second font is the user's to choose)
 
 
 def main():
-    held = getattr(sys, "_freelab_font_compare", None)
-    if held is not None:
-        try:
-            held.dialog.close()
-        except Exception:
-            pass
+    try:  # this font's window shows it already: brought forward as it is
+        if load_auto_kerning().raise_open("Font Compare"):
+            return
+    except Exception:
+        pass
     dialog = CompareDialog()
     sys._freelab_font_compare = dialog  # kept, even half-built: PythonQt deletes a dialog with no Python reference
     if dialog.failed is not None:
@@ -2264,6 +2421,10 @@ def main():
         return
     try:
         dialog.ak.hook_menu_order()
+    except Exception:
+        pass
+    try:
+        dialog.ak.take_window("Font Compare", dialog)  # its font's window: the tool shown there gives way
     except Exception:
         pass
     dialog.show()

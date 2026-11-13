@@ -215,7 +215,7 @@ SWEEP_MS = 750  # how often to look for widgets FontLab created or showed
 FULL_SWEEP_EVERY = 40  # every Nth sweep revisits every widget (replaced stylesheets, new icons)
 FOCUS_DRAIN_MS = 80  # a window that takes focus is darkened at once, up to this long, before it paints light
 MAX_ERRORS = 50
-NATIVE_VERSION = 108
+NATIVE_VERSION = 111
 
 ID_PROP = "freelab_id"  # dynamic properties FreeLab sets on widgets, all removed by restore()
 SEEN_PROP = "freelab_seen"
@@ -1004,6 +1004,12 @@ def _icon_has_white_artwork(icon):
 def _darken_sheet(widget):
     sheet = _prop(widget, "styleSheet")
     if not sheet:
+        # Its stylesheet was taken away since (a FreeLab dropdown is drawn as a label while it has one
+        # choice, and is a plain dropdown again with two): the sheet remembered here made it pass for
+        # a styled input ever after, and the ink effect garbled it.
+        if widget.property(SHEET_PROP) is not None or widget.property(DARK_SHEET_PROP) is not None:
+            widget.setProperty(SHEET_PROP, None)
+            widget.setProperty(DARK_SHEET_PROP, None)
         return
     if sheet == widget.property(SEPARATOR_PROP):
         return  # a menu's lighter separators: drawn as set
@@ -1318,20 +1324,36 @@ MARK_FLAG_PROP = "freelabMarkFlag"
 PAINT_EVENT = 12
 
 
+def _pixel_ratio(pixmap):
+    """How many of a pixmap's pixels make one pixel of the interface, each way (1 for most)."""
+    try:
+        ratio = float(pixmap.devicePixelRatio())
+    except Exception:
+        return 1.0
+    return ratio if ratio >= 1.0 else 1.0
+
+
 def _swap_pixmap(label):
     state = _state()
     pixmap = _prop(label, "pixmap")
     if pixmap is None or pixmap.isNull() or pixmap.cacheKey() in state["mapped_keys"]:
         return
-    if pixmap.width() > MAX_ICON_SIDE or pixmap.height() > MAX_ICON_SIDE:
+    # Its size as drawn: FontLab's warning dialogs (Coordinates Rounding) hold their 64-pixel question
+    # mark at twice the size, for sharp screens. Counted in the image's own pixels, it passed for a
+    # picture too large to be an icon, and kept its edge smoothed toward white: a light ring on dark.
+    ratio = _pixel_ratio(pixmap)
+    if pixmap.width() / ratio > MAX_ICON_SIDE or pixmap.height() / ratio > MAX_ICON_SIDE:
         return
     flag = (_prop(label, "objectName") or u"") in MARK_FLAG_NAMES
-    if not flag and max(pixmap.width(), pixmap.height()) >= COLOR_PICTURE_SIDE and not icon_is_gray(_gui("QIcon")(pixmap)):
+    if (not flag and max(pixmap.width(), pixmap.height()) / ratio >= COLOR_PICTURE_SIDE
+            and not icon_is_gray(_gui("QIcon")(pixmap))):
         # A colorful picture (a message box's question mark): its colors as drawn, its edges smoothed toward
         # white cleaned (keep_colors), and drawn as that over any effect around it (mapped with the dialog,
         # or as drawn on dark, its edges were jagged)
         image = pixmap.toImage().convertToFormat(_gui("QImage").Format_ARGB32)
         clean = _gui("QPixmap").fromImage(keep_colors(image, image.copy()))
+        if ratio != 1.0:
+            clean.setDevicePixelRatio(ratio)
         state["mapped_keys"].add(clean.cacheKey())
         _record(label)["pixmap"] = pixmap
         label.setPixmap(clean)
@@ -1474,7 +1496,16 @@ def _logo_rects(view):
 
 
 SELECTED_INK_SHARE = 0.01  # a selected row with more near-black pixels than this holds dark ink: mapped
+SELECTED_LIGHT_SHARE = 0.5  # a selected row FontLab paints light itself (Preview Features' row under the pointer): mapped, as any light surface
 SELECTED_ROWS_MAX = 200
+
+
+def selected_as_painted(opaque, white, black):
+    """Whether a selected row is drawn again as FontLab painted it, over the mapping: light text on the
+    dark palette's highlight (Export Profiles). Not a row holding dark ink, and not a row FontLab
+    paints light whatever the palette (Preview Features' row under the pointer, near-white with pale
+    text: left as painted, it stayed a white band in a dark list)."""
+    return bool(opaque) and black <= SELECTED_INK_SHARE * opaque and white <= SELECTED_LIGHT_SHARE * opaque
 
 
 def _selected_rows(view, width, height):
@@ -1844,8 +1875,8 @@ def _effect_classes():
                 image = pixmap.toImage()
                 for rect in rows:
                     part = image.copy(rect)
-                    opaque, _, black = image_stats(part)
-                    if opaque and black <= SELECTED_INK_SHARE * opaque:
+                    opaque, white, black = image_stats(part)
+                    if selected_as_painted(opaque, white, black):
                         area = rect.translated(offset)
                         if painter.hasClipping():
                             area = area.intersected(painter.clipBoundingRect().toAlignedRect())
@@ -2517,6 +2548,15 @@ def _set_effect(widget, record, kind, keys=None):
         _unswap_labels_inside(widget)
 
 
+def _forget_effect(widget):
+    """A widget dark mode now leaves as drawn: the effect and the kind it was given earlier go."""
+    record = _record(widget, create=False)
+    if record is not None and record.get("effect") is not None:
+        _clear_effect(widget, record)
+    if widget.property(ISLAND_PROP) is not None:
+        widget.setProperty(ISLAND_PROP, None)
+
+
 def _gray_text(widget):
     """Fields and selectors: drawn in grays before mapping (their light text's ClearType fringes)."""
     return (_class_name(widget) in GRAYSCALE_TEXT_CLASSES or widget.inherits("QLineEdit")
@@ -2776,6 +2816,7 @@ def process(widget):
         _protect(widget)
         return
     if _left_alone(widget, name):
+        _forget_effect(widget)  # one it got before it asked (a dropdown down to one choice)
         _note_sheet_as_seen(widget)
         _protect(widget)
         return
@@ -2804,6 +2845,7 @@ def process(widget):
         visible_unchecked = False  # FontLab's logo: white on purpose, no effect (the ink effect blackened its edges)
     if _plain_input(widget):
         kind, visible_unchecked = None, False  # Fusion draws it from the dark palette: right as it is
+        _forget_effect(widget)  # one it got while it had a stylesheet of its own
     elif kind is None and _light_text_label(widget):
         _protect(widget)  # light text from the dark palette: no effect above may map it again
         visible_unchecked = False

@@ -170,5 +170,33 @@ class SpacingTests(unittest.TestCase):
         self.assertNotIn("aacute", moves)
 
 
+class WordingTests(unittest.TestCase):
+    """The owner's rules for interface texts, read from the script (its dialog needs FontLab)."""
+
+    def source(self):
+        import io
+        with io.open(sp.__file__.replace(".pyc", ".py"), encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_no_dash_or_dot_between_data(self):
+        escaped = [u" \\" + code + u" " for code in (u"N{EM DASH}", u"N{MIDDLE DOT}", u"u2014", u"u00b7", u"xb7")]
+        for mark in escaped + [u" \N{EM DASH} ", u" \N{MIDDLE DOT} "]:
+            self.assertNotIn(mark, self.source())
+
+    def test_a_check_box_label_takes_no_period(self):
+        import re
+        self.assertEqual(re.findall(u"QCheckBox\\(u?\"[^\"]*\\.\"\\)", self.source()), [])
+        self.assertIn(u"QCheckBox(\"Glyphs built from components follow the glyphs they are built on\")", self.source())
+
+    def test_the_units_box_follows_its_number(self):
+        self.assertNotIn(u"setSuffix(", self.source(), "ak.counted_suffix sets it: 1 unit, 2 units")
+        self.assertIn(u"counted_suffix(self.tolerance, u\"unit\")", self.source())
+
+    def test_the_log_counts(self):
+        self.assertIn(u"1 glyph still had a side 1 unit or more off, and was spaced again", sp.apply_note(2, 1, 1))
+        self.assertIn(u"2 glyphs still had a side 2 units or more off, and were spaced again", sp.apply_note(3, 2, 2))
+        self.assertEqual(sp.apply_note(1, 0, 2), u"")
+
+
 if __name__ == "__main__":
     unittest.main()

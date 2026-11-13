@@ -1,6 +1,6 @@
 # Auto spacing
 
-*Scripts > FreeLab > Auto Spacing* suggests sidebearings for the drawn letters of the font's current master (Latin, Armenian, Georgian, and kana that are proportional already), shows each glyph between its references as it is and as suggested, and changes only the glyphs you leave checked.
+*Scripts > FreeLab > Auto Spacing* suggests sidebearings for the drawn glyphs of the font's current master (Latin, Armenian, Georgian, and kana that are proportional already), shows each glyph between its references as it is and as suggested, and changes only the glyphs you leave checked.
 
 ## Using it
 
@@ -13,7 +13,7 @@ The list covers letters, letters and figures, letters, figures, and punctuation,
 
 A font with nothing done yet has its references unspaced too. When H's or n's sidebearings look unspaced (a side at its ink, or one side three times the other), the references come first in the list, unchecked, spaced as the open-licensed fonts space theirs: *spacing/train/references.py* measures H, O, n, o, and zero in 398 families into *spacing/reference_model.json*, as shares of the cap height or x-height (H about 0.08 of the cap height on each side, n 0.09 of the x-height, o 0.077). For a font not spaced yet, check them, space them, then click *Analyze*: the other glyphs are measured against them. A font tight on purpose looks the same (the owner's test font sets H's left side at -23 units), so they stay unchecked unless you check them.
 
-Changes go straight into the open font, as one step of FontLab's History: *Edit > Undo* takes them back, and the dialog measures the glyphs again after an undo, a redo, or an edit in FontLab. What a write did goes to the log under the previews. The font's kerning was set for the old sidebearings: *Check kerning of these glyphs…* opens Kerning Check on the glyphs just spaced and those built on them that followed ([KERNING.md](KERNING.md#kerning-check): its lists then hold only the pairs and entries with them), and Auto Kerning, run again with *Include existing kerned pairs*, shows which pairs now want other values.
+Changes go straight into the open font, as one step of FontLab's History: *Edit > Undo* takes them back, and the dialog measures the glyphs again after an undo, a redo, or an edit in FontLab. What a write did goes to the log under the previews; a glyph the log names is drawn there as the font draws it, and a click on it opens it in a Glyph tab. The font's kerning was set for the old sidebearings: *Check kerning of these glyphs…* opens Kerning Check on the glyphs just spaced and those built on them that followed ([KERNING.md](KERNING.md#kerning-check): its lists then hold only the pairs and entries with them), and Auto Kerning, run again with *Include existing kerned pairs*, shows which pairs now want other values.
 
 ## How it measures
 
@@ -41,7 +41,7 @@ A script whose references the font lacks has its letters spaced by case against 
 
 ## Glyphs built from components
 
-A glyph made only of components (*é* from *e* and an acute) is not spaced: it follows the letter it is built on. Moving *e*'s outline moves it inside *é* too, since the component draws *e*'s outline (checked in FontLab 7.2: shifting a layer moves its nodes, and component offsets and widths can be set); with *Glyphs built from components follow the letters they are built on* (on by default), the accents of *é* move with it, and *é* takes *e*'s change of width. A composite built on one that follows (an acute over *ê*) follows in turn. One whose marks then stick out further past its width or before its start (a horn on a tighter *O*, a vertical caron on *d*) follows all the same, since its letter's outline has moved under its marks already, and the log names it in a warning, to check its marks. One built on two changed letters (a ligature made of *f* and *i*) is left as it is and counted, to look at.
+A glyph made only of components (*é* from *e* and an acute) is not spaced: it follows the glyph it is built on. Moving *e*'s outline moves it inside *é* too, since the component draws *e*'s outline (checked in FontLab 7.2: shifting a layer moves its nodes, and component offsets and widths can be set); with *Glyphs built from components follow the glyphs they are built on* (on by default), the accents of *é* move with it, and *é* takes *e*'s change of width. A composite built on one that follows (an acute over *ê*) follows in turn. One whose marks then stick out further past its width or before its start (a horn on a tighter *O*, a vertical caron on *d*) follows all the same, since its base glyph's outline has moved under its marks already, and the log names it in a warning, to check its marks. One built on two changed glyphs (a ligature made of *f* and *i*) is left as it is and counted, to look at.
 
 On the owner's test font, 72 of 156 drawn glyphs had a side 6 units or more from its suggestion, mostly capitals on their right side, and 10 composites followed them.
 

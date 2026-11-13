@@ -25,6 +25,12 @@ KERN = re.search(r"#define FREELAB_KERN_VERSION (\d+)", (ROOT / "kerning" / "nat
 LEGACY = b"# >>> FreeLab (managed by FreeLab tools/install-fontlab.ps1; -Uninstall removes it)\ndef _freelab_startup():\n    pass\n# <<< FreeLab\n"
 MCP = b"# >>> FreeLab MCP (managed by FreeLab MCP tools/install-fontlab.ps1; -Uninstall removes it)\nmcp = 1\n# <<< FreeLab MCP\n"
 MINE = b"import fontlab\nprint('mine')\n"
+# Font Check's font, five files; the repository holds the first alone, each release publishes the four
+# others beside it, and the tools work without them, as does the installer.
+FONT_FILES = ["FreeLang-Essential.ttf", "FreeLang-CJK.ttf", "FreeLang-Extended-General.ttf",
+              "FreeLang-Extended-Mongolian-Tibetan.ttf", "FreeLang-Extended-Duployan.ttf"]
+OPTIONAL_FONTS = FONT_FILES[1:]
+OPTIONAL_FONT = "FreeLang-Extended-Duployan.ttf"  # (the one a test leaves out of its copy)
 
 
 @unittest.skipIf(POWERSHELL is None, "Windows PowerShell is not available")
@@ -107,6 +113,93 @@ class InstallerTests(unittest.TestCase):
         code, out = self.run_installer()
         self.assertEqual((code, self.read()), (0, before), "a second install changes nothing")
 
+    def test_only_scripts_with_a_menu_title_are_installed_as_py(self):
+        """FontLab lists every .py of the folder in Scripts > FreeLab: a helper module went in as
+        freelab_alternates.py and showed there as "Freelab_alternates"."""
+        self.write(MINE)
+        old = self.scripts / "FreeLab" / "freelab_alternates.py"
+        old.write_text("old = 1\n")
+        (self.scripts / "FreeLab" / "freelab_alternates.pyc").write_bytes(b"old")
+        code, out = self.run_installer()
+        self.assertEqual(code, 0, out)
+        folder = self.scripts / "FreeLab"
+        self.assertFalse(old.exists(), "the helper once installed as a script is removed")
+        self.assertFalse((folder / "freelab_alternates.pyc").exists(), "with its compiled copy")
+        self.assertEqual((folder / "freelab_alternates.module").read_bytes(),
+                         (ROOT / "features" / "freelab_alternates.py").read_bytes())
+        untitled = [path.name for path in folder.glob("*.py")
+                    if not path.read_bytes().lstrip(b"\xef\xbb\xbf").startswith(b"#FLM:")]
+        self.assertEqual(untitled, [], "every installed .py names its menu entry")
+
+    def test_the_font_under_its_earlier_names_is_removed(self):
+        """Font Check's font was FreeLabAutonyms.ttf, then FreeLabLanguages.ttf, then one FreeLang.ttf,
+        then three files, and is five: an install puts the five and their license in and removes the
+        earlier ones (FreeLang-Extended.ttf, the third of three, among them), and one FontLab holds
+        open (it registered the font) is reported and left, the install going on."""
+        self.write(MINE)
+        folder = self.scripts / "FreeLab"
+        earlier = ("FreeLabAutonyms.ttf", "FreeLabAutonyms_LICENSE", "FreeLabLanguages.ttf", "FreeLabLanguages_LICENSE",
+                   "FreeLang.ttf", "FreeLang-Extended.ttf")
+        for name in earlier:
+            (folder / name).write_bytes(b"old")
+        code, out = self.run_installer()
+        self.assertEqual(code, 0, out)
+        self.assertEqual([name for name in earlier if (folder / name).exists()], [], out)
+        self.assertIn("Removed the retired", out)
+        fonts = [name for name in FONT_FILES if (ROOT / "checks" / "language_font" / name).exists()]
+        self.assertEqual([name for name in FONT_FILES if name not in fonts and name not in OPTIONAL_FONTS], [],
+                         "only an optional font may be absent from a copy of the repository")
+        for name in fonts + ["FreeLang_LICENSE"]:
+            self.assertEqual((folder / name).read_bytes(), (ROOT / "checks" / "language_font" / name).read_bytes(), name)
+        self.assertEqual(sorted(path.name for path in folder.glob("FreeLang*.ttf")), sorted(fonts))
+        held = folder / "FreeLabLanguages.ttf"
+        held.write_bytes(b"old")
+        with open(str(held), "rb"):  # (opened without sharing deletion, as a registered font is)
+            code, out = self.run_installer()
+        self.assertEqual(code, 0, out)
+        self.assertTrue(held.exists(), "in use: left where it is")
+        self.assertIn("Could not remove the retired", out)
+        self.assertIn("quit FontLab and run this again", out)
+        self.assertIn("tools block", out, "the rest of the install went on")
+        code, out = self.run_installer("-Uninstall")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(sorted(p.name for p in folder.parent.glob("FreeLab/*")), [], "an uninstall removes it too")
+
+    def test_the_optional_font_may_be_absent(self):
+        """The installer lists the five fonts, in ASCII names, and marks all but Essential optional:
+        run from a copy of the repository without one (here, Duployan's), it installs the others,
+        says it skipped the one, and leaves an installed copy of it alone."""
+        text = INSTALLER.read_text(encoding="ascii")  # (an ASCII-only script: read in the system code page)
+        listed = re.findall(r"From = '([^']+)'; Name = '([^']+)'(; Optional = \$true)?", text)
+        self.assertEqual([name for _, name, _ in listed if name.endswith(".ttf")], FONT_FILES)
+        self.assertEqual([name for _, name, optional in listed if optional], OPTIONAL_FONTS)
+        self.assertIn("'FreeLang-Extended.ttf'", text, "retired")
+        copy = self.tmp / "copy"
+        for relative in [found[0] for found in listed] + ["tools\\install-fontlab.ps1"] + [
+                str(path.relative_to(ROOT)) for folder in ("darkmode/native", "kerning/native") for path in (ROOT / folder).glob("*.c")]:
+            if relative.endswith(OPTIONAL_FONT) or not (ROOT / Path(*relative.split("\\"))).exists():
+                continue  # (and an optional font this copy of the repository lacks)
+            target = copy / Path(*relative.split("\\"))
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(str(ROOT / Path(*relative.split("\\"))), str(target))
+        self.write(MINE)
+        folder = self.scripts / "FreeLab"
+        (folder / OPTIONAL_FONT).write_bytes(b"installed earlier")
+        installer = copy / "tools" / "install-fontlab.ps1"
+        proc = subprocess.run(
+            [POWERSHELL, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(installer),
+             "-ScriptsDir", str(self.scripts), "-StartupScript", str(self.startup), "-BinDir", str(self.bin),
+             "-StateDir", str(self.state), "-RegistryKey", r"HKCU:\Software\FreeLabInstallerTestNone",
+             "-ProcessName", "freelab-no-such-process"],
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, errors="replace", creationflags=NO_WINDOW)
+        out = proc.stdout + proc.stderr
+        self.assertEqual(proc.returncode, 0, out)
+        self.assertIn("Skipped %s (optional, not in this copy)" % OPTIONAL_FONT, out)
+        self.assertEqual((folder / OPTIONAL_FONT).read_bytes(), b"installed earlier")
+        for name in FONT_FILES[:-1]:
+            if (ROOT / "checks" / "language_font" / name).exists():
+                self.assertEqual((folder / name).read_bytes(), (ROOT / "checks" / "language_font" / name).read_bytes(), name)
+
     def test_block_is_updated_where_it_is(self):
         self.write(MINE + b"# >>> FreeLab tools (managed)\nold = 1\n# <<< FreeLab tools\n" + MCP)
         code, out = self.run_installer()
@@ -127,6 +220,47 @@ class InstallerTests(unittest.TestCase):
         self.assertFalse((self.state / "darkmode.log").exists())
         self.assertFalse((self.state / "kerning-cache").exists(), "Auto Kerning's remembered analyses go too")
         self.assertTrue((self.state / "listener.json").exists(), "FreeLab MCP's state stays")
+
+    def test_uninstall_removes_the_window_size_and_proof_settings(self):
+        self.write(MINE)
+        self.assertEqual(self.run_installer()[0], 0)
+        (self.state / "windows.json").write_text('{"size": [900, 700]}')
+        (self.state / "proof.json").write_text('{"summary": false}')
+        code, out = self.run_installer("-Uninstall")
+        self.assertEqual(code, 0, out)
+        self.assertFalse((self.state / "windows.json").exists(), out)
+        self.assertFalse((self.state / "proof.json").exists(), out)
+        self.assertTrue((self.state / "listener.json").exists(), "FreeLab MCP's state stays")
+
+    def test_the_scripts_folder_itself_loses_only_what_freelab_put_there(self):
+        """Before 0.3 FreeLab installed dark mode's two scripts in the Scripts folder itself: those go, on
+        install and uninstall. A file of the same name as one FreeLab installs now in its submenu
+        (character_sets.json and the like, generic names) is the user's: kept. A locked old script is a
+        reported skip, the install going on."""
+        self.write(MINE)
+        theirs = ["character_sets.json", "language_families.json", "language_orthographies.json",
+                  "language_orthographies_LICENSE", "freelab_proof.py", "common_pairs.txt"]
+        for name in theirs:
+            (self.scripts / name).write_text("the user's own")
+        old = self.scripts / "freelab_dark_mode.py"
+        old.write_text("old")
+        (self.scripts / "freelab_dark_mode_settings.py").write_text("old")
+        with open(str(old), "rb"):  # (opened without sharing deletion: the delete fails)
+            code, out = self.run_installer()
+        self.assertEqual(code, 0, out)
+        self.assertIn("Could not remove the old", out)
+        self.assertIn("tools block", out, "the rest of the install went on")
+        self.assertTrue(old.exists())
+        self.assertFalse((self.scripts / "freelab_dark_mode_settings.py").exists(), out)
+        self.assertEqual([name for name in theirs if not (self.scripts / name).exists()], [], out)
+        code, out = self.run_installer()
+        self.assertEqual(code, 0, out)
+        self.assertFalse(old.exists(), "no longer locked: removed")
+        old.write_text("old")
+        code, out = self.run_installer("-Uninstall")
+        self.assertEqual(code, 0, out)
+        self.assertFalse(old.exists(), "an uninstall removes it too")
+        self.assertEqual([name for name in theirs if not (self.scripts / name).exists()], [], out)
 
     def test_uninstall_without_a_block_leaves_the_file_alone(self):
         self.write(MINE + MCP)

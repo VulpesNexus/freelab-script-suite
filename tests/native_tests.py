@@ -340,6 +340,19 @@ class NativeTests(unittest.TestCase):
         anchors(LIB, buf, 40, "ink")
         self.assertEqual(rgb_at(buf, TEXT_ROW + 2), fringe)
 
+    def test_dark_gray_lines_apart_from_red_lines_are_lifted(self):
+        # FontLab's Output panel: its output in dark gray (#404040), its errors in red, each on lines of
+        # its own. The gray fits a blend of the paper and the red loosely, and was kept as the red's
+        # smoothing: unreadable on the dark paper whenever an error was shown. Smoothing touches its text.
+        paper, gray, red = (30, 30, 30), (64, 64, 64), (255, 0, 0)
+        buf = pixels(text_rows(paper, gray) + text_rows(paper, red) + text_rows(paper, gray))
+        anchors(LIB, buf, 40, "ink")
+        for row in (TEXT_ROW, TEXT_ROW + 28 * 40):
+            r, g, b = rgb_at(buf, row + 1)
+            self.assertGreater(dm.oklab(r, g, b)[0], 0.6, "the gray text is light enough to read")
+        self.assertEqual(rgb_at(buf, TEXT_ROW + 14 * 40 + 1), red, "the red stays")
+        self.assertEqual(rgb_at(buf, 0), paper)
+
     def test_light_badges_turn_dark_without_touching_light_text_beside_them(self):
         # Gray text (192) on a dark row, and a gray badge (160) with black text: all on one gray line.
         width, rows = 60, 14
@@ -552,6 +565,99 @@ class KeyedTests(unittest.TestCase):
         self.assertEqual((alpha(32, 12), alpha(30, 12)), (153, 153), "its core and its edge keep their coverage")
         self.assertEqual(rgb_at(buf, 1), (192, 192, 192), "light text stays")
         self.assertEqual(alpha(1, 0), 120, "its smoothing, not mapped, is not thinned")
+
+    def test_list_mode_leaves_the_counters_of_light_text_on_a_dark_row(self):
+        # Export Profiles: navy names drawn on nothing, and the selected row FontLab paints dark itself
+        # (#313131) with light text. The row's color closed off inside each letter is a small shape of a
+        # dark gray: mapped as a glyph icon, it filled the letters with light gray.
+        width, rows, buf = 220, 240, bytearray()  # the row a small part of the list: no background of its own
+        row, text, smooth, navy = (0x31, 0x31, 0x31), (0xdb, 0xdb, 0xdb), (0x86, 0x86, 0x86), (58, 63, 127)
+        for y in range(rows):
+            for x in range(width):
+                letter = (x - 20) % 12 if 20 <= x < 200 else 99  # each letter: a 6 by 8 ring, smoothing at its right
+                if 10 <= y < 30:
+                    if 14 <= y <= 21 and letter < 6:
+                        color = row if 2 <= letter <= 3 and 16 <= y <= 19 else text
+                    elif 14 <= y <= 21 and letter == 6:
+                        color = smooth
+                    else:
+                        color = row
+                    buf += struct.pack("<BBBB", color[2], color[1], color[0], 255)
+                elif 2 <= y <= 7 and x % 6 == 1:
+                    buf += struct.pack("<BBBB", navy[2], navy[1], navy[0], 255)
+                elif 2 <= y <= 7 and x % 6 == 2:
+                    buf += struct.pack("<BBBB", navy[2], navy[1], navy[0], 120)
+                else:
+                    buf += struct.pack("<BBBB", 0, 0, 0, 0)
+        before = bytes(buf)
+        anchors(LIB, buf, width, "list")
+        r, g, b = rgb_at(buf, 3 * width + 1)
+        self.assertGreater(dm.oklab(r, g, b)[0], 0.6, "the navy name turns light")
+        self.assertGreater(b, r + 30, "and stays blue")
+        row_bytes = slice(4 * 10 * width, 4 * 30 * width)
+        self.assertEqual(rgb_at(buf, 17 * width + 22), row, "a letter's counter stays the row's color")
+        self.assertEqual(rgb_at(buf, 17 * width + 20), text, "the light text as drawn")
+        self.assertEqual(rgb_at(buf, 17 * width + 26), smooth, "its smoothing too")
+        self.assertEqual(bytes(buf[row_bytes]), before[row_bytes], "the whole row as FontLab painted it")
+
+    @staticmethod
+    def features(hover=True):
+        """Preview Features' list as FontLab paints it for a dark interface, on its own dark base: rows of
+        light gray ClearType text (a full stroke between a navy and a yellowish fringe), a dark gray ring
+        at the left of each, and the row under the pointer (rows 60 to 71) near-white, with the same light
+        gray text between its pale fringes, a gray ring, and a checked mark's blue disk."""
+        base, text, ring, band = (0x1e, 0x1e, 0x1e), (0xdb, 0xdb, 0xdb), (0x4f, 0x4f, 0x4f), (0xe9, 0xf0, 0xff)
+        left, right = (0x1e, 0x3e, 0x7c), (0xbb, 0xbb, 0x7c)  # the text's fringes on the base,
+        pale_left, pale_right = (0xe7, 0xf0, 0xff), (0xe9, 0xec, 0xed)  # and on the near-white row
+        band_ring, disk = (0xb4, 0xb8, 0xbf), (0x41, 0x9b, 0xf9)
+        width, rows, out = 120, 96, []
+        for y in range(rows):
+            line, top = y % 12, y - y % 12
+            on_band = hover and top == 60
+            for x in range(width):
+                color = band if on_band else base
+                if 2 <= line <= 9 and 4 <= x <= 11 and (line in (2, 9) or x in (4, 11)):
+                    color = band_ring if on_band else ring
+                elif on_band and 2 <= line <= 9 and 60 <= x <= 67:
+                    color = disk
+                elif 3 <= line <= 8 and 20 <= x < 56 and x % 6 == 2:
+                    color = pale_left if on_band else left
+                elif 3 <= line <= 8 and 20 <= x < 56 and x % 6 == 3:
+                    color = text
+                elif 3 <= line <= 8 and 20 <= x < 56 and x % 6 == 4:
+                    color = pale_right if on_band else right
+                out.append(color)
+        return width, pixels(out)
+
+    def test_light_text_and_rings_on_a_dark_list_with_one_near_white_row(self):
+        # The near-white row made the light text on the dark rows a blend of that row and the text's own
+        # yellowish fringe (which lies only on the dark rows), and the rings a blend of the dark base and
+        # a pale fringe of the row's text (which lies only on that row): both were redrawn as blends with
+        # the row's colors as they turn dark, dark on dark.
+        text, ring, band = (0xdb, 0xdb, 0xdb), (0x4f, 0x4f, 0x4f), dm.map_rgb(0xe9, 0xf0, 0xff)
+        for mode in ("list", "ink"):
+            width, buf = self.features()
+            anchors(LIB, buf, width, mode)
+            at = lambda x, y: rgb_at(buf, y * width + x)
+            self.assertEqual(at(0, 0), (0x1e, 0x1e, 0x1e), "the dark base stays")
+            self.assertEqual(at(21, 5), text, "%s: the light text on a dark row as painted" % mode)
+            self.assertGreaterEqual(min(at(4, 5)), ring[0], "%s: a ring no darker than painted" % mode)
+            self.assertEqual(len(set(at(4, 5))), 1, "and gray")
+            self.assertEqual(at(100, 65), band, "the near-white row turns dark, as any light surface")
+            self.assertLess(max(band), 0x40)
+            self.assertEqual(at(21, 65), text, "its light text stays, readable on it now")
+            # its smoothing: the same share of the way from the row to the text (the left fringe is nearly
+            # the row's color, the right one over a third of the way)
+            self.assertGreaterEqual(min(at(20, 65)), max(band), "the text's faint smoothing is no darker than the row")
+            self.assertLess(max(at(20, 65)), max(band) + 20)
+            self.assertGreater(min(at(22, 65)), max(band) + 40, "its stronger smoothing is lighter than the row")
+            self.assertLess(max(at(22, 65)), text[0] - 40, "and darker than the text")
+            self.assertGreater(min(at(4, 65)), max(band) + 20, "the row's ring shows on it")
+            self.assertEqual(at(62, 65), (0x41, 0x9b, 0xf9), "the blue disk stays")
+            # with no row under the pointer, the dark rows come out the same
+            width, plain = self.features(hover=False)
+            anchors(LIB, plain, width, mode)
+            self.assertEqual(bytes(plain[:4 * 60 * width]), bytes(buf[:4 * 60 * width]), "%s: the same with no near-white row" % mode)
 
     def test_with_no_anchor_everything_mapped_maps_each_pixel(self):
         # No color three times (a gray ramp, one pixel): where every color is mapped, each pixel is mapped

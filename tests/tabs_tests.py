@@ -226,6 +226,83 @@ class HookTests(unittest.TestCase):
         self.assertEqual((frame.updates, inner.updates, outside.updates), (1, 1, 0))
 
 
+class MergeTests(unittest.TestCase):
+    """Docking goes through FontLab's Merge Window, which FontLab enables once it has seen the tab's
+    window become the active one: not always at once."""
+
+    class Action(object):
+        objectName = ft.MERGE_WINDOW
+
+        def __init__(self, ready_after):
+            self.ready_after, self.asked, self.triggered = ready_after, 0, 0
+
+        def isEnabled(self):
+            self.asked += 1
+            return self.ready_after is not None and self.asked > self.ready_after
+
+        def trigger(self):
+            self.triggered += 1
+
+    class Frame(object):
+        windowTitle = u"Cardo"
+
+        def __init__(self):
+            self.activated = 0
+
+        def metaObject(self):
+            return self
+
+        def className(self):
+            return "YFrameWindow"
+
+        def raise_(self):
+            pass
+
+        def activateWindow(self):
+            self.activated += 1
+
+    def merge(self, ready_after):
+        case, action, frame = self, self.Action(ready_after), self.Frame()
+
+        class Main(object):
+            def findChildren(self, kind):
+                return [action]
+
+        class Application(object):
+            @staticmethod
+            def processEvents():
+                pass
+
+            @staticmethod
+            def activeWindow():
+                return frame
+
+        class Gui(object):
+            QApplication, QAction = Application, object
+
+        saved = (ft._qt, ft.main_window, ft.ACTIVATE_WAIT, getattr(sys, "_freelab_tabs_state", None))
+        ft._qt, ft.main_window, ft.ACTIVATE_WAIT = (lambda: (None, Gui)), (lambda: Main()), 0.0
+        sys._freelab_tabs_state = {"on": True}
+        try:
+            return ft.merge_window(frame), action, frame, list(ft._state().get("failures", []))
+        finally:
+            ft._qt, ft.main_window, ft.ACTIVATE_WAIT, sys._freelab_tabs_state = saved
+
+    def test_the_command_is_waited_for(self):
+        done, action, frame, failures = self.merge(ready_after=3)
+        self.assertTrue(done)
+        self.assertEqual((action.triggered, failures), (1, []))
+
+    def test_a_command_that_stays_unavailable_is_reported(self):
+        done, action, frame, failures = self.merge(ready_after=None)
+        self.assertFalse(done)
+        self.assertEqual(action.triggered, 0)
+        self.assertEqual(frame.activated, 2, "asked once more on the way")
+        self.assertEqual(len(failures), 1)
+        self.assertIn(u"Merge Window command stayed unavailable", failures[0][1])
+        self.assertIn(u"Cardo", failures[0][1])
+
+
 class SettingTests(unittest.TestCase):
     def test_on_unless_switched_off(self):
         self.assertTrue(ft.enabled_setting({}))

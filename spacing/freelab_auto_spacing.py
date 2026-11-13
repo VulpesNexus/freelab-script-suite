@@ -35,7 +35,7 @@ ROUND_REFERENCES = {u"H": u"O", u"n": u"o", u"0": u"8", u"\N{ARMENIAN CAPITAL LE
 FIXED = u"HOlno08"  # the references and tuning glyphs of the methods: never changed (the other scripts' too, below)
 TOLERANCE_UNITS = 6  # a side whose suggestion is closer than this to its sidebearing is left out
 GROUPS = (("letters", "Letters"), ("figures", "Letters and figures"), ("all", "Letters, figures, and punctuation"),
-          ("everything", "Everything: every glyph with a character"))  # (other scripts and symbols too, by case)
+          ("everything", "Everything"))  # (other scripts and symbols too, by case)
 PREVIEW_SIZE = 80  # pixels per em in the previews
 SETTLE_PASSES = 6  # an analysis measures each change again, with it made, at most this many times
 SETTLE_SHARE = 0.002  # a side has settled when measuring it again asks less than this share of the em more
@@ -318,7 +318,7 @@ def ink_sides(layer):
 
 
 HELP = u"""<b>FreeLab Auto Spacing</b><br>
-Suggests sidebearings for the drawn letters of this master, so that each sits beside its
+Suggests sidebearings for the drawn glyphs of this master, so that each sits beside its
 straight reference (H for capitals, n for lowercase, 0 for figures) as the references sit beside each
 other. Changes only the glyphs you leave checked.<br><br>
 <b>Scripts</b>: Latin; Armenian, against its own vo (capital and small) and oh; Georgian, against
@@ -330,7 +330,7 @@ Spacing</i>). A script whose references the font lacks is spaced by case against
 lacks. A side measured within the tolerance is left as it is.<br>
 <b>The references are yours</b>: H, O, l, n, o, 0, and 8 set the spacing (as in Walter Tracy's
 method: space H and n, then O and o, by eye) and are never changed, nor are the other scripts'. Glyphs built from components
-are not spaced: they follow the letters they are built on, their accents kept over them.<br>
+are not spaced: they follow the glyphs they are built on, their accents kept over them.<br>
 <b>One click</b>: each suggestion is measured again with its change made, until it settles (halfkern
 closes half of a tightening at a time, so one measure leaves part of it), and the list shows where
 each glyph ends up. If you check references, they are spaced first and the other glyphs measured
@@ -366,6 +366,9 @@ class AutoSpacingDialog(object):
         layout.addWidget(self.status)
         layout.addWidget(self.ak.separator())
         self.log = self.ak.Log()
+        # (the glyphs a line names drawn as the font draws them; clicked, one opens in a Glyph window:
+        # spaced glyphs have left the list)
+        self.log.follow(lambda: (self.fontlab, self.package, self.master))
         self.seen_history, self.first_checks = None, {}
         row = QtGui.QHBoxLayout()
         self.group = QtGui.QComboBox()
@@ -379,7 +382,7 @@ class AutoSpacingDialog(object):
         self.tolerance = QtGui.QSpinBox()
         self.tolerance.setRange(1, 100)
         self.tolerance.setValue(TOLERANCE_UNITS)
-        self.tolerance.setSuffix(" units")
+        self.suffix_slot = self.ak.counted_suffix(self.tolerance, u"unit")  # ("1 unit", "2 units")
         self.tolerance.setWhatsThis(u"A side is changed only when the suggestion differs from it by at least this "
                                     u"much; a glyph is listed when one of its sides is.")
         row.addWidget(self.tolerance)
@@ -411,7 +414,7 @@ class AutoSpacingDialog(object):
         self.neighbors = [self.ak.ClickRegions(label, self.open_pair, u"Click to open this pair in <i>Auto Kerning</i>.")
                           for label in (self.preview_now, self.preview_after)]
         layout.addLayout(previews)
-        self.follow = QtGui.QCheckBox("Glyphs built from components follow the letters they are built on.")
+        self.follow = QtGui.QCheckBox("Glyphs built from components follow the glyphs they are built on")
         self.follow.setChecked(True)
         self.follow.setWhatsThis(u"\N{LATIN SMALL LETTER E WITH ACUTE} built from e and an acute keeps its acute "
                                  u"over the e and takes e's change of width. Without it, its e moves under the "
@@ -477,7 +480,7 @@ class AutoSpacingDialog(object):
                 return None
         except Exception:
             pass
-        package = workspace.currentPackage
+        package = self.ak.window_font(self, workspace)  # this window's font
         if package is None or package.isNull or not package.glyphsCount:
             return None
         return package
@@ -739,7 +742,7 @@ class AutoSpacingDialog(object):
             moves = composite_moves(self.composites, changes)
             following = sum(1 for move in moves.values() if move is not None)
             left_out = sum(1 for m in moves.values() if m is None)
-            self.composites_note.setText(u"%s built from components %s the listed letters%s." % (
+            self.composites_note.setText(u"%s built from components %s the listed glyphs%s." % (
                 counted(following, u"glyph"), u"follows" if following == 1 else u"follow",
                 u"; %d built on two of them %s left as %s" % (left_out, u"is" if left_out == 1 else u"are",
                                                              u"it is" if left_out == 1 else u"they are")
@@ -1093,17 +1096,12 @@ class AutoSpacingDialog(object):
         names = getattr(self, "overhanging", [])
         if not names:
             return u""
-        chars = []
-        for name in names:
-            glyph = self.package.findName(name)
-            code = glyph.fgGlyph.unicode if glyph is not None else None
-            chars.append(self.ak.unichr_(code) if code else name)
-        one = len(names) == 1
-        return (u"Check the marks of %s: %s followed %s letter, and %s marks now stick out further past %s width "
-                u"(or before %s start), toward the next letter: %s." % (
+        one = len(names) == 1  # (named by glyph, not by character: the interface's fonts lack many, shown as boxes)
+        return (u"Check the marks of %s: %s followed %s base glyph, and %s marks now stick out further past %s width "
+                u"(or before %s start), toward the next glyph: %s." % (
                     self.ak.b(counted(len(names), u"glyph")), u"it" if one else u"they", u"its" if one else u"their",
                     u"its" if one else u"their", u"its" if one else u"their", u"its" if one else u"their",
-                    self.ak.b(u" ".join(chars))))
+                    self.ak.glyph_name_links(names)))
 
     def touched(self, glyph):
         try:
@@ -1146,12 +1144,11 @@ def mark_overhang(layer, shift, width_change):
 
 
 def main():
-    held = getattr(sys, "_freelab_auto_spacing", None)
-    if held is not None:
-        try:
-            held.dialog.close()
-        except Exception:
-            pass
+    try:  # this font's window shows it already: brought forward as it is
+        if load_auto_kerning().raise_open("Auto Spacing"):
+            return
+    except Exception:
+        pass
     try:
         dialog = AutoSpacingDialog()
     except Exception as exc:
@@ -1159,6 +1156,10 @@ def main():
         return
     sys._freelab_auto_spacing = dialog  # kept: PythonQt deletes a dialog with no Python reference
     dialog.ak.hook_menu_order()
+    try:
+        dialog.ak.take_window("Auto Spacing", dialog)  # its font's window: the tool shown there gives way
+    except Exception:
+        pass
     dialog.show()
 
 

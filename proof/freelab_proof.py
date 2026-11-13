@@ -4,10 +4,11 @@
 outlines.
 
 FontLab 9 has a Notepad panel for specimens and PDF proofs; FontLab 7 has none. Proof lays the
-font's glyphs out as they are in FontLab (nothing exported, nothing installed): a character set,
-waterfalls, text in each script the font covers, kerning strings, spacing strings, diacritics, and
-figures and punctuation, for the current master or each master, with a header and a footer on each
-page. Kerning is applied as FontLab applies it (classes resolved). OpenType features are not: no
+font's glyphs out as they are in FontLab (nothing exported, nothing installed): a summary of the font
+(its names, metrics, features, and the languages it covers, as Font Check counts them), then a
+character set, waterfalls, text in each script the font covers, kerning strings, spacing strings,
+diacritics, and figures and punctuation, for the current master or each master, with a header and a
+footer on each page. Kerning is applied as FontLab applies it (classes resolved). OpenType features are not: no
 ligatures, no contextual or localized forms, no mark positioning; each character shows its own glyph.
 
 Valid Python 2.7 (FontLab 7) and Python 3. Everything above the Qt line needs no Qt and no FontLab.
@@ -18,6 +19,7 @@ and offline (PySide6).
 from __future__ import absolute_import, division, print_function
 
 import json
+import math
 import os
 import re
 import sys
@@ -35,7 +37,20 @@ LABEL_WIDTH = 36.0  # points left of a waterfall's or a paragraph's lines, for t
 SECTIONS = (("charset", u"Character set"), ("waterfall", u"Waterfall"), ("text", u"Text"),
             ("kerning", u"Kerning strings"), ("spacing", u"Spacing strings"), ("diacritics", u"Diacritics"),
             ("figures", u"Figures and punctuation"))
-TITLES = dict(SECTIONS, about=u"About this proof", info=u"Font info", masters=u"Masters")
+TITLES = dict(SECTIONS, summary=u"Summary", about=u"About this proof", info=u"Font info", masters=u"Masters")
+FONT_CHECK_FILE, FONT_CHECK_MODULE = "freelab_font_check.py", "freelab_font_check"
+FEATURE_CODE_FILE, FEATURE_CODE_MODULE = "freelab_feature_code.py", "freelab_feature_code"
+SETTINGS_FILE = u"proof.json"  # in FreeLab's settings folder (ak.state_dir()): the summary's two settings
+# What the summary lists of the languages, after their counts (the dropdown's texts follow "Summary lists")
+SUMMARY_LANGUAGES = (("covered", u"covered languages"), ("reach", u"covered languages and those within reach"),
+                     ("none", u"no languages (counts only)"))
+SUMMARY_TITLE_SIZE = 30  # points: the family's name, in the font itself
+SUMMARY_TITLE_MIN = 12  # ... made smaller, down to this, for a name wider than the page
+SUMMARY_COLUMNS = 5  # the languages' names, in columns
+SUMMARY_NAME_SIZE = 6.5  # points: a language's name
+SUMMARY_NAME_LEADING = 8.2  # points from a name's line to the next
+SUMMARY_MIN_ROWS = 3  # rows of names at least under a heading at a page's foot
+SUMMARY_METRIC_COLUMN = 64.0  # points: a column of the vertical metrics' table
 WATERFALL_SIZES = (8, 9, 10, 11, 12, 14, 16, 18, 21, 24, 28, 32, 36, 48, 60, 72)
 TEXT_SIZES = (9, 11, 14)
 SIZE_RANGE = (4, 288)  # points: sizes typed outside this are left out
@@ -46,7 +61,10 @@ SHOWCASE_SIZE = 28  # points: diacritics, figures, and punctuation
 MASTERS_SIZES = (28, 12)  # points: each master's line on the masters page
 STRING_GAP = 0.6  # of the em, between two strings
 LINE_SHARE = 1.25  # a line is at least this many times its size tall
-SCOPE_LANGUAGES_MAX = 120  # languages offered in the Proof dropdown, the most spoken first
+SCOPE_LANGUAGES_TOP = 20  # languages the Proof dropdown lists to start with, the most spoken first
+SCOPE_LANGUAGES_SLACK = 4  # ... and up to this many more, listed at once: an entry that opens so few says little
+MORE_LANGUAGES = u"More languages\N{HORIZONTAL ELLIPSIS}"  # the dropdown's entry that lists the others
+MORE = ("more", None)  # its scope: no proof's, the list filled out
 MAX_SAMPLES = 6  # languages per script in the text section, the most spoken first
 SCRIPT_MINIMUM = 5  # a script's letters the font needs before its letters stand in for its text
 ALPHABET_MAX = 120  # characters at most, when a script's letters stand in for its text
@@ -1093,6 +1111,284 @@ def info_rows(info, name=None, upm=None, masters=()):
 
 
 # ---------------------------------------------------------------------------
+# The summary: what the proof's first page says of the font
+# ---------------------------------------------------------------------------
+
+# OpenType's names of the features a font's code commonly defines (ss01 to ss20 and cv01 to cv99 are
+# named by their number: feature_title)
+FEATURE_NAMES = {
+    "aalt": u"Access All Alternates", "abvm": u"Above-Base Mark Positioning", "blwm": u"Below-Base Mark Positioning",
+    "c2pc": u"Petite Capitals From Capitals", "c2sc": u"Small Capitals From Capitals", "calt": u"Contextual Alternates",
+    "case": u"Case-Sensitive Forms", "ccmp": u"Glyph Composition and Decomposition", "clig": u"Contextual Ligatures",
+    "cpsp": u"Capital Spacing", "cswh": u"Contextual Swash", "curs": u"Cursive Positioning", "dist": u"Distances",
+    "dlig": u"Discretionary Ligatures", "dnom": u"Denominators", "fina": u"Terminal Forms", "frac": u"Fractions",
+    "fwid": u"Full Widths", "halt": u"Alternate Half Widths", "hist": u"Historical Forms",
+    "hlig": u"Historical Ligatures", "hwid": u"Half Widths", "init": u"Initial Forms", "isol": u"Isolated Forms",
+    "kern": u"Kerning", "liga": u"Standard Ligatures", "lnum": u"Lining Figures", "locl": u"Localized Forms",
+    "mark": u"Mark Positioning", "medi": u"Medial Forms", "mkmk": u"Mark to Mark Positioning",
+    "nalt": u"Alternate Annotation Forms", "numr": u"Numerators", "onum": u"Oldstyle Figures", "ordn": u"Ordinals",
+    "ornm": u"Ornaments", "palt": u"Proportional Alternate Widths", "pcap": u"Petite Capitals",
+    "pnum": u"Proportional Figures", "pwid": u"Proportional Widths", "rlig": u"Required Ligatures",
+    "salt": u"Stylistic Alternates", "sinf": u"Scientific Inferiors", "size": u"Optical Size",
+    "smcp": u"Small Capitals", "subs": u"Subscript", "sups": u"Superscript", "swsh": u"Swash", "titl": u"Titling",
+    "tnum": u"Tabular Figures", "unic": u"Unicase", "vert": u"Vertical Writing", "vkrn": u"Vertical Kerning",
+    "vpal": u"Proportional Alternate Vertical Metrics", "vrt2": u"Vertical Alternates and Rotation",
+    "zero": u"Slashed Zero"}
+METRIC_HEADER = (u"Ascender", u"Descender", u"Line gap")
+NOT_SET = u"not set"
+INFERRED_KEY = (u"(inferred): the letters a counted text uses, not an orthography a source declares; rare letters may "
+                u"be missing from it.")
+KEYBOARD_KEY = (u"(keyboard): the characters a keyboard layout types, not an orthography a source declares; it may "
+                u"lack some letters.")
+EVIDENCE_KEYS = ((u"inferred", INFERRED_KEY), (u"keyboard", KEYBOARD_KEY))
+APPLIED = (u"Kerning, as FontLab applies it (classes resolved); no OpenType features (no ligatures, alternates, or mark "
+           u"positioning: each character shows its own glyph)")
+
+
+def feature_title(tag):
+    """OpenType's name of a feature ("Standard Ligatures", "Stylistic Set 3"), or u"" for a tag it does
+    not register (or one this table lacks)."""
+    tag = u"%s" % tag
+    match = re.match(u"^(ss|cv)([0-9]{2})$", tag)
+    if match and int(match.group(2)) >= 1 and (match.group(1) == u"cv" or int(match.group(2)) <= 20):
+        return (u"Stylistic Set %d" if match.group(1) == u"ss" else u"Character Variant %d") % int(match.group(2))
+    return FEATURE_NAMES.get(tag, u"")
+
+
+def features_text(features):
+    """The features of a font's code in one text: features [(tag, the name the code gives it or u"")],
+    in the code's order; each tag with OpenType's name and the code's own, in parentheses."""
+    parts = []
+    for tag, name in features:
+        words = u": ".join(text for text in (feature_title(tag), info_text(name)) if text)
+        parts.append(u"%s (%s)" % (tag, words) if words else u"%s" % tag)
+    if not parts:
+        return u"none in the font's code"
+    return u"%s: %s" % (counted(len(parts), u"feature"), u", ".join(parts))
+
+
+def kerning_text(pairs, master, entries=None, classes=None):
+    """A master's kerning in one line: its pairs of glyphs with the classes resolved, then the entries
+    and classes they come from, where FontLab gives them."""
+    text = u"%s in master %s, classes resolved" % (counted(pairs, u"kerned pair"), master)
+    if entries is not None and classes is not None:
+        text += u" (%s, %s)" % (counted(entries, u"entry", u"entries"), counted(classes, u"class", u"classes"))
+    return text
+
+
+def units(value):
+    """A metric in font units, rounded (halves up, whatever the Python); "not set" for None."""
+    if value is None:
+        return NOT_SET
+    return u"%d" % int(math.floor(float(value) + 0.5))
+
+
+def metric_rows(metrics, master=u""):
+    """[(label, [ascender, descender, line gap])] as texts, for the summary's table: the master's own
+    dimensions, then the font's typo, hhea, and Windows values (metrics: Font Check's read_metrics, or
+    any object with its fields; Windows has no line gap)."""
+    rows = ((u"Master %s" % master if master else u"Master", ("ascender", "descender", "line_gap")),
+            (u"Typo", ("typo_ascender", "typo_descender", "typo_line_gap")),
+            (u"hhea", ("hhea_ascender", "hhea_descender", "hhea_line_gap")),
+            (u"Windows", ("win_ascent", "win_descent", None)))
+    return [(label, [units(getattr(metrics, field, None)) if field else u"" for field in fields])
+            for label, fields in rows]
+
+
+def metric_notes(metrics):
+    """[(label, text)] under the summary's table: the x-height and the cap height, and whether Use Typo
+    Metrics is set, each where the font says."""
+    found = []
+    heights = [u"%s %s" % (label, units(getattr(metrics, field)))
+               for label, field in ((u"x-height", "x_height"), (u"cap height", "cap_height"))
+               if getattr(metrics, field, None) is not None]
+    if heights:
+        found.append((u"Heights", u", ".join(heights)))
+    if getattr(metrics, "use_typo", None) is not None:
+        found.append((u"Use Typo Metrics", u"on" if metrics.use_typo else u"off"))
+    return found
+
+
+def summary_rows(info, name, master, masters, proofed, glyphs, encoded, scope=u""):
+    """[(label, text)] of the summary's first block: the font (its family and style names, as its info
+    gives them, else its name in FontLab), the master proofed and the others, the version and dates the
+    font records, its units per em, and its counts of glyphs and of encoded characters. info: info_rows'
+    rows (or None); proofed: the masters the proof shows; scope: what the proof is limited to, if anything."""
+    known = dict(info or ())
+    rows = []
+    font = u" ".join(text for text in (known.get(u"Family", u""), known.get(u"Style", u"")) if text) or info_text(name)
+    if font:
+        rows.append((u"Font", font))
+    masters = [u"%s" % one for one in masters or ()]
+    proofed = [u"%s" % one for one in proofed or ()]
+    if len(proofed) > 1:
+        rows.append((u"Masters", u"%s (all %d proofed)" % (u", ".join(proofed), len(proofed))))
+    elif master:
+        others = [one for one in masters if one != master]
+        if not others:
+            rows.append((u"Master", u"%s (the font's only master)" % master))
+        else:
+            rows.append((u"Master", u"%s (%s: %s)" % (master, u"the font's other master" if len(others) == 1
+                                                      else u"the font's other masters", u", ".join(others))))
+    dates = u", ".join(u"%s %s" % (word, known[label]) for word, label in ((u"created", u"Created"),
+                                                                           (u"modified", u"Modified")) if known.get(label))
+    if known.get(u"Version"):
+        rows.append((u"Version", u"%s (%s)" % (known[u"Version"], dates) if dates else known[u"Version"]))
+    elif dates:
+        rows.append((u"Dates", dates))
+    if known.get(u"Units per em"):
+        rows.append((u"Units per em", known[u"Units per em"]))
+    rows.append((u"Glyphs", u"%s (%s)" % (counted(glyphs, u"glyph"), counted(encoded, u"encoded character"))))
+    if scope:
+        rows.append((u"Proof of", scope))
+    return rows
+
+
+class ScriptSummary(object):
+    """A script the font has, on the summary: text ("275 of 569 languages (99 within reach)", Font
+    Check's own words), and its languages covered and within reach, each A to Z as
+    (name, its mark: u"inferred" from a text, u"keyboard" from a keyboard layout, u"" declared by a source
+    (True stands for u"inferred"), what it lacks: u"" when covered, "2 missing", "12 auxiliary missing")."""
+
+    def __init__(self, script, text, covered=(), reach=()):
+        self.script, self.text, self.covered, self.reach = script, text, list(covered), list(reach)
+
+
+class CoverageSummary(object):
+    """What the summary says of the languages: scripts [ScriptSummary]; sets: the names of the character
+    sets covered, of set_count checked; within: the characters a language within reach lacks at most;
+    composed: the languages covered thanks to letters the anchors compose (None: letters are not
+    composed); sources [(source's name, languages covered it gives)], the most first; dated: the day
+    the data files were last changed (u"": not known)."""
+
+    def __init__(self, scripts=(), sets=(), set_count=0, within=3, composed=None, sources=(), dated=u""):
+        self.scripts, self.sets, self.set_count = list(scripts), list(sets), set_count
+        self.within, self.composed, self.sources, self.dated = within, composed, list(sources), dated
+
+    def covered(self):
+        return sum(len(script.covered) for script in self.scripts)
+
+    def reach(self):
+        return sum(len(script.reach) for script in self.scripts)
+
+    def inferred(self):
+        return sum(1 for script in self.scripts for _, inferred, _ in script.covered if inferred)
+
+    def sentence(self):
+        """The counts in one sentence, in their numbers."""
+        if not self.scripts:
+            return u"The font has none of the scripts whose languages Font Check checks."
+        return u"%s covered and %d within reach, of the languages of %s the font has." % (
+            counted(self.covered(), u"language"), self.reach(), counted(len(self.scripts), u"script"))
+
+    def notes(self):
+        """The small print, a paragraph each: how the languages are counted, how many rest on a counted
+        text, and where the data comes from, with its date: a coverage claim on a proof is a claim."""
+        found = [u"Counted as Font Check counts them: a language is covered when the font has every one of its base "
+                 u"and auxiliary characters and its marks, and within reach when it lacks at most %s (or auxiliary "
+                 u"characters alone)." % counted(self.within, u"base character or mark", u"base characters or marks")]
+        if self.composed is not None:
+            found[0] += u" A letter the font's anchors compose from its letter and marks counts as there"
+            found[0] += u" (%s covered %s on such letters)." % (counted(self.composed, u"language"),
+                                                                 u"relies" if self.composed == 1 else u"rely")
+        inferred = self.inferred()
+        if inferred:  # (Font Check's own words for the languages no source declares)
+            found.append(u"Of the languages covered, %s inferred from text or read from a keyboard layout, not declared "
+                         u"by a source." % (u"1 is" if inferred == 1 else u"{:,} are".format(inferred)))
+        if self.sources:
+            text = u"Language data, as Font Check holds it: %s." % u"; ".join(
+                u"%s from %s" % (counted(count, u"language"), name) for name, count in self.sources)
+            if self.dated:
+                text += u" Data files last changed %s." % self.dated
+            found.append(text)
+        return found
+
+
+def data_date(fc):
+    """The day Font Check's data files were last changed (the newest of them), or u""."""
+    stamps = []
+    for name in ("languages_path", "orthographies_path", "sets_path"):
+        try:
+            stamps.append(os.path.getmtime(getattr(fc, name)()))
+        except Exception:
+            continue
+    return u"%s" % time.strftime("%Y-%m-%d", time.localtime(max(stamps))) if stamps else u""
+
+
+def coverage_summary(fc, codes, attaches=None):
+    """The CoverageSummary of a font with these code points, computed by Font Check's own functions
+    (fc: its module), in the order its Coverage view calls them and with the settings its window
+    starts with: every language (the inferred ones too), within reach at its NEARLY_MISSING, and
+    attaches(letter's code point, mark's code point) for the letters the font's anchors compose (None:
+    none are). The scripts are those the font has; the character sets, the ones it lists as covered."""
+    languages, _ = fc.chosen_languages(fc.load_languages(), True)
+    font = fc.FontCharacters(codes, attaches)
+    within = fc.NEARLY_MISSING
+    scripts, sources, composed = [], {}, 0
+    for found in fc.coverage(languages, font, within, True, None):
+        if not found.present:
+            continue
+        covered, reach = [], []
+        for r in sorted(found.results, key=fc.name_key):
+            mark = evidence_mark(fc, r.language.evidence)  # (keyboard layouts too: no source declares them)
+            if r.level == "covered":
+                covered.append((u"%s" % r.language.name, mark, u""))
+                source = u"%s" % r.language.source
+                sources[source] = sources.get(source, 0) + 1
+                composed += 1 if r.composed else 0
+            elif r.level == "nearly":
+                # what it lacks, as Font Check's needs() says: base characters and marks, or, with all
+                # of those there, its auxiliary characters (any number of them: said so)
+                lacks = u"%d missing" if fc.base_needs(r) else u"%d auxiliary missing"
+                reach.append((u"%s" % r.language.name, mark, lacks % len(fc.needs(r))))
+        scripts.append(ScriptSummary(u"%s" % found.script, fc.script_text(found), covered, reach))
+    sets = [fc.check_language(one, font, within) for one in fc.load_character_sets()]
+    return CoverageSummary(scripts, [u"%s" % r.language.name for r in sets if r.level == "covered"], len(sets), within,
+                           composed if attaches is not None else None,
+                           sorted(sources.items(), key=lambda one: (-one[1], one[0])), data_date(fc))
+
+
+def evidence_mark(fc, evidence):
+    """What Font Check's list says beside a language no source declares: u"inferred" (its characters
+    counted from a text) or u"keyboard" (read from a keyboard layout); u"" for a declared one. Font
+    Check's UNDECLARED names both kinds (an older Font Check without it knew the inferred alone)."""
+    inferred = getattr(fc, "INFERRED", "inferred")
+    undeclared = getattr(fc, "UNDECLARED", (inferred,))
+    if evidence not in undeclared:
+        return u""
+    return u"keyboard" if evidence == getattr(fc, "KEYBOARD", "keyboard") else u"inferred"
+
+
+def mark_word(mark):
+    """An entry's mark as the word the summary shows (True, from older callers, is u"inferred")."""
+    return u"inferred" if mark is True else (u"%s" % mark if mark else u"")
+
+
+def language_names(entries):
+    """The texts of a script's languages on the summary: each name, with "(inferred)" or "(keyboard)"
+    as Font Check marks a language no source declares, and, within reach, how many it lacks."""
+    found = []
+    for name, mark, lacks in entries:
+        notes = ([mark_word(mark)] if mark else []) + ([lacks] if lacks else [])
+        found.append(u"%s (%s)" % (name, u", ".join(notes)) if notes else name)
+    return found
+
+
+class Summary(object):
+    """What the proof's first page says of the font. title: the family's name, set in the font itself
+    (font: the ProofFont it is set in, None: the proof's first); rows [(label, text)] (summary_rows);
+    metrics and metric_notes (metric_rows, metric_notes; None: not read); features: features_text's (u"":
+    not read); kerning: kerning_text's; coverage: a CoverageSummary (None: Font Check's data is not
+    there, and the page leaves the languages out); languages: a key of SUMMARY_LANGUAGES."""
+
+    def __init__(self, title=u"", rows=(), metrics=None, metric_notes=(), features=u"", kerning=u"", coverage=None,
+                 languages="covered", font=None):
+        self.title, self.rows, self.font = title, list(rows), font
+        self.metrics, self.metric_notes = metrics, list(metric_notes)
+        self.features, self.kerning, self.coverage, self.languages = features, kerning, coverage, languages
+
+
+# ---------------------------------------------------------------------------
 # The sections
 # ---------------------------------------------------------------------------
 
@@ -1267,6 +1563,112 @@ def section_info(layout, rows):
         layout.field(label, text)
 
 
+def summary_table(layout, header, rows, label_width=INFO_LABEL_WIDTH, column=SUMMARY_METRIC_COLUMN, size=8):
+    """A small table, kept on one page: a quiet header, then each row's label and its cells, the cells
+    set flush right under their headings."""
+    height = size * 1.45
+    layout.need(height * (len(rows) + 1))
+    for index, (label, cells) in enumerate([(u"", header)] + list(rows)):
+        if label:
+            layout.add("text", x=layout.left, y=layout.y, width=label_width - 6.0, height=height, text=label,
+                       size=size, style="quiet", align="left")
+        for at, cell in enumerate(cells):
+            if cell:  # (Windows has no line gap: its cell stays empty)
+                layout.add("text", x=layout.left + label_width + at * column, y=layout.y, width=column - 10.0,
+                           height=height, text=cell, size=size, style="plain" if index else "quiet", align="right")
+        layout.y += height
+
+
+def summary_names(layout, names, columns=SUMMARY_COLUMNS, size=SUMMARY_NAME_SIZE, leading=SUMMARY_NAME_LEADING):
+    """Names in columns, read down each column and then across; a list longer than the page's room goes
+    on over the following pages (down the columns of each page in turn), never cut."""
+    width = layout.width() / columns
+    at = 0
+    while at < len(names):
+        rest = -(-(len(names) - at) // columns)  # the rows the names left would take
+        layout.need(leading * min(SUMMARY_MIN_ROWS, rest))
+        room = max(1, int((layout.bottom - layout.y) // leading))
+        block = names[at:at + room * columns]
+        rows = -(-len(block) // columns)
+        for index, name in enumerate(block):
+            column, row = divmod(index, rows)
+            layout.add("text", x=layout.left + column * width, y=layout.y + row * leading, width=width - 6.0,
+                       height=leading, text=name, size=size, style="plain", align="left")
+        layout.y += rows * leading
+        at += len(block)
+
+
+def summary_languages(layout, coverage, mode):
+    """The languages' counts, script by script, the character sets covered, and the small print; then
+    (mode "covered" or "reach") the languages themselves under their scripts, A to Z."""
+    layout.text(u"Language coverage", 9, "bold", gap=8.0, keep=40.0)
+    layout.text(coverage.sentence())
+    for script in coverage.scripts:
+        layout.field(script.script, script.text)
+    if coverage.set_count:
+        text = u"%d of %d covered" % (len(coverage.sets), coverage.set_count)
+        layout.field(u"Character sets", text + (u": %s" % u", ".join(coverage.sets) if coverage.sets else u""))
+    for index, note in enumerate(coverage.notes()):
+        layout.text(note, SUMMARY_NAME_SIZE, "quiet", gap=0.0 if index else 3.0)
+    if mode not in ("covered", "reach"):
+        return
+    lists = []
+    for script in coverage.scripts:
+        if script.covered:
+            lists.append((u"%s, covered (%d)" % (script.script, len(script.covered)), language_names(script.covered)))
+        if mode == "reach" and script.reach:
+            lists.append((u"%s, within reach (%d)" % (script.script, len(script.reach)),
+                          language_names(script.reach)))
+    marked = set(mark_word(mark) for script in coverage.scripts
+                 for _, mark, _ in script.covered + (script.reach if mode == "reach" else []) if mark)
+    first = True
+    for word, key in EVIDENCE_KEYS:  # a key for each mark the lists show
+        if lists and word in marked:
+            layout.text(key, SUMMARY_NAME_SIZE, "quiet", gap=6.0 if first else 0.0, keep=40.0)
+            first = False
+    for heading, names in lists:
+        layout.text(heading, 8, "bold", gap=5.0, keep=SUMMARY_NAME_LEADING * SUMMARY_MIN_ROWS)
+        summary_names(layout, names)
+
+
+def section_summary(layout, font, summary, date, left_out=()):
+    """The summary: the family's name in the font itself, then, in the labels' typeface, the font and
+    the proof, its vertical metrics, its OpenType features and kerning, and the languages it covers."""
+    title_font = summary.font or font
+    title = summary.title or font.family
+    sequence = title_font.sequence(title) if title else None
+    if sequence:
+        placed, width = place(title_font, sequence)
+        size = float(SUMMARY_TITLE_SIZE)
+        if width * size / title_font.upm > layout.width():  # a long name: smaller, down to a size still a title
+            size = max(float(SUMMARY_TITLE_MIN), layout.width() * title_font.upm / width)
+            placed, width = clip(title_font, sequence, layout.width() * title_font.upm / size)
+        layout.glyphs(title_font, placed, width, size)
+        layout.y += 4.0
+    else:  # the font lacks a character of its own name: the labels' typeface says it
+        layout.text(title, 16, "bold", keep=30.0)
+    rows = list(summary.rows)
+    rows.append((u"Proofed", u"%s, with FreeLab Proof, from the font's own outlines in FontLab" % date))
+    rows.append((u"Applied", APPLIED))
+    if left_out:
+        rows.append((u"No text for", u"%s (shaping is not done)" % u", ".join(left_out)))
+    for label, text in rows:
+        layout.field(label, text)
+    if summary.metrics:
+        layout.text(u"Vertical metrics", 9, "bold", gap=8.0, keep=70.0)
+        summary_table(layout, METRIC_HEADER, summary.metrics)
+        for label, text in summary.metric_notes:
+            layout.field(label, text)
+    if summary.features or summary.kerning:
+        layout.text(u"OpenType", 9, "bold", gap=8.0, keep=30.0)
+        if summary.features:
+            layout.field(u"Features", summary.features)
+        if summary.kerning:
+            layout.field(u"Kerning", summary.kerning)
+    if summary.coverage is not None:
+        summary_languages(layout, summary.coverage, summary.languages)
+
+
 def section_masters(layout, fonts, line, rtl):
     layout.heading(TITLES["masters"])
     layout.text(u"The same text in each master, kerning applied.", style="quiet")
@@ -1347,10 +1749,122 @@ def restricted(font, names):
                      font.descender, font._ink, font._colored)
 
 
-def build_proof(fonts, options=None, languages=(), date=None, info=None):
+def covered_languages(font, languages):
+    """The languages the font has every base character of, the most spoken first (Hyperglot's speakers):
+    those a proof can set text in."""
+    codes = set(code for code, name in font.cmap.items() if font.has(name))
+    covered = [language for language in languages
+               if language.base and all(has_character(codes, ch) for ch in language.base)]
+    covered.sort(key=lambda language: -(language.speakers or 0))
+    return covered
+
+
+def scope_label(scope):
+    """A proof scope as the dropdown and the summary name it: "Latin only", "Spanish (Latin)"; u"" for none."""
+    if scope is None or scope == MORE:
+        return u""
+    if scope[0] == "script":
+        return u"%s only" % SCRIPT_LABELS.get(scope[1], scope[1].title())
+    return u"%s (%s)" % (scope[1].name, scope[1].script)
+
+
+def same_scope(one, other):
+    """Whether two scopes are the same script, or the same language in the same script."""
+    if one is None or other is None or one[0] != other[0] or one == MORE:
+        return False
+    if one[0] == "script":
+        return one[1] == other[1]
+    return (one[1].iso, one[1].script) == (other[1].iso, other[1].script)
+
+
+def split_languages(covered, expanded=False, kept=None):
+    """(the languages listed to start with, the others, whether the others are listed): the most spoken
+    SCOPE_LANGUAGES_TOP first; the others are listed at once when they are few (SCOPE_LANGUAGES_SLACK),
+    when the list was filled out (expanded), or when the scope kept (kept) is one of them."""
+    if len(covered) <= SCOPE_LANGUAGES_TOP + SCOPE_LANGUAGES_SLACK:
+        return list(covered), [], True
+    first, rest = list(covered[:SCOPE_LANGUAGES_TOP]), list(covered[SCOPE_LANGUAGES_TOP:])
+    among = kept is not None and kept[0] == "language" and any(same_scope(kept, ("language", one)) for one in rest)
+    return first, rest, bool(expanded or among)
+
+
+def scope_rows(scripts, covered, expanded=False, kept=None):
+    """The Proof dropdown's rows, [(text, scope)]: every script (scope None); each script the font has
+    letters of; then, after a separator (text None), the languages it covers, the most spoken first, a
+    sensible number of them; then More languages... (scope MORE), or, once that was chosen, the others
+    after a second separator, A to Z (a long list is found by eye or by typing a name's first letters)."""
+    rows = [(u"Every script", None)]
+    rows += [(scope_label(("script", word)), ("script", word)) for word in scripts]
+    if not covered:
+        return rows
+    first, rest, listed = split_languages(covered, expanded, kept)
+    rows.append((None, None))
+    rows += [(scope_label(("language", one)), ("language", one)) for one in first]
+    if rest and not listed:
+        rows.append((MORE_LANGUAGES, MORE))
+    elif rest:
+        rows.append((None, None))
+        rest.sort(key=lambda one: ((u"%s" % one.name).lower(), u"%s" % one.script))
+        rows += [(scope_label(("language", one)), ("language", one)) for one in rest]
+    return rows
+
+
+def scope_help(covered, rest, listed):
+    """The Proof dropdown's What's This, with the counts: covered, the languages the font covers; rest,
+    those not among the most spoken; listed: whether the dropdown lists them."""
+    text = (u"What the proof covers: every script the font has, one of them (its letters, with the figures, "
+            u"punctuation, and symbols), or, after the line, one language the font covers (its letters; the text "
+            u"section shows its sample alone). ")
+    if not covered:
+        text += (u"No language is listed: the font has every base character of none of the languages Hyperglot "
+                 u"describes. ")
+    else:
+        text += u"The font has every base character of %s Hyperglot describes" % counted(covered, u"language")
+        if not rest:
+            text += u": it is listed. " if covered == 1 else u": all are listed, the most spoken first. "
+        elif listed:
+            text += u": the %d most spoken come first, then the %s, A to Z. " % (
+                covered - rest, u"other one" if rest == 1 else u"other %s" % u"{:,}".format(rest))
+        else:
+            text += u": the %d most spoken are listed, and <i>More languages\N{HORIZONTAL ELLIPSIS}</i> lists %s " \
+                    u"after them, A to Z. " % (covered - rest, u"the other one" if rest == 1
+                                               else u"the other %s" % u"{:,}".format(rest))
+    return text + (u"Languages within reach are not offered: a language's text is set only when the font has all its "
+                   u"base characters, and <i>Font Check</i> lists what the others lack.")
+
+
+def settings_path(ak):
+    return os.path.join(ak.state_dir(), SETTINGS_FILE)
+
+
+def read_settings(ak):
+    """The settings kept from one FontLab session to the next ({} when there are none yet)."""
+    import io
+    try:
+        with io.open(settings_path(ak), encoding="utf-8") as handle:
+            data = json.load(handle)
+        return data if isinstance(data, dict) else {}
+    except (IOError, OSError, ValueError):
+        return {}
+
+
+def write_settings(ak, data):
+    import io
+    try:
+        folder = os.path.dirname(settings_path(ak))
+        if not os.path.isdir(folder):
+            os.makedirs(folder)
+        with io.open(settings_path(ak), "w", encoding="utf-8") as handle:
+            handle.write(u"%s" % json.dumps(data, indent=1, sort_keys=True))
+    except (IOError, OSError):
+        pass
+
+
+def build_proof(fonts, options=None, languages=(), date=None, info=None, summary=None):
     """The pages of a proof of fonts (a ProofFont per master, the first the one the text is chosen
-    for): an about block, the font's info (info: [(label, text)], None for none), the masters side by
-    side (several masters), then each master's sections."""
+    for): the summary (a Summary; None: an about block in its place), the font's info (info:
+    [(label, text)], None for none), the masters side by side (several masters), then each master's
+    sections."""
     options = options or Options()
     date = date or time.strftime("%Y-%m-%d")
     layout = Layout(page_size(options.page))
@@ -1362,17 +1876,22 @@ def build_proof(fonts, options=None, languages=(), date=None, info=None):
     for font in fonts:
         kerned.append(sum(1 for (left, right), value in font.kerning.items()
                           if value and (options.keep is None or options.keep(left, right))))
-    layout.begin("about", label)
-    layout.text(first.family, 16, "bold", keep=30.0)
-    masters = u", ".join(font.master for font in fonts)
-    layout.text(u"%s; %s: %s." % (counted(len(first.glyphs), u"glyph"), counted(len(fonts), u"master"), masters))
-    layout.text(u"Drawn from the font's own outlines. Kerning applied as FontLab applies it, classes resolved "
-                u"(%s). OpenType features not applied: no ligatures, no contextual or localized forms, no mark "
-                u"positioning; each character shows its own glyph." % u", ".join(
-                    u"%s %s" % (counted(count, u"kerned pair"), u"in " + font.master) for count, font in zip(kerned, fonts)))
-    if left_out:
-        layout.text(u"No text for %s: shaping is not done." % u", ".join(left_out))
-    layout.text(u"Made with FreeLab Proof, %s." % date, style="quiet")
+    if summary is not None:  # (it says what the about block says, and more)
+        layout.begin("summary", label)
+        section_summary(layout, first, summary, date, left_out)
+    else:
+        layout.begin("about", label)
+        layout.text(first.family, 16, "bold", keep=30.0)
+        masters = u", ".join(font.master for font in fonts)
+        layout.text(u"%s; %s: %s." % (counted(len(first.glyphs), u"glyph"), counted(len(fonts), u"master"), masters))
+        layout.text(u"Drawn from the font's own outlines. Kerning applied as FontLab applies it, classes resolved "
+                    u"(%s). OpenType features not applied: no ligatures, no contextual or localized forms, no mark "
+                    u"positioning; each character shows its own glyph." % u", ".join(
+                        u"%s %s" % (counted(count, u"kerned pair"), u"in " + font.master)
+                        for count, font in zip(kerned, fonts)))
+        if left_out:
+            layout.text(u"No text for %s: shaping is not done." % u", ".join(left_out))
+        layout.text(u"Made with FreeLab Proof, %s." % date, style="quiet")
     if info is not None:  # (with the about block: which font, which version, before any glyph)
         layout.begin("info", label)
         section_info(layout, info)
@@ -1633,8 +2152,13 @@ Pick the sections: the <b>character set</b> (every glyph with its name and code 
 from Font Check's language data), <b>kerning strings</b> (every kerned pair, or the common ones,
 between control letters: HH?HOHO, nn?nono), <b>spacing strings</b> (each letter as HHxHOxOO or
 nnxnoxoo, without kerning), <b>diacritics</b>, and <b>figures and punctuation</b>; for the current
-master, or for each master (with a page of the masters side by side). The first page says what the
-proof shows and gives the font's info (names, version, designer, license, dates).<br><br>
+master, or for each master (with a page of the masters side by side). The proof opens on a
+<b>summary</b>: the family's name in the font itself, the font and the master proofed, its vertical
+metrics, its OpenType features and kerning, and the scripts and languages it covers, as <i>Font
+Check</i> counts them (<i>Summary lists</i>: the covered languages, those within reach too, or the
+counts alone). The font's info follows (names, version, designer, license, dates).<br><br>
+<i>Proof</i> limits the proof to one script, or to one language the font covers: the most spoken
+come first, and <i>More languages\N{HORIZONTAL ELLIPSIS}</i> lists the others.<br><br>
 Kerning is applied as FontLab applies it, classes resolved. OpenType features are not: no ligatures,
 no contextual or localized forms, no mark positioning, so each character shows its own glyph, and
 scripts that need shaping (Arabic, the Indic scripts, Thai) get no text.<br><br>
@@ -1672,6 +2196,9 @@ class ProofDialog(object):
         self.saved = None
         self.gone_said = False  # the log said the PDF saved last is not there anymore
         self.info = None  # the font's info rows, read once per font
+        self.facts = None  # what the summary reads of the font beyond its info (font_facts), once per font read
+        self.kerning_counts = {}  # master: (kerning entries, classes), as its kerning was read
+        self.facts_said = set()  # what the log said the summary leaves out, each once
         self.common = None  # {two characters: rank}, read when first needed
         self.languages = None
         self.keep = []  # Python references to the slots and filters PythonQt does not hold
@@ -1685,50 +2212,61 @@ class ProofDialog(object):
         layout.addWidget(self.font_label)
         layout.addWidget(ak.separator())
 
+        self.settings = read_settings(ak)  # the summary's two settings, kept between FontLab sessions
+        self.captions = {}  # each control's caption (a label), by the control's name here: it shows the control's help
+
+        def captioned(into, name, caption, control, tip, stretch=0):
+            """A control after its caption, both with the control's own What's This: a click on the
+            caption in What's This mode answers for its control, not for the window (or a neighbor)."""
+            label = self.captions[name] = QtGui.QLabel(caption)
+            label.setWhatsThis(tip)
+            control.setWhatsThis(tip)
+            into.addWidget(label)
+            into.addWidget(control, stretch)
+            return control
+
         row = QtGui.QHBoxLayout()
-        row.addWidget(QtGui.QLabel("Masters"))
-        self.masters_box = QtGui.QComboBox()
-        self.masters_box.setWhatsThis(u"The current master only, or each master in turn (each starting on a new "
-                                      u"page, after a page of the masters side by side).")
-        row.addWidget(self.masters_box)
+        self.masters_box = captioned(row, "masters", "Masters", QtGui.QComboBox(),
+                                     u"The current master only, or each master in turn (each starting on a new "
+                                     u"page, after a page of the masters side by side).")
         row.addSpacing(12)
-        row.addWidget(QtGui.QLabel("Page"))
         self.page_box = QtGui.QComboBox()
         for _, label, _ in PAGE_SIZES:
             self.page_box.addItem(label)
-        self.page_box.setWhatsThis(u"The PDF's page size, portrait.")
-        row.addWidget(self.page_box)
+        captioned(row, "page", "Page", self.page_box, u"The PDF's page size, portrait.")
         row.addSpacing(12)
-        row.addWidget(QtGui.QLabel("Kerning strings for"))
         self.pairs_box = QtGui.QComboBox()
         for _, label in KERNING_SETS:
             self.pairs_box.addItem(label)
-        self.pairs_box.setWhatsThis(u"Every kerned pair (a font with class kerning can have tens of thousands: the PDF "
-                                    u"grows with them), or only the pairs common in text (the list <i>Auto Kerning</i>'s "
-                                    u"<i>Common pairs</i> uses).")
-        row.addWidget(self.pairs_box)
+        captioned(row, "pairs", "Kerning strings for", self.pairs_box,
+                  u"Every kerned pair (a font with class kerning can have tens of thousands: the PDF grows with them), "
+                  u"or only the pairs common in text (the list <i>Auto Kerning</i>'s <i>Common pairs</i> uses).")
         row.addSpacing(12)
-        row.addWidget(QtGui.QLabel("Proof"))
-        self.scope_box = QtGui.QComboBox()
-        self.scope_box.setWhatsThis(u"What the proof covers: every script the font has, one of them (its letters, with "
-                                    u"the figures, punctuation, and symbols), or, after the line, one language the "
-                                    u"font covers (its letters; the text section shows its sample alone).")
+        self.scope_box = captioned(row, "scope", "Proof", QtGui.QComboBox(), scope_help(0, 0, True))
         self.scopes = [None]
+        self.scope_kept = None  # the scope chosen last (the dropdown is filled again around it)
+        self.scope_expanded = False  # More languages... was chosen: the dropdown lists every covered language
         self.scope_box.addItem(u"Every script")
-        row.addWidget(self.scope_box)
         row.addSpacing(12)
-        row.addWidget(QtGui.QLabel("Colors"))
         self.colors_box = QtGui.QComboBox()
         for _, label in COLOR_MODES:
             self.colors_box.addItem(label)
-        self.colors_box.setWhatsThis(u"The PDF's colors: this window's (its text on its background, light on dark in dark "
-                                     u"mode), or black on white, for printing. The page shown beside the list is the PDF "
-                                     u"as it will be.")
-        row.addWidget(self.colors_box)
+        captioned(row, "colors", "Colors", self.colors_box,
+                  u"The PDF's colors: this window's (its text on its background, light on dark in dark mode), or "
+                  u"black on white, for printing. The page shown beside the list is the PDF as it will be.")
         row.addStretch(1)
         layout.addLayout(row)
 
         checks = QtGui.QHBoxLayout()
+        self.summary_box = QtGui.QCheckBox(TITLES["summary"])
+        self.summary_box.setChecked(self.settings.get("summary") is not False)
+        self.summary_box.setWhatsThis(u"The proof's first page: the family's name in the font itself, then the font and "
+                                      u"the master proofed, the version and dates the font records, its units per em, "
+                                      u"its counts of glyphs and of encoded characters, its vertical metrics, its "
+                                      u"OpenType features and kerning, and the scripts and languages it covers, as "
+                                      u"<i>Font Check</i> counts them, with the data's sources. Unchecked, a few lines "
+                                      u"about the proof take its place. Kept from one FontLab session to the next.")
+        checks.addWidget(self.summary_box)
         self.section_boxes = {}
         tips = {"charset": u"Every glyph in a grid, in the font's order, with its name and code point.",
                 "waterfall": u"A line of sample text at each waterfall size.",
@@ -1747,15 +2285,29 @@ class ProofDialog(object):
         layout.addLayout(checks)
 
         sizes = QtGui.QHBoxLayout()
-        sizes.addWidget(QtGui.QLabel("Waterfall sizes"))
-        self.waterfall_edit = QtGui.QLineEdit(u" ".join(format_size(s) for s in WATERFALL_SIZES))
-        self.waterfall_edit.setWhatsThis(u"Point sizes, separated by spaces or commas.")
-        sizes.addWidget(self.waterfall_edit, 2)
+        self.languages_box = QtGui.QComboBox()
+        for _, label in SUMMARY_LANGUAGES:
+            self.languages_box.addItem(label)
+        keys = [key for key, _ in SUMMARY_LANGUAGES]
+        if self.settings.get("summary_languages") in keys:
+            self.languages_box.setCurrentIndex(keys.index(self.settings.get("summary_languages")))
+        captioned(sizes, "languages", "Summary lists", self.languages_box,
+                  u"What the summary lists after the counts of each script's languages: the languages the font covers "
+                  u"(under their scripts, A to Z, in five columns of small type; some 435 fill a page, and a longer "
+                  u"list goes on over the following pages, never cut: a font with the Latin of Western and Central "
+                  u"Europe covers nearly a thousand languages, about four pages), those and the languages within "
+                  u"reach (each with how many characters it lacks), or none: the counts alone. Kept from one FontLab "
+                  u"session to the next.")
         sizes.addSpacing(12)
-        sizes.addWidget(QtGui.QLabel("Text sizes"))
-        self.text_edit = QtGui.QLineEdit(u" ".join(format_size(s) for s in TEXT_SIZES))
-        self.text_edit.setWhatsThis(u"Point sizes of the text section's paragraphs.")
-        sizes.addWidget(self.text_edit, 1)
+        self.waterfall_edit = captioned(
+            sizes, "waterfall", "Waterfall sizes", QtGui.QLineEdit(u" ".join(format_size(s) for s in WATERFALL_SIZES)),
+            u"The waterfall's point sizes, a line of sample text at each: typed, separated by spaces or commas (%d to "
+            u"%d points)." % SIZE_RANGE, 2)
+        sizes.addSpacing(12)
+        self.text_edit = captioned(
+            sizes, "text", "Text sizes", QtGui.QLineEdit(u" ".join(format_size(s) for s in TEXT_SIZES)),
+            u"The point sizes the text section sets each script's sample text at: typed, separated by spaces or "
+            u"commas (%d to %d points)." % SIZE_RANGE, 1)
         layout.addLayout(sizes)
 
         splitter = self.splitter = QtGui.QSplitter(QtCore.Qt.Horizontal)
@@ -1796,6 +2348,8 @@ class ProofDialog(object):
         self.open_button = QtGui.QPushButton("Open PDF")
         self.open_button.setWhatsThis(u"Opens the PDF saved last in the application Windows opens PDF files with.")
         self.close_button = QtGui.QPushButton("Close")
+        self.close_button.setWhatsThis(u"Closes this window. Nothing is written to the font; a PDF saved stays where "
+                                       u"it was saved.")
         buttons.addWidget(self.glyph_window_button)
         buttons.addWidget(self.restore_button)
         buttons.addStretch(1)
@@ -1820,8 +2374,11 @@ class ProofDialog(object):
         later = self.rebuild_timer.start
         for box in self.section_boxes.values():
             box.connect("toggled(bool)", lambda on: later())
-        for box in (self.masters_box, self.page_box, self.pairs_box, self.scope_box):
+        for box in (self.masters_box, self.page_box, self.pairs_box):
             box.connect("currentIndexChanged(int)", lambda index: later())
+        self.scope_box.connect("currentIndexChanged(int)", self.scope_chosen)
+        self.summary_box.connect("toggled(bool)", lambda on: self.summary_changed("summary"))
+        self.languages_box.connect("currentIndexChanged(int)", lambda index: self.summary_changed("summary_languages"))
         for edit in (self.waterfall_edit, self.text_edit):
             edit.connect("editingFinished()", later)
         self.page_list.connect("currentRowChanged(int)", lambda row: self.show_page())
@@ -1874,7 +2431,7 @@ class ProofDialog(object):
                 return None
         except Exception:
             pass
-        package = workspace.currentPackage
+        package = self.ak.window_font(self, workspace)  # this window's font
         if package is None or package.isNull or not package.glyphsCount:
             return None
         return package
@@ -1883,6 +2440,7 @@ class ProofDialog(object):
         """The current font and master (the cached glyphs dropped); False (and said so) when no font is open."""
         self.package = self.current_font()
         self.fonts, self.paths, self.font_glyphs, self.info, self.color_parts = {}, {}, None, None, {}
+        self.facts, self.kerning_counts = None, {}
         if self.package is None:
             self.master = None
             self.proof = None
@@ -1972,6 +2530,7 @@ class ProofDialog(object):
         """{(left, right): value} as FontLab applies it, classes resolved; pairs of its own only (and said
         so) when FontLab does not resolve them."""
         kerning = self.ak.FontKerning(self.package.kerning(master))
+        self.kerning_counts[master] = (len(kerning.values), len(kerning.classes))  # (for the summary's one line)
         if kerning.plain is not None:
             return dict(kerning.plain)
         self.log.add(u"FontLab did not give master %s's kerning with its classes applied: only pairs of glyphs are "
@@ -2036,9 +2595,134 @@ class ProofDialog(object):
                 self.log.add(u"The font's info could not be read: %s" % self.ak.html(exc), "warning")
         return self.info
 
+    def font_check(self):
+        """Font Check beside this script, as a module (its window not opened): its coverage and its
+        reading of the vertical metrics."""
+        return self.ak.load_sibling(FONT_CHECK_FILE, FONT_CHECK_MODULE)
+
+    def say_once(self, key, text):
+        """A warning the log gives once per window (a font read again at each edit would repeat it)."""
+        if key not in self.facts_said:
+            self.facts_said.add(key)
+            self.log.add(text, "warning")
+
+    def read_coverage(self, fc):
+        """The CoverageSummary of the font as it is now: its code points, and its anchors in the current
+        master for the letters they compose (read as Font Check reads them, when a language asks)."""
+        package, master = self.package, self.master
+        names_of, codes = {}, set()
+        names, glyph_codes_ = self.glyph_list()
+        for name in names:
+            for code in glyph_codes_.get(name, ()):
+                codes.add(code)
+                names_of.setdefault(code, name)
+        anchors = {}
+
+        def anchors_of(code):
+            if code not in anchors:
+                layer = self.layer(master, names_of[code]) if code in names_of else None
+                anchors[code] = set(fc.anchor_names(layer)) if layer is not None else set()
+            return anchors[code]
+
+        def attaches(base, mark):
+            return bool(set(name[1:] for name in anchors_of(mark) if name.startswith(u"_")) & anchors_of(base))
+
+        return coverage_summary(fc, codes, attaches)
+
+    def read_features(self):
+        """[(tag, the name the code gives the feature or u"")] of the font's feature code, in its order."""
+        features = self.package.fgPackage.features
+        tags = [u"%s" % tag for tag in features.keys()]
+        own = None
+        try:  # the name a stylistic set's own code gives it (featureNames), as Feature Code reads it
+            own = self.ak.load_sibling(FEATURE_CODE_FILE, FEATURE_CODE_MODULE).hand_name
+        except Exception:
+            pass
+        found = []
+        for tag in tags:
+            name = None
+            if own is not None and re.match(u"^(ss|cv)[0-9]{2}$", tag):
+                try:
+                    name = own(u"%s" % (features.get_feature(tag) or u""))
+                except Exception:
+                    name = None
+            found.append((tag, name or u""))
+        return found
+
+    def font_facts(self):
+        """What the summary reads of the font beyond its info, once per font read (never as a page is
+        drawn): {"coverage": a CoverageSummary or None, "metrics": Font Check's, or None, "features":
+        [(tag, name)] or None}. What cannot be read is left out, and the log says why once."""
+        if self.facts is not None:
+            return self.facts
+        facts = self.facts = {"coverage": None, "metrics": None, "features": None}
+        html = self.ak.html
+        fc = None
+        try:
+            fc = self.font_check()
+        except Exception as exc:
+            self.say_once("font check", u"<i>Font Check</i> is not beside this script (%s): the summary leaves the "
+                                        u"languages the font covers and its vertical metrics out. Reinstall FreeLab."
+                          % html(exc))
+        if fc is not None:
+            try:
+                facts["coverage"] = self.read_coverage(fc)
+            except Exception as exc:
+                self.say_once("coverage", u"<i>Font Check</i>'s language data could not be read (%s): the summary "
+                                          u"leaves the languages the font covers out. Reinstall FreeLab." % html(exc))
+            try:
+                facts["metrics"] = fc.read_metrics(self.package)
+            except Exception as exc:
+                self.say_once("metrics", u"The font's vertical metrics could not be read (%s): the summary leaves "
+                                         u"them out." % html(exc))
+        try:
+            facts["features"] = self.read_features()
+        except Exception as exc:
+            self.say_once("features", u"The font's features could not be read (%s): the summary leaves them out."
+                          % html(exc))
+        return facts
+
+    def summary(self, font, proofed, scope=None):
+        """The Summary of the font (None with its check box off): font is the first master's ProofFont,
+        whole (not limited to the scope); proofed: the masters the proof shows."""
+        if not self.summary_box.isChecked():
+            return None
+        facts = self.font_facts()
+        package = self.package
+        names, codes = self.glyph_list()
+        encoded = len(set(code for name in names for code in codes.get(name, ())))
+        rows = summary_rows(self.font_info(), getattr(package, "tfn", None), font.master, self.masters(), proofed,
+                            len(names), encoded, scope_label(scope))
+        metrics = facts["metrics"]
+        counts = self.kerning_counts.get(font.master) or (None, None)
+        mode = SUMMARY_LANGUAGES[max(0, min(self.languages_box.currentIndex, len(SUMMARY_LANGUAGES) - 1))][0]
+        return Summary(font.family, rows, metric_rows(metrics, font.master) if metrics is not None else None,
+                       metric_notes(metrics) if metrics is not None else (),
+                       features_text(facts["features"]) if facts["features"] is not None else u"",
+                       kerning_text(len(font.kerning), font.master, counts[0], counts[1]),
+                       facts["coverage"], mode, font)
+
+    def summary_changed(self, key=None):
+        """The summary's check box ("summary") or its list's choice ("summary_languages") changed: kept for
+        the next session, and the proof laid out again. The file is read again and only that key is
+        changed: another Proof window (another font's) may have set the other one since this window read
+        the file. key None: both."""
+        try:
+            mode = SUMMARY_LANGUAGES[max(0, min(self.languages_box.currentIndex, len(SUMMARY_LANGUAGES) - 1))][0]
+            values = {"summary": bool(self.summary_box.isChecked()), "summary_languages": mode}
+            settings = read_settings(self.ak)
+            for name in ([key] if key in values else list(values)):
+                settings[name] = values[name]
+            self.settings = settings
+            write_settings(self.ak, settings)
+        except Exception:
+            pass  # a signal's handler must not raise
+        self.rebuild_timer.start()
+
     def history_moved(self):
         """An undo, a redo, or an edit in FontLab: the font read again and the proof laid out again."""
         self.fonts, self.paths, self.font_glyphs, self.info, self.color_parts = {}, {}, None, None, {}
+        self.facts, self.kerning_counts = None, {}
         self.rebuild()
 
     # -- the proof ------------------------------------------------------------
@@ -2082,47 +2766,68 @@ class ProofDialog(object):
         except Exception as exc:
             self.log.add(u"The sample texts could not be checked: %s" % self.ak.html(exc), "warning")
 
-    def fill_scopes(self, font, languages):
-        """The scopes the font offers (made once per font): its scripts with letters, then the languages it
-        covers whole (every base letter), the most spoken first; the choice kept where it still is."""
+    def fill_scopes(self, font, languages, again=False):
+        """The scopes the font offers (made once per font; again: now, More languages... was chosen): its
+        scripts with letters, then the languages it covers whole (every base character), the most spoken
+        first, a sensible number of them, and an entry that lists the others; the choice kept where it
+        still is. The dropdown's help and its caption's give the counts."""
         key = self.ak.font_key(self.package)
-        if getattr(self, "scopes_font", None) == key:
+        if getattr(self, "scopes_font", None) == key and not again:
             return
         self.scopes_font = key
-        current = self.scopes[max(0, self.scope_box.currentIndex)] if self.scopes else None
+        current = self.scope_kept
         counts = {}
         for name in font.glyphs:
             script = glyph_script(font, name)
             if script is not None and font.has(name):
                 counts[script] = counts.get(script, 0) + 1
         scripts = sorted((word for word, n in counts.items() if n >= SCRIPT_MINIMUM), key=lambda word: -counts[word])
-        codes = set(code for code, name in font.cmap.items() if font.has(name))
-        covered = [language for language in languages
-                   if language.base and all(has_character(codes, ch) for ch in language.base)]
-        covered.sort(key=lambda language: -(language.speakers or 0))
+        covered = self.scope_languages = covered_languages(font, languages)
+        rows = scope_rows(scripts, covered, self.scope_expanded, current)
+        _, rest, listed = split_languages(covered, self.scope_expanded, current)
         self.scope_box.blockSignals(True)
         try:
             self.scope_box.clear()
-            self.scopes = [None]
-            self.scope_box.addItem(u"Every script")
-            for word in scripts:
-                self.scopes.append(("script", word))
-                self.scope_box.addItem(u"%s only" % SCRIPT_LABELS.get(word, word.title()))
-            if covered:
-                self.scope_box.insertSeparator(self.scope_box.count)
-                self.scopes.append(None)  # (the separator's place)
-                for language in covered[:SCOPE_LANGUAGES_MAX]:
-                    self.scopes.append(("language", language))
-                    self.scope_box.addItem(u"%s (%s)" % (language.name, language.script))
+            self.scopes = []
+            for text, scope in rows:
+                if text is None:
+                    self.scope_box.insertSeparator(self.scope_box.count)
+                else:
+                    self.scope_box.addItem(text)
+                self.scopes.append(scope)  # (None at a separator's place too)
             index = 0
             for at, scope in enumerate(self.scopes):
-                if scope is not None and current is not None and scope[0] == current[0] and (
-                        scope[1] == current[1] if scope[0] == "script"
-                        else (scope[1].iso, scope[1].script) == (current[1].iso, current[1].script)):
+                if same_scope(scope, current):
                     index = at
             self.scope_box.setCurrentIndex(index)
+            if not index:
+                self.scope_kept = None  # (the font read now lacks it: every script again)
+            tip = scope_help(len(covered), len(rest), listed)
+            for widget in (self.scope_box, self.captions["scope"]):
+                widget.setWhatsThis(tip)
         finally:
             self.scope_box.blockSignals(False)
+
+    def scope_chosen(self, index=None):
+        """A choice in the Proof dropdown: the proof laid out again for it; More languages... lists the
+        other languages instead, the choice before it kept, and opens the dropdown again to pick one."""
+        try:
+            at = self.scope_box.currentIndex
+            scope = self.scopes[at] if 0 <= at < len(self.scopes) else None
+            if scope == MORE:
+                QtCore, QtGui = _qt()
+                self.scope_expanded = True
+                if self.fonts and self.languages is not None:
+                    font = self.fonts.get(self.master) or list(self.fonts.values())[0]
+                    self.fill_scopes(font, self.languages, again=True)
+                opener = lambda: self.scope_box.showPopup()
+                self.keep.append(opener)
+                QtCore.QTimer.singleShot(0, opener)  # (once this choice is done with: the list, longer now)
+                return
+            self.scope_kept = scope
+        except Exception:
+            pass  # a signal's handler must not raise
+        self.rebuild_timer.start()
 
     def rebuild(self):
         """The proof laid out again from the settings (the font read where it changed)."""
@@ -2146,6 +2851,9 @@ class ProofDialog(object):
             languages = self.load_languages()
             self.fill_scopes(fonts[0], languages)
             scope = self.scopes[max(0, self.scope_box.currentIndex)] if self.scopes else None
+            if scope == MORE:  # (the entry that fills the list out is no scope)
+                scope = None
+            summary = self.summary(fonts[0], masters, scope)  # (of the whole font, whatever the scope)
             if scope is not None:
                 names = scope_names(fonts[0], scope)
                 fonts = [restricted(font, names) for font in fonts]
@@ -2154,7 +2862,7 @@ class ProofDialog(object):
                 else:  # the languages written in that script (all of them, where none is named so: Han)
                     same = [language for language in languages if (u"%s" % language.script).upper() == scope[1]]
                     languages = same or languages
-            self.proof = build_proof(fonts, options, languages, info=self.font_info())
+            self.proof = build_proof(fonts, options, languages, info=self.font_info(), summary=summary)
             self.page_options = options
             self.note_font(fonts[0], options)
         except Exception as exc:
@@ -2176,7 +2884,7 @@ class ProofDialog(object):
                 for number, page in enumerate(self.proof.pages, 1):
                     text = u"%d   %s" % (number, u", ".join(TITLES.get(key, key) for key in page.sections))
                     if several and page.master != ALL_MASTERS:
-                        text += u" \N{EM DASH} %s" % page.master
+                        text += u" (%s)" % page.master  # (a page's master: data beside its sections)
                     self.page_list.addItem(text)
                 self.page_list.setCurrentRow(min(row, len(self.proof.pages) - 1))
         finally:
@@ -2189,7 +2897,8 @@ class ProofDialog(object):
             self.font_label.setText(u"%s: no proof (see the log)." % b(self.package.tfn))
             return
         counts = self.proof.section_pages()
-        parts = [u"%s %d" % (title.lower(), counts[key]) for key, title in SECTIONS if key in counts]
+        parts = [u"%s %d" % (title.lower(), counts[key]) for key, title in ((("summary", TITLES["summary"]),) + SECTIONS)
+                 if key in counts]
         size = dict((key, label) for key, label, _ in PAGE_SIZES).get(self.page_options.page, u"")
         masters = self.proof.masters
         which = u"master %s" % b(masters[0]) if len(masters) == 1 else b(counted(len(masters), u"master"))
@@ -2200,7 +2909,8 @@ class ProofDialog(object):
                            for count, master in zip(self.proof.kerned, masters))
         text += u" Kerning applied (%s, classes resolved); OpenType features not applied." % pairs
         if self.proof.left_out:
-            text += u" No text for %s: it needs shaping." % u", ".join(self.proof.left_out)
+            text += u" No text for %s: %s shaping." % (u", ".join(self.proof.left_out),
+                                                      u"it needs" if len(self.proof.left_out) == 1 else u"they need")
         self.font_label.setText(text)
 
     def selected_page(self):
@@ -2270,7 +2980,8 @@ class ProofDialog(object):
         sections = [self.section_boxes[key].isChecked() for key, _ in SECTIONS]
         return (not all(sections) or self.page_box.currentIndex != 0 or self.pairs_box.currentIndex != 0
                 or self.masters_box.currentIndex != 0 or self.colors_box.currentIndex != 0
-                or self.scope_box.currentIndex > 0
+                or self.scope_box.currentIndex > 0 or self.scope_expanded
+                or not self.summary_box.isChecked() or self.languages_box.currentIndex != 0
                 or parse_sizes(self.waterfall_edit.text, ()) != tuple(float(s) for s in WATERFALL_SIZES)
                 or parse_sizes(self.text_edit.text, ()) != tuple(float(s) for s in TEXT_SIZES))
 
@@ -2279,6 +2990,8 @@ class ProofDialog(object):
         ready = self.proof is not None and bool(self.proof.pages) and not self.busy
         enable(self.save_button, ready)
         enable(self.open_button, self.saved_there())
+        enable(self.languages_box, bool(self.summary_box.isChecked()))  # (nothing to list without the page)
+        enable(self.captions["languages"], bool(self.summary_box.isChecked()))
         page = self.selected_page()
         enable(self.glyph_window_button, ready and page is not None and bool(page.runs()))
         try:
@@ -2308,6 +3021,10 @@ class ProofDialog(object):
         self.masters_box.setCurrentIndex(0)
         self.colors_box.setCurrentIndex(0)
         self.scope_box.setCurrentIndex(0)
+        self.scope_kept, self.scope_expanded = None, False
+        self.scopes_font = None  # (the dropdown filled again, short, as the proof is laid out)
+        self.summary_box.setChecked(True)
+        self.languages_box.setCurrentIndex(0)
         self.waterfall_edit.setText(u" ".join(format_size(s) for s in WATERFALL_SIZES))
         self.text_edit.setText(u" ".join(format_size(s) for s in TEXT_SIZES))
         self.rebuild_timer.start()
@@ -2399,12 +3116,11 @@ SAVE_FOLDER = []  # the folder a PDF was last saved in, while FontLab runs
 
 
 def main():
-    held = getattr(sys, "_freelab_proof", None)
-    if held is not None:
-        try:
-            held.dialog.close()
-        except Exception:
-            pass
+    try:  # this font's window shows it already: brought forward as it is
+        if load_auto_kerning().raise_open("Proof"):
+            return
+    except Exception:
+        pass
     dialog = ProofDialog()
     sys._freelab_proof = dialog  # kept, even half-built: PythonQt deletes a dialog with no Python reference
     if dialog.failed is not None:
@@ -2416,6 +3132,10 @@ def main():
         return
     try:
         dialog.ak.hook_menu_order()
+    except Exception:
+        pass
+    try:
+        dialog.ak.take_window("Proof", dialog)  # its font's window: the tool shown there gives way
     except Exception:
         pass
     dialog.show()

@@ -538,6 +538,378 @@ class ProofTests(unittest.TestCase):
         self.assertEqual(sorted(set(item.size for item in runs)), sorted(fp.WATERFALL_SIZES))
 
 
+def font_check():
+    """Font Check, as a module (its window not opened): the summary's coverage is its own computation."""
+    folder = os.path.join(HERE, os.pardir, "checks")
+    if folder not in sys.path:
+        sys.path.insert(0, folder)
+    import freelab_font_check
+    return freelab_font_check
+
+
+LATIN_1_A = [code for code in list(range(0x20, 0x7F)) + list(range(0xA0, 0x180))]  # Latin-1 and Latin Extended-A
+
+
+class Metrics(object):
+    upm, ascender, descender, line_gap, x_height, cap_height = 1000.0, 750.0, -250.0, None, 499.5, 700.0
+    typo_ascender, typo_descender, typo_line_gap = 950.0, -250.0, 0.0
+    hhea_ascender = hhea_descender = hhea_line_gap = None
+    win_ascent, win_descent, use_typo = 1024.4, 300.0, True
+
+
+def summary_texts(proof, key="summary"):
+    return [item.text for page in proof.pages if key in page.sections for item in page.items if item.kind == "text"]
+
+
+def entries(prefix, count, inferred=0):
+    """count names, the first few inferred from text."""
+    return [(u"%s%04d" % (prefix, index), index < inferred, u"") for index in range(count)]
+
+
+class SummaryTests(unittest.TestCase):
+    def test_features_in_one_text_in_their_number(self):
+        self.assertEqual(fp.features_text([]), u"none in the font's code")
+        self.assertEqual(fp.features_text([(u"liga", u"")]), u"1 feature: liga (Standard Ligatures)")
+        self.assertEqual(fp.features_text([(u"kern", None), (u"ss03", u"Round a"), (u"zzzz", u""), (u"cv12", u"")]),
+                         u"4 features: kern (Kerning), ss03 (Stylistic Set 3: Round a), zzzz, cv12 (Character Variant 12)")
+        self.assertEqual(fp.feature_title(u"ss21"), u"", "OpenType has twenty stylistic sets")
+        self.assertEqual(fp.feature_title(u"ss00"), u"")
+
+    def test_kerning_in_one_line_in_its_numbers(self):
+        self.assertEqual(fp.kerning_text(0, u"Regular"), u"0 kerned pairs in master Regular, classes resolved")
+        self.assertEqual(fp.kerning_text(1, u"Regular", 1, 1),
+                         u"1 kerned pair in master Regular, classes resolved (1 entry, 1 class)")
+        self.assertEqual(fp.kerning_text(1204, u"Bold", 86, 2),
+                         u"1,204 kerned pairs in master Bold, classes resolved (86 entries, 2 classes)")
+
+    def test_vertical_metrics_as_a_small_table(self):
+        rows = fp.metric_rows(Metrics(), u"Regular")
+        self.assertEqual(rows, [(u"Master Regular", [u"750", u"-250", fp.NOT_SET]), (u"Typo", [u"950", u"-250", u"0"]),
+                                (u"hhea", [fp.NOT_SET] * 3), (u"Windows", [u"1024", u"300", u""])])
+        self.assertEqual(fp.metric_notes(Metrics()), [(u"Heights", u"x-height 500, cap height 700"),
+                                                      (u"Use Typo Metrics", u"on")], "halves round up, on any Python")
+        self.assertEqual(fp.metric_notes(object()), [])
+
+    def test_the_font_and_its_masters(self):
+        info = [(u"Family", u"Test Sans"), (u"Style", u"Bold"), (u"Version", u"2.005"), (u"Created", u"2023-11-14"),
+                (u"Modified", u"2026-11-01"), (u"Units per em", u"1000")]
+        rows = fp.summary_rows(info, u"TestSans-Bold", u"Bold", [u"Regular", u"Bold", u"Black"], [u"Bold"], 1234, 1100)
+        self.assertEqual(rows, [(u"Font", u"Test Sans Bold"), (u"Master", u"Bold (the font's other masters: Regular, Black)"),
+                                (u"Version", u"2.005 (created 2023-11-14, modified 2026-11-01)"),
+                                (u"Units per em", u"1000"), (u"Glyphs", u"1,234 glyphs (1,100 encoded characters)")])
+        rows = dict(fp.summary_rows(None, u"Bare", u"Regular", [u"Regular"], [u"Regular"], 1, 1, u"Latin only"))
+        self.assertEqual(rows, {u"Font": u"Bare", u"Master": u"Regular (the font's only master)",
+                                u"Glyphs": u"1 glyph (1 encoded character)", u"Proof of": u"Latin only"})
+        rows = dict(fp.summary_rows([(u"Modified", u"2026-11-01")], u"Two", u"Regular", [u"Regular", u"Bold"],
+                                    [u"Regular"], 2, 0))
+        self.assertEqual(rows[u"Master"], u"Regular (the font's other master: Bold)")
+        self.assertEqual(rows[u"Dates"], u"modified 2026-11-01", "no version recorded: its dates alone")
+        self.assertEqual(rows[u"Glyphs"], u"2 glyphs (0 encoded characters)")
+        rows = dict(fp.summary_rows(None, u"Two", u"Regular", [u"Regular", u"Bold"], [u"Regular", u"Bold"], 2, 2))
+        self.assertEqual(rows[u"Masters"], u"Regular, Bold (all 2 proofed)")
+        self.assertNotIn(u"Master", rows)
+
+    def test_coverage_is_font_checks_own(self):
+        fc = font_check()
+        found = fp.coverage_summary(fc, set(LATIN_1_A))
+        languages, _ = fc.chosen_languages(fc.load_languages(), True)
+        scripts = [s for s in fc.coverage(languages, fc.FontCharacters(set(LATIN_1_A), None), fc.NEARLY_MISSING, True, None)
+                   if s.present]
+        self.assertEqual([s.script for s in found.scripts], [u"%s" % s.script for s in scripts])
+        latin, checked = found.scripts[0], scripts[0]
+        self.assertEqual(latin.script, u"Latin")
+        self.assertEqual(latin.text, fc.script_text(checked), "the count in Font Check's own words")
+        self.assertEqual(len(latin.covered), checked.count("covered"))
+        self.assertEqual(len(latin.reach), checked.count("nearly"))
+        names = [name for name, _, _ in latin.covered]
+        self.assertIn(u"English", names)
+        self.assertIn(u"Spanish", names)
+        self.assertEqual(names, [u"%s" % r.language.name for r in sorted(checked.results, key=fc.name_key)
+                                 if r.level == "covered"], "A to Z, as Font Check orders names")
+        # Marked as Font Check marks its rows: the languages no source declares, keyboard layouts' too
+        marks = dict((name, mark) for name, mark, _ in latin.covered + latin.reach if mark)
+        self.assertEqual(set(marks), set(u"%s" % r.language.name for r in checked.results
+                                         if r.level in ("covered", "nearly") and r.language.evidence in fc.UNDECLARED))
+        for r in checked.results:
+            if u"%s" % r.language.name in marks:
+                self.assertEqual(marks[u"%s" % r.language.name], u"keyboard" if r.language.evidence == fc.KEYBOARD
+                                 else u"inferred")
+        lacks = dict((u"%s" % r.language.name, r) for r in checked.results if r.level == "nearly")
+        for name, _, text in latin.reach:  # base characters and marks, at most Font Check's few; or auxiliary ones alone
+            r = lacks[name]
+            if r.missing or r.marks_missing:
+                self.assertEqual(text, u"%d missing" % (len(r.missing) + len(r.marks_missing)))
+                self.assertLessEqual(len(r.missing) + len(r.marks_missing), fc.NEARLY_MISSING)
+            else:
+                self.assertEqual(text, u"%d auxiliary missing" % len(r.auxiliary_missing))
+        self.assertTrue(any(text.endswith(u"auxiliary missing") for _, _, text in latin.reach))
+        self.assertTrue(all(text == u"" for _, _, text in latin.covered))
+        self.assertEqual(found.covered(), sum(len(s.covered) for s in found.scripts))
+        self.assertEqual(sum(count for _, count in found.sources), found.covered(), "each covered language has a source")
+        self.assertEqual(found.sources[0][0], u"Hyperglot")
+        self.assertIsNone(found.composed, "no anchors asked: no letter is composed")
+        sets = [fc.check_language(one, fc.FontCharacters(set(LATIN_1_A), None), fc.NEARLY_MISSING)
+                for one in fc.load_character_sets()]
+        self.assertEqual(found.set_count, len(sets))
+        self.assertEqual(found.sets, [u"%s" % r.language.name for r in sets if r.level == "covered"])
+        import re
+        self.assertTrue(re.match(r"^\d{4}-\d{2}-\d{2}$", found.dated), found.dated)
+        composing = fp.coverage_summary(fc, set(LATIN_1_A), lambda base, mark: True)
+        self.assertIsNotNone(composing.composed)
+        self.assertGreaterEqual(composing.covered(), found.covered())
+
+    def test_a_font_with_no_script_says_so(self):
+        found = fp.coverage_summary(font_check(), set([0x20]))
+        self.assertEqual(found.scripts, [])
+        self.assertEqual(found.sentence(), u"The font has none of the scripts whose languages Font Check checks.")
+
+    def test_the_counts_sentence_and_the_small_print_follow_their_numbers(self):
+        def coverage(covered, reach, inferred=0, composed=None, scripts=1):
+            found = [fp.ScriptSummary(u"S%d" % at, u"x", [], []) for at in range(scripts)]
+            found[0].covered, found[0].reach = entries(u"c", covered, inferred), entries(u"r", reach)
+            return fp.CoverageSummary(found, [], 0, 3, composed, [(u"Hyperglot", covered)] if covered else [], u"2026-11-13")
+
+        self.assertEqual(coverage(0, 0).sentence(), u"0 languages covered and 0 within reach, of the languages of 1 "
+                                                    u"script the font has.")
+        self.assertEqual(coverage(1, 1, scripts=2).sentence(),
+                         u"1 language covered and 1 within reach, of the languages of 2 scripts the font has.")
+        self.assertEqual(coverage(1234, 2).sentence()[:25], u"1,234 languages covered a")
+        notes = coverage(2, 0, inferred=1, composed=1).notes()
+        self.assertIn(u"at most 3 base characters or marks (or auxiliary characters alone).", notes[0])
+        self.assertTrue(notes[0].endswith(u"counts as there (1 language covered relies on such letters)."))
+        self.assertEqual(notes[1], u"Of the languages covered, 1 is inferred from text or read from a keyboard layout, "
+                                   u"not declared by a source.")
+        self.assertEqual(notes[2], u"Language data, as Font Check holds it: 2 languages from Hyperglot. Data files last "
+                                   u"changed 2026-11-13.")
+        notes = coverage(3, 0, inferred=2, composed=2).notes()
+        self.assertTrue(notes[0].endswith(u"(2 languages covered rely on such letters)."))
+        self.assertEqual(notes[1], u"Of the languages covered, 2 are inferred from text or read from a keyboard layout, "
+                                   u"not declared by a source.")
+        self.assertEqual(len(coverage(1, 0).notes()), 2, "none inferred: nothing said of it; no anchors: no clause")
+        self.assertNotIn(u"anchors", coverage(1, 0).notes()[0])
+        one = fp.CoverageSummary([], [], 0, 1)
+        self.assertIn(u"at most 1 base character or mark (or", one.notes()[0])
+
+    def page_of(self, summary, font=None, left_out=()):
+        font = font or make_font()
+        return fp.build_proof([font], fp.Options([]), [], u"2026-11-11", summary=summary)
+
+    def test_the_page_top_to_bottom(self):
+        font = make_font()
+        coverage = fp.CoverageSummary([fp.ScriptSummary(u"Latin", u"3 of 9 languages (1 within reach)",
+                                                        entries(u"Lang", 3, 1), [(u"Near", False, u"2 missing")])],
+                                      [u"Adobe Latin 1"], 61, 3, 0, [(u"Hyperglot", 3)], u"2026-11-13")
+        summary = fp.Summary(u"Test Sans", [(u"Font", u"Test Sans Regular")], fp.metric_rows(Metrics(), u"Regular"),
+                             fp.metric_notes(Metrics()), fp.features_text([(u"liga", u"")]),
+                             fp.kerning_text(1, u"Regular"), coverage, "covered")
+        proof = self.page_of(summary)
+        page = proof.pages[0]
+        self.assertEqual(page.sections, ["summary"], "no about block beside it")
+        self.assertEqual(len(proof.pages), 1)
+        body = page.items[8:]  # (after the header and footer)
+        title = body[0]
+        self.assertEqual((title.kind, title.size), ("glyphs", fp.SUMMARY_TITLE_SIZE), "the family, in the font itself")
+        self.assertEqual([name for name, _ in title.placed], [u"T", u"e", u"s", u"t", u"S", u"a", u"n", u"s"])
+        texts = [item.text for item in body if item.kind == "text"]
+        order = [u"Font", u"Proofed", u"2026-11-11, with FreeLab Proof, from the font's own outlines in FontLab",
+                 u"Applied", u"Vertical metrics", u"Ascender", u"Master Regular", u"Windows", u"Heights",
+                 u"Use Typo Metrics", u"OpenType", u"Features", u"1 feature: liga (Standard Ligatures)", u"Kerning",
+                 u"Language coverage", u"3 languages covered and 1 within reach, of the languages of 1 script the "
+                 u"font has.", u"Latin", u"3 of 9 languages (1 within reach)", u"Character sets",
+                 u"1 of 61 covered: Adobe Latin 1", fp.INFERRED_KEY, u"Latin, covered (3)", u"Lang0000 (inferred)",
+                 u"Lang0001", u"Lang0002"]
+        places = [texts.index(text) for text in order]
+        self.assertEqual(places, sorted(places), "each block under the one before")
+        self.assertNotIn(u"Near (2 missing)", texts, "within reach: counted, listed only when asked")
+        sizes = dict((item.text, item.size) for item in body if item.kind == "text")
+        self.assertEqual(sizes[u"Lang0001"], fp.SUMMARY_NAME_SIZE)
+        self.assertEqual(sizes[u"Vertical metrics"], 9)
+        numbers = [item for item in body if item.kind == "text" and item.text == u"950"]
+        self.assertEqual(numbers[0].align, "right", "a table's numbers flush right")
+        for item in body:
+            y = item.baseline if item.kind == "glyphs" else item.y
+            self.assertTrue(fp.MARGIN + fp.HEADER_ROOM <= y <= 841.89 - fp.MARGIN - fp.HEADER_ROOM)
+
+    def test_what_the_list_holds_is_a_setting(self):
+        coverage = fp.CoverageSummary([fp.ScriptSummary(u"Latin", u"x", entries(u"Lang", 2), [(u"Near", True, u"1 missing")]),
+                                       fp.ScriptSummary(u"Greek", u"y", [], [(u"Far", False, u"3 auxiliary missing")])],
+                                      [], 0)
+        texts = summary_texts(self.page_of(fp.Summary(u"Test Sans", coverage=coverage, languages="reach")))
+        for text in (u"Latin, covered (2)", u"Latin, within reach (1)", u"Near (inferred, 1 missing)",
+                     u"Greek, within reach (1)", u"Far (3 auxiliary missing)", fp.INFERRED_KEY):
+            self.assertIn(text, texts)
+        self.assertNotIn(u"Greek, covered (0)", texts, "no heading over nothing")
+        texts = summary_texts(self.page_of(fp.Summary(u"Test Sans", coverage=coverage, languages="covered")))
+        self.assertNotIn(fp.INFERRED_KEY, texts, "no key without a language it marks")
+        self.assertNotIn(u"Latin, within reach (1)", texts)
+        texts = summary_texts(self.page_of(fp.Summary(u"Test Sans", coverage=coverage, languages="none")))
+        self.assertIn(u"Latin", texts)
+        self.assertIn(u"x", texts, "the counts stay")
+        self.assertNotIn(u"Lang0000", texts)
+        self.assertNotIn(u"Latin, covered (2)", texts)
+
+    def test_keyboard_layout_languages_are_marked_as_font_check_marks_them(self):
+        # The summary marked only the inferred languages; Font Check's UNDECLARED holds keyboard layouts' too
+        class Check(object):
+            INFERRED, KEYBOARD, UNDECLARED = "inferred", "keyboard", ("inferred", "keyboard")
+
+        class Older(object):  # (a Font Check from before keyboard layouts)
+            INFERRED = "inferred"
+
+        self.assertEqual([fp.evidence_mark(Check, e) for e in ("declared", "inferred", "keyboard")],
+                         [u"", u"inferred", u"keyboard"])
+        self.assertEqual([fp.evidence_mark(Older, e) for e in ("declared", "inferred", "keyboard")],
+                         [u"", u"inferred", u""])
+        self.assertEqual(fp.language_names([(u"Ainu", u"keyboard", u""), (u"Near", u"keyboard", u"1 missing"),
+                                            (u"Old", True, u"")]),
+                         [u"Ainu (keyboard)", u"Near (keyboard, 1 missing)", u"Old (inferred)"])
+        coverage = fp.CoverageSummary([fp.ScriptSummary(u"Latin", u"x", [(u"Ainu", u"keyboard", u"")], [])], [], 0)
+        self.assertEqual(coverage.inferred(), 1, "counted with the undeclared")
+        texts = summary_texts(self.page_of(fp.Summary(u"Test Sans", coverage=coverage, languages="covered")))
+        self.assertIn(u"Ainu (keyboard)", texts)
+        self.assertIn(fp.KEYBOARD_KEY, texts)
+        self.assertNotIn(fp.INFERRED_KEY, texts, "a key only for a mark the lists show")
+        self.assertIn(u"inferred from text or read from a keyboard layout", coverage.notes()[1])
+
+    def test_names_read_down_each_column(self):
+        layout = fp.Layout()
+        layout.begin("summary", u"Regular")
+        names = [u"n%02d" % index for index in range(23)]
+        fp.summary_names(layout, names)
+        items = [item for item in layout.page.items if item.kind == "text"]
+        width = layout.width() / fp.SUMMARY_COLUMNS
+        columns = [int(round((item.x - layout.left) / width)) for item in items]
+        self.assertEqual(columns, [0] * 5 + [1] * 5 + [2] * 5 + [3] * 5 + [4] * 3, "five rows: down, then across")
+        self.assertEqual([item.y for item in items[:5]], [layout.top + row * fp.SUMMARY_NAME_LEADING for row in range(5)])
+        self.assertAlmostEqual(layout.y, layout.top + 5 * fp.SUMMARY_NAME_LEADING)
+
+    def test_a_long_list_goes_on_over_the_following_pages_whole(self):
+        coverage = fp.CoverageSummary([fp.ScriptSummary(u"Latin", u"x", entries(u"Tongue", 1900, 500), [])], [], 0)
+        proof = self.page_of(fp.Summary(u"Test Sans", coverage=coverage))
+        pages = [page for page in proof.pages if "summary" in page.sections]
+        self.assertGreater(len(pages), 4)
+        self.assertEqual(pages, proof.pages[:len(pages)], "the proof's first pages")
+        found = []
+        for page in pages:
+            names = [item for item in page.items if item.kind == "text" and item.text.startswith(u"Tongue")]
+            for item in names:
+                self.assertLessEqual(item.y + item.height, 841.89 - fp.MARGIN - fp.HEADER_ROOM + 0.01)
+            found += [item.text for item in sorted(names, key=lambda item: (round(item.x), item.y))]
+        wanted = fp.language_names(entries(u"Tongue", 1900, 500))
+        self.assertEqual(found, wanted, "every name once, in order down the columns of each page: none cut")
+        full = [item for item in pages[1].items if item.kind == "text" and item.text.startswith(u"Tongue")]
+        self.assertEqual(len(full), 87 * fp.SUMMARY_COLUMNS, "a full page of names (the window's help says some 435)")
+
+    def test_the_pages_a_real_font_takes(self):
+        # What the Summary lists dropdown's help says: about four pages for Latin-1 and Latin Extended-A
+        fc = font_check()
+        coverage = fp.coverage_summary(fc, set(LATIN_1_A))
+        proof = self.page_of(fp.Summary(u"Test Sans", coverage=coverage))
+        pages = sum(1 for page in proof.pages if "summary" in page.sections)
+        self.assertTrue(3 <= pages <= 5, "%d pages for %d languages" % (pages, coverage.covered()))
+        self.assertTrue(800 <= coverage.covered() <= 1200, coverage.covered())
+        texts = summary_texts(proof)
+        self.assertIn(u"English", texts)
+        listed = sum(len(script.covered) for script in coverage.scripts)
+        self.assertEqual(sum(1 for item in proof.pages for item in item.items
+                             if item.kind == "text" and item.size == fp.SUMMARY_NAME_SIZE and item.style == "plain"),
+                         listed)
+
+    def test_a_name_the_font_cannot_set_is_set_in_the_labels_typeface(self):
+        font = make_font(u"xyz")
+        proof = self.page_of(fp.Summary(u"Test Sans"), font)
+        body = proof.pages[0].items[8:]
+        self.assertEqual((body[0].kind, body[0].text, body[0].style), ("text", u"Test Sans", "bold"))
+        self.assertNotIn(u"Language coverage", summary_texts(proof), "no coverage read: left out, not failed")
+        self.assertNotIn(u"Vertical metrics", summary_texts(proof))
+        long_name = fp.Summary(u"T" * 60)
+        title = self.page_of(long_name).pages[0].items[8]
+        self.assertEqual(title.kind, "glyphs")
+        self.assertLess(title.size, fp.SUMMARY_TITLE_SIZE)
+        self.assertLessEqual(len(title.placed) * 500 * title.size / 1000.0, fp.Layout().width() + 0.01)
+
+    def test_the_title_is_set_in_the_whole_font_whatever_the_scope(self):
+        whole = make_font()
+        scoped = fp.restricted(whole, set([u"x", u"y"]))
+        proof = fp.build_proof([scoped], fp.Options([]), [], u"2026-11-11", summary=fp.Summary(u"Test Sans", font=whole))
+        self.assertEqual(proof.pages[0].items[8].kind, "glyphs")
+
+    def test_scripts_left_out_are_named(self):
+        font = make_font()
+        layout = fp.Layout()
+        layout.begin("summary", u"Regular")
+        fp.section_summary(layout, font, fp.Summary(u"Test Sans"), u"2026-11-11", [u"Arabic", u"Thai"])
+        texts = [item.text for item in layout.page.items if item.kind == "text"]
+        self.assertIn(u"Arabic, Thai (shaping is not done)", texts)
+
+
+class ScopeListTests(unittest.TestCase):
+    @staticmethod
+    def languages(count):
+        names = [u"Zulu", u"Albanian", u"Welsh", u"Basque", u"Maori", u"Dutch"]
+        return [fp.Language(u"l%02d" % index, names[index] if index < len(names) else u"Lang %02d" % index, u"Latin",
+                            1000 - index, [u"a"]) for index in range(count)]
+
+    def test_the_most_spoken_then_an_entry_for_the_others(self):
+        covered = self.languages(60)
+        rows = fp.scope_rows([u"LATIN", u"GREEK"], covered)
+        texts = [text for text, _ in rows]
+        self.assertEqual(texts[:4], [u"Every script", u"Latin only", u"Greek only", None], "the scripts, then a line")
+        self.assertEqual(texts[4:7], [u"Zulu (Latin)", u"Albanian (Latin)", u"Welsh (Latin)"], "by speakers, as before")
+        self.assertEqual(len(rows), 3 + 1 + fp.SCOPE_LANGUAGES_TOP + 1)
+        self.assertEqual(rows[-1], (fp.MORE_LANGUAGES, fp.MORE))
+        self.assertEqual(rows[0][1], None)
+        self.assertEqual(rows[1][1], ("script", u"LATIN"))
+
+    def test_the_others_follow_a_to_z_once_asked_for(self):
+        covered = self.languages(60)
+        rows = fp.scope_rows([u"LATIN"], covered, expanded=True)
+        texts = [text for text, _ in rows]
+        self.assertNotIn(fp.MORE_LANGUAGES, texts)
+        at = 2 + 1 + fp.SCOPE_LANGUAGES_TOP
+        self.assertIsNone(texts[at], "a second line before the others")
+        rest = texts[at + 1:]
+        self.assertEqual(len(rest), 40)
+        self.assertEqual(rest, sorted(rest))
+        self.assertEqual(len(set(texts) - set([None])), 2 + 60, "every covered language once")
+
+    def test_few_others_are_listed_at_once_and_a_kept_one_is_never_hidden(self):
+        few = self.languages(fp.SCOPE_LANGUAGES_TOP + fp.SCOPE_LANGUAGES_SLACK)
+        rows = fp.scope_rows([], few)
+        self.assertEqual(len(rows), 1 + 1 + len(few))
+        self.assertNotIn(fp.MORE, [scope for _, scope in rows])
+        self.assertEqual(fp.scope_rows([], []), [(u"Every script", None)], "no language covered: no line either")
+        many = self.languages(60)
+        kept = ("language", many[45])
+        rows = fp.scope_rows([], many, False, kept)
+        self.assertTrue(any(fp.same_scope(scope, kept) for _, scope in rows), "the choice kept stays in the list")
+        self.assertFalse(fp.same_scope(fp.MORE, fp.MORE))
+        self.assertEqual(fp.scope_label(kept), u"Lang 45 (Latin)")
+        self.assertEqual(fp.scope_label(None), u"")
+
+    def test_the_help_gives_the_counts_in_their_numbers(self):
+        self.assertIn(u"No language is listed", fp.scope_help(0, 0, True))
+        self.assertIn(u"every base character of 1 language Hyperglot describes: it is listed. ", fp.scope_help(1, 0, True))
+        self.assertIn(u"of 2 languages Hyperglot describes: all are listed, the most spoken first. ",
+                      fp.scope_help(2, 0, True))
+        self.assertIn(u"of 25 languages Hyperglot describes: the 20 most spoken are listed, and <i>More languages"
+                      u"\N{HORIZONTAL ELLIPSIS}</i> lists the other 5 after them, A to Z. ", fp.scope_help(25, 5, False))
+        self.assertIn(u"lists the other one after them", fp.scope_help(21, 1, False))
+        self.assertIn(u"of 1,412 languages Hyperglot describes: the 20 most spoken come first, then the other 1,392, "
+                      u"A to Z. ", fp.scope_help(1412, 1392, True))
+        self.assertIn(u"then the other one, A to Z", fp.scope_help(21, 1, True))
+        for text in (fp.scope_help(0, 0, True), fp.scope_help(30, 10, False)):
+            self.assertIn(u"Languages within reach are not offered", text)
+
+    def test_covered_means_every_base_character(self):
+        font = make_font(u"abc ")
+        languages = [fp.Language(u"one", u"One", u"Latin", 5, [u"a", u"b"]),
+                     fp.Language(u"two", u"Two", u"Latin", 9, [u"a", u"c"]),
+                     fp.Language(u"not", u"Not", u"Latin", 99, [u"a", u"z"]),
+                     fp.Language(u"nil", u"Nil", u"Latin", 99, [])]
+        self.assertEqual([language.name for language in fp.covered_languages(font, languages)], [u"Two", u"One"])
+
+
 # ---------------------------------------------------------------------------
 # The dialog, run on fakes: any Qt call is accepted and does nothing, and the font is a small fake of
 # FontLab's. This catches mistakes in the dialog's own code paths, not in how Qt or FontLab answer.
@@ -584,6 +956,64 @@ class _FakeQtModule(object):
         if name not in self.classes:
             self.classes[name] = _AnyMeta(name, (Anything,), {})
         return self.classes[name]
+
+
+# A Qt module whose widgets remember what the dialog tells them: their What's This, their text, a
+# check box's state, a dropdown's rows and choice. Anything else is accepted as above.
+CONTROLS = ("QPushButton", "QCheckBox", "QComboBox", "QSpinBox", "QDoubleSpinBox", "QLineEdit", "QListWidget",
+            "QTreeWidget", "QRadioButton", "QPlainTextEdit")
+
+
+def _remembering(name, made):
+    def init(self, *args, **kwargs):
+        self.whats, self.rows, self.kind = u"", [], name
+        self.captioned = bool(args) and isinstance(args[0], (type(u""), str))  # made with its text
+        if self.captioned:
+            self.text = args[0]
+        made.append(self)
+
+    def set_whats(self, text):
+        self.whats = text
+
+    def set_text(self, text):
+        self.text = text
+
+    members = {"__init__": init, "setWhatsThis": set_whats, "setText": set_text}
+    if name == "QCheckBox":
+        members["setChecked"] = lambda self, on: setattr(self, "on", bool(on))
+        members["isChecked"] = lambda self: getattr(self, "on", False)
+    if name in ("QComboBox", "QListWidget"):
+        members["addItem"] = lambda self, text: self.rows.append(text)
+        members["insertSeparator"] = lambda self, at: self.rows.insert(at, None)
+        members["clear"] = lambda self: self.rows.__delitem__(slice(None))
+        members["count"] = property(lambda self: len(self.rows))
+        members["setCurrentIndex"] = lambda self, index: setattr(self, "currentIndex", index)
+        members["setCurrentRow"] = lambda self, row: setattr(self, "currentRow", row)
+    return _AnyMeta(name, (Anything,), members)
+
+
+class _RememberingQtModule(_FakeQtModule):
+    def __init__(self):
+        _FakeQtModule.__init__(self)
+        self.made = []
+
+    def __getattr__(self, name):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        if name not in self.classes:
+            self.classes[name] = _remembering(name, self.made)
+        return self.classes[name]
+
+
+class FakeFeatures(object):
+    def __init__(self, features):
+        self.features = features
+
+    def keys(self):
+        return [tag for tag, _ in self.features]
+
+    def get_feature(self, tag):
+        return dict(self.features)[tag]
 
 
 class FakeLayer(object):
@@ -667,9 +1097,15 @@ class DialogTests(unittest.TestCase):
         ak._freelab_stamp = None  # (load_auto_kerning finds no file beside the script: the one loaded here is kept)
         sys.modules[fp.AUTO_KERNING_MODULE] = ak
         cls.ak = ak
+        # The settings kept between sessions: never this machine's own file (read, or written, by a test)
+        cls.settings, cls.written = {}, []
+        cls.settings_functions = fp.read_settings, fp.write_settings
+        fp.read_settings = lambda ak: dict(cls.settings)
+        fp.write_settings = lambda ak, data: cls.written.append(dict(data))
 
     @classmethod
     def tearDownClass(cls):
+        fp.read_settings, fp.write_settings = cls.settings_functions
         cls.ak.layer_path = cls.ak_layer_path
         if cls.ak_stamp == "unset":
             del cls.ak._freelab_stamp
@@ -707,6 +1143,33 @@ class DialogTests(unittest.TestCase):
         dialog.history_moved()
         self.assertEqual(dialog.proof.masters, [u"Regular", u"Bold"])
 
+    def test_a_page_of_one_master_names_it_in_parentheses(self):
+        dialog = self.dialog(fake_font())
+        dialog.languages = []
+        dialog.masters_box.currentIndex = 1
+        dialog.rebuild()
+
+        class Page(object):
+            def __init__(self, sections, master):
+                self.sections, self.master = sections, master
+
+        dialog.proof.pages = [Page(["about"], fp.ALL_MASTERS), Page(["text", "kerning"], u"Regular"), Page(["text"], u"Bold")]
+        listed = []
+        dialog.page_list.addItem = listed.append
+        dialog.fill_pages()
+        text, kerning = fp.TITLES["text"], fp.TITLES["kerning"]
+        self.assertEqual(listed, [u"1   %s" % fp.TITLES["about"], u"2   %s, %s (Regular)" % (text, kerning),
+                                  u"3   %s (Bold)" % text], "data beside data: parentheses, no dash, no period")
+
+    def test_no_dash_or_dot_between_data(self):
+        # The owner's rule: data beside data goes in parentheses, not after an interpunct or an em dash
+        import io
+        with io.open(fp.__file__.replace(".pyc", ".py"), encoding="utf-8") as handle:
+            source = handle.read()
+        escaped = [u" \\" + code + u" " for code in (u"N{EM DASH}", u"N{MIDDLE DOT}", u"u2014", u"u00b7", u"xb7")]
+        for mark in escaped + [u" \N{EM DASH} ", u" \N{MIDDLE DOT} "]:
+            self.assertNotIn(mark, source)
+
     def test_common_pairs_and_defaults(self):
         dialog = self.dialog(fake_font())
         dialog.languages = []
@@ -725,6 +1188,24 @@ class DialogTests(unittest.TestCase):
         self.assertIsNone(dialog.proof)
         dialog.save_pdf()
         dialog.show_in_glyph_window()
+
+    def test_a_setting_saved_changes_only_its_own_key(self):
+        # Two Proof windows (two fonts) each read proof.json once: the second to save wrote back the first's
+        # other setting as it had read it
+        type(self).settings = {}
+        try:
+            dialog = self.dialog(fake_font())
+            type(self).settings = {"summary": True, "summary_languages": "reach", "later": 1}  # another window's since
+            dialog.summary_box.setChecked(False)
+            del self.written[:]
+            dialog.summary_changed("summary")
+            self.assertEqual(self.written[-1], {"summary": False, "summary_languages": "reach", "later": 1})
+            type(self).settings = {"summary": True, "summary_languages": "reach"}
+            dialog.summary_changed("summary_languages")
+            self.assertEqual(self.written[-1], {"summary": True, "summary_languages": fp.SUMMARY_LANGUAGES[0][0]})
+            self.assertEqual(dialog.settings, self.written[-1], "the window holds what it wrote")
+        finally:
+            type(self).settings = {}
 
     def test_the_font_info_page_and_the_colors(self):
         dialog = self.dialog(fake_font())
@@ -760,6 +1241,215 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(len(said), 1, "said once")
         dialog.saved = os.path.abspath(__file__)
         self.assertTrue(dialog.saved_there())
+
+    # -- on widgets that remember what they are told ----------------------------------------------
+
+    def remembering(self, package, settings=None, font_check_module=True):
+        """A dialog whose widgets remember their texts, rows, and states; (dialog, the Qt module's widgets).
+        Font Check is the repository's own (the scripts are not installed side by side here)."""
+        qt = sys.modules["PythonQt"]
+        plain, made = qt.QtGui, _RememberingQtModule()
+        type(self).settings = dict(settings or {})
+        del self.written[:]
+        qt.QtGui = made
+        try:
+            dialog = self.dialog(package)
+        finally:
+            qt.QtGui = plain
+            type(self).settings = {}
+        self.said = []
+        dialog.log.add = lambda text, level="info": self.fail(text) if level == "error" else self.said.append((level, text))
+        if font_check_module:
+            dialog.font_check = font_check
+        dialog.languages = fp.load_languages(LANGUAGES_FILE)
+        return dialog, made.made
+
+    def test_every_control_has_a_help_text_of_its_own(self):
+        # The owner found, in another tool, a control whose right-click help was its neighbor's
+        dialog, made = self.remembering(fake_font())
+        dialog.rebuild()
+        controls = [widget for widget in made if widget.kind in CONTROLS]
+        kinds = set(widget.kind for widget in controls)
+        for kind in ("QPushButton", "QCheckBox", "QComboBox", "QLineEdit", "QListWidget"):
+            self.assertIn(kind, kinds)
+        self.assertGreaterEqual(len(controls), 5 + 1 + 8 + 6 + 2)
+        for widget in controls:
+            self.assertTrue((u"%s" % widget.whats).strip(), "%s %r has no What's This" % (widget.kind, getattr(widget, "text", u"")))
+        texts = [u"%s" % widget.whats for widget in controls]
+        self.assertEqual(len(set(texts)), len(texts), "two controls with one help text: %r" % sorted(
+            text for text in set(texts) if texts.count(text) > 1))
+        named = {"masters": dialog.masters_box, "page": dialog.page_box, "pairs": dialog.pairs_box,
+                 "scope": dialog.scope_box, "colors": dialog.colors_box, "languages": dialog.languages_box,
+                 "waterfall": dialog.waterfall_edit, "text": dialog.text_edit}
+        self.assertEqual(sorted(dialog.captions), sorted(named))
+        for name, control in named.items():
+            self.assertEqual(dialog.captions[name].whats, control.whats, "%s: its caption answers for it" % name)
+            self.assertEqual(dialog.captions[name].kind, "QLabel")
+        labels = [widget for widget in made if widget.kind == "QLabel" and widget.captioned and widget.text]
+        self.assertEqual(sorted(label.text for label in labels), sorted(label.text for label in dialog.captions.values()),
+                         "no caption without its control's help")
+        for box in [dialog.summary_box, dialog.close_button, dialog.page_list] + list(dialog.section_boxes.values()):
+            self.assertIn(box, controls)
+
+    def test_the_summary_is_the_first_page_and_is_listed_as_summary(self):
+        package = fake_font()
+        package.fgPackage.features = FakeFeatures([(u"liga", u"sub f i by f_i;"), (u"kern", u"pos T o -80;"),
+                                                   (u"ss01", u'featureNames { name "Round a"; };\nsub a by a.ss01;')])
+        dialog, made = self.remembering(package)
+        self.assertTrue(dialog.summary_box.isChecked(), "on to start with")
+        reads = []
+        read = dialog.read_coverage
+        dialog.read_coverage = lambda fc: reads.append(1) or read(fc)
+        dialog.rebuild()
+        self.assertEqual(dialog.proof.pages[0].sections[0], "summary")
+        self.assertNotIn("about", dialog.proof.section_pages())
+        self.assertIn("info", dialog.proof.section_pages(), "the font's info follows")
+        self.assertTrue(dialog.page_list.rows[0].startswith(u"1   Summary"), dialog.page_list.rows[0])
+        texts = summary_texts(dialog.proof)
+        self.assertIn(u"Fake Sans", texts)
+        self.assertIn(u"Regular (the font's other master: Bold)", texts)
+        self.assertIn(u"14 glyphs (13 encoded characters)", texts)
+        self.assertIn(u"1 kerned pair in master Regular, classes resolved (0 entries, 0 classes)", texts)
+        self.assertIn(u"Vertical metrics", texts)
+        self.assertIn(u"Master Regular", texts)
+        self.assertIn(u"Language coverage", texts)
+        features = [text for text in texts if text.startswith(u"3 features: liga (Standard Ligatures), kern (Kerning), ss01")]
+        self.assertEqual(len(features), 1)
+        # a stylistic set's own name, as Feature Code reads it from the set's code (the scripts are not
+        # side by side here: Feature Code is handed over as the installed copy would be found)
+        folder = os.path.join(HERE, os.pardir, "features")
+        if folder not in sys.path:
+            sys.path.insert(0, folder)
+        import freelab_feature_code
+        load = dialog.ak.load_sibling
+        dialog.ak.load_sibling = lambda file_name, module_name: (
+            freelab_feature_code if module_name == fp.FEATURE_CODE_MODULE else load(file_name, module_name))
+        try:
+            self.assertEqual(dialog.read_features(), [(u"liga", u""), (u"kern", u""), (u"ss01", u"Round a")])
+        finally:
+            dialog.ak.load_sibling = load
+        self.assertEqual(fp.features_text([(u"ss01", u"Round a")]), u"1 feature: ss01 (Stylistic Set 1: Round a)")
+        self.assertIn(u"summary 1", dialog.font_label.text)
+        self.assertEqual(self.said, [], "nothing left out")
+        # once per font read: not per layout, not as a page is drawn
+        dialog.rebuild()
+        dialog.show_page()
+        dialog.languages_box.setCurrentIndex(2)
+        dialog.rebuild()
+        self.assertEqual(len(reads), 1)
+        self.assertNotIn(u"Latin, covered", u" ".join(summary_texts(dialog.proof)), "counts only")
+        dialog.history_moved()
+        self.assertEqual(len(reads), 2, "read again once the font changed")
+        # a scope limits the proof, not what the summary says of the font
+        dialog.scopes = [None, ("script", u"LATIN")]
+        dialog.scope_box.setCurrentIndex(1)
+        dialog.scopes_font = dialog.ak.font_key(dialog.package)
+        dialog.rebuild()
+        texts = summary_texts(dialog.proof)
+        self.assertIn(u"Latin only", texts)
+        self.assertIn(u"14 glyphs (13 encoded characters)", texts)
+        # off: the about block, as before
+        dialog.summary_box.setChecked(False)
+        dialog.rebuild()
+        self.assertEqual(dialog.proof.pages[0].sections[:2], ["about", "info"])
+        self.assertEqual(len(reads), 2, "nothing read for a page not made")
+
+    def test_without_font_check_the_summary_leaves_coverage_out_and_says_why_once(self):
+        dialog, made = self.remembering(fake_font(), font_check_module=False)
+
+        def missing():
+            raise IOError("no freelab_font_check.py")
+
+        dialog.font_check = missing
+        dialog.rebuild()
+        self.assertIsNotNone(dialog.proof, "the proof is made all the same")
+        self.assertEqual(dialog.proof.pages[0].sections[0], "summary")
+        texts = summary_texts(dialog.proof)
+        self.assertNotIn(u"Language coverage", texts)
+        self.assertNotIn(u"Vertical metrics", texts)
+        self.assertIn(u"OpenType", texts, "what Proof reads itself stays")
+        warnings = [text for level, text in self.said if level == "warning" and u"Font Check" in text]
+        self.assertEqual(len(warnings), 1)
+        self.assertIn(u"leaves the languages the font covers and its vertical metrics out", warnings[0])
+        dialog.history_moved()
+        self.assertEqual(len([text for level, text in self.said if u"Font Check" in text]), 1, "said once")
+        # its data unreadable: the same, for the languages alone
+        dialog, made = self.remembering(fake_font())
+        broken = font_check()
+
+        class Broken(object):
+            def __getattr__(self, name):
+                if name == "load_languages":
+                    return lambda *args: (_ for _ in ()).throw(IOError("language_coverage.json"))
+                return getattr(broken, name)
+
+        dialog.font_check = lambda: Broken()
+        dialog.rebuild()
+        texts = summary_texts(dialog.proof)
+        self.assertNotIn(u"Language coverage", texts)
+        self.assertIn(u"Vertical metrics", texts)
+        self.assertEqual(len([text for level, text in self.said if u"language data could not be read" in text]), 1)
+
+    def test_the_summary_settings_are_remembered(self):
+        dialog, made = self.remembering(fake_font())
+        self.assertTrue(dialog.summary_box.isChecked())
+        dialog.summary_box.setChecked(False)
+        dialog.languages_box.setCurrentIndex(1)
+        dialog.summary_changed()
+        self.assertEqual(self.written[-1], {"summary": False, "summary_languages": "reach"})
+        self.assertTrue(dialog.defaults_changed())
+        dialog, made = self.remembering(fake_font(), {"summary": False, "summary_languages": "none"})
+        self.assertFalse(dialog.summary_box.isChecked(), "as it was left")
+        self.assertEqual(dialog.languages_box.currentIndex, 2)
+        self.assertEqual(dialog.languages_box.rows, [label for _, label in fp.SUMMARY_LANGUAGES])
+        dialog, made = self.remembering(fake_font(), {"summary_languages": "no such choice"})
+        self.assertTrue(dialog.summary_box.isChecked())
+        dialog.restore_defaults()
+        self.assertTrue(dialog.summary_box.isChecked())
+        self.assertEqual(dialog.languages_box.currentIndex, 0)
+
+    def test_the_proof_dropdown_lists_few_languages_and_more_on_demand(self):
+        glyphs = [FakeGlyph(fp.char_of(code), code, {u"Regular": FakeLayer(500)}) for code in LATIN_1_A]
+        dialog, made = self.remembering(FakePackage(glyphs, {}, (u"Regular",)))
+        dialog.rebuild()
+        rows, scopes = dialog.scope_box.rows, dialog.scopes
+        self.assertEqual(len(rows), len(scopes))
+        self.assertEqual(rows[:3], [u"Every script", u"Latin only", None])
+        self.assertEqual(rows[3:5], [u"Spanish (Latin)", u"English (Latin)"], "by Hyperglot's speakers, as before")
+        self.assertEqual(rows[-1], fp.MORE_LANGUAGES)
+        self.assertEqual(len(rows), 3 + fp.SCOPE_LANGUAGES_TOP + 1, "short enough for any screen")
+        covered = len(dialog.scope_languages)
+        self.assertGreater(covered, 100)
+        self.assertIn(u"of %d languages Hyperglot describes: the 20 most spoken are listed" % covered,
+                      dialog.scope_box.whats)
+        self.assertEqual(dialog.captions["scope"].whats, dialog.scope_box.whats)
+        # a language chosen, then More languages...: the list filled out, the choice kept, no proof of "More"
+        dialog.scope_box.setCurrentIndex(4)
+        dialog.scope_chosen(4)
+        self.assertEqual(fp.scope_label(dialog.scope_kept), u"English (Latin)")
+        dialog.scope_box.setCurrentIndex(len(rows) - 1)
+        dialog.scope_chosen(len(rows) - 1)
+        rows, scopes = dialog.scope_box.rows, dialog.scopes
+        self.assertNotIn(fp.MORE_LANGUAGES, rows)
+        self.assertEqual(len([row for row in rows if row is not None]), 2 + covered, "every covered language now")
+        self.assertEqual(rows.count(None), 2)
+        rest = rows[3 + fp.SCOPE_LANGUAGES_TOP + 1:]
+        self.assertEqual(rest, sorted(rest, key=lambda text: text.lower()), "the others A to Z")
+        self.assertEqual(rows[dialog.scope_box.currentIndex], u"English (Latin)", "the choice before it kept")
+        self.assertIn(u"come first, then the other %d, A to Z" % (covered - fp.SCOPE_LANGUAGES_TOP),
+                      dialog.scope_box.whats)
+        dialog.rebuild()
+        self.assertIn(u"English (Latin)", summary_texts(dialog.proof), "the summary names the scope")
+        self.assertTrue(dialog.defaults_changed())
+        # the defaults: every script, and the short list again
+        dialog.restore_defaults()
+        dialog.rebuild()
+        self.assertEqual(dialog.scope_box.rows[-1], fp.MORE_LANGUAGES)
+        self.assertEqual(dialog.scope_box.currentIndex, 0)
+        # More languages... chosen by itself is no scope
+        dialog.scope_box.setCurrentIndex(len(dialog.scope_box.rows) - 1)
+        dialog.rebuild()
+        self.assertIsNotNone(dialog.proof)
 
 
 if __name__ == "__main__":

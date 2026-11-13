@@ -28,6 +28,7 @@ from __future__ import absolute_import, division, print_function
 import json
 import os
 import sys
+import time
 
 MODULE_NAME = "freelab_tabs"
 TEAR_MARGIN = 40  # pixels around the main tab bar where a released tab docks back (Photoshop's feel)
@@ -354,26 +355,61 @@ def holder_of(page):
     return None
 
 
+ACTIVATE_TRIES, ACTIVATE_WAIT = 10, 0.02  # how long Merge Window is waited for, once its window is made active
+
+
+def _fail(reason):
+    """Why a tab could not be docked: said in FontLab's Output panel and kept (state["failures"], the
+    last few with their times), since a dock that does nothing gave no hint of its cause."""
+    state = _state()
+    failures = state.setdefault("failures", [])
+    failures.append((time.strftime("%H:%M:%S"), reason))
+    del failures[:-8]
+    try:
+        print("FreeLab tab docking: %s" % reason)
+    except Exception:
+        pass
+    return False
+
+
+def _describe(widget):
+    try:
+        return u"%s \"%s\"" % (_class(widget), widget.windowTitle) if widget is not None else u"none"
+    except Exception:
+        return u"unknown"
+
+
 def merge_window(frame):
-    """Window > Docking > Merge Window for that window: it is made the active one first."""
+    """Window > Docking > Merge Window for that window: it is made the active one first, and waited
+    for a moment (FontLab enables the command once it has seen the window become active, which with
+    other windows open, a FreeLab tool's among them, is not always at once)."""
     QtGui = _qt()[1]
     main = main_window()
     if main is None:
-        return False
+        return _fail(u"FontLab's main window was not found.")
     actions = [a for a in main.findChildren(QtGui.QAction) if a.objectName == MERGE_WINDOW]
     if not actions:
-        return False
+        return _fail(u"FontLab's Merge Window command was not found.")
     frame.raise_()
     frame.activateWindow()
-    QtGui.QApplication.processEvents()
+    active = None
+    for attempt in range(ACTIVATE_TRIES):
+        QtGui.QApplication.processEvents()
+        try:
+            active = QtGui.QApplication.activeWindow()
+        except Exception:
+            active = None  # not known: merged as before
+        if actions[0].isEnabled() and (active is None or active is frame or _class(active) != "YFrameWindow"):
+            break
+        time.sleep(ACTIVATE_WAIT)
+        if attempt == ACTIVATE_TRIES // 2:
+            frame.activateWindow()  # (asked once more: another window had taken the activation back)
     if not actions[0].isEnabled():
-        return False
-    try:
-        active = QtGui.QApplication.activeWindow()
-    except Exception:
-        active = None  # not known: merged as before
+        return _fail(u"FontLab's Merge Window command stayed unavailable for %s (the active window: %s)."
+                     % (_describe(frame), _describe(active)))
     if active is not None and active is not frame and _class(active) == "YFrameWindow":
-        return False  # another window of its own is still the active one: Merge Window would merge that one
+        # another window of its own is still the active one: Merge Window would merge that one
+        return _fail(u"another window stayed the active one (%s), not %s." % (_describe(active), _describe(frame)))
     actions[0].trigger()
     QtGui.QApplication.processEvents()
     return True
@@ -384,15 +420,17 @@ def dock(page, target=None):
     a window it left empty is closed (FontLab keeps it open, and merging it does nothing)."""
     bar, main = main_tabs()
     if main is None:
-        return False
+        return _fail(u"the main window's tabs were not found.")
     at = main.indexOf(page)
     if at < 0:
         frame = holder_of(page)
-        if frame is None or not merge_window(frame):
+        if frame is None:
+            return _fail(u"the tab's window was not found (FontLab may have moved the tab since).")
+        if not merge_window(frame):
             return False
         at = main.indexOf(page)
         if at < 0:
-            return False
+            return _fail(u"FontLab's Merge Window ran, but the tab is not in the main window.")
     if target is not None and 0 <= target < bar.count and target != at:
         bar.moveTab(at, target)
     for widget, frame in document_tab_widgets():

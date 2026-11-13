@@ -6,3 +6,6 @@ __pycache__/
 venv/
 build/
 dist/
+# FreeLang's optional fonts: published beside each release (FreeLang-Extras.zip), not kept here
+checks/language_font/FreeLang-CJK.ttf
+checks/language_font/FreeLang-Extended-*.ttf

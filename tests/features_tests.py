@@ -6,13 +6,16 @@ compiles the code into real fonts and shapes text with HarfBuzz.)"""
 from __future__ import absolute_import, division, print_function
 
 import os
+import re
 import sys
+import unicodedata
 import unittest
 
 os.environ["FREELAB_NO_AUTOSTART"] = "1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, os.pardir, "features"))
 import freelab_feature_code as fc  # noqa: E402
+import freelab_alternates as fa  # noqa: E402 (the third tab, built with the dialog in a test)
 
 try:
     import fontTools.feaLib.parser  # noqa: F401
@@ -677,9 +680,24 @@ FakeQt = _AnyMeta("Qt", (Anything,), {"Checked": CHECKED, "Unchecked": UNCHECKED
                                       "Vertical": 2})
 
 
+class FakeSize(object):
+    def __init__(self, width=0, height=0):
+        self.width, self.height = width, height
+
+
 class FakeItem(Anything):
     def __init__(self, texts=()):
         self.texts, self.values, self.checks, self.children, self.tree = list(texts) + [u""] * 3, {}, {}, [], None
+        self.hints, self.tips = {}, {}  # its cells' size hints and tooltips, by column
+
+    def setSizeHint(self, column, size):
+        self.hints[column] = size
+
+    def setToolTip(self, column, text):
+        self.tips[column] = text
+
+    def toolTip(self, column):
+        return self.tips.get(column, u"")
 
     def text(self, column):
         return self.texts[column]
@@ -766,6 +784,101 @@ class FakeButton(Anything):
 
     def connect(self, signal, slot):
         self.slots.setdefault(signal, []).append(slot)
+
+
+class ContainedButton(FakeButton):
+    """A button as Qt reports one inside a container: disabled while its container is (container_disabled,
+    the window's lists while it is busy), whatever its own state (own), which setEnabled sets."""
+    container_disabled = False
+
+    def __init__(self, text=u""):
+        self.text, self.own, self.slots = text, True, {}
+
+    @property
+    def enabled(self):
+        return self.own and not ContainedButton.container_disabled
+
+    def setEnabled(self, on):
+        self.own = on
+
+
+class BusySplitter(Anything):
+    """The dialog's splitter: disabled while the dialog is busy, and its buttons with it."""
+
+    def setEnabled(self, on):
+        ContainedButton.container_disabled = not on
+
+
+class Recorded(Anything):
+    """A control or a label: its text, What's This, tooltip, value, and state kept; each one made is listed."""
+    made = []
+
+    def __init__(self, *args):
+        self.text = args[0] if args and isinstance(args[0], (str, type(u""))) else u""
+        self.whats, self.tip, self.placeholder, self.labels, self.slots = u"", u"", u"", [], {}
+        self.value, self.currentIndex, self.checked, self.enabled = 0, 0, False, True
+        Recorded.made.append(self)
+
+    def setWhatsThis(self, text):
+        self.whats = text
+
+    def setToolTip(self, text):
+        self.tip = text
+
+    def setPlaceholderText(self, text):
+        self.placeholder = text
+
+    def setText(self, text):
+        self.text = text
+
+    def setValue(self, value):
+        self.value = value
+
+    def setCurrentIndex(self, index):
+        self.currentIndex = index
+
+    def setChecked(self, on):
+        self.checked = on
+
+    def setEnabled(self, on):
+        self.enabled = on
+
+    def addItem(self, label):
+        self.labels.append(label)
+
+    def clear(self):
+        self.labels = []
+
+    def connect(self, signal, slot):
+        self.slots.setdefault(signal, []).append(slot)
+
+
+CONTROL_KINDS = ("QPushButton", "QCheckBox", "QComboBox", "QSpinBox", "QLineEdit", "QPlainTextEdit")
+RECORDED = dict((kind, type(kind, (Recorded,), {})) for kind in CONTROL_KINDS + ("QLabel",))
+
+
+class RecordedTree(FakeTree):
+    """A list: its What's This kept, and listed among the controls made."""
+
+    def __init__(self, *args):
+        FakeTree.__init__(self, *args)
+        self.whats = u""
+        Recorded.made.append(self)
+
+    def setWhatsThis(self, text):
+        self.whats = text
+
+
+class RecordedRow(Anything):
+    """A row of a layout (QHBoxLayout): the widgets put in it, in order."""
+    made = []
+
+    def __init__(self, *args):
+        self.widgets = []
+        RecordedRow.made.append(self)
+
+    def addWidget(self, widget, *args):
+        self.widgets.append(widget)
 
 
 class FakeQTransform(Anything):
@@ -996,6 +1109,152 @@ class FakePackage(object):
         return 1
 
 
+# A font whose figures are outlines with nodes (one upright stem each), for the strokes kept while
+# scaling: what the build writes is measured on them.
+
+STEM = (100.0, 180.0, 0.0, 700.0)  # a figure's stem: left, right, bottom, top (80 units wide)
+
+
+class FakeNode(object):
+    def __init__(self, x, y, kind=u"on"):
+        self.x, self.y, self.type = x, y, kind
+
+
+class NodeContour(object):
+    """A contour whose nodes() are its own nodes: what is set on them is kept."""
+
+    def __init__(self, points):
+        self.points = [FakeNode(*point) for point in points]
+
+    def nodes(self):
+        return list(self.points)
+
+    def update(self):
+        pass
+
+    def path(self):
+        return self
+
+    @property
+    def box(self):
+        xs, ys = [n.x for n in self.points], [n.y for n in self.points]
+        return (min(xs), min(ys), max(xs), max(ys))
+
+
+class DroppingContour(NodeContour):
+    """A contour whose nodes() are copies: what is set on them is lost, as it may be in FontLab."""
+
+    def nodes(self):
+        return [FakeNode(n.x, n.y, n.type) for n in self.points]
+
+
+class OddContour(NodeContour):
+    """A contour whose nodes' type does not read "on"."""
+
+    def __init__(self, points):
+        self.points = [FakeNode(point[0], point[1], u"line") for point in points]
+
+
+class PlainTransform(FakeTransform):
+    def m11(self):
+        return 1.0
+
+    def m22(self):
+        return 1.0
+
+
+class NodeShape(object):
+    isComponent = False
+
+    def __init__(self, contours):
+        self.contours, self.transform = contours, PlainTransform()
+
+    def cloneTopLevel(self):
+        return NodeShape([type(c)([(n.x, n.y, n.type) for n in c.points]) for c in self.contours])
+
+    def applyTransform(self, transform):
+        sx, _, _, sy, dx, dy = transform.args
+        for contour in self.contours:
+            for node in contour.points:
+                node.x, node.y = node.x * sx + dx, node.y * sy + dy
+
+
+class NodeLayer(object):
+    def __init__(self, advance=500, contour=NodeContour):
+        left, right, bottom, top = STEM  # counterclockwise, y up
+        self.shapes = [NodeShape([contour([(left, bottom), (right, bottom), (right, top), (left, top)])])]
+        self.advanceWidth, self.isNull = advance, False
+
+
+class NodeBuiltLayer(FakeBuiltLayer):
+    def addShape(self, shape):
+        self.shapes.append(shape)
+        self.events.append(("shape", self.name))
+
+
+class NodeBuiltGlyph(FakeBuiltGlyph):
+    def getLayerByName(self, master, create=False):
+        if master not in self.made and create:
+            self.made[master] = NodeBuiltLayer(self.name, self.events)
+        return self.made.get(master)
+
+
+class NodePackage(FakePackage):
+    """The fake font with its figures drawn as stems of nodes; what a build adds can hold outlines."""
+
+    def __init__(self, features, contour=NodeContour):
+        FakePackage.__init__(self, features)
+        self.drawn = dict((name, NodeLayer(500, contour)) for name in DIGIT_NAMES)
+        for name, layer in self.drawn.items():
+            self.by_name[name].getLayerByName = lambda master, create=False, layer=layer: layer
+
+    def addGlyph(self, glyph):
+        added = NodeBuiltGlyph(glyph.name, self.events)
+        self.glyphs.append(added)
+        self.by_name[added.name] = added
+        self.fgPackage.glyphs.append(added.fgGlyph)
+        self.glyphsCount = len(self.glyphs)
+
+
+class FakePoint(object):
+    def __init__(self, x, y):
+        self.px, self.py = x, y
+
+    def x(self):
+        return self.px
+
+    def y(self):
+        return self.py
+
+
+class NodeRect(FakeRect):
+    def isEmpty(self):
+        return self.box[0] >= self.box[2] or self.box[1] >= self.box[3]
+
+
+class NodePath(object):
+    """A layer's outline: its box, and whether a point is inside one of its contours' boxes (stems)."""
+
+    def __init__(self, layer):
+        self.boxes = [c.box for shape in layer.shapes for c in shape.contours]
+
+    def boundingRect(self):
+        return NodeRect((min(b[0] for b in self.boxes), min(b[1] for b in self.boxes),
+                         max(b[2] for b in self.boxes), max(b[3] for b in self.boxes)))
+
+    def isEmpty(self):
+        return not self.boxes
+
+    def contains(self, point):
+        return any(b[0] <= point.x() <= b[2] and b[1] <= point.y() <= b[3] for b in self.boxes)
+
+
+def stem_of(layer):
+    """The width of a built layer's stem, measured on its nodes."""
+    xs = [n.x for shape in layer.shapes for c in shape.contours for n in c.points]
+    return max(xs) - min(xs)
+
+
 class CheckBoxTests(unittest.TestCase):
     def test_the_sheet_draws_boxes_plain_to_see(self):
         sheet = fc.check_box_sheet(13, u"C:\\temp\\check.png", u"rgb(1, 2, 3)")
@@ -1064,12 +1323,12 @@ class DialogTests(unittest.TestCase):
             else:
                 sys.modules[name] = module
 
-    def dialog(self, features):
+    def dialog(self, features, package=None, classes=None, core=None):
         qt = Anything()
-        qt.QtCore = _FakeQtModule({"Qt": FakeQt})
-        qt.QtGui = _FakeQtModule({"QTreeWidget": FakeTree, "QTreeWidgetItem": FakeItem, "QLineEdit": FakeEdit,
-                                  "QPushButton": FakeButton, "QTransform": FakeQTransform})
-        package = FakePackage(features)
+        qt.QtCore = _FakeQtModule(dict({"Qt": FakeQt, "QSize": FakeSize}, **(core or {})))
+        qt.QtGui = _FakeQtModule(dict({"QTreeWidget": FakeTree, "QTreeWidgetItem": FakeItem, "QLineEdit": FakeEdit,
+                                       "QPushButton": FakeButton, "QTransform": FakeQTransform}, **(classes or {})))
+        package = package or FakePackage(features)
         workspace = Anything()
         workspace.packages = lambda: [package]
         workspace.currentPackage = package
@@ -1179,6 +1438,10 @@ class DialogTests(unittest.TestCase):
         self.assertIsNone(package.findName(u"zero.subs"))
         done = [t for level, t in self.logged if level == "done"]
         self.assertTrue(done and u"Built <b>29 glyphs</b>" in done[-1], self.logged)
+        # The glyphs a log line names are links (drawn from the font's outlines, opened by a click)
+        self.assertIn(u'<a href="glyphname:two.sups">two.sups</a>', done[-1])
+        self.assertEqual(done[-1].count(u'<a href="glyphname:'), 29)
+        self.assertEqual(dialog.log.source(), (self.fontlab, package, package.master), "the log follows the font")
         # The font read again: the forms take them, and what is left keeps its checks
         tags = [item.data(0, USER_ROLE) for item in dialog.forms_tree.items]
         self.assertIn("sups", tags)
@@ -1194,6 +1457,1183 @@ class DialogTests(unittest.TestCase):
         dialog.history_moved()
         self.assertFalse(dialog.form_feature("frac").on)
         self.assertEqual(self.section(dialog, "frac").checkState(0), UNCHECKED)
+
+    def test_no_list_cell_shows_markup(self):
+        """aalt's row read "<i>Glyphs</i>" as typed: a list's cell draws no rich text, so no cell of any
+        list holds a tag or an escaped character."""
+        case_feature = fc.case_feature
+
+        def marked(info):  # (a note written as for a label, one day)
+            feature = case_feature(info)
+            feature.note, feature.rules[0].note = u"The <i>Case</i> forms", u"Kept <b>bold</b> &amp; <i>plain</i>"
+            return feature
+
+        fc.case_feature = marked
+        try:
+            dialog = self.dialog(FakeFeatures({"liga": u"feature liga {\n  sub f i by f_i;\n} liga;\n"}))
+        finally:
+            fc.case_feature = case_feature
+        cells = []
+        for tree in (dialog.ligature_tree, dialog.alternate_tree, dialog.forms_tree, dialog.small_tree):
+            for item in tree.items:
+                for row in [item] + item.children:
+                    cells.extend(u"%s" % text for text in row.texts)
+        self.assertGreater(len(cells), 100)
+        self.assertEqual([text for text in cells if MARKUP.search(text)], [])
+        self.assertIn(u"Kept bold & plain", cells)
+        self.assertIn(u"The Case forms", cells)
+        aalt = [item for item in dialog.forms_tree.items if item.data(0, USER_ROLE) == "aalt"][0]
+        self.assertIn(u"their Glyphs panel", aalt.text(2))
+
+    def big_font(self, features, variants=2):
+        """A font of every Latin letter to U+024F, each with built variants (X.alt1, X.alt2)."""
+        package = FakePackage(features)
+        letters = [(fc.unichr_(code) if code < 0x80 else u"uni%04X" % code, code) for code in range(0x41, 0x250)
+                   if unicodedata.category(fc.unichr_(code)) in ("Lu", "Ll")]
+        names = letters + [(u"space", 0x20)]
+        names += [(u"%s.alt%d" % (name, n), None) for n in range(1, variants + 1) for name, _ in letters]
+        package.glyphs = [FakeGlyph(name, code) for name, code in names]
+        package.by_name = dict((g.name, g) for g in package.glyphs)
+        package.fgPackage.glyphs = [g.fgGlyph for g in package.glyphs]
+        package.glyphsCount = len(package.glyphs)
+        return package, [name for name, _ in letters]
+
+    def look_back(self, dialog, letters):
+        """The look back set (the fake spin box holds no number), and the font read with it as if for the
+        first time (no checks kept from the reading before)."""
+        dialog.look_back = Anything()
+        dialog.look_back.value = letters
+        dialog.package = None
+        dialog.run()
+
+    def test_a_whole_alphabet_of_variants(self):
+        """With variants built for every letter (1,102 in the report), the calt code was 56 MB, the list
+        drew a picture per letter, and FontLab's compiler stopped at "coverage section too large". Now:
+        the letters that double in text come first and start checked, taking turns by letter; all of
+        them checked take turns by position, in a few rules; the checks survive the font read again."""
+        features = FakeFeatures({})
+        package, letters = self.big_font(features)
+        drawn = []
+        picture = fc.FeatureCodeDialog.picture
+        fc.FeatureCodeDialog.picture = lambda self, names: drawn.append(names)
+        try:
+            dialog = self.dialog(features, package, {"QLabel": FakeEdit})
+            del drawn[:]
+            self.look_back(dialog, 2)
+        finally:
+            fc.FeatureCodeDialog.picture = picture
+        rows = dialog.alternate_tree.items
+        self.assertEqual(len(rows), len(letters))
+        self.assertGreater(len(letters), 300)
+        self.assertLessEqual(len([names for names in drawn if len(names) == 3]), fc.TURN_PICTURES,
+                             "the first rows' cycles drawn; the rest when clicked")
+        first = [row.data(0, USER_ROLE) for row in rows[:8]]
+        self.assertEqual(set(first), set(u"eEtTiIaA"), "the letters doubled most in text lead (ee, tt, ii, aa)")
+        self.assertEqual(rows[0].text(2), u"Often")
+        self.assertEqual(rows[-1].text(2), u"Seldom")
+        checked = set(dialog.cycling())
+        self.assertEqual(checked, dialog.often, "more letters than rules by letter serve: the doubled ones start checked")
+        self.assertTrue(set(u"lLsSeEoOtTfF") <= checked and u"x" not in checked and u"q" not in checked)
+        self.assertEqual(fc.turn_mode(dialog.cycling(), 2), "letter")
+        self.assertIn(u"<b>60 glyphs</b> checked, taking turns <b>by glyph</b>", dialog.turn_label.text)
+        self.assertIn(u"  ignore sub l.alt2 l';\n", dialog.new_texts()["calt"])
+        states = dict((key, button.enabled) for (key, _, _), button in zip(fc.TURN_CHECKS, dialog.turn_buttons))
+        self.assertEqual(states, {"often": False, "all": True, "none": True})
+        dialog.check_turns("all")
+        self.assertEqual(len(dialog.cycling()), len(letters))
+        self.assertIn(u"<b>by position</b>", dialog.turn_label.text)
+        texts = dialog.new_texts()
+        self.assertLess(len(texts["calt"]), 40000, "a few rules on classes, not megabytes")
+        self.assertIn(u"sub @FreeLab_turn_0 @FreeLab_letters_1' by @FreeLab_turn_1;", texts["calt"])
+        self.assertIn(u"sub @FreeLab_turn_1 @FreeLab_letters_1' by @FreeLab_turn_2;", texts["calt"])
+        if HAVE_FONTTOOLS:
+            self.assertIsNone(fc.check_code(texts["calt"], dialog.names))
+        self.assertTrue(dialog.write_button.enabled)
+        shown = []
+        dialog.progress = lambda what, done=None, total=None, force=False: shown.append((what, dialog.busy))
+        dialog.write()
+        self.assertIn((u"Writing the code", True), shown, "its progress said, the dialog busy meanwhile")
+        self.assertFalse(dialog.busy)
+        self.assertEqual(features.texts["calt"], texts["calt"])
+        self.assertEqual(len(dialog.cycling()), len(letters), "read again after writing: the checks kept")
+        self.assertFalse(dialog.write_button.enabled, "the font has this code")
+        # Opened again later, the letters in the font's code are the ones checked
+        again = self.dialog(features, self.big_font(features)[0], {"QLabel": FakeEdit})
+        self.look_back(again, 2)
+        self.assertEqual(len(again.cycling()), len(letters))
+        self.assertFalse(again.write_button.enabled)
+        again.check_turns("often")
+        self.assertEqual(set(again.cycling()), again.often)
+        again.restore()
+        self.assertEqual(len(again.cycling()), len(letters), "restored as it first came: what the font's code has")
+        again.check_turns("none")
+        self.assertEqual(again.cycling(), {})
+        self.assertIn(u"No glyph is checked", again.turn_label.text)
+
+    def with_glyphs(self, features, names):
+        """The fake font with more glyphs (names, no characters)."""
+        package = FakePackage(features)
+        for name in names:
+            glyph = FakeGlyph(name, None)
+            package.glyphs.append(glyph)
+            package.by_name[name] = glyph
+            package.fgPackage.glyphs.append(glyph.fgGlyph)
+        return package
+
+    def test_figures_and_punctuation_take_turns(self):
+        """Only letters took turns: a figure's or a period's alternates were not listed, though the counts
+        knew 00 and 99. They are listed, ranked, and checked by the same evidence, each kind looking back
+        among its own, so the letters' turns stay what they were."""
+        features = FakeFeatures({})
+        package = self.with_glyphs(features, [u"zero.alt1", u"nine.alt1", u"one.alt1", u"period.alt1", u"hyphen.alt1",
+                                              u"slash.alt1", u"fraction.alt1"])
+        dialog = self.dialog(features, package, {"QLabel": FakeEdit})
+        self.look_back(dialog, 2)
+        rows = dialog.alternate_tree.items
+        self.assertEqual([row.data(0, USER_ROLE) for row in rows],
+                         [u"l", u"zero", u"nine", u"period", u"hyphen", u"one", u"slash"],
+                         "ll, 00, 99, then the marks doubled by convention, then 11 and //; a fraction bar is a symbol")
+        self.assertEqual([row.text(2) for row in rows], [u"Often"] * 5 + [u"Seldom"] * 2)
+        self.assertEqual(dialog.often, set([u"l", u"zero", u"nine", u"period", u"hyphen"]))
+        self.assertEqual(sorted(dialog.cycling()), sorted(row.data(0, USER_ROLE) for row in rows), "few: all checked")
+        self.assertIn(u"<b>7 glyphs</b> checked, taking turns <b>by glyph</b>", dialog.turn_label.text)
+        self.assertIn(u"<b>7 glyphs</b> with alternates taking turns", dialog.status.text)
+        calt = dialog.new_texts()["calt"]
+        classes = classes_of(calt)
+        self.assertEqual(sorted(classes), [u"FreeLab_figures", u"FreeLab_letters", u"FreeLab_punctuation"])
+        figures, marks, letters = classes[u"FreeLab_figures"], classes[u"FreeLab_punctuation"], classes[u"FreeLab_letters"]
+        self.assertTrue(set([u"zero", u"zero.alt1", u"one.tf", u"nine.numr"]) <= figures, "a figure's forms too")
+        self.assertFalse(figures & set([u"l", u"period", u"fraction", u"f_i"]))
+        self.assertTrue(set([u"period", u"period.alt1", u"hyphen", u"hyphen.case", u"parenleft", u"ampersand"]) <= marks)
+        self.assertFalse(marks & set([u"fraction", u"zero", u"l", u"acutecomb"]))
+        self.assertTrue(set([u"l", u"l.2", u"i.loclTRK", u"a.sc"]) <= letters)
+        self.assertFalse(letters & set([u"zero", u"period", u"hyphen", u"one.tf"]), "the letters' class is the letters'")
+        for rule in (u"  sub zero zero' by zero.alt1;", u"  sub zero @FreeLab_figures @FreeLab_figures zero' by zero.alt1;",
+                     u"  sub period @FreeLab_punctuation period' by period.alt1;",
+                     u"  sub l @FreeLab_letters l' by l.2;"):
+            self.assertIn(rule, calt)
+        if HAVE_FONTTOOLS:
+            self.assertIsNone(fc.check_code(calt, dialog.names))
+        dialog.check_turns("often")
+        self.assertEqual(set(dialog.cycling()), dialog.often, "the button checks the figures and marks often doubled too")
+        self.assertEqual(fc.TURN_CHECKS[0][1], u"Often doubled")
+        self.assertEqual(dialog.kind(u"9"), fc.FIGURES)
+        self.assertTrue(dialog.doubled(u".") and dialog.doubled(u"0") and not dialog.doubled(u"/"))
+
+    def test_the_look_back_counts_in_words(self):
+        self.assertEqual([fc.look_back_suffix(n) for n in (0, 1, 2)], [u" glyphs", u" glyph", u" glyphs"])
+        dialog = self.dialog(FakeFeatures({}))
+        said = []
+        dialog.look_back = Anything()
+        dialog.look_back.value = 1
+        dialog.look_back.setSuffix = said.append
+        dialog.look_back_changed(1)
+        self.assertEqual(said, [u" glyph"])
+
+        def broken(text):
+            raise RuntimeError("no box")
+        dialog.look_back.setSuffix = broken
+        dialog.look_back_changed(2)  # (a signal's handler must not raise)
+
+    def test_font_units_count_in_words(self):
+        """The baseline box read "1 units": its word follows its number, as every text with a number of
+        units does (a moved figure form's note, a tabular figure's width)."""
+        self.assertEqual([fc.units_suffix(n) for n in (0, 1, 2, -1, -2)],
+                         [u" units", u" unit", u" units", u" unit", u" units"])
+        self.assertEqual([fc.moved_words(n) for n in (0, 1, 2, -1, -357)],
+                         [u"on the baseline", u"raised 1 unit", u"raised 2 units", u"lowered 1 unit",
+                          u"lowered 357 units"])
+        dialog = self.dialog(FakeFeatures({}))
+        said = []
+        dialog.small_baseline = Anything()
+        dialog.small_baseline.setSuffix = said.append
+        for value in (1, 2, -1, 0):
+            dialog.small_baseline.value = value
+            dialog.show_baseline_suffix()
+        self.assertEqual(said, [u" unit", u" units", u" unit", u" units"])
+
+        def broken(text):
+            raise RuntimeError("no box")
+        dialog.small_baseline.setSuffix = broken
+        dialog.show_baseline_suffix()  # (a signal's handler must not raise)
+        # A tabular figure 1 unit wide among figures 2 units wide (no font has them: the words still agree)
+        info = make_info([], codes=[(name, 0x30 + digit) for digit, name in enumerate(fc.DIGIT_WORDS)],
+                         widths=dict((name, 1 if name == u"one" else 2) for name in fc.DIGIT_WORDS))
+        sets = {("tab", "lin"): dict((name, name) for name in fc.DIGIT_WORDS)}
+        rules = fc.tabular_warnings(info, sets, ("tab", "lin"))
+        self.assertEqual([(rule.target, rule.note) for rule in rules],
+                         [(u"1 unit wide", u"The default figures are tabular, but one is not 2 units wide like the "
+                                           u"others: review it (nothing is changed here)")])
+
+    def test_a_variant_of_an_alternate_takes_turns_with_its_glyph(self):
+        """The Stylistic alternates tab builds variants from a glyph's alternates too, named after them
+        (W.ss01.alt2, a changed copy of W.ss01): they are in W's turn, and W.ss01 stays the Forms tab's."""
+        names = [u"W", u"W.ss01", u"W.alt1", u"W.ss01.alt2", u"W.alt3", u"a", u"a.sc", u"a.sc.alt1", u"x", u"x.ss02.alt1"]
+        sets = fc.alternate_sets(names, lambda name: True)
+        self.assertEqual(sets, {u"W": [u"W.alt1", u"W.ss01.alt2", u"W.alt3"]},
+                         "not a small capital's alternate; not a variant whose alternate the font lacks")
+        code = fc.cycle_code(sets, names, look_back=0)
+        self.assertIn(u"  sub W W' by W.alt1;", code)
+        self.assertIn(u"  sub W.alt1 W' by W.ss01.alt2;", code)
+        self.assertIn(u"  sub W.ss01.alt2 W' by W.alt3;", code)
+        self.assertIsNone(fc.check_code(u"feature calt {\n%s\n} calt;\n" % u"\n".join(code), names))
+        index = fc.forms_index(names)
+        self.assertEqual(index.get(u"ss01"), {u"W": u"W.ss01"}, "the set's feature takes W.ss01 alone")
+        # The dialog counts the glyphs that may stand before a glyph taking turns in the font's own order
+        dialog = self.dialog(FakeFeatures({}))
+        self.assertIsNone(dialog.turn_trouble({}))
+        self.assertTrue(dialog.cycling(), "the fake font has glyphs taking turns")
+        self.assertIsNone(dialog.turn_trouble(dialog.cycling()))
+        dialog.names = dialog.names[::2] + dialog.names[1::2]  # (the same glyphs: the count follows their order)
+        self.assertIsNone(dialog.turn_trouble(dialog.cycling()), "a small font: room whatever the order")
+    def test_busy_takes_no_clicks(self):
+        """The window answers events while long work shows its progress: a click then must not start the
+        tool again inside itself."""
+        features = FakeFeatures({})
+        dialog = self.dialog(features)
+        dialog.busy = True
+        dialog.write()
+        self.assertEqual(features.texts, {}, "busy: nothing written")
+        rows = len(dialog.forms_tree.items)
+        dialog.forms_tree.clear()
+        dialog.run()
+        self.assertEqual(len(dialog.forms_tree.items), 0, "busy: not read again")
+        dialog.busy = False
+        dialog.run()
+        self.assertEqual(len(dialog.forms_tree.items), rows)
+        self.assertFalse(dialog.busy)
+
+    def test_progress_redraws_but_leaves_clicks_and_keys_waiting(self):
+        """progress() processed every event during writes and builds, so a click or a key acted on the font
+        while it was being changed: user input waits until the work is done."""
+        class Events(object):
+            ExcludeUserInputEvents = "no user input"
+
+        pumped = []
+        app = type("App", (object,), {"processEvents": staticmethod(lambda *flags: pumped.append(flags))})
+        core, gui = type("Core", (object,), {"QEventLoop": Events}), type("Gui", (object,), {"QApplication": app})
+        fc.pump_events(core, gui)
+        self.assertEqual(pumped, [("no user input",)])
+        fc.pump_events(type("Core", (object,), {}), gui)  # (a Qt without the flag: everything, rather than nothing)
+        self.assertEqual(pumped[-1], ())
+        dialog = fc.FeatureCodeDialog.__new__(fc.FeatureCodeDialog)
+        texts = []
+        dialog.progress_shown, dialog.status, dialog.ak = 0.0, type("Status", (object,), {})(), None
+        dialog.status.setText = texts.append
+        saved = fc._qt
+        try:
+            fc._qt = lambda: (core, gui)
+            dialog.progress(u"Writing the code", force=True)
+        finally:
+            fc._qt = saved
+        self.assertEqual(texts, [u"Writing the code\N{HORIZONTAL ELLIPSIS}"])
+        self.assertEqual(pumped[-1], ("no user input",), "the dialog's own progress pumps that way")
+
+    def test_a_small_set_starts_checked_whole(self):
+        """A font with a few drawn alternates: every letter takes turns, doubled often or not."""
+        features = FakeFeatures({})
+        package = FakePackage(features)
+        for name in (u"H.alt1", u"e.2", u"e.3"):
+            glyph = FakeGlyph(name, None)
+            package.glyphs.append(glyph)
+            package.by_name[name] = glyph
+            package.fgPackage.glyphs.append(glyph.fgGlyph)
+        dialog = self.dialog(features, package)
+        self.look_back(dialog, 2)
+        self.assertEqual([row.data(0, USER_ROLE) for row in dialog.alternate_tree.items], [u"e", u"l", u"H"],
+                         "ee, then ll, then a letter seldom doubled")
+        self.assertEqual(sorted(dialog.cycling()), [u"H", u"e", u"l"])
+        dialog.alternate_tree.items[0].setCheckState(0, UNCHECKED)
+        dialog.history_moved()
+        self.assertEqual(sorted(dialog.cycling()), [u"H", u"l"], "an undo in FontLab: the checks kept")
+
+    # -- the owner's round of 2026-11-13 ------------------------------------------------
+
+    def test_every_row_of_the_forms_list_is_as_high_as_a_row_with_a_picture(self):
+        """The Forms list looked crammed beside the window's other lists: a feature's row and its rows
+        without a picture ("sups: its alternates (Superscript)") were one line of text high among rows
+        as high as their pictures. Every row gets one height, which a picture fits in; a long note
+        stays on its row's one line, and its cell's tooltip has it whole, wrapped."""
+        self.assertGreaterEqual(fc.ROW_HEIGHT, fc.ICON_SIZE, "a picture fits in the row")
+        self.assertLessEqual(fc.ROW_HEIGHT, fc.ICON_SIZE + 6, "and no row is stretched past a picture's")
+        dialog = self.dialog(FakeFeatures({}))
+        rows = [row for item in dialog.forms_tree.items for row in [item] + item.children]
+        self.assertGreater(len(rows), 40)
+        self.assertEqual(set(row.hints[0].height for row in rows), set([fc.ROW_HEIGHT]),
+                         "feature rows and their rows, with a picture or without: one height")
+        aalt = self.section(dialog, "aalt")
+        self.assertTrue(aalt.children, "aalt's rows have no picture (a feature has no glyph)")
+        note = aalt.text(2)
+        self.assertGreater(len(note), 150, "a note longer than its column")
+        self.assertNotIn(u"\n", note, "one line in the cell")
+        self.assertTrue(aalt.tips[2].startswith(u'<table width="%d"' % fc.TIP_WIDTH), "wrapped at Font Check's width")
+        self.assertIn(note.replace(u"&", u"&amp;"), aalt.tips[2], "the whole note in the tooltip")
+        for row in rows:  # every note has its tooltip, as rich text (Qt wraps rich text only)
+            if row.text(2):
+                self.assertTrue(row.tips[2].startswith((u"<span>", u"<table")), row.text(2))
+        # A tooltip's text: escaped, short ones as they are, long ones in a cell of the width
+        self.assertEqual(fc.tip_html(u"a < b"), u"<span>a &lt; b</span>")
+        self.assertEqual(fc.tip_html(u""), u"")
+        long_text = u"word " * 40
+        self.assertEqual(fc.tip_html(long_text), u'<table width="520" cellspacing="0" cellpadding="0"><tr><td>%s'
+                                                 u'</td></tr></table>' % long_text)
+        self.assertEqual(fc.tip_html(u"<i>short</i> " + u"<b></b>" * 40, True)[:6], u"<span>", "tags are not counted")
+        # The first column has room for an open feature's rows: their indent, check box, and glyph name
+        measure = lambda text: 8 * len(text)
+        self.assertEqual(fc.form_column_width(20, [u"a", u"asciitilde"], measure), 40 + 24 + 80 + 12)
+        self.assertEqual(fc.form_column_width(20, [u"x" * 100], measure), 40 + 24 + fc.FORM_SOURCE_MOST + 12,
+                         "a long name does not take the list over")
+        self.assertEqual(fc.form_column_width(Anything(), [u"ab"], None), 40 + 24 + 2 * fc.TIP_CHARACTER + 12,
+                         "nothing to measure with: a guess")
+
+    def recorded(self, features, package=None):
+        """A dialog whose controls, labels, lists, and rows are recorded (with its third tab)."""
+        del Recorded.made[:]
+        del RecordedRow.made[:]
+        load = self.ak.load_sibling
+        self.ak.load_sibling = lambda file_name, module_name: fa
+        try:
+            dialog = self.dialog(features, package, dict(RECORDED, QTreeWidget=RecordedTree, QHBoxLayout=RecordedRow))
+        finally:
+            self.ak.load_sibling = load
+        self.assertIsNotNone(dialog.alternates, "the Stylistic alternates tab is built")
+        return dialog
+
+    def test_every_control_answers_with_its_own_whats_this(self):
+        """A right-click on Strokes showed another text, over the Suggested button: a widget with no
+        What's This answers with its nearest container's, in that container's middle. Every button,
+        check box, combo box, spin box, field, and list of the three tabs has its own, every label has
+        its field's (or its own), and no two controls of a row share one."""
+        dialog = self.recorded(FakeFeatures({"liga": u"feature liga {\n  sub f i by f_i;\n} liga;\n"}))
+        controls = [w for w in Recorded.made
+                    if isinstance(w, tuple(RECORDED[kind] for kind in CONTROL_KINDS) + (RecordedTree,))]
+        kinds = set(type(w).__name__ for w in controls)
+        self.assertEqual(kinds, set(CONTROL_KINDS + ("RecordedTree",)), "every kind of control is among them")
+        self.assertGreater(len(controls), 30)
+        nameless = [(type(w).__name__, getattr(w, "text", u"")) for w in controls if not (u"%s" % w.whats).strip()]
+        self.assertEqual(nameless, [], "controls with no What's This of their own")
+        labels = [w for w in Recorded.made if isinstance(w, RECORDED["QLabel"])]
+        self.assertGreater(len(labels), 20)
+        self.assertEqual([w.text for w in labels if not (u"%s" % w.whats).strip()], [], "labels with no What's This")
+        is_label = lambda w: isinstance(w, RECORDED["QLabel"])
+        rows = [row for row in RecordedRow.made if any(isinstance(w, Recorded) or isinstance(w, RecordedTree)
+                                                       for w in row.widgets)]
+        self.assertGreater(len(rows), 5)
+        for row in rows:
+            texts = [w.whats for w in row.widgets if not is_label(w) and hasattr(w, "whats")]
+            self.assertEqual(len(texts), len(set(texts)), "two controls of a row share a What's This: %r" % (texts,))
+            for at, widget in enumerate(row.widgets):
+                if not is_label(widget):
+                    continue
+                after = row.widgets[at + 1] if at + 1 < len(row.widgets) else None
+                if after is not None and not is_label(after) and widget.whats == getattr(after, "whats", None):
+                    continue  # a label and its field
+                self.assertNotIn(widget.whats, texts, "the label %r has another control's What's This" % widget.text)
+        # Strokes: its label and its box answer with its own text, which says it is for every set
+        strokes = [w for w in labels if w.text == u"Strokes"][0]
+        self.assertEqual(strokes.whats, dialog.stroke_box.whats)
+        self.assertTrue(strokes.whats.startswith(u"For every set, not only the one picked: how thick"))
+        self.assertNotEqual(strokes.whats, dialog.small_reset.whats)
+        # The splitters hold no What's This for their labels to answer with (their handles do, in FontLab)
+        self.assertNotIn(u"Drag the space", u" ".join(u"%s" % w.whats for w in Recorded.made))
+        # The ligatures' boxes and the sets' name fields, made as the font is read, have theirs too
+        self.assertTrue(dialog.combos and all(u"The feature this ligature goes in" in c.whats for c in dialog.combos))
+        self.assertIn(u"The set's name", dialog.name_edits[u"ss01"].whats)
+
+    def test_the_settings_of_the_figure_forms_are_one_row(self):
+        """Strokes stood alone under the list, and a sentence beside Suggested said where the suggestion
+        came from: Strokes is on the settings row, and the sentence in the button's tooltip and What's
+        This."""
+        dialog = self.recorded(FakeFeatures({}))
+        row = [row for row in RecordedRow.made if dialog.small_set in row.widgets][0]
+        self.assertEqual([w.text for w in row.widgets if isinstance(w, RECORDED["QLabel"])],
+                         [u"Settings of", u"Scale", u"Baseline at", u"Width", u"Strokes"])
+        for box in (dialog.small_scale, dialog.small_baseline, dialog.small_width, dialog.small_reset, dialog.stroke_box):
+            self.assertIn(box, row.widgets)
+        self.assertLess(row.widgets.index(dialog.small_reset), row.widgets.index(dialog.stroke_box),
+                        "after Suggested, which puts back the three before it and not Strokes")
+        self.assertNotIn(dialog.build_button, row.widgets, "the build button stays under the list")
+        self.assertFalse(hasattr(dialog, "small_why"), "no sentence beside the button")
+        dialog.small_set_picked(fc.SMALL_SETS.index("numr"))
+        self.assertEqual(dialog.small_reset.whats,
+                         u"Puts the picked set's scale, baseline, and width back as first suggested. This set's "
+                         u"suggestion: as most open-licensed fonts.")
+        self.assertEqual(dialog.small_reset.tip, u"<table width=\"520\" cellspacing=\"0\" cellpadding=\"0\"><tr><td>%s"
+                                                 u"</td></tr></table>" % dialog.small_reset.whats)
+        dialog.small_first["sups"]["why"] = u"As the font's 5 drawn forms."  # (what the owner's font said)
+        dialog.small_set_picked(fc.SMALL_SETS.index("sups"))
+        self.assertTrue(dialog.small_reset.whats.endswith(u"This set's suggestion: as the font's 5 drawn forms."),
+                        "the picked set's own")
+        self.assertIn(u"as the font's 5 drawn forms.", dialog.small_reset.tip, "on hover too")
+        self.assertEqual([fc.suggested_words(why) for why in (None, u"As the font's 1 drawn form.")],
+                         [u"Puts the picked set's scale, baseline, and width back as first suggested.",
+                          u"Puts the picked set's scale, baseline, and width back as first suggested. This set's "
+                          u"suggestion: as the font's 1 drawn form."])
+        self.assertIn(u"<i>Strokes</i>, one value for every set", fc.HELP)
+
+    def test_the_build_button_grays_out_when_nothing_is_left_to_build(self):
+        """After a build that left nothing to build, Build checked glyphs stayed clickable: its state was
+        set while the font was read again, the lists' part disabled meanwhile, through a helper that
+        leaves a widget alone when it reports the state asked for (a widget in a disabled container
+        reports disabled). The same after an undo, and for the buttons that check the turns."""
+        ContainedButton.container_disabled = False
+        dialog = self.dialog(FakeFeatures({}), classes={"QPushButton": ContainedButton, "QSplitter": BusySplitter})
+        package = dialog.package
+        self.assertEqual(dialog.build_button.text, u"Build 40 checked glyphs")
+        self.assertTrue(dialog.build_button.enabled)
+        before = list(package.glyphs)
+        dialog.build_small_forms()
+        self.assertFalse(ContainedButton.container_disabled, "the lists answer again")
+        self.assertEqual(dialog.small_tree.items, [], "every figure form is built")
+        self.assertEqual(dialog.build_button.text, u"Build checked glyphs")
+        self.assertFalse(dialog.build_button.enabled, "nothing to build: grayed out")
+        for glyph in [g for g in package.glyphs if g not in before]:  # Edit > Undo in FontLab
+            package.deleteGlyph(glyph)
+        dialog.history_moved()
+        self.assertEqual(dialog.build_button.text, u"Build 40 checked glyphs")
+        self.assertTrue(dialog.build_button.enabled, "the forms are to build again")
+        for section in list(dialog.small_tree.items):
+            section.setCheckState(0, UNCHECKED)
+        self.assertFalse(dialog.build_button.enabled)
+        dialog.history_moved()  # (read again with nothing checked: still grayed out)
+        self.assertFalse(dialog.build_button.enabled)
+        # The turns' buttons are set as the font is read too: None has nothing to uncheck once all are off
+        dialog.check_turns("none")
+        dialog.history_moved()
+        states = dict((key, button.enabled) for (key, _, _), button in zip(fc.TURN_CHECKS, dialog.turn_buttons))
+        self.assertFalse(states["none"], "no glyph is checked: nothing to uncheck")
+        self.assertTrue(states["all"])
+
+    def strokes_built(self, percent, contour=NodeContour):
+        """The fake font's superiors built with Strokes at percent: (the dialog, the font)."""
+        features = FakeFeatures({})
+        package = NodePackage(features, contour)
+        self.ak.layer_path = lambda layer, *args: NodePath(layer)
+        try:
+            dialog = self.dialog(features, package, core={"QPointF": FakePoint})
+            for group in ("superscript", "subs", "subscript"):
+                self.small_section(dialog, group).setCheckState(0, UNCHECKED)
+            self.assertEqual(dialog.build_button.text, u"Build 10 checked glyphs")
+            dialog.stroke_box = Anything()
+            dialog.stroke_box.value = percent  # (read as the build starts)
+            dialog.build_small_forms()
+        finally:
+            self.ak.layer_path = fake_path
+        self.assertFalse([t for level, t in self.logged if level == "error"], self.logged)
+        return dialog, package
+
+    def test_strokes_thickens_what_is_built_by_its_share(self):
+        """The owner: whatever the value of Strokes, the built glyphs' thickness did not appear to change,
+        while the log said "strokes at 130% of the scaled ones". On a figure that is one stem 80 units
+        wide, scaled to 59%: the stem written is 47.2 units at 100% (a component), 1.07 times that at
+        107%, and 1.30 times that at 130%, measured on the nodes written."""
+        scale = fc.CORPUS_SCALE["sups"]
+        scaled = (STEM[1] - STEM[0]) * scale
+        self.assertAlmostEqual(scaled, 47.2)
+        dialog, package = self.strokes_built(100)
+        layer = package.findName(u"two.sups").made[u"Regular"]
+        self.assertEqual([c.name for c in layer.components], [u"two"], "100%: a component, scaled")
+        self.assertEqual(layer.components[0].transform.args[:4], (scale, 0.0, 0.0, scale))
+        self.assertNotIn(("shape", u"two.sups"), package.events, "no outline written")
+        done = [t for level, t in self.logged if level == "done"][-1]
+        self.assertIn(u"Scaling thins strokes: draw over what was scaled.", done)
+        widths = {}
+        for percent, moved in ((107, u"1.7"), (130, u"7.1")):
+            dialog, package = self.strokes_built(percent)
+            for name in (u"two.sups", u"nine.sups"):
+                layer = package.findName(name).made[u"Regular"]
+                self.assertEqual(layer.components, [], "outlines, not a component")
+                self.assertEqual(len(layer.shapes), 1)
+                widths[percent] = stem_of(layer)
+                self.assertAlmostEqual(widths[percent], scaled * percent / 100.0, delta=0.5,
+                                       msg="%s at %d%%: %.2f units" % (name, percent, widths[percent]))
+                ys = [n.y for c in layer.shapes[0].contours for n in c.points]
+                self.assertAlmostEqual((max(ys) - min(ys)) - 700 * scale, widths[percent] - scaled, delta=1e-6,
+                                       msg="the same offset all around: the form grows by it in height too")
+            self.assertEqual(package.findName(u"two.sups").made[u"Regular"].advanceWidth,
+                             float(int(round(500 * scale * 1.12))), "the planned width")
+            self.assertEqual(package.drawn[u"two"].shapes[0].contours[0].box, (100.0, 0.0, 180.0, 700.0),
+                             "the figure itself is left as drawn")
+            done = [t for level, t in self.logged if level == "done"][-1]
+            self.assertIn(u"Made of outlines, strokes at %d%% of the scaled ones (each side moved out %s units): "
+                          u'<a href="glyphname:' % (percent, moved), done)
+            self.assertEqual(done.count(u'<a href="glyphname:'), 20, "the 10 built and the 10 thickened: links")
+            self.assertFalse([t for level, t in self.logged if level == "warning"], self.logged)
+        self.assertGreater(widths[107] - scaled, 3.0, "about 3.3 units more at 107%")
+        self.assertGreater(widths[130] - widths[107], 10.0, "about 10.9 units more at 130% than at 107%")
+        self.assertEqual([fc.offset_words(values) for values in ([], [1.0], [0.5, 1.0], [6.64, 7.58], [2.0, 2.04])],
+                         [u"", u" (each side moved out 1 unit)", u" (each side moved out 0.5 to 1 unit)",
+                          u" (each side moved out 6.6 to 7.6 units)", u" (each side moved out 2 units)"])
+
+    def test_strokes_fontlab_did_not_keep_are_said_not_assumed(self):
+        """Where the nodes read back after the build are not where they were put (their contour gave
+        copies of its nodes: what FontLab does with a node's x and y set from a script was never looked
+        at live), the log says so, and does not say the strokes are at 130%."""
+        dialog, package = self.strokes_built(130, DroppingContour)
+        layer = package.findName(u"two.sups").made[u"Regular"]
+        self.assertAlmostEqual(stem_of(layer), (STEM[1] - STEM[0]) * fc.CORPUS_SCALE["sups"], msg="as scaled")
+        done = [t for level, t in self.logged if level == "done"][-1]
+        self.assertIn(u"Built <b>10 glyphs</b>", done)
+        self.assertNotIn(u"strokes at 130%", done)
+        warnings = [t for level, t in self.logged if level == "warning"]
+        self.assertEqual(len(warnings), 1, self.logged)
+        self.assertTrue(warnings[0].startswith(u"FontLab did not keep the thicker strokes of <b>10 glyphs</b>: "
+                                               u'<a href="glyphname:'), warnings[0])
+        self.assertTrue(warnings[0].endswith(u"Read back, their outlines were as scaled (40 nodes in 10 contours, 40 "
+                                             u"on-curve, 40 given a new place, 0 found there): draw over them."),
+                        warnings[0])
+        self.assertEqual(warnings[0].count(u'<a href="glyphname:'), 10)
+        # The same where no node reads as an on-curve one (none is moved): the counts say where it stopped
+        dialog, package = self.strokes_built(130, OddContour)
+        warnings = [t for level, t in self.logged if level == "warning"]
+        self.assertEqual(len(warnings), 1, self.logged)
+        self.assertIn(u"(40 nodes in 10 contours, 0 on-curve, 0 given a new place, 0 found there)", warnings[0])
+        self.assertNotIn(u"strokes at 130%", [t for level, t in self.logged if level == "done"][-1])
+
+
+MARKUP = re.compile(u"</?[A-Za-z]+>|&[a-z]+;")
+
+
+def classes_of(code):
+    """{class name: the set of its glyphs} of feature code's class definitions, on one line or wrapped."""
+    return dict((name, set(glyphs.split())) for name, glyphs in re.findall(r"@(\w+) = \[([^\]]*)\];", code))
+
+
+def turn_font(letters, variants, extra=()):
+    """A font (fontTools) of the letters (glyph names; a letter's own, or uniXXXX), each with its variants
+    (X.alt1...), a space, and a period; then the extra glyphs (names, no characters)."""
+    from fontTools.fontBuilder import FontBuilder
+    from fontTools.pens.ttGlyphPen import TTGlyphPen
+    cmap = dict((int(name[3:], 16) if name.startswith("uni") else ord(name), name) for name in letters)
+    cmap.update({0x20: "space", 0x2E: "period"})
+    order = [".notdef", "space", "period"] + list(letters)
+    order += ["%s.alt%d" % (ch, n) for ch in letters for n in range(1, variants.get(ch, 0) + 1)]
+    have = set(order)
+    order += [name for name in extra if name not in have]
+    builder = FontBuilder(1000, isTTF=True)
+    builder.setupGlyphOrder(order)
+    builder.setupCharacterMap(cmap)
+    builder.setupGlyf(dict((name, TTGlyphPen(None).glyph()) for name in order))
+    builder.setupHorizontalMetrics(dict((name, (500, 0)) for name in order))
+    builder.setupHorizontalHeader()
+    builder.setupNameTable({"familyName": "Turns", "styleName": "Regular"})
+    builder.setupOS2()
+    builder.setupPost()
+    return builder.font, order
+
+
+def apply_lookup(gsub, index, glyphs, at=None):
+    """GSUB applied as a shaper does, for the tables these rules compile to: single substitutions and
+    chaining contexts (format 3, coverages; format 1, glyphs)."""
+    lookup = gsub.LookupList.Lookup[index]
+    subtables = [sub.ExtSubTable if lookup.LookupType == 7 else sub for sub in lookup.SubTable]
+    for i in (range(len(glyphs)) if at is None else [at]):
+        for sub in subtables:
+            kind = type(sub).__name__
+            if kind == "SingleSubst":
+                if glyphs[i] in sub.mapping:
+                    glyphs[i] = sub.mapping[glyphs[i]]
+                    break
+                continue
+            if kind != "ChainContextSubst" or sub.Format not in (1, 3):
+                raise ValueError("a table this test does not read: %s %s" % (kind, getattr(sub, "Format", None)))
+            if sub.Format == 3:
+                rules = [([c.glyphs for c in sub.BacktrackCoverage], [c.glyphs for c in sub.InputCoverage],
+                          [c.glyphs for c in sub.LookAheadCoverage], sub.SubstLookupRecord)]
+            elif glyphs[i] in sub.Coverage.glyphs:
+                rules = [([[g] for g in rule.Backtrack], [[glyphs[i]]] + [[g] for g in rule.Input],
+                          [[g] for g in rule.LookAhead], rule.SubstLookupRecord)
+                         for rule in sub.ChainSubRuleSet[sub.Coverage.glyphs.index(glyphs[i])].ChainSubRule]
+            else:
+                rules = []
+            matched = False
+            for back, inputs, ahead, records in rules:
+                if i - len(back) < 0 or i + len(inputs) + len(ahead) > len(glyphs):
+                    continue
+                if all(glyphs[i - 1 - k] in c for k, c in enumerate(back)) and \
+                        all(glyphs[i + k] in c for k, c in enumerate(inputs)) and \
+                        all(glyphs[i + len(inputs) + k] in c for k, c in enumerate(ahead)):
+                    for record in records:
+                        apply_lookup(gsub, record.LookupListIndex, glyphs, i + record.SequenceIndex)
+                    matched = True
+                    break
+            if matched:
+                break
+    return glyphs
+
+
+class TurnTests(unittest.TestCase):
+    """Alternates that take turns: the code by letter and by position, compiled and applied."""
+
+    def test_by_letter_one_class_and_the_nearest_form_first(self):
+        letters = [u"i", u"i.2", u"i.3", u"n", u"l"]
+        code = fc.cycle_code({u"i": [u"i.2", u"i.3"]}, letters, 1)
+        self.assertEqual(code, [u"@FreeLab_letters = [i i.2 i.3 l n];",
+                                u"lookup FreeLab_take_turns {",
+                                u"  sub i i' by i.2;",
+                                u"  sub i.2 i' by i.3;",
+                                u"  ignore sub i.3 i';",
+                                u"  sub i @FreeLab_letters i' by i.2;",
+                                u"  sub i.2 @FreeLab_letters i' by i.3;",
+                                u"} FreeLab_take_turns;"])
+        self.assertEqual(fc.turn_rules({u"i": [u"i.2", u"i.3"]}, 1), 5)
+        self.assertEqual(fc.cycle_code({}, letters), [])
+
+    def test_the_code_grows_with_the_alternates_not_with_their_square(self):
+        """One class of the letters per letter (4,400 names, 1,100 times) made 56 MB of code."""
+        bases = [u"g%04d" % n for n in range(1100)]
+        sets = dict((base, [base + u".alt1", base + u".alt2", base + u".alt3"]) for base in bases)
+        letters = bases + [form for forms in sets.values() for form in forms]
+        self.assertEqual(fc.turn_mode(sets, 2), "position")
+        self.assertEqual(fc.turn_rules(sets, 2), 12100)
+        self.assertEqual(fc.turn_bytes(sets), 26400)
+        self.assertIsNone(fc.turn_problem(sets, 2))
+        code = fc.cycle_code(sets, letters, 2)
+        self.assertLess(sum(len(line) for line in code), 120000)
+        self.assertEqual(len([line for line in code if line.startswith(u"  sub ")]), 3, "a rule per step of the turn")
+        self.assertLess(max(len(line) for line in code), 400, "long classes wrapped")
+        forced = fc.cycle_code(sets, letters, 2, mode="letter")
+        self.assertLess(sum(len(line) for line in forced), 800000)
+        self.assertEqual([line for line in forced if line.startswith(u"@")], [u"@FreeLab_letters = ["],
+                         "one class of the letters, wrapped; none per letter")
+        few = dict((base, sets[base]) for base in bases[:60])
+        self.assertEqual(fc.turn_mode(few, 2), "letter")
+        self.assertEqual(fc.turn_mode(few, 6), "position", "a long look back takes more rules")
+        self.assertEqual(fc.turn_mode({}, 2), "none")
+        huge = dict((u"h%05d" % n, [u"h%05d.alt%d" % (n, k) for k in (1, 2, 3, 4)]) for n in range(1600))
+        self.assertIn(u"1600 glyphs taking turns need more room", fc.turn_problem(huge, 2),
+                      "past what GSUB's offsets reach: said, not written")
+        self.assertIn(u"uncheck some glyphs", fc.turn_problem(huge, 2))
+        self.assertIn(u"(about 51,200 of 48,000 bytes)", fc.turn_problem(huge, 2), "numbers grouped by thousands")
+
+    def test_a_cjk_fonts_letters_are_counted_before_a_glyph_taking_turns(self):
+        """A font of ideographs: every one is a letter, so the class of the glyphs that may stand before a
+        glyph taking turns holds tens of thousands. In the font's order they are a few runs; in an order
+        without runs they pass what a table's offsets reach (fontTools could not compile the turns of
+        6,000 glyphs among 48,000 letters in a shuffled font of 65,000 glyphs): said, not written."""
+        order = dict((u"g%d" % n, n) for n in range(100))
+        self.assertEqual(fc.coverage_bytes([u"g%d" % n for n in range(40)], order), 6, "one run of glyphs")
+        self.assertEqual(fc.coverage_bytes([u"g1", u"g3", u"g5", u"g6", u"g7"], order), 10, "five glyphs: 2 bytes each")
+        self.assertEqual(fc.coverage_bytes([u"g%d" % n for n in range(0, 40)] + [u"g50", u"g60"], order), 18)
+        self.assertEqual(fc.coverage_bytes([], order), 0)
+        letters = [u"u%05d" % n for n in range(30000)]
+        sets = dict((base, [base + u".alt1"]) for base in letters[:50])
+        forms = [form for base in sorted(sets) for form in sets[base]]
+        in_order = dict((name, number) for number, name in enumerate(letters + forms))
+        self.assertEqual(fc.turn_mode(sets, 2), "letter")
+        context = fc.context_bytes(sets, letters + forms, {}, in_order, "letter")
+        self.assertEqual(context, 6, "by glyph: the letters and the alternates, one run")
+        self.assertIsNone(fc.turn_problem(sets, 2, context))
+        self.assertEqual(fc.context_bytes(sets, letters + forms, {}, in_order, "position"), 6, "the letters alone")
+        apart = dict((name, 2 * number) for name, number in in_order.items())  # (no two glyphs follow one another)
+        context = fc.context_bytes(sets, letters + forms, {}, apart, "letter")
+        self.assertEqual(context, 2 * 30050)
+        problem = fc.turn_problem(sets, 2, context)
+        self.assertIn(u"the glyphs that may stand before a glyph taking turns need more room", problem)
+        self.assertIn(u"(about 60,100 of 48,000 bytes with the turns, in this font's glyph order)", problem)
+        # By position, the turns' own room is added; figures are counted with figures
+        many = dict((base, [base + u".alt1"]) for base in letters[:5000])
+        self.assertEqual(fc.turn_mode(many, 2), "position")
+        self.assertIsNone(fc.turn_problem(many, 2, 6))
+        self.assertIn(u"(about 50,000 of 48,000 bytes with the turns", fc.turn_problem(many, 2, 10000))
+        figures = {fc.FIGURES: [u"one", u"one.alt1", u"two"], fc.PUNCTUATION: [u"period"]}
+        mixed = {u"one": [u"one.alt1"], u"u00000": [u"u00000.alt1"]}
+        spread = dict((name, 2 * number) for number, name in enumerate([u"one", u"one.alt1", u"two", u"period",
+                                                                        u"u00000", u"u00001", u"u00000.alt1"]))
+        self.assertEqual(fc.context_bytes(mixed, [u"u00000", u"u00001", u"u00000.alt1"], figures, spread, "position"),
+                         2 * 2 + 2 * 2, "two letters before a letter, two figures before a figure; no alternate")
+        self.assertEqual(fc.context_bytes({}, letters, {}, in_order, "none"), 0)
+
+    def compiled(self, sets, look_back, mode=None):
+        try:
+            from fontTools.feaLib.builder import addOpenTypeFeaturesFromString
+            letters = sorted(set(base for base in sets) | set(u"abcdefgh"))
+            font, order = turn_font(letters, dict((base, len(forms)) for base, forms in sets.items()))
+        except Exception as exc:
+            self.skipTest("fontTools cannot build the test font here: %s" % exc)
+        every = [name for name in order if name not in (".notdef", "space", "period")]
+        text = fc.calt_text(None, fc.cycle_code(sets, every, look_back, mode=mode))
+        self.assertIsNone(fc.check_code(text, order))
+        addOpenTypeFeaturesFromString(font, u"languagesystem DFLT dflt;\n" + text)
+        return font, every
+
+    def shape(self, font, text):
+        gsub = font["GSUB"].table
+        glyphs = [{u" ": "space", u".": "period"}.get(ch, ch) for ch in text]  # (characters, or glyph names)
+        for record in gsub.FeatureList.FeatureRecord:
+            if record.FeatureTag == "calt":
+                for index in record.Feature.LookupListIndex:
+                    apply_lookup(gsub, index, glyphs)
+                break
+        return u" ".join(glyphs)
+
+    def sizes(self, font):
+        """The compiled GSUB's size, which every 16-bit offset in it stays under."""
+        import io
+        buffer = io.BytesIO()
+        font.save(buffer)
+        from fontTools.ttLib import TTFont
+        again = TTFont(io.BytesIO(buffer.getvalue()))
+        return len(again.getTableData("GSUB")), [lookup.LookupType for lookup in again["GSUB"].table.LookupList.Lookup]
+
+    def test_by_letter_compiled(self):
+        sets = {u"a": [u"a.alt1", u"a.alt2"], u"b": [u"b.alt1"]}
+        font, every = self.compiled(sets, 2)
+        self.assertEqual(self.shape(font, u"aaaa"), u"a a.alt1 a.alt2 a", "back to the letter after its last alternate")
+        self.assertEqual(self.shape(font, u"aaaaaaa"), u"a a.alt1 a.alt2 a a.alt1 a.alt2 a")
+        self.assertEqual(self.shape(font, u"acdac"), u"a c d a.alt1 c", "two letters between")
+        self.assertEqual(self.shape(font, u"acdea"), u"a c d e a", "three: too far")
+        self.assertEqual(self.shape(font, u"a a.a"), u"a space a period a", "a space or punctuation ends the look back")
+        self.assertEqual(self.shape(font, u"abab"), u"a b a.alt1 b.alt1")
+        self.assertEqual(self.shape(font, u"aacaca"), u"a a.alt1 c a.alt2 c a",
+                         "the nearest earlier form decides, and its last alternate's stops the look back")
+        self.assertEqual(self.shape(font, u"bbbb"), u"b b.alt1 b b.alt1")
+        size, kinds = self.sizes(font)
+        self.assertLess(size, 2000)
+        self.assertNotIn(7, kinds, "no extension lookup needed")
+        none, _ = self.compiled(sets, 0)
+        self.assertEqual(self.shape(none, u"aaca"), u"a a.alt1 c a", "look back 0: only side by side")
+
+    def test_by_position_compiled(self):
+        sets = {u"a": [u"a.alt1", u"a.alt2"], u"b": [u"b.alt1"], u"c": [u"c.alt1", u"c.alt2"]}
+        font, every = self.compiled(sets, 2, "position")
+        self.assertEqual(self.shape(font, u"aaaa"), u"a a.alt1 a.alt2 a")
+        self.assertEqual(self.shape(font, u"acac"), u"a c.alt1 a.alt2 c", "the form after the letter's before it")
+        self.assertEqual(self.shape(font, u"abc"), u"a b.alt1 c.alt2")
+        self.assertEqual(self.shape(font, u"cab"), u"c a.alt1 b", "b has no second alternate: the letter itself")
+        self.assertEqual(self.shape(font, u"da a"), u"d a.alt1 space a", "after a plain letter the first alternate; "
+                                                                        u"a space starts afresh")
+        size, kinds = self.sizes(font)
+        self.assertLess(size, 600)
+        self.assertEqual(sorted(kinds), [1, 1, 6], "two steps: two substitutions, one lookup of two rules")
+
+    FIGURES = [u"zero", u"one", u"nine"]
+    MARKS = [u"period", u"exclam", u"question", u"hyphen", u"quotedbl"]
+
+    def test_each_kind_has_its_own_class(self):
+        sets = {u"i": [u"i.2"], u"one": [u"one.alt1"], u"period": [u"period.alt1", u"period.alt2"]}
+        letters = [u"i", u"i.2", u"n"]
+        others = {fc.FIGURES: [u"one", u"one.alt1", u"zero", u"zero.tf"], fc.PUNCTUATION: [u"period", u"exclam"]}
+        code = fc.cycle_code(sets, letters, 1, others=others)
+        self.assertEqual(code, [u"@FreeLab_letters = [i i.2 n];",
+                                u"@FreeLab_figures = [one one.alt1 zero zero.tf];",
+                                u"@FreeLab_punctuation = [exclam period period.alt1 period.alt2];",
+                                u"lookup FreeLab_take_turns {",
+                                u"  sub i i' by i.2;",
+                                u"  ignore sub i.2 i';",
+                                u"  sub i @FreeLab_letters i' by i.2;",
+                                u"  sub one one' by one.alt1;",
+                                u"  ignore sub one.alt1 one';",
+                                u"  sub one @FreeLab_figures one' by one.alt1;",
+                                u"  sub period period' by period.alt1;",
+                                u"  sub period.alt1 period' by period.alt2;",
+                                u"  ignore sub period.alt2 period';",
+                                u"  sub period @FreeLab_punctuation period' by period.alt1;",
+                                u"  sub period.alt1 @FreeLab_punctuation period' by period.alt2;",
+                                u"} FreeLab_take_turns;"])
+        only = {u"i": [u"i.2"]}
+        for mode in ("letter", "position"):
+            self.assertEqual(fc.cycle_code(only, letters, 2, mode=mode, others=others),
+                             fc.cycle_code(only, letters, 2, mode=mode),
+                             "letters alone: the code written before figures and punctuation took turns")
+            both = fc.cycle_code(sets, letters, 2, mode=mode, others=others)
+            self.assertTrue(set(fc.cycle_code(only, letters, 2, mode=mode)) <= set(both), "and the same beside them")
+        self.assertEqual(fc.cycle_code({u"one": [u"one.alt1"]}, letters, 0, others=others),
+                         [u"@FreeLab_figures = [one one.alt1 zero zero.tf];", u"lookup FreeLab_take_turns {",
+                          u"  sub one one' by one.alt1;", u"} FreeLab_take_turns;"], "no letter: no class of letters")
+        by_position = fc.cycle_code(sets, letters, 1, mode="position", others=others)
+        self.assertEqual([line for line in by_position if line.startswith(u"  sub ")],
+                         [u"  sub @FreeLab_turn_0 @FreeLab_letters_1' by @FreeLab_turn_1;",
+                          u"  sub @FreeLab_figures_turn_0 @FreeLab_figures_1' by @FreeLab_figures_turn_1;",
+                          u"  sub @FreeLab_punctuation_turn_0 @FreeLab_punctuation_1' by @FreeLab_punctuation_turn_1;",
+                          u"  sub @FreeLab_punctuation_turn_1 @FreeLab_punctuation_1' by @FreeLab_punctuation_turn_2;"],
+                         "a rule per kind and step (the marks with a second step are those with a first: one class)")
+        self.assertEqual(classes_of(u"\n".join(by_position))[u"FreeLab_figures_turn_0"], set([u"one", u"zero", u"zero.tf"]))
+
+    def mixed(self, look_back, mode=None, forms=2):
+        """A font of letters, figures, and punctuation marks, each with alternates, and its compiled turns."""
+        try:
+            from fontTools.feaLib.builder import addOpenTypeFeaturesFromString
+            letters = list(u"abcd")
+            bases = self.FIGURES + self.MARKS
+            extra = bases + [u"%s.alt%d" % (base, n) for base in bases for n in range(1, forms + 1)] + [u"plus"]
+            font, order = turn_font(letters, dict((ch, forms) for ch in letters), extra)
+        except Exception as exc:
+            self.skipTest("fontTools cannot build the test font here: %s" % exc)
+        sets = dict((base, [u"%s.alt%d" % (base, n) for n in range(1, forms + 1)]) for base in letters + bases)
+        others = {fc.FIGURES: [name for name in order if name.split(u".")[0] in self.FIGURES],
+                  fc.PUNCTUATION: [name for name in order if name.split(u".")[0] in self.MARKS]}
+        every = [name for name in order if name.split(u".")[0] in letters]
+        text = fc.calt_text(None, fc.cycle_code(sets, every, look_back, mode=mode, others=others))
+        self.assertIsNone(fc.check_code(text, order))
+        addOpenTypeFeaturesFromString(font, u"languagesystem DFLT dflt;\n" + text)
+        return font
+
+    NAMES = {u"0": u"zero", u"1": u"one", u"9": u"nine", u".": u"period", u"!": u"exclam", u"?": u"question",
+             u"-": u"hyphen", u'"': u"quotedbl", u" ": u"space", u"+": u"plus"}
+
+    def set_text(self, font, text):
+        return self.shape(font, [self.NAMES.get(ch, ch) for ch in text])
+
+    def test_figures_and_punctuation_by_character_compiled(self):
+        font = self.mixed(2)
+        for text, shaped, why in (
+                (u"1001", u"one zero zero.alt1 one.alt1", "two figures between: the second 1 takes its turn"),
+                (u"99", u"nine nine.alt1", None),
+                (u"...", u"period period.alt1 period.alt2", None),
+                (u"....", u"period period.alt1 period.alt2 period", None),
+                (u"!!", u"exclam exclam.alt1", None),
+                (u"--", u"hyphen hyphen.alt1", None),
+                (u"?!?", u"question exclam question.alt1", "a mark looks back over marks"),
+                (u"aa.", u"a a.alt1 period", None),
+                (u"a.a", u"a period a", "a letter does not look back over punctuation, as before"),
+                (u"a-a", u"a hyphen a", None),
+                (u"a1a", u"a one a", "nor over a figure"),
+                (u"1a1", u"one a one", "nor a figure over a letter"),
+                (u"1.1", u"one period one", "nor a figure over a mark"),
+                (u".a.", u"period a period", None),
+                (u"1 1", u"one space one", "a space ends every look back"),
+                (u"1+1", u"one plus one", "and a symbol"),
+                (u"abab 1010 .!.!", u"a b a.alt1 b.alt1 space one zero one.alt1 zero.alt1 space period exclam "
+                                    u"period.alt1 exclam.alt1", None)):
+            self.assertEqual(self.set_text(font, text), shaped, why or text)
+        size, kinds = self.sizes(font)
+        self.assertLess(size, 4000)
+        self.assertNotIn(7, kinds, "no extension lookup needed")
+
+    def test_figures_and_punctuation_by_position_compiled(self):
+        font = self.mixed(2, "position")
+        for text, shaped, why in (
+                (u"1001", u"one zero.alt1 zero.alt2 one", "the form after the figure's before it"),
+                (u"99", u"nine nine.alt1", None),
+                (u"...", u"period period.alt1 period.alt2", None),
+                (u"!!", u"exclam exclam.alt1", None),
+                (u"--", u"hyphen hyphen.alt1", None),
+                (u'"ab"', u"quotedbl a b.alt1 quotedbl", "a word after a quotation mark starts on its plain letter, as "
+                                                         "after a space; the closing mark is plain: a letter stands before it"),
+                (u"a1", u"a one", "a figure after a letter is plain"),
+                (u"ab.!", u"a b.alt1 period exclam.alt1", "each kind takes its own turns"),
+                (u"1 1", u"one space one", None)):
+            self.assertEqual(self.set_text(font, text), shaped, why or text)
+        size, kinds = self.sizes(font)
+        self.assertLess(size, 1200)
+        self.assertEqual(sorted(kinds), [1, 1, 6], "one lookup of six rules (two steps of three kinds); the kinds' "
+                                                    "substitutions share a lookup per step, as fontTools compiles them")
+
+    def test_a_whole_font_compiled(self):
+        """1,100 letters, 40 figures and figure forms, and 60 punctuation marks, each with 3 variants, all
+        checked: by position, in nine rules, and under the room the window counts."""
+        try:
+            from fontTools.feaLib.builder import addOpenTypeFeaturesFromString
+            letters = [u"uni%04X" % code for code in range(0x100, 0x2000)
+                       if unicodedata.category(fc.unichr_(code)) in ("Lu", "Ll")][:1100]
+            figures = [u"fig%02d" % n for n in range(40)]
+            marks = [u"mark%02d" % n for n in range(60)]
+            extra = figures + marks + [u"%s.alt%d" % (base, n) for base in figures + marks for n in (1, 2, 3)]
+            font, order = turn_font(letters, dict((ch, 3) for ch in letters), extra)
+        except Exception as exc:
+            self.skipTest("fontTools cannot build the test font here: %s" % exc)
+        sets = dict((base, [u"%s.alt%d" % (base, n) for n in (1, 2, 3)]) for base in letters + figures + marks)
+        others = {fc.FIGURES: [name for name in order if name.startswith(u"fig")],
+                  fc.PUNCTUATION: [name for name in order if name.startswith(u"mark")]}
+        every = [name for name in order[3:] if name.startswith(u"uni")]
+        self.assertEqual(fc.turn_mode(sets, 2), "position")
+        self.assertEqual(fc.turn_rules(sets, 2), 13200)
+        self.assertEqual(fc.turn_bytes(sets), 28800)
+        self.assertIsNone(fc.turn_problem(sets, 2))
+        code = fc.cycle_code(sets, every, 2, others=others)
+        self.assertEqual(len([line for line in code if line.startswith(u"  sub ")]), 9, "a rule per kind and step")
+        addOpenTypeFeaturesFromString(font, u"languagesystem DFLT dflt;\n" + fc.calt_text(None, code))
+        size, kinds = self.sizes(font)
+        self.assertLess(size, fc.turn_bytes(sets))
+        self.assertEqual(sorted(kinds), [1, 1, 1, 6])
+        a, f, m = letters[0], figures[0], marks[0]
+        self.assertEqual(self.shape(font, [a, a, f, f, f, m, m, a]),
+                         u"%s %s.alt1 %s %s.alt1 %s.alt2 %s %s.alt1 %s" % (a, a, f, f, f, m, m, a))
+
+    def test_a_whole_alphabet_compiled(self):
+        """1,100 letters with 3 variants each: FontLab's compiler stopped at "coverage section too large";
+        the code by position compiles to a few kilobytes, every offset far under 65,535."""
+        try:
+            from fontTools.feaLib.builder import addOpenTypeFeaturesFromString
+            letters = [u"uni%04X" % code for code in range(0x100, 0x2000)
+                       if unicodedata.category(fc.unichr_(code)) in ("Lu", "Ll")][:1100]
+            font, order = turn_font(letters, dict((ch, 3) for ch in letters))
+        except Exception as exc:
+            self.skipTest("fontTools cannot build the test font here: %s" % exc)
+        self.assertEqual(len(letters), 1100)
+        sets = dict((ch, [u"%s.alt%d" % (ch, n) for n in (1, 2, 3)]) for ch in letters)
+        every = order[3:]
+        text = fc.calt_text(None, fc.cycle_code(sets, every, 2))
+        addOpenTypeFeaturesFromString(font, u"languagesystem DFLT dflt;\n" + text)
+        size, kinds = self.sizes(font)
+        self.assertLess(size, fc.turn_bytes(sets))
+        self.assertLess(fc.turn_bytes(sets), 65535)
+        self.assertEqual(sorted(kinds), [1, 1, 1, 6])
+        a, b = letters[0], letters[700]
+        self.assertEqual(self.shape(font, [a, a, b, b, a]), u"%s %s.alt1 %s.alt2 %s.alt3 %s" % (a, a, b, b, a))
+
+
+class LargeFontTests(unittest.TestCase):
+    """The other features Feature Code writes, on a font of 1,100 letters: none grows as the letters
+    taking turns did (a table per rule, each with its own lists of glyphs), so none nears the 65,535
+    bytes an offset reaches."""
+
+    def letters(self):
+        return [(u"uni%04X" % code, code) for code in range(0x100, 0x2000)
+                if unicodedata.category(fc.unichr_(code)) in ("Lu", "Ll")][:1100]
+
+    def compiled(self, text, names):
+        """(the compiled GSUB's size, its lookups' types), by fontTools; skipped without it."""
+        try:
+            import io
+            from fontTools.feaLib.builder import addOpenTypeFeaturesFromString
+            from fontTools.ttLib import TTFont
+            font, order = turn_font([], {}, names)
+        except Exception as exc:
+            self.skipTest("fontTools cannot build the test font here: %s" % exc)
+        self.assertIsNone(fc.check_code(text, order))
+        addOpenTypeFeaturesFromString(font, text)
+        buffer = io.BytesIO()
+        font.save(buffer)
+        again = TTFont(io.BytesIO(buffer.getvalue()))
+        return len(again.getTableData("GSUB")), [lookup.LookupType for lookup in again["GSUB"].table.LookupList.Lookup]
+
+    def test_the_forms_of_a_whole_alphabet(self):
+        letters = self.letters()
+        extra = [name + suffix for name, _ in letters for suffix in (u".sc", u".ss01", u".case")]
+        extra += [d + s for d in DIGIT_NAMES for s in (u".numr", u".dnom", u".tf", u".osf")]
+        info = make_info(extra, codes=letters)
+        features, _ = fc.form_features(info, {})
+        found = by_tag(features)
+        self.assertEqual(len(found["ss01"].rules), 1100)
+        self.assertEqual(len(found["case"].rules), 1100)
+        self.assertGreater(len(found["smcp"].rules) + len(found["c2sc"].rules), 1100)
+        texts = fc.forms_texts(features, {})
+        tags = [feature.tag for feature in features]
+        self.assertEqual(tags[0], "aalt")
+        whole = fc.prefix_text(u"", fc.language_systems(found["locl"])) + u"".join(texts[tag] for tag in tags)
+        self.assertLess(len(whole), 200000, "a line per substitution: the code grows with the glyphs, no faster")
+        size, kinds = self.compiled(whole, info.names)
+        self.assertLess(size, 40000, "aalt, case, the small capitals, the figures, and the set together")
+        self.assertNotIn(7, kinds, "no lookup past its offsets (fontTools would have made it an extension)")
+
+    def test_a_thousand_ligatures(self):
+        letters = [name for name, _ in self.letters()]
+        rules = [([letters[n], letters[n + 1]], u"%s_%s" % (letters[n], letters[n + 1])) for n in range(1000)]
+        text = fc.feature_text("liga", None, rules, "ligatures")
+        size, kinds = self.compiled(u"languagesystem DFLT dflt;\n" + text, letters + [glyph for _, glyph in rules])
+        self.assertLess(size, 20000)
+        self.assertEqual(kinds, [4], "one lookup of ligatures")
+
+
+class KindTests(unittest.TestCase):
+    """Which characters take turns: letters, figures, and punctuation marks, told by the model's table
+    so that FontLab's Python 2.7 (Unicode 5.2) and Python 3 list the same characters."""
+
+    def test_kinds(self):
+        for ch, kind in ((u"a", fc.LETTERS), (u"\u00df", fc.LETTERS), (u"\u3044", fc.LETTERS), (u"9", fc.FIGURES),
+                         (u"\u00b2", fc.FIGURES), (u"\u00bd", fc.FIGURES), (u".", fc.PUNCTUATION), (u"-", fc.PUNCTUATION),
+                         (u"&", fc.PUNCTUATION), (u"\u2026", fc.PUNCTUATION), (u"_", fc.PUNCTUATION),
+                         (u" ", None), (u"+", None), (u"$", None), (u"~", None), (u"\u2044", None), (u"\u0301", None),
+                         (u"\u00a9", None)):
+            self.assertEqual(fc.char_kind(ch), kind, repr(ch))
+        for value in (None, u"", u"ab"):
+            self.assertIsNone(fc.char_kind(value))
+
+    def test_the_same_in_python_2_and_3(self):
+        # Python 2.7's Unicode 5.2 calls the section sign and the pilcrow symbols, and knows none of the rest
+        for code, kind in ((0xA7, fc.PUNCTUATION), (0xB6, fc.PUNCTUATION), (0x2E3A, fc.PUNCTUATION),
+                           (0xA7AE, fc.LETTERS), (0x1C90, fc.LETTERS), (0x20BD, None)):
+            self.assertEqual(fc.char_kind(fc.unichr_(code)), kind, "U+%04X" % code)
+        self.assertIsNone(fc.char_kind(fc.unichr_(0x1D400)), "past U+FFFF: no character in FontLab's Python")
+        self.assertIsNone(fc.char_kind(u"\U0001D400"))
+
+    def test_the_table_is_unicodes(self):
+        table = fc.load_kinds()
+        self.assertIsNotNone(table)
+        self.assertIsNone(fc.load_kinds(os.path.join(HERE, "no-such-file.json")))
+        self.assertEqual(fc.char_kind(u"a", ()), fc.LETTERS, "without the table, this Python's unicodedata")
+        self.assertEqual(fc.char_kind(u"+", ()), None)
+        import io
+        import json
+        with io.open(os.path.join(HERE, os.pardir, "features", fc.DOUBLES_FILE), encoding="utf-8") as handle:
+            source = json.load(handle)["kinds_source"]
+        if (u"Unicode %s:" % unicodedata.unidata_version) not in source:
+            self.skipTest("this Python's Unicode (%s) is not the table's" % unicodedata.unidata_version)
+        for code in range(0x10000):
+            ch = fc.unichr_(code)
+            self.assertEqual(fc.char_kind(ch, table), fc.CATEGORY_KINDS.get(unicodedata.category(ch)[:1]), "U+%04X" % code)
+
+    def test_glyphs_by_kind(self):
+        codes = {u"a": 0x61, u"f": 0x66, u"t": 0x74, u"one": 0x31, u"nine": 0x39, u"period": 0x2E, u"hyphen": 0x2D,
+                 u"space": 0x20, u"plus": 0x2B, u"acutecomb": 0x301, u"big": 0x1D400, u"quote_single": 0x27}
+        names = [u"a", u"a.sc", u"f", u"t", u"f_f_t", u"f_t.liga", u"one", u"one.tf", u"nine", u"nine.alt1", u"period",
+                 u"hyphen", u"hyphen.case", u"period_period_period", u"f_period", u"one_period", u"space", u"plus",
+                 u"plus.alt1", u"acutecomb", u".notdef", u"big", u"x.alt1", u"quote_single", u"quote_single.alt1"]
+        kinds = fc.glyph_kinds(names, codes)
+        self.assertEqual(kinds[fc.LETTERS], [u"a", u"a.sc", u"f", u"t", u"f_f_t", u"f_t.liga"])
+        self.assertEqual(kinds[fc.FIGURES], [u"one", u"one.tf", u"nine", u"nine.alt1"])
+        self.assertEqual(kinds[fc.PUNCTUATION], [u"period", u"hyphen", u"hyphen.case", u"period_period_period",
+                                                 u"quote_single", u"quote_single.alt1"],
+                         "a glyph joining two kinds (f_period) is of none; a character is of its kind whatever its name")
+        sets = fc.alternate_sets(names + [u"a.alt1", u"period.2"], lambda name: fc.char_kind(fc.unichr_(codes.get(name, 0x20))))
+        self.assertEqual(sets, {u"a": [u"a.alt1"], u"nine": [u"nine.alt1"], u"period": [u"period.2"],
+                                u"quote_single": [u"quote_single.alt1"]},
+                         "a plus sign's alternates take no turns")
+
+
+class DoubleTests(unittest.TestCase):
+    """The characters that double in text, which lead the characters taking turns."""
+
+    def test_a_capital_counts_as_its_own_small_letter_only(self):
+        # Python 2 (FontLab's) lowers the dotted capital I to a plain i: it led the list as "ii" does
+        dotted = fc.unichr_(0x130) if hasattr(fc, "unichr_") else u"\N{LATIN CAPITAL LETTER I WITH DOT ABOVE}"
+        self.assertEqual(fc.small(u"E"), u"e")
+        self.assertEqual(fc.small(dotted), dotted)
+        self.assertEqual(fc.double_count(u"I", {u"i": 9}), 9)
+        self.assertEqual(fc.double_count(dotted, {u"i": 9}), 0)
+
+    def test_the_counts_ship_with_the_model(self):
+        doubles = fc.load_doubles()
+        self.assertGreater(len(doubles), 60)
+        self.assertGreater(doubles[u"e"], doubles[u"l"])
+        self.assertGreater(doubles[u"l"], doubles[u"f"])
+        self.assertGreaterEqual(doubles[u"f"], fc.DOUBLE_OFTEN)
+        self.assertEqual(fc.load_doubles(os.path.join(HERE, "no-such-file.json")), {})
+
+    def test_often_and_seldom(self):
+        doubles = {u"l": 2779, u"f": 300, u"w": 20, u"9": 112}
+        pairs = {u"\u3044\u3044": 162, u"TT": 21}
+        self.assertTrue(fc.doubles_often(u"l", doubles))
+        self.assertTrue(fc.doubles_often(u"L", doubles), "text in capitals doubles the same letters")
+        self.assertTrue(fc.doubles_often(u"9", doubles))
+        self.assertFalse(fc.doubles_often(u"w", doubles))
+        self.assertFalse(fc.doubles_often(u"q", doubles))
+        self.assertTrue(fc.doubles_often(u"\u3044", doubles, pairs), "kana, among Auto Kerning's common pairs")
+        self.assertTrue(fc.doubles_often(u"T", doubles, pairs))
+        self.assertFalse(fc.doubles_often(None, doubles, pairs))
+        self.assertEqual(fc.double_words(u"l", doubles)[0], u"Often")
+        self.assertIn(u"ll: about 2779 of every 300,000 pairs of characters in text", fc.double_words(u"l", doubles)[1])
+        self.assertEqual(fc.double_words(u"w", doubles),
+                         (u"Seldom", u"ww: about 20 of every 300,000 pairs of characters in text, in the language that "
+                                     u"doubles it most."))
+        self.assertIn(u"[[: about 1 of every 300,000 pairs", fc.double_words(u"[", {u"[": 1})[1], "the same words for one")
+        self.assertEqual(fc.double_words(u"q", doubles), (u"Seldom", u"qq was not found among the pairs counted in text."))
+        self.assertEqual(fc.double_words(u"\u3044", doubles, pairs)[0], u"Often")
+        self.assertEqual(fc.grouped(1102), u"1,102")
+        self.assertEqual(fc.grouped(300000), u"300,000")
+        self.assertEqual(fc.grouped(12), u"12")
+
+    def test_figures_and_punctuation_by_the_same_counts(self):
+        """What the counts hold for figures and punctuation, and why the marks are taken from conventions:
+        the text counted is an encyclopedia's with its markup, so no mark is counted as often as the
+        letters that double, and the common pairs' doubled marks are markup."""
+        doubles, typed = fc.load_doubles(), fc.load_typed_doubles()
+        self.assertEqual([doubles[ch] for ch in u"0918"], [419, 112, 72, 45])
+        self.assertEqual([doubles[ch] for ch in u"}.-,/!?"], [85, 72, 47, 32, 24, 1, 1])
+        marks = [ch for ch in doubles if fc.char_kind(ch) == fc.PUNCTUATION]
+        self.assertEqual(len(marks), 19)
+        self.assertEqual([ch for ch in marks if doubles[ch] >= fc.DOUBLE_OFTEN], [],
+                         "no mark reaches what makes a letter one that doubles: the conventions decide")
+        self.assertEqual(typed, set([u".", u"!", u"?", u"-", u"'", u"\u2032", u"\u2035"]),
+                         "Unicode's ellipsis, !!, ??, and primes; TeX's -- and ''")
+        self.assertEqual(fc.load_typed_doubles(os.path.join(HERE, "no-such-file.json")), set())
+        pairs = {u"}}": 3, u"//": 9, u"))": 12, u"{{": 30, u"TT": 21}
+        often = [ch for ch in u"09185.!?-'},/)({\"" if fc.doubles_often(ch, doubles, pairs, typed)]
+        self.assertEqual(often, list(u"09.!?-'"), "00 and 99 by their counts, the marks by convention; not the "
+                                                  "markup the common pairs hold (}}, //, )), {{)")
+        self.assertTrue(fc.doubles_often(u"T", doubles, pairs, typed), "a letter's common pair still counts")
+        self.assertTrue(fc.doubles_often(u";", {u";": 100}), "a mark counted as often as a letter would be one too")
+        self.assertEqual(fc.double_words(u".", doubles, pairs, typed),
+                         (u"Often", u".. is a mark doubled by convention (as ..., !!, ??, --, and '' are)."))
+        self.assertEqual(fc.double_words(u",", doubles, pairs, typed),
+                         (u"Seldom", u",,: about 32 of every 300,000 pairs of characters in text, in the language that "
+                                     u"doubles it most."))
+        self.assertEqual(fc.double_words(u"}", doubles, pairs, typed)[0], u"Seldom")
+        self.assertEqual(fc.double_words(u"0", doubles, pairs, typed)[0], u"Often")
+        chars = {u"zero": u"0", u"one": u"1", u"period": u".", u"comma": u",", u"exclam": u"!", u"w": u"w", u"l": u"l",
+                 u"braceright": u"}"}
+        self.assertEqual(fc.turn_order(list(chars), chars, doubles, pairs, typed),
+                         [u"l", u"zero", u"period", u"exclam", u"braceright", u"one", u"comma", u"w"],
+                         "those often doubled by their counts, then the rest by theirs")
+
+    def test_order_and_first_checks(self):
+        doubles = {u"l": 2779, u"e": 3329, u"w": 20}
+        chars = {u"l": u"l", u"e": u"e", u"w": u"w", u"x": u"x", u"L": u"L", u"ka": u"\u304b"}
+        pairs = {u"\u304b\u304b": 280}
+        order = fc.turn_order(list(chars), chars, doubles, pairs)
+        self.assertEqual(order, [u"e", u"L", u"l", u"ka", u"w", u"x"])
+        sets = dict((base, [base + u".alt1"]) for base in order)
+        often = set([u"e", u"L", u"l", u"ka"])
+        self.assertEqual(fc.first_turns(sets, order, often, set([u"l"])), set(order) - set([u"l"]),
+                         "few letters: all but the one whose alternate has a job")
+        many = dict((u"g%d" % n, [u"g%d.alt1" % n, u"g%d.alt2" % n]) for n in range(400))
+        many.update(sets)
+        self.assertEqual(fc.first_turns(many, sorted(many), often, set()), often, "many: those doubled in text")
+        self.assertEqual(fc.first_turns(many, sorted(many), set(), set()), set(many), "none known to double: all")
+        calt = fc.calt_text(None, fc.cycle_code({u"x": [u"x.alt1"]}, [u"x", u"x.alt1", u"w"]))
+        self.assertEqual(fc.turns_written(sets, calt), set([u"x"]), "what the font's code cycles already")
+        self.assertEqual(fc.turns_written(sets, u"feature calt {\n  sub x' w by x.alt1;\n} calt;\n"), set())
+
+    def test_notes_made_plain(self):
+        self.assertEqual(fc.plain(u"their <i>Glyphs</i> panel: a &lt; b &amp; c<br/>"), u"their Glyphs panel: a < b & c")
+        self.assertEqual(fc.plain(u"sub a' <b> by c"), u"sub a'  by c")
+        self.assertEqual(fc.plain(None), u"")
+        info = make_info([u"hyphen.case", u"a.sc", u"a.ss01", u"i.loclTRK", u"one.numr", u"one.dnom", u"one.tf"])
+        for feature in fc.form_features(info, {})[0]:
+            for note in [feature.note, feature.kind_note] + [rule.note for rule in feature.rules]:
+                self.assertIsNone(MARKUP.search(note or u""), note)
+
+
+class PlaceNodeTests(unittest.TestCase):
+    """Thicker strokes are written by moving nodes. FontLab keeps a node's x and y set from a script, but
+    its shape's outline follows only a node moved through its position (seen live): forms built with
+    Strokes at 130% looked as scaled."""
+
+    class Node(object):
+        """As FontLab's: x and y can be set, and the shape sees only what position was given."""
+
+        def __init__(self, x, y):
+            self.x, self.y, self.shape_sees = x, y, (x, y)
+
+        @property
+        def position(self):
+            return (self.x, self.y)
+
+        @position.setter
+        def position(self, point):
+            self.x, self.y = point.x(), point.y()
+            self.shape_sees = (self.x, self.y)
+
+    class Point(object):
+        def __init__(self, x, y):
+            self.px, self.py = x, y
+
+        def x(self):
+            return self.px
+
+        def y(self):
+            return self.py
+
+    def test_a_node_is_moved_through_its_position(self):
+        class Core(object):
+            QPointF = PlaceNodeTests.Point
+
+        class Qt(object):
+            QtCore = Core
+
+        old = sys.modules.get("PythonQt")
+        sys.modules["PythonQt"] = Qt
+        self.addCleanup(lambda: sys.modules.__setitem__("PythonQt", old) if old is not None else sys.modules.pop("PythonQt"))
+        node = self.Node(10.0, 20.0)
+        fc.place_node(node, 13.5, 18.0)
+        self.assertEqual(node.shape_sees, (13.5, 18.0), "the shape's outline follows")
+
+    def test_a_node_without_a_position_takes_x_and_y(self):
+        node = FakeNode(10.0, 20.0)
+        fc.place_node(node, 13.5, 18.0)
+        self.assertEqual((node.x, node.y), (13.5, 18.0))
 
 
 if __name__ == "__main__":

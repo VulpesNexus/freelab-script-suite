@@ -10,10 +10,15 @@ Two kinds of OpenType code a font's glyph names alone do not settle:
   FontLab regenerates the code between its "#> feature" and "#< feature" lines when it updates its
   automatic features (on compiling or exporting, with Update on Compile): a feature written here has
   that first line turned into "#/> feature", FontLab's own way to hand a feature back to you.
-- Alternates that take turns (calt): for a handwriting font, a letter repeated within a few letters
-  takes its next alternate (l, l.2, l, l.2...), so doubled and nearby letters do not look stamped. The
-  nearest earlier form of the same letter decides; spaces and punctuation end the look back. Its code
-  sits in calt between FreeLab's own marker lines, and the rest of calt is kept.
+- Alternates that take turns (calt): for a handwriting font, a letter, a figure, or a punctuation
+  mark repeated within a few characters takes its next alternate (l, l.2, l, l.2...), so doubled and
+  nearby characters do not look stamped. The nearest earlier form of the same character decides, and
+  each looks back among its own kind only (letters among letters, figures among figures, punctuation
+  marks among punctuation marks): a space, or a character of another kind, ends the look back. Its
+  code sits in calt between FreeLab's own marker lines, and the rest of calt is kept. The characters
+  that double most in text (ll, ee, ss, 00) are listed first; where more are checked than rules by
+  character can serve in a font (a whole alphabet of built variants), each takes the form after the
+  character before it instead, in a few rules on classes.
 - Forms (the window's second tab): the features a font's glyph names call for. case (.case), locl
   (Romanian and Moldavian S and T with a comma below, by the font's code points; Catalan l.l; Dutch
   ij with acutes; the Turkic dotted i; any .loclXXX glyph, its language from the suffix and its
@@ -36,9 +41,12 @@ Valid Python 2.7 (FontLab 7) and Python 3. The code generation below the Qt line
 
 from __future__ import absolute_import, division, print_function
 
+import bisect
+import json
 import os
 import re
 import sys
+import time
 import unicodedata
 
 CHOICES = (("liga", "Standard (liga)"), ("dlig", "Discretionary (dlig)"), ("off", "Off"))
@@ -46,8 +54,26 @@ FEATURE_TITLES = {"liga": "Standard Ligatures", "dlig": "Discretionary Ligatures
 BEGIN, END = u"# >>> FreeLab %s (made by FreeLab Feature Code)", u"# <<< FreeLab %s"
 FONTLAB_AUTO, FONTLAB_HANDED = u"#> feature", u"#/> feature"
 LISTS_EVERY_ALTERNATE = ("aalt", "salt")  # features that list alternates as a menu, not giving them a job
-DEFAULT_LOOK_BACK = 2  # letters between a letter and its earlier form, at most
+DEFAULT_LOOK_BACK = 2  # characters between a character and its earlier form, at most
+TURN_RULES_MAX = 800  # rules of characters taking turns by character (a table each in the font); more: by position
+TURN_BYTES_MAX = 48000  # bytes of GSUB the turns by position may need at most (its offsets reach 65,535)
+CLASS_LINE_GLYPHS = 16  # glyph names to a line in a long class
+DOUBLES_FILE = "alternates_model.json"  # beside this script: its "doubles", how often each character stands doubled in text
+DOUBLES_OF = 300000  # the doubles are counted of this many pairs of characters
+DOUBLE_OFTEN = 100  # a character doubled this often (ff: 300, jj: 141, 99: 112; ww: 20) is one that doubles in text
+TURN_PICTURES = 120  # the characters whose cycles are drawn as the list is made; the rest when clicked
+# What takes turns, each kind looking back among its own: the model's "kinds" names them so, and the
+# classes of the code are named after them
+LETTERS, FIGURES, PUNCTUATION = u"letters", u"figures", u"punctuation"
+KINDS = (LETTERS, FIGURES, PUNCTUATION)
+CATEGORY_KINDS = {u"L": LETTERS, u"N": FIGURES, u"P": PUNCTUATION}  # by a general category's first letter
+TURN_PICTURE_TIP = u"Click the row to draw its forms."
 ALTERNATE_SUFFIX = re.compile(r"^(?P<base>[^.]+)\.(?:(?P<number>[2-9])|alt(?P<alt>[0-9]*)|calt(?P<calt>[0-9]*))$")
+# A variant built from one of a glyph's alternates (freelab_alternates.py: W.ss01.alt2, of W.ss01): the
+# alternate's suffix is a stylistic one (a set, a character variant, salt, alt, calt, or a number), so
+# a.sc.alt1, a small capital's alternate, stays out of a's turn
+DESIGN_VARIANT = re.compile(r"^(?P<base>[^.]+)\.(?P<design>(?:ss|cv)[0-9]{2}|salt|c?alt[0-9]*|[0-9]+)\.alt(?P<alt>[0-9]+)$"
+                            r"(?P<number>)(?P<calt>)")
 RULE = re.compile(r"^\s*sub(?:stitute)?\s+(?P<input>[A-Za-z0-9_.\- ]+?)\s+by\s+(?P<output>[A-Za-z0-9_.\-]+)\s*;\s*(?:#.*)?$")
 
 
@@ -117,8 +143,9 @@ def ligatures(names, features, chars=None, model=None):
         counts = counts_of.get(key) if u"\0" not in key else None
         if counts:
             choice = "liga" if counts[0] >= counts[1] else "dlig"
-            why = u"%d of the %d corpus families with it put it in %s" % (
-                max(counts), counts[0] + counts[1], choice)
+            total = counts[0] + counts[1]
+            why = (u"the 1 corpus family with it puts it in %s" % choice) if total == 1 else (
+                u"%d of the %d corpus families with it put it in %s" % (max(counts), total, choice))
             found.append(Ligature(name, parts, None, choice, why))
         else:
             found.append(Ligature(name, parts, None, "dlig", u"no corpus family has it: discretionary, to be safe"))
@@ -203,43 +230,240 @@ def rule_lines(rules):
 # Alternates that take turns
 # ---------------------------------------------------------------------------
 
-def alternate_sets(names, is_letter):
-    """{letter glyph: [its alternates, in order]}: X.2, X.3...; X.alt, X.alt1, X.alt2...; X.calt1...
-    is_letter(glyph) says whether a glyph is a letter's."""
+def load_kinds(path=None):
+    """([each range's first code point], [(first, last, kind)]) of the model's "kinds": which characters
+    are letters, figures, and punctuation marks (features/train/kinds.py: Unicode's general categories
+    L, N, and P to U+FFFF, as ranges); None where the file or the table is missing."""
+    path = path or os.path.join(os.path.dirname(os.path.abspath(globals().get("__file__") or ".")), DOUBLES_FILE)
+    try:
+        with open(path, "rb") as handle:
+            data = json.loads(handle.read().decode("utf-8"))
+        rows = []
+        for kind in KINDS:
+            for part in data["kinds"][kind].split():
+                first, _, last = part.partition(u"-")
+                rows.append((int(first, 16), int(last or first, 16), kind))
+        rows.sort()
+        return [row[0] for row in rows], rows
+    except Exception:
+        return None
+
+
+_KINDS = []  # the kinds' table, read once (load_kinds), when a character's kind is first asked
+
+
+def char_kind(ch, table=None):
+    """What a character is, for taking turns: LETTERS, FIGURES, PUNCTUATION, or None (a space, a symbol, a
+    combining mark, a character past U+FFFF). Read from the model's table, not asked of this Python:
+    FontLab's Python 2.7 knows Unicode 5.2, where the section sign is a symbol and the letters encoded
+    since are unassigned, so a font's list would differ between FontLab and the tests. Only without
+    the table (a file missing beside the script) does unicodedata answer."""
+    if not ch or len(ch) != 1 or ord(ch) > 0xFFFF:
+        return None
+    if table is None:
+        if not _KINDS:
+            _KINDS.append(load_kinds() or ())
+        table = _KINDS[0]
+    if not table:
+        return CATEGORY_KINDS.get(unicodedata.category(ch)[:1])
+    starts, rows = table
+    at = bisect.bisect_right(starts, ord(ch)) - 1
+    return rows[at][2] if at >= 0 and ord(ch) <= rows[at][1] else None
+
+
+def glyph_kinds(names, codes):
+    """{kind: [the font's glyphs of that kind]}, for KINDS: a glyph that is a character of the kind, or
+    whose name's stem (before its first period) is one, or joins characters of the one kind with _
+    (a.sc, f_f_t, nine.alt1, one.tf, hyphen.case, period_period_period). codes: {glyph: its code
+    point}. What may stand between a character and its earlier form; a character that takes turns is
+    always among its own kind's glyphs, whatever its name."""
+    def kind_of(name):
+        code = codes.get(name)
+        return char_kind(unichr_(code)) if code else None
+
+    found = dict((kind, []) for kind in KINDS)
+    for name in names:
+        stem = name.split(u".")[0]
+        kind = kind_of(name) or kind_of(stem)
+        if kind is None and stem:
+            kinds = set(kind_of(part) for part in stem.split(u"_") if part)
+            kind = kinds.pop() if len(kinds) == 1 else None
+        if kind is not None:
+            found[kind].append(name)
+    return found
+
+
+def alternate_sets(names, takes_turns):
+    """{glyph: [its alternates, in order]}: X.2, X.3...; X.alt, X.alt1, X.alt2...; X.calt1...; and a
+    variant the Stylistic alternates tab built from one of X's alternates, named after it (X.ss01.alt2:
+    a changed copy of X.ss01, in X's turn), while the font has that alternate. takes_turns(glyph)
+    says whether a glyph is one whose alternates may take turns (a letter's, a figure's, or a
+    punctuation mark's)."""
     names = set(names)
     found = {}
     for name in names:
         match = ALTERNATE_SUFFIX.match(name)
-        if not match or match.group("base") not in names or not is_letter(match.group("base")):
+        if not match:
+            match = DESIGN_VARIANT.match(name)
+            if not match or u"%s.%s" % (match.group("base"), match.group("design")) not in names:
+                continue
+        if match.group("base") not in names or not takes_turns(match.group("base")):
             continue
         number = match.group("number") or match.group("alt") or match.group("calt") or u"1"
         found.setdefault(match.group("base"), []).append((int(number), name))
     return dict((base, [name for _, name in sorted(forms)]) for base, forms in found.items())
 
 
-def cycle_code(sets, letters, look_back=DEFAULT_LOOK_BACK, class_prefix=u"FreeLab"):
-    """calt code: a letter whose nearest earlier form (within look_back letters between) is form i
-    takes form i + 1 (back to the letter after its last alternate). letters: every letter glyph of
-    the font (alternates and ligatures of letters included), what may stand between."""
-    lines = []
-    for base in sorted(sets):
-        forms = [base] + list(sets[base])
-        gap = sorted(set(letters) - set(forms))
-        gap_class = u"@%s_gap_%s" % (class_prefix, safe_name(base))
-        lines.append(u"%s = [%s];" % (gap_class, u" ".join(gap)))
-    lines.append(u"lookup %s_take_turns {" % class_prefix)
-    for base in sorted(sets):
-        forms = [base] + list(sets[base])
-        gap_class = u"@%s_gap_%s" % (class_prefix, safe_name(base))
-        for index, earlier in enumerate(forms):
-            following = forms[(index + 1) % len(forms)]
-            if following == base:
-                continue  # back to the letter: it already is
-            for between in range(look_back + 1):
-                lines.append(u"  sub %s %s%s' by %s;" % (earlier, u"".join(u"%s " % gap_class for _ in range(between)),
-                                                        base, following))
-    lines.append(u"} %s_take_turns;" % class_prefix)
+def turn_rules(sets, look_back=DEFAULT_LOOK_BACK):
+    """How many rules taking turns by character needs: per character, one per form and distance, less
+    the last distance's rule for its last alternate."""
+    return sum((len(forms) + 1) * (look_back + 1) - 1 for forms in sets.values())
+
+
+def turn_bytes(sets):
+    """The most room taking turns by position needs in the font's GSUB table, in bytes: per step of the
+    turn, a substitution of each character that has it (4 bytes each) and the two lists of glyphs its
+    rule reads (2 bytes a glyph each, where the compiler finds no ranges to shorten them)."""
+    deepest = max([len(forms) for forms in sets.values()] or [0])
+    return sum(8 * sum(1 for forms in sets.values() if len(forms) >= step) for step in range(1, deepest + 1))
+
+
+def turn_mode(sets, look_back=DEFAULT_LOOK_BACK):
+    """How the characters take turns: "letter" (by character: each looks back for its own earlier form)
+    while that takes TURN_RULES_MAX rules at most, else "position" (each takes the form after the
+    character before it), whose code grows with the alternates' count, not with characters times forms
+    times distances; "none" for no character."""
+    if not sets:
+        return "none"
+    return "letter" if turn_rules(sets, look_back) <= TURN_RULES_MAX else "position"
+
+
+def coverage_bytes(glyphs, order):
+    """The room a list of glyphs needs in GSUB, in bytes: 2 a glyph, or 6 a run of glyphs that follow
+    one another in the font (order: {glyph: its number in the font}), whichever is less (the two forms
+    a compiler writes such a list in)."""
+    numbers = sorted(order[glyph] for glyph in glyphs if glyph in order)
+    runs = sum(1 for at, number in enumerate(numbers) if not at or number != numbers[at - 1] + 1)
+    return min(2 * len(numbers), 6 * runs)
+
+
+def context_bytes(sets, letters, others, order, mode):
+    """The room the turns' rules need for the glyphs that may stand before a glyph taking turns: per kind
+    with such a glyph, the class its rules read (by position, @..._turn_0: the kind's glyphs but the
+    alternates cycled; by glyph, the kind's every glyph). turn_bytes does not count it: a few
+    thousand bytes for an alphabet, but more than a table's offsets reach for the ideographs of a CJK
+    font whose glyphs do not follow one another (fontTools itself stopped at 48,000 letters in a
+    font of 65,000 glyphs in a shuffled order; in the font's order, 17,900 glyphs took 12 KB in all)."""
+    others = others or {}
+    kind_of = dict((glyph, kind) for kind in KINDS[1:] for glyph in others.get(kind, ()))
+    total = 0
+    for kind in KINDS:
+        bases = [base for base in sets if kind_of.get(base, LETTERS) == kind]
+        if not bases:
+            continue
+        around = set(glyph for glyph in letters if glyph not in kind_of) if kind == LETTERS else set(others[kind])
+        around.update(bases)
+        cycled = set(form for base in bases for form in sets[base])
+        total += coverage_bytes(around - cycled if mode == "position" else around | cycled, order)
+    return total
+
+
+def turn_problem(sets, look_back=DEFAULT_LOOK_BACK, context=0):
+    """Why the characters' turns cannot be written (their tables would not fit the offsets of GSUB,
+    which the compiler FontLab uses does not work around), or None. context: context_bytes, the room
+    of the glyphs that may stand before, where the caller knows the font's glyph order."""
+    mode = turn_mode(sets, look_back)
+    if mode == "position" and turn_bytes(sets) > TURN_BYTES_MAX:
+        return (u"%s taking turns need more room than one feature's tables have (about %s of %s bytes): "
+                u"uncheck some glyphs" % (counted(len(sets), u"glyph"), grouped(turn_bytes(sets) + context),
+                                          grouped(TURN_BYTES_MAX)))
+    if mode != "none" and context + (turn_bytes(sets) if mode == "position" else 0) > TURN_BYTES_MAX:
+        return (u"the glyphs that may stand before a glyph taking turns need more room than one feature's tables "
+                u"have (about %s of %s bytes with the turns, in this font's glyph order): the turns cannot be "
+                u"written for a font this large unless those glyphs follow one another in the font" % (
+                    grouped(context + (turn_bytes(sets) if mode == "position" else 0)), grouped(TURN_BYTES_MAX)))
+    return None
+
+
+def class_lines(name, glyphs, indent=u""):
+    """A glyph class's definition, a few names to a line (a font's every letter on one line is slow to
+    show and to scroll)."""
+    if len(glyphs) <= CLASS_LINE_GLYPHS:
+        return [u"%s%s = [%s];" % (indent, name, u" ".join(glyphs))]
+    lines = [u"%s%s = [" % (indent, name)]
+    for start in range(0, len(glyphs), CLASS_LINE_GLYPHS):
+        lines.append(u"%s  %s" % (indent, u" ".join(glyphs[start:start + CLASS_LINE_GLYPHS])))
+    lines.append(u"%s];" % indent)
     return lines
+
+
+def cycle_code(sets, letters, look_back=DEFAULT_LOOK_BACK, class_prefix=u"FreeLab", mode=None, others=None):
+    """calt code for characters whose alternates take turns. letters: every letter glyph of the font
+    (alternates and ligatures of letters included), what may stand between and before a letter.
+    others: {FIGURES: the font's figure glyphs, PUNCTUATION: its punctuation glyphs} (glyph_kinds), what
+    may stand between and before a figure and a punctuation mark; a glyph in neither is a letter's.
+
+    Each kind looks back among its own only, in rules and classes of its own: 1001 and 99 vary their
+    figures, ... and !! and -- their marks, and a letter's turns are what they were before figures
+    and punctuation took turns (a hyphen, an apostrophe, or a figure between two letters still ends the
+    look back, so each word starts afresh). One class of every kind would have made l'l and e-e vary
+    where they did not, and, by position, a word after an opening quotation mark start on its first
+    alternate. The letters' classes keep their names (@FreeLab_letters, @FreeLab_turn_1), so the code a
+    font has for its letters is the code written again.
+
+    By character (mode "letter": what turn_mode picks while the rules are few): a character whose
+    nearest earlier form (within look_back glyphs of its kind between) is form i takes form i + 1 (back
+    to the character after its last alternate). One class of the kind serves every rule: the nearest
+    form wins because a character's rules are written nearest first, and its last alternate's rule
+    stops the look back there (an "ignore"), so no class of "the letters but this one's forms" is
+    needed per letter (4,400 names times 1,100 letters made 56 MB of code, and a list of glyphs of its
+    own per rule in the font).
+
+    By position (mode "position"): a character takes the form after the form of the character of its
+    kind before it, whichever that is (the character itself after a plain one, or after a form it has
+    no next of). One rule per kind and step of the turn, on classes: a few thousand bytes for a whole
+    alphabet where by character takes a table per character, form, and distance, more than GSUB's
+    16-bit offsets reach; FontLab's compiler stops there ("coverage section too large")."""
+    if not sets:
+        return []
+    mode = mode or turn_mode(sets, look_back)
+    name = u"%s_take_turns" % class_prefix
+    others = others or {}
+    kind_of = dict((glyph, kind) for kind in KINDS[1:] for glyph in others.get(kind, ()))
+    lines, rules = [], []
+    for kind in KINDS:
+        bases = sorted(base for base in sets if kind_of.get(base, LETTERS) == kind)
+        if not bases:
+            continue
+        around = set(glyph for glyph in letters if glyph not in kind_of) if kind == LETTERS else set(others[kind])
+        if mode == "position":
+            stem = class_prefix if kind == LETTERS else u"%s_%s" % (class_prefix, kind)
+            cycled = set(form for base in bases for form in sets[base])
+            deepest = max(len(sets[base]) for base in bases)
+            lines.extend(class_lines(u"@%s_turn_0" % stem, [glyph for glyph in sorted(around | set(bases))
+                                                            if glyph not in cycled]))
+            last = None
+            for step in range(1, deepest + 1):
+                having = [base for base in bases if len(sets[base]) >= step]
+                if having != last:  # (the characters with this step: named once while they stay the same)
+                    source = u"@%s_%s_%d" % (class_prefix, kind, step)
+                    lines.extend(class_lines(source, having))
+                    last = having
+                lines.extend(class_lines(u"@%s_turn_%d" % (stem, step), [sets[base][step - 1] for base in having]))
+                rules.append(u"  sub @%s_turn_%d %s' by @%s_turn_%d;" % (stem, step - 1, source, stem, step))
+            continue
+        between_class = u"@%s_%s" % (class_prefix, kind)
+        lines.extend(class_lines(between_class, sorted(around | set(bases) | set(f for b in bases for f in sets[b]))))
+        for base in bases:
+            forms = [base] + list(sets[base])
+            for between in range(look_back + 1):
+                gap = u"".join(u"%s " % between_class for _ in range(between))
+                for index, earlier in enumerate(forms):
+                    if index + 1 < len(forms):
+                        rules.append(u"  sub %s %s%s' by %s;" % (earlier, gap, base, forms[index + 1]))
+                    elif between < look_back:  # back to the character, which it is: farther forms not looked at
+                        rules.append(u"  ignore sub %s %s%s';" % (earlier, gap, base))
+    return lines + [u"lookup %s {" % name] + rules + [u"} %s;" % name]
 
 
 def used_in(names, texts):
@@ -257,8 +481,135 @@ def used_in(names, texts):
     return found
 
 
-def safe_name(name):
-    return re.sub(r"[^A-Za-z0-9_]", u"_", name)
+def load_doubles(path=None):
+    """{character: how often it stands doubled in text, of DOUBLES_OF pairs of characters}, from the
+    model's "doubles" (features/train/doubles.py: the totals of andre-fuchs/kerning-pairs, the most
+    among its 24 languages; letters, figures, and punctuation marks); empty where the file or the list
+    is missing."""
+    path = path or os.path.join(os.path.dirname(os.path.abspath(globals().get("__file__") or ".")), DOUBLES_FILE)
+    try:
+        with open(path, "rb") as handle:
+            data = json.loads(handle.read().decode("utf-8"))
+        return dict((u"%s" % ch, int(count)) for ch, count in data.get("doubles") or [])
+    except Exception:
+        return {}
+
+
+def load_typed_doubles(path=None):
+    """The punctuation marks doubled by convention, a set, from the model's "doubles_typed"
+    (features/train/doubles.py: those whose double or triple Unicode encodes as one character, the
+    period, the exclamation and question marks, the prime; and TeX's -- and ''); empty where the file
+    or the list is missing."""
+    path = path or os.path.join(os.path.dirname(os.path.abspath(globals().get("__file__") or ".")), DOUBLES_FILE)
+    try:
+        with open(path, "rb") as handle:
+            data = json.loads(handle.read().decode("utf-8"))
+        return set(u"%s" % ch for ch in data.get("doubles_typed") or [])
+    except Exception:
+        return set()
+
+
+def double_count(ch, doubles):
+    """How often a character stands doubled in text; a capital as often as its small letter (text set
+    in capitals doubles the same letters)."""
+    if not ch:
+        return 0
+    return max(doubles.get(ch, 0), doubles.get(small(ch), 0))
+
+
+def small(ch):
+    """A capital's small letter, where that letter's capital is this one. Python 2 (FontLab's) lowers the
+    dotted capital I to a plain i, and Python 3 to two characters: neither is the letter that doubles."""
+    lower = ch.lower()
+    return lower if lower.upper() == ch or lower == ch else ch
+
+
+def doubles_often(ch, doubles, pairs=None, typed=None):
+    """Whether a character often stands doubled in text: counted DOUBLE_OFTEN times or more; else, a
+    letter or a figure whose pair is among Auto Kerning's common pairs (pairs: {pair: rank}, which also
+    has kana, Armenian, and Georgian), and a punctuation mark doubled by convention (typed:
+    load_typed_doubles). The common pairs do not speak for punctuation: they hold what fonts kern, and
+    their doubled marks are the markup of the text counted (}}, {{, )), //, and two backslashes), as is
+    the mark the counts double most (}}, 85); no mark is counted DOUBLE_OFTEN times (.. 72, -- 47, !!
+    under 1)."""
+    if not ch:
+        return False
+    if double_count(ch, doubles) >= DOUBLE_OFTEN:
+        return True
+    if char_kind(ch) == PUNCTUATION:
+        return ch in (typed or ())
+    return ch + ch in (pairs or {}) or small(ch) * 2 in (pairs or {})
+
+
+def turn_order(bases, chars, doubles, pairs=None, typed=None):
+    """The characters with alternates, those that double most in text first: the often doubled ones by
+    their count (then by their pair's rank among the common pairs), then the rest by their count, then
+    by name. chars: {glyph: its character}."""
+    pairs = pairs or {}
+
+    def key(base):
+        ch = chars.get(base) or u""
+        rank = min(pairs.get(ch + ch, len(pairs)), pairs.get(small(ch) * 2, len(pairs))) if ch else len(pairs)
+        return (0 if doubles_often(ch, doubles, pairs, typed) else 1, -double_count(ch, doubles), rank, base)
+
+    return sorted(bases, key=key)
+
+
+def double_words(ch, doubles, pairs=None, typed=None):
+    """(a list cell's word, its tooltip) for how often a character stands doubled in text."""
+    if not ch:
+        return u"", u""
+    count = double_count(ch, doubles)
+    pair = ch + ch
+    counted_so = u"%s: about %d of every %s pairs of characters in text, in the language that doubles it most." % (
+        pair, count, grouped(DOUBLES_OF))  # ("about 1 of every 300,000 pairs": the same words for any count)
+    if count >= DOUBLE_OFTEN:
+        return u"Often", counted_so
+    if doubles_often(ch, doubles, pairs, typed):
+        if char_kind(ch) == PUNCTUATION:
+            return u"Often", u"%s is a mark doubled by convention (as ..., !!, ??, --, and '' are)." % pair
+        return u"Often", u"%s is among the pairs common in text." % pair
+    if count:
+        return u"Seldom", counted_so
+    return u"Seldom", u"%s was not found among the pairs counted in text." % pair
+
+
+def grouped(number):
+    """300000 as 300,000."""
+    digits = u"%d" % number
+    parts = []
+    while len(digits) > 3:
+        parts.insert(0, digits[-3:])
+        digits = digits[:-3]
+    return u",".join([digits] + parts)
+
+
+def first_turns(sets, order, often, taken, look_back=DEFAULT_LOOK_BACK):
+    """The characters that start checked to take turns: every one whose alternates have no other job
+    (taken: those that have one), while they all fit turns by character; else only those that often
+    stand doubled in text (often), which need the turns most, and the rest are a check away."""
+    free = [base for base in order if base not in taken]
+    if turn_mode(dict((base, sets[base]) for base in free), look_back) != "position":
+        return set(free)
+    chosen = [base for base in free if base in often]
+    return set(chosen) if chosen else set(free)
+
+
+def turns_written(sets, calt):
+    """The characters taking turns in the font's calt already (those with an alternate named in FreeLab's
+    block of it): they start checked, so the font's own code is what the window first shows."""
+    block = freelab_block("calt", calt, "alternates")
+    if not block:
+        return set()
+    tokens = set(re.findall(r"[A-Za-z0-9_.\-]+", block))
+    return set(base for base, forms in sets.items() if any(form in tokens for form in forms))
+
+
+def plain(text):
+    """A note as a list's cell shows it: a cell draws markup as typed (<i>Glyphs</i>), so the tags go and
+    the escaped characters come back."""
+    text = re.sub(r"</?[A-Za-z][A-Za-z0-9]*\s*/?>", u"", u"%s" % (text or u""))
+    return text.replace(u"&lt;", u"<").replace(u"&gt;", u">").replace(u"&amp;", u"&")
 
 
 def calt_text(old, code_lines):
@@ -1110,9 +1461,11 @@ def tabular_warnings(info, sets, default):
         if apart:
             what = u"default figures" if spec == default else u"%s figures" % describe_style(*spec)
             for glyph in apart:
-                rules.append(FormRule(u"width " + glyph, [glyph], glyph, u"%d units wide" % int(round(widths[glyph])),
-                                      u"The %s are tabular, but %s is not %d units wide like the others: review it "
-                                      u"(nothing is changed here)" % (what, glyph, common), warning=True))
+                rules.append(FormRule(u"width " + glyph, [glyph], glyph,
+                                      u"%s wide" % counted(int(round(widths[glyph])), u"unit"),
+                                      u"The %s are tabular, but %s is not %s wide like the others: review it "
+                                      u"(nothing is changed here)" % (what, glyph, counted(common, u"unit")),
+                                      warning=True))
     return rules
 
 
@@ -1242,7 +1595,7 @@ def set_features(info, texts):
             continue
         feature = FormFeature(tag, single_rules([(base, form, u"") for base, form in pairs]), make_singles,
                               u"A set of alternates users switch on as a whole (off unless turned on)"
-                              if tag.startswith(u"ss") else u"A character's alternate (off unless turned on)",
+                              if tag.startswith(u"ss") else u"A glyph's alternate (off unless turned on)",
                               suggest_set_name(info, pairs))
         feature.hand_name = hand_name(texts.get(tag))
         if feature.hand_name:
@@ -1298,8 +1651,9 @@ def aalt_feature(info, texts, made):
         return lines
 
     return FormFeature("aalt", rows, make_aalt,
+                       # (plain text: a note is a list cell's, and a list cell shows markup as typed)
                        u"What InDesign and Illustrator offer as a selected character's alternates (in place and in "
-                       u"their <i>Glyphs</i> panel): every one-for-one alternate of the font's features, and the "
+                       u"their Glyphs panel): every one-for-one alternate of the font's features, and the "
                        u"ASCII characters' look-alike accents")
 
 
@@ -1726,7 +2080,24 @@ def figure_top(info):
 # above 100 is made of outlines (not components), offset outward until its strokes are that share of the
 # scaled ones: the same offset on both sides of each stroke, so it keeps its place.
 STROKE_WEIGHT = 107  # percent of the scaled strokes
+STROKE_READ_BACK = 0.6  # units: a node counts as moved past this, and as kept within this of where it was put
+# (FontLab may round a node to whole units)
 MITER_LIMIT = 2.0  # a sharp corner moves at most this many times the offset
+
+
+def place_node(node, x, y):
+    """Moves a node, through its position where it has one. FontLab keeps a node's x and y set from a
+    script, and its contour's path follows, but the shape's own outline does not (its bounding box
+    stayed where it was: seen live on a detached layer, 2026-11-13), so forms built with thicker strokes
+    looked as scaled. Set through position, the shape follows."""
+    if hasattr(node, "position"):
+        try:
+            from PythonQt import QtCore
+            node.position = QtCore.QPointF(x, y)
+            return
+        except Exception:
+            pass
+    node.x, node.y = x, y
 
 
 def offset_contour(points, distance, right=True):
@@ -1934,7 +2305,7 @@ def flat_parts(plans, name, depth=4):
 
 
 def moved_words(dy):
-    return u"on the baseline" if not dy else (u"raised %d units" % dy if dy > 0 else u"lowered %d units" % -dy)
+    return u"on the baseline" if not dy else u"%s %s" % (u"raised" if dy > 0 else u"lowered", counted(abs(dy), u"unit"))
 
 
 def describe_placement(plan):
@@ -1953,6 +2324,31 @@ SMALL_NOTES = {"scaled": u"scaled: a start to draw over (scaling thins its strok
                "moved": u"a drawn small figure, moved", "copied": u"its set's glyph, with the code point"}
 
 
+def offset_words(offsets):
+    """How far Strokes moved each side of a stroke, for the log: " (each side moved out 1.8 units)", or
+    " (each side moved out 6.6 to 7.6 units)" where the sets' scales differ; empty without offsets."""
+    values = sorted(set(round(value, 1) for value in offsets))
+    if not values:
+        return u""
+
+    def number(value):
+        return u"%d" % value if value == int(value) else u"%.1f" % value
+
+    span = number(values[0]) if len(values) == 1 else u"%s to %s" % (number(values[0]), number(values[-1]))
+    return u" (each side moved out %s %s)" % (span, u"unit" if values[-1] == 1 else u"units")
+
+
+def suggested_words(why):
+    """The Suggested button's What's This and tooltip (rich text): what a click does, then where the
+    picked set's suggestion comes from (why: small_settings' sentence; None before a font is read).
+    That sentence stood in the settings row, beside the button."""
+    text = u"Puts the picked set's scale, baseline, and width back as first suggested."
+    if why:
+        why = (u"%s" % why).replace(u"&", u"&amp;").replace(u"<", u"&lt;").replace(u">", u"&gt;")
+        text += u" This set's suggestion: %s" % (why[:1].lower() + why[1:])
+    return text
+
+
 def build_label(count):
     """The build button's words for this many checked glyphs."""
     return u"Build %s" % counted(count, u"checked glyph") if count else u"Build checked glyphs"
@@ -1964,6 +2360,13 @@ def build_label(count):
 
 AUTO_KERNING_FILE, AUTO_KERNING_MODULE = "freelab_auto_kerning.py", "freelab_auto_kerning"
 ICON_SIZE = 36
+# A list's row is as high as its picture (ICON_SIZE and the style's few pixels around it). A row with no
+# picture was one line of text high: in the Forms list, a feature's row and its plain rows stood crammed
+# among rows more than twice as high. Every row of that list is given this height (pixels), which a
+# picture fits in, so its rows are even and none is taller than the window's other lists' rows.
+ROW_HEIGHT = ICON_SIZE + 4
+TIP_WIDTH = 520  # pixels: a tooltip's text at most (Font Check's width)
+TIP_CHARACTER = 7  # pixels: about a character's width (a tooltip's text is not measured)
 
 
 def load_auto_kerning():
@@ -2011,6 +2414,17 @@ def _qt():
     return QtCore, QtGui
 
 
+def pump_events(QtCore, QtGui):
+    """The window redrawn during long work, user input left waiting (Qt delivers it once events are
+    processed without the flag): a click or a key would otherwise act on the font while it is being
+    changed. A Qt without the flag pumps everything."""
+    flag = getattr(getattr(QtCore, "QEventLoop", None), "ExcludeUserInputEvents", None)
+    if flag is None:
+        QtGui.QApplication.processEvents()
+    else:
+        QtGui.QApplication.processEvents(flag)
+
+
 UNWRAP_DEPTH = 4  # components inside components followed this deep
 
 
@@ -2054,6 +2468,106 @@ def counted(number, one, many=None):
     return u"%d %s" % (number, one if number == 1 else (many or one + u"s"))
 
 
+def tip_html(text, rich=False):
+    """A tooltip as rich text: Qt wraps rich text, and shows plain text on one line however long (a long
+    note's tooltip ran past the screen's edge). text: plain, escaped here (rich: rich text already).
+    One whose longest line would pass TIP_WIDTH pixels is laid out in a one-cell table that wide (Qt's
+    rich text takes a width from nothing else): Font Check's manner."""
+    text = u"%s" % (text or u"")
+    if not text:
+        return u""
+    lines = (plain(text.replace(u"<br>", u"\n")) if rich else text).split(u"\n")
+    if not rich:
+        text = text.replace(u"&", u"&amp;").replace(u"<", u"&lt;").replace(u">", u"&gt;").replace(u"\n", u"<br>")
+    if max(len(line) for line in lines) * TIP_CHARACTER > TIP_WIDTH:
+        return u"<table width=\"%d\" cellspacing=\"0\" cellpadding=\"0\"><tr><td>%s</td></tr></table>" % (TIP_WIDTH, text)
+    return u"<span>%s</span>" % text
+
+
+def set_enabled(widget, on):
+    """A control grayed out, or not, whatever its container's state. Auto Kerning's enable() sets a
+    state only when it differs from the one the widget reports, and a widget reports its container's
+    too: while the window is busy (its lists' part disabled), a button to gray out read as grayed
+    out already, was left alone, and came back clickable with its container (Build checked glyphs,
+    after a build that left nothing to build)."""
+    try:
+        widget.setEnabled(bool(on))
+    except Exception:
+        pass  # a signal's handler must not raise
+
+
+def describe(widget, text, tip=False):
+    """A control's What's This (rich text), and its tooltip too when asked; the widget."""
+    try:
+        widget.setWhatsThis(text)
+        if tip:
+            widget.setToolTip(tip_html(text, True))
+    except Exception:
+        pass
+    return widget
+
+
+def label_of(QtGui, text, what):
+    """A setting's label with the What's This of the control beside it. A widget with none answers
+    with its nearest container's, shown in that container's middle: a right-click on the label
+    Strokes showed the text of the part's splitter over the Suggested button."""
+    return describe(QtGui.QLabel(text), what)
+
+
+def describe_handles(splitter, text):
+    """A splitter's hint on its handles (the spaces dragged), not on the splitter: on the splitter, every
+    label and blank space inside it answered a right-click with it (label_of)."""
+    try:
+        for index in range(1, splitter.count()):
+            describe(splitter.handle(index), text, True)
+    except Exception:
+        pass
+
+
+FORM_SOURCE_MOST = 220  # pixels: the Forms list's first column grows this far for its rows' glyph names
+
+
+def form_column_width(indentation, texts, measure=None, most=FORM_SOURCE_MOST):
+    """The least width of the Forms list's first column for a feature's rows to show whole: a row's
+    indent (under its feature's), its check box, and the longest of texts (measure: a text's width in
+    pixels; about TIP_CHARACTER a character without), up to most."""
+    widest = 0
+    for text in texts:
+        width = 0
+        if measure is not None:
+            try:
+                width = int(measure(u"%s" % text))
+            except Exception:
+                width = 0
+        if not width > 0:
+            width = len(u"%s" % text) * TIP_CHARACTER
+        widest = max(widest, width)
+    try:
+        indent = int(indentation)
+    except Exception:
+        indent = 0
+    return (indent if indent > 0 else 20) * 2 + 24 + min(widest, most) + 12
+
+
+def even_row(QtCore, item, height=ROW_HEIGHT):
+    """A list's row at least ROW_HEIGHT high, picture or not (through its first cell's size hint)."""
+    try:
+        item.setSizeHint(0, QtCore.QSize(0, height))
+    except Exception:
+        pass
+    return item
+
+
+def look_back_suffix(value):
+    """What follows the look back's number in its box: " glyph" after 1, " glyphs" otherwise."""
+    return u" " + counted(value, u"glyph").split(u" ", 1)[1]
+
+
+def units_suffix(value):
+    """What follows a number of font units in its box: " unit" after 1 and -1, " units" otherwise."""
+    return u" " + counted(abs(int(value)), u"unit").split(u" ", 1)[1]
+
+
 HELP = u"""<b>FreeLab Feature Code</b><br>
 Writes the OpenType code for the font's ligatures, for alternates that take turns, and for the forms
 its glyph names call for. The code is shown, and checked, before anything is written.<br><br>
@@ -2066,10 +2580,12 @@ both: in InDesign and Illustrator, the <i>Ligatures</i> and <i>Discretionary Lig
 font-variant-ligatures. A feature written here is handed back from FontLab's automatic features (its
 "#&gt; feature" line becomes "#/&gt; feature"), so FontLab no longer rewrites it; the rest of its
 code is kept.<br>
-<b>Alternates that take turns</b> (calt, on unless turned off): a letter repeated within the letters
-set takes its next alternate (X.2, X.3, or X.alt1...), so repeated letters vary as handwriting does.
-The nearest earlier form decides; a space or punctuation ends the look back. Ligatures come first:
-where liga makes l_l of <i>ll</i>, the alternates take turns around it.<br><br>
+<b>Alternates that take turns</b> (calt, on unless turned off): a letter, a figure, or a punctuation
+mark repeated within the look back set takes its next alternate (X.2, X.3, or X.alt1...), so repeated
+glyphs vary as handwriting does (<i>ll</i>, <i>1001</i>, <i>...</i>, <i>!!</i>). The nearest earlier
+form decides; each looks back among its own kind, so a space, or punctuation between letters, ends the
+look back. Ligatures come first: where liga makes l_l of <i>ll</i>, the alternates take turns around
+it.<br><br>
 <b>Forms</b> (the second tab): one row per feature, its substitutions under it (click its arrow):
 case (.case), locl (Romanian and Moldavian <i>S</i> and <i>T</i> with a comma below, Catalan
 <i>l\N{MIDDLE DOT}l</i>, Dutch <i>\N{LATIN SMALL LETTER I WITH ACUTE}j</i>, the Turkic dotted <i>i</i>, and any
@@ -2084,15 +2600,30 @@ to review, and changes nothing.<br>
 Unicode superscript and subscript figures, and ordinal indicators the font lacks, each made of its
 figure (or <i>a</i> or <i>o</i>) as a component, scaled and raised or lowered as most open-licensed fonts place
 them (or as the font's own small figures, where it has some). Pick a set in the settings row to change
-its scale, baseline, and width, and the strokes kept (outlines thickened evenly; 100%: components). A built form is a start to refine.
+its scale, baseline, and width; <i>Strokes</i>, one value for every set, is the strokes kept (outlines thickened
+evenly; 100%: components). A built form is a start to refine.
 <i>Build checked glyphs</i> adds them in one step of FontLab's History; the font is read again, and
 the forms above take them.<br><br>
+<b>Stylistic alternates</b> (the third tab) holds two separate jobs. <b>Suggested alternates</b>: the
+glyphs fonts most often give a stylistic alternate; <i>Make copies to redraw</i> gives each checked one
+a copy named for a stylistic set (a.ss01), to redraw by hand. <b>Variants that take turns</b>: computed
+copies of the glyphs in scope, each changed a little as a whole (X.alt1, X.alt2...), which the first
+tab then cycles; they need no copy made first. <i>Also build variants from existing alternates</i> spreads a
+glyph's variants over the glyph and the alternates drawn for it (W.ss01.alt2 is a changed copy of
+W.ss01).<br><br>
 The code is made again as you change the choices. Pick a ligature's feature in its box; drag between the parts to give one more room;
-double-click a ligature, a letter, or a form to see it in a <i>Glyph</i> window. <i>Restore suggestions</i> puts the
+double-click a ligature, a glyph, or a form to see it in a <i>Glyph</i> window. <i>Restore suggestions</i> puts the
 choices back as they first came.<br><br>
 Click this help's <i>?</i> button, then any control, for what it does."""
 
 TABS = (u"Ligatures and alternates", u"Forms", u"Stylistic alternates")
+# The buttons that check the glyphs taking turns: (key, label, what it does)
+TURN_CHECKS = (("often", u"Often doubled", u"Checks the glyphs that often stand doubled in text (ll, ee, ss, tt; "
+                                           u"00 and 99; marks doubled by convention, such as ..., !!, and --), and "
+                                           u"only them: those whose alternates matter most."),
+               ("all", u"All", u"Checks every glyph whose alternates have no other job in the font's code."),
+               ("none", u"None", u"Unchecks every glyph: none takes turns."))
+PROGRESS_SECONDS = 0.1  # long work shows its progress, and lets the window answer, this often
 FORM_ICON_WIDTH = 3  # a form row's picture: this many icons wide
 
 # The check boxes of a list whose pictures dark mode leaves alone (LEAVE_ALONE_PROP): the style drew
@@ -2231,16 +2762,21 @@ class FeatureCodeDialog(object):
         layout = QtGui.QVBoxLayout(dialog)
         self.status = self.ak.status_label()
         self.status.setWordWrap(True)
+        describe(self.status, u"What the font has (its ligatures, the glyphs whose alternates take turns, its form "
+                              u"features) and whether the code shown can be written; while the font is read, glyphs "
+                              u"are built, or the code is written, what is under way.")
         layout.addWidget(self.status)
         layout.addWidget(self.ak.separator())
         self.log = self.ak.Log()
+        # The glyphs a line names are links, drawn from the font's own outlines (the interface's fonts
+        # lack many characters: they came out as empty boxes), and a click opens one in a Glyph tab
+        self.log.follow(self.log_source)
         self.seen_history, self.first_choices, self.first_checks = None, [], []
 
         # The lists (on two tabs) and the code share the height in a splitter: drag between them to see
         # more of one
         self.splitter = QtGui.QSplitter(QtCore.Qt.Vertical)
         self.splitter.setChildrenCollapsible(False)
-        self.splitter.setWhatsThis(u"Drag the space between two parts up or down to give one more room.")
         layout.addWidget(self.splitter, 1)
         top = self.part(QtGui, 3)
         # A tab bar over plain pages: a QTabWidget's themed page drew its buttons with light frames in dark mode
@@ -2250,49 +2786,75 @@ class FeatureCodeDialog(object):
             self.tabs.addTab(label)
         self.tabs.setTabToolTip(0, u"Ligatures (liga, dlig) and alternates that take turns (calt)")
         self.tabs.setTabToolTip(1, u"Forms: case, locl, fractions and figures, small capitals, stylistic sets")
-        self.tabs.setTabToolTip(2, u"Alternates fonts commonly offer, as starting copies; variants that take turns")
+        self.tabs.setTabToolTip(2, u"Alternates fonts commonly offer, as copies to redraw; variants that take turns")
+        describe(self.tabs, u"The window's three tabs: <i>Ligatures and alternates</i> (liga, dlig, and calt), "
+                            u"<i>Forms</i> (case, locl, fractions and figures, small capitals, stylistic sets, and the "
+                            u"figure forms to build), and <i>Stylistic alternates</i> (copies to redraw, and variants "
+                            u"that take turns). The code under them is the same whichever tab is open.")
         top.addWidget(self.tabs)
         self.pages = QtGui.QStackedWidget()
         top.addWidget(self.pages, 1)
 
         self.lists = QtGui.QSplitter(QtCore.Qt.Vertical)
         self.lists.setChildrenCollapsible(False)
-        self.lists.setWhatsThis(u"Drag the space between two parts up or down to give one more room.")
         self.pages.addWidget(self.lists)
         part = self.part(QtGui, 2, self.lists)
-        part.addWidget(self.heading(QtGui, u"Ligatures"))
+        what = (u"Each ligature, what it replaces, and the feature it goes in (pick it to change it). Standard "
+                u"ligatures are on unless a user turns them off; discretionary ones off unless turned on.")
+        part.addWidget(describe(self.heading(QtGui, u"Ligatures"), what))
         self.ligature_tree = QtGui.QTreeWidget()
         self.ligature_tree.setColumnCount(3)
         self.ligature_tree.setHeaderLabels(["Ligature", "Replaces", "Feature"])
         self.ligature_tree.setRootIsDecorated(False)
         self.ligature_tree.setIconSize(QtCore.QSize(ICON_SIZE, ICON_SIZE))
-        self.ligature_tree.setWhatsThis(u"Each ligature, what it replaces, and the feature it goes in (pick it to "
-                                        u"change it). Standard ligatures are on unless a user turns them off; "
-                                        u"discretionary ones off unless turned on.")
+        self.ligature_tree.setWhatsThis(what)
         self.ligature_tree.setProperty(self.ak.LEAVE_ALONE_PROP, True)  # its pictures are drawn in the dialog's colors
         self.ak.grid_lines(self.ligature_tree)
         part.addWidget(self.ligature_tree, 1)
 
         part = self.part(QtGui, 1, self.lists)
-        part.addWidget(self.heading(QtGui, u"Alternates that take turns"))
+        turns = (u"The letters, figures, and punctuation marks with alternates (named X.2, X.alt1, or X.calt1), and "
+                 u"their cycle: the forms they take in turn. Checked glyphs take turns. Those that often stand "
+                 u"doubled in text (ll, ee, ss, tt, 00, and 99: counted in the text of 24 languages, and in kana, "
+                 u"Armenian, and Georgian text; and the marks doubled by convention: ..., !!, ??, --, and '') come "
+                 u"first; where the font has more glyphs with alternates than rules by glyph can serve, only those "
+                 u"start checked.")
+        part.addWidget(describe(self.heading(QtGui, u"Alternates that take turns"), turns))
         row = QtGui.QHBoxLayout()
-        row.addWidget(QtGui.QLabel("Look back over at most"))
+        what = (u"How many glyphs of its kind may stand between a glyph and its earlier form for it to take the "
+                u"next alternate (0: only side by side). A letter looks back over letters, a figure over figures, a "
+                u"punctuation mark over punctuation marks; anything else between ends the look back.")
+        row.addWidget(label_of(QtGui, u"Look back over at most", what))
         self.look_back = QtGui.QSpinBox()
         self.look_back.setRange(0, 6)
         self.look_back.setValue(DEFAULT_LOOK_BACK)
-        self.look_back.setSuffix(" letters")
-        self.look_back.setWhatsThis(u"How many letters may stand between a letter and its earlier form for it to take "
-                                    u"the next alternate (0: only side by side).")
+        self.look_back.setSuffix(look_back_suffix(DEFAULT_LOOK_BACK))
+        self.look_back.setWhatsThis(what)
         row.addWidget(self.look_back)
         row.addStretch(1)
+        row.addWidget(label_of(QtGui, u"Check", u"The three buttons beside check the glyphs of the list below at "
+                                                u"once: those often doubled in text, all, or none."))
+        self.turn_buttons = []
+        for key, label, what in TURN_CHECKS:
+            button = QtGui.QPushButton(label)
+            button.setWhatsThis(what)
+            button.connect("clicked()", lambda key=key: self.check_turns(key))
+            row.addWidget(button)
+            self.turn_buttons.append(button)
         part.addLayout(row)
+        self.turn_label = QtGui.QLabel(u"")  # how the checked glyphs take turns: by glyph, or by position
+        self.turn_label.setWordWrap(True)
+        self.ak.rich(self.turn_label)
+        describe(self.turn_label, u"How the checked glyphs take turns: by glyph (each looks back for its own earlier "
+                                  u"form) while that takes few enough rules, else by position (each takes the form "
+                                  u"after the form of the glyph of its kind before it).")
+        part.addWidget(self.turn_label)
         self.alternate_tree = QtGui.QTreeWidget()
-        self.alternate_tree.setColumnCount(3)
-        self.alternate_tree.setHeaderLabels(["Letter", "Cycle", "Note"])
+        self.alternate_tree.setColumnCount(4)
+        self.alternate_tree.setHeaderLabels(["Glyph", "Cycle", "Doubled in text", "Note"])
         self.alternate_tree.setRootIsDecorated(False)
         self.alternate_tree.setIconSize(QtCore.QSize(ICON_SIZE * 3, ICON_SIZE))
-        self.alternate_tree.setWhatsThis(u"The letters with alternates (named X.2, X.alt1, or X.calt1), and their "
-                                         u"cycle: the forms they take in turn. Checked letters take turns.")
+        self.alternate_tree.setWhatsThis(turns)
         self.alternate_tree.setProperty(self.ak.LEAVE_ALONE_PROP, True)
         self.ak.grid_lines(self.alternate_tree)
         part.addWidget(self.alternate_tree, 1)
@@ -2302,10 +2864,12 @@ class FeatureCodeDialog(object):
         box.setContentsMargins(0, 0, 0, 0)
         self.forms_label = QtGui.QLabel(u"")
         self.forms_label.setWordWrap(True)
+        describe(self.forms_label, u"What the default figures are (tabular or proportional, lining or oldstyle) and "
+                                   u"how that was read: the figure features (lnum, onum, pnum, and tnum) are written "
+                                   u"from it.")
         box.addWidget(self.forms_label)
         self.forms_parts = QtGui.QSplitter(QtCore.Qt.Vertical)
         self.forms_parts.setChildrenCollapsible(False)
-        self.forms_parts.setWhatsThis(u"Drag the space between two parts up or down to give one more room.")
         box.addWidget(self.forms_parts, 1)
         forms_box = self.part(QtGui, 3, self.forms_parts)
         self.forms_tree = QtGui.QTreeWidget()
@@ -2313,10 +2877,16 @@ class FeatureCodeDialog(object):
         self.forms_tree.setHeaderLabels(["Feature", "Becomes", "Note"])
         self.forms_tree.setRootIsDecorated(True)
         self.forms_tree.setIconSize(QtCore.QSize(ICON_SIZE * FORM_ICON_WIDTH, ICON_SIZE))
+        try:  # a note stays on its row's one line, cut at its end; its cell's tooltip has it whole
+            self.forms_tree.setWordWrap(False)
+            self.forms_tree.setTextElideMode(QtCore.Qt.ElideRight)
+        except Exception:
+            pass
         self.forms_tree.setWhatsThis(u"The form features the font's glyph names call for, each with its substitutions "
                                      u"under it (click its arrow). A checked feature is written, with its checked "
                                      u"rows; a set's name (the Becomes column of its row) is what applications show, "
-                                     u"and you can edit it. Amber rows are warnings to review: they change nothing.")
+                                     u"and you can edit it. Amber rows are warnings to review: they change nothing. "
+                                     u"A note too long for its column is whole in its cell's tooltip.")
         self.forms_tree.setProperty(self.ak.LEAVE_ALONE_PROP, True)
         self.ak.grid_lines(self.forms_tree)
         forms_box.addWidget(self.forms_tree, 1)
@@ -2335,24 +2905,28 @@ class FeatureCodeDialog(object):
             self.pages.addWidget(missing)
 
         part = self.part(QtGui, 2)
-        part.addWidget(self.heading(QtGui, u"The code"))
+        what = (u"The code to be written, feature by feature: FreeLab's blocks between their marker lines, the rest "
+                u"of each feature as it is; the prefix's language systems first where locl needs some.")
+        part.addWidget(describe(self.heading(QtGui, u"The code"), what))
         self.code = QtGui.QPlainTextEdit()
         self.code.setReadOnly(True)
-        self.code.setWhatsThis(u"The code to be written, feature by feature: FreeLab's blocks between their "
-                               u"marker lines, the rest of each feature as it is; the prefix's language systems "
-                               u"first where locl needs some.")
+        self.code.setWhatsThis(what)
         part.addWidget(self.code, 1)
+        for splitter in (self.splitter, self.lists, self.forms_parts):  # (once their parts are in)
+            describe_handles(splitter, u"Drag the space between two parts up or down to give one more room.")
 
         layout.addWidget(self.log.widget)
         buttons = QtGui.QHBoxLayout()
         self.restore_button = QtGui.QPushButton("Restore suggestions")
-        self.restore_button.setWhatsThis(u"Puts every ligature's feature, every letter's, form's, and figure form's "
+        self.restore_button.setWhatsThis(u"Puts every ligature's feature, every glyph's, form's, and figure form's "
                                          u"check, every set's name, and the build settings back as they first came.")
         self.write_button = QtGui.QPushButton("Write the code")
         self.write_button.setWhatsThis(u"Writes the features as shown (liga, dlig, calt, and the checked forms) to the "
                                        u"font, and the language systems locl needs to its prefix (<i>Update the code</i>: "
                                        u"FreeLab's code is in them already, and changes).")
         self.close_button = QtGui.QPushButton("Close")
+        self.close_button.setWhatsThis(u"Closes the window. What was written or built stays in the font; choices "
+                                       u"not written are not kept.")
         buttons.addWidget(self.restore_button)
         buttons.addStretch(1)
         self.compile_box = self.ak.compile_box()
@@ -2364,10 +2938,12 @@ class FeatureCodeDialog(object):
         self.write_button.connect("clicked()", self.write)
         self.close_button.connect("clicked()", dialog.close)
         self.tabs.connect("currentChanged(int)", self.switch_page)
-        self.look_back.connect("valueChanged(int)", lambda value: self.make_code())
+        self.look_back.connect("valueChanged(int)", lambda value: self.look_back_changed(value))
         self.ligature_tree.connect("itemDoubleClicked(QTreeWidgetItem*,int)", self.double_clicked)
         self.alternate_tree.connect("itemDoubleClicked(QTreeWidgetItem*,int)", self.double_clicked)
         self.alternate_tree.connect("itemChanged(QTreeWidgetItem*,int)", lambda item, column: self.make_code())
+        self.alternate_tree.connect("currentItemChanged(QTreeWidgetItem*,QTreeWidgetItem*)",
+                                    lambda current, previous: self.turn_picked(current))
         self.forms_tree.connect("itemDoubleClicked(QTreeWidgetItem*,int)", self.double_clicked)
         self.forms_tree.connect("itemChanged(QTreeWidgetItem*,int)", self.form_checked)
         self.forms_tree.connect("itemExpanded(QTreeWidgetItem*)", self.form_expanded)
@@ -2375,6 +2951,14 @@ class FeatureCodeDialog(object):
         self.combos = []  # each ligature's feature box, by its index in found (held: PythonQt deletes what Python does not)
         self.name_edits = {}  # each set's name box, by its tag (held likewise)
         self.names, self.letters, self.found, self.sets = [], [], [], {}
+        self.others = {}  # the font's figure and punctuation glyphs (glyph_kinds), as self.letters is its letters'
+        self.chars, self.often, self.taken = {}, set(), set()  # the glyphs' characters; those often doubled; those with a job
+        self.doubles, self.typed = load_doubles(), load_typed_doubles()
+        try:  # Auto Kerning's common pairs: the doubled letters of kana, Armenian, and Georgian text among them
+            self.pairs = self.ak.common_pairs()
+        except Exception:
+            self.pairs = {}
+        self.busy, self.progress_shown = False, 0.0
         self.forms, self.figures, self.checked_code = [], None, {}
         self.texts, self.prefix = {}, u""
         self.ligature_model = load_ligature_model()
@@ -2432,17 +3016,63 @@ class FeatureCodeDialog(object):
                 return None
         except Exception:
             pass
-        package = workspace.currentPackage
+        package = self.ak.window_font(self, workspace)  # this window's font
         if package is None or package.isNull or not package.glyphsCount:
             return None
         return package
 
+    def log_source(self):
+        """(fontlab, the font the window shows, its current master), for the log's glyph links."""
+        package = getattr(self, "package", None)
+        return self.fontlab, package, package.master if package is not None else None
+
+    def set_busy(self, on):
+        """Long work under way (or over). The window answers events while it shows the work's progress, so
+        a click could start the tool again inside itself: the lists and their buttons take no clicks
+        meanwhile, the buttons under them do nothing (each action checks busy), and ak.watch_history
+        waits on busy too."""
+        self.busy = bool(on)
+        try:
+            self.splitter.setEnabled(not on)
+        except Exception:
+            pass
+
+    def progress(self, what, done=None, total=None, force=False):
+        """Long work's progress in the top line (what: "Building variants"; done of total, when counted),
+        the window left to redraw, at most every PROGRESS_SECONDS. Clicks and keys wait until the work is
+        done (Qt delivers them then): the font is being read or changed meanwhile, and nothing, here or in
+        FontLab, may act on it halfway."""
+        now = time.time()
+        if not force and now - self.progress_shown < PROGRESS_SECONDS:
+            return
+        self.progress_shown = now
+        try:
+            QtCore, QtGui = _qt()
+            self.status.setText(u"%s: %s of %s\N{HORIZONTAL ELLIPSIS}" % (what, self.ak.b(done), self.ak.b(total))
+                                if total else u"%s\N{HORIZONTAL ELLIPSIS}" % what)
+            pump_events(QtCore, QtGui)
+        except Exception:
+            pass
+
     def run(self):
+        """The font read again, unless long work is under way (a click the window answered meanwhile)."""
+        if self.busy:
+            return
+        self.set_busy(True)
+        try:
+            self.read_font()
+        finally:
+            self.set_busy(False)
+
+    def read_font(self):
         QtCore, QtGui = _qt()
         kept = self.small_state()  # (the builds' checks and settings, kept for the same font)
+        turns = self.turn_state()  # (and the characters checked to take turns)
         package = self.package = self.current_font()
         if kept is not None and (package is None or self.ak.font_key(package) != kept[0]):
             kept = None
+        if turns is not None and (package is None or self.ak.font_key(package) != turns[0]):
+            turns = None
         self.small_kept = kept
         self.ligature_tree.clear()  # (its boxes go with its rows)
         self.combos = []
@@ -2468,18 +3098,17 @@ class FeatureCodeDialog(object):
         except Exception:
             self.prefix = u""
 
-        def is_letter(name):
+        def takes_turns(name):  # a letter's, a figure's, or a punctuation mark's glyph
             code = codes.get(name)
-            return bool(code) and unicodedata.category(unichr_(code)).startswith(u"L")
+            return bool(code) and char_kind(unichr_(code)) is not None
 
-        def letter_like(name):
-            stem = name.split(u".")[0]
-            return all(is_letter(part) for part in stem.split(u"_") if part) if stem else False
-
-        self.letters = [name for name in self.names if letter_like(name)]
+        self.progress(u"Reading the font", force=True)
+        kinds = glyph_kinds(self.names, codes)
+        self.letters = kinds[LETTERS]
+        self.others = dict((kind, kinds[kind]) for kind in KINDS[1:])
         self.found = ligatures(self.names, self.texts,
                                dict((name, unichr_(code)) for name, code in codes.items() if code), self.ligature_model)
-        self.sets = alternate_sets(self.names, is_letter)
+        self.sets = alternate_sets(self.names, takes_turns)
         bold = QtGui.QFont(self.ligature_tree.font)
         bold.setBold(True)
         self.ligature_tree.blockSignals(True)
@@ -2496,7 +3125,9 @@ class FeatureCodeDialog(object):
             combo = self.ak.flat_combo(QtGui.QComboBox())
             for _, label in CHOICES:
                 combo.addItem(label)
-            combo.setToolTip(u"Its feature. First set by %s." % (lig.why or u"default"))
+            # (its own What's This: without one, a right-click answered with the list's)
+            describe(combo, u"The feature this ligature goes in: <i>Standard</i> (liga), <i>Discretionary</i> "
+                            u"(dlig), or <i>Off</i> (neither). First set by %s." % self.ak.html(lig.why or u"default"), True)
             combo.connect("currentIndexChanged(int)", lambda choice, lig=lig: self.choose(lig, choice))
             self.ligature_tree.setItemWidget(item, 2, combo)
             self.combos.append(combo)
@@ -2505,26 +3136,44 @@ class FeatureCodeDialog(object):
         self.ligature_tree.blockSignals(False)
         self.alternate_tree.blockSignals(True)
         used = used_in([name for forms in self.sets.values() for name in forms], self.texts)
-        for base in sorted(self.sets):
+        self.chars = dict((base, unichr_(codes[base])) for base in self.sets if codes.get(base))
+        self.often = set(base for base in self.sets if self.doubled(self.chars.get(base)))
+        self.taken = set(base for base in self.sets if any(name in used for name in self.sets[base]))
+        order = turn_order(self.sets, self.chars, self.doubles, self.pairs, self.typed)
+        first = first_turns(self.sets, order, self.often, self.taken, self.look_back.value) | \
+            turns_written(self.sets, self.texts.get("calt"))
+        checks = dict((base, base in first) for base in order)
+        if turns is not None:  # the same font read again (after a build, a write, an undo): its checks kept
+            checks.update((base, on) for base, on in turns[1].items() if base in checks and base not in self.taken)
+        for row, base in enumerate(order):
             forms = [base] + self.sets[base]
             jobs = [u"%s in %s" % (name, u", ".join(used[name])) for name in self.sets[base] if name in used]
             note = (u"The font's code uses %s already: left out, so as not to undo it." % u"; ".join(jobs)) if jobs else u""
-            item = QtGui.QTreeWidgetItem([base, u", ".join(forms), note])
+            doubled, how_often = double_words(self.chars.get(base), self.doubles, self.pairs, self.typed)
+            item = QtGui.QTreeWidgetItem([base, u", ".join(forms), doubled, note])
             item.setFont(0, bold)
             item.setData(0, QtCore.Qt.UserRole, base)
             item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsUserCheckable)
-            item.setCheckState(0, QtCore.Qt.Unchecked if jobs else QtCore.Qt.Checked)
-            item.setToolTip(2, note)
-            icon = self.picture(forms)
-            if icon is not None:
-                item.setIcon(1, QtGui.QIcon(icon))
+            item.setCheckState(0, QtCore.Qt.Checked if checks[base] else QtCore.Qt.Unchecked)
+            item.setToolTip(2, tip_html(how_often))
+            item.setToolTip(3, tip_html(note))
+            if row < TURN_PICTURES:  # (a picture per row of a whole alphabet took seconds: the rest when clicked)
+                icon = self.picture(forms)
+                if icon is not None:
+                    item.setIcon(1, QtGui.QIcon(icon))
+            else:
+                item.setToolTip(1, TURN_PICTURE_TIP)
             self.alternate_tree.addTopLevelItem(item)
+            if row % 50 == 49:
+                self.progress(u"Listing the glyphs with alternates", row + 1, len(order))
         self.alternate_tree.blockSignals(False)
-        self.first_checks = self.alternate_checks()
+        self.first_checks = [base in first for base in order]  # (what Restore suggestions puts back)
         for tree in (self.ligature_tree, self.alternate_tree):
             tree.resizeColumnToContents(0)
             tree.resizeColumnToContents(1)
+        self.alternate_tree.resizeColumnToContents(2)
         self.checked_code = {}
+        self.progress(u"Reading the forms", force=True)
         self.read_forms(glyphs)
         self.make_code()
         if self.alternates is not None:
@@ -2559,20 +3208,23 @@ class FeatureCodeDialog(object):
         tree = self.forms_tree
         tree.blockSignals(True)
         for feature in self.forms:
-            item = QtGui.QTreeWidgetItem([feature.tag, u"", u" ".join(t for t in (feature.kind_note, feature.note) if t)])
+            # (plain: a list's cell shows markup as typed, "<i>Glyphs</i>")
+            item = QtGui.QTreeWidgetItem([feature.tag, u"", plain(u" ".join(t for t in (feature.kind_note, feature.note) if t))])
             self.ak.section_row(item, tree)
+            even_row(QtCore, item)  # (a feature's row as high as the rows with pictures, not a heading's line)
             item.setData(0, QtCore.Qt.UserRole, feature.tag)
             item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsUserCheckable)
             item.setCheckState(0, QtCore.Qt.Checked if feature.on else QtCore.Qt.Unchecked)
             item.setToolTip(0, u"%s (%s): %s." % (feature.title(), feature.tag, counted(len(feature.rules), u"row")))
-            item.setToolTip(2, item.text(2))
+            item.setToolTip(2, tip_html(item.text(2)))  # (the note whole, wrapped: its cell cuts it at the column's edge)
             if feature.tag not in SET_TAGS:
                 item.setText(1, u"%s (%d)" % (feature.title(), len(feature.rules)))
             tree.addTopLevelItem(item)
             for rule in feature.rules:
-                child = QtGui.QTreeWidgetItem([rule.source, rule.target, rule.note])
+                child = QtGui.QTreeWidgetItem([rule.source, rule.target, plain(rule.note)])
+                even_row(QtCore, child)  # (with a picture or without: "its alternates (Superscript)" has none)
                 child.setData(0, QtCore.Qt.UserRole, u"%s\t%s" % (feature.tag, rule.key))
-                child.setToolTip(2, rule.note)
+                child.setToolTip(2, tip_html(plain(rule.note)))
                 if rule.warning:
                     child.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable)
                     self.warning_colors(child)
@@ -2585,15 +3237,26 @@ class FeatureCodeDialog(object):
                 edit.setFrame(False)
                 if feature.hand_name:
                     edit.setReadOnly(True)
-                    edit.setToolTip(u"The name the font's own code gives this set: edit it there.")
+                    describe(edit, u"The name the font's own code gives this set: edit it there.", True)
                 else:
-                    edit.setToolTip(u"The set's name, as applications show it (suggested from what it changes): "
-                                    u"edit it as you like.")
+                    describe(edit, u"The set's name, as applications show it (suggested from what it changes): "
+                                   u"edit it as you like.", True)
                 edit.connect("textEdited(QString)", lambda text, feature=feature: self.rename(feature, text))
                 tree.setItemWidget(item, 1, edit)
                 self.name_edits[feature.tag] = edit
         tree.blockSignals(False)
         tree.resizeColumnToContents(0)
+        try:  # room for an open feature's rows: sized while they are closed, the column cut their check boxes
+            sources = [rule.source for feature in self.forms for rule in feature.rules]
+            try:
+                measure = QtGui.QFontMetrics(tree.font).width
+            except Exception:
+                measure = None
+            least = form_column_width(tree.indentation, sources, measure)
+            if tree.columnWidth(0) < least:
+                tree.setColumnWidth(0, least)
+        except Exception:
+            pass
         tree.setColumnWidth(1, max(tree.columnWidth(1), ICON_SIZE * FORM_ICON_WIDTH + 160))
         if self.figures:
             self.forms_label.setText(u"The default figures are %s (by %s). %s" % (
@@ -2781,69 +3444,78 @@ class FeatureCodeDialog(object):
 
     def build_part(self, QtCore, QtGui, part):
         """The Forms tab's lower part: the figure forms the font lacks, their settings, and the build."""
-        part.addWidget(self.heading(QtGui, u"Figure forms to build"))
+        listed = (u"The figure forms the font lacks, by set (click a set's arrow): each glyph, what it would be made "
+                  u"of, drawn beside its figure, and its code point. Checked glyphs are built.")
+        part.addWidget(describe(self.heading(QtGui, u"Figure forms to build"), listed))
         self.small_label = QtGui.QLabel(u"")
         self.small_label.setWordWrap(True)
+        describe(self.small_label, u"How many figure forms the font lacks, and how each is made: of its figure, scaled "
+                                   u"and moved (its strokes kept as <i>Strokes</i> says), or of a drawn small figure "
+                                   u"where the font has a whole set of them.")
         part.addWidget(self.small_label)
+        # One row for every setting. Scale, Baseline at, and Width are the picked set's, and Suggested puts
+        # those three back; Strokes, after it, is one value for every set (it stood alone under the list,
+        # which said so by its place only: its What's This says it now).
         row = QtGui.QHBoxLayout()
-        row.addWidget(QtGui.QLabel(u"Settings of"))
+        what = u"The set whose settings the boxes beside show and change (clicking a row picks its set)."
+        row.addWidget(label_of(QtGui, u"Settings of", what))
         self.small_set = QtGui.QComboBox()
         for key in SMALL_SETS:
             self.small_set.addItem(SMALL_SET_TITLES[key])
-        self.small_set.setWhatsThis(u"The set whose settings the boxes beside show and change (clicking a row "
-                                    u"picks its set).")
+        self.small_set.setWhatsThis(what)
         row.addWidget(self.small_set)
-        row.addWidget(QtGui.QLabel(u"Scale"))
+        what = (u"The size of the set's glyphs, of their figure's (or letter's). Numerators and ordinal indicators "
+                u"keep their top where it is; the others their baseline.")
+        row.addWidget(label_of(QtGui, u"Scale", what))
         self.small_scale = QtGui.QSpinBox()
         self.small_scale.setRange(20, 95)
         self.small_scale.setSuffix(u"%")
-        self.small_scale.setWhatsThis(u"The size of the set's glyphs, of their figure's (or letter's). Numerators and "
-                                      u"ordinal indicators keep their top where it is; the others their baseline.")
+        self.small_scale.setWhatsThis(what)
         row.addWidget(self.small_scale)
-        row.addWidget(QtGui.QLabel(u"Baseline at"))
+        what = u"Where the scaled figure's baseline goes, in font units above the font's baseline (below it, negative)."
+        row.addWidget(label_of(QtGui, u"Baseline at", what))
         self.small_baseline = QtGui.QSpinBox()
         self.small_baseline.setRange(-3000, 3000)
-        self.small_baseline.setSuffix(u" units")
-        self.small_baseline.setWhatsThis(u"Where the scaled figure's baseline goes, in font units above the font's "
-                                         u"baseline (below it, negative).")
+        self.small_baseline.setSuffix(units_suffix(0))  # (follows its number: show_baseline_suffix)
+        self.small_baseline.setWhatsThis(what)
         row.addWidget(self.small_baseline)
-        row.addWidget(QtGui.QLabel(u"Width"))
+        what = (u"The advance width, of the scaled figure's: above 100%, a little more room around the small figure "
+                u"(most open-licensed fonts give them 112%).")
+        row.addWidget(label_of(QtGui, u"Width", what))
         self.small_width = QtGui.QSpinBox()
         self.small_width.setRange(50, 200)
         self.small_width.setSuffix(u"%")
-        self.small_width.setWhatsThis(u"The advance width, of the scaled figure's: above 100%, a little more room "
-                                      u"around the small figure (most open-licensed fonts give them 112%).")
+        self.small_width.setWhatsThis(what)
         row.addWidget(self.small_width)
         self.small_reset = QtGui.QPushButton(u"Suggested")
-        self.small_reset.setWhatsThis(u"Puts the set's scale, baseline, and width back as first suggested.")
+        describe(self.small_reset, suggested_words(None), True)  # (where the suggestion comes from: small_set_picked)
         row.addWidget(self.small_reset)
-        self.small_why = QtGui.QLabel(u"")
-        row.addWidget(self.small_why, 1)
+        what = (u"For every set, not only the one picked: how thick the built forms' strokes are, as a share of "
+                u"their scaled figure's. Scaling a figure to 60%% thins its strokes to 60%%; drawn small figures are "
+                u"about 7%% bolder than scaled ones (the corpus's fonts), hence %d%%. Above 100%%, each scaled form is "
+                u"made of outlines (not components), offset outward evenly on both sides of each stroke; 100%%: "
+                u"components, scaled, as they are. <i>Suggested</i> leaves it as it is; <i>Restore suggestions</i> "
+                u"puts it back at %d%%." % (STROKE_WEIGHT, STROKE_WEIGHT))
+        row.addWidget(label_of(QtGui, u"Strokes", what))
+        self.stroke_box = QtGui.QSpinBox()
+        self.stroke_box.setRange(100, 160)
+        self.stroke_box.setSuffix(u"%")
+        self.stroke_box.setValue(STROKE_WEIGHT)
+        self.stroke_box.setWhatsThis(what)
+        row.addWidget(self.stroke_box)
+        self.stroke_box.connect("valueChanged(int)", lambda value: self.update_small_buttons())
+        row.addStretch(1)
         part.addLayout(row)
         self.small_tree = QtGui.QTreeWidget()
         self.small_tree.setColumnCount(3)
         self.small_tree.setHeaderLabels(["Glyph", "Made of", "Note"])
         self.small_tree.setRootIsDecorated(True)
         self.small_tree.setIconSize(QtCore.QSize(ICON_SIZE * 2, ICON_SIZE))
-        self.small_tree.setWhatsThis(u"The figure forms the font lacks, by set (click a set's arrow): each glyph, what "
-                                     u"it would be made of, drawn beside its figure, and its code point. Checked "
-                                     u"glyphs are built.")
+        self.small_tree.setWhatsThis(listed)
         self.small_tree.setProperty(self.ak.LEAVE_ALONE_PROP, True)
         self.ak.grid_lines(self.small_tree)
         part.addWidget(self.small_tree, 1)
         row = QtGui.QHBoxLayout()
-        row.addWidget(QtGui.QLabel(u"Strokes"))
-        self.stroke_box = QtGui.QSpinBox()
-        self.stroke_box.setRange(100, 160)
-        self.stroke_box.setSuffix(u"%")
-        self.stroke_box.setValue(STROKE_WEIGHT)
-        self.stroke_box.setWhatsThis(u"How thick the built forms' strokes are, as a share of their scaled figure's: "
-                                     u"scaling a figure to 60%% thins its strokes to 60%%; drawn small figures are about "
-                                     u"7%% bolder than scaled ones (the corpus's fonts), hence %d%%. Above 100%%, each form "
-                                     u"is made of outlines (not components), offset outward evenly on both sides of each "
-                                     u"stroke; 100%%: components, scaled, as they are." % STROKE_WEIGHT)
-        row.addWidget(self.stroke_box)
-        self.stroke_box.connect("valueChanged(int)", lambda value: self.update_small_buttons())
         row.addStretch(1)
         self.build_button = QtGui.QPushButton(build_label(0))
         self.build_button.setWhatsThis(u"Adds the checked glyphs to the font, as shown (scaled forms with their "
@@ -2856,6 +3528,7 @@ class FeatureCodeDialog(object):
         self.small_set.connect("currentIndexChanged(int)", self.small_set_picked)
         self.small_scale.connect("valueChanged(int)", lambda value: self.small_setting("scale", value))
         self.small_baseline.connect("valueChanged(int)", lambda value: self.small_setting("baseline", value))
+        self.small_baseline.connect("valueChanged(int)", lambda value: self.show_baseline_suffix())
         self.small_width.connect("valueChanged(int)", lambda value: self.small_setting("width", value))
         self.small_reset.connect("clicked()", self.small_suggested)
         self.small_tree.connect("itemChanged(QTreeWidgetItem*,int)", self.small_checked)
@@ -3173,11 +3846,18 @@ class FeatureCodeDialog(object):
         return copies
 
     def add_stroke_copies(self, layer, copies, width):
-        """layer (empty, the new form's) made of the copies stroke_copies listed, offset."""
+        """layer (empty, the new form's) made of the copies stroke_copies listed, offset. Returns what
+        was done, as counts: [contours, nodes, on-curve nodes, nodes given a new place, those of them
+        found there afterwards]. The layer's shapes, contours, and nodes are asked of FontLab again once
+        written, so a build whose strokes FontLab did not keep says so, and where it stopped, instead
+        of reporting them thickened (the log said "strokes at 130%" of forms that looked as scaled;
+        whether FontLab keeps a node's x and y set from a script was never looked at live)."""
+        counts = [0, 0, 0, 0, 0]
         for source_layer, transform, distance in copies:
             for shape in source_layer.shapes:
                 layer.addShape(shape.cloneTopLevel() if hasattr(shape, "cloneTopLevel") else shape.clone())
-                copy = layer.shapes[len(layer.shapes) - 1]
+                at = len(layer.shapes) - 1
+                copy = layer.shapes[at]
                 copy.applyTransform(transform)
                 contours = [c for c in copy.contours if c is not None]
                 if not contours:
@@ -3187,13 +3867,35 @@ class FeatureCodeDialog(object):
                 right = signed_area(biggest) > 0  # its outer contour counterclockwise (y up): the outside is right
                 own = copy.transform
                 local = (abs(own.m11() * own.m22()) ** 0.5) or 1.0  # (the offset in the contours' own units)
+                wanted = []
                 for contour in contours:
                     nodes = contour.nodes()
                     points = [(n.x, n.y, u"%s" % n.type == u"on") for n in nodes]
-                    for node, (x, y) in zip(nodes, offset_contour(points, distance / local, right)):
-                        node.x, node.y = x, y
+                    places = offset_contour(points, distance / local, right)
+                    for node, (x, y) in zip(nodes, places):
+                        place_node(node, x, y)
                     contour.update() if hasattr(contour, "update") else None
+                    wanted.append([(x, y, abs(x - p[0]) > STROKE_READ_BACK or abs(y - p[1]) > STROKE_READ_BACK)
+                                   for (x, y), p in zip(places, points)])
+                    counts[0] += 1
+                    counts[1] += len(points)
+                    counts[2] += sum(1 for point in points if point[2])
+                try:  # read back through new objects, not the ones written through
+                    again = [c for c in layer.shapes[at].contours if c is not None]
+                    read = [[(n.x, n.y) for n in c.nodes()] for c in again]
+                except Exception:
+                    read = []
+                for index, places in enumerate(wanted):
+                    now = read[index] if index < len(read) and len(read[index]) == len(places) else None
+                    for number, (x, y, shifted) in enumerate(places):
+                        if not shifted:
+                            continue
+                        counts[3] += 1
+                        if now is not None and abs(now[number][0] - x) <= STROKE_READ_BACK and \
+                                abs(now[number][1] - y) <= STROKE_READ_BACK:
+                            counts[4] += 1
         layer.advanceWidth = float(width)
+        return counts
 
     def small_set_picked(self, index):
         """A set picked in the settings row: its settings shown in the boxes (signals held: showing them
@@ -3208,12 +3910,21 @@ class FeatureCodeDialog(object):
                 self.small_scale.setValue(int(round(setting["scale"] * 100)))
                 self.small_baseline.setValue(int(setting["baseline"]))
                 self.small_width.setValue(int(round(setting["width"] * 100)))
-                self.small_why.setText(u"Suggested: %s" % self.ak.html(setting.get("why") or u""))
-            else:
-                self.small_why.setText(u"")
+            # (where the set's suggestion comes from, in the button's tooltip and What's This)
+            first = self.small_first.get(SMALL_SETS[self.small_set_index]) or setting or {}
+            describe(self.small_reset, suggested_words(first.get("why")), True)
         finally:
             for box in boxes:
                 box.blockSignals(False)
+        self.show_baseline_suffix()
+
+    def show_baseline_suffix(self):
+        """The baseline box's word follows its number ("1 unit", "-1 unit", "2 units"), however the
+        number came (typed, or set with the box's signals held)."""
+        try:
+            self.small_baseline.setSuffix(units_suffix(self.small_baseline.value))
+        except Exception:
+            pass  # a signal's handler must not raise
 
     def small_setting(self, key, value):
         """A setting of the picked set changed in its box."""
@@ -3231,6 +3942,7 @@ class FeatureCodeDialog(object):
                 self.small_baseline.blockSignals(True)
                 self.small_baseline.setValue(baseline)
                 self.small_baseline.blockSignals(False)
+                self.show_baseline_suffix()
         elif key == "baseline":
             setting["baseline"] = int(value)
         else:
@@ -3255,8 +3967,10 @@ class FeatureCodeDialog(object):
     def update_small_buttons(self):
         count = sum(1 for form in self.small_forms if form.on and self.small_plans.get(form.name) is not None)
         self.build_button.setText(build_label(count))
-        self.ak.enable(self.build_button, count > 0)
-        self.ak.enable(self.restore_button, self.restorable())
+        # (set_enabled, not Auto Kerning's enable: this runs while the font is read after a build or an
+        # undo, the lists' part disabled meanwhile, and the button stayed clickable with nothing to build)
+        set_enabled(self.build_button, count > 0)
+        set_enabled(self.restore_button, self.restorable())
 
     def restorable(self):
         return [lig.choice for lig in self.found] != self.first_choices or self.alternate_checks() != self.first_checks \
@@ -3303,6 +4017,9 @@ class FeatureCodeDialog(object):
             return plans[master]
 
         made, skipped, failed, error, touched, thickened = [], [], [], None, [], []
+        # forms whose thicker strokes FontLab did not keep, and what was done to them (add_stroke_copies' counts);
+        # how far the kept strokes' sides moved in the current master (asked: the form's under way)
+        unkept, lost, offsets, asked = [], [0, 0, 0, 0, 0], [], []
         self.stems = {}
         try:
             for master in masters:
@@ -3333,12 +4050,15 @@ class FeatureCodeDialog(object):
                             outlines = {}
                             break
                         outlines[master] = copies
-                if outlines:
-                    thickened.append(form.name)
+                del asked[:]
+                done = [0, 0, 0, 0, 0]  # contours, nodes, on-curve nodes, nodes moved, nodes found where put
                 for master, plan in usable:
                     layer = glyph.getLayerByName(master, True)
                     if master in outlines:
-                        self.add_stroke_copies(layer, outlines[master], plan.width)
+                        counts = self.add_stroke_copies(layer, outlines[master], plan.width)
+                        done = [a + b for a, b in zip(done, counts)]
+                        if master == package.master:  # (how far each side moved, for the log)
+                            asked.extend(distance for _, _, distance in outlines[master])
                         placed = True
                         continue
                     components = []
@@ -3358,6 +4078,16 @@ class FeatureCodeDialog(object):
                     package.findName(form.name).fgGlyph.unicode = form.code
                 touched.append(glyph)
                 made.append(form.name)
+                if outlines:
+                    # Thickened only where FontLab has every moved node where it was put. An offset under a
+                    # unit (thin strokes at 101%) moves no node far enough to tell: taken as kept.
+                    far = any(distance >= 1.0 for copies in outlines.values() for _, _, distance in copies)
+                    if (done[3] and done[4] == done[3]) or not far:
+                        thickened.append(form.name)
+                        offsets.extend(asked)
+                    else:
+                        unkept.append(form.name)
+                        lost = [a + b for a, b in zip(lost, done)]
         except Exception as exc:  # what was made stays made, and is reported
             error = exc
         self.ak.notify_changed(fontlab, package, u"FreeLab Feature Code", touched)
@@ -3365,20 +4095,28 @@ class FeatureCodeDialog(object):
         if made:
             one = len(made) == 1
             kept = sorted(set(thickened))
-            strokes = (u"Made of outlines, strokes at %d%% of the scaled ones: %s." % (
-                self.stroke_box.value, self.ak.html(u", ".join(kept))) if kept else
+            strokes = (u"Made of outlines, strokes at %d%% of the scaled ones%s: %s." % (
+                self.stroke_box.value, offset_words(offsets), self.ak.glyph_name_links(kept)) if kept else
                 u"Scaling thins strokes: draw over what was scaled.")
             self.log.add(u"Built %s: %s. %s at the end of the font; <i>Edit &gt; Undo</i> takes %s back. %s The forms "
                          u"above take %s now: check their features and write the code." % (
-                             b(counted(len(made), u"glyph")), self.ak.html(u", ".join(made)),
+                             b(counted(len(made), u"glyph")), self.ak.glyph_name_links(made),
                              u"It is" if one else u"They are", u"it" if one else u"them", strokes,
                              u"it" if one else u"them"),
                          "done")
         else:
             self.log.add(u"Built none.")
+        if unkept:  # (said, not assumed: the outlines were read back after they were written)
+            self.log.add(u"FontLab did not keep the thicker strokes of %s: %s. Read back, %s as scaled (%s in %s, "
+                         u"%s on-curve, %s given a new place, %s found there): draw over %s." % (
+                             b(counted(len(unkept), u"glyph")), self.ak.glyph_name_links(sorted(unkept)),
+                             u"its outline was" if len(unkept) == 1 else u"their outlines were",
+                             counted(lost[1], u"node"), counted(lost[0], u"contour"), grouped(lost[2]),
+                             grouped(lost[3]), grouped(lost[4]),
+                             u"it" if len(unkept) == 1 else u"them"), "warning")
         if skipped:
             self.log.add(u"%s had been made meanwhile and %s left as %s." % (
-                b(u", ".join(skipped)), u"was" if len(skipped) == 1 else u"were",
+                self.ak.glyph_name_links(skipped), u"was" if len(skipped) == 1 else u"were",
                 u"it was" if len(skipped) == 1 else u"they were"), "warning")
         for name, why in failed:
             self.log.add(u"%s was not built: %s." % (b(name), self.ak.html(why)), "warning")
@@ -3428,6 +4166,8 @@ class FeatureCodeDialog(object):
     def restore(self):
         """The features, checks, names, and build settings as they first came."""
         QtCore, QtGui = _qt()
+        if self.busy:
+            return
         for row, (lig, choice) in enumerate(zip(self.found, self.first_choices)):
             lig.choice = choice
             self.show_choice(self.ligature_tree.topLevelItem(row), lig)
@@ -3452,7 +4192,7 @@ class FeatureCodeDialog(object):
         self.log.add(u"Choices restored as suggested.")
 
     def double_clicked(self, item, column):
-        """A ligature's glyphs, a letter's forms, or a form's glyphs in a Glyph window."""
+        """A ligature's glyphs, a character's forms, or a form's glyphs in a Glyph window."""
         QtCore, QtGui = _qt()
         tree = item.treeWidget()
         if column == 2 and tree is self.ligature_tree:
@@ -3528,14 +4268,121 @@ class FeatureCodeDialog(object):
                 chosen[base] = self.sets[base]
         return chosen
 
+    def turn_state(self):
+        """(the font's key, {glyph: checked to take turns}), or None before a font is read."""
+        QtCore, QtGui = _qt()
+        if getattr(self, "package", None) is None:
+            return None
+        try:
+            key = self.ak.font_key(self.package)
+            tree = self.alternate_tree
+            return key, dict((u"%s" % tree.topLevelItem(row).data(0, QtCore.Qt.UserRole),
+                              tree.topLevelItem(row).checkState(0) == QtCore.Qt.Checked)
+                             for row in range(tree.topLevelItemCount))
+        except Exception:
+            return None
+
+    def doubled(self, ch):
+        """Whether a character often stands doubled in text (the Stylistic alternates tab's scope asks)."""
+        return doubles_often(ch, self.doubles, self.pairs, self.typed)
+
+    def kind(self, ch):
+        """A character's kind, for taking turns (letters, figures, punctuation), or None (the Stylistic
+        alternates tab asks, so both tabs take the same characters)."""
+        return char_kind(ch)
+
+    def look_back_changed(self, value):
+        """The look back set: its box's word follows its number (1 character, 2 characters), and the
+        code is made again."""
+        try:
+            self.look_back.setSuffix(look_back_suffix(int(value)))
+        except Exception:
+            pass  # a signal's handler must not raise
+        self.make_code()
+
+    def check_turns(self, key):
+        """The characters taking turns checked at once: those often doubled in text, all, or none (one
+        whose alternates have another job in the font's code stays unchecked)."""
+        QtCore, QtGui = _qt()
+        if self.busy or self.package is None:
+            return
+        tree = self.alternate_tree
+        tree.blockSignals(True)
+        try:
+            for row in range(tree.topLevelItemCount):
+                item = tree.topLevelItem(row)
+                base = u"%s" % item.data(0, QtCore.Qt.UserRole)
+                on = base not in self.taken and (key == "all" or (key == "often" and base in self.often))
+                item.setCheckState(0, QtCore.Qt.Checked if on else QtCore.Qt.Unchecked)
+        finally:
+            tree.blockSignals(False)
+        self.make_code()
+
+    def turn_picked(self, item):
+        """A character's row clicked: its forms drawn, where the list was too long to draw every row's."""
+        try:
+            QtCore, QtGui = _qt()
+            if item is None or self.package is None or self.busy:
+                return
+            base = u"%s" % item.data(0, QtCore.Qt.UserRole)
+            if base in self.sets and (u"%s" % item.toolTip(1)) == TURN_PICTURE_TIP:
+                icon = self.picture([base] + self.sets[base])
+                if icon is not None:
+                    item.setIcon(1, QtGui.QIcon(icon))
+                item.setToolTip(1, u"")
+        except Exception:
+            pass  # a signal's handler must not raise
+
+    def show_turns(self, cycling):
+        """How the checked characters take turns, said under the look back, and the check buttons' states."""
+        look_back = self.look_back.value
+        mode = turn_mode(cycling, look_back)
+        if mode == "position":
+            deepest = {}  # (a rule per kind and step of the turn)
+            for base, forms in cycling.items():
+                kind = char_kind(self.chars.get(base)) or LETTERS
+                deepest[kind] = max(deepest.get(kind, 0), len(forms))
+            text = (u"%s checked: more than rules by glyph can serve in a font (%s rules; %s at most). They "
+                    u"take turns %s instead: each takes the form after the form of the glyph of its kind "
+                    u"before it, in %s, and the look back does not apply. Check fewer glyphs (%s) for each to "
+                    u"look back for its own earlier form." % (
+                        self.ak.b(counted(len(cycling), u"glyph")), grouped(turn_rules(cycling, look_back)),
+                        grouped(TURN_RULES_MAX), self.ak.b(u"by position"),
+                        counted(sum(deepest.values()), u"rule"), self.ak.i(TURN_CHECKS[0][1])))
+        elif mode == "letter":
+            text = (u"%s checked, taking turns %s: each looks back among its own kind (letters, figures, or "
+                    u"punctuation marks) for its own earlier form (%s)." % (
+                        self.ak.b(counted(len(cycling), u"glyph")), self.ak.b(u"by glyph"),
+                        counted(turn_rules(cycling, look_back), u"rule")))
+        else:
+            text = u"No glyph is checked to take turns." if self.sets else u""
+        self.turn_label.setText(text)
+        free = [base for base in self.sets if base not in self.taken]
+        often = set(base for base in free if base in self.often)
+        states = {"often": bool(often) and set(cycling) != often, "all": len(cycling) < len(free), "none": bool(cycling)}
+        for (key, _, _), button in zip(TURN_CHECKS, self.turn_buttons):
+            set_enabled(button, states[key])  # (also set while the font is read: update_small_buttons)
+
+    def turn_trouble(self, cycling):
+        """Why the checked glyphs' turns cannot be written, or None (turn_problem, with the room of the
+        glyphs that may stand before them counted in the font's own glyph order)."""
+        look_back = self.look_back.value
+        mode = turn_mode(cycling, look_back)
+        if mode == "none":
+            return None
+        order = dict((name, number) for number, name in enumerate(self.names))
+        return turn_problem(cycling, look_back, context_bytes(cycling, self.letters, self.others, order, mode))
+
     def new_texts(self):
         """{tag: its new code} for liga, dlig, and calt (only those with something of FreeLab's, or
         with rules FreeLab takes over), and for the form features that change."""
         texts = ligature_texts(self.found, self.texts)
         cycling = self.cycling()
         if cycling or (BEGIN % "alternates") in (self.texts.get("calt") or u""):
+            fits = cycling and not self.turn_trouble(cycling)  # (code that cannot compile is not made)
             texts["calt"] = calt_text(self.texts.get("calt"),
-                                      cycle_code(cycling, self.letters, self.look_back.value) if cycling else [])
+                                      cycle_code(cycling, self.letters, self.look_back.value, others=self.others)
+                                      if fits else [])
         texts.update(forms_texts(self.forms, self.texts))
         return texts
 
@@ -3549,6 +4396,11 @@ class FeatureCodeDialog(object):
         texts = self.new_texts()
         prefix = self.new_prefix()
         shown, problems = [], []
+        cycling = self.cycling()
+        problem = self.turn_trouble(cycling)
+        if problem:
+            problems.append(u"calt: %s" % problem)
+        self.show_turns(cycling)
         if prefix is not None:
             shown.append(u"# The prefix (before the features)\n" + prefix)
         for tag in ("liga", "dlig", "calt"):
@@ -3571,15 +4423,15 @@ class FeatureCodeDialog(object):
             any((BEGIN % FORMS) in (text or u"") for text in self.texts.values())
         changes = bool(texts and any(texts[tag] != self.texts.get(tag) for tag in texts)) or prefix is not None
         self.write_button.setText(u"Update the code" if present else u"Write the code")
-        self.ak.enable(self.write_button, changes and not problems)
-        self.ak.enable(self.restore_button, self.restorable())
+        set_enabled(self.write_button, changes and not problems)
+        set_enabled(self.restore_button, self.restorable())
         counts = dict((key, sum(1 for lig in self.found if lig.choice == key)) for key, _ in CHOICES)
         b = self.ak.b
         checked = [feature.tag for feature in self.forms if feature.on and feature.checked()]
         self.status.setText(u"%s: %s (%s standard, %s discretionary, %s off); %s with alternates taking turns.\n"
                             u"Forms: %s checked of %s%s.%s%s" % (
                                 b(self.package.tfn), b(counted(len(self.found), u"ligature")), b(counts["liga"]),
-                                b(counts["dlig"]), b(counts["off"]), b(counted(len(self.cycling()), u"letter")),
+                                b(counts["dlig"]), b(counts["off"]), b(counted(len(cycling), u"glyph")),
                                 b(len(checked)), b(counted(len(self.forms), u"form feature")),
                                 (u" (%s)" % self.ak.html(u", ".join(checked))) if checked else u"",
                                 u" The font has this code already." if not changes and (texts or self.forms) else u"",
@@ -3587,7 +4439,7 @@ class FeatureCodeDialog(object):
                                  self.ak.html(u"; ".join(problems))) if problems else u""))
 
     def write(self):
-        if self.package is None:
+        if self.package is None or self.busy:
             return
         current = self.current_font()
         if current is None or self.ak.font_key(current) != self.ak.font_key(self.package):
@@ -3609,7 +4461,9 @@ class FeatureCodeDialog(object):
                          "warning")
             return
         written, error, skipped = [], None, None
+        self.set_busy(True)  # (the window answers while the top line says what is under way)
         try:
+            self.progress(u"Writing the code", force=True)
             if prefix is not None:
                 setter = getattr(features, "set_prefix", None)
                 try:
@@ -3629,6 +4483,8 @@ class FeatureCodeDialog(object):
                 written[written.index(u"aalt")] = u"aalt (first among the features)"
         except Exception as exc:
             error = exc
+        finally:
+            self.set_busy(False)
         self.ak.notify_changed(self.fontlab, self.package, u"FreeLab Feature Code")
         forms = self.form_state()
         self.run()
@@ -3655,12 +4511,11 @@ class FeatureCodeDialog(object):
 
 
 def main():
-    held = getattr(sys, "_freelab_feature_code", None)
-    if held is not None:
-        try:
-            held.dialog.close()
-        except Exception:
-            pass
+    try:  # this font's window shows it already: brought forward as it is
+        if load_auto_kerning().raise_open("Feature Code"):
+            return
+    except Exception:
+        pass
     try:
         dialog = FeatureCodeDialog()
     except Exception as exc:
@@ -3668,6 +4523,10 @@ def main():
         return
     sys._freelab_feature_code = dialog  # kept: PythonQt deletes a dialog with no Python reference
     dialog.ak.hook_menu_order()
+    try:
+        dialog.ak.take_window("Feature Code", dialog)  # its font's window: the tool shown there gives way
+    except Exception:
+        pass
     dialog.show()
 
 

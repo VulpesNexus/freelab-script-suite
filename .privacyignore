@@ -1,2 +1,5 @@
-# Bytes of glyph outlines in the bundled list font that read like an email address (no one's).
-file:checks/language_font/FreeLabLanguages.ttf :: D@G2U.DI
+# Bytes of glyph outlines in the bundled list fonts that read like an email address (no one's).
+file:checks/language_font/FreeLang-Essential.ttf :: P@pV0.SqDZ
+file:checks/language_font/FreeLang-Essential.ttf :: D@G2U.DI
+file:checks/language_font/FreeLang-Extended-General.ttf :: P@pV0.SqDZ
+file:checks/language_font/FreeLang-Extended-General.ttf :: O@pV0.SqDZ
