@@ -60,15 +60,15 @@ LIST_FAMILY = "FreeLang Essential"  # its family: Noto subsets (OFL) of every ch
 # and four that Qt falls back to for what the first lacks (register_list_font), beside it: (file,
 # family), in the order they are fallen back to. The four are optional, published beside each release
 # rather than kept in the repository: without one, its characters come from the system's fonts. Every
-# family starts with LIST_DISPLAY_NAME and a space, which is how Diacritics leaves them out of its font
-# chooser. Each is the name Qt knows the font by, its Windows family (name ID 1): the fourth font is
-# "FreeLang Extended Mongolian-Tibetan", too long for Windows (31 characters at most), whose shorter
-# name is this (GDI_FAMILIES of checks/train/language_font.py). It has an en dash (U+2013), written as
-# an escape: this file stays ASCII there, as its file name does.
+# family starts with LIST_DISPLAY_NAME and a space or a plus (the last three are FreeLang+), which is
+# how Diacritics leaves them out of its font chooser. Each fits the 31 characters of a Windows family
+# name, past which Qt never lists a font (checks/train/language_font.py, GDI_FAMILY_LIMIT). The fourth
+# has an en dash (U+2013), written as an escape: this file stays ASCII there, as its file name does,
+# which spells the plus "Plus".
 LIST_FONT_FALLBACKS = (("FreeLang-CJK.ttf", u"FreeLang CJK"),
-                       ("FreeLang-Extended-General.ttf", u"FreeLang Extended General"),
-                       ("FreeLang-Extended-Mongolian-Tibetan.ttf", u"FreeLang Mongolian\N{EN DASH}Tibetan"),
-                       ("FreeLang-Extended-Duployan.ttf", u"FreeLang Extended Duployan"))
+                       ("FreeLangPlus-General.ttf", u"FreeLang+ General"),
+                       ("FreeLangPlus-Mongolian-Tibetan.ttf", u"FreeLang+ Mongolian\N{EN DASH}Tibetan"),
+                       ("FreeLangPlus-Duployan.ttf", u"FreeLang+ Duployan"))
 LIST_DISPLAY_NAME = "FreeLang"  # what a tool calls the five together where it names the font to the user
 LIST_SCALE = 1.25  # the languages list's text, this many times the dialog's (easier to read)
 SETS_FILE = "character_sets.json"  # beside this script: checks/train/character_sets.py makes it (sets that are no languages)

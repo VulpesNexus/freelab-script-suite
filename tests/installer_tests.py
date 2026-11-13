@@ -27,10 +27,10 @@ MCP = b"# >>> FreeLab MCP (managed by FreeLab MCP tools/install-fontlab.ps1; -Un
 MINE = b"import fontlab\nprint('mine')\n"
 # Font Check's font, five files; the repository holds the first alone, each release publishes the four
 # others beside it, and the tools work without them, as does the installer.
-FONT_FILES = ["FreeLang-Essential.ttf", "FreeLang-CJK.ttf", "FreeLang-Extended-General.ttf",
-              "FreeLang-Extended-Mongolian-Tibetan.ttf", "FreeLang-Extended-Duployan.ttf"]
+FONT_FILES = ["FreeLang-Essential.ttf", "FreeLang-CJK.ttf", "FreeLangPlus-General.ttf",
+              "FreeLangPlus-Mongolian-Tibetan.ttf", "FreeLangPlus-Duployan.ttf"]
 OPTIONAL_FONTS = FONT_FILES[1:]
-OPTIONAL_FONT = "FreeLang-Extended-Duployan.ttf"  # (the one a test leaves out of its copy)
+OPTIONAL_FONT = "FreeLangPlus-Duployan.ttf"  # (the one a test leaves out of its copy)
 
 
 @unittest.skipIf(POWERSHELL is None, "Windows PowerShell is not available")
@@ -139,7 +139,8 @@ class InstallerTests(unittest.TestCase):
         self.write(MINE)
         folder = self.scripts / "FreeLab"
         earlier = ("FreeLabAutonyms.ttf", "FreeLabAutonyms_LICENSE", "FreeLabLanguages.ttf", "FreeLabLanguages_LICENSE",
-                   "FreeLang.ttf", "FreeLang-Extended.ttf")
+                   "FreeLang.ttf", "FreeLang-Extended.ttf", "FreeLang-Extended-General.ttf",
+                   "FreeLang-Extended-Mongolian-Tibetan.ttf", "FreeLang-Extended-Duployan.ttf")  # (then FreeLang+)
         for name in earlier:
             (folder / name).write_bytes(b"old")
         code, out = self.run_installer()

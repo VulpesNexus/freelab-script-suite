@@ -1,5 +1,5 @@
 """Tests of Font Check's font (checks/language_font), five files that Qt falls back across (FreeLang
-Essential, CJK, Extended General, Extended Mongolian-Tibetan, and Extended Duployan, the last one
+Essential, CJK, and FreeLang+ General, Mongolian-Tibetan, and Duployan, the last four
 optional): together they have every character of checks/font_characters.json (the names, the other
 names, the orthographies' characters, and the character sets': what the lists, tooltips, and pictures
 show), each in one of them (but the characters of a font's own family name, which each font has), but
@@ -39,24 +39,24 @@ PARTS = ("names", "other_names", "orthographies", "sets")
 # Unicode became a character set (40,444 characters): one font cannot hold their glyphs and layout
 # (65,535 glyphs; a GSUB table's lookups within 65,535 bytes), so it was three, and is five, 12.8 MB
 # together as built: Essential 1.7 MB, CJK 3.7 MB (the 11,172 Hangul syllables and the hanja 2.5 MB),
-# Extended General 4.6 MB (cuneiform 0.8 MB, hieroglyphs 0.6 MB, Symbols 2 0.5 MB), Extended
-# Mongolian-Tibetan 0.8 MB (Noto Serif Tibetan 0.6 MB of it), and Extended Duployan 1.6 MB (its
+# FreeLang+ General 5.0 MB (cuneiform 0.8 MB, hieroglyphs 0.6 MB, Symbols 2 0.5 MB), FreeLang+
+# Mongolian-Tibetan 0.8 MB (Noto Serif Tibetan 0.6 MB of it), and FreeLang+ Duployan 1.6 MB (its
 # layout's 9,378 glyphs). Each bound leaves about a fifth of room: a build past one is one whose data
 # or sources grew, and is to be looked at before it ships.
-MAX_SIZES = {u"Essential": 2100 * 1024, u"CJK": 4400 * 1024, u"Extended General": 5600 * 1024,
-             u"Extended Mongolian-Tibetan": 1050 * 1024, u"Extended Duployan": 1900 * 1024}
-LABELS = (u"Essential", u"CJK", u"Extended General", u"Extended Mongolian-Tibetan", u"Extended Duployan")
+MAX_SIZES = {u"Essential": 2100 * 1024, u"CJK": 4400 * 1024, u"General": 5600 * 1024,
+             u"Mongolian-Tibetan": 1050 * 1024, u"Duployan": 1900 * 1024}
+LABELS = (u"Essential", u"CJK", u"General", u"Mongolian-Tibetan", u"Duployan")
 # The tools work without these files, published beside each release rather than kept in the repository:
 # a test of a file is skipped without it.
-OPTIONAL = (u"CJK", u"Extended General", u"Extended Mongolian-Tibetan", u"Extended Duployan")
+OPTIONAL = (u"CJK", u"General", u"Mongolian-Tibetan", u"Duployan")
 GDI_FAMILY_LIMIT = 31  # characters of a family name Windows (GDI) and so Qt can register
 MAX_GLYPHS = 65535  # a TrueType font's glyph indices are 16 bits wide
 MAX_LOOKUP_BYTES = 65535  # and its lookups are reached by 16-bit offsets (checks/train/language_font.py: lookup_bytes)
 # The sources that keep their layout though no language's text draws from them: each has a font of its
 # own (with Noto Serif Tibetan, or alone), the stated exception to the rule of running text.
-OWN_LAYOUT = {u"Noto Sans Mongolian": u"Extended Mongolian-Tibetan", u"Noto Sans Duployan": u"Extended Duployan"}
+OWN_LAYOUT = {u"Noto Sans Mongolian": u"Mongolian-Tibetan", u"Noto Sans Duployan": u"Duployan"}
 # The one source in two fonts: Unicodia Funky's four combining parentheses are in the Essential font,
-# where Noto Sans's letters take them; the rest of it is in the Extended General font.
+# where Noto Sans's letters take them; the rest of it is in the FreeLang+ General font.
 ELSEWHERE = {u"UnicodiaFunky": (u"Essential", u"1AC1-1AC4")}
 # What no source font has (checks/train/language_font.py found no source): hexadecimal code points
 # and ranges, as in checks/font_characters.json. Qt takes such a character from a system font, or shows
@@ -416,13 +416,13 @@ class ListFontTests(unittest.TestCase):
         self.assertEqual(sum(len(codes) for codes in self.cmaps.values()) - copies, len(self.cmap))
         for label in self.present:
             self.assertEqual(len(self.cmaps[label]), self.files[label]["characters"], label)
-        general, mongolian = u"Extended General", u"Extended Mongolian-Tibetan"
+        general, mongolian = u"General", u"Mongolian-Tibetan"
         for low, high, label in ((0x41, 0x42, u"Essential"), (0x410, 0x44F, u"Essential"), (0x391, 0x3A1, u"Essential"),
                                  (0x900, 0x939, u"Essential"), (0x2010, 0x2012, u"Essential"), (0x300, 0x306, u"Essential"),
                                  (0x30, 0x39, u"Essential"), (0x20A0, 0x20BF, u"Essential"), (0x1AC1, 0x1AC4, u"Essential"),
                                  (0xAC00, 0xD7A3, u"CJK"), (0x3041, 0x3096, u"CJK"), (0x4E00, 0x4E0F, u"CJK"),
                                  (0x12000, 0x12010, general), (0x2800, 0x28FF, general), (0x10D40, 0x10D65, general),
-                                 (0x1820, 0x1842, mongolian), (0xF40, 0xF47, mongolian), (0x1BC00, 0x1BC6A, u"Extended Duployan")):
+                                 (0x1820, 0x1842, mongolian), (0xF40, 0xF47, mongolian), (0x1BC00, 0x1BC6A, u"Duployan")):
             found = set(l for l in self.cmaps for code in range(low, high + 1) if code in self.cmaps[l])
             self.assertEqual(found, set([label]) & set(self.present), "U+%04X to U+%04X" % (low, high))
         scripts = self.files[u"Essential"]["scripts"]
@@ -430,7 +430,7 @@ class ListFontTests(unittest.TestCase):
         # (Latin: the letters of each font's own family name)
         self.assertEqual(self.files[u"CJK"]["scripts"], [u"Bopo", u"Hang", u"Hani", u"Hira", u"Kana", u"Latn"])
         self.assertEqual(self.files[mongolian]["scripts"], [u"Latn", u"Mong", u"Tibt"])
-        self.assertEqual(self.files[u"Extended Duployan"]["scripts"], [u"Dupl", u"Latn"])
+        self.assertEqual(self.files[u"Duployan"]["scripts"], [u"Dupl", u"Latn"])
 
     def test_each_font_draws_its_own_family_name(self):
         """A font list draws a family's name in the family: every font has the characters of its own
@@ -440,8 +440,7 @@ class ListFontTests(unittest.TestCase):
         first = [source for source in self.info["fonts"] if source["font"] == u"Essential"][0]
         self.assertEqual((first["family"], first["subset"]), (u"Noto Sans", u"own"))
         for row in self.info["files"]:
-            wanted = set(fc.code_points(row["full_family"]))  # (the longer name: it has the shorter one's characters)
-            self.assertEqual(set(fc.code_points(row["family"])) - wanted, set(), row["font"])
+            wanted = set(fc.code_points(row["family"]))
             if row["font"] in self.present:
                 self.assertEqual(sorted(wanted - self.cmaps[row["font"]]), [], row["font"])
             if row["font"] == u"Essential":
@@ -453,11 +452,12 @@ class ListFontTests(unittest.TestCase):
             self.assertEqual((copy["family"], copy["sha256"], copy["layout"]),
                              (u"Noto Sans", first["sha256"], u"none (character map only)"))
             self.assertEqual(row["name_subset"], [[len(wanted), len(wanted) + 1]], "its characters and .notdef")
-        dash = [code for code in fc.code_points(self.files[u"Extended Mongolian-Tibetan"]["family"]) if code > 0x7E]
+        dash = [code for code in fc.code_points(self.files[u"Mongolian-Tibetan"]["family"]) if code > 0x7E]
         self.assertEqual(dash, [0x2013], "an en dash joins Mongolian and Tibetan in the fourth family's name")
         for row in self.info["files"]:
             self.assertEqual([c for c in row["file"] if ord(c) > 0x7E], [], "a file name is ASCII")
-            self.assertTrue(row["family"].startswith(fc.LIST_DISPLAY_NAME + u" "), "what Diacritics' font chooser leaves out")
+            self.assertIn(row["family"][:len(fc.LIST_DISPLAY_NAME) + 1], (fc.LIST_DISPLAY_NAME + u" ", fc.LIST_DISPLAY_NAME + u"+"),
+                          "what Diacritics' font chooser leaves out")
 
     def test_has_every_required_character(self):
         """Everything checks/font_characters.json asks for, but the characters listed in NOT_SUPPLIED."""
@@ -539,7 +539,7 @@ class ListFontTests(unittest.TestCase):
         self.assertEqual(sorted(family for family, found in places.items() if len(found) > 1), sorted(ELSEWHERE))
         self.assertEqual(self.info["elsewhere"], dict((family, list(found)) for family, found in ELSEWHERE.items()))
         for family, (label, listed) in ELSEWHERE.items():
-            self.assertEqual(sorted(places[family]), sorted([(label, u"elsewhere"), (u"Extended General", u"own")]))
+            self.assertEqual(sorted(places[family]), sorted([(label, u"elsewhere"), (u"General", u"own")]))
             second = [s for s in self.sources if s["family"] == family and s["subset"] == u"elsewhere"][0]
             own = [s for s in self.sources if s["family"] == family and s["subset"] == u"own"][0]
             self.assertEqual(codes_of(second["code_points"]), codes_of(listed), family)
@@ -573,8 +573,8 @@ class ListFontTests(unittest.TestCase):
                     self.assertLessEqual(source["glyphs"], source["count"] + 4, "%s: and the parts a few are made of" % family)
             self.assertEqual(sorted(source["font"] for source in rows),
                              [u"Essential"] if family == u"Andika"
-                             else sorted([u"Extended General", ELSEWHERE[family][0]]) if family in ELSEWHERE
-                             else [u"Extended General"], family)
+                             else sorted([u"General", ELSEWHERE[family][0]]) if family in ELSEWHERE
+                             else [u"General"], family)
         for family in OTHER_SOURCES:
             self.assertEqual([u"U+%04X" % code for code in sorted(codes_of(OTHER_SOURCES[family])) if code not in self.cmap], [])
 
@@ -624,7 +624,7 @@ class ListFontTests(unittest.TestCase):
         to_mark = attachments(self.tables["GPOS"], 6)
         for mark in sorted(codes_of(ANCHORS_CARRIED[u"UnicodiaFunky"][u"marks"])):
             self.assertIn(mark, self.cmaps[u"Essential"])
-            self.assertNotIn(mark, self.cmaps[u"Extended General"], "U+%04X: in one font" % mark)
+            self.assertNotIn(mark, self.cmaps[u"General"], "U+%04X: in one font" % mark)
             bases = set().union(*[found for marks, found in to_base if glyphs[mark] in marks])
             for letter in (0x61, 0x48, 0x25CC, 0x430, 0x3B1, 0x25B):
                 self.assertIn(glyphs[letter], bases, "U+%04X on U+%04X" % (mark, letter))
@@ -648,15 +648,14 @@ class ListFontTests(unittest.TestCase):
             found = names(tables["name"])
             self.assertEqual(found[1], self.files[label]["family"])
             self.assertLessEqual(len(found[1]), GDI_FAMILY_LIMIT, "Windows, and so Qt, registers no longer family")
-            self.assertEqual(found[4], self.files[label]["full_family"], "the full name of a Regular font is its family's")
-            if found[1] != found[4]:  # (a family too long for Windows: the full one is the typographic family)
-                self.assertEqual((found.get(16), found.get(17)), (found[4], u"Regular"), label)
-            else:
-                self.assertNotIn(16, found, label)
-            # (FreeLang and what it holds; the fourth family's en dash is a hyphen in its label)
-            self.assertEqual(found[4].replace(u"\N{EN DASH}", u"-"), fc.LIST_DISPLAY_NAME + u" " + label)
+            self.assertEqual(found[4], found[1], "the full name of a Regular font is its family's")
+            self.assertNotIn(16, found, "no typographic family apart: the family fits Windows")
+            # (FreeLang or FreeLang+ and what it holds; the fourth family's en dash is a hyphen in its label)
+            self.assertIn(found[1].replace(u"\N{EN DASH}", u"-"), [fc.LIST_DISPLAY_NAME + u" " + label,
+                                                                     fc.LIST_DISPLAY_NAME + u"+ " + label])
             self.assertEqual([c for c in found[6] if not u"!" <= c <= u"~"], [], "a PostScript name is ASCII")
-            self.assertEqual(found[6], found[4].replace(u"\N{EN DASH}", u"").replace(u" ", u"") + u"-Regular")
+            self.assertEqual(found[6], found[1].replace(u"\N{EN DASH}", u"").replace(u"+", u"Plus").replace(u" ", u"")
+                             + u"-Regular", "no plus in a PostScript name: a PDF reads it as a subset's tag")
             self.assertEqual(found[2], u"Regular")
             named = found[1] + found[4] + found[6]
             self.assertNotIn(u"Noto", named, "never mistaken for an installed Noto font")
@@ -679,7 +678,7 @@ class ListFontTests(unittest.TestCase):
             self.assertIn(4, formats)
             self.assertEqual(formats, self.files[label]["cmap_formats"])
         for code in (0x12000, 0x13000, 0x17000, 0x1D400, 0x16F00):
-            self.assertIn(code, self.cmaps[u"Extended General"], "U+%04X" % code)
+            self.assertIn(code, self.cmaps[u"General"], "U+%04X" % code)
 
     def test_within_both_limits(self):
         """A font holds 65,535 glyphs, and its lookups must lie within 65,535 bytes of their list: the
@@ -702,7 +701,7 @@ class ListFontTests(unittest.TestCase):
             near = row["glyphs"] >= 0.9 * MAX_GLYPHS or max(row["lookup_bytes"].values()) >= 0.9 * MAX_LOOKUP_BYTES
             self.assertEqual(bool(row["warnings"]), near, "%s: a warning from nine tenths of a limit on" % label)
         self.assertGreater(self.files[u"Essential"]["lookup_bytes_left"], 30000, "room again, without Noto Serif Tibetan")
-        duployan = self.files[u"Extended Duployan"]
+        duployan = self.files[u"Duployan"]
         self.assertGreater(duployan["lookup_bytes"]["GSUB"], 50000, "most of a table's reach, alone")
         self.assertEqual((duployan["sources"], duployan["optional"], duployan["own_layout"]), (2, True, True))
 
@@ -716,9 +715,9 @@ class ListFontTests(unittest.TestCase):
         ranges = dict((label, struct.unpack(">4L", tables["OS/2"][42:58])) for label, tables in self.fonts.items())
         for bit, label in ((0, u"Essential"), (7, u"Essential"), (9, u"Essential"), (10, u"Essential"), (11, u"Essential"),
                            (13, u"Essential"), (15, u"Essential"), (24, u"Essential"), (26, u"Essential"), (56, u"CJK"),
-                           (70, u"Extended Mongolian-Tibetan"), (81, u"Extended Mongolian-Tibetan"),
-                           (71, u"Extended General"), (72, u"Essential"), (73, u"Essential"),
-                           (74, u"Essential"), (80, u"Essential"), (0, u"CJK"), (0, u"Extended General")):
+                           (70, u"Mongolian-Tibetan"), (81, u"Mongolian-Tibetan"),
+                           (71, u"General"), (72, u"Essential"), (73, u"Essential"),
+                           (74, u"Essential"), (80, u"Essential"), (0, u"CJK"), (0, u"General")):
             self.assertTrue(ranges[label][bit // 32] >> (bit % 32) & 1, "Unicode range bit %d (%s)" % (bit, label))
 
     def test_one_line_for_the_five(self):
@@ -771,15 +770,15 @@ class ListFontTests(unittest.TestCase):
             self.assertTrue(self.files[label]["own_layout"], label)
             self.assertGreater(kept[family]["glyphs"], 10 * kept[family]["count"], "%s: the forms its letters join in" % family)
             self.assertGreater(kept[family]["lookup_bytes"]["GSUB"], 5000, family)
-        self.assertEqual(kept[u"Noto Serif Tibetan"]["font"], u"Extended Mongolian-Tibetan")
+        self.assertEqual(kept[u"Noto Serif Tibetan"]["font"], u"Mongolian-Tibetan")
         self.assertEqual(sorted(label for label in LABELS if self.files[label]["own_layout"]), sorted(set(OWN_LAYOUT.values())))
-        self.assertEqual(self.files[u"Extended Mongolian-Tibetan"]["sources"], 3, "Tibetan, Mongolian, and its name's letters")
+        self.assertEqual(self.files[u"Mongolian-Tibetan"]["sources"], 3, "Tibetan, Mongolian, and its name's letters")
 
     def test_duployan_drawn_by_the_optional_font_alone(self):
         """The tools work without the Duployan font's file. With it, Duployan's characters are drawn
         by it; without it, by none of the others (Qt takes a system font, or shows boxes), and every
         other character is drawn as before."""
-        label = u"Extended Duployan"
+        label = u"Duployan"
         self.assertEqual(self.files[label]["file"], fc.LIST_FONT_FALLBACKS[-1][0], "the last one fallen back to")
         duployan = set(code for source in self.sources if source["font"] == label for code in codes_of(source["code_points"]))
         self.assertEqual(len(duployan), 143)
@@ -921,15 +920,13 @@ class FindingTests(unittest.TestCase):
                          [fc.LIST_FONT_FILE] + [name for name, _ in fc.LIST_FONT_FALLBACKS])
         self.assertEqual(len(set(os.path.dirname(path) for path in FakeDatabase.added)), 1, "the five side by side")
         self.assertEqual(FakeFont.inserted, [(fc.LIST_FAMILY, fallbacks)])
-        self.assertEqual(fallbacks, [u"FreeLang CJK", u"FreeLang Extended General",
-                                     u"FreeLang Mongolian\N{EN DASH}Tibetan", u"FreeLang Extended Duployan"])
-        for family in [fc.LIST_FAMILY] + fallbacks:  # (a longer one Qt never lists: GDI_FAMILIES of the build)
+        self.assertEqual(fallbacks, [u"FreeLang CJK", u"FreeLang+ General",
+                                     u"FreeLang+ Mongolian\N{EN DASH}Tibetan", u"FreeLang+ Duployan"])
+        for family in [fc.LIST_FAMILY] + fallbacks:  # (a longer one Qt never lists: GDI_FAMILY_LIMIT of the build)
             self.assertLessEqual(len(family), GDI_FAMILY_LIMIT, family)
-        self.assertEqual([row["full_family"] for row in info()["files"]][3], u"FreeLang Extended Mongolian\N{EN DASH}Tibetan",
-                         "the owner's name for it, kept as its typographic family and full name")
         self.assertEqual([name for name, _ in fc.LIST_FONT_FALLBACKS],
-                         ["FreeLang-CJK.ttf", "FreeLang-Extended-General.ttf", "FreeLang-Extended-Mongolian-Tibetan.ttf",
-                          "FreeLang-Extended-Duployan.ttf"], "file names in ASCII: FontLab's Python 2.7 opens ANSI paths")
+                         ["FreeLang-CJK.ttf", "FreeLangPlus-General.ttf", "FreeLangPlus-Mongolian-Tibetan.ttf",
+                          "FreeLangPlus-Duployan.ttf"], "file names in ASCII: FontLab's Python 2.7 opens ANSI paths")
         FakeDatabase.known = [fc.LIST_FAMILY] + fallbacks
         self.assertEqual(fc.register_list_font(FakeCore, FakeGui), fc.LIST_FAMILY)
         self.assertEqual(len(FakeDatabase.added), 5, "already known to Qt: not added again")
@@ -937,7 +934,7 @@ class FindingTests(unittest.TestCase):
         self.assertEqual(fc.LIST_DISPLAY_NAME, u"FreeLang", "the name a tool shows for the five")
         self.assertEqual(fc.LIST_FAMILY, u"FreeLang Essential")
         for family in [fc.LIST_FAMILY] + fallbacks:  # (Diacritics leaves out of its chooser what starts so)
-            self.assertTrue(family.startswith(fc.LIST_DISPLAY_NAME + u" "), family)
+            self.assertIn(family[:len(fc.LIST_DISPLAY_NAME) + 1], (fc.LIST_DISPLAY_NAME + u" ", fc.LIST_DISPLAY_NAME + u"+"), family)
 
     def with_files(self, names):
         """Font Check finding its font in the test's folder, which holds files of these names (the fakes

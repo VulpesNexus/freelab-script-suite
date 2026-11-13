@@ -1887,8 +1887,8 @@ def reference_rows(default, families, chosen=None, shown=None):
     rows = []
     if default:
         rows += [(u"%s (default)" % (shown or default), default), (None, None)]
-    names = [family for family in families
-             if family != default and not (shown and family.startswith(shown + u" "))]
+    names = [family for family in families  # (FreeLang's families: "FreeLang CJK", "FreeLang+ General", ...)
+             if family != default and not (shown and family[:len(shown) + 1] in (shown + u" ", shown + u"+"))]
     if chosen and chosen != default and chosen not in names:
         names.append(chosen)
     return rows + [(family, family) for family in names]

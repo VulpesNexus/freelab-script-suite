@@ -1,6 +1,6 @@
 """Build Font Check's font, FreeLang, five files in checks/language_font (FreeLang-Essential.ttf,
-FreeLang-CJK.ttf, FreeLang-Extended-General.ttf, FreeLang-Extended-Mongolian-Tibetan.ttf, and
-FreeLang-Extended-Duployan.ttf: the table FONTS, where a sixth would be one more entry): every
+FreeLang-CJK.ttf, FreeLangPlus-General.ttf, FreeLangPlus-Mongolian-Tibetan.ttf, and
+FreeLangPlus-Duployan.ttf: the table FONTS, where a sixth would be one more entry): every
 character its lists, tooltips, and pictures of missing characters show, from Noto fonts and, for the
 characters and scripts no Noto font has, Andika, Unicodia Funky, Kanchenjunga, Kedebideri, Daarage,
 Padauk Book, Shafarik, and BabelStone Pseudographica (all under the SIL Open Font License 1.1),
@@ -29,7 +29,7 @@ LAST_RESORT) are looked in after the earlier ones, so a character an earlier bui
 
     python checks/train/language_font.py [--cache <folder>] [--dry-run] [--fresh] [--repin]
     python checks/train/language_font.py --stage subsets [--seconds 400]   (as many runs as it asks for)
-    python checks/train/language_font.py --stage merge --font "Extended General"   (one font, kept in the work folder)
+    python checks/train/language_font.py --stage merge --font "General"   (one font, kept in the work folder)
     python checks/train/language_font.py --stage merge   (the fonts not merged yet, then the five written)
 
 Python 3 with fontTools and uharfbuzz (pip install uharfbuzz, in a virtual environment): HarfBuzz
@@ -112,26 +112,24 @@ Font = collections.namedtuple("Font", "label family file postscript sources own_
 # LIST_FONT_FALLBACKS of checks/freelab_font_check.py, which the tests compare with it. The font's
 # own copy of its name's characters follows this (NAME_SUBSETS). The label, the file name, and the
 # PostScript name stay ASCII: a PostScript name must be, and FontLab's Python 2.7 opens paths through
-# the ANSI code page.
-MONGOLIAN_TIBETAN = "FreeLang Extended Mongolian\N{EN DASH}Tibetan"
+# the ANSI code page. They spell the families' "+" as "Plus": a "+" in a PostScript name reads as a
+# subset's tag in a PDF.
+MONGOLIAN_TIBETAN = "FreeLang+ Mongolian\N{EN DASH}Tibetan"
 # Windows names a font's family in at most 31 characters (GDI's LOGFONT face name, LF_FACESIZE 32 with
-# its terminator), and Qt 5 registers an application font through GDI under its legacy family name
-# (name ID 1), cut to that length: a longer name matches nothing, and Qt never lists the family (seen
-# in FontLab 7.2 on 2026-11-13, where "FreeLang Extended Mongolian-Tibetan", 35 characters, was absent
-# and Mongolian came from Mongolian Baiti). A family past the limit keeps its full name as the
-# typographic family (name IDs 16 and 17, which DirectWrite and macOS show) and full name (ID 4), and
-# takes the shorter one here as its legacy family, the name Qt and Font Check know it by.
+# its terminator), and Qt 5 registers an application font through GDI under its family name (name ID
+# 1): a longer name matches nothing, and Qt never lists the family. Seen in FontLab 7.2 on 2026-11-13,
+# when the fourth font was "FreeLang Extended Mongolian-Tibetan" (35 characters): it was absent, and
+# Mongolian came from Mongolian Baiti. The fonts past Essential and CJK were renamed "FreeLang+" then,
+# which every name fits in; the build stops on one that would not (gdi_family).
 GDI_FAMILY_LIMIT = 31
-GDI_FAMILIES = {MONGOLIAN_TIBETAN: "FreeLang Mongolian\N{EN DASH}Tibetan"}
 
 
 def gdi_family(family):
-    """The family name Windows and Qt know a font by (name ID 1): its family, or GDI_FAMILIES's shorter one."""
-    name = GDI_FAMILIES.get(family, family)
-    if len(name) > GDI_FAMILY_LIMIT:
-        raise SystemExit("%r: %d characters, past the %d of a Windows family name (GDI_FAMILIES)" % (
-            name, len(name), GDI_FAMILY_LIMIT))
-    return name
+    """A family name, once it is known to fit Windows' (and so Qt's) 31 characters."""
+    if len(family) > GDI_FAMILY_LIMIT:
+        raise SystemExit("%r: %d characters, past the %d of a Windows family name: Qt would never list it" % (
+            family, len(family), GDI_FAMILY_LIMIT))
+    return family
 
 
 # Essential is the one file the repository holds; the other four are optional, published beside each
@@ -140,12 +138,12 @@ FONTS = (
     Font("Essential", "FreeLang Essential", "FreeLang-Essential.ttf", "FreeLangEssential-Regular",
          "recommended", False, False),
     Font("CJK", "FreeLang CJK", "FreeLang-CJK.ttf", "FreeLangCJK-Regular", "cjk", False, True),
-    Font("Extended General", "FreeLang Extended General", "FreeLang-Extended-General.ttf",
-         "FreeLangExtendedGeneral-Regular", "rest", False, True),
-    Font("Extended Mongolian-Tibetan", MONGOLIAN_TIBETAN, "FreeLang-Extended-Mongolian-Tibetan.ttf",
-         "FreeLangExtendedMongolianTibetan-Regular", ("NotoSansMongolian", "NotoSerifTibetan"), True, True),
-    Font("Extended Duployan", "FreeLang Extended Duployan", "FreeLang-Extended-Duployan.ttf",
-         "FreeLangExtendedDuployan-Regular", ("NotoSansDuployan",), True, True),
+    Font("General", "FreeLang+ General", "FreeLangPlus-General.ttf",
+         "FreeLangPlusGeneral-Regular", "rest", False, True),
+    Font("Mongolian-Tibetan", MONGOLIAN_TIBETAN, "FreeLangPlus-Mongolian-Tibetan.ttf",
+         "FreeLangPlusMongolianTibetan-Regular", ("NotoSansMongolian", "NotoSerifTibetan"), True, True),
+    Font("Duployan", "FreeLang+ Duployan", "FreeLangPlus-Duployan.ttf",
+         "FreeLangPlusDuployan-Regular", ("NotoSansDuployan",), True, True),
 )
 NAMES_USED = " ".join(name for font in FONTS for name in (font.family, font.postscript))  # (no source may reserve any of it)
 # The two limits of a font, checked for each before it is merged (check_limits). Its glyph indices are
@@ -165,7 +163,7 @@ WARN_AT = 0.9
 # written with Chinese characters, Hangul, and kana are the CJK font's; the fonts of the others are the
 # Essential font's, with the general punctuation, digits, currency signs, and combining marks that
 # Noto Sans draws, but Tibetan's, which FONTS names for a font of its own; every other source is the
-# Extended General font's. (Bopomofo is not in the table: it is in the CJK font because Noto Sans SC,
+# FreeLang+ General font's. (Bopomofo is not in the table: it is in the CJK font because Noto Sans SC,
 # a source of that font, draws it.)
 RECOMMENDED = ("Arab", "Armn", "Beng", "Cyrl", "Deva", "Ethi", "Geor", "Grek", "Gujr", "Guru", "Hani",
                "Hang", "Hebr", "Hira", "Knda", "Kana", "Khmr", "Laoo", "Latn", "Mlym", "Mymr", "Orya", "Sinh",
@@ -338,7 +336,7 @@ ONE_COLOR = ("NotoZnamennyMusicalNotation",)
 # its source's (the same file, pin, license, and kind of layout: base_family). Unicodia Funky's four
 # combining parentheses (U+1AC1 to U+1AC4, Combining Diacritical Marks Extended) are marks of Latin
 # phonetic text: in the Essential font their anchors are carried onto Noto Sans's letters, dotted
-# circle, and other marks (ANCHORED), which the rest of Unicodia Funky, in the Extended General font,
+# circle, and other marks (ANCHORED), which the rest of Unicodia Funky, in the FreeLang+ General font,
 # has no use for.
 ELSEWHERE = {"UnicodiaFunky": ("Essential", "1AC1-1AC4")}
 PART = "@"
@@ -373,7 +371,7 @@ CMAP_ONLY = ("NotoSansMath", "NotoSansSymbols", "NotoSansSymbols2", "NotoSansMon
 # orthographies parts of checks/font_characters.json, and the data files' texts), since only those are
 # ever set as running text. A source whose characters are a character set's alone (a script's or a
 # block's: shown one at a time, in a list cell, a tooltip, or a picture) keeps its character map alone:
-# build() lists those here. Without the rule the Extended General font cannot be written: a GSUB
+# build() lists those here. Without the rule the FreeLang+ General font cannot be written: a GSUB
 # table's lookups must lie within 65,535 bytes of its list, and those of its sources would need about
 # 62,800 (as counted when the font was one of three). One at a time, a character is drawn the same with or without its font's layout. The
 # exception is a font of FONTS with own_layout: its named sources keep their layout whole (Noto Sans
@@ -1243,8 +1241,6 @@ def set_names(font, copyrights, stamp, family, postscript_name):
             "available with a FAQ at: https://openfontlicense.org",
         14: "https://openfontlicense.org",
     }
-    if gdi_family(family) != family:  # (the full name as the typographic family: GDI_FAMILIES)
-        records[16], records[17] = family, "Regular"
     if any(ord(c) > 0x7E for c in postscript_name):
         raise SystemExit("%r: a PostScript name is ASCII" % postscript_name)
     try:  # (Macintosh records, in Mac Roman, which has the en dash of the fourth family's name: none at
@@ -1586,7 +1582,7 @@ def build(args):
         say("line: ascent %d, descent %d (highest: %s; lowest: %s)" % (
             line[0], line[1], highest[2].get("top"), lowest[2].get("bottom")))
     for name in sorted(os.listdir(OUT_DIR)):  # (a font file of an earlier table, FreeLang-Extended.ttf: not left behind)
-        if name.startswith(FAMILY + "-") and name.endswith(".ttf") and name not in [font.file for font in FONTS]:
+        if name.startswith(FAMILY) and name.endswith(".ttf") and name not in [font.file for font in FONTS]:
             os.remove(os.path.join(OUT_DIR, name))
             say("removed %s, which no entry of FONTS names" % name)
     files, drawn, checked = [], set(), True
@@ -1620,9 +1616,7 @@ def build(args):
                                  file_name, len(merged.getGlyphOrder()), dict(packed),
                                  sum(row["glyphs"] for row in rows), dict(lookups)))
         files.append(collections.OrderedDict((
-            # (family: the name Qt and Font Check know it by, gdi_family; full_family: its own, name ID 4)
-            ("font", label), ("family", gdi_family(family_name)), ("full_family", family_name),
-            ("file", file_name), ("optional", spec.optional),
+            ("font", label), ("family", family_name), ("file", file_name), ("optional", spec.optional),
             ("holds", sources_rule(spec)), ("own_layout", spec.own_layout),
             ("size", os.path.getsize(out)),
             ("glyphs", len(merged.getGlyphOrder())), ("characters", len(codes)), ("sources", len(members)),
@@ -1707,8 +1701,6 @@ def merge_recipe(font, subsets):
         ("recipe", MERGE_RECIPE), ("version", VERSION), ("family", font.family), ("postscript", font.postscript),
         ("subsets", digest.hexdigest()), ("count", len(subsets)),
         ("fontTools", fontTools.version), ("uharfbuzz", harfbuzz_version())))
-    if gdi_family(font.family) != font.family:  # (a font named otherwise for Windows: GDI_FAMILIES)
-        recipe["gdi_family"] = gdi_family(font.family)
     return recipe
 
 
@@ -1752,7 +1744,7 @@ def main():
     parser.add_argument("--seconds", type=float, default=0,
                         help="start no new subset after this long (exit code 3 when some are left)")
     parser.add_argument("--font", metavar="LABEL",
-                        help="with --stage merge: merge this font of FONTS alone (\"Essential\", \"Extended General\"), "
+                        help="with --stage merge: merge this font of FONTS alone (\"Essential\", \"General\"), "
                              "keep it in the work folder, and write nothing")
     parser.add_argument("--fresh", action="store_true",
                         help="make every subset again (with --stage merge: every merge, or the one of --font)")

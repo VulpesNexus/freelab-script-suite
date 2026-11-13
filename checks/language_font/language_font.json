@@ -4,7 +4,6 @@
   {
    "font": "Essential",
    "family": "FreeLang Essential",
-   "full_family": "FreeLang Essential",
    "file": "FreeLang-Essential.ttf",
    "optional": false,
    "holds": "the first font, the fonts of Unicode's Recommended Scripts, and Andika, but those another font names",
@@ -83,7 +82,6 @@
   {
    "font": "CJK",
    "family": "FreeLang CJK",
-   "full_family": "FreeLang CJK",
    "file": "FreeLang-CJK.ttf",
    "optional": true,
    "holds": "the fonts of Chinese, Japanese, and Korean",
@@ -139,16 +137,15 @@
    "anchors_carried": {}
   },
   {
-   "font": "Extended General",
-   "family": "FreeLang Extended General",
-   "full_family": "FreeLang Extended General",
-   "file": "FreeLang-Extended-General.ttf",
+   "font": "General",
+   "family": "FreeLang+ General",
+   "file": "FreeLangPlus-General.ttf",
    "optional": true,
    "holds": "every other source",
    "own_layout": false,
-   "size": 5041244,
-   "glyphs": 23852,
-   "characters": 19609,
+   "size": 5040920,
+   "glyphs": 23849,
+   "characters": 19606,
    "sources": 146,
    "lookup_bytes": {
     "GSUB": 20778,
@@ -157,8 +154,8 @@
    "lookup_bytes_left": 44757,
    "name_subset": [
     [
-     14,
-     15
+     11,
+     12
     ]
    ],
    "warnings": [],
@@ -334,16 +331,15 @@
    "anchors_carried": {}
   },
   {
-   "font": "Extended Mongolian-Tibetan",
-   "family": "FreeLang Mongolian–Tibetan",
-   "full_family": "FreeLang Extended Mongolian–Tibetan",
-   "file": "FreeLang-Extended-Mongolian-Tibetan.ttf",
+   "font": "Mongolian-Tibetan",
+   "family": "FreeLang+ Mongolian–Tibetan",
+   "file": "FreeLangPlus-Mongolian-Tibetan.ttf",
    "optional": true,
    "holds": "named: NotoSansMongolian, NotoSerifTibetan",
    "own_layout": true,
-   "size": 841540,
-   "glyphs": 5045,
-   "characters": 396,
+   "size": 841188,
+   "glyphs": 5043,
+   "characters": 394,
    "sources": 3,
    "lookup_bytes": {
     "GSUB": 41992,
@@ -352,8 +348,8 @@
    "lookup_bytes_left": 23543,
    "name_subset": [
     [
-     19,
-     20
+     17,
+     18
     ]
    ],
    "warnings": [],
@@ -389,16 +385,15 @@
    "anchors_carried": {}
   },
   {
-   "font": "Extended Duployan",
-   "family": "FreeLang Extended Duployan",
-   "full_family": "FreeLang Extended Duployan",
-   "file": "FreeLang-Extended-Duployan.ttf",
+   "font": "Duployan",
+   "family": "FreeLang+ Duployan",
+   "file": "FreeLangPlus-Duployan.ttf",
    "optional": true,
    "holds": "named: NotoSansDuployan",
    "own_layout": true,
-   "size": 1567676,
-   "glyphs": 9541,
-   "characters": 161,
+   "size": 1567408,
+   "glyphs": 9538,
+   "characters": 158,
    "sources": 2,
    "lookup_bytes": {
     "GSUB": 57192,
@@ -407,8 +402,8 @@
    "lookup_bytes_left": 8343,
    "name_subset": [
     [
-     18,
-     19
+     15,
+     16
     ]
    ],
    "warnings": [],
@@ -556,7 +551,7 @@
   },
   {
    "family": "Noto Sans Coptic",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansCoptic/unhinted/ttf/NotoSansCoptic-Regular.ttf",
    "version": "Version 2.004",
@@ -598,7 +593,7 @@
   },
   {
    "family": "Noto Sans Osage",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansOsage/unhinted/ttf/NotoSansOsage-Regular.ttf",
    "version": "Version 2.002",
@@ -682,7 +677,7 @@
   },
   {
    "family": "Noto Sans Adlam",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansAdlam/unhinted/ttf/NotoSansAdlam-Regular.ttf",
    "version": "Version 3.002",
@@ -703,7 +698,7 @@
   },
   {
    "family": "Noto Sans Syriac",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansSyriac/unhinted/ttf/NotoSansSyriac-Regular.ttf",
    "version": "Version 3.000",
@@ -745,7 +740,7 @@
   },
   {
    "family": "Noto Sans NKo",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansNKo/unhinted/ttf/NotoSansNKo-Regular.ttf",
    "version": "Version 2.004",
@@ -766,7 +761,7 @@
   },
   {
    "family": "Noto Sans Samaritan",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansSamaritan/unhinted/ttf/NotoSansSamaritan-Regular.ttf",
    "version": "Version 2.001",
@@ -787,7 +782,7 @@
   },
   {
    "family": "Noto Sans Mandaic",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansMandaic/unhinted/ttf/NotoSansMandaic-Regular.ttf",
    "version": "Version 2.003",
@@ -955,7 +950,7 @@
   },
   {
    "family": "UnicodiaFunky",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://raw.githubusercontent.com/Mercury13/unicodia/df2b09c61e8fdc06f96fc6d6b194427f61bb2e38/Fonts/UnicodiaFunky.ttf",
    "version": "Version 3.1.3",
@@ -1090,7 +1085,7 @@
   },
   {
    "family": "Noto Serif Tibetan",
-   "font": "Extended Mongolian-Tibetan",
+   "font": "Mongolian-Tibetan",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSerifTibetan/unhinted/ttf/NotoSerifTibetan-Regular.ttf",
    "version": "Version 2.103",
@@ -1175,7 +1170,7 @@
   },
   {
    "family": "Noto Sans Cherokee",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansCherokee/unhinted/ttf/NotoSansCherokee-Regular.ttf",
    "version": "Version 2.001",
@@ -1196,7 +1191,7 @@
   },
   {
    "family": "Noto Sans Canadian Aboriginal",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansCanadianAboriginal/unhinted/ttf/NotoSansCanadianAboriginal-Regular.ttf",
    "version": "Version 2.004",
@@ -1217,7 +1212,7 @@
   },
   {
    "family": "Noto Sans Ogham",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansOgham/unhinted/ttf/NotoSansOgham-Regular.ttf",
    "version": "Version 2.001",
@@ -1238,7 +1233,7 @@
   },
   {
    "family": "Noto Sans Runic",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansRunic/unhinted/ttf/NotoSansRunic-Regular.ttf",
    "version": "Version 2.002",
@@ -1259,7 +1254,7 @@
   },
   {
    "family": "Noto Sans Tagalog",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansTagalog/unhinted/ttf/NotoSansTagalog-Regular.ttf",
    "version": "Version 2.002",
@@ -1280,7 +1275,7 @@
   },
   {
    "family": "Noto Sans Hanunoo",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansHanunoo/unhinted/ttf/NotoSansHanunoo-Regular.ttf",
    "version": "Version 2.004",
@@ -1301,7 +1296,7 @@
   },
   {
    "family": "Noto Sans Buhid",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansBuhid/unhinted/ttf/NotoSansBuhid-Regular.ttf",
    "version": "Version 2.001",
@@ -1322,7 +1317,7 @@
   },
   {
    "family": "Noto Sans Tagbanwa",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansTagbanwa/unhinted/ttf/NotoSansTagbanwa-Regular.ttf",
    "version": "Version 2.001",
@@ -1364,7 +1359,7 @@
   },
   {
    "family": "Noto Sans Mongolian",
-   "font": "Extended Mongolian-Tibetan",
+   "font": "Mongolian-Tibetan",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansMongolian/unhinted/ttf/NotoSansMongolian-Regular.ttf",
    "version": "Version 3.103;fontc 1.0.0",
@@ -1385,7 +1380,7 @@
   },
   {
    "family": "Noto Sans Limbu",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansLimbu/unhinted/ttf/NotoSansLimbu-Regular.ttf",
    "version": "Version 2.005",
@@ -1406,7 +1401,7 @@
   },
   {
    "family": "Noto Sans Tai Le",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansTaiLe/unhinted/ttf/NotoSansTaiLe-Regular.ttf",
    "version": "Version 2.002",
@@ -1427,7 +1422,7 @@
   },
   {
    "family": "Noto Sans New Tai Lue",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansNewTaiLue/unhinted/ttf/NotoSansNewTaiLue-Regular.ttf",
    "version": "Version 2.004",
@@ -1448,7 +1443,7 @@
   },
   {
    "family": "Noto Sans Buginese",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansBuginese/unhinted/ttf/NotoSansBuginese-Regular.ttf",
    "version": "Version 2.002",
@@ -1469,7 +1464,7 @@
   },
   {
    "family": "Noto Sans Tai Tham",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansTaiTham/unhinted/ttf/NotoSansTaiTham-Regular.ttf",
    "version": "Version 2.002; ttfautohint (v1.8.4.7-5d5b)",
@@ -1509,7 +1504,7 @@
   },
   {
    "family": "Noto Sans Balinese",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansBalinese/unhinted/ttf/NotoSansBalinese-Regular.ttf",
    "version": "Version 2.006",
@@ -1530,7 +1525,7 @@
   },
   {
    "family": "Noto Sans Sundanese",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansSundanese/unhinted/ttf/NotoSansSundanese-Regular.ttf",
    "version": "Version 2.005",
@@ -1551,7 +1546,7 @@
   },
   {
    "family": "Noto Sans Batak",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansBatak/unhinted/ttf/NotoSansBatak-Regular.ttf",
    "version": "Version 2.005",
@@ -1572,7 +1567,7 @@
   },
   {
    "family": "Noto Sans Lepcha",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansLepcha/unhinted/ttf/NotoSansLepcha-Regular.ttf",
    "version": "Version 2.006",
@@ -1593,7 +1588,7 @@
   },
   {
    "family": "Noto Sans Ol Chiki",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansOlChiki/unhinted/ttf/NotoSansOlChiki-Regular.ttf",
    "version": "Version 2.003",
@@ -1636,7 +1631,7 @@
   },
   {
    "family": "Noto Sans Nandinagari",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansNandinagari/unhinted/ttf/NotoSansNandinagari-Regular.ttf",
    "version": "Version 1.003",
@@ -1657,7 +1652,7 @@
   },
   {
    "family": "Noto Sans Syriac Western",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansSyriacWestern/unhinted/ttf/NotoSansSyriacWestern-Regular.ttf",
    "version": "Version 3.001",
@@ -1695,7 +1690,7 @@
   },
   {
    "family": "Noto Sans Math",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansMath/unhinted/ttf/NotoSansMath-Regular.ttf",
    "version": "Version 3.000",
@@ -1716,7 +1711,7 @@
   },
   {
    "family": "Noto Sans Symbols",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansSymbols/unhinted/ttf/NotoSansSymbols-Regular.ttf",
    "version": "Version 2.003",
@@ -1737,7 +1732,7 @@
   },
   {
    "family": "Noto Sans Symbols 2",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansSymbols2/unhinted/ttf/NotoSansSymbols2-Regular.ttf",
    "version": "Version 2.008",
@@ -1759,7 +1754,7 @@
   },
   {
    "family": "Noto Sans Mono",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansMono/unhinted/ttf/NotoSansMono-Regular.ttf",
    "version": "Version 2.014",
@@ -1778,7 +1773,7 @@
   },
   {
    "family": "Noto Emoji",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/google/fonts/blob/c30b221beb0c1da59d563feb91ec8656a1fa972a/ofl/notoemoji/NotoEmoji[wght].ttf",
    "version": "Version 3.002",
@@ -1797,7 +1792,7 @@
   },
   {
    "family": "Noto Sans Glagolitic",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansGlagolitic/unhinted/ttf/NotoSansGlagolitic-Regular.ttf",
    "version": "Version 2.004",
@@ -1818,7 +1813,7 @@
   },
   {
    "family": "Shafarik",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://raw.githubusercontent.com/Mercury13/unicodia/df2b09c61e8fdc06f96fc6d6b194427f61bb2e38/Fonts/Shafarik-Regular.ttf",
    "version": "Version 1.0 ",
@@ -1839,7 +1834,7 @@
   },
   {
    "family": "Noto Sans Tifinagh",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansTifinagh/unhinted/ttf/NotoSansTifinagh-Regular.ttf",
    "version": "Version 2.006",
@@ -1860,7 +1855,7 @@
   },
   {
    "family": "Noto Sans Avestan",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansAvestan/unhinted/ttf/NotoSansAvestan-Regular.ttf",
    "version": "Version 2.003",
@@ -1904,7 +1899,7 @@
   },
   {
    "family": "Noto Sans Yi",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansYi/unhinted/ttf/NotoSansYi-Regular.ttf",
    "version": "Version 2.002",
@@ -1925,7 +1920,7 @@
   },
   {
    "family": "Noto Sans Lisu",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansLisu/unhinted/ttf/NotoSansLisu-Regular.ttf",
    "version": "Version 2.102",
@@ -1946,7 +1941,7 @@
   },
   {
    "family": "Noto Sans Vai",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansVai/unhinted/ttf/NotoSansVai-Regular.ttf",
    "version": "Version 2.001",
@@ -1967,7 +1962,7 @@
   },
   {
    "family": "Noto Sans Bamum",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansBamum/unhinted/ttf/NotoSansBamum-Regular.ttf",
    "version": "Version 2.002",
@@ -1988,7 +1983,7 @@
   },
   {
    "family": "Noto Sans Syloti Nagri",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansSylotiNagri/unhinted/ttf/NotoSansSylotiNagri-Regular.ttf",
    "version": "Version 2.004",
@@ -2009,7 +2004,7 @@
   },
   {
    "family": "Noto Sans PhagsPa",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansPhagsPa/unhinted/ttf/NotoSansPhagsPa-Regular.ttf",
    "version": "Version 2.004",
@@ -2030,7 +2025,7 @@
   },
   {
    "family": "Noto Sans Saurashtra",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansSaurashtra/unhinted/ttf/NotoSansSaurashtra-Regular.ttf",
    "version": "Version 2.002",
@@ -2051,7 +2046,7 @@
   },
   {
    "family": "Noto Sans Kayah Li",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansKayahLi/unhinted/ttf/NotoSansKayahLi-Regular.ttf",
    "version": "Version 2.002",
@@ -2072,7 +2067,7 @@
   },
   {
    "family": "Noto Sans Rejang",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansRejang/unhinted/ttf/NotoSansRejang-Regular.ttf",
    "version": "Version 2.003",
@@ -2093,7 +2088,7 @@
   },
   {
    "family": "Noto Sans Javanese",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansJavanese/unhinted/ttf/NotoSansJavanese-Regular.ttf",
    "version": "Version 2.005",
@@ -2114,7 +2109,7 @@
   },
   {
    "family": "Noto Sans Cham",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansCham/unhinted/ttf/NotoSansCham-Regular.ttf",
    "version": "Version 2.005",
@@ -2135,7 +2130,7 @@
   },
   {
    "family": "Noto Sans Tai Viet",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansTaiViet/unhinted/ttf/NotoSansTaiViet-Regular.ttf",
    "version": "Version 2.004",
@@ -2156,7 +2151,7 @@
   },
   {
    "family": "Noto Sans Meetei Mayek",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansMeeteiMayek/unhinted/ttf/NotoSansMeeteiMayek-Regular.ttf",
    "version": "Version 2.002",
@@ -2177,7 +2172,7 @@
   },
   {
    "family": "Noto Sans Linear B",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansLinearB/unhinted/ttf/NotoSansLinearB-Regular.ttf",
    "version": "Version 2.002",
@@ -2198,7 +2193,7 @@
   },
   {
    "family": "Noto Sans Lycian",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansLycian/unhinted/ttf/NotoSansLycian-Regular.ttf",
    "version": "Version 2.002",
@@ -2219,7 +2214,7 @@
   },
   {
    "family": "Noto Sans Carian",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansCarian/unhinted/ttf/NotoSansCarian-Regular.ttf",
    "version": "Version 2.002",
@@ -2240,7 +2235,7 @@
   },
   {
    "family": "Noto Sans Old Italic",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansOldItalic/unhinted/ttf/NotoSansOldItalic-Regular.ttf",
    "version": "Version 2.004",
@@ -2261,7 +2256,7 @@
   },
   {
    "family": "Noto Sans Gothic",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansGothic/unhinted/ttf/NotoSansGothic-Regular.ttf",
    "version": "Version 2.001",
@@ -2282,7 +2277,7 @@
   },
   {
    "family": "Noto Sans Old Permic",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansOldPermic/unhinted/ttf/NotoSansOldPermic-Regular.ttf",
    "version": "Version 2.001",
@@ -2303,7 +2298,7 @@
   },
   {
    "family": "Noto Sans Ugaritic",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansUgaritic/unhinted/ttf/NotoSansUgaritic-Regular.ttf",
    "version": "Version 2.001",
@@ -2324,7 +2319,7 @@
   },
   {
    "family": "Noto Sans Old Persian",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansOldPersian/unhinted/ttf/NotoSansOldPersian-Regular.ttf",
    "version": "Version 2.001",
@@ -2345,7 +2340,7 @@
   },
   {
    "family": "Noto Sans Deseret",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansDeseret/unhinted/ttf/NotoSansDeseret-Regular.ttf",
    "version": "Version 2.001",
@@ -2366,7 +2361,7 @@
   },
   {
    "family": "Noto Sans Shavian",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansShavian/unhinted/ttf/NotoSansShavian-Regular.ttf",
    "version": "Version 2.001",
@@ -2387,7 +2382,7 @@
   },
   {
    "family": "Noto Sans Osmanya",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansOsmanya/unhinted/ttf/NotoSansOsmanya-Regular.ttf",
    "version": "Version 2.001",
@@ -2408,7 +2403,7 @@
   },
   {
    "family": "Noto Sans Elbasan",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansElbasan/unhinted/ttf/NotoSansElbasan-Regular.ttf",
    "version": "Version 2.004",
@@ -2429,7 +2424,7 @@
   },
   {
    "family": "Noto Sans Caucasian Albanian",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansCaucasianAlbanian/unhinted/ttf/NotoSansCaucasianAlbanian-Regular.ttf",
    "version": "Version 2.005",
@@ -2450,7 +2445,7 @@
   },
   {
    "family": "Noto Sans Vithkuqi",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansVithkuqi/unhinted/ttf/NotoSansVithkuqi-Regular.ttf",
    "version": "Version 1.001",
@@ -2471,7 +2466,7 @@
   },
   {
    "family": "Noto Serif Todhri",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSerifTodhri/unhinted/ttf/NotoSerifTodhri-Regular.ttf",
    "version": "Version 1.000",
@@ -2492,7 +2487,7 @@
   },
   {
    "family": "Noto Sans Linear A",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansLinearA/unhinted/ttf/NotoSansLinearA-Regular.ttf",
    "version": "Version 2.002",
@@ -2513,7 +2508,7 @@
   },
   {
    "family": "Noto Sans Cypriot",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansCypriot/unhinted/ttf/NotoSansCypriot-Regular.ttf",
    "version": "Version 2.002",
@@ -2534,7 +2529,7 @@
   },
   {
    "family": "Noto Sans Imperial Aramaic",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansImperialAramaic/unhinted/ttf/NotoSansImperialAramaic-Regular.ttf",
    "version": "Version 2.002",
@@ -2555,7 +2550,7 @@
   },
   {
    "family": "Noto Sans Palmyrene",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansPalmyrene/unhinted/ttf/NotoSansPalmyrene-Regular.ttf",
    "version": "Version 2.001",
@@ -2576,7 +2571,7 @@
   },
   {
    "family": "Noto Sans Nabataean",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansNabataean/unhinted/ttf/NotoSansNabataean-Regular.ttf",
    "version": "Version 2.001",
@@ -2597,7 +2592,7 @@
   },
   {
    "family": "Noto Sans Hatran",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansHatran/unhinted/ttf/NotoSansHatran-Regular.ttf",
    "version": "Version 2.001",
@@ -2618,7 +2613,7 @@
   },
   {
    "family": "Noto Sans Phoenician",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansPhoenician/unhinted/ttf/NotoSansPhoenician-Regular.ttf",
    "version": "Version 2.001",
@@ -2639,7 +2634,7 @@
   },
   {
    "family": "Noto Sans Lydian",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansLydian/unhinted/ttf/NotoSansLydian-Regular.ttf",
    "version": "Version 2.002",
@@ -2660,7 +2655,7 @@
   },
   {
    "family": "Noto Sans Meroitic",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansMeroitic/unhinted/ttf/NotoSansMeroitic-Regular.ttf",
    "version": "Version 2.002",
@@ -2682,7 +2677,7 @@
   },
   {
    "family": "Noto Sans Kharoshthi",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansKharoshthi/unhinted/ttf/NotoSansKharoshthi-Regular.ttf",
    "version": "Version 2.004",
@@ -2703,7 +2698,7 @@
   },
   {
    "family": "Noto Sans Old South Arabian",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansOldSouthArabian/unhinted/ttf/NotoSansOldSouthArabian-Regular.ttf",
    "version": "Version 2.001",
@@ -2724,7 +2719,7 @@
   },
   {
    "family": "Noto Sans Old North Arabian",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansOldNorthArabian/unhinted/ttf/NotoSansOldNorthArabian-Regular.ttf",
    "version": "Version 2.001",
@@ -2745,7 +2740,7 @@
   },
   {
    "family": "Noto Sans Manichaean",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansManichaean/unhinted/ttf/NotoSansManichaean-Regular.ttf",
    "version": "Version 2.005",
@@ -2766,7 +2761,7 @@
   },
   {
    "family": "Noto Sans Inscriptional Parthian",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansInscriptionalParthian/unhinted/ttf/NotoSansInscriptionalParthian-Regular.ttf",
    "version": "Version 2.004",
@@ -2787,7 +2782,7 @@
   },
   {
    "family": "Noto Sans Inscriptional Pahlavi",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansInscriptionalPahlavi/unhinted/ttf/NotoSansInscriptionalPahlavi-Regular.ttf",
    "version": "Version 2.004",
@@ -2808,7 +2803,7 @@
   },
   {
    "family": "Noto Sans Psalter Pahlavi",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansPsalterPahlavi/unhinted/ttf/NotoSansPsalterPahlavi-Regular.ttf",
    "version": "Version 2.003",
@@ -2829,7 +2824,7 @@
   },
   {
    "family": "Noto Sans Old Turkic",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansOldTurkic/unhinted/ttf/NotoSansOldTurkic-Regular.ttf",
    "version": "Version 2.004",
@@ -2850,7 +2845,7 @@
   },
   {
    "family": "Noto Sans Old Hungarian",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansOldHungarian/unhinted/ttf/NotoSansOldHungarian-Regular.ttf",
    "version": "Version 2.005",
@@ -2871,7 +2866,7 @@
   },
   {
    "family": "Noto Sans Hanifi Rohingya",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansHanifiRohingya/unhinted/ttf/NotoSansHanifiRohingya-Regular.ttf",
    "version": "Version 2.102",
@@ -2892,7 +2887,7 @@
   },
   {
    "family": "Noto Serif Yezidi",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSerifYezidi/unhinted/ttf/NotoSerifYezidi-Regular.ttf",
    "version": "Version 1.001",
@@ -2913,7 +2908,7 @@
   },
   {
    "family": "Noto Sans Old Sogdian",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansOldSogdian/unhinted/ttf/NotoSansOldSogdian-Regular.ttf",
    "version": "Version 2.003",
@@ -2934,7 +2929,7 @@
   },
   {
    "family": "Noto Sans Sogdian",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansSogdian/unhinted/ttf/NotoSansSogdian-Regular.ttf",
    "version": "Version 2.002",
@@ -2955,7 +2950,7 @@
   },
   {
    "family": "Noto Serif Old Uyghur",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSerifOldUyghur/unhinted/ttf/NotoSerifOldUyghur-Regular.ttf",
    "version": "Version 1.005",
@@ -2976,7 +2971,7 @@
   },
   {
    "family": "Noto Sans Chorasmian",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansChorasmian/unhinted/ttf/NotoSansChorasmian-Regular.ttf",
    "version": "Version 1.004",
@@ -2997,7 +2992,7 @@
   },
   {
    "family": "Noto Sans Elymaic",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansElymaic/unhinted/ttf/NotoSansElymaic-Regular.ttf",
    "version": "Version 1.002",
@@ -3018,7 +3013,7 @@
   },
   {
    "family": "Noto Sans Brahmi",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansBrahmi/unhinted/ttf/NotoSansBrahmi-Regular.ttf",
    "version": "Version 2.004",
@@ -3039,7 +3034,7 @@
   },
   {
    "family": "Noto Sans Kaithi",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansKaithi/unhinted/ttf/NotoSansKaithi-Regular.ttf",
    "version": "Version 2.006",
@@ -3060,7 +3055,7 @@
   },
   {
    "family": "Noto Sans Sora Sompeng",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansSoraSompeng/unhinted/ttf/NotoSansSoraSompeng-Regular.ttf",
    "version": "Version 2.101",
@@ -3081,7 +3076,7 @@
   },
   {
    "family": "Noto Sans Chakma",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansChakma/unhinted/ttf/NotoSansChakma-Regular.ttf",
    "version": "Version 2.003",
@@ -3102,7 +3097,7 @@
   },
   {
    "family": "Noto Sans Mahajani",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansMahajani/unhinted/ttf/NotoSansMahajani-Regular.ttf",
    "version": "Version 2.003",
@@ -3123,7 +3118,7 @@
   },
   {
    "family": "Noto Sans Sharada",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansSharada/unhinted/ttf/NotoSansSharada-Regular.ttf",
    "version": "Version 2.006",
@@ -3144,7 +3139,7 @@
   },
   {
    "family": "Noto Sans Khojki",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansKhojki/unhinted/ttf/NotoSansKhojki-Regular.ttf",
    "version": "Version 2.005",
@@ -3165,7 +3160,7 @@
   },
   {
    "family": "Noto Serif Khojki",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSerifKhojki/unhinted/ttf/NotoSerifKhojki-Regular.ttf",
    "version": "Version 2.005",
@@ -3186,7 +3181,7 @@
   },
   {
    "family": "Noto Sans Multani",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansMultani/unhinted/ttf/NotoSansMultani-Regular.ttf",
    "version": "Version 2.002",
@@ -3207,7 +3202,7 @@
   },
   {
    "family": "Noto Sans Khudawadi",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansKhudawadi/unhinted/ttf/NotoSansKhudawadi-Regular.ttf",
    "version": "Version 2.004",
@@ -3228,7 +3223,7 @@
   },
   {
    "family": "Noto Sans Grantha",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansGrantha/unhinted/ttf/NotoSansGrantha-Regular.ttf",
    "version": "Version 2.005",
@@ -3249,7 +3244,7 @@
   },
   {
    "family": "Daarage",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://raw.githubusercontent.com/Mercury13/unicodia/df2b09c61e8fdc06f96fc6d6b194427f61bb2e38/Fonts/UnicodiaDaarage.otf",
    "version": "Version 1.000",
@@ -3270,7 +3265,7 @@
   },
   {
    "family": "Noto Sans Newa",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansNewa/unhinted/ttf/NotoSansNewa-Regular.ttf",
    "version": "Version 2.007",
@@ -3291,7 +3286,7 @@
   },
   {
    "family": "Noto Sans Tirhuta",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansTirhuta/unhinted/ttf/NotoSansTirhuta-Regular.ttf",
    "version": "Version 2.003",
@@ -3312,7 +3307,7 @@
   },
   {
    "family": "Noto Sans Siddham",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansSiddham/unhinted/ttf/NotoSansSiddham-Regular.ttf",
    "version": "Version 2.005",
@@ -3333,7 +3328,7 @@
   },
   {
    "family": "Noto Sans Modi",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansModi/unhinted/ttf/NotoSansModi-Regular.ttf",
    "version": "Version 2.004",
@@ -3354,7 +3349,7 @@
   },
   {
    "family": "Noto Sans Takri",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansTakri/unhinted/ttf/NotoSansTakri-Regular.ttf",
    "version": "Version 2.005",
@@ -3375,7 +3370,7 @@
   },
   {
    "family": "Padauk Book",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/silnrsi/font-padauk/releases/download/v6.000/PadaukBook-6.000.zip#PadaukBook-6.000/PadaukBook-Regular.ttf",
    "version": "Version 6.000",
@@ -3396,7 +3391,7 @@
   },
   {
    "family": "Noto Serif Ahom",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSerifAhom/unhinted/ttf/NotoSerifAhom-Regular.ttf",
    "version": "Version 2.007",
@@ -3417,7 +3412,7 @@
   },
   {
    "family": "Noto Serif Dogra",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSerifDogra/unhinted/ttf/NotoSerifDogra-Regular.ttf",
    "version": "Version 1.007",
@@ -3438,7 +3433,7 @@
   },
   {
    "family": "Noto Sans Warang Citi",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansWarangCiti/unhinted/ttf/NotoSansWarangCiti-Regular.ttf",
    "version": "Version 3.002",
@@ -3459,7 +3454,7 @@
   },
   {
    "family": "Noto Serif Dives Akuru",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/dives-akuru/releases/download/NotoSerifDivesAkuru-v1.001/NotoSerifDivesAkuru-v1.001.zip#NotoSerifDivesAkuru/unhinted/ttf/NotoSerifDivesAkuru-Regular.ttf",
    "version": "Version 1.001",
@@ -3480,7 +3475,7 @@
   },
   {
    "family": "Noto Sans Zanabazar Square",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansZanabazarSquare/unhinted/ttf/NotoSansZanabazarSquare-Regular.ttf",
    "version": "Version 2.006",
@@ -3501,7 +3496,7 @@
   },
   {
    "family": "Noto Sans Soyombo",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansSoyombo/unhinted/ttf/NotoSansSoyombo-Regular.ttf",
    "version": "Version 2.001",
@@ -3522,7 +3517,7 @@
   },
   {
    "family": "Noto Sans Pau Cin Hau",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansPauCinHau/unhinted/ttf/NotoSansPauCinHau-Regular.ttf",
    "version": "Version 2.002",
@@ -3543,7 +3538,7 @@
   },
   {
    "family": "Noto Sans Sunuwar",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansSunuwar/unhinted/ttf/NotoSansSunuwar-Regular.ttf",
    "version": "Version 1.000",
@@ -3564,7 +3559,7 @@
   },
   {
    "family": "Noto Sans Bhaiksuki",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansBhaiksuki/unhinted/ttf/NotoSansBhaiksuki-Regular.ttf",
    "version": "Version 2.002",
@@ -3585,7 +3580,7 @@
   },
   {
    "family": "Noto Sans Marchen",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansMarchen/unhinted/ttf/NotoSansMarchen-Regular.ttf",
    "version": "Version 2.004",
@@ -3606,7 +3601,7 @@
   },
   {
    "family": "Noto Sans Masaram Gondi",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansMasaramGondi/unhinted/ttf/NotoSansMasaramGondi-Regular.ttf",
    "version": "Version 1.005",
@@ -3627,7 +3622,7 @@
   },
   {
    "family": "Noto Sans Gunjala Gondi",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansGunjalaGondi/unhinted/ttf/NotoSansGunjalaGondi-Regular.ttf",
    "version": "Version 1.004",
@@ -3648,7 +3643,7 @@
   },
   {
    "family": "Noto Serif Makasar",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSerifMakasar/unhinted/ttf/NotoSerifMakasar-Regular.ttf",
    "version": "Version 1.001",
@@ -3669,7 +3664,7 @@
   },
   {
    "family": "Noto Sans Kawi",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansKawi/unhinted/ttf/NotoSansKawi-Regular.ttf",
    "version": "Version 1.000",
@@ -3711,7 +3706,7 @@
   },
   {
    "family": "Noto Sans Cuneiform",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansCuneiform/unhinted/ttf/NotoSansCuneiform-Regular.ttf",
    "version": "Version 2.001",
@@ -3732,7 +3727,7 @@
   },
   {
    "family": "Noto Sans Cypro Minoan",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansCyproMinoan/unhinted/ttf/NotoSansCyproMinoan-Regular.ttf",
    "version": "Version 1.503",
@@ -3753,7 +3748,7 @@
   },
   {
    "family": "Noto Sans Egyptian Hieroglyphs",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansEgyptianHieroglyphs/unhinted/ttf/NotoSansEgyptianHieroglyphs-Regular.ttf",
    "version": "Version 2.002",
@@ -3774,7 +3769,7 @@
   },
   {
    "family": "Noto Sans Anatolian Hieroglyphs",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansAnatolianHieroglyphs/unhinted/ttf/NotoSansAnatolianHieroglyphs-Regular.ttf",
    "version": "Version 2.001",
@@ -3795,7 +3790,7 @@
   },
   {
    "family": "Noto Sans Mro",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansMro/unhinted/ttf/NotoSansMro-Regular.ttf",
    "version": "Version 2.001",
@@ -3816,7 +3811,7 @@
   },
   {
    "family": "Noto Sans Tangsa",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansTangsa/unhinted/ttf/NotoSansTangsa-Regular.ttf",
    "version": "Version 1.506",
@@ -3837,7 +3832,7 @@
   },
   {
    "family": "Noto Sans Bassa Vah",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansBassaVah/unhinted/ttf/NotoSansBassaVah-Regular.ttf",
    "version": "Version 2.002",
@@ -3858,7 +3853,7 @@
   },
   {
    "family": "Noto Sans Pahawh Hmong",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansPahawhHmong/unhinted/ttf/NotoSansPahawhHmong-Regular.ttf",
    "version": "Version 2.001",
@@ -3879,7 +3874,7 @@
   },
   {
    "family": "Kanchenjunga",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/silnrsi/font-kanchenjunga/releases/download/v2.001/Kanchenjunga-2.001.zip#Kanchenjunga-2.001/Kanchenjunga-Regular.ttf",
    "version": "Version 2.001",
@@ -3900,7 +3895,7 @@
   },
   {
    "family": "Noto Sans Medefaidrin",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansMedefaidrin/unhinted/ttf/NotoSansMedefaidrin-Regular.ttf",
    "version": "Version 1.002",
@@ -3921,7 +3916,7 @@
   },
   {
    "family": "Kedebideri",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/silnrsi/font-kedebideri/releases/download/v3.001/Kedebideri-3.001.zip#Kedebideri-3.001/Kedebideri-Regular.ttf",
    "version": "Version 3.001",
@@ -3942,7 +3937,7 @@
   },
   {
    "family": "Noto Sans Miao",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansMiao/unhinted/ttf/NotoSansMiao-Regular.ttf",
    "version": "Version 2.004",
@@ -3963,7 +3958,7 @@
   },
   {
    "family": "Noto Serif Tangut",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSerifTangut/unhinted/ttf/NotoSerifTangut-Regular.ttf",
    "version": "Version 2.170",
@@ -3984,7 +3979,7 @@
   },
   {
    "family": "Noto Sans Duployan",
-   "font": "Extended Duployan",
+   "font": "Duployan",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansDuployan/unhinted/ttf/NotoSansDuployan-Regular.ttf",
    "version": "Version 3.002",
@@ -4005,7 +4000,7 @@
   },
   {
    "family": "Noto Znamenny Musical Notation",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoZnamennyMusicalNotation/unhinted/ttf/NotoZnamennyMusicalNotation-Regular.ttf",
    "version": "Version 1.003",
@@ -4024,7 +4019,7 @@
   },
   {
    "family": "Noto Music",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoMusic/unhinted/ttf/NotoMusic-Regular.ttf",
    "version": "Version 2.004;fontc 1.0.0",
@@ -4045,7 +4040,7 @@
   },
   {
    "family": "Noto Serif NP Hmong",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSerifNPHmong/unhinted/ttf/NotoSerifNPHmong-Regular.ttf",
    "version": "Version 1.001",
@@ -4066,7 +4061,7 @@
   },
   {
    "family": "Noto Serif Toto",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSerifToto/unhinted/ttf/NotoSerifToto-Regular.ttf",
    "version": "Version 2.003",
@@ -4087,7 +4082,7 @@
   },
   {
    "family": "Noto Sans Wancho",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansWancho/unhinted/ttf/NotoSansWancho-Regular.ttf",
    "version": "Version 2.001",
@@ -4108,7 +4103,7 @@
   },
   {
    "family": "Noto Sans Nag Mundari",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansNagMundari/unhinted/ttf/NotoSansNagMundari-Regular.ttf",
    "version": "Version 1.001",
@@ -4129,7 +4124,7 @@
   },
   {
    "family": "Noto Sans Mende Kikakui",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansMendeKikakui/unhinted/ttf/NotoSansMendeKikakui-Regular.ttf",
    "version": "Version 2.003",
@@ -4150,7 +4145,7 @@
   },
   {
    "family": "Noto Sans Indic Siyaq Numbers",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSansIndicSiyaqNumbers/unhinted/ttf/NotoSansIndicSiyaqNumbers-Regular.ttf",
    "version": "Version 2.002",
@@ -4169,7 +4164,7 @@
   },
   {
    "family": "Noto Serif Ottoman Siyaq",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSerifOttomanSiyaq/unhinted/ttf/NotoSerifOttomanSiyaq-Regular.ttf",
    "version": "Version 1.006",
@@ -4188,7 +4183,7 @@
   },
   {
    "family": "BabelStone Pseudographica",
-   "font": "Extended General",
+   "font": "General",
    "subset": "own",
    "file": "https://raw.githubusercontent.com/Mercury13/unicodia/df2b09c61e8fdc06f96fc6d6b194427f61bb2e38/Fonts/BabelStonePseudographica.ttf",
    "version": "Version 16.0.0",
@@ -4228,7 +4223,7 @@
   },
   {
    "family": "Noto Sans",
-   "font": "Extended General",
+   "font": "General",
    "subset": "name",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSans/unhinted/ttf/NotoSans-Regular.ttf",
    "version": "Version 2.015",
@@ -4238,18 +4233,18 @@
    "scripts": [
     "Latn"
    ],
-   "count": 14,
-   "glyphs": 15,
+   "count": 11,
+   "glyphs": 12,
    "lookup_bytes": {
     "GSUB": 0,
     "GPOS": 0
    },
-   "bytes": 3060,
-   "code_points": "0020 0045-0047 004C 0061 0064-0065 0067 006C 006E 0072 0074 0078"
+   "bytes": 2800,
+   "code_points": "0020 002B 0046-0047 004C 0061 0065 0067 006C 006E 0072"
   },
   {
    "family": "Noto Sans",
-   "font": "Extended Mongolian-Tibetan",
+   "font": "Mongolian-Tibetan",
    "subset": "name",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSans/unhinted/ttf/NotoSans-Regular.ttf",
    "version": "Version 2.015",
@@ -4259,18 +4254,18 @@
    "scripts": [
     "Latn"
    ],
-   "count": 19,
-   "glyphs": 20,
+   "count": 17,
+   "glyphs": 18,
    "lookup_bytes": {
     "GSUB": 0,
     "GPOS": 0
    },
-   "bytes": 3396,
-   "code_points": "0020 0045-0046 004C-004D 0054 0061-0062 0064-0065 0067 0069 006C 006E-006F 0072 0074 0078 2013"
+   "bytes": 3224,
+   "code_points": "0020 002B 0046 004C-004D 0054 0061-0062 0065 0067 0069 006C 006E-006F 0072 0074 2013"
   },
   {
    "family": "Noto Sans",
-   "font": "Extended Duployan",
+   "font": "Duployan",
    "subset": "name",
    "file": "https://github.com/notofonts/notofonts.github.io/blob/4cf78353cd1668040ba8efa13029cd910fcdf9e2/fonts/NotoSans/unhinted/ttf/NotoSans-Regular.ttf",
    "version": "Version 2.015",
@@ -4280,14 +4275,14 @@
    "scripts": [
     "Latn"
    ],
-   "count": 18,
-   "glyphs": 19,
+   "count": 15,
+   "glyphs": 16,
    "lookup_bytes": {
     "GSUB": 0,
     "GPOS": 0
    },
-   "bytes": 3400,
-   "code_points": "0020 0044-0046 004C 0061 0064-0065 0067 006C 006E-0070 0072 0074-0075 0078-0079"
+   "bytes": 3164,
+   "code_points": "0020 002B 0044 0046 004C 0061 0065 0067 006C 006E-0070 0072 0075 0079"
   }
  ]
 }

@@ -11,8 +11,8 @@ import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FOLDER = os.path.join(ROOT, "checks", "language_font")
-NAMES = ("FreeLang-CJK.ttf", "FreeLang-Extended-General.ttf", "FreeLang-Extended-Mongolian-Tibetan.ttf",
-         "FreeLang-Extended-Duployan.ttf", "FreeLang_LICENSE")
+NAMES = ("FreeLang-CJK.ttf", "FreeLangPlus-General.ttf", "FreeLangPlus-Mongolian-Tibetan.ttf",
+         "FreeLangPlus-Duployan.ttf", "FreeLang_LICENSE")
 OUT = os.path.join(ROOT, "dist", "FreeLang-Extras.zip")
 STAMP = (2026, 1, 1, 0, 0, 0)  # (every entry dated alike: the archive depends on the files alone)
 

@@ -64,9 +64,9 @@ $files = @(
     # beside it (FreeLang-Extras.zip, unpacked into checks\language_font). Font Check works without
     # them (their scripts are then left to the system's fonts), so a copy without them still installs.
     @{ From = 'checks\language_font\FreeLang-CJK.ttf'; Name = 'FreeLang-CJK.ttf'; Optional = $true },
-    @{ From = 'checks\language_font\FreeLang-Extended-General.ttf'; Name = 'FreeLang-Extended-General.ttf'; Optional = $true },
-    @{ From = 'checks\language_font\FreeLang-Extended-Mongolian-Tibetan.ttf'; Name = 'FreeLang-Extended-Mongolian-Tibetan.ttf'; Optional = $true },
-    @{ From = 'checks\language_font\FreeLang-Extended-Duployan.ttf'; Name = 'FreeLang-Extended-Duployan.ttf'; Optional = $true },
+    @{ From = 'checks\language_font\FreeLangPlus-General.ttf'; Name = 'FreeLangPlus-General.ttf'; Optional = $true },
+    @{ From = 'checks\language_font\FreeLangPlus-Mongolian-Tibetan.ttf'; Name = 'FreeLangPlus-Mongolian-Tibetan.ttf'; Optional = $true },
+    @{ From = 'checks\language_font\FreeLangPlus-Duployan.ttf'; Name = 'FreeLangPlus-Duployan.ttf'; Optional = $true },
     @{ From = 'checks\language_font\FreeLang_LICENSE'; Name = 'FreeLang_LICENSE' },
     @{ From = 'spacing\freelab_auto_spacing.py'; Name = 'freelab_auto_spacing.py' },
     @{ From = 'diacritics\freelab_diacritics.py'; Name = 'freelab_diacritics.py' },
@@ -95,7 +95,9 @@ $retired = @('freelab_accents.py',  # Accented Glyphs, now Diacritics
     'FreeLabAutonyms.ttf', 'FreeLabAutonyms_LICENSE',  # Font Check's first font
     'FreeLabLanguages.ttf', 'FreeLabLanguages_LICENSE',  # its second name
     'FreeLang.ttf',  # one file before it became three (FreeLang-Essential.ttf, -CJK, -Extended)
-    'FreeLang-Extended.ttf')  # the third of three, before they became five (-Extended-General, and two more)
+    'FreeLang-Extended.ttf',  # the third of three, before they became five (-Extended-General, and two more)
+    'FreeLang-Extended-General.ttf', 'FreeLang-Extended-Mongolian-Tibetan.ttf',  # the last three's names
+    'FreeLang-Extended-Duployan.ttf')  # before they became FreeLang+ (FreeLangPlus-General.ttf, and two more)
 # The files FreeLab put in the Scripts folder itself before 0.3 (its own submenu since): only these are
 # removed from there. The root's other files are the user's or another tool's, and some of FreeLab's
 # names (character_sets.json, language_families.json) are generic enough to be someone else's.

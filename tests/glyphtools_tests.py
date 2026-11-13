@@ -1911,6 +1911,10 @@ class ReferenceFontTests(unittest.TestCase):
         self.assertEqual(ac.reference_rows(None, [u"Arial"]), [(u"Arial", u"Arial")], "no bundled font: as before")
         self.assertEqual(ac.reference_rows(u"Bundled Sans", [u"Arial"], u"Gone Sans")[-1], (u"Gone Sans", u"Gone Sans"),
                          "a pick saved before is still listed")
+        rows = ac.reference_rows(u"FreeLang Essential", [u"Arial", u"FreeLang CJK", u"FreeLang+ General",
+                                                         u"FreeLang+ Duployan", u"FreeLanguage Sans"], shown=u"FreeLang")
+        self.assertEqual([family for _, family in rows], [u"FreeLang Essential", None, u"Arial", u"FreeLanguage Sans"],
+                         "FreeLang's other families, with a space or a plus after its name, are not choices")
 
     def dialog(self, settings, default=u"Bundled Sans"):
         dialog = ac.AccentsDialog.__new__(ac.AccentsDialog)
