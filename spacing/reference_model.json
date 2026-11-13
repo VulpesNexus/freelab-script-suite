@@ -1,0 +1,105 @@
+{
+ "families": 398,
+ "format": 1,
+ "references": {
+  "0": {
+   "by": "height",
+   "height_of": "H",
+   "left": 0.063,
+   "right": 0.0614,
+   "spread": 0.987
+  },
+  "H": {
+   "by": "height",
+   "height_of": "H",
+   "left": 0.0793,
+   "right": 0.0756,
+   "spread": 1.785
+  },
+  "O": {
+   "by": "height",
+   "height_of": "H",
+   "left": 0.0648,
+   "right": 0.0642,
+   "spread": 1.088
+  },
+  "n": {
+   "by": "height",
+   "height_of": "x",
+   "left": 0.0918,
+   "right": 0.0864,
+   "spread": 1.972
+  },
+  "o": {
+   "by": "height",
+   "height_of": "x",
+   "left": 0.0801,
+   "right": 0.0794,
+   "spread": 1.082
+  },
+  "\u0548": {
+   "by": "height",
+   "families": 3,
+   "height_of": "\u0548",
+   "left": 0.1243,
+   "right": 0.0915,
+   "spread": null
+  },
+  "\u0555": {
+   "by": "height",
+   "families": 3,
+   "height_of": "\u0548",
+   "left": 0.0773,
+   "right": 0.0773,
+   "spread": null
+  },
+  "\u0578": {
+   "by": "height",
+   "families": 3,
+   "height_of": "\u0578",
+   "left": 0.1235,
+   "right": 0.1157,
+   "spread": null
+  },
+  "\u0585": {
+   "by": "height",
+   "families": 3,
+   "height_of": "\u0578",
+   "left": 0.1116,
+   "right": 0.1135,
+   "spread": null
+  },
+  "\u10d8": {
+   "by": "height",
+   "families": 3,
+   "height_of": "\u10d8",
+   "left": 0.1004,
+   "right": 0.1004,
+   "spread": null
+  },
+  "\u10dd": {
+   "by": "height",
+   "families": 3,
+   "height_of": "\u10d8",
+   "left": 0.1004,
+   "right": 0.1004,
+   "spread": null
+  },
+  "\u1c98": {
+   "by": "height",
+   "families": 3,
+   "height_of": "\u1c98",
+   "left": 0.0912,
+   "right": 0.0912,
+   "spread": null
+  },
+  "\u1c9d": {
+   "by": "height",
+   "families": 3,
+   "height_of": "\u1c98",
+   "left": 0.0912,
+   "right": 0.0912,
+   "spread": null
+  }
+ }
+}

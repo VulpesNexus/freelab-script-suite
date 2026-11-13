@@ -1,17 +1,19 @@
-# Install FreeLab's FontLab 7 tools (dark mode) for the current user, or remove them.
+# Install FreeLab's FontLab 7 tools (dark mode, auto kerning) for the current user, or remove them.
 #
-#   install-fontlab.ps1             copy the dark-mode scripts into FontLab 7's
+#   install-fontlab.ps1             copy the dark-mode and auto kerning scripts into FontLab 7's
 #                                   Scripts\FreeLab folder (a FreeLab submenu of the
 #                                   Scripts menu), and add the FreeLab tools block to
 #                                   FontLab's startupScript.py
 #   install-fontlab.ps1 -Uninstall  remove that block, the copied scripts, the native
-#                                   helper, and dark mode's settings, putting back the
-#                                   workspace color dark mode replaced
+#                                   helper, dark mode's settings (putting back the
+#                                   workspace color dark mode replaced), the tools'
+#                                   window size, and Proof's settings
 #
 # FreeLab MCP, a separate repository, installs its listener beside these with a
 # startup block of its own: either can be installed or removed without the other.
 #
-# Install also builds dark mode's native pixel helper (tools/build-native.ps1)
+# Install also builds dark mode's native pixel helper, its native engine, and the auto kerning
+# core (tools/build-native.ps1)
 # into %LOCALAPPDATA%\FreeLab\bin when it is missing; without a compiler, dark
 # mode still works, with plain inversion in the widgets FontLab paints itself.
 # The first install keeps the original startup script as
@@ -42,14 +44,75 @@ if ($StartupScript) { $startup = $StartupScript }
 else { $startup = Join-Path $env:LOCALAPPDATA 'FontLab\FontLab 7\startupScript.py' }
 $files = @(
     @{ From = 'darkmode\freelab_dark_mode.py'; Name = 'freelab_dark_mode.py' },
-    @{ From = 'darkmode\freelab_dark_mode_settings.py'; Name = 'freelab_dark_mode_settings.py' }
+    @{ From = 'darkmode\freelab_dark_mode_settings.py'; Name = 'freelab_dark_mode_settings.py' },
+    @{ From = 'windows\freelab_tabs.py'; Name = 'freelab_tabs.py' },
+    @{ From = 'kerning\freelab_auto_kerning.py'; Name = 'freelab_auto_kerning.py' },
+    @{ From = 'kerning\freelab_kerning_check.py'; Name = 'freelab_kerning_check.py' },
+    @{ From = 'checks\freelab_font_check.py'; Name = 'freelab_font_check.py' },
+    @{ From = 'compare\freelab_font_compare.py'; Name = 'freelab_font_compare.py' },
+    @{ From = 'proof\freelab_proof.py'; Name = 'freelab_proof.py' },
+    @{ From = 'checks\language_coverage.json'; Name = 'language_coverage.json' },
+    @{ From = 'checks\language_coverage_LICENSE'; Name = 'language_coverage_LICENSE' },
+    @{ From = 'checks\character_sets.json'; Name = 'character_sets.json' },
+    @{ From = 'checks\character_sets_LICENSE'; Name = 'character_sets_LICENSE' },
+    @{ From = 'checks\language_families.json'; Name = 'language_families.json' },
+    @{ From = 'checks\language_families_LICENSE'; Name = 'language_families_LICENSE' },
+    @{ From = 'checks\language_orthographies.json'; Name = 'language_orthographies.json' },
+    @{ From = 'checks\language_orthographies_LICENSE'; Name = 'language_orthographies_LICENSE' },
+    @{ From = 'checks\language_font\FreeLang-Essential.ttf'; Name = 'FreeLang-Essential.ttf' },
+    # Optional: the repository holds the Essential font alone, and each release publishes these four
+    # beside it (FreeLang-Extras.zip, unpacked into checks\language_font). Font Check works without
+    # them (their scripts are then left to the system's fonts), so a copy without them still installs.
+    @{ From = 'checks\language_font\FreeLang-CJK.ttf'; Name = 'FreeLang-CJK.ttf'; Optional = $true },
+    @{ From = 'checks\language_font\FreeLang-Extended-General.ttf'; Name = 'FreeLang-Extended-General.ttf'; Optional = $true },
+    @{ From = 'checks\language_font\FreeLang-Extended-Mongolian-Tibetan.ttf'; Name = 'FreeLang-Extended-Mongolian-Tibetan.ttf'; Optional = $true },
+    @{ From = 'checks\language_font\FreeLang-Extended-Duployan.ttf'; Name = 'FreeLang-Extended-Duployan.ttf'; Optional = $true },
+    @{ From = 'checks\language_font\FreeLang_LICENSE'; Name = 'FreeLang_LICENSE' },
+    @{ From = 'spacing\freelab_auto_spacing.py'; Name = 'freelab_auto_spacing.py' },
+    @{ From = 'diacritics\freelab_diacritics.py'; Name = 'freelab_diacritics.py' },
+    @{ From = 'diacritics\mark_model.json'; Name = 'mark_model.json' },
+    @{ From = 'diacritics\glyph_names.json'; Name = 'glyph_names.json' },
+    @{ From = 'diacritics\anchor_model.json'; Name = 'anchor_model.json' },
+    @{ From = 'diacritics\GlyphData_LICENSE'; Name = 'GlyphData_LICENSE' },
+    @{ From = 'features\freelab_feature_code.py'; Name = 'freelab_feature_code.py' },
+    @{ From = 'features\ligature_model.json'; Name = 'ligature_model.json' },
+    # A helper module, no script of its own: FontLab lists every .py of the folder in the Scripts menu,
+    # so it goes in under the extension load_sibling (kerning/freelab_auto_kerning.py) also looks for.
+    @{ From = 'features\freelab_alternates.py'; Name = 'freelab_alternates.module' },
+    @{ From = 'features\alternates_model.json'; Name = 'alternates_model.json' },
+    @{ From = 'spacing\reference_model.json'; Name = 'reference_model.json' },
+    @{ From = 'cjk\freelab_cjk_spacing.py'; Name = 'freelab_cjk_spacing.py' },
+    @{ From = 'cjk\palt_model.json'; Name = 'palt_model.json' },
+    @{ From = 'cjk\hangul_model.json'; Name = 'hangul_model.json' },
+    @{ From = 'kerning\common_pairs.txt'; Name = 'common_pairs.txt' },
+    @{ From = 'kerning\script_pairs.txt'; Name = 'script_pairs.txt' },
+    @{ From = 'kerning\learned_model.json'; Name = 'learned_model.json' },
+    @{ From = 'kerning\class_model.json'; Name = 'class_model.json' }
 )
+# Scripts FreeLab once installed under other names: removed on install and uninstall.
+$retired = @('freelab_accents.py',  # Accented Glyphs, now Diacritics
+    'freelab_alternates.py', 'freelab_alternates.pyc',  # listed in the menu as a script: now freelab_alternates.module
+    'FreeLabAutonyms.ttf', 'FreeLabAutonyms_LICENSE',  # Font Check's first font
+    'FreeLabLanguages.ttf', 'FreeLabLanguages_LICENSE',  # its second name
+    'FreeLang.ttf',  # one file before it became three (FreeLang-Essential.ttf, -CJK, -Extended)
+    'FreeLang-Extended.ttf')  # the third of three, before they became five (-Extended-General, and two more)
+# The files FreeLab put in the Scripts folder itself before 0.3 (its own submenu since): only these are
+# removed from there. The root's other files are the user's or another tool's, and some of FreeLab's
+# names (character_sets.json, language_families.json) are generic enough to be someone else's.
+$preSubfolder = @('freelab_dark_mode.py', 'freelab_dark_mode_settings.py')
 if (-not $BinDir) { $BinDir = Join-Path $env:LOCALAPPDATA 'FreeLab\bin' }
 if (-not $StateDir) { $StateDir = Join-Path $env:LOCALAPPDATA 'FreeLab' }
 if (-not $RegistryKey) { $RegistryKey = 'HKCU:\Software\Fontlab\fontlab7' }
 $darkWorkspace = '#fff0f0f0'  # WORKSPACE_DARK in darkmode/freelab_dark_mode.py
 $source = [System.IO.File]::ReadAllText((Join-Path $repo 'darkmode\native\freelab_pixels.c'))
-$nativeName = 'freelab_pixels-v' + [regex]::Match($source, '#define FREELAB_PIXELS_VERSION (\d+)').Groups[1].Value + '.dll'
+$pixelsVersion = [regex]::Match($source, '#define FREELAB_PIXELS_VERSION (\d+)').Groups[1].Value
+$nativeName = 'freelab_pixels-v' + $pixelsVersion + '.dll'
+# The native engine's library (darkmode/native/freelab_hooks.c), named after both versions.
+$hooksSource = [System.IO.File]::ReadAllText((Join-Path $repo 'darkmode\native\freelab_hooks.c'))
+$hooksName = 'freelab_hooks-v' + [regex]::Match($hooksSource, '#define FREELAB_HOOKS_VERSION (\d+)').Groups[1].Value + '-' + $pixelsVersion + '.dll'
+# The auto kerning core (kerning/native/freelab_kern.c).
+$kernSource = [System.IO.File]::ReadAllText((Join-Path $repo 'kerning\native\freelab_kern.c'))
+$kernName = 'freelab_kern-v' + [regex]::Match($kernSource, '#define FREELAB_KERN_VERSION (\d+)').Groups[1].Value + '.dll'
 $begin = '# >>> FreeLab tools'
 $end = '# <<< FreeLab tools'
 
@@ -189,7 +252,7 @@ if ($Uninstall) {
         $saved = $null
         try { $saved = ([System.IO.File]::ReadAllText($settingsFile) | ConvertFrom-Json).saved_workspace } catch { }
         if ($saved -and (Get-Process -Name $ProcessName -ErrorAction SilentlyContinue)) {
-            Write-Output 'FontLab is running with dark mode on: switch dark mode off (Scripts > FreeLab > Toggle Dark Mode), quit FontLab, and run -Uninstall again.'
+            Write-Output 'FontLab is running with dark mode on: switch dark mode off (Scripts > FreeLab > Dark Mode), quit FontLab, and run -Uninstall again.'
             exit 1
         }
         if ($saved) {
@@ -222,17 +285,30 @@ if ($Uninstall) {
     }
     $log = Join-Path $StateDir 'darkmode.log'
     if (Test-Path $log) { [System.IO.File]::Delete($log); Write-Output "Removed $log" }
-    foreach ($f in $files) {
-        foreach ($dir in @($scripts, $rootScripts)) {  # the Scripts folder itself held them before 0.3
-            $target = Join-Path $dir $f.Name
-            if (Test-Path $target) { [System.IO.File]::Delete($target); Write-Output "Removed $target" }
+    # Auto Kerning's remembered analyses.
+    $kernCache = Join-Path $StateDir 'kerning-cache'
+    if (Test-Path $kernCache) { [System.IO.Directory]::Delete($kernCache, $true); Write-Output "Removed $kernCache" }
+    # The size given to the tools' windows by hand, and Proof's summary settings.
+    foreach ($name in @('windows.json', 'proof.json')) {
+        $kept = Join-Path $StateDir $name
+        if (Test-Path $kept) {
+            try { [System.IO.File]::Delete($kept); Write-Output "Removed $kept" }
+            catch { Write-Output "Could not remove $kept (FontLab holds it open): quit FontLab and run this again." }
+        }
+    }
+    $installed = @(@($files | ForEach-Object { Join-Path $scripts $_.Name }) + @($retired | ForEach-Object { Join-Path $scripts $_ }) +
+        @($preSubfolder | ForEach-Object { Join-Path $rootScripts $_ }))  # (the Scripts folder itself held these before 0.3)
+    foreach ($target in $installed) {
+        if (Test-Path $target) {
+            try { [System.IO.File]::Delete($target); Write-Output "Removed $target" }
+            catch { Write-Output "Could not remove $target (FontLab holds it open): quit FontLab and run this again." }
         }
     }
     if ((Test-Path $scripts) -and -not (Get-ChildItem $scripts -Force)) {
         [System.IO.Directory]::Delete($scripts); Write-Output "Removed $scripts"
     }
     if (Test-Path $BinDir) {
-        foreach ($dll in Get-ChildItem $BinDir -Filter 'freelab_pixels*.dll') {
+        foreach ($dll in @(Get-ChildItem $BinDir -Filter 'freelab_pixels*.dll') + @(Get-ChildItem $BinDir -Filter 'freelab_hooks*.dll') + @(Get-ChildItem $BinDir -Filter 'freelab_kern*.dll')) {
             try { [System.IO.File]::Delete($dll.FullName); Write-Output "Removed $($dll.FullName)" }
             catch { Write-Output "Could not remove $($dll.FullName) (FontLab is using it): delete it after quitting FontLab." }
         }
@@ -243,10 +319,29 @@ if ($Uninstall) {
 if (-not (Test-Path $scripts)) { New-Item -ItemType Directory -Path $scripts | Out-Null }
 foreach ($f in $files) {
     $target = Join-Path $scripts $f.Name
-    [System.IO.File]::Copy((Join-Path $repo $f.From), $target, $true)
-    Write-Output "Copied $($f.Name) to $scripts"
-    $old = Join-Path $rootScripts $f.Name  # before 0.3 they sat in the Scripts folder itself
-    if (Test-Path $old) { [System.IO.File]::Delete($old); Write-Output "Removed the old $old" }
+    $from = Join-Path $repo $f.From
+    if ($f.Optional -and -not (Test-Path $from)) { Write-Output "Skipped $($f.Name) (optional, not in this copy)"; continue }
+    # A file already there as it is stays (FontLab holds a font it registered open: it could not be replaced)
+    $same = (Test-Path $target) -and ((Get-FileHash $from).Hash -eq (Get-FileHash $target).Hash)
+    if ($same) { Write-Output "Kept $($f.Name) (unchanged)" }
+    else {
+        try { [System.IO.File]::Copy($from, $target, $true); Write-Output "Copied $($f.Name) to $scripts" }
+        catch { Write-Output "Could not replace $($f.Name), which FontLab holds open: quit FontLab and run this again. ($($_.Exception.Message))" }
+    }
+}
+foreach ($name in $preSubfolder) {  # before 0.3 they sat in the Scripts folder itself
+    $old = Join-Path $rootScripts $name
+    if (Test-Path $old) {
+        try { [System.IO.File]::Delete($old); Write-Output "Removed the old $old" }
+        catch { Write-Output "Could not remove the old $old (FontLab holds it open): quit FontLab and run this again." }
+    }
+}
+foreach ($name in $retired) {
+    $old = Join-Path $scripts $name
+    if (Test-Path $old) {
+        try { [System.IO.File]::Delete($old); Write-Output "Removed the retired $old" }
+        catch { Write-Output "Could not remove the retired $old (FontLab holds it open): quit FontLab and run this again." }
+    }
 }
 
 $native = Join-Path $BinDir $nativeName
@@ -258,15 +353,29 @@ else {
         Write-Output 'Dark mode still works, with plain inversion in the widgets FontLab paints itself. Install LLVM or Visual Studio with the C++ tools, then run tools\build-native.ps1.'
     }
 }
+$hooks = Join-Path $BinDir $hooksName
+if (Test-Path $hooks) { Write-Output "Native engine present: $hooks" }
+elseif (Test-Path $native) {  # the same compiler builds it
+    try { & (Join-Path $PSScriptRoot 'build-native.ps1') -Hooks -Out $hooks }
+    catch { Write-Output "Could not build the native engine: $_ (the script engine still works)." }
+}
+$kern = Join-Path $BinDir $kernName
+if (Test-Path $kern) { Write-Output "Auto kerning core present: $kern" }
+elseif (Test-Path $native) {  # the same compiler builds it
+    try { & (Join-Path $PSScriptRoot 'build-native.ps1') -Kern -Out $kern }
+    catch { Write-Output "Could not build the auto kerning core: $_ (Auto Kerning needs it)." }
+}
 if ((Test-Path $native) -and (Test-Path $BinDir)) {
     # Earlier versions: FontLab keeps the one it loaded locked until it quits, so a locked one waits for the next install.
-    foreach ($dll in Get-ChildItem $BinDir -Filter 'freelab_pixels*.dll') {
-        if ($dll.Name -eq $nativeName) { continue }
+    foreach ($dll in @(Get-ChildItem $BinDir -Filter 'freelab_pixels*.dll') + @(Get-ChildItem $BinDir -Filter 'freelab_hooks*.dll') + @(Get-ChildItem $BinDir -Filter 'freelab_kern*.dll')) {
+        if ($dll.Name -eq $nativeName -or $dll.Name -eq $hooksName -or $dll.Name -eq $kernName) { continue }
         try { [System.IO.File]::Delete($dll.FullName); Write-Output "Removed the superseded $($dll.FullName)" } catch { }
     }
 }
 
 $darkPath = ConvertTo-PyLiteral (Join-Path $scripts 'freelab_dark_mode.py')
+$kernPath = ConvertTo-PyLiteral (Join-Path $scripts 'freelab_auto_kerning.py')
+$tabsPath = ConvertTo-PyLiteral (Join-Path $scripts 'freelab_tabs.py')
 $block = @"
 $begin (managed by FreeLab tools/install-fontlab.ps1; -Uninstall removes it)
 def _freelab_tools_load(name, path):
@@ -301,6 +410,19 @@ def _freelab_tools_startup():
             module.startup()
     except Exception as exc:
         print("FreeLab dark mode at startup: %s" % (exc,))
+    try:
+        tools = _freelab_tools_load("freelab_auto_kerning", $kernPath)
+        if tools is not None:
+            # Scripts > FreeLab in working order, with separators (once FontLab has built the menu)
+            getattr(tools, "hook_menu_order_soon", tools.hook_menu_order)()
+    except Exception as exc:
+        print("FreeLab menu at startup: %s" % (exc,))
+    try:
+        tabs = _freelab_tools_load("freelab_tabs", $tabsPath)
+        if tabs is not None:
+            tabs.startup()  # document tabs reorder and dock back as Photoshop's do (unless switched off)
+    except Exception as exc:
+        print("FreeLab tab docking at startup: %s" % (exc,))
 try:
     _freelab_tools_startup()
 except Exception:

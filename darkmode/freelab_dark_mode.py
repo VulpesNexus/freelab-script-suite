@@ -1,4 +1,4 @@
-#FLM: Toggle Dark Mode
+#FLM: Dark Mode
 # -*- coding: utf-8 -*-
 """FreeLab dark mode for FontLab's interface.
 
@@ -166,12 +166,17 @@ SKIP_CLASSES = ("ColorPickerItem", "ColorPickerButton", "QtColorPicker", "QDeskt
                 "YSimpleSlider")  # drawn from the palette: its white knob is right on dark already
 SKIP_CLASS_WORDS = ("ColorSource", "OpacityBar", "Eyedropper")
 SWATCH_NAME_PREFIXES = ("flag",)
+# The Color panel's channel sliders draw color gradients (their stylesheets): color controls too.
+# Under the ink effect, partial repaints left blocky patches in the red and blue tracks.
+COLOR_SLIDER_PANELS = ("ColorPanel",)
 # Color pickers keep their swatch (the white "no color" slot included), but their button frame,
 # drawn white by the style, gets this thin dark border instead (appended to their own stylesheet).
 PICKER_FRAME = u"\nQtColorPicker { border: 1px solid #55555a; border-radius: 2px; background: transparent; }"
-# A picker draws its swatch at the left, about as wide as it is tall, and a dark arrow after this
-# gap: the "picker" effect maps only the arrow's side.
-PICKER_ARROW_GAP = 3
+# A picker draws its swatch at the left, about as wide as it is tall, inside a light frame of its own,
+# and a dark arrow after this gap: the "picker" effect maps all of it but the swatch's inside (the
+# frame on the swatch's side stayed white).
+PICKER_SWATCH_GAP = 3  # the swatch's side ends this far past a square as tall as the picker
+PICKER_KEEP_CHROMA = 48  # around the swatch's inside, pixels this colored keep their color
 # Color pickers and mark-color buttons keep their look, the white "no color" slot included (the owner
 # preferred that to a half-dark frame).
 
@@ -210,7 +215,7 @@ SWEEP_MS = 750  # how often to look for widgets FontLab created or showed
 FULL_SWEEP_EVERY = 40  # every Nth sweep revisits every widget (replaced stylesheets, new icons)
 FOCUS_DRAIN_MS = 80  # a window that takes focus is darkened at once, up to this long, before it paints light
 MAX_ERRORS = 50
-NATIVE_VERSION = 103
+NATIVE_VERSION = 111
 
 ID_PROP = "freelab_id"  # dynamic properties FreeLab sets on widgets, all removed by restore()
 SEEN_PROP = "freelab_seen"
@@ -224,7 +229,23 @@ ISLAND_PROP = "freelab_island"  # found by rendering: "island" or "ink"
 SHEET_PROP = "freelab_sheet"  # the widget's own stylesheet
 DARK_SHEET_PROP = "freelab_sheet_dark"  # what dark mode set instead
 MENU_HOOK_PROP = "freelab_menu_hooked"  # aboutToShow connected (kept: the hook stays, idle while off)
-PROPS = (ID_PROP, SEEN_PROP, QUEUED_PROP, WATCHED_PROP, CHECKED_PROP, ISLAND_PROP, SHEET_PROP, DARK_SHEET_PROP)
+SEPARATOR_PROP = "freelab_menu_separators"  # the stylesheet a menu's lighter separators were set as
+SEPARATOR_LIGHTER = 190  # a menu separator's color: the window color this much lighter (Fusion's is hardly seen)
+HOOKED_PROP = "freelabHooked"  # an island the native engine's hooks map, rather than an effect
+NATIVE_INK_PROP = "freelabNativeInk"  # a list whose dark pens the native engine maps, rather than the ink effect
+# Lists whose rows Qt draws, in colors FontLab puts in their data: under the native engine, their
+# viewports' dark pens are mapped as they are set (in FontLab's program and in Qt5Widgets), with no
+# effect. Only lists whose delegates leave the drawing to Qt (Metrics' sets colors only); a delegate
+# of FontLab's that paints its rows (FontAudit's badges, the Elements tree) keeps the ink effect.
+NATIVE_INK_DELEGATES = ("QStyledItemDelegate", "QItemDelegate", "MetricsDataDelegate")
+# Islands Qt draws (from their stylesheet), out of the hooks' reach: the script engine's island
+# under either engine (the continue edge's white line stayed white).
+SCRIPT_ISLAND_CLASSES = ("YContinueWidget",)
+# FontLab's classes built on widgets Qt draws: inside a hooked island they are processed as any
+# widget (a search field's line edit keeps its placeholder's ink), not hooked.
+QT_DRAWN_BASES = ("QLineEdit", "QAbstractButton", "QAbstractScrollArea", "QAbstractSpinBox", "QComboBox",
+                  "QLabel", "QAbstractSlider", "QTabBar")
+PROPS = (ID_PROP, SEEN_PROP, QUEUED_PROP, WATCHED_PROP, CHECKED_PROP, ISLAND_PROP, SHEET_PROP, DARK_SHEET_PROP, HOOKED_PROP, NATIVE_INK_PROP)
 
 NAMED_COLORS = {
     "white": (255, 255, 255), "black": (0, 0, 0), "whitesmoke": (245, 245, 245),
@@ -662,7 +683,7 @@ def _address(image):
     return ctypes.addressof(ctypes.c_char.from_buffer(image.bits()))
 
 
-ANCHOR_MODES = {"ink": 0, "all": 1, "relight": 2, "icon": 3, "subpixel": 4, "syntax": 5}
+ANCHOR_MODES = {"ink": 0, "all": 1, "relight": 2, "icon": 3, "subpixel": 4, "syntax": 5, "list": 6}
 
 
 def map_image(image, min_l=0.0, keys=None, ink_below=-1.0, keep_tint=0.0, light_l=None, edge_neutral=0.0, edge_target=0,
@@ -824,7 +845,8 @@ def map_sheet_images(sheet, mapped_path):
 
 def _mapped_resource(resource):
     """A dark copy of one of FontLab's resource images (arrows, check boxes, info-bar icons that its
-    stylesheets name), saved once per shade; None for pictures, color swatches, and failures."""
+    stylesheets name), saved once per shade; None for pictures, color swatches, white artwork (the
+    logo in the Welcome dialog's bottom bar), and failures."""
     state = _state()
     cache = state.setdefault("sheet_images", {})
     key = (state.get("shade", "dark"), resource)
@@ -835,7 +857,7 @@ def _mapped_resource(resource):
         QImage = _gui("QImage")
         image = QImage(resource)
         if (not image.isNull() and image.width() <= MAX_ICON_SIDE and image.height() <= MAX_ICON_SIDE
-                and not is_swatch(image)):
+                and not is_swatch(image) and not is_white_artwork(image)):  # FontLab's logo stays white
             folder = os.path.join(state_dir(), "cache", "images-%s-%s-%d" % (VERSION, key[0], NATIVE_VERSION))
             if not os.path.isdir(folder):
                 os.makedirs(folder)
@@ -854,10 +876,143 @@ def _mapped_resource(resource):
     return path
 
 
+PLAIN_INPUTS = ("QComboBox", "QAbstractSpinBox", "QLineEdit")
+
+
+def _plain_input(widget):
+    """A combo box, spin box, or field of Qt's with no stylesheet on it or around it (FreeLab's own
+    dialogs): Fusion draws it from the dark palette alone. The ink effect, which its dark outlines
+    and arrows set off, garbled its text and hid its arrows."""
+    if not any(widget.inherits(c) for c in PLAIN_INPUTS):
+        return False
+    current = widget
+    while current is not None:
+        if current.property(SHEET_PROP) or _prop(current, "styleSheet"):
+            return False
+        if current.isWindow():
+            return True
+        current = current.parentWidget()
+    return True
+
+
+LIGHT_LABEL_MIN = 0.6  # a label's text this light (HLS lightness), on a parent this dark or darker,
+DARK_PARENT_MAX = 0.4  # is drawn for the dark interface already
+LABEL_DARK_SHARE = 0.8  # when this share of what lies beneath it is that dark too
+
+
+def _color_lightness(color):
+    name = color.name()  # "#rrggbb"
+    return _lightness(int(name[1:3], 16), int(name[3:5], 16), int(name[5:7], 16))
+
+
+def _light_text_label(widget):
+    """A text label drawn from the dark palette: light text, no image, no colors of its own in its
+    stylesheet or text, on a dark parent and dark ground. Right as drawn, it is protected from the
+    ink effect around it, which mapped it among the whole window's colors: the font window's light
+    gray "SEARCH HISTORY" and "BOOKMARKS" headers, too few pixels to weigh, were read as smoothing
+    toward a white slot of its toolbar, and broke up."""
+    if not widget.inherits("QLabel"):
+        return False
+    text = getattr(widget, "text", None)
+    text = text() if callable(text) else text
+    if not text or u"<" in text:
+        return False  # (rich text brings colors of its own: the font window's selection count)
+    pixmap = getattr(widget, "pixmap", None)
+    pixmap = pixmap() if callable(pixmap) else pixmap
+    if pixmap is not None and not pixmap.isNull():
+        return False
+    sheet = (_prop(widget, "styleSheet") or u"").lower()
+    if "color" in sheet or "background" in sheet or "image" in sheet:
+        return False
+    QPalette = _qt()[1]
+    parent = widget.parentWidget()
+    if parent is None or _color_lightness(widget.palette.color(QPalette.WindowText)) < LIGHT_LABEL_MIN:
+        return False
+    if _color_lightness(parent.palette.color(QPalette.Window)) > DARK_PARENT_MAX:
+        return False
+    if not widget.isVisible():
+        return False  # decided once shown: a hidden page's label may come to lie on a light badge
+    try:
+        geometry = _prop(widget, "geometry")
+        key = (widget.palette.color(QPalette.WindowText).name(), geometry.width(), geometry.height(),
+               _record(parent) and int(parent.property(ID_PROP)))  # the record gives the parent its id
+    except Exception:
+        return True
+    record = _record(widget)
+    cached = record.get("light_label")
+    if cached is not None and cached[0] == key:
+        return cached[1]  # sweeps revisit every label: the parent is grabbed again only when this changes
+    result = _dark_ground(parent, geometry)
+    record["light_label"] = (key, result)
+    return result
+
+
+def _dark_ground(parent, rect):
+    """Whether the parent paints rect dark, read as the parent draws it without FreeLab's effect: a
+    parent with the ink effect would show a light badge already mapped dark (grab draws a widget
+    through its own effect), and the label on it would be kept light on the light badge."""
+    effect = parent.graphicsEffect()
+    paused = effect is not None and _ours(parent) and bool(_prop(effect, "enabled"))
+    try:
+        if paused:
+            effect.setEnabled(False)
+        try:
+            image = parent.grab(rect).toImage()
+        finally:
+            if paused:
+                effect.setEnabled(True)
+        width, height = image.width(), image.height()
+    except Exception:
+        return True
+    if not width or not height:
+        return True
+    samples = [image.pixel(x, y) for y in range(0, height, max(1, height // 4)) for x in range(0, width, max(1, width // 12))]
+    dark = sum(1 for v in samples if _lightness((v >> 16) & 255, (v >> 8) & 255, v & 255) <= DARK_PARENT_MAX)
+    return dark >= LABEL_DARK_SHARE * len(samples)
+
+
+def _shows_white_artwork(widget):
+    """A label whose stylesheet shows only white artwork (the Welcome dialog's logo), or a button
+    whose icon has white artwork (a checked state's white mark): no effect over them."""
+    if widget.inherits("QAbstractButton"):
+        return _icon_has_white_artwork(_prop(widget, "icon"))
+    if not widget.inherits("QLabel"):
+        return False
+    sheet = widget.property(SHEET_PROP) or _prop(widget, "styleSheet") or u""
+    resources = [m.group(2) for m in _SHEET_IMAGE_RE.finditer(sheet)]
+    if not resources:
+        return False
+    QImage = _gui("QImage")
+    return all(is_white_artwork(QImage(resource)) for resource in resources)
+
+
+def _icon_has_white_artwork(icon):
+    if icon is None or icon.isNull():
+        return False
+    original = _state()["originals"].get(icon.cacheKey(), icon)
+    sizes = list(original.availableSizes())
+    if not sizes:
+        return False
+    QIcon = _gui("QIcon")
+    for icon_state in (QIcon.Off, QIcon.On):
+        pixmap = original.pixmap(sizes[0], QIcon.Normal, icon_state)
+        if not pixmap.isNull() and is_white_artwork(pixmap.toImage()):
+            return True
+    return False
+
+
 def _darken_sheet(widget):
     sheet = _prop(widget, "styleSheet")
     if not sheet:
+        # Its stylesheet was taken away since (a FreeLab dropdown is drawn as a label while it has one
+        # choice, and is a plain dropdown again with two): the sheet remembered here made it pass for
+        # a styled input ever after, and the ink effect garbled it.
+        if widget.property(SHEET_PROP) is not None or widget.property(DARK_SHEET_PROP) is not None:
+            widget.setProperty(SHEET_PROP, None)
+            widget.setProperty(DARK_SHEET_PROP, None)
         return
+    if sheet == widget.property(SEPARATOR_PROP):
+        return  # a menu's lighter separators: drawn as set
     ours = widget.property(DARK_SHEET_PROP)
     if sheet == ours:
         return  # already ours
@@ -879,10 +1034,15 @@ def _watcher():
         class StyleWatcher(QTimer):
             def eventFilter(self, obj, event):
                 try:
-                    if event.type() == STYLE_CHANGE_EVENT:
+                    kind = event.type()
+                    if kind == STYLE_CHANGE_EVENT:
                         module = _module()
                         if module is not None:
                             module._on_style_change(obj)
+                    elif kind == PAINT_EVENT and obj.property(MARK_FLAG_PROP):
+                        module = _module()
+                        if module is not None:
+                            module._on_flag_paint(obj)
                 except Exception as exc:  # an event filter must never raise
                     _note_error("watcher", exc)
                 return False
@@ -945,12 +1105,138 @@ def dark_icon(icon, owner=None):
             for icon_state in (QIcon.Off, QIcon.On):
                 pixmap = icon.pixmap(size, mode, icon_state)
                 if not pixmap.isNull():
-                    result.addPixmap(QPixmap.fromImage(map_image(pixmap.toImage(), anchors="icon")), mode, icon_state)
+                    image = pixmap.toImage()
+                    if is_white_artwork(image):  # a white check on a checked button's blue: white on purpose
+                        image = whitened(image)
+                    else:
+                        image = map_image(image, anchors="icon")
+                    result.addPixmap(QPixmap.fromImage(image), mode, icon_state)
+    return result
+
+
+LOGO_KEEP_CHROMA = 48  # max - min of the channels: a logo's colored part (its blue T, its teal O), kept as drawn
+LOGO_PALE = 120  # a colored pixel with every channel this light or lighter is smoothing toward white
+
+
+def _chroma(value):
+    r, g, b = (value >> 16) & 255, (value >> 8) & 255, value & 255
+    return max(r, g, b) - min(r, g, b)
+
+
+def keep_colors(original, mapped):
+    """mapped with original's clearly colored pixels put back (both Format_ARGB32, one size): a logo's
+    colors are its own, its dark shading included (mapped as ink, a blue T's navy turned pale). Its
+    edges were smoothed toward white: a paler pixel beside a colored one, on the picture's outline
+    (beside a transparent pixel or the image's border), becomes that color, as transparent as it was
+    mixed with white, so the edge is smooth on any row. A pale pixel inside the picture is its own
+    (the white "?" of a message box's blue question icon), left as it is: cleaned too, it turned
+    transparent and the "?" lost a pixel on each side."""
+    width, height = min(original.width(), mapped.width()), min(original.height(), mapped.height())
+    kept = set()
+    for y in range(height):
+        for x in range(width):
+            value = original.pixel(x, y)
+            darkest = min((value >> 16) & 255, (value >> 8) & 255, value & 255)
+            if (value >> 24) & 255 and _chroma(value) >= LOGO_KEEP_CHROMA and darkest < LOGO_PALE:
+                mapped.setPixel(x, y, value)
+                kept.add((x, y))
+    for y in range(height):
+        for x in range(width):
+            if (x, y) in kept:
+                continue
+            value = original.pixel(x, y)
+            alpha = (value >> 24) & 255
+            if not alpha:
+                continue
+            near = [original.pixel(x + dx, y + dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)
+                    if (x + dx, y + dy) in kept]
+            if not near:
+                continue
+            outline = any(not (0 <= x + dx < width and 0 <= y + dy < height)
+                          or not (original.pixel(x + dx, y + dy) >> 24) & 255
+                          for dx in (-1, 0, 1) for dy in (-1, 0, 1))
+            if not outline:
+                continue  # inside the picture: a white detail, not smoothing toward white
+            color = max(near, key=_chroma)
+            shares = []
+            for shift in (16, 8, 0):
+                c, v = (color >> shift) & 255, (value >> shift) & 255
+                if 255 - c >= 40:
+                    if v < c - 8:
+                        shares = None  # darker than the color: no mix with white (another part of the logo)
+                        break
+                    shares.append(max(0.0, min(1.0, (255.0 - v) / (255.0 - c))))
+            if not shares:
+                continue
+            share = sum(shares) / len(shares)
+            mapped.setPixel(x, y, (int(round(share * alpha)) << 24) | (color & 0xffffff))
+    return mapped
+
+
+def dark_logo(icon, map_grays=True):
+    """A logo (a picture in a list: Export Profiles' formats) mapped as icons are, its colors kept;
+    without map_grays, only its colored edges cleaned of their smoothing toward white."""
+    QIcon, QPixmap, QImage = _gui("QIcon"), _gui("QPixmap"), _gui("QImage")
+    result = QIcon()
+    sizes = list(icon.availableSizes()) or [_core("QSize")(32, 32)]
+    for size in sizes:
+        for mode in (QIcon.Normal, QIcon.Disabled, QIcon.Active, QIcon.Selected):
+            for icon_state in (QIcon.Off, QIcon.On):
+                pixmap = icon.pixmap(size, mode, icon_state)
+                if pixmap.isNull():
+                    continue
+                original = pixmap.toImage().convertToFormat(QImage.Format_ARGB32)
+                mapped = map_image(original, anchors="icon") if map_grays else original.copy()
+                result.addPixmap(QPixmap.fromImage(keep_colors(original, mapped)), mode, icon_state)
     return result
 
 
 def dark_pixmap(pixmap):
-    return _gui("QPixmap").fromImage(map_image(pixmap.toImage(), anchors="icon"))
+    """A label's image mapped; white artwork (FontLab's logo) stays as it is. Button icons do not get
+    that rule: a toggled button's white icon, kept, turned black under the button's ink effect."""
+    image = pixmap.toImage()
+    return _gui("QPixmap").fromImage(whitened(image) if is_white_artwork(image) else map_image(image, anchors="icon"))
+
+
+ARTWORK_WHITE = 235  # every visible pixel at least this light, on transparency: white artwork
+ARTWORK_SAMPLE = 24  # sides of the scaled copy looked at
+
+
+def whitened(image):
+    """White artwork with every pixel white, its transparency kept: its faint edge pixels (dark in
+    some of FontLab's icons) made a dark halo on the gray of a checked button."""
+    QImage = _gui("QImage")
+    image = image.convertToFormat(QImage.Format_ARGB32)  # straight alpha
+    for y in range(image.height()):
+        for x in range(image.width()):
+            alpha = (image.pixel(x, y) >> 24) & 255
+            if alpha:
+                image.setPixel(x, y, (alpha << 24) | 0xffffff)
+    return image
+
+
+def is_white_artwork(image):
+    """White artwork on transparency (FontLab's logo, white glyphs on icons meant for color): drawn
+    white on purpose, it stays white; mapped as paper, the logo turned black."""
+    QImage, Qt = _gui("QImage"), _core("Qt")
+    if image.isNull() or not image.hasAlphaChannel():
+        return False
+    small = image.convertToFormat(QImage.Format_ARGB32)
+    if small.width() > ARTWORK_SAMPLE or small.height() > ARTWORK_SAMPLE:
+        small = small.scaled(ARTWORK_SAMPLE, ARTWORK_SAMPLE, Qt.KeepAspectRatio, Qt.FastTransformation)  # no blending: its own pixels
+    seen = clear = False
+    for y in range(small.height()):
+        for x in range(small.width()):
+            value = small.pixel(x, y)
+            alpha = (value >> 24) & 255
+            if alpha < 255:
+                clear = True
+            if alpha < 64:
+                continue  # smoothing toward transparency: blended, not the artwork's color
+            if min((value >> 16) & 255, (value >> 8) & 255, value & 255) < ARTWORK_WHITE:
+                return False
+            seen = True
+    return seen and clear
 
 
 SWATCH_CHROMA = 80  # max - min of the channels: clearly colored
@@ -1006,6 +1292,8 @@ def icon_is_swatch(icon):
 
 
 def _swap_icon(obj):
+    if _asked_to_be_left_alone(obj):
+        return
     state = _state()
     icon = _prop(obj, "icon")
     if icon is None or icon.isNull():
@@ -1026,6 +1314,23 @@ def _swap_icon(obj):
 
 
 MAX_ICON_SIDE = 64  # label images larger than this are pictures (artwork, previews), left as they are
+COLOR_PICTURE_SIDE = 32  # a colorful label image this large or larger (a message box's icon) is left as drawn too
+# The font window's mark flag (a red flag on a black pole): its image is mapped by dark mode, and the
+# ink effect around it draws it as mapped (protected). Left to the effect, as other labels inside it
+# are, its pole stayed black: the effect read the thin black line beside the red as the flag's own.
+# FontLab hands it a new image for each glyph's mark; a paint of an image not mapped yet swaps it.
+MARK_FLAG_NAMES = ("labelMark",)
+MARK_FLAG_PROP = "freelabMarkFlag"
+PAINT_EVENT = 12
+
+
+def _pixel_ratio(pixmap):
+    """How many of a pixmap's pixels make one pixel of the interface, each way (1 for most)."""
+    try:
+        ratio = float(pixmap.devicePixelRatio())
+    except Exception:
+        return 1.0
+    return ratio if ratio >= 1.0 else 1.0
 
 
 def _swap_pixmap(label):
@@ -1033,12 +1338,86 @@ def _swap_pixmap(label):
     pixmap = _prop(label, "pixmap")
     if pixmap is None or pixmap.isNull() or pixmap.cacheKey() in state["mapped_keys"]:
         return
-    if pixmap.width() > MAX_ICON_SIDE or pixmap.height() > MAX_ICON_SIDE:
+    # Its size as drawn: FontLab's warning dialogs (Coordinates Rounding) hold their 64-pixel question
+    # mark at twice the size, for sharp screens. Counted in the image's own pixels, it passed for a
+    # picture too large to be an icon, and kept its edge smoothed toward white: a light ring on dark.
+    ratio = _pixel_ratio(pixmap)
+    if pixmap.width() / ratio > MAX_ICON_SIDE or pixmap.height() / ratio > MAX_ICON_SIDE:
         return
+    flag = (_prop(label, "objectName") or u"") in MARK_FLAG_NAMES
+    if (not flag and max(pixmap.width(), pixmap.height()) / ratio >= COLOR_PICTURE_SIDE
+            and not icon_is_gray(_gui("QIcon")(pixmap))):
+        # A colorful picture (a message box's question mark): its colors as drawn, its edges smoothed toward
+        # white cleaned (keep_colors), and drawn as that over any effect around it (mapped with the dialog,
+        # or as drawn on dark, its edges were jagged)
+        image = pixmap.toImage().convertToFormat(_gui("QImage").Format_ARGB32)
+        clean = _gui("QPixmap").fromImage(keep_colors(image, image.copy()))
+        if ratio != 1.0:
+            clean.setDevicePixelRatio(ratio)
+        state["mapped_keys"].add(clean.cacheKey())
+        _record(label)["pixmap"] = pixmap
+        label.setPixmap(clean)
+        _protect(label)
+        return
+    if not flag and _under_ink(label):
+        return  # the ink effect around it maps its image as drawn (see _unswap_labels_inside)
     new = dark_pixmap(pixmap)
     state["mapped_keys"].add(new.cacheKey())
     _record(label)["pixmap"] = pixmap
     label.setPixmap(new)
+    if flag:
+        _protect(label)  # drawn as mapped, not mapped again by an effect around it
+        label.setProperty(MARK_FLAG_PROP, True)
+        _watch(label)
+
+
+def _on_flag_paint(label):
+    """The mark flag paints: an image FontLab set since (another glyph's mark) is mapped in turn."""
+    state = _state()
+    if not state["on"]:
+        return
+    pixmap = _prop(label, "pixmap")
+    if pixmap is not None and not pixmap.isNull() and pixmap.cacheKey() not in state["mapped_keys"]:
+        QTimer = _qt()[4]
+        QTimer.singleShot(0, lambda: _swap_pixmap(label) if _alive(label) else None)
+
+
+def _under_ink(widget):
+    """Inside a widget FreeLab's ink effect maps (within its window), with nothing between them that
+    the effect draws unmapped: a protected widget (the defringe bar, a left-alone one), a hooked
+    island, or a list the native ink paints keep their images as dark mode made them."""
+    current = widget
+    while not current.isWindow():
+        current = current.parentWidget()
+        if current is None:
+            return False
+        record = _record(current, create=False)
+        if record is not None and record.get("kind") == "ink" and record.get("effect") is not None and _ours(current, record):
+            return True
+        if (record is not None and record.get("protected")) or _drawn_natively(current):
+            return False
+    return False
+
+
+def _unswap_labels_inside(widget):
+    """Give the labels inside a widget that now gets the ink effect their images back as FontLab drew
+    them. Mapped twice, a mapped image went wrong: the font window's mark flag (red, with a black pole
+    made light) lay beside the white "no flag" slot, and the ink effect read the light pole as
+    smoothing between the dark paper and that white, and turned it dark again. Its black pole as
+    drawn is plain ink, which the effect maps light."""
+    state = _state()
+    for record in list(state["records"].values()):
+        label = record.get("obj")
+        if "pixmap" not in record or label is None or not _alive(label) or not widget.isAncestorOf(label):
+            continue
+        if record.get("protected"):
+            continue  # the mark flag: drawn as dark mode mapped it
+        if not _under_ink(label):
+            continue  # a protected widget between them: the effect draws it unmapped, the mapped image stays
+        original = record.pop("pixmap")
+        current = _prop(label, "pixmap")
+        if current is not None and current.cacheKey() in state["mapped_keys"]:
+            label.setPixmap(original)  # else FontLab set another image since: it stays
 
 
 def _show_original_icon(widget):
@@ -1056,6 +1435,8 @@ def _show_original_icon(widget):
 
 
 def _darken_icons(widget):
+    if _asked_to_be_left_alone(widget):
+        return  # FreeLab's own pictures (Auto Kerning's previews): drawn for the palette, never mapped
     if widget.inherits("QTreeWidget") or widget.inherits("QListWidget"):
         _swap_item_icons(widget)
     if widget.inherits("QAbstractButton"):
@@ -1086,14 +1467,155 @@ def _list_items(widget):
     return [item for item in items if item is not None]
 
 
+LOGO_ROWS_MAX = 200  # visible rows looked at per paint
+LOGO_MIN_SIDE = 24  # a list icon drawn this large or larger is a picture (Export Profiles' formats are 32 px)
+
+
+def _visible_columns(view, count, width):
+    """The columns of a view that lie on its viewport (every column of a view that cannot say): a wide
+    table under the ink effect asked the model for every column of every visible row on each paint."""
+    if not hasattr(view, "columnViewportPosition") or not hasattr(view, "columnWidth"):
+        return list(range(count))
+    found = []
+    for column in range(count):
+        try:
+            if hasattr(view, "isColumnHidden") and view.isColumnHidden(column):
+                continue
+            left = view.columnViewportPosition(column)
+            if left < width and left + view.columnWidth(column) > 0:
+                found.append(column)
+        except Exception:
+            return list(range(count))
+    return found
+
+
+def _logo_rects(view):
+    """The viewport rectangles of the visible logo icons in a list (the style's decoration place:
+    at the left of the cell, centered), for icons dark mode leaves as FontLab draws them."""
+    return [rect for rect, _ in _logo_places(view)]
+
+
+SELECTED_INK_SHARE = 0.01  # a selected row with more near-black pixels than this holds dark ink: mapped
+SELECTED_LIGHT_SHARE = 0.5  # a selected row FontLab paints light itself (Preview Features' row under the pointer): mapped, as any light surface
+SELECTED_ROWS_MAX = 200
+
+
+def selected_as_painted(opaque, white, black):
+    """Whether a selected row is drawn again as FontLab painted it, over the mapping: light text on the
+    dark palette's highlight (Export Profiles). Not a row holding dark ink, and not a row FontLab
+    paints light whatever the palette (Preview Features' row under the pointer, near-white with pale
+    text: left as painted, it stayed a white band in a dark list)."""
+    return bool(opaque) and black <= SELECTED_INK_SHARE * opaque and white <= SELECTED_LIGHT_SHARE * opaque
+
+
+def _selected_rows(view, width, height):
+    """The viewport rectangles of a list's visible selected rows (full width): the rows on screen are
+    walked from the top, as _logo_places does, at most SELECTED_ROWS_MAX of them. A copy of the whole
+    selection, made on every paint, was slow under a long table with everything selected, and its
+    first indexes were not always the rows on screen."""
+    QRect, QPoint = _core("QRect"), _core("QPoint")
+    selection = view.selectionModel() if hasattr(view, "selectionModel") else None
+    model = view.model()
+    if selection is None or model is None or not _prop(selection, "hasSelection"):  # (a property in PythonQt)
+        return []
+    index = view.indexAt(QPoint(1, 1))
+    tree = view.inherits("QTreeView")
+    rows = []
+    for _ in range(SELECTED_ROWS_MAX):
+        if not index.isValid():
+            break
+        r = view.visualRect(index)
+        if r.top() >= height:
+            break
+        if not r.isEmpty() and r.bottom() >= 0 and selection.rowIntersectsSelection(index.row(), index.parent()):
+            rows.append(QRect(0, r.top(), width, r.height()).intersected(QRect(0, 0, width, height)))
+        if tree:
+            index = view.indexBelow(index)
+        else:  # flat lists and tables: the next row of the model
+            index = model.index(index.row() + 1, 0, index.parent())
+    return rows
+
+
+def _logo_icon(icon, state):
+    """The icon a list's logo is drawn from over its mapped row, or False for a line icon the row's
+    mapping takes care of. A logo is a picture (LOGO_MIN_SIDE or larger), a swatch, or colorful. A
+    gray picture (Export Profiles' TrueType and OpenType badges) is drawn from its mapped copy:
+    left to the row's mapping, which also mapped the copy already put in the list, its edges came out
+    jagged."""
+    key = icon.cacheKey()
+    mapped = key in state["mapped_keys"]
+    large = any(s.width() >= LOGO_MIN_SIDE for s in icon.availableSizes())  # a picture, not a line icon
+    if mapped:
+        return icon if large else False  # dark already: its own smoothing, over the dark row
+    if icon_is_swatch(icon):
+        return icon  # as FontLab draws it
+    if not icon_is_gray(icon):  # colorful: as drawn, its colored edges cleaned (smoothed toward white, ragged on dark)
+        clean = state["icon_cache"].get(("clean", key))
+        if clean is None:
+            clean = state["icon_cache"][("clean", key)] = dark_logo(icon, False) if large else icon
+        return clean
+    if not large:
+        return False
+    dark = state["icon_cache"].get(key)
+    if dark is None:
+        dark = state["icon_cache"][key] = dark_logo(icon)
+        state["mapped_keys"].add(dark.cacheKey())
+        state["originals"][dark.cacheKey()] = icon
+    return dark
+
+
+def _logo_places(view):
+    """[(viewport rectangle, QIcon)] of the visible logo icons in a list (see _logo_rects)."""
+    QRect, QPoint, Qt = _core("QRect"), _core("QPoint"), _core("Qt")
+    QStyle = _gui("QStyle")
+    model = view.model()
+    if model is None:
+        return []
+    state = _state()
+    logos = state.setdefault("logo_keys", {})
+    style = view.style()
+    size = view.iconSize.width() if view.iconSize.width() > 0 else style.pixelMetric(QStyle.PM_SmallIconSize)
+    margin = style.pixelMetric(QStyle.PM_FocusFrameHMargin) + 1
+    viewport = view.viewport()
+    rects = []
+    first = view.indexAt(QPoint(1, 1))
+    if not first.isValid():
+        return []
+    index = first
+    columns = _visible_columns(view, model.columnCount(first.parent()), viewport.width)
+    for _ in range(LOGO_ROWS_MAX):
+        row_rect = view.visualRect(index)
+        if not index.isValid() or row_rect.top() > viewport.height:
+            break
+        for column in columns:
+            cell = model.index(index.row(), column, index.parent())
+            icon = model.data(cell, Qt.DecorationRole)
+            if icon is None or not hasattr(icon, "availableSizes") or icon.isNull():  # icons only (not pixmaps)
+                continue
+            key = icon.cacheKey()
+            logo = logos.get(key)
+            if logo is None:
+                logo = logos[key] = _logo_icon(icon, state)
+            if logo:
+                r = view.visualRect(cell)
+                rects.append((QRect(r.x() + margin, r.y() + (r.height() - size) // 2, size, size), logo))
+        if view.inherits("QTreeView"):
+            index = view.indexBelow(index)
+        else:  # flat lists and tables: the next row of the model
+            index = model.index(index.row() + 1, 0, index.parent())
+    return rects
+
+
 def _swap_item_icons(widget):
     """Item icons of FontLab's lists (Font Info's and Preferences' pages): drawn for light mode, the
-    gray ones nearly vanished on dark. Mapped as button icons are; the originals are kept to put back."""
+    gray ones nearly vanished on dark. Mapped as button icons are; colorful ones and logos (Export
+    Profiles' formats) stay as drawn. Items are never kept: FontLab deletes and rebuilds them, and a
+    deleted item is no Qt object Python can tell is gone (restoring through one crashed FontLab)."""
     state = _state()
     record = _record(widget)
-    kept = record.setdefault("item_icons", [])
+    tree = widget.inherits("QTreeWidget")
     for item in _list_items(widget):
-        icon = item.icon(0) if widget.inherits("QTreeWidget") else item.icon()
+        icon = item.icon(0) if tree else item.icon()
         if icon is None or icon.isNull():
             continue
         key = icon.cacheKey()
@@ -1104,25 +1626,31 @@ def _swap_item_icons(widget):
             continue
         new = state["icon_cache"].get(key)
         if new is None:
-            new = state["icon_cache"][key] = dark_icon(icon)
+            large = any(s.width() >= LOGO_MIN_SIDE for s in icon.availableSizes())  # a logo: its colors kept
+            new = state["icon_cache"][key] = dark_logo(icon) if large else dark_icon(icon)
             state["mapped_keys"].add(new.cacheKey())
             state["originals"][new.cacheKey()] = icon
-        kept.append((item, icon))
-        if widget.inherits("QTreeWidget"):
+        record["item_icons"] = True
+        if tree:
             item.setIcon(0, new)
         else:
             item.setIcon(new)
 
 
 def _restore_item_icons(widget, record):
-    for item, icon in record.pop("item_icons", []):
-        try:
-            if widget.inherits("QTreeWidget"):
-                item.setIcon(0, icon)
-            else:
-                item.setIcon(icon)
-        except Exception:  # FontLab rebuilt the list meanwhile
+    """Put back the originals of the mapped icons the list shows now, through its current items."""
+    record.pop("item_icons", None)
+    originals = _state()["originals"]
+    tree = widget.inherits("QTreeWidget")
+    for item in _list_items(widget):
+        icon = item.icon(0) if tree else item.icon()
+        original = originals.get(icon.cacheKey()) if icon is not None and not icon.isNull() else None
+        if original is None:
             continue
+        if tree:
+            item.setIcon(0, original)
+        else:
+            item.setIcon(original)
 
 
 def _restore_icons(obj, record):
@@ -1252,18 +1780,23 @@ def _effect_classes():
                     if kind == "relight":  # an editor left dark after switching off: its dark paper white, its light text black
                         draw_mapped(painter, pixmap, offset, whole, 0.0, None, -1.0, 0.0, None, 0.0, 0, "relight")
                         return
-                    if kind == "picker":  # the swatch as it is; the dark arrow beside it mapped light
+                    if kind == "picker":  # the swatch as it is; its frame and the dark arrow beside it mapped
                         side = pixmap.height() - 2  # the swatch: a square at the left, inside a 2-px frame
                         image = pixmap.toImage()
-                        probe_x, probe_y = side // 4 + 1, side // 4 + 1  # off the "no color" diagonal
-                        if side > 6 and _gui("QColor").fromRgba(image.pixel(probe_x, probe_y)).alpha() < 200:
-                            # Some pickers paint "no color" transparent: give them the white slot others paint.
-                            painter.fillRect(QRect(offset.x() + 3, offset.y() + 3, side - 4, side - 4), Qt.white)
-                        painter.drawPixmap(offset, pixmap)
-                        split = min(pixmap.width(), pixmap.height() + PICKER_ARROW_GAP)
-                        draw_mapped(painter, pixmap, offset, QRect(offset.x() + split, offset.y(),
-                                                                   pixmap.width() - split, pixmap.height()),
-                                    0.0, None, -1.0, 0.0, None, 0.0, 0, "all")
+                        draw_mapped(painter, pixmap, offset, whole, 0.0, None, -1.0, 0.0, None, 0.0, 0, "all")
+                        if side > 6:
+                            inside = QRect(3, 3, side - 4, side - 4)  # the swatch within the frame FontLab paints light
+                            probe_x, probe_y = side // 4 + 1, side // 4 + 1  # off the "no color" diagonal
+                            if _gui("QColor").fromRgba(image.pixel(probe_x, probe_y)).alpha() < 200:
+                                # Some pickers paint "no color" transparent: give them the white slot others paint.
+                                painter.fillRect(inside.translated(offset), Qt.white)
+                            painter.drawPixmap(inside.translated(offset), pixmap, inside)
+                        # Around that square, only the light frame is mapped: a picker that paints its
+                        # swatch at full height (the mark color's) keeps its color to the edges.
+                        split = min(pixmap.width(), pixmap.height() + PICKER_SWATCH_GAP)
+                        colored = _colored_part(image, QRect(0, 0, split, pixmap.height()))
+                        if colored is not None:
+                            painter.drawImage(offset, colored)
                         return
                     if kind == "defringe":  # dark already (its stylesheet): only its text's fringes made gray
                         area = whole
@@ -1276,6 +1809,8 @@ def _effect_classes():
                         keep_unmapped(self, painter, pixmap, offset)
                         return
                     anchors = {"island": "all", "subpixel": "subpixel"}.get(kind, "ink")
+                    if kind == "ink" and getattr(self, "freelab_list", False):
+                        anchors = "list"
                     editor = self.freelab_widget.parentWidget() if kind == "edges" else None
                     editor_record = _record(editor, create=False) if editor is not None else None
                     native = editor_record is not None and editor_record.get("sci")
@@ -1309,12 +1844,93 @@ def _effect_classes():
                     # fringes even inside an effect: grays, unless text is selected (the blue highlight).
                     gray = getattr(self, "freelab_gray", False) and not (
                         self.freelab_widget.inherits("QLineEdit") and _prop(self.freelab_widget, "hasSelectedText"))
-                    draw_mapped(painter, pixmap, offset, whole, 0.0, None, -1.0, self.freelab_keep_tint, None, 0.0, 0,
+                    logos, mapped_from = (logo_places(self), pixmap) if kind == "ink" else ([], pixmap)
+                    if logos:
+                        mapped_from = without_logos(pixmap, logos)
+                    draw_mapped(painter, mapped_from, offset, whole, 0.0, None, -1.0, self.freelab_keep_tint, None, 0.0, 0,
                                 anchors, None, gray, QRect(whole) if kind in ("ink", "edges") else None)
+                    if kind == "ink" and getattr(self, "freelab_list", False):
+                        # from the copy without logos: FontLab's logo, with its light fringe, showed through
+                        # the cleaned logo's smoothing drawn over it
+                        draw_selected(self, painter, mapped_from, offset)
+                    if logos:
+                        draw_logos(painter, pixmap, offset, logos)
                     keep_unmapped(self, painter, pixmap, offset)
                 except Exception as exc:
                     _note_error("effect", exc)
                     self.drawSource(painter)
+
+        def draw_selected(effect, painter, pixmap, offset):
+            """A list's selected rows as Qt drew them, over the mapping: their highlight and light text
+            are the dark palette's already, and mapped again the text's smoothing came out fringed
+            (Export Profiles); ClearType's colored fringes made gray. A selected row with dark ink in it
+            (FontLab's own colors) stays mapped."""
+            view = effect.freelab_widget.parentWidget()
+            if view is None or not view.inherits("QAbstractItemView"):
+                return
+            try:
+                rows = _selected_rows(view, pixmap.width(), pixmap.height())
+                if not rows:
+                    return
+                image = pixmap.toImage()
+                for rect in rows:
+                    part = image.copy(rect)
+                    opaque, white, black = image_stats(part)
+                    if selected_as_painted(opaque, white, black):
+                        area = rect.translated(offset)
+                        if painter.hasClipping():
+                            area = area.intersected(painter.clipBoundingRect().toAlignedRect())
+                        if not area.isEmpty():
+                            # ClearType's fringes of the light text made gray (orange and blue around white letters)
+                            source = area.translated(-offset.x(), -offset.y())
+                            painter.drawImage(area.topLeft(), defringe_image(image.copy(source)))
+            except Exception as exc:
+                _note_error("list selection", exc)
+
+        def logo_places(effect):
+            """[(rect, icon)] of a list's logo icons (Export Profiles' formats), or [] (not a list, or failed)."""
+            view = effect.freelab_widget.parentWidget()
+            if view is None or not view.inherits("QAbstractItemView"):
+                return []
+            try:
+                return _logo_places(view)
+            except Exception as exc:
+                _note_error("list logos", exc)
+                return []
+
+        def without_logos(pixmap, logos):
+            """A copy of the source with each logo's place filled with the row's color beside it (its top
+            left corner's pixel, the logo's margin): mapped, the row is whole, with no logo under the icons."""
+            QPainter = _gui("QPainter")
+            copy = pixmap.copy()
+            image = pixmap.toImage()
+            painter = QPainter(copy)
+            try:
+                painter.setCompositionMode(QPainter.CompositionMode_Source)
+                for rect, _ in logos:
+                    x, y = max(0, rect.x() - 1), max(0, rect.y())
+                    if 0 <= x < image.width() and 0 <= y < image.height():
+                        painter.fillRect(rect, _gui("QColor").fromRgba(image.pixel(x, y)))
+            finally:
+                painter.end()
+            return copy
+
+        def draw_logos(painter, pixmap, offset, logos):
+            """A list's logo icons drawn over the mapped rows, each from its own icon (its smoothing over
+            the dark row, not over FontLab's light one: copied pixels brought a light fringe, jagged)."""
+            for rect, icon in logos:
+                area = rect.translated(offset).intersected(QRect(offset, pixmap.size()))
+                if painter.hasClipping():
+                    area = area.intersected(painter.clipBoundingRect().toAlignedRect())
+                if area.isEmpty():
+                    continue
+                try:
+                    painter.save()
+                    painter.setClipRect(area)
+                    icon.paint(painter, rect.translated(offset))
+                    painter.restore()
+                except Exception as exc:
+                    _note_error("list logos", exc)
 
         def keep_unmapped(effect, painter, pixmap, offset):
             """Draw protected descendants (color swatches, mark slots, pickers) as they are, over the mapping."""
@@ -1651,6 +2267,22 @@ def is_content(widget):
             and _is_canvas(widget, _class_name(parent)))
 
 
+def _colored_part(image, area):
+    """The clearly colored pixels of image within area (the rest transparent), or None if none."""
+    QImage = _gui("QImage")
+    part = image.copy(area).convertToFormat(QImage.Format_ARGB32)
+    any_colored = False
+    for y in range(part.height()):
+        for x in range(part.width()):
+            value = part.pixel(x, y)
+            r, g, b = (value >> 16) & 255, (value >> 8) & 255, value & 255
+            if ((value >> 24) & 255) and max(r, g, b) - min(r, g, b) >= PICKER_KEEP_CHROMA:
+                any_colored = True
+            else:
+                part.setPixel(x, y, 0)
+    return part if any_colored else None
+
+
 def _frame_picker(widget):
     own = _prop(widget, "styleSheet") or u""
     if own == widget.property(DARK_SHEET_PROP):
@@ -1663,7 +2295,8 @@ def _frame_picker(widget):
 
 def _protect(widget):
     """Have every mapping effect above this widget draw it unmapped (swatches keep their real colors)."""
-    _record(widget)  # gives it an id
+    _record(widget)["protected"] = True  # gives it an id; effects made later (a dock's keyed effect is
+                                         # replaced when its frame colors are read again) protect it too
     key = int(widget.property(ID_PROP))
     current = widget
     while not current.isWindow():
@@ -1677,7 +2310,18 @@ def _protect(widget):
         protect = getattr(effect, "freelab_protect", None)
         if protect is None:
             protect = effect.freelab_protect = {}
-        protect[key] = widget
+        if key not in protect:
+            protect[key] = widget
+            widget.update()  # shown before it was found (a Color panel mode): drawn mapped until now, and
+                             # partial repaints kept bands of that
+
+
+def _drawn_natively(widget):
+    """Painted dark by the native engine's hooks (a hooked island, a list's native ink)."""
+    try:
+        return bool(widget.property(HOOKED_PROP) or widget.property(NATIVE_INK_PROP))
+    except Exception:  # deleted meanwhile
+        return False
 
 
 def _protect_effects_inside(widget, effect):
@@ -1688,7 +2332,9 @@ def _protect_effects_inside(widget, effect):
     own = widget.property(ID_PROP)
     for key, record in list(_state()["records"].items()):
         inner = record.get("obj")
-        if record.get("effect") is None or inner is None or record.get("kind") == "title":
+        if inner is None or record.get("kind") == "title":
+            continue
+        if record.get("effect") is None and not record.get("protected") and not _drawn_natively(inner):
             continue
         if own is not None and key == int(own):
             continue  # Qt's isAncestorOf is true for the widget itself
@@ -1720,9 +2366,40 @@ def _drop_stray_effect(widget):
 INDICATOR_BORDER = {"dark": "#8c8c92", "medium": "#a8a8ae"}
 
 
+LEAVE_ALONE_PROP = "freelabLeaveAlone"  # set by FreeLab's own tools on what they draw themselves (previews)
+
+
+def _asked_to_be_left_alone(obj):
+    """The widget, or one of its ancestors within its window, carries LEAVE_ALONE_PROP (a FreeLab
+    tool may mark a whole panel of previews). An action counts by its own property."""
+    current = obj
+    try:
+        while current is not None:
+            if current.property(LEAVE_ALONE_PROP):
+                return True
+            if not current.isWidgetType() or current.isWindow():
+                return False
+            current = current.parentWidget()
+    except Exception:  # deleted meanwhile
+        return False
+    return False
+
+
 def _left_alone(widget, name):
-    return (name in SKIP_CLASSES or any(word in name for word in SKIP_CLASS_WORDS)
-            or (widget.inherits("QAbstractButton") and (_prop(widget, "objectName") or u"").startswith(SWATCH_NAME_PREFIXES)))
+    return (name in SKIP_CLASSES or any(word in name for word in SKIP_CLASS_WORDS) or _asked_to_be_left_alone(widget)
+            or (widget.inherits("QAbstractButton") and (_prop(widget, "objectName") or u"").startswith(SWATCH_NAME_PREFIXES))
+            or (widget.inherits("QAbstractSlider") and _within(widget, COLOR_SLIDER_PANELS)))
+
+
+def _within(widget, classes):
+    current = widget.parentWidget()
+    while current is not None:
+        if _class_name(current) in classes:
+            return True
+        if current.isWindow():
+            return False
+        current = current.parentWidget()
+    return False
 
 
 def _island_ancestor(widget, canvas):
@@ -1732,8 +2409,8 @@ def _island_ancestor(widget, canvas):
         parent = current.parentWidget()
         if parent is None:
             return None
-        if widget_kind(parent, canvas) == "island":
-            return parent
+        if parent.property(HOOKED_PROP) is None and widget_kind(parent, canvas) == "island":
+            return parent  # (a hooked island maps only its own painting: its children are processed as any)
         current = parent
     return None
 
@@ -1855,6 +2532,9 @@ def _set_effect(widget, record, kind, keys=None):
     effect.freelab_edge_target = frame_target(keys) if keys else 0
     effect.freelab_kind = kind
     effect.freelab_gray = kind == "ink" and _gray_text(widget)
+    # a list's rows (the font window's sidebar): drawn on nothing, gray sub-items and dark glyph icons are ink too
+    parent = widget.parentWidget()
+    effect.freelab_list = kind == "ink" and parent is not None and parent.inherits("QAbstractItemView")
     effect.setProperty(EFFECT_PROP, kind)
     widget.setGraphicsEffect(effect)  # deletes any effect FreeLab set before
     record["effect"], record["kind"] = effect, kind  # PythonQt deletes it if no Python reference is kept
@@ -1864,6 +2544,17 @@ def _set_effect(widget, record, kind, keys=None):
         _protect(widget)
         if kind != "picker":
             _protect_effects_inside(widget, effect)
+    if kind == "ink":
+        _unswap_labels_inside(widget)
+
+
+def _forget_effect(widget):
+    """A widget dark mode now leaves as drawn: the effect and the kind it was given earlier go."""
+    record = _record(widget, create=False)
+    if record is not None and record.get("effect") is not None:
+        _clear_effect(widget, record)
+    if widget.property(ISLAND_PROP) is not None:
+        widget.setProperty(ISLAND_PROP, None)
 
 
 def _gray_text(widget):
@@ -1992,6 +2683,10 @@ def _undo_widget(widget, keep_props=False, keep_placeholder=False):
         _restore_icons(widget, record)
         _drop_record(widget, record)
     if widget.inherits("QMenu"):
+        try:
+            _restore_separators(widget)
+        except Exception as exc:
+            _note_error("menu separators", exc)
         for action in widget.actions():
             action_record = _record(action, create=False)
             if action_record is not None:
@@ -2121,6 +2816,7 @@ def process(widget):
         _protect(widget)
         return
     if _left_alone(widget, name):
+        _forget_effect(widget)  # one it got before it asked (a dropdown down to one choice)
         _note_sheet_as_seen(widget)
         _protect(widget)
         return
@@ -2128,6 +2824,9 @@ def process(widget):
     if not canvas and is_content(widget):
         _note_sheet_as_seen(widget)  # "dark interface" mode: canvases, font cells, and previews keep FontLab's look
         _protect(widget)  # and the ink effect of the window around them must not map them (garbled cells)
+        return
+    if _in_hooked_island(widget):
+        _hook_island(widget)  # FontLab's own painting inside a hooked island (the canvas's labels): mapped as it
         return
     if _island_ancestor(widget, canvas) is not None:
         _undo_widget(widget, keep_props=True, keep_placeholder=True)  # the island maps it as drawn in light mode
@@ -2137,11 +2836,19 @@ def process(widget):
         return
     kind = widget_kind(widget, canvas)
     if kind == "island":
-        _make_island(widget)
+        _island(widget)
         return
     _darken_sheet(widget)
     if widget.inherits("QsciScintilla"):
         _recolor_editor(widget)  # after its stylesheet: a repolish could reset QScintilla's defaults
+    if kind is None and visible_unchecked and _shows_white_artwork(widget):
+        visible_unchecked = False  # FontLab's logo: white on purpose, no effect (the ink effect blackened its edges)
+    if _plain_input(widget):
+        kind, visible_unchecked = None, False  # Fusion draws it from the dark palette: right as it is
+        _forget_effect(widget)  # one it got while it had a stylesheet of its own
+    elif kind is None and _light_text_label(widget):
+        _protect(widget)  # light text from the dark palette: no effect above may map it again
+        visible_unchecked = False
     if kind is None and visible_unchecked:
         found = detect_light(widget)  # before its icons are mapped light
         found = LEGACY_KINDS.get(found, found)
@@ -2149,15 +2856,19 @@ def process(widget):
             widget.setProperty(ISLAND_PROP, found)
             kind = found
             if found == "island":
-                _make_island(widget)
+                _island(widget)
                 return
     _darken_icons(widget)
+    if widget.inherits("QAbstractButton") and _icon_has_white_artwork(_prop(widget, "icon")):
+        _protect(widget)  # its white mark as it is: the dock's keyed effect turned the white middles dark
     if kind is None and visible_unchecked:
         found = detect_ink(widget)
         if found:
             widget.setProperty(ISLAND_PROP, found)
             kind = found
-    if kind in ("ink", "edges", "title", "subpixel", "defringe"):
+    if kind == "ink" and _native_ink_target(widget):
+        _native_ink(widget)
+    elif kind in ("ink", "edges", "title", "subpixel", "defringe"):
         _set_effect(widget, _record(widget), kind)
     elif kind == "keyed" and widget.isVisible():
         record = _record(widget)
@@ -2239,16 +2950,103 @@ def _sweep():
     todo = [w for w in app.allWidgets()
             if full or w.property(SEEN_PROP) is None or (w.isVisible() and (_unchecked(w) or _restyled(w)))]
     if todo:
+        if state.get("hooked") and full:
+            _update_hooked(app)  # forgets islands FontLab deleted (their addresses may be reused)
         _hook_menus(todo)
         _enqueue(todo, "dark")
         if len(todo) > 200 and not full:
             _log("sweep %d queued %d (queue %d)" % (state["sweeps"], len(todo), len(state["queue"])))
     dark_title_bars(True)  # windows opened since the last sweep
+    _follow_color_font(full)
     if full:
         _prune_relit()
     for key, record in list(state["records"].items()):
         if not _alive(record["obj"]):
             del state["records"][key]
+
+
+COLOR_SAMPLE = 48  # glyphs looked at for SVG or bitmap pictures, after every glyph's color flag
+
+
+def _color_font_key(package):
+    """Which open font and master: FontLab's own number for the font (fgPackage.id, the same through
+    every Python wrapper of it; two reads of currentPackage give two wrappers), its name, and the
+    master. Two versions of one font (a mono and a color one) share the name and glyph count."""
+    try:
+        number = package.fgPackage.id
+    except Exception:
+        number = None
+    return (number, getattr(package, "tfn", None), package.master)
+
+
+def font_in_color(package, cache=None):
+    """True for a font that draws in color: shapes with their own colors (COLR, as FontLab imports
+    it), or pictures (SVG or bitmap glyphs). Every glyph is looked at, a long while for a large CJK
+    font: with a cache (a dict), the answer is kept per open font and master until its glyph count
+    changes. Each test fails on its own, and the glyphs are never indexed by position (indexing
+    FontLab's native sequences crashed FontLab 8, beyond the reach of try)."""
+    try:
+        glyphs = package.fgPackage.glyphs
+        count, master = len(glyphs), package.master
+        key = _color_font_key(package)
+    except Exception:
+        return False
+    if cache is not None and cache.get(key, (None,))[0] == count:
+        return cache[key][1]
+    step, names, colors, found = max(1, count // COLOR_SAMPLE), [], True, False
+    try:
+        for i, glyph in enumerate(glyphs):
+            if i % step == 0:
+                try:
+                    names.append(glyph.name)
+                except Exception:
+                    pass
+            if colors:
+                try:
+                    if glyph.hasColors():
+                        found = True
+                        break
+                except Exception:
+                    colors = False  # no color flag: the pictures are still looked for
+    except Exception:
+        pass
+    if not found:
+        try:
+            for name in names:
+                glyph = package.findName(name)
+                layer = glyph.getLayerByName(master) if glyph is not None else None
+                if layer is not None and any(shape.shapeType == "ShapeImage" for shape in layer.shapes):
+                    found = True
+                    break
+        except Exception:
+            pass
+    if cache is not None:
+        cache[key] = (count, found)
+    return found
+
+
+def _follow_color_font(full):
+    """A color font's own rules: while it is the current font, the native engine draws its pictures
+    and SVG glyphs as they are (what the user gets), mapping only what FontLab paints around them."""
+    state = _state()
+    lib = state.get("hooked_lib") if state.get("hooked") else None
+    if lib is None:
+        return
+    try:
+        import fontlab
+        package = fontlab.flWorkspace.instance().currentPackage
+        key = _color_font_key(package) if package is not None else None
+    except Exception:
+        return
+    if key == state.get("color_font_key") and not full:
+        return
+    on = bool(package is not None and font_in_color(package, state.setdefault("color_fonts", {})))
+    state["color_font_key"] = key
+    if on != state.get("color_content", False):
+        state["color_content"] = on
+        lib.freelab_hooks_set_color_content(1 if on else 0)
+        _log("a color font is %s" % ("current" if on else "no longer current"))
+        _repaint_all(_qt()[0].instance())
 
 
 def _module():
@@ -2311,12 +3109,50 @@ def _menu_hook(menu):
     return shown
 
 
+def lighter_name(name, factor):
+    """#rrggbb with each channel times factor percent, at most 255 (QColor.lighter, for grays)."""
+    channels = [int(name[i:i + 2], 16) for i in (1, 3, 5)]
+    return u"#" + u"".join(u"%02x" % min(255, int(round(c * factor / 100.0))) for c in channels)
+
+
+def separator_sheet(color_name):
+    """The stylesheet a dark menu's separators are drawn with: a line of the given color. (Only that:
+    any rule more, a check mark's, made Qt draw the whole menu by the stylesheet, out of Fusion's look.)"""
+    return u"QMenu::separator { height: 1px; background: %s; margin: 4px 8px; }" % color_name
+
+
+def _lighten_separators(menu):
+    """Fusion draws a menu separator in a shade of the window color barely apart from it on a dark
+    menu; a menu with no stylesheet of its own gets lighter ones (taken off again with dark mode)."""
+    if menu.property(SEPARATOR_PROP) is not None or _prop(menu, "styleSheet"):
+        return
+    palette = _prop(menu, "palette")
+    window = palette.color(_gui("QPalette").Window).name()
+    # (a check mark drawn by an indicator rule here made Qt draw the whole menu by the stylesheet: no)
+    sheet = separator_sheet(lighter_name(window, SEPARATOR_LIGHTER))
+    menu.setProperty(SEPARATOR_PROP, sheet)
+    menu.setStyleSheet(sheet)
+
+
+def _restore_separators(menu):
+    sheet = menu.property(SEPARATOR_PROP)
+    if sheet is None:
+        return
+    if _prop(menu, "styleSheet") == sheet:
+        menu.setStyleSheet(u"")  # else FontLab restyled it since: keep FontLab's
+    menu.setProperty(SEPARATOR_PROP, None)
+
+
 def _on_menu_shown(menu):
     state = _state()
     if not state["on"] or state.get("busy") or not _alive(menu):
         return
     state["busy"] = True  # the worker must not re-enter from a signal sent while processing
     try:
+        try:
+            _lighten_separators(menu)
+        except Exception as exc:
+            _note_error("menu separators", exc)
         for widget in [menu] + _descendants(menu):
             if widget.property(SEEN_PROP) is None or widget.property(QUEUED_PROP) == "dark":
                 widget.setProperty(QUEUED_PROP, None)
@@ -2451,7 +3287,330 @@ def _watch_windows(follow):
         _stop_timer(state, "theme_watch")
 
 
-def configure(dark=None, content=None, follow_windows=None, shade=None):
+# ---------------------------------------------------------------------------
+# The native engine (darkmode/native/freelab_hooks.c)
+# ---------------------------------------------------------------------------
+# Two engines darken the islands, the surfaces FontLab paints itself in fixed light colors (the glyph
+# canvas, font cells, previews, rulers): "script" gives each FontLab's light look and maps the pixels
+# it drew, through a graphics effect; "native" maps the colors FontLab hands to Qt as it paints them,
+# in the hooks library, before anything is drawn. Everything else (palette, Fusion, stylesheets,
+# icons, title bars, editors, lists, the other effects) is the same in both. If the native engine cannot start (no library, another Qt build), the script engine runs.
+ENGINES = ("script", "native")
+HOOKS_VERSION = 20
+PALETTE_GROUPS, PALETTE_ROLES = 3, 21
+
+
+def engine_setting(settings):
+    engine = settings.get("engine", "script")
+    return engine if engine in ENGINES else "script"
+
+
+def hooks_path():
+    name = "freelab_hooks-v%d-%d.dll" % (HOOKS_VERSION, NATIVE_VERSION)  # both: a loaded library stays locked
+    return os.environ.get("FREELAB_HOOKS_DLL") or os.path.join(state_dir(), "bin", name)
+
+
+def _hooks():
+    """The hooks library, loaded once per FontLab session (its import-table state lives in it), or None."""
+    holder = _state()
+    lib = holder.get("hooks_lib")
+    if lib is not None and holder.get("hooks_lib_path") == hooks_path():
+        return lib
+    path = hooks_path()
+    if not os.path.isfile(path):
+        raise RuntimeError("the native engine's library is missing: %s (tools/install-fontlab.ps1 builds it)" % path)
+    import ctypes
+    lib = ctypes.PyDLL(path)  # keeps the interpreter lock: the wrappers never call back into Python
+    if lib.freelab_hooks_version() != HOOKS_VERSION * 1000 + NATIVE_VERSION:
+        raise RuntimeError("the native engine's library is another version")
+    lib.freelab_hooks_init.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+    lib.freelab_hooks_add_module.argtypes = [ctypes.c_void_p]
+    lib.freelab_hooks_set_palette.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    lib.freelab_hooks_install.argtypes = [ctypes.c_double, ctypes.c_double, ctypes.c_double]
+    lib.freelab_hooks_set_hooked.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    lib.freelab_hooks_set_ink.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    lib.freelab_hooks_add_ink_module.argtypes = [ctypes.c_void_p]
+    lib.freelab_hooks_set_subpixel.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_double]
+    lib.freelab_hooks_add_svg_module.argtypes = [ctypes.c_void_p]
+    lib.freelab_hooks_set_color_content.argtypes = [ctypes.c_int]
+    kernel32 = ctypes.WinDLL("kernel32")
+    kernel32.GetModuleHandleW.restype = ctypes.c_void_p
+    kernel32.GetModuleHandleW.argtypes = [ctypes.c_wchar_p]
+    qtgui = kernel32.GetModuleHandleW(u"Qt5Gui.dll")
+    virtual_protect = ctypes.cast(kernel32.VirtualProtect, ctypes.c_void_p).value
+    qtwidgets = kernel32.GetModuleHandleW(u"Qt5Widgets.dll")
+    if not qtgui or not qtwidgets or lib.freelab_hooks_init(qtgui, virtual_protect, qtwidgets) != 1:
+        raise RuntimeError("Qt is not the build the native engine knows (Qt 5.14.2)")
+    found = lib.freelab_hooks_add_module(kernel32.GetModuleHandleW(None))  # FontLab's own program
+    if found not in (-2,) and found < HOOKS_MIN_FOUND:
+        raise RuntimeError("FontLab's program imports only %d of the calls the native engine maps" % found)
+    svg = kernel32.GetModuleHandleW(u"Qt5Svg.dll")
+    if svg:  # FontLab draws some artwork (its logo) by handing an SVG to QSvgRenderer, which paints in Qt5Svg
+        lib.freelab_hooks_add_svg_module(svg)  # left to Qt while a color font is current (its SVG glyphs)
+    lib.freelab_hooks_add_ink_module(qtwidgets)  # its pens, for the lists' rows it draws (the ink viewports only)
+    holder["hooks_lib"], holder["hooks_lib_path"] = lib, path
+    return lib
+
+
+HOOKS_MIN_FOUND = 25  # of 29: FontLab 7.2's program imports all of them
+
+
+def _palette_table(palette):
+    """A palette's colors as 0xAARRGGBB, groups (Active, Disabled, Inactive) by roles."""
+    import ctypes
+    QPalette = _gui("QPalette")
+    table = (ctypes.c_uint32 * (PALETTE_GROUPS * PALETTE_ROLES))()
+    groups = (QPalette.Active, QPalette.Disabled, QPalette.Inactive)
+    for g, group in enumerate(groups):
+        for role in range(PALETTE_ROLES):
+            try:
+                table[g * PALETTE_ROLES + role] = palette.color(group, role).rgba() & 0xffffffff
+            except Exception:
+                table[g * PALETTE_ROLES + role] = 0
+    return table
+
+
+NATIVE_SETTLE_MS = 15000  # the native engine counts as started once it has run this long
+NATIVE_FELL_BACK = ("FreeLab dark mode: FontLab closed while the native engine was starting, so the script "
+                    "engine runs instead. To try the native engine again, choose it in Scripts > FreeLab > "
+                    "Dark Mode Settings.")
+
+
+def _install_hooks(app):
+    """Start the native engine: FontLab's palette reads answer light, its painting is mapped. True when on.
+
+    A guard against a crash at start: darkmode.json holds native_pending from just before the hooks go
+    in until the engine has run NATIVE_SETTLE_MS. Found at the next start, it means FontLab closed
+    while the engine was starting (most likely a crash): the script engine runs from then on.
+    """
+    state = _state()
+    if state.get("hooked"):
+        # applied again while on (the re-applies after a switch, a sweep of settings): the hooks are
+        # in; only the palette FontLab's code sees is brought up to date
+        try:
+            import ctypes
+            dark, light = _palette_table(app.palette()), _palette_table(state["saved"]["palette"])
+            state["hooked_lib"].freelab_hooks_set_palette(ctypes.addressof(dark), ctypes.addressof(light))
+        except Exception as exc:
+            _note_error("native engine", exc)
+        return True
+    settings = load_settings()
+    # A mark this FontLab session set is its own start, still settling (state lives as long as FontLab
+    # does); only one left by an earlier session means FontLab closed while the engine was starting.
+    if settings.pop("native_pending", None) and not state.get("native_pending_mine"):
+        settings["engine"] = "script"
+        save_settings(settings)
+        state["engine"] = "script"
+        _note_error("native engine", "FontLab closed while it was starting; the script engine runs instead")
+        print(NATIVE_FELL_BACK)
+        return False
+    settings["native_pending"] = True
+    save_settings(settings)
+    state["native_pending_mine"] = True
+    try:
+        lib = _hooks()
+        import ctypes
+        dark, light = _palette_table(app.palette()), _palette_table(state["saved"]["palette"])
+        lib.freelab_hooks_set_palette(ctypes.addressof(dark), ctypes.addressof(light))
+        if lib.freelab_hooks_install(DARK_OKL, LIGHT_OKL, KEEP_TINT_CONTENT) < 0:
+            # a slot it could not write: the library put back the ones it had written
+            raise RuntimeError("the native engine could not hook FontLab's calls")
+        state["hooked"], state["hooked_lib"] = True, lib
+        state["hooked_addresses"], state["ink_addresses"] = [], []
+        _update_hooked(app)
+    except Exception as exc:
+        _clear_native_pending()
+        _note_error("native engine", exc)
+        state["engine"] = "script"  # falls back: dark mode still works, through effects
+        _remove_hooks(app)  # never both engines at once
+        return False
+    _repaint_all(app)
+    _core("QTimer").singleShot(NATIVE_SETTLE_MS, _native_settled)
+    return True
+
+
+def _clear_native_pending():
+    settings = load_settings()
+    if settings.pop("native_pending", None):
+        save_settings(settings)
+
+
+def _native_settled():
+    try:
+        if _state().get("hooked"):
+            _clear_native_pending()
+    except Exception as exc:  # a Qt timer callback must not raise
+        _note_error("native engine", exc)
+
+
+def _island(widget):
+    """An island: the native engine hooks one FontLab paints itself; otherwise (the script engine, or
+    an item view, whose rows Qt draws) the script engine's light look and effect."""
+    state = _state()
+    if state.get("engine") == "native" and state.get("hooked") and _hookable(widget):
+        _hook_island(widget)
+    else:
+        _make_island(widget)
+
+
+def _child_widgets(widget):
+    """The widgets inside `widget`, from its own children (not a scan of every widget, as
+    _descendants does: a hooked island is met hundreds of times at start)."""
+    found, pending = [], [widget]
+    while pending:
+        for child in pending.pop().children():
+            try:
+                if child.isWidgetType():
+                    found.append(child)
+                    pending.append(child)
+            except Exception:
+                pass
+    return found
+
+
+def _in_hooked_island(widget):
+    """A widget of FontLab's own class (Qt's start with Q) inside a hooked island: the script engine's
+    island effect covers it, so the hooks map it too."""
+    if _class_name(widget).startswith("Q") or widget.property(HOOKED_PROP):
+        return False
+    if any(widget.inherits(base) for base in QT_DRAWN_BASES):
+        return False
+    state = _state()
+    if state.get("engine") != "native" or not state.get("hooked"):
+        return False
+    current = widget
+    while not current.isWindow():
+        current = current.parentWidget()
+        if current is None:
+            return False
+        if current.property(HOOKED_PROP):
+            return True
+    return False
+
+
+def _hookable(widget):
+    if widget.inherits("QAbstractItemView") or _class_name(widget) in SCRIPT_ISLAND_CLASSES:
+        return False
+    parent = widget.parentWidget()
+    return not (parent is not None and parent.inherits("QAbstractItemView"))
+
+
+def _hook_island(widget):
+    """Leave the island's painting to the hooks: no light look, no effect. Qt still draws its
+    stylesheet and icons, which are darkened as any widget's."""
+    first = widget.property(HOOKED_PROP) is None
+    _clear_effect(widget, _record(widget))  # an effect dark mode set before it was found in a hooked island
+    widget.setProperty(HOOKED_PROP, True)
+    _protect(widget)  # dark as it is painted: an effect around it (the font window's ink) must not map it again
+    _darken_sheet(widget)
+    _darken_icons(widget)
+    if first:
+        _enqueue([w for w in _child_widgets(widget) if _in_hooked_island(w)], "dark")
+    state = _state()
+    pointer = _sci_pointer(widget)
+    if pointer and pointer not in state.setdefault("hooked_addresses", []):
+        state["hooked_addresses"].append(pointer)
+        _send_hooked(state)
+
+
+def _update_hooked(app):
+    """The hooked islands' addresses, rebuilt from the living widgets (FontLab deletes and makes
+    windows; a deleted island's address may come back as another widget's)."""
+    state = _state()
+    if state.get("hooked_lib") is None or not state.get("hooked"):
+        return
+    addresses, inks = [], []
+    for widget in app.allWidgets():
+        try:
+            hooked, ink = widget.property(HOOKED_PROP), widget.property(NATIVE_INK_PROP)
+            if hooked or ink:
+                pointer = _sci_pointer(widget)
+                if pointer:
+                    (addresses if hooked else inks).append(pointer)
+        except Exception:
+            pass
+    if addresses != state.get("hooked_addresses"):
+        state["hooked_addresses"] = addresses
+        _send_hooked(state)
+    if inks != state.get("ink_addresses"):
+        state["ink_addresses"] = inks
+        _send_ink(state)
+
+
+def _native_ink_target(widget):
+    state = _state()
+    if state.get("engine") != "native" or not state.get("hooked"):
+        return False
+    parent = widget.parentWidget()
+    if _prop(widget, "objectName") != "qt_scrollarea_viewport" or parent is None or not parent.inherits("QAbstractItemView"):
+        return False
+    delegates = [parent.itemDelegate()]
+    model = parent.model()
+    for column in range(min(model.columnCount() if model is not None else 0, 64)):
+        delegates.append(parent.itemDelegateForColumn(column))
+    return all(d is None or _class_name(d) in NATIVE_INK_DELEGATES for d in delegates)
+
+
+def _native_ink(widget):
+    """A list's viewport: its dark pens are mapped by the hooks, with no effect."""
+    _clear_effect(widget, _record(widget))
+    widget.setProperty(NATIVE_INK_PROP, True)
+    _protect(widget)
+    state = _state()
+    pointer = _sci_pointer(widget)
+    if pointer and pointer not in state.setdefault("ink_addresses", []):
+        state["ink_addresses"].append(pointer)
+        _send_ink(state)
+    widget.update()
+
+
+def _send_ink(state):
+    import ctypes
+    addresses = state["ink_addresses"]
+    table = (ctypes.c_uint64 * max(1, len(addresses)))(*addresses)
+    state["hooked_lib"].freelab_hooks_set_ink(ctypes.addressof(table), len(addresses))
+
+
+def _send_hooked(state):
+    import ctypes
+    addresses = state["hooked_addresses"]
+    table = (ctypes.c_uint64 * max(1, len(addresses)))(*addresses)
+    state["hooked_lib"].freelab_hooks_set_hooked(ctypes.addressof(table), len(addresses))
+
+
+def _remove_hooks(app):
+    state = _state()
+    if not state.get("hooked"):
+        return
+    state["hooked"] = False
+    _clear_native_pending()  # switched off in order: no crash to guard against
+    try:
+        state["hooked_lib"].freelab_hooks_remove()
+    except Exception as exc:
+        _note_error("native engine", exc)
+    _repaint_all(app)
+
+
+def _repaint_all(app):
+    try:
+        _gui("QPixmapCache").clear()  # pixmaps drawn before (light, or dark) are drawn again
+    except Exception:
+        pass
+    for widget in app.allWidgets():
+        try:
+            if widget.isVisible():
+                widget.update()
+        except Exception:
+            pass
+
+
+def native():
+    """True when the native engine is the one running."""
+    state = _state()
+    return state["on"] and state.get("engine") == "native" and bool(state.get("hooked"))
+
+
+def configure(dark=None, content=None, follow_windows=None, shade=None, engine=None):
     """Change the options and apply them now; None leaves an option as it is. Returns the settings."""
     settings = load_settings()
     old_content = content_setting(settings)
@@ -2465,13 +3624,16 @@ def configure(dark=None, content=None, follow_windows=None, shade=None):
         settings.pop("canvas", None)
     if follow_windows is not None:
         settings["follow_windows"] = bool(follow_windows)
+    old_engine = engine_setting(settings)
+    if engine is not None:
+        settings["engine"] = engine if engine in ENGINES else "script"
     save_settings(settings)
     follow = bool(settings.get("follow_windows"))
     want_dark = windows_is_dark() if follow else bool(settings.get("enabled"))
     state = _state()
     if state["on"] and (not want_dark or content_setting(settings) != old_content
-                        or settings.get("shade", "dark") != old_shade):
-        restore()  # a change of content mode or shade is rebuilt from scratch
+                        or settings.get("shade", "dark") != old_shade or engine_setting(settings) != old_engine):
+        restore()  # a change of content mode, shade, or engine is rebuilt from scratch
     if want_dark and not state["on"]:
         apply_dark()
     _watch_windows(follow)
@@ -2547,7 +3709,15 @@ def _framed_style(fusion):
 
         class FreeLabStyle(QProxyStyle):
             def drawPrimitive(self, element, option, painter, widget=None):
-                QProxyStyle.drawPrimitive(self, element, option, painter, widget)
+                try:
+                    QProxyStyle.drawPrimitive(self, element, option, painter, widget)
+                except ValueError:
+                    # PythonQt found no overload for some options with their widget (a tool button's
+                    # menu arrow: a QStyleOptionToolButton): drawn without the widget, or not at all
+                    try:
+                        QProxyStyle.drawPrimitive(self, element, option, painter)
+                    except Exception:
+                        return
                 try:
                     which = int(element)
                     if which != check and which != radio:
@@ -2641,6 +3811,7 @@ def apply_dark():
     state["saved"].setdefault("font", _gui("QFont")(app.font()))  # a state kept from before fonts were saved
     settings = load_settings()
     state["canvas"] = content_setting(settings)
+    state["engine"] = engine_setting(settings)
     state["log"] = bool(settings.get("log", False))
     shade = set_shade(settings.get("shade", "dark"))
     state["shade"] = shade
@@ -2653,7 +3824,9 @@ def apply_dark():
     state["on"] = True
     _keep_module(state)
     state["queue"][:] = [item for item in state["queue"] if item[0] == "dark"]  # switching off may not have finished
-    _darken_preferences()
+    if state["engine"] == "native":
+        _install_hooks(app)  # falls back to the script engine when it cannot start
+    _darken_preferences()  # a near-white workspace, which either engine maps to dark mode's canvas
     dark_title_bars(True)
     widgets = list(app.allWidgets())
     _enqueue([w for w in widgets if not w.isVisible()], "dark")
@@ -2680,6 +3853,8 @@ def restore():
     saved = state["saved"]
     if app is None or saved is None:
         return
+    if app is not None:
+        _remove_hooks(app)
     for record in list(state["records"].values()):  # effects, palettes, icons: quick, all at once
         obj = record["obj"]
         if not _alive(obj):
@@ -2697,6 +3872,8 @@ def restore():
     state["mapped_keys"].clear()
     state["originals"].clear()
     state["swatches"].clear()
+    state.pop("logo_keys", None)  # list logos mapped at this shade: another shade maps them anew
+    state.pop("color_fonts", None)  # fonts found in color or not: looked at anew when switched on
     if was_on:
         _restore_preferences()
     dark_title_bars(False)
@@ -2756,7 +3933,8 @@ def status():
     return {
         "version": VERSION, "on": state["on"], "queue": len(state["queue"]), "records": len(state["records"]),
         "islands": kinds.count("island"), "titles": kinds.count("title"), "native": _native() is not None,
-        "canvas": state["canvas"], "errors": list(state["errors"][-10:]),
+        "canvas": state["canvas"], "engine": state.get("engine", "script"), "hooked": bool(state.get("hooked")),
+        "errors": list(state["errors"][-10:]),
         "original_style": (state["saved"] or {}).get("style_chain"),
     }
 

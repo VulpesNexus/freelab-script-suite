@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 103
+#define FREELAB_PIXELS_VERSION 111
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -513,6 +513,7 @@ EXPORT void freelab_map_keyed(uint8_t *pixels, int64_t count, int64_t width, con
 #define ANCHORS_RELIGHT 2 /* back to light: a dark main paper turns white, light gray text black, the rest stays */
 #define ANCHORS_ICON 3 /* as ANCHORS_ALL, but colored parts of middle lightness (blue guides, green fills) stay */
 #define ANCHORS_SUBPIXEL_SYNTAX 5 /* as ANCHORS_SUBPIXEL, for an editor on light paper: colored syntax, never black assumed */
+#define ANCHORS_INK_LIST 6 /* as ANCHORS_INK, for a list's rows: drawn on nothing, its gray sub-items and glyph icons are ink too */
 #define ANCHORS_SUBPIXEL 4 /* as ANCHORS_ALL, for ClearType text drawn on purpose (TrueType Hinting's preview):
                               each channel's coverage between the paper and the text is kept */
 #define ICON_KEEP_CHROMA 0.08
@@ -523,6 +524,27 @@ EXPORT void freelab_map_keyed(uint8_t *pixels, int64_t count, int64_t width, con
 #define DIM_INK_ABOVE_MAIN 0.08
 #define DIM_INK_MAX_OKL 0.58
 #define DIM_INK_LIFT 0.35
+#define DIM_INK_MAX_OKL_BARE 0.66 /* on nothing (a list painting no background), gray drawn for a light ground: sub-items */
+/* Glyph icons drawn on nothing, for a light ground (the font window's sidebar): FontLab draws them dark
+ * gray, solid enough to pass for surfaces, and its badges as dark tiles behind white letters, in the
+ * same colors. Each connected shape decides: none lighter than GLYPH_ICON_LIGHT_HLS inside its box, an
+ * icon, mapped as ink; light text inside, a badge, drawn as it is (a black badge mapped light lost its
+ * white letter). */
+#define GLYPH_ICON_MAX_OKL 0.5
+#define GLYPH_ICON_MAX_SIDE 48 /* pixels: a shape this large both ways (or four times as long) is a panel */
+#define GLYPH_ICON_LIGHT_HLS 0.8
+#define GLYPH_BADGE_MIN_LIGHT 4 /* light pixels in a shape's box: a badge's letters, */
+#define GLYPH_BADGE_LIGHT_SHARE 0.04 /* as a share of the shape's own pixels */
+#define GLYPH_SOLID_SHARE 0.7 /* a shape filling this much of its box is a block, not a glyph */
+#define GLYPH_ICON_NEAR 4 /* per channel: a pixel of the shape's color (premultiplied rounding of translucent text) */
+#define GLYPH_ICON_GROW 24 /* per channel: the shape goes on through its blends with a translucent fill (a flag's tint) */
+/* A row FontLab paints dark itself (the selected row of Export Profiles, #313131 from the dark palette,
+ * with light ClearType text) is a panel of such a color, and the counters of its letters, closed off
+ * by the text, are small shapes of that same color: mapped as glyph icons, they filled the letters
+ * with light gray, and the text looked struck twice. A shape inside the box of a panel of its own
+ * color, with only opaque pixels around it, is a hole in what is drawn on the panel, and goes as the
+ * panel does. */
+#define GLYPH_MAX_PANELS 64 /* panels remembered per image (later ones are not) */
 #define RELIGHT_PAPER_OKL 0.35
 #define RELIGHT_TEXT_OKL 0.75
 #define RELIGHT_SPREAD 30
@@ -549,6 +571,8 @@ EXPORT void freelab_map_keyed(uint8_t *pixels, int64_t count, int64_t width, con
 #define MAIN_MIN_AREA_SHARE 0.1 /* the most frequent surface is the background only if it covers this much of the image
                                   * (an unticked box in a list painted on nothing is not) */
 #define ON_LIGHT_SHARE 0.5 /* a text color this often inside a light surface (touching it, not the background) */
+#define KEPT_TEXT_NEAR_LIGHT 0.03 /* OKLab L around the mapping's light end: the dark interface's own light text, */
+#define KEPT_TEXT_MAX_SPREAD 12 /* a gray (a ClearType fringe of other text is tinted) */
 #define LIGHT_SURFACE_SPREAD 60
 #define INK_MAX_OKL 0.5
 #define INK_BELOW_MAIN 0.1 /* ink is at least this much darker (OKLab L) than the main background */
@@ -571,6 +595,74 @@ static uint32_t m_key[MEMO_SIZE], m_mask[MEMO_SIZE], m_val[MEMO_SIZE], m_gen[MEM
 static int8_t a_index[MAX_INDEXED];
 static uint8_t white_mark[MAX_INDEXED]; /* decided on the pixels as drawn: 1 a white mark kept, 2 a box edge (ink); 4 light text on a kept color (content);
                                          * 3 a ClearType fringe (content) */
+static uint8_t icon_px[MAX_INDEXED]; /* ink mode on nothing: 1 a glyph icon's pixel, mapped; 2 seen; 3 a badge's, kept */
+static int32_t icon_queue[MAX_INDEXED]; /* a shape's pixels, found in turn */
+static int last_paper_found; /* the last call found a main background */
+static int mode_list; /* set per call: a list's rows (ANCHORS_INK_LIST) */
+
+/* A list's rows are drawn on nothing, so their text's smoothing is its transparency. Dark text
+ * mapped light keeps that coverage, and light on dark looks heavier than dark on light did: the
+ * small counters of bold text (e, p, O in Export Profiles) filled in. The partly covered pixels of
+ * light ink get less coverage (a power of it), as text drawn light on dark is. Only the edges: a pixel
+ * the mapping changed, beside a more opaque one (a 4-neighbor). Gray sub-items drawn translucent
+ * throughout keep their cores, and light pixels drawn as they are (a badge's white letters) stay. */
+#define LIGHT_SMOOTHING_POWER 12 /* coverage ** (1 + 12 / 20): ** 1.6, bold counters open, small text whole */
+#define LIGHT_SMOOTHING_MIN_HLS 0.55
+static uint8_t smoothing_table[256];
+static int smoothing_table_made;
+static uint8_t thin_px[MAX_INDEXED]; /* a list's rows: 1 the mapping changed the pixel, 2 an edge thinned */
+
+static int more_opaque_beside(const uint32_t *p, int64_t i, int64_t width, int64_t count)
+{
+    uint32_t a = p[i] >> 24;
+    int64_t x = i % width;
+    return (x > 0 && (p[i - 1] >> 24) > a) || (x + 1 < width && (p[i + 1] >> 24) > a)
+           || (i >= width && (p[i - width] >> 24) > a) || (i + width < count && (p[i + width] >> 24) > a);
+}
+
+static void thin_light_smoothing(uint32_t *p, int64_t count, int64_t width)
+{
+    int64_t i;
+    if (!smoothing_table_made) {
+        int a;
+        for (a = 0; a < 256; a++) {
+            double x = a / 255.0, y = 1.0, base = x;
+            int k;
+            /* x ** (1 + LIGHT_SMOOTHING_POWER / 20) without the C runtime: x times a root found by bisection */
+            double lo = 0.0, hi = 1.0;
+            for (k = 0; k < 40; k++) { /* r with r ** 20 == x ** LIGHT_SMOOTHING_POWER */
+                double mid = (lo + hi) / 2.0, m = 1.0, t = 1.0;
+                int e;
+                for (e = 0; e < 20; e++)
+                    m *= mid;
+                for (e = 0; e < LIGHT_SMOOTHING_POWER; e++)
+                    t *= base;
+                if (m < t)
+                    lo = mid;
+                else
+                    hi = mid;
+            }
+            y = x * lo;
+            smoothing_table[a] = (uint8_t)(y * 255.0 + 0.5);
+        }
+        smoothing_table[255] = 255;
+        smoothing_table_made = 1;
+    }
+    /* chosen first, written after: the alphas compared are the ones drawn */
+    for (i = 0; i < count; i++) {
+        uint32_t v = p[i], a = v >> 24;
+        if (thin_px[i] != 1 || a == 0 || a == 255)
+            continue;
+        if (lightness((uint8_t)(v >> 16), (uint8_t)(v >> 8), (uint8_t)v) < LIGHT_SMOOTHING_MIN_HLS)
+            continue;
+        if (more_opaque_beside(p, i, width, count))
+            thin_px[i] = 2;
+    }
+    for (i = 0; i < count; i++) {
+        if (thin_px[i] == 2)
+            p[i] = ((uint32_t)smoothing_table[p[i] >> 24] << 24) | (p[i] & 0xffffffU);
+    }
+}
 static uint32_t generation = 0;
 
 typedef struct {
@@ -578,6 +670,7 @@ typedef struct {
     double mr, mg, mb; /* mapped (equal to r, g, b when kept) */
     double hrun, vrun, okl, chroma, oa, ob;
     int64_t count, slot, beside_light, on_light;
+    int64_t at_light; /* its pixels right beside a light surface (on_light: those not beside the main background too) */
     uint64_t touches; /* candidates right beside its pixels (all when not surveyed) */
     double light_okl; /* the lightest light surface it lies inside (on_light) */
     double ir, ig, ib; /* mapped as an island would (ink mode, inside a light surface) */
@@ -588,6 +681,7 @@ static Anchor anchors[MAX_CANDIDATES];
 static int anchor_count;
 static uint32_t light_bits; /* ink mode: anchors that are light surfaces turned dark */
 static uint32_t main_bit; /* ink mode: the kept main background (anchor 0), when there is one */
+static uint32_t kept_text_bits; /* ink mode: light text drawn as it is on a light surface that turns dark too (see find_anchors) */
 static Anchor candidates[MAX_CANDIDATES]; /* diagnostics: the candidates of the last call */
 static int candidate_count, candidate_dropped[MAX_CANDIDATES];
 
@@ -747,11 +841,15 @@ static int fringe_of_lighter_color(int k)
         return 0;
     for (j = 1; j < anchor_count; j++) {
         const Anchor *o = &anchors[j];
-        double t, ee;
+        double t, ee, res;
         if (j == k || o->surface || o->long_line || o->okl <= c->okl || o->chroma < INK_CHROMA)
             continue;
-        if (blend_fit(c->r, c->g, c->b, paper, o, &t, &ee) <= LOCAL_BLEND_TOLERANCE * LOCAL_BLEND_TOLERANCE * ee
-            && t > 0.03 && t < 0.97)
+        if (c->touches != ~(uint64_t)0 && !((c->touches >> j) & 1U))
+            continue; /* smoothing touches the text it smooths: the Output panel's dark gray lines, near enough
+                       * to a blend of the paper and its red error lines by the fit below, lie apart from them
+                       * (kept dark, they could not be read whenever an error was shown) */
+        res = blend_fit(c->r, c->g, c->b, paper, o, &t, &ee); /* first: the comparison reads ee */
+        if (res <= LOCAL_BLEND_TOLERANCE * LOCAL_BLEND_TOLERANCE * ee && t > 0.03 && t < 0.97)
             return 1;
     }
     return 0;
@@ -829,12 +927,25 @@ static double blend_fit(double r, double g, double b, const Anchor *a, const Anc
  * surface (a badge's rounded edge) or darker (or more colored) text-like candidate, of any
  * frequency, is smoothing between them, not a color of its own. Smoothing between a background
  * and lighter text is left alone: it stays as it is anyway. */
+static int light_surface_candidate(const Anchor *a);
+
 static int is_blend(int k, int n)
 {
     const Anchor *c = &anchors[k];
     int i, j;
+    uint64_t surfaces = 0, reach = c->touches, seen = (uint64_t)1 << k;
     if (c->surface || c->long_line)
         return 0;
+    for (i = 0; i < n; i++)
+        surfaces |= anchors[i].surface ? (uint64_t)1 << i : 0U;
+    /* what it reaches: the candidates it touches, and those the text-like ones among them touch, in turn */
+    for (i = 0; i < n && c->touches != ~(uint64_t)0; i++) {
+        if (((reach >> i) & 1U) && !((seen >> i) & 1U) && !anchors[i].surface) {
+            seen |= (uint64_t)1 << i;
+            reach |= anchors[i].touches;
+            i = -1; /* again, with what it added */
+        }
+    }
     if (c->okl < c->light_okl && (double)c->on_light >= ON_LIGHT_SHARE * (double)c->count)
         return 0; /* gray text on a light row lies between the background and a white surface too */
     for (i = 0; i < k; i++) {
@@ -856,6 +967,24 @@ static int is_blend(int k, int n)
             if (ink->surface && !((c->touches >> j) & 1U))
                 continue; /* a surface's edge touches it: gray text on a dark row lies between it and a white surface
                              * too (text fringes chain through each other, so text ink needs no touch) */
+            /* A light surface that turns dark beside what stays (Preview Features' list, painted dark by
+             * FontLab but for the near-white row under the pointer): colors of the dark rows fitted lines
+             * to that row's colors, and dropped, they were redrawn as blends with those colors as they turn
+             * dark: dark on dark. Three cases, each a color that lies elsewhere than the blend it fitted: */
+            if (c->touches != ~(uint64_t)0 && light_surface_candidate(s)) {
+                if (ink->surface && !light_surface_candidate(ink) && !((reach >> i) & 1U))
+                    continue; /* the dark gray rings (#4f4f4f), on the line from the row to the dark base: they
+                               * touch the base only, and nothing that touches them leads to the row (a smoothed
+                               * edge two pixels wide reaches its surface through its other shade) */
+                if (!ink->surface && !((ink->touches >> i) & 1U) && (ink->touches & surfaces)
+                    && (double)c->at_light < ON_LIGHT_SHARE * (double)c->count)
+                    continue; /* the light text (#dbdbdb), on the line from the row to the text's own yellowish
+                               * fringe: that fringe lies only on the dark rows, and so does most of the text
+                               * (a surface's edge smoothed in two shades lies all along it) */
+            } else if (c->touches != ~(uint64_t)0 && !ink->surface && !((ink->touches >> i) & 1U) && !((reach >> j) & 1U)
+                       && (double)ink->on_light >= ON_LIGHT_SHARE * (double)ink->count)
+                continue; /* the rings again, on the line from the dark base to a pale fringe of the row's text:
+                           * that fringe lies inside the row, and nothing that touches the rings leads to it */
             if (blend_fit(c->r, c->g, c->b, s, ink, &t, &ee) <= BLEND_ANCHOR_TOLERANCE * BLEND_ANCHOR_TOLERANCE
                 && t > 0.03 && t < 0.97)
                 return 1;
@@ -867,12 +996,12 @@ static int is_blend(int k, int n)
             && (c->touches != ~(uint64_t)0 || (double)c->beside_light >= LIGHT_FRINGE_SHARE * (double)c->count)) {
             for (j = 0; j < n; j++) {
                 const Anchor *text = &anchors[j];
-                double t, ee;
+                double t, ee, res;
                 if (j == i || j == k || text->surface || text->long_line || text->okl <= c->okl
                     || c->count > 2 * text->count || !((c->touches >> j) & 1U))
                     continue; /* a fringe is rarer than the text it smooths, and beside it */
-                if (blend_fit(c->r, c->g, c->b, s, text, &t, &ee) <= LOCAL_BLEND_TOLERANCE * LOCAL_BLEND_TOLERANCE * ee
-                    && t > 0.03 && t < 0.97)
+                res = blend_fit(c->r, c->g, c->b, s, text, &t, &ee); /* first: the comparison reads ee */
+                if (res <= LOCAL_BLEND_TOLERANCE * LOCAL_BLEND_TOLERANCE * ee && t > 0.03 && t < 0.97)
                     return 1;
             }
         }
@@ -991,6 +1120,8 @@ static void survey_neighbors(const uint32_t *p, int64_t count, int64_t width, in
             else if (o >= 0 && kind[o] == 2)
                 main = 1;
         }
+        if (light >= 0)
+            anchors[c].at_light++;
         if (light >= 0 && !main) {
             anchors[c].on_light++;
             if (anchors[light].okl > anchors[c].light_okl)
@@ -1030,6 +1161,47 @@ static int touches_light_surface(int k)
     return 0;
 }
 
+/* Smoothing of kept light text (kept_text_bits) inside a light surface that turns dark (one of
+ * `surfaces`): a color between that surface and the text becomes the same blend of the surface as it
+ * turns and the text as drawn. Between the two only: what lies past the text (a gray ring's edge,
+ * darker than the text) is no smoothing of it. */
+static int kept_text_blend(double r, double g, double b, uint32_t surfaces, uint32_t *out)
+{
+    double best = -1.0, best_t = 0.0;
+    int s, o, best_s = -1, best_o = -1;
+    for (s = 0; s < anchor_count; s++) {
+        const Anchor *a = &anchors[s];
+        if (!((surfaces >> s) & 1U))
+            continue;
+        for (o = 0; o < anchor_count; o++) {
+            const Anchor *text = &anchors[o];
+            double er = text->r - a->r, eg = text->g - a->g, eb = text->b - a->b, ee = er * er + eg * eg + eb * eb;
+            double dr = r - a->r, dg = g - a->g, db = b - a->b, t, res, tolerance;
+            if (!((kept_text_bits >> o) & 1U) || ee <= 0.0)
+                continue;
+            t = (dr * er + dg * eg + db * eb) / ee; /* not clamped: past either end is no blend */
+            if (t <= 0.0 || t > 1.0)
+                continue;
+            res = (dr - t * er) * (dr - t * er) + (dg - t * eg) * (dg - t * eg) + (db - t * eb) * (db - t * eb);
+            tolerance = LOCAL_BLEND_TOLERANCE * LOCAL_BLEND_TOLERANCE * ee;
+            if (tolerance < BLEND_MIN_TOLERANCE * BLEND_MIN_TOLERANCE)
+                tolerance = BLEND_MIN_TOLERANCE * BLEND_MIN_TOLERANCE;
+            if (res <= tolerance && (best < 0.0 || res < best)) {
+                best = res;
+                best_t = t;
+                best_s = s;
+                best_o = o;
+            }
+        }
+    }
+    if (best_s < 0)
+        return 0;
+    *out = pack(anchors[best_s].mr + best_t * (anchors[best_o].r - anchors[best_s].mr),
+                anchors[best_s].mg + best_t * (anchors[best_o].g - anchors[best_s].mg),
+                anchors[best_s].mb + best_t * (anchors[best_o].b - anchors[best_s].mb));
+    return 1;
+}
+
 static void find_anchors(const uint32_t *p, int64_t count, int64_t width, int mode, double dark_l, double light_l,
                          double keep_tint, double main_default)
 {
@@ -1037,6 +1209,11 @@ static void find_anchors(const uint32_t *p, int64_t count, int64_t width, int mo
     int k, j, n;
     double main_l = main_default, share_of;
     int text_found = 0;
+    uint32_t turned = 0; /* ink mode: text-like anchors turned with the light surface they lie in */
+    /* Without a background of its own (a list painted on nothing: the font window's categories),
+     * its dark gray text and headers were drawn for light paper: dim ink however close to the
+     * dark gray beneath they come (kept, they nearly vanished and their smoothing turned dark). */
+    int paper_found = 0;
     generation++;
     if (generation == 0)
         generation = 1;
@@ -1097,6 +1274,7 @@ static void find_anchors(const uint32_t *p, int64_t count, int64_t width, int mo
         oklab_of(pack(a->r, a->g, a->b), &a->okl, &a->chroma);
         oklab_ab(pack(a->r, a->g, a->b), &a->oa, &a->ob);
         a->on_light = 0;
+        a->at_light = 0;
         a->light_okl = 0.0;
     }
     survey_neighbors(p, count, width, n);
@@ -1133,10 +1311,12 @@ static void find_anchors(const uint32_t *p, int64_t count, int64_t width, int mo
      * nothing (FontLab's Unicode ranges and codepages lists) would pass for the background. Dim
      * marks (a field's gray frame drawn on nothing) keep the share of the opaque pixels. */
     share_of = (double)total;
-    if (anchor_count > 0 && anchors[0].surface && (double)anchors[0].count >= MAIN_MIN_AREA_SHARE * (double)area)
+    if (anchor_count > 0 && anchors[0].surface && (double)anchors[0].count >= MAIN_MIN_AREA_SHARE * (double)area) {
         main_l = anchors[0].okl;
-    else
+        paper_found = 1;
+    } else
         share_of = (double)area;
+    last_paper_found = paper_found;
     if (mode == ANCHORS_RELIGHT && anchor_count > 2)
         drop_paper_blends();
     light_bits = 0;
@@ -1175,6 +1355,7 @@ static void find_anchors(const uint32_t *p, int64_t count, int64_t width, int mo
             int colored = a->chroma >= INK_CHROMA && !fringe_of_darker_text(j);
             out = colored ? mapped_one(rgb, dark_l, light_l, 1.0) : all_color(rgb, ANCHORS_ALL, dark_l, light_l, 0.0);
             a->mapped = 1;
+            turned |= 1U << j;
         } else if (!a->long_line && (double)a->count < BACKGROUND_SHARE * share_of && a->okl < INK_MAX_OKL
                    && (!a->surface || a->okl <= SURFACE_INK_MAX_OKL)
                    && (a->okl <= main_l - INK_BELOW_MAIN
@@ -1183,9 +1364,11 @@ static void find_anchors(const uint32_t *p, int64_t count, int64_t width, int mo
                                || ((double)a->beside_light < FRINGE_SHARE * (double)a->count && !smoothing_of_readable(j)))))) {
             out = mapped_one(rgb, dark_l, light_l, a->chroma >= INK_CHROMA ? 1.0 : 0.0);
             a->mapped = 1;
-        } else if (!a->surface && !a->long_line && a->chroma < INK_CHROMA && a->okl < DIM_INK_MAX_OKL
-                   && a->okl >= main_l + DIM_INK_ABOVE_MAIN && (double)a->count < BACKGROUND_SHARE * (double)total
-                   && !fringe_of_lighter_color(j)) {
+        } else if (!a->surface && !a->long_line && a->chroma < INK_CHROMA
+                   && a->okl < (paper_found || !mode_list ? DIM_INK_MAX_OKL : DIM_INK_MAX_OKL_BARE)
+                   && a->okl >= main_l + (paper_found ? DIM_INK_ABOVE_MAIN : -INK_BELOW_MAIN)
+                   && (double)a->count < BACKGROUND_SHARE * (double)total
+                   && (!paper_found || !fringe_of_lighter_color(j))) { /* (that test reads anchor 0 as the paper) */
             double light = gray_byte(light_l);
             out = mapped_one(rgb, dark_l, light_l, 0.0);
             out = pack(((out >> 16) & 255) + (light - ((out >> 16) & 255)) * DIM_INK_LIFT,
@@ -1219,6 +1402,70 @@ static void find_anchors(const uint32_t *p, int64_t count, int64_t width, int mo
         a->mg = (double)((out >> 8) & 255);
         a->mb = (double)(out & 255);
         h_anchor[a->slot] = (int8_t)j;
+    }
+    /* Light text of the dark interface (gray, as light as the mapping's light end: the dark palette's
+     * text color), kept as drawn, that FontLab also draws inside a surface it paints light itself
+     * (Preview Features' row under the pointer: near-white, with that same light gray text, light on
+     * light as painted). That surface turns dark and the text stays, so what lies between them there is
+     * the text's smoothing (see kept_text_blend); turned as an island, it left the text's few full
+     * pixels alone on the dark row, the letters in pieces. Not where a light surface holds dark text
+     * (a dark text-like anchor with pixels inside one): its palest fringes lie on that same line, and
+     * some are as frequent as text. */
+    kept_text_bits = 0;
+    for (j = 0; mode == ANCHORS_INK && light_bits && j < anchor_count; j++) {
+        const Anchor *a = &anchors[j];
+        uint8_t px[3];
+        px[2] = (uint8_t)a->r;
+        px[1] = (uint8_t)a->g;
+        px[0] = (uint8_t)a->b;
+        if (!a->mapped && !a->surface && !a->long_line && spread_of(px) <= KEPT_TEXT_MAX_SPREAD
+            && a->okl >= light_l - KEPT_TEXT_NEAR_LIGHT && a->okl <= light_l + KEPT_TEXT_NEAR_LIGHT && a->on_light > 0
+            && a->okl < a->light_okl)
+            kept_text_bits |= 1U << j;
+    }
+    for (j = 0; kept_text_bits && j < anchor_count; j++) {
+        if (!anchors[j].surface && anchors[j].on_light > 0 && anchors[j].okl < INK_MAX_OKL)
+            kept_text_bits = 0;
+    }
+    for (j = 0; turned && j < anchor_count; j++) {
+        Anchor *a = &anchors[j];
+        uint32_t beside = 0, blend;
+        int s, o, done = 0;
+        if (!((turned >> j) & 1U))
+            continue;
+        for (s = 0; s < anchor_count; s++) /* the light surfaces it touches */
+            beside |= ((light_bits >> s) & 1U) && ((a->touches >> s) & 1U) ? 1U << s : 0U;
+        if (kept_text_bits && kept_text_blend(a->r, a->g, a->b, beside, &blend)) {
+            a->mr = a->ir = (double)((blend >> 16) & 255);
+            a->mg = a->ig = (double)((blend >> 8) & 255);
+            a->mb = a->ib = (double)(blend & 255);
+            continue;
+        }
+        /* The smoothed edge of a clearly colored surface kept as drawn (a checked mark's blue disk on
+         * that row), frequent enough to be an anchor: the blend of the row as it turns and the disk, as
+         * its rarer edge pixels are resolved (see resolve); turned alone, it outlined half the disk in
+         * dark blue. */
+        for (s = 0; s < anchor_count && !done; s++) {
+            if (!((beside >> s) & 1U))
+                continue;
+            for (o = 0; o < anchor_count && !done; o++) {
+                const Anchor *k = &anchors[o];
+                double t, ee, res;
+                uint8_t px[3];
+                px[2] = (uint8_t)k->r;
+                px[1] = (uint8_t)k->g;
+                px[0] = (uint8_t)k->b;
+                if (o == j || !k->surface || k->mapped || spread_of(px) <= LINEAR_SPREAD || !((a->touches >> o) & 1U))
+                    continue;
+                res = blend_fit(a->r, a->g, a->b, &anchors[s], k, &t, &ee); /* first: the comparison reads ee */
+                if (ee > 0.0 && res <= BLEND_ANCHOR_TOLERANCE * BLEND_ANCHOR_TOLERANCE && t > 0.0 && t < 1.0) {
+                    a->mr = a->ir = anchors[s].mr + t * (k->r - anchors[s].mr);
+                    a->mg = a->ig = anchors[s].mg + t * (k->g - anchors[s].mg);
+                    a->mb = a->ib = anchors[s].mb + t * (k->b - anchors[s].mb);
+                    done = 1;
+                }
+            }
+        }
     }
 }
 
@@ -1378,6 +1625,11 @@ static uint32_t resolve(uint32_t c, int translucent, uint32_t mask, int mode, do
             /* the logo's smoothing toward the row: the blend of the row as it turns and the logo as drawn
              * (inverted alone, it ringed the logo) */
             uint32_t colored = 0;
+            uint32_t blend;
+            /* light text kept on such a row: its smoothing likewise, wherever it lies in the row (a thin
+             * stem has no full pixel of the text's color near it) */
+            if (kept_text_bits && kept_text_blend(r, g, b, mask & light_bits, &blend))
+                return blend;
             for (j = 0; j < anchor_count; j++) {
                 uint8_t q[3];
                 q[2] = (uint8_t)anchors[j].r;
@@ -1616,6 +1868,8 @@ static int light_on_kept_color(const uint32_t *p, int64_t i, int64_t width, int6
 #define WHITE_MARK_PURE_SPREAD 20 /* a white mark is pure white; its smoothing toward the box is colored */
 #define WHITE_MARK_TEST_HLS 0.6 /* pixels this light are tested: the mark, and its smoothing */
 #define WHITE_MARK_SPREAD 25 /* colored enough for a control (a pale tinted row, spread 22, is not) */
+#define WHITE_MARK_STEP 0.05 /* the control is darker than the mark and its smoothing by this much (HLS): a flat light
+                              * colored area (a selected flag swatch, dfbbbf) is no mark on a control of its own color */
 
 static int white_run(const uint32_t *p, int64_t i, int64_t step, int64_t limit, int64_t width, int horizontal);
 
@@ -1623,9 +1877,10 @@ static int white_on_colored(const uint32_t *p, int64_t i, int64_t width, int64_t
 {
     int64_t x, y, dx, dy, rows;
     int colored = 0;
-    double hr = 0.0, hg = 0.0, hb = 0.0;
+    double hr = 0.0, hg = 0.0, hb = 0.0, own;
     if (width <= 0)
         return 0;
+    own = lightness((uint8_t)(p[i] >> 16), (uint8_t)(p[i] >> 8), (uint8_t)p[i]);
     if (white_run(p, i, -1, count, width, 1) + white_run(p, i, 1, count, width, 1) + 1 > BOX_MAX_RUN
         || white_run(p, i, -width, count, width, 0) + white_run(p, i, width, count, width, 0) + 1 > BOX_MAX_RUN)
         return 0; /* a mark is small (a tick in its box): a white row beside text's light fringes is no mark */
@@ -1646,7 +1901,8 @@ static int white_on_colored(const uint32_t *p, int64_t i, int64_t width, int64_t
                 q = (const uint8_t *)&p[yy * width + xx];
                 if (q[3] >= ANCHOR_MIN_ALPHA && lightness(q[2], q[1], q[0]) >= WHITE_HLS && spread_of(q) <= WHITE_MARK_PURE_SPREAD)
                     continue;
-                if (q[3] < ANCHOR_MIN_ALPHA || spread_of(q) < WHITE_MARK_SPREAD || lightness(q[2], q[1], q[0]) < WHITE_MARK_CONTROL_HLS)
+                if (q[3] < ANCHOR_MIN_ALPHA || spread_of(q) < WHITE_MARK_SPREAD || lightness(q[2], q[1], q[0]) < WHITE_MARK_CONTROL_HLS
+                    || lightness(q[2], q[1], q[0]) > own - WHITE_MARK_STEP)
                     return 0;
                 found = 1;
             }
@@ -1665,6 +1921,8 @@ static int white_on_colored(const uint32_t *p, int64_t i, int64_t width, int64_t
             if (q[3] < ANCHOR_MIN_ALPHA || spread_of(q) < WHITE_MARK_SPREAD
                 || lightness(q[2], q[1], q[0]) < WHITE_MARK_CONTROL_HLS)
                 return 0; /* beside nothing, gray, or dark (black text's ClearType fringes): no colored control */
+            if (lightness(q[2], q[1], q[0]) > own - WHITE_MARK_STEP && (p[i] & 0xffffffU) != (*(const uint32_t *)q & 0xffffffU))
+                return 0; /* as light as the pixel and another color: no control around a mark */
             {
                 /* one control color (its blue and lighter blue smoothing): ClearType's fringes of black
                  * text on a white row come in opposite hues, and the white between them is no mark */
@@ -1894,21 +2152,159 @@ static int beside_gray_text(const uint32_t *p, int64_t i, int64_t width, int64_t
     return 0;
 }
 
+static int near_rgb(uint32_t a, uint32_t b, int tolerance)
+{
+    int k;
+    for (k = 0; k < 24; k += 8) {
+        int d = (int)((a >> k) & 255) - (int)((b >> k) & 255);
+        if (d > tolerance || d < -tolerance)
+            return 0;
+    }
+    return 1;
+}
+
+/* A pixel of a light surface the mapping turns dark (a selected row): no letter of a badge. */
+static int light_row_pixel(int64_t at)
+{
+    return a_index[at] >= 0 && anchors[a_index[at]].mapped && light_surface_candidate(&anchors[a_index[at]]);
+}
+
+/* A dark, low-color anchor whose shapes decide one by one (see GLYPH_ICON_MAX_OKL). */
+static int glyph_icon_anchor(const Anchor *a, int64_t area)
+{
+    return !a->long_line && a->chroma < INK_CHROMA && a->okl < GLYPH_ICON_MAX_OKL
+           && (double)a->count < BACKGROUND_SHARE * (double)area;
+}
+
+/* Fills icon_px for an image painted on nothing (ink mode, no main background, a_index made): the
+ * pixels of each connected shape of a dark gray anchor, translucent edges included, 1 for an icon
+ * (mapped as ink), 3 for a badge (kept as drawn); returns whether any shape was found. */
+static int find_glyph_icons(const uint32_t *p, int64_t count, int64_t width)
+{
+    int64_t i, rows = count / width;
+    int32_t *queue = icon_queue;
+    int j, found = 0, which[MAX_ANCHORS], panels = 0;
+    uint32_t colors[MAX_ANCHORS];
+    const Anchor *panel_of[GLYPH_MAX_PANELS];
+    int64_t panel_box[GLYPH_MAX_PANELS][4];
+    for (j = 0; j < anchor_count; j++) {
+        if (glyph_icon_anchor(&anchors[j], count)) {
+            which[found] = j;
+            colors[found++] = pack(anchors[j].r, anchors[j].g, anchors[j].b);
+        }
+    }
+    if (!found)
+        return 0;
+    for (i = 0; i < count; i++)
+        icon_px[i] = 0;
+    for (i = 0; i < count; i++) {
+        int64_t head = 0, tail = 0, k, x0, x1, y0, y1, x, y, light = 0;
+        uint32_t rgb = 0;
+        const Anchor *a = NULL;
+        int verdict, hole = 0, bare = 0;
+        if (icon_px[i] || (p[i] >> 24) == 0)
+            continue;
+        for (j = 0; j < found && a == NULL; j++) { /* (gray text drawn translucent: none of its pixels is the anchor itself) */
+            if (near_rgb(p[i], colors[j], GLYPH_ICON_NEAR)) {
+                a = &anchors[which[j]];
+                rgb = colors[j];
+            }
+        }
+        if (a == NULL)
+            continue;
+        icon_px[i] = 2;
+        queue[tail++] = (int32_t)i;
+        x0 = x1 = i % width;
+        y0 = y1 = i / width;
+        while (head < tail) {
+            int64_t q = queue[head++], qx = q % width, qy = q / width, n[4];
+            int d;
+            if (qx < x0) x0 = qx;
+            if (qx > x1) x1 = qx;
+            if (qy < y0) y0 = qy;
+            if (qy > y1) y1 = qy;
+            n[0] = qx > 0 ? q - 1 : -1;
+            n[1] = qx + 1 < width ? q + 1 : -1;
+            n[2] = qy > 0 ? q - width : -1;
+            n[3] = qy + 1 < rows ? q + width : -1;
+            for (d = 0; d < 4; d++) {
+                int64_t m = n[d];
+                if (m >= 0 && (p[m] >> 24) < ANCHOR_MIN_ALPHA)
+                    bare = 1; /* drawn on nothing, or smoothed toward it */
+                if (m >= 0 && !icon_px[m] && (p[m] >> 24) > 0 && near_rgb(p[m], rgb, GLYPH_ICON_GROW)) {
+                    icon_px[m] = 2;
+                    queue[tail++] = (int32_t)m;
+                }
+            }
+        }
+        if ((x1 - x0 >= GLYPH_ICON_MAX_SIDE && y1 - y0 >= GLYPH_ICON_MAX_SIDE) || x1 - x0 >= 4 * GLYPH_ICON_MAX_SIDE
+            || y1 - y0 >= 4 * GLYPH_ICON_MAX_SIDE) {
+            if (panels < GLYPH_MAX_PANELS) {
+                panel_of[panels] = a;
+                panel_box[panels][0] = x0;
+                panel_box[panels][1] = x1;
+                panel_box[panels][2] = y0;
+                panel_box[panels++][3] = y1;
+            }
+            continue; /* a panel: as the anchor decided (a word, joined through its smoothing, is long but low) */
+        }
+        /* (rows are read top to bottom: a panel is met before the holes inside its box; a dot of gray
+         * text drawn on nothing, inside the box of a long word, touches nothing opaque and is no hole) */
+        for (j = 0; j < panels && !hole && !bare; j++)
+            hole = panel_of[j] == a && x0 >= panel_box[j][0] && x1 <= panel_box[j][1] && y0 >= panel_box[j][2]
+                   && y1 <= panel_box[j][3];
+        if (hole)
+            continue; /* a letter's counter on a panel of its own color: the panel's, as the anchor decided */
+        for (y = y0; y <= y1; y++) {
+            for (x = x0; x <= x1; x++) {
+                int64_t at = y * width + x;
+                uint32_t v = p[at];
+                if ((v >> 24) >= ANCHOR_MIN_ALPHA && !light_row_pixel(at)
+                    && lightness((uint8_t)(v >> 16), (uint8_t)(v >> 8), (uint8_t)v) >= GLYPH_ICON_LIGHT_HLS)
+                    light++;
+            }
+        }
+        /* light letters on it: a badge; a light pixel or two (a tag's hole): an icon */
+        if (light >= GLYPH_BADGE_MIN_LIGHT && (double)light >= GLYPH_BADGE_LIGHT_SHARE * (double)tail) {
+            verdict = 3;
+            for (y = y0; y <= y1; y++) { /* its letters and their smoothing too, as drawn */
+                for (x = x0; x <= x1; x++) {
+                    int64_t at = y * width + x;
+                    if (!icon_px[at] && (p[at] >> 24) > 0 && !light_row_pixel(at))
+                        icon_px[at] = 3;
+                }
+            }
+        } else if ((double)tail >= GLYPH_SOLID_SHARE * (double)((x1 - x0 + 1) * (y1 - y0 + 1)) && x1 - x0 >= 5 && y1 - y0 >= 5)
+            verdict = 2; /* a filled block (a selected row's dark branch cell): as the anchor decided */
+        else
+            verdict = a->mapped ? 2 : 1; /* dark text already mapped as ink stays so */
+        for (k = 0; k < tail; k++)
+            icon_px[queue[k]] = (uint8_t)verdict;
+    }
+    return 1;
+}
+
 EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width, int mode, double dark_l,
                                    double light_l, double keep_tint, double main_default, int apply)
 {
     uint32_t *p = (uint32_t *)pixels;
     uint32_t last_in = 0, last_out = 0;
-    int have_last = 0, any_mapped = 0, j, local, tinted, last_edge = 0;
+    int have_last = 0, any_mapped = 0, j, local, tinted, last_edge = 0, glyph_icons = 0;
     uint32_t paper_bit, other_surfaces, other_surface_bits;
-    int white_marks = 0, fringes = 0, bands = 0;
+    int white_marks = 0, fringes = 0, bands = 0, thin;
     uint32_t left_orig = 0;
     double paper_hls;
     int64_t i, changed = 0;
     mode_icon_fallback = mode == ANCHORS_SUBPIXEL_SYNTAX;
+    mode_list = mode == ANCHORS_INK_LIST;
+    if (mode_list)
+        mode = ANCHORS_INK;
     if (mode_icon_fallback)
         mode = ANCHORS_SUBPIXEL;
     find_anchors(p, count, width, mode, dark_l, light_l, keep_tint, main_default);
+    thin = mode_list && apply && width > 0 && count <= MAX_INDEXED; /* light ink's edges thinned after */
+    for (i = 0; thin && i < count; i++)
+        thin_px[i] = 0;
     for (j = 0; j < anchor_count; j++)
         any_mapped |= anchors[j].mapped;
     /* White marks and box edges are judged on the pixels as drawn, before any is mapped: mapped in
@@ -1942,7 +2338,11 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
     }
     if (!any_mapped && mode == ANCHORS_RELIGHT)
         return 0;
-    if (!any_mapped) {
+    /* Where everything is mapped (all, icon, subpixel), an image with no anchor mapped (none found, no
+     * color being there three times: a gray ramp, a single pixel; or, as an icon, every anchor kept)
+     * goes on below, each pixel by the mode's own fallback; ink, which maps only what is wrong on a
+     * dark interface, has nothing to map but stray whites. */
+    if (!any_mapped && mode != ANCHORS_ALL && mode != ANCHORS_ICON && mode != ANCHORS_SUBPIXEL) {
         /* Nothing to map but stray whites (a pure white pixel that is no anchor). */
         for (i = 0; i < count; i++) {
             uint8_t *px = pixels + 4 * i;
@@ -1966,6 +2366,7 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
     local = (mode == ANCHORS_INK || mode == ANCHORS_RELIGHT || mode == ANCHORS_SUBPIXEL) && width > 0 && count <= MAX_INDEXED;
     if (local)
         index_pixels(p, count);
+    glyph_icons = local && mode_list && !last_paper_found && find_glyph_icons(p, count, width);
     tinted = (mode == ANCHORS_ALL || mode == ANCHORS_ICON) && keep_tint > 0.0 && width > 0;
     /* Text smoothing lies between the paper and the text, even where the pixels around are all
      * fringes (ClearType's navy and red beside blue syntax on a dark editor): the kept paper always
@@ -1984,6 +2385,18 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
         left_orig = v; /* as drawn, before this pixel is mapped */
         if (alpha == 0)
             continue;
+        if (glyph_icons && (icon_px[i] == 1 || icon_px[i] == 3)) {
+            out = icon_px[i] == 1 ? (mapped_one(v & 0xffffffU, dark_l, light_l, 0.0) | (v & 0xff000000U)) : v;
+            have_last = 0;
+            if (out != v) {
+                changed++;
+                if (apply)
+                    p[i] = out;
+                if (thin)
+                    thin_px[i] = 1;
+            }
+            continue;
+        }
         if (white_marks && white_mark[i] == 1) { /* the mark and its smoothing toward the box */
             have_last = 0;
             continue;
@@ -1996,6 +2409,8 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
             changed++;
             if (apply)
                 p[i] = (v & 0xff000000U) | BOX_FRAME;
+            if (thin)
+                thin_px[i] = 1;
             have_last = 0;
             continue;
         }
@@ -2012,6 +2427,8 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
                 changed++;
                 if (apply)
                     p[i] = last_out;
+                if (thin)
+                    thin_px[i] = 1;
             }
             continue;
         }
@@ -2033,6 +2450,8 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
                 changed++;
                 if (apply)
                     p[i] = out;
+                if (thin)
+                    thin_px[i] = 1;
             }
             continue;
         }
@@ -2055,6 +2474,8 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
                 changed++;
                 if (apply)
                     p[i] = out;
+                if (thin)
+                    thin_px[i] = 1;
             }
             continue;
         }
@@ -2067,8 +2488,12 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
             changed++;
             if (apply)
                 p[i] = out;
+            if (thin)
+                thin_px[i] = 1;
         }
     }
+    if (thin)
+        thin_light_smoothing(p, count, width);
     return changed;
 }
 
@@ -2079,6 +2504,14 @@ EXPORT void freelab_last_marks(uint8_t *out, int64_t count)
     int64_t i;
     for (i = 0; i < count && i < MAX_INDEXED; i++)
         out[i] = white_mark[i];
+}
+
+/* Diagnostics: each pixel's shape verdict of the last call (see icon_px; 0 when that pass did not run). */
+EXPORT void freelab_last_icons(uint8_t *out, int64_t count)
+{
+    int64_t i;
+    for (i = 0; i < count && i < MAX_INDEXED; i++)
+        out[i] = icon_px[i];
 }
 
 /* Diagnostics: the candidates of the last call before blends were dropped: 0xRRGGBB, and per

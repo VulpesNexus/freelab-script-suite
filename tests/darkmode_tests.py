@@ -9,6 +9,7 @@ import os
 import shutil
 import sys
 import tempfile
+import types
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -18,7 +19,7 @@ os.environ["FREELAB_NO_AUTOSTART"] = "1"
 
 import qtfakes  # noqa: E402
 import freelab_dark_mode as dm  # noqa: E402
-from qtfakes import FakeWidget, FakeIcon, QAction, QColor, QPalette  # noqa: E402
+from qtfakes import FakeGeometry, FakeWidget, FakeIcon, QAction, QColor, QPalette  # noqa: E402
 
 PANEL_SHEET = u"QWidget{background:#edeeef;color:black;}\nQToolButton{background-color:white;}"
 DARK_PANEL_SHEET = dm.recolor_sheet(PANEL_SHEET)
@@ -542,6 +543,433 @@ class EditorTests(DarkModeCase):
         self.assertNotIn("sci", record)
 
 
+class FakeHooks(object):
+    """The native engine's library, faked: what dark mode asks of it."""
+
+    def __init__(self):
+        self.calls = []
+
+    def freelab_hooks_set_palette(self, dark, light):
+        self.calls.append("set_palette")
+        return 63
+
+    def freelab_hooks_install(self, dark_l, light_l, keep_tint):
+        self.calls.append("install")
+        return 24
+
+    def freelab_hooks_set_hooked(self, widgets, count):
+        self.calls.append("set_hooked")
+        self.hooked = count
+        return count
+
+    def freelab_hooks_set_ink(self, widgets, count):
+        self.calls.append("set_ink")
+        return count
+
+    def freelab_hooks_add_ink_module(self, module):
+        return 2
+
+    def freelab_hooks_set_subpixel(self, widgets, count, background_okl):
+        self.calls.append("set_subpixel")
+        return count
+
+    def freelab_hooks_remove(self):
+        self.calls.append("remove")
+        return 24
+
+
+class SelectedAsPaintedTests(unittest.TestCase):
+    """A selected row is drawn again as FontLab painted it only when that is light text on a dark row."""
+
+    def test_which_selected_rows_are_drawn_as_painted(self):
+        self.assertTrue(dm.selected_as_painted(5000, 300, 0), "Export Profiles: light text on the dark highlight")
+        self.assertFalse(dm.selected_as_painted(5000, 0, 400), "dark ink on it: mapped")
+        self.assertFalse(dm.selected_as_painted(5000, 4500, 0),
+                         "Preview Features' row under the pointer, near-white: mapped, or it stays a white band")
+        self.assertFalse(dm.selected_as_painted(0, 0, 0), "nothing drawn")
+
+
+class LeaveAloneTests(DarkModeCase):
+    def test_a_widget_can_ask_to_be_left_alone(self):
+        # Auto Kerning's preview buttons draw pairs in the palette's own colors: mapped as icons, they
+        # would have turned dark
+        button = FakeWidget("QToolButton", "preview", parent=self.content, icon=FakeIcon("pair"),
+                            inherits=("QAbstractButton",), light="ink")
+        button.setProperty(dm.LEAVE_ALONE_PROP, True)
+        self.on()
+        self.assertIsNone(button.effect)
+        self.assertEqual(button.icon.label, "pair", "its icon as it is")
+
+
+    def test_a_marked_container_leaves_its_children_alone(self):
+        panel = FakeWidget("QWidget", "previews", parent=self.content)
+        panel.setProperty(dm.LEAVE_ALONE_PROP, True)
+        button = FakeWidget("QToolButton", "preview", parent=panel, icon=FakeIcon("pair"),
+                            inherits=("QAbstractButton",), light="ink")
+        self.on()
+        self.assertIsNone(button.effect)
+        self.assertEqual(button.icon.label, "pair")
+
+    def test_left_alone_icons_are_never_swapped(self):
+        # Auto Kerning's previews once came back mapped (dark gray glyphs): the swap itself refuses them
+        button = FakeWidget("QToolButton", "preview", parent=self.content, icon=FakeIcon("pair"),
+                            inherits=("QAbstractButton",))
+        button.setProperty(dm.LEAVE_ALONE_PROP, True)
+        self.on()
+        dm._darken_icons(button)
+        dm._swap_icon(button)
+        self.assertEqual(button.icon.label, "pair")
+
+
+class LabelPixmap(object):
+    def __init__(self, side=16):
+        self.side = side
+        self.key = FakeIcon().key
+
+    def isNull(self):
+        return False
+
+    def cacheKey(self):
+        return self.key
+
+    def width(self):
+        return self.side
+
+    def height(self):
+        return self.side
+
+
+class VisibleColumnTests(unittest.TestCase):
+    class View(object):
+        def __init__(self, hidden=()):
+            self.hidden = hidden
+
+        def columnViewportPosition(self, column):
+            return column * 100 - 30  # scrolled 30 pixels to the right
+
+        def columnWidth(self, column):
+            return 100
+
+        def isColumnHidden(self, column):
+            return column in self.hidden
+
+    def test_only_the_columns_on_screen(self):
+        self.assertEqual(dm._visible_columns(self.View(), 8, 250), [0, 1, 2])
+        self.assertEqual(dm._visible_columns(self.View(hidden=(1,)), 8, 250), [0, 2])
+        self.assertEqual(dm._visible_columns(object(), 3, 250), [0, 1, 2], "a list: its one column, or all")
+
+
+class InkLabelTests(DarkModeCase):
+    # Inside the ink effect, a label's image is mapped once, by the effect (a label mapped first, then
+    # mapped again by the effect, went wrong). The font window's mark flag is the exception: the effect
+    # left its black pole black, so dark mode maps its image and has the effect draw it as it is.
+    def test_a_label_inside_the_ink_effect_keeps_its_image(self):
+        self.odd.light = "ink"
+        label = FakeWidget("QLabel", "labelIcon", parent=self.odd, inherits=("QLabel",))
+        original = label.pixmap = LabelPixmap()
+        self.on()
+        self.assertIsNotNone(self.odd.effect)
+        self.assertIs(label.pixmap, original)
+
+    def test_a_label_mapped_before_the_ink_effect_gets_its_image_back(self):
+        box = FakeWidget("QWidget", "box", parent=self.content)
+        label = FakeWidget("QLabel", "labelIcon", parent=box, inherits=("QLabel",))
+        original = label.pixmap = LabelPixmap()
+        self.on()
+        self.assertIsInstance(label.pixmap, Mapped)
+        dm._set_effect(box, dm._record(box), "ink")
+        self.assertIs(label.pixmap, original)
+        self.assertNotIn("pixmap", dm._record(label), "nothing left to restore when switching off")
+
+    def test_the_mark_flag_is_mapped_and_drawn_as_mapped(self):
+        self.odd.light = "ink"
+        flag = FakeWidget("QLabel", "labelMark", parent=self.odd, inherits=("QLabel",))
+        flag.pixmap = LabelPixmap()
+        self.on()
+        self.assertIsInstance(flag.pixmap, Mapped, "its pole made light")
+        self.assertTrue(dm._record(flag).get("protected"), "the ink effect draws it unmapped")
+        dm._set_effect(self.odd, dm._record(self.odd), "ink")
+        self.assertIsInstance(flag.pixmap, Mapped, "not handed back to the effect")
+
+    def test_a_protected_widget_between_keeps_its_labels_images(self):
+        # the ink effect draws a protected widget (the defringe bar) unmapped: an image inside it stays
+        # as dark mode mapped it, and is never handed back to the effect
+        box = FakeWidget("QWidget", "box", parent=self.content)
+        bar = FakeWidget("QFrame", "frameBottom", parent=box)
+        icon = FakeWidget("QLabel", "labelIcon", parent=bar, inherits=("QLabel",))
+        icon.pixmap = LabelPixmap()
+        self.on()
+        mapped = icon.pixmap
+        self.assertIsInstance(mapped, Mapped)
+        dm._protect(bar)
+        dm._set_effect(box, dm._record(box), "ink")
+        self.assertFalse(dm._under_ink(icon))
+        self.assertIs(icon.pixmap, mapped)
+
+    def test_an_image_fontlab_replaced_meanwhile_stays(self):
+        box = FakeWidget("QWidget", "box", parent=self.content)
+        flag = FakeWidget("QLabel", "labelIcon", parent=box, inherits=("QLabel",))
+        flag.pixmap = LabelPixmap()
+        self.on()
+        newer = flag.pixmap = LabelPixmap()  # FontLab's own, set after the swap
+        dm._set_effect(box, dm._record(box), "ink")
+        self.assertIs(flag.pixmap, newer)
+
+
+class LightLabelTests(DarkModeCase):
+    # The font window's "SEARCH HISTORY" header: light gray text from the dark palette, on its dark
+    # panel. The window's ink effect mapped it among the window's colors and broke it up.
+    def title_label(self, text, parent_window="#292929", ink="#afafaf", sheet=u"QLabel{padding-left: 2px;}"):
+        panel = FakeWidget("QWidget", "historyWidget", parent=self.content)
+        panel.palette.setColor(QPalette.Window, QColor(parent_window))
+        label = FakeWidget("YTitleLabel", "historyLabel", parent=panel, sheet=sheet, inherits=("QLabel",))
+        label.text = text
+        label.palette.setColor(QPalette.WindowText, QColor(ink))
+        return label
+
+    def test_light_text_from_the_dark_palette_is_protected(self):
+        label = self.title_label(u"SEARCH HISTORY")
+        self.on()
+        self.assertTrue(dm._record(label).get("protected"))
+
+    def test_a_light_badge_under_the_parents_ink_is_read_unmapped(self):
+        # the parent's own ink effect shows its light badge dark in a grab: read with the effect paused,
+        # the label on the badge is not protected (it would be drawn light on light)
+        label = self.title_label(u"3")
+        panel = label.parentWidget()
+        panel.light = "ink"
+        panel.ground, panel.mapped_ground = 0xf0f0f0, 0x303030
+        self.on()
+        self.assertIsNotNone(panel.effect)
+        self.assertFalse(dm._record(label).get("protected"))
+        self.assertTrue(panel.grabs and not any(panel.grabs), "grabbed with the effect paused")
+        self.assertTrue(panel.effect.enabled, "and the effect on again")
+
+    def test_the_ground_is_grabbed_again_only_when_the_label_changes(self):
+        label = self.title_label(u"SEARCH HISTORY")
+        panel = label.parentWidget()
+        panel.ground = 0x292929
+        self.on()
+        self.assertTrue(dm._record(label).get("protected"))
+        grabs = len(panel.grabs)
+        self.assertTrue(dm._light_text_label(label))
+        self.assertEqual(len(panel.grabs), grabs, "a sweep's second look reads the cache")
+        label.geometry = FakeGeometry(140, 20)
+        dm._light_text_label(label)
+        self.assertEqual(len(panel.grabs), grabs + 1, "resized: looked at again")
+
+    def test_a_hidden_label_is_decided_when_shown(self):
+        label = self.title_label(u"BOOKMARKS")
+        label.visible = False
+        self.on()
+        record = dm._record(label, create=False) or {}
+        self.assertFalse(record.get("protected"), "not protected unseen: it may come to lie on a light badge")
+
+    def test_rich_text_dark_text_or_a_light_parent_are_not(self):
+        rich = self.title_label(u'<span style="color:#ff0000">2</span> selected')
+        dark = self.title_label(u"Name", ink="#202020")
+        on_light = self.title_label(u"Name", parent_window="#f0f0f0")
+        colored = self.title_label(u"Name", sheet=u"QLabel{color: #ffffff;}")
+        self.on()
+        for label in (rich, dark, on_light, colored):
+            record = dm._record(label, create=False) or {}
+            self.assertFalse(record.get("protected"), label.text)
+
+
+class PlainInputTests(DarkModeCase):
+    def test_a_plain_combo_box_gets_no_effect(self):
+        # FreeLab's own dialogs: Qt's combo boxes and spin boxes with no stylesheet anywhere. Their
+        # dark outlines set off the ink detection, whose effect garbled their text and hid their arrows.
+        dialog = FakeWidget("QDialog", parent=None, window=True)
+        combo = FakeWidget("QComboBox", parent=dialog, inherits=("QComboBox",), light="ink")
+        styled = FakeWidget("QComboBox", parent=self.content, inherits=("QComboBox",), light="ink")
+        self.app.roots.append(dialog)
+        self.on()
+        self.assertIsNone(combo.effect)
+        self.assertIsNotNone(styled.effect, "under FontLab's stylesheets the ink detection stays")
+
+    def test_a_combo_box_that_lost_its_stylesheet_is_plain_again(self):
+        # FreeLab draws a dropdown with one choice as a label, through a stylesheet, and takes the
+        # stylesheet away when a second choice comes (Diacritics' Script dropdown). Dark mode kept the
+        # sheet it had seen, took the dropdown for a styled one ever after, and its ink effect garbled it.
+        dialog = FakeWidget("QDialog", parent=None, window=True)
+        combo = FakeWidget("QComboBox", parent=dialog, inherits=("QComboBox",), light="ink",
+                           sheet=u"QComboBox { border: none; background: transparent; }")
+        self.app.roots.append(dialog)
+        self.on()
+        self.assertIsNotNone(combo.effect, "styled: looked at as any widget")
+        combo.setStyleSheet(u"")
+        dm._sweep()
+        dm.run_queue()
+        self.assertIsNone(combo.effect)
+        self.assertIsNone(combo.property(dm.SHEET_PROP))
+        self.assertIsNone(combo.property(dm.ISLAND_PROP))
+        self.assertTrue(dm._plain_input(combo))
+
+    def test_a_widget_that_asks_later_to_be_left_alone_loses_its_effect(self):
+        dialog = FakeWidget("QDialog", parent=None, window=True)
+        combo = FakeWidget("QComboBox", parent=dialog, inherits=("QComboBox",), light="ink",
+                           sheet=u"QComboBox { color: red; }")
+        self.app.roots.append(dialog)
+        self.on()
+        self.assertIsNotNone(combo.effect)
+        combo.setProperty(dm.LEAVE_ALONE_PROP, True)
+        dm.process(combo)
+        self.assertIsNone(combo.effect)
+
+
+class ProtectionTests(DarkModeCase):
+    def test_a_replaced_effect_still_draws_color_controls_unmapped(self):
+        # a dock's keyed effect is replaced when its frame colors are read again; the Color panel's
+        # wheel, which has no effect of its own, was then mapped (its white corner turned dark)
+        self.on()
+        self.assertIn(self.swatch, list(self.dock.effect.freelab_protect.values()))
+        record = dm._record(self.dock)
+        dm._set_effect(self.dock, record, "keyed", [0xcacbcc])
+        self.assertIn(self.swatch, list(self.dock.effect.freelab_protect.values()), "protected by the new effect too")
+
+
+class ListIconTests(DarkModeCase):
+    """Restoring a list's icons goes through the items it has then: FontLab deletes and rebuilds
+    items, and a deleted item is no Qt object Python can tell is gone (writing through one crashed
+    FontLab when switching off after Export Profiles was closed)."""
+
+    def test_icons_are_put_back_through_the_current_items(self):
+        class Item(object):
+            def __init__(self, icon):
+                self._icon, self.dead = icon, False
+
+            def icon(self):
+                return self._icon
+
+            def setIcon(self, icon):
+                assert not self.dead, "written through a deleted item"
+                self._icon = icon
+
+        class ListWidget(FakeWidget):
+            pass
+
+        lst = ListWidget("QListWidget", parent=self.main, inherits=("QListWidget",))
+        page = FakeIcon("page")
+        lst.rows = [Item(page)]
+        self.patch("_list_items", lambda widget: list(widget.rows))
+        self.patch("icon_is_swatch", lambda icon: False)
+        self.patch("icon_is_gray", lambda icon: True)
+        self.patch("dark_icon", lambda icon: FakeIcon("mapped " + icon.label))
+        dm._state()  # the session state, with its caches
+        dm._swap_item_icons(lst)
+        self.assertEqual(lst.rows[0].icon().label, "mapped page")
+        old = lst.rows[0]
+        old.dead = True  # FontLab rebuilt the list: the old item is gone, a new one shows the mapped icon
+        lst.rows = [Item(old.icon())]
+        dm._restore_item_icons(lst, dm._record(lst))
+        self.assertEqual(lst.rows[0].icon().label, "page")
+
+
+class EngineTests(DarkModeCase):
+    def save(self, **values):
+        settings = dm.load_settings()
+        settings.update(values)
+        dm.save_settings(settings)
+
+    def test_engine_setting(self):
+        self.assertEqual(dm.engine_setting({}), "script")
+        self.assertEqual(dm.engine_setting({"engine": "native"}), "native")
+        self.assertEqual(dm.engine_setting({"engine": "warp"}), "script")
+
+    def test_native_without_its_library_falls_back_to_the_script_engine(self):
+        self.save(engine="native")
+        self.on()
+        status = dm.status()
+        self.assertEqual((status["engine"], status["hooked"]), ("script", False))
+        self.assertTrue(any("native engine" in e for e in status["errors"]))
+        self.assertEqual(self.kind(self.search), "island", "the script engine's effects are in place")
+        self.assertNotIn("native_pending", self.settings(), "nothing left to guard")
+
+    def test_a_crash_while_starting_turns_the_native_engine_off(self):
+        self.save(engine="native", native_pending=True)
+        dm._state().pop("native_pending_mine", None)  # the mark is an earlier session's
+        self.patch("_hooks", lambda: self.fail("the hooks must not go in again"))
+        self.on()
+        self.assertEqual(dm.status()["engine"], "script")
+        self.assertEqual(self.settings().get("engine"), "script")
+        self.assertNotIn("native_pending", self.settings())
+
+    def test_native_engine_maps_no_pixels_of_what_fontlab_paints(self):
+        hooks = FakeHooks()
+        self.patch("_hooks", lambda: hooks)
+        self.patch("_palette_table", lambda palette: (dm.ctypes_array(1) if hasattr(dm, "ctypes_array") else __import__("ctypes").c_uint32(0)))
+        self.save(engine="native")
+        popup = FakeWidget("YPopupHost", parent=self.canvas)  # FontLab's labels over the glyph canvas
+        del qtfakes.QTimer.single_shots[:]
+        self.on()
+        status = dm.status()
+        self.assertEqual((status["engine"], status["hooked"]), ("native", True), status["errors"])
+        self.assertEqual(hooks.calls[:2], ["set_palette", "install"])
+        self.assertIsNone(self.kind(self.search), "an island FontLab paints: hooked, no effect")
+        self.assertTrue(self.search.property(dm.HOOKED_PROP))
+        self.assertIn(self.search, list(self.dock.effect.freelab_protect.values()),
+                      "dark as it is painted: the dock's effect must not map it again")
+        self.assertTrue(self.canvas.property(dm.HOOKED_PROP))
+        self.assertTrue(popup.property(dm.HOOKED_PROP), "FontLab's own painting inside a hooked island: hooked too")
+        self.assertIsNone(self.edit.property(dm.HOOKED_PROP), "a line edit (Qt draws it) inside one: processed as any")
+        self.assertEqual(self.kind(self.panel), "title", "the script engine's other effects stay")
+        self.assertNotEqual(self.search.styleSheet, u"QWidget{background:white;}", "Qt draws stylesheets: darkened as ever")
+        self.assertTrue(self.settings().get("native_pending"), "guarded until it has run a while")
+        settle = [cb for ms, cb in qtfakes.QTimer.single_shots if ms == dm.NATIVE_SETTLE_MS]
+        self.assertEqual(len(settle), 1)
+        settle[0]()
+        self.assertNotIn("native_pending", self.settings())
+        self.off()
+        self.assertIn("remove", hooks.calls)
+        self.assertFalse(dm.status()["hooked"])
+
+    def test_hooks_that_cannot_all_go_in_fall_back_to_the_script_engine(self):
+        hooks = FakeHooks()
+        hooks.freelab_hooks_install = lambda dark_l, light_l, keep_tint: -2  # a slot it could not write
+        self.patch("_hooks", lambda: hooks)
+        self.patch("_palette_table", lambda palette: __import__("ctypes").c_uint32(0))
+        self.save(engine="native")
+        self.on()
+        status = dm.status()
+        self.assertEqual((status["engine"], status["hooked"]), ("script", False))
+        self.assertTrue(any("could not hook" in e for e in status["errors"]), status["errors"])
+        self.assertEqual(self.kind(self.search), "island", "the script engine's effects are in place")
+        self.assertNotIn("native_pending", self.settings(), "nothing left to guard")
+
+    def test_applying_again_while_on_keeps_the_hooks(self):
+        # the re-applies after a switch (0, 1.5, and 5 s) came while the start was still settling,
+        # took their own mark for a crash, and ran the script engine over the hooks
+        hooks = FakeHooks()
+        self.patch("_hooks", lambda: hooks)
+        self.patch("_palette_table", lambda palette: __import__("ctypes").c_uint32(0))
+        self.save(engine="native", enabled=True)
+        self.on()
+        dm.apply_dark()
+        dm.run_queue()
+        dm._reapply_if_on()
+        dm.run_queue()
+        status = dm.status()
+        self.assertEqual((status["engine"], status["hooked"], status["errors"]), ("native", True, []))
+        self.assertEqual(hooks.calls.count("install"), 1)
+        self.assertIsNone(self.kind(self.search), "no script effects over the hooks")
+
+    def test_switching_engines_rebuilds(self):
+        hooks = FakeHooks()
+        self.patch("_hooks", lambda: hooks)
+        self.patch("_palette_table", lambda palette: __import__("ctypes").c_uint32(0))
+        self.on()
+        self.assertEqual(self.kind(self.search), "island")
+        dm.configure(dark=True, engine="native")
+        dm.run_queue()
+        self.assertEqual((dm.status()["engine"], dm.status()["hooked"]), ("native", True), dm.status()["errors"])
+        self.assertIsNone(self.kind(self.search))
+        dm.configure(dark=True, engine="script")
+        dm.run_queue()
+        self.assertEqual(self.kind(self.search), "island")
+        self.assertIn("remove", hooks.calls)
+
+
 class KindTests(DarkModeCase):
     def test_kinds(self):
         self.assertEqual(dm.widget_kind(self.search), "island")
@@ -665,6 +1093,41 @@ class OnOffTests(DarkModeCase):
         self.assertIsInstance(icon.pixmap, Mapped)
         self.assertEqual(art.pixmap.side, 400, "artwork such as the About picture stays")
 
+    def test_an_icon_held_at_twice_its_size_is_still_an_icon(self):
+        """FontLab's warning dialogs hold their 64-pixel question mark as 128 pixels for sharp screens:
+        counted in its own pixels it passed for artwork, and kept its light edge on the dark dialog."""
+        class Pixmap(object):
+            def __init__(self, side, ratio=None):
+                self.side, self.ratio = side, ratio
+                self.key = FakeIcon().key
+
+            def isNull(self):
+                return False
+
+            def cacheKey(self):
+                return self.key
+
+            def width(self):
+                return self.side
+
+            def height(self):
+                return self.side
+
+            def devicePixelRatio(self):
+                if self.ratio is None:
+                    raise AttributeError("an older Qt")
+                return self.ratio
+
+        sharp = FakeWidget("QLabel", parent=self.content, inherits=("QLabel",))
+        small = FakeWidget("QLabel", parent=self.content, inherits=("QLabel",))
+        plain = FakeWidget("QLabel", parent=self.content, inherits=("QLabel",))
+        sharp.pixmap, small.pixmap, plain.pixmap = Pixmap(60, 2.0), Pixmap(20), Pixmap(128, 1.0)
+        self.on()
+        self.assertIsInstance(sharp.pixmap, Mapped, "30 pixels as drawn: an icon")
+        self.assertIsInstance(small.pixmap, Mapped, "no ratio known: its own pixels")
+        self.assertEqual(plain.pixmap.side, 128, "128 pixels as drawn: a picture, left alone")
+        self.assertEqual(dm._pixel_ratio(Pixmap(128, 2.0)), 2.0)
+
     def test_icons_are_not_mapped_twice(self):
         self.on()
         mapped = self.button.icon
@@ -720,7 +1183,9 @@ class OnOffTests(DarkModeCase):
         self.assertIsNone(self.menu.property(dm.SEEN_PROP))
         self.menu.emit("aboutToShow()")
         self.assertTrue(self.menu.property(dm.SEEN_PROP))
+        self.assertIn(u"QMenu::separator", self.menu.styleSheet, "lighter separators")
         self.off()
+        self.assertEqual(self.menu.styleSheet, u"", "taken off with dark mode")
         self.on()
         self.assertEqual(len(self.menu.connections["aboutToShow()"]), 1, "hooked once, across switches")
         self.assertEqual(dm._state()["errors"], [])
@@ -1125,6 +1590,301 @@ class OldQtTests(DarkModeCase):
         roles = set(role for _group, role in self.app.palette().colors)
         self.assertNotIn("PlaceholderText", roles)
         self.assertIn("Window", roles)
+
+
+class _Shape(object):
+    def __init__(self, kind):
+        self.shapeType = kind
+
+
+class _Layer(object):
+    def __init__(self, kinds):
+        self.shapes = [_Shape(k) for k in kinds]
+
+
+class _FgGlyph(object):
+    def __init__(self, name, colors=False):
+        self.name, self.colors = name, colors
+
+    def hasColors(self):
+        return self.colors
+
+
+class _Glyph(object):
+    def __init__(self, kinds):
+        self.layer = _Layer(kinds)
+
+    def getLayerByName(self, name):
+        return self.layer
+
+
+class _FgPackage(object):
+    def __init__(self, glyphs):
+        self.glyphs = glyphs
+
+
+class _Package(object):
+    master = "Regular"
+
+    def __init__(self, glyphs, kinds):
+        self.fgPackage = _FgPackage(glyphs)
+        self.kinds = kinds
+
+    def findName(self, name):
+        return _Glyph(self.kinds.get(name, ["ShapeContours"]))
+
+
+class ColorFontTests(unittest.TestCase):
+    def test_a_font_in_one_ink_is_not_in_color(self):
+        glyphs = [_FgGlyph("g%d" % i) for i in range(200)]
+        self.assertFalse(dm.font_in_color(_Package(glyphs, {})))
+
+    def test_colored_shapes_make_a_color_font(self):
+        glyphs = [_FgGlyph("g%d" % i, colors=(i == 150)) for i in range(200)]
+        self.assertTrue(dm.font_in_color(_Package(glyphs, {})))
+
+    def test_svg_pictures_make_a_color_font(self):
+        glyphs = [_FgGlyph("g%d" % i) for i in range(200)]
+        kinds = dict(("g%d" % i, ["ShapeImage"]) for i in range(100, 200))  # its emoji, after the letters
+        self.assertTrue(dm.font_in_color(_Package(glyphs, kinds)))
+
+    def test_a_failing_font_is_not_in_color(self):
+        self.assertFalse(dm.font_in_color(object()))
+
+    def test_pictures_are_found_without_a_color_flag(self):
+        class NoFlag(object):
+            def __init__(self, name):
+                self.name = name
+        glyphs = [NoFlag("g%d" % i) for i in range(200)]
+        kinds = dict(("g%d" % i, ["ShapeImage"]) for i in range(100, 200))
+        self.assertTrue(dm.font_in_color(_Package(glyphs, kinds)), "one test failing leaves the other")
+
+    def test_the_glyphs_are_never_indexed(self):
+        class Glyphs(object):  # FontLab's native sequence: indexing one crashed FontLab 8
+            def __init__(self, items):
+                self.items = items
+
+            def __len__(self):
+                return len(self.items)
+
+            def __iter__(self):
+                return iter(self.items)
+
+            def __getitem__(self, i):
+                raise AssertionError("indexed")
+        glyphs = Glyphs([_FgGlyph("g%d" % i) for i in range(200)])
+        kinds = dict(("g%d" % i, ["ShapeImage"]) for i in range(100, 200))
+        self.assertTrue(dm.font_in_color(_Package(glyphs, kinds)))
+
+    def test_the_answer_is_kept_until_the_glyph_count_changes(self):
+        glyphs = [_FgGlyph("g%d" % i) for i in range(200)]
+        package, cache = _Package(glyphs, {}), {}
+        self.assertFalse(dm.font_in_color(package, cache))
+        glyphs[150].colors = True
+        self.assertFalse(dm.font_in_color(package, cache), "kept: the font is not looked at again")
+        glyphs.append(_FgGlyph("new"))
+        self.assertTrue(dm.font_in_color(package, cache), "a glyph more: looked at anew")
+
+    def test_two_open_fonts_of_one_name_and_count_are_told_apart(self):
+        # a mono and a color version of one font: same name, master, and glyph count
+        mono = _Package([_FgGlyph("g%d" % i) for i in range(200)], {})
+        color = _Package([_FgGlyph("g%d" % i, colors=(i == 150)) for i in range(200)], {})
+        mono.tfn = color.tfn = "Font"
+        mono.fgPackage.id, color.fgPackage.id = 1, 2
+        cache = {}
+        self.assertFalse(dm.font_in_color(mono, cache))
+        self.assertTrue(dm.font_in_color(color, cache), "not the mono version's answer")
+        self.assertFalse(dm.font_in_color(mono, cache))
+
+
+class _Image(object):
+    """A QImage's pixels (ARGB32), for keep_colors."""
+
+    def __init__(self, width, height, pixels=None):
+        self.w, self.h, self.pixels = width, height, dict(pixels or {})
+
+    def width(self):
+        return self.w
+
+    def height(self):
+        return self.h
+
+    def pixel(self, x, y):
+        return self.pixels.get((x, y), 0)
+
+    def setPixel(self, x, y, value):
+        self.pixels[(x, y)] = value
+
+    def copy(self):
+        return _Image(self.w, self.h, self.pixels)
+
+
+class KeepColorsTests(unittest.TestCase):
+    BLUE, WHITE, PALE = 0xff1060c0, 0xffffffff, 0xff90b8e8
+
+    def picture(self):
+        """A blue square on transparency, a white dot inside it, and a pale pixel on its right edge."""
+        pixels = dict(((x, y), self.BLUE) for x in range(1, 6) for y in range(1, 6))
+        pixels[(3, 3)] = self.WHITE
+        pixels[(6, 3)] = self.PALE
+        return _Image(7, 7, pixels)
+
+    def test_a_white_detail_inside_the_picture_stays(self):
+        original = self.picture()
+        result = dm.keep_colors(original, original.copy())
+        self.assertEqual(result.pixel(3, 3), self.WHITE, "the white ? of a question icon")
+        self.assertEqual(result.pixel(2, 2), self.BLUE)
+
+    def test_smoothing_toward_white_on_the_outline_is_cleaned(self):
+        original = self.picture()
+        value = dm.keep_colors(original, original.copy()).pixel(6, 3)
+        self.assertEqual(value & 0xffffff, self.BLUE & 0xffffff, "the edge takes the color beside it")
+        self.assertTrue(0 < value >> 24 < 255, "as transparent as it was mixed with white")
+
+
+class _Index(object):
+    def __init__(self, row):
+        self._row = row
+
+    def isValid(self):
+        return 0 <= self._row < 1000
+
+    def row(self):
+        return self._row
+
+    def parent(self):
+        return None
+
+
+class _Rect(object):
+    def __init__(self, x, y, w, h):
+        self.x, self.y, self.w, self.h = x, y, w, h
+
+    def top(self):
+        return self.y
+
+    def bottom(self):
+        return self.y + self.h - 1
+
+    def height(self):
+        return self.h
+
+    def isEmpty(self):
+        return self.w <= 0 or self.h <= 0
+
+    def intersected(self, other):
+        top, bottom = max(self.y, other.y), min(self.y + self.h, other.y + other.h)
+        return _Rect(self.x, top, self.w, bottom - top)
+
+
+class SelectedRowTests(DarkModeCase):
+    """A list's selected rows are found among the rows on screen, never by copying the whole selection."""
+
+    class Selection(object):
+        def __init__(self, rows):
+            self.rows = rows
+
+        @property
+        def hasSelection(self):  # a property under PythonQt, as FontLab has it
+            return bool(self.rows)
+
+        def rowIntersectsSelection(self, row, parent):
+            return row in self.rows
+
+        def selectedIndexes(self):
+            raise AssertionError("the whole selection copied")
+
+    class Model(object):
+        def index(self, row, column, parent):
+            return _Index(row)
+
+    class View(object):
+        def __init__(self, selected, scrolled):
+            self.selection, self.model_, self.scrolled = SelectedRowTests.Selection(selected), SelectedRowTests.Model(), scrolled
+
+        def selectionModel(self):
+            return self.selection
+
+        def model(self):
+            return self.model_
+
+        def inherits(self, name):
+            return False
+
+        def indexAt(self, point):
+            return _Index(self.scrolled)
+
+        def visualRect(self, index):
+            return _Rect(0, (index.row() - self.scrolled) * 20, 300, 20)
+
+    def setUp(self):
+        DarkModeCase.setUp(self)
+        core = dm._core
+        self.patch("_core", lambda name: {"QRect": _Rect, "QPoint": lambda x, y: None}.get(name) or core(name))
+
+    def test_the_selected_rows_on_screen(self):
+        view = self.View(selected=set(range(1000)) - set([502]), scrolled=500)  # everything but one, scrolled down
+        rows = dm._selected_rows(view, 300, 100)
+        self.assertEqual([r.top() for r in rows], [0, 20, 60, 80], "rows 500, 501, 503, and 504")
+        self.assertEqual(rows[-1].height(), 20)
+
+    def test_nothing_selected(self):
+        self.assertEqual(dm._selected_rows(self.View(selected=set(), scrolled=0), 300, 100), [])
+
+
+class FollowColorFontTests(DarkModeCase):
+    def test_switching_between_two_versions_of_one_font_follows_the_current_one(self):
+        class Hooks(object):
+            def __init__(self):
+                self.flags = []
+
+            def freelab_hooks_set_color_content(self, on):
+                self.flags.append(on)
+                return 0
+
+        mono = _Package([_FgGlyph("g%d" % i) for i in range(200)], {})
+        color = _Package([_FgGlyph("g%d" % i, colors=(i == 150)) for i in range(200)], {})
+        mono.tfn = color.tfn = "Font"
+        mono.fgPackage.id, color.fgPackage.id = 1, 2
+        current = [mono]
+
+        class Workspace(object):
+            @property
+            def currentPackage(self):
+                return current[0]
+
+        fontlab = types.ModuleType("fontlab")
+        fontlab.flWorkspace = type("flWorkspace", (object,), {"instance": staticmethod(lambda: Workspace())})
+        saved = sys.modules.get("fontlab")
+        sys.modules["fontlab"] = fontlab
+        try:
+            hooks = Hooks()
+            state = dm._state()
+            state["hooked"], state["hooked_lib"] = True, hooks
+            dm._follow_color_font(False)
+            current[0] = color  # not a full sweep: the key alone tells the fonts apart
+            dm._follow_color_font(False)
+            current[0] = mono
+            dm._follow_color_font(False)
+        finally:
+            state["hooked"] = False
+            state.pop("hooked_lib", None)
+            if saved is None:
+                sys.modules.pop("fontlab", None)
+            else:
+                sys.modules["fontlab"] = saved
+        self.assertEqual(hooks.flags, [1, 0])
+
+
+class RestoreCacheTests(DarkModeCase):
+    def test_switching_off_forgets_the_list_logos_and_color_fonts(self):
+        self.on()
+        state = dm._state()
+        state["logo_keys"] = {1: "logo at the dark shade"}
+        state["color_fonts"] = {("Font", "Regular"): (200, True)}
+        self.off()
+        self.assertNotIn("logo_keys", state)
+        self.assertNotIn("color_fonts", state)
 
 
 def _ancestors(widget):

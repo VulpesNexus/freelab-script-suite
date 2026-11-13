@@ -25,9 +25,30 @@ PY27 = PY27_DIR / "tools" / "python.exe"
 NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 PY27_FILES = (
     "darkmode/freelab_dark_mode.py", "darkmode/freelab_dark_mode_settings.py", "tests/qtfakes.py",
-    "tests/darkmode_tests.py",
+    "tests/darkmode_tests.py", "kerning/freelab_auto_kerning.py", "kerning/freelab_kerning_check.py", "kerning/common_pairs.txt", "kerning/script_pairs.txt",
+    "tests/kern_tests.py", "spacing/freelab_auto_spacing.py", "tests/spacing_tests.py",
+    "diacritics/freelab_diacritics.py", "diacritics/glyph_names.json", "features/freelab_feature_code.py",
+    "tests/glyphtools_tests.py",
+    "cjk/freelab_cjk_spacing.py", "tests/cjk_tests.py", "tests/features_tests.py",
+    "checks/freelab_font_check.py", "checks/language_coverage.json", "tests/fontcheck_tests.py",
+    "checks/character_sets.json", "checks/character_sets_LICENSE",
+    "checks/language_families.json", "checks/language_families_LICENSE",
+    "checks/language_orthographies.json", "checks/language_orthographies_LICENSE", "checks/font_characters.json",
+    "compare/freelab_font_compare.py", "tests/compare_tests.py", "proof/freelab_proof.py", "tests/proof_tests.py",
+    "windows/freelab_tabs.py", "tests/tabs_tests.py",
+    "features/freelab_alternates.py", "features/alternates_model.json", "tests/alternates_tests.py",
+    "checks/language_font/FreeLang-Essential.ttf", "checks/language_font/FreeLang-CJK.ttf",
+    "checks/language_font/FreeLang-Extended-General.ttf", "checks/language_font/FreeLang-Extended-Mongolian-Tibetan.ttf",
+    "checks/language_font/FreeLang-Extended-Duployan.ttf", "checks/language_font/FreeLang_LICENSE",
+    "checks/language_font/language_font.json", "tests/language_font_tests.py",
 )
-PY27_SUITES = ("tests/darkmode_tests.py",)
+PY27_OPTIONAL = tuple("checks/language_font/%s" % name for name in (
+    "FreeLang-CJK.ttf", "FreeLang-Extended-General.ttf", "FreeLang-Extended-Mongolian-Tibetan.ttf",
+    "FreeLang-Extended-Duployan.ttf"))
+PY27_SUITES = ("tests/darkmode_tests.py", "tests/kern_tests.py", "tests/spacing_tests.py", "tests/glyphtools_tests.py",
+               "tests/cjk_tests.py", "tests/features_tests.py", "tests/fontcheck_tests.py",
+               "tests/compare_tests.py", "tests/proof_tests.py", "tests/tabs_tests.py",
+               "tests/alternates_tests.py", "tests/language_font_tests.py")
 
 
 def run_py3() -> tuple[bool, list[str]]:
@@ -46,6 +67,8 @@ def run_py27() -> bool | None:
     ok = True
     try:
         for rel in PY27_FILES:
+            if rel in PY27_OPTIONAL and not (ROOT / rel).is_file():
+                continue  # (FreeLang's optional fonts, published beside a release: the tests skip what is absent)
             target = work / rel
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / rel, target)

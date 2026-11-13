@@ -239,6 +239,30 @@ class NativeTests(unittest.TestCase):
         self.assertEqual(rgb_at(buf, TEXT_ROW + 2), dm.map_rgb(0, 0, 0), "its smoothing too, alpha kept")
         self.assertEqual(buf[4 * (TEXT_ROW + 2) + 3], 120)
 
+    def test_dark_gray_text_drawn_on_nothing_turns_light(self):
+        # The font window's categories: headers and empty categories in dark gray, close to the dark
+        # gray beneath, and a light badge more frequent than that text (taken for the paper, it made
+        # the text a "fringe" between the badge and a red flag).
+        width, buf = 60, bytearray()
+        for y in range(40):
+            for x in range(width):
+                gray = (0x3c, 0x3c, 0x3c) if x < 24 else (0, 0, 0)  # gray headers, black items
+                if 3 <= y <= 10 and x % 6 == 1:
+                    buf += struct.pack("<BBBB", gray[2], gray[1], gray[0], 255)
+                elif 3 <= y <= 10 and x % 6 == 2:
+                    buf += struct.pack("<BBBB", gray[2], gray[1], gray[0], 120)
+                elif 30 <= y <= 32:
+                    buf += struct.pack("<BBBB", 0xd5, 0xcb, 0xcb, 255)  # the badges
+                elif y == 35 and x < 3:
+                    buf += struct.pack("<BBBB", 0x2c, 0x27, 0xc1, 255)  # the flag's red
+                else:
+                    buf += struct.pack("<BBBB", 0, 0, 0, 0)
+        anchors(LIB, buf, width, "ink")
+        text = rgb_at(buf, 3 * width + 1)
+        self.assertGreater(min(text), 0x90, "light on the dark interface: %r" % (text,))
+        self.assertGreater(min(rgb_at(buf, 3 * width + 2)), 0x90, "its smoothing too")
+        self.assertEqual(buf[4 * (3 * width + 2) + 3], 120, "alpha kept")
+
     def test_a_gray_frame_drawn_on_nothing_stays(self):
         # A glyph-panel field: only its 1-pixel gray frame is opaque.
         buf = bytearray()
@@ -315,6 +339,19 @@ class NativeTests(unittest.TestCase):
         buf = pixels(text_rows(paper, blue, blend=fringe))
         anchors(LIB, buf, 40, "ink")
         self.assertEqual(rgb_at(buf, TEXT_ROW + 2), fringe)
+
+    def test_dark_gray_lines_apart_from_red_lines_are_lifted(self):
+        # FontLab's Output panel: its output in dark gray (#404040), its errors in red, each on lines of
+        # its own. The gray fits a blend of the paper and the red loosely, and was kept as the red's
+        # smoothing: unreadable on the dark paper whenever an error was shown. Smoothing touches its text.
+        paper, gray, red = (30, 30, 30), (64, 64, 64), (255, 0, 0)
+        buf = pixels(text_rows(paper, gray) + text_rows(paper, red) + text_rows(paper, gray))
+        anchors(LIB, buf, 40, "ink")
+        for row in (TEXT_ROW, TEXT_ROW + 28 * 40):
+            r, g, b = rgb_at(buf, row + 1)
+            self.assertGreater(dm.oklab(r, g, b)[0], 0.6, "the gray text is light enough to read")
+        self.assertEqual(rgb_at(buf, TEXT_ROW + 14 * 40 + 1), red, "the red stays")
+        self.assertEqual(rgb_at(buf, 0), paper)
 
     def test_light_badges_turn_dark_without_touching_light_text_beside_them(self):
         # Gray text (192) on a dark row, and a gray badge (160) with black text: all on one gray line.
@@ -460,6 +497,184 @@ class KeyedTests(unittest.TestCase):
         expected = dm.map_rgb(202, 203, 204)
         self.assertLessEqual(max(abs(a - b) for a, b in zip(out[0], expected)), 1)
         self.assertEqual(out[1:], colors[1:])
+
+    @staticmethod
+    def sidebar(width=64, height=96):
+        """A list's rows drawn on nothing, for a light ground (the font window's sidebar): a dark gray
+        glyph icon, a dark gray badge with a white letter, black text, and gray sub-item text, over\n        empty rows (no color covers enough to be its background)."""
+        icon, badge, white, black, gray = (64, 65, 66), (64, 65, 66), (255, 255, 255), (0, 0, 0), (124, 124, 124)
+        image = {}
+        for y in range(4, 14):  # the icon: a frame of strokes, 8 by 10, a third filled
+            for x in range(4, 12):
+                if x in (4, 11) or y in (4, 8, 13):
+                    image[(x, y)] = icon
+        for y in range(4, 20):  # the badge: 16 by 16, a white bar for its letter
+            for x in range(20, 36):
+                image[(x, y)] = white if 26 <= x <= 27 and 7 <= y <= 16 else badge
+        for y in range(4, 14):  # black text and gray text: 1-pixel strokes
+            for x in range(40, 50, 3):
+                image[(x, y)] = black
+            for x in range(52, 62, 3):
+                image[(x, y)] = gray
+        out = bytearray()
+        for y in range(height):
+            for x in range(width):
+                color = image.get((x, y))
+                out += struct.pack("<BBBB", color[2], color[1], color[0], 255) if color else b"\0\0\0\0"
+        return out
+
+    def test_list_mode_maps_glyph_icons_and_gray_rows_on_nothing(self):
+        width = 64
+        ink, listed = self.sidebar(), self.sidebar()
+        anchors(LIB, ink, width, "ink")
+        anchors(LIB, listed, width, "list")
+        at = lambda buf, x, y: rgb_at(buf, y * width + x)
+        self.assertEqual(at(ink, 4, 6), (64, 65, 66), "ink mode: a dark surface on nothing stays")
+        self.assertGreater(at(listed, 4, 6)[0], 150, "list mode: the glyph icon turns light")
+        self.assertEqual(at(listed, 21, 5), (64, 65, 66), "the badge stays as drawn")
+        self.assertEqual(at(listed, 26, 10), (255, 255, 255), "its white letter too")
+        self.assertGreater(at(listed, 40, 6)[0], 150, "black text turns light")
+        self.assertEqual(at(ink, 52, 6), (124, 124, 124), "ink mode: mid gray on nothing stays")
+        self.assertGreater(at(listed, 52, 6)[0], 150, "list mode: gray sub-item text turns light")
+
+    def test_list_mode_thins_only_the_edges_it_mapped(self):
+        # On nothing: black text (opaque) with its smoothing beside it, a smoothing pixel with nothing more
+        # opaque beside it, a block of text drawn translucent throughout (a gray sub-item), and light text
+        # with its smoothing, kept as drawn.
+        width, buf = 40, bytearray()
+        for y in range(14):
+            for x in range(width):
+                if 3 <= y <= 10 and x % 6 == 1:
+                    buf += struct.pack("<BBBB", 0, 0, 0, 255)
+                elif 3 <= y <= 10 and x % 6 in (2, 4):
+                    buf += struct.pack("<BBBB", 0, 0, 0, 120)
+                elif 11 <= y <= 13 and 30 <= x < 36:
+                    buf += struct.pack("<BBBB", 0, 0, 0, 153)
+                elif y == 0 and x < 20 and x % 2 == 0:
+                    buf += struct.pack("<BBBB", 192, 192, 192, 255)
+                elif y == 0 and x < 20:
+                    buf += struct.pack("<BBBB", 192, 192, 192, 120)
+                else:
+                    buf += struct.pack("<BBBB", 0, 0, 0, 0)
+        anchors(LIB, buf, width, "list")
+        alpha = lambda x, y: buf[4 * (y * width + x) + 3]
+        self.assertEqual(rgb_at(buf, TEXT_ROW + 2), dm.map_rgb(0, 0, 0), "the smoothing turns light")
+        self.assertLess(alpha(2, 3), 100, "and is thinned, beside the more opaque text")
+        self.assertEqual(alpha(4, 3), 120, "nothing more opaque beside it: as drawn")
+        self.assertEqual(rgb_at(buf, 12 * width + 32), dm.map_rgb(0, 0, 0), "the translucent block turns light")
+        self.assertEqual((alpha(32, 12), alpha(30, 12)), (153, 153), "its core and its edge keep their coverage")
+        self.assertEqual(rgb_at(buf, 1), (192, 192, 192), "light text stays")
+        self.assertEqual(alpha(1, 0), 120, "its smoothing, not mapped, is not thinned")
+
+    def test_list_mode_leaves_the_counters_of_light_text_on_a_dark_row(self):
+        # Export Profiles: navy names drawn on nothing, and the selected row FontLab paints dark itself
+        # (#313131) with light text. The row's color closed off inside each letter is a small shape of a
+        # dark gray: mapped as a glyph icon, it filled the letters with light gray.
+        width, rows, buf = 220, 240, bytearray()  # the row a small part of the list: no background of its own
+        row, text, smooth, navy = (0x31, 0x31, 0x31), (0xdb, 0xdb, 0xdb), (0x86, 0x86, 0x86), (58, 63, 127)
+        for y in range(rows):
+            for x in range(width):
+                letter = (x - 20) % 12 if 20 <= x < 200 else 99  # each letter: a 6 by 8 ring, smoothing at its right
+                if 10 <= y < 30:
+                    if 14 <= y <= 21 and letter < 6:
+                        color = row if 2 <= letter <= 3 and 16 <= y <= 19 else text
+                    elif 14 <= y <= 21 and letter == 6:
+                        color = smooth
+                    else:
+                        color = row
+                    buf += struct.pack("<BBBB", color[2], color[1], color[0], 255)
+                elif 2 <= y <= 7 and x % 6 == 1:
+                    buf += struct.pack("<BBBB", navy[2], navy[1], navy[0], 255)
+                elif 2 <= y <= 7 and x % 6 == 2:
+                    buf += struct.pack("<BBBB", navy[2], navy[1], navy[0], 120)
+                else:
+                    buf += struct.pack("<BBBB", 0, 0, 0, 0)
+        before = bytes(buf)
+        anchors(LIB, buf, width, "list")
+        r, g, b = rgb_at(buf, 3 * width + 1)
+        self.assertGreater(dm.oklab(r, g, b)[0], 0.6, "the navy name turns light")
+        self.assertGreater(b, r + 30, "and stays blue")
+        row_bytes = slice(4 * 10 * width, 4 * 30 * width)
+        self.assertEqual(rgb_at(buf, 17 * width + 22), row, "a letter's counter stays the row's color")
+        self.assertEqual(rgb_at(buf, 17 * width + 20), text, "the light text as drawn")
+        self.assertEqual(rgb_at(buf, 17 * width + 26), smooth, "its smoothing too")
+        self.assertEqual(bytes(buf[row_bytes]), before[row_bytes], "the whole row as FontLab painted it")
+
+    @staticmethod
+    def features(hover=True):
+        """Preview Features' list as FontLab paints it for a dark interface, on its own dark base: rows of
+        light gray ClearType text (a full stroke between a navy and a yellowish fringe), a dark gray ring
+        at the left of each, and the row under the pointer (rows 60 to 71) near-white, with the same light
+        gray text between its pale fringes, a gray ring, and a checked mark's blue disk."""
+        base, text, ring, band = (0x1e, 0x1e, 0x1e), (0xdb, 0xdb, 0xdb), (0x4f, 0x4f, 0x4f), (0xe9, 0xf0, 0xff)
+        left, right = (0x1e, 0x3e, 0x7c), (0xbb, 0xbb, 0x7c)  # the text's fringes on the base,
+        pale_left, pale_right = (0xe7, 0xf0, 0xff), (0xe9, 0xec, 0xed)  # and on the near-white row
+        band_ring, disk = (0xb4, 0xb8, 0xbf), (0x41, 0x9b, 0xf9)
+        width, rows, out = 120, 96, []
+        for y in range(rows):
+            line, top = y % 12, y - y % 12
+            on_band = hover and top == 60
+            for x in range(width):
+                color = band if on_band else base
+                if 2 <= line <= 9 and 4 <= x <= 11 and (line in (2, 9) or x in (4, 11)):
+                    color = band_ring if on_band else ring
+                elif on_band and 2 <= line <= 9 and 60 <= x <= 67:
+                    color = disk
+                elif 3 <= line <= 8 and 20 <= x < 56 and x % 6 == 2:
+                    color = pale_left if on_band else left
+                elif 3 <= line <= 8 and 20 <= x < 56 and x % 6 == 3:
+                    color = text
+                elif 3 <= line <= 8 and 20 <= x < 56 and x % 6 == 4:
+                    color = pale_right if on_band else right
+                out.append(color)
+        return width, pixels(out)
+
+    def test_light_text_and_rings_on_a_dark_list_with_one_near_white_row(self):
+        # The near-white row made the light text on the dark rows a blend of that row and the text's own
+        # yellowish fringe (which lies only on the dark rows), and the rings a blend of the dark base and
+        # a pale fringe of the row's text (which lies only on that row): both were redrawn as blends with
+        # the row's colors as they turn dark, dark on dark.
+        text, ring, band = (0xdb, 0xdb, 0xdb), (0x4f, 0x4f, 0x4f), dm.map_rgb(0xe9, 0xf0, 0xff)
+        for mode in ("list", "ink"):
+            width, buf = self.features()
+            anchors(LIB, buf, width, mode)
+            at = lambda x, y: rgb_at(buf, y * width + x)
+            self.assertEqual(at(0, 0), (0x1e, 0x1e, 0x1e), "the dark base stays")
+            self.assertEqual(at(21, 5), text, "%s: the light text on a dark row as painted" % mode)
+            self.assertGreaterEqual(min(at(4, 5)), ring[0], "%s: a ring no darker than painted" % mode)
+            self.assertEqual(len(set(at(4, 5))), 1, "and gray")
+            self.assertEqual(at(100, 65), band, "the near-white row turns dark, as any light surface")
+            self.assertLess(max(band), 0x40)
+            self.assertEqual(at(21, 65), text, "its light text stays, readable on it now")
+            # its smoothing: the same share of the way from the row to the text (the left fringe is nearly
+            # the row's color, the right one over a third of the way)
+            self.assertGreaterEqual(min(at(20, 65)), max(band), "the text's faint smoothing is no darker than the row")
+            self.assertLess(max(at(20, 65)), max(band) + 20)
+            self.assertGreater(min(at(22, 65)), max(band) + 40, "its stronger smoothing is lighter than the row")
+            self.assertLess(max(at(22, 65)), text[0] - 40, "and darker than the text")
+            self.assertGreater(min(at(4, 65)), max(band) + 20, "the row's ring shows on it")
+            self.assertEqual(at(62, 65), (0x41, 0x9b, 0xf9), "the blue disk stays")
+            # with no row under the pointer, the dark rows come out the same
+            width, plain = self.features(hover=False)
+            anchors(LIB, plain, width, mode)
+            self.assertEqual(bytes(plain[:4 * 60 * width]), bytes(buf[:4 * 60 * width]), "%s: the same with no near-white row" % mode)
+
+    def test_with_no_anchor_everything_mapped_maps_each_pixel(self):
+        # No color three times (a gray ramp, one pixel): where every color is mapped, each pixel is mapped
+        # on its own; ink still maps only stray whites
+        ramp = [(g, g, g) for g in range(256)]
+        buf = pixels(ramp)
+        anchors(LIB, buf, 256, "all")
+        for i, rgb in enumerate(ramp):
+            self.assertEqual(rgb_at(buf, i), dm.map_rgb(*rgb), rgb)
+        for mode in ("all", "icon", "subpixel"):
+            one = pixels([(0, 0, 0)])
+            anchors(LIB, one, 1, mode)
+            self.assertEqual(rgb_at(one, 0), dm.map_rgb(0, 0, 0), mode)
+        one = pixels([(0, 0, 0), (255, 255, 255)])
+        anchors(LIB, one, 2, "ink")
+        self.assertEqual(rgb_at(one, 0), (0, 0, 0), "ink: dark on the dark interface is right as it is")
+        self.assertEqual(rgb_at(one, 1), dm.map_rgb(255, 255, 255), "a stray white is not")
 
 
 if __name__ == "__main__":
