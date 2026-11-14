@@ -32,6 +32,7 @@ from __future__ import absolute_import, division, print_function
 import os
 import re
 import sys
+import time
 
 MODEL_FILE = "vertical_model.json"
 SPACING_FILE, SPACING_MODULE = "freelab_cjk_spacing.py", "freelab_cjk_spacing"
@@ -1001,6 +1002,58 @@ EXPORT_NOTE = (u"FontLab 7's export writes no vhea, vmtx, or VORG table (tried a
                u"heights and vhea values stay in the font. After exporting it, <i>Add vertical metrics to an "
                u"exported font</i> adds them to a copy of the font FontLab exported.")
 
+# Long work under a progress bar, as Font Check's: its steps, each with the share of the bar at which it
+# ends, from live timings on IBM Plex Sans JP (9,505 glyphs, 2026-11-15, with the bar): the list read in
+# 1.0 s (the font read 0.6 s), a write in 3.8 s (FontLab's update 0.5 s, vhea 1.3 s, the list read again
+# 1.7 s; the undo step took 0.1 s, once 1.6 s), and vertical metrics added to its TrueType font in 7.4 s (the
+# glyphs measured 3.5 to 6.1 s, saving 0.1 s) and to its CFF export in 7.8 s (measured 3.3 s, saving 3.1 s;
+# 13 s before save_with_tables, which copies the other tables as they are).
+READ_STEP, LIST_STEP, PREVIEW_STEP = u"Reading the font", u"Listing", u"Drawing the previews"
+LIST_STEPS = ((READ_STEP, 0.6), (LIST_STEP, 0.95), (PREVIEW_STEP, 1.0))
+SHOW_STEPS = ((LIST_STEP, 0.95), (PREVIEW_STEP, 1.0))
+UNDO_STEP, BUILD_STEP, CODE_STEP = u"Opening an undo step", u"Building the vertical forms", u"Writing the code"
+HEIGHTS_STEP, UPDATE_STEP, VHEA_STEP = u"Setting advance heights", u"Updating the font", u"Writing vhea"
+WRITE_STEPS = ((UNDO_STEP, 0.05), (BUILD_STEP, 0.1), (CODE_STEP, 0.12), (HEIGHTS_STEP, 0.15), (UPDATE_STEP, 0.25),
+               (VHEA_STEP, 0.5), (READ_STEP, 0.84), (LIST_STEP, 0.97), (PREVIEW_STEP, 1.0))
+VALUES_STEP, OPEN_STEP, SAVE_STEP, CHECK_STEP = (u"Reading this font's values", u"Reading the exported font",
+                                                 u"Saving", u"Checking")
+# (add_vertical_metrics.add_tables reports its own steps by key)
+SCRIPT_STEPS = {"match": u"Matching glyphs", "measure": u"Measuring the glyphs", "build": u"Building the tables"}
+EXPORT_STEPS = ((VALUES_STEP, 0.12), (OPEN_STEP, 0.13), (SCRIPT_STEPS["match"], 0.14), (SCRIPT_STEPS["measure"], 0.95),
+                (SCRIPT_STEPS["build"], 0.96), (SAVE_STEP, 0.98), (CHECK_STEP, 1.0))
+CFF_EXPORT_STEPS = ((VALUES_STEP, 0.12), (OPEN_STEP, 0.13), (SCRIPT_STEPS["match"], 0.14), (SCRIPT_STEPS["measure"], 0.56),
+                    (SCRIPT_STEPS["build"], 0.57), (SAVE_STEP, 0.96), (CHECK_STEP, 1.0))
+SHOW_AFTER = 0.3  # seconds: the list read again (an undo, a check box) shows the bar only when it takes longer
+PUMP_SECONDS = 0.05  # the window redrawn at most this often during a step
+ROWS_PER_STEP = 100  # rows listed between two moves of the bar
+BAR_RANGE = 1000
+BAR_GREEN = ((120, 200, 120), (30, 120, 40))  # ak.LOG_COLORS["done"], should the shared module not have it
+# On the bar itself, never on the dialog: a thin bar, its chunk in the suite's "done" green (Font Check's)
+BAR_SHEET = (u"QProgressBar { border: 1px solid rgba(128, 128, 128, 140); border-radius: 3px; "
+             u"background: transparent; min-height: 10px; max-height: 10px; } "
+             u"QProgressBar::chunk { background-color: rgb(%d, %d, %d); border-radius: 2px; }")
+
+
+def bar_value(steps, label, part=0.0):
+    """How far the bar is, 0 to 1, at this part (0 to 1) of the step of that label; None for a step that is
+    not one of these steps."""
+    start = 0.0
+    for name, end in steps:
+        if name == label:
+            return start + (end - start) * min(max(float(part), 0.0), 1.0)
+        start = end
+    return None
+
+
+def pump_events(QtCore, QtGui):
+    """The window redrawn during long work, the user's clicks and keys left waiting until it is over (Feature
+    Code's pump_events): nothing may act on the font halfway."""
+    flag = getattr(getattr(QtCore, "QEventLoop", None), "ExcludeUserInputEvents", None)
+    if flag is None:
+        QtGui.QApplication.processEvents()
+    else:
+        QtGui.QApplication.processEvents(flag)
+
 
 HELP = u"""<b>FreeLab CJK Vertical</b><br>
 Gives the font what vertical text needs of it: vertical forms (vert and vrt2), proportional heights
@@ -1038,6 +1091,8 @@ def mark_modified(package):
 
 class CJKVerticalDialog(object):
     COLUMNS = ("Glyph", "Name", "Vertical form", "How", "Now", "After")
+    # (long work's state, also for a dialog object made without its window: tests)
+    busy, busy_shown, run_due, busy_steps, busy_now, busy_since, pumped = False, False, False, (), None, 0.0, 0.0
 
     def __init__(self):
         QtCore, QtGui = _qt()
@@ -1082,6 +1137,34 @@ class CJKVerticalDialog(object):
             row.addWidget(box)
         row.addStretch(1)
         layout.addLayout(row)
+        # A progress bar over the list while long work runs (Font Check's): the step's name beside it, its
+        # chunk in the log's "done" green, left alone by dark mode; hidden otherwise
+        self.busy_row = QtGui.QWidget()
+        busy_layout = QtGui.QHBoxLayout(self.busy_row)
+        busy_layout.setContentsMargins(0, 2, 0, 2)
+        self.busy_step = QtGui.QLabel(u"")
+        self.busy_bar = QtGui.QProgressBar()
+        try:
+            self.busy_bar.setRange(0, BAR_RANGE)
+            self.busy_bar.setValue(0)
+            self.busy_bar.setTextVisible(False)  # (the step's name stands beside it)
+            self.busy_bar.setProperty(ak.LEAVE_ALONE_PROP, True)
+        except Exception:
+            pass
+        try:  # (room for the longest step's name: the bar's left edge stays put from one step to the next)
+            longest = max([label for steps in (LIST_STEPS, WRITE_STEPS, EXPORT_STEPS) for label, _ in steps], key=len)
+            self.busy_step.setMinimumWidth(int(QtGui.QFontMetrics(self.busy_step.font).width(
+                u"%s\N{HORIZONTAL ELLIPSIS}" % longest)) + 8)
+        except Exception:
+            pass
+        busy_help = (u"How far the work is: reading the font and listing it, writing, or adding vertical metrics to "
+                     u"an exported font. The window waits for it; it goes away when the work is over.")
+        self.busy_bar.setWhatsThis(busy_help)
+        self.busy_step.setWhatsThis(busy_help)
+        busy_layout.addWidget(self.busy_step)
+        busy_layout.addWidget(self.busy_bar, 1)
+        self.busy_row.setVisible(False)
+        layout.addWidget(self.busy_row)
         self.tree = QtGui.QTreeWidget()
         self.tree.setColumnCount(len(self.COLUMNS))
         self.tree.setHeaderLabels(list(self.COLUMNS))
@@ -1221,6 +1304,8 @@ class CJKVerticalDialog(object):
             pass
 
     def previews_resized(self):
+        if self.busy:
+            return  # (drawn again once the work is over: set_busy)
         if (self.room(), self.pane_width(self.previews[0])) != self.preview_room:  # (a pane taller or wider)
             self.draw_previews()
 
@@ -1239,6 +1324,116 @@ class CJKVerticalDialog(object):
             return height - 8 if height > 32 else None  # (a shorter pane: the em shrinks to fit it, fitting_em)
         except Exception:
             return None
+
+    # -- long work ------------------------------------------------------------------
+
+    def busy_widgets(self):
+        """What is grayed while long work runs (Close is not: a click waits for the work, then closes)."""
+        return [getattr(self, name, None) for name in (
+            "tree", "forms_box", "vpal_box", "vkrn_box", "turned_box", "metrics_box", "compile_box", "sample_box",
+            "sample", "all_button", "none_button", "restore_button", "put_back_button", "export_button",
+            "write_button")]
+
+    def set_busy(self, on, steps=(), at_once=False):
+        """Long work begun (its steps: (label, share of the bar at its end)) or over. While busy, the History
+        watcher, dark mode, and the window's release wait, and so does another read of the list (run once the
+        work is over). The bar and the grayed controls show at once (at_once: a write, an export), or once
+        the work has taken SHOW_AFTER (a list read again for a small font never flickers). Never raises."""
+        self.busy = bool(on)
+        self.busy_steps, self.busy_now = (tuple(steps) if on else ()), None
+        self.busy_since, self.pumped = time.time(), 0.0
+        if on:
+            if at_once:
+                self.show_busy()
+            return
+        if self.busy_shown:
+            self.busy_shown = False
+            try:
+                self.busy_row.setVisible(False)
+                for widget in self.busy_widgets():
+                    if widget is not None:
+                        self.ak.enable(widget, True)
+            except Exception:
+                pass
+            for restore in (lambda: self.show_font_parts(self.package is not None), self.update_buttons,
+                            self.update_put_back):
+                try:  # (each control as the font and the checks want it)
+                    restore()
+                except Exception:
+                    pass
+        if self.run_due:
+            self.run_due = False
+            try:
+                QtCore, QtGui = _qt()
+                QtCore.QTimer.singleShot(0, self.run)
+            except Exception:
+                pass
+
+    def show_busy(self):
+        """The bar shown and the controls grayed, painted at once."""
+        if self.busy_shown:
+            return
+        self.busy_shown = True
+        try:
+            for widget in self.busy_widgets():
+                if widget is not None:
+                    self.ak.enable(widget, False)
+            self.busy_bar.setStyleSheet(self.bar_sheet())  # (the palette may have changed since)
+            self.busy_bar.setValue(0)
+            self.busy_row.setVisible(True)
+        except Exception:
+            pass
+        self.pump(force=True)
+
+    def bar_sheet(self):
+        """The bar's own stylesheet: its chunk in the log's "done" green, the one that reads on the window."""
+        rgb = BAR_GREEN[1]
+        try:
+            QtCore, QtGui = _qt()
+            pair = self.ak.LOG_COLORS["done"]
+            dark = self.dialog.palette.color(QtGui.QPalette.Window).lightness() < 128
+            rgb = tuple(int(value) for value in (pair[0] if dark else pair[1]))
+        except Exception:
+            pass
+        return BAR_SHEET % rgb
+
+    def progress(self, label, part=0.0, events=True):
+        """The work at this part (0 to 1) of the step of that label: the bar moved and the window redrawn (at
+        most every PUMP_SECONDS within a step), or, without events, only the bar painted (as the list is
+        filled: live, letting events through laid out the list made so far each time, and doubled its 0.8 s;
+        the window is redrawn when the step changes). A step the work does not list is passed over. Never
+        raises."""
+        value = bar_value(self.busy_steps, label, part)
+        if value is None or not self.busy:
+            return
+        now = time.time()
+        if not self.busy_shown and now - self.busy_since >= SHOW_AFTER:
+            self.show_busy()
+        if not self.busy_shown:
+            return
+        moved = label != self.busy_now
+        try:
+            if moved:
+                self.busy_now = label
+                self.busy_step.setText(u"%s\N{HORIZONTAL ELLIPSIS}" % label)
+            self.busy_bar.setValue(int(round(value * BAR_RANGE)))
+            if not (moved or events):
+                self.busy_bar.repaint()
+        except Exception:
+            pass
+        if moved or events:
+            self.pump(force=moved)
+
+    def pump(self, force=False):
+        now = time.time()
+        if not force and now - self.pumped < PUMP_SECONDS:
+            return
+        self.pumped = now
+        try:
+            QtCore, QtGui = _qt()
+            pump_events(QtCore, QtGui)
+        except Exception:
+            pass
 
     # -- reading the font --------------------------------------------------------------
 
@@ -1305,8 +1500,21 @@ class CJKVerticalDialog(object):
         return ascender + ((self.model.get("metrics") or {}).get("origin_over_ascender") or 0.0) * upm
 
     def run(self):
+        """The list read again for the font that is current, under the progress bar; while other work runs,
+        once it is over."""
+        if self.busy:
+            self.run_due = True
+            return
+        self.set_busy(True, LIST_STEPS)
+        try:
+            self.read_font()
+        finally:
+            self.set_busy(False)
+
+    def read_font(self):
         QtCore, QtGui = _qt()
         ak = self.ak
+        self.progress(READ_STEP)
         kept = self.current_checks()
         self.tree.blockSignals(True)
         self.tree.clear()
@@ -1350,7 +1558,10 @@ class CJKVerticalDialog(object):
         wanted.update(turnable)
         glyphs, shown_codes = [], []
         self.char_names = code_map(fg_glyphs)
-        for code, name in sorted(self.char_names.items()):
+        codes = sorted(self.char_names.items())
+        for number, (code, name) in enumerate(codes):
+            if number % ROWS_PER_STEP == 0:
+                self.progress(READ_STEP, 0.2 + 0.6 * number / float(len(codes)))
             kind = self.cj.kind_of(code)
             if code in wanted or (kind is not None and kind != "hangul"):
                 measured = self.measure(name)
@@ -1382,17 +1593,19 @@ class CJKVerticalDialog(object):
         for item, on in zip(self.all_rows(), [kept.get(self.row_key(row), row.checked) for row in self.all_rows()]):
             item.checked = on
         if u"%s" % self.sample.text in [text for _, _, text in self.samples]:  # (text of one's own is kept)
-            key = self.cj.SAMPLES[self.cj.best_sample(set(self.char_names))][0]
+            key = self.cj.SAMPLES[self.cj.best_sample(set(self.char_names), *self.cj.font_hints(package))][0]
             keys = [k for k, _, _ in self.samples]
             index = keys.index(key) if key in keys else 0
             self.sample_box.setCurrentIndex(index)
             self.sample.setText(self.samples[index][2])
-        self.fill()
+        self.progress(LIST_STEP)
+        self.fill(lambda part: self.progress(LIST_STEP, part, False))
         self.first_checks = [row.checked for row in self.all_rows()]
         self.update_buttons()
         self.status.setText(self.status_text(package, master))
         self.seen_history = ak.history_mark(package)
         self.update_put_back()
+        self.progress(PREVIEW_STEP)
         self.draw_previews()
 
     def shown_glyph(self, name, own):
@@ -1517,7 +1730,25 @@ class CJKVerticalDialog(object):
             pass
         return dict((self.row_key(row), row.checked) for row in self.all_rows())
 
-    def fill(self):
+    def fill(self, progress=None):
+        """The list made from the rows; progress(part), where given, every ROWS_PER_STEP rows, the list not
+        painted meanwhile."""
+        if progress is None:
+            self.fill_rows(None)
+            return
+        try:
+            self.tree.setUpdatesEnabled(False)
+        except Exception:
+            pass
+        try:
+            self.fill_rows(progress)
+        finally:
+            try:
+                self.tree.setUpdatesEnabled(True)
+            except Exception:
+                pass
+
+    def fill_rows(self, progress):
         QtCore, QtGui = _qt()
         self.tree.blockSignals(True)
         self.tree.clear()
@@ -1530,6 +1761,7 @@ class CJKVerticalDialog(object):
             dimmed = None
         on = {"forms": self.forms_box.checked, "vpal": self.vpal_box.checked, "metrics": self.metrics_box.checked,
               "vkrn": self.vkrn_box.checked, "turned": self.turned_box.checked and self.forms_box.checked}
+        listed = 0
         for section, label in SECTION_LABELS:
             if section == "vpal":
                 members = [(i, r) for i, r in enumerate(rows) if isinstance(r, VTrim)]
@@ -1567,6 +1799,9 @@ class CJKVerticalDialog(object):
                         item.setForeground(column, dimmed)
                 item.setToolTip(3, self.row_tip(row))
                 top.addChild(item)
+                listed += 1
+                if progress is not None and listed % ROWS_PER_STEP == 0:
+                    progress(listed / float(len(rows) or 1))
             top.setExpanded(True)
         for column in range(len(self.COLUMNS)):
             self.tree.resizeColumnToContents(column)
@@ -1664,6 +1899,8 @@ class CJKVerticalDialog(object):
 
     def update_buttons(self):
         self.buttons_due = False
+        if self.busy:
+            return  # (set once the work is over: set_busy)
         ak = self.ak
         self.harvest()
         checks = [row.checked for row in self.checkable()]
@@ -1675,18 +1912,30 @@ class CJKVerticalDialog(object):
         self.draw_previews()
 
     def toggled(self):
+        if self.busy:
+            return
+        self.set_busy(True, SHOW_STEPS)
         try:
             self.harvest()
-            self.fill()
+            self.fill(lambda part: self.progress(LIST_STEP, part, False))
+            self.progress(PREVIEW_STEP)
             self.draw_previews()
         except Exception as exc:
             self.log.add(u"Could not show the change: %s" % self.ak.html(exc), "error")
+        finally:
+            self.set_busy(False)
         self.update_buttons()
 
     def restore(self):
+        if self.busy:
+            return
         for row, on in zip(self.all_rows(), self.first_checks):
             row.checked = on
-        self.fill()
+        self.set_busy(True, SHOW_STEPS)
+        try:
+            self.fill(lambda part: self.progress(LIST_STEP, part, False))
+        finally:
+            self.set_busy(False)
         self.log.add(u"Checks restored as suggested.")
 
     def history_moved(self):
@@ -1837,7 +2086,7 @@ class CJKVerticalDialog(object):
     # -- writing --------------------------------------------------------------------
 
     def write(self):
-        if self.package is None:
+        if self.package is None or self.busy:
             return
         self.harvest()
         package = self.package
@@ -1864,15 +2113,25 @@ class CJKVerticalDialog(object):
             return
         heights = [m for m in metrics if m.key == "advance_height"]
         vhea = [m for m in metrics if m.key != "advance_height"]
+        self.set_busy(True, WRITE_STEPS, at_once=True)
+        try:  # (busy always ends: while it holds, the History watcher is silent and the window is kept)
+            self.write_parts(package, new, builds, heights, vhea)
+        finally:
+            self.set_busy(False)
+
+    def write_parts(self, package, new, builds, heights, vhea):
+        """The write itself, under the progress bar (write), then its log and the list read again."""
         built, failed, written, set_heights, error, touched = [], [], [], 0, None, []
         vhea_done = []
-        self.busy = True
-        try:  # (busy always ends: while it holds, the History watcher is silent and the window is kept)
+        try:
             in_history = bool(builds or new or heights)  # (the font info is not in FontLab's History: no step for it alone)
             if in_history:
+                self.progress(UNDO_STEP)
                 self.ak.before_changes(self.fontlab, package, TITLE)
             try:
-                for form in builds:
+                self.progress(BUILD_STEP)
+                for number, form in enumerate(builds):
+                    self.progress(BUILD_STEP, number / float(len(builds)))
                     glyph, why = self.build_form_safely(package, form)
                     if glyph is None:
                         failed.append((form.target, why))
@@ -1885,22 +2144,25 @@ class CJKVerticalDialog(object):
                         if form.target in gone:
                             form.checked = False
                     new = self.texts_now()
+                self.progress(CODE_STEP)
                 features = package.fgPackage.features
                 for tag in ("vert", "vrt2", "vpal", "vkrn"):
                     if tag in new:
                         features.set_feature(tag, new[tag])
                         written.append(tag)
                 if heights:
+                    self.progress(HEIGHTS_STEP)
                     set_heights = self.set_advance_heights(package, heights[0].value)
             except Exception as exc:
                 error = exc
             if in_history:
+                self.progress(UPDATE_STEP)
                 self.ak.notify_changed(self.fontlab, package, TITLE, touched, added=bool(built) or None)
+            if vhea:
+                self.progress(VHEA_STEP)
             vhea_done = self.write_vhea(package, vhea) if vhea else []
         except Exception as exc:
             error = error or exc
-        finally:
-            self.busy = False
         b = self.ak.b
         if built:
             self.log.add(u"Built %s: %s. %s at the end of the font; <i>Edit &gt; Undo</i> takes %s back." % (
@@ -1926,7 +2188,7 @@ class CJKVerticalDialog(object):
             self.log.add(u"Wrote nothing.")
         if error is not None:
             self.log.add(u"Stopped by an error: %s" % self.ak.html(error), "error")
-        self.run()
+        self.read_font()  # (under the same bar)
 
     def build_form_safely(self, package, form):
         """build_form, its glyph taken out again when anything fails after FontLab added it (an empty glyph
@@ -2091,7 +2353,7 @@ class CJKVerticalDialog(object):
         values, by add_vertical_metrics run here (FontLab 7's Python ships fontTools); the values written
         beside the exported font too, for add_vertical_metrics run on its own. The result in the log."""
         QtCore, QtGui = _qt()
-        if self.package is None:
+        if self.package is None or self.busy:
             return
         if path is None:
             path = QtGui.QFileDialog.getOpenFileName(self.dialog, u"The font FontLab exported", u"",
@@ -2099,32 +2361,53 @@ class CJKVerticalDialog(object):
             if not path:
                 return
         path = u"%s" % path
+        self.set_busy(True, EXPORT_STEPS, at_once=True)
+        try:
+            self.add_metrics_to(path)
+        finally:
+            self.set_busy(False)
+
+    def add_metrics_to(self, path):
+        """add_metrics_to_export's work, under the progress bar, and its log."""
         import io
         import json
         b = self.ak.b
+        started = time.time()
         try:
+            self.progress(VALUES_STEP)
             values = self.metrics_values(self.package)
             script = load_metrics_script()
             with io.open(script.values_path(path), "w", encoding="utf-8") as handle:
                 handle.write(u"%s" % json.dumps(values, indent=1, sort_keys=True, ensure_ascii=False))
+            self.progress(OPEN_STEP)
             from fontTools.ttLib import TTFont
             font = TTFont(path)
-            if font["head"].unitsPerEm != values["upm"]:
-                self.log.add(u"%s has an em of %s, this font %s: export it from this font again." % (
-                    b(os.path.basename(path)), counted(font["head"].unitsPerEm, u"unit"), counted(values["upm"], u"unit")),
-                    "error")
-                return
-            metrics = script.add_tables(font, values)
-            out = free_name(script.output_path(path))
-            font.save(out)
+            try:
+                if font["head"].unitsPerEm != values["upm"]:
+                    self.log.add(u"%s has an em of %s, this font %s: export it from this font again." % (
+                        b(os.path.basename(path)), counted(font["head"].unitsPerEm, u"unit"),
+                        counted(values["upm"], u"unit")), "error")
+                    return
+                if "CFF " in font or "CFF2" in font:
+                    self.busy_steps = CFF_EXPORT_STEPS  # (its glyphs measured faster, its copy saved slower)
+                metrics = script.add_tables(font, values,
+                                            lambda key, part=0.0: self.progress(SCRIPT_STEPS.get(key, key), part))
+                self.progress(SAVE_STEP)
+                out = free_name(script.output_path(path))
+                script.save_with_tables(font, path, out)
+                cff = "VORG" in font
+            finally:
+                font.close()  # (the exported font let go: Windows keeps an open file from being moved or deleted)
+            self.progress(CHECK_STEP)
             problems = script.check(out, values)
         except Exception as exc:
             self.log.add(u"Could not add the vertical metrics: %s" % self.ak.html(exc), "error")
             return
-        self.log.add(u"Wrote %s: %s for %s, from this font's values (master %s; vertical origin %d). The exported "
-                     u"font is unchanged; its values are in %s, for <i>add_vertical_metrics</i> run again." % (
-                         b(os.path.basename(out)), u"vhea, vmtx, and VORG" if "VORG" in font else u"vhea and vmtx",
+        self.log.add(u"Wrote %s: %s for %s, from this font's values (master %s; vertical origin %d), in %s. The "
+                     u"exported font is unchanged; its values are in %s, for <i>add_vertical_metrics</i> run again." % (
+                         b(os.path.basename(out)), u"vhea, vmtx, and VORG" if cff else u"vhea and vmtx",
                          b(counted(len(metrics), u"glyph")), self.ak.html(values["master"]), values["origin"],
+                         counted(int(round(time.time() - started)) or 1, u"second"),
                          b(os.path.basename(script.values_path(path)))), "done")
         for problem in problems:
             self.log.add(u"Read back: %s." % self.ak.html(problem), "error")

@@ -211,8 +211,8 @@ AUTO_MIN_AREA = 64
 WORKSPACE_DARK = "#fff0f0f0"
 
 SLICE_MS = 20  # work per timer slice, so FontLab stays responsive
-SWEEP_MS = 750  # how often to look for widgets FontLab created or showed
-FULL_SWEEP_EVERY = 40  # every Nth sweep revisits every widget (replaced stylesheets, new icons)
+SWEEP_MS = 500  # how often to look for widgets FontLab created or showed (750 while a sweep cost 22 ms)
+FULL_SWEEP_EVERY = 60  # every Nth sweep revisits every widget (replaced stylesheets, new icons): every 30 s
 FOCUS_DRAIN_MS = 80  # a window that takes focus is darkened at once, up to this long, before it paints light
 MAX_ERRORS = 50
 NATIVE_VERSION = 111
@@ -2938,7 +2938,16 @@ def run_queue():
 
 
 def _sweep():
-    """Timer: queue widgets FontLab created or showed since the last sweep."""
+    """Timer: queue widgets FontLab created or showed since the last sweep.
+
+    Every widget's wrapper is held (state["known"]): PythonQt makes a wrapper for each widget
+    allWidgets() lists that Python does not hold yet, and frees it as the list goes. Held, the same
+    wrappers come back each sweep, nothing is made or freed (live, November 15: about 2,000 wrappers made
+    and freed each sweep before, of 4,754 widgets; FontLab's crashes of November 14 were PythonQt freeing
+    a wrapper twice), and "seen before" is a lookup in Python rather than a Qt property read. A sweep
+    took 22 ms, now about 8 (measured live, with nothing to queue), so it runs more often (SWEEP_MS) for
+    less. The wrappers of deleted widgets, and dark mode's records of them, are let go on the full
+    sweeps."""
     state = _state()
     if not state["on"] or state.get("busy"):
         return
@@ -2947,8 +2956,17 @@ def _sweep():
         return
     state["sweeps"] += 1
     full = state["sweeps"] % FULL_SWEEP_EVERY == 0
-    todo = [w for w in app.allWidgets()
-            if full or w.property(SEEN_PROP) is None or (w.isVisible() and (_unchecked(w) or _restyled(w)))]
+    known = state.setdefault("known", {})
+    todo = []
+    for widget in app.allWidgets():
+        key = id(widget)
+        if key not in known:  # (a wrapper Python held not: a widget not listed before)
+            known[key] = widget
+            if widget.property(SEEN_PROP) is None:
+                todo.append(widget)
+                continue
+        if full or (widget.isVisible() and (_unchecked(widget) or _restyled(widget))):
+            todo.append(widget)
     if todo:
         if state.get("hooked") and full:
             _update_hooked(app)  # forgets islands FontLab deleted (their addresses may be reused)
@@ -2960,9 +2978,42 @@ def _sweep():
     _follow_color_font(full)
     if full:
         _prune_relit()
+        _prune_known(state)
+
+
+def _prune_known(state):
+    """The wrappers of deleted widgets let go, at a moment of dark mode's choosing (a full sweep), and
+    dark mode's records of them. A deleted widget's wrapper frees nothing of Qt's."""
+    known = state.get("known") or {}
+    for key, widget in list(known.items()):
+        if not _alive(widget):
+            del known[key]
     for key, record in list(state["records"].items()):
         if not _alive(record["obj"]):
             del state["records"][key]
+
+
+def _release_known(state):
+    """The wrappers the sweeps held, let go (switching off, or on anew), but for those of widgets alive
+    with no parent: those go to state["parentless"], held for the session. Such a widget may be one
+    made from Python that its maker let go on purpose (another script's dialog, a probe's label):
+    PythonQt deletes a widget made from Python once its last Python reference goes, and letting go of
+    thousands of wrappers at once would delete them all at that moment, from inside this loop, the
+    pattern of FontLab's crashes of November 14. They are few (FontLab's own windows among them, whose
+    wrappers delete nothing), and never let go in bulk. A deleted widget's wrapper, or one with a
+    parent (Qt's to delete), is let go."""
+    known, state["known"] = state.get("known") or {}, {}
+    kept = state.setdefault("parentless", [])
+    held = set(id(widget) for widget in kept)
+    for widget in known.values():
+        try:
+            if not _alive(widget) or widget.parentWidget() is not None:
+                continue
+        except Exception:
+            continue
+        if id(widget) not in held:
+            kept.append(widget)
+            held.add(id(widget))
 
 
 COLOR_SAMPLE = 48  # glyphs looked at for SVG or bitmap pictures, after every glyph's color flag
@@ -3832,6 +3883,8 @@ def apply_dark():
     _darken_preferences()  # a near-white workspace, which either engine maps to dark mode's canvas
     dark_title_bars(True)
     widgets = list(app.allWidgets())
+    if switched:
+        _release_known(state)  # (the sweeps hold every widget's wrapper anew: _sweep)
     _enqueue([w for w in widgets if not w.isVisible()], "dark")
     _enqueue([w for w in widgets if w.isVisible()], "dark")  # visible ones first
     _start_timer(state, "sweeper", SWEEP_MS, _sweep)
@@ -3871,6 +3924,7 @@ def restore():
         except Exception as exc:
             _note_error("restore", exc)
     state["records"].clear()
+    _release_known(state)  # (the widgets' wrappers the sweeps held, let go now: but parentless ones)
     state["icon_cache"].clear()
     state["mapped_keys"].clear()
     state["originals"].clear()

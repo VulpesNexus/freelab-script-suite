@@ -3,6 +3,7 @@ Python 3."""
 
 from __future__ import absolute_import, division, print_function
 
+import io
 import os
 import sys
 import unittest
@@ -147,12 +148,58 @@ class SampleTests(unittest.TestCase):
         kana = set(range(0x3041, 0x3097)) | set(range(0x30A1, 0x30FB))
         hangul = set(range(0xAC00, 0xAC00 + 3000)) | codes_of("ko")
         han = set(range(0x4E00, 0x4E00 + 5000)) | codes_of("zh-hans")
-        self.assertEqual(cj.SAMPLES[cj.best_sample(kana | codes_of("ja"))][0], "ja")
-        self.assertEqual(cj.SAMPLES[cj.best_sample(hangul | kana | codes_of("ja"))][0], "ko",
-                         "a Korean font with kana: Korean")
-        self.assertEqual(cj.SAMPLES[cj.best_sample(han | kana | codes_of("ja"))][0], "zh-hans",
-                         "a Chinese font with kana: Chinese")
-        self.assertEqual(cj.SAMPLES[cj.best_sample(codes_of("zh-hant"))][0], "zh-hant")
+        def picked(codes, family=u"", pages=()):
+            return cj.SAMPLES[cj.best_sample(codes, family, pages)][0]
+        self.assertEqual(picked(kana | codes_of("ja")), "ja")
+        self.assertEqual(picked(hangul | kana | codes_of("ja")), "ko", "a Korean font with kana: Korean")
+        self.assertEqual(picked(han | kana | codes_of("ja"), u"Noto Sans SC"), "zh-hans",
+                         "a Chinese font with kana: its name says Chinese")
+        self.assertEqual(picked(codes_of("zh-hant")), "zh-hant")
+
+    def test_the_sample_in_the_fonts_own_writing(self):
+        """The owner: IBM Plex Sans JP was shown the Traditional Chinese sample (it covers it as fully as the
+        Iroha, and has more kanji than kana). The font's own writing wins; coverage decides only between
+        the two Chinese samples, or where nothing else says."""
+        def codes_of(*keys):
+            return set(ord(ch) for key in keys for ch in self.sample(key))
+
+        def picked(codes, family=u"", pages=()):
+            return cj.SAMPLES[cj.best_sample(codes, family, pages)][0]
+        kana = set(range(0x3041, 0x3097)) | set(range(0x30A1, 0x30FB)) | set(range(0xFF61, 0xFFA0))
+        kanji = set(range(0x4E00, 0x4E00 + 6000)) | codes_of("zh-hant", "zh-hans")
+        hangul = set(range(0xAC00, 0xD7A4)) | codes_of("ko")
+        hanja = set(range(0x4E00, 0x4E00 + 4000)) | codes_of("zh-hant")
+        simplified, traditional = codes_of("zh-hans"), codes_of("zh-hant")
+        self.assertEqual(picked(kana | kanji | codes_of("ja")), "ja", "kana and kanji: Japanese")
+        self.assertEqual(picked(kana | kanji | codes_of("ja"), u"IBM Plex Sans JP", (0, 2, 17, 29)), "ja",
+                         "IBM Plex Sans JP, as FontLab reads it")
+        self.assertEqual(picked(hangul | hanja), "ko", "Hangul and hanja: Korean")
+        self.assertEqual(picked(hangul | hanja | kana | codes_of("ja")), "ko", "KS X 1001 has kana too")
+        self.assertEqual(picked(simplified | set(range(0x4E00, 0x4E00 + 3000))), "zh-hans", "Simplified only")
+        self.assertEqual(picked(traditional | set(range(0x4E00, 0x4E00 + 3000))), "zh-hant", "Traditional only")
+        both = kana | kanji | codes_of("ja")  # (a Chinese font has kana too: GB 2312, Big5)
+        self.assertEqual(picked(both, u"Noto Sans TC"), "zh-hant", "its name")
+        self.assertEqual(picked(both, u"LXGW WenKai TC"), "zh-hant")
+        self.assertEqual(picked(both, u"WDXL Lubrifont SC"), "zh-hans")
+        self.assertEqual(picked(both, u"Some Ming", (18,)), "zh-hans", "one code page bit, no name")
+        self.assertEqual(picked(both, u"Some Ming", (20,)), "zh-hant")
+        self.assertEqual(picked(both, u"Zen Kaku Gothic New", (17, 20)), "ja", "two bits say nothing: its kana")
+        self.assertEqual(picked(simplified | traditional), "zh-hans", "both Chinese samples covered alike: the first")
+        self.assertEqual(picked(codes_of("ja") - kana | set(range(0x3000, 0x3020)), u"Amatic SC"),
+                         picked(codes_of("ja") - kana | set(range(0x3000, 0x3020))),
+                         "a name's word (small caps) never picks a sample the font hardly covers")
+        self.assertEqual(cj.writing_hints(u"Noto Sans JP", (17, 18)), ["ja"])
+        self.assertEqual(cj.writing_hints(u"", (17, 18)), [], "two writings: no hint")
+        self.assertEqual(cj.writing_hints(u"Source Han Sans K", (19,)), ["ko"])
+
+    def test_font_hints_read_from_fontlab(self):
+        info = type("Info", (), {"openTypeNamePreferredFamilyName": None, "familyName": u"IBM Plex Sans JP",
+                                 "openTypeOS2CodePageRanges": [0, 2, 17, 29]})()
+        package = type("Package", (), {"fgPackage": type("Fg", (), {"info": info})(), "tfn": u"x"})()
+        self.assertEqual(cj.font_hints(package), (u"IBM Plex Sans JP", (0, 2, 17, 29)))
+        self.assertEqual(cj.font_hints(object()), (u"", ()))
+        source = io.open(os.path.join(HERE, os.pardir, "cjk", "freelab_cjk_vertical.py"), encoding="utf-8").read()
+        self.assertIn(u"best_sample(set(self.char_names), *self.cj.font_hints(package))", source, "CJK Vertical too")
 
 
 class OwnCodeTests(unittest.TestCase):

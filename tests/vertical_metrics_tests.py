@@ -124,6 +124,33 @@ class AddTests(unittest.TestCase):
             json.dump(dict(VALUES, upm=2048), handle)
         self.assertEqual(avm.main([path]), 2)
 
+    def test_the_other_tables_are_copied_as_they_are_and_the_export_let_go(self):
+        """Saved from a fresh copy: the glyphs read to measure them are not compiled again (live: 8.6 s of
+        13 for a CFF font), and come out byte for byte; no file left open (Windows could not move it)."""
+        from fontTools.ttLib import TTFont
+        for cff in (False, True):
+            path = self.font(cff)
+            self.assertEqual(avm.main([path, "--force"]), 0)
+            source, out = TTFont(path), TTFont(avm.output_path(path))
+            for tag in ("CFF " if cff else "glyf", "cmap", "hmtx", "OS/2"):
+                self.assertEqual(source.reader[tag], out.reader[tag], tag)
+            source.close()
+            out.close()
+            moved = path + ".moved"
+            os.rename(path, moved)
+            os.rename(avm.output_path(path), moved + ".vert")
+
+    def test_progress_through_its_steps(self):
+        """CJK Vertical's progress bar follows add_tables: matching, measuring (by part), building."""
+        from fontTools.ttLib import TTFont
+        font = TTFont(self.font())
+        seen = []
+        avm.add_tables(font, VALUES, lambda step, part=0.0: seen.append((step, part)))
+        self.assertEqual(sorted(set(step for step, _ in seen), key=[s for s, _ in seen].index), ["match", "measure", "build"])
+        parts = [part for step, part in seen if step == "measure"]
+        self.assertEqual(parts, sorted(parts))
+        self.assertTrue(all(0.0 <= part < 1.0 for part in parts))
+
     def test_check_finds_a_wrong_height(self):
         path = self.font()
         self.assertEqual(avm.main([path]), 0)

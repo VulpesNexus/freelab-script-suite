@@ -1361,12 +1361,58 @@ class TimerTests(DarkModeCase):
         self.app.emit("focusChanged(QWidget*,QWidget*)", None, late)
         self.assertEqual(late.styleSheet, u"QWidget{background:white;}")
 
-    def test_sweep_prunes_dead_records(self):
+    def test_a_full_sweep_prunes_dead_records_and_wrappers(self):
         self.on()
-        count = len(dm._state()["records"])
+        state = dm._state()
+        count = len(state["records"])
         self.search.deleted = True
         dm._sweep()
-        self.assertEqual(len(dm._state()["records"]), count - 1)
+        self.assertEqual(len(state["records"]), count, "not each sweep: at a full one")
+        self.assertIn(id(self.search), state["known"])
+        state["sweeps"] = dm.FULL_SWEEP_EVERY - 1
+        dm._sweep()
+        self.assertEqual(len(state["records"]), count - 1)
+        self.assertNotIn(id(self.search), state["known"], "a deleted widget's wrapper let go")
+
+    def test_sweeps_hold_the_wrappers_and_find_new_widgets_by_them(self):
+        # PythonQt made a wrapper for each widget each sweep listed that Python did not hold, and freed it as
+        # the list went: about 2,000 a sweep, live. Held, the same come back, and a new widget is one not held
+        self.on()
+        state = dm._state()
+        dm._sweep()
+        self.assertEqual(sorted(state["known"]), sorted(id(w) for w in self.app.allWidgets()), "every widget held")
+        reads = []
+        for widget in self.app.allWidgets():
+            original = widget.property
+            widget.property = (lambda original: lambda name: reads.append(name) or original(name))(original)
+        late = FakeWidget("QWidget", parent=self.content, sheet=u"QWidget{background:white;}")
+        dm._sweep()
+        self.assertNotIn(dm.SEEN_PROP, reads, "widgets held are not asked whether they were seen")
+        dm.run_queue()
+        self.assertEqual(late.styleSheet, dm.recolor_sheet(u"QWidget{background:white;}"), "a new widget: themed")
+        self.off()
+        self.assertEqual(state["known"], {}, "switched off: let go")
+
+    def test_switching_off_keeps_the_wrappers_of_live_parentless_widgets(self):
+        # Let go of, the last reference to a widget made from Python with no parent (another script's
+        # dialog its maker dropped) makes PythonQt delete it there and then, inside the loop: never in bulk
+        loose = FakeWidget("QDialog", "someone's dialog", window=True)
+        gone = FakeWidget("QDialog", "deleted", window=True)
+        self.app.roots.extend([loose, gone])
+        self.on()
+        dm._sweep()
+        state = dm._state()
+        self.assertTrue(all(id(w) in state["known"] for w in (loose, gone, self.label)))
+        gone.deleted = True
+        self.off()
+        kept = state["parentless"]
+        self.assertTrue(any(w is loose for w in kept), "alive and parentless: held for the session")
+        self.assertFalse(any(w is gone for w in kept), "deleted: let go")
+        self.assertFalse(any(w is self.label for w in kept), "with a parent (Qt's to delete): let go")
+        self.on()
+        dm._sweep()
+        self.off()
+        self.assertEqual(len([w for w in state["parentless"] if w is loose]), 1, "held once")
 
     def test_toggling_off_cancels_timers(self):
         dm.save_settings({"enabled": True})

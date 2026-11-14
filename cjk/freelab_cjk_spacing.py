@@ -51,8 +51,8 @@ KIND_LABELS = {"hiragana": "Hiragana", "small hiragana": "Small hiragana", "kata
 # the Iroha (Japanese, 11th century, public domain: every kana once), a Hangul pangram written for
 # FreeLab (GPL-3 with the code: the 14 basic consonants and the 10 basic vowels; Proof has it too), and
 # the opening lines of the Thousand Character Classic (public domain, no character twice: a pangram of
-# hanzi cannot be) in each Chinese standard's forms. The one the font covers best is shown first; the
-# field takes any text of one's own.
+# hanzi cannot be) in each Chinese standard's forms. The one in the font's own writing is shown first
+# (best_sample); the field takes any text of one's own.
 SAMPLE = u"「いろはにほへと、ちりぬるを。わかよたれそ、つねならむ。うゐのおくやま、けふこえて。あさきゆめみし、ゑひもせす。」（いろはうた）"
 SAMPLES = (("ja", u"Japanese", SAMPLE),
            ("ko", u"Korean", u"「토요일 아침, 키 큰 여행자가 푸른 바다 앞 야자수 그늘에서 휴식을 즐겼다.」"),
@@ -62,20 +62,91 @@ SAMPLE_SCRIPTS = {"ja": ((0x3041, 0x30FA),), "ko": ((0xAC00, 0xD7A3),),
                   "zh-hans": ((0x4E00, 0x9FFF), (0x3400, 0x4DBF)), "zh-hant": ((0x4E00, 0x9FFF), (0x3400, 0x4DBF))}
 
 
-def best_sample(codes):
-    """The index in SAMPLES of the sample the font covers best (codes: the font's code points; its
-    full-width punctuation counted too): the largest share of its characters, then the most glyphs of
-    its own script in the font (a Korean or a Chinese font with kana is not shown the Iroha), then the
-    first."""
+# The writing a font is for, as its family name says it (a word of it: IBM Plex Sans JP, Noto Sans TC)
+NAME_HINTS = {"JP": "ja", "JPN": "ja", "JAPANESE": "ja", "KR": "ko", "KOR": "ko", "KOREAN": "ko",
+              "SC": "zh-hans", "CN": "zh-hans", "PRC": "zh-hans", "HANS": "zh-hans", "SIMPLIFIED": "zh-hans",
+              "TC": "zh-hant", "HK": "zh-hant", "TW": "zh-hant", "HANT": "zh-hant", "TRADITIONAL": "zh-hant"}
+# and as its OS/2 code page bits say it (one writing only: fonts set several, Noto Sans JP 17 and 18)
+CODE_PAGE_HINTS = {17: "ja", 18: "zh-hans", 19: "ko", 20: "zh-hant", 21: "ko"}
+MIN_SAMPLE_SHARE = 0.5  # a sample the font covers less than this share of is never picked for a hint
+HANGUL_SYLLABLES, KANA = (0xAC00, 0xD7A3), (0x3041, 0x30FF)
+
+
+def sample_share(index, codes):
+    """The share of the sample's characters the font has."""
+    chars = [ord(ch) for ch in SAMPLES[index][2] if not ch.isspace()]
+    return round(sum(1 for code in chars if code in codes) / float(len(chars) or 1), 3)
+
+
+def writing_hints(family=u"", code_pages=()):
+    """The sample keys the font's family name points to (its words), else those of its code page bits when
+    they point to one writing only: [] when neither says."""
+    words = re.split(r"[^A-Za-z0-9]+", u"%s" % (family or u""))
+    named = []
+    for word in words:
+        key = NAME_HINTS.get(word.upper())
+        if key is not None and key not in named:
+            named.append(key)
+    if named:
+        return named
+    paged = sorted(set(CODE_PAGE_HINTS[bit] for bit in (code_pages or ()) if bit in CODE_PAGE_HINTS))
+    return paged if len(paged) == 1 else []
+
+
+def best_sample(codes, family=u"", code_pages=()):
+    """The index in SAMPLES of the sample in the font's own writing: the one its family name or its code page
+    bits name (writing_hints), where it covers at least MIN_SAMPLE_SHARE of it; else Korean for a font with
+    Hangul syllables, Japanese for one with kana, and Chinese otherwise, Simplified or Traditional as it covers
+    them; the sample it covers best where it has none of these (a font of punctuation alone). Kana alone
+    cannot say Japanese: the Chinese fonts carry kana too (GB 2312 and Big5 have it; IBM Plex Sans JP's
+    covers the Traditional sample as fully as the Iroha, which put the Traditional sample first for it)."""
     codes = set(codes)
+    keys = [key for key, _, _ in SAMPLES]
+
+    def covered(key):
+        return key in keys and sample_share(keys.index(key), codes) >= MIN_SAMPLE_SHARE
+
+    for key in writing_hints(family, code_pages):
+        if covered(key):
+            return keys.index(key)
+    if any(HANGUL_SYLLABLES[0] <= code <= HANGUL_SYLLABLES[1] for code in codes) and covered("ko"):
+        return keys.index("ko")
+    if any(KANA[0] <= code <= KANA[1] for code in codes) and covered("ja"):
+        return keys.index("ja")
+    chinese = [keys.index(key) for key in ("zh-hans", "zh-hant") if covered(key)]
+    if chinese:
+        return max(chinese, key=lambda index: (sample_share(index, codes), -index))
 
     def score(index):
-        key, _, text = SAMPLES[index]
-        chars = [ord(ch) for ch in text if not ch.isspace()]
-        share = round(sum(1 for code in chars if code in codes) / float(len(chars) or 1), 3)
-        own = sum(1 for code in codes for low, high in SAMPLE_SCRIPTS.get(key, ()) if low <= code <= high)
-        return (share, own, -index)
+        own = sum(1 for code in codes for low, high in SAMPLE_SCRIPTS.get(keys[index], ()) if low <= code <= high)
+        return (sample_share(index, codes), own, -index)
     return max(range(len(SAMPLES)), key=score)
+
+
+def font_hints(package):
+    """(family name, OS/2 code page bits) of a FontLab font, for best_sample: ("", ()) where it has none."""
+    try:
+        info = package.fgPackage.info
+    except Exception:
+        return u"", ()
+    family = u""
+    for field in ("openTypeNamePreferredFamilyName", "familyName"):
+        try:
+            family = getattr(info, field, None) or u""
+        except Exception:
+            family = u""
+        if family:
+            break
+    if not family:
+        try:
+            family = package.tfn or u""
+        except Exception:
+            family = u""
+    try:
+        pages = tuple(int(bit) for bit in (info.openTypeOS2CodePageRanges or ()))
+    except Exception:
+        pages = ()
+    return u"%s" % family, pages
 
 
 CJK_RANGES = ((0x3000, 0x30FF), (0x3100, 0x31FF), (0x3400, 0x4DBF), (0x4E00, 0x9FFF), (0xAC00, 0xD7A3),
@@ -551,8 +622,8 @@ class CJKSpacingDialog(object):
         self.sample_box = QtGui.QComboBox()
         for _, label, _ in SAMPLES:
             self.sample_box.addItem(label)
-        self.sample_box.setWhatsThis(u"A sample per writing system (the one the font covers best is chosen as it is "
-                                     u"read); the field beside it takes text of your own.")
+        self.sample_box.setWhatsThis(u"A sample per writing system (the one in the font's own writing is chosen as it "
+                                     u"is read); the field beside it takes text of your own.")
         sample_row.addWidget(self.sample_box)
         self.sample = QtGui.QLineEdit(SAMPLE)
         self.sample.setWhatsThis(u"The text the previews set, as it is and with palt, in as many lines as the window's "
@@ -730,7 +801,7 @@ class CJKSpacingDialog(object):
         for t in self.trims:
             t.checked = kept.get(t.name, t.checked)
         if u"%s" % self.sample.text in [text for _, _, text in SAMPLES]:  # (text of one's own is kept)
-            index = best_sample(set(all_codes(package.fgPackage.glyphs)))
+            index = best_sample(set(all_codes(package.fgPackage.glyphs)), *font_hints(package))
             self.sample_box.setCurrentIndex(index)
             self.sample.setText(SAMPLES[index][2])
         self.note_font(package)

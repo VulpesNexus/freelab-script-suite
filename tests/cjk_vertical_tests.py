@@ -849,7 +849,7 @@ class FakeQtTests(unittest.TestCase):
             notify_changed=staticmethod(raising), b=staticmethod(lambda t: t), html=staticmethod(lambda t: u"%s" % t),
             joined=staticmethod(lambda items: u", ".join(items))))
         dialog.log = type("Log", (), {"add": lambda self, text, kind=None: logged.append((kind, text))})()
-        dialog.harvest = dialog.run = lambda: None
+        dialog.harvest = dialog.run = dialog.read_font = lambda: None
         dialog.current_font = lambda: package
         heights = cv.Metric("advance_height", u"Advance heights", None, 1000, 1)
         dialog.pending = lambda: ({}, [], [heights])
@@ -1009,8 +1009,13 @@ class ExportTests(unittest.TestCase):
         from fontTools.ttLib import TTFont
         before = open(path, "rb").read()
         dialog = self.dialog(self.package())
+        steps, kept = [], dialog.progress
+        dialog.progress = lambda label, part=0.0: (steps.append(label), kept(label, part))
         dialog.add_metrics_to_export(path)
         self.assertEqual([kind for kind, _ in self.logged], ["done"], self.logged)
+        self.assertEqual(sorted(set(steps), key=steps.index), [label for label, _ in cv.EXPORT_STEPS],
+                         "every step on the bar, in order")
+        self.assertFalse(dialog.busy)
         out = os.path.join(os.path.dirname(path), u"test.vert.ttf")
         vmtx = TTFont(out)["vmtx"].metrics
         self.assertEqual(vmtx["comma"], (500, 80))
@@ -1021,6 +1026,23 @@ class ExportTests(unittest.TestCase):
         dialog.add_metrics_to_export(path)
         self.assertTrue(os.path.isfile(os.path.join(os.path.dirname(path), u"test.vert-2.ttf")), "the first kept")
 
+    def test_a_cff_export_gets_vorg_and_its_own_shares_of_the_bar(self):
+        path = self.exported()
+        import vertical_metrics_tests
+        otf = os.path.join(os.path.dirname(path), u"test.otf")
+        vertical_metrics_tests.make_font(otf, cff=True)
+        dialog = self.dialog(self.package())
+        shares, kept = [], dialog.progress
+        dialog.progress = lambda label, part=0.0: (shares.append((label, dialog.busy_steps)), kept(label, part))
+        dialog.add_metrics_to_export(otf)
+        self.assertEqual([kind for kind, _ in self.logged], ["done"], self.logged)
+        self.assertIn(u"vhea, vmtx, and VORG", self.logged[0][1])
+        self.assertEqual(dict(shares)[cv.SAVE_STEP], cv.CFF_EXPORT_STEPS, "saving a CFF copy takes longer")
+        from fontTools.ttLib import TTFont
+        out = TTFont(os.path.join(os.path.dirname(path), u"test.vert.otf"))
+        self.assertEqual(out["VORG"].defaultVertOriginY, 880)
+        out.close()
+
     def test_a_font_of_another_em_is_refused(self):
         path = self.exported()
         dialog = self.dialog(self.package(2048.0))
@@ -1028,6 +1050,135 @@ class ExportTests(unittest.TestCase):
         self.assertEqual([kind for kind, _ in self.logged], ["error"])
         self.assertIn(u"1,000 units", self.logged[0][1])
         self.assertFalse(os.path.exists(os.path.join(os.path.dirname(path), u"test.vert.ttf")))
+
+
+class ProgressTests(unittest.TestCase):
+    """Long work under a progress bar (the owner: about 13 s without one adding vertical metrics)."""
+
+    class Widget(object):
+        def __init__(self):
+            self.visible, self.enabled, self.value, self.text = False, True, 0, u""
+
+        def setVisible(self, on):
+            self.visible = on
+
+        def setEnabled(self, on):
+            self.enabled = on
+
+        def setValue(self, value):
+            self.value = value
+
+        def setText(self, text):
+            self.text = text
+
+        def setStyleSheet(self, sheet):
+            pass
+
+    def dialog(self):
+        dialog = cv.CJKVerticalDialog.__new__(cv.CJKVerticalDialog)
+        widget = self.Widget
+        dialog.ak = type("Ak", (), {"enable": staticmethod(lambda w, on: w.setEnabled(bool(on))), "LOG_COLORS": {}})
+        dialog.busy_row, dialog.busy_bar, dialog.busy_step = widget(), widget(), widget()
+        dialog.tree, dialog.write_button, dialog.export_button = widget(), widget(), widget()
+        dialog.package = None
+        self.restored = []
+        dialog.show_font_parts = lambda on: self.restored.append("parts")
+        dialog.update_buttons = lambda: self.restored.append("buttons")
+        dialog.update_put_back = lambda: self.restored.append("put back")
+        self.pumps = []
+        kept = dialog.pump
+        dialog.pump = lambda force=False: (self.pumps.append(force), kept(force))
+        return dialog
+
+    def test_each_step_has_its_share_and_the_bar_ends_full(self):
+        for steps in (cv.LIST_STEPS, cv.SHOW_STEPS, cv.WRITE_STEPS, cv.EXPORT_STEPS, cv.CFF_EXPORT_STEPS):
+            ends = [end for _, end in steps]
+            self.assertEqual(ends, sorted(ends))
+            self.assertEqual(ends[-1], 1.0)
+            self.assertEqual(len(set(label for label, _ in steps)), len(steps))
+        self.assertEqual(cv.bar_value(cv.EXPORT_STEPS, cv.VALUES_STEP), 0.0)
+        self.assertAlmostEqual(cv.bar_value(cv.EXPORT_STEPS, u"Measuring the glyphs", 0.5), (0.14 + 0.95) / 2)
+        self.assertAlmostEqual(cv.bar_value(cv.EXPORT_STEPS, cv.CHECK_STEP, 2.0), 1.0, msg="a part past its end")
+        self.assertIsNone(cv.bar_value(cv.LIST_STEPS, cv.SAVE_STEP))
+        for label in cv.SCRIPT_STEPS.values():
+            self.assertIsNotNone(cv.bar_value(cv.EXPORT_STEPS, label), "add_tables' own steps on the bar")
+        for label, _ in cv.LIST_STEPS:
+            self.assertIsNotNone(cv.bar_value(cv.WRITE_STEPS, label), "the list read again at a write's end")
+
+    def test_a_write_shows_the_bar_at_once_and_moves_it(self):
+        dialog = self.dialog()
+        dialog.set_busy(True, cv.EXPORT_STEPS, at_once=True)
+        self.assertTrue(dialog.busy)
+        self.assertTrue(dialog.busy_row.visible)
+        self.assertFalse(any(w.enabled for w in (dialog.tree, dialog.write_button, dialog.export_button)))
+        dialog.progress(u"Measuring the glyphs", 0.5)
+        self.assertEqual(dialog.busy_bar.value, int(round(1000 * cv.bar_value(cv.EXPORT_STEPS, u"Measuring the glyphs", 0.5))))
+        self.assertEqual(dialog.busy_step.text, u"Measuring the glyphs\N{HORIZONTAL ELLIPSIS}")
+        self.assertTrue(self.pumps and self.pumps[-1], "the window redrawn at once at a new step")
+        dialog.progress(cv.SAVE_STEP)
+        self.assertEqual(dialog.busy_bar.value, 960, "where building the tables ends")
+        dialog.set_busy(False)
+        self.assertFalse(dialog.busy)
+        self.assertFalse(dialog.busy_row.visible)
+        self.assertTrue(dialog.tree.enabled)
+        self.assertEqual(self.restored, ["parts", "buttons", "put back"], "each control as the font wants it")
+
+    def test_a_quick_list_never_shows_the_bar(self):
+        dialog = self.dialog()
+        dialog.set_busy(True, cv.LIST_STEPS)
+        dialog.progress(cv.LIST_STEP, 0.5)
+        self.assertFalse(dialog.busy_row.visible)
+        self.assertTrue(dialog.tree.enabled)
+        dialog.busy_since -= cv.SHOW_AFTER + 0.01  # (as if it had taken that long)
+        dialog.progress(cv.LIST_STEP, 0.6)
+        self.assertTrue(dialog.busy_row.visible)
+        self.assertEqual(dialog.busy_bar.value, int(round((0.6 + 0.35 * 0.6) * 1000)))
+        pumps = len(self.pumps)
+        dialog.progress(cv.LIST_STEP, 0.8, False)
+        self.assertEqual(len(self.pumps), pumps, "while the list fills, only the bar painted (live: twice as slow)")
+        self.assertEqual(dialog.busy_bar.value, int(round((0.6 + 0.35 * 0.8) * 1000)))
+        dialog.set_busy(False)
+        self.assertFalse(dialog.busy_row.visible)
+
+    def test_the_list_read_during_work_waits_for_it(self):
+        dialog = self.dialog()
+        reads = []
+        dialog.read_font = lambda: reads.append(dialog.busy)
+        dialog.run()
+        self.assertEqual(reads, [True], "read under the bar")
+        self.assertFalse(dialog.busy)
+        dialog.set_busy(True, cv.EXPORT_STEPS, at_once=True)
+        dialog.run()
+        self.assertEqual(reads, [True], "not in the middle of the work")
+        self.assertTrue(dialog.run_due)
+        import qtfakes
+        qtfakes.install()
+        self.addCleanup(qtfakes.uninstall)
+        shots = []
+        sys.modules["PythonQt.QtCore"].QTimer = type("T", (), {"singleShot": staticmethod(lambda ms, f: shots.append(f))})
+        dialog.set_busy(False)
+        self.assertFalse(dialog.run_due)
+        self.assertEqual(len(shots), 1, "once the work is over")
+        dialog.write()
+        dialog.add_metrics_to_export(u"x.otf")
+        self.assertEqual(reads, [True], "no font: nothing")
+
+    def test_the_export_step_goes_through_its_steps(self):
+        import qtfakes
+        qtfakes.install()
+        self.addCleanup(qtfakes.uninstall)
+        dialog = self.dialog()
+        seen = []
+        dialog.progress = lambda label, part=0.0: seen.append(label)
+        dialog.package = object()
+        dialog.add_metrics_to = lambda path: [dialog.progress(label) for label, _ in cv.EXPORT_STEPS]
+        dialog.busy = True
+        dialog.add_metrics_to_export(u"x.otf")
+        self.assertEqual(seen, [], "busy: a second click does nothing")
+        dialog.busy = False
+        dialog.add_metrics_to_export(u"x.otf")
+        self.assertEqual(seen, [label for label, _ in cv.EXPORT_STEPS])
+        self.assertFalse(dialog.busy)
 
 
 class SourceTests(unittest.TestCase):

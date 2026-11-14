@@ -26,6 +26,7 @@ import os
 import sys
 
 VALUES_SUFFIX = ".vertical.json"
+PROGRESS_GLYPHS = 100  # glyphs measured between two reports (add_tables' progress)
 
 
 def values_path(font_path):
@@ -66,12 +67,16 @@ def heights_by_glyph(glyph_order, cmap, values):
     return found
 
 
-def glyph_tops(font):
-    """{glyph: (y min, y max)} of each glyph's ink, or None for a glyph without ink."""
+def glyph_tops(font, progress=None):
+    """{glyph: (y min, y max)} of each glyph's ink, or None for a glyph without ink; progress(part), where
+    given, every PROGRESS_GLYPHS glyphs (the longest part: 4.8 s of 8.4 for 9,505 glyphs in FontLab)."""
     from fontTools.pens.boundsPen import BoundsPen
     glyph_set = font.getGlyphSet()
     found = {}
-    for name in font.getGlyphOrder():
+    order = font.getGlyphOrder()
+    for number, name in enumerate(order):
+        if progress is not None and number % PROGRESS_GLYPHS == 0:
+            progress(number / float(len(order)))
         pen = BoundsPen(glyph_set)
         try:
             glyph_set[name].draw(pen)
@@ -91,14 +96,19 @@ def vertical_metrics(glyph_order, heights, inks, origin):
     return found
 
 
-def add_tables(font, values):
+def add_tables(font, values, progress=None):
     """vhea and vmtx (and VORG for a CFF font) added to a fontTools TTFont from the values; the metrics, as
-    {glyph: (advance height, top sidebearing)}."""
+    {glyph: (advance height, top sidebearing)}. progress(step, part), where given, as the work goes: step
+    "match", "measure" (with its part, 0 to 1), then "build" (CJK Vertical's progress bar)."""
     from fontTools.ttLib import newTable
+    report = progress or (lambda step, part=0.0: None)
     glyph_order = font.getGlyphOrder()
     origin = float(values["origin"])
+    report("match")
     heights = heights_by_glyph(glyph_order, font.getBestCmap() or {}, values)
-    inks = glyph_tops(font)
+    report("measure")
+    inks = glyph_tops(font, lambda part: report("measure", part))
+    report("build")
     metrics = vertical_metrics(glyph_order, heights, inks, origin)
     vmtx = newTable("vmtx")
     vmtx.metrics = dict(metrics)
@@ -128,11 +138,37 @@ def add_tables(font, values):
     return metrics
 
 
+VERTICAL_TAGS = ("vhea", "vmtx", "VORG")
+
+
+def save_with_tables(font, source_path, out):
+    """The vertical tables add_tables gave font saved into a copy of the font at source_path, every other
+    table copied byte for byte: font's own, its glyphs read to measure them, would be compiled again (saving
+    IBM Plex Sans JP's CFF that way took 8.6 s of 13 in FontLab; and its CFF came out rewritten)."""
+    from fontTools.ttLib import TTFont
+    fresh = TTFont(source_path)
+    try:
+        fresh.setGlyphOrder(font.getGlyphOrder())  # (read from font: the copy's CFF stays unread)
+        for tag in VERTICAL_TAGS:
+            if tag in font:
+                fresh[tag] = font[tag]
+        fresh.save(out)
+    finally:
+        fresh.close()
+
+
 def check(path, values):
     """What is wrong with the vertical tables of the font at path, as a list (empty when all is well): each
     glyph's advance height and the vertical origin as the values give them, vhea's count of metrics."""
     from fontTools.ttLib import TTFont
     font = TTFont(path)
+    try:
+        return problems_of(font, values)
+    finally:
+        font.close()  # (the file let go: Windows keeps an open file from being moved or deleted)
+
+
+def problems_of(font, values):
     problems = []
     for tag in ("vhea", "vmtx"):
         if tag not in font:
@@ -191,21 +227,26 @@ def main(argv=None):
         return 2
     values = load_values(values_file)
     font = TTFont(args.font)
-    if font["head"].unitsPerEm != int(values.get("upm") or font["head"].unitsPerEm):
-        print("The values are for an em of %s units, the font's is %s: export the font again, or write the values "
-              "again." % (values.get("upm"), font["head"].unitsPerEm))
-        return 2
-    metrics = add_tables(font, values)
-    font.save(out)
+    try:
+        if font["head"].unitsPerEm != int(values.get("upm") or font["head"].unitsPerEm):
+            print("The values are for an em of %s units, the font's is %s: export the font again, or write the "
+                  "values again." % (values.get("upm"), font["head"].unitsPerEm))
+            return 2
+        metrics = add_tables(font, values)
+        save_with_tables(font, args.font, out)
+        cff = "VORG" in font
+    finally:
+        font.close()
     problems = check(out, values)
     heights = sorted(set(height for height, _ in metrics.values()))
     print("Wrote %s: vhea and vmtx%s for %d glyphs (advance heights %s; vertical origin %s)." % (
-        out, " and VORG" if "VORG" in font else "", len(metrics), ", ".join(str(h) for h in heights[:4]) +
+        out, " and VORG" if cff else "", len(metrics), ", ".join(str(h) for h in heights[:4]) +
         (" ..." if len(heights) > 4 else ""), int(round(float(values["origin"])))))
     sample = values.get("sample") or u"あいう"
     shaped = shaped_heights(out, sample)
-    if shaped is not None:
-        print("HarfBuzz sets %s vertically with y advances %s." % (sample, shaped))
+    if shaped is not None:  # (code points, not the text: a console's code page may lack it)
+        print("HarfBuzz sets %s vertically with y advances %s." % (
+            " ".join("U+%04X" % ord(ch) for ch in sample), shaped))
     for problem in problems:
         print("Problem: %s" % problem)
     return 1 if problems else 0
