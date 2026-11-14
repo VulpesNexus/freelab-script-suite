@@ -96,12 +96,42 @@ class SpacingTests(unittest.TestCase):
         self.assertEqual(refs(ak.unichr_(0x1C91)), ak.unichr_(0x1C98), "Mtavruli against Mtavruli in")
         self.assertEqual(refs(u"\N{GEORGIAN LETTER BAN}"), u"\N{GEORGIAN LETTER IN}")
         self.assertEqual(refs(u"\N{HIRAGANA LETTER KA}"), u"\N{KATAKANA LETTER RO}")
+        self.assertEqual(refs(u"\N{CYRILLIC CAPITAL LETTER ZHE}"), u"\N{CYRILLIC CAPITAL LETTER EN}")
+        self.assertEqual(refs(u"\N{CYRILLIC SMALL LETTER ZHE}"), u"\N{CYRILLIC SMALL LETTER EN}")
+        self.assertEqual(refs(u"\N{GREEK CAPITAL LETTER SIGMA}"), u"\N{GREEK CAPITAL LETTER ETA}")
+        self.assertEqual(refs(u"\N{GREEK SMALL LETTER LAMDA}"), u"\N{GREEK SMALL LETTER ETA}")
+        self.assertEqual(refs(u"\N{DEVANAGARI LETTER KA}"), u"\N{DEVANAGARI LETTER NA}")
+        self.assertEqual(refs(u"\N{HEBREW LETTER BET}"), u"\N{HEBREW LETTER HE}")
+        self.assertEqual(refs(u"\N{THAANA LETTER BAA}"), u"\N{THAANA LETTER NOONU}")
+        for script in ("cyrillic", "greek", "devanagari", "hebrew", "thaana"):
+            for straight in sp.SCRIPT_SPACING_REFERENCES[script].values():
+                self.assertIn(straight, sp.ROUND_REFERENCES, "each straight reference has its round one")
         self.assertEqual(refs(u"T"), u"H", "Latin as before")
         self.assertEqual(sp.reference_for(u"T", ak.category), u"H", "without script_of: Latin's")
         self.assertEqual(sp.ROUND_REFERENCES[small_vo], u"\N{ARMENIAN SMALL LETTER OH}")
         fixed = sp.fixed_characters(ak)
         for ch in (u"H", small_vo, u"\N{GEORGIAN LETTER ON}", u"\N{HIRAGANA LETTER NO}"):
             self.assertIn(ch, fixed, "a reference is never changed")
+
+    def test_letters_of_every_script_auto_kerning_knows(self):
+        class Group(object):
+            currentIndex = 0  # Letters
+
+        class Dialog(object):
+            group, package = Group(), None
+
+        dialog = Dialog()
+        dialog.ak = ak
+        characters = getattr(sp.AutoSpacingDialog.characters, "__func__", sp.AutoSpacingDialog.characters)
+        letters = characters(dialog)
+        for ch in (u"\N{CYRILLIC CAPITAL LETTER ZHE}", u"\N{GREEK SMALL LETTER LAMDA}", u"\N{DEVANAGARI LETTER KA}",
+                   u"\N{HEBREW LETTER BET}", u"\N{THAANA LETTER BAA}", u"\N{ARMENIAN SMALL LETTER BEN}", u"T"):
+            self.assertIn(ch, letters, "live, Noto Sans listed no Cyrillic or Greek letter under Letters")
+        self.assertEqual(len(letters), len(set(letters)), "each once")
+        Group.currentIndex = 2  # Letters, figures, and punctuation
+        punctuation = characters(dialog)
+        self.assertIn(u"\N{HEBREW PUNCTUATION MAQAF}", punctuation)
+        self.assertIn(u"\N{DEVANAGARI DANDA}", punctuation)
 
     def test_references_to_space_by_script(self):
         vo, small_vo, oh = u"\N{ARMENIAN CAPITAL LETTER VO}", u"\N{ARMENIAN SMALL LETTER VO}", u"\N{ARMENIAN SMALL LETTER OH}"
@@ -168,6 +198,43 @@ class SpacingTests(unittest.TestCase):
         self.assertEqual(moves["ecircumflexacute"], (5, 2), "built on a composite that follows")
         self.assertIsNone(moves["f_e"], "two of its letters changed: left for a look")
         self.assertNotIn("aacute", moves)
+
+
+class TableTests(unittest.TestCase):
+    """The owner: "Maybe this table should be aligned in terms of layout with the other ones?" The glyph
+    drawn from the font beside its character, its name, its code point, then its numbers."""
+
+    def dialog(self):
+        dialog = sp.AutoSpacingDialog.__new__(sp.AutoSpacingDialog)  # (its window needs FontLab: its rows do not)
+        dialog.ak = ak
+        return dialog
+
+    def test_a_rows_cells(self):
+        s = sp.Spacing(u"\N{LATIN CAPITAL LETTER A WITH GRAVE}", u"Agrave", "upper", 12.4, 30, 600)
+        s.left_change, s.right_change = -8, 0
+        texts = self.dialog().row_texts(s, 6)
+        self.assertEqual(texts, [u"\N{LATIN CAPITAL LETTER A WITH GRAVE}", u"Agrave", u"U+00C0", u"12", u"-8", u"30",
+                                 u"0", u"592"])
+        self.assertEqual(len(texts), len(sp.AutoSpacingDialog.COLUMNS))
+        s.reference = True
+        self.assertEqual(self.dialog().row_texts(s, 6)[1], u"Agrave (reference)", "said in its name's cell")
+
+    def test_the_columns_match_the_other_tools(self):
+        self.assertEqual(sp.AutoSpacingDialog.COLUMNS[:3], ("Glyph", "Name", "Unicode"))
+        self.assertEqual([sp.AutoSpacingDialog.COLUMNS[c] for c in sp.AutoSpacingDialog.NUMBERS],
+                         ["Left now", "Left change", "Right now", "Right change", "Width"], "the numbers, right-aligned")
+        self.assertEqual(ak.glyph_icon_size(), (int(ak.GLYPH_ICON_SIZE * 1.6), int(ak.GLYPH_ICON_SIZE * 1.45)))
+        self.assertEqual(ak.unicode_label(0xC0), u"U+00C0")
+        self.assertEqual(ak.unicode_label(0x1F600), u"U+1F600")
+        self.assertEqual(ak.unicode_label(None), u"")
+
+    def test_a_closed_font_empties_the_window(self):
+        dialog = self.dialog()
+        runs = []
+        dialog.run = lambda: runs.append(1)
+        dialog.spaced = [u"A"]
+        dialog.font_changed()
+        self.assertEqual((runs, dialog.spaced), ([1], []), "measured anew (or the no-font line), nothing left to check")
 
 
 class WordingTests(unittest.TestCase):

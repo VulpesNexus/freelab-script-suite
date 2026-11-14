@@ -1,0 +1,2989 @@
+{
+ "source": "https://github.com/google/fonts",
+ "commit": "c30b221beb0c1da59d563feb91ec8656a1fa972a",
+ "license": "SIL Open Font License 1.1 (the ofl/ folder; each family's license file beside its fonts)",
+ "fetched for": "Auto Kerning's training in scripts other than Latin (kerning/train/dataset.py); Latin is not measured in these fonts",
+ "chosen": "every OFL family of google/fonts at this commit with a cyrillic, greek, hebrew, devanagari, thai, armenian, japanese, arabic, syriac, thaana, nko, or adlam subset, not monospaced, not among the corpus's fonts already: its regular (or variable roman) font",
+ "files": [
+  {
+   "path": "ofl/adlamdisplay/ADLaMDisplay-Regular.ttf",
+   "bytes": 97228,
+   "sha256": "cc36c3c6cba02522b86ef6c5ee7b062c5bf2a60b0f51f9b87a44c7d50d650899",
+   "family": "ADLaM Display",
+   "trained in": []
+  },
+  {
+   "path": "ofl/adventpro/AdventPro[wdth,wght].ttf",
+   "bytes": 248348,
+   "sha256": "b60ab2920b89bdc4b7dadfb282cadac6e03833e7a80844f9eac096359b2b9766",
+   "family": "Advent Pro",
+   "trained in": [
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/akshar/Akshar[CTRS,wght].ttf",
+   "bytes": 320136,
+   "sha256": "320e19960349d8e7257bce325d5db07aea4f7c08bcf143b0f44cedf7227dd63c",
+   "family": "Akshar",
+   "trained in": []
+  },
+  {
+   "path": "ofl/akt/Akt[wght].ttf",
+   "bytes": 353816,
+   "sha256": "3da5013ec56bf5a83cccd1d5601b89fa58a6cda5b3fd0e5f8d18ee3690272c05",
+   "family": "Akt",
+   "trained in": [
+    "cyrillic",
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/alansans/AlanSans[wght].ttf",
+   "bytes": 198132,
+   "sha256": "96e93ac16fd488698a88489e297a5de00b2c5dbd8f20c298ebd4d3acc4421b2a",
+   "family": "Alan Sans",
+   "trained in": []
+  },
+  {
+   "path": "ofl/alef/Alef-Regular.ttf",
+   "bytes": 90996,
+   "sha256": "a32adcc953ac356906901778460083dc207d4560cb586fd9ea24ec5b186969ed",
+   "family": "Alef",
+   "trained in": []
+  },
+  {
+   "path": "ofl/alegreya/Alegreya[wght].ttf",
+   "bytes": 425288,
+   "sha256": "ba5564634b93a8f8ba57b48cd4f1ae7417d2b4656fbac779028679b00de3cf12",
+   "family": "Alegreya",
+   "trained in": [
+    "cyrillic",
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/alegreyasans/AlegreyaSans-Regular.ttf",
+   "bytes": 263804,
+   "sha256": "8fab634196007afca839f1e5a6fb300976daff55d8528b590ef032f01b14ea10",
+   "family": "Alegreya Sans",
+   "trained in": [
+    "cyrillic",
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/alegreyasanssc/AlegreyaSansSC-Regular.ttf",
+   "bytes": 267620,
+   "sha256": "0c5d4abcdd83af0ce9f5d4ca49f226c2b3030d2a83adf92cb5a5c2638c8e68b0",
+   "family": "Alegreya Sans SC",
+   "trained in": [
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/alegreyasc/AlegreyaSC-Regular.ttf",
+   "bytes": 367628,
+   "sha256": "5c8fba800b848b851e308dfdfdc573b64135e498db41cbd0b6d78ba9d267d9a1",
+   "family": "Alegreya SC",
+   "trained in": [
+    "cyrillic",
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/alice/Alice-Regular.ttf",
+   "bytes": 129200,
+   "sha256": "8212c40f10b306af9b82272ae68314de6964522b6dabf6abdaff647e74ac8b58",
+   "family": "Alice",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/alkalami/Alkalami-Regular.ttf",
+   "bytes": 145540,
+   "sha256": "4410dfc591b918dd4360b0252b079855a8a00250de363c8c0163b29ddfc56434",
+   "family": "Alkalami",
+   "trained in": []
+  },
+  {
+   "path": "ofl/alumnisanscollegiateone/AlumniSansCollegiateOne-Regular.ttf",
+   "bytes": 163484,
+   "sha256": "9bd48b280391794c7a5aea97476b25051b4705c7963e4b63b2c84876db31b59b",
+   "family": "Alumni Sans Collegiate One",
+   "trained in": []
+  },
+  {
+   "path": "ofl/alumnisanscollegiateonesc/AlumniSansCollegiateOneSC-Regular.ttf",
+   "bytes": 145920,
+   "sha256": "dae9c9d91919a15c3bf226538a5dc2bab1bc108d685bdaea3232979cc100de53",
+   "family": "Alumni Sans Collegiate One SC",
+   "trained in": []
+  },
+  {
+   "path": "ofl/alumnisanspinstripe/AlumniSansPinstripe-Regular.ttf",
+   "bytes": 104716,
+   "sha256": "c00bc8d641f2ddc444bbb9a07125f4eb1e6eda0384a896196ad0c7be0a9cfeea",
+   "family": "Alumni Sans Pinstripe",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/alumnisanssc/AlumniSansSC[wght].ttf",
+   "bytes": 125764,
+   "sha256": "41a67970fd2a6f6a806578451d7e9902b45008043de2d60bf47e005ec0dab922",
+   "family": "Alumni Sans SC",
+   "trained in": []
+  },
+  {
+   "path": "ofl/alyamama/Alyamama[wght].ttf",
+   "bytes": 220572,
+   "sha256": "f09eb4ad2eaf1b0a7c990cb9b3b7658414405804d74775269fdddc25efdb1883",
+   "family": "Alyamama",
+   "trained in": []
+  },
+  {
+   "path": "ofl/amiko/Amiko-Regular.ttf",
+   "bytes": 192880,
+   "sha256": "402d4d96034762fee68518fd95b778cf6a9d70cab838fa1a817cb783d39639a4",
+   "family": "Amiko",
+   "trained in": []
+  },
+  {
+   "path": "ofl/amiriquran/AmiriQuran-Regular.ttf",
+   "bytes": 136920,
+   "sha256": "e2a47644762d16bdfb6d33e0d8db8c6ff30beae84150ef5a705316bbd829455c",
+   "family": "Amiri Quran",
+   "trained in": []
+  },
+  {
+   "path": "ofl/ancizarsans/AncizarSans[wght].ttf",
+   "bytes": 172192,
+   "sha256": "c99ce8a9cd997f264e6c34c2799faecd94c39acf7d06928124f9e7c12d72c743",
+   "family": "Ancizar Sans",
+   "trained in": [
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/ancizarserif/AncizarSerif[wght].ttf",
+   "bytes": 193212,
+   "sha256": "fcc35d7fe2780846344d7187515d483bb69f3d9bcc49c4833a219e4d9109db98",
+   "family": "Ancizar Serif",
+   "trained in": []
+  },
+  {
+   "path": "ofl/anekdevanagari/AnekDevanagari[wdth,wght].ttf",
+   "bytes": 2190532,
+   "sha256": "b88cf0ff5705599b2f16fce4ba9ce2029f76106dd24f0419976c417d89f20888",
+   "family": "Anek Devanagari",
+   "trained in": [
+    "devanagari"
+   ]
+  },
+  {
+   "path": "ofl/annapurnasil/AnnapurnaSIL-Regular.ttf",
+   "bytes": 530928,
+   "sha256": "f5f80335993c983ebf811b27fe07604b01d207f7c3b66c8798c3d721d164088c",
+   "family": "Annapurna SIL",
+   "trained in": []
+  },
+  {
+   "path": "ofl/aoboshione/AoboshiOne-Regular.ttf",
+   "bytes": 117976,
+   "sha256": "3d197454026eeb34ee409d0d7eda75a8c7ee654a8dfa9c1a73ada2d9e525b7b1",
+   "family": "Aoboshi One",
+   "trained in": []
+  },
+  {
+   "path": "ofl/arefruqaaink/ArefRuqaaInk-Regular.ttf",
+   "bytes": 568056,
+   "sha256": "0415c2410b1e453f5d0ea0db114fb95d01f65ba2e9e2dc4ae67c5fb73c33e863",
+   "family": "Aref Ruqaa Ink",
+   "trained in": []
+  },
+  {
+   "path": "ofl/arsenal/Arsenal-Regular.ttf",
+   "bytes": 194396,
+   "sha256": "544784eccc5405570c8d91419739a12c2a9ee7cfc947715cee51fa060701b4c2",
+   "family": "Arsenal",
+   "trained in": []
+  },
+  {
+   "path": "ofl/arsenalsc/ArsenalSC-Regular.ttf",
+   "bytes": 184020,
+   "sha256": "56d7ae5099045e6b04a963156f665abeb5cfec2b55af0ddec74af6564bc7af47",
+   "family": "Arsenal SC",
+   "trained in": []
+  },
+  {
+   "path": "ofl/arya/Arya-Regular.ttf",
+   "bytes": 182132,
+   "sha256": "b02bdacefe31bd544f9332b9b4244168ec23e18be395a573e08f484c2a778879",
+   "family": "Arya",
+   "trained in": []
+  },
+  {
+   "path": "ofl/asar/Asar-Regular.ttf",
+   "bytes": 669032,
+   "sha256": "8b4147354af009836d031f50af3e0450768d78b1e0e0281c7df17cd26440cc2e",
+   "family": "Asar",
+   "trained in": []
+  },
+  {
+   "path": "ofl/badeendisplay/BadeenDisplay-Regular.ttf",
+   "bytes": 78908,
+   "sha256": "274805b3ee44f9b45a99bdcecf25cd44944c0a81f6cf8086b5cf30d00e860537",
+   "family": "Badeen Display",
+   "trained in": []
+  },
+  {
+   "path": "ofl/badscript/BadScript-Regular.ttf",
+   "bytes": 184216,
+   "sha256": "40ec737eee65ec4efbc24ae636fa31d7d84d1ccca83ab54cd555edb72cb3eaf0",
+   "family": "Bad Script",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/batang/Batang-Regular.ttf",
+   "bytes": 6829552,
+   "sha256": "0929031e799b2feadda22208c58f503515e6f8fa2eaba75acd2e6847d73fc54b",
+   "family": "Batang",
+   "trained in": []
+  },
+  {
+   "path": "ofl/batangche/BatangChe-Regular.ttf",
+   "bytes": 6823284,
+   "sha256": "34aff823e0d9b86e7b7cb6913612e06638812a1d9af061272510b4cbf9d4c6ba",
+   "family": "BatangChe",
+   "trained in": []
+  },
+  {
+   "path": "ofl/beiruti/Beiruti[wght].ttf",
+   "bytes": 678740,
+   "sha256": "c31f26b93e90ac916757de63c060370c5382457f85d50f64f930b96e5477f222",
+   "family": "Beiruti",
+   "trained in": []
+  },
+  {
+   "path": "ofl/bellota/Bellota-Regular.ttf",
+   "bytes": 194464,
+   "sha256": "d46806f9c5fd46cd6bf1c261bfa46b2d22503130d585451dc7863d8ce80524fc",
+   "family": "Bellota",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/bellotatext/BellotaText-Regular.ttf",
+   "bytes": 191092,
+   "sha256": "b10a58605747b85f738e3bbf9a5571101ecff0a398ef6620df9e9b4ee1f33f83",
+   "family": "Bellota Text",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/bhavuka/Bhavuka-Regular.ttf",
+   "bytes": 262772,
+   "sha256": "153806257782e9bb99f4504659175a4ba27a5933291702963416c98870b37aa9",
+   "family": "Bhavuka",
+   "trained in": []
+  },
+  {
+   "path": "ofl/bitter/Bitter[wght].ttf",
+   "bytes": 328636,
+   "sha256": "ef2b9a711fb02f1e5823b34da1b7450e0fc76793b7d733a8b41006e24916d4a7",
+   "family": "Bitter",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/bizudgothic/BIZUDGothic-Regular.ttf",
+   "bytes": 4667376,
+   "sha256": "709fcd41e3209fb765da750472f55ccdf925653e9fa7e1eb007cb65c8f749c75",
+   "family": "BIZ UDGothic",
+   "trained in": []
+  },
+  {
+   "path": "ofl/bizudmincho/BIZUDMincho-Regular.ttf",
+   "bytes": 6153932,
+   "sha256": "468ee6d9b149ca144809e03841bf18740ecf014e055a00da6ecaf1aaf4165af2",
+   "family": "BIZ UDMincho",
+   "trained in": []
+  },
+  {
+   "path": "ofl/bizudpgothic/BIZUDPGothic-Regular.ttf",
+   "bytes": 4669688,
+   "sha256": "258d7156c165f2ff774b6efee637c22c3b950de0d8a10e501137061bc8085d01",
+   "family": "BIZ UDPGothic",
+   "trained in": []
+  },
+  {
+   "path": "ofl/bizudpmincho/BIZUDPMincho-Regular.ttf",
+   "bytes": 6156444,
+   "sha256": "dbcea04578ac1e9d3484525e870ce491bd04361768f4d2ba4b827d96e20f891d",
+   "family": "BIZ UDPMincho",
+   "trained in": []
+  },
+  {
+   "path": "ofl/blaka/Blaka-Regular.ttf",
+   "bytes": 58104,
+   "sha256": "5cd0ff67dcfbc371c6450afffe10f6e7027ffada0c31f436beb8865e57b781a3",
+   "family": "Blaka",
+   "trained in": []
+  },
+  {
+   "path": "ofl/blakahollow/BlakaHollow-Regular.ttf",
+   "bytes": 73852,
+   "sha256": "59cb30824e6023d454b4b44038cf44cdc9a4ad67f9795171c646c98ceb2bd542",
+   "family": "Blaka Hollow",
+   "trained in": []
+  },
+  {
+   "path": "ofl/blakaink/BlakaInk-Regular.ttf",
+   "bytes": 391520,
+   "sha256": "d745f0be7cf43f4e8998834ef730b3cab22a82db19d6a1737008b7b4a87112ea",
+   "family": "Blaka Ink",
+   "trained in": []
+  },
+  {
+   "path": "ofl/bonanovasc/BonaNovaSC-Regular.ttf",
+   "bytes": 403312,
+   "sha256": "e4d155cdf1917f42e4d9073ab8856bb4b58984a3849c7753f27fe3837da832f8",
+   "family": "Bona Nova SC",
+   "trained in": [
+    "cyrillic",
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/brygada1918/Brygada1918[wght].ttf",
+   "bytes": 242256,
+   "sha256": "93a23e7c6de5e2c54410116abceed294a05b71aa03af52fbaa92c2cc79003d4d",
+   "family": "Brygada 1918",
+   "trained in": [
+    "cyrillic",
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/cactusclassicalserif/CactusClassicalSerif-Regular.ttf",
+   "bytes": 28502932,
+   "sha256": "ecbd58961db922392d7fecfafa3681fefaeec0c399b860ab6940ba700f7da055",
+   "family": "Cactus Classical Serif",
+   "trained in": []
+  },
+  {
+   "path": "ofl/cairoplay/CairoPlay[slnt,wght].ttf",
+   "bytes": 608152,
+   "sha256": "2c275b43ace54233a0960c3aa1d05b4e9e0e396a501cd3f8d446b16cc3362745",
+   "family": "Cairo Play",
+   "trained in": []
+  },
+  {
+   "path": "ofl/cambay/Cambay-Regular.ttf",
+   "bytes": 224780,
+   "sha256": "473faf71630aa1b411fa9887951d1b7b2674efa137e6697cd71afc2bf17d4d55",
+   "family": "Cambay",
+   "trained in": []
+  },
+  {
+   "path": "ofl/carlito/Carlito-Regular.ttf",
+   "bytes": 628032,
+   "sha256": "f6418f708baede9789daef5d458c0f53d2a888af9820e8062934e504fedc6595",
+   "family": "Carlito",
+   "trained in": [
+    "cyrillic",
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/cascadiacode/CascadiaCode[wght].ttf",
+   "bytes": 727940,
+   "sha256": "30f2e14a5c389b346b1fce110c4ddcf0dc5ce8265faf5eca2ab7323f49dba590",
+   "family": "Cascadia Code",
+   "trained in": []
+  },
+  {
+   "path": "ofl/cascadiamono/CascadiaMono[wght].ttf",
+   "bytes": 704344,
+   "sha256": "78864a1b4d03767a44731454a6f24c6b7d6e93fb5f62932860eb02e409cd50cb",
+   "family": "Cascadia Mono",
+   "trained in": []
+  },
+  {
+   "path": "ofl/caudex/Caudex-Regular.ttf",
+   "bytes": 466324,
+   "sha256": "dbb493e1adc50aaec52071535e6fccf4176793c79545f54d95a812cbfb85169b",
+   "family": "Caudex",
+   "trained in": []
+  },
+  {
+   "path": "ofl/caveat/Caveat[wght].ttf",
+   "bytes": 403648,
+   "sha256": "0bdb6b660482d31531b3945849fba5916b3ef8695da7024a9e6b9ee3c4157988",
+   "family": "Caveat",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/charissil/CharisSIL-Regular.ttf",
+   "bytes": 752900,
+   "sha256": "346337374aa347d64ee015b26d441f1970d8631914e2f3941b00e1c4761e28c5",
+   "family": "Charis SIL",
+   "trained in": []
+  },
+  {
+   "path": "ofl/charmonman/Charmonman-Regular.ttf",
+   "bytes": 117644,
+   "sha256": "7ec5575c6c87a6be69de7839b3ecd1027b7ba6510ad3e49bc30b73cc9ee1bce0",
+   "family": "Charmonman",
+   "trained in": []
+  },
+  {
+   "path": "ofl/chirongoroundtc/ChironGoRoundTC[wght].ttf",
+   "bytes": 51170304,
+   "sha256": "47cd5ff5153799d4c0d05bcc64da849e13b8eb842e46728a66bf2d52c480231f",
+   "family": "Chiron GoRound TC",
+   "trained in": []
+  },
+  {
+   "path": "ofl/chironheihk/ChironHeiHK[wght].ttf",
+   "bytes": 31144580,
+   "sha256": "0d788ded72dc88f478818182179af4c7cd143df0bf86557d29729ab132333930",
+   "family": "Chiron Hei HK",
+   "trained in": [
+    "cyrillic",
+    "greek",
+    "kana"
+   ]
+  },
+  {
+   "path": "ofl/chironsunghk/ChironSungHK[wght].ttf",
+   "bytes": 50652520,
+   "sha256": "c88d5db947f4aad3399105d2c1c808a64580ab65e8cb26e58bb81cd96843d130",
+   "family": "Chiron Sung HK",
+   "trained in": []
+  },
+  {
+   "path": "ofl/chocolateclassicalsans/ChocolateClassicalSans-Regular.ttf",
+   "bytes": 12183000,
+   "sha256": "e6345f3d92c7a9b7044c31a87d9b61f50220b08c0f1dcc2736e94c2aa587ce03",
+   "family": "Chocolate Classical Sans",
+   "trained in": [
+    "cyrillic",
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/chokokutai/Chokokutai-Regular.ttf",
+   "bytes": 165580,
+   "sha256": "c622b971d1bdb2d8cd64f978746e6d52d361417ae4222c275cb57549e34e097e",
+   "family": "Chokokutai",
+   "trained in": []
+  },
+  {
+   "path": "ofl/climatecrisis/ClimateCrisis[YEAR].ttf",
+   "bytes": 3601356,
+   "sha256": "4b25279f80e420f9f09dbba13eb14d0beabfa013d17f74bad19cc9fdf4d55523",
+   "family": "Climate Crisis",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/comforterbrush/ComforterBrush-Regular.ttf",
+   "bytes": 807248,
+   "sha256": "7bd357dc8bf83d71f27fd5155ece5c8c100a2042d4530e4487635473c5836f95",
+   "family": "Comforter Brush",
+   "trained in": []
+  },
+  {
+   "path": "ofl/comicrelief/ComicRelief-Regular.ttf",
+   "bytes": 80324,
+   "sha256": "9ef4958ab06385d91f635f83a15569786b243f9d010cfb3f9a5cdda593c7bc22",
+   "family": "Comic Relief",
+   "trained in": []
+  },
+  {
+   "path": "ofl/commissioner/Commissioner[FLAR,VOLM,slnt,wght].ttf",
+   "bytes": 742232,
+   "sha256": "db01279a6eb8676ee62675a4d7e5edbfe5f08fbc109358e2f49760b70c0447d3",
+   "family": "Commissioner",
+   "trained in": [
+    "cyrillic",
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/cormorantgaramond/CormorantGaramond[wght].ttf",
+   "bytes": 1195560,
+   "sha256": "b20b7d9626dd956b2c5e558692ad328b1f19e3275e2782db4fa07670d83f35e0",
+   "family": "Cormorant Garamond",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/cormorantinfant/CormorantInfant[wght].ttf",
+   "bytes": 1174156,
+   "sha256": "48c6efe07539c75d3108795467898706a9cd71ce876d461e45f58482156d7bf3",
+   "family": "Cormorant Infant",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/cormorantsc/CormorantSC-Regular.ttf",
+   "bytes": 763624,
+   "sha256": "a51985a075f3884d8dc9b2d20367c51b6b05e53fdb912959acb785084579aeaa",
+   "family": "Cormorant SC",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/cormorantunicase/CormorantUnicase-Regular.ttf",
+   "bytes": 763872,
+   "sha256": "8fadf0a9ddf4b7d20fbc7c330a740378469fe4f4422c225dd23e6fc5dc028921",
+   "family": "Cormorant Unicase",
+   "trained in": []
+  },
+  {
+   "path": "ofl/cuprum/Cuprum[wght].ttf",
+   "bytes": 84324,
+   "sha256": "be75585aa57a5f1c1d10de61305bb4266effa1b9083722d20c26adf97e911534",
+   "family": "Cuprum",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/darumadropone/DarumadropOne-Regular.ttf",
+   "bytes": 359120,
+   "sha256": "beef6d9031918823176ea0f9f729cb811a5f250598d7c8c684b3dee333810689",
+   "family": "Darumadrop One",
+   "trained in": []
+  },
+  {
+   "path": "ofl/daysone/DaysOne-Regular.ttf",
+   "bytes": 65580,
+   "sha256": "7b5a0e6d88696e43e95f6320613908e53d36ad854b4a18e4a1b8d1c19fdbf1fe",
+   "family": "Days One",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/dekko/Dekko-Regular.ttf",
+   "bytes": 271164,
+   "sha256": "e6b151a5bdc521833ceb9a4f8010195515259e9416abfe055cfd16adb2e1af42",
+   "family": "Dekko",
+   "trained in": []
+  },
+  {
+   "path": "ofl/delagothicone/DelaGothicOne-Regular.ttf",
+   "bytes": 2508848,
+   "sha256": "4ff87a0965f1b0505e5a2c58424bc6ad3cff27e56a82f21c2fc9d6b0e3857ee2",
+   "family": "Dela Gothic One",
+   "trained in": [
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/didactgothic/DidactGothic-Regular.ttf",
+   "bytes": 194200,
+   "sha256": "b98f9e091b6337a86f4e0f69c94c31905e1e287782853f472e176b4e28d3f81f",
+   "family": "Didact Gothic",
+   "trained in": [
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/dotum/Dotum-Regular.ttf",
+   "bytes": 4575996,
+   "sha256": "12f749ac462e547e3f4073227bb3b2b4c116062fc7546fbdadaa04e5e9f88b12",
+   "family": "Dotum",
+   "trained in": []
+  },
+  {
+   "path": "ofl/dotumche/DotumChe-Regular.ttf",
+   "bytes": 4568508,
+   "sha256": "c2c030ca896d46ff28dae17663e9fe22ab2fc6e6518c96d75e15ca8fb441bd2f",
+   "family": "DotumChe",
+   "trained in": []
+  },
+  {
+   "path": "ofl/ekmukta/EkMukta-Regular.ttf",
+   "bytes": 432280,
+   "sha256": "d14f40a588b232cac9fb3063c707df93fc10e8d265694fc99fcfafcc8ab7b3b4",
+   "family": "Ek Mukta",
+   "trained in": []
+  },
+  {
+   "path": "ofl/estedad/Estedad[wght].ttf",
+   "bytes": 328340,
+   "sha256": "6e745beeeb0cae5eea7f38d3132597089548a622d87997b58944e5b1edfec5a1",
+   "family": "Estedad",
+   "trained in": []
+  },
+  {
+   "path": "ofl/exo2/Exo2[wght].ttf",
+   "bytes": 303940,
+   "sha256": "205a448676a2586f9c57c25f3d5c58ca8db7e6cf5edf7506783a010c6fe2bfb5",
+   "family": "Exo 2",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/finlandica/Finlandica[wght].ttf",
+   "bytes": 143908,
+   "sha256": "8192c7f916ad929890b799bd4fe0974200be62e024c267c7b234632caca6658e",
+   "family": "Finlandica",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/finlandicaheadline/FinlandicaHeadline[wght].ttf",
+   "bytes": 311120,
+   "sha256": "807735d6aa1f8dfb34c93256d9f696a0573f3c337e166c26666ac17137b3abfc",
+   "family": "Finlandica Headline",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/finlandicatext/FinlandicaText[wght].ttf",
+   "bytes": 288868,
+   "sha256": "6ffe79064e08ec7c3adfdfbd8905aaba7c7286b994b34c143cd9237cb0ab4175",
+   "family": "Finlandica Text",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/firasans/FiraSans-Regular.ttf",
+   "bytes": 456996,
+   "sha256": "c29556a2719bf613ef3d5e070e40d903a8965d9c081beca1375dc1e6e0f93c23",
+   "family": "Fira Sans",
+   "trained in": [
+    "cyrillic",
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/firasanscondensed/FiraSansCondensed-Regular.ttf",
+   "bytes": 459804,
+   "sha256": "c67609f14fc9d328442bfffcc31988b0f76e5575cf460fcc1f3dd8e4912fe257",
+   "family": "Fira Sans Condensed",
+   "trained in": [
+    "cyrillic",
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/firasansextracondensed/FiraSansExtraCondensed-Regular.ttf",
+   "bytes": 455820,
+   "sha256": "51f01985ca8dc740b951afd3d21478cc51cb1d8546136643c3b031a74add5479",
+   "family": "Fira Sans Extra Condensed",
+   "trained in": [
+    "cyrillic",
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/firjar/Firjar[wdth,wght].ttf",
+   "bytes": 143588,
+   "sha256": "77a23cca553d3d4f992ffe46dfb9687e54261cc82b5e7a4963ad026e64f561be",
+   "family": "Firjar",
+   "trained in": []
+  },
+  {
+   "path": "ofl/flowblock/FlowBlock-Regular.ttf",
+   "bytes": 38928,
+   "sha256": "41df2ad95d9ae2d3573e7e958186e04a852a44a568e5c2fc5fbd22e416b50acc",
+   "family": "Flow Block",
+   "trained in": []
+  },
+  {
+   "path": "ofl/flowcircular/FlowCircular-Regular.ttf",
+   "bytes": 45788,
+   "sha256": "ea87d5b1d0be7c5a3cf63054ad3e1d5ed54cca7491f9237a1226cb72f6340e78",
+   "family": "Flow Circular",
+   "trained in": []
+  },
+  {
+   "path": "ofl/flowrounded/FlowRounded-Regular.ttf",
+   "bytes": 43800,
+   "sha256": "dd3319188800beba4f303532f254880f77c513dfb8ee54e44cd7fa2fdeb25123",
+   "family": "Flow Rounded",
+   "trained in": []
+  },
+  {
+   "path": "ofl/forum/Forum-Regular.ttf",
+   "bytes": 303316,
+   "sha256": "5c9fbe9c4ce76d0269f5088d921d57e58082fd9c28433eacb6de95baf938adf8",
+   "family": "Forum",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/fustat/Fustat[wght].ttf",
+   "bytes": 172620,
+   "sha256": "ba09d90e6180e79334aadd42ea1ed0e97a405fadcd34412c1d02a6b8f679d402",
+   "family": "Fustat",
+   "trained in": []
+  },
+  {
+   "path": "ofl/gabriela/Gabriela-Regular.ttf",
+   "bytes": 70984,
+   "sha256": "c38334bfff10cc97fa6e5c5ddf1f12dd54428bb218d7a423fb3c07bf8180bfd8",
+   "family": "Gabriela",
+   "trained in": []
+  },
+  {
+   "path": "ofl/gajrajone/GajrajOne-Regular.ttf",
+   "bytes": 149784,
+   "sha256": "eb924f0e1cb9f29f129a76645dadcc36d0f3a831185ac530a6b5af607ae06231",
+   "family": "Gajraj One",
+   "trained in": []
+  },
+  {
+   "path": "ofl/geist/Geist[wght].ttf",
+   "bytes": 169056,
+   "sha256": "73894e0448cae90a92b6c2f8732b7bb9acb7b94c418bff559dad4a18e1de9659",
+   "family": "Geist",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/gentiumbookplus/GentiumBookPlus-Regular.ttf",
+   "bytes": 818952,
+   "sha256": "fe7b64eeacc430fcf46836a6f0dfe00d2c5a15483ed36692a2a185cb23ec2a5c",
+   "family": "Gentium Book Plus",
+   "trained in": [
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/geologica/Geologica[CRSV,SHRP,slnt,wght].ttf",
+   "bytes": 348640,
+   "sha256": "9124d9e88ac6c11d761f35241713a51d68e2c4ebedce0edaca834717a00959ec",
+   "family": "Geologica",
+   "trained in": [
+    "cyrillic",
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/geom/Geom[wght].ttf",
+   "bytes": 105408,
+   "sha256": "4509ad62e97c2e07c7fbc51180caba092b66fb2967e4de7dcba149ab3beb3b15",
+   "family": "Geom",
+   "trained in": [
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/gfsneohellenic/GFSNeohellenic.ttf",
+   "bytes": 460072,
+   "sha256": "14d54dd7f36fdd7140d3f6357c99a8ead988a808b298471e02ba2c0992aa110d",
+   "family": "GFS Neohellenic",
+   "trained in": []
+  },
+  {
+   "path": "ofl/gidole/Gidole-Regular.ttf",
+   "bytes": 121620,
+   "sha256": "7a9b54e2ce1f582cfcd1aa39ca025cd125084f4fb2ea35969d21f6544aa05f23",
+   "family": "Gidole",
+   "trained in": []
+  },
+  {
+   "path": "ofl/glegoo/Glegoo-Regular.ttf",
+   "bytes": 271368,
+   "sha256": "237ca320ef867416c46c6fdfa6edc2ac5f49a121396ad0279a2e0f8ed7aaa3b1",
+   "family": "Glegoo",
+   "trained in": []
+  },
+  {
+   "path": "ofl/golostext/GolosText[wght].ttf",
+   "bytes": 184292,
+   "sha256": "17bb58fb69aec2dfb047a2ebf52534023e9b688c97a6b7ac795b0a72912c2063",
+   "family": "Golos Text",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/googlesansflex/GoogleSansFlex[ROND,opsz,slnt,wdth,wght].ttf",
+   "bytes": 3910784,
+   "sha256": "a9ac770798857d5e8ac593ced42b22e40a7c08cec98319f92b0eccc2783a77ba",
+   "family": "Google Sans Flex",
+   "trained in": []
+  },
+  {
+   "path": "ofl/greatvibes/GreatVibes-Regular.ttf",
+   "bytes": 457588,
+   "sha256": "8d509802186f1b51572531ecf313e8098f9a5bfdfaca93f0c9b34467f9982d15",
+   "family": "Great Vibes",
+   "trained in": []
+  },
+  {
+   "path": "ofl/gulim/Gulim-Regular.ttf",
+   "bytes": 4719024,
+   "sha256": "a435857b8ffe2102f8faa7cf098d0d48b1d01d951c1c8326770848203bb7b5c2",
+   "family": "Gulim",
+   "trained in": []
+  },
+  {
+   "path": "ofl/gulimche/GulimChe-Regular.ttf",
+   "bytes": 4711736,
+   "sha256": "aba838ffa7d1bc8e95107f643bb0486434ca424edf020e5a5e9b32295029de6c",
+   "family": "GulimChe",
+   "trained in": []
+  },
+  {
+   "path": "ofl/gungsuh/Gungsuh-Regular.ttf",
+   "bytes": 6582836,
+   "sha256": "e0887c3b3a92f0ebc604cbd5e94ad6d0dad4ed3ffa624f6bae9a95f2d4d06735",
+   "family": "Gungsuh",
+   "trained in": []
+  },
+  {
+   "path": "ofl/gungsuhche/GungsuhChe-Regular.ttf",
+   "bytes": 6578224,
+   "sha256": "ad7744ead7cb467fa12ffc565d1ba864a1a2f972c1bea1e3208062c369982c64",
+   "family": "GungsuhChe",
+   "trained in": []
+  },
+  {
+   "path": "ofl/hachimarupop/HachiMaruPop-Regular.ttf",
+   "bytes": 4385624,
+   "sha256": "78408910c8f1a2f174a279cbc1484b48b71780039eba3fe1be2bfcc5d4df3f98",
+   "family": "Hachi Maru Pop",
+   "trained in": []
+  },
+  {
+   "path": "ofl/handjet/Handjet[ELGR,ELSH,wght].ttf",
+   "bytes": 283912,
+   "sha256": "9262749e8bb0b73ebcae0e20428689c3c59576eebeb6c4e1020300d2d41bdf4d",
+   "family": "Handjet",
+   "trained in": []
+  },
+  {
+   "path": "ofl/hinamincho/HinaMincho-Regular.ttf",
+   "bytes": 6451924,
+   "sha256": "8395fafa0c2721b4b5c274031e1336fea0f703d908b175ee21f8ba2f1ad566a0",
+   "family": "Hina Mincho",
+   "trained in": []
+  },
+  {
+   "path": "ofl/huninn/Huninn-Regular.ttf",
+   "bytes": 4683972,
+   "sha256": "1bd770a5ffc0c06723b567686f8b5db5abf9ab54227f3bbc4e6fd648f4698805",
+   "family": "Huninn",
+   "trained in": []
+  },
+  {
+   "path": "ofl/ibmplexsans/IBMPlexSans[wdth,wght].ttf",
+   "bytes": 537244,
+   "sha256": "3b031aa4216174205bd8471f88a49b91f093169e9e87bd5262242bc5967fe2e3",
+   "family": "IBM Plex Sans",
+   "trained in": [
+    "cyrillic",
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/ibmplexsansdevanagari/IBMPlexSansDevanagari-Regular.ttf",
+   "bytes": 357812,
+   "sha256": "9a309796ffbe3b6827591eb4e6e7f13e273c38d37b40d12a5ac695172571e88b",
+   "family": "IBM Plex Sans Devanagari",
+   "trained in": [
+    "devanagari"
+   ]
+  },
+  {
+   "path": "ofl/ibmplexsansthailooped/IBMPlexSansThaiLooped-Regular.ttf",
+   "bytes": 125080,
+   "sha256": "6d7910d13a7a9e33872d5501fd81a71f84ee532f729bfb72c6ffa94d1f13009e",
+   "family": "IBM Plex Sans Thai Looped",
+   "trained in": []
+  },
+  {
+   "path": "ofl/ibmplexserif/IBMPlexSerif-Regular.ttf",
+   "bytes": 163068,
+   "sha256": "e882efa9c41949a528ac2369079ec5ef050c1c996bbd0bacce3c3326d44cf80d",
+   "family": "IBM Plex Serif",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/idiqlat/Idiqlat-Regular.ttf",
+   "bytes": 81504,
+   "sha256": "9035ef01c4b64c3f0a8396ef9100ddfd0caa80ed9354a740c57f2812965f7ed8",
+   "family": "Idiqlat",
+   "trained in": []
+  },
+  {
+   "path": "ofl/inknutantiqua/InknutAntiqua-Regular.ttf",
+   "bytes": 393736,
+   "sha256": "d46c7420b1e5fedc2086c8ce89275a6ed13c6778829c0617f56df8c3bddd686f",
+   "family": "Inknut Antiqua",
+   "trained in": [
+    "devanagari"
+   ]
+  },
+  {
+   "path": "ofl/intertight/InterTight[wght].ttf",
+   "bytes": 581588,
+   "sha256": "b81b73dcb64df3c230cabade7df6c5773bf863233f24c9ee51087519f1f88b6f",
+   "family": "Inter Tight",
+   "trained in": [
+    "cyrillic",
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/istokweb/IstokWeb-Regular.ttf",
+   "bytes": 315392,
+   "sha256": "a13c4e6cba8f6d24abf96542d9028cea47411ac65c01e6f85349d7405dee53c6",
+   "family": "Istok Web",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/jaini/Jaini-Regular.ttf",
+   "bytes": 757280,
+   "sha256": "67224e60cafa27291c4b03cd907ca61ec678ba59fc1743af89da4472ea50d5c7",
+   "family": "Jaini",
+   "trained in": []
+  },
+  {
+   "path": "ofl/jainipurva/JainiPurva-Regular.ttf",
+   "bytes": 762796,
+   "sha256": "178d7f5a40594d4ef6c28b7a68d85da7eae46df2f71becedfb40251ff678c2f5",
+   "family": "Jaini Purva",
+   "trained in": []
+  },
+  {
+   "path": "ofl/jaldi/Jaldi-Regular.ttf",
+   "bytes": 460664,
+   "sha256": "26f34c48b7baa838dd459b5f5db026e9493bb468efc2956761c52134d478d2e2",
+   "family": "Jaldi",
+   "trained in": []
+  },
+  {
+   "path": "ofl/jomhuria/Jomhuria-Regular.ttf",
+   "bytes": 172276,
+   "sha256": "17b4b0453acdaafb940a8be8acccc968713e223e5d03942347f6562ca3b1dec3",
+   "family": "Jomhuria",
+   "trained in": []
+  },
+  {
+   "path": "ofl/jost/Jost[wght].ttf",
+   "bytes": 134996,
+   "sha256": "6343b70971000b04c5d401c96ae08ce371086135e999d5e1e1413039c0213076",
+   "family": "Jost",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/jura/Jura[wght].ttf",
+   "bytes": 258404,
+   "sha256": "188b415d44810d68b4d6b4a8c281f864184c2b8edc5e88e6357c89f7b44075bf",
+   "family": "Jura",
+   "trained in": []
+  },
+  {
+   "path": "ofl/kablammo/Kablammo[MORF].ttf",
+   "bytes": 2209224,
+   "sha256": "900c8c183efc8d913da30dceb9e4e9886888bbd48847455343f12ce85a334925",
+   "family": "Kablammo",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/kadwa/Kadwa-Regular.ttf",
+   "bytes": 251420,
+   "sha256": "2d726feadfadcf1e1eb31d443556b830da66badbb0629e984419d8ddab7e6e9d",
+   "family": "Kadwa",
+   "trained in": []
+  },
+  {
+   "path": "ofl/kaiseidecol/KaiseiDecol-Regular.ttf",
+   "bytes": 4503152,
+   "sha256": "fb9202b97944fa00b5f145ad4701def5c306bcd0d26407917baef9e01b042056",
+   "family": "Kaisei Decol",
+   "trained in": []
+  },
+  {
+   "path": "ofl/kaiseiharunoumi/KaiseiHarunoUmi-Regular.ttf",
+   "bytes": 4571780,
+   "sha256": "176e2dac3ffb1659dd85c90666a3ee19d2bb4fce8a8a2315fe630625ac5ab6a7",
+   "family": "Kaisei HarunoUmi",
+   "trained in": []
+  },
+  {
+   "path": "ofl/kaiseiopti/KaiseiOpti-Regular.ttf",
+   "bytes": 4503024,
+   "sha256": "990cfb1fb00f311c8975c2c5f4778b2fe5462fd5eabf0884828a323dad3f18c0",
+   "family": "Kaisei Opti",
+   "trained in": []
+  },
+  {
+   "path": "ofl/kaiseitokumin/KaiseiTokumin-Regular.ttf",
+   "bytes": 4581732,
+   "sha256": "3fbdbec539369aed11bb1fa0cdda1d19ea246e795107357383dfa561848a427d",
+   "family": "Kaisei Tokumin",
+   "trained in": []
+  },
+  {
+   "path": "ofl/kapakana/Kapakana[wght].ttf",
+   "bytes": 184420,
+   "sha256": "5ff3af9e470b5b278d645099214818ceb3933b542fbfd4b38c0a9b0be29fd35e",
+   "family": "Kapakana",
+   "trained in": []
+  },
+  {
+   "path": "ofl/kellyslab/KellySlab-Regular.ttf",
+   "bytes": 77816,
+   "sha256": "cbf98bddb534c52d2f1150aed233c53e5e3a7966b7be1ab860550c23f9930c27",
+   "family": "Kelly Slab",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/khula/Khula-Regular.ttf",
+   "bytes": 158356,
+   "sha256": "825477d3c995997ebd41245fc4177bf1681bfd6546674e0d67a29a094c78644f",
+   "family": "Khula",
+   "trained in": [
+    "devanagari"
+   ]
+  },
+  {
+   "path": "ofl/kripa/Kripa[wght].ttf",
+   "bytes": 344556,
+   "sha256": "049bd349ef3128e3f1968a0819757413780258b667d9bf4fedf30ec2761a0344",
+   "family": "Kripa",
+   "trained in": []
+  },
+  {
+   "path": "ofl/kufam/Kufam[wght].ttf",
+   "bytes": 428544,
+   "sha256": "f17a89b518c833de289598d0662bb9a07d09cc7d75b7079a15f1305f624bbcda",
+   "family": "Kufam",
+   "trained in": []
+  },
+  {
+   "path": "ofl/ledger/Ledger-Regular.ttf",
+   "bytes": 62148,
+   "sha256": "0d9e4086208d5aee8813ae1185010c58fa2f07933fb5c1a1d0950f42bd976272",
+   "family": "Ledger",
+   "trained in": []
+  },
+  {
+   "path": "ofl/libertinussans/LibertinusSans-Regular.ttf",
+   "bytes": 460756,
+   "sha256": "2d261d21add710a08b2ffbd89072d7fd2f29a19582e872da4b8f8f6d622cd78b",
+   "family": "Libertinus Sans",
+   "trained in": [
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/libertinusserifdisplay/LibertinusSerifDisplay-Regular.ttf",
+   "bytes": 733352,
+   "sha256": "5d2b119fe718b6420953a8ca747cc2d83f42e8b5739798d3d6d27430dde75486",
+   "family": "Libertinus Serif Display",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/librefranklin/LibreFranklin[wght].ttf",
+   "bytes": 187436,
+   "sha256": "2329f394b10ed1c71107df20fddc11e2bb1b68c1ecbb385f975b36fd64a971f8",
+   "family": "Libre Franklin",
+   "trained in": []
+  },
+  {
+   "path": "ofl/lineseedjp/LINESeedJP-Regular.ttf",
+   "bytes": 3673280,
+   "sha256": "04a6c0077ddb8ba5af3638bd76b4600708dde7b38df047b40fbe6f3af358d3c3",
+   "family": "LINE Seed JP",
+   "trained in": []
+  },
+  {
+   "path": "ofl/liter/Liter-Regular.ttf",
+   "bytes": 77008,
+   "sha256": "379fe197584f098a0318278c5e1b453a1ef8f017925041e3e51e18efb025822d",
+   "family": "Liter",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/literata/Literata[opsz,wght].ttf",
+   "bytes": 955132,
+   "sha256": "b41138c9373112f32abb589cc22e8674b06ed4048b0c513be922bdd26f274440",
+   "family": "Literata",
+   "trained in": [
+    "cyrillic",
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/lobster/Lobster-Regular.ttf",
+   "bytes": 406076,
+   "sha256": "d6568e697fd50cedc0be04d8aae4127fe95add607e7bff954ca88604be80c205",
+   "family": "Lobster",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/lora/Lora[wght].ttf",
+   "bytes": 212196,
+   "sha256": "822a6621ccbe8d97d20ac88c1c41f5615c9c2c202eaa75f272cd452aac6475a7",
+   "family": "Lora",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/lunasima/Lunasima-Regular.ttf",
+   "bytes": 195140,
+   "sha256": "833ded9502e6553eece11f587f27640cab1ef44900785abe8c3b09ba11690b62",
+   "family": "Lunasima",
+   "trained in": []
+  },
+  {
+   "path": "ofl/lxgwmarkergothic/LXGWMarkerGothic-Regular.ttf",
+   "bytes": 3187360,
+   "sha256": "e6a55cfd5f18dc393f92670a164397a69242cb4eabe1d3feb5dc22fc4947a8ba",
+   "family": "LXGW Marker Gothic",
+   "trained in": []
+  },
+  {
+   "path": "ofl/lxgwwenkaitc/LXGWWenKaiTC-Regular.ttf",
+   "bytes": 13110528,
+   "sha256": "4fcc5aec11cbbf737b0cfab7b63796f7f280087a7a656b2f13342cd5e5318d95",
+   "family": "LXGW WenKai TC",
+   "trained in": []
+  },
+  {
+   "path": "ofl/madhuban/Madhuban[wght].ttf",
+   "bytes": 230368,
+   "sha256": "9686f1c013c0ba14488bbebbd08310295b794a7b988169dad35b133d3fbb2d32",
+   "family": "Madhuban",
+   "trained in": []
+  },
+  {
+   "path": "ofl/manrope/Manrope[wght].ttf",
+   "bytes": 164700,
+   "sha256": "3ae11c49db0455a3cc33e37d380f20fdb8c7f8b41dc07625c177e3d87a9d6ae6",
+   "family": "Manrope",
+   "trained in": [
+    "cyrillic",
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/mansalva/Mansalva-Regular.ttf",
+   "bytes": 355776,
+   "sha256": "613ca294f0a364fd282a06d5e8a65db5d8f2bb8b834f8b21437a53cf70dafb8a",
+   "family": "Mansalva",
+   "trained in": []
+  },
+  {
+   "path": "ofl/marckscript/MarckScript-Regular.ttf",
+   "bytes": 83664,
+   "sha256": "504de8cc6f919163bc9afb67b9bc208d258230c5e8d00cb82ec52474f9fafc3b",
+   "family": "Marck Script",
+   "trained in": []
+  },
+  {
+   "path": "ofl/marhey/Marhey[wght].ttf",
+   "bytes": 198704,
+   "sha256": "19c30686157ec965797fae8c8feb7bb142b082217227562d1a809c067df447e9",
+   "family": "Marhey",
+   "trained in": []
+  },
+  {
+   "path": "ofl/marmelad/Marmelad-Regular.ttf",
+   "bytes": 142764,
+   "sha256": "aadcea7a972d84294ab5399b99654506559d328e03169a2351854c7046b77fc6",
+   "family": "Marmelad",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/martelsans/MartelSans-Regular.ttf",
+   "bytes": 153396,
+   "sha256": "5c365880e5c79763c745ca132049518e69873cf3da6f7ee91711dc522b021100",
+   "family": "Martel Sans",
+   "trained in": []
+  },
+  {
+   "path": "ofl/matangi/Matangi[wght].ttf",
+   "bytes": 711948,
+   "sha256": "1f2a23098e137dc241492fde76543abaaccad4726e99b198002e6dffbdf5a45d",
+   "family": "Matangi",
+   "trained in": []
+  },
+  {
+   "path": "ofl/merriweather/Merriweather[opsz,wdth,wght].ttf",
+   "bytes": 4628080,
+   "sha256": "d0ed0e359e396af7ad05e73dffd11a3a4c326ea0d0283c56bd9361cb2cc86a96",
+   "family": "Merriweather",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/mochiypopone/MochiyPopOne-Regular.ttf",
+   "bytes": 5163948,
+   "sha256": "9e009430e1316c271a5f34759c6b65fc343c4e806f193042528887e7235a92c6",
+   "family": "Mochiy Pop One",
+   "trained in": []
+  },
+  {
+   "path": "ofl/moderustic/Moderustic[wght].ttf",
+   "bytes": 267392,
+   "sha256": "ba465ae65b26bbc2eede93f05d983912999c0916ef1160449da773fa3beb7467",
+   "family": "Moderustic",
+   "trained in": [
+    "cyrillic",
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/monomakh/Monomakh-Regular.ttf",
+   "bytes": 230236,
+   "sha256": "c0d38d79252b758a61adb31101f202450ff11305a675481525ecdcc294b800bf",
+   "family": "Monomakh",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/montserratunderline/MontserratUnderline[wght].ttf",
+   "bytes": 805200,
+   "sha256": "b77c3c339f0a793692f32d53b0cf631a426f6deec94e53e013cb612f87370fcc",
+   "family": "Montserrat Underline",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/mplus2/MPLUS2[wght].ttf",
+   "bytes": 4201608,
+   "sha256": "2e4f45c2391355fb03195da4854ffbe85fea49bfdff5cc51020238083af6b75c",
+   "family": "M PLUS 2",
+   "trained in": []
+  },
+  {
+   "path": "ofl/mplusrounded1c/MPLUSRounded1c-Regular.ttf",
+   "bytes": 3389792,
+   "sha256": "b75708b53e45b06d17d470aeeca5b766e3d1b3999f03f13ec4eb863ca846c14c",
+   "family": "M PLUS Rounded 1c",
+   "trained in": []
+  },
+  {
+   "path": "ofl/mplusu/MPLUSU[wght].ttf",
+   "bytes": 4207732,
+   "sha256": "b8a7510c3cf3d1e330018eed21b6b603122d6eb724e9d1d5b9a91ba4013c3019",
+   "family": "M PLUS U",
+   "trained in": []
+  },
+  {
+   "path": "ofl/mulish/Mulish[wght].ttf",
+   "bytes": 211988,
+   "sha256": "00f1105796291a2fdda117a0fc7f25d8e68f8010cdbb34a411f60b3bd57717ac",
+   "family": "Mulish",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/mynerve/Mynerve-Regular.ttf",
+   "bytes": 279224,
+   "sha256": "1844706b0020e74f1cc38810266f8c45741bd0d9b7beeb05a584caee11dbc63e",
+   "family": "Mynerve",
+   "trained in": []
+  },
+  {
+   "path": "ofl/natasans/NataSans[wght].ttf",
+   "bytes": 434804,
+   "sha256": "f8867b7b2d02c3513398412d06f6bc264f414a90753943297fc44d53cfb60559",
+   "family": "Nata Sans",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/neucha/Neucha.ttf",
+   "bytes": 141432,
+   "sha256": "7927bd6ce090fa032857dcbc3ad0e8b765c462d0a72a8779068132496b4e087d",
+   "family": "Neucha",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/nevermind/Nevermind[wght].ttf",
+   "bytes": 144980,
+   "sha256": "3901d5c01bffb98c3e9773c7062a932ae95133ef6cdc672e475d415d8489918d",
+   "family": "Nevermind",
+   "trained in": [
+    "cyrillic",
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/newscycle/NewsCycle-Regular.ttf",
+   "bytes": 179600,
+   "sha256": "8653ccce06d26dcf19a68704a16063835fc9fea036638c2fcbd5bdc8c94e4e95",
+   "family": "News Cycle",
+   "trained in": []
+  },
+  {
+   "path": "ofl/newtegomin/NewTegomin-Regular.ttf",
+   "bytes": 7450688,
+   "sha256": "bcae8775f0f9b88e12e40434918c56817e96e3a291e2a6595a34fb38fe3e58fb",
+   "family": "New Tegomin",
+   "trained in": []
+  },
+  {
+   "path": "ofl/nobile/Nobile-Regular.ttf",
+   "bytes": 65152,
+   "sha256": "fc2eab24ea3dbe7f5d80324fa5c5d3ea5098175755c3218e3d54cec4355987f2",
+   "family": "Nobile",
+   "trained in": []
+  },
+  {
+   "path": "ofl/notonaskharabicui/NotoNaskhArabicUI[wght].ttf",
+   "bytes": 199448,
+   "sha256": "6bcf69fb867a773084baf29736b6410ff7a0fd67c821271fe6eb87ed2292b1cd",
+   "family": "Noto Naskh Arabic UI",
+   "trained in": []
+  },
+  {
+   "path": "ofl/notosansadlam/NotoSansAdlam[wght].ttf",
+   "bytes": 136472,
+   "sha256": "fda98eedbbad51d6c80319065bb193a1b3c9410a8309f09063082b768a54159f",
+   "family": "Noto Sans Adlam",
+   "trained in": []
+  },
+  {
+   "path": "ofl/notosansadlamunjoined/NotoSansAdlamUnjoined[wght].ttf",
+   "bytes": 73680,
+   "sha256": "edd3827faf66232eede488883b7bc73fdc7de0cddc96cfc1e3a72c7a73e5f2a2",
+   "family": "Noto Sans Adlam Unjoined",
+   "trained in": []
+  },
+  {
+   "path": "ofl/notosansarabicui/NotoSansArabicUI[wdth,wght].ttf",
+   "bytes": 898932,
+   "sha256": "2d47090f7a3de2fd01ba8aff9a775263b3ab70a46cd2a6bfe3d1c3e1dd89ffe5",
+   "family": "Noto Sans Arabic UI",
+   "trained in": []
+  },
+  {
+   "path": "ofl/notosansdisplay/NotoSansDisplay[wdth,wght].ttf",
+   "bytes": 1544512,
+   "sha256": "deaa68141fa5ad21bd17d7c11fa79183ceda19b32e40ff5c33874d42f3636dde",
+   "family": "Noto Sans Display",
+   "trained in": [
+    "cyrillic",
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/notosanshk/NotoSansHK[wght].ttf",
+   "bytes": 11905808,
+   "sha256": "76098ee78ec234cd4f8c950742b3f766fea2f8b43d5180d901048f4fc86c6849",
+   "family": "Noto Sans HK",
+   "trained in": [
+    "kana"
+   ]
+  },
+  {
+   "path": "ofl/notosansnkounjoined/NotoSansNKoUnjoined[wght].ttf",
+   "bytes": 63800,
+   "sha256": "9da7c2cd66449822e9b6014a9d59470c9a20fc4c4b831aebc72d308b93ebc4d4",
+   "family": "Noto Sans NKo Unjoined",
+   "trained in": []
+  },
+  {
+   "path": "ofl/notosanssyriac/NotoSansSyriac[wght].ttf",
+   "bytes": 171996,
+   "sha256": "775585cc3c12877115d588f70af3aa140c78cb440f9d42c98273bf05bed3f6b1",
+   "family": "Noto Sans Syriac",
+   "trained in": []
+  },
+  {
+   "path": "ofl/notosanssyriaceastern/NotoSansSyriacEastern[wght].ttf",
+   "bytes": 146308,
+   "sha256": "5f562f4ed8a00bcdf57a46726d15111e6b97bd06bb554a5e368a084c2116f5e4",
+   "family": "Noto Sans Syriac Eastern",
+   "trained in": []
+  },
+  {
+   "path": "ofl/notosanssyriacwestern/NotoSansSyriacWestern[wght].ttf",
+   "bytes": 180868,
+   "sha256": "29d375b81b36ab042c543f94b31a9ca4982ee1af02e352a6285fa6a0ce25c5b8",
+   "family": "Noto Sans Syriac Western",
+   "trained in": []
+  },
+  {
+   "path": "ofl/notosanstc/NotoSansTC[wght].ttf",
+   "bytes": 11941968,
+   "sha256": "864727d210d54f2537bbe23b3a839436c3992af72de9322af5270897246bd44f",
+   "family": "Noto Sans TC",
+   "trained in": []
+  },
+  {
+   "path": "ofl/notosansthaana/NotoSansThaana[wght].ttf",
+   "bytes": 114724,
+   "sha256": "a296795c892a9ec2b0f4d3af315568506ef9fd55920386170992d3935d8866ca",
+   "family": "Noto Sans Thaana",
+   "trained in": [
+    "thaana"
+   ]
+  },
+  {
+   "path": "ofl/notosansthaiui/NotoSansThaiUI[wdth,wght].ttf",
+   "bytes": 98836,
+   "sha256": "3eddf0ec5225225b9cfd9e649314b883d209cedbc593ff96e485557296353389",
+   "family": "Noto Sans Thai UI",
+   "trained in": []
+  },
+  {
+   "path": "ofl/notoserifdisplay/NotoSerifDisplay[wdth,wght].ttf",
+   "bytes": 1835176,
+   "sha256": "4b661adcf6a5d38bf5befdc4d976e8a7238a4aeb57e62c1c1a67775380a09df9",
+   "family": "Noto Serif Display",
+   "trained in": [
+    "cyrillic",
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/notoserifhk/NotoSerifHK[wght].ttf",
+   "bytes": 16828640,
+   "sha256": "66108860e321aa413e7cb346448b4a418b779d94ae392accb32d163c024ae661",
+   "family": "Noto Serif HK",
+   "trained in": [
+    "kana"
+   ]
+  },
+  {
+   "path": "ofl/notoserifsc/NotoSerifSC[wght].ttf",
+   "bytes": 25125512,
+   "sha256": "050080d9255a86808f2945bffac582b31ef32bc36411ce29563b4961670c66f9",
+   "family": "Noto Serif SC",
+   "trained in": []
+  },
+  {
+   "path": "ofl/notoseriftc/NotoSerifTC[wght].ttf",
+   "bytes": 16851596,
+   "sha256": "0077e18f57c6908f4a000969880940bdb0dad057c0e8d98b49dc364c3d1b09c6",
+   "family": "Noto Serif TC",
+   "trained in": []
+  },
+  {
+   "path": "ofl/nunitosans/NunitoSans[YTLC,opsz,wdth,wght].ttf",
+   "bytes": 571240,
+   "sha256": "f934d7142fb4784bf828da485b7dcbd90c0c80d514e9d49a5da0ed3a1ae2491d",
+   "family": "Nunito Sans",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/oldstandardtt/OldStandard-Regular.ttf",
+   "bytes": 249668,
+   "sha256": "42717a1280b523a506ca2b0285cca380e77fe214b1f6e3d75a8b925005f19eac",
+   "family": "Old Standard TT",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/onest/Onest[wght].ttf",
+   "bytes": 193056,
+   "sha256": "966c5c29b4755da84b6854d5c21dd4eaa2420225d0e9874de602de176d4a9f31",
+   "family": "Onest",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/oranienbaum/Oranienbaum-Regular.ttf",
+   "bytes": 141220,
+   "sha256": "d0c2527f106ddaf53bebce08e903b585d1fd1d830eddd23ed723c313b4fe2c6c",
+   "family": "Oranienbaum",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/orelegaone/OrelegaOne-Regular.ttf",
+   "bytes": 133732,
+   "sha256": "df8372dca68d1a5bc4c7713594ec275d14192f2260b9d5c67c426d300505b704",
+   "family": "Orelega One",
+   "trained in": []
+  },
+  {
+   "path": "ofl/overpass/Overpass[wght].ttf",
+   "bytes": 318700,
+   "sha256": "970717df17a7f9911dee45f60695d05bfa9d745fa0a11fc5c348371fa21f0073",
+   "family": "Overpass",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/pacifico/Pacifico-Regular.ttf",
+   "bytes": 329380,
+   "sha256": "5b6c0d5334a7bf77dea52b975c5a0c408878c0f7115ed5b6fb151f634b7bf701",
+   "family": "Pacifico",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/palanquindark/PalanquinDark-Regular.ttf",
+   "bytes": 500136,
+   "sha256": "de7ba10d7038f13c677b6a57e01c4b2082dd49602a15406135d761296c949284",
+   "family": "Palanquin Dark",
+   "trained in": []
+  },
+  {
+   "path": "ofl/palettemosaic/PaletteMosaic-Regular.ttf",
+   "bytes": 142520,
+   "sha256": "6029de6a94670695b620b3df665794e3dae213d8b7aed8ac0327b2da5679b004",
+   "family": "Palette Mosaic",
+   "trained in": []
+  },
+  {
+   "path": "ofl/parastoo/Parastoo[wght].ttf",
+   "bytes": 170292,
+   "sha256": "f29efde7fbdc1ec5d2e2d009371103c6a06ec4f85ed1703306b5fa11d261a8e4",
+   "family": "Parastoo",
+   "trained in": []
+  },
+  {
+   "path": "ofl/pattaya/Pattaya-Regular.ttf",
+   "bytes": 420092,
+   "sha256": "02b77f7f5b52e718a91230c8ea153bfe746e1d748dabded4e41d7e6765fa9889",
+   "family": "Pattaya",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/piazzolla/Piazzolla[opsz,wght].ttf",
+   "bytes": 624956,
+   "sha256": "b6b6451daba93a4b71f88ca8e37a66c3fd2b4e57ec54a407cddf6ae65b62c7b7",
+   "family": "Piazzolla",
+   "trained in": [
+    "cyrillic",
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/pixelifysans/PixelifySans[wght].ttf",
+   "bytes": 79160,
+   "sha256": "9ba86cd010a4de309d263ceff8e8044092c9db7efda869620cb9ff1c4389e8a5",
+   "family": "Pixelify Sans",
+   "trained in": []
+  },
+  {
+   "path": "ofl/playfair/Playfair[opsz,wdth,wght].ttf",
+   "bytes": 1776724,
+   "sha256": "33cfecbc9948cf9eafe54dc9f36d19a03b393cf12221b20be235926d1ca1db61",
+   "family": "Playfair",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/playfairdisplay/PlayfairDisplay[wght].ttf",
+   "bytes": 300724,
+   "sha256": "c40f2293766a503bc70cce9e512ef844a4ccb7cbcde792fe2ea31d191917d8d6",
+   "family": "Playfair Display",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/playfairdisplaysc/PlayfairDisplaySC-Regular.ttf",
+   "bytes": 201772,
+   "sha256": "55df09f0a49905a0f5e478597b5b3fc78acf0512ceb568504f3cdc4659662e47",
+   "family": "Playfair Display SC",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/playpensans/PlaypenSans[wght].ttf",
+   "bytes": 1567080,
+   "sha256": "e083f9da8be210e08ea982ab510894641aab37590e70620d6db73f8de881ec4a",
+   "family": "Playpen Sans",
+   "trained in": [
+    "cyrillic",
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/playpensansarabic/PlaypenSansArabic[wght].ttf",
+   "bytes": 758132,
+   "sha256": "31122f11b6aa8a36a283f95797663a575afffbe2d52b69e496f3a2440942a226",
+   "family": "Playpen Sans Arabic",
+   "trained in": []
+  },
+  {
+   "path": "ofl/playpensansdeva/PlaypenSansDeva[wght].ttf",
+   "bytes": 1567116,
+   "sha256": "741156a0ea70b12b150625cd715c34f0a921db5f7dd2bceb37043e59764ae3ea",
+   "family": "Playpen Sans Deva",
+   "trained in": []
+  },
+  {
+   "path": "ofl/playpensansthai/PlaypenSansThai[wght].ttf",
+   "bytes": 754920,
+   "sha256": "14ac51adb087ad8d0395e4b6c0a976d33421ecbc5fe3e3506415505da95f47ef",
+   "family": "Playpen Sans Thai",
+   "trained in": []
+  },
+  {
+   "path": "ofl/pliant/Pliant[wdth,wght].ttf",
+   "bytes": 300140,
+   "sha256": "11cb215c4380f2e7e4cb40e38cf799cba36faf89dae69a688eb7cca6f30f0915",
+   "family": "Pliant",
+   "trained in": [
+    "cyrillic",
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/pochaevsk/Pochaevsk-Regular.ttf",
+   "bytes": 180120,
+   "sha256": "1c424dbaad55832f4067c631c89ecae1c917f23f8c33323987ea4a99f97012a8",
+   "family": "Pochaevsk",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/podkova/Podkova[wght].ttf",
+   "bytes": 163368,
+   "sha256": "a7be6732a489b1c5c7c37a5c2e816fad901563ccd882e9bbc56d13eeebf4a4e7",
+   "family": "Podkova",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/poiretone/PoiretOne-Regular.ttf",
+   "bytes": 130176,
+   "sha256": "457f2d03263f58e5a6dbcc1b607b10dff6581e7cf9c4ebdf330ec3e6772a3558",
+   "family": "Poiret One",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/ponomar/Ponomar-Regular.ttf",
+   "bytes": 337220,
+   "sha256": "c3f7aa32d64fa80e3b53357f057ca31ced4249fae3ba5fcab8cddb39b64c68a0",
+   "family": "Ponomar",
+   "trained in": []
+  },
+  {
+   "path": "ofl/pottaone/PottaOne-Regular.ttf",
+   "bytes": 4918516,
+   "sha256": "bde843868b56e429e1c863da2efa76df533162b226d990efcb96d533b0ca2a93",
+   "family": "Potta One",
+   "trained in": []
+  },
+  {
+   "path": "ofl/pragatinarrow/PragatiNarrow-Regular.ttf",
+   "bytes": 377784,
+   "sha256": "c00d288cc79bce384e85161a256570d278bf25598f809c9718a4f59421516a94",
+   "family": "Pragati Narrow",
+   "trained in": []
+  },
+  {
+   "path": "ofl/prata/Prata-Regular.ttf",
+   "bytes": 101284,
+   "sha256": "3b2b880737be3bda5f03554297b758516876157c88f9e3b3bae8fa1fc96a2c2c",
+   "family": "Prata",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/pressstart2p/PressStart2P-Regular.ttf",
+   "bytes": 118204,
+   "sha256": "034c77f1f05ec89421e4a63f0e3a4ca1ecf852cc6d2bf611f126f275728e017d",
+   "family": "Press Start 2P",
+   "trained in": []
+  },
+  {
+   "path": "ofl/prostoone/ProstoOne-Regular.ttf",
+   "bytes": 96868,
+   "sha256": "745974a4c404cc1fd646d4134940ed359657d6c28634b544f9cbc0f830791ea6",
+   "family": "Prosto One",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/ptsans/PT_Sans-Web-Regular.ttf",
+   "bytes": 442960,
+   "sha256": "9cc831490532009bae2b3ce0d39c62adfc889060beb421593bfd9d2396d0f10a",
+   "family": "PT Sans",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/ptsanscaption/PT_Sans-Caption-Web-Regular.ttf",
+   "bytes": 387192,
+   "sha256": "91d763dd9e8284938be814b76919b0bd97510ec342434e7ec7a56f9fc58b36c4",
+   "family": "PT Sans Caption",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/ptsansnarrow/PT_Sans-Narrow-Web-Regular.ttf",
+   "bytes": 396212,
+   "sha256": "4102edda03059163771869d258df54ac8563c408fa6e9ef75b2ddc85eabea6f4",
+   "family": "PT Sans Narrow",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/ptserif/PT_Serif-Web-Regular.ttf",
+   "bytes": 359048,
+   "sha256": "a4951fade06ff8f09b7673aa81ffb65a8cd409e24d3289a6dc670bc4dda2557a",
+   "family": "PT Serif",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/ptserifcaption/PT_Serif-Caption-Web-Regular.ttf",
+   "bytes": 399840,
+   "sha256": "d17d47f44e840eee017f839b27dff3c94c7afe7743eff308d4bd11f7018b69af",
+   "family": "PT Serif Caption",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/qahiri/Qahiri-Regular.ttf",
+   "bytes": 40728,
+   "sha256": "9c4d8cfba7b663dad7eeeeb52a625749f3e1f5ec472a0a6333e1684a2f43dbdf",
+   "family": "Qahiri",
+   "trained in": []
+  },
+  {
+   "path": "ofl/ramsina/Ramsina-Regular.ttf",
+   "bytes": 83812,
+   "sha256": "f3bc6cff3b6326dc8095cc1fe2cb71b046281d4d4abd72ab3cea434c3b132873",
+   "family": "Ramsina",
+   "trained in": []
+  },
+  {
+   "path": "ofl/ranga/Ranga-Regular.ttf",
+   "bytes": 119128,
+   "sha256": "e51a6898e34d12bd9b9057002e645f176d30f5e821bfaa1ccc4e56294af7099a",
+   "family": "Ranga",
+   "trained in": []
+  },
+  {
+   "path": "ofl/reemkufifun/ReemKufiFun[wght].ttf",
+   "bytes": 176328,
+   "sha256": "d1342cebd08afc04a51bf9a28e5ac6a8299c5716c47df9b7ea27f94653aaa40f",
+   "family": "Reem Kufi Fun",
+   "trained in": []
+  },
+  {
+   "path": "ofl/reemkufiink/ReemKufiInk-Regular.ttf",
+   "bytes": 315764,
+   "sha256": "45fecf59cff786a23357b61d282e5ad383438be9507f3aa9ea00eb0534d0a87e",
+   "family": "Reem Kufi Ink",
+   "trained in": []
+  },
+  {
+   "path": "ofl/rhodiumlibre/RhodiumLibre-Regular.ttf",
+   "bytes": 233792,
+   "sha256": "d068be8060fd77135bd7c94ee36822d6902aed3bf0d382d8bcdfcbb5ad1b8283",
+   "family": "Rhodium Libre",
+   "trained in": []
+  },
+  {
+   "path": "ofl/robotoflex/RobotoFlex[GRAD,XOPQ,XTRA,YOPQ,YTAS,YTDE,YTFI,YTLC,YTUC,opsz,slnt,wdth,wght].ttf",
+   "bytes": 1787292,
+   "sha256": "9b523f7d82593df0107173849ebb8c817471a1df4b4fb2c3cbf40cfd810c8281",
+   "family": "Roboto Flex",
+   "trained in": []
+  },
+  {
+   "path": "ofl/robotoserif/RobotoSerif[GRAD,opsz,wdth,wght].ttf",
+   "bytes": 3944924,
+   "sha256": "351ced75f3851806aa6d846b669361521eb1925cfc530396df9c1a1b77061ddb",
+   "family": "Roboto Serif",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/rock3d/Rock3D-Regular.ttf",
+   "bytes": 444468,
+   "sha256": "c95e67174335f12678fc309e321ad4e4099e9411b5a7a2edfbb5011116123f16",
+   "family": "Rock 3D",
+   "trained in": []
+  },
+  {
+   "path": "ofl/rubik80sfade/Rubik80sFade-Regular.ttf",
+   "bytes": 3448044,
+   "sha256": "da14679ae16caaf4ad32aece9a7357dcdea02c5d7c9b1d296faba86e19862d3f",
+   "family": "Rubik 80s Fade",
+   "trained in": []
+  },
+  {
+   "path": "ofl/rubikbeastly/RubikBeastly-Regular.ttf",
+   "bytes": 512684,
+   "sha256": "854c5f4bd05aae76d7830e871e2c990ea309a436072d8f0b67a796a80ec1cb18",
+   "family": "Rubik Beastly",
+   "trained in": [
+    "hebrew"
+   ]
+  },
+  {
+   "path": "ofl/rubikbrokenfax/RubikBrokenFax-Regular.ttf",
+   "bytes": 495004,
+   "sha256": "52062566e93a07757574a2eb993befa2bf00638a2c1d10a12ccdb7e8c86a3e5e",
+   "family": "Rubik Broken Fax",
+   "trained in": [
+    "cyrillic",
+    "hebrew"
+   ]
+  },
+  {
+   "path": "ofl/rubikbubbles/RubikBubbles-Regular.ttf",
+   "bytes": 219564,
+   "sha256": "2171521dab2b1b3675bbb7aecd34b1c169167c360e3647dadb4939910490c974",
+   "family": "Rubik Bubbles",
+   "trained in": [
+    "hebrew"
+   ]
+  },
+  {
+   "path": "ofl/rubikburned/RubikBurned-Regular.ttf",
+   "bytes": 605348,
+   "sha256": "149705177b7fe352b54227b05121c030520a55e1cc8a4cdd7f8d0af324e6f00d",
+   "family": "Rubik Burned",
+   "trained in": [
+    "hebrew"
+   ]
+  },
+  {
+   "path": "ofl/rubikdirt/RubikDirt-Regular.ttf",
+   "bytes": 1492292,
+   "sha256": "9de3d928e434a47ec85d759012c8a0ebfeab0860076eea4e3989a47c5e213123",
+   "family": "Rubik Dirt",
+   "trained in": [
+    "hebrew"
+   ]
+  },
+  {
+   "path": "ofl/rubikdistressed/RubikDistressed-Regular.ttf",
+   "bytes": 892544,
+   "sha256": "64a9962c862451507b5d8dbc1c4bf023ddbcad701bc73d277eae46723718327a",
+   "family": "Rubik Distressed",
+   "trained in": [
+    "hebrew"
+   ]
+  },
+  {
+   "path": "ofl/rubikdoodleshadow/RubikDoodleShadow-Regular.ttf",
+   "bytes": 1361560,
+   "sha256": "cb8b89235d7a7e1eb3658ef42daaadc7c0c2e5ed41a92cf76211ee6987531358",
+   "family": "Rubik Doodle Shadow",
+   "trained in": [
+    "cyrillic",
+    "hebrew"
+   ]
+  },
+  {
+   "path": "ofl/rubikdoodletriangles/RubikDoodleTriangles-Regular.ttf",
+   "bytes": 1366376,
+   "sha256": "096790639e1a53a23efa86e4c0ed2083037a8bf42521cfd07bf09cbf163d89be",
+   "family": "Rubik Doodle Triangles",
+   "trained in": [
+    "cyrillic",
+    "hebrew"
+   ]
+  },
+  {
+   "path": "ofl/rubikgemstones/RubikGemstones-Regular.ttf",
+   "bytes": 265004,
+   "sha256": "3f308a5b3744c2727f87ffa29a1e6c8e63ad65eb5b4a36584bddec08a88468fa",
+   "family": "Rubik Gemstones",
+   "trained in": [
+    "hebrew"
+   ]
+  },
+  {
+   "path": "ofl/rubikglitch/RubikGlitch-Regular.ttf",
+   "bytes": 407304,
+   "sha256": "260245012483d56956269100ebece747aa95b4b67e5a9411a81a36e91f55e653",
+   "family": "Rubik Glitch",
+   "trained in": [
+    "hebrew"
+   ]
+  },
+  {
+   "path": "ofl/rubikglitchpop/RubikGlitchPop-Regular.ttf",
+   "bytes": 1976660,
+   "sha256": "20545e9c47a8d5f1a23305c598c54b2c29f252079db2965e593184e765d5880f",
+   "family": "Rubik Glitch Pop",
+   "trained in": [
+    "cyrillic",
+    "hebrew"
+   ]
+  },
+  {
+   "path": "ofl/rubikiso/RubikIso-Regular.ttf",
+   "bytes": 132376,
+   "sha256": "b3d774e88798b202a354bcbe7f14180c2c76596baa0f1bb8445c53683e8a511b",
+   "family": "Rubik Iso",
+   "trained in": [
+    "hebrew"
+   ]
+  },
+  {
+   "path": "ofl/rubiklines/RubikLines-Regular.ttf",
+   "bytes": 1295268,
+   "sha256": "a02cc9f24672b2eec94620f496d6ec8ef78070c84d4ccd5b5632eb2b0e05cf61",
+   "family": "Rubik Lines",
+   "trained in": [
+    "cyrillic",
+    "hebrew"
+   ]
+  },
+  {
+   "path": "ofl/rubikmaps/RubikMaps-Regular.ttf",
+   "bytes": 2264632,
+   "sha256": "ebb439b66ec111e6ca61f9081801cb35445afcedbb3d9749932979d65c69efa1",
+   "family": "Rubik Maps",
+   "trained in": [
+    "cyrillic",
+    "hebrew"
+   ]
+  },
+  {
+   "path": "ofl/rubikmarkerhatch/RubikMarkerHatch-Regular.ttf",
+   "bytes": 363876,
+   "sha256": "8d91e401dfaf5c93b26fc717b27c262c829be6804f7be7a6db7a20f4ff09c09b",
+   "family": "Rubik Marker Hatch",
+   "trained in": [
+    "hebrew"
+   ]
+  },
+  {
+   "path": "ofl/rubikmaze/RubikMaze-Regular.ttf",
+   "bytes": 459040,
+   "sha256": "5bc4c333e6b5d3caf085d44b633b28a6d2abc40fa933b7bc7a1972ef019ff5d9",
+   "family": "Rubik Maze",
+   "trained in": [
+    "hebrew"
+   ]
+  },
+  {
+   "path": "ofl/rubikmicrobe/RubikMicrobe-Regular.ttf",
+   "bytes": 1444176,
+   "sha256": "af2360aa13ce3a068142dedded39d2d831615d8bbe370bc086e95192f2e528d7",
+   "family": "Rubik Microbe",
+   "trained in": [
+    "hebrew"
+   ]
+  },
+  {
+   "path": "ofl/rubikmonoone/RubikMonoOne-Regular.ttf",
+   "bytes": 141088,
+   "sha256": "b22624b6a36e543e942106edfccd198c50b57b65b924bfe02a6f0a5699429e6b",
+   "family": "Rubik Mono One",
+   "trained in": []
+  },
+  {
+   "path": "ofl/rubikmoonrocks/RubikMoonrocks-Regular.ttf",
+   "bytes": 403712,
+   "sha256": "39ff4d96b906e8cc2fd7a350aa13620d5eff18d776fedb5c98c12cbf6e1f2c1e",
+   "family": "Rubik Moonrocks",
+   "trained in": [
+    "hebrew"
+   ]
+  },
+  {
+   "path": "ofl/rubikone/RubikOne-Regular.ttf",
+   "bytes": 153084,
+   "sha256": "fced18ce7220d7504aba15adebd58f63d29eca554180aa74ea7545c9e07e6548",
+   "family": "Rubik One",
+   "trained in": []
+  },
+  {
+   "path": "ofl/rubikpixels/RubikPixels-Regular.ttf",
+   "bytes": 5627648,
+   "sha256": "2d81a3511bf20e24f1f7bae72029ff4c04134a98a4e0e9ff81e4d664d2412e18",
+   "family": "Rubik Pixels",
+   "trained in": [
+    "hebrew"
+   ]
+  },
+  {
+   "path": "ofl/rubikpuddles/RubikPuddles-Regular.ttf",
+   "bytes": 404956,
+   "sha256": "ac690b0790b890a24c54997cfc66bde14d4648cb1a914e9b8754e9023bb0d342",
+   "family": "Rubik Puddles",
+   "trained in": [
+    "hebrew"
+   ]
+  },
+  {
+   "path": "ofl/rubikscribble/RubikScribble-Regular.ttf",
+   "bytes": 583828,
+   "sha256": "341d083481febe704791212f560a0898039d6a5744c8819102f3ce7a7f8fc2d4",
+   "family": "Rubik Scribble",
+   "trained in": [
+    "cyrillic",
+    "hebrew"
+   ]
+  },
+  {
+   "path": "ofl/rubikspraypaint/RubikSprayPaint-Regular.ttf",
+   "bytes": 941576,
+   "sha256": "e608af93c514f2ba78c9ecfb08e90a206a6f5fd4fc3afbd2db1e65bc65129ca1",
+   "family": "Rubik Spray Paint",
+   "trained in": [
+    "hebrew"
+   ]
+  },
+  {
+   "path": "ofl/rubikstorm/RubikStorm-Regular.ttf",
+   "bytes": 795704,
+   "sha256": "0ccc7b5901c6ad6908dfc0125f12ef0dc2647c8b8641c6dd70328df86108229c",
+   "family": "Rubik Storm",
+   "trained in": [
+    "hebrew"
+   ]
+  },
+  {
+   "path": "ofl/rubikvinyl/RubikVinyl-Regular.ttf",
+   "bytes": 414752,
+   "sha256": "64f1d1636851d814a9031a945bc6ca6b7bc26a29009eb316176d27f00f2b7d4e",
+   "family": "Rubik Vinyl",
+   "trained in": [
+    "hebrew"
+   ]
+  },
+  {
+   "path": "ofl/rubikwetpaint/RubikWetPaint-Regular.ttf",
+   "bytes": 442628,
+   "sha256": "3f35d1c77219c5219826b23c2f0c72dd0eed46425a0d4fff21b8827cdce61693",
+   "family": "Rubik Wet Paint",
+   "trained in": [
+    "hebrew"
+   ]
+  },
+  {
+   "path": "ofl/ruda/Ruda[wght].ttf",
+   "bytes": 84420,
+   "sha256": "acc6e412c74545f934bed8564f8650f113d46d220f0f3a94484e6a6558cb40f0",
+   "family": "Ruda",
+   "trained in": []
+  },
+  {
+   "path": "ofl/ruslandisplay/RuslanDisplay-Regular.ttf",
+   "bytes": 55048,
+   "sha256": "6fb5f4db06869e886ca5da3760c547c6d3ebec82aebd3678f314e99ae3347b09",
+   "family": "Ruslan Display",
+   "trained in": []
+  },
+  {
+   "path": "ofl/ruwudu/Ruwudu-Regular.ttf",
+   "bytes": 121440,
+   "sha256": "ed5b134e7f389eecfdabc6bbbf9605177fa8b5b9984c8b24edbec908623d2c3b",
+   "family": "Ruwudu",
+   "trained in": []
+  },
+  {
+   "path": "ofl/sahitya/Sahitya-Regular.ttf",
+   "bytes": 261652,
+   "sha256": "f43e57c9eb3c936e195009a5755906d34cdffb7e5ac4d0a51d260150f118ee62",
+   "family": "Sahitya",
+   "trained in": []
+  },
+  {
+   "path": "ofl/sansation/Sansation-Regular.ttf",
+   "bytes": 44548,
+   "sha256": "6d47039ee6665d78b143a1b264abc02017a33ffa52a4e9f6645ce357f92d4f09",
+   "family": "Sansation",
+   "trained in": []
+  },
+  {
+   "path": "ofl/sarpanch/Sarpanch-Regular.ttf",
+   "bytes": 290368,
+   "sha256": "2828287b0825b08c7b2cbba15779fd8b3b85c1907df8b9a987f08848cd6947f4",
+   "family": "Sarpanch",
+   "trained in": []
+  },
+  {
+   "path": "ofl/sawarabigothic/SawarabiGothic-Regular.ttf",
+   "bytes": 1902848,
+   "sha256": "04f2f9111bb69cb8d3706c27b44879c2c0fac593a11edf5cfe8cec1efc92c789",
+   "family": "Sawarabi Gothic",
+   "trained in": []
+  },
+  {
+   "path": "ofl/sawarabimincho/SawarabiMincho-Regular.ttf",
+   "bytes": 3662996,
+   "sha256": "1f27e6b0c2543a311c31d2ba3e895e50028069bd24b5e0d20a5b6e0a0b03e9c4",
+   "family": "Sawarabi Mincho",
+   "trained in": []
+  },
+  {
+   "path": "ofl/scada/Scada-Regular.ttf",
+   "bytes": 91020,
+   "sha256": "4ae8f108b8ce016017a2fe40ff65ec613eb6a4149ce3b9a9fe60cea117b55036",
+   "family": "Scada",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/sciencegothic/ScienceGothic[CTRS,slnt,wdth,wght].ttf",
+   "bytes": 2726388,
+   "sha256": "246e4d33a6fcb3846094e5c4c034616f83e9ae10100316df32e2436362deab3d",
+   "family": "Science Gothic",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/seymourone/SeymourOne-Regular.ttf",
+   "bytes": 93576,
+   "sha256": "8699709245074a91a64b43495bf864f6df6d43648d7e9d0d09144ca74433c3d4",
+   "family": "Seymour One",
+   "trained in": []
+  },
+  {
+   "path": "ofl/shizuru/Shizuru-Regular.ttf",
+   "bytes": 251244,
+   "sha256": "5954562e5fbb40fffe6361cbbcac0d4a4c9c5e2897d7b20876f294fbcc243f7f",
+   "family": "Shizuru",
+   "trained in": []
+  },
+  {
+   "path": "ofl/sitara/Sitara-Regular.ttf",
+   "bytes": 202652,
+   "sha256": "db012b93bc95bb06c3d223165ac852a70a08153891f02dc6d8bbdd2f046245e0",
+   "family": "Sitara",
+   "trained in": []
+  },
+  {
+   "path": "ofl/slacksideone/SlacksideOne-Regular.ttf",
+   "bytes": 171736,
+   "sha256": "c32d67d921cfde2f89d2fe12b6e78a58618a41774a7cb1b0e321d5d1ae9a324a",
+   "family": "Slackside One",
+   "trained in": []
+  },
+  {
+   "path": "ofl/snpro/SNPro[wght].ttf",
+   "bytes": 338948,
+   "sha256": "63abf11c85df08dde6cec421c133c723408ee1e5744bb280b660dfd8be3fe061",
+   "family": "SN Pro",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/sofiasans/SofiaSans[wght].ttf",
+   "bytes": 345684,
+   "sha256": "a3e1019b8867e21b75d26a7b59d4eb2c81d1acf6b69b9ae6cedca269fb68e291",
+   "family": "Sofia Sans",
+   "trained in": [
+    "cyrillic",
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/sourcesans3/SourceSans3[wght].ttf",
+   "bytes": 646340,
+   "sha256": "042fe2cc0b933e328410d7acbd0aa6a1873dca5aef81875f4bc214b08825c7b9",
+   "family": "Source Sans 3",
+   "trained in": [
+    "cyrillic",
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/sourceserif4/SourceSerif4[opsz,wght].ttf",
+   "bytes": 1209508,
+   "sha256": "97b2d4da6e3cb494b5a1e66ae176914d852ccabef49e0c02c0df25f3e39aca0b",
+   "family": "Source Serif 4",
+   "trained in": [
+    "cyrillic",
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/spectral/Spectral-Regular.ttf",
+   "bytes": 261088,
+   "sha256": "c89021dc20720c8d0dcf40b0b2f6e00c13665fa8041717f581396f51b8c78f5d",
+   "family": "Spectral",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/spectralsc/SpectralSC-Regular.ttf",
+   "bytes": 260936,
+   "sha256": "11b89ee8eff243c4068a9fc105650f8d90005b288f90c98c6d40fecd85a0306d",
+   "family": "Spectral SC",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/srisakdi/Srisakdi-Regular.ttf",
+   "bytes": 102340,
+   "sha256": "073d1694bda5cf42082574a4b7d57df298d7f2cfc9ee997f8f5ab9b214cf72c9",
+   "family": "Srisakdi",
+   "trained in": []
+  },
+  {
+   "path": "ofl/stalinistone/StalinistOne-Regular.ttf",
+   "bytes": 48808,
+   "sha256": "73cc48eefa01543b09fd3df9bab6af2a302e52e292b8625f4b62c868bc152eeb",
+   "family": "Stalinist One",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/stixtwotext/STIXTwoText[wght].ttf",
+   "bytes": 418956,
+   "sha256": "7962b8b7811e6a896c9a91a0bccbb5241047770eb24d4997c5cb5fe21d5c0df2",
+   "family": "STIX Two Text",
+   "trained in": [
+    "cyrillic",
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/strong/Strong-Regular.ttf",
+   "bytes": 85308,
+   "sha256": "4cae5278cb372d0ec20fe7b00a969a9766b5ecab9f1a16c3d9d31f2fa8c0b461",
+   "family": "Strong",
+   "trained in": []
+  },
+  {
+   "path": "ofl/sumana/Sumana-Regular.ttf",
+   "bytes": 211548,
+   "sha256": "e71be1be55f8970ef24ee3aaf790c34cad3f5b6c5d518e41c8651c596e102ec4",
+   "family": "Sumana",
+   "trained in": [
+    "devanagari"
+   ]
+  },
+  {
+   "path": "ofl/syne/Syne[wght].ttf",
+   "bytes": 146980,
+   "sha256": "ce5ac77142a65cab2248a1a2ebb740b1d4d9c20b52488877d3ff664d1356104a",
+   "family": "Syne",
+   "trained in": [
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/tektur/Tektur[wdth,wght].ttf",
+   "bytes": 163160,
+   "sha256": "a4c451e5336874811267c2a514efa09bca7bc8cabf32a310f0b44e111eacb933",
+   "family": "Tektur",
+   "trained in": []
+  },
+  {
+   "path": "ofl/tenorsans/TenorSans-Regular.ttf",
+   "bytes": 131896,
+   "sha256": "350c882fa9f19927ed108371691d393d5dc1c209edde8472cab8aa8013241366",
+   "family": "Tenor Sans",
+   "trained in": []
+  },
+  {
+   "path": "ofl/thabit/Thabit.ttf",
+   "bytes": 124084,
+   "sha256": "3fe6f423d751919d6411b38d6de2ff823252292eef9e860c4a532faf779b674a",
+   "family": "Thabit",
+   "trained in": []
+  },
+  {
+   "path": "ofl/tiktoksans/TikTokSans[opsz,slnt,wdth,wght].ttf",
+   "bytes": 761964,
+   "sha256": "0e7f0a3e924c9a86478fc6fc2946de2e4ab8fc704ed72ee40434ade94bb9b0c6",
+   "family": "TikTok Sans",
+   "trained in": [
+    "cyrillic",
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/tiny5/Tiny5[BLED,JITT,ROND,wdth,wght].ttf",
+   "bytes": 433432,
+   "sha256": "588626f2c1b164f55927c0d8123f4bc134651aad7d257da68fc19b0824b0d8fa",
+   "family": "Tiny5",
+   "trained in": [
+    "armenian"
+   ]
+  },
+  {
+   "path": "ofl/tiny5duo/Tiny5Duo[BLED,JITT,ROND,wdth,wght].ttf",
+   "bytes": 591832,
+   "sha256": "d7bb7a796691873bf0e5070bc9ff68d720be50254674ad09e56242af6381112e",
+   "family": "Tiny5 Duo",
+   "trained in": [
+    "armenian"
+   ]
+  },
+  {
+   "path": "ofl/tirodevanagarimarathi/TiroDevanagariMarathi-Regular.ttf",
+   "bytes": 439712,
+   "sha256": "8e1d4edf924c0685f1383d0d37aa7c4662103d2e485e53b535b4528af5acd966",
+   "family": "Tiro Devanagari Marathi",
+   "trained in": []
+  },
+  {
+   "path": "ofl/tirodevanagarisanskrit/TiroDevanagariSanskrit-Regular.ttf",
+   "bytes": 761856,
+   "sha256": "75ae873e5e3f9c30fb962a3d283b9f5e7bc5bca57822a2aa926753b297b150ca",
+   "family": "Tiro Devanagari Sanskrit",
+   "trained in": []
+  },
+  {
+   "path": "ofl/triodion/Triodion-Regular.ttf",
+   "bytes": 173068,
+   "sha256": "fc93ae1a214a8dbb0746ee5afa705042b4d65430327c648eeafe15ff5f53bfe3",
+   "family": "Triodion",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/tuffy/Tuffy-Regular.ttf",
+   "bytes": 218708,
+   "sha256": "e4818f18c471c4a6a7f1d5f80c7a0ef0fd7b95b63364fd48f15768c449d8f958",
+   "family": "Tuffy",
+   "trained in": []
+  },
+  {
+   "path": "ofl/unbounded/Unbounded[wght].ttf",
+   "bytes": 778272,
+   "sha256": "323b511be380c8d474ef030686b71aedde501f8d9cd46da558b7c40454372c3f",
+   "family": "Unbounded",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/underdog/Underdog-Regular.ttf",
+   "bytes": 101480,
+   "sha256": "33f9aee5b2aaeb85e1f433fb21916d0c6dbae74e23b94d978b8131bdbddc40c6",
+   "family": "Underdog",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/uoqmunthenkhung/UoqMunThenKhung-Regular.ttf",
+   "bytes": 4901688,
+   "sha256": "943a23eb10d40ca85ee08491c0e3fb3adbc4bd111ef1f93526a4f766a8e66fbd",
+   "family": "UoqMunThenKhung",
+   "trained in": []
+  },
+  {
+   "path": "ofl/vesperlibre/VesperLibre-Regular.ttf",
+   "bytes": 166124,
+   "sha256": "2be8f243d90685e53bb6d6435985cf4d145d42bf70e3f964026a62c7cd96de1c",
+   "family": "Vesper Libre",
+   "trained in": [
+    "devanagari"
+   ]
+  },
+  {
+   "path": "ofl/viaodalibre/ViaodaLibre-Regular.ttf",
+   "bytes": 196944,
+   "sha256": "adb53ede25107c5ed4c45f993fd014a21ef82ac82b2327a564fe8e994e228942",
+   "family": "Viaoda Libre",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/vibes/Vibes-Regular.ttf",
+   "bytes": 78412,
+   "sha256": "297d9c8499e7383ac7675932741625ab12d9bb3abd1c31d2659b385d965a7ab7",
+   "family": "Vibes",
+   "trained in": []
+  },
+  {
+   "path": "ofl/vollkornsc/VollkornSC-Regular.ttf",
+   "bytes": 202164,
+   "sha256": "a6b4dbabb5cf158f2359c15f39a0eefd5ef99434b9d443a84e6012c2fcbd81ae",
+   "family": "Vollkorn SC",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/wdxllubrifontjpn/WDXLLubrifontJPN-Regular.ttf",
+   "bytes": 10344400,
+   "sha256": "f7a95e761a2d2c2ee6a90f8536e42ea9e50bae8840695f01704986e2bce34869",
+   "family": "WDXL Lubrifont JP N",
+   "trained in": []
+  },
+  {
+   "path": "ofl/wdxllubrifontsc/WDXLLubrifontSC-Regular.ttf",
+   "bytes": 10344488,
+   "sha256": "0134ed261d56aab8fa1860df677858c5d0d3ca899b2aa5430581c458a752e914",
+   "family": "WDXL Lubrifont SC",
+   "trained in": []
+  },
+  {
+   "path": "ofl/wdxllubrifonttc/WDXLLubrifontTC-Regular.ttf",
+   "bytes": 10345168,
+   "sha256": "acae31588d34ba66a51a6271209bdcbb6105962f0f77a74729e69e3938f96775",
+   "family": "WDXL Lubrifont TC",
+   "trained in": []
+  },
+  {
+   "path": "ofl/wixmadefordisplay/WixMadeforDisplay[wght].ttf",
+   "bytes": 159752,
+   "sha256": "5cab84cd1f7231a866e59ee34245c9ca95cf23984d6b7d79132b3ffac2ef821f",
+   "family": "Wix Madefor Display",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/wixmadefortext/WixMadeforText[wght].ttf",
+   "bytes": 158708,
+   "sha256": "7660fbcd33f643a011283d9e96b3ad571a942d25d1a9603e69e9e1b6976fa4e1",
+   "family": "Wix Madefor Text",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/xmind/Xmind[wght].ttf",
+   "bytes": 145004,
+   "sha256": "64cd402ec7bb4f9343bad5e6fe63556ee16dcd74ed94e8ccfa248eaee327c3b5",
+   "family": "Xmind",
+   "trained in": []
+  },
+  {
+   "path": "ofl/yanonekaffeesatz/YanoneKaffeesatz[wght].ttf",
+   "bytes": 129312,
+   "sha256": "17e3bd546d57d2c41200866ac310bd76b8c59c44cd738f6ca402a285f45e97b8",
+   "family": "Yanone Kaffeesatz",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/yatraone/YatraOne-Regular.ttf",
+   "bytes": 276324,
+   "sha256": "c47a94a4edf30f4eae0ca1c84777f4b70bc350221b6249de6b64fefdded2d3cd",
+   "family": "Yatra One",
+   "trained in": []
+  },
+  {
+   "path": "ofl/yesevaone/YesevaOne-Regular.ttf",
+   "bytes": 108016,
+   "sha256": "88362b33820f0011e163e67b1d570fecd442aa8c05eaac89d5162f9c40d9dac3",
+   "family": "Yeseva One",
+   "trained in": [
+    "cyrillic"
+   ]
+  },
+  {
+   "path": "ofl/yomogi/Yomogi-Regular.ttf",
+   "bytes": 4045904,
+   "sha256": "ec280f473a03187292905618f24fdb08a6dcbf8620b52637e3b589fe745259b9",
+   "family": "Yomogi",
+   "trained in": []
+  },
+  {
+   "path": "ofl/ysabeau/Ysabeau[wght].ttf",
+   "bytes": 431992,
+   "sha256": "aa6df9f1f6cb1180f7c00fffb5ae2734ba66aa5f58defd173a9247ca11dffcf4",
+   "family": "Ysabeau",
+   "trained in": []
+  },
+  {
+   "path": "ofl/ysabeausc/YsabeauSC[wght].ttf",
+   "bytes": 223356,
+   "sha256": "be5128bbae3feaf10b2766724c42b2cb21ccb968ae943688e61ed048d59762b8",
+   "family": "Ysabeau SC",
+   "trained in": [
+    "cyrillic",
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/yujiboku/YujiBoku-Regular.ttf",
+   "bytes": 8525588,
+   "sha256": "94fda16384f3bdac24376a000c57e99abfa314961bd89ef27badfb7410322003",
+   "family": "Yuji Boku",
+   "trained in": []
+  },
+  {
+   "path": "ofl/yujihentaiganaakari/YujiHentaiganaAkari-Regular.ttf",
+   "bytes": 93496,
+   "sha256": "6fa6bfaff8851fd20f32a807dfb9a7dc15f54780af564ddc8f32e074004bde27",
+   "family": "Yuji Hentaigana Akari",
+   "trained in": []
+  },
+  {
+   "path": "ofl/yujihentaiganaakebono/YujiHentaiganaAkebono-Regular.ttf",
+   "bytes": 99100,
+   "sha256": "8e387eeb5c24cd2945d8804caab8f97985b694cec8d2b228da63cceb16c7a8f3",
+   "family": "Yuji Hentaigana Akebono",
+   "trained in": []
+  },
+  {
+   "path": "ofl/yujimai/YujiMai-Regular.ttf",
+   "bytes": 8496292,
+   "sha256": "05d83b65204a5de6fc34c222057fc082f8c6e2e44c05a0d28f4189b3e54c54c2",
+   "family": "Yuji Mai",
+   "trained in": []
+  },
+  {
+   "path": "ofl/yujisyuku/YujiSyuku-Regular.ttf",
+   "bytes": 8430348,
+   "sha256": "82728ebafc8c97391e2dab633414a806f344b8e4e2227d307179f07b548fca61",
+   "family": "Yuji Syuku",
+   "trained in": []
+  },
+  {
+   "path": "ofl/zain/Zain-Regular.ttf",
+   "bytes": 188468,
+   "sha256": "2a2b8af3804039c7f500c43f581a4145012728bc3109ef15d48371700f5e1f63",
+   "family": "Zain",
+   "trained in": []
+  },
+  {
+   "path": "ofl/zenantique/ZenAntique-Regular.ttf",
+   "bytes": 5507920,
+   "sha256": "8c5cf7a136837ee705d06bbc133ea18ac06b7dd284f38aace91f5de36725c315",
+   "family": "Zen Antique",
+   "trained in": [
+    "cyrillic",
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/zenantiquesoft/ZenAntiqueSoft-Regular.ttf",
+   "bytes": 7095608,
+   "sha256": "ab566917267087f4ee3ee9662ce09ff13070e42c704e1e84b6de4c75457da1a5",
+   "family": "Zen Antique Soft",
+   "trained in": [
+    "cyrillic",
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/zenkakugothicantique/ZenKakuGothicAntique-Regular.ttf",
+   "bytes": 2370412,
+   "sha256": "e79b874ef1ae0cfe5b9d750f5990d408874300b17c7a02cb6e86e73a14a33005",
+   "family": "Zen Kaku Gothic Antique",
+   "trained in": []
+  },
+  {
+   "path": "ofl/zenkurenaido/ZenKurenaido-Regular.ttf",
+   "bytes": 4303112,
+   "sha256": "58b8d930d9fc10c8a5810c085bae378dacb98d0779073ee6d53d919f19ee6a4f",
+   "family": "Zen Kurenaido",
+   "trained in": [
+    "cyrillic",
+    "greek"
+   ]
+  },
+  {
+   "path": "ofl/zenmarugothic/ZenMaruGothic-Regular.ttf",
+   "bytes": 3832756,
+   "sha256": "a0c0b53543e0993ae2225e629c833f3d51495ad31720694ff112ce4ce11111ef",
+   "family": "Zen Maru Gothic",
+   "trained in": [
+    "cyrillic",
+    "greek"
+   ]
+  }
+ ],
+ "license files": [
+  "ofl/adlamdisplay/OFL.txt",
+  "ofl/adventpro/OFL.txt",
+  "ofl/akshar/OFL.txt",
+  "ofl/akt/OFL.txt",
+  "ofl/alansans/OFL.txt",
+  "ofl/alef/OFL.txt",
+  "ofl/alegreya/OFL.txt",
+  "ofl/alegreyasans/OFL.txt",
+  "ofl/alegreyasanssc/OFL.txt",
+  "ofl/alegreyasc/OFL.txt",
+  "ofl/alice/OFL.txt",
+  "ofl/alkalami/OFL.txt",
+  "ofl/alumnisanscollegiateone/OFL.txt",
+  "ofl/alumnisanscollegiateonesc/OFL.txt",
+  "ofl/alumnisanspinstripe/OFL.txt",
+  "ofl/alumnisanssc/OFL.txt",
+  "ofl/alyamama/OFL.txt",
+  "ofl/amiko/OFL.txt",
+  "ofl/amiriquran/OFL.txt",
+  "ofl/ancizarsans/OFL.txt",
+  "ofl/ancizarserif/OFL.txt",
+  "ofl/anekdevanagari/OFL.txt",
+  "ofl/annapurnasil/OFL.txt",
+  "ofl/aoboshione/OFL.txt",
+  "ofl/arefruqaaink/OFL.txt",
+  "ofl/arsenal/OFL.txt",
+  "ofl/arsenalsc/OFL.txt",
+  "ofl/arya/OFL.txt",
+  "ofl/asar/OFL.txt",
+  "ofl/badeendisplay/OFL.txt",
+  "ofl/badscript/OFL.txt",
+  "ofl/batang/OFL.txt",
+  "ofl/batangche/OFL.txt",
+  "ofl/beiruti/OFL.txt",
+  "ofl/bellota/OFL.txt",
+  "ofl/bellotatext/OFL.txt",
+  "ofl/bhavuka/OFL.txt",
+  "ofl/bitter/OFL.txt",
+  "ofl/bizudgothic/OFL.txt",
+  "ofl/bizudmincho/OFL.txt",
+  "ofl/bizudpgothic/OFL.txt",
+  "ofl/bizudpmincho/OFL.txt",
+  "ofl/blaka/OFL.txt",
+  "ofl/blakahollow/OFL.txt",
+  "ofl/blakaink/OFL.txt",
+  "ofl/bonanovasc/OFL.txt",
+  "ofl/brygada1918/OFL.txt",
+  "ofl/cactusclassicalserif/OFL.txt",
+  "ofl/cairoplay/OFL.txt",
+  "ofl/cambay/OFL.txt",
+  "ofl/carlito/OFL.txt",
+  "ofl/cascadiacode/OFL.txt",
+  "ofl/cascadiamono/OFL.txt",
+  "ofl/caudex/OFL.txt",
+  "ofl/caveat/OFL.txt",
+  "ofl/charissil/OFL.txt",
+  "ofl/charmonman/OFL.txt",
+  "ofl/chirongoroundtc/OFL.txt",
+  "ofl/chironheihk/OFL.txt",
+  "ofl/chironsunghk/OFL.txt",
+  "ofl/chocolateclassicalsans/OFL.txt",
+  "ofl/chokokutai/OFL.txt",
+  "ofl/climatecrisis/OFL.txt",
+  "ofl/comforterbrush/OFL.txt",
+  "ofl/comicrelief/OFL.txt",
+  "ofl/commissioner/OFL.txt",
+  "ofl/cormorantgaramond/OFL.txt",
+  "ofl/cormorantinfant/OFL.txt",
+  "ofl/cormorantsc/OFL.txt",
+  "ofl/cormorantunicase/OFL.txt",
+  "ofl/cuprum/OFL.txt",
+  "ofl/darumadropone/OFL.txt",
+  "ofl/daysone/OFL.txt",
+  "ofl/dekko/OFL.txt",
+  "ofl/delagothicone/OFL.txt",
+  "ofl/didactgothic/OFL.txt",
+  "ofl/dotum/OFL.txt",
+  "ofl/dotumche/OFL.txt",
+  "ofl/ekmukta/OFL.txt",
+  "ofl/estedad/OFL.txt",
+  "ofl/exo2/OFL.txt",
+  "ofl/finlandica/OFL.txt",
+  "ofl/finlandicaheadline/OFL.txt",
+  "ofl/finlandicatext/OFL.txt",
+  "ofl/firasans/OFL.txt",
+  "ofl/firasanscondensed/OFL.txt",
+  "ofl/firasansextracondensed/OFL.txt",
+  "ofl/firjar/OFL.txt",
+  "ofl/flowblock/OFL.txt",
+  "ofl/flowcircular/OFL.txt",
+  "ofl/flowrounded/OFL.txt",
+  "ofl/forum/OFL.txt",
+  "ofl/fustat/OFL.txt",
+  "ofl/gabriela/OFL.txt",
+  "ofl/gajrajone/OFL.txt",
+  "ofl/geist/OFL.txt",
+  "ofl/gentiumbookplus/OFL.txt",
+  "ofl/geologica/OFL.txt",
+  "ofl/geom/OFL.txt",
+  "ofl/gfsneohellenic/OFL.txt",
+  "ofl/gidole/OFL.txt",
+  "ofl/glegoo/OFL.txt",
+  "ofl/golostext/OFL.txt",
+  "ofl/googlesansflex/OFL.txt",
+  "ofl/greatvibes/OFL.txt",
+  "ofl/gulim/OFL.txt",
+  "ofl/gulimche/OFL.txt",
+  "ofl/gungsuh/OFL.txt",
+  "ofl/gungsuhche/OFL.txt",
+  "ofl/hachimarupop/OFL.txt",
+  "ofl/handjet/OFL.txt",
+  "ofl/hinamincho/OFL.txt",
+  "ofl/huninn/OFL.txt",
+  "ofl/ibmplexsans/OFL.txt",
+  "ofl/ibmplexsansdevanagari/OFL.txt",
+  "ofl/ibmplexsansthailooped/OFL.txt",
+  "ofl/ibmplexserif/OFL.txt",
+  "ofl/idiqlat/OFL.txt",
+  "ofl/inknutantiqua/OFL.txt",
+  "ofl/intertight/OFL.txt",
+  "ofl/istokweb/OFL.txt",
+  "ofl/jaini/OFL.txt",
+  "ofl/jainipurva/OFL.txt",
+  "ofl/jaldi/OFL.txt",
+  "ofl/jomhuria/OFL.txt",
+  "ofl/jost/OFL.txt",
+  "ofl/jura/OFL.txt",
+  "ofl/kablammo/OFL.txt",
+  "ofl/kadwa/OFL.txt",
+  "ofl/kaiseidecol/OFL.txt",
+  "ofl/kaiseiharunoumi/OFL.txt",
+  "ofl/kaiseiopti/OFL.txt",
+  "ofl/kaiseitokumin/OFL.txt",
+  "ofl/kapakana/OFL.txt",
+  "ofl/kellyslab/OFL.txt",
+  "ofl/khula/OFL.txt",
+  "ofl/kripa/OFL.txt",
+  "ofl/kufam/OFL.txt",
+  "ofl/ledger/OFL.txt",
+  "ofl/libertinussans/OFL.txt",
+  "ofl/libertinusserifdisplay/OFL.txt",
+  "ofl/librefranklin/OFL.txt",
+  "ofl/lineseedjp/OFL.txt",
+  "ofl/liter/OFL.txt",
+  "ofl/literata/OFL.txt",
+  "ofl/lobster/OFL.txt",
+  "ofl/lora/OFL.txt",
+  "ofl/lunasima/OFL.txt",
+  "ofl/lxgwmarkergothic/OFL.txt",
+  "ofl/lxgwwenkaitc/OFL.txt",
+  "ofl/madhuban/OFL.txt",
+  "ofl/manrope/OFL.txt",
+  "ofl/mansalva/OFL.txt",
+  "ofl/marckscript/OFL.txt",
+  "ofl/marhey/OFL.txt",
+  "ofl/marmelad/OFL.txt",
+  "ofl/martelsans/OFL.txt",
+  "ofl/matangi/OFL.txt",
+  "ofl/merriweather/OFL.txt",
+  "ofl/mochiypopone/OFL.txt",
+  "ofl/moderustic/OFL.txt",
+  "ofl/monomakh/OFL.txt",
+  "ofl/montserratunderline/OFL.txt",
+  "ofl/mplus2/OFL.txt",
+  "ofl/mplusu/OFL.txt",
+  "ofl/mulish/OFL.txt",
+  "ofl/mynerve/OFL.txt",
+  "ofl/natasans/OFL.txt",
+  "ofl/neucha/OFL.txt",
+  "ofl/nevermind/OFL.txt",
+  "ofl/newscycle/OFL.txt",
+  "ofl/newtegomin/OFL.txt",
+  "ofl/nobile/OFL.txt",
+  "ofl/notonaskharabicui/OFL.txt",
+  "ofl/notosansadlam/OFL.txt",
+  "ofl/notosansadlamunjoined/OFL.txt",
+  "ofl/notosansarabicui/OFL.txt",
+  "ofl/notosansdisplay/OFL.txt",
+  "ofl/notosanshk/OFL.txt",
+  "ofl/notosansnkounjoined/OFL.txt",
+  "ofl/notosanssyriac/OFL.txt",
+  "ofl/notosanssyriaceastern/OFL.txt",
+  "ofl/notosanssyriacwestern/OFL.txt",
+  "ofl/notosanstc/OFL.txt",
+  "ofl/notosansthaana/OFL.txt",
+  "ofl/notosansthaiui/OFL.txt",
+  "ofl/notoserifdisplay/OFL.txt",
+  "ofl/notoserifhk/OFL.txt",
+  "ofl/notoserifsc/OFL.txt",
+  "ofl/notoseriftc/OFL.txt",
+  "ofl/nunitosans/OFL.txt",
+  "ofl/oldstandardtt/OFL.txt",
+  "ofl/onest/OFL.txt",
+  "ofl/oranienbaum/OFL.txt",
+  "ofl/orelegaone/OFL.txt",
+  "ofl/overpass/OFL.txt",
+  "ofl/pacifico/OFL.txt",
+  "ofl/palanquindark/OFL.txt",
+  "ofl/palettemosaic/OFL.txt",
+  "ofl/parastoo/OFL.txt",
+  "ofl/pattaya/OFL.txt",
+  "ofl/piazzolla/OFL.txt",
+  "ofl/pixelifysans/OFL.txt",
+  "ofl/playfair/OFL.txt",
+  "ofl/playfairdisplay/OFL.txt",
+  "ofl/playfairdisplaysc/OFL.txt",
+  "ofl/playpensans/OFL.txt",
+  "ofl/playpensansarabic/OFL.txt",
+  "ofl/playpensansdeva/OFL.txt",
+  "ofl/playpensansthai/OFL.txt",
+  "ofl/pliant/OFL.txt",
+  "ofl/pochaevsk/OFL.txt",
+  "ofl/podkova/OFL.txt",
+  "ofl/poiretone/OFL.txt",
+  "ofl/ponomar/OFL.txt",
+  "ofl/pottaone/OFL.txt",
+  "ofl/pragatinarrow/OFL.txt",
+  "ofl/prata/OFL.txt",
+  "ofl/pressstart2p/OFL.txt",
+  "ofl/prostoone/OFL.txt",
+  "ofl/ptsans/OFL.txt",
+  "ofl/ptsanscaption/OFL.txt",
+  "ofl/ptsansnarrow/OFL.txt",
+  "ofl/ptserif/OFL.txt",
+  "ofl/ptserifcaption/OFL.txt",
+  "ofl/qahiri/OFL.txt",
+  "ofl/ramsina/OFL.txt",
+  "ofl/ranga/OFL.txt",
+  "ofl/reemkufifun/OFL.txt",
+  "ofl/reemkufiink/OFL.txt",
+  "ofl/rhodiumlibre/OFL.txt",
+  "ofl/robotoflex/OFL.txt",
+  "ofl/robotoserif/OFL.txt",
+  "ofl/rock3d/OFL.txt",
+  "ofl/rubik80sfade/OFL.txt",
+  "ofl/rubikbeastly/OFL.txt",
+  "ofl/rubikbrokenfax/OFL.txt",
+  "ofl/rubikbubbles/OFL.txt",
+  "ofl/rubikburned/OFL.txt",
+  "ofl/rubikdirt/OFL.txt",
+  "ofl/rubikdistressed/OFL.txt",
+  "ofl/rubikdoodleshadow/OFL.txt",
+  "ofl/rubikdoodletriangles/OFL.txt",
+  "ofl/rubikgemstones/OFL.txt",
+  "ofl/rubikglitch/OFL.txt",
+  "ofl/rubikglitchpop/OFL.txt",
+  "ofl/rubikiso/OFL.txt",
+  "ofl/rubiklines/OFL.txt",
+  "ofl/rubikmaps/OFL.txt",
+  "ofl/rubikmarkerhatch/OFL.txt",
+  "ofl/rubikmaze/OFL.txt",
+  "ofl/rubikmicrobe/OFL.txt",
+  "ofl/rubikmonoone/OFL.txt",
+  "ofl/rubikmoonrocks/OFL.txt",
+  "ofl/rubikone/OFL.txt",
+  "ofl/rubikpixels/OFL.txt",
+  "ofl/rubikpuddles/OFL.txt",
+  "ofl/rubikscribble/OFL.txt",
+  "ofl/rubikspraypaint/OFL.txt",
+  "ofl/rubikstorm/OFL.txt",
+  "ofl/rubikvinyl/OFL.txt",
+  "ofl/rubikwetpaint/OFL.txt",
+  "ofl/ruda/OFL.txt",
+  "ofl/ruslandisplay/OFL.txt",
+  "ofl/ruwudu/OFL.txt",
+  "ofl/sahitya/OFL.txt",
+  "ofl/sansation/OFL.txt",
+  "ofl/sarpanch/OFL.txt",
+  "ofl/sawarabigothic/OFL.txt",
+  "ofl/sawarabimincho/OFL.txt",
+  "ofl/scada/OFL.txt",
+  "ofl/sciencegothic/OFL.txt",
+  "ofl/seymourone/OFL.txt",
+  "ofl/shizuru/OFL.txt",
+  "ofl/sitara/OFL.txt",
+  "ofl/slacksideone/OFL.txt",
+  "ofl/snpro/OFL.txt",
+  "ofl/sofiasans/OFL.txt",
+  "ofl/sourcesans3/OFL.txt",
+  "ofl/sourceserif4/OFL.txt",
+  "ofl/spectral/OFL.txt",
+  "ofl/spectralsc/OFL.txt",
+  "ofl/srisakdi/OFL.txt",
+  "ofl/stalinistone/OFL.txt",
+  "ofl/stixtwotext/OFL.txt",
+  "ofl/strong/OFL.txt",
+  "ofl/sumana/OFL.txt",
+  "ofl/syne/OFL.txt",
+  "ofl/tektur/OFL.txt",
+  "ofl/tenorsans/OFL.txt",
+  "ofl/thabit/OFL.txt",
+  "ofl/tiktoksans/OFL.txt",
+  "ofl/tiny5/OFL.txt",
+  "ofl/tiny5duo/OFL.txt",
+  "ofl/tirodevanagarimarathi/OFL.txt",
+  "ofl/tirodevanagarisanskrit/OFL.txt",
+  "ofl/triodion/OFL.txt",
+  "ofl/tuffy/OFL.txt",
+  "ofl/unbounded/OFL.txt",
+  "ofl/underdog/OFL.txt",
+  "ofl/uoqmunthenkhung/OFL.txt",
+  "ofl/vesperlibre/OFL.txt",
+  "ofl/viaodalibre/OFL.txt",
+  "ofl/vibes/OFL.txt",
+  "ofl/vollkornsc/OFL.txt",
+  "ofl/wdxllubrifontjpn/OFL.txt",
+  "ofl/wdxllubrifontsc/OFL.txt",
+  "ofl/wdxllubrifonttc/OFL.txt",
+  "ofl/wixmadefordisplay/OFL.txt",
+  "ofl/wixmadefortext/OFL.txt",
+  "ofl/xmind/OFL.txt",
+  "ofl/yanonekaffeesatz/OFL.txt",
+  "ofl/yatraone/OFL.txt",
+  "ofl/yesevaone/OFL.txt",
+  "ofl/yomogi/OFL.txt",
+  "ofl/ysabeau/OFL.txt",
+  "ofl/ysabeausc/OFL.txt",
+  "ofl/yujiboku/OFL.txt",
+  "ofl/yujihentaiganaakari/OFL.txt",
+  "ofl/yujihentaiganaakebono/OFL.txt",
+  "ofl/yujimai/OFL.txt",
+  "ofl/yujisyuku/OFL.txt",
+  "ofl/zain/OFL.txt",
+  "ofl/zenantique/OFL.txt",
+  "ofl/zenantiquesoft/OFL.txt",
+  "ofl/zenkakugothicantique/OFL.txt",
+  "ofl/zenkurenaido/OFL.txt",
+  "ofl/zenmarugothic/OFL.txt"
+ ]
+}

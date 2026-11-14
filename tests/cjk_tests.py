@@ -227,6 +227,41 @@ class LineTests(unittest.TestCase):
         self.assertEqual(lines, [(0, 2), (3, 6)], "after the space, which is dropped")
 
 
+class NoFontTests(unittest.TestCase):
+    """The owner: audit "what currently remains clickable or visible when there's nothing loaded"."""
+
+    class Widget(object):
+        def __init__(self):
+            self.visible = self.enabled = True
+
+        def setVisible(self, on):
+            self.visible = on
+
+        def setEnabled(self, on):
+            self.enabled = on
+
+    def test_with_no_font_the_sample_and_previews_are_hidden_and_the_settings_grayed(self):
+        dialog = cj.CJKSpacingDialog.__new__(cj.CJKSpacingDialog)  # (its window needs FontLab)
+        dialog.ak = type("Ak", (), {"enable": staticmethod(lambda widget, on: widget.setEnabled(bool(on)))})  # (ak.enable)
+        widget = self.Widget
+        dialog.sample_label, dialog.sample_box, dialog.sample = widget(), widget(), widget()
+        dialog.preview_captions = [widget(), widget()]
+        dialog.previews = [(widget(), u"Now"), (widget(), u"With palt")]
+        dialog.palt_box, dialog.halt_box, dialog.compile_box, dialog.hangul_box = widget(), widget(), widget(), widget()
+        dialog.show_font_parts(False)
+        shown = [dialog.sample_label, dialog.sample_box, dialog.sample] + dialog.preview_captions + [p for p, _ in dialog.previews]
+        self.assertFalse(any(w.visible for w in shown), "nothing to set a sample in")
+        self.assertFalse(any(w.enabled for w in (dialog.palt_box, dialog.halt_box, dialog.compile_box, dialog.hangul_box)))
+        dialog.show_font_parts(True)
+        self.assertTrue(all(w.visible for w in shown))
+        self.assertTrue(all(w.enabled for w in (dialog.palt_box, dialog.halt_box, dialog.compile_box)))
+        self.assertFalse(dialog.hangul_box.enabled, "the font's Hangul sets it as it is read")
+        runs = []
+        dialog.run = lambda: runs.append(1)
+        dialog.font_changed()
+        self.assertEqual(runs, [1], "a font closed or opened: read anew")
+
+
 class WordingTests(unittest.TestCase):
     """The owner's rules for interface texts: a text with a number follows it, and data beside data
     goes in parentheses."""

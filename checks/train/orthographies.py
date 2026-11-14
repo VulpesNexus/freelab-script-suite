@@ -88,7 +88,9 @@ rests on) and its evidence ("d" declared, "i" inferred, "k" a keyboard layout); 
 it rests on with the letters that source counted ([[index, letters]], 0 where the source gives no
 count). CLDR's and SLDR's exemplars list small letters only (UTS #35): each
 one's capital is added (not Georgian's Mtavruli). Format characters (the zero-width joiners of some
-exemplar sets) and spaces are dropped: no glyph is asked for them. The status column is "h" where
+exemplar sets) and spaces are dropped: no glyph is asked for them. A presentation form a source
+lists (character_sets.json's Legacy sets: SLDR's final alef wasla for Susu) is replaced by the letter
+it stands for (NFKC), which is what text stores. The status column is "h" where
 Google's data says historical, "c" where Glottolog files the language under Artificial Language,
 and empty elsewhere (not given: Font Check counts such a language with the living ones). The
 validity column holds SLDR's or CLDR's draft level where one is given.
@@ -96,7 +98,12 @@ validity column holds SLDR's or CLDR's draft level where one is given.
 The ISO 639-3 code of a BCP 47 language subtag comes from CLDR's alias table
 (supplementalMetadata.xml: the three-letter code of a two-letter one, and the member languages a
 macrolanguage's subtag stands for); of those, the first Glottolog has (families.py then classifies
-it). A subtag any of whose codes Hyperglot has is Hyperglot's. An Crubadan's 2010 files are named
+it). A subtag any of whose codes Hyperglot has is Hyperglot's, but for a declared orthography of a
+macrolanguage's subtag in a script Hyperglot gives none of its members in: that one is filed under
+the one member CLDR's likely subtags write in the same script and region, or left out where none or
+several do (macrolanguage_members: SLDR's Mongolian in the Mongolian script, mn_Mong_CN, is
+Peripheral Mongolian's, mvf_Mong_CN; Hyperglot's Halh Mongolian is written in Cyrillic). An
+Crubadan's 2010 files are named
 by ISO 639-3 codes: each is read as the subtag CLDR writes it with (that of its macrolanguage, where
 CLDR files it under one).
 
@@ -798,12 +805,14 @@ class Codes(object):
         self.short = dict((code, tag) for tag, code in self.overlong.items())
         self.macro = dict((self.overlong.get(code, code), tag) for tag in sorted(self.members)
                           for code in self.members[tag])
-        self.likely = {}
+        self.likely, self.likely_places = {}, {}
         root = ElementTree.fromstring(archive.read("common/supplemental/likelySubtags.xml"))
         for one in root.iter("likelySubtag"):
             parts = one.get("to").split("_")
             if len(parts) > 1 and "_" not in one.get("from"):
                 self.likely[one.get("from")] = parts[1]
+            if len(parts) == 3:  # (language_script_region: what likely_place() reads)
+                self.likely_places[one.get("from")] = (parts[1], parts[2])
         self.names = {}
         root = ElementTree.fromstring(archive.read("common/main/en.xml"))
         for one in root.iter("language"):
@@ -823,6 +832,11 @@ class Codes(object):
     def own(self, tag):
         """The ISO 639-3 code a subtag itself names (not the members of a macrolanguage), or None."""
         return self.overlong.get(tag) or (tag if len(tag) == 3 else None)
+
+    def likely_place(self, tag):
+        """(script, region) CLDR's likely subtags give a language subtag or a language and script
+        ("mn_Mong": ("Mong", "CN")), or None."""
+        return self.likely_places.get(tag)
 
     def subtag(self, iso):
         """The language subtag an ISO 639-3 code is written with (for a source keyed by such codes):
@@ -1713,6 +1727,38 @@ def second_scripts(declared, codes, hyperglot_written, scripts):
     return dict((iso, ones) for iso, ones in found.items() if ones)
 
 
+def macrolanguage_members(declared, codes, hyperglot_written, scripts, members_of, excluded):
+    """({ISO code: [Orthography]}, [(subtag, script, member)]): what the declared sources give under a
+    macrolanguage's subtag in a script Hyperglot gives none of its members in, filed under the one
+    member that CLDR's likely subtags write in the same script and region. Mongolian in the Mongolian
+    script (SLDR's mn_Mong) is the case: CLDR gives mn_Mong as mn_Mong_CN and Peripheral Mongolian
+    (mvf, the member spoken in China) as mvf_Mong_CN, while Halh Mongolian (khk, Hyperglot's) is
+    written in Cyrillic. Where no member, or several, match, the orthography is left out as before: a
+    macrolanguage's subtag does not say whose it is (SLDR's ff_Arab is ff_Arab_GN, and the one member
+    CLDR writes in Arabic, Adamawa Fulfulde, fub_Arab_CM). members_of(tag): the ISO codes of the
+    subtag's members (CLDR's aliases and the languages Glottolog has under the macrolanguage's
+    languoid); excluded: the codes a source already gives rows of their own."""
+    found, matched = collections.defaultdict(list), []
+    for _, by_tag in declared:
+        for tag in sorted(by_tag):
+            members = members_of(tag)
+            if not any(code in hyperglot_written for code in members):
+                continue  # (the macrolanguage rule left nothing out: iso_of() took the subtag's own code)
+            given = set(code for member in members for _, code in hyperglot_written.get(member, ()))
+            for one in by_tag[tag]:
+                written = written_in(one.base, scripts)
+                place = codes.likely_place("%s_%s" % (tag, one.script))
+                if written is None or written in given or place is None:
+                    continue
+                fits = [code for code in members if code not in hyperglot_written and code not in excluded
+                        and codes.likely_place(code) == place]
+                if len(fits) != 1 or written in [written_in(other.base, scripts) for other in found[fits[0]]]:
+                    continue
+                found[fits[0]].append(one)
+                matched.append((tag, one.script, fits[0]))
+    return dict(found), matched
+
+
 def plain_name(name, *scripts):
     """A language's name without the script a source adds to it ("Bassa (Latin)", "Wancho Naga,
     Latin"), for its row in another script; the script by any of the names given (Google calls Ho's
@@ -1729,6 +1775,12 @@ def build(paths, glottolog_folder, texts, keyboards=None):
         hyperglot_rows = json.load(handle)
     hyperglot = set(row[0] for row in hyperglot_rows["orthographies"])
     by_iso, families = glottolog_tables(glottolog_folder)
+    sys.path.insert(0, HERE)
+    try:
+        import character_sets
+    finally:
+        sys.path.remove(HERE)
+    legacy = character_sets.legacy_codes(SETS_FILE)  # (presentation forms: checks/character_sets.json's Legacy sets)
     problems, script_names = [], {}
     pinned_categories(paths["unicode-%s-UnicodeData.txt" % UNICODE_VERSION])
     archive = zipfile.ZipFile(paths["cldr-common-%s.zip" % CLDR_VERSION])
@@ -1752,11 +1804,12 @@ def build(paths, glottolog_folder, texts, keyboards=None):
     # that counts (said_scripts gets CLDR's too, further down).
     stated = dict((tag, set(title_of_code(code) for code in found)) for tag, found in said_scripts.items())
     glottolog = families.download(glottolog_folder)
+    languoids = families.table(glottolog["cldf/languages.csv"])
+    parents = families.parents_of(glottolog["cldf/classification.nex"])
     # A language Hyperglot describes through its members, by Glottolog's classification: Akan (aka),
     # whose dialects Twi and Fante Hyperglot describes. CLDR files Twi under ak and has no alias for
     # aka, so An Crubadan's aka file found no code of Hyperglot's and made a row of its own.
-    through_members = families.described_through(families.table(glottolog["cldf/languages.csv"]),
-                                                 families.parents_of(glottolog["cldf/classification.nex"]), hyperglot)
+    through_members = families.described_through(languoids, parents, hyperglot)
 
     no_language = set()
 
@@ -1792,6 +1845,29 @@ def build(paths, glottolog_folder, texts, keyboards=None):
         for one in second[iso]:
             one.name = plain_name(name, title_of_code(written), unicode_name(written))
         taken[iso] = second[iso]
+    # A macrolanguage's subtag in a script Hyperglot gives none of its members in (Mongolian in the
+    # Mongolian script): the one member CLDR's likely subtags write there (macrolanguage_members).
+    below = collections.defaultdict(list)  # glottocode: the ISO codes of the languages under it
+    for row in languoids:
+        if row["Level"] == "language" and row["ISO639P3code"] and row["Family_ID"] != families.BOOKKEEPING:
+            at = row["ID"]
+            while at in parents:
+                at = parents[at]
+                below[at].append(row["ISO639P3code"])
+
+    def members_of(tag):
+        own = codes.own(tag)
+        if own in hyperglot_written:
+            return []  # (Hyperglot's own language: second_scripts says what is added to it)
+        found = [code for code in codes.isos(tag) if code != own]
+        if own in by_iso:
+            found += [code for code in below.get(by_iso[own]["ID"], ()) if code not in found]
+        return found
+
+    members, by_member = macrolanguage_members(declared, codes, hyperglot_written, scripts, members_of,
+                                               set(taken) | hyperglot | through_members)
+    for iso in sorted(members):
+        taken[iso] = members[iso]
     needed = lambda tag: iso_of(tag) is not None and iso_of(tag) not in taken  # (no declared source has it)
     generated = dict((tag, [generated_evidence(one) for one in found]) for tag, found in sldr_generated.items())
     unilex = read_unilex(paths["unilex-%s.tar.gz" % UNILEX_COMMIT[:8]], counter, codes, needed, problems)
@@ -1892,8 +1968,13 @@ def build(paths, glottolog_folder, texts, keyboards=None):
                 unnamed.append(iso)
                 name = iso
             status = "h" if one.historical else "c" if row is not None and row["Family_ID"] == ARTIFICIAL else ""
+            # (a presentation form a source lists, SLDR's final alef wasla for Susu, is its letter: what
+            # text stores, and what a font is checked for)
+            base = character_sets.without_legacy(one.base, legacy, clusters_of)
+            auxiliary = [item for item in character_sets.without_legacy(one.auxiliary, legacy, clusters_of)
+                         if item not in base]
             rows.append([iso, name, one.autonym if one.autonym != name else "", script, status, one.validity,
-                         one.speakers, text(one.base), text(one.auxiliary), one.marks, keys.index(one.source),
+                         one.speakers, text(base), text(auxiliary), one.marks, keys.index(one.source),
                          "k" if one.source == KEYBOARD else "i" if one.source in INFERRED else "d"])
             if one.rests and one.source != KEYBOARD:  # (an inferred row: every source it rests on, and the letters each counted)
                 rows[-1].append([[keys.index(source), size] for source, size in one.rests])
@@ -1966,6 +2047,12 @@ def build(paths, glottolog_folder, texts, keyboards=None):
     summary["(a layout set aside: a declared row in its script)"] = (len(set(iso for iso, _, _ in set_aside)),
                                                                      len(set_aside))
     summary["(a counted row a layout took the place of)"] = (len(set(iso for iso, _, _ in replaced)), len(replaced))
+    summary["(a macrolanguage's subtag, filed under its member)"] = (len(set(iso for _, _, iso in by_member)),
+                                                                    len(by_member))
+    for tag, script, iso in by_member:
+        problems.append("macrolanguage: %s in %s is filed under its member %s (CLDR's likely subtags: %s_%s_%s, %s_%s_%s)"
+                        % ((tag, script, iso, tag) + codes.likely_place("%s_%s" % (tag, script))
+                           + (iso,) + codes.likely_place(iso)))
     for iso, title, sources in replaced:
         problems.append("keyboard: %s in %s rests on its layout, not on %s" % (iso, title, ", ".join(sources)))
     for layout, iso, script, units, own, foreign in refused:
@@ -2027,7 +2114,8 @@ def license_notice(paths, texts, glottolog_folder, keyboards=None):
         "2. Unicode CLDR %s (https://cldr.unicode.org), Copyright Unicode, Inc., licensed under the" % CLDR_VERSION,
         "   Unicode License V3. Changes made: each locale's main and auxiliary exemplar characters,",
         "   with the capital of each small letter added, the language's English name and its name in",
-        "   its own locale; CLDR's language alias and likely-script tables give codes and scripts.",
+        "   its own locale; CLDR's language alias and likely-subtag tables give codes and scripts, and",
+        "   the member of a macrolanguage an orthography in a script and region is filed under.",
         "",
         "3. SIL's Locale Data Repository (https://github.com/silnrsi/sldr, tag %s)," % SLDR_TAG,
         "   Copyright (c) 2014-2023 SIL International, licensed under the MIT License. Changes made:",
@@ -2162,8 +2250,19 @@ def ranges_of(codes):
     return " ".join(parts)
 
 
-BLOCK_FONT_LIMIT = 256  # a Unicode block's set of more characters is not drawn whole by the bundled font
-SCRIPT_FONT_LIMIT = 300  # a script's set is drawn whole when its own characters number at most this
+# A Unicode block's set of more characters is not drawn whole by the bundled font: 256 until
+# 2026-11-14, when the owner lifted the bound on size; every block a set holds is drawn now (the
+# largest, Mathematical Alphanumeric Symbols, has 996).
+BLOCK_FONT_LIMIT = 1100
+# A script's set is drawn whole when its own characters number at most this: every script but Han
+# (103,351 ideographs, more than a font's 65,535 glyphs) since 2026-11-14, when the owner lifted the
+# bound on size (it was 300: Hangul, Tangut, the hieroglyphs, cuneiform, Yi, and the larger alphabets
+# were drawn only as far as an orthography or another set used them).
+SCRIPT_FONT_LIMIT = 12000
+UNIHAN_SETS = "unihan-"  # (character_sets.py's UNIHAN_PREFIX: the Han repertoires)
+# A Han repertoire is drawn whole up to this many characters (the largest, Unihan Core 2020, has
+# 20,720): the CJK font holds them, with what Noto lacks from Jigmo, within its 65,535 glyphs.
+UNIHAN_FONT_LIMIT = 25000
 
 
 def font_characters():
@@ -2214,12 +2313,15 @@ def font_characters():
     # own characters number more than SCRIPT_FONT_LIMIT (Han, Hangul, Tangut, the hieroglyphs,
     # cuneiform: what the orthographies use of them is in already). Their names are drawn all the same;
     # the pictures of their missing characters fall back to the system's fonts.
-    blocks_out, scripts_out, of_scripts = [], [], set()
+    blocks_out, sets_out, scripts_out, of_scripts = [], [], [], set()
     for row in data.get("sets", ()):
         names.update(ord(ch) for ch in row[1])
         codes = codes_of(row[4])
         if row[0].startswith("block-") and len(codes) > BLOCK_FONT_LIMIT:
             blocks_out.append(row[1])
+            continue
+        if row[0].startswith(UNIHAN_SETS) and len(codes) > UNIHAN_FONT_LIMIT:
+            sets_out.append(row[1])  # (none today: every Han repertoire is drawn, Jigmo filling what Noto lacks)
             continue
         sets.update(codes)
         for sequence in row[5].split():
@@ -2245,12 +2347,12 @@ def font_characters():
                   "headings (always shown); other_names: Glottolog's other names (a tooltip shows the one a "
                   "search found); orthographies: base, auxiliary, and mark characters; sets: the character sets' "
                   "and the scripts' own and shared characters, but those of a Unicode block of more than %d "
-                  "characters and of a script of more than %d (left_out names them)."
-                  % (BLOCK_FONT_LIMIT, SCRIPT_FONT_LIMIT)),
+                  "characters, of a Han repertoire of more than %d, and of a script of more than %d (left_out names "
+                  "them)." % (BLOCK_FONT_LIMIT, UNIHAN_FONT_LIMIT, SCRIPT_FONT_LIMIT)),
         ("counts", collections.OrderedDict((("all", len(everything)), ("names", len(names)),
                                             ("other_names", len(others)), ("orthographies", len(orthographies)),
                                             ("sets", len(sets)), ("of_scripts", len(of_scripts))))),
-        ("left_out", collections.OrderedDict((("blocks", blocks_out), ("scripts", scripts_out)))),
+        ("left_out", collections.OrderedDict((("blocks", blocks_out), ("scripts", scripts_out), ("sets", sets_out)))),
         ("names", ranges_of(names)), ("other_names", ranges_of(others)),
         ("orthographies", ranges_of(orthographies)), ("sets", ranges_of(sets)),
     ))

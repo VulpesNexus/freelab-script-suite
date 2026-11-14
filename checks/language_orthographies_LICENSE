@@ -14,7 +14,8 @@ None of them endorses this file or FreeLab.
 2. Unicode CLDR 49 (https://cldr.unicode.org), Copyright Unicode, Inc., licensed under the
    Unicode License V3. Changes made: each locale's main and auxiliary exemplar characters,
    with the capital of each small letter added, the language's English name and its name in
-   its own locale; CLDR's language alias and likely-script tables give codes and scripts.
+   its own locale; CLDR's language alias and likely-subtag tables give codes and scripts, and
+   the member of a macrolanguage an orthography in a script and region is filed under.
 
 3. SIL's Locale Data Repository (https://github.com/silnrsi/sldr, tag 26062.1946),
    Copyright (c) 2014-2023 SIL International, licensed under the MIT License. Changes made:

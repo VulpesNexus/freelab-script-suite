@@ -997,6 +997,45 @@ class FakeCodeGlyph(object):
         return [self.code] if self.code else []
 
 
+class ArgsTransform(object):
+    """A component's transform as a shape gives it back: its matrix's values (QTransform's getters)."""
+
+    def __init__(self, args):
+        self.args = tuple(args) + (0.0,) * (6 - len(args))
+
+    def m11(self):
+        return self.args[0]
+
+    def m12(self):
+        return self.args[1]
+
+    def m21(self):
+        return self.args[2]
+
+    def m22(self):
+        return self.args[3]
+
+    def dx(self):
+        return self.args[4]
+
+    def dy(self):
+        return self.args[5]
+
+    def map(self, contour):
+        return FakeTransform().map(contour)
+
+
+class FakeComponentShape(FakeShape):
+    """A component as a built layer holds it: the glyph it points to and its transform."""
+    isComponent = True
+
+    def __init__(self, component):
+        FakeShape.__init__(self, ((0, 300, 300, 720),))
+        self.shapeData = Anything()
+        self.shapeData.componentGlyph = component.name
+        self.transform = ArgsTransform(getattr(component.transform, "args", ()))
+
+
 class FakeBuiltLayer(object):
     def __init__(self, name, events):
         self.name, self.events, self.shapes, self.advanceWidth, self.isNull = name, events, [], 0, False
@@ -1004,8 +1043,12 @@ class FakeBuiltLayer(object):
 
     def setGlyphComponents(self, components, width, package, flag):
         self.components, self.advanceWidth = list(components), width
-        self.shapes = [FakeShape(((0, 300, 300, 720),))]
+        self.shapes = [FakeComponentShape(component) for component in components]
         self.events.append(("layer", self.name))
+
+    def removeAllShapes(self):
+        self.shapes, self.components = [], []
+        self.events.append(("emptied", self.name))
 
 
 class FakeBuiltGlyph(object):
@@ -1080,6 +1123,7 @@ class FakePackage(object):
         self.fgPackage = Anything()
         self.fgPackage.glyphs = [g.fgGlyph for g in self.glyphs]
         self.fgPackage.features = features
+        self.fgPackage.id = id(self)  # (FontLab's number for the open font: the same at every read)
         self.isNull, self.glyphsCount, self.upm, self.tfn, self.path = False, len(self.glyphs), 1000, u"Fake", u"fake.vfc"
         self.master, self.masters, self.capsHeight_value, self.events = u"Regular", [u"Regular"], 700.0, []
 
@@ -1108,6 +1152,9 @@ class FakePackage(object):
     def currentHistoryState(self):
         return 1
 
+    def initialHistoryState(self):
+        return 0  # (a step recorded since it was opened: the font itself has a state to go back to)
+
 
 # A font whose figures are outlines with nodes (one upright stem each), for the strokes kept while
 # scaling: what the build writes is measured on them.
@@ -1131,6 +1178,10 @@ class NodeContour(object):
 
     def update(self):
         pass
+
+    def clone(self):
+        """A copy that belongs to no shape (FontLab's flContour.clone)."""
+        return type(self)([(n.x, n.y, n.type) for n in self.points])
 
     def path(self):
         return self
@@ -1164,25 +1215,69 @@ class PlainTransform(FakeTransform):
 
 
 class NodeShape(object):
+    """A shape of node contours. What it draws (its boundingBox) is kept apart from its nodes, as FontLab
+    keeps a shape's outline: worked out when it is made, transformed, given contours, or updated, not
+    when a node is moved (seen live: a node set from a script moved, the shape's box did not)."""
     isComponent = False
 
     def __init__(self, contours):
         self.contours, self.transform = contours, PlainTransform()
+        self.updates = 0
+        self.draw()
+
+    def draw(self):
+        boxes = [c.box for c in self.contours if c.points]
+        self.drawn = (min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes),
+                      max(b[3] for b in boxes)) if boxes else (0, 0, 0, 0)
+
+    @property
+    def boundingBox(self):
+        return NodeRect(self.drawn)
+
+    def update(self):
+        self.updates += 1
+        self.draw()
 
     def cloneTopLevel(self):
-        return NodeShape([type(c)([(n.x, n.y, n.type) for n in c.points]) for c in self.contours])
+        return type(self)([type(c)([(n.x, n.y, n.type) for n in c.points]) for c in self.contours])
 
     def applyTransform(self, transform):
         sx, _, _, sy, dx, dy = transform.args
         for contour in self.contours:
             for node in contour.points:
                 node.x, node.y = node.x * sx + dx, node.y * sy + dy
+        self.draw()
+
+
+class StaleShape(NodeShape):
+    """A shape that never draws its nodes anew once made and transformed (update changes nothing): what
+    FontLab did when the forms built at 130% looked as scaled."""
+
+    def update(self):
+        self.updates += 1
+
+
+class NewShape(NodeShape):
+    """A shape made from a script (fontlab.flShape()), given its contours at once (addContours)."""
+
+    def __init__(self):
+        NodeShape.__init__(self, [])
+        self.notified = []
+
+    def addContours(self, contours, notify):
+        self.contours = list(contours)
+        self.notified.append(notify)
+        self.draw()
+
+
+def no_new_shape():
+    raise TypeError("this FontLab makes no shape from a script")
 
 
 class NodeLayer(object):
-    def __init__(self, advance=500, contour=NodeContour):
+    def __init__(self, advance=500, contour=NodeContour, shape=NodeShape):
         left, right, bottom, top = STEM  # counterclockwise, y up
-        self.shapes = [NodeShape([contour([(left, bottom), (right, bottom), (right, top), (left, top)])])]
+        self.shapes = [shape([contour([(left, bottom), (right, bottom), (right, top), (left, top)])])]
         self.advanceWidth, self.isNull = advance, False
 
 
@@ -1190,6 +1285,9 @@ class NodeBuiltLayer(FakeBuiltLayer):
     def addShape(self, shape):
         self.shapes.append(shape)
         self.events.append(("shape", self.name))
+
+    def update(self):
+        self.events.append(("measured", self.name))
 
 
 class NodeBuiltGlyph(FakeBuiltGlyph):
@@ -1202,9 +1300,9 @@ class NodeBuiltGlyph(FakeBuiltGlyph):
 class NodePackage(FakePackage):
     """The fake font with its figures drawn as stems of nodes; what a build adds can hold outlines."""
 
-    def __init__(self, features, contour=NodeContour):
+    def __init__(self, features, contour=NodeContour, shape=NodeShape):
         FakePackage.__init__(self, features)
-        self.drawn = dict((name, NodeLayer(500, contour)) for name in DIGIT_NAMES)
+        self.drawn = dict((name, NodeLayer(500, contour, shape)) for name in DIGIT_NAMES)
         for name, layer in self.drawn.items():
             self.by_name[name].getLayerByName = lambda master, create=False, layer=layer: layer
 
@@ -1296,6 +1394,89 @@ class CheckBoxTests(unittest.TestCase):
         self.assertIsNotNone(watcher)
         self.assertEqual(tree.sheets[-1].count(fc.CHECK_SHEET_MARK), 1, "the old rules replaced, not added to")
         self.assertNotIn(u"old rules", tree.sheets[-1])
+
+
+class HighlightTests(unittest.TestCase):
+    """The Code box's colors (the owner, 2026-11-14: "syntax highlighting would be neat")."""
+
+    def kinds(self, line, in_list=False):
+        spans, still_open = fc.fea_spans(line, in_list)
+        return [(line[start:start + length], kind) for start, length, kind in spans], still_open
+
+    def test_each_part_of_a_line(self):
+        self.assertEqual(self.kinds(u"feature liga {"), ([(u"feature", "keyword"), (u"liga", "tag")], False))
+        self.assertEqual(self.kinds(u"} liga;"), ([(u"liga", "tag")], False))
+        self.assertEqual(self.kinds(u"languagesystem latn TRK;")[0],
+                         [(u"languagesystem", "keyword"), (u"latn", "tag"), (u"TRK", "tag")])
+        self.assertEqual(self.kinds(u"  script latn; language ROM;")[0],
+                         [(u"script", "keyword"), (u"latn", "tag"), (u"language", "keyword"), (u"ROM", "tag")])
+        self.assertEqual(self.kinds(u"lookup FreeLab_case {")[0], [(u"lookup", "keyword"), (u"FreeLab_case", "tag")])
+        self.assertEqual(self.kinds(u"  sub @FreeLab_turn_0 @FreeLab_letters_1' by @FreeLab_turn_1;")[0],
+                         [(u"sub", "keyword"), (u"@FreeLab_turn_0", "class"), (u"@FreeLab_letters_1", "class"),
+                          (u"by", "keyword"), (u"@FreeLab_turn_1", "class")])
+        self.assertEqual(self.kinds(u"  sub uni0041 one.sups by f_i; # FreeLab begin")[0],
+                         [(u"sub", "keyword"), (u"by", "keyword"), (u"# FreeLab begin", "comment")],
+                         "glyph names keep the text's color, figures in a name are no number")
+        self.assertEqual(self.kinds(u"@x = [a b.sc c];")[0], [(u"@x", "class"), (u"[a b.sc c]", "list")])
+        self.assertEqual(self.kinds(u"  featureNames { name \"Single-story a\"; };")[0],
+                         [(u"featureNames", "keyword"), (u"name", "keyword"), (u"\"Single-story a\"", "string")])
+        self.assertEqual(self.kinds(u"pos a b -120; lookupflag IgnoreMarks;")[0],
+                         [(u"pos", "keyword"), (u"-120", "number"), (u"lookupflag", "keyword"),
+                          (u"IgnoreMarks", "keyword")])
+        self.assertEqual(self.kinds(u"#> feature")[0], [(u"#> feature", "comment")], "FontLab's marker lines")
+        self.assertEqual(self.kinds(u"include(features.fea);")[0], [(u"include", "keyword")])
+        self.assertEqual(self.kinds(u""), ([], False))
+
+    def test_a_list_over_several_lines(self):
+        """A class of thousands of glyphs is written a few names to a line (class_lines): its lines are
+        the list's color, carried from line to line."""
+        lines = fc.class_lines(u"@FreeLab_letters", [u"g%d" % n for n in range(fc.CLASS_LINE_GLYPHS * 2 + 1)])
+        self.assertGreater(len(lines), 3)
+        still_open, kinds = False, []
+        for line in lines:
+            spans, still_open = fc.fea_spans(line, still_open)
+            kinds.append([kind for _, _, kind in spans])
+        self.assertEqual(kinds[0], ["class", "list"])
+        self.assertTrue(all(k == ["list"] for k in kinds[1:]), kinds)
+        self.assertFalse(still_open, "closed at the end")
+        self.assertEqual(self.kinds(u"  a b c", True), ([(u"  a b c", "list")], True))
+        self.assertEqual(self.kinds(u"]; sub a by b;", True)[0], [(u"]", "list"), (u"sub", "keyword"), (u"by", "keyword")])
+
+    def test_colors_plain_to_read_on_either_palette(self):
+        def lightness(rgb):
+            return (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 255.0
+
+        self.assertEqual(set(fc.FEA_COLORS), set(fc.FEA_KINDS))
+        for kind in fc.FEA_KINDS:
+            self.assertGreater(lightness(fc.fea_color(kind, True)), 0.55, "%s on a dark background" % kind)
+            self.assertLess(lightness(fc.fea_color(kind, False)), 0.40, "%s on a light background" % kind)
+        self.assertEqual(len(set(fc.fea_color(kind, True) for kind in fc.FEA_KINDS)), len(fc.FEA_KINDS))
+
+
+class DrawnBoxTests(unittest.TestCase):
+    """What tells a thickened form FontLab draws as it was (the owner saw no difference at 130%)."""
+
+    def test_the_drawn_box_against_the_nodes(self):
+        square = [[(0.0, 0.0, True, True), (10.0, 0.0, True, True), (10.0, 10.0, True, True), (0.0, 10.0, True, True)]]
+        self.assertTrue(fc.drawn_box_kept((0.0, 0.0, 10.0, 10.0), (square,)))
+        self.assertTrue(fc.drawn_box_kept((0.4, -0.5, 10.0, 10.5), (square,)), "rounded to units")
+        self.assertFalse(fc.drawn_box_kept((2.0, 2.0, 8.0, 8.0), (square,)), "drawn as before the offset")
+        self.assertIsNone(fc.drawn_box_kept(None, (square,)), "not known")
+        self.assertTrue(fc.drawn_box_kept((2.0, 2.0, 8.0, 8.0), (square, [[(2.0, 2.0, True, True),
+                                                                           (8.0, 8.0, True, True)]])),
+                        "in the shape's own coordinates")
+        arch = [[(0.0, 0.0, True, True), (5.0, 20.0, True, False), (10.0, 0.0, True, True)]]
+        self.assertTrue(fc.drawn_box_kept((0.0, 0.0, 10.0, 15.0), (arch,)), "a curve stays inside its handles")
+        self.assertFalse(fc.drawn_box_kept((0.0, 0.0, 10.0, 25.0), (arch,)))
+
+    def test_matrices(self):
+        self.assertEqual(fc.compose(fc.IDENTITY, (0.5, 0.5, 10.0, 20.0)), (0.5, 0.0, 0.0, 0.5, 10.0, 20.0))
+        self.assertEqual(fc.mapped(fc.compose((1.0, 0.0, 0.0, 1.0, 4.0, 0.0), (0.5, 0.5, 10.0, 20.0)), 100.0, 100.0),
+                         (62.0, 70.0), "the shape's own transform first, then the plan's")
+        self.assertEqual(fc.shape_matrix(object()), fc.IDENTITY)
+        self.assertEqual(fc.shape_matrix(NodeShape([])), fc.IDENTITY, "what a transform does not say: the identity's")
+        self.assertIsNone(fc.shape_box(object()))
+        self.assertEqual(fc.shape_box(NodeShape([NodeContour([(1, 2), (5, 2), (5, 9)])])), (1.0, 2.0, 5.0, 9.0))
 
 
 class DialogTests(unittest.TestCase):
@@ -1421,7 +1602,8 @@ class DialogTests(unittest.TestCase):
         self.small_section(dialog, "subs").child(0).setCheckState(0, UNCHECKED)  # zero.subs
         self.assertEqual(dialog.build_button.text, u"Build 29 checked glyphs")
         dialog.build_small_forms()
-        self.assertEqual(self.fontlab.flItems.steps, [u"FreeLab Feature Code"], "one step of the History")
+        self.assertEqual(self.fontlab.flItems.steps, [u"FreeLab Feature Code (before)", u"FreeLab Feature Code"],
+                         "the font's first write from FreeLab: the font as it was recorded first, for Undo to go back to")
         two = package.findName(u"two.sups")
         self.assertEqual(two.made[u"Regular"].advanceWidth, float(int(round(520 * 0.59 * 1.12))))
         component = two.made[u"Regular"].components[0]
@@ -1446,9 +1628,17 @@ class DialogTests(unittest.TestCase):
         tags = [item.data(0, USER_ROLE) for item in dialog.forms_tree.items]
         self.assertIn("sups", tags)
         self.assertIn("subs", tags)
-        self.assertEqual([item.data(0, USER_ROLE) for item in dialog.small_tree.items], ["subs", "subscript"])
+        # What was built stays listed (a build replaces it once its settings change), checked as built; the
+        # button stays clickable, though nothing checked would change (a click says so)
+        self.assertEqual([item.data(0, USER_ROLE) for item in dialog.small_tree.items],
+                         ["sups", "superscript", "subs", "subscript"])
+        self.assertEqual(sorted(dialog.small_ours), sorted(t.split(u'">')[0] for t in
+                                                          done[-1].split(u'<a href="glyphname:')[1:]))
         self.assertEqual(dialog.build_button.text, u"Build checked glyphs")
-        self.assertFalse(dialog.build_button.enabled)
+        self.assertTrue(dialog.build_button.enabled)
+        self.assertEqual(dialog.small_counts(),
+                         u"The font lacks <b>11 figure forms</b>. <b>29 figure forms</b> were built here before: a "
+                         u"build replaces them once their settings change.")
         self.assertFalse([t for level, t in self.logged if level in ("error", "warning")], self.logged)
 
     def test_history_keeps_choices(self):
@@ -1786,14 +1976,15 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(fc.form_column_width(Anything(), [u"ab"], None), 40 + 24 + 2 * fc.TIP_CHARACTER + 12,
                          "nothing to measure with: a guess")
 
-    def recorded(self, features, package=None):
+    def recorded(self, features, package=None, classes=None):
         """A dialog whose controls, labels, lists, and rows are recorded (with its third tab)."""
         del Recorded.made[:]
         del RecordedRow.made[:]
         load = self.ak.load_sibling
         self.ak.load_sibling = lambda file_name, module_name: fa
         try:
-            dialog = self.dialog(features, package, dict(RECORDED, QTreeWidget=RecordedTree, QHBoxLayout=RecordedRow))
+            dialog = self.dialog(features, package, dict(RECORDED, QTreeWidget=RecordedTree, QHBoxLayout=RecordedRow,
+                                                         **(classes or {})))
         finally:
             self.ak.load_sibling = load
         self.assertIsNotNone(dialog.alternates, "the Stylistic alternates tab is built")
@@ -1875,7 +2066,9 @@ class DialogTests(unittest.TestCase):
         """After a build that left nothing to build, Build checked glyphs stayed clickable: its state was
         set while the font was read again, the lists' part disabled meanwhile, through a helper that
         leaves a widget alone when it reports the state asked for (a widget in a disabled container
-        reports disabled). The same after an undo, and for the buttons that check the turns."""
+        reports disabled). The same after an undo, and for the buttons that check the turns. Since the
+        owner's round of 2026-11-14 a build leaves what it built listed, and the button clickable (a
+        click with nothing changed says so): it grays out only with nothing checked."""
         ContainedButton.container_disabled = False
         dialog = self.dialog(FakeFeatures({}), classes={"QPushButton": ContainedButton, "QSplitter": BusySplitter})
         package = dialog.package
@@ -1884,9 +2077,9 @@ class DialogTests(unittest.TestCase):
         before = list(package.glyphs)
         dialog.build_small_forms()
         self.assertFalse(ContainedButton.container_disabled, "the lists answer again")
-        self.assertEqual(dialog.small_tree.items, [], "every figure form is built")
+        self.assertEqual(len(dialog.small_tree.items), 4, "what was built is listed again, to replace")
         self.assertEqual(dialog.build_button.text, u"Build checked glyphs")
-        self.assertFalse(dialog.build_button.enabled, "nothing to build: grayed out")
+        self.assertTrue(dialog.build_button.enabled, "built with these settings: a click says nothing changed")
         for glyph in [g for g in package.glyphs if g not in before]:  # Edit > Undo in FontLab
             package.deleteGlyph(glyph)
         dialog.history_moved()
@@ -1904,13 +2097,16 @@ class DialogTests(unittest.TestCase):
         self.assertFalse(states["none"], "no glyph is checked: nothing to uncheck")
         self.assertTrue(states["all"])
 
-    def strokes_built(self, percent, contour=NodeContour):
-        """The fake font's superiors built with Strokes at percent: (the dialog, the font)."""
+    def strokes_built(self, percent, contour=NodeContour, new_shape=NewShape, shape=NodeShape):
+        """The fake font's superiors built with Strokes at percent: (the dialog, the font). new_shape: what
+        fontlab.flShape() makes (no_new_shape: FontLab makes none, and the old way is taken); shape: the
+        figures' shapes, whose copies the old way writes in."""
         features = FakeFeatures({})
-        package = NodePackage(features, contour)
+        package = NodePackage(features, contour, shape)
         self.ak.layer_path = lambda layer, *args: NodePath(layer)
         try:
             dialog = self.dialog(features, package, core={"QPointF": FakePoint})
+            self.fontlab.flShape = new_shape
             for group in ("superscript", "subs", "subscript"):
                 self.small_section(dialog, group).setCheckState(0, UNCHECKED)
             self.assertEqual(dialog.build_button.text, u"Build 10 checked glyphs")
@@ -1989,6 +2185,359 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(len(warnings), 1, self.logged)
         self.assertIn(u"(40 nodes in 10 contours, 0 on-curve, 0 given a new place, 0 found there)", warnings[0])
         self.assertNotIn(u"strokes at 130%", [t for level, t in self.logged if level == "done"][-1])
+
+    # -- the owner's round of 2026-11-14 ------------------------------------------------
+
+    def test_strokes_are_drawn_where_their_nodes_are(self):
+        """The owner, of Strokes at 130%: "I still see no visible difference", while the log said the
+        strokes were thickened and the nodes read back where they were put. FontLab keeps a node's x
+        and y set from a script, but the shape it draws (its box) did not follow them (seen live). The
+        fakes' shapes draw what they held when made, transformed, given contours, or updated: the
+        outline is now written as contours placed before a new shape takes them, and checked on what
+        the shape draws."""
+        scaled = (STEM[1] - STEM[0]) * fc.CORPUS_SCALE["sups"]
+        dialog, package = self.strokes_built(130)
+        shape = package.findName(u"two.sups").made[u"Regular"].shapes[0]
+        self.assertIsInstance(shape, NewShape, "a new shape, given its contours with their nodes in place")
+        self.assertEqual(shape.notified, [True])
+        self.assertGreaterEqual(shape.updates, 1, "told to draw them anew")
+        self.assertAlmostEqual(shape.drawn[2] - shape.drawn[0], scaled * 1.3, delta=0.5, msg="drawn as thick")
+        self.assertEqual(package.drawn[u"two"].shapes[0].contours[0].box, (100.0, 0.0, 180.0, 700.0),
+                         "the figure's own contours left as drawn (clones were moved)")
+        self.assertIn(u"strokes at 130% of the scaled ones", [t for level, t in self.logged if level == "done"][-1])
+        self.assertFalse([t for level, t in self.logged if level == "warning"], self.logged)
+        # Where FontLab makes no shape from a script: the old way, a copy whose nodes are moved, then updated
+        dialog, package = self.strokes_built(130, new_shape=no_new_shape)
+        shape = package.findName(u"two.sups").made[u"Regular"].shapes[0]
+        self.assertNotIsInstance(shape, NewShape)
+        self.assertGreaterEqual(shape.updates, 1)
+        self.assertAlmostEqual(shape.drawn[2] - shape.drawn[0], scaled * 1.3, delta=0.5, msg="drawn as thick")
+        self.assertIn(u"strokes at 130% of the scaled ones", [t for level, t in self.logged if level == "done"][-1])
+        # A shape that draws what it drew whatever its nodes (the case the owner saw): said, not assumed
+        dialog, package = self.strokes_built(130, new_shape=no_new_shape, shape=StaleShape)
+        done = [t for level, t in self.logged if level == "done"][-1]
+        self.assertNotIn(u"strokes at 130%", done)
+        warnings = [t for level, t in self.logged if level == "warning"]
+        self.assertEqual(len(warnings), 1, self.logged)
+        self.assertTrue(warnings[0].endswith(u"(40 nodes in 10 contours, 40 on-curve, 40 given a new place, 40 found "
+                                             u"there, 10 shapes drawn as before): draw over them."), warnings[0])
+
+    def test_a_layer_built_again_measures_itself_again(self):
+        """Live (IBM Plex Sans JP): zero.sups built again at 130% and 160% had its new shape's box grow,
+        while the layer's own box, what FontLab measures and draws, stayed the 100% one until the layer
+        was updated."""
+        dialog, package = self.strokes_built(130)
+        events = [event for event in package.events if event[1] == u"two.sups"]
+        self.assertIn(("measured", u"two.sups"), events)
+        self.assertLess(events.index(("shape", u"two.sups")), events.index(("measured", u"two.sups")),
+                        "once its shapes are written")
+
+    def test_forms_made_from_a_form_built_again_are_built_again(self):
+        """Live: uni2070, a component of zero.sups, kept zero.sups' 100% outline after zero.sups was built
+        again at 130% and 160% (it was "left as it was": its own plan had not changed)."""
+        features = FakeFeatures({})
+        package = NodePackage(features, NodeContour, NodeShape)
+        self.ak.layer_path = lambda layer, *args: NodePath(layer)
+        try:
+            dialog = self.dialog(features, package, core={"QPointF": FakePoint})
+            self.fontlab.flShape = NewShape
+            for group in ("subs", "subscript"):
+                self.small_section(dialog, group).setCheckState(0, UNCHECKED)
+            copies = [form.name for form in dialog.small_forms if form.group == "superscript"
+                      and getattr(dialog.small_plans.get(form.name), "how", None) == "copied"]
+            self.assertTrue(copies, "the superscripts copy the sups")
+            dialog.stroke_box = Anything()
+            dialog.stroke_box.value = 100
+            dialog.build_small_forms()
+            del package.events[:]
+            dialog.stroke_box.value = 130
+            dialog.build_small_forms()
+        finally:
+            self.ak.layer_path = fake_path
+        emptied = set(name for kind, name in package.events if kind == "emptied")
+        self.assertTrue(set(copies) <= emptied, "the copies built again with what they copy")
+        self.assertNotIn(u"left as it was", [t for level, t in self.logged if level == "done"][-1])
+
+    def test_dependent_forms(self):
+        class Plan(object):
+            def __init__(self, *parts):
+                self.parts = [(part, 1.0, 1.0, 0, 0) for part in parts]
+
+        class Named(object):
+            def __init__(self, name):
+                self.name = name
+
+        forms = [Named(n) for n in (u"zero.sups", u"uni2070", u"uni2070.alt", u"one.sups", u"uni00B9")]
+        plans = {u"zero.sups": Plan(u"zero"), u"uni2070": Plan(u"zero.sups"), u"uni2070.alt": Plan(u"uni2070"),
+                 u"one.sups": Plan(u"one"), u"uni00B9": Plan(u"one.sups")}
+        ours = {u"zero.sups": 1, u"uni2070": 1, u"uni2070.alt": 1, u"uni00B9": 1}
+        self.assertEqual(fc.dependent_forms(forms, plans, ours, [u"zero.sups"]), [u"uni2070", u"uni2070.alt"],
+                         "at any depth")
+        self.assertEqual(fc.dependent_forms(forms, plans, {u"zero.sups": 1}, [u"zero.sups"]), [],
+                         "only what this window built (a glyph of the font's is never replaced)")
+        self.assertEqual(fc.dependent_forms(forms, plans, ours, [u"one.sups"]), [u"uni00B9"])
+
+    def test_the_picture_of_a_form_to_build_shows_its_strokes(self):
+        """The pictures of the forms to build were the scaled figure whatever Strokes said: drawn with a
+        pen as wide as both sides' offset, they grow as the build does, and Strokes draws them again."""
+        widths = []
+
+        class Pen(Anything):
+            def __init__(self, *args):
+                self.width = None
+
+            def setWidthF(self, width):
+                self.width = width
+
+        class Painter(Anything):
+            def strokePath(self, path, pen):
+                widths.append(pen.width)
+
+        features = FakeFeatures({})
+        package = NodePackage(features)
+        self.ak.layer_path = lambda layer, *args: NodePath(layer)
+        try:
+            dialog = self.dialog(features, package, {"QPen": Pen, "QPainter": Painter}, core={"QPointF": FakePoint})
+            dialog.stroke_box = Anything()
+            dialog.stroke_box.value = 130
+            self.assertIsNotNone(dialog.planned_picture(dialog.small_form(u"two.sups")))
+            self.assertEqual(len(widths), 1)
+            self.assertAlmostEqual(widths[0], 2 * 7.08, delta=0.15, msg="7.08 units a side (80 at 59%, 30% more; "
+                                                                         "the stem measured to half a unit)")
+            dialog.stroke_box.value = 100
+            dialog.planned_picture(dialog.small_form(u"two.sups"))
+            self.assertEqual(len(widths), 1, "at 100%: components, no pen")
+        finally:
+            self.ak.layer_path = fake_path
+        replanned = []
+        dialog = self.recorded(FakeFeatures({}))
+        dialog.replan = lambda: replanned.append(True)
+        dialog.stroke_box.slots["valueChanged(int)"][0](130)
+        self.assertEqual(replanned, [True], "Strokes plans again: the pictures and the count follow")
+
+    def test_a_build_replaces_what_it_built_and_nothing_else(self):
+        """The owner: the build button "should just remain visible and simply replace the previously-created
+        glyphs (if values changed or new features were ticked)". What this window built stays listed while
+        nobody changes it; a build with other settings makes it again in place, as one step of the
+        History; with nothing changed it says so and builds nothing; a glyph drawn over since is left."""
+        dialog = self.dialog(FakeFeatures({}))
+        package = dialog.package
+        for group in ("superscript", "subs", "subscript"):
+            self.small_section(dialog, group).setCheckState(0, UNCHECKED)
+        dialog.build_small_forms()
+        steps, count = len(self.fontlab.flItems.steps), len(package.glyphs)
+        self.assertEqual(steps, 2, "the font as it was (its first write), then the build")
+        self.assertEqual(len(dialog.small_ours), 10)
+        self.assertEqual(self.small_section(dialog, "sups").childCount(), 10, "listed again")
+        self.assertIn(fc.BUILT_NOTE, self.small_section(dialog, "sups").child(2).text(2))
+        self.assertTrue(dialog.build_button.enabled)
+        self.assertEqual(dialog.build_button.text, u"Build checked glyphs", "nothing that a build would change")
+        # Nothing changed: said, nothing built, no step
+        dialog.build_small_forms()
+        self.assertEqual(len(self.fontlab.flItems.steps), steps)
+        self.assertTrue(self.logged[-1][1].startswith(u"Nothing changed since the last build"), self.logged[-1])
+        # A setting changed: made again in place, the same glyphs, as one more step
+        dialog.small_clicked(self.small_section(dialog, "sups").child(2), 0)
+        dialog.small_setting("scale", 50)
+        self.assertEqual(dialog.build_button.text, u"Build 10 checked glyphs")
+        two = package.findName(u"two.sups")
+        dialog.build_small_forms()
+        self.assertEqual(len(self.fontlab.flItems.steps), steps + 1, "one step of the History")
+        self.assertEqual(len(package.glyphs), count, "no glyph added")
+        self.assertIs(package.findName(u"two.sups"), two, "the same glyph, its layers made anew")
+        self.assertIn(("emptied", u"two.sups"), package.events)
+        self.assertEqual(two.made[u"Regular"].components[0].transform.args[:4], (0.5, 0.0, 0.0, 0.5))
+        done = [t for level, t in self.logged if level == "done"][-1]
+        self.assertTrue(done.startswith(u"Replaced <b>10 glyphs</b> built here before, with the settings shown: "),
+                        done)
+        self.assertNotIn(u"Built <b>", done)
+        self.assertEqual(done.count(u'<a href="glyphname:'), 10)
+        self.assertFalse([t for level, t in self.logged if level in ("error", "warning")], self.logged)
+        # Drawn over since: the user's, no longer listed, never replaced
+        two.made[u"Regular"].advanceWidth = 999
+        dialog.history_moved()
+        self.assertNotIn(u"two.sups", dialog.small_ours)
+        self.assertEqual(len(dialog.small_ours), 9)
+        self.assertNotIn(u"two.sups", [row.text(0) for row in self.small_section(dialog, "sups").children])
+        dialog.small_setting("scale", 55)
+        dialog.build_small_forms()
+        self.assertEqual(two.made[u"Regular"].advanceWidth, 999, "left as the user made it")
+        self.assertEqual(two.made[u"Regular"].components[0].transform.args[:4], (0.5, 0.0, 0.0, 0.5))
+        self.assertIn(u"Replaced <b>9 glyphs</b>", [t for level, t in self.logged if level == "done"][-1])
+        # Undone in FontLab (the glyphs gone): a build makes them anew
+        for name in list(dialog.small_ours):
+            package.deleteGlyph(package.findName(name))
+        dialog.history_moved()
+        self.assertEqual(dialog.small_ours, {})
+        self.assertEqual(dialog.build_button.text, u"Build 9 checked glyphs")
+        self.assertEqual(fc.plan_signature(None, 107), None)
+        self.assertEqual(fc.layer_print(two.made[u"Regular"])[0], 999)
+
+    def test_the_code_part_is_named_code_and_colored(self):
+        """The owner: "it should just be 'Code'; also, syntax highlighting would be neat." The heading
+        reads Code; the box is colored by a highlighter whose colors follow the palette, shown plain past
+        HIGHLIGHT_LINES lines (each click makes the code again, and Qt colors every line again); where
+        PythonQt cannot make the highlighter, the box stays plain."""
+        dialog = self.recorded(FakeFeatures({}), classes={"QTabBar": type("QTabBar", (Recorded,), {})})
+        texts = [w.text for w in Recorded.made if isinstance(w, RECORDED["QLabel"])]
+        self.assertIn(u"Code", texts)
+        self.assertNotIn(u"The code", texts)
+        self.assertIn(u"<i>Code</i>, under them", dialog.tabs.whats)
+        self.assertIn(u"in <i>Code</i>", fc.HELP)
+
+        class Highlighter(Anything):
+            def __init__(self, parent):  # (as PythonQt makes it: a QObject parent, no document colored)
+                self.document, self.formats, self.state, self.previous, self.colored = None, [], 0, -1, 0
+
+            def setFormat(self, start, length, made):
+                self.formats.append((start, length, made.brush.color.rgb))
+
+            def previousBlockState(self):
+                return self.previous
+
+            def setCurrentBlockState(self, state):
+                self.state = state
+
+            def setDocument(self, document):
+                self.document = document
+
+            def rehighlight(self):
+                self.colored += 1
+
+        class CharFormat(Anything):
+            def setForeground(self, brush):
+                self.brush = brush
+
+        class Color(Anything):
+            def __init__(self, *rgb):
+                self.rgb = rgb
+
+        class Brush(Anything):
+            def __init__(self, color):
+                self.color = color
+
+        dialog = self.dialog(FakeFeatures({}), classes={"QSyntaxHighlighter": Highlighter, "QTextCharFormat": CharFormat,
+                                                        "QColor": Color, "QBrush": Brush})
+        highlighter = dialog.highlighting.highlighter
+        self.assertIsInstance(highlighter, Highlighter)
+        self.assertIs(highlighter.document, dialog.highlighting.document,
+                      "set on the document itself: PythonQt's QObject parent colored nothing, live")
+        highlighter.highlightBlock(u"feature liga { # FreeLab")
+        light = lambda kind: fc.fea_color(kind, False)
+        self.assertEqual(highlighter.formats, [(0, 7, light("keyword")), (8, 4, light("tag")),
+                                               (15, 9, light("comment"))])
+        del highlighter.formats[:]
+        highlighter.highlightBlock(u"@x = [a b")
+        self.assertEqual(highlighter.state, 1, "a list open at the line's end")
+        highlighter.previous = 1
+        highlighter.highlightBlock(u"c];")
+        self.assertEqual(highlighter.formats[-1], (0, 2, light("list")))
+        self.assertEqual(highlighter.state, 0)
+        # Dark mode switched: the colors read from the palette again, and the code colored again
+
+        class Dark(object):
+            def color(self, role):
+                shade = Anything()
+                shade.lightness = lambda: 40
+                return shade
+
+        dialog.code.palette = Dark()
+        dialog.highlighting.refresh()
+        self.assertEqual(highlighter.colored, 1)
+        del highlighter.formats[:]
+        highlighter.previous = 0  # (no list open on the line before)
+        highlighter.highlightBlock(u"sub a by b;")
+        self.assertEqual(highlighter.formats[0][2], fc.fea_color("keyword", True))
+        # Long code shown plain; short code colored again
+        document = highlighter.document
+        dialog.show_code(u"\n".join([u"sub a by b;"] * (fc.HIGHLIGHT_LINES + 1)))
+        self.assertIsNone(highlighter.document)
+        self.assertFalse(dialog.highlighting.attached)
+        dialog.show_code(u"sub a by b;")
+        self.assertIs(highlighter.document, document)
+        self.assertTrue(dialog.highlighting.attached)
+        # A highlighter that cannot be made: the box stays plain, and the code is shown
+
+        class Broken(Anything):
+            def __init__(self, *args):
+                raise TypeError("PythonQt cannot make it")
+
+        dialog = self.dialog(FakeFeatures({}), classes={"QSyntaxHighlighter": Broken})
+        self.assertIsNone(dialog.highlighting)
+        self.assertIn(u"feature", dialog.code_text)
+
+    def test_alternates_that_take_turns_say_where_they_are_built(self):
+        """The owner: "some kind of indication in the 'Alternates that take turns' section that such
+        alternates need to be built in 'Stylistic alternates' when there are none". The section says so,
+        naming the tab as it is named, a link that opens it; the look back and the check buttons, which
+        have nothing to act on, are grayed out."""
+        features = FakeFeatures({})
+        package = FakePackage(features)
+        package.glyphs = [g for g in package.glyphs if g.name != u"l.2"]
+        package.by_name.pop(u"l.2")
+        package.fgPackage.glyphs = [g.fgGlyph for g in package.glyphs]
+        tabs = type("QTabBar", (Recorded,), {})
+        dialog = self.recorded(features, package, {"QTabBar": tabs, "QStackedWidget": type("Stack", (Recorded,), {})})
+        self.assertEqual(dialog.sets, {})
+        self.assertEqual(dialog.turn_label.text, fc.NO_TURNS)
+        self.assertIn(u'on the <a href="tab:2"><i>Stylistic alternates</i></a> tab', fc.NO_TURNS)
+        self.assertEqual(fc.TABS[fc.STYLISTIC_TAB], u"Stylistic alternates")
+        self.assertFalse(dialog.look_back.enabled)
+        self.assertEqual([button.enabled for button in dialog.turn_buttons], [False, False, False])
+        dialog.turn_label.slots["linkActivated(QString)"][0](u"tab:2")
+        self.assertEqual((dialog.tabs.currentIndex, dialog.pages.currentIndex), (2, 2))
+        dialog.link_activated(u"elsewhere")  # (any other link: nothing, and nothing raised)
+        # With alternates, the line says how they take turns, and the look back can be set
+        dialog = self.recorded(FakeFeatures({}))
+        self.assertNotIn(u"Stylistic alternates", dialog.turn_label.text)
+        self.assertTrue(dialog.look_back.enabled)
+
+    def test_with_no_font_nothing_acts_and_the_window_follows_the_fonts(self):
+        """The owner: audit "what currently remains clickable or visible when there's nothing loaded".
+        With no font, no control that acts on a font takes a click on any of the three tabs, and nothing
+        of the font closed stays shown (its code, its lists); the window takes the next font opened
+        (the shared module calls font_changed), read as at the window's opening."""
+        dialog = self.recorded(FakeFeatures({"liga": u"feature liga {\n  sub f i by f_i;\n} liga;\n"}))
+        workspace = self.fontlab.flWorkspace.instance()
+        self.assertTrue(dialog.code_text)
+        self.assertTrue(dialog.small_set.enabled and dialog.stroke_box.enabled, "forms to build: settings to set")
+        self.assertFalse(dialog.small_reset.enabled, "the picked set as suggested: nothing to put back")
+        dialog.small_setting("scale", 50)
+        self.assertTrue(dialog.small_reset.enabled)
+        empty = Anything()
+        empty.packages = lambda: []
+        self.fontlab.flWorkspace.instance = lambda: empty
+        dialog.font_changed()
+        self.assertIsNone(dialog.package)
+        self.assertEqual(dialog.status.text, self.ak.sentences(self.ak.NO_FONT_LINE))
+        self.assertEqual(dialog.code_text, u"")
+        self.assertEqual(dialog.turn_label.text, u"")
+        for tree in (dialog.ligature_tree, dialog.alternate_tree, dialog.forms_tree, dialog.small_tree):
+            self.assertEqual(tree.items, [])
+        page = dialog.alternates
+        self.assertEqual(page.tree.items, [])
+        grayed = [dialog.look_back, dialog.write_button, dialog.restore_button, dialog.build_button,
+                  dialog.small_set, dialog.small_scale, dialog.small_baseline, dialog.small_width,
+                  dialog.small_reset, dialog.stroke_box, page.all_button, page.none_button, page.copy_button,
+                  page.scope_box, page.letters_edit, page.count_box, page.strength_box, page.seed_box,
+                  page.designs_box, page.build_button] + list(dialog.turn_buttons)
+        self.assertEqual([getattr(w, "text", u"") for w in grayed if w.enabled], [], "clickable with no font")
+        self.assertEqual(page.note.text, u"")
+        # A font opened: read as when the window opens
+        self.fontlab.flWorkspace.instance = lambda: workspace
+        dialog.font_changed()
+        self.assertIsNotNone(dialog.package)
+        self.assertTrue(dialog.forms_tree.items and dialog.ligature_tree.items and page.tree.items is not None)
+        self.assertTrue(dialog.code_text)
+        self.assertTrue(dialog.look_back.enabled and dialog.small_set.enabled)
+        # Called from a timer: nothing escapes
+
+        def broken():
+            raise RuntimeError("no font to read")
+        dialog.read_font = broken
+        dialog.font_changed()
+        self.assertFalse(dialog.busy)
+        self.assertTrue(self.logged[-1][1].startswith(u"The font could not be read"), self.logged[-1])
 
 
 MARKUP = re.compile(u"</?[A-Za-z]+>|&[a-z]+;")

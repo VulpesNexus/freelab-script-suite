@@ -9,7 +9,10 @@ from __future__ import absolute_import, division, print_function
 import ctypes
 import io
 import os
+import re
+import shutil
 import sys
+import tempfile
 import unittest
 
 os.environ["FREELAB_NO_AUTOSTART"] = "1"
@@ -595,6 +598,22 @@ class KerningUpgradeTests(unittest.TestCase):
         plan = ak.ClassPlan("first", [u"e", u"E"], {u"e": "e", u"E": "eacute"}, k, [(u"E", 52, u"T"), (u"E", 40, u"V")])
         self.assertEqual(ak.noted_exceptions(k, [plan], {u"e": "e", u"E": "eacute", u"T": "T", u"V": "V"}), [])
 
+    def test_kerning_check_shows_a_right_to_left_pair_as_read(self):
+        class Glyph(object):
+            def __init__(self, code):
+                self.fgGlyph = type("FgGlyph", (object,), {"unicode": code})()
+
+        class Package(object):
+            def findName(self, name):
+                return Glyph({"bet": 0x05D1, "yod": 0x05D9, "T": 0x54, "o": 0x6F}.get(name, 0))
+
+        self.assertEqual(kc.pair_text(Package(), "yod", "bet", ak), HEBREW_YOD + HEBREW_BET,
+                         "the key (yod, bet) is typed yod then bet: shown so, yod at the right")
+        self.assertEqual(kc.screen_pair(ak, Package(), "yod", "bet"), ("bet", "yod"), "measured and drawn as on screen")
+        self.assertEqual(kc.screen_pair(ak, Package(), "T", "o"), ("T", "o"))
+        self.assertEqual(kc.pair_text(Package(), "T", "o", ak), u"To")
+        self.assertEqual(kc.pair_text(Package(), "T", "bet.alt", ak), u"T bet.alt", "a glyph without a character: its name")
+
     def test_collisions_closest_first_with_their_fix(self):
         k = fake_font({"T": (["T", "Tcaron"], "KernLeft")},
                       {(("T", True), ("o", False)): -90, (("T", False), ("a", False)): -60, (("V", False), ("o", False)): 5})
@@ -787,6 +806,113 @@ class ProofTests(unittest.TestCase):
         self.assertEqual(ak.proof_contexts(package, ["x.alt", "T"]), ["H", "n", "o"], "an unencoded glyph: the next one's")
 
 
+class HistoryObject(object):
+    """A FontLab object with History states: at its first one until a step records it (FontLab's
+    History moves every object's current state with it; here, only what a step records moves)."""
+    def __init__(self, name):
+        self.name, self.state, self.mark = name, 0, 0
+
+    def currentHistoryState(self):
+        return self.state
+
+    def initialHistoryState(self):
+        return 0
+
+    def update(self):
+        pass
+
+
+class HistoryItems(object):
+    def __init__(self):
+        self.steps, self.updates, self.index = [], [], 0
+
+    def notifyChangesApplied(self, title, objects, recursive):
+        self.index += 1
+        recorded = objects if isinstance(objects, list) else [objects]
+        for obj in recorded:
+            obj.state = self.index
+        self.steps.append((title, [obj.name for obj in recorded], recursive))
+
+    def notifyPackageContentUpdated(self, key):
+        self.updates.append(key)
+
+
+class HistoryPackage(HistoryObject):
+    def __init__(self, key):
+        HistoryObject.__init__(self, "font")
+        self.fgPackage = HistoryObject("fgPackage")
+        self.fgPackage.id = key
+        self.glyphsCount, self.flags = 3, []
+
+    def setFlag(self, flag, value):
+        self.flags.append((flag, value))
+
+
+class BeforeChangesTests(unittest.TestCase):
+    """A FreeLab write to a font opened afresh could not be undone (live: History 1 to 0, H's width
+    kept): a step records objects as they are after it, and those with no earlier state stayed."""
+
+    def setUp(self):
+        self.saved = getattr(sys, "_freelab_history", None)
+        sys._freelab_history = None
+        self.fontlab = HistoryObject("fontlab")
+        self.items = self.fontlab.flItems = HistoryItems()
+
+    def tearDown(self):
+        sys._freelab_history = self.saved
+
+    def test_the_first_write_records_the_font_as_it_was(self):
+        package = HistoryPackage(7)
+        self.assertEqual(ak.before_changes(self.fontlab, package, u"FreeLab Auto Spacing"), [package])
+        ak.notify_changed(self.fontlab, package, u"FreeLab Auto Spacing")
+        self.assertEqual(self.items.steps, [(u"FreeLab Auto Spacing (before)", ["font"], True),
+                                            (u"FreeLab Auto Spacing", ["font"], True)], "the whole font, each time")
+        self.assertEqual(self.items.updates, [], "no glyph added: the Font window's list not rebuilt")
+        self.assertEqual(package.flags, [(2, True)], "marked modified")
+        self.assertEqual(ak.before_changes(self.fontlab, package, u"FreeLab Auto Spacing"), [],
+                         "a later write: the font recorded already")
+        self.assertEqual(len(self.items.steps), 2)
+
+    def test_an_undo_past_the_first_record_records_it_again(self):
+        package = HistoryPackage(8)
+        ak.before_changes(self.fontlab, package, u"FreeLab Diacritics")
+        ak.notify_changed(self.fontlab, package, u"FreeLab Diacritics")
+        package.state = 0  # (undone twice: back where the font was opened)
+        self.assertEqual(ak.before_changes(self.fontlab, package, u"FreeLab Diacritics"), [package])
+
+    def test_glyphs_without_a_state_are_recorded_with_the_font(self):
+        package, glyphs = HistoryPackage(9), [HistoryObject("A"), HistoryObject("B")]
+        glyphs[1].state = 4  # (recorded by an earlier step)
+        self.assertEqual(ak.before_changes(self.fontlab, package, u"FreeLab flag", glyphs), [package, glyphs[0]],
+                         "a flag is the glyph's own state, which the whole font's record leaves out")
+        ak.notify_changed(self.fontlab, package, u"FreeLab flag", glyphs)
+        self.assertEqual(self.items.steps[-1], (u"FreeLab flag", ["font", "A", "B"], True), "the glyphs recorded too")
+        self.assertEqual(ak.before_changes(self.fontlab, package, u"FreeLab flag", glyphs), [])
+
+    def test_the_font_window_is_told_only_of_glyphs_added_or_removed(self):
+        package = HistoryPackage(10)
+        ak.before_changes(self.fontlab, package, u"FreeLab Feature Code")
+        package.glyphsCount += 2
+        ak.notify_changed(self.fontlab, package, u"FreeLab Feature Code")
+        self.assertEqual(self.items.updates, [10], "glyphs added: the Font window shows them")
+        ak.notify_changed(self.fontlab, package, u"FreeLab Feature Code")
+        self.assertEqual(self.items.updates, [10, 10], "no count noted before: told, to be safe")
+        ak.notify_changed(self.fontlab, package, u"FreeLab Auto Kerning", added=False)
+        self.assertEqual(self.items.updates, [10, 10], "kerning only: not told")
+
+    def test_every_write_begins_with_before_changes_where_undo_needs_it(self):
+        """Each tool that changes glyphs records the font first; kerning, feature code, and font info are
+        the font's own state (recorded when FontLab opens a font: live, they went on Undo)."""
+        root = os.path.join(HERE, os.pardir)
+        expected = {"spacing/freelab_auto_spacing.py": 1, "cjk/freelab_cjk_spacing.py": 1,
+                    "diacritics/freelab_diacritics.py": 1, "features/freelab_feature_code.py": 1,
+                    "checks/freelab_font_check.py": 1, "kerning/freelab_auto_kerning.py": 1}
+        for path, count in expected.items():
+            with io.open(os.path.join(root, path), encoding="utf-8") as handle:
+                source = handle.read()
+            self.assertEqual(len(re.findall(r"(?<!def )before_changes\((?:self\.|owner\.)?fontlab", source)), count, path)
+
+
 class MenuOrderTests(unittest.TestCase):
     def test_working_order_then_dark_mode_then_mcp(self):
         texts = ["Diacritics", "Auto Kerning", "Auto Spacing", "CJK Spacing", "Toggle Dark Mode", "Dark Mode Settings",
@@ -849,8 +975,8 @@ class WindowTests(unittest.TestCase):
         def resize(self, width, height):
             self.width, self.height = width, height
 
-        def move(self, pos):
-            self.pos = pos
+        def move(self, *pos):
+            self.pos = pos if len(pos) == 2 else pos[0]
 
         def connect(self, signal, slot):
             self.slots[signal] = slot
@@ -975,15 +1101,19 @@ class WindowTests(unittest.TestCase):
 
         self.saved, self.shortcuts = [], {}
         old_qt, old_fontlab, old_windows = ak._qt, sys.modules.get("fontlab"), getattr(sys, "_freelab_windows", None)
-        old_saved, old_save, old_hook = ak._saved_size, ak._save_size, getattr(sys, "_freelab_quit_hook", None)
+        old_hook, old_watch = getattr(sys, "_freelab_quit_hook", None), getattr(sys, "_freelab_font_watch", None)
+        old_state = ak.state_dir
+        self.state = tempfile.mkdtemp()
         ak._qt, sys.modules["fontlab"], sys._freelab_windows = (lambda: (Core, Gui)), FontLab, None
-        ak._saved_size, ak._save_size = (lambda: None), self.saved.append  # (no file touched)
+        ak.state_dir = lambda: self.state  # (a windows.json written there would be found: none must be)
         sys._freelab_quit_hook = None
+        sys._freelab_font_watch = "held"  # (the fonts' watch is ticked by hand here: fonts_tick)
 
         def restore():
             ak._qt, sys._freelab_windows = old_qt, old_windows
-            ak._saved_size, ak._save_size = old_saved, old_save
-            sys._freelab_quit_hook = old_hook
+            ak.state_dir = old_state
+            sys._freelab_quit_hook, sys._freelab_font_watch = old_hook, old_watch
+            shutil.rmtree(self.state, ignore_errors=True)
             if old_fontlab is None:
                 del sys.modules["fontlab"]
             else:
@@ -1031,28 +1161,47 @@ class WindowTests(unittest.TestCase):
         second.dialog.width = 1400  # (Font Check asks for more width than the others)
         ak.take_window("Font Check", second)
         self.assertFalse(first.dialog.visible, "the tool the window showed is closed")
-        self.assertEqual(second.dialog.pos, (40, 50), "where it stood")
+        self.assertEqual(second.dialog.pos, (40 - 500, 50), "where it stood, around the same center")
         self.assertEqual((second.dialog.width, second.dialog.height), (1400, 300), "at its own size")
         second.dialog.visible = True
         third = self.open("Diacritics")
         self.assertEqual((third.dialog.width, third.dialog.height), (400, 300), "back to the others' size after Font Check")
+        self.assertEqual(third.dialog.pos, (40, 50), "shrunk around its center again")
         self.assertTrue(other.dialog.visible, "the other font's window stays")
         self.assertEqual(other.dialog.pos, (0, 0))
-        self.assertEqual(self.saved, [], "nothing resized by hand: nothing kept")
+        self.assertIsNone(sys._freelab_windows.get("size"), "nothing resized by hand: nothing kept")
 
-    def test_a_size_given_by_hand_is_every_windows_size(self):
+    def test_a_wider_tool_grows_on_both_sides_and_stays_on_screen(self):
+        # The owner: "it always enlarges from the left side of the window instead of keeping it centered"
+        self.assertEqual(ak.centered_place((300, 100), (1000, 800), (1400, 800)), (100, 100), "200 pixels each side")
+        self.assertEqual(ak.centered_place((100, 100), (1400, 800), (1000, 800)), (300, 100), "and back")
+        area = (0, 0, 1920, 1040)
+        self.assertEqual(ak.centered_place((50, 100), (1000, 800), (1400, 800), area, (16, 39)), (0, 100),
+                         "kept on screen on the left")
+        self.assertEqual(ak.centered_place((900, 100), (1000, 800), (1400, 800), area, (16, 39)), (1920 - 1400 - 16, 100),
+                         "and on the right")
+        self.assertEqual(ak.centered_place((300, 600), (1000, 800), (1000, 900), area, (16, 39)), (300, 1040 - 900 - 39),
+                         "a taller one, above the taskbar")
+
+    def test_a_size_given_by_hand_is_every_windows_size_for_this_session_only(self):
+        # The owner: "it should survive within a single session across fonts and such, but maybe not between
+        # sessions, else there's no way to ever go back to default size"
+        with open(os.path.join(self.state, "windows.json"), "w") as handle:
+            handle.write('{"size": [900, 700]}')  # an earlier version's
         first = self.open("Proof")
+        self.assertEqual((first.dialog.width, first.dialog.height), (400, 300), "an earlier session's size is not read")
         first.dialog.resize(1200, 900)  # the owner drags its corner
         second = self.open("Diacritics")
         self.assertEqual((second.dialog.width, second.dialog.height), (1200, 900))
-        self.assertEqual(self.saved, [(1200, 900)], "kept for later sessions")
         self.workspace.currentPackage = self.two
         other = self.open("Font Check")
         self.assertEqual((other.dialog.width, other.dialog.height), (1200, 900), "for the other font too")
         other.dialog.resize(1000, 800)
         other.dialog.close()  # closed, not taken over: its size counts all the same
-        self.assertEqual(self.saved[-1], (1000, 800))
         self.assertEqual(sys._freelab_windows["size"], (1000, 800))
+        with open(os.path.join(self.state, "windows.json")) as handle:
+            self.assertEqual(handle.read(), '{"size": [900, 700]}', "nothing written for later sessions")
+        self.assertEqual(os.listdir(self.state), ["windows.json"])
 
     def test_a_minimized_or_maximized_window_gives_no_place_and_no_size(self):
         first = self.open("Proof")
@@ -1061,12 +1210,36 @@ class WindowTests(unittest.TestCase):
         second = self.open("Diacritics")
         self.assertEqual(second.dialog.pos, (0, 0))
         self.assertEqual((second.dialog.width, second.dialog.height), (400, 300))
-        self.assertEqual(self.saved, [])
+        self.assertIsNone(sys._freelab_windows.get("size"))
 
     def test_a_tools_window_is_a_window_of_its_own(self):
         proof = self.open("Proof")
         self.assertIsNone(proof.dialog.parent, "no owner: a button of its own on the taskbar")
-        self.assertIn(proof, sys._freelab_windows["kept"], "held for the session: nothing else keeps it alive")
+        self.assertIn(proof, sys._freelab_windows["kept"], "held while shown: nothing else keeps it alive")
+
+    def test_a_window_closed_or_replaced_is_let_go(self):
+        # sys._freelab_windows["kept"] held 18 hidden windows after a session, live
+        filters = sys._freelab_window_filters = {}
+        self.addCleanup(lambda: setattr(sys, "_freelab_window_filters", None))
+        proof = self.open("Proof")
+        filters[5] = "Proof's filter"
+        proof.dialog.setProperty(ak.WINDOW_FILTER_PROP, 5)
+        diacritics = self.Tool(self.workspace, u"FreeLab Diacritics")  # (from FontLab's menu: in Proof's place)
+        ak.take_window("Diacritics", diacritics)
+        diacritics.dialog.show()
+        self.assertFalse(proof.dialog.visible)
+        self.assertEqual(sys._freelab_windows["kept"], [proof, diacritics], "not while its own events run")
+        self.run_timers()
+        self.assertEqual(sys._freelab_windows["kept"], [diacritics], "let go once they have")
+        self.assertEqual(filters, {}, "its filter too: its handler holds the window")
+        diacritics.dialog.close()  # (by hand)
+        diacritics.dialog.visible = True  # shown again before the wait is over: still needed
+        self.run_timers()
+        self.assertEqual(sys._freelab_windows["kept"], [diacritics])
+        diacritics.dialog.close()
+        self.run_timers()
+        self.assertEqual(sys._freelab_windows["kept"], [])
+        self.assertEqual(sys._freelab_windows["releasing"], [], "nothing waiting")
 
     def test_a_tool_opened_from_a_window_works_on_that_windows_font(self):
         self.workspace.currentPackage = self.two
@@ -1162,17 +1335,17 @@ class WindowTests(unittest.TestCase):
         first = self.open("Proof", laid_out=(520, 360))  # Qt grew it to its layout as it showed it
         second = self.open("Diacritics")
         self.assertFalse(first.dialog.visible)
-        self.assertEqual(self.saved, [], "measured once shown: nothing given by hand")
+        self.assertIsNone(sys._freelab_windows.get("size"), "measured once shown: nothing given by hand")
         self.assertEqual((second.dialog.width, second.dialog.height), (400, 300))
         before = second.dialog.height
         second.dialog.resize(400, before + 120)  # the log's grip drags the window's bottom edge
         ak.grip_resized(second.dialog, before)
         second.dialog.close()
-        self.assertEqual(self.saved, [], "the grip's doing")
+        self.assertIsNone(sys._freelab_windows.get("size"), "the grip's doing")
         third = self.open("Proof")
         third.dialog.resize(700, 300)  # the owner drags its edge
         third.dialog.close()
-        self.assertEqual(self.saved, [(700, 300)])
+        self.assertEqual(sys._freelab_windows.get("size"), (700, 300))
 
     def test_undo_and_redo_reach_fontlab_for_this_windows_font_only(self):
         proof = self.open("Proof")
@@ -1190,6 +1363,73 @@ class WindowTests(unittest.TestCase):
         level, text = proof.lines[0]
         self.assertEqual(level, "warning")
         self.assertIn(u"<b>One</b>'s Font window", text, "names the font to click")
+
+    def test_an_undo_from_a_window_redraws_fontlabs_views(self):
+        # The owner: "The log does mention the history changed, but it doesn't appear to actually reach FontLab"
+        self.open("Proof")
+        told = []
+
+        class Items(object):
+            def __getattr__(self, name):
+                return lambda *args: told.append((name,) + args)
+
+        fontlab = sys.modules["fontlab"]
+        fontlab.flItems = Items()
+        self.addCleanup(lambda: delattr(fontlab, "flItems"))
+        self.shortcuts["Ctrl+Z"]()
+        self.assertEqual(self.triggered, ["actionUndo"])
+        self.assertEqual(told, [], "told once FontLab's command has run")
+        self.run_timers()
+        self.assertEqual([call[0] for call in told], ["notifyPackageUpdated", "notifyHistoryChanged"],
+                         "not notifyPackageContentUpdated: 8.8 s a Ctrl+Z on a 3,700-glyph font, live")
+        self.assertEqual(told[0][1:], (self.one.id,), "this window's font")
+        self.assertNotIn("notifyChangesApplied", [call[0] for call in told], "no step of the History of its own")
+
+    def test_a_window_whose_font_closed_is_reused_then_takes_the_next_font(self):
+        # The owner: "after a font is closed and the script stays open, it still remains attached to the font it
+        # belonged to, meaning navigating again opens a new window"; and "can't it also detect when a font then
+        # gets open after its launch to hook into that one?"
+        spacing = self.open("Auto Spacing")
+        changes = []
+        spacing.font_changed = lambda: changes.append(("spacing", spacing.font_id))
+        self.workspace.fonts, self.workspace.currentPackage = [], self.Font(1, u"")  # (FontLab's placeholder)
+        self.assertEqual(ak.fonts_tick(self.workspace), [spacing])
+        self.assertIsNone(spacing.font_id)
+        self.assertEqual(spacing.dialog.windowTitle, u"FreeLab Auto Spacing", "its title without the font")
+        self.assertEqual(changes, [("spacing", None)], "the tool shows its no-font state")
+        self.assertIs(sys._freelab_windows["fonts"].get(None), spacing)
+        self.assertEqual(ak.fonts_tick(self.workspace), [], "nothing more to do")
+        self.assertIsNone(self.open("Auto Spacing"), "FontLab's menu brings it forward: no second window")
+        self.active = spacing.dialog  # its arrow to the next tool
+        kerning = self.open("Auto Kerning")
+        self.active = None
+        self.assertFalse(spacing.dialog.visible, "the window clicked gives way, as one with a font does")
+        self.assertIs(sys._freelab_windows["fonts"].get(None), kerning)
+        self.assertIsNone(self.open("Auto Kerning"), "and the menu finds it again")
+        three = self.Font(4242, u"Three")
+        self.workspace.fonts, self.workspace.currentPackage = [three], three  # a font opened
+        kerning.font_changed = lambda: changes.append(("kerning", kerning.font_id))
+        self.assertEqual(ak.fonts_tick(self.workspace), [kerning])
+        self.assertEqual(changes[-1], ("kerning", 4242), "the tool reads it")
+        self.assertEqual(kerning.dialog.windowTitle, u"FreeLab Auto Kerning (Three)")
+        self.assertIs(sys._freelab_windows["fonts"][4242], kerning)
+        self.assertNotIn(None, sys._freelab_windows["fonts"])
+        self.assertIsNone(self.open("Auto Kerning"), "the font's window now")
+
+    def test_a_window_without_a_font_takes_the_one_fontlab_shows(self):
+        self.workspace.fonts, self.workspace.currentPackage = [], self.Font(1, u"")
+        proof = self.open("Proof")
+        self.assertIsNone(getattr(proof, "font_id", None))
+        self.workspace.fonts, self.workspace.currentPackage = [self.one, self.two], self.two  # two opened at once
+        self.assertEqual(ak.fonts_tick(self.workspace), [proof])
+        self.assertEqual(proof.font_id, self.two.id, "the one FontLab shows")
+        busy = self.open("Diacritics")  # (on Two too: it takes the window's place)
+        self.workspace.fonts, self.workspace.currentPackage = [], self.Font(1, u"")
+        busy.busy = True
+        self.assertEqual(ak.fonts_tick(self.workspace), [], "a busy window is looked at next time")
+        busy.busy = False
+        self.assertEqual(ak.fonts_tick(self.workspace), [busy])
+        self.assertIsNone(busy.font_id)
 
     def test_a_glyph_tab_opens_for_this_windows_font_only(self):
         proof = self.open("Proof")
@@ -1397,8 +1637,361 @@ class SingleChoiceTests(unittest.TestCase):
             tick()
             self.assertTrue(consistent(), "%d rows: sheet %r, flag %r" % (count, combo.styleSheet,
                                                                             combo.property(ak.LEAVE_ALONE_PROP)))
-        self.assertEqual(combo.styleSheet, u"", "a few rows: a plain box")
-        self.assertIsNone(combo.property(ak.LEAVE_ALONE_PROP))
+        self.assertEqual(combo.styleSheet, ak.LONG_SHEET, "a few rows: opens below its box too")
+        self.assertTrue(combo.property(ak.LEAVE_ALONE_PROP))
+
+    def test_every_dropdown_opens_below_its_box(self):
+        # The owner: "Some open upwards still even when there's room below" (Diacritics' Character set on
+        # All, its last row, opened upward over the box)
+        class Qt(object):
+            WA_TransparentForMouseEvents = NoFocus = StrongFocus = 0
+
+        class QtCore(object):
+            pass
+
+        QtCore.Qt = Qt
+        old = ak._qt
+        ak._qt = lambda: (QtCore, None)
+        self.addCleanup(lambda: setattr(ak, "_qt", old))
+        for count in (2, 7, ak.LONG_CHOICES, ak.LONG_CHOICES + 1, 400):
+            combo = self.Combo(count)
+            shown = []
+            combo.setMaxVisibleItems = shown.append
+            ak.single_choice(combo)
+            ak.long_choice(combo)
+            self.assertEqual(combo.styleSheet, ak.LONG_SHEET, "%d rows" % count)
+            self.assertIn(u"combobox-popup: 0", combo.styleSheet)
+            self.assertTrue(combo.property(ak.LEAVE_ALONE_PROP), "drawn by the palette, not by dark mode's effect")
+            self.assertEqual(shown, [ak.LONG_CHOICES], "scrolled past 24 rows")
+        own = self.Combo(7)
+        own.styleSheet = u"QComboBox { color: red; }"
+        ak.long_choice(own)
+        self.assertEqual(own.styleSheet, u"QComboBox { color: red; }", "a sheet of its own is left as it is")
+
+
+class WindowFilterTests(unittest.TestCase):
+    """Every FreeLab window's filter: help on a grayed-out control, tooltips laid out for the window, and
+    selections cleared by a click beside them."""
+
+    class Widget(object):
+        def __init__(self, kinds=(), parent=None, **values):
+            self.kinds = set(kinds) | set(["QWidget"])
+            self.parent, self.children, self.props = parent, [], {}
+            self.whatsThis = self.toolTip = u""
+            self.enabled, self.visible, self.mouseTracking, self.selectionMode, self.width = True, True, False, 1, 1000
+            self.at = None
+            if parent is not None:
+                parent.children.append(self)
+            for name, value in values.items():
+                setattr(self, name, value)
+
+        def inherits(self, kind):
+            return kind in self.kinds
+
+        def parentWidget(self):
+            return self.parent
+
+        def isWindow(self):
+            return self.parent is None
+
+        def window(self):
+            widget = self
+            while widget.parent is not None:
+                widget = widget.parent
+            return widget
+
+        def property(self, name):
+            return self.props.get(name)
+
+        def setProperty(self, name, value):
+            self.props[name] = value
+
+        def findChildren(self, kind):
+            found = []
+            for child in self.children:
+                if child.inherits(kind):
+                    found.append(child)
+                found.extend(child.findChildren(kind))
+            return found
+
+        def childAt(self, pos):
+            return self.at
+
+    class View(Widget):
+        def __init__(self, parent, rows=3, **values):
+            WindowFilterTests.Widget.__init__(self, ("QAbstractItemView", "QAbstractScrollArea"), parent, **values)
+            self.rows, self.selected, self.current, self.cleared = rows, True, True, 0
+            self.port = WindowFilterTests.Widget((), self)
+            view = self
+
+            class Model(object):
+                @property
+                def hasSelection(self):
+                    return view.selected
+
+                def clearCurrentIndex(self):
+                    view.current = False
+
+            self.model = Model()
+
+        def selectionModel(self):
+            return self.model
+
+        def clearSelection(self):
+            self.selected = False
+            self.cleared += 1
+
+        def indexAt(self, pos):
+            valid = pos[1] < self.rows * 20
+
+            class Index(object):
+                def isValid(self):
+                    return valid
+
+            return Index()
+
+    class Event(object):
+        def __init__(self, kind, button=1, pos=(5, 5)):
+            self.kind, self.pressed, self.where = kind, button, pos
+
+        def type(self):
+            return self.kind
+
+        def button(self):
+            return self.pressed
+
+        def pos(self):
+            return self.where
+
+        def globalPos(self):
+            return self.where
+
+    def setUp(self):
+        case = self
+        self.timers, self.helped = [], []
+
+        class Core(object):
+            class Qt(object):
+                LeftButton, RightButton, ToolTipRole = 1, 2, 3
+
+            class QTimer(object):
+                @staticmethod
+                def singleShot(ms, slot):
+                    case.timers.append(slot)
+
+        class Gui(object):
+            QAbstractItemView = "QAbstractItemView"
+
+        old_qt, old_help, old_windows = ak._qt, ak.show_disabled_help, getattr(sys, "_freelab_windows", None)
+        ak._qt = lambda: (Core, Gui)
+        ak.show_disabled_help = lambda widget, where: case.helped.append(widget) or True
+        sys._freelab_windows = None
+
+        def restore():
+            ak._qt, ak.show_disabled_help, sys._freelab_windows = old_qt, old_help, old_windows
+
+        self.addCleanup(restore)
+
+    def test_a_right_click_on_a_grayed_out_control_shows_its_help(self):
+        # The owner: "greyed out buttons do not give access to their tooltips through right-clicking"
+        window = self.Widget()
+        window.whatsThis = u"The window's help."
+        button = self.Widget(("QAbstractButton",), window, enabled=False, whatsThis=u"Writes the checked pairs.")
+        pending = []
+        self.assertTrue(ak.filter_event(window, button, self.Event(3, button=2), pending), "the release is taken")
+        self.assertEqual(self.helped, [], "shown once the context menu had its chance")
+        self.timers.pop()()
+        self.assertEqual(self.helped, [button])
+        self.assertTrue(ak.filter_event(window, button, self.Event(82), []), "a context menu, if Qt sends one")
+        self.assertEqual(self.helped, [button, button])
+        button.enabled = True
+        self.assertFalse(ak.filter_event(window, button, self.Event(82), []), "an enabled one: Qt's own")
+        self.assertEqual(ak.disabled_help(button), u"Writes the checked pairs.")
+        button.whatsThis, button.toolTip = u"", u"Write them."
+        self.assertEqual(ak.disabled_help(button), u"Write them.", "else its tooltip")
+        button.toolTip = u""
+        self.assertEqual(ak.disabled_help(button), u"The window's help.", "else its container's help")
+
+    def test_tooltips_are_as_wide_as_their_window_allows(self):
+        # The owner: tooltips "stupidly compacted when there's ample space"
+        measure = lambda text: 7 * len(text)
+        short = u"Drag the space between two parts up or down to give one more room."
+        laid_out = ak.tip_html(short, ak.tip_width(1000), measure)
+        self.assertIn(u'width="%d"' % (7 * len(short) + ak.TIP_MARGIN), laid_out, "one line: as wide as it is")
+        long = u"A sentence of some length that goes on. " * 6
+        self.assertIn(u'width="%d"' % ak.tip_width(1000), ak.tip_html(long, ak.tip_width(1000), measure))
+        self.assertEqual([ak.tip_width(w) for w in (400, 1000, 1400, 3000)], [360, 500, 700, 900])
+        self.assertIsNone(ak.tip_html(u'<table width="300"><tr><td>Built</td></tr></table>', 500, measure),
+                          "a tool's own layout is left as it is")
+        self.assertIsNone(ak.tip_html(u"", 500, measure))
+        self.assertIn(u"a &lt; b", ak.tip_html(u"a < b", 500, measure), "plain text stays plain")
+
+    def test_paragraphs_of_a_tooltip_are_a_blank_line_apart(self):
+        # The owner: "line jumps between paragraphs of tooltips so it reads better"
+        measure = lambda text: 7 * len(text)
+        self.assertIn(u"It is checked.<br><br>Click to write it.",
+                      ak.tip_html(u"It is checked.\nClick to write it.", 500, measure))
+        self.assertIn(u"<i>Now</i>.<br><br>Then", ak.tip_html(u"<i>Now</i>.<br>Then", 500, measure))
+        self.assertIn(u"A V<br>T o", ak.tip_html(u"A V\nT o", 500, measure), "a list, a line each, stays")
+        self.assertNotIn(u"<br><br><br>", ak.tip_html(u"One.<br><br>Two.", 500, measure))
+
+    def test_a_click_beside_the_lists_clears_their_selection(self):
+        # The owner: "It's never possible to unselect a row even by clicking outside any table"
+        window = self.Widget()
+        view = self.View(window)
+        label = self.Widget(("QLabel",), window)
+        window.at = label
+        self.assertFalse(ak.filter_event(window, window, self.Event(2), []))
+        self.assertEqual((view.selected, view.current), (False, False), "on a label: cleared")
+        view.selected = view.current = True
+        for target in (self.Widget(("QAbstractButton",), window, enabled=False),
+                       self.Widget(("QLabel",), window, props={ak.LEAVE_ALONE_PROP: True}),
+                       self.Widget(("QLabel",), window, mouseTracking=True)):
+            window.at = target
+            ak.filter_event(window, window, self.Event(2), [])
+            self.assertTrue(view.selected, "a control, grayed out or not, or a picture: kept")
+        window.at = label
+        ak.filter_event(window, window, self.Event(2, button=2), [])
+        self.assertTrue(view.selected, "a right-click: kept")
+        ak.filter_event(window, view.port, self.Event(2, pos=(5, 30)), [])
+        self.assertTrue(view.selected, "on a row: Qt's own")
+        ak.filter_event(window, view.port, self.Event(2, pos=(5, 300)), [])
+        self.assertFalse(view.selected, "under the last row: cleared")
+
+    def test_some_lists_keep_their_selection(self):
+        window = self.Widget()
+        window.setProperty(ak.WINDOW_PROP, 1)
+        pages, scripts, other = self.View(window), self.View(window), self.View(window)
+        pages.setProperty(ak.KEEP_SELECTION_PROP, True)  # (Proof's pages)
+
+        class Owner(object):
+            tool, window_key, dialog, script_tree = "Font Check", 1, window, scripts
+
+        sys._freelab_windows = {"fonts": {}, "kept": [Owner()], "next": 1, "hint": None}
+        self.assertEqual([ak.keeps_selection(v) for v in (pages, scripts, other)], [True, True, False])
+        other.selectionMode = 0
+        self.assertTrue(ak.keeps_selection(other), "a list that selects nothing")
+        other.selectionMode = 1
+        window.at = window
+        header = self.View(scripts)  # (a tree's header: a list of its own that shares the tree's selection)
+        header.kinds = ("QAbstractItemView", "QHeaderView")
+        ak.filter_event(window, window, self.Event(2), [])
+        self.assertEqual([v.selected for v in (pages, scripts, other)], [True, True, False])
+        self.assertTrue(header.selected, "a header is never cleared: that cleared the tree's selection, live")
+
+    def test_the_window_is_walked_as_built_then_only_once_a_widget_is_added(self):
+        # update_states walked every shown window each 300 ms: 1.3 ms of its 2.3 ms on Feature Code, live
+        gui = ak._qt()[1]
+        for kind in ak.HELP_KINDS + ("QWidget",):
+            setattr(gui, kind, kind)
+        filters = {}
+        self.Widget.installEventFilter = lambda widget, watcher: filters.setdefault(id(widget), []).append(watcher)
+        old_filters = getattr(sys, "_freelab_window_filters", None)
+        sys._freelab_window_filters = None
+
+        def restore():
+            del self.Widget.installEventFilter
+            sys._freelab_window_filters = old_filters
+
+        self.addCleanup(restore)
+        window = self.Widget()
+        page = self.Widget((), window)
+        self.Widget(("QAbstractButton",), page)
+        self.assertTrue(ak.install_filters(window), "as built")
+        self.assertFalse(ak.install_filters(window), "nothing added since: not walked")
+        watcher = sys._freelab_window_filters[window.property(ak.WINDOW_FILTER_PROP)]
+        self.assertIn(watcher.child_watch, filters[id(page)], "a container watched for new children")
+        later = self.Widget(("QAbstractButton",), page, enabled=False, whatsThis=u"Builds them.")
+        self.assertFalse(ak.install_filters(window), "Qt has not said so yet")
+        self.assertFalse(watcher.child_watch.eventFilter(page, self.Event(ak.CHILD_ADDED)), "the event goes on")
+        self.assertTrue(ak.install_filters(window), "a widget was added: walked")
+        self.assertIn(watcher, filters[id(later)], "a control made later gets the filter")
+        self.assertTrue(watcher.eventFilter(later, self.Event(3, button=2)), "and its right-click help")
+        self.timers.pop()()
+        self.assertEqual(self.helped, [later])
+        self.assertFalse(ak.install_filters(window))
+        watcher.eventFilter(window, self.Event(ak.CHILD_ADDED))  # (a child of the window itself)
+        self.assertTrue(ak.install_filters(window))
+
+
+class KerningCheckTableTests(unittest.TestCase):
+    """The owner: Kerning Check's tables "aligned in terms of layout with the other ones"."""
+
+    def test_the_pair_its_glyphs_then_its_numbers(self):
+        self.assertEqual(kc.COLLISION_COLUMNS, (u"Pair", u"Glyphs", u"Kerning", u"Distance", u"Fix", u"Set by",
+                                                u"Compared with"))
+        self.assertEqual(kc.COLLISION_COLUMNS.index(u"Fix"), 4, "a fix dragged by hand is shown in its own column")
+        self.assertTrue(set([u"Kerning", u"Distance", u"Fix", u"Value"]) <= set(kc.NUMBER_COLUMNS))
+        self.assertEqual(ak.glyph_icon_size(2), (int(ak.GLYPH_ICON_SIZE * 2.8), int(ak.GLYPH_ICON_SIZE * 1.45)))
+
+    def test_a_closed_font_empties_the_lists(self):
+        class Tree(object):
+            def __init__(self):
+                self.cleared = 0
+
+            def clear(self):
+                self.cleared += 1
+
+        class Tab(object):
+            def __init__(self):
+                self.tree, self.findings, self.first_checks, self.texts = Tree(), [1], [True], []
+                self.status = type("Status", (), {"setText": lambda status, text: self.texts.append(text)})()
+
+        dialog = kc.KerningCheckDialog.__new__(kc.KerningCheckDialog)  # (its window needs FontLab)
+        dialog.collisions, dialog.cleanup, dialog.masters = Tab(), Tab(), Tab()
+        calls = []
+        dialog.read_font = lambda: calls.append("read") or False  # (no font left open)
+        dialog.update_previews = lambda: calls.append("previews")
+        dialog.update_buttons = lambda: calls.append("buttons")
+        dialog.font_changed()
+        for tab in (dialog.collisions, dialog.cleanup, dialog.masters):
+            self.assertEqual((tab.tree.cleared, tab.findings, tab.first_checks, tab.texts), (1, [], [], [u""]))
+        self.assertEqual(calls, ["read", "previews", "buttons"])
+        self.assertEqual(dialog.stale, set(kc.TABS), "each list checked again as it is shown")
+
+
+class ChoiceSheetTests(unittest.TestCase):
+    def test_the_chosen_suggestion_has_a_light_tint_of_the_highlight(self):
+        # The owner: "the selected suggestions should probably get a light blue background to stand out from
+        # the unavailable buttons"
+        class Color(object):
+            def red(self):
+                return 0
+
+            def green(self):
+                return 120
+
+            def blue(self):
+                return 215
+
+        class Palette(object):
+            def color(self, role):
+                return Color()
+
+        class Gui(object):
+            class QPalette(object):
+                Highlight = 12
+
+        old = ak._qt
+        ak._qt = lambda: (None, Gui)
+        self.addCleanup(lambda: setattr(ak, "_qt", old))
+        sheet = ak.choice_sheet(Palette())
+        self.assertIn(u"QToolButton:checked { background: rgba(0, 120, 215, %d);" % ak.CHOSEN_ALPHA, sheet)
+        self.assertIn(u"QToolButton:disabled { background: transparent;", sheet, "the unavailable ones stay plain")
+        self.assertLess(ak.CHOSEN_ALPHA, 128, "a light tint: the pair's ink stays legible in either palette")
+
+
+class PairLinkTests(unittest.TestCase):
+    def test_the_pairs_written_are_named_drawn_and_clickable(self):
+        # The owner: "Auto kerning seems to never be in a situation where it'd display the list of characters"
+        text = ak.pair_links([(u"A", u"V"), (u"T", u"o")])
+        self.assertEqual(text, u'<a href="glyphname:A">A</a><a href="glyphname:V">V</a>, '
+                               u'<a href="glyphname:T">T</a><a href="glyphname:o">o</a>')
+        self.assertEqual([ak.linked_glyph_name(m) for m in re.findall(u'href="([^"]+)"', text)], [u"A", u"V", u"T", u"o"])
+        self.assertEqual(ak.LOG_PAIRS_SHOWN, 12)
+        with io.open(ak.__file__, encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertIn(u"self.log.follow(lambda: (self.fontlab, self.package, self.master))", source.split(u"class AutoKerningDialog")[1])
 
 
 class CountedSuffixTests(unittest.TestCase):
@@ -1489,6 +2082,9 @@ class CountedTextTests(unittest.TestCase):
 ARMENIAN_VO, ARMENIAN_SMALL_VO =u"\N{ARMENIAN CAPITAL LETTER VO}", u"\N{ARMENIAN SMALL LETTER VO}"
 GEORGIAN_IN, MTAVRULI_IN = u"\N{GEORGIAN LETTER IN}", ak.unichr_(0x1C98)  # (Python 2.7 has no Mtavruli names)
 KANA_RO, KANA_NO, KANA_I = u"\N{KATAKANA LETTER RO}", u"\N{HIRAGANA LETTER NO}", u"\N{HIRAGANA LETTER I}"
+HEBREW_BET, HEBREW_YOD = u"\N{HEBREW LETTER BET}", u"\N{HEBREW LETTER YOD}"
+CYRILLIC_EN, GREEK_ETA, DEVANAGARI_NA = (u"\N{CYRILLIC CAPITAL LETTER EN}", u"\N{GREEK CAPITAL LETTER ETA}",
+                                         u"\N{DEVANAGARI LETTER NA}")
 
 
 class ScriptTests(unittest.TestCase):
@@ -1503,6 +2099,100 @@ class ScriptTests(unittest.TestCase):
         self.assertEqual(ak.category(u"\N{ARMENIAN FULL STOP}"), "punctuation")
         self.assertEqual(ak.pair_kinds(KANA_NO, u"\N{IDEOGRAPHIC COMMA}"), ("kana", "kana"), "punctuation beside a kana: the kana's band")
         self.assertIsNone(ak.pair_kinds(u"\N{IDEOGRAPHIC COMMA}", u"\N{LEFT CORNER BRACKET}"))
+
+    def test_kinds_of_cyrillic_greek_and_devanagari(self):
+        self.assertEqual(ak.category(CYRILLIC_EN), "upper")
+        self.assertEqual(ak.category(u"\N{CYRILLIC SMALL LETTER GHE WITH UPTURN}"), "lower", "Ukrainian's ghe")
+        self.assertEqual(ak.category(u"\N{CYRILLIC CAPITAL LETTER IO}"), "upper")
+        self.assertEqual(ak.category(u"\N{GREEK CAPITAL LETTER ALPHA WITH TONOS}"), "upper")
+        self.assertEqual(ak.category(u"\N{GREEK SMALL LETTER FINAL SIGMA}"), "lower")
+        self.assertEqual(ak.category(DEVANAGARI_NA), "lower", "one case, held to the lowercase band")
+        self.assertEqual(ak.category(u"\N{DEVANAGARI DANDA}"), "punctuation")
+        self.assertEqual([ak.script_of(ch) for ch in (CYRILLIC_EN, GREEK_ETA, DEVANAGARI_NA, u"\N{DEVANAGARI VOWEL SIGN AA}",
+                                                      u"\N{CYRILLIC SMALL LETTER IE WITH GRAVE}", u"\N{CYRILLIC SMALL LETTER SCHWA}")],
+                         ["cyrillic", "greek", "devanagari", None, None, None],
+                         "vowel signs, grave-accented and Kazakh letters are not measured")
+        self.assertEqual(len(ak.CYRILLIC_LETTERS), 2 * 47, "Russian, Ukrainian, Belarusian, Bulgarian, Serbian, Macedonian")
+        self.assertEqual(len(ak.GREEK_CAPITALS), 33)
+        self.assertEqual(len(ak.DEVANAGARI_LETTERS), 53)
+        self.assertIn(u"\N{DOUBLE LOW-9 QUOTATION MARK}", ak.script_characters("cyrillic"))
+        self.assertIn(u"\N{DEVANAGARI DOUBLE DANDA}", ak.script_characters("devanagari"))
+        self.assertNotIn(u"0", ak.script_characters("greek"), "figures are Latin's")
+        self.assertEqual(ak.font_scripts(ak.LETTERS + ak.CYRILLIC_LETTERS + ak.GREEK_LETTERS), ["latin", "cyrillic", "greek"])
+        self.assertEqual(ak.font_scripts(ak.CYRILLIC_LETTERS.replace(u"\N{CYRILLIC SMALL LETTER PE}", u"")), [],
+                         "Cyrillic without pe, a tuning letter: not measured")
+
+    def test_right_to_left_pairs_are_kept_as_on_screen_and_typed_in_text_order(self):
+        # On screen, bet stands left of yod in "yod bet" as typed: Auto Kerning keeps (bet, yod)
+        self.assertTrue(ak.is_rtl_pair(HEBREW_BET, HEBREW_YOD))
+        self.assertTrue(ak.is_rtl_pair(u".", HEBREW_YOD), "a mark of punctuation takes its partner's direction")
+        self.assertFalse(ak.is_rtl_pair(u"A", u"V"))
+        self.assertEqual(ak.text_order(HEBREW_BET, HEBREW_YOD), HEBREW_YOD + HEBREW_BET)
+        self.assertEqual(ak.screen_order(HEBREW_YOD + HEBREW_BET), (HEBREW_BET, HEBREW_YOD))
+        self.assertEqual(ak.text_order(u"A", u"V"), u"AV", "left to right as before")
+        self.assertEqual(ak.screen_order(u"AV"), (u"A", u"V"))
+        # an opening parenthesis typed before yod stands at its right, drawn as ")"
+        self.assertEqual(ak.text_order(HEBREW_YOD, u")"), u"(" + HEBREW_YOD)
+        self.assertEqual(ak.screen_order(u"(" + HEBREW_YOD), (HEBREW_YOD, u")"))
+        for left, right in ((HEBREW_BET, HEBREW_YOD), (u".", HEBREW_YOD), (HEBREW_YOD, u"]"), (u"T", u"o")):
+            self.assertEqual(ak.screen_order(ak.text_order(left, right)), (left, right))
+        self.assertEqual(ak.pair_label(u"T", u"o"), u"To")
+        self.assertEqual(ak.pair_label(HEBREW_BET, HEBREW_YOD), HEBREW_YOD + HEBREW_BET,
+                         "typed in text order: Qt sets yod, the first, at the right")
+        self.assertEqual(ak.pair_label(u".", HEBREW_YOD),
+                         u"\N{RIGHT-TO-LEFT EMBEDDING}" + HEBREW_YOD + u".\N{POP DIRECTIONAL FORMATTING}",
+                         "with a mark, inside a right-to-left embedding: the full stop stays at the left")
+        s = ak.Suggestion(HEBREW_BET, HEBREW_YOD, u"bet", u"yod", 0)
+        self.assertEqual(ak.rtl_note(s, True), u"Read right to left: yod first, at the right. ")
+        # FontLab 7 keeps a right-to-left pair in text order (Noto Sans Hebrew: typed yod then bet, -64,
+        # is FontLab's pair (yod, bet)): bet left of yod is read from and written to the key (yod, bet)
+        self.assertEqual(s.key, (u"yod", u"bet"))
+        self.assertEqual(ak.Suggestion(u"T", u"o", u"T", u"o", 0).key, (u"T", u"o"))
+        self.assertEqual(ak.screen_of_key(HEBREW_YOD, HEBREW_BET, u"yod", u"bet"), (u"bet", u"yod"))
+        self.assertEqual(ak.screen_of_key(HEBREW_YOD, None, u"yod", u"bet.alt"), (u"bet.alt", u"yod"),
+                         "an unencoded glyph takes its partner's direction")
+        self.assertEqual(ak.screen_of_key(u"T", u"o", u"T", u"o"), (u"T", u"o"))
+        self.assertEqual(ak.screen_of_key(None, None, u"a.sc", u"b.sc"), (u"a.sc", u"b.sc"))
+        for left, right in ((HEBREW_BET, HEBREW_YOD), (HEBREW_YOD, u"."), (u"T", u"o")):
+            key = ak.kerning_key(left, right, left, right)
+            self.assertEqual(ak.screen_of_key(key[0], key[1], key[0], key[1]), (left, right))
+
+    def test_a_hebrew_pair_is_read_and_written_in_text_order(self):
+        kerning = ak.FontKerning(FakeKerning({}, {((u"yod", False), (u"bet", False)): -64}))
+        s = ak.Suggestion(HEBREW_BET, HEBREW_YOD, u"bet", u"yod", 0)
+        self.assertEqual(kerning.current(*s.key), -64, "the font's kerning of bet left of yod")
+        self.assertEqual(kerning.target(*s.key)[0], ((u"yod", False), (u"bet", False)), "written to that pair, not a reversed one")
+
+    def test_an_entrys_first_pair_without_every_class_pair(self):
+        kerning = ak.FontKerning(FakeKerning({u"T": ([u"T", u"Tcaron"], u"KernLeft"), u"o": ([u"o", u"oacute"], u"KernRight")},
+                                             {((u"T", True), (u"o", True)): -80, ((u"A", False), (u"V", False)): -60}))
+        for entry in kerning.entries:
+            self.assertEqual(kerning.first_pair(entry), kerning.pairs(entry)[0])
+        self.assertIsNone(ak.FontKerning(FakeKerning({u"e": ([], u"KernLeft")}, {((u"e", True), (u"x", False)): 5}))
+                          .first_pair(((u"e", True), (u"x", False))), "an empty class")
+        self.assertEqual(ak.rtl_note(ak.Suggestion(u"T", u"o", u"T", u"o", 0)), u"")
+
+    def test_hebrew_and_thaana(self):
+        self.assertEqual(len(ak.HEBREW_LETTERS), 27, "the five final forms included")
+        self.assertEqual(ak.category(HEBREW_BET), "lower")
+        self.assertEqual(ak.category(u"\N{THAANA LETTER RAA}"), "lower")
+        self.assertEqual(ak.category(u"\N{HEBREW PUNCTUATION MAQAF}"), "punctuation")
+        self.assertIsNone(ak.script_of(u"\N{HEBREW POINT QAMATS}"), "points are marks, not measured")
+        self.assertIsNone(ak.script_of(u"\N{THAANA ABAFILI}"), "nor the fili")
+        self.assertEqual(ak.script_of(u"\N{THAANA LETTER NOONU}"), "thaana")
+        self.assertEqual(ak.font_scripts(ak.LETTERS + ak.HEBREW_LETTERS), ["latin", "hebrew"])
+        self.assertEqual(ak.kind_character(u"\N{HEBREW LETTER LAMED}"), u"\N{HEBREW LETTER HE}")
+        self.assertEqual(set(ak.RTL_SCRIPTS), set(["hebrew", "thaana"]))
+        self.assertTrue(all(script in dict(ak.SCRIPTS) for script in ak.RTL_SCRIPTS))
+        self.assertEqual(ak.MIRRORED[u"("], u")")
+
+    def test_cyrillic_greek_and_devanagari_letters_take_their_controls(self):
+        self.assertEqual(ak.kind_character(u"\N{CYRILLIC SMALL LETTER ZHE}"), u"\N{CYRILLIC SMALL LETTER EN}")
+        self.assertEqual(ak.kind_character(u"\N{CYRILLIC CAPITAL LETTER ZHE}"), CYRILLIC_EN)
+        self.assertEqual(ak.kind_character(u"\N{GREEK CAPITAL LETTER LAMDA}"), GREEK_ETA)
+        self.assertEqual(ak.kind_character(u"\N{GREEK SMALL LETTER LAMDA}"), u"\N{GREEK SMALL LETTER ETA}")
+        self.assertEqual(ak.kind_character(u"\N{DEVANAGARI LETTER KA}"), DEVANAGARI_NA)
+        self.assertEqual(ak.SCRIPT_SIDE["cyrillic"], CYRILLIC_EN)
 
     def test_script_of_a_character(self):
         self.assertEqual([ak.script_of(ch) for ch in (u"a", u"7", ARMENIAN_VO, MTAVRULI_IN, GEORGIAN_IN, KANA_RO, u".", u"\N{CJK UNIFIED IDEOGRAPH-4E00}")],
@@ -1561,7 +2251,14 @@ class ScriptTests(unittest.TestCase):
         self.assertGreater(len(others), 3000)
         self.assertTrue(all(every[pair] >= len(latin) for pair in others))
         scripts = set(ak.script_of(ch) for pair in others for ch in pair) - set([None])
-        self.assertEqual(scripts, set(["kana", "armenian", "georgian"]))
+        self.assertEqual(scripts, set(["kana", "armenian", "georgian", "cyrillic", "greek", "devanagari", "hebrew", "thaana"]))
+        self.assertIn(HEBREW_YOD + u"\N{HEBREW LETTER FINAL MEM}", every, "Hebrew's -im, in text order")
+        self.assertNotIn(u"\N{HEBREW LETTER FINAL MEM}" + HEBREW_YOD, every, "(not as on screen)")
+        self.assertIn(u"\N{CYRILLIC SMALL LETTER EN}\N{CYRILLIC SMALL LETTER A}", every, "Russian's na")
+        self.assertIn(u"\N{GREEK CAPITAL LETTER TAU}\N{GREEK CAPITAL LETTER OMICRON}", every, "all-capital Greek")
+        self.assertIn(u"\N{DEVANAGARI LETTER KA}\N{DEVANAGARI LETTER RA}", every, "Hindi's kar")
+        self.assertTrue(any(ak.script_of(pair[0]) == "cyrillic" and pair[1] in u".," for pair in others),
+                        "Cyrillic pairs with punctuation, from running text")
         self.assertIn(u"\N{HIRAGANA LETTER SMALL TU}\N{HIRAGANA LETTER TE}", every, "a pair of a small kana")
         self.assertIn(u"\N{ARMENIAN SMALL LETTER VO}\N{ARMENIAN SMALL LETTER YIWN}", every, "Armenian's ou")
         self.assertTrue(any(ak.category(pair[0]) == "upper" for pair in others if ak.script_of(pair[0]) == "georgian"),
@@ -1586,6 +2283,15 @@ class ScriptTests(unittest.TestCase):
         self.assertEqual(ak.learned_scripts({"info": {"trained": "2026-11-10"}}), ["latin"], "an older model: Latin's")
         self.assertEqual(ak.learned_scripts({"info": {"scripts": ["latin", "armenian"]}}), ["latin", "armenian"])
         self.assertNotIn("kana", ak.learned_scripts(ak.learned_model()), "no kana model: too few fonts kern kana")
+        if ak.learned_model() is None:
+            return  # (learned_model.json is not copied beside the script for run_tests.py's Python 2.7 files)
+        for script in ("latin", "cyrillic", "greek", "armenian", "georgian", "devanagari"):
+            self.assertIn(script, ak.learned_scripts(ak.learned_model()), "held out, it beat the default in " + script)
+        for script in ("hebrew", "thaana"):
+            self.assertNotIn(script, ak.learned_scripts(ak.learned_model()), "not closer on the pairs Hebrew fonts kern; "
+                                                                               "Thaana: one design")
+        self.assertEqual(sorted(ak.learned_model()["info"]["trained on"]),
+                         ["armenian", "cyrillic", "devanagari", "georgian", "greek", "latin"])
 
     def test_a_letter_takes_its_scripts_references(self):
         self.assertEqual(ak.kind_character(u"\N{ARMENIAN SMALL LETTER BEN}"), ARMENIAN_SMALL_VO)
@@ -1691,6 +2397,58 @@ class ScriptPairCountTests(unittest.TestCase):
         self.assertEqual(self.sp.mtavruli(GEORGIAN_IN), MTAVRULI_IN)
         self.assertIsNone(self.sp.mtavruli(u"a"))
         self.assertIsNone(self.sp.armenian_capital(u"\N{ARMENIAN SMALL LIGATURE ECH YIWN}"), "a ligature has no one capital")
+
+    def test_capitals_of_cyrillic_and_greek(self):
+        self.assertEqual(self.sp.script_capital(u"\N{CYRILLIC SMALL LETTER ZHE}", "cyrillic"), u"\N{CYRILLIC CAPITAL LETTER ZHE}")
+        self.assertEqual(self.sp.script_capital(u"\N{GREEK SMALL LETTER ALPHA WITH TONOS}", "greek"),
+                         u"\N{GREEK CAPITAL LETTER ALPHA}", "all-capital Greek drops the tonos")
+        self.assertEqual(self.sp.script_capital(u"\N{GREEK SMALL LETTER IOTA WITH DIALYTIKA AND TONOS}", "greek"),
+                         u"\N{GREEK CAPITAL LETTER IOTA WITH DIALYTIKA}", "and keeps the dialytika")
+        self.assertEqual(self.sp.script_capital(u"\N{GREEK SMALL LETTER FINAL SIGMA}", "greek"), u"\N{GREEK CAPITAL LETTER SIGMA}")
+        self.assertIsNone(self.sp.script_capital(u"\N{CYRILLIC CAPITAL LETTER ZHE}", "cyrillic"), "a capital already")
+        self.assertIsNone(self.sp.script_capital(DEVANAGARI_NA, "devanagari"), "one case")
+
+    def test_word_lists_give_letter_pairs_as_often_as_their_words(self):
+        counts = self.sp.word_pair_counts({u"abc": 3, u"ba": 2, u"a-b": 5}, u"abc")
+        self.assertEqual(dict(counts), {u"ab": 3, u"bc": 3, u"ba": 2}, "a hyphen breaks a pair")
+
+    def test_a_script_not_recounted_keeps_its_section(self):
+        import tempfile
+        handle, path = tempfile.mkstemp(suffix=".txt")
+        os.close(handle)
+        try:
+            with io.open(path, "w", encoding="utf-8") as out:
+                out.write(u"# header\n# kana: 2 pairs, from 600 works\n" + KANA_RO + KANA_NO + u"\n" + KANA_NO + KANA_I
+                          + u"\n# armenian: 1 pairs, from 3 articles\n" + ARMENIAN_SMALL_VO + u",\n")
+            sections = self.sp.existing_sections(path)
+        finally:
+            os.remove(path)
+        self.assertEqual(sections, {"kana": ([KANA_RO + KANA_NO, KANA_NO + KANA_I], u"600 works"),
+                                    "armenian": ([ARMENIAN_SMALL_VO + u","], u"3 articles")})
+        self.assertEqual(self.sp.existing_sections(path), {}, "no file: no sections")
+
+    def test_the_fonts_fetched_for_other_scripts_add_no_latin(self):
+        try:
+            import dataset
+        except ImportError:  # (numpy: the training's)
+            self.skipTest("numpy is not installed")
+        fetched = os.path.join(dataset.CORPUS_DIR, "kerning-fonts", "ofl", "lora", "Lora[wght].ttf")
+        self.assertFalse(dataset.latin_measured(fetched), "Latin's training set stays the one the model was checked on")
+        self.assertFalse(dataset.latin_measured(os.path.join(dataset.CORPUS_DIR, "language-font-sources", "NotoSans.ttf")))
+        self.assertTrue(dataset.latin_measured(os.path.join(dataset.CORPUS_DIR, "Lora[wght].ttf")))
+        self.assertIn("cyrillic", dataset.SCRIPT_SHAPING)
+        self.assertEqual(set(dataset.SCRIPT_SHAPING), set(key for key, _ in ak.SCRIPTS), "every script is read as shaped")
+        hebrew = dataset.script_common_pairs("hebrew")
+        self.assertIn(u"\N{HEBREW LETTER FINAL MEM}" + HEBREW_YOD, hebrew, "measured as on screen: final mem at the left")
+        self.assertEqual(dataset.script_common_pairs("cyrillic")[0], u"\N{CYRILLIC SMALL LETTER EN}\N{CYRILLIC SMALL LETTER A}")
+
+    def test_hebrew_and_thaana_pairs_are_counted_without_their_marks(self):
+        self.assertEqual(self.sp.without_marks(u"\N{HEBREW LETTER SHIN}\N{HEBREW POINT QAMATS}\N{HEBREW LETTER LAMED}"),
+                         u"\N{HEBREW LETTER SHIN}\N{HEBREW LETTER LAMED}")
+        text = u"\N{THAANA LETTER NOONU}\N{THAANA ABAFILI}\N{THAANA LETTER RAA}\N{THAANA SUKUN}."
+        counts = self.sp.count_pairs([self.sp.without_marks(text)], ak.THAANA_LETTERS, ak.THAANA_PUNCTUATION)
+        self.assertEqual(dict(counts), {u"\N{THAANA LETTER NOONU}\N{THAANA LETTER RAA}": 1, u"\N{THAANA LETTER RAA}.": 1},
+                         "letters under their fili stand side by side")
 
     def test_pairs_are_kept_until_they_cover_the_share(self):
         counts = {u"ab": 50, u"bc": 30, u"cd": 15, u"de": 5}

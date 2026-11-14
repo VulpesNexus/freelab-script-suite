@@ -3,9 +3,12 @@ and features compared. Valid Python 2.7 and Python 3."""
 
 from __future__ import absolute_import, division, print_function
 
+import io
 import math
 import os
+import shutil
 import sys
+import tempfile
 import unittest
 
 os.environ["FREELAB_NO_AUTOSTART"] = "1"
@@ -100,6 +103,56 @@ class ChoiceTests(unittest.TestCase):
         self.assertEqual(rows, [("none", None, None, u"Choose a font" + self.ELLIPSIS), ("separator", None, None, u""),
                                 ("open", None, None, u"Open a font" + self.ELLIPSIS)],
                          "a font is not compared with itself")
+
+    def test_installed_fonts_come_after_the_file_row(self):
+        rows = fcmp.second_entries([(7, u"Sans", [u"Regular"], u"Sans.vfc")], 7, [(u"b.ttf", u"Beta"), (u"a.otf", u"alpha")])
+        self.assertEqual(rows[1:], [("separator", None, None, u""), ("open", None, None, u"Open a font" + self.ELLIPSIS),
+                                    ("separator", None, None, u""), ("installed", u"a.otf", None, u"alpha"),
+                                    ("installed", u"b.ttf", None, u"Beta")], "A to Z, its file's path for an id")
+
+    def test_an_installed_fonts_name_comes_from_its_name_table(self):
+        import struct
+
+        def font(records, collection=False):
+            strings, entries = b"", []
+            for platform, encoding, language, name_id, text in records:
+                data = text.encode("utf-16-be" if platform == 3 else "latin-1")
+                entries.append(struct.pack(">HHHHHH", platform, encoding, language, name_id, len(data), len(strings)))
+                strings += data
+            table = struct.pack(">HHH", 0, len(records), 6 + 12 * len(records)) + b"".join(entries) + strings
+            start = 16 if collection else 0  # (a collection's header: its tag, version, count, and first offset)
+            head = struct.pack(">4sHHHH", b"\x00\x01\x00\x00", 1, 0, 0, 0) + struct.pack(">4sIII", b"name", 0,
+                                                                                         start + 28, len(table))
+            whole = (struct.pack(">4sIII", b"ttcf", 0x10000, 1, start) if collection else b"") + head + table
+            return lambda offset, length: whole[offset:offset + length]
+
+        self.assertEqual(fcmp.name_table_name(font([(1, 0, 0, 4, u"Mac Name"), (3, 1, 0x40C, 4, u"Nom"),
+                                                    (3, 1, 0x409, 4, u"Fake Sans Bold")])), u"Fake Sans Bold")
+        self.assertEqual(fcmp.name_table_name(font([(3, 1, 0x409, 1, u"Fake"), (3, 1, 0x409, 2, u"Italic")])),
+                         u"Fake Italic", "family and style without a full name")
+        self.assertEqual(fcmp.name_table_name(font([(3, 1, 0x409, 4, u"First")], collection=True)), u"First")
+        self.assertIsNone(fcmp.name_table_name(lambda offset, length: b"\x00" * length), "no name table: the file's name")
+        folder = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, folder, True)
+        with open(os.path.join(folder, u"x.ttf"), "wb") as handle:
+            handle.write(b"not a font")
+        with open(os.path.join(folder, u"notes.txt"), "wb") as handle:
+            handle.write(b"")
+        self.assertEqual(fcmp.installed_fonts([folder]), [(os.path.join(folder, u"x.ttf"), u"x")])
+
+    def test_installed_fonts_give_the_same_list_until_a_folder_changes(self):
+        folder = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, folder, True)
+        with open(os.path.join(folder, u"x.ttf"), "wb") as handle:
+            handle.write(b"not a font")
+        found = fcmp.installed_fonts([folder])
+        self.assertIs(fcmp.installed_fonts([folder]), found, "read once: the same list, so a change shows")
+        with open(os.path.join(folder, u"y.ttf"), "wb") as handle:
+            handle.write(b"not a font")
+        os.utime(folder, (os.path.getmtime(folder) + 5,) * 2)  # (a file added: the folder's stamp moves)
+        again = fcmp.installed_fonts([folder])
+        self.assertIsNot(again, found)
+        self.assertEqual([name for _, name in again], [u"x", u"y"])
 
     def test_one_font_with_masters_offers_its_masters(self):
         rows = self.rows([(7, u"Sans", [u"Regular", u"Bold"], u"Sans.vfc")], 7)
@@ -733,9 +786,12 @@ class DialogTests(unittest.TestCase):
         ak._freelab_stamp = None  # (load_auto_kerning finds no file beside the script: the one loaded here is kept)
         sys.modules[fcmp.AUTO_KERNING_MODULE] = ak
         cls.ak = ak
+        cls.installed_fonts, cls.installed = fcmp.installed_fonts, []
+        fcmp.installed_fonts = lambda folders=None: list(cls.installed)  # (never this machine's fonts)
 
     @classmethod
     def tearDownClass(cls):
+        fcmp.installed_fonts = cls.installed_fonts
         cls.ak.layer_path = cls.ak_layer_path
         if cls.ak_stamp == "unset":
             del cls.ak._freelab_stamp
@@ -786,9 +842,10 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(texts[-1], u"Click <i>Compare</i> to compare the fonts chosen.")
         self.assertFalse(dialog.swap_button.enabled, "two fonts: the first stays this window's")
         dialog.choice_b.pick(0)
-        self.assertIsNone(dialog.second_key, "the placeholder row: no choice")
-        self.assertFalse(dialog.compare_button.enabled)
-        self.assertIn(u"Choose in <i>with</i>", texts[-1])
+        self.assertEqual(dialog.second_key, (second.fgPackage.id, u"Regular"),
+                         "the placeholder is no choice (its row is grayed out): the font chosen stays")
+        self.assertEqual(dialog.choice_b.currentIndex, 1)
+        self.assertTrue(dialog.compare_button.enabled)
 
     def test_two_fonts(self):
         dialog = self.dialog([first_font(), second_font()])
@@ -907,6 +964,76 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(len(dialog.results), 6)
         self.assertEqual([r.name for r in dialog.glyph_names], [u"a", u"b"], "the worst listed")
         self.assertEqual(len(dialog.kern_shown), 2)
+
+    def test_installed_fonts_are_listed_and_open_in_fontlab_when_picked(self):
+        # The owner: "'Choose a font' does nothing, only 'Open a font' is usable, which doesn't help much,
+        # especially if it does not open in the default system font folder"
+        first = first_font()
+        type(self).installed = [(u"C:\\Fonts\\zeta.ttf", u"Zeta Sans"), (u"C:\\Fonts\\alpha.otf", u"Alpha Serif"),
+                                (first.path, u"Fake A, installed")]
+        self.addCleanup(lambda: setattr(type(self), "installed", []))
+        dialog = self.dialog([first])
+        box = dialog.choice_b
+        self.assertEqual(box.rows, [u"Choose a font" + self.ELLIPSIS, None, u"Open a font" + self.ELLIPSIS, None,
+                                    u"Alpha Serif", u"Zeta Sans"], "A to Z, the font open already left out")
+        requested, opened = [], []
+        dialog.open_font = lambda path=None: opened.append(path)
+        box.pick(4)
+        self.assertEqual(opened, [u"C:\\Fonts\\alpha.otf"], "opened in FontLab, then chosen once it is in")
+        self.assertEqual((box.currentIndex, dialog.second_key), (0, None), "the choice is what it was meanwhile")
+        with io.open(fcmp.__file__, encoding="utf-8") as handle:
+            self.assertIn(u"picking one opens it \"\n                                   u\"in FontLab", handle.read(),
+                          "its help says so")
+
+    def test_installed_rows_made_again_only_when_they_change(self):
+        """read_fonts runs at each press, focus, and activation: it made and sorted some 4,000 installed
+        rows each time, comparing each file with each open font's (0.1 s a click with five fonts open)."""
+        first = first_font()
+        installed = [(u"C:\\Fonts\\zeta.ttf", u"Zeta Sans"), (u"C:\\Fonts\\alpha.otf", u"Alpha Serif")]
+        held, made = fcmp.installed_fonts, []
+        fcmp.installed_fonts = lambda folders=None: installed  # (the same list while nothing changed, as there)
+        self.addCleanup(setattr, fcmp, "installed_fonts", held)
+        real = fcmp.installed_entries
+        fcmp.installed_entries = lambda found: made.append(list(found)) or real(found)
+        self.addCleanup(setattr, fcmp, "installed_entries", real)
+        dialog = self.dialog([first])
+        count = len(made)
+        self.assertGreaterEqual(count, 1)
+        rows = list(dialog.choice_b.rows)
+        dialog.read_fonts()
+        dialog.read_fonts()
+        self.assertEqual(len(made), count, "nothing changed: not made again")
+        self.assertEqual(dialog.choice_b.rows, rows)
+        installed = installed + [(first.path, u"Fake A, installed")]  # (a font installed: a new list)
+        dialog.read_fonts()
+        self.assertEqual(len(made), count + 1)
+        self.assertEqual(dialog.choice_b.rows[4:], [u"Alpha Serif", u"Zeta Sans"], "the font open already left out")
+        dialog.read_fonts()
+        self.assertEqual(len(made), count + 1)
+        first.path = u"C:\\Elsewhere\\a.vfc"  # (the open font saved elsewhere: its installed file listed now)
+        dialog.read_fonts()
+        self.assertEqual((len(made), dialog.choice_b.rows[4:]), (count + 2, [u"Alpha Serif", u"Fake A, installed",
+                                                                             u"Zeta Sans"]))
+
+    def test_the_placeholder_is_not_a_choice_and_the_file_dialog_starts_in_a_font_folder(self):
+        first, second = first_font(), second_font()
+        dialog = self.dialog([first, second])
+        flags = []
+        qt = sys.modules["PythonQt"].QtCore.Qt
+        qt.UserRole = 256
+        self.addCleanup(lambda: delattr(qt, "UserRole"))
+        dialog.choice_b.setItemData = lambda index, value, role: flags.append((index, value, role))
+        dialog.second_rows = []
+        dialog.read_fonts()
+        self.assertIn((0, 0, 255), flags, "its row grayed out (its flags, Qt.UserRole - 1, cleared)")
+        dialog.choice_b.pick(1)
+        self.assertEqual(dialog.second_key, (second.fgPackage.id, u"Regular"))
+        dialog.choice_b.pick(0)
+        self.assertEqual(dialog.second_key, (second.fgPackage.id, u"Regular"), "picking it changes nothing")
+        folders = fcmp.font_folders()
+        self.assertEqual(dialog.open_folder(), folders[0] if folders else u"")
+        dialog.last_folder = HERE
+        self.assertEqual(dialog.open_folder(), HERE, "then where the last font came from")
 
     def test_open_a_font(self):
         first, second, third = first_font(), second_font(), two_master_font()

@@ -144,12 +144,26 @@ def first_entries(font):
     return [(font_id, master, choice_text(name, master, len(masters))) for master in masters]
 
 
-def second_entries(fonts, own=None):
+def installed_entries(installed):
+    """The second dropdown's rows of the installed fonts ([(path, name)]): set apart ("separator"), then
+    one per font ("installed", its file's path for the id), A to Z; none without any."""
+    if not installed:
+        return []
+    rows = [("separator", None, None, u"")]
+    for path, name in sorted(installed, key=lambda pair: (pair[1].lower(), pair[0].lower())):
+        rows.append(("installed", path, None, name))
+    return rows
+
+
+def second_entries(fonts, own=None, installed=(), installed_rows=None):
     """The second dropdown's rows, (kind, font id, master, text): the placeholder shown until a choice is
-    made ("none"); the other open fonts in FontLab's order, a row per master ("font"); the window's own
-    font last, and only when it has several masters (a font is compared with itself master against
-    master); then, set apart ("separator"), the row that opens a font file ("open").
-    fonts: [(font id, name, masters, file name)]; own: the window's font's id. Fonts of one name are told
+    made ("none", which cannot be picked); the other open fonts in FontLab's order, a row per master
+    ("font"); the window's own font last, and only when it has several masters (a font is compared with
+    itself master against master); then, set apart ("separator"), the row that opens a font file
+    ("open"); then the installed fonts ("installed", their file's path for the id), A to Z: picked, one
+    opens in FontLab and is chosen once it is in. fonts: [(font id, name, masters, file name)]; own: the
+    window's font's id; installed: [(path, name)], or installed_rows: their rows made already
+    (installed_entries: some 4,000 of them, made again only when they change). Fonts of one name are told
     apart by their files' names."""
     names = [name for _, name, _, _ in fonts]
     rows = [("none", None, None, PLACEHOLDER)]
@@ -160,7 +174,118 @@ def second_entries(fonts, own=None):
             rows.append(("font", font_id, master, choice_text(name, master, len(masters), note)))
     rows.append(("separator", None, None, u""))
     rows.append(("open", None, None, OPEN_ENTRY))
+    rows.extend(installed_entries(installed) if installed_rows is None else installed_rows)
     return rows
+
+
+FONT_FILE_TYPES = (u".otf", u".ttf", u".otc", u".ttc")  # the installed fonts listed (FontLab opens them all)
+_INSTALLED = {}  # folder: (its time stamp, [(path, name)]), read once a session unless a font is added or removed;
+# None: (the folders' stamps, the list installed_fonts last gave of them all)
+
+
+def font_folders():
+    """Windows' font folder and the user's own (fonts installed for one account only), those there are."""
+    found = []
+    for base, tail in ((os.environ.get("WINDIR") or os.environ.get("SystemRoot"), (u"Fonts",)),
+                       (os.environ.get("LOCALAPPDATA"), (u"Microsoft", u"Windows", u"Fonts"))):
+        if base:
+            if not isinstance(base, type(u"")):  # (Python 2's environment is bytes: unicode paths list unicode names)
+                base = base.decode(sys.getfilesystemencoding() or "mbcs", "replace")
+            folder = os.path.join(base, *tail)
+            if os.path.isdir(folder):
+                found.append(folder)
+    return found
+
+
+def name_table_name(read):
+    """A font's full name (name ID 4, else family and style: IDs 1 and 2), as its name table gives it for
+    Windows (else for the Mac), of the first font of a collection; None when it cannot be read.
+    read(offset, length) gives the file's bytes there: only the table directory and the name table are
+    read (an installed font's file may be tens of megabytes)."""
+    import struct
+    try:
+        start = 0
+        if read(0, 4) == b"ttcf":
+            start = struct.unpack(">I", read(12, 4))[0]
+        tables = struct.unpack(">H", read(start + 4, 2))[0]
+        directory = read(start + 12, 16 * tables)
+        for index in range(tables):
+            if directory[16 * index:16 * index + 4] == b"name":
+                offset, size = struct.unpack(">II", directory[16 * index + 8:16 * index + 16])
+                break
+        else:
+            return None
+        table = read(offset, size)
+        count, strings = struct.unpack(">HH", table[2:6])
+        found = {}
+        for index in range(count):
+            at = 6 + 12 * index
+            platform, encoding, language, name_id, length, where = struct.unpack(">HHHHHH", table[at:at + 12])
+            if name_id not in (1, 2, 4):
+                continue
+            raw = table[strings + where:strings + where + length]
+            if platform == 3 and encoding in (0, 1, 10):
+                rank, text = (0 if language == 0x409 else 1), raw.decode("utf-16-be", "replace")
+            elif platform == 1 and encoding == 0:
+                rank, text = 2, raw.decode("latin-1")
+            else:
+                continue
+            if name_id not in found or rank < found[name_id][0]:
+                found[name_id] = (rank, text)
+        if 4 in found:
+            return found[4][1].strip() or None
+        if 1 in found:
+            return (u"%s %s" % (found[1][1], found[2][1] if 2 in found else u"")).strip() or None
+    except Exception:
+        return None
+    return None
+
+
+def file_font_name(path):
+    """name_table_name of a font file, or None."""
+    import io
+    try:
+        with io.open(path, "rb") as handle:
+            def read(offset, length):
+                handle.seek(offset)
+                return handle.read(length)
+            return name_table_name(read)
+    except (IOError, OSError):
+        return None
+
+
+def installed_fonts(folders=None):
+    """The fonts installed on Windows ([(path, name)]), from its font folder and the user's: each
+    file's full name, or its file's name where its name table cannot be read. Read once a session (a
+    folder whose time stamp changed is read again). The same list is given back while no folder changed,
+    so a caller can tell a change by it (the second dropdown's rows are made again only then)."""
+    found, stamps = [], []
+    for folder in (font_folders() if folders is None else folders):
+        try:
+            stamp = os.path.getmtime(folder)
+        except OSError:
+            continue
+        held = _INSTALLED.get(folder)
+        if held is None or held[0] != stamp:
+            listed = []
+            try:
+                files = sorted(os.listdir(folder))
+            except OSError:
+                files = []
+            for file_name in files:
+                if os.path.splitext(file_name)[1].lower() not in FONT_FILE_TYPES:
+                    continue
+                path = os.path.join(folder, file_name)
+                listed.append((path, file_font_name(path) or os.path.splitext(file_name)[0]))
+            held = _INSTALLED[folder] = (stamp, listed)
+        stamps.append((folder, held[0], id(held[1])))
+        found.extend(held[1])
+    stamps = tuple(stamps)
+    whole = _INSTALLED.get(None)  # (the folders' lists together, as last given)
+    if whole is not None and whole[0] == stamps:
+        return whole[1]
+    _INSTALLED[None] = (stamps, found)
+    return found
 
 
 def missing_line(name, others, masters, chosen, same_master=False):
@@ -1261,9 +1386,10 @@ class CompareDialog(object):
         settings.addWidget(self.swap_button)
         settings.addWidget(QtGui.QLabel("with"))
         self.choice_b = self.combo(u"The second font: another font open in FontLab (a row for each master), or "
-                                   u"another master of the first. Its last row, <i>%s</i>, opens a font file in "
-                                   u"FontLab (as <i>File &gt; Open</i> does) and chooses it. The list follows the "
-                                   u"fonts FontLab has open." % OPEN_ENTRY)
+                                   u"another master of the first. <i>%s</i> opens a font file in FontLab (as "
+                                   u"<i>File &gt; Open</i> does, starting in Windows' font folder) and chooses it. "
+                                   u"Under it, the fonts installed on Windows (yours too), A to Z: picking one opens it "
+                                   u"in FontLab and chooses it. The list follows the fonts FontLab has open." % OPEN_ENTRY)
         settings.addWidget(self.choice_b)
         settings.addSpacing(12)
         settings.addWidget(QtGui.QLabel("Ignore differences up to"))
@@ -1599,12 +1725,67 @@ class CompareDialog(object):
         except Exception:
             return False
 
-    def open_font(self):
-        """The second dropdown's last row: a font file picked and opened in FontLab; once it is in, chosen
-        as the second font (at once when it is open already)."""
+    def installed(self):
+        """The fonts installed on Windows (installed_fonts), [] when they cannot be listed."""
+        try:
+            return installed_fonts()
+        except Exception:
+            return []
+
+    @staticmethod
+    def normal_path(path):
+        """A file's path as same_file compares it (absolute, in Windows' case), or None."""
+        try:
+            return os.path.normcase(os.path.abspath(u"%s" % path))
+        except Exception:
+            return None
+
+    def installed_rows(self, fonts):
+        """The second dropdown's rows of the installed fonts not open already (installed_entries). They
+        are made again only when the installed fonts or the open fonts' files change: read_fonts runs at
+        each press, focus, and activation of the window, and made and sorted some 4,000 rows each time,
+        comparing each file with each open font's (0.1 s a click with five fonts open)."""
+        found = self.installed()
+        opened = frozenset(self.normal_path(p.path) for p in fonts if getattr(p, "path", None))
+        held = getattr(self, "installed_held", None)
+        if held is not None and held[0] is found and held[1] == opened:
+            return held[2]
+        normal = self.normal_path
+        rows = installed_entries([(path, name) for path, name in found if normal(path) not in opened])
+        self.installed_held = (found, opened, rows)
+        return rows
+
+    def placeholder_unpickable(self):
+        """The second dropdown's placeholder shown, not picked: its row grayed out in the list (its flags
+        cleared, as Qt's own model reads them), so that it does nothing when clicked."""
+        QtCore = _qt()[0]
+        try:
+            for index, row in enumerate(self.second_rows):
+                if row[0] == "none":
+                    self.choice_b.setItemData(index, 0, int(QtCore.Qt.UserRole) - 1)
+        except Exception:
+            pass  # (a Qt whose model will not: picking it still changes nothing, second_activated)
+
+    def open_folder(self):
+        """Where Open a font... starts: the folder of the last font opened from it, else Windows' font
+        folder (or the user's own)."""
+        last = getattr(self, "last_folder", None)
+        if last and os.path.isdir(last):
+            return last
+        folders = font_folders()
+        return folders[0] if folders else u""
+
+    def open_font(self, path=None):
+        """The second dropdown's Open a font... row (a font file picked, the dialog starting in a font
+        folder), or an installed font's row (path): the font opened in FontLab; once it is in, chosen as
+        the second font (at once when it is open already)."""
         QtCore, QtGui = _qt()
-        path = QtGui.QFileDialog.getOpenFileName(self.dialog, u"Open a font to compare", u"", self.OPEN_FILTER)
-        path = u"%s" % (path[0] if isinstance(path, (tuple, list)) else path or u"")
+        if path is None:
+            path = QtGui.QFileDialog.getOpenFileName(self.dialog, u"Open a font to compare", self.open_folder(),
+                                                     self.OPEN_FILTER)
+            path = u"%s" % (path[0] if isinstance(path, (tuple, list)) else path or u"")
+            if path:
+                self.last_folder = os.path.dirname(path)
         if not path:
             return
         fonts = self.open_fonts()
@@ -1742,7 +1923,10 @@ class CompareDialog(object):
         self.by_id = dict((entry[0], package) for entry, package in zip(listed, fonts))
         own = listed[0] if self.own_listed and listed else None
         first = first_entries(own) if own is not None else []
-        second = second_entries(listed, own[0] if own is not None else None)
+        installed_rows = []
+        if own is not None:  # (the fonts installed on Windows, those not open already, to compare with directly)
+            installed_rows = self.installed_rows(fonts)
+        second = second_entries(listed, own[0] if own is not None else None, installed_rows=installed_rows)
         lost = False
         self.filling = True
         try:
@@ -1760,6 +1944,7 @@ class CompareDialog(object):
             if second != self.second_rows:
                 self.second_rows = second
                 self.fill_box(self.choice_b, [None if row[0] == "separator" else row[3] for row in second])
+                self.placeholder_unpickable()
             held = self.second_key
             lost = not self.set_second(held) and held is not None  # (its font closed, or its master gone)
         finally:
@@ -1817,11 +2002,14 @@ class CompareDialog(object):
         """A row of the second dropdown picked by the user: its last row opens a font file, the choice
         staying what it was (the font opened is chosen once FontLab has it)."""
         try:
-            kind = self.second_rows[index][0] if isinstance(index, int) and 0 <= index < len(self.second_rows) else None
-            if kind in ("open", "separator"):  # (neither is a font: the dropdown shows the choice again)
+            row = self.second_rows[index] if isinstance(index, int) and 0 <= index < len(self.second_rows) else None
+            kind = row[0] if row is not None else None
+            if kind in ("open", "separator", "installed", "none"):  # (no open font: the dropdown shows the choice again)
                 self.set_second(self.second_key)
             if kind == "open":
                 self.open_font()
+            elif kind == "installed":
+                self.open_font(row[1])  # (opened in FontLab, then chosen once it is in)
         except Exception as exc:  # a signal's handler must not raise
             self.log.add(u"Could not open a font: %s" % self.ak.html(exc), "error")
 
@@ -1834,10 +2022,10 @@ class CompareDialog(object):
             row = self.second_rows[index] if isinstance(index, int) and 0 <= index < len(self.second_rows) else None
             if row is not None and row[0] == "font":
                 self.second_key = row[1:3]
-            elif row is not None and row[0] == "none":
-                self.second_key = None
+            elif row is not None and row[0] == "none" and self.second_key is None:
+                pass  # (the placeholder, shown while nothing is chosen)
             elif row is not None:
-                return  # the row that opens a file: second_activated puts the choice back
+                return  # a row that opens a file, or the placeholder: second_activated puts the choice back
             self.say_state(True)
             self.update_buttons()
         except Exception:
@@ -2041,6 +2229,18 @@ class CompareDialog(object):
         self.fill_kerning()
         self.fill_features()
 
+    def font_changed(self):
+        """This window's font was closed, or a font opened for this window without one (fonts_tick): the
+        dropdowns read again (the first lists the new font's masters, or nothing), the top line says
+        what is missing; a comparison shown is the old font's, and the log says so."""
+        if self.busy:
+            return
+        compared = self.sides is not None
+        self.read_fonts()
+        if compared:
+            self.log.add(u"This window's font changed: the lists show the last comparison until you click %s."
+                         % self.ak.i(u"Compare"), "warning")
+
     def history_moved(self):
         """An undo, a redo, or an edit in either font: compared again."""
         QtCore, QtGui = _qt()
@@ -2066,6 +2266,10 @@ class CompareDialog(object):
         ready = self.first_key() is not None and self.second_key is not None and not self.missing()
         ak.enable(self.compare_button, not self.busy and ready)  # grayed until both sides are chosen
         ak.enable(self.swap_button, not self.busy and self.can_swap())
+        # No font of its own: no second font to choose for it, no differences to ignore yet
+        own = self.first_key() is not None
+        ak.enable(self.choice_b, own and not self.busy)
+        ak.enable(self.threshold, own)
         tab_texts = (u"Glyphs", u"Kerning", u"Features")
         if self.sides is not None:
             tab_texts = (u"Glyphs %s" % grouped(len(self.results)), u"Kerning %s" % grouped(

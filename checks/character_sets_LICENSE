@@ -4,11 +4,14 @@ points in a compact form. No other part of the sources is included.
 
 1. The Unicode Character Database, version 17.0.0 (https://www.unicode.org/Public/17.0.0/ucd/:
    Blocks.txt, UnicodeData.txt, DerivedCoreProperties.txt, Scripts.txt, ScriptExtensions.txt,
-   PropertyValueAliases.txt, DerivedAge.txt), Copyright (c) Unicode, Inc.,
-   under the Unicode License V3: the assigned characters of some blocks, the characters
-   with the Math property, the currency symbols (general category Sc), and, for each
-   script, its own characters (the Script property), the characters it shares with other
-   scripts (Script_Extensions), and the version it was first encoded in.
+   PropertyValueAliases.txt, DerivedAge.txt, and Unihan.zip's Unihan_IRGSources.txt),
+   Copyright (c) Unicode, Inc., under the Unicode License V3: the assigned characters of
+   some blocks, the characters with the Math property, the currency symbols (general
+   category Sc), the ideographs of each Vietnamese source of the IRG (kIRG_VSource), which
+   characters are optional (presentation forms, compatibility ideographs, canonical
+   singletons, by their decompositions), and, for each script, its own characters (the
+   Script property), the characters it shares with other scripts (Script_Extensions), and
+   the version it was first encoded in.
 
 2. Google Fonts' glyph sets, version 1.1.3 (https://github.com/googlefonts/glyphsets),
    by Google and the project's contributors, under the Apache License, Version 2.0: the

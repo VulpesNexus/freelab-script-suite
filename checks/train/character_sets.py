@@ -3,7 +3,8 @@
 Font Check lists these sets beside the languages, each covered by a definition that can be cited:
 
 - Unicode 17.0.0 (the Unicode Character Database, Unicode License V3): the assigned characters of
-  some blocks (Blocks.txt, UnicodeData.txt) used in phonetics, mathematics, and for symbols; the
+  some blocks (Blocks.txt, UnicodeData.txt) used in phonetics, mathematics, East Asian typesetting,
+  and notations, and for symbols; the
   characters with the Math property (DerivedCoreProperties.txt; Unicode Technical Report #25); the
   currency symbols (general category Sc). Control and format characters (categories Cc and Cf) are
   left out of these: no glyph is drawn for them.
@@ -26,7 +27,9 @@ import json
 import os
 import re
 import tarfile
+import unicodedata
 import urllib.request
+import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT_FILE = os.path.join(HERE, os.pardir, "character_sets.json")
@@ -54,6 +57,9 @@ SOURCES = {  # file name: (URL, SHA-256)
     "unicode-%s-DerivedAge.txt" % UNICODE_VERSION: (
         "https://www.unicode.org/Public/%s/ucd/DerivedAge.txt" % UNICODE_VERSION,
         "f8ecdf768bdc210f201abd271d9bc587825618a86a7046a8146cc816393f1998"),
+    "unicode-%s-Unihan.zip" % UNICODE_VERSION: (  # (read: Unihan_IRGSources.txt, kIRG_VSource)
+        "https://www.unicode.org/Public/%s/ucd/Unihan.zip" % UNICODE_VERSION,
+        "f7a48b2b545acfaa77b2d607ae28747404ce02baefee16396c5d2d7a8ef34b5e"),
     "glyphsets-%s.tar.gz" % GLYPHSETS_TAG: (
         "https://codeload.github.com/googlefonts/glyphsets/tar.gz/refs/tags/%s" % GLYPHSETS_TAG,
         "4d80e35548c9dbcf0a787fb936df86d5c2a14d1a359ed9c492f304d3c169c03a"),
@@ -70,9 +76,113 @@ SOURCES = {  # file name: (URL, SHA-256)
         "aed8bd71a2e377895fda1fb0e2df54f7b49c685c",
         "9f2717cf99c22fdf1e7b7a9a223ff05573392663cb24111002298507e65d9919"),
 }
-GROUPS = ("Phonetics", "Mathematics", "Symbols and punctuation", "Notation", "Games and pictographs",
+GROUPS = ("Phonetics", "Mathematics", "Symbols and punctuation", "CJK symbols and forms",
+          "Han repertoires", "Notation", "Games and pictographs", "Legacy",
           "Foundries")  # (shown as "Character sets: foundries")
-PHONETICS, MATHEMATICS, SYMBOLS, NOTATION, PICTOGRAPHS, FOUNDRY = range(6)
+PHONETICS, MATHEMATICS, SYMBOLS, CJK, HAN, NOTATION, PICTOGRAPHS, LEGACY, FOUNDRY = range(9)
+# The repertoires of ideographs a CJK font is made for, and those of the other writings in Han
+# characters (Vietnam's Chu Nom, Zhuang's Sawndip, Japan's kokuji), by Unihan (Unicode 17.0.0): one set
+# per national standard, list, or IRG source. What each is, as UAX #38 (revision 39, for Unicode
+# 17.0.0) names it. Font Check's languages had the few thousand ideographs of Hyperglot's Chinese,
+# Japanese, and Korean rows (Japanese: 1,958 of the 2,136 Joyo kanji; Korean: 755 hanja). No source
+# here declares an orthography of Vietnamese or Zhuang in Han characters (Google's data has a file for
+# vi_Hani with no characters; CLDR records Han as a secondary script of Vietnamese), so these are sets,
+# not languages' rows. Each: (id, name, (Unihan field, the value or the values' prefixes it takes, or
+# None for any), what UAX #38 says it is).
+HAN_SETS = (  # (names spelled with escapes: the source stays ASCII)
+    ("unihan-core2020", "Unihan Core 2020 (Unihan kUnihanCore2020)", ("kUnihanCore2020", None),
+     "the minimal set of required ideographs for East Asia"),
+    ("unihan-gb2312", "GB/T 2312-1980 (Unihan G0)", ("kIRG_GSource", ("G0-",)), "GB/T 2312-1980"),
+    ("unihan-tgh", "T\N{LATIN SMALL LETTER O WITH MACRON}ngy\N{LATIN SMALL LETTER O WITH GRAVE}ng Gu\N{LATIN SMALL LETTER I WITH MACRON}"
+                   "f\N{LATIN SMALL LETTER A WITH GRAVE}n H\N{LATIN SMALL LETTER A WITH GRAVE}nz\N{LATIN SMALL LETTER I WITH GRAVE}"
+                   "bi\N{LATIN SMALL LETTER A WITH CARON}o, 2013 (Unihan kTGH)", ("kTGH", None),
+     "the table of general standard Chinese characters"),
+    ("unihan-big5", "Big Five (Unihan kBigFive)", ("kBigFive", None), "Big Five"),
+    ("unihan-hkscs", "HKSCS-2008 and 2016 (Unihan H and HD)", ("kIRG_HSource", ("H-", "HD-")),
+     "the Hong Kong Supplementary Character Set, 2008 and 2016"),
+    ("unihan-joyo", "J\N{LATIN SMALL LETTER O WITH MACRON}y\N{LATIN SMALL LETTER O WITH MACRON} kanji, 2010 (Unihan kJoyoKanji)",
+     ("kJoyoKanji", ("2010",)), "the J\N{LATIN SMALL LETTER O WITH MACRON}y\N{LATIN SMALL LETTER O WITH MACRON} Kanji table of 2010"),
+    ("unihan-jinmeiyo", "Jinmei-y\N{LATIN SMALL LETTER O WITH MACRON} kanji (Unihan kJinmeiyoKanji)", ("kJinmeiyoKanji", None),
+     "the Jinmei-y\N{LATIN SMALL LETTER O WITH MACRON} Kanji table"),
+    ("unihan-jis0208", "JIS X 0208-1990 (Unihan J0)", ("kIRG_JSource", ("J0-",)), "JIS X 0208-1990"),
+    # (kJIS0213 maps the ideographs JIS X 0213 adds to JIS X 0208: its levels 3 and 4, 3,695 of them)
+    ("unihan-jis0213", "JIS X 0213:2004, levels 3 and 4 (Unihan kJIS0213)", ("kJIS0213", None),
+     "the JIS X 0213:2004 mapping"),
+    ("unihan-kokuji", "Japanese kokuji (Unihan JK)", ("kIRG_JSource", ("JK-",)), "the Japanese KOKUJI Collection"),
+    ("unihan-ksx1001", "KS X 1001:2004 hanja (Unihan K0)", ("kIRG_KSource", ("K0-",)), "KS X 1001:2004"),
+    ("unihan-koredu", "Basic education hanja, 2007 (Unihan kKoreanEducationHanja)", ("kKoreanEducationHanja", None),
+     "the list of 1,800 basic ideographs for education in Hanmun"),
+    ("unihan-korname", "Personal-name hanja (Unihan kKoreanName)", ("kKoreanName", None),
+     "the list of ideographs for personal names"),
+    ("unihan-sawndip", "Sawndip (Unihan GZ, GZA, GPGLG, and GLGYJ)", ("kIRG_GSource", ("GZ-", "GZA-", "GPGLG-", "GLGYJ-")),
+     "the Ancient Zhuang Character Dictionary (1989) and the sources of Zhuang songs and texts"),
+    ("unihan-v0", "TCVN 5773:1993 (Unihan V0)", ("kIRG_VSource", ("V0-",)), "the Vietnamese standard TCVN 5773:1993"),
+    ("unihan-v1", "TCVN 6056:1995 (Unihan V1)", ("kIRG_VSource", ("V1-",)), "the Vietnamese standard TCVN 6056:1995"),
+    ("unihan-v2", "VHN 01:1998 (Unihan V2)", ("kIRG_VSource", ("V2-",)), "VHN 01:1998"),
+    ("unihan-v3", "VHN 02:1998 (Unihan V3)", ("kIRG_VSource", ("V3-",)), "VHN 02:1998"),
+    ("unihan-v4", "H\N{LATIN SMALL LETTER A WITH ACUTE}n N\N{LATIN SMALL LETTER O WITH CIRCUMFLEX}m Coded Character "
+                  "Repertoire (Unihan V4)", ("kIRG_VSource", ("V4-",)),
+     "Kho Ch\N{LATIN SMALL LETTER U WITH HORN AND TILDE} H\N{LATIN SMALL LETTER A WITH ACUTE}n "
+     "N\N{LATIN SMALL LETTER O WITH CIRCUMFLEX}m M\N{LATIN SMALL LETTER A WITH GRAVE} Ho\N{LATIN SMALL LETTER A WITH ACUTE} "
+     "(the H\N{LATIN SMALL LETTER A WITH ACUTE}n N\N{LATIN SMALL LETTER O WITH CIRCUMFLEX}m Coded Character "
+     "Repertoire), H\N{LATIN SMALL LETTER A WITH GRAVE} N\N{LATIN SMALL LETTER O WITH CIRCUMFLEX AND DOT BELOW}i, 2007"),
+    ("unihan-vn", "Vietnamese extensions (Unihan VN)", ("kIRG_VSource", ("VN-",)),
+     "the Vietnamese horizontal and vertical extensions"),
+)
+UNIHAN_PREFIX = "unihan-"  # (a set of Unihan's ideographs)
+# Optional characters: listed in a set or a script's row, but not needed for it to be complete, since
+# text does not store them (optional_codes says which). They are
+# - the presentation forms of these three blocks, every character with a decomposition (the Latin,
+#   Armenian, and Hebrew ligatures and pointed or wide letters; the Arabic contextual forms and
+#   ligatures) and the Arabic tail fragment, a piece of legacy shaping with none: fonts draw them by
+#   shaping now, from the plain letters text stores;
+PRESENTATION_BLOCKS = ("Alphabetic Presentation Forms", "Arabic Presentation Forms-A", "Arabic Presentation Forms-B")
+PRESENTATION_WITHOUT_DECOMPOSITION = (0xFE73,)  # ARABIC TAIL FRAGMENT
+# - but for the characters of Arabic Presentation Forms-A still typed as signs in their own right, which
+#   stay required: those Unicode classes as symbols or punctuation (the Arabic symbols U+FBB2 to U+FBC2,
+#   the honorific ligatures, the Basmala, the ornate parentheses, the rial sign), and three ligatures it
+#   classes as letters, U+FDF2 (Allah) and U+FDFA (an honorific: "sallallahou alayhe wasallam"), which
+#   the pinned word counts show typed as signs (Unilex: Urdu 1,116 times, Hausa 4,583), and U+FDFB
+#   (the honorific "jallajalalouhou"), of the same kind as U+FDFA;
+IN_USE_LETTERS = (0xFDF2, 0xFDFA, 0xFDFB)
+OPTIONAL_ABOUT = ("optional: {set id: its optional characters, as hexadecimal code points and ranges}, and each "
+                  "script row's last column: characters the set or script holds but is complete without, since text "
+                  "does not store them (presentation forms, which fonts draw by shaping from the plain letters; "
+                  "compatibility ideographs and other characters normalization replaces by another). A Legacy set's "
+                  "characters are all optional.")
+# - and every canonical singleton, a character Unicode's normalization (NFC) replaces by another single
+#   one, so that normalized text never holds it: the CJK compatibility ideographs (duplicates of unified
+#   ones kept for round trips with older standards) and a few others (the Kelvin, Ohm, and angstrom
+#   signs, two angle brackets, two spaces, two combining tone marks), but the Greek ones, which stay
+#   required: the owner, "Let's include all Greek polytonic letters (oxia)": polytonic text keeps the
+#   letters with oxia, the standalone oxia and varia, prosgegrammeni, the koronis, and the numeral sign
+#   (each a character whose Unicode name says GREEK). The Ohm sign, a duplicate of capital omega whose
+#   name does not, stays optional.
+GREEK_KEPT = "GREEK"  # (a canonical singleton whose name holds this word stays required)
+# A set whose characters are all optional is a Legacy set: the blocks of those characters, but the few
+# each holds that text does use (a Hebrew mark; the Arabic signs above; twelve unified ideographs), which
+# their scripts' rows count as required.
+LEGACY_BLOCKS = PRESENTATION_BLOCKS + ("CJK Compatibility Ideographs", "CJK Compatibility Ideographs Supplement")
+LEGACY_NOTES = {
+    "Alphabetic Presentation Forms": "the Latin and Armenian ligatures and the Hebrew letters with points, wide "
+                                     "letters, and ligature that older encodings stored as characters (but the "
+                                     "Judeo-Spanish varika, a Hebrew mark in use); fonts draw these by shaping now, "
+                                     "from the plain letters text stores.",
+    "Arabic Presentation Forms-A": "the Arabic ligatures and contextual forms that older encodings stored as "
+                                   "characters (but the symbols, honorifics, ornate parentheses, and rial sign typed in "
+                                   "their own right, which the Arabic script counts as required); fonts draw these by "
+                                   "shaping now, from the plain letters text stores.",
+    "Arabic Presentation Forms-B": "the contextual forms of the Arabic letters (and a tail fragment) that older "
+                                   "encodings stored as characters; fonts draw these by shaping now, from the plain "
+                                   "letters text stores.",
+    "CJK Compatibility Ideographs": "duplicates of unified ideographs kept for round trips with older standards, "
+                                    "which normalization replaces by the unified ones (but the twelve unified "
+                                    "ideographs of the block, which Han counts as required); fonts give such forms "
+                                    "through variation sequences now.",
+    "CJK Compatibility Ideographs Supplement": "duplicates of unified ideographs kept for round trips with older "
+                                              "standards, which normalization replaces by the unified ones; fonts "
+                                              "give such forms through variation sequences now.",
+}
 NO_GLYPH = ("Cc", "Cf")  # control and format characters: no glyph is drawn for them
 NOT_CHARACTERS = ("Co", "Cs")  # private use and surrogates: assigned to no character
 SCRIPTS_GROUP = "Scripts (Unicode)"  # the scripts' section in the Character sets tab
@@ -110,6 +220,20 @@ BLOCKS = (  # (group, Unicode block): its assigned characters
     (PICTOGRAPHS, "Mahjong Tiles"), (PICTOGRAPHS, "Miscellaneous Symbols and Pictographs"),
     (PICTOGRAPHS, "Emoticons"), (PICTOGRAPHS, "Transport and Map Symbols"),
     (PICTOGRAPHS, "Supplemental Symbols and Pictographs"), (PICTOGRAPHS, "Symbols and Pictographs Extended-A"),
+    # Added after a second survey (every block of Blocks.txt against the sets): the blocks whose
+    # characters are no one script's own (Common or Inherited, which ScriptExtensions.txt may lend to
+    # several scripts) and that no set held whole. The combining marks, which orthographies ask for
+    # one by one; the East Asian symbols and compatibility forms, a group of their own; numbers and
+    # marks several scripts share; and the Arabic mathematical alphabet, as its Latin counterpart.
+    (PHONETICS, "Combining Diacritical Marks"), (PHONETICS, "Combining Diacritical Marks Extended"),
+    (PHONETICS, "Combining Diacritical Marks Supplement"), (PHONETICS, "Combining Half Marks"),
+    (MATHEMATICS, "Combining Diacritical Marks for Symbols"), (MATHEMATICS, "Arabic Mathematical Alphabetic Symbols"),
+    (CJK, "CJK Symbols and Punctuation"), (CJK, "Ideographic Description Characters"), (CJK, "Kanbun"),
+    (CJK, "CJK Strokes"), (CJK, "Enclosed CJK Letters and Months"), (CJK, "CJK Compatibility"),
+    (CJK, "Enclosed Ideographic Supplement"), (CJK, "Vertical Forms"), (CJK, "CJK Compatibility Forms"),
+    (CJK, "Small Form Variants"), (CJK, "Halfwidth and Fullwidth Forms"),
+    (NOTATION, "Aegean Numbers"), (NOTATION, "Coptic Epact Numbers"), (NOTATION, "Common Indic Number Forms"),
+    (NOTATION, "Vedic Extensions"),
 )
 GOOGLE = (  # (group, glyph set, name shown): the set's .nam file
     (PHONETICS, "GF_Phonetics_IPAStandard", "IPA (GF Phonetics IPA Standard)"),
@@ -160,12 +284,21 @@ def download(folder):
     for name, (url, digest) in sorted(SOURCES.items()):
         path = os.path.join(folder, name)
         if not os.path.isfile(path):
-            with urllib.request.urlopen(url, timeout=120) as response, open(path, "wb") as handle:
-                handle.write(response.read())
+            download_one(url, path)
         if sha256_of(path) != digest:
             raise SystemExit("%s: SHA-256 %s, expected %s" % (path, sha256_of(path), digest))
         found[name] = path
     return found
+
+
+def download_one(url, path):
+    """A file fetched over HTTPS, with a generic User-Agent, written whole or not at all."""
+    request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; fetch)"})
+    with urllib.request.urlopen(request, timeout=300) as response:
+        data = response.read()
+    with open(path + ".part", "wb") as handle:
+        handle.write(data)
+    os.replace(path + ".part", path)
 
 
 def text_of(path):
@@ -199,6 +332,89 @@ def categories(unicode_data):
         else:
             found[code] = fields[2]
     return found
+
+
+def decompositions(unicode_data):
+    """{code point: its decomposition field ("<isolated> 0627", "6ED1")} of the characters that have one."""
+    found = {}
+    for line in unicode_data.splitlines():
+        fields = line.split(";")
+        if len(fields) > 5 and fields[5]:
+            found[int(fields[0], 16)] = fields[5]
+    return found
+
+
+def optional_codes(files, category=None):
+    """(the optional characters, the characters of the presentation blocks kept required as signs in use):
+    see PRESENTATION_BLOCKS and the notes above it."""
+    text = text_of(files["unicode-%s-UnicodeData.txt" % UNICODE_VERSION])
+    category = category or categories(text)
+    decomposed = decompositions(text)
+    spans = blocks(text_of(files["unicode-%s-Blocks.txt" % UNICODE_VERSION]))
+    drawn = lambda code: code in category and category[code] not in NO_GLYPH + NOT_CHARACTERS
+    optional, in_use = set(), set()
+    for name in PRESENTATION_BLOCKS:
+        low, high = spans[name]
+        for code in range(low, high + 1):
+            if not drawn(code):
+                continue
+            if name == "Arabic Presentation Forms-A" and (category[code][0] in "SP" or code in IN_USE_LETTERS):
+                in_use.add(code)
+            elif code in decomposed or code in PRESENTATION_WITHOUT_DECOMPOSITION:
+                optional.add(code)
+    names = dict((int(line.split(";")[0], 16), line.split(";")[1]) for line in text.splitlines() if ";" in line)
+    for code, mapping in decomposed.items():  # (the canonical singletons, but the Greek ones)
+        if (not mapping.startswith("<") and len(mapping.split()) == 1 and drawn(code)
+                and GREEK_KEPT not in names.get(code, "").split()):
+            optional.add(code)
+    return optional, in_use
+
+
+def unihan_fields(files, wanted):
+    """{Unihan field: {code point: value}} of the fields wanted, from every file of Unihan.zip."""
+    found = dict((field, {}) for field in wanted)
+    with zipfile.ZipFile(files["unicode-%s-Unihan.zip" % UNICODE_VERSION]) as archive:
+        for name in sorted(archive.namelist()):
+            for line in archive.read(name).decode("utf-8").splitlines():
+                parts = line.split("\t")
+                if len(parts) == 3 and parts[1] in found:
+                    found[parts[1]][int(parts[0][2:], 16)] = parts[2]
+    for field, values in found.items():
+        if not values:
+            raise SystemExit("Unihan has no field %s" % field)
+    return found
+
+
+def legacy_codes(path=OUT_FILE):
+    """The characters of the Legacy sets of a data file (presentation forms, compatibility ideographs),
+    for the orthographies' train scripts. A missing file stops the build: the languages would keep
+    presentation forms, and their data would drift from what is committed with no error."""
+    if not os.path.isfile(path):
+        raise SystemExit("%s is missing: restore it (git checkout) or build it with character_sets.py first" % path)
+    with open(path, encoding="ascii") as handle:
+        data = json.load(handle)
+    if "Legacy" not in data["groups"]:
+        return set()
+    legacy = data["groups"].index("Legacy")
+    return set(code for row in data["sets"] if row[2] == legacy for code in codes_of(row[4]))
+
+
+def without_legacy(items, legacy, split):
+    """An orthography's characters with each Legacy character replaced by what normalization (NFKC)
+    makes of it, split into characters by split (an isolated alef: the alef), each once: a source that
+    lists a presentation form names the letter, which is what text stores and a font is checked for."""
+    found = []
+    for item in items:
+        pieces = split(unicodedata.normalize("NFKC", item)) if any(ord(ch) in legacy for ch in item) else [item]
+        for piece in pieces:
+            if piece and piece not in found and not any(ord(ch) in legacy for ch in piece):
+                found.append(piece)
+    return found
+
+
+def optional_of(codes, optional):
+    """A row's optional characters, as ranges ("" when none)."""
+    return ranges_text(set(codes) & optional)
 
 
 def blocks(text):
@@ -427,6 +643,26 @@ def build(files):
                     "%s, the block %s (U+%04X to U+%04X): its assigned characters, control and format characters "
                     "left out." % (unicode_note, block, low, high),
                     set(code for code in range(low, high + 1) if drawn(code)))
+        if group == HAN:
+            fields = unihan_fields(files, set(field for _, _, (field, _), _ in HAN_SETS))
+            low_planes = [block_spans[name] for name in ("CJK Unified Ideographs", "CJK Unified Ideographs Extension A")]
+            for key, name, (field, values), what in HAN_SETS:
+                codes = set(code for code, value in fields[field].items()
+                            if values is None or any(value == one or value.startswith(one) for one in values))
+                past = sum(1 for one in codes if not any(low <= one <= high for low, high in low_planes))
+                add(key, name, group,
+                    "%s, Unihan (%s%s): the %s ideographs of %s, as UAX #38 names it; %s of them past CJK Unified "
+                    "Ideographs and Extension A (Extension B and later)." % (
+                        unicode_note, field, " " + ", ".join(one.rstrip("-") for one in values) if values else "",
+                        "{:,}".format(len(codes)), what, "{:,}".format(past)), codes)
+        if group == LEGACY:
+            optional, _ = optional_codes(files, category)
+            for block in LEGACY_BLOCKS:
+                low, high = block_spans[block]
+                add("block-%04x" % low, "%s (Unicode block)" % block, group,
+                    "%s, the block %s (U+%04X to U+%04X), every character optional: %s" % (
+                        unicode_note, block, low, high, LEGACY_NOTES[block]),
+                    set(code for code in range(low, high + 1) if code in optional))
         if group == FOUNDRY:
             for archive, name, lists in ADOBE:
                 codes, sequences = set(), []
@@ -442,6 +678,19 @@ def build(files):
     return rows
 
 
+def sets_optional(rows, optional):
+    """{set id: its optional characters as ranges}, for the sets Unicode defines (its blocks, the Math
+    property, the currency symbols) that hold any. A foundry's set (Google's, Adobe's) is checked as its
+    list says: Adobe Latin 1 asks for the fi and fl ligatures, and they stay required there."""
+    found = {}
+    for row in rows:
+        if row[0].startswith(("block-", "unicode-", UNIHAN_PREFIX)):
+            ranges = optional_of(codes_of(row[4]), optional)
+            if ranges:
+                found[row[0]] = ranges
+    return found
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--download", required=True, help="a folder, outside the repository, for the pinned sources")
@@ -454,6 +703,7 @@ def main():
     args = parser.parse_args()
     files = download(args.download)
     rows, scripts = build(files), build_scripts(files)
+    optional, in_use = optional_codes(files)
     if args.survey:
         old = None
         if args.before:
@@ -476,16 +726,26 @@ def main():
             "columns": ["id", "name", "group", "definition", "characters", "sequences"],
             "groups": list(GROUPS),
             "sets": rows,  # characters: hexadecimal code points and ranges; sequences: code points joined by +
+            # Optional characters (presentation forms, compatibility ideographs, canonical singletons): a
+            # set or a script holds them, but is complete without them. Kept beside the sets' rows, not
+            # in them, so that a reader of six columns reads this file as before.
+            "optional_about": OPTIONAL_ABOUT,
+            "optional": sets_optional(rows, optional),
             # Every script of Unicode, checkable as a set where no language's orthography is known: its
-            # own characters (Scripts.txt), those it shares (ScriptExtensions.txt), and the version of
-            # Unicode it was first encoded in (DerivedAge.txt).
+            # own characters (Scripts.txt), those it shares (ScriptExtensions.txt), the version of
+            # Unicode it was first encoded in (DerivedAge.txt), and those of either that are optional.
             "scripts": {"unicode": UNICODE_VERSION, "group": SCRIPTS_GROUP,
-                        "columns": ["name", "characters", "shared", "since"], "rows": scripts}}
+                        "columns": ["name", "characters", "shared", "since", "optional"],
+                        "rows": [row + [optional_of(codes_of(row[1]) | codes_of(row[2]), optional)] for row in scripts]}}
     with open(args.out, "w", encoding="ascii", newline="\n") as handle:
         json.dump(data, handle, ensure_ascii=True, separators=(",", ":"))
         handle.write("\n")
     print("%d character sets and %d scripts written to %s (%d bytes)" % (
         len(rows), len(scripts), os.path.basename(args.out), os.path.getsize(args.out)))
+    print("%d optional characters, held by %d sets and %d scripts; %d of the presentation blocks' characters kept "
+          "required as signs in use (%s)" % (
+              len(optional), len(data["optional"]), sum(1 for row in data["scripts"]["rows"] if row[4]), len(in_use),
+              ranges_text(in_use)))
 
 
 if __name__ == "__main__":

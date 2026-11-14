@@ -34,7 +34,7 @@ The one the font covers best is chosen as the font is read (the largest share of
 
 ## Kana kerning, after palt
 
-palt trims each kana alone; some pairs still sit unevenly (a katakana with an open side beside another, a kana before the ideographic comma or full stop). *Auto Kerning*, with *Script* set to *Kana*, kerns those pairs on top of palt: it reads the font's palt from its feature code (written here or by hand, as single adjustments), measures the kana as palt sets them, and writes pair kerning only for what palt leaves uneven, never undoing a trim. A font whose kana are full width and have no palt is not kerned: write palt here first. See [KERNING.md](KERNING.md#kana-armenian-and-georgian).
+palt trims each kana alone; some pairs still sit unevenly (a katakana with an open side beside another, a kana before the ideographic comma or full stop). *Auto Kerning*, with *Script* set to *Kana*, kerns those pairs on top of palt: it reads the font's palt from its feature code (written here or by hand, as single adjustments), measures the kana as palt sets them, and writes pair kerning only for what palt leaves uneven, never undoing a trim. A font whose kana are full width and have no palt is not kerned: write palt here first. See [KERNING.md](KERNING.md#kana).
 
 ## Hangul
 

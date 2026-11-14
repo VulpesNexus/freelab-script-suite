@@ -566,12 +566,14 @@ class PageTests(unittest.TestCase):
         self.assertEqual(len(owner.package.glyphs), 2200, "nothing made")
         self.assertEqual(owner.was_busy, [])
         self.assertEqual([level for level, _ in owner.logged], ["warning"])
-        # The last build's pace tells the next one's time, and refuses one that would take too long
+        # The last build's pace refuses one that would take too long; a long one allowed says only that it
+        # may take a bit (the owner, 2026-11-14: no time, no word of the progress)
         page.count_box.setValue(1)
         page.pace = 0.25
         page.update_buttons()
-        self.assertIn(u"A build this large takes a while (about 9 minutes at the last build's pace)",
-                      page.scope_note.text)
+        self.assertTrue(page.scope_note.text.endswith(u"to build. A build this large may take a bit."),
+                        page.scope_note.text)
+        self.assertNotIn(u"minute", page.scope_note.text)
         page.pace = 0.5
         page.update_buttons()
         self.assertFalse(page.build_button.enabled)
@@ -736,7 +738,9 @@ class PageTests(unittest.TestCase):
         self.pick(page, "both")
         letters = len(glyphs)
         self.assertEqual(page.build_button.text, u"Build %d variants" % (2 * letters))
-        self.assertIn(u"A build this large takes a while", page.scope_note.text)
+        self.assertTrue(page.scope_note.text.endswith(u" " + fa.LONG_BUILD_WORDS))
+        self.assertEqual(fa.LONG_BUILD_WORDS, u"A build this large may take a bit.", "the owner's words")
+        self.assertNotIn(u"top line", page.scope_note.text)
         self.assertIn(u"uni0107\N{HORIZONTAL ELLIPSIS})", page.scope_note.text, "the first letters named, not all")
         seen = []
         owner.progress = lambda what, done=None, total=None, force=False: seen.append((what, done, total, owner.busy))
@@ -797,6 +801,28 @@ class PageTests(unittest.TestCase):
         page.draw_preview()
         self.assertEqual(page.existing_caption.text, u"In the font: l, l.alt1, l.alt2")
         self.assertIn(u"the font has these variants already", page.preview_caption.text)
+
+    def test_nothing_to_act_on_takes_no_click(self):
+        """The owner's audit of what stays clickable with nothing loaded: with no font, no control of the
+        tab takes a click; with no glyph in scope (nothing checked), the variants' count, strength, and
+        seed are grayed out with the button; a font with none of the suggested glyphs says so."""
+        owner = Owner(self.ak, None)
+        page = owner.page = fa.AlternatesPage(owner)
+        page.fill()
+        controls = [page.all_button, page.none_button, page.copy_button, page.scope_box, page.letters_edit,
+                    page.count_box, page.strength_box, page.seed_box, page.designs_box, page.build_button]
+        self.assertEqual([c for c in controls if c.enabled], [], "no font: nothing clickable")
+        self.assertEqual((page.note.text, page.scope_note.text), (u"", u""))
+        page, owner = self.page()
+        self.assertEqual(page.scope(), "checked")
+        self.assertTrue(page.scope_box.enabled, "a font: its scope can be picked")
+        self.assertEqual([box.enabled for box in (page.count_box, page.strength_box, page.seed_box)], [False] * 3,
+                         "no glyph in scope: nothing for them to set")
+        self.row(page, u"a").setCheckState(0, ft.CHECKED)
+        self.assertEqual([box.enabled for box in (page.count_box, page.strength_box, page.seed_box)], [True] * 3)
+        page, owner = self.page([(u"zero", 0x30), (u"space", 0x20)], ((u"a", 49),))
+        self.assertEqual(page.tree.items, [])
+        self.assertTrue(page.note.text.startswith(u"The font has none of the glyphs fonts most often give"))
 
     def test_what_a_click_builds_in_words(self):
         plan = fa.variants_planned([u"a", u"g"], 2, set([u"a", u"g", u"a.alt1", u"a.alt2"]))

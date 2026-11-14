@@ -6,9 +6,12 @@ per em), measures every common pair with Auto Kerning's own code and native core
 kerning the font applies through HarfBuzz. Each script is measured on its own, with its own references
 and common pairs: Latin's (kerning/common_pairs.txt), and kana's, Armenian's, and Georgian's
 (kerning/script_pairs.txt), kana as palt sets them; train.py scores each script and trains on those
-asked for. Fonts of other licenses are never opened past their name table.
+asked for. Right-to-left pairs (Hebrew, Thaana) are measured as they stand on screen, the left glyph
+first, as Auto Kerning keeps them, and their kerning read from text typed in text order and shaped
+right to left (rtl_kerning_of). Fonts of other licenses are never opened past their name table.
 
     python kerning/train/dataset.py [--out <file.npz>] [--limit <fonts>] [--scripts latin,armenian,georgian,kana]
+        [--add-to <dataset.npz>]  (the scripts' rows added to an earlier training set, its rows kept)
 
 Python 3 with fonttools, freetype-py, uharfbuzz, and numpy; the core DLL as Auto Kerning finds it
 (or FREELAB_KERN_DLL). The output (default %LOCALAPPDATA%\\FreeLab\\kerning-train\\dataset.npz) holds
@@ -35,6 +38,11 @@ FONT_DIRS = tuple(os.path.join(base, *parts) for base, parts in (
     (os.environ.get("WINDIR") or os.environ.get("SystemRoot"), ("Fonts",)),
     (os.environ.get("LOCALAPPDATA"), ("Microsoft", "Windows", "Fonts"))) if base)
 CORPUS_DIR = os.path.join(os.environ.get("LOCALAPPDATA", ""), "FreeLab", "corpus")  # open-licensed fonts fetched for the corpus
+# Folders under the corpus read through (their subfolders too) for the scripts other than Latin only, so
+# that Latin's training set stays the one the shipped model was checked on: google/fonts families
+# fetched for those scripts (kerning-fonts, with its manifest.json), and the Noto fonts FreeLang is
+# built from (language-font-sources, its subsets in work/ left out).
+OTHER_SCRIPT_DIRS = ("kerning-fonts", "language-font-sources")
 OPEN_LICENSES = (("open font license", "OFL"), ("scripts.sil.org/ofl", "OFL"), ("openfontlicense", "OFL"),
                  ("apache license", "Apache"), ("apache.org/licenses", "Apache"))
 
@@ -59,34 +67,53 @@ def family_of(font):
     return str(name.getDebugName(16) or name.getDebugName(1) or "")
 
 
+def font_files(scripts=("latin",)):
+    """Every font file to look at: the installed fonts and the corpus folder's own, then, when a script
+    other than Latin is asked for, OTHER_SCRIPT_DIRS' (see latin_measured)."""
+    found = []
+    for folder in FONT_DIRS + (CORPUS_DIR,):
+        for pattern in ("*.ttf", "*.otf", "*.ttc", "*.otc"):
+            found.extend(sorted(glob.glob(os.path.join(folder, pattern))))
+    if any(script != "latin" for script in scripts):
+        for name in OTHER_SCRIPT_DIRS:
+            for root, folders, files in os.walk(os.path.join(CORPUS_DIR, name)):
+                folders[:] = sorted(f for f in folders if f != "work")
+                found.extend(os.path.join(root, f) for f in sorted(files) if f.lower().endswith((".ttf", ".otf", ".ttc", ".otc")))
+    return found
+
+
+def latin_measured(path):
+    """Whether a font's Latin is measured: not for the fonts of OTHER_SCRIPT_DIRS."""
+    folders = [os.path.normcase(os.path.join(CORPUS_DIR, name)) + os.sep for name in OTHER_SCRIPT_DIRS]
+    return not any(os.path.normcase(path).startswith(folder) for folder in folders)
+
+
 def open_fonts(scripts=("latin",)):
     """(path, index, family, license) of the open-licensed, kerned fonts with l, n, o, H, and O, or
     with another of the scripts' tuning letters."""
     from fontTools.ttLib import TTCollection, TTFont
     found = []
-    for folder in FONT_DIRS + (CORPUS_DIR,):
-        for pattern in ("*.ttf", "*.otf", "*.ttc", "*.otc"):
-            for path in sorted(glob.glob(os.path.join(folder, pattern))):
-                try:
-                    collection = path.lower().endswith((".ttc", ".otc"))
-                    fonts = TTCollection(path, lazy=True).fonts if collection else [TTFont(path, lazy=True)]
-                except Exception:
+    for path in font_files(scripts):
+        try:
+            collection = path.lower().endswith((".ttc", ".otc"))
+            fonts = TTCollection(path, lazy=True).fonts if collection else [TTFont(path, lazy=True)]
+        except Exception:
+            continue
+        for index, font in enumerate(fonts):
+            try:
+                licence = license_of(font)
+                if licence is None:
                     continue
-                for index, font in enumerate(fonts):
-                    try:
-                        licence = license_of(font)
-                        if licence is None:
-                            continue
-                        cmap = font["cmap"].getBestCmap() or {}
-                        tunings = [u"lnoHO" if script == "latin" else u"".join(ak.SCRIPT_TUNING[script]) for script in scripts]
-                        if not any(all(ord(c) in cmap for c in tuning) for tuning in tunings):
-                            continue
-                        kerned = ("GPOS" in font and any(r.FeatureTag == "kern" for r in font["GPOS"].table.FeatureList.FeatureRecord)) \
-                            or "kern" in font
-                        if kerned:
-                            found.append((path, index, family_of(font), licence))
-                    except Exception:
-                        continue
+                cmap = font["cmap"].getBestCmap() or {}
+                tunings = [u"lnoHO" if script == "latin" else u"".join(ak.SCRIPT_TUNING[script]) for script in scripts]
+                if not any(all(ord(c) in cmap for c in tuning) for tuning in tunings):
+                    continue
+                kerned = ("GPOS" in font and any(r.FeatureTag == "kern" for r in font["GPOS"].table.FeatureList.FeatureRecord)) \
+                    or "kern" in font
+                if kerned:
+                    found.append((path, index, family_of(font), licence))
+            except Exception:
+                continue
     return found
 
 
@@ -142,17 +169,21 @@ class FreeTypeGlyphs(object):
 # How each script is shaped to read the kerning a font applies: HarfBuzz's script and language, and
 # the features turned on besides kern (kana as palt sets them: their kerning is set for it).
 SCRIPT_SHAPING = {"latin": ("Latn", "en", {}), "kana": ("Kana", "ja", {"palt": True}), "armenian": ("Armn", "hy", {}),
-                  "georgian": ("Geor", "ka", {})}
+                  "georgian": ("Geor", "ka", {}), "cyrillic": ("Cyrl", "ru", {}), "greek": ("Grek", "el", {}),
+                  "devanagari": ("Deva", "hi", {}), "hebrew": ("Hebr", "he", {}), "thaana": ("Thaa", "dv", {})}
 
 
 def kerning_of(path, index, pairs, script="latin"):
     """The kerning the font applies to each pair (font units), as HarfBuzz shapes it: Latin, English,
     left to right (or the script's own, SCRIPT_SHAPING), with ligatures and contextual alternates off
-    (an fi ligature's advance is not kerning)."""
+    (an fi ligature's advance is not kerning). A right-to-left script's pairs, (left, right) on screen
+    as Auto Kerning keeps them, are typed in text order and shaped right to left (rtl_kerning_of)."""
     import uharfbuzz as hb
     font = hb.Font(hb.Face(hb.Blob.from_file_path(path), index))
     tag, language, extra = SCRIPT_SHAPING[script]
     features = dict(SHAPING_FEATURES, **extra)
+    if script in ak.RTL_SCRIPTS:
+        return rtl_kerning_of(font, pairs, tag, language, features), font.face.upem
 
     def advance(text):
         buf = hb.Buffer()
@@ -167,6 +198,35 @@ def kerning_of(path, index, pairs, script="latin"):
             if ch not in singles:
                 singles[ch] = advance(ch)
     return dict((pair, advance(pair) - singles[pair[0]] - singles[pair[1]]) for pair in pairs), font.face.upem
+
+
+def rtl_kerning_of(font, pairs, tag, language, features):
+    """How much nearer the right glyph sits to the left one on screen (font units, negative tighter),
+    for each pair (left, right) of a right-to-left script: typed in text order (ak.text_order: the
+    right glyph first, brackets as their mirror) and shaped right to left with kern on and off, the
+    change in the distance from the left glyph's position to the right one's. A right-to-left font
+    kerns a pair on the first glyph's placement and advance (<-30 0 -30 0>), so its total advance
+    alone, as kerning_of reads a left-to-right pair, would miss the placement: the positions are read
+    instead. A pair that does not shape to two glyphs is read as unkerned."""
+    import uharfbuzz as hb
+
+    def placed(text, kern):
+        buf = hb.Buffer()
+        buf.add_str(text)
+        buf.direction, buf.script, buf.language = "rtl", tag, language
+        hb.shape(font, buf, dict(features, kern=kern))
+        out, x = [], 0
+        for pos in buf.glyph_positions:  # (on screen, left to right)
+            out.append(x + pos.x_offset)
+            x += pos.x_advance
+        return out
+
+    found = {}
+    for pair in pairs:
+        text = ak.text_order(pair[0], pair[1])
+        on, off = placed(text, True), placed(text, False)
+        found[pair] = (on[1] - on[0]) - (off[1] - off[0]) if len(on) == 2 and len(off) == 2 else 0
+    return found
 
 
 def palt_of(path, index):
@@ -219,14 +279,19 @@ def script_common_pairs(script):
     if script == "latin":
         return list(ak.common_pairs(os.path.join(HERE, os.pardir, ak.COMMON_PAIRS_FILE)))
     every = ak.common_pairs(os.path.join(HERE, os.pardir, ak.SCRIPT_PAIRS_FILE))
-    return [pair for pair in sorted(every, key=every.get) if any(ak.script_of(ch) == script for ch in pair)]
+    found = [pair for pair in sorted(every, key=every.get) if any(ak.script_of(ch) == script for ch in pair)]
+    if script in ak.RTL_SCRIPTS:  # counted in text order: kept as on screen, the left glyph first
+        found = [u"".join(ak.screen_order(pair)) for pair in found]
+    return found
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", default=os.path.join(ak.state_dir(), "kerning-train", "dataset.npz"))
     parser.add_argument("--limit", type=int, default=0, help="at most this many fonts (0: all)")
-    parser.add_argument("--scripts", default="latin,armenian,georgian,kana", help="the scripts measured, by Auto Kerning's names")
+    parser.add_argument("--scripts", default=",".join(key for key, _ in ak.SCRIPTS), help="the scripts measured, by Auto Kerning's names")
+    parser.add_argument("--add-to", default="", help="a training set (made by this script, with its families) the "
+                                                     "scripts' rows are added to, its own rows kept as they are")
     args = parser.parse_args()
     scripts = [script for script in args.scripts.split(",") if script]
     core = ak.Core()
@@ -237,10 +302,22 @@ def main():
     print("%d open-licensed kerned fonts" % len(fonts), flush=True)
     xs, ys, groups, pairs, sources, font_rows, script_rows = [], [], [], [], [], [], []
     families, seen, skipped = {}, set(), {"unkerned": 0, "duplicate": 0}
+    if args.add_to:  # (a script's number is its place in SCRIPTS: a set numbered otherwise is refused below)
+        old = np.load(args.add_to)
+        if [str(s) for s in old["scripts"]] != [key for key, _ in ak.SCRIPTS][:len(old["scripts"])]:
+            raise SystemExit("%s numbers its scripts otherwise" % args.add_to)
+        added = set(scripts) & set(str(old["scripts"][n]) for n in np.unique(old["script"]))
+        if added:
+            raise SystemExit("%s has %s already" % (args.add_to, ", ".join(sorted(added))))
+        xs, ys, groups, font_rows, script_rows = [old["x"]], [old["y"]], [old["group"]], [old["font"]], [old["script"]]
+        pairs, sources = [str(p) for p in old["pair"]], [str(s) for s in old["fonts"]]
+        families = dict((str(name), number) for number, name in enumerate(old["families"]))
     started = time.time()
     for number, (path, index, family, licence) in enumerate(fonts, 1):
         source = None
         for script in scripts:
+            if script == "latin" and not latin_measured(path):
+                continue
             try:
                 result = measure_font(core, path, index, common[script], script)
             except Exception as exc:
@@ -274,7 +351,8 @@ def main():
         os.makedirs(folder)
     np.savez_compressed(args.out, x=np.concatenate(xs), y=np.concatenate(ys), group=np.concatenate(groups),
                         font=np.concatenate(font_rows), pair=np.array(pairs), fonts=np.array(sources),
-                        script=np.concatenate(script_rows), scripts=np.array([key for key, _ in ak.SCRIPTS]))
+                        script=np.concatenate(script_rows), scripts=np.array([key for key, _ in ak.SCRIPTS]),
+                        families=np.array(sorted(families, key=families.get)))  # (group i's family name: families[i])
     counts = np.bincount(np.concatenate(script_rows), minlength=len(ak.SCRIPTS))
     print("wrote %s: %d pairs from %d fonts in %d families (%s; %.0f s; left out: %d barely kerned, %d duplicates)"
           % (args.out, sum(len(y) for y in ys), len(sources), len(families),

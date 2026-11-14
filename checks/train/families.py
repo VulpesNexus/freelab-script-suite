@@ -13,8 +13,9 @@ checks/language_orthographies.json (the other sources', checks/train/orthographi
 - its place in Glottolog's classification: the family and branches above it, as a table of nodes
   (name, parent). A code Glottolog gives to a dialect hangs under its language (Croatian under
   Serbian-Croatian-Bosnian). A language Glottolog calls an isolate goes under one node, "Language
-  isolates" (FreeLab's own heading, not Glottolog's); a code Glottolog does not have is left out of
-  the table, and Font Check lists it under "Not classified".
+  isolates" (FreeLab's own heading, not Glottolog's); a code Glottolog does not have, and PLACED does
+  not place, is left out of the table, and Font Check lists it under "Languages Glottolog does not
+  classify".
 - its other names (names.csv: Glottolog's own and those it compiled from MultiTree, Lexvo, the
   Catalogue of Endangered Languages, WALS, AIATSIS, Moseley & Asher 1994, and Ruhlen 1987), but
   those its orthographies already give it, so a search finds it by any of them.
@@ -83,6 +84,13 @@ PLACED = {
     "srd": ("camp1261", "beside"),  # Sardinian: beside Campidanese Sardinian
     "xha": ("mina1279", "is"),  # Hyperglot's xha is Minaean (ISO 639-3: inm)
     "lab": ("mino1236", "beside"),  # Linear A, the script of Minoan: beside it (unclassifiable)
+    # Minang (Hyperglot's "Minang (Mirnong)"): no languoid has xrg, nor a name or a closest code that
+    # points to it (Glottolog's "Minang" is a MultiTree name of Minangkabau, and Mirning, mirn1243, is
+    # a group of the south coast further east). Hyperglot's own note: "an extinct dialect of ISO
+    # 639-3:nys", Nyunga (nyun1247), the Noongar language, under which Glottolog lists six south-western
+    # varieties (Bibbulman, Goreng, Kaniyang, Pinjarup, Wajuk, and Wardandi) and no Minang. Beside
+    # Nyunga, under South-West Pama-Nyungan, not under it: Nyunga is not described through a row of a to z.
+    "xrg": ("nyun1247", "beside"),
     # Codes of language_orthographies.json that Glottolog has under no languoid:
     "nwx": ("newa1246", "beside"),  # Middle Newar: beside Kathmandu Valley Newari
     "xmn": ("pahl1241", "beside"),  # Manichaean Middle Persian: beside Pahlavi

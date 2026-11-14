@@ -420,9 +420,25 @@ def is_variant(name, key, char_of):
     return key_char is None or decomposed[:1] == key_char or decomposed[:1] == char  # (barred letters do not decompose)
 
 
-def pair_text(package, left, right):
+def screen_pair(ak, package, first, second, chars=None):
+    """The glyph pair on screen, (left, right), of a kerning key: a right-to-left key is kept in text
+    order, its right glyph first (Auto Kerning's screen_of_key). chars: {name: character or None},
+    filled as glyphs are looked up (a check of thousands of pairs asks FontLab once per glyph)."""
+    chars = {} if chars is None else chars
+    for name in (first, second):
+        if name not in chars:
+            text = glyph_text(package, name)
+            chars[name] = text if len(text) == 1 and text != name else None
+    return ak.screen_of_key(chars[first], chars[second], first, second)
+
+
+def pair_text(package, left, right, ak=None):
+    """A glyph pair's characters as a reader sees them (a right-to-left pair set right to left, see
+    Auto Kerning's pair_label), or its glyphs' names."""
     a, b = glyph_text(package, left), glyph_text(package, right)
-    return a + b if len(a) == 1 and len(b) == 1 else u"%s %s" % (a, b)
+    if len(a) == 1 and len(b) == 1:  # (left and right are a kerning key: a right-to-left one is in text order)
+        return ak.pair_label(*ak.screen_of_key(a, b, a, b)) if ak is not None else a + b
+    return u"%s %s" % (a, b)
 
 
 class InkDistances(object):
@@ -434,11 +450,15 @@ class InkDistances(object):
         self.known = set(name for name in names if self.glyphs.add(name))
         self.core = ak.Core()
         self.units_per_pixel = self.glyphs.upm / float(ak.EM_PIXELS)
+        self.package, self.chars = package, {}
 
     def closest_at(self, left, right, value):
+        """At the pair's kerning value: (left, right) is a kerning key, measured as it stands on screen
+        (a right-to-left key, in text order, the other way round)."""
         if left not in self.known or right not in self.known:
             return None
         ak = self.ak
+        left, right = screen_pair(ak, self.package, left, right, self.chars)
         a, b = self.glyphs.image(left), self.glyphs.image(right)
         _, raw_right_of_left, _, _ = a.contours(self.core)
         raw_left_of_right, _, _, _ = b.contours(self.core)
@@ -447,7 +467,13 @@ class InkDistances(object):
         return None if gap > 1e8 else gap * self.units_per_pixel
 
 
-ACTIONS = {"collisions": (u"Write checked fixes", u"Write %s", (u"checked fix", u"checked fixes")),
+# The Collisions list's columns: the pair (drawn from the font beside its characters), its glyphs' names,
+# then its numbers and where its value comes from
+COLLISION_COLUMNS = (u"Pair", u"Glyphs", u"Kerning", u"Distance", u"Fix", u"Set by", u"Compared with")
+NUMBER_COLUMNS = (u"Kerning", u"Distance", u"Fix", u"Value")  # right-aligned, their headers too
+
+
+ACTIONS = {"collisions":(u"Write checked fixes", u"Write %s", (u"checked fix", u"checked fixes")),
            "cleanup": (u"Clean up checked entries", u"Clean up %s", (u"checked entry", u"checked entries"))}
 
 
@@ -573,8 +599,7 @@ class KerningCheckDialog(object):
                                           lambda step: self.ak.select_next_row(self.current_tab().tree, step),
                                           self.units_scale)
 
-        self.collisions = Tab(QtGui, ("Pair", "Kerning", "Distance", "Fix", "Set by", "Compared with"),
-                              action_text("collisions", 0), self.ak.status_label)
+        self.collisions = Tab(QtGui, COLLISION_COLUMNS, action_text("collisions", 0), self.ak.status_label)
         tab = self.collisions
         tab.settings.addWidget(QtGui.QLabel("List"))
         self.pair_set = QtGui.QComboBox()
@@ -640,6 +665,9 @@ class KerningCheckDialog(object):
 
         for tab, label in ((self.collisions, "Collisions"), (self.cleanup, "Cleanup"), (self.masters, "Masters")):
             self.ak.grid_lines(tab.tree)
+            if tab is not self.masters:  # (as the other tools' lists: each row's pair drawn from the font)
+                tab.tree.setIconSize(QtCore.QSize(*self.ak.glyph_icon_size(2)))
+                tab.tree.setProperty(self.ak.LEAVE_ALONE_PROP, True)  # its pictures are drawn in the dialog's colors
             if tab.action is not None:
                 for button in (tab.check_all, tab.check_none, tab.restore):
                     tab.buttons.addWidget(button)
@@ -679,6 +707,7 @@ class KerningCheckDialog(object):
         self.tabs.connect("currentChanged(int)", self.switch_page)
         self.close_button.connect("clicked()", dialog.close)
         self.package = self.master = None
+        self.chars = {}  # {glyph name: its character or None}, for screen_pair
         self.busy = False
         self.ak.add_tools_button(dialog, "Kerning Check", getattr(self, "log", None))  # (the other font tools, a click away)
         self.ak.plain_buttons(dialog)
@@ -708,9 +737,12 @@ class KerningCheckDialog(object):
         """The current font and master; False (and said so) when no font is open."""
         self.package = self.current_font()
         self.master = self.package.master if self.package is not None else None
+        self.chars = {}  # {glyph name: its character or None}, for screen_pair (read again with the font)
         if self.package is None:
-            self.font_label.setText(u"No font is open. Open one, then click %s." % self.ak.i("Check"))
+            self.font_label.setText(self.ak.NO_FONT_LINE)
+            self.update_buttons_soon()  # (its settings grayed out)
             return False
+        self.update_buttons_soon()  # (its settings back on)
         upm = float(self.package.upm)
         if not self.minimum.value and not getattr(self, "minimum_set", False):
             self.minimum.setValue(round_units(MIN_DISTANCE_SHARE * upm))
@@ -746,7 +778,8 @@ class KerningCheckDialog(object):
         return True
 
     def after_writing(self):
-        self.ak.notify_changed(self.fontlab, self.package, u"FreeLab Kerning Check")
+        # (kerning only: the font's own state, which needs no before_changes, and no glyph added)
+        self.ak.notify_changed(self.fontlab, self.package, u"FreeLab Kerning Check", added=False)
 
     # -- the lists limited to some glyphs ------------------------------------
 
@@ -818,6 +851,13 @@ class KerningCheckDialog(object):
             self.ak.enable(tab.restore, checks != tab.first_checks[:len(checks)] or len(checks) != len(tab.first_checks))
         finding = self.selected_finding() if self.package is not None else None
         self.ak.enable(self.glyph_window_button, isinstance(finding, (Collision, Cleanup)))
+        # No font: nothing to check, and the settings set nothing; Check reads a font once one is open
+        has_font = self.package is not None
+        can_read = not self.busy and (has_font or self.ak.fonts_open(self.fontlab))
+        for button in (self.collisions_button, self.cleanup_button, self.masters_button):
+            self.ak.enable(button, can_read)
+        for widget in (self.pair_set, self.minimum, self.mode, self.tiny):
+            self.ak.enable(widget, has_font)
 
     def first_checks_of(self, tab):
         QtCore, QtGui = _qt()
@@ -838,8 +878,21 @@ class KerningCheckDialog(object):
         self.log.add(u"Checks restored as suggested.")
 
     def double_clicked(self, item, column):
-        if column == 0:
+        if column in (0, 1) and self.tabs.currentIndex == 0 or column == 0:  # the pair, or its glyphs' names
             self.show_in_glyph_window()
+
+    def font_changed(self):
+        """This window's font was closed, or a font opened for this window without one (fonts_tick): the
+        lists emptied and the font read again, the list shown checked for the new font."""
+        for tab in (self.collisions, self.cleanup, self.masters):
+            tab.tree.clear()
+            tab.findings, tab.first_checks = [], []
+            tab.status.setText(u"")
+        self.stale = set(TABS)
+        if self.read_font():
+            self.check(TABS[self.tabs.currentIndex])
+        self.update_previews()
+        self.update_buttons()
 
     def check(self, key):
         {"collisions": self.check_collisions, "cleanup": self.check_cleanup, "masters": self.check_masters}[key]()
@@ -853,10 +906,21 @@ class KerningCheckDialog(object):
 
     # -- the lists ---------------------------------------------------------
 
+    def pair_icon(self, pair, value, row):
+        """A row's picture of its pair at a kerning value (the first GLYPH_ICON_ROWS rows), or None."""
+        QtCore, QtGui = _qt()
+        if pair is None or row >= self.ak.GLYPH_ICON_ROWS or self.package is None:
+            return None
+        pair = screen_pair(self.ak, self.package, pair[0], pair[1], self.chars)  # (drawn as on screen)
+        return self.ak.glyph_icon(self.package, self.master, list(pair), self.dialog.palette.color(QtGui.QPalette.WindowText),
+                                  value)
+
     @staticmethod
-    def add_row(tab, index, texts, checkable, checked, tip=u"", parent=None):
+    def add_row(tab, index, texts, checkable, checked, tip=u"", parent=None, icon=None):
         QtCore, QtGui = _qt()
         item = QtGui.QTreeWidgetItem(list(texts))
+        if icon is not None:
+            item.setIcon(0, icon)
         item.setData(0, QtCore.Qt.UserRole, index)
         flags = QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable
         if checkable:
@@ -916,6 +980,13 @@ class KerningCheckDialog(object):
         QtCore, QtGui = _qt()
         for column in range(tab.tree.columnCount - 1):
             tab.tree.resizeColumnToContents(column)
+        try:  # the headers of the columns of numbers right-aligned, as their cells are
+            header = tab.tree.headerItem()
+            for column in range(tab.tree.columnCount):
+                if header.text(column) in NUMBER_COLUMNS:
+                    header.setTextAlignment(column, int(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter))
+        except Exception:
+            pass
         # the first column holds the rows inside collapsed groups too, which the resize does not measure
         room = QtGui.QFontMetrics(tab.tree.font).width(u"MMMMMM") + 3 * tab.tree.indentation
         if tab.tree.columnWidth(0) < room:
@@ -958,8 +1029,9 @@ class KerningCheckDialog(object):
             if common_only and self.common is None:
                 self.common = self.ak.common_pairs()
 
-            def common(left, right):
-                return (char_of(left) or u"\N{REPLACEMENT CHARACTER}") + (char_of(right) or u"\N{REPLACEMENT CHARACTER}") in self.common
+            def common(left, right):  # (a kerning key; the common pairs are as typed, mirrored brackets their own)
+                a, b = char_of(left), char_of(right)
+                return a is not None and b is not None and self.ak.text_order(*self.ak.screen_of_key(a, b, a, b)) in self.common
 
             found = find_collisions(kerning, ink.closest_at, minimum, relative,
                                     lambda done, total: self.progress(tab, done, total, u"Checking pair"),
@@ -990,7 +1062,7 @@ class KerningCheckDialog(object):
         for index, c in enumerate(found):
             where = kerning.describe(c.entry) if c.entry is not None else u""
             if c.reference is not None:
-                compared = u"%s: %d" % (pair_text(self.package, *c.reference), round_units(c.reference_gap))
+                compared = u"%s: %d" % (pair_text(self.package, c.reference[0], c.reference[1], self.ak), round_units(c.reference_gap))
                 tip = (u"%s %s: %d now, its ink %s apart, %s closer than %s %s at the same value; %d sets it "
                        u"as far apart." % (c.left, c.right, c.value, counted(round_units(c.gap), u"unit"),
                                            counted(round_units(c.reference_gap - c.gap), u"unit"),
@@ -999,9 +1071,9 @@ class KerningCheckDialog(object):
                 compared = u""
                 tip = u"%s %s: %d now, its ink %s apart; %d keeps %s." % (
                     c.left, c.right, c.value, counted(round_units(c.gap), u"unit"), c.fix, counted(minimum, u"unit"))
-            self.add_row(tab, index, (pair_text(self.package, c.left, c.right), u"%d" % c.value,
-                                      u"%d" % round_units(c.gap), u"%d" % c.fix, where, compared), True, True, tip,
-                         parents.get(c.variant or c.left))
+            self.add_row(tab, index, (pair_text(self.package, c.left, c.right, self.ak), u"%s %s" % (c.left, c.right),
+                                      u"%d" % c.value, u"%d" % round_units(c.gap), u"%d" % c.fix, where, compared),
+                         True, True, tip, parents.get(c.variant or c.left), self.pair_icon((c.left, c.right), c.value, index))
         self.resize(tab)
         self.checked_now(tab, "collisions")
         tight = sum(1 for pair, _ in tight_pairs(kerning, self.only) if not common_only or common(*pair))
@@ -1055,8 +1127,9 @@ class KerningCheckDialog(object):
         tab.findings = found
         kinds = dict(CLEANUP_KINDS)
         for index, c in enumerate(found):
+            first = kerning.first_pair(c.entry) if index < self.ak.GLYPH_ICON_ROWS else None  # (not every class x class pair)
             self.add_row(tab, index, (kerning.describe(c.entry), u"%d" % c.value, u"%s: %s" % (kinds[c.kind], c.reason)),
-                         True, c.checked)
+                         True, c.checked, icon=self.pair_icon(first, c.value, index))
         self.resize(tab)
         self.checked_now(tab, "cleanup")
         counts = {}
@@ -1170,11 +1243,11 @@ class KerningCheckDialog(object):
                     shown.append((finding.reference, finding.value, u"Base pair: %d" % finding.value))
             elif isinstance(finding, Cleanup):
                 kerning = self.kerning()
-                pairs = kerning.pairs(finding.entry)
-                if pairs:
-                    now = kerning.current(*pairs[0])
-                    without = value_without(kerning, finding.entry, *pairs[0])
-                    shown = [(pairs[0], now, u"Now: %d" % now), (pairs[0], without, u"Adjusted: %d" % without)]
+                first = kerning.first_pair(finding.entry)
+                if first is not None:
+                    now = kerning.current(*first)
+                    without = value_without(kerning, finding.entry, *first)
+                    shown = [(first, now, u"Now: %d" % now), (first, without, u"Adjusted: %d" % without)]
         except Exception:
             shown = []
         self.adjust_width = None
@@ -1217,7 +1290,7 @@ class KerningCheckDialog(object):
         tab = self.collisions
         for item in self.rows(tab):
             if tab.findings[int(item.data(0, QtCore.Qt.UserRole))] is finding:
-                item.setText(3, u"%d" % value)
+                item.setText(COLLISION_COLUMNS.index(u"Fix"), u"%d" % value)
                 item.setCheckState(0, QtCore.Qt.Checked)
                 break
 
@@ -1225,6 +1298,7 @@ class KerningCheckDialog(object):
         """A glyph pair at a kerning value in the dialog's text color, its caption under it (see
         Auto Kerning's pair_pixmap)."""
         QtCore, QtGui = _qt()
+        left, right = screen_pair(self.ak, self.package, left, right, self.chars)  # (a kerning key, drawn as on screen)
         return self.ak.pair_pixmap(self.package, self.master, left, right, value, caption,
                                    self.dialog.palette.color(QtGui.QPalette.WindowText), self.dialog.font,
                                    room, width)
@@ -1251,8 +1325,7 @@ class KerningCheckDialog(object):
         if isinstance(finding, Collision):
             return finding.pair()
         if isinstance(finding, Cleanup):
-            pairs = self.kerning().pairs(finding.entry)
-            return pairs[0] if pairs else None
+            return self.kerning().first_pair(finding.entry)
         return None
 
     def show_in_glyph_window(self):

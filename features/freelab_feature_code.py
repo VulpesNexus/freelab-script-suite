@@ -2100,6 +2100,107 @@ def place_node(node, x, y):
     node.x, node.y = x, y
 
 
+IDENTITY = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+
+
+def shape_matrix(shape):
+    """(m11, m12, m21, m22, dx, dy) of a shape's transform (a value it does not give: the identity's)."""
+    try:
+        transform = shape.transform
+    except Exception:
+        return IDENTITY
+    values = []
+    for name, default in zip(("m11", "m12", "m21", "m22", "dx", "dy"), IDENTITY):
+        try:
+            values.append(float(getattr(transform, name)()))
+        except Exception:
+            values.append(default)
+    return tuple(values)
+
+
+def mapped(matrix, x, y):
+    """A point through a matrix (m11, m12, m21, m22, dx, dy), as QTransform maps it."""
+    m11, m12, m21, m22, dx, dy = matrix
+    return (m11 * x + m21 * y + dx, m12 * x + m22 * y + dy)
+
+
+def compose(matrix, move):
+    """matrix, then move (sx, sy, dx, dy: a scale and an offset), as one matrix."""
+    m11, m12, m21, m22, dx, dy = matrix
+    sx, sy, mx, my = move
+    return (sx * m11, sy * m12, sx * m21, sy * m22, sx * dx + mx, sy * dy + my)
+
+
+def wanted_points(places, points):
+    """[(x, y, moved, on-curve)] of a contour's nodes as offset (places [(x, y)]; points [(x, y, on)]
+    as they were): moved where a node goes past STROKE_READ_BACK."""
+    return [(x, y, abs(x - p[0]) > STROKE_READ_BACK or abs(y - p[1]) > STROKE_READ_BACK, p[2])
+            for (x, y), p in zip(places, points)]
+
+
+def shape_box(shape):
+    """(left, bottom, right, top) of what FontLab draws of a shape (its boundingBox), or None."""
+    try:
+        rect = shape.boundingBox
+        rect = rect() if callable(rect) else rect
+        box = (float(rect.left()), float(rect.top()), float(rect.right()), float(rect.bottom()))
+    except Exception:
+        return None
+    return box if box[2] > box[0] and box[3] > box[1] else None  # (font units grow upward: top() is the lowest)
+
+
+DRAWN_SLACK = 1.0  # units: a drawn box this near the nodes' (FontLab may round a node to whole units)
+
+
+def drawn_box_kept(box, outlines, slack=DRAWN_SLACK):
+    """Whether FontLab draws a shape as its nodes were put: its drawn box (shape_box) holds the box of
+    the on-curve nodes wanted and lies within the box of them all (a curve stays inside its handles),
+    each within slack, in the coordinates of one of outlines ([[(x, y, moved, on)]] a contour: the
+    form's, or the shape's own, which a box may be told in). None where the box is not known. A shape
+    whose outline did not follow its nodes is drawn at its box before the offset: smaller by the
+    offset all around."""
+    if box is None:
+        return None
+    for outline in outlines:
+        points = [point for contour in outline for point in contour]
+        if not points:
+            continue
+        ons = [point for point in points if point[3]] or points
+        inner = (min(p[0] for p in ons), min(p[1] for p in ons), max(p[0] for p in ons), max(p[1] for p in ons))
+        outer = (min(p[0] for p in points), min(p[1] for p in points), max(p[0] for p in points),
+                 max(p[1] for p in points))
+        holds = box[0] <= inner[0] + slack and box[1] <= inner[1] + slack and \
+            box[2] >= inner[2] - slack and box[3] >= inner[3] - slack
+        within = box[0] >= outer[0] - slack and box[1] >= outer[1] - slack and \
+            box[2] <= outer[2] + slack and box[3] <= outer[3] + slack
+        if holds and within:
+            return True
+    return False
+
+
+def refresh_shape(shape):
+    """A shape whose contours were written told to draw them anew (its ink box reset, then updated):
+    each call only where FontLab has it, and none may stop the build."""
+    for name in ("resetInkBox", "update"):
+        method = getattr(shape, name, None)
+        if callable(method):
+            try:
+                method()
+            except Exception:
+                pass
+
+
+def update_layer(layer):
+    """A layer whose shapes were replaced told to measure itself again (flObject.update). Live
+    (2026-11-14, IBM Plex Sans JP): zero.sups built again at 130% and 160% had its new shape's box
+    grow (41.9 to 280.0, then 35.0 to 294.0), while the layer's own box, what FontLab measures and
+    draws of the glyph, stayed the 100% one (48.9 to 266.1) until layer.update() was called."""
+    try:
+        layer.update()
+    except Exception:
+        pass
+
+
 def offset_contour(points, distance, right=True):
     """A closed contour's points [(x, y, on-curve)] moved outward by distance (inward when negative):
     each on-curve point along the bisector of the normals of its two neighbors' directions (a corner
@@ -2322,6 +2423,7 @@ def describe_placement(plan):
 
 SMALL_NOTES = {"scaled": u"scaled: a start to draw over (scaling thins its strokes)",
                "moved": u"a drawn small figure, moved", "copied": u"its set's glyph, with the code point"}
+BUILT_NOTE = u"built here before (a build replaces it once its settings change)"  # a cell note: no period
 
 
 def offset_words(offsets):
@@ -2352,6 +2454,133 @@ def suggested_words(why):
 def build_label(count):
     """The build button's words for this many checked glyphs."""
     return u"Build %s" % counted(count, u"checked glyph") if count else u"Build checked glyphs"
+
+
+def without_glyphs(info, names):
+    """info as if the font lacked those glyphs (the figure forms this window built: listed again, so a
+    build can replace them), their widths and ink kept for whatever else reads them."""
+    gone = set(names)
+    if not gone:
+        return info
+    return FontInfo([name for name in info.names if name not in gone],
+                    dict((name, codes) for name, codes in info.codes.items() if name not in gone),
+                    info.widths, info.bounds, info.contours)
+
+
+def layer_print(layer):
+    """What a built layer is, to tell later whether anything changed it since it was built: its width
+    and its shapes (a component's glyph and transform; an outline's transform and nodes), in whole
+    units (FontLab may round a node). Raises where FontLab does not say."""
+    parts = []
+    for shape in layer.shapes:
+        matrix = tuple(int(round(value * 1000)) for value in shape_matrix(shape))
+        if getattr(shape, "isComponent", False):
+            parts.append((u"component", u"%s" % shape.shapeData.componentGlyph, matrix))
+        else:
+            parts.append((u"outline", matrix, tuple(tuple((int(round(n.x)), int(round(n.y))) for n in c.nodes())
+                                                    for c in shape.contours if c is not None)))
+    return int(round(float(layer.advanceWidth))), tuple(parts)
+
+
+def plan_signature(plan, strokes):
+    """What a planned form is built from (how, its parts, its width, and Strokes for a scaled one): a
+    form built with the same signature is built as it would be again."""
+    if plan is None:
+        return None
+    parts = tuple((u"%s" % name, round(sx, 4), round(sy, 4), int(round(dx)), int(round(dy)))
+                  for name, sx, sy, dx, dy in plan.parts)
+    return plan.how, parts, int(round(plan.width)), (int(strokes) if plan.how == "scaled" else None)
+
+
+def dependent_forms(forms, plans, ours, rebuilt):
+    """The names of the forms this window built (ours) made from a form built again (rebuilt), at any
+    depth, in the forms' order: they are built again with it (a component keeps the glyph it points to
+    as it was when it was made)."""
+    names, found = set(rebuilt), []
+    grew = True
+    while grew:
+        grew = False
+        for form in forms:
+            if form.name in names or form.name not in ours:
+                continue
+            parts = getattr(plans.get(form.name), "parts", None) or ()
+            if any(u"%s" % part[0] in names for part in parts):
+                names.add(form.name)
+                found.append(form.name)
+                grew = True
+    return [form.name for form in forms if form.name in found]
+
+
+# ---------------------------------------------------------------------------
+# The Code box's colors (syntax highlighting): what each part of a line of feature code is
+# ---------------------------------------------------------------------------
+
+FEA_KEYWORDS = frozenset(u"""feature lookup sub substitute rsub reversesub ignore pos position enum enumerate by from
+lookupflag languagesystem script language include exclude_dflt include_dflt required table featureNames
+cvParameters name parameters subtable useExtension markClass anchor anchorDef valueRecordDef NULL RightToLeft
+IgnoreBaseGlyphs IgnoreLigatures IgnoreMarks MarkAttachmentType UseMarkFilteringSet FeatUILabelNameID
+FeatUITooltipTextNameID SampleTextNameID ParamUILabelNameID Character""".split())
+# The words after these name a tag or a lookup (languagesystem: a script and a language)
+FEA_NAMED_AFTER = {u"feature": 1, u"script": 1, u"language": 1, u"languagesystem": 2, u"lookup": 1}
+FEA_TOKEN = re.compile(u"#.*|\"[^\"]*\"?|\\[[^\\]]*\\]?|@[A-Za-z0-9_.\\-]+|[{};]|"
+                       u"-?[0-9]+(?:\\.[0-9]+)?(?![A-Za-z0-9_.])|[A-Za-z0-9_.\\\\\\-]+")
+FEA_KINDS = ("keyword", "tag", "class", "list", "comment", "number", "string")
+# (r, g, b) on a dark background, on a light one: each kind plain to read on either (as LOG_COLORS)
+FEA_COLORS = {"keyword": ((110, 170, 240), (20, 70, 190)), "tag": ((90, 205, 185), (0, 120, 130)),
+              "class": ((205, 150, 225), (130, 40, 150)), "list": ((225, 200, 140), (130, 90, 20)),
+              "comment": ((125, 180, 105), (40, 120, 40)), "number": ((190, 220, 160), (20, 120, 80)),
+              "string": ((230, 150, 120), (170, 50, 30))}
+# Past this many lines the code is shown plain: Qt asks the highlighter for every line each time the
+# code is made again (a click), and a CJK font's classes of thousands of glyphs run to thousands of
+# lines, where a reply for each would hold up every click
+HIGHLIGHT_LINES = 2000
+
+
+def fea_spans(line, in_list=False):
+    """The colored parts of a line of feature code: ([(start, length, kind)], whether a glyph list
+    ([...]) is still open at its end). in_list: one was open at the end of the line before (a long
+    class runs over several lines: its lines are the list's color). Keywords, the tag or name after
+    feature, script, language, languagesystem, lookup, and a closing brace; glyph classes (@name),
+    glyph lists as a whole, comments, numbers, and strings. Glyph names stay the text's color."""
+    spans, at = [], 0
+    if in_list:
+        end = line.find(u"]")
+        if end < 0:
+            return ([(0, len(line), "list")] if line else []), True
+        spans.append((0, end + 1, "list"))
+        at = end + 1
+    named, still_open = 0, False
+    for match in FEA_TOKEN.finditer(line, at):
+        token, start = match.group(0), match.start()
+        first = token[:1]
+        if first == u"#":
+            spans.append((start, len(token), "comment"))
+        elif first == u'"':
+            spans.append((start, len(token), "string"))
+        elif first == u"[":
+            spans.append((start, len(token), "list"))
+            still_open = not token.endswith(u"]")
+        elif first == u"@":
+            spans.append((start, len(token), "class"))
+        elif token in (u"{", u";"):
+            named = 0
+        elif token == u"}":
+            named = 1  # (} liga;)
+        elif named:
+            spans.append((start, len(token), "tag"))
+            named -= 1
+        elif token in FEA_KEYWORDS:
+            spans.append((start, len(token), "keyword"))
+            named = FEA_NAMED_AFTER.get(token, 0)
+        elif first.isdigit() or (first == u"-" and token[1:2].isdigit()):
+            if re.match(u"^-?[0-9]+(?:\\.[0-9]+)?$", token):
+                spans.append((start, len(token), "number"))
+    return spans, still_open
+
+
+def fea_color(kind, dark):
+    """A kind's (r, g, b) on a dark background (dark) or a light one."""
+    return FEA_COLORS[kind][0 if dark else 1]
 
 
 # ---------------------------------------------------------------------------
@@ -2570,7 +2799,8 @@ def units_suffix(value):
 
 HELP = u"""<b>FreeLab Feature Code</b><br>
 Writes the OpenType code for the font's ligatures, for alternates that take turns, and for the forms
-its glyph names call for. The code is shown, and checked, before anything is written.<br><br>
+its glyph names call for. The code is shown under the tabs, in <i>Code</i> (in colors: keywords, tags,
+classes, glyph lists, numbers, and comments), and checked, before anything is written.<br><br>
 <b>Ligatures and alternates</b> (the first tab):<br>
 <b>Ligatures</b>: each ligature with what it replaces, set to <i>Standard</i> (liga, on unless a user turns
 it off), <i>Discretionary</i> (dlig, off unless a user turns it on), or <i>Off</i>. A ligature the font's code and
@@ -2603,7 +2833,8 @@ them (or as the font's own small figures, where it has some). Pick a set in the 
 its scale, baseline, and width; <i>Strokes</i>, one value for every set, is the strokes kept (outlines thickened
 evenly; 100%: components). A built form is a start to refine.
 <i>Build checked glyphs</i> adds them in one step of FontLab's History; the font is read again, and
-the forms above take them.<br><br>
+the forms above take them. What it built stays listed: change a setting and build again to replace it
+(a glyph drawn over since is left alone).<br><br>
 <b>Stylistic alternates</b> (the third tab) holds two separate jobs. <b>Suggested alternates</b>: the
 glyphs fonts most often give a stylistic alternate; <i>Make copies to redraw</i> gives each checked one
 a copy named for a stylistic set (a.ss01), to redraw by hand. <b>Variants that take turns</b>: computed
@@ -2617,12 +2848,19 @@ choices back as they first came.<br><br>
 Click this help's <i>?</i> button, then any control, for what it does."""
 
 TABS = (u"Ligatures and alternates", u"Forms", u"Stylistic alternates")
+CODE_HEADING = u"Code"  # the part under the tabs
 # The buttons that check the glyphs taking turns: (key, label, what it does)
 TURN_CHECKS = (("often", u"Often doubled", u"Checks the glyphs that often stand doubled in text (ll, ee, ss, tt; "
                                            u"00 and 99; marks doubled by convention, such as ..., !!, and --), and "
                                            u"only them: those whose alternates matter most."),
                ("all", u"All", u"Checks every glyph whose alternates have no other job in the font's code."),
                ("none", u"None", u"Unchecks every glyph: none takes turns."))
+STYLISTIC_TAB = 2  # the Stylistic alternates tab's place, which builds variants that take turns
+# What Alternates that take turns says where the font has none: where they are built, named as the tab
+# is (a link that opens it)
+NO_TURNS = (u"The font has no alternates to take turns (glyphs named X.2, X.alt1, or X.calt1). Build them on the "
+            u"<a href=\"tab:%d\"><i>%s</i></a> tab, under <i>Variants that take turns</i>, or draw them and name "
+            u"them so." % (STYLISTIC_TAB, TABS[STYLISTIC_TAB]))
 PROGRESS_SECONDS = 0.1  # long work shows its progress, and lets the window answer, this often
 FORM_ICON_WIDTH = 3  # a form row's picture: this many icons wide
 
@@ -2709,9 +2947,10 @@ def style_check_boxes(QtCore, QtGui, tree, base):
                                                                       u"rgb(%d, %d, %d)" % rgb))
 
 
-def watch_check_boxes(dialog, trees):
+def watch_check_boxes(dialog, trees, also=None):
     """The trees' check boxes drawn plain to see in either palette, and drawn again when dark mode
-    switches; the watcher to keep a reference to (None where it could not be made)."""
+    switches (also: called then too, after the first drawing: the Code box's colors); the watcher to
+    keep a reference to (None where it could not be made)."""
     QtCore, QtGui = _qt()
     bases = []
     for tree in trees:
@@ -2719,14 +2958,19 @@ def watch_check_boxes(dialog, trees):
         sheet = u"%s" % (sheet or u"")
         bases.append(sheet.split(CHECK_SHEET_MARK)[0].strip())
 
-    def restyle():
+    def restyle(first=False):
         for tree, base in zip(trees, bases):
             try:
                 style_check_boxes(QtCore, QtGui, tree, base)
             except Exception:
                 pass
+        if also is not None and not first:
+            try:
+                also()
+            except Exception:
+                pass
 
-    restyle()
+    restyle(True)
 
     class CheckWatcher(QtCore.QTimer):  # PythonQt has no QObject to subclass; a timer will do
         def eventFilter(self, obj, event):
@@ -2744,6 +2988,84 @@ def watch_check_boxes(dialog, trees):
         watcher.connect("timeout()", restyle)
         dialog.installEventFilter(watcher)
         return watcher
+    except Exception:
+        return None
+
+
+class Highlighting(object):
+    """The Code box's highlighter and the document it colors: attached while the code is short enough
+    (HIGHLIGHT_LINES), detached past it (the code then shows plain), its colors read again when dark
+    mode switches (refresh)."""
+
+    def __init__(self, highlighter, document, formats):
+        self.highlighter, self.document, self.formats, self.attached = highlighter, document, formats, True
+
+    def detach(self):
+        if self.attached:
+            try:
+                self.highlighter.setDocument(None)
+                self.attached = False
+            except Exception:
+                pass
+
+    def attach(self):
+        if not self.attached:
+            try:
+                self.highlighter.setDocument(self.document)  # (Qt colors it once the window answers again)
+                self.attached = True
+            except Exception:
+                pass
+
+    def refresh(self):
+        """The colors taken from the box's palette again (dark mode switched), and the code recolored."""
+        self.formats.clear()
+        if self.attached:
+            try:
+                self.highlighter.rehighlight()
+            except Exception:
+                pass
+
+
+def make_highlighter(edit):
+    """The Code box's syntax highlighting (fea_spans' kinds in colors plain to read on the box's
+    palette, dark or light), or None where PythonQt cannot make it: the box then stays plain text.
+    PythonQt lets a Python class override a Qt virtual (the check boxes' watcher overrides a timer's
+    eventFilter); highlightBlock is QSyntaxHighlighter's, called by Qt for each line it shows."""
+    QtCore, QtGui = _qt()
+    formats = {}  # kind: QTextCharFormat, made from the palette at the first line colored after a switch
+
+    def palette_formats():
+        if not formats:
+            try:
+                palette = edit.palette() if callable(edit.palette) else edit.palette
+                dark = palette.color(QtGui.QPalette.Base).lightness() < 128
+            except Exception:
+                dark = False
+            for kind in FEA_KINDS:
+                rgb = fea_color(kind, dark)
+                made = QtGui.QTextCharFormat()
+                made.setForeground(QtGui.QBrush(QtGui.QColor(rgb[0], rgb[1], rgb[2])))
+                formats[kind] = made
+        return formats
+
+    class FeaHighlighter(QtGui.QSyntaxHighlighter):
+        def highlightBlock(self, text):
+            try:
+                spans, still_open = fea_spans(u"%s" % (text or u""), self.previousBlockState() == 1)
+                kinds = palette_formats()
+                for start, length, kind in spans:
+                    self.setFormat(start, length, kinds[kind])
+                self.setCurrentBlockState(1 if still_open else 0)  # (1: a glyph list runs on to the next line)
+            except Exception:
+                pass  # a virtual Qt calls must never raise
+
+    try:
+        document = edit.document() if callable(edit.document) else edit.document
+        highlighter = FeaHighlighter(document)
+        # PythonQt chose QSyntaxHighlighter(QObject *parent), which colors no document unless the parent
+        # is a text box: live, the code stayed plain until the document was set (2026-11-14)
+        highlighter.setDocument(document)
+        return Highlighting(highlighter, document, formats)
     except Exception:
         return None
 
@@ -2790,7 +3112,7 @@ class FeatureCodeDialog(object):
         describe(self.tabs, u"The window's three tabs: <i>Ligatures and alternates</i> (liga, dlig, and calt), "
                             u"<i>Forms</i> (case, locl, fractions and figures, small capitals, stylistic sets, and the "
                             u"figure forms to build), and <i>Stylistic alternates</i> (copies to redraw, and variants "
-                            u"that take turns). The code under them is the same whichever tab is open.")
+                            u"that take turns). <i>Code</i>, under them, is the same whichever tab is open.")
         top.addWidget(self.tabs)
         self.pages = QtGui.QStackedWidget()
         top.addWidget(self.pages, 1)
@@ -2847,7 +3169,13 @@ class FeatureCodeDialog(object):
         self.ak.rich(self.turn_label)
         describe(self.turn_label, u"How the checked glyphs take turns: by glyph (each looks back for its own earlier "
                                   u"form) while that takes few enough rules, else by position (each takes the form "
-                                  u"after the form of the glyph of its kind before it).")
+                                  u"after the form of the glyph of its kind before it). Where the font has no "
+                                  u"alternates, where to build them: click the tab's name to open it.")
+        try:  # (its link to the Stylistic alternates tab opens the tab, not a browser)
+            self.turn_label.setOpenExternalLinks(False)
+            self.turn_label.connect("linkActivated(QString)", self.link_activated)
+        except Exception:
+            pass
         part.addWidget(self.turn_label)
         self.alternate_tree = QtGui.QTreeWidget()
         self.alternate_tree.setColumnCount(4)
@@ -2892,6 +3220,10 @@ class FeatureCodeDialog(object):
         forms_box.addWidget(self.forms_tree, 1)
         self.small_forms, self.small_plans, self.small_info = [], {}, None
         self.small_setup, self.small_first, self.small_set_index = {}, {}, 0
+        # The figure forms this window built, by font: {font key: {glyph: {what it was built as (layer_print,
+        # every master): the plan it was built from (plan_signature)}}}. A glyph still as one of its builds
+        # left it is this tool's to replace (small_ours, read with the font); one edited since is the user's.
+        self.built, self.small_ours, self.stems = {}, {}, {}
         self.build_part(QtCore, QtGui, self.part(QtGui, 2, self.forms_parts))
         self.pages.addWidget(forms_page)
         self.alternates = None
@@ -2906,12 +3238,20 @@ class FeatureCodeDialog(object):
 
         part = self.part(QtGui, 2)
         what = (u"The code to be written, feature by feature: FreeLab's blocks between their marker lines, the rest "
-                u"of each feature as it is; the prefix's language systems first where locl needs some.")
-        part.addWidget(describe(self.heading(QtGui, u"The code"), what))
+                u"of each feature as it is; the prefix's language systems first where locl needs some. Keywords, "
+                u"tags, glyph classes (@name), glyph lists ([...]), numbers, and comments (#...) are in colors of "
+                u"their own; code of more than %s lines is shown plain." % grouped(HIGHLIGHT_LINES))
+        # "Code", not "The code": the owner's name for the part, in every tool that writes and compiles code
+        part.addWidget(describe(self.heading(QtGui, CODE_HEADING), what))
         self.code = QtGui.QPlainTextEdit()
         self.code.setReadOnly(True)
         self.code.setWhatsThis(what)
         part.addWidget(self.code, 1)
+        self.code_text = None  # (what the box shows: not set again unchanged, which would color it again)
+        try:  # its colors; without them (a PythonQt that cannot subclass the highlighter) the code shows plain
+            self.highlighting = make_highlighter(self.code)
+        except Exception:
+            self.highlighting = None
         for splitter in (self.splitter, self.lists, self.forms_parts):  # (once their parts are in)
             describe_handles(splitter, u"Drag the space between two parts up or down to give one more room.")
 
@@ -2975,12 +3315,24 @@ class FeatureCodeDialog(object):
             trees = [self.alternate_tree, self.forms_tree, self.small_tree]
             if self.alternates is not None:
                 trees.append(self.alternates.tree)
-            self.check_watcher = watch_check_boxes(dialog, trees)
+            self.check_watcher = watch_check_boxes(
+                dialog, trees, (lambda: self.highlighting.refresh()) if self.highlighting is not None else None)
         except Exception:
             self.check_watcher = None
 
     def switch_page(self, index):
         self.pages.setCurrentIndex(index)
+
+    def link_activated(self, link):
+        """A link of a label clicked: "tab:2" opens that tab (the tab bar's signal shows its page)."""
+        try:
+            link = u"%s" % link
+            if link.startswith(u"tab:"):
+                index = int(link[4:])
+                self.tabs.setCurrentIndex(index)
+                self.switch_page(index)  # (shown whether or not the bar's signal comes: it was the current tab)
+        except Exception:
+            pass  # a signal's handler must not raise
 
     def selected_names(self, tree):
         QtCore, QtGui = _qt()
@@ -3083,10 +3435,23 @@ class FeatureCodeDialog(object):
         self.write_button.setEnabled(False)
         self.restore_button.setEnabled(False)
         if package is None:
-            self.status.setText(u"No font is open. Open one, then run <i>Feature Code</i> again.")
+            # (the window takes the next font opened: ak.fonts_tick, then font_changed)
+            self.status.setText(getattr(self.ak, "NO_FONT_LINE", None) or u"No font is open.")
             self.forms_label.setText(u"")
+            # Nothing of the font closed stays (its code, its turns' line, the third tab's list), and nothing
+            # that acts on a font takes a click: the turns' buttons and look back, the build's settings
+            self.names, self.letters, self.found, self.sets, self.others = [], [], [], {}, {}
+            self.chars, self.often, self.taken, self.texts, self.prefix = {}, set(), set(), {}, u""
+            self.first_choices, self.first_checks = [], []
+            self.show_code(u"")
+            self.show_turns({})
             self.small_forms, self.small_plans, self.small_info = [], {}, None
             self.show_small_forms()
+            if self.alternates is not None:
+                try:
+                    self.alternates.fill()
+                except Exception:
+                    pass
             return
         glyphs = list(package.fgPackage.glyphs)
         self.names = [g.name for g in glyphs]
@@ -3503,7 +3868,8 @@ class FeatureCodeDialog(object):
         self.stroke_box.setValue(STROKE_WEIGHT)
         self.stroke_box.setWhatsThis(what)
         row.addWidget(self.stroke_box)
-        self.stroke_box.connect("valueChanged(int)", lambda value: self.update_small_buttons())
+        # (planned again: the open sections' pictures show the strokes, and the build's count follows)
+        self.stroke_box.connect("valueChanged(int)", lambda value: self.replan())
         row.addStretch(1)
         part.addLayout(row)
         self.small_tree = QtGui.QTreeWidget()
@@ -3521,7 +3887,9 @@ class FeatureCodeDialog(object):
         self.build_button.setWhatsThis(u"Adds the checked glyphs to the font, as shown (scaled forms with their "
                                        u"strokes kept as Strokes says), in one "
                                        u"step of FontLab's History. The font is read again: the forms above take "
-                                       u"them.")
+                                       u"them. What it built stays listed while nobody changes it: a build then "
+                                       u"replaces it with the settings shown (a glyph drawn over is left alone), and "
+                                       u"says so when nothing changed.")
         self.build_button.setEnabled(False)
         row.addWidget(self.build_button)
         part.addLayout(row)
@@ -3572,6 +3940,12 @@ class FeatureCodeDialog(object):
             upm = float(self.package.upm)
         except Exception:
             upm = 1000.0
+        # The forms this window built and nobody changed since are listed again, as if the font lacked
+        # them: a build replaces them (the owner: the button grayed out after a build, where it should
+        # stay and replace what it made once a value changes)
+        self.stems = {}  # (the figures' strokes measured again: the font may have changed)
+        self.small_ours = self.own_built(self.package) if self.package is not None else {}
+        info = self.small_info = without_glyphs(info, self.small_ours)
         try:
             self.small_forms = [form for form in missing_small_forms(info) if self.drawn_in_ink(form.base)]
             self.small_first = small_settings(info, cap, upm)
@@ -3631,13 +4005,12 @@ class FeatureCodeDialog(object):
             self.small_label.setText(u"")
         elif self.small_forms:
             self.small_label.setText(
-                u"The font lacks %s. Each is made of its figure (or <i>a</i> or <i>o</i>), scaled and moved, or of "
+                u"%s Each is made of its figure (or <i>a</i> or <i>o</i>), scaled and moved, or of "
                 u"a drawn small figure where the font has a whole set of them. Scaling alone thins the strokes (a "
                 u"figure at 60%% has stems 60%% as thick); with <i>Strokes</i> above 100%%, the form is made of "
                 u"outlines thickened evenly to that share of the scaled strokes (drawn small figures are about 7%% "
                 u"bolder than scaled ones: 107%%), at 100%% of components. A start to refine, not a drawing. Built, the "
-                u"features above take them." % (
-                    self.ak.b(counted(len(self.small_forms), u"figure form"))))
+                u"features above take them." % self.small_counts())
         elif self.small_info is not None and not any(self.small_info.figures()):
             self.small_label.setText(u"The font has no figures 0 to 9 to build small forms of.")
         else:
@@ -3645,6 +4018,20 @@ class FeatureCodeDialog(object):
                                      u"superiors, inferiors, their Unicode characters, and the ordinal indicators.")
         self.small_set_picked(self.small_set_index)
         self.replan()
+
+    def small_counts(self):
+        """The build list's first sentence: what the font lacks, and what this window built before
+        (listed again: a build replaces it once its settings change)."""
+        b = self.ak.b
+        ours = sum(1 for form in self.small_forms if form.name in self.small_ours)
+        lacking = len(self.small_forms) - ours
+        words = (u"The font lacks %s." % b(counted(lacking, u"figure form"))) if lacking else u""
+        if ours:
+            one = ours == 1
+            words += (u" " if words else u"") + u"%s %s built here before: a build replaces %s once %s settings " \
+                u"change." % (b(counted(ours, u"figure form")), u"was" if one else u"were", u"it" if one else u"them",
+                              u"its" if one else u"their")
+        return words
 
     def replan(self):
         """The forms planned again (a check or a setting changed): each row's words, and the pictures of
@@ -3675,7 +4062,8 @@ class FeatureCodeDialog(object):
                         child.setToolTip(1, words)
                         note = u"; ".join(text for text in (
                             u"U+%04X %s" % (form.code, unichr_(form.code)) if form.code else u"",
-                            SMALL_NOTES.get(plan.how if plan is not None else None, u"")) if text)
+                            SMALL_NOTES.get(plan.how if plan is not None else None, u""),
+                            BUILT_NOTE if form.name in self.small_ours else u"") if text)
                         child.setText(2, note)
                         child.setToolTip(2, note)
                 if item.data(1, QtCore.Qt.UserRole):
@@ -3727,6 +4115,17 @@ class FeatureCodeDialog(object):
             parts.append((self.ak.layer_path(layer), sx, sy, dx, dy))
         if figure is None or not parts:
             return None
+        # Strokes above 100% on a scaled form: its outline drawn with a pen as wide as both sides' offset,
+        # which grows every stroke by the offset on each side, as the build does (the picture showed the
+        # scaled figure whatever Strokes said)
+        pen_width = 0.0
+        weight = self.strokes_value() / 100.0
+        if plan.how == "scaled" and weight > 1.0:
+            try:
+                stem = self.figure_stem(self.package, master)
+                pen_width = 2.0 * stem * abs(plan.parts[0][1]) * (weight - 1.0) / 2.0 if stem else 0.0
+            except Exception:
+                pen_width = 0.0
         scale = ICON_SIZE * 0.75 / float(self.package.upm)
         gap = ICON_SIZE * 0.2
         width = int((figure.advanceWidth + plan.width) * scale + gap * 2)
@@ -3745,7 +4144,13 @@ class FeatureCodeDialog(object):
             painter.translate(figure.advanceWidth * scale + gap, ICON_SIZE * 0.78)
             painter.scale(scale, -scale)
             for path, sx, sy, dx, dy in parts:
-                painter.fillPath(QtGui.QTransform(sx, 0.0, 0.0, sy, float(dx), float(dy)).map(path), QtGui.QBrush(color))
+                placed = QtGui.QTransform(sx, 0.0, 0.0, sy, float(dx), float(dy)).map(path)
+                painter.fillPath(placed, QtGui.QBrush(color))
+                if pen_width > 0:
+                    pen = QtGui.QPen(color)
+                    pen.setWidthF(pen_width)
+                    pen.setJoinStyle(QtCore.Qt.MiterJoin)
+                    painter.strokePath(placed, pen)
             painter.restore()
         finally:
             painter.end()
@@ -3827,10 +4232,9 @@ class FeatureCodeDialog(object):
 
     def stroke_copies(self, package, master, plan, weight):
         """What a scaled form's layer in a master is made of when its strokes are kept: [(source layer,
-        transform, offset)], its parts' outlines scaled and placed as planned, then offset outward so their
-        strokes are weight times the scaled ones; None when a part is made of components or the figure's
-        stroke cannot be measured (the form is then made of components). Nothing is added here."""
-        QtGui = _qt()[1]
+        (sx, sy, dx, dy), offset)], its parts' outlines scaled and placed as planned, then offset outward
+        so their strokes are weight times the scaled ones; None when a part is made of components or the
+        figure's stroke cannot be measured (the form is then made of components). Nothing is added here."""
         stem = self.figure_stem(package, master)
         if not stem:
             return None
@@ -3842,60 +4246,120 @@ class FeatureCodeDialog(object):
             if source_layer is None or any(shape.isComponent for shape in source_layer.shapes):
                 return None
             distance = stem * abs(sx) * (weight - 1.0) / 2.0
-            copies.append((source_layer, QtGui.QTransform(sx, 0.0, 0.0, sy, float(round(dx)), float(round(dy))), distance))
+            copies.append((source_layer, (sx, sy, float(round(dx)), float(round(dy))), distance))
         return copies
 
     def add_stroke_copies(self, layer, copies, width):
         """layer (empty, the new form's) made of the copies stroke_copies listed, offset. Returns what
         was done, as counts: [contours, nodes, on-curve nodes, nodes given a new place, those of them
-        found there afterwards]. The layer's shapes, contours, and nodes are asked of FontLab again once
-        written, so a build whose strokes FontLab did not keep says so, and where it stopped, instead
-        of reporting them thickened (the log said "strokes at 130%" of forms that looked as scaled;
-        whether FontLab keeps a node's x and y set from a script was never looked at live)."""
-        counts = [0, 0, 0, 0, 0]
-        for source_layer, transform, distance in copies:
+        found there afterwards, shapes FontLab draws as they were before the offset].
+
+        The owner saw no difference at 130% while the log said the strokes were thickened, and the nodes
+        read back were where they had been put. Seen live (2026-11-13): a node's x and y set from a
+        script are kept, and its contour's path follows, but the shape's own outline, what FontLab draws
+        (its bounding box), does not; that is why the forms looked as scaled. So the outline is no
+        longer moved node by node inside a shape FontLab has drawn already: each contour is cloned, its
+        nodes put at their offset places while the clone belongs to no shape, and the clones are given
+        to a new shape at once (flShape.addContours, which Font Check's master fixes proved live to
+        redraw), the shape then updated. Where FontLab cannot make a shape from a script, the old way
+        is taken (a copy of the shape, its nodes moved), the shape updated after. Either way the
+        outline is read back twice, its nodes and its drawn box (flShape.boundingBox), so a form that
+        FontLab draws as before is reported, not called thickened."""
+        counts = [0, 0, 0, 0, 0, 0]
+        for source_layer, move, distance in copies:
             for shape in source_layer.shapes:
-                layer.addShape(shape.cloneTopLevel() if hasattr(shape, "cloneTopLevel") else shape.clone())
-                at = len(layer.shapes) - 1
-                copy = layer.shapes[at]
-                copy.applyTransform(transform)
-                contours = [c for c in copy.contours if c is not None]
-                if not contours:
+                written = self.write_offset_shape(layer, shape, move, distance)
+                if written is None:
                     continue
-                shapes_points = [[(n.x, n.y, u"%s" % n.type == u"on") for n in c.nodes()] for c in contours]
-                biggest = max(shapes_points, key=lambda pts: abs(signed_area(pts)))
-                right = signed_area(biggest) > 0  # its outer contour counterclockwise (y up): the outside is right
-                own = copy.transform
-                local = (abs(own.m11() * own.m22()) ** 0.5) or 1.0  # (the offset in the contours' own units)
-                wanted = []
-                for contour in contours:
-                    nodes = contour.nodes()
-                    points = [(n.x, n.y, u"%s" % n.type == u"on") for n in nodes]
-                    places = offset_contour(points, distance / local, right)
-                    for node, (x, y) in zip(nodes, places):
-                        place_node(node, x, y)
-                    contour.update() if hasattr(contour, "update") else None
-                    wanted.append([(x, y, abs(x - p[0]) > STROKE_READ_BACK or abs(y - p[1]) > STROKE_READ_BACK)
-                                   for (x, y), p in zip(places, points)])
-                    counts[0] += 1
-                    counts[1] += len(points)
-                    counts[2] += sum(1 for point in points if point[2])
+                at, wanted, own, done = written
+                counts = [a + b for a, b in zip(counts, done + [0, 0])]
                 try:  # read back through new objects, not the ones written through
-                    again = [c for c in layer.shapes[at].contours if c is not None]
-                    read = [[(n.x, n.y) for n in c.nodes()] for c in again]
+                    again = layer.shapes[at]
+                    matrix = shape_matrix(again)
+                    read = [[mapped(matrix, n.x, n.y) for n in c.nodes()] for c in again.contours if c is not None]
                 except Exception:
-                    read = []
+                    again, read = None, []
+                moved = found = 0
                 for index, places in enumerate(wanted):
                     now = read[index] if index < len(read) and len(read[index]) == len(places) else None
-                    for number, (x, y, shifted) in enumerate(places):
+                    for number, (x, y, shifted, _) in enumerate(places):
                         if not shifted:
                             continue
-                        counts[3] += 1
+                        moved += 1
                         if now is not None and abs(now[number][0] - x) <= STROKE_READ_BACK and \
                                 abs(now[number][1] - y) <= STROKE_READ_BACK:
-                            counts[4] += 1
+                            found += 1
+                counts[3] += moved
+                counts[4] += found
+                if moved and found == moved and drawn_box_kept(shape_box(again), (wanted, own)) is False:
+                    counts[5] += 1  # (its nodes read as put, and FontLab draws it as it was: what the owner saw)
         layer.advanceWidth = float(width)
+        update_layer(layer)
         return counts
+
+    def write_offset_shape(self, layer, shape, move, distance):
+        """A copy of shape added to layer, scaled and placed by move (sx, sy, dx, dy), its strokes offset
+        by distance (in the form's units): (its index among the layer's shapes, its nodes as wanted, in
+        the form's units [[(x, y, moved)]] a contour, the same in the copy's own units (what its drawn box
+        may be told in), [contours, nodes, on-curve nodes, 0]), or None for a shape without contours."""
+        contours = [c for c in shape.contours if c is not None]
+        if not contours:
+            return None
+        matrix = compose(shape_matrix(shape), move)
+        points = [[mapped(matrix, n.x, n.y) + (u"%s" % n.type == u"on",) for n in c.nodes()] for c in contours]
+        biggest = max(points, key=lambda pts: abs(signed_area(pts)))
+        right = signed_area(biggest) > 0  # its outer contour counterclockwise (y up): the outside is right
+        places = [offset_contour(pts, distance, right) for pts in points]
+        done = [len(points), sum(len(pts) for pts in points), sum(1 for pts in points for p in pts if p[2]), 0]
+        wanted = [wanted_points(contour_places, pts) for contour_places, pts in zip(places, points)]
+        new = None
+        try:  # a new shape, given its contours with their nodes already in place
+            # (flContour.clone() copies the nodes: live, 2026-11-14, the figure's own zero kept its nodes and
+            # its box after its clones' nodes were moved, in two fonts and five builds)
+            clones = [contour.clone() for contour in contours]
+            for clone, contour_places in zip(clones, places):
+                nodes = clone.nodes()
+                if len(nodes) != len(contour_places):
+                    raise ValueError(u"a cloned contour has other nodes")
+                for node, (x, y) in zip(nodes, contour_places):
+                    place_node(node, x, y)
+                # (the clones are the figure's contours, unscaled: where their nodes did not take their
+                # places, the shape would be the figure at full size, so the old way is taken instead)
+                if any(abs(node.x - x) > STROKE_READ_BACK or abs(node.y - y) > STROKE_READ_BACK
+                       for node, (x, y) in zip(clone.nodes(), contour_places)):
+                    raise ValueError(u"a cloned contour's nodes did not move")
+            new = self.fontlab.flShape()
+            new.addContours(clones, True)
+        except Exception:
+            new = None
+        if new is not None:
+            layer.addShape(new)
+            at = len(layer.shapes) - 1
+            refresh_shape(layer.shapes[at])
+            return at, wanted, wanted, done
+        # The old way: a copy of the shape, placed by its transform, its nodes moved where they are
+        QtGui = _qt()[1]
+        layer.addShape(shape.cloneTopLevel() if hasattr(shape, "cloneTopLevel") else shape.clone())
+        at = len(layer.shapes) - 1
+        copy = layer.shapes[at]
+        copy.applyTransform(QtGui.QTransform(move[0], 0.0, 0.0, move[1], move[2], move[3]))
+        own_matrix = shape_matrix(copy)
+        local = (abs(own_matrix[0] * own_matrix[3] - own_matrix[1] * own_matrix[2]) ** 0.5) or 1.0
+        copied = [c for c in copy.contours if c is not None]
+        own_points = [[(n.x, n.y, u"%s" % n.type == u"on") for n in c.nodes()] for c in copied]
+        own_right = signed_area(max(own_points, key=lambda pts: abs(signed_area(pts)))) > 0 if own_points else right
+        own = []
+        for contour, pts in zip(copied, own_points):
+            nodes = contour.nodes()
+            contour_places = offset_contour(pts, distance / local, own_right)  # (the offset in the contours' own units)
+            for node, (x, y) in zip(nodes, contour_places):
+                place_node(node, x, y)
+            if hasattr(contour, "update"):
+                contour.update()
+            own.append(wanted_points(contour_places, pts))
+        refresh_shape(copy)
+        wanted = [[mapped(own_matrix, x, y) + (shifted, on) for x, y, shifted, on in contour] for contour in own]
+        return at, wanted, own, done
 
     def small_set_picked(self, index):
         """A set picked in the settings row: its settings shown in the boxes (signals held: showing them
@@ -3965,14 +4429,79 @@ class FeatureCodeDialog(object):
             for k in ("scale", "baseline", "width"))
 
     def update_small_buttons(self):
-        count = sum(1 for form in self.small_forms if form.on and self.small_plans.get(form.name) is not None)
+        unchanged = self.unchanged_forms()
+        count = sum(1 for form in self.small_forms if form.on and self.small_plans.get(form.name) is not None
+                    and form.name not in unchanged)
         self.build_button.setText(build_label(count))
         # (set_enabled, not Auto Kerning's enable: this runs while the font is read after a build or an
-        # undo, the lists' part disabled meanwhile, and the button stayed clickable with nothing to build)
-        set_enabled(self.build_button, count > 0)
+        # undo, the lists' part disabled meanwhile, and the button stayed clickable with nothing to build.)
+        # Checked forms built here with these very settings keep it clickable: the owner wants it there
+        # after a build, and a click says that nothing changed rather than building them again.
+        set_enabled(self.build_button, count > 0 or bool(unchanged))
         set_enabled(self.restore_button, self.restorable())
+        # The settings act on the forms listed: none listed (no font, or nothing to build), none to set.
+        # Suggested only where the picked set is not as suggested (it would put nothing back).
+        listed = bool(self.small_forms)
+        for box in (self.small_set, self.small_scale, self.small_baseline, self.small_width, self.stroke_box):
+            set_enabled(box, listed)
+        set_key = SMALL_SETS[self.small_set_index] if 0 <= self.small_set_index < len(SMALL_SETS) else None
+        first, now = self.small_first.get(set_key), self.small_setup.get(set_key)
+        set_enabled(self.small_reset, listed and first is not None and now is not None and any(
+            first.get(k) != now.get(k) for k in ("scale", "baseline", "width")))
+
+    def build_masters(self, package):
+        """The masters a build makes layers in (every master; the current one where none is listed)."""
+        try:
+            masters = list(package.masters)
+        except Exception:
+            masters = []
+        return masters or [package.master]
+
+    def glyph_print(self, package, name, masters):
+        """What a glyph is in each master (layer_print), or None where it is not in the font or FontLab
+        does not say."""
+        glyph = package.findName(name)
+        if glyph is None:
+            return None
+        try:
+            found = []
+            for master in masters:
+                layer = glyph.getLayerByName(master)
+                if layer is not None:
+                    found.append((u"%s" % master, layer_print(layer)))
+            return tuple(found) or None
+        except Exception:
+            return None
+
+    def own_built(self, package):
+        """{glyph: the plan it was built from (plan_signature)} of the figure forms this window built in
+        this font that are still as one of its builds left them (an undo may bring back an earlier one).
+        A glyph drawn over, or changed any other way, is no longer listed: it is the user's, and never
+        replaced."""
+        try:
+            records = self.built.get(self.ak.font_key(package), {})
+        except Exception:
+            return {}
+        found, masters = {}, self.build_masters(package)
+        for name, prints in records.items():
+            now = self.glyph_print(package, name, masters)
+            if now is not None and now in prints:
+                found[name] = prints[now]
+        return found
+
+    def strokes_value(self):
+        return self.stroke_box.value if hasattr(self, "stroke_box") else STROKE_WEIGHT
+
+    def unchanged_forms(self):
+        """The checked forms this window built whose plan and Strokes are what they were built with: a
+        build would make them as they are."""
+        strokes = self.strokes_value()
+        return set(form.name for form in self.small_forms if form.on and form.name in self.small_ours and
+                   self.small_ours[form.name] == plan_signature(self.small_plans.get(form.name), strokes))
 
     def restorable(self):
+        if self.package is None:  # (no font: the last font's settings are nothing to restore)
+            return False
         return [lig.choice for lig in self.found] != self.first_choices or self.alternate_checks() != self.first_checks \
             or self.forms_changed() or self.small_changed()
 
@@ -3999,12 +4528,26 @@ class FeatureCodeDialog(object):
             self.run()
             self.log.add(u"The font changed since the list was made: here is this one's. Nothing was built.", "warning")
             return
+        # What this window built and nobody changed since, asked of the font now (not as the list was read);
+        # of it, what these settings would make as it is: left as it is, and said
+        ours = self.own_built(package)
+        strokes = self.strokes_value()
+        signatures = dict((form.name, plan_signature(self.small_plans.get(form.name), strokes)) for form in chosen)
+        same = [form.name for form in chosen if form.name in ours and ours[form.name] == signatures[form.name]]
+        chosen = [form for form in chosen if form.name not in same]
+        # What this window built from a form built again is built again with it: a component keeps the
+        # glyph it points to as it was when it was made (live: uni2070, a component of zero.sups, kept
+        # zero.sups' 100% outline after zero.sups was built again at 130% and 160%)
+        following = dependent_forms(self.small_forms, self.small_plans, ours, [form.name for form in chosen])
+        same = [name for name in same if name not in following]
+        chosen += [form for form in self.small_forms if form.name in following and form not in chosen]
+        signatures.update((name, plan_signature(self.small_plans.get(name), strokes)) for name in following)
+        if not chosen:
+            self.log.add(u"Nothing changed since the last build: the checked glyphs are as these settings make them, "
+                         u"so none was built again. Change a setting, or check other glyphs, to build again.")
+            return
         fontlab = self.fontlab
-        try:
-            masters = list(package.masters)
-        except Exception:
-            masters = []
-        masters = masters or [package.master]
+        masters = self.build_masters(package)
         plans = {}
 
         def plans_of(master):
@@ -4016,42 +4559,57 @@ class FeatureCodeDialog(object):
                 plans[master] = plan_small_forms(self.small_info, self.small_forms, self.small_setup, advance)
             return plans[master]
 
-        made, skipped, failed, error, touched, thickened = [], [], [], None, [], []
+        made, skipped, failed, error, touched, thickened, replaced = [], [], [], None, [], [], []
         # forms whose thicker strokes FontLab did not keep, and what was done to them (add_stroke_copies' counts);
         # how far the kept strokes' sides moved in the current master (asked: the form's under way)
-        unkept, lost, offsets, asked = [], [0, 0, 0, 0, 0], [], []
+        unkept, lost, offsets, asked = [], [0, 0, 0, 0, 0, 0], [], []
         self.stems = {}
+        self.ak.before_changes(fontlab, package, u"FreeLab Feature Code")  # (a form built again: its glyph is changed)
         try:
             for master in masters:
                 plans_of(master)  # (each master planned before anything is added)
             for form in sorted(chosen, key=lambda f: f.group in ("superscript", "subscript")):
-                if package.findName(form.name) is not None or (form.code and self.has_code(package, form.code)):
-                    skipped.append(form.name)  # made meanwhile
+                # A glyph of the name, or with the code point, that is not one this window built and left
+                # alone since is the font's: made meanwhile, or drawn over. Never replaced.
+                again = form.name in ours and package.findName(form.name) is not None
+                if not again and (package.findName(form.name) is not None or
+                                  (form.code and self.has_code(package, form.code))):
+                    skipped.append(form.name)
                     continue
-                new = fontlab.flGlyph()
-                new.name = form.name
-                # (its code point set once its layers are made: given before, FontLab kept none of them)
-                package.addGlyph(new)  # (FontLab adds a copy, without layers: they are made on the font's glyph)
-                glyph = package.findName(form.name)
-                if glyph is None:
-                    raise RuntimeError(u"FontLab did not add %s" % form.name)
-                placed = False
                 usable = [(master, plans_of(master).get(form.name)) for master in masters]
                 usable = [(master, plan) for master, plan in usable if plan is not None and
                           all(package.findName(part[0]) is not None for part in plan.parts)]
+                if not usable:  # (asked before anything is added or taken out)
+                    failed.append((form.name, u"its figure has no width in any master"))
+                    continue
                 # (a scaled form only: a copied or moved one is the same as its drawn or built glyph; and
                 # outlines in every master or in none, so the masters stay compatible)
-                weight = self.stroke_box.value / 100.0 if hasattr(self, "stroke_box") else 1.0
+                weight = strokes / 100.0
                 outlines = {}
-                if weight > 1.0 and usable and all(plan.how == "scaled" for _, plan in usable):
+                if weight > 1.0 and all(plan.how == "scaled" for _, plan in usable):
                     for master, plan in usable:
                         copies = self.stroke_copies(package, master, plan, weight)
                         if copies is None:
                             outlines = {}
                             break
                         outlines[master] = copies
+                if again:  # its layers emptied, then made anew: the glyph, its code point, and what uses it stay
+                    glyph = package.findName(form.name)
+                    for master in masters:
+                        layer = glyph.getLayerByName(master)
+                        if layer is not None:
+                            layer.removeAllShapes()
+                else:
+                    new = fontlab.flGlyph()
+                    new.name = form.name
+                    # (its code point set once its layers are made: given before, FontLab kept none of them)
+                    package.addGlyph(new)  # (FontLab adds a copy, without layers: they are made on the font's glyph)
+                    glyph = package.findName(form.name)
+                    if glyph is None:
+                        raise RuntimeError(u"FontLab did not add %s" % form.name)
+                placed = False
                 del asked[:]
-                done = [0, 0, 0, 0, 0]  # contours, nodes, on-curve nodes, nodes moved, nodes found where put
+                done = [0, 0, 0, 0, 0, 0]  # contours, nodes, on-curve, moved, found where put, drawn as before
                 for master, plan in usable:
                     layer = glyph.getLayerByName(master, True)
                     if master in outlines:
@@ -4068,21 +4626,29 @@ class FeatureCodeDialog(object):
                         component.transform = QtGui.QTransform(sx, 0.0, 0.0, sy, float(round(dx)), float(round(dy)))
                         components.append(component)
                     layer.setGlyphComponents(components, float(plan.width), package, False)
+                    update_layer(layer)
                     placed = True
                 if not placed or is_empty(package.findName(form.name)):
-                    failed.append((form.name, u"FontLab did not keep its components" if placed else
-                                   u"its figure has no width in any master"))
+                    if again:  # (this window's own glyph, left empty: said, and Edit > Undo puts it back)
+                        touched.append(glyph)
+                        failed.append((form.name, u"FontLab did not keep its new components, and it is empty; "
+                                                  u"Edit > Undo puts it back"))
+                        continue
+                    failed.append((form.name, u"FontLab did not keep its components"))
                     package.deleteGlyph(package.findName(form.name))
                     continue
-                if form.code:
+                if form.code and not again:
                     package.findName(form.name).fgGlyph.unicode = form.code
                 touched.append(glyph)
                 made.append(form.name)
+                if again:
+                    replaced.append(form.name)
                 if outlines:
-                    # Thickened only where FontLab has every moved node where it was put. An offset under a
-                    # unit (thin strokes at 101%) moves no node far enough to tell: taken as kept.
+                    # Thickened only where FontLab has every moved node where it was put, and draws the
+                    # outline where they are. An offset under a unit (thin strokes at 101%) moves no node
+                    # far enough to tell: taken as kept.
                     far = any(distance >= 1.0 for copies in outlines.values() for _, _, distance in copies)
-                    if (done[3] and done[4] == done[3]) or not far:
+                    if (done[3] and done[4] == done[3] and not done[5]) or not far:
                         thickened.append(form.name)
                         offsets.extend(asked)
                     else:
@@ -4091,31 +4657,52 @@ class FeatureCodeDialog(object):
         except Exception as exc:  # what was made stays made, and is reported
             error = exc
         self.ak.notify_changed(fontlab, package, u"FreeLab Feature Code", touched)
+        try:  # what each glyph is now, and from what it was built: a later build may replace it
+            records = self.built.setdefault(self.ak.font_key(package), {})
+            for name in made:
+                now = self.glyph_print(package, name, masters)
+                if now is not None:
+                    records.setdefault(name, {})[now] = signatures.get(name)
+        except Exception:
+            pass
         b = self.ak.b
         if made:
             one = len(made) == 1
             kept = sorted(set(thickened))
-            strokes = (u"Made of outlines, strokes at %d%% of the scaled ones%s: %s." % (
-                self.stroke_box.value, offset_words(offsets), self.ak.glyph_name_links(kept)) if kept else
+            new = [name for name in made if name not in replaced]
+            words = []
+            if new:
+                words.append(u"Built %s: %s. %s at the end of the font." % (
+                    b(counted(len(new), u"glyph")), self.ak.glyph_name_links(new),
+                    u"It is" if len(new) == 1 else u"They are"))
+            if replaced:  # (the glyphs this window built before, made again with the settings shown)
+                words.append(u"Replaced %s built here before, with the settings shown: %s." % (
+                    b(counted(len(replaced), u"glyph")), self.ak.glyph_name_links(replaced)))
+            words.append(u"<i>Edit &gt; Undo</i> takes %s back." % (u"it" if one else u"them"))
+            words.append(u"Made of outlines, strokes at %d%% of the scaled ones%s: %s." % (
+                strokes, offset_words(offsets), self.ak.glyph_name_links(kept)) if kept else
                 u"Scaling thins strokes: draw over what was scaled.")
-            self.log.add(u"Built %s: %s. %s at the end of the font; <i>Edit &gt; Undo</i> takes %s back. %s The forms "
-                         u"above take %s now: check their features and write the code." % (
-                             b(counted(len(made), u"glyph")), self.ak.glyph_name_links(made),
-                             u"It is" if one else u"They are", u"it" if one else u"them", strokes,
-                             u"it" if one else u"them"),
-                         "done")
+            if new:
+                words.append(u"The forms above take %s now: check their features and write the code." % (
+                    u"it" if len(new) == 1 else u"them"))
+            if same:
+                words.append(u"%s, as built before with these settings, %s left as %s." % (
+                    counted(len(same), u"glyph"), u"was" if len(same) == 1 else u"were",
+                    u"it was" if len(same) == 1 else u"they were"))
+            self.log.add(u" ".join(words), "done")
         else:
             self.log.add(u"Built none.")
         if unkept:  # (said, not assumed: the outlines were read back after they were written)
+            drawn = (u", %s drawn as before" % counted(lost[5], u"shape")) if lost[5] else u""
             self.log.add(u"FontLab did not keep the thicker strokes of %s: %s. Read back, %s as scaled (%s in %s, "
-                         u"%s on-curve, %s given a new place, %s found there): draw over %s." % (
+                         u"%s on-curve, %s given a new place, %s found there%s): draw over %s." % (
                              b(counted(len(unkept), u"glyph")), self.ak.glyph_name_links(sorted(unkept)),
                              u"its outline was" if len(unkept) == 1 else u"their outlines were",
                              counted(lost[1], u"node"), counted(lost[0], u"contour"), grouped(lost[2]),
-                             grouped(lost[3]), grouped(lost[4]),
+                             grouped(lost[3]), grouped(lost[4]), drawn,
                              u"it" if len(unkept) == 1 else u"them"), "warning")
         if skipped:
-            self.log.add(u"%s had been made meanwhile and %s left as %s." % (
+            self.log.add(u"%s had been made or changed meanwhile and %s left as %s." % (
                 self.ak.glyph_name_links(skipped), u"was" if len(skipped) == 1 else u"were",
                 u"it was" if len(skipped) == 1 else u"they were"), "warning")
         for name, why in failed:
@@ -4211,6 +4798,20 @@ class FeatureCodeDialog(object):
         error = self.ak.show_in_glyph_window(self.fontlab, text)
         if error:
             self.log.add(u"FontLab did not open them: %s" % self.ak.html(error), "error")
+
+    def font_changed(self):
+        """This window's font was closed, or a font opened for this window without one (the shared
+        module's fonts_tick, from a timer): the three tabs read again for the new font, as when the window
+        opens (the checks and settings of another font are not carried over: read_font keeps them for
+        the same font only), or emptied, the no-font line shown and nothing that acts on a font
+        clickable. Nothing escapes: a timer's call must not raise."""
+        try:
+            self.run()
+        except Exception as exc:
+            try:
+                self.log.add(u"The font could not be read: %s" % self.ak.html(exc), "error")
+            except Exception:
+                pass
 
     def history_moved(self):
         """An undo, a redo, or an edit in FontLab: the font read again, the choices kept where they still apply."""
@@ -4354,9 +4955,14 @@ class FeatureCodeDialog(object):
                     u"punctuation marks) for its own earlier form (%s)." % (
                         self.ak.b(counted(len(cycling), u"glyph")), self.ak.b(u"by glyph"),
                         counted(turn_rules(cycling, look_back), u"rule")))
-        else:
-            text = u"No glyph is checked to take turns." if self.sets else u""
+        elif self.package is None:
+            text = u""
+        elif self.sets:
+            text = u"No glyph is checked to take turns."
+        else:  # (the section said nothing, and the owner looked for a minute for where they are made)
+            text = NO_TURNS
         self.turn_label.setText(text)
+        set_enabled(self.look_back, bool(self.sets))  # (no glyph with alternates: no look back to set)
         free = [base for base in self.sets if base not in self.taken]
         often = set(base for base in free if base in self.often)
         states = {"often": bool(often) and set(cycling) != often, "all": len(cycling) < len(free), "none": bool(cycling)}
@@ -4385,6 +4991,21 @@ class FeatureCodeDialog(object):
                                       if fits else [])
         texts.update(forms_texts(self.forms, self.texts))
         return texts
+
+    def show_code(self, text):
+        """The Code box's text, colored while it has HIGHLIGHT_LINES lines at most, plain past that; left
+        alone when it is the text shown already (each click makes the code again, and Qt would color every
+        line of it again)."""
+        if text == self.code_text:
+            return
+        self.code_text = text
+        highlighting = self.highlighting
+        long_code = text.count(u"\n") + 1 > HIGHLIGHT_LINES
+        if highlighting is not None and long_code:
+            highlighting.detach()  # (before the text: none of its lines is colored)
+        self.code.setPlainText(text)
+        if highlighting is not None and not long_code:
+            highlighting.attach()  # (after it, where it was detached: colored once, not twice)
 
     def tags_shown(self, texts):
         return [tag for tag in ("liga", "dlig", "calt") if tag in texts] + \
@@ -4417,7 +5038,7 @@ class FeatureCodeDialog(object):
         for tag, problem in sorted(forms_check(self.forms, form_texts, language_systems(self.locl()),
                                                self.names, self.checked_code).items()):
             problems.append(u"%s: %s" % (tag, problem))
-        self.code.setPlainText(u"\n".join(shown))
+        self.show_code(u"\n".join(shown))
         present = any((BEGIN % kind) in (self.texts.get(tag) or u"")
                       for tag, kind in (("liga", "ligatures"), ("dlig", "ligatures"), ("calt", "alternates"))) or \
             any((BEGIN % FORMS) in (text or u"") for text in self.texts.values())
@@ -4485,7 +5106,8 @@ class FeatureCodeDialog(object):
             error = exc
         finally:
             self.set_busy(False)
-        self.ak.notify_changed(self.fontlab, self.package, u"FreeLab Feature Code")
+        # (the feature code only: the font's own state, which needs no before_changes, and no glyph added)
+        self.ak.notify_changed(self.fontlab, self.package, u"FreeLab Feature Code", added=False)
         forms = self.form_state()
         self.run()
         self.apply_form_state(forms)

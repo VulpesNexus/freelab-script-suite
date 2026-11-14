@@ -27,11 +27,23 @@ SPACING_REFERENCES = {"upper": u"H", "lower": u"n", "figure": u"0"}  # each kind
 # reference each straight one is proofed with
 SCRIPT_SPACING_REFERENCES = {"armenian": {"upper": u"\N{ARMENIAN CAPITAL LETTER VO}", "lower": u"\N{ARMENIAN SMALL LETTER VO}"},
                              "georgian": {"upper": u"Ი", "lower": u"\N{GEORGIAN LETTER IN}"},
-                             "kana": {"kana": u"\N{KATAKANA LETTER RO}"}}
+                             "kana": {"kana": u"\N{KATAKANA LETTER RO}"},
+                             "cyrillic": {"upper": u"\N{CYRILLIC CAPITAL LETTER EN}", "lower": u"\N{CYRILLIC SMALL LETTER EN}"},
+                             "greek": {"upper": u"\N{GREEK CAPITAL LETTER ETA}", "lower": u"\N{GREEK SMALL LETTER ETA}"},
+                             "devanagari": {"lower": u"\N{DEVANAGARI LETTER NA}"},
+                             "hebrew": {"lower": u"\N{HEBREW LETTER HE}"},
+                             "thaana": {"lower": u"\N{THAANA LETTER NOONU}"}}
 ROUND_REFERENCES = {u"H": u"O", u"n": u"o", u"0": u"8", u"\N{ARMENIAN CAPITAL LETTER VO}": u"\N{ARMENIAN CAPITAL LETTER OH}",
                     u"\N{ARMENIAN SMALL LETTER VO}": u"\N{ARMENIAN SMALL LETTER OH}",
                     u"Ი": u"Ო",
-                    u"\N{GEORGIAN LETTER IN}": u"\N{GEORGIAN LETTER ON}", u"\N{KATAKANA LETTER RO}": u"\N{HIRAGANA LETTER NO}"}
+                    u"\N{GEORGIAN LETTER IN}": u"\N{GEORGIAN LETTER ON}", u"\N{KATAKANA LETTER RO}": u"\N{HIRAGANA LETTER NO}",
+                    u"\N{CYRILLIC CAPITAL LETTER EN}": u"\N{CYRILLIC CAPITAL LETTER O}",
+                    u"\N{CYRILLIC SMALL LETTER EN}": u"\N{CYRILLIC SMALL LETTER O}",
+                    u"\N{GREEK CAPITAL LETTER ETA}": u"\N{GREEK CAPITAL LETTER OMICRON}",
+                    u"\N{GREEK SMALL LETTER ETA}": u"\N{GREEK SMALL LETTER OMICRON}",
+                    u"\N{DEVANAGARI LETTER NA}": u"\N{DEVANAGARI LETTER TTHA}",
+                    u"\N{HEBREW LETTER HE}": u"\N{HEBREW LETTER SAMEKH}",
+                    u"\N{THAANA LETTER NOONU}": u"\N{THAANA LETTER MEEMU}"}
 FIXED = u"HOlno08"  # the references and tuning glyphs of the methods: never changed (the other scripts' too, below)
 TOLERANCE_UNITS = 6  # a side whose suggestion is closer than this to its sidebearing is left out
 GROUPS = (("letters", "Letters"), ("figures", "Letters and figures"), ("all", "Letters, figures, and punctuation"),
@@ -118,8 +130,9 @@ class Spacing(object):
 
 def reference_for(kind_char, category, script_of=None):
     """A character's straight reference, by the kind of its base letter: H, n, or 0; n for
-    punctuation (set among lowercase most). With script_of, an Armenian or Georgian letter takes its
-    script's own (vo, in) and a kana RO."""
+    punctuation (set among lowercase most). With script_of, a letter of another script Auto Kerning
+    knows takes its script's own: Armenian vo, Georgian in, kana RO, Cyrillic en, Greek eta,
+    Devanagari na, Hebrew he, and Thaana noonu."""
     script = script_of(kind_char) if script_of is not None else None
     if script in SCRIPT_SPACING_REFERENCES:
         own = SCRIPT_SPACING_REFERENCES[script]
@@ -348,7 +361,9 @@ Click this help's <i>?</i> button, then any control, for what it does."""
 
 
 class AutoSpacingDialog(object):
-    COLUMNS = ("Glyph", "Left now", "Left change", "Right now", "Right change", "Width")
+    # As the other tools' lists: the glyph drawn from the font beside its character, its name, its code point
+    COLUMNS = ("Glyph", "Name", "Unicode", "Left now", "Left change", "Right now", "Right change", "Width")
+    NUMBERS = (3, 4, 5, 6, 7)  # the columns of numbers, right-aligned
 
     def __init__(self):
         QtCore, QtGui = _qt()
@@ -397,7 +412,9 @@ class AutoSpacingDialog(object):
         self.tree.setRootIsDecorated(False)
         self.tree.setWhatsThis(u"Each glyph's sidebearings now and the change suggested for each side (below 0: "
                                u"closer to its neighbors), and its width after. Checked glyphs are changed. "
-                               u"Double-click a glyph's name to open it in a <i>Glyph</i> window.")
+                               u"Double-click a glyph or its name to open it in a <i>Glyph</i> window.")
+        self.tree.setIconSize(QtCore.QSize(*self.ak.glyph_icon_size()))
+        self.tree.setProperty(self.ak.LEAVE_ALONE_PROP, True)  # its pictures are drawn in the dialog's colors
         self.ak.grid_lines(self.tree)
         layout.addWidget(self.tree, 1)
         self.composites_note = QtGui.QLabel(u"")
@@ -489,10 +506,22 @@ class AutoSpacingDialog(object):
         ak = self.ak
         group = GROUPS[self.group.currentIndex][0]
         letters = [ch for ch in ak.class_characters() if ch.isalpha()]
-        letters += list(ak.ARMENIAN_LETTERS + ak.GEORGIAN_LETTERS + ak.KANA_LETTERS)  # (kana only where proportional)
+        # every other script Auto Kerning knows (kana only where proportional): its letters, as listed there
+        # (Cyrillic, Greek, Devanagari, Hebrew, and Thaana were left out until 2026-11-14, live)
+        others = getattr(ak, "SCRIPT_LETTERS", None) or {"armenian": ak.ARMENIAN_LETTERS, "georgian": ak.GEORGIAN_LETTERS,
+                                                         "kana": ak.KANA_LETTERS}
+        seen = set(letters)
+        for script, _ in ak.SCRIPTS:
+            if script != "latin" and script in others:
+                letters += [ch for ch in others[script] if ch not in seen]
+                seen.update(others[script])
         chosen = letters + (list(ak.FIGURES) if group in ("figures", "all") else [])
         if group == "all":
-            chosen += list(ak.PUNCTUATION) + [ch for ch in ak.ARMENIAN_PUNCTUATION if ch not in ak.PUNCTUATION]
+            marks = getattr(ak, "SCRIPT_PUNCTUATION", None) or {"armenian": ak.ARMENIAN_PUNCTUATION}
+            chosen += list(ak.PUNCTUATION)
+            for script, _ in ak.SCRIPTS:
+                if script not in ("latin", "kana") and script in marks:
+                    chosen += [ch for ch in marks[script] if ch not in chosen]
         if group == "everything" and self.package is not None:
             import unicodedata
             for fg in self.package.fgPackage.glyphs:
@@ -512,11 +541,13 @@ class AutoSpacingDialog(object):
         self.tree.clear()
         self.spacings, self.listed = [], []
         self.apply_button.setEnabled(False)
+        self.composites_note.setText(u"")  # (the last font's, until this one is measured)
+        self.composites_note.setVisible(False)
         try:
             package = self.package = self.current_font()
             self.master = package.master if package is not None else None
             if package is None:
-                self.status.setText(u"No font is open. Open one, then click %s." % self.ak.i("Analyze"))
+                self.status.setText(self.ak.NO_FONT_LINE)
                 return
             self.status.setText(u"Measuring\N{HORIZONTAL ELLIPSIS}")
             QtGui.QApplication.processEvents()
@@ -529,6 +560,7 @@ class AutoSpacingDialog(object):
         finally:
             self.busy = False
             self.seen_history = self.ak.history_mark(self.package)
+            self.update_buttons()  # (no font, or nothing measured: the settings grayed out)
         self.first_checks = dict((s.name, s.checked) for s in self.spacings)
         self.fill()
         if self.unspaced_references:
@@ -720,28 +752,28 @@ class AutoSpacingDialog(object):
         self.listed = [s for s in self.spacings if s.listed(tolerance)]
         bold = QtGui.QFont(self.tree.font)
         bold.setBold(True)
-        sign = lambda value: u"%+d" % value if value else u"0"
+        color = self.dialog.palette.color(QtGui.QPalette.WindowText)
         for index, s in enumerate(self.listed):
-            left, right = s.changes(tolerance)
-            item = QtGui.QTreeWidgetItem([u"%s  %s%s" % (s.char, s.name, u" (reference)" if getattr(s, "reference", False) else u""),
-                                          u"%d" % round_units(s.left), sign(left),
-                                          u"%d" % round_units(s.right), sign(right),
-                                          u"%d" % round_units(s.advance + left + right)])
+            item = QtGui.QTreeWidgetItem(self.row_texts(s, tolerance))
             item.setData(0, QtCore.Qt.UserRole, index)
             item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsUserCheckable)
             item.setCheckState(0, QtCore.Qt.Checked if s.checked else QtCore.Qt.Unchecked)
             item.setFont(0, bold)
-            for column in range(1, len(self.COLUMNS)):
+            if self.package is not None and index < self.ak.GLYPH_ICON_ROWS:
+                icon = self.ak.glyph_icon(self.package, self.master, [s.name], color)
+                if icon is not None:
+                    item.setIcon(0, icon)
+            for column in self.NUMBERS:
                 item.setTextAlignment(column, int(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter))
             self.tree.addTopLevelItem(item)
-        for column in range(len(self.COLUMNS)):
-            self.tree.resizeColumnToContents(column)
+        self.ak.fit_columns(self.tree, self.NUMBERS)
         self.update_buttons()
         if self.package is not None:
             changes = dict((s.name, s.changes(tolerance)) for s in self.listed)
             moves = composite_moves(self.composites, changes)
             following = sum(1 for move in moves.values() if move is not None)
             left_out = sum(1 for m in moves.values() if m is None)
+            self.composites_note.setVisible(bool(self.listed))  # (nothing listed: nothing follows)
             self.composites_note.setText(u"%s built from components %s the listed glyphs%s." % (
                 counted(following, u"glyph"), u"follows" if following == 1 else u"follow",
                 u"; %d built on two of them %s left as %s" % (left_out, u"is" if left_out == 1 else u"are",
@@ -758,6 +790,16 @@ class AutoSpacingDialog(object):
                                    u"passes): halfkern closes half of a tightening at a time, so one measure leaves part "
                                    u"of it." % ak.b(self.settle_passes) if getattr(self, "settle_passes", 1) > 1 else u""))
         self.select()
+
+    def row_texts(self, s, tolerance):
+        """A row's cells: the glyph's character, its name (a reference says so), its code point, its
+        sidebearings now and the changes, its width after."""
+        left, right = s.changes(tolerance)
+        sign = lambda value: u"%+d" % value if value else u"0"
+        code = self.ak.code_point(s.char) if s.char else 0
+        return [s.char, s.name + (u" (reference)" if getattr(s, "reference", False) else u""), self.ak.unicode_label(code),
+                u"%d" % round_units(s.left), sign(left), u"%d" % round_units(s.right), sign(right),
+                u"%d" % round_units(s.advance + left + right)]
 
     def harvest(self):
         QtCore, QtGui = _qt()
@@ -793,6 +835,10 @@ class AutoSpacingDialog(object):
         self.ak.enable(self.glyph_window_button, self.selected() is not None)
         self.ak.enable(self.kerning_button, bool(self.spaced) and not self.busy)
         self.ak.enable(self.follow, bool(items))  # nothing listed: nothing for it to act on
+        # No font: nothing to pick glyphs from; nothing measured: no list for the tolerance to filter
+        self.ak.enable(self.group, self.package is not None and not self.busy)
+        self.ak.enable(self.tolerance, bool(self.spacings))
+        self.ak.enable(self.analyze_button, not self.busy and (self.package is not None or self.ak.fonts_open(self.fontlab)))
 
     def check_kerning(self):
         """Kerning Check on the glyphs the last spacing changed."""
@@ -819,8 +865,14 @@ class AutoSpacingDialog(object):
         self.log.add(u"Checks restored as suggested.")
 
     def double_clicked(self, item, column):
-        if column == 0:
+        if column in (0, 1):  # the glyph or its name
             self.show_in_glyph_window()
+
+    def font_changed(self):
+        """This window's font was closed, or a font opened for this window without one (fonts_tick):
+        measured anew, or the list emptied and the no-font line shown."""
+        self.spaced = []
+        self.run()
 
     def history_moved(self):
         """An undo, a redo, or an edit in FontLab: the glyphs measured again, as they are now."""
@@ -950,6 +1002,7 @@ class AutoSpacingDialog(object):
         others = [s for s in chosen if not getattr(s, "reference", False)]
         totals, stale, error, moved = {}, 0, None, []
         passes, again, measured_again, unread = 0, 0, 0, False
+        self.ak.before_changes(self.fontlab, self.package, u"FreeLab Auto Spacing")
         self.busy = True
         try:
             batches = [references, others] if references and others else [chosen]

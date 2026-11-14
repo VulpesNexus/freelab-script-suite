@@ -6,7 +6,8 @@ languages are written with, developed by Rosetta Type/Research and its contribut
 Changes made: checks/train/languages.py reads Hyperglot's language files, resolves their
 inheritance, keeps each language's primary orthographies (base and auxiliary characters,
 the marks they need, script, status, validity, and number of speakers), and writes them
-in a compact form. No other part of Hyperglot is included.
+in a compact form. An Arabic presentation form a list holds (the isolated letters of two
+lists) is written as the letter it stands for. No other part of Hyperglot is included.
 
 The Apache License, Version 2.0, follows.
 

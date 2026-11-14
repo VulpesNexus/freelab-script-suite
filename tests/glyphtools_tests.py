@@ -956,8 +956,11 @@ class AnchorPageTests(unittest.TestCase):
         page.glyphs = page.plan_for("Regular")[0]
         page.harvest = page.run = lambda keep_script=False: None
         page.code_box = Stub(checked=False)
+        page.writes = []  # (what the owner was told of the write: begin, end)
         page.owner = Stub(current_font=lambda: package, package_key=lambda p: (u"a.vfc", 1) if p is not None else None,
-                          log=Stub(add=lambda text, kind="info": None))
+                          log=Stub(add=lambda text, kind="info": None),
+                          begin_write=lambda p: page.writes.append("begin"),
+                          end_write=lambda p, wrote=True: page.writes.append("end" if wrote else "end, nothing"))
         page.ak = Stub(notify_changed=lambda *args: None, b=lambda text: u"%s" % text, html=lambda text: u"%s" % text)
         page.fontlab = Stub(flPinPoint=lambda point: Anchor(point))
         return page, built
@@ -977,6 +980,7 @@ class AnchorPageTests(unittest.TestCase):
         self.assertTrue(g.pending())
         self.write(page)
         self.assertEqual(built["Regular"].read()["top"], (260, 600))
+        self.assertEqual(page.writes, ["begin", "end"], "the dialog told of its own write (not an edit in FontLab)")
         self.assertEqual(g.adjust, {}, "the font has the move now")
         again = page.plan_for("Regular")[0][0]
         again.adjust = g.adjust  # (as the refresh carries it)
@@ -992,6 +996,31 @@ class AnchorPageTests(unittest.TestCase):
         self.assertEqual(sorted(built["Bold"].read()), ["bottom", "ogonek", "top"], "Bold gets them")
         self.assertEqual(built["Regular"].read(), {"top": (250, 600), "bottom": (250, 0), "ogonek": (460, 0)},
                          "Regular as it was")
+
+    def test_nothing_written_says_so(self):
+        """Add checked anchors said it wrote (end_write's wrote=True, a History step, "Added 0 anchors to 1
+        glyph") when every anchor was in the font already: a write of nothing makes no step and says so."""
+        page, built = self.page({"Regular": {"top": (250, 600), "bottom": (250, 0), "ogonek": (460, 0)}})
+        logged, notified = [], []
+        page.owner.log = Stub(add=lambda text, kind="info": logged.append((kind, text)))
+        page.ak.notify_changed = lambda *args: notified.append(args)
+        g = page.glyphs[0]
+        g.elsewhere = g.checked = True  # (listed as pending, but the font has them all by the write)
+        self.write(page)
+        self.assertEqual(page.writes, ["begin", "end, nothing"], "nothing written: no step of its own to expect")
+        self.assertEqual(notified, [], "no History step made for nothing")
+        self.assertEqual([kind for kind, _ in logged], ["info"])
+        self.assertTrue(logged[0][1].startswith(u"Nothing was added"), logged)
+        # One master lacking them: written, and only the glyph written in counted
+        page, built = self.page({"Regular": {"top": (250, 600), "bottom": (250, 0), "ogonek": (460, 0)}, "Bold": {}})
+        logged, notified = [], []
+        page.owner.log = Stub(add=lambda text, kind="info": logged.append((kind, text)))
+        page.ak.notify_changed = lambda *args: notified.append(args)
+        g = page.glyphs[0]
+        g.elsewhere = g.checked = True
+        self.write(page)
+        self.assertEqual((page.writes, len(notified)), (["begin", "end"], 1))
+        self.assertEqual(logged, [("done", u"Added 3 anchors to 1 glyph. <i>Edit &gt; Undo</i> takes it back.")])
 
     # -- the bases' sections, the notes, and stacked examples (the owner's reports of 2026-11-12) --
 
@@ -1590,7 +1619,7 @@ class DirectionTests(unittest.TestCase):
     def qt(self, paths):
         def path():
             made = Recorder()
-            made.boundingRect = lambda: Stub(width=lambda: 100.0, left=lambda: 0.0)
+            made.boundingRect = lambda: Stub(width=lambda: 100.0, left=lambda: 0.0, top=lambda: -70.0, bottom=lambda: 0.0)
             paths.append(made)
             return made
         gui = Stub(QFont=Recorder, QPainterPath=path, QPixmap=Recorder, QColor=Recorder, QPainter=Recorder,
@@ -1909,87 +1938,132 @@ class ReferenceFontTests(unittest.TestCase):
         self.assertEqual(rows, [(u"Bundled Sans (default)", u"Bundled Sans"), (None, None),
                                 (u"Arial", u"Arial"), (u"Noto Sans", u"Noto Sans")], "once, above a separator")
         self.assertEqual(ac.reference_rows(None, [u"Arial"]), [(u"Arial", u"Arial")], "no bundled font: as before")
-        self.assertEqual(ac.reference_rows(u"Bundled Sans", [u"Arial"], u"Gone Sans")[-1], (u"Gone Sans", u"Gone Sans"),
-                         "a pick saved before is still listed")
         rows = ac.reference_rows(u"FreeLang Essential", [u"Arial", u"FreeLang CJK", u"FreeLang+ General",
                                                          u"FreeLang+ Duployan", u"FreeLanguage Sans"], shown=u"FreeLang")
         self.assertEqual([family for _, family in rows], [u"FreeLang Essential", None, u"Arial", u"FreeLanguage Sans"],
                          "FreeLang's other families, with a space or a plus after its name, are not choices")
 
+    def test_a_family_that_is_not_installed_is_never_a_row(self):
+        """The owner's chooser listed "FreeLab Languages", the bundled font's old family name saved as the
+        pick in an earlier session, and chose it: a ghost row, drawing nothing of its own."""
+        rows = ac.reference_rows(u"FreeLang Essential", [u"Arial", u"Noto Sans"], [u"FreeLab Languages", u"Noto Sans"],
+                                 shown=u"FreeLang")
+        self.assertEqual([family for _, family in rows], [u"FreeLang Essential", u"Noto Sans", None, u"Arial", u"Noto Sans"],
+                         "the recent picks still installed at the top, over the separator; the gone one nowhere")
+        self.assertEqual(ac.installed_pick(u"FreeLab Languages", [u"Noto Sans"], [u"Arial", u"Noto Sans"]),
+                         (None, [u"Noto Sans"]), "forgotten")
+        self.assertEqual(ac.installed_pick(u"Noto Sans", [], [u"Arial", u"Noto Sans"]), (u"Noto Sans", [u"Noto Sans"]),
+                         "a pick saved by an earlier version heads the recent ones")
+        self.assertEqual(ac.installed_pick(u"Gone Sans", [], []), (u"Gone Sans", [u"Gone Sans"]),
+                         "Qt listed no family: nothing is known, nothing forgotten")
+        many = [u"Family %d" % at for at in range(9)]
+        self.assertEqual(len([row for row in ac.reference_rows(None, many, many) if row[0]]), len(many) + ac.REFERENCE_RECENT)
+
     def dialog(self, settings, default=u"Bundled Sans"):
         dialog = ac.AccentsDialog.__new__(ac.AccentsDialog)
         dialog.settings, dialog.reference_history = dict(settings), []
         dialog.choosing_reference, dialog.anchors_read = False, True
-        dialog.done = done = {"written": [], "drawn": 0, "registered": 0}
+        dialog.done = done = {"written": [], "drawn": 0, "registered": 0, "log": []}
 
         def register(core, gui):
             done["registered"] += 1
             return default
-        dialog.ak = Stub(load_sibling=lambda name, module: Stub(register_list_font=register), state_dir=lambda: u"")
+        dialog.ak = Stub(load_sibling=lambda name, module: Stub(register_list_font=register), state_dir=lambda: u"",
+                         html=lambda text: u"%s" % text)
         dialog.reference_boxes = [self.box(), self.box()]
         dialog.draw_reference = lambda r: done.__setitem__("drawn", done["drawn"] + 1)
         dialog.selected = lambda: None
         dialog.anchors = Stub(draw_reference=lambda g: done.__setitem__("drawn", done["drawn"] + 1), selected=lambda: None)
-        dialog.log = Stub(add=lambda text, level="info": None)
+        dialog.log = Stub(add=lambda text, level="info": done["log"].append((level, text)))
         return dialog, done
 
     def box(self):
         box = Stub(rows=[], currentIndex=-1, slots=[])
         box.blockSignals = lambda on: None
+        box.clear = lambda: box.__dict__.__setitem__("rows", [])
         box.addItem = lambda label: box.rows.append(label)
         box.insertSeparator = lambda at: box.rows.insert(at, None)
         box.setCurrentIndex = lambda index: setattr(box, "currentIndex", index)
         box.connect = lambda signal, slot: box.slots.append(slot)
         return box
 
-    def setup(self, dialog):
+    def setup(self, dialog, installed=(u"Arial", u"Bundled Sans", u"Noto Sans JP")):
+        """setup_reference over these installed families; Qt (its timers kept in dialog.done["timers"])
+        and the settings file stubbed until the test ends."""
         saved = ac._qt, ac.write_settings
-        try:
-            families = Stub(families=lambda: [u"Arial", u"Bundled Sans", u"Noto Sans JP"])
-            ac._qt = lambda: (None, Stub(QFontDatabase=lambda: families))
-            ac.write_settings = lambda ak, data: dialog.done["written"].append(dict(data))
-            dialog.setup_reference()
-        finally:
-            ac._qt = saved[0]
-        return saved[1]
+        self.addCleanup(lambda: (setattr(ac, "_qt", saved[0]), setattr(ac, "write_settings", saved[1])))
+        families = Stub(families=lambda: list(installed))
+        timers = dialog.done["timers"] = []
+        ac._qt = lambda: (Stub(QTimer=Stub(singleShot=lambda ms, slot: timers.append(slot))),
+                          Stub(QFontDatabase=lambda: families))
+        ac.write_settings = lambda ak, data: dialog.done["written"].append(dict(data))
+        dialog.setup_reference()
+        dialog.done["fonts"] = 0  # (each name in its own font: ReferencePreviewTests; here, how often started)
+        dialog.set_reference_fonts = lambda: dialog.done.__setitem__("fonts", dialog.done["fonts"] + 1)
 
     def test_a_fresh_setting_starts_on_the_bundled_font(self):
         dialog, done = self.dialog({})
-        restore = self.setup(dialog)
-        try:
-            first, second = dialog.reference_boxes
-            self.assertEqual(first.rows, [u"Bundled Sans (default)", None, u"Arial", u"Noto Sans JP"])
-            self.assertEqual(second.rows, first.rows, "the Mark anchors tab has the same chooser")
-            self.assertEqual((done["registered"], dialog.reference_chosen), (1, u"Bundled Sans"))
-            self.assertEqual((first.currentIndex, second.currentIndex), (0, 0))
-            self.assertEqual(done["written"], [], "the default is not saved: it stays the default")
-            second.currentIndex = 3  # Noto Sans JP picked on the Mark anchors tab
-            second.slots[0](3)
-            self.assertEqual(dialog.reference_chosen, u"Noto Sans JP")
-            self.assertEqual(first.currentIndex, 3, "kept in step")
-            self.assertEqual(done["written"][-1], {"reference": u"Noto Sans JP"})
-            self.assertEqual(done["drawn"], 2, "both references drawn again")
-            first.currentIndex = 0  # the bundled font's own entry: the pick taken back
-            first.slots[0](0)
-            self.assertEqual((dialog.reference_chosen, second.currentIndex), (u"Bundled Sans", 0))
-            self.assertEqual(done["written"][-1], {}, "no pick saved any more")
-            self.assertEqual(dialog.reference_history, [u"Noto Sans JP"], "the earlier pick still stands in when it lacks a character")
-            first.currentIndex = 1  # the separator
-            first.slots[0](1)
-            self.assertEqual(dialog.reference_chosen, u"Bundled Sans")
-        finally:
-            ac.write_settings = restore
+        self.setup(dialog)
+        first, second = dialog.reference_boxes
+        self.assertEqual(first.rows, [u"Bundled Sans (default)", None, u"Arial", u"Noto Sans JP"])
+        self.assertEqual(second.rows, first.rows, "the Mark anchors tab has the same chooser")
+        self.assertEqual((done["registered"], dialog.reference_chosen), (1, u"Bundled Sans"))
+        self.assertEqual((first.currentIndex, second.currentIndex), (0, 0))
+        self.assertEqual(done["written"], [], "the default is not saved: it stays the default")
+        second.currentIndex = 3  # Noto Sans JP picked on the Mark anchors tab
+        second.slots[0](3)
+        self.assertEqual(dialog.reference_chosen, u"Noto Sans JP")
+        self.assertEqual(first.currentIndex, 3, "kept in step")
+        self.assertEqual(done["written"][-1], {"reference": u"Noto Sans JP", "recent_references": [u"Noto Sans JP"]})
+        self.assertEqual(done["drawn"], 2, "both references drawn again")
+        self.assertEqual(first.rows, [u"Bundled Sans (default)", None, u"Arial", u"Noto Sans JP"],
+                         "not refilled inside the pick's own signal")
+        while done["timers"]:
+            done["timers"].pop(0)()
+        self.assertEqual(first.rows, [u"Bundled Sans (default)", u"Noto Sans JP", None, u"Arial", u"Noto Sans JP"],
+                         "the pick at the top, where the list opens")
+        self.assertEqual((first.currentIndex, second.currentIndex), (1, 1), "on the pick's row at the top")
+        self.assertEqual(done["fonts"], 1, "the names given their own fonts again: the refill took them")
+        first.currentIndex = 0  # the bundled font's own entry: the pick taken back
+        first.slots[0](0)
+        self.assertEqual((dialog.reference_chosen, second.currentIndex), (u"Bundled Sans", 0))
+        self.assertEqual(done["written"][-1], {"recent_references": [u"Noto Sans JP"]}, "no pick saved any more")
+        self.assertEqual(dialog.reference_history, [u"Noto Sans JP"], "the earlier pick still stands in when it lacks a character")
+        first.currentIndex = 2  # the separator
+        first.slots[0](2)
+        self.assertEqual(dialog.reference_chosen, u"Bundled Sans")
+        first.currentIndex = 1  # the recent pick, at the top
+        first.slots[0](1)
+        self.assertEqual((dialog.reference_chosen, done["timers"]), (u"Noto Sans JP", []), "listed there already")
 
     def test_a_saved_pick_is_kept(self):
         dialog, done = self.dialog({"reference": u"Noto Sans JP"})
-        ac.write_settings = self.setup(dialog)
+        self.setup(dialog)
         self.assertEqual(dialog.reference_chosen, u"Noto Sans JP")
-        self.assertEqual(dialog.reference_boxes[0].currentIndex, 3)
-        self.assertEqual(dialog.reference_boxes[0].rows[0], u"Bundled Sans (default)", "a click away")
+        self.assertEqual(dialog.reference_boxes[0].currentIndex, 1, "at the top, under the default")
+        self.assertEqual(dialog.reference_boxes[0].rows[:3], [u"Bundled Sans (default)", u"Noto Sans JP", None])
+        self.assertEqual(done["log"], [])
+
+    def test_a_saved_pick_whose_font_is_gone_is_forgotten_once(self):
+        dialog, done = self.dialog({"reference": u"FreeLab Languages", "recent_references": [u"FreeLab Languages"],
+                                    "compact": False})
+        self.setup(dialog)
+        self.assertEqual(dialog.reference_chosen, u"Bundled Sans", "the default stands")
+        self.assertNotIn(u"FreeLab Languages", dialog.reference_boxes[0].rows, "neither listed")
+        self.assertEqual(dialog.reference_boxes[0].currentIndex, 0)
+        self.assertEqual(done["written"], [{"compact": False}], "nor kept: the other settings are")
+        self.assertEqual(len(done["log"]), 1)
+        self.assertEqual(done["log"][0], ("warning", u"The reference font picked before, FreeLab Languages, is not "
+                                                     u"installed any more: the pick is forgotten, and Bundled Sans, "
+                                                     u"the default, is used again."))
+        self.assertNotIn(u"FreeLab Languages", dialog.reference_history, "nor a fallback")
+        again, done_again = self.dialog(done["written"][-1])  # the next session
+        self.setup(again)
+        self.assertEqual(done_again["log"], [], "said once")
 
     def test_without_the_bundled_font_the_installed_ones_alone(self):
         dialog, done = self.dialog({}, default=None)
-        ac.write_settings = self.setup(dialog)
+        self.setup(dialog)
         self.assertEqual(dialog.reference_boxes[0].rows, [u"Arial", u"Bundled Sans", u"Noto Sans JP"])
         self.assertEqual((dialog.reference_chosen, dialog.reference_boxes[0].currentIndex), (u"", -1),
                          "chosen when the list is read: the installed font with the most of its characters")
@@ -2140,15 +2214,57 @@ class SearchTests(unittest.TestCase):
 
     def test_what_finds_a_row(self):
         a_ogonek = ac.unichr_(0x0105)
-        row = (u"aogonek", a_ogonek, 0x0105, u"a + ogonekcomb (suggested: mark 25 right)")
+        row = (u"aogonek", a_ogonek, 0x0105, [u"a", u"ogonekcomb"])  # (its name, character, value, and parts)
         for query in (u"", u"  ", u"aog", u"AOGONEK", a_ogonek, text(0x0061, 0x0328), u"U+0105", u"u+105", u"0105", u"105",
-                      u"ogonekcomb", u"25 right"):
+                      u"ogonekcomb", u"a"):
             self.assertTrue(ac.row_matches(query, *row), repr(query))
-        for query in (u"U+0104", u"0104", u"macron", ac.unichr_(0x0104), u"U+", u"1050"):
+        for query in (u"U+0104", u"0104", u"macron", ac.unichr_(0x0104), u"U+", u"1050", u"25 right", u"suggested",
+                      u"o", u"A"):
             self.assertFalse(ac.row_matches(query, *row), repr(query))
         self.assertTrue(ac.row_matches(u"0105", u"uni0105", a_ogonek, 0x0105), "the name holds it too")
-        self.assertTrue(ac.row_matches(u"dead", u"x", u"", 0, u"a deadline"), "hexadecimal digits are text too")
-        self.assertFalse(ac.row_matches(u"dead", u"x", u"", 0, u""), "a glyph of no character has no Unicode value")
+        self.assertTrue(ac.row_matches(u"dead", u"deadline", u"", 0), "hexadecimal digits are text too")
+        self.assertFalse(ac.row_matches(u"dead", u"x", u"", 0), "a glyph of no character has no Unicode value")
+
+    def test_a_letter_typed_alone_finds_that_glyph_not_the_notes(self):
+        """Typing h on the Mark anchors tab listed 70 of 70 glyphs: every row's note said "has bottom, top
+        already". A character typed alone finds its glyph, its forms, and the letters built on it."""
+        h_circumflex, o_circumflex = ac.unichr_(0x0125), ac.unichr_(0xF4)
+        self.assertTrue(ac.row_matches(u"h", u"h", u"h", 0x68))
+        self.assertTrue(ac.row_matches(u"h", u"h.sc", u"", 0), "its unencoded forms")
+        self.assertTrue(ac.row_matches(u"h", u"hcircumflex", h_circumflex, 0x0125, [u"h", u"circumflexcomb"]))
+        self.assertFalse(ac.row_matches(u"h", u"ohookabove", ac.unichr_(0x1ECF), 0x1ECF, [u"o", u"hookabovecomb"]),
+                         "a name or part that holds the letter is no glyph of it")
+        self.assertFalse(ac.row_matches(u"h", u"ocircumflex", o_circumflex, 0xF4, [u"o", u"circumflexcomb"]))
+        # A letter with a mark typed finds the letters built on it: both sides decomposed (typing u with a
+        # diaeresis found no u with diaeresis and macron, e with circumflex no e with circumflex and acute)
+        for typed, row in ((0xFC, 0x1D6), (0xFC, 0x1D8), (0xEA, 0x1EBF)):
+            self.assertTrue(ac.row_matches(ac.unichr_(typed), u"x", ac.unichr_(row), row), "U+%04X" % row)
+        self.assertTrue(ac.row_matches(u"u" + ac.unichr_(0x308), u"x", ac.unichr_(0x1D6), 0x1D6), "typed decomposed")
+        self.assertFalse(ac.row_matches(ac.unichr_(0xEA), u"x", ac.unichr_(0xE9), 0xE9), "e with acute: not built on it")
+        self.assertFalse(ac.row_matches(ac.unichr_(0xFC), u"x", u"u", 0x75), "the plain letter: not built on it")
+        page = ac.AnchorPage.__new__(ac.AnchorPage)
+        inks = AnchorPageTests.INKS
+        page.glyphs = ac.plan_anchors([("e", 0x65, "base", inks["e"], {"top": (240, 600), "bottom": (240, 0)}),
+                                       ("B", 0x42, "base", inks["B"], {"top": (290, 800), "bottom": (290, 0)})],
+                                      {}, "latin", 1000, 500)
+        for g in page.glyphs:
+            g.cell = u"%s %s" % ac.anchor_cells(g)
+        self.assertTrue(all(u"h" in g.cell for g in page.glyphs), "every note holds an h (has ... already)")
+        rows = [Row(index, True) for index in range(len(page.glyphs))]
+        tops = [Row(-1, rows=rows)]
+        page.tree = Stub(topLevelItemCount=1, topLevelItem=lambda row: tops[row], blockSignals=lambda on: None)
+        page.search, page.search_label = Stub(text=u"h"), Stub(setText=lambda value: setattr(page, "count", value))
+        page.update_buttons = lambda: None
+        saved = ac._qt
+        try:
+            ac._qt = lambda: (LIST_QT, None)
+            page.apply_search()
+            self.assertEqual(page.count, u"0 of 2 glyphs shown", "no row has the glyph h")
+            page.search.text = u"e"
+            page.apply_search()
+            self.assertEqual(page.count, u"1 of 2 glyphs shown")
+        finally:
+            ac._qt = saved
         self.assertEqual(ac.ascii_lower(u"AbZ" + ac.unichr_(0x0104)), u"abz" + ac.unichr_(0x0104),
                          "A to Z only: the same on FontLab's Python and on Python 3")
 
@@ -3516,6 +3632,7 @@ class MirrorFixTests(unittest.TestCase):
         dialog.steps, dialog.lines, dialog.reads = [], [], []
         dialog.ak = Stub(layer_path=fl_path, b=lambda value: u"%s" % value, html=lambda value: u"%s" % value,
                          glyph_links=lambda chars: u" ".join(chars),
+                         before_changes=lambda fontlab, package, title, glyphs=(): [],
                          notify_changed=lambda fontlab, package, title, glyphs=(): dialog.steps.append(
                              (title, sorted(set(g.name for g in glyphs)))))
         dialog.current_font = lambda: font
@@ -3872,6 +3989,631 @@ class AlternateTests(unittest.TestCase):
         self.assertEqual(fc.calt_text(text, code), text, "writing twice changes nothing")
         if HAVE_FONTTOOLS:
             self.assertIsNone(fc.check_code(text, letters + ["x", "x.alt", "y"]))
+
+
+# -- Diacritics: the owner's report of 2026-11-14 ------------------------------------------------------
+
+
+def editor_qt(size):
+    """(QtCore, QtGui) stand-ins to make a mark editor on, its widget size[0] by size[1] pixels."""
+    class Widget(object):
+        def __init__(self):
+            self.cursor, self.updates = None, 0
+
+        rect = property(lambda self: Stub(width=lambda: size[0], height=lambda: size[1]))
+
+        def setFocusPolicy(self, policy):
+            pass
+
+        def setMouseTracking(self, on):
+            pass
+
+        def setMinimumHeight(self, height):
+            pass
+
+        def update(self):
+            self.updates += 1
+    qt = Stub(StrongFocus=1, LeftButton=1, ShiftModifier=2, AltModifier=4)
+    return Stub(Qt=qt), Stub(QWidget=Widget)
+
+
+def overlapping(boxes):
+    """The pairs of (left, top, right, bottom) boxes that overlap."""
+    return [(a, b) for at, a in enumerate(boxes) for b in boxes[at + 1:]
+            if a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]]
+
+
+class PreviewPartsTests(unittest.TestCase):
+    """Item 2: nothing shown over an empty area, nothing clickable that would do nothing ("We agreed those
+    shouldn't be displayed when no diacritic is selected")."""
+
+    def test_the_letters_tab_shows_only_what_has_something_to_show(self):
+        self.assertFalse(any(ac.preview_parts(False, False, False).values()),
+                         "nothing selected: no reference heading, chooser, editor, or Same diacritic strip")
+        missing = ac.preview_parts(True, False, False)
+        self.assertEqual(sorted(name for name, on in missing.items() if on),
+                         ["hint", "reference", "reference_font", "reference_note", "reference_title"],
+                         "a glyph that cannot be built: its letter in the reference and what it needs, no editor")
+        alone = ac.preview_parts(True, True, False)
+        self.assertFalse(alone["strip_label"] or alone["strip_area"], "no letter with the same diacritic: no strip")
+        self.assertTrue(all(ac.preview_parts(True, True, True).values()))
+        self.assertEqual(ac.list_controls(False, 0, False), {"choices": False, "search": False}, "no font")
+        self.assertEqual(ac.list_controls(True, 0, False), {"choices": True, "search": False}, "nothing listed")
+        self.assertEqual(ac.list_controls(True, 0, True)["search"], True, "a text left in the field can be taken out")
+        self.assertEqual(ac.list_controls(True, 3, False)["search"], True)
+
+    def with_qt(self, call):
+        saved = ac._qt
+        try:
+            ac._qt = lambda: (LIST_QT, None)
+            call()
+        finally:
+            ac._qt = saved
+
+    def shown(self, owner, names):
+        found = {}
+        for name in names:
+            setattr(owner, name, Stub(setVisible=(lambda key: lambda on: found.__setitem__(key, on))(name),
+                                      setText=lambda text: None))
+        return found
+
+    def test_with_no_font_the_letters_tab_hides_its_preview(self):
+        """With no font, run returned before anything was selected: the reference heading, its chooser, the
+        editor, and Same diacritic stayed as the dialog was built, over nothing."""
+        dialog = ac.AccentsDialog.__new__(ac.AccentsDialog)
+        shown = self.shown(dialog, ac.preview_parts(False, False, False).keys())
+        dialog.recipes, dialog.package, dialog.master, dialog.shown_existing = [], None, None, set()
+        dialog.tree = Stub(clear=lambda: None, selectedItems=lambda: [], topLevelItemCount=0)
+        dialog.build_button = Stub(setEnabled=lambda on: None)
+        dialog.current_font = lambda: None
+        dialog.selected = lambda: None
+        dialog.ak = Stub(NO_FONT_LINE=u"No font is open. This window takes the next font you open.")
+        dialog.status = Stub(setText=lambda text: setattr(dialog, "top_line", text))
+        dialog.editor = Stub(selected=None, scene="a scene of before", update=lambda: None,
+                             setVisible=lambda on: shown.__setitem__("editor", on))
+        dialog.fill_strip = lambda r: False
+        dialog.draw_reference = lambda r: None
+        dialog.update_buttons = lambda: None
+        self.with_qt(dialog.run)
+        self.assertEqual(sorted(shown), sorted(ac.preview_parts(False, False, False)))
+        self.assertFalse(any(shown.values()), shown)
+        self.assertIsNone(dialog.editor.scene)
+        self.assertEqual(dialog.top_line, u"No font is open. This window takes the next font you open.",
+                         "the shared line: the window takes the next font opened")
+        self.assertEqual(ac.no_font_line(None), u"No font is open.")
+
+    def test_a_font_closed_or_opened_under_the_window_is_read_afresh(self):
+        """Windows follow fonts: the shared module calls font_changed when this window's font closes or
+        another opens for it; both tabs are read as at opening (the Mark anchors tab's script chosen anew)."""
+        dialog = ac.AccentsDialog.__new__(ac.AccentsDialog)
+        calls = []
+        dialog.run = lambda: calls.append("letters")
+        dialog.anchors = Stub(run=lambda keep_script=False: calls.append(("anchors", keep_script)))
+        dialog.anchors_read, dialog.own_write = False, (0.0, "a write of the old font's")
+        dialog.font_changed()
+        self.assertEqual((calls, dialog.own_write), (["letters"], None), "the anchors tab, not read yet, waits")
+        dialog.anchors_read = True
+        dialog.font_changed()
+        self.assertEqual(calls[1:], ["letters", ("anchors", False)])
+        lines = []
+        dialog.log, dialog.ak = Stub(add=lambda text, level="info": lines.append(level)), Stub(html=lambda text: u"%s" % text)
+        dialog.run = lambda: 1 / 0
+        dialog.font_changed()  # (called from a timer: nothing escapes)
+        self.assertEqual(lines, ["error"])
+
+    def test_the_letters_tab_grays_its_choices_with_no_font(self):
+        dialog = ac.AccentsDialog.__new__(ac.AccentsDialog)
+        states = {}
+        dialog.ak = Stub(enable=lambda widget, on: states.__setitem__(getattr(widget, "name", None), on),
+                         checks_of=lambda items, checked: (False, False))
+        for name in ("all", "none", "build", "value", "restore", "glyph_window", "reset_marks", "propagate", "kerning",
+                     "line_up", "correct"):
+            setattr(dialog, name + "_button", Stub(name=name, setText=lambda value: None))
+        for name in ("set_box", "existing_box", "compact_box"):
+            setattr(dialog, name, Stub(name=name, checked=False))
+        dialog.search = Stub(name="search", text=u"")
+        dialog.recipes, dialog.package, dialog.hidden, dialog.high_value, dialog.first_checks = [], None, set(), None, {}
+        dialog.built_names, dialog.editor = [], Stub(selected=None)
+        dialog.tree = Stub(topLevelItemCount=0, topLevelItem=lambda row: None, selectedItems=lambda: [])
+        saved = ac._qt
+        try:
+            ac._qt = lambda: (LIST_QT, None)
+            dialog.update_buttons()
+            self.assertEqual([states[name] for name in ("set_box", "existing_box", "compact_box", "search")],
+                             [False, False, False, False], "no font: the list's choices do nothing")
+            self.assertFalse(any(states[name] for name in ("all", "none", "build", "value", "restore", "glyph_window",
+                                                           "reset_marks", "propagate", "kerning", "line_up", "correct")))
+            dialog.package = Stub()
+            dialog.update_buttons()
+            self.assertEqual([states[name] for name in ("set_box", "existing_box", "compact_box", "search")],
+                             [True, True, True, False], "a font, nothing listed: no search")
+            dialog.search.text = u"zz"
+            dialog.update_buttons()
+            self.assertTrue(states["search"], "its text can still be taken out")
+        finally:
+            ac._qt = saved
+
+    def anchor_page(self):
+        page = ac.AnchorPage.__new__(ac.AnchorPage)
+        names = ("reference_title", "reference_font", "reference", "reference_note", "hint", "reset_button",
+                 "script_label", "script_box", "script_name")
+        shown = self.shown(page, names)
+        page.editor = Stub(selected=None, scene=None, update=lambda: None,
+                           setVisible=lambda on: shown.__setitem__("editor", on))
+        page.owner = Stub(current_font=lambda: None, package_key=lambda package: None,
+                          log=Stub(add=lambda text, level="info": None))
+        page.tree = Stub(blockSignals=lambda on: None, clear=lambda: None, selectedItems=lambda: [])
+        page.loading, page.glyphs, page.package = False, [], None
+        page.status = Stub(setText=lambda text: None)
+        page.update_buttons = lambda: None
+        page.draw_reference = lambda g: None
+        page.selected = lambda: None
+        page.ak = Stub(html=lambda text: u"%s" % text)
+        return page, shown
+
+    def test_the_mark_anchors_tab_hides_its_preview_and_its_script_with_nothing_read(self):
+        page, shown = self.anchor_page()
+        page.scripts = ["thai"]  # (from a font read before)
+        self.with_qt(page.run)
+        self.assertFalse(any(shown.values()), "no font: no script chooser or name, no reference, no editor: %r" % shown)
+        page.scripts = ["thai"]
+        page.show_scripts()
+        self.assertEqual((shown["script_label"], shown["script_box"], shown["script_name"]), (True, False, True),
+                         "one script: its name")
+        page.scripts = ["thai", "khmer"]
+        page.show_scripts()
+        self.assertEqual((shown["script_label"], shown["script_box"], shown["script_name"]), (True, True, False))
+
+    def test_the_mark_anchors_tab_grays_the_feature_code_box_without_a_list(self):
+        page = ac.AnchorPage.__new__(ac.AnchorPage)
+        states = {}
+        page.ak = Stub(enable=lambda widget, on: states.__setitem__(getattr(widget, "name", None), on))
+        for name in ("all", "none", "restore", "write", "reset"):
+            setattr(page, name + "_button", Stub(name=name, setText=lambda value: None))
+        page.code_box, page.search = Stub(name="code"), Stub(name="search", text=u"")
+        page.glyphs, page.first_checks, page.hidden, page.package = [], {}, set(), None
+        page.harvest, page.selected = (lambda: None), (lambda: None)
+        self.with_qt(page.update_buttons)
+        self.assertEqual((states["code"], states["search"], states["write"]), (False, False, False))
+        inks = AnchorPageTests.INKS
+        page.glyphs = ac.plan_anchors([("e", 0x65, "base", inks["e"], {})], {}, "latin", 1000, 500)
+        page.package = Stub(mastersCount=1)
+        self.with_qt(page.update_buttons)
+        self.assertEqual((states["code"], states["search"]), (True, True))
+        page.package = Stub(mastersCount=2)
+        self.with_qt(page.update_buttons)
+        self.assertFalse(states["code"], "several masters: FontLab's automatic features write the code")
+
+
+class EditorLayoutTests(unittest.TestCase):
+    """Item 3: no text of the editor over another ("Bottom text can sometimes overlap with the captions
+    for lines"), at any size and with any font's lines."""
+
+    OWNER_LIMITS = [(1080, u"120% line 1080 (meets the line above)", True), (880, u"font ascender 880", False),
+                    (-430, u"120% line -430 (meets the line below)", True),
+                    (-745, u"font, typo, and hhea descender, winDescent -745 (Windows and macOS clip below)", True)]
+
+    def test_captions_too_wide_for_their_glyphs_take_a_second_row(self):
+        self.assertEqual(ac.caption_layout([(100, 60), (300, 60)], 600), [(70.0, 60.0, 0), (270.0, 60.0, 0)])
+        placed = ac.caption_layout([(200, 120), (260, 230)], 600)
+        self.assertEqual([row for _, _, row in placed], [0, 1])
+        self.assertEqual(ac.caption_layout([(5, 100)], 600)[0][0], 4.0, "kept within the editor")
+        self.assertEqual(ac.caption_layout([(595, 100)], 600)[0][0], 496.0)
+
+    def test_the_names_of_lines_close_together_never_overlap(self):
+        for width in (220, 380, 640, 1000):
+            for gap in (0, 1, 3, 6, 12, 20):
+                wanted = [(200 + at * gap, at % 3 != 2, 150 + 70 * (at % 4)) for at in range(10)]
+                places = ac.label_layout(wanted, width, 14, 400)
+                boxes = [(left, top, left + wide, top + ac.LABEL_HEIGHT) for left, top, wide in
+                         [place for place in places if place is not None]]
+                self.assertEqual(overlapping(boxes), [], (width, gap))
+                self.assertTrue(all(14 <= box[1] and box[3] <= 400 for box in boxes), (width, gap))
+                self.assertGreaterEqual(len(boxes), 10 if width >= 380 else 1, "room for them all in a band this tall")
+        far = ac.label_layout([(100, True, 80), (300, False, 80)], 600, 14, 400)
+        self.assertEqual(far, [(4.0, 87, 80.0), (4.0, 301, 80.0)], "apart: each at the left, over or under its line")
+        close = ac.label_layout([(100, True, 80), (104, True, 80)], 600, 14, 400)
+        self.assertEqual(close[1], (516.0, 91, 80.0), "a few pixels apart: the other end")
+
+    def editor(self, size, captions):
+        part = [("o", 1.0, 1.0, 0.0, 0.0), ("acute", 1.0, 1.0, 150.0, 0.0)]
+        ink = InkOf({"o": ac.Ink(40, -10, 460, 480, advance=500), "acute": ac.Ink(0, 520, 120, 680)})
+        saved = ac._qt
+        try:
+            ac._qt = lambda: editor_qt(size)
+            editor = ac.make_editor(Stub(mark_selected=lambda index: None))
+        finally:
+            ac._qt = saved
+        editor.scene = {"glyphs": [(part[:1], 500.0, "existing"), (part, 500.0, "new"), (part[:1], 500.0, "after")],
+                        "parts": part, "ranges": [(1, 2)], "ink": ink, "upm": 1000.0, "top": 1130.0, "bottom": -795.0,
+                        "limits": self.OWNER_LIMITS, "captions": captions}
+        return editor
+
+    def test_no_text_overlaps_another_at_any_size(self):
+        """The owner's lines (the descenders and winDescent at -745, a 120% line at -430) and captions
+        ("Current", "Suggested (mark 121 left, 1 down)"), the editor from small to large."""
+        captions = {"existing": u"Current", "new": u"Suggested (mark 121 left, 1 down)"}
+        for size in ((300, 300), (420, 300), (640, 360), (1000, 700), (1600, 300), (360, 900)):
+            editor = self.editor(size, captions)
+            saved = ac._qt
+            try:
+                ac._qt = lambda: editor_qt(size)
+                scale, x0, y0 = editor.geometry()
+                names = editor.name_places(self.OWNER_LIMITS, size[0], scale, y0)
+            finally:
+                ac._qt = saved
+            band = editor.caption_band
+            texts = [(left, size[1] - band + 1 + row * ac.CAPTION_HEIGHT, left + wide,
+                      size[1] - band + 1 + (row + 1) * ac.CAPTION_HEIGHT) for _, _, left, wide, row in editor.captions_at]
+            texts += [(left, top, left + wide, top + ac.LABEL_HEIGHT) for left, top, wide in names.values()]
+            self.assertEqual(len(editor.captions_at), 2)
+            self.assertEqual(len(names), len(self.OWNER_LIMITS), "every line named: %r" % (size,))
+            self.assertEqual(overlapping(texts), [], size)
+            self.assertTrue(all(0 <= box[0] and box[2] <= size[0] and 0 <= box[1] and box[3] <= size[1]
+                                for box in texts), size)
+            lowest = y0 - min(line[0] for line in self.OWNER_LIMITS) * scale
+            self.assertLessEqual(lowest + ac.LABEL_HEIGHT, size[1] - band, "the lines over the captions' band")
+        editor = self.editor((640, 360), {})
+        saved = ac._qt
+        try:
+            ac._qt = lambda: editor_qt((640, 360))
+            editor.geometry()
+        finally:
+            ac._qt = saved
+        self.assertEqual((editor.captions_at, editor.caption_band), ([], 0), "the Mark anchors tab: no band")
+
+
+class ScrollKeptTests(unittest.TestCase):
+    """Item 4: ticking Compact glyphs to fit the line kept scrolling the list back to the selected row."""
+
+    def test_compacting_keeps_the_list_where_it_is(self):
+        dialog = ac.AccentsDialog.__new__(ac.AccentsDialog)
+        recipe = ac.Recipe(ac.unichr_(0x1ED1), u"x1ED1", "o", [ac.Mark("circumflex", "above", [("circumflex", 1.0, 1.0, 0.0, 0.0)])])
+        dialog.recipes, dialog.first_checks, dialog.settings, dialog.compact = [recipe], {}, {}, True
+        dialog.compact_box = Stub(checked=False)
+        bar, side = Stub(value=240), Stub(value=0)
+        bar.setValue = lambda value: setattr(bar, "value", value)
+        side.setValue = lambda value: setattr(side, "value", value)
+        top = Stub(text=lambda column: u"Can be built (1)", isExpanded=lambda: False)
+        dialog.tree = Stub(topLevelItemCount=1, topLevelItem=lambda row: top, verticalScrollBar=lambda: bar,
+                           horizontalScrollBar=lambda: side, doItemsLayout=lambda: None, blockSignals=lambda on: None)
+        dialog.harvest = dialog.select = lambda: None
+        dialog.selected = lambda: recipe
+        dialog.fill = lambda: setattr(bar, "value", 0)  # a refill: the list at its top
+        dialog.select_recipe = lambda r: setattr(bar, "value", 900)  # selecting its row again scrolls to it
+        dialog.item_of = lambda r: None
+        dialog.log = Stub(add=lambda line, level="info": None)
+        dialog.ak = Stub(html=lambda value: u"%s" % value)
+        saved = ac._qt, ac.write_settings
+        try:
+            ac._qt = lambda: (LIST_QT, None)
+            ac.write_settings = lambda ak, data: None
+            dialog.compact_toggled()
+        finally:
+            ac._qt, ac.write_settings = saved
+        self.assertEqual(bar.value, 240, "where the list was scrolled")
+        self.assertEqual(dialog.open_sections, {u"Can be built": False}, "a section closed by hand stays closed")
+        self.assertEqual(ac.section_title(u"Existing glyphs: check to rebuild (12)"), u"Existing glyphs: check to rebuild")
+
+
+class FarOffTests(unittest.TestCase):
+    """Item 5: a placement applied that leaves marks far off is a warning, not a success in green."""
+
+    INK = {"C": ac.Ink(40, -10, 600, 710, advance=640), "G": ac.Ink(40, -10, 640, 710, advance=680),
+           "S": ac.Ink(40, -10, 520, 710, advance=560), "c": ac.Ink(40, -10, 460, 480, advance=500),
+           "circumflex": ac.Ink(0, 520, 200, 680)}
+    LIMITS = [(1143, u"winAscent 1143 (Windows clips above)", True), (1080, u"120% line 1080 (meets the line above)", True),
+              (880, u"font ascender 880", False), (-472, u"winDescent -472 (Windows clips below)", True)]
+
+    def test_what_is_far_off(self):
+        ink = InkOf(self.INK)
+        parts = [("C", 1.0, 1.0, 0.0, 0.0), ("circumflex", 1.0, 1.0, 220.0 + 6675, 230.0 + 4551)]
+        found = ac.far_marks(parts, [(1, 2)], [0], ink, self.LIMITS, 1000.0, 640)
+        self.assertEqual([kind for kind, _ in found[0]], ["outside", "clipped", "detached"])
+        self.assertEqual(found[0][1][1], u"winAscent 1143 (Windows clips above)", "a clipping line, not the 120% line")
+        note = ac.far_note(found)
+        self.assertTrue(note.startswith(u"a mark outside the view; a mark past winAscent 1143 (Windows clips above); "
+                                        u"a mark away from its letter ("), note)
+        self.assertFalse(note.endswith(u"."), "a cell's note")
+        near = [("C", 1.0, 1.0, 0.0, 0.0), ("circumflex", 1.0, 1.0, 220.0, 260.0)]
+        self.assertEqual(ac.far_marks(near, [(1, 2)], [0], ink, self.LIMITS, 1000.0, 640), {}, "raised 30: fine")
+        raised = [("C", 1.0, 1.0, 0.0, 0.0), ("circumflex", 1.0, 1.0, 220.0, 340.0)]  # (its top at 1020, 150 over C)
+        low = [(1000, u"winAscent 1000 (Windows clips above)", True)]
+        self.assertEqual(ac.far_marks(raised, [(1, 2)], [0], ink, low, 1000.0, 640),
+                         {0: [("clipped", u"winAscent 1000 (Windows clips above)")]})
+        self.assertEqual(ac.far_marks(parts, [(1, 2)], [], ink, self.LIMITS, 1000.0, 640), {}, "not moved by hand")
+        lines = ac.far_lines([(u"x", found), (u"y", found)], lambda chars: u" ".join(chars))
+        self.assertEqual(len(lines), 3)
+        self.assertEqual(lines[0], u"2 letters now have a mark outside the view (over an em past the font's lines): "
+                                   u"x y. Look at them; <i>Reset diacritics</i> on a row puts it back.")
+        self.assertIn(u"1 letter now has a mark away from its letter (over 250 units): x. Look at it",
+                      ac.far_lines([(u"x", found)], lambda chars: u" ".join(chars))[2])
+        self.assertIn(u"(over 512 units)", ac.far_lines([(u"x", found)], lambda chars: u" ".join(chars), upm=2048)[2],
+                      "a share of the font's em")
+
+    def dialog(self):
+        def letter(code, base):
+            return ac.Recipe(ac.unichr_(code), name=u"uni%04X" % code, base=base,
+                             marks=[ac.Mark("circumflex", "above", [("circumflex", 1.0, 1.0, 0.0, 0.0)])])
+        dialog = ac.AccentsDialog.__new__(ac.AccentsDialog)
+        c, g, s = letter(0x0108, "C"), letter(0x011C, "G"), letter(0x015C, "S")
+        dialog.recipes = [c, g, s, letter(0x0109, "c")]
+        dialog.master, dialog.package = "Regular", Stub(upm=1000)
+        dialog.inks, dialog.placements = {"Regular": InkOf(self.INK)}, {"Regular": ac.Placement(1000.0, MODEL)}
+        dialog.metrics = lambda package: ac.Metrics(1000, 880, -120, 710)
+        dialog.limits = lambda package: self.LIMITS
+        dialog.selected = lambda: c
+        dialog.closeness = lambda recipe: u""
+        dialog.item_of = lambda recipe: None
+        dialog.fill_strip = dialog.log_touches = lambda *args: None
+        dialog.update_buttons = lambda: None
+        dialog.lines = lines = []
+        dialog.log = Stub(add=lambda line, level="info": lines.append((level, line)))
+        dialog.ak = Stub(b=lambda value: u"%s" % value, glyph_links=lambda chars: u" ".join(chars))
+        return dialog, c, g, s
+
+    def test_applied_far_off_is_a_warning_naming_the_letters(self):
+        dialog, c, g, s = self.dialog()
+        c.adjust = {0: [6675.0, 4551.0, 1.0, 1.0]}  # the owner's: moved 6,675 right, 4,551 up
+        dialog.propagate()
+        self.assertEqual(dialog.lines[0][0], "warning", "not done, in green")
+        self.assertIn(u"Placed the diacritics of 2 letters as on", dialog.lines[0][1])
+        reasons = [line for level, line in dialog.lines[1:] if level == "warning"]
+        self.assertTrue(any(u"outside the view" in line and g.char in line and s.char in line for line in reasons), reasons)
+        self.assertTrue(any(u"past winAscent 1143 (Windows clips above)" in line for line in reasons), reasons)
+        self.assertTrue(any(u"away from its letter" in line for line in reasons), reasons)
+
+    def test_applied_within_reach_is_done(self):
+        dialog, c, g, s = self.dialog()
+        c.adjust = {0: [0.0, 20.0, 1.0, 1.0]}
+        dialog.propagate()
+        self.assertEqual([level for level, _ in dialog.lines], ["done"])
+
+
+class ReferenceFitTests(unittest.TestCase):
+    """Item 6: the reference drawn whole, whatever its ink's height."""
+
+    def test_the_picture_holds_the_ink(self):
+        area, base = (170, 168), 105 * 1.15
+        self.assertEqual(ac.reference_fit(-77, 25, 54, area[0], area[1], base), (1.0, base),
+                         "a y with a dieresis (FreeLang's: 730 over the baseline, 240 under): as drawn before")
+        scale, baseline = ac.reference_fit(-130, 25, 60, area[0], area[1], base)
+        self.assertEqual(scale, 1.0)
+        self.assertEqual(baseline, 134.0, "a stacked capital rising over the picture: moved down, its size kept")
+        scale, baseline = ac.reference_fit(-200, 60, 60, area[0], area[1], base)
+        self.assertAlmostEqual(scale, 160.0 / 260.0)
+        self.assertAlmostEqual(baseline + (-200) * scale, ac.REFERENCE_MARGIN, msg="its top at the margin")
+        self.assertAlmostEqual(baseline + 60 * scale, area[1] - ac.REFERENCE_MARGIN, msg="its bottom too")
+        scale, baseline = ac.reference_fit(-40, 120, 60, area[0], area[1], base)
+        self.assertLessEqual(baseline + 120 * scale, area[1] - ac.REFERENCE_MARGIN, "a long descender: moved up")
+        self.assertAlmostEqual(ac.reference_fit(-77, 25, 400, area[0], area[1], base)[0], 170 * 0.92 / 400)
+
+    @unittest.skipUnless(HAVE_FONTTOOLS, "needs fontTools")
+    def test_freelang_s_letters_with_diacritics_are_within_its_own_lines(self):
+        """FreeLang's y with a dieresis looked clipped: its ink (-240 to 730) is well within its winAscent and
+        winDescent (1143 and -472), and so is every Latin, Greek, and Cyrillic letter of FreeLang Essential."""
+        from fontTools.ttLib import TTFont
+        from fontTools.pens.boundsPen import BoundsPen
+        path = os.path.join(HERE, os.pardir, "checks", "language_font", "FreeLang-Essential.ttf")
+        if not os.path.exists(path):
+            self.skipTest("FreeLang Essential is not here")
+        font = TTFont(path, lazy=True)
+        os2, glyphs, cmap = font["OS/2"], font.getGlyphSet(), font.getBestCmap()
+        pen = BoundsPen(glyphs)
+        glyphs[cmap[0xFF]].draw(pen)
+        self.assertEqual(pen.bounds[1::2], (-240, 730))
+        for code, name in cmap.items():
+            if 0xC0 <= code < 0x530 or 0x1E00 <= code < 0x2000:
+                pen = BoundsPen(glyphs)
+                glyphs[name].draw(pen)
+                if pen.bounds:
+                    self.assertTrue(-os2.usWinDescent <= pen.bounds[1] and pen.bounds[3] <= os2.usWinAscent, hex(code))
+
+
+class OwnWriteTests(unittest.TestCase):
+    """Item 8: the dialog's own writes are not reported as the History moving in FontLab."""
+
+    def dialog(self, marks):
+        dialog = ac.AccentsDialog.__new__(ac.AccentsDialog)
+        dialog.lines, dialog.reads = [], []
+        dialog.recorded = []  # (the fonts recorded before a write: before_changes)
+        dialog.fontlab = None
+        dialog.ak = Stub(history_mark=lambda package: marks[0],
+                         before_changes=lambda fontlab, package, title, glyphs=(): dialog.recorded.append(title))
+        dialog.log = Stub(add=lambda line, level="info": dialog.lines.append(line))
+        dialog.run = lambda: dialog.reads.append(1)
+        dialog.anchors_read = False
+        return dialog
+
+    def test_a_write_recorded_at_once(self):
+        marks = [("font", 1)]
+        dialog = self.dialog(marks)
+        dialog.begin_write(Stub())
+        self.assertTrue(dialog.busy, "the History watch holds off while the dialog writes")
+        marks[0] = ("font", 2)  # FontLab recorded the step
+        dialog.end_write(Stub())
+        self.assertEqual((dialog.busy, dialog.seen_history, dialog.own_write), (False, ("font", 2), None),
+                         "the History as it stands is the dialog's own: the watch sees nothing to read")
+
+    def test_a_write_recorded_late_is_read_again_quietly(self):
+        marks = [("font", 1)]
+        dialog = self.dialog(marks)
+        dialog.begin_write(Stub())
+        dialog.end_write(Stub())  # (FontLab had not recorded the step yet)
+        self.assertIsNotNone(dialog.own_write)
+        marks[0] = ("font", 2)
+        dialog.history_moved()  # (as the watch calls it, once it sees the step)
+        self.assertEqual((dialog.lines, dialog.reads), ([], [1]), "not said to be the History moving")
+        dialog.history_moved()  # an undo after that
+        self.assertEqual(dialog.lines, [u"The font's History moved (an undo, a redo, or an edit): read again."])
+        dialog.begin_write(Stub())
+        dialog.end_write(Stub())
+        dialog.own_write = (dialog.own_write[0] - ac.OWN_WRITE_SECONDS - 1, dialog.own_write[1])  # (long ago)
+        dialog.history_moved()
+        self.assertEqual(len(dialog.lines), 2, "a step long after the write is not the write's")
+        dialog.begin_write(Stub())
+        dialog.end_write(Stub(), wrote=False)
+        self.assertIsNone(dialog.own_write, "nothing written: no step to wait for, an undo after it is said")
+
+    def test_every_write_goes_through_it(self):
+        font = fl_font("bake")
+        test = MirrorFixTests("test_build_never_writes_a_mirror_a_draft_would_bring")
+        test.setUp()
+        try:
+            dialog, recipe = test.build_caron(font)
+            self.assertFalse(dialog.busy)
+            self.assertIn(recipe.char, dialog.just_built, "item 9: kept in view after the build")
+            dialog = test.dialog(fl_font("bake"))
+            dialog.ak.history_mark = lambda package: len(dialog.steps)  # (a step recorded at each write)
+            dialog.correct_mirrored()
+            self.assertEqual((dialog.busy, dialog.seen_history), (False, 1), "the correction's step seen as its own")
+        finally:
+            test.tearDown()
+        with open(ac.__file__.replace(".pyc", ".py"), "rb") as handle:
+            source = handle.read().decode("utf-8")
+        writes = source.count(u"notify_changed(")
+        self.assertEqual(writes, 3, "Build, Correct mirrored components, Add anchors")
+        self.assertEqual(source.count(u"end_write(package, "), writes, "each followed by end_write")
+
+
+class JustBuiltTests(unittest.TestCase):
+    """Item 9: the glyphs just built stay listed, so that what is set right after a build reaches them."""
+
+    def test_a_glyph_just_built_is_listed_under_its_own_section_unchecked(self):
+        built = ac.Font(["o", "caron", "ocaron"], [("o", 0x6F), ("caron", 0x2C7), ("ocaron", 0x01D2)])
+        chars = [ac.unichr_(0x01D2)]
+        self.assertEqual([r.char for r in ac.plan(built, chars)], [], "the font has it now: it left the list")
+        recipes = ac.plan(built, chars, False, set([ac.unichr_(0x01D2)]))
+        self.assertEqual([(r.char, r.existing, r.checked) for r in recipes], [(ac.unichr_(0x01D2), "ocaron", False)])
+        sections = ac.list_sections(recipes, lambda r: (0, 0), set([ac.unichr_(0x01D2)]))
+        self.assertEqual([(title, indexes) for title, indexes in sections if indexes], [(ac.JUST_BUILT, [0])])
+        self.assertEqual([title for title, _ in sections][3:], [ac.JUST_BUILT, u"Need a mark or letter the font lacks"],
+                         "under the existing glyphs")
+        recipes[0].mirrored = ["caron"]
+        dialog = ac.AccentsDialog.__new__(ac.AccentsDialog)
+        dialog.recipes, dialog.hidden = recipes, set()
+        self.assertEqual(dialog.correctable(), recipes, "Correct mirrored components reaches it")
+        unbuilt = ac.plan(ac.Font(["o", "caron"], [("o", 0x6F), ("caron", 0x2C7)]), chars, False, set([chars[0]]))
+        self.assertEqual(ac.list_sections(unbuilt, lambda r: None, set([chars[0]]))[0][1], [0],
+                         "taken back by an undo: to build again")
+
+    def test_a_glyph_built_comes_back_unchecked_and_one_checked_by_hand_stays_checked(self):
+        mine = ac.Recipe(O_GRAVE, "ograve", "o")
+        mine.existing = "ograve"
+        self.assertFalse(ac.keeps_check(mine, True, set([O_GRAVE])), "built or rebuilt since: unchecked")
+        self.assertFalse(ac.keeps_check(mine, False, set()), "not a glyph of the font before: as listed")
+        self.assertTrue(ac.keeps_check(mine, True, set()), "a glyph of the font checked by hand, not built: kept")
+        self.assertTrue(ac.keeps_check(ac.Recipe(O_HORN_HOOK, "ohornhookabove", "o"), False, set([O_HORN_HOOK])))
+
+    def test_a_build_undone_lists_its_letters_checked_again(self):
+        """Built, undone, and Build again: the letters were listed under Can be built but unchecked (the
+        check they had as the font's glyphs), and silently skipped. The docs promise an undo lists them
+        to be built again: they take the plan's check."""
+        to_build = ac.Recipe(O_GRAVE, "ograve", "o")
+        self.assertTrue(to_build.checked, "the plan checks a letter to build")
+        self.assertFalse(ac.keeps_check(to_build, True, set([O_GRAVE])), "the font's before the undo: the plan's check")
+        self.assertFalse(ac.keeps_check(to_build, True, set()))
+        self.assertTrue(ac.keeps_check(to_build, False, set()), "to build before too: unchecked by hand stays so")
+        # The dialog's reading again, as run() does it: built (unchecked, the font's), then undone
+        before = ac.Recipe(O_GRAVE, "ograve", "o")
+        before.existing, before.checked = "ograve", False
+        kept = {O_GRAVE: (before.checked, bool(before.existing))}
+        again = ac.plan(ac.Font(["o", "gravecomb"], [("o", 0x6F), ("gravecomb", 0x300)]), [O_GRAVE])
+        self.assertEqual([(r.char, r.existing) for r in again], [(O_GRAVE, None)])
+        for r in again:
+            checked, was_there = kept[r.char]
+            if ac.keeps_check(r, was_there, set([O_GRAVE])):
+                r.checked = checked
+        self.assertEqual([r.checked for r in again], [True], "listed to be built again, checked")
+
+
+class RevealedTests(unittest.TestCase):
+    """Item 10: a glyph of the font listed to show it (a click on the letter beside the edited one) leaves
+    the list again once the user goes on, unless checked."""
+
+    OTHER = ac.unichr_(0x1EDD)  # o with a horn and a grave: rebuilt from what the font has, as O_GRAVE is
+
+    def dialog(self):
+        test = GoToTests("test_a_listed_glyph_is_selected")
+        dialog, done = test.dialog(listed=[O_HORN_HOOK], in_font={O_GRAVE: "ograve", self.OTHER: "ohorngrave"})
+        dialog.characters = lambda: [O_GRAVE, O_HORN_HOOK, self.OTHER]
+        state = {"selected": None, "filled": 0}
+        dialog.selected = lambda: state["selected"]
+        dialog.harvest = lambda: None
+        dialog.remember_list = dialog.restore_scroll = lambda: None
+        dialog.fill = lambda: state.__setitem__("filled", state["filled"] + 1)
+        dialog.select = lambda: None
+        dialog.select_recipe = lambda recipe: state.__setitem__("selected", recipe) or True
+        dialog.existing_box.checked = False
+        plain_run = dialog.run
+
+        def run():  # (read again: the checks carry over, as keeps_check has them)
+            kept = dict((r.char, (r.checked, bool(r.existing))) for r in dialog.recipes)
+            plain_run()
+            for r in dialog.recipes:
+                if r.char in kept and ac.keeps_check(r, kept[r.char][1], set()):
+                    r.checked = kept[r.char][0]
+        dialog.run = run
+        return dialog, done, state
+
+    def test_a_shown_glyph_goes_when_the_user_goes_on(self):
+        dialog, done, state = self.dialog()
+        self.assertEqual(dialog.go_to_char(O_GRAVE), "listed")
+        self.assertIn(u"It leaves the list again once you go on", done["log"][-1][1])
+        shown = dialog.recipe_of(O_GRAVE)
+        self.assertEqual((shown.existing, shown.checked), ("ograve", False))
+        self.assertFalse(dialog.drop_revealed(shown), "still on it: it stays")
+        state["selected"] = dialog.recipe_of(O_HORN_HOOK)  # another letter selected in the list
+        self.assertTrue(dialog.drop_revealed(state["selected"]), "it goes")
+        self.assertIsNone(dialog.recipe_of(O_GRAVE))
+        self.assertEqual(dialog.shown_existing, set())
+        self.assertEqual(state["selected"].char, O_HORN_HOOK, "the letter gone on to stays selected")
+
+    def test_a_shown_glyph_checked_stays(self):
+        dialog, done, state = self.dialog()
+        dialog.go_to_char(O_GRAVE)
+        dialog.recipe_of(O_GRAVE).checked = True  # ticked: to be rebuilt
+        self.assertFalse(dialog.drop_revealed())
+        self.assertEqual(dialog.go_to_char(self.OTHER), "listed", "another letter clicked beside a glyph")
+        self.assertEqual(sorted(r.char for r in dialog.recipes if r.existing), sorted([O_GRAVE, self.OTHER]),
+                         "the checked one stays, beside the one shown now")
+        dialog.recipe_of(O_GRAVE).checked = False
+        dialog.recipe_of(self.OTHER).adjust = {0: [0.0, 30.0, 1.0, 1.0]}  # its mark moved by hand
+        self.assertTrue(dialog.drop_revealed(), "unchecked, and the user went on (a search): it goes")
+        self.assertEqual(sorted(r.char for r in dialog.recipes), sorted([O_HORN_HOOK, self.OTHER]),
+                         "but a glyph whose mark was moved by hand stays: the move would be lost with it")
+        dialog.recipe_of(self.OTHER).adjust = {}
+        dialog.just_built = set([self.OTHER])  # built since (rebuilt, checked)
+        self.assertFalse(dialog.drop_revealed(), "listed as just built now: it stays")
+
+    def test_another_letter_replaces_the_one_shown_and_a_search_takes_it_out(self):
+        dialog, done, state = self.dialog()
+        dialog.go_to_char(O_GRAVE)
+        dialog.go_to_char(self.OTHER)
+        self.assertEqual(sorted(r.char for r in dialog.recipes if r.existing), [self.OTHER],
+                         "the one shown before went: one shown at a time")
+        dialog.apply_search = lambda: done.__setitem__("searched", True)
+        dialog.searched()
+        self.assertEqual([r.char for r in dialog.recipes], [O_HORN_HOOK], "a new search: it goes")
+        timers = []
+        dialog.go_to_char(O_GRAVE)
+        saved = ac._qt
+        try:
+            ac._qt = lambda: (Stub(QTimer=Stub(singleShot=lambda ms, slot: timers.append((ms, slot)))), None)
+            state["selected"] = dialog.recipe_of(O_HORN_HOOK)
+            dialog.list_checked()  # a check changed in the list
+            self.assertEqual([ms for ms, _ in timers], [0], "once the check's own signal is over")
+            timers.pop(0)[1]()
+            self.assertIsNone(dialog.recipe_of(O_GRAVE))
+            dialog.go_to_char(O_GRAVE)
+            state["selected"] = dialog.recipe_of(O_HORN_HOOK)
+            dialog.drop_revealed_soon(state["selected"], ac.REVEALED_WAIT_MS)  # (as select asks: a row clicked)
+            self.assertEqual([ms for ms, _ in timers], [ac.REVEALED_WAIT_MS], "past a double-click's second click")
+            state["selected"] = dialog.recipe_of(O_GRAVE)  # back on it meanwhile
+            timers.pop(0)[1]()
+            self.assertIsNotNone(dialog.recipe_of(O_GRAVE), "the row selected when it comes stays")
+        finally:
+            ac._qt = saved
 
 
 if __name__ == "__main__":

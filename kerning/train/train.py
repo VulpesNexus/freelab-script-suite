@@ -40,6 +40,49 @@ FEATURES = (["halfkern", "contour", "left kind", "right kind"] + ["spacing " + p
             + ["left advance", "right advance"] + ["gap %d" % b for b in range(ak.PROFILE_BANDS)])
 
 
+SAME_DESIGN_UNITS = 2 / 1000.0  # two fonts kern a pair alike within this share of the em
+SAME_DESIGN_SHARE = 0.8  # fonts of one script that kern this share of their kerned pairs alike are one design
+SAME_DESIGN_MIN = 20  # (compared on at least this many pairs either of them kerns)
+
+
+def design_groups(y, script, font, groups, pairs):
+    """The family groups, those whose fonts kern one script alike merged: one design under several
+    family names (Source Han Sans as Noto Sans JP, SC, and HK; Inter and Inter V) falls in one fold,
+    so that no family is scored on its own design seen in training. (number of merges, groups)"""
+    parent = dict((g, g) for g in np.unique(groups))
+
+    def root(g):
+        while parent[g] != g:
+            parent[g] = parent[parent[g]]
+            g = parent[g]
+        return g
+
+    merges = 0
+    for number in np.unique(script):
+        rows = np.flatnonzero(script == number)
+        names = sorted(set(pairs[rows]))
+        column = dict((name, c) for c, name in enumerate(names))
+        fonts = sorted(set(font[rows]))
+        index = dict((f, i) for i, f in enumerate(fonts))
+        table = np.full((len(fonts), len(names)), np.nan)
+        family = np.zeros(len(fonts), dtype=np.int64)
+        for r in rows:
+            table[index[font[r]], column[pairs[r]]] = y[r]
+            family[index[font[r]]] = groups[r]
+        kerned = np.abs(np.nan_to_num(table)) >= KERNED
+        for i in range(len(fonts)):
+            both = ~np.isnan(table[i]) & ~np.isnan(table)  # (every font against font i)
+            compared = both & (kerned[i] | kerned)
+            alike = compared & (np.abs(np.nan_to_num(table) - np.nan_to_num(table[i])) <= SAME_DESIGN_UNITS)
+            counts = compared.sum(axis=1)
+            for j in np.flatnonzero((counts >= SAME_DESIGN_MIN) & (alike.sum(axis=1) >= SAME_DESIGN_SHARE * np.maximum(counts, 1))):
+                a, b = root(family[i]), root(family[j])
+                if a != b:
+                    parent[max(a, b)] = min(a, b)
+                    merges += 1
+    return merges, np.array([root(g) for g in groups])
+
+
 def baselines(x):
     halo, contour = np.nan_to_num(x[:, 0]), np.nan_to_num(x[:, 1])
     tighten, loosen = ak.DEFAULT_FACTORS["halfkern"]
@@ -61,17 +104,20 @@ def usable_columns(x):
 
 
 def fit(x, y):
-    """(classifier, regressor, columns): whether a pair is kerned, and how much where it is."""
+    """(classifier, regressor, columns): whether a pair is kerned, and how much where it is; columns is
+    each stage's (the regressor's from the kerned pairs alone: in a small script's set, a column can
+    have one value among them, the pair kinds of a unicameral script)."""
     columns = usable_columns(x)
     kerned = np.abs(y) >= KERNED
     classifier = HistGradientBoostingClassifier(**PARAMS).fit(x[:, columns], kerned)
-    regressor = HistGradientBoostingRegressor(loss="squared_error", **PARAMS).fit(x[kerned][:, columns], y[kerned])
-    return classifier, regressor, columns
+    amount_columns = usable_columns(x[kerned])
+    regressor = HistGradientBoostingRegressor(loss="squared_error", **PARAMS).fit(x[kerned][:, amount_columns], y[kerned])
+    return classifier, regressor, (columns, amount_columns)
 
 
 def predict(classifier, regressor, columns, x):
-    chance = classifier.predict_proba(x[:, columns])[:, 1]
-    return np.where(chance >= CUT, regressor.predict(x[:, columns]), 0.0)
+    chance = classifier.predict_proba(x[:, columns[0]])[:, 1]
+    return np.where(chance >= CUT, regressor.predict(x[:, columns[1]]), 0.0)
 
 
 def stage(model, columns):
@@ -84,8 +130,8 @@ def stage(model, columns):
 
 
 def export(classifier, regressor, columns, info, path=None):
-    data = {"format": 2, "features": FEATURES, "cut": CUT, "classifier": stage(classifier, columns),
-            "regressor": stage(regressor, columns), "info": info}
+    data = {"format": 2, "features": FEATURES, "cut": CUT, "classifier": stage(classifier, columns[0]),
+            "regressor": stage(regressor, columns[1]), "info": info}
     with open(path or MODEL_FILE, "w", encoding="utf-8", newline="\n") as handle:
         json.dump(data, handle, separators=(",", ":"))
     return path or MODEL_FILE
@@ -102,6 +148,10 @@ def main():
     parser.add_argument("--apply-to", default="latin,armenian,georgian",
                         help="the scripts Auto Kerning uses the model for: trained on Latin alone and held out on "
                              "Armenian and Georgian families, it beat the other methods there")
+    parser.add_argument("--compare", default="", help="other training sets to score on the same folds, ';' between "
+                                                      "them (latin,cyrillic;latin,greek): their own learned columns")
+    parser.add_argument("--keep-families", action="store_true", help="fold by family name alone, without merging the "
+                                                                       "families that kern alike (design_groups)")
     args = parser.parse_args()
     data = np.load(args.data)
     x, y, groups, fonts = data["x"].astype(np.float64), data["y"].astype(np.float64), data["group"], data["font"]
@@ -114,47 +164,70 @@ def main():
         x, y, groups, fonts, script = x[keep], y[keep], groups[keep], fonts[keep], script[keep]
         print("left out %d fonts matching %r" % (len(left_out), args.exclude))
     font_count = len(np.unique(fonts))
+    if "pair" in data and not args.keep_families:
+        merges, groups = design_groups(y, script, fonts, groups, data["pair"][keep] if args.exclude else data["pair"])
+        print("%d families merged with another that kerns a script alike (one design under two names)" % merges)
 
     print("%d pairs, %d fonts, %d families; %.0f%% kerned" % (len(y), font_count, len(set(groups)), 100 * (y != 0).mean()))
     use = np.isin(script, [names.index(name) for name in trained_on])
     print("training on %s: %d pairs" % (", ".join(trained_on), use.sum()))
+    # Each training set scored: "learned" is --scripts', "learned <set>" each of --compare's.
+    trainings = [("learned", use)]
+    for part in [p for p in args.compare.split(";") if p]:
+        chosen = [name for name in part.split(",") if name in names]
+        trainings.append(("learned " + "+".join(chosen), np.isin(script, [names.index(name) for name in chosen])))
+    # Every pair is predicted once, in the fold that holds its design out, and each script is scored
+    # over all its pairs at once. (Averaging each fold's score instead let a script of few designs,
+    # Armenian's four, swing with which fold each design fell in: a fold holding only a pixel font
+    # weighed as much as one holding Google Sans.)
     folds = GroupKFold(n_splits=5)
-    results = {}  # script: {method: [fold scores]}
+    held_out = {}  # method: each pair's prediction, from the fold that held its design out
     started = time.time()
     for fold, (train, test) in enumerate(folds.split(x, y, groups)):
-        train = train[use[train]]
-        classifier, regressor, columns = fit(x[train], y[train])
-        predictions = dict(baselines(x[test]), learned=predict(classifier, regressor, columns, x[test]))
-        for number, name in enumerate(names):
-            rows = script[test] == number
-            if rows.sum() < 50 or not (np.abs(y[test][rows]) * 1000 >= 10).any():
-                continue
-            for method, predicted in predictions.items():
-                results.setdefault(name, {}).setdefault(method, []).append(scores(y[test][rows], predicted[rows]))
+        predictions = baselines(x[test])
+        for label, rows_used in trainings:
+            fold_train = train[rows_used[train]]
+            classifier, regressor, columns = fit(x[fold_train], y[fold_train])
+            predictions[label] = predict(classifier, regressor, columns, x[test])
+        for method, predicted in predictions.items():
+            held_out.setdefault(method, np.zeros(len(y)))[test] = predicted
         print("fold %d done (%.0f s)" % (fold + 1, time.time() - started), flush=True)
     summaries = {}
-    for name, by_method in results.items():
+    for number, name in enumerate(names):
+        rows = script == number
+        if rows.sum() < 50 or not (np.abs(y[rows]) * 1000 >= 10).any():
+            continue
         summary = summaries[name] = {}
-        print("\n%s (%d pairs)\n%-9s %8s %12s %10s %10s" % (name, (script == names.index(name)).sum(), "method", "MAE",
-                                                             "MAE kerned", "within 10", "within 20"))
-        for method, runs in by_method.items():
-            mean = dict((key, float(np.mean([r[key] for r in runs]))) for key in runs[0])
-            summary[method] = mean
-            print("%-9s %8.1f %12.1f %9.0f%% %9.0f%%" % (method, mean["mae"], mean["mae kerned"], 100 * mean["within 10"],
-                                                         100 * mean["within 20"]))
+        print("\n%s (%d pairs, %d designs)\n%-24s %8s %12s %10s %10s" % (
+            name, rows.sum(), len(set(groups[rows])), "method", "MAE", "MAE kerned", "within 10", "within 20"))
+        for method, predicted in held_out.items():
+            summary[method] = scores(y[rows], predicted[rows])
+            print("%-24s %8.1f %12.1f %9.0f%% %9.0f%%" % (method, summary[method]["mae"], summary[method]["mae kerned"],
+                                                          100 * summary[method]["within 10"], 100 * summary[method]["within 20"]))
     summary = summaries.get("latin") or summaries[trained_on[0]]
-    others = [n for n in summary if n != "learned"]
+    others = [n for n in ("zero", "halfkern", "contour", "average") if n in summary]
     if args.export:
         if (summary["learned"]["mae"] >= min(summary[n]["mae"] for n in others)
                 or summary["learned"]["mae kerned"] >= min(summary[n]["mae kerned"] for n in others)):
             print("not exported: the learned model does not beat the other methods on both measures")
             return
+        applied = args.apply_to.split(",") if args.apply_to else trained_on
+        # Another script takes the model only where it beats the default suggestion, the average of
+        # halfkern and contour distance, on families it never saw, on all pairs and on kerned pairs.
+        losing = [name for name in applied if name != "latin" and name in summaries
+                  and (summaries[name]["learned"]["mae"] >= summaries[name]["average"]["mae"]
+                       or summaries[name]["learned"]["mae kerned"] >= summaries[name]["average"]["mae kerned"])]
+        if losing or any(name not in summaries for name in applied if name != "latin"):
+            print("not exported: the learned model does not beat the average of halfkern and contour in %s"
+                  % ", ".join(losing or [name for name in applied if name not in summaries]))
+            return
         classifier, regressor, columns = fit(x[use], y[use])
         info = {"trained": time.strftime("%Y-%m-%d"), "pairs": int(use.sum()), "fonts": int(len(np.unique(fonts[use]))),
                 "families": int(len(set(groups[use]))), "licenses": "SIL Open Font License and Apache License fonts only",
                 "scripts": args.apply_to.split(",") if args.apply_to else trained_on, "trained on": trained_on,
-                "cross-validation": summaries.get("latin", summary),
-                "cross-validation by script": summaries}
+                "cross-validation": dict((m, s) for m, s in summary.items() if m in others + ["learned"]),
+                "cross-validation by script": dict((name, dict((m, s) for m, s in by.items() if m in others + ["learned"]))
+                                                   for name, by in summaries.items())}
         export(classifier, regressor, columns, info, args.model)
         print("exported the model")
 

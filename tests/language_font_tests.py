@@ -37,13 +37,17 @@ CHARACTERS_FILE = os.path.join(CHECKS, "font_characters.json")  # checks/train/o
 PARTS = ("names", "other_names", "orthographies", "sets")
 # The font was one file of 8.3 MB (29,402 characters) until every small script and symbol block of
 # Unicode became a character set (40,444 characters): one font cannot hold their glyphs and layout
-# (65,535 glyphs; a GSUB table's lookups within 65,535 bytes), so it was three, and is five, 12.8 MB
-# together as built: Essential 1.7 MB, CJK 3.7 MB (the 11,172 Hangul syllables and the hanja 2.5 MB),
+# (65,535 glyphs; a GSUB table's lookups within 65,535 bytes), so it was three, and is five, 13.0 MB
+# together as built since the East Asian blocks became sets (41,623 characters): Essential 1.7 MB, CJK
+# 3.8 MB (the 11,172 Hangul syllables and the hanja 2.5 MB),
 # FreeLang+ General 5.0 MB (cuneiform 0.8 MB, hieroglyphs 0.6 MB, Symbols 2 0.5 MB), FreeLang+
 # Mongolian-Tibetan 0.8 MB (Noto Serif Tibetan 0.6 MB of it), and FreeLang+ Duployan 1.6 MB (its
 # layout's 9,378 glyphs). Each bound leaves about a fifth of room: a build past one is one whose data
 # or sources grew, and is to be looked at before it ships.
-MAX_SIZES = {u"Essential": 2100 * 1024, u"CJK": 4400 * 1024, u"General": 5600 * 1024,
+# Since 2026-11-14 (every script but Han drawn whole, the Han repertoires from Noto and Jigmo, 90,078
+# characters): Essential 1.9 MB, CJK 18.0 MB, FreeLang+ General 10.5 MB; the owner lifted the bound on
+# size, but not the one on glyphs (no sixth font).
+MAX_SIZES = {u"Essential": 2400 * 1024, u"CJK": 22000 * 1024, u"General": 13000 * 1024,
              u"Mongolian-Tibetan": 1050 * 1024, u"Duployan": 1900 * 1024}
 LABELS = (u"Essential", u"CJK", u"General", u"Mongolian-Tibetan", u"Duployan")
 # The tools work without these files, published beside each release rather than kept in the repository:
@@ -60,25 +64,61 @@ OWN_LAYOUT = {u"Noto Sans Mongolian": u"Mongolian-Tibetan", u"Noto Sans Duployan
 ELSEWHERE = {u"UnicodiaFunky": (u"Essential", u"1AC1-1AC4")}
 # What no source font has (checks/train/language_font.py found no source): hexadecimal code points
 # and ranges, as in checks/font_characters.json. Qt takes such a character from a system font, or shows
-# a box. Looked for on 2026-11-13 in every font of notofonts.github.io at the pinned commit (but the
-# fonts of SignWriting, Nushu, Khitan, and the two test fonts), in 23 Noto fonts of google/fonts, and
-# in the fonts Unicodia bundles: no font under an open license has them. Unicodia's "Noto Serif Tai
-# Yo" 1.030 is no Noto font and declares no license or copyright; its Syriac font (Serto Antioch
-# Bible) forbids commercial use; the emoji are in Noto's color font alone. A character added to
-# checks/font_characters.json that no source has is listed here.
-NOT_SUPPLIED = (u"0860-086A "  # Syriac Supplement (the Malayalam letters of Syriac)
-                u"31BC-31BF "  # Bopomofo Extended (Unicode 13)
-                u"1E6C0-1E6DE 1E6E0-1E6F5 1E6FE-1E6FF "  # Tai Yo (Unicode 17): the whole script
-                u"1F6D8 "  # Transport and Map Symbols (Unicode 17)
-                u"1FA89-1FA8A 1FA8E-1FA8F 1FABE 1FAC6 1FAC8 1FACD 1FADC 1FADF 1FAE9-1FAEA 1FAEF")  # emoji of Unicode 16 and 17
+# a box. Until 2026-11-14 that was 93 characters (Tai Yo, Syriac Supplement, the newest emoji, a few CJK
+# signs), which Jigmo and GNU Unifont now draw. Since every script but Han is drawn whole, two groups
+# have no font under a license FreeLang can take: Tangut's additions of Unicode 16 and 17 (BabelStone
+# Tangut Wenhai, OFL, is of 2016; the others state no license), and the signs of Egyptian Hieroglyphs
+# Extended-A that NewGardiner leaves out (its maker calls them non-core, unverified): every assigned
+# character of the block that NewGardiner does not supply (EGYPTIAN_EXTENDED_A, computed below).
+NOT_SUPPLIED_TANGUT = u"187F8-187FF 18D09-18D1E 18D80-18DF2"
+EGYPTIAN_EXTENDED_A = (0x13460, 0x143FA)  # (its assigned characters, Unicode 16.0)
+# The blocks made character sets on 2026-11-14 (checks/train/character_sets.py), by their sets' ids: the
+# group each is listed under.
+BLOCKS_ADDED = {
+    u"block-0300": u"Phonetics", u"block-1ab0": u"Phonetics", u"block-1dc0": u"Phonetics", u"block-fe20": u"Phonetics",
+    u"block-20d0": u"Mathematics", u"block-1ee00": u"Mathematics",
+    u"block-3000": u"CJK symbols and forms", u"block-2ff0": u"CJK symbols and forms", u"block-3190": u"CJK symbols and forms",
+    u"block-31c0": u"CJK symbols and forms", u"block-3200": u"CJK symbols and forms", u"block-3300": u"CJK symbols and forms",
+    u"block-1f200": u"CJK symbols and forms", u"block-fe10": u"CJK symbols and forms", u"block-fe30": u"CJK symbols and forms",
+    u"block-fe50": u"CJK symbols and forms", u"block-ff00": u"CJK symbols and forms",
+    u"block-10100": u"Notation", u"block-102e0": u"Notation", u"block-a830": u"Notation", u"block-1cd0": u"Notation",
+    # (the Legacy sets of 256 characters at most: the presentation forms, all optional)
+    u"block-fb00": u"Legacy", u"block-fe70": u"Legacy",
+}
+# The Legacy sets that were too large for the list's font while a block of more than 256 characters
+# was left out of what it draws (until 2026-11-14): drawn whole since.
+LEGACY_LEFT_OUT = (u"Arabic Presentation Forms-A (Unicode block)", u"CJK Compatibility Ideographs (Unicode block)",
+                   u"CJK Compatibility Ideographs Supplement (Unicode block)")
 # What comes from fonts other than Noto's, by the family language_font.json names: the build looks in
 # them last, for what no Noto font has, and a top-up that takes more from them fails here until it is
 # looked at and listed. Until 2026-11-13 sixteen characters came from GNU Unifont, a bitmap's pixels;
-# they come from Unicodia Funky's outlines, and no source may be a bitmap font again (BITMAP_FONTS).
+# they come from Unicodia Funky's outlines. Since 2026-11-14 Unifont is back, under the owner's rule,
+# for what no outline font under a license FreeLang can take has (PIXEL_SOURCES). Three sources supply
+# too many characters to list: their rule is in OTHER_SOURCES_BY_RULE.
 OTHER_SOURCES = {
+    # Jigmo (CC0): what the Han repertoires and the scripts drawn whole need that Noto lacks, in the BMP and
+    # plane 1 (Bopomofo's and the strokes' newest, the squared PAATU, kana of the Kana blocks, the symbols
+    # of Chinese folk religion)
+    u"Jigmo": u"31BC-31BF 31E4-31E5 332C 4DB6 FA70-FAD9 1AFF0-1AFF3 1AFF5-1AFFB 1AFFD-1AFFE 1B000-1B122 1B132 "
+              u"1B150-1B152 1B155 1B164-1B167 1F260-1F265",  # (FA70 to FAD9: the DPRK compatibility ideographs, a Legacy set's)
+    # GNU Unifont (pixels): the Syriac Supplement, two Arabic letters of Unicode 16, and the honorific
+    # ligatures of Unicode 14 to 17 no Noto Arabic font draws; Arabic Extended-C's newest, Tai Yo, and the
+    # newest emoji
+    u"Unifont": u"0860-086A 088F 0897 FBC3-FBD2 FD90-FD91 FDC8-FDCE",
+    u"Unifont Upper": (u"10EC2-10EC7 10ED0-10ED8 10EFA-10EFC 1CCFA-1CCFB 1CEBA-1CEBF 1E6C0-1E6DE 1E6E0-1E6F5 1E6FE-1E6FF "
+                       u"1F6D8 1FA89-1FA8A 1FA8E-1FA8F 1FABE 1FAC6 1FAC8 1FACD 1FADC 1FADF 1FAE9-1FAEA 1FAEF"),
     u"Noto Emoji": (u"23EB-23EC 23F0 "  # Miscellaneous Technical: emoji
                     u"2705 270A 2728 274C 274E 2754-2755 2795-2797 27B0 27BF "  # Dingbats: emoji
                     u"1F1E6-1F1FF "  # Enclosed Alphanumeric Supplement: the regional indicators
+                    # Miscellaneous Symbols and Pictographs, drawn whole since 2026-11-14 (the rest from Noto's
+                    # symbol fonts)
+                    u"1F300-1F30C 1F310-1F314 1F316-1F31B 1F31D-1F320 1F32D-1F335 1F337-1F377 1F379-1F37C 1F37E-1F392 "
+                    u"1F3A0-1F3A6 1F3A8-1F3AB 1F3AF-1F3C1 1F3C3 1F3C5 1F3C7-1F3C9 1F3CF-1F3D3 1F3E1-1F3EC 1F3EE-1F3F0 "
+                    u"1F3F4 1F3F8-1F407 1F409-1F414 1F416-1F41E 1F420-1F425 1F427-1F43E 1F440 1F443-1F445 1F44A-1F44B "
+                    u"1F44F-1F452 1F454-1F469 1F46B-1F47C 1F47E-1F4A2 1F4A4-1F4AF 1F4B1-1F4B2 1F4B4-1F4B8 1F4BA "
+                    u"1F4BC-1F4BE 1F4C0-1F4C7 1F4CC-1F4D9 1F4DB-1F4DE 1F4E0-1F4E3 1F4E7-1F4E9 1F4EE-1F4F6 1F4F8 1F4FC "
+                    u"1F4FF-1F502 1F504-1F506 1F50B-1F50C 1F50E-1F511 1F514-1F53D 1F54B-1F54E 1F57A 1F595-1F596 1F5A4 "
+                    u"1F5FB-1F5FF "
                     u"1F600-1F60F 1F611-1F64F "  # Emoticons
                     u"1F680-1F686 1F688-1F68C 1F68E-1F690 1F692-1F693 1F695-1F697 1F699-1F6AC 1F6AE-1F6B1 1F6B3-1F6B8 "
                     u"1F6BB 1F6BD-1F6C5 1F6CC 1F6D0-1F6D2 1F6DC-1F6DF 1F6EB-1F6EC 1F6F4-1F6F6 "  # Transport and Map Symbols
@@ -86,10 +126,15 @@ OTHER_SOURCES = {
                     u"1F90C-1F93A 1F93C-1F945 1F947-1F9FF "  # Supplemental Symbols and Pictographs
                     u"1FA75-1FA77 1FA7B-1FA7C 1FA87-1FA88 1FAA9-1FAAF 1FAB7-1FABD 1FABF 1FAC3-1FAC5 1FACE-1FACF "
                     u"1FAD7-1FADB 1FAE0-1FAE8 1FAF0-1FAF8"),  # Symbols and Pictographs Extended-A
-    u"Andika": (u"1C89-1C8A "  # Cyrillic Extended-C: tje (Unicode 16)
-                u"A7CB-A7CD A7DA-A7DC"),  # Latin Extended-D (Unicode 16)
+    u"Andika": (u"1AC6 "  # Combining Diacritical Marks Extended: the number sign above (Unicode 14), since the block is a set
+                u"1C89-1C8A "  # Cyrillic Extended-C: tje (Unicode 16)
+                u"A7CB-A7CD A7DA-A7DC "  # Latin Extended-D (Unicode 16)
+                u"1DF25-1DF2A "  # Latin Extended-G's newest, since the Latin script is drawn whole
+                u"1E030-1E049 1E04B-1E06B 1E06D 1E08F"),  # Cyrillic Extended-D's modifier letters, likewise
     u"UnicodiaFunky": (u"0C5C 0CDC "  # a Telugu and a Kannada letter (Unicode 17)
                        u"1AC1-1AC4 "  # Combining Diacritical Marks Extended (Unicode 14)
+                       u"1ACF-1ADD 1AE0-1AEB "  # the same block's marks of Unicode 17, since the block is a set
+                       u"2FFC-2FFF 31EF "  # Ideographic Description Characters and a CJK stroke (Unicode 15.1)
                        u"1B4E-1B4F 1B7F "  # Balinese (Unicode 16)
                        u"2427-2429 2B96 "  # Control Pictures, Miscellaneous Symbols and Arrows
                        u"10940-10959 "  # Sidetic (no Noto font)
@@ -100,7 +145,10 @@ OTHER_SOURCES = {
                        u"16100-16139 "  # Gurung Khema (Noto's is unreleased)
                        u"1CEC0-1CED0 1CEE0-1CEF0 "  # Miscellaneous Symbols Supplement (Unicode 17)
                        u"1E5D0-1E5FA 1E5FF "  # Ol Onal (Noto's is unreleased)
-                       u"1F777-1F77A 1F8C0-1F8C1 1F8D0-1F8D8 1FA54-1FA57 1FBFA"),  # alchemical, arrows, chess, legacy computing
+                       u"1F777-1F77A 1F8C0-1F8C1 1F8D0-1F8D8 1FA54-1FA57 1FBFA "  # alchemical, arrows, chess, legacy computing
+                       u"A7CE-A7CF A7D2 A7D4 A7F1 1E04A 1E06C "  # Latin and Cyrillic letters, since those scripts are drawn whole
+                       u"18CFF "  # Khitan Small Script's newest
+                       u"1CCFC"),  # Symbols for Legacy Computing Supplement, since every block is drawn whole
     # Scripts no Noto font draws, each from the font made for it:
     u"Kanchenjunga": u"16D40-16D79",  # Kirat Rai (SIL); it draws an orthography, and keeps its layout
     u"Kedebideri": u"16EA0-16EB8 16EBB-16ED3",  # Beria Erfe (SIL)
@@ -109,18 +157,48 @@ OTHER_SOURCES = {
     # A few characters each, which the script's Noto font lacks:
     u"Padauk Book": u"116D0-116E3",  # Myanmar Extended-C: digits (SIL's Myanmar font)
     u"Shafarik": u"2C2F 2C5F",  # two Glagolitic letters of Unicode 14
-    u"BabelStone Pseudographica": u"1F8B2-1F8BB 1FBCB-1FBEF",  # arrows and legacy computing symbols of Unicode 16
+    # arrows and legacy computing symbols of Unicode 16 (and their Supplement, drawn whole since 2026-11-14)
+    u"BabelStone Pseudographica": u"1CC00-1CCF9 1CD00-1CEB3 1F8B2-1F8BB 1FBCB-1FBEF",
 }
+# The sources whose characters a rule says: (the planes or the range their characters are in, the
+# script Unicode gives each). Jigmo2 and Jigmo3: the ideographs of Extension B and later (planes 2 and 3)
+# that the Han repertoires and the orthographies need and Noto lacks; NewGardiner: the core signs of
+# Egyptian Hieroglyphs Extended-A.
+OTHER_SOURCES_BY_RULE = {u"Jigmo2": ((0x20000, 0x2FFFF), u"Hani"), u"Jigmo3": ((0x30000, 0x3FFFF), u"Hani"),
+                         u"NewGardiner": ((0x13440, 0x143FF), u"Egyp")}
+# GNU Unifont's two fonts, the one pixel source (the owner, 2026-11-14: only where no outline source has
+# the character), dual-licensed and taken under the OFL.
+PIXEL_SOURCES = (u"Unifont", u"Unifont Upper")
+# The fonts the CJK font holds besides Noto's (RULES: "cjk")
+CJK_OTHERS = (u"Jigmo", u"Jigmo2", u"Jigmo3")
+# Outline fonts drawn with straight segments alone, which the test of curves would take for pixels: Jigmo's
+# glyphs are GlyphWiki's KAGE strokes, polygons off any grid (its kana and signs in plane 0 and 1 too).
+STRAIGHT_STROKES = (u"Jigmo",)
+
+
+def ranges_text(codes):
+    """Sorted code points as hexadecimal ranges ("0041-005A 00DF")."""
+    parts, codes = [], sorted(codes)
+    at = 0
+    while at < len(codes):
+        end = at
+        while end + 1 < len(codes) and codes[end + 1] == codes[end] + 1:
+            end += 1
+        parts.append(u"%04X" % codes[at] if end == at else u"%04X-%04X" % (codes[at], codes[end]))
+        at = end + 1
+    return u" ".join(parts)
 # The sources that draw a language's text, and so keep their layout; the others draw characters one
 # at a time, and keep their character map alone.
 SCRIPT_FONTS = (u"Kanchenjunga",)
 # What the fonts of OTHER_SOURCES have carried into Noto Sans's mark lookups (language_font.json's
-# anchors_carried, of the Essential font): Andika's letters as bases of Noto Sans's marks, and Unicodia
+# anchors_carried, of the Essential font): Andika's letters as bases of Noto Sans's marks (and its
+# number sign above, U+1AC6, as a mark of Noto Sans's letters and a base of its marks), and Unicodia
 # Funky's four combining parentheses as marks of them. (While the font was three, Unicodia Funky was
 # whole in the Extended font, out of Noto Sans's reach, and the four were placed by their outlines.)
-ANCHORS_CARRIED = {u"Andika": {u"bases": u"1C89-1C8A A7CB-A7CD A7DA-A7DC", u"marks": u""},
+ANCHORS_CARRIED = {u"Andika": {u"bases": u"1AC6 1C89-1C8A A7CB-A7CD A7DA-A7DC 1DF25-1DF2A 1E030-1E049 1E04B-1E06B 1E06D 1E08F",
+                               u"marks": u"1AC6 1E08F"},
                    u"UnicodiaFunky": {u"bases": u"", u"marks": u"1AC1-1AC4"}}
-# Fonts whose outlines are a bitmap's pixels (or are bitmaps): never a source.
+# Fonts whose outlines are a bitmap's pixels (or are bitmaps): never a source, but PIXEL_SOURCES.
 BITMAP_FONTS = (u"unifont", u"fairfax", u"terminus", u"fixedsys", u"unscii", u"proggy", u"bitmap", u"pixel")
 # Where a source that is not one of the two Noto repositories at a pinned commit comes from: a
 # release, pinned by its version in the address, or another repository's file at a pinned commit.
@@ -128,7 +206,10 @@ RELEASES = (u"https://github.com/silnrsi/font-andika/releases/download/v7.000/",
             u"https://github.com/silnrsi/font-kanchenjunga/releases/download/v2.001/",
             u"https://github.com/silnrsi/font-kedebideri/releases/download/v3.001/",
             u"https://github.com/silnrsi/font-padauk/releases/download/v6.000/",
-            u"https://raw.githubusercontent.com/Mercury13/unicodia/df2b09c61e8fdc06f96fc6d6b194427f61bb2e38/Fonts/")
+            u"https://raw.githubusercontent.com/Mercury13/unicodia/df2b09c61e8fdc06f96fc6d6b194427f61bb2e38/Fonts/",
+            u"https://kamichikoichi.github.io/jigmo/Jigmo-20250912.zip",
+            u"https://unifoundry.com/pub/unifont/unifont-18.0.01/",
+            u"https://raw.githubusercontent.com/nederhof/newgardiner/ef51d1aa1101d58a9b18b782dba51f70661194d7/fonts/")
 # The one Noto font taken from its project's release, not from the pinned commit: the commit's version
 # (2.000) draws 49 of Dives Akuru's 72 characters, and 1.001 draws them all.
 NOTO_RELEASES = {u"Noto Serif Dives Akuru": u"https://github.com/notofonts/dives-akuru/releases/download/NotoSerifDivesAkuru-v1.001/"}
@@ -376,6 +457,18 @@ def info():
         return json.load(handle)
 
 
+def not_supplied():
+    """NOT_SUPPLIED: Tangut's additions, and the signs of Egyptian Hieroglyphs Extended-A NewGardiner leaves out."""
+    egyptian = set(range(EGYPTIAN_EXTENDED_A[0], EGYPTIAN_EXTENDED_A[1] + 1))
+    for source in info()["fonts"]:
+        if source["family"] == u"NewGardiner":
+            egyptian -= codes_of(source["code_points"])
+    return ranges_text(egyptian | codes_of(NOT_SUPPLIED_TANGUT))
+
+
+NOT_SUPPLIED = not_supplied()
+
+
 class ListFontTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -466,6 +559,8 @@ class ListFontTests(unittest.TestCase):
         self.assertEqual(len(required), counts["all"])
         self.assertGreater(len(required), 40000)
         not_supplied = codes_of(NOT_SUPPLIED)
+        self.assertEqual((len(not_supplied), len(not_supplied - codes_of(NOT_SUPPLIED_TANGUT))), (713, 568),
+                         "Tangut's 145 additions and Egyptian's 568 non-core signs")
         missing = [u"U+%04X" % code for code in sorted(required - not_supplied - self.absent) if code not in self.cmap]
         self.assertEqual(missing, [], "the bundled font lacks these")
         self.assertEqual([u"U+%04X" % code for code in sorted(not_supplied) if code in self.cmap], [],
@@ -483,6 +578,38 @@ class ListFontTests(unittest.TestCase):
         self.assertEqual(self.info["counts"]["all"], [counts["all"], counts["all"] - len(not_supplied)])
         for part in ("names", "other_names"):  # (what a row or a tooltip always shows is whole)
             self.assertEqual(sorted(parts[part] & not_supplied), [], part)
+
+    def test_blocks_added_as_sets_drawn(self):
+        """The 21 blocks that became character sets on 2026-11-14, whose characters are no one script's
+        own (the combining marks, the CJK symbols and compatibility forms, numbers and Vedic marks several
+        scripts share, and the Arabic mathematical alphabet), and the Legacy sets of presentation forms:
+        asked for whole, and drawn but for the few no source has (the CJK font draws the East Asian ones,
+        from Noto Sans JP and KR); the larger Legacy sets are left out, as the larger blocks are."""
+        with io.open(os.path.join(CHECKS, "character_sets.json"), encoding="ascii") as handle:
+            data = json.load(handle)
+        groups = data["groups"]
+        added = dict((row[0], row) for row in data["sets"] if row[0] in BLOCKS_ADDED)
+        self.assertEqual(sorted(added), sorted(BLOCKS_ADDED))
+        parts, _ = required_characters()
+        not_supplied = codes_of(NOT_SUPPLIED)
+        for key, group in BLOCKS_ADDED.items():
+            _, name, at, _, characters, _ = added[key]
+            self.assertEqual(groups[at], group, name)
+            codes = codes_of(characters)
+            self.assertEqual(sorted(codes - parts["sets"]), [], "%s: asked for whole (256 characters at most)" % name)
+            self.assertEqual([u"U+%04X" % code for code in sorted(codes - not_supplied - self.absent - self.cmap)], [],
+                             name)
+        with io.open(CHARACTERS_FILE, encoding="utf-8") as handle:
+            left_out = json.load(handle)["left_out"]["blocks"]
+        self.assertEqual(left_out, [], "every block a set holds drawn whole since 2026-11-14 (%s among them)"
+                         % ", ".join(LEGACY_LEFT_OUT))
+        legacy = groups.index(u"Legacy")
+        for key, name, at, _, characters, _ in data["sets"]:  # (a Legacy set: every character optional)
+            if at == legacy:
+                self.assertEqual(codes_of(data["optional"][key]), codes_of(characters), name)
+        if u"CJK" in self.present:
+            for code in (0x3001, 0x2FF0, 0x3190, 0x31C0, 0x3200, 0x3300, 0x1F200, 0xFE10, 0xFE30, 0xFF01, 0xFF61):
+                self.assertIn(code, self.cmaps[u"CJK"], "U+%04X" % code)
 
     def test_bulk_scripts_bundled(self):
         """What the first builds left to the system's fonts: the Hangul syllables, the ideographs of
@@ -559,9 +686,18 @@ class ListFontTests(unittest.TestCase):
         for source in self.sources:
             if not source["family"].startswith(u"Noto ") or source["family"] in OTHER_SOURCES:
                 found.setdefault(source["family"], []).append(source)
-        self.assertEqual(sorted(found), sorted(OTHER_SOURCES))
+        self.assertEqual(sorted(found), sorted(list(OTHER_SOURCES) + list(OTHER_SOURCES_BY_RULE)))
         for family, rows in found.items():
             supplied = sorted(code for source in rows for code in codes_of(source["code_points"]))
+            if family in OTHER_SOURCES_BY_RULE:
+                (low, high), script = OTHER_SOURCES_BY_RULE[family]
+                self.assertEqual([u"U+%04X" % code for code in supplied if not low <= code <= high], [], family)
+                if script == u"Hani":
+                    self.assertTrue(all(unicodedata.name(fc.char_of(code), u"").startswith(
+                                        (u"CJK UNIFIED IDEOGRAPH", u"CJK COMPATIBILITY IDEOGRAPH"))
+                                        for code in supplied if (code < 0x10000 or sys.maxunicode > 0xFFFF)
+                                        and unicodedata.name(fc.char_of(code), u"")), family)
+                continue
             self.assertEqual(supplied, sorted(codes_of(OTHER_SOURCES[family])), family)
             for source in rows:
                 if family in SCRIPT_FONTS:
@@ -570,30 +706,45 @@ class ListFontTests(unittest.TestCase):
                 else:
                     self.assertEqual(source["layout"], u"none (character map only)", family)
                     self.assertGreater(source["glyphs"], source["count"], "%s: its characters and .notdef" % family)
-                    self.assertLessEqual(source["glyphs"], source["count"] + 4, "%s: and the parts a few are made of" % family)
+                    # (4 until Unicodia Funky's marks of Unicode 17 and its ideographic description
+                    # characters came in with their blocks' sets: 14 glyphs beyond its 351 characters there)
+                    self.assertLessEqual(source["glyphs"], source["count"] + 16, "%s: and the parts a few are made of" % family)
             self.assertEqual(sorted(source["font"] for source in rows),
                              [u"Essential"] if family == u"Andika"
+                             else [u"CJK"] if family in CJK_OTHERS
                              else sorted([u"General", ELSEWHERE[family][0]]) if family in ELSEWHERE
                              else [u"General"], family)
         for family in OTHER_SOURCES:
-            self.assertEqual([u"U+%04X" % code for code in sorted(codes_of(OTHER_SOURCES[family])) if code not in self.cmap], [])
+            self.assertEqual([u"U+%04X" % code for code in sorted(codes_of(OTHER_SOURCES[family]))
+                              if code not in self.cmap and code not in self.absent], [])
 
     def test_no_source_is_a_bitmap_font(self):
         """Sixteen glyphs were a 16 by 16 bitmap's pixels (GNU Unifont) until outline fonts replaced
         them: no source is a bitmap font by its name, and each font of OTHER_SOURCES draws curves,
-        which a bitmap's pixels never are."""
+        which a bitmap's pixels never are; but PIXEL_SOURCES, GNU Unifont again since 2026-11-14 for
+        what no outline font under a license FreeLang can take has (the owner's rule), whose
+        characters OTHER_SOURCES lists one by one."""
         for source in self.info["fonts"]:
+            if source["family"] in PIXEL_SOURCES:
+                continue
             named = (source["family"] + u" " + source["file"]).lower()
             self.assertEqual([word for word in BITMAP_FONTS if word in named], [], source["family"])
-        self.assertNotIn(u"unifont", self.info["sources"].lower())
+        self.assertEqual(sorted(set(s["family"] for s in self.info["fonts"] if u"unifont" in s["file"].lower())),
+                         sorted(PIXEL_SOURCES))
         with io.open(LICENSE_FILE, encoding="utf-8") as handle:
-            self.assertNotIn(u"unifont", handle.read().lower(), "its license left with it")
+            text = handle.read()
+        self.assertIn(u"under the OFL", text, "Unifont taken under the OFL of its dual license")
+        self.assertIn(u"CC0 1.0 Universal", text, "Jigmo's dedication")
         for tables in self.fonts.values():
             for tag in ("EBDT", "EBLC", "CBDT", "CBLC", "sbix"):
                 self.assertNotIn(tag, tables)
         for family, listed in sorted(OTHER_SOURCES.items()):
-            curves = sum(self.curves(code) for code in codes_of(listed))
-            self.assertGreater(curves, 0, "%s: outlines with curves" % family)
+            if family in PIXEL_SOURCES or family in STRAIGHT_STROKES:
+                continue
+            codes = [code for code in codes_of(listed) if code not in self.absent]
+            if codes:
+                curves = sum(self.curves(code) for code in codes)
+                self.assertGreater(curves, 0, "%s: outlines with curves" % family)
         self.assertGreater(self.curves(0x1AC1), 0, "a combining parenthesis is a curve")
         self.assertEqual(self.curves(0x2588), 0, "(a full block has none: the count tells them apart)")
         # Two sources whose outlines were changed on the way in: Daarage's cubic curves became quadratic
@@ -613,11 +764,14 @@ class ListFontTests(unittest.TestCase):
         self.assertEqual([self.files[label]["anchors_carried"] for label in LABELS[1:]], [{}, {}, {}, {}])
         glyphs = cmap_glyphs(self.tables["cmap"])
         to_base = attachments(self.tables["GPOS"], 4)
-        for mark, letters in ((0x0301, ANCHORS_CARRIED[u"Andika"][u"bases"]), (0x0323, ANCHORS_CARRIED[u"Andika"][u"bases"])):
+        letters = codes_of(ANCHORS_CARRIED[u"Andika"][u"bases"]) - codes_of(ANCHORS_CARRIED[u"Andika"][u"marks"])
+        for mark in (0x0301, 0x0323):  # (Andika's letters as bases; its mark U+1AC6 is a base of marks only)
             bases = set().union(*[found for marks, found in to_base if glyphs[mark] in marks])
-            self.assertEqual([u"U+%04X" % code for code in sorted(codes_of(letters)) if glyphs[code] not in bases], [],
+            self.assertEqual([u"U+%04X" % code for code in sorted(letters) if glyphs[code] not in bases], [],
                              "bases of U+%04X" % mark)
             self.assertIn(glyphs[0x61], bases, "the lookup that places it on Noto Sans's own letters")
+        on = set().union(*[found for marks, found in to_base if glyphs[0x1AC6] in marks])
+        self.assertIn(glyphs[0x61], on, "Andika's number sign above, placed on Noto Sans's a")
         # The four combining parentheses (a second subset of Unicodia Funky, in this font for that):
         # marks of a mark-to-base lookup whose bases are Noto Sans's letters and dotted circle, and of
         # a mark-to-mark lookup whose bases are its other marks (one stands clear of an acute).
@@ -751,7 +905,9 @@ class ListFontTests(unittest.TestCase):
         (running text); one that draws a character set's characters alone, shown one at a time, keeps
         its character map. The stated exception: Noto Sans Mongolian and Noto Sans Duployan, which the
         rule had cut, keep their layout whole in fonts of their own (Mongolian with Tibetan), so that
-        their running text shapes; no other font's budget could afford them."""
+        their running text shapes; no other font's budget could afford them. Since 2026-11-14 an
+        orthography is written in Mongolian (SLDR's, filed under Peripheral Mongolian), so the rule
+        would keep Noto Sans Mongolian's layout too; Duployan stays the exception alone."""
         parts, _ = required_characters()
         in_text = parts["names"] | parts["other_names"] | parts["orthographies"]
         for source in self.sources:
@@ -766,7 +922,10 @@ class ListFontTests(unittest.TestCase):
         for family, label in sorted(OWN_LAYOUT.items()):
             self.assertIn(family, kept, "its layout restored")
             self.assertEqual(kept[family]["font"], label, family)
-            self.assertFalse(in_text & codes_of(kept[family]["code_points"]), "%s: the exception, not the rule" % family)
+            if family == u"Noto Sans Mongolian":
+                self.assertTrue(in_text & codes_of(kept[family]["code_points"]), "%s: an orthography's letters" % family)
+            else:
+                self.assertFalse(in_text & codes_of(kept[family]["code_points"]), "%s: the exception, not the rule" % family)
             self.assertTrue(self.files[label]["own_layout"], label)
             self.assertGreater(kept[family]["glyphs"], 10 * kept[family]["count"], "%s: the forms its letters join in" % family)
             self.assertGreater(kept[family]["lookup_bytes"]["GSUB"], 5000, family)
@@ -888,9 +1047,11 @@ class FindingTests(unittest.TestCase):
         FakeFont.substituted, FakeFont.inserted = {}, []
         self.qt = fc._qt
         fc._qt = lambda: (FakeCore, FakeGui)
+        self.drawn = fc.LIST_FALLBACKS_DRAWN
 
     def tearDown(self):
         fc._qt = self.qt
+        fc.LIST_FALLBACKS_DRAWN = self.drawn
         shutil.rmtree(self.folder, ignore_errors=True)
 
     def test_in_the_repository_folder(self):
@@ -974,19 +1135,23 @@ class FindingTests(unittest.TestCase):
         self.assertEqual(FakeFont.inserted, [(fc.LIST_FAMILY, [family for _, family in fc.LIST_FONT_FALLBACKS[1:]
                                                                if os.path.isfile(os.path.join(FOLDER, dict(
                                                                    (f, n) for n, f in fc.LIST_FONT_FALLBACKS)[family]))])])
+        self.assertEqual(fc.LIST_FALLBACKS_DRAWN, frozenset(FakeFont.inserted[0][1]), "noted: the CJK file is not")
         FakeDatabase.known, FakeDatabase.added, FakeDatabase.refuse = [], [], [name for name, _ in fc.LIST_FONT_FALLBACKS]
         FakeFont.substituted, FakeFont.inserted = {}, []
         self.assertEqual(fc.register_list_font(FakeCore, FakeGui), fc.LIST_FAMILY)
         self.assertEqual(FakeFont.inserted, [], "no substitute: nothing inserted")
+        self.assertEqual(fc.LIST_FALLBACKS_DRAWN, frozenset())
 
         class NoSubstitutions(object):  # (a Qt without the calls: the first font alone, no error)
             QFontDatabase = FakeDatabase
         FakeDatabase.known, FakeDatabase.added, FakeDatabase.refuse = [], [], False
         self.assertEqual(fc.register_list_font(FakeCore, NoSubstitutions), fc.LIST_FAMILY)
+        self.assertEqual(fc.LIST_FALLBACKS_DRAWN, frozenset(), "registered, but no substitute draws them")
 
     def test_refused(self):
         FakeDatabase.refuse = True
         self.assertIsNone(fc.register_list_font(FakeCore, FakeGui))
+        self.assertEqual(fc.LIST_FALLBACKS_DRAWN, frozenset(), "no file drawn at all")
 
     def test_list_in_one_family_larger(self):
         tree = FakeTree(FakeFont(points=9.0))
@@ -1063,10 +1228,56 @@ class TooltipFontTests(unittest.TestCase):
                     boxes.add(code)
         self.assertEqual([u"U+%04X" % code for code in sorted(boxes)], [],
                          "every tooltip whole but for the characters no source font has")
-        self.assertGreater(len(shown), 25000, "the Hangul syllables, ideographs, cuneiform, and hieroglyphs among them")
+        # (more than 25,000 while a tooltip named every character it missed; it names the first
+        # fc.TIP_SHOWN of each list since, and Mandarin's no longer names thousands of ideographs)
+        self.assertGreater(len(shown), 12000, "the Hangul syllables, ideographs, cuneiform, and hieroglyphs among them")
         inuktitut = [l for l in languages if l.iso == u"ike"][0]
         tip = fc.coverage_tip(fc.check_language(inuktitut, font))
         self.assertTrue(all(self.drawn(code) for code in fc.code_points(tip)), "the tooltip the owner saw as boxes")
+
+    def test_large_sets_by_code_point_without_their_files(self):
+        """The CJK and FreeLang+ General files are optional: without one, a set past the first bounds
+        (300, 256, no Han repertoire) whose characters it draws is named by code point, not in boxes,
+        and one the registered files draw still by its characters (from what the build says each file
+        holds, whether or not the optional files are here)."""
+        found = info()
+        label_of = dict((row["family"], row["font"]) for row in found["files"])
+        held = {}
+        for source in found["fonts"]:
+            held.setdefault(source["font"], set()).update(codes_of(source["code_points"]))
+        sets = fc.load_character_sets()
+        large = [one for one in sets if (isinstance(one, fc.ScriptSet) and one.own_count > fc.NAMED_SCRIPT_FEW)
+                 or (u"%s" % one.iso).startswith(u"block-") and one.size() > fc.NAMED_BLOCK_FEW
+                 or (u"%s" % one.iso).startswith(u"unihan-")]
+        self.assertGreater(len(large), 40)
+        font = fc.FontCharacters([])
+        not_supplied = codes_of(NOT_SUPPLIED)
+        fallbacks = [family for _, family in fc.LIST_FONT_FALLBACKS]
+        kept = fc.LIST_FALLBACKS_DRAWN
+        try:
+            for absent in ((), (fc.CJK_FALLBACK,), (fc.GENERAL_FALLBACK,), (fc.CJK_FALLBACK, fc.GENERAL_FALLBACK)):
+                fc.LIST_FALLBACKS_DRAWN = frozenset(family for family in fallbacks if family not in absent)
+                drawn = set().union(*[held[label_of[family]] for family in [fc.LIST_FAMILY] + list(fc.LIST_FALLBACKS_DRAWN)])
+                named = 0
+                for one in large:
+                    tip = fc.coverage_tip(fc.check_language(one, font))
+                    boxes = [u"U+%04X" % code for code in fc.code_points(tip)
+                             if code not in drawn and code not in not_supplied and code != 0x20 and not is_format(code)]
+                    self.assertEqual(boxes[:5], [], u"%s without %s" % (one.name, absent))
+                    named += fc.names_characters(one)
+                if absent == (fc.CJK_FALLBACK, fc.GENERAL_FALLBACK):
+                    self.assertEqual(named, 2, "Ethiopic and Arabic Presentation Forms-A: the first file's")
+            fc.LIST_FALLBACKS_DRAWN = frozenset([fc.GENERAL_FALLBACK])
+            byname = dict((one.name, one) for one in sets)
+            self.assertFalse(fc.names_characters(byname[u"Hangul"]), "the CJK file's")
+            self.assertFalse(fc.names_characters(byname[u"Latin"]), "its fullwidth letters are the CJK file's")
+            self.assertFalse(fc.names_characters(byname[u"Yi"]), "the CJK punctuation it shares")
+            self.assertTrue(fc.names_characters(byname[u"Cuneiform"]), "FreeLang+ General's alone")
+            self.assertTrue(fc.names_characters(byname[u"Braille"]), "within the first bounds: as before")
+            fc.LIST_FALLBACKS_DRAWN = None
+            self.assertTrue(fc.names_characters(byname[u"Hangul"]), "not registered yet (the tests): every file")
+        finally:
+            fc.LIST_FALLBACKS_DRAWN = kept
 
     def test_other_names_and_families_drawn(self):
         families = fc.load_families(os.path.join(CHECKS, fc.FAMILIES_FILE))
@@ -1076,6 +1287,113 @@ class TooltipFontTests(unittest.TestCase):
         self.assertGreater(len(names), 15000)
         broken = [name for name in names if not all(self.drawn(code) for code in fc.code_points(name))]
         self.assertEqual(broken, [], "the languages' other names, those in Chinese, Japanese, and Korean too")
+
+
+class OptionalCharactersTests(unittest.TestCase):
+    """The owner: presentation forms and compatibility ideographs must not count towards the script
+    they belong to. checks/character_sets.json lists them as optional: a set's in "optional" (by its
+    id), a script row's in its last column. They stay listed (and drawn where they were); the Arabic
+    signs typed in their own right stay required."""
+
+    @classmethod
+    def setUpClass(cls):
+        with io.open(os.path.join(CHECKS, "character_sets.json"), encoding="ascii") as handle:
+            cls.data = json.load(handle)
+        cls.scripts = dict((row[0], row) for row in cls.data["scripts"]["rows"])
+
+    def test_scripts(self):
+        self.assertEqual(self.data["scripts"]["columns"], [u"name", u"characters", u"shared", u"since", u"optional"])
+        held = dict((name, len(codes_of(row[4]))) for name, row in self.scripts.items() if row[4])
+        self.assertEqual(held, {u"Arabic": 728, u"Armenian": 5, u"Greek": 1, u"Han": 1002, u"Hebrew": 45, u"Latin": 9})
+        # (the owner: "Let's include all Greek polytonic letters (oxia)": required; the Ohm sign is optional)
+        self.assertEqual(codes_of(self.scripts[u"Greek"][4]), set([0x2126]))
+        for polytonic in (0x1F71, 0x1FBB, 0x1FBE, 0x1FEE, 0x1FEF, 0x1FFD, 0x0374):
+            self.assertNotIn(polytonic, codes_of(self.scripts[u"Greek"][4]), "U+%04X" % polytonic)
+        for row in self.scripts.values():
+            self.assertFalse(codes_of(row[4]) - codes_of(row[1]) - codes_of(row[2]), row[0])
+        arabic = codes_of(self.scripts[u"Arabic"][4])
+        for sign in (0xFDF2, 0xFDFA, 0xFDFB, 0xFDFC, 0xFDFD, 0xFD3E, 0xFD3F, 0xFD40, 0xFBB2, 0xFBC3, 0xFDCF, 0xFDFF):
+            self.assertNotIn(sign, arabic, "U+%04X: a sign in use, required" % sign)
+        for form in (0xFB51, 0xFDF0, 0xFDF3, 0xFE73, 0xFE8D, 0xFEFC):
+            self.assertIn(form, arabic, "U+%04X: a shaping form, optional" % form)
+        self.assertNotIn(0xFB1E, codes_of(self.scripts[u"Hebrew"][4]), "the varika: a Hebrew mark in use")
+        self.assertNotIn(0xFA0E, codes_of(self.scripts[u"Han"][4]), "a unified ideograph of the compatibility block")
+        self.assertIn(0xF900, codes_of(self.scripts[u"Han"][4]))
+
+    def test_sets(self):
+        groups = self.data["groups"]
+        self.assertEqual(groups[-2:], [u"Legacy", u"Foundries"])
+        legacy = [row for row in self.data["sets"] if groups[row[2]] == u"Legacy"]
+        self.assertEqual([(row[1], len(codes_of(row[4]))) for row in legacy],
+                         [(u"Alphabetic Presentation Forms (Unicode block)", 57),
+                          (u"Arabic Presentation Forms-A (Unicode block)", 588),
+                          (u"Arabic Presentation Forms-B (Unicode block)", 140),
+                          (u"CJK Compatibility Ideographs (Unicode block)", 460),
+                          (u"CJK Compatibility Ideographs Supplement (Unicode block)", 542)])
+        for row in legacy:
+            self.assertIn(u"every character optional", row[3])
+            self.assertIn(u"now", row[3])
+        self.assertEqual(sorted(key for key in self.data["optional"] if not any(row[0] == key for row in legacy)),
+                         [u"block-0300", u"block-2000", u"block-2100", u"block-2300", u"unicode-math",
+                          u"unihan-big5", u"unihan-core2020", u"unihan-hkscs", u"unihan-jinmeiyo", u"unihan-jis0213",
+                          u"unihan-ksx1001"],
+                         "Unicode's sets that hold a few (the Han repertoires: their compatibility ideographs); a "
+                         "foundry's set is checked as its list says")
+        self.assertEqual(len(codes_of(self.data["optional"][u"unihan-ksx1001"])), 268, "KS X 1001's duplicate hanja")
+        self.assertEqual(codes_of(self.data["optional"][u"unicode-math"]), set([0xFB29]))
+        for row in self.data["sets"]:
+            self.assertEqual(len(row), 6, "six columns, as a reader made before expects")
+            self.assertFalse(codes_of(self.data["optional"].get(row[0], u"")) - codes_of(row[4]), row[1])
+
+    def test_han_repertoires(self):
+        """The Han repertoires (Unihan, Unicode 17.0): the national standards and lists a CJK font is
+        made for, and the other writings in Han characters (Chu Nom: one set per Vietnamese source of
+        the IRG; Sawndip; Japan's kokuji). FreeLang draws them whole, Jigmo supplying what Noto lacks."""
+        groups = self.data["groups"]
+        found = [(row[0], len(codes_of(row[4]))) for row in self.data["sets"] if groups[row[2]] == u"Han repertoires"]
+        self.assertEqual(found, [(u"unihan-core2020", 20720), (u"unihan-gb2312", 6763), (u"unihan-tgh", 8105),
+                                 (u"unihan-big5", 13064), (u"unihan-hkscs", 4605), (u"unihan-joyo", 2136),
+                                 (u"unihan-jinmeiyo", 863), (u"unihan-jis0208", 6356), (u"unihan-jis0213", 3695),
+                                 (u"unihan-kokuji", 782), (u"unihan-ksx1001", 4888), (u"unihan-koredu", 1800),
+                                 (u"unihan-korname", 6367), (u"unihan-sawndip", 3812), (u"unihan-v0", 2345),
+                                 (u"unihan-v1", 3309), (u"unihan-v2", 3198), (u"unihan-v3", 533), (u"unihan-v4", 2008),
+                                 (u"unihan-vn", 2883)])
+        self.assertEqual(groups.index(u"Han repertoires"), groups.index(u"CJK symbols and forms") + 1)
+        with io.open(CHARACTERS_FILE, encoding="utf-8") as handle:
+            data = json.load(handle)
+        self.assertEqual(data["left_out"]["sets"], [], "every one drawn")
+        self.assertEqual(data["left_out"]["scripts"], [u"Han"], "every script but Han drawn whole")
+        han = set()
+        for row in self.data["sets"]:
+            if groups[row[2]] == u"Han repertoires":
+                han |= codes_of(row[4])
+        self.assertEqual(sorted(han - codes_of(data["sets"])), [], "asked for whole")
+        names = dict((row[0], row[1]) for row in self.data["sets"])
+        self.assertEqual(names[u"unihan-v0"], u"TCVN 5773:1993 (Unihan V0)")
+        self.assertIn(u"H\N{LATIN SMALL LETTER A WITH ACUTE}n N\N{LATIN SMALL LETTER O WITH CIRCUMFLEX}m",
+                      names[u"unihan-v4"])
+
+
+class CoverageGapsTests(unittest.TestCase):
+    """checks/coverage_gaps.json (checks/train/coverage_gaps.py, with docs/COVERAGE-GAPS.md): what Font
+    Check knows of and does not check, and the fonts to consider for what FreeLang cannot draw, each
+    named by the sets and scripts it is for."""
+
+    def test_data(self):
+        with io.open(os.path.join(CHECKS, "coverage_gaps.json"), encoding="ascii") as handle:
+            data = json.load(handle)
+        with io.open(os.path.join(CHECKS, "character_sets.json"), encoding="ascii") as handle:
+            sets = json.load(handle)
+        ids = set(row[0] for row in sets["sets"]) | set(u"script:" + row[0] for row in sets["scripts"]["rows"])
+        self.assertTrue(data["known"])
+        for name, others, why in data["known"]:
+            self.assertTrue(name and why and isinstance(others, list), name)
+        names = [row[0] for row in data["resources"]]
+        self.assertIn(u"Jigmo, Jigmo2, Jigmo3", names)
+        for font, maker, license_, page, what, caution, rows in data["resources"]:
+            self.assertTrue(page.startswith(u"https://"), font)
+            self.assertFalse(set(rows) - ids, font)
+        self.assertTrue(os.path.isfile(os.path.join(CHECKS, os.pardir, "docs", "COVERAGE-GAPS.md")))
 
 
 if __name__ == "__main__":

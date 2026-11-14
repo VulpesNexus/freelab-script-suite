@@ -6,6 +6,7 @@ from __future__ import absolute_import, division, print_function
 import os
 import re
 import sys
+import time
 import unicodedata
 import unittest
 
@@ -120,6 +121,32 @@ class SupportTests(unittest.TestCase):
         syllable = u(0xD55C)
         jamo = fc.code_points(unicodedata.normalize("NFD", syllable))
         self.assertEqual(fc.support(syllable, font(jamo, {}))[0], fc.MISSING, "jamo are letters, not marks")
+
+    def test_single_character_never_had_through_another(self):
+        """The owner: the letters with oxia are required in their own right; a single character is
+        had by its own code point, never by the one it is canonically the same as."""
+        tonos = [0x391, 0x386, 0x3B1, 0x3AC, 0x3B5, 0x3AD]
+        self.assertEqual(fc.support(u(0x1F71), font(tonos))[0], fc.MISSING, "alpha with oxia, not through tonos")
+        self.assertEqual(fc.support(u(0x1F71), font([0x1F71]))[0], fc.HAVE)
+        anchors = {0x3B1: [u"top"], 0x301: [u"_top"]}
+        self.assertEqual(fc.support(u(0x1F71), font([0x3B1, 0x301], anchors)),
+                         (fc.COMPOSED, (0x3B1, (0x301,))), "still composed of its letter and mark")
+        self.assertEqual(fc.support(u(0x1F71), font(tonos + [0x301], {}))[0], fc.PARTS)
+        self.assertEqual(fc.support(u(0x2126), font([0x3A9]))[0], fc.MISSING, "the ohm sign, not through omega")
+        self.assertEqual(fc.support(u(0x212A), font([0x4B]))[0], fc.MISSING, "the Kelvin sign, not through K")
+        self.assertEqual(fc.support(u(0x212B), font([0xC5]))[0], fc.MISSING, "the angstrom sign, not through A ring")
+        self.assertEqual(fc.support(u(0xF900), font([0x8C48]))[0], fc.MISSING, "a compatibility ideograph")
+        self.assertEqual(fc.support(u(0x2F800), font([0x4E3D]))[0], fc.MISSING, "past U+FFFF, either build")
+        self.assertEqual(fc.support(u(0x2F800), font([0x2F800]))[0], fc.HAVE)
+        self.assertEqual(fc.support(u(0x3B1) + u(0x301), font([0x3AC]))[0], fc.HAVE,
+                         "a sequence is had by the character it composes to")
+
+    def test_normal_form_leaves_astral_text(self):
+        """FontLab's narrow Python 2 normalizes nothing past U+FFFF: neither does the count, here."""
+        kaithi = u(0x11099) + u(0x110BA)
+        self.assertEqual(fc.normal_form("NFC", kaithi), kaithi)
+        self.assertEqual(fc.normal_form("NFD", u(0x2F800)), u(0x2F800))
+        self.assertEqual(fc.normal_form("NFC", u"e" + u(0x301)), u(0xE9))
 
 
 class CoverageTests(unittest.TestCase):
@@ -791,9 +818,9 @@ class CharacterSetTests(unittest.TestCase):
         self.assertEqual(box.level, "covered")
         self.assertEqual(fc.language_note(ipa), u"1 of 3 missing")
         self.assertEqual(fc.language_note(box), u"")
-        self.assertEqual(fc.coverage_tip(ipa), u"IPA test: within reach (the font has 2 of its 3 characters).\n"
-                                               u"A test's definition.\nMissing: " + u(0x259))
-        self.assertEqual(fc.coverage_tip(box), u"Box test: covered (the font has 1 of its 1 character).\nAnother.")
+        self.assertEqual(fc.coverage_tip(ipa), u"IPA test: within reach (the font has 2 of its 3 characters).\n\n"
+                                               u"A test's definition.\n\nMissing: " + u(0x259))
+        self.assertEqual(fc.coverage_tip(box), u"Box test: covered (the font has 1 of its 1 character).\n\nAnother.")
         self.assertTrue(fc.language_matches(ipa, u"phonet"), "a set's group")
         self.assertTrue(fc.language_matches(ipa, u"ipa"))
         self.assertFalse(fc.language_matches(box, u"ipa"))
@@ -839,13 +866,13 @@ class CharacterSetTests(unittest.TestCase):
         self.assertEqual(len(set(one.iso for one in every)), len(every), "each its own id")
         self.assertEqual(len(set(one.name for one in every)), len(every), "each its own name")
         sets = [one for one in every if not isinstance(one, fc.ScriptSet)]  # (the scripts: ScriptTests)
-        self.assertEqual(len(sets), 99)
+        self.assertEqual(len(sets), 145)
         groups = []
         for one in sets:
             if one.script not in groups:
                 groups.append(one.script)
-        self.assertEqual(groups, [u"Phonetics", u"Mathematics", u"Symbols and punctuation", u"Notation",
-                                  u"Games and pictographs", u"Foundries"])
+        self.assertEqual(groups, [u"Phonetics", u"Mathematics", u"Symbols and punctuation", u"CJK symbols and forms",
+                                  u"Han repertoires", u"Notation", u"Games and pictographs", u"Legacy", u"Foundries"])
         for one in sets:
             self.assertEqual((one.kind, one.status, one.auxiliary, one.marks), ("set", u"set", [], u""), one.name)
             self.assertTrue(one.base and one.definition.endswith(u".") and one.script, one.name)
@@ -871,7 +898,15 @@ class CharacterSetTests(unittest.TestCase):
                                         (u"block-1fb00", u"Symbols for Legacy Computing (Unicode block)",
                                          u"Symbols and punctuation", 250),
                                         (u"block-1f700", u"Alchemical Symbols (Unicode block)",
-                                         u"Symbols and punctuation", 128)):
+                                         u"Symbols and punctuation", 128),
+                                        # (and those of the second survey, on 2026-11-14)
+                                        (u"block-0300", u"Combining Diacritical Marks (Unicode block)", u"Phonetics", 112),
+                                        (u"block-20d0", u"Combining Diacritical Marks for Symbols (Unicode block)",
+                                         u"Mathematics", 33),
+                                        (u"block-3300", u"CJK Compatibility (Unicode block)", u"CJK symbols and forms", 256),
+                                        (u"block-ff00", u"Halfwidth and Fullwidth Forms (Unicode block)",
+                                         u"CJK symbols and forms", 225),
+                                        (u"block-1cd0", u"Vedic Extensions (Unicode block)", u"Notation", 43)):
             self.assertEqual((by_id[key].name, by_id[key].script, len(by_id[key].base)), (name, group, count))
         self.assertNotIn(u(0x1D173), by_id[u"block-1d100"].base, "the musical format characters: no glyph")
         for one in sets:  # (no private-use, surrogate, or control character in any set)
@@ -960,7 +995,7 @@ class FamilyTests(unittest.TestCase):
         germanic = indo.children[0]
         self.assertEqual(germanic.path, (u"Indo-European", u"Classical Indo-European", u"Germanic"),
                          "its place as Glottolog has it, whatever branches the tree skipped: it finds the node again")
-        self.assertEqual(fc.family_tip(germanic), u"Germanic: 2 covered, 1 within reach, 0 started, 1 missed.\n"
+        self.assertEqual(fc.family_tip(germanic), u"Germanic: 2 covered, 1 within reach, 0 started, 1 missed.\n\n"
                                                   u"Glottolog: Indo-European > Classical Indo-European > Germanic.")
         self.assertEqual(fc.family_tip(indo), u"Indo-European: 3 covered, 1 within reach, 0 started, 1 missed.")
         names = lambda sort: [one.name for one in fc.family_tree(results, families, u"", None, sort)[0].children]
@@ -1051,7 +1086,11 @@ class FamilyTests(unittest.TestCase):
         self.assertEqual(families.path(u"hrv")[-1], u"Serbian-Croatian-Bosnian", "a code Glottolog gives a dialect")
         self.assertEqual(families.path(u"eus"), (u"Language isolates",))
         self.assertEqual(families.path(u"que"), (u"Quechuan",), "a macrolanguage placed by hand")
-        self.assertEqual(sorted(iso for iso in isos if not families.path(iso)), [u"xrg"], "all classified but one")
+        self.assertEqual(sorted(iso for iso in isos if not families.path(iso)), [], "all classified")
+        self.assertEqual(families.path(u"xrg")[-2:], (u"Pama-Nyungan", u"South-West Pama-Nyungan"),
+                         "Minang, placed by hand beside Nyunga (Glottolog has no languoid for it)")
+        self.assertEqual(families.path(u"mvf")[-1], u"Mongolian", "Peripheral Mongolian, beside Halh")
+        self.assertEqual(families.path(u"mvf"), families.path(u"khk"))
         self.assertTrue(set(families.aliases) <= isos)
         self.assertIn(u"Nama", families.aliases[u"naq"], "Khoekhoe's better-known name")
         own = dict((l.iso, set()) for l in languages)
@@ -1084,8 +1123,7 @@ class FamilyTests(unittest.TestCase):
         root, _ = fc.family_tree(results, families)
         self.assertEqual(len(root.all_results()), len(results), "each orthography once")
         self.assertGreater(len(root.children), 50)
-        self.assertEqual(root.children[-1].name, fc.UNCLASSIFIED)
-        self.assertEqual([r.language.iso for r in root.children[-1].results], [u"xrg"])
+        self.assertNotIn(fc.UNCLASSIFIED, [one.name for one in root.children], "Minang is placed beside Nyunga")
         self.assertEqual(root.children[0].name, u"Indo-European", "the most languages covered or within reach first")
 
         def check(node, top):
@@ -1142,7 +1180,7 @@ class NotCoveredTests(unittest.TestCase):
         counts = families.counts
         self.assertEqual((counts["described"], counts["not_described"], counts["glottolog_languages_with_iso"],
                           counts["families"], counts["families_without_a_described_language"]),
-                         (2511, 5036, 7861, 240, 77))
+                         (2512, 5035, 7861, 240, 77))
         amkoe = [one for one in by_family[u"Kxa"] if one.iso == u"huc"][0]
         self.assertEqual((amkoe.name, amkoe.family), (u"Amkoe", u"Kxa"))
         names = [fc.fold(one.name) for one in by_family[u"Austronesian"]]
@@ -1152,13 +1190,14 @@ class NotCoveredTests(unittest.TestCase):
         self.assertEqual(old.unlisted_matches(u"aaa"), [(u"aaa", u"Ghotuo", None)])
         scripts = fc.load_known_scripts(ORTHOGRAPHIES_FILE)
         self.assertIs(fc.load_known_scripts(ORTHOGRAPHIES_FILE), scripts, "read once")
-        self.assertEqual((scripts.known, len(scripts.not_covered)), (172, 61))
-        self.assertEqual(fc.scripts_section(scripts.not_covered, u"MONGOL"), [u"Mongolian"])
+        self.assertEqual((scripts.known, len(scripts.not_covered)), (172, 60))
+        self.assertEqual(fc.scripts_section(scripts.not_covered, u"GLAGOL"), [u"Glagolitic"])
+        self.assertEqual(fc.scripts_section(scripts.not_covered, u"MONGOL"), [], "SLDR's Mongolian is written in it")
         self.assertEqual(fc.scripts_section(scripts.not_covered), scripts.not_covered)
         self.assertEqual(fc.scripts_section(scripts.not_covered, u"latin"), [])
         unlisted = set(row[0] for row in families.unlisted)
         recorded = set(iso for iso in scripts.of_languages if iso in unlisted)
-        self.assertEqual(len(recorded), 4501, "of the 5,036: a script recorded by CLDR or Google's data")
+        self.assertEqual(len(recorded), 4500, "of the 5,035: a script recorded by CLDR or Google's data")
         self.assertEqual(len([iso for iso in recorded if scripts.of_languages[iso] == [u"Latin"]]), 3957)
         empty = fc.load_known_scripts(os.path.join(HERE, "no_such_file.json"))
         self.assertEqual((empty.known, empty.not_covered, empty.of_languages), (0, [], {}))
@@ -1216,13 +1255,20 @@ class NotCoveredTests(unittest.TestCase):
         tip = fc.family_tip(fc.UncoveredNode((u"Kxa",), [entry(1), entry(2)]))
         self.assertTrue(tip.startswith(u"2 languages of it are known and cannot be checked yet"), tip)
         self.assertIn(fc.CONTRIBUTE, tip)
+        # (the Families tab's line asks for "these languages" only when its list shows some)
+        root = fc.FamilyNode(u"", ())
+        self.assertFalse(fc.shows_uncovered(root))
+        family = fc.FamilyNode(u"Kxa", (u"Kxa",))
+        family.children.append(fc.UncoveredNode((u"Kxa",), [entry(1)]))
+        root.children.append(family)
+        self.assertTrue(fc.shows_uncovered(root))
         self.assertEqual(fc.ISSUES_ADDRESS, fc.REPOSITORY + u"/issues")
         self.assertTrue(fc.REPOSITORY.startswith(u"https://github.com/"))
         for text in (fc.CONTRIBUTE, fc.CONTRIBUTE_SCRIPTS):
             self.assertIn(u"open an issue on FreeLab's repository (%s) with the characters" % fc.ISSUES_ADDRESS, text,
                           "the address is written out: it reads without a link")
         amkoe = fc.Uncovered(u"huc", u"Amkoe", (u"Hoan", u"Eastern Hoan"), u"Kxa")
-        lines = fc.uncovered_tip(amkoe, [u"Latin"]).split(u"\n")
+        lines = fc.uncovered_tip(amkoe, [u"Latin"]).split(u"\n\n")  # (a blank line between two paragraphs)
         self.assertEqual(lines[0], u"Amkoe (huc), Kxa: known, not yet covered. None of Font Check's sources says which "
                                    u"characters it is written with, so no font can be checked for it.")
         self.assertEqual(lines[1], u"Recorded as written in Latin: the character sets Adobe Latin 5, GF Latin African, "
@@ -1371,10 +1417,10 @@ class OrthographyTests(unittest.TestCase):
         gothic = [l for l in self.others if l.iso == u"got"]
         self.assertEqual([(l.script, u"sample text" in l.source) for l in gothic], [(u"Gothic", True), (u"Runic", True)],
                          "crawled in Latin letters, while Google's data states other scripts: left to its texts")
-        self.assertEqual(len(set(l.iso for l in self.languages)), 2511)
+        self.assertEqual(len(set(l.iso for l in self.languages)), 2512)
         self.assertEqual(len(set(l.iso for l in self.others if l.evidence == fc.INFERRED)), 748,
                          "Lisu in Lisu and Mandaic in Mandaic counted (their scripts by Unicode's own codes); Akan not")
-        self.assertEqual(len(fc.load_families(FAMILIES_FILE).unlisted), 5036,
+        self.assertEqual(len(fc.load_families(FAMILIES_FILE).unlisted), 5035,
                          "nor a language described through its dialects or members (Latvian, Serbian-Croatian-Bosnian)")
 
     def test_misfiled_and_reinforced(self):
@@ -1471,7 +1517,7 @@ class OrthographyTests(unittest.TestCase):
                          u"unconfirmed, status not given).")
         counted = fc.check_language(other_language(u"a b c", evidence=fc.INFERRED, validity=u"",
                                                    source=u"Unilex word frequencies"), f)
-        lines = fc.coverage_tip(counted).split(u"\n")
+        lines = fc.coverage_tip(counted).split(u"\n\n")
         self.assertEqual(lines[0], u"Other, Latin script: within reach (Unilex word frequencies: inferred from text, "
                                    u"status not given).")
         self.assertEqual(lines[1], fc.INFERRED_TIP)
@@ -1489,7 +1535,7 @@ class OrthographyTests(unittest.TestCase):
         # A keyboard layout's row says so, in its tooltip and in the list
         typed = fc.check_language(other_language(u"a b c", evidence=fc.KEYBOARD, validity=u"",
                                                  source=u"Language Tools (sven-oly/LanguageTools, commit a9386e00)"), f)
-        lines = fc.coverage_tip(typed).split(u"\n")
+        lines = fc.coverage_tip(typed).split(u"\n\n")
         self.assertEqual(lines[0], u"Other, Latin script: within reach (Language Tools (sven-oly/LanguageTools, commit "
                                    u"a9386e00): from a keyboard layout, status not given).")
         self.assertEqual(lines[1], fc.KEYBOARD_TIP)
@@ -1634,12 +1680,17 @@ class OrthographyTests(unittest.TestCase):
                 self.assertEqual(row[12][0][0], row[10], "%s: the source named is the first it rests on" % row[0])
                 self.assertTrue(all(index >= 4 for index, _ in row[12]), "%s: inferred sources only" % row[0])
         scripts = data["scripts"]
-        self.assertEqual((scripts["known"], len(scripts["not_covered"])), (172, 61))
+        self.assertEqual((scripts["known"], len(scripts["not_covered"])), (172, 60))
         for script in ("Javanese", "Balinese", "Sundanese", "Lisu", "Mandaic"):
             self.assertNotIn(script, scripts["not_covered"], "a declared second script, or a text Unicode's code finds")
         for script in ("Ahom", "Tai Yo", "Warang Citi", "Meetei Mayek", "Gurung Khema"):
             self.assertNotIn(script, scripts["not_covered"], "a layout's language is written in it")
-        self.assertIn("Mongolian", scripts["not_covered"])
+        self.assertNotIn("Mongolian", scripts["not_covered"], "SLDR's mn_Mong, filed under Peripheral Mongolian")
+        mongolian = [row for row in data["orthographies"] if row[3] == "Mongolian"]
+        self.assertEqual([(row[0], row[1], row[5], data["sources"][row[10]][0], row[11]) for row in mongolian],
+                         [("mvf", "Mongolian", "proposed", "sldr", "d")], "declared, at SLDR's default draft level")
+        self.assertNotIn("mvf", scripts["of_other_languages"]["Mongolian"].split())
+        self.assertIn("Glagolitic", scripts["not_covered"])
         self.assertNotIn("Latin", scripts["not_covered"])
         self.assertNotIn("Miao", scripts["not_covered"], "the Pollard script, which the data has")
         known = set(row[0] for row in data["orthographies"])
@@ -1991,6 +2042,36 @@ class TrainTests(unittest.TestCase):
         self.assertEqual(o.plain_name(u"Ho, Warang Citi", u"Varang Kshiti", u"Warang Citi"), u"Ho")
         self.assertEqual(o.plain_name(u"Bassa (Latin)", u"Latin"), u"Bassa")
 
+    def test_macrolanguage_members(self):
+        """Mongolian in the Mongolian script (SLDR's mn_Mong) was left out: its subtag is a
+        macrolanguage's, and Hyperglot describes one of its members (Halh Mongolian) in Cyrillic. In a
+        script Hyperglot gives none of the members in, it goes to the one member CLDR's likely subtags
+        write in that script and region; with none or several, it stays out."""
+        o = self.o
+        scripts = self.keyboard_scripts()
+        codes = o.Codes.__new__(o.Codes)
+        codes.overlong, codes.members = {}, {"zz": ["aaa"]}
+        codes.likely_places = {"zz_Deva": ("Deva", "IN"), "bbb": ("Deva", "IN"), "ccc": ("Deva", "NP"),
+                               "zz_Grek": ("Grek", "GR")}
+        deva = o.shaped("zz", "Deva", u"Zed", u"", [u(0x915), u(0x916)], [], [], "sldr", True)
+        latin = o.shaped("zz", "Latn", u"Zed", u"", [u"a", u"b"], [], [], "sldr", True)
+        greek = o.shaped("zz", "Grek", u"Zed", u"", [u(0x3B1), u(0x3B2)], [], [], "sldr", True)
+        declared = (("sldr", {"zz": [deva, latin, greek]}),)
+        members_of = lambda tag: ["aaa", "bbb", "ccc"] if tag == "zz" else []
+        hyperglot = {"aaa": [(u"Aaa", "Latn")]}
+        found, matched = o.macrolanguage_members(declared, codes, hyperglot, scripts, members_of, set())
+        self.assertEqual(found, {"bbb": [deva]},
+                         "Devanagari: the one member CLDR writes in it there; Latin: Hyperglot's member's; Greek: none")
+        self.assertEqual(matched, [("zz", "Deva", "bbb")])
+        self.assertEqual(codes.likely_place("zz_Deva"), ("Deva", "IN"))
+        found, _ = o.macrolanguage_members(declared, codes, hyperglot, scripts, members_of, set(["bbb"]))
+        self.assertEqual(found, {}, "a member a source gives rows of its own keeps them")
+        codes.likely_places["ddd"] = ("Deva", "IN")
+        found, _ = o.macrolanguage_members(declared, codes, hyperglot, scripts, lambda tag: ["aaa", "bbb", "ddd"], set())
+        self.assertEqual(found, {}, "two members fit: the subtag does not say whose it is")
+        found, _ = o.macrolanguage_members(declared, codes, {}, scripts, members_of, set())
+        self.assertEqual(found, {}, "no member is Hyperglot's: the subtag kept its own code")
+
     def test_described_through_members(self):
         """A review: An Crubadan's aka (Akan) file made a row though Hyperglot describes Akan's dialects
         Twi and Fante. Glottolog's classification says what is below a languoid: a dialect (by its
@@ -2259,12 +2340,13 @@ class TrainTests(unittest.TestCase):
         self.assertTrue(set([0x1C0, 0x2BC]) <= codes)
 
     def test_font_characters_bounded(self):
-        """The bundled font cannot hold all of Unicode (65,535 glyphs at most): a script's set is drawn
-        whole up to 300 characters of its own, a Unicode block's set up to 256, and the list says what
-        it leaves out."""
+        """The bundled font cannot hold all of Unicode (65,535 glyphs a file, five files): a script's set is
+        drawn whole up to 12,000 characters of its own (every script but Han), a Unicode block's set up to
+        1,100 (every block), a Han repertoire up to 25,000, and the list says what it leaves out."""
         o = self.o
-        self.assertEqual((o.SCRIPT_FONT_LIMIT, o.BLOCK_FONT_LIMIT), (300, 256))
-        self.assertEqual((fc.NAMED_SCRIPT_MOST, fc.NAMED_BLOCK_MOST), (o.SCRIPT_FONT_LIMIT, o.BLOCK_FONT_LIMIT),
+        self.assertEqual((o.SCRIPT_FONT_LIMIT, o.BLOCK_FONT_LIMIT, o.UNIHAN_FONT_LIMIT), (12000, 1100, 25000))
+        self.assertEqual((fc.NAMED_SCRIPT_MOST, fc.NAMED_BLOCK_MOST, fc.NAMED_UNIHAN_MOST),
+                         (o.SCRIPT_FONT_LIMIT, o.BLOCK_FONT_LIMIT, o.UNIHAN_FONT_LIMIT),
                          "a tooltip names the characters of the sets the font draws whole, and no others")
         # Every character a set's tooltip names is in the list (a font with nothing: each names its first missing)
         drawn = set()
@@ -2282,21 +2364,14 @@ class TrainTests(unittest.TestCase):
             low, _, high = part.partition("-")
             codes.update(range(int(low, 16), int(high or low, 16) + 1))
         self.assertEqual(len(codes), found["counts"]["sets"])
-        self.assertLess(found["counts"]["all"], 45000, "room left under 65,535 glyphs")
-        self.assertEqual(found["left_out"]["scripts"],
-                         ["Anatolian Hieroglyphs", "Arabic", "Bamum", "Canadian Aboriginal", "Cuneiform", "Cyrillic",
-                          "Egyptian Hieroglyphs", "Ethiopic", "Greek", "Han", "Hangul", "Hiragana", "Katakana",
-                          "Khitan Small Script", "Latin", "Linear A", "Nushu", "SignWriting", "Tangut", "Yi"])
-        self.assertEqual(found["left_out"]["blocks"],
-                         ["Mathematical Alphanumeric Symbols (Unicode block)",
-                          "Symbols for Legacy Computing Supplement (Unicode block)",
-                          "Sutton SignWriting (Unicode block)",
-                          "Miscellaneous Symbols and Pictographs (Unicode block)"])
+        self.assertLess(found["counts"]["all"], 100000, "room left under five fonts' glyphs")
+        self.assertEqual(found["left_out"]["scripts"], ["Han"], "Han's 103,351 ideographs alone: no file holds them")
+        self.assertEqual(found["left_out"]["blocks"], [], "every block a set holds is drawn")
         self.assertTrue(set(range(0x1E5D0, 0x1E5FB)) <= codes, "Ol Onal: a script no language here is written in, whole")
         self.assertTrue(set([0x10940, 0x10959]) <= codes, "Sidetic")
-        self.assertIn(0x1D400, codes, "a block left out whole keeps what another set brings (the Math property's)")
-        self.assertNotIn(0x2A700, codes, "not Han's 103,351 ideographs")
-        self.assertNotIn(0x1D800, codes, "nor SignWriting's 672 signs")
+        self.assertIn(0x1D400, codes, "Mathematical Alphanumeric Symbols, a block of 996")
+        self.assertIn(0x2A700, codes, "an ideograph of a Han repertoire (Extension C), though not all of Han")
+        self.assertIn(0x1D800, codes, "SignWriting's signs, read since 2026-11-14")
         self.assertIn(0x1D100, codes, "Musical Symbols: a block of 225")
 
 
@@ -2958,10 +3033,12 @@ class DialogTests(unittest.TestCase):
         cls.ak = ak
         # (the sets a user saved on this computer are not the tests': a file no one has)
         cls.sets_file, fc.CUSTOM_SETS_FILE = fc.CUSTOM_SETS_FILE, u"font_check_sets_of_the_tests.json"
+        cls.fallbacks_drawn = fc.LIST_FALLBACKS_DRAWN  # (the fakes' Qt registers no fallback file: put back)
 
     @classmethod
     def tearDownClass(cls):
         fc.CUSTOM_SETS_FILE = cls.sets_file
+        fc.LIST_FALLBACKS_DRAWN = cls.fallbacks_drawn
         cls.ak.layer_path = cls.ak_layer_path
         if cls.ak_stamp == "unset":
             del cls.ak._freelab_stamp
@@ -2975,7 +3052,9 @@ class DialogTests(unittest.TestCase):
 
     def dialog(self):
         self.workspace.currentPackage = FakePackage()  # (a font of its own: the fixes and writes change it)
+        drawn = fc.LIST_FALLBACKS_DRAWN
         dialog = fc.FontCheckDialog()
+        fc.LIST_FALLBACKS_DRAWN = drawn  # (the fakes' Qt registers no fallback file: the other tests assume them all)
         self.assertIsNone(dialog.failed, dialog.failed)
         dialog.log.add = lambda text, level="info": self.fail(text) if level == "error" else None
         return dialog
@@ -3226,7 +3305,8 @@ class DialogTests(unittest.TestCase):
         self.assertEqual((heading.expanded, dialog.closed["languages"]), (None, set([script])),
                          "a double-click's second press does nothing more: closed once")
         made = self.recorded_items(dialog)
-        for change in (lambda: dialog.fill_right(), lambda: setattr(dialog.sort_box, "currentIndex", 3),
+        for change in (lambda: setattr(dialog, "generation", dialog.generation + 1),  # (a new check)
+                       lambda: setattr(dialog.sort_box, "currentIndex", 3),
                        lambda: setattr(dialog.search, "text", name[:3])):
             change()
             del made[:]
@@ -3374,6 +3454,12 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(len(row.children), len(closed.children) + len(closed.results), "its rows made as it opens")
         self.assertGreater(len(rows), before)
         self.assertNotIn(closed.path, dialog.unfilled["families"])
+        self.assertEqual(dialog.views["families"]["full"].signature[-1], frozenset(dialog.opened),
+                         "the list shows it opened already: no need to fill it anew for it")
+        made_before = len(made)
+        dialog.fill_right()
+        self.assertEqual(len(made), made_before, "nothing changed: the list is kept as it is, scrolled where it was")
+        dialog.generation += 1  # (as a new check does: the list is filled anew)
         dialog.fill_right()
         rows = dialog.right_rows["families"]
         again = [one for one in rows if isinstance(one, fc.FamilyNode) and one.path == closed.path][0]
@@ -3537,10 +3623,13 @@ class DialogTests(unittest.TestCase):
             dialog = self.dialog()
         finally:
             fc.FontCheckDialog.size_columns = original
+        # (each tab's full list, then its search's: the same columns)
         self.assertEqual([modes for _, modes in calls],
-                         [("stretch", "contents"), ("stretch", "contents"), ("stretch", "fixed", "contents", "contents")])
+                         [("stretch", "contents")] * 4 + [("stretch", "fixed", "contents", "contents")] * 2)
         self.assertTrue(all(tree is wanted for (tree, _), wanted in
-                            zip(calls, (dialog.language_tree, dialog.set_tree, dialog.family_tree))))
+                            zip(calls, [dialog.views[key][mode].tree for key in ("languages", "sets", "families")
+                                        for mode in ("full", "search")])))
+        self.assertIs(dialog.views["families"]["full"].tree, dialog.family_tree)
 
         class Modes(object):
             Stretch, ResizeToContents, Fixed = "Stretch", "ResizeToContents", "Fixed"
@@ -3645,11 +3734,17 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(len(dialog.unfilled["families"]), len(rows))
         del made[:]
         dialog.right_tab_changed(0)
+        self.assertEqual(made, [], "the Languages tab, filled by the check and unchanged since: shown as it was")
+        dialog.generation += 1  # (as a new check does: filled anew)
+        dialog.fill_right()
         headings = [one for one in made if (u"%s" % one.value).startswith(u"#")]
         self.assertEqual(len(made), every + len(headings), "the scripts are open to start with: a row per language")
         latin = len([r for r in dialog.results if r.language.script == u"Latin"])
         click(u"#Latin")
         del made[:]
+        dialog.fill_right()
+        self.assertEqual(made, [], "closed by a click in the list shown: the list shows it so already")
+        dialog.generation += 1
         dialog.fill_right()
         self.assertEqual(len(made), every - latin + len(headings), "a closed script's rows are not made")
         click(u"#Latin")
@@ -3683,18 +3778,20 @@ class DialogTests(unittest.TestCase):
         a second check does not start inside the first, and no count shows as a zero meanwhile."""
         dialog = self.dialog()
         dialog.busy_label, dialog.coverage_stack, dialog.coverage.status = Recorded(), Recorded(), Recorded()
-        dialog.coverage_button, dialog.tabs = Recorded(), Recorded()
+        dialog.coverage_button, dialog.tabs, dialog.busy_step = Recorded(), Recorded(), Recorded()
         dots = u(0x2026)
         dialog.show()
         self.assertTrue(dialog.stepwise, "a window shown: step by step from now on")
-        self.assertEqual((dialog.busy, dialog.busy_label.text, dialog.coverage_stack.currentIndex),
+        self.assertEqual((dialog.busy, dialog.busy_step.text, dialog.coverage_stack.currentIndex),
                          (False, u"Reading the language data" + dots, 0), "it opens on that line, not on empty lists")
         waiting = []
         dialog.defer = waiting.append
         dialog.nearly.value, dialog.inferred_box.checked = 30, True
         dialog.check_coverage()
-        self.assertEqual((dialog.busy, dialog.busy_label.text, dialog.coverage.status.text),
-                         (True, u"Reading the language data" + dots, u"Reading the language data" + dots))
+        # The owner: "'Listing...' appears twice": the step is said once, beside the bar, never also in the
+        # top line or in the middle of the lists' area
+        self.assertEqual((dialog.busy, dialog.busy_step.text, dialog.busy_label.text, dialog.coverage.status.text),
+                         (True, u"Reading the language data" + dots, u"", u""))
         self.assertEqual((dialog.coverage_stack.currentIndex, dialog.coverage_button.enabled, dialog.tabs.enabled),
                          (0, False, False), "the line in the lists' place, the controls grayed")
         self.assertEqual((len(waiting), dialog.scripts), (1, []), "nothing is done before the window is painted")
@@ -3705,8 +3802,10 @@ class DialogTests(unittest.TestCase):
         while waiting:
             self.assertEqual(len(waiting), 1, "one step at a time")
             waiting.pop(0)()
-            said.append(dialog.busy_label.text)
-        self.assertEqual(said, [u"Reading the font" + dots, u"Checking 2,511 languages" + dots, u"Listing" + dots, u""])
+            said.append(dialog.busy_step.text)
+            if dialog.busy:
+                self.assertEqual((dialog.busy_label.text, dialog.coverage.status.text), (u"", u""), "said once")
+        self.assertEqual(said, [u"Reading the font" + dots, u"Checking 2,512 languages" + dots, u"Listing" + dots, u""])
         self.assertEqual((dialog.busy, dialog.coverage_stack.currentIndex, dialog.coverage_button.enabled,
                           dialog.tabs.enabled), (False, 1, True, True))
         self.assertTrue(dialog.scripts and dialog.rows)
@@ -3774,7 +3873,7 @@ class DialogTests(unittest.TestCase):
         han = [one for one in scripts if one.name == u"Han"][0]
         r = second["check_entry"](han, second["FontCharacters"](list(range(0x20, 0x7F)), None))
         self.assertIsInstance(r.missing, second["CodeItems"], "Han checked by its ranges, not as a list")
-        self.assertTrue(second["language_note"](r).endswith(u"missing"))
+        self.assertIn(u" missing", second["language_note"](r))
         selection = second["selection_of"](r)
         self.assertEqual((selection.kind, selection.results), ("set", [r]))
         uncovered = second["load_families"]().uncovered()
@@ -3799,9 +3898,13 @@ class DialogTests(unittest.TestCase):
         self.assertIn(u"880 more languages of it are known and cannot be checked yet", family.tip)
         self.assertGreater(len(rows), 230, "the families that have nothing but languages not yet covered are listed too")
         note = dialog.languages_note.text
-        self.assertIn(u"Font Check can check 2,511 of the 7,861 languages Glottolog lists with an ISO 639-3 code, written "
-                      u"in 111 of Unicode's 172 scripts.", note)
-        self.assertIn(u"of the 5,036 languages not covered, 4,501 have a script on record", note)
+        known = dialog.known_scripts
+        listed = len(fc.languages_not_covered(known.not_covered))  # (Braille and SignWriting: character sets)
+        self.assertEqual(len(known.not_covered) - listed, 2)
+        self.assertIn(u"Font Check can check 2,512 of the 7,861 languages Glottolog lists with an ISO 639-3 code, written "
+                      u"in %d of Unicode's 172 scripts (%d not yet covered, and 2 notations checked as character sets)."
+                      % (known.known - len(known.not_covered), listed), note)
+        self.assertIn(u"of the 5,035 languages not covered, 4,500 have a script on record", note)
         self.assertIn(u'<a href="%s">%s</a>' % (fc.ISSUES_ADDRESS, fc.ISSUES_ADDRESS), note, "a link, and the address as text")
         node = rows[family.value]
         dialog.toggle_family(node, Row(family.value))
@@ -3823,47 +3926,57 @@ class DialogTests(unittest.TestCase):
         self.assertIn(u"Glottolog also lists Amkoe (huc)", dialog.languages_note.text)
         self.assertIn(u"<a href=", dialog.languages_note.text)
         dialog.search.text = u""
-        del made[:]
         dialog.right_tab_changed(0)
+        del made[:]
+        dialog.generation += 1  # (filled by the check before the items were recorded: filled anew)
+        dialog.fill_right()
         heading = made[-1]
-        self.assertEqual((heading.value, heading.texts[0]), (u"#Scripts not yet covered", u"Scripts not yet covered (61)"))
+        # Braille and SignWriting are character sets, not scripts not yet covered (the data's less those two)
+        self.assertEqual((heading.value, heading.texts[0]),
+                         (u"#Scripts not yet covered", u"Scripts not yet covered (%d)" % listed))
         self.assertIn(u"each is checked as a script", heading.tip)
         self.assertIn(u"As of November 2026, a script Unicode has not encoded", heading.tip)
+        self.assertIn(u"Not yet covered means that none of Font Check's sources describes a language written in the "
+                      u"script, not that the script is unknown or cannot be drawn", heading.tip)
+        self.assertIn(u"<br><br>", heading.tip, "a blank line between two paragraphs")
         rows = dialog.right_rows["languages"]
         self.assertFalse([r for r in rows if isinstance(r.language, fc.ScriptSet)], "closed to start with")
         before = len(made)
         row = click(u"#Scripts not yet covered")
         # The owner: "see how these can be supported going forward": each is a live row, checked as a script
         scripts = [r for r in rows if isinstance(r.language, fc.ScriptSet)]
-        self.assertEqual((len(scripts), len(made) - before), (61, 61))
+        self.assertEqual((len(scripts), len(made) - before), (listed, listed))
         names = [r.language.name for r in scripts]
-        for name in (u"Mongolian", u"Ol Onal", u"Sidetic", u"Tolong Siki", u"Tulu Tigalari", u"Garay", u"Beria Erfe"):
+        for name in (u"Braille", u"SignWriting"):
+            self.assertNotIn(name, names, "a notation is a character set, not a script not yet covered")
+        self.assertIn(u"Duployan", names, "a shorthand that also wrote Chinook Wawa: a source could describe it")
+        for name in (u"Glagolitic", u"Ol Onal", u"Sidetic", u"Tolong Siki", u"Tulu Tigalari", u"Garay", u"Beria Erfe"):
             self.assertIn(name, names)
-        for name in (u"Kirat Rai", u"Tai Yo", u"Gurung Khema", u"Warang Citi"):
+        for name in (u"Kirat Rai", u"Tai Yo", u"Gurung Khema", u"Warang Citi", u"Mongolian"):
             self.assertNotIn(name, names, "a script a language here is written in is listed under its languages")
-        mongolian = made[before + sorted(names).index(u"Mongolian")] if names == sorted(names) else \
-            [one for one in made[before:] if one.texts[0] == u"Mongolian"][0]
-        self.assertEqual(mongolian.texts, [u"Mongolian", u"167 of 167 missing"], "its coverage, as any set's")
-        self.assertTrue(mongolian.lazy, "its tooltip is made when asked for")
-        self.assertIn(u"Mongolian: missed (the font has 0 of its 167 characters", mongolian.tip)
-        self.assertIn(u"No language data exists for it yet", mongolian.tip)
-        self.assertIn(u"the script's whole repertoire is the measure", mongolian.tip)
-        entry = dialog.right_entry("languages", Row(mongolian.value))
+        glagolitic = made[before + sorted(names).index(u"Glagolitic")] if names == sorted(names) else \
+            [one for one in made[before:] if one.texts[0] == u"Glagolitic"][0]
+        self.assertEqual(glagolitic.texts, [u"Glagolitic", u"134 of 134 missing"], "its coverage, as any set's")
+        self.assertTrue(glagolitic.lazy, "its tooltip is made when asked for")
+        self.assertIn(u"Glagolitic: missed (the font has 0 of its 134 characters", glagolitic.tip)
+        self.assertIn(u"No language data exists for it yet", glagolitic.tip)
+        self.assertIn(u"the script's whole repertoire is the measure", glagolitic.tip)
+        entry = dialog.right_entry("languages", Row(glagolitic.value))
         self.assertEqual(entry[0], "row", "a row that selects like any other")
         dialog.select(dialog.entry_selection(entry))
-        self.assertEqual((dialog.selection.kind, dialog.selection.name, dialog.left_tab), ("set", u"Mongolian", "own"))
-        self.assertEqual(sum(len(one.items) for one in dialog.own_rows), 167, "its missing glyphs, handed to the left")
+        self.assertEqual((dialog.selection.kind, dialog.selection.name, dialog.left_tab), ("set", u"Glagolitic", "own"))
+        self.assertEqual(sum(len(one.items) for one in dialog.own_rows), 134, "its missing glyphs, handed to the left")
         dialog.right_tab_changed(1)  # (the same script under Scripts (Unicode), in the Character sets tab)
-        self.assertEqual(dialog.selection.name, u"Mongolian", "the selection goes with the tab that lists it too")
+        self.assertEqual(dialog.selection.name, u"Glagolitic", "the selection goes with the tab that lists it too")
         dialog.select(None)
         dialog.right_tab_changed(0)
-        dialog.search.text = u"mongol"
+        dialog.search.text = u"glagol"
         del made[:]
         dialog.fill_right()
-        self.assertEqual([one.texts[0] for one in made if one.texts[0] == u"Mongolian"], [u"Mongolian"],
+        self.assertEqual([one.texts[0] for one in made if one.texts[0] == u"Glagolitic"], [u"Glagolitic"],
                          "a search finds a script not yet covered, and opens its section")
         self.assertEqual([r.language.name for r in dialog.right_rows["languages"] if isinstance(r.language, fc.ScriptSet)],
-                         [u"Mongolian"])
+                         [u"Glagolitic"])
         dialog.search.text = u""
         dialog.level_filter.currentIndex = [key for key, _ in fc.LANGUAGE_FILTERS].index("covered")
         dialog.fill_right()
@@ -3876,8 +3989,8 @@ class DialogTests(unittest.TestCase):
         del made[:]
         dialog.fill_right()
         plain = [one for one in made if (u"%s" % one.value).startswith(u"script:")]
-        self.assertEqual(len(plain), 61)
-        self.assertIsNone(dialog.right_entry("languages", Row(u"script:Mongolian")))
+        self.assertEqual(len(plain), listed)
+        self.assertIsNone(dialog.right_entry("languages", Row(u"script:Glagolitic")))
 
     def test_a_set_of_your_own(self):
         """Characters pasted in the Character sets tab are checked as a set, selected (its missing
@@ -4042,12 +4155,16 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(row.expanded, False, "a first click closes it")
         del made[:]
         dialog.languages_changed()
+        self.assertEqual(made, [], "the search's list shows it closed already: kept as it is")
+        dialog.generation += 1  # (a new check: the search's list filled anew)
+        dialog.languages_changed()
         self.assertEqual(heading().last("setExpanded"), (False,), "closed by hand: kept while the search runs")
         row = click(title)
         self.assertEqual(row.expanded, True)
         click(title)
         dialog.search.text = u""
         del made[:]
+        dialog.generation += 1
         dialog.languages_changed()
         self.assertEqual(heading().last("setExpanded"), (False,), "no search: closed until asked for")
         row = click(title)
@@ -4283,8 +4400,8 @@ class ScriptTests(unittest.TestCase):
         self.assertIsInstance(fc.check_entry(language(u"a b"), font([0x61])).missing, list)
         tip = fc.coverage_tip(r)
         self.assertTrue(tip.startswith(u"Test: missed (the font has 0 of its 6 characters, and 0 of the 2 it shares "
-                                       u"with other scripts).\nA script of Unicode 17.0.0: its own characters"), tip)
-        self.assertIn(u"\nMissing: A B C a b c\nShared characters missing: ", tip)
+                                       u"with other scripts).\n\nA script of Unicode 17.0.0: its own characters"), tip)
+        self.assertIn(u"\n\nMissing: A B C a b c\n\nShared characters missing: ", tip)
         self.assertNotIn(u"No language data", tip)
         self.assertIn(u"\n%s\n" % fc.NO_LANGUAGE_DATA, fc.coverage_tip(r, (), True))
         one = fc.ScriptSet(u"One", u"41", u"")
@@ -4300,37 +4417,51 @@ class ScriptTests(unittest.TestCase):
         han = self.scripts()[u"Han"]
         han.lists.clear()
         r = fc.check_entry(han, font([0x4E00, 0x61]))
-        self.assertEqual((r.level, len(r.missing), fc.language_note(r)), ("started", 103350, u"103,350 of 103,351 missing"))
+        needed = han.own_count - han.optional_own  # (its compatibility ideographs are optional)
+        self.assertEqual((han.own_count, han.optional_own), (103351, 1002))
+        self.assertEqual((r.level, len(r.missing), len(r.optional_missing), fc.language_note(r)),
+                         ("started", needed - 1, 1002,
+                          u"%s of %s missing (and 1,002 optional glyphs)" % (fc.grouped(needed - 1), fc.grouped(needed))))
         self.assertIsInstance(r.missing, fc.CodeItems)
         self.assertEqual(fc.check_entry(han, font(list(range(0x20, 0x7F)) + [0xB7])).level, "missed",
                          "a Latin font with U+00B7 (Han's by Script_Extensions) has none of Han")
         tip = fc.coverage_tip(r, (), False)
-        self.assertIn(u"Han: started (the font has 1 of its 103,351 characters, and 0 of the 308 it shares", tip)
+        self.assertIn(u"Han: started (the font has 1 of its %s characters, 0 of the 308 it shares with other scripts, and "
+                      u"0 of the 1,002 optional ones)." % fc.grouped(needed), tip)
         # The list's font, which tooltips are set in, does not draw a script this large: code points, not boxes
         self.assertIn(u"\nMissing, by code point (a set this large is not drawn by the list's font): U+2E80 to U+2E99, "
-                      u"U+2E9B to U+2EF3, U+2F00 to U+2FD5, U+3005, U+3007, U+3021 to U+3029, and 103,010 more\n", tip)
+                      u"U+2E9B to U+2EF3, U+2F00 to U+2FD5, U+3005, U+3007, U+3021 to U+3029, and %s more\n"
+                      % fc.grouped(needed - 1 - 340), tip)  # (340 named in the six runs)
         self.assertTrue(all(code < 128 for code in fc.code_points(tip)), "no character of the script in it")
         self.assertFalse(fc.names_characters(han))
         self.assertTrue(fc.names_characters(self.scripts()[u"Braille"]))
         self.assertTrue(fc.names_characters(language(u"a b")))
         big = fc.Language(u"block-1f300", u"Big (Unicode block)", u"", u"Games and pictographs", u"set", u"", 0,
-                          [u(code) for code in range(0x1F300, 0x1F600)], [], u"", kind="set", definition=u"A block.")
-        self.assertFalse(fc.names_characters(big))
-        self.assertIn(u"\nMissing, by code point (a set this large is not drawn by the list's font): U+1F300 to U+1F5FF",
+                          [u(code) for code in range(0x1F300, 0x1F7B0)], [], u"", kind="set", definition=u"A block.")
+        self.assertFalse(fc.names_characters(big), "a block past NAMED_BLOCK_MOST (1,100)")
+        self.assertIn(u"\nMissing, by code point (a set this large is not drawn by the list's font): U+1F300 to U+1F7AF",
                       fc.coverage_tip(fc.check_language(big, font([]))))
         self.assertEqual(fc.few_codes([u"a", u"b", u"d"]), u"U+0061 to U+0062, U+0064")
         self.assertEqual(fc.few_codes([u"a", u"c", u"e"], 2), u"U+0061, U+0063, and 1 more")
         self.assertEqual(fc.few_codes([]), u"")
+        # Duployan's font took 5.9 s to lay out a tooltip of 60 of its characters: named by code point
+        duployan = fc.script_tip(fc.check_language(self.scripts()[u"Duployan"], font([])))
+        self.assertIn(u"Missing: U+1BC00 to U+1BC6A", duployan)
+        self.assertIn(fc.SLOW_BY_CODE, duployan)
+        self.assertFalse(any(0x1BC00 <= code <= 0x1BCAF for code in fc.code_points(duployan)))
+        self.assertEqual(fc.few([u"a", u"b"]), u"a b", "others as characters still")
         selection = fc.selection_of(r)
-        self.assertEqual((selection.count(), len(selection.wanted())), (103350, fc.WANTED_MOST))
-        self.assertEqual(fc.selection_title(selection), u"Han (103350)")
+        self.assertEqual((selection.count(), len(selection.wanted())), (needed - 1, fc.WANTED_MOST))
+        self.assertEqual(selection.optional_count(), 1002)
+        self.assertEqual(fc.selection_title(selection), u"Han (103350)", "what its tab lists, the optional ones too")
         rows, left = fc.selection_rows([], selection)
         listed = sum(len(row.items) for row in rows)
         self.assertEqual((listed, left), (fc.FLOAT_MOST, 103350 - fc.FLOAT_MOST), "the first 200, the rest counted")
+        self.assertFalse([row for row in rows if row.optional], "the required ones fill the 200: no optional one listed")
         self.assertEqual(rows[0].items, [u(0x2E80)], "by code point")
         self.assertEqual([len(row.completing) for row in rows[:3]], [0, 0, 0])
-        self.assertIn(u"Han misses 103350 glyphs. 103150 more are not listed (the first 200 are).",
-                      fc.selection_text(selection, left))
+        self.assertIn(u"Han misses %s glyphs, and 1,002 optional glyphs, listed after them. 103,150 more are not listed "
+                      u"(the first 200 are)." % fc.grouped(needed - 1), fc.selection_text(selection, left))
         self.assertEqual(fc.languages_gained([r], [u(0x2E80)]), [])
         self.assertEqual(fc.buildable_candidates([r], [(0xC0, 0x250)]), [])
         self.assertEqual(han.lists, {}, "and still no list of its 103,351 characters")
@@ -4371,7 +4502,7 @@ class ScriptTests(unittest.TestCase):
         self.assertIn(u"1 language is not covered: no script is on record for it", fc.limits_text(1, 0))
         families, known = fc.load_families(FAMILIES_FILE), fc.load_known_scripts(ORTHOGRAPHIES_FILE)
         self.assertEqual((len(families.unlisted), sum(1 for row in families.unlisted if row[0] in known.of_languages)),
-                         (5036, 4501), "the counts the docs state")
+                         (5035, 4500), "the counts the docs state")
 
     def test_progress_and_log_texts(self):
         self.assertEqual(len(fc.BUSY_SHARES), len(fc.BUSY_STEPS))
@@ -4443,9 +4574,9 @@ class SurveyTests(unittest.TestCase):
             sys.path.remove(TRAIN)
         self.assertEqual(c.SOURCES["unicode-17.0.0-Scripts.txt"], orthographies.SOURCES["unicode-17.0.0-Scripts.txt"],
                          "one pin for the file the two scripts read")
-        self.assertEqual(len(c.GROUPS), 6)
+        self.assertEqual(len(c.GROUPS), 9)
         names = [name for _, name in c.BLOCKS]
-        self.assertEqual((len(names), len(set(names))), (62, 62))
+        self.assertEqual((len(names), len(set(names))), (83, 83))
         for name in names:  # (no private-use, surrogate, or control range is a set)
             self.assertFalse("Private Use" in name or "Surrogate" in name or "Control" == name or "Tags" == name, name)
 
@@ -4545,10 +4676,10 @@ class LoadingTests(unittest.TestCase):
         self.assertEqual((dialog.busy, dialog.busy_row.visible, pages[-1]), (False, False, 1), "gone with the lists shown")
         done = [text for text, level in logged if level == "done"]
         self.assertEqual(len(done), 1, "one line when done, not one per step")
-        self.assertTrue(re.match(u"^Checked 2,511 languages, 99 character sets, and 172 scripts in [0-9]+\\.[0-9] s\\.$",
+        self.assertTrue(re.match(u"^Checked 2,512 languages, 140 character sets, and 172 scripts in [0-9]+\\.[0-9] s\\.$",
                                  done[0]), done[0])
         self.assertIn(u"of Unicode's 172 are covered whole.", dialog.coverage.status.text)
-        self.assertIn(u"character sets</b> of 99 are covered.", dialog.coverage.status.text)
+        self.assertIn(u"character sets</b> of 140 are covered.", dialog.coverage.status.text, "the 5 Legacy sets not counted")
 
     def test_tooltips_made_when_asked_for(self):
         """Some 2,600 rows each had a rich tooltip made, measured, and set as the list was filled: a
@@ -4570,6 +4701,7 @@ class LoadingTests(unittest.TestCase):
         measured = []
         tip = dialog.tip
         dialog.tip = lambda text, names=False, rich=False: measured.append(text) or tip(text, names, rich)
+        dialog.generation += 1  # (as a new check: the list filled anew)
         dialog.fill_right()
         rows = dialog.right_rows["languages"]
         lazy = [one for one in told if one[1]]
@@ -4685,6 +4817,680 @@ class LoadingTests(unittest.TestCase):
             box.setValue(value)
             self.ak.counted_suffix(box, u"glyph")
             self.assertEqual(box.told("setSuffix"), [(suffix,)])
+
+
+class OptionalTests(unittest.TestCase):
+    """Optional characters (the owner's design): characters a set or a script holds but is complete
+    without, since text does not store them (presentation forms, compatibility characters). They are
+    counted and listed, never in the level, the languages gained, or the high-value glyphs; a set
+    wholly optional is the Legacy group's."""
+
+    def optional_set(self, base, optional, name=u"Test set"):
+        one = fc.Language(u"set-test", name, u"", u"Symbols", u"set", u"", 0, base.split(), [], u"", kind="set",
+                          definition=u"A test.")
+        one.optional = frozenset(fc.code_points(u"".join(optional.split())))
+        one.optional_count = len(optional.split())
+        return one
+
+    def test_loaded_from_the_data(self):
+        """Point 1: the sets' optional characters by set id, the scripts' in their rows' fifth column."""
+        import json
+        with open(os.path.join(HERE, os.pardir, "checks", "character_sets.json"), "rb") as handle:
+            data = json.loads(handle.read().decode("utf-8"))
+        sets = dict((one.iso, one) for one in fc.load_character_sets())
+        for key, ranges in data["optional"].items():
+            self.assertEqual(sets[key].optional, fc.optional_codes(ranges), key)
+            self.assertTrue(0 < sets[key].optional_count <= len(sets[key].base), key)
+        legacy = [one for one in sets.values() if one.script == u"Legacy"]
+        self.assertEqual(sorted(one.name for one in legacy),
+                         [u"Alphabetic Presentation Forms (Unicode block)", u"Arabic Presentation Forms-A (Unicode block)",
+                          u"Arabic Presentation Forms-B (Unicode block)", u"CJK Compatibility Ideographs (Unicode block)",
+                          u"CJK Compatibility Ideographs Supplement (Unicode block)"])
+        self.assertTrue(all(one.required_size() == 0 for one in legacy), "wholly optional")
+        self.assertTrue(all(not one.optional for one in sets.values() if one.iso.startswith((u"gf-", u"adobe-"))),
+                        "Google's and Adobe's sets have none")
+        scripts = dict((one.name, one) for one in sets.values() if isinstance(one, fc.ScriptSet))
+        self.assertEqual(data["scripts"]["columns"][-1], u"optional")
+        self.assertEqual(dict((name, (scripts[name].optional_own, scripts[name].optional_shared)) for name in
+                              (u"Arabic", u"Hebrew", u"Latin", u"Armenian", u"Han", u"Coptic")),
+                         {u"Arabic": (728, 0), u"Hebrew": (45, 0), u"Latin": (9, 0), u"Armenian": (5, 0),
+                          u"Han": (1002, 0), u"Coptic": (0, 0)})
+        self.assertEqual((scripts[u"Greek"].optional_own, scripts[u"Greek"].optional_shared), (1, 0),
+                         "the Ohm sign alone: the letters with oxia are required again")
+        self.assertIn(u"listed as optional: it is complete without them", scripts[u"Arabic"].definition)
+        self.assertNotIn(u"optional", scripts[u"Thai"].definition)
+        old = fc.ScriptSet(u"Old", u"41-43", u"")  # (a file made before: four columns)
+        self.assertEqual((old.optional, old.optional_count), (frozenset(), 0))
+
+    def test_never_in_the_level(self):
+        """Point 2: a set is covered without its optional characters; within reach counts the others only;
+        a wholly optional set is covered whatever the font has of it (its row says how many it lacks:
+        text set in the font needs none of them), and having only optional characters starts nothing."""
+        fi = u(0xFB01)
+        one = self.optional_set(u"a b c " + fi, fi)
+        r = fc.check_language(one, font([0x61, 0x62, 0x63]))
+        self.assertEqual((r.level, r.missing, r.optional_missing, r.have), ("covered", [], [fi], 3))
+        r = fc.check_language(one, font([0x61, 0x62]))
+        self.assertEqual((r.level, r.missing, r.optional_missing), ("nearly", [u"c"], [fi]))
+        r = fc.check_language(one, font([0xFB01]), nearly=1)
+        self.assertEqual((r.level, r.have, r.optional_missing), ("missed", 0, []), "an optional glyph starts nothing")
+        legacy = self.optional_set(fi + u" " + u(0xFB02), fi + u" " + u(0xFB02), u"Ligatures")
+        r = fc.check_language(legacy, font([]))
+        self.assertEqual((r.level, r.missing, len(r.optional_missing)), ("covered", [], 2))
+        self.assertEqual(fc.needs(r), [], "nothing to add for it, nor any language gained")
+        self.assertEqual(fc.languages_gained([r], set([fi])), [])
+        # A script: its optional own and shared characters set apart
+        script = fc.ScriptSet(u"Test", u"41-43 FB00", u"B7 374", optional=u"FB00 374")
+        self.assertEqual((script.optional_own, script.optional_shared, script.required_size()), (1, 1, 3))
+        r = fc.check_entry(script, font([0x41, 0x42, 0x43, 0xB7]))
+        self.assertEqual((r.level, list(r.missing), list(r.auxiliary_missing), r.optional_missing.codes),
+                         ("covered", [], [], [0xFB00, 0x374]))
+        r = fc.check_entry(script, font([0x41]))
+        self.assertEqual((r.level, len(r.missing), r.have), ("nearly", 2, 1))
+        r = fc.check_entry(script, font([0xFB00]), nearly=1)
+        self.assertEqual(r.level, "missed", "its optional character alone: none of what it needs")
+
+    def test_legacy_sets_not_counted(self):
+        """The owner: the Legacy sets "do not count towards the stats". A Latin-only font covered CJK
+        Compatibility Ideographs in the top line's count; the sets are still checked and listed, each
+        row saying what the font lacks of them."""
+        sets = fc.load_character_sets()
+        results = [fc.check_entry(one, font(LATIN_1)) for one in sets]
+        legacy = [r for r in results if r.language.script == fc.LEGACY_GROUP]
+        self.assertEqual(len(legacy), 5)
+        self.assertTrue(all(r.level == "covered" and r.optional_missing for r in legacy), "covered, their rows noted")
+        counted = fc.counted_sets(results)
+        self.assertFalse([r for r in counted if r.language.script == fc.LEGACY_GROUP or isinstance(r.language, fc.ScriptSet)])
+        self.assertEqual(len(counted), len([one for one in sets if not isinstance(one, fc.ScriptSet)]) - 5)
+        own = fc.check_language(fc.custom_set(u"own-x", u"Mine", u"abc"), font(LATIN_1))
+        self.assertEqual(fc.counted_sets([own]), [], "nor the user's own")
+
+    def test_row_notes(self):
+        """Point 3: worded as "3 shared missing" is, the number deciding the noun."""
+        self.assertEqual(fc.with_optional(u"", 1), u"1 optional glyph missing")
+        self.assertEqual(fc.with_optional(u"", 1002), u"1,002 optional glyphs missing")
+        self.assertEqual(fc.with_optional(u"3 of 10 missing", 4), u"3 of 10 missing (and 4 optional glyphs)")
+        self.assertEqual(fc.with_optional(u"3 shared missing", 1), u"3 shared missing (and 1 optional glyph)")
+        self.assertEqual(fc.with_optional(u"", 0), u"")
+        fi = u(0xFB01)
+        one = self.optional_set(u"a b c " + fi, fi)
+        self.assertEqual(fc.language_note(fc.check_language(one, font([0x61, 0x62, 0x63]))), u"1 optional glyph missing")
+        self.assertEqual(fc.language_note(fc.check_language(one, font([0x61, 0x62, 0x63, 0xFB01]))), u"")
+        self.assertEqual(fc.language_note(fc.check_language(one, font([0x61]))), u"2 of 3 missing (and 1 optional glyph)")
+
+    def test_tooltips(self):
+        """Point 4 and 7: the count line, a paragraph of the optional characters missing (cut as the
+        others), the word optional, never auxiliary."""
+        fi = u(0xFB01)
+        one = self.optional_set(u"a b c " + fi, fi)
+        tip = fc.coverage_tip(fc.check_language(one, font([0x61, 0x62, 0x63])))
+        self.assertTrue(tip.startswith(u"Test set: covered (the font has 3 of its 3 characters, and 0 of the 1 optional "
+                                       u"one)."), tip)
+        self.assertIn(u"\n\nOptional characters missing (presentation forms and compatibility characters, which text "
+                      u"does not store): " + fi, tip)
+        self.assertNotIn(u"uxiliary", tip)
+        many = u" ".join(u(0xFB50 + k) for k in range(100))
+        legacy = self.optional_set(many, many, u"Forms")
+        tip = fc.coverage_tip(fc.check_language(legacy, font([])))
+        self.assertIn(u"Forms: covered (the font has 0 of its 100 characters, all optional: it is complete without them).",
+                      tip)
+        self.assertIn(u" and 40 more", tip)
+        self.assertTrue(tip.endswith(fc.CUT_TIP))
+        arabic = dict((one.name, one) for one in fc.load_character_sets())[u"Arabic"]
+        tip = fc.coverage_tip(fc.check_entry(arabic, font(LATIN_1)))
+        self.assertIn(u", and 0 of the 728 optional ones).", tip)
+        self.assertIn(u"Optional characters missing (presentation forms and compatibility characters, which text does "
+                      u"not store): " + u(0xFB50), tip, "a script the list's font draws: by character")
+        han = dict((one.name, one) for one in fc.load_character_sets())[u"Han"]
+        self.assertIn(u"Optional characters missing (presentation forms and compatibility characters, which text does "
+                      u"not store): U+F900 to U+FA0D", fc.coverage_tip(fc.check_entry(han, font(LATIN_1))),
+                      "a script the list's font does not draw: by code point")
+
+    def test_order_selection_and_high_value(self):
+        """Points 5 and 6: optional characters only break a tie in the order; they never enter the
+        high-value glyphs; the selection's own tab lists them after the required ones, marked optional."""
+        fi, fl = u(0xFB01), u(0xFB02)
+        one = self.optional_set(u"a b c " + fi + u" " + fl, fi + u" " + fl)
+        fewer = fc.check_language(one, font([0x61, 0x62, 0x63, 0xFB01]))
+        more = fc.check_language(one, font([0x61, 0x62, 0x63]))
+        self.assertEqual(fc.sort_languages([more, fewer], "most"), [fewer, more])
+        self.assertLess(fc.covered_key(fewer)[:3], fc.covered_key(fc.check_language(one, font([0x61])))[:3])
+        started = fc.check_language(one, font([0x61]))
+        self.assertEqual(started.level, "nearly")
+        self.assertEqual([row.items for row in fc.add_rows([started])], [[u"b"], [u"c"]],
+                         "what it needs, never its optional glyphs")
+        rows, left = fc.selection_rows([], fc.selection_of(started))
+        self.assertEqual([(row.items, row.optional) for row in rows], [([u"b"], False), ([u"c"], False),
+                                                                        ([fi], True), ([fl], True)])
+        self.assertEqual(left, 0)
+        self.assertEqual(fc.row_languages_text(rows[-1]), u"optional")
+        self.assertIn(u"Optional: the set selected holds it and is complete without it", fc.row_tip(rows[-1]))
+        selection = fc.selection_of(started)
+        self.assertEqual(fc.selection_title(selection), u"Test set (4)")
+        self.assertTrue(fc.selection_text(selection, 0).startswith(
+            u"Test set misses 2 glyphs, and 2 optional glyphs, listed after them."))
+        covered = fc.selection_of(more)
+        self.assertTrue(fc.selection_text(covered, 0).startswith(
+            u"Test set misses no glyph it needs, but 2 optional glyphs (presentation forms"))
+        rows, left = fc.selection_rows([], fc.selection_of(started), most=3)
+        self.assertEqual(([row.items for row in rows], left), ([[u"b"], [u"c"], [fi]], 1), "the required ones first")
+        self.assertEqual(started.all_missing()[-2:], [fi, fl], "a Glyph window gets them last")
+
+    def test_in_the_dialog(self):
+        """The Legacy group listed, its sets covered with their optional glyphs counted; the top line
+        counts a set covered by its required characters alone."""
+        dialog = DialogTests.__dict__["dialog"](self)
+        dialog.check_coverage()
+        legacy = [r for r in dialog.set_results if r.language.script == u"Legacy"]
+        self.assertEqual(len(legacy), 5)
+        self.assertTrue(all(r.level == "covered" and fc.language_note(r).endswith(u"optional glyphs missing")
+                            for r in legacy))
+        dialog.right_tab_changed(1)
+        self.assertIn(u"Legacy", [r.language.script for r in dialog.right_rows["sets"]])
+        arabic = [r for r in dialog.set_results if r.language.name == u"Arabic"][0]
+        self.assertTrue(fc.language_note(arabic).endswith(u"(and 728 optional glyphs)"), fc.language_note(arabic))
+        self.assertFalse([row for row in dialog.rows if any(code_point in (0xFB01, 0xFB50)
+                                                            for item in row.items for code_point in fc.code_points(item))])
+
+    setUpClass = classmethod(DialogTests.__dict__["setUpClass"].__func__)
+    tearDownClass = classmethod(DialogTests.__dict__["tearDownClass"].__func__)
+
+
+class CoverageGapsTests(unittest.TestCase):
+    """checks/coverage_gaps.json: what Font Check knows of and does not check (named by a search, as
+    the languages Glottolog lists and no source describes are), and fonts to consider for what FreeLang
+    does not draw (named in a set's or a script's tooltip, never shipped). And the Han repertoires,
+    kept as ranges: opening and selecting them stay quick."""
+
+    setUpClass = classmethod(DialogTests.__dict__["setUpClass"].__func__)
+    tearDownClass = classmethod(DialogTests.__dict__["tearDownClass"].__func__)
+    dialog = DialogTests.__dict__["dialog"]
+
+    def test_known_gaps(self):
+        gaps = fc.load_coverage_gaps()
+        self.assertIs(fc.load_coverage_gaps(), gaps, "read once")
+        self.assertTrue(gaps.known and gaps.resources)
+        self.assertEqual([name for name, _ in gaps.known_matches(u"gukja")], [u"Korean gukja"])
+        self.assertEqual([name for name, _ in gaps.known_matches(u"ZWJ sequences")], [u"Emoji sequences"],
+                         "by another name, whole")
+        self.assertEqual([name for name, _ in gaps.known_matches(u"jurch")], [u"Jurchen, Khitan Large Script"])
+        self.assertEqual(gaps.known_matches(u"ju"), [], "two characters: a whole name only")
+        self.assertEqual(gaps.known_matches(u""), [])
+        self.assertEqual(fc.known_line([(u"Korean gukja", u"no Unihan field or source marks them")]),
+                         u"Font Check knows of Korean gukja, which it does not check: no Unihan field or source marks "
+                         u"them.")
+        self.assertEqual(fc.known_line([]), u"")
+        missing = fc.load_coverage_gaps(os.path.join(HERE, "no_such_gaps.json"))
+        self.assertEqual((missing.known, missing.resources, missing.fonts_for(u"script:Han")), ([], [], []),
+                         "without the file: nothing said")
+        # A search names them under the list, in every tab
+        dialog = self.dialog()
+        dialog.check_coverage()
+        dialog.languages_note = Recorded()
+        for index in (0, 1, 2):
+            dialog.search.text = u"gukja"
+            dialog.right_tab_changed(index)
+            dialog.languages_changed()
+            self.assertIn(u"Font Check knows of Korean gukja, which it does not check", dialog.languages_note.text, index)
+
+    def test_fonts_to_consider(self):
+        """Named in the tooltip of the sets and scripts a resource is for (font and license, a separate
+        download), nothing more; never for the others."""
+        gaps = fc.load_coverage_gaps()
+        self.assertEqual(gaps.fonts_for(u"script:Han"), [(u"Jigmo, Jigmo2, Jigmo3", u"CC0 1.0")])
+        self.assertEqual(gaps.fonts_for(u"script:Latin"), [])
+        self.assertEqual(fc.fonts_sentence([(u"Jigmo", u"CC0 1.0")]),
+                         u"Fonts to consider for the rest: Jigmo (CC0 1.0, a separate download).")
+        self.assertEqual(fc.fonts_sentence([]), u"")
+        dialog = self.dialog()
+        dialog.check_coverage()
+        rows = dict((r.language.iso, r) for r in dialog.set_results)
+        han = dialog.entry_tip("sets", rows[u"script:Han"])
+        self.assertIn(u"\n\nFonts to consider for the rest: Jigmo, Jigmo2, Jigmo3 (CC0 1.0, a separate download).", han)
+        self.assertNotIn(u"kamichikoichi", han, "no address, no maker: the font, its license, a separate download")
+        emoji = dialog.entry_tip("sets", rows[u"block-1f600"])
+        self.assertIn(u"Noto Color Emoji", emoji)
+        self.assertNotIn(u"Fonts to consider", dialog.entry_tip("sets", rows[u"script:Latin"]))
+        self.assertNotIn(u"Fonts to consider", fc.coverage_tip(rows[u"script:Han"]), "none given: none named")
+
+    def test_han_repertoires_kept_as_ranges(self):
+        """Some 90,000 ideographs in 20 sets: made into characters and checked one by one, they were
+        most of an opening's time, and selecting one took a second against Han's 30 ms."""
+        sets = fc.load_character_sets()
+        han = [one for one in sets if one.script == u"Han repertoires"]
+        self.assertEqual(len(han), 20)
+        large = [one for one in han if one.size() >= fc.RANGED_FROM]
+        self.assertTrue(large and all(isinstance(one, fc.RangedSet) and not isinstance(one, fc.ScriptSet)
+                                      for one in large))
+        core = [one for one in han if one.iso == u"unihan-core2020"][0]
+        self.assertEqual(core.size(), 20720)
+        core.lists.clear()
+        r = fc.check_entry(core, font(LATIN_1))
+        self.assertIsInstance(r.missing, fc.CodeItems)
+        self.assertEqual(core.lists, {}, "checked on its ranges: no list of its characters made")
+        self.assertEqual(r.level, "missed")
+        self.assertEqual(fc.language_note(r), u"%s of %s missing (and %s)" % (
+            fc.grouped(len(r.missing)), fc.grouped(core.required_size()),
+            fc.counted_grouped(len(r.optional_missing), u"optional glyph")))
+        self.assertTrue(fc.names_characters(core), "drawn by FreeLang: its tooltip names its characters")
+        self.assertFalse(isinstance(core, fc.ScriptSet) or u"A script of Unicode" in core.definition)
+        dialog = self.dialog()
+        dialog.check_coverage()
+        listed = [r for r in dialog.set_results if r.language.iso == u"unihan-core2020"][0]
+        start = time.time()
+        dialog.select(fc.selection_of(listed))
+        dialog.tip(dialog.entry_tip("sets", listed), True)
+        self.assertLess(time.time() - start, 0.3, "selected without a freeze")
+        self.assertEqual(sum(len(row.items) for row in dialog.own_rows), fc.FLOAT_MOST)
+        self.assertEqual(fc.others_text(fc.check_language(language(u"a b c d e f g h"), font([])),
+                                        fc.AddRow([u"a"], [], [])), u"b c d e f g +1",
+                         "a list's count without a scan in Python, the same as before")
+
+
+class OwnerRoundTests(unittest.TestCase):
+    """The owner's round of 2026-11-14 on Font Check, item by item: the busy line said once, every name
+    and character in FreeLang, one group per Unicode script, lists kept as they were across tabs and
+    searches, a heading's press that selects nothing, quick and capped tooltips as wide as the window
+    allows, a search that waits for a pause and clears at once, the own set's fields, the languages
+    Glottolog does not classify, what "not yet covered" means (and Braille and SignWriting, character
+    sets), and what is grayed or hidden while there is nothing to act on."""
+
+    setUpClass = classmethod(DialogTests.__dict__["setUpClass"].__func__)
+    tearDownClass = classmethod(DialogTests.__dict__["tearDownClass"].__func__)
+    dialog = DialogTests.__dict__["dialog"]
+    linked_lists = DialogTests.__dict__["linked_lists"]
+    recorded_items = DialogTests.__dict__["recorded_items"]
+    recorded_dialog = LoadingTests.__dict__["recorded_dialog"]
+
+    def test_names_and_characters_in_freelang(self):
+        """Item 2: the glyphs' Languages column drew "Hadramautic (with" and its letters as boxes. Every
+        widget that shows a name or a character of any script is set in FreeLang: the lists at the right
+        (larger), the glyphs' lists, the lines naming a selection, the tab's caption, the fields, and the
+        line under the lists (at the dialog's size); tooltips that name them, and the log's quotes."""
+        told, original = [], fc.FontCheckDialog.use_list_font
+        fc.FontCheckDialog.use_list_font = lambda self, widget, scale=fc.LIST_SCALE: told.append((widget, scale))
+        try:
+            dialog = self.dialog()
+        finally:
+            fc.FontCheckDialog.use_list_font = original
+        scales = dict((id(widget), scale) for widget, scale in told)
+        for widget in (dialog.add_tree, dialog.own_tree, dialog.own_label, dialog.gain_label, dialog.left_tabs,
+                       dialog.search, dialog.paste_field, dialog.name_field, dialog.languages_note):
+            self.assertEqual(scales.get(id(widget)), 1, widget)
+        for key in ("languages", "sets", "families"):
+            for mode in ("full", "search"):
+                self.assertEqual(scales.get(id(dialog.views[key][mode].tree)), fc.LIST_SCALE, (key, mode))
+        dialog.list_family = u"FreeLang Essential"
+        self.assertEqual(dialog.in_list_font(u"<i>x</i>"), u"<span style=\"font-family:'FreeLang Essential'\"><i>x</i></span>")
+        logged = []
+        dialog.log.add = lambda text, level="info": logged.append(text)
+        dialog.chosen_characters = lambda: [u(0x10AC0)]  # (a Manichaean letter: the log's font has none)
+        dialog.copy_characters()
+        self.assertIn(u"font-family:'FreeLang Essential'", logged[-1])
+        dialog.list_family = None
+        self.assertEqual(dialog.in_list_font(u"x"), u"x", "without the font: as it was")
+
+    def test_one_group_per_unicode_script(self):
+        """Item 3: Plains Cree alone under Cree, Inuktitut alone under Inuktitut Syllabics: the labels
+        that are no script of their own are listed under their Unicode script, and the row's tooltip
+        keeps the finer label; a language with orthographies in two scripts says so."""
+        self.assertEqual([fc.script_group(name) for name in (u"Cree", u"Inuktitut Syllabics", u"Ojibwe Syllabics",
+                                                              u"Canadian Syllabics")], [u"Canadian Syllabics"] * 4)
+        self.assertEqual([fc.script_group(name) for name in (u"Chinese", u"Hanja", u"Kanji")], [u"Han"] * 3)
+        self.assertEqual([fc.script_group(name) for name in (u"Latin", u"Hiragana", u"Katakana", u"Burmese")],
+                         [u"Latin", u"Hiragana", u"Katakana", u"Burmese"], "a Unicode script of its own: as it is")
+        f = font([0x61])
+        cree = language(u"a b", script=u"Cree", name=u"Swampy Cree")
+        scripts = fc.coverage([cree, language(u"a", script=u"Canadian Syllabics", name=u"Plains Cree")], f)
+        self.assertEqual([(s.script, len(s.results)) for s in scripts], [(u"Canadian Syllabics", 2)])
+        tip = fc.coverage_tip(fc.check_language(cree, f))
+        self.assertTrue(tip.startswith(u"Swampy Cree, Canadian Syllabics script (Cree): within reach"), tip)
+        self.assertEqual(fc.gain_text(2, [fc.check_language(cree, f)]), u"With 2 glyphs checked: +1 language "
+                                                                         u"(Canadian Syllabics)")
+        self.assertEqual(fc.proxy_sentence([u"Chinese"]), u"Recorded as written in Chinese: the languages listed "
+                                                          u"under Han are the nearest measure.")
+        # With the data: no group is a label alone, and each language is listed under its script's group
+        every = fc.load_languages()
+        groups = fc.coverage(every, font(LATIN_1), historical=True)
+        names = set(s.script for s in groups)
+        for label in fc.SCRIPT_GROUPS:
+            self.assertNotIn(label, names)
+        self.assertEqual(sum(len(s.results) for s in groups), len(every))
+        han = [s for s in groups if s.script == u"Han"][0]
+        self.assertEqual(set(r.language.iso for r in han.results) >= set([u"cmn", u"jpn", u"kor"]), True)
+        syllabics = [s for s in groups if s.script == u"Canadian Syllabics"][0]
+        self.assertTrue(set([u"crk", u"csw", u"ike", u"oji"]) <= set(r.language.iso for r in syllabics.results))
+        self.assertEqual(fc.also_listed([u"Greek"]), u"Also listed under Greek: it has an orthography in that script too.")
+        self.assertEqual(fc.also_listed([u"Cyrillic", u"Greek"]), u"Also listed under Cyrillic and Greek: it has an "
+                                                                  u"orthography in each of those scripts too.")
+        # In the dialog: Pontic Greek's and Sanskrit's rows name their other scripts
+        dialog = self.dialog()
+        dialog.check_coverage()
+        rows = dict(((r.language.iso, r.language.script), r) for r in dialog.results + dialog.other_results)
+        self.assertIn(u"Also listed under Greek and Latin", dialog.entry_tip("languages", rows[(u"pnt", u"Cyrillic")]))
+        self.assertIn(u"Also listed under Nandinagari", dialog.entry_tip("languages", rows[(u"san", u"Devanagari")]))
+        self.assertNotIn(u"Also listed", dialog.entry_tip("languages", rows[(u"crk", u"Canadian Syllabics")]))
+        japanese = dialog.entry_tip("languages", rows[(u"jpn", u"Kanji")])
+        self.assertIn(u"Han script (Kanji)", japanese)
+        self.assertIn(u"Also listed under Hiragana and Katakana", japanese)
+        self.assertIn(u"Han", [s.script for s in dialog.scripts])
+        start = time.time()
+        dialog.script_filter = u"Han"
+        dialog.fill_right(False)
+        dialog.fill_add()
+        self.assertLess(time.time() - start, 1.0, "Han, chosen above, lists at once")
+
+    def test_lists_kept_across_tabs_and_searches(self):
+        """Item 4: switching tabs brought each list back to its top, and item 8: clearing a search
+        took seconds. Each tab has its full list and a search's; a list is shown as it was (nothing
+        made anew) unless what it shows changed."""
+        dialog, state, click, Row = self.linked_lists()
+        made = self.recorded_items(dialog)
+        full = dialog.views["languages"]["full"]
+        self.assertIs(dialog.right_trees["languages"], full.tree)
+        for index in (2, 1, 0):
+            dialog.right_tab_changed(index)
+        del made[:]
+        dialog.right_tab_changed(2)
+        dialog.right_tab_changed(0)
+        self.assertEqual(made, [], "back and forth: nothing made anew")
+        self.assertIs(dialog.right_trees["languages"], full.tree)
+        listed = list(dialog.right_rows["languages"])
+        dialog.search.text = u"lao"
+        dialog.languages_changed()
+        search = dialog.views["languages"]["search"]
+        self.assertIs(dialog.right_trees["languages"], search.tree, "a search's finds in a list of their own")
+        self.assertTrue(made and [r for r in dialog.right_rows["languages"] if r.language.name == u"Lao"])
+        self.assertEqual(full.rows, listed, "the full list left as it was behind it")
+        del made[:]
+        dialog.search.text = u""
+        dialog.languages_changed()
+        self.assertEqual(made, [], "cleared: the full list shown again, nothing made")
+        self.assertIs(dialog.right_trees["languages"], full.tree)
+        self.assertEqual(dialog.right_rows["languages"], listed)
+        self.assertIsNone(dialog.right_rows["languages"][0].found_by, "no other name kept from the search")
+        # What does change it fills it anew: another order, a check
+        dialog.sort_box.currentIndex = 3
+        dialog.languages_changed()
+        self.assertTrue(made, "another order: filled anew")
+        dialog.sort_box.currentIndex = 0
+        del made[:]
+        dialog.check_coverage()
+        self.assertTrue(made, "a check: filled anew")
+        # The selection goes with a list kept as it was, as it went with a list filled anew
+        within = [k for k, r in enumerate(dialog.right_rows["languages"]) if r.language.iso == u"deu"][0]
+        click(within)
+        key = dialog.selection.key
+        dialog.right_tab_changed(2)
+        self.assertEqual(dialog.selection.key, key, "German is listed under its family too")
+        dialog.right_tab_changed(1)
+        self.assertIsNone(dialog.selection, "no character set is German")
+
+    def test_heading_press_selects_nothing(self):
+        """Item 5: a click on a group's arrow selected its heading. A press on a heading opens or closes
+        it and goes no further (nor the second press of a double-click, which Qt took for a press of its
+        own); a press on a family's arrow too, a double-click on it as well."""
+        dialog, state, click, Row = self.linked_lists()
+        tree = dialog.right_trees["languages"]
+        self.assertIs(dialog.list_pressed(tree, Row(u"#Latin")), True, "used up: Qt neither selects nor makes it current")
+        self.assertIs(dialog.list_pressed(tree, Row(u"#Latin"), None, True), True)
+        self.assertEqual(dialog.closed["languages"], set([u"Latin"]), "closed once")
+
+        class At(object):
+            def __init__(self, x):
+                self.at = x
+
+            def x(self):
+                return self.at
+
+        dialog.right_tab_changed(2)
+        families = dialog.right_trees["families"]
+        index = [k for k, one in enumerate(dialog.right_rows["families"]) if isinstance(one, fc.FamilyNode)][0]
+        self.assertIs(dialog.list_pressed(families, Row(index), At(5)), True)
+        self.assertIs(dialog.list_pressed(families, Row(index), At(5), True), True, "a double-click on the arrow too")
+        self.assertIs(dialog.list_pressed(families, Row(index), At(200), True), False, "on its name: Qt saw the first")
+        self.assertIsNone(dialog.selection)
+
+    def test_tooltips_quick_capped_and_as_wide_as_the_window(self):
+        """Items 6 and 7: Duployan's tooltip froze the window for seconds (measured in the dialog's font,
+        Qt searched the system's fonts for the script); Mandarin's was a wall of ideographs the height of
+        the screen, its paragraphs run together, compacted in a wide window."""
+        self.assertEqual([fc.tip_limit(width) for width in (1400, 2400, 700, 300, None)], [700, 900, 360, 260, fc.TIP_WIDTH])
+        self.assertEqual(fc.line_width(u"abc"), 3 * fc.TIP_CHARACTER)
+        self.assertEqual(fc.line_width(u(0x4E2D) + u(0x20000)), 4 * fc.TIP_CHARACTER, "wide, either interpreter")
+        self.assertIsNone(fc.tip_width(u"Short."), "a short one keeps its own width")
+        self.assertEqual(fc.tip_width(u"x" * 70, 700), 72 * fc.TIP_CHARACTER, "a longer one: its own line's width")
+        self.assertEqual(fc.tip_width(u"x" * 200, 700), 700)
+        many = language(u" ".join(u(0x4E00 + k) for k in range(500)), name=u"Big", script=u"Chinese")
+        tip = fc.coverage_tip(fc.check_language(many, font([])))
+        self.assertIn(u" and 440 more", tip)
+        self.assertTrue(tip.endswith(u"\n\n" + fc.CUT_TIP), tip[-200:])
+        self.assertLess(len(tip), 1000)
+        dialog = self.dialog()
+        dialog.check_coverage()
+        gui = sys.modules["PythonQt"].QtGui
+        saved = dict(gui.classes)
+
+        class Refused(object):  # (no tooltip is measured in a font any more; the lists' heights still are)
+            def __init__(self, *args):
+                raise AssertionError("a tooltip measured in a font")
+
+        gui.classes["QFontMetrics"] = Refused
+        try:
+            dialog.dialog.width = 1600
+            self.assertTrue(dialog.tip(u"x" * 300).startswith(u"<table width=\"800\""), "half the window's width")
+            dialog.dialog.width = 3000
+            self.assertTrue(dialog.tip(u"x" * 300).startswith(u"<table width=\"900\""), "at most 900")
+            rows = dict((r.language.name, r) for r in dialog.results + dialog.set_results)
+            timed = []
+            for name in (u"Mandarin Chinese", u"Korean", u"Japanese", u"Duployan", u"Han", u"Hangul",
+                         u"Duployan (Unicode block)", u"Mathematics (Unicode's Math property)", u"Adobe Latin 5"):
+                start = time.time()
+                text = dialog.tip(dialog.entry_tip("sets" if rows[name].language.kind == "set" else "languages",
+                                                   rows[name]), True)
+                timed.append((name, time.time() - start, len(text)))
+            for name, seconds, length in timed:
+                self.assertLess(seconds, 0.05, name)
+                self.assertLess(length, 4000, "%s: a tooltip cut short" % name)
+        finally:
+            gui.classes.clear()
+            gui.classes.update(saved)
+        # Made once per row: Qt asks again each time the mouse rests on it
+        dialog, state, click, Row = self.linked_lists()
+        asked = []
+        real = dialog.entry_tip
+        dialog.entry_tip = lambda tab, row: asked.append(row) or real(tab, row)
+        first = dialog.right_tip("languages", Row(0))
+        self.assertEqual((dialog.right_tip("languages", Row(0)), len(asked)), (first, 1))
+        self.assertIn(u"<br><br>", first, "a blank line between two paragraphs")
+        dialog.dialog.width = 1000
+        dialog.right_tip("languages", Row(0))
+        self.assertEqual(len(asked), 2, "made again for another width")
+        # A glyph's row names its languages, the first few
+        row = fc.AddRow([u"a"], [], [fc.check_language(language(u"a", name=u"L%d" % k), font([])) for k in range(45)])
+        self.assertIn(u", and 15 more.", fc.row_tip(row))
+
+    def test_search_waits_for_a_pause(self):
+        """Item 8: each keystroke listed the tab anew (seconds in FontLab), and clearing too. A search
+        waits for a pause of SEARCH_DELAY ms; clearing shows the full list at once; the field has a
+        cross that clears it."""
+        dialog, made = self.recorded_dialog(("QLineEdit",))
+        self.assertEqual(dialog.search.told("setClearButtonEnabled"), [(True,)])
+        self.assertEqual(fc.SEARCH_DELAY, 250)
+        started, filled = [], []
+        dialog.search_timer = Anything()
+        dialog.search_timer.start = lambda: started.append(1)
+        dialog.search_timer.stop = lambda: started.append(0)
+        dialog.languages_changed = lambda: filled.append(dialog.searched())
+        dialog.search.text = u"ma"
+        dialog.search_typed()
+        self.assertEqual((started, filled), ([1], []), "a keystroke: the timer, nothing listed yet")
+        dialog.search_paused()
+        self.assertEqual(filled, [u"ma"], "listed once the typing pauses")
+        dialog.search.text = u""
+        dialog.search_typed()
+        self.assertEqual((started[-1], filled[-1]), (0, u""), "cleared: listed at once")
+
+    def test_short_search_leaves_families_closed(self):
+        """Item 8: a one-letter search opened every family it listed, some 4,300 rows made at a keystroke;
+        from SEARCH_OPENS characters on, the families it lists are opened as before."""
+        dialog = self.dialog()
+        dialog.check_coverage()
+        dialog.right_tab_changed(2)
+        dialog.search.text = u"m"
+        dialog.languages_changed()
+        rows = dialog.right_rows["families"]
+        self.assertTrue(rows and all(isinstance(one, fc.FamilyNode) and len(one.path) == 1 for one in rows),
+                        "the families found, closed: their rows made when opened")
+        self.assertLess(len(rows), 300)
+        dialog.search.text = u"mandar"
+        dialog.languages_changed()
+        self.assertTrue([one for one in dialog.right_rows["families"] if isinstance(one, fc.Coverage)
+                         and one.language.iso == u"cmn"], "opened from three characters on")
+
+    def test_own_set_fields(self):
+        """Item 9: the owner's wording for the two fields."""
+        dialog, made = self.recorded_dialog(("QLineEdit",))
+        self.assertEqual(dialog.paste_field.told("setPlaceholderText"),
+                         [(u"Paste text or characters to check as a set of your own.",)])
+        self.assertEqual(dialog.name_field.told("setPlaceholderText"), [(u"Name",)])
+
+    def test_languages_glottolog_does_not_classify(self):
+        """Item 10: "Not classified (1)" read as a family's name. Its one language, Minang (xrg), has no
+        entry in Glottolog 5.4 (checks/train/families.py would need a placement for it); its node says
+        what its languages are."""
+        self.assertEqual(fc.UNCLASSIFIED, u"Languages Glottolog does not classify")
+        families = fc.load_families()
+        for iso in families.counts.get("not_classified") or ():  # (Minang's, until the data placed it)
+            self.assertEqual(families.path(iso), ())
+        node = fc.FamilyNode(fc.UNCLASSIFIED, (fc.UNCLASSIFIED,))
+        stray = fc.Language(u"zzx", u"Stray", u"", u"Latin", u"living", u"", 0, [u"a"], [], u"")  # (no code Glottolog has)
+        node.results = [fc.check_language(stray, font([0x61]))]
+        tip = fc.family_tip(node)
+        self.assertIn(u"No family: Glottolog 5.4 has no entry for these languages' ISO 639-3 codes", tip)
+        root = fc.family_tree(node.results, families)[0]
+        self.assertEqual([one.name for one in root.children], [fc.UNCLASSIFIED])
+        # With every language classified (Minang placed beside Nyunga), no empty node is made, whatever
+        # is searched, and with the languages not yet covered under their families
+        every = [fc.check_language(one, font([0x61])) for one in fc.load_languages()]
+        for text in (u"", u"minang", u"zzzz"):
+            root = fc.family_tree(every, families, text, uncovered=families.uncovered())[0]
+            self.assertNotIn(fc.UNCLASSIFIED, [one.name for one in root.children], text)
+
+    def test_not_yet_covered_and_notations(self):
+        """Item 11: "not yet covered" means no source describes a language in the script, said plainly;
+        and the owner's follow-up: Braille and SignWriting are character sets (their characters do not
+        depend on the language written), not scripts not yet covered."""
+        self.assertEqual([(script, block) for script, _, block in fc.NOTATION_SCRIPTS],
+                         [(u"Braille", u"Braille Patterns (Unicode block)"),
+                          (u"SignWriting", u"Sutton SignWriting (Unicode block)")])
+        self.assertTrue(all(reason and not reason.endswith(u".") for _, reason, _ in fc.NOTATION_SCRIPTS))
+        known = fc.load_known_scripts()
+        sets = dict((one.name, one) for one in fc.load_character_sets())
+        for script, _, block in fc.NOTATION_SCRIPTS:
+            self.assertIn(script, known.not_covered)
+            self.assertIn(script, sets, "a script's set, under Scripts (Unicode)")
+            self.assertEqual(sets[block].script, u"Notation", "and a block's, under Notation")
+        listed = fc.languages_not_covered(known.not_covered)
+        self.assertEqual(len(listed), len(known.not_covered) - 2)
+        for name in (u"Duployan", u"Bopomofo", u"Mongolian", u"Phags Pa", u"Soyombo"):
+            if name in known.not_covered:  # (Mongolian left it once its orthographies were added to the data)
+                self.assertIn(name, listed, "a script that wrote a language: a source could describe it")
+            self.assertEqual(fc.notation_reason(name), u"")
+        self.assertNotIn(u"Deseret", known.not_covered + [script for script, _, _ in fc.NOTATION_SCRIPTS])
+        self.assertIn(u"Braille is a notation, not a language's script (its 256 cells", fc.notation_line(u"brail"))
+        self.assertIn(u"Braille Patterns (Unicode block) under Notation", fc.notation_line(u"Braille"))
+        self.assertEqual(fc.notation_line(u"latin"), u"")
+        for short in (u"e", u"b", u"si", u"br"):  # (as known_matches: part of a name from three characters on)
+            self.assertEqual(fc.notation_line(short), u"", short)
+        self.assertIn(u"SignWriting is a notation", fc.notation_line(u"sig"))
+        braille = fc.check_entry(sets[u"Braille"], font([]))
+        tip = fc.coverage_tip(braille, (), True)
+        self.assertIn(u"A notation, not a language's own script: its 256 cells", tip)
+        self.assertNotIn(fc.NO_LANGUAGE_DATA, tip)
+        self.assertIn(u"Not yet covered means only that", fc.coverage_tip(fc.check_entry(sets[u"Glagolitic"], font([])),
+                                                                         (), True))
+        # A search for Braille in the Languages tab leads to its set
+        dialog = self.dialog()
+        dialog.check_coverage()
+        dialog.languages_note = Recorded()
+        dialog.search.text = u"braille"
+        dialog.languages_changed()
+        self.assertFalse([r for r in dialog.right_rows["languages"] if r.language.name == u"Braille"])
+        note = dialog.languages_note.text
+        self.assertIn(u'<a href="set:Braille Patterns (Unicode block)">Braille Patterns (Unicode block)</a>', note)
+        dialog.search.setText = lambda text: setattr(dialog.search, "text", text)
+        dialog.open_address(u"set:Braille Patterns (Unicode block)")
+        self.assertEqual((dialog.right_tab, dialog.searched()), ("sets", u"Braille Patterns (Unicode block)"))
+        self.assertEqual([r.language.name for r in dialog.right_rows["sets"]], [u"Braille Patterns (Unicode block)"])
+
+    def test_font_changed(self):
+        """Windows follow fonts (the shared module's fonts_tick): a window whose font is closed empties
+        its views and says it takes the next font opened; a font opened then is checked as at opening.
+        It is called from a timer: nothing escapes."""
+        dialog, made = self.recorded_dialog(("QLineEdit",))
+        dialog.check_coverage()
+        self.assertTrue(dialog.results and dialog.has_coverage)
+        dialog.font_label = Recorded()
+        packages = self.workspace.packages
+        self.workspace.packages = lambda: []
+        try:
+            dialog.font_changed()
+        finally:
+            self.workspace.packages = packages
+        self.assertEqual(dialog.font_label.text, self.ak.NO_FONT_LINE)
+        self.assertEqual((dialog.results, dialog.set_results, dialog.rows, dialog.selection, dialog.has_coverage),
+                         ([], [], [], None, False), "what belonged to the closed font is gone")
+        self.assertEqual(dialog.right_rows["languages"], [])
+        self.assertIsNone(dialog.metric_values)
+        self.assertEqual(dialog.search.enabled, False, "nothing to search")
+        self.assertEqual(dialog.stale, set(fc.TABS))
+        dialog.font_changed()  # (a font opened: checked as at opening, the view shown)
+        self.assertTrue(dialog.results and dialog.has_coverage and dialog.right_rows["languages"])
+        self.assertEqual(dialog.search.enabled, True)
+        self.assertNotIn("coverage", dialog.stale)
+        checks = []
+        dialog.check = checks.append
+        dialog.busy = True
+        dialog.font_changed()
+        self.assertEqual(checks, [], "a check under way is left to finish")
+        dialog.busy = False
+        logged = []
+        dialog.log.add = lambda text, level="info": logged.append(level)
+        dialog.read_font = lambda: 1 / 0
+        dialog.font_changed()  # (it must not raise)
+        self.assertEqual(logged, ["error"])
+
+    def test_lists_keep_their_selection(self):
+        """The shared module clears a list's selection on a click beside it, but for lists marked to keep
+        it: the scripts' list and the lists at the right (both of each tab), whose selection feeds the
+        rest and which unselect on a click in their empty part themselves. The glyphs' lists are left to
+        it (clearing is the same either way)."""
+        dialog, made = self.recorded_dialog(("QTreeWidget",))
+        marked = [one for one in made if one.kind == "QTreeWidget"
+                  and (self.ak.KEEP_SELECTION_PROP, True) in one.told("setProperty")]
+        wanted = [dialog.script_tree] + [dialog.views[key][mode].tree for key in ("languages", "sets", "families")
+                                         for mode in ("full", "search")]
+        self.assertEqual(len(marked), len(wanted))
+        self.assertTrue(all(any(one is tree for one in marked) for tree in wanted))
+        for tree in (dialog.add_tree, dialog.own_tree, dialog.glyph_tree):
+            self.assertNotIn((self.ak.KEEP_SELECTION_PROP, True), tree.told("setProperty"))
+
+    def test_nothing_to_act_on(self):
+        """Item 12: before a check has listed anything, what would act on the lists is grayed and the
+        scripts' list hidden; after it, they act."""
+        dialog, made = self.recorded_dialog(("QLineEdit", "QComboBox", "QTabBar", "QRadioButton"))
+        dialog.package = None
+        dialog.update_buttons()
+        controls = (dialog.search, dialog.level_filter, dialog.sort_box, dialog.right_tabs, dialog.left_tabs,
+                    dialog.paste_field, dialog.name_field)
+        self.assertEqual([one.enabled for one in controls], [False] * len(controls))
+        self.assertEqual((dialog.mode_share.enabled, dialog.mode_keep.enabled), (False, False),
+                         "no values to suggest yet")
+        self.assertEqual((dialog.clip_master.enabled, dialog.compare_master.enabled), (False, False), "nothing to choose")
+        dialog.package = self.workspace.currentPackage
+        dialog.check_coverage()
+        self.assertEqual([one.enabled for one in controls], [True] * len(controls))
 
 
 if __name__ == "__main__":

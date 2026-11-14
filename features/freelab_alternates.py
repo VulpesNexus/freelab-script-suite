@@ -80,7 +80,10 @@ DESIGNS_NONE = (u"Grayed out: this font has no alternate to build from (no glyph
                 u"a punctuation mark with a set, a number, .salt, or .alt, such as W.ss01 or W.2), so every variant "
                 u"is a copy of the glyph itself. Your choice is kept for a font that has some.")
 NAMED_MOST = 8  # characters named in the line that says what a click builds; alternates drawn in the preview
-LONG_BUILD = 200  # variants: a build this large says that it takes a while
+LONG_BUILD = 200  # variants: a build this large says that it may take a bit
+# The owner's words for it (2026-11-14), and nothing more: the sentence once gave a time at the last
+# build's pace and said that the window's top line shows the progress
+LONG_BUILD_WORDS = u"A build this large may take a bit."
 LINKED_MOST = 12  # built variants named in the log, each a link drawn from its outlines; more: counted only
 PREVIEW_HEIGHT = 100  # pixels: the em in the previews
 SET_SUFFIX = u".ss%02d"
@@ -250,7 +253,8 @@ def build_words(plan, count, scope, designs=False, problem=None, pace=None):
     """(the build button's label, the line under the settings) for a plan (variants_planned): how many
     variants of which glyphs a click builds, said before the click; how many of them come from the
     font's alternates (designs: that option is on); the problem's sentence in place of the count where
-    the build is refused (build_problem); a long build's time at the last build's pace, where known."""
+    the build is refused (build_problem); a sentence that a long build may take a bit (pace: what
+    build_problem measures by, the line no longer says a time)."""
     glyphs = [glyph for glyph, _ in plan]
     new = sum(len(variants) for _, variants in plan)
     if not glyphs:
@@ -274,9 +278,8 @@ def build_words(plan, count, scope, designs=False, problem=None, pace=None):
         line += u"; %s the font has already %s left as %s" % (
             counted(kept, u"variant"), u"is" if kept == 1 else u"are", u"it is" if kept == 1 else u"they are")
     line += u"."
-    if new >= LONG_BUILD:
-        line += u" A build this large takes a while%s: the window's top line shows its progress." % (
-            (u" (about %s at the last build's pace)" % duration(new * pace)) if pace else u"")
+    if new >= LONG_BUILD:  # (the owner's words, nothing more: the top line's count needs no announcing)
+        line += u" " + LONG_BUILD_WORDS
     return (u"Build %s" % counted(new, u"variant")) if new else u"Build variants", line
 
 
@@ -700,11 +703,15 @@ class AlternatesPage(object):
         self.show_scopes(font_scripts(ch for ch in (to_char(code) for code, glyph in cmap.items() if u"." not in glyph)
                                       if self.takes_turns(ch)))
         found = suggestions(rows, cmap, names, index=self.index)
-        self.note.setText(u"The glyphs fonts most often give a stylistic alternate (of %s open-licensed families, %s "
-                          u"have alternates), those this font has. To draw an alternate by hand, check a glyph, then "
-                          u"click %s: it gets a copy named for a stylistic set (a.ss01). The variants below are "
-                          u"another job, and need no such copy." % (
-                              self.ak.b(families), self.ak.b(varied), self.ak.i(u"Make copies to redraw")))
+        if found:
+            self.note.setText(u"The glyphs fonts most often give a stylistic alternate (of %s open-licensed families, "
+                              u"%s have alternates), those this font has. To draw an alternate by hand, check a glyph, "
+                              u"then click %s: it gets a copy named for a stylistic set (a.ss01). The variants below "
+                              u"are another job, and need no such copy." % (
+                                  self.ak.b(families), self.ak.b(varied), self.ak.i(u"Make copies to redraw")))
+        else:  # (an empty list said nothing of why it was empty)
+            self.note.setText(u"The font has none of the glyphs fonts most often give a stylistic alternate: nothing "
+                              u"to copy here. The variants below are another job.")
         picture = getattr(self.owner, "picture", None)  # (the dialog's: glyphs side by side, in its text color)
         self.tree.blockSignals(True)  # (a row's first check state is no change to answer)
         try:
@@ -853,7 +860,8 @@ class AlternatesPage(object):
             set_enabled(self.all_button, has_font and len(checked) < self.tree.topLevelItemCount)
             set_enabled(self.none_button, has_font and bool(checked))
             typed = self.scope() == "typed"
-            set_enabled(self.letters_edit, typed)
+            set_enabled(self.letters_edit, has_font and typed)
+            set_enabled(self.scope_box, has_font)  # (no font: no glyph to pick, and no script to list)
             try:  # its words say what to type while it is used; grayed out, it says nothing
                 self.letters_edit.setPlaceholderText(TYPED_HINT if typed else u"")
             except Exception:
@@ -867,6 +875,10 @@ class AlternatesPage(object):
                 describe(self.designs_box, DESIGNS_WHAT)
                 self.designs_box.setToolTip(u"")
             glyphs, names = self.characters_in_scope() if has_font else ([], set())
+            # How many, how strong, and from what seed say nothing while no glyph is in scope (no font, or
+            # nothing checked or typed): grayed out until there is one, as the button is
+            for box in (self.count_box, self.strength_box, self.seed_box):
+                set_enabled(box, bool(glyphs))
             count, designs = self.count_box.value, self.from_designs()
             plan = variants_planned(glyphs, count, names, designs, self.index)
             new = sum(len(variants) for _, variants in plan)

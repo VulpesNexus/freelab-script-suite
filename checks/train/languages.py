@@ -15,7 +15,9 @@ This reads a release's YAML files, resolves their inheritance (<iso>, <iso auxil
   with combining marks Unicode has no single character for (n with a dieresis); digraphs (ch, dz) are
   split into their letters, which Hyperglot does not check as units either;
 - the marks the orthography needs beyond those its characters decompose into, as Hyperglot's own
-  "required marks" (marks listed on their own, and the marks of unencoded letter-and-mark clusters).
+  "required marks" (marks listed on their own, and the marks of unencoded letter-and-mark clusters);
+- a presentation form a list holds (checks/character_sets.json's Legacy sets) as the letters it
+  stands for (NFKC), since text stores those: two of Hyperglot's Arabic lists hold isolated forms.
 
 Primary orthographies only (and the historical ones of historical languages), as Hyperglot's own
 language detection does; secondary orthographies and transliterations are left out.
@@ -41,6 +43,10 @@ import urllib.request
 import yaml
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import character_sets  # noqa: E402 (the Legacy sets: presentation forms and compatibility ideographs)
+
+LEGACY = character_sets.legacy_codes()  # (from checks/character_sets.json: build it first)
 OUT_FILE = os.path.join(HERE, os.pardir, "language_coverage.json")
 HYPERGLOT_TAG = "0.8.2"
 HYPERGLOT_URL = "https://codeload.github.com/rosettatype/hyperglot/tar.gz/refs/tags/%s" % HYPERGLOT_TAG
@@ -230,6 +236,10 @@ def build(languages):
                 skipped += 1
                 print("skipped %s %s: %s" % (iso, script, exc), file=sys.stderr)
                 continue
+            # A presentation form some lists hold (Southern Azerbaijani's and Northern Pashto's isolated
+            # Arabic letters) is its letter: what text stores and a font is checked for.
+            base = character_sets.without_legacy(base, LEGACY, items_of)
+            auxiliary = character_sets.without_legacy(auxiliary, LEGACY, items_of)
             marks = required_marks(marks or "", base, auxiliary)  # (lone marks in base or auxiliary: not required)
             base = [item for item in base if not all(is_mark(ch) for ch in item)]
             auxiliary = [item for item in auxiliary if item not in base and not all(is_mark(ch) for ch in item)]

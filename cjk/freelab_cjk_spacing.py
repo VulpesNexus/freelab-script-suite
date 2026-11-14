@@ -529,7 +529,8 @@ class CJKSpacingDialog(object):
                                u"to see it in a <i>Glyph</i> window.")
         layout.addWidget(self.tree, 1)
         sample_row = QtGui.QHBoxLayout()
-        sample_row.addWidget(QtGui.QLabel(u"Sample:"))
+        self.sample_label = QtGui.QLabel(u"Sample:")
+        sample_row.addWidget(self.sample_label)
         self.sample_box = QtGui.QComboBox()
         for _, label, _ in SAMPLES:
             self.sample_box.addItem(label)
@@ -675,8 +676,9 @@ class CJKSpacingDialog(object):
         self.tree.blockSignals(False)
         self.trims = []
         package = self.package = self.current_font()
+        self.show_font_parts(package is not None)
         if package is None:
-            self.status.setText(u"No font is open. Open one, then run <i>CJK Spacing</i> again.")
+            self.status.setText(ak.NO_FONT_LINE)
             self.update_buttons()
             return
         if not self.model:
@@ -931,6 +933,23 @@ class CJKSpacingDialog(object):
         self.log.add(u"The font's History moved (an undo, a redo, or an edit): read again.")
         self.run()
 
+    def font_changed(self):
+        """This window's font was closed, or a font opened for this window without one (fonts_tick):
+        read anew, or the list emptied and the no-font line shown."""
+        self.run()
+
+    def show_font_parts(self, on):
+        """With no font open, what has nothing to act on is hidden (the sample and its previews) or
+        grayed out (the features to write, the Hangul setting, compiling)."""
+        for widget in [self.sample_label, self.sample_box, self.sample] + list(self.preview_captions):
+            widget.setVisible(on)
+        for label, _ in self.previews:
+            label.setVisible(on)
+        for widget in (self.palt_box, self.halt_box, self.compile_box):
+            self.ak.enable(widget, on)
+        if not on:
+            self.ak.enable(self.hangul_box, False)  # (a font's Hangul sets it again as it is read)
+
     # -- pictures ------------------------------------------------------------------
 
     def layer_of(self, name):
@@ -1095,6 +1114,7 @@ class CJKSpacingDialog(object):
             return
         written, error, syllables = [], None, 0
         shapes = set(c.shape for c in self.hangul_chosen())
+        self.ak.before_changes(self.fontlab, package, u"FreeLab CJK Spacing")
         try:
             for tag in ("palt", "halt"):
                 if tag in new and new[tag] != self.texts.get(tag):

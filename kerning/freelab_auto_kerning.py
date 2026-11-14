@@ -3,7 +3,7 @@
 """FreeLab auto kerning, from FontLab's Scripts menu.
 
 Suggests kerning for the pairs of the current font's current master, one script at a time (Latin,
-kana as palt sets them, Armenian, Georgian), by two methods and FontLab's own, shows them beside the
+Cyrillic, Greek, kana as palt sets them, Armenian, Georgian, Devanagari), by two methods and FontLab's own, shows them beside the
 kerning the font has and how far they agree, and writes only the pairs you approve.
 
 - halfkern's method (https://github.com/behdad/halfkern, Copyright 2022 Google LLC, Apache License
@@ -59,7 +59,7 @@ ORDERS = (("change", "Largest change first"), ("agreement", "Best agreement firs
           ("alphabet", "Alphabetical"))
 PREVIEW_SIZE = 64  # pixels per em in the dialog's preview
 COMMON_PAIRS_FILE = "common_pairs.txt"  # beside this script
-SCRIPT_PAIRS_FILE = "script_pairs.txt"  # beside it: kana, Armenian, and Georgian pairs (kerning/train/script_pairs.py)
+SCRIPT_PAIRS_FILE = "script_pairs.txt"  # beside it: the other scripts' pairs (kerning/train/script_pairs.py)
 CACHE_VERSION = 1  # raise when the measuring changes in a way the settings below do not show
 # The learned method's features: the gap between a pair's facing edges in height bands, from below
 # the baseline to above the capitals (shares of the em), besides both methods' readings.
@@ -102,10 +102,48 @@ ARMENIAN_PUNCTUATION = _characters((0x055A, 0x055E), (0x0589, 0x058A)) + u",.:()
 MTAVRULI = _characters((0x1C90, 0x1CBA), (0x1CBD, 0x1CBF))
 GEORGIAN_LETTERS = _characters((0x10D0, 0x10FA), (0x10FD, 0x10FF)) + MTAVRULI
 GEORGIAN_PUNCTUATION = u".,:;!?'\"-()„“”«»–—"
-SCRIPTS = (("latin", "Latin"), ("kana", "Kana"), ("armenian", "Armenian"), ("georgian", "Georgian"))
-SCRIPT_LETTERS = {"latin": LETTERS, "kana": KANA_LETTERS, "armenian": ARMENIAN_LETTERS, "georgian": GEORGIAN_LETTERS}
-SCRIPT_PUNCTUATION = {"latin": PUNCTUATION, "kana": KANA_PUNCTUATION, "armenian": ARMENIAN_PUNCTUATION,
-                      "georgian": GEORGIAN_PUNCTUATION}
+# Cyrillic: the letters of Russian, Ukrainian, Belarusian, Bulgarian, Serbian, and Macedonian (U+0400
+# to U+045F, and Ukrainian's ghe with upturn), less the four with a grave accent (Bulgarian and
+# Macedonian stress marks): letters with diacritics of other languages (Kazakh's, Tatar's) are not
+# measured, as accented Latin letters are not. Greek: monotonic Greek, the vowels with tonos and
+# dialytika included (most words have one). Devanagari (one case, as Mkhedruli): the consonants and the
+# independent vowels; vowel signs, conjuncts, and half forms are set by the font's shaping, not by a
+# glyph of their own Auto Kerning could pair.
+CYRILLIC_CAPITALS = _characters((0x0401, 0x040C), (0x040E, 0x042F), (0x0490, 0x0490))
+CYRILLIC_LETTERS = (CYRILLIC_CAPITALS + _characters((0x0430, 0x044F), (0x0451, 0x045C), (0x045E, 0x045F),
+                                                    (0x0491, 0x0491)))
+CYRILLIC_PUNCTUATION = PUNCTUATION + u"\N{DOUBLE LOW-9 QUOTATION MARK}"
+GREEK_CAPITALS = _characters((0x0386, 0x0386), (0x0388, 0x038A), (0x038C, 0x038C), (0x038E, 0x038F), (0x0391, 0x03A1),
+                             (0x03A3, 0x03AB))
+GREEK_LETTERS = GREEK_CAPITALS + _characters((0x0390, 0x0390), (0x03AC, 0x03CE))
+GREEK_PUNCTUATION = PUNCTUATION
+DEVANAGARI_LETTERS = _characters((0x0905, 0x0939))  # the independent vowels A to AU, then KA to HA
+DEVANAGARI_PUNCTUATION = (_characters((0x0964, 0x0965)) + u".,:;!?'\"-()"  # the danda and double danda, then Latin's
+                          + _characters((0x2018, 0x2019), (0x201C, 0x201D), (0x2013, 0x2014)))  # (curly quotes, dashes)
+# Right-to-left scripts, unicameral and unjoined: Hebrew (its 27 letters, the five final forms
+# included; points and accents are marks, set by the font's mark positioning) and Thaana (its letters;
+# its vowel signs, the fili, are marks too, so letters stand side by side as consonants do). A pair of
+# them is kept as everywhere else, its left glyph on screen first (see text_order): in text, the right
+# one comes first.
+HEBREW_LETTERS = _characters((0x05D0, 0x05EA))
+HEBREW_PUNCTUATION = (_characters((0x05BE, 0x05BE), (0x05C3, 0x05C3), (0x05F3, 0x05F4))  # maqaf, sof pasuq, geresh, gershayim
+                      + u".,:;!?'\"-()[]" + _characters((0x2018, 0x2019), (0x201C, 0x201E), (0x2013, 0x2014)))
+THAANA_LETTERS = _characters((0x0780, 0x07A5), (0x07B1, 0x07B1))
+THAANA_PUNCTUATION = (_characters((0x060C, 0x060C), (0x061B, 0x061B), (0x061F, 0x061F))  # Arabic comma, semicolon, question mark
+                      + u".:!'\"-()" + _characters((0x2018, 0x2019), (0x201C, 0x201D), (0x2013, 0x2014)))
+RTL_SCRIPTS = ("hebrew", "thaana")
+# Characters a right-to-left run sets with the glyph of their mirror (Unicode's Bidi_Mirrored, as
+# HarfBuzz and every text engine apply it): typed "(", an opening parenthesis shows as ")" there.
+MIRRORED = dict(zip(u"()[]{}<>\N{LEFT-POINTING DOUBLE ANGLE QUOTATION MARK}\N{RIGHT-POINTING DOUBLE ANGLE QUOTATION MARK}",
+                    u")(][}{><\N{RIGHT-POINTING DOUBLE ANGLE QUOTATION MARK}\N{LEFT-POINTING DOUBLE ANGLE QUOTATION MARK}"))
+SCRIPTS = (("latin", "Latin"), ("cyrillic", "Cyrillic"), ("greek", "Greek"), ("kana", "Kana"), ("armenian", "Armenian"),
+           ("georgian", "Georgian"), ("devanagari", "Devanagari"), ("hebrew", "Hebrew"), ("thaana", "Thaana"))
+SCRIPT_LETTERS = {"latin": LETTERS, "cyrillic": CYRILLIC_LETTERS, "greek": GREEK_LETTERS, "kana": KANA_LETTERS,
+                  "armenian": ARMENIAN_LETTERS, "georgian": GEORGIAN_LETTERS, "devanagari": DEVANAGARI_LETTERS,
+                  "hebrew": HEBREW_LETTERS, "thaana": THAANA_LETTERS}
+SCRIPT_PUNCTUATION = {"latin": PUNCTUATION, "cyrillic": CYRILLIC_PUNCTUATION, "greek": GREEK_PUNCTUATION,
+                      "kana": KANA_PUNCTUATION, "armenian": ARMENIAN_PUNCTUATION, "georgian": GEORGIAN_PUNCTUATION,
+                      "devanagari": DEVANAGARI_PUNCTUATION, "hebrew": HEBREW_PUNCTUATION, "thaana": THAANA_PUNCTUATION}
 # Each script's references by kind of letter (as REFERENCES for Latin), the three letters its halo is
 # tuned on (as TUNING), and its controls: a straight lowercase, a round lowercase, and a straight
 # capital, as n, o, and H are Latin's (the font's spacing for the learned method). Kana have one
@@ -125,6 +163,51 @@ SCRIPT_PROOF = {"kana": u"ロのい", "armenian": u"Ոոօ", "georgian": u"Ი�
 SCRIPT_LINES = {"latin": u"Latin letters, figures, and punctuation", "kana": u"Kana and Japanese punctuation, as palt sets them",
                 "armenian": u"Armenian letters and punctuation",
                 "georgian": u"Georgian letters (Mkhedruli, and Mtavruli where the font has them) and punctuation"}
+# Cyrillic and Greek as Latin: a straight and a round capital (En and O, Eta and Omicron), and a
+# straight and a round lowercase with a third tuning letter (en, o, and pe; eta, omicron, and iota,
+# whose stem is Greek's nearest to l). Devanagari, unicameral: two letters standing on their stem at
+# the right (na, pa) and a round one hanging from the headline (ttha), which is drawn across each
+# letter and meets the next: the references are set with it joined, as text sets them.
+_CYRILLIC_EN, _CYRILLIC_O = u"\N{CYRILLIC CAPITAL LETTER EN}", u"\N{CYRILLIC CAPITAL LETTER O}"
+_CYRILLIC_EN_SMALL, _CYRILLIC_O_SMALL = u"\N{CYRILLIC SMALL LETTER EN}", u"\N{CYRILLIC SMALL LETTER O}"
+_GREEK_ETA, _GREEK_OMICRON = u"\N{GREEK CAPITAL LETTER ETA}", u"\N{GREEK CAPITAL LETTER OMICRON}"
+_GREEK_ETA_SMALL, _GREEK_OMICRON_SMALL = u"\N{GREEK SMALL LETTER ETA}", u"\N{GREEK SMALL LETTER OMICRON}"
+_DEVANAGARI_NA, _DEVANAGARI_PA, _DEVANAGARI_TTHA = (u"\N{DEVANAGARI LETTER NA}", u"\N{DEVANAGARI LETTER PA}",
+                                                    u"\N{DEVANAGARI LETTER TTHA}")
+SCRIPT_REFERENCES.update({
+    "cyrillic": {"upper": (_CYRILLIC_EN, _CYRILLIC_O),
+                 "lower": (_CYRILLIC_EN_SMALL, _CYRILLIC_O_SMALL, u"\N{CYRILLIC SMALL LETTER PE}")},
+    "greek": {"upper": (_GREEK_ETA, _GREEK_OMICRON),
+              "lower": (_GREEK_ETA_SMALL, _GREEK_OMICRON_SMALL, u"\N{GREEK SMALL LETTER IOTA}")},
+    "devanagari": {"lower": (_DEVANAGARI_NA, _DEVANAGARI_PA, _DEVANAGARI_TTHA)}})
+SCRIPT_TUNING.update({"cyrillic": SCRIPT_REFERENCES["cyrillic"]["lower"], "greek": SCRIPT_REFERENCES["greek"]["lower"],
+                      "devanagari": SCRIPT_REFERENCES["devanagari"]["lower"]})
+SCRIPT_CONTROLS.update({"cyrillic": _CYRILLIC_EN_SMALL + _CYRILLIC_O_SMALL + _CYRILLIC_EN,
+                        "greek": _GREEK_ETA_SMALL + _GREEK_OMICRON_SMALL + _GREEK_ETA,
+                        "devanagari": _DEVANAGARI_NA + _DEVANAGARI_TTHA + _DEVANAGARI_PA})
+SCRIPT_SIDE.update({"cyrillic": _CYRILLIC_EN, "greek": _GREEK_ETA, "devanagari": _DEVANAGARI_NA})
+SCRIPT_PROOF.update({"cyrillic": _CYRILLIC_EN + _CYRILLIC_EN_SMALL + _CYRILLIC_O_SMALL,  # (as PROOF_SCRIPTS proofs them)
+                     "greek": _GREEK_ETA + u"\N{GREEK SMALL LETTER NU}" + _GREEK_OMICRON_SMALL,
+                     "devanagari": _DEVANAGARI_PA + _DEVANAGARI_NA + _DEVANAGARI_TTHA})
+SCRIPT_LINES.update({"cyrillic": u"Cyrillic letters and punctuation", "greek": u"Greek letters and punctuation",
+                     "devanagari": u"Devanagari consonants, independent vowels, and punctuation"})
+# Hebrew, unicameral: he, final mem, and samekh (ה, ם, ס), an open letter, a closed square one, and a
+# round one, as Hebrew designers space them; previews between he, proofs between he, final nun, and
+# samekh (as PROOF_SCRIPTS proofed them). Thaana: noonu, raa, and meemu (ނ, ރ, މ), its commonest
+# letters, set side by side as text sets them under their fili.
+_HEBREW_HE = u"\N{HEBREW LETTER HE}"
+_THAANA_NOONU = u"\N{THAANA LETTER NOONU}"
+SCRIPT_REFERENCES.update({
+    "hebrew": {"lower": (_HEBREW_HE, u"\N{HEBREW LETTER FINAL MEM}", u"\N{HEBREW LETTER SAMEKH}")},
+    "thaana": {"lower": (_THAANA_NOONU, u"\N{THAANA LETTER RAA}", u"\N{THAANA LETTER MEEMU}")}})
+SCRIPT_TUNING.update({"hebrew": SCRIPT_REFERENCES["hebrew"]["lower"], "thaana": SCRIPT_REFERENCES["thaana"]["lower"]})
+SCRIPT_CONTROLS.update({"hebrew": _HEBREW_HE + u"\N{HEBREW LETTER SAMEKH}\N{HEBREW LETTER FINAL MEM}",
+                        "thaana": _THAANA_NOONU + u"\N{THAANA LETTER MEEMU}\N{THAANA LETTER RAA}"})
+SCRIPT_SIDE.update({"hebrew": _HEBREW_HE, "thaana": _THAANA_NOONU})
+SCRIPT_PROOF.update({"hebrew": _HEBREW_HE + u"\N{HEBREW LETTER FINAL NUN}\N{HEBREW LETTER SAMEKH}",
+                     "thaana": _THAANA_NOONU + u"\N{THAANA LETTER RAA}\N{THAANA LETTER MEEMU}"})
+SCRIPT_LINES.update({"hebrew": u"Hebrew letters and punctuation, right to left",
+                     "thaana": u"Thaana letters and punctuation, right to left"})
 ALL_SCRIPTS = "all"  # the Script list's last choice, for a font with two scripts or more: each analyzed, one list
 ALL_SCRIPTS_LABEL = u"All scripts"
 ALL_SCRIPTS_LINE = u"Every script the font has, each against its own references, in one list"
@@ -135,8 +218,8 @@ FULL_WIDTH_SHARE = 0.9  # kana wider than this share of the em are full width (a
 
 def common_pairs(path=None):
     """{pair: rank} from common_pairs.txt (andre-fuchs/kerning-pairs, MIT): Latin pairs common in text
-    and kerned in fonts, most relevant first; then script_pairs.txt's kana, Armenian, and Georgian
-    pairs common in text (kerning/train/script_pairs.py). Only path's pairs when given. Empty when
+    and kerned in fonts, most relevant first; then script_pairs.txt's pairs of the other scripts,
+    common in text (kerning/train/script_pairs.py). Only path's pairs when given. Empty when
     the files are missing."""
     here = os.path.dirname(os.path.abspath(globals().get("__file__") or "."))
     paths = [path] if path else [os.path.join(here, COMMON_PAIRS_FILE), os.path.join(here, SCRIPT_PAIRS_FILE)]
@@ -369,6 +452,12 @@ def category(ch):
         return "upper" if ch in ARMENIAN_CAPITALS else "lower"
     if ch in GEORGIAN_LETTERS:
         return "upper" if ch in MTAVRULI else "lower"
+    if ch in CYRILLIC_LETTERS:  # (case from the tables, not isupper(): FontLab's Python knows Unicode 5.2 only)
+        return "upper" if ch in CYRILLIC_CAPITALS else "lower"
+    if ch in GREEK_LETTERS:
+        return "upper" if ch in GREEK_CAPITALS else "lower"
+    if ch in DEVANAGARI_LETTERS or ch in HEBREW_LETTERS or ch in THAANA_LETTERS:
+        return "lower"  # (one case: its pairs are held to the lowercase band, as Mkhedruli's)
     if ch in KANA_LETTERS:
         return "kana"
     return "punctuation"
@@ -397,6 +486,80 @@ def script_pairs(pairs, script):
         if script in scripts and scripts <= set([script, None]):
             found.add(pair)
     return found
+
+
+# Right-to-left pairs. Auto Kerning measures and draws every pair as it stands on screen, its left
+# glyph first (the gap between the left glyph's right side and the right glyph's left side). In text,
+# a right-to-left pair's right glyph comes first, and that is the order the font's kerning keeps it
+# in: a compiled font kerns it as (right glyph, left glyph), its value on the first glyph's placement
+# and advance (<-30 0 -30 0>), and FontLab 7 keeps it so (read live on Noto Sans Hebrew, 2026-11-14:
+# typed yod then bet, -64, is FontLab's pair (yod, bet); (bet, yod) is empty). So a right-to-left
+# pair is read from and written to the font's kerning in text order (kerning_key), proofed in a Glyph
+# window in that order (FontLab 7 sets typed Hebrew left to right, kerning it by that key), and
+# counted, looked up, and shown in it (text_order, pair_label).
+
+
+def kerning_key(left_char, right_char, left, right):
+    """The font's kerning key of the glyph pair (left, right) on screen: the same, or (right, left) for
+    a right-to-left pair, which the font kerns in text order. Its own inverse: given a key and its
+    glyphs' characters in key order, kerning_key(second_char, first_char, second, first) is the
+    pair on screen (see screen_of_key)."""
+    return (right, left) if is_rtl_pair(left_char, right_char) else (left, right)
+
+
+def screen_of_key(first_char, second_char, first, second):
+    """The glyph pair on screen, (left, right), of a kerning key (first, second) whose glyphs have
+    those characters (None for an unencoded glyph, which takes its partner's direction): a
+    right-to-left key is in text order."""
+    if any(script_of(ch) in RTL_SCRIPTS for ch in (first_char, second_char) if ch):
+        return second, first
+    return first, second
+
+
+def is_rtl_pair(left_char, right_char):
+    """Whether a pair is of a right-to-left script (a mark of punctuation takes its partner's)."""
+    return pair_script(left_char, right_char, None) in RTL_SCRIPTS
+
+
+def text_order(left_char, right_char):
+    """A pair as typed: its characters in text order. A right-to-left pair's right character comes
+    first, and a mirrored character is typed as its mirror (the ")" glyph at the right of a Hebrew
+    pair is an opening parenthesis typed "(")."""
+    if not is_rtl_pair(left_char, right_char):
+        return left_char + right_char
+    return MIRRORED.get(right_char, right_char) + MIRRORED.get(left_char, left_char)
+
+
+def screen_order(text):
+    """A pair typed (two characters in text order) as it stands on screen: (left, right)."""
+    first, second = text[0], text[1]
+    if pair_script(first, second, None) not in RTL_SCRIPTS:
+        return first, second
+    return MIRRORED.get(second, second), MIRRORED.get(first, first)
+
+
+def pair_label(left_char, right_char):
+    """A pair as the interface shows it, as a reader sees it: a right-to-left pair is typed in text
+    order, which Qt sets right to left, its first letter at the right. Two letters need nothing more
+    (and a list's type-ahead finds the pair by its first letter in text); with a mark of punctuation,
+    which takes the direction around it, the pair goes inside a right-to-left embedding, so that the
+    mark stays on its side and a bracket is mirrored, as on screen."""
+    if not is_rtl_pair(left_char, right_char):
+        return left_char + right_char
+    text = text_order(left_char, right_char)
+    if script_of(left_char) in RTL_SCRIPTS and script_of(right_char) in RTL_SCRIPTS:
+        return text
+    return u"\N{RIGHT-TO-LEFT EMBEDDING}%s\N{POP DIRECTIONAL FORMATTING}" % text
+
+
+def rtl_note(s, sentence=False):
+    """For a right-to-left pair (a Suggestion), which of its glyphs comes first in text: a sentence
+    before a tooltip's next one, or a clause before the preview line's "writes to"."""
+    if not is_rtl_pair(s.left_char, s.right_char):
+        return u""
+    if sentence:
+        return u"Read right to left: %s first, at the right. " % s.right
+    return u"read right to left, %s first, at the right; " % s.right
 
 
 def font_scripts(characters):
@@ -1143,6 +1306,17 @@ class FontKerning(object):
         side = lambda name, is_class: self.members.get(name, []) if is_class else [name]
         return [(left, right) for left in side(*entry[0]) for right in side(*entry[1])]
 
+    def first_pair(self, entry):
+        """The first glyph pair an entry kerns (pairs(entry)[0]), without making every pair of two
+        classes; None for an empty class."""
+        firsts = []
+        for name, is_class in entry:
+            members = self.members.get(name, []) if is_class else [name]
+            if not members:
+                return None
+            firsts.append(members[0])
+        return tuple(firsts)
+
     @staticmethod
     def describe(entry):
         name = lambda text, is_class: (u"class %s" % text) if is_class else text
@@ -1205,8 +1379,8 @@ PROOF_SCRIPTS = (("GREEK", u"\u0397\u03bd\u03bf"), ("CYRILLIC", u"\u041d\u043d\u
 def proof_contexts(package, names):
     """The glyph names to proof glyphs between, in the script of the first of them that is encoded
     (H, n, and o for Latin; Greek's Eta, nu, omicron; Cyrillic's En, en, o; zeros for figures): only
-    those the font has, else Latin's, else the glyphs themselves. Kana, Armenian, and Georgian take
-    the controls Auto Kerning measures them by (SCRIPT_PROOF)."""
+    those the font has, else Latin's, else the glyphs themselves. The scripts Auto Kerning measures
+    take the controls of SCRIPT_PROOF (Greek's and Cyrillic's the same as PROOF_SCRIPTS')."""
     import unicodedata
     controls = u"Hno"
     for name in names:
@@ -1288,29 +1462,91 @@ def show_in_glyph_window(fontlab, text, owner=None):
         return u"%s" % exc
 
 
-def notify_changed(fontlab, package, title, glyphs=()):
-    """FontLab told of a script's changes, as one step of its History, and its windows redrawn.
+def _history():
+    held = getattr(sys, "_freelab_history", None)
+    if held is None:
+        held = sys._freelab_history = {"whole": set(), "counts": {}}
+    return held
 
-    The step records the whole font (notifyChangesApplied's third argument: its objects and theirs):
-    a step that recorded only the glyphs it changed left the font's list of glyphs out, and undoing a
-    later step then put back a list without the glyphs a script had added (and FontLab complained of
-    the components it could not find). notifyPackageContentUpdated takes the font's fontgate id
-    (fgPackage.id): given flPackage.id, PyCXX cannot pass it as an int. Without it, the Font window
-    does not show glyphs a script added. The font is marked modified: a script's writes leave it
-    unmarked, and FontLab would close it without asking to save."""
+
+def _without_state(obj):
+    """Whether FontLab's History holds no state of obj to go back to: it is at its first one (a font
+    opened afresh: the font itself has one, its layers and glyphs none). True when it cannot be read."""
+    try:
+        return obj.currentHistoryState() == obj.initialHistoryState()
+    except Exception:
+        return True
+
+
+def _glyph_count(package):
+    try:
+        return int(package.glyphsCount)
+    except Exception:
+        return None
+
+
+def before_changes(fontlab, package, title, glyphs=()):
+    """Called before a script changes a font, so that Undo can put back what it changes. A step of
+    FontLab's History records each object as it is after the change, and Undo puts back each object's
+    state before it: an object with none stays as written while the History moves back (live, on a font
+    opened afresh: History 1 to 0, H's width kept). So the first write to a font in a session records
+    the whole font as it is first, as a step of its own (its title followed by "(before)"), and so does
+    a write after an undo past that step; later writes need none, since each records the whole font.
+    The glyphs given are recorded too when they have no state: the whole font's record holds their
+    layers, not the glyphs themselves (their flags). The glyph count is noted for notify_changed. The
+    objects recorded, as a list (empty when none had to be)."""
+    held = _history()
+    font = _font_id(package)
+    held["counts"][font] = _glyph_count(package)
+    objects = []
+    if font not in held["whole"] or _without_state(package):
+        objects.append(package)
+    objects.extend(glyph for glyph in glyphs if _without_state(glyph))
+    if objects:
+        try:
+            fontlab.flItems.notifyChangesApplied(u"%s (before)" % title, objects, True)
+            if objects[0] is package:
+                held["whole"].add(font)
+        except Exception:
+            pass
+    return objects
+
+
+def notify_changed(fontlab, package, title, glyphs=(), added=None):
+    """FontLab told of a script's changes, as one step of its History, and its windows redrawn; the
+    write began with before_changes, so that Undo has something to go back to.
+
+    The step records the whole font (notifyChangesApplied's third argument: its objects and theirs),
+    and the glyphs given (their own state, such as their flag, is not in the font's): a step that
+    recorded only the glyphs it changed left the font's list of glyphs out, and undoing a later step
+    then put back a list without the glyphs a script had added (and FontLab complained of the
+    components it could not find). Recording the whole font costs little (0.26 s more than one glyph
+    on 9,505 glyphs, live). notifyPackageContentUpdated takes the font's fontgate id (fgPackage.id):
+    given flPackage.id, PyCXX cannot pass it as an int. Without it, the Font window does not show glyphs
+    a script added; it is called only when glyphs were added or removed (added; None: the glyph count
+    differs from the one before_changes noted, or none was), since each call checks the clipboard
+    twice. The font is marked modified: a script's writes leave it unmarked, and FontLab would close it
+    without asking to save."""
+    glyphs = list(glyphs)
     for glyph in glyphs:
         try:
             glyph.update()
         except Exception:
             pass
+    held, font = _history(), _font_id(package)
     try:
-        fontlab.flItems.notifyChangesApplied(title, package, True)
+        fontlab.flItems.notifyChangesApplied(title, [package] + glyphs if glyphs else package, True)
+        held["whole"].add(font)
     except Exception:
         pass
-    try:
-        fontlab.flItems.notifyPackageContentUpdated(package.fgPackage.id)
-    except Exception:
-        pass
+    before = held["counts"].pop(font, None)
+    if added is None:
+        added = before is None or before != _glyph_count(package)
+    if added:
+        try:
+            fontlab.flItems.notifyPackageContentUpdated(package.fgPackage.id)
+        except Exception:
+            pass
     try:
         package.setFlag(2, True)  # ofChanged
     except Exception:
@@ -1509,6 +1745,51 @@ def find_font(workspace, font_id):
     return None
 
 
+def open_font_ids(workspace):
+    """FontLab's numbers of the open fonts, in its order ([] when none is open; FontLab still hands a
+    placeholder package then, which is no font); None when the workspace cannot be read."""
+    try:
+        import fontlab
+        listed = workspace.packages()
+    except Exception:
+        return None
+    found = []
+    for item in listed or []:
+        try:
+            found.append(fontlab.flPackage(item).fgPackage.id)
+        except Exception:
+            continue
+    return found
+
+
+def fonts_open(fontlab=None):
+    """Whether FontLab has a font open (True when it cannot tell): a tool's button that reads a font is
+    clickable only then."""
+    try:
+        if fontlab is None:
+            import fontlab
+        found = open_font_ids(fontlab.flWorkspace.instance())
+    except Exception:
+        return True
+    return found is None or bool(found)
+
+
+def font_closed(owner, workspace=None):
+    """A window whose font was closed while no other font is open: a window without a font (its title
+    without the font's name), the fonts' registry's under None, so that FontLab's menu, the tools button,
+    and the arrows find it and reuse it instead of opening a second window; it takes the next font that
+    opens (fonts_tick)."""
+    old = getattr(owner, "font_id", None)
+    owner.font_id = None
+    fonts = _windows()["fonts"]
+    if old is not None and fonts.get(old) is owner:
+        del fonts[old]
+    held = fonts.get(None)
+    if held is None or held is owner or not _shown(held):
+        fonts[None] = owner
+    title_window(owner, None)
+
+
 def _owners():
     """Every tool's dialog object of the session by its window's number: the fonts' windows, and a window
     that is not its font's (one whose font was closed, moved onto a font that has a window already)."""
@@ -1591,8 +1872,15 @@ def window_font(owner, workspace):
     read: the calling window's font, else FontLab's current one), and FontLab's current one once that
     font is closed. The window's title follows, and the registry (a window opened with no font open is
     its font's window once it reads one). FontLab's own package when nothing is open (callers test it
-    as before)."""
+    as before): the window is then one without a font (font_closed), and takes the next font opened."""
     font_id = getattr(owner, "font_id", None)
+    if open_font_ids(workspace) == []:
+        if font_id is not None:
+            font_closed(owner, workspace)
+        else:
+            owner.font_id = None
+            title_window(owner, None)
+        return workspace.currentPackage
     package = find_font(workspace, font_id)
     if package is None:
         if font_id is None:
@@ -1666,8 +1954,12 @@ def raise_open(tool):
         registry = _windows()
         font_id = calling_font()
         if font_id is None:
-            font_id = _font_id(fontlab.flWorkspace.instance().currentPackage)
+            workspace = fontlab.flWorkspace.instance()
+            if open_font_ids(workspace):
+                font_id = _font_id(workspace.currentPackage)  # (none open: the window without a font)
         owner = registry["fonts"].get(font_id)
+        if owner is None or not _shown(owner):
+            owner = registry["fonts"].get(None)  # a window without a font takes the next font opened
         if owner is None or getattr(owner, "tool", None) != tool or not owner.dialog.isVisible():
             return False
         registry["hint"] = None
@@ -1677,39 +1969,24 @@ def raise_open(tool):
         return False
 
 
-WINDOWS_FILE = u"windows.json"  # in state_dir(): the size the owner gave a tool's window by hand
-
-
-def _saved_size():
-    """The size given by hand in an earlier session, (width, height), or None."""
-    try:
-        with open(os.path.join(state_dir(), WINDOWS_FILE), "r") as handle:
-            size = json.load(handle).get("size")
-        size = (int(size[0]), int(size[1]))
-        return size if min(size) >= 200 else None
-    except Exception:
-        return None
-
-
-def _save_size(size):
-    try:
-        folder = state_dir()
-        if not os.path.isdir(folder):
-            os.makedirs(folder)
-        with open(os.path.join(folder, WINDOWS_FILE), "w") as handle:
-            json.dump({"size": [int(size[0]), int(size[1])]}, handle)
-    except Exception:
-        pass
-
-
 def _size(dialog):
     return int(_property(dialog, "width")), int(_property(dialog, "height"))
 
 
+def _xy(point):
+    """(x, y) of a QPoint, or of an (x, y) pair."""
+    try:
+        return int(point.x()), int(point.y())
+    except AttributeError:
+        return int(point[0]), int(point[1])
+
+
 def note_size(owner):
-    """A window resized by hand: its size is the owner's own from then on. Every tool's window opens at
-    it, for every font, in later sessions too. A window left at the size it opened at says nothing:
-    each tool then opens at its own (Font Check wider than the others, for its two lists)."""
+    """A window resized by hand: its size is the owner's own for the rest of the session. Every tool's
+    window opens at it, for every font. It is not kept for later sessions (the owner could never get
+    back to the tools' own sizes): FreeLab no longer writes windows.json, and one written by an
+    earlier version is not read. A window left at the size it opened at says nothing: each tool then
+    opens at its own (Font Check wider than the others, for its two lists)."""
     try:
         dialog = owner.dialog
         if _property(dialog, "minimized") or _property(dialog, "maximized"):
@@ -1717,9 +1994,39 @@ def note_size(owner):
         size, opened = _size(dialog), getattr(owner, "opened_size", None)
         if opened is not None and (abs(size[0] - opened[0]) > 2 or abs(size[1] - opened[1]) > 2):
             _windows()["size"] = owner.opened_size = size
-            _save_size(size)
     except Exception:
         pass
+
+
+def centered_place(place, size, new_size, area=None, frame=(0, 0)):
+    """Where a window of new_size goes to take the place of one of size whose frame stood at place:
+    around the same center, so a tool wider than the one before grows by as much on each side (it grew
+    from the left edge, all of it to the right). Kept inside area (left, top, right, bottom: the
+    screen's free part) when given; frame: what the title bar and borders add to the size."""
+    x = place[0] + (size[0] - new_size[0]) // 2
+    y = place[1] + (size[1] - new_size[1]) // 2
+    if area is not None:
+        left, top, right, bottom = area
+        x = max(left, min(x, right - new_size[0] - frame[0]))
+        y = max(top, min(y, bottom - new_size[1] - frame[1]))
+    return x, y
+
+
+def _free_area(dialog):
+    """The free part of the dialog's screen, (left, top, right, bottom), and what its frame adds to its
+    size; (None, (0, 0)) where Qt cannot tell."""
+    try:
+        rect = _qt()[1].QApplication.desktop().availableGeometry(dialog)
+        area = (rect.left(), rect.top(), rect.right() + 1, rect.bottom() + 1)
+    except Exception:
+        return None, (0, 0)
+    try:
+        frame = _property(dialog, "frameGeometry")
+        extra = (max(0, frame.width() - int(_property(dialog, "width"))),
+                 max(0, frame.height() - int(_property(dialog, "height"))))
+    except Exception:
+        extra = (0, 0)
+    return area, extra
 
 
 OPENED_MS = 250  # after a window is shown, when the size it opened at is read (note_size)
@@ -1787,6 +2094,83 @@ def hook_quit():
         pass
 
 
+FONTS_POLL_MS = 700  # how often FreeLab looks whether a window's font was closed, or a font opened
+NO_FONT_LINE = u"No font is open. This window takes the next font you open."  # a tool's top line meanwhile
+
+
+def font_switched(owner):
+    """A window's font changed under it (closed, or opened for a window without a font): the tool shows
+    the new font, or its no-font state, through its font_changed(). A tool without one keeps what it
+    shows until it reads its font again (its title has changed already)."""
+    changed = getattr(owner, "font_changed", None)
+    if changed is not None:
+        changed()
+
+
+def fonts_tick(workspace=None):
+    """Each shown FreeLab window, as fonts open and close: one whose font was closed moves to the font
+    FontLab shows (window_font), or, with no font left open, becomes a window without a font
+    (font_closed); a window without a font takes the font FontLab shows (the one just opened) once one
+    is open, unless that font has a window of its own shown. A busy window is looked at next time.
+    Returns the windows that changed."""
+    if workspace is None:
+        import fontlab
+        workspace = fontlab.flWorkspace.instance()
+    open_ids = open_font_ids(workspace)
+    if open_ids is None:
+        return []
+    fonts = _windows()["fonts"]
+    changed = []
+    for _, owner in sorted(_owners().items(), key=lambda pair: pair[0]):
+        if not _shown(owner) or getattr(owner, "busy", False):
+            continue
+        font_id = getattr(owner, "font_id", None)
+        if font_id is not None and font_id not in open_ids:
+            if open_ids:
+                window_font(owner, workspace)
+            else:
+                font_closed(owner, workspace)
+        elif font_id is None and open_ids:
+            current = _font_id(workspace.currentPackage)
+            target = current if current in open_ids else open_ids[0]
+            held = fonts.get(target)
+            if held is not None and held is not owner and _shown(held):
+                continue  # (that font has its own window: this one stays without a font)
+            _move_window(owner, None, target)
+            owner.font_id = target
+            title_window(owner, find_font(workspace, target))
+        else:
+            continue
+        changed.append(owner)
+        try:
+            font_switched(owner)
+        except Exception:
+            pass  # (one tool's refresh failing leaves the others theirs)
+    return changed
+
+
+def watch_fonts():
+    """Once a session: fonts_tick every FONTS_POLL_MS, through the module loaded last (a reinstall
+    replaces it in sys.modules, and Python 2 empties a dropped module's globals). FontLab's Scripts
+    menu cannot gray out a tool that needs a font, so a window follows the fonts instead."""
+    if getattr(sys, "_freelab_font_watch", None) is not None:
+        return
+    QtCore = _qt()[0]
+    modules, name, own = sys.modules, __name__, fonts_tick
+
+    def tick():
+        try:
+            (getattr(modules.get(name), "fonts_tick", None) or own)()
+        except Exception:
+            pass  # a timer's handler must not raise
+
+    timer = QtCore.QTimer()
+    timer.setInterval(FONTS_POLL_MS)
+    timer.connect("timeout()", tick)
+    timer.start()
+    sys._freelab_font_watch = (timer, tick)  # (held: PythonQt drops what no Python object holds)
+
+
 def _own_window(dialog):
     """A window of its own, with a button on the taskbar, a minimize and a maximize button. A dialog
     FontLab's main window owns has no taskbar button: minimized, it was a title bar in a corner of the
@@ -1845,6 +2229,12 @@ def forward_undo(owner):
                 if action.objectName == name:
                     if action.isEnabled():
                         action.trigger()
+                        # FontLab's Undo moved the font's History, but its own windows (Font, Glyph,
+                        # Kerning) were not drawn again while a FreeLab window was the active one: they
+                        # are told, once the command has run (refresh_views)
+                        refresh = lambda: refresh_views(owner)
+                        held[:] = [entry for entry in held if isinstance(entry, tuple)] + [refresh]
+                        QtCore.QTimer.singleShot(0, refresh)
                     return
         except Exception:
             pass  # (a slot must not raise)
@@ -1855,6 +2245,75 @@ def forward_undo(owner):
         shortcut.connect("activated()", slot)
         held.append((shortcut, slot))
     owner.undo_shortcuts = held  # (PythonQt drops what no Python object holds)
+
+
+def refresh_views(owner, fontlab=None):
+    """FontLab's own windows told that the font of a tool's window changed, without a step of its
+    History (notifyChangesApplied would make one): after an undo or a redo started from a FreeLab
+    window, FontLab's views kept showing the font as it was. The notifications called, as a list.
+
+    Not notifyPackageContentUpdated: it rebuilds the Font window's list and took 8.8 s on Noto Sans
+    (3,700 glyphs, live 2026-11-14), each Ctrl+Z (two checks of a clipboard another program held
+    open: the time does not grow with the font). FontLab's Undo restores the glyphs itself (live: H's
+    width came back on undo and went again on redo); notify_changed still calls it after a write that
+    added glyphs. What the owner saw ("the log says History changed, but it doesn't reach FontLab")
+    was the first write of a font opened afresh: with no state of FontLab's History before it, Undo
+    moves the History back and puts nothing back (live: width 751 kept, History 1 to 0); before_changes
+    records the font first."""
+    called = []
+    try:
+        if fontlab is None:
+            import fontlab
+        package = getattr(owner, "package", None) or fontlab.flWorkspace.instance().currentPackage
+        font = package.fgPackage.id
+    except Exception:
+        return called
+    items = getattr(fontlab, "flItems", None)
+    for name, args in (("notifyPackageUpdated", (font,)), ("notifyHistoryChanged", ())):
+        try:
+            getattr(items, name)(*args)
+            called.append(name)
+        except Exception:
+            pass  # (a FontLab without it: the others still run)
+    try:
+        main = AutoKerningDialog.main_window()
+        if main is not None:
+            main.update()
+    except Exception:
+        pass
+    return called
+
+
+RELEASE_MS = 1000  # how long after it closed a tool's window is let go (release_window)
+
+
+def release_window(owner):
+    """A tool's window closed (by hand, or giving way to another tool) let go: neither "kept" nor its
+    window filter (whose handler holds the window) holds it any more, RELEASE_MS later, unless it is
+    shown again by then. A window FreeLab made has no owner, so PythonQt deletes it once nothing holds
+    it: never deleteLater (PythonQt would delete it a second time), and never during the events that
+    closed it (a click in it may have), hence the wait. What still needs it (its font's entry, a timer
+    or a slot of its own) still holds it, and it lives until they let go."""
+    QtCore = _qt()[0]
+    registry = _windows()
+    waiting = registry.setdefault("releasing", [])
+
+    def release():
+        try:  # (a timer's handler must not raise)
+            if release in waiting:
+                waiting.remove(release)
+            if _shown(owner):
+                return
+            registry["kept"] = [held for held in registry.get("kept", []) if held is not owner]
+            filters = getattr(sys, "_freelab_window_filters", None) or {}
+            key = owner.dialog.property(WINDOW_FILTER_PROP)
+            if key is not None:
+                filters.pop(int(key), None)
+        except Exception:
+            pass
+
+    waiting.append(release)  # (held until it runs)
+    QtCore.QTimer.singleShot(RELEASE_MS, release)
 
 
 def take_window(tool, owner):
@@ -1877,11 +2336,20 @@ def take_window(tool, owner):
     except Exception:
         pass
     old = registry["fonts"].get(font_id)
-    if caller is not None and caller is not owner and getattr(caller, "font_id", None) == font_id and _shown(caller):
-        old = caller
+    if old is None or not _shown(old):
+        # a window without a font (its font closed) is the next font's: it gives way, not a second window
+        fontless = registry["fonts"].get(None)
+        if fontless is not None and fontless is not owner and _shown(fontless):
+            old = fontless
+            if registry["fonts"].get(None) is fontless and font_id is not None:
+                del registry["fonts"][None]
+    if (caller is not None and caller is not owner and _shown(caller)
+            and getattr(caller, "font_id", None) in (font_id, None)):
+        old = caller  # (the window clicked, its font this one's, or none since its font was closed)
     registry["fonts"][font_id] = owner
-    # Kept for the session: a window with no owner lives only while Python holds it, and FontLab's
-    # main window kept every closed tool window until it quit, as this does.
+    # Kept while it is shown: a window with no owner lives only while Python holds it. Once closed (by
+    # hand, or giving way to another tool) it is let go (release_window): kept for the session, as
+    # FontLab's main window kept its closed tool windows, they piled up (18 hidden after a session, live).
     registry.setdefault("kept", []).append(owner)
     place = None
     if old is not None and old is not owner:
@@ -1889,19 +2357,19 @@ def take_window(tool, owner):
             if old.dialog.isVisible():
                 note_size(old)
                 if not _property(old.dialog, "minimized") and not _property(old.dialog, "maximized"):
-                    place = _property(old.dialog, "pos")
+                    place = (_xy(_property(old.dialog, "pos")), _size(old.dialog))
                 old.dialog.close()
         except Exception:
             pass  # (FontLab deleted it)
+        release_window(old)
     try:
         _own_window(owner.dialog)
     except Exception:
         pass
-    if "size" not in registry:
-        registry["size"] = _saved_size()
+    size = registry.setdefault("size", None)  # (given by hand in this session: note_size)
     try:
-        if registry["size"] is not None:
-            width, height = registry["size"]
+        if size is not None:
+            width, height = size
             try:
                 area = _qt()[1].QApplication.desktop().availableGeometry(owner.dialog)
                 width, height = min(width, area.width() - 40), min(height, area.height() - 60)
@@ -1909,7 +2377,9 @@ def take_window(tool, owner):
                 pass
             owner.dialog.resize(width, height)
         if place is not None:
-            owner.dialog.move(place)
+            area, frame = _free_area(owner.dialog)
+            x, y = centered_place(place[0], place[1], _size(owner.dialog), area, frame)
+            owner.dialog.move(x, y)
         else:
             _center_on_main(owner.dialog)
     except Exception:
@@ -1921,7 +2391,13 @@ def take_window(tool, owner):
         pass
     hook_quit()
     try:
-        closed = lambda *args: note_size(owner)
+        watch_fonts()
+    except Exception:
+        pass
+    try:
+        def closed(*args):
+            note_size(owner)
+            release_window(owner)
         owner.size_slot = closed
         owner.dialog.connect("finished(int)", closed)
     except Exception:
@@ -2215,6 +2691,11 @@ def plain_buttons(dialog):
             button.setDefault(False)
     except Exception:
         pass
+    style_combos(dialog)  # (as built: a dropdown opened before the first update_states opens below its box too)
+    try:
+        install_filters(dialog)  # (as built; then as widgets are added)
+    except Exception:
+        pass
     watch_states(dialog)
 
 
@@ -2297,22 +2778,22 @@ LONG_CHOICES = 24  # a dropdown with more choices than this opens as a list of t
 LONG_SHEET = u"QComboBox { combobox-popup: 0; }"
 # Qt's style opens a dropdown as a menu laid over the box, with the current choice under the pointer:
 # with several hundred choices (Proof's languages) it covered the screen from top to bottom, its ends
-# cut off. With this one property it opens as a list hanging from the box, as long as LONG_CHOICES
-# rows, with a scroll bar. The property needs a stylesheet on the box, which dark mode would take for a
-# styled input and map: the box asks to be left as drawn, which is what a plain box gets anyway.
+# cut off, and a short one whose current choice was its last (Diacritics' Character set on All) opened
+# upward, over the box, with room to spare below. With this one property every FreeLab dropdown opens
+# as a list hanging from its box (above it only when the screen has no room below), at most LONG_CHOICES
+# rows, scrolled past them. The property needs a stylesheet on the box, which dark mode would take for a
+# styled input and map: the box asks to be left as drawn, which is what a plain box gets anyway (dark
+# mode's Fusion draws it from the dark palette, the sheet holding no color).
 
 
 def long_choice(combo):
-    """A dropdown with many choices opens as a scrolled list under its box; one that has no longer
-    many is a plain box again (the long list's sheet and its flag taken off together)."""
+    """A dropdown (every one, however many its choices) opens as a list under its box, scrolled past
+    LONG_CHOICES rows; the sheet and its flag go on together (a one-choice dropdown's own sheet comes
+    first, and gives this one back when it has choices again: single_choice). A sheet of the box's own
+    is left as it is."""
     if combo.property(SINGLE_PROP):
         return
     sheet = combo.styleSheet or u""
-    if combo.count <= LONG_CHOICES:
-        if sheet == LONG_SHEET:
-            combo.setStyleSheet(u"")
-            combo.setProperty(LEAVE_ALONE_PROP, None)
-        return
     if sheet and sheet != LONG_SHEET:
         return  # a sheet of its own: left as it is
     if not sheet:
@@ -2322,16 +2803,353 @@ def long_choice(combo):
         combo.setProperty(LEAVE_ALONE_PROP, True)
 
 
-def update_states(dialog, hidden_too=False):
+# What every FreeLab window's widgets share through one event filter (put on by update_states as they
+# appear, so a tool's later widgets have it too): a right-click on a grayed-out control shows its help
+# (Qt sends no context menu to a disabled widget); a tooltip as wide as its window allows, its paragraphs
+# a blank line apart; and a click on a list's empty part, or on the window beside every list, clears the
+# lists' selection (a row could not be unselected).
+FILTER_PROP = "freelab_filtered"  # on a widget (a list: on the list) once the window's filter is on it
+WINDOW_FILTER_PROP = "freelab_window_filter"  # on a window: its filter's number in sys._freelab_window_filters
+KEEP_SELECTION_PROP = "freelab_keep_selection"  # on a list whose selection must stay (a navigator, a filter)
+OWN_TIPS_PROP = "freelab_own_tips"  # on a widget or list that lays its tooltips out itself
+# The lists a tool's code needs a row selected in (its page navigator, its filter by script, the lists
+# feeding another), by the tool's attribute, for the tools that do not set KEEP_SELECTION_PROP themselves
+KEEP_SELECTION = {"Font Check": ("script_tree", "language_tree", "set_tree", "family_tree"), "Proof": ("page_list",)}
+OWN_TIPS = ("Font Check",)  # tools whose lists build their rows' tooltips as they show (left to them)
+HELP_KINDS = ("QAbstractButton", "QComboBox", "QAbstractSpinBox", "QLineEdit", "QAbstractSlider", "QLabel",
+              "QSplitterHandle", "QGroupBox")  # (a splitter's handle: Feature Code's tooltip came out four words wide)
+NOT_BLANK = ("QAbstractButton", "QComboBox", "QAbstractSpinBox", "QLineEdit", "QAbstractSlider", "QTabBar",
+             "QAbstractScrollArea", "QSplitterHandle", "QMenu")  # a press on these is no click beside the lists
+TIP_WIDTH = (360, 900)  # a tooltip is at most half its window's width, within these (pixels)
+TIP_MARGIN = 8  # pixels added to a tooltip's longest line, so that it does not wrap
+_TAG = re.compile(u"<[^>]+>")
+_BREAK = re.compile(u"<br\\s*/?>", re.IGNORECASE)
+# a line break after a sentence's end is a new paragraph (a list of names, a line each, is not)
+_PARAGRAPH = re.compile(u"([.!?:\N{HORIZONTAL ELLIPSIS}](?:</[biBI]>)?)<br>(?!<br>)")
+
+
+def tip_width(window_width):
+    """The widest a window's tooltips are: half its width, within TIP_WIDTH."""
+    return max(TIP_WIDTH[0], min(TIP_WIDTH[1], int(window_width) // 2))
+
+
+def tip_built(text):
+    """Whether a tooltip is laid out already by its tool (a table, a page): left as it is."""
+    lowered = text.lower()
+    return any(mark in lowered for mark in (u"<table", u"<html", u"<qt", u"<p>", u"<p ", u"<div"))
+
+
+def _plain(line):
+    """A rich line's text, as measured."""
+    return (_TAG.sub(u"", line).replace(u"&nbsp;", u" ").replace(u"&lt;", u"<").replace(u"&gt;", u">")
+            .replace(u"&amp;", u"&"))
+
+
+def tip_html(text, width, measure):
+    """A tooltip laid out for its window: rich text, a blank line between its paragraphs, as wide as its
+    longest line when that fits in width (a short tooltip stays on one line: Qt wrapped short ones into
+    a narrow column of a few words), else width. measure(text) gives a line's width in pixels. None for
+    one left as it is (empty, or laid out by its tool)."""
+    text = u"%s" % (text or u"")
+    if not text.strip() or tip_built(text):
+        return None
+    if not _TAG.search(text):
+        text = html(text)
+    text = _BREAK.sub(u"<br>", text.replace(u"\r\n", u"\n").replace(u"\n", u"<br>"))
+    text = _PARAGRAPH.sub(lambda m: m.group(1) + u"<br><br>", text)
+    longest = 0
+    for line in text.split(u"<br>"):
+        if line:
+            longest = max(longest, int(measure(_plain(line)) * (1.1 if u"<b>" in line else 1.0)))
+    return (u'<table width="%d" cellspacing="0" cellpadding="0"><tr><td>%s</td></tr></table>'
+            % (min(width, longest + TIP_MARGIN), text))
+
+
+def disabled_help(widget):
+    """What a right-click on a grayed-out control shows: its What's This, else its tooltip, else its
+    nearest container's What's This (as Qt's own right-click finds one); u"" for none."""
+    for name in ("whatsThis", "toolTip"):
+        value = _property(widget, name)
+        if value:
+            return u"%s" % value
+    parent = widget.parentWidget()
+    while parent is not None:
+        value = _property(parent, "whatsThis")
+        if value:
+            return u"%s" % value
+        if parent.isWindow():
+            break
+        parent = parent.parentWidget()
+    return u""
+
+
+def _inherits_any(widget, kinds):
+    return any(widget.inherits(kind) for kind in kinds)
+
+
+def keeps_selection(view):
+    """Whether a list's selection must stay when a click falls beside it (KEEP_SELECTION_PROP, or its
+    tool's KEEP_SELECTION), or it selects nothing anyway."""
+    try:
+        if view.property(KEEP_SELECTION_PROP):
+            return True
+        if int(_property(view, "selectionMode")) == 0:  # NoSelection
+            return True
+    except Exception:
+        return True
+    owner = window_owner(view)
+    for name in KEEP_SELECTION.get(getattr(owner, "tool", None), ()):
+        held = getattr(owner, name, None)
+        if held is not None and (held is view or held == view):
+            return True
+    return False
+
+
+def clear_selection(view):
+    """A list's selection and its current row cleared (its handlers hear it, as when a row is
+    unselected); False when it had none."""
+    try:
+        model = view.selectionModel()
+        if model is None or not _property(model, "hasSelection"):
+            return False
+        view.clearSelection()
+        try:
+            model.clearCurrentIndex()
+        except Exception:
+            pass
+        return True
+    except Exception:
+        return False
+
+
+def blank_press(window, target):
+    """Whether a press on target (the widget under the pointer) is a click beside the lists: on the
+    window itself, a label or a frame, never on a control (a grayed-out one included), a list, or a
+    picture a tool draws (previews: their pair is dragged or clicked)."""
+    widget = target
+    while widget is not None and not (widget is window or widget == window):
+        if _inherits_any(widget, NOT_BLANK) or widget.property(LEAVE_ALONE_PROP) or _property(widget, "mouseTracking"):
+            return False
+        widget = widget.parentWidget()
+    return True
+
+
+def clear_selections(window):
+    """Every list of the window cleared but those that keep theirs; the lists cleared, as a list."""
     QtGui = _qt()[1]
-    if not hidden_too and not _property(dialog, "visible"):
-        return
+    cleared = []
+    for view in window.findChildren(QtGui.QAbstractItemView):
+        try:
+            if not (view.window() is window or view.window() == window) or not _property(view, "visible"):
+                continue  # (a dropdown's list, another window's)
+            if view.inherits("QHeaderView"):
+                continue  # (a list's header shares its selection: clearing it cleared Font Check's lists, live)
+            if not keeps_selection(view) and clear_selection(view):
+                cleared.append(view)
+        except Exception:
+            continue
+    return cleared
+
+
+def show_disabled_help(widget, where):
+    """The What's This menu Qt shows on a right-click, for a grayed-out control: its help once picked."""
+    QtGui = _qt()[1]
+    text = disabled_help(widget)
+    if not text:
+        return False
+    menu = QtGui.QMenu(widget.window())
+    action = menu.addAction(u"What's This?")
+    picked = menu.exec_(where)
+    if picked is not None and (picked is action or picked.text == action.text):
+        center = _property(widget, "rect").center()
+        QtGui.QWhatsThis.showText(widget.mapToGlobal(center), text, widget)
+    return True
+
+
+def _view_of(viewport):
+    """The list whose viewport this is, or None."""
+    try:
+        view = viewport.parentWidget()
+        if view is not None and view.inherits("QAbstractItemView"):
+            return view
+    except Exception:
+        pass
+    return None
+
+
+def show_tip(obj, event, view=None):
+    """A tooltip laid out for its window (tip_html): True once shown, False to leave it to Qt."""
+    QtCore, QtGui = _qt()
+    if obj.property(OWN_TIPS_PROP) or (view is not None and view.property(OWN_TIPS_PROP)):
+        return False
+    rect = None
+    if view is not None:
+        if getattr(window_owner(view), "tool", None) in OWN_TIPS:
+            return False
+        index = view.indexAt(event.pos())
+        if not index.isValid():
+            return False
+        text = index.data(QtCore.Qt.ToolTipRole)
+        rect = view.visualRect(index)
+    else:
+        text = _property(obj, "toolTip")
+    if not text:
+        return False
+    metrics = QtGui.QFontMetrics(QtGui.QToolTip.font())
+    laid_out = tip_html(text, tip_width(_property(obj.window(), "width")), lambda line: metrics.width(line))
+    if laid_out is None:
+        return False
+    if rect is not None:
+        QtGui.QToolTip.showText(event.globalPos(), laid_out, obj, rect)
+    else:
+        QtGui.QToolTip.showText(event.globalPos(), laid_out, obj)
+    return True
+
+
+def filter_event(window, obj, event, pending):
+    """The window's filter: True when the event was handled here. pending holds a grayed-out control
+    right-clicked, until its context menu comes (or does not)."""
+    QtCore = _qt()[0]
+    kind = event.type()
+    if kind == 110:  # ToolTip
+        return show_tip(obj, event, _view_of(obj))
+    if obj is window or obj == window:
+        if kind == 2 and int(event.button()) == int(QtCore.Qt.LeftButton):  # a press no widget took
+            target = window.childAt(event.pos())
+            if blank_press(window, target if target is not None else window):
+                clear_selections(window)
+        return False
+    view = _view_of(obj)
+    if view is not None:
+        if kind == 2 and int(event.button()) == int(QtCore.Qt.LeftButton) and not view.indexAt(event.pos()).isValid():
+            if not keeps_selection(view):
+                clear_selection(view)  # a click under the last row
+        return False
+    if _property(obj, "enabled"):
+        return False
+    if kind == 82:  # ContextMenu, if Qt sends one to the grayed-out control
+        pending[:] = []
+        return show_disabled_help(obj, event.globalPos())
+    if kind == 3 and int(event.button()) == int(QtCore.Qt.RightButton):  # MouseButtonRelease
+        pending[:] = [obj, event.globalPos()]
+
+        def later():
+            try:
+                if pending:
+                    widget, where = pending[0], pending[1]
+                    pending[:] = []
+                    show_disabled_help(widget, where)
+            except Exception:
+                pass  # a timer's handler must not raise
+        pending.append(later)  # (held until it runs)
+        QtCore.QTimer.singleShot(0, later)
+        return True
+    return False
+
+
+WATCHED_EVENTS = (2, 3, 82, 110)  # MouseButtonPress, MouseButtonRelease, ContextMenu, ToolTip
+
+
+CHILD_ADDED = 68  # QEvent::ChildAdded, sent to a widget given a child
+WATCH_PROP = "freelab_child_watch"  # on a widget once the window's child watch is on it
+
+
+def install_filters(dialog):
+    """The window's filter (filter_event) on the window, its controls, and its lists' viewports, each
+    once (FILTER_PROP), new widgets as they appear; True when the window was walked. It is walked
+    when its filter is made, then only once a widget of it was given a child (a ChildAdded event,
+    which a watch on each of its widgets notes): walking it every tick of update_states (nine
+    findChildren, then each widget wrapped and read) took 1.3 ms of its 2.3 ms on Feature Code's
+    1,447 widgets, live, every 300 ms in every shown window."""
+    QtCore, QtGui = _qt()
+    window = dialog.window()
+    holder = getattr(sys, "_freelab_window_filters", None)
+    if holder is None:
+        holder = sys._freelab_window_filters = {}
+    key = window.property(WINDOW_FILTER_PROP)
+    watcher = holder.get(int(key)) if key is not None else None
+    if watcher is None:
+        modules, name, own, pending, changed = sys.modules, __name__, filter_event, [], [True]
+
+        class WindowFilter(QtCore.QTimer):  # PythonQt has no QObject to subclass; a timer will do
+            def eventFilter(self, obj, event):
+                try:
+                    kind = event.type()
+                    if kind == CHILD_ADDED:
+                        changed[0] = True
+                    if kind not in WATCHED_EVENTS:
+                        return False
+                    handler = getattr(modules.get(name), "filter_event", None) or own  # (the module loaded now)
+                    return bool(handler(window, obj, event, pending))
+                except Exception:
+                    return False  # an event filter must never raise
+
+        class ChildWatch(QtCore.QTimer):  # (on the widgets the filter is not on: it notes new children only)
+            def eventFilter(self, obj, event):
+                try:
+                    if event.type() == CHILD_ADDED:
+                        changed[0] = True
+                except Exception:
+                    pass
+                return False
+
+        watcher = WindowFilter()
+        watcher.changed, watcher.child_watch = changed, ChildWatch()
+        key = max(list(holder) + [0]) + 1  # (never a number given before: windows let go leave gaps)
+        holder[key] = watcher
+        window.setProperty(WINDOW_FILTER_PROP, key)
+        window.installEventFilter(watcher)
+        window.setProperty(WATCH_PROP, True)
+    changed = getattr(watcher, "changed", None)
+    if changed is not None:
+        if not changed[0]:
+            return False
+        changed[0] = False  # (before the walk: a widget added during it is walked next time)
+    for kind in HELP_KINDS + ("QAbstractItemView",):
+        found = getattr(QtGui, kind, None)
+        if found is None:
+            continue  # (a PythonQt without the class: the others still get it)
+        for widget in window.findChildren(found):
+            try:
+                if widget.property(FILTER_PROP) or not (widget.window() is window or widget.window() == window):
+                    continue
+                # a list's events go to its viewport (its rows, the space under them)
+                (widget.viewport() if kind == "QAbstractItemView" else widget).installEventFilter(watcher)
+                widget.setProperty(FILTER_PROP, True)
+            except Exception:
+                continue
+    child_watch = getattr(watcher, "child_watch", None)
+    if child_watch is not None:
+        for widget in window.findChildren(QtGui.QWidget):
+            try:
+                if not widget.property(WATCH_PROP) and (widget.window() is window or widget.window() == window):
+                    widget.installEventFilter(child_watch)  # (a dialog opened from this one watches its own)
+                    widget.setProperty(WATCH_PROP, True)
+            except Exception:
+                continue
+    return True
+
+
+def style_combos(dialog):
+    """Each dropdown of the dialog as single_choice and long_choice have it."""
+    QtGui = _qt()[1]
     for combo in dialog.findChildren(QtGui.QComboBox):
         try:
             single_choice(combo)
             long_choice(combo)
         except Exception:
             pass
+
+
+def update_states(dialog, hidden_too=False):
+    QtGui = _qt()[1]
+    if not hidden_too and not _property(dialog, "visible"):
+        return
+    style_combos(dialog)
+    try:
+        install_filters(dialog)
+    except Exception:
+        pass
     window = dialog.window()  # (a dialog opened from this one is a child too: its buttons and lists are its own)
     buttons = [b for b in dialog.findChildren(QtGui.QPushButton)
                if any((u"%s" % b.text).startswith(t) for t in CHECK_BUTTON_TEXTS) and b.window() == window]
@@ -2453,6 +3271,15 @@ def glyph_name_links(names):
     return u" ".join(u'<a href="%s%s">%s</a>' % (GLYPH_NAME_LINK, html(name), html(name)) for name in names if name)
 
 
+LOG_PAIRS_SHOWN = 12  # a log line names the pairs it wrote when they are this few
+
+
+def pair_links(pairs):
+    """Glyph pairs, (left name, right name), as links a log that follows the font (Log.follow) draws as
+    the font does, each glyph opened on a click: u"AV, To"."""
+    return u", ".join(glyph_name_links([left]) + glyph_name_links([right]) for left, right in pairs)
+
+
 def linked_glyph_name(target):
     """The glyph name a link names, or None."""
     if not target.startswith(GLYPH_NAME_LINK):
@@ -2525,6 +3352,80 @@ def glyph_picture(package, master, name, color, line):
         return (u"%s" % str(data.toBase64()), width, height)
     except Exception:
         return None
+
+
+GLYPH_ICON_SIZE = 32  # pixels per em of a list row's picture of its glyphs (Font Check's 32, near Diacritics' 40)
+GLYPH_ICON_ROWS = 1000  # rows of a list drawn with their glyphs at most (each picture takes about a millisecond)
+
+
+def glyph_icon_size(glyphs=1, size=GLYPH_ICON_SIZE):
+    """The (width, height) a list gives its rows' pictures of one glyph or of a pair (setIconSize)."""
+    return int(size * (1.6 if glyphs == 1 else 2.8)), int(size * 1.45)
+
+
+def glyph_icon(package, master, names, color, value=0, size=GLYPH_ICON_SIZE):
+    """A list row's picture of its glyph, or of its pair at a kerning value, drawn from the font on one
+    baseline (as Diacritics draws its rows), in color, color glyphs in their own colors; None when a
+    glyph has nothing to draw. Lists that show one take LEAVE_ALONE_PROP: dark mode leaves the
+    pictures as drawn, in the window's own text color."""
+    QtCore, QtGui = _qt()
+    try:
+        layers = []
+        for name in names:
+            glyph = package.findName(name)
+            layer = glyph.getLayerByName(master) if glyph is not None and not glyph.isNull else None
+            if layer is None:
+                return None
+            layers.append((layer, layer_path(layer)))
+        if all(path.isEmpty() for _, path in layers):
+            return None
+        scale = float(size) / float(package.upm)
+        left = min(0.0, layers[0][1].boundingRect().left()) if not layers[0][1].isEmpty() else 0.0
+        advance = sum(float(layer.advanceWidth) for layer, _ in layers) + (value if len(layers) > 1 else 0)
+        width = max(8, int(math.ceil((advance - left) * scale)) + 8)
+        height = int(size * 1.45)
+        pixmap = QtGui.QPixmap(width, height)
+        pixmap.fill(QtGui.QColor(0, 0, 0, 0))
+        painter = QtGui.QPainter(pixmap)
+        try:  # ended before anything else can fail: a painter left open on a freed pixmap aborts FontLab
+            painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+            x = 4 - left * scale
+            for index, (layer, path) in enumerate(layers):
+                painter.save()
+                painter.translate(x, size * 1.1)
+                painter.scale(scale, -scale)
+                fill_glyph(painter, path, QtGui.QBrush(QtGui.QColor(color)), layer_parts(layer))
+                painter.restore()
+                x += (float(layer.advanceWidth) + (value if index == 0 else 0)) * scale
+        finally:
+            painter.end()
+        return QtGui.QIcon(pixmap)
+    except Exception:
+        return None
+
+
+def unicode_label(code):
+    """A code point as lists show it (u"U+00C0"), u"" for none."""
+    return u"U+%04X" % code if code else u""
+
+
+def fit_columns(tree, numbers=()):
+    """A list's columns as wide as their contents (no last column stretched across the rest: a column
+    of numbers ran the window's width), the headers of the columns of numbers right-aligned as their
+    cells are."""
+    QtCore = _qt()[0]
+    try:
+        tree.header().setStretchLastSection(False)
+    except Exception:
+        pass
+    for column in range(_property(tree, "columnCount")):
+        tree.resizeColumnToContents(column)
+    try:
+        header = tree.headerItem()
+        for column in numbers:
+            header.setTextAlignment(column, int(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter))
+    except Exception:
+        pass
 
 
 def b(value):
@@ -3374,11 +4275,13 @@ def flag_glyphs(owner, names, label, value):
     for name in names:
         glyph = package.findName(name)
         if glyph is not None and not glyph.isNull:
-            glyph.mark = value
             glyphs.append(glyph)
     if not glyphs:
         return
-    notify_changed(owner.fontlab, package, u"FreeLab flag", glyphs)
+    before_changes(owner.fontlab, package, u"FreeLab flag", glyphs)
+    for glyph in glyphs:
+        glyph.mark = value
+    notify_changed(owner.fontlab, package, u"FreeLab flag", glyphs, added=False)
     owner.seen_history = history_mark(package)  # its own step: nothing to read again
     menus = getattr(owner, "flagging", None)
     for menu in (menus if isinstance(menus, list) else [menus]):
@@ -3420,7 +4323,8 @@ def fontlab_autokern(package, master, left, right):
 class Suggestion(object):
     def __init__(self, left_char, right_char, left, right, current):
         self.left_char, self.right_char = left_char, right_char
-        self.left, self.right = left, right
+        self.left, self.right = left, right  # as on screen: measured and drawn so
+        self.key = kerning_key(left_char, right_char, left, right)  # as the font's kerning holds it
         self.current = current
         self.raw = {}  # method: units before its factors
         self.values = {}  # method: units to write; "fontlab" once asked
@@ -3648,7 +4552,8 @@ def analyze(package, master, characters=None, em=EM_PIXELS, progress=None, core=
                          None if contour is None else contour * glyphs.upm / em, None, learned]
                 measured += 1
             cached[key] = entry
-            s = Suggestion(left_char, right_char, left, right, kerning.current(left, right))
+            s = Suggestion(left_char, right_char, left, right, 0)
+            s.current = kerning.current(*s.key)  # (a right-to-left pair's kerning is kept in text order)
             for method, units in ((MEASURED[0], entry[0]), (MEASURED[1], entry[1]), (MEASURED[2], entry[3])):
                 if units is not None:
                     s.raw[method] = units
@@ -3746,8 +4651,8 @@ DIFFERS_NOTE = 0.03  # a member kerning this much differently from its class's f
 
 def kind_character(ch):
     """The character whose kind (capital, lowercase, figure) sets a pair's references: its base letter;
-    for a kana, Armenian, or Georgian letter, its script's straight control of its case (RO for kana,
-    Armenian's vo, Georgian's in)."""
+    for a letter of another script Auto Kerning measures, its script's straight control of its case
+    (RO for kana, Armenian's vo, Georgian's in, Cyrillic's en, Greek's eta, Devanagari's na)."""
     base = base_letter(ch)
     if base in LETTERS + FIGURES:
         return base
@@ -3895,7 +4800,10 @@ class ClassPlan(object):
         return text
 
     def pair_text(self, ch, partner):
-        return ch + partner if self.side == "first" else partner + ch
+        """The member and its partner as a pair, shown as a reader sees it: the side says its order in
+        the font's kerning, which is text order (a right-to-left pair's right glyph first)."""
+        first, second = (ch, partner) if self.side == "first" else (partner, ch)
+        return pair_label(*screen_of_key(first, second, first, second))
 
     def describe_differs(self):
         """Each member kerning unlike the first one, as the pair where it differs most (an e acute beside
@@ -4083,9 +4991,23 @@ def apply_class_plans(kerning, plans, move_base_kerning=True):
 CHOICES = (("current", "Now"), ("average", "Average"), ("halfkern", "halfkern"), ("contour", "Contour"),
            ("learned", "FreeLab"), ("fontlab", "FontLab"))
 LEAVE_ALONE_PROP = "freelabLeaveAlone"  # dark mode leaves the preview's pictures as they are drawn
-# The pair's choice, plain to see; a method with no value for the pair, flat and dashed: nothing to click
-CHOICE_SHEET = (u"QToolButton:checked { border: 2px solid palette(highlight); border-radius: 3px; } "
+# The pair's choice, plain to see: framed in the highlight color, on a light tint of it (a frame alone
+# looked much like the dashed frame of a method with no value for the pair: flat, nothing to click)
+CHOICE_SHEET = (u"QToolButton:checked { background: rgba(%d, %d, %d, %d); border: 2px solid palette(highlight); "
+                u"border-radius: 3px; } "
                 u"QToolButton:disabled { background: transparent; border: 1px dashed rgba(128, 128, 128, 90); border-radius: 3px; }")
+CHOSEN_ALPHA = 60  # the chosen button's tint: the highlight color this opaque, over a light or a dark window
+
+
+def choice_sheet(palette):
+    """CHOICE_SHEET in this palette's highlight color (a stylesheet's rgba takes no palette role)."""
+    QtGui = _qt()[1]
+    try:
+        color = palette.color(QtGui.QPalette.Highlight)
+        rgb = (color.red(), color.green(), color.blue())
+    except Exception:
+        rgb = (0, 120, 215)  # (Windows' highlight)
+    return CHOICE_SHEET % (rgb + (CHOSEN_ALPHA,))
 UNAVAILABLE_ALPHA = 90  # the name of a method with no value for the pair, this opaque
 PREVIEW_TEXT_WIDTH = 92  # pixels beside a preview's glyphs for its method and value
 PICKED_ALPHA = 70  # the tint of a row whose value was picked by hand: the highlight color, this opaque
@@ -4096,10 +5018,11 @@ PALETTE_EVENTS = (38, 39)  # QEvent ApplicationPaletteChange, PaletteChange: dar
 COLUMN_CHOICES = {1: "current", 2: "halfkern", 3: "contour", 4: "learned", 5: "fontlab"}  # double-clicked cells
 
 HELP = u"""<b>FreeLab Auto Kerning</b><br>
-Suggests kerning for the font's pairs, one script at a time (Latin, kana, Armenian, Georgian: the
-<i>Script</i> list offers those the font has, and <i>All scripts</i>, each against its own references,
+Suggests kerning for the font's pairs, one script at a time (Latin, Cyrillic, Greek, Armenian, Georgian, Devanagari, kana,
+Hebrew, and Thaana: the <i>Script</i> list offers those the font has, and <i>All scripts</i>, each against its own references,
 in one list), and writes only the pairs you check. Kana are kerned as
-the font's palt sets them, on top of it.<br><br>
+the font's palt sets them, on top of it. Hebrew and Thaana pairs are listed as read, right to left, measured and drawn as
+they stand on screen, and read and written in text order, the right glyph first, as FontLab 7 keeps them.<br><br>
 <b>The list</b>: each method's value beside the font's current one. Check the pairs to write;
 pairs the font kerns already start unchecked.<br>
 <b>Choosing a value for one pair</b>: click a preview below the list, double-click a value in the
@@ -4144,6 +5067,8 @@ class AutoKerningDialog(object):
         layout.addWidget(self.status)
         layout.addWidget(separator())
         self.log = Log()
+        # (the pairs a line names drawn as the font draws them; a glyph clicked opens in a Glyph window)
+        self.log.follow(lambda: (self.fontlab, self.package, self.master))
         self.seen_history, self.first_pass, self.pinned = None, True, set()
         row = QtGui.QHBoxLayout()
         row.addWidget(QtGui.QLabel("List changes of at least"))
@@ -4245,7 +5170,7 @@ class AutoKerningDialog(object):
             button.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)  # its method and value are in its picture
             button.setSizePolicy(QtGui.QSizePolicy.Expanding, QtGui.QSizePolicy.Fixed)
             button.setProperty(LEAVE_ALONE_PROP, True)
-            button.setStyleSheet(CHOICE_SHEET)
+            button.setStyleSheet(choice_sheet(dialog.palette))
             button.setToolTip(u"%s: click to use it for this pair (<i>Ctrl+%d</i> in the list)." % (html(label), number + 1))
             button.setWhatsThis(u"The pair as %s sets it, between two H's. Click to use it for this pair." % label)
             button.setEnabled(False)
@@ -4327,7 +5252,8 @@ class AutoKerningDialog(object):
         if self.selected is None or self.package is None:
             return
         s = self.suggestions[self.selected]
-        error = show_in_glyph_window(self.fontlab, proof_text(s.left, s.right, proof_contexts(self.package, [s.left, s.right])))
+        # (in the font's key order: FontLab 7 sets typed Hebrew left to right and kerns it by that key)
+        error = show_in_glyph_window(self.fontlab, proof_text(s.key[0], s.key[1], proof_contexts(self.package, list(s.key))))
         if error:
             self.log.add(u"FontLab did not open the pair: %s" % html(error), "error")
 
@@ -4380,7 +5306,7 @@ class AutoKerningDialog(object):
 
     def font_line(self):
         if self.package is None:
-            return u"No font is open. Open one, then click %s." % i("Analyze")
+            return NO_FONT_LINE
         return u"%s, master %s. %s." % (b(self.package.tfn), b(self.master),
                                         ALL_SCRIPTS_LINE if self.script == ALL_SCRIPTS else SCRIPT_LINES[self.script])
 
@@ -4474,6 +5400,7 @@ class AutoKerningDialog(object):
         finally:
             self.busy = False
             self.analyze_button.setEnabled(True)
+            self.update_buttons()  # (no font, or nothing analyzed: the settings grayed out)
             if self.refilter_again:
                 self.refilter_again = False
                 self.refilter()
@@ -4564,7 +5491,7 @@ class AutoKerningDialog(object):
         return True
 
     def rank(self, suggestion):
-        return self.common.get(suggestion.left_char + suggestion.right_char, len(self.common))
+        return self.common.get(text_order(suggestion.left_char, suggestion.right_char), len(self.common))
 
     def ask_fontlab(self, suggestions):
         """FontLab's own value for the pairs not asked yet (a call per pair)."""
@@ -4622,7 +5549,7 @@ class AutoKerningDialog(object):
             listed = [s for s in self.analysis.suggestions
                       if (s.left, s.right) in self.pinned
                       or (self.shown(s) and (include or not s.current)
-                          and (not common_only or s.left_char + s.right_char in self.common)
+                          and (not common_only or text_order(s.left_char, s.right_char) in self.common)
                           and (differs(s, "halfkern") or differs(s, "contour") or differs(s, "average")))]
         self.ask_fontlab(listed)
         order = ORDERS[self.order.currentIndex][0]
@@ -4632,7 +5559,7 @@ class AutoKerningDialog(object):
         elif order == "common":
             listed.sort(key=lambda s: (self.rank(s), change(s)))
         elif order == "alphabet":
-            listed.sort(key=lambda s: (s.left_char, s.right_char))
+            listed.sort(key=lambda s: text_order(s.left_char, s.right_char))  # (as read: a Hebrew pair by its right letter)
         else:
             listed.sort(key=change)
         self.suggestions = listed
@@ -4658,7 +5585,7 @@ class AutoKerningDialog(object):
         table.setRowCount(len(self.suggestions))
         source = self.source_key()
         for row, s in enumerate(self.suggestions):
-            pair = QtGui.QTableWidgetItem(s.left_char + s.right_char)
+            pair = QtGui.QTableWidgetItem(pair_label(s.left_char, s.right_char))  # (as a reader sees it, right to left too)
             pair.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsUserCheckable)
             checked = s.checked if s.checked is not None else not s.current  # the designer's pairs: opt in
             pair.setCheckState(QtCore.Qt.Checked if checked else QtCore.Qt.Unchecked)
@@ -4676,7 +5603,7 @@ class AutoKerningDialog(object):
         """Where the pair's value is written, for its tooltip and the line under the list."""
         if self.font_kerning is None:
             return u""
-        entry = self.font_kerning.target(s.left, s.right)[0]
+        entry = self.font_kerning.target(*s.key)[0]
         reach = self.font_kerning.reach(entry)
         if reach > 1:
             return u"Writes to %s, which kerns %d glyph pairs." % (FontKerning.describe(entry), reach)
@@ -4699,7 +5626,7 @@ class AutoKerningDialog(object):
         for column in range(len(self.COLUMNS)):
             self.table.item(row, column).setBackground(QtGui.QBrush(tint) if s.override else QtGui.QBrush())
         script = u" (%s)" % script_label(getattr(s, "script", self.script)) if self.script == ALL_SCRIPTS else u""
-        self.table.item(row, 0).setToolTip(u"%s %s%s. %s" % (s.left, s.right, script, self.target_text(s)))
+        self.table.item(row, 0).setToolTip(u"%s %s%s. %s%s" % (s.left, s.right, script, rtl_note(s, True), self.target_text(s)))
 
     def refresh_values(self):
         """Another source: only the Suggested column and the preview change."""
@@ -4747,6 +5674,13 @@ class AutoKerningDialog(object):
         enable(self.restore_button, self.edited())
         enable(self.classes_button, self.package is not None)
         enable(self.check_button, self.package is not None)
+        # The list's settings act on an analysis only: grayed out until there is one (no font open, or
+        # one that could not be analyzed); Analyze while there is a font to read
+        analyzed = self.analysis is not None
+        for widget in (self.tolerance, self.show_kind, self.source, self.order, self.include_kerned):
+            enable(widget, analyzed)
+        enable(self.pairs, analyzed and bool(self.common))
+        enable(self.analyze_button, not self.busy and (self.package is not None or fonts_open(self.fontlab)))
 
     def edited(self):
         """Whether a check or a value differs from how the list first came."""
@@ -4843,7 +5777,7 @@ class AutoKerningDialog(object):
         self.refresh_kerning()
         changed = 0
         for s in self.analysis.suggestions:
-            now = self.font_kerning.current(s.left, s.right)
+            now = self.font_kerning.current(*s.key)
             if now != s.current:
                 s.current = now
                 changed += 1
@@ -4854,6 +5788,12 @@ class AutoKerningDialog(object):
             self.select()
             self.log.add(u"The font's History moved (an undo, a redo, or an edit): %s read again. Click %s "
                          u"if outlines changed." % (b(counted(changed, u"current value")), i("Analyze")))
+
+    def font_changed(self):
+        """This window's font was closed, or a font opened for this window without one (fonts_tick):
+        the new font analyzed, or the list emptied and the no-font line shown."""
+        self.first_pass = True
+        self.run()
 
     def toggle_check(self):
         QtCore, QtGui = _qt()
@@ -4869,6 +5809,7 @@ class AutoKerningDialog(object):
             self.reset_button.setEnabled(False)
             self.glyph_window_button.setEnabled(False)
             self.preview_note.setText("Select a pair to compare the methods; click one to use it for that pair.")
+            self.preview_note.setVisible(bool(self.suggestions))  # (nothing listed: nothing to select)
             self.related.setVisible(False)
             for button in self.choice_buttons.values():
                 button.setEnabled(False)
@@ -4877,6 +5818,7 @@ class AutoKerningDialog(object):
             return
         for button in self.choice_buttons.values():
             button.setVisible(True)
+        self.preview_note.setVisible(True)
         self.selected = rows[0].row()
         if self.package is not None and time.time() - self.kerning_read > 1.0:
             self.refresh_kerning()
@@ -4922,11 +5864,11 @@ class AutoKerningDialog(object):
 
     def show_related(self, s):
         """Under the note, the glyph pairs the pair's entry kerns, when there are others."""
-        pairs = self.font_kerning.pairs(self.font_kerning.target(s.left, s.right)[0]) if self.font_kerning else []
+        pairs = self.font_kerning.pairs(self.font_kerning.target(*s.key)[0]) if self.font_kerning else []
         if len(pairs) < 2:
             self.related.setVisible(False)
             return
-        names = [u"%s %s" % pair for pair in pairs if pair != (s.left, s.right)]
+        names = [u"%s %s" % pair for pair in pairs if pair != s.key]  # (in the font's key order)
         shown = u", ".join(names[:RELATED_SHOWN])
         if len(names) > RELATED_SHOWN:
             shown += u", and %d more" % (len(names) - RELATED_SHOWN)
@@ -4960,9 +5902,10 @@ class AutoKerningDialog(object):
 
     def restyle(self):
         try:
+            sheet = choice_sheet(self.dialog.palette)
             for button in self.choice_buttons.values():
                 button.setStyleSheet(u"")
-                button.setStyleSheet(CHOICE_SHEET)  # polished again from the new palette
+                button.setStyleSheet(sheet)  # polished again from the new palette
             self.refresh_values()  # the tints and the previews, in the new colors
         finally:
             self.repainting = False
@@ -4978,7 +5921,8 @@ class AutoKerningDialog(object):
         self.glyph_window_button.setEnabled(True)
         picked = (u"Picked by hand: %s. " % dict(CHOICES)[s.override]) if s.override else u""
         target = self.target_text(s)
-        self.preview_note.setText(u"%sThe pair %s: %s" % (picked, s.left_char + s.right_char, target[:1].lower() + target[1:]))
+        self.preview_note.setText(u"%sThe pair %s: %s%s" % (picked, pair_label(s.left_char, s.right_char), rtl_note(s),
+                                                             target[:1].lower() + target[1:]))
         self.show_related(s)
         palette = self.dialog.palette
         text = palette.color(QtGui.QPalette.WindowText)  # (FontLab 7's PythonQt lacks the placeholder text role)
@@ -5084,7 +6028,7 @@ class AutoKerningDialog(object):
             value = s.to_write(source)
             if value is None:
                 continue
-            target = kerning.target(s.left, s.right)
+            target = kerning.target(*s.key)
             plans.setdefault(target[0], []).append(((self.rank(s), s.left_char, s.right_char), s, value, target[1]))
         shared = classes = entries = 0
         written, error = [], None
@@ -5106,27 +6050,30 @@ class AutoKerningDialog(object):
         self.after_writing(self.package)
         self.refresh_kerning()
         for s in self.analysis.suggestions:
-            s.current = self.font_kerning.current(s.left, s.right)
+            s.current = self.font_kerning.current(*s.key)
         for s in written:
             s.override = None
-        lines = [u"Wrote %s for %s to master %s%s." % (
+        first = html(u"Wrote %s for %s to master %s%s" % (
             counted(entries, u"entry", u"entries"), counted(len(written), u"pair"), self.master,
             (u" (%s, which kern%s %s classes' other glyphs too)" % (
                 u"one of them a kerning class pair" if classes == 1 else u"%d of them kerning class pairs" % classes,
-                u"s" if classes == 1 else u"", u"its" if classes == 1 else u"their")) if classes else u"")]
-        if shared:
-            lines.append(u"%s shared an entry with a commoner pair and took its value." % counted(shared, u"pair"))
+                u"s" if classes == 1 else u"", u"its" if classes == 1 else u"their")) if classes else u""))
+        if 0 < len(written) <= LOG_PAIRS_SHOWN:  # the pairs, drawn from the font, each glyph opened on a click
+            first += u": %s" % pair_links([(s.left, s.right) for s in written])
+        lines = [html(u"%s shared an entry with a commoner pair and took its value." % counted(shared, u"pair"))] if shared else []
         self.update_picked()
         self.fill_table()
-        self.log.add(html(u" ".join(lines)), "done" if entries else "info")
+        self.log.add(u" ".join([first + u"."] + lines), "done" if entries else "info")
         if error is not None:
             self.log.add(u"Stopped by an error: %s" % html(error), "error")
         self.seen_history = history_mark(self.package)
 
     def after_writing(self, package):
         """FontLab told of the change, and the font marked modified: a script's kerning writes leave it
-        unmarked, and FontLab would close it without asking to save."""
-        notify_changed(self.fontlab, package, u"FreeLab Auto Kerning")
+        unmarked, and FontLab would close it without asking to save. Kerning needs no before_changes:
+        it is the font's own state, which FontLab records when it opens a font (live: a first write's
+        pair went on Undo)."""
+        notify_changed(self.fontlab, package, u"FreeLab Auto Kerning", added=False)
 
 
 def font_class_suggestions(package, master, core=None, em=EM_PIXELS, model=None):

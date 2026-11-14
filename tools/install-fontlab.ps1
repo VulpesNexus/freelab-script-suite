@@ -55,6 +55,7 @@ $files = @(
     @{ From = 'checks\language_coverage_LICENSE'; Name = 'language_coverage_LICENSE' },
     @{ From = 'checks\character_sets.json'; Name = 'character_sets.json' },
     @{ From = 'checks\character_sets_LICENSE'; Name = 'character_sets_LICENSE' },
+    @{ From = 'checks\coverage_gaps.json'; Name = 'coverage_gaps.json' },
     @{ From = 'checks\language_families.json'; Name = 'language_families.json' },
     @{ From = 'checks\language_families_LICENSE'; Name = 'language_families_LICENSE' },
     @{ From = 'checks\language_orthographies.json'; Name = 'language_orthographies.json' },

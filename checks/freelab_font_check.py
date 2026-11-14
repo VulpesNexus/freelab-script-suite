@@ -69,6 +69,9 @@ LIST_FONT_FALLBACKS = (("FreeLang-CJK.ttf", u"FreeLang CJK"),
                        ("FreeLangPlus-General.ttf", u"FreeLang+ General"),
                        ("FreeLangPlus-Mongolian-Tibetan.ttf", u"FreeLang+ Mongolian\N{EN DASH}Tibetan"),
                        ("FreeLangPlus-Duployan.ttf", u"FreeLang+ Duployan"))
+# The fallback families register_list_font gave Qt (a frozenset), or None before it ran (every file
+# assumed, as in the tests that never register): names_characters reads it
+LIST_FALLBACKS_DRAWN = None
 LIST_DISPLAY_NAME = "FreeLang"  # what a tool calls the five together where it names the font to the user
 LIST_SCALE = 1.25  # the languages list's text, this many times the dialog's (easier to read)
 SETS_FILE = "character_sets.json"  # beside this script: checks/train/character_sets.py makes it (sets that are no languages)
@@ -236,6 +239,15 @@ class Language(object):
         # An inferred orthography: every source it rests on, as (the source's name, the letters it
         # counted or 0, what those are: "text", "words", or u""), the best-ranked first.
         self.rests = ()
+        # A character set's optional characters (code points): those it holds but is complete without,
+        # since text does not store them (presentation forms, compatibility characters). They never
+        # decide its level; optional_count: how many of its base characters are optional. Unlike a
+        # language's auxiliary characters, which keep it from being covered.
+        self.optional, self.optional_count = frozenset(), 0
+
+    def required_size(self):
+        """How many of its base characters it needs (its optional ones left out)."""
+        return self.size() - self.optional_count
 
     def label(self):
         if self.autonym and self.autonym != self.name:
@@ -449,20 +461,32 @@ def load_character_sets(path=None):
         return held[1]
     data = read_data(path, stamp)
     groups = data["groups"]
+    optional = data.get("optional") or {}  # {set id: its optional characters, as ranges} (a file made before: none)
     found = []
     for key, name, group, definition, characters, sequences in data["sets"]:
+        if not sequences.strip() and sum(high - low + 1 for low, high in ranges_of(characters)) >= RANGED_FROM:
+            # (a large set of single characters, kept as ranges and checked on them: the Han repertoires')
+            found.append(RangedSet(u"%s" % key, u"%s" % name, u"%s" % groups[group], characters, u"",
+                                   optional.get(key, u""), u"%s" % definition))
+            continue
         items = []
         for part in characters.split():
             low, _, high = part.partition(u"-")
             items.extend(char_of(code) for code in range(int(low, 16), int(high or low, 16) + 1))
         for sequence in sequences.split():  # a letter and marks with no single character: "0047+0303"
             items.append(unicodedata.normalize("NFC", u"".join(char_of(int(code, 16)) for code in sequence.split(u"+"))))
-        found.append(Language(u"%s" % key, u"%s" % name, u"", u"%s" % groups[group], u"set", u"", 0, items, [], u"",
-                              kind="set", definition=u"%s" % definition))
-    try:  # every script of Unicode, as a set (a file made before has none)
+        one = Language(u"%s" % key, u"%s" % name, u"", u"%s" % groups[group], u"set", u"", 0, items, [], u"",
+                       kind="set", definition=u"%s" % definition)
+        held = optional_codes(optional.get(key, u""))
+        if held:
+            one.optional = held
+            one.optional_count = sum(1 for item in items if len(code_points(item)) == 1 and code_points(item)[0] in held)
+        found.append(one)
+    try:  # every script of Unicode, as a set (a file made before has none; one made before optional characters, 4 columns)
         scripts = data.get("scripts") or {}
         group, version = u"%s" % (scripts.get("group") or SCRIPTS_GROUP), u"%s" % (scripts.get("unicode") or u"")
-        found.extend(ScriptSet(u"%s" % row[0], row[1], row[2], u"%s" % row[3], group, version)
+        found.extend(ScriptSet(u"%s" % row[0], row[1], row[2], u"%s" % row[3], group, version,
+                               row[4] if len(row) > 4 else u"")
                      for row in scripts.get("rows", ()))
     except (KeyError, IndexError, TypeError, ValueError, AttributeError):
         pass
@@ -471,6 +495,7 @@ def load_character_sets(path=None):
 
 
 SCRIPTS_GROUP = u"Scripts (Unicode)"  # the scripts' section in the Character sets tab (the data file names it too)
+LEGACY_GROUP = u"Legacy"  # the wholly optional sets' section (the data file names it): left out of the counts
 SCRIPT_COMPOSE_MOST = 2000  # a script missing more characters than this is not searched for letters the anchors compose
 WANTED_MOST = 2000  # the missing characters of one language or set looked at for the selection's own tab, at most
 
@@ -482,6 +507,30 @@ def ranges_of(text):
         low, _, high = part.partition(u"-")
         found.append((int(low, 16), int(high or low, 16)))
     return found
+
+
+def count_in_ranges(codes, ranges):
+    """How many of the code points fall in the ranges [(low, high)] (sorted, apart: a data file's), by
+    bisection: a Han repertoire has some 4,000 ranges, and a scan of them for each code was felt."""
+    if not codes or not ranges:
+        return 0
+    import bisect
+    lows = [low for low, _ in ranges]
+    found = 0
+    for code in codes:
+        at = bisect.bisect_right(lows, code) - 1
+        if at >= 0 and code <= ranges[at][1]:
+            found += 1
+    return found
+
+
+def optional_codes(text):
+    """The code points of "FB00-FB06 212A" as a frozenset (none for u"")."""
+    return frozenset(code for low, high in ranges_of(text) for code in range(low, high + 1))
+
+
+# What the tooltips call the optional characters, said once
+OPTIONAL_WHAT = u"presentation forms and compatibility characters, which text does not store"
 
 
 class CodeItems(object):
@@ -537,26 +586,27 @@ class CodeItems(object):
     __hash__ = None
 
 
-class ScriptSet(Language):
-    """A script of Unicode checked as a character set, for a font to be measured against a script no
-    language here is written in (and against any other): its own characters (Unicode's Script
-    property: letters, marks, digits, punctuation) are its base characters, and those Unicode says it
-    shares with other scripts (Script_Extensions) its auxiliary ones. Both are kept as ranges, and
-    made into characters only when asked for (Han has about 100,000)."""
+class RangedSet(Language):
+    """A character set kept as ranges and checked on them (check_script): its base characters (own)
+    and auxiliary ones (shared), made into characters only when asked for. A script of Unicode is one
+    (ScriptSet: Han has about 100,000 characters), and so is a large set of single characters, the Han
+    repertoires' (Unihan Core 2020: 20,720): made into 90,000 characters and checked one by one, they
+    were most of an opening's time, and a list of 20,000 read for each of a selection's 200 rows froze
+    it for a second where Han's own selection took 30 ms."""
 
-    def __init__(self, name, own, shared, since=u"", group=SCRIPTS_GROUP, version=u""):
+    def __init__(self, iso, name, group, own, shared=u"", optional=u"", definition=u""):
         self.own_ranges, self.shared_ranges = ranges_of(own), ranges_of(shared)
         self.own_count = sum(high - low + 1 for low, high in self.own_ranges)
         self.shared_count = sum(high - low + 1 for low, high in self.shared_ranges)
-        self.since, self.unicode = since, version
         self.lists = {}
-        Language.__init__(self, u"script:%s" % name, name, u"", group, u"set", u"", 0, None, None, u"", kind="set")
-        self.definition = (
-            u"A script of Unicode%s: its own characters (letters, marks, digits, and punctuation, by Unicode's Script "
-            u"property) are the measure, and the characters Unicode says it shares with other scripts "
-            u"(Script_Extensions) count as auxiliary ones. Control and format characters are left out.%s" % (
-                u" %s" % version if version else u"",
-                u" Encoded since Unicode %s." % since if since else u""))
+        Language.__init__(self, iso, name, u"", group, u"set", u"", 0, None, None, u"", kind="set",
+                          definition=definition)
+        # Its optional characters (Arabic's presentation forms, Han's compatibility ideographs), among its own
+        # and its shared ones: they never decide its level (check_script)
+        self.optional = optional_codes(optional)
+        self.optional_own = count_in_ranges(self.optional, self.own_ranges)
+        self.optional_shared = count_in_ranges(self.optional, self.shared_ranges)
+        self.optional_count = self.optional_own
 
     def size(self):
         return self.own_count
@@ -566,9 +616,101 @@ class ScriptSet(Language):
             self.lists[key] = [char_of(code) for low, high in ranges for code in range(low, high + 1)]
         return self.lists[key]
 
-    # (Language sets both in its constructor: a script's are made from its ranges, when asked for)
+    # (Language sets both in its constructor: a ranged set's are made from its ranges, when asked for)
     base = property(lambda self: self.items("base", self.own_ranges), lambda self, value: None)
     auxiliary = property(lambda self: self.items("auxiliary", self.shared_ranges), lambda self, value: None)
+
+
+RANGED_FROM = 1000  # characters: a set of single characters this large or larger is kept as ranges (RangedSet)
+
+
+class ScriptSet(RangedSet):
+    """A script of Unicode checked as a character set, for a font to be measured against a script no
+    language here is written in (and against any other): its own characters (Unicode's Script
+    property: letters, marks, digits, punctuation) are its base characters, and those Unicode says it
+    shares with other scripts (Script_Extensions) its auxiliary ones. Both are kept as ranges, and
+    made into characters only when asked for (Han has about 100,000)."""
+
+    def __init__(self, name, own, shared, since=u"", group=SCRIPTS_GROUP, version=u"", optional=u""):
+        RangedSet.__init__(self, u"script:%s" % name, name, group, own, shared, optional)
+        self.since, self.unicode = since, version
+        self.definition = (
+            u"A script of Unicode%s: its own characters (letters, marks, digits, and punctuation, by Unicode's Script "
+            u"property) are the measure, and the characters Unicode says it shares with other scripts "
+            u"(Script_Extensions) count as auxiliary ones. Control and format characters are left out.%s%s" % (
+                u" %s" % version if version else u"",
+                u" Its %s, are listed as optional: it is complete without them." % OPTIONAL_WHAT if self.optional else u"",
+                u" Encoded since Unicode %s." % since if since else u""))
+
+
+COVERAGE_GAPS_FILE = "coverage_gaps.json"  # beside this script: checks/train/coverage_gaps.py makes it (optional)
+
+
+class CoverageGaps(object):
+    """What Font Check knows of and does not check (known: [(name, other names, why)]), and fonts to
+    consider for what FreeLang cannot draw (resources: [(font, maker, license, page, what, caution,
+    the ids of the sets and scripts it is for)]), from coverage_gaps.json; empty without the file."""
+
+    def __init__(self, known=(), resources=()):
+        self.known = [(u"%s" % row[0], [u"%s" % other for other in row[1]], u"%s" % row[2])
+                      for row in known if len(row) >= 3]
+        self.resources = [row for row in resources if len(row) >= 7]
+
+    def known_matches(self, text):
+        """[(name, why)] of the known gaps a search names: the text is a whole name or other name, or,
+        from three characters on, part of one; the whole ones first."""
+        text = fold(text).strip()
+        if not text:
+            return []
+        found = []
+        for name, others, why in self.known:
+            names = [fold(name)] + [fold(other) for other in others]
+            if text in names:
+                found.append((0, name, why))
+            elif len(text) >= 3 and any(text in one for one in names):
+                found.append((1, name, why))
+        return [(name, why) for _, name, why in sorted(found, key=lambda one: one[0])]
+
+    def fonts_for(self, key):
+        """[(font, license)] of the fonts to consider for the set or script of this id."""
+        return [(u"%s" % row[0], u"%s" % row[2]) for row in self.resources if key in (row[6] or ())]
+
+
+def load_coverage_gaps(path=None):
+    """The CoverageGaps of coverage_gaps.json (read once per file version); an empty one without the file
+    or for a file that cannot be read: Font Check checks as before, and says nothing of gaps."""
+    path = path or os.path.join(os.path.dirname(os.path.abspath(globals().get("__file__") or ".")), COVERAGE_GAPS_FILE)
+    try:
+        stamp = os.path.getmtime(path)
+    except OSError:
+        return CoverageGaps()
+    held = _LANGUAGES.get(path)
+    if held is not None and held[0] == stamp:
+        return held[1]
+    try:
+        data = read_data(path, stamp)
+        found = CoverageGaps(data.get("known") or (), data.get("resources") or ())
+    except (OSError, IOError, ValueError, KeyError, TypeError, AttributeError):
+        found = CoverageGaps()
+    _LANGUAGES[path] = (stamp, found)
+    return found
+
+
+def known_line(found):
+    """What a search says of the gaps it names that Font Check knows of and does not check (found:
+    CoverageGaps.known_matches): each, and why."""
+    if not found:
+        return u""
+    return u" ".join(u"Font Check knows of %s, which it does not check: %s." % (name, why) for name, why in found)
+
+
+def fonts_sentence(fonts):
+    """A set's or a script's tooltip naming the fonts to consider for what FreeLang does not draw of it
+    (fonts: [(font, license)]): never shipped with FreeLab, each a separate download."""
+    if not fonts:
+        return u""
+    return u"Fonts to consider for the rest: %s." % u"; ".join(
+        u"%s (%s, a separate download)" % (font, license_) for font, license_ in fonts)
 
 
 def families_path():
@@ -729,22 +871,35 @@ class FontCharacters(object):
 HAVE, COMPOSED, PARTS, MISSING = "have", "composed", "parts", "missing"
 
 
+def normal_form(form, text):
+    """unicodedata.normalize, but a text with a code point past U+FFFF is left as it is, on every
+    Python: FontLab's narrow Python 2 normalizes none of them, and the counts must be the same there
+    as in the tests."""
+    if any(code > 0xFFFF for code in code_points(text)):
+        return text
+    return unicodedata.normalize(form, text)
+
+
 def support(item, font):
     """How a font has one of a language's characters: HAVE (its own glyph), COMPOSED (its letter and
     marks, which its anchors put together), PARTS (its letter and marks, but no anchors that join
     them), or MISSING. A letter with two marks may stand on a letter with one (e with macron, then
-    acute)."""
+    acute). A single character is had by its own code point only, never through another one it is
+    canonically the same as (the letters with oxia through those with tonos, the ohm sign through
+    omega, a compatibility ideograph through its unified one): only a sequence of a letter and marks
+    is had by the character it composes to."""
     codes = code_points(item)
     if len(codes) == 1 and codes[0] in font.codes:
         return HAVE, None
-    composed = code_points(unicodedata.normalize("NFC", item))
-    if len(composed) == 1 and composed[0] in font.codes:
-        return HAVE, None  # (listed decomposed)
-    parts = code_points(unicodedata.normalize("NFD", item))
+    if len(codes) > 1:
+        composed = code_points(normal_form("NFC", item))
+        if len(composed) == 1 and composed[0] in font.codes:
+            return HAVE, None  # (listed decomposed)
+    parts = code_points(normal_form("NFD", item))
     if len(parts) < 2 or not all(is_mark(code) for code in parts[1:]):
         return MISSING, None
     for size in range(len(parts) - 1, 0, -1):
-        base = code_points(unicodedata.normalize("NFC", u"".join(char_of(code) for code in parts[:size])))
+        base = code_points(normal_form("NFC", u"".join(char_of(code) for code in parts[:size])))
         if len(base) == 1 and base[0] in font.codes:
             base, marks = base[0], parts[size:]
             break
@@ -762,7 +917,8 @@ class Coverage(object):
     """How a font covers a language: level is "covered", "nearly" (within reach), "started" (the font
     has at least one of its characters, but it is not within reach), or "missed" (it has none)."""
 
-    def __init__(self, language, missing, auxiliary_missing, marks_missing, composed, parts, level, have=0):
+    def __init__(self, language, missing, auxiliary_missing, marks_missing, composed, parts, level, have=0,
+                 optional_missing=None):
         self.language = language
         self.missing, self.auxiliary_missing, self.marks_missing = missing, auxiliary_missing, marks_missing
         self.composed = composed  # [(character, (letter, marks))]: counted, made of the font's letter and marks
@@ -770,13 +926,16 @@ class Coverage(object):
         self.level = level
         self.have = have  # how many of its characters (base, auxiliary, marks) the font has or composes
         self.found_by = None  # the other name a search found it by (set as the list is filled), or None
+        # A set's optional characters the font lacks (presentation forms, compatibility characters): listed and
+        # counted, never in the level, the languages gained, or the high-value glyphs (needs() leaves them out)
+        self.optional_missing = optional_missing if optional_missing is not None else []
 
     def base_missing(self):
         return len(self.missing) + len(self.marks_missing)
 
     def all_missing(self):
-        """Every missing character: base, marks, auxiliary."""
-        return self.missing + self.marks_missing + self.auxiliary_missing
+        """Every missing character: base, marks, auxiliary, then the optional ones."""
+        return self.missing + self.marks_missing + self.auxiliary_missing + self.optional_missing
 
 
 LEVELS = (("nearly", u"Within reach"), ("covered", u"Covered"), ("started", u"Started"), ("missed", u"Missed"))
@@ -784,29 +943,39 @@ BAR_LEVELS = ("covered", "nearly", "started", "missed")  # a bar's segments, in 
 
 
 def check_language(language, font, nearly=NEARLY_MISSING):
-    missing, auxiliary_missing, composed, parts = [], [], [], []
+    """A language or a character set checked. A set's optional characters (language.optional) are
+    looked for and counted apart (optional_missing), and never decide its level or what it has: a set
+    is covered without them, and one wholly optional (the Legacy group's) is always covered, its row
+    saying how many of them the font lacks. Its level says whether text set in the font needs anything
+    more, which a presentation form or a compatibility character never is."""
+    missing, auxiliary_missing, composed, parts, optional_missing = [], [], [], [], []
+    optional = language.optional
     for items, into in ((language.base, missing), (language.auxiliary, auxiliary_missing)):
         for item in items:
             how, recipe = font.support(item)
             if how == COMPOSED:
                 composed.append((item, recipe))
             elif how != HAVE:
+                codes = code_points(item) if optional else ()
+                if len(codes) == 1 and codes[0] in optional:
+                    optional_missing.append(item)
+                    continue
                 into.append(item)
                 if how == PARTS:
                     parts.append(item)
     marks = code_points(language.marks or u"")
     marks_missing = [char_of(code) for code in marks if code not in font.codes]
     short = len(missing) + len(marks_missing)
-    have = (len(language.base) - len(missing) + len(language.auxiliary) - len(auxiliary_missing)
-            + len(marks) - len(marks_missing))
+    have = (len(language.base) - language.optional_count - len(missing) + len(language.auxiliary)
+            - len(auxiliary_missing) + len(marks) - len(marks_missing))
     # Below the threshold of "within reach", one character or more is a start (red); none at all, gray.
     level = ("covered" if not short and not auxiliary_missing else "nearly" if short <= nearly
              else "started" if have > 0 else "missed")
-    return Coverage(language, missing, auxiliary_missing, marks_missing, composed, parts, level, have)
+    return Coverage(language, missing, auxiliary_missing, marks_missing, composed, parts, level, have, optional_missing)
 
 
 def check_script(script, font, nearly=NEARLY_MISSING):
-    """A ScriptSet checked as check_language checks a set, on its ranges: no character is made but
+    """A ScriptSet (or another RangedSet) checked as check_language checks a set, on its ranges: no character is made but
     the missing ones that may be composed. Its own characters missing are the base ones missing, the
     shared ones the auxiliary ones; a letter the font's anchors compose counts, looked for when the
     font has some of the script and misses at most SCRIPT_COMPOSE_MOST of it (Han's ideographs and
@@ -814,8 +983,15 @@ def check_script(script, font, nearly=NEARLY_MISSING):
     codes = font.codes
     missing = [code for low, high in script.own_ranges for code in range(low, high + 1) if code not in codes]
     shared = [code for low, high in script.shared_ranges for code in range(low, high + 1) if code not in codes]
+    optional_missing = []
+    if script.optional:  # (its optional characters: counted apart, never in its level)
+        optional = script.optional
+        optional_missing = [code for code in missing + shared if code in optional]
+        missing = [code for code in missing if code not in optional]
+        shared = [code for code in shared if code not in optional]
+    own_count = script.own_count - script.optional_own  # (the own characters it needs)
     composed, parts = [], []
-    if len(missing) < script.own_count and len(missing) <= SCRIPT_COMPOSE_MOST:
+    if len(missing) < own_count and len(missing) <= SCRIPT_COMPOSE_MOST:
         kept = []
         for code in missing:
             item = char_of(code)
@@ -827,18 +1003,19 @@ def check_script(script, font, nearly=NEARLY_MISSING):
                 if how == PARTS:
                     parts.append(item)
         missing = kept
-    have = script.own_count - len(missing) + script.shared_count - len(shared)
+    have = own_count - len(missing) + script.shared_count - script.optional_shared - len(shared)
     # Started or missed by its own characters alone: the shared ones (U+00B7, a Latin font has it) are
     # other scripts' too, and made Han and Carian "started" in a font with none of theirs. They still
     # count in have, and as the auxiliary ones missing.
     level = ("covered" if not missing and not shared else "nearly" if len(missing) <= nearly
-             else "started" if len(missing) < script.own_count else "missed")
-    return Coverage(script, CodeItems(missing), CodeItems(shared), [], composed, parts, level, have)
+             else "started" if len(missing) < own_count else "missed")
+    return Coverage(script, CodeItems(missing), CodeItems(shared), [], composed, parts, level, have,
+                    CodeItems(optional_missing))
 
 
 def check_entry(one, font, nearly=NEARLY_MISSING):
-    """A language or a character set checked; a script's set by its ranges."""
-    if isinstance(one, ScriptSet):
+    """A language or a character set checked; a script's set, or another set kept as ranges, by its ranges."""
+    if isinstance(one, RangedSet):
         return check_script(one, font, nearly)
     return check_language(one, font, nearly)
 
@@ -924,18 +1101,38 @@ def left_title(language):
     return STATUS_TITLES.get(language.status, u"%s" % language.status)
 
 
+# The scripts' groups: one per script of Unicode. Hyperglot labels some orthographies with names that
+# are no script of their own: Cree, Inuktitut Syllabics, and Ojibwe Syllabics are written in Unicode's
+# Canadian Aboriginal script, which Hyperglot itself calls Canadian Syllabics; Chinese, Hanja, and Kanji
+# are all Han. Each became a script of its own in the list (Plains Cree alone under Cree, Inuktitut alone
+# under Inuktitut Syllabics). A language keeps its own label (language.script: what its row's tooltip
+# says, what tells two orthographies apart); the lists, the bars, and the counts go by its group. The other
+# labels are one per Unicode script already, under another name than Unicode's at most (Burmese for
+# Myanmar, Ge'ez for Ethiopic, Modern Yi for Yi): those are left as they are.
+SCRIPT_GROUPS = {u"Cree": u"Canadian Syllabics", u"Inuktitut Syllabics": u"Canadian Syllabics",
+                 u"Ojibwe Syllabics": u"Canadian Syllabics",
+                 u"Chinese": u"Han", u"Hanja": u"Han", u"Kanji": u"Han"}
+
+
+def script_group(label):
+    """The group (one per Unicode script) a script's label is listed under: itself, or the one
+    SCRIPT_GROUPS names."""
+    return SCRIPT_GROUPS.get(label, label)
+
+
 def coverage(languages, font, nearly=NEARLY_MISSING, historical=False, statuses=None):
     """[ScriptCoverage], the scripts the font has first (those with the most languages covered or
     within reach first); within each, the languages within reach first (the fewest missing first),
     then the covered ones, then the missed ones, the most spoken first. statuses: the statuses kept
-    (None: living and constructed, and historical too when historical is set)."""
+    (None: living and constructed, and historical too when historical is set). A script is a group of
+    labels, one per Unicode script (script_group)."""
     if statuses is None and not historical:
         statuses = STATUS_FILTERS[0][2]
     by_script = {}
     for language in languages:
         if statuses is not None and language.status not in statuses:
             continue
-        by_script.setdefault(language.script, []).append(check_language(language, font, nearly))
+        by_script.setdefault(script_group(language.script), []).append(check_language(language, font, nearly))
     found = []
     for script, results in by_script.items():
         letters = set()
@@ -973,9 +1170,9 @@ def name_key(result):
 
 def covered_key(result):
     """Covered, then within reach, then started, then missed; within each, the fewest characters
-    missing first."""
+    missing first, the optional ones last of all (they only break a tie)."""
     return (BAR_LEVELS.index(result.level) if result.level in BAR_LEVELS else len(BAR_LEVELS),
-            result.base_missing(), len(result.auxiliary_missing))
+            result.base_missing(), len(result.auxiliary_missing), len(result.optional_missing))
 
 
 def sort_languages(results, sort="reach"):
@@ -1963,8 +2160,9 @@ class AddRow(object):
     """A row of a tab of characters: a missing character (a capital and its small letter together when both
     are missing), the languages within reach that need it, and those it completes on its own."""
 
-    def __init__(self, items, needing, completing):
+    def __init__(self, items, needing, completing, optional=False):
         self.items, self.needing, self.completing = items, needing, completing
+        self.optional = optional  # a set's optional character (selection_rows: listed after the others, marked)
 
     def text(self):
         return u" ".join(shown_text(item) for item in self.items)
@@ -2046,6 +2244,21 @@ class Selection(object):
         beyond = sum(max(0, len(needs(r)) - WANTED_MOST) for r in self.results if r.level != "covered")
         return len(self.wanted()) + beyond
 
+    def optional(self):
+        """The optional characters it misses (a set's or a script's: presentation forms, compatibility
+        characters), the first WANTED_MOST of each, in order, once each: never in wanted()."""
+        found, seen = [], set()
+        for r in self.results:
+            for item in r.optional_missing[:WANTED_MOST]:
+                if item not in seen:
+                    seen.add(item)
+                    found.append(item)
+        return found
+
+    def optional_count(self):
+        """How many optional characters it misses, all of them."""
+        return sum(len(r.optional_missing) for r in self.results)
+
 
 def same_results(one, other):
     """Whether two lists hold the same coverages, the same objects in any order (a Selection made again
@@ -2066,10 +2279,25 @@ def selection_rows(rows, selection, most=FLOAT_MOST):
     and in its order (their +N counts every language); the characters no row there has (a started or
     missed language's, a character set's, another script's) get rows of their own after them, those
     that complete the most of the selection's languages first, then by code point, at most `most`
-    characters of them (left: how many more it misses). With nothing selected or missing, no rows."""
+    characters of them (left: how many more it misses). A set's optional characters missing come last,
+    marked optional (AddRow.optional), as many as `most` still allows. With nothing selected or missing,
+    no rows."""
     wanted = selection.wanted() if selection is not None else []
     if not wanted:
-        return [], 0
+        rows, left = [], 0
+    else:
+        rows, left = required_rows(rows, selection, wanted, most)
+    optional = selection.optional() if selection is not None else []
+    if optional:
+        room = max(0, most - sum(len(row.items) for row in rows))  # (the required ones first: what is left of most)
+        shown = optional[:room]
+        rows = rows + [AddRow([item], [], [], True) for item in sorted(shown, key=code_points)]
+        left += selection.optional_count() - len(shown)
+    return rows, left
+
+
+def required_rows(rows, selection, wanted, most):
+    """selection_rows' rows of the characters a selection needs (wanted), and how many more it misses."""
     needed = set(wanted)
     own = [row for row in rows if needed & set(row.items)]
     listed = set(item for row in own for item in row.items)
@@ -2108,13 +2336,22 @@ def selection_text(selection, left, b=None):
             u"misses 1 glyph" if short == 1 and count == 1 else
             u"misses %d glyphs" % count if short == 1 else
             u"miss 1 glyph" if count == 1 else u"miss %d glyphs" % count)
-    elif not count:
-        return u"%s misses nothing." % name
     else:
-        text = u"%s misses %s." % (name, counted(count, u"glyph"))
+        optional = selection.optional_count()  # (a set's optional glyphs: listed after the others, marked so)
+        if not count and not optional:
+            return u"%s misses nothing." % name
+        if not optional:
+            text = u"%s misses %s." % (name, counted(count, u"glyph"))
+        elif not count:
+            text = u"%s misses no glyph it needs, but %s (%s)." % (
+                name, counted_grouped(optional, u"optional glyph"), OPTIONAL_WHAT)
+        else:
+            text = u"%s misses %s, and %s, listed after them." % (
+                name, counted_grouped(count, u"glyph"), counted_grouped(optional, u"optional glyph"))
+        count += optional
     if left:
-        text += u" %s not listed (the first %d are)." % (
-            u"1 more is" if left == 1 else u"%d more are" % left, count - left)
+        text += u" %s not listed (the first %s are)." % (
+            u"1 more is" if left == 1 else u"%s more are" % grouped(left), grouped(count - left))
     return text + u" Click it again, or an empty part of its list, to unselect it."
 
 
@@ -2123,7 +2360,7 @@ def selection_title(selection):
     to do while nothing is selected."""
     if selection is None:
         return UNSELECTED_TITLE
-    return u"%s (%d)" % (selection.name, selection.count())
+    return u"%s (%d)" % (selection.name, selection.count() + selection.optional_count())  # (all its tab lists)
 
 
 # The grayed tab's caption: what to do, since the tab works on a family or a character set as well.
@@ -2156,6 +2393,14 @@ def busy_share(done, part=0.0):
     base = BUSY_SHARES[done - 1] if done else 0.0
     end = BUSY_SHARES[done] if done < len(BUSY_SHARES) else base
     return base + max(0.0, min(float(part), 1.0)) * (end - base)
+
+
+def counted_sets(results):
+    """The character sets the top line and the log's count count: the data's, but the scripts (counted
+    apart), the user's own, and the Legacy group's (wholly optional, always covered: the owner, "they
+    do not count towards the stats"; their rows still say what the font lacks of them)."""
+    return [r for r in results if r.language.script not in (CUSTOM_GROUP, LEGACY_GROUP)
+            and not isinstance(r.language, ScriptSet)]
 
 
 def checked_sentence(languages, sets, scripts, seconds):
@@ -2266,10 +2511,11 @@ def gain_text(checked_count, gained, bold=None):
         return u"Check glyphs to see how many languages they complete."
     scripts, order = {}, []
     for r in gained:
-        if r.language.script not in scripts:
-            scripts[r.language.script] = 0
-            order.append(r.language.script)
-        scripts[r.language.script] += 1
+        group = script_group(r.language.script)  # (as the scripts are listed: Cree under Canadian Syllabics)
+        if group not in scripts:
+            scripts[group] = 0
+            order.append(group)
+        scripts[group] += 1
     head = u"With %s checked: " % counted(checked_count, u"glyph")
     if not gained:
         return head + u"no language is complete yet"
@@ -2948,7 +3194,10 @@ def register_list_font(QtCore, QtGui):
     which is optional) are registered beside it and given to Qt as its substitutes
     (QFont.insertSubstitutions, once), so a font of the first family draws what it lacks from them.
     One of them that is missing or refused leaves its characters to the system's fonts (boxes
-    where Qt finds none); nothing here raises for it."""
+    where Qt finds none); nothing here raises for it. The fallback families given to Qt are noted
+    (LIST_FALLBACKS_DRAWN), so a tooltip names by code point what no registered file draws."""
+    global LIST_FALLBACKS_DRAWN
+
     def add(path):
         """The first family of a font file added to Qt's application fonts, or None."""
         if isinstance(path, bytes):  # (Python 2: the file system's encoding, for Qt's unicode path)
@@ -2963,6 +3212,7 @@ def register_list_font(QtCore, QtGui):
         return families[0] if families else None
 
     known = [u"%s" % f for f in QtGui.QFontDatabase().families()]
+    LIST_FALLBACKS_DRAWN = frozenset()  # (until they are given to Qt below)
     if LIST_FAMILY in known:
         family = LIST_FAMILY
     else:
@@ -2986,6 +3236,7 @@ def register_list_font(QtCore, QtGui):
         missing = [f for f in fallbacks if f not in present]
         if missing:
             QtGui.QFont.insertSubstitutions(family, missing)
+        LIST_FALLBACKS_DRAWN = frozenset(fallbacks)
     except Exception:
         pass
     return family
@@ -3106,6 +3357,8 @@ STATE_LABELS = {"covered": u"Covered", "nearly": u"Within reach", "started": u"S
 # reach (red); Missed: it has none (gray).
 BRANCH_SHEET = u" QTreeView::branch { image: none; border-image: none; }"
 ARROW_ZONE = 22  # pixels from a row's left edge: a press there, on a family's arrow, opens or closes it only
+SEARCH_DELAY = 250  # milliseconds of a pause in the typing before a search lists its finds
+SEARCH_OPENS = 3  # characters a search has from which it opens the families it lists
 
 
 def qcolor(rgb, alpha=255):
@@ -3713,15 +3966,19 @@ def others_text(r, row, shown=6):
     if len(others) > shown:
         if isinstance(wanted, CodeItems):
             rest = len(wanted) - sum(1 for item in own if item in wanted)
-        else:  # (a list may hold a character twice, a mark both a base character and a mark: counted as listed)
-            rest = sum(1 for item in wanted if item not in own)
+        else:  # (a list may hold a character twice, a mark both a base character and a mark: counted as listed;
+            # list.count, not a scan in Python: 200 rows of a set of 20,000 took a second)
+            rest = len(wanted) - sum(wanted.count(item) for item in own)
         text += u" +%d" % (rest - shown)
     return text
 
 
 def row_languages_text(row, shown=4):
     """The languages column of a row of characters: the languages it completes, or, when it completes
-    none on its own, the languages needing it with what else they miss."""
+    none on its own, the languages needing it with what else they miss; "optional" for a set's
+    optional character (the selection's own tab lists them last)."""
+    if row.optional:
+        return u"optional"
     if row.completing:
         names = [r.language.name for r in row.completing]
     else:
@@ -3732,22 +3989,37 @@ def row_languages_text(row, shown=4):
     return text
 
 
+def few_names(names, shown=None):
+    """Names in a tooltip, the first `shown` of them and how many more: a glyph many languages need
+    (a schwa) named hundreds, a wall of text the height of the screen."""
+    shown = TIP_NAMES if shown is None else shown
+    text = u", ".join(names[:shown])
+    if len(names) > shown:
+        text += u", and %s more" % grouped(len(names) - shown)
+    return text
+
+
 def row_tip(row, buildable=False):
-    lines = [u"%s: %s" % (code_label(item), short_name(item)) for item in row.items]
-    if row.auxiliary():
-        lines.append(u"Auxiliary: these languages use it in loan words and names, and miss nothing else.")
+    """A glyph's row's tooltip: its code points and names, then a paragraph each (a blank line
+    between two) for what it completes, what needs it with other glyphs, and what the font has of it."""
+    paragraphs = [u"\n".join(u"%s: %s" % (code_label(item), short_name(item)) for item in row.items)]
+    if row.optional:
+        paragraphs.append(u"Optional: the set selected holds it and is complete without it (%s)." % OPTIONAL_WHAT)
+    elif row.auxiliary():
+        paragraphs.append(u"Auxiliary: these languages use it in loan words and names, and miss nothing else.")
     if row.completing:
-        lines.append(u"Completes on its own: %s." % u", ".join(r.language.label() for r in row.completing))
+        paragraphs.append(u"Completes on its own: %s." % few_names([r.language.label() for r in row.completing]))
     others = [r for r in row.needing if r not in row.completing]
     if others:
-        lines.append(u"Needed, with other glyphs, by: %s." % u", ".join(
-            u"%s (with %s)" % (r.language.label(), others_text(r, row)) for r in others))
+        paragraphs.append(u"Needed, with other glyphs, by: %s." % few_names(
+            [u"%s (with %s)" % (r.language.label(), others_text(r, row)) for r in others[:TIP_NAMES]]
+            + [u""] * max(0, len(others) - TIP_NAMES)))  # (only the names shown are made: others_text reads lists)
     parts = [item for item in row.items if any(item in r.parts for r in row.needing)]
     if parts:
-        lines.append(u"The font has the letter and marks of %s, but no anchors joining them." % u" ".join(parts))
+        paragraphs.append(u"The font has the letter and marks of %s, but no anchors joining them." % u" ".join(parts))
     if buildable:
-        lines.append(u"Diacritics can build it from the font's letters and marks.")
-    return u"\n".join(lines)
+        paragraphs.append(u"Diacritics can build it from the font's letters and marks.")
+    return u"\n\n".join(paragraphs)
 
 
 def language_matches(r, text):
@@ -3797,13 +4069,31 @@ class Section(object):
         return u"%s: %s" % (text, self.why) if self.why else text
 
 
+class RightView(object):
+    """One list of a tab at the right (each tab has two: the full list, and a search's finds) and what
+    it was filled with: its rows (Coverages, FamilyNodes, Uncovered, by the index each item holds), the
+    label of each (what finds its item again), the closed headings and families whose rows wait, and
+    the signature of what it was filled from (None: never filled). A list whose signature is still the
+    one wanted is shown as it is: where it was scrolled to, its headings as they were opened."""
+
+    def __init__(self, tree):
+        self.tree, self.rows, self.labels, self.unfilled, self.signature = tree, [], [], {}, None
+
+
 ABSENT_WHY = u"a script the font has none of"
 OTHER_SCRIPT_WHY = u"not the script chosen above"
 STATUS_WHY = u"left out by the choice of languages above"
 RIGHT_TABS = (("languages", u"Languages"), ("sets", u"Character sets"), ("families", u"Families"))
 RIGHT_NOUNS = {"languages": (u"language", u"languages"), "sets": (u"character set", u"character sets"),
                "families": (u"language", u"languages")}
-UNCLASSIFIED = u"Not classified"  # the Families tab's last node: languages Glottolog does not classify
+# The Families tab's last node: the languages Glottolog does not classify. It read "Not classified", which,
+# among the families, read as the name of one (the owner: "Odd a family is listed as not classified since
+# it's a family"): it is no family, and says what its languages are. Its one language was Minang (xrg), a
+# code Glottolog 5.4 has no languoid for, which the families' train script now places beside Nyunga: with
+# this data the node is never made (family_tree makes it for a language that lands there, and only then).
+UNCLASSIFIED = u"Languages Glottolog does not classify"
+UNCLASSIFIED_TIP = (u"No family: Glottolog 5.4 has no entry for these languages' ISO 639-3 codes, or files them under "
+                    u"no family, so Font Check cannot place them in its tree. They are checked as any language is.")
 
 
 def kept_rows(results, text, level, sort, counts):
@@ -3897,6 +4187,52 @@ def family_matches(path, text):
 # node, and the scripts Unicode has that no orthography here is written in.
 NOT_COVERED = u"Not yet covered"
 SCRIPTS_NOT_COVERED = u"Scripts not yet covered"
+# Scripts whose characters do not depend on the language written, so that no language's character list,
+# and no count of languages, can ever rank a font for them: notations that transcribe other scripts or
+# languages. The owner: for Braille and SignWriting, "'Not yet covered' fails at being a good description
+# ... they can never be covered according to those criteria", and they are character sets, not languages.
+# So they are not listed among the scripts not yet covered in the Languages tab: they are character sets
+# (Notation, as Unicode blocks, and Scripts (Unicode)), and a search for one there points to them. Each
+# with why, and its block's set. The other scripts not yet covered each wrote one or more languages, so a
+# source could describe them: Duployan (the everyday script of Chinook Wawa and several Salishan
+# languages; its block is a Notation set too, which answers another question), Bopomofo (a closed phonetic
+# set for Mandarin and Taiwanese), Phags Pa, Zanabazar Square, and Soyombo. Mongolian was among them until
+# SLDR's Mongolian in the Mongolian script was added to the data (filed under Peripheral Mongolian).
+NOTATION_SCRIPTS = (
+    (u"Braille", u"its 256 cells are the same code points whatever the language or contraction code",
+     u"Braille Patterns (Unicode block)"),
+    (u"SignWriting", u"its symbols are one set for every sign language", u"Sutton SignWriting (Unicode block)"),
+)
+CLOSING_TITLES = (SCRIPTS_NOT_COVERED,)  # the Languages tab's closing section: closed until asked for
+SET_LINK = u"set:"  # a link in the line under the lists: the Character sets tab, searched for the set named
+
+
+def notation_reason(name):
+    """Why a script is a notation no language count ranks (NOTATION_SCRIPTS), or u"" for another."""
+    return next((reason for script, reason, _ in NOTATION_SCRIPTS if script == name), u"")
+
+
+def languages_not_covered(not_covered):
+    """The scripts not yet covered that the Languages tab lists: those no orthography here is written
+    in, but the notations (NOTATION_SCRIPTS), which are character sets."""
+    return [name for name in not_covered if not notation_reason(name)]
+
+
+def notation_line(text):
+    """What a search of the Languages tab says of a notation it names (Braille, SignWriting): a
+    character set, not a language's script, and where it is checked; u"" when it names none. As
+    known_matches has it, the text is a whole name, or, from three characters on, part of one (a
+    search for "e" names neither)."""
+    text = fold(text).strip()
+
+    def named(name):
+        return text == name or (len(text) >= 3 and text in name)
+    found = [(script, reason, block) for script, reason, block in NOTATION_SCRIPTS
+             if text and (named(fold(script)) or named(fold(block)))]
+    return u" ".join(
+        u"%s is a notation, not a language's script (%s): it is checked as a character set, %s under Notation and "
+        u"%s under Scripts (Unicode), in the Character sets tab." % (script, reason, block, script)
+        for script, reason, block in found)
 UNCOVERED_NAMED = 4  # languages a family's tooltip names of those it cannot check
 UNCOVERED_OPEN = 50  # a search opens a family's Not yet covered node by itself up to this many languages
 CONTRIBUTE = (u"These languages are known, but FreeLab has no data on how they are written. To add one, open an "
@@ -3963,6 +4299,13 @@ class UncoveredNode(FamilyNode):
         self.entries = list(entries)
 
 
+def shows_uncovered(node):
+    """Whether a family tree (its root) lists any language that cannot be checked yet."""
+    if isinstance(node, UncoveredNode):
+        return bool(node.entries)
+    return any(shows_uncovered(child) for child in getattr(node, "children", ()))
+
+
 def uncovered_count_text(count):
     """A family's last column: how many of its languages cannot be checked yet (nothing for none)."""
     return u"%d not yet covered" % count if count else u""
@@ -3990,6 +4333,9 @@ def proxy_sentence(scripts):
         if sets:
             lines.append(u"Recorded as written in %s: the character %s %s (in Character sets) %s the nearest measure." % (
                 script, u"set" if len(sets) == 1 else u"sets", word_list(list(sets)), u"is" if len(sets) == 1 else u"are"))
+        elif script_group(script) != script:  # (Chinese is listed under Han: the heading named as it is listed)
+            lines.append(u"Recorded as written in %s: the languages listed under %s are the nearest measure."
+                         % (script, script_group(script)))
         else:
             lines.append(u"Recorded as written in %s: the languages listed under that script are the nearest measure."
                          % script)
@@ -4009,7 +4355,7 @@ def uncovered_tip(entry, scripts=()):
         lines.append(u"Also called: %s" % word_list(others))
     lines.append(u"To add it, open an issue on FreeLab's repository (%s) with the characters it uses and a source."
                  % ISSUES_ADDRESS)
-    return u"\n".join(line for line in lines if line)
+    return u"\n\n".join(line for line in lines if line)  # (a blank line between two paragraphs)
 
 
 def uncovered_matches(entry, text):
@@ -4029,14 +4375,20 @@ def scripts_section(not_covered, text=u""):
     return [name for name in not_covered if not text or text in fold(name)]
 
 
-def coverage_counts_text(checked, known, scripts_covered, scripts_known):
-    """The sentence that counts what Font Check can check of what is known."""
+def coverage_counts_text(checked, known, scripts_covered, scripts_known, uncovered=None, notations=0):
+    """The sentence that counts what Font Check can check of what is known; uncovered and notations:
+    how the scripts no language here is written in divide (the Languages tab lists the first as not yet
+    covered; the notations are character sets), so that the counts add up."""
     if not known:
         return u""
     text = u"Font Check can check %s of the %s languages Glottolog lists with an ISO 639-3 code" % (
         grouped(checked), grouped(known))
     if scripts_known:
         text += u", written in %d of Unicode's %d scripts" % (scripts_covered, scripts_known)
+        if uncovered is not None and notations:
+            text += u" (%d not yet covered, and %s checked as %s)" % (
+                uncovered, u"1 notation" if notations == 1 else u"%d notations" % notations,
+                u"a character set" if notations == 1 else u"character sets")
     return text + u"."
 
 
@@ -4120,11 +4472,17 @@ def family_order(node, sort):
 def family_tip(node):
     """A family's tooltip: its place in Glottolog's classification and its languages at each level."""
     if isinstance(node, UncoveredNode):
-        return u"%s\n%s" % (uncovered_sentence(node.entries).replace(u" more language", u" language", 1), CONTRIBUTE)
+        return u"%s\n\n%s" % (uncovered_sentence(node.entries).replace(u" more language", u" language", 1), CONTRIBUTE)
     counts = level_counts(node.all_results())
     place = u" > ".join(node.path) if len(node.path) > 1 else u""
-    return counts_tip(node.name, counts) + (u"\nGlottolog: %s." % place if place else u"") + (
-        u"\n" + uncovered_sentence(node.uncovered) if node.uncovered else u"")
+    paragraphs = [counts_tip(node.name, counts)]
+    if node.path == (UNCLASSIFIED,):
+        paragraphs.append(UNCLASSIFIED_TIP)
+    if place:
+        paragraphs.append(u"Glottolog: %s." % place)
+    if node.uncovered:
+        paragraphs.append(uncovered_sentence(node.uncovered))
+    return u"\n\n".join(paragraphs)
 
 
 def families_line(root, text=u"", hidden=0, level=None, classified=True):
@@ -4230,44 +4588,104 @@ def languages_line(sections, text=u"", hidden=0, outside=0, left=0, level=None, 
     return u" ".join(lines)
 
 
-TIP_SHOWN = 60  # characters named in a character set's tooltip, at most (a block may miss hundreds)
+TIP_SHOWN = 60  # characters named in a tooltip's list, at most (a block may miss hundreds, Mandarin thousands)
+TIP_NAMES = 30  # languages named in a glyph's tooltip, at most (a schwa is needed by hundreds)
+# A tooltip that cuts a list of missing characters short says where they are all listed.
+CUT_TIP = u"Select it to list its missing glyphs at the left."
 
 
 def few(items, shown=TIP_SHOWN):
+    if any(slow_to_shape(item) for item in items[:shown]):
+        return few_codes(items) + SLOW_BY_CODE
     text = u" ".join(items[:shown])
     if len(items) > shown:
-        text += u" and %d more" % (len(items) - shown)
+        text += u" and %s more" % grouped(len(items) - shown)
     return text
 
 
+# Characters whose font lays them out too slowly for a tooltip: FreeLang+ Duployan (Noto Sans Duployan's
+# layout) took 3.5 ms a character, every time Qt laid the tooltip out; its 60 characters in a script's
+# tooltip froze FontLab for 5.9 s as Qt sized it (measured live 2026-11-14; the next slowest script, Adlam,
+# 0.7 ms). A tooltip names these by code point.
+SLOW_SHAPING = ((0x1BC00, 0x1BCAF),)  # Duployan, and the shorthand format controls after it
+SLOW_BY_CODE = u" (by code point: Duployan's font is too slow to lay out in a tooltip)"
+
+
+def slow_to_shape(item):
+    """Whether a character (or a letter and marks) is one a tooltip names by code point (SLOW_SHAPING)."""
+    return any(low <= code <= high for code in code_points(item) for low, high in SLOW_SHAPING)
+
+
+# What "not yet covered" means, said where the scripts not yet covered are listed (the owner wondered how
+# they had full previews, and was surprised to see Braille, SignWriting, and Mongolian among them): the
+# script is encoded and drawn; what is missing is a language described in it.
+NOT_COVERED_MEANS = (u"Not yet covered means that none of Font Check's sources describes a language written in the "
+                     u"script, not that the script is unknown or cannot be drawn: Unicode encodes it, its glyphs are "
+                     u"drawn in FreeLang (or the system's fonts, for the largest scripts), and the font is checked "
+                     u"against its whole repertoire.")
 NO_LANGUAGE_DATA = (u"No language data exists for it yet: none of Font Check's sources gives an orthography written "
-                    u"in it, so the script's whole repertoire is the measure.")
+                    u"in it, so the script's whole repertoire is the measure. Not yet covered means only that: the "
+                    u"script itself is encoded and drawn.")
 
 
 def few_of(items, shown=TIP_SHOWN):
     """few() of a list that may be long or made as it is read (a script's missing characters): only
     the ones shown are made."""
-    text = u" ".join(shown_text(item) for item in items[:shown])
+    first = items[:shown]
+    if any(slow_to_shape(item) for item in first):
+        return few_codes(items) + SLOW_BY_CODE
+    text = u" ".join(shown_text(item) for item in first)
     if len(items) > shown:
         text += u" and %s more" % grouped(len(items) - shown)
     return text
 
 
 # The bundled list font, which tooltips are set in, cannot hold all of Unicode: it draws a script's
-# set whole up to this many characters of its own, and a Unicode block's set up to that many
-# (checks/train/orthographies.py's SCRIPT_FONT_LIMIT and BLOCK_FONT_LIMIT: the tests keep them equal).
-# The tooltip of a larger set names what is missing by code point, not by characters that would show
-# as boxes.
-NAMED_SCRIPT_MOST, NAMED_BLOCK_MOST = 300, 256
+# set whole up to this many characters of its own, a Unicode block's set up to that many, and a Han
+# repertoire up to the third (checks/train/orthographies.py's SCRIPT_FONT_LIMIT, BLOCK_FONT_LIMIT, and
+# UNIHAN_FONT_LIMIT: the tests keep them equal). Since 2026-11-14 that is every script but Han and
+# every block (they were 300 and 256). The tooltip of a larger set names what is missing by code
+# point, not by characters that would show as boxes. The bounds decide that alone: a tooltip makes its
+# first 60 characters whatever the set's size.
+NAMED_SCRIPT_MOST, NAMED_BLOCK_MOST, NAMED_UNIHAN_MOST = 12000, 1100, 25000
+# Those bounds hold with the optional CJK and FreeLang+ General files, which draw most of a set past
+# the first file's bounds: 300, 256, and no Han repertoire (all three bounds before 2026-11-14). A set
+# is held to them when a file it needs did not register (fallbacks_needed; the tests check it against
+# the files' character maps), so its tooltip lists code points rather than boxes.
+NAMED_SCRIPT_FEW, NAMED_BLOCK_FEW, NAMED_UNIHAN_FEW = 300, 256, 0
+CJK_FALLBACK, GENERAL_FALLBACK = LIST_FONT_FALLBACKS[0][1], LIST_FONT_FALLBACKS[1][1]
+CJK_SCRIPTS = (u"Han", u"Hangul", u"Hiragana", u"Katakana", u"Bopomofo")
+CJK_SHARING = (u"Latin", u"Tangut", u"Yi")  # scripts drawn by FreeLang+ General with characters of the CJK file
+ESSENTIAL_SETS = (u"Ethiopic", u"block-fb50")  # past the first bounds, and drawn by the first file alone
 BY_CODE = u", by code point (a set this large is not drawn by the list's font)"
+
+
+def fallbacks_needed(language):
+    """The optional files (their families) a large set's characters are drawn by: a Han repertoire, a
+    CJK script or block the CJK file; Latin (its fullwidth letters), Tangut, and Yi (the CJK
+    punctuation they share) that one and FreeLang+ General; any other the latter, but Ethiopic and
+    Arabic Presentation Forms-A (the first file's)."""
+    iso = u"%s" % language.iso
+    name = u"%s" % language.name if isinstance(language, ScriptSet) else None
+    if name in ESSENTIAL_SETS or iso in ESSENTIAL_SETS:
+        return ()
+    if iso.startswith(u"unihan-") or name in CJK_SCRIPTS or (iso.startswith(u"block-") and u"CJK" in language.name):
+        return (CJK_FALLBACK,)
+    if name in CJK_SHARING:
+        return (CJK_FALLBACK, GENERAL_FALLBACK)
+    return (GENERAL_FALLBACK,)
 
 
 def names_characters(language):
     """Whether a set's tooltip names its missing characters themselves (the list font draws them)."""
+    drawn = LIST_FALLBACKS_DRAWN
+    whole = drawn is None or all(family in drawn for family in fallbacks_needed(language))
     if isinstance(language, ScriptSet):
-        return language.own_count <= NAMED_SCRIPT_MOST
+        return language.own_count <= (NAMED_SCRIPT_MOST if whole else NAMED_SCRIPT_FEW)
     if (u"%s" % language.iso).startswith(u"block-"):
-        return language.size() <= NAMED_BLOCK_MOST
+        return language.size() <= (NAMED_BLOCK_MOST if whole else NAMED_BLOCK_FEW)
+    if (u"%s" % language.iso).startswith(u"unihan-"):
+        return language.size() <= (NAMED_UNIHAN_MOST if whole else NAMED_UNIHAN_FEW)
     return True
 
 
@@ -4291,21 +4709,27 @@ def few_codes(items, runs=6, looked=2000):
     return text
 
 
-def script_tip(r, no_language=False):
+def script_tip(r, no_language=False, fonts=()):
     """A script's tooltip (a ScriptSet's coverage): its state, how many of its own and of its shared
     characters the font has, what the measure is (and, for a script no orthography here is written in,
     that no language data exists yet), and the first characters missing (by code point for a script
     too large for the list's font to draw)."""
     script = r.language
-    own = script.own_count - len(r.missing)
-    text = u"%s: %s (the font has %s of its %s" % (
-        script.name, STATE_LABELS[r.level].lower(), grouped(own),
-        u"1 character" if script.own_count == 1 else u"%s characters" % grouped(script.own_count))
-    if script.shared_count:
-        text += u", and %s of the %s it shares with other scripts" % (
-            grouped(script.shared_count - len(r.auxiliary_missing)), grouped(script.shared_count))
-    lines = [text + u")."]
-    if no_language:
+    own_count = script.own_count - script.optional_own
+    shared_count = script.shared_count - script.optional_shared
+    parts = [u"%s of its %s" % (grouped(own_count - len(r.missing)), counted_grouped(own_count, u"character"))]
+    if shared_count:
+        parts.append(u"%s of the %s it shares with other scripts" % (
+            grouped(shared_count - len(r.auxiliary_missing)), grouped(shared_count)))
+    optional = script.optional_own + script.optional_shared
+    if optional:
+        parts.append(optional_part(optional, len(r.optional_missing)))
+    lines = [u"%s: %s (the font has %s)." % (script.name, STATE_LABELS[r.level].lower(),
+                                             u", and ".join(parts) if len(parts) == 2 else word_list(parts))]
+    if no_language and notation_reason(script.name):
+        lines.append(u"A notation, not a language's own script: %s. No count of languages can rank a font for it, "
+                     u"so its whole repertoire is the measure." % notation_reason(script.name))
+    elif no_language:
         lines.append(NO_LANGUAGE_DATA)
     lines.append(script.definition)
     if not names_characters(script):
@@ -4319,7 +4743,10 @@ def script_tip(r, no_language=False):
         if r.parts:
             lines.append(u"The font has the letters and marks of %s, but no anchors joining them" % (
                 u"1 more" if len(r.parts) == 1 else u"%s more" % grouped(len(r.parts))))
-        return u"\n".join(lines)
+        if r.optional_missing:
+            lines.append(u"%s: %s" % (OPTIONAL_MISSING, few_codes(r.optional_missing)))
+        return paragraphs_of(lines, any(len(found) > TIP_SHOWN for found in
+                                        (r.missing, r.auxiliary_missing, r.optional_missing)), fonts)
     if r.missing:
         lines.append(u"Missing: %s" % few_of(r.missing))
     if r.auxiliary_missing:
@@ -4328,26 +4755,58 @@ def script_tip(r, no_language=False):
         lines.append(u"Composed from the font's letters and marks (its anchors): %s" % few([c for c, _ in r.composed]))
     if r.parts:
         lines.append(u"The font has the letters and marks of %s, but no anchors joining them" % few(r.parts))
-    return u"\n".join(lines)
+    if r.optional_missing:
+        lines.append(u"%s: %s" % (OPTIONAL_MISSING, few_of(r.optional_missing)))
+    return paragraphs_of(lines, any(len(found) > TIP_SHOWN for found in
+                                    (r.missing, r.auxiliary_missing, r.optional_missing)), fonts)
 
 
-def set_tip(r, no_language=False):
-    """A character set's tooltip: its state, the definition it is cited by, and what the font misses."""
+# The paragraph of a set's tooltip that names its optional characters missing (never "auxiliary": a
+# language's auxiliary character keeps it from being covered, an optional one does not)
+OPTIONAL_MISSING = u"Optional characters missing (%s)" % OPTIONAL_WHAT
+
+
+def optional_part(total, missing):
+    """What a set's tooltip says the font has of its optional characters: "0 of the 57 optional ones"."""
+    return u"%s of the %s optional %s" % (grouped(total - missing), grouped(total), u"one" if total == 1 else u"ones")
+
+
+def paragraphs_of(lines, cut=False, fonts=()):
+    """A tooltip's paragraphs, a blank line between two (the owner: line jumps between paragraphs read
+    better); fonts: the fonts to consider for what FreeLang lacks of a set (fonts_sentence); cut: a list
+    of characters was cut short, and the last paragraph says where it is whole."""
+    return u"\n\n".join([line for line in lines if line] + [fonts_sentence(fonts)] * bool(fonts)
+                        + ([CUT_TIP] if cut else []))
+
+
+def set_tip(r, no_language=False, fonts=()):
+    """A character set's tooltip: its state, the definition it is cited by, what the font misses, and
+    the fonts to consider for what FreeLang does not draw of it (coverage_gaps.json's resources)."""
     if isinstance(r.language, ScriptSet):
-        return script_tip(r, no_language)
-    total = len(r.language.base)
-    lines = [u"%s: %s (the font has %d of its %s)." % (r.language.name, STATE_LABELS[r.level].lower(),
-                                                       total - len(r.missing), counted(total, u"character")),
-             r.language.definition]
-    if r.missing and not names_characters(r.language):
+        return script_tip(r, no_language, fonts)
+    language = r.language
+    required, optional = language.required_size(), language.optional_count
+    if optional and not required:  # (a Legacy set: wholly optional, complete whatever the font has of it)
+        has = u"%s of its %s, all optional: it is complete without them" % (
+            grouped(optional - len(r.optional_missing)), counted_grouped(optional, u"character"))
+    else:
+        has = u"%s of its %s" % (grouped(required - len(r.missing)), counted_grouped(required, u"character"))
+        if optional:
+            has = u"%s, and %s" % (has, optional_part(optional, len(r.optional_missing)))
+    lines = [u"%s: %s (the font has %s)." % (language.name, STATE_LABELS[r.level].lower(), has), language.definition]
+    drawn = names_characters(language)
+    if r.missing and not drawn:
         lines.append(u"Missing%s: %s" % (BY_CODE, few_codes(r.missing)))
     elif r.missing:
-        lines.append(u"Missing: %s" % few([shown_text(item) for item in r.missing]))
+        lines.append(u"Missing: %s" % few_of(r.missing))
     if r.composed:
         lines.append(u"Composed from the font's letters and marks (its anchors): %s" % few([c for c, _ in r.composed]))
     if r.parts:
         lines.append(u"The font has the letters and marks of %s, but no anchors joining them" % few(r.parts))
-    return u"\n".join(lines)
+    if r.optional_missing:
+        lines.append(u"%s%s: %s" % (OPTIONAL_MISSING, u"" if drawn else BY_CODE,
+                                    few_of(r.optional_missing) if drawn else few_codes(r.optional_missing)))
+    return paragraphs_of(lines, len(r.missing) > TIP_SHOWN or len(r.optional_missing) > TIP_SHOWN, fonts)
 
 
 INFERRED_TIP = (u"Inferred from text: these are the letters a counted text uses, not an orthography someone "
@@ -4407,15 +4866,29 @@ def source_text(language):
     return u"%s: %s" % (rests_text(language), u", ".join(parts))
 
 
-def coverage_tip(r, path=(), no_language=False):
-    """A language's tooltip (path: the family and branches above it, Glottolog's): its state, where
-    its characters come from (and that they are inferred from a text, when they are), the other name
-    a search found it by, and the characters missing or composed. no_language: a script listed among
-    those no orthography is written in says so."""
+def also_listed(groups):
+    """What a language's tooltip says of the other scripts it is listed under (Pontic Greek under
+    Cyrillic and Greek, Sanskrit under Devanagari and Nandinagari): a second orthography, not a row
+    listed twice by mistake."""
+    if not groups:
+        return u""
+    return u"Also listed under %s: it has an orthography in %s too." % (
+        word_list(list(groups)), u"that script" if len(groups) == 1 else u"each of those scripts")
+
+
+def coverage_tip(r, path=(), no_language=False, also=(), fonts=()):
+    """A language's tooltip (path: the family and branches above it, Glottolog's): its state, its
+    script (and its source's finer label, when the list groups it under another: Cree under Canadian
+    Syllabics), where its characters come from (and that they are inferred from a text, when they
+    are), the other scripts it is also listed under (also), the other name a search found it by, and
+    the characters missing or composed, each list cut at TIP_SHOWN (Mandarin misses thousands: a
+    tooltip the height of the screen). A paragraph each, a blank line between two. no_language: a
+    script listed among those no orthography is written in says so; fonts: a set's fonts to consider."""
     if r.language.kind == "set":
-        return set_tip(r, no_language)
-    lines = [u"%s, %s script: %s (%s)." % (r.language.label(), r.language.script, STATE_LABELS[r.level].lower(),
-                                           source_text(r.language))]
+        return set_tip(r, no_language, fonts)
+    label, group = r.language.script, script_group(r.language.script)
+    lines = [u"%s, %s script%s: %s (%s)." % (r.language.label(), group, u" (%s)" % label if label != group else u"",
+                                             STATE_LABELS[r.level].lower(), source_text(r.language))]
     if r.language.evidence == INFERRED:
         lines.append(INFERRED_TIP)
         if len(r.language.rests) > 1:
@@ -4425,34 +4898,59 @@ def coverage_tip(r, path=(), no_language=False):
             lines.append(SHORT_TIP)
     elif r.language.evidence == KEYBOARD:
         lines.append(KEYBOARD_TIP)
+    lines.append(also_listed(also))
     if r.found_by:
         lines.append(u"Found by its other name %s." % r.found_by)
     if path:
         lines.append(u"Family: %s." % u" > ".join(path))
     if r.missing:
-        lines.append(u"Base characters missing: %s" % u" ".join(r.missing))
+        lines.append(u"Base characters missing: %s" % few(r.missing))
     if r.marks_missing:
-        lines.append(u"Marks missing: %s" % u" ".join(DOTTED_CIRCLE + m for m in r.marks_missing))
+        lines.append(u"Marks missing: %s" % few([DOTTED_CIRCLE + m for m in r.marks_missing]))
     if r.auxiliary_missing:
-        lines.append(u"Auxiliary characters missing (loan words, names): %s" % u" ".join(r.auxiliary_missing))
+        lines.append(u"Auxiliary characters missing (loan words, names): %s" % few(r.auxiliary_missing))
     if r.composed:
-        lines.append(u"Composed from the font's letters and marks (its anchors): %s" % u" ".join(c for c, _ in r.composed))
+        lines.append(u"Composed from the font's letters and marks (its anchors): %s" % few([c for c, _ in r.composed]))
     if r.parts:
-        lines.append(u"The font has the letters and marks of %s, but no anchors joining them" % u" ".join(r.parts))
-    return u"\n".join(lines)
+        lines.append(u"The font has the letters and marks of %s, but no anchors joining them" % few(r.parts))
+    return paragraphs_of(lines, any(len(found) > TIP_SHOWN for found in (r.missing, r.marks_missing,
+                                                                          r.auxiliary_missing)))
+
+
+def set_counts_note(r):
+    """A character set's or a script's own note, its optional characters aside: what it misses of
+    what it needs (counts, not characters: the list's font draws the languages' characters, not every
+    symbol), u"" when it misses none."""
+    if r.level == "covered":
+        return u""
+    if isinstance(r.language, ScriptSet):
+        if not r.missing:  # (its own characters are all there: what it shares with other scripts is not)
+            return u"%s shared missing" % grouped(len(r.auxiliary_missing))
+        return u"%s of %s missing" % (grouped(len(r.missing)), grouped(r.language.required_size()))
+    return u"%s of %s missing" % (grouped(len(r.missing)), grouped(r.language.required_size()))
+
+
+def with_optional(note, optional):
+    """A set's note with its optional glyphs missing: "4 optional glyphs missing" alone (it is covered,
+    or misses nothing else), or after the rest, "158 of 168 missing (and 4 optional glyphs)"."""
+    if not optional:
+        return note
+    if not note:
+        return u"%s missing" % counted_grouped(optional, u"optional glyph")
+    return u"%s (and %s)" % (note, counted_grouped(optional, u"optional glyph"))
+
+
+def counted_grouped(number, one, many=None):
+    """counted(), its number with its thousands apart: "1,002 optional glyphs"."""
+    return u"%s %s" % (grouped(number), one if number == 1 else (many or one + u"s"))
 
 
 def language_note(r):
     """The second column of a language: its missing characters when within reach, "composed" when
     covered thanks to the anchors, "inferred" when its characters were counted from a text,
     "keyboard" when they were read from a keyboard layout."""
-    if isinstance(r.language, ScriptSet) and r.level != "covered":
-        if not r.missing:  # (its own characters are all there: what it shares with other scripts is not)
-            return u"%s shared missing" % grouped(len(r.auxiliary_missing))
-        return u"%s of %s missing" % (grouped(len(r.missing)), grouped(r.language.size()))
-    if r.language.kind == "set" and r.level != "covered":
-        # (counts, not the characters: the list's font draws the languages' characters, not every symbol)
-        return u"%d of %d missing" % (len(r.missing), len(r.language.base))
+    if r.language.kind == "set" and (r.level != "covered" or r.optional_missing):
+        return with_optional(set_counts_note(r), len(r.optional_missing))
     if r.level == "nearly":
         return compact_missing(r)
     # (an inferred language, or one read from a keyboard layout, says so in the list itself, where it
@@ -4462,10 +4960,47 @@ def language_note(r):
     return u", ".join(words)
 
 
-TIP_WIDTH = 520  # pixels: a tooltip's text at most (narrower in a narrower window)
+# A tooltip's width follows the window's (the owner: tooltips were "stupidly compacted when there's ample
+# space"): about half of it, between TIP_LEAST and TIP_MOST pixels, never wider than the window less
+# TIP_MARGIN. It was a fixed 520 pixels. TIP_WIDTH stands when the window's width cannot be read.
+TIP_SHARE, TIP_LEAST, TIP_MOST = 0.5, 360, 900
+TIP_WIDTH = 520  # pixels: a tooltip's text at most, when the window's width cannot be read
 TIP_MARGIN = 40  # pixels kept between a tooltip's width and the window's
-TIP_CHARACTER = 7  # pixels: a character's width, taken when the font cannot be asked
+TIP_NATURAL = 400  # pixels: a tooltip whose longest line is shorter is left to its own width
+TIP_CHARACTER = 7  # pixels: a character's width, as tooltips are measured (twice that for a wide one)
+# Wide characters (ideographs, kana, Hangul syllables, Tangut, fullwidth forms), estimated at two widths: a
+# table of ranges, not the runtime's Unicode data (FontLab's Python has Unicode 5.2: the same text must get
+# the same width under either interpreter).
+WIDE_RANGES = ((0x1100, 0x115F), (0x2E80, 0x303E), (0x3041, 0x33FF), (0x3400, 0x4DBF), (0x4E00, 0x9FFF),
+               (0xA000, 0xA4CF), (0xAC00, 0xD7A3), (0xF900, 0xFAFF), (0xFE30, 0xFE4F), (0xFF00, 0xFF60),
+               (0xFFE0, 0xFFE6), (0x16FE0, 0x18CFF), (0x1B000, 0x1B2FF), (0x20000, 0x3FFFD))
 TAG = None  # (made when first needed: a tag of rich text)
+
+
+def tip_limit(window_width):
+    """The width a tooltip's text may take, in pixels, for a window this wide (None: not known): about
+    half of it, between TIP_LEAST and TIP_MOST, and never wider than the window less TIP_MARGIN."""
+    try:
+        width = int(window_width)
+    except (TypeError, ValueError):
+        return TIP_WIDTH
+    if width <= 0:
+        return TIP_WIDTH
+    limit = max(TIP_LEAST, min(TIP_MOST, int(width * TIP_SHARE)))
+    if width > TIP_MARGIN + 200:
+        limit = min(limit, width - TIP_MARGIN)
+    return limit
+
+
+def line_width(line):
+    """A line's width in pixels, estimated: TIP_CHARACTER a character, twice that for a wide one.
+    Tooltips were measured in the dialog's font, which sent Qt looking through the system's fonts for
+    every script that font lacks: Duployan's tooltip froze the window for seconds as it was measured."""
+    width = 0
+    for code in code_points(line):
+        wide = any(low <= code <= high for low, high in WIDE_RANGES) if code >= 0x1100 else False
+        width += 2 if wide else 1
+    return width * TIP_CHARACTER
 
 
 def plain_of(text):
@@ -4478,8 +5013,10 @@ def plain_of(text):
 
 
 def tip_width(text, limit=TIP_WIDTH, measure=None, rich=False):
-    """The width to give a tooltip, or None when its longest line fits within limit pixels as it is.
-    measure: a line's width in pixels (the font's metrics; a count of characters stands in without)."""
+    """The width to give a tooltip: limit pixels when its longest line is wider, that line's width
+    when it is wider than TIP_NATURAL (Qt wraps rich text a little past 80 characters of its own
+    accord, narrower than the room a wide window leaves), None for a short one, left as it is.
+    measure: a line's width in pixels (line_width, an estimate, when not given)."""
     widest = 0
     lines = [plain_of(line) if rich else line for line in (u"%s" % (text or u"")).replace(u"<br>", u"\n").split(u"\n")]
     # The longest line first, and no further once one is too wide: each row of each list has a tooltip,
@@ -4494,9 +5031,11 @@ def tip_width(text, limit=TIP_WIDTH, measure=None, rich=False):
             except Exception:
                 width = 0
         if not width > 0:
-            width = len(line) * TIP_CHARACTER
+            width = line_width(line)
         widest = max(widest, width)
-    return int(limit) if widest > limit else None
+    if widest > limit:
+        return int(limit)
+    return min(int(limit), int(widest) + 2 * TIP_CHARACTER) if widest > TIP_NATURAL else None
 
 
 def tip_html(text, width=None, family=None, rich=False):
@@ -4575,7 +5114,12 @@ class FontCheckDialog(object):
         self.asked = set()  # the selections whose characters Diacritics was asked about
         self.script_filter = None
         self.list_family = None  # FreeLang once registered: the font of names and characters in tooltips
-        self.tip_metrics = None  # (when made, the dialog's font metrics): for the tooltips' widths
+        self.tip_cache = {}  # the tooltips of the lists' rows made so far, for this check (right_tip)
+        self.generation = 0  # one more at each check: what the lists at the right were filled from
+        self.views = {}  # each right tab's two lists, the full one and a search's (build_coverage)
+        self.groups_of = {}  # ISO 639-3 code: the scripts' groups its orthographies are listed under
+        self.has_coverage = False  # a check has finished: the lists have something to search, sort, or select
+        self.coverage_gaps = CoverageGaps()  # what Font Check knows of and does not check (read with the data)
         self.stepwise = False  # long work step by step, the window repainted in between: once it is shown (show)
         self.deferred = None  # the next step, kept for its timer
         self.known_scripts = KnownScripts()  # Unicode's scripts no orthography is written in, and scripts recorded
@@ -4763,25 +5307,35 @@ class FontCheckDialog(object):
         label.setFont(font)
         return label
 
-    def use_list_font(self, tree):
+    def use_list_font(self, tree, scale=LIST_SCALE):
         """The languages list (its rows, section headings, and column headings) in FreeLang, at
         LIST_SCALE times the dialog's size: rows grow with it, and a section heading's bold font is made
         from the list's (section_row). Without the font file, or if Qt refuses it, the list keeps its
-        family and is still enlarged; tooltips keep Qt's own font. This never raises."""
+        family and is still enlarged; tooltips keep Qt's own font. This never raises. scale 1: a widget
+        that shows names or characters of any script at the dialog's size (the glyphs' lists, whose
+        Languages column drew Hadramautic's letters as boxes; the fields; the lines that name languages)."""
         try:
             QtCore, QtGui = _qt()
             font = QtGui.QFont(_prop(tree, "font"))
             family = register_list_font(QtCore, QtGui)
             if family:
                 font.setFamily(family)
-            unit, size = scaled_size(font.pointSizeF(), font.pixelSize())
-            if unit == "point":
-                font.setPointSizeF(size)
-            elif unit == "pixel":
-                font.setPixelSize(size)
+            if scale != 1:
+                unit, size = scaled_size(font.pointSizeF(), font.pixelSize(), scale)
+                if unit == "point":
+                    font.setPointSizeF(size)
+                elif unit == "pixel":
+                    font.setPixelSize(size)
             tree.setFont(font)
         except Exception:
             pass
+
+    def in_list_font(self, text):
+        """Rich text (escaped already) set in FreeLang, for the log's lines that quote characters or a
+        set's name: the log's own font drew boxes for scripts it lacks."""
+        if not self.list_family:
+            return text
+        return u"<span style=\"font-family:'%s'\">%s</span>" % (self.list_family.replace(u"'", u""), text)
 
     def picture_label(self, minimum):
         """A label showing a picture drawn to its size (redrawn as it is resized)."""
@@ -4849,7 +5403,8 @@ class FontCheckDialog(object):
                 elif key == "comparison":
                     self.draw_comparison()
                 elif key == "bars":
-                    self.fit_bar(self.family_tree, FAMILY_NAMES_MOST)
+                    for tree in (self.family_tree, self.family_search_tree):
+                        self.fit_bar(tree, FAMILY_NAMES_MOST)
             except Exception:
                 pass  # a timer's handler must not raise
 
@@ -4910,9 +5465,10 @@ class FontCheckDialog(object):
                                       u"its languages covered (green), within reach (amber), started (red: the font "
                                       u"has some of their glyphs, too few to be within reach), and missed (gray: "
                                       u"it has none). Click a script to see only its languages below.")
-        # The lists stand on the second page of a stack; the first is one centered line that says what is
-        # happening while the data is read and the font checked (the window opened on empty lists and
-        # zero counts for seconds, as if broken). set_busy shows one or the other.
+        # The lists stand on the second page of a stack; the first is blank, shown while the data is read
+        # and the font checked (the window opened on empty lists and zero counts for seconds, as if broken),
+        # under the progress bar, whose label alone says what is happening (it was said there, in a
+        # centered line on this page, and in the top line: twice at once). set_busy shows one or the other.
         self.coverage_stack = QtGui.QStackedWidget()
         self.busy_label = QtGui.QLabel(u"")
         self.busy_label.setAlignment(QtCore.Qt.AlignCenter)
@@ -5038,6 +5594,11 @@ class FontCheckDialog(object):
                                    u"opens its glyph in a <i>Glyph</i> window.")
         self.left_pages.addWidget(self.add_tree)
         self.left_pages.addWidget(self.own_tree)
+        # In FreeLang, at the dialog's size: the Languages column names what else a language misses
+        # ("Hadramautic (with" and six of its letters), which the interface font drew as boxes; the line
+        # over the list and the tab's caption name a selection, a set of the user's own in any script.
+        for widget in (self.add_tree, self.own_tree, self.own_label, self.gain_label, self.left_tabs):
+            self.use_list_font(widget, 1)
         box.addWidget(self.left_pages, 1)
         row = QtGui.QHBoxLayout()
         self.diacritics_button = QtGui.QPushButton("Build with Diacritics")
@@ -5075,6 +5636,16 @@ class FontCheckDialog(object):
             self.search.setPlaceholderText(u"Find a language, a character set, or a family")
         except Exception:
             pass
+        try:  # (a cross in the field clears it at once, as the owner asked; PythonQt may lack the call)
+            self.search.setClearButtonEnabled(True)
+        except Exception:
+            pass
+        # A search waits for a pause in the typing (SEARCH_DELAY): each keystroke listed the tab anew, a
+        # few seconds for every letter of a name in FontLab. Clearing the field shows the full list at once.
+        self.search_timer = QtCore.QTimer()
+        self.search_timer.setSingleShot(True)
+        self.search_timer.setInterval(SEARCH_DELAY)
+        self.search_timer.connect("timeout()", self.search_paused)
         self.search.setWhatsThis(u"Shows, in the tab shown, the languages whose name, autonym, code, or other name "
                                  u"holds this text (Glottolog's other names: <i>Nama</i> finds Khoekhoe, and the row's "
                                  u"tooltip says which name it was found by), the character sets whose name does, or "
@@ -5103,6 +5674,14 @@ class FontCheckDialog(object):
         self.language_tree = self.tree(("Language", "Missing"), icon=(DOT_SIZE, DOT_SIZE))
         self.set_tree = self.tree(("Character set", "Missing"), icon=(DOT_SIZE, DOT_SIZE))
         self.family_tree = self.tree(("Family", "", "Languages", "Not yet covered"), icon=BAR_SIZE)
+        # Each tab has a second list for a search's finds: the full list stays as it is, behind it, so
+        # clearing the search shows it again at once, where it was scrolled to, with nothing made anew
+        # (it was made anew at each keystroke, some 2,600 rows: seconds in FontLab).
+        searches = dict((key, self.tree(columns, icon=icon)) for key, columns, icon in (
+            ("languages", ("Language", "Missing"), (DOT_SIZE, DOT_SIZE)),
+            ("sets", ("Character set", "Missing"), (DOT_SIZE, DOT_SIZE)),
+            ("families", ("Family", "", "Languages", "Not yet covered"), BAR_SIZE)))
+        self.family_search_tree = searches["families"]
         colors = (u"A dot per row: covered (green), within reach (amber), started (red: the font has some of its "
                   u"glyphs), missed (gray: it has none). ")
         selecting = (u"Clicking a row opens the second tab of glyphs at the left on what it misses; clicking it "
@@ -5114,7 +5693,9 @@ class FontCheckDialog(object):
                                         u"language here is written in: each is checked as a script, by its whole "
                                         u"repertoire, and selects like a language.")
         self.set_tree.setWhatsThis(colors + u"A set that is not covered says how many of its characters are missing; "
-                                   u"its tooltip names its definition. Under <i>Scripts (Unicode)</i>, every script "
+                                   u"its tooltip names its definition. Optional characters (presentation forms and "
+                                   u"compatibility characters, which text does not store) are counted apart: a set is "
+                                   u"covered without them, and those of <i>Legacy</i> are all optional. Under <i>Scripts (Unicode)</i>, every script "
                                    u"Unicode encodes is a set: its own characters are the measure, and those it "
                                    u"shares with other scripts count as auxiliary ones (a large script, such as "
                                    u"Han, lists its first 200 missing glyphs and counts the rest). " + selecting
@@ -5125,17 +5706,21 @@ class FontCheckDialog(object):
                                       u"double-click its name, to open or close it; click its name to list what its "
                                       u"languages miss at the left. " + selecting)
         for key, tree in (("languages", self.language_tree), ("sets", self.set_tree), ("families", self.family_tree)):
-            self.use_list_font(tree)
-            try:
-                tree.setIndentation(16)
-                tree.setExpandsOnDoubleClick(False)  # (list_pressed opens and closes: once per double-click)
-                # The arrows are icons drawn in the text color (arrow_pixmap): the style's own branch marks,
-                # dark whatever the palette, are left out (on the list itself, never on the dialog).
-                tree.setStyleSheet(u"%s%s" % (_prop(tree, "styleSheet") or u"", BRANCH_SHEET))
-            except Exception:
-                pass
+            searches[key].setWhatsThis(u"%s A search lists its finds here; clearing the search shows the whole "
+                                       u"list again, as it was." % _prop(tree, "whatsThis"))
+            for one in (tree, searches[key]):
+                self.use_list_font(one)
+                try:
+                    one.setIndentation(16)
+                    one.setExpandsOnDoubleClick(False)  # (list_pressed opens and closes: once per double-click)
+                    # The arrows are icons drawn in the text color (arrow_pixmap): the style's own branch marks,
+                    # dark whatever the palette, are left out (on the list itself, never on the dialog).
+                    one.setStyleSheet(u"%s%s" % (_prop(one, "styleSheet") or u"", BRANCH_SHEET))
+                except Exception:
+                    pass
+                self.right_pages.addWidget(one)  # (the full list at 2 * the tab's index, the search's after it)
+            self.views[key] = {"full": RightView(tree), "search": RightView(searches[key])}
             self.right_trees[key] = tree
-            self.right_pages.addWidget(tree)
         try:  # (registered by the lists above; asked again for its name: tooltips and pictures use it too)
             self.list_family = register_list_font(QtCore, QtGui)
         except Exception:
@@ -5150,8 +5735,8 @@ class FontCheckDialog(object):
         self.paste_field = QtGui.QLineEdit()
         self.name_field = QtGui.QLineEdit()
         try:
-            self.paste_field.setPlaceholderText(u"Paste text or characters to check as a set of your own")
-            self.name_field.setPlaceholderText(u"Name to save it under")
+            self.paste_field.setPlaceholderText(u"Paste text or characters to check as a set of your own.")
+            self.name_field.setPlaceholderText(u"Name")  # (the owner's wording for both)
         except Exception:
             pass
         self.paste_field.setWhatsThis(u"Text or characters pasted here are checked as a character set of your own, "
@@ -5183,6 +5768,10 @@ class FontCheckDialog(object):
         except Exception:
             pass
         box.addWidget(self.languages_note)
+        # What is typed, pasted, or named there may be in any script (an autonym searched, an alphabet
+        # pasted, another name a search found a language by): in FreeLang, at the dialog's size.
+        for widget in (self.search, self.paste_field, self.name_field, self.languages_note):
+            self.use_list_font(widget, 1)
         halves.addWidget(left)
         halves.addWidget(right)
         halves.setStretchFactor(0, 1)
@@ -5194,11 +5783,27 @@ class FontCheckDialog(object):
             pass
         # The lists at the right: the names' column takes what the others leave, and the last one is as
         # wide as its contents (at 1000 pixels the families' counts were cut: "95 of 177 la...").
-        self.size_columns(self.language_tree, ("stretch", "contents"))
-        self.size_columns(self.set_tree, ("stretch", "contents"))
-        self.size_columns(self.family_tree, ("stretch", "fixed", "contents", "contents"))
-        self.watch_resize(self.family_tree, "bars")  # (its bars give up width first in a narrower list)
+        for key, modes in (("languages", ("stretch", "contents")), ("sets", ("stretch", "contents")),
+                           ("families", ("stretch", "fixed", "contents", "contents"))):
+            for mode in ("full", "search"):
+                self.size_columns(self.views[key][mode].tree, modes)
+        for tree in (self.family_tree, self.family_search_tree):
+            self.watch_resize(tree, "bars")  # (its bars give up width first in a narrower list)
+        # The shared module clears a list's selection on a click beside it (its empty part, the window's
+        # background); these lists' selections feed the others (the script chosen, the selection's tab of
+        # glyphs), and the lists at the right unselect on a click in their empty part themselves
+        # (list_pressed): left to them, by the property the shared module reads (KEEP_SELECTION_PROP)
+        for tree in [self.script_tree] + [self.views[key][mode].tree for key, _ in RIGHT_TABS
+                                          for mode in ("full", "search")]:
+            try:
+                tree.setProperty(getattr(ak, "KEEP_SELECTION_PROP", "freelab_keep_selection"), True)
+            except Exception:
+                pass
         content_layout.addWidget(halves, 1)
+        # Nothing to show before the first check: the scripts' list and its check box come with it (item 12
+        # of the owner's audit: what has nothing to show is hidden, what cannot act is grayed, update_buttons)
+        self.script_tree.setVisible(False)
+        self.show_absent.setVisible(False)
 
         self.coverage_button.connect("clicked()", self.check_coverage)
         self.script_tree.connect("itemSelectionChanged()", self.script_selected)
@@ -5211,14 +5816,21 @@ class FontCheckDialog(object):
                     ("itemDoubleClicked(QTreeWidgetItem*,int)", lambda item, column: self.character_double_clicked(key, item)))
 
         def right_slots(key, tree):
-            return (("itemSelectionChanged()", lambda: self.right_selected(key)),
-                    ("itemClicked(QTreeWidgetItem*,int)", lambda item, column: self.right_clicked(key)),
-                    ("itemDoubleClicked(QTreeWidgetItem*,int)", lambda item, column: self.right_double_clicked(key, item)),
-                    ("itemExpanded(QTreeWidgetItem*)", lambda item: self.right_expanded(key, item, True)),
-                    ("itemCollapsed(QTreeWidgetItem*)", lambda item: self.right_expanded(key, item, False)))
+            # (each tab has two lists, the full one and a search's: only the one shown is heard; the other
+            # signals as it is filled or its selection set, in the background)
+            def shown():
+                return self.right_trees.get(key) is tree
+
+            return (("itemSelectionChanged()", lambda: shown() and self.right_selected(key)),
+                    ("itemClicked(QTreeWidgetItem*,int)", lambda item, column: shown() and self.right_clicked(key)),
+                    ("itemDoubleClicked(QTreeWidgetItem*,int)",
+                     lambda item, column: shown() and self.right_double_clicked(key, item)),
+                    ("itemExpanded(QTreeWidgetItem*)", lambda item: shown() and self.right_expanded(key, item, True)),
+                    ("itemCollapsed(QTreeWidgetItem*)", lambda item: shown() and self.right_expanded(key, item, False)))
 
         for slots, trees in ((left_slots, (("value", self.add_tree), ("own", self.own_tree))),
-                             (right_slots, [(key, self.right_trees[key]) for key, _ in RIGHT_TABS])):
+                             (right_slots, [(key, view.tree) for key, _ in RIGHT_TABS
+                                            for view in (self.views[key]["full"], self.views[key]["search"])])):
             for key, tree in trees:
                 for signal, slot in slots(key, tree):
                     tree.connect(signal, slot)
@@ -5226,7 +5838,7 @@ class FontCheckDialog(object):
                 self.watch_presses(tree)
         self.left_tabs.connect("currentChanged(int)", self.left_tab_changed)
         self.right_tabs.connect("currentChanged(int)", self.right_tab_changed)
-        self.search.connect("textChanged(QString)", lambda text: self.languages_changed())
+        self.search.connect("textChanged(QString)", lambda text: self.search_typed())
         self.level_filter.connect("currentIndexChanged(int)", lambda index: self.languages_changed())
         self.sort_box.connect("currentIndexChanged(int)", lambda index: self.languages_changed())
         self.status_filter.connect("currentIndexChanged(int)", lambda index: self.status_changed())
@@ -5242,8 +5854,8 @@ class FontCheckDialog(object):
 
     def set_busy(self, on, message=u""):
         """Long work under way (or over), as Feature Code shows its own: the lists' area gives way to
-        one centered line that says what is happening, the top line says it too, and the controls that
-        would do nothing meanwhile are grayed. The line is painted here and now, so the window shows
+        a blank page under the progress bar, whose label says what is happening, and the controls that
+        would do nothing meanwhile are grayed. The bar is painted here and now, so the window shows
         it before the work starts. busy also holds off the History's watch and a second check."""
         self.busy = bool(on)
         try:
@@ -5286,14 +5898,15 @@ class FontCheckDialog(object):
             pass
 
     def say_busy(self, message):
-        """What is happening now, in the middle of the lists' area, beside the bar, and in the top
-        line, painted at once."""
+        """What is happening now, said once, beside the bar, painted at once. It was said in the top
+        line and in the middle of the lists' area too (the owner: "'Listing...' appears twice"): the top
+        line is empty meanwhile, and the lists' area blank until they are shown."""
         text = u"%s\N{HORIZONTAL ELLIPSIS}" % message if message else u""
         try:
-            self.busy_label.setText(text)
+            self.busy_label.setText(u"")
             self.busy_step.setText(text)
             if message:
-                self.coverage.status.setText(text)
+                self.coverage.status.setText(u"")
             self.busy_label.repaint()
             self.busy_step.repaint()
             self.busy_bar.repaint()
@@ -5337,8 +5950,12 @@ class FontCheckDialog(object):
 
     def open_address(self, address):
         """A click on the repository's address: opened in the browser where Qt can (FontLab's Python
-        cannot be relied on to; the address stays written out either way)."""
+        cannot be relied on to; the address stays written out either way). A notation's set's name: that
+        set shown in the Character sets tab (show_set)."""
         try:
+            if (u"%s" % address).startswith(SET_LINK):
+                self.show_set((u"%s" % address)[len(SET_LINK):].replace(u"&amp;", u"&"))
+                return
             QtCore, QtGui = _qt()
             QtGui.QDesktopServices.openUrl(QtCore.QUrl(u"%s" % address))
         except Exception:
@@ -5582,7 +6199,7 @@ class FontCheckDialog(object):
         self.package = package
         self.master = package.master if package is not None else None
         if package is None:
-            self.font_label.setText(u"No font is open. Open one, then click %s." % self.ak.i("Check"))
+            self.font_label.setText(getattr(self.ak, "NO_FONT_LINE", u"No font is open. Open one, then click Check."))
             self.update_buttons()
             return False
         b = self.ak.b
@@ -5687,6 +6304,70 @@ class FontCheckDialog(object):
         self.log.add(u"The font's History moved (an undo, a redo, or an edit): checked again.")
         self.check(self.current_key())
 
+    def font_changed(self):
+        """This window's font was closed, or a font opened for this window without one (the shared
+        module's fonts_tick, from a timer): the views checked anew as at opening, the one shown now and
+        the others when shown, or, with no font, emptied, the top line saying the window takes the next
+        font opened. Nothing escapes (a timer's handler)."""
+        try:
+            self.stale = set(TABS)
+            self.buildable = self.plan_font = None
+            self.asked = set()
+            if self.busy:
+                return  # (the check under way reads the font as it goes on: the shared module asks again)
+            if not self.read_font():
+                self.show_fontless()
+                return
+            self.check(self.current_key())
+        except Exception as exc:
+            try:
+                self.log.add(u"The font could not be read again: %s" % self.ak.html(exc), "error")
+            except Exception:
+                pass
+
+    def show_fontless(self):
+        """Every view emptied: what was listed belonged to a font that is closed. The lists, pictures,
+        and lines go, and what acts on them is grayed (update_buttons) until a font is read."""
+        QtCore, QtGui = _qt()
+        self.scripts, self.results, self.other_results, self.set_results = [], [], [], []
+        self.rows, self.own_rows, self.checked, self.selection = [], [], set(), None
+        self.has_coverage, self.font_found, self.script_filter = False, None, None
+        self.groups_of, self.tip_cache = {}, {}
+        self.generation += 1
+        self.metric_values, self.extents_found, self.suggestions, self.notes = None, [], [], []
+        self.check_rows, self.clipped, self.problems, self.glyph_names = [], [], [], []
+        self.coverage.findings = self.metrics.findings = self.masters.findings = []
+        was, self.filling = self.filling, True
+        try:
+            for step in (
+                    lambda: self.script_tree.clear(), lambda: self.script_tree.setVisible(False),
+                    lambda: self.show_absent.setVisible(False),
+                    lambda: [view.tree.clear() for key in self.views for view in self.views[key].values()],
+                    lambda: self.add_tree.clear(), lambda: self.own_tree.clear(),
+                    lambda: self.left_tabs.setTabText(0, value_title(None)),
+                    lambda: self.left_tabs.setTabText(1, selection_title(None)),
+                    lambda: self.left_tabs.setTabEnabled(1, False), lambda: self.show_left("value"),
+                    lambda: [self.right_tabs.setTabText(index, label) for index, (_, label) in enumerate(RIGHT_TABS)],
+                    lambda: self.gain_label.setText(u""), lambda: self.languages_note.setVisible(False),
+                    lambda: self.values_tree.clear(), lambda: self.checks_tree.clear(),
+                    lambda: self.clipped_list.clear(), lambda: self.diagram.clear(),
+                    lambda: self.glyph_tree.clear(), lambda: self.comparison.clear(),
+                    lambda: self.problem_label.setText(u""), lambda: self.compare_master.clear(),
+                    lambda: [chip.setVisible(False) for _, _, chip in self.chips]):
+                try:
+                    step()
+                except Exception:
+                    pass
+            for key in sorted(self.views, key=lambda one: one == self.right_tab):  # (the tab shown last: its page)
+                for view in self.views[key].values():
+                    view.rows, view.labels, view.unfilled, view.signature = [], [], {}, None
+                self.activate(key, "full")
+            for tab in (self.coverage, self.metrics, self.masters):
+                tab.status.setText(u"")
+        finally:
+            self.filling = was
+        self.update_buttons()
+
     def switch_page(self, index):
         QtCore, QtGui = _qt()
         self.pages.setCurrentIndex(index)
@@ -5743,7 +6424,7 @@ class FontCheckDialog(object):
             else u"This glyph's problems need the designer."))
         ak.enable(self.font_info_button, self.package is not None)
         ak.enable(self.glyph_window_button, self.package is not None and bool(self.glyph_window_text()))
-        self.glyph_window_button.setToolTip(self.tip(self.glyph_window_tip()))
+        self.glyph_window_button.setToolTip(self.tip(self.glyph_window_tip(), True))  # (it may name a set of any script)
         # The user's own sets: saved once there are characters and a name, removed when a saved one is selected
         pasted = bool(pasted_characters(self.pasted_text))
         named = bool((u"%s" % (_prop(self.name_field, "text") or u"")).strip())
@@ -5753,6 +6434,30 @@ class FontCheckDialog(object):
         ak.enable(self.remove_set_button, self.selected_custom() is not None)
         self.remove_set_button.setToolTip(self.tip(
             u"" if self.selected_custom() is not None else u"Select one of your saved sets first."))
+        self.update_controls()
+
+    def update_controls(self):
+        """The owner's audit: what cannot act yet is grayed (the buttons above say why in their
+        tooltips). Before a check has listed anything (no font open, or the first check under way),
+        the search, the level, the order, the tabs of the lists, and the fields of a set of one's own
+        have nothing to act on (the scripts' list and its check box are hidden until then: fill_scripts);
+        the strategy of the vertical metrics acts once there are values to suggest; a choice of masters
+        acts once there is more than one to choose (the masters to compare with, once compared)."""
+        ak = self.ak
+        ready = bool(self.has_coverage)
+        for widget in (self.search, self.level_filter, self.sort_box, self.right_tabs, self.left_tabs,
+                       self.paste_field, self.name_field):
+            ak.enable(widget, ready)
+        measured = self.metric_values is not None
+        ak.enable(self.mode_share, measured)
+        ak.enable(self.mode_keep, measured)
+        ak.enable(self.share, measured and self.mode() == "share")
+        for box, least in ((self.clip_master, 2), (self.compare_master, 1), (self.reference, 2)):
+            try:
+                count = int(_prop(box, "count") or 0)
+            except Exception:
+                count = 0
+            ak.enable(box, count >= least)
 
     def glyph_window_tip(self):
         """What Show in Glyph window opens now, and what a double-click does instead."""
@@ -5775,31 +6480,23 @@ class FontCheckDialog(object):
 
     def tip(self, text, names=False, rich=False):
         """A tooltip's text for Qt: rich text, which Qt wraps (plain text ran on one line, thousands of
-        pixels wide for a row naming dozens of languages), in a width no wider than the window when its
+        pixels wide for a row naming dozens of languages), in a width that follows the window's when its
         longest line needs one. names: set in FreeLang, which has every name, autonym, and
         orthography character the lists show (the interface font drew boxes for some scripts). rich:
         the text is rich text already. Every tooltip of this window goes through here."""
         text = sentence(text) if not rich else u"%s" % (text or u"")
         if not text:
             return u""
-        limit = TIP_WIDTH
+        # Its width follows the window's (tip_limit), and its lines are estimated, not measured in a font
+        # (line_width: Qt's search for the scripts the dialog's font lacks froze the window for seconds)
+        return tip_html(text, tip_width(text, self.tip_limit(), None, rich), self.list_family if names else None, rich)
+
+    def tip_limit(self):
+        """The width tooltips may take now: about half the window's (tip_limit)."""
         try:
-            width = int(_prop(self.dialog, "width"))
-            if width > TIP_MARGIN + 200:
-                limit = min(TIP_WIDTH, width - TIP_MARGIN)
+            return tip_limit(_prop(self.dialog, "width"))
         except Exception:
-            pass
-        try:
-            # One font metrics for the tooltips of a filling (kept two seconds: a new font is taken up then);
-            # each of some 2,600 rows made its own before.
-            metrics, now = self.tip_metrics, time.time()
-            if metrics is None or not 0 <= now - metrics[0] < 2.0:
-                QtCore, QtGui = _qt()
-                metrics = self.tip_metrics = (now, QtGui.QFontMetrics(_prop(self.dialog, "font")))
-            measure = lambda line: metrics[1].width(line)
-        except Exception:
-            measure = None
-        return tip_html(text, tip_width(text, limit, measure, rich), self.list_family if names else None, rich)
+            return TIP_WIDTH
 
     def start(self, tab):
         """A view about to be checked; False when it cannot be (busy, no font)."""
@@ -5839,8 +6536,11 @@ class FontCheckDialog(object):
         if isinstance(row, Coverage):
             language = row.language
             path = self.families.path(language.iso) if self.families is not None and language.kind != "set" else ()
+            also = [] if language.kind == "set" else [
+                group for group in self.groups_of.get(language.iso, ()) if group != script_group(language.script)]
+            fonts = self.coverage_gaps.fonts_for(language.iso) if language.kind == "set" else []
             return coverage_tip(row, path, isinstance(language, ScriptSet)
-                                and language.name in self.known_scripts.not_covered)
+                                and language.name in self.known_scripts.not_covered, also, fonts)
         if isinstance(row, Uncovered):
             return uncovered_tip(row, self.known_scripts.of_languages.get(row.iso, ()))
         if isinstance(row, FamilyNode):
@@ -5862,7 +6562,15 @@ class FontCheckDialog(object):
         rows = self.right_rows[tab]
         if not 0 <= index < len(rows):
             return u""
-        return self.tip(self.entry_tip(tab, rows[index]), True)
+        # Made once per row, check, and width (a search's other name changes it): Qt asks again each time
+        # the mouse rests on the row
+        row = rows[index]
+        key = (tab, id(row), getattr(row, "found_by", None), self.tip_limit())
+        if key not in self.tip_cache:
+            if len(self.tip_cache) > 2000:
+                self.tip_cache.clear()
+            self.tip_cache[key] = self.tip(self.entry_tip(tab, row), True)
+        return self.tip_cache[key]
 
     def show_tip(self, tree, event):
         """Qt asks for a tooltip over a list at the right: the row's is made now and shown; False
@@ -6002,6 +6710,10 @@ class FontCheckDialog(object):
             self.known_scripts = load_known_scripts()
         except Exception:
             self.known_scripts = KnownScripts()
+        try:  # (optional: without it, nothing is said of the gaps and the fonts to consider)
+            self.coverage_gaps = load_coverage_gaps()
+        except Exception:
+            self.coverage_gaps = CoverageGaps()
         try:
             state["sets"] = self.custom_languages() + list(load_character_sets())
         except Exception as exc:  # (the languages are listed all the same)
@@ -6027,6 +6739,16 @@ class FontCheckDialog(object):
         self.scripts = scripts
         self.results = [r for s in scripts for r in s.results]
         self.other_results, self.set_results = others, sets
+        self.generation += 1  # (the lists at the right are filled anew from these)
+        self.tip_cache = {}
+        # The scripts' groups each language is listed under (Pontic Greek: Cyrillic and Greek), for its
+        # tooltip to name the others
+        groups_of = {}
+        for one in state["languages"]:
+            found = groups_of.setdefault(one.iso, [])
+            if script_group(one.script) not in found:
+                found.append(script_group(one.script))
+        self.groups_of = groups_of
         self.coverage.findings = self.results
         self.buildable = self.plan_font = None
         self.asked = set()
@@ -6041,6 +6763,7 @@ class FontCheckDialog(object):
         """The last step: the lists filled, the top line written, and the lists shown again."""
         tab, b = self.coverage, self.ak.b
         scripts, sets, aside = self.scripts, self.set_results, state["aside"]
+        self.has_coverage = True  # (the lists' controls act from now on: update_controls)
         try:  # (the lists' page first: their columns are sized to it; of it nothing is painted before the end,
             # while the bar above it, which is painted at each call, moves with the rows made)
             self.coverage_stack.setCurrentIndex(1)
@@ -6060,7 +6783,7 @@ class FontCheckDialog(object):
         text += inferred_sentence(sum(1 for s in present for r in s.results
                                       if r.level in ("covered", "nearly") and r.language.evidence in UNDECLARED),
                                   len(aside), b)
-        listed = [r for r in sets if r.language.script != CUSTOM_GROUP and not isinstance(r.language, ScriptSet)]
+        listed = counted_sets(sets)
         if listed:
             whole = sum(1 for r in listed if r.level == "covered")
             text += u" %s of %d %s covered." % (b(counted(whole, u"character set")), len(listed),
@@ -6099,6 +6822,7 @@ class FontCheckDialog(object):
             return
         own = [check_language(one, self.font_found, self.nearly.value) for one in self.custom_languages()]
         self.set_results = own + [r for r in self.set_results if r.language.script != CUSTOM_GROUP]
+        self.generation += 1  # (the Character sets tab is filled anew)
         chosen = next((r for r in own if r.language.iso == select), None)
         if chosen is not None:
             self.closed["sets"].discard(CUSTOM_GROUP)
@@ -6124,7 +6848,8 @@ class FontCheckDialog(object):
             self.custom_sets = with_custom_set(self.custom_sets, name, self.pasted_text)
             save_custom_sets(self.custom_path(), self.custom_sets)
             self.log.add(u"Saved the set %s (%s) in FreeLab's settings folder." % (
-                self.ak.b(self.ak.html(name)), counted(len(pasted_characters(self.pasted_text)), u"character")))
+                self.in_list_font(self.ak.b(self.ak.html(name))),
+                counted(len(pasted_characters(self.pasted_text)), u"character")))
             self.recheck_custom(custom_key(name))
         except Exception as exc:
             self.log.add(u"The set could not be saved: %s" % self.ak.html(exc), "error")
@@ -6144,7 +6869,7 @@ class FontCheckDialog(object):
                 return
             self.custom_sets = [(held, text) for held, text in self.custom_sets if held != name]
             save_custom_sets(self.custom_path(), self.custom_sets)
-            self.log.add(u"Removed the set %s from the saved ones." % self.ak.b(self.ak.html(name)))
+            self.log.add(u"Removed the set %s from the saved ones." % self.in_list_font(self.ak.b(self.ak.html(name))))
             self.recheck_custom()
         except Exception as exc:
             self.log.add(u"The set could not be removed: %s" % self.ak.html(exc), "error")
@@ -6207,6 +6932,7 @@ class FontCheckDialog(object):
             tree.setCurrentItem(selected)
             self.fit_columns(tree, (220, BAR_SIZE[0] + 12))
             tree.setFixedHeight(self.rows_height(tree, min(len(shown) + 1, 6)))
+            tree.setVisible(True)  # (hidden until a check has something to list)
         finally:
             self.filling = False
         if absent:
@@ -6391,7 +7117,9 @@ class FontCheckDialog(object):
             self.gain_label.setText(u"No language within reach here: nothing to add." if self.results else u"")
         else:
             self.gain_label.setText(gain_text(len(self.checked), gained, self.ak.b))
-        tip = u"\n".join(u"%s (%s)" % (r.language.label(), r.language.script) for r in gained[:40])
+        tip = u"\n".join(u"%s (%s)" % (r.language.label(), script_group(r.language.script)) for r in gained[:TIP_NAMES])
+        if len(gained) > TIP_NAMES:
+            tip += u"\nand %s more" % grouped(len(gained) - TIP_NAMES)
         self.gain_label.setToolTip(self.tip(tip, True))
 
     def selected_row(self):
@@ -6424,7 +7152,7 @@ class FontCheckDialog(object):
         """Whether a heading is shown open. Scripts not yet covered is closed until asked for, and open
         while a search runs unless closed by hand during it (as a family is): what is shown is what a
         click toggles."""
-        if title == SCRIPTS_NOT_COVERED:
+        if title in CLOSING_TITLES:
             if self.searched():
                 return title not in self.closed[tab]
             return self.scripts_open
@@ -6433,14 +7161,20 @@ class FontCheckDialog(object):
     def family_open(self, node):
         """Whether a family shows its branches and languages: closed to start with, opened by hand;
         while a search runs, every family it lists is open unless closed by hand meanwhile."""
-        if self.searched() and not (isinstance(node, UncoveredNode) and len(node.entries) > UNCOVERED_OPEN):
+        if self.search_opens() and not (isinstance(node, UncoveredNode) and len(node.entries) > UNCOVERED_OPEN):
             return node.path not in self.closed["families"]  # (a long Not yet covered list stays closed until asked for)
         return node.path in self.opened
+
+    def search_opens(self):
+        """Whether the search opens the families it lists: from SEARCH_OPENS characters on. A letter
+        or two match most languages, and opening every family made some 4,300 rows (one letter, under
+        the tests' fakes), against 240 left closed."""
+        return len(self.searched()) >= SEARCH_OPENS
 
     def toggle_family(self, node, item):
         """A family opened or closed (item: its row, handed over by Qt and used here and now)."""
         open_ = not self.family_open(node)
-        searching = self.searched() and not (isinstance(node, UncoveredNode) and len(node.entries) > UNCOVERED_OPEN)
+        searching = self.search_opens() and not (isinstance(node, UncoveredNode) and len(node.entries) > UNCOVERED_OPEN)
         held, wanted = (self.closed["families"], not open_) if searching else (self.opened, open_)
         if wanted:
             held.add(node.path)
@@ -6450,12 +7184,13 @@ class FontCheckDialog(object):
             self.fill_under("families", node.path, item)  # (its rows, made now that they are to be seen)
         item.setExpanded(open_)
         item.setIcon(0, self.arrow(open_))
+        self.view_kept("families")
 
     def toggle_heading(self, tab, title, item):
         """A script's or a group's heading opened or closed, kept by its title through refills, other
         orders, and searches."""
         open_ = not self.heading_open(tab, title)
-        if title == SCRIPTS_NOT_COVERED:
+        if title in CLOSING_TITLES:
             if not self.searched():
                 self.scripts_open = open_
             elif open_:  # (during a search: closed by hand until the search ends)
@@ -6471,6 +7206,7 @@ class FontCheckDialog(object):
             self.closed[tab].add(title)
         item.setExpanded(open_)
         item.setIcon(0, self.arrow(open_))
+        self.view_kept(tab)
 
     def right_expanded(self, tab, item, open_):
         """Qt opened or closed a row (its own doing: a key, or a press on a branch): what is held by
@@ -6562,7 +7298,7 @@ class FontCheckDialog(object):
         item.setIcon(0, dots[r.level])
         if texts[-1] and (r.level == "covered" or (r.language.kind != "set" and r.level != "nearly")):
             item.setForeground(len(texts) - 1, quiet)  # ("composed", "inferred": said quietly; not what is missing)
-        rows.append(r)
+        self.add_row(tab, r, texts[0])
         if parent is None:
             tree.addTopLevelItem(item)
         else:
@@ -6586,12 +7322,13 @@ class FontCheckDialog(object):
         for one in [one for one in node.children if not isinstance(one, UncoveredNode)]:
             counts_ = level_counts(one.all_results())
             open_ = self.family_open(one)
-            item = self.item((u"%s (%d)" % (one.name, sum(counts_)), u"", coverage_text(counts_),
+            label = u"%s (%d)" % (one.name, sum(counts_))
+            item = self.item((label, u"", coverage_text(counts_),
                               uncovered_count_text(len(one.uncovered))), len(rows), self.later_tip(tab, one), True)
             item.setIcon(1, self.icon(bar_pixmap, counts_, colors))
             item.setForeground(3, quiet)  # (in gray: known, not yet covered)
             item.setIcon(0, self.arrow(open_))
-            rows.append(one)
+            self.add_row(tab, one, label)
             if parent is None:
                 tree.addTopLevelItem(item)
             else:
@@ -6619,11 +7356,11 @@ class FontCheckDialog(object):
                               u", %s" % r.language.script if several[r.language.iso] > 1 else u"", select)
         for entry in getattr(node, "entries", ()):  # (under Not yet covered: a row to read each, in gray)
             scripts = self.known_scripts.of_languages.get(entry.iso, ())
-            item = self.item((u"%s (%s)" % (entry.name, entry.iso), u"", u"", u", ".join(scripts)), len(rows),
-                             self.later_tip(tab, entry), True)
+            label = u"%s (%s)" % (entry.name, entry.iso)
+            item = self.item((label, u"", u"", u", ".join(scripts)), len(rows), self.later_tip(tab, entry), True)
             item.setForeground(0, quiet)
             item.setForeground(3, quiet)
-            rows.append(entry)
+            self.add_row(tab, entry, label)
             if parent is None:
                 tree.addTopLevelItem(item)
             else:
@@ -6631,11 +7368,11 @@ class FontCheckDialog(object):
         for one in [one for one in node.children if isinstance(one, UncoveredNode)]:
             # A family's last node: its languages that cannot be checked yet, their rows made when it is opened
             open_ = self.family_open(one)
-            item = self.item((u"%s (%d)" % (one.name, len(one.entries)), u"", u"", u""), len(rows),
-                             self.later_tip(tab, one), True)
+            label = u"%s (%d)" % (one.name, len(one.entries))
+            item = self.item((label, u"", u"", u""), len(rows), self.later_tip(tab, one), True)
             item.setForeground(0, quiet)
             item.setIcon(0, self.arrow(open_))
-            rows.append(one)
+            self.add_row(tab, one, label)
             if parent is None:
                 tree.addTopLevelItem(item)
             else:
@@ -6673,7 +7410,7 @@ class FontCheckDialog(object):
         try:
             if isinstance(waiting, FamilyNode):
                 self.family_rows(tab, waiting, item, wanted, None, True)
-            elif key == SCRIPTS_NOT_COVERED:
+            elif key in CLOSING_TITLES:
                 self.script_rows(tab, waiting, item, wanted, None, True)
             else:
                 for r in waiting:
@@ -6694,7 +7431,7 @@ class FontCheckDialog(object):
         for name in names:
             item = self.item((name, u""), u"script:%s" % name,
                              u"%s: a script Unicode encodes. No orthography here is written in it, so no language "
-                             u"written in it can be checked yet.\n%s" % (name, CONTRIBUTE_SCRIPTS), True)
+                             u"written in it can be checked yet.\n\n%s" % (name, CONTRIBUTE_SCRIPTS), True)
             item.setForeground(0, quiet)
             parent.addChild(item)
 
@@ -6705,11 +7442,161 @@ class FontCheckDialog(object):
             return [r for s in self.scripts for r in s.results] + list(self.other_results)
         return [r for s in self.scripts if s.script in shown for r in s.results]
 
+    # Each tab at the right has two lists, the full one and a search's (RightView). The one shown is
+    # right_trees[tab], its rows right_rows[tab], what its closed rows hold unfilled[tab]: activate swaps
+    # them. A list is filled anew only when what it shows would change (view_signature): a new check,
+    # another level, order, script, or search, a heading opened or closed elsewhere. Otherwise it is shown as
+    # it was, scrolled where it was, which also makes clearing a search instant.
+
+    def activate(self, tab, mode):
+        """A tab's full list ("full") or its search's ("search") made the one shown; its RightView."""
+        view = self.views[tab][mode]
+        self.right_trees[tab], self.right_rows[tab], self.unfilled[tab] = view.tree, view.rows, view.unfilled
+        try:
+            self.right_pages.setCurrentIndex([key for key, _ in RIGHT_TABS].index(tab) * 2 + (mode == "search"))
+        except Exception:
+            pass
+        return view
+
+    def active_view(self, tab):
+        """The RightView shown for a tab (None for none)."""
+        tree = self.right_trees.get(tab)
+        return next((view for view in self.views.get(tab, {}).values() if view.tree is tree), None)
+
+    def view_signature(self, tab, text, level, sort, shown):
+        """What a list at the right is filled from: the check, the choices, the search, and the
+        headings and families opened or closed (by hand: their rows are then made or kept). Two equal
+        signatures fill a list alike."""
+        if tab == "families":
+            state = frozenset(self.closed["families"]) if len(text) >= SEARCH_OPENS else frozenset(self.opened)
+        elif text:
+            state = frozenset(self.closed[tab])
+        else:
+            state = (frozenset(title for title in self.closed[tab] if title not in CLOSING_TITLES), self.scripts_open)
+        return (self.generation, level, sort, tuple(shown), self.script_filter, text, state)
+
+    def view_kept(self, tab):
+        """A heading or a family opened or closed by hand, in the list shown, which shows it so already:
+        its signature follows, so that the list is not filled anew for it when it is shown again."""
+        try:
+            view = self.active_view(tab)
+            if view is not None and view.signature is not None:
+                view.signature = self.view_signature(
+                    tab, self.searched(), self.choice(self.level_filter, LANGUAGE_FILTERS)[0],
+                    self.choice(self.sort_box, SORTS)[0], [s.script for s in self.filtered_scripts()])
+        except Exception:
+            pass
+
+    def listed_selection(self, tab, made, wanted, text, level):
+        """The Selection of key wanted as a tab lists it (made: its sections, or its families' root),
+        or None when it does not: what a refill would find, without making a row."""
+        if wanted is None:
+            return None
+        if tab == "families":
+            def walk(node):
+                for r in node.results:
+                    if language_key(r) == wanted:
+                        return selection_of(r)
+                for one in node.children:
+                    if isinstance(one, UncoveredNode):
+                        continue
+                    if wanted == ("family",) + one.path:
+                        return self.entry_selection(("node", one))
+                    held = walk(one)
+                    if held is not None:
+                        return held
+                return None
+            return walk(made[0])
+        for section in made[0]:
+            for r in section.results:
+                if language_key(r) == wanted:
+                    return selection_of(r)
+        if tab == "languages":
+            for r in self.uncovered_scripts(text, level)[0]:
+                if language_key(r) == wanted:
+                    return selection_of(r)
+        return None
+
+    def row_key(self, row):
+        """What a row of a right tab stands for, as a Selection's key: a language's or a set's, a
+        family's place; None for the others."""
+        if isinstance(row, Coverage):
+            return language_key(row)
+        if isinstance(row, FamilyNode) and not isinstance(row, UncoveredNode):
+            return ("family",) + row.path
+        return None
+
+    def item_of(self, tab, key):
+        """The item of the list shown whose row stands for key, found by its label (one call to Qt),
+        or None (no row made for it: under a closed heading)."""
+        QtCore, QtGui = _qt()
+        view = self.active_view(tab)
+        if view is None:
+            return None
+        index = next((k for k, row in enumerate(view.rows) if self.row_key(row) == key), None)
+        if index is None or index >= len(view.labels):
+            return None
+        try:
+            items = view.tree.findItems(view.labels[index], QtCore.Qt.MatchExactly | QtCore.Qt.MatchRecursive, 0)
+            for item in items:
+                if self.index_of(item) == index:
+                    return item
+        except Exception:
+            pass
+        return None
+
+    def select_row(self, tab, selection):
+        """The list shown, kept as it was, made to show the selection: its row selected (and scrolled
+        to) when it is another than the one selected there, or none selected. Its handlers are held off."""
+        try:
+            current = self.entry_selection(self.selected_entry(tab))
+            wanted = selection.key if selection is not None else None
+            if (current.key if current is not None else None) == wanted:
+                return
+            tree = self.right_trees[tab]
+            was, self.filling = self.filling, True
+            try:
+                tree.clearSelection()
+                item = self.item_of(tab, wanted) if wanted is not None else None
+                if item is not None:
+                    tree.setCurrentItem(item)
+            finally:
+                self.filling = was
+        except Exception:
+            pass
+
+    def search_typed(self):
+        """The search field edited: the search waits for a pause in the typing (SEARCH_DELAY); a field
+        cleared (its cross, or the text deleted) shows the full list at once."""
+        try:
+            if self.searched():
+                self.search_timer.start()
+            else:
+                self.search_timer.stop()
+                self.languages_changed()
+        except Exception:
+            pass  # a signal's handler must not raise
+
+    def search_paused(self):
+        try:
+            self.languages_changed()
+        except Exception:
+            pass  # a timer's handler must not raise
+
+    def add_row(self, tab, row, label):
+        """A row noted in the list being filled: what its item's data indexes, and the label that
+        finds its item again (select_row)."""
+        self.right_rows[tab].append(row)
+        view = self.active_view(tab)
+        if view is not None and view.rows is self.right_rows[tab]:
+            view.labels.append(label)
+
     def uncovered_scripts(self, text, level):
         """The coverages of the scripts no orthography here is written in (each script as a set), for
         the Languages tab's closing section: those a search names, of the level kept; and the names of
-        those that have no set to check them by (a data file made before), when no level is kept."""
-        names = scripts_section(self.known_scripts.not_covered, text)
+        those that have no set to check them by (a data file made before), when no level is kept. The
+        notations (Braille, SignWriting) are character sets, not listed here (languages_not_covered)."""
+        names = scripts_section(languages_not_covered(self.known_scripts.not_covered), text)
         by_name = dict((r.language.name, r) for r in self.set_results if isinstance(r.language, ScriptSet))
         live = [by_name[name] for name in names if name in by_name and (level is None or by_name[name].level == level)]
         return live, ([name for name in names if name not in by_name] if level is None else [])
@@ -6723,11 +7610,13 @@ class FontCheckDialog(object):
         (refill: here; False when the caller fills the characters next)."""
         QtCore, QtGui = _qt()
         tab = self.right_tab
-        tree, colors = self.right_trees[tab], self.colors()
         level = self.choice(self.level_filter, LANGUAGE_FILTERS)[0]
         sort = self.choice(self.sort_box, SORTS)[0]
         text = self.searched()
         shown = [s.script for s in self.filtered_scripts()]
+        # The tab's full list, or its search's: the other stays as it is behind it (activate)
+        view = self.activate(tab, "search" if text else "full")
+        tree, colors = view.tree, self.colors()
         # Each tab's finds, for the captions; the tab shown last, since each tells its rows the other
         # name a search found them by.
         made = {}
@@ -6745,9 +7634,6 @@ class FontCheckDialog(object):
                   "sets": sum(len(s.results) for s in made["sets"][0]), "families": len(made["families"][0].children)}
         for index, (key, label) in enumerate(RIGHT_TABS):
             self.right_tabs.setTabText(index, u"%s (%d)" % (label, counts[key]))
-        rows = self.right_rows[tab] = []
-        pending = self.unfilled[tab] = {}
-        self.row_tools = None  # (the rows' dots made anew: the palette may have changed)
         wanted = self.selection.key if self.selection is not None else None
         found = {"selection": None}
         if tab == "families" and self.reveal and self.selection is not None and not text:
@@ -6756,7 +7642,23 @@ class FontCheckDialog(object):
         if not text:
             self.closed["families"].clear()  # (what was closed by hand during a search ends with it)
             for held in self.closed.values():
-                held.discard(SCRIPTS_NOT_COVERED)
+                for closing in CLOSING_TITLES:
+                    held.discard(closing)
+        signature = self.view_signature(tab, text, level, sort, shown)
+        if view.signature == signature:
+            # Filled from the same check, choices, and headings opened: shown as it is, where it was
+            # scrolled to (the owner: switching tabs brought each list back to its top). The selection
+            # goes with it where it lists it, as a refill would have found it.
+            found["selection"] = self.listed_selection(tab, made[tab], wanted, text, level)
+            self.select_row(tab, found["selection"])
+            self.after_fill(tab, made, text, level, shown, found, refill)
+            return
+        view.signature = signature
+        self.tip_cache = {}  # (keyed by the rows' identities: rows made anew may take an old one's)
+        rows = self.right_rows[tab] = view.rows = []
+        view.labels = []
+        pending = self.unfilled[tab] = view.unfilled = {}
+        self.row_tools = None  # (the rows' dots made anew: the palette may have changed)
 
         self.filling = True
         tree.setUpdatesEnabled(False)
@@ -6801,10 +7703,11 @@ class FontCheckDialog(object):
                 live = sort_languages(live, sort)
                 if live or names:
                     # The closing section: the scripts Unicode has that no orthography here is written in,
-                    # each checked as a script (its whole repertoire), a row that selects like any other
+                    # each checked as a script (its whole repertoire), a row that selects like any other. Its
+                    # tooltip says what "not yet covered" means (the owner wondered how they had previews)
                     title = u"%s (%d)" % (SCRIPTS_NOT_COVERED, len(live) + len(names))
                     heading = self.item((title, u""), u"#%s" % SCRIPTS_NOT_COVERED,
-                                        u"%s\n%s" % (CONTRIBUTE_SCRIPTS, NOT_ENCODED), True)
+                                        u"%s\n\n%s\n\n%s" % (NOT_COVERED_MEANS, CONTRIBUTE_SCRIPTS, NOT_ENCODED), True)
                     heading.setFlags(QtCore.Qt.ItemIsEnabled)
                     open_ = self.heading_open(tab, SCRIPTS_NOT_COVERED)  # (closed until asked for; a search opens it)
                     heading.setIcon(0, self.arrow(open_))
@@ -6824,8 +7727,13 @@ class FontCheckDialog(object):
         finally:
             tree.setUpdatesEnabled(True)
             self.filling = False
+        self.after_fill(tab, made, text, level, shown, found, refill)
+
+    def after_fill(self, tab, made, text, level, shown, found, refill):
+        """What follows the list at the right, filled or shown as it was: the line under it, and the
+        selection kept (found["selection"]) or let go, the selection's tab of glyphs with it."""
         note = self.right_note(tab, made[tab], text, level, shown)
-        self.languages_note.setText(self.note_html(note) if ISSUES_ADDRESS in note else note)
+        self.languages_note.setText(self.note_html(note) if self.links_in(note) else note)
         self.languages_note.setVisible(bool(note))
         was, self.selection = self.selection, found["selection"]
         if was is not None and self.selection is None:
@@ -6852,19 +7760,27 @@ class FontCheckDialog(object):
         unlisted = self.families.unlisted_matches(text) if text and tab != "sets" and self.families is not None else []
         if unlisted:
             lines.append(unlisted_line(unlisted))
+        if text and tab == "languages":  # (Braille and SignWriting: character sets, a link to them)
+            lines.append(notation_line(text))
+        if text:  # (what Font Check knows of and does not check: Korean gukja, emoji sequences, Jurchen)
+            lines.append(known_line(self.coverage_gaps.known_matches(text)))
         if tab == "families" and self.families is not None and not text:
             # What can be checked of what is known, and how to add to it
             counts = self.families.counts
+            not_covered = self.known_scripts.not_covered
+            listed = languages_not_covered(not_covered)
             lines.append(coverage_counts_text(counts.get("described", 0), counts.get("glottolog_languages_with_iso", 0),
-                                              self.known_scripts.known - len(self.known_scripts.not_covered),
-                                              self.known_scripts.known))
+                                              self.known_scripts.known - len(not_covered), self.known_scripts.known,
+                                              len(listed), len(not_covered) - len(listed)))
             if any(isinstance(r.language, ScriptSet) for r in self.set_results):
                 lines.append(u"Every script of Unicode is checked as a set of its own, under Character sets.")
             # What limits the rest, with its date: the record itself (a script on record without characters, or none)
             lines.append(limits_text(len(self.families.unlisted),
                                      sum(1 for row in self.families.unlisted
                                          if (u"%s" % row[0]) in self.known_scripts.of_languages)))
-        if unlisted or (tab == "families" and self.families is not None and self.families.uncovered()):
+        # ("These languages": those listed, so only when some are: not under a search that lists none)
+        if unlisted or (tab == "families" and self.families is not None and self.families.uncovered()
+                        and (not text or shows_uncovered(made[0]))):
             lines.append(CONTRIBUTE)
         return u" ".join(line for line in lines if line)
 
@@ -6873,7 +7789,27 @@ class FontCheckDialog(object):
         click where Qt can), and written out all the same."""
         text = self.ak.html(note)
         address = self.ak.html(ISSUES_ADDRESS)
-        return text.replace(address, u'<a href="%s">%s</a>' % (address, address))
+        text = text.replace(address, u'<a href="%s">%s</a>' % (address, address))
+        for _, _, block in NOTATION_SCRIPTS:  # (a notation's set: a click shows it in the Character sets tab)
+            name = self.ak.html(block)
+            text = text.replace(name, u'<a href="%s%s">%s</a>' % (SET_LINK, name, name))
+        return text
+
+    def links_in(self, note):
+        """Whether the line under the lists has links to make (note_html)."""
+        return ISSUES_ADDRESS in note or any(block in note for _, _, block in NOTATION_SCRIPTS)
+
+    def show_set(self, name):
+        """A notation's set shown: the Character sets tab, searched for its name (a link in the line
+        under the Languages tab, where a search for Braille or SignWriting finds no language)."""
+        self.search.setText(name)  # (its signal waits for a pause: stopped, the tab is listed below at once)
+        self.search_timer.stop()
+        index = [key for key, _ in RIGHT_TABS].index("sets")
+        self.right_tabs.setCurrentIndex(index)  # (its signal lists the tab: right_tab_changed)
+        if self.right_tab != "sets":
+            self.right_tab_changed(index)
+        else:
+            self.languages_changed()
 
     def open_to(self, root, key):
         """The families above the language selected opened, so the Families tab shows it."""
@@ -6889,13 +7825,13 @@ class FontCheckDialog(object):
         self.opened.update(walk(root, []) or [])
 
     def right_tab_changed(self, index):
-        """Another tab at the right: its list shown and filled (the search, the level, and the order
-        act on it); the selection goes with it when the tab lists it too."""
+        """Another tab at the right: its list shown, as it was when nothing it shows has changed since
+        (scrolled where it was), else filled (the search, the level, and the order act on it); the
+        selection goes with it when the tab lists it too."""
         try:
             if self.filling or not 0 <= index < len(RIGHT_TABS):
                 return
             self.right_tab = RIGHT_TABS[index][0]
-            self.right_pages.setCurrentIndex(index)
             self.custom_row.setVisible(self.right_tab == "sets")  # (a set of the user's own is pasted there)
             self.reveal = True
             self.fill_right()
@@ -6941,8 +7877,9 @@ class FontCheckDialog(object):
         """A mouse press on a Coverage list, or a double-click's second press, heard before Qt handles
         it (item: the row under the mouse, None on the list's empty part); True: the press is used up.
         On the empty part the selection is cleared: Qt keeps a single selection whatever is clicked.
-        A press on a heading opens or closes it (a double-click's second press does nothing more, so a
-        click and a double-click both do it once). On a family, a press on its arrow opens or closes it
+        A press on a heading opens or closes it, and nothing else: Qt does not see it (a double-click's
+        second press does nothing more, so a click and a double-click both do it once). On a family, a
+        press on its arrow opens or closes it
         and selects nothing; a double-click on its name does too. A press on the row selected already
         is remembered, for the click that follows to unselect it."""
         tab = next((key for key, one in self.right_trees.items() if one is tree), None)
@@ -6959,19 +7896,28 @@ class FontCheckDialog(object):
             return False
         kind, value = entry
         if kind == "heading":
+            # Used up, the double-click's second press too: handed on, Qt made the heading its current
+            # row and cleared the selection (the owner: a click on a group's arrow selected its heading),
+            # and turned a double-click on a row it had not seen pressed into a press of its own.
             self.pressed = None
             if not double:
                 self.toggle_heading(tab, value, item)
-            return False
+            return True
         if kind == "node" and isinstance(value, UncoveredNode):  # (as a heading: a press anywhere opens or closes it)
             self.pressed = None
             if not double:
                 self.toggle_family(value, item)
             return True
-        if kind == "node" and (double or self.on_arrow(tree, item, pos)):
+        if kind == "node" and self.on_arrow(tree, item, pos):
+            # (an arrow's press selects nothing, a double-click's second one neither: handed on, Qt, which
+            # had not seen the first, took it for a press and selected the family)
             self.pressed = None
             self.toggle_family(value, item)
-            return not double  # (an arrow's press selects nothing; a double-click's goes on to Qt)
+            return True
+        if kind == "node" and double:
+            self.pressed = None
+            self.toggle_family(value, item)
+            return False  # (a double-click on its name goes on to Qt, which saw the first press)
         selected = self.selection.key if self.selection is not None else None
         under = self.entry_selection(entry).key
         self.pressed = selected if selected is not None and selected == under and not double else None
@@ -7095,7 +8041,7 @@ class FontCheckDialog(object):
             for item in self.shown_tree().selectedItems():
                 if item.flags() & QtCore.Qt.ItemIsUserCheckable:
                     item.setCheckState(0, QtCore.Qt.Checked)
-        i = self.ak.i  # (letters named in a message are in italics)
+        i = lambda text: self.in_list_font(self.ak.i(text))  # (letters named in a message: italics, in FreeLang)
         try:
             dm = self.diacritics_module()
             try:
@@ -7115,7 +8061,7 @@ class FontCheckDialog(object):
             return
         try:
             QtGui.QApplication.clipboard().setText(u" ".join(chars))
-            self.log.add(u"Copied %s." % self.ak.i(u" ".join(chars)), "done")
+            self.log.add(u"Copied %s." % self.in_list_font(self.ak.i(u" ".join(chars))), "done")
         except Exception as exc:
             self.log.add(u"Could not copy: %s" % self.ak.html(exc), "error")
 
@@ -7473,7 +8419,8 @@ class FontCheckDialog(object):
         finally:
             self.busy = False
         if done or failed:
-            self.ak.notify_changed(self.fontlab, self.package, u"FreeLab Font Check: vertical metrics")
+            # (the font info only: the font's own state, which needs no before_changes, and no glyph added)
+            self.ak.notify_changed(self.fontlab, self.package, u"FreeLab Font Check: vertical metrics", added=False)
         if done:
             # (font, old values, keys written, keys that were unset before: no way to unset one is known, labels)
             unset = [s.key for s in done if s.key != "use_typo" and s.key in old and old[s.key] is None]
@@ -7535,7 +8482,7 @@ class FontCheckDialog(object):
                 kept.append(key)
         self.put_back = (ident, old, kept, [], labels) if kept else None
         if restored or failed:
-            self.ak.notify_changed(self.fontlab, current, u"FreeLab Font Check: vertical metrics put back")
+            self.ak.notify_changed(self.fontlab, current, u"FreeLab Font Check: vertical metrics put back", added=False)
         b = self.ak.b
         if restored:
             self.log.add(u"Put back %s as they were." % b(counted(len(restored), u"value")), "done")
@@ -7797,6 +8744,7 @@ class FontCheckDialog(object):
         masters = [m for m in self.master_names() if m != reference]
         before = set((f.glyph, f.master, f.kind, f.contour) for f in self.problems)
         done, failed, touched = [], [], []
+        ak.before_changes(self.fontlab, self.package, u"FreeLab Font Check: masters")
         self.busy = True
         try:
             for name in names:
@@ -7838,7 +8786,7 @@ class FontCheckDialog(object):
         finally:
             self.busy = False
         if touched:
-            ak.notify_changed(self.fontlab, self.package, u"FreeLab Font Check: masters", touched)
+            ak.notify_changed(self.fontlab, self.package, u"FreeLab Font Check: masters", touched, added=False)
         undo = u" <i>Edit &gt; Undo</i> takes %s back." % (u"it" if len(touched) == 1 else u"them") if touched else u""
         if done:
             shown = done[:20] + ([u"%d more" % (len(done) - 20)] if len(done) > 20 else [])

@@ -253,6 +253,10 @@ ADDED = {
     "Berf": "Kedebideri", "Tutg": "Daarage",
     "Gara": "UnicodiaFunky", "Gukh": "UnicodiaFunky", "Onao": "UnicodiaFunky", "Sidt": "UnicodiaFunky",
     "Tols": "UnicodiaFunky",
+    # Since 2026-11-14, when every script but Han is drawn whole: the three scripts whose Noto fonts were
+    # not read while the list left them out (Nushu, Khitan Small Script, SignWriting), so that their
+    # characters come from Noto's outlines rather than Unifont's pixels.
+    "Nshu": "NotoSansNushu", "Kits": "NotoFangsongKSSRotated", "Sgnw": "NotoSansSignWriting",
 }
 # Noto's fonts of notations and numbers that are no script's, added with them and looked in after them.
 # Then two fonts that each have one character no font above has: Noto Serif Khojki (U+11241, which Noto
@@ -290,7 +294,22 @@ EXTRA = ("NotoEmoji", "Andika", "UnicodiaFunky")
 # of Unicode 14, which Noto Sans Glagolitic lacks), and BabelStone Pseudographica (a font of box
 # drawing and terminal graphics, drawn as outlines: the arrows and legacy computing symbols of
 # Unicode 16).
-LAST_RESORT = ("Padauk", "Shafarik", "BabelStonePseudographica")
+LAST_RESORT = ("Padauk", "Shafarik", "BabelStonePseudographica", "NewGardiner")
+# (NewGardiner, since 2026-11-14: Mark-Jan Nederhof's Egyptian font, SIL OFL 1.1, which draws the core
+# signs of Egyptian Hieroglyphs Extended-A, encoded in Unicode 16, that Noto Sans Egyptian Hieroglyphs lacks)
+# After those, since 2026-11-14, when the Han repertoires became character sets (Unihan's national
+# standards and lists: some 31,800 ideographs more, most of Extension B and later, which Noto Sans JP,
+# KR, and SC do not draw): Jigmo, the three fonts GlyphWiki's glyphs are published in (Kamichi Koichi;
+# CC0 1.0, a public-domain dedication), which draw every ideograph Unicode 17.0 encodes, in a Mincho
+# (serif) design. In the CJK font (RULES), each by its character map alone (CMAP_ONLY).
+HAN_LAST = ("Jigmo", "Jigmo2", "Jigmo3")
+# Last of all, for a character no outline font under a license FreeLang can take draws (the 55 letters
+# of Tai Yo, Syriac Supplement's eleven): GNU Unifont, whose glyphs are a 16 by 16 grid of pixels drawn
+# as squares. Its font files are dual-licensed (GPL version 2 or later with the font embedding
+# exception, and the SIL Open Font License 1.1, since 13.0.04): FreeLang takes them under the OFL. The
+# owner's rule (2026-11-14): a pixel font only where no outline source has the character; language_font.json
+# lists what it supplies (tests/language_font_tests.py: PIXEL_SOURCES).
+PIXEL_LAST = ("Unifont", "UnifontUpper")
 # The sources outside the two pinned repositories, each a release pinned by its version or a file of a
 # repository at a pinned commit: {family: ((URL, member of that archive or None) of the font, the same
 # of its license)}.
@@ -301,6 +320,9 @@ KEDEBIDERI = "https://github.com/silnrsi/font-kedebideri/releases/download/v3.00
 PADAUK = "https://github.com/silnrsi/font-padauk/releases/download/v6.000/PadaukBook-6.000.zip"
 DIVES_AKURU = ("https://github.com/notofonts/dives-akuru/releases/download/NotoSerifDivesAkuru-v1.001/"
                "NotoSerifDivesAkuru-v1.001.zip")
+NEWGARDINER = "https://raw.githubusercontent.com/nederhof/newgardiner/ef51d1aa1101d58a9b18b782dba51f70661194d7/fonts/"  # main on 2026-11-14
+JIGMO = "https://kamichikoichi.github.io/jigmo/Jigmo-20250912.zip"  # (the maker's own page; version of 2025-09-12)
+UNIFONT = "https://unifoundry.com/pub/unifont/unifont-18.0.01/"  # (Unifoundry's own site; 18.0.01, 2026-09-16)
 RELEASES = {
     "Andika": ((ANDIKA, "Andika-7.000/Andika-Regular.ttf"), (ANDIKA, "Andika-7.000/OFL.txt")),
     "Kanchenjunga": ((KANCHENJUNGA, "Kanchenjunga-2.001/Kanchenjunga-Regular.ttf"), (KANCHENJUNGA, "Kanchenjunga-2.001/OFL.txt")),
@@ -313,7 +335,22 @@ RELEASES = {
     # Noto Serif Dives Akuru 2.000, the version of the pinned commit, draws 49 of the script's 72
     # characters; 1.001 draws them all, and is taken whole from the project's own release.
     "NotoSerifDivesAkuru": ((DIVES_AKURU, "NotoSerifDivesAkuru/unhinted/ttf/NotoSerifDivesAkuru-Regular.ttf"), (DIVES_AKURU, "../OFL.txt")),
+    "NewGardiner": ((NEWGARDINER + "NewGardiner.ttf", None), (NEWGARDINER + "OFL.txt", None)),
+    "Jigmo": ((JIGMO, "Jigmo.ttf"), (JIGMO, "LICENSE.txt")),
+    "Jigmo2": ((JIGMO, "Jigmo2.ttf"), (JIGMO, "LICENSE.txt")),
+    "Jigmo3": ((JIGMO, "Jigmo3.ttf"), (JIGMO, "LICENSE.txt")),
+    # (the font files are in the release's font-builds folder; its OFL text, in its source archive)
+    "Unifont": ((UNIFONT + "font-builds/unifont-18.0.01.otf", None),
+                (UNIFONT + "unifont-18.0.01.tar.gz", "unifont-18.0.01/OFL-1.1.txt")),
+    "UnifontUpper": ((UNIFONT + "font-builds/unifont_upper-18.0.01.otf", None),
+                     (UNIFONT + "unifont-18.0.01.tar.gz", "unifont-18.0.01/OFL-1.1.txt")),
 }
+# Fonts dedicated to the public domain (Creative Commons CC0 1.0), not under the OFL: their license file
+# is CC0's text, and nothing in it reserves a name. A font made of them may be under any license.
+LICENSE_CC0 = HAN_LAST
+# Fonts under two licenses, of which FreeLang takes the OFL (their name table names both, or neither):
+# the license file read is the OFL's text the release ships.
+LICENSE_DUAL = PIXEL_LAST
 # Fonts whose license file is a notice that names the SIL Open Font License without carrying its text
 # (the text is in the other sources' files), and whose name table declares the license and its version
 # in the copyright record, having no license record.
@@ -323,9 +360,12 @@ LICENSE_NOTICE = ("UnicodiaFunky",)
 # copyright line, which is read from that file's first line; {family: the name it is listed under}
 # (Daarage's name records are its maker's working title).
 LICENSE_BESIDE = {"Daarage": "Daarage"}
+# Fonts whose name table declares the OFL in its copyright record ("Released under OFL 1.1"), having no
+# license record; their license file is the OFL's whole text.
+LICENSE_IN_COPYRIGHT = ("NewGardiner",)
 # Fonts drawn with cubic curves (a CFF table): their outlines are converted to TrueType's quadratic
 # ones (quadratic_outlines). Every other source has TrueType outlines, and none else is converted.
-CUBIC = ("Daarage",)
+CUBIC = ("Daarage",) + PIXEL_LAST  # (Unifont's pixels: squares, whose straight lines convert exactly)
 # Fonts that color parts of their glyphs (COLR and CPAL tables: Znamenny notation's red signs) over
 # plain outlines that draw the whole glyph in one color: the color tables are dropped, and the glyphs
 # are drawn as a program without color fonts draws them. No other source may have a color table.
@@ -365,7 +405,7 @@ HOST_SCRIPTS = ("Latn", "Grek", "Cyrl")  # what it draws: the scripts whose gues
 # character variants) are reached by nothing.
 CMAP_ONLY = ("NotoSansMath", "NotoSansSymbols", "NotoSansSymbols2", "NotoSansMono", "NotoMusic",
              "NotoSansCuneiform", "NotoSansEgyptianHieroglyphs", "NotoSansAnatolianHieroglyphs", "NotoSerifTangut",
-             "NotoZnamennyMusicalNotation", "NotoSansMayanNumerals") + EXTRA + LAST_RESORT
+             "NotoZnamennyMusicalNotation", "NotoSansMayanNumerals") + EXTRA + LAST_RESORT + HAN_LAST + PIXEL_LAST
 # The rule for every other source, in the fonts alike: it keeps its layout only if some character
 # it supplies is in a language's name, autonym, other name, or orthography (the names, other_names, and
 # orthographies parts of checks/font_characters.json, and the data files' texts), since only those are
@@ -501,6 +541,11 @@ def required_characters():
 # The Noto fonts
 # ---------------------------------------------------------------------------
 
+def name_text(font):
+    """Every record of the font's name table, as one lowercase text (str() of the table is its repr)."""
+    return " ".join(r.toUnicode() for r in font["name"].names).lower()
+
+
 def license_of(font, records=(13, 14)):
     """"OFL" when the font's name table declares the SIL Open Font License (as kerning/train/dataset.py
     reads it) in its license records (or the records given), else None."""
@@ -578,11 +623,16 @@ def reserved_names(text):
     return found
 
 
-def checked_license(path, notice=False):
+def checked_license(path, notice=False, cc0=False):
     """A source's license file: the SIL Open Font License 1.1 (or, for a font of LICENSE_NOTICE, a
-    notice that names the license; its version is then read from the font), reserving no name used."""
+    notice that names the license; its version is then read from the font), reserving no name used;
+    for a font of LICENSE_CC0, the text of Creative Commons CC0 1.0 Universal."""
     with open(path, encoding="utf-8") as handle:
         text = handle.read().replace("\r\n", "\n")
+    if cc0:
+        if "CC0 1.0 Universal" not in text or "Statement of Purpose" not in text:
+            raise SystemExit("%s is not Creative Commons CC0 1.0 Universal" % path)
+        return text
     if "SIL OPEN FONT LICENSE" not in text.upper() or not (notice or "Version 1.1" in text):
         raise SystemExit("%s is not the SIL Open Font License 1.1" % path)
     for name in reserved_names(text):
@@ -616,17 +666,22 @@ def source_font(family, folder):
         path = fetch(NOTO, "fonts/%s/unhinted/ttf/%s-Regular.ttf" % (family, family), folder)
         license_path = fetch(NOTO, "fonts/LICENSE", folder)
     notice = family in LICENSE_NOTICE
-    text = checked_license(license_path, notice)
+    text = checked_license(license_path, notice, family in LICENSE_CC0)
     font = TTFont(path, lazy=True)
-    if notice:  # (no license record: the copyright record names the license and its version)
+    if family in LICENSE_CC0 or family in LICENSE_DUAL:
+        # (CC0: nothing to declare; a dual license: the OFL's text was read above. Neither may name a
+        # proprietary license, nor reserve a name FreeLang uses.)
+        if any(marker in name_text(font) for marker in PROPRIETARY):
+            raise SystemExit("%s names a proprietary license: read it" % path)
+    elif notice:  # (no license record: the copyright record names the license and its version)
         if license_of(font, (0,)) != "OFL" or "open font license 1.1" not in str(font["name"].getDebugName(0)).lower():
             raise SystemExit("%s does not declare the SIL Open Font License 1.1 in its copyright record" % path)
     elif family in LICENSE_BESIDE:  # (nothing declared in the font: the file beside it is its license)
-        if license_of(font, (0, 13, 14)) is not None or any(marker in str(font["name"]).lower() for marker in PROPRIETARY):
+        if license_of(font, (0, 13, 14)) is not None or any(marker in name_text(font) for marker in PROPRIETARY):
             raise SystemExit("%s declares a license of its own: read it, and take it out of LICENSE_BESIDE" % path)
         if not copyright_of(family, font, text):
             raise SystemExit("%s does not open with a copyright line" % license_path)
-    elif license_of(font) != "OFL":
+    elif license_of(font, (0, 13, 14) if family in LICENSE_IN_COPYRIGHT else (13, 14)) != "OFL":
         raise SystemExit("%s does not declare the SIL Open Font License in its name table" % path)
     for name in reserved_names(str(font["name"].getDebugName(0) or "")):
         if name.lower() in NAMES_USED.lower():
@@ -706,7 +761,7 @@ def candidates(code, votes, ideographs):
     # own script alone (Kedebideri has Latin letters too, and Unicodia Funky most of what Noto lacks).
     added = [ADDED[script] for script in scripts if script in ADDED]
     added += list(ADDED_LAST) + sorted(set(f for f in ADDED.values() if f not in RELEASES))
-    for family in added + list(EXTRA) + list(LAST_RESORT):
+    for family in added + list(EXTRA) + list(LAST_RESORT) + list(HAN_LAST) + list(PIXEL_LAST):
         if family not in found:
             found.append(family)
     return found
@@ -792,7 +847,8 @@ def recommended_source(family):
 
 # The rules a font of FONTS may name as its sources: each says whether a source no font names is its.
 RULES = collections.OrderedDict((
-    ("cjk", lambda family: family in CJK and family != "NotoEmoji"),  # the three fonts of Chinese, Japanese, and Korean
+    # the three fonts of Chinese, Japanese, and Korean, and Jigmo's, which draw the ideographs they lack
+    ("cjk", lambda family: (family in CJK and family != "NotoEmoji") or family in HAN_LAST),
     ("recommended", recommended_source),
     ("rest", lambda family: True),  # (the last font with a rule in FONTS: every other source)
 ))
@@ -1724,6 +1780,14 @@ def license_notice(sources, licenses):
                   "places the font under the SIL Open Font License (version 1.1, by the font's copyright record), its",
                   "author's own glyphs under no condition at all, and names whose glyphs the others are. It is among the",
                   "texts below, whole."]
+    if any(source["family"] in HAN_LAST for source in sources):
+        lines += ["", "Jigmo, Jigmo2, and Jigmo3 (Kamichi Koichi, from GlyphWiki's glyphs) are not under the OFL: their maker",
+                  "dedicated them to the public domain under Creative Commons CC0 1.0 Universal (the release's LICENSE.txt,",
+                  "among the texts below), which lets them be part of a font under any license."]
+    if any(source["family"] in PIXEL_LAST for source in sources):
+        lines += ["", "GNU Unifont's font files are dual-licensed, under the GNU GPL version 2 or later with the font",
+                  "embedding exception and under the SIL Open Font License 1.1 (its COPYING file): FreeLang takes them",
+                  "under the OFL, whose text the release ships as OFL-1.1.txt, among the texts below."]
     lines.append("")
     texts = []
     for path in licenses:
