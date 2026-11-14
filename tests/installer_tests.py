@@ -106,12 +106,39 @@ class InstallerTests(unittest.TestCase):
         self.assertTrue((self.scripts / "FreeLab" / "freelab_cjk_spacing.py").exists(), "and CJK Spacing")
         self.assertTrue((self.scripts / "FreeLab" / "palt_model.json").exists(), "with its trims")
         self.assertTrue((self.scripts / "FreeLab" / "hangul_model.json").exists(), "and its Hangul widths")
+        self.assertTrue((self.scripts / "FreeLab" / "freelab_cjk_vertical.py").exists(), "and CJK Vertical")
+        self.assertTrue((self.scripts / "FreeLab" / "vertical_model.json").exists(), "with its vertical forms")
+        self.assertEqual((self.scripts / "FreeLab" / "add_vertical_metrics.module").read_bytes(),
+                         (ROOT / "tools" / "add_vertical_metrics.py").read_bytes(), "and its export step, no menu item")
         self.assertTrue((self.scripts / "FreeLab" / "anchor_model.json").exists(), "and Diacritics' anchors")
         self.assertTrue((self.scripts / "FreeLab" / "ligature_model.json").exists(), "the corpus's ligatures")
         self.assertTrue((self.scripts / "FreeLab" / "reference_model.json").exists(), "and its references' spacing")
         before = self.read()
         code, out = self.run_installer()
         self.assertEqual((code, self.read()), (0, before), "a second install changes nothing")
+
+    def test_the_block_starts_freelab_once_a_session(self):
+        # Live: the startup script ran again as each FreeLab tool opened (FreeLab MCP's listener started
+        # over each time); dark mode's startup, the menu hook, and tab docking must not start over
+        self.write(b"x = 1\n")
+        code, out = self.run_installer()
+        self.assertEqual(code, 0, out)
+        folder = self.scripts / "FreeLab"
+        for name, call in (("freelab_dark_mode.py", "startup"), ("freelab_auto_kerning.py", "hook_menu_order_soon"),
+                           ("freelab_tabs.py", "startup")):
+            (folder / name).write_text("import sys\n\ndef %s():\n    sys.started.append(%r)\n\nhook_menu_order = %s\n"
+                                       % (call, name, call))
+        script = ("import sys\nsys.started = []\nsource = open(%r, encoding='utf-8-sig').read()\n"
+                  "for run in range(3):\n    exec(compile(source, 'startupScript.py', 'exec'), {})\n"
+                  "print(sorted(sys.started))\n" % str(self.startup))
+        done = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, errors="replace",
+                              creationflags=NO_WINDOW, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        # dark mode and tab docking once; the menu's order hooked each time (Refresh Scripts builds the menu
+        # anew and runs the startup script again; the hook does nothing on a menu it has hooked)
+        self.assertEqual(done.stdout.strip(),
+                         "['freelab_auto_kerning.py', 'freelab_auto_kerning.py', 'freelab_auto_kerning.py', "
+                         "'freelab_dark_mode.py', 'freelab_tabs.py']")
 
     def test_only_scripts_with_a_menu_title_are_installed_as_py(self):
         """FontLab lists every .py of the folder in Scripts > FreeLab: a helper module went in as

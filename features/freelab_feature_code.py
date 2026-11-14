@@ -2982,7 +2982,7 @@ def watch_check_boxes(dialog, trees, also=None):
             return False
 
     try:
-        watcher = CheckWatcher()
+        watcher = CheckWatcher(dialog)  # (its parent the window: Qt deletes it with it)
         watcher.setSingleShot(True)
         watcher.setInterval(0)
         watcher.connect("timeout()", restyle)
@@ -3276,7 +3276,7 @@ class FeatureCodeDialog(object):
         layout.addLayout(buttons)
         self.restore_button.connect("clicked()", self.restore)
         self.write_button.connect("clicked()", self.write)
-        self.close_button.connect("clicked()", dialog.close)
+        self.close_button.connect("clicked()", self.ak.close_slot(self))  # (never the window itself: see let_go)
         self.tabs.connect("currentChanged(int)", self.switch_page)
         self.look_back.connect("valueChanged(int)", lambda value: self.look_back_changed(value))
         self.ligature_tree.connect("itemDoubleClicked(QTreeWidgetItem*,int)", self.double_clicked)
@@ -3455,7 +3455,7 @@ class FeatureCodeDialog(object):
             return
         glyphs = list(package.fgPackage.glyphs)
         self.names = [g.name for g in glyphs]
-        codes = dict((g.name, g.unicode) for g in glyphs)
+        codes = dict((g.name, self.ak.main_code(g)) for g in glyphs)  # (not a radical it is encoded at too)
         features = package.fgPackage.features
         self.texts = dict((tag, features.get_feature(tag)) for tag in features.keys())
         try:
@@ -3483,7 +3483,7 @@ class FeatureCodeDialog(object):
             item.setData(0, QtCore.Qt.UserRole, index)
             icon = self.picture([lig.glyph])
             if icon is not None:
-                item.setIcon(0, QtGui.QIcon(icon))
+                item.setIcon(0, self.ak.icon_of(icon))
             item.setToolTip(1, u"Now: %s." % (dict(CHOICES)[lig.now] if lig.now else u"in no feature"))
             item.setToolTip(2, u"Its feature. First set by %s." % (lig.why or u"default"))
             self.ligature_tree.addTopLevelItem(item)
@@ -3525,7 +3525,7 @@ class FeatureCodeDialog(object):
             if row < TURN_PICTURES:  # (a picture per row of a whole alphabet took seconds: the rest when clicked)
                 icon = self.picture(forms)
                 if icon is not None:
-                    item.setIcon(1, QtGui.QIcon(icon))
+                    item.setIcon(1, self.ak.icon_of(icon))
             else:
                 item.setToolTip(1, TURN_PICTURE_TIP)
             self.alternate_tree.addTopLevelItem(item)
@@ -3732,7 +3732,7 @@ class FeatureCodeDialog(object):
                 rule = self.form_rule(child)
                 icon = self.picture(rule.glyphs[:FORM_ICON_WIDTH]) if rule is not None else None
                 if icon is not None:
-                    child.setIcon(1, QtGui.QIcon(icon))
+                    child.setIcon(1, self.ak.icon_of(icon))
         except Exception:
             pass
         finally:
@@ -4091,7 +4091,7 @@ class FeatureCodeDialog(object):
             form = self.small_form((u"%s" % child.data(0, QtCore.Qt.UserRole))[1:])
             icon = self.planned_picture(form) if form is not None else None
             if icon is not None:
-                child.setIcon(1, QtGui.QIcon(icon))
+                child.setIcon(1, self.ak.icon_of(icon))
 
     def planned_picture(self, form):
         """The figure (or letter) and the glyph planned of it, side by side as the font would set them, in
@@ -4154,7 +4154,7 @@ class FeatureCodeDialog(object):
             painter.restore()
         finally:
             painter.end()
-        return pixmap
+        return self.ak.inked(pixmap, color)  # (in one color: redrawn in the new one when dark mode switches)
 
     def small_checked(self, item, column):
         """A row's or a set's check changed (a set's checks all its rows)."""
@@ -4857,7 +4857,7 @@ class FeatureCodeDialog(object):
                 x += layer.advanceWidth * scale + gap
         finally:
             painter.end()
-        return pixmap
+        return self.ak.inked(pixmap, color)  # (in one color: redrawn in the new one when dark mode switches)
 
     def cycling(self):
         QtCore, QtGui = _qt()
@@ -4929,7 +4929,7 @@ class FeatureCodeDialog(object):
             if base in self.sets and (u"%s" % item.toolTip(1)) == TURN_PICTURE_TIP:
                 icon = self.picture([base] + self.sets[base])
                 if icon is not None:
-                    item.setIcon(1, QtGui.QIcon(icon))
+                    item.setIcon(1, self.ak.icon_of(icon))
                 item.setToolTip(1, u"")
         except Exception:
             pass  # a signal's handler must not raise

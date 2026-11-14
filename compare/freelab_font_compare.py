@@ -1411,7 +1411,7 @@ class CompareDialog(object):
         layout.addWidget(self.tabs)
         self.pages = QtGui.QStackedWidget()
         layout.addWidget(self.pages, 1)
-        self.redraw_timer = QtCore.QTimer()
+        self.redraw_timer = QtCore.QTimer(dialog)  # (its parent the window: Qt deletes it with it)
         self.redraw_timer.setSingleShot(True)
         self.redraw_timer.setInterval(80)
         self.redraw_timer.connect("timeout()", self.redraw_now)
@@ -1428,7 +1428,7 @@ class CompareDialog(object):
         buttons.addStretch(1)
         buttons.addWidget(self.close_button)
         layout.addLayout(buttons)
-        self.close_button.connect("clicked()", dialog.close)
+        self.close_button.connect("clicked()", self.ak.close_slot(self))  # (never the window itself: see let_go)
         self.compare_button.connect("clicked()", self.compare)
         self.swap_button.connect("clicked()", self.swap)
         self.choice_slots = [lambda index: self.choice_changed(), lambda index: self.second_activated(index)]
@@ -1503,7 +1503,7 @@ class CompareDialog(object):
                     pass  # an event filter must never raise
                 return False
 
-        found = Resized()
+        found = Resized(widget)  # (its parent the widget it watches: Qt deletes it with it)
         widget.installEventFilter(found)
         self.filters.append(found)
 
@@ -1525,10 +1525,35 @@ class CompareDialog(object):
                     pass  # an event filter must never raise
                 return False
 
-        found = Watch()
+        found = Watch(self.dialog)  # (its parent the window: Qt deletes it with it)
         for widget in (self.dialog, self.choice_a, self.choice_b):
             widget.installEventFilter(found)
         self.filters.append(found)
+
+    def theme_changed(self):
+        """Dark mode switched, either way (the shared module's theme_switched): what is drawn here in the
+        palette's colors drawn again from the new one, the fonts not read again: the glyphs' pictures
+        (each font in its own color), the comparison, the pair, and the feature's differences. The
+        selected glyph stays selected."""
+        try:
+            index = self.index_of(self.selected_item(self.glyph_tree))
+        except Exception:
+            index = -1
+        try:
+            self.fill_glyphs()
+            if index >= 0:
+                for item in self.top_items(self.glyph_tree) if hasattr(self, "top_items") else []:
+                    if self.index_of(item) == index:
+                        self.glyph_tree.setCurrentItem(item)
+                        break
+        except Exception:
+            pass
+        self.redraws = dict((key, True) for key in ("comparison", "pair"))
+        self.redraw_now()
+        try:
+            self.feature_selected()
+        except Exception:
+            pass
 
     def redraw_now(self):
         keys, self.redraws = list(self.redraws), {}
@@ -1811,7 +1836,7 @@ class CompareDialog(object):
         self.opening, self.open_tries = (path, before, superseded), 0
         timer = getattr(self, "open_timer", None)
         if timer is None:
-            timer = self.open_timer = QtCore.QTimer()
+            timer = self.open_timer = QtCore.QTimer(self.dialog)  # (its parent the window: Qt deletes it with it)
             timer.setSingleShot(True)
             timer.setInterval(self.OPEN_WAIT_MS)
             timer.connect("timeout()", self.look_for_opened)
@@ -2506,6 +2531,17 @@ class CompareDialog(object):
         d = self.kern_shown[index] if 0 <= index < len(self.kern_shown) else None
         return [d.left, d.right] if d is not None else []
 
+    def screen_pair(self, package, first, second):
+        """A kerning key's glyphs as they stand on screen, (left, right): a right-to-left key (Hebrew,
+        Arabic...) is in text order, its right glyph first, and is drawn the other way round. Each pair
+        by its own glyphs (Auto Kerning's direction_char), whatever scripts the font has."""
+        try:
+            ak = self.ak
+            return ak.screen_of_key(ak.direction_char(package, first), ak.direction_char(package, second),
+                                    first, second)
+        except Exception:
+            return first, second
+
     def draw_pair(self):
         if self.filling:
             return
@@ -2523,10 +2559,11 @@ class CompareDialog(object):
         except Exception:
             factor = 1.0
         try:
-            pictures = [self.ak.pair_pixmap(first.package, first.master, d.left, d.right, d.a,
+            left, right = self.screen_pair(first.package, d.left, d.right)
+            pictures = [self.ak.pair_pixmap(first.package, first.master, left, right, d.a,
                                             u"%s: %d" % (first.label, d.a), colors["text"], font),
-                        self.ak.pair_pixmap(second.package, second.master, back.get(d.left, d.left),
-                                            back.get(d.right, d.right), int(round(d.b / factor)) if factor else d.b,
+                        self.ak.pair_pixmap(second.package, second.master, back.get(left, left),
+                                            back.get(right, right), int(round(d.b / factor)) if factor else d.b,
                                             u"%s: %d" % (second.label, d.b), colors["highlight"], font)]
             self.pair_picture.setPixmap(stacked_pixmap(pictures))
         except Exception as exc:

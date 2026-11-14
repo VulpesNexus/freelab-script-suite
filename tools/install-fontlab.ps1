@@ -85,6 +85,9 @@ $files = @(
     @{ From = 'cjk\freelab_cjk_spacing.py'; Name = 'freelab_cjk_spacing.py' },
     @{ From = 'cjk\palt_model.json'; Name = 'palt_model.json' },
     @{ From = 'cjk\hangul_model.json'; Name = 'hangul_model.json' },
+    @{ From = 'cjk\freelab_cjk_vertical.py'; Name = 'freelab_cjk_vertical.py' },
+    @{ From = 'cjk\vertical_model.json'; Name = 'vertical_model.json' },
+    @{ From = 'tools\add_vertical_metrics.py'; Name = 'add_vertical_metrics.module' },
     @{ From = 'kerning\common_pairs.txt'; Name = 'common_pairs.txt' },
     @{ From = 'kerning\script_pairs.txt'; Name = 'script_pairs.txt' },
     @{ From = 'kerning\learned_model.json'; Name = 'learned_model.json' },
@@ -407,19 +410,30 @@ def _freelab_tools_load(name, path):
     sys.modules[name] = module
     return module
 def _freelab_tools_startup():
+    import sys
+    try:
+        # Scripts > FreeLab in working order, with separators (once FontLab has built the menu), each time:
+        # Refresh Scripts builds the menu anew, and runs this script again (the module loaded already is
+        # used: the hook does nothing on a menu it has hooked)
+        tools = sys.modules.get("freelab_auto_kerning")
+        if tools is None or not hasattr(tools, "hook_menu_order"):
+            tools = _freelab_tools_load("freelab_auto_kerning", $kernPath)
+        if tools is not None:
+            getattr(tools, "hook_menu_order_soon", tools.hook_menu_order)()
+    except Exception as exc:
+        print("FreeLab menu at startup: %s" % (exc,))
+    # The rest once a session: the startup script runs again as FontLab runs a script (live, November
+    # 14: FreeLab MCP's block started its listener over each time a FreeLab tool opened), and dark
+    # mode's startup (a full pass over every widget) and tab docking started over with it
+    if getattr(sys, "_freelab_tools_started", False):
+        return
+    sys._freelab_tools_started = True
     try:
         module = _freelab_tools_load("freelab_dark_mode", $darkPath)
         if module is not None:
             module.startup()
     except Exception as exc:
         print("FreeLab dark mode at startup: %s" % (exc,))
-    try:
-        tools = _freelab_tools_load("freelab_auto_kerning", $kernPath)
-        if tools is not None:
-            # Scripts > FreeLab in working order, with separators (once FontLab has built the menu)
-            getattr(tools, "hook_menu_order_soon", tools.hook_menu_order)()
-    except Exception as exc:
-        print("FreeLab menu at startup: %s" % (exc,))
     try:
         tabs = _freelab_tools_load("freelab_tabs", $tabsPath)
         if tabs is not None:

@@ -16,11 +16,11 @@ Unicode's own data, compared with what Font Check checks (languages, character s
 | Ideographic variation sequences | acknowledged | 39,501 |
 | Joining and Indic syllable shaping | acknowledged | 780 joining and 4,856 Indic characters |
 | CLDR's punctuation and number exemplars, regional locales | acknowledged | 188, 115, and 637 locale files |
-| Characters FreeLang draws as Unifont's pixels | added: font source | 133 |
+| Characters FreeLang draws as Unifont's pixels | added: font source | 14 |
 
 ## Han repertoires
 
-Font Check's languages had the ideographs of Hyperglot's Chinese, Japanese, and Korean rows (a few thousand). Each repertoire below is a character set under *Han repertoires*, from Unihan's fields as UAX #38 (revision 39) defines them; FreeLang draws each whole, Jigmo supplying what Noto Sans JP, KR, and SC lack. The Han script itself (103,351 ideographs) cannot be drawn whole: a font holds 65,535 glyphs at most, and FreeLang draws 36,179 of them.
+Font Check's languages had the ideographs of Hyperglot's Chinese, Japanese, and Korean rows (a few thousand). Each repertoire below is a character set under *Han repertoires*, from Unihan's fields as UAX #38 (revision 39) defines them; FreeLang draws each whole, Plangothic supplying what Noto Sans JP, KR, and SC lack. The Han script itself (103,351 ideographs) cannot be drawn whole: a font holds 65,535 glyphs at most, and FreeLang draws 36,179 of them.
 
 | Set | Ideographs | Drawn by FreeLang |
 | --- | --- | --- |
@@ -120,7 +120,7 @@ The orthographies take each locale's main and auxiliary exemplars. CLDR 49 also 
 
 ## What FreeLang draws as pixels, and what it cannot draw
 
-GNU Unifont draws, as a 16 by 16 grid of pixels, the characters no outline font under a license FreeLang can take has: Unifont, 38 characters (0860-086A 088F 0897 FBC3-FBD2 FD90-FD91 FDC8-FDCE); Unifont Upper, 95 characters (10EC2-10EC7 10ED0-10ED8 10EFA-10EFC 1CCFA-1CCFB 1CEBA-1CEBF 1E6C0-1E6DE 1E6E0-1E6F5 1E6FE-1E6FF 1F6D8 1FA89-1FA8A 1FA8E-1FA8F 1FABE 1FAC6 1FAC8 1FACD 1FADC 1FADF 1FAE9-1FAEA 1FAEF). No source at all has 713 characters: Egyptian Hieroglyphs Extended-A 568, Tangut 8, Tangut Components Supplement 115, Tangut Supplement 22. Egyptian's are the signs NewGardiner leaves out as non-core (unverified, its maker says); Tangut's are the additions of Unicode 16 and 17, which no font under a license FreeLang can take draws.
+GNU Unifont draws, as a 16 by 16 grid of pixels, the characters no outline font under a license FreeLang can take has: Unifont Upper, 14 characters (1F6D8 1FA89-1FA8A 1FA8E-1FA8F 1FABE 1FAC6 1FAC8 1FACD 1FADC 1FADF 1FAE9-1FAEA 1FAEF). Until 2026-11-14 it drew 133, of which Plangothic P2 now draws 119 as outlines. No source at all has 568 characters: Egyptian Hieroglyphs Extended-A 568: the signs NewGardiner leaves out as non-core (unverified, its maker says). Tangut's additions of Unicode 16 and 17 had none until Plangothic P2.
 
 ## Fonts to consider for what FreeLang cannot draw
 
@@ -128,7 +128,7 @@ Fonts a designer working on these characters can install beside FreeLang. They a
 
 | Font | Maker | License | Where | What it draws that FreeLang does not | Caution |
 | --- | --- | --- | --- | --- | --- |
-| Jigmo, Jigmo2, Jigmo3 | Kamichi Koichi (GlyphWiki) | CC0 1.0 | https://kamichikoichi.github.io/jigmo/ | every ideograph of Unicode 17.0 (103,351, and the compatibility ideographs), of which FreeLang holds only the Han repertoires' and the orthographies' | public domain: install it beside FreeLang; too large for one of its files (65,535 glyphs at most) |
+| Plangothic P1, Plangothic P2 | The Plangothic Project | SIL OFL 1.1 | https://github.com/Fitzgerald-Porthmouth-Koenigsegg/Plangothic_Project | with Noto Sans SC, JP, or KR (or Source Han Sans), every ideograph of Unicode 17.0 (103,351, and the compatibility ideographs), of which FreeLang holds only the Han repertoires' and the orthographies' | install both beside FreeLang; too large for one of its files (65,535 glyphs at most); they leave most of the URO and Extension A to Source Han Sans |
 | Noto Color Emoji | Google | SIL OFL 1.1 | https://github.com/googlefonts/noto-emoji | all 1,219 characters with the Emoji_Presentation property in color, the 14 newest among them (FreeLang draws those as Unifont's pixels), and 2,564 emoji sequences (ZWJ, flags, keycaps, skin tones) as ligatures | a color font (COLR version 1, SVG): its outlines are color layers, so no plain glyph can be taken from it |
 
 ## Fonts looked at again
@@ -138,10 +138,11 @@ The fonts the build left out, or that earlier work dismissed, read again on 2026
 | Font | Now | Why |
 | --- | --- | --- |
 | GNU Unifont 18.0.01 (Unifoundry) | taken | dual-licensed (GPL 2 or later with the font embedding exception, and the SIL OFL 1.1, since 13.0.04): FreeLang takes it under the OFL, for the characters no outline font under a license FreeLang can take draws; its glyphs are a 16 by 16 grid of pixels |
-| Jigmo 2025-09-12 (Kamichi Koichi, GlyphWiki) | taken | CC0 1.0 (its LICENSE.txt): the ideographs of the Han repertoires that Noto Sans JP, KR, and SC lack |
+| Jigmo 2025-09-12 (Kamichi Koichi, GlyphWiki) | replaced | CC0 1.0 (its LICENSE.txt), a Mincho design: it drew the ideographs of the Han repertoires that Noto Sans JP, KR, and SC lack until Plangothic, which draws every one of them, took its place |
 | NewGardiner 3.09 (Mark-Jan Nederhof) | taken | SIL OFL 1.1 (its OFL.txt; its copyright record says so): the core signs of Egyptian Hieroglyphs Extended-A; it leaves out the non-core ones, which its maker calls unverified |
-| Plangothic (OFL 1.1) | not needed | a gothic design for Extension B to J, which would match Noto Sans CJK better than Jigmo's Mincho; Jigmo draws every ideograph the data asks for |
-| BabelStone Tangut Wenhai 1.002 | not needed | OFL 1.1, of 2016: none of Tangut's Unicode 16 and 17 additions, the only Tangut FreeLang lacks |
+| Plangothic V2.9.5795 (P1 6.400, P2 3.179; the Plangothic Project) | taken | SIL OFL 1.1 (its name records and LICENSE-OFL.txt; the names Plangothic and 遍黑 reserved): a gothic design on Source Han Sans CN, as Noto Sans SC is, for Extension B to J; it draws all of the 15,520 characters Jigmo supplied, and replaced it |
+| Plangothic P2's other characters (Tangut's additions of Unicode 16 and 17, Tai Yo, a few Syriac and Arabic) | taken | 264 characters no source drew, or only Unifont's pixels, in the FreeLang+ General font; under the glyph names of Noto's fonts (lowko-taiyo, malayalamnga-syriac), its Tai Yo seemingly Noto Serif Tai Yo's, which states no license of its own: taken under Plangothic's OFL, the owner's decision of 2026-11-14 |
+| BabelStone Tangut Wenhai 1.002 | not needed | OFL 1.1, of 2016: none of Tangut's Unicode 16 and 17 additions, which Plangothic P2 draws |
 | Tangut Yinchuan (as BabelStone's page lists it) | still left out | "Copyright Prof. Jing Yongshi", no license named |
 | Noto Serif Tai Yo 1.030 (as Language Tools and Unicodia bundle it) | still left out | no copyright, license, or designer record and no license file; notofonts.github.io issue 81, which offers it to Noto, is still open |
 | Catrinity 2.250 | not needed | OFL 1.1; every character it drew that FreeLang lacked now has a source |

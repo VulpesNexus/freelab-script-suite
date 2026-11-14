@@ -3815,13 +3815,16 @@ def apply_dark():
     state["log"] = bool(settings.get("log", False))
     shade = set_shade(settings.get("shade", "dark"))
     state["shade"] = shade
-    if not (state["on"] and _app_is_dark(app, QPalette)):  # a style change repolishes every widget: only when needed
+    switched = not (state["on"] and _app_is_dark(app, QPalette))
+    if switched:  # a style change repolishes every widget: only when needed
         fusion = QStyleFactory.create("Fusion")
         if fusion is not None:
             app.setStyle(_framed_style(fusion))
         app.setPalette(build_palette(QPalette, QColor))
         app.setFont(state["saved"]["font"])  # undoes the grayscale text smoothing an earlier version set
     state["on"] = True
+    if switched:
+        _tell_tools(True)  # (before the queue: FreeLab's windows in their new colors when they are looked at)
     _keep_module(state)
     state["queue"][:] = [item for item in state["queue"] if item[0] == "dark"]  # switching off may not have finished
     if state["engine"] == "native":
@@ -3892,6 +3895,72 @@ def restore():
     run_queue()
     _keep_module(state)  # its relight effects call into it
     _relight_editors(app)
+    _tell_tools(False)
+
+
+TOOLS_HOOK = "_freelab_theme_hook"  # set by FreeLab's tools (their shared module's hook_theme)
+
+
+def _tell_tools(dark):
+    """FreeLab's tool windows follow the switch at once (their shared module's theme_switched): their
+    widgets under a stylesheet kept the theme of before, and their pictures were drawn in it. Called
+    once the palette and the style are both set, either way; nothing when no tool window was opened."""
+    hook = getattr(sys, TOOLS_HOOK, None)
+    if hook is None:
+        return
+    try:
+        hook(dark)
+    except Exception as exc:  # the switch goes on whatever a tool does
+        _note_error("tools", exc)
+
+
+def owns_palette(widget):
+    """Whether dark mode set this widget's palette (an island's, a field's placeholder): FreeLab's tools
+    then leave it be as they polish their windows again after a switch."""
+    record = _record(widget, create=False)
+    return record is not None and ("palette" in record or "placeholder" in record)
+
+
+def forget(window):
+    """A FreeLab tool window closed for good (its shared module's let_go): what dark mode did to its
+    widgets undone, and their records dropped. The records held the widgets (and their effects), which
+    kept the window from being freed. True when there was something to forget."""
+    state = _state()
+    found = False
+    try:
+        widgets = _descendants(window)  # (the window itself too: Qt's isAncestorOf includes it)
+    except Exception:
+        widgets = [window]
+    for widget in widgets:
+        try:
+            if widget.property(SHEET_PROP) is not None or _record(widget, create=False) is not None:
+                found = True
+            _undo_widget(widget)  # (an effect removed through Qt, then dropped: never freed under the widget)
+        except Exception as exc:
+            _note_error("forget", exc)
+    for key, record in list(state["records"].items()):
+        obj = record.get("obj")
+        try:
+            if obj is None or not _alive(obj) or not obj.isWidgetType():
+                continue
+            if not (obj is window or obj == window or window.isAncestorOf(obj)):
+                continue
+        except Exception:
+            continue
+        state["records"].pop(key, None)  # (one _undo_widget could not drop)
+        found = True
+    queue = state["queue"]
+    kept = []
+    for item in queue:
+        try:
+            if item[1] is window or item[1] == window or window.isAncestorOf(item[1]):
+                found = True
+                continue
+        except Exception:
+            pass
+        kept.append(item)
+    queue[:] = kept
+    return found
 
 
 def _relight_editors(app):

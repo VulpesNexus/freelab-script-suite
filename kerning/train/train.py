@@ -10,8 +10,10 @@ names the scripts Auto Kerning then uses the model for (its "scripts").
 Errors are in units of a 1000-unit em. The model has two stages, gradient-boosted trees each: a
 classifier says whether a pair is kerned at all, and a regressor, trained on kerned pairs only, how
 much. (One regressor learned to say 0: most common pairs are not kerned.) --export writes
-kerning/learned_model.json, evaluated by Auto Kerning in plain Python, when the model beats every
-other method both overall and on the pairs the fonts kern.
+kerning/learned_model.json, evaluated by Auto Kerning in plain Python, when each script --apply-to
+names passes the rule of gate.py on designs the model never saw (Latin: every other method beaten,
+overall and on the pairs the fonts kern; another script: two designs at least, and the default
+suggestion beaten on both measures; with gate.BEAT_NO_KERNING, no kerning beaten on kerned pairs too).
 
 Python 3 with numpy and scikit-learn.
 """
@@ -30,6 +32,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, os.pardir))
 os.environ["FREELAB_NO_AUTOSTART"] = "1"
 import freelab_auto_kerning as ak  # noqa: E402
+import gate  # noqa: E402  (the rule a script's scores must pass for the model to be offered in it)
 
 MODEL_FILE = os.path.join(HERE, os.pardir, "learned_model.json")
 PARAMS = dict(max_iter=150, learning_rate=0.08, max_leaf_nodes=31, min_samples_leaf=40, l2_regularization=1.0,
@@ -192,12 +195,13 @@ def main():
         for method, predicted in predictions.items():
             held_out.setdefault(method, np.zeros(len(y)))[test] = predicted
         print("fold %d done (%.0f s)" % (fold + 1, time.time() - started), flush=True)
-    summaries = {}
+    summaries, designs = {}, {}
     for number, name in enumerate(names):
         rows = script == number
         if rows.sum() < 50 or not (np.abs(y[rows]) * 1000 >= 10).any():
             continue
         summary = summaries[name] = {}
+        designs[name] = len(set(groups[rows]))
         print("\n%s (%d pairs, %d designs)\n%-24s %8s %12s %10s %10s" % (
             name, rows.sum(), len(set(groups[rows])), "method", "MAE", "MAE kerned", "within 10", "within 20"))
         for method, predicted in held_out.items():
@@ -205,21 +209,21 @@ def main():
             print("%-24s %8.1f %12.1f %9.0f%% %9.0f%%" % (method, summary[method]["mae"], summary[method]["mae kerned"],
                                                           100 * summary[method]["within 10"], 100 * summary[method]["within 20"]))
     summary = summaries.get("latin") or summaries[trained_on[0]]
-    others = [n for n in ("zero", "halfkern", "contour", "average") if n in summary]
+    others = [n for n in gate.OTHERS if n in summary]
+    # Each script against the rule (gate.py), whether --apply-to asks for it or not.
+    print("\nwhere the learned model may be offered (gate.py):")
+    for name in sorted(summaries):
+        why = gate.reasons(name, summaries[name], designs[name])
+        stricter = gate.reasons(name, summaries[name], designs[name], beat_no_kerning=True)
+        print("  %-12s %s%s" % (name, "yes" if not why else "no: " + "; ".join(why),
+                                "" if stricter == why or gate.BEAT_NO_KERNING
+                                else " (with BEAT_NO_KERNING: %s)" % ("; ".join(stricter) or "yes")))
     if args.export:
-        if (summary["learned"]["mae"] >= min(summary[n]["mae"] for n in others)
-                or summary["learned"]["mae kerned"] >= min(summary[n]["mae kerned"] for n in others)):
-            print("not exported: the learned model does not beat the other methods on both measures")
-            return
         applied = args.apply_to.split(",") if args.apply_to else trained_on
-        # Another script takes the model only where it beats the default suggestion, the average of
-        # halfkern and contour distance, on families it never saw, on all pairs and on kerned pairs.
-        losing = [name for name in applied if name != "latin" and name in summaries
-                  and (summaries[name]["learned"]["mae"] >= summaries[name]["average"]["mae"]
-                       or summaries[name]["learned"]["mae kerned"] >= summaries[name]["average"]["mae kerned"])]
-        if losing or any(name not in summaries for name in applied if name != "latin"):
-            print("not exported: the learned model does not beat the average of halfkern and contour in %s"
-                  % ", ".join(losing or [name for name in applied if name not in summaries]))
+        refused = gate.refused(["latin"] + [name for name in applied if name != "latin"], summaries, designs)
+        if refused:
+            print("not exported: the learned model may not be offered in %s" % ", ".join(
+                "%s (%s)" % (name, "; ".join(why)) for name, why in sorted(refused.items())))
             return
         classifier, regressor, columns = fit(x[use], y[use])
         info = {"trained": time.strftime("%Y-%m-%d"), "pairs": int(use.sum()), "fonts": int(len(np.unique(fonts[use]))),
@@ -227,7 +231,8 @@ def main():
                 "scripts": args.apply_to.split(",") if args.apply_to else trained_on, "trained on": trained_on,
                 "cross-validation": dict((m, s) for m, s in summary.items() if m in others + ["learned"]),
                 "cross-validation by script": dict((name, dict((m, s) for m, s in by.items() if m in others + ["learned"]))
-                                                   for name, by in summaries.items())}
+                                                   for name, by in summaries.items()),
+                "designs by script": dict(designs)}
         export(classifier, regressor, columns, info, args.model)
         print("exported the model")
 

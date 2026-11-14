@@ -99,14 +99,21 @@ RECONSIDERED = (
     ("GNU Unifont 18.0.01 (Unifoundry)", "taken", "dual-licensed (GPL 2 or later with the font embedding exception, "
      "and the SIL OFL 1.1, since 13.0.04): FreeLang takes it under the OFL, for the characters no outline font "
      "under a license FreeLang can take draws; its glyphs are a 16 by 16 grid of pixels"),
-    ("Jigmo 2025-09-12 (Kamichi Koichi, GlyphWiki)", "taken", "CC0 1.0 (its LICENSE.txt): the ideographs of the "
-     "Han repertoires that Noto Sans JP, KR, and SC lack"),
+    ("Jigmo 2025-09-12 (Kamichi Koichi, GlyphWiki)", "replaced", "CC0 1.0 (its LICENSE.txt), a Mincho design: it drew "
+     "the ideographs of the Han repertoires that Noto Sans JP, KR, and SC lack until Plangothic, which draws every one "
+     "of them, took its place"),
     ("NewGardiner 3.09 (Mark-Jan Nederhof)", "taken", "SIL OFL 1.1 (its OFL.txt; its copyright record says so): the core "
      "signs of Egyptian Hieroglyphs Extended-A; it leaves out the non-core ones, which its maker calls unverified"),
-    ("Plangothic (OFL 1.1)", "not needed", "a gothic design for Extension B to J, which would match Noto Sans CJK "
-     "better than Jigmo's Mincho; Jigmo draws every ideograph the data asks for"),
+    ("Plangothic V2.9.5795 (P1 6.400, P2 3.179; the Plangothic Project)", "taken", "SIL OFL 1.1 (its name records "
+     "and LICENSE-OFL.txt; the names Plangothic and \N{CJK UNIFIED IDEOGRAPH-904D}\N{CJK UNIFIED IDEOGRAPH-9ED1} "
+     "reserved): a gothic design on Source Han Sans CN, as Noto Sans SC is, for Extension B to J; it draws all of "
+     "the 15,520 characters Jigmo supplied, and replaced it"),
+    ("Plangothic P2's other characters (Tangut's additions of Unicode 16 and 17, Tai Yo, a few Syriac and Arabic)",
+     "taken", "264 characters no source drew, or only Unifont's pixels, in the FreeLang+ General font; under the "
+     "glyph names of Noto's fonts (lowko-taiyo, malayalamnga-syriac), its Tai Yo seemingly Noto Serif Tai Yo's, "
+     "which states no license of its own: taken under Plangothic's OFL, the owner's decision of 2026-11-14"),
     ("BabelStone Tangut Wenhai 1.002", "not needed", "OFL 1.1, of 2016: none of Tangut's Unicode 16 and 17 additions, "
-     "the only Tangut FreeLang lacks"),
+     "which Plangothic P2 draws"),
     ("Tangut Yinchuan (as BabelStone's page lists it)", "still left out", "\"Copyright Prof. Jing Yongshi\", no license named"),
     ("Noto Serif Tai Yo 1.030 (as Language Tools and Unicodia bundle it)", "still left out", "no copyright, license, or "
      "designer record and no license file; notofonts.github.io issue 81, which offers it to Noto, is still open"),
@@ -120,13 +127,15 @@ RECONSIDERED = (
 # Fonts to consider for what FreeLang cannot draw: a font no FreeLang file can merge, or one too large
 # for the five files. Each license read from the font's own files on 2026-11-14. (RESOURCE_FOR: the
 # rows of Font Check, by their ids, whose tooltips could name each.)
-RESOURCE_FOR = {"Jigmo, Jigmo2, Jigmo3": ["script:Han"],
+RESOURCE_FOR = {"Plangothic P1, Plangothic P2": ["script:Han"],
                 "Noto Color Emoji": ["block-1f300", "block-1f600", "block-1f680", "block-1f900", "block-1fa70"]}
 RESOURCES = (
-    ("Jigmo, Jigmo2, Jigmo3", "Kamichi Koichi (GlyphWiki)", "CC0 1.0", "https://kamichikoichi.github.io/jigmo/",
-     "every ideograph of Unicode 17.0 (103,351, and the compatibility ideographs), of which FreeLang holds only the "
-     "Han repertoires' and the orthographies'", "public domain: install it beside FreeLang; too large for one of "
-     "its files (65,535 glyphs at most)"),
+    ("Plangothic P1, Plangothic P2", "The Plangothic Project", "SIL OFL 1.1",
+     "https://github.com/Fitzgerald-Porthmouth-Koenigsegg/Plangothic_Project",
+     "with Noto Sans SC, JP, or KR (or Source Han Sans), every ideograph of Unicode 17.0 (103,351, and the "
+     "compatibility ideographs), of which FreeLang holds only the Han repertoires' and the orthographies'",
+     "install both beside FreeLang; too large for one of its files (65,535 glyphs at most); they leave most of "
+     "the URO and Extension A to Source Han Sans"),
     ("Noto Color Emoji", "Google", "SIL OFL 1.1", "https://github.com/googlefonts/noto-emoji",
      "all 1,219 characters with the Emoji_Presentation property in color, the 14 newest among them (FreeLang draws "
      "those as Unifont's pixels), and 2,564 emoji sequences (ZWJ, flags, keycaps, skin tones) as ligatures",
@@ -299,7 +308,7 @@ def page(found):
     out += ["", "## Han repertoires", "",
             "Font Check's languages had the ideographs of Hyperglot's Chinese, Japanese, and Korean rows (a few "
             "thousand). Each repertoire below is a character set under *Han repertoires*, from Unihan's fields as "
-            "UAX #38 (revision 39) defines them; FreeLang draws each whole, Jigmo supplying what Noto Sans JP, KR, "
+            "UAX #38 (revision 39) defines them; FreeLang draws each whole, Plangothic supplying what Noto Sans JP, KR, "
             "and SC lack. The Han script itself (%s ideographs) cannot be drawn whole: a font holds 65,535 glyphs "
             "at most, and FreeLang draws %s of them." % (NUMBER(found["han_row"][0]), NUMBER(found["han_row"][1])), ""]
     out += table(("Set", "Ideographs", "Drawn by FreeLang"), [(name, NUMBER(count), NUMBER(drawn))
@@ -344,9 +353,9 @@ def page(found):
             "GNU Unifont draws, as a 16 by 16 grid of pixels, the characters no outline font under a license "
             "FreeLang can take has: " + "; ".join("%s, %s characters (%s)" % (family, NUMBER(len(codes_of(codes))), codes)
                                                   for family, codes in found["pixels"]) +
-            ". No source at all has %s characters: %s. Egyptian's are the signs NewGardiner leaves out as non-core "
-            "(unverified, its maker says); Tangut's are the additions of Unicode 16 and 17, which no font under a "
-            "license FreeLang can take draws." % (
+            ". Until 2026-11-14 it drew 133, of which Plangothic P2 now draws 119 as outlines. No source at all has %s "
+            "characters: %s: the signs NewGardiner leaves out as non-core (unverified, its maker says). Tangut's "
+            "additions of Unicode 16 and 17 had none until Plangothic P2." % (
                 NUMBER(sum(count for _, count in found["not_drawn"])),
                 ", ".join("%s %s" % (block, NUMBER(count)) for block, count in found["not_drawn"]) or "none"), ""]
     out += ["## Fonts to consider for what FreeLang cannot draw", "",

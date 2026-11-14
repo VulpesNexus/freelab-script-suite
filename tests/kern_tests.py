@@ -968,6 +968,16 @@ class WindowTests(unittest.TestCase):
 
         def setParent(self, parent, flags=None):
             self.parent = parent
+            self.flags = flags
+
+        def windowFlags(self):
+            return "window flags"
+
+        def metaObject(self):
+            return "QDialog"
+
+        def deleteLater(self):
+            self.calls.append("deleteLater")
 
         def setAttribute(self, attribute, on=True):
             self.props[("attribute", attribute)] = on
@@ -1244,11 +1254,12 @@ class WindowTests(unittest.TestCase):
     def test_a_tool_opened_from_a_window_works_on_that_windows_font(self):
         self.workspace.currentPackage = self.two
         check = self.open("Font Check")
+        window = check.dialog  # (the tool's object is emptied once its window is let go: let_go)
         self.workspace.currentPackage = self.one  # FontLab shows the other font; the click is in Two's window
         self.active = check.dialog
         diacritics = self.open("Diacritics")
         self.assertIs(diacritics.current_font(), self.two)
-        self.assertFalse(check.dialog.visible, "its window's tool gave way")
+        self.assertFalse(window.visible, "its window's tool gave way")
         self.active = None
         kerning = self.open("Auto Kerning")
         self.assertIs(kerning.current_font(), self.one, "from FontLab's menu: the font FontLab shows")
@@ -1257,11 +1268,12 @@ class WindowTests(unittest.TestCase):
         # (FontLab may run the menu entry once the click is over, the window no longer the active one)
         self.workspace.currentPackage = self.two
         check = self.open("Font Check")
+        font_id = check.font_id
         self.workspace.currentPackage = self.one
-        sys._freelab_windows["hint"] = (check.font_id, ak.time.time())
+        sys._freelab_windows["hint"] = (font_id, ak.time.time())
         self.assertIs(self.open("Diacritics").current_font(), self.two)
         self.assertIsNone(sys._freelab_windows["hint"], "used once")
-        sys._freelab_windows["hint"] = (check.font_id, ak.time.time() - 60)
+        sys._freelab_windows["hint"] = (font_id, ak.time.time() - 60)
         self.assertIs(self.open("Proof").current_font(), self.one, "an old one counts no more")
 
     def test_the_tool_a_window_shows_comes_forward(self):
@@ -1274,12 +1286,25 @@ class WindowTests(unittest.TestCase):
         proof.dialog.visible = False
         self.assertIsNotNone(self.open("Proof"), "closed: opened anew")
 
-    def test_a_window_whose_font_was_closed_moves_to_the_current_font(self):
+    def test_a_window_closes_with_its_font_while_others_stay_open(self):
+        # The owner: "In such a case, I'd suggest closing the script window along with the font it belongs to"
+        # (it moved to the font FontLab showed, which could leave two windows on one font)
         proof = self.open("Proof")
-        self.workspace.fonts, self.workspace.currentPackage = [self.two], self.two
-        self.assertIs(proof.current_font(), self.two)
-        self.assertEqual(proof.dialog.windowTitle, u"FreeLab Proof (Two)")
-        self.assertIsNone(self.open("Proof"), "it is that font's window now")
+        self.workspace.currentPackage = self.two
+        other = self.open("Diacritics")
+        window, other_window = proof.dialog, other.dialog
+        self.workspace.fonts = [self.two]  # One closed
+        self.assertIsNone(proof.current_font(), "never another font in its place, even before it closes")
+        self.assertEqual(window.windowTitle, u"FreeLab Proof (One)")
+        self.assertEqual(ak.fonts_tick(self.workspace), [proof])
+        self.assertFalse(window.visible, "closed with its font")
+        self.assertEqual(window.calls, ["close"], "as its close button does")
+        self.assertTrue(other_window.visible, "the other font's window stays")
+        self.run_timers()
+        self.assertTrue(getattr(proof, ak.RELEASED, False), "let go once closed")
+        self.assertEqual(sys._freelab_windows["fonts"], {self.two.id: other})
+        self.assertEqual(ak.fonts_tick(self.workspace), [], "nothing more to do")
+        self.assertIsNone(self.open("Diacritics"), "Two's window is still its only one")
 
     def test_a_tools_window_does_not_keep_fontlab_running(self):
         # A window of its own counted as one of FontLab's main windows: left open, FontLab kept running
@@ -1303,38 +1328,37 @@ class WindowTests(unittest.TestCase):
         self.assertIs(sys._freelab_windows["fonts"].get(self.one.id), proof)
         self.assertNotIn(None, sys._freelab_windows["fonts"], "no longer listed under no font")
         self.assertIsNone(self.open("Proof"), "it is that font's window: brought forward, not opened twice")
+        window = proof.dialog
         diacritics = self.open("Diacritics")
-        self.assertFalse(proof.dialog.visible, "the next tool takes its place")
+        self.assertFalse(window.visible, "the next tool takes its place")
         self.assertTrue(diacritics.dialog.visible)
 
     def test_the_window_clicked_is_the_one_replaced(self):
-        # A window whose font was closed moves to the font FontLab shows, which had a window already: a
-        # tool opened from it replaced the other window, which the owner had not clicked
-        moved = self.open("Proof")
+        # Two fonts, a window each: a tool opened from one window (its tools button, or its hint once the
+        # window is no longer the active one) replaces that window, never the other
+        one = self.open("Proof")
         self.workspace.currentPackage = self.two
         other = self.open("Diacritics")
-        self.workspace.fonts = [self.two]  # One closed
-        self.assertIs(moved.current_font(), self.two)
-        self.assertIs(sys._freelab_windows["fonts"][self.two.id], other, "one window per font: Two's own stays its")
-        self.assertIs(ak.window_owner(moved.dialog), moved, "the moved one is still found")
-        self.active = moved.dialog  # its tools button clicked
+        one_window, other_window = one.dialog, other.dialog
+        self.active = one.dialog  # its tools button clicked, while FontLab shows Two
         check = self.open("Font Check")
-        self.assertFalse(moved.dialog.visible, "the window clicked gives way")
-        self.assertTrue(other.dialog.visible, "the other is left alone")
-        self.assertIs(check.current_font(), self.two)
-        self.assertIs(sys._freelab_windows["fonts"][self.two.id], check)
-        self.active = other.dialog  # and from the other one, through its button's hint (the window no longer active)
+        self.assertFalse(one_window.visible, "the window clicked gives way")
+        self.assertTrue(other_window.visible, "the other is left alone")
+        self.assertIs(check.current_font(), self.one, "on the clicked window's font")
+        self.assertIs(sys._freelab_windows["fonts"][self.one.id], check)
         sys._freelab_windows["hint"] = (other.font_id, ak.time.time(), other.window_key)
         self.active = None
         spacing = self.open("Auto Spacing")
-        self.assertFalse(other.dialog.visible)
+        self.assertFalse(other_window.visible)
         self.assertTrue(check.dialog.visible)
         self.assertTrue(spacing.dialog.visible)
+        self.assertIs(spacing.current_font(), self.two)
 
     def test_a_size_qt_or_the_logs_grip_gives_is_not_a_size_given_by_hand(self):
         first = self.open("Proof", laid_out=(520, 360))  # Qt grew it to its layout as it showed it
+        window = first.dialog
         second = self.open("Diacritics")
-        self.assertFalse(first.dialog.visible)
+        self.assertFalse(window.visible)
         self.assertIsNone(sys._freelab_windows.get("size"), "measured once shown: nothing given by hand")
         self.assertEqual((second.dialog.width, second.dialog.height), (400, 300))
         before = second.dialog.height
@@ -1385,25 +1409,34 @@ class WindowTests(unittest.TestCase):
         self.assertEqual(told[0][1:], (self.one.id,), "this window's font")
         self.assertNotIn("notifyChangesApplied", [call[0] for call in told], "no step of the History of its own")
 
-    def test_a_window_whose_font_closed_is_reused_then_takes_the_next_font(self):
-        # The owner: "after a font is closed and the script stays open, it still remains attached to the font it
-        # belonged to, meaning navigating again opens a new window"; and "can't it also detect when a font then
-        # gets open after its launch to hook into that one?"
+    def test_a_window_closes_with_the_last_font_too(self):
+        # (a window is its font's for good: one left open without a font, waiting for the next, was the font's
+        # window no more, and "navigating again opens a new window", the owner)
         spacing = self.open("Auto Spacing")
-        changes = []
+        window, changes = spacing.dialog, []
         spacing.font_changed = lambda: changes.append(("spacing", spacing.font_id))
         self.workspace.fonts, self.workspace.currentPackage = [], self.Font(1, u"")  # (FontLab's placeholder)
         self.assertEqual(ak.fonts_tick(self.workspace), [spacing])
+        self.assertFalse(window.visible)
+        self.assertEqual(changes, [], "closed, not shown without a font")
+        self.run_timers()
+        self.assertEqual(sys._freelab_windows["fonts"], {})
+        self.assertIsNotNone(self.open("Auto Spacing"), "opened anew, without a font")
+
+    def test_a_window_opened_with_no_font_is_reused_then_takes_the_next_font(self):
+        # The owner: "can't it also detect when a font then gets open after its launch to hook into that one?"
+        self.workspace.fonts, self.workspace.currentPackage = [], self.Font(1, u"")  # (FontLab's placeholder)
+        spacing = self.open("Auto Spacing")
+        window, changes = spacing.dialog, []
         self.assertIsNone(spacing.font_id)
-        self.assertEqual(spacing.dialog.windowTitle, u"FreeLab Auto Spacing", "its title without the font")
-        self.assertEqual(changes, [("spacing", None)], "the tool shows its no-font state")
+        self.assertEqual(spacing.dialog.windowTitle, u"FreeLab Auto Spacing", "its title without a font")
         self.assertIs(sys._freelab_windows["fonts"].get(None), spacing)
-        self.assertEqual(ak.fonts_tick(self.workspace), [], "nothing more to do")
+        self.assertEqual(ak.fonts_tick(self.workspace), [], "nothing to do")
         self.assertIsNone(self.open("Auto Spacing"), "FontLab's menu brings it forward: no second window")
         self.active = spacing.dialog  # its arrow to the next tool
         kerning = self.open("Auto Kerning")
         self.active = None
-        self.assertFalse(spacing.dialog.visible, "the window clicked gives way, as one with a font does")
+        self.assertFalse(window.visible, "the window clicked gives way, as one with a font does")
         self.assertIs(sys._freelab_windows["fonts"].get(None), kerning)
         self.assertIsNone(self.open("Auto Kerning"), "and the menu finds it again")
         three = self.Font(4242, u"Three")
@@ -1424,12 +1457,244 @@ class WindowTests(unittest.TestCase):
         self.assertEqual(ak.fonts_tick(self.workspace), [proof])
         self.assertEqual(proof.font_id, self.two.id, "the one FontLab shows")
         busy = self.open("Diacritics")  # (on Two too: it takes the window's place)
-        self.workspace.fonts, self.workspace.currentPackage = [], self.Font(1, u"")
+        window = busy.dialog
+        self.workspace.fonts, self.workspace.currentPackage = [self.one], self.one  # Two closed
         busy.busy = True
         self.assertEqual(ak.fonts_tick(self.workspace), [], "a busy window is looked at next time")
+        self.assertTrue(window.visible)
         busy.busy = False
         self.assertEqual(ak.fonts_tick(self.workspace), [busy])
-        self.assertIsNone(busy.font_id)
+        self.assertFalse(window.visible, "closed with its font once its work is done")
+
+    def test_a_window_is_let_go_only_once_its_work_is_done(self):
+        proof = self.open("Proof")
+        proof.busy = True  # (closed while inside its own loop, which lets events through)
+        proof.dialog.close()
+        self.timers.pop(0)()  # (RELEASE_MS later)
+        self.assertFalse(getattr(proof, ak.RELEASED, False), "its loop still works on it")
+        self.assertEqual(len(sys._freelab_windows["releasing"]), 1, "looked at again later")
+        self.assertEqual(len(self.timers), 1)
+        proof.busy = False
+        self.run_timers()
+        self.assertTrue(getattr(proof, ak.RELEASED, False))
+        self.assertEqual(sys._freelab_windows["releasing"], [])
+
+    def test_a_window_let_go_is_held_by_nothing_freelab_keeps(self):
+        # Hidden windows were never freed: closures Qt held still reached them (PythonQt frees a window made
+        # from Python once nothing refers to it; deleteLater crashed FontLab)
+        case = self
+        proof = self.open("Proof")
+        window = proof.dialog
+        window.window = lambda: window
+        filters = sys._freelab_window_filters = {7: "Proof's filter"}
+        window.setProperty(ak.WINDOW_FILTER_PROP, 7)
+        disconnected, forgotten, told = [], [], []
+
+        class Timer(object):
+            def __init__(self):
+                self.running, self.owner = True, None
+
+            def inherits(self, name):
+                return name == "QTimer"
+
+            def metaObject(self):
+                return "QTimer"
+
+            def parent(self):
+                return self.owner
+
+            def setParent(self, parent):
+                self.owner = parent
+
+            def stop(self):
+                self.running = False
+
+            def disconnect(self, signal, slot):
+                disconnected.append((self, signal, slot))
+
+        class Sender(object):
+            def __init__(self, parent):
+                self.parent = parent
+
+            def window(self):
+                return self.parent
+
+            def disconnect(self, signal, slot):
+                disconnected.append((self, signal, slot))
+
+        states_timer = Timer()
+        tick = lambda: None
+        tick.dialog, tick.timer = window, states_timer
+        old_watchers = getattr(sys, "_freelab_state_watchers", None)
+        sys._freelab_state_watchers = [tick, "another window's tick"]
+        button, other_button = Sender(window), Sender(object())
+        slot = lambda: None
+        saved_buttons = list(ak._TOOL_BUTTONS)
+        ak._TOOL_BUTTONS[:] = [(button, "menu", [slot], [(button, "clicked()", slot)]),
+                               (other_button, "menu", [], [])]
+
+        class DarkMode(object):
+            @staticmethod
+            def forget(widget):
+                forgotten.append(widget)
+                return True
+
+        old_dark = getattr(sys, "_freelab_dark_mode", None)
+        sys._freelab_dark_mode = {"module": DarkMode}
+
+        def restore():
+            sys._freelab_window_filters = None
+            sys._freelab_state_watchers = old_watchers
+            sys._freelab_dark_mode = old_dark
+            ak._TOOL_BUTTONS[:] = saved_buttons
+        self.addCleanup(restore)
+        own_timer = proof.history_timer = Timer()
+        proof.timers = [Timer()]
+        part = type("Page", (object,), {})()  # (a part the tool holds: Diacritics' anchors page)
+        part.redraw_timer, part.owner = Timer(), proof
+        proof.anchors = part
+        shared = type(sys)("shared")  # (the shared module a tool holds: its timers serve every window)
+        shared.watch = Timer()
+        proof.ak = shared
+        proof.let_go = lambda: told.append("tool")
+        window.close()
+        self.run_timers()
+        self.assertTrue(getattr(proof, ak.RELEASED, False))
+        self.assertEqual(sorted(proof.__dict__), [ak.RELEASED], "the tool's object holds nothing more")
+        self.assertEqual(sys._freelab_windows["kept"], [])
+        self.assertNotIn(proof, sys._freelab_windows["fonts"].values())
+        self.assertEqual(filters, {})
+        self.assertEqual(sys._freelab_state_watchers, ["another window's tick"])
+        self.assertFalse(states_timer.running)
+        self.assertEqual([entry[0] for entry in ak._TOOL_BUTTONS], [other_button], "the other window's button stays")
+        self.assertIn((button, "clicked()", slot), disconnected)
+        self.assertIn((states_timer, "timeout()", tick), disconnected)
+        self.assertEqual(forgotten, [window], "dark mode's records of its widgets")
+        self.assertEqual(told, ["tool"], "what the tool connected outside its window")
+        self.assertFalse(own_timer.running, "its timers stopped")
+        self.assertFalse(part.redraw_timer.running, "and its parts' (one level down)")
+        self.assertTrue(shared.watch.running, "never a module's")
+        # Freed by Qt alone, once: given FontLab's main window as its parent (PythonQt leaves a parented
+        # object to Qt), its parentless timers given the window, then deleteLater from a plain timer
+        self.assertIs(own_timer.owner, window, "a timer made from Python dies with the window, through Qt")
+        self.assertIs(part.redraw_timer.owner, window)
+        self.assertIsNone(shared.watch.owner)
+        self.assertEqual(type(window.parent).__name__, "Main", "FontLab's main window")
+        self.assertEqual(window.flags, "window flags", "a window still, hidden")
+        self.assertEqual(window.calls.count("deleteLater"), 1, "deleted once")
+        self.assertEqual(sys._freelab_windows[ak.DELETING], [], "held until deleteLater was asked, then let go")
+        self.assertFalse(case.timers, "nothing left waiting")
+
+    def test_without_fontlabs_main_window_a_window_is_kept_rather_than_freed_by_pythonqt(self):
+        proof = self.open("Proof")
+        window = proof.dialog
+        saved = ak.AutoKerningDialog.main_window
+        ak.AutoKerningDialog.main_window = staticmethod(lambda: None)
+        # (put back as a static method: Python 2 makes a plain function set on a class an unbound method)
+        self.addCleanup(lambda: setattr(ak.AutoKerningDialog, "main_window", staticmethod(saved)))
+        window.close()
+        self.run_timers()
+        self.assertNotIn("deleteLater", window.calls)
+        self.assertIn(window, sys._freelab_windows["unfreed"], "held, hidden: never freed at a random moment")
+        sys._freelab_windows["unfreed"] = []
+
+    def test_work_still_pending_on_a_tool_let_go_does_nothing(self):
+        # Live: a refresh asked for by a list as it was deleted ran on it afterwards; a write through a
+        # deleted list's item corrupts FontLab's heap without a word
+        import types
+        proof = self.open("Proof")
+        written = []
+
+        class Item(object):
+            def setText(self, column, text):
+                written.append(text)
+
+        class Tree(object):
+            def topLevelItem(self, index):
+                return Item()
+
+        proof.tree = Tree()
+        touch = types.MethodType(lambda self: self.tree.topLevelItem(0).setText(0, u"x"), proof)
+        touch()
+        self.assertEqual(written, [u"x"])
+        proof.dialog.close()
+        self.run_timers()
+        self.assertTrue(getattr(proof, ak.RELEASED, False))
+        touch()  # (a slot Qt still held, bound to the tool's object)
+        self.assertEqual(written, [u"x"], "nothing reached the list")
+        self.assertIsNotNone(proof.update_buttons(), "any method: nothing done, nothing raised")
+        self.assertFalse(getattr(proof, "busy", False))
+        self.assertEqual(list(proof.anything), [])
+        # written to, it stays nothing (one object stands for every attribute of every tool let go)
+        proof.tree.rows = [u"a row"]
+        proof.tree[0] = u"a row"
+        self.assertEqual(list(proof.tree.rows), [])
+        self.assertFalse(proof.log)
+        ak.flag_glyphs(proof, [u"A"], u"Red", 1)  # (picked in a menu that stayed open while the window closed)
+        self.assertEqual(written, [u"x"])
+
+    def test_a_flag_refresh_never_runs_on_a_list_gone(self):
+        case, scheduled, touched = self, [], []
+
+        class View(object):
+            deleted = False
+
+            def metaObject(self):
+                if self.deleted:
+                    raise ValueError("Trying to call 'metaObject' on a destroyed QTreeWidget object")
+                return "QTreeWidget"
+
+            def signalsBlocked(self):
+                touched.append("signalsBlocked")
+                return False
+
+            def blockSignals(self, on):
+                touched.append("blockSignals")
+
+            topLevelItemCount = 0
+
+            def viewport(self):
+                return type("Viewport", (object,), {"update": lambda viewport: touched.append("update")})()
+
+        class Owner(object):
+            pass
+
+        menu = ak.FlagMenu.__new__(ak.FlagMenu)
+        menu.view, menu.owner, menu.names_of_row = View(), Owner(), lambda handle: []
+        menu.refreshing, menu.due, menu.cache, menu.table = False, False, {}, False
+        saved = ak._qt
+
+        class Core(object):
+            class QTimer(object):
+                @staticmethod
+                def singleShot(ms, slot):
+                    scheduled.append(slot)
+        ak._qt = lambda: (Core, None)
+        self.addCleanup(lambda: setattr(ak, "_qt", saved))
+        menu.soon(True)
+        self.assertEqual(len(scheduled), 1)
+        menu.view.deleted = True  # (deleted with its window before the timer fired)
+        scheduled.pop()()
+        self.assertEqual(touched, [], "nothing asked of the deleted list")
+        menu.soon(True)
+        self.assertEqual(scheduled, [], "and nothing more asked for")
+        menu.view.deleted = False
+        menu.owner.released = True  # (its tool let go)
+        menu.refresh()
+        menu.go(1)
+        self.assertEqual(touched, [])
+
+    def test_a_close_button_closes_through_the_tools_object(self):
+        proof = self.open("Proof")
+        window = proof.dialog
+        close = ak.close_slot(proof)
+        self.assertIs(proof.close_slot, close, "held with the tool")
+        self.assertNotIn(window, [cell.cell_contents for cell in (close.__closure__ or ())],
+                         "the slot never refers to the window itself")
+        close()
+        self.assertFalse(window.visible)
+        self.run_timers()
+        close()  # (clicked again after the window was let go: nothing happens)
 
     def test_a_glyph_tab_opens_for_this_windows_font_only(self):
         proof = self.open("Proof")
@@ -1452,6 +1717,630 @@ class WindowTests(unittest.TestCase):
         self.assertEqual(ak.tool_neighbors("Kerning Check"), ("Auto Kerning", "Feature Code"))
         self.assertEqual(ak.tool_neighbors("Proof"), ("Font Check", None))
         self.assertEqual(ak.tool_neighbors("No Such Tool"), (None, None))
+
+
+class ThemeFakes(object):
+    """Just enough of PythonQt for the windows following dark mode (pictures, items, palettes)."""
+
+    LIGHT = {"Window": (240, 240, 240), "WindowText": (0, 0, 0), "Text": (0, 0, 0), "Base": (255, 255, 255),
+             "Highlight": (0, 120, 215), "HighlightedText": (255, 255, 255), "disabled Text": (120, 120, 120)}
+    DARK = {"Window": (53, 53, 53), "WindowText": (219, 219, 219), "Text": (219, 219, 219), "Base": (31, 31, 31),
+            "Highlight": (61, 111, 184), "HighlightedText": (255, 255, 255), "disabled Text": (110, 110, 110)}
+
+    class Color(object):
+        def __init__(self, r, g, b, a=255):
+            self.rgba = [r, g, b, a]
+
+        def red(self):
+            return self.rgba[0]
+
+        def green(self):
+            return self.rgba[1]
+
+        def blue(self):
+            return self.rgba[2]
+
+        def alpha(self):
+            return self.rgba[3]
+
+        def setAlpha(self, alpha):
+            self.rgba[3] = alpha
+
+        def lightness(self):
+            return (max(self.rgba[:3]) + min(self.rgba[:3])) // 2
+
+    class Palette(object):
+        Active, Disabled = 0, 2
+
+        def __init__(self, colors=None):
+            self.colors = colors or {}  # (none: as QPalette() is, the application's, nothing set)
+
+        def color(self, *args):
+            group, role = (0, args[0]) if len(args) == 1 else args
+            key = ("disabled " if group == 2 else "") + role
+            rgb = self.colors.get(key, self.colors.get(role, (1, 2, 3)))
+            return ThemeFakes.Color(*rgb)
+
+    class Brush(object):
+        def __init__(self, color=None, style=1):
+            self._color, self._style = color, style if color is not None else 0
+
+        def color(self):
+            return self._color or ThemeFakes.Color(0, 0, 0)
+
+        def style(self):
+            return self._style
+
+    class Icon(object):
+        keys = [100]
+
+        def __init__(self, pixmap=None):
+            ThemeFakes.Icon.keys[0] += 1
+            self.key = ThemeFakes.Icon.keys[0]
+
+        def cacheKey(self):
+            return self.key
+
+        def isNull(self):
+            return False
+
+    class Item(object):
+        def __init__(self, icon=None, brush=None):
+            self.icons, self.brushes, self.children = {0: icon}, {0: brush}, []
+
+        def icon(self, column):
+            return self.icons.get(column)
+
+        def setIcon(self, column, icon):
+            self.icons[column] = icon
+
+        def foreground(self, column):
+            return self.brushes.get(column) or ThemeFakes.Brush()
+
+        def setForeground(self, column, brush):
+            self.brushes[column] = brush
+
+        def background(self, column):
+            return ThemeFakes.Brush()
+
+        def childCount(self):
+            return len(self.children)
+
+        def child(self, index):
+            return self.children[index]
+
+    class Tree(object):
+        columnCount = 2
+
+        def __init__(self, items):
+            self.items = items
+
+        def blockSignals(self, on):
+            return False
+
+        def inherits(self, name):
+            return name == "QTreeWidget"
+
+        @property
+        def topLevelItemCount(self):
+            return len(self.items)
+
+        def topLevelItem(self, index):
+            return self.items[index]
+
+
+class ThemeTests(unittest.TestCase):
+    """FreeLab's windows follow a dark mode switch at once, both ways, repeatedly (owner's screenshots 76
+    and 77: stale cells, labels, pictures, and buttons until the window was opened again)."""
+
+    def setUp(self):
+        fakes = ThemeFakes
+        case = self
+        self.palette = fakes.Palette(dict(fakes.LIGHT))
+        self.widgets = []
+
+        class App(object):
+            @staticmethod
+            def palette():
+                return case.palette
+
+            @staticmethod
+            def allWidgets():
+                return list(case.widgets)
+
+        class Gui(object):
+            QPalette = fakes.Palette
+            QColor = fakes.Color
+            QBrush = fakes.Brush
+            QIcon = fakes.Icon
+            QDialog = "QDialog"
+
+            class QApplication(object):
+                @staticmethod
+                def instance():
+                    return App()
+
+        class Core(object):
+            class Qt(object):
+                WA_SetPalette = 13
+
+        for role in ak.THEME_ROLES:
+            setattr(fakes.Palette, role, role)
+        old = (ak._qt, ak.retinted, getattr(sys, "_freelab_windows", None), getattr(sys, "_freelab_theme_hook", None))
+        ak._qt = lambda: (Core, Gui)
+        self.retints = []
+
+        def retinted(picture, rgb):
+            self.retints.append((picture, rgb))
+            return ak.inked(fakes.Icon(), rgb)
+        ak.retinted = retinted
+        sys._freelab_windows, sys._freelab_theme_hook = None, None
+
+        def restore():
+            ak._qt, ak.retinted, sys._freelab_windows, sys._freelab_theme_hook = old
+        self.addCleanup(restore)
+
+    def test_colors_map_role_by_role_and_the_logs_swap(self):
+        old, new = ak.theme_colors(ThemeFakes.Palette(ThemeFakes.LIGHT)), ak.theme_colors(ThemeFakes.Palette(ThemeFakes.DARK))
+        self.assertFalse(ak.theme_dark(old))
+        self.assertTrue(ak.theme_dark(new))
+        mapping = ak.theme_map(old, new)
+        self.assertEqual(mapping[(0, 0, 0)], (219, 219, 219), "text")
+        self.assertNotIn((255, 255, 255), mapping, "a color both palettes give the same role is not listed")
+        self.assertEqual(mapping[(120, 120, 120)], (110, 110, 110), "grayed-out text")
+        warning = ak.LOG_COLORS["warning"]
+        self.assertEqual(mapping[warning[1]], warning[0], "a log's amber for a light background, for a dark one")
+        back = ak.theme_map(new, old)
+        self.assertEqual(back[(219, 219, 219)], (0, 0, 0))
+        self.assertEqual(back[warning[0]], warning[1])
+
+    def test_a_picture_in_one_color_is_noted_and_its_icon_too(self):
+        pixmap = ThemeFakes.Icon()
+        self.assertIs(ak.inked(pixmap, ThemeFakes.Color(0, 0, 0)), pixmap)
+        self.assertEqual(ak.ink_of(pixmap), (0, 0, 0))
+        icon = ak.icon_of(pixmap)
+        self.assertEqual(ak.ink_of(icon), (0, 0, 0), "the icon made of it is another picture to Qt")
+        self.assertIsNone(ak.ink_of(ak.icon_of(ThemeFakes.Icon())), "a picture never noted: left as drawn")
+        self.assertIsNone(ak.ink_of(None))
+
+    def test_a_lists_pictures_and_grayed_rows_take_the_new_colors(self):
+        fakes = ThemeFakes
+        black = ak.inked(fakes.Icon(), (0, 0, 0))
+        red = ak.inked(fakes.Icon(), (200, 0, 0))  # (a fixed color: no role's)
+        quiet = fakes.Brush(fakes.Color(0, 0, 0, 120))  # (the text color, faded)
+        grayed = fakes.Brush(fakes.Color(120, 120, 120))
+        child = fakes.Item(black, grayed)
+        top = fakes.Item(red, quiet)
+        top.children.append(child)
+        plain = fakes.Item(None, None)
+        tree = fakes.Tree([top, plain])
+        mapping = ak.theme_map(ak.theme_colors(fakes.Palette(fakes.LIGHT)), ak.theme_colors(fakes.Palette(fakes.DARK)))
+        self.assertEqual(ak.retheme_items(tree, mapping), 3)
+        self.assertEqual(self.retints, [(black, (219, 219, 219))], "the red one keeps its color")
+        self.assertEqual(ak.ink_of(child.icons[0]), (219, 219, 219), "and can follow the next switch")
+        self.assertEqual(top.brushes[0].color().rgba, [219, 219, 219, 120], "faded as it was")
+        self.assertEqual(child.brushes[0].color().rgba, [110, 110, 110, 255])
+        self.assertIsNone(plain.brushes[0], "an item's own palette colors are left to Qt")
+
+    def test_a_lists_items_redrawn_are_no_edit(self):
+        # Diacritics dropped its revealed rows, and Feature Code wrote its code again row by row, on the
+        # itemChanged each redrawn item sent (review)
+        fakes, edits = ThemeFakes, []
+
+        class Item(fakes.Item):
+            def setIcon(self, column, icon):
+                fakes.Item.setIcon(self, column, icon)
+                tree.changed(self)
+
+            def setForeground(self, column, brush):
+                fakes.Item.setForeground(self, column, brush)
+                tree.changed(self)
+
+        class Tree(fakes.Tree):
+            blocked, calls = False, []
+
+            def blockSignals(self, on):
+                was, self.blocked = self.blocked, on
+                self.calls.append(on)
+                return was
+
+            def changed(self, item):
+                if not self.blocked:
+                    edits.append(item)  # (itemChanged reaching the tool's handler)
+
+        item = Item(ak.inked(fakes.Icon(), (0, 0, 0)), fakes.Brush(fakes.Color(0, 0, 0)))
+        tree = Tree([item])
+        mapping = ak.theme_map(ak.theme_colors(fakes.Palette(fakes.LIGHT)), ak.theme_colors(fakes.Palette(fakes.DARK)))
+        self.assertEqual(ak.retheme_items(tree, mapping), 2)
+        self.assertEqual(edits, [], "no handler ran")
+        self.assertEqual(tree.calls, [True, False], "held, then let go as it was")
+        tree.blocked, tree.calls = True, []
+        ak.retheme_items(tree, mapping)
+        self.assertEqual(tree.calls, [True, True], "a list held already stays held")
+
+    def test_a_busy_window_catches_up_once_its_work_is_done(self):
+        ak.hook_theme()
+        owner, label, _ = self.window()
+        other, other_label, _ = self.window()
+        owner.busy = True  # (an analysis under way, which lets events through)
+        self.palette = ThemeFakes.Palette(dict(ThemeFakes.DARK))
+        self.assertEqual(sys._freelab_theme_hook(True), [other], "not redrawn mid-loop")
+        self.assertEqual(ak.ink_of(label.pixmap), (0, 0, 0))
+        self.assertEqual(owner.calls, [])
+        self.assertEqual(ak.theme_tick(), [], "still busy")
+        owner.busy = False
+        self.assertEqual(ak.theme_tick(), [owner], "the next tick catches it up")
+        self.assertEqual(ak.ink_of(label.pixmap), (219, 219, 219))
+        self.assertEqual(owner.calls, ["log", "tool"])
+        self.assertEqual(other.calls, ["log", "tool"], "the other one is not redrawn twice")
+        self.assertEqual(ak.theme_tick(), [])
+        ak.note_theme(owner)
+        self.assertEqual(getattr(owner, ak.THEME_ATTR), ak.theme_colors(self.palette), "a window built now: drawn in now's")
+
+    def window(self, theme_changed=True, shown=True):
+        """A tool's window: a label with a picture, and a list; its dialog object."""
+        fakes, case = ThemeFakes, self
+        polished = []
+
+        class Style(object):
+            def unpolish(self, widget):
+                polished.append(("unpolish", widget.name))
+
+            def polish(self, widget):
+                polished.append(("polish", widget.name))
+
+        class Palette(object):
+            def __init__(self, mask):
+                self.mask = mask
+
+            def resolve(self):
+                return self.mask
+
+        class Widget(object):
+            def __init__(self, name, parent=None, kinds=()):
+                self.name, self.parent, self.kinds, self.set_palette = name, parent, kinds, False
+                self.pixmap = None
+
+            @property
+            def palette(self):
+                return Palette(1 if self.set_palette else 0)
+
+            def setPalette(self, palette):
+                polished.append(("palette", self.name))
+
+            def inherits(self, kind):
+                return kind in self.kinds
+
+            def parentWidget(self):
+                return self.parent
+
+            def isAncestorOf(self, other):
+                while other is not None:
+                    if other is self:
+                        return True
+                    other = other.parent
+                return False
+
+            def findChildren(self, kind):
+                return []
+
+            def testAttribute(self, attribute):
+                return self.set_palette
+
+            def style(self):
+                return Style()
+
+            def update(self):
+                pass
+
+            def isVisible(self):
+                return shown
+
+            def setPixmap(self, pixmap):
+                self.pixmap = pixmap
+
+        dialog = Widget("dialog")
+        label = Widget("label", dialog, ("QLabel",))
+        label.pixmap = ak.inked(fakes.Icon(), (0, 0, 0))
+        island = Widget("island", dialog)
+        island.set_palette = True  # (dark mode's island: its palette is dark mode's)
+        sheeted = Widget("sheeted", dialog)
+        sheeted.set_palette = True  # (a stylesheet with colors: Qt marks its palette as set too)
+        islands = self.islands = getattr(self, "islands", [])
+        islands.append(island)
+        dark = type(sys)("dark")
+        dark.owns_palette = lambda widget: any(widget is one for one in islands)
+        saved = getattr(sys, "_freelab_dark_mode", None)
+        sys._freelab_dark_mode = {"module": dark}
+        self.addCleanup(lambda: setattr(sys, "_freelab_dark_mode", saved))
+        self.widgets.extend([label, island, sheeted, dialog])
+
+        class Owner(object):
+            pass
+        owner = Owner()
+        owner.dialog, owner.window_key, owner.calls = dialog, len(self.widgets), []
+
+        class FakeLog(ak.Log):
+            def __init__(self):
+                self.entries, self.view = [], None
+
+            def restyle(self):
+                owner.calls.append("log")
+        owner.log = FakeLog()
+        if theme_changed:
+            owner.theme_changed = lambda: owner.calls.append("tool")
+        registry = ak._windows()
+        registry.setdefault("kept", []).append(owner)
+        return owner, label, polished
+
+    def test_a_switch_redraws_every_shown_window_once(self):
+        ak.hook_theme()
+        owner, label, polished = self.window()
+        hidden, _, hidden_polish = self.window(shown=False)
+        self.palette = ThemeFakes.Palette(dict(ThemeFakes.DARK))  # dark mode switched on
+        followed = sys._freelab_theme_hook(True)
+        self.assertEqual(followed, [owner], "a closed window is let go, not redrawn")
+        self.assertEqual(polished[:3], [("unpolish", "dialog"), ("palette", "dialog"), ("polish", "dialog")],
+                         "the window first, then its children: unpolished, its palette inherited again, polished")
+        self.assertIn(("palette", "label"), polished, "a widget with no palette of its own takes its parent's again")
+        self.assertNotIn(("palette", "sheeted"), polished, "one its stylesheet colors is polished from them again")
+        self.assertIn(("polish", "label"), polished)
+        self.assertNotIn(("polish", "island"), polished, "a palette dark mode set is kept")
+        self.assertIn(("polish", "sheeted"), polished,
+                      "a palette its stylesheet set is read again (Font Check's scripts list stayed light, live)")
+        self.assertEqual(ak.ink_of(label.pixmap), (219, 219, 219), "its picture in the new text color")
+        self.assertEqual(owner.calls, ["log", "tool"], "its logs, then the tool's own")
+        self.assertEqual(sys._freelab_theme_hook(True), [], "told twice: done once")
+        self.assertEqual(ak.theme_tick(), [], "and the windows' tick has nothing more to do")
+        self.palette = ThemeFakes.Palette(dict(ThemeFakes.LIGHT))  # and off again: no one said so
+        self.assertEqual(ak.theme_tick(), [owner], "the tick notices it")
+        self.assertEqual(ak.ink_of(label.pixmap), (0, 0, 0), "back in black")
+        self.assertEqual(owner.calls, ["log", "tool", "log", "tool"])
+
+    def test_the_hook_reaches_the_module_loaded_last(self):
+        ak.hook_theme()
+        hook = sys._freelab_theme_hook
+        ak.hook_theme()
+        self.assertIs(sys._freelab_theme_hook, hook, "once a session")
+        calls = []
+        stand_in = type(sys)("stand_in")
+        stand_in.theme_switched = lambda dark=None: calls.append(dark) or ["followed"]
+        saved = sys.modules[ak.__name__]
+        sys.modules[ak.__name__] = stand_in  # (a reinstall replaced it)
+        try:
+            self.assertEqual(hook(False), ["followed"])
+        finally:
+            sys.modules[ak.__name__] = saved
+        self.assertEqual(calls, [False])
+
+    def test_a_log_is_written_again_in_the_new_colors(self):
+        fakes = ThemeFakes
+
+        class View(object):
+            def __init__(self):
+                self.palette = fakes.Palette(dict(fakes.LIGHT))
+                self.html = None
+
+            def setHtml(self, html):
+                self.html = html
+
+            def verticalScrollBar(self):
+                raise AttributeError("no bar")
+
+        log = ak.Log.__new__(ak.Log)
+        log.view, log.entries, log.lines, log.source, log.line = View(), [], [], None, 12
+        log.add(u"Done.", "done")
+        log.add(u"Read.")
+        light = ak.LOG_COLORS["done"][1]
+        self.assertIn(u"#%02x%02x%02x" % light, log.view.html)
+        log.view.palette = fakes.Palette(dict(fakes.DARK))
+        log.restyle()
+        dark = ak.LOG_COLORS["done"][0]
+        self.assertIn(u"#%02x%02x%02x" % dark, log.view.html)
+        self.assertNotIn(u"#%02x%02x%02x" % light, log.view.html)
+        self.assertEqual(len(log.entries), 2, "every line, newest first")
+        self.assertTrue(log.entries[0].endswith(u"Read."))
+
+
+class HeldFilterTests(unittest.TestCase):
+    """Event filters made from Python are timers here: made without a parent, one held only in a
+    dictionary of parts became garbage once its tool was let go, and PythonQt deleted it at whatever
+    moment Python's collector picked (the crashes of November 14 were PythonQt freeing such a wrapper)."""
+
+    def setUp(self):
+        made = self.made = []
+
+        class Timer(object):
+            def __init__(self, parent=None):
+                self.owner, self.running = parent, True
+                made.append(self)
+
+            def inherits(self, name):
+                return name == "QTimer"
+
+            def metaObject(self):
+                return "QTimer"
+
+            def parent(self):
+                return self.owner
+
+            def setParent(self, parent):
+                self.owner = parent
+
+            def stop(self):
+                self.running = False
+
+        class Core(object):
+            QTimer = Timer
+
+            class Qt(object):
+                ClickFocus = SizeHorCursor = ArrowCursor = PointingHandCursor = 0
+
+        class Widget(object):
+            def __init__(self):
+                self.filters = []
+
+            def installEventFilter(self, watcher):
+                self.filters.append(watcher)
+
+            def setMouseTracking(self, on):
+                pass
+
+            def setFocusPolicy(self, policy):
+                pass
+
+            def setToolTip(self, text):
+                pass
+
+            def setProperty(self, name, value):
+                pass
+
+            toolTip = u""
+
+        self.Widget = Widget
+        saved = ak._qt
+        ak._qt = lambda: (Core, None)
+        self.addCleanup(lambda: setattr(ak, "_qt", saved))
+
+    def test_filters_are_made_with_the_widget_they_watch_as_parent(self):
+        button, label = self.Widget(), self.Widget()
+        regions = ak.ClickRegions(button, lambda key: None)
+        drag = ak.PairDrag(label, lambda: 0, lambda value: None, lambda step: None, lambda: 1.0)
+        self.assertIs(regions.filter.owner, button, "Qt deletes it with its widget, never PythonQt at random")
+        self.assertIs(drag.filter.owner, label)
+
+    def test_timers_anywhere_a_tool_holds_them_are_found(self):
+        class Tool(object):
+            pass
+
+        class Page(object):
+            pass
+
+        tool, made = Tool(), self.made
+        tool.neighbors = dict((key, ak.ClickRegions(self.Widget(), lambda k: None)) for key in ("before", "after"))
+        tool.spacing_neighbors = [ak.ClickRegions(self.Widget(), lambda k: None)]
+        tool.class_dialog = Page()  # (Auto Kerning's classes dialog, holding its drag, and its owner back)
+        tool.class_dialog.adjusting = ak.PairDrag(self.Widget(), lambda: 0, lambda v: None, lambda s: None, lambda: 1.0)
+        tool.class_dialog.owner = tool
+        tool.shared = type(sys)("shared")  # (a module: its timers serve every window)
+        tool.shared.watch = made[0].__class__()
+        tool.text, tool.numbers = u"a" * 10, list(range(1000))
+        found = ak._held_timers(tool)
+        self.assertEqual(len(found), 4, "two in a dictionary, one in a list, one in a part of a part")
+        self.assertNotIn(tool.shared.watch, found)
+
+
+class MainCodeTests(unittest.TestCase):
+    def test_a_glyph_fontlab_gives_a_radical_first_is_read_as_its_ideograph(self):
+        # FontLab's unicode gives the Kangxi radical U+2F47 first for a glyph also encoded at U+65E5 (IBM Plex
+        # Sans JP): read as the radical, it was a symbol (category So), not Han
+        class Fg(object):
+            unicodes, unicode = [0x2F47, 0x65E5], 0x2F47
+
+        class Glyph(object):
+            fgGlyph = Fg()
+
+        class Package(object):
+            def findName(self, name):
+                return Glyph() if name == u"uni65E5" else None
+
+        self.assertEqual(ak.main_code(Fg()), 0x65E5)
+        self.assertEqual(ak.direction_char(Package(), u"uni65E5"), u"\u65e5")
+        import freelab_kerning_check as check
+        self.assertEqual(check.glyph_text(Package(), u"uni65E5"), u"\u65e5")
+
+
+class FontLabWidgetTests(unittest.TestCase):
+    def test_fontlabs_widgets_are_looked_for_once_not_at_every_read(self):
+        # Every widget wrapped at each compile and each of its Output reads (the walk November 14's crashes
+        # came at the end of, in tab docking): the widget found is kept while it is there
+        case, walks = self, []
+
+        class Output(object):
+            objectName, deleted, shown, text = "textOutput", False, True, u"compiled"
+
+            def inherits(self, name):
+                return name == "QTextEdit"
+
+            def metaObject(self):
+                if self.deleted:
+                    raise ValueError("destroyed")
+                return "QTextEdit"
+
+            def isVisible(self):
+                return self.shown
+
+            def toPlainText(self):
+                return self.text
+
+        case.output = Output()
+        hidden = Output()  # (FontLab has two of that name: the first hidden and empty, live)
+        hidden.shown, hidden.text = False, u""
+
+        class App(object):
+            def allWidgets(self):
+                walks.append(1)
+                return [hidden, case.output]
+
+        class Gui(object):
+            class QApplication(object):
+                @staticmethod
+                def instance():
+                    return App()
+
+        saved, held = ak._qt, getattr(sys, "_freelab_found", None)
+        ak._qt, sys._freelab_found = (lambda: (None, Gui)), None
+
+        def restore():
+            ak._qt, sys._freelab_found = saved, held
+        self.addCleanup(restore)
+        self.assertEqual([ak.output_text() for _ in range(3)], [u"compiled"] * 3)
+        self.assertEqual(len(walks), 1, "walked once")
+        case.output.deleted = True  # (FontLab rebuilt its panel)
+        case.output = Output()
+        self.assertEqual(ak.output_text(), u"compiled")
+        self.assertEqual(len(walks), 2, "walked again once the one found is gone")
+        case.output.shown = False  # (the panel closed: both hidden)
+        self.assertEqual(ak.output_text(), u"compiled", "the one that holds text, not the empty first")
+        case.output.text = u""
+        self.assertEqual(ak.output_text(), u"", "with none holding text, the first")
+
+    def test_a_compiles_output_is_read_before_and_after_from_the_same_text_box(self):
+        reads, timers, logged = [], [], []
+
+        class View(object):
+            def __init__(self, texts):
+                self.texts = texts
+
+            def toPlainText(self):
+                reads.append(self)
+                return self.texts.pop(0) if len(self.texts) > 1 else self.texts[0]
+
+        view = View([u"old", u"old\n[E] bad rule", u"old\n[E] bad rule"])
+
+        class Core(object):
+            class QTimer(object):
+                @staticmethod
+                def singleShot(ms, slot):
+                    timers.append(slot)
+
+        class Box(object):
+            checked = True
+
+        class Log(object):
+            def add(self, text, level="info"):
+                logged.append((level, text))
+
+        saved = (ak._qt, ak.output_view, ak.compile_features)
+        ak._qt, ak.output_view, ak.compile_features = (lambda: (Core, None)), (lambda: view), (lambda: True)
+        self.addCleanup(lambda: setattr(ak, "_qt", saved[0]) or setattr(ak, "output_view", saved[1])
+                        or setattr(ak, "compile_features", saved[2]))
+        ak.compiled_note(Box(), Log())
+        while timers:
+            timers.pop(0)()
+        self.assertTrue(all(read is view for read in reads), "one text box, before and after")
+        self.assertEqual(logged[-1][0], "error")
+        self.assertIn(u"bad rule", logged[-1][1])
 
 
 class HelperModuleTests(unittest.TestCase):
@@ -1775,6 +2664,9 @@ class WindowFilterTests(unittest.TestCase):
                 LeftButton, RightButton, ToolTipRole = 1, 2, 3
 
             class QTimer(object):
+                def __init__(self, parent=None):
+                    self.parent_ = parent  # (the window's filters are made with the window as parent)
+
                 @staticmethod
                 def singleShot(ms, slot):
                     case.timers.append(slot)
@@ -1981,6 +2873,366 @@ class ChoiceSheetTests(unittest.TestCase):
         self.assertLess(ak.CHOSEN_ALPHA, 128, "a light tint: the pair's ink stays legible in either palette")
 
 
+class AutoKerningListTests(unittest.TestCase):
+    """The owner, on Auto Kerning's table in dark mode: "The table headers look bad in dark mode here;
+    probably yet another argument in favor of making this table adopt the same layout as other tables"."""
+
+    class Stub(object):
+        """Any widget the list's methods only tell things to."""
+
+        def __init__(self, **values):
+            self.__dict__.update(values)
+            self.calls = []
+
+        def __getattr__(self, name):
+            if name.startswith("__"):
+                raise AttributeError(name)
+            return lambda *args: self.calls.append((name,) + args)
+
+    class Color(object):
+        def __init__(self, value, alpha=255):
+            self.hex = value.hex if isinstance(value, AutoKerningListTests.Color) else value
+            self.alpha = value.alpha if isinstance(value, AutoKerningListTests.Color) else alpha
+
+        def name(self):
+            return self.hex
+
+        def setAlpha(self, alpha):
+            self.alpha = alpha
+
+        def red(self):
+            return int(self.hex[1:3], 16)
+
+        def green(self):
+            return int(self.hex[3:5], 16)
+
+        def blue(self):
+            return int(self.hex[5:7], 16)
+
+    class Palette(object):
+        def __init__(self, text, highlight):
+            self.text, self.highlight = text, highlight
+
+        def color(self, role):
+            return AutoKerningListTests.Color(self.text if role == "WindowText" else self.highlight)
+
+    class Font(object):
+        def __init__(self, other=None):
+            self.bold = other.bold if other is not None else False
+
+        def setBold(self, on):
+            self.bold = on
+
+    class Item(object):
+        def __init__(self, texts):
+            self.texts, self.values, self.aligned, self.fonts, self.tips, self.icons = list(texts), {}, {}, {}, {}, {}
+            self.state = self.flags = None
+
+        def setData(self, column, role, value):
+            self.values[(column, role)] = value
+
+        def data(self, column, role):
+            return self.values.get((column, role))
+
+        def setText(self, column, text):
+            self.texts[column] = text
+
+        def setFont(self, column, font):
+            self.fonts[column] = font
+
+        def setToolTip(self, column, tip):
+            self.tips[column] = tip
+
+        def setIcon(self, column, icon):
+            self.icons[column] = icon
+
+        def setCheckState(self, column, state):
+            self.state = state
+
+        def checkState(self, column):
+            return self.state
+
+        def setFlags(self, flags):
+            self.flags = flags
+
+        def setTextAlignment(self, column, value):
+            self.aligned[column] = value
+
+    class Tree(object):
+        columnCount = 8
+
+        def __init__(self):
+            self.items, self.current, self.updates, self.header_aligned = [], None, 0, {}
+            self.font = AutoKerningListTests.Font()
+
+        @property
+        def topLevelItemCount(self):  # (a Qt property: a value under PythonQt)
+            return len(self.items)
+
+        def topLevelItem(self, index):
+            return self.items[index]
+
+        def addTopLevelItem(self, item):
+            self.items.append(item)
+
+        def clear(self):
+            self.items, self.current = [], None
+
+        def selectedItems(self):
+            return [self.current] if self.current is not None else []
+
+        def setCurrentItem(self, item):
+            self.current = item
+
+        def scrollToItem(self, item):
+            pass
+
+        def setFocus(self):
+            pass
+
+        def header(self):
+            return AutoKerningListTests.Stub()
+
+        def resizeColumnToContents(self, column):
+            pass
+
+        def headerItem(self):
+            tree = self
+            return type("Header", (), {"setTextAlignment": lambda header, column, value: tree.header_aligned.update(
+                {column: value})})()
+
+        def viewport(self):
+            return self
+
+        def update(self):
+            self.updates += 1
+
+    def setUp(self):
+        test = self
+
+        class Qt(object):
+            UserRole, Checked, Unchecked = 0x0100, 2, 0
+            ItemIsSelectable, ItemIsEnabled, ItemIsUserCheckable = 1, 32, 16
+            AlignRight, AlignVCenter = 0x02, 0x80
+
+        class Rect(object):
+            def __init__(self, *args):
+                self.args = args
+
+        class Delegate(object):
+            painted = []
+
+            def __init__(self, parent=None):
+                pass
+
+            @staticmethod
+            def paint(delegate, painter, option, index):
+                Delegate.painted.append(index)
+
+        class QtCore(object):
+            pass
+
+        class QtGui(object):
+            QTreeWidgetItem, QFont, QColor = test.Item, test.Font, test.Color
+            QStyledItemDelegate = Delegate
+
+            class QPalette(object):
+                WindowText, Highlight = "WindowText", "Highlight"
+
+            @staticmethod
+            def QIcon():
+                return "no picture"
+
+        QtCore.Qt, QtCore.QRect = Qt, Rect
+        self.Qt, self.QtGui = Qt, QtGui
+        old = ak._qt, ak.glyph_icon
+        ak._qt = lambda: (QtCore, QtGui)
+        self.drawn = []
+        ak.glyph_icon = lambda package, master, names, color, value=0: self.drawn.append(
+            (tuple(names), color.name(), value)) or u"%s %s at %d in %s" % (names[0], names[1], value, color.name())
+
+        def put_back():
+            ak._qt, ak.glyph_icon = old
+        self.addCleanup(put_back)
+
+    def suggestion(self, left_char, right_char, left, right, current=0, **values):
+        s = ak.Suggestion(left_char, right_char, left, right, current)
+        s.values.update(values)
+        return s
+
+    def window(self, suggestions, text="#000000", highlight="#0078d7"):
+        Stub = self.Stub
+        d = ak.AutoKerningDialog.__new__(ak.AutoKerningDialog)  # (its window needs FontLab)
+        d.tree, d.suggestions, d.icon_cache, d.adjustments = self.Tree(), suggestions, {}, {}
+        d.dialog = Stub(palette=self.Palette(text, highlight), font=self.Font())
+        d.package, d.master, d.font_kerning, d.script, d.selected = object(), u"Regular", None, "latin", None
+        d.source = Stub(currentIndex=0)  # (Average of halfkern and Contour)
+        d.choice_buttons = dict((key, Stub()) for key, _ in ak.CHOICES)
+        for name in ("reset_button", "glyph_window_button", "preview_note", "related", "all_button", "none_button",
+                     "apply_button", "restore_button", "classes_button", "check_button", "tolerance", "show_kind",
+                     "order", "include_kerned", "pairs", "analyze_button"):
+            setattr(d, name, Stub())
+        d.only_picked, d.picked_room_kept = Stub(checked=False), True
+        d.analysis, d.busy, d.common, d.fontlab, d.buttons_due = None, False, {}, None, False
+        d.kerning_read = 1e12  # (the font's kerning read just now: not asked of FontLab again)
+        d.previewed = []
+        d.show_preview = lambda s: d.previewed.append((s.left, s.right))
+        return d
+
+    def test_rows_in_the_layout_of_the_other_lists(self):
+        av = self.suggestion(u"A", u"V", u"A", u"V", 0, halfkern=-80, contour=-60)
+        kerned = self.suggestion(u"T", u"o", u"T", u"o", -40, halfkern=-90, contour=-70)
+        hebrew = self.suggestion(u"\N{HEBREW LETTER BET}", u"\N{HEBREW LETTER ALEF}", u"bet", u"alef", 0, halfkern=-10,
+                                 contour=-20)  # (bet left of alef)
+        d = self.window([av, kerned, hebrew])
+        d.fill_table()
+        rows = d.tree.items
+        self.assertEqual([item.texts[0] for item in rows], [u"AV", u"To", u"\N{HEBREW LETTER ALEF}\N{HEBREW LETTER BET}"],
+                         "a Hebrew pair typed in text order, which Qt sets right to left: as read")
+        self.assertEqual([item.data(0, self.Qt.UserRole) for item in rows], [0, 1, 2], "each row knows its pair")
+        self.assertEqual([item.state for item in rows], [self.Qt.Checked, self.Qt.Unchecked, self.Qt.Checked],
+                         "pairs the font kerns start unchecked")
+        self.assertEqual(rows[0].texts[1:], [u"0", u"-80", u"-60", u"\N{EN DASH}", u"\N{EN DASH}", u"20", u"-70"])
+        right = int(self.Qt.AlignRight | self.Qt.AlignVCenter)
+        self.assertEqual(rows[0].aligned, dict((column, right) for column in range(1, 8)), "numbers right-aligned")
+        self.assertEqual(d.tree.header_aligned, dict((column, right) for column in range(1, 8)), "their headers too")
+        self.assertEqual(self.drawn, [((u"A", u"V"), u"#000000", -70), ((u"T", u"o"), u"#000000", -80),
+                                      ((u"bet", u"alef"), u"#000000", -15)],
+                         "each pair drawn as on screen, at the value it takes, in the window's text color")
+        self.assertEqual(rows[2].icons[0], u"bet alef at -15 in #000000")
+        self.assertIn(u"Read right to left: alef first", rows[2].tips[0])
+        with io.open(ak.__file__, encoding="utf-8") as handle:
+            source = handle.read().split(u"class AutoKerningDialog")[1].split(u"\ndef font_class_suggestions")[0]
+        for wanted in (u"QtGui.QTreeWidget()", u"setProperty(LEAVE_ALONE_PROP, True)", u"grid_lines(self.tree)",
+                       u"glyph_icon_size(2)"):
+            self.assertIn(wanted, source)
+        self.assertNotIn(u"QTableWidget", source, "no table left: its header was what looked bad")
+
+    def test_a_pick_tints_the_row_from_the_palette_as_drawn(self):
+        av = self.suggestion(u"A", u"V", u"A", u"V", 0, halfkern=-80, contour=-60)
+        d = self.window([av])
+        d.fill_table()
+        item = d.tree.items[0]
+        self.assertEqual([item.data(column, ak.PICKED_ROLE) for column in range(8)], [None] * 8)
+        d.tree.setCurrentItem(item)
+        d.select()
+        self.assertEqual((d.selected, d.previewed), (0, [(u"A", u"V")]))
+        d.choose("halfkern")
+        item = d.tree.items[0]
+        self.assertEqual([item.data(column, ak.PICKED_ROLE) for column in range(8)], [True] * 8)
+        self.assertTrue(item.fonts[7].bold)
+        self.assertEqual(item.texts[7], u"-80")
+        self.assertEqual(self.drawn[-1], ((u"A", u"V"), u"#000000", -80), "its picture at the value picked")
+        d.reset()
+        self.assertEqual([item.data(column, ak.PICKED_ROLE) for column in range(8)], [None] * 8)
+        self.assertFalse(item.fonts[7].bold)
+
+    def test_the_tint_and_the_flags_painted_by_one_delegate(self):
+        d = self.window([])
+        d.tree.setItemDelegate = d.tree.setItemDelegateForColumn = lambda *args: None
+        delegate = d.tint_rows()
+        filled = []
+        painter = type("Painter", (), {"fillRect": lambda painter, rect, color: filled.append((rect, color))})()
+
+        class Rect(object):
+            def left(self):
+                return 0
+
+            def top(self):
+                return 0
+
+            def width(self):
+                return 40
+
+            def height(self):
+                return 20
+
+            def bottom(self):
+                return 19
+
+        option = type("Option", (), {"rect": Rect(), "palette": self.Palette("#ffffff", "#2a82da")})()
+
+        def index(column, picked, flags=None):
+            values = {ak.PICKED_ROLE: picked, ak.FLAG_ROLE: flags}
+            return type("Index", (), {"data": lambda index, role: values.get(role), "column": lambda index: column})()
+
+        delegate.paint(painter, option, index(3, True))
+        self.assertEqual([(color.name(), color.alpha) for _, color in filled], [(u"#2a82da", ak.PICKED_ALPHA)],
+                         "the highlight of the palette it is drawn with: a dark mode switch needs no new brush")
+        del filled[:]
+        delegate.paint(painter, option, index(3, None, u"#ff0000"))
+        self.assertEqual(filled, [], "flags only in the pair's column")
+        delegate.paint(painter, option, index(0, None, u"#ff0000,"))
+        self.assertEqual([(color.name(), color.alpha) for _, color in filled],
+                         [(u"#ff0000", ak.FLAG_TINT), (u"#ff0000", 255)], "a flag's tint, then its bar over the row")
+
+    def test_kana_drawn_as_palt_sets_them(self):
+        ka = self.suggestion(u"\N{KATAKANA LETTER KA}", u"\N{KATAKANA LETTER I}", u"ka", u"i", 0)
+        d = self.window([ka])
+        d.adjustments = {u"ka": (-20, -50), u"i": (-30, -60)}  # (placement, added width)
+        self.assertEqual(d.icon_value(ka, -10), -10 + (-50 + 20) - 30)
+        d.adjustments = {}
+        self.assertEqual(d.icon_value(ka, -10), -10)
+
+    def test_a_dark_mode_switch_redraws_what_came_from_the_palette(self):
+        av = self.suggestion(u"A", u"V", u"A", u"V", 0, halfkern=-80, contour=-60)
+        d = self.window([av])
+        d.fill_table()
+        d.tree.setCurrentItem(d.tree.items[0])
+        d.select()
+        del self.drawn[:], d.previewed[:]
+        d.dialog.palette = self.Palette("#dbdbdb", "#2a82da")  # (switched to dark)
+        d.theme_changed()
+        self.assertEqual(self.drawn, [((u"A", u"V"), u"#dbdbdb", -70)], "the pictures in the new text color")
+        self.assertEqual(d.tree.items[0].icons[0], u"A V at -70 in #dbdbdb")
+        self.assertEqual(d.previewed, [(u"A", u"V")], "the previews too")
+        for button in d.choice_buttons.values():
+            sheets = [call[1] for call in button.calls if call[0] == "setStyleSheet"]
+            self.assertEqual(len(sheets), 1, "restyled once")
+            self.assertIn(u"rgba(42, 130, 218,", sheets[0], "the chosen suggestion's tint, from the new highlight")
+        self.assertGreater(d.tree.updates, 0, "the rows' tints repainted")
+        self.assertFalse(hasattr(ak.AutoKerningDialog, "watch_palette"),
+                         "no palette watcher of its own: FreeLab's shared mechanism calls theme_changed")
+
+    def test_the_selected_pair_stays_selected_when_the_list_is_filled_again(self):
+        av = self.suggestion(u"A", u"V", u"A", u"V", 0, halfkern=-80, contour=-60)
+        to = self.suggestion(u"T", u"o", u"T", u"o", 0, halfkern=-90, contour=-70)
+        d = self.window([av, to])
+        d.fill_table()
+        d.tree.setCurrentItem(d.tree.items[1])
+        d.select()
+        d.suggestions = [to, av]  # (another order)
+        d.fill_table()
+        self.assertEqual((d.selected, d.tree.current.texts[0]), (0, u"To"))
+
+    def test_checks_and_double_clicks_read_the_rows_from_the_list(self):
+        av = self.suggestion(u"A", u"V", u"A", u"V", 0, halfkern=-80, contour=-60)
+        to = self.suggestion(u"T", u"o", u"T", u"o", 0, halfkern=-90, contour=-70)
+        d = self.window([av, to])
+        d.fill_table()
+        d.tree.items[1].setCheckState(0, self.Qt.Unchecked)
+        d.harvest_checks()
+        self.assertEqual([av.checked, to.checked], [True, False])
+        self.assertTrue(d.row_checked(0))
+        self.assertFalse(d.row_checked(1))
+        self.assertFalse(d.row_checked(5), "no such row")
+        d.check_all(False)
+        self.assertEqual([item.state for item in d.tree.items], [self.Qt.Unchecked] * 2)
+        opened, chosen = [], []
+        d.show_in_glyph_window = lambda: opened.append(d.selected)
+        d.choose = lambda key: chosen.append((d.selected, key))
+        d.reset = lambda: chosen.append((d.selected, "reset"))
+        d.item_double_clicked(d.tree.items[1], 2)
+        d.item_double_clicked(d.tree.items[0], 0)
+        d.item_double_clicked(d.tree.items[1], 7)
+        self.assertEqual((opened, chosen), ([0], [(1, "halfkern"), (1, "reset")]))
+        d.select_row(1)
+        d.toggle_check()
+        self.assertEqual(d.tree.items[1].state, self.Qt.Checked, "Space checks the selected pair")
+        self.assertEqual(d.names_of_row(1), [u"T", u"o"])
+        self.assertEqual(d.names_of_row(None), [])
+
+
 class PairLinkTests(unittest.TestCase):
     def test_the_pairs_written_are_named_drawn_and_clickable(self):
         # The owner: "Auto kerning seems to never be in a situation where it'd display the list of characters"
@@ -2156,6 +3408,52 @@ class ScriptTests(unittest.TestCase):
         for left, right in ((HEBREW_BET, HEBREW_YOD), (HEBREW_YOD, u"."), (u"T", u"o")):
             key = ak.kerning_key(left, right, left, right)
             self.assertEqual(ak.screen_of_key(key[0], key[1], key[0], key[1]), (left, right))
+
+    def test_every_right_to_left_script_is_read_right_to_left_by_table(self):
+        # Kerning Check and Font Compare read any font's keys: an Arabic, Syriac, or Adlam key is in text
+        # order too (FontLab keeps a GPOS pair as the lookup holds it, typed order), though Auto Kerning
+        # measures none of them. A table, not unicodedata: FontLab's Python knows Unicode 5.2 only
+        alef, beh = u"\N{ARABIC LETTER ALEF}", u"\N{ARABIC LETTER BEH}"
+        adlam = u"\U0001E900"  # (two UTF-16 code units on a narrow Python 2)
+        for ch in (HEBREW_YOD, alef, u"\N{SYRIAC LETTER ALAPH}", u"\N{THAANA LETTER HAA}", u"\N{NKO LETTER A}",
+                   u"\N{HEBREW PUNCTUATION MAQAF}", adlam):
+            self.assertTrue(ak.is_rtl_char(ch), repr(ch))
+        for ch in (u"A", u".", u"0", u"\N{ARABIC-INDIC DIGIT ONE}", u"\N{EXTENDED ARABIC-INDIC DIGIT ONE}",
+                   u"\N{MONGOLIAN LETTER A}", u"\N{OGHAM LETTER BEITH}", u"\N{HIRAGANA LETTER A}", u"", None):
+            self.assertFalse(ak.is_rtl_char(ch), repr(ch))
+        self.assertEqual(ak.code_of_char(adlam), 0x1E900)
+        self.assertEqual(ak.screen_of_key(beh, alef, u"beh", u"alef"), (u"alef", u"beh"))
+        self.assertTrue(ak.is_rtl_pair(alef, beh))
+        self.assertFalse(ak.is_rtl_pair(u"\N{ARABIC-INDIC DIGIT ONE}", u"\N{ARABIC-INDIC DIGIT TWO}"),
+                         "numbers run left to right in right-to-left text")
+        self.assertFalse(ak.is_rtl_pair(u"T", HEBREW_YOD), "a pair takes its first letter's script, as before")
+        for left, right in ((alef, beh), (u".", alef)):
+            key = ak.kerning_key(left, right, left, right)
+            self.assertEqual(ak.screen_of_key(key[0], key[1], key[0], key[1]), (left, right))
+
+    def test_a_multi_script_font_reads_each_key_by_its_own_glyphs(self):
+        # One font with Latin, Hebrew, and Arabic: every key is read in its own direction, an unencoded
+        # contextual form (uni0628.fina, yod.alt) by its base glyph's character, never by the font's script
+        codes = {u"T": 0x54, u"o": 0x6F, u"yod": 0x05D9, u"bet": 0x05D1, u"uni0628": 0x0628, u"uni0627": 0x0627}
+
+        class Glyph(object):
+            def __init__(self, code):
+                self.fgGlyph = type("FgGlyph", (object,), {"unicode": code})()
+
+        class Package(object):
+            def findName(self, name):
+                return Glyph(codes[name]) if name in codes else (Glyph(0) if u"." in name else None)
+
+        package = Package()
+        self.assertEqual(ak.direction_char(package, u"uni0628.fina"), u"\N{ARABIC LETTER BEH}")
+        self.assertEqual(ak.direction_char(package, u"yod.alt"), HEBREW_YOD)
+        self.assertIsNone(ak.direction_char(package, u"a.sc"))
+        chars = {}
+        self.assertEqual(kc.screen_pair(ak, package, u"uni0628.fina", u"uni0627.fina", chars),
+                         (u"uni0627.fina", u"uni0628.fina"), "two contextual forms: right to left")
+        self.assertEqual(kc.screen_pair(ak, package, u"yod.alt", u"bet", chars), (u"bet", u"yod.alt"))
+        self.assertEqual(kc.screen_pair(ak, package, u"T", u"o", chars), (u"T", u"o"), "the Latin key beside them")
+        self.assertEqual(kc.screen_pair(ak, package, u"a.sc", u"o", chars), (u"a.sc", u"o"))
 
     def test_a_hebrew_pair_is_read_and_written_in_text_order(self):
         kerning = ak.FontKerning(FakeKerning({}, {((u"yod", False), (u"bet", False)): -64}))
@@ -2376,6 +3674,61 @@ class ScriptBandTests(unittest.TestCase):
         self.assertLess(contour, 0)
         halo, contour = ak.measure_pair(tools, KANA_RO, KANA_I, stem("ro"), stem("i"), 100, float(PAD))
         self.assertEqual(halo, 0.0, "spaced as the references: left alone")
+
+
+GATE_FILE = os.path.join(HERE, os.pardir, "kerning", "train", "gate.py")
+
+
+@unittest.skipUnless(os.path.isfile(GATE_FILE), "the training scripts are not in the Python 2.7 copy")
+class LearnedGateTests(unittest.TestCase):
+    """kerning/train/gate.py: where train.py --export lets the learned method be offered."""
+
+    def setUp(self):
+        sys.path.insert(0, os.path.dirname(GATE_FILE))
+        try:
+            import gate
+        finally:
+            sys.path.pop(0)
+        self.gate = gate
+
+    @staticmethod
+    def summary(zero, average, learned, halfkern=(99, 99), contour=(99, 99)):
+        scored = {"zero": zero, "average": average, "learned": learned, "halfkern": halfkern, "contour": contour}
+        return dict((method, {"mae": all_pairs, "mae kerned": kerned}) for method, (all_pairs, kerned) in scored.items())
+
+    def test_beating_no_kerning_is_a_switch_left_off(self):
+        # Devanagari as scored on 2026-11-14: closer than the default, but not than leaving the pairs alone
+        self.assertFalse(self.gate.BEAT_NO_KERNING, "the owner's decision, pending: the suggestion stays in Devanagari")
+        devanagari = self.summary((4.0, 25.7), (12.2, 36.9), (4.8, 26.0))
+        self.assertEqual(self.gate.reasons("devanagari", devanagari, 11), [])
+        self.assertEqual(self.gate.reasons("devanagari", devanagari, 11, beat_no_kerning=True),
+                         ["mae kerned 26.0 not below no kerning's 25.7"])
+        self.assertEqual(self.gate.refused(["devanagari"], {"devanagari": devanagari}, {"devanagari": 11}, True),
+                         {"devanagari": ["mae kerned 26.0 not below no kerning's 25.7"]})
+        greek = self.summary((5.0, 31.1), (8.1, 20.5), (5.1, 17.1))
+        self.assertEqual(self.gate.reasons("greek", greek, 60, beat_no_kerning=True), [],
+                         "no kerning is never asked to be beaten over all pairs")
+
+    def test_another_script_must_beat_the_default_on_both_measures(self):
+        hebrew = self.summary((4.0, 36.4), (8.9, 26.6), (5.8, 28.3))
+        self.assertEqual(self.gate.reasons("hebrew", hebrew, 19), ["mae kerned 28.3 not below the default's 26.6"])
+        kana = self.summary((4.1, 41.8), (3.0, 26.6), (4.3, 41.8))
+        self.assertEqual(len(self.gate.reasons("kana", kana, 8)), 2)
+        self.assertEqual(len(self.gate.reasons("kana", kana, 8, beat_no_kerning=True)), 3)
+
+    def test_another_script_needs_two_designs(self):
+        thaana = self.summary((2.3, 30.9), (5.4, 30.2), (3.7, 26.0))
+        self.assertEqual(self.gate.reasons("thaana", thaana, 1), ["1 design scored, 2 needed"])
+        self.assertEqual(self.gate.reasons("thaana", thaana, 2), [])
+
+    def test_latin_must_beat_every_method(self):
+        latin = self.summary((9.4, 38.4), (22.0, 24.8), (8.5, 21.4), (17.4, 22.4), (27.3, 31.6))
+        self.assertEqual(self.gate.reasons("latin", latin, 1), [], "Latin is not held to the design count")
+        self.assertEqual(self.gate.reasons("latin", self.summary((8.0, 38.4), (22.0, 24.8), (8.5, 21.4)), 234),
+                         ["mae 8.5 not below zero's"])
+        self.assertEqual(self.gate.refused(["latin", "thaana", "mongolian"], {"latin": latin, "thaana": self.summary(
+            (2.3, 30.9), (5.4, 30.2), (3.7, 26.0))}, {"latin": 234, "thaana": 1}),
+            {"thaana": ["1 design scored, 2 needed"], "mongolian": ["not scored"]})
 
 
 @unittest.skipIf(sys.version_info[0] < 3, "the pairs are counted by a Python 3 training script")

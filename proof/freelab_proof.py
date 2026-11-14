@@ -143,6 +143,21 @@ SAMPLES = (
 TEXT_SCRIPTS = ("Latin", "Greek", "Cyrillic", "Armenian", "Georgian", "Hebrew", "Hiragana", "Katakana", "Hangul",
                 "Kanji", "Chinese", "Hanja")
 RTL_SCRIPTS = ("Hebrew",)
+# The code points of the right-to-left scripts: the blocks Unicode gives a right-to-left bidirectional
+# class (R or AL) by default (DerivedBidiClass.txt: Hebrew, Arabic, Syriac, Thaana, N'Ko, Samaritan,
+# Mandaic, their presentation forms, and the historic and newer right-to-left scripts of plane 1:
+# Phoenician, Kharoshthi, Old South Arabian, Avestan, Old Turkic, Old Hungarian, Hanifi Rohingya,
+# Yezidi, Sogdian, Old Uyghur, Mende Kikakui, Adlam...), without the numbers in them, which a
+# right-to-left text sets left to right (Arabic-Indic digits, the Rumi numerals). A table, not the
+# interpreter's Unicode data: FontLab's Python 2.7 knows Unicode 5.2, and on its narrow build it cannot
+# read a character past U+FFFF at all, so the direction would have depended on the interpreter.
+RTL_RANGES = ((0x0590, 0x08FF), (0xFB1D, 0xFDFF), (0xFE70, 0xFEFC), (0x10800, 0x10FFF), (0x1E800, 0x1EFFF))
+RTL_NUMBER_RANGES = ((0x0600, 0x0605), (0x0660, 0x066C), (0x06DD, 0x06DD), (0x06F0, 0x06F9), (0x0890, 0x0891),
+                     (0x08E2, 0x08E2), (0x10D30, 0x10D39), (0x10E60, 0x10E7E))
+# Scripts written top to bottom (in columns, left to right) whose letters this proof sets horizontally,
+# left to right, as Unicode encodes them and as FontLab shows them: their letters' code points. The
+# proof says so (vertical_scripts); vertical setting is not done.
+VERTICAL_SCRIPTS = ((u"Mongolian", ((0x1820, 0x18AA),)), (u"Phags-pa", ((0xA840, 0xA873),)))
 UNSPACED_SCRIPTS = ("Hiragana", "Katakana", "Kanji", "Chinese", "Hanja")  # lines may break between any two characters
 HAN_SCRIPTS = ("Kanji", "Chinese", "Hanja")
 
@@ -218,6 +233,22 @@ def code_points(text):
             found.append(code)
             at += 1
     return found
+
+
+def _in_ranges(code, ranges):
+    return any(low <= code <= high for low, high in ranges)
+
+
+def is_rtl_code(code):
+    """Whether a code point is of a right-to-left script (RTL_RANGES), its numbers apart."""
+    return _in_ranges(code, RTL_RANGES) and not _in_ranges(code, RTL_NUMBER_RANGES)
+
+
+def vertical_scripts(font):
+    """The names of the scripts written top to bottom that the font has letters of (VERTICAL_SCRIPTS):
+    the proof sets them horizontally, and says so."""
+    codes = [code for code, name in font.cmap.items() if font.has(name)]
+    return [script for script, ranges in VERTICAL_SCRIPTS if any(_in_ranges(code, ranges) for code in codes)]
 
 
 def char_name(code):
@@ -303,7 +334,9 @@ class ProofFont(object):
     advance widths, and the kerning FontLab applies (classes resolved).
 
     advance(name): the glyph's advance width in this master, or None where it has no layer here;
-    kerning {(left, right): value}: glyph pairs, as they are seen (left glyph, right glyph);
+    kerning {(first, second): value}: FontLab's kerning keys, glyph pairs in text order: the left
+    glyph first, but a right-to-left pair's right glyph first (the one typed first: FontLab 7 keeps
+    Hebrew kerning so, as a compiled font kerns it; see Auto Kerning's kerning_key);
     ink(name): (xmin, xmax) of the glyph's outline, or None (zero-width glyphs are centered by it)."""
 
     def __init__(self, family, master, upm, glyphs, codes, advance, kerning=None, ascender=None, descender=None,
@@ -356,8 +389,26 @@ class ProofFont(object):
             return False
         return self._ink is None or self.ink(name) is not None
 
-    def kern(self, left, right):
-        return self.kerning.get((left, right), 0)
+    def kern(self, first, second):
+        """The kerning between two glyphs that follow each other in text (first typed first, whatever
+        the direction they are set in)."""
+        return self.kerning.get((first, second), 0)
+
+    def direction(self, name):
+        """"rtl" for a glyph of a right-to-left script (Hebrew, Thaana, Arabic...: its character's, or
+        its base glyph's for an unencoded one such as yod.alt; see is_rtl_code), else None: a glyph of
+        a left-to-right script, a mark of punctuation, a space, an unencoded glyph (a pair takes the
+        direction of its right-to-left glyph, if it has one)."""
+        code = self.code_of(name)
+        if code is None:
+            stem = name.split(u".")[0].split(u"_")[0]
+            code = self.code_of(stem) if stem in self.codes else None
+        return "rtl" if code is not None and is_rtl_code(code) else None
+
+    def rtl_pair(self, first, second):
+        """Whether a kerned pair is set right to left: either glyph of a right-to-left script (a mark of
+        punctuation takes its partner's direction), as Auto Kerning's screen_of_key reads a key."""
+        return "rtl" in (self.direction(first), self.direction(second))
 
     def ink(self, name):
         try:
@@ -424,8 +475,10 @@ class ProofFont(object):
 # ---------------------------------------------------------------------------
 
 def place(font, line, rtl=False, kerning=True, space=None):
-    """([(name, x)], width) for a line of glyph names (None: a space), in font units. Right to left,
-    the line is reversed first: kerning is read as the pairs are seen, left glyph then right glyph."""
+    """([(name, x)], width) for a line of glyph names (None: a space) in reading order, in font units,
+    placed from the left. Right to left, the line is reversed first, its first glyph at the right; its
+    pairs are still kerned in text order, as the font's kerning keeps them (a right-to-left pair's
+    right glyph first): the glyph at the right of each pair is the first of its key."""
     space = font.space() if space is None else space
     visual = list(reversed(line)) if rtl else list(line)
     placed, x, prev = [], 0.0, None
@@ -435,18 +488,19 @@ def place(font, line, rtl=False, kerning=True, space=None):
             prev = None
             continue
         if prev is not None and kerning:
-            x += font.kern(prev, name)
+            x += font.kern(name, prev) if rtl else font.kern(prev, name)
         placed.append((name, x))
         x += font.width(name)
         prev = name
     return placed, x
 
 
-def _token_width(font, names, prev, kerning, rtl):
+def _token_width(font, names, prev, kerning):
+    """The width of names (in reading order) after prev: each pair kerned in text order, either way."""
     width = 0.0
     for name in names:
         if prev is not None and kerning:
-            width += font.kern(name, prev) if rtl else font.kern(prev, name)
+            width += font.kern(prev, name)
         width += font.width(name)
         prev = name
     return width, prev
@@ -462,7 +516,7 @@ def wrap(font, tokens, room, rtl=False, kerning=True, space=None):
     while queue:
         names, spaced = queue.pop()
         gap = space if (line and spaced) else 0.0
-        width, last = _token_width(font, names, None if gap or not line else prev, kerning, rtl)
+        width, last = _token_width(font, names, None if gap or not line else prev, kerning)
         if line and x + gap + width > room:
             lines.append(line)
             line, x, prev = [], 0.0, None
@@ -561,7 +615,7 @@ def text_lines(text, width, size):
 
 class Item(object):
     """Something on a page. Kinds: "glyphs" (x, baseline, size in points per em, upm, master, placed:
-    [(name, x in font units)]), "text" (x, y, width, height, text, size, style: plain, bold, or quiet;
+    [(name, x in font units)] from the left, rtl: set right to left), "text" (x, y, width, height, text, size, style: plain, bold, or quiet;
     align: left, center, or right), "line" (x1, y1, x2, y2), "frame" (x, y, width, height)."""
 
     def __init__(self, kind, **values):
@@ -577,8 +631,15 @@ class Page(object):
         self.items = []
 
     def runs(self):
-        """The glyph names of each line of glyphs on the page."""
-        return [[name for name, _ in item.placed] for item in self.items if item.kind == "glyphs"]
+        """The glyph names of each line of glyphs on the page, in text order: a right-to-left line's
+        from its right end (FontLab 7's Glyph window sets typed Hebrew left to right, in that order, and
+        kerns it by the font's keys, which are in that order too)."""
+        found = []
+        for item in self.items:
+            if item.kind == "glyphs":
+                names = [name for name, _ in item.placed]
+                found.append(list(reversed(names)) if getattr(item, "rtl", False) else names)
+        return found
 
 
 class Layout(object):
@@ -652,8 +713,9 @@ class Layout(object):
                          text=line, size=size, style="plain", align="left")
                 self.y += height
 
-    def glyphs(self, font, placed, width, size, label=None, indent=0.0, align="left"):
-        """A line of glyphs at size points per em (placed and width in font units)."""
+    def glyphs(self, font, placed, width, size, label=None, indent=0.0, align="left", rtl=False):
+        """A line of glyphs at size points per em (placed and width in font units); rtl: a line set
+        right to left (its text order is from its right end: Page.runs)."""
         height = line_height(font, size)
         self.need(height)
         x = self.left + indent
@@ -663,15 +725,17 @@ class Layout(object):
             self.add("text", x=self.left, y=self.y, width=indent - 4.0, height=height, text=label, size=7,
                      style="quiet", align="left")
         self.add("glyphs", x=x, baseline=self.y + baseline_in(font, size, height), size=size, upm=font.upm,
-                 master=font.master, placed=placed)
+                 master=font.master, placed=placed, rtl=rtl)
         self.y += height
 
     def lines(self, font, tokens, size, rtl=False, kerning=True, space=None, label=None, indent=0.0):
-        """Tokens broken into lines of the page's width and laid out (label: on the first line)."""
+        """Tokens broken into lines of the page's width and laid out (label: on the first line); right to
+        left, each line set flush right, its first token at the right."""
         room = (self.width() - indent) * font.upm / size
         for index, line in enumerate(wrap(font, tokens, room, rtl, kerning, space)):
             placed, width = place(font, line, rtl, kerning, space)
-            self.glyphs(font, placed, width, size, label if index == 0 else None, indent, "right" if rtl else "left")
+            self.glyphs(font, placed, width, size, label if index == 0 else None, indent, "right" if rtl else "left",
+                        rtl)
 
     def finish(self, title, date, note=NOTE):
         """A header (the font, the master, the date) and a footer (the sections, the note, the page
@@ -846,10 +910,13 @@ def font_order(font):
 
 
 def kerning_strings(font, keep=None):
-    """[(left, [(right, value, names)])]: every kerned pair, grouped by its left glyph (in the font's
+    """[(first, [(second, value, names)])]: every kerned pair, grouped by its first glyph (in the font's
     order), each between control letters as HH?HOHO and nn?nono have it: two straight ones of the
-    left glyph's kind before, a straight and a round one of the right glyph's twice after.
-    keep(left, right): the pairs to list (all by default)."""
+    first glyph's kind before, a straight and a round one of the second glyph's twice after. A pair is
+    the font's kerning key, in text order, and so are its names: the first glyph is the left one, or
+    the right one of a right-to-left pair (font.rtl_pair), whose string is set right to left
+    (section_kerning) and reads HH?HOHO from the right. keep(first, second): the pairs to list (all
+    by default)."""
     groups = {}
     for (left, right), value in font.kerning.items():
         if not value or not font.has(left) or not font.has(right):
@@ -1467,7 +1534,8 @@ def section_waterfall(layout, font, line, rtl, sizes):
     for size in sizes:
         room = (layout.width() - LABEL_WIDTH) * font.upm / size
         placed, width = clip(font, line, room, rtl)
-        layout.glyphs(font, placed, width, size, u"%s pt" % format_size(size), LABEL_WIDTH, "right" if rtl else "left")
+        layout.glyphs(font, placed, width, size, u"%s pt" % format_size(size), LABEL_WIDTH, "right" if rtl else "left",
+                      rtl)
 
 
 def section_text(layout, font, groups, sizes, left_out):
@@ -1496,15 +1564,30 @@ def section_kerning(layout, font, keep=None, size=STRING_SIZE):
     groups = kerning_strings(font, keep)
     total = sum(len(strings) for _, strings in groups)
     which = u"common kerned pair" if keep is not None else u"kerned pair"
-    layout.text(u"%s, grouped by left glyph, between control letters (HH?HOHO, nn?nono), kerning applied "
-                u"(classes resolved)." % counted(total, which), style="quiet")
+    layout.text(u"%s, grouped by first glyph, between control letters (HH?HOHO, nn?nono), kerning applied "
+                u"(classes resolved). Right-to-left pairs are set right to left, as they read: their first "
+                u"glyph is the right one." % counted(total, which), style="quiet")
     if not groups:
         layout.text(u"No %s in this master." % (which + u"s"))
         return
     space = font.upm * STRING_GAP
-    for left, strings in groups:
-        layout.text(u"%s (%s)" % (left, counted(len(strings), u"pair")), 8, "bold", gap=4.0, keep=line_height(font, size))
-        layout.lines(font, [(names, True) for _, _, names in strings], size, space=space)
+    for first, strings in groups:
+        layout.text(u"%s (%s)" % (first, counted(len(strings), u"pair")), 8, "bold", gap=4.0,
+                    keep=line_height(font, size))
+        for rtl, tokens in direction_runs(font, first, strings):
+            layout.lines(font, tokens, size, rtl, space=space)
+
+
+def direction_runs(font, first, strings):
+    """A group's strings ([(second, value, names)]) as [(rtl, tokens)]: the strings that follow each
+    other in one direction, one run each (a mark of punctuation may kern with letters of both)."""
+    runs = []
+    for second, _, names in strings:
+        rtl = font.rtl_pair(first, second)
+        if not runs or runs[-1][0] != rtl:
+            runs.append((rtl, []))
+        runs[-1][1].append((names, True))
+    return runs
 
 
 def section_spacing(layout, font, size=STRING_SIZE):
@@ -1518,7 +1601,8 @@ def section_spacing(layout, font, size=STRING_SIZE):
     space = font.upm * STRING_GAP
     for label, strings in groups:
         layout.text(u"%s (%s)" % (label, counted(len(strings), u"glyph")), 8, "bold", gap=4.0, keep=line_height(font, size))
-        layout.lines(font, [(names, True) for _, names in strings], size, kerning=False, space=space)
+        rtl = font.direction(strings[0][0]) == "rtl"  # (Hebrew's read from the right, as its kerning strings)
+        layout.lines(font, [(names, True) for _, names in strings], size, rtl, kerning=False, space=space)
 
 
 def section_diacritics(layout, font, size=SHOWCASE_SIZE):
@@ -1635,9 +1719,13 @@ def summary_languages(layout, coverage, mode):
         summary_names(layout, names)
 
 
-def section_summary(layout, font, summary, date, left_out=()):
+VERTICAL_NOTE = u"%s (written top to bottom: set here horizontally, left to right, as encoded; vertical setting is not done)"
+
+
+def section_summary(layout, font, summary, date, left_out=(), vertical=()):
     """The summary: the family's name in the font itself, then, in the labels' typeface, the font and
-    the proof, its vertical metrics, its OpenType features and kerning, and the languages it covers."""
+    the proof, its vertical metrics, its OpenType features and kerning, and the languages it covers.
+    vertical: the scripts written top to bottom the proof sets horizontally (vertical_scripts)."""
     title_font = summary.font or font
     title = summary.title or font.family
     sequence = title_font.sequence(title) if title else None
@@ -1656,6 +1744,8 @@ def section_summary(layout, font, summary, date, left_out=()):
     rows.append((u"Applied", APPLIED))
     if left_out:
         rows.append((u"No text for", u"%s (shaping is not done)" % u", ".join(left_out)))
+    if vertical:
+        rows.append((u"Set horizontally", VERTICAL_NOTE % u", ".join(vertical)))
     for label, text in rows:
         layout.field(label, text)
     if summary.metrics:
@@ -1681,7 +1771,7 @@ def section_masters(layout, fonts, line, rtl):
         for size in MASTERS_SIZES:
             room = layout.width() * font.upm / size
             placed, width = clip(font, line, room, rtl)
-            layout.glyphs(font, placed, width, size, align="right" if rtl else "left")
+            layout.glyphs(font, placed, width, size, align="right" if rtl else "left", rtl=rtl)
 
 
 class Proof(object):
@@ -1875,6 +1965,7 @@ def build_proof(fonts, options=None, languages=(), date=None, info=None, summary
     layout = Layout(page_size(options.page))
     first = fonts[0]
     groups, left_out = choose_samples(first, languages)
+    vertical = vertical_scripts(first)
     line, rtl = waterfall_line(first, groups)
     label = ALL_MASTERS if len(fonts) > 1 else first.master
     kerned = []
@@ -1883,7 +1974,7 @@ def build_proof(fonts, options=None, languages=(), date=None, info=None, summary
                           if value and (options.keep is None or options.keep(left, right))))
     if summary is not None:  # (it says what the about block says, and more)
         layout.begin("summary", label)
-        section_summary(layout, first, summary, date, left_out)
+        section_summary(layout, first, summary, date, left_out, vertical)
     else:
         layout.begin("about", label)
         layout.text(first.family, 16, "bold", keep=30.0)
@@ -1896,6 +1987,8 @@ def build_proof(fonts, options=None, languages=(), date=None, info=None, summary
                         for count, font in zip(kerned, fonts)))
         if left_out:
             layout.text(u"No text for %s: shaping is not done." % u", ".join(left_out))
+        if vertical:
+            layout.text(u"Set horizontally: %s." % (VERTICAL_NOTE % u", ".join(vertical)))
         layout.text(u"Made with FreeLab Proof, %s." % date, style="quiet")
     if info is not None:  # (with the about block: which font, which version, before any glyph)
         layout.begin("info", label)
@@ -2175,7 +2268,8 @@ counts alone).<br><br>
 come first, then the others, A to Z (type a name's first letters to find it).<br><br>
 Kerning is applied as FontLab applies it, classes resolved. OpenType features are not: no ligatures,
 no contextual or localized forms, no mark positioning, so each character shows its own glyph, and
-scripts that need shaping (Arabic, the Indic scripts, Thai) get no text.<br><br>
+scripts that need shaping (Arabic, the Indic scripts, Thai) get no text. Hebrew is set right to left,
+its kerning strings too, each pair kerned as the font keeps it (its right glyph first).<br><br>
 <i>Colors</i>: the PDF in this window's colors (light on dark in dark mode), or black on white for
 printing; the page beside the list shows the PDF as it will be.<br><br>
 The list shows the pages; select one to see it. <i>Save PDF</i> writes them all, <i>Open PDF</i> opens
@@ -2285,7 +2379,8 @@ class ProofDialog(object):
         tips = {"charset": u"Every glyph in a grid, in the font's order, with its name and code point.",
                 "waterfall": u"A line of sample text at each waterfall size.",
                 "text": u"A few lines of sample text in each script the font covers, at each text size.",
-                "kerning": u"Every kerned pair between control letters (HH?HOHO, nn?nono), grouped by left glyph.",
+                "kerning": u"Every kerned pair between control letters (HH?HOHO, nn?nono), grouped by first glyph "
+                           u"(the right one in a right-to-left pair, set right to left).",
                 "spacing": u"Each letter and figure between control letters (HHxHOxOO, nnxnoxoo), without kerning.",
                 "diacritics": u"The letters with marks, each after its base letter, and the marks.",
                 "figures": u"Figures and their alternates, punctuation, and symbols, alone and between letters."}
@@ -2373,15 +2468,16 @@ class ProofDialog(object):
         buttons.addWidget(self.close_button)
         layout.addLayout(buttons)
 
-        self.rebuild_timer = QtCore.QTimer()
+        # (their parent the window: Qt deletes them with it, never PythonQt at a random moment)
+        self.rebuild_timer = QtCore.QTimer(dialog)
         self.rebuild_timer.setSingleShot(True)
         self.rebuild_timer.setInterval(300)
         self.rebuild_timer.connect("timeout()", self.rebuild)
-        self.preview_timer = QtCore.QTimer()
+        self.preview_timer = QtCore.QTimer(dialog)
         self.preview_timer.setSingleShot(True)
         self.preview_timer.setInterval(120)
         self.preview_timer.connect("timeout()", self.show_page)
-        self.saved_timer = QtCore.QTimer()  # (the window activated: the PDF saved last looked for again)
+        self.saved_timer = QtCore.QTimer(dialog)  # (the window activated: the PDF saved last looked for again)
         self.saved_timer.setSingleShot(True)
         self.saved_timer.setInterval(0)
         self.saved_timer.connect("timeout()", self.update_buttons)
@@ -2402,7 +2498,7 @@ class ProofDialog(object):
         self.restore_button.connect("clicked()", self.restore_defaults)
         self.save_button.connect("clicked()", self.save_pdf)
         self.open_button.connect("clicked()", self.open_pdf)
-        self.close_button.connect("clicked()", dialog.close)
+        self.close_button.connect("clicked()", self.ak.close_slot(self))  # (never the window itself: see let_go)
         self.watch_size()
         ak.add_tools_button(dialog, "Proof", self.log)  # (the other font tools, a click away)
         ak.plain_buttons(dialog)
@@ -2430,7 +2526,7 @@ class ProofDialog(object):
                 return False
 
         try:
-            watcher = Watcher()
+            watcher = Watcher(self.dialog)  # (its parent the window: Qt deletes it with it)
             self.preview.installEventFilter(watcher)
             self.dialog.installEventFilter(watcher)
             self.keep.append(watcher)

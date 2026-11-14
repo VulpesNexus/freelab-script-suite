@@ -329,6 +329,13 @@ def other_case(case):
     return "lower" if case == "upper" else "upper"
 
 
+def font_codes(ak, glyphs):
+    """[(glyph, code point)] of every code point of each glyph, the first glyph at a code point last so
+    that Font's map keeps it (a glyph encoded at a radical too is found by its ideograph)."""
+    pairs = [(u"%s" % g.name, code) for g in glyphs for code in ak.glyph_codes(g)]
+    return list(reversed(pairs))
+
+
 class Font(object):
     """What the planning reads of a font: its glyph names, their code points, and which glyphs are
     empty (a character with an empty glyph is planned again, under that glyph's name)."""
@@ -4490,8 +4497,9 @@ class AnchorPage(object):
     def scripts_present(self, package):
         """The scripts the font has marks of, in ANCHOR_SCRIPTS' order."""
         found = set()
+        main_code = self.ak.main_code  # (the code a glyph stands for: not a radical FontLab gives first)
         for fg in package.fgPackage.glyphs:
-            code = fg.unicode
+            code = main_code(fg)
             if code and unicodedata.category(unichr_(code)) in ("Mn", "Me"):
                 script = anchor_script(code)
                 if script:
@@ -4505,9 +4513,11 @@ class AnchorPage(object):
         roles = {}
         takes_marks = base_letters(script, self.model)
         self.left_out = 0
-        arabic_names = set(fg.name for fg in package.fgPackage.glyphs if fg.unicode and anchor_script(fg.unicode) == "arabic")
+        # (the code each glyph stands for, read once: not a Kangxi radical FontLab may give first)
+        codes = dict((fg.name, self.ak.main_code(fg)) for fg in package.fgPackage.glyphs)
+        arabic_names = set(name for name, code in codes.items() if code and anchor_script(code) == "arabic")
         for fg in package.fgPackage.glyphs:
-            code = fg.unicode
+            code = codes.get(fg.name)
             if code and anchor_script(code) == script:
                 category = unicodedata.category(unichr_(code))
                 if category in ("Mn", "Me"):
@@ -4523,8 +4533,9 @@ class AnchorPage(object):
                     roles[fg.name] = ("base", code, 0)
         found = []
         for fg in package.fgPackage.glyphs:
-            role = roles.get(fg.name) or (roles.get(fg.name.split(u".")[0]) if not fg.unicode else None)
-            if role is None and not fg.unicode:
+            code = codes.get(fg.name)
+            role = roles.get(fg.name) or (roles.get(fg.name.split(u".")[0]) if not code else None)
+            if role is None and not code:
                 if script == "arabic":
                     parts = ligature_parts(fg.name, 0, arabic_names)
                     role = ("ligature", 0, parts) if parts else None
@@ -4542,14 +4553,14 @@ class AnchorPage(object):
                     existing[u"%s" % anchor.name] = (anchor.point.x(), anchor.point.y())
             except Exception:
                 pass
-            found.append((fg.name, fg.unicode or role[1], role[0], ink(fg.name), existing, role[2]))
+            found.append((fg.name, code or role[1], role[0], ink(fg.name), existing, role[2]))
         return found
 
     def rules_for(self, script, ink):
         """The substitutions the font's own forms allow (Thai's smaller and shortened forms, the i-matras
         of Devanagari, Bengali, and Gujarati), as Rules."""
         package = self.package
-        names_by_code = dict((fg.unicode, fg.name) for fg in package.fgPackage.glyphs if fg.unicode)
+        names_by_code = self.ak.glyph_code_map(package.fgPackage.glyphs)  # (every code point of each glyph)
         names = set(fg.name for fg in package.fgPackage.glyphs)
         if script == "thai":
             return thai_rules(names_by_code, names)
@@ -4763,7 +4774,7 @@ class AnchorPage(object):
         g.cell = u"%s %s" % (anchors, note)
         icon = self.owner_picture(g)
         if icon is not None:
-            item.setIcon(0, QtGui.QIcon(icon))
+            item.setIcon(0, self.ak.icon_of(icon))  # (in one color: redrawn in the new one when dark mode switches)
 
     def owner_picture(self, g):
         """The glyph alone, in the dialog's text color."""
@@ -4781,10 +4792,11 @@ class AnchorPage(object):
             painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
             painter.translate(4 - min(0, box.left()) * scale, size * 1.1)
             painter.scale(scale, -scale)
-            painter.fillPath(path, QtGui.QBrush(self.owner.dialog.palette.color(QtGui.QPalette.WindowText)))
+            color = self.owner.dialog.palette.color(QtGui.QPalette.WindowText)
+            painter.fillPath(path, QtGui.QBrush(color))
         finally:
             painter.end()
-        return pixmap
+        return self.ak.inked(pixmap, color)
 
     def items(self):
         """Every row under the top sections, at any depth (the Bases' own sections and their letters)."""
@@ -5552,7 +5564,7 @@ class AccentsDialog(object):
         self.propagate_button.connect("clicked()", self.propagate)
         self.line_up_button.connect("clicked()", self.line_up)
         self.build_button.connect("clicked()", self.build)
-        self.close_button.connect("clicked()", dialog.close)
+        self.close_button.connect("clicked()", self.ak.close_slot(self))  # (never the window itself: see let_go)
         self.tree.connect("itemSelectionChanged()", self.select)
         self.tree.connect("itemChanged(QTreeWidgetItem*,int)", lambda item, column: self.list_checked())
         self.tree.connect("itemDoubleClicked(QTreeWidgetItem*,int)", lambda item, column: self.show_in_glyph_window())
@@ -5887,11 +5899,12 @@ class AccentsDialog(object):
         glyphs = list(package.fgPackage.glyphs)
         empty = []
         for g in glyphs:
-            if g.unicode and (0xC0 <= g.unicode < 0x2000 or 0x3040 <= g.unicode < 0x3100):  # (only those built here)
+            code = self.ak.main_code(g)  # (the code it stands for: not a radical FontLab gives first)
+            if code and (0xC0 <= code < 0x2000 or 0x3040 <= code < 0x3100):  # (only those built here)
                 glyph = package.findName(g.name)
                 if glyph is not None and is_empty(glyph):
                     empty.append(g.name)
-        return Font([g.name for g in glyphs], [(g.name, g.unicode) for g in glyphs], empty)
+        return Font([g.name for g in glyphs], font_codes(self.ak, glyphs), empty)
 
     def characters(self):
         index = self.set_box.currentIndex
@@ -5911,10 +5924,10 @@ class AccentsDialog(object):
             glyph = package.findName(fg.name)
             layer = glyph.getLayerByName(master) if glyph is not None else None
             parts = component_parts(layer) if layer is not None else None
-            marks = learned_marks(fg.unicode, parts) if parts and len(parts) > 1 else None
+            marks = learned_marks(self.ak.main_code(fg), parts) if parts and len(parts) > 1 else None
             if marks is not None:
                 composites.append((parts[0][0], marks))
-        by_name = dict((g.name, g.unicode) for g in package.fgPackage.glyphs)
+        by_name = dict((g.name, self.ak.main_code(g)) for g in package.fgPackage.glyphs)  # (not a radical first)
 
         def glyph_case(name):
             code = by_name.get(name)
@@ -6203,7 +6216,7 @@ class AccentsDialog(object):
         if not first:
             r.checked = checked  # a mark moved by hand does not uncheck the glyph
         if icon is not None:
-            item.setIcon(0, QtGui.QIcon(icon))
+            item.setIcon(0, self.ak.icon_of(icon))
         r.far = far_note(self.far_reasons(r))  # (a mark the hand left far off: said in its row too)
         notes = list(r.notes) + ([r.touches] if r.touches else []) + ([r.far] if r.far else []) + self.reversal_notes(r)
         r.cell = row_text(r.describe(), r.refill, self.existing_shift(r) if r.existing else None, bool(r.existing), notes)
@@ -7436,7 +7449,7 @@ class AccentsDialog(object):
                 painter.restore()
         finally:
             painter.end()
-        return pixmap
+        return self.ak.inked(pixmap, color)  # (in one color: redrawn in the new one when dark mode switches)
 
     def sibling(self, recipe):
         """(glyph, character) of a letter the font has with the same base and a diacritic, to compare (á
@@ -7506,6 +7519,25 @@ class AccentsDialog(object):
         self.draw_reference(self.selected())
         if self.anchors_read:
             self.anchors.draw_reference(self.anchors.selected())
+
+    def theme_changed(self):
+        """Dark mode switched, either way (the shared module's theme_switched, once the rows' pictures and
+        grayed-out rows are in the new colors): what is drawn here in colors read when it was drawn,
+        again: the strip's buttons, the editors' scenes (their amber warnings), and both tabs'
+        references. Nothing else of the selection changes."""
+        try:
+            r = self.selected()
+            self.fill_strip(r)
+            if r is not None and not r.missing:
+                self.editor.scene = self.scene(r)
+            self.editor.update()
+            self.reference_changed()
+            if getattr(self, "anchors_read", False):
+                g = self.anchors.selected()
+                self.anchors.editor.scene = self.anchors.scene(g) if g is not None else None
+                self.anchors.editor.update()
+        except Exception:
+            pass  # (the next selection draws them anyway)
 
     def draw_reference(self, r):
         QtCore, QtGui = _qt()

@@ -190,6 +190,14 @@ class OwnCodeTests(unittest.TestCase):
                          [u"cid00010", u"cid00011", u"uni3041", u"uni3042", u"uni3043"], "uni3001 is only in a pair rule")
 
 
+class CodePointTests(unittest.TestCase):
+    def test_a_glyph_encoded_twice_is_found_at_both(self):
+        """IBM Plex Sans JP encodes the ideograph sun at U+2F47 (its Kangxi radical) and U+65E5; FontLab's
+        unicode gives the first, so the Chinese sample left it out."""
+        glyph = type("G", (), {"name": "uni65E5", "unicode": 0x2F47, "unicodes": [0x2F47, 0x65E5]})()
+        self.assertEqual(cj.all_codes([glyph]), {0x2F47: u"uni65E5", 0x65E5: u"uni65E5"})
+
+
 class MissTests(unittest.TestCase):
     def test_a_sample_showing_none_of_the_fonts_cjk_characters_names_them(self):
         codes = {0x41, 0x3030, 0x303D, 0x1F600}  # an emoji font: a wavy dash and a part mark

@@ -847,6 +847,34 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(dialog.choice_b.currentIndex, 1)
         self.assertTrue(dialog.compare_button.enabled)
 
+    def test_a_right_to_left_pair_is_drawn_as_on_screen(self):
+        # FontLab keeps typed yod then bet as the key (yod, bet): bet stands at the left. The Latin key
+        # of the same font stays as it is: each pair by its own glyphs
+        def hebrew_font(name, value):
+            glyphs = [FakeGlyph(u"yod", 0x05D9, one_master(FakeLayer([FakeShape([box(500)])]))),
+                      FakeGlyph(u"bet", 0x05D1, one_master(FakeLayer([FakeShape([box(500)])]))),
+                      FakeGlyph(u"H", 0x48, one_master(FakeLayer([FakeShape([box(700)])]))),
+                      FakeGlyph(u"o", 0x6F, one_master(FakeLayer([FakeShape([box(500)])])))]
+            return FakePackage(name, glyphs, {u"Regular": {(u"yod", u"bet"): value, (u"H", u"o"): value}}, [])
+
+        dialog = self.dialog([hebrew_font(u"Fake A", -64), hebrew_font(u"Fake B", -40)])
+        dialog.choice_b.pick(1)
+        dialog.compare()
+        drawn = []
+        saved = self.ak.pair_pixmap
+        self.ak.pair_pixmap = lambda package, master, left, right, *rest: drawn.append((left, right)) or Anything()
+        try:
+            for d in list(dialog.kern_shown):
+                dialog.selected_pair = lambda d=d: d
+                del drawn[:]
+                dialog.draw_pair()
+                expected = (u"bet", u"yod") if d.left == u"yod" else (u"H", u"o")
+                self.assertEqual(drawn, [expected, expected], u"%s %s" % (d.left, d.right))
+        finally:
+            self.ak.pair_pixmap = saved
+        self.assertEqual(sorted((d.left, d.right) for d in dialog.kern_shown), [(u"H", u"o"), (u"yod", u"bet")],
+                         "listed by FontLab's keys")
+
     def test_two_fonts(self):
         dialog = self.dialog([first_font(), second_font()])
         dialog.choice_b.pick(1)
@@ -1151,6 +1179,32 @@ class DialogTests(unittest.TestCase):
             dialog.feature_rows = rows
             dialog.fill_features()
         self.assertEqual(texts, [u"The one feature is alike in both.", u"The <b>2 features</b> are alike."])
+
+
+class ThemeChangedTests(unittest.TestCase):
+    def test_a_dark_mode_switch_redraws_without_reading_the_fonts(self):
+        # (the glyphs' pictures are in two colors: the shared module cannot redraw them in one)
+        dialog = fcmp.CompareDialog.__new__(fcmp.CompareDialog)
+        calls, current = [], []
+
+        class Item(object):
+            def __init__(self, index):
+                self.index = index
+
+        items = [Item(0), Item(1), Item(2)]
+        dialog.glyph_tree = type("Tree", (object,), {"setCurrentItem": lambda tree, item: current.append(item.index)})()
+        dialog.selected_item = lambda view: items[1]
+        dialog.index_of = lambda item: item.index if item is not None else -1
+        dialog.top_items = lambda tree: items
+        dialog.fill_glyphs = lambda: calls.append("glyphs")
+        dialog.draw_comparison = lambda: calls.append("comparison")
+        dialog.draw_pair = lambda: calls.append("pair")
+        dialog.feature_selected = lambda: calls.append("differences")
+        dialog.compare = dialog.run = lambda: self.fail("the fonts are not read again")
+        dialog.redraws = {}
+        dialog.theme_changed()
+        self.assertEqual(sorted(calls), ["comparison", "differences", "glyphs", "pair"])
+        self.assertEqual(current, [1], "the selected glyph stays selected")
 
 
 if __name__ == "__main__":

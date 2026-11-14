@@ -1516,6 +1516,7 @@ class DialogTests(unittest.TestCase):
         fontlab = Anything()
         fontlab.flWorkspace = Anything()
         fontlab.flWorkspace.instance = lambda: workspace
+        fontlab.flPackage = lambda item: item  # (FontLab's wrapper of an open font: its number read through it)
         fontlab.flGlyph, fontlab.GlyphComponent, fontlab.flItems = FakeNewGlyph, FakeComponent, FakeItems()
         self.fontlab = fontlab
         sys.modules["PythonQt"], sys.modules["fontlab"] = qt, fontlab

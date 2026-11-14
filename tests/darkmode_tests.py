@@ -1197,6 +1197,82 @@ class OnOffTests(DarkModeCase):
         self.assertEqual(dm._state()["errors"], [])
 
 
+class ToolWindowTests(DarkModeCase):
+    """FreeLab's tool windows: told once dark mode has switched (their shared module follows), and
+    forgotten once closed for good (the records held their widgets, which kept them from being freed)."""
+
+    def setUp(self):
+        DarkModeCase.setUp(self)
+        self.told = []
+        case = self
+
+        def hook(dark):
+            # what the tools see when told: the palette and the style already set, the queue not yet worked
+            case.told.append((dark, dm._app_is_dark(case.app, QPalette), case.app.style().objectName,
+                              bool(dm._state()["queue"])))
+        self.old_hook = getattr(sys, dm.TOOLS_HOOK, None)
+        setattr(sys, dm.TOOLS_HOOK, hook)
+
+    def tearDown(self):
+        setattr(sys, dm.TOOLS_HOOK, self.old_hook)
+        DarkModeCase.tearDown(self)
+
+    def test_the_tools_are_told_after_each_switch_either_way(self):
+        dm.apply_dark()
+        self.assertEqual(self.told, [(True, True, "Fusion", False)],
+                         "after the palette and the style, before any widget is looked at")
+        dm.run_queue()
+        dm.apply_dark()  # (a reapply while on: nothing switched)
+        self.assertEqual(len(self.told), 1)
+        dm.restore()
+        self.assertEqual(self.told[-1], (False, False, "windowsvista", False), "once every widget is undone")
+        self.on()
+        self.off()
+        self.assertEqual([entry[0] for entry in self.told], [True, False, True, False], "every time, both ways")
+
+    def test_a_tool_failing_never_stops_the_switch(self):
+        def broken(dark):
+            raise RuntimeError("a tool's bug")
+        setattr(sys, dm.TOOLS_HOOK, broken)
+        self.on()
+        self.assertEqual(self.app.style().objectName, "Fusion")
+        self.assertTrue(any("a tool's bug" in u"%s" % error for error in dm._state()["errors"]))
+
+    def test_a_closed_tool_window_is_forgotten(self):
+        W = FakeWidget
+        tool = W("QDialog", "tool", window=True, width=600, height=400)
+        part = W("QWidget", parent=tool, sheet=u"QWidget{background:white;}")
+        label = W("QLabel", parent=part, inherits=("QLabel",))
+        label.ink = "ink"
+        self.app.roots.append(tool)
+        self.on()
+        self.assertEqual(self.kind(label), "ink")
+        self.assertNotEqual(part.styleSheet, u"QWidget{background:white;}")
+        def of_tool(record):
+            return record["obj"].isWidgetType() and tool.isAncestorOf(record["obj"])
+        kept = len([r for r in dm._state()["records"].values() if not of_tool(r)])
+        dm._enqueue([label], "dark")  # (one waiting in the queue too)
+        self.assertTrue(dm.forget(tool))
+        self.assertEqual(part.styleSheet, u"QWidget{background:white;}", "undone as when switched off")
+        self.assertIsNone(label.effect, "its effect removed through Qt before its record goes")
+        self.assertFalse([r for r in dm._state()["records"].values() if of_tool(r)])
+        self.assertEqual(len(dm._state()["records"]), kept, "FontLab's own widgets keep theirs")
+        self.assertFalse([item for item in dm._state()["queue"] if item[1] is label])
+        self.assertFalse(dm.forget(tool), "nothing left to forget")
+
+    def test_the_tools_are_told_which_palettes_are_dark_modes(self):
+        # (their windows polished again after a switch keep an island's palette, and read again one their
+        # own stylesheets set)
+        self.board.light = None
+        self.on()
+        island = [w for w in self.app.allWidgets() if dm._record(w, create=False) and "palette" in dm._record(w, create=False)]
+        self.assertTrue(island, "the canvas is an island")
+        self.assertTrue(dm.owns_palette(island[0]))
+        self.assertFalse(dm.owns_palette(self.label))
+        self.off()
+        self.assertFalse(dm.owns_palette(island[0]), "undone: the palette is no longer dark mode's")
+
+
 class PreferenceTests(DarkModeCase):
     def test_workspace_saved_set_and_restored(self):
         self.on()

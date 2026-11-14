@@ -1348,6 +1348,37 @@ class OrthographyTests(unittest.TestCase):
         cls.languages = fc.load_languages(LANGUAGES_FILE, ORTHOGRAPHIES_FILE)
         cls.others = cls.languages[len(cls.hyperglot):]
 
+    def test_english_in_deseret_and_shavian(self):
+        """English's rows in Deseret and Shavian (SLDR's, amended by orthographies.py's AMENDED): Deseret's
+        38 printed letters in two cases as base, oi and ew as auxiliary; Shavian's 48 letters and its namer
+        dot as base. They are checked and ranked as any orthography is."""
+        rows = dict((l.script, l) for l in self.others if l.iso == u"eng")
+        deseret, shavian = rows[u"Deseret"], rows[u"Shavian"]
+        late = set([0x10426, 0x10427, 0x1044E, 0x1044F])
+        self.assertEqual((len(deseret.base), len(deseret.auxiliary)), (76, 4), "38 letters in two cases; oi and ew")
+        self.assertEqual(set(fc.code_points(u"".join(deseret.base))), set(range(0x10400, 0x10450)) - late)
+        self.assertEqual(set(fc.code_points(u"".join(deseret.auxiliary))), late)
+        self.assertEqual(set(fc.code_points(u"".join(shavian.base))), set(range(0x10450, 0x10480)) | set([0xB7]))
+        self.assertEqual(list(shavian.auxiliary), [])
+        for row in (deseret, shavian):
+            self.assertTrue(row.source.startswith(u"SIL's Locale Data Repository"), row.source)
+            self.assertEqual(row.evidence, fc.DECLARED)
+        printed = fc.FontCharacters(set(range(0x10400, 0x10450)) - late)
+        whole = fc.FontCharacters(range(0x10400, 0x10450))
+        self.assertEqual(fc.check_language(deseret, whole).level, "covered")
+        r = fc.check_language(deseret, printed)
+        self.assertEqual((r.level, len(r.missing), len(r.auxiliary_missing)), ("nearly", 0, 4),
+                         "the printed alphabet: within reach, oi and ew left")
+        self.assertIn(u"Auxiliary characters missing (loan words, names, rare letters)", fc.coverage_tip(r))
+        self.assertEqual(fc.check_language(deseret, fc.FontCharacters(range(0x10400, 0x10426))).level, "started")
+        self.assertEqual(fc.check_language(deseret, fc.FontCharacters([])).level, "missed")
+        letters = range(0x10450, 0x10480)
+        self.assertEqual(fc.check_language(shavian, fc.FontCharacters(list(letters) + [0xB7])).level, "covered")
+        r = fc.check_language(shavian, fc.FontCharacters(letters))
+        self.assertEqual((r.level, r.missing), ("nearly", [u"\N{MIDDLE DOT}"]), "the namer dot missing")
+        ranked = sorted([r, fc.check_language(deseret, whole), fc.check_language(deseret, printed)], key=fc.coverage_order)
+        self.assertEqual([x.level for x in ranked], ["nearly", "nearly", "covered"], "ranked by level, as any row")
+
     def test_loaded_beside_hyperglot(self):
         self.assertEqual(self.languages[:len(self.hyperglot)], self.hyperglot, "Hyperglot's first, as they were")
         self.assertIs(fc.load_languages(LANGUAGES_FILE, ORTHOGRAPHIES_FILE), self.languages, "put together once")
@@ -1802,6 +1833,29 @@ class TrainTests(unittest.TestCase):
                          b"0370..03FF ; Greek # L\n0900..097F ; Devanagari # L\n02BC ; Common # Lm\n"
                          b"0300..036F ; Inherited # Mn\n")
         return self.o.Counter(path, {"Latn": "Latin", "Grek": "Greek", "Deva": "Devanagari"})
+
+    def test_english_in_deseret_and_shavian_amended(self):
+        """SLDR's exemplars of English in Deseret list the 40 letters Unicode encodes, oi and ew among them,
+        which no printed book set; those of English in Shavian leave out the namer dot its own names use."""
+        import xml.etree.ElementTree as ElementTree
+        o = self.o
+        deseret = u" ".join(chr(code) for code in range(0x10428, 0x10450))
+        root = ElementTree.fromstring((u"<ldml><characters><exemplarCharacters>[%s]</exemplarCharacters></characters>"
+                                       u"</ldml>" % deseret).encode("utf-8"))
+        one = o.ldml_orthography(root, "en", "Dsrt", "English", "sldr", "", [])
+        late = [chr(code) for code in (0x10426, 0x10427, 0x1044E, 0x1044F)]
+        self.assertEqual(len(one.base), 76, "the 38 printed letters, in two cases")
+        self.assertEqual(sorted(one.auxiliary), sorted(late), "oi and ew, in two cases")
+        self.assertFalse(set(one.base) & set(late))
+        shavian = u" ".join(chr(code) for code in range(0x10450, 0x10480))
+        root = ElementTree.fromstring((u"<ldml><characters><exemplarCharacters>[%s]</exemplarCharacters></characters>"
+                                       u"</ldml>" % shavian).encode("utf-8"))
+        one = o.ldml_orthography(root, "en", "Shaw", "English", "sldr", "", [])
+        self.assertEqual(len(one.base), 49, "the 48 letters and the namer dot")
+        self.assertEqual(one.base[-1], u"\N{MIDDLE DOT}")
+        self.assertEqual(one.auxiliary, [])
+        self.assertEqual(o.amended("cldr", "en", "Shaw", ["a"], []), (["a"], []), "SLDR's rows alone")
+        self.assertEqual(o.amended("sldr", "en", "Latn", ["a"], ["b"]), (["a"], ["b"]))
 
     def test_pins(self):
         o = self.o
@@ -3025,6 +3079,7 @@ class DialogTests(unittest.TestCase):
         fontlab = Anything()
         fontlab.flWorkspace = Anything()
         fontlab.flWorkspace.instance = lambda: workspace
+        fontlab.flPackage = lambda item: item  # (FontLab's wrapper of an open font: its number read through it)
         sys.modules["PythonQt"], sys.modules["fontlab"] = qt, fontlab
         cls.ak_layer_path, cls.ak_stamp = ak.layer_path, getattr(ak, "_freelab_stamp", "unset")
         ak.layer_path = FakePath
@@ -3574,7 +3629,7 @@ class DialogTests(unittest.TestCase):
         f = font([0x61])
         tip = fc.coverage_tip(fc.check_language(language(u"a b", u"c"), f))
         self.assertIn(u"Base characters missing: b", tip, "the orthography's own terms are kept")
-        self.assertIn(u"Auxiliary characters missing (loan words, names): c", tip)
+        self.assertIn(u"Auxiliary characters missing (loan words, names, rare letters): c", tip)
         for text in (fc.HELP, dialog.glyph_window_tip()):
             self.assertNotIn(u"checked character", text)
             self.assertNotIn(u"characters to add", text)
@@ -5037,17 +5092,18 @@ class CoverageGapsTests(unittest.TestCase):
         """Named in the tooltip of the sets and scripts a resource is for (font and license, a separate
         download), nothing more; never for the others."""
         gaps = fc.load_coverage_gaps()
-        self.assertEqual(gaps.fonts_for(u"script:Han"), [(u"Jigmo, Jigmo2, Jigmo3", u"CC0 1.0")])
+        self.assertEqual(gaps.fonts_for(u"script:Han"), [(u"Plangothic P1, Plangothic P2", u"SIL OFL 1.1")])
         self.assertEqual(gaps.fonts_for(u"script:Latin"), [])
-        self.assertEqual(fc.fonts_sentence([(u"Jigmo", u"CC0 1.0")]),
-                         u"Fonts to consider for the rest: Jigmo (CC0 1.0, a separate download).")
+        self.assertEqual(fc.fonts_sentence([(u"Plangothic P1", u"SIL OFL 1.1")]),
+                         u"Fonts to consider for the rest: Plangothic P1 (SIL OFL 1.1, a separate download).")
         self.assertEqual(fc.fonts_sentence([]), u"")
         dialog = self.dialog()
         dialog.check_coverage()
         rows = dict((r.language.iso, r) for r in dialog.set_results)
         han = dialog.entry_tip("sets", rows[u"script:Han"])
-        self.assertIn(u"\n\nFonts to consider for the rest: Jigmo, Jigmo2, Jigmo3 (CC0 1.0, a separate download).", han)
-        self.assertNotIn(u"kamichikoichi", han, "no address, no maker: the font, its license, a separate download")
+        self.assertIn(u"\n\nFonts to consider for the rest: Plangothic P1, Plangothic P2 (SIL OFL 1.1, a separate "
+                      u"download).", han)
+        self.assertNotIn(u"github.com", han, "no address, no maker: the font, its license, a separate download")
         emoji = dialog.entry_tip("sets", rows[u"block-1f600"])
         self.assertIn(u"Noto Color Emoji", emoji)
         self.assertNotIn(u"Fonts to consider", dialog.entry_tip("sets", rows[u"script:Latin"]))
@@ -5491,6 +5547,61 @@ class OwnerRoundTests(unittest.TestCase):
         dialog.package = self.workspace.currentPackage
         dialog.check_coverage()
         self.assertEqual([one.enabled for one in controls], [True] * len(controls))
+
+
+class ThemeChangedTests(unittest.TestCase):
+    def test_a_dark_mode_switch_drops_kept_pictures_and_redraws_the_rest(self):
+        dialog = fc.FontCheckDialog.__new__(fc.FontCheckDialog)
+        calls, current = [], []
+        dialog.pictures, dialog.row_tools, dialog.redraws = {("char", u"a"): "old picture"}, ("dots", "quiet", None), {}
+        dialog.draw_diagram = lambda: calls.append("diagram")
+        dialog.draw_comparison = lambda: calls.append("comparison")
+        dialog.fill_checks = lambda: calls.append("checks")
+        dialog.fill_clipped = lambda: calls.append("clipped")
+
+        def fill_glyphs():
+            calls.append("glyphs")
+            raise RuntimeError("not filled yet")  # (a view never filled: the others still drawn)
+        dialog.fill_glyphs = fill_glyphs
+        dialog.glyph_tree = type("Tree", (object,), {"setCurrentItem": lambda tree, item: current.append(item)})()
+        dialog.selected_glyph = lambda: u"b"
+        dialog.top_items = lambda tree: [u"a", u"b"]
+        dialog.data_of = lambda item, default: item
+        dialog.theme_changed()
+        self.assertEqual(dialog.pictures, {}, "drawn anew in the new colors when a list is filled again")
+        self.assertIsNone(dialog.row_tools)
+        self.assertEqual(sorted(calls), ["checks", "clipped", "comparison", "diagram", "glyphs"])
+        self.assertEqual(current, [u"b"], "the selected glyph stays selected")
+
+    def test_pictures_in_one_color_are_noted_for_the_next_switch(self):
+        dialog = fc.FontCheckDialog.__new__(fc.FontCheckDialog)
+        noted = []
+        dialog.ak = type("Ak", (object,), {"inked": staticmethod(lambda icon, color: noted.append(color) or icon)})()
+        dialog.drawing_failed, dialog.log = False, None
+
+        class Color(object):
+            def red(self):
+                return 0
+
+            def alpha(self):
+                return 255
+
+        black = Color()
+        fake = type("QtGui", (object,), {"QIcon": staticmethod(lambda picture=None: ("icon", picture))})
+        saved = fc._qt
+        fc._qt = lambda: (None, fake)
+        try:
+            dialog.icon(lambda *args: "thumb", u"path", black)
+            self.assertEqual(noted, [], "a drawing of its own: not known to be in one color")
+            original = fc.glyph_thumb
+            fc.glyph_thumb = lambda *args: "thumb"
+            try:
+                dialog.icon(fc.glyph_thumb, u"path", black, 10, 10)
+            finally:
+                fc.glyph_thumb = original
+            self.assertEqual(noted, [black])
+        finally:
+            fc._qt = saved
 
 
 if __name__ == "__main__":

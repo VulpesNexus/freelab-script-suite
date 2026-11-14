@@ -50,6 +50,20 @@ def make_font(chars=LETTERS + u" ", widths=None, kerning=None, extra=(), master=
                         lambda name: (-300.0, -100.0) if name == u"acutecomb" else (50.0, 450.0))
 
 
+HEBREW_GLYPHS = ((u"H", ord(u"H")), (u"O", ord(u"O")), (u"T", ord(u"T")), (u"n", ord(u"n")), (u"o", ord(u"o")),
+                 (u"period", ord(u".")), (u"he", 0x05D4), (u"samekh", 0x05E1), (u"yod", 0x05D9), (u"bet", 0x05D1),
+                 (u"haa", 0x0780))  # (haa: Thaana)
+
+
+def hebrew_font(kerning=None):
+    """A ProofFont with Hebrew letters (and their controls, he and samekh), a Thaana letter, a few Latin
+    ones, a period, and an unencoded yod.alt; every glyph 500 units wide. kerning: FontLab's keys."""
+    names = [name for name, _ in HEBREW_GLYPHS] + [u"yod.alt"]
+    codes = dict((name, [code]) for name, code in HEBREW_GLYPHS)
+    return fp.ProofFont(u"Test Hebrew", u"Regular", 1000, names, codes, lambda name: 500, kerning or {}, 800, -200,
+                        lambda name: (50.0, 450.0))
+
+
 class PlaceTests(unittest.TestCase):
     def test_kerning_moves_the_glyphs_after_the_pair(self):
         font = make_font(kerning={(u"T", u"o"): -80})
@@ -64,10 +78,22 @@ class PlaceTests(unittest.TestCase):
         placed, _ = fp.place(font, [u"o", None, u"T"])
         self.assertEqual(placed[1][1], 750.0, "no kerning across a space")
 
-    def test_right_to_left_reverses_and_kerns_as_seen(self):
-        font = make_font(kerning={(u"b", u"a"): -50})
+    def test_right_to_left_reverses_and_kerns_in_text_order(self):
+        # The font's key of a right-to-left pair is in text order, its right glyph first (FontLab 7
+        # keeps typed yod then bet as (yod, bet)): a then b typed is kerned by (a, b), b at the left
+        font = make_font(kerning={(u"a", u"b"): -50})
         placed, width = fp.place(font, [u"a", u"b"], rtl=True)
         self.assertEqual(placed, [(u"b", 0.0), (u"a", 450.0)], "a reads first, so it sits at the right")
+        self.assertEqual(width, 950.0)
+        font = make_font(kerning={(u"b", u"a"): -50})
+        placed, _ = fp.place(font, [u"a", u"b"], rtl=True)
+        self.assertEqual(placed, [(u"b", 0.0), (u"a", 500.0)], "the pair as seen, left glyph first, is no key")
+
+    def test_wrap_measures_right_to_left_kerning_in_text_order(self):
+        font = make_font(kerning={(u"a", u"b"): 100})
+        self.assertEqual(fp.wrap(font, [([u"a", u"b"], False)], 1050, rtl=True), [[u"a"], [u"b"]])
+        font = make_font(kerning={(u"b", u"a"): 100})
+        self.assertEqual(fp.wrap(font, [([u"a", u"b"], False)], 1050, rtl=True), [[u"a", u"b"]])
 
     def test_clip_keeps_what_fits(self):
         font = make_font()
@@ -211,6 +237,100 @@ class StringTests(unittest.TestCase):
         self.assertFalse(keep(u"bet", u"yod"), "the screen order is not a key")
         self.assertTrue(keep(u"parenright", u"yod"), "the mirrored parenthesis, typed (")
         self.assertTrue(fp.common_filter({yod + bet: 0}, codes)(u"yod", u"bet"), "without Auto Kerning: the key as typed")
+
+    def test_directions_of_glyphs_and_pairs(self):
+        font = hebrew_font()
+        self.assertEqual(font.direction(u"yod"), "rtl")
+        self.assertEqual(font.direction(u"yod.alt"), "rtl", "an unencoded glyph goes by its base's")
+        self.assertEqual(font.direction(u"haa"), "rtl", "Thaana too")
+        self.assertIsNone(font.direction(u"T"))
+        self.assertIsNone(font.direction(u"period"))
+        self.assertTrue(font.rtl_pair(u"yod", u"bet"))
+        self.assertTrue(font.rtl_pair(u"period", u"yod"), "punctuation takes its partner's direction")
+        self.assertFalse(font.rtl_pair(u"period", u"T"))
+        self.assertFalse(font.rtl_pair(u"T", u"o"))
+
+    def test_right_to_left_code_points_by_table_on_any_interpreter(self):
+        # A table, not unicodedata: FontLab's Python 2.7 knows Unicode 5.2 and cannot read a character
+        # past U+FFFF, so Adlam or Old Hungarian would have read as left to right there
+        rtl = (0x05D0, 0x0627, 0x0710, 0x0780, 0x07CA, 0xFB2A, 0xFEFB, 0x10A60, 0x10C80, 0x10D00, 0x1E900, 0x1E922)
+        for code in rtl:
+            self.assertTrue(fp.is_rtl_code(code), u"U+%04X" % code)
+        ltr = (0x41, 0x2E, 0x0661, 0x06F1, 0x10E60, 0xFEFF, 0x1820, 0xA840, 0x1681, 0x1720, 0x4E00, 0x3042)
+        for code in ltr:  # (Latin, a period, Arabic-Indic and Rumi numbers, the BOM, Mongolian, Phags-pa,
+            self.assertFalse(fp.is_rtl_code(code), u"U+%04X" % code)  # Ogham, Hanunoo, Han, kana)
+        sys.path.insert(0, os.path.join(HERE, os.pardir, "kerning"))
+        import freelab_auto_kerning as ak
+        self.assertEqual((fp.RTL_RANGES, fp.RTL_NUMBER_RANGES), (ak.RTL_RANGES, ak.RTL_NUMBER_RANGES),
+                         "Proof reads directions as Kerning Check and Font Compare do")
+        font = fp.ProofFont(u"Adlam", u"Regular", 1000, [u"alif", u"daali", u"one"],
+                            {u"alif": [0x1E900], u"daali": [0x1E901], u"one": [0x1E951]}, lambda name: 500)
+        self.assertTrue(font.rtl_pair(u"alif", u"daali"), "Adlam, past U+FFFF")
+
+    def test_scripts_written_top_to_bottom_are_set_horizontally_and_said_so(self):
+        chars = {u"a": 0x61, u"mongolian_a": 0x1820, u"phagspa_ka": 0xA840, u"mongolian_comma": 0x1802,
+                 u"ogham_beith": 0x1681, u"hanunoo_a": 0x1720}
+        names = sorted(chars)
+        codes = dict((name, [code]) for name, code in chars.items())
+        font = fp.ProofFont(u"Test Vertical", u"Regular", 1000, names, codes, lambda name: 500)
+        self.assertEqual(fp.vertical_scripts(font), [u"Mongolian", u"Phags-pa"], "Ogham and Hanunoo run left to right")
+        latin = fp.ProofFont(u"Test", u"Regular", 1000, [u"a", u"mongolian_comma"],
+                             {u"a": [0x61], u"mongolian_comma": [0x1802]}, lambda name: 500)
+        self.assertEqual(fp.vertical_scripts(latin), [], "a Mongolian punctuation mark alone is no Mongolian")
+        placed, _ = fp.place(font, [u"mongolian_a", u"phagspa_ka"])
+        self.assertEqual([name for name, _ in placed], [u"mongolian_a", u"phagspa_ka"], "left to right, as encoded")
+        proof = fp.build_proof([font], fp.Options([]), [], u"2026-11-11", summary=fp.Summary(u"Test Vertical"))
+        texts = [item.text for item in proof.pages[0].items if item.kind == "text"]
+        self.assertIn(u"Set horizontally", texts)
+        self.assertTrue(any(text.startswith(u"Mongolian, Phags-pa (written top to bottom") for text in texts))
+        proof = fp.build_proof([font], fp.Options([]), [], u"2026-11-11")
+        texts = u" ".join(item.text for item in proof.pages[0].items if item.kind == "text")
+        self.assertIn(u"Set horizontally: Mongolian, Phags-pa (written top to bottom", texts)
+        proof = fp.build_proof([latin], fp.Options([]), [], u"2026-11-11", summary=fp.Summary(u"Test"))
+        self.assertNotIn(u"Set horizontally", [item.text for item in proof.pages[0].items if item.kind == "text"])
+
+    def test_hebrew_kerning_strings_read_right_to_left_kerned_by_the_key(self):
+        # Typed yod then bet: the key (yod, bet), bet at the left on screen. The string is the key's
+        # glyphs between Hebrew controls in text order (he he yod bet he samekh he samekh), set from
+        # the right, the kerning between bet and yod
+        font = hebrew_font({(u"yod", u"bet"): -64})
+        groups = fp.kerning_strings(font)
+        strings = dict(groups)
+        self.assertEqual(strings[u"yod"][0][2], [u"he", u"he", u"yod", u"bet", u"he", u"samekh", u"he", u"samekh"])
+        layout = fp.Layout()
+        layout.begin("kerning", u"Regular")
+        fp.section_kerning(layout, font)
+        runs = [item for item in layout.page.items if item.kind == "glyphs"]
+        hebrew = [item for item in runs if u"yod" in [name for name, _ in item.placed]
+                  and [name for name, _ in item.placed][-2:] == [u"he", u"he"]][0]
+        self.assertTrue(hebrew.rtl)
+        x = dict((name, at) for name, at in hebrew.placed[4:6])
+        self.assertEqual([name for name, _ in hebrew.placed][4:6], [u"bet", u"yod"], "bet at the left of yod")
+        self.assertEqual(x[u"yod"] - x[u"bet"], 500 - 64, "kerned by (yod, bet), not by the pair as seen")
+        self.assertAlmostEqual(hebrew.x + hebrew.placed[-1][1] * hebrew.size / font.upm + 500 * hebrew.size / font.upm,
+                               layout.right, msg="flush right: the string starts at the right")
+        self.assertIn([u"he", u"he", u"yod", u"bet", u"he", u"samekh", u"he", u"samekh"], layout.page.runs(),
+                      "the Glyph window gets the string in text order (FontLab kerns it by the same key)")
+
+    def test_a_group_of_both_directions_is_set_in_runs(self):
+        font = hebrew_font({(u"period", u"T"): -20, (u"period", u"yod"): -30})
+        groups = dict(fp.kerning_strings(font))
+        runs = fp.direction_runs(font, u"period", groups[u"period"])
+        self.assertEqual([rtl for rtl, _ in runs], [False, True], "T (Latin) first in the font's order, then yod")
+        layout = fp.Layout()
+        layout.begin("kerning", u"Regular")
+        fp.section_kerning(layout, font)
+        flags = [item.rtl for item in layout.page.items if item.kind == "glyphs"]
+        self.assertEqual(flags, [False, True])
+
+    def test_hebrew_spacing_strings_read_right_to_left(self):
+        font = hebrew_font()
+        layout = fp.Layout()
+        layout.begin("spacing", u"Regular")
+        fp.section_spacing(layout, font)
+        flags = dict((item.placed[-1][0], item.rtl) for item in layout.page.items if item.kind == "glyphs")
+        self.assertTrue(any(flags.values()), "the Hebrew letters' line")
+        self.assertFalse(all(flags.values()), "the Latin letters' lines")
 
     def test_spacing_strings(self):
         font = make_font()
@@ -1124,6 +1244,7 @@ class DialogTests(unittest.TestCase):
         fontlab = Anything()
         fontlab.flWorkspace = Anything()
         fontlab.flWorkspace.instance = lambda: workspace
+        fontlab.flPackage = lambda item: item  # (FontLab's wrapper of an open font: its number read through it)
         sys.modules["PythonQt"], sys.modules["fontlab"] = qt, fontlab
         cls.ak_layer_path, cls.ak_stamp = ak.layer_path, getattr(ak, "_freelab_stamp", "unset")
         ak.layer_path = lambda layer: Anything()

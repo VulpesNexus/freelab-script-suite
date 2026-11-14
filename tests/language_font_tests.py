@@ -46,7 +46,8 @@ PARTS = ("names", "other_names", "orthographies", "sets")
 # or sources grew, and is to be looked at before it ships.
 # Since 2026-11-14 (every script but Han drawn whole, the Han repertoires from Noto and Jigmo, 90,078
 # characters): Essential 1.9 MB, CJK 18.0 MB, FreeLang+ General 10.5 MB; the owner lifted the bound on
-# size, but not the one on glyphs (no sixth font).
+# size, but not the one on glyphs (no sixth font). Plangothic's subsets, which replaced Jigmo's the same
+# day, are smaller.
 MAX_SIZES = {u"Essential": 2400 * 1024, u"CJK": 22000 * 1024, u"General": 13000 * 1024,
              u"Mongolian-Tibetan": 1050 * 1024, u"Duployan": 1900 * 1024}
 LABELS = (u"Essential", u"CJK", u"General", u"Mongolian-Tibetan", u"Duployan")
@@ -61,16 +62,22 @@ MAX_LOOKUP_BYTES = 65535  # and its lookups are reached by 16-bit offsets (check
 OWN_LAYOUT = {u"Noto Sans Mongolian": u"Mongolian-Tibetan", u"Noto Sans Duployan": u"Duployan"}
 # The one source in two fonts: Unicodia Funky's four combining parentheses are in the Essential font,
 # where Noto Sans's letters take them; the rest of it is in the FreeLang+ General font.
-ELSEWHERE = {u"UnicodiaFunky": (u"Essential", u"1AC1-1AC4")}
+# Plangothic P2 likewise: its characters of other scripts than the CJK ones (taken under its OFL, the owner's
+# word, 2026-11-14: Syriac Supplement, Arabic signs, Tai Yo, Tangut's newest, legacy computing symbols, where
+# only Unifont's pixels or nothing drew them) are in the FreeLang+ General font, the rest in the CJK font.
+PLANGOTHIC_ELSEWHERE = (u"0860-086A 088F 0897 FBC3-FBD2 FD90-FD91 FDC8-FDCE 10EC2-10EC7 10ED0-10ED8 10EFA-10EFC "
+                        u"187F8-187FF 18D09-18D1E 18D80-18DF2 1CCFA-1CCFB 1CEBA-1CEBF 1E6C0-1E6DE 1E6E0-1E6F5 1E6FE-1E6FF")
+ELSEWHERE = {u"UnicodiaFunky": (u"Essential", u"1AC1-1AC4"), u"PlangothicP2": (u"General", PLANGOTHIC_ELSEWHERE)}
+SHOWN_AS = {u"PlangothicP2": u"Plangothic P2"}  # (the build's key of a source, and the family its rows name)
 # What no source font has (checks/train/language_font.py found no source): hexadecimal code points
 # and ranges, as in checks/font_characters.json. Qt takes such a character from a system font, or shows
 # a box. Until 2026-11-14 that was 93 characters (Tai Yo, Syriac Supplement, the newest emoji, a few CJK
-# signs), which Jigmo and GNU Unifont now draw. Since every script but Han is drawn whole, two groups
-# have no font under a license FreeLang can take: Tangut's additions of Unicode 16 and 17 (BabelStone
+# signs), which Plangothic (Jigmo until 2026-11-14) and GNU Unifont now draw. Since every script but
+# Han is drawn whole, two groups have no font under a license FreeLang can take: Tangut's additions of Unicode 16 and 17 (BabelStone
 # Tangut Wenhai, OFL, is of 2016; the others state no license), and the signs of Egyptian Hieroglyphs
 # Extended-A that NewGardiner leaves out (its maker calls them non-core, unverified): every assigned
 # character of the block that NewGardiner does not supply (EGYPTIAN_EXTENDED_A, computed below).
-NOT_SUPPLIED_TANGUT = u"187F8-187FF 18D09-18D1E 18D80-18DF2"
+NOT_SUPPLIED_TANGUT = u""  # (Plangothic P2 draws them since 2026-11-14)
 EGYPTIAN_EXTENDED_A = (0x13460, 0x143FA)  # (its assigned characters, Unicode 16.0)
 # The blocks made character sets on 2026-11-14 (checks/train/character_sets.py), by their sets' ids: the
 # group each is listed under.
@@ -96,17 +103,11 @@ LEGACY_LEFT_OUT = (u"Arabic Presentation Forms-A (Unicode block)", u"CJK Compati
 # for what no outline font under a license FreeLang can take has (PIXEL_SOURCES). Three sources supply
 # too many characters to list: their rule is in OTHER_SOURCES_BY_RULE.
 OTHER_SOURCES = {
-    # Jigmo (CC0): what the Han repertoires and the scripts drawn whole need that Noto lacks, in the BMP and
-    # plane 1 (Bopomofo's and the strokes' newest, the squared PAATU, kana of the Kana blocks, the symbols
-    # of Chinese folk religion)
-    u"Jigmo": u"31BC-31BF 31E4-31E5 332C 4DB6 FA70-FAD9 1AFF0-1AFF3 1AFF5-1AFFB 1AFFD-1AFFE 1B000-1B122 1B132 "
-              u"1B150-1B152 1B155 1B164-1B167 1F260-1F265",  # (FA70 to FAD9: the DPRK compatibility ideographs, a Legacy set's)
     # GNU Unifont (pixels): the Syriac Supplement, two Arabic letters of Unicode 16, and the honorific
     # ligatures of Unicode 14 to 17 no Noto Arabic font draws; Arabic Extended-C's newest, Tai Yo, and the
     # newest emoji
-    u"Unifont": u"0860-086A 088F 0897 FBC3-FBD2 FD90-FD91 FDC8-FDCE",
-    u"Unifont Upper": (u"10EC2-10EC7 10ED0-10ED8 10EFA-10EFC 1CCFA-1CCFB 1CEBA-1CEBF 1E6C0-1E6DE 1E6E0-1E6F5 1E6FE-1E6FF "
-                       u"1F6D8 1FA89-1FA8A 1FA8E-1FA8F 1FABE 1FAC6 1FAC8 1FACD 1FADC 1FADF 1FAE9-1FAEA 1FAEF"),
+    # (and, until Plangothic P2 drew them, 2026-11-14, Unifont's Syriac Supplement, Arabic signs, and Tai Yo)
+    u"Unifont Upper": u"1F6D8 1FA89-1FA8A 1FA8E-1FA8F 1FABE 1FAC6 1FAC8 1FACD 1FADC 1FADF 1FAE9-1FAEA 1FAEF",
     u"Noto Emoji": (u"23EB-23EC 23F0 "  # Miscellaneous Technical: emoji
                     u"2705 270A 2728 274C 274E 2754-2755 2795-2797 27B0 27BF "  # Dingbats: emoji
                     u"1F1E6-1F1FF "  # Enclosed Alphanumeric Supplement: the regional indicators
@@ -161,19 +162,26 @@ OTHER_SOURCES = {
     u"BabelStone Pseudographica": u"1CC00-1CCF9 1CD00-1CEB3 1F8B2-1F8BB 1FBCB-1FBEF",
 }
 # The sources whose characters a rule says: (the planes or the range their characters are in, the
-# script Unicode gives each). Jigmo2 and Jigmo3: the ideographs of Extension B and later (planes 2 and 3)
-# that the Han repertoires and the orthographies need and Noto lacks; NewGardiner: the core signs of
+# script Unicode gives each), and the characters each supplies outside that range, listed. Plangothic P1
+# and P2 (OFL; Jigmo, CC0, until 2026-11-14): the ideographs of Extension B and later (planes 2 and 3)
+# that the Han repertoires and the orthographies need and Noto lacks, and, listed, what else Noto lacks:
+# Bopomofo's and the strokes' newest, a URO ideograph, the DPRK compatibility ideographs (a Legacy
+# set's: FA70 to FAD9), the squared PAATU, the kana of the Kana blocks, the symbols of Chinese folk
+# religion; and P2's characters of other scripts (PLANGOTHIC_ELSEWHERE). NewGardiner: the core signs of
 # Egyptian Hieroglyphs Extended-A.
-OTHER_SOURCES_BY_RULE = {u"Jigmo2": ((0x20000, 0x2FFFF), u"Hani"), u"Jigmo3": ((0x30000, 0x3FFFF), u"Hani"),
-                         u"NewGardiner": ((0x13440, 0x143FF), u"Egyp")}
+OTHER_SOURCES_BY_RULE = {
+    u"Plangothic P1": ((0x20000, 0x3FFFF), u"Hani", u"31BC-31BF 31E4-31E5 4DB6 FA70-FAD9"),
+    u"Plangothic P2": ((0x30000, 0x3FFFF), u"Hani", u"332C 1AFF0-1AFF3 1AFF5-1AFFB 1AFFD-1AFFE 1B000-1B122 1B132 "
+                                                   u"1B150-1B152 1B155 1B164-1B167 1F260-1F265 " + PLANGOTHIC_ELSEWHERE),
+    u"NewGardiner": ((0x13440, 0x143FF), u"Egyp", u"")}
 # GNU Unifont's two fonts, the one pixel source (the owner, 2026-11-14: only where no outline source has
 # the character), dual-licensed and taken under the OFL.
-PIXEL_SOURCES = (u"Unifont", u"Unifont Upper")
+PIXEL_SOURCES = (u"Unifont Upper",)  # (Unifont's BMP font supplies nothing since Plangothic P2)
 # The fonts the CJK font holds besides Noto's (RULES: "cjk")
-CJK_OTHERS = (u"Jigmo", u"Jigmo2", u"Jigmo3")
-# Outline fonts drawn with straight segments alone, which the test of curves would take for pixels: Jigmo's
-# glyphs are GlyphWiki's KAGE strokes, polygons off any grid (its kana and signs in plane 0 and 1 too).
-STRAIGHT_STROKES = (u"Jigmo",)
+CJK_OTHERS = (u"Plangothic P1", u"Plangothic P2")
+# Outline fonts drawn with straight segments alone, which the test of curves would take for pixels (Jigmo's
+# were, GlyphWiki's KAGE strokes; none since Plangothic took its place).
+STRAIGHT_STROKES = ()
 
 
 def ranges_text(codes):
@@ -207,7 +215,7 @@ RELEASES = (u"https://github.com/silnrsi/font-andika/releases/download/v7.000/",
             u"https://github.com/silnrsi/font-kedebideri/releases/download/v3.001/",
             u"https://github.com/silnrsi/font-padauk/releases/download/v6.000/",
             u"https://raw.githubusercontent.com/Mercury13/unicodia/df2b09c61e8fdc06f96fc6d6b194427f61bb2e38/Fonts/",
-            u"https://kamichikoichi.github.io/jigmo/Jigmo-20250912.zip",
+            u"https://github.com/Fitzgerald-Porthmouth-Koenigsegg/Plangothic_Project/releases/download/V2.9.5795/",
             u"https://unifoundry.com/pub/unifont/unifont-18.0.01/",
             u"https://raw.githubusercontent.com/nederhof/newgardiner/ef51d1aa1101d58a9b18b782dba51f70661194d7/fonts/")
 # The one Noto font taken from its project's release, not from the pinned commit: the commit's version
@@ -559,8 +567,8 @@ class ListFontTests(unittest.TestCase):
         self.assertEqual(len(required), counts["all"])
         self.assertGreater(len(required), 40000)
         not_supplied = codes_of(NOT_SUPPLIED)
-        self.assertEqual((len(not_supplied), len(not_supplied - codes_of(NOT_SUPPLIED_TANGUT))), (713, 568),
-                         "Tangut's 145 additions and Egyptian's 568 non-core signs")
+        self.assertEqual((len(not_supplied), len(not_supplied - codes_of(NOT_SUPPLIED_TANGUT))), (568, 568),
+                         "Egyptian's 568 non-core signs (Tangut's 145 additions: Plangothic P2's since 2026-11-14)")
         missing = [u"U+%04X" % code for code in sorted(required - not_supplied - self.absent) if code not in self.cmap]
         self.assertEqual(missing, [], "the bundled font lacks these")
         self.assertEqual([u"U+%04X" % code for code in sorted(not_supplied) if code in self.cmap], [],
@@ -657,16 +665,20 @@ class ListFontTests(unittest.TestCase):
         self.assertEqual(set(source["font"] for source in self.info["fonts"]), set(self.files))
 
     def test_each_source_whole_in_one_font_but_one(self):
-        """Each source is whole in one font, but the one of ELSEWHERE: Unicodia Funky is cut in two
-        subsets, its four combining parentheses in the Essential font and the rest where it was. The
-        second subset is its source's in every other respect."""
+        """Each source is whole in one font, but those of ELSEWHERE: Unicodia Funky is cut in two
+        subsets, its four combining parentheses in the Essential font and the rest where it was, and
+        Plangothic P2, its other scripts' characters in the FreeLang+ General font and its CJK ones in
+        the CJK font. The second subset is its source's in every other respect."""
         places = {}
         for source in self.sources:
             places.setdefault(source["family"], []).append((source["font"], source["subset"]))
-        self.assertEqual(sorted(family for family, found in places.items() if len(found) > 1), sorted(ELSEWHERE))
+        self.assertEqual(sorted(family for family, found in places.items() if len(found) > 1),
+                         sorted(SHOWN_AS.get(family, family) for family in ELSEWHERE))
         self.assertEqual(self.info["elsewhere"], dict((family, list(found)) for family, found in ELSEWHERE.items()))
-        for family, (label, listed) in ELSEWHERE.items():
-            self.assertEqual(sorted(places[family]), sorted([(label, u"elsewhere"), (u"General", u"own")]))
+        for key, (label, listed) in ELSEWHERE.items():
+            family = SHOWN_AS.get(key, key)
+            home = u"CJK" if family in CJK_OTHERS else u"General"
+            self.assertEqual(sorted(places[family]), sorted([(label, u"elsewhere"), (home, u"own")]))
             second = [s for s in self.sources if s["family"] == family and s["subset"] == u"elsewhere"][0]
             own = [s for s in self.sources if s["family"] == family and s["subset"] == u"own"][0]
             self.assertEqual(codes_of(second["code_points"]), codes_of(listed), family)
@@ -690,12 +702,17 @@ class ListFontTests(unittest.TestCase):
         for family, rows in found.items():
             supplied = sorted(code for source in rows for code in codes_of(source["code_points"]))
             if family in OTHER_SOURCES_BY_RULE:
-                (low, high), script = OTHER_SOURCES_BY_RULE[family]
-                self.assertEqual([u"U+%04X" % code for code in supplied if not low <= code <= high], [], family)
+                (low, high), script, listed = OTHER_SOURCES_BY_RULE[family]
+                self.assertEqual([u"U+%04X" % code for code in supplied if not low <= code <= high],
+                                 [u"U+%04X" % code for code in sorted(codes_of(listed))], family)
+                self.assertTrue(all(source["font"] == (u"CJK" if family in CJK_OTHERS else u"General")
+                                    for source in rows if source["subset"] == u"own"), family)
+                self.assertTrue(all(source["layout"] == u"none (character map only)" for source in rows), family)
                 if script == u"Hani":
                     self.assertTrue(all(unicodedata.name(fc.char_of(code), u"").startswith(
                                         (u"CJK UNIFIED IDEOGRAPH", u"CJK COMPATIBILITY IDEOGRAPH"))
-                                        for code in supplied if (code < 0x10000 or sys.maxunicode > 0xFFFF)
+                                        for code in supplied if low <= code <= high
+                                        and (code < 0x10000 or sys.maxunicode > 0xFFFF)
                                         and unicodedata.name(fc.char_of(code), u"")), family)
                 continue
             self.assertEqual(supplied, sorted(codes_of(OTHER_SOURCES[family])), family)
@@ -734,7 +751,8 @@ class ListFontTests(unittest.TestCase):
         with io.open(LICENSE_FILE, encoding="utf-8") as handle:
             text = handle.read()
         self.assertIn(u"under the OFL", text, "Unifont taken under the OFL of its dual license")
-        self.assertIn(u"CC0 1.0 Universal", text, "Jigmo's dedication")
+        self.assertIn(u"Plangothic P1 and P2 (the Plangothic Project) are under the SIL Open Font License 1.1", text)
+        self.assertNotIn(u"Jigmo", text, "replaced by Plangothic")
         for tables in self.fonts.values():
             for tag in ("EBDT", "EBLC", "CBDT", "CBLC", "sbix"):
                 self.assertNotIn(tag, tables)
@@ -1348,7 +1366,7 @@ class OptionalCharactersTests(unittest.TestCase):
     def test_han_repertoires(self):
         """The Han repertoires (Unihan, Unicode 17.0): the national standards and lists a CJK font is
         made for, and the other writings in Han characters (Chu Nom: one set per Vietnamese source of
-        the IRG; Sawndip; Japan's kokuji). FreeLang draws them whole, Jigmo supplying what Noto lacks."""
+        the IRG; Sawndip; Japan's kokuji). FreeLang draws them whole, Plangothic supplying what Noto lacks."""
         groups = self.data["groups"]
         found = [(row[0], len(codes_of(row[4]))) for row in self.data["sets"] if groups[row[2]] == u"Han repertoires"]
         self.assertEqual(found, [(u"unihan-core2020", 20720), (u"unihan-gb2312", 6763), (u"unihan-tgh", 8105),
@@ -1389,7 +1407,7 @@ class CoverageGapsTests(unittest.TestCase):
         for name, others, why in data["known"]:
             self.assertTrue(name and why and isinstance(others, list), name)
         names = [row[0] for row in data["resources"]]
-        self.assertIn(u"Jigmo, Jigmo2, Jigmo3", names)
+        self.assertIn(u"Plangothic P1, Plangothic P2", names)
         for font, maker, license_, page, what, caution, rows in data["resources"]:
             self.assertTrue(page.startswith(u"https://"), font)
             self.assertFalse(set(rows) - ids, font)

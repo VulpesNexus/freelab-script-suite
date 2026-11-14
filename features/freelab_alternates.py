@@ -678,8 +678,7 @@ class AlternatesPage(object):
         cmap, names = {}, set()
         for g in package.fgPackage.glyphs:
             names.add(u"%s" % g.name)
-            if g.unicode:
-                cmap.setdefault(g.unicode, u"%s" % g.name)
+        cmap = self.ak.glyph_code_map(package.fgPackage.glyphs)  # (every code point of each glyph)
         return cmap, names
 
     def fill(self):
@@ -724,8 +723,9 @@ class AlternatesPage(object):
                 for column, drawn in ((1, [glyph]), (3, alternates)):
                     try:
                         icon = picture(drawn) if picture is not None and drawn else None
-                        if icon is not None:
-                            item.setIcon(column, QtGui.QIcon(icon))
+                        if icon is not None:  # (noted in its color: redrawn in the new one when dark mode switches)
+                            make = getattr(getattr(self.owner, "ak", None), "icon_of", None) or QtGui.QIcon
+                            item.setIcon(column, make(icon))
                     except Exception:
                         pass  # a row without its picture still reads
                 self.tree.addTopLevelItem(item)
@@ -1065,7 +1065,8 @@ class AlternatesPage(object):
                 x += advance * scale
         finally:
             painter.end()
-        return pixmap
+        inked = getattr(getattr(self.owner, "ak", None), "inked", None)  # (redrawn in the new color on a switch)
+        return inked(pixmap, color) if inked is not None else pixmap
 
     def preview_parts(self, glyph):
         """What the two previews show of a glyph: ([the glyph and the font's alternates of it, as (name,

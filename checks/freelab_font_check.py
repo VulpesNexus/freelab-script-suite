@@ -4006,7 +4006,8 @@ def row_tip(row, buildable=False):
     if row.optional:
         paragraphs.append(u"Optional: the set selected holds it and is complete without it (%s)." % OPTIONAL_WHAT)
     elif row.auxiliary():
-        paragraphs.append(u"Auxiliary: these languages use it in loan words and names, and miss nothing else.")
+        paragraphs.append(u"Auxiliary: these languages use it in loan words, names, or rare spellings, and miss "
+                          u"nothing else.")
     if row.completing:
         paragraphs.append(u"Completes on its own: %s." % few_names([r.language.label() for r in row.completing]))
     others = [r for r in row.needing if r not in row.completing]
@@ -4908,7 +4909,7 @@ def coverage_tip(r, path=(), no_language=False, also=(), fonts=()):
     if r.marks_missing:
         lines.append(u"Marks missing: %s" % few([DOTTED_CIRCLE + m for m in r.marks_missing]))
     if r.auxiliary_missing:
-        lines.append(u"Auxiliary characters missing (loan words, names): %s" % few(r.auxiliary_missing))
+        lines.append(u"Auxiliary characters missing (loan words, names, rare letters): %s" % few(r.auxiliary_missing))
     if r.composed:
         lines.append(u"Composed from the font's letters and marks (its anchors): %s" % few([c for c, _ in r.composed]))
     if r.parts:
@@ -5159,7 +5160,7 @@ class FontCheckDialog(object):
         layout.addWidget(self.tabs)
         self.pages = QtGui.QStackedWidget()
         layout.addWidget(self.pages, 1)
-        self.redraw_timer = QtCore.QTimer()
+        self.redraw_timer = QtCore.QTimer(dialog)  # (its parent the window: Qt deletes it with it)
         self.redraw_timer.setSingleShot(True)
         self.redraw_timer.setInterval(80)
         self.redraw_timer.connect("timeout()", self.redraw_now)
@@ -5185,7 +5186,7 @@ class FontCheckDialog(object):
         layout.addLayout(buttons)
         self.glyph_window_button.connect("clicked()", self.show_in_glyph_window)
         self.tabs.connect("currentChanged(int)", self.switch_page)
-        self.close_button.connect("clicked()", dialog.close)
+        self.close_button.connect("clicked()", self.ak.close_slot(self))  # (never the window itself: see let_go)
         ak.add_tools_button(dialog, "Font Check", getattr(self, "log", None))  # (the other font tools, a click away)
         ak.plain_buttons(dialog)
         try:  # the check boxes drawn plain to see in either palette (the lists' pictures stay unmapped)
@@ -5365,7 +5366,7 @@ class FontCheckDialog(object):
                     pass  # an event filter must never raise
                 return False
 
-        found = Resized()
+        found = Resized(widget)  # (its parent the widget it watches: Qt deletes it with it)
         widget.installEventFilter(found)
         self.filters.append(found)
 
@@ -5390,9 +5391,34 @@ class FontCheckDialog(object):
                     pass  # an event filter must never raise
                 return False
 
-        found = Pressed()
+        found = Pressed(tree)  # (its parent the list: Qt deletes it with it)
         tree.viewport().installEventFilter(found)
         self.filters.append(found)
+
+    def theme_changed(self):
+        """Dark mode switched, either way (the shared module's theme_switched, once the pictures drawn in
+        one palette color and the quiet rows are in the new colors): the pictures kept for the next
+        filling dropped, and what is drawn in several colors drawn again (the diagram, the comparison,
+        the checks' badges, the clipped glyphs, the masters' glyphs). Nothing is read again."""
+        self.pictures = {}
+        self.row_tools = None
+        self.redraws = dict((key, True) for key in ("diagram", "comparison"))
+        try:
+            selected = self.selected_glyph()  # (filled again, the glyphs' list selects its first row)
+        except Exception:
+            selected = None
+        for draw in (self.redraw_now, self.fill_checks, self.fill_clipped, self.fill_glyphs):
+            try:
+                draw()
+            except Exception:
+                pass  # (that view not filled yet: drawn when it is)
+        try:
+            for item in self.top_items(self.glyph_tree):
+                if selected is not None and u"%s" % self.data_of(item, None) == selected:
+                    self.glyph_tree.setCurrentItem(item)
+                    break
+        except Exception:
+            pass
 
     def redraw_now(self):
         keys, self.redraws = list(self.redraws), {}
@@ -5642,7 +5668,7 @@ class FontCheckDialog(object):
             pass
         # A search waits for a pause in the typing (SEARCH_DELAY): each keystroke listed the tab anew, a
         # few seconds for every letter of a name in FontLab. Clearing the field shows the full list at once.
-        self.search_timer = QtCore.QTimer()
+        self.search_timer = QtCore.QTimer(self.dialog)  # (its parent the window: Qt deletes it with it)
         self.search_timer.setSingleShot(True)
         self.search_timer.setInterval(SEARCH_DELAY)
         self.search_timer.connect("timeout()", self.search_paused)
@@ -6268,7 +6294,13 @@ class FontCheckDialog(object):
         the list is filled all the same)."""
         QtCore, QtGui = _qt()
         try:
-            return QtGui.QIcon(draw(*args))
+            icon = QtGui.QIcon(draw(*args))
+            # A picture in one color of the palette, noted in it: redrawn in the new one when dark mode
+            # switches (the shared module's theme_switched); the others are drawn again (theme_changed)
+            colors = [arg for arg in args if hasattr(arg, "red") and hasattr(arg, "alpha")]
+            if draw in (character_pixmap, arrow_pixmap, glyph_thumb) and len(colors) == 1:
+                icon = self.ak.inked(icon, colors[0])
+            return icon
         except Exception as exc:
             if not self.drawing_failed:
                 self.drawing_failed = True
@@ -8000,7 +8032,10 @@ class FontCheckDialog(object):
         if held is None or held[0] is not self.package or held[1] is not dm:
             fgs = list(self.package.fgPackage.glyphs)
             held = self.plan_font = (self.package, dm, dm.Font([u"%s" % g.name for g in fgs],
-                                                               [(u"%s" % g.name, g.unicode) for g in fgs]))
+                                                               # (every code point of each glyph, the first
+                                                               # glyph at one last: Font's map keeps it)
+                                                               list(reversed([(u"%s" % g.name, code) for g in fgs
+                                                                              for code in glyph_codes(g)]))))
         return set(recipe.char for recipe in dm.plan(held[2], candidates) if not recipe.missing)
 
     def ask_buildable(self, selection):

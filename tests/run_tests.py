@@ -30,6 +30,9 @@ PY27_FILES = (
     "diacritics/freelab_diacritics.py", "diacritics/glyph_names.json", "features/freelab_feature_code.py",
     "tests/glyphtools_tests.py",
     "cjk/freelab_cjk_spacing.py", "tests/cjk_tests.py", "tests/features_tests.py",
+    "cjk/freelab_cjk_vertical.py", "cjk/vertical_model.json", "tests/cjk_vertical_tests.py",
+    "tools/add_vertical_metrics.py",
+    "tests/glyphcodes_tests.py",
     "checks/freelab_font_check.py", "checks/language_coverage.json", "tests/fontcheck_tests.py",
     "checks/character_sets.json", "checks/character_sets_LICENSE", "checks/coverage_gaps.json",
     "checks/language_families.json", "checks/language_families_LICENSE",
@@ -46,7 +49,8 @@ PY27_OPTIONAL = tuple("checks/language_font/%s" % name for name in (
     "FreeLang-CJK.ttf", "FreeLangPlus-General.ttf", "FreeLangPlus-Mongolian-Tibetan.ttf",
     "FreeLangPlus-Duployan.ttf"))
 PY27_SUITES = ("tests/darkmode_tests.py", "tests/kern_tests.py", "tests/spacing_tests.py", "tests/glyphtools_tests.py",
-               "tests/cjk_tests.py", "tests/features_tests.py", "tests/fontcheck_tests.py",
+               "tests/cjk_tests.py", "tests/cjk_vertical_tests.py", "tests/glyphcodes_tests.py",
+               "tests/features_tests.py", "tests/fontcheck_tests.py",
                "tests/compare_tests.py", "tests/proof_tests.py", "tests/tabs_tests.py",
                "tests/alternates_tests.py", "tests/language_font_tests.py")
 

@@ -4616,5 +4616,67 @@ class RevealedTests(unittest.TestCase):
             ac._qt = saved
 
 
+class MainCodeReadTests(unittest.TestCase):
+    def test_a_glyph_is_read_by_the_code_it_stands_for(self):
+        # FontLab's unicode gives a compatibility or radical code first for a glyph encoded twice: the
+        # empty glyphs Diacritics would build again are found by the code they stand for
+        sys.path.insert(0, os.path.join(HERE, os.pardir, "kerning"))
+        import freelab_auto_kerning as ak
+
+        class Fg(object):
+            def __init__(self, name, codes):
+                self.name, self.unicodes, self.unicode = name, codes, codes[0] if codes else 0
+
+        class Glyph(object):
+            layers = []  # (no layer: empty)
+
+        class Package(object):
+            class fgPackage(object):
+                # (ga encoded at a radical first, as FontLab gives the ideograph's: its own code is kana's)
+                glyphs = [Fg(u"Agrave", [0xC0]), Fg(u"ga", [0x2F00, 0x304C]), Fg(u"uni65E5", [0x2F47, 0x65E5])]
+
+            def findName(self, name):
+                return Glyph()
+
+        dialog = ac.AccentsDialog.__new__(ac.AccentsDialog)
+        dialog.ak = ak
+        font = dialog.font(Package())
+        self.assertEqual(sorted(font.empty), [u"Agrave", u"ga"],
+                         "an empty ga is found by its kana code, not the radical given first")
+
+
+class DiacriticsThemeTests(unittest.TestCase):
+    def test_a_dark_mode_switch_redraws_the_strip_editors_and_references(self):
+        dialog = ac.AccentsDialog.__new__(ac.AccentsDialog)
+        calls = []
+
+        class Recipe(object):
+            missing = False
+
+        class Editor(object):
+            def __init__(self, name):
+                self.name, self.scene = name, "old scene"
+
+            def update(self):
+                calls.append(("update", self.name))
+
+        recipe, glyph = Recipe(), object()
+        dialog.selected = lambda: recipe
+        dialog.fill_strip = lambda r: calls.append(("strip", r is recipe))
+        dialog.scene = lambda r: "new scene"
+        dialog.editor = Editor("editor")
+        dialog.reference_changed = lambda: calls.append(("references",))
+        dialog.anchors_read = True
+        anchors = dialog.anchors = type("Page", (object,), {})()
+        anchors.selected = lambda: glyph
+        anchors.scene = lambda g: "new anchors scene"
+        anchors.editor = Editor("anchors")
+        dialog.drop_revealed_soon = lambda *args: self.fail("the selection's own work is not redone")
+        dialog.theme_changed()
+        self.assertEqual(dialog.editor.scene, "new scene", "its amber warnings in the new colors")
+        self.assertEqual(anchors.editor.scene, "new anchors scene")
+        self.assertEqual(calls, [("strip", True), ("update", "editor"), ("references",), ("update", "anchors")])
+
+
 if __name__ == "__main__":
     unittest.main()

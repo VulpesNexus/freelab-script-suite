@@ -127,17 +127,66 @@ def main_window():
     return None
 
 
+FRAME_CLASSES = ("MainWindow", "YFrameWindow")  # the windows that hold document tabs
+
+
+def _document_tab(widget):
+    """(widget, its frame) when widget is a document area's tab widget, else None."""
+    if _class(widget) != "YTabWidget":
+        return None
+    frame = widget.parentWidget()
+    if frame is not None and _class(frame) == "YFrameWindow":
+        return widget, frame
+    return None
+
+
+def _alive(widget):
+    return bool(_class(widget))  # (a deleted object's wrapper raises: no class name)
+
+
 def document_tab_widgets():
-    """(tab widget, its frame) of every document area: the main window's and each window of its own."""
+    """(tab widget, its frame) of every document area: the main window's and each window of its own.
+
+    Looked for from the windows that hold them (FontLab's main window, and each of its windows of their
+    own), through Qt's typed search, which wraps only the tab widgets: the walk over every widget it
+    replaces wrapped some 5,000 each second, and the crashes of November 14 all came at the end of it
+    (PythonQt freeing a wrapper twice). Where the typed search finds nothing (PythonQt gives nothing for
+    findChildren(QWidget), and may give nothing for a class here too), the whole walk is made, but only
+    when the set of those windows has changed since the walk before."""
     QtGui = _qt()[1]
+    state = _state()
+    windows = [w for w in QtGui.QApplication.topLevelWidgets() if _class(w) in FRAME_CLASSES]
     found = []
+    tab_class = getattr(QtGui, "QTabWidget", None)
+    if tab_class is not None:
+        for window in windows:
+            try:
+                for widget in window.findChildren(tab_class):
+                    pair = _document_tab(widget)
+                    if pair is not None:
+                        found.append(pair)
+            except Exception:
+                continue
+    if found:
+        state["tab_walk"] = None
+        return found
+    signature = tuple(sorted(repr(w) for w in windows))
+    walked = state.get("tab_walk")
+    if walked is not None and walked[0] == signature and (walked[1] or time.time() - walked[2] < EMPTY_WALK_SECONDS):
+        kept = [(w, f) for w, f in walked[1] if _alive(w) and _alive(f)]
+        if len(kept) == len(walked[1]):
+            return kept
+        # (one of them deleted: a window docked and another torn off may have taken its address, and the
+        # same signature: walked again)
     for widget in QtGui.QApplication.instance().allWidgets():
-        if _class(widget) != "YTabWidget":
-            continue
-        frame = widget.parentWidget()
-        if frame is not None and _class(frame) == "YFrameWindow":
-            found.append((widget, frame))
+        pair = _document_tab(widget)
+        if pair is not None:
+            found.append(pair)
+    state["tab_walk"] = (signature, found, time.time())
     return found
+
+
+EMPTY_WALK_SECONDS = 30  # a walk that found no document area (FontLab still building its window) is made again this late
 
 
 def main_tabs():
@@ -501,27 +550,36 @@ def _filter_class():
     return state["filter_class_v2"]
 
 
-def watch():
-    """Hook every document tab bar not seen yet, and give windows of their own their Dock button."""
+def watch(force=False):
+    """Hook every document tab bar not hooked yet, and give windows of their own their Dock button. Each
+    document area found is looked at every pass, a few calls each (whether its bar is hooked, its Dock
+    button there): a key of the areas' addresses was no proof, as a window docked and another torn off
+    within one pass may take the same address. True when something was hooked or added. (force: kept
+    for callers of an earlier version; every pass looks.)"""
     QtCore, QtGui = _qt()
     state = _state()
+    changed = False
     for tab_widget, frame in document_tab_widgets():
         try:
             if frame.isWindow():
                 button = tab_widget.findChild(QtGui.QToolButton, DOCK_BUTTON_NAME)
                 if button is None:
                     _add_dock_button(tab_widget)
+                    changed = True
                 elif tab_widget.cornerWidget(QtCore.Qt.TopRightCorner) is None:  # put back after an off
                     tab_widget.setCornerWidget(button, QtCore.Qt.TopRightCorner)
                     button.show()
+                    changed = True
             bar = _bar_of(tab_widget)
             if bar is not None and bar.property(WATCHED_PROP) != 2:
-                presses = _filter_class()()
+                presses = _filter_class()(bar)  # (its parent the bar: Qt deletes it with it, never PythonQt)
                 state["held"].append(presses)
                 bar.installEventFilter(presses)
                 bar.setProperty(WATCHED_PROP, 2)  # (1 or True: an earlier version's filter, which does nothing now)
+                changed = True
         except Exception as exc:
             print("FreeLab tab docking: %s" % (exc,))
+    return changed
 
 
 def _timer(key, interval, function):
@@ -531,6 +589,9 @@ def _timer(key, interval, function):
     old = state.get(key)
     if old is not None:
         old.stop()
+        # (kept: a timer made from Python with no parent is deleted by PythonQt as its last reference goes,
+        # at whatever moment that is)
+        state.setdefault("held", []).append(old)
     timer = QtCore.QTimer()
     timer.setInterval(interval)
     tick = (lambda call: lambda: call(function))(_dispatcher())
@@ -546,7 +607,7 @@ def start():
     state["module"] = sys.modules.get(__name__)  # what the dispatcher calls, should FontLab drop it
     _timer("timer", WATCH_MS, "watch").start()
     _timer("poll_timer", POLL_MS, "poll")
-    watch()
+    watch(force=True)  # (the Dock buttons put back after an off)
 
 
 def stop():

@@ -509,16 +509,82 @@ def kerning_key(left_char, right_char, left, right):
 
 def screen_of_key(first_char, second_char, first, second):
     """The glyph pair on screen, (left, right), of a kerning key (first, second) whose glyphs have
-    those characters (None for an unencoded glyph, which takes its partner's direction): a
-    right-to-left key is in text order."""
-    if any(script_of(ch) in RTL_SCRIPTS for ch in (first_char, second_char) if ch):
+    those characters (None for an unencoded glyph, which takes its partner's direction; see
+    direction_char): a right-to-left key is in text order. Right to left: a letter of Hebrew or
+    Thaana, or any character of the right-to-left blocks (is_rtl_char), so that Kerning Check and
+    Font Compare read an Arabic or Syriac key the same way, though Auto Kerning measures neither."""
+    if any(is_rtl_char(ch) for ch in (first_char, second_char) if ch):
         return second, first
     return first, second
 
 
 def is_rtl_pair(left_char, right_char):
-    """Whether a pair is of a right-to-left script (a mark of punctuation takes its partner's)."""
-    return pair_script(left_char, right_char, None) in RTL_SCRIPTS
+    """Whether a pair is of a right-to-left script (a mark of punctuation takes its partner's): its
+    letters' script, as Auto Kerning measures it; a pair of no script it measures (Arabic) by the
+    right-to-left blocks."""
+    script = pair_script(left_char, right_char, None)
+    if script is not None:
+        return script in RTL_SCRIPTS
+    return any(is_rtl_char(ch) for ch in (left_char, right_char) if ch)
+
+
+# The right-to-left blocks: those Unicode gives a right-to-left bidirectional class (R or AL) by default
+# (DerivedBidiClass.txt): Hebrew, Arabic, Syriac, Thaana, N'Ko, Samaritan, Mandaic, their presentation
+# forms, and plane 1's right-to-left scripts (Phoenician, Kharoshthi, Old South Arabian, Old Hungarian,
+# Hanifi Rohingya, Sogdian, Adlam...), without the numbers in them, which a right-to-left text sets left to
+# right (Arabic-Indic digits, the Rumi numerals). A table, not unicodedata: FontLab's Python 2.7 knows
+# Unicode 5.2, and its narrow build holds a character past U+FFFF as two code units. Proof keeps the
+# same table (proof_tests checks they agree).
+RTL_RANGES = ((0x0590, 0x08FF), (0xFB1D, 0xFDFF), (0xFE70, 0xFEFC), (0x10800, 0x10FFF), (0x1E800, 0x1EFFF))
+RTL_NUMBER_RANGES = ((0x0600, 0x0605), (0x0660, 0x066C), (0x06DD, 0x06DD), (0x06F0, 0x06F9), (0x0890, 0x0891),
+                     (0x08E2, 0x08E2), (0x10D30, 0x10D39), (0x10E60, 0x10E7E))
+
+
+def code_of_char(ch):
+    """The code point of a one-character text, a pair of UTF-16 surrogates read as one (a narrow
+    Python 2); None for anything else."""
+    if not ch:
+        return None
+    if len(ch) == 2 and 0xD800 <= ord(ch[0]) < 0xDC00 and 0xDC00 <= ord(ch[1]) < 0xE000:
+        return 0x10000 + ((ord(ch[0]) - 0xD800) << 10) + ord(ch[1]) - 0xDC00
+    return ord(ch) if len(ch) == 1 else None
+
+
+def is_rtl_char(ch):
+    """Whether a character is of a right-to-left script: a letter Auto Kerning measures right to left,
+    or a character of the right-to-left blocks, numbers apart (RTL_RANGES)."""
+    if not ch:
+        return False
+    if script_of(ch) in RTL_SCRIPTS:
+        return True
+    code = code_of_char(ch)
+    if code is None:
+        return False
+    within = lambda ranges: any(low <= code <= high for low, high in ranges)
+    return within(RTL_RANGES) and not within(RTL_NUMBER_RANGES)
+
+
+def direction_char(package, name):
+    """The character a glyph's direction is read from: its own, else its base glyph's, named by its
+    name's stem (uni0628.fina, yod.alt, beh_alef by beh): FontLab's kerning of a right-to-left font is
+    mostly between unencoded contextual forms. None when neither is encoded. Past U+FFFF, two UTF-16
+    code units on a narrow Python 2 (is_rtl_char reads them as one)."""
+    stem = name.split(u".")[0].split(u"_")[0]
+    for candidate in ((name, stem) if stem and stem != name else (name,)):
+        try:
+            glyph = package.findName(candidate)
+            # (flGlyph has no unicode of its own; main_code: not a Kangxi radical FontLab may give first)
+            code = main_code(glyph.fgGlyph) if glyph is not None else None
+        except Exception:
+            code = None
+        if code:
+            try:
+                return unichr(code)  # noqa: F821 (Python 2)
+            except NameError:
+                return chr(code)
+            except ValueError:
+                return (b"\\U%08x" % code).decode("unicode-escape")
+    return None
 
 
 def text_order(left_char, right_char):
@@ -1385,7 +1451,7 @@ def proof_contexts(package, names):
     controls = u"Hno"
     for name in names:
         glyph = package.findName(name)
-        code = glyph.fgGlyph.unicode if glyph is not None else 0
+        code = main_code(glyph.fgGlyph) if glyph is not None else 0  # (U+65E5, not the radical U+2F47)
         if code:
             script = script_of(unichr_(code))
             if script in SCRIPT_PROOF:
@@ -1566,8 +1632,8 @@ def history_state(package):
 # The font tools in the order of the work, which the menu, each window's tools button, and its arrows
 # follow: the letters built (Diacritics), spaced, kerned, the features written, then the result
 # compared, checked (Font Check), and proofed.
-MENU_GROUPS = (("Diacritics", "Auto Spacing", "CJK Spacing", "Auto Kerning", "Kerning Check", "Feature Code",
-                "Font Compare", "Font Check", "Proof"),
+MENU_GROUPS = (("Diacritics", "Auto Spacing", "CJK Spacing", "CJK Vertical", "Auto Kerning", "Kerning Check",
+                "Feature Code", "Font Compare", "Font Check", "Proof"),
                ("Dark Mode", "Toggle Dark Mode", "Dark Mode Settings", "Tab Docking", "Toggle Tab Docking"),
                ("Start MCP Listener", "Stop MCP Listener", "Start Listener", "Stop Listener"))  # (FreeLab MCP's, old names too)
 MENU_TITLE, SCRIPTS_MENU = "FreeLab", "menuScripts"
@@ -1699,10 +1765,12 @@ _TOOL_BUTTONS = []  # each tools button with its menu and slots, held
 # The font tools are the steps of one job on one font, so each open font has one FreeLab window: a tool
 # opened for a font takes the place (and the size) of the tool that font's window showed, the way a
 # step follows another, and the window's title names its font. A window works on the font it was
-# opened for, whichever font FontLab shows since: two fonts open side by side each keep their own.
+# opened for, whichever font FontLab shows since: two fonts open side by side each keep their own, and
+# a window closes with its font (fonts_tick). A window opened with no font open waits for one, and
+# takes the next font opened.
 # sys._freelab_windows holds them: {"fonts": {FontLab's number of the font: the tool's dialog object},
 # "next": a counter, "hint": (font number, time, window number) for a tool about to be opened from a
-# window, "kept": every tool's dialog object of the session}.
+# window, "kept": every tool's dialog object shown, "theme": the colors the windows were last drawn in}.
 # ---------------------------------------------------------------------------
 
 WINDOW_PROP = "freelab_window"  # on a tool's window: its number in sys._freelab_windows
@@ -1774,25 +1842,16 @@ def fonts_open(fontlab=None):
     return found is None or bool(found)
 
 
-def font_closed(owner, workspace=None):
-    """A window whose font was closed while no other font is open: a window without a font (its title
-    without the font's name), the fonts' registry's under None, so that FontLab's menu, the tools button,
-    and the arrows find it and reuse it instead of opening a second window; it takes the next font that
-    opens (fonts_tick)."""
-    old = getattr(owner, "font_id", None)
-    owner.font_id = None
-    fonts = _windows()["fonts"]
-    if old is not None and fonts.get(old) is owner:
-        del fonts[old]
-    held = fonts.get(None)
-    if held is None or held is owner or not _shown(held):
-        fonts[None] = owner
-    title_window(owner, None)
+def font_gone(owner, open_ids):
+    """Whether the font a window was opened for has been closed (open_ids: open_font_ids; None, when
+    FontLab cannot tell, is no news). A window opened with no font has none to lose."""
+    font_id = getattr(owner, "font_id", None)
+    return font_id is not None and open_ids is not None and font_id not in open_ids
 
 
 def _owners():
-    """Every tool's dialog object of the session by its window's number: the fonts' windows, and a window
-    that is not its font's (one whose font was closed, moved onto a font that has a window already)."""
+    """Every tool's dialog object shown by its window's number: the fonts' windows, and a window that is
+    not its font's (a window without a font, while another waits too)."""
     registry = _windows()
     found = {}
     for owner in list(registry.get("kept", [])) + list(registry["fonts"].values()):
@@ -1800,6 +1859,18 @@ def _owners():
         if key is not None:
             found[key] = owner
     return found
+
+
+def widget_alive(widget):
+    """Whether a Qt object is still there: PythonQt raises for a deleted one (never so for a list's items,
+    which are no Qt objects: re-enumerate those from a live list)."""
+    if widget is None:
+        return False
+    try:
+        widget.metaObject()
+        return True
+    except Exception:
+        return False
 
 
 def _shown(owner):
@@ -1868,28 +1939,29 @@ def _move_window(owner, old_id, new_id):
 
 
 def window_font(owner, workspace):
-    """The font a tool's window works on: the one it was opened for while FontLab has it open (first
-    read: the calling window's font, else FontLab's current one), and FontLab's current one once that
-    font is closed. The window's title follows, and the registry (a window opened with no font open is
-    its font's window once it reads one). FontLab's own package when nothing is open (callers test it
-    as before): the window is then one without a font (font_closed), and takes the next font opened."""
+    """The font a tool's window works on: the one it was opened for (first read: the calling window's
+    font, else FontLab's current one). The window's title follows, and the registry (a window opened
+    with no font open is its font's window once it reads one). FontLab's own package when nothing is
+    open (callers test it as before): the window is then one without a font, and takes the next font
+    opened. None once its font is closed: the window closes with it (fonts_tick), and meanwhile works
+    on no font, never on another (it moved to the font FontLab showed, and could make two windows for
+    one font)."""
     font_id = getattr(owner, "font_id", None)
-    if open_font_ids(workspace) == []:
-        if font_id is not None:
-            font_closed(owner, workspace)
-        else:
-            owner.font_id = None
-            title_window(owner, None)
+    open_ids = open_font_ids(workspace)
+    if font_gone(owner, open_ids):
+        return None
+    if open_ids == []:
+        owner.font_id = None  # (a window opened with no font: it has none to lose)
+        title_window(owner, None)
         return workspace.currentPackage
     package = find_font(workspace, font_id)
     if package is None:
-        if font_id is None:
-            package = find_font(workspace, calling_font())
-        if package is None:
-            package = workspace.currentPackage
+        if font_id is not None:
+            return None  # (FontLab's fonts could not be read: never another font in its place)
+        package = find_font(workspace, calling_font()) or workspace.currentPackage
         found = _font_id(package)
-        if found != font_id:
-            _move_window(owner, font_id, found)
+        if found is not None:
+            _move_window(owner, None, found)
         owner.font_id = found
     title_window(owner, package)
     return package
@@ -1912,7 +1984,7 @@ def foreign_font(owner, fontlab=None):
             return None
         package = find_font(workspace, font_id)
         if package is None:
-            return None  # its font was closed: the window moves to the one FontLab shows (window_font)
+            return None  # its font was closed: the window closes with it (fonts_tick)
         return u"%s" % (package.tfn or u"its font")
     except Exception:
         return None
@@ -2099,20 +2171,21 @@ NO_FONT_LINE = u"No font is open. This window takes the next font you open."  # 
 
 
 def font_switched(owner):
-    """A window's font changed under it (closed, or opened for a window without a font): the tool shows
-    the new font, or its no-font state, through its font_changed(). A tool without one keeps what it
-    shows until it reads its font again (its title has changed already)."""
+    """A window without a font took one (opened since): the tool shows it through its font_changed().
+    A tool without one keeps what it shows until it reads its font again (its title has changed
+    already)."""
     changed = getattr(owner, "font_changed", None)
     if changed is not None:
         changed()
 
 
 def fonts_tick(workspace=None):
-    """Each shown FreeLab window, as fonts open and close: one whose font was closed moves to the font
-    FontLab shows (window_font), or, with no font left open, becomes a window without a font
-    (font_closed); a window without a font takes the font FontLab shows (the one just opened) once one
-    is open, unless that font has a window of its own shown. A busy window is looked at next time.
-    Returns the windows that changed."""
+    """Each shown FreeLab window, as fonts open and close: one whose font was closed closes with it
+    (the owner: "I'd suggest closing the script window along with the font it belongs to"; it moved
+    to the font FontLab showed, which could leave two windows on one font), and is let go
+    (release_window); a window opened with no font takes the font FontLab shows (the one just opened)
+    once one is open, unless that font has a window of its own shown. A busy window is looked at next
+    time. Returns the windows that changed (closed, or given a font)."""
     if workspace is None:
         import fontlab
         workspace = fontlab.flWorkspace.instance()
@@ -2125,11 +2198,13 @@ def fonts_tick(workspace=None):
         if not _shown(owner) or getattr(owner, "busy", False):
             continue
         font_id = getattr(owner, "font_id", None)
-        if font_id is not None and font_id not in open_ids:
-            if open_ids:
-                window_font(owner, workspace)
-            else:
-                font_closed(owner, workspace)
+        if font_gone(owner, open_ids):
+            try:
+                owner.dialog.close()  # (as its close button does: finished, then let go)
+            except Exception:
+                pass  # (FontLab deleted it)
+            changed.append(owner)
+            continue
         elif font_id is None and open_ids:
             current = _font_id(workspace.currentPackage)
             target = current if current in open_ids else open_ids[0]
@@ -2163,12 +2238,441 @@ def watch_fonts():
             (getattr(modules.get(name), "fonts_tick", None) or own)()
         except Exception:
             pass  # a timer's handler must not raise
+        try:  # (a switch dark mode did not announce: theme_tick)
+            module = modules.get(name)
+            if module is not None and getattr(module, "theme_tick", None) is not None:
+                module.theme_tick()
+        except Exception:
+            pass
 
     timer = QtCore.QTimer()
     timer.setInterval(FONTS_POLL_MS)
     timer.connect("timeout()", tick)
     timer.start()
     sys._freelab_font_watch = (timer, tick)  # (held: PythonQt drops what no Python object holds)
+
+
+# ---------------------------------------------------------------------------
+# Following dark mode as it switches
+#
+# Dark mode changes FontLab's palette and style, then tells FreeLab (sys._freelab_theme_hook, set
+# here, called by dark mode once it has switched either way); the windows' own tick notices a switch
+# it did not announce (theme_tick). Each shown FreeLab window then follows at once (retheme_window):
+# - its widgets polished again: Qt 5 polishes a widget under a stylesheet (on it or on a parent)
+#   with the palette of that moment, and dark mode sets the style (which polishes) before the
+#   palette, so such widgets kept the theme before the switch: dark cells and pale labels in light
+#   mode, light ones in dark mode that dark mode's mapping then garbled (owner's screenshots 76 and
+#   77; seen in Qt 5.15 offscreen, any number of switches, both ways);
+# - its pictures drawn in one palette color (inked: glyph pictures, pair previews, the tools
+#   button's lines) drawn again in that role's new color;
+# - its items' text and background colors that are a palette color, or a log color for the other
+#   background (LOG_COLORS), given the new one;
+# - its logs written again in the new colors (Log.restyle);
+# - and the tool's own theme_changed(), for what it draws in several colors.
+# ---------------------------------------------------------------------------
+
+THEME_ROLES = ("WindowText", "Text", "ButtonText", "HighlightedText", "Window", "Base", "Button", "Highlight",
+               "AlternateBase", "Mid", "Dark", "Light")  # (text roles first: they win where two share a color)
+INKED_MAX = 50000  # pictures remembered with their color at most (the oldest forgotten first)
+# A one-color picture's cacheKey: (its color, the order it came in). Held in sys: each tool may hold its
+# own copy of this module (loaded again after a reinstall), and the one that follows a switch must
+# find every tool's pictures
+_INKED = getattr(sys, "_freelab_inked", None)
+if _INKED is None:
+    _INKED = sys._freelab_inked = {}
+_INKED_ORDER = [max([0] + [entry[1] for entry in _INKED.values()])]
+
+
+def _rgb(color):
+    """(r, g, b) of a QColor, or of an (r, g, b[, a]) tuple."""
+    try:
+        return (int(color.red()), int(color.green()), int(color.blue()))
+    except AttributeError:
+        return tuple(int(c) for c in color[:3])
+
+
+def inked(picture, color):
+    """A picture (QIcon or QPixmap) drawn in one color alone, at any strengths (its alpha), noted so
+    that a dark mode switch draws it again in the new color of that color's role (retheme_window);
+    returns the picture."""
+    try:
+        _INKED_ORDER[0] += 1
+        _INKED[picture.cacheKey()] = (_rgb(color), _INKED_ORDER[0])
+        if len(_INKED) > INKED_MAX:
+            oldest = sorted(_INKED.items(), key=lambda pair: pair[1][1])[:INKED_MAX // 5]
+            for key, _ in oldest:
+                del _INKED[key]
+    except Exception:
+        pass
+    return picture
+
+
+def icon_of(pixmap):
+    """A list row's icon of a picture: noted in the picture's color when the picture was (inked), since
+    an icon made from a pixmap is another picture to Qt (its own cacheKey)."""
+    icon = _qt()[1].QIcon(pixmap)
+    ink = ink_of(pixmap)
+    return inked(icon, ink) if ink is not None else icon
+
+
+def ink_of(picture):
+    """The color a picture was drawn in (inked), or None."""
+    try:
+        if picture is None or picture.isNull():
+            return None
+        found = _INKED.get(picture.cacheKey())
+        return found[0] if found is not None else None
+    except Exception:
+        return None
+
+
+def theme_colors(palette):
+    """{(group, role): (r, g, b)} of a palette: the roles of THEME_ROLES, active, and the grayed-out
+    text roles (lists gray out what cannot be done)."""
+    QtGui = _qt()[1]
+    found = {}
+    groups = (("active", getattr(QtGui.QPalette, "Active", 0)), ("disabled", getattr(QtGui.QPalette, "Disabled", 2)))
+    for group_name, group in groups:
+        for role_name in THEME_ROLES if group_name == "active" else ("WindowText", "Text", "ButtonText"):
+            role = getattr(QtGui.QPalette, role_name, None)
+            if role is None:
+                continue
+            try:
+                found[(group_name, role_name)] = _rgb(palette.color(group, role))
+            except Exception:
+                continue
+    return found
+
+
+def theme_dark(colors):
+    """Whether a palette's colors (theme_colors) are dark: its window darker than its text."""
+    window, text = colors.get(("active", "Window")), colors.get(("active", "WindowText"))
+    if window is None or text is None:
+        return False
+    return sum(window) < sum(text)
+
+
+def theme_map(old, new):
+    """{old color: new color} from one palette's colors to another's (theme_colors), role by role (a
+    color two roles shared goes the way of the first, text roles first), with the logs' colors for a
+    light background and for a dark one (LOG_COLORS) swapped as the background changed."""
+    mapping = {}
+    for group in ("active", "disabled"):
+        for role in THEME_ROLES:
+            key = (group, role)
+            if key in old and key in new and old[key] not in mapping:
+                mapping[old[key]] = new[key]
+    was_dark, dark = theme_dark(old), theme_dark(new)
+    if was_dark != dark:
+        for on_dark, on_light in LOG_COLORS.values():
+            mapping.setdefault(on_dark if was_dark else on_light, on_light if was_dark else on_dark)
+    return dict((before, after) for before, after in mapping.items() if before != after)
+
+
+def retinted(picture, rgb):
+    """A one-color picture (QIcon or QPixmap) drawn again in rgb, its alpha kept (Qt's SourceIn: each
+    pixel takes the new color at its own strength), and noted in that color (inked)."""
+    QtCore, QtGui = _qt()
+    icon = not hasattr(picture, "toImage")
+    if icon:
+        sizes = list(picture.availableSizes())
+        if not sizes:
+            return None
+        source = picture.pixmap(sizes[-1])
+    else:
+        source = picture
+    pixmap = QtGui.QPixmap(source.size())
+    try:
+        pixmap.setDevicePixelRatio(source.devicePixelRatio())
+    except Exception:
+        pass
+    pixmap.fill(QtGui.QColor(0, 0, 0, 0))
+    painter = QtGui.QPainter(pixmap)
+    try:  # ended whatever happens: a painter left open on a freed pixmap aborts FontLab
+        painter.drawPixmap(0, 0, source)
+        painter.setCompositionMode(QtGui.QPainter.CompositionMode_SourceIn)
+        painter.fillRect(pixmap.rect(), QtGui.QColor(rgb[0], rgb[1], rgb[2]))
+    finally:
+        painter.end()
+    made = QtGui.QIcon(pixmap) if icon else pixmap
+    return inked(made, rgb)
+
+
+def _items(view):
+    """Every item of a tree, list, or table widget, read from the live widget now (never kept)."""
+    if view.inherits("QTreeWidget"):
+        pending = [view.topLevelItem(i) for i in range(_property(view, "topLevelItemCount"))]
+        while pending:
+            item = pending.pop()
+            if item is None:
+                continue
+            yield item
+            pending.extend(item.child(i) for i in range(item.childCount()))
+    elif view.inherits("QListWidget"):
+        for row in range(_property(view, "count")):
+            yield view.item(row)
+    elif view.inherits("QTableWidget"):
+        for row in range(_property(view, "rowCount")):
+            for column in range(_property(view, "columnCount")):
+                item = view.item(row, column)
+                if item is not None:
+                    yield item
+
+
+def _recolored_brush(brush, mapping):
+    """The brush in its color's new color (its alpha kept), or None when it keeps its color."""
+    QtGui = _qt()[1]
+    try:
+        if int(brush.style()) == 0:  # Qt.NoBrush: the item's own color is the palette's already
+            return None
+        color = brush.color()
+        after = mapping.get(_rgb(color))
+        if after is None:
+            return None
+        made = QtGui.QColor(after[0], after[1], after[2])
+        made.setAlpha(color.alpha())
+        return QtGui.QBrush(made)
+    except Exception:
+        return None
+
+
+def retheme_items(view, mapping):
+    """A list's pictures (inked) and item colors in their new colors: how many were redrawn. The list's
+    signals are held meanwhile: a changed item is no edit of the user's (Diacritics dropped its
+    revealed rows, Feature Code wrote its code again row by row, on itemChanged)."""
+    count = 0
+    single = view.inherits("QListWidget")  # (a list's item has no column)
+    columns = 1 if single else max(1, _property(view, "columnCount"))
+    try:
+        blocked = bool(view.blockSignals(True))  # (what it was: a list held already stays held)
+    except Exception:
+        blocked = None
+    try:
+        for item in _items(view):
+            for column in range(columns):
+                args = () if single else (column,)
+                try:
+                    icon = item.icon(*args)
+                    ink = ink_of(icon)
+                    if ink is not None and ink in mapping:
+                        made = retinted(icon, mapping[ink])
+                        if made is not None:
+                            item.setIcon(*(args + (made,)))
+                            count += 1
+                    for getter, setter in (("foreground", "setForeground"), ("background", "setBackground")):
+                        brush = _recolored_brush(getattr(item, getter)(*args), mapping)
+                        if brush is not None:
+                            getattr(item, setter)(*(args + (brush,)))
+                            count += 1
+                except Exception:
+                    continue
+    finally:
+        if blocked is not None:
+            try:
+                view.blockSignals(blocked)
+            except Exception:
+                pass
+    return count
+
+
+def window_widgets(window):
+    """The widgets of a window, itself first, each before its children (a child polished before its
+    parent would take the parent's colors of before)."""
+    QtGui = _qt()[1]
+    try:  # (a dialog the tool opened from its window, Auto Kerning's classes, is a window of its own)
+        roots = [window] + list(window.findChildren(QtGui.QDialog))
+        found = [w for w in QtGui.QApplication.instance().allWidgets() if any(root.isAncestorOf(w) for root in roots)]
+    except Exception:
+        return [window]
+
+    def depth(widget):
+        steps = 0
+        while widget is not None and steps < 64:
+            widget = widget.parentWidget()
+            steps += 1
+        return steps
+    return sorted(found, key=depth)
+
+
+def dark_mode_palette(widget):
+    """Whether dark mode set this widget's palette (an island's light palette): polished again, Qt would
+    drop it. A palette a stylesheet's own rules set counts not: Qt marks such a widget as having a
+    palette of its own too (live: 71 of Font Check's widgets), and it is the one to read again."""
+    module = (getattr(sys, "_freelab_dark_mode", None) or {}).get("module")
+    owns = getattr(module, "owns_palette", None)
+    try:
+        return bool(owns(widget)) if owns is not None else False
+    except Exception:
+        return False
+
+
+def repolish(widget):
+    """The widget in the colors of now (see above), its window's widgets taken parents first: unpolished
+    (a stylesheet's palette taken back), its palette taken from its parent again where none is set on
+    it, then polished again. A widget styled through a stylesheet (on it, a parent, or the application)
+    kept the palette it had, colors set on it or not: an empty palette set on it brings the one of now
+    (live, November 14: Feature Code's sections and Font Check's lists kept the theme before; polishing
+    alone changed nothing). One whose palette dark mode set (an island) is left as it is; one whose
+    palette a stylesheet's own colors set is read again (Font Check's scripts list stayed light)."""
+    QtGui = _qt()[1]
+    try:
+        if dark_mode_palette(widget):
+            return False
+        style = widget.style()
+        style.unpolish(widget)
+        try:
+            if not widget.palette.resolve():  # (nothing set on it: inherit again)
+                widget.setPalette(QtGui.QPalette())
+        except Exception:
+            pass
+        style.polish(widget)
+        widget.update()
+        return True
+    except Exception:
+        return False
+
+
+def _logs_of(owner):
+    """The logs (Log) a tool's dialog object holds, and those of the parts it holds (a page's log)."""
+    def is_log(value):  # (by what it does: a tool may hold a Log of another copy of this module)
+        return (not hasattr(value, "inherits") and callable(getattr(value, "restyle", None))
+                and hasattr(value, "entries") and hasattr(value, "view"))
+
+    found = []
+    for value in list(getattr(owner, "__dict__", {}).values()):
+        if is_log(value):
+            if all(value is not log for log in found):
+                found.append(value)
+        elif hasattr(value, "__dict__") and not hasattr(value, "inherits"):
+            for inner in list(value.__dict__.values()):
+                if is_log(inner) and all(inner is not log for log in found):
+                    found.append(inner)
+    return found
+
+
+def retheme_window(owner, mapping):
+    """One shown FreeLab window in the colors of now (see above): what was done, by kind."""
+    done = {"polished": 0, "pictures": 0, "logs": 0, "tool": False}
+    dialog = owner.dialog
+    widgets = window_widgets(dialog)
+    for widget in widgets:
+        if repolish(widget):
+            done["polished"] += 1
+    for widget in widgets:
+        try:
+            if widget.inherits("QTreeWidget") or widget.inherits("QListWidget") or widget.inherits("QTableWidget"):
+                done["pictures"] += retheme_items(widget, mapping)
+            elif widget.inherits("QLabel"):
+                pixmap = _property(widget, "pixmap")
+                ink = ink_of(pixmap)
+                if ink is not None and ink in mapping:
+                    widget.setPixmap(retinted(pixmap, mapping[ink]))
+                    done["pictures"] += 1
+            elif widget.inherits("QAbstractButton"):
+                icon = _property(widget, "icon")
+                ink = ink_of(icon)
+                if ink is not None and ink in mapping:
+                    widget.setIcon(retinted(icon, mapping[ink]))
+                    done["pictures"] += 1
+        except Exception:
+            continue
+    for log in _logs_of(owner):
+        try:
+            log.restyle()
+            done["logs"] += 1
+        except Exception:
+            pass
+    changed = getattr(owner, "theme_changed", None)
+    if changed is not None:
+        try:
+            changed()
+            done["tool"] = True
+        except Exception:
+            pass  # (one tool failing leaves the others theirs)
+    return done
+
+
+THEME_ATTR = "drawn_theme"  # on a tool's dialog object: the colors (theme_colors) its window is drawn in
+
+
+def _theme_now():
+    try:
+        return theme_colors(_qt()[1].QApplication.instance().palette())
+    except Exception:
+        return None
+
+
+def note_theme(owner):
+    """A tool's window, as it is built, is drawn in the colors of now."""
+    now = _theme_now()
+    if now is not None:
+        setattr(owner, THEME_ATTR, now)
+
+
+def theme_switched(dark=None):
+    """FontLab's palette changed (dark mode switched, either way): every shown FreeLab window follows
+    (retheme_window), from the colors it was drawn in. A busy window (inside its own loop, which lets
+    events through: an analysis, a check) is left as it is, and follows on a later tick once its work
+    is done. dark: what dark mode says it switched to (unused: the palette tells). The windows that
+    followed."""
+    registry = _windows()
+    now = _theme_now()
+    if now is None:
+        return []
+    seen, registry["theme"] = registry.get("theme"), now
+    followed = []
+    for _, owner in sorted(_owners().items(), key=lambda pair: pair[0]):
+        if getattr(owner, RELEASED, False) or not _shown(owner):
+            continue  # (a closed window is let go, not redrawn)
+        before = getattr(owner, THEME_ATTR, None) or seen
+        if not before or before == now:
+            setattr(owner, THEME_ATTR, now)
+            continue
+        if getattr(owner, "busy", False):
+            setattr(owner, THEME_ATTR, before)  # (its colors of before kept: it catches up once its work is done)
+            continue
+        try:
+            retheme_window(owner, theme_map(before, now))
+            followed.append(owner)
+        except Exception:
+            pass
+        setattr(owner, THEME_ATTR, now)
+    return followed
+
+
+def theme_tick():
+    """The windows' tick: a palette change no one announced (an older dark mode) is followed, and a
+    window that was busy at a switch catches up; the colors of the first tick are the ones the windows
+    were drawn in."""
+    registry = _windows()
+    if registry.get("theme") is None:
+        now = _theme_now()
+        if now is not None:
+            registry["theme"] = now
+        return []
+    return theme_switched()
+
+
+def hook_theme():
+    """Once a session: dark mode's call after it switched (sys._freelab_theme_hook) reaches
+    theme_switched through the module loaded last. The colors the windows are drawn in now noted."""
+    registry = _windows()
+    if registry.get("theme") is None:
+        try:
+            registry["theme"] = theme_colors(_qt()[1].QApplication.instance().palette())
+        except Exception:
+            pass
+    if getattr(sys, "_freelab_theme_hook", None) is not None:
+        return
+    modules, name, own = sys.modules, __name__, theme_switched
+
+    def switched(dark=None):
+        try:
+            return (getattr(modules.get(name), "theme_switched", None) or own)(dark)
+        except Exception:
+            return []  # (dark mode's switch must never fail on FreeLab's account)
+
+    sys._freelab_theme_hook = switched
 
 
 def _own_window(dialog):
@@ -2285,15 +2789,14 @@ def refresh_views(owner, fontlab=None):
 
 
 RELEASE_MS = 1000  # how long after it closed a tool's window is let go (release_window)
+RELEASED = "released"  # what a tool's dialog object holds once let go (let_go): nothing else
 
 
 def release_window(owner):
-    """A tool's window closed (by hand, or giving way to another tool) let go: neither "kept" nor its
-    window filter (whose handler holds the window) holds it any more, RELEASE_MS later, unless it is
-    shown again by then. A window FreeLab made has no owner, so PythonQt deletes it once nothing holds
-    it: never deleteLater (PythonQt would delete it a second time), and never during the events that
-    closed it (a click in it may have), hence the wait. What still needs it (its font's entry, a timer
-    or a slot of its own) still holds it, and it lives until they let go."""
+    """A tool's window closed (by hand, giving way to another tool, or with its font) let go
+    (let_go), RELEASE_MS later, unless it is shown again by then; a tool still busy (inside its own
+    loop, which lets events through) is looked at again as long later. Never during the events that
+    closed it (a click in it may have), hence the wait."""
     QtCore = _qt()[0]
     registry = _windows()
     waiting = registry.setdefault("releasing", [])
@@ -2302,18 +2805,318 @@ def release_window(owner):
         try:  # (a timer's handler must not raise)
             if release in waiting:
                 waiting.remove(release)
-            if _shown(owner):
+            if getattr(owner, RELEASED, False) or _shown(owner):
                 return
-            registry["kept"] = [held for held in registry.get("kept", []) if held is not owner]
-            filters = getattr(sys, "_freelab_window_filters", None) or {}
-            key = owner.dialog.property(WINDOW_FILTER_PROP)
-            if key is not None:
-                filters.pop(int(key), None)
+            if getattr(owner, "busy", False):
+                release_window(owner)  # (its loop still works on it: later)
+                return
+            let_go(owner)
         except Exception:
             pass
 
     waiting.append(release)  # (held until it runs)
     QtCore.QTimer.singleShot(RELEASE_MS, release)
+
+
+def _window_of(widget):
+    try:
+        return widget.window()
+    except Exception:
+        return None  # (deleted)
+
+
+def _same(one, other):
+    """Whether two wrappers are the same Qt object (PythonQt may hand back another wrapper)."""
+    try:
+        return one is other or (one is not None and other is not None and one == other)
+    except Exception:
+        return False
+
+
+def let_go(owner):
+    """A tool's window closed for good, freed by PythonQt itself, which deletes a window made from Python
+    once no Python object refers to it (never deleteLater: PythonQt would delete it a second time,
+    which crashed FontLab). Hidden windows piled up: closed, they were dropped from the registry, but
+    a closure Qt held still reached the window. So: every reference FreeLab keeps is dropped (the
+    registry's entries, the window's filter, its states' timer, its tools button's slots, dark mode's
+    records of its widgets, the tool's own let_go() for what it connected outside the window), timers
+    the tool holds are stopped, and the tool's dialog object is emptied (RELEASED alone left on it):
+    the slots Qt holds refer to the tool's object, never to the window, so they no longer reach it.
+    Nothing else: if something still holds the window, it stays hidden, as before. Returns what was
+    let go, by kind (for tests and probes)."""
+    registry = _windows()
+    done = []
+    dialog = getattr(owner, "dialog", None)
+    registry["kept"] = [held for held in registry.get("kept", []) if held is not owner]
+    for key, held in list(registry["fonts"].items()):
+        if held is owner:
+            del registry["fonts"][key]
+            done.append("font")
+    if dialog is not None:
+        try:
+            key = dialog.property(WINDOW_FILTER_PROP)
+            filters = getattr(sys, "_freelab_window_filters", None) or {}
+            watcher = filters.get(int(key)) if key is not None else None
+            if watcher is not None:
+                # (made from Python with no parent: given the window, so Qt deletes them with it, never
+                # PythonQt as the last reference goes, at whatever moment Python's collector picks)
+                for made in (watcher, getattr(watcher, "child_watch", None)):
+                    _adopt(made, dialog)
+                filters.pop(int(key), None)
+                done.append("filter")
+        except Exception:
+            pass
+        done.extend(_drop_state_watch(dialog))
+        done.extend(_drop_tool_buttons(dialog))
+        try:  # dark mode's records hold its widgets (and their effects): undone and dropped
+            module = (getattr(sys, "_freelab_dark_mode", None) or {}).get("module")
+            forget = getattr(module, "forget", None)
+            if forget is not None and forget(dialog):
+                done.append("dark mode")
+        except Exception:
+            pass
+    own = getattr(owner, "let_go", None)
+    if own is not None:
+        try:
+            own()  # (what the tool connected outside its window)
+            done.append("tool")
+        except Exception:
+            pass
+    for timer in _held_timers(owner):
+        try:
+            timer.stop()  # (a timer whose slot holds the timer itself would tick on, alone)
+        except Exception:
+            continue
+        if dialog is not None and _adopt(timer, dialog):
+            done.append("adopted")
+    try:
+        if dialog is not None:
+            dialog.disconnect("finished(int)", owner.size_slot)
+    except Exception:
+        pass
+    if dialog is not None and hand_to_qt(dialog):
+        done.append("deleting")
+    owner.__dict__.clear()
+    setattr(owner, RELEASED, True)
+    try:
+        # Work still pending through the tool's object (a 0 ms timer, a slot its list's model calls as the
+        # list is deleted) now does nothing: never through a deleted window's lists and items
+        owner.__class__ = ReleasedTool
+    except TypeError:
+        pass  # (a class of another kind: its attributes are gone all the same)
+    return done
+
+
+def _adopt(made, parent):
+    """A QObject made from Python with no parent (a timer, an event filter) given one: Qt then deletes it
+    with its parent. Left parentless, PythonQt deletes it when its last Python reference goes, which may
+    be at any moment Python's collector picks: three crashes of FontLab (November 14) were PythonQt
+    freeing such an object twice, inside an unrelated loop. True when it was given one."""
+    try:
+        if made is None or made.parent() is not None:
+            return False
+        made.setParent(parent)
+        return True
+    except Exception:
+        return False
+
+
+DELETING = "deleting"  # in sys._freelab_windows: the windows handed to Qt, held until deleteLater is asked
+DELETE_WAIT_MS = 500  # deleteLater waits this long again while a menu or a modal dialog is open
+
+
+def _popup_open():
+    """Whether a menu (a list's right-click menu, a What's This menu) or a modal dialog runs its own event
+    loop now: a window deleted inside one would take the menu, its child, from under it."""
+    try:
+        app = _qt()[1].QApplication
+        return app.activePopupWidget() is not None or app.activeModalWidget() is not None
+    except Exception:
+        return False
+
+
+def hand_to_qt(dialog):
+    """A closed tool window freed by Qt, once, at a moment FreeLab chooses: given FontLab's main window
+    as its parent (a window still, hidden: its flags kept), so PythonQt, which deletes a window made from
+    Python once nothing refers to it, leaves it to Qt; then deleteLater from a plain timer's slot (never
+    from inside the window's own signals), and only then is it let go. Without FontLab's main window, it
+    is kept, hidden: never freed rather than freed by PythonQt at a random moment. True when handed."""
+    QtCore = _qt()[0]
+    registry = _windows()
+    held = registry.setdefault(DELETING, [])
+    try:
+        main = AutoKerningDialog.main_window()
+    except Exception:
+        main = None
+    try:
+        if main is None or not widget_alive(dialog):
+            if widget_alive(dialog):
+                registry.setdefault("unfreed", []).append(dialog)
+            return False
+        dialog.setParent(main, dialog.windowFlags())  # (a parent: PythonQt no longer deletes it)
+    except Exception:
+        registry.setdefault("unfreed", []).append(dialog)
+        return False
+
+    def delete():
+        try:
+            if _popup_open():
+                QtCore.QTimer.singleShot(DELETE_WAIT_MS, delete)  # (a menu of its own may be open: later)
+                return
+            if widget_alive(dialog):
+                dialog.deleteLater()  # (Qt deletes it as its event loop comes back: once)
+        except Exception:
+            pass
+        held[:] = [entry for entry in held if entry[0] is not dialog]  # (only now let go)
+
+    held.append((dialog, delete))
+    QtCore.QTimer.singleShot(0, delete)
+    return True
+
+
+class _Inert(object):
+    """Nothing: called, or asked for an attribute, it gives itself; false, empty, and never Qt."""
+
+    def __call__(self, *args, **kwargs):
+        return self
+
+    def __getattr__(self, name):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        return self
+
+    def __setattr__(self, name, value):
+        pass  # (written to, it stays nothing: one object stands for every attribute of every tool let go)
+
+    def __delattr__(self, name):
+        pass
+
+    def __setitem__(self, key, value):
+        pass
+
+    def __delitem__(self, key):
+        pass
+
+    def __getitem__(self, key):
+        return self
+
+    def __iter__(self):
+        return iter(())
+
+    def __len__(self):
+        return 0
+
+    def __bool__(self):
+        return False
+    __nonzero__ = __bool__
+
+
+_INERT = _Inert()
+
+
+class ReleasedTool(object):
+    """What a tool's dialog object becomes once let go (let_go): whatever is asked of it (a method, a
+    widget, a list) is nothing (_Inert), so a slot or a timer still bound to it (self.update_buttons from
+    a 0 ms timer, self.select from the selection a deleted list gives up, Diacritics' row drop) ends
+    there, never reaching a deleted list or its items."""
+    released = True
+
+    def __getattr__(self, name):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        return _INERT
+
+
+HELD_DEPTH = 4  # how deep _held_timers looks through what a tool holds
+HELD_MOST = 50000  # and how many things at most (a tool's lists of results are long)
+_PLAIN = (type(None), bool, int, float, str, type(u""), bytes)
+
+
+def _held_timers(owner):
+    """The QTimers a tool's dialog object holds, wherever it holds them: in its attributes, the lists,
+    tuples, sets, and dictionaries it holds, and the parts it holds (Diacritics' anchors page, Auto
+    Kerning's previews' click regions, its classes dialog's drag, a flag menu, a log), each once, down
+    to HELD_DEPTH. Timers tick on their own slots, and event filters are timers here: one held only in a
+    dictionary of parts was missed, and became garbage PythonQt deleted at an arbitrary moment. Never a
+    module's (the shared module a tool holds serves every window), a class's, or a function's; nor
+    inside a Qt object."""
+    def is_qt(value):
+        return hasattr(value, "inherits") and hasattr(value, "metaObject")
+
+    found, seen, pending = [], set([id(owner)]), [(value, 1) for value in list(getattr(owner, "__dict__", {}).values())]
+    while pending and len(seen) < HELD_MOST:
+        value, depth = pending.pop()
+        if isinstance(value, _PLAIN) or id(value) in seen:
+            continue
+        seen.add(id(value))
+        try:
+            if is_qt(value):
+                if value.inherits("QTimer"):
+                    found.append(value)
+                continue  # (what a Qt object holds is Qt's)
+            if isinstance(value, (type(sys), type)) or callable(value) or depth >= HELD_DEPTH:
+                continue
+            if isinstance(value, dict):
+                inner = list(value.values())
+            elif isinstance(value, (list, tuple, set, frozenset)):
+                inner = list(value)
+            elif hasattr(value, "__dict__"):
+                inner = list(value.__dict__.values())
+            else:
+                continue
+            pending.extend((item, depth + 1) for item in inner)
+        except Exception:
+            continue
+    return found
+
+
+def close_slot(owner):
+    """A tool's Close button's slot: the tool's window closed through its dialog object. Connected to
+    the window's own close, Qt held the window through the button (a child of the window), and the
+    window was never freed once closed (let_go empties the dialog object instead)."""
+    def close(*args):
+        try:
+            owner.dialog.close()
+        except Exception:
+            pass  # (let go already, or deleted; a slot must not raise)
+    owner.close_slot = close  # (held with the tool)
+    return close
+
+
+def _drop_state_watch(dialog):
+    """watch_states' tick for this window, disconnected from its timer and dropped (it held the window)."""
+    holder = getattr(sys, "_freelab_state_watchers", None) or []
+    dropped = []
+    for tick in list(holder):
+        try:
+            if not _same(getattr(tick, "dialog", None), dialog):
+                continue
+            timer = tick.timer
+            timer.stop()
+            timer.disconnect("timeout()", tick)
+        except Exception:
+            pass
+        holder.remove(tick)
+        dropped.append("states")
+    return dropped
+
+
+def _drop_tool_buttons(dialog):
+    """The tools button's slots of this window, disconnected and dropped (_TOOL_BUTTONS held them)."""
+    dropped = []
+    for entry in list(_TOOL_BUTTONS):
+        button, connections = entry[0], entry[3] if len(entry) > 3 else []
+        window = _window_of(button)
+        if window is not None and not _same(window, dialog):
+            continue  # (another window's; a deleted button's entry goes too)
+        for sender, signal, slot in connections:
+            try:
+                sender.disconnect(signal, slot)
+            except Exception:
+                pass
+        _TOOL_BUTTONS.remove(entry)
+        dropped.append("tools button")
+    return dropped
 
 
 def take_window(tool, owner):
@@ -2337,7 +3140,7 @@ def take_window(tool, owner):
         pass
     old = registry["fonts"].get(font_id)
     if old is None or not _shown(old):
-        # a window without a font (its font closed) is the next font's: it gives way, not a second window
+        # a window opened with no font is the next font's: it gives way, not a second window
         fontless = registry["fonts"].get(None)
         if fontless is not None and fontless is not owner and _shown(fontless):
             old = fontless
@@ -2345,7 +3148,7 @@ def take_window(tool, owner):
                 del registry["fonts"][None]
     if (caller is not None and caller is not owner and _shown(caller)
             and getattr(caller, "font_id", None) in (font_id, None)):
-        old = caller  # (the window clicked, its font this one's, or none since its font was closed)
+        old = caller  # (the window clicked, its font this one's, or a window still without a font)
     registry["fonts"][font_id] = owner
     # Kept while it is shown: a window with no owner lives only while Python holds it. Once closed (by
     # hand, or giving way to another tool) it is let go (release_window): kept for the session, as
@@ -2392,6 +3195,8 @@ def take_window(tool, owner):
     hook_quit()
     try:
         watch_fonts()
+        hook_theme()
+        note_theme(owner)  # (built just now: in the colors of now)
     except Exception:
         pass
     try:
@@ -2476,13 +3281,16 @@ def add_tools_button(dialog, current, log=None):
         button.setToolTip(u"Open another FreeLab tool.")
         button.setWhatsThis(u"Lists FreeLab's font tools in the order of the work. Picking one opens it on this window's "
                             u"font, in this window's place.")
-        button.setIcon(QtGui.QIcon(tools_icon(_property(dialog, "palette").color(QtGui.QPalette.WindowText))))
+        ink = _property(dialog, "palette").color(QtGui.QPalette.WindowText)
+        button.setIcon(inked(QtGui.QIcon(tools_icon(ink)), ink))  # (redrawn in the new text color on a switch)
         button.setProperty(LEAVE_ALONE_PROP, True)  # drawn in the dialog's colors
         menu = QtGui.QMenu(button)
-        held = []
+        held, connections = [], []  # (sender, signal, slot): disconnected once the window is let go
 
         def go(title):
-            if not open_tool(title, dialog) and log is not None:
+            # (the window found from the button as it is clicked: a slot that held the window kept it
+            # alive once it was closed, see let_go)
+            if not open_tool(title, _window_of(button)) and log is not None:
                 log.add(u"%s is not in <i>Scripts &gt; FreeLab</i>: run <i>Refresh Scripts</i>, or reinstall FreeLab." % b(title),
                         "warning")
 
@@ -2494,6 +3302,7 @@ def add_tools_button(dialog, current, log=None):
                 chosen = (lambda title: lambda *args: go(title))(title)
                 held.append(chosen)
                 action.connect("triggered()", chosen)
+                connections.append((action, "triggered()", chosen))
         # The tool before and the tool after, in the order of the work: each opens in this window's place
         arrows = []
         for neighbor, arrow, word in zip(tool_neighbors(current), (QtCore.Qt.LeftArrow, QtCore.Qt.RightArrow),
@@ -2510,6 +3319,7 @@ def add_tools_button(dialog, current, log=None):
                 stepped = (lambda title: lambda *args: go(title))(neighbor)
                 held.append(stepped)
                 step.connect("clicked()", stepped)
+                connections.append((step, "clicked()", stepped))
             arrows.append(step)
         held.append(arrows)
         button.setMenu(menu)
@@ -2527,6 +3337,7 @@ def add_tools_button(dialog, current, log=None):
         whats_this = lambda *args: QtGui.QWhatsThis.enterWhatsThisMode()
         held.append(whats_this)
         help_button.connect("clicked()", whats_this)
+        connections.append((help_button, "clicked()", whats_this))
         if first is not None:  # a widget: it and the buttons share a row
             layout.removeWidget(first)
             row = QtGui.QHBoxLayout()
@@ -2538,7 +3349,8 @@ def add_tools_button(dialog, current, log=None):
         else:  # a row already: the buttons at its end
             for widget in [help_button] + arrows + [button]:
                 first_row.addWidget(widget, 0, QtCore.Qt.AlignTop)
-        _TOOL_BUTTONS.append((button, menu, held))  # (PythonQt drops what no Python object holds)
+        # (PythonQt drops what no Python object holds; let_go drops them with the window)
+        _TOOL_BUTTONS.append((button, menu, held, connections))
         return button
     except Exception:
         return None
@@ -2584,19 +3396,41 @@ def hook_menu_order_soon(tries=MENU_HOOK_TRIES):
 COMPILE_TIP = u"Compile features ("  # the Features panel's button (its tooltip names its shortcut after this)
 
 
+def fontlab_widget(key, matches):
+    """One of FontLab's own widgets, found by matches(widget): the one found before while it is there and
+    still matches (sys._freelab_found), else looked for among every widget, a walk that wraps thousands
+    (each wrapper a thing PythonQt frees later): once, not at every compile or every read."""
+    QtGui = _qt()[1]
+    found = getattr(sys, "_freelab_found", None)
+    if found is None:
+        found = sys._freelab_found = {}
+    held = found.get(key)
+    try:
+        if held is not None and widget_alive(held) and matches(held):
+            return held
+    except Exception:
+        pass
+    found.pop(key, None)
+    for widget in QtGui.QApplication.instance().allWidgets():
+        try:
+            if matches(widget):
+                found[key] = widget  # (FontLab's: its wrapper held deletes nothing)
+                return widget
+        except Exception:
+            continue
+    return None
+
+
 def compile_features():
     """Compile the current font's features as the Features panel's button does (FontLab has no call for
     it): True once clicked, False when the panel was never made (open it once: Window > Panels)."""
-    QtGui = _qt()[1]
-    for widget in QtGui.QApplication.instance().allWidgets():
-        try:
-            if (widget.inherits("QAbstractButton") and widget.objectName == "buttonCompile"
-                    and (u"%s" % widget.toolTip).startswith(COMPILE_TIP)):
-                widget.click()
-                return True
-        except Exception:
-            continue
-    return False
+    button = fontlab_widget("compile", lambda widget: (
+        widget.inherits("QAbstractButton") and widget.objectName == "buttonCompile"
+        and (u"%s" % widget.toolTip).startswith(COMPILE_TIP)))
+    if button is None:
+        return False
+    button.click()
+    return True
 
 
 def compile_box():
@@ -2615,16 +3449,25 @@ COMPILE_READS_MAX = 8  # reads at most (a slow compile's output is read once it 
 COMPILE_ERROR_MARKS = (u"[F]", u"[E]", u"error", u"Error")
 
 
-def output_text():
-    """FontLab's Output panel's text (where the compiler writes its errors), or None."""
-    QtGui = _qt()[1]
-    for widget in QtGui.QApplication.instance().allWidgets():
-        try:
-            if widget.objectName == "textOutput" and widget.inherits("QTextEdit"):
-                return u"%s" % widget.toPlainText()
-        except Exception:
-            continue
-    return None
+def output_view():
+    """FontLab's Output panel's text box (where the compiler writes its errors), or None. FontLab has two
+    of that name, the first hidden and empty (live: the compiler's [N] and [W] lines were in the other,
+    and the log said the panel showed nothing): the one shown, else one that holds text, else either."""
+    def output(widget):
+        return widget.objectName == "textOutput" and widget.inherits("QTextEdit")
+    return (fontlab_widget("output", lambda widget: output(widget) and widget.isVisible())
+            or fontlab_widget("output (with text)", lambda widget: output(widget) and bool(u"%s" % widget.toPlainText()))
+            or fontlab_widget("output (any)", output))
+
+
+def output_text(view=None):
+    """The Output panel's text (output_view, or the text box given: a compile's before and after are read
+    from the same one), or None."""
+    view = view if view is not None else output_view()
+    try:
+        return u"%s" % view.toPlainText() if view is not None else None
+    except Exception:
+        return None
 
 
 def compiled_note(box, log=None):
@@ -2633,7 +3476,8 @@ def compiled_note(box, log=None):
     QtCore = _qt()[0]
     if box is None or not box.checked:
         return u" Compile the features in FontLab's <i>Features</i> panel to try it."
-    before = output_text()
+    view = output_view()  # (before and after read from the same text box: FontLab has two of that name)
+    before = output_text(view)
     if not compile_features():
         return (u" Not compiled: FontLab's <i>Features</i> panel was never opened in this session (<i>Window &gt; "
                 u"Panels &gt; Features</i>); compile there.")
@@ -2643,7 +3487,7 @@ def compiled_note(box, log=None):
 
     def read():
         try:
-            after = output_text() or u""
+            after = output_text(view) or u""
             state["reads"] += 1
             if state["reads"] < COMPILE_READS_MAX and (after == before or after != state["last"]):
                 state["last"] = after  # nothing yet, or still growing: read again
@@ -2960,7 +3804,7 @@ def show_disabled_help(widget, where):
     menu = QtGui.QMenu(widget.window())
     action = menu.addAction(u"What's This?")
     picked = menu.exec_(where)
-    if picked is not None and (picked is action or picked.text == action.text):
+    if picked is not None and widget_alive(widget) and (picked is action or picked.text == action.text):
         center = _property(widget, "rect").center()
         QtGui.QWhatsThis.showText(widget.mapToGlobal(center), text, widget)
     return True
@@ -3093,8 +3937,10 @@ def install_filters(dialog):
                     pass
                 return False
 
-        watcher = WindowFilter()
-        watcher.changed, watcher.child_watch = changed, ChildWatch()
+        # (their parent the window: Qt deletes them with it, never PythonQt at whatever moment Python's
+        # collector picks, as it does a parentless object made from Python)
+        watcher = WindowFilter(window)
+        watcher.changed, watcher.child_watch = changed, ChildWatch(window)
         key = max(list(holder) + [0]) + 1  # (never a number given before: windows let go leave gaps)
         holder[key] = watcher
         window.setProperty(WINDOW_FILTER_PROP, key)
@@ -3204,6 +4050,7 @@ def watch_states(dialog):
         except Exception:
             pass  # a timer's handler must not raise
     tick.gone = gone
+    tick.dialog, tick.timer = dialog, timer  # (let_go disconnects it: it holds the window)
 
     def dropped(held):
         try:
@@ -3387,6 +4234,7 @@ def glyph_icon(package, master, names, color, value=0, size=GLYPH_ICON_SIZE):
         pixmap = QtGui.QPixmap(width, height)
         pixmap.fill(QtGui.QColor(0, 0, 0, 0))
         painter = QtGui.QPainter(pixmap)
+        colored = False
         try:  # ended before anything else can fail: a painter left open on a freed pixmap aborts FontLab
             painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
             x = 4 - left * scale
@@ -3394,12 +4242,15 @@ def glyph_icon(package, master, names, color, value=0, size=GLYPH_ICON_SIZE):
                 painter.save()
                 painter.translate(x, size * 1.1)
                 painter.scale(scale, -scale)
-                fill_glyph(painter, path, QtGui.QBrush(QtGui.QColor(color)), layer_parts(layer))
+                parts = layer_parts(layer)
+                colored = colored or bool(parts)
+                fill_glyph(painter, path, QtGui.QBrush(QtGui.QColor(color)), parts)
                 painter.restore()
                 x += (float(layer.advanceWidth) + (value if index == 0 else 0)) * scale
         finally:
             painter.end()
-        return QtGui.QIcon(pixmap)
+        icon = QtGui.QIcon(pixmap)
+        return icon if colored else inked(icon, color)  # (in one color: redrawn in the new one on a switch)
     except Exception:
         return None
 
@@ -3632,7 +4483,7 @@ class Log(object):
         view.setFixedHeight(LOG_HEIGHT[0] if LOG_HEIGHT else int(self.line * LOG_LINES + 12))
         view.setWhatsThis(u"What this window did, newest first: done in green, warnings in amber, errors in red. "
                           u"Drag its bottom edge to make it taller: the window's bottom edge moves with it.")
-        self.entries = []
+        self.entries, self.lines = [], []  # (lines: (time, text, level) as given; entries: as shown)
         self.widget = QtGui.QWidget()
         box = QtGui.QVBoxLayout(self.widget)
         box.setContentsMargins(0, 0, 0, 0)
@@ -3679,7 +4530,7 @@ class Log(object):
                 return False
 
         self.start = None
-        self.drag = Drag()
+        self.drag = Drag(grip)  # (its parent the grip: Qt deletes it with the grip, never PythonQt at random)
         grip.installEventFilter(self.drag)
 
     def follow(self, source):
@@ -3711,25 +4562,48 @@ class Log(object):
 
     def add(self, text, level="info"):
         """text is rich text already (html(), b(), and i() make its parts)."""
-        QtCore, QtGui = _qt()
         try:
             stamp = time.strftime("%H:%M")
-            color = LOG_COLORS.get(level)
-            if color is None:
-                ink = self.view.palette.color(QtGui.QPalette.Text)
-                text = self.pictured(text, (ink.red(), ink.green(), ink.blue()))
-            if color is not None:
-                base = self.view.palette.color(QtGui.QPalette.Base)
-                rgb = color[0] if base.lightness() < 128 else color[1]
-                text = self.pictured(text, rgb)
-                # links (glyphs to select) in the line's own color, underlined: not the palette's blue
-                text = text.replace(u'<a href=', u'<a style="color:#%02x%02x%02x" href=' % (rgb[0], rgb[1], rgb[2]))
-                text = u'<span style="color:#%02x%02x%02x">%s</span>' % (rgb[0], rgb[1], rgb[2], text)
-            self.entries.insert(0, u"%s&nbsp; %s" % (stamp, text))
+            self.lines = getattr(self, "lines", [])
+            self.lines.insert(0, (stamp, text, level))  # (as given: written again in new colors, restyle)
+            del self.lines[LOG_KEPT:]
+            self.entries.insert(0, self.rendered(stamp, text, level))
             del self.entries[LOG_KEPT:]
             self.view.setHtml(u"<br>".join(self.entries))
         except Exception:
             pass
+
+    def rendered(self, stamp, text, level):
+        """A line as the log shows it, in the colors of now: its glyphs drawn, its level's color."""
+        QtGui = _qt()[1]
+        color = LOG_COLORS.get(level)
+        if color is None:
+            ink = self.view.palette.color(QtGui.QPalette.Text)
+            text = self.pictured(text, (ink.red(), ink.green(), ink.blue()))
+        else:
+            base = self.view.palette.color(QtGui.QPalette.Base)
+            rgb = color[0] if base.lightness() < 128 else color[1]
+            text = self.pictured(text, rgb)
+            # links (glyphs to select) in the line's own color, underlined: not the palette's blue
+            text = text.replace(u'<a href=', u'<a style="color:#%02x%02x%02x" href=' % (rgb[0], rgb[1], rgb[2]))
+            text = u'<span style="color:#%02x%02x%02x">%s</span>' % (rgb[0], rgb[1], rgb[2], text)
+        return u"%s&nbsp; %s" % (stamp, text)
+
+    def restyle(self):
+        """Every line written again in the colors of now (dark mode switched: retheme_window); the
+        lines were colored, and their glyphs drawn, in the colors of when they came."""
+        lines = getattr(self, "lines", [])
+        if not lines:
+            return
+        self.entries = [self.rendered(*line) for line in lines]
+        try:
+            bar = self.view.verticalScrollBar()
+            at = int(_property(bar, "value"))  # (a property under PythonQt: a value, not a call)
+        except Exception:
+            bar = None
+        self.view.setHtml(u"<br>".join(self.entries))
+        if bar is not None:
+            bar.setValue(at)  # (where the reader was)
 
     def link_clicked(self, url):
         """A link in a line clicked: handed to the dialog's handler (its text: the link's target)."""
@@ -3757,7 +4631,7 @@ class Log(object):
             self.add(u"FontLab did not open the glyph: %s" % html(error), "error")
 
     def clear(self):
-        self.entries = []
+        self.entries, self.lines = [], []
         self.view.clear()
 
 
@@ -3822,7 +4696,10 @@ def watch_history(owner):
     History differs from owner.seen_history: an undo, a redo, or an edit made in FontLab meanwhile.
     The owner sets seen_history (history_mark) after its own analysis and writes. Keep the timer."""
     QtCore, QtGui = _qt()
-    timer = QtCore.QTimer()
+    try:  # (its parent the window: Qt deletes it with the window)
+        timer = QtCore.QTimer(owner.dialog)
+    except Exception:
+        timer = QtCore.QTimer()
     timer.setInterval(HISTORY_POLL_MS)
 
     def tick():
@@ -3873,7 +4750,7 @@ class ClickRegions(object):
                     pass  # an event filter must never raise
                 return False
 
-        self.filter = Filter()
+        self.filter = Filter(widget)  # (its parent the widget it watches: Qt deletes it with it)
         try:
             widget.setMouseTracking(True)
             widget.setProperty("freelabTip", _property(widget, "toolTip"))
@@ -3936,6 +4813,7 @@ def pair_pixmap(package, master, left, right, value, caption, color, font, room=
     ink = QtGui.QColor(color)
     ink.setAlpha(PAIR_ALPHA)
     painter = QtGui.QPainter(pixmap)
+    colored = False
     try:  # ended before anything else can fail: a painter left open on a freed pixmap aborts FontLab
         painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
         painter.setFont(font)
@@ -3944,14 +4822,16 @@ def pair_pixmap(package, master, left, right, value, caption, color, font, room=
             painter.save()
             painter.translate(x, em * 1.05)
             painter.scale(scale, -scale)
-            fill_glyph(painter, path, QtGui.QBrush(ink), layer_parts(layer))
+            parts = layer_parts(layer)
+            colored = colored or bool(parts)
+            fill_glyph(painter, path, QtGui.QBrush(ink), parts)
             painter.restore()
             x += (layer.advanceWidth + (value if index == 0 else 0)) * scale
         painter.setPen(color)
         painter.drawText(QtCore.QRect(0, height - line, pixmap.width(), line), int(QtCore.Qt.AlignCenter), caption)
     finally:
         painter.end()
-    return pixmap
+    return pixmap if colored else inked(pixmap, color)  # (one color, at two strengths: redrawn on a switch)
 
 
 class PairDrag(object):
@@ -4001,7 +4881,7 @@ class PairDrag(object):
                     pass  # an event filter must never raise
                 return False
 
-        self.filter = Filter()
+        self.filter = Filter(label)  # (its parent the label it watches: Qt deletes it with it)
         label.installEventFilter(self.filter)
 
 
@@ -4160,10 +5040,16 @@ class FlagMenu(object):
             found.append(cache[name])
         return found
 
+    def usable(self):
+        """Whether the list is still there to work on: its tool not let go (let_go), the list not deleted.
+        A list deleted with its window sent its model's signals as it went, and the refresh they asked
+        for ran on the deleted list (live: "Trying to call 'signalsBlocked' on a destroyed QTreeWidget")."""
+        return not getattr(self.owner, RELEASED, False) and widget_alive(self.view)
+
     def soon(self, filled=False):
         QtCore, QtGui = _qt()
-        if self.refreshing:
-            return  # its own tints
+        if self.refreshing or not self.usable():
+            return  # its own tints; or a list going away
         if filled:
             self.cache = {}  # filled again (an undo, another font): flags read anew
         if not self.due:
@@ -4174,8 +5060,8 @@ class FlagMenu(object):
         """Each row's cell tinted with the flag of its first flagged glyph, or plain."""
         QtCore, QtGui = _qt()
         self.due = False
-        if self.names_of_row is None:
-            return
+        if self.names_of_row is None or not self.usable():
+            return  # (never through a deleted list's items: a write through one corrupts FontLab's heap)
         blocked = self.view.signalsBlocked()
         self.view.blockSignals(True)  # a tint is no edit: the dialog's itemChanged must not hear it
         self.refreshing = True
@@ -4197,6 +5083,8 @@ class FlagMenu(object):
 
     def go(self, step):
         """The next (step 1) or previous (-1) row with a flagged glyph selected, around the list's end."""
+        if not self.usable():
+            return
         rows = [(handle, any(self.marks(names, self.cache))) for handle, names in self.rows()]
         if not any(flagged for _, flagged in rows):
             try:
@@ -4248,8 +5136,8 @@ class FlagMenu(object):
             view = self.view
             where = view.viewport().mapToGlobal(pos) if hasattr(view, "viewport") else view.mapToGlobal(pos)
             picked = menu.exec_(where)
-            if picked is None:
-                return
+            if picked is None or not self.usable():
+                return  # (nothing picked; or its window closed meanwhile, let go: nothing to flag in)
             if picked.text == following.text:
                 self.go(1)
                 return
@@ -4269,7 +5157,9 @@ class FlagMenu(object):
 
 def flag_glyphs(owner, names, label, value):
     """The glyphs flagged (or unflagged) in FontLab, as one step of its History; the owner's lists'
-    tints read again."""
+    tints read again. Nothing for a tool let go (its window closed while its menu was open)."""
+    if getattr(owner, RELEASED, False):
+        return
     package = owner.package
     glyphs = []
     for name in names:
@@ -4634,6 +5524,48 @@ def unichr_(code):
         return chr(code)
     except ValueError:
         return u"\N{REPLACEMENT CHARACTER}"
+
+
+def glyph_codes(fg):
+    """A fontgate glyph's code points: its unicodes, else its unicode. A glyph may be encoded at several:
+    a CJK font encodes 日 at the Kangxi radical U+2F47 and at U+65E5, and FontLab's unicode gives the
+    radical first (IBM Plex Sans JP: 日 月 玄 黄 辰), so a map of characters to glyphs built from unicode
+    alone lost the ideographs."""
+    try:
+        codes = [int(code) for code in (fg.unicodes or []) if code]
+    except Exception:
+        codes = []
+    if not codes:
+        try:
+            codes = [int(fg.unicode)] if fg.unicode else []
+        except Exception:
+            codes = []
+    return codes
+
+
+def glyph_code_map(glyphs):
+    """{code point: glyph name} of every code point of each glyph (the first glyph at a code point wins, as
+    in a cmap)."""
+    found = {}
+    for fg in glyphs:
+        for code in glyph_codes(fg):
+            found.setdefault(code, u"%s" % fg.name)
+    return found
+
+
+# Where a CJK font encodes a glyph a second time, as a radical or a compatibility form of the ideograph:
+# not the character a glyph stands for when one code point is wanted
+DUPLICATE_RANGES = ((0x2E80, 0x2EFF), (0x2F00, 0x2FDF), (0xF900, 0xFAFF), (0x2F800, 0x2FA1F))
+
+
+def main_code(fg):
+    """The one code point a glyph stands for: the first of its code points that is not a radical or a
+    compatibility duplicate (DUPLICATE_RANGES), else the first; None for an unencoded glyph."""
+    codes = glyph_codes(fg)
+    for code in codes:
+        if not any(low <= code <= high for low, high in DUPLICATE_RANGES):
+            return code
+    return codes[0] if codes else None
 
 
 def base_letter(ch):
@@ -5011,6 +5943,9 @@ def choice_sheet(palette):
 UNAVAILABLE_ALPHA = 90  # the name of a method with no value for the pair, this opaque
 PREVIEW_TEXT_WIDTH = 92  # pixels beside a preview's glyphs for its method and value
 PICKED_ALPHA = 70  # the tint of a row whose value was picked by hand: the highlight color, this opaque
+# A cell of a row picked by hand (Qt.UserRole + 78): its tint is painted by the list's delegate, from the palette
+# as it is drawn (the list's stylesheet item rule hides BackgroundRole, and a brush set once kept the old palette)
+PICKED_ROLE = 0x0100 + 78
 SIDE_ALPHA = 110  # the H's on either side of a preview's pair, dimmed: the pair is what to look at
 RELATED_SHOWN = 30  # glyph pairs named under the preview's note; the rest are counted, all in its tooltip
 PICKED_ROOM = 8888  # the widest count the "picked by hand" filter keeps room for
@@ -5041,6 +5976,7 @@ Click this help's <i>?</i> button, then any control, for what it does."""
 
 class AutoKerningDialog(object):
     COLUMNS = ("Pair", "Current", "halfkern", "Contour", "FreeLab", "FontLab", "Spread", "Suggested")
+    NUMBERS = (1, 2, 3, 4, 5, 6, 7)  # the columns of numbers: right-aligned, their headers too
 
     def __init__(self):
         QtCore, QtGui = _qt()
@@ -5128,19 +6064,23 @@ class AutoKerningDialog(object):
         row.addWidget(self.only_picked)
         row.addStretch(1)
         layout.addLayout(row)
-        self.table = QtGui.QTableWidget(0, len(self.COLUMNS))
-        self.table.setHorizontalHeaderLabels(list(self.COLUMNS))
-        self.table.setSelectionBehavior(QtGui.QAbstractItemView.SelectRows)
-        self.table.setSelectionMode(QtGui.QAbstractItemView.SingleSelection)
-        self.table.verticalHeader().setVisible(False)
-        self.table.verticalHeader().setDefaultSectionSize(QtGui.QFontMetrics(self.table.font).height() + 6)  # PythonQt has no widget.fontMetrics()
-        self.table.horizontalHeader().setSectionResizeMode(QtGui.QHeaderView.Stretch)  # the columns share the width
-        self.table.setWhatsThis(u"The pairs, each method's value, and the value to write (Suggested). "
-                                u"Double-click a value to use it for that pair, or press <i>Ctrl+1</i> to <i>Ctrl+6</i>; "
-                                u"<i>Space</i> checks the pair; <i>Backspace</i> gives it the suggested value again. "
-                                u"Double-click a pair's name to open it in a <i>Glyph</i> window.")
-        grid_lines(self.table)
-        layout.addWidget(self.table, 1)
+        # The list, laid out as the other tools' lists (a tree of plain rows, the pair drawn from the font at
+        # the value it takes beside its characters, the numbers right-aligned): a table's header, its own
+        # sections drawn by the style and mapped by dark mode, looked washed out in dark mode
+        self.tree = QtGui.QTreeWidget()
+        self.tree.setColumnCount(len(self.COLUMNS))
+        self.tree.setHeaderLabels(list(self.COLUMNS))
+        self.tree.setRootIsDecorated(False)
+        self.tree.setUniformRowHeights(True)  # (rows of one height: a long list scrolls without measuring each)
+        self.tree.setIconSize(QtCore.QSize(*glyph_icon_size(2)))
+        self.tree.setProperty(LEAVE_ALONE_PROP, True)  # its pictures are drawn in the dialog's colors
+        self.tree.setWhatsThis(u"The pairs, each drawn at the value it takes, each method's value, and the value to "
+                               u"write (Suggested). Double-click a value to use it for that pair, or press <i>Ctrl+1</i> "
+                               u"to <i>Ctrl+6</i>; <i>Space</i> checks the pair; <i>Backspace</i> gives it the suggested "
+                               u"value again. Double-click a pair to open it in a <i>Glyph</i> window.")
+        grid_lines(self.tree)
+        layout.addWidget(self.tree, 1)
+        self.icon_cache = {}  # (left, right, value, color): the pair's picture, drawn once
         note_row = QtGui.QHBoxLayout()
         self.preview_note = QtGui.QLabel("Select a pair to compare the methods; click one to use it for that pair.")
         self.preview_note.setWordWrap(True)
@@ -5213,15 +6153,15 @@ class AutoKerningDialog(object):
         self.none_button.connect("clicked()", lambda: self.check_all(False))
         self.restore_button.connect("clicked()", self.restore)
         self.buttons_due = False
-        self.table.connect("itemChanged(QTableWidgetItem*)", lambda item: self.update_buttons_soon())
+        self.tree.connect("itemChanged(QTreeWidgetItem*,int)", lambda item, column: self.update_buttons_soon())
         self.apply_button.connect("clicked()", self.write)
         self.classes_button.connect("clicked()", self.suggest_classes)
-        self.close_button.connect("clicked()", dialog.close)
+        self.close_button.connect("clicked()", close_slot(self))  # (never the window itself: see let_go)
         self.reset_button.connect("clicked()", self.reset)
         self.glyph_window_button.connect("clicked()", self.show_in_glyph_window)
         self.check_button.connect("clicked()", self.open_kerning_check)
-        self.table.connect("itemSelectionChanged()", self.select)
-        self.table.connect("cellDoubleClicked(int,int)", self.double_clicked)
+        self.tree.connect("itemSelectionChanged()", self.select)
+        self.tree.connect("itemDoubleClicked(QTreeWidgetItem*,int)", self.item_double_clicked)
         for widget in (self.show_kind, self.pairs, self.order):
             widget.connect("currentIndexChanged(int)", lambda index: self.refilter())
         self.script_box.connect("activated(int)", lambda index: self.run())  # (by the user: refilling it starts nothing)
@@ -5231,13 +6171,13 @@ class AutoKerningDialog(object):
         self.source.connect("currentIndexChanged(int)", lambda index: self.refresh_values())  # the list stays as it is
         self.choice_group.connect("buttonClicked(int)", lambda number: self.choose(CHOICES[number][0]))
         self.keys = self.make_keys()
-        self.watcher = self.watch_palette()
+        # (no palette watcher of its own: FreeLab's shared mechanism calls theme_changed when dark mode switches)
         self.history_timer = watch_history(self)
-        self.flagging = flag_menu(self.table, self, lambda: [self.suggestions[self.selected].left,
-                                                              self.suggestions[self.selected].right]
+        self.flagging = flag_menu(self.tree, self, lambda: [self.suggestions[self.selected].left,
+                                                             self.suggestions[self.selected].right]
                                   if self.selected is not None else [],
-                                  lambda row: [self.suggestions[row].left, self.suggestions[row].right]
-                                  if row < len(self.suggestions) else [])
+                                  lambda item: self.names_of_row(self.row_of(item)))
+        self.tint = self.tint_rows()  # after the flags' delegate, which it takes over (one delegate per cell)
         self.focus = None  # a pair to go to once the analysis is done (opened from another script)
         add_tools_button(dialog, "Auto Kerning", getattr(self, "log", None))  # (the other font tools, a click away)
         plain_buttons(dialog)
@@ -5272,13 +6212,125 @@ class AutoKerningDialog(object):
             actions = [("Ctrl+%d" % (number + 1), (lambda key=key: self.choose(key))) for number, (key, _) in enumerate(CHOICES)]
             actions += [("Backspace", self.reset), ("Delete", self.reset), ("Space", self.toggle_check)]
             for sequence, action in actions:
-                shortcut = QtGui.QShortcut(QtGui.QKeySequence(sequence), self.table)
+                shortcut = QtGui.QShortcut(QtGui.QKeySequence(sequence), self.tree)
                 shortcut.setContext(QtCore.Qt.WidgetShortcut)
                 shortcut.connect("activated()", action)
                 made.append(shortcut)  # kept: PythonQt deletes what Python no longer holds
         except Exception:
             pass  # no shortcuts: the buttons and double-clicks still work
         return made
+
+    # -- the list's rows: read from the list each time (an item kept across events may be deleted) ------
+
+    def row_count(self):
+        return _property(self.tree, "topLevelItemCount")
+
+    def row_item(self, row):
+        """The list's row number row (its suggestion's index in self.suggestions), or None."""
+        if row is None or not 0 <= row < self.row_count():
+            return None
+        return self.tree.topLevelItem(row)
+
+    @staticmethod
+    def row_of(item):
+        """The row number an item holds (its suggestion's index), or None."""
+        QtCore = _qt()[0]
+        try:
+            return int(item.data(0, QtCore.Qt.UserRole))
+        except Exception:
+            return None
+
+    def names_of_row(self, row):
+        """A row's glyphs' names, as on screen (the flags' tints)."""
+        if row is None or not 0 <= row < len(self.suggestions):
+            return []
+        return [self.suggestions[row].left, self.suggestions[row].right]
+
+    def clear_list(self):
+        self.tree.clear()
+
+    def tint_rows(self):
+        """The list's delegate: a row picked by hand tinted (PICKED_ROLE) in the highlight color of the
+        palette it is drawn with, so that it follows a dark mode switch, and in the pair's column the
+        flags of its glyphs (FLAG_ROLE, see FlagMenu, whose delegate for that column it replaces: a cell
+        takes one delegate). The delegate, kept, or None where PythonQt could not make it (no tints)."""
+        QtCore, QtGui = _qt()
+        picked_role, picked_alpha, highlight = PICKED_ROLE, PICKED_ALPHA, QtGui.QPalette.Highlight
+        role, bar, tint, segments = FLAG_ROLE, FLAG_BAR, FLAG_TINT, flag_segments  # (held: a dropped module's globals turn None)
+
+        class Tint(QtGui.QStyledItemDelegate):
+            def paint(self, painter, option, index):
+                parts = []
+                try:
+                    rect = option.rect
+                    if index.data(picked_role):
+                        color = QtGui.QColor(option.palette.color(highlight))
+                        color.setAlpha(picked_alpha)
+                        painter.fillRect(rect, color)
+                    if index.column() == 0:
+                        parts = segments(index.data(role), rect.left(), rect.width())
+                        for x, width, name in parts:
+                            color = QtGui.QColor(name)
+                            color.setAlpha(tint)
+                            painter.fillRect(QtCore.QRect(x, rect.top(), width, rect.height()), color)
+                except Exception:
+                    parts = []
+                QtGui.QStyledItemDelegate.paint(self, painter, option, index)
+                try:  # over the row as drawn: a selected row's highlight covers the tint, not the bar
+                    for x, width, name in parts:
+                        painter.fillRect(QtCore.QRect(x, rect.bottom() - bar + 1, width, bar), QtGui.QColor(name))
+                except Exception:
+                    pass
+
+        try:
+            delegate = Tint(self.tree)
+            self.tree.setItemDelegate(delegate)
+            self.tree.setItemDelegateForColumn(0, delegate)
+            return delegate
+        except Exception:
+            return None
+
+    def icon_value(self, s, kern):
+        """The distance a pair's picture sets its glyphs at: its kerning, and for kana palt's own
+        adjustments (the right glyph's placement, the left one's added width, less the left one's
+        placement, which moves it alone)."""
+        left, right = self.adjustments.get(s.left), self.adjustments.get(s.right)
+        return kern + (left[1] - left[0] if left else 0) + (right[0] if right else 0)
+
+    def pair_icon(self, row, s, source):
+        """A row's picture: the pair as on screen, at the value it takes (the one written), drawn from the
+        font in the dialog's text color (the first GLYPH_ICON_ROWS rows); None for the others."""
+        QtCore, QtGui = _qt()
+        if self.package is None or row >= GLYPH_ICON_ROWS:
+            return None
+        kern = s.to_write(source)
+        kern = s.current if kern is None else kern
+        color = self.dialog.palette.color(QtGui.QPalette.WindowText)
+        key = (s.left, s.right, kern, color.name())
+        if key not in self.icon_cache:
+            self.icon_cache[key] = glyph_icon(self.package, self.master, [s.left, s.right], color, self.icon_value(s, kern))
+        return self.icon_cache[key]
+
+    def theme_changed(self):
+        """Dark mode switched, either way (FreeLab's shared mechanism calls this on each shown tool
+        window): what was drawn or styled from the palette, again from the new one. The choice buttons'
+        tint, the list's pictures, and the previews; the rows' tints are read from the palette as they
+        are drawn (tint_rows)."""
+        try:
+            sheet = choice_sheet(self.dialog.palette)
+            for button in self.choice_buttons.values():
+                button.setStyleSheet(sheet)
+        except Exception:
+            pass
+        self.icon_cache = {}  # (pictures in the old text color)
+        try:
+            self.refresh_values()  # the pictures and the previews, in the new colors
+        except Exception:
+            pass
+        try:
+            self.tree.viewport().update()
+        except Exception:
+            pass
 
     @staticmethod
     def main_window():
@@ -5413,12 +6465,12 @@ class AutoKerningDialog(object):
         package = self.current_font()
         if package is None:
             self.package, self.analysis, self.suggestions = None, None, []
-            self.table.setRowCount(0)
+            self.clear_list()
             self.status.setText(self.font_line())
             return
         if self.package is None or font_key(package) != font_key(self.package) or package.master != self.master:
             self.analysis, self.suggestions = None, []
-            self.table.setRowCount(0)
+            self.clear_list()
         self.package, self.master = package, package.master
         self.analyze_button.setEnabled(False)
         self.apply_button.setEnabled(False)
@@ -5426,7 +6478,7 @@ class AutoKerningDialog(object):
             script = self.fill_scripts(package, self.chosen_script())
             if script != self.script:
                 self.analysis, self.suggestions = None, []
-                self.table.setRowCount(0)
+                self.clear_list()
             self.script = script
             scripts = [key for key in self.script_keys if key != ALL_SCRIPTS] if script == ALL_SCRIPTS else [script]
             self.sides = {}
@@ -5466,6 +6518,7 @@ class AutoKerningDialog(object):
             self.log.add(u"Stopped.", "warning")
             return
         self.harvest_checks()
+        self.icon_cache = {}  # (measured again: the outlines may have changed, the pictures with them)
         if self.analysis is not None:  # the same font and master: its picks and checks carry over
             before = dict(((old.left, old.right), old) for old in self.analysis.suggestions)
             for new in result.suggestions:
@@ -5580,22 +6633,29 @@ class AutoKerningDialog(object):
         self.fill_table()
 
     def fill_table(self):
+        """The list filled anew with self.suggestions, in their order: row k is suggestion k (its item's
+        UserRole holds k)."""
         QtCore, QtGui = _qt()
-        table = self.table
-        table.setRowCount(len(self.suggestions))
+        tree = self.tree
+        # (the pair selected stays selected where it is still listed, as the table kept its row selected)
+        kept = getattr(self, "selected_pair", None)
+        self.clear_list()
         source = self.source_key()
+        blank = [u""] * (len(self.COLUMNS) - 1)
         for row, s in enumerate(self.suggestions):
-            pair = QtGui.QTableWidgetItem(pair_label(s.left_char, s.right_char))  # (as a reader sees it, right to left too)
-            pair.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsUserCheckable)
+            item = QtGui.QTreeWidgetItem([pair_label(s.left_char, s.right_char)] + blank)  # (as a reader sees it, right to left too)
+            item.setData(0, QtCore.Qt.UserRole, row)
+            item.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsUserCheckable)
             checked = s.checked if s.checked is not None else not s.current  # the designer's pairs: opt in
-            pair.setCheckState(QtCore.Qt.Checked if checked else QtCore.Qt.Unchecked)
-            table.setItem(row, 0, pair)
-            for column in range(1, len(self.COLUMNS)):
-                item = QtGui.QTableWidgetItem()
-                item.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
-                item.setTextAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
-                table.setItem(row, column, item)
-            self.fill_row(row, s, source)
+            item.setCheckState(0, QtCore.Qt.Checked if checked else QtCore.Qt.Unchecked)
+            for column in self.NUMBERS:
+                item.setTextAlignment(column, int(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter))
+            tree.addTopLevelItem(item)
+            self.fill_row(row, s, source, item)
+        fit_columns(tree, self.NUMBERS)
+        rows = [row for row, s in enumerate(self.suggestions) if (s.left, s.right) == kept]
+        if rows:
+            self.select_row(rows[0])  # (its selection change shows its preview)
         self.select()
         self.update_buttons()
 
@@ -5609,24 +6669,31 @@ class AutoKerningDialog(object):
             return u"Writes to %s, which kerns %d glyph pairs." % (FontKerning.describe(entry), reach)
         return u"Writes to the pair %s alone." % FontKerning.describe(entry)
 
-    def fill_row(self, row, s, source):
+    def fill_row(self, row, s, source, item=None):
+        """A row's numbers, its picture at the value it takes, its tint while picked by hand (the
+        delegate draws it in the palette's highlight), and its tooltips. item: the row's item, when the
+        caller has just made it (else read from the list)."""
         QtCore, QtGui = _qt()
+        item = item if item is not None else self.row_item(row)
+        if item is None:
+            return
         cells = (s.current, s.values.get("halfkern"), s.values.get("contour"), s.values.get("learned"),
                  s.values.get("fontlab"), s.spread(), s.to_write(source))
-        tint = QtGui.QColor(self.dialog.palette.color(QtGui.QPalette.Highlight))
-        tint.setAlpha(PICKED_ALPHA)
         for column, value in enumerate(cells, 1):
-            self.table.item(row, column).setText(u"\N{EN DASH}" if value is None else str(value))
-        suggested = self.table.item(row, len(self.COLUMNS) - 1)
-        font = QtGui.QFont(self.table.font)
+            item.setText(column, u"\N{EN DASH}" if value is None else str(value))
+        last = len(self.COLUMNS) - 1
+        font = QtGui.QFont(self.tree.font)
         font.setBold(bool(s.override))
-        suggested.setFont(font)
-        suggested.setToolTip(u"Picked by hand: %s. <i>Backspace</i> or <i>Reset pair</i> gives it the suggested value."
-                             % html(dict(CHOICES)[s.override]) if s.override else u"")
+        item.setFont(last, font)
+        item.setToolTip(last, u"Picked by hand: %s. <i>Backspace</i> or <i>Reset pair</i> gives it the suggested value."
+                        % html(dict(CHOICES)[s.override]) if s.override else u"")
         for column in range(len(self.COLUMNS)):
-            self.table.item(row, column).setBackground(QtGui.QBrush(tint) if s.override else QtGui.QBrush())
+            if bool(item.data(column, PICKED_ROLE)) != bool(s.override):
+                item.setData(column, PICKED_ROLE, True if s.override else None)
+        icon = self.pair_icon(row, s, source)
+        item.setIcon(0, icon if icon is not None else QtGui.QIcon())
         script = u" (%s)" % script_label(getattr(s, "script", self.script)) if self.script == ALL_SCRIPTS else u""
-        self.table.item(row, 0).setToolTip(u"%s %s%s. %s%s" % (s.left, s.right, script, rtl_note(s, True), self.target_text(s)))
+        item.setToolTip(0, u"%s %s%s. %s%s" % (s.left, s.right, script, rtl_note(s, True), self.target_text(s)))
 
     def refresh_values(self):
         """Another source: only the Suggested column and the preview change."""
@@ -5638,23 +6705,23 @@ class AutoKerningDialog(object):
     def harvest_checks(self):
         """The list's checks, kept on its suggestions before the list is filled again (rows read anew)."""
         QtCore, QtGui = _qt()
-        for row in range(min(self.table.rowCount, len(self.suggestions))):
-            item = self.table.item(row, 0)
+        for row in range(min(self.row_count(), len(self.suggestions))):
+            item = self.row_item(row)
             if item is not None:
-                self.suggestions[row].checked = item.checkState() == QtCore.Qt.Checked
+                self.suggestions[row].checked = item.checkState(0) == QtCore.Qt.Checked
 
     def check_all(self, on):
         """Check every new pair, or uncheck everything; pairs the font kerns are checked one by one."""
         QtCore, QtGui = _qt()
-        for row in range(self.table.rowCount):
+        for row in range(min(self.row_count(), len(self.suggestions))):
             checked = on and not self.suggestions[row].current
-            self.table.item(row, 0).setCheckState(QtCore.Qt.Checked if checked else QtCore.Qt.Unchecked)
+            self.row_item(row).setCheckState(0, QtCore.Qt.Checked if checked else QtCore.Qt.Unchecked)
         self.update_buttons()
 
     def row_checked(self, row):
         QtCore, QtGui = _qt()
-        item = self.table.item(row, 0)
-        return item is not None and item.checkState() == QtCore.Qt.Checked
+        item = self.row_item(row)
+        return item is not None and item.checkState(0) == QtCore.Qt.Checked
 
     def update_buttons_soon(self):
         """Once, after the changes under way (filling the list changes every row)."""
@@ -5666,7 +6733,7 @@ class AutoKerningDialog(object):
     def update_buttons(self):
         """Each button clickable only when it would do something."""
         self.buttons_due = False
-        rows = range(min(self.table.rowCount, len(self.suggestions)))
+        rows = range(min(self.row_count(), len(self.suggestions)))
         checked = [self.row_checked(row) for row in rows]
         enable(self.all_button, any(not on and not self.suggestions[row].current for row, on in zip(rows, checked)))
         enable(self.none_button, any(checked))
@@ -5734,9 +6801,8 @@ class AutoKerningDialog(object):
         self.refilter()
         for row, s in enumerate(self.suggestions):
             if (s.left, s.right) == (left, right):
-                self.table.selectRow(row)
-                self.table.scrollToItem(self.table.item(row, 0))
-                self.table.setFocus()
+                self.select_row(row)
+                self.tree.setFocus()
                 return
 
     def measure_one(self, left, right):
@@ -5746,7 +6812,7 @@ class AutoKerningDialog(object):
         chars = []
         for name in (left, right):
             glyph = package.findName(name)
-            code = glyph.fgGlyph.unicode if glyph is not None else 0
+            code = main_code(glyph.fgGlyph) if glyph is not None else 0  # (not a radical FontLab gives first)
             if not code:
                 return None
             chars.append(unichr_(code))
@@ -5799,12 +6865,27 @@ class AutoKerningDialog(object):
         QtCore, QtGui = _qt()
         if self.selected is None:
             return
-        item = self.table.item(self.selected, 0)
-        item.setCheckState(QtCore.Qt.Unchecked if item.checkState() == QtCore.Qt.Checked else QtCore.Qt.Checked)
+        item = self.row_item(self.selected)
+        if item is not None:
+            item.setCheckState(0, QtCore.Qt.Unchecked if item.checkState(0) == QtCore.Qt.Checked else QtCore.Qt.Checked)
+
+    def select_row(self, row):
+        """Row number row made the current, selected row, scrolled into view."""
+        item = self.row_item(row)
+        if item is not None:
+            self.tree.setCurrentItem(item)
+            self.tree.scrollToItem(item)
+
+    def selected_row(self):
+        """The selected row's number, or None."""
+        items = self.tree.selectedItems()
+        row = self.row_of(items[0]) if items else None
+        return row if row is not None and row < len(self.suggestions) else None
 
     def select(self):
-        rows = self.table.selectionModel().selectedRows()
-        if not rows or rows[0].row() >= len(self.suggestions):
+        row = self.selected_row()
+        self.selected_pair = (self.suggestions[row].left, self.suggestions[row].right) if row is not None else None
+        if row is None:
             self.selected = None
             self.reset_button.setEnabled(False)
             self.glyph_window_button.setEnabled(False)
@@ -5819,7 +6900,7 @@ class AutoKerningDialog(object):
         for button in self.choice_buttons.values():
             button.setVisible(True)
         self.preview_note.setVisible(True)
-        self.selected = rows[0].row()
+        self.selected = row
         if self.package is not None and time.time() - self.kerning_read > 1.0:
             self.refresh_kerning()
         self.show_preview(self.suggestions[self.selected])
@@ -5851,9 +6932,9 @@ class AutoKerningDialog(object):
     def double_clicked(self, row, column):
         """A method's value double-clicked: that value for the pair; the Suggested one: reset; the
         pair's name: the pair in a Glyph window."""
-        if row >= len(self.suggestions):
+        if row is None or row >= len(self.suggestions):
             return
-        self.table.selectRow(row)
+        self.select_row(row)
         self.selected = row
         if column == 0:
             self.show_in_glyph_window()
@@ -5861,6 +6942,13 @@ class AutoKerningDialog(object):
             self.choose(COLUMN_CHOICES[column])
         elif column == len(self.COLUMNS) - 1:
             self.reset()
+
+    def item_double_clicked(self, item, column):
+        """The list's double-click (a row's item and its column), as double_clicked takes it."""
+        try:
+            self.double_clicked(self.row_of(item), column)
+        except Exception:
+            pass  # (a slot must not raise)
 
     def show_related(self, s):
         """Under the note, the glyph pairs the pair's entry kerns, when there are others."""
@@ -5875,40 +6963,6 @@ class AutoKerningDialog(object):
         self.related.setText(u"Also kerns: %s." % shown)
         self.related.setToolTip(u"\n".join(names))
         self.related.setVisible(True)
-
-    def watch_palette(self):
-        """Dark mode switched while the dialog is open: its buttons restyled and its previews redrawn in
-        the new text color (a stylesheet's look and a drawn picture keep the old colors otherwise)."""
-        QtCore, QtGui = _qt()
-        dialog = self
-
-        class PaletteWatcher(QtCore.QTimer):  # PythonQt has no QObject to subclass; a timer will do
-            def eventFilter(self, obj, event):
-                try:
-                    if event.type() in PALETTE_EVENTS and not dialog.repainting:
-                        dialog.repainting = True
-                        QtCore.QTimer.singleShot(0, dialog.restyle)
-                except Exception:
-                    pass  # an event filter must never raise
-                return False
-
-        self.repainting = False
-        try:
-            watcher = PaletteWatcher()
-            self.dialog.installEventFilter(watcher)
-            return watcher
-        except Exception:
-            return None
-
-    def restyle(self):
-        try:
-            sheet = choice_sheet(self.dialog.palette)
-            for button in self.choice_buttons.values():
-                button.setStyleSheet(u"")
-                button.setStyleSheet(sheet)  # polished again from the new palette
-            self.refresh_values()  # the tints and the previews, in the new colors
-        finally:
-            self.repainting = False
 
     def show_preview(self, s):
         """Each choice's button: the pair between two H's as that method sets it, its name and value

@@ -226,6 +226,111 @@ class HookTests(unittest.TestCase):
         self.assertEqual((frame.updates, inner.updates, outside.updates), (1, 1, 0))
 
 
+class FindTests(unittest.TestCase):
+    """The document areas are found from FontLab's windows, not by wrapping every widget each second:
+    the crashes of November 14 all came at the end of that walk (PythonQt freeing a wrapper twice)."""
+
+    def setUp(self):
+        self.main = Widget(window=True, kind="MainWindow")
+        self.frame = Widget(self.main, kind="YFrameWindow")
+        self.tabs = Widget(self.frame, kind="YTabWidget")
+        self.loose = Widget(window=True, kind="YFrameWindow")  # a window of its own
+        self.loose_tabs = Widget(self.loose, kind="YTabWidget")
+        self.other = Widget(self.main, kind="QTabWidget")  # a panel's tabs: no document area
+        self.tops = [self.main, self.loose, Widget(window=True, kind="QMenu")]
+        self.walks, self.typed = 0, {self.main: [self.tabs, self.other], self.loose: [self.loose_tabs]}
+        case = self
+
+        class App(object):
+            def allWidgets(self):
+                case.walks += 1
+                return [case.main, case.frame, case.tabs, case.other, case.loose, case.loose_tabs]
+
+        app = App()
+
+        class Application(object):
+            @staticmethod
+            def instance():
+                return app
+
+            @staticmethod
+            def topLevelWidgets():
+                return list(case.tops)
+
+        for top in (self.main, self.loose):
+            top.findChildren = (lambda top: lambda kind: list(case.typed.get(top, [])))(top)
+        self.gui = type("QtGui", (), {"QApplication": Application, "QTabWidget": "QTabWidget"})
+        saved = (ft._qt, getattr(sys, "_freelab_tabs_state", None))
+        ft._qt = lambda: (None, self.gui)
+        sys._freelab_tabs_state = {"on": True, "held": []}
+
+        def restore():
+            ft._qt = saved[0]
+            if saved[1] is None:
+                del sys._freelab_tabs_state
+            else:
+                sys._freelab_tabs_state = saved[1]
+        self.addCleanup(restore)
+
+    def test_found_from_the_windows_that_hold_them(self):
+        self.assertEqual(ft.document_tab_widgets(), [(self.tabs, self.frame), (self.loose_tabs, self.loose)])
+        self.assertEqual(self.walks, 0, "no widget walked")
+
+    def test_without_the_typed_search_the_walk_is_made_only_when_the_windows_change(self):
+        self.typed = {}  # (as PythonQt gives for findChildren(QWidget))
+        self.assertEqual(len(ft.document_tab_widgets()), 2)
+        self.assertEqual(ft.document_tab_widgets(), [(self.tabs, self.frame), (self.loose_tabs, self.loose)])
+        self.assertEqual(self.walks, 1, "the same windows: not walked again")
+        self.tops.remove(self.loose)  # (the window docked back)
+        ft.document_tab_widgets()
+        self.assertEqual(self.walks, 2)
+
+        def deleted():
+            raise ValueError("destroyed")
+        self.tabs.metaObject = deleted  # (deleted, and its address may be another's now, the windows' the same)
+        ft.document_tab_widgets()
+        self.assertEqual(self.walks, 3, "walked again")
+
+    def test_each_pass_hooks_what_is_not_hooked_yet(self):
+        # (a key of addresses was no proof: a window docked and another torn off in one pass may take the
+        # same address, and its new bar went unhooked)
+        hooked, buttons = [], []
+
+        class Bar(object):
+            def __init__(self):
+                self.props = {}
+
+            def property(self, name):
+                return self.props.get(name)
+
+            def setProperty(self, name, value):
+                self.props[name] = value
+
+            def installEventFilter(self, watcher):
+                hooked.append(self)
+
+        bars = {self.tabs: Bar(), self.loose_tabs: Bar()}
+        saved = (ft._bar_of, ft._add_dock_button, ft._filter_class)
+        ft._bar_of = lambda tab_widget: bars[tab_widget]
+        ft._add_dock_button = lambda tab_widget: buttons.append(tab_widget)
+        ft._filter_class = lambda: (lambda parent: ("filter of", parent))
+        self.loose_tabs.findChild = lambda kind, name: None if not buttons else "button"
+        self.loose_tabs.cornerWidget = lambda corner: "button"
+        core = type("QtCore", (), {"Qt": type("Qt", (), {"TopRightCorner": 1})})
+        ft._qt = lambda: (core, self.gui)
+        try:
+            self.gui.QToolButton = "QToolButton"
+            self.assertTrue(ft.watch())
+            self.assertEqual(hooked, [bars[self.tabs], bars[self.loose_tabs]])
+            self.assertEqual(buttons, [self.loose_tabs], "the window of its own gets its Dock button")
+            self.assertFalse(ft.watch(), "nothing new: nothing done")
+            bars[self.loose_tabs] = Bar()  # (a new bar, as a new window at a reused address has)
+            self.assertTrue(ft.watch(), "looked at all the same, and hooked")
+            self.assertEqual(len(hooked), 3)
+        finally:
+            ft._bar_of, ft._add_dock_button, ft._filter_class = saved
+
+
 class MergeTests(unittest.TestCase):
     """Docking goes through FontLab's Merge Window, which FontLab enables once it has seen the tab's
     window become the active one: not always at once."""

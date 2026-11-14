@@ -473,7 +473,7 @@ class AutoSpacingDialog(object):
         self.glyph_window_button.connect("clicked()", self.show_in_glyph_window)
         self.apply_button.connect("clicked()", self.apply)
         self.kerning_button.connect("clicked()", self.check_kerning)
-        self.close_button.connect("clicked()", dialog.close)
+        self.close_button.connect("clicked()", self.ak.close_slot(self))  # (never the window itself: see let_go)
         self.tree.connect("itemSelectionChanged()", self.select)
         self.package = self.master = None
         self.settle_passes = 1
@@ -525,7 +525,7 @@ class AutoSpacingDialog(object):
         if group == "everything" and self.package is not None:
             import unicodedata
             for fg in self.package.fgPackage.glyphs:
-                code = fg.unicode
+                code = ak.main_code(fg)  # (an ideograph, not the Kangxi radical FontLab may give first)
                 if not code or code > sys.maxunicode:
                     continue  # (past U+FFFF, FontLab's narrow Python has no single character for it)
                 ch = ak.unichr_(code)
@@ -964,7 +964,7 @@ class AutoSpacingDialog(object):
                 x += layer.advanceWidth * scale + ((left + right) * scale if is_glyph else 0)
         finally:
             painter.end()
-        return pixmap, spans
+        return ak.inked(pixmap, color), spans  # (one color at two strengths: redrawn in the new one on a switch)
 
     def show_in_glyph_window(self):
         s = self.selected()

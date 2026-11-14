@@ -530,6 +530,20 @@ ARTIFICIAL = "arti1236"  # Glottolog's family of constructed languages
 SLDR_NS = "{urn://www.sil.org/ldml/0.1}"
 SLDR_DEFAULT_DRAFT = "proposed"  # SLDR's manual: an element without a draft level, in a file without one
 SLDR_LEFT_OUT = ("suspect",)  # "for retaining data that is considered wrong"
+# Declared exemplars amended where the writing's own history or the source's own text shows them
+# wrong: {(source, subtag, ISO 15924 code): (characters added to the base list, small letters moved
+# from it to the auxiliary list)}, capitals following their small letters (ldml_orthography).
+#   English in Deseret: SLDR lists the 40 letters Unicode encodes, two of which, oi and ew (U+1044E,
+#     U+1044F), the Deseret News approved in 1859 and never cast; every printed book (the Deseret First
+#     and Second Books of 1868, the Book of Mormon of 1869) and the newspaper set 38. The two are found
+#     in handwriting only: auxiliary, so that a font of the printed alphabet is within reach, not missed.
+#   English in Shavian: SLDR lists the 48 letters; the namer dot (U+00B7, middle dot) that marks a
+#     proper name, as a capital does in Latin, is the alphabet's too (Unicode's Shavian section), and
+#     SLDR's own file sets it before every month and day name.
+AMENDED = {
+    ("sldr", "en", "Dsrt"): ("", "\U0001044E\U0001044F"),
+    ("sldr", "en", "Shaw"): ("\N{MIDDLE DOT}", ""),
+}
 INHERITED = "\N{UPWARDS ARROW}\N{UPWARDS ARROW}\N{UPWARDS ARROW}"  # CLDR: the value of the parent locale
 
 # ISO 15924 code: the script's name. Hyperglot's own name where Hyperglot has the script (one section
@@ -887,7 +901,18 @@ def ldml_orthography(root, tag, script, name, source, validity, problems):
     except (UnsupportedSet, ValueError, IndexError, KeyError) as exc:
         problems.append("%s %s %s: %s" % (source, tag, script, exc))
         return None
+    base, auxiliary = amended(source, tag, script, base, auxiliary)
     return shaped(tag, script, name, own_name(root, tag), base, auxiliary, [], source, True, validity=validity)
+
+
+def amended(source, tag, script, base, auxiliary):
+    """(base, auxiliary) as AMENDED corrects them for that source's orthography, else as they are."""
+    added, moved = AMENDED.get((source, tag, script), ("", ""))
+    if not added and not moved:
+        return base, auxiliary
+    added, moved = list(added), list(moved)
+    base = [item for item in base if item not in moved] + [ch for ch in added if ch not in base]
+    return base, list(auxiliary) + [ch for ch in moved if ch not in auxiliary]
 
 
 def read_cldr(archive, codes, problems):

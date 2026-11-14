@@ -92,7 +92,7 @@ FAMILY = "FreeLang"  # the fonts together, as the tools name them to the user
 # The fonts, a table: adding one is one entry. One font cannot hold it all: with every script's layout
 # the sources bring 68,943 glyphs (a font holds 65,535) and 4,563 substitution lookups (a GSUB table
 # about half as many: each must lie within 65,535 bytes of the table's list). Each source goes whole
-# into one font (group_of; ELSEWHERE is the one exception); Font Check registers the fonts and has Qt
+# into one font (group_of; ELSEWHERE's are the exceptions); Font Check registers the fonts and has Qt
 # fall back from the first to the others, in this order.
 #   label: what the font is called in language_font.json and on the command line (--font), in ASCII;
 #     its family is "FreeLang " and the label, but for a character ASCII lacks (Diacritics hides the
@@ -299,12 +299,17 @@ LAST_RESORT = ("Padauk", "Shafarik", "BabelStonePseudographica", "NewGardiner")
 # signs of Egyptian Hieroglyphs Extended-A, encoded in Unicode 16, that Noto Sans Egyptian Hieroglyphs lacks)
 # After those, since 2026-11-14, when the Han repertoires became character sets (Unihan's national
 # standards and lists: some 31,800 ideographs more, most of Extension B and later, which Noto Sans JP,
-# KR, and SC do not draw): Jigmo, the three fonts GlyphWiki's glyphs are published in (Kamichi Koichi;
-# CC0 1.0, a public-domain dedication), which draw every ideograph Unicode 17.0 encodes, in a Mincho
-# (serif) design. In the CJK font (RULES), each by its character map alone (CMAP_ONLY).
-HAN_LAST = ("Jigmo", "Jigmo2", "Jigmo3")
-# Last of all, for a character no outline font under a license FreeLang can take draws (the 55 letters
-# of Tai Yo, Syriac Supplement's eleven): GNU Unifont, whose glyphs are a 16 by 16 grid of pixels drawn
+# KR, and SC do not draw): Plangothic P1 and P2 (the Plangothic Project; SIL OFL 1.1), a gothic design
+# on Source Han Sans CN, the design of Noto Sans SC, for every extension block of the CJK Unified
+# Ideographs, with the kana, strokes, and compatibility ideographs Noto's fonts lack. In the CJK font
+# (RULES), each by its character map alone (CMAP_ONLY). (Jigmo, Jigmo2, and Jigmo3, CC0 1.0 and a Mincho
+# design, drew them until 2026-11-14; Plangothic draws every character they supplied.) Plangothic P2
+# also draws characters of other scripts no source above has (Tangut's newest, Tai Yo, a few Syriac and
+# Arabic ones), which it takes before Unifont's pixels, into the FreeLang+ General font (ELSEWHERE): the
+# owner's decision (2026-11-14), to go by Plangothic's own license.
+HAN_LAST = ("PlangothicP1", "PlangothicP2")
+# Last of all, for a character no outline font under a license FreeLang can take draws (14 emoji of
+# Unicode 16 and 17; until Plangothic P2 drew them, Tai Yo and Syriac Supplement too): GNU Unifont, whose glyphs are a 16 by 16 grid of pixels drawn
 # as squares. Its font files are dual-licensed (GPL version 2 or later with the font embedding
 # exception, and the SIL Open Font License 1.1, since 13.0.04): FreeLang takes them under the OFL. The
 # owner's rule (2026-11-14): a pixel font only where no outline source has the character; language_font.json
@@ -321,7 +326,9 @@ PADAUK = "https://github.com/silnrsi/font-padauk/releases/download/v6.000/Padauk
 DIVES_AKURU = ("https://github.com/notofonts/dives-akuru/releases/download/NotoSerifDivesAkuru-v1.001/"
                "NotoSerifDivesAkuru-v1.001.zip")
 NEWGARDINER = "https://raw.githubusercontent.com/nederhof/newgardiner/ef51d1aa1101d58a9b18b782dba51f70661194d7/fonts/"  # main on 2026-11-14
-JIGMO = "https://kamichikoichi.github.io/jigmo/Jigmo-20250912.zip"  # (the maker's own page; version of 2025-09-12)
+PLANGOTHIC = "https://github.com/Fitzgerald-Porthmouth-Koenigsegg/Plangothic_Project/releases/download/V2.9.5795/"
+PLANGOTHIC_LICENSE = ("https://raw.githubusercontent.com/Fitzgerald-Porthmouth-Koenigsegg/Plangothic_Project/"
+                      "51485203670f18b6f5fa40913ffcde55027ddcb1/LICENSE-OFL.txt")  # (the commit of V2.9.5795)
 UNIFONT = "https://unifoundry.com/pub/unifont/unifont-18.0.01/"  # (Unifoundry's own site; 18.0.01, 2026-09-16)
 RELEASES = {
     "Andika": ((ANDIKA, "Andika-7.000/Andika-Regular.ttf"), (ANDIKA, "Andika-7.000/OFL.txt")),
@@ -336,9 +343,9 @@ RELEASES = {
     # characters; 1.001 draws them all, and is taken whole from the project's own release.
     "NotoSerifDivesAkuru": ((DIVES_AKURU, "NotoSerifDivesAkuru/unhinted/ttf/NotoSerifDivesAkuru-Regular.ttf"), (DIVES_AKURU, "../OFL.txt")),
     "NewGardiner": ((NEWGARDINER + "NewGardiner.ttf", None), (NEWGARDINER + "OFL.txt", None)),
-    "Jigmo": ((JIGMO, "Jigmo.ttf"), (JIGMO, "LICENSE.txt")),
-    "Jigmo2": ((JIGMO, "Jigmo2.ttf"), (JIGMO, "LICENSE.txt")),
-    "Jigmo3": ((JIGMO, "Jigmo3.ttf"), (JIGMO, "LICENSE.txt")),
+    # (the release of 2026-07-05, V2.9.5795: P1 6.400, P2 3.179)
+    "PlangothicP1": ((PLANGOTHIC + "PlangothicP1-Regular.ttf", None), (PLANGOTHIC_LICENSE, None)),
+    "PlangothicP2": ((PLANGOTHIC + "PlangothicP2-Regular.ttf", None), (PLANGOTHIC_LICENSE, None)),
     # (the font files are in the release's font-builds folder; its OFL text, in its source archive)
     "Unifont": ((UNIFONT + "font-builds/unifont-18.0.01.otf", None),
                 (UNIFONT + "unifont-18.0.01.tar.gz", "unifont-18.0.01/OFL-1.1.txt")),
@@ -346,8 +353,9 @@ RELEASES = {
                      (UNIFONT + "unifont-18.0.01.tar.gz", "unifont-18.0.01/OFL-1.1.txt")),
 }
 # Fonts dedicated to the public domain (Creative Commons CC0 1.0), not under the OFL: their license file
-# is CC0's text, and nothing in it reserves a name. A font made of them may be under any license.
-LICENSE_CC0 = HAN_LAST
+# is CC0's text, and nothing in it reserves a name. A font made of them may be under any license. None
+# since Plangothic took Jigmo's place (2026-11-14); the check stays for the next.
+LICENSE_CC0 = ()
 # Fonts under two licenses, of which FreeLang takes the OFL (their name table names both, or neither):
 # the license file read is the OFL's text the release ships.
 LICENSE_DUAL = PIXEL_LAST
@@ -370,15 +378,22 @@ CUBIC = ("Daarage",) + PIXEL_LAST  # (Unifont's pixels: squares, whose straight 
 # plain outlines that draw the whole glyph in one color: the color tables are dropped, and the glyphs
 # are drawn as a program without color fonts draws them. No other source may have a color table.
 ONE_COLOR = ("NotoZnamennyMusicalNotation",)
-# The one exception to "each source whole in one font": {source: (the label of another font of FONTS,
+# The exceptions to "each source whole in one font": {source: (the label of another font of FONTS,
 # the characters that go there)}. The source is then cut in two subsets, its own and a second one, named
 # "<source>@<label>" (part_key), which is merged into that other font and is in every other respect
 # its source's (the same file, pin, license, and kind of layout: base_family). Unicodia Funky's four
 # combining parentheses (U+1AC1 to U+1AC4, Combining Diacritical Marks Extended) are marks of Latin
 # phonetic text: in the Essential font their anchors are carried onto Noto Sans's letters, dotted
 # circle, and other marks (ANCHORED), which the rest of Unicodia Funky, in the FreeLang+ General font,
-# has no use for.
-ELSEWHERE = {"UnicodiaFunky": ("Essential", "1AC1-1AC4")}
+# has no use for. Plangothic P2's characters of other scripts than the CJK ones (since 2026-11-14, the
+# owner's word: taken under Plangothic's OFL, before Unifont's pixels and where no source drew them:
+# Syriac Supplement, Arabic signs and ligatures, Tai Yo, Tangut's newest, legacy computing symbols) go
+# into the FreeLang+ General font with their scripts' other characters, so that the CJK font stays the
+# East Asian scripts' (Font Check's fallbacks_needed).
+ELSEWHERE = {"UnicodiaFunky": ("Essential", "1AC1-1AC4"),
+             "PlangothicP2": ("General", "0860-086A 088F 0897 FBC3-FBD2 FD90-FD91 FDC8-FDCE 10EC2-10EC7 10ED0-10ED8 "
+                                         "10EFA-10EFC 187F8-187FF 18D09-18D1E 18D80-18DF2 1CCFA-1CCFB 1CEBA-1CEBF "
+                                         "1E6C0-1E6DE 1E6E0-1E6F5 1E6FE-1E6FF")}
 PART = "@"
 # The one exception to "each character in one font": every font but the one that holds FIRST also has
 # the characters of its own family name (the letters, the space, the fourth font's joining character),
@@ -761,6 +776,8 @@ def candidates(code, votes, ideographs):
     # own script alone (Kedebideri has Latin letters too, and Unicodia Funky most of what Noto lacks).
     added = [ADDED[script] for script in scripts if script in ADDED]
     added += list(ADDED_LAST) + sorted(set(f for f in ADDED.values() if f not in RELEASES))
+    # (HAN_LAST after every outline font above and before Unifont's pixels: Plangothic P2 draws, besides
+    # the CJK characters, some no source above has, which it takes from the pixels or from nothing)
     for family in added + list(EXTRA) + list(LAST_RESORT) + list(HAN_LAST) + list(PIXEL_LAST):
         if family not in found:
             found.append(family)
@@ -847,7 +864,7 @@ def recommended_source(family):
 
 # The rules a font of FONTS may name as its sources: each says whether a source no font names is its.
 RULES = collections.OrderedDict((
-    # the three fonts of Chinese, Japanese, and Korean, and Jigmo's, which draw the ideographs they lack
+    # the three fonts of Chinese, Japanese, and Korean, and Plangothic's, which draw the ideographs they lack
     ("cjk", lambda family: (family in CJK and family != "NotoEmoji") or family in HAN_LAST),
     ("recommended", recommended_source),
     ("rest", lambda family: True),  # (the last font with a rule in FONTS: every other source)
@@ -1780,11 +1797,11 @@ def license_notice(sources, licenses):
                   "places the font under the SIL Open Font License (version 1.1, by the font's copyright record), its",
                   "author's own glyphs under no condition at all, and names whose glyphs the others are. It is among the",
                   "texts below, whole."]
-    if any(source["family"] in HAN_LAST for source in sources):
-        lines += ["", "Jigmo, Jigmo2, and Jigmo3 (Kamichi Koichi, from GlyphWiki's glyphs) are not under the OFL: their maker",
-                  "dedicated them to the public domain under Creative Commons CC0 1.0 Universal (the release's LICENSE.txt,",
-                  "among the texts below), which lets them be part of a font under any license."]
-    if any(source["family"] in PIXEL_LAST for source in sources):
+    if any(source["file"] in [source_url(family) for family in HAN_LAST] for source in sources):  # (named "Plangothic P1")
+        lines += ["", "Plangothic P1 and P2 (the Plangothic Project) are under the SIL Open Font License 1.1 (the project's",
+                  "LICENSE-OFL.txt, among the texts below); their project reserves the names \"Plangothic\" and",
+                  "\"\N{CJK UNIFIED IDEOGRAPH-904D}\N{CJK UNIFIED IDEOGRAPH-9ED1}\", which no font of %s uses." % FAMILY]
+    if any(source["file"] in [source_url(family) for family in PIXEL_LAST] for source in sources):  # ("Unifont Upper")
         lines += ["", "GNU Unifont's font files are dual-licensed, under the GNU GPL version 2 or later with the font",
                   "embedding exception and under the SIL Open Font License 1.1 (its COPYING file): FreeLang takes them",
                   "under the OFL, whose text the release ships as OFL-1.1.txt, among the texts below."]

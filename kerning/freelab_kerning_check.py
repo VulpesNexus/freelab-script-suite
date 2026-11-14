@@ -385,11 +385,20 @@ def _qt():
     return QtCore, QtGui
 
 
+def _main_code(fg):
+    """The one code point a glyph stands for (Auto Kerning's main_code: U+65E5 for a glyph FontLab gives the
+    Kangxi radical U+2F47 first), or its unicode where Auto Kerning is not loaded."""
+    shared = sys.modules.get(AUTO_KERNING_MODULE)
+    main = getattr(shared, "main_code", None)
+    return main(fg) if main is not None else fg.unicode
+
+
 def glyph_text(package, name):
     """A glyph's character when it has one, else its name."""
     try:
         glyph = package.findName(name)
-        code = glyph.fgGlyph.unicode if glyph is not None else None  # (flGlyph has no unicode of its own)
+        # (flGlyph has no unicode of its own; main_code: not a Kangxi radical FontLab may give first)
+        code = _main_code(glyph.fgGlyph) if glyph is not None else None
         if code:
             try:
                 return unichr(code)  # noqa: F821 (Python 2)
@@ -422,13 +431,15 @@ def is_variant(name, key, char_of):
 
 def screen_pair(ak, package, first, second, chars=None):
     """The glyph pair on screen, (left, right), of a kerning key: a right-to-left key is kept in text
-    order, its right glyph first (Auto Kerning's screen_of_key). chars: {name: character or None},
-    filled as glyphs are looked up (a check of thousands of pairs asks FontLab once per glyph)."""
+    order, its right glyph first (Auto Kerning's screen_of_key), whatever the font's other scripts: each
+    pair by its own glyphs. A glyph's direction is its character's, or its base glyph's for an unencoded
+    form (uni0628.fina, yod.alt: Auto Kerning's direction_char), so that a key of two contextual forms
+    of a right-to-left script is measured as it stands. chars: {name: character or None}, filled as
+    glyphs are looked up (a check of thousands of pairs asks FontLab once per glyph)."""
     chars = {} if chars is None else chars
     for name in (first, second):
         if name not in chars:
-            text = glyph_text(package, name)
-            chars[name] = text if len(text) == 1 and text != name else None
+            chars[name] = ak.direction_char(package, name)
     return ak.screen_of_key(chars[first], chars[second], first, second)
 
 
@@ -705,7 +716,7 @@ class KerningCheckDialog(object):
                 tab.check_none.connect("clicked()", lambda tab=tab: self.check_every(tab, False))
         self.show_all_button.connect("clicked()", self.show_all)
         self.tabs.connect("currentChanged(int)", self.switch_page)
-        self.close_button.connect("clicked()", dialog.close)
+        self.close_button.connect("clicked()", self.ak.close_slot(self))  # (never the window itself: see let_go)
         self.package = self.master = None
         self.chars = {}  # {glyph name: its character or None}, for screen_pair
         self.busy = False

@@ -161,6 +161,23 @@ def hangul_shape(code):
     return shape + (" final" if final else "")
 
 
+def all_codes(glyphs):
+    """{code point: glyph name} of every code point of each glyph (fgGlyph.unicodes; unicode alone gives
+    the first, and a CJK font encodes 日 at the Kangxi radical U+2F47 first: IBM Plex Sans JP's 日 月 玄
+    黄 辰 went missing from the samples). The first glyph at a code point wins, as in a cmap."""
+    found = {}
+    for glyph in glyphs:
+        try:
+            codes = [int(code) for code in (glyph.unicodes or [])]
+        except Exception:
+            codes = []
+        if not codes and getattr(glyph, "unicode", None):
+            codes = [int(glyph.unicode)]
+        for code in codes:
+            found.setdefault(code, u"%s" % glyph.name)
+    return found
+
+
 def unichr_(code):
     try:
         return unichr(code)  # noqa: F821 (Python 2)
@@ -587,7 +604,7 @@ class CJKSpacingDialog(object):
         self.none_button.connect("clicked()", lambda: self.check_all(False))
         self.restore_button.connect("clicked()", self.restore)
         self.write_button.connect("clicked()", self.write)
-        self.close_button.connect("clicked()", dialog.close)
+        self.close_button.connect("clicked()", self.ak.close_slot(self))  # (never the window itself: see let_go)
         self.palt_box.connect("toggled(bool)", lambda on: self.toggled())
         self.halt_box.connect("toggled(bool)", lambda on: self.toggled())
         self.sample.connect("textChanged(QString)", lambda text: self.draw_previews())
@@ -628,11 +645,12 @@ class CJKSpacingDialog(object):
                 return False
 
         try:
-            self.redraw_timer = QtCore.QTimer()
+            # (parents given: Qt deletes them with the window, never PythonQt at a random moment)
+            self.redraw_timer = QtCore.QTimer(self.dialog)
             self.redraw_timer.setSingleShot(True)
             self.redraw_timer.setInterval(80)
             self.redraw_timer.connect("timeout()", self.previews_resized)
-            watcher = Watcher()
+            watcher = Watcher(self.previews[0][0])
             self.previews[0][0].installEventFilter(watcher)
             self.watchers.append(watcher)
         except Exception:
@@ -689,7 +707,8 @@ class CJKSpacingDialog(object):
         glyphs, hangul = [], 0
         self.hangul_glyphs = []
         for fg in package.fgPackage.glyphs:
-            code = fg.unicode
+            codes = self.ak.glyph_codes(fg)  # (the one of its code points that is a kind: not a radical it is encoded at too)
+            code = next((c for c in codes if kind_of(c)), codes[0] if codes else None)
             kind = kind_of(code) if code else None
             if kind == "hangul":
                 hangul += 1
@@ -711,7 +730,7 @@ class CJKSpacingDialog(object):
         for t in self.trims:
             t.checked = kept.get(t.name, t.checked)
         if u"%s" % self.sample.text in [text for _, _, text in SAMPLES]:  # (text of one's own is kept)
-            index = best_sample(set(fg.unicode for fg in package.fgPackage.glyphs if fg.unicode))
+            index = best_sample(set(all_codes(package.fgPackage.glyphs)))
             self.sample_box.setCurrentIndex(index)
             self.sample.setText(SAMPLES[index][2])
         self.note_font(package)
@@ -839,7 +858,7 @@ class CJKSpacingDialog(object):
                         item.setForeground(column, dimmed)
                 icon = self.picture([(t.name, 0, 0)], ICON_SIZE)
                 if icon is not None:
-                    item.setIcon(0, QtGui.QIcon(icon))
+                    item.setIcon(0, self.ak.icon_of(icon))
                 top.addChild(item)
             top.setExpanded(True)
         if self.hangul:
@@ -978,6 +997,7 @@ class CJKSpacingDialog(object):
         pixmap.fill(QtGui.QColor(0, 0, 0, 0))
         color = self.dialog.palette.color(QtGui.QPalette.WindowText)
         painter = QtGui.QPainter(pixmap)
+        colored = False
         try:  # ended before anything else can fail: a painter left open on a freed pixmap aborts FontLab
             painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
             for number, layers in enumerate(lines):
@@ -986,12 +1006,15 @@ class CJKSpacingDialog(object):
                     painter.save()
                     painter.translate(x + placement * scale, size * 1.0 + step * number)
                     painter.scale(scale, -scale)
-                    self.ak.fill_glyph(painter, self.ak.layer_path(layer), QtGui.QBrush(color), self.ak.layer_parts(layer))
+                    parts = self.ak.layer_parts(layer)
+                    colored = colored or bool(parts)
+                    self.ak.fill_glyph(painter, self.ak.layer_path(layer), QtGui.QBrush(color), parts)
                     painter.restore()
                     x += (layer.advanceWidth + advance) * scale
         finally:
             painter.end()
-        return pixmap
+        # (in one color: redrawn in the new one when dark mode switches; a color font's glyphs keep theirs)
+        return pixmap if colored else self.ak.inked(pixmap, color)
 
     def note_font(self, package):
         """Said once per font and sample: a color font's glyphs, and a sample that shows none of the
@@ -1004,7 +1027,7 @@ class CJKSpacingDialog(object):
         note = self.ak.color_note(package) if first else u""
         if note:
             self.log.add(note)
-        codes = set(fg.unicode for fg in package.fgPackage.glyphs if fg.unicode)
+        codes = set(all_codes(package.fgPackage.glyphs))
         missed = sample_misses(codes, u"%s" % self.sample.text)
         if missed:
             shown = u" ".join(missed[:12]) + (u" …" if len(missed) > 12 else u"")
@@ -1026,7 +1049,7 @@ class CJKSpacingDialog(object):
             return
         by_code = dict((t.code, t) for t in self.trims if t.checked and t.palt)
         by_code.update((c.code, c) for c in self.hangul_chosen())
-        names = dict((g.unicode, g.name) for g in self.package.fgPackage.glyphs if g.unicode)
+        names = all_codes(self.package.fgPackage.glyphs)
         text = u"%s" % self.sample.text
         room = self.preview_width = self.preview_room()
         upm = float(self.package.upm) or 1000.0

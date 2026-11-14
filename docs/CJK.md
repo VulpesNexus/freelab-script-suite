@@ -47,5 +47,5 @@ The list shows the six shapes, each with its count, its median move, and its med
 
 ## The rest
 
-- **vpal** (proportional heights, for vertical text) is measured into the model but not written yet: FontLab's vertical metrics have to be read first.
+- **Vertical text** (vert and vrt2, vpal, and the vertical metrics) is *CJK Vertical*'s: [VERTICAL.md](VERTICAL.md).
 - **Kanji** stay full width, as in the corpus.
