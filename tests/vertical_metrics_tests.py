@@ -118,6 +118,57 @@ class AddTests(unittest.TestCase):
         self.assertEqual(avm.main([path, "--force"]), 0)
         self.assertEqual(open(path, "rb").read(), before)
 
+    def test_another_spelling_or_a_link_of_the_export_is_refused(self):
+        """Review: the paths were compared as strings, so on Windows --out EXAMPLE.ttf --force (or a hard link
+        to the export) saved over the exported font."""
+        path = self.font()
+        before = open(path, "rb").read()
+        aliases = []
+        upper = os.path.join(self.folder, os.path.basename(path).upper())
+        if os.path.exists(upper):  # (a file system that ignores case: Windows's)
+            aliases.append(upper)
+        link = os.path.join(self.folder, "linked.ttf")
+        try:
+            os.link(path, link)
+            aliases.append(link)
+        except (OSError, AttributeError, NotImplementedError):
+            pass
+        self.assertTrue(aliases or sys.platform != "win32", "Windows has both")
+        for alias in aliases:
+            self.assertEqual(avm.main([path, "--out", alias, "--force"]), 2, alias)
+            self.assertEqual(open(path, "rb").read(), before, alias)
+            self.assertTrue(avm.same_file(alias, path), alias)
+        self.assertFalse(avm.same_file(avm.output_path(path), path), "a file that does not exist yet")
+        self.assertFalse(avm.same_file(avm.values_path(path), path))
+        expected = set([os.path.basename(path), os.path.basename(avm.values_path(path))])
+        if link in aliases:
+            expected.add(os.path.basename(link))
+        self.assertEqual(set(os.listdir(self.folder)), expected, "nothing else written")
+
+    def test_a_copy_that_reads_back_wrong_takes_no_name(self):
+        """The copy is staged beside its name and checked first: a wrong one never replaces the output it
+        was to replace, and leaves no file behind."""
+        path = self.font()
+        self.assertEqual(avm.main([path]), 0)
+        out = avm.output_path(path)
+        good = open(out, "rb").read()
+        kept = avm.check
+        avm.check = lambda where, values: ["%s read back wrong" % os.path.basename(where)]
+        try:
+            self.assertEqual(avm.main([path, "--force"]), 1)
+        finally:
+            avm.check = kept
+        self.assertEqual(open(out, "rb").read(), good, "the output as it was")
+        self.assertEqual(sorted(os.listdir(self.folder)),
+                         sorted(os.path.basename(p) for p in (path, out, avm.values_path(path))), "no staged file left")
+        os.remove(out)
+        avm.check = lambda where, values: ["wrong"]
+        try:
+            self.assertEqual(avm.main([path]), 1)
+        finally:
+            avm.check = kept
+        self.assertFalse(os.path.exists(out), "nothing written")
+
     def test_another_em_is_refused(self):
         path = self.font()
         with io.open(avm.values_path(path), "w", encoding="utf-8") as handle:

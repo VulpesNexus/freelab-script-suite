@@ -7,7 +7,8 @@ Font Check lists these sets beside the languages, each covered by a definition t
   and notations, and for symbols; the
   characters with the Math property (DerivedCoreProperties.txt; Unicode Technical Report #25); the
   currency symbols (general category Sc). Control and format characters (categories Cc and Cf) are
-  left out of these: no glyph is drawn for them.
+  left out of these: no glyph is drawn for them. Beside the sets, every assigned code point's general
+  category, with the first word of a letter's name (UnicodeData.txt): Proof classes glyphs by it.
 - Google Fonts' glyph sets (googlefonts/glyphsets, Apache License 2.0): the encoded characters of each
   set (its .nam file); the glyphs without a code point that a set also asks for are not checked.
 - Adobe's Latin, Cyrillic, and Greek character sets (adobe-type-tools, MIT License): each set's
@@ -332,6 +333,46 @@ def categories(unicode_data):
         else:
             found[code] = fields[2]
     return found
+
+
+CATEGORIES_ABOUT = (
+    "Every assigned code point's general category (UnicodeData.txt), as runs \"low-high:category\" (hexadecimal; "
+    "\"low:category\" for one code point), and for a letter (L*) the first word of its name, by its index in words "
+    "(\"41-5A:Lu:0\"), as Proof names a letter's script: FontLab's Python 2.7 knows Unicode 5.2, so a proof's "
+    "classes come from this table under either interpreter. A code point no run holds is unassigned.")
+
+
+def category_runs(unicode_data):
+    """(runs, words) for the "categories" table (CATEGORIES_ABOUT): runs as one string, words the first words
+    of the letters' names (ranges given by their ends take the range's name: "CJK", "HANGUL", "TANGUT")."""
+    found, first = {}, None
+    for line in unicode_data.splitlines():
+        fields = line.split(";")
+        if len(fields) < 3:
+            continue
+        code, name, kind = int(fields[0], 16), fields[1], fields[2]
+        if name.endswith(", First>"):
+            first = code
+            continue
+        if name.endswith(", Last>"):
+            name = name[1:-len(", Last>")]
+        words = name.replace("-", " ").split()
+        word = words[0].upper() if kind.startswith("L") and words else ""
+        for inside in range(first if fields[1].endswith(", Last>") else code, code + 1):
+            found[inside] = (kind, word)
+    runs = []
+    for code in sorted(found):
+        if runs and runs[-1][1] == code - 1 and runs[-1][2] == found[code]:
+            runs[-1][1] = code
+        else:
+            runs.append([code, code, found[code]])
+    words = sorted(set(word for _, _, (_, word) in runs if word))
+    index = dict((word, number) for number, word in enumerate(words))
+    parts = []
+    for low, high, (kind, word) in runs:
+        span = "%X" % low if low == high else "%X-%X" % (low, high)
+        parts.append("%s:%s%s" % (span, kind, ":%d" % index[word] if word else ""))
+    return " ".join(parts), words
 
 
 def decompositions(unicode_data):
@@ -737,6 +778,8 @@ def main():
             "scripts": {"unicode": UNICODE_VERSION, "group": SCRIPTS_GROUP,
                         "columns": ["name", "characters", "shared", "since", "optional"],
                         "rows": [row + [optional_of(codes_of(row[1]) | codes_of(row[2]), optional)] for row in scripts]}}
+    runs, words = category_runs(text_of(files["unicode-%s-UnicodeData.txt" % UNICODE_VERSION]))
+    data["categories"] = {"unicode": UNICODE_VERSION, "about": CATEGORIES_ABOUT, "words": words, "runs": runs}
     with open(args.out, "w", encoding="ascii", newline="\n") as handle:
         json.dump(data, handle, ensure_ascii=True, separators=(",", ":"))
         handle.write("\n")

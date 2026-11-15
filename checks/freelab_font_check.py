@@ -8455,7 +8455,8 @@ class FontCheckDialog(object):
             self.busy = False
         if done or failed:
             # (the font info only: the font's own state, which needs no before_changes, and no glyph added)
-            self.ak.notify_changed(self.fontlab, self.package, u"FreeLab Font Check: vertical metrics", added=False)
+            self.ak.notify_changed(self.fontlab, self.package, u"FreeLab Font Check: vertical metrics",
+                                   added=False).report(self.log)
         if done:
             # (font, old values, keys written, keys that were unset before: no way to unset one is known, labels)
             unset = [s.key for s in done if s.key != "use_typo" and s.key in old and old[s.key] is None]
@@ -8517,7 +8518,8 @@ class FontCheckDialog(object):
                 kept.append(key)
         self.put_back = (ident, old, kept, [], labels) if kept else None
         if restored or failed:
-            self.ak.notify_changed(self.fontlab, current, u"FreeLab Font Check: vertical metrics put back", added=False)
+            self.ak.notify_changed(self.fontlab, current, u"FreeLab Font Check: vertical metrics put back",
+                                   added=False).report(self.log)
         b = self.ak.b
         if restored:
             self.log.add(u"Put back %s as they were." % b(counted(len(restored), u"value")), "done")
@@ -8779,7 +8781,8 @@ class FontCheckDialog(object):
         masters = [m for m in self.master_names() if m != reference]
         before = set((f.glyph, f.master, f.kind, f.contour) for f in self.problems)
         done, failed, touched = [], [], []
-        ak.before_changes(self.fontlab, self.package, u"FreeLab Font Check: masters")
+        if not ak.begin_write(self.fontlab, self.package, u"FreeLab Font Check: masters", self.log):
+            return  # (nothing fixed: the reason in the log)
         self.busy = True
         try:
             for name in names:
@@ -8820,9 +8823,11 @@ class FontCheckDialog(object):
             failed.append(u"%s" % exc)
         finally:
             self.busy = False
+        status = ak.WriteStatus()
         if touched:
-            ak.notify_changed(self.fontlab, self.package, u"FreeLab Font Check: masters", touched, added=False)
-        undo = u" <i>Edit &gt; Undo</i> takes %s back." % (u"it" if len(touched) == 1 else u"them") if touched else u""
+            status = ak.notify_changed(self.fontlab, self.package, u"FreeLab Font Check: masters", touched, added=False)
+        undo = status.undo(u" <i>Edit &gt; Undo</i> takes %s back." % (u"it" if len(touched) == 1 else u"them")
+                           if touched else u"")
         if done:
             shown = done[:20] + ([u"%d more" % (len(done) - 20)] if len(done) > 20 else [])
             self.log.add(u"Fixed %s: %s.%s" % (b(counted(len(done), u"glyph layer")), ak.html(u"; ".join(shown)), undo),
@@ -8831,6 +8836,7 @@ class FontCheckDialog(object):
             self.log.add(u"Not fixed: %s.%s" % (ak.html(u"; ".join(failed[:20])), u"" if done else undo), "error")
         if not done and not failed:
             self.log.add(u"Nothing to fix: the masters already match where Font Check can set them right.")
+        status.report(self.log)
         selected = self.selected_glyph()
         self.stale.add("metrics")
         self.check_masters()

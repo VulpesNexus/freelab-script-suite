@@ -1551,6 +1551,58 @@ def _glyph_count(package):
         return None
 
 
+class HistoryError(Exception):
+    """before_changes could not record the font before a write: the write must not happen, since Undo
+    could not take it back. Its text is the log's line (HTML)."""
+
+
+class WriteStatus(object):
+    """What notify_changed managed once a write was made. recorded: FontLab's History holds the step,
+    so Undo takes the write back; marked: the font is marked modified, so FontLab asks to save it before
+    closing it. A redraw that failed (a glyph's update, the Font window's list of glyphs) is not counted:
+    it costs a display, not the write."""
+
+    def __init__(self):
+        self.recorded = self.marked = True
+        self.reasons = []  # (what failed, the error), for the log
+
+    @property
+    def ok(self):
+        return self.recorded and self.marked
+
+    def undo(self, text):
+        """The text promising Undo (as given) when the History recorded the write; u"" when it did not."""
+        return text if self.recorded else u""
+
+    def message(self):
+        """The log's error line (HTML) when something failed; u"" when nothing did."""
+        parts = []
+        if not self.recorded:
+            parts.append(u"The font was changed, but FontLab's History did not record the change (%s): <i>Edit &gt; "
+                         u"Undo</i> cannot take it back. To drop the change, close the font without saving it." %
+                         html(dict(self.reasons).get("history", u"")))
+        if not self.marked:
+            parts.append(u"FontLab did not mark the font as modified (%s): save the font before closing it, since "
+                         u"FontLab may not ask." % html(dict(self.reasons).get("modified", u"")))
+        return u" ".join(parts)
+
+    def report(self, log):
+        """The error line added to a tool's log when something failed. Whether nothing did."""
+        if not self.ok and log is not None:
+            try:
+                log.add(self.message(), "error")
+            except Exception:
+                pass
+        return self.ok
+
+
+def _error_text(exc):
+    try:
+        return u"%s" % (exc,)
+    except Exception:  # (Python 2: an error whose text is bytes that are not ASCII)
+        return u"%r" % (exc,)
+
+
 def before_changes(fontlab, package, title, glyphs=()):
     """Called before a script changes a font, so that Undo can put back what it changes. A step of
     FontLab's History records each object as it is after the change, and Undo puts back each object's
@@ -1560,7 +1612,8 @@ def before_changes(fontlab, package, title, glyphs=()):
     a write after an undo past that step; later writes need none, since each records the whole font.
     The glyphs given are recorded too when they have no state: the whole font's record holds their
     layers, not the glyphs themselves (their flags). The glyph count is noted for notify_changed. The
-    objects recorded, as a list (empty when none had to be)."""
+    objects recorded, as a list (empty when none had to be). Raises HistoryError, before anything is
+    changed, when FontLab could not record them: the caller must then write nothing (begin_write)."""
     held = _history()
     font = _font_id(package)
     held["counts"][font] = _glyph_count(package)
@@ -1571,11 +1624,28 @@ def before_changes(fontlab, package, title, glyphs=()):
     if objects:
         try:
             fontlab.flItems.notifyChangesApplied(u"%s (before)" % title, objects, True)
-            if objects[0] is package:
-                held["whole"].add(font)
-        except Exception:
-            pass
+        except Exception as exc:
+            held["counts"].pop(font, None)
+            raise HistoryError(u"Nothing was changed: FontLab's History could not record the font before the change "
+                               u"(%s), so <i>Edit &gt; Undo</i> could not have taken it back." % html(_error_text(exc)))
+        if objects[0] is package:
+            held["whole"].add(font)
     return objects
+
+
+def begin_write(fontlab, package, title, log, glyphs=()):
+    """before_changes for a tool: True when the write may go ahead; False, with the reason in its log
+    (as an error), when FontLab's History could not record the font first and nothing may be written."""
+    try:
+        before_changes(fontlab, package, title, glyphs)
+        return True
+    except HistoryError as exc:
+        if log is not None:
+            try:
+                log.add(_error_text(exc), "error")
+            except Exception:
+                pass
+        return False
 
 
 def notify_changed(fontlab, package, title, glyphs=(), added=None):
@@ -1592,19 +1662,24 @@ def notify_changed(fontlab, package, title, glyphs=(), added=None):
     a script added; it is called only when glyphs were added or removed (added; None: the glyph count
     differs from the one before_changes noted, or none was), since each call checks the clipboard
     twice. The font is marked modified: a script's writes leave it unmarked, and FontLab would close it
-    without asking to save."""
+    without asking to save. A WriteStatus: whether the History recorded the step and the font was
+    marked (a caller promises Undo only through status.undo, and status.report logs a failure); the
+    redraws (glyph.update, notifyPackageContentUpdated) are not part of it."""
+    status = WriteStatus()
     glyphs = list(glyphs)
     for glyph in glyphs:
         try:
             glyph.update()
         except Exception:
-            pass
+            pass  # (a redraw)
     held, font = _history(), _font_id(package)
     try:
         fontlab.flItems.notifyChangesApplied(title, [package] + glyphs if glyphs else package, True)
         held["whole"].add(font)
-    except Exception:
-        pass
+    except Exception as exc:
+        status.recorded = False
+        status.reasons.append(("history", _error_text(exc)))
+        held["whole"].discard(font)  # (the next write records the font first again)
     before = held["counts"].pop(font, None)
     if added is None:
         added = before is None or before != _glyph_count(package)
@@ -1612,11 +1687,13 @@ def notify_changed(fontlab, package, title, glyphs=(), added=None):
         try:
             fontlab.flItems.notifyPackageContentUpdated(package.fgPackage.id)
         except Exception:
-            pass
+            pass  # (a redraw: the Font window's list)
     try:
         package.setFlag(2, True)  # ofChanged
-    except Exception:
-        pass
+    except Exception as exc:
+        status.marked = False
+        status.reasons.append(("modified", _error_text(exc)))
+    return status
 
 
 def history_state(package):
@@ -5168,10 +5245,12 @@ def flag_glyphs(owner, names, label, value):
             glyphs.append(glyph)
     if not glyphs:
         return
-    before_changes(owner.fontlab, package, u"FreeLab flag", glyphs)
+    log = getattr(owner, "log", None)
+    if not begin_write(owner.fontlab, package, u"FreeLab flag", log, glyphs):
+        return  # (nothing flagged: the reason in the log)
     for glyph in glyphs:
         glyph.mark = value
-    notify_changed(owner.fontlab, package, u"FreeLab flag", glyphs, added=False)
+    notify_changed(owner.fontlab, package, u"FreeLab flag", glyphs, added=False).report(log)
     owner.seen_history = history_mark(package)  # its own step: nothing to read again
     menus = getattr(owner, "flagging", None)
     for menu in (menus if isinstance(menus, list) else [menus]):
@@ -7101,7 +7180,7 @@ class AutoKerningDialog(object):
                 written.extend(plan[1] for plan in wanted)
         except Exception as exc:  # what was written stays written, and is reported
             error = exc
-        self.after_writing(self.package)
+        status = self.after_writing(self.package)
         self.refresh_kerning()
         for s in self.analysis.suggestions:
             s.current = self.font_kerning.current(*s.key)
@@ -7120,14 +7199,15 @@ class AutoKerningDialog(object):
         self.log.add(u" ".join([first + u"."] + lines), "done" if entries else "info")
         if error is not None:
             self.log.add(u"Stopped by an error: %s" % html(error), "error")
+        status.report(self.log)
         self.seen_history = history_mark(self.package)
 
     def after_writing(self, package):
         """FontLab told of the change, and the font marked modified: a script's kerning writes leave it
         unmarked, and FontLab would close it without asking to save. Kerning needs no before_changes:
         it is the font's own state, which FontLab records when it opens a font (live: a first write's
-        pair went on Undo)."""
-        notify_changed(self.fontlab, package, u"FreeLab Auto Kerning", added=False)
+        pair went on Undo). notify_changed's WriteStatus."""
+        return notify_changed(self.fontlab, package, u"FreeLab Auto Kerning", added=False)
 
 
 def font_class_suggestions(package, master, core=None, em=EM_PIXELS, model=None):
@@ -7426,7 +7506,7 @@ class ClassDialog(object):
             written = write_exceptions(kerning, [e for e in chosen if e not in stale])
         except Exception as exc:  # what was written stays written, and is reported
             error = exc
-        self.owner.after_writing(package)
+        status = self.owner.after_writing(package)
         self.run()
         notes = [u"Wrote %s of %s own." % (counted(written, u"pair"), u"its" if written == 1 else u"their")]
         if stale:
@@ -7435,6 +7515,8 @@ class ClassDialog(object):
                 u"was" if len(stale) == 1 else u"were", u"it is" if len(stale) == 1 else u"they are"))
         if error is not None:
             notes.append(u"Stopped by an error: %s" % html(error))
+        if not status.ok:
+            notes.append(status.message())
         notes.append(u"Writing goes straight into the open font: close it without saving to take it back.")
         self.status.setText(u" ".join(notes) + u" " + self.status.text)
 
@@ -7474,7 +7556,7 @@ class ClassDialog(object):
             made, extended, moved, kept = apply_class_plans(FontKerning(package.kerning(master)), chosen, self.move.checked)
         except Exception as exc:  # what was made stays made, and is reported
             error = exc
-        self.owner.after_writing(package)
+        status = self.owner.after_writing(package)
         self.run()
         notes = [u"Made %s and extended %d%s." % (counted(made, u"class", u"classes"), extended,
                                                    u", and moved %s into them" % counted(moved, u"pair") if moved else u"")]
@@ -7483,6 +7565,8 @@ class ClassDialog(object):
                                                                     u"its" if kept == 1 else u"their"))
         if error is not None:
             notes.append(u"Stopped by an error: %s" % html(error))
+        if not status.ok:
+            notes.append(status.message())
         notes.append(u"Writing goes straight into the open font: close it without saving to take it back.")
         self.status.setText(u" ".join(notes) + u" " + self.status.text)
         if self.owner.package is not None and font_key(self.owner.package) == font_key(package):

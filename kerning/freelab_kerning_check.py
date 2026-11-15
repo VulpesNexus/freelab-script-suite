@@ -789,8 +789,9 @@ class KerningCheckDialog(object):
         return True
 
     def after_writing(self):
-        # (kerning only: the font's own state, which needs no before_changes, and no glyph added)
-        self.ak.notify_changed(self.fontlab, self.package, u"FreeLab Kerning Check", added=False)
+        """notify_changed's WriteStatus (kerning only: the font's own state, which needs no before_changes,
+        and no glyph added)."""
+        return self.ak.notify_changed(self.fontlab, self.package, u"FreeLab Kerning Check", added=False)
 
     # -- the lists limited to some glyphs ------------------------------------
 
@@ -1114,12 +1115,14 @@ class KerningCheckDialog(object):
                 written += 1
         except Exception as exc:
             error = exc
-        self.after_writing()
+        status = self.after_writing()
         self.check_collisions()
         b = self.ak.b
-        self.log.add(u"Wrote %s of %s own (<i>Edit &gt; Undo</i> takes %s back)." % (
-            b(counted(written, u"pair")), u"its" if written == 1 else u"their", u"it" if written == 1 else u"them"),
+        self.log.add(u"Wrote %s of %s own%s." % (
+            b(counted(written, u"pair")), u"its" if written == 1 else u"their",
+            status.undo(u" (<i>Edit &gt; Undo</i> takes %s back)" % (u"it" if written == 1 else u"them"))),
             "done" if written else "info")
+        status.report(self.log)
         if stale:
             self.log.add(u"%s had changed since the check and %s left as %s." % (
                 b(counted(stale, u"pair")), u"was" if stale == 1 else u"were", u"it was" if stale == 1 else u"they were"),
@@ -1172,11 +1175,14 @@ class KerningCheckDialog(object):
                 removed += 1
         except Exception as exc:
             error = exc
-        self.after_writing()
+        status = self.after_writing()
         self.check_cleanup()
         b = self.ak.b
-        self.log.add(u"Removed %s (<i>Edit &gt; Undo</i> puts %s back)." % (
-            b(counted(removed, u"entry", u"entries")), u"it" if removed == 1 else u"them"), "done" if removed else "info")
+        self.log.add(u"Removed %s%s." % (
+            b(counted(removed, u"entry", u"entries")),
+            status.undo(u" (<i>Edit &gt; Undo</i> puts %s back)" % (u"it" if removed == 1 else u"them"))),
+            "done" if removed else "info")
+        status.report(self.log)
         if stale:
             self.log.add(u"%s had changed since the check and %s left as %s." % (
                 b(counted(stale, u"entry", u"entries")), u"was" if stale == 1 else u"were", u"it was" if stale == 1 else u"they were"),

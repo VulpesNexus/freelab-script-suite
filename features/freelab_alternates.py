@@ -909,14 +909,15 @@ class AlternatesPage(object):
                     touched.append(new)
         except Exception as exc:
             error = exc
-        self.ak.notify_changed(self.owner.fontlab, package, u"FreeLab Feature Code", touched)
+        status = self.ak.notify_changed(self.owner.fontlab, package, u"FreeLab Feature Code", touched)
         if made:
             one = len(made) == 1
-            self.owner.log.add(u"Made %s: %s. Once drawn, the <i>Forms</i> tab writes %s; "
-                               u"<i>Edit &gt; Undo</i> takes %s back." % (
+            self.owner.log.add(u"Made %s: %s. Once drawn, the <i>Forms</i> tab writes %s%s." % (
                                    self.ak.b(self.ak.counted(len(made), u"copy to redraw", u"copies to redraw")),
                                    self.ak.glyph_name_links(made), u"its set" if one else u"their sets",
-                                   u"it" if one else u"them"), "done")
+                                   status.undo(u"; <i>Edit &gt; Undo</i> takes %s back" % (u"it" if one else u"them"))),
+                               "done")
+        status.report(self.owner.log)
         if error is not None:
             self.owner.log.add(u"Stopped by an error: %s" % self.ak.html(error), "error")
         self.owner.run()
@@ -1014,7 +1015,7 @@ class AlternatesPage(object):
             error = exc
         finally:
             owner.set_busy(False)
-        self.ak.notify_changed(self.owner.fontlab, package, u"FreeLab Feature Code", touched)
+        status = self.ak.notify_changed(self.owner.fontlab, package, u"FreeLab Feature Code", touched)
         if made >= PACE_FROM:  # (what the next build's time is told from)
             self.pace = (time.time() - started) / made
         if made:
@@ -1022,10 +1023,12 @@ class AlternatesPage(object):
             named = (u": %s" % self.ak.glyph_name_links(built)) if made <= LINKED_MOST else u""
             self.owner.log.add(u"Built %s of %s%s (%s, seed %d%s). The first tab's <i>Alternates that take turns</i> "
                                u"lists them, the glyphs that double most in text first: check those to cycle, then "
-                               u"write the code; <i>Edit &gt; Undo</i> takes them back." % (
+                               u"write the code%s." % (
                                    self.ak.b(self.ak.counted(made, u"variant")), self.ak.counted(letters, u"glyph"),
                                    named, strength, seed,
-                                   (u", %d from the font's alternates" % others) if designs else u""), "done")
+                                   (u", %d from the font's alternates" % others) if designs else u"",
+                                   status.undo(u"; <i>Edit &gt; Undo</i> takes them back")), "done")
+        status.report(self.owner.log)
         if kept:
             self.owner.log.add(u"%s the font has already, left as %s." % (
                 self.ak.b(self.ak.counted(kept, u"variant")), u"it is" if kept == 1 else u"they are"), "warning")

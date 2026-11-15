@@ -187,7 +187,8 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertTrue(held.exists(), "in use: left where it is")
         self.assertIn("Could not remove the retired", out)
-        self.assertIn("quit FontLab and run this again", out)
+        self.assertIn("the next install removes it", out)
+        self.assertIn("Left for the next install", out, "a font FontLab holds: expected, the status stays 0")
         self.assertIn("tools block", out, "the rest of the install went on")
         code, out = self.run_installer("-Uninstall")
         self.assertEqual(code, 0, out)
@@ -275,8 +276,10 @@ class InstallerTests(unittest.TestCase):
         (self.scripts / "freelab_dark_mode_settings.py").write_text("old")
         with open(str(old), "rb"):  # (opened without sharing deletion: the delete fails)
             code, out = self.run_installer()
-        self.assertEqual(code, 0, out)
+        self.assertEqual(code, 1, "an old script left in the menu: not done, said, and the status says so: " + out)
         self.assertIn("Could not remove the old", out)
+        self.assertIn("in use by another program", out, "the real reason")
+        self.assertIn("Not done (1)", out)
         self.assertIn("tools block", out, "the rest of the install went on")
         self.assertTrue(old.exists())
         self.assertFalse((self.scripts / "freelab_dark_mode_settings.py").exists(), out)
@@ -353,6 +356,154 @@ class InstallerTests(unittest.TestCase):
         self.write(data)
         code, out = self.run_installer()
         self.assertEqual((code, self.read()), (1, data), out)
+
+    # Review of 2026-11-15: the check took markers at the start of a line only, the changes took marker text
+    # anywhere, so an install or uninstall deleted the user's code between two quoted markers
+
+    QUOTED = (b'print("# >>> FreeLab tools")\nuser_work()\nprint("# <<< FreeLab tools")\nkeep_me()\n'
+              b'text = """\n    # >>> FreeLab tools (indented)\n    middle()\n    # <<< FreeLab tools\n"""\n'
+              b'print("# >>> FreeLab (managed")\nlegacy_work()\nprint("# <<< FreeLab")\n')
+
+    def test_marker_text_in_the_users_code_is_kept_byte_for_byte(self):
+        original = b"\xef\xbb\xbf" + (MINE + self.QUOTED + MCP).replace(b"\n", b"\r\n")
+        self.write(original)
+        code, out = self.run_installer()
+        self.assertEqual(code, 0, out)
+        data = self.read()
+        self.assertTrue(data.startswith(original.rstrip(b"\r\n")), "everything before the new block as it was: " + out)
+        self.assertEqual(data.count(b"\n# >>> FreeLab tools (managed by"), 1, "the block appended once")
+        self.assertNotIn("combined FreeLab block", out, "quoted legacy markers are not a legacy block")
+        code, out = self.run_installer("-Uninstall")
+        self.assertEqual((code, self.read()), (0, original), out)
+
+    def test_a_block_between_quoted_markers_is_found_and_replaced_alone(self):
+        data = MINE + self.QUOTED + b"# >>> FreeLab tools (managed)\nold = 1\n# <<< FreeLab tools\n" + MCP
+        self.write(data)
+        code, out = self.run_installer()
+        self.assertEqual(code, 0, out)
+        text = self.read()
+        self.assertTrue(text.startswith(MINE + self.QUOTED), "the user's code as it was")
+        self.assertTrue(text.endswith(MCP))
+        self.assertNotIn(b"old = 1", text)
+        self.assertEqual(self.run_installer("-Uninstall")[0], 0)
+        self.assertEqual(self.read(), MINE + self.QUOTED + MCP)
+
+    def test_a_block_opened_by_one_kind_and_closed_by_another_is_refused(self):
+        for data in (MINE + b"# >>> FreeLab tools (managed)\nmine = 1\n# <<< FreeLab MCP\n",
+                     MINE + b"# >>> FreeLab MCP (managed)\nmine = 1\n# <<< FreeLab tools\n",
+                     MINE + b"# >>> FreeLab (managed)\nmine = 1\n# <<< FreeLab tools\n",
+                     MINE + b"# >>> FreeLab tools (managed)\n# >>> FreeLab MCP\nmine = 1\n# <<< FreeLab MCP\n"
+                            b"# <<< FreeLab tools\n"):
+            self.write(data)
+            for flags in ((), ("-Uninstall",)):
+                code, out = self.run_installer(*flags)
+                self.assertEqual((code, self.read()), (1, data), out)
+                self.assertIn("left as it is", out)
+
+    def test_each_update_keeps_the_file_it_replaced(self):
+        first = MINE + MCP
+        self.write(first)
+        code, out = self.run_installer()
+        self.assertEqual(code, 0, out)
+        backup = self.tmp / "startupScript.py.freelab-backup"
+        previous = self.tmp / "startupScript.py.freelab-previous"
+        self.assertEqual(backup.read_bytes(), first, "the first install's copy")
+        self.assertEqual(previous.read_bytes(), first)
+        edited = self.read() + b"later = 2\n"  # (the user's change after the install)
+        self.write(edited)
+        code, out = self.run_installer("-Uninstall")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(previous.read_bytes(), edited, "the file as it was just before this change")
+        self.assertEqual(backup.read_bytes(), first, "the first install's copy stays")
+        self.assertIn(b"later = 2", self.read())
+        self.assertEqual(sorted(p.name for p in self.tmp.glob("startupScript.py*")),
+                         ["startupScript.py", "startupScript.py.freelab-backup", "startupScript.py.freelab-previous"],
+                         "no temporary file left")
+
+    # Review of 2026-11-15: a required copy that failed was printed and the install went on (retiring old
+    # files, writing the block) with exit status 0; uninstall said 0 whatever it left
+
+    def test_a_script_that_cannot_be_replaced_stops_the_install_before_anything_changes(self):
+        self.write(MINE)
+        self.assertEqual(self.run_installer()[0], 0)
+        folder = self.scripts / "FreeLab"
+        (folder / "freelab_auto_kerning.py").write_bytes(b"old kerning")
+        held = folder / "freelab_auto_spacing.py"
+        held.write_bytes(b"old spacing")
+        retired = folder / "freelab_accents.py"
+        retired.write_bytes(b"retired")
+        startup = self.read()
+        with open(str(held), "rb"):  # (held open by another program)
+            code, out = self.run_installer()
+        self.assertEqual(code, 1, out)
+        self.assertIn("in use by another program", out)
+        self.assertIn("Nothing installed was replaced", out)
+        self.assertEqual((folder / "freelab_auto_kerning.py").read_bytes(), b"old kerning", "the earlier set kept whole")
+        self.assertEqual(held.read_bytes(), b"old spacing")
+        self.assertTrue(retired.exists(), "nothing retired before its replacement is in")
+        self.assertEqual(self.read(), startup, "the startup block not touched")
+        self.assertEqual(list(folder.glob("*.freelab-new")), [], "the staged copies cleared")
+        code, out = self.run_installer()
+        self.assertEqual(code, 0, out)
+        self.assertEqual(held.read_bytes(), (ROOT / "spacing" / "freelab_auto_spacing.py").read_bytes())
+        self.assertFalse(retired.exists())
+
+    def test_a_font_held_open_is_kept_and_the_install_succeeds(self):
+        self.write(MINE)
+        self.assertEqual(self.run_installer()[0], 0)
+        font = self.scripts / "FreeLab" / "FreeLang-Essential.ttf"
+        font.write_bytes(b"older font")
+        (self.scripts / "FreeLab" / "freelab_auto_kerning.py").write_bytes(b"old kerning")
+        with open(str(font), "rb"):  # (FontLab registered it: open until it quits)
+            code, out = self.run_installer()
+        self.assertEqual(code, 0, out)
+        self.assertEqual(font.read_bytes(), b"older font")
+        self.assertIn("Left for the next install", out)
+        self.assertEqual((self.scripts / "FreeLab" / "freelab_auto_kerning.py").read_bytes(),
+                         (ROOT / "kerning" / "freelab_auto_kerning.py").read_bytes(), "the rest installed")
+
+    def test_without_the_auto_kerning_core_the_status_says_so(self):
+        copy = self.tmp / "copy"
+        for relative in ["tools/install-fontlab.ps1", "darkmode/native/freelab_pixels.c", "darkmode/native/freelab_hooks.c",
+                         "kerning/native/freelab_kern.c"]:
+            target = copy / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(str(ROOT / relative), str(target))
+        (copy / "tools" / "build-native.ps1").write_text(
+            "param([string]$Out, [switch]$Hooks, [switch]$Kern)\nthrow 'No compiler found (test)'\n")
+        text = INSTALLER.read_text(encoding="ascii")
+        for source, _ in re.findall(r"From = '([^']+)'; Name = '([^']+)'", text):
+            if (ROOT / Path(*source.split("\\"))).exists():
+                target = copy / Path(*source.split("\\"))
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(str(ROOT / Path(*source.split("\\"))), str(target))
+        (self.bin / ("freelab_kern-v%s.dll" % KERN)).unlink()
+        self.write(MINE)
+        proc = subprocess.run(
+            [POWERSHELL, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
+             str(copy / "tools" / "install-fontlab.ps1"), "-ScriptsDir", str(self.scripts), "-StartupScript",
+             str(self.startup), "-BinDir", str(self.bin), "-StateDir", str(self.state), "-RegistryKey",
+             r"HKCU:\Software\FreeLabInstallerTestNone", "-ProcessName", "freelab-no-such-process"],
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, errors="replace", creationflags=NO_WINDOW,
+            timeout=120)
+        out = proc.stdout + proc.stderr
+        self.assertEqual(proc.returncode, 1, out)
+        self.assertIn("auto kerning core", out)
+        self.assertIn("Not done (1)", out)
+        self.assertIn(b"# >>> FreeLab tools", self.read(), "dark mode and the rest installed")
+
+    def test_an_uninstall_that_leaves_files_says_so(self):
+        self.write(MINE)
+        self.assertEqual(self.run_installer()[0], 0)
+        held = self.scripts / "FreeLab" / "freelab_proof.py"
+        with open(str(held), "rb"):
+            code, out = self.run_installer("-Uninstall")
+        self.assertEqual(code, 1, out)
+        self.assertIn("freelab_proof.py", out.split("Not done")[-1])
+        self.assertTrue(held.exists())
+        code, out = self.run_installer("-Uninstall")
+        self.assertEqual(code, 0, out)
+        self.assertFalse(held.exists())
 
     def test_missing_startup_script_is_not_created(self):
         code, out = self.run_installer()

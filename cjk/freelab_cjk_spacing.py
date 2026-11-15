@@ -416,49 +416,137 @@ def expand_ranges(text):
     return names
 
 
-def font_positioned(tag, text):
-    """The glyphs a feature's own code (outside FreeLab's block) positions one by one (pos a-hira <...>;
-    pos [a b] <...>; position, enum pos; a class defined in that code, @KANA = [...];, by its glyphs):
-    FreeLab's rules for them would be a second value, which the compiler refuses ("Duplicate single
-    positioning glyph with different values"). A class defined elsewhere (the font's classes) is not read."""
-    import re
-    begin, end = BEGIN % tag, END % tag
-    classes = {}
-    for match in re.finditer(u"(@[A-Za-z0-9_.\\-]+)\\s*=\\s*\\[([^\\]]*)\\]", re.sub(u"#[^\\n]*", u"", text or u"")):
-        classes[match.group(1)] = expand_ranges(match.group(2))
+# ---------------------------------------------------------------------------
+# The font's own feature code, as the compiler reads it: CJK Spacing's and CJK Vertical's one reader (CJK
+# Vertical loads this module). A glyph the font's own code gives a single value in a feature must get no
+# second one from FreeLab: the compiler refuses it ("Duplicate single positioning glyph with different
+# values"). Live (IBM Plex Sans JP, 2026-11-15): its palt is "pos @palt -500;", the class defined in the
+# prefix, and a reader of the feature's own text alone let FreeLab add uni3001 to it.
+# ---------------------------------------------------------------------------
 
-    def members(name, depth=0):
-        if not name.startswith(u"@"):
-            return [name]
+CLASS_DEFINITION = re.compile(u"(@[A-Za-z0-9_.\\-]+)\\s*=\\s*\\[([^\\]]*)\\]")
+GLYPH_TOKEN = u"(\\[[^\\]]*\\]|@[A-Za-z0-9_.\\-]+|[A-Za-z_.\\\\][A-Za-z0-9_.\\-\\\\]*)"  # a [list], a @class, a glyph
+# A single position: its glyphs, then one value, a record (<-10 0 -20 0>) or a number (format A: the advance
+# along the feature's direction); nothing after it (a pair, or a contextual rule, has more)
+SINGLE_POSITION = re.compile(u"^\\s*(?:enum\\s+)?pos(?:ition)?\\s+" + GLYPH_TOKEN + u"\\s*(<[^>]*>|-?[0-9]+)\\s*$")
+POSITION_KEYWORDS = (u"cursive", u"base", u"mark", u"ligature")  # (pos cursive ...: attachments, no single values)
+LOOKUP_BLOCK = re.compile(u"lookup\\s+([A-Za-z0-9_.\\-]+)(?:\\s+useExtension)?\\s*\\{(.*?)\\}\\s*\\1\\s*;", re.S)
+LOOKUP_USE = re.compile(u"^\\s*lookup\\s+([A-Za-z0-9_.\\-]+)\\s*$")
+
+
+def without_comments(text):
+    return re.sub(u"#[^\\n]*", u"", text or u"")
+
+
+def code_classes(text):
+    """{@name: [members]} of the classes a feature code (or the prefix) defines (ranges spelled out)."""
+    found = {}
+    for match in CLASS_DEFINITION.finditer(without_comments(text)):
+        found[match.group(1)] = expand_ranges(match.group(2))
+    return found
+
+
+def class_members(token, classes, depth=0):
+    """The glyphs a token names: a glyph, a [list], or a @class (classes: {@name: [members]})."""
+    token = token.strip()
+    if token.startswith(u"[") and token.endswith(u"]"):
+        return [g for part in expand_ranges(token[1:-1]) for g in class_members(part, classes, depth + 1)]
+    if token.startswith(u"@"):
         if depth > 8:
             return []
-        return [g for part in classes.get(name, []) for g in members(part, depth + 1)]
-    found, inside = set(), False
+        return [g for part in classes.get(token, []) for g in class_members(part, classes, depth + 1)]
+    return [token]
+
+
+def code_lookups(text):
+    """{name: body} of the named lookups a feature code (or the prefix) defines."""
+    return dict((m.group(1), m.group(2)) for m in LOOKUP_BLOCK.finditer(without_comments(text)))
+
+
+def feature_statements(tag, text, lookups=None, begin=BEGIN, end=END, depth=0):
+    """The statements of a feature's own code (outside FreeLab's block, begin and end % tag), each with
+    what opens a block before it on its line taken off (lookup X { sub a by b;), and a lookup the code
+    names (lookup X;), defined there or in the prefix (lookups: {name: body}), read as its rules."""
+    first, last = begin % tag, end % tag
+    known = dict(lookups or {})
+    known.update(code_lookups(text))
+    inside = False
     for line in (text or u"").splitlines():
-        stripped = line.split(u"#")[0].strip() if line.strip() not in (begin, end) else line.strip()
-        if line.strip() == begin:
+        stripped = line.strip()
+        if stripped == first:
             inside = True
             continue
-        if line.strip() == end:
+        if stripped == last:
             inside = False
             continue
         if inside:
             continue
-        match = re.match(u"(?:enum\\s+)?(?:pos|position)\\s+(\\[[^\\]]*\\]|[^\\s\\[<]+)\\s*(.*)$", stripped)
-        if not match or not match.group(2).startswith(u"<"):
-            continue  # (a pair or a contextual rule: its glyphs keep their single values)
-        target = expand_ranges(match.group(1).strip(u"[]"))
-        found.update(glyph for name in target for glyph in members(name))
+        for statement in without_comments(line).split(u";"):
+            statement = statement.split(u"{")[-1].split(u"}")[-1]
+            use = LOOKUP_USE.match(statement)
+            if use and use.group(1) in known and depth < 4:
+                for inner in feature_statements(tag, known[use.group(1)], known, begin, end, depth + 1):
+                    yield inner
+                continue
+            yield statement
+
+
+def single_positions(tag, text, classes=None, lookups=None, begin=BEGIN, end=END):
+    """[(glyph, value)] of the single positions a feature's own code gives (pos a <-10 0 -20 0>; pos [a b]
+    <...>; pos @class -500; position, enum pos), the value as written ("<-10 0 -20 0>", "-500"): the
+    classes the code defines, the font's (classes: {@name: [members]}, its prefix's and its class list's),
+    and those of the lookups it names (lookups: the prefix's, {name: body}) read too."""
+    known = dict(classes or {})
+    for body in (lookups or {}).values():
+        known.update(code_classes(body))
+    known.update(code_classes(text))
+    found = []
+    for statement in feature_statements(tag, text, lookups, begin, end):
+        match = SINGLE_POSITION.match(statement)
+        if match and match.group(1) not in POSITION_KEYWORDS:
+            found.extend((glyph, match.group(2)) for glyph in class_members(match.group(1), known))
     return found
 
 
-def texts_for(trims, old_texts, palt_on=True, halt_on=True, kept=None):
+def font_positioned(tag, text, classes=None, lookups=None, begin=BEGIN, end=END):
+    """The glyphs a feature's own code gives a single value (single_positions): FreeLab writes none for
+    them. A pair or a contextual rule is not a single value."""
+    return set(glyph for glyph, _ in single_positions(tag, text, classes, lookups, begin, end))
+
+
+def read_prefix(features):
+    """The font's feature prefix (its classes and lookups, which the features name), or None unread."""
+    try:
+        return features.get_prefix()
+    except Exception:
+        return None
+
+
+def font_classes(package, prefix):
+    """{@name: [members]} of the font's classes: FontLab's own feature classes (its class list) and those
+    its prefix defines."""
+    classes = {}
+    try:
+        for group in package.getAllGroups():
+            if not group[0]:  # (a kerning class has True)
+                classes[u"@%s" % group[1]] = [u"%s" % name for name in group[4]]
+    except Exception:
+        pass
+    try:
+        classes.update(code_classes(prefix))
+    except Exception:
+        pass
+    return classes
+
+
+def texts_for(trims, old_texts, palt_on=True, halt_on=True, kept=None, classes=None, lookups=None):
     """{tag: new code} for palt and halt from the checked trims. Glyphs the feature's own code positions
-    already keep it (no second value); kept, when given, gets {tag: [their names]}."""
+    already (font_positioned: the font's classes and the prefix's lookups read too) keep it (no second
+    value); kept, when given, gets {tag: [their names]}."""
     chosen = [t for t in trims if t.checked]
     new = {}
     for tag, on, value in (("palt", palt_on, lambda t: t.palt), ("halt", halt_on, lambda t: t.halt)):
-        own = font_positioned(tag, old_texts.get(tag))
+        own = font_positioned(tag, old_texts.get(tag), classes, lookups)
         if kept is not None and on:
             kept[tag] = [t.name for t in chosen if value(t) and t.name in own]
         rules = [value_rule(t.name, value(t)) for t in chosen if value(t) and t.name not in own] if on else []
@@ -466,6 +554,32 @@ def texts_for(trims, old_texts, palt_on=True, halt_on=True, kept=None):
         if rules or (BEGIN % tag) in (old or u""):  # (an empty feature is not made; an old block is taken out)
             new[tag] = feature_text(tag, old, rules)
     return new
+
+
+UNCOMPARED = object()
+
+
+def changed_features(features, texts, tags, prefix=UNCOMPARED):
+    """What differs in the font from the code read with the list (texts: {tag: code}, a feature the font
+    lacked then left out; prefix, when given: read_prefix's then): the tags, and "prefix". A write composed
+    from that code would undo an edit made since (Feature Code's check before it writes). A feature that
+    cannot be read counts as changed."""
+    try:
+        present = set(features.keys())
+    except Exception:
+        return list(tags)
+    changed = []
+    for tag in tags:
+        try:
+            now = features.get_feature(tag) if tag in present else None
+        except Exception:
+            changed.append(tag)
+            continue
+        if now != texts.get(tag):
+            changed.append(tag)
+    if prefix is not UNCOMPARED and read_prefix(features) != prefix:
+        changed.append(u"prefix")
+    return changed
 
 
 def block_of(tag, text):
@@ -684,6 +798,7 @@ class CJKSpacingDialog(object):
         self.tree.connect("itemDoubleClicked(QTreeWidgetItem*,int)", lambda item, column: self.show_in_glyph_window(item))
         self.package = None
         self.trims, self.first_checks, self.texts, self.names = [], [], {}, []
+        self.prefix, self.classes, self.lookups = None, {}, {}  # (read with the code: the font's own positions)
         self.seen_history, self.busy, self.buttons_due = None, False, False
         self.model = load_model()
         self.hangul_model = load_model(name=HANGUL_MODEL_FILE)
@@ -797,6 +912,12 @@ class CJKSpacingDialog(object):
         self.names = [g.name for g in package.fgPackage.glyphs]
         features = package.fgPackage.features
         self.texts = dict((tag, features.get_feature(tag)) for tag in features.keys())
+        self.prefix = read_prefix(features)  # (its classes and lookups: palt's and halt's own code may name them)
+        self.classes = font_classes(package, self.prefix)
+        try:
+            self.lookups = code_lookups(self.prefix) if self.prefix is not None else {}
+        except Exception:
+            self.lookups = {}
         self.trims = plan(glyphs, self.model, float(package.upm))
         for t in self.trims:
             t.checked = kept.get(t.name, t.checked)
@@ -1003,7 +1124,8 @@ class CJKSpacingDialog(object):
         ak.enable(self.all_button, not all(checks) if checks else False)
         ak.enable(self.none_button, any(checks))
         ak.enable(self.restore_button, checks != self.first_checks)
-        new = texts_for(self.trims, self.texts, self.palt_box.checked, self.halt_box.checked) if self.package else {}
+        new = texts_for(self.trims, self.texts, self.palt_box.checked, self.halt_box.checked, None, self.classes,
+                        self.lookups) if self.package else {}
         present = any((BEGIN % tag) in (self.texts.get(tag) or u"") for tag in ("palt", "halt"))
         changes = any(new[tag] != self.texts.get(tag) for tag in new)
         widths = bool(self.hangul_chosen())
@@ -1183,13 +1305,14 @@ class CJKSpacingDialog(object):
             return
         features = package.fgPackage.features
         kept = {}
-        new = texts_for(self.trims, self.texts, self.palt_box.checked, self.halt_box.checked, kept)
+        new = texts_for(self.trims, self.texts, self.palt_box.checked, self.halt_box.checked, kept, self.classes,
+                        self.lookups)
         for tag, names in sorted(kept.items()):
             if names:
-                self.log.add(u"%s %s positioned by the font's own %s code already: %s %s it, not FreeLab's trim "
+                self.log.add(u"%s %s positioned by the font's own %s code already: %s, not FreeLab's trim "
                              u"(two values for one glyph do not compile): %s." % (
                                  self.ak.b(counted(len(names), u"glyph")), u"is" if len(names) == 1 else u"are", tag,
-                                 u"it keeps" if len(names) == 1 else u"they keep", tag,
+                                 u"it keeps its value" if len(names) == 1 else u"they keep theirs",
                                  self.ak.html(u" ".join(names[:30]) + (u" \N{HORIZONTAL ELLIPSIS}" if len(names) > 30 else u""))),
                              "warning")
         fc = None
@@ -1206,9 +1329,25 @@ class CJKSpacingDialog(object):
         if problems:
             self.log.add(u"The code has problems, so nothing was written: %s" % self.ak.html(u"; ".join(problems)), "error")
             return
+        # The code written is composed from the code read with the list: an edit made since (before the
+        # History watcher saw it, or one that leaves the History where it was) would be replaced. Checked
+        # last, with nothing between it and the write that lets events through
+        # (the prefix and the font's classes too: the font's own positions were read through them)
+        changed = changed_features(features, self.texts, ("palt", "halt"), self.prefix)
+        if u"prefix" not in changed and font_classes(package, self.prefix) != self.classes:
+            changed.append(u"classes")
+        if changed:
+            self.run()
+            self.log.add(u"The feature code (%s) changed since the list was read: here is the list again, to check "
+                         u"before writing. Nothing was written." % self.ak.html(self.ak.joined(changed)), "warning")
+            return
         written, error, syllables = [], None, 0
         shapes = set(c.shape for c in self.hangul_chosen())
-        self.ak.before_changes(self.fontlab, package, u"FreeLab CJK Spacing")
+        try:
+            self.ak.before_changes(self.fontlab, package, u"FreeLab CJK Spacing")
+        except getattr(self.ak, "HistoryError", ()) as exc:  # (nothing written: Undo could not take it back)
+            self.log.add(u"%s" % (exc,), "error")
+            return
         try:
             for tag in ("palt", "halt"):
                 if tag in new and new[tag] != self.texts.get(tag):
@@ -1218,18 +1357,22 @@ class CJKSpacingDialog(object):
                 syllables = self.write_hangul(package, shapes)
         except Exception as exc:
             error = exc
-        self.ak.notify_changed(self.fontlab, package, u"FreeLab CJK Spacing")
+        status = self.ak.notify_changed(self.fontlab, package, u"FreeLab CJK Spacing")
+        undo = getattr(status, "recorded", True)  # (Undo promised only when FontLab's History recorded the write)
         self.run()
         if written:
             them = u"it" if len(written) == 1 else u"them"
-            self.log.add(u"Wrote %s; <i>Edit &gt; Undo</i> takes %s back.%s" % (
-                self.ak.b(u" and ".join(written)), them, self.ak.compiled_note(self.compile_box, self.log)), "done")
+            self.log.add(u"Wrote %s%s.%s" % (
+                self.ak.b(u" and ".join(written)), u"; <i>Edit &gt; Undo</i> takes %s back" % them if undo else u"",
+                self.ak.compiled_note(self.compile_box, self.log)), "done")
         if syllables:
-            self.log.add(u"Set %s in every master; the font's kerning of Hangul, if any, was set for the old widths. "
-                         u"<i>Edit &gt; Undo</i> takes it back." % self.ak.b(counted(syllables, u"syllable width", u"syllable widths")),
-                         "done")
+            self.log.add(u"Set %s in every master; the font's kerning of Hangul, if any, was set for the old widths.%s" % (
+                self.ak.b(counted(syllables, u"syllable width", u"syllable widths")),
+                u" <i>Edit &gt; Undo</i> takes it back." if undo else u""), "done")
         if not written and not syllables:
             self.log.add(u"Wrote nothing.")
+        if not getattr(status, "ok", True):
+            self.log.add(status.message(), "error")
         if error is not None:
             self.log.add(u"Stopped by an error: %s" % self.ak.html(error), "error")
 

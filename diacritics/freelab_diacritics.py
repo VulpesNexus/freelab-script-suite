@@ -3524,6 +3524,19 @@ OWN_WRITE_SECONDS = 3.0  # a History step FontLab records this soon after the di
 REVEALED_WAIT_MS = 700  # a row selected: the glyph listed to show it goes this long after (past a double-click)
 
 
+def undo_words(status, text):
+    """text, a promise of Undo, unless notify_changed's WriteStatus says FontLab's History did not record
+    the write (u"" then)."""
+    return text if getattr(status, "recorded", True) else u""
+
+
+def report_write(status, log):
+    """notify_changed's failure, if any (not recorded in the History, the font not marked modified),
+    added to the log as an error."""
+    if status is not None and not getattr(status, "ok", True):
+        log.add(status.message(), "error")
+
+
 def fit_tree_columns(tree, count):
     """A list's first `count` columns fitted to the rows it shows (Qt measures only those): with every
     section closed, to the headings alone (live 2026-11-14, Noto Sans with Also list existing glyphs
@@ -5235,7 +5248,8 @@ class AnchorPage(object):
         coded = []  # the features whose code was written (a text the font has already is not)
         # The dialog's own write: the History's next step is not an edit made in FontLab (end_write). This
         # tab did not say so, and its step was logged as "The font's History moved" (the owner's report)
-        self.owner.begin_write(package)
+        if not self.owner.begin_write(package):
+            return  # (nothing added: the reason in the log)
         try:
             for master in list(package.masters) or [self.master]:
                 planned = dict((g.name, g) for g in self.plan_for(master)[0])
@@ -5278,16 +5292,19 @@ class AnchorPage(object):
         for name, anchor_name in written:  # the font has these moves now (read again below): only those not written stay
             chosen[name].adjust.pop(anchor_name, None)
         wrote = bool(written) or bool(coded)
+        status = None
         try:
             if wrote:  # (a write of nothing makes no History step, which the watch would read as FontLab's)
-                self.ak.notify_changed(self.fontlab, package, u"FreeLab Diacritics anchors", touched)
+                status = self.ak.notify_changed(self.fontlab, package, u"FreeLab Diacritics anchors", touched)
         finally:
             self.owner.end_write(package, wrote)
         if wrote:
-            self.owner.log.add(u"Added %s%s to %s%s. <i>Edit &gt; Undo</i> takes it back." % (
+            self.owner.log.add(u"Added %s%s to %s%s.%s" % (
                 self.ak.b(counted(added, u"anchor")), (u" and moved %s" % self.ak.b(moved)) if moved else u"",
                 self.ak.b(counted(len(touched), u"glyph")),
-                u", and wrote the %s code" % u", ".join(coded) if coded else u""), "done")
+                u", and wrote the %s code" % u", ".join(coded) if coded else u"",
+                undo_words(status, u" <i>Edit &gt; Undo</i> takes it back.")), "done")
+            report_write(status, self.owner.log)
         elif error is None:
             self.owner.log.add(u"Nothing was added: the checked glyphs have their anchors in every master already%s." % (
                 u", and the font has the mark code as written" if new_texts else u""))
@@ -6333,7 +6350,9 @@ class AccentsDialog(object):
                 name = corrected(source, axis)
                 asked.append(name)
                 return name
-            self.begin_write(package)
+            if not self.begin_write(package):
+                return  # (nothing corrected: the reason in the log)
+            status = None
             try:
                 self.correct_targets(package, masters, targets, counting, asked, used, touched, done, failed)
                 unused = [name for name in made if name not in used]  # made for a glyph then left as it was
@@ -6345,15 +6364,18 @@ class AccentsDialog(object):
                 touched = [glyph for glyph in touched if u"%s" % getattr(glyph, "name", u"") not in unused]
                 made = [name for name in made if name in used]
                 if touched:
-                    self.ak.notify_changed(self.fontlab, package, u"FreeLab Diacritics mirrored components", touched)
+                    status = self.ak.notify_changed(self.fontlab, package, u"FreeLab Diacritics mirrored components",
+                                                    touched)
             finally:
                 self.end_write(package, bool(touched))
             b, html = self.ak.b, self.ak.html
             if done:
                 self.log.add(corrected_text(len(done), len(made), b) + u": %s%s. The letters stay glyphs of "
-                             u"components and look as they did; <i>Edit &gt; Undo</i> takes it back." % (
-                                 self.ak.glyph_links(done), (u"; added: %s" % html(u", ".join(made))) if made else u""),
+                             u"components and look as they did%s." % (
+                                 self.ak.glyph_links(done), (u"; added: %s" % html(u", ".join(made))) if made else u"",
+                                 undo_words(status, u"; <i>Edit &gt; Undo</i> takes it back")),
                              "done")
+            report_write(status, self.log)
             for char, why in failed:
                 self.log.add(u"%s keeps a mirrored component: %s." % (b(char), html(why)), "warning")
             self.run()
@@ -6763,10 +6785,18 @@ class AccentsDialog(object):
     def begin_write(self, package):
         """Before a write to the font (Build, Correct mirrored components, Add anchors): the History
         watch held (watch_history skips while busy), the font recorded where Undo needs it
-        (before_changes), and where the History stands then noted."""
+        (before_changes), and where the History stands then noted. True when the write may go ahead;
+        False, with the reason in the log, when FontLab's History could not record the font first: nothing
+        may be written then (Undo could not take it back)."""
         self.busy = True
-        self.ak.before_changes(self.fontlab, package, u"FreeLab Diacritics")
+        try:
+            self.ak.before_changes(self.fontlab, package, u"FreeLab Diacritics")
+        except getattr(self.ak, "HistoryError", Exception) as exc:
+            self.busy = False
+            self.log.add(u"%s" % (exc,), "error")
+            return False
         self.write_from = self.history_of(package)
+        return True
 
     def history_of(self, package):
         """Where the font stands in FontLab's History (Auto Kerning's history_mark), or None."""
@@ -7650,7 +7680,8 @@ class AccentsDialog(object):
         used = set()  # the corrected glyphs a glyph built points to
         corrected = self.corrector(package, masters, helpers, touched)
         changing = None  # the glyph whose layers are being changed, for touched should an error stop the build
-        self.begin_write(package)
+        if not self.begin_write(package):
+            return  # (nothing built: the reason in the log)
         try:
             for r in chosen:
                 glyph = package.findName(r.name)
@@ -7781,24 +7812,29 @@ class AccentsDialog(object):
                 pass
         touched = [glyph for glyph in touched if u"%s" % getattr(glyph, "name", u"") not in unused]
         helpers = [name for name in helpers if name in used]
+        status = None
         try:
-            self.ak.notify_changed(fontlab, package, u"FreeLab Diacritics", touched)
+            status = self.ak.notify_changed(fontlab, package, u"FreeLab Diacritics", touched)
         finally:
             self.end_write(package, bool(touched))
         b = self.ak.b
         if made:
             one = len(made) == 1
-            self.log.add(u"Built %s: %s. %s at the end of the font; <i>Edit &gt; Undo</i> takes %s back. "
+            self.log.add(u"Built %s: %s. %s at the end of the font%s. "
                          u"<i>Check kerning of %s</i> looks at %s pairs." % (
                              b(counted(len(made), u"glyph")), self.ak.html(u"".join(made)), u"It is" if one else u"They are",
-                             u"it" if one else u"them", u"this glyph" if len(self.built_names) == 1 else u"these glyphs",
+                             undo_words(status, u"; <i>Edit &gt; Undo</i> takes %s back" % (u"it" if one else u"them")),
+                             u"this glyph" if len(self.built_names) == 1 else u"these glyphs",
                              u"its" if len(self.built_names) == 1 else u"their"), "done")
         elif not rebuilt:
             self.log.add(u"Built none.")
         if rebuilt:
-            self.log.add(u"Rebuilt %s from %s letter and marks, in place: %s. <i>Edit &gt; Undo</i> takes %s back." % (
+            self.log.add(u"Rebuilt %s from %s letter and marks, in place: %s.%s" % (
                 b(counted(len(rebuilt), u"glyph")), u"its" if len(rebuilt) == 1 else u"their",
-                self.ak.html(u"".join(rebuilt)), u"it" if len(rebuilt) == 1 else u"them"), "done")
+                self.ak.html(u"".join(rebuilt)),
+                undo_words(status, u" <i>Edit &gt; Undo</i> takes %s back." % (u"it" if len(rebuilt) == 1 else u"them"))),
+                "done")
+        report_write(status, self.log)
         close = []
         for r in chosen:  # built in spite of a mark too close: named, to look at
             if r.char in made or r.char in rebuilt:

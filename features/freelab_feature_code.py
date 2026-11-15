@@ -651,6 +651,7 @@ def check_code(text, names):
 # ---------------------------------------------------------------------------
 
 FORMS = "forms"  # FreeLab's block in each form feature
+EMPTIED_UNDO = u"; Edit > Undo puts it back"  # (said of a form left empty, when FontLab's History recorded the build)
 LANGUAGES_BLOCK = "languages"  # and in the prefix, the language systems locl needs
 FORM_TITLES = {
     "locl": u"Localized Forms", "case": u"Case-Sensitive Forms", "frac": u"Fractions", "numr": u"Numerators",
@@ -4564,7 +4565,9 @@ class FeatureCodeDialog(object):
         # how far the kept strokes' sides moved in the current master (asked: the form's under way)
         unkept, lost, offsets, asked = [], [0, 0, 0, 0, 0, 0], [], []
         self.stems = {}
-        self.ak.before_changes(fontlab, package, u"FreeLab Feature Code")  # (a form built again: its glyph is changed)
+        # (a form built again: its glyph is changed)
+        if not self.ak.begin_write(fontlab, package, u"FreeLab Feature Code", self.log):
+            return  # (nothing built: the reason in the log)
         try:
             for master in masters:
                 plans_of(master)  # (each master planned before anything is added)
@@ -4631,8 +4634,8 @@ class FeatureCodeDialog(object):
                 if not placed or is_empty(package.findName(form.name)):
                     if again:  # (this window's own glyph, left empty: said, and Edit > Undo puts it back)
                         touched.append(glyph)
-                        failed.append((form.name, u"FontLab did not keep its new components, and it is empty; "
-                                                  u"Edit > Undo puts it back"))
+                        failed.append((form.name, u"FontLab did not keep its new components, and it is empty" +
+                                       EMPTIED_UNDO))
                         continue
                     failed.append((form.name, u"FontLab did not keep its components"))
                     package.deleteGlyph(package.findName(form.name))
@@ -4656,7 +4659,9 @@ class FeatureCodeDialog(object):
                         lost = [a + b for a, b in zip(lost, done)]
         except Exception as exc:  # what was made stays made, and is reported
             error = exc
-        self.ak.notify_changed(fontlab, package, u"FreeLab Feature Code", touched)
+        status = self.ak.notify_changed(fontlab, package, u"FreeLab Feature Code", touched)
+        if not status.recorded:  # (no Undo to promise)
+            failed = [(name, why.replace(EMPTIED_UNDO, u"")) for name, why in failed]
         try:  # what each glyph is now, and from what it was built: a later build may replace it
             records = self.built.setdefault(self.ak.font_key(package), {})
             for name in made:
@@ -4678,7 +4683,7 @@ class FeatureCodeDialog(object):
             if replaced:  # (the glyphs this window built before, made again with the settings shown)
                 words.append(u"Replaced %s built here before, with the settings shown: %s." % (
                     b(counted(len(replaced), u"glyph")), self.ak.glyph_name_links(replaced)))
-            words.append(u"<i>Edit &gt; Undo</i> takes %s back." % (u"it" if one else u"them"))
+            words.append(status.undo(u"<i>Edit &gt; Undo</i> takes %s back." % (u"it" if one else u"them")))
             words.append(u"Made of outlines, strokes at %d%% of the scaled ones%s: %s." % (
                 strokes, offset_words(offsets), self.ak.glyph_name_links(kept)) if kept else
                 u"Scaling thins strokes: draw over what was scaled.")
@@ -4689,9 +4694,10 @@ class FeatureCodeDialog(object):
                 words.append(u"%s, as built before with these settings, %s left as %s." % (
                     counted(len(same), u"glyph"), u"was" if len(same) == 1 else u"were",
                     u"it was" if len(same) == 1 else u"they were"))
-            self.log.add(u" ".join(words), "done")
+            self.log.add(u" ".join(word for word in words if word), "done")
         else:
             self.log.add(u"Built none.")
+        status.report(self.log)
         if unkept:  # (said, not assumed: the outlines were read back after they were written)
             drawn = (u", %s drawn as before" % counted(lost[5], u"shape")) if lost[5] else u""
             self.log.add(u"FontLab did not keep the thicker strokes of %s: %s. Read back, %s as scaled (%s in %s, "
@@ -5107,15 +5113,17 @@ class FeatureCodeDialog(object):
         finally:
             self.set_busy(False)
         # (the feature code only: the font's own state, which needs no before_changes, and no glyph added)
-        self.ak.notify_changed(self.fontlab, self.package, u"FreeLab Feature Code", added=False)
+        status = self.ak.notify_changed(self.fontlab, self.package, u"FreeLab Feature Code", added=False)
         forms = self.form_state()
         self.run()
         self.apply_form_state(forms)
         self.make_code()
         them = u"it" if len(written) == 1 else u"them"
-        self.log.add(u"Wrote %s; <i>Edit &gt; Undo</i> takes %s back.%s" % (
-            self.ak.b(u", ".join(written)), them, self.ak.compiled_note(self.compile_box, self.log)) if written else u"Wrote nothing.",
+        self.log.add(u"Wrote %s%s.%s" % (
+            self.ak.b(u", ".join(written)), status.undo(u"; <i>Edit &gt; Undo</i> takes %s back" % them),
+            self.ak.compiled_note(self.compile_box, self.log)) if written else u"Wrote nothing.",
             "done" if written else "info")
+        status.report(self.log)
         if skipped is not None:
             self.log.add(u"locl was not written: the prefix could not be (%s). Add these lines to the prefix in "
                          u"FontLab's <i>Features</i> panel, then write again: %s" % (

@@ -406,6 +406,205 @@ class ScopeTests(unittest.TestCase):
         self.assertNotIn(u"\N{LATIN CAPITAL LIGATURE OE}", icelandic[0].base)
 
 
+def narrow_char(code):
+    """A code point as FontLab's narrow Python 2.7 holds it: past U+FFFF, two UTF-16 surrogates."""
+    if code <= 0xFFFF:
+        return u(code)
+    code -= 0x10000
+    return u(0xD800 + (code >> 10)) + u(0xDC00 + (code & 0x3FF))
+
+
+SHAVIAN_PEEP, SHAVIAN_TOT = 0x10450, 0x10451
+ADLAM_ALIF, ADLAM_SMALL_ALIF = 0x1E900, 0x1E922  # (Unicode 9.0)
+# Blocks Unicode 5.2 lacks that these tests use: Adlam, Georgian Mtavruli, Tai Yo
+AFTER_UNICODE_52 = ((0x1E900, 0x1E95F), (0x1C90, 0x1CBF), (0x1E6C0, 0x1E6FF))
+
+
+class Unicode52(object):
+    """unicodedata as FontLab's Python 2.7.18 answers (a narrow build, Unicode 5.2): a character past U+FFFF
+    is a pair of UTF-16 units, which it reads as one (probed with that interpreter, 2026-11-15: Shavian
+    PEEP is Lo, SHAVIAN LETTER PEEP), and a character encoded after Unicode 5.2 is unassigned (Cn, no
+    name). Everything else is the running Python's own module."""
+
+    def __init__(self, real):
+        self.real = real
+
+    def __getattr__(self, name):
+        return getattr(self.real, name)
+
+    def code(self, ch):
+        points = fp.code_points(ch)
+        if len(points) != 1:
+            raise TypeError("need a single Unicode character as parameter")
+        return points[0]
+
+    def wide(self, code):
+        try:
+            return unichr(code)  # noqa: F821 (Python 2: a narrow build's own module reads the pair)
+        except NameError:
+            return chr(code)
+        except ValueError:
+            return narrow_char(code)
+
+    def category(self, ch):
+        code = self.code(ch)
+        if any(low <= code <= high for low, high in AFTER_UNICODE_52):
+            return u"Cn"
+        return self.real.category(self.wide(code))
+
+    def name(self, ch, *default):
+        code = self.code(ch)
+        if any(low <= code <= high for low, high in AFTER_UNICODE_52):
+            if default:
+                return default[0]
+            raise ValueError("no such name")
+        return self.real.name(self.wide(code), *default)
+
+
+class NarrowBuildTests(unittest.TestCase):
+    """Review: Proof classed glyphs by the running Python's unicodedata. FontLab's is a narrow build of
+    Unicode 5.2: a letter encoded since (Adlam, Georgian's Mtavruli, Tai Yo) had no script, so a Latin-only
+    proof kept it as it keeps punctuation, and a language's characters past U+FFFF were split into their
+    UTF-16 units (ord over each). (The review said the pairs themselves were refused; FontLab's 2.7.18
+    reads a pair as one character, and knows Shavian.) Modeled here under either interpreter: char_of
+    hands out two surrogates past U+FFFF, and unicodedata answers as Unicode52 does."""
+
+    def setUp(self):
+        import unicodedata
+        for name, value in (("char_of", narrow_char), ("unicodedata", Unicode52(unicodedata))):
+            self.addCleanup(setattr, fp, name, getattr(fp, name))
+            setattr(fp, name, value)
+
+    def font(self, extra=()):
+        glyphs = [(u"a", 0x61), (u"b", 0x62), (u"H", 0x48), (u"zero", 0x30), (u"period", 0x2E), (u"peep", SHAVIAN_PEEP),
+                  (u"tot", SHAVIAN_TOT), (u"alif", ADLAM_ALIF), (u"alif.lc", ADLAM_SMALL_ALIF)] + list(extra)
+        return fp.ProofFont(u"Test", u"Regular", 1000, [name for name, _ in glyphs] + [u"peep.alt"],
+                            dict((name, [code]) for name, code in glyphs), lambda name: 500, {}, 800, -200)
+
+    def test_the_model_is_fontlabs_python(self):
+        self.assertEqual(len(fp.char_of(SHAVIAN_PEEP)), 2)
+        self.assertEqual(fp.unicodedata.category(fp.char_of(SHAVIAN_PEEP)), u"Lo", "a pair read as one")
+        self.assertEqual(fp.unicodedata.category(fp.char_of(ADLAM_ALIF)), u"Cn", "newer than Unicode 5.2")
+        self.assertEqual(fp.unicodedata.category(u"a"), u"Ll")
+
+    def test_letters_past_the_first_plane_have_their_script_and_kind(self):
+        self.assertEqual(fp.script_case(SHAVIAN_PEEP), (u"SHAVIAN", None))
+        self.assertEqual(fp.category(SHAVIAN_PEEP), u"Lo")
+        self.assertEqual(fp.script_case(0x10400), (u"DESERET", "upper"))
+        self.assertEqual(fp.script_case(0x10428), (u"DESERET", "lower"))
+        self.assertEqual(fp.script_case(0x20000), (u"CJK", None), "a range's letters: CJK Extension B")
+        self.assertEqual(fp.script_case(0x1D7CE), ("FIGURE", None), "a mathematical digit")
+        self.assertEqual(fp.category(0x1F600), u"So")
+        self.assertEqual(fp.category(0x1E6C0), u"Lo", "Unicode 17's Tai Yo, whatever the interpreter knows")
+        self.assertEqual(fp.script_case(0x1C90), (u"GEORGIAN", "upper"), "Mtavruli (Unicode 11), unknown to Unicode 5.2")
+        self.assertEqual(fp.script_case(ADLAM_ALIF), (u"ADLAM", "upper"))
+        self.assertEqual(fp.script_case(ADLAM_SMALL_ALIF), (u"ADLAM", "lower"))
+
+    def test_a_latin_proof_leaves_other_scripts_out_and_each_is_a_scope(self):
+        font = self.font()
+        kept = fp.scope_names(font, ("script", u"LATIN"))
+        self.assertEqual(sorted(kept), [u"H", u"a", u"b", u"period", u"zero"], "no Adlam, no Shavian")
+        kept = fp.scope_names(font, ("script", u"SHAVIAN"))
+        self.assertEqual(sorted(kept), [u"peep", u"peep.alt", u"period", u"tot", u"zero"])
+        self.assertEqual(fp.glyph_script(font, u"peep.alt"), u"SHAVIAN", "an alternate of a Shavian letter")
+        kept = fp.scope_names(font, ("script", u"ADLAM"))
+        self.assertEqual(sorted(kept), [u"alif", u"alif.lc", u"period", u"zero"])
+
+    def test_a_language_reads_its_characters_as_code_points(self):
+        language = type("L", (), {"base": [narrow_char(ADLAM_ALIF), narrow_char(ADLAM_SMALL_ALIF)],
+                                  "auxiliary": [narrow_char(SHAVIAN_PEEP)]})()
+        kept = fp.scope_names(self.font(), ("language", language))
+        self.assertTrue(set([u"alif", u"alif.lc", u"peep"]) <= kept, "each pair of units read as one code point")
+        self.assertNotIn(u"tot", kept)
+        self.assertNotIn(u"b", kept)
+
+    def test_a_scripts_letters_too_few_for_a_text_are_classed_by_the_table(self):
+        georgian = fp.Language(u"kat", u"Georgian", u"Georgian", 1000, [narrow_char(0x1C90), u"a"])
+        font = self.font(extra=[(u"an.capital", 0x1C90)])
+        self.assertEqual(dict(fp.thin_scripts(font, [georgian], [])), {u"Georgian": narrow_char(0x1C90)},
+                         "Mtavruli, unknown to Unicode 5.2, is Georgian's; the Latin a is not")
+
+    def test_what_is_unknown_is_never_kept_as_punctuation(self):
+        font = self.font(extra=[(u"unassigned", 0x0378), (u"icon", 0xE000)])
+        kept = fp.scope_names(font, ("script", u"LATIN"))
+        self.assertNotIn(u"unassigned", kept, "a code point Unicode does not assign")
+        self.assertIn(u"icon", kept, "a private-use glyph is a symbol of the font's own")
+        held = list(fp._CATEGORIES)
+        fp._CATEGORIES[:] = [None]  # (the table missing: the running Python answers where it can)
+        try:
+            kept = fp.scope_names(font, ("script", u"LATIN"))
+            self.assertNotIn(u"alif", kept, "unknown to Unicode 5.2: left out, not kept as a symbol")
+            self.assertNotIn(u"peep", kept, "Shavian, which Unicode 5.2 knows")
+            self.assertTrue(set([u"a", u"zero", u"period", u"icon"]) <= kept)
+        finally:
+            fp._CATEGORIES[:] = held
+
+    def test_the_table_agrees_with_the_names(self):
+        """The table's first words are the names' (Python 3, whose data reads every character)."""
+        import unicodedata
+        if sys.version_info[0] < 3:
+            return
+        fp.char_of = chr
+        # (U+0295, Ll in Unicode 16, is Lo in 17: what the interpreter's older data says otherwise)
+        changed = set() if unicodedata.unidata_version == "17.0.0" else set([0x295])
+        differ = []
+        for code in list(range(0x20, 0x3000)) + list(range(0x10000, 0x10800)):
+            ch = chr(code)
+            kind = unicodedata.category(ch)
+            if kind == "Cn" or code in changed:
+                continue
+            found = fp.unicode_class(code)
+            if found is None or found[0] != kind:
+                differ.append((hex(code), kind, found))
+            elif kind.startswith("L") and found[1] != unicodedata.name(ch).replace("-", " ").split()[0]:
+                differ.append((hex(code), unicodedata.name(ch), found))
+        self.assertEqual(differ, [])
+
+
+class SignScriptTests(unittest.TestCase):
+    """Live pass (ADLaM Display, 2026-11-15): a Latin-only proof kept Adlam's digits (U+1E950 to U+1E959)
+    and its initial marks (U+1E95E, U+1E95F) on its character set, spacing strings, and figures and
+    punctuation pages: a sign that is no letter belongs to the script Unicode's Script property gives it
+    (Scripts.txt), and only a Common or Inherited one (the ASCII digits, the period, a combining accent) is
+    every script's."""
+
+    GLYPHS = [(u"a", 0x61), (u"b", 0x62), (u"H", 0x48), (u"zero", 0x30), (u"period", 0x2E), (u"acutecomb", 0x301),
+              (u"alif", 0x1E900), (u"alifsmall", 0x1E922), (u"nukta", 0x1E94A), (u"adlamzero", 0x1E950),
+              (u"adlamone", 0x1E951), (u"initialexclam", 0x1E95E), (u"initialquestion", 0x1E95F)]
+    ADLAM = [u"adlamone", u"adlamzero", u"alif", u"alifsmall", u"initialexclam", u"initialquestion", u"nukta"]
+    SHARED = [u"acutecomb", u"period", u"zero"]
+
+    def font(self):
+        return fp.ProofFont(u"Test", u"Regular", 1000, [name for name, _ in self.GLYPHS] + [u"adlamzero.ss01"],
+                            dict((name, [code]) for name, code in self.GLYPHS), lambda name: 500, {}, 800, -200)
+
+    def test_the_script_property(self):
+        self.assertEqual([fp.code_script(code) for code in (0x1E950, 0x1E95E, 0x1E94A, 0x61, 0x30, 0x2E, 0x301)],
+                         [u"Adlam", u"Adlam", u"Adlam", u"Latin", None, None, None], "Common and Inherited: no script")
+        self.assertEqual([fp.sign_scripts(code) for code in (0x1E950, 0x1E95F, 0x30, 0x1E900)],
+                         [frozenset([u"ADLAM"])] * 2 + [None, None], "a letter's script is script_case's")
+        self.assertEqual([sorted(fp.script_words(name)) for name in (u"Adlam", u"Latin", u"Hiragana")],
+                         [[u"ADLAM"], [u"LATIN"], [u"HENTAIGANA", u"HIRAGANA"]], "the words its letters carry")
+        self.assertIn(u"CJK", fp.script_words(u"Han"))
+
+    def test_a_latin_proof_leaves_adlams_signs_out(self):
+        kept = fp.scope_names(self.font(), ("script", u"LATIN"))
+        self.assertEqual(sorted(kept), sorted([u"H", u"a", u"b"] + self.SHARED))
+        kept = fp.scope_names(self.font(), ("script", u"ADLAM"))
+        self.assertEqual(sorted(kept), sorted(self.ADLAM + self.SHARED + [u"adlamzero.ss01"]),
+                         "an Adlam figure's alternate too")
+        figures = [name for _, tokens in fp.figure_rows(fp.restricted(self.font(), fp.scope_names(
+            self.font(), ("script", u"LATIN")))) for names, _ in tokens for name in names]
+        self.assertFalse(set(figures) & set(self.ADLAM), figures)
+
+    def test_a_languages_proof_keeps_its_own_scripts_signs(self):
+        spanish = type("L", (), {"base": [u"a", u"b"], "auxiliary": []})()
+        self.assertEqual(sorted(fp.scope_names(self.font(), ("language", spanish))), sorted([u"a", u"b"] + self.SHARED))
+        fulah = type("L", (), {"base": [narrow_char(0x1E900), narrow_char(0x1E922)], "auxiliary": []})()
+        self.assertEqual(sorted(fp.scope_names(self.font(), ("language", fulah))),
+                         sorted(self.ADLAM + self.SHARED + [u"adlamzero.ss01"]))
+
+
 class SampleTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

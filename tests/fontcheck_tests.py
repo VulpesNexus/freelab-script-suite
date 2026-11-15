@@ -3022,6 +3022,9 @@ class FakePackage(object):
     def currentHistoryState(self):
         return 1
 
+    def setFlag(self, flag, value):  # (marked modified, as notify_changed does)
+        self.__dict__.setdefault("flags", []).append((flag, value))
+
 
 class ReorderShapesTests(unittest.TestCase):
     """flLayer.reorderShapes is unproven: whichever way it reads its list, the components end in the

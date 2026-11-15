@@ -1047,7 +1047,8 @@ def _watcher():
                     _note_error("watcher", exc)
                 return False
 
-        state["watcher"] = StyleWatcher()
+        app = _qt()[0].instance()
+        state["watcher"] = StyleWatcher(app) if app is not None else StyleWatcher()  # (held: see _new_timer)
     return state["watcher"]
 
 
@@ -3251,22 +3252,63 @@ def _connect_timeout(timer, callback):
         timer.timeout.connect(callback)
 
 
+def _timer_slot(name):
+    """A timer's slot: the function of that name in the version of this module loaded now. Uses only
+    what its closure holds, so a timer kept across reloads calls the current version."""
+    modules, holder = sys.modules, sys
+
+    def slot():
+        state = getattr(holder, "_freelab_dark_mode", None) or {}
+        module = modules.get(MODULE_NAME) or state.get("module")
+        if module is not None:
+            getattr(module, name)()
+    return slot
+
+
+def _new_timer(name=None):
+    """A timer whose parent is FontLab's application, so PythonQt never deletes it (it deletes a timer
+    made from Python with no parent the moment its last Python reference goes, even while that timer
+    emits: the worker stopping itself in its own timeout did that). Dark mode keeps its timers and
+    starts them again rather than making new ones; Qt deletes them with the application."""
+    QApplication, QTimer = _qt()[0], _qt()[4]
+    app = QApplication.instance()
+    timer = QTimer(app) if app is not None else QTimer()
+    if name is not None:
+        _connect_timeout(timer, _timer_slot(name))
+    return timer
+
+
+def _kept_timers(state):
+    """Every timer dark mode made, held for the session: never let go, so never PythonQt's to delete."""
+    return state.setdefault("kept_timers", {})
+
+
 def _start_timer(state, key, interval, callback):
-    if state[key] is not None:
+    """Start the timer of that key (made once, kept: _new_timer) unless it runs; callback is a function of
+    this module, called through _timer_slot."""
+    if state.get(key) is not None:
         return
-    timer = _qt()[4]()
+    kept = _kept_timers(state)
+    timer = kept.get(key)
+    if timer is None or not _alive(timer):
+        timer = kept[key] = _new_timer(callback.__name__)
     timer.setInterval(interval)
-    _connect_timeout(timer, callback)
     timer.start()
     state[key] = timer
 
 
 def _stop_timer(state, key):
-    if state[key] is not None:
+    """Stop the timer of that key; state[key] goes back to None, but the timer stays held (kept_timers):
+    this may run inside that very timer's timeout (the worker stops itself)."""
+    timer = state.get(key)
+    if timer is not None:
         try:
-            state[key].stop()
+            timer.stop()
         except Exception:
             pass
+        kept = _kept_timers(state)
+        if kept.get(key) is not timer:  # (one an earlier version made, parentless: held for the session)
+            state.setdefault("retired_timers", []).append(timer)
         state[key] = None
 
 
@@ -3361,6 +3403,40 @@ def hooks_path():
     return os.environ.get("FREELAB_HOOKS_DLL") or os.path.join(state_dir(), "bin", name)
 
 
+NATIVE_QT_VERSION = "5.14.2"  # the Qt the native engine's wrappers were written against (MSVC, 64-bit)
+
+
+def _qt_runtime_version():
+    """The version of the Qt5Core.dll loaded in this process, from its own qVersion() (an undecorated C
+    export), or None."""
+    try:
+        import ctypes
+        kernel32 = ctypes.WinDLL("kernel32")
+        kernel32.GetModuleHandleW.restype = ctypes.c_void_p
+        kernel32.GetModuleHandleW.argtypes = [ctypes.c_wchar_p]
+        handle = kernel32.GetModuleHandleW(u"Qt5Core.dll")
+        if not handle:
+            return None
+        function = ctypes.PyDLL("Qt5Core.dll", handle=handle).qVersion
+        function.restype = ctypes.c_char_p
+        return function().decode("ascii", "replace")
+    except Exception:
+        return None
+
+
+def native_build_problem(version, pointer_bytes):
+    """Why this process is not the build the native engine knows, or None. Checked: a 64-bit process and
+    Qt's own version, exactly; then (freelab_hooks_init, freelab_hooks_add_module) the MSVC-decorated Qt
+    exports and FontLab's imports it hooks. Not checked: the compiler a same-version Qt was built with,
+    or its object layouts beyond that (docs/NATIVE.md)."""
+    if pointer_bytes != 8:
+        return "the native engine needs a 64-bit FontLab"
+    if version != NATIVE_QT_VERSION:
+        return "Qt is %s, not the build the native engine knows (Qt %s)" % (version or "of an unknown version",
+                                                                          NATIVE_QT_VERSION)
+    return None
+
+
 def _hooks():
     """The hooks library, loaded once per FontLab session (its import-table state lives in it), or None."""
     holder = _state()
@@ -3374,6 +3450,9 @@ def _hooks():
     lib = ctypes.PyDLL(path)  # keeps the interpreter lock: the wrappers never call back into Python
     if lib.freelab_hooks_version() != HOOKS_VERSION * 1000 + NATIVE_VERSION:
         raise RuntimeError("the native engine's library is another version")
+    problem = native_build_problem(_qt_runtime_version(), ctypes.sizeof(ctypes.c_void_p))
+    if problem:  # (before anything is looked up or hooked)
+        raise RuntimeError(problem)
     lib.freelab_hooks_init.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
     lib.freelab_hooks_add_module.argtypes = [ctypes.c_void_p]
     lib.freelab_hooks_set_palette.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
@@ -4063,12 +4142,12 @@ def status():
 
 
 def _cancel_timers(state):
+    """The reapply timers stopped, and kept (schedule_reapply starts them again)."""
     for timer in state["timers"]:
         try:
             timer.stop()
         except Exception:
             pass
-    state["timers"] = []
 
 
 def _reapply_if_on():
@@ -4082,16 +4161,21 @@ def _reapply_if_on():
 
 def schedule_reapply():
     """Apply again shortly after startup, in case FontLab sets its own style after this script."""
-    QTimer = _qt()[4]
     state = _state()
     _cancel_timers(state)
-    for delay in REAPPLY_DELAYS_MS:
-        timer = QTimer()
-        timer.setSingleShot(True)
+    timers = state["timers"]
+    for index, delay in enumerate(REAPPLY_DELAYS_MS):
+        timer = timers[index] if index < len(timers) and _alive(timers[index]) else None
+        if timer is None:  # (made once, kept for the session: _new_timer)
+            timer = _new_timer("_reapply_if_on")
+            timer.setSingleShot(True)
+            if index < len(timers):
+                state.setdefault("retired_timers", []).append(timers[index])
+                timers[index] = timer
+            else:
+                timers.append(timer)
         timer.setInterval(delay)
-        _connect_timeout(timer, _reapply_if_on)
         timer.start()
-        state["timers"].append(timer)  # kept referenced until they fire
 
 
 # ---------------------------------------------------------------------------

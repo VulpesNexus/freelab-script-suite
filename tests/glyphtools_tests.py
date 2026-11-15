@@ -959,7 +959,7 @@ class AnchorPageTests(unittest.TestCase):
         page.writes = []  # (what the owner was told of the write: begin, end)
         page.owner = Stub(current_font=lambda: package, package_key=lambda p: (u"a.vfc", 1) if p is not None else None,
                           log=Stub(add=lambda text, kind="info": None),
-                          begin_write=lambda p: page.writes.append("begin"),
+                          begin_write=lambda p: page.writes.append("begin") or True,  # (True: the font recorded)
                           end_write=lambda p, wrote=True: page.writes.append("end" if wrote else "end, nothing"))
         page.ak = Stub(notify_changed=lambda *args: None, b=lambda text: u"%s" % text, html=lambda text: u"%s" % text)
         page.fontlab = Stub(flPinPoint=lambda point: Anchor(point))

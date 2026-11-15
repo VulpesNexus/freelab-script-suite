@@ -900,17 +900,85 @@ class BeforeChangesTests(unittest.TestCase):
         ak.notify_changed(self.fontlab, package, u"FreeLab Auto Kerning", added=False)
         self.assertEqual(self.items.updates, [10, 10], "kerning only: not told")
 
+    # Failures of FontLab's History or modified mark were swallowed, and the tools then wrote and promised
+    # Undo (review of 2026-11-15): each of the three calls fails here on its own
+
+    def test_a_failed_first_record_writes_nothing(self):
+        package = HistoryPackage(11)
+
+        def refuse(title, objects, recursive):
+            raise RuntimeError("History refused")
+        self.items.notifyChangesApplied = refuse
+        with self.assertRaises(ak.HistoryError):
+            ak.before_changes(self.fontlab, package, u"FreeLab Auto Spacing")
+        logged = []
+        log = type("Log", (), {"add": lambda _, text, kind="info": logged.append((kind, text))})()
+        self.assertFalse(ak.begin_write(self.fontlab, package, u"FreeLab Auto Spacing", log))
+        self.assertEqual([kind for kind, _ in logged], ["error"])
+        self.assertIn(u"Nothing was changed", logged[0][1])
+        self.assertIn(u"History refused", logged[0][1])
+        self.assertNotIn(11, sys._freelab_history["whole"], "not taken as recorded: the next write tries again")
+
+    def test_a_failed_step_is_reported_without_the_undo_promise(self):
+        package = HistoryPackage(12)
+        self.assertTrue(ak.begin_write(self.fontlab, package, u"FreeLab Auto Spacing", None))
+
+        def refuse(title, objects, recursive):
+            raise RuntimeError("History refused")
+        self.items.notifyChangesApplied = refuse
+        status = ak.notify_changed(self.fontlab, package, u"FreeLab Auto Spacing")
+        self.assertFalse(status.recorded)
+        self.assertTrue(status.marked, "the font marked modified all the same")
+        self.assertEqual(status.undo(u"Undo takes it back."), u"")
+        logged = []
+        log = type("Log", (), {"add": lambda _, text, kind="info": logged.append((kind, text))})()
+        self.assertFalse(status.report(log))
+        self.assertEqual([kind for kind, _ in logged], ["error"])
+        self.assertIn(u"cannot take it back", logged[0][1])
+        self.assertIn(u"close the font without saving", logged[0][1])
+        self.assertNotIn(12, sys._freelab_history["whole"], "the next write records the font first again")
+
+    def test_a_font_left_unmarked_is_reported(self):
+        package = HistoryPackage(13)
+
+        def refuse(flag, value):
+            raise RuntimeError("no flag")
+        package.setFlag = refuse
+        ak.before_changes(self.fontlab, package, u"FreeLab flag")
+        status = ak.notify_changed(self.fontlab, package, u"FreeLab flag")
+        self.assertTrue(status.recorded)
+        self.assertFalse(status.marked)
+        self.assertFalse(status.ok)
+        self.assertEqual(status.undo(u"Undo takes it back."), u"Undo takes it back.", "the History has the step")
+        self.assertIn(u"save the font before closing it", status.message())
+
+    def test_a_failed_redraw_is_not_a_failed_write(self):
+        package = HistoryPackage(14)
+        glyph = HistoryObject("A")
+
+        def broken():
+            raise RuntimeError("no redraw")
+        glyph.update = broken
+        self.items.notifyPackageContentUpdated = lambda key: broken()
+        ak.before_changes(self.fontlab, package, u"FreeLab Diacritics", [glyph])
+        package.glyphsCount += 1
+        status = ak.notify_changed(self.fontlab, package, u"FreeLab Diacritics", [glyph])
+        self.assertTrue(status.ok)
+        self.assertEqual(status.message(), u"")
+
     def test_every_write_begins_with_before_changes_where_undo_needs_it(self):
         """Each tool that changes glyphs records the font first; kerning, feature code, and font info are
         the font's own state (recorded when FontLab opens a font: live, they went on Undo)."""
         root = os.path.join(HERE, os.pardir)
         expected = {"spacing/freelab_auto_spacing.py": 1, "cjk/freelab_cjk_spacing.py": 1,
                     "diacritics/freelab_diacritics.py": 1, "features/freelab_feature_code.py": 1,
-                    "checks/freelab_font_check.py": 1, "kerning/freelab_auto_kerning.py": 1}
+                    "checks/freelab_font_check.py": 1,
+                    "kerning/freelab_auto_kerning.py": 2}  # (flag_glyphs's, and begin_write's own before_changes)
         for path, count in expected.items():
             with io.open(os.path.join(root, path), encoding="utf-8") as handle:
                 source = handle.read()
-            self.assertEqual(len(re.findall(r"(?<!def )before_changes\((?:self\.|owner\.)?fontlab", source)), count, path)
+            self.assertEqual(len(re.findall(r"(?<!def )(?:before_changes|begin_write)\((?:self\.(?:ak\.)?|owner\.|ak\.)?fontlab",
+                                            source)), count, path)
 
 
 class MenuOrderTests(unittest.TestCase):

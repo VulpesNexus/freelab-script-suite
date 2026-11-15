@@ -408,6 +408,164 @@ class SettingsModuleTests(unittest.TestCase):
         self.assertTrue(callable(settings.show_dialog))
 
 
+class _Control(object):
+    """A settings dialog control: whatever it is asked to do, it does nothing, but checks and signals."""
+
+    def __init__(self, *args):
+        self.checked, self.slots = False, {}
+
+    def __getattr__(self, name):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        return lambda *args: None
+
+    def setChecked(self, value):
+        self.checked = bool(value)
+
+    def isChecked(self):
+        return self.checked
+
+    def connect(self, signal, slot):
+        self.slots.setdefault(signal, []).append(slot)
+
+
+class _SettingsDialog(_Control):
+    made = []
+    run = [lambda dialog: 0]  # what exec_ does (a test sets it)
+
+    def __init__(self, parent=None):
+        _Control.__init__(self)
+        self.parent_, self.deleted = parent, 0
+        _SettingsDialog.made.append(self)
+
+    def windowFlags(self):
+        return 0
+
+    def exec_(self):
+        return _SettingsDialog.run[0](self)
+
+    def deleteLater(self):
+        self.deleted += 1
+
+
+class _FakeDarkMode(object):
+    def __init__(self, fail=False):
+        self.configured, self.fail = [], fail
+
+    def load_settings(self):
+        return {"enabled": True}
+
+    def content_setting(self, settings):
+        return bool(settings.get("content", True))
+
+    def windows_is_dark(self):
+        return True
+
+    def configure(self, **values):
+        if self.fail:
+            raise RuntimeError("configure failed")
+        self.configured.append(values)
+        return dict(values, enabled=True)
+
+
+class SettingsDialogLifetimeTests(unittest.TestCase):
+    """The settings dialog has FontLab's main window as its parent, its watch timer stops when it closes,
+    and Qt deletes it once (deleteLater from a plain timer): never left running and held by dark mode's
+    sweep, never deleted by PythonQt at a random moment. Reviewed 2026-11-15."""
+
+    def setUp(self):
+        qtfakes.install()
+        os.environ["FREELAB_NO_AUTOSTART"] = "1"
+        try:
+            import freelab_dark_mode_settings as settings
+        finally:
+            del os.environ["FREELAB_NO_AUTOSTART"]
+        self.settings = settings
+        original = settings.dark_mode_module
+        self.addCleanup(lambda: setattr(settings, "dark_mode_module", original))
+        gui = sys.modules["PythonQt.QtGui"]
+        self.main = FakeWidget("QMainWindow", name="MainWindow")
+        self.tops = [self.main]
+        gui.QApplication = type("App", (), {"topLevelWidgets": staticmethod(lambda: list(self.tops))})
+        for name in ("QVBoxLayout", "QHBoxLayout", "QRadioButton", "QCheckBox", "QPushButton", "QLabel", "QButtonGroup"):
+            setattr(gui, name, _Control)
+        gui.QDialog = _SettingsDialog
+        sys.modules["PythonQt.QtCore"].Qt.WindowFlags = staticmethod(int)
+        sys.modules["PythonQt.QtCore"].Qt.WindowContextHelpButtonHint = 0x00010000
+        _SettingsDialog.made = []
+        del qtfakes.QTimer.single_shots[:]
+        if hasattr(sys, "_freelab_dark_mode_settings_held"):
+            del sys._freelab_dark_mode_settings_held
+        self.addCleanup(qtfakes.uninstall)
+        self.addCleanup(lambda: delattr(sys, "_freelab_dark_mode_settings_held")
+                        if hasattr(sys, "_freelab_dark_mode_settings_held") else None)
+        self.addCleanup(lambda: _SettingsDialog.run.__setitem__(0, lambda dialog: 0))
+
+    def show(self, dm, run):
+        _SettingsDialog.run[0] = run
+        self.settings.dark_mode_module = lambda: dm
+        return self.settings.show_dialog()
+
+    def watch(self, dialog):
+        return [t for t in qtfakes.timers() if t.parent() is dialog][0]
+
+    def freed_once(self, dialog):
+        self.assertIn(dialog, self.settings.held_dialogs(), "held until Qt deletes it")
+        for _ms, callback in list(qtfakes.QTimer.single_shots):
+            callback()
+        self.assertEqual(dialog.deleted, 1)
+        self.assertNotIn(dialog, self.settings.held_dialogs())
+
+    def test_cancel_stops_the_watch_and_frees_the_dialog(self):
+        seen = {}
+
+        def run(dialog):
+            seen["running"] = self.watch(dialog).running
+            return 0
+        self.assertIsNone(self.show(_FakeDarkMode(), run))
+        dialog = _SettingsDialog.made[-1]
+        self.assertIs(dialog.parent_, self.main)
+        self.assertTrue(seen["running"])
+        watch = self.watch(dialog)
+        self.assertFalse(watch.running)
+        self.assertIsNone(watch.callback, "disconnected")
+        self.freed_once(dialog)
+
+    def test_ok_frees_it_too(self):
+        result = self.show(_FakeDarkMode(), lambda dialog: 1)
+        self.assertTrue(result["dark"])
+        dialog = _SettingsDialog.made[-1]
+        self.assertFalse(self.watch(dialog).running)
+        self.freed_once(dialog)
+
+    def test_a_failing_configure_still_stops_and_frees(self):
+        with self.assertRaises(RuntimeError):
+            self.show(_FakeDarkMode(fail=True), lambda dialog: 1)
+        dialog = _SettingsDialog.made[-1]
+        self.assertFalse(self.watch(dialog).running)
+        self.freed_once(dialog)
+
+    def test_repeated_visits_leave_nothing_running(self):
+        for _visit in range(3):
+            self.show(_FakeDarkMode(), lambda dialog: 0)
+            for _ms, callback in list(qtfakes.QTimer.single_shots):
+                callback()
+            del qtfakes.QTimer.single_shots[:]
+        self.assertEqual(self.settings.held_dialogs(), [])
+        self.assertEqual([t for t in qtfakes.timers() if t.running], [])
+        self.assertEqual([d.deleted for d in _SettingsDialog.made], [1, 1, 1])
+
+    def test_without_fontlab_main_window_it_is_kept_not_deleted(self):
+        self.tops[:] = []
+        self.show(_FakeDarkMode(), lambda dialog: 0)
+        dialog = _SettingsDialog.made[-1]
+        self.assertIsNone(dialog.parent_)
+        self.assertFalse(self.watch(dialog).running)
+        self.assertEqual(qtfakes.QTimer.single_shots, [])
+        self.assertIn(dialog, self.settings.held_dialogs(), "parentless: PythonQt's to delete, so held")
+        self.assertEqual(dialog.deleted, 0)
+
+
 class FakeSci(object):
     """SendScintilla on a fake editor: style colors, caret, and caret line, as Scintilla's BGR integers."""
 
@@ -886,6 +1044,39 @@ class EngineTests(DarkModeCase):
         self.assertEqual(self.kind(self.search), "island", "the script engine's effects are in place")
         self.assertNotIn("native_pending", self.settings(), "nothing left to guard")
 
+    def test_another_qt_is_refused_before_anything_is_hooked(self):
+        # Review of 2026-11-15: the guard checked the library's version and the symbols it looks up, so a
+        # Qt of another version exporting the same names passed. Qt's own version is checked first now.
+        self.assertIsNone(dm.native_build_problem("5.14.2", 8))
+        self.assertIn("5.15.2", dm.native_build_problem("5.15.2", 8))
+        self.assertIn("unknown version", dm.native_build_problem(None, 8))
+        self.assertIn("64-bit", dm.native_build_problem("5.14.2", 4))
+        calls = []
+
+        class Lib(object):
+            def freelab_hooks_version(self):
+                return dm.HOOKS_VERSION * 1000 + dm.NATIVE_VERSION
+
+            def __getattr__(self, name):
+                calls.append(name)
+                raise AssertionError("looked up %s: nothing may be looked up for another Qt" % name)
+        import ctypes
+        library = os.path.join(self.tmp, "hooks.dll")
+        with open(library, "wb") as handle:
+            handle.write(b"")
+        os.environ["FREELAB_HOOKS_DLL"] = library
+        saved = ctypes.PyDLL
+        ctypes.PyDLL = lambda path, *args, **kwargs: Lib()
+        self.patch("_qt_runtime_version", lambda: "5.15.2")
+        try:
+            with self.assertRaises(RuntimeError) as raised:
+                dm._hooks()
+        finally:
+            ctypes.PyDLL = saved
+            del os.environ["FREELAB_HOOKS_DLL"]
+        self.assertIn("Qt is 5.15.2", "%s" % raised.exception)
+        self.assertEqual(calls, [])
+
     def test_a_crash_while_starting_turns_the_native_engine_off(self):
         self.save(engine="native", native_pending=True)
         dm._state().pop("native_pending_mine", None)  # the mark is an earlier session's
@@ -1317,17 +1508,17 @@ class ToggleTests(DarkModeCase):
 class TimerTests(DarkModeCase):
     def test_startup_off_does_nothing(self):
         dm.startup()
-        self.assertEqual(qtfakes.QTimer.made, [])
+        self.assertEqual(qtfakes.timers(), [])
 
     def test_startup_on_applies_and_schedules(self):
         dm.save_settings({"enabled": True})
         dm.startup()
-        intervals = [t.interval for t in qtfakes.QTimer.made if t.single]
+        intervals = [t.interval for t in qtfakes.timers() if t.single]
         self.assertEqual(intervals, list(dm.REAPPLY_DELAYS_MS))
         # FontLab puts its own style and palette back after the startup script: a reapply wins them back.
         self.app.setStyle(qtfakes.FakeStyle("windowsvista"))
         self.app.setPalette(QPalette())
-        [t for t in qtfakes.QTimer.made if t.single][1].fire()
+        [t for t in qtfakes.timers() if t.single][1].fire()
         self.assertEqual(self.app.style().objectName, "Fusion")
 
     def test_worker_runs_in_slices_and_stops(self):
@@ -1338,6 +1529,51 @@ class TimerTests(DarkModeCase):
             worker.fire()
         worker.fire()
         self.assertIsNone(dm._state()["worker"])
+
+    def test_the_worker_never_lets_go_of_itself_while_it_emits(self):
+        # The worker stops itself once the queue drains, inside its own timeout: that must never drop the
+        # last reference to a parentless timer (PythonQt would delete it while it emits). Reviewed 2026-11-15.
+        dm.apply_dark()
+        while dm._state()["queue"]:
+            qtfakes.fire_unheld(lambda: dm._state()["worker"])
+        self.assertIsNone(dm._state()["worker"])
+        self.assertEqual(qtfakes.QTimer.deleted_while_emitting, [])
+        made = len(qtfakes.timers())
+        dm._enqueue([self.content], "dark")  # queued again: the same timer starts again, none is made
+        self.assertTrue(dm._state()["worker"].running)
+        self.assertEqual(len(qtfakes.timers()), made)
+        while dm._state()["queue"]:
+            qtfakes.fire_unheld(lambda: dm._state()["worker"])
+
+    def test_every_timer_has_a_parent_and_stays_held(self):
+        # A parentless timer made from Python is PythonQt's to delete whenever its last reference goes;
+        # dark mode's timers have FontLab's application as their parent, and are kept for reuse.
+        dark = [True]
+        self.patch("windows_is_dark", lambda: dark[0])
+        dm.save_settings({"enabled": True})
+        dm.startup()
+        dm.configure(follow_windows=True)
+        dm.run_queue()
+        dm.toggle()
+        dm.run_queue()
+        dm.toggle()
+        dm.startup()
+        dm.run_queue()
+        dm.configure(follow_windows=False)
+        made = qtfakes.timers()
+        self.assertTrue(made)
+        self.assertEqual([t for t in made if t.parent() is None], [])
+        self.assertEqual(qtfakes.QTimer.deleted_while_emitting, [])
+
+    def test_reapply_timers_are_reused(self):
+        dm.save_settings({"enabled": True})
+        dm.startup()
+        before = list(dm._state()["timers"])
+        dm.schedule_reapply()
+        dm.schedule_reapply()
+        self.assertEqual([id(t) for t in dm._state()["timers"]], [id(t) for t in before])
+        self.assertEqual(sorted(t.interval for t in dm._state()["timers"]), sorted(dm.REAPPLY_DELAYS_MS))
+        self.assertTrue(all(t.running for t in dm._state()["timers"]))
 
     def test_sweep_picks_up_new_widgets(self):
         self.on()
@@ -1419,7 +1655,7 @@ class TimerTests(DarkModeCase):
         dm.startup()
         dm.toggle()
         dm.run_queue()  # the worker stops once switching off has restored every widget
-        self.assertTrue(all(not t.running for t in qtfakes.QTimer.made))
+        self.assertTrue(all(not t.running for t in qtfakes.timers()))
 
 
 class TitleBarTests(DarkModeCase):

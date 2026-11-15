@@ -5,13 +5,14 @@ Vertical's *Add vertical metrics to an exported font* runs this inside FontLab, 
 font's own values beside the exported font, as <font file>.vertical.json: the vertical origin (the
 typographic ascender), vhea's ascender, descender, and line gap, and each glyph's advance height. Run on
 its own, this script reads both and writes a copy of the font with the vertical tables, <name>.vert.<ext>,
-beside it; the exported font is never changed.
+beside it; the exported font is never changed, whatever spelling of its path --out gives.
 
     python add_vertical_metrics.py <exported font> [--values <json>] [--out <file>] [--force]
 
 Each glyph's top sidebearing is the vertical origin less its ink's top; a glyph without ink gets 0. VORG
 gives a CFF font's vertical origin (one default for all glyphs). Glyphs are matched by name, then by code
-point where the export renamed one. The tables written are read back and checked.
+point where the export renamed one. The copy is written to a file of its own first and its tables read back
+and checked: it takes its name (replacing a file there only with --force) when they are right, never else.
 
 Python 3 with fontTools, or FontLab 7's own Python 2.7, which ships fontTools 3.43 (CJK Vertical runs
 add_tables() and check() there). With uharfbuzz, it also says how HarfBuzz sets a sample vertically.
@@ -157,6 +158,78 @@ def save_with_tables(font, source_path, out):
         fresh.close()
 
 
+def same_file(first, second):
+    """Whether two paths name one file: by the file's identity where both exist (os.path.samefile, so a
+    spelling in another case on Windows, a hard link, or a symbolic link is caught), else by the paths made
+    real and normalized (Python 2.7 on Windows has no samefile, and its stat gives no file number)."""
+    if os.path.exists(first) and os.path.exists(second):
+        samefile = getattr(os.path, "samefile", None)
+        if samefile is not None:
+            try:
+                return samefile(first, second)
+            except OSError:
+                pass
+        try:
+            one, other = os.stat(first), os.stat(second)
+            if one.st_ino and other.st_ino:
+                return (one.st_dev, one.st_ino) == (other.st_dev, other.st_ino)
+        except OSError:
+            pass
+    return os.path.normcase(os.path.realpath(first)) == os.path.normcase(os.path.realpath(second))
+
+
+def staged_path(path):
+    """A new, empty file beside path (its name, then .part), for what is written to take path's place once
+    it is whole and checked: a write that fails leaves path as it was."""
+    import tempfile
+    folder = os.path.dirname(os.path.abspath(path))
+    stem, ext = os.path.splitext(os.path.basename(path))
+    handle, staged = tempfile.mkstemp(prefix=stem + ".", suffix=".part" + ext, dir=folder)
+    os.close(handle)
+    return staged
+
+
+def publish(staged, path):
+    """A staged file moved to path, replacing a file there."""
+    replace = getattr(os, "replace", None)
+    if replace is not None:
+        replace(staged, path)
+        return
+    if os.path.exists(path):  # (Python 2.7 has no os.replace, and its rename onto a file fails on Windows)
+        os.remove(path)
+    os.rename(staged, path)
+
+
+def discard(staged):
+    try:
+        if staged is not None and os.path.exists(staged):
+            os.remove(staged)
+    except OSError:
+        pass
+
+
+def write_copy(font, source_path, out, values, progress=None):
+    """save_with_tables into out by way of a staged file beside it, read back and checked (check) before it
+    takes out's place: the problems found, an empty list when out was written; with any, out is left as it
+    was. out is never the exported font itself, whatever its spelling (same_file): a ValueError.
+    progress(step), where given: "save", then "check" (CJK Vertical's progress bar)."""
+    report = progress or (lambda step: None)
+    if same_file(out, source_path):
+        raise ValueError("the output would replace the exported font")
+    staged = staged_path(out)
+    try:
+        report("save")
+        save_with_tables(font, source_path, staged)
+        report("check")
+        problems = check(staged, values)
+        if not problems:
+            publish(staged, out)
+            staged = None
+        return problems
+    finally:
+        discard(staged)
+
+
 def check(path, values):
     """What is wrong with the vertical tables of the font at path, as a list (empty when all is well): each
     glyph's advance height and the vertical origin as the values give them, vhea's count of metrics."""
@@ -219,7 +292,7 @@ def main(argv=None):
     from fontTools.ttLib import TTFont
     values_file = args.values or values_path(args.font)
     out = args.out or output_path(args.font)
-    if os.path.abspath(out) == os.path.abspath(args.font):
+    if same_file(out, args.font):  # (not the paths' spelling: on Windows, EXAMPLE.otf is Example.otf)
         print("The output would replace the exported font: give another --out.")
         return 2
     if os.path.exists(out) and not args.force:
@@ -233,11 +306,15 @@ def main(argv=None):
                   "values again." % (values.get("upm"), font["head"].unitsPerEm))
             return 2
         metrics = add_tables(font, values)
-        save_with_tables(font, args.font, out)
+        problems = write_copy(font, args.font, out, values)
         cff = "VORG" in font
     finally:
         font.close()
-    problems = check(out, values)
+    if problems:
+        for problem in problems:
+            print("Problem: %s" % problem)
+        print("Nothing was written: the copy's tables read back wrong.")
+        return 1
     heights = sorted(set(height for height, _ in metrics.values()))
     print("Wrote %s: vhea and vmtx%s for %d glyphs (advance heights %s; vertical origin %s)." % (
         out, " and VORG" if cff else "", len(metrics), ", ".join(str(h) for h in heights[:4]) +
@@ -247,9 +324,7 @@ def main(argv=None):
     if shaped is not None:  # (code points, not the text: a console's code page may lack it)
         print("HarfBuzz sets %s vertically with y advances %s." % (
             " ".join("U+%04X" % ord(ch) for ch in sample), shaped))
-    for problem in problems:
-        print("Problem: %s" % problem)
-    return 1 if problems else 0
+    return 0
 
 
 if __name__ == "__main__":

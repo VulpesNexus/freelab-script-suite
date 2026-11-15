@@ -1130,6 +1130,9 @@ class FakePackage(object):
     def findName(self, name):
         return self.by_name.get(name)
 
+    def setFlag(self, flag, value):  # (marked modified, as notify_changed does)
+        self.__dict__.setdefault("flags", []).append((flag, value))
+
     def findUnicode(self, code):
         for glyph in self.glyphs:
             if glyph.fgGlyph.unicode == code:

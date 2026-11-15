@@ -18,6 +18,7 @@ and offline (PySide6).
 
 from __future__ import absolute_import, division, print_function
 
+import bisect
 import json
 import math
 import os
@@ -252,46 +253,219 @@ def vertical_scripts(font):
 
 
 def char_name(code):
+    """A character's Unicode name, by the running Python's data: u"" where it has none (unnamed, newer
+    than its Unicode, or past U+FFFF on a narrow build, where the character is two UTF-16 units)."""
     try:
         return unicodedata.name(char_of(code))
-    except Exception:  # unnamed, or past U+FFFF on a narrow build
+    except Exception:
         return u""
 
 
-def category(code):
+# A glyph's kind (letter, figure, mark, punctuation...) and a letter's script come from Unicode 17.0's
+# general categories and the first words of the letters' names, kept in Font Check's character_sets.json
+# ("categories", made by checks/train/character_sets.py from the pinned UnicodeData.txt), not from the
+# running Python's data: FontLab's Python 2.7 knows Unicode 5.2, so letters encoded since (Adlam,
+# Georgian's Mtavruli, Tai Yo) were unassigned there, and a Latin-only proof kept them as it keeps
+# punctuation. (Its narrow build holds a character past U+FFFF as two UTF-16 units: its unicodedata
+# reads such a pair as one character, 2.7.18 probed, but a loop over a text's characters splits it, so
+# texts are read by code_points.)
+# A sign that is no letter (a digit, a mark, a punctuation mark, a symbol) belongs to the script Unicode's
+# Script property gives it (Scripts.txt, Unicode 17.0: the "scripts" of the same file, each script's own
+# characters), Common and Inherited ones (the ASCII digits, common punctuation, combining accents) to every
+# script. Live (ADLaM Display, 2026-11-15): a Latin-only proof kept Adlam's digits and its initial marks.
+CATEGORIES_FILE = "character_sets.json"  # beside this script once installed, or in the repository's checks/
+_CATEGORIES = []  # the table, read when first asked (categories_table): (lows, [(low, high, category, word)])
+_SCRIPTS = []  # the scripts' own characters, read with it (scripts_table): (lows, [(low, high, script)])
+_SCRIPT_WORDS = {}  # {script: the words Proof names its letters by}, made when first asked (script_words)
+
+
+def categories_path():
+    here = os.path.dirname(os.path.abspath(globals().get("__file__") or "."))
+    for path in (os.path.join(here, CATEGORIES_FILE), os.path.join(here, os.pardir, "checks", CATEGORIES_FILE)):
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def load_unicode_tables(path=None):
+    """(categories, scripts) of character_sets.json, each as (lows, rows) for bisection, or None without
+    the file or the table: categories' rows (low, high, category, the first word of a letter's name or
+    None), the scripts' (low, high, script's name), the script's own characters (Common and Inherited are
+    no script there)."""
+    path = path or categories_path()
+    if not path:
+        return None, None
     try:
-        return unicodedata.category(char_of(code))
+        with open(path, "rb") as handle:
+            data = json.loads(handle.read().decode("utf-8"))
     except Exception:
-        return u"Cn"
+        return None, None
+    categories = scripts = None
+    try:
+        words = [u"%s" % word for word in data["categories"]["words"]]
+        rows = []
+        for part in data["categories"]["runs"].split():
+            fields = part.split(u":")
+            low, _, high = fields[0].partition(u"-")
+            low = int(low, 16)
+            rows.append((low, int(high, 16) if high else low, u"%s" % fields[1],
+                         words[int(fields[2])] if len(fields) > 2 else None))
+        categories = ([row[0] for row in rows], rows)
+    except Exception:
+        pass
+    try:
+        rows = []
+        for row in data["scripts"]["rows"]:
+            for part in (row[1] or u"").split():
+                low, _, high = part.partition(u"-")
+                rows.append((int(low, 16), int(high or low, 16), u"%s" % row[0]))
+        rows.sort()
+        scripts = ([row[0] for row in rows], rows) if rows else None
+    except Exception:
+        pass
+    return categories, scripts
+
+
+def load_categories(path=None):
+    """The table of general categories of character_sets.json (load_unicode_tables)."""
+    return load_unicode_tables(path)[0]
+
+
+def _read_tables():
+    if not _CATEGORIES or not _SCRIPTS:
+        categories, scripts = load_unicode_tables()
+        if not _CATEGORIES:
+            _CATEGORIES.append(categories)
+        if not _SCRIPTS:
+            _SCRIPTS.append(scripts)
+
+
+def categories_table():
+    _read_tables()
+    return _CATEGORIES[0]
+
+
+def scripts_table():
+    _read_tables()
+    return _SCRIPTS[0]
+
+
+def _looked_up(table, code):
+    """The row of a table (lows, rows) that holds code, or None."""
+    if table is None:
+        return None
+    lows, rows = table
+    at = bisect.bisect_right(lows, code) - 1
+    return rows[at] if at >= 0 and code <= rows[at][1] else None
+
+
+def code_script(code):
+    """The script Unicode's Script property gives a code point, by its name (u"Adlam", u"Latin"); None for
+    Common and Inherited (shared by every script), unassigned, or without the table."""
+    row = _looked_up(scripts_table(), code)
+    return row[2] if row is not None else None
+
+
+def script_words(script):
+    """The words Proof names a script's letters by (script_case: u"ADLAM"; u"CJK" for Han; u"HIRAGANA" and
+    u"HENTAIGANA" for Hiragana), NOT_SCRIPTS left out; a script without letters, its name's first word in
+    capitals. A frozenset."""
+    if not _SCRIPT_WORDS:
+        found = {}
+        table = categories_table()
+        for low, high, kind, word in (table[1] if table is not None else ()):
+            if word and word not in NOT_SCRIPTS:
+                name = code_script(low)
+                if name is not None:
+                    found.setdefault(name, set()).add(word)
+        _SCRIPT_WORDS.update((name, frozenset(words)) for name, words in found.items())
+        _SCRIPT_WORDS[None] = frozenset()  # (made)
+    words = _SCRIPT_WORDS.get(script)
+    if words is None:
+        parts = (script or u"").replace(u"_", u" ").split()
+        words = frozenset([parts[0].upper()]) if parts else frozenset()
+    return words
+
+
+def sign_scripts(code):
+    """The script words (script_words) of a code point that is no letter (a digit, a mark, a punctuation
+    mark, a symbol) whose Script property is one script's (Adlam's digits and initial marks); None for a
+    letter (script_case says), for a sign every script shares (Common, Inherited: the ASCII digits, common
+    punctuation), and without the table."""
+    found = unicode_class(code) if code is not None else None
+    if found is None or found[0].startswith(u"L"):
+        return None
+    script = code_script(code)
+    return script_words(script) if script is not None else None
+
+
+def unicode_class(code):
+    """(general category, first word of a letter's name or None) of a code point, by the table (Unicode
+    17.0); without it, by the running Python where it can read the character. None: unassigned, or
+    unknown to the data at hand (never taken for punctuation or a symbol)."""
+    table = categories_table()
+    if table is not None:
+        lows, rows = table
+        at = bisect.bisect_right(lows, code) - 1
+        if at >= 0 and code <= rows[at][1]:
+            return rows[at][2], rows[at][3]
+        return None
+    try:
+        kind = u"%s" % unicodedata.category(char_of(code))
+    except Exception:  # (a narrow build's two units past U+FFFF)
+        return None
+    if kind == u"Cn":
+        return None
+    words = char_name(code).replace(u"-", u" ").split() if kind.startswith(u"L") else []
+    return kind, (words[0] if words else None)
+
+
+def category(code):
+    """A code point's general category (unicode_class); u"Cn" when it is unassigned or unknown."""
+    found = unicode_class(code)
+    return found[0] if found is not None else u"Cn"
 
 
 def script_case(code):
-    """(script, case) of a letter, from its Unicode name: ("LATIN", "upper"), ("HEBREW", None);
-    ("FIGURE", None) for a digit; None for anything else."""
-    kind = category(code)
+    """(script, case) of a letter, its script the first word of its Unicode name: ("LATIN", "upper"),
+    ("HEBREW", None), ("SHAVIAN", None); ("FIGURE", None) for a digit; None for anything else."""
+    found = unicode_class(code)
+    if found is None:
+        return None
+    kind, word = found
     if kind == u"Nd":
         return ("FIGURE", None)
-    if not kind.startswith(u"L"):
-        return None
-    words = char_name(code).replace(u"-", u" ").split()
-    if not words:
+    if not kind.startswith(u"L") or not word:
         return None
     case = "upper" if kind in (u"Lu", u"Lt") else ("lower" if kind == u"Ll" else None)
-    return (words[0], case)
+    return (word, case)
+
+
+def unknown_code(code):
+    """Whether a code point is unassigned or unknown (unicode_class): no letter, figure, or punctuation
+    mark a scope can be said to keep."""
+    return code is not None and unicode_class(code) is None
 
 
 def base_char(code):
     """The letter an accented letter is built on (A for Aacute, l for lslash), or None."""
     text = char_of(code)
-    decomposed = unicodedata.normalize("NFD", text)
-    if len(decomposed) > 1 and not unicodedata.combining(decomposed[0]) and unicodedata.combining(decomposed[1]):
-        return ord(decomposed[0])
+    decomposed = code_points(unicodedata.normalize("NFD", text))  # (code points: a narrow build's pairs read as one)
+
+    def combining(code):
+        try:
+            return unicodedata.combining(char_of(code))
+        except Exception:
+            return 0
+    if len(decomposed) > 1 and not combining(decomposed[0]) and combining(decomposed[1]):
+        return decomposed[0]
     name = char_name(code)
     if u" WITH " in name:
         try:
-            return ord(unicodedata.lookup(name.split(u" WITH ")[0]))
+            found = code_points(unicodedata.lookup(name.split(u" WITH ")[0]))
         except (KeyError, TypeError):
             return None
+        return found[0] if len(found) == 1 else None
     return None
 
 
@@ -875,8 +1049,9 @@ def thin_scripts(font, languages, groups):
             continue
         present = found.setdefault(language.script, [])
         for ch in language.base:  # its script's letters only (keycap figures, Latin letters a Cyrillic orthography lists)
-            kind = script_case(ord(ch[0]))
-            if (ch not in present and category(ord(ch[0])).startswith(u"L") and kind is not None
+            first = (code_points(ch) or [None])[0]  # (a narrow build's pair of units read as one code point)
+            kind = script_case(first) if first is not None else None
+            if (ch not in present and category(first).startswith(u"L") and kind is not None
                     and kind[0] == (u"%s" % language.script).upper() and has_character(codes, ch)):
                 present.append(ch)
     return [(script, u"".join(found[script])) for script in TEXT_SCRIPTS if found.get(script)]
@@ -1814,22 +1989,34 @@ def glyph_script(font, name):
 
 def scope_names(font, scope, languages=()):
     """The glyph names a proof scope keeps: ("script", word): that script's letters; ("language", Language):
-    its base and auxiliary letters; with every glyph that is no letter (figures, punctuation, symbols)."""
+    its base and auxiliary letters; with every glyph that is no letter (figures, punctuation, symbols, an
+    unencoded glyph of none) but those Unicode's Script property gives another script (sign_scripts:
+    Adlam's digits leave a Latin proof; a language's script is that of its letters). A glyph of a code
+    point Unicode does not assign (unknown_code) is no glyph of either kind: left out, unless the language
+    lists it."""
     kind, value = scope
+    wanted = set()
     if kind == "language":
-        wanted = set()
         for chars in (value.base, getattr(value, "auxiliary", None) or []):
             for ch in chars:
-                for c in ch:
-                    wanted.add(ord(c))
+                wanted.update(code_points(ch))  # (a narrow build's pair of units read as one code point)
+        words = set(found[0] for found in (script_case(code) for code in wanted) if found and found[0] != "FIGURE")
+    else:
+        words = set([value])
     kept = set()
     for name in font.glyphs:
+        code = encoded_code(font, name)
+        if kind == "language" and code in wanted:
+            kept.add(name)
+            continue
         script = glyph_script(font, name)
         if script is None:
-            kept.add(name)
+            if unknown_code(code):
+                continue
+            signs = sign_scripts(code)
+            if signs is None or signs & words:
+                kept.add(name)
         elif kind == "script" and script == value:
-            kept.add(name)
-        elif kind == "language" and encoded_code(font, name) in wanted:
             kept.add(name)
     return kept
 

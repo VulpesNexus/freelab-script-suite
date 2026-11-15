@@ -1002,7 +1002,8 @@ class AutoSpacingDialog(object):
         others = [s for s in chosen if not getattr(s, "reference", False)]
         totals, stale, error, moved = {}, 0, None, []
         passes, again, measured_again, unread = 0, 0, 0, False
-        self.ak.before_changes(self.fontlab, self.package, u"FreeLab Auto Spacing")
+        if not self.ak.begin_write(self.fontlab, self.package, u"FreeLab Auto Spacing", self.log):
+            return  # (nothing written: the reason in the log)
         self.busy = True
         try:
             batches = [references, others] if references and others else [chosen]
@@ -1036,7 +1037,7 @@ class AutoSpacingDialog(object):
             error = exc
         finally:
             self.busy = False
-        self.after_writing()
+        status = self.after_writing()
         ak = self.ak
         self.spaced = sorted(totals) + sorted(name for name in moved if name not in totals)
         lines = [u"Spaced %s%s." % (ak.b(counted(len(totals), u"glyph")),
@@ -1049,8 +1050,9 @@ class AutoSpacingDialog(object):
             lines.append(u"The kerning was set for the old spacing: click %s to see whether pairs with these glyphs now "
                          u"collide, or run <i>Auto Kerning</i> again with <i>Include existing kerned pairs</i>." % ak.i(
                              KERNING_BUTTON))
-        lines.append(u"<i>Edit &gt; Undo</i> (or the <i>History</i> panel) takes it back.")
-        self.log.add(u" ".join(lines), "done" if totals else "info")
+        lines.append(status.undo(u"<i>Edit &gt; Undo</i> (or the <i>History</i> panel) takes it back."))
+        self.log.add(u" ".join(line for line in lines if line), "done" if totals else "info")
+        status.report(self.log)
         overhang = self.overhang_line() if self.follow.checked else u""
         if overhang:
             self.log.add(overhang, "warning")
@@ -1163,7 +1165,8 @@ class AutoSpacingDialog(object):
             pass
 
     def after_writing(self, glyphs=()):
-        self.ak.notify_changed(self.fontlab, self.package, u"FreeLab Auto Spacing", glyphs)
+        """notify_changed's WriteStatus."""
+        return self.ak.notify_changed(self.fontlab, self.package, u"FreeLab Auto Spacing", glyphs)
 
     def show(self):
         QtCore, QtGui = _qt()

@@ -15,10 +15,14 @@
 # Install also builds dark mode's native pixel helper, its native engine, and the auto kerning
 # core (tools/build-native.ps1)
 # into %LOCALAPPDATA%\FreeLab\bin when it is missing; without a compiler, dark
-# mode still works, with plain inversion in the widgets FontLab paints itself.
+# mode still works, with plain inversion in the widgets FontLab paints itself; the
+# auto kerning core is required (the exit status is 1 without it).
 # The first install keeps the original startup script as
-# startupScript.py.freelab-backup. Quit FontLab first or restart it afterwards:
+# startupScript.py.freelab-backup, and each change keeps the file it replaced as
+# startupScript.py.freelab-previous. Quit FontLab first or restart it afterwards:
 # FontLab reads its Scripts folder and startup script when it starts.
+# The exit status is 1 when anything required could not be done (listed at the
+# end); a font FontLab holds open is replaced at the next install.
 #
 # ASCII only: Windows PowerShell 5.1 reads a BOM-less script in the ANSI code page.
 
@@ -122,34 +126,80 @@ $kernName = 'freelab_kern-v' + [regex]::Match($kernSource, '#define FREELAB_KERN
 $begin = '# >>> FreeLab tools'
 $end = '# <<< FreeLab tools'
 
-function Remove-Block([string]$text) {
-    $re = New-Object System.Text.RegularExpressions.Regex ('(?s)\n?' + [regex]::Escape($begin) + '.*?' + [regex]::Escape($end) + '[^\n]*\n?')
-    # a block at the very top leaves no blank first line; elsewhere one line break stays between its neighbors
-    $evaluator = [System.Text.RegularExpressions.MatchEvaluator] { param($m) if ($m.Index -eq 0) { '' } else { "`n" } }
-    return $re.Replace($text, $evaluator).TrimEnd("`n") + "`n"
+# FreeLab's markers are whole lines, from the start of the line. A line starting "# >>> FreeLab" opens a
+# block and one starting "# <<< FreeLab" closes it, in turn; a block of this installer's opens with
+# $begin alone or followed by a space and a note, and closes with $end alone. Marker text anywhere else
+# (a string in the user's code, an indented comment) is the user's, never a marker. This one recognizer
+# serves the check and every change: the check once took markers at the start of a line while the
+# changes took marker text anywhere, and deleted the user's code between two quoted markers.
+$ownOpen = '^' + [regex]::Escape($begin) + '(?:[ \t].*)?$'
+$ownClose = '^' + [regex]::Escape($end) + '[ \t]*$'
+# The one block FreeLab wrote before the MCP and the tools became separate repositories
+# (dark mode and the listener together). Either installer takes it out and says so.
+$legacyOpen = '^# >>> FreeLab \(managed.*$'
+$legacyClose = '^# <<< FreeLab[ \t]*$'
+
+# The blocks a pair of markers delimits, as (first line, last line) index pairs; $null when the file's
+# FreeLab markers do not pair: a block opened inside another, closed without being opened, never
+# closed, or opened by one kind of marker and closed by another (another FreeLab block's markers count).
+function Find-Blocks([string[]]$lines, [string]$open, [string]$close) {
+    $found = New-Object System.Collections.ArrayList
+    $start = -1
+    $mine = $false
+    for ($i = 0; $i -lt $lines.Length; $i++) {
+        $line = $lines[$i]
+        if ($line.StartsWith('# >>> FreeLab', [System.StringComparison]::Ordinal)) {
+            if ($start -ge 0) { return $null }
+            $start = $i
+            $mine = $line -cmatch $open
+        }
+        elseif ($line.StartsWith('# <<< FreeLab', [System.StringComparison]::Ordinal)) {
+            if ($start -lt 0) { return $null }
+            if (($line -cmatch $close) -ne $mine) { return $null }
+            if ($mine) { [void]$found.Add(@($start, $i)) }
+            $start = -1
+        }
+    }
+    if ($start -ge 0) { return $null }
+    return ,$found
 }
+
+function Split-Lines([string]$text) { return ,$text.Split([char]10) }
+
+# The text without the blocks of that kind (the lines between their markers, markers included).
+function Remove-Blocks([string]$text, [string]$open, [string]$close) {
+    $lines = Split-Lines $text
+    $blocks = Find-Blocks $lines $open $close
+    if ($null -eq $blocks) { throw "unpaired FreeLab markers" }  # (checked before: never reached)
+    $drop = @{}
+    foreach ($block in $blocks) { for ($i = $block[0]; $i -le $block[1]; $i++) { $drop[$i] = $true } }
+    $kept = New-Object System.Collections.Generic.List[string]
+    for ($i = 0; $i -lt $lines.Length; $i++) { if (-not $drop.ContainsKey($i)) { $kept.Add($lines[$i]) } }
+    return ([string]::Join("`n", $kept)).TrimEnd("`n") + "`n"
+}
+
+function Remove-Block([string]$text) { return Remove-Blocks $text $ownOpen $ownClose }
 
 # The block put where it already is (the other repository's block keeps its place), or appended.
 function Set-Block([string]$text, [string]$newBlock) {
-    $re = New-Object System.Text.RegularExpressions.Regex ([regex]::Escape($begin) + '(?s:.*?)' + [regex]::Escape($end) + '[^\n]*')
-    if ($re.IsMatch($text)) {
+    $lines = Split-Lines $text
+    $blocks = Find-Blocks $lines $ownOpen $ownClose
+    if ($null -eq $blocks) { throw "unpaired FreeLab markers" }  # (checked before: never reached)
+    if ($blocks.Count -gt 0) {
         # the first copy replaced, any later one (a duplicated block) taken out
-        $seen = @{ first = $true }
-        $evaluator = [System.Text.RegularExpressions.MatchEvaluator] {
-            param($m)
-            if ($seen.first) { $seen.first = $false; return $newBlock }
-            return ''
-        }.GetNewClosure()
-        return $re.Replace($text, $evaluator)
+        $drop = @{}
+        foreach ($block in $blocks) { for ($i = $block[0]; $i -le $block[1]; $i++) { $drop[$i] = $true } }
+        $kept = New-Object System.Collections.Generic.List[string]
+        for ($i = 0; $i -lt $lines.Length; $i++) {
+            if ($i -eq $blocks[0][0]) { $kept.Add($newBlock) }
+            elseif (-not $drop.ContainsKey($i)) { $kept.Add($lines[$i]) }
+        }
+        return [string]::Join("`n", $kept)
     }
     $text = $text.TrimEnd("`n")
     if ($text) { $text += "`n" }
     return $text + $newBlock + "`n"
 }
-
-# The one block FreeLab wrote before the MCP and the tools became separate repositories
-# (dark mode and the listener together). Either installer takes it out and says so.
-$legacyPattern = '(?s)\n?# >>> FreeLab \(managed.*?# <<< FreeLab[ \t]*(\n|$)'
 
 # A Python string literal that is pure ASCII: backslashes doubled, everything
 # outside ASCII as \uXXXX, so Python 2 reads it whatever the code page.
@@ -199,25 +249,11 @@ if (Test-Path $startup) {
         $current = $normalized
     }
 }
-# Each begin marker must be followed by its end marker before the next begin: counting them was not
+# Each begin marker must be followed by its own end marker before the next begin: counting them was not
 # enough (an end marker above its begin marker let a later install delete the code between them).
-function Test-Paired([string]$text, [string]$open, [string]$close) {
-    $inside = $false
-    foreach ($line in $text -split "`n") {
-        if ($line -match ('^' + $open)) {
-            if ($inside) { return $false }
-            $inside = $true
-        }
-        elseif ($line -match ('^' + $close + '[ \t]*$')) {
-            if (-not $inside) { return $false }
-            $inside = $false
-        }
-    }
-    return -not $inside
-}
-if (-not (Test-Paired $current ([regex]::Escape($begin)) ([regex]::Escape($end))) -or
-    -not (Test-Paired $current '# >>> FreeLab \(managed' '# <<< FreeLab')) {
-    Write-Output "$startup has a FreeLab begin marker without its end marker, or the reverse, so it is left as it is. Remove the broken block by hand and run this again."
+$currentLines = Split-Lines $current
+if ($null -eq (Find-Blocks $currentLines $ownOpen $ownClose) -or $null -eq (Find-Blocks $currentLines $legacyOpen $legacyClose)) {
+    Write-Output "$startup has a FreeLab begin marker without its end marker, or the reverse, or two blocks' markers mixed, so it is left as it is. Remove the broken block by hand and run this again."
     exit 1
 }
 function Test-Changed([string]$text) {
@@ -235,7 +271,19 @@ function Save-Startup([string]$text) {
     $folder = Split-Path -Parent $startup
     if (-not (Test-Path $folder)) { New-Item -ItemType Directory -Path $folder | Out-Null }
     if ($crlf) { $text = $text -replace "`n", "`r`n" }
-    [System.IO.File]::WriteAllText($startup, $text, (New-Object System.Text.UTF8Encoding $bom))
+    # Written whole beside it, then put in its place, the file it replaces kept as .freelab-previous
+    # (each update: the first install's copy is the user's file before FreeLab, not their later changes)
+    $temp = "$startup.freelab-new"
+    try {
+        [System.IO.File]::WriteAllText($temp, $text, (New-Object System.Text.UTF8Encoding $bom))
+        if ([System.IO.File]::Exists($startup)) { [System.IO.File]::Replace($temp, $startup, "$startup.freelab-previous", $true) }
+        else { [System.IO.File]::Move($temp, $startup) }
+    }
+    catch {
+        if ([System.IO.File]::Exists($temp)) { [System.IO.File]::Delete($temp) }
+        Write-Output "Could not write ${startup}: $($_.Exception.Message) It is left as it was."
+        exit 1
+    }
 }
 if (-not $Uninstall -and -not (Test-Path $startup)) {
     # FontLab writes its own startup script (its default imports) when it first starts; one made here
@@ -243,11 +291,40 @@ if (-not $Uninstall -and -not (Test-Path $startup)) {
     Write-Output "FontLab has not made its startup script yet ($startup): start FontLab once, quit it, and run this again."
     exit 1
 }
-$legacy = [regex]::IsMatch($current, $legacyPattern)
-if ($legacy) { $current = [regex]::Replace($current, $legacyPattern, "`n").TrimEnd("`n") + "`n" }
+$legacy = (Find-Blocks $currentLines $legacyOpen $legacyClose).Count -gt 0
+if ($legacy) { $current = Remove-Blocks $current $legacyOpen $legacyClose }
 function Write-LegacyNote {
     if ($legacy) {
         Write-Output 'Removed the combined FreeLab block of earlier versions, which also started the MCP listener. To keep that, run tools\install-fontlab.ps1 -ListenerAtLaunch from FreeLab MCP.'
+    }
+}
+
+# What an install or uninstall could not do. $incomplete: required (a script or its data, the auto
+# kerning core, anything an uninstall leaves behind): listed at the end, and the exit status is 1.
+# $degraded: expected, and FreeLab works without it (a font FontLab registered and holds open until
+# it quits, which the next install replaces): said, the exit status stays 0.
+$incomplete = New-Object System.Collections.ArrayList
+$degraded = New-Object System.Collections.ArrayList
+
+# The reason a file operation failed, in words: "in use" for a sharing or lock violation (FontLab holds
+# the file), else the error's own message (access denied, a missing folder, a full disk).
+function Get-Reason($record) {
+    $ex = $record.Exception
+    while ($null -ne $ex.InnerException) { $ex = $ex.InnerException }
+    $code = $ex.HResult -band 0xFFFF
+    if ($code -eq 32 -or $code -eq 33) { return 'in use by another program, FontLab if it runs' }
+    return $ex.Message.Trim()
+}
+
+function Add-Incomplete([string]$what) { [void]$incomplete.Add($what); Write-Output "Could not $what" }
+
+function Write-Summary {
+    if ($degraded.Count -gt 0) {
+        Write-Output ("Left for the next install (FreeLab works without them meanwhile): " + ($degraded -join '; ') + '.')
+    }
+    if ($incomplete.Count -gt 0) {
+        Write-Output ("Not done (" + $incomplete.Count + "): " + ($incomplete -join '; ') + '. Quit FontLab if it runs, deal with the reason given, and run this again.')
+        exit 1
     }
 }
 
@@ -299,7 +376,7 @@ if ($Uninstall) {
         $kept = Join-Path $StateDir $name
         if (Test-Path $kept) {
             try { [System.IO.File]::Delete($kept); Write-Output "Removed $kept" }
-            catch { Write-Output "Could not remove $kept (FontLab holds it open): quit FontLab and run this again." }
+            catch { Add-Incomplete "remove $kept ($(Get-Reason $_))" }
         }
     }
     $installed = @(@($files | ForEach-Object { Join-Path $scripts $_.Name }) + @($retired | ForEach-Object { Join-Path $scripts $_ }) +
@@ -307,7 +384,7 @@ if ($Uninstall) {
     foreach ($target in $installed) {
         if (Test-Path $target) {
             try { [System.IO.File]::Delete($target); Write-Output "Removed $target" }
-            catch { Write-Output "Could not remove $target (FontLab holds it open): quit FontLab and run this again." }
+            catch { Add-Incomplete "remove $target ($(Get-Reason $_))" }
         }
     }
     if ((Test-Path $scripts) -and -not (Get-ChildItem $scripts -Force)) {
@@ -316,37 +393,98 @@ if ($Uninstall) {
     if (Test-Path $BinDir) {
         foreach ($dll in @(Get-ChildItem $BinDir -Filter 'freelab_pixels*.dll') + @(Get-ChildItem $BinDir -Filter 'freelab_hooks*.dll') + @(Get-ChildItem $BinDir -Filter 'freelab_kern*.dll')) {
             try { [System.IO.File]::Delete($dll.FullName); Write-Output "Removed $($dll.FullName)" }
-            catch { Write-Output "Could not remove $($dll.FullName) (FontLab is using it): delete it after quitting FontLab." }
+            catch { Add-Incomplete "remove $($dll.FullName) ($(Get-Reason $_))" }
         }
     }
+    Write-Summary
     exit 0
 }
 
+# The scripts and their data staged first, each beside its place (.freelab-new): a file that cannot even
+# be staged stops the install before anything installed is replaced. Then each takes its place. A
+# font is the one expected failure: FontLab holds the fonts it registered open until it quits, and the
+# installed copy serves meanwhile. Anything else that fails stops the install before the old files are
+# retired and the startup block is written, so no new script runs beside old data.
+function Test-Font([string]$name) { return $name.EndsWith('.ttf', [System.StringComparison]::OrdinalIgnoreCase) }
 if (-not (Test-Path $scripts)) { New-Item -ItemType Directory -Path $scripts | Out-Null }
+$staged = New-Object System.Collections.ArrayList
 foreach ($f in $files) {
     $target = Join-Path $scripts $f.Name
     $from = Join-Path $repo $f.From
     if ($f.Optional -and -not (Test-Path $from)) { Write-Output "Skipped $($f.Name) (optional, not in this copy)"; continue }
     # A file already there as it is stays (FontLab holds a font it registered open: it could not be replaced)
     $same = (Test-Path $target) -and ((Get-FileHash $from).Hash -eq (Get-FileHash $target).Hash)
-    if ($same) { Write-Output "Kept $($f.Name) (unchanged)" }
-    else {
-        try { [System.IO.File]::Copy($from, $target, $true); Write-Output "Copied $($f.Name) to $scripts" }
-        catch { Write-Output "Could not replace $($f.Name), which FontLab holds open: quit FontLab and run this again. ($($_.Exception.Message))" }
+    if ($same) { Write-Output "Kept $($f.Name) (unchanged)"; continue }
+    $temp = "$target.freelab-new"
+    try {
+        [System.IO.File]::Copy($from, $temp, $true)
+        [void]$staged.Add(@{ Name = $f.Name; Temp = $temp; Target = $target })
     }
+    catch { Add-Incomplete "copy $($f.Name) to $scripts ($(Get-Reason $_))" }
+}
+# Each installed file to be replaced opened alone first: one another program holds (FontLab, a font it
+# registered; an editor) is found before anything is replaced, not halfway.
+$replace = New-Object System.Collections.ArrayList
+foreach ($s in $staged) {
+    if ([System.IO.File]::Exists($s.Target)) {
+        try { [System.IO.File]::Open($s.Target, 'Open', 'ReadWrite', 'None').Close() }
+        catch {
+            $reason = Get-Reason $_
+            [System.IO.File]::Delete($s.Temp)
+            if (Test-Font $s.Name) {
+                [void]$degraded.Add("$($s.Name), the earlier copy kept ($reason)")
+                Write-Output "Could not replace $($s.Name) ($reason): the earlier copy stays until the next install."
+            }
+            else { Add-Incomplete "replace $($s.Name) in $scripts ($reason)" }
+            continue
+        }
+    }
+    [void]$replace.Add($s)
+}
+if ($incomplete.Count -gt 0) {
+    foreach ($s in $staged) { if ([System.IO.File]::Exists($s.Temp)) { [System.IO.File]::Delete($s.Temp) } }
+    Write-Output 'Nothing installed was replaced.'
+    Write-Summary
+}
+foreach ($s in $replace) {
+    try {
+        if ([System.IO.File]::Exists($s.Target)) { [System.IO.File]::Replace($s.Temp, $s.Target, [NullString]::Value, $true) }
+        else { [System.IO.File]::Move($s.Temp, $s.Target) }
+        Write-Output "Copied $($s.Name) to $scripts"
+    }
+    catch {
+        $reason = Get-Reason $_
+        if ([System.IO.File]::Exists($s.Temp)) { [System.IO.File]::Delete($s.Temp) }
+        if (Test-Font $s.Name) {
+            [void]$degraded.Add("$($s.Name), the earlier copy kept ($reason)")
+            Write-Output "Could not replace $($s.Name) ($reason): the earlier copy stays until the next install."
+        }
+        else { Add-Incomplete "replace $($s.Name) in $scripts ($reason)" }
+    }
+}
+if ($incomplete.Count -gt 0) {
+    Write-Output 'FreeLab is partly installed: the files above were not replaced, so nothing was retired and the startup block was not written.'
+    Write-Summary
 }
 foreach ($name in $preSubfolder) {  # before 0.3 they sat in the Scripts folder itself
     $old = Join-Path $rootScripts $name
     if (Test-Path $old) {
         try { [System.IO.File]::Delete($old); Write-Output "Removed the old $old" }
-        catch { Write-Output "Could not remove the old $old (FontLab holds it open): quit FontLab and run this again." }
+        catch { Add-Incomplete "remove the old $old ($(Get-Reason $_))" }
     }
 }
 foreach ($name in $retired) {
     $old = Join-Path $scripts $name
     if (Test-Path $old) {
         try { [System.IO.File]::Delete($old); Write-Output "Removed the retired $old" }
-        catch { Write-Output "Could not remove the retired $old (FontLab holds it open): quit FontLab and run this again." }
+        catch {
+            $reason = Get-Reason $_
+            if (Test-Font $name) {
+                [void]$degraded.Add("the retired $name ($reason)")
+                Write-Output "Could not remove the retired $old ($reason): the next install removes it."
+            }
+            else { Add-Incomplete "remove the retired $old ($reason)" }
+        }
     }
 }
 
@@ -357,6 +495,7 @@ else {
     catch {
         Write-Output "Could not build the native helper: $_"
         Write-Output 'Dark mode still works, with plain inversion in the widgets FontLab paints itself. Install LLVM or Visual Studio with the C++ tools, then run tools\build-native.ps1.'
+        [void]$degraded.Add('the native pixel helper (dark mode inverts plainly without it)')
     }
 }
 $hooks = Join-Path $BinDir $hooksName
@@ -369,7 +508,10 @@ $kern = Join-Path $BinDir $kernName
 if (Test-Path $kern) { Write-Output "Auto kerning core present: $kern" }
 elseif (Test-Path $native) {  # the same compiler builds it
     try { & (Join-Path $PSScriptRoot 'build-native.ps1') -Kern -Out $kern }
-    catch { Write-Output "Could not build the auto kerning core: $_ (Auto Kerning needs it)." }
+    catch { Write-Output "Could not build the auto kerning core: $_" }
+}
+if (-not (Test-Path $kern)) {  # (required: Auto Kerning, Auto Spacing, Kerning Check, and Diacritics measure with it)
+    Add-Incomplete "build the auto kerning core $kernName, which Auto Kerning, Auto Spacing, Kerning Check, and Diacritics measure with (it needs a C compiler: LLVM or Visual Studio with the C++ tools; then tools\build-native.ps1 -Kern)"
 }
 if ((Test-Path $native) -and (Test-Path $BinDir)) {
     # Earlier versions: FontLab keeps the one it loaded locked until it quits, so a locked one waits for the next install.
@@ -454,3 +596,4 @@ if (Test-Changed $text) {
     Write-LegacyNote
 }
 else { Write-Output "The FreeLab tools block in $startup is up to date" }
+Write-Summary

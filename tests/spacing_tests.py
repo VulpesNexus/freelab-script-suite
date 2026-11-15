@@ -237,6 +237,86 @@ class TableTests(unittest.TestCase):
         self.assertEqual((runs, dialog.spaced), ([1], []), "measured anew (or the no-font line), nothing left to check")
 
 
+class HistoryFailureTests(unittest.TestCase):
+    """Review of 2026-11-15: a failed History record before the write let Auto Spacing write anyway, and a
+    failed step after it was followed by "Edit > Undo takes it back"."""
+
+    def setUp(self):
+        self.saved = getattr(sys, "_freelab_history", None)
+        sys._freelab_history = None
+        self.addCleanup(lambda: setattr(sys, "_freelab_history", self.saved))
+
+    def dialog(self, refuse_before, refuse_after):
+        steps = []
+
+        class Items(object):
+            def notifyChangesApplied(self, title, objects, recursive):
+                if (refuse_before if title.endswith(u"(before)") else refuse_after):
+                    raise RuntimeError("History refused")
+                steps.append(title)
+
+            def notifyPackageContentUpdated(self, key):
+                pass
+
+        class Package(object):
+            master, glyphsCount, path, id = "Regular", 1, u"a.vfc", 21
+            fgPackage = type("Fg", (), {"id": 21})()
+
+            def currentHistoryState(self):
+                return 0
+
+            def initialHistoryState(self):
+                return 0
+
+            def setFlag(self, flag, value):
+                pass
+
+        dialog = sp.AutoSpacingDialog.__new__(sp.AutoSpacingDialog)
+        dialog.ak, dialog.busy, dialog.package, dialog.master = ak, False, Package(), "Regular"
+        dialog.fontlab = type("FontLab", (), {"flItems": Items()})()
+        dialog.logged, dialog.writes = [], []
+        dialog.log = type("Log", (), {"add": lambda _, text, kind="info": dialog.logged.append((kind, text))})()
+        dialog.harvest = dialog.run = lambda: None
+        dialog.current_font = lambda: dialog.package
+        dialog.tolerance = type("Box", (), {"value": 6})()
+        dialog.follow = type("Box", (), {"checked": False})()
+        row = sp.Spacing(u"T", "T", "upper", 20, 25, 500)
+        row.checked = True
+        dialog.listed = [row]
+
+        def write_spacings(rows, tolerance, totals):
+            dialog.writes.append([s.name for s in rows])
+            totals["T"] = (0, -5)
+            return [], 0
+        dialog.write_spacings = write_spacings
+        return dialog, steps
+
+    def test_nothing_is_written_when_the_font_cannot_be_recorded_first(self):
+        dialog, steps = self.dialog(refuse_before=True, refuse_after=False)
+        dialog.apply()
+        self.assertEqual(dialog.writes, [], "no glyph changed")
+        self.assertEqual(steps, [])
+        self.assertEqual([kind for kind, _ in dialog.logged], ["error"])
+        self.assertIn(u"Nothing was changed", dialog.logged[0][1])
+
+    def test_a_step_not_recorded_promises_no_undo(self):
+        dialog, steps = self.dialog(refuse_before=False, refuse_after=True)
+        dialog.apply()
+        self.assertEqual(dialog.writes, [["T"]])
+        self.assertFalse(any(u"Undo</i> (or" in text for _, text in dialog.logged), dialog.logged)
+        errors = [text for kind, text in dialog.logged if kind == "error"]
+        self.assertEqual(len(errors), 1, dialog.logged)
+        self.assertIn(u"cannot take it back", errors[0])
+
+    def test_a_recorded_write_promises_undo(self):
+        dialog, steps = self.dialog(refuse_before=False, refuse_after=False)
+        dialog.apply()
+        self.assertEqual(steps, [u"FreeLab Auto Spacing (before)", u"FreeLab Auto Spacing"])
+        self.assertTrue(any(u"<i>Edit &gt; Undo</i> (or the <i>History</i> panel) takes it back." in text
+                            for _, text in dialog.logged), dialog.logged)
+        self.assertEqual([kind for kind, _ in dialog.logged if kind == "error"], [])
+
+
 class WordingTests(unittest.TestCase):
     """The owner's rules for interface texts, read from the script (its dialog needs FontLab)."""
 

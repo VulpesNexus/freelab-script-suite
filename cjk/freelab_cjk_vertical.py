@@ -208,91 +208,38 @@ def compose(outer, inner):
 # The font's own code: classes and single substitutions
 # ---------------------------------------------------------------------------
 
-def without_comments(text):
-    return re.sub(u"#[^\\n]*", u"", text or u"")
-
+# (CJK Spacing's reader of the font's own code, shared: its classes, lookups, and single positions)
 
 def code_classes(text):
     """{@name: [members]} of the classes a feature code defines (ranges spelled out)."""
-    expand = spacing().expand_ranges
-    found = {}
-    for match in re.finditer(u"(@[A-Za-z0-9_.\\-]+)\\s*=\\s*\\[([^\\]]*)\\]", without_comments(text)):
-        found[match.group(1)] = expand(match.group(2))
-    return found
+    return spacing().code_classes(text)
 
 
 def members(token, classes, depth=0):
     """The glyphs a token names: a glyph, a [list], or a @class (classes: {@name: [members]})."""
-    token = token.strip()
-    if token.startswith(u"[") and token.endswith(u"]"):
-        return [g for part in spacing().expand_ranges(token[1:-1]) for g in members(part, classes, depth + 1)]
-    if token.startswith(u"@"):
-        if depth > 8:
-            return []
-        return [g for part in classes.get(token, []) for g in members(part, classes, depth + 1)]
-    return [token]
+    return spacing().class_members(token, classes, depth)
 
 
 SUBSTITUTION = re.compile(u"^\\s*sub(?:stitute)?\\s+(\\[[^\\]]*\\]|@[A-Za-z0-9_.\\-]+|[A-Za-z0-9_.\\-]+)\\s+by\\s+"
                           u"(\\[[^\\]]*\\]|@[A-Za-z0-9_.\\-]+|[A-Za-z0-9_.\\-]+)\\s*;")
 
 
-POSITION = re.compile(u"^\\s*(?:enum\\s+)?pos(?:ition)?\\s+(\\[[^\\]]*\\]|@[A-Za-z0-9_.\\-]+|[A-Za-z0-9_.\\-]+)\\s*<")
-
-
-LOOKUP_BLOCK = re.compile(u"lookup\\s+([A-Za-z0-9_.\\-]+)(?:\\s+useExtension)?\\s*\\{(.*?)\\}\\s*\\1\\s*;", re.S)
-LOOKUP_USE = re.compile(u"^\\s*lookup\\s+([A-Za-z0-9_.\\-]+)\\s*$")
-
-
 def code_lookups(text):
     """{name: body} of the named lookups a feature code (or the prefix) defines."""
-    return dict((m.group(1), m.group(2)) for m in LOOKUP_BLOCK.finditer(without_comments(text)))
+    return spacing().code_lookups(text)
 
 
-def statements(tag, text, lookups=None, depth=0):
-    """The statements of a feature's own code (outside FreeLab's block), each with what opens a block
-    before it on its line taken off (lookup X { sub a by b;), and a lookup the code names (lookup X;),
-    defined there or in the prefix (lookups: {name: body}), read as its rules."""
-    begin, end = BEGIN % tag, END % tag
-    known = dict(lookups or {})
-    known.update(code_lookups(text))
-    inside = False
-    for line in (text or u"").splitlines():
-        stripped = line.strip()
-        if stripped == begin:
-            inside = True
-            continue
-        if stripped == end:
-            inside = False
-            continue
-        if inside:
-            continue
-        for statement in without_comments(line).split(u";"):
-            statement = statement.split(u"{")[-1].split(u"}")[-1]
-            use = LOOKUP_USE.match(statement)
-            if use and use.group(1) in known and depth < 4:
-                for inner in statements(tag, known[use.group(1)], known, depth + 1):
-                    yield inner
-                continue
-            yield statement
+def statements(tag, text, lookups=None):
+    """The statements of a feature's own code, outside this tool's block (spacing's feature_statements)."""
+    return spacing().feature_statements(tag, text, lookups, BEGIN, END)
 
 
 def own_positions(tag, text, classes=None, lookups=None):
-    """The glyphs a feature's own code (outside FreeLab's block) gives a single value (pos a <0 -2 0 -13>;
-    pos [a b] <...>; pos @class <...>;), the font's classes read too (classes: {@name: [members]}), and
-    the lookups it names (lookups: the prefix's, {name: body}): a second value for one of them would
-    not compile ("Duplicate single positioning glyph with different values"). A pair or a contextual
-    rule is not a single value."""
-    known = dict(classes or {})
-    known.update(code_classes(text))
-    for body in (lookups or {}).values():
-        known.update(code_classes(body))
-    found = set()
-    for statement in statements(tag, text, lookups):
-        match = POSITION.match(statement)
-        if match:
-            found.update(members(match.group(1), known))
-    return found
+    """The glyphs a feature's own code (outside FreeLab's block) gives a single value (CJK Spacing's
+    font_positioned: pos a <0 -2 0 -13>; pos [a b] <...>; pos @class -500;), the font's classes read too
+    (classes: {@name: [members]}), and the lookups it names (lookups: the prefix's, {name: body}): a
+    second value for one of them would not compile. A pair or a contextual rule is not a single value."""
+    return spacing().font_positioned(tag, text, classes, lookups, BEGIN, END)
 
 
 def own_substitutions(tag, text, classes=None, lookups=None):
@@ -581,6 +528,43 @@ def feature_text(tag, old, rules):
     return u"\n".join(kept[:closing] + block + kept[closing:]) + u"\n"
 
 
+CODE_TAGS = ("vert", "vrt2", "vpal", "vkrn")  # (the features written, each read for the font's own code too)
+
+
+def read_prefix(features):
+    """The font's feature prefix (its classes and lookups, which the features name), or None unread."""
+    try:
+        return features.get_prefix()
+    except Exception:
+        return None
+
+
+UNCOMPARED = object()
+
+
+def changed_features(features, texts, tags, prefix=UNCOMPARED):
+    """What differs in the font from the code read with the list (texts: {tag: code}, a feature the font
+    lacked then left out; prefix, when given: read_prefix's then): the tags, and "prefix". A write composed
+    from that code would undo an edit made since (Feature Code's check before it writes). A feature that
+    cannot be read counts as changed."""
+    try:
+        present = set(features.keys())
+    except Exception:
+        return list(tags)
+    changed = []
+    for tag in tags:
+        try:
+            now = features.get_feature(tag) if tag in present else None
+        except Exception:
+            changed.append(tag)
+            continue
+        if now != texts.get(tag):
+            changed.append(tag)
+    if prefix is not UNCOMPARED and read_prefix(features) != prefix:
+        changed.append(u"prefix")
+    return changed
+
+
 def block_of(tag, text):
     """FreeLab's block of a feature, alone in a feature of its own (for the parser's check), or None."""
     begin, end = BEGIN % tag, END % tag
@@ -665,6 +649,27 @@ def free_name(path, exists=os.path.exists):
     while exists(u"%s-%d%s" % (stem, number, ext)):
         number += 1
     return u"%s-%d%s" % (stem, number, ext)
+
+
+def values_file(script, path, values, exists=os.path.exists):
+    """Where this font's values go beside the exported font at path, as (file, the file kept or None): the
+    values file add_vertical_metrics reads by default (script.values_path), replaced only when it holds the
+    values of this same font and master; one holding another's, or that cannot be read, is kept, and the
+    values go to the next name (<font>.vertical-2.json ...) that is free or holds this font's and master's
+    values, for --values."""
+    first = script.values_path(path)
+    stem, ext = os.path.splitext(first)
+    candidate, number = first, 1
+    while exists(candidate):
+        try:
+            old = script.load_values(candidate)
+            if (old.get("family"), old.get("master")) == (values.get("family"), values.get("master")):
+                break
+        except Exception:
+            pass
+        number += 1
+        candidate = u"%s-%d%s" % (stem, number, ext)
+    return candidate, (first if candidate != first else None)
 
 
 def load_metrics_script():
@@ -825,8 +830,9 @@ def vkrn_rules(kerns):
     return [u"pos %s %s <0 0 0 %d>;" % (k.first, k.second, k.value) for k in kerns if k.checked]
 
 
-PAIR_POSITION = re.compile(u"^\\s*(?:enum\\s+)?pos(?:ition)?\\s+(\\[[^\\]]*\\]|@[A-Za-z0-9_.\\-]+|[A-Za-z0-9_.\\-]+)\\s+"
-                           u"(\\[[^\\]]*\\]|@[A-Za-z0-9_.\\-]+|[A-Za-z0-9_.\\-]+)\\s*(?:<|-?[0-9])")
+# (a glyph name starts with no digit or hyphen: the single position "pos @vpal -500" is no pair of @vpal and "-50")
+PAIR_POSITION = re.compile(u"^\\s*(?:enum\\s+)?pos(?:ition)?\\s+(\\[[^\\]]*\\]|@[A-Za-z0-9_.\\-]+|[A-Za-z_.][A-Za-z0-9_.\\-]*)\\s+"
+                           u"(\\[[^\\]]*\\]|@[A-Za-z0-9_.\\-]+|[A-Za-z_.][A-Za-z0-9_.\\-]*)\\s*(?:<|-?[0-9])")
 
 
 def own_pairs(tag, text, classes=None, lookups=None):
@@ -848,18 +854,15 @@ def own_pairs(tag, text, classes=None, lookups=None):
 
 def own_position_values(tag, text, classes=None, lookups=None):
     """{glyph: (y placement, y advance)} of the single values a feature's own code gives (pos a <0 -2 0
-    -13>;), for measuring glyphs as the font's own vpal sets them."""
-    known = dict(classes or {})
-    known.update(code_classes(text))
-    for body in (lookups or {}).values():
-        known.update(code_classes(body))
+    -13>;, or pos a -500;: a number alone is the advance along the feature's direction, the y advance in a
+    vertical feature), for measuring glyphs as the font's own vpal sets them."""
     found = {}
-    for statement in statements(tag, text, lookups):
-        match = re.match(u"^\\s*(?:enum\\s+)?pos(?:ition)?\\s+(\\[[^\\]]*\\]|@[A-Za-z0-9_.\\-]+|[A-Za-z0-9_.\\-]+)\\s*"
-                         u"<\\s*(-?[0-9]+)\\s+(-?[0-9]+)\\s+(-?[0-9]+)\\s+(-?[0-9]+)\\s*>", statement)
-        if match:
-            for glyph in members(match.group(1), known):
-                found.setdefault(glyph, (int(match.group(3)), int(match.group(5))))
+    for glyph, value in spacing().single_positions(tag, text, classes, lookups, BEGIN, END):
+        record = re.match(u"^<\\s*(-?[0-9]+)\\s+(-?[0-9]+)\\s+(-?[0-9]+)\\s+(-?[0-9]+)\\s*>$", value)
+        if record:
+            found.setdefault(glyph, (int(record.group(2)), int(record.group(4))))
+        elif not value.startswith(u"<"):
+            found.setdefault(glyph, (0, int(value)))
     return found
 
 
@@ -1259,7 +1262,7 @@ class CJKVerticalDialog(object):
         self.forms, self.trims, self.metrics, self.first_checks = [], [], [], []
         self.turned, self.kerns, self.own_vkrn = [], [], set()
         self.texts, self.names, self.own_vpal, self.boxes, self.own_vert = {}, [], set(), {}, {}
-        self.char_names = {}
+        self.char_names, self.prefix, self.classes, self.holding = {}, None, {}, False
         self.font_vert, self.vrt2_extra = {}, {}
         self.origin, self.height = 880.0, 1000.0
         self.seen_history, self.busy, self.buttons_due, self.put_back = None, False, False, None
@@ -1339,7 +1342,7 @@ class CJKVerticalDialog(object):
         watcher, dark mode, and the window's release wait, and so does another read of the list (run once the
         work is over). The bar and the grayed controls show at once (at_once: a write, an export), or once
         the work has taken SHOW_AFTER (a list read again for a small font never flickers). Never raises."""
-        self.busy = bool(on)
+        self.busy, self.holding = bool(on), False
         self.busy_steps, self.busy_now = (tuple(steps) if on else ()), None
         self.busy_since, self.pumped = time.time(), 0.0
         if on:
@@ -1401,7 +1404,9 @@ class CJKVerticalDialog(object):
         """The work at this part (0 to 1) of the step of that label: the bar moved and the window redrawn (at
         most every PUMP_SECONDS within a step), or, without events, only the bar painted (as the list is
         filled: live, letting events through laid out the list made so far each time, and doubled its 0.8 s;
-        the window is redrawn when the step changes). A step the work does not list is passed over. Never
+        the window is redrawn when the step changes). A step the work does not list is passed over. While
+        holding (a write, from its check of the font's code to the code written), no events go through at
+        all: the bar and its step are painted alone, and nothing can change the code meanwhile. Never
         raises."""
         value = bar_value(self.busy_steps, label, part)
         if value is None or not self.busy:
@@ -1412,12 +1417,15 @@ class CJKVerticalDialog(object):
         if not self.busy_shown:
             return
         moved = label != self.busy_now
+        holding = getattr(self, "holding", False)
         try:
             if moved:
                 self.busy_now = label
                 self.busy_step.setText(u"%s\N{HORIZONTAL ELLIPSIS}" % label)
+                if holding:
+                    self.busy_step.repaint()
             self.busy_bar.setValue(int(round(value * BAR_RANGE)))
-            if not (moved or events):
+            if holding or not (moved or events):
                 self.busy_bar.repaint()
         except Exception:
             pass
@@ -1425,6 +1433,8 @@ class CJKVerticalDialog(object):
             self.pump(force=moved)
 
     def pump(self, force=False):
+        if getattr(self, "holding", False):
+            return  # (a write between its check and its code: progress paints the bar alone)
         now = time.time()
         if not force and now - self.pumped < PUMP_SECONDS:
             return
@@ -1468,19 +1478,9 @@ class CJKVerticalDialog(object):
         return self.boxes[name]
 
     def font_classes(self, package, features):
-        """{@name: [members]} of the font's classes: its prefix's and FontLab's own feature classes."""
-        classes = {}
-        try:
-            for group in package.getAllGroups():
-                if not group[0]:  # (a kerning class has True)
-                    classes[u"@%s" % group[1]] = [u"%s" % name for name in group[4]]
-        except Exception:
-            pass
-        try:
-            classes.update(code_classes(features.get_prefix()))
-        except Exception:
-            pass
-        return classes
+        """{@name: [members]} of the font's classes: its prefix's and FontLab's own feature classes (CJK
+        Spacing's font_classes)."""
+        return spacing().font_classes(package, read_prefix(features))
 
     def vertical_origin(self, package):
         """The vertical origin's y: the typographic ascender (the font's ascender where it has none),
@@ -1539,9 +1539,10 @@ class CJKVerticalDialog(object):
         self.names = [u"%s" % g.name for g in fg_glyphs]
         features = package.fgPackage.features
         self.texts = dict((tag, features.get_feature(tag)) for tag in features.keys())
-        classes = self.font_classes(package, features)
-        try:
-            lookups = code_lookups(features.get_prefix())  # (lookups the prefix defines, which features name)
+        self.prefix = read_prefix(features)  # (with the code and the classes: checked again before a write)
+        classes = self.classes = self.font_classes(package, features)
+        try:  # (lookups the prefix defines, which features name)
+            lookups = code_lookups(self.prefix) if self.prefix is not None else {}
         except Exception:
             lookups = {}
         own_vert = own_substitutions("vert", self.texts.get("vert"), classes, lookups)
@@ -2123,11 +2124,31 @@ class CJKVerticalDialog(object):
         """The write itself, under the progress bar (write), then its log and the list read again."""
         built, failed, written, set_heights, error, touched = [], [], [], 0, None, []
         vhea_done = []
+        # The code written is composed from the code read with the list: an edit made since (before the History
+        # watcher saw it, or one that leaves the History where it was) would be replaced. Checked after the last
+        # event let through (the bar's); from here until the code is written, the bar is painted alone
+        self.holding = True
+        try:
+            changed = self.changed_code(package)
+        except Exception:
+            changed = list(CODE_TAGS)  # (code that cannot be read counts as changed)
+        if changed:
+            self.holding = False
+            self.read_font()  # (under the same bar)
+            self.log.add(u"The feature code (%s) changed since the list was read: here is the list again, to check "
+                         u"before writing. Nothing was written." % self.ak.html(self.ak.joined(changed)), "warning")
+            return
+        status = None  # (notify_changed's: Undo promised only when FontLab's History recorded the write)
         try:
             in_history = bool(builds or new or heights)  # (the font info is not in FontLab's History: no step for it alone)
             if in_history:
                 self.progress(UNDO_STEP)
-                self.ak.before_changes(self.fontlab, package, TITLE)
+                try:
+                    self.ak.before_changes(self.fontlab, package, TITLE)
+                except getattr(self.ak, "HistoryError", ()) as exc:  # (nothing written: Undo could not take it back)
+                    self.holding = False
+                    self.log.add(u"%s" % (exc,), "error")
+                    return
             try:
                 self.progress(BUILD_STEP)
                 for number, form in enumerate(builds):
@@ -2146,33 +2167,39 @@ class CJKVerticalDialog(object):
                     new = self.texts_now()
                 self.progress(CODE_STEP)
                 features = package.fgPackage.features
-                for tag in ("vert", "vrt2", "vpal", "vkrn"):
+                for tag in CODE_TAGS:
                     if tag in new:
                         features.set_feature(tag, new[tag])
                         written.append(tag)
+                self.holding = False
                 if heights:
                     self.progress(HEIGHTS_STEP)
                     set_heights = self.set_advance_heights(package, heights[0].value)
             except Exception as exc:
                 error = exc
+            self.holding = False
             if in_history:
                 self.progress(UPDATE_STEP)
-                self.ak.notify_changed(self.fontlab, package, TITLE, touched, added=bool(built) or None)
+                status = self.ak.notify_changed(self.fontlab, package, TITLE, touched, added=bool(built) or None)
             if vhea:
                 self.progress(VHEA_STEP)
             vhea_done = self.write_vhea(package, vhea) if vhea else []
         except Exception as exc:
             error = error or exc
+        self.holding = False
         b = self.ak.b
+        undo = getattr(status, "recorded", True)
         if built:
-            self.log.add(u"Built %s: %s. %s at the end of the font; <i>Edit &gt; Undo</i> takes %s back." % (
+            self.log.add(u"Built %s: %s. %s at the end of the font%s." % (
                 b(counted(len(built), u"vertical form")), self.ak.glyph_name_links(built),
-                u"It is" if len(built) == 1 else u"They are", u"it" if len(built) == 1 else u"them"), "done")
+                u"It is" if len(built) == 1 else u"They are",
+                u"; <i>Edit &gt; Undo</i> takes %s back" % (u"it" if len(built) == 1 else u"them") if undo else u""), "done")
         for target, why in failed:
             self.log.add(u"%s was not built: %s." % (b(target), self.ak.html(why)), "warning")
         if written:
-            self.log.add(u"Wrote %s; <i>Edit &gt; Undo</i> takes %s back.%s" % (
-                b(self.ak.joined(written)), u"it" if len(written) == 1 else u"them",
+            self.log.add(u"Wrote %s%s.%s" % (
+                b(self.ak.joined(written)),
+                u"; <i>Edit &gt; Undo</i> takes %s back" % (u"it" if len(written) == 1 else u"them") if undo else u"",
                 self.ak.compiled_note(self.compile_box, self.log)), "done")
         if set_heights:
             self.log.add(u"Set the advance height of %s to %s." % (b(counted(set_heights, u"layer")), b(heights[0].value)),
@@ -2186,9 +2213,20 @@ class CJKVerticalDialog(object):
             self.log.add(EXPORT_NOTE, "warning")
         if not (built or written or set_heights or vhea_done):
             self.log.add(u"Wrote nothing.")
+        if not getattr(status, "ok", True):
+            self.log.add(status.message(), "error")
         if error is not None:
             self.log.add(u"Stopped by an error: %s" % self.ak.html(error), "error")
         self.read_font()  # (under the same bar)
+
+    def changed_code(self, package):
+        """What differs in the font's code from the code read with the list (changed_features: the features
+        written, the prefix), its feature classes too: the list rests on all of them."""
+        features = package.fgPackage.features
+        changed = changed_features(features, self.texts, CODE_TAGS, self.prefix)
+        if u"prefix" not in changed and self.font_classes(package, features) != self.classes:
+            changed.append(u"classes")
+        return changed
 
     def build_form_safely(self, package, form):
         """build_form, its glyph taken out again when anything fails after FontLab added it (an empty glyph
@@ -2368,17 +2406,19 @@ class CJKVerticalDialog(object):
             self.set_busy(False)
 
     def add_metrics_to(self, path):
-        """add_metrics_to_export's work, under the progress bar, and its log."""
+        """add_metrics_to_export's work, under the progress bar, and its log. Nothing is written until the
+        exported font is read and its em checked; the copy and the values file are written to files of their
+        own first (add_vertical_metrics' staged_path), and take their names together, once the copy's tables
+        read back right: a refusal or a failure leaves the folder as it was."""
         import io
         import json
         b = self.ak.b
         started = time.time()
+        staged, script = None, None
         try:
             self.progress(VALUES_STEP)
             values = self.metrics_values(self.package)
             script = load_metrics_script()
-            with io.open(script.values_path(path), "w", encoding="utf-8") as handle:
-                handle.write(u"%s" % json.dumps(values, indent=1, sort_keys=True, ensure_ascii=False))
             self.progress(OPEN_STEP)
             from fontTools.ttLib import TTFont
             font = TTFont(path)
@@ -2393,24 +2433,38 @@ class CJKVerticalDialog(object):
                 metrics = script.add_tables(font, values,
                                             lambda key, part=0.0: self.progress(SCRIPT_STEPS.get(key, key), part))
                 self.progress(SAVE_STEP)
+                values_out, kept = values_file(script, path, values)
+                staged = script.staged_path(values_out)
+                with io.open(staged, "w", encoding="utf-8") as handle:
+                    handle.write(u"%s" % json.dumps(values, indent=1, sort_keys=True, ensure_ascii=False))
                 out = free_name(script.output_path(path))
-                script.save_with_tables(font, path, out)
+                problems = script.write_copy(font, path, out, values,
+                                             lambda key: self.progress(CHECK_STEP) if key == "check" else None)
                 cff = "VORG" in font
             finally:
                 font.close()  # (the exported font let go: Windows keeps an open file from being moved or deleted)
-            self.progress(CHECK_STEP)
-            problems = script.check(out, values)
+            if problems:
+                for problem in problems:
+                    self.log.add(u"Read back: %s." % self.ak.html(problem), "error")
+                self.log.add(u"Nothing was written: the copy's tables read back wrong.", "error")
+                return
+            script.publish(staged, values_out)
+            staged = None
         except Exception as exc:
             self.log.add(u"Could not add the vertical metrics: %s" % self.ak.html(exc), "error")
             return
+        finally:
+            if staged is not None and script is not None:
+                script.discard(staged)
         self.log.add(u"Wrote %s: %s for %s, from this font's values (master %s; vertical origin %d), in %s. The "
-                     u"exported font is unchanged; its values are in %s, for <i>add_vertical_metrics</i> run again." % (
+                     u"exported font is unchanged; its values are in %s, for <i>add_vertical_metrics</i> run again%s." % (
                          b(os.path.basename(out)), u"vhea, vmtx, and VORG" if cff else u"vhea and vmtx",
                          b(counted(len(metrics), u"glyph")), self.ak.html(values["master"]), values["origin"],
                          counted(int(round(time.time() - started)) or 1, u"second"),
-                         b(os.path.basename(script.values_path(path)))), "done")
-        for problem in problems:
-            self.log.add(u"Read back: %s." % self.ak.html(problem), "error")
+                         b(os.path.basename(values_out)), u" (with <i>--values</i>)" if kept else u""), "done")
+        if kept:
+            self.log.add(u"%s is kept as it was: it holds another font's or master's values, or could not be read." % (
+                b(os.path.basename(kept))), "warning")
 
     def update_put_back(self):
         held = self.put_back

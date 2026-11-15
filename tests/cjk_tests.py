@@ -237,6 +237,113 @@ class OwnCodeTests(unittest.TestCase):
                          [u"cid00010", u"cid00011", u"uni3041", u"uni3042", u"uni3043"], "uni3001 is only in a pair rule")
 
 
+class LiveFontCodeTests(unittest.TestCase):
+    """Live pass (IBM Plex Sans JP, 2026-11-15): every write failed to compile, "Duplicate single positioning
+    glyph with different values in feature 'palt': uni3001". The font's palt positions its punctuation by
+    "pos @palt -500;", the class defined in the prefix, and its halt by @halt and @halt2: CJK Spacing read
+    the features' own text alone and added "pos uni3001 <6 0 -494 0>;". An excerpt of that font's code,
+    its rules and classes as FontLab read them (the classes cut to the glyphs used here)."""
+
+    PREFIX = u"""@palt = [angleright uni3001 uni3002 uniFF0C uniFF0E uni309B uni309C uniFF09 uni3015];
+@halt = [angleleft uni300A uni300C uniFF08 uni3014];
+@halt2 = [angleright uni3001 uni3002 uniFF0C uniFF09 uni3015 uni300B];
+lookup HALT_EXTRA {
+  pos uniFF5B <-500 0 -500 0>;
+} HALT_EXTRA;
+"""
+    PALT = u"""feature palt {
+# GPOS feature: Proportional Alternate Widths
+# Lookups: 1
+
+  pos [uni30FB uniFF1A uniFF1B uniFF1F uniFF01] <-250 0 -500 0>;
+  pos @palt -500;
+  pos uni30FD <-115 0 -250 0>;
+  pos [uni3041] <-55 0 -115 0>;
+} palt;
+"""
+    HALT = u"""feature halt {
+# GPOS feature: Alternate Half Widths
+# Lookups: 5
+
+  script latn; # Latin
+  pos @halt <-500 0 -500 0>;
+  pos [uni30FB uniFF1A uniFF1B uniFF01] <-250 0 -500 0>;
+  pos @halt2 -500;
+
+  script kana; # Hiragana
+  pos @halt <-500 0 -500 0>;
+  pos [uni30FB uniFF1A uniFF1B uniFF01] <-250 0 -500 0>;
+  pos @halt2 -500;
+  lookup HALT_EXTRA;
+} halt;
+"""
+    GLYPHS = [u"uni3001", u"uni3002", u"uni3041", u"uni3042", u"uni300C", u"uniFF5B", u"uniFF5D", u"uni30FB"]
+
+    def trims(self):
+        found = []
+        for name in self.GLYPHS:
+            trim = cj.Trim(0x3001, name, "punctuation", 1000, 100, 300)
+            trim.palt, trim.halt, trim.checked = (6, -494), (0, -500), True
+            found.append(trim)
+        return found
+
+    def texts(self, classes=None, lookups=None, kept=None):
+        if classes is None:
+            classes, lookups = cj.code_classes(self.PREFIX), cj.code_lookups(self.PREFIX)
+        return cj.texts_for(self.trims(), {"palt": self.PALT, "halt": self.HALT}, True, True, kept, classes, lookups)
+
+    def written(self, text, tag):
+        block = cj.block_of(tag, text) or u""
+        return sorted(line.split()[1] for line in block.splitlines() if line.strip().startswith(u"pos "))
+
+    def test_the_prefixs_classes_and_lookups_keep_their_glyphs_out(self):
+        kept = {}
+        new = self.texts(kept=kept)
+        self.assertEqual(self.written(new["palt"], "palt"), sorted([u"uni3042", u"uni300C", u"uniFF5B", u"uniFF5D"]),
+                         "uni3001 and uni3002 by @palt, uni3041 by its own rule, uni30FB by a list")
+        self.assertEqual(self.written(new["halt"], "halt"), [u"uni3041", u"uni3042", u"uniFF5D"],
+                         "@halt, @halt2, the list, and the prefix's lookup HALT_EXTRA")
+        self.assertEqual(sorted(kept["palt"]), [u"uni3001", u"uni3002", u"uni3041", u"uni30FB"])
+
+    def test_fontlabs_class_list_counts_too(self):
+        package = type("Package", (), {"getAllGroups": lambda self: [(False, u"palt", 0, 0, [u"uni3001", u"uni3002"]),
+                                                                      (True, u"kern1", 0, 0, [u"uni3042"])]})()
+        classes = cj.font_classes(package, None)
+        self.assertEqual(sorted(classes), [u"@palt"], "a kerning class is no feature class")
+        self.assertEqual(cj.font_positioned("palt", self.PALT, classes), set(
+            [u"uni3001", u"uni3002", u"uni30FB", u"uniFF1A", u"uniFF1B", u"uniFF1F", u"uniFF01", u"uni30FD", u"uni3041"]))
+        self.assertEqual(sorted(cj.font_classes(package, self.PREFIX)["@palt"])[:2], [u"angleright", u"uni3001"],
+                         "the prefix's own definition read too")
+
+    def test_the_written_code_compiles(self):
+        """What CJK Spacing writes, compiled with the font's own code (fontTools' compiler; FontLab's refused
+        the second value outright)."""
+        try:
+            from fontTools.feaLib.builder import addOpenTypeFeaturesFromString
+            from fontTools.fontBuilder import FontBuilder
+        except ImportError:
+            return  # (the Python 2.7 run)
+        new = self.texts()
+        names = set(self.GLYPHS) | set(cj.code_classes(self.PREFIX)["@palt"] + cj.code_classes(self.PREFIX)["@halt"] +
+                                      cj.code_classes(self.PREFIX)["@halt2"])
+        names |= set([u"uni30FD", u"uniFF1A", u"uniFF1B", u"uniFF1F", u"uniFF01"])
+        order = [u".notdef"] + sorted(names)
+        builder = FontBuilder(1000, isTTF=True)
+        builder.setupGlyphOrder(order)
+        builder.setupCharacterMap({})
+        from fontTools.pens.ttGlyphPen import TTGlyphPen
+        builder.setupGlyf(dict((name, TTGlyphPen(None).glyph()) for name in order))
+        builder.setupHorizontalMetrics(dict((name, (1000, 0)) for name in order))
+        builder.setupHorizontalHeader(ascent=880, descent=-120)
+        code = u"languagesystem DFLT dflt;\nlanguagesystem latn dflt;\nlanguagesystem kana dflt;\n" + self.PREFIX + \
+            new["palt"] + new["halt"]
+        addOpenTypeFeaturesFromString(builder.font, code)  # (raises on a second value for one glyph)
+        before = self.PALT.replace(u"} palt;", u"  pos uni3001 <6 0 -494 0>;\n} palt;")
+        from fontTools.feaLib.error import FeatureLibError
+        self.assertRaises(FeatureLibError, addOpenTypeFeaturesFromString, builder.font,
+                          u"languagesystem DFLT dflt;\n" + self.PREFIX + before)
+
+
 class CodePointTests(unittest.TestCase):
     def test_a_glyph_encoded_twice_is_found_at_both(self):
         """IBM Plex Sans JP encodes the ideograph sun at U+2F47 (its Kangxi radical) and U+65E5; FontLab's
@@ -315,6 +422,95 @@ class NoFontTests(unittest.TestCase):
         dialog.run = lambda: runs.append(1)
         dialog.font_changed()
         self.assertEqual(runs, [1], "a font closed or opened: read anew")
+
+
+class StaleCodeTests(unittest.TestCase):
+    """Review: a write composed palt and halt from the code read with the list, so an edit made since (before
+    the History watcher's next look, or one that leaves the History where it was) was replaced. The write
+    now compares the font's code with what was read, last, and writes nothing when it differs."""
+
+    USER_PALT = u"feature palt {\n  pos uni3042 <-10 0 -20 0>;\n} palt;\n"
+
+    class Features(object):
+        def __init__(self, texts):
+            self.texts, self.written = dict(texts), []
+
+        def keys(self):
+            return list(self.texts)
+
+        def get_feature(self, tag):
+            return self.texts[tag]
+
+        def set_feature(self, tag, text):
+            self.written.append(tag)
+            self.texts[tag] = text
+
+    def make(self, texts):
+        features = self.Features(texts)
+        package = type("Package", (), {"fgPackage": type("Fg", (), {"features": features})()})()
+        dialog = cj.CJKSpacingDialog.__new__(cj.CJKSpacingDialog)  # (its window needs FontLab)
+        dialog.package, dialog.names, dialog.texts = package, ["a-hira", "uni3042"], dict(texts)
+        dialog.prefix, dialog.classes, dialog.lookups = None, {}, {}
+        dialog.trims = [cj.suggest(cj.Trim(0x3042, "a-hira", "hiragana", 1000, 150, 880), MODEL, 1000.0),
+                        cj.suggest(cj.Trim(0x3001, "ideographiccomma", "punctuation", 1000, 100, 300), MODEL, 1000.0)]
+        dialog.palt_box = dialog.halt_box = type("Box", (), {"checked": True})()
+        dialog.compile_box = dialog.fontlab = None
+        self.logged, self.runs, self.history = [], [], []
+        dialog.log = type("Log", (), {"add": lambda _, text, kind=None: self.logged.append((kind, text))})()
+        raising = lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("no Feature Code here"))
+        dialog.ak = type("Ak", (), dict(
+            font_key=staticmethod(lambda p: 1), load_sibling=staticmethod(raising),
+            before_changes=staticmethod(lambda *args: self.history.append("before")),
+            notify_changed=staticmethod(lambda *args: self.history.append("notify")),
+            compiled_note=staticmethod(lambda box, log: u""), b=staticmethod(lambda t: u"%s" % t),
+            html=staticmethod(lambda t: u"%s" % t), joined=staticmethod(lambda items: u" and ".join(items))))
+        dialog.harvest = lambda: None
+        dialog.hangul_chosen = lambda: []
+        dialog.current_font = lambda: package
+        dialog.run = lambda: self.runs.append(1)
+        return dialog, features
+
+    def test_an_edit_made_since_the_list_was_read_is_kept(self):
+        dialog, features = self.make({"palt": self.USER_PALT})
+        edited = features.texts["palt"] = self.USER_PALT.replace(u"} palt;", u"  pos uni3044 <-5 0 -10 0>;\n} palt;")
+        dialog.write()
+        self.assertEqual(features.written, [], "no feature replaced")
+        self.assertEqual(features.texts["palt"], edited, "the user's rule is still there")
+        self.assertEqual(self.history, [], "no History step")
+        self.assertEqual(self.runs, [1], "the list read again")
+        self.assertEqual([kind for kind, _ in self.logged], ["warning"], self.logged)
+        self.assertIn(u"(palt)", self.logged[0][1])
+        self.assertIn(u"Nothing was written", self.logged[0][1])
+
+    def test_a_feature_added_since_is_seen_and_an_unchanged_font_is_written(self):
+        dialog, features = self.make({})
+        features.texts["halt"] = u"feature halt {\n  pos uni3001 <0 0 -500 0>;\n} halt;\n"
+        dialog.write()
+        self.assertEqual(features.written, [])
+        self.assertIn(u"(halt)", self.logged[0][1])
+        dialog, features = self.make({"palt": self.USER_PALT})
+        dialog.write()
+        self.assertEqual(sorted(features.written), ["halt", "palt"])
+        self.assertIn(u"pos uni3042 <-10 0 -20 0>;", features.texts["palt"], "the font's own rule kept")
+        self.assertEqual(self.history, ["before", "notify"])
+
+    def test_a_new_prefix_is_seen_too(self):
+        """The font's own positions are read through the prefix's classes: one changed since is a change."""
+        dialog, features = self.make({"palt": self.USER_PALT})
+        features.get_prefix = lambda: u"@palt = [a-hira];"
+        dialog.write()
+        self.assertEqual(features.written, [])
+        self.assertIn(u"(prefix)", self.logged[0][1])
+
+    def test_the_log_says_who_keeps_what(self):
+        """Live: "they keep palt it, not FreeLab's trim" (the feature's tag given once too often)."""
+        dialog, features = self.make({"palt": u"feature palt {\n  pos [a-hira ideographiccomma] <0 0 -1 0>;\n} palt;\n"})
+        dialog.write()
+        palt = [text for kind, text in self.logged if kind == "warning" and u"own palt" in text]
+        self.assertEqual(len(palt), 1, self.logged)
+        self.assertIn(u"are positioned by the font's own palt code already: they keep theirs, not FreeLab's trim", palt[0])
+        self.assertNotIn(u"keep palt", palt[0])
+        self.assertEqual(features.written, ["halt"], "palt has nothing left to write")
 
 
 class WordingTests(unittest.TestCase):

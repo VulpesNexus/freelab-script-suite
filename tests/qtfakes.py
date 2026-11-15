@@ -9,6 +9,7 @@ from __future__ import absolute_import, division, print_function
 
 import sys
 import types
+import weakref
 
 ROLES = (
     "Window", "WindowText", "Base", "AlternateBase", "ToolTipBase", "ToolTipText", "Text", "Button",
@@ -441,28 +442,63 @@ class QApplication(object):
 
 
 class QTimer(object):
-    made = []
+    """A timer that owns up to PythonQt's rule: one made from Python with no parent is deleted the moment
+    its last Python reference goes. made holds weak references only (timers() lists the live ones), so a
+    timer nothing else holds goes, as it would in FontLab; one that goes while it emits (its own timeout
+    let go of its last reference) is noted in deleted_while_emitting, and fire_unheld raises for it."""
+    made = []  # weak references to the timers made since install()
     single_shots = []  # (ms, callback) of every QTimer.singleShot
+    deleted_while_emitting = []  # (interval, callback) of each parentless timer deleted inside its own timeout
+    parented = []  # the timers made with a parent, which Qt holds
 
     @staticmethod
     def singleShot(ms, callback):
         QTimer.single_shots.append((ms, callback))
 
-    def __init__(self):
+    def __init__(self, parent=None):
+        self._parent = parent
         self.single = False
         self.interval = None
         self.callback = None
         self.running = False
-        QTimer.made.append(self)
+        emitting = self._emitting = [False]
+        owned = parent is None  # (PythonQt's to delete)
+        details = self._details = [None, None]
+
+        def gone(_ref):  # (holds nothing of the timer itself)
+            if owned and emitting[0]:
+                QTimer.deleted_while_emitting.append(tuple(details))
+        QTimer.made.append(weakref.ref(self, gone))
+        if parent is not None:
+            QTimer.parented.append(self)  # (Qt's: alive while its parent is, whoever holds it in Python)
+
+    def parent(self):
+        return self._parent
+
+    def metaObject(self):
+        return _Meta("QTimer")
+
+    def inherits(self, name):
+        return name == "QTimer"
+
+    def isActive(self):
+        return self.running
 
     def setSingleShot(self, value):
         self.single = value
 
     def setInterval(self, ms):
         self.interval = ms
+        self._details[0] = ms
 
     def connect(self, signal, callback):
         self.callback = callback
+        self._details[1] = callback
+        return True
+
+    def disconnect(self, signal, callback):
+        if self.callback is callback:
+            self.callback = None
         return True
 
     def start(self):
@@ -475,7 +511,37 @@ class QTimer(object):
         if self.running:
             if self.single:
                 self.running = False
-            self.callback()
+            self._emitting[0] = True
+            try:
+                self.callback()
+            finally:
+                self._emitting[0] = False
+
+
+def timers():
+    """The timers made since install() that are still alive."""
+    return [timer for timer in (ref() for ref in QTimer.made) if timer is not None]
+
+
+def fire_unheld(get):
+    """Fire the timer get() gives as Qt does: no Python reference to it held while it emits (Qt's signal
+    holds none). Raises when PythonQt would have deleted it from inside its own timeout."""
+    ref = weakref.ref(get())
+    timer = ref()
+    if timer is None or not timer.running:
+        return
+    if timer.single:
+        timer.running = False
+    callback, emitting, before = timer.callback, timer._emitting, len(QTimer.deleted_while_emitting)
+    emitting[0] = True
+    del timer
+    try:
+        callback()
+    finally:
+        emitting[0] = False
+    if len(QTimer.deleted_while_emitting) > before:
+        raise AssertionError("a parentless timer lost its last reference inside its own timeout: "
+                             "PythonQt deletes it while it emits")
 
 
 class Preferences(object):
@@ -500,6 +566,8 @@ def install(remove_placeholder=False):
     light.setColor(QPalette.Window, QColor(LIGHT_WINDOW))
     QApplication.current = FakeApp(light)
     QTimer.made = []
+    QTimer.deleted_while_emitting = []
+    QTimer.parented = []
     QT_VERSION[0] = "5.14.2"
     Preferences.color_workspace = QColor("#ffacacac")
     if remove_placeholder and hasattr(QPalette, "PlaceholderText"):

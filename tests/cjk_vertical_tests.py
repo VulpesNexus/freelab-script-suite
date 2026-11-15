@@ -5,6 +5,7 @@ Python 3."""
 from __future__ import absolute_import, division, print_function
 
 import io
+import json
 import os
 import re
 import sys
@@ -140,6 +141,19 @@ class OwnCodeTests(unittest.TestCase):
   } V2;
 } vpal;"""
         self.assertEqual(sorted(cv.own_positions("vpal", vpal, {}, lookups)), [u"uni3041.vert", u"uni3063.vert"])
+
+    def test_a_class_given_one_number_is_a_single_value(self):
+        """Live pass: IBM Plex Sans JP's palt reads "pos @palt -500;" (a number alone: the advance along the
+        feature's direction), its class in the prefix; CJK Spacing missed it. In vpal, the same reader:
+        no vpal rule for its glyphs, and the pair reader does not take it for a pair of @vpal and "-50"."""
+        prefix = u"@vpal = [uni3001 uni3002];\n"
+        vpal = u"feature vpal {\n  pos @vpal -500;\n  pos uni3044 uniFE11 -20;\n} vpal;\n"
+        classes = cv.code_classes(prefix)
+        self.assertEqual(sorted(cv.own_positions("vpal", vpal, classes)), [u"uni3001", u"uni3002"])
+        self.assertEqual(cv.own_position_values("vpal", vpal, classes), {u"uni3001": (0, -500), u"uni3002": (0, -500)})
+        self.assertEqual(cv.own_pairs("vpal", vpal, classes), set([(u"uni3044", u"uniFE11")]))
+        trims = [type("T", (), {"shown": name, "value": (10, -20), "checked": True})() for name in (u"uni3001", u"uni3042")]
+        self.assertEqual(cv.vpal_rules(trims, cv.own_positions("vpal", vpal, classes)), [u"pos uni3042 <0 10 0 -20>;"])
 
     def test_ranges_in_classes(self):
         text = u"feature vert {\n  sub [cid00010-cid00011] by [cid00020-cid00021];\n} vert;"
@@ -839,8 +853,9 @@ class FakeQtTests(unittest.TestCase):
         """Review: an error in notify_changed or the vhea write left busy set (the History watcher silent,
         the window never let go)."""
         package = self.Package([self.Glyph("uni300C", {"Regular": self.Layer(1000.0)})], masters=("Regular",))
-        package.fgPackage.features = type("Features", (), {"set_feature": lambda self, tag, text: None})()
+        package.fgPackage.features = StaleCodeTests.Features({})
         dialog = self.dialog(package)
+        dialog.texts, dialog.prefix, dialog.classes = {}, u"", {}
         logged = []
         raising = lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("FontLab said no"))
         dialog.ak = type("Ak", (), dict(
@@ -918,6 +933,140 @@ class FakeQtTests(unittest.TestCase):
                          "live: without the glyph's update() the height was gone after the write in most glyphs")
 
 
+class StaleCodeTests(unittest.TestCase):
+    """Review: a write composed its code from the code read with the list, so an edit of vert, vrt2, vpal, or
+    vkrn made since (before the History watcher's next look, or one that leaves the History where it was)
+    was replaced. The write now compares the font's code with what was read, after the last event it lets
+    through, and writes nothing when it differs."""
+
+    USER_VERT = u"feature vert {\n  sub uni3001 by uni3001.vert;\n} vert;\n"
+
+    class Features(object):
+        def __init__(self, texts, prefix=u""):
+            self.texts, self.prefix, self.written = dict(texts), prefix, []
+
+        def keys(self):
+            return list(self.texts)
+
+        def get_feature(self, tag):
+            return self.texts[tag]
+
+        def get_prefix(self):
+            return self.prefix
+
+        def set_feature(self, tag, text):
+            self.written.append(tag)
+            self.texts[tag] = text
+
+    def setUp(self):
+        import qtfakes
+        qtfakes.install()
+        self.addCleanup(qtfakes.uninstall)
+        kept = cv.pump_events
+        self.addCleanup(setattr, cv, "pump_events", kept)
+        self.pumps, self.on_pump = [], None
+
+        def pump_events(QtCore, QtGui):
+            self.pumps.append(self.dialog.holding)
+            if self.on_pump is not None:
+                self.on_pump()
+        cv.pump_events = pump_events
+
+    def make(self, texts, prefix=u""):
+        features = self.Features(texts, prefix)
+        package = FakeQtTests.Package([FakeQtTests.Glyph("uni300C", {"Regular": FakeQtTests.Layer(1000.0)})],
+                                      masters=("Regular",))
+        package.fgPackage.features = features
+        dialog = self.dialog = cv.CJKVerticalDialog.__new__(cv.CJKVerticalDialog)  # (its window needs FontLab)
+        dialog.package, dialog.names, dialog.fontlab = package, ["uni300C"], None
+        dialog.texts, dialog.prefix, dialog.classes = dict(texts), features.get_prefix(), {}
+        dialog.holding, dialog.busy, dialog.busy_shown, dialog.run_due = False, False, False, False
+        widget = ProgressTests.Widget
+        dialog.busy_row, dialog.busy_bar, dialog.busy_step = widget(), widget(), widget()
+        dialog.tree, dialog.write_button, dialog.export_button, dialog.compile_box = widget(), widget(), widget(), None
+        self.logged, self.steps, self.reads, self.history = [], [], [], []
+        dialog.log = type("Log", (), {"add": lambda _, text, kind=None: self.logged.append((kind, text))})()
+        raising = lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("no Feature Code here"))
+        dialog.ak = type("Ak", (), dict(
+            font_key=staticmethod(lambda p: 1), load_sibling=staticmethod(raising), LOG_COLORS={},
+            enable=staticmethod(lambda w, on: w.setEnabled(bool(on))),
+            before_changes=staticmethod(lambda *args: self.history.append("before")),
+            notify_changed=staticmethod(lambda *args, **kwargs: self.history.append("notify")),
+            compiled_note=staticmethod(lambda box, log: u""), glyph_name_links=staticmethod(lambda names: u" ".join(names)),
+            b=staticmethod(lambda t: u"%s" % t), html=staticmethod(lambda t: u"%s" % t),
+            joined=staticmethod(lambda items: u" and ".join(items))))
+        dialog.harvest = dialog.show_font_parts = lambda *args: None
+        dialog.update_buttons = dialog.update_put_back = lambda: None
+        dialog.read_font = lambda: self.reads.append(dialog.busy)
+        dialog.current_font = lambda: package
+        kept = dialog.progress
+        dialog.progress = lambda label, part=0.0, events=True: (self.steps.append((label, dialog.holding)),
+                                                               kept(label, part, events))
+        form = cv.Form(0x300C, "uni300C", "rotated", "uni300C.vert", "build", (0, -1, 1, 0, 120, 880))
+        self.built = []
+        dialog.build_form_safely = lambda package, form: (self.built.append(form.target), (object(), None))[1]
+        new = {"vert": cv.feature_text("vert", texts.get("vert"), [u"sub uni300C by uni300C.vert;"])}
+        dialog.pending = lambda: (new, [form], [])
+        return dialog, features
+
+    def refused(self, features):
+        self.assertEqual(features.written, [], "no feature replaced")
+        self.assertEqual(self.built, [], "no form built")
+        self.assertEqual(self.history, [], "no History step")
+        self.assertEqual(self.reads, [True], "the list read again (under the bar)")
+        self.assertEqual([kind for kind, _ in self.logged], ["warning"], self.logged)
+        self.assertIn(u"Nothing was written", self.logged[0][1])
+        self.assertFalse(self.dialog.busy)
+        self.assertFalse(self.dialog.holding)
+
+    def test_an_edit_made_since_the_list_was_read_is_kept(self):
+        dialog, features = self.make({"vert": self.USER_VERT})
+        features.texts["vert"] = self.USER_VERT.replace(u"} vert;", u"  sub uni3002 by uni3002.vert;\n} vert;")
+        edited = features.texts["vert"]
+        dialog.write()
+        self.refused(features)
+        self.assertEqual(features.texts["vert"], edited, "the user's rule is still there")
+        self.assertIn(u"(vert)", self.logged[0][1])
+
+    def test_a_feature_added_since_or_a_new_prefix_is_seen_too(self):
+        dialog, features = self.make({"vert": self.USER_VERT})
+        features.texts["vkrn"] = u"feature vkrn {\n  pos uni3042 uni3001 -80;\n} vkrn;\n"
+        dialog.write()
+        self.refused(features)
+        self.assertIn(u"(vkrn)", self.logged[0][1])
+        dialog, features = self.make({"vert": self.USER_VERT}, prefix=u"@kana = [uni3042];")
+        features.prefix = u"@kana = [uni3042 uni3044];"
+        dialog.write()
+        self.refused(features)
+        self.assertIn(u"(prefix)", self.logged[0][1])
+
+    def test_an_edit_let_through_by_the_bar_is_seen(self):
+        """The bar lets events through as it shows; an edit made then is after any check made before it."""
+        dialog, features = self.make({"vert": self.USER_VERT})
+
+        def edit():
+            features.texts["vert"] = self.USER_VERT + u"# mine\n"
+            self.on_pump = None
+        self.on_pump = edit
+        dialog.write()
+        self.assertTrue(self.pumps, "the bar shown at once let events through")
+        self.refused(features)
+
+    def test_no_event_goes_through_between_the_check_and_the_code(self):
+        dialog, features = self.make({"vert": self.USER_VERT})
+        dialog.write()
+        self.assertEqual(features.written, ["vert"], self.logged)
+        self.assertEqual(self.built, ["uni300C.vert"])
+        self.assertIn(u"sub uni3001 by uni3001.vert;", features.texts["vert"], "the font's own rule kept")
+        self.assertEqual(self.history, ["before", "notify"])
+        self.assertNotIn(True, self.pumps, "no event let through while holding")
+        held = [label for label, holding in self.steps if holding]
+        self.assertEqual(held, [cv.UNDO_STEP, cv.BUILD_STEP, cv.BUILD_STEP, cv.CODE_STEP], "the bar still moves meanwhile")
+        self.assertEqual(dialog.busy_step.repaints, 3, "each new step painted without events")
+        self.assertFalse(dialog.holding)
+        self.assertIn(False, self.pumps[1:], "events go through again once the code is written")
+
+
 class ExportTests(unittest.TestCase):
     """Vertical metrics added to a font FontLab exported (its export writes none)."""
 
@@ -984,7 +1133,8 @@ class ExportTests(unittest.TestCase):
         script = cv.load_metrics_script()
         self.assertEqual(script.output_path(os.path.join(u"x", u"Font.otf")), os.path.join(u"x", u"Font.vert.otf"))
         self.assertEqual(script.values_path(u"Font.otf"), u"Font.otf.vertical.json")
-        for name in ("add_tables", "check", "heights_by_glyph", "main"):
+        for name in ("add_tables", "check", "heights_by_glyph", "main", "same_file", "staged_path", "publish",
+                     "discard", "write_copy", "load_values"):
             self.assertTrue(callable(getattr(script, name)), name)
 
     def exported(self):
@@ -1051,13 +1201,91 @@ class ExportTests(unittest.TestCase):
         self.assertIn(u"1,000 units", self.logged[0][1])
         self.assertFalse(os.path.exists(os.path.join(os.path.dirname(path), u"test.vert.ttf")))
 
+    SENTINEL = {"format": 1, "upm": 2048, "origin": 1800, "family": u"Other", "master": u"Bold",
+                "vhea": {"ascent": 1024, "descent": -1024, "lineGap": 0}, "default_height": 2048, "heights": {},
+                "codes": {}}
+
+    def sentinel(self, path, values=None):
+        """A values file beside the export already, as an earlier use (or the user) left it."""
+        sidecar = path + u".vertical.json"
+        with io.open(sidecar, "w", encoding="utf-8") as handle:
+            handle.write(u"%s" % json.dumps(values or self.SENTINEL))
+        return sidecar, open(sidecar, "rb").read()
+
+    def test_a_refusal_leaves_the_values_file_as_it_was(self):
+        """Review: the values file was written before the font was read and its em checked, so a refusal
+        (another em, a file that is not a font) replaced the values an earlier use had left there."""
+        path = self.exported()
+        folder = os.path.dirname(path)
+        sidecar, before = self.sentinel(path)
+        listed = sorted(os.listdir(folder))
+        self.dialog(self.package(2048.0)).add_metrics_to_export(path)
+        self.assertEqual([kind for kind, _ in self.logged], ["error"], self.logged)
+        self.assertEqual(open(sidecar, "rb").read(), before)
+        not_a_font = os.path.join(folder, u"notes.ttf")
+        with open(not_a_font, "wb") as handle:
+            handle.write(b"not a font")
+        other, other_before = self.sentinel(not_a_font)
+        self.dialog(self.package()).add_metrics_to_export(not_a_font)
+        self.assertEqual([kind for kind, _ in self.logged], ["error"], self.logged)
+        self.assertEqual(open(other, "rb").read(), other_before)
+        self.assertEqual(sorted(os.listdir(folder)), sorted(listed + [u"notes.ttf", u"notes.ttf.vertical.json"]),
+                         "nothing else written")
+
+    def test_a_failed_copy_writes_neither_file(self):
+        path = self.exported()
+        folder = os.path.dirname(path)
+        sidecar, before = self.sentinel(path, dict(self.SENTINEL, family=u"Test", master=u"Regular", upm=1000))
+        listed = sorted(os.listdir(folder))
+        real = cv.load_metrics_script
+
+        def broken():
+            script = real()
+
+            def save_with_tables(font, source, out):
+                with open(out, "wb") as handle:
+                    handle.write(b"half a font")
+                raise IOError("the disk is full")
+            script.save_with_tables = save_with_tables
+            return script
+        cv.load_metrics_script = broken
+        try:
+            self.dialog(self.package()).add_metrics_to_export(path)
+        finally:
+            cv.load_metrics_script = real
+        self.assertEqual([kind for kind, _ in self.logged], ["error"], self.logged)
+        self.assertIn(u"the disk is full", self.logged[0][1])
+        self.assertEqual(open(sidecar, "rb").read(), before, "this master's values as they were")
+        self.assertEqual(sorted(os.listdir(folder)), listed, "no copy, no staged file left")
+
+    def test_another_masters_values_are_kept(self):
+        """A values file of another font or master is never replaced: this one's go to the next free name."""
+        path = self.exported()
+        sidecar, before = self.sentinel(path)
+        self.dialog(self.package()).add_metrics_to_export(path)
+        self.assertEqual([kind for kind, _ in self.logged], ["done", "warning"], self.logged)
+        self.assertEqual(open(sidecar, "rb").read(), before)
+        second = path + u".vertical-2.json"
+        self.assertEqual(json.load(io.open(second, encoding="utf-8"))["master"], u"Regular")
+        self.assertIn(u"test.ttf.vertical-2.json", self.logged[0][1])
+        self.assertIn(u"--values", self.logged[0][1])
+        self.assertIn(u"test.ttf.vertical.json", self.logged[1][1])
+        self.dialog(self.package()).add_metrics_to_export(path)  # (the same master again: its own file replaced)
+        self.assertEqual([kind for kind, _ in self.logged], ["done", "warning"], self.logged)
+        self.assertIn(u"test.ttf.vertical-2.json", self.logged[0][1])
+        self.assertFalse(os.path.exists(path + u".vertical-3.json"))
+        self.assertEqual(open(sidecar, "rb").read(), before)
+
 
 class ProgressTests(unittest.TestCase):
     """Long work under a progress bar (the owner: about 13 s without one adding vertical metrics)."""
 
     class Widget(object):
         def __init__(self):
-            self.visible, self.enabled, self.value, self.text = False, True, 0, u""
+            self.visible, self.enabled, self.value, self.text, self.repaints = False, True, 0, u"", 0
+
+        def repaint(self):
+            self.repaints += 1
 
         def setVisible(self, on):
             self.visible = on

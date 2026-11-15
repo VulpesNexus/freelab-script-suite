@@ -5,7 +5,9 @@ Dark mode has two engines, chosen in *Scripts > FreeLab > Dark Mode Settings > E
 - **Script:** each island gets FontLab's light look, is drawn offscreen through a graphics effect, and the pixels it drew are mapped.
 - **Native:** the colors FontLab hands to Qt while it paints an island are mapped before anything is drawn, and Qt draws dark itself. Lists whose rows Qt draws get the same, for their dark text.
 
-If the native engine cannot start (its library is missing, Qt is another build, or an import table entry cannot be written), the script engine runs and the reason shows in `status()["errors"]`.
+If the native engine cannot start (its library is missing or another version, FontLab is not 64-bit, Qt is not version 5.14.2, a Qt function or FontLab import it hooks is missing, or an import table entry cannot be written), the script engine runs and the reason shows in `status()["errors"]`.
+
+What the start checks is that list, and no more: Qt's own version (its `qVersion()`), and the MSVC-decorated names the library looks up. A Qt 5.14.2 built otherwise (another compiler, other build options) that still exports those names would pass, and the library's assumptions about Qt's object layout (where a widget's `QPaintDevice` part sits, for one) would then go unchecked. FontLab 7.2's own Qt is the build it was written and tested against.
 
 ## How it is applied to a FontLab install
 
@@ -50,5 +52,5 @@ Fixed since the owner's tests of version 10, and waiting for the owner's look: t
 | **Speed** | Every island is drawn offscreen and mapped | A color mapped per call, an image once |
 | **Reach** | Anything drawn, cached images included | Colors FontLab passes to Qt on the islands, and the images it draws there; the rest is the script engine's |
 | **Risk** | Python and Qt effects only: a mistake looks wrong | Native code inside FontLab: a mistake in a wrapper can crash FontLab (the start guard then falls back) |
-| **Compatibility** | Any FontLab 7 build whose widgets it knows | Qt 5.14.2 (MSVC x64) only; checked at start, script engine otherwise |
+| **Compatibility** | Any FontLab 7 build whose widgets it knows | Qt 5.14.2 (MSVC x64) only; its version and the names it hooks are checked at start (not its layout), script engine otherwise |
 | **Maturity** | Tuned on most of FontLab's surfaces | Compared with the script engine on the main window; dialogs share the script engine's handling |

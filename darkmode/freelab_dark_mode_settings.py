@@ -62,18 +62,82 @@ def current_choice(settings, dm):
     return theme, not dm.content_setting(settings), settings.get("shade", "dark")
 
 
+def main_window():
+    """FontLab's main window, or None."""
+    try:
+        from PythonQt.QtGui import QApplication
+        for widget in QApplication.topLevelWidgets():
+            if widget.objectName == "MainWindow":
+                return widget
+    except Exception:
+        pass
+    return None
+
+
+def held_dialogs():
+    """Dialogs this script let go of and Qt has not deleted yet (or, with no FontLab main window to give
+    them to, kept for the session): held in sys, never let go while PythonQt could delete them."""
+    held = getattr(sys, "_freelab_dark_mode_settings_held", None)
+    if held is None:
+        held = sys._freelab_dark_mode_settings_held = []
+    return held
+
+
+def let_go(dialog, watch, slot, parented):
+    """A closed settings dialog: its watch timer stopped and disconnected, then the dialog deleted once by
+    Qt (deleteLater from a plain timer's slot, never from inside its own signals) when it has FontLab's
+    main window as its parent, which PythonQt leaves to Qt. A parentless one (no main window found) is
+    kept, hidden: PythonQt deletes a widget made from Python the moment its last reference goes."""
+    from PythonQt.QtCore import QTimer
+    try:
+        watch.stop()
+    except Exception:
+        pass
+    if slot is not None:
+        try:
+            watch.disconnect("timeout()", slot)
+        except Exception:
+            pass
+    held = held_dialogs()
+    held.append(dialog)
+    if not parented:
+        return
+
+    def delete():
+        try:
+            dialog.deleteLater()
+        except Exception:
+            pass
+        held[:] = [entry for entry in held if entry is not dialog]  # (only now let go)
+    QTimer.singleShot(0, delete)
+
+
 def show_dialog():
-    from PythonQt.QtGui import QDialog, QVBoxLayout, QHBoxLayout, QRadioButton, QCheckBox, QPushButton, QLabel
+    """The settings dialog, modal; the settings chosen (None on Cancel). The dialog has FontLab's main
+    window as its parent and is deleted once closed (let_go), its watch timer stopped first."""
+    from PythonQt.QtGui import QDialog
+    from PythonQt.QtCore import QTimer
+    dm = dark_mode_module()
+    main = main_window()
+    dialog = QDialog(main) if main is not None else QDialog()  # (a parent: PythonQt leaves it to Qt)
+    watch = QTimer(dialog)
+    slots = {}
+    try:
+        return _run(dialog, watch, slots, dm)
+    finally:
+        let_go(dialog, watch, slots.get("watch"), main is not None)
+
+
+def _run(dialog, watch, slots, dm):
+    from PythonQt.QtGui import QVBoxLayout, QHBoxLayout, QRadioButton, QCheckBox, QPushButton, QLabel
     from PythonQt.QtGui import QButtonGroup
     from PythonQt.QtCore import Qt
-    dm = dark_mode_module()
     settings = dm.load_settings()
     before = dict(dark=bool(settings.get("enabled")), content=dm.content_setting(settings),
                   follow_windows=bool(settings.get("follow_windows")), shade=settings.get("shade", "dark"))
     has_engines = hasattr(dm, "engine_setting")  # a dark mode from before the native engine has one
     engine = dm.engine_setting(settings) if has_engines else "script"
     theme, mixed, shade = current_choice(settings, dm)
-    dialog = QDialog()
     dialog.setWindowTitle("FreeLab Dark Mode")
     # No "?" in the title bar: it offered help this dialog does not have.
     flags = int(dialog.windowFlags()) if callable(dialog.windowFlags) else int(dialog.windowFlags)
@@ -161,9 +225,8 @@ def show_dialog():
         button.connect("toggled(bool)", preview)
     mixed_box.connect("toggled(bool)", preview)
     themes["automatic"].connect("toggled(bool)", system_light)
-    from PythonQt.QtCore import QTimer
-    watch = QTimer(dialog)
     watch.setInterval(SYSTEM_CHECK_MS)
+    slots["watch"] = system_light
     watch.connect("timeout()", system_light)
     watch.start()
     system_light()
