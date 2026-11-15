@@ -633,8 +633,9 @@ class PreviewTests(unittest.TestCase):
         self.assertEqual(len(chars), 2)
         surrogates = u"\ud842\udfb7"  # (as a narrow Python holds it)
         self.assertEqual(cv.code_points(surrogates), [(0x20BB7, surrogates)])
-        missing = cv.preview_column(u"\U00020bb7", {}, {}, {}, {}, {}, 1000.0, 1000.0)[0]
-        self.assertEqual(missing, [(None, None, 0, 0)], "one empty box, not two")
+        missing = cv.preview_column(u"\U00020bb7か", {0x304B: "ka"}, {}, {}, {}, {}, 1000.0, 1000.0)
+        self.assertEqual((missing[0], missing[1]), ([("ka", None, 0, 0)], [u"か"]),
+                         "left out whole, as CJK Spacing leaves it: no half of it drawn")
 
     def test_the_columns_fit_their_pane(self):
         chars = list(u"\u3044\u308d\u306f") * 16  # 48 kana: 48 ems of column
@@ -919,6 +920,52 @@ class FakeQtTests(unittest.TestCase):
         source = io.open(os.path.join(HERE, os.pardir, "cjk", "freelab_cjk_vertical.py"), encoding="utf-8").read()
         self.assertIn(u"glyph, why = self.build_form_safely(package, form)", source,
                       "the write builds each form through it, and goes on to the next")
+
+    def test_a_font_without_cjk_glyphs_is_offered_nothing(self):
+        """The owner, of Noto Sans: "The CJK spacing section is aware that the font contains no such glyphs,
+        but the CJK vertical section disagrees because of some punctuation marks". Its em-wide HORIZONTAL
+        BAR (U+2015, General Punctuation: the dash Japanese text turns, so the corpus turns it) passed every
+        test of a form, and the vertical metrics were offered too: a font with no CJK glyph is offered
+        nothing, and the line over the list says why."""
+        self.assertFalse(cv.has_cjk([0x41, 0x2015, 0x2014, 0x201C, 0x0416, 0x03BC]))
+        for code in (0x3001, 0x304B, 0x30AB, 0x3105, 0x4E00, 0xAC00, 0xFE41, 0xFF08, 0x20BB7):
+            self.assertTrue(cv.has_cjk([0x41, code]), hex(code))
+        model = dict(MODEL, vert=dict(MODEL["vert"], **{"U+2015": {"fonts": 90, "agree": 0.9, "how": "rotated",
+                                                                    "move": [0.0, 0.0]}}))
+
+        def listed(codes):
+            glyphs = [self.Glyph(u"uni%04X" % code, {"Regular": self.Layer(1000.0)}) for code in codes]
+            package = self.Package(glyphs, masters=("Regular",))
+            package.fgPackage.glyphs = [type("Fg", (), {"name": glyph.name, "unicodes": [code]})()
+                                        for glyph, code in zip(glyphs, codes)]
+            package.fgPackage.features = StaleCodeTests.Features({})
+            package.tfn = u"Fake Sans"
+            dialog = self.dialog(package)
+            dialog.model, dialog.cj = model, cv.spacing()
+            dialog.boxes, dialog.busy, dialog.holding = {}, False, False
+            widget = ProgressTests.Widget
+            dialog.status, dialog.sample, dialog.sample_box = widget(), widget(), widget()
+            dialog.tree = type("Tree", (), {"blockSignals": lambda self, on: None, "clear": lambda self: None})()
+            dialog.samples = [(u"ja", u"Japanese", cv.SAMPLE_JA)]
+            dialog.ak = type("Ak", (), dict(b=staticmethod(lambda t: u"%s" % t), i=staticmethod(lambda t: u"%s" % t),
+                                            joined=staticmethod(lambda items: u", ".join(items)),
+                                            history_mark=staticmethod(lambda p: None)))
+            for name in ("show_font_parts", "fill", "update_buttons", "update_put_back", "draw_previews", "progress"):
+                setattr(dialog, name, lambda *args, **kwargs: None)
+            dialog.current_checks = lambda: {}
+            dialog.current_font = lambda: package
+            dialog.font_classes = lambda package, features: {}
+            dialog.read_font()
+            return dialog
+
+        latin = listed([0x41, 0x2015])
+        self.assertEqual((latin.forms, latin.trims, latin.turned, latin.kerns, latin.metrics), ([], [], [], [], []))
+        self.assertEqual(latin.status.text, u"Fake Sans, master Regular, has no kana, Hangul, ideographs, or CJK "
+                                            u"punctuation: not a CJK font, nothing to add for vertical text.")
+        cjk = listed([0x41, 0x2015, 0x300C])
+        self.assertEqual(sorted(f.name for f in cjk.forms), [u"uni2015", u"uni300C"], "a CJK font's dash turns")
+        self.assertTrue(cjk.metrics)
+        self.assertNotIn(u"not a CJK font", cjk.status.text)
 
     def test_advance_heights_only_where_none(self):
         set_one = self.Layer()
@@ -1350,6 +1397,30 @@ class ProgressTests(unittest.TestCase):
         self.assertFalse(dialog.busy_row.visible)
         self.assertTrue(dialog.tree.enabled)
         self.assertEqual(self.restored, ["parts", "buttons", "put back"], "each control as the font wants it")
+
+    def test_a_quick_list_sets_the_buttons_and_a_font_without_cjk_grays_them(self):
+        """The live pass, on Noto Sans: Write and Restore suggestions stayed clickable over an empty list, left as
+        the font before had them (a list read quickly shows no bar, and the buttons it held off were never set
+        again). A font with no CJK glyph has every button that acts on the list grayed, and the export's."""
+        dialog = self.dialog()
+        del dialog.update_buttons  # (the real one)
+        for name in ("all_button", "none_button", "restore_button", "export_button"):
+            setattr(dialog, name, self.Widget())
+        dialog.harvest = dialog.draw_previews = lambda: None
+        dialog.forms, dialog.turned, dialog.trims, dialog.kerns, dialog.metrics, dialog.first_checks = [], [], [], [], [], []
+        dialog.pending = lambda: ({"vert": u"code"}, [], [])  # (what a write would change)
+        dialog.cjk = False
+        dialog.set_busy(True, cv.LIST_STEPS)
+        dialog.update_buttons()  # (held off while the list is read)
+        self.assertTrue(dialog.write_button.enabled, "as the font before left it")
+        dialog.set_busy(False)
+        self.assertFalse(dialog.busy_row.visible, "a quick list: no bar")
+        self.assertEqual([getattr(dialog, name).enabled for name in ("all_button", "none_button", "restore_button",
+                                                                     "write_button", "export_button")],
+                         [False] * 5, "set once the list is read: nothing to act on")
+        dialog.cjk = True
+        dialog.update_buttons()
+        self.assertTrue(dialog.write_button.enabled, "a CJK font's change: Write")
 
     def test_a_quick_list_never_shows_the_bar(self):
         dialog = self.dialog()

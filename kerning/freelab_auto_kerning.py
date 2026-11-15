@@ -2635,8 +2635,13 @@ def retheme_window(owner, mapping):
     for widget in widgets:
         if repolish(widget):
             done["polished"] += 1
+    done["tables"] = 0
     for widget in widgets:
         try:
+            if is_table(widget):  # (its stylesheet holds the palette's colors: written again in the new ones)
+                style_table(widget)
+                refit(widget)  # (and its columns fitted as they were, from the same rows and fonts)
+                done["tables"] += 1
             if widget.inherits("QTreeWidget") or widget.inherits("QListWidget") or widget.inherits("QTableWidget"):
                 done["pictures"] += retheme_items(widget, mapping)
             elif widget.inherits("QLabel"):
@@ -3549,7 +3554,8 @@ def output_text(view=None):
 
 def compiled_note(box, log=None):
     """After writing: compiled (when the box is checked), and what the log says of it. With log, what the
-    compiler printed in FontLab's Output panel is read just after: an error goes in the log, in red."""
+    compiler printed in FontLab's Output panel is read just after, once it stops changing: an error goes in
+    the log, in red, else that FontLab reported none (compile_report)."""
     QtCore = _qt()[0]
     if box is None or not box.checked:
         return u" Compile the features in FontLab's <i>Features</i> panel to try it."
@@ -3560,35 +3566,63 @@ def compiled_note(box, log=None):
                 u"Panels &gt; Features</i>); compile there.")
     if log is None or before is None:
         return u" Compiled: see the <i>Features</i> panel for any error."
-    state = {"last": before, "reads": 0}
+    state = {"last": None, "reads": 0}
 
     def read():
         try:
             after = output_text(view) or u""
             state["reads"] += 1
-            if state["reads"] < COMPILE_READS_MAX and (after == before or after != state["last"]):
-                state["last"] = after  # nothing yet, or still growing: read again
+            if state["reads"] < COMPILE_READS_MAX and (after != state["last"] or after == before):
+                state["last"] = after  # the first read, still growing, or not changed yet: read again
                 QtCore.QTimer.singleShot(COMPILE_READ_MS, read)
                 return
-            if after == before:
-                log.add(u"FontLab's <i>Output</i> panel showed nothing from the compiler: see the <i>Features</i> "
-                        u"panel for any error.", "info")
-                return
-            if after.startswith(before):
-                said = after[len(before):]
-            else:  # the panel dropped its oldest text (or was cleared): what follows the old text's end
-                tail = before[-200:]
-                at = after.rfind(tail) if tail else -1
-                said = after[at + len(tail):] if at >= 0 else after
-            errors = [line.strip() for line in said.splitlines() if any(mark in line for mark in COMPILE_ERROR_MARKS)]
-            if errors:
-                log.add(u"The features did not compile: %s" % html(u" ".join(errors[:3])), "error")
+            log.add(*compile_outcome(before, after))
         except Exception:
             pass  # a timer's handler must not raise
     _COMPILE_READS.append(read)
     del _COMPILE_READS[:-8]
     QtCore.QTimer.singleShot(COMPILE_READ_MS, read)
-    return u" Compiled: an error the compiler reports in FontLab's <i>Output</i> panel is added to this log."
+    return u" Compiled: what FontLab's compiler reports follows in this log."
+
+
+def compiler_said(before, after):
+    """What a compile printed in FontLab's Output panel, from its text before the click and after. FontLab
+    clears the panel at each compile (the owner, 2026-11-15), so what it holds after is the compile's own,
+    an empty panel meaning no message at all (the log said "showed nothing from the compiler: see the
+    Features panel for any error" after every clean compile); where the panel kept the old text and added
+    to it, what was added."""
+    if before and after != before and after.startswith(before):
+        return after[len(before):]
+    return after
+
+
+COMPILE_UNCHANGED = (u"FontLab's <i>Output</i> panel still shows what it showed before the compile: see the "
+                     u"<i>Features</i> panel for any error.")
+
+
+def compile_outcome(before, after):
+    """(the log's line, its level) once the Output panel has been read for the last time: compile_report of
+    what the compile printed; but a panel that holds text and never changed (read to COMPILE_READS_MAX) is
+    not taken for this compile's (its old error, or its old silence): it says so (COMPILE_UNCHANGED). An
+    empty panel that stayed empty is a compile with no message."""
+    if after == before and before.strip():
+        return COMPILE_UNCHANGED, "info"
+    return compile_report(compiler_said(before, after))
+
+
+def compile_report(said):
+    """(the log's line, its level) for what a compile printed (compiler_said): its errors, in red; else
+    that FontLab reported none, with its warnings where it gave some."""
+    lines = [line.strip() for line in said.splitlines() if line.strip()]
+    errors = [line for line in lines if any(mark in line for mark in COMPILE_ERROR_MARKS)]
+    if errors:
+        return u"The features did not compile: %s" % html(u" ".join(errors[:3])), "error"
+    warnings = [line for line in lines if u"[W]" in line]
+    if warnings:
+        return (u"Compiled: FontLab reported no errors, and %s: %s" % (
+            u"a warning" if len(warnings) == 1 else u"%d warnings" % len(warnings),
+            html(u" ".join(warnings[:3]))), "info")
+    return u"Compiled: FontLab reported no errors.", "info"
 
 
 _COMPILE_READS = []  # (held: PythonQt drops a slot no Python object holds)
@@ -4338,9 +4372,9 @@ def unicode_label(code):
 
 
 def fit_columns(tree, numbers=()):
-    """A list's columns as wide as their contents (no last column stretched across the rest: a column
-    of numbers ran the window's width), the headers of the columns of numbers right-aligned as their
-    cells are."""
+    """A list's columns as wide as their contents, its stretch column (table_layout) given the rest of
+    the width too, if any (with none, no column takes it: a column of numbers stretched across the rest
+    ran the window's width), the headers of the columns of numbers right-aligned as their cells are."""
     QtCore = _qt()[0]
     try:
         tree.header().setStretchLastSection(False)
@@ -4348,12 +4382,249 @@ def fit_columns(tree, numbers=()):
         pass
     for column in range(_property(tree, "columnCount")):
         tree.resizeColumnToContents(column)
+    stretch_column(tree, measure=True)
     try:
         header = tree.headerItem()
         for column in numbers:
             header.setTextAlignment(column, int(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter))
     except Exception:
         pass
+
+
+TEXT_MARGIN = 4  # pixels: Qt's delegate keeps its text this far from the cell's edge, each side (at most)
+HEADER_MARGIN = 8  # pixels: a header section's text from its edges, each side (at most)
+ICON_GAP = 4  # pixels between a cell's picture or check box and its text
+TEXT_COLUMN_MOST = 360  # pixels: a column of long texts (glyph lists) is no wider; its cells elide, whole in tooltips
+
+
+def _tree_rows(view):
+    """(item, depth) for every row of a tree widget, those of closed groups too."""
+    pending = [(view.topLevelItem(i), 0) for i in range(_property(view, "topLevelItemCount"))]
+    while pending:
+        item, depth = pending.pop()
+        if item is None:
+            continue
+        yield item, depth
+        pending.extend((item.child(i), depth + 1) for i in range(item.childCount()))
+
+
+def fit_rows(view, columns=None, most=None, settle=True):
+    """The columns (None: all) of a tree widget as wide as every row's content needs, the rows of closed
+    groups included (Qt's resizeColumnToContents measures the rows it shows, and only some of a long
+    list's: Kerning Check's names were cut once a group was opened, CJK Vertical's metrics' labels at the
+    end of a long list), from the fonts' measures and fixed margins alone, so a width is the same in
+    either theme and after any switch (Font Check's "+N" column grew 6 pixels over a round trip, live).
+    A row spanning its first column (a section's heading) counts for no column. most: a width no column
+    passes (a number for all, or one per column, None for none). Each row's font is measured as Qt draws
+    it: what it does not set taken from the list's font now (a font copied from the list before the
+    window was shown kept the size of then, while Qt drew the list's later one: Font Check's "+N" column
+    was 35 pixels wide on opening and 39 after a dark mode round trip, live). The list is fitted again,
+    with the same columns and widths, once its window is shown (settle_fit), and after a dark
+    mode switch (retheme_window); settle False: not again (a refit). The widths set, by column."""
+    QtCore, QtGui = _qt()
+    count = int(_property(view, "columnCount"))
+    columns = list(range(count)) if columns is None else list(columns)
+    widths, measures = {}, {}
+    remember_fit(view, columns, most, settle)
+    try:
+        view_font = _property(view, "font")
+    except Exception:
+        view_font = None
+
+    def drawn_font(font):
+        """The font as Qt draws it: the list's, with the row's weight and slant (all FreeLab sets on a
+        row's font). Made by hand: QFont.resolve's overloads (one takes a number) are not called from
+        PythonQt."""
+        if view_font is None:
+            return font
+        try:
+            made = QtGui.QFont(view_font)
+            made.setBold(bool(font.bold()))
+            made.setItalic(bool(font.italic()))
+            return made
+        except Exception:
+            return font
+
+    def text_width(font, text):
+        try:
+            key = (font.key(), text)
+        except Exception:
+            key = (None, text)
+        found = measures.get(key)
+        if found is None:
+            metrics = measures.get(key[0]) or QtGui.QFontMetrics(font)
+            measures[key[0]] = metrics
+            found = measures[key] = max([int(metrics.width(line)) for line in (u"%s" % text).split(u"\n")] or [0])
+        return found
+
+    try:
+        icon_width = int(_property(view, "iconSize").width())
+    except Exception:
+        icon_width = 16
+    try:
+        indent = int(_property(view, "indentation"))
+        decorated = bool(_property(view, "rootIsDecorated"))
+    except Exception:
+        indent, decorated = 20, True
+    padding = 2 * TABLE_PADDING[1] + 2 * TEXT_MARGIN + 1  # (the layout's padding, the text's margin, a grid line)
+    check_role = QtCore.Qt.CheckStateRole
+    for item, depth in _tree_rows(view):
+        try:
+            spanned = bool(item.isFirstColumnSpanned())
+        except Exception:
+            spanned = False
+        if spanned:
+            continue
+        for column in columns:
+            try:
+                width = text_width(drawn_font(item.font(column)), item.text(column))
+                icon = item.icon(column)
+                if icon is not None and not icon.isNull():
+                    width += icon_width + ICON_GAP
+                if item.data(column, check_role) is not None:
+                    width += CHECK_SIZE + 2 + ICON_GAP  # (the box as the layout draws it, in any style: Fusion's is 14)
+                if column == 0:
+                    width += indent * (depth + (1 if decorated else 0))
+                widths[column] = max(widths.get(column, 0), width + padding)
+            except Exception:
+                continue
+    try:
+        header, head_font = view.headerItem(), _property(view.header(), "font")
+        for column in columns:
+            widths[column] = max(widths.get(column, 0), text_width(head_font, header.text(column)) + 2 * HEADER_MARGIN)
+    except Exception:
+        pass
+    for column in columns:
+        width = widths.get(column)
+        if width is None:
+            continue
+        cap = most[column] if isinstance(most, (list, tuple)) and column < len(most) else most
+        if isinstance(cap, (int, float)) and not isinstance(cap, bool):
+            width = min(width, int(cap))
+        widths[column] = width
+        try:
+            view.setColumnWidth(column, width)
+        except Exception:
+            pass
+    return widths
+
+
+TABLE_FIT_PROP = "freelabTableFit"  # the last fit_rows of a list: its columns and widths, as JSON
+
+
+FIT_SETTLE_MS = 300  # a list fitted again this long after its filling, once its window is shown
+FIT_SETTLE_TRIES = 20  # and looked at this many times for that (a window built before it is shown)
+
+
+def remember_fit(view, columns, most, settle=True):
+    """The list's fit (fit_rows) kept on it, to fit it again as it was (refit); settle: once more after
+    its window is shown (settle_fit)."""
+    try:
+        view.setProperty(TABLE_FIT_PROP, u"%s" % json.dumps(
+            {"columns": [int(c) for c in columns], "most": list(most) if isinstance(most, (list, tuple)) else most}))
+    except Exception:
+        return
+    if settle:
+        settle_fit(view)
+
+
+def refit(view):
+    """The list fitted again as it was last (fit_rows), its stretch column given the rest again; False
+    when it was never fitted. Called from safe points only: after a filling (settle_fit's timer) and
+    from the theme hook (retheme_window), never from an event filter."""
+    try:
+        kept = view.property(TABLE_FIT_PROP)
+        if kept is None:
+            return False
+        kept = json.loads(u"%s" % kept)
+    except Exception:
+        return False
+    fit_rows(view, kept["columns"], most=kept["most"], settle=False)
+    stretch_column(view, measure=True)
+    return True
+
+
+def settle_fit(view):
+    """The list fitted again (refit) once its window is shown: Qt gives a list built before its window
+    is shown its window's font only then. A plain timer, parented to the list and held in sys, looks
+    every FIT_SETTLE_MS (at most FIT_SETTLE_TRIES times) and fits it once it is visible. No event filter:
+    Python run inside Qt's polishing of a window being shown is where PythonQt crashes FontLab (Kerning
+    Check, 2026-11-16, with a filter on font and style changes)."""
+    QtCore = _qt()[0]
+    modules, name, own = sys.modules, __name__, refit
+    try:
+        timer = QtCore.QTimer(view)
+        timer.setSingleShot(True)
+        timer.setInterval(FIT_SETTLE_MS)
+    except Exception:
+        return None
+    tries = [0]
+    held = getattr(sys, "_freelab_table_fills", None)
+    if held is None:
+        held = sys._freelab_table_fills = []
+
+    def settle():  # (no globals below: a reload empties them)
+        try:
+            tries[0] += 1
+            if _property(view, "visible"):
+                (getattr(modules.get(name), "refit", None) or own)(view)
+            elif tries[0] < FIT_SETTLE_TRIES:
+                timer.start()
+                return
+        except Exception:
+            pass  # a slot must not raise
+        try:  # (done: let go, once Qt has finished with it)
+            held.remove(timer)
+        except Exception:
+            pass
+
+    try:
+        timer.connect("timeout()", settle)
+        timer.start()
+    except Exception:
+        return None
+    held.append(timer)
+    del held[:-TABLE_FILLS_KEPT]
+    return timer
+
+
+def align_numbers(view, columns):
+    """The columns of numbers right-aligned, their headers and their cells in every row of a tree widget
+    (Font Compare's kerning values sat at the left, unlike every other list's numbers)."""
+    QtCore = _qt()[0]
+    right = int(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+    try:
+        header = view.headerItem()
+        for column in columns:
+            header.setTextAlignment(column, right)
+    except Exception:
+        pass
+    for item, _ in _tree_rows(view):
+        for column in columns:
+            try:
+                item.setTextAlignment(column, right)
+            except Exception:
+                pass
+
+
+def fit_list_width(view, most=TEXT_COLUMN_MOST):
+    """A list widget at least as wide as its longest row (with room for its scroll bar), at most most
+    pixels: Proof's pages list scrolled sideways for 2 pixels."""
+    try:
+        frame = int(_property(view, "frameWidth"))
+    except Exception:
+        frame = 1
+    try:
+        bar = int(view.verticalScrollBar().sizeHint.width()) if not callable(view.verticalScrollBar().sizeHint) \
+            else int(view.verticalScrollBar().sizeHint().width())
+    except Exception:
+        bar = 12
+    try:
+        needed = int(view.sizeHintForColumn(0)) + 2 * frame + bar + 2
+        view.setMinimumWidth(min(needed, int(most)))
+        return min(needed, int(most))
+    except Exception:
+        return None
 
 
 def b(value):
@@ -4712,20 +4983,334 @@ class Log(object):
         self.view.clear()
 
 
-GRID_SHEETS = {"table": u"QTableView { gridline-color: rgba(128, 128, 128, 128); }",
-               "tree": u"QTreeView::item { border-right: 1px solid rgba(128, 128, 128, 128); "
-                       u"border-bottom: 1px solid rgba(128, 128, 128, 128); } "
-                       u"QTreeView::item:selected { background: palette(highlight); color: palette(highlighted-text); }"}
-# (a stylesheet's item rule takes the items' drawing over: without its selected rule, a selected row
-# showed no highlight)
+# FreeLab's one table layout (table_layout), for every list of rows in every tool, trees and tables
+# alike, in either theme and across a switch: the owner's reference is Diacritics' and Feature Code's
+# lists (2026-11-15), where a list converted later had a header dark mode had mapped (stray light
+# separators), gray ticks, rows close to their text, no grid where the theme changed, or columns that
+# left half the window empty.
+# - Dark mode leaves the whole list alone (LEAVE_ALONE_PROP): everything in it is drawn from the
+#   palette, so there is nothing to map; mapped, its header came out with light separators and its
+#   grid light (Font Compare, Kerning Classes). The header is the style's own, as Diacritics' is.
+# - Grid lines halfway between the list's text and its ground, at half strength (a mid gray at 50 %
+#   opacity: faint beside the text, in either theme).
+# - Each cell's content TABLE_PADDING from its lines (rows with room above and below their text).
+# - Check boxes framed in a mid gray, filled with the selection's color and ticked when checked (the
+#   style's own nearly vanish on a dark palette).
+# - Selected rows in the palette's selection colors (a stylesheet's item rule takes the items'
+#   drawing over: without a selected rule, a selected row showed no highlight).
+# - The columns fill the list's width: one column (the stretch column) takes what the others leave,
+#   Qt's last one unless the tool names another (that one never narrower than its contents: a narrow
+#   window scrolls, and it can be dragged as any column).
+# The stylesheet holds colors read from the palette: retheme_window writes it again on each switch.
+TABLE_PROP = "freelabTable"  # on a list table_layout laid out: its stretch column (-1: Qt's last one)
+TABLE_GRID_PROP = "freelabTableGrid"  # False on a list laid out without grid lines
+TABLE_SHEET_MARK = u"/* FreeLab table */"
+TABLE_SHEET_END = u"/* FreeLab table end */"  # (rules a tool adds after it, Font Check's branch arrows, stay)
+TABLE_PADDING = (4, 6)  # pixels between a cell's content and its lines: above and below, and beside
+TABLE_GRID_ALPHA = 128  # of 255: the grid lines' strength
+CHECK_FRAME = u"rgb(140, 140, 146)"  # an unchecked box's frame: a mid gray, plain on either background
+CHECK_MARK_SCALE = 3  # the check mark is drawn this many times the box's size (sharp on a scaled display)
+CHECK_SIZE = 13  # pixels: a check box's side when the style does not say
+
+
+def _view_kind(view):
+    """The stylesheet's name for a list's kind: QTableView, QListView, or QTreeView."""
+    for kind in ("QTableView", "QListView"):
+        try:
+            if view.inherits(kind):
+                return kind
+        except Exception:
+            break
+    return "QTreeView"
+
+
+def check_box_sheet(size, mark=None, fill=u"palette(highlight)", frame=CHECK_FRAME, selected_frame=u"white",
+                    kind="QTreeView"):
+    """Stylesheet rules for a list's check boxes: unchecked, a box framed in a mid gray on the row's own
+    background; checked, a box filled with fill (the list's selection color), with the check mark
+    (mark: an image file's path; None: filled only). On a selected row (the same color) each box is
+    framed in selected_frame (the selected text's color), so it still stands out. size: the style's
+    box, frame included (Qt sizes a column for the style's box: a frame drawn around a box of that
+    size made it 2 pixels wider, and the cell's text was cut, "Advance heig...")."""
+    image = u' image: url("%s");' % mark.replace(u"\\", u"/") if mark else u""
+    inner = max(1, size - 2)
+    return (u"%s::indicator { width: %dpx; height: %dpx; border: 1px solid %s; border-radius: 2px; "
+            u"background: transparent; } "
+            u"%s::indicator:checked { border: 1px solid %s; background: %s;%s } "
+            u"%s::indicator:indeterminate { background: %s; } "
+            u"%s::indicator:selected { border: 1px solid %s; }" % (kind, inner, inner, frame, kind, fill, fill, image,
+                                                                 kind, frame, kind, selected_frame))
+
+
+def check_mark_file(color, size):
+    """A check mark in color (r, g, b) for a box of size pixels, drawn larger and saved as a PNG in
+    FreeLab's folder of the temporary files (once per color and size): its path, or None."""
+    QtCore, QtGui = _qt()
+    temporary = u"%s" % QtCore.QDir.tempPath()
+    if not temporary or not os.path.isabs(temporary):
+        return None
+    folder = os.path.join(temporary, u"FreeLab")
+    path = os.path.join(folder, u"check-%02x%02x%02x-%d.png" % (color[0], color[1], color[2], size))
+    if os.path.isfile(path):
+        return path
+    if not os.path.isdir(folder):
+        os.makedirs(folder)
+    side = size * CHECK_MARK_SCALE
+    pixmap = QtGui.QPixmap(side, side)
+    pixmap.fill(QtGui.QColor(0, 0, 0, 0))
+    painter = QtGui.QPainter(pixmap)
+    try:  # ended whatever happens: a painter left open on a freed pixmap aborts FontLab
+        painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        pen = QtGui.QPen(QtGui.QColor(color[0], color[1], color[2]))
+        pen.setWidthF(side * 0.15)
+        pen.setCapStyle(QtCore.Qt.RoundCap)
+        pen.setJoinStyle(QtCore.Qt.RoundJoin)
+        painter.setPen(pen)
+        tick = QtGui.QPainterPath()
+        tick.moveTo(side * 0.2, side * 0.52)
+        tick.lineTo(side * 0.42, side * 0.74)
+        tick.lineTo(side * 0.8, side * 0.28)
+        painter.drawPath(tick)
+    finally:
+        painter.end()
+    return path if pixmap.save(path, "PNG") else None
+
+
+def _css(rgb, alpha=None):
+    if alpha is None:
+        return u"rgb(%d, %d, %d)" % tuple(rgb[:3])
+    return u"rgba(%d, %d, %d, %d)" % (tuple(rgb[:3]) + (alpha,))
+
+
+def table_colors(palette):
+    """{"text", "base", "grid", "highlight", "highlighted"}: (r, g, b) of a list's palette, its Active
+    group (Qt's light defaults where it cannot be read). The grid lies halfway between the text and the
+    ground. Read as Active whatever the window is: the stylesheet holds them as fixed colors, and a
+    window behind another at a switch read its Inactive group, whose selection is light gray in the
+    Windows style: gray ticks and a gray selection that stayed so once the window was activated (live,
+    2026-11-16)."""
+    QtGui = _qt()[1]
+    defaults = {"Text": (0, 0, 0), "Base": (255, 255, 255), "Highlight": (0, 120, 215), "HighlightedText": (255, 255, 255)}
+    active = getattr(QtGui.QPalette, "Active", 0)
+    found = {}
+    for role, default in defaults.items():
+        try:
+            found[role] = _rgb(palette.color(active, getattr(QtGui.QPalette, role)))
+        except Exception:
+            found[role] = default
+    text, base = found["Text"], found["Base"]
+    return {"text": text, "base": base, "grid": tuple((t + g) // 2 for t, g in zip(text, base)),
+            "highlight": found["Highlight"], "highlighted": found["HighlightedText"]}
+
+
+def table_sheet(colors, kind="QTreeView", grid=True, check_size=CHECK_SIZE, mark=None):
+    """The stylesheet of a FreeLab list (table_layout) in colors (table_colors), between its marks."""
+    line = _css(colors["grid"], TABLE_GRID_ALPHA)
+    rules = [TABLE_SHEET_MARK]
+    if kind == "QTableView":  # (a table draws its grid itself; its cells take only the padding)
+        rules.append(u"QTableView { gridline-color: %s; }" % (line if grid else u"transparent"))
+        rules.append(u"QTableView::item { padding: %dpx %dpx; }" % TABLE_PADDING)
+    else:
+        lines = (u" border-right: 1px solid %s; border-bottom: 1px solid %s;" % (line, line)) if grid else u""
+        rules.append(u"%s::item { padding: %dpx %dpx;%s }" % ((kind,) + TABLE_PADDING + (lines,)))
+    rules.append(u"%s::item:selected { background: %s; color: %s; }" % (kind, _css(colors["highlight"]),
+                                                                         _css(colors["highlighted"])))
+    rules.append(check_box_sheet(check_size, mark, _css(colors["highlight"]), CHECK_FRAME,
+                                 _css(colors["highlighted"]), kind))
+    rules.append(TABLE_SHEET_END)
+    return u" ".join(rules)
+
+
+def _without_table_sheet(sheet):
+    """A list's stylesheet without the rules table_layout wrote (and what came before them: the
+    grid lines of before), keeping those a tool added after them."""
+    sheet = u"%s" % (sheet or u"")
+    if TABLE_SHEET_END in sheet:
+        return sheet.split(TABLE_SHEET_END, 1)[1].strip()
+    if TABLE_SHEET_MARK in sheet:
+        return u""
+    return sheet.strip()
+
+
+def style_table(view):
+    """A FreeLab list's stylesheet (table_sheet) written in the colors of its palette now, the rules a
+    tool added after it kept. Called by table_layout, and again by retheme_window on each switch."""
+    QtGui = _qt()[1]
+    try:
+        colors = table_colors(_property(view, "palette"))
+    except Exception:
+        colors = table_colors(None)
+    try:
+        size = int(view.style().pixelMetric(QtGui.QStyle.PM_IndicatorWidth))
+    except Exception:
+        size = CHECK_SIZE
+    size = max(11, min(24, size or CHECK_SIZE))
+    try:
+        mark = check_mark_file(colors["highlighted"], size)
+    except Exception:
+        mark = None
+    try:
+        grid = view.property(TABLE_GRID_PROP) is not False
+    except Exception:
+        grid = True
+    try:
+        rest = _without_table_sheet(_property(view, "styleSheet"))
+    except Exception:
+        rest = u""
+    sheet = table_sheet(colors, _view_kind(view), grid, size, mark)
+    try:
+        view.setStyleSheet(u"")  # (polished again: the palette's colors read anew)
+        view.setStyleSheet(sheet + (u" " + rest if rest else u""))
+    except Exception:
+        pass
+    return sheet
+
+
+def table_stretch(view):
+    """The column a FreeLab list stretches (table_layout), or None (Qt's last one, or none)."""
+    try:
+        stretch = view.property(TABLE_PROP)
+        stretch = int(stretch) if stretch is not None else -1
+    except Exception:
+        return None
+    return stretch if stretch >= 0 else None
+
+
+def _header_of(view):
+    try:
+        return view.horizontalHeader() if view.inherits("QTableView") else view.header()
+    except Exception:
+        return None
+
+
+TABLE_CONTENT_PROP = "freelabTableContent"  # the stretch column's width for its contents (pixels)
+TABLE_FILL_PROP = "freelabTableFill"  # the key of the list's fill watch (sys._freelab_table_fills)
+RESIZE_EVENT = 14  # QEvent::Resize
+TABLE_FILLS_KEPT = 256  # watches held (those of windows long closed go first)
+
+
+def stretch_column(view, measure=False):
+    """The list's stretch column (table_layout) given the width the other columns leave, never less
+    than its contents need (measure: as wide as they are now, after a fill): a narrow window scrolls
+    rather than squeezing it, and every column can still be dragged. In Qt's own Stretch mode, the
+    pair pictures and names shrank to nothing in a narrow window, and the column could not be resized
+    by hand. Its viewport's resizes give it the room anew (watch_stretch). None named: the columns are
+    left as they are (Qt stretches the last one)."""
+    stretch = table_stretch(view)
+    header = _header_of(view)
+    if stretch is None or header is None:
+        return None
+    try:
+        header.setStretchLastSection(False)
+        if measure:
+            view.setProperty(TABLE_CONTENT_PROP, int(view.columnWidth(stretch)))
+        content = view.property(TABLE_CONTENT_PROP)
+        content = int(content) if content is not None else int(view.columnWidth(stretch))
+        others = sum(int(view.columnWidth(column)) for column in range(_property(view, "columnCount"))
+                     if column != stretch and not view.isColumnHidden(column))
+        room = int(_property(view.viewport(), "width"))
+        width = max(content, room - others)
+        if width != int(view.columnWidth(stretch)):
+            view.setColumnWidth(stretch, width)
+        return width
+    except Exception:
+        return None
+
+
+def watch_stretch(view):
+    """The list's stretch column given its room again as the list is resized (stretch_column), by a
+    watch on its viewport: parented to the list (Qt deletes it with it, never PythonQt at whatever
+    moment Python's collector picks) and held in sys (PythonQt drops a Python override no one holds). The
+    filter only starts the watch's own timer: the widths change on the next turn of the event loop,
+    never synchronously inside Qt's resizing (where setting a width re-enters the layout)."""
+    QtCore = _qt()[0]
+    modules, name, own = sys.modules, __name__, stretch_column
+    try:
+        if view.property(TABLE_FILL_PROP) is not None:
+            return None  # (watched already)
+
+        class StretchWatch(QtCore.QTimer):  # PythonQt has no QObject to subclass; a timer will do
+            def eventFilter(self, obj, event):
+                try:
+                    if event.type() == RESIZE_EVENT:
+                        self.start()  # (the widths changed on the next turn: never inside Qt's layout)
+                except Exception:
+                    pass  # an event filter must never raise
+                return False
+
+        watch = StretchWatch(view)
+        watch.setSingleShot(True)
+        watch.setInterval(0)
+        watch.connect("timeout()", lambda: (getattr(modules.get(name), "stretch_column", None) or own)(view))
+        view.viewport().installEventFilter(watch)
+    except Exception:
+        return None
+    held = getattr(sys, "_freelab_table_fills", None)
+    if held is None:
+        held = sys._freelab_table_fills = []
+    held.append(watch)
+    del held[:-TABLE_FILLS_KEPT]
+    try:
+        view.setProperty(TABLE_FILL_PROP, len(held))
+    except Exception:
+        pass
+    return watch
+
+
+def set_stretch(view, column):
+    """A FreeLab list's stretch column named after it was laid out (table_layout's stretch): the column
+    given the room the others leave, never less than its contents (stretch_column)."""
+    try:
+        view.setProperty(TABLE_PROP, int(column))
+        _header_of(view).setStretchLastSection(False)
+    except Exception:
+        return
+    watch_stretch(view)
+
+
+def table_layout(view, stretch=None, numbers=(), grid=True):
+    """FreeLab's one layout of a list of rows (tree, table, or list widget; see TABLE_PROP above):
+    left alone by dark mode, grid lines (none: grid False), room around each cell's content, check
+    boxes and selected rows in the palette's selection colors, the columns filling the width (stretch:
+    the column given the rest, never less than its contents, see stretch_column; None: Qt's last one,
+    as Qt stretches it), the headers of the columns of numbers
+    right-aligned as their cells are. Returns the view."""
+    QtCore = _qt()[0]
+    try:
+        view.setProperty(LEAVE_ALONE_PROP, True)  # (the whole list: its header and scroll bars too)
+        view.setProperty(TABLE_PROP, -1 if stretch is None else int(stretch))
+        view.setProperty(TABLE_GRID_PROP, bool(grid))
+    except Exception:
+        pass
+    style_table(view)
+    if stretch is not None:
+        try:
+            _header_of(view).setStretchLastSection(False)
+        except Exception:
+            pass
+        watch_stretch(view)
+    if numbers:
+        try:
+            header = view.headerItem()
+            for column in numbers:
+                header.setTextAlignment(column, int(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter))
+        except Exception:
+            pass
+    return view
+
+
+def is_table(view):
+    """A list laid out by table_layout."""
+    try:
+        return view.property(TABLE_PROP) is not None
+    except Exception:
+        return False
 
 
 def grid_lines(view):
-    """Lines between a list's cells: a mid gray at half strength, over either palette."""
-    try:
-        view.setStyleSheet(GRID_SHEETS["table" if view.inherits("QTableView") else "tree"])
-    except Exception:
-        pass
+    """A list in FreeLab's table layout (table_layout), its last column stretched (the name the tools
+    used before the layout took over the grid's place)."""
+    return table_layout(view)
 
 
 def flat_combo(box):
@@ -6157,7 +6742,7 @@ class AutoKerningDialog(object):
                                u"write (Suggested). Double-click a value to use it for that pair, or press <i>Ctrl+1</i> "
                                u"to <i>Ctrl+6</i>; <i>Space</i> checks the pair; <i>Backspace</i> gives it the suggested "
                                u"value again. Double-click a pair to open it in a <i>Glyph</i> window.")
-        grid_lines(self.tree)
+        table_layout(self.tree, stretch=0)  # (the pairs take the room the numbers leave)
         layout.addWidget(self.tree, 1)
         self.icon_cache = {}  # (left, right, value, color): the pair's picture, drawn once
         note_row = QtGui.QHBoxLayout()
@@ -7251,7 +7836,7 @@ class ClassDialog(object):
         self.tree = QtGui.QTreeWidget()
         self.tree.setColumnCount(len(CLASS_COLUMNS))
         self.tree.setHeaderLabels(list(CLASS_COLUMNS))
-        grid_lines(self.tree)
+        table_layout(self.tree)
         self.tree.setWhatsThis(u"Each class suggested for this master: checked ones are made (or extended) when you click "
                                u"<i>Create checked classes</i>. Gray ones are shown for reference and left as they are. "
                                u"<i>May need pairs of their own</i> names the members that need looser kerning than the "
@@ -7396,8 +7981,9 @@ class ClassDialog(object):
                 top.addChild(item)
             top.setExpanded(True)
         self.exceptions_button.setEnabled(bool(self.exceptions))
-        for column in range(len(CLASS_COLUMNS) - 1):
-            self.tree.resizeColumnToContents(column)
+        # every row measured, each column at most TEXT_COLUMN_MOST: sized to its longest glyph list, the table
+        # ran 1,664 pixels wide in a 964-pixel view (Tinos, live); a row's tooltip holds the whole list
+        fit_rows(self.tree, range(len(CLASS_COLUMNS) - 1), most=TEXT_COLUMN_MOST)
         plural = lambda count, one, many: u"%s %s" % (b(count), one if count == 1 else many)
         self.status.setText(u"%s, master %s: %s, %s, %s, %s. Nothing is changed until you "
                             u"create them." % (b(self.package.tfn), b(self.master),

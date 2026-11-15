@@ -415,7 +415,7 @@ class AutoSpacingDialog(object):
                                u"Double-click a glyph or its name to open it in a <i>Glyph</i> window.")
         self.tree.setIconSize(QtCore.QSize(*self.ak.glyph_icon_size()))
         self.tree.setProperty(self.ak.LEAVE_ALONE_PROP, True)  # its pictures are drawn in the dialog's colors
-        self.ak.grid_lines(self.tree)
+        self.ak.table_layout(self.tree, stretch=1)  # (the names take the room the numbers leave)
         layout.addWidget(self.tree, 1)
         self.composites_note = QtGui.QLabel(u"")
         self.composites_note.setWordWrap(True)
@@ -435,9 +435,9 @@ class AutoSpacingDialog(object):
         self.follow.setChecked(True)
         self.follow.setWhatsThis(u"\N{LATIN SMALL LETTER E WITH ACUTE} built from e and an acute keeps its acute "
                                  u"over the e and takes e's change of width. Without it, its e moves under the "
-                                 u"acute (the e's outline moves) and its width stays. A glyph whose marks then "
+                                 u"acute (the e's outline moves) and its width stays. A glyph whose diacritics then "
                                  u"stick out further past its width (a horn on a tighter O) follows all the same, "
-                                 u"and the log names it, to check its marks.")
+                                 u"and the log names it, to check its diacritics.")
         layout.addWidget(self.follow)
         layout.addWidget(self.log.widget)
         buttons = QtGui.QHBoxLayout()
@@ -1152,7 +1152,7 @@ class AutoSpacingDialog(object):
         if not names:
             return u""
         one = len(names) == 1  # (named by glyph, not by character: the interface's fonts lack many, shown as boxes)
-        return (u"Check the marks of %s: %s followed %s base glyph, and %s marks now stick out further past %s width "
+        return (u"Check the diacritics of %s: %s followed %s base glyph, and %s diacritics now stick out further past %s width "
                 u"(or before %s start), toward the next glyph: %s." % (
                     self.ak.b(counted(len(names), u"glyph")), u"it" if one else u"they", u"its" if one else u"their",
                     u"its" if one else u"their", u"its" if one else u"their", u"its" if one else u"their",

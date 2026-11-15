@@ -1238,16 +1238,16 @@ class TouchTests(unittest.TestCase):
                             (u"b", u"horn %s (a horn joins it)" % ac.APART),
                             (u"c", u"ogonek %s (an ogonek joins it)" % ac.APART)], "built")
         self.assertEqual(lines, [
-            ("warning", u"1 glyph built with a mark within 12 units of its letter or another mark: a. Look at it."),
-            ("warning", u"2 glyphs built with a mark that joins its letter (ogonek, cedilla, horn) and does not "
+            ("warning", u"1 glyph built with a diacritic within 12 units of its letter or another diacritic: a. Look at it."),
+            ("warning", u"2 glyphs built with a diacritic that joins its letter (ogonek, cedilla, horn) and does not "
                         u"touch it: b c. Look at them.")])
         del lines[:]
         dialog.log_touches([(u"b", u"horn %s (a horn joins it)" % ac.APART)], "now")
-        self.assertEqual(lines[0][1], u"1 letter now has a mark that joins its letter (ogonek, cedilla, horn) and does "
+        self.assertEqual(lines[0][1], u"1 letter now has a diacritic that joins its letter (ogonek, cedilla, horn) and does "
                                       u"not touch it: b. Look at it.")
         del lines[:]
         dialog.log_touches([(u"a", u"x"), (u"d", u"y")], "")
-        self.assertEqual(lines[0][1], u"2 letters come within 12 units of their letter or another mark: a d. Look at them.")
+        self.assertEqual(lines[0][1], u"2 letters come within 12 units of their letter or another diacritic: a d. Look at them.")
         del lines[:]
         dialog.log_touches([], "built")
         self.assertEqual(lines, [], "nothing to name")
@@ -1765,12 +1765,12 @@ class CellTextTests(unittest.TestCase):
     def test_built_from(self):
         self.assertEqual(ac.row_text(u"A + gravecomb"), u"A + gravecomb")
         self.assertEqual(ac.row_text(u"A + gravecomb", shift=(25, 4), existing=True),
-                         u"A + gravecomb (suggested: mark 25 right, 4 up)")
+                         u"A + gravecomb (suggested: 25 right, 4 up)")
         self.assertEqual(ac.row_text(u"A + gravecomb", shift=(0, 0), existing=True), u"A + gravecomb (placed as suggested)")
         self.assertEqual(ac.row_text(u"A + gravecomb", shift=None, existing=True),
                          u"A + gravecomb (drawn, not built of components: compare by eye)")
-        self.assertEqual(ac.row_text(u"a + caron", refill=True, notes=[u"marks placed by hand"]),
-                         u"a + caron (its glyph is in the font, empty: filled when built; marks placed by hand)")
+        self.assertEqual(ac.row_text(u"a + caron", refill=True, notes=[u"diacritics placed by hand"]),
+                         u"a + caron (its glyph is in the font, empty: filled when built; diacritics placed by hand)")
         for text in (ac.row_text(u"A + gravecomb", shift=(25, 4), existing=True, notes=[u"gaps closed to fit a 120% line"]),
                      ac.row_text(u"a + caron", notes=[u"x"])):
             self.assertFalse(text.endswith(u"."))
@@ -2926,7 +2926,7 @@ class CompactTests(unittest.TestCase):
         self.assertEqual(ac.room_details(2, 1, 0), [u"2 made compact to fit a 120% line", u"1 too tall even so, left unchecked"])
         self.assertEqual(ac.room_details(0, 0, 42), [u"42 too tall for a 120% line as placed"])
         self.assertEqual(ac.room_details(0, 0, 0), [])
-        self.assertEqual(ac.compact_text(False, 0), u"Glyphs are no longer made compact: their marks keep their own gaps "
+        self.assertEqual(ac.compact_text(False, 0), u"Glyphs are no longer made compact: their diacritics keep their own gaps "
                                                     u"and size, and the rows say which are too tall for a 120% line.")
         self.assertEqual(ac.compact_text(True, 1), u"Glyphs too tall for a 120% line are made compact again. 1 glyph "
                                                    u"placed by hand keeps what you set.")
@@ -2971,7 +2971,7 @@ class CompactTests(unittest.TestCase):
         compact, _ = ac.place(plain, inks().get, placement, self.TIGHT)
         self.switch(dialog, False)
         self.assertEqual((plain.compact, by_hand.compact), (False, True))
-        self.assertEqual(dialog.written, [{"compact": False}], "remembered")
+        self.assertEqual(dialog.written, [{ac.COMPACT_KEY: False}], "remembered")
         self.assertEqual(dialog.shift_cache, {})
         self.assertTrue(plain.notes[0].endswith(ac.TOO_TALL_NOTE), "its row says it is too tall, not that it was compacted")
         self.assertEqual(ac.place(by_hand, inks().get, placement, self.TIGHT)[0], before, "what the hand set, kept")
@@ -2997,7 +2997,7 @@ class CompactTests(unittest.TestCase):
         self.switch(dialog, True)
         self.assertEqual([r.checked for r in dialog.recipes], [False, True, False],
                          "unchecked again where too tall even compact; the checks set by hand stay")
-        self.assertEqual(dialog.settings, {"compact": True})
+        self.assertEqual(dialog.settings, {ac.COMPACT_KEY: True})
 
     def test_a_reread_keeps_what_a_row_placed_by_hand_was_placed_under(self):
         dialog, placement = self.dialog(self.TIGHT)
@@ -3134,7 +3134,14 @@ def recording_qt():
 
     def whats(self, value):
         self.__dict__["whats"] = value
-    base = meta("Base", (object,), {"__init__": init, "__getattr__": missing, "setWhatsThis": whats})
+
+    def add(self, widget, *args):  # (a layout's widgets, in order: where a control sits)
+        self.__dict__.setdefault("added", []).append(widget)
+
+    def checked(self, on):
+        self.__dict__["checked"] = on
+    base = meta("Base", (object,), {"__init__": init, "__getattr__": missing, "setWhatsThis": whats,
+                                    "addWidget": add, "setChecked": checked})
     classes = {}
 
     class Namespace(object):
@@ -3230,7 +3237,7 @@ class WhatsThisTests(unittest.TestCase):
         self.assertEqual(dialog.anchors.reference_title.whats, dialog.anchors.reference.whats)
         self.assertEqual(dialog.reference_font.whats, dialog.anchors.reference_font.whats, "one chooser, on both tabs")
         self.assertIn(u"FreeLab's own font", dialog.reference_font.whats, "named plainly where Font Check is not read")
-        self.assertTrue(dialog.compact_box.whats.startswith(u"Makes a glyph too tall for a 120% line compact"))
+        self.assertTrue(dialog.compact_box.whats.startswith(u"Makes the diacritics of a glyph too tall for a 120% line compact"))
         self.assertIn(u"Every checked glyph is built, those a search hides too", dialog.build_button.whats)
         self.assertNotEqual(dialog.dialog.whats, dialog.tabs.whats, "the tab bar's own, not the whole dialog's")
 
@@ -3335,8 +3342,8 @@ class CellWalkTests(unittest.TestCase):
                 self.assertTrue(tip == u"" or tip.endswith(u"."), "a tooltip is a sentence: %r" % tip)
                 for sign in self.BANNED:
                     self.assertNotIn(sign, tip)
-                for word in (u"gaps closed", u"marks at", u"still", u"too tall for a 120% line", u"placed by hand",
-                             u"suggested: mark", u"placed as suggested", u"drawn, not built", u"filled when built",
+                for word in (u"gaps closed", u"diacritics at", u"still", u"too tall for a 120% line", u"placed by hand",
+                             u"suggested: ", u"placed as suggested", u"drawn, not built", u"filled when built",
                              u"draft for", u"needs ", u"a combining mark", u"mirrored", u"comes within", u"overlaps",
                              u"does not touch", u"fonts draw for"):
                     if word in cell:
@@ -3345,7 +3352,7 @@ class CellWalkTests(unittest.TestCase):
                 self.assertTrue(any(u"(gaps closed to fit a 120% line" in cell or u"; gaps closed" in cell
                                     for _, cell, _ in rows), "the compacting note, in parentheses")
             else:
-                self.assertFalse(any(u"gaps closed" in cell for _, cell, _ in rows))
+                self.assertFalse(any(u"gaps closed" in cell or u"gap closed" in cell for _, cell, _ in rows))
         self.assertEqual(len(seen), 17, "every kind of note was written by some row: %s" % sorted(seen))
 
     def test_the_exact_rows_of_the_owners_report(self):
@@ -4032,7 +4039,7 @@ class PreviewPartsTests(unittest.TestCase):
                          "nothing selected: no reference heading, chooser, editor, or Same diacritic strip")
         missing = ac.preview_parts(True, False, False)
         self.assertEqual(sorted(name for name, on in missing.items() if on),
-                         ["hint", "reference", "reference_font", "reference_note", "reference_title"],
+                         ["compact_box", "hint", "reference", "reference_font", "reference_note", "reference_title"],
                          "a glyph that cannot be built: its letter in the reference and what it needs, no editor")
         alone = ac.preview_parts(True, True, False)
         self.assertFalse(alone["strip_label"] or alone["strip_area"], "no letter with the same diacritic: no strip")
@@ -4293,7 +4300,7 @@ class ScrollKeptTests(unittest.TestCase):
             ac._qt, ac.write_settings = saved
         self.assertEqual(bar.value, 240, "where the list was scrolled")
         self.assertEqual(dialog.open_sections, {u"Can be built": False}, "a section closed by hand stays closed")
-        self.assertEqual(ac.section_title(u"Existing glyphs: check to rebuild (12)"), u"Existing glyphs: check to rebuild")
+        self.assertEqual(ac.section_title(u"Just built (check to rebuild) (12)"), u"Just built (check to rebuild)")
 
 
 class FarOffTests(unittest.TestCase):
@@ -4312,8 +4319,8 @@ class FarOffTests(unittest.TestCase):
         self.assertEqual([kind for kind, _ in found[0]], ["outside", "clipped", "detached"])
         self.assertEqual(found[0][1][1], u"winAscent 1143 (Windows clips above)", "a clipping line, not the 120% line")
         note = ac.far_note(found)
-        self.assertTrue(note.startswith(u"a mark outside the view; a mark past winAscent 1143 (Windows clips above); "
-                                        u"a mark away from its letter ("), note)
+        self.assertTrue(note.startswith(u"a diacritic outside the view; a diacritic past winAscent 1143 (Windows clips above); "
+                                        u"a diacritic away from its letter ("), note)
         self.assertFalse(note.endswith(u"."), "a cell's note")
         near = [("C", 1.0, 1.0, 0.0, 0.0), ("circumflex", 1.0, 1.0, 220.0, 260.0)]
         self.assertEqual(ac.far_marks(near, [(1, 2)], [0], ink, self.LIMITS, 1000.0, 640), {}, "raised 30: fine")
@@ -4324,9 +4331,9 @@ class FarOffTests(unittest.TestCase):
         self.assertEqual(ac.far_marks(parts, [(1, 2)], [], ink, self.LIMITS, 1000.0, 640), {}, "not moved by hand")
         lines = ac.far_lines([(u"x", found), (u"y", found)], lambda chars: u" ".join(chars))
         self.assertEqual(len(lines), 3)
-        self.assertEqual(lines[0], u"2 letters now have a mark outside the view (over an em past the font's lines): "
+        self.assertEqual(lines[0], u"2 letters now have a diacritic outside the view (over an em past the font's lines): "
                                    u"x y. Look at them; <i>Reset diacritics</i> on a row puts it back.")
-        self.assertIn(u"1 letter now has a mark away from its letter (over 250 units): x. Look at it",
+        self.assertIn(u"1 letter now has a diacritic away from its letter (over 250 units): x. Look at it",
                       ac.far_lines([(u"x", found)], lambda chars: u" ".join(chars))[2])
         self.assertIn(u"(over 512 units)", ac.far_lines([(u"x", found)], lambda chars: u" ".join(chars), upm=2048)[2],
                       "a share of the font's em")
@@ -4676,6 +4683,227 @@ class DiacriticsThemeTests(unittest.TestCase):
         self.assertEqual(dialog.editor.scene, "new scene", "its amber warnings in the new colors")
         self.assertEqual(anchors.editor.scene, "new anchors scene")
         self.assertEqual(calls, [("strip", True), ("update", "editor"), ("references",), ("update", "anchors")])
+
+
+class OwnerReportNovember15Tests(unittest.TestCase):
+    """The owner's Diacritics report of 2026-11-15, on Noto Sans: compacting by no more than needed, a
+    letter's own descender not counted against its diacritics, the rows of glyphs placed by hand following
+    what was set, the captions and sections, the check box beside the preview, and the Mark anchors tab's
+    sample marks."""
+
+    def test_the_gaps_close_just_enough(self):
+        placement = ac.Placement(1000.0, MODEL)
+        recipe = one_mark(0x00F3, "o", "acute", "above", "acute")
+        natural, _ = ac.place(recipe, inks().get, placement)
+        top = natural[1][4] + 600  # (the acute's ink runs from 500 to 600 in its own glyph)
+        metrics = ac.Metrics(1000, 600, -(1200 - (top - 12)))  # room up to 12 units under the acute's top
+        self.assertEqual(metrics.top, top - 12)
+        parts, _ = ac.place(recipe, inks().get, placement, metrics)
+        self.assertEqual(recipe.notes, [u"gap closed to fit a 120% line"], "one diacritic: one gap")
+        self.assertEqual(parts[1][3], natural[1][3], "not moved across")
+        self.assertIn(natural[1][4] - parts[1][4], (12, 13), "12 units down, as U+04DA needed: not every gap closed to 40%")
+        self.assertEqual(parts[1][1], 1.0, "full size: closing the gap was enough")
+
+    def test_marks_are_made_only_as_small_as_needed(self):
+        placement = ac.Placement(1000.0, MODEL)
+        recipe = CompactTests("test_the_top_line_counts_follow").stack()
+        # o's top at 480, the two circumflexes 100 high, 50 and 25 apart: 755 as placed, 710 closed, 510 + 200
+        # times their scale closed and smaller
+        tight = ac.Metrics(1000, 600, -530)  # room up to 670: closing the gaps is not enough, 80% is
+        parts, _ = ac.place(recipe, inks().get, placement, tight)
+        self.assertEqual(recipe.notes, [u"gaps closed and diacritics at 80% to fit a 120% line"])
+        percent = 80
+        letter = u"o"
+        top = lambda scale: ac.layout(recipe, inks().get, placement, letter, ac.CLOSED_GAPS, ac.CLOSED_GAPS, scale)[1]
+        self.assertLessEqual(top(percent / 100.0), 670, "it fits")
+        self.assertGreater(top((percent + 1) / 100.0), 670, "a percent larger would not: no smaller than needed")
+        self.assertAlmostEqual(parts[1][1], percent / 100.0)
+        self.assertTrue(recipe.checked)
+
+    def test_a_letters_own_descender_is_not_the_diacritics_fault(self):
+        placement = ac.Placement(1000.0, MODEL)
+        found = dict(inks(), y=ac.Ink(10, -240, 490, 480, advance=500))
+        recipe = one_mark(0x04EF, "y", "macron", "above", "acute")  # U+04EF: cyrillic u and a mark above
+        noto = ac.Metrics(1000, 1069, -293)  # Noto Sans: room from -131 to 907
+        self.assertEqual((noto.top, noto.bottom), (907, -131))
+        natural, _ = ac.place(recipe, found.get, placement)
+        parts, _ = ac.place(recipe, found.get, placement, noto)
+        self.assertEqual(recipe.notes, [], "y reaches -240 by itself: no compacting, no 109 units too tall")
+        self.assertEqual(parts, natural, "the mark at its own gap and full size, as on cyrillic i")
+        below = one_mark(0x1E8F, "y", "dotbelow", "below", "acute")  # a mark under the descender counts from it
+        ac.place(below, found.get, placement, noto)
+        self.assertTrue(below.notes and ac.is_compact_note(below.notes[0]), below.notes)
+        self.assertEqual(ac.room_limits(noto, found["y"]), (907, -240))
+
+    def test_a_row_placed_by_hand_says_what_was_set(self):
+        compact = CompactTests("test_the_top_line_counts_follow")
+        dialog, placement = compact.dialog(compact.TIGHT)
+        by_hand = dialog.recipes[1]
+        by_hand.adjust = {1: [0.0, -10.0, 1.0, 1.0]}  # (under the compact suggestion)
+        dialog.fill()
+        self.assertEqual(by_hand.notes, [ac.hand_note(1)], "what was set fits: nothing of the suggestion's compacting")
+        set_by_hand = ac.place(by_hand, inks().get, placement, compact.TIGHT)[0]
+        compact.switch(dialog, False)  # the box unticked: the row says the same, by what was set
+        self.assertEqual(by_hand.notes, [ac.hand_note(1)])
+        self.assertEqual(ac.place(by_hand, inks().get, placement, compact.TIGHT)[0], set_by_hand)
+        self.assertFalse([r for r in dialog.recipes if any(ac.is_compact_note(n) for n in r.notes)],
+                         "no row says it was made compact while the box is unticked")
+        by_hand.adjust = {1: [0.0, 500.0, 1.0, 1.0]}  # raised far: too tall as set
+        ac.place(by_hand, inks().get, placement, compact.TIGHT)
+        self.assertTrue(by_hand.notes[0].endswith(ac.TOO_TALL_NOTE), by_hand.notes)
+        self.assertEqual(ac.room_counts([by_hand]), (0, 0, 1))
+
+    def test_captions_and_cells_say_no_mark(self):
+        self.assertEqual(ac.suggested_caption((11, -46)), u"Suggested (11 right, 46 down)")
+        self.assertEqual(ac.suggested_caption((0, 0)), u"Suggested (the same)")
+        self.assertEqual(ac.suggested_caption(None), u"Suggested")
+        self.assertEqual(ac.row_text(u"uni04D8 + dieresis", shift=(11, -46), existing=True),
+                         u"uni04D8 + dieresis (suggested: 11 right, 46 down)")
+
+    def test_what_is_placed_is_a_diacritic(self):
+        """A diacritic is the sign as placed on a letter; a mark, the glyph (the owner's request of 2026-11-15)."""
+        self.assertEqual(ac.HAND_NOTE, u"diacritics placed by hand")
+        self.assertIn(u"their diacritics keep their own gaps", ac.compact_text(False, 0))
+        self.assertEqual(ac.far_words("outside", None), u"a diacritic outside the view")
+        for text in (ac.HINT_HELP, ac.STRIP_HELP, ac.LINES_HELP, ac.COMPACT_HELP):
+            self.assertNotIn(u" mark ", text.replace(u",", u" ").replace(u".", u" "), text)
+        self.assertIn(u"Need a mark or letter the font lacks", ac.LACKING, "a glyph the font lacks: a mark")
+
+    def test_the_notes_follow_their_counts(self):
+        """The independent review of 2026-11-15: one gap, one diacritic, each said so."""
+        self.assertEqual(ac.compact_note(1, 1), u"gap closed to fit a 120% line")
+        self.assertEqual(ac.compact_note(2, 2), u"gaps closed to fit a 120% line")
+        self.assertEqual(ac.compact_note(1, 1, 85), u"gap closed and diacritic at 85% to fit a 120% line")
+        self.assertEqual(ac.compact_note(2, 2, 85), u"gaps closed and diacritics at 85% to fit a 120% line")
+        self.assertEqual((ac.hand_note(1), ac.hand_note(2)), (u"diacritic placed by hand", u"diacritics placed by hand"))
+        one, two = Stub(notes=[ac.compact_note(1, 1)]), Stub(notes=[ac.compact_note(2, 2, 90)])
+        self.assertEqual(ac.room_counts([one, two]), (2, 0, 0), "both forms count as made compact")
+        placement = ac.Placement(1000.0, MODEL)
+        recipe = one_mark(0x00F3, "o", "acute", "above", "acute")
+        ac.place(recipe, inks().get, placement, ac.Metrics(1000, 600, -700))  # room up to 500: the letter alone
+        self.assertEqual(recipe.notes[0], u"gap closed and diacritic at 70% to fit a 120% line")
+        dialog = ac.AccentsDialog.__new__(ac.AccentsDialog)
+        dialog.inks = {"Regular": Stub()}
+        dialog.inks["Regular"] = lambda name: None
+        self.assertEqual(dialog.why_empty(recipe, ["Regular"], False), u"o has no outline in master Regular")
+        self.assertEqual(dialog.why_empty(recipe, [], False), u"its diacritic could not be placed")
+        recipe.marks = recipe.marks * 2
+        self.assertEqual(dialog.why_empty(recipe, [], False), u"its diacritics could not be placed")
+
+    def test_a_row_placed_by_hand_is_checked_by_what_was_set(self):
+        """The independent review: a glyph placed by hand whose suggestion under it is too tall even compact
+        was unchecked by that suggestion, and its reason wiped from its row."""
+        placement = ac.Placement(1000.0, MODEL)
+        hopeless = CompactTests.HOPELESS  # room up to 500: the stack does not fit even compact
+        recipe = CompactTests("test_the_top_line_counts_follow").stack()
+        recipe.adjust = {0: [0.0, -100.0, 0.2, 0.2], 1: [0.0, -250.0, 0.2, 0.2]}  # made tiny and set low by hand
+        parts, _ = ac.place(recipe, inks().get, placement, hopeless)
+        self.assertLessEqual(ac.parts_box(parts, inks().get)[3], 500, "what was set fits")
+        self.assertTrue(recipe.checked, "not unchecked by the suggestion under it")
+        self.assertEqual(recipe.notes, [ac.hand_note(2)])
+        recipe.adjust = {1: [0.0, 300.0, 1.0, 1.0]}  # raised: too tall as set, compacting on
+        ac.place(recipe, inks().get, placement, hopeless)
+        self.assertFalse(recipe.checked)
+        self.assertTrue(recipe.notes[0].endswith(ac.TOO_TALL_NOTE), "the reason stays in its row: %s" % recipe.notes)
+        recipe.checked, recipe.compact = True, False  # compacting off: too tall as set, left checked
+        ac.place(recipe, inks().get, placement, hopeless)
+        self.assertTrue(recipe.checked)
+        self.assertTrue(recipe.notes[0].endswith(ac.TOO_TALL_NOTE))
+
+    def test_the_sections_are_named_as_the_owner_asked(self):
+        existing = one_mark(0x00F3, "o", "acute", "above", "acute")
+        existing.existing = u"oacute"
+        moved = one_mark(0x00F2, "o", "grave", "above", "acute")
+        moved.existing = u"ograve"
+        shifts = {existing.char: (0, 0), moved.char: (3, 0)}
+        titles = [title for title, rows in ac.list_sections([existing, moved], lambda r: shifts[r.char]) if rows]
+        self.assertEqual(titles, [u"Existing glyphs with suggestions (check to rebuild)",
+                                  u"Existing glyphs that match suggestions (check to rebuild)"])
+        self.assertEqual(ac.section_title(u"Existing glyphs with suggestions (check to rebuild) (767)"),
+                         u"Existing glyphs with suggestions (check to rebuild)")
+        self.assertEqual(ac.JUST_BUILT, u"Just built (check to rebuild)")
+
+    def test_the_check_box_sits_with_the_preview_unticked_at_first(self):
+        saved = ac.read_settings
+        try:
+            ac.read_settings = lambda ak: {"compact": True}  # (a choice saved for the box as it was)
+            dialog, made = WhatsThisTests("test_every_control_and_label_has_its_own").build()
+        finally:
+            ac.read_settings = saved
+        box = dialog.compact_box
+        self.assertEqual(box.args[0], u"Compact diacritics to fit the line")
+        self.assertIs(box.__dict__.get("checked"), False, "unticked by default")
+        self.assertFalse(dialog.compact)
+        rows = [w for w in made if dialog.reset_marks_button in w.__dict__.get("added", [])]
+        self.assertEqual(len(rows), 1)
+        added = rows[0].added
+        self.assertEqual(added.index(box) + 1, added.index(dialog.reset_marks_button), "left of Reset diacritics")
+        self.assertFalse([w for w in made if w is not rows[0] and box in w.__dict__.get("added", [])],
+                         "no longer over the list")
+        shown = ac.preview_parts(True, True, True)
+        self.assertTrue(shown["compact_box"])
+        self.assertFalse(ac.preview_parts(False, False, False)["compact_box"])
+
+    # -- the Mark anchors tab's sample marks, in a font whose marks attach by anchors of other names --
+
+    ABOVE, BELOW = ac.Ink(-100, 550, 100, 650, advance=0), ac.Ink(-50, -150, 50, -50, advance=0)
+    INKS = {"A": ac.Ink(10, 0, 590, 714, advance=600), "B": ac.Ink(60, 0, 520, 714, advance=580),
+            "uni031A": ABOVE, "circumflexcomb": ABOVE, "acutecomb": ABOVE, "dotbelowcomb": BELOW,
+            "uni0326": BELOW, "tildebelowcomb": BELOW, "ogonekcomb": ac.Ink(-100, -200, 0, 0, advance=0)}
+    NOTO = [("A", 0x41, "base", {"t.cyrillicbreve": (300, 730), "m.uni0326": (300, 0)}),
+            ("B", 0x42, "base", {"t.cyrillicbreve": (290, 730), "m.uni0326": (290, 0)}),
+            ("uni031A", 0x031A, "mark", {}),  # (first in the font's order, with no anchor of its own)
+            ("circumflexcomb", 0x0302, "mark", {"_t.cyrillicbreve": (0, 540)}),
+            ("acutecomb", 0x0301, "mark", {"_t.cyrillicbreve": (0, 540)}),
+            ("dotbelowcomb", 0x0323, "mark", {"_m.uni0326": (0, 0)}),
+            ("uni0326", 0x0326, "mark", {"_b.uni0326": (0, 0), "_m.uni0326": (0, 0)}),
+            ("tildebelowcomb", 0x0330, "mark", {"_x.unknown": (0, 0)}),
+            ("ogonekcomb", 0x0328, "mark", {"_m.uni0326_2": (0, 0)})]
+
+    def noto_page(self, rows=None):
+        inks = self.INKS
+        page = ac.AnchorPage.__new__(ac.AnchorPage)
+        page.glyphs = ac.plan_anchors([(name, code, role, inks[name], existing)
+                                       for name, code, role, existing in (rows or self.NOTO)], {}, "latin", 1000, 500)
+        page.package, page.scripts, page.script_box = Stub(upm=1000), ["latin"], Stub(currentIndex=0)
+        page.ink = type("Ink", (object,), {"__call__": lambda self, name: inks.get(name),
+                                           "path": lambda self, name: (None, inks[name].advance)})()
+        return page, dict((g.name, g) for g in page.glyphs)
+
+    def test_letters_show_real_diacritics_above_below_and_beside(self):
+        page, found = self.noto_page()
+        a, b = found["A"], found["B"]
+        self.assertEqual([(side, m.name if m is not None else None) for side, m in page.samples(b)],
+                         [("top", "circumflexcomb"), ("bottom", "dotbelowcomb"), ("reph", None)],
+                         "a circumflex above and a dot below, not U+031A (a right angle) over every letter")
+        self.assertEqual([part[0] for part in page.scene(b)["parts"]], ["B", "circumflexcomb", "dotbelowcomb"])
+        self.assertEqual(page.reference_text(b), text(0x0042, 0x0323, 0x0302))
+        names = [part[0] for part in page.scene(a)["parts"]]
+        self.assertEqual(names, ["A", "circumflexcomb", "acutecomb", "dotbelowcomb", "ogonekcomb"],
+                         "A stacks (U+1EA4), and takes its ogonek at its side")
+        self.assertEqual(page.reference_text(a), text(0x0041, 0x0323, 0x0302, 0x0301, 0x0020, 0x0041, 0x0328))
+        ogonek = page.scene(a)["parts"][4]
+        self.assertEqual((ogonek[3], ogonek[4]), a.placed()["ogonek"],
+                         "its top right (0, 0 in its own glyph) on A's ogonek anchor")
+
+    def test_each_mark_sits_on_a_letter(self):
+        page, found = self.noto_page()
+        comma = found["uni0326"]
+        self.assertEqual(page.samples(comma), [("m.uni0326", found["A"])],
+                         "on the letter's anchor the font attaches it by, not alone on a dotted circle")
+        self.assertTrue(page.reference_text(comma).startswith(text(0x0041, 0x0326, 0x0020)), page.reference_text(comma))
+        self.assertIsNotNone(page.scene(comma))
+        tilde = found["tildebelowcomb"]  # its own anchor is no letter's: hung where its _bottom would be
+        side, base = page.samples(tilde)[0]
+        self.assertEqual((side, base.name), ("bottom", "A"))
+        scene = page.scene(tilde)
+        self.assertEqual([part[0] for part in scene["parts"]][:2], ["A", "tildebelowcomb"])
+        self.assertNotIn((1, 2), scene["ranges"], "it has no _bottom to drag (the mark on it moves its own bottom)")
+        self.assertEqual(len(page.edits), len(scene["ranges"]))
+        self.assertTrue(page.reference_text(tilde).startswith(text(0x0041, 0x0330, 0x0020)))
+        alone, marks = self.noto_page([row for row in self.NOTO if row[2] == "mark"])
+        self.assertEqual(alone.reference_text(marks["uni0326"])[:1], text(ac.DOTTED_CIRCLE),
+                         "a dotted circle only with no letter at all")
 
 
 if __name__ == "__main__":

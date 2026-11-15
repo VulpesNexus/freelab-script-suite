@@ -2870,6 +2870,7 @@ FORM_ICON_WIDTH = 3  # a form row's picture: this many icons wide
 CHECK_FRAME = u"rgb(140, 140, 146)"  # an unchecked box's frame: a mid gray, plain on either background
 CHECK_MARK_SCALE = 3  # the check mark is drawn this many times the box's size (sharp on a scaled display)
 CHECK_SHEET_MARK = u"/* FreeLab check boxes */"
+TABLE_PROP = "freelabTable"  # (the shared module's: a list in FreeLab's table layout)
 
 
 def check_box_sheet(size, mark=None, fill=u"palette(highlight)", frame=CHECK_FRAME, selected_frame=u"white"):
@@ -2920,7 +2921,15 @@ def check_mark_file(QtCore, QtGui, color, size):
 
 
 def style_check_boxes(QtCore, QtGui, tree, base):
-    """The list's check boxes drawn in its palette's colors (base: its own stylesheet, kept before them)."""
+    """The list's check boxes drawn in its palette's colors (base: its own stylesheet, kept before them).
+    A list in FreeLab's table layout (the shared module's table_layout) draws its own, and writes them
+    again on each switch: left to it (written here too, its old colors came back after a switch)."""
+    try:
+        if tree.property(TABLE_PROP) is not None:
+            return
+    except Exception:
+        pass
+
     def color_of(palette, role, default):
         try:
             color = palette.color(role)
@@ -3132,7 +3141,7 @@ class FeatureCodeDialog(object):
         self.ligature_tree.setIconSize(QtCore.QSize(ICON_SIZE, ICON_SIZE))
         self.ligature_tree.setWhatsThis(what)
         self.ligature_tree.setProperty(self.ak.LEAVE_ALONE_PROP, True)  # its pictures are drawn in the dialog's colors
-        self.ak.grid_lines(self.ligature_tree)
+        self.ak.table_layout(self.ligature_tree)
         part.addWidget(self.ligature_tree, 1)
 
         part = self.part(QtGui, 1, self.lists)
@@ -3185,7 +3194,7 @@ class FeatureCodeDialog(object):
         self.alternate_tree.setIconSize(QtCore.QSize(ICON_SIZE * 3, ICON_SIZE))
         self.alternate_tree.setWhatsThis(turns)
         self.alternate_tree.setProperty(self.ak.LEAVE_ALONE_PROP, True)
-        self.ak.grid_lines(self.alternate_tree)
+        self.ak.table_layout(self.alternate_tree)
         part.addWidget(self.alternate_tree, 1)
 
         forms_page = QtGui.QWidget()
@@ -3217,7 +3226,7 @@ class FeatureCodeDialog(object):
                                      u"and you can edit it. Amber rows are warnings to review: they change nothing. "
                                      u"A note too long for its column is whole in its cell's tooltip.")
         self.forms_tree.setProperty(self.ak.LEAVE_ALONE_PROP, True)
-        self.ak.grid_lines(self.forms_tree)
+        self.ak.table_layout(self.forms_tree)
         forms_box.addWidget(self.forms_tree, 1)
         self.small_forms, self.small_plans, self.small_info = [], {}, None
         self.small_setup, self.small_first, self.small_set_index = {}, {}, 0
@@ -3880,7 +3889,7 @@ class FeatureCodeDialog(object):
         self.small_tree.setIconSize(QtCore.QSize(ICON_SIZE * 2, ICON_SIZE))
         self.small_tree.setWhatsThis(listed)
         self.small_tree.setProperty(self.ak.LEAVE_ALONE_PROP, True)
-        self.ak.grid_lines(self.small_tree)
+        self.ak.table_layout(self.small_tree)
         part.addWidget(self.small_tree, 1)
         row = QtGui.QHBoxLayout()
         row.addStretch(1)

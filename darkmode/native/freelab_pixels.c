@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 111
+#define FREELAB_PIXELS_VERSION 114
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -1944,6 +1944,213 @@ static int white_on_colored(const uint32_t *p, int64_t i, int64_t width, int64_t
     return colored;
 }
 
+/* Ink mode: light text on a gray badge (Anchors & Pins' coordinates: white ClearType digits on a
+ * mid-gray pill, #a0a2a4, in a white list). The digits' white is the list's white, one anchor, mapped
+ * dark with the list: dark digits on the badge, their light fringes around them (unreadable). A light
+ * pixel enclosed by one badge gray, each way within reach, past nothing but light pixels (the
+ * text and its fringes), and thin one way at least (a stroke; the white inside a gray-framed box is as
+ * wide as it is tall), is text on the badge: drawn from the badge as it comes out toward white, at
+ * the pixel's own coverage per channel (kept, the badge's text is as drawn; turned dark, its text stays
+ * light, as on FontAudit's badges). A badge's gray is an anchor solid one way at least (a badge's runs;
+ * a gray letter's strokes are short), of low color (white_on_colored takes colored controls), darker
+ * than the text, and of middle lightness (a dark gray tile behind white letters too). */
+#define BADGE_REACH 6 /* px: the badge's gray within this many pixels up and down, */
+#define BADGE_REACH_ACROSS 24 /* and across (a line of digits' bars touch through their fringes) */
+#define BADGE_MIN_HLS 0.3 /* a badge's gray is no darker (black text's counters are no badge text) */
+#define BADGE_TEXT_STEP 0.01 /* the text (its fringes too) is lighter than its badge by this much (HLS) */
+#define BADGE_LIGHT_HLS 0.5 /* what the walk crosses: the text and its fringes, this light at least */
+#define BADGE_STROKE 3 /* px: text on a badge is this thin one way at least (across or down), */
+#define BADGE_SAME_HLS 0.1 /* its stroke being what is about as light as the pixel (its fringes end it) */
+#define BADGE_MAX_HLS 0.85 /* nor lighter (a light row is no badge) */
+#define BADGE_MAX_COLORS 8
+#define BADGE_MARK 16 /* white_mark: BADGE_MARK + the badge's index, for its text */
+
+static uint32_t badge_colors[BADGE_MAX_COLORS], badge_out[BADGE_MAX_COLORS], badge_dark[BADGE_MAX_COLORS];
+static int64_t badge_text_count[BADGE_MAX_COLORS];
+static double badge_hls[BADGE_MAX_COLORS];
+static int badge_count;
+
+static uint32_t resolve(uint32_t c, int translucent, uint32_t mask, int mode, double dark_l, double light_l,
+                        double keep_tint, double tint);
+
+/* The frequent colors a badge could be of (see above), once per call, each with the color it comes
+ * out as: among all the candidates, a blend dropped as no anchor too (a gray badge lies on the line
+ * from the list's white to its black text). */
+static void find_badge_colors(int mode, double dark_l, double light_l, double keep_tint)
+{
+    int j;
+    badge_count = 0;
+    for (j = 0; j < candidate_count && badge_count < BADGE_MAX_COLORS; j++) {
+        const Anchor *a = &candidates[j];
+        uint8_t px[3];
+        double hls;
+        uint32_t rgb = pack(a->r, a->g, a->b);
+        px[2] = (uint8_t)a->r;
+        px[1] = (uint8_t)a->g;
+        px[0] = (uint8_t)a->b;
+        hls = lightness(px[2], px[1], px[0]);
+        if (spread_of(px) >= WHITE_MARK_SPREAD || hls < BADGE_MIN_HLS || hls > BADGE_MAX_HLS
+            || (a->hrun < SURFACE_RUN && a->vrun < SURFACE_RUN))
+            continue;
+        badge_colors[badge_count] = rgb;
+        badge_text_count[badge_count] = 0;
+        badge_dark[badge_count] = 0;
+        badge_out[badge_count] = resolve(rgb, 0, 0U, mode, dark_l, light_l, keep_tint, 0.0) & 0xffffffU;
+        badge_hls[badge_count++] = hls;
+    }
+}
+
+static int badge_color_of(uint32_t rgb)
+{
+    int k;
+    for (k = 0; k < badge_count; k++) {
+        if (badge_colors[k] == rgb)
+            return k;
+    }
+    return -1;
+}
+
+static uint8_t badge_near[MAX_INDEXED]; /* 1: a badge's gray within reach on the left and on the right */
+static uint8_t badge_at[MAX_INDEXED]; /* text on a badge: the nearest badge pixel found, its way << 5 | its distance */
+
+/* Which pixels have a badge's gray within reach on both sides along their row (light_on_gray_badge
+ * asks that of each way; looked for in one pass a row, it spares the rest the walk). */
+static void find_near_badges(const uint32_t *p, int64_t count, int64_t width)
+{
+    int64_t y, x, rows = width > 0 ? count / width : 0;
+    for (y = 0; y < rows; y++) {
+        const uint32_t *row = p + y * width;
+        uint8_t *near = badge_near + y * width;
+        int64_t last = -BADGE_REACH_ACROSS - 1, next = width + BADGE_REACH_ACROSS + 1;
+        uint32_t seen = 0;
+        int seen_badge = 0, have = 0;
+        for (x = 0; x < width; x++) {
+            uint32_t c = row[x] & 0xffffffU;
+            if (!have || c != seen) { /* (the color's answer only: each pixel's alpha is its own) */
+                seen = c;
+                seen_badge = badge_color_of(c) >= 0;
+                have = 1;
+            }
+            if (seen_badge && (row[x] >> 24) >= ANCHOR_MIN_ALPHA)
+                last = x;
+            near[x] = x - last <= BADGE_REACH_ACROSS;
+        }
+        have = 0;
+        for (x = width - 1; x >= 0; x--) {
+            uint32_t c = row[x] & 0xffffffU;
+            if (!have || c != seen) {
+                seen = c;
+                seen_badge = badge_color_of(c) >= 0;
+                have = 1;
+            }
+            if (seen_badge && (row[x] >> 24) >= ANCHOR_MIN_ALPHA)
+                next = x;
+            near[x] = near[x] && next - x <= BADGE_REACH_ACROSS;
+        }
+    }
+}
+
+static int light_on_gray_badge(const uint32_t *p, int64_t i, int64_t width, int64_t count)
+{
+    int64_t x, y, rows, k;
+    int dir, badge = -1, run[4], nearest = 0, nearest_k = BADGE_REACH_ACROSS + 1;
+    double own;
+    if (!badge_count || width <= 0 || !badge_near[i])
+        return 0;
+    own = lightness((uint8_t)(p[i] >> 16), (uint8_t)(p[i] >> 8), (uint8_t)p[i]);
+    if (own < BADGE_LIGHT_HLS || badge_color_of(p[i] & 0xffffffU) >= 0)
+        return 0;
+    x = i % width;
+    y = i / width;
+    rows = count / width;
+    for (dir = 0; dir < 4; dir++) {
+        int64_t sx = dir == 0 ? 1 : dir == 1 ? -1 : 0, sy = dir == 2 ? 1 : dir == 3 ? -1 : 0;
+        int found = 0, same = 1, reach = sx ? BADGE_REACH_ACROSS : BADGE_REACH;
+        run[dir] = 0;
+        for (k = 1; k <= reach && !found; k++) {
+            int64_t xx = x + sx * k, yy = y + sy * k;
+            const uint8_t *q;
+            int which;
+            double l;
+            if (xx < 0 || xx >= width || yy < 0 || yy >= rows)
+                return 0;
+            q = (const uint8_t *)&p[yy * width + xx];
+            if (q[3] < ANCHOR_MIN_ALPHA)
+                return 0;
+            which = badge_color_of(*(const uint32_t *)q & 0xffffffU);
+            l = lightness(q[2], q[1], q[0]);
+            if (which >= 0) {
+                if ((badge >= 0 && which != badge) || badge_hls[which] > own - BADGE_TEXT_STEP)
+                    return 0; /* two grays, or one as light as the pixel: no text on its badge */
+                badge = which;
+                found = 1;
+                if (k < nearest_k) {
+                    nearest_k = (int)k;
+                    nearest = dir << 5 | (int)k;
+                }
+            } else if (l < BADGE_LIGHT_HLS)
+                return 0; /* dark before the gray: no badge around the pixel */
+            same = same && l >= own - BADGE_SAME_HLS && spread_of(q) <= WHITE_MARK_PURE_SPREAD;
+            run[dir] += same && !found; /* the pixel's own stroke, up to its fringe or the badge */
+        }
+        if (!found)
+            return 0;
+    }
+    /* Text is thin one way at least (a stroke, a bar); the white inside a gray-framed box is as wide
+     * as it is tall. */
+    if (run[0] + run[1] + 1 > BADGE_STROKE && run[2] + run[3] + 1 > BADGE_STROKE)
+        return 0;
+    badge_at[i] = (uint8_t)nearest;
+    return badge + 1;
+}
+
+/* A badge whose light text reads badly on it as it comes out (Anchors & Pins' #a0a2a4 kept, white on
+ * it about 2.6:1, live) is drawn darker, in its own hue: to the luminance of the Classes panel's badge
+ * gray (#646464, about 5.9:1 with white), when its own gives white less than 4.5:1. The color for that,
+ * or 0 for none (the badge as it comes out is dark enough). */
+#define BADGE_MAX_LUMINANCE 0.1833 /* white on it at 4.5:1 at least */
+#define BADGE_DARK_LUMINANCE 0.1274 /* #646464 */
+#define BADGE_MIN_TEXT 6 /* pixels: a badge with less light text on it is left as it comes out */
+
+static double luminance_of(uint32_t rgb)
+{
+    return 0.2126 * SRGB_TO_LINEAR[(rgb >> 16) & 255] + 0.7152 * SRGB_TO_LINEAR[(rgb >> 8) & 255]
+           + 0.0722 * SRGB_TO_LINEAR[rgb & 255];
+}
+
+static uint32_t darker_badge(uint32_t rgb)
+{
+    double y = luminance_of(rgb), f;
+    if (y <= BADGE_MAX_LUMINANCE)
+        return 0;
+    f = BADGE_DARK_LUMINANCE / y;
+    return ((uint32_t)linear_to_byte(SRGB_TO_LINEAR[(rgb >> 16) & 255] * f) << 16)
+           | ((uint32_t)linear_to_byte(SRGB_TO_LINEAR[(rgb >> 8) & 255] * f) << 8)
+           | (uint32_t)linear_to_byte(SRGB_TO_LINEAR[rgb & 255] * f) | 0x01000000U; /* (never 0) */
+}
+
+/* Text on a badge (light_on_gray_badge), its coverage from the badge toward white drawn again from
+ * the badge as it comes out (to: the badge pixel beside it as the mapping drew it, so the
+ * text's smoothing meets the badge exactly; badge_out only where nothing is written: detection). */
+static uint32_t badge_text(uint32_t v, int k, uint32_t to)
+{
+    uint32_t from = badge_colors[k];
+    double out[3], t = 0.0;
+    int ch;
+    for (ch = 0; ch < 3; ch++) { /* the pixel's coverage, the mean of its channels' (grayscale smoothing:
+                                  * ClearType's colored fringes, drawn for the light badge, are left out) */
+        int shift = 16 - 8 * ch;
+        double c = (double)((v >> shift) & 255), f = (double)((from >> shift) & 255);
+        t += (f < 255.0 ? (c - f) / (255.0 - f) : 1.0) / 3.0;
+    }
+    t = t < 0.0 ? 0.0 : t > 1.0 ? 1.0 : t;
+    for (ch = 0; ch < 3; ch++) {
+        double o = (double)((to >> (16 - 8 * ch)) & 255);
+        out[ch] = o + t * (255.0 - o);
+    }
+    return (v & 0xff000000U) | (pack(out[0], out[1], out[2]) & 0xffffffU);
+}
+
 /* Ink mode: the edge of a small white shape drawn on nothing (an unticked box a list's delegate paints
  * as a white square) gets a frame color: mapped whole, the box was a dark square with no outline. */
 #define BOX_INK_HLS 0.45 /* darker than an unticked box's own gray frame */
@@ -2291,7 +2498,7 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
     uint32_t last_in = 0, last_out = 0;
     int have_last = 0, any_mapped = 0, j, local, tinted, last_edge = 0, glyph_icons = 0;
     uint32_t paper_bit, other_surfaces, other_surface_bits;
-    int white_marks = 0, fringes = 0, bands = 0, thin;
+    int white_marks = 0, fringes = 0, bands = 0, thin, badge, darkened = 0;
     uint32_t left_orig = 0;
     double paper_hls;
     int64_t i, changed = 0;
@@ -2322,6 +2529,12 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
         else if (cleartype_fringe(p, i, width, count))
             white_mark[i] = 3;
     }
+    badge_count = 0;
+    if (white_marks) {
+        find_badge_colors(mode, dark_l, light_l, keep_tint);
+        if (badge_count)
+            find_near_badges(p, count, width);
+    }
     for (i = 0; white_marks && i < count; i++) {
         uint32_t v = p[i];
         double l = lightness((uint8_t)(v >> 16), (uint8_t)(v >> 8), (uint8_t)v);
@@ -2330,11 +2543,33 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
             continue;
         if (l >= WHITE_MARK_TEST_HLS && white_on_colored(p, i, width, count))
             white_mark[i] = 1;
+        else if (l >= BADGE_LIGHT_HLS && (badge = light_on_gray_badge(p, i, width, count)) > 0)
+        {
+            white_mark[i] = (uint8_t)(BADGE_MARK + badge - 1); /* light text on a gray badge */
+            badge_text_count[badge - 1]++;
+        }
         else if (l >= WHITE_HLS && small_box_edge(p, i, width, count))
             white_mark[i] = 2;
         else if (spread_of((const uint8_t *)&p[i]) <= FRINGE_MAX_SPREAD && cleartype_fringe(p, i, width, count)
                  && beside_gray_text(p, i, width, count, paper_hls))
             white_mark[i] = 3; /* kept as drawn, it turns gray (light text in a list painted opaque) */
+    }
+    for (j = 0; white_marks && j < badge_count; j++) { /* badges too light for their text drawn darker */
+        int a;
+        badge_dark[j] = badge_text_count[j] >= BADGE_MIN_TEXT ? darker_badge(badge_out[j]) : 0;
+        if (!badge_dark[j])
+            continue;
+        badge_out[j] = badge_dark[j] & 0xffffffU;
+        darkened = any_mapped = 1;
+        for (a = 0; a < anchor_count; a++) { /* an anchor: its edges' blends follow it */
+            if (pack(anchors[a].r, anchors[a].g, anchors[a].b) == badge_colors[j]) {
+                anchors[a].mr = (double)((badge_out[j] >> 16) & 255);
+                anchors[a].mg = (double)((badge_out[j] >> 8) & 255);
+                anchors[a].mb = (double)(badge_out[j] & 255);
+                anchors[a].mapped = 1;
+                any_mapped = 1;
+            }
+        }
     }
     if (!any_mapped && mode == ANCHORS_RELIGHT)
         return 0;
@@ -2347,8 +2582,8 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
         for (i = 0; i < count; i++) {
             uint8_t *px = pixels + 4 * i;
             if (px[3] > 0 && lightness(px[2], px[1], px[0]) >= WHITE_HLS) {
-                if (white_marks && white_mark[i] == 1)
-                    continue;
+                if (white_marks && (white_mark[i] == 1 || white_mark[i] >= BADGE_MARK))
+                    continue; /* (a badge's text: no anchor is mapped, its badge neither) */
                 if (white_marks && white_mark[i] == 2) {
                     changed++;
                     if (apply)
@@ -2385,6 +2620,19 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
         left_orig = v; /* as drawn, before this pixel is mapped */
         if (alpha == 0)
             continue;
+        if (darkened && alpha >= ANCHOR_MIN_ALPHA) { /* a badge drawn darker, an anchor or not (a blend dropped) */
+            int bk = badge_color_of(v & 0xffffffU);
+            if (bk >= 0 && badge_dark[bk]) {
+                out = (v & 0xff000000U) | badge_out[bk];
+                have_last = 0;
+                if (out != v) {
+                    changed++;
+                    if (apply)
+                        p[i] = out;
+                }
+                continue;
+            }
+        }
         if (glyph_icons && (icon_px[i] == 1 || icon_px[i] == 3)) {
             out = icon_px[i] == 1 ? (mapped_one(v & 0xffffffU, dark_l, light_l, 0.0) | (v & 0xff000000U)) : v;
             have_last = 0;
@@ -2398,6 +2646,10 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
             continue;
         }
         if (white_marks && white_mark[i] == 1) { /* the mark and its smoothing toward the box */
+            have_last = 0;
+            continue;
+        }
+        if (white_marks && white_mark[i] >= BADGE_MARK) { /* text on a gray badge: once its badge is drawn (below) */
             have_last = 0;
             continue;
         }
@@ -2492,13 +2744,36 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
                 thin_px[i] = 1;
         }
     }
+    for (i = 0; white_marks && badge_count && i < count; i++) { /* text on a gray badge, from the badge as drawn */
+        uint32_t v = p[i], out, to;
+        int64_t step, at;
+        int k;
+        if (white_mark[i] < BADGE_MARK)
+            continue;
+        k = white_mark[i] - BADGE_MARK;
+        step = badge_at[i] & 31;
+        switch (badge_at[i] >> 5) {
+        case 0: at = i + step; break;
+        case 1: at = i - step; break;
+        case 2: at = i + step * width; break;
+        default: at = i - step * width; break;
+        }
+        to = apply && at >= 0 && at < count ? p[at] & 0xffffffU : badge_out[k];
+        out = badge_text(v, k, to);
+        if (out != v) {
+            changed++;
+            if (apply)
+                p[i] = out;
+        }
+    }
     if (thin)
         thin_light_smoothing(p, count, width);
     return changed;
 }
 
 /* Diagnostics: the pre-pass decision of each pixel of the last call (0 none, 1 white mark kept, 2 box
- * edge, 3 ClearType fringe), when it ran (ink and tinted content modes, images up to MAX_INDEXED). */
+ * edge, 3 ClearType fringe, BADGE_MARK and up text on a gray badge), when it ran (ink and tinted
+ * content modes, images up to MAX_INDEXED). */
 EXPORT void freelab_last_marks(uint8_t *out, int64_t count)
 {
     int64_t i;

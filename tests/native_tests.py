@@ -375,6 +375,108 @@ class NativeTests(unittest.TestCase):
         self.assertLess(badge[0], 120, "the badge turns dark: %r" % (badge,))
         self.assertGreater(rgb_at(buf, 6 * width + 32)[0], 150, "its black text turns light")
 
+    def badge_list(self, frame_box=False, gray=(160, 162, 164)):
+        """A white list (light mode): black text, a mid-gray badge (#a0a2a4) with white digits and their
+        ClearType fringes (Anchors & Pins' coordinates), and, with frame_box, a white box framed in that
+        gray (11 pixels inside). Returns (buffer, width)."""
+        white, black = (255, 255, 255), (0, 0, 0)
+        blue, amber = (176, 208, 240), (239, 208, 179)  # (the digits' fringes)
+        width, rows = 90, 22
+        image = dict(((x, y), white) for x in range(width) for y in range(rows))
+        for y in range(6, 14):  # black text at the left
+            for x in range(4, 30, 4):
+                image[(x, y)] = black
+        for y in range(4, 16):  # the badge, 34 by 12, its digits' stems and bars in white
+            for x in range(50, 84):
+                image[(x, y)] = gray
+        for start in range(54, 80, 6):
+            for y in range(7, 13):
+                image[(start + 2, y)] = white
+                image[(start + 1, y)], image[(start + 3, y)] = blue, amber
+            for x in range(start + 1, start + 4):
+                image[(x, 7)] = image[(x, 12)] = white
+        if frame_box:
+            for y in range(4, 17):
+                for x in range(34, 47):
+                    edge = x in (34, 46) or y in (4, 16)
+                    image[(x, y)] = gray if edge else white
+        colors = [image[(x, y)] for y in range(rows) for x in range(width)]
+        return pixels(colors), width
+
+    def test_white_text_on_a_gray_badge_stays_light(self):
+        # Anchors & Pins (2026-11-15): the digits' white is the list's white; mapped with it, the digits
+        # turned dark on the gray badge, their light fringes around them.
+        buf, width = self.badge_list()
+        anchors(LIB, buf, width, "ink")
+        self.assertLess(rgb_at(buf, 0)[0], 60, "the list turns dark")
+        self.assertGreater(rgb_at(buf, 8 * width + 4)[0], 180, "its black text light")
+        stem, bar = rgb_at(buf, 9 * width + 56), rgb_at(buf, 7 * width + 56)
+        badge = rgb_at(buf, 5 * width + 52)
+        for name, pixel in (("a stem", stem), ("a bar", bar)):
+            self.assertGreater(min(pixel), 230, "%s of a digit stays white: %r" % (name, pixel))
+        self.assertLess(max(badge), max(stem) - 60, "and stands out on its badge: %r" % (badge,))
+        fringe = rgb_at(buf, 9 * width + 55)
+        self.assertGreater(sum(fringe), sum(badge), "its fringe lies between the badge and the digit: %r" % (fringe,))
+
+    def test_a_kept_badge_too_light_for_its_text_is_drawn_darker(self):
+        # (live, 2026-11-16: white digits on Anchors & Pins' kept #a0a2a4, about 2.6:1, read weakly)
+        def luminance(rgb):
+            linear = [c / 255.0 / 12.92 if c <= 10 else ((c / 255.0 + 0.055) / 1.055) ** 2.4 for c in rgb]
+            return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+        for gray in ((128, 128, 128), (118, 120, 122)):  # (kept as drawn: no light surface to turn dark)
+            buf, width = self.badge_list(gray=gray)
+            anchors(LIB, buf, width, "ink")
+            badge, edge = rgb_at(buf, 5 * width + 52), rgb_at(buf, 4 * width + 50)
+            self.assertLessEqual((1.05 / (luminance(badge) + 0.05)), 6.5, "about the Classes badge's gray: %r" % (badge,))
+            self.assertGreaterEqual(1.05 / (luminance(badge) + 0.05), 4.5, "white on it at 4.5:1 at least: %r" % (badge,))
+            self.assertEqual(edge, badge, "the whole badge")
+            self.assertLessEqual(max(badge) - min(badge), max(gray) - min(gray) + 1, "in its own hue")
+            self.assertEqual(rgb_at(buf, 9 * width + 56), (255, 255, 255), "its digits white")
+            fringe = rgb_at(buf, 9 * width + 55)
+            self.assertLessEqual(max(fringe) - min(fringe), 3, "their smoothing gray, no ClearType fringe: %r" % (fringe,))
+            self.assertGreater(fringe[0], badge[0], "between the badge and the digit")
+        buf, width = self.badge_list(gray=(140, 140, 140))
+        anchors(LIB, buf, width, "ink")
+        self.assertEqual(rgb_at(buf, 5 * width + 52), (116, 116, 116), "one dark enough as it comes out is left so")
+
+    def test_a_translucent_edge_of_the_badge_s_gray_does_not_hide_it(self):
+        # (the row's color cache once kept the answer of the run's first pixel, its alpha included: a
+        # translucent edge of the badge's own gray made the rest of the row no badge)
+        buf, width = self.badge_list()
+        for y in range(4, 16):
+            buf[4 * (y * width + 50) + 3] = 100  # the badge's left edge: its gray, at alpha 100
+        anchors(LIB, buf, width, "ink")
+        self.assertGreater(min(rgb_at(buf, 9 * width + 56)), 230, "the digits stay white")
+
+    def test_badge_text_smoothing_meets_the_badge_as_drawn(self):
+        buf, width = self.badge_list()
+        half = 9 * width + 61  # a stem's left fringe, made halfway between the badge and white
+        for k, value in enumerate((207, 208, 209)):
+            buf[4 * half + 2 - k] = value
+        anchors(LIB, buf, width, "ink")
+        badge = rgb_at(buf, 9 * width + 59)  # the badge beside it, as the mapping drew it
+        for channel, got in enumerate(rgb_at(buf, half)):
+            self.assertLessEqual(abs(got - (badge[channel] + 255) / 2.0), 2.5, "halfway from the badge to white")
+
+    def test_a_gray_framed_white_box_is_no_badge(self):
+        buf, width = self.badge_list(frame_box=True)
+        anchors(LIB, buf, width, "ink")
+        self.assertLess(rgb_at(buf, 10 * width + 40)[0], 80, "its inside turns dark with the list")
+        self.assertGreater(min(rgb_at(buf, 9 * width + 56)), 230, "the badge's digits stay white beside it")
+
+    def test_the_white_inside_gray_letters_turns_dark(self):
+        # Gray text (#a0a2a4, the badge's gray, as a word's strokes): its counters are the list's white.
+        gray, white = (160, 162, 164), (255, 255, 255)
+        width, colors = 40, []
+        for y in range(14):
+            for x in range(width):
+                ring = 3 <= y <= 9 and x % 6 in (1, 4) or y in (3, 9) and x % 6 in (2, 3)
+                colors.append(gray if ring else white)
+        buf = pixels(colors)
+        anchors(LIB, buf, width, "ink")
+        self.assertLess(rgb_at(buf, 6 * width + 2)[0], 80, "an o's counter turns dark with the paper")
+
     def test_all_mode_maps_white_paper_and_black_text(self):
         buf = pixels(text_rows((255, 255, 255), (0, 0, 0), blend=(128, 128, 128)))
         anchors(LIB, buf, 40, "all")

@@ -8,6 +8,7 @@ from __future__ import absolute_import, division, print_function
 
 import ctypes
 import io
+import json
 import os
 import re
 import shutil
@@ -2210,6 +2211,514 @@ class ThemeTests(unittest.TestCase):
         self.assertTrue(log.entries[0].endswith(u"Read."))
 
 
+class TableLayoutTests(unittest.TestCase):
+    """FreeLab's one table layout (owner, 2026-11-15: Auto Spacing's list left half its window empty, with
+    gray ticks; Kerning Classes' and Font Compare's headers had stray separators, their rows no room;
+    the grids were to be faint, at 50 % opacity)."""
+
+    class Header(object):
+        def __init__(self):
+            self.calls = []
+
+        def setStretchLastSection(self, on):
+            self.calls.append(("last", on))
+
+        def setSectionResizeMode(self, column, mode):
+            self.calls.append(("mode", column, mode))
+
+    class HeaderItem(object):
+        def __init__(self):
+            self.aligned = {}
+
+        def setTextAlignment(self, column, alignment):
+            self.aligned[column] = alignment
+
+    class View(object):
+        columnCount = 4
+
+        def __init__(self, palette, kind="QTreeView", sheet=u""):
+            self.props, self.sheets, self.kind = {}, [], kind
+            self.palette, self.styleSheet = palette, sheet
+            self.head, self.head_item, self.resized = TableLayoutTests.Header(), TableLayoutTests.HeaderItem(), []
+            self.contents = [40, 120, 50, 60]  # (each column's width for its contents)
+            self.widths = [100, 100, 100, 100]
+            self.port = type("Port", (object,), {"width": 600, "filters": []})()
+            self.port.installEventFilter = self.port.filters.append
+
+        def setProperty(self, name, value):
+            self.props[name] = value
+
+        def property(self, name):
+            return self.props.get(name)
+
+        def setStyleSheet(self, sheet):
+            self.sheets.append(sheet)
+            self.styleSheet = sheet
+
+        def inherits(self, kind):
+            return kind == self.kind or (kind == "QTreeWidget" and self.kind == "QTreeView")
+
+        def header(self):
+            if self.kind != "QTreeView":
+                raise AttributeError("header")
+            return self.head
+
+        def horizontalHeader(self):
+            return self.head
+
+        def headerItem(self):
+            return self.head_item
+
+        def resizeColumnToContents(self, column):
+            self.resized.append(column)
+            self.widths[column] = self.contents[column]
+
+        def columnWidth(self, column):
+            return self.widths[column]
+
+        def setColumnWidth(self, column, width):
+            self.widths[column] = width
+
+        def isColumnHidden(self, column):
+            return False
+
+        def viewport(self):
+            return self.port
+
+        def parentWidget(self):
+            return None
+
+        def style(self):
+            class Style(object):
+                @staticmethod
+                def pixelMetric(metric):
+                    return 14  # (Fusion's box)
+            return Style()
+
+    def setUp(self):
+        fakes = ThemeFakes
+
+        class Gui(object):
+            QPalette = fakes.Palette
+
+            class QStyle(object):
+                PM_IndicatorWidth = 1
+
+            class QHeaderView(object):
+                Stretch = "Stretch"
+
+        class Core(object):
+            class Qt(object):
+                AlignRight, AlignVCenter = 2, 128
+
+            class QDir(object):
+                @staticmethod
+                def tempPath():
+                    return u""  # (no folder: the check mark is left out, the box filled)
+
+        for role in ("Text", "Base", "Highlight", "HighlightedText"):
+            setattr(fakes.Palette, role, role)
+        old = ak._qt
+        ak._qt = lambda: (Core, Gui)
+        self.addCleanup(lambda: setattr(ak, "_qt", old))
+        self.light = fakes.Palette(dict(fakes.LIGHT))
+        self.dark = fakes.Palette(dict(fakes.DARK))
+
+    def test_a_list_takes_the_layout_in_its_palettes_colors(self):
+        view = self.View(self.light)
+        self.assertIs(ak.table_layout(view), view)
+        self.assertTrue(view.props[ak.LEAVE_ALONE_PROP], "dark mode leaves it alone: mapped, its header and grid came out light")
+        self.assertTrue(ak.is_table(view))
+        sheet = view.styleSheet
+        self.assertEqual(view.sheets[0], u"", "cleared first: polished again in the palette of now")
+        self.assertIn(u"border-right: 1px solid rgba(127, 127, 127, 128)", sheet,
+                      "grid lines halfway between the text and the ground, at half strength")
+        self.assertIn(u"QTreeView::item { padding: %dpx %dpx;" % ak.TABLE_PADDING, sheet, "room around each cell's text")
+        self.assertIn(u"QTreeView::item:selected { background: rgb(0, 120, 215); color: rgb(255, 255, 255); }", sheet)
+        self.assertIn(u"QTreeView::indicator { width: 12px; height: 12px;", sheet,
+                      "the style's 14-pixel box, its frame inside it (a wider one cut the cell's text)")
+        self.assertIn(u"QTreeView::indicator:checked { border: 1px solid rgb(0, 120, 215); background: rgb(0, 120, 215);",
+                      sheet, "checked: filled with the selection's color")
+        self.assertEqual(view.head.calls, [], "no stretch column named: Qt's last one takes the rest")
+
+    def test_a_switch_writes_it_again_and_keeps_what_a_tool_added(self):
+        view = self.View(self.light)
+        ak.table_layout(view)
+        view.styleSheet += u" QTreeView::branch { image: none; }"  # (Font Check's branch arrows, added after)
+        view.palette = self.dark
+        ak.style_table(view)
+        sheet = view.styleSheet
+        self.assertEqual(sheet.count(ak.TABLE_SHEET_MARK), 1, "the old rules replaced, not added to")
+        self.assertIn(u"rgba(125, 125, 125, 128)", sheet, "the grid in the dark palette's half")
+        self.assertIn(u"background: rgb(61, 111, 184)", sheet)
+        self.assertNotIn(u"rgb(0, 120, 215)", sheet, "nothing of the light palette left")
+        self.assertTrue(sheet.endswith(u"QTreeView::branch { image: none; }"), "the tool's own rules kept, after")
+        older = self.View(self.light, sheet=u"QTreeView::item { color: gray; }")
+        ak.table_layout(older)
+        ak.style_table(older)
+        self.assertEqual(older.styleSheet.split(ak.TABLE_SHEET_END)[1].strip(), u"QTreeView::item { color: gray; }",
+                         "a sheet the tool set before stays its own, once")
+
+    def test_the_stretch_column_takes_the_rest_never_less_than_its_contents(self):
+        # (Qt's Stretch mode shrank Auto Kerning's pair pictures in a narrow window, and the column could
+        # not be dragged: the reviewer, 2026-11-15)
+        view = self.View(self.light)
+        ak.table_layout(view, stretch=1, numbers=(2, 3))
+        self.assertEqual(view.head.calls, [("last", False)], "no column in Qt's Stretch mode: all can be dragged")
+        self.assertEqual(view.head_item.aligned, {2: 130, 3: 130})
+        ak.fit_columns(view, (2, 3))
+        self.assertEqual(view.resized, [0, 1, 2, 3], "every column sized to its contents")
+        self.assertEqual(view.widths, [40, 450, 50, 60], "the names given the rest (Auto Spacing's list now fills)")
+        self.assertNotIn("mode", [call[0] for call in view.head.calls])
+        view.port.width = 200  # a narrow window
+        self.assertEqual(ak.stretch_column(view), 120, "never narrower than its contents: the list scrolls")
+        self.assertEqual(view.widths[1], 120)
+        view.port.width = 800
+        ak.stretch_column(view)
+        self.assertEqual(view.widths[1], 650, "and the room back once it is wider")
+        plain = self.View(self.light)
+        ak.table_layout(plain)
+        ak.fit_columns(plain)
+        self.assertEqual(plain.widths, [40, 120, 50, 60], "none named: no column takes the rest")
+
+    class Timer(object):
+        """A QTimer as the watches use it: its slots run by fire(), its starts counted."""
+        made = []
+
+        def __init__(self, parent=None):
+            self.parent, self.slots, self.started, self.single = parent, [], 0, None
+            TableLayoutTests.Timer.made.append(self)
+
+        def setSingleShot(self, on):
+            self.single = on
+
+        def setInterval(self, ms):
+            self.interval = ms
+
+        def connect(self, signal, slot):
+            self.slots.append(slot)
+
+        def start(self):
+            self.started += 1
+
+        def fire(self):
+            for slot in self.slots:
+                slot()
+
+    def timers(self):
+        TableLayoutTests.Timer.made = []
+        ak._qt()[0].QTimer = TableLayoutTests.Timer
+        saved = getattr(sys, "_freelab_table_fills", None)
+        self.addCleanup(lambda: setattr(sys, "_freelab_table_fills", saved))
+        return TableLayoutTests.Timer.made
+
+    def test_a_resize_of_the_list_gives_the_room_again_on_the_next_turn(self):
+        made = self.timers()
+        view = self.View(self.light)
+        ak.table_layout(view, stretch=1)
+        ak.fit_columns(view)
+        self.assertEqual(len(made), 1)
+        self.assertIs(made[0].parent, view, "parented to the list: Qt deletes it with it")
+        self.assertEqual(view.port.filters, made, "on the viewport")
+        self.assertIs(sys._freelab_table_fills[-1], made[0], "held: PythonQt drops an override no one holds")
+        view.port.width = 700
+
+        class Event(object):
+            @staticmethod
+            def type():
+                return ak.RESIZE_EVENT
+        self.assertFalse(made[0].eventFilter(view.port, Event()), "the event goes on")
+        self.assertEqual(view.widths[1], 450, "nothing changed inside Qt's resizing (it re-enters the layout)")
+        self.assertEqual((made[0].started, made[0].single, made[0].interval), (1, True, 0), "a turn of the loop later")
+        made[0].fire()
+        self.assertEqual(view.widths[1], 550)
+        ak.watch_stretch(view)
+        self.assertEqual(len(made), 1, "watched once")
+
+    def test_a_window_following_a_switch_writes_its_tables_again(self):
+        view = self.View(self.light)
+        ak.table_layout(view)
+
+        class Dialog(object):
+            def findChildren(self, kind):
+                return []
+
+            def isAncestorOf(self, widget):
+                return True
+
+        class App(object):
+            @staticmethod
+            def allWidgets():
+                return [view]
+
+        gui = ak._qt()[1]
+        gui.QDialog = "QDialog"
+        gui.QApplication = type("QApplication", (object,), {"instance": staticmethod(lambda: App())})
+
+        class Owner(object):
+            dialog = Dialog()
+        view.palette = self.dark
+        done = ak.retheme_window(Owner(), {})
+        self.assertEqual(done["tables"], 1)
+        self.assertIn(u"background: rgb(61, 111, 184)", view.styleSheet, "in the new palette's selection color")
+
+    def test_colors_are_read_from_the_active_group(self):
+        # (live, 2026-11-16: a window behind another at a switch got gray ticks and a gray selection, its
+        # Inactive group's, which stayed once it was activated)
+        class Palette(ThemeFakes.Palette):
+            def color(self, *args):
+                if len(args) == 1 or args[0] != ThemeFakes.Palette.Active:
+                    return ThemeFakes.Color(240, 240, 240)  # (the Inactive selection of the Windows style)
+                return ThemeFakes.Palette.color(self, *args)
+        view = self.View(Palette(dict(ThemeFakes.LIGHT)))
+        ak.table_layout(view)
+        self.assertIn(u"QTreeView::item:selected { background: rgb(0, 120, 215);", view.styleSheet)
+        self.assertNotIn(u"240", view.styleSheet)
+
+    class Font(object):
+        def __init__(self, bold=False):
+            self.bold = bold
+
+        def key(self):
+            return "bold" if self.bold else "plain"
+
+    class Icon(object):
+        def __init__(self, null):
+            self.null = null
+
+        def isNull(self):
+            return self.null
+
+    class Row(object):
+        def __init__(self, texts, children=(), checked=False, icon=False, bold=False, spanned=False):
+            self.texts, self.children, self.checked = list(texts), list(children), checked
+            self.icon_on, self.bold, self.spanned = icon, bold, spanned
+            self.aligned = {}
+
+        def text(self, column):
+            return self.texts[column] if column < len(self.texts) else u""
+
+        def font(self, column):
+            return TableLayoutTests.Font(self.bold)
+
+        def icon(self, column):
+            return TableLayoutTests.Icon(not (self.icon_on and column == 0))
+
+        def data(self, column, role):
+            return 2 if self.checked and column == 0 and role == "check" else None
+
+        def isFirstColumnSpanned(self):
+            return self.spanned
+
+        def childCount(self):
+            return len(self.children)
+
+        def child(self, index):
+            return self.children[index]
+
+        def setTextAlignment(self, column, alignment):
+            self.aligned[column] = alignment
+
+    def rows_view(self, rows):
+        case = self
+
+        class Metrics(object):
+            def __init__(self, font):
+                self.font = font
+
+            def width(self, text):
+                return len(text) * (8 if self.font.bold else 7)
+
+        gui, core = ak._qt()[1], ak._qt()[0]
+        gui.QFontMetrics = Metrics
+        core.Qt.CheckStateRole = "check"
+
+        class Header(object):
+            font = TableLayoutTests.Font()
+
+        class View(case.View):
+            columnCount, indentation, rootIsDecorated = 3, 20, True
+            iconSize = type("Size", (object,), {"width": lambda self: 32})()
+
+            def topLevelItemCount(self):
+                return len(rows)
+
+            def topLevelItem(self, index):
+                return rows[index]
+
+            def header(self):
+                return Header()
+
+            def headerItem(self):
+                return TableLayoutTests.Row([u"Pair", u"Glyphs", u"Set by"])
+
+        view = View(self.light)
+        view.widths = [0, 0, 0]
+        return view
+
+    def test_columns_fit_every_row_closed_groups_too(self):
+        # (live, 2026-11-16: Kerning Check's names cut to "Lc..." once a group was opened; CJK Vertical's
+        # metrics' labels cut at the end of a long list; Font Check's "+N" 6 pixels wider after a round trip)
+        long_child = self.Row([u"", u"Lcaron quotedbl", u"class LT"], checked=True, icon=True)
+        group = self.Row([u"L (23 pairs)"], children=[long_child], spanned=True, bold=True)
+        rows = [group, self.Row([u"Advance height", u"", u"none on 3,884 layers"], checked=True)]
+        view = self.rows_view(rows)
+        widths = ak.fit_rows(view)
+        pad = 2 * ak.TABLE_PADDING[1] + 2 * ak.TEXT_MARGIN + 1
+        check = ak.CHECK_SIZE + 2 + ak.ICON_GAP
+        self.assertEqual(widths[1], len(u"Lcaron quotedbl") * 7 + pad, "a closed group's row measured")
+        self.assertEqual(widths[0], max(len(u"Advance height") * 7 + check + 20,  # (indented once: root decorated)
+                                        0 + 32 + ak.ICON_GAP + check + 40) + pad,
+                         "a child's picture, check box, and indentation; the spanned heading counts for none")
+        self.assertEqual(widths[2], len(u"none on 3,884 layers") * 7 + pad)
+        self.assertEqual(view.widths, [widths[0], widths[1], widths[2]])
+        self.assertEqual(ak.fit_rows(view), widths, "the same every time: fonts and fixed margins alone")
+        capped = ak.fit_rows(view, (1,), most=60)
+        self.assertEqual(capped[1], 60, "a long glyph list capped (Kerning Classes ran 1,664 pixels wide)")
+        ak.fit_rows(view, (0, 1, 2), most=[None, 50, None])
+        self.assertEqual(view.widths[1], 50)
+        self.assertEqual(view.widths[2], widths[2], "None: as measured")
+
+    def test_a_row_is_measured_in_the_font_qt_draws_it_in(self):
+        # (live, 2026-11-16: Font Check's "+N" column 35 pixels on opening, 39 after a dark mode round
+        # trip: its bold font was copied from the list before the window was shown, at the size of then)
+        class SizedFont(object):
+            def __init__(self, size, bold=False, sized=True):
+                self.size, self.bold_on, self.sized = size, bold, sized
+
+            def key(self):
+                return "%s-%s" % (self.size, self.bold_on)
+
+            def resolve(self, other):  # (never called: its overloads are not called from PythonQt)
+                raise AssertionError("QFont.resolve called")
+
+            def bold(self):
+                return self.bold_on
+
+            def italic(self):
+                return False
+
+        class QFont(SizedFont):  # (the list's font copied, given the row's weight)
+            def __init__(self, other):
+                SizedFont.__init__(self, other.size)
+
+            def setBold(self, on):
+                self.bold_on = on
+
+            def setItalic(self, on):
+                pass
+        ak._qt()[1].QFont = QFont
+        rows = [self.Row([u"", u"", u"+1"])]
+        rows[0].font = lambda column: SizedFont(8, bold=True, sized=False)  # (only its weight set)
+        view = self.rows_view(rows)
+
+        class Metrics(object):
+            def __init__(self, font):
+                self.font = font
+
+            def width(self, text):
+                return len(text) * getattr(self.font, "size", 7)
+        ak._qt()[1].QFontMetrics = Metrics
+        view.headerItem = lambda: TableLayoutTests.Row([u"", u"", u""])  # (as Font Check's "+N" column: no header text)
+        view.font = SizedFont(10)  # (the list's font once its window is shown)
+        pad = 2 * ak.TABLE_PADDING[1] + 2 * ak.TEXT_MARGIN + 1
+        self.assertEqual(ak.fit_rows(view, (2,))[2], 2 * 10 + pad, "the list's size, as Qt draws the row")
+        view.font = SizedFont(12)
+        self.assertEqual(ak.fit_rows(view, (2,))[2], 2 * 12 + pad, "and the list's size of now, every time")
+
+    def test_a_list_is_fitted_again_once_shown_without_an_event_filter(self):
+        # (2026-11-16: a filter on the list's font and style changes, run while Qt polished the window being
+        # shown, came with two crashes of FontLab on opening Kerning Check)
+        made = self.timers()
+        filters = []
+        rows = [self.Row([u"Advance height", u"x", u"none on 3,884 layers"])]
+        view = self.rows_view(rows)
+        view.installEventFilter = filters.append
+        view.visible = False  # (filled before its window is shown)
+        first = ak.fit_rows(view, (0, 2), most=[None, None, 100])
+        self.assertEqual(json.loads(view.props[ak.TABLE_FIT_PROP]), {"columns": [0, 2], "most": [None, None, 100]})
+        self.assertEqual(filters, [], "no event filter on the list")
+        self.assertEqual(len(made), 1, "a plain timer")
+        timer = made[0]
+        self.assertIs(timer.parent, view, "parented to the list")
+        self.assertIn(timer, sys._freelab_table_fills, "held")
+        self.assertEqual((timer.started, timer.single, timer.interval), (1, True, ak.FIT_SETTLE_MS))
+        view.widths = [5, 5, 5]
+        rows[0].texts[0] = u"Advance height (font units)"  # (its window's font: the same rows measure wider)
+        timer.fire()
+        self.assertEqual(view.widths, [5, 5, 5], "not shown yet: looked at again later")
+        self.assertEqual(timer.started, 2)
+        view.visible = True
+        timer.fire()
+        self.assertGreater(view.widths[0], first[0], "shown: fitted again")
+        self.assertEqual(view.widths[2], 100, "with the same widths at most")
+        self.assertEqual(view.widths[1], 5, "and the same columns only")
+        self.assertEqual(len(made), 1, "a refit sets no timer of its own")
+        self.assertNotIn(timer, sys._freelab_table_fills, "done: let go")
+        hidden = self.rows_view([self.Row([u"a"])])
+        hidden.visible = False
+        ak.fit_rows(hidden, (0,))
+        for _ in range(ak.FIT_SETTLE_TRIES + 5):
+            made[-1].fire()
+        self.assertEqual(made[-1].started, ak.FIT_SETTLE_TRIES, "never shown: given up")
+        self.assertFalse(ak.refit(self.rows_view([])), "a list never fitted: nothing to do")
+
+    def test_numbers_align_right_in_every_row(self):
+        child = self.Row([u"A V", u"-60", u"-80"])
+        rows = [self.Row([u"group"], children=[child])]
+        view = self.rows_view(rows)
+        ak.align_numbers(view, (1, 2))
+        self.assertEqual(child.aligned, {1: 130, 2: 130}, "a closed group's rows too")
+        self.assertEqual(rows[0].aligned, {1: 130, 2: 130})
+
+    def test_a_list_widens_to_its_longest_row(self):
+        class List(object):
+            frameWidth, minimum = 1, None
+
+            def sizeHintForColumn(self, column):
+                return 97
+
+            def verticalScrollBar(self):
+                return type("Bar", (object,), {"sizeHint": lambda self: type("S", (object,), {"width": lambda s: 12})()})()
+
+            def setMinimumWidth(self, width):
+                self.minimum = width
+        pages = List()
+        self.assertEqual(ak.fit_list_width(pages), 97 + 2 + 12 + 2, "Proof's pages: no sideways scrolling for 2 pixels")
+        self.assertEqual(pages.minimum, 113)
+        self.assertEqual(ak.fit_list_width(pages, most=80), 80)
+
+    def test_tables_and_lists_without_grid(self):
+        table = self.View(self.light, kind="QTableView")
+        ak.table_layout(table)
+        self.assertIn(u"QTableView { gridline-color: rgba(127, 127, 127, 128); }", table.styleSheet)
+        self.assertIn(u"QTableView::indicator", table.styleSheet)
+        names = self.View(self.light, kind="QListView")
+        ak.table_layout(names, grid=False)
+        self.assertIn(u"QListView::item { padding: %dpx %dpx; }" % ak.TABLE_PADDING, names.styleSheet, "no lines")
+        self.assertNotIn(u"border-right", names.styleSheet)
+        ak.style_table(names)
+        self.assertNotIn(u"border-right", names.styleSheet, "still none after a switch")
+
+    def test_every_tools_list_takes_the_layout(self):
+        made = re.compile(u"QtGui\\.Q(?:TreeWidget|ListWidget|TableWidget)\\(\\)")
+        exempt = {u"freelab_font_check.py": 1}  # (its clipped glyphs: a strip of tiles, not rows)
+        root = os.path.join(HERE, os.pardir)
+        checked = 0
+        for folder in ("kerning", "spacing", "diacritics", "features", "cjk", "compare", "checks", "proof"):
+            for name in os.listdir(os.path.join(root, folder)):
+                if not name.endswith(u".py"):
+                    continue
+                with io.open(os.path.join(root, folder, name), encoding="utf-8") as handle:
+                    source = handle.read()
+                lists = len(made.findall(source)) - exempt.get(name, 0)
+                laid = source.count(u"table_layout(") - (source.count(u"def table_layout(") * 2)
+                checked += lists
+                self.assertGreaterEqual(laid, lists, "%s: a list made without FreeLab's table layout" % name)
+                self.assertNotIn(u"grid_lines(", source.replace(u"def grid_lines(", u""), name)
+        self.assertGreater(checked, 15)
+
+
 class HeldFilterTests(unittest.TestCase):
     """Event filters made from Python are timers here: made without a parent, one held only in a
     dictionary of parts became garbage once its tool was let go, and PythonQt deleted it at whatever
@@ -2409,6 +2918,73 @@ class FontLabWidgetTests(unittest.TestCase):
         self.assertTrue(all(read is view for read in reads), "one text box, before and after")
         self.assertEqual(logged[-1][0], "error")
         self.assertIn(u"bad rule", logged[-1][1])
+
+    def test_a_clean_compile_says_fontlab_reported_no_errors(self):
+        # The log said "FontLab's Output panel showed nothing from the compiler: see the Features panel for any
+        # error" after a write with vrt2. FontLab clears the panel at each compile (the owner), so an empty
+        # panel after one means no message at all
+        timers, logged = [], []
+
+        class View(object):
+            def __init__(self, texts):
+                self.texts = texts
+
+            def toPlainText(self):
+                return self.texts.pop(0) if len(self.texts) > 1 else self.texts[0]
+
+        class Core(object):
+            class QTimer(object):
+                @staticmethod
+                def singleShot(ms, slot):
+                    timers.append(slot)
+
+        class Box(object):
+            checked = True
+
+        class Log(object):
+            def add(self, text, level="info"):
+                logged.append((level, text))
+
+        saved = (ak._qt, ak.output_view, ak.compile_features)
+        self.addCleanup(lambda: setattr(ak, "_qt", saved[0]) or setattr(ak, "output_view", saved[1])
+                        or setattr(ak, "compile_features", saved[2]))
+        ak._qt, ak.compile_features = (lambda: (Core, None)), (lambda: True)
+        cases = (([u"", u""], ("info", u"Compiled: FontLab reported no errors.")),
+                 ([u"[E] an old error", u""], ("info", u"Compiled: FontLab reported no errors."), "cleared"),
+                 ([u"", u"[W] unused class @a"],
+                  ("info", u"Compiled: FontLab reported no errors, and a warning: [W] unused class @a")),
+                 # Review: a panel that never changed is not this compile's: neither its old error, nor "no
+                 # errors" before the compiler has had its say
+                 ([u"[W] unused class @a", u"[W] unused class @a"], ("info", ak.COMPILE_UNCHANGED),
+                  "the old text, never changed"),
+                 ([u"[E] bad rule", u"[E] bad rule"], ("info", ak.COMPILE_UNCHANGED), "not the old error again"),
+                 ([u"[E] old", u"[E] old", u"[E] old", u"[E] old", u""],
+                  ("info", u"Compiled: FontLab reported no errors."), "read on while it has not changed"),
+                 ([u"[N] notes", u"[N] notes\n[E] bad rule"], ("error", u"The features did not compile: [E] bad rule"),
+                  "kept and added to"),
+                 ([u"", u"", u"[F] stopped", u"[F] stopped"], ("error", u"The features did not compile: [F] stopped"),
+                  "read until it stops changing"))
+        for case in cases:
+            texts, wanted = case[0], case[1]
+            view = View(list(texts))
+            ak.output_view = lambda: view
+            del logged[:]
+            note = ak.compiled_note(Box(), Log())
+            while timers:
+                timers.pop(0)()
+            self.assertEqual(logged, [wanted], case[2:] or texts)
+        self.assertEqual(note, u" Compiled: what FontLab's compiler reports follows in this log.")
+        counted, view = [], View([u"[E] old"])
+        plain = view.toPlainText
+        view.toPlainText = lambda: counted.append(1) or plain()
+        ak.output_view = lambda: view
+        ak.compiled_note(Box(), Log())
+        while timers:
+            timers.pop(0)()
+        self.assertEqual(len(counted), 1 + ak.COMPILE_READS_MAX, "read before, then to the most while unchanged")
+        self.assertEqual(ak.compile_report(u"[W] a\n[W] b\n")[0], u"Compiled: FontLab reported no errors, and 2 warnings: [W] a [W] b")
+        for text in (logged[-1][1], ak.compile_report(u"")[0]):
+            self.assertNotIn(u"showed nothing", text)
 
 
 class HelperModuleTests(unittest.TestCase):
@@ -2909,6 +3485,51 @@ class KerningCheckTableTests(unittest.TestCase):
         self.assertEqual(calls, ["read", "previews", "buttons"])
         self.assertEqual(dialog.stale, set(kc.TABS), "each list checked again as it is shown")
 
+    def test_the_pictures_room_says_what_it_is_for(self):
+        # (live, 2026-11-16: with no pair selected, it read as an empty band between the buttons and the log)
+        class Label(object):
+            def __init__(self):
+                self.text = None
+
+            def clear(self):
+                self.text = u""
+
+            def setText(self, text):
+                self.text = text
+
+        dialog = kc.KerningCheckDialog.__new__(kc.KerningCheckDialog)
+        dialog.previews = [Label(), Label(), Label()]
+        dialog.package = object()
+        dialog.selected_finding = lambda: None
+        dialog.update_buttons_soon = lambda: None
+        for index, wanted in ((0, kc.PREVIEW_HINTS[0]), (1, kc.PREVIEW_HINTS[1]), (2, u"")):
+            dialog.tabs = type("Tabs", (), {"currentIndex": index})()
+            dialog.update_previews()
+            self.assertEqual([label.text for label in dialog.previews], [u"", wanted, u""])
+        dialog.package, dialog.tabs = None, type("Tabs", (), {"currentIndex": 0})()
+        dialog.update_previews()
+        self.assertEqual(dialog.previews[1].text, u"", "no font: nothing to select")
+        with io.open(kc.__file__, encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertIn(u"label.setWordWrap(False)", source, "the hint stays on one line")
+        self.assertNotIn(u"label.setWordWrap(True)  # (its hint", source)
+
+    def test_columns_fit_every_row_closed_groups_too(self):
+        with io.open(kc.__file__, encoding="utf-8") as handle:
+            source = handle.read().split(u"def resize(tab):")[1].split(u"\n    def ")[0]
+        self.assertIn(u"fit_rows(tab.tree, range(tab.tree.columnCount - 1))", source)
+        self.assertNotIn(u"resizeColumnToContents", source, "Qt measures only the rows it shows")
+
+    def test_a_list_filled_says_what_the_pictures_room_is_for(self):
+        # (live, 2026-11-16: the hint showed only once a pair was selected, then unselected)
+        with io.open(kc.__file__, encoding="utf-8") as handle:
+            source = handle.read()
+        lines = [line.strip() for line in source.splitlines()]
+        fills = [index for index, line in enumerate(lines) if line == u"self.resize(tab)"]
+        self.assertEqual(len(fills), 3, "the three lists' fillings")
+        self.assertEqual([lines[index + 1].split(u"  #")[0] for index in fills], [u"self.update_previews()"] * 3,
+                         "each followed by the pictures' room")
+
 
 class ChoiceSheetTests(unittest.TestCase):
     def test_the_chosen_suggestion_has_a_light_tint_of_the_highlight(self):
@@ -3171,7 +3792,7 @@ class AutoKerningListTests(unittest.TestCase):
         self.assertIn(u"Read right to left: alef first", rows[2].tips[0])
         with io.open(ak.__file__, encoding="utf-8") as handle:
             source = handle.read().split(u"class AutoKerningDialog")[1].split(u"\ndef font_class_suggestions")[0]
-        for wanted in (u"QtGui.QTreeWidget()", u"setProperty(LEAVE_ALONE_PROP, True)", u"grid_lines(self.tree)",
+        for wanted in (u"QtGui.QTreeWidget()", u"setProperty(LEAVE_ALONE_PROP, True)", u"table_layout(self.tree, stretch=0)",
                        u"glyph_icon_size(2)"):
             self.assertIn(wanted, source)
         self.assertNotIn(u"QTableWidget", source, "no table left: its header was what looked bad")

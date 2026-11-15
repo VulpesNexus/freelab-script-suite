@@ -2087,6 +2087,18 @@ def code_label(item):
     return u" ".join(u"U+%04X" % code for code in code_points(item))
 
 
+def row_label(row):
+    """A high-value row's Glyph column: its character's short name over its code points ("r with caron",
+    "U+0158 U+0159": a capital and its small letter go by the small one's name). A character the runtime's
+    Unicode data cannot name (FontLab's Python 2.7 has Unicode 5.2: U+A7CB is of 13.0) goes by its code
+    points alone, once: the name's line had repeated them ("U+A7CB" over "U+A7CB")."""
+    item = row.items[-1] if len(row.items) > 1 else row.items[0]
+    name, codes = short_name(item), u" ".join(code_label(one) for one in row.items)
+    if not name or name == code_label(item) or name == codes:
+        return codes
+    return u"%s\n%s" % (name, codes)
+
+
 def unicode_name(code):
     try:
         return u"%s" % unicodedata.name(char_of(code))
@@ -2124,10 +2136,35 @@ def short_name(item):
                 if capital:
                     head, _, tail = rest.partition(u" ")
                     if len(head) == 1:
-                        return head.upper() + (u" " + tail if tail else u"")
-                    return u"capital " + rest
-                return rest
+                        rest = head.upper() + (u" " + tail if tail else u"")
+                    else:
+                        rest = u"capital " + rest
+                # The script's name goes, its style stays: CIRCLED LATIN SMALL LETTER A read "a" (live, the
+                # first high-value row of Noto Sans, beside its capital)
+                style = name_style(name[:at])
+                return u"%s %s" % (style, rest) if style else rest
     return name.lower()
+
+
+# Words before a script's name in a character's Unicode name that say how the letter is drawn (kept in its
+# short name: "circled a", "full-width A"), as opposed to the script's own name (left out: "r with caron")
+NAME_STYLES = {u"CIRCLED": u"circled", u"PARENTHESIZED": u"parenthesized", u"NEGATIVE": u"negative",
+               u"SQUARED": u"squared", u"FULLWIDTH": u"full-width", u"HALFWIDTH": u"half-width",
+               u"MATHEMATICAL": u"mathematical", u"BOLD": u"bold", u"ITALIC": u"italic", u"SANS-SERIF": u"sans-serif",
+               u"DOUBLE-STRUCK": u"double-struck", u"MONOSPACE": u"monospace", u"FRAKTUR": u"fraktur",
+               u"SCRIPT": u"script", u"TAG": u"tag", u"REGIONAL": u"regional", u"INDICATOR": u"indicator",
+               u"SYMBOL": u"symbol", u"SUPERSCRIPT": u"superscript", u"SUBSCRIPT": u"subscript"}
+
+
+def name_style(prefix):
+    """The style words leading a name's part before its case word ("CIRCLED LATIN" gives "circled"), u"" for
+    a script's name alone ("LATIN", "OLD ITALIC": a style word after a script's first word is the script's)."""
+    words = []
+    for word in prefix.split():
+        if word not in NAME_STYLES:
+            break
+        words.append(NAME_STYLES[word])
+    return u" ".join(words)
 
 
 def case_partner(item):
@@ -2401,6 +2438,67 @@ def counted_sets(results):
     do not count towards the stats"; their rows still say what the font lacks of them)."""
     return [r for r in results if r.language.script not in (CUSTOM_GROUP, LEGACY_GROUP)
             and not isinstance(r.language, ScriptSet)]
+
+
+def set_tally(results):
+    """The character sets checked (Coverages), sorted as every count of them takes them, the one definition
+    Font Check's top line, its log, the Character sets tab's caption, and Proof's summary share: (the sets
+    counted, counted_sets; Unicode's scripts, each checked as a set and counted apart; the Legacy group's
+    sets, listed and never counted; the user's own, listed and never counted). The tab lists all four (Noto
+    Sans: 140 + 172 + 5 = 317 rows, against 33 of 140 sets covered)."""
+    scripts = [r for r in results if isinstance(r.language, ScriptSet)]
+    legacy = [r for r in results if r.language.script == LEGACY_GROUP and not isinstance(r.language, ScriptSet)]
+    own = [r for r in results if r.language.script == CUSTOM_GROUP and not isinstance(r.language, ScriptSet)]
+    return counted_sets(results), scripts, legacy, own
+
+
+def sets_sentence(results, b=lambda text: text):
+    """The top line's sentences of the character sets (b: bold): "33 character sets of 140 are covered
+    (the 5 Legacy sets, wholly optional, are not counted). 0 scripts of Unicode's 172 are covered whole."
+    u"" without sets."""
+    counted_, scripts, legacy, _ = set_tally(results)
+    text = u""
+    if counted_:
+        whole = sum(1 for r in counted_ if r.level == "covered")
+        if whole:
+            text += u" %s of %d %s covered" % (b(counted(whole, u"character set")), len(counted_),
+                                               u"is" if whole == 1 else u"are")
+        else:
+            text += u" %s of %d is covered" % (b(u"No character set"), len(counted_))
+        if legacy:
+            text += (u" (the Legacy set, wholly optional, is not counted)" if len(legacy) == 1 else
+                     u" (the %d Legacy sets, wholly optional, are not counted)" % len(legacy))
+        text += u"."
+    if scripts:  # (each script as a set: its whole repertoire, whatever languages are written in it)
+        whole = sum(1 for r in scripts if r.level == "covered")
+        if whole:
+            text += u" %s of Unicode's %d %s covered whole." % (b(counted(whole, u"script")), len(scripts),
+                                                                u"is" if whole == 1 else u"are")
+        else:  # ("0 scripts … are" read as a plural left unmade, owner, 2026-11-16)
+            text += u" %s of Unicode's %d is covered whole." % (b(u"No script"), len(scripts))
+    return text
+
+
+def sets_tab_tip(results):
+    """The Character sets tab's tooltip: what its count is made of (set_tally), each part with its noun
+    in its number, so that it adds up to the caption with the top line's counts in it."""
+    counted_, scripts, legacy, own = set_tally(results)
+    parts = []
+    for count, one, many in ((len(counted_), u"character set counted in the line above",
+                              u"character sets counted in the line above"),
+                             (len(scripts), u"script of Unicode, checked as a set (counted apart)",
+                              u"scripts of Unicode, each checked as a set (counted apart)"),
+                             (len(legacy), u"Legacy set, wholly optional (not counted)",
+                              u"Legacy sets, wholly optional (not counted)"),
+                             (len(own), u"set of your own (not counted)", u"sets of your own (not counted)")):
+        if count:
+            parts.append(u"%s %s" % (grouped(count), one if count == 1 else many))
+    if not parts:
+        return u"No character set is listed."
+    total = len(counted_) + len(scripts) + len(legacy) + len(own)
+    listed = parts[0] if len(parts) == 1 else (u"%s and %s" % tuple(parts) if len(parts) == 2 else
+                                               u"%s, and %s" % (u", ".join(parts[:-1]), parts[-1]))
+    return u"%s %s: %s." % (grouped(total), u"row" if total == 1 else u"rows", listed)
 
 
 def checked_sentence(languages, sets, scripts, seconds):
@@ -2845,7 +2943,7 @@ def check_lines(m, extents, findings, capitals=True):
             if rows:
                 more = u"" if len(rows) < BEYOND_SHOWN else u" (the farthest %d)" % BEYOND_SHOWN
                 info.append(CheckLine("info", u"%s reach %s%s" % (counted(len(rows), u"glyph"), word, more),
-                                      u"They may touch the line %s at the font's own line spacing (tall marks often "
+                                      u"They may touch the line %s at the font's own line spacing (tall diacritics often "
                                       u"do): %s." % (u"above" if kind == "beyond-top" else u"below",
                                                      u", ".join(u"%s %d" % (f.glyphs[0][1], f.value) for f in rows)),
                                       [f.glyphs[0][1] for f in rows]))
@@ -3287,7 +3385,7 @@ current line spacing for an update of a released font; the checks Google Fonts' 
 the glyphs Windows clips. <i>Write suggested values</i> sets the font's typo, hhea, and win values and <i>Use Typo Metrics</i>
 (those that differ); the masters' ascender, descender, x-height, and cap height, which FontLab draws
 with, are left as they are.<br>
-<b>Masters</b>: the glyphs that keep the masters from interpolating, worst first, a mark per master;
+<b>Masters</b>: the glyphs that keep the masters from interpolating, worst first, a symbol per master;
 the selected glyph drawn in the master compared with and in another, the contour at fault highlighted
 and its nodes numbered. <i>Fix</i> sets right, in the other masters, the contours' order, directions,
 start points, and the components' order; contour and node counts, node types, missing layers, and
@@ -4071,14 +4169,40 @@ class Section(object):
 
 
 class RightView(object):
-    """One list of a tab at the right (each tab has two: the full list, and a search's finds) and what
-    it was filled with: its rows (Coverages, FamilyNodes, Uncovered, by the index each item holds), the
-    label of each (what finds its item again), the closed headings and families whose rows wait, and
-    the signature of what it was filled from (None: never filled). A list whose signature is still the
-    one wanted is shown as it is: where it was scrolled to, its headings as they were opened."""
+    """One list of a tab at the right (each tab has three, VIEW_MODES) and what it was filled with: its
+    rows (Coverages, FamilyNodes, Uncovered, by the index each item holds), the label of each (what
+    finds its item again), the closed headings and families whose rows wait, and the signature of what
+    it was filled from (None: never filled). A list whose signature is still the one wanted is shown as
+    it is: where it was scrolled to, its headings as they were opened."""
 
     def __init__(self, tree):
         self.tree, self.rows, self.labels, self.unfilled, self.signature = tree, [], [], {}, None
+        self.script, self.used = None, 0  # (a script's list: the script it was last shown for, and when)
+
+
+# Each tab's lists: every script's ("full"), the last three scripts chosen above (SCRIPT_MODES, the least
+# recently shown given to a new script), and a search's finds ("search"), each kept as it was filled. The
+# owner: "Clicking from one script to another can freeze up for a few seconds without visual feedback": one
+# list for both, the whole Languages list (1,800 rows on Noto Sans) was made anew at each click between a
+# script and All scripts, and back; with one script's list, Latin's 2,108 rows were made anew after a click
+# on Cyrillic (live: 0.125 s the second time)
+SCRIPT_MODES = ("script", "script 2", "script 3")
+VIEW_MODES = ("full",) + SCRIPT_MODES + ("search",)
+LISTING_BUSY_ROWS = 300  # rows a script's click makes at least for the progress bar to show meanwhile
+LISTING_STEP_ROWS = 100  # rows made between two moves of that bar
+
+
+def listing_text(tab, script):
+    """What the progress bar says while a script's click lists the tab at the right (script: None or
+    u"" for All scripts)."""
+    if tab == "families":
+        text = (u"Listing the families of the languages written in %s" % script if script
+                else u"Listing the families of all scripts' languages")
+    elif tab == "sets":
+        text = u"Listing the character sets"
+    else:
+        text = u"Listing the languages written in %s" % script if script else u"Listing the languages of all scripts"
+    return text + u"\N{HORIZONTAL ELLIPSIS}"
 
 
 ABSENT_WHY = u"a script the font has none of"
@@ -5117,7 +5241,7 @@ class FontCheckDialog(object):
         self.list_family = None  # FreeLang once registered: the font of names and characters in tooltips
         self.tip_cache = {}  # the tooltips of the lists' rows made so far, for this check (right_tip)
         self.generation = 0  # one more at each check: what the lists at the right were filled from
-        self.views = {}  # each right tab's two lists, the full one and a search's (build_coverage)
+        self.views = {}  # each right tab's lists (VIEW_MODES): every script's, one script's, a search's (build_coverage)
         self.groups_of = {}  # ISO 639-3 code: the scripts' groups its orthographies are listed under
         self.has_coverage = False  # a check has finished: the lists have something to search, sort, or select
         self.coverage_gaps = CoverageGaps()  # what Font Check knows of and does not check (read with the data)
@@ -5282,8 +5406,7 @@ class FontCheckDialog(object):
             tree.setIconSize(QtCore.QSize(icon[0], icon[1]))
             tree.setProperty(self.ak.LEAVE_ALONE_PROP, True)  # (the whole list: on its viewport alone, dark mode
             # mapped the list and its pictures with it; its scroll bars are FreeLab's flat ones)
-        if grid:
-            self.ak.grid_lines(tree)
+        self.ak.table_layout(tree, grid=grid)  # (FreeLab's one table layout; grid lines or none)
         return tree
 
     @staticmethod
@@ -5429,8 +5552,8 @@ class FontCheckDialog(object):
                 elif key == "comparison":
                     self.draw_comparison()
                 elif key == "bars":
-                    for tree in (self.family_tree, self.family_search_tree):
-                        self.fit_bar(tree, FAMILY_NAMES_MOST)
+                    for view in self.views["families"].values():
+                        self.fit_bar(view.tree, FAMILY_NAMES_MOST)
             except Exception:
                 pass  # a timer's handler must not raise
 
@@ -5473,7 +5596,7 @@ class FontCheckDialog(object):
         tab.settings.addWidget(self.inferred_box)
         self.composing = QtGui.QCheckBox("Count letters its anchors compose")
         self.composing.setChecked(True)
-        self.composing.setWhatsThis(u"A letter with a mark the font lacks as one glyph counts as there when the "
+        self.composing.setWhatsThis(u"A letter with a diacritic the font lacks as one glyph counts as there when the "
                                     u"font has the letter and the combining mark, and the letter has an anchor the "
                                     u"mark attaches to (top and _top): applications compose it. Unchecked, only the "
                                     u"font's own glyphs count.")
@@ -5486,7 +5609,9 @@ class FontCheckDialog(object):
         tab.settings.addStretch(1)
 
         self.script_tree = self.tree(("Script", "", "Languages"), icon=BAR_SIZE, header=False, grid=False)
-        self.script_tree.setStyleSheet(SCRIPT_SHEET)
+        # (after the table layout's rules, as BRANCH_SHEET is: replaced, they came back in front of it at
+        # the first dark mode switch, and the list changed its look then)
+        self.script_tree.setStyleSheet(u"%s %s" % (_prop(self.script_tree, "styleSheet") or u"", SCRIPT_SHEET))
         self.script_tree.setWhatsThis(u"The scripts the font has, the most languages covered first: each bar shows "
                                       u"its languages covered (green), within reach (amber), started (red: the font "
                                       u"has some of their glyphs, too few to be within reach), and missed (gray: "
@@ -5703,10 +5828,14 @@ class FontCheckDialog(object):
         # Each tab has a second list for a search's finds: the full list stays as it is, behind it, so
         # clearing the search shows it again at once, where it was scrolled to, with nothing made anew
         # (it was made anew at each keystroke, some 2,600 rows: seconds in FontLab).
-        searches = dict((key, self.tree(columns, icon=icon)) for key, columns, icon in (
+        # And three for the last scripts chosen above (VIEW_MODES): every script's list stays as it is too, so
+        # clicking All scripts again shows it at once, and so does a script chosen lately
+        made_trees = dict(((key, mode), self.tree(columns, icon=icon)) for key, columns, icon in (
             ("languages", ("Language", "Missing"), (DOT_SIZE, DOT_SIZE)),
             ("sets", ("Character set", "Missing"), (DOT_SIZE, DOT_SIZE)),
-            ("families", ("Family", "", "Languages", "Not yet covered"), BAR_SIZE)))
+            ("families", ("Family", "", "Languages", "Not yet covered"), BAR_SIZE))
+            for mode in SCRIPT_MODES + ("search",))
+        searches = dict((key, made_trees[(key, "search")]) for key, _ in RIGHT_TABS)
         self.family_search_tree = searches["families"]
         colors = (u"A dot per row: covered (green), within reach (amber), started (red: the font has some of its "
                   u"glyphs), missed (gray: it has none). ")
@@ -5734,7 +5863,12 @@ class FontCheckDialog(object):
         for key, tree in (("languages", self.language_tree), ("sets", self.set_tree), ("families", self.family_tree)):
             searches[key].setWhatsThis(u"%s A search lists its finds here; clearing the search shows the whole "
                                        u"list again, as it was." % _prop(tree, "whatsThis"))
-            for one in (tree, searches[key]):
+            for mode in SCRIPT_MODES:  # (one place, shown in turn: one help, SCRIPT_MODES)
+                made_trees[(key, mode)].setWhatsThis(u"%s This list shows the script chosen above; clicking <i>All "
+                                                     u"scripts</i> shows every script's list again, as it was, and "
+                                                     u"so does clicking one of the last three scripts chosen."
+                                                     % _prop(tree, "whatsThis"))
+            for one in [tree] + [made_trees[(key, mode)] for mode in SCRIPT_MODES] + [searches[key]]:
                 self.use_list_font(one)
                 try:
                     one.setIndentation(16)
@@ -5744,8 +5878,9 @@ class FontCheckDialog(object):
                     one.setStyleSheet(u"%s%s" % (_prop(one, "styleSheet") or u"", BRANCH_SHEET))
                 except Exception:
                     pass
-                self.right_pages.addWidget(one)  # (the full list at 2 * the tab's index, the search's after it)
-            self.views[key] = {"full": RightView(tree), "search": RightView(searches[key])}
+                self.right_pages.addWidget(one)  # (in VIEW_MODES' order, len(VIEW_MODES) pages per tab)
+            self.views[key] = dict([("full", RightView(tree)), ("search", RightView(searches[key]))]
+                                   + [(mode, RightView(made_trees[(key, mode)])) for mode in SCRIPT_MODES])
             self.right_trees[key] = tree
         try:  # (registered by the lists above; asked again for its name: tooltips and pictures use it too)
             self.list_family = register_list_font(QtCore, QtGui)
@@ -5811,16 +5946,16 @@ class FontCheckDialog(object):
         # wide as its contents (at 1000 pixels the families' counts were cut: "95 of 177 la...").
         for key, modes in (("languages", ("stretch", "contents")), ("sets", ("stretch", "contents")),
                            ("families", ("stretch", "fixed", "contents", "contents"))):
-            for mode in ("full", "search"):
+            for mode in VIEW_MODES:
                 self.size_columns(self.views[key][mode].tree, modes)
-        for tree in (self.family_tree, self.family_search_tree):
-            self.watch_resize(tree, "bars")  # (its bars give up width first in a narrower list)
+        for mode in VIEW_MODES:
+            self.watch_resize(self.views["families"][mode].tree, "bars")  # (its bars give up width first in a narrower list)
         # The shared module clears a list's selection on a click beside it (its empty part, the window's
         # background); these lists' selections feed the others (the script chosen, the selection's tab of
         # glyphs), and the lists at the right unselect on a click in their empty part themselves
         # (list_pressed): left to them, by the property the shared module reads (KEEP_SELECTION_PROP)
         for tree in [self.script_tree] + [self.views[key][mode].tree for key, _ in RIGHT_TABS
-                                          for mode in ("full", "search")]:
+                                          for mode in VIEW_MODES]:
             try:
                 tree.setProperty(getattr(ak, "KEEP_SELECTION_PROP", "freelab_keep_selection"), True)
             except Exception:
@@ -5855,8 +5990,8 @@ class FontCheckDialog(object):
                     ("itemCollapsed(QTreeWidgetItem*)", lambda item: shown() and self.right_expanded(key, item, False)))
 
         for slots, trees in ((left_slots, (("value", self.add_tree), ("own", self.own_tree))),
-                             (right_slots, [(key, view.tree) for key, _ in RIGHT_TABS
-                                            for view in (self.views[key]["full"], self.views[key]["search"])])):
+                             (right_slots, [(key, self.views[key][mode].tree) for key, _ in RIGHT_TABS
+                                            for mode in VIEW_MODES])):
             for key, tree in trees:
                 for signal, slot in slots(key, tree):
                     tree.connect(signal, slot)
@@ -6148,7 +6283,7 @@ class FontCheckDialog(object):
         box.setContentsMargins(0, 0, 4, 0)
         self.glyph_tree = self.tree(("Glyph", "Masters", "Fix"), icon=(THUMB_SIZE, THUMB_SIZE))
         self.glyph_tree.setWhatsThis(u"The glyphs that keep the masters from interpolating, the worst first, with a "
-                                     u"mark per master in order: a ring for the master compared with, red where the "
+                                     u"symbol per master in order: a ring for the master compared with, red where the "
                                      u"glyph cannot interpolate (a dashed square: no layer), amber where it "
                                      u"interpolates oddly (direction, start point, components, anchors), a faint dot "
                                      u"where all is well. <i>Fix</i> says whether Font Check can set its problems "
@@ -6683,11 +6818,9 @@ class FontCheckDialog(object):
 
     def fit_columns(self, tree, widths):
         """Each column but the last sized to its contents, at most the given width (None: as is); the
-        last takes the rest, its text elided."""
-        for column, most in enumerate(widths):
-            tree.resizeColumnToContents(column)
-            if most is not None and tree.columnWidth(column) > most:
-                tree.setColumnWidth(column, most)
+        last takes the rest, its text elided. Measured by the shared fit_rows: every row, the same in
+        either theme (the "+N" column grew 6 pixels over a dark, light, dark round trip, live)."""
+        self.ak.fit_rows(tree, range(len(widths)), most=list(widths))
 
     # -- Coverage ------------------------------------------------------------
 
@@ -6815,16 +6948,8 @@ class FontCheckDialog(object):
         text += inferred_sentence(sum(1 for s in present for r in s.results
                                       if r.level in ("covered", "nearly") and r.language.evidence in UNDECLARED),
                                   len(aside), b)
-        listed = counted_sets(sets)
-        if listed:
-            whole = sum(1 for r in listed if r.level == "covered")
-            text += u" %s of %d %s covered." % (b(counted(whole, u"character set")), len(listed),
-                                                 u"is" if whole == 1 else u"are")
-        of_unicode = [r for r in sets if isinstance(r.language, ScriptSet)]
-        if of_unicode:  # (each script as a set: its whole repertoire, whatever languages are written in it)
-            whole = sum(1 for r in of_unicode if r.level == "covered")
-            text += u" %s of Unicode's %d %s covered whole." % (b(counted(whole, u"script")), len(of_unicode),
-                                                                u"is" if whole == 1 else u"are")
+        listed, of_unicode = set_tally(sets)[:2]  # (the one count Proof gives too)
+        text += sets_sentence(sets, b)
         tab.status.setText(text)
         self.progress_to(len(BUSY_SHARES))
         self.set_busy(False)
@@ -6972,6 +7097,9 @@ class FontCheckDialog(object):
         self.show_absent.setVisible(bool(absent))
 
     def script_selected(self):
+        """A script's row clicked (or All scripts): the lists follow it. Each tab keeps every script's list
+        and the chosen script's apart (VIEW_MODES), so going back to All scripts makes no row; a list made
+        anew that makes many rows shows the progress bar and the wait cursor meanwhile (listing_rows)."""
         if self.filling:
             return
         item = self.selected_item(self.script_tree)
@@ -6979,10 +7107,90 @@ class FontCheckDialog(object):
             return
         key = u"%s" % self.data_of(item, u"")
         self.script_filter = key or None
-        self.fill_right(False)
-        self.fill_add()
-        self.update_gain()
+        shown = self.listing_shown(self.listing_rows(), key)
+        try:
+            self.fill_right(False, progress=(lambda part: self.listing_progress(part * 0.9)) if shown else None)
+            self.listing_progress(0.9)
+            self.fill_add()
+            self.update_gain()
+        finally:
+            self.listing_over(shown)
         self.update_buttons()
+
+    def listing_rows(self):
+        """How many rows the list at the right would make now: 0 when the list to show is kept as it was
+        (its signature unchanged), else the rows of what it lists (the languages of the scripts shown, the
+        sets, or the families at the top), an estimate for the progress bar."""
+        try:
+            tab, text = self.right_tab, self.searched()
+            view = self.views[tab][self.view_mode(tab, text)]
+            shown = [s.script for s in self.filtered_scripts()]
+            signature = self.view_signature(tab, text, self.choice(self.level_filter, LANGUAGE_FILTERS)[0],
+                                            self.choice(self.sort_box, SORTS)[0], shown)
+            if view.signature == signature:
+                return 0
+            if tab == "sets":
+                return len(self.set_results)
+            results = [r for s in self.scripts if s.script in set(shown) for r in s.results]
+            if tab == "families":  # (the families at the top: the others' rows wait until opened)
+                path = self.families.path if self.families is not None else (lambda iso: ())
+                return len(set((path(r.language.iso) or (UNCLASSIFIED,))[0] for r in results))
+            return len(results)
+        except Exception:
+            return 0
+
+    def listing_shown(self, rows, script):
+        """The progress bar shown over the lists, and the wait cursor, while a script's click makes many
+        rows (LISTING_BUSY_ROWS: a few make none of it flicker); painted at once, since no event is let
+        through meanwhile. True when shown (listing_over hides it). Never raises."""
+        if rows < LISTING_BUSY_ROWS:
+            return False
+        try:
+            QtCore, QtGui = _qt()
+            self.busy_bar.setStyleSheet(self.bar_sheet())  # (the palette may have changed since)
+            self.busy_bar.setValue(0)
+            self.busy_step.setText(listing_text(self.right_tab, script))
+            self.busy_row.setVisible(True)
+            self.listing_cursor = False
+            try:
+                QtGui.QApplication.setOverrideCursor(QtGui.QCursor(QtCore.Qt.WaitCursor))
+                self.listing_cursor = True  # (put back by listing_over: only one this set)
+            except Exception:
+                pass
+            self.busy_row.repaint()
+            self.busy_step.repaint()
+            self.busy_bar.repaint()
+            return True
+        except Exception:
+            return False
+
+    def listing_progress(self, part):
+        """The progress bar at part (0 to 1) of a script's listing, painted at once (nothing when it is
+        hidden). Never raises."""
+        try:
+            if _prop(self.busy_row, "visible") and not self.busy:
+                self.busy_bar.setValue(int(round(min(max(part, 0.0), 1.0) * BAR_RANGE)))
+                self.busy_bar.repaint()
+        except Exception:
+            pass
+
+    def listing_over(self, shown):
+        """The progress bar and the wait cursor of a script's listing gone (listing_shown). Never raises."""
+        if not shown:
+            return
+        try:
+            QtCore, QtGui = _qt()
+            self.busy_row.setVisible(False)
+            self.busy_step.setText(u"")
+        except Exception:
+            pass
+        if getattr(self, "listing_cursor", False):  # (never another's cursor: only the one listing_shown set)
+            self.listing_cursor = False
+            try:
+                QtCore, QtGui = _qt()
+                QtGui.QApplication.restoreOverrideCursor()
+            except Exception:
+                pass
 
     def picture_font(self):
         """The font the missing characters are drawn in: the dialog's, in FreeLang once it is
@@ -7012,9 +7220,8 @@ class FontCheckDialog(object):
             bold = self.bold(tree)
             quiet = QtGui.QBrush(faded(colors["text"], QUIET_ALPHA))
             for index, row in enumerate(rows):
-                name = short_name(row.items[-1]) if len(row.items) > 1 else short_name(row.items[0])
                 plus = u"+%d" % len(row.completing)
-                item = self.item((u"", u"%s\n%s" % (name, u" ".join(code_label(i) for i in row.items)), plus,
+                item = self.item((u"", row_label(row), plus,
                                   row_languages_text(row)), index,
                                  row_tip(row, any(i in buildable for i in row.items)), True)
                 item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsUserCheckable)
@@ -7481,14 +7688,34 @@ class FontCheckDialog(object):
     # it was, scrolled where it was, which also makes clearing a search instant.
 
     def activate(self, tab, mode):
-        """A tab's full list ("full") or its search's ("search") made the one shown; its RightView."""
+        """One of a tab's lists (VIEW_MODES: every script's, the chosen script's, or a search's) made the
+        one shown; its RightView. A script's list is marked as the chosen script's, shown now (view_mode)."""
         view = self.views[tab][mode]
+        if mode in SCRIPT_MODES:
+            self.view_clock = getattr(self, "view_clock", 0) + 1
+            view.script, view.used = self.script_filter, self.view_clock
         self.right_trees[tab], self.right_rows[tab], self.unfilled[tab] = view.tree, view.rows, view.unfilled
         try:
-            self.right_pages.setCurrentIndex([key for key, _ in RIGHT_TABS].index(tab) * 2 + (mode == "search"))
+            self.right_pages.setCurrentIndex([key for key, _ in RIGHT_TABS].index(tab) * len(VIEW_MODES)
+                                             + VIEW_MODES.index(mode))
         except Exception:
             pass
         return view
+
+    def view_mode(self, tab, text):
+        """Which of a tab's lists shows now (VIEW_MODES): a search's finds; the chosen script's; every
+        script's. The Character sets tab lists the same sets whatever the script: its full list always. A
+        script's list is the one last shown for that script (kept as it was, unless what it shows changed
+        since: its signature), else the one least recently shown (SCRIPT_MODES). Asks only: activate marks."""
+        if text:
+            return "search"
+        if self.script_filter is None or tab == "sets":
+            return "full"
+        views = self.views[tab]
+        for mode in SCRIPT_MODES:
+            if views[mode].script == self.script_filter:
+                return mode
+        return min(SCRIPT_MODES, key=lambda mode: views[mode].used)
 
     def active_view(self, tab):
         """The RightView shown for a tab (None for none)."""
@@ -7505,6 +7732,8 @@ class FontCheckDialog(object):
             state = frozenset(self.closed[tab])
         else:
             state = (frozenset(title for title in self.closed[tab] if title not in CLOSING_TITLES), self.scripts_open)
+        if tab == "sets":  # (the same sets whatever the script chosen above: not made anew at a script's click)
+            return (self.generation, level, sort, text, state)
         return (self.generation, level, sort, tuple(shown), self.script_filter, text, state)
 
     def view_kept(self, tab):
@@ -7647,7 +7876,7 @@ class FontCheckDialog(object):
         text = self.searched()
         shown = [s.script for s in self.filtered_scripts()]
         # The tab's full list, or its search's: the other stays as it is behind it (activate)
-        view = self.activate(tab, "search" if text else "full")
+        view = self.activate(tab, self.view_mode(tab, text))
         tree, colors = view.tree, self.colors()
         # Each tab's finds, for the captions; the tab shown last, since each tells its rows the other
         # name a search found them by.
@@ -7666,6 +7895,11 @@ class FontCheckDialog(object):
                   "sets": sum(len(s.results) for s in made["sets"][0]), "families": len(made["families"][0].children)}
         for index, (key, label) in enumerate(RIGHT_TABS):
             self.right_tabs.setTabText(index, u"%s (%d)" % (label, counts[key]))
+        try:  # (what the sets' count is made of: it adds up to the top line's counts, set_tally)
+            index = [key for key, _ in RIGHT_TABS].index("sets")
+            self.right_tabs.setTabToolTip(index, sets_tab_tip([r for s in made["sets"][0] for r in s.results]))
+        except Exception:
+            pass
         wanted = self.selection.key if self.selection is not None else None
         found = {"selection": None}
         if tab == "families" and self.reveal and self.selection is not None and not text:
@@ -7721,7 +7955,9 @@ class FontCheckDialog(object):
                         heading.setFirstColumnSpanned(True)
                         self.ak.section_row(heading, tree)
                     if open_:
-                        for r in section.results:
+                        for made_rows, r in enumerate(section.results):
+                            if progress is not None and made_rows and made_rows % LISTING_STEP_ROWS == 0:
+                                progress((done - len(section.results) + made_rows) / float(every))  # (one script: one section)
                             self.language_row(tab, r, heading, wanted, found)
                     else:  # (closed: its rows are made when it is opened; what is selected under it stays so)
                         pending[section.title] = section.results

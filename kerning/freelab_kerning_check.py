@@ -480,6 +480,8 @@ class InkDistances(object):
 
 # The Collisions list's columns: the pair (drawn from the font beside its characters), its glyphs' names,
 # then its numbers and where its value comes from
+PREVIEW_HINTS = (u"Select a pair to see it here as it is, with its fix, and beside its base pair.",
+                 u"Select an entry to see its first pair here, with the entry and without it.")
 COLLISION_COLUMNS = (u"Pair", u"Glyphs", u"Kerning", u"Distance", u"Fix", u"Set by", u"Compared with")
 NUMBER_COLUMNS = (u"Kerning", u"Distance", u"Fix", u"Value")  # right-aligned, their headers too
 
@@ -507,7 +509,7 @@ values smaller than the size you set (unchecked: look at them first).<br>
 <b>Masters</b>: entries some masters kern and others do not, entries tightening in one master and
 loosening in another, and classes whose members differ between masters (a font with one master has
 nothing to compare).<br><br>
-<b>Opened from another script</b> (<i>Diacritics</i> after building or moving marks, <i>Auto Spacing</i>
+<b>Opened from another script</b> (<i>Diacritics</i> after building or moving diacritics, <i>Auto Spacing</i>
 after spacing): the lists hold only the pairs and entries with the glyphs it changed, as the line over
 them says; <i>Show all</i> lists the whole font's.<br><br>
 Each list is checked as its tab is first shown, and again after an undo or an edit in FontLab.
@@ -597,6 +599,7 @@ class KerningCheckDialog(object):
             label = QtGui.QLabel()
             label.setProperty(self.ak.LEAVE_ALONE_PROP, True)  # dark mode leaves the drawn pictures alone
             label.setAlignment(QtCore.Qt.AlignCenter)
+            label.setWordWrap(False)  # (its hint while no pair is selected stays on one line, owner's request)
             label.setMinimumHeight(int(self.ak.PAIR_PREVIEW_EM * 1.7))
             label.setWhatsThis(u"The selected pair as it is set now and adjusted: with its fix (<i>Collisions</i>), or "
                                u"without its entry (<i>Cleanup</i>), beside its base pair; its glyphs are drawn see-through, "
@@ -675,7 +678,7 @@ class KerningCheckDialog(object):
                               u"whose sign flips, classes whose members differ.")
 
         for tab, label in ((self.collisions, "Collisions"), (self.cleanup, "Cleanup"), (self.masters, "Masters")):
-            self.ak.grid_lines(tab.tree)
+            self.ak.table_layout(tab.tree)
             if tab is not self.masters:  # (as the other tools' lists: each row's pair drawn from the font)
                 tab.tree.setIconSize(QtCore.QSize(*self.ak.glyph_icon_size(2)))
                 tab.tree.setProperty(self.ak.LEAVE_ALONE_PROP, True)  # its pictures are drawn in the dialog's colors
@@ -990,8 +993,9 @@ class KerningCheckDialog(object):
     @staticmethod
     def resize(tab):
         QtCore, QtGui = _qt()
-        for column in range(tab.tree.columnCount - 1):
-            tab.tree.resizeColumnToContents(column)
+        # every row measured, those of closed groups too: sized while the groups were closed, the names
+        # were cut once one was opened (the shared fit_rows)
+        load_auto_kerning().fit_rows(tab.tree, range(tab.tree.columnCount - 1))
         try:  # the headers of the columns of numbers right-aligned, as their cells are
             header = tab.tree.headerItem()
             for column in range(tab.tree.columnCount):
@@ -1087,6 +1091,7 @@ class KerningCheckDialog(object):
                                       u"%d" % c.value, u"%d" % round_units(c.gap), u"%d" % c.fix, where, compared),
                          True, True, tip, parents.get(c.variant or c.left), self.pair_icon((c.left, c.right), c.value, index))
         self.resize(tab)
+        self.update_previews()  # (refilled: nothing selected now, the pictures' room says what it is for)
         self.checked_now(tab, "collisions")
         tight = sum(1 for pair, _ in tight_pairs(kerning, self.only) if not common_only or common(*pair))
         b = self.ak.b
@@ -1145,6 +1150,7 @@ class KerningCheckDialog(object):
             self.add_row(tab, index, (kerning.describe(c.entry), u"%d" % c.value, u"%s: %s" % (kinds[c.kind], c.reason)),
                          True, c.checked, icon=self.pair_icon(first, c.value, index))
         self.resize(tab)
+        self.update_previews()  # (refilled: nothing selected now, the pictures' room says what it is for)
         self.checked_now(tab, "cleanup")
         counts = {}
         for c in found:
@@ -1206,6 +1212,7 @@ class KerningCheckDialog(object):
         for index, d in enumerate(found):
             self.add_row(tab, index, (d.subject, u"; ".join(u"%s %s" % pair for pair in d.values), d.reason), False, False)
         self.resize(tab)
+        self.update_previews()  # (refilled: nothing selected now, the pictures' room says what it is for)
         b = self.ak.b
         if self.only is None:
             tab.status.setText(u"%s between %s masters." % (b(counted(len(found), u"difference")), b(len(masters))) if found
@@ -1278,7 +1285,21 @@ class KerningCheckDialog(object):
                 label.setPixmap(picture)
             else:
                 label.clear()
+        if not shown:  # (the room the pictures take, said what it is for: it read as an empty band, live)
+            self.previews[1].setText(self.preview_hint())
         self.update_buttons_soon()
+
+    def preview_hint(self):
+        """What the pictures' room shows while no pair is selected: on the lists of pairs, what selecting
+        one does; elsewhere nothing."""
+        try:
+            index = self.tabs.currentIndex
+            index = index() if callable(index) else index
+        except Exception:
+            index = 0
+        if self.package is None or index not in (0, 1):
+            return u""
+        return PREVIEW_HINTS[index]
 
     # -- the Adjusted preview, dragged ---------------------------------------
 

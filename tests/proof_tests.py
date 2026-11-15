@@ -842,7 +842,7 @@ class ProofTests(unittest.TestCase):
         proof = fp.build_proof([font], fp.Options(), self.languages, u"2026-11-11")
         texts = [item.text for page in proof.pages for item in page.items if item.kind == "text"]
         self.assertIn(u"No kerned pairs in this master.", texts)
-        self.assertIn(u"The font has no letters with marks.", texts)
+        self.assertIn(u"The font has no letters with diacritics.", texts)
 
     def test_masters_each_on_their_own_pages(self):
         regular = make_font(kerning={(u"T", u"o"): -80})
@@ -980,14 +980,31 @@ class SummaryTests(unittest.TestCase):
         self.assertEqual(sum(count for _, count in found.sources), found.covered(), "each covered language has a source")
         self.assertEqual(found.sources[0][0], u"Hyperglot")
         self.assertIsNone(found.composed, "no anchors asked: no letter is composed")
-        sets = [fc.check_language(one, fc.FontCharacters(set(LATIN_1_A), None), fc.NEARLY_MISSING)
-                for one in fc.load_character_sets()]
-        legacy = [r for r in sets if r.language.script == fc.LEGACY_GROUP]
+        results = [fc.check_entry(one, fc.FontCharacters(set(LATIN_1_A), None), fc.NEARLY_MISSING)
+                   for one in fc.load_character_sets()]
+        legacy = [r for r in results if r.language.script == fc.LEGACY_GROUP]
         self.assertEqual((len(legacy), set(r.level for r in legacy)), (5, set([u"covered"])), "covered by a Latin font")
-        sets = [r for r in sets if r not in legacy]
-        self.assertEqual(found.set_count, len(sets), "the Legacy sets do not count toward the stats")
+        # The live pass, on Noto Sans: Font Check said 33 of 140, Proof 33 of 312 (Unicode's 172 scripts among
+        # the sets). Counted as Font Check's top line counts them (set_tally): the scripts apart
+        sets = fc.counted_sets(results)
+        scripts = [r for r in results if isinstance(r.language, fc.ScriptSet)]
+        self.assertTrue(scripts)
+        self.assertEqual(found.set_count, len(sets), "the Legacy sets and the scripts do not count among the sets")
         self.assertEqual(found.sets, [u"%s" % r.language.name for r in sets if r.level == "covered"])
+        self.assertEqual(found.script_sets, (sum(1 for r in scripts if r.level == "covered"), len(scripts)))
+        self.assertEqual((found.legacy, found.set_count + len(scripts) + found.legacy), (5, len(results)))
         self.assertNotIn(u"CJK Compatibility Ideographs (Unicode block)", found.sets)
+        fields = dict(fp.set_fields(found))
+        self.assertTrue(fields[u"Character sets"].startswith(
+            u"%d of %d covered (the 5 Legacy sets, wholly optional, not counted)" % (len(found.sets), len(sets))))
+        self.assertEqual(fields[u"Scripts (Unicode)"], u"%d of %d covered whole" % found.script_sets)
+        stated = fc.sets_sentence(results).strip()
+        same = (u"%d character sets of %d" % (len(found.sets), len(sets)) if found.sets else
+                u"No character set of %d" % len(sets))
+        self.assertTrue(stated.startswith(same), "the same count as Font Check's: %r" % stated)
+        named = fp.CoverageSummary(set_count=len(sets), sets=[u"IPA"], legacy=5)
+        self.assertEqual(dict(fp.set_fields(named))[u"Character sets"], u"1 of %d covered (the 5 Legacy sets, wholly "
+                                                                        u"optional, not counted): IPA" % len(sets))
         import re
         self.assertTrue(re.match(r"^\d{4}-\d{2}-\d{2}$", found.dated), found.dated)
         composing = fp.coverage_summary(fc, set(LATIN_1_A), lambda base, mark: True)
@@ -1742,6 +1759,34 @@ class DialogTests(unittest.TestCase):
         self.assertNotIn(u"Language coverage", texts)
         self.assertIn(u"Vertical metrics", texts)
         self.assertEqual(len([text for level, text in self.said if u"language data could not be read" in text]), 1)
+
+    def test_summary_lists_shows_the_pages_it_changes(self):
+        # The owner: "Changing summary lists doesn't appear to change what is shown on the proof, unless I'm
+        # missing something." The lists close the proof (its Language coverage pages), and the page shown
+        # stayed the one before: a choice there now shows the first of those pages
+        glyphs = [FakeGlyph(fp.char_of(code), code, {u"Regular": FakeLayer(500)}) for code in LATIN_1_A]
+        dialog, made = self.remembering(FakePackage(glyphs, {}, (u"Regular",)))
+        dialog.rebuild()
+        coverage = [number for number, page in enumerate(dialog.proof.pages) if "coverage" in page.sections]
+        self.assertTrue(coverage and coverage[0] > 0, "after the other sections")
+        listed = summary_texts(dialog.proof, "coverage")
+        self.assertTrue([text for text in listed if text.startswith(u"Latin, covered")], "the covered languages")
+        dialog.page_list.setCurrentRow(1)
+        dialog.rebuild()  # (another setting: the page shown stays)
+        self.assertEqual(dialog.page_list.currentRow, 1)
+        for index, (mode, _) in enumerate(fp.SUMMARY_LANGUAGES):
+            dialog.page_list.setCurrentRow(0)
+            dialog.languages_box.setCurrentIndex(index)  # (its signal: summary_changed, then the rebuild's timer)
+            dialog.summary_changed("summary_languages")
+            dialog.rebuild()
+            pages = [number for number, page in enumerate(dialog.proof.pages) if "coverage" in page.sections]
+            self.assertEqual(dialog.page_list.currentRow, pages[0], mode)
+            texts = u" ".join(summary_texts(dialog.proof, "coverage"))
+            self.assertEqual(u"Latin, covered" in texts, mode != "none", mode)
+            self.assertEqual(u"within reach (" in texts, mode == "reach", mode)
+        dialog.page_list.setCurrentRow(0)
+        dialog.rebuild()
+        self.assertEqual(dialog.page_list.currentRow, 0, "shown once, not at every layout after")
 
     def test_the_summary_settings_are_remembered(self):
         dialog, made = self.remembering(fake_font())

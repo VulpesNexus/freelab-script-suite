@@ -3681,12 +3681,13 @@ class DialogTests(unittest.TestCase):
             dialog = self.dialog()
         finally:
             fc.FontCheckDialog.size_columns = original
-        # (each tab's full list, then its search's: the same columns)
+        # (each tab's full list, then its script's and its search's: the same columns)
+        views = len(fc.VIEW_MODES)
         self.assertEqual([modes for _, modes in calls],
-                         [("stretch", "contents")] * 4 + [("stretch", "fixed", "contents", "contents")] * 2)
+                         [("stretch", "contents")] * 2 * views + [("stretch", "fixed", "contents", "contents")] * views)
         self.assertTrue(all(tree is wanted for (tree, _), wanted in
                             zip(calls, [dialog.views[key][mode].tree for key in ("languages", "sets", "families")
-                                        for mode in ("full", "search")])))
+                                        for mode in fc.VIEW_MODES])))
         self.assertIs(dialog.views["families"]["full"].tree, dialog.family_tree)
 
         class Modes(object):
@@ -4693,6 +4694,16 @@ class LoadingTests(unittest.TestCase):
             gui.classes.update(saved)
         return dialog, made
 
+    def test_the_scripts_list_keeps_the_table_layout_and_its_own_rules(self):
+        # (its own sheet once replaced the layout's; a dark mode switch then put the layout back in front)
+        dialog, made = self.recorded_dialog(("QTreeWidget",))
+        sheet = dialog.script_tree.styleSheet
+        self.assertIn(self.ak.TABLE_SHEET_MARK, sheet, "the table layout's rules, from the first")
+        self.assertTrue(sheet.endswith(fc.SCRIPT_SHEET), "its faint selection after them, winning")
+        self.assertGreater(sheet.index(fc.SCRIPT_SHEET), sheet.index(self.ak.TABLE_SHEET_END))
+        self.assertEqual(self.ak._without_table_sheet(sheet), fc.SCRIPT_SHEET.strip(),
+                         "a switch writes the layout again and keeps it after them")
+
     def test_progress_bar(self):
         """The owner: "The loading of Font Check is not visible enough; a green progression bar or status
         in the log could help better visualize it." """
@@ -4736,8 +4747,10 @@ class LoadingTests(unittest.TestCase):
         self.assertEqual(len(done), 1, "one line when done, not one per step")
         self.assertTrue(re.match(u"^Checked 2,512 languages, 140 character sets, and 172 scripts in [0-9]+\\.[0-9] s\\.$",
                                  done[0]), done[0])
-        self.assertIn(u"of Unicode's 172 are covered whole.", dialog.coverage.status.text)
-        self.assertIn(u"character sets</b> of 140 are covered.", dialog.coverage.status.text, "the 5 Legacy sets not counted")
+        self.assertIn(u"<b>No script</b> of Unicode's 172 is covered whole.", dialog.coverage.status.text,
+                      "zero says No, not 0 ... are (owner, 2026-11-16)")
+        self.assertIn(u"<b>No character set</b> of 140 is covered (the 5 Legacy sets, wholly optional, are not counted).",
+                      dialog.coverage.status.text, "the 5 Legacy sets not counted, and said so")
 
     def test_tooltips_made_when_asked_for(self):
         """Some 2,600 rows each had a rich tooltip made, measured, and set as the list was filled: a
@@ -4852,6 +4865,12 @@ class LoadingTests(unittest.TestCase):
             name = u"%s %r" % (one.kind, one.made)
             self.assertTrue(said and (u"%s" % said[-1][0]).strip(), u"%s has no What's This" % name)
             texts.setdefault(u"%s" % said[-1][0], []).append(name)
+        # (but a tab's lists of the last scripts chosen: one place, shown in turn, one help)
+        alike = set(id(dialog.views[key][mode].tree) for key in dialog.views for mode in fc.SCRIPT_MODES[1:])
+        texts = {}
+        for one in controls:
+            if id(one) not in alike:
+                texts.setdefault(u"%s" % one.told("setWhatsThis")[-1][0], []).append(u"%s %r" % (one.kind, one.made))
         shared = dict((text, names) for text, names in texts.items() if len(names) > 1)
         self.assertEqual(shared, {}, "no two controls answer with the same text")
         labels = dict((one.made[0], one) for one in made if one.kind == "QLabel" and one.made and one.told("setBuddy"))
@@ -4962,6 +4981,59 @@ class OptionalTests(unittest.TestCase):
         self.assertEqual(len(counted), len([one for one in sets if not isinstance(one, fc.ScriptSet)]) - 5)
         own = fc.check_language(fc.custom_set(u"own-x", u"Mine", u"abc"), font(LATIN_1))
         self.assertEqual(fc.counted_sets([own]), [], "nor the user's own")
+        # The live pass, on Noto Sans: the top line said 33 of 140, the tab's caption 317, and Proof 33 of
+        # 312 (Unicode's scripts among its sets). One tally for all, the tab's tooltip adding it up
+        counted_, scripts, legacy_, own_ = fc.set_tally(results + [own])
+        self.assertEqual((counted_, legacy_, own_), (counted, legacy, [own]))
+        self.assertEqual(len(scripts), len([one for one in sets if isinstance(one, fc.ScriptSet)]))
+        self.assertEqual(len(counted_) + len(scripts) + len(legacy_) + len(own_), len(results) + 1, "every row, once")
+        whole = sum(1 for r in counted if r.level == "covered")
+        scripts_whole = sum(1 for r in scripts if r.level == "covered")
+        self.assertEqual(fc.sets_sentence(results),
+                         u" %s of %d %s covered (the 5 Legacy sets, wholly optional, are not counted).%s" % (
+                             fc.counted(whole, u"character set") if whole else u"No character set", len(counted),
+                             u"is" if whole <= 1 else u"are",
+                             (u" %s of Unicode's %d %s covered whole." % (
+                                 fc.counted(scripts_whole, u"script"), len(scripts), u"is" if scripts_whole == 1 else u"are"))
+                             if scripts_whole else u" No script of Unicode's %d is covered whole." % len(scripts)))
+        tip = fc.sets_tab_tip(results + [own])
+        self.assertTrue(tip.startswith(u"%s rows: %d character sets counted in the line above, %d scripts of Unicode, "
+                                       u"each checked as a set (counted apart), 5 Legacy sets, wholly optional (not "
+                                       u"counted), and 1 set of your own (not counted)." % (
+                                           fc.grouped(len(results) + 1), len(counted), len(scripts))), tip)
+        self.assertEqual(fc.sets_tab_tip([own]), u"1 row: 1 set of your own (not counted).")
+        self.assertEqual(fc.sets_tab_tip([]), u"No character set is listed.")
+
+    def test_a_high_value_rows_label(self):
+        """The live pass: a row of a character FontLab's Python cannot name (Unicode 5.2) read "U+A7CB" over
+        "U+A7CB", and the circled letters' row read "a" (CIRCLED LATIN SMALL LETTER A: the script's name went,
+        and the style with it)."""
+        self.assertEqual(fc.short_name(u(0x24D0)), u"circled a")
+        self.assertEqual(fc.short_name(u(0x24B6)), u"circled A")
+        self.assertEqual(fc.short_name(u(0xFF21)), u"full-width A")
+        self.assertEqual(fc.short_name(u(0x159)), u"r with caron", "a script's name alone still goes")
+        self.assertEqual(fc.name_style(u"OLD ITALIC"), u"", "a script's own word, not a style")
+
+        class Row(object):
+            def __init__(self, *items):
+                self.items = list(items)
+
+        self.assertEqual(fc.row_label(Row(u(0x24B6), u(0x24D0))), u"circled a\nU+24B6 U+24D0")
+        held = fc.unicodedata
+
+        def name(ch):  # (Unicode 5.2, as FontLab's Python has it: Latin Extended-D's newer letters unnamed)
+            if 0xA7C0 <= ord(ch[0]) <= 0xA7FF:
+                raise ValueError("no such name")
+            return held.name(ch)
+        fc.unicodedata = type("Unicode52", (), {"name": staticmethod(name),
+                                                "__getattr__": lambda self, attr: getattr(held, attr)})()
+        try:
+            self.assertEqual(fc.row_label(Row(u(0xA7CB))), u"U+A7CB", "its code point once")
+            self.assertEqual(fc.row_label(Row(u(0xA7DC) + u(0x313))), u"U+A7DC with comma above\nU+A7DC U+0313",
+                             "its mark named all the same")
+        finally:
+            fc.unicodedata = held
+        self.assertEqual(fc.row_label(Row(u(0x159))), u"r with caron\nU+0159")
 
     def test_row_notes(self):
         """Point 3: worded as "3 shared missing" is, the number deciding the noun."""
@@ -5177,7 +5249,7 @@ class OwnerRoundTests(unittest.TestCase):
                        dialog.search, dialog.paste_field, dialog.name_field, dialog.languages_note):
             self.assertEqual(scales.get(id(widget)), 1, widget)
         for key in ("languages", "sets", "families"):
-            for mode in ("full", "search"):
+            for mode in fc.VIEW_MODES:
                 self.assertEqual(scales.get(id(dialog.views[key][mode].tree)), fc.LIST_SCALE, (key, mode))
         dialog.list_family = u"FreeLang Essential"
         self.assertEqual(dialog.in_list_font(u"<i>x</i>"), u"<span style=\"font-family:'FreeLang Essential'\"><i>x</i></span>")
@@ -5284,6 +5356,112 @@ class OwnerRoundTests(unittest.TestCase):
         self.assertEqual(dialog.selection.key, key, "German is listed under its family too")
         dialog.right_tab_changed(1)
         self.assertIsNone(dialog.selection, "no character set is German")
+
+    def test_a_scripts_click_keeps_every_scripts_list(self):
+        """The owner: "Clicking from one script to another can freeze up for a few seconds without visual
+        feedback". One list served every script and the one chosen, so each click between a script and All
+        scripts made the whole list anew (1,800 rows on Noto Sans, under the fakes). Every script's list is
+        kept apart from the chosen script's, the Character sets tab is made anew for no script, and a click
+        that makes many rows shows the progress bar and the wait cursor meanwhile."""
+        dialog, state, click, Row = self.linked_lists()
+        made = self.recorded_items(dialog)
+        latin = [s for s in dialog.scripts if s.script == u"Latin"][0]
+        full, script = dialog.views["languages"]["full"], dialog.views["languages"]["script"]
+
+        def pick(key):
+            dialog.selected_item = lambda tree: Row(key) if tree is dialog.script_tree else None
+            try:
+                dialog.script_selected()
+            finally:
+                del dialog.selected_item
+
+        listed = list(full.rows)
+        pick(u"Latin")
+        self.assertIs(dialog.right_trees["languages"], script.tree, "the chosen script's list")
+        self.assertEqual(len(script.rows), len(latin.results))
+        self.assertEqual(full.rows, listed, "every script's list left as it was behind it")
+        del made[:]
+        pick(u"")  # (All scripts)
+        self.assertIs(dialog.right_trees["languages"], full.tree)
+        self.assertEqual(len(made), len(dialog.rows) + len(dialog.own_rows), "only the glyphs' rows made anew")
+        dialog.right_tab_changed(1)
+        del made[:]
+        pick(u"Latin")
+        self.assertIs(dialog.right_trees["sets"], dialog.views["sets"]["full"].tree)
+        self.assertEqual(len(made), len(dialog.rows) + len(dialog.own_rows), "the same sets for any script")
+        dialog.right_tab_changed(0)
+        # The progress bar and the wait cursor, while a click makes many rows
+        cursors = []
+        gui = sys.modules["PythonQt"].QtGui
+        gui.classes["QApplication"] = type("QApplication", (), {
+            "setOverrideCursor": staticmethod(lambda cursor: cursors.append("wait")),
+            "restoreOverrideCursor": staticmethod(lambda: cursors.append("restored"))})
+        busy = dialog.busy_row, dialog.busy_step, dialog.busy_bar, fc.LISTING_BUSY_ROWS, fc.LISTING_STEP_ROWS
+
+        def restore():
+            del gui.classes["QApplication"]
+            dialog.busy_row, dialog.busy_step, dialog.busy_bar, fc.LISTING_BUSY_ROWS, fc.LISTING_STEP_ROWS = busy
+        self.addCleanup(restore)
+        dialog.busy_row, dialog.busy_step, dialog.busy_bar = Recorded(), Recorded(), Recorded()
+        dialog.busy_row.__dict__["visible"] = False
+        shown = []
+        dialog.busy_row.setVisible = lambda on: shown.append(on) or dialog.busy_row.__dict__.update(visible=on)
+        fc.LISTING_STEP_ROWS = 2
+        pick(u"")
+        self.assertEqual((shown, cursors), ([], []), "every script's list kept: nothing to wait for")
+        fc.LISTING_BUSY_ROWS = len(latin.results) + 1
+        dialog.script_filter = None
+        script.signature = None  # (a list to make anew)
+        pick(u"Latin")
+        self.assertEqual((shown, cursors), ([], []), "fewer rows than that: no bar to flicker")
+        fc.LISTING_BUSY_ROWS = 2
+        script.signature = None
+        pick(u"Latin")
+        self.assertEqual((shown, cursors), ([True, False], ["wait", "restored"]))
+        self.assertEqual(dialog.busy_step.told("setText")[0], (u"Listing the languages written in Latin" + u(0x2026),))
+        values = [args[0] for args in dialog.busy_bar.told("setValue")]
+        self.assertEqual(values[0], 0)
+        self.assertTrue(len(values) > 3 and values == sorted(values), values)
+        self.assertEqual(values[-1], int(round(0.9 * fc.BAR_RANGE)), "the glyphs' list after the languages'")
+        self.assertEqual(fc.listing_text("languages", u""), u"Listing the languages of all scripts" + u(0x2026))
+        self.assertEqual(fc.listing_text("families", u"Greek"),
+                         u"Listing the families of the languages written in Greek" + u(0x2026))
+        dialog.fill_right = lambda refill=True, progress=None: 1 / 0
+        script.signature = None
+        self.assertRaises(ZeroDivisionError, pick, u"Latin")
+        self.assertEqual((shown[2:], cursors[2:]), ([True, False], ["wait", "restored"]), "gone, whatever happened")
+        # Review: a wait cursor that could not be set is not "restored" (that would put back another's)
+        del dialog.fill_right
+        refused = lambda cursor: 1 / 0
+        gui.classes["QApplication"].setOverrideCursor = staticmethod(refused)
+        script.signature = None
+        pick(u"Latin")
+        self.assertEqual((shown[4:], cursors[4:]), ([True, False], []), "the bar all the same, no cursor put back")
+        # The live pass: a second click on Latin, after Cyrillic, made Latin's 2,108 rows again (0.125 s). The
+        # last three scripts' lists are kept, the least recently shown given to a new script
+        others = [s.script for s in dialog.scripts if s.results and s.script != u"Latin"][:3]
+        self.assertEqual(len(others), 3)
+        left = lambda: len(dialog.rows) + len(dialog.own_rows)
+        pick(u"Latin")
+        pick(others[0])
+        del made[:]
+        pick(u"Latin")
+        self.assertEqual(len(made), left(), "Latin's list kept: only the glyphs' rows made")
+        pick(others[1])
+        pick(others[2])
+        del made[:]
+        pick(u"Latin")
+        self.assertEqual(len(made), left(), "still among the last three")
+        pick(others[1])
+        pick(others[0])
+        pick(others[2])
+        del made[:]
+        pick(u"Latin")
+        self.assertGreaterEqual(len(made), left() + len(latin.results), "three others since: made anew")
+        dialog.check_coverage()
+        del made[:]
+        pick(others[2])
+        self.assertGreater(len(made), left(), "a new check: every kept list made anew")
 
     def test_heading_press_selects_nothing(self):
         """Item 5: a click on a group's arrow selected its heading. A press on a heading opens or closes
@@ -5529,7 +5707,7 @@ class OwnerRoundTests(unittest.TestCase):
         marked = [one for one in made if one.kind == "QTreeWidget"
                   and (self.ak.KEEP_SELECTION_PROP, True) in one.told("setProperty")]
         wanted = [dialog.script_tree] + [dialog.views[key][mode].tree for key in ("languages", "sets", "families")
-                                         for mode in ("full", "search")]
+                                         for mode in fc.VIEW_MODES]
         self.assertEqual(len(marked), len(wanted))
         self.assertTrue(all(any(one is tree for one in marked) for tree in wanted))
         for tree in (dialog.add_tree, dialog.own_tree, dialog.glyph_tree):

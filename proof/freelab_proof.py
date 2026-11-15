@@ -1502,11 +1502,15 @@ class CoverageSummary(object):
     sets covered, of set_count checked; within: the characters a language within reach lacks at most;
     composed: the languages covered thanks to letters the anchors compose (None: letters are not
     composed); sources [(source's name, languages covered it gives)], the most first; dated: the day
-    the data files were last changed (u"": not known)."""
+    the data files were last changed (u"": not known); script_sets: (Unicode's scripts covered whole, of
+    those checked), counted apart from the sets as Font Check counts them; legacy: the Legacy sets left out
+    of the counts."""
 
-    def __init__(self, scripts=(), sets=(), set_count=0, within=3, composed=None, sources=(), dated=u""):
+    def __init__(self, scripts=(), sets=(), set_count=0, within=3, composed=None, sources=(), dated=u"",
+                 script_sets=(0, 0), legacy=0):
         self.scripts, self.sets, self.set_count = list(scripts), list(sets), set_count
         self.within, self.composed, self.sources, self.dated = within, composed, list(sources), dated
+        self.script_sets, self.legacy = tuple(script_sets), legacy
 
     def covered(self):
         return sum(len(script.covered) for script in self.scripts)
@@ -1586,12 +1590,22 @@ def coverage_summary(fc, codes, attaches=None):
                 lacks = u"%d missing" if fc.base_needs(r) else u"%d auxiliary missing"
                 reach.append((u"%s" % r.language.name, mark, lacks % len(fc.needs(r))))
         scripts.append(ScriptSummary(u"%s" % found.script, fc.script_text(found), covered, reach))
-    # (the Legacy sets, wholly optional and always covered, do not count toward the stats: the owner)
-    legacy = getattr(fc, "LEGACY_GROUP", u"Legacy")
-    sets = [fc.check_language(one, font, within) for one in fc.load_character_sets() if one.script != legacy]
+    # The sets counted as Font Check counts them (its set_tally, one definition for both): the scripts of
+    # Unicode apart (a script checked as a set, by its ranges, as Font Check checks it), the Legacy sets,
+    # wholly optional and always covered, not at all (the owner). Live on Noto Sans, Proof said "33 of 312"
+    # (the scripts counted among the sets) where Font Check said 33 of 140
+    check = getattr(fc, "check_entry", fc.check_language)
+    results = [check(one, font, within) for one in fc.load_character_sets()]
+    if hasattr(fc, "set_tally"):
+        sets, of_unicode, legacy = fc.set_tally(results)[:3]
+    else:  # (an older Font Check)
+        legacy_group = getattr(fc, "LEGACY_GROUP", u"Legacy")
+        sets, of_unicode, legacy = [r for r in results if r.language.script != legacy_group], [], []
     return CoverageSummary(scripts, [u"%s" % r.language.name for r in sets if r.level == "covered"], len(sets), within,
                            composed if attaches is not None else None,
-                           sorted(sources.items(), key=lambda one: (-one[1], one[0])), data_date(fc))
+                           sorted(sources.items(), key=lambda one: (-one[1], one[0])), data_date(fc),
+                           script_sets=(sum(1 for r in of_unicode if r.level == "covered"), len(of_unicode)),
+                           legacy=len(legacy))
 
 
 def evidence_mark(fc, evidence):
@@ -1785,13 +1799,13 @@ def section_diacritics(layout, font, size=SHOWCASE_SIZE):
     groups = diacritic_groups(font)
     combining, spacing = marks_of(font)
     layout.text(u"%s, each group after the letter it is built on, kerning applied; marks are not positioned "
-                u"(no mark feature)." % counted(sum(len(names) for _, names in groups), u"letter with marks",
-                                                u"letters with marks"), style="quiet")
+                u"(no mark feature)." % counted(sum(len(names) for _, names in groups), u"letter with diacritics",
+                                                u"letters with diacritics"), style="quiet")
     space = font.upm * STRING_GAP
     if groups:
         layout.lines(font, [(([base] if base else []) + names, True) for base, names in groups], size, space=space)
     else:
-        layout.text(u"The font has no letters with marks.")
+        layout.text(u"The font has no letters with diacritics.")
     circle = font.cmap.get(0x25CC)
     circle = circle if font.has(circle) else None
     if combining:
@@ -1861,6 +1875,24 @@ def summary_names(layout, names, columns=SUMMARY_COLUMNS, size=SUMMARY_NAME_SIZE
         at += len(block)
 
 
+def set_fields(coverage):
+    """[(label, text)] of the character sets on the summary, counted as Font Check's top line counts them
+    (its set_tally): "33 of 140 covered (the 5 Legacy sets, wholly optional, not counted): IPA, …", and
+    Unicode's scripts apart, "0 of 172 covered whole"."""
+    found = []
+    if coverage.set_count:
+        text = u"%d of %d covered" % (len(coverage.sets), coverage.set_count)
+        legacy = getattr(coverage, "legacy", 0)
+        if legacy:
+            text += (u" (the Legacy set, wholly optional, not counted)" if legacy == 1 else
+                     u" (the %d Legacy sets, wholly optional, not counted)" % legacy)
+        found.append((u"Character sets", text + (u": %s" % u", ".join(coverage.sets) if coverage.sets else u"")))
+    whole, checked = getattr(coverage, "script_sets", (0, 0))
+    if checked:
+        found.append((u"Scripts (Unicode)", u"%d of %d covered whole" % (whole, checked)))
+    return found
+
+
 def summary_languages(layout, coverage, mode):
     """The languages' counts, script by script, the character sets covered, and the small print; then
     (mode "covered" or "reach") the languages themselves under their scripts, A to Z."""
@@ -1868,9 +1900,8 @@ def summary_languages(layout, coverage, mode):
     layout.text(coverage.sentence())
     for script in coverage.scripts:
         layout.field(script.script, script.text)
-    if coverage.set_count:
-        text = u"%d of %d covered" % (len(coverage.sets), coverage.set_count)
-        layout.field(u"Character sets", text + (u": %s" % u", ".join(coverage.sets) if coverage.sets else u""))
+    for label, text in set_fields(coverage):
+        layout.field(label, text)
     for index, note in enumerate(coverage.notes()):
         layout.text(note, SUMMARY_NAME_SIZE, "quiet", gap=0.0 if index else 3.0)
     if mode not in ("covered", "reach"):
@@ -2569,7 +2600,7 @@ class ProofDialog(object):
                 "kerning": u"Every kerned pair between control letters (HH?HOHO, nn?nono), grouped by first glyph "
                            u"(the right one in a right-to-left pair, set right to left).",
                 "spacing": u"Each letter and figure between control letters (HHxHOxOO, nnxnoxoo), without kerning.",
-                "diacritics": u"The letters with marks, each after its base letter, and the marks.",
+                "diacritics": u"The letters with diacritics, each after its base letter, and the marks.",
                 "figures": u"Figures and their alternates, punctuation, and symbols, alone and between letters."}
         for key, label in SECTIONS:
             box = QtGui.QCheckBox(label)
@@ -2592,8 +2623,9 @@ class ProofDialog(object):
                   u"(under their scripts, A to Z, in five columns of small type; some 435 fill a page, and a longer "
                   u"list goes on over the following pages, never cut: a font with the Latin of Western and Central "
                   u"Europe covers nearly a thousand languages, about four pages), those and the languages within "
-                  u"reach (each with how many characters it lacks), or none: the counts alone. Kept from one FontLab "
-                  u"session to the next.")
+                  u"reach (each with how many characters it lacks), or none: the counts alone. They close the proof, "
+                  u"on its <i>Language coverage</i> pages: a choice here shows the first of them. Kept from one "
+                  u"FontLab session to the next.")
         sizes.addSpacing(12)
         self.waterfall_edit = captioned(
             sizes, "waterfall", "Waterfall sizes", QtGui.QLineEdit(u" ".join(format_size(s) for s in WATERFALL_SIZES)),
@@ -2609,6 +2641,7 @@ class ProofDialog(object):
         splitter = self.splitter = QtGui.QSplitter(QtCore.Qt.Horizontal)
         self.page_list = QtGui.QListWidget()
         self.page_list.setProperty(ak.KEEP_SELECTION_PROP, True)  # (the pages' navigator: a page is always shown)
+        ak.table_layout(self.page_list, grid=False)  # (as every FreeLab list: a list of names, no grid)
         self.page_list.setWhatsThis(u"The proof's pages: select one to see it. Double-click one to open its lines in a "
                                     u"<i>Glyph</i> window.")
         self.preview = QtGui.QLabel()
@@ -3004,7 +3037,11 @@ class ProofDialog(object):
         """The summary's check box ("summary") or its list's choice ("summary_languages") changed: kept for
         the next session, and the proof laid out again. The file is read again and only that key is
         changed: another Proof window (another font's) may have set the other one since this window read
-        the file. key None: both."""
+        the file. key None: both. A choice of Summary lists shows the first Language coverage page once
+        the proof is laid out (the owner: "Changing summary lists doesn't appear to change what is shown on
+        the proof": the lists close the proof, and the page shown stayed the one before)."""
+        if key == "summary_languages":
+            self.show_section = "coverage"
         try:
             mode = SUMMARY_LANGUAGES[max(0, min(self.languages_box.currentIndex, len(SUMMARY_LANGUAGES) - 1))][0]
             values = {"summary": bool(self.summary_box.isChecked()), "summary_languages": mode}
@@ -3174,6 +3211,9 @@ class ProofDialog(object):
             self.log.add(u"The proof could not be laid out: %s" % self.ak.html(exc), "error")
         finally:
             self.busy = False
+        wanted, self.show_section = getattr(self, "show_section", None), None
+        if wanted is not None and self.proof is not None:  # (a setting that changes pages further on: shown)
+            row = next((number for number, page in enumerate(self.proof.pages) if wanted in page.sections), row)
         self.fill_pages(row)
         self.status()
         self.seen_history = self.ak.history_mark(self.package)
@@ -3191,6 +3231,7 @@ class ProofDialog(object):
                         text += u" (%s)" % page.master  # (a page's master: data beside its sections)
                     self.page_list.addItem(text)
                 self.page_list.setCurrentRow(min(row, len(self.proof.pages) - 1))
+                self.ak.fit_list_width(self.page_list)  # (as wide as its longest page: it scrolled sideways for 2 pixels)
         finally:
             self.page_list.blockSignals(False)
         self.show_page()

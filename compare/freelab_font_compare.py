@@ -24,6 +24,7 @@ import difflib
 import math
 import os
 import sys
+import time
 
 AUTO_KERNING_FILE, AUTO_KERNING_MODULE = "freelab_auto_kerning.py", "freelab_auto_kerning"
 TABS = ("glyphs", "kerning", "features")
@@ -31,7 +32,19 @@ THRESHOLD = 1  # units: metrics, anchors, nodes, components, and kerning differi
 SHAPE_SHARE = 0.002  # outlines differ when their symmetric difference passes this share of the ink
 SHAPE_ROWS = 160  # scan lines across a glyph's height, measuring its area
 CURVE_STEPS = 8  # straight pieces per curve, measuring its area
-PROGRESS_EVERY = 100  # glyphs between two looks at the event loop
+PROGRESS_EVERY = 100  # glyphs between two moves of the progress bar
+# A comparison's steps, with the share of the progress bar at the end of each (the owner: "the comparing
+# step could potentially get its own loading bar, since CJK fonts can take a bit to load")
+READ_A_STEP, READ_B_STEP, GLYPHS_STEP, KERNING_STEP, FEATURES_STEP, LIST_STEP = (
+    u"Reading the first font's glyphs", u"Reading the second font's glyphs", u"Comparing the glyphs",
+    u"Comparing the kerning", u"Comparing the features", u"Listing the differences")
+COMPARE_STEPS = ((READ_A_STEP, 0.04), (READ_B_STEP, 0.08), (GLYPHS_STEP, 0.85), (KERNING_STEP, 0.95),
+                 (FEATURES_STEP, 0.98), (LIST_STEP, 1.0))
+SHOW_AFTER = 0.3  # seconds: a comparison shows the bar only once it has taken this long (a small font never flickers)
+PUMP_SECONDS = 0.05  # the window redrawn at most this often during a comparison
+BAR_RANGE = 1000
+OPEN_SETTLE_MS = 400  # a font just opened: FontLab activates its window as it lists it; this window comes back after
+OPEN_LATE_MS = 1500  # ... and once more this long after the comparison
 DIFF_CONTEXT = 3  # unchanged lines shown around each change of a feature's code
 ROWS_SHOWN = 2000  # glyphs or pairs listed at most, the worst first (two weights of a family differ everywhere)
 
@@ -176,6 +189,16 @@ def second_entries(fonts, own=None, installed=(), installed_rows=None):
     rows.append(("open", None, None, OPEN_ENTRY))
     rows.extend(installed_entries(installed) if installed_rows is None else installed_rows)
     return rows
+
+
+def popup_rows_hidden(rows):
+    """The rows (second_entries) the open list leaves out, by index: the placeholder (the box shows it;
+    listed under it, it read as a second copy), and a separator with no row above it left to set apart."""
+    hidden = set(index for index, row in enumerate(rows) if row[0] == "none")
+    for index, row in enumerate(rows):
+        if row[0] == "separator" and all(i in hidden for i in range(index)):
+            hidden.add(index)
+    return hidden
 
 
 FONT_FILE_TYPES = (u".otf", u".ttf", u".otc", u".ttc")  # the installed fonts listed (FontLab opens them all)
@@ -835,11 +858,35 @@ class KernDifference(object):
 
 
 KERN_KINDS = ("only_a", "only_b", "value", "absent")
+# The kinds of difference each list shows to start with: what both fonts have, compared (the owner: the
+# glyphs only in one font "should probably be unchecked by default so it truly focuses on comparing what is
+# available in both fonts", and the kerning "should default to 'Differing values' ... only different to
+# ticking everything else if there's nothing falling under that category")
+GLYPH_KINDS_FIRST = ("outline", "components", "codes", "metrics", "anchors")
+KERN_KINDS_FIRST = ("value",)
 
 
 def kern_label(kind, labels):
     return {"only_a": u"Only in %s" % labels[0], "only_b": u"Only in %s" % labels[1],
-            "value": u"Other values", "absent": u"Glyphs one font lacks"}[kind]
+            "value": u"Differing values", "absent": u"Glyphs one font lacks"}[kind]
+
+
+def bar_value(steps, label, part=0.0):
+    """How far the progress bar is, 0 to 1, at this part (0 to 1) of the step of that label (steps: (label,
+    share at its end)); None for a label that is not one of them."""
+    start = 0.0
+    for name, end in steps:
+        if name == label:
+            return start + (end - start) * min(max(float(part), 0.0), 1.0)
+        start = end
+    return None
+
+
+def kinds_first_on(counts, first):
+    """The kinds whose chips are checked after a comparison: those of first that have something; every
+    kind that has something when none of them has (else the list would start empty)."""
+    found = set(kind for kind in first if counts.get(kind))
+    return found or set(kind for kind, count in counts.items() if count)
 
 
 def kerning_diff(a, b, threshold=0, rename=None, glyphs_a=None, glyphs_b=None):
@@ -1102,17 +1149,20 @@ Two open fonts, or two masters of one font, compared glyph by glyph. Nothing in 
 changes.<br><br>
 The first is this window's font (<i>Compare</i> lists its masters). Choose the second in <i>with</i>:
 another open font, another master of the first, or <i>Open a font\N{HORIZONTAL ELLIPSIS}</i> for a font
-file; then click <i>Compare</i>.
+file; then click <i>Compare</i>. A font opened from there, or from the fonts installed on Windows listed
+under it, is compared at once. A progress bar shows how far a comparison is.
 Differences of at most the units set are left out (metrics, anchors, nodes, components, kerning).
 A font of another em is scaled to the first one's.<br><br>
 <b>Glyphs</b>: a chip per kind of difference, each showing or hiding that kind in the list (a glyph
-with none of the kinds shown is left out); the glyphs that differ, the worst first by the kinds
+with none of the kinds shown is left out; the glyphs only in one font are hidden to start with); the
+glyphs that differ, the worst first by the kinds
 shown, both drawn small; the selected glyph from both fonts, the first in the text
 color and the second in the highlight color, overlaid in the middle, its differences in one sentence
 under it. How much two outlines differ is the area where one has ink and the other not, as a share of
 the ink: a node moved shows.<br>
 <b>Kerning</b>: the glyph pairs kerned differently, classes resolved as FontLab applies them, the
-largest difference first, and the selected pair drawn in both.<br>
+largest difference first, and the selected pair drawn in both. The pairs both fonts kern, with
+differing values, are shown to start with; a chip shows the others.<br>
 <b>Features</b>: the features only in one font, and the lines of code that differ, removed in red and
 added in green.<br><br>
 Right-click a glyph or a pair to flag it in the first font. Compared again after an undo or an edit
@@ -1129,6 +1179,12 @@ CHIP_SHEET = (u"QToolButton { background: transparent; color: rgba(128, 128, 128
 # over either palette, set on each chip (never on the dialog, whose fields dark mode then maps) and
 # left alone by dark mode, as Auto Kerning's TAB_SHEET is. Windows' own style drew a checked tool
 # button light whatever the palette: mapped, it came out garbled, white in dark mode.
+
+BAR_GREEN = ((120, 200, 120), (30, 120, 40))  # ak.LOG_COLORS["done"], should the shared module not have it
+# On the bar itself, never on the dialog: a thin bar, its chunk in the suite's "done" green (Font Check's)
+BAR_SHEET = (u"QProgressBar { border: 1px solid rgba(128, 128, 128, 140); border-radius: 3px; "
+             u"background: transparent; min-height: 10px; max-height: 10px; } "
+             u"QProgressBar::chunk { background-color: rgb(%d, %d, %d); border-radius: 2px; }")
 
 GRAY = (128, 128, 128)
 LINE_ALPHA = 128  # the lists' lines: a mid gray at half strength
@@ -1309,7 +1365,9 @@ class Side(object):
 
     def __init__(self, package, master, label):
         self.package, self.master, self.label = package, master, label
-        self.paths = {}  # glyph name: its QPainterPath, for the glyphs listed
+        self.paths = {}  # glyph name: (its QPainterPath, its advance), for the glyphs listed (path_of)
+        self.factor = 1.0  # the scale of its glyphs to the first font's em
+        self.number = None  # FontLab's number of its font at the comparison (font_number): read only while it is open
 
 
 class SecondWatch(object):
@@ -1389,7 +1447,8 @@ class CompareDialog(object):
                                    u"another master of the first. <i>%s</i> opens a font file in FontLab (as "
                                    u"<i>File &gt; Open</i> does, starting in Windows' font folder) and chooses it. "
                                    u"Under it, the fonts installed on Windows (yours too), A to Z: picking one opens it "
-                                   u"in FontLab and chooses it. The list follows the fonts FontLab has open." % OPEN_ENTRY)
+                                   u"in FontLab and chooses it. A font opened either way is compared at once, without a "
+                                   u"click on <i>Compare</i>. The list follows the fonts FontLab has open." % OPEN_ENTRY)
         settings.addWidget(self.choice_b)
         settings.addSpacing(12)
         settings.addWidget(QtGui.QLabel("Ignore differences up to"))
@@ -1404,6 +1463,36 @@ class CompareDialog(object):
         settings.addWidget(self.compare_button)
         settings.addStretch(1)
         layout.addLayout(settings)
+        # A progress bar under the choices while a comparison runs (Font Check's and CJK Vertical's): the step's
+        # name beside it, its chunk in the log's "done" green, left alone by dark mode; hidden otherwise
+        self.busy_row = QtGui.QWidget()
+        busy_layout = QtGui.QHBoxLayout(self.busy_row)
+        busy_layout.setContentsMargins(0, 2, 0, 2)
+        self.busy_step = QtGui.QLabel(u"")
+        self.busy_bar = QtGui.QProgressBar()
+        try:
+            self.busy_bar.setRange(0, BAR_RANGE)
+            self.busy_bar.setValue(0)
+            self.busy_bar.setTextVisible(False)  # (the step's name stands beside it)
+            self.busy_bar.setProperty(ak.LEAVE_ALONE_PROP, True)
+        except Exception:
+            pass
+        try:  # (room for the longest step's name: the bar's left edge stays put from one step to the next)
+            longest = max([label for label, _ in COMPARE_STEPS], key=len)
+            self.busy_step.setMinimumWidth(int(QtGui.QFontMetrics(_prop(self.busy_step, "font")).width(
+                u"%s\N{HORIZONTAL ELLIPSIS}" % longest)) + 8)
+        except Exception:
+            pass
+        busy_help = (u"How far the comparison is: reading each font's glyphs, comparing the glyphs, the kerning, and "
+                     u"the features, then listing the differences. The window waits for it; it goes away when the "
+                     u"lists are shown.")
+        self.busy_bar.setWhatsThis(busy_help)
+        self.busy_step.setWhatsThis(u"The step the comparison is at: reading each font's glyphs, comparing the "
+                                    u"glyphs, the kerning, or the features, or listing the differences.")
+        busy_layout.addWidget(self.busy_step)
+        busy_layout.addWidget(self.busy_bar, 1)
+        self.busy_row.setVisible(False)
+        layout.addWidget(self.busy_row)
         self.log = ak.Log()
         # A tab bar over plain pages, as in Font Check: a QTabWidget's page drew light frames in dark mode
         self.tabs = QtGui.QTabBar()
@@ -1472,7 +1561,7 @@ class CompareDialog(object):
         if icon is not None:
             tree.setIconSize(QtCore.QSize(icon, icon))
             tree.setProperty(self.ak.LEAVE_ALONE_PROP, True)  # (as Font Check's: its scroll bars are FreeLab's flat ones)
-        self.ak.grid_lines(tree)
+        self.ak.table_layout(tree)  # (left alone by dark mode: mapped, its header and grid came out light)
         return tree
 
     def picture_label(self, minimum):
@@ -1574,14 +1663,14 @@ class CompareDialog(object):
         box.addWidget(status)
         return widget, box, status
 
-    def chip_row(self, kinds, on_toggle, tip):
+    def chip_row(self, kinds, on_toggle, tip, first=()):
         QtCore, QtGui = _qt()
         row = QtGui.QHBoxLayout()
         chips = []
         for kind in kinds:
             chip = QtGui.QToolButton()
             chip.setCheckable(True)
-            chip.setChecked(kind != "absent")
+            chip.setChecked(kind in first)  # (each comparison sets them again: fill_chips)
             chip.setProperty(self.ak.LEAVE_ALONE_PROP, True)  # (drawn by CHIP_SHEET in the palette's colors)
             chip.setStyleSheet(CHIP_SHEET)
             chip.setWhatsThis(tip)
@@ -1598,7 +1687,9 @@ class CompareDialog(object):
         row, self.glyph_chips = self.chip_row(GLYPH_KINDS, self.fill_glyphs,
                                               u"Shows or hides this kind of difference in the list (the count: glyphs "
                                               u"with it). A glyph left with no kind shown is hidden; the others are "
-                                              u"ranked by the kinds shown.")
+                                              u"ranked by the kinds shown. The glyphs only in one font are hidden to "
+                                              u"start with, so the list compares what both fonts have (shown when "
+                                              u"nothing else differs).", GLYPH_KINDS_FIRST)
         box.addLayout(row)
         halves = QtGui.QSplitter(QtCore.Qt.Horizontal)
         self.glyph_tree = self.tree(("Glyph", "Differences"), icon=THUMB_SIZE)
@@ -1629,8 +1720,11 @@ class CompareDialog(object):
     def build_kerning(self, QtCore, QtGui):
         widget, box, self.kern_status = self.page(QtGui)
         row, self.kern_chips = self.chip_row(KERN_KINDS, self.fill_kerning,
-                                             u"Shows or hides these pairs (the count: pairs). Pairs of a glyph one font "
-                                             u"lacks are hidden to start with: the Glyphs tab lists those glyphs.")
+                                             u"Shows or hides these pairs (the count: pairs). Only the pairs kerned in "
+                                             u"both fonts with differing values are shown to start with (every other kind "
+                                             u"when there are none): the pairs only one font kerns, and those of a glyph "
+                                             u"one font lacks (the Glyphs tab lists those glyphs), are a click away.",
+                                             KERN_KINDS_FIRST)
         box.addLayout(row)
         halves = QtGui.QSplitter(QtCore.Qt.Horizontal)
         self.kern_tree = self.tree(("Pair", "First", "Second", "Difference"))
@@ -1782,7 +1876,8 @@ class CompareDialog(object):
 
     def placeholder_unpickable(self):
         """The second dropdown's placeholder shown, not picked: its row grayed out in the list (its flags
-        cleared, as Qt's own model reads them), so that it does nothing when clicked."""
+        cleared, as Qt's own model reads them), so that it does nothing when clicked; and left out of the
+        open list (popup_rows_hidden), where it read as the box's text twice (the owner's screenshot 98)."""
         QtCore = _qt()[0]
         try:
             for index, row in enumerate(self.second_rows):
@@ -1790,6 +1885,13 @@ class CompareDialog(object):
                     self.choice_b.setItemData(index, 0, int(QtCore.Qt.UserRole) - 1)
         except Exception:
             pass  # (a Qt whose model will not: picking it still changes nothing, second_activated)
+        try:
+            view = self.choice_b.view()
+            hidden = popup_rows_hidden(self.second_rows)
+            for index in range(len(self.second_rows)):
+                view.setRowHidden(index, index in hidden)
+        except Exception:
+            pass  # (shown, grayed out, as before)
 
     def open_folder(self):
         """Where Open a font... starts: the folder of the last font opened from it, else Windows' font
@@ -1818,7 +1920,7 @@ class CompareDialog(object):
         if there:
             self.opening = None  # (a font still being looked for is not chosen over this one)
             try:
-                self.choose_second(there[0], u"%s is open already")
+                self.choose_second(there[0], u"%s is open already", True)
             except Exception as exc:
                 self.log.add(u"Could not choose that font: %s" % self.ak.html(exc), "error")
             return
@@ -1866,14 +1968,15 @@ class CompareDialog(object):
                                  % self.ak.i(os.path.basename(path)), "warning")
                 return
             self.opening = None
-            self.choose_second(found[0], u"Opened %s")  # (the file's own, when another font came in too)
+            self.choose_second(found[0], u"Opened %s", True)  # (the file's own, when another font came in too)
         except Exception as exc:
             self.opening = None
             self.log.add(u"Could not choose the font just opened: %s" % self.ak.html(exc), "error")
 
-    def choose_second(self, package, said):
+    def choose_second(self, package, said, then_compare=False):
         """An open font chosen as the second font, and said so (said: how the log's line starts, %s standing
-        for the font's name)."""
+        for the font's name); then_compare: compared too, with this window brought back to the front
+        (compare_opened). True when chosen."""
         self.read_fonts()
         key = self.font_number(package)
         first = self.first_key()
@@ -1883,7 +1986,7 @@ class CompareDialog(object):
         if not masters:  # this window's own font, with one master: not in the list
             self.log.add(u"%s is the first font, and has one master: there is nothing to compare it with. "
                          u"Choose another font in <i>with</i>." % self.ak.b(package.tfn), "warning")
-            return
+            return False
         try:
             current = u"%s" % package.master
         except Exception:
@@ -1891,8 +1994,71 @@ class CompareDialog(object):
         self.set_second((key, current if current in masters else masters[0]))
         self.say_state(True)
         self.update_buttons()
-        self.log.add((said + u": chosen as the second font. Click %s.") % (
-            self.ak.b(package.tfn), self.ak.i(u"Compare")), "done")
+        if then_compare:
+            self.log.add((said + u": chosen as the second font.") % self.ak.b(package.tfn), "done")  # (the comparison says its own)
+            self.compare_opened()
+        else:
+            self.log.add((said + u": chosen as the second font. Click %s.") % (
+                self.ak.b(package.tfn), self.ak.i(u"Compare")), "done")
+        return True
+
+    def compare_opened(self):
+        """A font opened from the second dropdown (a file, or an installed font), now chosen: compared without
+        a click on Compare, and this window brought back to the front. FontLab makes the new font's window
+        the active one as it lists the font, which sent this window behind it: it is brought forward now,
+        again once FontLab has settled (OPEN_SETTLE_MS), and after the comparison."""
+        QtCore, QtGui = _qt()
+        self.bring_forward()
+        timer = getattr(self, "settle_timer", None)
+        if timer is None:
+            timer = self.settle_timer = QtCore.QTimer(self.dialog)  # (its parent the window: Qt deletes it with it)
+            timer.setSingleShot(True)
+            timer.setInterval(OPEN_SETTLE_MS)
+            timer.connect("timeout()", self.settled)
+        timer.start()
+
+    def settled(self):
+        """compare_opened's comparison, once FontLab has settled (again later while one runs); nothing once
+        the window is closed (a comparison would hold the user's clicks for a window no one sees)."""
+        try:
+            if not self.shown():
+                return
+            if self.busy:
+                self.settle_timer.start()
+                return
+            self.bring_forward()
+            if self.missing():
+                return  # (the choice changed meanwhile: the top line says what is missing)
+            self.compare()
+            self.bring_forward()
+            QtCore, QtGui = _qt()
+            late = getattr(self, "late_timer", None)
+            if late is None:  # (once more a while later: FreeLab's tab docking merges the new window, and
+                # activates FontLab's, once a second)
+                late = self.late_timer = QtCore.QTimer(self.dialog)  # (its parent the window: Qt deletes it with it)
+                late.setSingleShot(True)
+                late.setInterval(OPEN_LATE_MS)
+                late.connect("timeout()", self.bring_forward)
+            late.start()
+        except Exception:
+            pass  # a timer's handler must not raise
+
+    def shown(self):
+        """Whether the window is on screen: visible, and not closed (the tool let go) or minimized."""
+        try:
+            return _prop(self.dialog, "visible") is True and _prop(self.dialog, "minimized") is not True
+        except Exception:
+            return False
+
+    def bring_forward(self):
+        """This window raised and made the active one, while it is shown (shown): a window the user
+        minimized or closed meanwhile is left as it is, never restored. Never raises."""
+        try:
+            if self.shown():
+                self.dialog.raise_()
+                self.dialog.activateWindow()
+        except Exception:
+            pass
 
     def swap(self):
         """The two masters of this window's font exchanged; compared again when they had been. Two
@@ -2073,10 +2239,104 @@ class CompareDialog(object):
                 self.log.add(u"A picture could not be drawn: %s" % self.ak.html(exc), "warning")
             return QtGui.QIcon()
 
-    def progress(self, done, total, what):
-        QtCore, QtGui = _qt()
-        self.font_label.setText(u"%s %s of %s\N{HORIZONTAL ELLIPSIS}" % (what, self.ak.b(grouped(done)), self.ak.b(grouped(total))))
-        QtGui.QApplication.processEvents()
+    # -- long work -----------------------------------------------------------
+
+    busy_shown, busy_since, busy_now, pumped, pump_refused = False, 0.0, None, 0.0, False
+
+    def busy_widgets(self):
+        """What is grayed while a comparison runs (Close is not: a click waits for it, then closes)."""
+        return [getattr(self, name, None) for name in ("choice_a", "choice_b", "swap_button", "threshold",
+                                                       "compare_button", "tabs", "pages")]
+
+    def set_busy(self, on):
+        """A comparison begun or over. While busy, the History watchers, dark mode, the dropdowns' reading,
+        and the window's release wait. The bar and the grayed controls show once the comparison has taken
+        SHOW_AFTER (progress). Never raises."""
+        self.busy = bool(on)
+        self.busy_since, self.busy_now, self.pumped = time.time(), None, 0.0
+        if on or not self.busy_shown:
+            return
+        self.busy_shown = False
+        try:
+            self.busy_row.setVisible(False)
+            for widget in (self.choice_a, self.tabs, self.pages):  # (the others as the choices want them: update_buttons)
+                self.ak.enable(widget, True)
+        except Exception:
+            pass
+
+    def show_busy(self):
+        """The bar shown and the controls grayed, painted at once."""
+        if self.busy_shown:
+            return
+        self.busy_shown = True
+        try:
+            for widget in self.busy_widgets():
+                if widget is not None:
+                    self.ak.enable(widget, False)
+            self.busy_bar.setStyleSheet(self.bar_sheet())  # (the palette may have changed since)
+            self.busy_bar.setValue(0)
+            self.busy_row.setVisible(True)
+        except Exception:
+            pass
+        self.pump(force=True)
+
+    def bar_sheet(self):
+        """The bar's own stylesheet: its chunk in the log's "done" green, the one that reads on the window."""
+        rgb = BAR_GREEN[1]
+        try:
+            QtCore, QtGui = _qt()
+            pair = self.ak.LOG_COLORS["done"]
+            dark = _prop(self.dialog, "palette").color(QtGui.QPalette.Window).lightness() < 128
+            rgb = tuple(int(value) for value in (pair[0] if dark is True else pair[1]))
+        except Exception:
+            pass
+        return BAR_SHEET % rgb
+
+    def progress(self, label, part=0.0):
+        """The comparison at this part (0 to 1) of the step of that label (COMPARE_STEPS): the bar moved and
+        the window redrawn (at most every PUMP_SECONDS within a step), the user's clicks and keys left
+        waiting until it is over. Never raises."""
+        value = bar_value(COMPARE_STEPS, label, part)
+        if value is None or not self.busy:
+            return
+        if not self.busy_shown and time.time() - self.busy_since >= SHOW_AFTER:
+            self.show_busy()
+        if not self.busy_shown:
+            return
+        moved = label != self.busy_now
+        try:
+            if moved:
+                self.busy_now = label
+                self.busy_step.setText(u"%s\N{HORIZONTAL ELLIPSIS}" % label)
+            self.busy_bar.setValue(int(round(value * BAR_RANGE)))
+        except Exception:
+            pass
+        self.pump(force=moved)
+
+    def pump(self, force=False):
+        """The window redrawn, nothing else let through: no click may change the choices halfway. Where Qt
+        will not take the flag that holds input back (or has none), the bar and its step are painted alone,
+        as Font Check paints its own: the user's input is never let through halfway. Never raises."""
+        now = time.time()
+        if not force and now - self.pumped < PUMP_SECONDS:
+            return
+        self.pumped = now
+        try:
+            QtCore, QtGui = _qt()
+            flag = getattr(getattr(QtCore, "QEventLoop", None), "ExcludeUserInputEvents", None)
+        except Exception:
+            flag = None
+        if flag is not None and not self.pump_refused:
+            try:
+                QtGui.QApplication.processEvents(flag)
+                return
+            except Exception:
+                self.pump_refused = True  # (not tried again: the bar painted alone from now on)
+        for widget in (self.busy_row, self.busy_step, self.busy_bar):
+            try:
+                widget.repaint()
+            except Exception:
+                pass
 
     # -- comparing -----------------------------------------------------------
 
@@ -2111,6 +2371,31 @@ class CompareDialog(object):
             path = transform.map(path)
         return data, (path, data.advance * factor)
 
+    def path_of(self, side, name, opened=None):
+        """A glyph's (path, advance width) in a side's master, scaled to the first font's em, read when first
+        asked for and kept: the glyphs only in one font are read as they are listed, not all at a comparison.
+        None without the glyph, a layer, or a read, and for a font closed since the comparison (opened: the
+        numbers of the fonts open now, open_numbers; the lists keep the last comparison, and FontLab is never
+        asked about a closed font: nothing is drawn, and nothing kept, so it is read once the font is back)."""
+        if name is None:
+            return None
+        if name not in side.paths:
+            if side.number not in (opened if opened is not None else self.open_numbers()):
+                return None
+            try:
+                side.paths[name] = self.read_glyph(side, name, [], side.factor)[1]
+            except Exception:
+                side.paths[name] = None
+        return side.paths[name]
+
+    def open_numbers(self):
+        """FontLab's numbers of the fonts open now (font_number), read afresh: a font compared may have been
+        closed since the dropdowns were last read. Those of the last reading where FontLab cannot be asked."""
+        try:
+            return set(self.font_number(package) for package in self.open_fonts())
+        except Exception:
+            return set(self.by_id)
+
     def kerning_of(self, side):
         """A master's kerning, {(left, right): value}, classes resolved as FontLab applies them."""
         kerning = self.ak.FontKerning(side.package.kerning(side.master))
@@ -2143,12 +2428,18 @@ class CompareDialog(object):
         """Both choices compared: glyphs, kerning, and features."""
         if self.busy:
             return
+        try:  # (a click on Compare while a font just opened waits to be compared: compared once, now)
+            settle = getattr(self, "settle_timer", None)
+            if settle is not None:
+                settle.stop()
+        except Exception:
+            pass
         self.read_fonts()  # (and what is missing said, the button grayed)
         a, b = self.chosen(self.choice_a), self.chosen(self.choice_b)
         ak = self.ak
         if a is None or b is None or self.missing():
             return
-        self.busy = True
+        self.set_busy(True)
         ak.enable(self.compare_button, False)
         try:
             self.run(a, b)
@@ -2156,7 +2447,7 @@ class CompareDialog(object):
             self.font_label.setText(u"The comparison stopped: see the log.")
             self.log.add(ak.html(exc), "error")
         finally:
-            self.busy = False
+            self.set_busy(False)
         self.update_buttons()
 
     def run(self, a, b):
@@ -2169,16 +2460,22 @@ class CompareDialog(object):
         first, second = Side(package_a, master_a, labels[0]), Side(package_b, master_b, labels[1])
         upm_a, upm_b = float(package_a.upm or 1000), float(package_b.upm or 1000)
         factor = upm_a / upm_b if upm_b else 1.0
+        second.factor = factor  # (its glyphs drawn at the first one's em, as they are read: path_of)
+        first.number, second.number = self.font_number(package_a), self.font_number(package_b)
         threshold = int(_prop(self.threshold, "value") or 0)
-        glyphs_a, glyphs_b = self.glyph_list(package_a), self.glyph_list(package_b)
+        self.font_label.setText(u"Comparing %s with %s\N{HORIZONTAL ELLIPSIS}" % (b_(labels[0]), b_(labels[1])))
+        self.progress(READ_A_STEP)
+        glyphs_a = self.glyph_list(package_a)
+        self.progress(READ_B_STEP)
+        glyphs_b = self.glyph_list(package_b)
         codes_a, codes_b = dict(glyphs_a), dict(glyphs_b)
         pairs, only_a, only_b = match_glyphs(glyphs_a, glyphs_b)
         self.rename = rename = dict((name_b, name_a) for name_a, name_b in pairs if name_a != name_b)
         results, unread = [], []
-        total = len(pairs) + len(only_a) + len(only_b)
+        total = float(len(pairs) or 1)
         for done, (name_a, name_b) in enumerate(pairs):
             if done % PROGRESS_EVERY == 0:
-                self.progress(done, total, u"Comparing glyph")
+                self.progress(GLYPHS_STEP, done / total)
             try:
                 data_a, picture_a = self.read_glyph(first, name_a, codes_a.get(name_a, []))
                 data_b, picture_b = self.read_glyph(second, name_b, codes_b.get(name_b, []), factor)
@@ -2193,30 +2490,31 @@ class CompareDialog(object):
                                            name_b if data_b is not None else None, found))
                 first.paths[name_a], second.paths[name_b] = picture_a, picture_b
         for side, names, kind in ((first, only_a, "only_a"), (second, only_b, "only_b")):
+            # (their pictures read as they are listed, path_of: a CJK font has thousands no other font has,
+            # each read whole here before, and their kind is hidden to start with)
+            text = u"only in %s" % side.label
             for name in names:
-                try:
-                    side.paths[name] = self.read_glyph(side, name, [], factor if side is second else 1.0)[1]
-                except Exception:
-                    side.paths[name] = None
-                text = u"only in %s" % side.label
                 results.append(GlyphResult(name if kind == "only_a" else None, name if kind == "only_b" else None,
                                            [Difference(kind, text, text)]))
         self.sides, self.masters_mode, self.results = (first, second), same, results
-        self.progress(total, total, u"Comparing glyph")
         if unread:
             self.log.add(u"Could not read %s: %s." % (counted(len(unread), u"glyph"), ak.html(u", ".join(unread[:20]))
                                                      + (u"\N{HORIZONTAL ELLIPSIS}" if len(unread) > 20 else u"")), "warning")
             unread = []
 
+        self.progress(KERNING_STEP)
         try:
             kern_a = self.kerning_of(first)
+            self.progress(KERNING_STEP, 0.4)
             kern_b = dict((pair, value * factor) for pair, value in self.kerning_of(second).items())
+            self.progress(KERNING_STEP, 0.8)
             known_a = set(name for name, _ in glyphs_a)
             known_b = set(rename.get(name, name) for name, _ in glyphs_b)
             self.kern_rows = kerning_diff(kern_a, kern_b, threshold, rename, known_a, known_b)
         except Exception as exc:
             self.kern_rows = []
             unread.append(u"kerning (%s)" % ak.html(exc))
+        self.progress(FEATURES_STEP)
         if same:
             self.feature_rows = []
         else:
@@ -2249,10 +2547,12 @@ class CompareDialog(object):
             noted.add(side.package.tfn)
             if note:
                 self.log.add(note)
+        self.progress(LIST_STEP)
         self.fill_chips()
         self.fill_glyphs()
         self.fill_kerning()
         self.fill_features()
+        self.progress(LIST_STEP, 1.0)
 
     def font_changed(self):
         """This window's font was closed, or a font opened for this window without one (fonts_tick): the
@@ -2267,12 +2567,37 @@ class CompareDialog(object):
                          % self.ak.i(u"Compare"), "warning")
 
     def history_moved(self):
-        """An undo, a redo, or an edit in either font: compared again."""
+        """An undo, a redo, or an edit in either font: compared again. A font compared that was closed moves
+        its History too (the live pass: "A font's History moved ... compared again", with the old results
+        still listed and nothing compared): that is said instead, and the comparison marked out of date."""
         QtCore, QtGui = _qt()
         if self.sides is None:
             return
+        opened = self.open_numbers()
+        closed = []
+        for side in self.sides:
+            if side.number not in opened and side.label not in closed:
+                closed.append(side.label)
+        if closed:  # (FontLab asked nothing of the closed font: its watcher let go of it, by its side's number)
+            first, second = self.sides
+            if first.number not in opened:
+                self.package, self.seen_history = None, None
+            if second.number not in opened or first.number not in opened and self.masters_mode:
+                self.second.package, self.second.seen_history = None, None
+            self.out_of_date(closed)
+            return
         self.log.add(u"A font's History moved (an undo, a redo, or an edit): compared again.")
         QtCore.QTimer.singleShot(0, self.compare)
+
+    def out_of_date(self, closed):
+        """A font compared was closed (closed: the labels of its sides): the lists keep the last comparison (a
+        closed font's glyphs not read yet drawn empty: path_of), and the top line and the log say it is out
+        of date, once (history_moved lets the closed font's History watcher go)."""
+        names = html_escape(u" and ".join(closed))
+        verb = u"was" if len(closed) == 1 else u"were"
+        self.font_label.setText(u"%s %s closed: the comparison shown is out of date. Choose a font in %s and "
+                                u"click %s." % (self.ak.b(names), verb, self.ak.i(u"with"), self.ak.i(u"Compare")))
+        self.log.add(u"%s %s closed: the comparison is out of date." % (self.ak.b(names), verb), "warning")
 
     # -- the tabs and buttons ------------------------------------------------
 
@@ -2344,10 +2669,10 @@ class CompareDialog(object):
         return [tree.topLevelItem(i) for i in range(_prop(tree, "topLevelItemCount"))]
 
     def fit_columns(self, tree, widths):
-        for column, most in enumerate(widths):
-            tree.resizeColumnToContents(column)
-            if most is not None and tree.columnWidth(column) > most:
-                tree.setColumnWidth(column, most)
+        """The columns as wide as every row needs, at most the widths given (None: as is), the same in
+        either theme (the shared fit_rows), the list's stretch column given the rest."""
+        self.ak.fit_rows(tree, range(len(widths)), most=list(widths))
+        self.ak.stretch_column(tree, measure=True)
 
     def select_first(self, tree, otherwise):
         items = self.top_items(tree)
@@ -2361,16 +2686,18 @@ class CompareDialog(object):
     def fill_chips(self):
         labels = self.labels()
         counts_ = glyph_counts(self.results)
+        on = kinds_first_on(counts_, GLYPH_KINDS_FIRST)
         for kind, chip in self.glyph_chips:
             count = counts_.get(kind, 0)
             chip.setText(u"%s %s" % (kind_label(kind, labels, self.masters_mode), grouped(count)))
-            chip.setChecked(True)
+            chip.setChecked(kind in on)
             chip.setVisible(bool(count))
         counts_ = kern_counts(self.kern_rows)
+        on = kinds_first_on(counts_, KERN_KINDS_FIRST)
         for kind, chip in self.kern_chips:
             count = counts_.get(kind, 0)
             chip.setText(u"%s %s" % (kern_label(kind, labels), grouped(count)))
-            chip.setChecked(kind != "absent")
+            chip.setChecked(kind in on)
             chip.setVisible(bool(count))
 
     @staticmethod
@@ -2387,14 +2714,14 @@ class CompareDialog(object):
         kinds = self.kinds_on(self.glyph_chips)
         found = glyph_rows(self.results, kinds)
         rows = self.glyph_names = found[:ROWS_SHOWN]
+        opened = self.open_numbers()  # (once per filling: path_of reads a font only while it is open)
         self.filling = True
         tree.setUpdatesEnabled(False)
         try:
             tree.clear()
             for index, r in enumerate(rows):
                 item = self.item((r.caption(), r.short(kinds)), index, r.sentence(labels))
-                picture_a = first.paths.get(r.a) if r.a is not None else None
-                picture_b = second.paths.get(r.b) if r.b is not None else None
+                picture_a, picture_b = self.path_of(first, r.a, opened), self.path_of(second, r.b, opened)
                 item.setIcon(0, self.icon(both_thumb, picture_a[0] if picture_a else None,
                                           picture_b[0] if picture_b else None, colors))
                 tree.addTopLevelItem(item)
@@ -2452,14 +2779,14 @@ class CompareDialog(object):
             return
         first, second = self.sides
         try:
-            upm_a, upm_b = float(first.package.upm or 1000), float(second.package.upm or 1000)
-            factor = upm_a / upm_b if upm_b else 1.0  # the second font's paths are scaled to the first's em (run)
+            factor = second.factor  # the second font's paths are scaled to the first's em (run)
+            opened = self.open_numbers()  # (a font closed since the comparison is asked nothing: its glyph drawn as kept)
             sides = []
             for side, name in ((first, r.a), (second, r.b)):
-                picture = side.paths.get(name) if name is not None else None
+                picture = self.path_of(side, name, opened)
                 path, advance = picture if picture else (None, 0.0)
                 parts = None
-                if path is not None:
+                if path is not None and side.number in opened:
                     try:
                         layer = self.layer_of(side.package, name, side.master)
                         parts = self.ak.layer_parts(layer) if layer is not None else None
@@ -2502,7 +2829,10 @@ class CompareDialog(object):
                     tip += u" A glyph of the pair is missing in one font."
                 item = self.item((u"%s %s" % (d.left, d.right), u"%d" % d.a, u"%d" % d.b, signed(d.delta)), index, tip)
                 tree.addTopLevelItem(item)
-            self.fit_columns(tree, (COLUMN_MAX, None, None))
+            if self.ak.table_stretch(tree) is None:  # (the pairs take the room; the values keep to the right of them)
+                self.ak.set_stretch(tree, 0)
+            self.ak.align_numbers(tree, (1, 2, 3))
+            self.fit_columns(tree, (COLUMN_MAX, None, None, None))
         finally:
             tree.setUpdatesEnabled(True)
             self.filling = False
@@ -2510,7 +2840,7 @@ class CompareDialog(object):
         listed = sum(n for kind, n in counts_.items() if kind != "absent")
         b = self.ak.b
         if listed:
-            text = u"%s kerned differently: %s only in %s, %s only in %s, %s with other values." % (
+            text = u"%s kerned differently: %s only in %s, %s only in %s, %s with differing values." % (
                 b(counted(listed, u"glyph pair")), b(grouped(counts_.get("only_a", 0))), html_escape(labels[0]),
                 b(grouped(counts_.get("only_b", 0))), html_escape(labels[1]), b(grouped(counts_.get("value", 0))))
         else:
@@ -2551,6 +2881,11 @@ class CompareDialog(object):
             self.update_buttons()
             return
         first, second = self.sides
+        opened = self.open_numbers()
+        if first.number not in opened or second.number not in opened:  # (closed since: FontLab is asked nothing)
+            self.pair_picture.clear()
+            self.update_buttons()
+            return
         back = dict((one, other) for other, one in self.rename.items())  # the first font's names to the second's
         font = _prop(self.dialog, "font")
         colors = self.colors()

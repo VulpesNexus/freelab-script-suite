@@ -1096,7 +1096,7 @@ def line_up_exclusion(recipe, index):
     if attached_kind(mark):
         return u"joined to its letter (ogonek, cedilla, horn, vertical caron): each lines up with its own kind"
     if mark.side not in LINE_UP_SIDES:
-        return u"placed beside or on its letter (horn, vertical caron, Greek capitals' marks, kana)"
+        return u"placed beside or on its letter (horn, vertical caron, Greek capitals' diacritics, kana)"
     if mark.root in LINE_UP_ATTACHED:
         return u"attached to its letter (cedilla, ogonek)"
     if mark.convention:
@@ -1104,7 +1104,7 @@ def line_up_exclusion(recipe, index):
     if mark.joined:
         return u"made of marks set together"
     if len([m for m in recipe.marks if m.side == mark.side]) > 1:
-        return u"stacked with another mark on the same side"
+        return u"stacked with another diacritic on the same side"
     return None
 
 
@@ -1198,19 +1198,34 @@ def propagated_text(count, put_back, on, bold=None):
 def row_text(built, refill=False, shift=None, existing=False, notes=()):
     """A row's Built from cell: what the glyph is built from, then its data in parentheses (a glyph of
     the font to fill, how a glyph the font has compares with the suggestion, what placing it took), as
-    one would write it by hand: "A + gravecomb (suggested: mark 25 right, 4 up)". No period: a cell."""
+    one would write it by hand: "A + gravecomb (suggested: 25 right, 4 up)". No period: a cell. What
+    moves is the diacritic, in a tool about diacritics: "mark" went without saying (the owner's report of
+    2026-11-15)."""
     data = []
     if refill:
         data.append(u"its glyph is in the font, empty: filled when built")
     if existing:
         data.append(u"placed as suggested" if shift == (0, 0) else
-                    (u"suggested: mark %s" % shift_words(*shift)) if shift else
+                    (u"suggested: %s" % shift_words(*shift)) if shift else
                     u"drawn, not built of components: compare by eye")
     data += list(notes)
     return built + (u" (%s)" % u"; ".join(data) if data else u"")
 
 
-JUST_BUILT = u"Just built: check to rebuild"  # the list's section of the glyphs built in this window
+def suggested_caption(shift):
+    """The editor's caption under the suggestion beside a glyph the font has: "Suggested (11 right, 46
+    down)", "Suggested (the same)", or "Suggested" (drawn, compared by eye)."""
+    if shift == (0, 0):
+        return u"Suggested (the same)"
+    return u"Suggested (%s)" % shift_words(*shift) if shift else u"Suggested"
+
+
+# The list's sections, as the owner named them on 2026-11-15 (data in parentheses: what a check does)
+CAN_BE_BUILT = u"Can be built"
+EXISTING_OTHERWISE = u"Existing glyphs with suggestions (check to rebuild)"
+EXISTING_AS_SUGGESTED = u"Existing glyphs that match suggestions (check to rebuild)"
+JUST_BUILT = u"Just built (check to rebuild)"  # the list's section of the glyphs built in this window
+LACKING = u"Need a mark or letter the font lacks"
 
 
 def list_sections(recipes, shift_of, just_built=()):
@@ -1220,9 +1235,8 @@ def list_sections(recipes, shift_of, just_built=()):
     afterward (Correct mirrored components, a placement applied, marks lined up) reaches them: they left
     the list once built, and nothing could be set right on them (the owner's report of 2026-11-14); and
     those that need a mark or letter the font lacks. shift_of(recipe): existing_shift."""
-    groups = [(u"Can be built", []), (u"Existing glyphs: check to rebuild", []),
-              (u"Existing glyphs placed as suggested", []), (JUST_BUILT, []),
-              (u"Need a mark or letter the font lacks", [])]
+    groups = [(CAN_BE_BUILT, []), (EXISTING_OTHERWISE, []), (EXISTING_AS_SUGGESTED, []), (JUST_BUILT, []),
+              (LACKING, [])]
     for index, r in enumerate(recipes):
         if r.missing:
             at = 4
@@ -1240,9 +1254,11 @@ def preview_parts(selected, editable, related):
     """{widget's attribute: whether it is shown} of the letters tab's preview: the reference (heading,
     chooser, picture, note) and the line under the editor while a row is selected; the editor and its
     three buttons while the selected glyph can be drawn and placed; the strip of letters with the same
-    diacritic while it holds letters. Nothing selected: none of them (they only showed empty)."""
+    diacritic while it holds letters. Nothing selected: none of them (they only showed empty). Compact
+    diacritics to fit the line sits with the preview, left of Reset diacritics, while a row is selected."""
     return {"reference_title": selected, "reference_font": selected, "reference": selected,
-            "reference_note": selected, "hint": selected, "editor": editable, "reset_marks_button": editable,
+            "reference_note": selected, "hint": selected, "compact_box": selected, "editor": editable,
+            "reset_marks_button": editable,
             "propagate_button": editable, "line_up_button": editable, "strip_label": related and selected,
             "strip_area": related and selected}
 
@@ -1250,7 +1266,7 @@ def preview_parts(selected, editable, related):
 def list_controls(font, rows, searching):
     """{what: whether it is clickable} of the controls over a list, with no font (font False) or no row
     (rows: how many the list holds, shown or not): the choices that make the list (the character set,
-    Also list existing glyphs, Compact glyphs to fit the line; the script and Write the feature code)
+    Also list existing glyphs; the script and Write the feature code)
     need a font; the search field needs rows, or a text in it to take out (searching)."""
     return {"choices": bool(font), "search": bool(rows) or bool(searching)}
 
@@ -1314,7 +1330,7 @@ def line_up_attached(recipes, recipe, index, kind, ink_of, placement, metrics):
             continue
         side = other.marks[at].side
         if len([m for m in other.marks if m.side == side]) > 1:
-            left_out.append((other, u"stacked with another mark on the same side"))
+            left_out.append((other, u"stacked with another diacritic on the same side"))
             continue
         other_box = placed_mark_box(other, at, ink_of, placement, metrics)
         if other_box is None:
@@ -1370,10 +1386,42 @@ def adjusted(recipe, parts, ink_of):
     return parts
 
 
+# Compact diacritics to fit the line: the key its choice is remembered by (diacritics.json), and its help
+COMPACT_KEY = "compact_diacritics"
+COMPACT_HELP = (u"Makes the diacritics of a glyph too tall for a 120% line compact, by no more than it needs: the gaps "
+                u"of its stack closed just enough to fit, and only where closing them is not enough, its diacritics "
+                u"made smaller too, as little as fits, down to 70%; its row says what it took. The letter itself is "
+                u"never made compact, and a letter that reaches past the line by itself (a descender) does not count "
+                u"against its diacritics. Off (as at first), every diacritic keeps its own gap and size, and a glyph "
+                u"too tall says by how much, for you to see to by hand. A glyph whose diacritics you moved, scaled, "
+                u"lined up, or took from a related letter keeps what you set, either way, and its row says whether that "
+                u"fits. In the font, nothing changes until you build: a glyph the font has (<i>Also list existing "
+                u"glyphs</i>) is only compared with the other suggestion. The choice is remembered.")
+
 # What a row's notes say of the room of a 120% line (the top line counts the rows by them)
 COMPACT_NOTE = u"gaps closed"  # how a note of a glyph made compact begins
 STILL_NOTE = u"still"  # how a note of a glyph too tall even compact begins
 TOO_TALL_NOTE = u"too tall for a 120% line"  # in the note of a glyph that does not fit
+
+
+def is_compact_note(note):
+    """Whether a row's note says the glyph was made compact ("gap closed ...", "gaps closed ...")."""
+    return note.startswith(COMPACT_NOTE) or note.startswith(u"gap closed")
+
+
+def compact_note(gaps, diacritics, percent=None):
+    """A row's note of what compacting took, its words following the counts: "gap closed to fit a 120%
+    line" for a glyph with one gap, "gaps closed and diacritics at 85% to fit a 120% line"."""
+    closed = u"gap closed" if gaps == 1 else COMPACT_NOTE
+    if percent is None:
+        return u"%s to fit a 120%% line" % closed
+    return u"%s and %s at %d%% to fit a 120%% line" % (closed, u"diacritic" if diacritics == 1 else u"diacritics",
+                                                      percent)
+
+
+def hand_note(count):
+    """A row's note of the diacritics the hand moved or scaled: "diacritic placed by hand" for one."""
+    return u"diacritic placed by hand" if count == 1 else HAND_NOTE
 
 
 def room_counts(recipes):
@@ -1382,17 +1430,17 @@ def room_counts(recipes):
     compact = still = tall = 0
     for recipe in recipes:
         notes = list(recipe.notes)
-        compact += 1 if any(note.startswith(COMPACT_NOTE) for note in notes) else 0
+        compact += 1 if any(is_compact_note(note) for note in notes) else 0
         still += 1 if any(note.startswith(STILL_NOTE) for note in notes) else 0
         tall += 1 if any(TOO_TALL_NOTE in note and not note.startswith(STILL_NOTE) for note in notes) else 0
     return compact, still, tall
 
 
 def compact_text(on, kept):
-    """The log's line when Compact glyphs to fit the line is switched: what the suggestions are now, and
+    """The log's line when Compact diacritics to fit the line is switched: what the suggestions are now, and
     how many glyphs placed by hand keep what was set."""
     text = (u"Glyphs too tall for a 120% line are made compact again." if on else
-            u"Glyphs are no longer made compact: their marks keep their own gaps and size, and the rows say "
+            u"Glyphs are no longer made compact: their diacritics keep their own gaps and size, and the rows say "
             u"which are too tall for a 120% line.")
     if kept:
         text += u" %s placed by hand %s what you set." % (counted(kept, u"glyph"), u"keeps" if kept == 1 else u"keep")
@@ -1407,49 +1455,118 @@ def room_details(compact, still, tall, bold=None):
                                                    (tall, u"%s too tall for a 120%% line as placed")) if count]
 
 
+GAP_STEPS = 12  # halvings of the gaps' range that find how far a stack's gaps are closed (to 0.6/4096 of them)
+
+
+def room_limits(metrics, base):
+    """(top, bottom) a glyph's marks must keep within: the room of a 120% line (metrics), or the letter's
+    own ink where the letter itself reaches past it. A letter's descender can come lower than the line
+    below's tallest letters come up (y's -240 against Noto Sans's -131, its ascender set at 1069): the
+    marks are not to blame for that, and nothing done to them mends it. ӯ was counted 109 units too tall,
+    and its macron made 70% (the owner's report of 2026-11-15: "big on N and small on Y")."""
+    return max(metrics.top, base.top), min(metrics.bottom, base.bottom)
+
+
 def place(recipe, ink_of, placement, metrics=None, letter=None):
     """The recipe's components [(glyph, x scale, y scale, x, y)] and width (its letter's): each mark
-    placed by the Placement, and, where the glyph would reach past the room a 120% line spacing leaves
-    (metrics), made compact: its stack's gaps closed, then its marks made smaller, down to MIN_SCALE.
-    recipe.notes says what it took, and whether it still does not fit. A recipe whose compact is False
-    (Compact glyphs to fit the line, switched off) is left as placed, and its note says it is too tall."""
+    placed by the Placement, and, where its marks would reach past the room a 120% line spacing leaves
+    (metrics; room_limits), made compact, by no more than it needs: its stack's gaps closed just enough to
+    fit, down to CLOSED_GAPS of them, and only where that is not enough, its marks made smaller too, to
+    the largest whole percent that fits, down to MIN_SCALE. Closing every gap to CLOSED_GAPS at once set
+    Ӛ's dieresis 46 units down where 12 were needed (the owner's report of 2026-11-15). recipe.notes says
+    what it took, and whether it still does not fit. A recipe whose compact is False (Compact diacritics
+    to fit the line, switched off) is left as placed, and its note says it is too tall. A recipe whose
+    marks were placed by hand is measured as placed: its notes say whether that fits (finished)."""
     letter = letter or unicodedata.normalize("NFD", recipe.char)[0]
     base = ink_of(recipe.base)
     recipe.notes = []
+    was_checked = recipe.checked  # (a glyph placed by hand is judged by what was set: finished)
     if base is None:  # its letter not drawn (in this master): nothing to place
         return None, 0
     parts, top, bottom, widen = layout(recipe, ink_of, placement, letter)
     if parts is None:
         return None, base.advance
-    if metrics is None or (top <= metrics.top and bottom >= metrics.bottom):
+    if metrics is None:
         return finished(recipe, parts, ink_of), base.advance + widen
+    # (the words follow the counts: each diacritic above, below, or at a capital's left keeps a gap; all
+    # but a horn and an adscript are made smaller)
+    gaps = sum(1 for mark in recipe.marks if mark.side in ("above", "below", "left"))
+    smaller = sum(1 for mark in recipe.marks if mark.side not in ("right", "adscript"))
+    finish = lambda laid_parts: finished(recipe, laid_parts, ink_of, metrics, base, was_checked)
+    limit_top, limit_bottom = room_limits(metrics, base)
+
+    def fits(laid):
+        return laid[1] <= limit_top and laid[2] >= limit_bottom
+
+    def over(laid):
+        return max(laid[1] - limit_top, limit_bottom - laid[2])
+    if fits((parts, top, bottom)):
+        return finish(parts), base.advance + widen
     if not getattr(recipe, "compact", True):
         # Left as placed, its marks at their own gaps and size: the note says by how much it is too tall, and
         # the glyph stays checked (whoever switched compacting off means to see to it by hand)
-        recipe.notes.append(u"%s %s" % (units_up(max(top - metrics.top, metrics.bottom - bottom)), TOO_TALL_NOTE))
-        return finished(recipe, parts, ink_of), base.advance + widen
-    parts, top, bottom, widen = layout(recipe, ink_of, placement, letter, CLOSED_GAPS, CLOSED_GAPS)
-    note = COMPACT_NOTE + u" to fit a 120% line"
-    if top > metrics.top or bottom < metrics.bottom:
-        scale = 1.0
-        while scale > MIN_SCALE and (top > metrics.top or bottom < metrics.bottom):
-            scale = max(MIN_SCALE, scale - 0.05)
-            parts, top, bottom, widen = layout(recipe, ink_of, placement, letter, CLOSED_GAPS, CLOSED_GAPS, scale)
-        note = COMPACT_NOTE + u" and marks at %d%% to fit a 120%% line" % round(scale * 100)
+        recipe.notes.append(u"%s %s" % (units_up(over((parts, top, bottom))), TOO_TALL_NOTE))
+        return finish(parts), base.advance + widen
+    laid = layout(recipe, ink_of, placement, letter, CLOSED_GAPS, CLOSED_GAPS)
+    if fits(laid):  # the gaps closed just enough: the most of them that fits
+        low, high = CLOSED_GAPS, 1.0
+        for _ in range(GAP_STEPS):
+            middle = (low + high) / 2.0
+            tried = layout(recipe, ink_of, placement, letter, middle, middle)
+            if fits(tried):
+                low, laid = middle, tried
+            else:
+                high = middle
+        note = compact_note(gaps, smaller)
+    else:  # closed, and the marks made smaller: the largest whole percent that fits
+        low = int(round(MIN_SCALE * 100))
+        laid = layout(recipe, ink_of, placement, letter, CLOSED_GAPS, CLOSED_GAPS, low / 100.0)
+        if fits(laid):
+            high = 100
+            while high - low > 1:
+                middle = (low + high) // 2
+                tried = layout(recipe, ink_of, placement, letter, CLOSED_GAPS, CLOSED_GAPS, middle / 100.0)
+                if fits(tried):
+                    low, laid = middle, tried
+                else:
+                    high = middle
+        note = compact_note(gaps, smaller, low)
+    parts, top, bottom, widen = laid
     recipe.notes.append(note)
-    over = max(top - metrics.top, metrics.bottom - bottom)
-    if over > 0:
+    if not fits(laid):
         recipe.notes.append(u"%s %s %s: needs a shorter letter or marks drawn for it" % (
-            STILL_NOTE, units_up(over), TOO_TALL_NOTE))
+            STILL_NOTE, units_up(over(laid)), TOO_TALL_NOTE))
         recipe.checked = False
-    return finished(recipe, parts, ink_of), base.advance + widen
+    return finish(parts), base.advance + widen
 
 
-def finished(recipe, parts, ink_of):
-    """The placed parts with the hand's changes, and a note of them."""
-    if recipe.adjust:
-        recipe.notes.append(u"marks placed by hand")
-    return adjusted(recipe, parts, ink_of)
+HAND_NOTE = u"diacritics placed by hand"  # the note of a glyph whose marks the hand moved or scaled (hand_note)
+
+
+def finished(recipe, parts, ink_of, metrics=None, base=None, was_checked=None):
+    """The placed parts with the hand's changes, and a note of them. A glyph placed by hand keeps what was
+    set whichever way Compact diacritics to fit the line is switched, so its notes are of what was set,
+    not of the suggestion under it: whether it fits, and by how much it does not. Its row said "gaps closed
+    and marks at 70%" with the box unticked (the owner's report of 2026-11-15). Its check follows what was
+    set too (was_checked: its check before placing): the suggestion under it, too tall even compact, no
+    longer unchecks it with its reason wiped from the row; only what was set, too tall while compacting is
+    on, unchecks it, as a suggestion too tall even compact is, its row saying by how much."""
+    if not recipe.adjust:
+        return parts
+    placed = adjusted(recipe, parts, ink_of)
+    recipe.notes = []
+    if was_checked is not None:
+        recipe.checked = was_checked
+    box = parts_box(placed, ink_of) if metrics is not None and base is not None and placed else None
+    if box is not None:
+        limit_top, limit_bottom = room_limits(metrics, base)
+        over = max(box[3] - limit_top, limit_bottom - box[1])
+        if over > 0:
+            recipe.notes.append(u"%s %s" % (units_up(over), TOO_TALL_NOTE))
+            if getattr(recipe, "compact", True):
+                recipe.checked = False
+    recipe.notes.append(hand_note(len(recipe.adjust)))
+    return placed
 
 
 # ---------------------------------------------------------------------------
@@ -1647,10 +1764,10 @@ def far_words(kind, data):
     """A far-off mark's reason as a row's note says it: "a mark outside the view", "a mark past winAscent
     1160 (Windows clips above)", "a mark away from its letter (6,700 units)"."""
     if kind == "outside":
-        return u"a mark outside the view"
+        return u"a diacritic outside the view"
     if kind == "clipped":
-        return u"a mark past %s" % data
-    return u"a mark away from its letter (%s units)" % grouped(data)
+        return u"a diacritic past %s" % data
+    return u"a diacritic away from its letter (%s units)" % grouped(data)
 
 
 def far_note(found):
@@ -1683,9 +1800,9 @@ def far_lines(far, links, bold=None, upm=1000.0):
     for kind, data in order:
         chars = by_reason[(kind, data)]
         one = len(chars) == 1
-        what = {"outside": u"a mark outside the view (over an em past the font's lines)",
-                "clipped": u"a mark past %s" % data,
-                "detached": u"a mark away from its letter (over %s units)" % grouped(DETACH_SHARE * finite(upm, 1000.0))}[kind]
+        what = {"outside": u"a diacritic outside the view (over an em past the font's lines)",
+                "clipped": u"a diacritic past %s" % data,
+                "detached": u"a diacritic away from its letter (over %s units)" % grouped(DETACH_SHARE * finite(upm, 1000.0))}[kind]
         lines.append(u"%s now %s %s: %s. Look at %s; <i>Reset diacritics</i> on %s row puts %s back." % (
             bold(counted(len(chars), u"letter")), u"has" if one else u"have", what, links(chars),
             u"it" if one else u"them", u"its" if one else u"a", u"it"))
@@ -2249,6 +2366,9 @@ class AnchorGlyph(object):
         self.anchors = {}  # name: (x, y), the ones to add
         self.adjust = {}  # name: [dx, dy], moved by hand
         self.side = None  # a mark's side: "top" or "bottom"
+        # a mark's attaching point for its side ({side: (x, y)}), where its _top (or _bottom, _ogonek, ...)
+        # is or would be: the preview hangs it there, a mark the font attaches by anchors of its own too
+        self.hang = {}
         self.checked = True
 
     def placed(self):
@@ -2438,6 +2558,12 @@ SAMPLE_MARKS = {"latin": {"top": 0x0301, "bottom": 0x0323}, "greek": {"top": 0x0
                 "tamil": {"top": 0x0BCD}, "thai": {"top": 0x0E48, "bottom": 0x0E38},
                 "lao": {"top": 0x0EC8, "bottom": 0x0EB8}, "myanmar": {"top": 0x1036, "bottom": 0x102F},
                 "khmer": {"top": 0x17B7, "bottom": 0x17BB}}
+# The marks the Mark anchors tab draws on a letter's anchors in Latin, Greek, and Cyrillic, the first the font
+# has of each side: diacritics a reader knows (a circumflex above, an acute stacked on it where marks
+# stack; a dot below; the ogonek; the horn)
+REPRESENTATIVE_MARKS = {"top": (0x0302, 0x0301, 0x0300, 0x0308, 0x0304, 0x0303, 0x030C, 0x0306, 0x030A, 0x0307),
+                        "bottom": (0x0323, 0x0331, 0x0326, 0x0325, 0x032D, 0x0324, 0x0330),
+                        "ogonek": (0x0328,), "horn": (0x031B,)}
 
 
 def letter_row(model, script, side, code):
@@ -2606,6 +2732,9 @@ def plan_anchors(glyphs, model, script, upm, x_height):
             # A mark attached already by an anchor of its own (a horn's _topright, an ogonek's _bottom) takes no
             # other: in two mark classes, fontTools' compiler refuses it
             attached = any(name.startswith(u"_") for name in g.existing)
+            g.hang = dict((anchor[1:], (round(point[0]), round(point[1]))) for anchor, point in points
+                          if anchor.startswith(u"_"))
+            g.hang.update((name[1:], point) for name, point in g.existing.items() if name[1:] in g.hang)
             for anchor, point in points:
                 if anchor not in g.existing and not (attached and anchor.startswith(u"_")):
                     g.anchors[anchor] = (round(point[0]), round(point[1]))
@@ -3458,7 +3587,7 @@ def component_parts(layer):
 
 HELP = u"""<b>FreeLab Diacritics</b><br>
 Builds the letters with diacritics this font lacks (Latin, Greek, Cyrillic, and the voiced kana) from its
-letters and marks, as glyphs of components, placing each mark as the font's own accented glyphs place theirs (no
+letters and marks, as glyphs of components, placing each diacritic as the font's own accented glyphs place theirs (no
 anchors needed). Nothing is made until you click <i>Build checked glyphs</i>.<br><br>
 <b>The list</b>: each glyph that can be built, drawn as it would be, with the glyphs it is
 built from. Capitals take a mark's .case form where the font has one; i and j take their dotless
@@ -3469,16 +3598,17 @@ decomposition names (Latvian's comma below for a cedilla, the vertical caron of 
 used, and the row says why. Double-click a row to open its glyph (or, not built yet, its letter) in a
 <i>Glyph</i> window.<br>
 <b>The editor</b> (under the list): the selected glyph between its letter and a letter the font has
-with the same base (click that one to go to its row). Click a mark to select it; drag it (its center snaps to the letter's center, a guide drawn;
+with the same base (click that one to go to its row). Click a diacritic to select it; drag it (its center snaps to the letter's center, a guide drawn;
 <i>Alt</i>: no snapping), or press the arrow keys (<i>Shift</i>: 10 units),
 to move it; drag a corner or a side of its frame to scale it (<i>Shift</i> on a corner: in proportion);
-<i>Tab</i> selects the next mark, <i>Backspace</i> puts the selected one back. Your changes stay with the glyph as
+<i>Tab</i> selects the next diacritic, <i>Backspace</i> puts the selected one back. Your changes stay with the glyph as
 you go down the list, and are built. The faint dashed lines are the font's lines, each named at one end. A
 limit says in parentheses what happens past it (Windows clips past winAscent and winDescent, macOS past the
-hhea values, and past the room of a 120% line the glyph meets the next line), and turns amber when a mark
+hhea values, and past the room of a 120% line the glyph meets the next line), and turns amber when a diacritic
 crosses it; the font's ascender and descender and the typo values are drawn for reference and never do.<br>
-<b>Room</b>: a glyph too tall for a 120% line is made compact (its gaps closed, then its marks made smaller),
-unless you switch <i>Compact glyphs to fit the line</i> off; glyphs you placed by hand keep what you set.<br>
+<b>Room</b>: <i>Compact diacritics to fit the line</i> (beside the preview, unticked at first) makes the diacritics
+of a glyph too tall for a 120% line compact, by no more than it needs (its gaps closed just enough, and only then
+its diacritics made smaller); glyphs you placed by hand keep what you set.<br>
 <b>Finding glyphs</b>: type in <i>Find a glyph</i> to show only the rows with that text in their name or in
 what they are built from, that character, or that Unicode value; the others keep their checks, and <i>Build
 checked glyphs</i> builds them too (the button says how many are not shown). <i>Check only
@@ -3488,14 +3618,14 @@ or one you pick (its entry at the top of the list takes the pick back).<br>
 <b>Mirrored components</b>: a component mirrored one way has its contours reversed, and shows a hole where it
 overlaps another part. Diacritics builds none; <i>Correct mirrored components</i> sets right those the listed
 glyphs of the font have.<br>
-<i>Restore suggestions</i> puts every check and every mark back as the list first came.<br>
-<b>Masters</b>: each glyph is built in every master, each measured on its own; marks moved by hand
+<i>Restore suggestions</i> puts every check and every diacritic back as the list first came.<br>
+<b>Masters</b>: each glyph is built in every master, each measured on its own; diacritics moved by hand
 move by as much in every master.<br><br>
 Click this help's <i>?</i> button, then any control, for what it does."""
 
 LINES_HELP = (u"The faint dashed lines are the font's lines, named at one end (equal ones share a line). A limit "
               u"says in parentheses what happens past it: Windows clips past winAscent and winDescent, macOS past "
-              u"the hhea values, and past the room of a 120% line the glyph meets the next line; a limit a mark "
+              u"the hhea values, and past the room of a 120% line the glyph meets the next line; a limit a diacritic "
               u"crosses turns amber. The font's ascender and descender and its typo values are reference lines: "
               u"drawn, never amber.")
 TABS_HELP = (u"<i>Letters with diacritics</i> builds the letters the font lacks from its letters and marks. "
@@ -3505,11 +3635,11 @@ TAB_HELPS = (u"The letters with diacritics the font lacks, built from its letter
              u"Anchors and mark features for scripts whose marks are attached, not built (Khmer, Thai, Arabic, "
              u"Hebrew, Devanagari, Bengali, Gujarati, Tamil, and the combining marks of any script).")
 STRIP_HELP = (u"The letters with the same diacritic as the selected glyph (on the same side, capitals and "
-              u"lowercase): click one to select it and see how the mark sits on it, after placing it by hand or "
+              u"lowercase): click one to select it and see how the diacritic sits on it, after placing it by hand or "
               u"applying it to related letters.")
 REFERENCE_NOTE_HELP = (u"Which font the reference is drawn in: the one chosen, or, where that one lacks the "
                        u"character, the font drawn in its place.")
-HINT_HELP = (u"What is selected in the picture: the mark, how far it was moved and scaled by hand, and whether it "
+HINT_HELP = (u"What is selected in the picture: the diacritic, how far it was moved and scaled by hand, and whether it "
              u"lies outside the picture; else what a click there does.")
 CORRECT_HELP = (u"Sets right the mirrored components of the font's glyphs listed here, those shown: under <i>Also "
                 u"list existing glyphs</i>, and those just built. A component mirrored one way (scaled by a negative number across or up, not "
@@ -4415,7 +4545,7 @@ class AnchorPage(object):
         self.tree.setHeaderLabels(list(self.COLUMNS))
         self.tree.setIconSize(QtCore.QSize(ICON_SIZE, ICON_SIZE))
         self.tree.setProperty(ak.LEAVE_ALONE_PROP, True)
-        ak.grid_lines(self.tree)
+        ak.table_layout(self.tree)
         self.tree.setWhatsThis(u"The script's bases (top and bottom anchors) and marks (the anchor each attaches by, "
                                u"and the one the next mark attaches to). Anchors a glyph has already are kept, and "
                                u"its row names those the marks attach by. Checked glyphs get theirs.")
@@ -4910,8 +5040,7 @@ class AnchorPage(object):
                 sides += sorted(set(m.side for m in self.glyphs if m.role == "mark" and m.side in SIDE_FAMILY
                                     and m.side in g.placed())) + ["reph"]
             for side in sides:
-                mark = next((m for m in self.glyphs if m.role in ("mark", "reph") and m.side == side
-                             and (u"_" + side) in m.placed()), None)
+                mark = self.sample_mark(side)
                 if g.role == "ligature":
                     found.extend((u"%s_%d" % (side, part), mark) for part in range(1, max(g.parts, 2) + 1))
                 else:
@@ -4922,6 +5051,40 @@ class AnchorPage(object):
         side = self.attach_side(g)
         base = next((b for b in self.glyphs if b.role == "base" and b.code and side in b.placed()), None)
         return [(side, base)]
+
+    def hang_point(self, m, side):
+        """Where a mark hangs on a letter's anchor of that side: its own attaching anchor (_top), else
+        where that anchor would be (AnchorGlyph.hang: a mark the font attaches by anchors of its own,
+        Noto Sans's _t.cyrillicbreve, is drawn as it would sit on the anchor shown), else None."""
+        if m is None:
+            return None
+        return m.placed().get(u"_" + side) or (m.hang.get(side) if side == m.side else None)
+
+    def sample_mark(self, side):
+        """The mark drawn on a letter's anchor of that side: a representative one, as a reader knows it
+        (REPRESENTATIVE_MARKS in Latin, Greek, and Cyrillic: a circumflex above, a dot below, the ogonek,
+        the horn), then the script's sample, then any of that side, those encoded and unsuffixed first.
+        It used to be the first mark in the font's order with an anchor _top of its own, which in a font
+        whose marks attach by anchors of other names was an odd one (Noto Sans's U+031A, a right angle,
+        over every letter, and no mark below or ogonek at all: the owner's report of 2026-11-15)."""
+        marks = [m for m in self.glyphs if m.role in ("mark", "reph") and m.side == side
+                 and self.hang_point(m, side) is not None]
+        if not marks:
+            return None
+        try:
+            script = self.script()
+        except Exception:
+            script = None
+        wanted = list(REPRESENTATIVE_MARKS.get(side, ())) if script in COMPOSED_SCRIPTS else []
+        sample = SAMPLE_MARKS.get(script, {}).get(side)
+        if sample:
+            wanted.append(sample)
+        for code in wanted:
+            found = [m for m in marks if m.code == code]
+            if found:
+                return sorted(found, key=lambda m: u"." in m.name)[0]
+        plain = [m for m in marks if m.code and u"." not in m.name]
+        return (plain or marks)[0]
 
     def shows_stack(self, g):
         """Whether a base is drawn with a second mark on its mark above: a letter whose precomposed forms
@@ -4942,7 +5105,7 @@ class AnchorPage(object):
         side = under.side
         if under.role != "mark" or side not in ("top", "bottom") or side not in under.placed():
             return None
-        choices = [m for m in self.glyphs if m.role == "mark" and m.side == side and (u"_" + side) in m.placed()]
+        choices = [m for m in self.glyphs if m.role == "mark" and m.side == side and self.hang_point(m, side) is not None]
         if not choices:
             return None
         try:
@@ -4954,11 +5117,20 @@ class AnchorPage(object):
 
     def attach_side(self, g):
         """The side a mark (the reph) attaches by: its class's, else that of an attaching anchor of its own
-        (an ogonek kept on its _bottom gets no _ogonek)."""
+        that a letter has (an ogonek kept on its _bottom gets no _ogonek; Noto Sans's comma below hangs on
+        its _m.uni0326, which letters have), else its class's again, hung where its anchor would be
+        (hang_point). A mark whose own anchors no letter has was drawn alone on a dotted circle (Noto
+        Sans's U+0326, by its _b.uni0326, while U+0309 sat on A: the owner's report of 2026-11-15)."""
         placed = g.placed()
         if g.side is None or (u"_" + g.side) in placed:
             return g.side
         own = sorted(name[1:] for name in placed if name.startswith(u"_"))
+        letters = [b.placed() for b in self.glyphs if b.role == "base" and b.code]
+        for name in own:
+            if any(name in anchors for anchors in letters):
+                return name
+        if g.side in g.hang:
+            return g.side
         return own[0] if own else g.side
 
     def show_preview(self, selected, placed):
@@ -5068,7 +5240,7 @@ class AnchorPage(object):
         elif g.role in ("base", "ligature"):
             parts.append((g.name, 1.0, 1.0, 0.0, 0.0))
             for side, mark in self.samples(g):
-                own = mark.placed().get(u"_" + side.split(u"_")[0]) if mark is not None else None
+                own = self.hang_point(mark, side.split(u"_")[0])
                 if own is None or side not in placed:
                     continue
                 dx, dy = placed[side][0] - own[0], placed[side][1] - own[1]
@@ -5079,24 +5251,28 @@ class AnchorPage(object):
                 if upper is not None:
                     # A second mark on the first, by the marks' own anchors: shown, not moved from here (it
                     # follows the first; its place is the first mark's anchor, moved on that mark's row)
-                    on, by = mark.placed()[side], upper.placed()[u"_" + side]
+                    on, by = mark.placed()[side], self.hang_point(upper, side)
                     parts.append((upper.name, 1.0, 1.0, dx + on[0] - by[0], dy + on[1] - by[1]))
             advance = self.ink.path(g.name)[1]
         else:
             side, base = self.samples(g)[0]
             target = base.placed().get(side) if base is not None else None
             own = placed.get(u"_" + side)
+            hung = own is None  # (hung where its anchor would be: there is no anchor of its own to move)
+            if hung:
+                own = self.hang_point(g, side)
             if target is None or own is None:
                 return None
             dx, dy = target[0] - own[0], target[1] - own[1]
             parts = [(base.name, 1.0, 1.0, 0.0, 0.0), (g.name, 1.0, 1.0, dx, dy)]
-            ranges = [(1, 2)]
-            self.edits.append((g, u"_" + side, -1))
+            ranges = [] if hung else [(1, 2)]
+            if not hung:
+                self.edits.append((g, u"_" + side, -1))
             upper = self.stack_mark(g) if side == g.side else None
             if upper is not None:
                 # Another mark on it, hung on the anchor the next mark attaches to (mark to mark): dragging
                 # that one moves this anchor
-                on, by = placed[side], upper.placed()[u"_" + side]
+                on, by = placed[side], self.hang_point(upper, side)
                 parts.append((upper.name, 1.0, 1.0, dx + on[0] - by[0], dy + on[1] - by[1]))
                 ranges.append((2, 3))
                 self.edits.append((g, side, 1))
@@ -5366,24 +5542,17 @@ class AccentsDialog(object):
         self.existing_box.setWhatsThis(u"Also lists the letters with diacritics the font already has (Latin, Greek, "
                                        u"and Cyrillic), in a section of their own, unchecked: each shown beside its "
                                        u"glyph as the font has it, to compare. Placements applied to related letters "
-                                       u"and marks lined up reach them too, so a font can be made consistent; only "
+                                       u"and diacritics lined up reach them too, so a font can be made consistent; only "
                                        u"those you check are rebuilt (their glyphs' outlines in each master replaced "
                                        u"by the letter and marks as components; <i>Edit &gt; Undo</i> takes it back).")
         row.addWidget(self.existing_box)
         self.settings = read_settings(ak)
-        self.compact = self.settings.get("compact") is not False  # (on unless switched off: as it always was)
-        self.compact_box = QtGui.QCheckBox(u"Compact glyphs to fit the line")
+        # Off unless switched on (the owner's choice of 2026-11-15); its own key, so that a choice saved for
+        # the box as it was (on at first, every gap closed at once) is not taken for this one
+        self.compact = self.settings.get(COMPACT_KEY) is True
+        self.compact_box = QtGui.QCheckBox(u"Compact diacritics to fit the line")
         self.compact_box.setChecked(self.compact)
-        self.compact_box.setWhatsThis(u"Makes a glyph too tall for a 120% line compact: the gaps of its stack "
-                                      u"closed, then its marks made smaller, down to 70%; its row says what it took. "
-                                      u"Switched off, every mark keeps its own gap and size, and a glyph too tall "
-                                      u"says by how much, for you to see to by hand. Switching it changes only the "
-                                      u"glyphs still placed as suggested: one whose marks you moved, scaled, lined "
-                                      u"up, or took from a related letter keeps what you set. In the font, nothing "
-                                      u"changes until you build: a glyph the font has (<i>Also list existing "
-                                      u"glyphs</i>) is only compared with the other suggestion. The choice is "
-                                      u"remembered.")
-        row.addWidget(self.compact_box)
+        self.compact_box.setWhatsThis(COMPACT_HELP)
         row.addStretch(1)
         self.reference_boxes = []  # the reference font's chooser on each tab: one choice, shown in both
         self.hidden = set()  # the rows a search hides, by their recipe's place in self.recipes
@@ -5406,7 +5575,7 @@ class AccentsDialog(object):
         self.tree.setHeaderLabels(list(self.COLUMNS))
         self.tree.setIconSize(QtCore.QSize(ICON_SIZE, ICON_SIZE))
         self.tree.setProperty(ak.LEAVE_ALONE_PROP, True)  # its pictures are drawn in the dialog's colors
-        ak.grid_lines(self.tree)
+        ak.table_layout(self.tree)
         self.tree.setWhatsThis(u"The letters with diacritics this font lacks: those that can be built (checked ones "
                                u"are built), and, at the end, those that need a mark the font does not have. "
                                u"Select a row to see its letter in the reference font. Double-click a row to open its "
@@ -5462,20 +5631,22 @@ class AccentsDialog(object):
         self.editor.setProperty(ak.LEAVE_ALONE_PROP, True)  # dark mode leaves what it draws alone
         self.editor.setWhatsThis(u"The selected glyph as it would be built, between its letter and a letter the font "
                                  u"has with the same base (click that one to go to its row: it is listed, "
-                                 u"unchecked, until you go on to another letter, unless you check it). Click a mark to select it, drag it (its center snaps to "
+                                 u"unchecked, until you go on to another letter, unless you check it). Click a diacritic to select it, drag it (its center snaps to "
                                  u"the letter's box center or top center, a guide drawn; <i>Alt</i>: no snapping) or "
                                  u"press the arrow keys "
-                                 u"to move it, drag its frame to scale it; <i>Tab</i> selects the next mark, <i>Backspace</i> "
+                                 u"to move it, drag its frame to scale it; <i>Tab</i> selects the next diacritic, <i>Backspace</i> "
                                  u"puts it back; "
                                  u"double-click the glyph to open it (or, not built yet, its letter) in a <i>Glyph</i> "
                                  u"window. " + LINES_HELP + u" The glyph is drawn as a renderer fills it, its "
-                                 u"components kept: a hole shown here would show in the font. A mark moved out of "
+                                 u"components kept: a hole shown here would show in the font. A diacritic moved out of "
                                  u"the picture is shown by an arrow at the edge: click the arrow to select it.")
         editing.addWidget(self.editor, 1)
         hint_row = QtGui.QHBoxLayout()
         self.hint = helped(QtGui.QLabel(u"Click a diacritic to move or scale it."), HINT_HELP)
         self.hint.setWordWrap(True)
         hint_row.addWidget(self.hint, 1)
+        # (with the preview it changes, left of Reset diacritics: the owner's report of 2026-11-15)
+        hint_row.addWidget(self.compact_box)
         self.reset_marks_button = QtGui.QPushButton(u"Reset diacritics")
         self.reset_marks_button.setWhatsThis(u"Puts this glyph's diacritics back where they were suggested.")
         hint_row.addWidget(self.reset_marks_button)
@@ -5483,28 +5654,28 @@ class AccentsDialog(object):
         self.propagate_button.setWhatsThis(u"Moves and scales the same diacritic on the related letters as on this "
                                            u"one: the same mark, on the same side and at the same place in its "
                                            u"stack, over letters of the same case (a circumflex raised on <i>C</i>: "
-                                           u"every capital with a circumflex). Across, a mark centered by hand "
+                                           u"every capital with a circumflex). Across, a diacritic centered by hand "
                                            u"(snapped to a center) is centered on each letter; else its offset from "
                                            u"the letter's center is carried in units, each letter keeping where fonts "
-                                           u"set marks on it (right of <i>l</i>'s stem). Grayed once applied, until "
-                                           u"the mark is moved again. A mark put back here (<i>Reset "
+                                           u"set diacritics on it (right of <i>l</i>'s stem). Grayed once applied, "
+                                           u"until the diacritic is moved again. A diacritic put back here (<i>Reset "
                                            u"diacritics</i>) while related letters still hold a placement made by "
                                            u"hand keeps the button clickable: it then puts theirs back too. "
-                                           u"Letters where the mark then comes "
-                                           u"within %d units of its letter or another mark are named in the log and "
-                                           u"in their row, to look at (a mark that joins its letter, an ogonek, a "
+                                           u"Letters where the diacritic then comes "
+                                           u"within %d units of its letter or another diacritic are named in the log "
+                                           u"and in their row, to look at (a diacritic that joins its letter, an ogonek, a "
                                            u"cedilla, or a horn, is named when it does not touch it instead); "
                                            u"<i>Reset diacritics</i> on a row puts it back."
                                            % round(TOUCH_SHARE * 1000))
         hint_row.addWidget(self.propagate_button)
-        self.line_up_button = QtGui.QPushButton(u"Line up marks")
-        self.line_up_button.setWhatsThis(u"Sets every mark above (or below) of the same group at the same height as "
-                                         u"this glyph's: its bottom (a mark below: its top) level with this one's. A "
-                                         u"group: the same side, the same case, and letters of the same height "
-                                         u"(within %d%% of the em: h's circumflex is not set as low as e's). Marks "
+        self.line_up_button = QtGui.QPushButton(u"Line up diacritics")
+        self.line_up_button.setWhatsThis(u"Sets every diacritic above (or below) of the same group at the same height "
+                                         u"as this glyph's: its bottom (a diacritic below: its top) level with this "
+                                         u"one's. A group: the same side, the same case, and letters of the same height "
+                                         u"(within %d%% of the em: h's circumflex is not set as low as e's). Diacritics "
                                          u"placed by a rule of their own (cedilla, ogonek, horn, the vertical caron, "
-                                         u"conventions), stacked marks, and taller or shorter letters are left as they "
-                                         u"are and named in the log. Each moved mark counts as moved by hand: "
+                                         u"conventions), stacked diacritics, and taller or shorter letters are left as "
+                                         u"they are and named in the log. Each moved diacritic counts as moved by hand: "
                                          u"<i>Reset diacritics</i> on a row puts it back." % round(LINE_UP_HEIGHT_SHARE * 100))
         hint_row.addWidget(self.line_up_button)
         editing.addLayout(hint_row)
@@ -5525,7 +5696,7 @@ class AccentsDialog(object):
                                        u"Check</i> is asked, when its data cannot be read, and when no glyph shown "
                                        u"is among them.")
         self.restore_button = QtGui.QPushButton("Restore suggestions")
-        self.restore_button.setWhatsThis(u"Puts every check, and every mark moved by hand, back as the list first came.")
+        self.restore_button.setWhatsThis(u"Puts every check, and every diacritic moved by hand, back as the list first came.")
         self.glyph_window_button = QtGui.QPushButton("Show in Glyph window")
         self.glyph_window_button.setWhatsThis(u"Opens the selected glyph in a <i>Glyph</i> window, between H's, n's, and o's "
                                               u"(only a glyph the font has: build it first).")
@@ -5536,12 +5707,12 @@ class AccentsDialog(object):
                                        u"shown. <i>Edit &gt; Undo</i> takes it back.")
         self.kerning_button = QtGui.QPushButton(u"Check kerning of these glyphs")
         self.kerning_button.setWhatsThis(u"Opens <i>Kerning Check</i> on the pairs with the glyphs built here (since "
-                                         u"this dialog opened): collisions their marks may cause, kerning to clean "
+                                         u"this dialog opened): collisions their diacritics may cause, kerning to clean "
                                          u"up.")
         self.correct_button = QtGui.QPushButton(correct_button_text(0))
         self.correct_button.setWhatsThis(CORRECT_HELP)
         self.close_button = helped(QtGui.QPushButton("Close"), u"Closes this window. Nothing is built by closing; "
-                                   u"checks and marks moved by hand are not kept.")
+                                   u"checks and diacritics moved by hand are not kept.")
         for button in (self.all_button, self.none_button, self.value_button, self.restore_button,
                        self.glyph_window_button, self.kerning_button, self.correct_button):
             buttons.addWidget(button)
@@ -6458,7 +6629,7 @@ class AccentsDialog(object):
         self.update_buttons()
         self.went_on()  # (checks changed: a glyph listed to show it goes)
 
-    # -- Compact glyphs to fit the line ------------------------------------------------------
+    # -- Compact diacritics to fit the line --------------------------------------------------
 
     def sync_compact(self, recipes=None):
         """Each recipe still placed as suggested follows the dialog's choice of compacting. One placed by
@@ -6470,14 +6641,14 @@ class AccentsDialog(object):
                 r.compact = compact
 
     def compact_toggled(self):
-        """Compact glyphs to fit the line, switched: the rows still placed as suggested take the other
+        """Compact diacritics to fit the line, switched: the rows still placed as suggested take the other
         suggestion (their checks as the list first gives them, unless changed by hand); the rows placed by
         hand keep what was set. Nothing changes in the font."""
         try:  # (a signal's handler: nothing may escape to Qt)
             QtCore, QtGui = _qt()
             self.harvest()
             self.compact = bool(_property(self.compact_box, "checked"))
-            self.settings["compact"] = self.compact
+            self.settings[COMPACT_KEY] = self.compact
             write_settings(self.ak, self.settings)
             self.shift_cache = {}
             if not self.recipes:  # (no font, or nothing listed: the choice is kept for the next list)
@@ -6677,9 +6848,9 @@ class AccentsDialog(object):
         index = self.line_up_index(r)
         ak.enable(self.line_up_button, index is not None)
         kind = attached_kind(r.marks[index]) if index is not None else None
-        self.line_up_button.setText(u"Line up marks" if index is None else (
+        self.line_up_button.setText(u"Line up diacritics" if index is None else (
             u"Line up %ss" % ("vertical caron" if kind == "vertical caron" else kind) if kind else
-            u"Line up marks %s" % r.marks[index].side))
+            u"Line up diacritics %s" % r.marks[index].side))
 
     def line_up_index(self, r):
         """The mark of r to line others up with: the one selected in the editor, else its first above or
@@ -6705,7 +6876,7 @@ class AccentsDialog(object):
             line, moves, left_out = line_up_plan(self.recipes, r, index, ink, placement, self.metrics(self.package),
                                                  float(self.package.upm))
         except Exception as exc:
-            self.log.add(u"Could not line up the marks: %s" % html(exc), "error")
+            self.log.add(u"Could not line up the diacritics: %s" % html(exc), "error")
             return
         if line is None:
             return
@@ -6731,13 +6902,13 @@ class AccentsDialog(object):
                 self.tree.blockSignals(False)
         if moves:
             far = [other for other, _, _ in moves if self.far_reasons(other)]  # (lined up with a mark far off)
-            self.log.add(u"Lined up the marks %s of %s with %s's %s (its %s at %s): %s." % (
+            self.log.add(u"Lined up the diacritics %s of %s with %s's %s (its %s at %s): %s." % (
                 side, b(counted(len(moves), group[:-1] if len(moves) == 1 else group)), b(r.char),
                 html(r.marks[index].root), edge, b(int(round(line))),
                 self.ak.glyph_links([other.char for other, _, _ in moves])), "warning" if far else "done")
             self.log_far(far)
         else:
-            self.log.add(u"The marks %s of the %s like %s already sit at its height." % (side, group, b(r.char)))
+            self.log.add(u"The diacritics %s of the %s like %s already sit at its height." % (side, group, b(r.char)))
         by_reason = {}
         for other, why in left_out:
             by_reason.setdefault(why, []).append(other.char)
@@ -6759,7 +6930,7 @@ class AccentsDialog(object):
         self.fill()
         self.select()
         self.restore_scroll()
-        self.log.add(u"Checks and marks restored as suggested.")
+        self.log.add(u"Checks and diacritics restored as suggested.")
 
     def selected(self):
         QtCore, QtGui = _qt()
@@ -6891,7 +7062,7 @@ class AccentsDialog(object):
             other = related[at]
             if other is None:  # the bar between letters with the mark alone and with it among others
                 button.setText(u"|")
-                button.setToolTip(u"After the bar: letters with this mark among others.")
+                button.setToolTip(u"After the bar: letters with this diacritic among others.")
                 button.setStyleSheet(u"QToolButton { border: none; color: %s; }" % quiet)
                 button.setEnabled(False)
                 button.show()
@@ -6981,7 +7152,7 @@ class AccentsDialog(object):
             self.editor.scene = None
             self.editor.update()
             self.show_preview_parts(r, related=related)
-            self.hint.setText(u"Select a glyph that can be built to place its marks." if r is None else
+            self.hint.setText(u"Select a glyph that can be built to place its diacritics." if r is None else
                               u"%s %s." % (r.char, r.describe()))
             self.draw_reference(r)
             self.update_buttons()
@@ -7016,8 +7187,7 @@ class AccentsDialog(object):
         if recipe.existing and ink.path(recipe.existing)[0] is not None:  # the font's own, to compare
             glyphs.append(([(recipe.existing, 1.0, 1.0, 0.0, 0.0)], ink.path(recipe.existing)[1], "existing"))
             shift = self.existing_shift(recipe)
-            captions = {"existing": u"Current", "new": u"Suggested" + (u" (the same)" if shift == (0, 0) else (
-                u" (mark %s)" % shift_words(*shift) if shift else u""))}
+            captions = {"existing": u"Current", "new": suggested_caption(shift)}
         elif letter:
             glyphs.append(([(letter, 1.0, 1.0, 0.0, 0.0)], ink.path(letter)[1], "before"))
         glyphs.append((parts, width, "new"))
@@ -7222,21 +7392,21 @@ class AccentsDialog(object):
         if close:
             one = len(close) == 1
             if how == "built":
-                text = u"%s built with a mark within %d units of %s letter or another mark: %s. Look at %s." % (
+                text = u"%s built with a diacritic within %d units of %s letter or another diacritic: %s. Look at %s." % (
                     b(counted(len(close), u"glyph")), units, u"its" if one else u"their", links(close),
                     u"it" if one else u"them")
             else:
-                text = u"%s %s%s within %d units of %s letter or another mark: %s. Look at %s." % (
+                text = u"%s %s%s within %d units of %s letter or another diacritic: %s. Look at %s." % (
                     b(counted(len(close), u"letter")), u"now " if how == "now" else u"", u"comes" if one else u"come",
                     units, u"its" if one else u"their", links(close), u"it" if one else u"them")
             self.log.add(text, "warning")
         if apart:
             one = len(apart) == 1
             if how == "built":
-                text = u"%s built with a mark that joins its letter (ogonek, cedilla, horn) and does not touch it: %s. " \
+                text = u"%s built with a diacritic that joins its letter (ogonek, cedilla, horn) and does not touch it: %s. " \
                        u"Look at %s." % (b(counted(len(apart), u"glyph")), links(apart), u"it" if one else u"them")
             else:
-                text = u"%s %s%s a mark that joins its letter (ogonek, cedilla, horn) and does not touch it: %s. " \
+                text = u"%s %s%s a diacritic that joins its letter (ogonek, cedilla, horn) and does not touch it: %s. " \
                        u"Look at %s." % (b(counted(len(apart), u"letter")), u"now " if how == "now" else u"",
                                          u"has" if one else u"have", links(apart), u"it" if one else u"them")
             self.log.add(text, "warning")
@@ -7892,7 +8062,7 @@ class AccentsDialog(object):
             for name in [r.base] + [part[0] for mark in r.marks for part in mark.parts]:
                 if ink(name) is None:
                     return u"%s has no outline in master %s" % (name, master)
-        return u"its marks could not be placed"
+        return u"its diacritic could not be placed" if len(r.marks) == 1 else u"its diacritics could not be placed"
 
     def show(self):
         QtCore, QtGui = _qt()

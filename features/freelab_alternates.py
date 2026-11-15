@@ -532,7 +532,7 @@ class AlternatesPage(object):
         self.tree.setIconSize(QtCore.QSize(ICON_SIZE * 3, ICON_SIZE))
         self.tree.setProperty(self.ak.LEAVE_ALONE_PROP, True)  # its pictures are drawn in the dialog's colors
         self.tree.setWhatsThis(listed)
-        self.ak.grid_lines(self.tree)
+        self.ak.table_layout(self.tree)
         layout.addWidget(self.tree, 2)
         row = QtGui.QHBoxLayout()
         self.all_button = QtGui.QPushButton(u"Check all")

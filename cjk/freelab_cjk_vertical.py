@@ -65,6 +65,22 @@ SECTION_LABELS = (("rotated", u"Turned a quarter (brackets, dashes, the long vow
 # forms); the others the corpus's fonts give a form (full-width Greek and Cyrillic, symbols, box
 # drawing) are listed unchecked.
 CORE_RANGES = ((0x2010, 0x2027), (0x3000, 0x30FF), (0x31F0, 0x31FF), (0xFE10, 0xFE4F), (0xFF00, 0xFFEF))
+# What makes a font a CJK font here: a glyph in one of these blocks (Hangul Jamo, the radicals and ideographic
+# description characters, CJK punctuation, kana, bopomofo, Hangul compatibility jamo, kanbun, CJK strokes,
+# enclosed and compatibility CJK, the ideographs, the Hangul syllables and their extended jamo, the vertical,
+# compatibility, half-width, and full-width forms, the kana supplements). A font with none (the owner's Noto
+# Sans) is not set in vertical CJK text: it is offered nothing, as CJK Spacing offers it no trim. Its em-wide
+# HORIZONTAL BAR (U+2015, General Punctuation: the dash Japanese text turns) had been offered a vertical form.
+CJK_RANGES = ((0x1100, 0x11FF), (0x2E80, 0x2FDF), (0x2FF0, 0x303F), (0x3040, 0x30FF), (0x3100, 0x31FF),
+              (0x3200, 0x33FF), (0x3400, 0x4DBF), (0x4E00, 0x9FFF), (0xA960, 0xA97F), (0xAC00, 0xD7FF),
+              (0xF900, 0xFAFF), (0xFE10, 0xFE1F), (0xFE30, 0xFE4F), (0xFF00, 0xFFEF), (0x1B000, 0x1B16F),
+              (0x20000, 0x323AF))
+
+
+def has_cjk(codes):
+    """Whether a font's code points include a CJK glyph (CJK_RANGES): kana, Hangul, an ideograph, bopomofo,
+    or CJK punctuation and forms."""
+    return any(low <= code <= high for code in codes for low, high in CJK_RANGES)
 # Unicode's vertical presentation forms (UnicodeData.txt, <vertical> decompositions), each for the
 # full-width or CJK character it stands for in vertical text: a font that draws one has drawn the form.
 VERTICAL_PRESENTATION = {
@@ -909,16 +925,15 @@ def preview_column(text, names, own, chosen, trims, kerns, height, upm):
     change)], its characters, each one's height in ems). names: {code point: glyph}; own: {glyph: its
     form} of the font's code; chosen: {glyph: Form} checked; trims: {glyph shown: (y placement, y
     advance)} of vpal; kerns: {(upper glyph shown, lower glyph shown): y advance change} of vkrn, which
-    the upper glyph takes in its height. A character the font lacks is a None glyph (an empty box)."""
+    the upper glyph takes in its height. A character the font lacks is left out, as CJK Spacing's previews
+    leave it (the owner, of Noto Sans's: rows of empty boxes, where CJK Spacing "only shows the glyphs it
+    can display")."""
     placed, chars, heights, previous = [], [], [], None
     for code, ch in code_points(text):
         if ch.isspace():
             continue
         name = names.get(code)
-        if name is None:  # (a character the font lacks: drawn as an empty box, not left out)
-            placed.append((None, None, 0, 0))
-            chars.append(ch)
-            heights.append(1.0)
+        if name is None:  # (a character the font lacks)
             previous = None
             continue
         if name in own:
@@ -1173,7 +1188,7 @@ class CJKVerticalDialog(object):
         self.tree.setHeaderLabels(list(self.COLUMNS))
         self.tree.setIconSize(QtCore.QSize(ICON_SIZE, ICON_SIZE))
         self.tree.setProperty(ak.LEAVE_ALONE_PROP, True)  # its pictures are drawn in the dialog's colors
-        ak.grid_lines(self.tree)
+        ak.table_layout(self.tree)
         self.tree.setWhatsThis(u"The vertical forms (the picture shows the form), the vpal trims (y placement and y "
                                u"advance), and the vertical metrics, each with its value now and after. Checked rows "
                                u"are written. Double-click a glyph to see it in a <i>Glyph</i> window.")
@@ -1364,6 +1379,11 @@ class CJKVerticalDialog(object):
                     restore()
                 except Exception:
                     pass
+        elif getattr(self, "buttons_waiting", False):  # (a quick list, no bar: the buttons it held off set now)
+            try:
+                self.update_buttons()
+            except Exception:
+                pass
         if self.run_due:
             self.run_due = False
             try:
@@ -1559,7 +1579,8 @@ class CJKVerticalDialog(object):
         wanted.update(turnable)
         glyphs, shown_codes = [], []
         self.char_names = code_map(fg_glyphs)
-        codes = sorted(self.char_names.items())
+        self.cjk = has_cjk(self.char_names)  # (none: not a CJK font, nothing listed but what says so)
+        codes = sorted(self.char_names.items()) if self.cjk else []
         for number, (code, name) in enumerate(codes):
             if number % ROWS_PER_STEP == 0:
                 self.progress(READ_STEP, 0.2 + 0.6 * number / float(len(codes)))
@@ -1589,8 +1610,8 @@ class CJKVerticalDialog(object):
                                   formed, freelab_substitutions("vrt2", self.texts.get("vrt2")))
         self.own_vkrn = own_pairs("vkrn", self.texts.get("vkrn"), classes, lookups)
         own_values = own_position_values("vpal", self.texts.get("vpal"), classes, lookups)
-        self.kerns = self.plan_kerns(self.char_names, own, own_values)
-        self.metrics = self.plan_metrics(package)
+        self.kerns = self.plan_kerns(self.char_names, own, own_values) if self.cjk else []
+        self.metrics = self.plan_metrics(package) if self.cjk else []
         for item, on in zip(self.all_rows(), [kept.get(self.row_key(row), row.checked) for row in self.all_rows()]):
             item.checked = on
         if u"%s" % self.sample.text in [text for _, _, text in self.samples]:  # (text of one's own is kept)
@@ -1695,6 +1716,9 @@ class CJKVerticalDialog(object):
         builds = sum(1 for f in self.forms if f.state == "build")
         drawn = sum(1 for f in self.forms if f.state == "glyph")
         own = sum(1 for f in self.forms if f.state == "font")
+        if not getattr(self, "cjk", True):
+            return u"%s, master %s, has no kana, Hangul, ideographs, or CJK punctuation: not a CJK font, nothing to " \
+                   u"add for vertical text." % (b(package.tfn), b(master))
         if not self.forms and not self.trims:
             return u"%s, master %s, has none of the characters that turn or move in vertical text, and no full-width " \
                    u"kana or punctuation." % (b(package.tfn), b(master))
@@ -1804,8 +1828,9 @@ class CJKVerticalDialog(object):
                 if progress is not None and listed % ROWS_PER_STEP == 0:
                     progress(listed / float(len(rows) or 1))
             top.setExpanded(True)
-        for column in range(len(self.COLUMNS)):
-            self.tree.resizeColumnToContents(column)
+        # every row measured (the shared fit_rows): Qt measures only some of a long list's rows, and the
+        # metrics' labels at its end were cut ("Advanc...", "none o...", live)
+        self.ak.fit_rows(self.tree, range(len(self.COLUMNS) - 1))
         self.tree.blockSignals(False)
         self.update_buttons()
 
@@ -1899,17 +1924,27 @@ class CJKVerticalDialog(object):
         return new, builds, metrics
 
     def update_buttons(self):
+        """Each button clickable only when it would do something. While long work runs, once it is over
+        (set_busy): the live pass found Write and Restore suggestions clickable over Noto Sans's empty list,
+        left as the font before had them, since a list read quickly (no bar shown) never set them again. A
+        font with no CJK glyph is offered nothing: every button that acts on the list is grayed, and so is
+        Add vertical metrics to an exported font, whose values would be the ones the list offers (none)."""
         self.buttons_due = False
         if self.busy:
-            return  # (set once the work is over: set_busy)
+            self.buttons_waiting = True  # (set once the work is over: set_busy)
+            return
+        self.buttons_waiting = False
         ak = self.ak
         self.harvest()
+        cjk = getattr(self, "cjk", True)
         checks = [row.checked for row in self.checkable()]
-        ak.enable(self.all_button, not all(checks) if checks else False)
-        ak.enable(self.none_button, any(checks))
-        ak.enable(self.restore_button, [row.checked for row in self.all_rows()] != self.first_checks)
+        ak.enable(self.all_button, cjk and (not all(checks) if checks else False))
+        ak.enable(self.none_button, cjk and any(checks))
+        ak.enable(self.restore_button, cjk and [row.checked for row in self.all_rows()] != self.first_checks)
         new, builds, metrics = self.pending()
-        ak.enable(self.write_button, bool(new or builds or metrics))
+        ak.enable(self.write_button, cjk and bool(new or builds or metrics))
+        if not cjk:
+            ak.enable(self.export_button, False)
         self.draw_previews()
 
     def toggled(self):

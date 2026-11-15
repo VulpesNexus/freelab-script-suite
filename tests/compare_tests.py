@@ -110,6 +110,39 @@ class ChoiceTests(unittest.TestCase):
                                     ("separator", None, None, u""), ("installed", u"a.otf", None, u"alpha"),
                                     ("installed", u"b.ttf", None, u"Beta")], "A to Z, its file's path for an id")
 
+    def test_the_open_list_leaves_out_the_placeholder(self):
+        # (the owner's screenshot 98: "Choose a font..." in the box and again as the list's first row)
+        alone = fcmp.second_entries([(7, u"Sans", [u"Regular"], u"Sans.vfc")], 7, [(u"a.otf", u"alpha")])
+        self.assertEqual(fcmp.popup_rows_hidden(alone), set([0, 1]), "and the separator with nothing above it")
+        others = fcmp.second_entries([(7, u"Sans", [u"Regular"], u""), (8, u"Serif", [u"Regular"], u"")], 7)
+        self.assertEqual(fcmp.popup_rows_hidden(others), set([0]), "a separator under another font stays")
+
+        class View(object):
+            hidden = {}
+
+            def setRowHidden(self, row, on):
+                View.hidden[row] = on
+
+        class Box(object):
+            def setItemData(self, *args):
+                pass
+
+            def view(self):
+                return View()
+
+        class Window(object):
+            placeholder_unpickable = fcmp.CompareDialog.__dict__["placeholder_unpickable"]  # (a function in 2.7 too)
+
+        window = Window()
+        window.second_rows, window.choice_b = alone, Box()
+        saved = fcmp._qt
+        fcmp._qt = lambda: (type("Core", (object,), {"Qt": type("Qt", (object,), {"UserRole": 32})}), None)
+        try:
+            window.placeholder_unpickable()
+        finally:
+            fcmp._qt = saved
+        self.assertEqual(View.hidden, {0: True, 1: True, 2: False, 3: False, 4: False})
+
     def test_an_installed_fonts_name_comes_from_its_name_table(self):
         import struct
 
@@ -396,6 +429,17 @@ class KerningTests(unittest.TestCase):
         self.assertEqual(found[2].delta, 10)
         self.assertEqual(fcmp.kern_counts(found), {"absent": 2, "only_b": 2, "value": 1})
 
+    def test_the_table_s_numbers_align_right_and_the_pairs_take_the_room(self):
+        # (live, 2026-11-16: its values sat at the left, unlike every other list's numbers)
+        with io.open(fcmp.__file__, encoding="utf-8") as handle:
+            source = handle.read()
+        fill = source.split(u'tree.setHeaderLabels([u"Pair", labels[0], labels[1], u"Difference"])')[1].split(u"\n    def ")[0]
+        self.assertIn(u"self.ak.align_numbers(tree, (1, 2, 3))", fill)
+        self.assertIn(u"self.ak.set_stretch(tree, 0)", fill)
+        sizing = source.split(u"    def fit_columns(self, tree, widths):")[1].split(u"\n    def ")[0]
+        self.assertIn(u"self.ak.fit_rows(tree, range(len(widths)), most=list(widths))", sizing)
+        self.assertNotIn(u"resizeColumnToContents", sizing, "measured alike in either theme")
+
     def test_only_in_first(self):
         found = fcmp.kerning_diff({(u"A", u"V"): -80}, {})
         self.assertEqual([(d.kind, d.delta) for d in found], [("only_a", 80)])
@@ -556,13 +600,16 @@ class FakeSpin(Anything):
 
 
 class FakeButton(Anything):
-    """A button that keeps whether it is enabled."""
+    """A button that keeps whether it is enabled, and whether it is checked (a chip)."""
 
     def __init__(self, *args, **kwargs):
         self.enabled = True
 
     def setEnabled(self, on):
         self.enabled = on
+
+    def setChecked(self, on):
+        self.checked = on
 
 
 class FakeEvent(object):
@@ -882,11 +929,26 @@ class DialogTests(unittest.TestCase):
         found = dict((r.name, sorted(r.kinds())) for r in dialog.results)
         self.assertEqual(found, {u"o": ["outline"], u"n": ["anchors", "metrics"], u"a": ["only_a"], u"b": ["only_b"],
                                  u"uni0101": ["codes"], u"eacute": ["components"]})
+        # The owner: the glyphs only in one font "should probably be unchecked by default so it truly focuses
+        # on comparing what is available in both fonts"
+        chips = dict(dialog.glyph_chips)
+        self.assertEqual(sorted(kind for kind, chip in dialog.glyph_chips if chip.checked),
+                         ["anchors", "codes", "components", "metrics", "outline"])
+        self.assertNotIn(u"a", [r.name for r in dialog.glyph_names])
+        self.assertEqual([r.name for r in dialog.glyph_names][0], u"o", "the worst of what both have first")
+        self.assertNotIn(u"b", dialog.sides[1].paths, "a glyph only in one font is read once listed, not before")
+        chips["only_a"].checked = chips["only_b"].checked = True
+        dialog.fill_glyphs()
         self.assertEqual([r.name for r in dialog.glyph_names][:2], [u"a", u"b"], "glyphs only in one font first")
+        self.assertIsNotNone(dialog.sides[1].paths.get(u"b"))
         self.assertEqual(dialog.labels(), (u"Fake A", u"Fake B"))
         kerning = sorted((d.left, d.right, d.a, d.b, d.kind) for d in dialog.kern_rows)
         self.assertEqual(kerning, [(u"H", u"o", -20, -30, "value"), (u"a", u"H", -5, 0, "absent"),
                                    (u"n", u"o", 0, 15, "only_b"), (u"o", u"n", -10, 0, "only_a")])
+        # And the kerning "should default to 'Differing values' (instead of 'Other values')"
+        self.assertEqual([kind for kind, chip in dialog.kern_chips if chip.checked], ["value"])
+        self.assertEqual([(d.left, d.right) for d in dialog.kern_shown], [(u"H", u"o")])
+        self.assertEqual(fcmp.kern_label("value", dialog.labels()), u"Differing values")
         self.assertEqual([(f.tag, f.kind) for f in dialog.feature_rows],
                          [(u"liga", "differs"), (u"kern", "only_a"), (u"ss01", "only_b"), (fcmp.CLASSES, "same")])
         dialog.draw_comparison()
@@ -987,11 +1049,76 @@ class DialogTests(unittest.TestCase):
             dialog = self.dialog([first_font(), second_font()])
             dialog.choice_b.pick(1)
             dialog.compare()
+            for _, chip in dialog.glyph_chips + dialog.kern_chips:
+                chip.checked = True
+            dialog.fill_glyphs()
+            dialog.fill_kerning()
         finally:
             fcmp.ROWS_SHOWN = saved
         self.assertEqual(len(dialog.results), 6)
         self.assertEqual([r.name for r in dialog.glyph_names], [u"a", u"b"], "the worst listed")
         self.assertEqual(len(dialog.kern_shown), 2)
+
+    def test_a_font_closed_since_the_comparison_is_asked_nothing(self):
+        # Review: the glyphs only in one font are read as they are listed; the lists keep the last comparison
+        # once a font is closed, and ticking "Only in" then called FontLab through the closed font
+        first, second = first_font(), second_font()
+        packages = [first, second]
+        dialog = self.dialog(packages)
+        self.workspace.packages = lambda: list(packages)
+        dialog.choice_b.pick(1)
+        dialog.compare()
+        packages.remove(second)  # closed in FontLab
+        closed = lambda *args: self.fail("FontLab asked about a closed font")
+        second.findName = second.kerning = closed
+        # The live pass: its History watcher then logged "A font's History moved ... compared again", and
+        # nothing was compared
+        said, texts = [], []
+        dialog.log.add = lambda text, level="info": said.append((level, text))
+        dialog.font_label.setText = texts.append
+        dialog.history_moved()
+        self.assertEqual(said, [("warning", u"<b>Fake B</b> was closed: the comparison is out of date.")])
+        self.assertIn(u"out of date", texts[-1])
+        self.assertEqual((dialog.second.package, dialog.second.seen_history), (None, None), "its watcher let go")
+        self.assertIs(dialog.package, first, "the font still open still watched")
+        chips = dict(dialog.glyph_chips)
+        chips["only_a"].checked = chips["only_b"].checked = True
+        dialog.fill_glyphs()
+        self.assertIn(u"b", [r.name for r in dialog.glyph_names], "still listed, as the last comparison has it")
+        self.assertNotIn(u"b", dialog.sides[1].paths, "not read, and not kept as unreadable")
+        self.assertIsNotNone(dialog.sides[0].paths.get(u"a"), "the font still open is read")
+        for r in (r for r in dialog.glyph_names if r.name in (u"b", u"o")):
+            dialog.selected_result = lambda r=r: r
+            dialog.draw_comparison()
+        dialog.selected_pair = lambda: dialog.kern_rows[0]
+        dialog.draw_pair()
+        del second.findName, second.kerning
+        packages.append(second)  # open again: read now
+        dialog.fill_glyphs()
+        self.assertIsNotNone(dialog.sides[1].paths.get(u"b"))
+
+    def test_every_kind_shown_when_what_both_have_is_alike(self):
+        self.assertEqual(fcmp.kinds_first_on({"value": 3, "only_a": 2, "absent": 1}, fcmp.KERN_KINDS_FIRST),
+                         set(["value"]))
+        self.assertEqual(fcmp.kinds_first_on({"only_a": 2, "absent": 1}, fcmp.KERN_KINDS_FIRST),
+                         set(["only_a", "absent"]), "no differing value: every other kind")
+        self.assertEqual(fcmp.kinds_first_on({}, fcmp.KERN_KINDS_FIRST), set())
+        first, second = first_font(), second_font()
+        second.by_name.pop(u"o")  # (the only glyph whose outline differs: the Glyphs list keeps something)
+        for name in (u"n", u"uni0101", u"eacute"):
+            first.by_name.pop(name)
+        first.fgPackage.glyphs = [g.fgGlyph for g in first.by_name.values()]
+        second.fgPackage.glyphs = [g.fgGlyph for g in second.by_name.values()]
+        second.kernings = {u"Regular": {(u"n", u"o"): 15}}
+        first.kernings = {u"Regular": {(u"H", u"o"): -20}}
+        dialog = self.dialog([first, second])
+        dialog.choice_b.pick(1)
+        dialog.compare()
+        self.assertTrue(dialog.glyph_names and all(r.a is None or r.b is None for r in dialog.glyph_names),
+                        "only glyphs one font lacks differ: shown")
+        self.assertTrue(all(chip.checked for kind, chip in dialog.glyph_chips if kind in ("only_a", "only_b")))
+        self.assertNotIn("value", [d.kind for d in dialog.kern_rows])
+        self.assertTrue(dialog.kern_shown, "no differing value: the other pairs shown")
 
     def test_installed_fonts_are_listed_and_open_in_fontlab_when_picked(self):
         # The owner: "'Choose a font' does nothing, only 'Open a font' is usable, which doesn't help much,
@@ -1118,6 +1245,122 @@ class DialogTests(unittest.TestCase):
         finally:
             del gui.classes["QFileDialog"]
             del fontlab.flItems
+
+    def test_a_font_opened_is_compared_and_the_window_comes_back(self):
+        # The owner: choosing a font "sends the script window in the background and doesn't bring it back to
+        # the front after opening (...) Could opening a font also automatically run the first
+        # comparison without requiring to click 'Compare'?"
+        first, second = first_font(), second_font()
+        packages = [first]
+        dialog = self.dialog(packages)
+        self.workspace.packages = lambda: list(packages)
+        said, requested, raised = [], [], []
+        dialog.log.add = lambda text, level="info": said.append((level, text))
+        fontlab = sys.modules["fontlab"]
+        fontlab.flItems = type("Items", (), {"requestLoadingFont": staticmethod(requested.append)})
+        self.addCleanup(lambda: delattr(fontlab, "flItems"))
+        window = dialog.dialog
+        window.visible, window.minimized = True, False
+        window.raise_ = lambda: raised.append(window)
+        window.showNormal = lambda: self.fail("a window minimized is never restored")
+        dialog.open_font(second.path)
+        dialog.look_for_opened()
+        self.assertIsNone(dialog.sides, "not in yet")
+        packages.append(second)  # FontLab lists it, and makes its window the active one
+        dialog.look_for_opened()
+        self.assertEqual(dialog.second_key, (second.fgPackage.id, u"Regular"))
+        self.assertEqual(raised, [dialog.dialog], "brought back at once")
+        self.assertNotIn(u"Click", said[-1][1], "nothing to click")
+        dialog.busy = True
+        dialog.settled()  # (the settling timer, while a comparison runs: waits for it)
+        self.assertIsNone(dialog.sides)
+        dialog.busy = False
+        dialog.settled()  # (the settling timer: FontLab has activated its font's window by now)
+        self.assertIsNotNone(dialog.sides, "compared without a click on Compare")
+        self.assertEqual(dialog.labels(), (u"Fake A", u"Fake B"))
+        self.assertEqual(len(raised), 3, "brought back again before and after the comparison")
+        self.assertIsNotNone(getattr(dialog, "late_timer", None), "and once more a while later")
+        self.assertEqual(said[-1], ("done", u"Compared <b>Fake A</b> with <b>Fake B</b>."))
+        del raised[:]
+        dialog.open_font(second.path)  # (open already: chosen and compared all the same)
+        self.assertEqual((requested, raised), ([second.path], [dialog.dialog]))
+        dialog.choice_b.pick(1)
+        self.assertEqual(raised, [dialog.dialog], "a font picked among those open: compared on a click, as before")
+        # Review: the timers once the window is minimized or closed, and a click on Compare meanwhile
+        stopped = []
+        dialog.settle_timer = type("Timer", (), {"stop": lambda timer: stopped.append(1),
+                                                 "start": lambda timer: None})()
+        compared, real = [], dialog.compare
+        dialog.compare = lambda: compared.append(1) or real()
+        window.minimized = True
+        dialog.bring_forward()  # (the late raise)
+        dialog.settled()
+        self.assertEqual((raised[1:], compared), ([], []), "minimized: left as it is, nothing compared")
+        window.minimized, window.visible = False, False
+        dialog.settled()
+        self.assertEqual(compared, [], "closed: no comparison for a window no one sees")
+        window.visible = True
+        real()  # (Compare clicked during the settling)
+        self.assertEqual(stopped, [1], "the settling's comparison called off: compared once")
+
+    def test_a_comparison_shows_its_progress(self):
+        # The owner: "the comparing step could potentially get its own loading bar, since CJK fonts can take a
+        # bit to load"
+        dialog = self.dialog([first_font(), second_font()])
+        dialog.choice_b.pick(1)
+        told = []
+
+        class Widget(object):
+            def __init__(self, name):
+                self.name = name
+
+            def __getattr__(self, attr):
+                return lambda *args: told.append((self.name, attr) + args)
+
+        dialog.busy_row, dialog.busy_step, dialog.busy_bar = Widget("row"), Widget("step"), Widget("bar")
+        pumped, flags = [], []
+        gui, core = sys.modules["PythonQt"].QtGui, sys.modules["PythonQt"].QtCore
+        gui.classes["QApplication"] = type("QApplication", (), {"processEvents": staticmethod(
+            lambda *flag: pumped.append(flag))})
+        core.classes["QEventLoop"] = type("QEventLoop", (), {"ExcludeUserInputEvents": "no input"})
+        saved, enable, enabled = fcmp.SHOW_AFTER, self.ak.enable, {}
+
+        def restore():
+            del gui.classes["QApplication"], core.classes["QEventLoop"]
+            fcmp.SHOW_AFTER, self.ak.enable = saved, enable
+        self.addCleanup(restore)
+        self.ak.enable = lambda widget, on: enabled.setdefault(id(widget), []).append(bool(on))
+        dialog.compare()
+        self.assertEqual(told, [], "a small font compared at once: no bar to flicker")
+        fcmp.SHOW_AFTER = 0
+        dialog.compare()
+        steps = [t[2] for t in told if t[:2] == ("step", "setText")]
+        self.assertEqual(steps, [label + self.ELLIPSIS for label, _ in fcmp.COMPARE_STEPS], "each step said in turn")
+        visible = [t[2] for t in told if t[:2] == ("row", "setVisible")]
+        self.assertEqual(visible, [True, False], "shown, then gone with the comparison")
+        values = [t[2] for t in told if t[:2] == ("bar", "setValue")]
+        self.assertEqual(values, sorted(values))
+        self.assertEqual(values[-1], fcmp.BAR_RANGE)
+        self.assertTrue(pumped and all(flag == ("no input",) for flag in pumped), "the user's clicks wait")
+        self.assertFalse(dialog.busy)
+        for widget in (dialog.choice_a, dialog.choice_b, dialog.threshold, dialog.compare_button, dialog.tabs,
+                       dialog.pages):
+            states = enabled.get(id(widget), [])
+            self.assertTrue(False in states and states[-1], "grayed meanwhile, then clickable again")
+        self.assertAlmostEqual(fcmp.bar_value(fcmp.COMPARE_STEPS, fcmp.GLYPHS_STEP, 0.5), (0.08 + 0.85) / 2)
+        # Review: a PythonQt that refuses the flag painted nothing at all (its error swallowed)
+        def refusing(*flag):
+            if flag:
+                raise TypeError("processEvents(): no such overload")
+            self.fail("the user's input is never let through")
+        gui.classes["QApplication"] = type("QApplication", (), {"processEvents": staticmethod(refusing)})
+        del told[:]
+        dialog.pump(force=True)
+        dialog.pump(force=True)
+        self.assertEqual(sorted(name for name, attr in [t[:2] for t in told] if attr == "repaint"),
+                         ["bar", "bar", "row", "row", "step", "step"], "the bar and its step painted alone")
+        self.assertTrue(dialog.pump_refused, "the flag not tried again")
+        self.assertIsNone(fcmp.bar_value(fcmp.COMPARE_STEPS, u"elsewhere"))
 
     def test_a_color_glyph_at_its_font_scale(self):
         a, b = first_font(), second_font()
