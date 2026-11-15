@@ -1,5 +1,5 @@
 """Where the open-licensed Japanese fonts put the dakuten and handakuten on their voiced kana (ga is ka with
-a dakuten, pa is ha with a handakuten), for Diacritics to build them.
+a dakuten, pa is ha with a handakuten), for Glyph Compose to build them.
 
 For each open-licensed font at hand with kana (one per family, SIL Open Font License or Apache License,
 as kerning/train/dataset.py finds them, plus FreeLab's corpus folder), each voiced kana it has, the
@@ -11,7 +11,7 @@ right end (across) and the top (up) of its letter's ink as drawn in the voiced g
 less its mark), and the mark's height. The medians of the fonts' medians, per letter and per kana set
 (hiragana, katakana) and mark, from at least MIN_FONTS fonts, are mark_model.json's "kana".
 
-    python diacritics/train/kana.py [--out <mark_model.json>] [--limit N]
+    python compose/train/kana.py [--out <mark_model.json>] [--limit N]
 
 Python 3 with fonttools. Only the measurements leave the fonts; the fonts are not copied.
 """

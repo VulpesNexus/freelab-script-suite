@@ -1,0 +1,1587 @@
+# -*- coding: utf-8 -*-
+"""FreeLab Glyph Compose's Glyph generation tab (loaded by freelab_glyph_compose.py; not a script of its own).
+
+Lists the characters of its first scope the font lacks (spaces, hyphens and dashes, duplicates,
+punctuation, Greek and Cyrillic look-alikes, ligature letters, vulgar fractions, arrows and triangles:
+205 characters) that it can make of the glyphs the font has, and builds the checked ones in every
+master, as one step of FontLab's History.
+
+The recipes are FreeLab's own (glyph_generation.json, made by compose/train/generation.py): each
+character's ways, the first the font can take used, each as sure as its confidence says:
+- exact: no design in it (a space of a set width, a second code point of the same character);
+- accepted: how fonts commonly build it (most of the corpus's families that have it build it so);
+- starting point: a draft to draw over, never a finished glyph (none in the first scope; the row
+  says so where one is used).
+What the ways do, the operations below: width (an empty glyph of a set advance: a share of the em, a
+setting, or another glyph's advance), shared (the code point added to the source's own glyph, no new
+glyph), copy (one component), move (one component raised), turn (by any angle, about the ink's
+center), mirror (left to right, the contours set right), row (side by side, at the corpus's gaps),
+stretch (a dash drawn longer: the nodes right of the source's middle moved, so it keeps its thickness
+and its ends), minus (the hyphen stretched on the plus: the plus's width and height, the hyphen's
+thickness), and fraction (Feature Code's numerators and denominators about the fraction slash).
+
+A recipe may use a glyph this list builds (two right single quotes make the right double quote):
+the list builds that one first, and the row says so. Nothing is replaced unless the row says so:
+existing glyphs are listed only with Also list existing glyphs, unchecked.
+
+Valid Python 2.7 (FontLab 7) and Python 3. The planning below the Qt line needs no Qt and no FontLab.
+"""
+
+from __future__ import absolute_import, division, print_function
+
+import math
+import os
+import sys
+
+DATA_FILE = "glyph_generation.json"
+CONFIDENCES = ("exact", "accepted", "starting point")
+DRAFT_NOTE = u"starting point: a draft to draw over"  # in the row of a recipe that is one
+SETTING_KEYS = ("thin", "hair", "en_dash", "em_dash")
+SETTINGS_KEY = "generation"  # its settings in Glyph Compose's settings file
+SETTING_REACH = {"thin": (2, 48), "hair": (2, 48), "en_dash": (0.2, 2.5), "em_dash": (0.2, 2.5)}  # (the boxes' too)
+CJK_RANGES = ((0x3040, 0x30FF), (0x3400, 0x4DBF), (0x4E00, 0x9FFF), (0xAC00, 0xD7AF))
+TABULAR = ("tf", "tosf", "tnum")  # a figure's tabular forms, in the order taken (its own glyph last)
+NUMR, DNOM = ("numr", "numerator"), ("dnom", "denominator")  # (Feature Code's own, where it is read)
+FRACTION_SLASH = "2044"
+LACKING = u"Need a glyph the font lacks"
+EXISTING = u"Existing glyphs (check to rebuild)"
+JUST_BUILT = u"Just built (check to rebuild)"
+FIGURE_FORMS_FIRST = u"build the numerators and denominators first (Feature Code, Forms tab)"
+NO_LAYER = u"%s has no layer in this master"  # (a variable font's sparse master: the glyph gets none there either)
+
+
+def main():
+    """Not a script: Glyph Compose loads this module for its tab. (load_sibling keeps a module that has a
+    main: one loaded again for each window would leave the earlier window's tab with a module Python 2
+    has emptied.)"""
+    return None
+
+
+def unichr_(code):
+    """The character of a code point, U+FFFD past U+FFFF in a narrow Python (FontLab's)."""
+    try:
+        return unichr(code)  # noqa: F821  (Python 2)
+    except NameError:
+        return chr(code)
+    except ValueError:
+        return u"�"
+
+
+def char_of(code_hex):
+    return unichr_(int(code_hex, 16))
+
+
+def counted(number, one, many=None):
+    return u"%d %s" % (number, one if number == 1 else (many or one + u"s"))
+
+
+# ---------------------------------------------------------------------------
+# The table
+# ---------------------------------------------------------------------------
+
+_DATA = {}
+
+
+def load_data(path=None):
+    """The recipe table (glyph_generation.json beside this file), read once; {} when it cannot be."""
+    import io
+    import json
+    path = path or os.path.join(os.path.dirname(os.path.abspath(globals().get("__file__") or ".")), DATA_FILE)
+    if path not in _DATA:
+        try:
+            with io.open(path, encoding="utf-8") as handle:
+                _DATA[path] = json.load(handle)
+        except (IOError, OSError, ValueError):
+            _DATA[path] = {}
+    return _DATA[path]
+
+
+def settings_of(data, saved=None):
+    """The settings: the table's suggestions, with those saved by the user over them (a value that
+    is no number, or out of reach, is left out)."""
+    found = dict((data or {}).get("settings") or {"thin": 6, "hair": 11, "en_dash": 0.528, "em_dash": 0.862})
+    reach = SETTING_REACH
+    for key, value in (saved or {}).items():
+        low, high = reach.get(key, (None, None))
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            continue
+        if low is not None and low <= value <= high:
+            found[key] = int(round(value)) if key in ("thin", "hair") else value
+    return found
+
+
+# ---------------------------------------------------------------------------
+# Geometry: transforms as (m11, m12, m21, m22, dx, dy), QTransform's order (x' = m11 x + m21 y + dx)
+# ---------------------------------------------------------------------------
+
+IDENTITY = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+
+
+def compose(outer, inner):
+    """outer after inner."""
+    a11, a12, a21, a22, adx, ady = outer
+    b11, b12, b21, b22, bdx, bdy = inner
+    return (b11 * a11 + b12 * a21, b11 * a12 + b12 * a22, b21 * a11 + b22 * a21, b21 * a12 + b22 * a22,
+            bdx * a11 + bdy * a21 + adx, bdx * a12 + bdy * a22 + ady)
+
+
+def translation(dx, dy):
+    return (1.0, 0.0, 0.0, 1.0, float(dx), float(dy))
+
+
+def rotation(angle, cx, cy):
+    """A turn by angle degrees, counterclockwise (y up), about (cx, cy); exact for the quarter turns."""
+    turns = {0: (1, 0), 90: (0, 1), 180: (-1, 0), 270: (0, -1)}
+    c, s = turns.get(int(angle) % 360, (math.cos(math.radians(angle)), math.sin(math.radians(angle))))
+    c, s = float(c), float(s)
+    # x' = c x - s y, y' = s x + c y, about the center
+    return (c, s, -s, c, cx - c * cx + s * cy, cy - s * cx - c * cy)
+
+
+def mirror_x(advance):
+    """Left to right within an advance."""
+    return (-1.0, 0.0, 0.0, 1.0, float(advance), 0.0)
+
+
+def mapped(matrix, x, y):
+    m11, m12, m21, m22, dx, dy = matrix
+    return m11 * x + m21 * y + dx, m12 * x + m22 * y + dy
+
+
+def linear(matrix):
+    return tuple(round(v, 9) for v in matrix[:4])
+
+
+def is_mirror(matrix):
+    return matrix[0] * matrix[3] - matrix[1] * matrix[2] < 0
+
+
+def box_through(box, matrix):
+    """The box of a box's corners mapped (a turned box: larger than the turned ink's own box)."""
+    points = [mapped(matrix, x, y) for x, y in ((box[0], box[1]), (box[2], box[1]), (box[2], box[3]), (box[0], box[3]))]
+    return (min(p[0] for p in points), min(p[1] for p in points), max(p[0] for p in points), max(p[1] for p in points))
+
+
+def union(boxes):
+    boxes = [b for b in boxes if b is not None]
+    if not boxes:
+        return None
+    return (min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes))
+
+
+def stretched_points(points, split, amount):
+    """[(x, y)] with every point right of split moved by amount: a dash drawn longer keeps its ends and
+    its thickness (a plain horizontal scale widens a round end and thins nothing, but distorts it)."""
+    return [(x + amount if x > split else x, y) for x, y in points]
+
+
+# ---------------------------------------------------------------------------
+# Plans
+# ---------------------------------------------------------------------------
+
+class Part(object):
+    """A glyph placed in another: name, its transform, and for a stretched dash (split, amount): its
+    nodes right of split (in its own units) moved by amount before the transform."""
+
+    def __init__(self, name, matrix=IDENTITY, stretch=None):
+        self.name, self.matrix, self.stretch = name, tuple(float(v) for v in matrix), stretch
+
+    def moved(self, matrix):
+        return Part(self.name, compose(matrix, self.matrix), self.stretch)
+
+    def __repr__(self):
+        return "Part(%r, %r, %r)" % (self.name, self.matrix, self.stretch)
+
+
+class Layout(object):
+    """What a glyph is made of in a master: its parts, its advance, and how it is written: "empty" (no
+    shapes), "shared" (no glyph: the code point goes to shared), "components", or "mirrored" (one
+    source's outlines mirrored into the glyph, its contours set right)."""
+
+    def __init__(self, parts, advance, kind="components", shared=None):
+        self.parts, self.advance, self.kind, self.shared = list(parts), float(advance), kind, shared
+
+
+class Need(Exception):
+    """A way the font cannot take: what it lacks, in words."""
+
+
+class Row(object):
+    """A character of the list: its glyph's name, the way taken, how sure it is, what it needs."""
+
+    def __init__(self, entry, name):
+        self.code = int(entry["code"], 16)
+        self.hex = entry["code"]
+        self.char = unichr_(self.code)
+        self.entry, self.name, self.group = entry, name, entry["group"]
+        self.way, self.way_index, self.layout, self.missing = None, None, None, None
+        self.existing = False  # the font has the character already (listed to rebuild)
+        self.needs = []  # the glyphs of this list it is built of: built first
+        self.checked = False
+        self.notes = []
+
+    @property
+    def confidence(self):
+        return (self.way or {}).get("confidence") or self.entry.get("research_confidence") or u"accepted"
+
+
+def describe_code(code_hex):
+    """A character for a note: a letter or a sign as itself, "‹ (U+2039)"; punctuation, a space, or a mark
+    by its Unicode name, "the middle dot (U+00B7)" (a dot or a dash between words reads as a separator)."""
+    import unicodedata
+    ch = char_of(code_hex)
+    try:
+        category = unicodedata.category(ch)
+    except (TypeError, ValueError):
+        category = u"Cn"
+    if category[0] in u"PZCM":
+        try:
+            return u"the %s (U+%s)" % (unicodedata.name(ch).lower(), code_hex)
+        except (ValueError, TypeError):
+            return u"U+%s" % code_hex
+    return u"%s (U+%s)" % (ch, code_hex)
+
+
+class Font(object):
+    """What planning reads of a font in one master (FontLab's is FontLabFont, the tests' a fake):
+    glyph_of(code), box(name, matrix) of a glyph's ink through a transform (y up, font units), advance(name),
+    composite(name) (made of components only), names, upm, x_height, cap_height; figure (a tabular
+    figure's glyph), numr(digit) and dnom(digit) (Feature Code's forms)."""
+
+    def __init__(self, upm=1000, x_height=None, cap_height=None):
+        self.upm = float(upm)
+        self.x_height, self.cap_height = x_height, cap_height
+
+    def has_layer(self, name):
+        """Whether the glyph has a layer in this master (a variable font's sparse masters lack some)."""
+        return True
+
+    def codes_of(self, name):
+        """Every code point the font gives that glyph."""
+        return [code for code in self.codes() if self.glyph_of(code) == name]
+
+    def has_cjk(self):
+        return any(low <= code <= high for code in self.codes() for low, high in CJK_RANGES)
+
+
+class Planner(object):
+    """The rows of the list for a font, and each row's layout in one of its masters."""
+
+    def __init__(self, data, font, settings=None, include_existing=False, codes=None):
+        self.data, self.font = data, font
+        self.settings = settings_of(data, settings)
+        self.rules = data.get("rules") or {}
+        self.include_existing = include_existing
+        entries = data.get("entries") or []
+        self.entries = dict((e["code"], e) for e in entries)
+        self.order = [e["code"] for e in entries if codes is None or e["code"] in codes]
+        self.rows, self.by_hex, self.by_name = [], {}, {}
+
+    # -- the list ------------------------------------------------------------------------------------------
+
+    def plan(self, ways=None):
+        """Every row: a way the font can take (the first), else what it needs. ways: {hex: way index}
+        to keep (a master's plan follows the current master's choice)."""
+        font = self.font
+        names = font.names
+        taken = set(names)
+        self.ways = dict(ways or {})
+        self.rows, self.by_hex, self.by_name = [], {}, {}
+        for hex_ in self.order:
+            entry = self.entries[hex_]
+            code = int(hex_, 16)
+            own = font.glyph_of(code)
+            if any(way.get("only") == "cjk" for way in entry["ways"]) and not font.has_cjk():
+                continue
+            if own is not None and not self.include_existing:
+                continue
+            if own is not None and len(font.codes_of(own)) > 1:
+                continue  # (its glyph stands for other characters too: rebuilt, they would change with it)
+            name = own or self.free_name(entry, taken)
+            taken.add(name)
+            row = Row(entry, name)
+            row.existing = own is not None
+            self.rows.append(row)
+            self.by_hex[hex_] = row
+            self.by_name[name] = row
+        for row in self.rows:
+            self.choose(row, self.ways.get(row.hex))
+        return self.rows
+
+    def free_name(self, entry, taken):
+        """Glyphs' name for the character, else uniXXXX, else uniXXXX.1 and on: one no glyph has."""
+        for name in (entry.get("glyph_name"), u"uni" + entry["code"]):
+            if name and name not in taken:
+                return name
+        number = 1
+        while u"uni%s.%d" % (entry["code"], number) in taken:
+            number += 1
+        return u"uni%s.%d" % (entry["code"], number)
+
+    def choose(self, row, only=None, stack=()):
+        if row.layout is not None or row.missing is not None:
+            return row
+        first_need = None
+        ways = list(enumerate(row.entry["ways"]))
+        if only is not None:
+            ways = [(index, way) for index, way in ways if index == only]
+        for index, way in ways:
+            needs = []
+            try:
+                layout = self.lay(way, row, stack + (row.hex,), needs)
+            except Need as need:
+                if first_need is None:
+                    first_need = u"%s" % need
+                continue
+            if row.existing and any(part.name == row.name for part in layout.parts):
+                first_need = first_need or u"made of its own glyph"
+                continue  # (a glyph is never made a component of itself)
+            row.way, row.way_index, row.layout, row.needs = way, index, layout, needs
+            return row
+        row.missing = first_need or u"no way the font can take"
+        return row
+
+    # -- sources ---------------------------------------------------------------------------------------------
+
+    def source(self, hex_, stack, needs, outlines=False):
+        """(glyph name, its layout or None) of a character: the font's glyph, else one this list builds
+        first (never when outlines are wanted: a mirror or a stretch reads the source's own outlines)."""
+        name = self.font.glyph_of(int(hex_, 16))
+        if name is not None:
+            return self.drawn(name), None
+        row = self.by_hex.get(hex_)
+        if row is not None and not outlines and hex_ not in stack and not row.existing:
+            self.choose(row, getattr(self, "ways", {}).get(hex_), stack=stack)
+            if row.layout is not None and row.layout.kind in ("components", "mirrored"):
+                if row.name not in needs:
+                    needs.append(row.name)
+                return row.name, row.layout
+        raise Need(u"needs %s" % describe_code(hex_))
+
+    def drawn(self, name):
+        """A source glyph of the font, once it is known to have a layer in this master: a variable font's
+        sparse master (Rubik's Bold) has none for many glyphs, and a glyph made of them gets none either."""
+        if not self.font.has_layer(name):
+            raise Need(NO_LAYER % name)
+        return name
+
+    def box(self, name, matrix=IDENTITY):
+        """A glyph's ink through a transform: the font's own, or a planned glyph's parts'."""
+        row = self.by_name.get(name)
+        if row is not None and row.layout is not None and not row.existing and self.font.glyph_of(row.code) is None:
+            return union([self.part_box(part.moved(matrix)) for part in row.layout.parts])
+        return self.font.box(name, matrix)
+
+    def part_box(self, part):
+        if part.stretch is None:
+            return self.box(part.name, part.matrix)
+        own = self.box(part.name)
+        if own is None:
+            return None
+        split, amount = part.stretch
+        grown = (own[0] if own[0] <= split else own[0] + amount, own[1], own[2] + amount if own[2] > split else own[2], own[3])
+        return box_through(grown, part.matrix)
+
+    def advance(self, name):
+        row = self.by_name.get(name)
+        if row is not None and row.layout is not None and self.font.glyph_of(row.code) is None:
+            return row.layout.advance
+        return self.font.advance(name)
+
+    def em(self, share):
+        return share * self.font.upm
+
+    # -- the operations ------------------------------------------------------------------------------------
+
+    def lay(self, way, row, stack, needs):
+        op = way["op"]
+        return getattr(self, "op_" + op)(way, row, stack, needs)
+
+    def op_width(self, way, row, stack, needs):
+        if "em" in way:
+            advance = self.em(way["em"])
+        elif "setting" in way:
+            advance = self.font.upm / float(self.settings[way["setting"]])
+        elif way.get("advance_of") == "figure":
+            figure = self.font.figure
+            if figure is None:
+                raise Need(u"needs the figures (0 to 9)")
+            advance = self.font.advance(self.drawn(figure))
+        else:
+            name, _ = self.source(way["advance_of"], stack, needs)
+            advance = self.advance(name)
+        return Layout([], round(advance), kind="empty")
+
+    def op_shared(self, way, row, stack, needs):
+        name = self.font.glyph_of(int(way["of"], 16))
+        if name is None:
+            raise Need(u"needs %s" % describe_code(way["of"]))
+        if row.existing:  # (its own glyph rebuilt as a copy: the code point cannot move to another glyph here)
+            return Layout([Part(name)], self.advance(name))
+        return Layout([Part(name)], self.advance(name), kind="shared", shared=name)
+
+    def op_copy(self, way, row, stack, needs):
+        name, _ = self.source(way["of"], stack, needs)
+        return Layout([Part(name)], self.advance(name))
+
+    def op_move(self, way, row, stack, needs):
+        name, _ = self.source(way["of"], stack, needs)
+        box = self.box(name)
+        if box is None:
+            raise Need(u"%s has no outline" % name)
+        x_height = self.font.x_height
+        if not x_height:
+            raise Need(u"needs an x to measure the x-height")
+        center = self.rules.get("middle_dot", 0.5) * x_height
+        return Layout([Part(name, translation(0, round(center - (box[1] + box[3]) / 2.0)))], self.advance(name))
+
+    def op_turn(self, way, row, stack, needs):
+        name, _ = self.source(way["of"], stack, needs)
+        box, advance = self.box(name), self.advance(name)
+        if box is None:
+            raise Need(u"%s has no outline" % name)
+        angle = int(way["angle"]) % 360
+        rule = (self.rules.get("turns") or {}).get(way.get("pair"), {})
+        cy = (box[1] + box[3]) / 2.0
+        if angle == 180:
+            # about the middle of the advance: the sidebearings change sides (as the corpus's turned quotes)
+            matrix = rotation(180, advance / 2.0, cy)
+            if "top_over_x_height" in rule and self.font.x_height:
+                matrix = compose(translation(0, round(self.font.x_height + self.em(rule["top_over_x_height"]) - box[3])), matrix)
+            elif rule.get("drop"):
+                matrix = compose(translation(0, round(self.em(rule["drop"]))), matrix)
+            return Layout([Part(name, matrix)], advance)
+        cx = (box[0] + box[2]) / 2.0
+        matrix = rotation(angle, cx, cy)
+        turned = self.box(name, matrix)
+        sides = max(0.0, (advance - (box[2] - box[0])) * rule.get("sides", 1.0) / 2.0)
+        matrix = compose(translation(round(sides - turned[0]), 0), matrix)
+        return Layout([Part(name, matrix)], round(turned[2] - turned[0] + 2 * sides))
+
+    def op_mirror(self, way, row, stack, needs):
+        name = self.font.glyph_of(int(way["of"], 16))
+        if name is None:
+            raise Need(u"needs %s" % describe_code(way["of"]))
+        advance = self.font.advance(self.drawn(name))
+        kind = "components" if self.font.composite(name) or row.existing else "mirrored"
+        return Layout([Part(name, mirror_x(advance))], advance, kind=kind)
+
+    def op_row(self, way, row, stack, needs):
+        sources = [self.source(hex_, stack, needs) for hex_ in way["of"]]
+        pair = way.get("pair")
+        if pair in (self.rules.get("dots") or {}):
+            return self.dotted(sources, self.rules["dots"][pair], pair)
+        gap = (self.rules.get("rows") or {}).get(pair if pair in (self.rules.get("rows") or {}) else "letters")
+        parts, x, last = [], 0.0, None
+        for index, (name, _) in enumerate(sources):
+            if index and gap is not None:
+                box, previous = self.box(name), self.part_box(parts[-1])
+                if box is None or previous is None:
+                    raise Need(u"%s has no outline" % name)
+                x = round(previous[2] + self.em(gap) - box[0])
+            parts.append(Part(name, translation(x, 0)))
+            last = name
+            x += self.advance(name)
+        if gap is None:
+            return Layout(parts, x)
+        box = self.box(last)
+        right_side = self.advance(last) - box[2]
+        return Layout(parts, round(self.part_box(parts[-1])[2] + right_side))
+
+    def dotted(self, sources, rule, pair):
+        """Catalan's L with a middle dot: the dot at the corpus's place after the letter."""
+        (letter, _), (dot, _) = sources
+        height = self.font.cap_height if pair == "013F" else self.font.x_height
+        dot_box = self.box(dot)
+        if not height or dot_box is None:
+            raise Need(u"needs %s to measure the dot's height" % (u"an H" if pair == "013F" else u"an x"))
+        dx = self.advance(letter) + self.em(rule["dot_left"]) - dot_box[0]
+        dy = rule["dot_center"] * height - (dot_box[1] + dot_box[3]) / 2.0
+        dot_part = Part(dot, translation(round(dx), round(dy)))
+        right_side = self.advance(dot) - dot_box[2] + self.em(rule["right_side"])
+        return Layout([Part(letter), dot_part], round(dot_box[2] + round(dx) + max(0.0, right_side)))
+
+    def op_stretch(self, way, row, stack, needs):
+        name = self.font.glyph_of(int(way["of"], 16))
+        if name is None:
+            raise Need(u"needs %s" % describe_code(way["of"]))
+        box, advance = self.box(self.drawn(name)), self.font.advance(name)
+        if box is None:
+            raise Need(u"%s has no outline" % name)
+        width = self.dash_width(way, name)
+        lsb, rsb = box[0], advance - box[2]
+        ink = width - lsb - rsb
+        if ink <= 0:
+            raise Need(u"%s is wider than %s" % (name, counted(int(round(width)), u"unit")))
+        amount = ink - (box[2] - box[0])
+        return Layout([Part(name, IDENTITY, ((box[0] + box[2]) / 2.0, round(amount)))], round(width))
+
+    def dash_width(self, way, name):
+        kind, times = way["width"], way.get("times", 1)
+        if kind == "figure":
+            if self.font.figure is None:
+                raise Need(u"needs the figures (0 to 9)")
+            return self.font.advance(self.font.figure)
+        if kind == "em_dash" and times > 1:
+            own = self.font.glyph_of(0x2014)
+            base = self.font.advance(own) if own is not None else self.em(self.settings["em_dash"])
+            return base * times
+        return self.em(self.settings[kind]) * times
+
+    def op_minus(self, way, row, stack, needs):
+        hyphen, plus = self.font.glyph_of(int(way["of"], 16)), self.font.glyph_of(int(way["on"], 16))
+        if hyphen is None or plus is None:
+            raise Need(u"needs %s" % describe_code(way["of"] if hyphen is None else way["on"]))
+        h, p = self.box(self.drawn(hyphen)), self.box(self.drawn(plus))
+        if h is None or p is None:
+            raise Need(u"%s has no outline" % (hyphen if h is None else plus))
+        amount = round((p[2] - p[0]) - (h[2] - h[0]))
+        dx, dy = round(p[0] - h[0]), round((p[1] + p[3]) / 2.0 - (h[1] + h[3]) / 2.0)
+        return Layout([Part(hyphen, translation(dx, dy), ((h[0] + h[2]) / 2.0, amount))], self.font.advance(plus))
+
+    def op_fraction(self, way, row, stack, needs):
+        slash = self.font.glyph_of(int(FRACTION_SLASH, 16))
+        tops = [self.font.numr(digit) for digit in way["numerator"]]
+        bottoms = [self.font.dnom(digit) for digit in way["denominator"]]
+        lacking = [u"%s's numerator" % d for d, n in zip(way["numerator"], tops) if n is None] + \
+                  [u"%s's denominator" % d for d, n in zip(way["denominator"], bottoms) if n is None]
+        if lacking:
+            raise Need(u"needs %s: %s" % (u", ".join(lacking), FIGURE_FORMS_FIRST))
+        if slash is None:
+            raise Need(u"needs the fraction slash (U+2044)")
+        parts, x = [], 0.0
+        for name in tops + [slash] + bottoms:
+            parts.append(Part(self.drawn(name), translation(x, 0)))
+            x += self.font.advance(name)
+        return Layout(parts, x)
+
+
+def build_order(rows):
+    """The rows in an order that builds each glyph after the glyphs of this list it is made of."""
+    by_name = dict((row.name, row) for row in rows)
+    done, order = set(), []
+
+    def visit(row, seen):
+        if row.name in done or row.name in seen:
+            return
+        for name in row.needs:
+            if name in by_name:
+                visit(by_name[name], seen | set([row.name]))
+        done.add(row.name)
+        order.append(row)
+    for row in rows:
+        visit(row, set())
+    return order
+
+
+def unbuilt_needs(row, chosen, font_has):
+    """The glyphs of this list a row is made of that will not be there: not in the font, not built."""
+    names = set(r.name for r in chosen)
+    return [name for name in row.needs if name not in names and not font_has(name)]
+
+
+# -- the words of a row ---------------------------------------------------------------------------------------
+
+def angle_words(angle):
+    angle = int(angle) % 360
+    return {180: u"turned", 90: u"turned a quarter turn left", 270: u"turned a quarter turn right"}.get(
+        angle, u"turned %d°" % angle)
+
+
+def width_words(way, layout, settings):
+    if way.get("em") == 0:
+        return u"empty, no width"
+    if "setting" in way:
+        return u"empty, 1/%d em (%s)" % (settings[way["setting"]], {"thin": u"Thin space", "hair": u"Hair space"}.get(
+            way["setting"], way["setting"]))
+    if "em" in way:
+        share = way["em"]
+        known = {0.5: u"1/2", 1.0: u"1", 0.25: u"1/4", 1.0 / 3: u"1/3", 1.0 / 6: u"1/6", 4.0 / 18: u"4/18"}
+        for value, text in known.items():
+            if abs(value - share) < 1e-6:
+                return u"empty, %s em" % text
+        return u"empty, %s em" % share
+    return u"empty, %s" % (way.get("note") or u"%d units" % layout.advance)
+
+
+def recipe_text(row, settings, rules=None):
+    """The Recipe cell: what the glyph is made of, in a few words (no period: a cell)."""
+    way, layout = row.way, row.layout
+    if layout is None:
+        return u""
+    op = way["op"]
+    names = [part.name for part in layout.parts]
+    if op == "width":
+        return width_words(way, layout, settings)
+    if op == "shared" and layout.kind == "shared":
+        return u"a second code point on %s" % layout.shared
+    if op in ("copy", "shared"):
+        return u"%s (component)" % names[0]
+    if op == "move":
+        return u"%s centered at %d%% of the x-height" % (names[0], round(100 * (rules or {}).get("middle_dot", 0.5)))
+    if op == "turn":
+        return u"%s %s" % (names[0], angle_words(way["angle"]))
+    if op == "mirror":
+        return u"%s mirrored" % names[0]
+    if op in ("row", "fraction"):
+        return u" + ".join(names)
+    if op == "stretch":
+        return u"%s drawn %s wide" % (names[0], counted(int(layout.advance), u"unit"))
+    if op == "minus":
+        return u"%s on the plus" % names[0]
+    return op
+
+
+def note_text(row, needs_built=()):
+    """The Note cell: what to know before building (no period: a cell)."""
+    notes = []
+    if row.missing:
+        return row.missing
+    if row.confidence == "starting point":
+        notes.append(DRAFT_NOTE)
+    if row.existing:
+        notes.append(u"replaces the font's own glyph" if not row.layout or row.layout.kind != "shared"
+                     else u"the font has it")
+    if row.layout is not None and row.layout.kind == "shared" and not row.existing:
+        notes.append(u"no new glyph")
+    if row.layout is not None and row.layout.kind == "mirrored":
+        notes.append(u"outlines, contours set right")
+    if row.needs:
+        notes.append(u"made of %s, built here first" % u", ".join(row.needs))
+    return u"; ".join(notes)
+
+
+def corpus_text(families, deriving):
+    """How many of the corpus's families have the character, and how many of those build it of other
+    glyphs (a sentence)."""
+    return u"%s of the corpus %s it; %d of them %s it of other glyphs." % (
+        counted(families, u"family", u"families"), u"has" if families == 1 else u"have", deriving,
+        u"builds" if deriving == 1 else u"build")
+
+
+def confidence_text(row):
+    return row.confidence if not row.missing else u""
+
+
+# ---------------------------------------------------------------------------
+# FontLab: the font read for planning, and the writes (PythonQt; not used by the planning tests)
+# ---------------------------------------------------------------------------
+
+def _qt():
+    from PythonQt import QtCore, QtGui
+    return QtCore, QtGui
+
+
+class FontLabFont(Font):
+    """A FontLab font's glyphs in one master, read as planning needs them (each outline once)."""
+
+    def __init__(self, ak, fc, package, master, codes):
+        Font.__init__(self, package.upm)
+        self.ak, self.package, self.master = ak, package, master
+        self.code_map = codes  # {code: glyph name}
+        self.names = [u"%s" % fg.name for fg in package.fgPackage.glyphs]
+        self.paths, self.boxes = {}, {}
+        x, h = self.glyph_of(0x78), self.glyph_of(0x48)
+        self.x_height = self.box(x)[3] if x and self.box(x) else None
+        self.cap_height = self.box(h)[3] if h and self.box(h) else None
+        self.figure, self.forms = figure_forms(fc, self.names, codes)
+
+    def codes(self):
+        return list(self.code_map.keys())
+
+    def glyph_of(self, code):
+        return self.code_map.get(code)
+
+    def layer(self, name):
+        glyph = self.package.findName(name)
+        if glyph is None or getattr(glyph, "isNull", False):
+            return None
+        return glyph.getLayerByName(self.master)
+
+    def path(self, name):
+        if name not in self.paths:
+            layer = self.layer(name)
+            self.paths[name] = (self.ak.layer_path(layer), float(layer.advanceWidth)) if layer is not None else (None, 0.0)
+        return self.paths[name]
+
+    def box(self, name, matrix=IDENTITY):
+        if name is None:
+            return None
+        key = (name, linear(matrix) + (round(matrix[4], 6), round(matrix[5], 6)))
+        if key not in self.boxes:
+            QtCore, QtGui = _qt()
+            path = self.path(name)[0]
+            if path is None or path.isEmpty():
+                self.boxes[key] = None
+            else:
+                if matrix != IDENTITY:
+                    path = QtGui.QTransform(*matrix).map(path)
+                rect = path.boundingRect()  # (y up: top() is the ink's lowest y)
+                self.boxes[key] = (rect.left(), rect.top(), rect.right(), rect.bottom())
+        return self.boxes[key]
+
+    def advance(self, name):
+        return self.path(name)[1]
+
+    def has_layer(self, name):
+        return self.layer(name) is not None
+
+    def composite(self, name):
+        layer = self.layer(name)
+        try:
+            shapes = list(layer.shapes) if layer is not None else []
+            return bool(shapes) and all(shape.isComponent for shape in shapes)
+        except Exception:
+            return False
+
+    def numr(self, digit):
+        return self.forms.get(("numr", digit))
+
+    def dnom(self, digit):
+        return self.forms.get(("dnom", digit))
+
+
+def figure_forms(fc, names, codes):
+    """(a tabular figure's glyph: the zero's .tf, .tosf, or .tnum form, else the zero itself; {("numr" or
+    "dnom", digit): glyph}) through Feature Code's own reading of figure forms (FontInfo.form)."""
+    by_name = {}
+    for code, name in codes.items():
+        by_name.setdefault(name, []).append(code)
+    info = fc.FontInfo(names, by_name)
+    zero = info.glyph(0x30)
+    figure = (info.form(zero, TABULAR) or zero) if zero else None
+    forms = {}
+    for digit in u"0123456789":
+        glyph = info.glyph(ord(digit))
+        if glyph:
+            for key, suffixes in (("numr", getattr(fc, "NUMR_SUFFIXES", NUMR)), ("dnom", getattr(fc, "DNOM_SUFFIXES", DNOM))):
+                form = info.form(glyph, suffixes)
+                if form:
+                    forms[(key, digit)] = form
+    return figure, forms
+
+
+class WriteError(Exception):
+    """Why a glyph was not built (said in the log)."""
+
+
+def flat_parts(package, master, parts, depth=4):
+    """The parts with every glyph made of components only replaced by its components, where a part is
+    turned, mirrored, or scaled (FontLab 7 refused a whole layer whose component was scaled and flipped and
+    pointed to such a glyph: Glyph Compose's unwrapped), and where a part is mirrored, so that each mirror
+    lands on a glyph of outlines (its corrected glyph is made of those)."""
+    out = []
+    for part in parts:
+        if linear(part.matrix) == linear(IDENTITY) or part.stretch is not None or depth <= 0:
+            out.append(part)
+            continue
+        glyph = package.findName(part.name)
+        layer = glyph.getLayerByName(master) if glyph is not None else None
+        shapes = list(layer.shapes) if layer is not None else []
+        if shapes and all(shape.isComponent for shape in shapes):
+            inner = []
+            for shape in shapes:
+                t = shape.transform
+                values = (t.m11(), t.m12(), t.m21(), t.m22(), t.dx(), t.dy())
+                inner.append(Part(u"%s" % shape.shapeData.componentGlyph, compose(part.matrix, values)))
+            out.extend(flat_parts(package, master, inner, depth - 1))
+        else:
+            out.append(part)
+    return out
+
+
+def outline_contours(package, master, name, matrix=IDENTITY, depth=4):
+    """[(contour, matrix)] of a glyph's outlines in a master, components followed (their contours are their
+    glyph's, placed by their shape's transform)."""
+    glyph = package.findName(name)
+    layer = glyph.getLayerByName(master) if glyph is not None else None
+    found = []
+    for shape in (list(layer.shapes) if layer is not None else []):
+        t = shape.transform
+        here = compose(matrix, (t.m11(), t.m12(), t.m21(), t.m22(), t.dx(), t.dy()))
+        contours = [c for c in shape.contours if c is not None]
+        if contours:
+            found.extend((contour, here) for contour in contours)
+        elif shape.isComponent and depth > 0:
+            found.extend(outline_contours(package, master, u"%s" % shape.shapeData.componentGlyph, here, depth - 1))
+    return found
+
+
+def stretched_shape(fontlab, fc, package, master, part):
+    """A new shape of a part's outlines, its nodes right of the split moved by the amount, then placed by its
+    transform: clones of the contours given their nodes' places (Feature Code's way, live 2026-11-14)."""
+    split, amount = part.stretch
+    contours = outline_contours(package, master, part.name)
+    if not contours:
+        raise WriteError(u"%s has no outline in master %s" % (part.name, master))
+    clones = []
+    for contour, matrix in contours:
+        clone = contour.clone()
+        nodes = clone.nodes()
+        for node in nodes:
+            x, y = mapped(matrix, float(node.x), float(node.y))  # (in the source glyph's own units)
+            x = x + amount if x > split else x
+            x, y = mapped(part.matrix, x, y)
+            fc.place_node(node, x, y)
+        clones.append(clone)
+    shape = fontlab.flShape()
+    shape.addContours(clones, True)
+    return shape
+
+
+def unused_helpers(package, masters, helpers, touched):
+    """The corrected glyphs made in a build that no glyph built points to."""
+    used = set()
+    for glyph in touched:
+        for master in masters:
+            layer = glyph.getLayerByName(master) if hasattr(glyph, "getLayerByName") else None
+            for shape in (list(layer.shapes) if layer is not None else []):
+                if getattr(shape, "isComponent", False):
+                    used.add(u"%s" % shape.shapeData.componentGlyph)
+    return [name for name in helpers if name not in used]
+
+
+def held_glyph(cm, fontlab, package, name):
+    """A new glyph added to the font (held for the session: Glyph Compose's new_glyph), or WriteError."""
+    new = cm.new_glyph(fontlab, package, name)
+    package.addGlyph(new)
+    glyph = package.findName(name)
+    if glyph is None:
+        raise WriteError(u"FontLab did not add %s" % name)
+    return glyph
+
+
+def write_layer(fontlab, ak, fc, cm, package, master, masters, glyph, layout, corrected):
+    """A master's layer of glyph made as layout says (its shapes replaced): components, the mirrored ones
+    pointing to their corrected glyphs (corrected(source): its name, made once), stretched outlines, or
+    nothing (an empty glyph). True when FontLab kept what was asked."""
+    QtCore, QtGui = _qt()
+    existed = glyph.getLayerByName(master) is not None
+    layer = glyph.getLayerByName(master, True)
+    own = [cm.shape_copy(shape) for shape in list(layer.shapes)]
+    own_width = float(layer.advanceWidth or 0)
+    try:
+        if write_parts(fontlab, ak, fc, cm, package, master, layer, layout, corrected):
+            return True
+    except Exception:
+        put_back(layer, own, own_width) if existed else drop_layer(glyph, layer)
+        raise
+    put_back(layer, own, own_width) if existed else drop_layer(glyph, layer)
+    return False
+
+
+def drop_layer(glyph, layer):
+    """A layer made for a write FontLab did not keep, taken out (the glyph had none in that master)."""
+    try:
+        glyph.removeLayer(layer)
+    except Exception:
+        pass
+
+
+def put_back(layer, shapes, width):
+    """A layer's own shapes and advance put back after a write FontLab did not keep."""
+    layer.removeAllShapes()
+    for shape in shapes:
+        layer.addShape(shape)
+    layer.advanceWidth = width
+
+
+def write_parts(fontlab, ak, fc, cm, package, master, layer, layout, corrected):
+    QtCore, QtGui = _qt()
+    components, shapes = [], []
+    for part in flat_parts(package, master, layout.parts):
+        if part.stretch is not None:
+            shapes.append(stretched_shape(fontlab, fc, package, master, part))
+            continue
+        name, values = part.name, part.matrix
+        if is_mirror(values):
+            axis = cm.mirror_axis(*values[:4])
+            mirror = cm.source_mirror(ak, package, master, name, axis)
+            if mirror is None:
+                raise WriteError(u"%s has no outline in master %s" % (name, master))
+            name, values = corrected(name, axis), cm.without_mirror(values, mirror)
+        component = fontlab.GlyphComponent(name)
+        component.transform = QtGui.QTransform(*[float(round(v, 6)) for v in values])
+        components.append(component)
+    layer.removeAllShapes()  # (only once every part is ready: a part that cannot be made leaves it as it was)
+    # Always through setGlyphComponents, with no component too (an empty glyph, a stretched dash's outlines
+    # added after): a new glyph whose layer was only made by getLayerByName(master, True) crashed FontLab
+    # when its fgGlyph was first read (live 2026-11-16, Varela Round: an empty layer and one with an outline
+    # alike, 0xC0000005 in FontLab 7.exe+0x72b370); made so first, both kept their code point
+    layer.setGlyphComponents(components, float(layout.advance), package, False)
+    for shape in shapes:
+        layer.addShape(shape)
+    layer.advanceWidth = float(layout.advance)
+    try:
+        layer.update()
+    except Exception:
+        pass
+    wanted = len(components) + len(shapes)
+    return len(list(layer.shapes)) >= wanted
+
+
+# ---------------------------------------------------------------------------
+# The tab
+# ---------------------------------------------------------------------------
+
+COLUMNS = (u"Glyph", u"Name", u"Recipe", u"Confidence", u"Note")
+ICON_SIZE = 40
+PREVIEW_SIZE = 150  # pixels per em
+HELP_LIST = (u"The characters the font lacks that it can make of the glyphs it has, by group: each with its "
+             u"recipe, a picture of the glyph it makes, and how sure the recipe is (<i>exact</i>: no design in "
+             u"it; <i>accepted</i>: how most fonts build it; <i>starting point</i>: a draft to draw over). Checked "
+             u"rows are built. A row that needs a glyph the font lacks says which, at the end. Double-click a row "
+             u"to open its glyph (built already) in a <i>Glyph</i> window.")
+
+
+class GenerationPage(object):
+    """The Glyph generation tab of Glyph Compose's window: owner, the window (its log, its font, its writes);
+    cm, Glyph Compose's module (its mirrored-component machinery, its settings, its helpers)."""
+
+    def __init__(self, owner, cm):
+        QtCore, QtGui = _qt()
+        self.owner, self.cm, self.ak, self.fontlab = owner, cm, owner.ak, owner.fontlab
+        ak = self.ak
+        self.data = load_data()
+        saved = (getattr(owner, "settings", None) or {}).get(SETTINGS_KEY) or {}
+        self.settings = settings_of(self.data, saved)
+        self.rows, self.first_checks, self.hidden = [], {}, set()
+        self.package = self.master = None
+        self.font = None
+        self.just_built = set()
+        self.buttons_due = False
+        self.fc = None
+        self.widget = QtGui.QWidget()
+        layout = QtGui.QVBoxLayout(self.widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.status = ak.status_label()
+        self.status.setWordWrap(True)
+        self.status.setWhatsThis(u"What the list holds for this font and master: how many glyphs can be built, how "
+                                 u"sure their recipes are, and how many need a glyph the font lacks.")
+        layout.addWidget(self.status)
+        layout.addWidget(ak.separator())
+        row = QtGui.QHBoxLayout()
+        self.existing_box = QtGui.QCheckBox(u"Also list existing glyphs")
+        self.existing_box.setWhatsThis(u"Also lists the characters of these groups the font has already, in a section "
+                                       u"of their own, unchecked: those you check are built again from their recipe, "
+                                       u"their outlines in each master replaced (<i>Edit &gt; Undo</i> takes it back). "
+                                       u"A glyph that shares its code point is rebuilt as a component of its source.")
+        row.addWidget(self.existing_box)
+        row.addSpacing(12)
+        self.spins = {}
+        for key, label, help_text in (
+                ("thin", u"Thin space 1/", u"The thin space's width, and the narrow no-break space's: this share of the "
+                                           u"em (1/6 at first; Unicode says 1/5 or 1/6, the corpus's median is 0.158 em)."),
+                ("hair", u"Hair space 1/", u"The hair space's width: this share of the em (1/11 at first, the corpus's "
+                                           u"median 0.090 em).")):
+            row.addWidget(cm.helped(QtGui.QLabel(label), help_text))
+            spin = QtGui.QSpinBox()
+            spin.setRange(*SETTING_REACH[key])
+            spin.setValue(int(self.settings[key]))
+            spin.setSuffix(u" em")
+            spin.setWhatsThis(help_text)
+            row.addWidget(spin)
+            self.spins[key] = spin
+        for key, label, help_text in (
+                ("en_dash", u"En dash", u"The en dash's advance, as a share of the em (52.8% at first: the corpus's median, "
+                                        u"507 families). Built from the hyphen, its thickness and ends kept."),
+                ("em_dash", u"Em dash", u"The em dash's advance, as a share of the em (86.2% at first: the corpus's median, "
+                                        u"507 families); the two- and three-em dashes are two and three times the font's "
+                                        u"em dash.")):
+            row.addWidget(cm.helped(QtGui.QLabel(label), help_text))
+            spin = QtGui.QDoubleSpinBox()
+            spin.setRange(SETTING_REACH[key][0] * 100, SETTING_REACH[key][1] * 100)
+            spin.setDecimals(1)
+            spin.setSingleStep(0.5)
+            spin.setValue(round(float(self.settings[key]) * 100, 1))
+            spin.setSuffix(u"% of the em")
+            spin.setWhatsThis(help_text)
+            row.addWidget(spin)
+            self.spins[key] = spin
+        row.addStretch(1)
+        self.search, self.search_label = owner.search_field(
+            u"Find a glyph", u"Shows only the rows whose glyph name, or the name of a glyph they are built from, holds "
+                             u"this text, whose character it is, whose Unicode value it is (<i>U+2013</i>, <i>2013</i>), "
+                             u"or whose Unicode name holds it (<i>dash</i>). Rows not shown keep their checks; <i>Check "
+                             u"all</i> and <i>Check none</i> act on the rows shown.")
+        row.addWidget(self.search)
+        row.addWidget(self.search_label)
+        layout.addLayout(row)
+        self.tree = QtGui.QTreeWidget()
+        self.tree.setColumnCount(len(COLUMNS))
+        self.tree.setHeaderLabels(list(COLUMNS))
+        self.tree.setIconSize(QtCore.QSize(ICON_SIZE, ICON_SIZE))
+        self.tree.setProperty(ak.LEAVE_ALONE_PROP, True)  # its pictures are drawn in the dialog's colors
+        ak.table_layout(self.tree, stretch=len(COLUMNS) - 1)
+        self.tree.setWhatsThis(HELP_LIST)
+        layout.addWidget(self.tree, 3)
+        lower = QtGui.QHBoxLayout()
+        self.preview = QtGui.QLabel()
+        self.preview.setProperty(ak.LEAVE_ALONE_PROP, True)
+        self.preview.setAlignment(QtCore.Qt.AlignCenter)
+        self.preview.setMinimumHeight(int(PREVIEW_SIZE * 1.5))
+        self.preview.setWhatsThis(u"The selected row's glyph as it would be built in this master, between dashed lines "
+                                  u"at its advance's ends and on the baseline; an empty glyph shows its advance alone.")
+        lower.addWidget(self.preview, 1)
+        self.details = QtGui.QLabel(u"")
+        self.details.setWordWrap(True)
+        self.details.setWhatsThis(u"The selected row's character, its Unicode name, the way it is built, and how many of "
+                                  u"the corpus's families have it and build it so.")
+        lower.addWidget(self.details, 1)
+        layout.addLayout(lower, 2)
+        buttons = QtGui.QHBoxLayout()
+        self.all_button = cm.helped(QtGui.QPushButton(u"Check all"), u"Checks every row shown that can be built (rows "
+                                    u"a search hides keep their checks).")
+        self.none_button = cm.helped(QtGui.QPushButton(u"Check none"), u"Unchecks every row shown (rows a search hides "
+                                     u"keep their checks).")
+        self.restore_button = cm.helped(QtGui.QPushButton(u"Restore suggestions"), u"Puts every check, and the four "
+                                        u"settings, back as the list first came.")
+        self.build_button = QtGui.QPushButton(u"Build checked glyphs")
+        self.build_button.setWhatsThis(u"Adds each checked glyph to the font with its Unicode value, in every master, as "
+                                       u"its recipe says; a glyph made of others of this list is built after them. A "
+                                       u"duplicate's code point goes to its source glyph (no new glyph). Every checked "
+                                       u"row is built, those a search hides too: the button then says how many are not "
+                                       u"shown. <i>Edit &gt; Undo</i> takes it back, in one step.")
+        for button in (self.all_button, self.none_button, self.restore_button):
+            buttons.addWidget(button)
+        buttons.addStretch(1)
+        buttons.addWidget(self.build_button)
+        layout.addLayout(buttons)
+        self.existing_box.connect("toggled(bool)", lambda on: self.run())
+        for key, spin in self.spins.items():
+            spin.connect("valueChanged(double)" if key in ("en_dash", "em_dash") else "valueChanged(int)",
+                         (lambda key: lambda value: self.setting_changed(key, value))(key))
+        self.all_button.connect("clicked()", lambda: self.check_all(True))
+        self.none_button.connect("clicked()", lambda: self.check_all(False))
+        self.restore_button.connect("clicked()", self.restore)
+        self.build_button.connect("clicked()", self.build)
+        self.search.connect("textChanged(QString)", lambda text: self.searched())
+        self.tree.connect("itemSelectionChanged()", self.select)
+        self.tree.connect("itemChanged(QTreeWidgetItem*,int)", lambda item, column: self.changed())
+        self.tree.connect("itemDoubleClicked(QTreeWidgetItem*,int)", lambda item, column: self.open_selected())
+        try:  # the check boxes drawn plain to see in either palette
+            self.check_watcher = self.feature_code().watch_check_boxes(owner.dialog, [self.tree])
+        except Exception:
+            self.check_watcher = None
+        try:  # a right-click flags a row's glyph, as on the suite's other lists
+            self.flagging = ak.flag_menu(self.tree, owner, self.flag_names, self.row_names)
+        except Exception:
+            self.flagging = None
+        self.update_buttons()
+
+    # -- the font ----------------------------------------------------------------------------------------
+
+    def feature_code(self):
+        if self.fc is None:
+            self.fc = self.ak.load_sibling("freelab_feature_code.py", "freelab_feature_code")
+        return self.fc
+
+    def font_in(self, package, master):
+        codes = self.ak.glyph_code_map(package.fgPackage.glyphs)
+        return FontLabFont(self.ak, self.feature_code(), package, master, codes)
+
+    def planner(self, font, ways=None):
+        planner = Planner(self.data, font, self.settings, bool(self.existing_box.checked))
+        planner.plan(ways)
+        return planner
+
+    def run(self, same_font=True):
+        """The list read again: checks kept for the same font (by character), the rows first suggested
+        otherwise (every buildable row checked but the rebuilds)."""
+        if not self.data.get("entries"):
+            self.status.setText(u"The recipe table (%s) could not be read: reinstall FreeLab." % DATA_FILE)
+            return
+        kept = dict((row.hex, row.checked) for row in self.rows) if same_font else {}
+        old_key = self.owner.package_key(self.package) if self.package is not None else None
+        package = self.package = self.owner.current_font()
+        self.rows = []
+        if package is None:
+            self.status.setText(self.cm.no_font_line(self.ak))
+            self.fill()
+            return
+        if not same_font or self.owner.package_key(package) != old_key:
+            kept, self.just_built = {}, set()
+        self.master = package.master
+        try:
+            self.font = self.font_in(package, self.master)
+            self.planner_now = self.planner(self.font)
+        except Exception as exc:
+            self.status.setText(u"Could not read the font: %s" % self.ak.html(exc))
+            self.fill()
+            return
+        self.rows = self.planner_now.rows
+        for row in self.rows:
+            suggested = row.layout is not None and not row.existing and row.confidence != "starting point"
+            row.checked = kept.get(row.hex, suggested) and row.layout is not None
+            self.first_checks[row.hex] = suggested
+        self.fill()
+        self.say_status()
+
+    def say_status(self):
+        b = self.ak.b
+        buildable = [r for r in self.rows if r.layout is not None and not r.existing]
+        lacking = [r for r in self.rows if r.layout is None]
+        sure = dict((c, sum(1 for r in buildable if r.confidence == c)) for c in CONFIDENCES)
+        parts = [u"%s %s" % (b(sure[c]), c) for c in CONFIDENCES if sure[c]]
+        self.status.setText(u"%s, master %s: %s can be built (%s)%s. Nothing changes until you click %s." % (
+            b(self.package.tfn), b(self.master), b(counted(len(buildable), u"glyph")), u", ".join(parts) or u"none",
+            u"; %s %s a glyph the font lacks" % (b(counted(len(lacking), u"glyph")), u"needs" if len(lacking) == 1 else u"need")
+            if lacking else u"", self.ak.i(u"Build checked glyphs")))
+
+    def fill(self):
+        QtCore, QtGui = _qt()
+        self.tree.blockSignals(True)
+        self.tree.clear()
+        bold = QtGui.QFont(self.tree.font)
+        bold.setBold(True)
+        groups = [(g["id"], g["title"]) for g in self.data.get("groups") or []]
+        sections = [(title, [i for i, r in enumerate(self.rows) if r.group == key and r.layout is not None
+                             and not r.existing and r.char not in self.just_built]) for key, title in groups]
+        sections.append((JUST_BUILT, [i for i, r in enumerate(self.rows) if r.char in self.just_built]))
+        sections.append((EXISTING, [i for i, r in enumerate(self.rows) if r.existing and r.char not in self.just_built
+                                    and r.layout is not None]))
+        sections.append((LACKING, [i for i, r in enumerate(self.rows) if r.layout is None]))
+        for title, members in sections:
+            if not members:
+                continue
+            top = QtGui.QTreeWidgetItem([u"%s (%d)" % (title, len(members))])
+            top.setData(0, QtCore.Qt.UserRole, -1)
+            self.tree.addTopLevelItem(top)
+            top.setFirstColumnSpanned(True)
+            self.ak.section_row(top, self.tree)
+            for index in members:
+                r = self.rows[index]
+                item = QtGui.QTreeWidgetItem([r.char if r.layout is None or r.layout.kind != "empty" else u"",
+                                              r.name, recipe_text(r, self.settings, self.data.get("rules")),
+                                              confidence_text(r), note_text(r)])
+                item.setData(0, QtCore.Qt.UserRole, index)
+                item.setFont(0, bold)
+                if r.layout is not None:
+                    item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsUserCheckable)
+                    item.setCheckState(0, QtCore.Qt.Checked if r.checked else QtCore.Qt.Unchecked)
+                else:
+                    item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable)
+                item.setToolTip(4, u"U+%s %s" % (r.hex, r.entry.get("unicode_name", u"")))
+                try:
+                    icon = self.picture(r, ICON_SIZE)
+                    if icon is not None:
+                        item.setIcon(0, self.ak.icon_of(icon))
+                except Exception:
+                    pass
+                top.addChild(item)
+            top.setExpanded(title not in (EXISTING, LACKING))
+        self.cm.fit_tree_columns(self.tree, len(COLUMNS) - 1)
+        self.tree.blockSignals(False)
+        self.apply_search()
+
+    # -- the list's controls --------------------------------------------------------------------------------
+
+    def items(self):
+        found = []
+        for top in range(self.tree.topLevelItemCount):
+            item = self.tree.topLevelItem(top)
+            found.extend(item.child(child) for child in range(item.childCount()))
+        return found
+
+    def harvest(self):
+        QtCore = _qt()[0]
+        for item in self.items():
+            index = int(item.data(0, QtCore.Qt.UserRole))
+            if 0 <= index < len(self.rows) and item.flags() & QtCore.Qt.ItemIsUserCheckable:
+                self.rows[index].checked = item.checkState(0) == QtCore.Qt.Checked
+
+    def check_all(self, on):
+        QtCore = _qt()[0]
+        self.tree.blockSignals(True)
+        for item in self.items():
+            if item.flags() & QtCore.Qt.ItemIsUserCheckable and int(item.data(0, QtCore.Qt.UserRole)) not in self.hidden:
+                item.setCheckState(0, QtCore.Qt.Checked if on else QtCore.Qt.Unchecked)
+        self.tree.blockSignals(False)
+        self.update_buttons()
+
+    def changed(self):
+        QtCore = _qt()[0]
+        if not self.buttons_due:
+            self.buttons_due = True
+            QtCore.QTimer.singleShot(0, self.update_buttons)
+
+    def update_buttons(self):
+        self.buttons_due = False
+        ak = self.ak
+        try:
+            self.harvest()
+        except Exception:
+            pass
+        shown = [r for i, r in enumerate(self.rows) if r.layout is not None and i not in self.hidden]
+        ak.enable(self.all_button, any(not r.checked for r in shown))
+        ak.enable(self.none_button, any(r.checked for r in shown))
+        checked = [i for i, r in enumerate(self.rows) if r.checked and r.layout is not None]
+        ak.enable(self.build_button, bool(checked))
+        self.build_button.setText(self.cm.build_text(len(checked), sum(1 for i in checked if i in self.hidden)))
+        defaults = settings_of(self.data)
+        ak.enable(self.restore_button, any(r.checked != self.first_checks.get(r.hex, r.checked) for r in self.rows)
+                  or any(abs(float(self.settings[k]) - float(defaults[k])) > 1e-9 for k in SETTING_KEYS))
+
+    def searched(self):
+        try:
+            self.apply_search()
+        except Exception as exc:
+            self.owner.log.add(u"Could not search the list: %s" % self.ak.html(exc), "error")
+
+    def apply_search(self):
+        QtCore = _qt()[0]
+        self.hidden = set()
+        query = u"%s" % (self.cm._property(self.search, "text") or u"")
+        shown = total = 0
+        for top in range(self.tree.topLevelItemCount):
+            section = self.tree.topLevelItem(top)
+            any_shown = False
+            for child in range(section.childCount()):
+                item = section.child(child)
+                index = int(item.data(0, QtCore.Qt.UserRole))
+                r = self.rows[index]
+                parts = [p.name for p in r.layout.parts] if r.layout is not None else []
+                found = self.cm.row_matches(query, r.name, r.char, r.code, parts) or (
+                    query and query.lower() in (r.entry.get("unicode_name") or u"").lower())
+                total += 1
+                shown += 1 if found else 0
+                if not found:
+                    self.hidden.add(index)
+                item.setHidden(not found)
+                any_shown = any_shown or found
+            section.setHidden(not any_shown)
+        self.search_label.setText(self.cm.search_count(shown, total, query))
+        self.update_buttons()
+
+    def setting_changed(self, key, value):
+        """A setting changed: kept in Glyph Compose's settings file, and the list planned again."""
+        value = int(value) if key in ("thin", "hair") else round(float(value) / 100.0, 4)
+        if self.settings.get(key) == value:
+            return
+        self.settings[key] = value
+        try:
+            settings = self.owner.settings
+            settings.setdefault(SETTINGS_KEY, {})[key] = value
+            self.cm.write_settings(self.ak, settings)
+        except Exception:
+            pass
+        self.run()
+
+    def restore(self):
+        defaults = settings_of(self.data)
+        for key, spin in self.spins.items():
+            spin.blockSignals(True)
+            spin.setValue(int(defaults[key]) if key in ("thin", "hair") else round(defaults[key] * 100, 1))
+            spin.blockSignals(False)
+        self.settings = defaults
+        try:
+            self.owner.settings.pop(SETTINGS_KEY, None)
+            self.cm.write_settings(self.ak, self.owner.settings)
+        except Exception:
+            pass
+        self.run(same_font=False)
+        self.owner.log.add(u"Glyph generation's checks and settings restored as suggested.")
+
+    def selected(self):
+        QtCore = _qt()[0]
+        items = self.tree.selectedItems()
+        if not items:
+            return None
+        index = int(items[0].data(0, QtCore.Qt.UserRole))
+        return self.rows[index] if 0 <= index < len(self.rows) else None
+
+    def select(self):
+        r = self.selected()
+        self.preview.clear()
+        if r is None:
+            self.details.setText(u"")
+            return
+        try:
+            picture = self.picture(r, PREVIEW_SIZE, frame=True)
+            if picture is not None:
+                self.preview.setPixmap(picture)
+        except Exception:
+            pass
+        lines = [u"<b>%s</b> U+%s %s" % (self.ak.html(r.char) if r.layout is None or r.layout.kind != "empty" else u"",
+                                           r.hex, self.ak.html(r.entry.get("unicode_name", u"")))]
+        if r.layout is not None:
+            lines.append(u"%s (%s)" % (self.ak.html(recipe_text(r, self.settings, self.data.get("rules"))), r.confidence))
+        else:
+            lines.append(self.ak.html(r.missing))
+        families, deriving = r.entry.get("families", 0), r.entry.get("deriving", 0)
+        if families:
+            lines.append(corpus_text(families, deriving))
+        self.details.setText(u"<br>".join(lines))
+
+    def glyph_in_font(self, r):
+        """The font's glyph a row stands for: its own once built, a duplicate's source; None before."""
+        if r is None or self.package is None:
+            return None
+        name = r.layout.shared if r.layout is not None and r.layout.kind == "shared" and not r.existing else r.name
+        return name if self.package.findName(name) is not None else None
+
+    def flag_names(self):
+        name = self.glyph_in_font(self.selected())
+        return [name] if name else []
+
+    def row_names(self, item):
+        QtCore = _qt()[0]
+        data = item.data(0, QtCore.Qt.UserRole)
+        index = int(data) if data is not None else -1
+        name = self.glyph_in_font(self.rows[index]) if 0 <= index < len(self.rows) else None
+        return [name] if name else []
+
+    def open_selected(self):
+        r = self.selected()
+        if r is None or self.package is None:
+            return
+        name = self.glyph_in_font(r)
+        if name is None:
+            self.owner.log.add(u"%s is not in the font yet: build it first." % self.ak.b(r.name), "warning")
+            return
+        self.owner.open_glyph(name)
+
+    # -- pictures --------------------------------------------------------------------------------------------
+
+    def part_path(self, part, depth=4):
+        """A part's outline as drawn (a QPainterPath, font units, y up): stretched where it is, a planned
+        glyph's own parts where it is one."""
+        QtCore, QtGui = _qt()
+        planner = self.planner_now
+        row = planner.by_name.get(part.name)
+        if row is not None and row.layout is not None and self.font.glyph_of(row.code) is None and depth:
+            path = QtGui.QPainterPath()
+            for inner in row.layout.parts:
+                found = self.part_path(inner.moved(part.matrix), depth - 1)
+                if found is not None:
+                    path.addPath(found)
+            return path
+        path = self.font.path(part.name)[0]
+        if path is None:
+            return None
+        if part.stretch is not None:
+            split, amount = part.stretch
+            try:  # each element right of the split moved, as the build moves the nodes
+                moved = QtGui.QPainterPath(path)
+                for index in range(moved.elementCount()):
+                    element = moved.elementAt(index)
+                    if element.x > split:
+                        moved.setElementPositionAt(index, element.x + amount, element.y)
+                path = moved
+            except Exception:  # (else the ink scaled across to the same length: a picture only)
+                box = path.boundingRect()
+                width = max(box.width(), 1e-6)
+                scale = (width + amount) / width
+                path = QtGui.QTransform(scale, 0, 0, 1, box.left() * (1 - scale), 0).map(path)
+        return QtGui.QTransform(*part.matrix).map(path)
+
+    def picture(self, r, size, frame=False):
+        """The row's glyph in the window's text color, size pixels per em; None where there is nothing."""
+        QtCore, QtGui = _qt()
+        if r.layout is None or self.font is None:
+            return None
+        upm = float(self.font.upm)
+        scale = float(size) / upm
+        path = QtGui.QPainterPath()
+        path.setFillRule(QtCore.Qt.WindingFill)
+        for part in r.layout.parts:
+            found = self.part_path(part)
+            if found is not None:
+                path.addPath(found)
+        box = path.boundingRect() if not path.isEmpty() else None
+        left = min(0.0, box.left()) if box else 0.0
+        right = max(r.layout.advance, box.right() if box else 0.0)
+        width = max(int((right - left) * scale) + 8, 8)
+        height = int(size * 1.45)
+        pixmap = QtGui.QPixmap(width, height)
+        pixmap.fill(QtGui.QColor(0, 0, 0, 0))
+        color = self.owner.dialog.palette.color(QtGui.QPalette.WindowText)
+        painter = QtGui.QPainter(pixmap)
+        try:
+            painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+            painter.translate(4 - left * scale, size * 1.1)
+            painter.scale(scale, -scale)
+            if frame or r.layout.kind == "empty":
+                pen = QtGui.QPen(color)
+                pen.setStyle(QtCore.Qt.DashLine)
+                pen.setCosmetic(True)
+                painter.setPen(pen)
+                painter.drawLine(QtCore.QPointF(0, -0.25 * upm), QtCore.QPointF(0, 0.85 * upm))
+                painter.drawLine(QtCore.QPointF(r.layout.advance, -0.25 * upm), QtCore.QPointF(r.layout.advance, 0.85 * upm))
+                if frame:
+                    painter.drawLine(QtCore.QPointF(left, 0), QtCore.QPointF(right, 0))
+            if not path.isEmpty():
+                painter.fillPath(path, QtGui.QBrush(color))
+        finally:
+            painter.end()
+        return self.ak.inked(pixmap, color)
+
+    # -- the build -------------------------------------------------------------------------------------------
+
+    def build(self):
+        """The checked rows built in every master, as one step of the History (the owner's write: its
+        begin_write and end_write)."""
+        self.harvest()
+        chosen = [r for r in self.rows if r.checked and r.layout is not None]
+        if not chosen or self.package is None:
+            return
+        package = self.package
+        if self.owner.package_key(self.owner.current_font()) != self.owner.package_key(package):
+            self.run(same_font=False)
+            self.owner.log.add(u"The font changed since the list was made: here is this one's. Nothing was built.",
+                               "warning")
+            return
+        log, b, html = self.owner.log, self.ak.b, self.ak.html
+        masters = list(package.masters) or [self.master]
+        plans = {}  # master: Planner, the current master's way kept for each row
+        ways = dict((r.hex, r.way_index) for r in self.rows if r.way_index is not None)
+        for master in masters:
+            plans[master] = self.planner_now if master == self.master else self.planner(self.font_in(package, master), ways)
+        order = build_order(chosen)
+        sharing = [package.findName(r.layout.shared) for r in order if r.layout.kind == "shared"]
+        if not self.owner.begin_write(package, [g for g in sharing if g is not None]):
+            return
+        made, rebuilt, shared, failed, touched, error = [], [], [], [], [], None
+        sparse = {}  # master: the glyphs left without a layer there, as their sources have none
+        built_names = set()
+        helpers = []  # the corrected glyphs made for mirrored parts
+        corrected = self.owner.corrector(package, masters, helpers, touched)
+        changing = None
+        try:
+            for r in order:
+                lacking = unbuilt_needs(r, [c for c in order if c.name in built_names],
+                                        lambda name: package.findName(name) is not None)
+                if lacking:
+                    failed.append((r.char, u"it needs %s, which %s not built: check %s too" % (
+                        u", ".join(lacking), u"was" if len(lacking) == 1 else u"were",
+                        u"it" if len(lacking) == 1 else u"them")))
+                    continue
+                if not r.existing and package.findUnicode(r.code) is not None:
+                    failed.append((r.char, u"the font has it now"))
+                    continue
+                if r.layout.kind == "shared":
+                    glyph = package.findName(r.layout.shared)
+                    before = list(glyph.fgGlyph.unicodes)
+                    glyph.fgGlyph.unicodes = before + [r.code]
+                    package.fgPackage.rebuildMaps()
+                    if r.code in list(package.findName(r.layout.shared).fgGlyph.unicodes):
+                        touched.append(glyph)
+                        shared.append((r.char, r.layout.shared))
+                        built_names.add(r.name)
+                        continue
+                    glyph.fgGlyph.unicodes = before
+                    package.fgPackage.rebuildMaps()
+                    failed.append((r.char, u"FontLab did not keep the second code point on %s" % r.layout.shared))
+                    continue
+                if r.layout.kind == "mirrored" and not r.existing:
+                    try:
+                        glyph = self.cm.make_corrected(self.fontlab, self.ak, package, masters, r.layout.parts[0].name,
+                                                       "x", r.name)
+                    except self.cm.MirrorError as exc:
+                        failed.append((r.char, u"%s" % exc))
+                        continue
+                    glyph.fgGlyph.unicode = r.code
+                    touched.append(glyph)
+                    made.append(r.char)
+                    built_names.add(r.name)
+                    continue
+                glyph = package.findName(r.name)
+                added = glyph is None
+                if added:
+                    glyph = held_glyph(self.cm, self.fontlab, package, r.name)
+                changing = glyph
+                kept, empty_in, why = [], [], None
+                try:
+                    for master in masters:
+                        row = plans[master].by_hex.get(r.hex)
+                        layout = row.layout if row is not None else None
+                        if layout is None:  # (a source with no layer there: a sparse master, said once below)
+                            sparse.setdefault(master, []).append(r.char)
+                            continue
+                        if write_layer(self.fontlab, self.ak, self.feature_code(), self.cm, package, master, masters,
+                                       glyph, layout if layout.kind != "mirrored" else Layout(layout.parts, layout.advance),
+                                       corrected):
+                            kept.append(master)
+                        else:
+                            empty_in.append(master)
+                except Exception as exc:  # (this glyph only: the others are built all the same)
+                    why = u"%s" % exc
+                if why is not None or not kept:
+                    failed.append((r.char, why or u"FontLab kept none of its parts"))
+                    if added:
+                        package.deleteGlyph(package.findName(r.name))
+                    elif kept or why is not None:
+                        touched.append(glyph)  # (its masters written so far stay written: recorded)
+                    changing = None
+                    continue
+                if added:
+                    package.findName(r.name).fgGlyph.unicode = r.code
+                touched.append(glyph)
+                changing = None
+                (rebuilt if r.existing else made).append(r.char)
+                built_names.add(r.name)
+                if empty_in:
+                    log.add(u"%s was left as it was in %s %s: FontLab did not keep its parts there." % (
+                        b(r.char), u"master" if len(empty_in) == 1 else u"masters", html(u", ".join(empty_in))), "warning")
+        except Exception as exc:
+            error = exc
+            if changing is not None:
+                touched.append(changing)
+        try:  # (whatever happens here, the step below is recorded and the window's write ends)
+            unused = unused_helpers(package, masters, helpers, touched)
+            for name in unused:  # (made for a glyph that was then not built: taken out, as Diacritics does)
+                try:
+                    package.deleteGlyph(package.findName(name))
+                except Exception:
+                    pass
+            helpers[:] = [name for name in helpers if name not in unused]
+            touched = [glyph for glyph in touched if u"%s" % getattr(glyph, "name", u"") not in unused]
+        except Exception as exc:
+            error = error or exc
+        try:
+            package.fgPackage.rebuildMaps()  # (FontLab's lookups by code point see the new ones: live 2026-11-16)
+        except Exception:
+            pass
+        status = None
+        try:
+            status = self.ak.notify_changed(self.fontlab, package, u"FreeLab Glyph Compose", touched)
+        finally:
+            self.owner.end_write(package, bool(touched))
+        undo = self.cm.undo_words(status, u" <i>Edit &gt; Undo</i> takes it back.")
+        if made:
+            log.add(u"Built %s: %s.%s" % (b(counted(len(made), u"glyph")), html(u" ".join(made)), undo), "done")
+        if shared:
+            glyphs = len(set(name for _, name in shared))
+            log.add(u"Added %s to %s the font has already, no new glyph: %s.%s" % (
+                b(counted(len(shared), u"code point")), u"a glyph" if glyphs == 1 else u"glyphs",
+                html(u", ".join(u"%s on %s" % pair for pair in shared)), undo), "done")
+        if rebuilt:
+            log.add(u"Rebuilt %s from %s recipe, in place: %s.%s" % (
+                b(counted(len(rebuilt), u"glyph")), u"its" if len(rebuilt) == 1 else u"their", html(u" ".join(rebuilt)),
+                undo), "done")
+        if not (made or shared or rebuilt):
+            log.add(u"Built none.")
+        for master in masters:
+            chars = [char for char in sparse.get(master, []) if char in made or char in rebuilt]
+            if chars:
+                log.add(u"In master %s, %s %s no layer, as %s sources have none there (a variable font's sparse "
+                        u"master): %s." % (
+                    b(master), counted(len(chars), u"glyph"), u"has" if len(chars) == 1 else u"have",
+                    u"its" if len(chars) == 1 else u"their", html(u" ".join(chars))))
+        if helpers:
+            log.add(u"Added %s for mirrored parts, mirrored with %s contours reversed: %s." % (
+                counted(len(helpers), u"glyph"), u"its" if len(helpers) == 1 else u"their", html(u", ".join(helpers))),
+                "done")
+        for char, why in failed:
+            log.add(u"%s was not built: %s." % (b(char), html(why)), "warning")
+        self.cm.report_write(status, log)
+        if error is not None:
+            log.add(u"Stopped by an error: %s" % html(error), "error")
+        self.just_built |= set(made) | set(rebuilt)
+        self.run()
+        try:  # the Diacritics tab's list reads the font again too (a letter built here may be one it listed)
+            self.owner.run()
+        except Exception:
+            pass

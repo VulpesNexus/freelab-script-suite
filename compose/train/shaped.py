@@ -18,10 +18,10 @@ Used by anchors.py. Python 3 with uharfbuzz and fonttools.
 
 import statistics
 
-import freelab_diacritics as dia  # (diacritics/, on the path anchors.py sets)
+import freelab_glyph_compose as dia  # (compose/, on the path anchors.py sets)
 
 # A sample mark for each side a script's marks take (above, below, and Hebrew's others: see
-# freelab_diacritics.MARK_CLASSES)
+# freelab_glyph_compose.MARK_CLASSES)
 SAMPLE_MARKS = dia.SAMPLE_MARKS
 SIDE_LETTERS = {("hebrew", "topright"): (0x05E9,)}  # a side sampled on these letters only (the shin dot on shin)
 # The reph: ra, virama, and the consonants it is sampled on, per script

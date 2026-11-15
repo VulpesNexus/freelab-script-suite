@@ -74,11 +74,15 @@ $files = @(
     @{ From = 'checks\language_font\FreeLangPlus-Duployan.ttf'; Name = 'FreeLangPlus-Duployan.ttf'; Optional = $true },
     @{ From = 'checks\language_font\FreeLang_LICENSE'; Name = 'FreeLang_LICENSE' },
     @{ From = 'spacing\freelab_auto_spacing.py'; Name = 'freelab_auto_spacing.py' },
-    @{ From = 'diacritics\freelab_diacritics.py'; Name = 'freelab_diacritics.py' },
-    @{ From = 'diacritics\mark_model.json'; Name = 'mark_model.json' },
-    @{ From = 'diacritics\glyph_names.json'; Name = 'glyph_names.json' },
-    @{ From = 'diacritics\anchor_model.json'; Name = 'anchor_model.json' },
-    @{ From = 'diacritics\GlyphData_LICENSE'; Name = 'GlyphData_LICENSE' },
+    @{ From = 'compose\freelab_glyph_compose.py'; Name = 'freelab_glyph_compose.py' },
+    # Its Glyph generation tab: a helper module, no menu entry of its own (see freelab_alternates.module)
+    @{ From = 'compose\freelab_glyph_generation.py'; Name = 'freelab_glyph_generation.module' },
+    @{ From = 'compose\glyph_generation.json'; Name = 'glyph_generation.json' },
+    @{ From = 'compose\glyph_generation_LICENSE'; Name = 'glyph_generation_LICENSE' },
+    @{ From = 'compose\mark_model.json'; Name = 'mark_model.json' },
+    @{ From = 'compose\glyph_names.json'; Name = 'glyph_names.json' },
+    @{ From = 'compose\anchor_model.json'; Name = 'anchor_model.json' },
+    @{ From = 'compose\GlyphData_LICENSE'; Name = 'GlyphData_LICENSE' },
     @{ From = 'features\freelab_feature_code.py'; Name = 'freelab_feature_code.py' },
     @{ From = 'features\ligature_model.json'; Name = 'ligature_model.json' },
     # A helper module, no script of its own: FontLab lists every .py of the folder in the Scripts menu,
@@ -98,7 +102,8 @@ $files = @(
     @{ From = 'kerning\class_model.json'; Name = 'class_model.json' }
 )
 # Scripts FreeLab once installed under other names: removed on install and uninstall.
-$retired = @('freelab_accents.py',  # Accented Glyphs, now Diacritics
+$retired = @('freelab_accents.py',  # Accented Glyphs, then Diacritics, now Glyph Compose
+    'freelab_diacritics.py', 'freelab_diacritics.pyc',  # Diacritics, now Glyph Compose (freelab_glyph_compose.py)
     'freelab_alternates.py', 'freelab_alternates.pyc',  # listed in the menu as a script: now freelab_alternates.module
     'FreeLabAutonyms.ttf', 'FreeLabAutonyms_LICENSE',  # Font Check's first font
     'FreeLabLanguages.ttf', 'FreeLabLanguages_LICENSE',  # its second name
@@ -510,8 +515,8 @@ elseif (Test-Path $native) {  # the same compiler builds it
     try { & (Join-Path $PSScriptRoot 'build-native.ps1') -Kern -Out $kern }
     catch { Write-Output "Could not build the auto kerning core: $_" }
 }
-if (-not (Test-Path $kern)) {  # (required: Auto Kerning, Auto Spacing, Kerning Check, and Diacritics measure with it)
-    Add-Incomplete "build the auto kerning core $kernName, which Auto Kerning, Auto Spacing, Kerning Check, and Diacritics measure with (it needs a C compiler: LLVM or Visual Studio with the C++ tools; then tools\build-native.ps1 -Kern)"
+if (-not (Test-Path $kern)) {  # (required: Auto Kerning, Auto Spacing, Kerning Check, and Glyph Compose measure with it)
+    Add-Incomplete "build the auto kerning core $kernName, which Auto Kerning, Auto Spacing, Kerning Check, and Glyph Compose measure with (it needs a C compiler: LLVM or Visual Studio with the C++ tools; then tools\build-native.ps1 -Kern)"
 }
 if ((Test-Path $native) -and (Test-Path $BinDir)) {
     # Earlier versions: FontLab keeps the one it loaded locked until it quits, so a locked one waits for the next install.

@@ -1707,9 +1707,9 @@ def history_state(package):
 # Scripts > FreeLab, in the order a font is usually made, then dark mode, then FreeLab MCP's: FontLab
 # lists a folder's scripts by file name and has no separators of its own.
 # The font tools in the order of the work, which the menu, each window's tools button, and its arrows
-# follow: the letters built (Diacritics), spaced, kerned, the features written, then the result
+# follow: the glyphs built (Glyph Compose), spaced, kerned, the features written, then the result
 # compared, checked (Font Check), and proofed.
-MENU_GROUPS = (("Diacritics", "Auto Spacing", "CJK Spacing", "CJK Vertical", "Auto Kerning", "Kerning Check",
+MENU_GROUPS = (("Glyph Compose", "Auto Spacing", "CJK Spacing", "CJK Vertical", "Auto Kerning", "Kerning Check",
                 "Feature Code", "Font Compare", "Font Check", "Proof"),
                ("Dark Mode", "Toggle Dark Mode", "Dark Mode Settings", "Tab Docking", "Toggle Tab Docking"),
                ("Start MCP Listener", "Stop MCP Listener", "Start Listener", "Stop Listener"))  # (FreeLab MCP's, old names too)
@@ -2515,7 +2515,7 @@ def _recolored_brush(brush, mapping):
 
 def retheme_items(view, mapping):
     """A list's pictures (inked) and item colors in their new colors: how many were redrawn. The list's
-    signals are held meanwhile: a changed item is no edit of the user's (Diacritics dropped its
+    signals are held meanwhile: a changed item is no edit of the user's (Glyph Compose dropped its
     revealed rows, Feature Code wrote its code again row by row, on itemChanged)."""
     count = 0
     single = view.inherits("QListWidget")  # (a list's item has no column)
@@ -3099,7 +3099,7 @@ _INERT = _Inert()
 class ReleasedTool(object):
     """What a tool's dialog object becomes once let go (let_go): whatever is asked of it (a method, a
     widget, a list) is nothing (_Inert), so a slot or a timer still bound to it (self.update_buttons from
-    a 0 ms timer, self.select from the selection a deleted list gives up, Diacritics' row drop) ends
+    a 0 ms timer, self.select from the selection a deleted list gives up, Glyph Compose's row drop) ends
     there, never reaching a deleted list or its items."""
     released = True
 
@@ -3116,7 +3116,7 @@ _PLAIN = (type(None), bool, int, float, str, type(u""), bytes)
 
 def _held_timers(owner):
     """The QTimers a tool's dialog object holds, wherever it holds them: in its attributes, the lists,
-    tuples, sets, and dictionaries it holds, and the parts it holds (Diacritics' anchors page, Auto
+    tuples, sets, and dictionaries it holds, and the parts it holds (Glyph Compose's anchors page, Auto
     Kerning's previews' click regions, its classes dialog's drag, a flag menu, a log), each once, down
     to HELD_DEPTH. Timers tick on their own slots, and event filters are timers here: one held only in a
     dictionary of parts was missed, and became garbage PythonQt deleted at an arbitrary moment. Never a
@@ -3733,7 +3733,7 @@ LONG_CHOICES = 24  # a dropdown with more choices than this opens as a list of t
 LONG_SHEET = u"QComboBox { combobox-popup: 0; }"
 # Qt's style opens a dropdown as a menu laid over the box, with the current choice under the pointer:
 # with several hundred choices (Proof's languages) it covered the screen from top to bottom, its ends
-# cut off, and a short one whose current choice was its last (Diacritics' Character set on All) opened
+# cut off, and a short one whose current choice was its last (Glyph Compose's Character set on All) opened
 # upward, over the box, with room to spare below. With this one property every FreeLab dropdown opens
 # as a list hanging from its box (above it only when the screen has no room below), at most LONG_CHOICES
 # rows, scrolled past them. The property needs a stylesheet on the box, which dark mode would take for a
@@ -4312,7 +4312,7 @@ def glyph_picture(package, master, name, color, line):
         return None
 
 
-GLYPH_ICON_SIZE = 32  # pixels per em of a list row's picture of its glyphs (Font Check's 32, near Diacritics' 40)
+GLYPH_ICON_SIZE = 32  # pixels per em of a list row's picture of its glyphs (Font Check's 32, near Glyph Compose's 40)
 GLYPH_ICON_ROWS = 1000  # rows of a list drawn with their glyphs at most (each picture takes about a millisecond)
 
 
@@ -4323,7 +4323,7 @@ def glyph_icon_size(glyphs=1, size=GLYPH_ICON_SIZE):
 
 def glyph_icon(package, master, names, color, value=0, size=GLYPH_ICON_SIZE):
     """A list row's picture of its glyph, or of its pair at a kerning value, drawn from the font on one
-    baseline (as Diacritics draws its rows), in color, color glyphs in their own colors; None when a
+    baseline (as Glyph Compose draws its rows), in color, color glyphs in their own colors; None when a
     glyph has nothing to draw. Lists that show one take LEAVE_ALONE_PROP: dark mode leaves the
     pictures as drawn, in the window's own text color."""
     QtCore, QtGui = _qt()
@@ -4984,13 +4984,13 @@ class Log(object):
 
 
 # FreeLab's one table layout (table_layout), for every list of rows in every tool, trees and tables
-# alike, in either theme and across a switch: the owner's reference is Diacritics' and Feature Code's
+# alike, in either theme and across a switch: the owner's reference is Glyph Compose's and Feature Code's
 # lists (2026-11-15), where a list converted later had a header dark mode had mapped (stray light
 # separators), gray ticks, rows close to their text, no grid where the theme changed, or columns that
 # left half the window empty.
 # - Dark mode leaves the whole list alone (LEAVE_ALONE_PROP): everything in it is drawn from the
 #   palette, so there is nothing to map; mapped, its header came out with light separators and its
-#   grid light (Font Compare, Kerning Classes). The header is the style's own, as Diacritics' is.
+#   grid light (Font Compare, Kerning Classes). The header is the style's own, as Glyph Compose's is.
 # - Grid lines halfway between the list's text and its ground, at half strength (a mid gray at 50 %
 #   opacity: faint beside the text, in either theme).
 # - Each cell's content TABLE_PADDING from its lines (rows with room above and below their text).

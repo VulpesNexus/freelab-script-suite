@@ -1,8 +1,8 @@
-"""Which mark the open-licensed fonts draw on each letter Diacritics builds, against Unicode's
+"""Which mark the open-licensed fonts draw on each letter Glyph Compose builds, against Unicode's
 canonical decomposition (Unicode decomposes Latvian's k with a comma below with a cedilla, and the
 Czech and Slovak d, t, l with an apostrophe-like caron with a caron).
 
-For every letter of Diacritics' sets that decomposes into a letter and marks, in every open-licensed
+For every letter of Glyph Compose's sets that decomposes into a letter and marks, in every open-licensed
 font at hand (one per family, SIL Open Font License or Apache License, as kerning/train/dataset.py
 finds them, plus FreeLab's corpus folder), each mark is told apart:
 - in a composite glyph, by its components' code points and names (uni0326, commaaccentcomb,
@@ -12,10 +12,10 @@ finds them, plus FreeLab's corpus folder), each mark is told apart:
   shape (the same points, moved), and where they sit.
 It prints, per letter, Unicode's mark, the mark most fonts draw, and how many fonts draw it; and the
 median placement of the marks fonts draw for Unicode's (the vertical caron's gap to the stem and height,
-the turned comma's gap above the letter and offset), which freelab_diacritics.py's CONVENTIONS and
+the turned comma's gap above the letter and offset), which freelab_glyph_compose.py's CONVENTIONS and
 VERTICAL_CARON carry.
 
-    python diacritics/train/conventions.py [--limit N] [--json <file>]
+    python compose/train/conventions.py [--limit N] [--json <file>]
 
 Python 3 with fonttools. Only the counts and measurements leave the fonts; the fonts are not copied.
 """
@@ -35,7 +35,7 @@ sys.path.insert(0, os.path.join(HERE, os.pardir, os.pardir, "kerning", "train"))
 sys.path.insert(0, os.path.join(HERE, os.pardir))
 os.environ["FREELAB_NO_AUTOSTART"] = "1"
 import dataset  # noqa: E402  (the corpus's folders and its license check)
-import freelab_diacritics as ac  # noqa: E402  (the marks, the sets)
+import freelab_glyph_compose as ac  # noqa: E402  (the marks, the sets)
 
 TOLERANCE = 0.004  # of the em: two outlines within this of each other, point for point, are the same shape
 BAND = ac.BAND_SHARE
@@ -189,7 +189,7 @@ def band_xs(segments, y0, y1):
 
 def ink_of(glyphset, name):
     """(left, bottom, right, top, top band center, bottom band center, bottom band right, top band right) of a
-    glyph's outline, its bands cut as Diacritics cuts them in FontLab (the outline's top and bottom fifth,
+    glyph's outline, its bands cut as Glyph Compose cuts them in FontLab (the outline's top and bottom fifth,
     curves and all: not its points, whose off-curve handles reach past the ink), or None for an empty glyph."""
     segments = segments_of(glyphset, name)
     if not segments:
@@ -243,7 +243,7 @@ def fonts(limit=0):
 
 
 def letters():
-    """The letters of Diacritics' sets that decompose into a letter and marks."""
+    """The letters of Glyph Compose's sets that decompose into a letter and marks."""
     found = []
     for low, high in dict((key, ranges) for key, _, ranges in ac.SETS)["all"]:
         for code in range(low, high):

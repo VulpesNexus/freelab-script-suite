@@ -558,7 +558,7 @@ class ListFontTests(unittest.TestCase):
         for row in self.info["files"]:
             self.assertEqual([c for c in row["file"] if ord(c) > 0x7E], [], "a file name is ASCII")
             self.assertIn(row["family"][:len(fc.LIST_DISPLAY_NAME) + 1], (fc.LIST_DISPLAY_NAME + u" ", fc.LIST_DISPLAY_NAME + u"+"),
-                          "what Diacritics' font chooser leaves out")
+                          "what Glyph Compose's font chooser leaves out")
 
     def test_has_every_required_character(self):
         """Everything checks/font_characters.json asks for, but the characters listed in NOT_SUPPLIED."""
@@ -1112,7 +1112,7 @@ class FindingTests(unittest.TestCase):
         self.assertEqual(len(FakeFont.inserted), 1, "nor substituted again")
         self.assertEqual(fc.LIST_DISPLAY_NAME, u"FreeLang", "the name a tool shows for the five")
         self.assertEqual(fc.LIST_FAMILY, u"FreeLang Essential")
-        for family in [fc.LIST_FAMILY] + fallbacks:  # (Diacritics leaves out of its chooser what starts so)
+        for family in [fc.LIST_FAMILY] + fallbacks:  # (Glyph Compose leaves out of its chooser what starts so)
             self.assertIn(family[:len(fc.LIST_DISPLAY_NAME) + 1], (fc.LIST_DISPLAY_NAME + u" ", fc.LIST_DISPLAY_NAME + u"+"), family)
 
     def with_files(self, names):

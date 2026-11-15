@@ -9,10 +9,10 @@ of the em: how far above the base's ink top (below its ink bottom) the base's an
 across from the center of the base's top (bottom) fifth, as a share of its width; how far below the
 mark's ink (above, for marks below) the mark's anchor sits; and, for mark-to-mark, how far above a
 mark's ink its own anchor sits.
-The medians, per script and side, are diacritics/anchor_model.json: Diacritics places anchors by them.
-Marks of other classes (freelab_diacritics.MARK_CLASSES: Hebrew's dagesh inside the letter, its holam
+The medians, per script and side, are compose/anchor_model.json: Glyph Compose places anchors by them.
+Marks of other classes (freelab_glyph_compose.MARK_CLASSES: Hebrew's dagesh inside the letter, its holam
 at the top left) are left out of these medians.
-Then it shapes text with each font (diacritics/train/shaped.py, through HarfBuzz): where a sample mark
+Then it shapes text with each font (compose/train/shaped.py, through HarfBuzz): where a sample mark
 of each side lands on each letter (from the fonts attaching that script's marks: a font that leaves
 them where they are drawn says nothing of where they go), the reph on a consonant (Devanagari, Bengali,
 Gujarati), how far the i-matra picked before each consonant reaches into it, and where two-part
@@ -21,9 +21,9 @@ ligatures' marks attach; the medians, from at least MIN_FONTS fonts each, are th
 pick their nominal i-matra before it), and "ligature".
 It also counts, per script, the letters each font attaches marks to (its encoded glyph or a form of
 it named after it, beh-ar.init): the letters at least BASE_SHARE of the fonts having them attach marks
-to are the script's bases, the letters Diacritics gives anchors to where Unicode composes none.
+to are the script's bases, the letters Glyph Compose gives anchors to where Unicode composes none.
 
-    python diacritics/train/anchors.py [--out <file.json>] [--all-fonts]
+    python compose/train/anchors.py [--out <file.json>] [--all-fonts]
 
 --all-fonts counts every font's shaped placements, attaching that script's marks or not (as the first
 models did).
@@ -44,7 +44,7 @@ sys.path.insert(0, os.path.join(HERE, os.pardir, os.pardir, "kerning", "train"))
 sys.path.insert(0, os.path.join(HERE, os.pardir))
 os.environ["FREELAB_NO_AUTOSTART"] = "1"
 import dataset  # noqa: E402  (the corpus's folders and its license check)
-import freelab_diacritics as dia  # noqa: E402  (the scripts' ranges)
+import freelab_glyph_compose as dia  # noqa: E402  (the scripts' ranges)
 import shaped  # noqa: E402  (beside this file: where marks land as HarfBuzz shapes them)
 
 MODEL_FILE = os.path.join(HERE, os.pardir, "anchor_model.json")

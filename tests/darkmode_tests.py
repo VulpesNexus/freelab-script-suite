@@ -948,7 +948,7 @@ class PlainInputTests(DarkModeCase):
 
     def test_a_combo_box_that_lost_its_stylesheet_is_plain_again(self):
         # FreeLab draws a dropdown with one choice as a label, through a stylesheet, and takes the
-        # stylesheet away when a second choice comes (Diacritics' Script dropdown). Dark mode kept the
+        # stylesheet away when a second choice comes (Glyph Compose's Script dropdown). Dark mode kept the
         # sheet it had seen, took the dropdown for a styled one ever after, and its ink effect garbled it.
         dialog = FakeWidget("QDialog", parent=None, window=True)
         combo = FakeWidget("QComboBox", parent=dialog, inherits=("QComboBox",), light="ink",

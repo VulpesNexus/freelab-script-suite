@@ -3,16 +3,16 @@ Font License and Apache License fonts only, as kerning/train/dataset.py finds th
 
 Every accented letter a TrueType font builds as a composite of its letter and its marks (Unicode's
 canonical decomposition, component by component, no scaled components; for the letters fonts draw
-another mark on, freelab_diacritics.CONVENTIONS, that mark: Latvian's comma below for Unicode's
+another mark on, freelab_glyph_compose.CONVENTIONS, that mark: Latvian's comma below for Unicode's
 cedilla) is measured, in shares of the em: each mark's gap to the ink below it (the letter's, or the
 mark under it in a stack) or above it, its center's offset from the center of the letter's top (or
 bottom) fifth as a share of the letter's width (the fifth of its outline, curves and all, as
-Diacritics cuts it in FontLab: not of its points, whose off-curve handles reach past the ink), its height against the same mark alone, and how far the whole glyph reaches above the
+Glyph Compose cuts it in FontLab: not of its points, whose off-curve handles reach past the ink), its height against the same mark alone, and how far the whole glyph reaches above the
 font's ascender or below its descender. The medians, per mark, case, and letter, are
-diacritics/mark_model.json: Diacritics places marks by them in a font with no composites of its
+compose/mark_model.json: Glyph Compose places marks by them in a font with no composites of its
 own to learn from.
 
-    python diacritics/train/marks.py [--out <file.json>] [--limit N]
+    python compose/train/marks.py [--out <file.json>] [--limit N]
 
 Python 3 with fonttools. Only the measurements leave the fonts; the fonts are not copied.
 """
@@ -29,7 +29,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, os.pardir, os.pardir, "kerning", "train"))
 sys.path.insert(0, os.path.join(HERE, os.pardir))
 import dataset  # noqa: E402  (the corpus: open-licensed fonts installed here)
-import freelab_diacritics as ac  # noqa: E402  (the marks' names and sides)
+import freelab_glyph_compose as ac  # noqa: E402  (the marks' names and sides)
 sys.path.insert(0, HERE)
 import conventions  # noqa: E402  (outlines cut in bands as FontLab cuts them)
 

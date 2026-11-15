@@ -22,7 +22,7 @@ Three views of the current font; nothing in the font changes until a button that
   character sets that are no languages, and the languages by family (Glottolog's classification and
   other names, checks/language_families.json, CC BY 4.0), found by any of their names. A letter the
   font lacks as one character counts when the font has its letter and marks and its anchors put them
-  together (composed). Missing letters that Diacritics can build are handed to it.
+  together (composed). Missing letters that Glyph Compose can build are handed to it.
 - Vertical metrics: a diagram of the font's tallest and deepest glyphs on its line metrics (typo,
   hhea, win), the ink Windows clips in red; the values now and as Google Fonts' vertical metrics
   guidance suggests; its checks, passed or not; the glyphs Windows clips (beyond winAscent and
@@ -46,7 +46,7 @@ import time
 import unicodedata
 
 AUTO_KERNING_FILE, AUTO_KERNING_MODULE = "freelab_auto_kerning.py", "freelab_auto_kerning"
-DIACRITICS_FILE, DIACRITICS_MODULE = "freelab_diacritics.py", "freelab_diacritics"
+DIACRITICS_FILE, DIACRITICS_MODULE = "freelab_glyph_compose.py", "freelab_glyph_compose"
 LANGUAGES_FILE = "language_coverage.json"  # beside this script: checks/train/languages.py makes it from Hyperglot
 ORTHOGRAPHIES_FILE = "language_orthographies.json"  # beside this script: checks/train/orthographies.py makes it
 # (the languages Hyperglot does not describe, from Google Fonts' language data, CLDR, SIL's SLDR, Unilex,
@@ -61,7 +61,7 @@ LIST_FAMILY = "FreeLang Essential"  # its family: Noto subsets (OFL) of every ch
 # family), in the order they are fallen back to. The four are optional, published beside each release
 # rather than kept in the repository: without one, its characters come from the system's fonts. Every
 # family starts with LIST_DISPLAY_NAME and a space or a plus (the last three are FreeLang+), which is
-# how Diacritics leaves them out of its font chooser. Each fits the 31 characters of a Windows family
+# how Glyph Compose leaves them out of its font chooser. Each fits the 31 characters of a Windows family
 # name, past which Qt never lists a font (checks/train/language_font.py, GDI_FAMILY_LIMIT). The fourth
 # has an en dash (U+2013), written as an escape: this file stays ASCII there, as its file name does,
 # which spells the plus "Plus".
@@ -1200,7 +1200,7 @@ def buildable_candidates(results, ranges):
         for item in list(r.missing[:WANTED_MOST]) + list(r.auxiliary_missing[:WANTED_MOST]) + list(r.marks_missing):
             codes = code_points(item)
             if len(codes) == 1 and 0x0300 <= codes[0] < 0x0370 and item not in found:
-                found.append(item)  # a combining mark: Diacritics makes it of the mark it comes from (macron below of the macron)
+                found.append(item)  # a combining mark: Glyph Compose makes it of the mark it comes from (macron below of the macron)
                 continue
             if len(codes) != 1 or not any(low <= codes[0] < high for low, high in ranges):
                 continue
@@ -2626,13 +2626,13 @@ def gain_text(checked_count, gained, bold=None):
     return head + u"%s (%s)" % (bold(count) if bold else count, where)
 
 
-CHECK_BUTTONS = (("all", u"Check all"), ("none", u"Check none"), ("buildable", u"Check only what Diacritics can build"))
+CHECK_BUTTONS = (("all", u"Check all"), ("none", u"Check none"), ("buildable", u"Check only what Glyph Compose can build"))
 
 
 def checks_for(rows, checked, buildable):
     """What each check button over a tab of characters would leave checked, {key: set of characters}, None
     for a button that would change nothing (it is grayed out): "all" adds every row listed to the
-    checks, "none" clears them, "buildable" checks the rows listed with a character Diacritics can
+    checks, "none" clears them, "buildable" checks the rows listed with a character Glyph Compose can
     build (buildable), and nothing else. rows: the AddRows listed; checked: the characters checked."""
     checked, buildable = set(checked), set(buildable or ())
     listed = set(item for row in rows for item in row.items)
@@ -3354,7 +3354,7 @@ they are inferred from counting a text (its row says <i>inferred</i>: rare lette
 or read from a keyboard layout (its row says <i>keyboard</i>: the characters its keys and rules
 type). Uncheck <i>Languages from texts and keyboards</i> to leave both out. At the left, two
 tabs of glyphs. <i>High-value missing glyphs</i> ranks the glyphs to add by the languages each
-completes on its own: check some (or all, none, or only those <i>Diacritics</i> can build), and the
+completes on its own: check some (or all, none, or only those <i>Glyph Compose</i> can build), and the
 line above says how many languages they complete together. The second tab is grayed, and reads
 <i>Select language, character set, or family</i>, until a language, a character set (a script of Unicode
 is one), or a family is selected at the right: it then lists what that one misses, and is
@@ -4033,7 +4033,7 @@ def comparison_pixmap(width, height, sides, colors, font):
 
 
 def anchor_points(layer):
-    """[(name, x, y)] of a layer's anchors (flPinPoint.point, as Diacritics reads it)."""
+    """[(name, x, y)] of a layer's anchors (flPinPoint.point, as Glyph Compose reads it)."""
     found = []
     try:
         for anchor in layer.anchors:
@@ -4117,7 +4117,7 @@ def row_tip(row, buildable=False):
     if parts:
         paragraphs.append(u"The font has the letter and marks of %s, but no anchors joining them." % u" ".join(parts))
     if buildable:
-        paragraphs.append(u"Diacritics can build it from the font's letters and marks.")
+        paragraphs.append(u"Glyph Compose can build it from the font's letters and marks.")
     return u"\n\n".join(paragraphs)
 
 
@@ -5216,9 +5216,9 @@ class FontCheckDialog(object):
         self.package = self.master = None
         self.busy = self.filling = False
         self.seen_history, self.stale = None, set(TABS)
-        self.diacritics = None  # Diacritics' module, loaded when first needed
-        self.buildable = None  # the characters Diacritics can build, asked once per check
-        self.plan_font = None  # (package, Diacritics' module, its Font of the glyphs): made once per check
+        self.diacritics = None  # Glyph Compose's module, loaded when first needed
+        self.buildable = None  # the characters Glyph Compose can build, asked once per check
+        self.plan_font = None  # (package, Glyph Compose's module, its Font of the glyphs): made once per check
         self.scripts, self.results, self.rows, self.own_rows = [], [], [], []  # rows: the high-value list's;
         # own_rows: the selection's own tab's
         self.checked = set()  # characters checked, in either tab of characters
@@ -5236,7 +5236,7 @@ class FontCheckDialog(object):
         self.opened = set()  # the families opened, by their place: all closed to start with
         self.reveal = False  # the selected language's family opened as the Families tab is next filled
         self.pressed = None  # the selection's key when the mouse was pressed on its own row
-        self.asked = set()  # the selections whose characters Diacritics was asked about
+        self.asked = set()  # the selections whose characters Glyph Compose was asked about
         self.script_filter = None
         self.list_family = None  # FreeLang once registered: the font of names and characters in tooltips
         self.tip_cache = {}  # the tooltips of the lists' rows made so far, for this check (right_tip)
@@ -5714,7 +5714,7 @@ class FontCheckDialog(object):
         self.check_buttons, self.check_slots = {}, []
         tips = {"all": u"Checks every glyph listed in the tab shown (the checks of rows not listed are kept).",
                 "none": u"Unchecks every glyph, those not listed in the tab shown too.",
-                "buildable": u"Checks the glyphs listed in the tab shown that <i>Diacritics</i> can build from "
+                "buildable": u"Checks the glyphs listed in the tab shown that <i>Glyph Compose</i> can build from "
                              u"the font's letters and marks, and unchecks the others."}
         def clicked(key):
             return lambda: self.set_checks(key)  # (no argument PythonQt could fill)
@@ -5752,8 +5752,8 @@ class FontCheckDialog(object):
             self.use_list_font(widget, 1)
         box.addWidget(self.left_pages, 1)
         row = QtGui.QHBoxLayout()
-        self.diacritics_button = QtGui.QPushButton("Build with Diacritics")
-        self.diacritics_button.setWhatsThis(u"Opens <i>Diacritics</i> on the checked glyphs of the tab shown that it "
+        self.diacritics_button = QtGui.QPushButton("Build with Glyph Compose")
+        self.diacritics_button.setWhatsThis(u"Opens <i>Glyph Compose</i> on the checked glyphs of the tab shown that it "
                                             u"can build from the font's letters and marks (you check them there "
                                             u"before anything is made).")
         self.copy_chars_button = QtGui.QPushButton("Copy glyphs")
@@ -6552,19 +6552,19 @@ class FontCheckDialog(object):
         chosen = self.chosen_characters() if self.package is not None else []
         buildable = self.buildable_checked() if chosen else []
         ak.enable(self.diacritics_button, bool(buildable))
-        self.diacritics_button.setText(u"Build %s with Diacritics" % counted(len(buildable), u"glyph") if buildable
-                                       else u"Build with Diacritics")
+        self.diacritics_button.setText(u"Build %s with Glyph Compose" % counted(len(buildable), u"glyph") if buildable
+                                       else u"Build with Glyph Compose")
         self.diacritics_button.setToolTip(self.tip(
             u"" if buildable else u"Check glyphs or select a row first." if not chosen else
-            u"<i>Diacritics</i> cannot build %s from the font's letters and marks." % (
+            u"<i>Glyph Compose</i> cannot build %s from the font's letters and marks." % (
                 u"this glyph" if len(chosen) == 1 else u"any of these glyphs"), rich=True))
         targets = self.check_targets() if self.package is not None else {}
         listed = self.shown_rows()
         can = any(item in (self.buildable or set()) for row in listed for item in row.items)
         idle = {"all": u"Every glyph listed is checked." if listed else u"No glyph is listed.",
                 "none": u"No glyph is checked.",
-                "buildable": u"Only what <i>Diacritics</i> can build is checked." if can
-                else u"<i>Diacritics</i> can build none of the glyphs listed."}
+                "buildable": u"Only what <i>Glyph Compose</i> can build is checked." if can
+                else u"<i>Glyph Compose</i> can build none of the glyphs listed."}
         for key, button in self.check_buttons.items():
             on = targets.get(key) is not None
             ak.enable(button, on)
@@ -6921,7 +6921,7 @@ class FontCheckDialog(object):
         self.pictures = {}  # (drawn again: the palette may have changed)
         if self.script_filter not in [s.script for s in scripts if s.present]:
             self.script_filter = None
-        self.buildable_set()  # (Diacritics asked once: the rows' tooltips say what it can build)
+        self.buildable_set()  # (Glyph Compose asked once: the rows' tooltips say what it can build)
         return BUSY_STEPS[3]
 
     def coverage_list(self, state):
@@ -7330,7 +7330,7 @@ class FontCheckDialog(object):
             self.checked -= set(row.items)
 
     def check_targets(self):
-        """checks_for of the rows of the tab shown (Diacritics asked once per check, as the rows'
+        """checks_for of the rows of the tab shown (Glyph Compose asked once per check, as the rows'
         tooltips are)."""
         rows = self.shown_rows()
         buildable = self.buildable_set() if self.package is not None and rows else set()
@@ -8010,8 +8010,8 @@ class FontCheckDialog(object):
                 self.fill_own()
                 self.update_gain()
         elif self.selection is not None:
-            # (kept through a new check, an undo's: the check forgot what Diacritics was asked, and the rows
-            # of a started language, a set, or a family lost "Diacritics can build it". Asked once per check)
+            # (kept through a new check, an undo's: the check forgot what Glyph Compose was asked, and the rows
+            # of a started language, a set, or a family lost "Glyph Compose can build it". Asked once per check)
             self.ask_buildable(self.selection)
 
     def right_note(self, tab, made, text, level, shown):
@@ -8243,7 +8243,7 @@ class FontCheckDialog(object):
         return self.diacritics
 
     def buildable_set(self):
-        """The missing characters of the languages within reach that Diacritics' own planning can build
+        """The missing characters of the languages within reach that Glyph Compose's own planning can build
         from the font's letters and marks (asked once per check)."""
         if self.buildable is not None:
             return self.buildable
@@ -8251,18 +8251,18 @@ class FontCheckDialog(object):
         try:
             found = self.diacritics_plan([r for r in self.results if r.level == "nearly"])
         except Exception as exc:
-            self.log.add(u"<i>Diacritics</i> could not be asked: %s" % self.ak.html(exc), "warning")
+            self.log.add(u"<i>Glyph Compose</i> could not be asked: %s" % self.ak.html(exc), "warning")
         self.buildable = found
         return found
 
     def diacritics_plan(self, results):
-        """The missing characters of the coverages given that Diacritics' planning can build."""
+        """The missing characters of the coverages given that Glyph Compose's planning can build."""
         dm = self.diacritics_module()
         ranges = [pair for _, _, pairs in dm.SETS for pair in pairs]
         candidates = buildable_candidates(results, ranges)
         if not candidates:
             return set()
-        # (Diacritics' Font of every glyph, made once per check and font: each new selection asked again
+        # (Glyph Compose's Font of every glyph, made once per check and font: each new selection asked again
         # made it anew. A check forgets it, as it forgets what was asked: the glyphs may have changed)
         held = self.plan_font
         if held is None or held[0] is not self.package or held[1] is not dm:
@@ -8275,7 +8275,7 @@ class FontCheckDialog(object):
         return set(recipe.char for recipe in dm.plan(held[2], candidates) if not recipe.missing)
 
     def ask_buildable(self, selection):
-        """Diacritics asked about a selection's characters too, once per check: the first asking covers
+        """Glyph Compose asked about a selection's characters too, once per check: the first asking covers
         the languages within reach only, and a started or missed language's, a character set's, or a
         family's rows are listed while it is selected."""
         results = [r for r in selection.results if r.level != "covered" and not (r.level == "nearly" and r in self.results)]
@@ -8285,7 +8285,7 @@ class FontCheckDialog(object):
         try:
             self.buildable = set(self.buildable_set()) | self.diacritics_plan(results)
         except Exception:
-            pass  # (its rows say nothing of Diacritics then)
+            pass  # (its rows say nothing of Glyph Compose then)
 
     def chosen_characters(self):
         """What the buttons act on: the checked characters the tab shown lists, or, with none of them
@@ -8297,7 +8297,7 @@ class FontCheckDialog(object):
         return sorted(row.items, key=code_points) if row is not None else []
 
     def buildable_checked(self):
-        """The chosen characters Diacritics can build."""
+        """The chosen characters Glyph Compose can build."""
         if self.package is None:
             return []
         can = self.buildable_set()
@@ -8316,14 +8316,14 @@ class FontCheckDialog(object):
         try:
             dm = self.diacritics_module()
             try:
-                dm.main(characters=chars)  # a Diacritics that lists the letters given only
-                self.log.add(u"<i>Diacritics</i> lists %s: check them there, then build." % i(u" ".join(chars)), "done")
+                dm.main(characters=chars)  # a Glyph Compose that lists the letters given only
+                self.log.add(u"<i>Glyph Compose</i> lists %s: check them there, then build." % i(u" ".join(chars)), "done")
             except TypeError:
-                dm.main()  # (a Diacritics that takes no letters lists every one it can build)
-                self.log.add(u"<i>Diacritics</i> lists every letter with diacritics it can build, %s among them." % i(
+                dm.main()  # (a Glyph Compose that takes no letters lists every one it can build)
+                self.log.add(u"<i>Glyph Compose</i> lists every letter with diacritics it can build, %s among them." % i(
                     u" ".join(chars)), "done")
         except Exception as exc:
-            self.log.add(u"<i>Diacritics</i> did not open: %s" % self.ak.html(exc), "error")
+            self.log.add(u"<i>Glyph Compose</i> did not open: %s" % self.ak.html(exc), "error")
 
     def copy_characters(self):
         QtCore, QtGui = _qt()

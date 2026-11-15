@@ -13,7 +13,7 @@ import unittest
 os.environ["FREELAB_NO_AUTOSTART"] = "1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, os.pardir, "checks"))
-sys.path.insert(0, os.path.join(HERE, os.pardir, "diacritics"))
+sys.path.insert(0, os.path.join(HERE, os.pardir, "compose"))
 import freelab_font_check as fc  # noqa: E402
 
 LANGUAGES_FILE = os.path.join(HERE, os.pardir, "checks", "language_coverage.json")
@@ -221,12 +221,12 @@ class CoverageTests(unittest.TestCase):
         self.assertEqual(result.marks_missing, [u(0x331), u(0x5B4)])
         ranges = [(0xC0, 0x250)]
         self.assertEqual(fc.buildable_candidates([result], ranges), [u(0x331)], "a combining mark, not a Hebrew point")
-        import freelab_diacritics as dm
+        import freelab_glyph_compose as dm
         self.assertEqual([r.char for r in dm.plan(dm.Font([u"o", u"macron"], [(u"o", 0x6F), (u"macron", 0xAF)]),
-                                                  [u(0x331)])], [u(0x331)], "Diacritics plans the mark")
+                                                  [u(0x331)])], [u(0x331)], "Glyph Compose plans the mark")
 
     def test_handed_to_diacritics(self):
-        import freelab_diacritics as dm
+        import freelab_glyph_compose as dm
         result = fc.check_language(language(u"r " + u(0x159) + u" " + u(0x13E)), font([0x72]))
         candidates = fc.buildable_candidates([result], [pair for _, _, pairs in dm.SETS for pair in pairs])
         diacritics_font = dm.Font([u"r", u"caron", u"l", u"quoteright"], [(u"r", 0x72), (u"l", 0x6C), (u"quoteright", 0x2019)])
@@ -495,13 +495,13 @@ class AddTests(unittest.TestCase):
         targets = fc.checks_for(rows, set(), set([small_eng]))
         self.assertEqual(targets["all"], listed)
         self.assertIsNone(targets["none"], "nothing checked: grayed out")
-        self.assertEqual(targets["buildable"], set([small_eng]), "the rows Diacritics can build, only")
+        self.assertEqual(targets["buildable"], set([small_eng]), "the rows Glyph Compose can build, only")
         targets = fc.checks_for(rows, listed, set([small_eng]))
         self.assertIsNone(targets["all"], "everything checked: grayed out")
         self.assertEqual(targets["none"], set())
         self.assertEqual(targets["buildable"], set([small_eng]), "the others unchecked")
         self.assertIsNone(fc.checks_for(rows, set([small_eng]), set([small_eng]))["buildable"], "already so")
-        self.assertIsNone(fc.checks_for(rows, set(), set())["buildable"], "Diacritics builds none of them")
+        self.assertIsNone(fc.checks_for(rows, set(), set())["buildable"], "Glyph Compose builds none of them")
         self.assertEqual(fc.checks_for(rows, set(), set([schwa]))["buildable"], set([schwa, small_schwa]),
                          "a row checks whole: a capital with its small letter")
         hidden = u(0x3B1)  # checked in a row another script's filter hides
@@ -2442,7 +2442,7 @@ class TipTests(unittest.TestCase):
         self.assertEqual(fc.tip_width(u"abc", 520, lambda line: 9000), 520, "the font's own measure when it gives one")
         self.assertIsNone(fc.tip_width(u"x" * 500, 520, lambda line: 100))
         self.assertEqual(fc.tip_width(u"x" * 500, 520, lambda line: 1 / 0), 520, "a measure that fails: by characters")
-        self.assertIsNone(fc.tip_width(u"<i>Diacritics</i> " + u"<b></b>" * 200, 520, None, True), "tags are not text")
+        self.assertIsNone(fc.tip_width(u"<i>Glyph Compose</i> " + u"<b></b>" * 200, 520, None, True), "tags are not text")
         asked = []
         measure = lambda line: asked.append(line) or len(line) * 9
         self.assertEqual(fc.tip_width(u"short\n" + u"x" * 90 + u"\nmid " * 3, 520, measure), 520)
@@ -2455,7 +2455,7 @@ class TipTests(unittest.TestCase):
     def test_html(self):
         self.assertEqual(fc.tip_html(u""), u"")
         self.assertEqual(fc.tip_html(u"a < b & c\nd"), u"<span>a &lt; b &amp; c<br>d</span>", "escaped, a line per line")
-        self.assertEqual(fc.tip_html(u"<i>Diacritics</i> cannot.", rich=True), u"<span><i>Diacritics</i> cannot.</span>")
+        self.assertEqual(fc.tip_html(u"<i>Glyph Compose</i> cannot.", rich=True), u"<span><i>Glyph Compose</i> cannot.</span>")
         self.assertEqual(fc.tip_html(u"a", 520),
                          u"<table width=\"520\" cellspacing=\"0\" cellpadding=\"0\"><tr><td>a</td></tr></table>")
         self.assertEqual(fc.tip_html(u"a", None, u"FreeLang"),
@@ -3820,8 +3820,8 @@ class DialogTests(unittest.TestCase):
         dialog.list_family = u"FreeLang"
         self.assertIn(u"font-family:'FreeLang'", dialog.tip(u"Name", True), "names and characters in the bundled font")
         self.assertNotIn(u"font-family", dialog.tip(u"Name"))
-        self.assertEqual(dialog.tip(u"<i>Diacritics</i> cannot build it.", rich=True),
-                         u"<span><i>Diacritics</i> cannot build it.</span>")
+        self.assertEqual(dialog.tip(u"<i>Glyph Compose</i> cannot build it.", rich=True),
+                         u"<span><i>Glyph Compose</i> cannot build it.</span>")
         made = self.recorded_items(dialog)
         dialog.nearly.value, dialog.show_absent.checked = 30, True
         dialog.check_coverage()
@@ -4141,8 +4141,8 @@ class DialogTests(unittest.TestCase):
             bassari = [one for one in range(len(listed)) if listed[one].language.iso == u"bsc"]
 
     def test_buildable_asked_again_after_a_check(self):
-        """A new check (an undo's) forgets what Diacritics was asked; the selection kept through it is
-        asked about again, so its rows still say Diacritics can build them."""
+        """A new check (an undo's) forgets what Glyph Compose was asked; the selection kept through it is
+        asked about again, so its rows still say Glyph Compose can build them."""
         dialog, state, click, Row = self.linked_lists()
         asked = []
 
@@ -4166,7 +4166,7 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(sum(1 for one in asked if one == [key]), 1, "once per check")
 
     def test_diacritics_font_made_once_per_check(self):
-        """Diacritics' Font of every glyph is made once per check, not at each selection."""
+        """Glyph Compose's Font of every glyph is made once per check, not at each selection."""
         dialog = self.dialog()
         dialog.check_coverage()
         made = []

@@ -1,0 +1,5346 @@
+{
+ "about": "Glyph Compose's Glyph generation recipes (FreeLab's own), made by compose/train/generation.py from the research inventory of 2026-11-16, Unicode's data, GlyphsInfo's glyph names, and measurements of the open-licensed corpus. Sources and licenses: glyph_generation_LICENSE.",
+ "corpus_families": 667,
+ "entries": [
+  {
+   "code": "00A0",
+   "deriving": 47,
+   "families": 645,
+   "glyph_name": "nbspace",
+   "group": "spaces",
+   "most": [
+    "empty",
+    596
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "NO-BREAK SPACE",
+   "ways": [
+    {
+     "advance_of": "0020",
+     "confidence": "exact",
+     "note": "the space's width",
+     "op": "width"
+    }
+   ]
+  },
+  {
+   "code": "2000",
+   "deriving": 0,
+   "families": 77,
+   "glyph_name": "enquad",
+   "group": "spaces",
+   "most": [
+    "empty",
+    76
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "EN QUAD",
+   "ways": [
+    {
+     "confidence": "exact",
+     "em": 0.5,
+     "note": "the en quad: half an em",
+     "op": "width"
+    }
+   ]
+  },
+  {
+   "code": "2001",
+   "deriving": 1,
+   "families": 78,
+   "glyph_name": "emquad",
+   "group": "spaces",
+   "most": [
+    "empty",
+    76
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "EM QUAD",
+   "ways": [
+    {
+     "confidence": "exact",
+     "em": 1.0,
+     "note": "the em quad: one em",
+     "op": "width"
+    }
+   ]
+  },
+  {
+   "code": "2002",
+   "deriving": 0,
+   "families": 143,
+   "glyph_name": "enspace",
+   "group": "spaces",
+   "most": [
+    "empty",
+    142
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "EN SPACE",
+   "ways": [
+    {
+     "confidence": "exact",
+     "em": 0.5,
+     "op": "width"
+    }
+   ]
+  },
+  {
+   "code": "2003",
+   "deriving": 0,
+   "families": 121,
+   "glyph_name": "emspace",
+   "group": "spaces",
+   "most": [
+    "empty",
+    120
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "EM SPACE",
+   "ways": [
+    {
+     "confidence": "exact",
+     "em": 1.0,
+     "op": "width"
+    }
+   ]
+  },
+  {
+   "code": "2004",
+   "deriving": 0,
+   "families": 89,
+   "glyph_name": "threeperemspace",
+   "group": "spaces",
+   "most": [
+    "empty",
+    88
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "THREE-PER-EM SPACE",
+   "ways": [
+    {
+     "confidence": "exact",
+     "em": 0.3333333333333333,
+     "op": "width"
+    }
+   ]
+  },
+  {
+   "code": "2005",
+   "deriving": 0,
+   "families": 92,
+   "glyph_name": "fourperemspace",
+   "group": "spaces",
+   "most": [
+    "empty",
+    91
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "FOUR-PER-EM SPACE",
+   "ways": [
+    {
+     "confidence": "exact",
+     "em": 0.25,
+     "op": "width"
+    }
+   ]
+  },
+  {
+   "code": "2006",
+   "deriving": 0,
+   "families": 85,
+   "glyph_name": "sixperemspace",
+   "group": "spaces",
+   "most": [
+    "empty",
+    84
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "SIX-PER-EM SPACE",
+   "ways": [
+    {
+     "confidence": "exact",
+     "em": 0.16666666666666666,
+     "op": "width"
+    }
+   ]
+  },
+  {
+   "code": "2007",
+   "deriving": 1,
+   "families": 164,
+   "glyph_name": "figurespace",
+   "group": "spaces",
+   "most": [
+    "empty",
+    162
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "FIGURE SPACE",
+   "ways": [
+    {
+     "advance_of": "figure",
+     "confidence": "exact",
+     "note": "a tabular figure's width",
+     "op": "width"
+    }
+   ]
+  },
+  {
+   "code": "2008",
+   "deriving": 1,
+   "families": 126,
+   "glyph_name": "punctuationspace",
+   "group": "spaces",
+   "most": [
+    "empty",
+    124
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "PUNCTUATION SPACE",
+   "ways": [
+    {
+     "advance_of": "002E",
+     "confidence": "exact",
+     "note": "the period's width",
+     "op": "width"
+    }
+   ]
+  },
+  {
+   "code": "2009",
+   "deriving": 1,
+   "families": 164,
+   "glyph_name": "thinspace",
+   "group": "spaces",
+   "most": [
+    "empty",
+    162
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "THIN SPACE",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "note": "Thin space setting",
+     "op": "width",
+     "setting": "thin"
+    }
+   ]
+  },
+  {
+   "code": "200A",
+   "deriving": 1,
+   "families": 133,
+   "glyph_name": "hairspace",
+   "group": "spaces",
+   "most": [
+    "empty",
+    131
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "HAIR SPACE",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "note": "Hair space setting",
+     "op": "width",
+     "setting": "hair"
+    }
+   ]
+  },
+  {
+   "code": "202F",
+   "deriving": 9,
+   "families": 85,
+   "glyph_name": "narrownbspace",
+   "group": "spaces",
+   "most": [
+    "empty",
+    74
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "NARROW NO-BREAK SPACE",
+   "ways": [
+    {
+     "confidence": "exact",
+     "note": "the thin space's width",
+     "op": "width",
+     "setting": "thin"
+    }
+   ]
+  },
+  {
+   "code": "205F",
+   "deriving": 0,
+   "families": 32,
+   "glyph_name": "mediumspace-math",
+   "group": "spaces",
+   "most": [
+    "empty",
+    30
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "MEDIUM MATHEMATICAL SPACE",
+   "ways": [
+    {
+     "confidence": "exact",
+     "em": 0.2222222222222222,
+     "note": "4/18 of an em",
+     "op": "width"
+    }
+   ]
+  },
+  {
+   "code": "200B",
+   "deriving": 0,
+   "families": 212,
+   "glyph_name": "zerowidthspace",
+   "group": "spaces",
+   "most": [
+    "empty",
+    211
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "ZERO WIDTH SPACE",
+   "ways": [
+    {
+     "confidence": "exact",
+     "em": 0.0,
+     "op": "width"
+    }
+   ]
+  },
+  {
+   "code": "2060",
+   "deriving": 0,
+   "families": 42,
+   "glyph_name": "wordjoiner",
+   "group": "spaces",
+   "most": [
+    "empty",
+    39
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "WORD JOINER",
+   "ways": [
+    {
+     "confidence": "exact",
+     "em": 0.0,
+     "op": "width"
+    }
+   ]
+  },
+  {
+   "code": "FEFF",
+   "deriving": 0,
+   "families": 68,
+   "glyph_name": "zeroWidthNoBreakSpace",
+   "group": "spaces",
+   "most": [
+    "empty",
+    63
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "ZERO WIDTH NO-BREAK SPACE",
+   "ways": [
+    {
+     "confidence": "exact",
+     "em": 0.0,
+     "op": "width"
+    }
+   ]
+  },
+  {
+   "code": "3000",
+   "deriving": 0,
+   "families": 88,
+   "glyph_name": "space-han",
+   "group": "spaces",
+   "most": [
+    "empty",
+    88
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "IDEOGRAPHIC SPACE",
+   "ways": [
+    {
+     "confidence": "exact",
+     "em": 1.0,
+     "note": "the full-width cell",
+     "only": "cjk",
+     "op": "width"
+    }
+   ]
+  },
+  {
+   "code": "00AD",
+   "deriving": 323,
+   "families": 385,
+   "glyph_name": "softhyphen",
+   "group": "dashes",
+   "most": [
+    "components: U+002D(copy)",
+    166
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "SOFT HYPHEN",
+   "ways": [
+    {
+     "confidence": "exact",
+     "of": "002D",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "2010",
+   "deriving": 224,
+   "families": 249,
+   "glyph_name": "hyphentwo",
+   "group": "dashes",
+   "most": [
+    "components: U+002D(copy)",
+    115
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "HYPHEN",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "002D",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "2011",
+   "deriving": 97,
+   "families": 101,
+   "glyph_name": "nonbreakinghyphen",
+   "group": "dashes",
+   "most": [
+    "components: U+002D(copy)",
+    42
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "NON-BREAKING HYPHEN",
+   "ways": [
+    {
+     "confidence": "exact",
+     "of": "2010",
+     "op": "copy"
+    },
+    {
+     "confidence": "exact",
+     "of": "002D",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "2012",
+   "deriving": 146,
+   "families": 164,
+   "glyph_name": "figuredash",
+   "group": "dashes",
+   "most": [
+    "outlines: U+002D(stretched_x)",
+    35
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "FIGURE DASH",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "002D",
+     "op": "stretch",
+     "width": "figure"
+    }
+   ]
+  },
+  {
+   "code": "2013",
+   "deriving": 339,
+   "families": 509,
+   "glyph_name": "endash",
+   "group": "dashes",
+   "most": [
+    "outlines: U+002D(stretched_x)",
+    160
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "EN DASH",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "002D",
+     "op": "stretch",
+     "width": "en_dash"
+    }
+   ]
+  },
+  {
+   "code": "2014",
+   "deriving": 367,
+   "families": 509,
+   "glyph_name": "emdash",
+   "group": "dashes",
+   "most": [
+    "outlines: U+002D(stretched_x)",
+    158
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "EM DASH",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "002D",
+     "op": "stretch",
+     "width": "em_dash"
+    }
+   ]
+  },
+  {
+   "code": "2015",
+   "deriving": 204,
+   "families": 218,
+   "glyph_name": "horizontalbar",
+   "group": "dashes",
+   "most": [
+    "components: U+2014(copy)",
+    65
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "HORIZONTAL BAR",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "2014",
+     "op": "copy"
+    },
+    {
+     "confidence": "accepted",
+     "of": "002D",
+     "op": "stretch",
+     "width": "em_dash"
+    }
+   ]
+  },
+  {
+   "code": "2212",
+   "deriving": 339,
+   "families": 486,
+   "glyph_name": "minus",
+   "group": "dashes",
+   "most": [
+    "outlines: U+002D(scaled_xy)",
+    156
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "MINUS SIGN",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "002D",
+     "on": "002B",
+     "op": "minus"
+    }
+   ]
+  },
+  {
+   "code": "2E3A",
+   "deriving": 27,
+   "families": 34,
+   "glyph_name": "twoemdash",
+   "group": "dashes",
+   "most": [
+    "outlines: U+2014(stretched_x)",
+    19
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "TWO-EM DASH",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "2014",
+     "op": "stretch",
+     "times": 2,
+     "width": "em_dash"
+    },
+    {
+     "confidence": "accepted",
+     "of": "002D",
+     "op": "stretch",
+     "times": 2,
+     "width": "em_dash"
+    }
+   ]
+  },
+  {
+   "code": "2E3B",
+   "deriving": 27,
+   "families": 34,
+   "glyph_name": "threeemdash",
+   "group": "dashes",
+   "most": [
+    "outlines: U+2014(stretched_x)",
+    19
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "THREE-EM DASH",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "2014",
+     "op": "stretch",
+     "times": 3,
+     "width": "em_dash"
+    },
+    {
+     "confidence": "accepted",
+     "of": "002D",
+     "op": "stretch",
+     "times": 3,
+     "width": "em_dash"
+    }
+   ]
+  },
+  {
+   "code": "2126",
+   "deriving": 124,
+   "families": 235,
+   "glyph_name": "Ohm",
+   "group": "duplicates",
+   "most": [
+    "drawn",
+    101
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "OHM SIGN",
+   "ways": [
+    {
+     "confidence": "exact",
+     "of": "03A9",
+     "op": "shared"
+    }
+   ]
+  },
+  {
+   "code": "212A",
+   "deriving": 21,
+   "families": 23,
+   "glyph_name": "kelvin",
+   "group": "duplicates",
+   "most": [
+    "components: U+004B(copy)",
+    15
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "KELVIN SIGN",
+   "ways": [
+    {
+     "confidence": "exact",
+     "of": "004B",
+     "op": "shared"
+    }
+   ]
+  },
+  {
+   "code": "212B",
+   "deriving": 23,
+   "families": 72,
+   "glyph_name": "angstrom",
+   "group": "duplicates",
+   "most": [
+    "drawn",
+    36
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "ANGSTROM SIGN",
+   "ways": [
+    {
+     "confidence": "exact",
+     "of": "00C5",
+     "op": "shared"
+    }
+   ]
+  },
+  {
+   "code": "037E",
+   "deriving": 89,
+   "families": 100,
+   "glyph_name": "questiongreek",
+   "group": "duplicates",
+   "most": [
+    "components: U+003B(copy)",
+    27
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "GREEK QUESTION MARK",
+   "ways": [
+    {
+     "confidence": "exact",
+     "of": "003B",
+     "op": "shared"
+    }
+   ]
+  },
+  {
+   "code": "0387",
+   "deriving": 94,
+   "families": 107,
+   "glyph_name": "anoteleia",
+   "group": "duplicates",
+   "most": [
+    "components: U+002E(moved)",
+    23
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "GREEK ANO TELEIA",
+   "ways": [
+    {
+     "confidence": "exact",
+     "of": "00B7",
+     "op": "shared"
+    }
+   ]
+  },
+  {
+   "code": "0374",
+   "deriving": 38,
+   "families": 75,
+   "glyph_name": "numeral-greek",
+   "group": "duplicates",
+   "most": [
+    "drawn",
+    32
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "GREEK NUMERAL SIGN",
+   "ways": [
+    {
+     "confidence": "exact",
+     "of": "02B9",
+     "op": "shared"
+    },
+    {
+     "confidence": "accepted",
+     "of": "2032",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "1F71",
+   "deriving": 38,
+   "families": 50,
+   "glyph_name": "alphaoxia",
+   "group": "duplicates",
+   "most": [
+    "components: U+03B1(copy) + U+1FFD(copy)",
+    13
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "GREEK SMALL LETTER ALPHA WITH OXIA",
+   "ways": [
+    {
+     "confidence": "exact",
+     "of": "03AC",
+     "op": "shared"
+    }
+   ]
+  },
+  {
+   "code": "1F73",
+   "deriving": 39,
+   "families": 50,
+   "glyph_name": "epsilonoxia",
+   "group": "duplicates",
+   "most": [
+    "components: U+03B5(copy) + U+1FFD(copy)",
+    13
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "GREEK SMALL LETTER EPSILON WITH OXIA",
+   "ways": [
+    {
+     "confidence": "exact",
+     "of": "03AD",
+     "op": "shared"
+    }
+   ]
+  },
+  {
+   "code": "1F75",
+   "deriving": 38,
+   "families": 45,
+   "glyph_name": "etaoxia",
+   "group": "duplicates",
+   "most": [
+    "components: U+03B7(copy) + U+1FFD(copy)",
+    13
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "GREEK SMALL LETTER ETA WITH OXIA",
+   "ways": [
+    {
+     "confidence": "exact",
+     "of": "03AE",
+     "op": "shared"
+    }
+   ]
+  },
+  {
+   "code": "1F77",
+   "deriving": 41,
+   "families": 45,
+   "glyph_name": "iotaoxia",
+   "group": "duplicates",
+   "most": [
+    "components: U+03B9(copy) + U+1FFD(copy)",
+    10
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "GREEK SMALL LETTER IOTA WITH OXIA",
+   "ways": [
+    {
+     "confidence": "exact",
+     "of": "03AF",
+     "op": "shared"
+    }
+   ]
+  },
+  {
+   "code": "1F79",
+   "deriving": 40,
+   "families": 45,
+   "glyph_name": "omicronoxia",
+   "group": "duplicates",
+   "most": [
+    "outlines: U+03CC(copy)",
+    9
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "GREEK SMALL LETTER OMICRON WITH OXIA",
+   "ways": [
+    {
+     "confidence": "exact",
+     "of": "03CC",
+     "op": "shared"
+    }
+   ]
+  },
+  {
+   "code": "1F7B",
+   "deriving": 38,
+   "families": 45,
+   "glyph_name": "upsilonoxia",
+   "group": "duplicates",
+   "most": [
+    "components: U+03C5(copy) + U+1FFD(copy)",
+    13
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "GREEK SMALL LETTER UPSILON WITH OXIA",
+   "ways": [
+    {
+     "confidence": "exact",
+     "of": "03CD",
+     "op": "shared"
+    }
+   ]
+  },
+  {
+   "code": "1F7D",
+   "deriving": 38,
+   "families": 45,
+   "glyph_name": "omegaoxia",
+   "group": "duplicates",
+   "most": [
+    "components: U+03C9(copy) + U+1FFD(copy)",
+    13
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "GREEK SMALL LETTER OMEGA WITH OXIA",
+   "ways": [
+    {
+     "confidence": "exact",
+     "of": "03CE",
+     "op": "shared"
+    }
+   ]
+  },
+  {
+   "code": "1FBB",
+   "deriving": 38,
+   "families": 44,
+   "glyph_name": "Alphaoxia",
+   "group": "duplicates",
+   "most": [
+    "components: U+0384(moved) + U+0041(copy)",
+    8
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "GREEK CAPITAL LETTER ALPHA WITH OXIA",
+   "ways": [
+    {
+     "confidence": "exact",
+     "of": "0386",
+     "op": "shared"
+    }
+   ]
+  },
+  {
+   "code": "1FC9",
+   "deriving": 38,
+   "families": 44,
+   "glyph_name": "Epsilonoxia",
+   "group": "duplicates",
+   "most": [
+    "components: U+0384(moved) + U+0045(copy)",
+    9
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "GREEK CAPITAL LETTER EPSILON WITH OXIA",
+   "ways": [
+    {
+     "confidence": "exact",
+     "of": "0388",
+     "op": "shared"
+    }
+   ]
+  },
+  {
+   "code": "1FCB",
+   "deriving": 37,
+   "families": 44,
+   "glyph_name": "Etaoxia",
+   "group": "duplicates",
+   "most": [
+    "components: U+0384(moved) + U+0048(copy)",
+    9
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "GREEK CAPITAL LETTER ETA WITH OXIA",
+   "ways": [
+    {
+     "confidence": "exact",
+     "of": "0389",
+     "op": "shared"
+    }
+   ]
+  },
+  {
+   "code": "1FD3",
+   "deriving": 38,
+   "families": 43,
+   "glyph_name": "iotadialytikaoxia",
+   "group": "duplicates",
+   "most": [
+    "components: U+1FEE(copy) + U+03B9(copy)",
+    10
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "GREEK SMALL LETTER IOTA WITH DIALYTIKA AND OXIA",
+   "ways": [
+    {
+     "confidence": "exact",
+     "of": "0390",
+     "op": "shared"
+    }
+   ]
+  },
+  {
+   "code": "1FDB",
+   "deriving": 40,
+   "families": 46,
+   "glyph_name": "Iotaoxia",
+   "group": "duplicates",
+   "most": [
+    "components: U+0384(moved) + U+0049(copy)",
+    9
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "GREEK CAPITAL LETTER IOTA WITH OXIA",
+   "ways": [
+    {
+     "confidence": "exact",
+     "of": "038A",
+     "op": "shared"
+    }
+   ]
+  },
+  {
+   "code": "1FE3",
+   "deriving": 36,
+   "families": 43,
+   "glyph_name": "upsilondialytikaoxia",
+   "group": "duplicates",
+   "most": [
+    "components: U+03C5(copy) + U+1FEE(copy)",
+    11
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "GREEK SMALL LETTER UPSILON WITH DIALYTIKA AND OXIA",
+   "ways": [
+    {
+     "confidence": "exact",
+     "of": "03B0",
+     "op": "shared"
+    }
+   ]
+  },
+  {
+   "code": "1FEB",
+   "deriving": 38,
+   "families": 44,
+   "glyph_name": "Upsilonoxia",
+   "group": "duplicates",
+   "most": [
+    "components: U+0384(moved) + U+0059(copy)",
+    7
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "GREEK CAPITAL LETTER UPSILON WITH OXIA",
+   "ways": [
+    {
+     "confidence": "exact",
+     "of": "038E",
+     "op": "shared"
+    }
+   ]
+  },
+  {
+   "code": "1FEE",
+   "deriving": 31,
+   "families": 47,
+   "glyph_name": "dialytikaoxia",
+   "group": "duplicates",
+   "most": [
+    "drawn (same contour structure as U+0385)",
+    13
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "GREEK DIALYTIKA AND OXIA",
+   "ways": [
+    {
+     "confidence": "exact",
+     "of": "0385",
+     "op": "shared"
+    }
+   ]
+  },
+  {
+   "code": "1FEF",
+   "deriving": 17,
+   "families": 45,
+   "glyph_name": "varia",
+   "group": "duplicates",
+   "most": [
+    "drawn",
+    17
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "GREEK VARIA",
+   "ways": [
+    {
+     "confidence": "exact",
+     "of": "0060",
+     "op": "shared"
+    }
+   ]
+  },
+  {
+   "code": "1FF9",
+   "deriving": 37,
+   "families": 44,
+   "glyph_name": "Omicronoxia",
+   "group": "duplicates",
+   "most": [
+    "components: U+0384(moved) + U+004F(copy)",
+    9
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "GREEK CAPITAL LETTER OMICRON WITH OXIA",
+   "ways": [
+    {
+     "confidence": "exact",
+     "of": "038C",
+     "op": "shared"
+    }
+   ]
+  },
+  {
+   "code": "1FFB",
+   "deriving": 39,
+   "families": 44,
+   "glyph_name": "Omegaoxia",
+   "group": "duplicates",
+   "most": [
+    "components: U+0384(moved) + U+03A9(copy)",
+    8
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "GREEK CAPITAL LETTER OMEGA WITH OXIA",
+   "ways": [
+    {
+     "confidence": "exact",
+     "of": "038F",
+     "op": "shared"
+    }
+   ]
+  },
+  {
+   "code": "1FFD",
+   "deriving": 34,
+   "families": 46,
+   "glyph_name": "oxia",
+   "group": "duplicates",
+   "most": [
+    "outlines: U+00B4(affine)",
+    11
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "GREEK OXIA",
+   "ways": [
+    {
+     "confidence": "exact",
+     "of": "00B4",
+     "op": "shared"
+    }
+   ]
+  },
+  {
+   "code": "0340",
+   "deriving": 25,
+   "families": 28,
+   "glyph_name": "gravetonecomb",
+   "group": "duplicates",
+   "most": [
+    "components: U+0060(copy)",
+    7
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "COMBINING GRAVE TONE MARK",
+   "ways": [
+    {
+     "confidence": "exact",
+     "of": "0300",
+     "op": "shared"
+    }
+   ]
+  },
+  {
+   "code": "0341",
+   "deriving": 21,
+   "families": 25,
+   "glyph_name": "acutetonecomb",
+   "group": "duplicates",
+   "most": [
+    "components: U+00B4(copy)",
+    7
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "COMBINING ACUTE TONE MARK",
+   "ways": [
+    {
+     "confidence": "exact",
+     "of": "0301",
+     "op": "shared"
+    }
+   ]
+  },
+  {
+   "code": "0343",
+   "deriving": 25,
+   "families": 35,
+   "glyph_name": "koroniscomb",
+   "group": "duplicates",
+   "most": [
+    "drawn",
+    9
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "COMBINING GREEK KORONIS",
+   "ways": [
+    {
+     "confidence": "exact",
+     "of": "0313",
+     "op": "shared"
+    }
+   ]
+  },
+  {
+   "code": "00B5",
+   "deriving": 151,
+   "families": 413,
+   "glyph_name": "micro",
+   "group": "duplicates",
+   "most": [
+    "drawn",
+    257
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "MICRO SIGN",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "03BC",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "2206",
+   "deriving": 91,
+   "families": 270,
+   "glyph_name": "increment",
+   "group": "duplicates",
+   "most": [
+    "drawn",
+    162
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "INCREMENT",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0394",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "00D0",
+   "deriving": 362,
+   "families": 491,
+   "glyph_name": "Eth",
+   "group": "duplicates",
+   "most": [
+    "outlines: U+0110(copy)",
+    277
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "LATIN CAPITAL LETTER ETH",
+   "ways": [
+    {
+     "confidence": "exact",
+     "of": "0110",
+     "op": "shared"
+    }
+   ]
+  },
+  {
+   "code": "0110",
+   "deriving": 352,
+   "families": 411,
+   "glyph_name": "Dcroat",
+   "group": "duplicates",
+   "most": [
+    "components: U+00D0(copy)",
+    169
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "LATIN CAPITAL LETTER D WITH STROKE",
+   "ways": [
+    {
+     "confidence": "exact",
+     "of": "00D0",
+     "op": "shared"
+    }
+   ]
+  },
+  {
+   "code": "0189",
+   "deriving": 50,
+   "families": 54,
+   "glyph_name": "Dtail",
+   "group": "duplicates",
+   "most": [
+    "components: U+00D0(copy)",
+    24
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN CAPITAL LETTER AFRICAN D",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "00D0",
+     "op": "copy"
+    },
+    {
+     "confidence": "accepted",
+     "of": "0110",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "2219",
+   "deriving": 178,
+   "families": 229,
+   "glyph_name": "bulletoperator",
+   "group": "duplicates",
+   "most": [
+    "drawn",
+    42
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "BULLET OPERATOR",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "00B7",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "22C5",
+   "deriving": 16,
+   "families": 20,
+   "glyph_name": "dotmath",
+   "group": "duplicates",
+   "most": [
+    "outlines: U+00B7(copy)",
+    6
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "DOT OPERATOR",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "00B7",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "2027",
+   "deriving": 53,
+   "families": 60,
+   "glyph_name": "hyphenationpoint",
+   "group": "duplicates",
+   "most": [
+    "components: U+00B7(copy)",
+    11
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "HYPHENATION POINT",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "00B7",
+     "op": "copy"
+    },
+    {
+     "confidence": "accepted",
+     "of": "00B7",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "2E31",
+   "deriving": 9,
+   "families": 11,
+   "glyph_name": "wordseparatormiddledot",
+   "group": "duplicates",
+   "most": [
+    "components: U+00B7(copy)",
+    5
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "WORD SEPARATOR MIDDLE DOT",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "00B7",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "2215",
+   "deriving": 308,
+   "families": 354,
+   "glyph_name": "divisionslash",
+   "group": "duplicates",
+   "most": [
+    "components: U+002F(copy)",
+    92
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "DIVISION SLASH",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "002F",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "2216",
+   "deriving": 9,
+   "families": 12,
+   "glyph_name": "setminus",
+   "group": "duplicates",
+   "most": [
+    "outlines: U+005C(slanted)",
+    6
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "SET MINUS",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "005C",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "2223",
+   "deriving": 27,
+   "families": 28,
+   "glyph_name": "divides",
+   "group": "duplicates",
+   "most": [
+    "outlines: U+007C(quarter_turn)",
+    12
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "DIVIDES",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "007C",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "02BC",
+   "deriving": 195,
+   "families": 287,
+   "glyph_name": "apostrophemod",
+   "group": "duplicates",
+   "most": [
+    "drawn",
+    71
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "MODIFIER LETTER APOSTROPHE",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "2019",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "02BB",
+   "deriving": 103,
+   "families": 174,
+   "glyph_name": "commaturnedmod",
+   "group": "duplicates",
+   "most": [
+    "drawn",
+    54
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "MODIFIER LETTER TURNED COMMA",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "2018",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "02BD",
+   "deriving": 19,
+   "families": 38,
+   "glyph_name": "commareversedmod",
+   "group": "duplicates",
+   "most": [
+    "drawn",
+    19
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "MODIFIER LETTER REVERSED COMMA",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "201B",
+     "op": "copy"
+    },
+    {
+     "confidence": "accepted",
+     "of": "2019",
+     "op": "mirror"
+    }
+   ]
+  },
+  {
+   "code": "2024",
+   "deriving": 36,
+   "families": 43,
+   "glyph_name": "onedotenleader",
+   "group": "duplicates",
+   "most": [
+    "components: U+002E(copy)",
+    16
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "ONE DOT LEADER",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "002E",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "2026",
+   "deriving": 427,
+   "families": 512,
+   "glyph_name": "ellipsis",
+   "group": "punctuation",
+   "most": [
+    "components: U+002E(copy) + U+002E(copy) + U+002E(copy)",
+    179
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "HORIZONTAL ELLIPSIS",
+   "ways": [
+    {
+     "confidence": "exact",
+     "of": [
+      "002E",
+      "002E",
+      "002E"
+     ],
+     "op": "row",
+     "pair": "2026"
+    }
+   ]
+  },
+  {
+   "code": "2025",
+   "deriving": 86,
+   "families": 110,
+   "glyph_name": "twodotenleader",
+   "group": "punctuation",
+   "most": [
+    "components: U+002E(copy) + U+002E(copy)",
+    24
+   ],
+   "research_confidence": "exact",
+   "unicode_name": "TWO DOT LEADER",
+   "ways": [
+    {
+     "confidence": "exact",
+     "of": [
+      "002E",
+      "002E"
+     ],
+     "op": "row",
+     "pair": "2026"
+    }
+   ]
+  },
+  {
+   "code": "201A",
+   "deriving": 308,
+   "families": 491,
+   "glyph_name": "quotesinglbase",
+   "group": "punctuation",
+   "most": [
+    "drawn",
+    135
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "SINGLE LOW-9 QUOTATION MARK",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "002C",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "201E",
+   "deriving": 421,
+   "families": 493,
+   "glyph_name": "quotedblbase",
+   "group": "punctuation",
+   "most": [
+    "outlines: 2 x U+201A(copy)",
+    86
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "DOUBLE LOW-9 QUOTATION MARK",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": [
+      "201A",
+      "201A"
+     ],
+     "op": "row",
+     "pair": "201E"
+    },
+    {
+     "confidence": "accepted",
+     "of": [
+      "002C",
+      "002C"
+     ],
+     "op": "row",
+     "pair": "201E"
+    }
+   ]
+  },
+  {
+   "code": "2018",
+   "deriving": 304,
+   "families": 518,
+   "glyph_name": "quoteleft",
+   "group": "punctuation",
+   "most": [
+    "outlines: U+2019(turned)",
+    228
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LEFT SINGLE QUOTATION MARK",
+   "ways": [
+    {
+     "angle": 180,
+     "confidence": "accepted",
+     "of": "2019",
+     "op": "turn",
+     "pair": "2018"
+    }
+   ]
+  },
+  {
+   "code": "201B",
+   "deriving": 41,
+   "families": 81,
+   "glyph_name": "quotereversed",
+   "group": "punctuation",
+   "most": [
+    "drawn",
+    31
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "SINGLE HIGH-REVERSED-9 QUOTATION MARK",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "2019",
+     "op": "mirror"
+    }
+   ]
+  },
+  {
+   "code": "201C",
+   "deriving": 453,
+   "families": 521,
+   "glyph_name": "quotedblleft",
+   "group": "punctuation",
+   "most": [
+    "outlines: U+201D(turned)",
+    181
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LEFT DOUBLE QUOTATION MARK",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": [
+      "2018",
+      "2018"
+     ],
+     "op": "row",
+     "pair": "201C"
+    },
+    {
+     "angle": 180,
+     "confidence": "accepted",
+     "of": "201D",
+     "op": "turn",
+     "pair": "2018"
+    }
+   ]
+  },
+  {
+   "code": "201F",
+   "deriving": 32,
+   "families": 55,
+   "glyph_name": "quotedblrightreversed",
+   "group": "punctuation",
+   "most": [
+    "drawn",
+    18
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "DOUBLE HIGH-REVERSED-9 QUOTATION MARK",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": [
+      "201B",
+      "201B"
+     ],
+     "op": "row",
+     "pair": "201C"
+    },
+    {
+     "confidence": "accepted",
+     "of": "201D",
+     "op": "mirror"
+    }
+   ]
+  },
+  {
+   "code": "00AB",
+   "deriving": 381,
+   "families": 502,
+   "glyph_name": "guillemetleft",
+   "group": "punctuation",
+   "most": [
+    "outlines: 2 x U+2039(copy)",
+    200
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LEFT-POINTING DOUBLE ANGLE QUOTATION MARK",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": [
+      "2039",
+      "2039"
+     ],
+     "op": "row",
+     "pair": "00AB"
+    }
+   ]
+  },
+  {
+   "code": "00BB",
+   "deriving": 433,
+   "families": 502,
+   "glyph_name": "guillemetright",
+   "group": "punctuation",
+   "most": [
+    "outlines: U+00AB(mirrored)",
+    192
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "RIGHT-POINTING DOUBLE ANGLE QUOTATION MARK",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": [
+      "203A",
+      "203A"
+     ],
+     "op": "row",
+     "pair": "00AB"
+    },
+    {
+     "confidence": "accepted",
+     "of": "00AB",
+     "op": "mirror"
+    }
+   ]
+  },
+  {
+   "code": "203A",
+   "deriving": 360,
+   "families": 492,
+   "glyph_name": "guilsinglright",
+   "group": "punctuation",
+   "most": [
+    "outlines: U+2039(mirrored)",
+    236
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "SINGLE RIGHT-POINTING ANGLE QUOTATION MARK",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "2039",
+     "op": "mirror"
+    }
+   ]
+  },
+  {
+   "code": "00A1",
+   "deriving": 267,
+   "families": 494,
+   "glyph_name": "exclamdown",
+   "group": "punctuation",
+   "most": [
+    "outlines: U+0021(turned)",
+    161
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "INVERTED EXCLAMATION MARK",
+   "ways": [
+    {
+     "angle": 180,
+     "confidence": "accepted",
+     "of": "0021",
+     "op": "turn",
+     "pair": "00A1"
+    }
+   ]
+  },
+  {
+   "code": "00BF",
+   "deriving": 266,
+   "families": 494,
+   "glyph_name": "questiondown",
+   "group": "punctuation",
+   "most": [
+    "outlines: U+003F(turned)",
+    242
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "INVERTED QUESTION MARK",
+   "ways": [
+    {
+     "angle": 180,
+     "confidence": "accepted",
+     "of": "003F",
+     "op": "turn",
+     "pair": "00BF"
+    }
+   ]
+  },
+  {
+   "code": "2E2E",
+   "deriving": 5,
+   "families": 14,
+   "glyph_name": "questionreversed",
+   "group": "punctuation",
+   "most": [
+    "drawn",
+    7
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "REVERSED QUESTION MARK",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "003F",
+     "op": "mirror"
+    }
+   ]
+  },
+  {
+   "code": "204F",
+   "deriving": 16,
+   "families": 34,
+   "glyph_name": "reversedsemicolon",
+   "group": "punctuation",
+   "most": [
+    "drawn",
+    16
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "REVERSED SEMICOLON",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "003B",
+     "op": "mirror"
+    }
+   ]
+  },
+  {
+   "code": "2E41",
+   "deriving": 10,
+   "families": 24,
+   "glyph_name": "commareversed",
+   "group": "punctuation",
+   "most": [
+    "drawn",
+    13
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "REVERSED COMMA",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "002C",
+     "op": "mirror"
+    }
+   ]
+  },
+  {
+   "code": "2E32",
+   "deriving": 8,
+   "families": 8,
+   "glyph_name": "turnedcomma",
+   "group": "punctuation",
+   "most": [
+    "outlines: U+002C(turned)",
+    6
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "TURNED COMMA",
+   "ways": [
+    {
+     "angle": 180,
+     "confidence": "accepted",
+     "of": "002C",
+     "op": "turn",
+     "pair": "2E32"
+    }
+   ]
+  },
+  {
+   "code": "00B7",
+   "deriving": 404,
+   "families": 501,
+   "glyph_name": "periodcentered",
+   "group": "punctuation",
+   "most": [
+    "outlines: U+002E(moved)",
+    142
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "MIDDLE DOT",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "002E",
+     "op": "move",
+     "to": "x_middle"
+    }
+   ]
+  },
+  {
+   "code": "2033",
+   "deriving": 212,
+   "families": 228,
+   "glyph_name": "second",
+   "group": "punctuation",
+   "most": [
+    "outlines: 2 x U+2032(copy)",
+    85
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "DOUBLE PRIME",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": [
+      "2032",
+      "2032"
+     ],
+     "op": "row",
+     "pair": "2033"
+    }
+   ]
+  },
+  {
+   "code": "2034",
+   "deriving": 41,
+   "families": 45,
+   "glyph_name": "tripleprime",
+   "group": "punctuation",
+   "most": [
+    "components: U+2032(copy) + U+2032(copy) + U+2032(copy)",
+    19
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "TRIPLE PRIME",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": [
+      "2032",
+      "2032",
+      "2032"
+     ],
+     "op": "row",
+     "pair": "2034"
+    }
+   ]
+  },
+  {
+   "code": "2057",
+   "deriving": 22,
+   "families": 22,
+   "glyph_name": "quadrupleprime",
+   "group": "punctuation",
+   "most": [
+    "components: U+2032(copy) + U+2032(copy) + U+2032(copy) + U+2032(copy)",
+    14
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "QUADRUPLE PRIME",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": [
+      "2032",
+      "2032",
+      "2032",
+      "2032"
+     ],
+     "op": "row",
+     "pair": "2034"
+    }
+   ]
+  },
+  {
+   "code": "2035",
+   "deriving": 27,
+   "families": 52,
+   "glyph_name": "primeReversed",
+   "group": "punctuation",
+   "most": [
+    "outlines: U+2032(mirrored)",
+    14
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "REVERSED PRIME",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "2032",
+     "op": "mirror"
+    }
+   ]
+  },
+  {
+   "code": "2036",
+   "deriving": 30,
+   "families": 35,
+   "glyph_name": "doubleprimeReversed",
+   "group": "punctuation",
+   "most": [
+    "outlines: 2 x U+2035(copy)",
+    12
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "REVERSED DOUBLE PRIME",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": [
+      "2035",
+      "2035"
+     ],
+     "op": "row",
+     "pair": "2033"
+    }
+   ]
+  },
+  {
+   "code": "2037",
+   "deriving": 28,
+   "families": 33,
+   "glyph_name": "tripleprimeReversed",
+   "group": "punctuation",
+   "most": [
+    "components: U+2035(copy) + U+2035(copy) + U+2035(copy)",
+    11
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "REVERSED TRIPLE PRIME",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": [
+      "2035",
+      "2035",
+      "2035"
+     ],
+     "op": "row",
+     "pair": "2034"
+    }
+   ]
+  },
+  {
+   "code": "203C",
+   "deriving": 72,
+   "families": 91,
+   "glyph_name": "exclamdouble",
+   "group": "punctuation",
+   "most": [
+    "outlines: 2 x U+0021(copy)",
+    34
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "DOUBLE EXCLAMATION MARK",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": [
+      "0021",
+      "0021"
+     ],
+     "op": "row",
+     "pair": "203C"
+    }
+   ]
+  },
+  {
+   "code": "2047",
+   "deriving": 43,
+   "families": 57,
+   "glyph_name": "doublequestion",
+   "group": "punctuation",
+   "most": [
+    "components: U+003F(copy) + U+003F(copy)",
+    21
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "DOUBLE QUESTION MARK",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": [
+      "003F",
+      "003F"
+     ],
+     "op": "row",
+     "pair": "2047"
+    }
+   ]
+  },
+  {
+   "code": "2048",
+   "deriving": 45,
+   "families": 55,
+   "glyph_name": "questionexclamation",
+   "group": "punctuation",
+   "most": [
+    "components: U+003F(copy) + U+0021(copy)",
+    20
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "QUESTION EXCLAMATION MARK",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": [
+      "003F",
+      "0021"
+     ],
+     "op": "row",
+     "pair": "2048"
+    }
+   ]
+  },
+  {
+   "code": "2049",
+   "deriving": 47,
+   "families": 58,
+   "glyph_name": "exclamationquestion",
+   "group": "punctuation",
+   "most": [
+    "components: U+0021(copy) + U+003F(copy)",
+    21
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "EXCLAMATION QUESTION MARK",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": [
+      "0021",
+      "003F"
+     ],
+     "op": "row",
+     "pair": "2049"
+    }
+   ]
+  },
+  {
+   "code": "01A9",
+   "deriving": 32,
+   "families": 49,
+   "glyph_name": "Esh",
+   "group": "lookalikes",
+   "most": [
+    "components: U+03A3(copy)",
+    17
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN CAPITAL LETTER ESH",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "03A3",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "01C0",
+   "deriving": 55,
+   "families": 63,
+   "glyph_name": "clickdental",
+   "group": "lookalikes",
+   "most": [
+    "outlines: U+007C(scaled_xy)",
+    18
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN LETTER DENTAL CLICK",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "007C",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "0391",
+   "deriving": 105,
+   "families": 134,
+   "glyph_name": "Alpha",
+   "group": "lookalikes",
+   "most": [
+    "components: U+0041(copy)",
+    57
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "GREEK CAPITAL LETTER ALPHA",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0041",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "0392",
+   "deriving": 108,
+   "families": 135,
+   "glyph_name": "Beta",
+   "group": "lookalikes",
+   "most": [
+    "components: U+0042(copy)",
+    64
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "GREEK CAPITAL LETTER BETA",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0042",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "0393",
+   "deriving": 104,
+   "families": 141,
+   "glyph_name": "Gamma",
+   "group": "lookalikes",
+   "most": [
+    "outlines: U+0413(copy)",
+    71
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "GREEK CAPITAL LETTER GAMMA",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0413",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "0395",
+   "deriving": 105,
+   "families": 135,
+   "glyph_name": "Epsilon",
+   "group": "lookalikes",
+   "most": [
+    "components: U+0045(copy)",
+    56
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "GREEK CAPITAL LETTER EPSILON",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0045",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "0396",
+   "deriving": 110,
+   "families": 134,
+   "glyph_name": "Zeta",
+   "group": "lookalikes",
+   "most": [
+    "components: U+005A(copy)",
+    63
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "GREEK CAPITAL LETTER ZETA",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "005A",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "0397",
+   "deriving": 109,
+   "families": 134,
+   "glyph_name": "Eta",
+   "group": "lookalikes",
+   "most": [
+    "components: U+0048(copy)",
+    57
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "GREEK CAPITAL LETTER ETA",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0048",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "0399",
+   "deriving": 116,
+   "families": 136,
+   "glyph_name": "Iota",
+   "group": "lookalikes",
+   "most": [
+    "components: U+0049(copy)",
+    54
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "GREEK CAPITAL LETTER IOTA",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0049",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "039A",
+   "deriving": 106,
+   "families": 134,
+   "glyph_name": "Kappa",
+   "group": "lookalikes",
+   "most": [
+    "components: U+004B(copy)",
+    58
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "GREEK CAPITAL LETTER KAPPA",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "004B",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "039C",
+   "deriving": 108,
+   "families": 136,
+   "glyph_name": "Mu",
+   "group": "lookalikes",
+   "most": [
+    "components: U+004D(copy)",
+    64
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "GREEK CAPITAL LETTER MU",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "004D",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "039D",
+   "deriving": 107,
+   "families": 134,
+   "glyph_name": "Nu",
+   "group": "lookalikes",
+   "most": [
+    "components: U+004E(copy)",
+    65
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "GREEK CAPITAL LETTER NU",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "004E",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "039F",
+   "deriving": 106,
+   "families": 134,
+   "glyph_name": "Omicron",
+   "group": "lookalikes",
+   "most": [
+    "components: U+004F(copy)",
+    55
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "GREEK CAPITAL LETTER OMICRON",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "004F",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "03A1",
+   "deriving": 108,
+   "families": 134,
+   "glyph_name": "Rho",
+   "group": "lookalikes",
+   "most": [
+    "components: U+0050(copy)",
+    58
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "GREEK CAPITAL LETTER RHO",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0050",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "03A4",
+   "deriving": 109,
+   "families": 134,
+   "glyph_name": "Tau",
+   "group": "lookalikes",
+   "most": [
+    "components: U+0054(copy)",
+    63
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "GREEK CAPITAL LETTER TAU",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0054",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "03A5",
+   "deriving": 88,
+   "families": 134,
+   "glyph_name": "Upsilon",
+   "group": "lookalikes",
+   "most": [
+    "components: U+0059(copy)",
+    43
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "GREEK CAPITAL LETTER UPSILON",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0059",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "03A7",
+   "deriving": 108,
+   "families": 136,
+   "glyph_name": "Chi",
+   "group": "lookalikes",
+   "most": [
+    "components: U+0058(copy)",
+    65
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "GREEK CAPITAL LETTER CHI",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0058",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "03F3",
+   "deriving": 27,
+   "families": 30,
+   "glyph_name": "yot",
+   "group": "lookalikes",
+   "most": [
+    "components: U+006A(copy)",
+    10
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "GREEK LETTER YOT",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "006A",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "03F7",
+   "deriving": 17,
+   "families": 27,
+   "glyph_name": "Sho",
+   "group": "lookalikes",
+   "most": [
+    "components: U+00DE(copy)",
+    12
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "GREEK CAPITAL LETTER SHO",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "00DE",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "0405",
+   "deriving": 183,
+   "families": 210,
+   "glyph_name": "Dze-cy",
+   "group": "lookalikes",
+   "most": [
+    "components: U+0053(copy)",
+    137
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "CYRILLIC CAPITAL LETTER DZE",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0053",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "0406",
+   "deriving": 197,
+   "families": 212,
+   "glyph_name": "I-cy",
+   "group": "lookalikes",
+   "most": [
+    "components: U+0049(copy)",
+    142
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "CYRILLIC CAPITAL LETTER BYELORUSSIAN-UKRAINIAN I",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0049",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "0408",
+   "deriving": 180,
+   "families": 211,
+   "glyph_name": "Je-cy",
+   "group": "lookalikes",
+   "most": [
+    "components: U+004A(copy)",
+    140
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "CYRILLIC CAPITAL LETTER JE",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "004A",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "0410",
+   "deriving": 211,
+   "families": 248,
+   "glyph_name": "A-cy",
+   "group": "lookalikes",
+   "most": [
+    "components: U+0041(copy)",
+    139
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "CYRILLIC CAPITAL LETTER A",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0041",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "0412",
+   "deriving": 215,
+   "families": 248,
+   "glyph_name": "Ve-cy",
+   "group": "lookalikes",
+   "most": [
+    "components: U+0042(copy)",
+    143
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "CYRILLIC CAPITAL LETTER VE",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0042",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "0415",
+   "deriving": 214,
+   "families": 248,
+   "glyph_name": "Ie-cy",
+   "group": "lookalikes",
+   "most": [
+    "components: U+0045(copy)",
+    134
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "CYRILLIC CAPITAL LETTER IE",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0045",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "041C",
+   "deriving": 210,
+   "families": 248,
+   "glyph_name": "Em-cy",
+   "group": "lookalikes",
+   "most": [
+    "components: U+004D(copy)",
+    146
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "CYRILLIC CAPITAL LETTER EM",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "004D",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "041D",
+   "deriving": 214,
+   "families": 248,
+   "glyph_name": "En-cy",
+   "group": "lookalikes",
+   "most": [
+    "components: U+0048(copy)",
+    144
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "CYRILLIC CAPITAL LETTER EN",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0048",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "041E",
+   "deriving": 217,
+   "families": 247,
+   "glyph_name": "O-cy",
+   "group": "lookalikes",
+   "most": [
+    "components: U+004F(copy)",
+    138
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "CYRILLIC CAPITAL LETTER O",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "004F",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "0420",
+   "deriving": 215,
+   "families": 248,
+   "glyph_name": "Er-cy",
+   "group": "lookalikes",
+   "most": [
+    "components: U+0050(copy)",
+    144
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "CYRILLIC CAPITAL LETTER ER",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0050",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "0421",
+   "deriving": 208,
+   "families": 248,
+   "glyph_name": "Es-cy",
+   "group": "lookalikes",
+   "most": [
+    "components: U+0043(copy)",
+    146
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "CYRILLIC CAPITAL LETTER ES",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0043",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "0422",
+   "deriving": 211,
+   "families": 248,
+   "glyph_name": "Te-cy",
+   "group": "lookalikes",
+   "most": [
+    "components: U+0054(copy)",
+    146
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "CYRILLIC CAPITAL LETTER TE",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0054",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "0425",
+   "deriving": 214,
+   "families": 248,
+   "glyph_name": "Ha-cy",
+   "group": "lookalikes",
+   "most": [
+    "components: U+0058(copy)",
+    145
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "CYRILLIC CAPITAL LETTER HA",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0058",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "0430",
+   "deriving": 210,
+   "families": 248,
+   "glyph_name": "a-cy",
+   "group": "lookalikes",
+   "most": [
+    "components: U+0061(copy)",
+    131
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "CYRILLIC SMALL LETTER A",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0061",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "0435",
+   "deriving": 208,
+   "families": 248,
+   "glyph_name": "ie-cy",
+   "group": "lookalikes",
+   "most": [
+    "components: U+0065(copy)",
+    127
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "CYRILLIC SMALL LETTER IE",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0065",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "043E",
+   "deriving": 215,
+   "families": 248,
+   "glyph_name": "o-cy",
+   "group": "lookalikes",
+   "most": [
+    "components: U+006F(copy)",
+    132
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "CYRILLIC SMALL LETTER O",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "006F",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "0440",
+   "deriving": 204,
+   "families": 248,
+   "glyph_name": "er-cy",
+   "group": "lookalikes",
+   "most": [
+    "components: U+0070(copy)",
+    133
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "CYRILLIC SMALL LETTER ER",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0070",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "0441",
+   "deriving": 211,
+   "families": 248,
+   "glyph_name": "es-cy",
+   "group": "lookalikes",
+   "most": [
+    "components: U+0063(copy)",
+    140
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "CYRILLIC SMALL LETTER ES",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0063",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "0443",
+   "deriving": 156,
+   "families": 248,
+   "glyph_name": "u-cy",
+   "group": "lookalikes",
+   "most": [
+    "components: U+0079(copy)",
+    91
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "CYRILLIC SMALL LETTER U",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0079",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "0445",
+   "deriving": 216,
+   "families": 248,
+   "glyph_name": "ha-cy",
+   "group": "lookalikes",
+   "most": [
+    "components: U+0078(copy)",
+    139
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "CYRILLIC SMALL LETTER HA",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0078",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "0455",
+   "deriving": 186,
+   "families": 210,
+   "glyph_name": "dze-cy",
+   "group": "lookalikes",
+   "most": [
+    "components: U+0073(copy)",
+    136
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "CYRILLIC SMALL LETTER DZE",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0073",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "0456",
+   "deriving": 185,
+   "families": 211,
+   "glyph_name": "i-cy",
+   "group": "lookalikes",
+   "most": [
+    "components: U+0069(copy)",
+    95
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "CYRILLIC SMALL LETTER BYELORUSSIAN-UKRAINIAN I",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0069",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "0458",
+   "deriving": 183,
+   "families": 211,
+   "glyph_name": "je-cy",
+   "group": "lookalikes",
+   "most": [
+    "components: U+006A(copy)",
+    98
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "CYRILLIC SMALL LETTER JE",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "006A",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "04AE",
+   "deriving": 122,
+   "families": 155,
+   "glyph_name": "Ustraight-cy",
+   "group": "lookalikes",
+   "most": [
+    "components: U+0059(copy)",
+    88
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "CYRILLIC CAPITAL LETTER STRAIGHT U",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0059",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "04BB",
+   "deriving": 131,
+   "families": 153,
+   "glyph_name": "shha-cy",
+   "group": "lookalikes",
+   "most": [
+    "components: U+0068(copy)",
+    114
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "CYRILLIC SMALL LETTER SHHA",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0068",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "04C0",
+   "deriving": 147,
+   "families": 150,
+   "glyph_name": "Palochka-cy",
+   "group": "lookalikes",
+   "most": [
+    "components: U+0049(copy)",
+    120
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "CYRILLIC LETTER PALOCHKA",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0049",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "04CF",
+   "deriving": 117,
+   "families": 146,
+   "glyph_name": "palochka-cy",
+   "group": "lookalikes",
+   "most": [
+    "components: U+006C(copy)",
+    70
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "CYRILLIC SMALL LETTER PALOCHKA",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "006C",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "04D4",
+   "deriving": 135,
+   "families": 137,
+   "glyph_name": "Aie-cy",
+   "group": "lookalikes",
+   "most": [
+    "components: U+00C6(copy)",
+    112
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "CYRILLIC CAPITAL LIGATURE A IE",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "00C6",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "04D5",
+   "deriving": 133,
+   "families": 137,
+   "glyph_name": "aie-cy",
+   "group": "lookalikes",
+   "most": [
+    "components: U+00E6(copy)",
+    110
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "CYRILLIC SMALL LIGATURE A IE",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "00E6",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "0501",
+   "deriving": 26,
+   "families": 28,
+   "glyph_name": "komide-cy",
+   "group": "lookalikes",
+   "most": [
+    "components: U+0064(copy)",
+    21
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "CYRILLIC SMALL LETTER KOMI DE",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0064",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "051B",
+   "deriving": 100,
+   "families": 102,
+   "glyph_name": "qa-cy",
+   "group": "lookalikes",
+   "most": [
+    "components: U+0071(copy)",
+    84
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "CYRILLIC SMALL LETTER QA",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0071",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "051C",
+   "deriving": 109,
+   "families": 112,
+   "glyph_name": "We-cy",
+   "group": "lookalikes",
+   "most": [
+    "components: U+0057(copy)",
+    93
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "CYRILLIC CAPITAL LETTER WE",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0057",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "051D",
+   "deriving": 108,
+   "families": 112,
+   "glyph_name": "we-cy",
+   "group": "lookalikes",
+   "most": [
+    "components: U+0077(copy)",
+    92
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "CYRILLIC SMALL LETTER WE",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0077",
+     "op": "copy"
+    }
+   ]
+  },
+  {
+   "code": "0132",
+   "deriving": 217,
+   "families": 284,
+   "glyph_name": "IJ",
+   "group": "ligatures",
+   "most": [
+    "components: U+0049(copy) + U+004A(copy)",
+    137
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN CAPITAL LIGATURE IJ",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": [
+      "0049",
+      "004A"
+     ],
+     "op": "row",
+     "pair": "letters"
+    }
+   ]
+  },
+  {
+   "code": "0133",
+   "deriving": 250,
+   "families": 289,
+   "glyph_name": "ij",
+   "group": "ligatures",
+   "most": [
+    "components: U+0069(copy) + U+006A(copy)",
+    130
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN SMALL LIGATURE IJ",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": [
+      "0069",
+      "006A"
+     ],
+     "op": "row",
+     "pair": "letters"
+    }
+   ]
+  },
+  {
+   "code": "01C4",
+   "deriving": 118,
+   "families": 125,
+   "glyph_name": "DZcaron",
+   "group": "ligatures",
+   "most": [
+    "components: U+0044(copy) + U+005A(copy) + uni030C.case(copy)",
+    23
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN CAPITAL LETTER DZ WITH CARON",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": [
+      "0044",
+      "017D"
+     ],
+     "op": "row",
+     "pair": "letters"
+    }
+   ]
+  },
+  {
+   "code": "01C5",
+   "deriving": 120,
+   "families": 124,
+   "glyph_name": "Dzcaron",
+   "group": "ligatures",
+   "most": [
+    "components: U+0044(copy) + U+007A(copy) + U+030C(copy)",
+    33
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN CAPITAL LETTER D WITH SMALL LETTER Z WITH CARON",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": [
+      "0044",
+      "017E"
+     ],
+     "op": "row",
+     "pair": "letters"
+    }
+   ]
+  },
+  {
+   "code": "01C6",
+   "deriving": 118,
+   "families": 124,
+   "glyph_name": "dzcaron",
+   "group": "ligatures",
+   "most": [
+    "components: U+0064(copy) + U+007A(copy) + U+030C(copy)",
+    34
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN SMALL LETTER DZ WITH CARON",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": [
+      "0064",
+      "017E"
+     ],
+     "op": "row",
+     "pair": "letters"
+    }
+   ]
+  },
+  {
+   "code": "01C7",
+   "deriving": 115,
+   "families": 125,
+   "glyph_name": "LJ",
+   "group": "ligatures",
+   "most": [
+    "components: U+004C(copy) + U+004A(copy)",
+    89
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN CAPITAL LETTER LJ",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": [
+      "004C",
+      "004A"
+     ],
+     "op": "row",
+     "pair": "letters"
+    }
+   ]
+  },
+  {
+   "code": "01C8",
+   "deriving": 116,
+   "families": 122,
+   "glyph_name": "Lj",
+   "group": "ligatures",
+   "most": [
+    "components: U+004C(copy) + U+006A(copy)",
+    54
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN CAPITAL LETTER L WITH SMALL LETTER J",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": [
+      "004C",
+      "006A"
+     ],
+     "op": "row",
+     "pair": "letters"
+    }
+   ]
+  },
+  {
+   "code": "01C9",
+   "deriving": 119,
+   "families": 123,
+   "glyph_name": "lj",
+   "group": "ligatures",
+   "most": [
+    "components: U+006C(copy) + U+006A(copy)",
+    55
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN SMALL LETTER LJ",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": [
+      "006C",
+      "006A"
+     ],
+     "op": "row",
+     "pair": "letters"
+    }
+   ]
+  },
+  {
+   "code": "01CA",
+   "deriving": 118,
+   "families": 125,
+   "glyph_name": "NJ",
+   "group": "ligatures",
+   "most": [
+    "components: U+004E(copy) + U+004A(copy)",
+    89
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN CAPITAL LETTER NJ",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": [
+      "004E",
+      "004A"
+     ],
+     "op": "row",
+     "pair": "letters"
+    }
+   ]
+  },
+  {
+   "code": "01CB",
+   "deriving": 117,
+   "families": 123,
+   "glyph_name": "Nj",
+   "group": "ligatures",
+   "most": [
+    "components: U+004E(copy) + U+006A(copy)",
+    57
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN CAPITAL LETTER N WITH SMALL LETTER J",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": [
+      "004E",
+      "006A"
+     ],
+     "op": "row",
+     "pair": "letters"
+    }
+   ]
+  },
+  {
+   "code": "01CC",
+   "deriving": 116,
+   "families": 123,
+   "glyph_name": "nj",
+   "group": "ligatures",
+   "most": [
+    "components: U+006E(copy) + U+006A(copy)",
+    56
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN SMALL LETTER NJ",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": [
+      "006E",
+      "006A"
+     ],
+     "op": "row",
+     "pair": "letters"
+    }
+   ]
+  },
+  {
+   "code": "01F1",
+   "deriving": 66,
+   "families": 70,
+   "glyph_name": "DZ",
+   "group": "ligatures",
+   "most": [
+    "components: U+0044(copy) + U+005A(copy)",
+    46
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN CAPITAL LETTER DZ",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": [
+      "0044",
+      "005A"
+     ],
+     "op": "row",
+     "pair": "letters"
+    }
+   ]
+  },
+  {
+   "code": "01F2",
+   "deriving": 62,
+   "families": 68,
+   "glyph_name": "Dz",
+   "group": "ligatures",
+   "most": [
+    "components: U+0044(copy) + U+007A(copy)",
+    44
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN CAPITAL LETTER D WITH SMALL LETTER Z",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": [
+      "0044",
+      "007A"
+     ],
+     "op": "row",
+     "pair": "letters"
+    }
+   ]
+  },
+  {
+   "code": "01F3",
+   "deriving": 62,
+   "families": 68,
+   "glyph_name": "dz",
+   "group": "ligatures",
+   "most": [
+    "components: U+0064(copy) + U+007A(copy)",
+    45
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN SMALL LETTER DZ",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": [
+      "0064",
+      "007A"
+     ],
+     "op": "row",
+     "pair": "letters"
+    }
+   ]
+  },
+  {
+   "code": "0149",
+   "deriving": 175,
+   "families": 203,
+   "glyph_name": "napostrophe",
+   "group": "ligatures",
+   "most": [
+    "outlines: U+006E(copy) + 1 drawn contours",
+    30
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN SMALL LETTER N PRECEDED BY APOSTROPHE",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": [
+      "02BC",
+      "006E"
+     ],
+     "op": "row",
+     "pair": "0149"
+    },
+    {
+     "confidence": "accepted",
+     "of": [
+      "2019",
+      "006E"
+     ],
+     "op": "row",
+     "pair": "0149"
+    }
+   ]
+  },
+  {
+   "code": "013F",
+   "deriving": 276,
+   "families": 285,
+   "glyph_name": "Ldot",
+   "group": "ligatures",
+   "most": [
+    "components: U+004C(copy) + U+00B7(moved)",
+    39
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN CAPITAL LETTER L WITH MIDDLE DOT",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": [
+      "004C",
+      "00B7"
+     ],
+     "op": "row",
+     "pair": "013F"
+    },
+    {
+     "confidence": "accepted",
+     "of": [
+      "004C",
+      "002E"
+     ],
+     "op": "row",
+     "pair": "013F"
+    }
+   ]
+  },
+  {
+   "code": "0140",
+   "deriving": 285,
+   "families": 298,
+   "glyph_name": "ldot",
+   "group": "ligatures",
+   "most": [
+    "components: U+006C(copy) + periodcentered.loclCAT(copy)",
+    39
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN SMALL LETTER L WITH MIDDLE DOT",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": [
+      "006C",
+      "00B7"
+     ],
+     "op": "row",
+     "pair": "0140"
+    },
+    {
+     "confidence": "accepted",
+     "of": [
+      "006C",
+      "002E"
+     ],
+     "op": "row",
+     "pair": "0140"
+    }
+   ]
+  },
+  {
+   "code": "00BC",
+   "deriving": 407,
+   "families": 441,
+   "glyph_name": "onequarter",
+   "group": "fractions",
+   "most": [
+    "outlines: U+2074(copy) + U+00B9(copy) + 1 drawn contours",
+    37
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "VULGAR FRACTION ONE QUARTER",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "denominator": "4",
+     "numerator": "1",
+     "op": "fraction"
+    }
+   ]
+  },
+  {
+   "code": "00BD",
+   "deriving": 405,
+   "families": 441,
+   "glyph_name": "onehalf",
+   "group": "fractions",
+   "most": [
+    "outlines: U+00B2(copy) + U+00B9(copy) + U+2044(copy)",
+    48
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "VULGAR FRACTION ONE HALF",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "denominator": "2",
+     "numerator": "1",
+     "op": "fraction"
+    }
+   ]
+  },
+  {
+   "code": "00BE",
+   "deriving": 398,
+   "families": 441,
+   "glyph_name": "threequarters",
+   "group": "fractions",
+   "most": [
+    "drawn",
+    43
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "VULGAR FRACTION THREE QUARTERS",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "denominator": "4",
+     "numerator": "3",
+     "op": "fraction"
+    }
+   ]
+  },
+  {
+   "code": "2150",
+   "deriving": 40,
+   "families": 44,
+   "glyph_name": "oneseventh",
+   "group": "fractions",
+   "most": [
+    "components: U+00B9(copy) + U+2044(copy) + U+2087(copy)",
+    8
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "VULGAR FRACTION ONE SEVENTH",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "denominator": "7",
+     "numerator": "1",
+     "op": "fraction"
+    }
+   ]
+  },
+  {
+   "code": "2151",
+   "deriving": 40,
+   "families": 43,
+   "glyph_name": "oneninth",
+   "group": "fractions",
+   "most": [
+    "components: U+00B9(copy) + U+2044(copy) + U+2089(copy)",
+    8
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "VULGAR FRACTION ONE NINTH",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "denominator": "9",
+     "numerator": "1",
+     "op": "fraction"
+    }
+   ]
+  },
+  {
+   "code": "2152",
+   "deriving": 29,
+   "families": 33,
+   "glyph_name": "onetenth",
+   "group": "fractions",
+   "most": [
+    "components: one.dnom(moved) + U+2044(copy) + one.dnom(copy) + zero.dnom(copy)",
+    5
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "VULGAR FRACTION ONE TENTH",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "denominator": "10",
+     "numerator": "1",
+     "op": "fraction"
+    }
+   ]
+  },
+  {
+   "code": "2153",
+   "deriving": 179,
+   "families": 196,
+   "glyph_name": "onethird",
+   "group": "fractions",
+   "most": [
+    "components: U+2081(moved) + U+2044(copy) + U+2083(moved)",
+    25
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "VULGAR FRACTION ONE THIRD",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "denominator": "3",
+     "numerator": "1",
+     "op": "fraction"
+    }
+   ]
+  },
+  {
+   "code": "2154",
+   "deriving": 172,
+   "families": 192,
+   "glyph_name": "twothirds",
+   "group": "fractions",
+   "most": [
+    "components: U+2082(moved) + U+2044(copy) + U+2083(moved)",
+    25
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "VULGAR FRACTION TWO THIRDS",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "denominator": "3",
+     "numerator": "2",
+     "op": "fraction"
+    }
+   ]
+  },
+  {
+   "code": "2155",
+   "deriving": 57,
+   "families": 65,
+   "glyph_name": "onefifth",
+   "group": "fractions",
+   "most": [
+    "components: one.numr(copy) + U+2044(copy) + five.dnom(copy)",
+    11
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "VULGAR FRACTION ONE FIFTH",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "denominator": "5",
+     "numerator": "1",
+     "op": "fraction"
+    }
+   ]
+  },
+  {
+   "code": "2156",
+   "deriving": 52,
+   "families": 59,
+   "glyph_name": "twofifths",
+   "group": "fractions",
+   "most": [
+    "components: two.numr(copy) + U+2044(copy) + five.dnom(copy)",
+    9
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "VULGAR FRACTION TWO FIFTHS",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "denominator": "5",
+     "numerator": "2",
+     "op": "fraction"
+    }
+   ]
+  },
+  {
+   "code": "2157",
+   "deriving": 51,
+   "families": 57,
+   "glyph_name": "threefifths",
+   "group": "fractions",
+   "most": [
+    "components: three.numr(copy) + U+2044(copy) + five.dnom(copy)",
+    9
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "VULGAR FRACTION THREE FIFTHS",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "denominator": "5",
+     "numerator": "3",
+     "op": "fraction"
+    }
+   ]
+  },
+  {
+   "code": "2158",
+   "deriving": 55,
+   "families": 59,
+   "glyph_name": "fourfifths",
+   "group": "fractions",
+   "most": [
+    "components: four.numr(copy) + U+2044(copy) + five.dnom(copy)",
+    9
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "VULGAR FRACTION FOUR FIFTHS",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "denominator": "5",
+     "numerator": "4",
+     "op": "fraction"
+    }
+   ]
+  },
+  {
+   "code": "2159",
+   "deriving": 53,
+   "families": 58,
+   "glyph_name": "onesixth",
+   "group": "fractions",
+   "most": [
+    "components: one.numr(copy) + U+2044(copy) + six.dnom(copy)",
+    9
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "VULGAR FRACTION ONE SIXTH",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "denominator": "6",
+     "numerator": "1",
+     "op": "fraction"
+    }
+   ]
+  },
+  {
+   "code": "215A",
+   "deriving": 51,
+   "families": 59,
+   "glyph_name": "fivesixths",
+   "group": "fractions",
+   "most": [
+    "components: five.numr(copy) + U+2044(copy) + six.dnom(copy)",
+    9
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "VULGAR FRACTION FIVE SIXTHS",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "denominator": "6",
+     "numerator": "5",
+     "op": "fraction"
+    }
+   ]
+  },
+  {
+   "code": "215B",
+   "deriving": 196,
+   "families": 213,
+   "glyph_name": "oneeighth",
+   "group": "fractions",
+   "most": [
+    "components: U+2081(moved) + U+2044(copy) + U+2088(moved)",
+    25
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "VULGAR FRACTION ONE EIGHTH",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "denominator": "8",
+     "numerator": "1",
+     "op": "fraction"
+    }
+   ]
+  },
+  {
+   "code": "215C",
+   "deriving": 190,
+   "families": 212,
+   "glyph_name": "threeeighths",
+   "group": "fractions",
+   "most": [
+    "components: three.numr(copy) + U+2044(copy) + eight.dnom(copy)",
+    25
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "VULGAR FRACTION THREE EIGHTHS",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "denominator": "8",
+     "numerator": "3",
+     "op": "fraction"
+    }
+   ]
+  },
+  {
+   "code": "215D",
+   "deriving": 185,
+   "families": 212,
+   "glyph_name": "fiveeighths",
+   "group": "fractions",
+   "most": [
+    "drawn",
+    27
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "VULGAR FRACTION FIVE EIGHTHS",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "denominator": "8",
+     "numerator": "5",
+     "op": "fraction"
+    }
+   ]
+  },
+  {
+   "code": "215E",
+   "deriving": 186,
+   "families": 212,
+   "glyph_name": "seveneighths",
+   "group": "fractions",
+   "most": [
+    "drawn",
+    26
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "VULGAR FRACTION SEVEN EIGHTHS",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "denominator": "8",
+     "numerator": "7",
+     "op": "fraction"
+    }
+   ]
+  },
+  {
+   "code": "215F",
+   "deriving": 31,
+   "families": 35,
+   "glyph_name": "onefraction",
+   "group": "fractions",
+   "most": [
+    "components: one.numr(copy) + U+2044(copy)",
+    7
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "FRACTION NUMERATOR ONE",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "denominator": "",
+     "numerator": "1",
+     "op": "fraction"
+    }
+   ]
+  },
+  {
+   "code": "2189",
+   "deriving": 22,
+   "families": 27,
+   "glyph_name": "zerothird",
+   "group": "fractions",
+   "most": [
+    "drawn",
+    5
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "VULGAR FRACTION ZERO THIRDS",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "denominator": "3",
+     "numerator": "0",
+     "op": "fraction"
+    }
+   ]
+  },
+  {
+   "code": "2190",
+   "deriving": 164,
+   "families": 225,
+   "glyph_name": "leftArrow",
+   "group": "arrows",
+   "most": [
+    "outlines: U+2192(mirrored)",
+    101
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LEFTWARDS ARROW",
+   "ways": [
+    {
+     "angle": 180,
+     "confidence": "accepted",
+     "of": "2192",
+     "op": "turn",
+     "pair": "2190"
+    }
+   ]
+  },
+  {
+   "code": "2191",
+   "deriving": 132,
+   "families": 226,
+   "glyph_name": "upArrow",
+   "group": "arrows",
+   "most": [
+    "outlines: U+2192(quarter_turn)",
+    114
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "UPWARDS ARROW",
+   "ways": [
+    {
+     "angle": 90,
+     "confidence": "accepted",
+     "of": "2192",
+     "op": "turn",
+     "pair": "2191"
+    }
+   ]
+  },
+  {
+   "code": "2193",
+   "deriving": 136,
+   "families": 226,
+   "glyph_name": "downArrow",
+   "group": "arrows",
+   "most": [
+    "outlines: U+2192(quarter_turn)",
+    118
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "DOWNWARDS ARROW",
+   "ways": [
+    {
+     "angle": 270,
+     "confidence": "accepted",
+     "of": "2192",
+     "op": "turn",
+     "pair": "2191"
+    }
+   ]
+  },
+  {
+   "code": "21D0",
+   "deriving": 29,
+   "families": 40,
+   "glyph_name": "leftDoubleArrow",
+   "group": "arrows",
+   "most": [
+    "outlines: U+21D2(mirrored)",
+    14
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LEFTWARDS DOUBLE ARROW",
+   "ways": [
+    {
+     "angle": 180,
+     "confidence": "accepted",
+     "of": "21D2",
+     "op": "turn",
+     "pair": "2190"
+    }
+   ]
+  },
+  {
+   "code": "21D1",
+   "deriving": 18,
+   "families": 26,
+   "glyph_name": "upDoubleArrow",
+   "group": "arrows",
+   "most": [
+    "outlines: U+21D2(quarter_turn)",
+    15
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "UPWARDS DOUBLE ARROW",
+   "ways": [
+    {
+     "angle": 90,
+     "confidence": "accepted",
+     "of": "21D2",
+     "op": "turn",
+     "pair": "2191"
+    }
+   ]
+  },
+  {
+   "code": "21D3",
+   "deriving": 17,
+   "families": 26,
+   "glyph_name": "downDoubleArrow",
+   "group": "arrows",
+   "most": [
+    "outlines: U+21D2(quarter_turn)",
+    15
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "DOWNWARDS DOUBLE ARROW",
+   "ways": [
+    {
+     "angle": 270,
+     "confidence": "accepted",
+     "of": "21D2",
+     "op": "turn",
+     "pair": "2191"
+    }
+   ]
+  },
+  {
+   "code": "25B2",
+   "deriving": 113,
+   "families": 157,
+   "glyph_name": "upBlackTriangle",
+   "group": "arrows",
+   "most": [
+    "outlines: U+25B6(affine)",
+    49
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "BLACK UP-POINTING TRIANGLE",
+   "ways": [
+    {
+     "angle": 90,
+     "confidence": "accepted",
+     "of": "25B6",
+     "op": "turn",
+     "pair": "25B2"
+    }
+   ]
+  },
+  {
+   "code": "25BC",
+   "deriving": 109,
+   "families": 153,
+   "glyph_name": "downBlackTriangle",
+   "group": "arrows",
+   "most": [
+    "outlines: U+25B6(affine)",
+    46
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "BLACK DOWN-POINTING TRIANGLE",
+   "ways": [
+    {
+     "angle": 270,
+     "confidence": "accepted",
+     "of": "25B6",
+     "op": "turn",
+     "pair": "25B2"
+    }
+   ]
+  },
+  {
+   "code": "25C0",
+   "deriving": 111,
+   "families": 120,
+   "glyph_name": "leftBlackTriangle",
+   "group": "arrows",
+   "most": [
+    "outlines: U+25B6(affine)",
+    51
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "BLACK LEFT-POINTING TRIANGLE",
+   "ways": [
+    {
+     "angle": 180,
+     "confidence": "accepted",
+     "of": "25B6",
+     "op": "turn",
+     "pair": "25C0"
+    }
+   ]
+  },
+  {
+   "code": "25B3",
+   "deriving": 78,
+   "families": 147,
+   "glyph_name": "upWhiteTriangle",
+   "group": "arrows",
+   "most": [
+    "outlines: U+25B7(quarter_turn)",
+    46
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "WHITE UP-POINTING TRIANGLE",
+   "ways": [
+    {
+     "angle": 90,
+     "confidence": "accepted",
+     "of": "25B7",
+     "op": "turn",
+     "pair": "25B2"
+    }
+   ]
+  },
+  {
+   "code": "25BD",
+   "deriving": 86,
+   "families": 142,
+   "glyph_name": "downWhiteTriangle",
+   "group": "arrows",
+   "most": [
+    "outlines: U+25B7(quarter_turn)",
+    52
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "WHITE DOWN-POINTING TRIANGLE",
+   "ways": [
+    {
+     "angle": 270,
+     "confidence": "accepted",
+     "of": "25B7",
+     "op": "turn",
+     "pair": "25B2"
+    }
+   ]
+  },
+  {
+   "code": "25C1",
+   "deriving": 113,
+   "families": 125,
+   "glyph_name": "leftWhiteTriangle",
+   "group": "arrows",
+   "most": [
+    "outlines: U+25B7(mirrored)",
+    65
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "WHITE LEFT-POINTING TRIANGLE",
+   "ways": [
+    {
+     "angle": 180,
+     "confidence": "accepted",
+     "of": "25B7",
+     "op": "turn",
+     "pair": "25C0"
+    }
+   ]
+  },
+  {
+   "code": "2196",
+   "deriving": 46,
+   "families": 126,
+   "glyph_name": "northWestArrow",
+   "group": "arrows",
+   "most": [
+    "drawn (same contour structure as U+2192)",
+    49
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "NORTH WEST ARROW",
+   "ways": [
+    {
+     "angle": 135,
+     "confidence": "accepted",
+     "of": "2192",
+     "op": "turn",
+     "pair": "2197"
+    }
+   ]
+  },
+  {
+   "code": "2197",
+   "deriving": 50,
+   "families": 125,
+   "glyph_name": "northEastArrow",
+   "group": "arrows",
+   "most": [
+    "drawn (same contour structure as U+2192)",
+    47
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "NORTH EAST ARROW",
+   "ways": [
+    {
+     "angle": 45,
+     "confidence": "accepted",
+     "of": "2192",
+     "op": "turn",
+     "pair": "2197"
+    }
+   ]
+  },
+  {
+   "code": "2198",
+   "deriving": 59,
+   "families": 126,
+   "glyph_name": "southEastArrow",
+   "group": "arrows",
+   "most": [
+    "outlines: U+2192(rotated)",
+    49
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "SOUTH EAST ARROW",
+   "ways": [
+    {
+     "angle": 315,
+     "confidence": "accepted",
+     "of": "2192",
+     "op": "turn",
+     "pair": "2197"
+    }
+   ]
+  },
+  {
+   "code": "2199",
+   "deriving": 43,
+   "families": 125,
+   "glyph_name": "southWestArrow",
+   "group": "arrows",
+   "most": [
+    "drawn (same contour structure as U+2192)",
+    56
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "SOUTH WEST ARROW",
+   "ways": [
+    {
+     "angle": 225,
+     "confidence": "accepted",
+     "of": "2192",
+     "op": "turn",
+     "pair": "2197"
+    }
+   ]
+  }
+ ],
+ "format": 1,
+ "groups": [
+  {
+   "count": 18,
+   "id": "spaces",
+   "title": "Spaces"
+  },
+  {
+   "count": 10,
+   "id": "dashes",
+   "title": "Hyphens and dashes"
+  },
+  {
+   "count": 44,
+   "id": "duplicates",
+   "title": "Duplicates"
+  },
+  {
+   "count": 28,
+   "id": "punctuation",
+   "title": "Punctuation"
+  },
+  {
+   "count": 52,
+   "id": "lookalikes",
+   "title": "Greek and Cyrillic look-alikes"
+  },
+  {
+   "count": 17,
+   "id": "ligatures",
+   "title": "Ligature letters"
+  },
+  {
+   "count": 20,
+   "id": "fractions",
+   "title": "Vulgar fractions"
+  },
+  {
+   "count": 16,
+   "id": "arrows",
+   "title": "Arrows and triangles"
+  }
+ ],
+ "layout": {
+  "00A1 advance - source": {
+   "median": 0.0,
+   "n": 494,
+   "q1": 0.0,
+   "q3": 0.0
+  },
+  "00A1 drop/em": {
+   "median": -0.1799,
+   "n": 494,
+   "q1": -0.204,
+   "q3": -0.14
+  },
+  "00A1 left - source right side": {
+   "median": 0.0,
+   "n": 494,
+   "q1": -0.001,
+   "q3": 0.0
+  },
+  "00A1 top - x-height": {
+   "median": 0.01,
+   "n": 494,
+   "q1": 0.0,
+   "q3": 0.0332
+  },
+  "00AB advance - parts": {
+   "median": -0.12,
+   "n": 491,
+   "q1": -0.167,
+   "q3": -0.0925
+  },
+  "00AB gap/em": {
+   "median": -0.0288,
+   "n": 491,
+   "q1": -0.0587,
+   "q3": -0.008
+  },
+  "00AB gap/inner sidebearings": {
+   "median": -0.3038,
+   "n": 479,
+   "q1": -0.6344,
+   "q3": -0.0795
+  },
+  "00AB left - first left": {
+   "median": 0.0,
+   "n": 491,
+   "q1": 0.0,
+   "q3": 0.0
+  },
+  "00AB right side - last right side": {
+   "median": 0.0,
+   "n": 491,
+   "q1": -0.0,
+   "q3": 0.0
+  },
+  "00B7 advance - period": {
+   "median": 0.0,
+   "n": 497,
+   "q1": 0.0,
+   "q3": 0.018
+  },
+  "00B7 center/x-height": {
+   "median": 0.62,
+   "n": 495,
+   "q1": 0.5539,
+   "q3": 0.6809
+  },
+  "00BB advance - parts": {
+   "median": -0.1182,
+   "n": 491,
+   "q1": -0.1645,
+   "q3": -0.094
+  },
+  "00BB gap/em": {
+   "median": -0.0275,
+   "n": 491,
+   "q1": -0.052,
+   "q3": -0.0078
+  },
+  "00BB gap/inner sidebearings": {
+   "median": -0.294,
+   "n": 478,
+   "q1": -0.5762,
+   "q3": -0.076
+  },
+  "00BB left - first left": {
+   "median": 0.0,
+   "n": 491,
+   "q1": 0.0,
+   "q3": 0.0
+  },
+  "00BB right side - last right side": {
+   "median": 0.0,
+   "n": 491,
+   "q1": -0.0,
+   "q3": 0.0
+  },
+  "00BF advance - source": {
+   "median": 0.0,
+   "n": 494,
+   "q1": -0.001,
+   "q3": 0.0
+  },
+  "00BF drop/em": {
+   "median": -0.185,
+   "n": 494,
+   "q1": -0.21,
+   "q3": -0.1447
+  },
+  "00BF left - source right side": {
+   "median": 0.0,
+   "n": 494,
+   "q1": -0.002,
+   "q3": 0.0
+  },
+  "00BF top - x-height": {
+   "median": 0.01,
+   "n": 494,
+   "q1": 0.001,
+   "q3": 0.0412
+  },
+  "0132 advance - parts": {
+   "median": -0.0,
+   "n": 283,
+   "q1": -0.072,
+   "q3": 0.0
+  },
+  "0132 gap/em": {
+   "median": 0.048,
+   "n": 283,
+   "q1": -0.078,
+   "q3": 0.09
+  },
+  "0132 gap/inner sidebearings": {
+   "median": 0.9801,
+   "n": 242,
+   "q1": -0.2597,
+   "q3": 1.0
+  },
+  "0132 left - first left": {
+   "median": 0.0,
+   "n": 283,
+   "q1": 0.0,
+   "q3": 0.0
+  },
+  "0132 right side - last right side": {
+   "median": 0.0,
+   "n": 283,
+   "q1": -0.0,
+   "q3": 0.0
+  },
+  "0133 advance - parts": {
+   "median": 0.0,
+   "n": 288,
+   "q1": -0.01,
+   "q3": 0.0
+  },
+  "0133 gap/em": {
+   "median": 0.013,
+   "n": 288,
+   "q1": -0.037,
+   "q3": 0.0457
+  },
+  "0133 gap/inner sidebearings": {
+   "median": 1.0,
+   "n": 180,
+   "q1": 0.6595,
+   "q3": 1.0
+  },
+  "0133 left - first left": {
+   "median": 0.0,
+   "n": 288,
+   "q1": 0.0,
+   "q3": 0.0
+  },
+  "0133 right side - last right side": {
+   "median": 0.0,
+   "n": 288,
+   "q1": -0.0,
+   "q3": 0.0
+  },
+  "013F advance - parts": {
+   "median": -0.25,
+   "n": 283,
+   "q1": -0.315,
+   "q3": -0.206
+  },
+  "013F dot center/height": {
+   "median": 0.5146,
+   "n": 96,
+   "q1": 0.4831,
+   "q3": 0.557
+  },
+  "013F dot left - letter advance": {
+   "median": -0.193,
+   "n": 96,
+   "q1": -0.2368,
+   "q3": -0.1559
+  },
+  "013F gap/em": {
+   "median": -0.119,
+   "n": 283,
+   "q1": -0.1421,
+   "q3": -0.099
+  },
+  "013F gap/inner sidebearings": {
+   "median": -1.28,
+   "n": 263,
+   "q1": -1.9041,
+   "q3": -0.9118
+  },
+  "013F left - first left": {
+   "median": 0.0,
+   "n": 283,
+   "q1": 0.0,
+   "q3": 0.0
+  },
+  "013F right side - last right side": {
+   "median": -0.034,
+   "n": 283,
+   "q1": -0.055,
+   "q3": -0.013
+  },
+  "0140 advance - parts": {
+   "median": -0.161,
+   "n": 297,
+   "q1": -0.235,
+   "q3": -0.127
+  },
+  "0140 dot center/height": {
+   "median": 0.676,
+   "n": 102,
+   "q1": 0.6179,
+   "q3": 0.7468
+  },
+  "0140 dot left - letter advance": {
+   "median": -0.019,
+   "n": 102,
+   "q1": -0.0502,
+   "q3": -0.0048
+  },
+  "0140 gap/em": {
+   "median": 0.003,
+   "n": 297,
+   "q1": -0.044,
+   "q3": 0.05
+  },
+  "0140 gap/inner sidebearings": {
+   "median": 0.071,
+   "n": 281,
+   "q1": -0.3703,
+   "q3": 0.3973
+  },
+  "0140 left - first left": {
+   "median": 0.0,
+   "n": 297,
+   "q1": 0.0,
+   "q3": 0.0
+  },
+  "0140 right side - last right side": {
+   "median": -0.0625,
+   "n": 297,
+   "q1": -0.0985,
+   "q3": -0.0305
+  },
+  "0149 advance - parts": {
+   "median": -0.185,
+   "n": 203,
+   "q1": -0.286,
+   "q3": -0.115
+  },
+  "0149 gap/em": {
+   "median": -0.029,
+   "n": 203,
+   "q1": -0.11,
+   "q3": 0.0186
+  },
+  "0149 gap/inner sidebearings": {
+   "median": -0.1657,
+   "n": 191,
+   "q1": -0.9691,
+   "q3": 0.1651
+  },
+  "0149 left - first left": {
+   "median": -0.04,
+   "n": 203,
+   "q1": -0.0878,
+   "q3": 0.0
+  },
+  "0149 right side - last right side": {
+   "median": 0.0,
+   "n": 203,
+   "q1": 0.0,
+   "q3": 0.0
+  },
+  "01C6 advance - parts": {
+   "median": 0.0,
+   "n": 123,
+   "q1": -0.0005,
+   "q3": 0.0
+  },
+  "01C6 gap/em": {
+   "median": 0.08,
+   "n": 123,
+   "q1": 0.0439,
+   "q3": 0.122
+  },
+  "01C6 gap/inner sidebearings": {
+   "median": 1.0,
+   "n": 116,
+   "q1": 0.9851,
+   "q3": 1.0
+  },
+  "01C6 left - first left": {
+   "median": 0.0,
+   "n": 123,
+   "q1": 0.0,
+   "q3": 0.0
+  },
+  "01C6 right side - last right side": {
+   "median": 0.0,
+   "n": 123,
+   "q1": -0.0,
+   "q3": 0.0
+  },
+  "01C9 advance - parts": {
+   "median": 0.0,
+   "n": 122,
+   "q1": -0.0,
+   "q3": 0.0
+  },
+  "01C9 gap/em": {
+   "median": 0.0145,
+   "n": 122,
+   "q1": -0.0211,
+   "q3": 0.041
+  },
+  "01C9 gap/inner sidebearings": {
+   "median": 1.0,
+   "n": 81,
+   "q1": 1.0,
+   "q3": 1.0
+  },
+  "01C9 left - first left": {
+   "median": 0.0,
+   "n": 122,
+   "q1": 0.0,
+   "q3": 0.0
+  },
+  "01C9 right side - last right side": {
+   "median": 0.0,
+   "n": 122,
+   "q1": -0.0,
+   "q3": 0.0
+  },
+  "2018 advance - source": {
+   "median": 0.0,
+   "n": 517,
+   "q1": 0.0,
+   "q3": 0.0
+  },
+  "2018 drop/em": {
+   "median": 0.0,
+   "n": 517,
+   "q1": 0.0,
+   "q3": 0.003
+  },
+  "2018 left - source right side": {
+   "median": 0.0,
+   "n": 517,
+   "q1": -0.0,
+   "q3": 0.001
+  },
+  "2018 top - x-height": {
+   "median": 0.224,
+   "n": 504,
+   "q1": 0.183,
+   "q3": 0.267
+  },
+  "201C advance - parts": {
+   "median": -0.055,
+   "n": 516,
+   "q1": -0.09,
+   "q3": -0.028
+  },
+  "201C gap/em": {
+   "median": 0.036,
+   "n": 516,
+   "q1": 0.023,
+   "q3": 0.0488
+  },
+  "201C gap/inner sidebearings": {
+   "median": 0.3901,
+   "n": 499,
+   "q1": 0.219,
+   "q3": 0.5714
+  },
+  "201C left - first left": {
+   "median": 0.0,
+   "n": 516,
+   "q1": 0.0,
+   "q3": 0.0
+  },
+  "201C right side - last right side": {
+   "median": 0.0,
+   "n": 516,
+   "q1": -0.0,
+   "q3": 0.0
+  },
+  "201D advance - parts": {
+   "median": -0.055,
+   "n": 517,
+   "q1": -0.093,
+   "q3": -0.0235
+  },
+  "201D gap/em": {
+   "median": 0.0353,
+   "n": 517,
+   "q1": 0.023,
+   "q3": 0.048
+  },
+  "201D gap/inner sidebearings": {
+   "median": 0.3919,
+   "n": 500,
+   "q1": 0.2201,
+   "q3": 0.5695
+  },
+  "201D left - first left": {
+   "median": 0.0,
+   "n": 517,
+   "q1": 0.0,
+   "q3": 0.0
+  },
+  "201D right side - last right side": {
+   "median": 0.0,
+   "n": 517,
+   "q1": -0.0,
+   "q3": 0.0
+  },
+  "201E advance - parts": {
+   "median": -0.074,
+   "n": 492,
+   "q1": -0.1205,
+   "q3": -0.0363
+  },
+  "201E gap/em": {
+   "median": 0.033,
+   "n": 492,
+   "q1": 0.014,
+   "q3": 0.047
+  },
+  "201E gap/inner sidebearings": {
+   "median": 0.283,
+   "n": 479,
+   "q1": 0.1207,
+   "q3": 0.4633
+  },
+  "201E left - first left": {
+   "median": 0.0,
+   "n": 492,
+   "q1": -0.01,
+   "q3": 0.0005
+  },
+  "201E right side - last right side": {
+   "median": -0.0,
+   "n": 492,
+   "q1": -0.014,
+   "q3": 0.001
+  },
+  "2026 advance - parts": {
+   "median": -0.0123,
+   "n": 508,
+   "q1": -0.083,
+   "q3": 0.046
+  },
+  "2026 gap/em": {
+   "median": 0.111,
+   "n": 508,
+   "q1": 0.078,
+   "q3": 0.1562
+  },
+  "2026 gap/inner sidebearings": {
+   "median": 0.9567,
+   "n": 498,
+   "q1": 0.7156,
+   "q3": 1.178
+  },
+  "2026 left - first left": {
+   "median": 0.0,
+   "n": 508,
+   "q1": 0.0,
+   "q3": 0.002
+  },
+  "2026 right side - last right side": {
+   "median": 0.0,
+   "n": 508,
+   "q1": -0.0,
+   "q3": 0.003
+  },
+  "2033 advance - parts": {
+   "median": -0.0655,
+   "n": 226,
+   "q1": -0.11,
+   "q3": -0.036
+  },
+  "2033 gap/em": {
+   "median": 0.031,
+   "n": 226,
+   "q1": -0.0048,
+   "q3": 0.0631
+  },
+  "2033 gap/inner sidebearings": {
+   "median": 0.3606,
+   "n": 220,
+   "q1": -0.0146,
+   "q3": 0.5397
+  },
+  "2033 left - first left": {
+   "median": 0.0,
+   "n": 226,
+   "q1": 0.0,
+   "q3": 0.0
+  },
+  "2033 right side - last right side": {
+   "median": 0.0,
+   "n": 226,
+   "q1": -0.0006,
+   "q3": 0.0
+  },
+  "2034 advance - parts": {
+   "median": -0.1778,
+   "n": 44,
+   "q1": -0.2572,
+   "q3": -0.0929
+  },
+  "2034 gap/em": {
+   "median": 0.006,
+   "n": 44,
+   "q1": -0.0424,
+   "q3": 0.0281
+  },
+  "2034 gap/inner sidebearings": {
+   "median": 0.048,
+   "n": 43,
+   "q1": -0.2459,
+   "q3": 0.2805
+  },
+  "2034 left - first left": {
+   "median": 0.0,
+   "n": 44,
+   "q1": -0.0108,
+   "q3": 0.0
+  },
+  "2034 right side - last right side": {
+   "median": -0.0,
+   "n": 44,
+   "q1": -0.0099,
+   "q3": 0.0
+  },
+  "203C advance - parts": {
+   "median": -0.022,
+   "n": 90,
+   "q1": -0.094,
+   "q3": 0.0
+  },
+  "203C gap/em": {
+   "median": 0.1248,
+   "n": 90,
+   "q1": 0.0933,
+   "q3": 0.166
+  },
+  "203C gap/inner sidebearings": {
+   "median": 0.8206,
+   "n": 90,
+   "q1": 0.4929,
+   "q3": 0.9948
+  },
+  "203C left - first left": {
+   "median": 0.0,
+   "n": 90,
+   "q1": 0.0,
+   "q3": 0.0
+  },
+  "203C right side - last right side": {
+   "median": 0.0,
+   "n": 90,
+   "q1": -0.0005,
+   "q3": 0.0057
+  },
+  "2047 advance - parts": {
+   "median": -0.041,
+   "n": 57,
+   "q1": -0.1077,
+   "q3": -0.022
+  },
+  "2047 gap/em": {
+   "median": 0.043,
+   "n": 57,
+   "q1": 0.0202,
+   "q3": 0.075
+  },
+  "2047 gap/inner sidebearings": {
+   "median": 0.5522,
+   "n": 57,
+   "q1": 0.1664,
+   "q3": 0.7669
+  },
+  "2047 left - first left": {
+   "median": 0.0,
+   "n": 57,
+   "q1": 0.0,
+   "q3": 0.0
+  },
+  "2047 right side - last right side": {
+   "median": 0.0,
+   "n": 57,
+   "q1": -0.0035,
+   "q3": 0.0
+  },
+  "2048 advance - parts": {
+   "median": -0.023,
+   "n": 54,
+   "q1": -0.0662,
+   "q3": 0.0
+  },
+  "2048 gap/em": {
+   "median": 0.095,
+   "n": 54,
+   "q1": 0.0589,
+   "q3": 0.128
+  },
+  "2048 gap/inner sidebearings": {
+   "median": 0.7462,
+   "n": 54,
+   "q1": 0.5339,
+   "q3": 0.8515
+  },
+  "2048 left - first left": {
+   "median": 0.0,
+   "n": 54,
+   "q1": 0.0,
+   "q3": 0.0
+  },
+  "2048 right side - last right side": {
+   "median": 0.0,
+   "n": 54,
+   "q1": -0.0,
+   "q3": 0.0067
+  },
+  "2049 advance - parts": {
+   "median": -0.0339,
+   "n": 56,
+   "q1": -0.07,
+   "q3": -0.0
+  },
+  "2049 gap/em": {
+   "median": 0.0848,
+   "n": 56,
+   "q1": 0.056,
+   "q3": 0.114
+  },
+  "2049 gap/inner sidebearings": {
+   "median": 0.7103,
+   "n": 56,
+   "q1": 0.3776,
+   "q3": 0.8321
+  },
+  "2049 left - first left": {
+   "median": 0.0,
+   "n": 56,
+   "q1": 0.0,
+   "q3": 0.0076
+  },
+  "2049 right side - last right side": {
+   "median": 0.0,
+   "n": 56,
+   "q1": -0.0,
+   "q3": 0.0065
+  },
+  "2190 center y - turned center y": {
+   "median": 0.0,
+   "n": 225,
+   "q1": 0.0,
+   "q3": 0.0
+  },
+  "2190 ink width/turned width": {
+   "median": 1.0,
+   "n": 225,
+   "q1": 1.0,
+   "q3": 1.0
+  },
+  "2190 sidebearings/source's": {
+   "median": 1.0,
+   "n": 219,
+   "q1": 1.0,
+   "q3": 1.0
+  },
+  "2191 center y - turned center y": {
+   "median": 0.0015,
+   "n": 222,
+   "q1": -0.0005,
+   "q3": 0.0105
+  },
+  "2191 ink width/turned width": {
+   "median": 1.0,
+   "n": 222,
+   "q1": 1.0,
+   "q3": 1.0
+  },
+  "2191 sidebearings/source's": {
+   "median": 1.4476,
+   "n": 216,
+   "q1": 1.0,
+   "q3": 3.6909
+  },
+  "2193 center y - turned center y": {
+   "median": -0.0005,
+   "n": 222,
+   "q1": -0.006,
+   "q3": 0.0029
+  },
+  "2193 ink width/turned width": {
+   "median": 1.0,
+   "n": 222,
+   "q1": 1.0,
+   "q3": 1.0
+  },
+  "2193 sidebearings/source's": {
+   "median": 1.4476,
+   "n": 216,
+   "q1": 1.0,
+   "q3": 3.6909
+  },
+  "2197 center y - turned center y": {
+   "median": -0.0003,
+   "n": 123,
+   "q1": -0.009,
+   "q3": 0.002
+  },
+  "2197 ink width/turned width": {
+   "median": 0.6637,
+   "n": 123,
+   "q1": 0.6113,
+   "q3": 0.7379
+  },
+  "2197 sidebearings/source's": {
+   "median": 2.0552,
+   "n": 119,
+   "q1": 1.0105,
+   "q3": 3.3563
+  },
+  "25B2 center y - turned center y": {
+   "median": 0.0025,
+   "n": 120,
+   "q1": 0.0,
+   "q3": 0.02
+  },
+  "25B2 ink width/turned width": {
+   "median": 1.0,
+   "n": 120,
+   "q1": 1.0,
+   "q3": 1.0021
+  },
+  "25B2 sidebearings/source's": {
+   "median": 0.782,
+   "n": 119,
+   "q1": 0.4545,
+   "q3": 1.0
+  },
+  "25C0 center y - turned center y": {
+   "median": 0.0,
+   "n": 120,
+   "q1": -0.0,
+   "q3": 0.0
+  },
+  "25C0 ink width/turned width": {
+   "median": 1.0,
+   "n": 120,
+   "q1": 1.0,
+   "q3": 1.0
+  },
+  "25C0 sidebearings/source's": {
+   "median": 1.0,
+   "n": 119,
+   "q1": 1.0,
+   "q3": 1.0
+  },
+  "2E32 advance - source": {
+   "median": 0.0,
+   "n": 8,
+   "q1": 0.0,
+   "q3": 0.0
+  },
+  "2E32 drop/em": {
+   "median": 0.0049,
+   "n": 8,
+   "q1": 0.0,
+   "q3": 0.1385
+  },
+  "2E32 left - source right side": {
+   "median": 0.0,
+   "n": 8,
+   "q1": -0.0,
+   "q3": 0.0
+  },
+  "2E32 top - x-height": {
+   "median": -0.3776,
+   "n": 8,
+   "q1": -0.42,
+   "q3": -0.264
+  }
+ },
+ "rules": {
+  "dots": {
+   "013F": {
+    "dot_center": 0.5146,
+    "dot_left": -0.193,
+    "right_side": -0.034
+   },
+   "0140": {
+    "dot_center": 0.676,
+    "dot_left": -0.019,
+    "right_side": -0.0625
+   }
+  },
+  "middle_dot": 0.62,
+  "rows": {
+   "00AB": -0.0288,
+   "0149": -0.029,
+   "201C": 0.036,
+   "201E": 0.033,
+   "2026": null,
+   "2033": 0.031,
+   "2034": 0.006,
+   "203C": 0.1248,
+   "2047": 0.043,
+   "2048": 0.095,
+   "2049": 0.0848,
+   "letters": null
+  },
+  "turns": {
+   "00A1": {
+    "top_over_x_height": 0.01
+   },
+   "00BF": {
+    "top_over_x_height": 0.01
+   },
+   "2018": {
+    "drop": 0.0
+   },
+   "2190": {
+    "sides": 1.0
+   },
+   "2191": {
+    "sides": 1.4476
+   },
+   "2197": {
+    "sides": 2.0552
+   },
+   "25B2": {
+    "sides": 0.782
+   },
+   "25C0": {
+    "sides": 1.0
+   },
+   "2E32": {
+    "drop": 0.0049
+   }
+  }
+ },
+ "settings": {
+  "em_dash": 0.862,
+  "en_dash": 0.528,
+  "hair": 11,
+  "thin": 6
+ },
+ "settings_why": {
+  "em_dash": "the corpus's median em dash, 0.862 em (507 families)",
+  "en_dash": "the corpus's median en dash, 0.528 em (507 families)",
+  "hair": "1/11 em (the corpus's median 0.090 em)",
+  "thin": "1/6 em (Unicode: 1/5 or 1/6; the corpus's median 0.158 em)"
+ }
+}

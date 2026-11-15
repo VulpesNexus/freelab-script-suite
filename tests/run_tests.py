@@ -27,7 +27,9 @@ PY27_FILES = (
     "darkmode/freelab_dark_mode.py", "darkmode/freelab_dark_mode_settings.py", "tests/qtfakes.py",
     "tests/darkmode_tests.py", "kerning/freelab_auto_kerning.py", "kerning/freelab_kerning_check.py", "kerning/common_pairs.txt", "kerning/script_pairs.txt",
     "tests/kern_tests.py", "spacing/freelab_auto_spacing.py", "tests/spacing_tests.py",
-    "diacritics/freelab_diacritics.py", "diacritics/glyph_names.json", "features/freelab_feature_code.py",
+    "compose/freelab_glyph_compose.py", "compose/glyph_names.json", "features/freelab_feature_code.py",
+    "compose/freelab_glyph_generation.py", "compose/glyph_generation.json", "compose/glyph_generation_LICENSE",
+    "tests/generation_tests.py",
     "tests/glyphtools_tests.py",
     "cjk/freelab_cjk_spacing.py", "tests/cjk_tests.py", "tests/features_tests.py",
     "cjk/freelab_cjk_vertical.py", "cjk/vertical_model.json", "tests/cjk_vertical_tests.py",
@@ -52,7 +54,7 @@ PY27_SUITES = ("tests/darkmode_tests.py", "tests/kern_tests.py", "tests/spacing_
                "tests/cjk_tests.py", "tests/cjk_vertical_tests.py", "tests/glyphcodes_tests.py",
                "tests/features_tests.py", "tests/fontcheck_tests.py",
                "tests/compare_tests.py", "tests/proof_tests.py", "tests/tabs_tests.py",
-               "tests/alternates_tests.py", "tests/language_font_tests.py")
+               "tests/alternates_tests.py", "tests/language_font_tests.py", "tests/generation_tests.py")
 
 
 def run_py3() -> tuple[bool, list[str]]:

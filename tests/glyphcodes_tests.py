@@ -11,10 +11,10 @@ import unittest
 
 os.environ["FREELAB_NO_AUTOSTART"] = "1"
 HERE = os.path.dirname(os.path.abspath(__file__))
-for folder in ("kerning", "diacritics", "features"):
+for folder in ("kerning", "compose", "features"):
     sys.path.insert(0, os.path.join(HERE, os.pardir, folder))
 import freelab_auto_kerning as ak  # noqa: E402
-import freelab_diacritics as ac  # noqa: E402
+import freelab_glyph_compose as ac  # noqa: E402
 import freelab_alternates as fa  # noqa: E402
 
 
@@ -87,7 +87,7 @@ class SourceTests(unittest.TestCase):
     def test_no_character_map_from_the_first_code_point(self):
         checks = {
             ("features", "freelab_feature_code.py"): u"dict((g.name, g.unicode) for g in glyphs)",
-            ("diacritics", "freelab_diacritics.py"): u"dict((fg.unicode, fg.name) for fg in package.fgPackage.glyphs",
+            ("compose", "freelab_glyph_compose.py"): u"dict((fg.unicode, fg.name) for fg in package.fgPackage.glyphs",
             ("checks", "freelab_font_check.py"): u"[(u\"%s\" % g.name, g.unicode) for g in fgs]",
             ("cjk", "freelab_cjk_spacing.py"): u"dict((g.unicode, g.name)",
             ("cjk", "freelab_cjk_vertical.py"): u"dict((g.unicode, ",

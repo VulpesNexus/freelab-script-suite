@@ -214,7 +214,7 @@ LIMIT_SHOWN = 24  # glyphs named in the line saying the lists are limited; the o
 
 def limit_line(texts, reason=None, shown=LIMIT_SHOWN):
     """The line over the lists while they are limited to some glyphs: "Pairs with the 12 glyphs
-    Diacritics built: ..." (reason: what the caller did, "Diacritics built"), or "Pairs with these 12
+    Glyph Compose built: ..." (reason: what the caller did, "Glyph Compose built"), or "Pairs with these 12
     glyphs: ..."; texts are the glyphs' characters or names."""
     count = len(texts)
     listed = u" ".join(texts[:shown]) + (u" \N{HORIZONTAL ELLIPSIS}" if count > shown else u"")
@@ -509,7 +509,7 @@ values smaller than the size you set (unchecked: look at them first).<br>
 <b>Masters</b>: entries some masters kern and others do not, entries tightening in one master and
 loosening in another, and classes whose members differ between masters (a font with one master has
 nothing to compare).<br><br>
-<b>Opened from another script</b> (<i>Diacritics</i> after building or moving diacritics, <i>Auto Spacing</i>
+<b>Opened from another script</b> (<i>Glyph Compose</i> after building or moving diacritics, <i>Auto Spacing</i>
 after spacing): the lists hold only the pairs and entries with the glyphs it changed, as the line over
 them says; <i>Show all</i> lists the whole font's.<br><br>
 Each list is checked as its tab is first shown, and again after an undo or an edit in FontLab.
@@ -1388,7 +1388,7 @@ class KerningCheckDialog(object):
 def main(glyphs=None, reason=None, **options):
     """Kerning Check on the current font. Another script that changed glyphs (built them, moved their
     marks, spaced them) passes their names (or the glyphs) as glyphs, and what it did as reason
-    ("Diacritics built": "Pairs with the 12 glyphs Diacritics built: ..."): Collisions, Cleanup, and
+    ("Glyph Compose built": "Pairs with the 12 glyphs Glyph Compose built: ..."): Collisions, Cleanup, and
     Masters then list only the pairs and entries with those glyphs, until Show all is clicked."""
     if reason is None:  # (a caller naming it otherwise: why=, source=, ...)
         reason = next((value for value in options.values() if isinstance(value, (type(u""), str))), None)

@@ -1,4 +1,4 @@
-"""Tests of FreeLab's Diacritics (planning and placing marks) and feature code (ligatures and
+"""Tests of FreeLab's Glyph Compose (planning and placing marks) and feature code (ligatures and
 alternates that take turns). Valid Python 2.7 and Python 3; the feature parser's checks run where
 fontTools is installed."""
 
@@ -10,9 +10,9 @@ import unittest
 
 os.environ["FREELAB_NO_AUTOSTART"] = "1"
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, os.pardir, "diacritics"))
+sys.path.insert(0, os.path.join(HERE, os.pardir, "compose"))
 sys.path.insert(0, os.path.join(HERE, os.pardir, "features"))
-import freelab_diacritics as ac  # noqa: E402
+import freelab_glyph_compose as ac  # noqa: E402
 import freelab_feature_code as fc  # noqa: E402
 
 try:
@@ -864,6 +864,42 @@ class Stub(object):
         self.__dict__.update(values)
 
 
+class RenameTests(unittest.TestCase):
+    """Diacritics became Glyph Compose (2026-11-16): the choices saved under the old name carry over once,
+    and the feature code blocks the old name wrote are still FreeLab's."""
+
+    def test_settings_saved_by_diacritics_carry_over_once(self):
+        import shutil
+        import tempfile
+        folder = tempfile.mkdtemp()
+        try:
+            ak = Stub(state_dir=lambda: folder)
+            old = os.path.join(folder, "diacritics.json")
+            with open(old, "w") as handle:
+                handle.write('{"reference": "Noto Sans", "compact_diacritics": true}')
+            self.assertEqual(ac.read_settings(ak), {"reference": u"Noto Sans", "compact_diacritics": True})
+            self.assertFalse(os.path.exists(old), "read once: the old file goes")
+            self.assertTrue(os.path.exists(os.path.join(folder, "glyph_compose.json")))
+            ac.write_settings(ak, {"reference": u"Gentium Plus"})
+            with open(old, "w") as handle:  # (an old file come back: the new one wins)
+                handle.write('{"reference": "Noto Sans"}')
+            self.assertEqual(ac.read_settings(ak), {"reference": u"Gentium Plus"})
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
+        self.assertEqual(ac.read_settings(Stub(state_dir=lambda: os.path.join(HERE, "no-such-folder"))), {})
+
+    def test_a_block_written_by_diacritics_is_replaced(self):
+        old = (u"feature mark {\n# Mark Positioning\n# >>> FreeLab anchors (made by FreeLab Diacritics)\n"
+               u"  pos base A <anchor 300 700> mark @top;\n# <<< FreeLab anchors\n} mark;\n")
+        new = ac.freelab_feature("mark", old, [u"pos base B <anchor 310 700> mark @top;"])
+        self.assertNotIn(u"base A", new, "the old block taken out")
+        self.assertIn(u"# >>> FreeLab anchors (made by FreeLab Glyph Compose)", new)
+        self.assertEqual(new.count(u"# >>> FreeLab"), 1)
+        texts = ac.mark_texts([], {"mark": old})
+        self.assertIn("mark", texts, "nothing more to write: the old block still taken out")
+        self.assertNotIn(u"base A", texts["mark"])
+
+
 class ReferenceTests(unittest.TestCase):
     def test_a_family_whose_own_font_cannot_be_read_has_nothing(self):
         raw = {"font": None}
@@ -1460,10 +1496,10 @@ class EditorClickTests(unittest.TestCase):
         self.assertEqual((editor.went, editor.cursor), (False, "arrow"))
 
 
-# -- Diacritics: the owner's reports of 2026-11-13 ---------------------------------------------------
+# -- Glyph Compose: the owner's reports of 2026-11-13 ---------------------------------------------------
 
 def font_check():
-    """Font Check, as Diacritics loads it beside itself (its bundled font, vertical metrics, high-value list)."""
+    """Font Check, as Glyph Compose loads it beside itself (its bundled font, vertical metrics, high-value list)."""
     sys.path.insert(0, os.path.join(HERE, os.pardir, "checks"))
     import freelab_font_check
     return freelab_font_check
@@ -2085,7 +2121,7 @@ class ReferenceFontTests(unittest.TestCase):
     def test_font_check_registers_the_family(self):
         check = font_check()
         self.assertTrue(check.LIST_FAMILY and check.LIST_FAMILY == check.LIST_FAMILY.strip(), "a family name")
-        self.assertTrue(callable(check.register_list_font), "what Diacritics calls, without Font Check's window")
+        self.assertTrue(callable(check.register_list_font), "what Glyph Compose calls, without Font Check's window")
 
     def test_the_family_is_named_from_font_checks_constant_only(self):
         ak = Stub(load_sibling=lambda name, module: Stub(LIST_FAMILY=u"Renamed Sans"))
@@ -2098,7 +2134,7 @@ class ReferenceFontTests(unittest.TestCase):
         with open(ac.__file__.replace(".pyc", ".py"), "rb") as handle:
             source = handle.read().decode("utf-8")
         family = font_check().LIST_FAMILY
-        self.assertNotIn(family, source, "the family's name is never written in Diacritics: a rename reaches it")
+        self.assertNotIn(family, source, "the family's name is never written in Glyph Compose: a rename reaches it")
 
 
 class HandedOverTests(unittest.TestCase):
@@ -2542,7 +2578,7 @@ class ApplyResetTests(unittest.TestCase):
         self.assertIn(u"Placed the diacritics of 2 letters as on", dialog.lines[-1])
 
 
-# -- Diacritics: the owner's second round of 2026-11-13 ------------------------------------------------
+# -- Glyph Compose: the owner's second round of 2026-11-13 ------------------------------------------------
 
 try:
     from PIL import Image, ImageDraw, ImageFont  # noqa: F401
@@ -3210,6 +3246,46 @@ class WhatsThisTests(unittest.TestCase):
                 sys.modules["fontlab"] = saved[2]
         return dialog, made
 
+    def test_the_glyph_generation_tab(self):
+        """The window's two tabs, and Glyph generation's controls (made as its tab is first shown) each with
+        a What's This of its own; a tab whose module cannot be loaded says why instead."""
+        dialog, made = self.build()
+        self.assertEqual(ac.TOP_TABS, (u"Diacritics", u"Glyph generation"))
+        sys.path.insert(0, os.path.join(HERE, os.pardir, "compose"))
+        import freelab_glyph_generation as gg
+        core, gui, made = recording_qt()
+        later = []
+        core.QTimer = Stub(singleShot=lambda ms, slot: later.append(slot))  # (the list read as the tab is shown)
+
+        def load_sibling(file_name, module_name):
+            if module_name == ac.GENERATION_MODULE:
+                return gg
+            raise IOError(file_name)
+        dialog.ak.load_sibling = load_sibling
+        saved = ac._qt, gg._qt
+        try:
+            ac._qt = gg._qt = lambda: (core, gui)
+            dialog.switch_top_page(1)
+        finally:
+            ac._qt, gg._qt = saved
+        self.assertIsInstance(dialog.generation, gg.GenerationPage)
+        self.assertEqual(later, [dialog.generation.run], "its list read once the tab is up")
+        kinds = [w for w in made if type(w).__name__ in self.CONTROLS + ("QLabel",)]
+        self.assertGreaterEqual(len([w for w in kinds if type(w).__name__ in ("QSpinBox", "QDoubleSpinBox")]), 4)
+        for widget in kinds:
+            self.assertTrue(widget.whats and widget.whats.strip(), "%s %r" % (type(widget).__name__, widget.args[:1]))
+        buttons = [w.whats for w in made if type(w).__name__ == "QPushButton"]
+        self.assertEqual(len(set(buttons)), len(buttons))
+        labels = dict((w.args[0], w) for w in made if type(w).__name__ == "QLabel" and w.args)
+        self.assertEqual(labels[u"Thin space 1/"].whats, dialog.generation.spins["thin"].whats)
+        dialog, made = self.build()  # (a module that will not load: the tab says why, once)
+        try:
+            ac._qt = lambda: (core, gui)
+            dialog.switch_top_page(1)
+        finally:
+            ac._qt = saved[0]
+        self.assertIs(dialog.generation, False)
+
     def test_every_control_and_label_has_its_own(self):
         dialog, made = self.build()
         kinds = dict((kind, [w for w in made if type(w).__name__ == kind]) for kind in self.CONTROLS + ("QLabel",))
@@ -3517,6 +3593,8 @@ class FlLayer(object):
                 contour.points = [transform.point(x, y) for x, y in contour.points]
                 if self.font.how == "bake+reverse":
                     contour.reverse()
+        # (the advance mirrored too, as FontLab mirrors it: live 2026-11-16, 238 read back as -238)
+        self.advanceWidth = transform.point(self.advanceWidth, 0)[0] - transform.point(0, 0)[0]
 
 
 class FlGlyph(object):
@@ -3723,7 +3801,7 @@ class MirrorFixTests(unittest.TestCase):
         self.assertEqual(font.glyphs["oplain"].by_master["Regular"].shapes[1].transform.values, (1.0, 0.0, 0.0, 1.0, 250.0, 400.0),
                          "a glyph with nothing mirrored is not touched")
         self.assertEqual(len(dialog.steps), 1, "one step of the History")
-        self.assertEqual(dialog.steps[0][0], u"FreeLab Diacritics mirrored components")
+        self.assertEqual(dialog.steps[0][0], u"FreeLab Glyph Compose mirrored components")
         self.assertEqual(dialog.steps[0][1], ["mark.flipped", "mark.mirrored", "oflip", "oflip.alt", "omirror"])
         self.assertEqual(dialog.lines[0][0], "done")
         self.assertIn(u"Corrected the mirrored components of 3 glyphs (2 glyphs added, mirrored with their contours "
@@ -3738,6 +3816,9 @@ class MirrorFixTests(unittest.TestCase):
         self.assertEqual(shape.transform.values, (1.0, 0.0, 0.0, 1.0, 0.0, 0.0), "its outlines themselves were mirrored")
         self.assertEqual(sorted(shape.own[0].points), [(0.0, 0.0), (0.0, 200.0), (200.0, 0.0), (300.0, 200.0)],
                          "upside down about the middle of its ink: it stands where the mark does")
+        for helper in ("mark.flipped", "mark.mirrored"):
+            self.assertEqual(font.glyphs[helper].by_master["Regular"].advanceWidth,
+                             font.glyphs["mark"].by_master["Regular"].advanceWidth, "the source's advance, not mirrored")
         across = font.glyphs["mark.mirrored"].by_master["Regular"].shapes[0]
         self.assertEqual(sorted(across.own[0].points), [(0.0, 0.0), (100.0, 200.0), (300.0, 0.0), (300.0, 200.0)],
                          "left to right about the middle of its advance width")
@@ -3998,7 +4079,7 @@ class AlternateTests(unittest.TestCase):
             self.assertIsNone(fc.check_code(text, letters + ["x", "x.alt", "y"]))
 
 
-# -- Diacritics: the owner's report of 2026-11-14 ------------------------------------------------------
+# -- Glyph Compose: the owner's report of 2026-11-14 ------------------------------------------------------
 
 
 def editor_qt(size):
@@ -4626,7 +4707,7 @@ class RevealedTests(unittest.TestCase):
 class MainCodeReadTests(unittest.TestCase):
     def test_a_glyph_is_read_by_the_code_it_stands_for(self):
         # FontLab's unicode gives a compatibility or radical code first for a glyph encoded twice: the
-        # empty glyphs Diacritics would build again are found by the code they stand for
+        # empty glyphs Glyph Compose would build again are found by the code they stand for
         sys.path.insert(0, os.path.join(HERE, os.pardir, "kerning"))
         import freelab_auto_kerning as ak
 
@@ -4686,7 +4767,7 @@ class DiacriticsThemeTests(unittest.TestCase):
 
 
 class OwnerReportNovember15Tests(unittest.TestCase):
-    """The owner's Diacritics report of 2026-11-15, on Noto Sans: compacting by no more than needed, a
+    """The owner's Glyph Compose report of 2026-11-15, on Noto Sans: compacting by no more than needed, a
     letter's own descender not counted against its diacritics, the rows of glyphs placed by hand following
     what was set, the captions and sections, the check box beside the preview, and the Mark anchors tab's
     sample marks."""

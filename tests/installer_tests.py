@@ -98,7 +98,7 @@ class InstallerTests(unittest.TestCase):
         self.assertTrue((self.scripts / "FreeLab" / "class_model.json").exists(), "and its class model")
         self.assertTrue((self.scripts / "FreeLab" / "freelab_kerning_check.py").exists(), "Kerning Check beside it")
         self.assertTrue((self.scripts / "FreeLab" / "freelab_auto_spacing.py").exists(), "and Auto Spacing")
-        self.assertTrue((self.scripts / "FreeLab" / "freelab_diacritics.py").exists(), "and Diacritics")
+        self.assertTrue((self.scripts / "FreeLab" / "freelab_glyph_compose.py").exists(), "and Glyph Compose")
         self.assertTrue((self.scripts / "FreeLab" / "mark_model.json").exists(), "with its mark model")
         self.assertTrue((self.scripts / "FreeLab" / "glyph_names.json").exists(), "and Glyphs' glyph names")
         self.assertTrue((self.scripts / "FreeLab" / "GlyphData_LICENSE").exists(), "with their notice")
@@ -110,7 +110,7 @@ class InstallerTests(unittest.TestCase):
         self.assertTrue((self.scripts / "FreeLab" / "vertical_model.json").exists(), "with its vertical forms")
         self.assertEqual((self.scripts / "FreeLab" / "add_vertical_metrics.module").read_bytes(),
                          (ROOT / "tools" / "add_vertical_metrics.py").read_bytes(), "and its export step, no menu item")
-        self.assertTrue((self.scripts / "FreeLab" / "anchor_model.json").exists(), "and Diacritics' anchors")
+        self.assertTrue((self.scripts / "FreeLab" / "anchor_model.json").exists(), "and Glyph Compose's anchors")
         self.assertTrue((self.scripts / "FreeLab" / "ligature_model.json").exists(), "the corpus's ligatures")
         self.assertTrue((self.scripts / "FreeLab" / "reference_model.json").exists(), "and its references' spacing")
         before = self.read()
@@ -157,6 +157,29 @@ class InstallerTests(unittest.TestCase):
         untitled = [path.name for path in folder.glob("*.py")
                     if not path.read_bytes().lstrip(b"\xef\xbb\xbf").startswith(b"#FLM:")]
         self.assertEqual(untitled, [], "every installed .py names its menu entry")
+
+    def test_diacritics_gives_way_to_glyph_compose(self):
+        """Diacritics was renamed Glyph Compose: its installed script (and a compiled copy) go, so the menu
+        lists the tool once, and its Glyph generation tab goes in as a helper with its table and notice."""
+        self.write(MINE)
+        folder = self.scripts / "FreeLab"
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "freelab_diacritics.py").write_text("#FLM: Diacritics\n")
+        (folder / "freelab_diacritics.pyc").write_bytes(b"old")
+        code, out = self.run_installer()
+        self.assertEqual(code, 0, out)
+        self.assertFalse((folder / "freelab_diacritics.py").exists(), out)
+        self.assertFalse((folder / "freelab_diacritics.pyc").exists())
+        self.assertIn("Removed the retired", out)
+        self.assertTrue((folder / "freelab_glyph_compose.py").read_bytes().startswith(b"#FLM: Glyph Compose"))
+        self.assertEqual((folder / "freelab_glyph_generation.module").read_bytes(),
+                         (ROOT / "compose" / "freelab_glyph_generation.py").read_bytes())
+        self.assertFalse((folder / "freelab_glyph_generation.py").exists(), "a helper: no menu entry")
+        for name in ("glyph_generation.json", "glyph_generation_LICENSE"):
+            self.assertEqual((folder / name).read_bytes(), (ROOT / "compose" / name).read_bytes(), name)
+        code, out = self.run_installer("-Uninstall")
+        self.assertEqual(code, 0, out)
+        self.assertFalse((folder / "freelab_glyph_generation.module").exists())
 
     def test_the_font_under_its_earlier_names_is_removed(self):
         """Font Check's font was FreeLabAutonyms.ttf, then FreeLabLanguages.ttf, then one FreeLang.ttf,

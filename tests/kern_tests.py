@@ -696,7 +696,7 @@ class KerningUpgradeTests(unittest.TestCase):
         self.assertEqual(kc.compare_masters([("Regular", regular)]), [])
 
     def test_lists_limited_to_some_glyphs(self):
-        # after Diacritics built Tcaron (or moved its caron): only the pairs and entries with it
+        # after Glyph Compose built Tcaron (or moved its caron): only the pairs and entries with it
         k = fake_font({"T": (["T", "Tcaron"], "KernLeft")},
                       {(("T", True), ("o", False)): -90, (("V", False), ("a", False)): -60,
                        (("V", False), ("o", False)): -3, (("Tcaron", False), ("a", False)): -60,
@@ -736,8 +736,8 @@ class KerningUpgradeTests(unittest.TestCase):
         self.assertEqual(len(kc.compare_masters([("Regular", regular), ("Bold", bold)])), 4)
 
     def test_the_line_over_limited_lists(self):
-        self.assertEqual(kc.limit_line([u"L", u"l"], u"Diacritics built"), u"Pairs with the 2 glyphs Diacritics built: L l")
-        self.assertEqual(kc.limit_line([u"L"], u"Diacritics built"), u"Pairs with the glyph Diacritics built: L")
+        self.assertEqual(kc.limit_line([u"L", u"l"], u"Glyph Compose built"), u"Pairs with the 2 glyphs Glyph Compose built: L l")
+        self.assertEqual(kc.limit_line([u"L"], u"Glyph Compose built"), u"Pairs with the glyph Glyph Compose built: L")
         self.assertEqual(kc.limit_line([u"a", u"b", u"c"], None, shown=2), u"Pairs with these 3 glyphs: a b \N{HORIZONTAL ELLIPSIS}")
         self.assertEqual(kc.limit_line([u"a"]), u"Pairs with this glyph: a")
 
@@ -766,14 +766,14 @@ class KerningUpgradeTests(unittest.TestCase):
         if redirect is None:
             saved, sys.stdout = sys.stdout, out
             try:
-                kc.main(glyphs=["Ldot"], reason=u"Diacritics built")
-                kc.main(["Ldot"], why=u"Diacritics moved marks of")
+                kc.main(glyphs=["Ldot"], reason=u"Glyph Compose built")
+                kc.main(["Ldot"], why=u"Glyph Compose moved marks of")
             finally:
                 sys.stdout = saved
         else:
             with redirect(out):
-                kc.main(glyphs=["Ldot"], reason=u"Diacritics built")
-                kc.main(["Ldot"], why=u"Diacritics moved marks of")
+                kc.main(glyphs=["Ldot"], reason=u"Glyph Compose built")
+                kc.main(["Ldot"], why=u"Glyph Compose moved marks of")
         self.assertIn("FreeLab Kerning Check", out.getvalue(), "no Qt here: said so, nothing raised")
 
     def test_proof_text_names_each_glyph(self):
@@ -876,10 +876,10 @@ class BeforeChangesTests(unittest.TestCase):
 
     def test_an_undo_past_the_first_record_records_it_again(self):
         package = HistoryPackage(8)
-        ak.before_changes(self.fontlab, package, u"FreeLab Diacritics")
-        ak.notify_changed(self.fontlab, package, u"FreeLab Diacritics")
+        ak.before_changes(self.fontlab, package, u"FreeLab Glyph Compose")
+        ak.notify_changed(self.fontlab, package, u"FreeLab Glyph Compose")
         package.state = 0  # (undone twice: back where the font was opened)
-        self.assertEqual(ak.before_changes(self.fontlab, package, u"FreeLab Diacritics"), [package])
+        self.assertEqual(ak.before_changes(self.fontlab, package, u"FreeLab Glyph Compose"), [package])
 
     def test_glyphs_without_a_state_are_recorded_with_the_font(self):
         package, glyphs = HistoryPackage(9), [HistoryObject("A"), HistoryObject("B")]
@@ -961,9 +961,9 @@ class BeforeChangesTests(unittest.TestCase):
             raise RuntimeError("no redraw")
         glyph.update = broken
         self.items.notifyPackageContentUpdated = lambda key: broken()
-        ak.before_changes(self.fontlab, package, u"FreeLab Diacritics", [glyph])
+        ak.before_changes(self.fontlab, package, u"FreeLab Glyph Compose", [glyph])
         package.glyphsCount += 1
-        status = ak.notify_changed(self.fontlab, package, u"FreeLab Diacritics", [glyph])
+        status = ak.notify_changed(self.fontlab, package, u"FreeLab Glyph Compose", [glyph])
         self.assertTrue(status.ok)
         self.assertEqual(status.message(), u"")
 
@@ -972,7 +972,7 @@ class BeforeChangesTests(unittest.TestCase):
         the font's own state (recorded when FontLab opens a font: live, they went on Undo)."""
         root = os.path.join(HERE, os.pardir)
         expected = {"spacing/freelab_auto_spacing.py": 1, "cjk/freelab_cjk_spacing.py": 1,
-                    "diacritics/freelab_diacritics.py": 1, "features/freelab_feature_code.py": 1,
+                    "compose/freelab_glyph_compose.py": 1, "features/freelab_feature_code.py": 1,
                     "checks/freelab_font_check.py": 1,
                     "kerning/freelab_auto_kerning.py": 2}  # (flag_glyphs's, and begin_write's own before_changes)
         for path, count in expected.items():
@@ -984,10 +984,10 @@ class BeforeChangesTests(unittest.TestCase):
 
 class MenuOrderTests(unittest.TestCase):
     def test_working_order_then_dark_mode_then_mcp(self):
-        texts = ["Diacritics", "Auto Kerning", "Auto Spacing", "CJK Spacing", "Toggle Dark Mode", "Dark Mode Settings",
+        texts = ["Glyph Compose", "Auto Kerning", "Auto Spacing", "CJK Spacing", "Toggle Dark Mode", "Dark Mode Settings",
                  "Feature Code", "Kerning Check", "Start Listener", "Something New"]
         self.assertEqual(ak.menu_order(texts),
-                         ["Diacritics", "Auto Spacing", "CJK Spacing", "Auto Kerning", "Kerning Check", "Feature Code", None,
+                         ["Glyph Compose", "Auto Spacing", "CJK Spacing", "Auto Kerning", "Kerning Check", "Feature Code", None,
                           "Toggle Dark Mode", "Dark Mode Settings", None, "Start Listener", None, "Something New"])
         self.assertEqual(ak.menu_order(["Auto Kerning"]), ["Auto Kerning"], "no separator around a lone group")
 
@@ -1243,7 +1243,7 @@ class WindowTests(unittest.TestCase):
         self.assertEqual(second.dialog.pos, (40 - 500, 50), "where it stood, around the same center")
         self.assertEqual((second.dialog.width, second.dialog.height), (1400, 300), "at its own size")
         second.dialog.visible = True
-        third = self.open("Diacritics")
+        third = self.open("Glyph Compose")
         self.assertEqual((third.dialog.width, third.dialog.height), (400, 300), "back to the others' size after Font Check")
         self.assertEqual(third.dialog.pos, (40, 50), "shrunk around its center again")
         self.assertTrue(other.dialog.visible, "the other font's window stays")
@@ -1270,7 +1270,7 @@ class WindowTests(unittest.TestCase):
         first = self.open("Proof")
         self.assertEqual((first.dialog.width, first.dialog.height), (400, 300), "an earlier session's size is not read")
         first.dialog.resize(1200, 900)  # the owner drags its corner
-        second = self.open("Diacritics")
+        second = self.open("Glyph Compose")
         self.assertEqual((second.dialog.width, second.dialog.height), (1200, 900))
         self.workspace.currentPackage = self.two
         other = self.open("Font Check")
@@ -1286,7 +1286,7 @@ class WindowTests(unittest.TestCase):
         first = self.open("Proof")
         first.dialog.pos, first.dialog.minimized = (-32000, -32000), True
         first.dialog.resize(160, 28)
-        second = self.open("Diacritics")
+        second = self.open("Glyph Compose")
         self.assertEqual(second.dialog.pos, (0, 0))
         self.assertEqual((second.dialog.width, second.dialog.height), (400, 300))
         self.assertIsNone(sys._freelab_windows.get("size"))
@@ -1303,8 +1303,8 @@ class WindowTests(unittest.TestCase):
         proof = self.open("Proof")
         filters[5] = "Proof's filter"
         proof.dialog.setProperty(ak.WINDOW_FILTER_PROP, 5)
-        diacritics = self.Tool(self.workspace, u"FreeLab Diacritics")  # (from FontLab's menu: in Proof's place)
-        ak.take_window("Diacritics", diacritics)
+        diacritics = self.Tool(self.workspace, u"FreeLab Glyph Compose")  # (from FontLab's menu: in Proof's place)
+        ak.take_window("Glyph Compose", diacritics)
         diacritics.dialog.show()
         self.assertFalse(proof.dialog.visible)
         self.assertEqual(sys._freelab_windows["kept"], [proof, diacritics], "not while its own events run")
@@ -1326,7 +1326,7 @@ class WindowTests(unittest.TestCase):
         window = check.dialog  # (the tool's object is emptied once its window is let go: let_go)
         self.workspace.currentPackage = self.one  # FontLab shows the other font; the click is in Two's window
         self.active = check.dialog
-        diacritics = self.open("Diacritics")
+        diacritics = self.open("Glyph Compose")
         self.assertIs(diacritics.current_font(), self.two)
         self.assertFalse(window.visible, "its window's tool gave way")
         self.active = None
@@ -1340,7 +1340,7 @@ class WindowTests(unittest.TestCase):
         font_id = check.font_id
         self.workspace.currentPackage = self.one
         sys._freelab_windows["hint"] = (font_id, ak.time.time())
-        self.assertIs(self.open("Diacritics").current_font(), self.two)
+        self.assertIs(self.open("Glyph Compose").current_font(), self.two)
         self.assertIsNone(sys._freelab_windows["hint"], "used once")
         sys._freelab_windows["hint"] = (font_id, ak.time.time() - 60)
         self.assertIs(self.open("Proof").current_font(), self.one, "an old one counts no more")
@@ -1360,7 +1360,7 @@ class WindowTests(unittest.TestCase):
         # (it moved to the font FontLab showed, which could leave two windows on one font)
         proof = self.open("Proof")
         self.workspace.currentPackage = self.two
-        other = self.open("Diacritics")
+        other = self.open("Glyph Compose")
         window, other_window = proof.dialog, other.dialog
         self.workspace.fonts = [self.two]  # One closed
         self.assertIsNone(proof.current_font(), "never another font in its place, even before it closes")
@@ -1373,7 +1373,7 @@ class WindowTests(unittest.TestCase):
         self.assertTrue(getattr(proof, ak.RELEASED, False), "let go once closed")
         self.assertEqual(sys._freelab_windows["fonts"], {self.two.id: other})
         self.assertEqual(ak.fonts_tick(self.workspace), [], "nothing more to do")
-        self.assertIsNone(self.open("Diacritics"), "Two's window is still its only one")
+        self.assertIsNone(self.open("Glyph Compose"), "Two's window is still its only one")
 
     def test_a_tools_window_does_not_keep_fontlab_running(self):
         # A window of its own counted as one of FontLab's main windows: left open, FontLab kept running
@@ -1398,7 +1398,7 @@ class WindowTests(unittest.TestCase):
         self.assertNotIn(None, sys._freelab_windows["fonts"], "no longer listed under no font")
         self.assertIsNone(self.open("Proof"), "it is that font's window: brought forward, not opened twice")
         window = proof.dialog
-        diacritics = self.open("Diacritics")
+        diacritics = self.open("Glyph Compose")
         self.assertFalse(window.visible, "the next tool takes its place")
         self.assertTrue(diacritics.dialog.visible)
 
@@ -1407,7 +1407,7 @@ class WindowTests(unittest.TestCase):
         # window is no longer the active one) replaces that window, never the other
         one = self.open("Proof")
         self.workspace.currentPackage = self.two
-        other = self.open("Diacritics")
+        other = self.open("Glyph Compose")
         one_window, other_window = one.dialog, other.dialog
         self.active = one.dialog  # its tools button clicked, while FontLab shows Two
         check = self.open("Font Check")
@@ -1426,7 +1426,7 @@ class WindowTests(unittest.TestCase):
     def test_a_size_qt_or_the_logs_grip_gives_is_not_a_size_given_by_hand(self):
         first = self.open("Proof", laid_out=(520, 360))  # Qt grew it to its layout as it showed it
         window = first.dialog
-        second = self.open("Diacritics")
+        second = self.open("Glyph Compose")
         self.assertFalse(window.visible)
         self.assertIsNone(sys._freelab_windows.get("size"), "measured once shown: nothing given by hand")
         self.assertEqual((second.dialog.width, second.dialog.height), (400, 300))
@@ -1525,7 +1525,7 @@ class WindowTests(unittest.TestCase):
         self.workspace.fonts, self.workspace.currentPackage = [self.one, self.two], self.two  # two opened at once
         self.assertEqual(ak.fonts_tick(self.workspace), [proof])
         self.assertEqual(proof.font_id, self.two.id, "the one FontLab shows")
-        busy = self.open("Diacritics")  # (on Two too: it takes the window's place)
+        busy = self.open("Glyph Compose")  # (on Two too: it takes the window's place)
         window = busy.dialog
         self.workspace.fonts, self.workspace.currentPackage = [self.one], self.one  # Two closed
         busy.busy = True
@@ -1619,7 +1619,7 @@ class WindowTests(unittest.TestCase):
         self.addCleanup(restore)
         own_timer = proof.history_timer = Timer()
         proof.timers = [Timer()]
-        part = type("Page", (object,), {})()  # (a part the tool holds: Diacritics' anchors page)
+        part = type("Page", (object,), {})()  # (a part the tool holds: Glyph Compose's anchors page)
         part.redraw_timer, part.owner = Timer(), proof
         proof.anchors = part
         shared = type(sys)("shared")  # (the shared module a tool holds: its timers serve every window)
@@ -1780,9 +1780,9 @@ class WindowTests(unittest.TestCase):
         self.assertIsNone(ak.show_in_glyph_window(sys.modules["fontlab"], u"/A"))
 
     def test_the_tools_follow_the_order_of_the_work(self):
-        self.assertEqual(ak.FONT_TOOLS[0], "Diacritics")
+        self.assertEqual(ak.FONT_TOOLS[0], "Glyph Compose")
         self.assertEqual(ak.FONT_TOOLS[-2:], ("Font Check", "Proof"), "checked before it is proofed")
-        self.assertEqual(ak.tool_neighbors("Diacritics"), (None, "Auto Spacing"))
+        self.assertEqual(ak.tool_neighbors("Glyph Compose"), (None, "Auto Spacing"))
         self.assertEqual(ak.tool_neighbors("Kerning Check"), ("Auto Kerning", "Feature Code"))
         self.assertEqual(ak.tool_neighbors("Proof"), ("Font Check", None))
         self.assertEqual(ak.tool_neighbors("No Such Tool"), (None, None))
@@ -1992,7 +1992,7 @@ class ThemeTests(unittest.TestCase):
         self.assertIsNone(plain.brushes[0], "an item's own palette colors are left to Qt")
 
     def test_a_lists_items_redrawn_are_no_edit(self):
-        # Diacritics dropped its revealed rows, and Feature Code wrote its code again row by row, on the
+        # Glyph Compose dropped its revealed rows, and Feature Code wrote its code again row by row, on the
         # itemChanged each redrawn item sent (review)
         fakes, edits = ThemeFakes, []
 
@@ -2705,7 +2705,7 @@ class TableLayoutTests(unittest.TestCase):
         exempt = {u"freelab_font_check.py": 1}  # (its clipped glyphs: a strip of tiles, not rows)
         root = os.path.join(HERE, os.pardir)
         checked = 0
-        for folder in ("kerning", "spacing", "diacritics", "features", "cjk", "compare", "checks", "proof"):
+        for folder in ("kerning", "spacing", "compose", "features", "cjk", "compare", "checks", "proof"):
             for name in os.listdir(os.path.join(root, folder)):
                 if not name.endswith(u".py"):
                     continue
@@ -3174,7 +3174,7 @@ class SingleChoiceTests(unittest.TestCase):
         self.assertTrue(combo.property(ak.LEAVE_ALONE_PROP))
 
     def test_every_dropdown_opens_below_its_box(self):
-        # The owner: "Some open upwards still even when there's room below" (Diacritics' Character set on
+        # The owner: "Some open upwards still even when there's room below" (Glyph Compose's Character set on
         # All, its last row, opened upward over the box)
         class Qt(object):
             WA_TransparentForMouseEvents = NoFocus = StrongFocus = 0

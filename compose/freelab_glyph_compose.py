@@ -1,6 +1,8 @@
-#FLM: Diacritics
+#FLM: Glyph Compose
 # -*- coding: utf-8 -*-
-"""FreeLab Diacritics, from FontLab's Scripts menu.
+"""FreeLab Glyph Compose, from FontLab's Scripts menu (Diacritics until 2026-11-16).
+
+Its Diacritics tab (this module):
 
 Builds the letters with diacritics a font lacks (Latin, Greek, Cyrillic, and the voiced kana: ga is ka
 with a dakuten), as glyphs of components (the base letter and its marks), in every master. Shows each one before anything is made, lets each
@@ -2057,7 +2059,7 @@ def left_out_given(given, recipes, font, absent_scripts=()):
     """[(reason, [characters])] of the characters handed over (Font Check's) that the list has no row
     for, in LEFT_OUT_ORDER: "have" (the font has its glyph already: built since, or there all along),
     "script" (a script the font has no letters of), "unbuildable" (no letter with marks, and no
-    combining mark, that Diacritics builds), "several" (not one character)."""
+    combining mark, that Glyph Compose builds), "several" (not one character)."""
     listed_chars = set(r.char for r in recipes)
     found = dict((reason, []) for reason in LEFT_OUT_ORDER)
     for item in given:
@@ -2332,7 +2334,10 @@ def carried_adjust(source, index, target, at, ink_of, placement, metrics=None):
 
 ANCHOR_MODEL_FILE = "anchor_model.json"
 ANCHOR_BLOCK = "anchors"
-ANCHOR_BEGIN, ANCHOR_END = u"# >>> FreeLab %s (made by FreeLab Diacritics)", u"# <<< FreeLab %s"
+ANCHOR_BEGIN, ANCHOR_END = u"# >>> FreeLab %s (made by FreeLab Glyph Compose)", u"# <<< FreeLab %s"
+# The opening line blocks had when the tool was called Diacritics: such a block is FreeLab's too, replaced
+# by the next write (fonts keep it until then)
+OLD_ANCHOR_BEGINS = (u"# >>> FreeLab %s (made by FreeLab Diacritics)",)
 FONTLAB_AUTO, FONTLAB_HANDED = u"#> feature", u"#/> feature"
 MARK_FEATURES = {"mark": "Mark Positioning", "mkmk": "Mark to Mark Positioning",
                  "ccmp": "Glyph Composition/Decomposition", "pres": "Pre-base Substitutions"}
@@ -3028,10 +3033,11 @@ def freelab_feature(tag, old, lines, block=ANCHOR_BLOCK, titles=MARK_FEATURES):
     taken out, the rest kept, FontLab's automatic block handed back ("#/> feature")."""
     import re
     begin, end = ANCHOR_BEGIN % block, ANCHOR_END % block
+    begins = [begin] + [old_begin % block for old_begin in OLD_ANCHOR_BEGINS]
     kept, inside = [], False
     for line in (old or u"").splitlines():
         stripped = line.strip()
-        if stripped == begin:
+        if stripped in begins:
             inside = True
             continue
         if stripped == end:
@@ -3067,7 +3073,8 @@ def mark_texts(glyphs, old_texts):
     new = {}
     for tag in CODE_FEATURES:
         old = old_texts.get(tag)
-        if lines.get(tag) or (ANCHOR_BEGIN % ANCHOR_BLOCK) in (old or u""):
+        if lines.get(tag) or any((opening % ANCHOR_BLOCK) in (old or u"")
+                                 for opening in (ANCHOR_BEGIN,) + OLD_ANCHOR_BEGINS):
             new[tag] = freelab_feature(tag, old, lines.get(tag, []))
     return new
 
@@ -3419,6 +3426,28 @@ def mirror_outlines(layer, mirror, before, wanted):
     raise MirrorError(u"FontLab did not mirror its outlines")
 
 
+HELD_GLYPHS = "_freelab_made_glyphs"  # on sys: {font's id: [every flGlyph Python made for it]}
+
+
+def new_glyph(fontlab, package, name):
+    """A new flGlyph of that name, held for the rest of the session (sys.HELD_GLYPHS, per font): two
+    FontLab crashes on closing a font (2026-11-16) found a glyph gone from the font's list of glyph
+    objects, and one suspect is PythonQt deleting the Python-made flGlyph once nothing held it while
+    FontLab kept it. Held until the cause is known; the font is added to by the caller (addGlyph)."""
+    new = fontlab.flGlyph()
+    new.name = name
+    try:
+        key = package.fgPackage.id
+    except Exception:
+        key = None
+    held = getattr(sys, HELD_GLYPHS, None)
+    if held is None:
+        held = {}
+        setattr(sys, HELD_GLYPHS, held)
+    held.setdefault(key, []).append(new)
+    return new
+
+
 def make_corrected(fontlab, ak, package, masters, source, axis, name):
     """source mirrored along axis into a new glyph of that name, in every master it is drawn in, each
     contour then set to run as the source's does (a mirror alone leaves it reversed: that is the fault
@@ -3426,8 +3455,7 @@ def make_corrected(fontlab, ak, package, masters, source, axis, name):
     origin = font_glyph(package, source)
     if origin is None:
         raise MirrorError(u"%s is not in the font" % source)
-    new = fontlab.flGlyph()
-    new.name = name
+    new = new_glyph(fontlab, package, name)
     package.addGlyph(new)  # (FontLab adds a copy, without layers: they are made on the font's glyph)
     glyph = font_glyph(package, name)
     if glyph is None:
@@ -3444,6 +3472,9 @@ def make_corrected(fontlab, ak, package, masters, source, axis, name):
                 raise MirrorError(u"%s is itself made of components in master %s: decompose it first" % (source, master))
             mirror = mirror_of(axis, layer_from.advanceWidth, before[1], before[3])
             layer = glyph.getLayerByName(master, True)
+            # (made through setGlyphComponents first, with no component: a new glyph whose layer was only
+            # made by getLayerByName crashed FontLab when its fgGlyph was read, live 2026-11-16)
+            layer.setGlyphComponents([], float(layer_from.advanceWidth), package, False)
             for shape in shapes:
                 layer.addShape(shape_copy(shape))
             layer.advanceWidth = float(layer_from.advanceWidth)
@@ -3460,6 +3491,11 @@ def make_corrected(fontlab, ak, package, masters, source, axis, name):
                         raise MirrorError(u"FontLab did not reverse a contour of %s" % name)
             if not same_points(layer_points(layer), wanted):
                 raise MirrorError(u"the outlines of %s moved when its contours were reversed" % name)
+            # The source's advance, set again: the layer's applyTransform mirrored it too (live 2026-11-16,
+            # Varela Round's quoteright: 238 read back as -238)
+            layer.advanceWidth = float(layer_from.advanceWidth)
+            if abs(float(layer.advanceWidth) - float(layer_from.advanceWidth)) > 0.5:
+                raise MirrorError(u"FontLab did not keep the advance of %s" % name)
             drawn += 1
         if not drawn:
             raise MirrorError(u"%s has no outline" % source)
@@ -3585,10 +3621,14 @@ def component_parts(layer):
     return parts or None
 
 
-HELP = u"""<b>FreeLab Diacritics</b><br>
-Builds the letters with diacritics this font lacks (Latin, Greek, Cyrillic, and the voiced kana) from its
-letters and marks, as glyphs of components, placing each diacritic as the font's own accented glyphs place theirs (no
-anchors needed). Nothing is made until you click <i>Build checked glyphs</i>.<br><br>
+HELP = u"""<b>FreeLab Glyph Compose</b><br>
+Builds the glyphs this font lacks from the glyphs it has. Two tabs: <i>Diacritics</i> (the letters with
+diacritics, and the anchors of scripts whose marks attach) and <i>Glyph generation</i> (spaces, dashes,
+punctuation, look-alike letters, ligature letters, fractions, and arrows). Nothing is made until you click a
+tab's <i>Build</i> button.<br><br>
+<b>Diacritics</b> builds the letters with diacritics this font lacks (Latin, Greek, Cyrillic, and the voiced
+kana) from its letters and marks, as glyphs of components, placing each diacritic as the font's own accented
+glyphs place theirs (no anchors needed).<br>
 <b>The list</b>: each glyph that can be built, drawn as it would be, with the glyphs it is
 built from. Capitals take a mark's .case form where the font has one; i and j take their dotless
 forms under a mark above. A mark the font lacks is borrowed (a dot below from the dot accent) or
@@ -3616,11 +3656,15 @@ high-value glyphs</i> checks those <i>Font Check</i> lists as completing languag
 <b>Reference</b>: the character in another font, to compare: {reference} at first,
 or one you pick (its entry at the top of the list takes the pick back).<br>
 <b>Mirrored components</b>: a component mirrored one way has its contours reversed, and shows a hole where it
-overlaps another part. Diacritics builds none; <i>Correct mirrored components</i> sets right those the listed
+overlaps another part. Glyph Compose builds none; <i>Correct mirrored components</i> sets right those the listed
 glyphs of the font have.<br>
 <i>Restore suggestions</i> puts every check and every diacritic back as the list first came.<br>
 <b>Masters</b>: each glyph is built in every master, each measured on its own; diacritics moved by hand
 move by as much in every master.<br><br>
+<b>Glyph generation</b> lists the characters the font lacks that it can make of glyphs it has: each with
+its recipe, a picture, and how sure the recipe is (<i>exact</i>: no design in it; <i>accepted</i>: how
+fonts commonly build it; <i>starting point</i>: a draft to draw over, never a finished glyph). Checked
+rows are built in every master as one step of the History.<br><br>
 Click this help's <i>?</i> button, then any control, for what it does."""
 
 LINES_HELP = (u"The faint dashed lines are the font's lines, named at one end (equal ones share a line). A limit "
@@ -3628,6 +3672,15 @@ LINES_HELP = (u"The faint dashed lines are the font's lines, named at one end (e
               u"the hhea values, and past the room of a 120% line the glyph meets the next line; a limit a diacritic "
               u"crosses turns amber. The font's ascender and descender and its typo values are reference lines: "
               u"drawn, never amber.")
+TOP_TABS = (u"Diacritics", u"Glyph generation")
+TOP_TABS_HELP = (u"<i>Diacritics</i> builds the letters with diacritics the font lacks, and places the anchors of "
+                 u"scripts whose marks attach. <i>Glyph generation</i> builds other glyphs the font lacks from the "
+                 u"glyphs it has: spaces, dashes, punctuation, look-alike letters, ligature letters, fractions, "
+                 u"and arrows.")
+TOP_TAB_HELPS = (u"Letters with diacritics, and mark anchors.",
+                 u"Spaces, dashes, punctuation, look-alike letters, ligature letters, fractions, and arrows, made of "
+                 u"the glyphs the font has.")
+GENERATION_FILE, GENERATION_MODULE = "freelab_glyph_generation.py", "freelab_glyph_generation"  # (its tab)
 TABS_HELP = (u"<i>Letters with diacritics</i> builds the letters the font lacks from its letters and marks. "
              u"<i>Mark anchors</i> places anchors, and writes the mark features, for scripts whose marks are "
              u"attached instead.")
@@ -3704,11 +3757,13 @@ def bundled_family_text(ak):
     return u"FreeLab's own font"
 
 
+TOOL_TITLE = "Glyph Compose"  # its entry in Scripts > FreeLab, and its name in the tools button
 EDITOR_HEIGHT = 300  # pixels, the editor's least height
 STRIP_HEIGHT = 34  # pixels, the strip of letters with the same diacritic
 REFERENCE_WIDTH = 170  # pixels, the reference's column
 HANDLE = 4  # half the side of a frame's handle, in pixels
-SETTINGS_FILE = "diacritics.json"  # in FreeLab's state folder: the reference font chosen
+SETTINGS_FILE = "glyph_compose.json"  # in FreeLab's state folder: the reference font chosen, and the like
+OLD_SETTINGS_FILES = ("diacritics.json",)  # the same settings under the tool's earlier name: read once, then gone
 NEIGHBOR_ALPHA = 110  # the letters beside the edited glyph, dimmed
 # Families known for many Latin, Greek, and Cyrillic letters: the reference is the installed one with
 # the most of the listed characters (all installed families would take minutes to look through).
@@ -3722,14 +3777,36 @@ def settings_path(ak):
 
 
 def read_settings(ak):
+    """The window's settings; where there are none yet, those saved under the tool's earlier name
+    (OLD_SETTINGS_FILES), moved to the new file once and the old file removed, so that the choices made
+    in Diacritics (its reference font, Compact diacritics) carry over."""
     import io
     import json
-    try:
-        with io.open(settings_path(ak), encoding="utf-8") as handle:
-            data = json.load(handle)
-        return data if isinstance(data, dict) else {}
-    except (IOError, OSError, ValueError):
-        return {}
+
+    def read(path):
+        try:
+            with io.open(path, encoding="utf-8") as handle:
+                data = json.load(handle)
+            return data if isinstance(data, dict) else {}
+        except (IOError, OSError, ValueError):
+            return None
+
+    data = read(settings_path(ak))
+    if data is not None:
+        return data
+    for name in OLD_SETTINGS_FILES:
+        old = os.path.join(ak.state_dir(), name)
+        data = read(old)
+        if data is None:
+            continue
+        write_settings(ak, data)
+        if read(settings_path(ak)) == data:  # (the old file goes only once the new one holds the same)
+            try:
+                os.remove(old)
+            except OSError:
+                pass
+        return data
+    return {}
 
 
 def write_settings(ak, data):
@@ -4409,7 +4486,7 @@ def make_editor(owner):
                 self.drag = self.held = None
 
         def mouseDoubleClickEvent(self, event):
-            """The glyph opened in a Glyph window (Diacritics: the built glyph, else its letter)."""
+            """The glyph opened in a Glyph window (Letters with diacritics: the built glyph, else its letter)."""
             try:
                 if self.went:  # its first click went to a neighbor's row: the second opens nothing there
                     self.went = False
@@ -5471,7 +5548,7 @@ class AnchorPage(object):
         status = None
         try:
             if wrote:  # (a write of nothing makes no History step, which the watch would read as FontLab's)
-                status = self.ak.notify_changed(self.fontlab, package, u"FreeLab Diacritics anchors", touched)
+                status = self.ak.notify_changed(self.fontlab, package, u"FreeLab Glyph Compose anchors", touched)
         finally:
             self.owner.end_write(package, wrote)
         if wrote:
@@ -5501,17 +5578,41 @@ class AccentsDialog(object):
         ak = self.ak = load_auto_kerning()
         main = ak.AutoKerningDialog.main_window()
         dialog = self.dialog = QtGui.QDialog(main) if main is not None else QtGui.QDialog()
-        dialog.setWindowTitle("FreeLab Diacritics")
+        dialog.setWindowTitle("FreeLab Glyph Compose")
         dialog.setWhatsThis(HELP.replace(u"{reference}", bundled_family_text(ak)))
         self.ak.size_dialog(dialog)
         outer = QtGui.QVBoxLayout(dialog)
-        # A tab bar over plain pages (a QTabWidget's themed page frames its buttons in light colors in dark mode)
+        # Tab bars over plain pages (a QTabWidget's themed page frames its buttons in light colors in dark
+        # mode): the window's two (Diacritics, Glyph generation), and Diacritics' own two under the first
+        self.top_tabs = QtGui.QTabBar()
+        self.top_tabs.setExpanding(False)
+        self.top_tabs.setWhatsThis(TOP_TABS_HELP)
+        for label in TOP_TABS:
+            self.top_tabs.addTab(label)
+        try:
+            for index, text in enumerate(TOP_TAB_HELPS):
+                self.top_tabs.setTabToolTip(index, text)
+                self.top_tabs.setTabWhatsThis(index, text)
+        except Exception:
+            pass
+        outer.addWidget(self.top_tabs)
+        self.top_pages = QtGui.QStackedWidget()
+        outer.addWidget(self.top_pages, 1)
+        diacritics_page = QtGui.QWidget()
+        diacritics_layout = QtGui.QVBoxLayout(diacritics_page)
+        diacritics_layout.setContentsMargins(0, 0, 0, 0)
+        self.top_pages.addWidget(diacritics_page)
+        self.generation_page = QtGui.QWidget()  # (its tab's widgets made as it is first shown: generation_tab)
+        self.generation_layout = QtGui.QVBoxLayout(self.generation_page)
+        self.generation_layout.setContentsMargins(0, 0, 0, 0)
+        self.top_pages.addWidget(self.generation_page)
+        self.generation = None
         self.tabs = QtGui.QTabBar()
         self.tabs.setExpanding(False)
         self.tabs.setWhatsThis(TABS_HELP)
-        outer.addWidget(self.tabs)
+        diacritics_layout.addWidget(self.tabs)
         self.pages = QtGui.QStackedWidget()
-        outer.addWidget(self.pages, 1)
+        diacritics_layout.addWidget(self.pages, 1)
         letters_page = QtGui.QWidget()
         layout = QtGui.QVBoxLayout(letters_page)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -5737,6 +5838,7 @@ class AccentsDialog(object):
         outer.addLayout(closing)
         self.anchors_read = False
         self.tabs.connect("currentChanged(int)", self.switch_page)
+        self.top_tabs.connect("currentChanged(int)", self.switch_top_page)
         self.set_box.connect("currentIndexChanged(int)", lambda index: self.run())
         self.existing_box.connect("toggled(bool)", lambda on: self.run())
         self.compact_box.connect("toggled(bool)", lambda on: self.compact_toggled())
@@ -5778,7 +5880,7 @@ class AccentsDialog(object):
         except Exception as exc:  # (the dialog opens all the same: references fall back as they do)
             self.log.add(u"The reference font's list could not be made: %s" % ak.html(exc), "error")
         self.model = load_model()
-        ak.add_tools_button(dialog, "Diacritics", getattr(self, "log", None))  # (the other font tools, a click away)
+        ak.add_tools_button(dialog, TOOL_TITLE, getattr(self, "log", None))  # (the other font tools, a click away)
         ak.plain_buttons(dialog)
         try:  # the check boxes drawn plain to see in either palette (the lists' pictures stay unmapped)
             fc = ak.load_sibling("freelab_feature_code.py", "freelab_feature_code")
@@ -6535,7 +6637,7 @@ class AccentsDialog(object):
                 touched = [glyph for glyph in touched if u"%s" % getattr(glyph, "name", u"") not in unused]
                 made = [name for name in made if name in used]
                 if touched:
-                    status = self.ak.notify_changed(self.fontlab, package, u"FreeLab Diacritics mirrored components",
+                    status = self.ak.notify_changed(self.fontlab, package, u"FreeLab Glyph Compose mirrored components",
                                                     touched)
             finally:
                 self.end_write(package, bool(touched))
@@ -6944,6 +7046,26 @@ class AccentsDialog(object):
         glyph = self.package.findName(r.name) if self.package is not None and r.name else None
         return glyph is not None and not is_empty(glyph)
 
+    def switch_top_page(self, index):
+        """Diacritics or Glyph generation shown; Glyph generation's tab made, and its list read, as it is
+        first shown (its module loaded then: where it cannot be, the tab says why)."""
+        QtCore, QtGui = _qt()
+        self.top_pages.setCurrentIndex(index)
+        if index != 1 or self.generation is not None:
+            return
+        try:
+            module = self.generation_module = self.ak.load_sibling(GENERATION_FILE, GENERATION_MODULE)  # (held)
+            self.generation = module.GenerationPage(self, _Globals(globals()))
+            self.generation_layout.addWidget(self.generation.widget, 1)
+            QtCore.QTimer.singleShot(0, self.generation.run)  # (read as the tab is first shown)
+        except Exception as exc:
+            self.generation = False  # (not tried again: the tab keeps its message)
+            note = QtGui.QLabel(u"Glyph generation could not be opened: %s. Reinstall FreeLab." % self.ak.html(exc))
+            note.setWordWrap(True)
+            note.setWhatsThis(u"Why this tab is empty: its part of FreeLab could not be loaded.")
+            self.generation_layout.addWidget(note)
+            self.generation_layout.addStretch(1)
+
     def switch_page(self, index):
         QtCore, QtGui = _qt()
         self.pages.setCurrentIndex(index)
@@ -6953,15 +7075,17 @@ class AccentsDialog(object):
 
     # -- the dialog's own writes, told apart from the History moving in FontLab -----------------------
 
-    def begin_write(self, package):
-        """Before a write to the font (Build, Correct mirrored components, Add anchors): the History
-        watch held (watch_history skips while busy), the font recorded where Undo needs it
-        (before_changes), and where the History stands then noted. True when the write may go ahead;
-        False, with the reason in the log, when FontLab's History could not record the font first: nothing
-        may be written then (Undo could not take it back)."""
+    def begin_write(self, package, glyphs=()):
+        """Before a write to the font (Build, Correct mirrored components, Add anchors, Build checked
+        glyphs on Glyph generation): the History watch held (watch_history skips while busy), the font
+        recorded where Undo needs it (before_changes; glyphs: those whose own properties the write
+        changes, such as their code points, recorded too: recorded with the font alone, a code point
+        added stayed on Undo, live 2026-11-16), and where the History stands then noted. True when the
+        write may go ahead; False, with the reason in the log, when FontLab's History could not record
+        the font first: nothing may be written then (Undo could not take it back)."""
         self.busy = True
         try:
-            self.ak.before_changes(self.fontlab, package, u"FreeLab Diacritics")
+            self.ak.before_changes(self.fontlab, package, u"FreeLab Glyph Compose", list(glyphs))
         except getattr(self.ak, "HistoryError", Exception) as exc:
             self.busy = False
             self.log.add(u"%s" % (exc,), "error")
@@ -7000,6 +7124,8 @@ class AccentsDialog(object):
             self.run()
             if getattr(self, "anchors_read", False):
                 self.anchors.run()  # (the new font's scripts, not the old one's choice)
+            if getattr(self, "generation", None):
+                self.generation.run(same_font=False)
         except Exception as exc:
             self.log.add(u"Could not read the font: %s" % self.ak.html(exc), "error")
 
@@ -7012,6 +7138,8 @@ class AccentsDialog(object):
         self.run()
         if self.anchors_read:
             self.anchors.run(keep_script=True)
+        if getattr(self, "generation", None):
+            self.generation.run()
 
     # -- the editor ----------------------------------------------------------------
 
@@ -7504,7 +7632,9 @@ class AccentsDialog(object):
             return None
         try:
             if _property(self.tabs, "currentIndex") != 0:
-                self.tabs.setCurrentIndex(0)  # (the log is under both tabs: the list is on the first)
+                self.tabs.setCurrentIndex(0)  # (the log is under every tab: the list is on the first)
+            if _property(getattr(self, "top_tabs", self.tabs), "currentIndex") != 0:
+                self.top_tabs.setCurrentIndex(0)
         except Exception:
             pass
         if self.select_recipe_of(ch):
@@ -7815,7 +7945,7 @@ class AccentsDialog(object):
         try:
             module = self.ak.load_sibling("freelab_kerning_check.py", "freelab_kerning_check")
             try:
-                module.main(glyphs=names, reason=u"Diacritics built")
+                module.main(glyphs=names, reason=u"Glyph Compose built")
             except TypeError:  # (a Kerning Check that takes no glyphs: all its pairs)
                 module.main()
         except Exception as exc:
@@ -7863,8 +7993,7 @@ class AccentsDialog(object):
                     if package.findUnicode(r.code) is not None:
                         skipped.append(r.char)
                         continue
-                    new = fontlab.flGlyph()
-                    new.name = r.name
+                    new = new_glyph(fontlab, package, r.name)
                     # (its code point set once its layers are made: given before, FontLab kept none of the
                     # layers made on it, live in Tsukimi Rounded 2026-11-11)
                     package.addGlyph(new)  # (FontLab adds a copy, without layers: they are made on the font's glyph)
@@ -7984,7 +8113,7 @@ class AccentsDialog(object):
         helpers = [name for name in helpers if name in used]
         status = None
         try:
-            status = self.ak.notify_changed(fontlab, package, u"FreeLab Diacritics", touched)
+            status = self.ak.notify_changed(fontlab, package, u"FreeLab Glyph Compose", touched)
         finally:
             self.end_write(package, bool(touched))
         b = self.ak.b
@@ -8050,6 +8179,8 @@ class AccentsDialog(object):
         # (one listed to show it and built is listed as built now, not to leave once the user goes on)
         self.shown_existing = set(getattr(self, "shown_existing", ())) - self.built_now
         self.run()
+        if getattr(self, "generation", None):  # (Glyph generation's list reads the font again too)
+            self.generation.run()
 
     def why_empty(self, r, masters, placed):
         """Why a recipe came out with nothing drawn: the first of its glyphs with no outline, master by
@@ -8071,6 +8202,14 @@ class AccentsDialog(object):
         QtCore.QTimer.singleShot(50, self.run)
 
 
+class _Globals(object):
+    """This module's names as attributes, for the Glyph generation tab (FontLab runs a script under a name
+    of its own, so the module cannot be found in sys.modules by __name__)."""
+
+    def __init__(self, names):
+        self.__dict__ = names
+
+
 def _property(widget, name):
     """A Qt property's value (PythonQt gives properties as attributes, some builds as methods)."""
     value = getattr(widget, name)
@@ -8078,25 +8217,25 @@ def _property(widget, name):
 
 
 def main(characters=None):
-    """Opens Diacritics; characters (Font Check's missing letters) are listed as a set of their own."""
+    """Opens Glyph Compose; characters (Font Check's missing letters) are listed as a set of their own."""
     try:  # this font's window shows it already: brought forward as it is
-        if characters is None and load_auto_kerning().raise_open("Diacritics"):
+        if characters is None and load_auto_kerning().raise_open(TOOL_TITLE):
             return
     except Exception:
         pass
     try:
         dialog = AccentsDialog(characters)
     except Exception as exc:
-        print("FreeLab Diacritics: %s" % exc)
+        print("FreeLab Glyph Compose: %s" % exc)
         return
-    sys._freelab_diacritics = dialog  # kept: PythonQt deletes a dialog with no Python reference
+    sys._freelab_glyph_compose = dialog  # kept: PythonQt deletes a dialog with no Python reference
     dialog.ak.hook_menu_order()
     try:
-        dialog.ak.take_window("Diacritics", dialog)  # its font's window: the tool shown there gives way
+        dialog.ak.take_window(TOOL_TITLE, dialog)  # its font's window: the tool shown there gives way
     except Exception:
         pass
     dialog.show()
 
 
-if not os.environ.get("FREELAB_NO_AUTOSTART") and __name__ != "freelab_diacritics":
+if not os.environ.get("FREELAB_NO_AUTOSTART") and __name__ != "freelab_glyph_compose":
     main()
