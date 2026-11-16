@@ -594,6 +594,8 @@ class PageTests(unittest.TestCase):
         self.assertFalse(page.none_button.enabled, "nothing checked: nothing to uncheck")
         page.all_button.slots["clicked()"][0]()
         self.assertEqual(len(page.checked_glyphs()), len(page.tree.items))
+        # Owner's report 118: these buttons left no line in the log
+        self.assertEqual(owner.logged[-1][1], u"<i>Check all</i> checked <b>%d glyphs</b>." % len(page.tree.items))
         self.assertFalse(page.all_button.enabled, "all checked: nothing more to check")
         self.assertTrue(page.none_button.enabled)
         self.assertTrue(page.copy_button.enabled)
@@ -602,6 +604,7 @@ class PageTests(unittest.TestCase):
         self.assertTrue(page.all_button.enabled and page.none_button.enabled)
         page.none_button.slots["clicked()"][0]()
         self.assertEqual(page.checked_glyphs(), [])
+        self.assertEqual(owner.logged[-1][1], u"<i>Check none</i> unchecked <b>%d glyphs</b>." % (len(page.tree.items) - 1))
         self.assertFalse(page.copy_button.enabled)
         owner.busy = True
         page.check_all(True)

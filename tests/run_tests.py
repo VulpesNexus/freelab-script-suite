@@ -37,7 +37,7 @@ PY27_FILES = (
     "tests/glyphcodes_tests.py",
     "checks/freelab_font_check.py", "checks/language_coverage.json", "tests/fontcheck_tests.py",
     "checks/character_sets.json", "checks/character_sets_LICENSE", "checks/coverage_gaps.json",
-    "checks/language_families.json", "checks/language_families_LICENSE",
+    "checks/language_families.json", "checks/language_families_LICENSE", "checks/high_value_languages.json",
     "checks/language_orthographies.json", "checks/language_orthographies_LICENSE", "checks/font_characters.json",
     "checks/space_conventions.json",
     "compare/freelab_font_compare.py", "tests/compare_tests.py", "proof/freelab_proof.py", "tests/proof_tests.py",

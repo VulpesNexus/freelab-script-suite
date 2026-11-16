@@ -65,6 +65,7 @@ $files = @(
     @{ From = 'checks\language_orthographies.json'; Name = 'language_orthographies.json' },
     @{ From = 'checks\language_orthographies_LICENSE'; Name = 'language_orthographies_LICENSE' },
     @{ From = 'checks\space_conventions.json'; Name = 'space_conventions.json' },
+    @{ From = 'checks\high_value_languages.json'; Name = 'high_value_languages.json' },
     @{ From = 'checks\language_font\FreeLang-Essential.ttf'; Name = 'FreeLang-Essential.ttf' },
     # Optional: the repository holds the Essential font alone, and each release publishes these four
     # beside it (FreeLang-Extras.zip, unpacked into checks\language_font). Font Check works without

@@ -48,6 +48,7 @@ FIXED = u"HOlno08"  # the references and tuning glyphs of the methods: never cha
 TOLERANCE_UNITS = 6  # a side whose suggestion is closer than this to its sidebearing is left out
 GROUPS = (("letters", "Letters"), ("figures", "Letters and figures"), ("all", "Letters, figures, and punctuation"),
           ("everything", "Everything"))  # (other scripts and symbols too, by case)
+DEFAULT_GROUP = "everything"  # the dropdown's choice as the window opens (owner's report 143)
 PREVIEW_SIZE = 80  # pixels per em in the previews
 SETTLE_PASSES = 6  # an analysis measures each change again, with it made, at most this many times
 SETTLE_SHARE = 0.002  # a side has settled when measuring it again asks less than this share of the em more
@@ -94,6 +95,11 @@ def load_auto_kerning():
             os.environ["FREELAB_NO_AUTOSTART"] = old
     module._freelab_stamp = stamp
     return module
+
+
+def default_group():
+    """The dropdown's index as the window opens: DEFAULT_GROUP's."""
+    return [key for key, _ in GROUPS].index(DEFAULT_GROUP)
 
 
 def counted(number, one, many=None):
@@ -375,7 +381,7 @@ class AutoSpacingDialog(object):
         dialog.setWindowTitle("FreeLab Auto Spacing")
         dialog.setWhatsThis(HELP)
         self.ak.size_dialog(dialog)
-        layout = QtGui.QVBoxLayout(dialog)
+        layout = self.ak.window_layout(dialog)  # (its content scrolls on a small screen)
         self.status = self.ak.status_label()
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
@@ -384,11 +390,13 @@ class AutoSpacingDialog(object):
         # (the glyphs a line names drawn as the font draws them; clicked, one opens in a Glyph window:
         # spaced glyphs have left the list)
         self.log.follow(lambda: (self.fontlab, self.package, self.master))
+        self.log.link_handler = self.log_link  # (a glyph clicked: opened between its references)
         self.seen_history, self.first_checks = None, {}
         row = QtGui.QHBoxLayout()
         self.group = QtGui.QComboBox()
         for _, label in GROUPS:
             self.group.addItem(label)
+        self.group.setCurrentIndex(default_group())  # (Everything: owner's report 143; set before it is heard)
         self.group.setWhatsThis(u"Which glyphs to space. Figures are often tabular (one width for all): leave them "
                                 u"out unless they are proportional. <i>Everything</i>: every glyph with a character (other "
                                 u"scripts' letters by their case, symbols beside n).")
@@ -810,9 +818,9 @@ class AutoSpacingDialog(object):
                 self.listed[index].checked = item.checkState(0) == QtCore.Qt.Checked
 
     def check_all(self, on):
-        QtCore, QtGui = _qt()
-        for row in range(self.tree.topLevelItemCount):
-            self.tree.topLevelItem(row).setCheckState(0, QtCore.Qt.Checked if on else QtCore.Qt.Unchecked)
+        """Check all or Check none, the log saying how many glyphs it changed (the shared check_rows)."""
+        items = [self.tree.topLevelItem(row) for row in range(self.tree.topLevelItemCount)]
+        self.ak.check_rows(items, bool(on), self.log, u"Check all" if on else u"Check none", u"glyph")
         self.update_buttons()
 
     def update_buttons_soon(self):
@@ -967,17 +975,42 @@ class AutoSpacingDialog(object):
             painter.end()
         return ak.inked(pixmap, color), spans  # (one color at two strengths: redrawn in the new one on a switch)
 
+    def context_text(self, name, char):
+        """FontLab text for a glyph between two of its references on each side (its straight one, then
+        its round one: /n/n/a/n/n, /o/o/a/o/o), a line each; the glyph alone where they cannot be read."""
+        ak = self.ak
+        try:
+            reference = reference_for(self.kind_of(char) or char, ak.category, ak.script_of) if char else u"n"
+            names = [found for _, found in ak.font_glyphs(self.package, [reference, ROUND_REFERENCES.get(reference, u"O")])]
+        except Exception:
+            names = []
+        return u"/space".join(u"/%s/%s/%s/%s/%s" % (r, r, name, r, r) for r in names) or u"/%s" % name
+
     def show_in_glyph_window(self):
         s = self.selected()
         if s is None:
             return
+        error = self.ak.show_in_glyph_window(self.fontlab, self.context_text(s.name, s.char))
+        if error:
+            self.log.add(u"FontLab did not open the glyph: %s" % self.ak.html(error), "error")
+
+    def log_link(self, target):
+        """A glyph named in the log clicked: opened between its references in a Glyph window, as Show in
+        Glyph window opens a row's (a composite whose diacritics the log says to check is seen beside
+        its neighbors); False for a link left to the log (a glyph the font no longer has)."""
         ak = self.ak
-        reference = reference_for(self.kind_of(s.char) or s.char, ak.category, ak.script_of)
-        names = [name for _, name in ak.font_glyphs(self.package, [reference, ROUND_REFERENCES.get(reference, u"O")])]
-        text = u"/space".join(u"/%s/%s/%s/%s/%s" % (r, r, s.name, r, r) for r in names) or u"/%s" % s.name
-        error = ak.show_in_glyph_window(self.fontlab, text)
+        name = ak.glyph_of_link(self.package, target) if self.package is not None else None
+        if not name:
+            return False
+        try:
+            code = ak.main_code(self.package.findName(name).fgGlyph)
+            char = ak.unichr_(code) if code else None
+        except Exception:
+            char = None
+        error = ak.show_in_glyph_window(self.fontlab, self.context_text(name, char))
         if error:
             self.log.add(u"FontLab did not open the glyph: %s" % ak.html(error), "error")
+        return None
 
     # -- changing the font ----------------------------------------------
 
@@ -1128,6 +1161,12 @@ class AutoSpacingDialog(object):
         package, master = self.package, self.master
         moved, self.overhanging = [], []
         reach = OVERHANG_SHARE * float(package.upm)
+
+        def component_box(name):  # (a component's glyph's box, in its own units)
+            glyph = package.findName(name)
+            layer = glyph.getLayerByName(master) if glyph is not None and not glyph.isNull else None
+            return layer.boundingBox if layer is not None else None
+
         for name, move in composite_moves(self.composites, totals).items():
             if move is None:
                 continue
@@ -1136,7 +1175,7 @@ class AutoSpacingDialog(object):
             if layer is None:
                 continue
             shift, width_change = move
-            if mark_overhang(layer, shift, width_change) > reach:
+            if mark_overhang(layer, shift, width_change, component_box) > reach:
                 self.overhanging.append(name)  # followed all the same, and named in the log, to check
             for shape in layer.shapes[1:]:  # the accents: kept over the base, whose outline moved
                 t = shape.transform  # moved in the layer's units, whatever the component's scale or mirroring
@@ -1179,20 +1218,50 @@ class AutoSpacingDialog(object):
 OVERHANG_SHARE = 0.01  # of the em: how much further a composite's marks may stick out once it follows its letter
 
 
-def mark_overhang(layer, shift, width_change):
+def mapped_span(box, transform):
+    """(left, right) of a box (a QRectF) once placed by a transform (a QTransform: x' = m11 x + m21 y +
+    dx), its four corners mapped."""
+    xs = [float(transform.m11()) * x + float(transform.m21()) * y + float(transform.dx())
+          for x in (float(box.left()), float(box.right())) for y in (float(box.top()), float(box.bottom()))]
+    return min(xs), max(xs)
+
+
+def shape_span(shape, component_box=None):
+    """(left, right) of what a layer's shape draws, in the layer's units, or None. A component: its
+    glyph's own box (component_box(name), in that glyph's units) placed by the component's transform.
+    A zero-width mark is drawn left of its origin (circumflexbelowcomb at about -300 to -100), so its
+    box in its own units read as the layer's put it far before the composite's start: ucircumflexbelow
+    was named as sticking out though its mark sat well inside its 451 units (owner's images 144/146).
+    Else, or when that cannot be read, the shape's own box."""
+    name = component_glyph(shape) if component_box is not None else None
+    if name:
+        try:
+            box = component_box(name)
+            if box is not None:
+                return mapped_span(box, shape.transform)
+        except Exception:
+            pass
+    try:
+        box = shape.boundingBox
+        box = box() if callable(box) else box
+        return float(box.left()), float(box.right())
+    except Exception:
+        return None
+
+
+def mark_overhang(layer, shift, width_change, component_box=None):
     """How much further a composite's marks (its components after the first) would stick out past its
     width, or before its start, once its letter's move is followed (shift: the outline's move across;
     width_change: the advance's), in units; 0 when they would not. Each side is weighed against itself:
-    a mark already out on the left does not hide one growing out on the right."""
+    a mark already out on the left does not hide one growing out on the right. component_box(name): a
+    component's glyph's box in its own units (shape_span)."""
     right_before = left_before = right_after = left_after = 0.0
     width = float(layer.advanceWidth)
     for shape in list(layer.shapes)[1:]:
-        try:
-            box = shape.boundingBox
-            box = box() if callable(box) else box
-            left, right = float(box.left()), float(box.right())
-        except Exception:
+        span = shape_span(shape, component_box)
+        if span is None:
             continue
+        left, right = span
         right_before = max(right_before, right - width)
         left_before = max(left_before, -left)
         right_after = max(right_after, right + shift - (width + width_change))

@@ -56,6 +56,58 @@ def parse(text, names):
     return fc.check_code(text, names) if HAVE_FONTTOOLS else None
 
 
+def refused_or(write, old, rules):
+    """What a writer makes of old, or None where it refuses (FeatureCodeUnreadable, or None given)."""
+    try:
+        return write(old, rules)
+    except fc.FeatureCodeUnreadable:
+        return None
+
+
+def writer_scenarios(test, write, tag, begin, end, rule):
+    """Codex review 6's scenarios for a feature writer: write(old code, rules) gives the new code (None, or
+    FeatureCodeUnreadable, for a refusal); tag, the feature it writes; begin and end, its block's markers;
+    rule, a line its block holds once written. Shared by Feature Code's, CJK Spacing's, and CJK Vertical's
+    tests: they all write through Feature Code's token functions."""
+    a, b, c = u"sub a by a.alt;", u"sub b by b.alt;", u"sub c by c.alt;"
+    # 1. An end marker after code on its line: the block ends there, the font's rule after it stays
+    own = u"%s\n%s\n%s %s\n%s" % (a, begin, b, end, c)
+    for rules in ([], [rule]):
+        text = write(own, rules)
+        test.assertEqual((text.count(a), text.count(c), text.count(b)), (1, 1, 0), "%r: %r" % (rules, text))
+        test.assertEqual(text.count(begin), 1 if rules else 0, text)
+    own = u"feature %s {\n%s\n%s\n%s %s\n%s\n} %s;\nfeature zzzz { sub z by z.alt; } zzzz;" % (tag, a, begin, b, end, c,
+                                                                                             tag)
+    text = write(own, [])  # (taken out: the rest of the feature, its brace, and the next feature kept)
+    test.assertEqual((text.count(a), text.count(c), text.count(b)), (1, 1, 0), text)
+    test.assertIn(u"} %s;" % tag, text)
+    test.assertIn(u"feature zzzz { sub z by z.alt; } zzzz;", text)
+    # 2. An opening marker after code on its line: the old block goes, one block is left
+    own = u"feature %s { %s %s\nlookup FreeLab_old { %s } FreeLab_old;\n%s\n} %s;" % (tag, a, begin, b, end, tag)
+    text = write(own, [rule])
+    test.assertEqual(text.count(begin), 1, text)
+    test.assertNotIn(u"FreeLab_old", text)
+    test.assertEqual(text.count(a), 1)
+    # 3. Written again: the same
+    test.assertEqual(write(text, [rule]), text)
+    # 4. Another feature's code only: this one made after it, whole, never statements at the top level
+    other = u"feature kern { pos f i -10; } kern;"
+    text = write(other, [rule])
+    test.assertTrue(text.startswith(other), text)
+    bounds = fc.feature_bounds(text, tag)
+    test.assertIsInstance(bounds, tuple, text)
+    test.assertTrue(bounds[0] < text.index(rule) < bounds[1], text)
+    # 5. A body with no feature around it: taken where its braces balance, refused where they do not
+    text = write(u"lookup Own { %s } Own;" % a, [rule])
+    test.assertEqual((text.count(a), text.count(rule)), (1, 1), text)
+    test.assertIsNone(refused_or(write, u"lookup Own { %s" % a, [rule]))
+    # 6. Markers not in pairs: refused, to write and to take out alike
+    for broken in (u"feature %s {\n%s\n%s\n} %s;" % (tag, a, begin, tag), u"feature %s {\n%s %s\n} %s;" % (tag, a, end, tag),
+                   u"feature %s {\n%s\n%s\n%s\n%s\n} %s;" % (tag, begin, a, begin, end, tag)):
+        for rules in ([], [rule]):
+            test.assertIsNone(refused_or(write, broken, rules), broken)
+
+
 class StrokeTests(unittest.TestCase):
     def test_a_square_grows_evenly(self):
         square = [(0, 0, True), (100, 0, True), (100, 100, True), (0, 100, True)]  # counterclockwise, y up
@@ -233,6 +285,271 @@ class LoclTests(unittest.TestCase):
         names = info.names
         full = prefix + fc.forms_feature_text("locl", None, feature.lines())
         self.assertIsNone(parse(full, names))
+
+    def test_a_language_the_fonts_code_sets_is_never_set_again(self):
+        # Owner's report 153 (Bellefair): the font's own locl sets CAT, MOL, and ROM; checked, FreeLab's block
+        # beside it set "language CAT;" again, and FontLab's compiler stopped ("language-specific behavior
+        # already specified"), at every write after
+        own = (u"feature locl {\n  script latn;\n  language CAT;\n  lookup locl_cat {\n    sub l periodcentered' l by ldot;\n"
+               u"  } locl_cat;\n  language MOL;\n  lookup locl_mol {\n    sub Scedilla by Scommaaccent;\n  } locl_mol;\n"
+               u"  language ROM exclude_dflt;\n  lookup locl_mol;\n} locl;\n")
+        self.assertEqual(fc.own_languages(own), set([("latn", "CAT"), ("latn", "MOL"), ("latn", "ROM")]))
+        info = make_info([u"i.loclTRK"], codes=[(u"Scedilla", 0x15E), (u"Scommaaccent", 0x218), (u"ldot", 0x140),
+                                                (u"Ldot", 0x13F)])
+        features, _ = fc.form_features(info, {u"locl": own})
+        locl = by_tag(features)[u"locl"]
+        self.assertEqual(locl.kind, "hand")
+        left = [rule for rule in locl.rules if rule.data["language"] in ("CAT", "MOL", "ROM")]
+        self.assertTrue(left and all(rule.warning and not rule.on for rule in left), "shown, never written")
+        locl.on = True  # (checked, as the owner did)
+        for rule in locl.rules:
+            rule.on = True  # (even so)
+        code = lines_of(locl)
+        for language in (u"CAT", u"MOL", u"ROM"):
+            self.assertNotIn(u"language %s;" % language, code, "the font's code sets it already")
+        self.assertIn(u"language TRK;", code, "a language the font's code lacks is still FreeLab's")
+        self.assertIn(u"sets CAT, MOL, and ROM already", locl.kind_note)
+        text = fc.forms_texts(features, {u"locl": own})[u"locl"]
+        seen, script = set(), None
+        for line in text.splitlines():
+            words = line.split(u"#")[0].replace(u";", u" ").split()
+            if words[:1] == [u"script"]:
+                script = words[1]
+            elif words[:1] == [u"language"]:
+                self.assertNotIn((script, words[1]), seen, "a language set twice in one feature")
+                seen.add((script, words[1]))
+        # FreeLab's earlier block (with CAT set again) is not taken for the font's own code
+        again = fc.forms_feature_text(u"locl", own, [u"script latn;", u"language CAT;", u"lookup x {", u"} x;"])
+        self.assertEqual(fc.own_languages(again), fc.own_languages(own))
+        automatic = u"feature locl {\n#> feature\nscript latn;\nlanguage CAT;\n#< feature\n} locl;\n"
+        self.assertEqual(fc.own_languages(automatic), set(), "FontLab's automatic code, which FreeLab's replaces")
+
+    def test_languages_are_read_by_statements_not_lines(self):
+        # Codex review 4: read line by line, a language on the script's line, a tag on the line after its
+        # keyword, and a second language on one line were missed, and FreeLab set them again
+        info = make_info([u"i.loclTRK"], codes=[(u"Scedilla", 0x15E), (u"Scommaaccent", 0x218), (u"ldot", 0x140),
+                                                (u"Ldot", 0x13F)])
+        cases = (
+            (u"feature locl {\n  script latn; language CAT; sub l' periodcentered' l by ldot;\n} locl;\n",
+             [("latn", "CAT")]),
+            (u"feature locl {\n  script latn;\n  language\n    ROM;\n  sub Scedilla by Scommaaccent;\n} locl;\n",
+             [("latn", "ROM")]),
+            (u"feature locl {\n  script latn;\n  language MOL; sub Scedilla by Scommaaccent; language CAT; "
+             u"sub l' periodcentered' l by ldot;\n} locl;\n", [("latn", "MOL"), ("latn", "CAT")]),
+        )
+        for own, pairs in cases:
+            self.assertEqual(fc.own_languages(own), set(pairs), own)
+            features, _ = fc.form_features(info, {u"locl": own})
+            locl = by_tag(features)[u"locl"]
+            locl.on = True
+            for rule in locl.rules:
+                rule.on = True
+            text = fc.forms_texts(features, {u"locl": own})[u"locl"]
+            block = text[text.index(fc.BEGIN % fc.FORMS):]
+            for _, language in pairs:
+                self.assertNotIn(u"language %s;" % language, block, "set by the font's code already: %r" % own)
+            self.assertIn(u"language TRK;", block, "a language the font's code lacks is still FreeLab's")
+            self.assertTrue(text.startswith(own[:own.index(u"} locl;")]), "the user's text intact: %r" % text)
+        commented = u"feature locl {\n  # language CAT;\n  sub a by b; # script cyrl;\n  name \"language NLD;\";\n} locl;\n"
+        self.assertEqual(fc.own_languages(commented), set(), "comments and strings set nothing")
+        self.assertEqual(fc.own_languages(u"feature locl {\n  sub language by script;\n} locl;\n"), set(),
+                         "a glyph named language is no statement")
+
+    def test_a_compact_feature_keeps_its_code(self):
+        # Codex review 5: the writer looked for the closing brace at the start of a line; a feature on one line,
+        # a brace after the last rule, or delimiters on lines of their own had none, and the font's own code was
+        # made again from nothing (its CAT rules lost)
+        info = make_info([u"i.loclTRK"], codes=[(u"ldot", 0x140), (u"Ldot", 0x13F)])
+        cases = (u"feature locl { script latn; language CAT; sub l by ldot; } locl;\n",
+                 u"feature locl {\nscript latn; language CAT;\nsub l by ldot; } locl;\n",
+                 u"feature\nlocl {\nscript latn; language CAT;\nsub l by ldot;\n} locl;\n")
+        for own in cases:
+            self.assertEqual(fc.own_languages(own), set([("latn", "CAT")]), own)
+            features, _ = fc.form_features(info, {u"locl": own})
+            locl = by_tag(features)[u"locl"]
+            locl.on = True
+            for rule in locl.rules:
+                rule.on = True
+            refused = []
+            text = fc.forms_texts(features, {u"locl": own}, refused)[u"locl"]
+            self.assertEqual(refused, [])
+            start, end = text.index(fc.BEGIN % fc.FORMS), text.index(fc.END % fc.FORMS)
+            block, rest = text[start:end], text[:start] + text[end + len(fc.END % fc.FORMS):]
+            self.assertEqual([t for t, _, _ in fc.code_tokens(rest)], [t for t, _, _ in fc.code_tokens(own)],
+                             "the user's code, statement for statement: %r" % text)
+            self.assertIn(u"sub l by ldot;", text, "the designer's rule as typed")
+            self.assertNotIn(u"language CAT;", block)
+            self.assertIn(u"language CAT;", rest)
+            self.assertIn(u"language TRK;", block)
+            self.assertEqual(fc.feature_bounds(text, u"locl")[1], text.rindex(u"}"), "one feature, closed once")
+        # Braces that cannot be found: nothing written there, never the feature made again
+        broken = u"feature locl { script latn; language CAT; sub l by ldot;\n"
+        features, _ = fc.form_features(info, {u"locl": broken})
+        by_tag(features)[u"locl"].on = True
+        refused = []
+        self.assertNotIn(u"locl", fc.forms_texts(features, {u"locl": broken}, refused))
+        self.assertEqual(refused, [u"locl"])
+        self.assertIn(u"FreeLab leaves locl as it is", fc.refused_words(refused))
+        # The ligatures and calt alike
+        liga = u"feature liga { sub f f by f_f; } liga;"
+        written = fc.feature_text(u"liga", liga, [((u"f", u"i"), u"fi")], u"ligatures", [])
+        self.assertIn(u"sub f f by f_f;", written)
+        self.assertIn(u"sub f i by fi;", written)
+        self.assertEqual(written.count(u"} liga;"), 1)
+        with self.assertRaises(fc.FeatureCodeUnreadable):
+            fc.feature_text(u"liga", u"feature liga { sub f f by f_f;", [((u"f", u"i"), u"fi")], u"ligatures", [])
+        calt = fc.calt_text(u"feature calt { # } calt; in a comment\n  sub a' b by a.alt; } calt;", [u"sub x by y;"])
+        self.assertTrue(calt.index(u"sub x by y;") > calt.index(u"sub a' b by a.alt;"), calt)
+        self.assertIn(u"# } calt; in a comment", calt)
+
+    def test_the_writers_read_markers_and_braces_by_tokens(self):
+        """Codex review 6, findings 1 and 2: markers found as comments wherever they stand, never past their
+        pair; another feature's code is no body; a body's braces must balance."""
+        writer_scenarios(self, lambda old, rules: fc.forms_feature_text(u"case", old, rules), u"case",
+                         fc.BEGIN % fc.FORMS, fc.END % fc.FORMS, u"sub x by x.case;")
+        writer_scenarios(self, lambda old, rules: fc.calt_text(old, rules), u"calt",
+                         fc.BEGIN % u"alternates", fc.END % u"alternates", u"sub x' x by x.alt;")
+        writer_scenarios(self, lambda old, rules: fc.feature_text(u"liga", old, [((u"x", u"y"), u"x_y")] if rules else [],
+                                                                  u"ligatures", []),
+                         u"liga", fc.BEGIN % u"ligatures", fc.END % u"ligatures", u"sub x y by x_y;")
+        # The readers alike: an inline end marker ends the block there
+        own = u"feature case {\nsub a by a.case;\n%s\nsub b by b.case; %s\nsub c by c.case;\n} case;" % (
+            fc.BEGIN % fc.FORMS, fc.END % fc.FORMS)
+        self.assertEqual(fc.feature_kind(own), "hand", "the font's own rules around FreeLab's block")
+        self.assertIn(u"sub c by c.case;", fc.strip_block(own, fc.FORMS))
+        self.assertEqual(fc.freelab_block(u"case", own, fc.FORMS), u"feature case {\nsub b by b.case; \n} case;\n")
+        self.assertEqual(fc.own_languages(u"feature locl {\n%s\nscript latn; language TRK; %s\nlanguage CAT;\n} locl;" % (
+            fc.BEGIN % fc.FORMS, fc.END % fc.FORMS)), set([("DFLT", "CAT")]), "CAT after FreeLab's block is the font's")
+
+    def test_the_fonts_own_ligature_rules_are_never_moved(self):
+        """Codex reviews 6 and 7: moving the font's own rules kept going wrong (a compact rule written a second
+        time; a rule moved after a lookupflag took it, was read as fixed, and the next write lost it; another
+        feature's rule taken for the text's tag). FreeLab never moves or takes out a rule the font wrote: it
+        manages its own block, and FontLab's automatic code; a choice that would move the font's rule is said."""
+        def apply(texts, found=None, stuck=None):
+            found = fc.ligatures(names, texts) if found is None else found
+            out = dict(texts)
+            out.update(fc.ligature_texts(found, texts, [], stuck))
+            return out
+
+        names = [u"f", u"i", u"l", u"a", u"b", u"f_i", u"f_l", u"a_b"]
+        # The font's compact rule: read, left where it is whatever the choice, never written again
+        texts = {u"liga": u"feature liga { sub f i by f_i; } liga;"}
+        for choice in ("liga", "dlig", "off"):
+            found = fc.ligatures(names, texts)
+            f_i = [lig for lig in found if lig.glyph == u"f_i"][0]
+            self.assertEqual((f_i.now, f_i.fixed), (u"liga", True))
+            f_i.choice = choice
+            stuck = []
+            out = apply(texts, found, stuck)
+            self.assertEqual(out[u"liga"].count(u"sub f i by f_i;"), 1, (choice, out))
+            self.assertIn(u"feature liga { sub f i by f_i; ", out[u"liga"], "as typed")
+            self.assertEqual(out.get(u"dlig", u"").count(u"sub f i by f_i;"), 0)
+            self.assertEqual(stuck, [] if choice == "liga" else [u"f_i"])
+        self.assertIn(u"FreeLab does not move f_i", fc.stuck_words([u"f_i"]))
+        # FontLab's automatic code is FreeLab's to take over: moved once
+        texts = {u"liga": u"feature liga {\n#> feature\n  sub f i by f_i;\n#< feature\n} liga;"}
+        for choice in ("liga", "dlig", "off"):
+            found = fc.ligatures(names, texts)
+            f_i = [lig for lig in found if lig.glyph == u"f_i"][0]
+            self.assertFalse(f_i.fixed)
+            f_i.choice = choice
+            out = apply(texts, found)
+            for tag in (u"liga", u"dlig"):
+                self.assertEqual(out.get(tag, u"").count(u"sub f i by f_i;"), 1 if choice == tag else 0, (choice, out))
+        # A rule before a lookupflag (or a script and language): FreeLab's block goes before it, and two writes
+        # in a row keep everything
+        for scope in (u"lookupflag IgnoreMarks;", u"script latn; language TRK;"):
+            texts = {u"liga": u"feature liga { sub f i by f_i; %s sub a b by a_b; } liga;" % scope}
+            found = fc.ligatures(names, texts)
+            [lig for lig in found if lig.glyph == u"f_l"][0].choice = "liga"  # (FreeLab's own, in liga)
+            first = apply(texts, found)
+            second = apply(first)
+            self.assertEqual(second, first, "written again: the same")
+            text = first[u"liga"]
+            self.assertEqual((text.count(u"sub f i by f_i;"), text.count(u"sub a b by a_b;")), (1, 1), text)
+            self.assertLess(text.index(u"sub f i by f_i;"), text.index(scope))
+            self.assertLess(text.index(u"sub f l by f_l;"), text.index(scope), "FreeLab's ligature in the default scope")
+        # FreeLab's block left after a lookupflag by an older FreeLab: its rule written again, before it
+        texts = {u"liga": u"feature liga { lookupflag IgnoreMarks;\n%s\nsub f l by f_l;\n%s\n} liga;" % (
+            fc.BEGIN % u"ligatures", fc.END % u"ligatures")}
+        out = apply(texts)
+        self.assertEqual(out[u"liga"].count(u"sub f l by f_l;"), 1, out)
+        self.assertLess(out[u"liga"].index(u"sub f l by f_l;"), out[u"liga"].index(u"lookupflag"))
+        self.assertEqual(apply(out), out)
+        # Another feature's code given under liga: its rule stays that feature's, byte for byte
+        other = u"feature dlig { sub f i by f_i; } dlig;"
+        for source in (other, u"feature liga { sub a b by a_b; } liga;\n" + other):
+            for choice in ("liga", "dlig", "off"):
+                texts = {u"liga": source}
+                found = fc.ligatures(names, texts)
+                f_i = [lig for lig in found if lig.glyph == u"f_i"][0]
+                self.assertEqual(f_i.now, u"dlig", "never relabeled from the text's tag")
+                f_i.choice = choice
+                out = apply(texts, found)
+                self.assertIn(other, out[u"liga"], (source, choice, out))
+                self.assertEqual(out[u"liga"].count(u"sub f i by f_i;") + out.get(u"dlig", u"").count(u"sub f i by f_i;"), 1)
+        # A feature given twice under one tag: each rule once, written again the same
+        texts = {u"liga": u"feature liga { sub f i by f_i; } liga;\nfeature liga { sub f l by f_l; } liga;"}
+        out = apply(texts)
+        self.assertEqual((out[u"liga"].count(u"sub f i by f_i;"), out[u"liga"].count(u"sub f l by f_l;")), (1, 1), out)
+        self.assertEqual(apply(out), out)
+
+    def test_a_ligature_the_fonts_code_makes_any_way_is_the_fonts(self):
+        """Codex review 8, finding 1: a rule FreeLab does not read as a plain ligature (a class in its input, a
+        named class, escaped names) still makes f_i: f_i was offered as new, and FreeLab wrote "sub f i by
+        f_i;" in liga again, or in dlig. That ligature is the font's: shown where it is, never written again."""
+        names = [u"f", u"i", u"i.alt", u"f_i"]
+        for own in (u"feature liga { sub f [i i.alt] by f_i; } liga;",
+                    u"@I = [i i.alt];\nfeature liga { sub f @I by f_i; } liga;",
+                    u"feature liga { sub \\f \\i by \\f_i; } liga;",
+                    u"feature liga { sub f' i' by f_i; } liga;"):
+            for choice in ("liga", "dlig"):
+                texts = {u"liga": own}
+                out = dict(texts)
+                for _ in range(2):  # (two writes)
+                    found = fc.ligatures(names, out)
+                    f_i = [lig for lig in found if lig.glyph == u"f_i"]
+                    self.assertEqual([(lig.now, lig.fixed) for lig in f_i], [(u"liga", True)], own)
+                    f_i[0].choice = choice
+                    stuck = []
+                    out.update(fc.ligature_texts(found, out, [], stuck))
+                    self.assertEqual(stuck, [] if choice == "liga" else [u"f_i"])
+                self.assertEqual(out[u"liga"], own, "the font's rule as it was, nothing added: %r" % out)
+                self.assertNotIn(u"f_i", out.get(u"dlig", u""))
+        self.assertEqual(fc.font_outputs(u"feature dlig { sub [f f.alt] i by f_i; } dlig;", u"liga"), {u"f_i": u"dlig"},
+                         "in the feature it stands in")
+
+    def test_a_lookup_in_the_feature_ends_the_default_scope(self):
+        """Codex review 8, finding 2: "lookup Own;" (or a lookup block) may carry its lookupflag on; FreeLab's
+        ligatures went after it. They go before it now."""
+        names = [u"f", u"l", u"f_l"]
+        for own in (u"feature liga { lookup Own; } liga;",
+                    u"feature liga { lookup Own { lookupflag IgnoreMarks; sub a b by a_b; } Own; } liga;"):
+            texts = {u"liga": own}
+            found = fc.ligatures(names, texts)
+            [lig for lig in found if lig.glyph == u"f_l"][0].choice = "liga"
+            out = dict(texts)
+            out.update(fc.ligature_texts(found, texts, [], []))
+            text = out[u"liga"]
+            self.assertLess(text.index(u"sub f l by f_l;"), text.index(u"lookup Own"), text)
+            again = dict(out)
+            again.update(fc.ligature_texts(fc.ligatures(names, out), out, [], []))
+            self.assertEqual(again, out, "written again: the same")
+        self.assertEqual(fc.scope_change(u"feature liga { sub f i by f_i; lookup Own; } liga;", u"liga"),
+                         len(u"feature liga { sub f i by f_i; "))
+
+    def test_taking_a_block_out_checks_the_braces_too(self):
+        """Codex review 7, finding 4: a write that only took FreeLab's block out returned an unclosed "lookup Own {"."""
+        for tag, begin, end, write in (
+                (u"case", fc.BEGIN % fc.FORMS, fc.END % fc.FORMS, lambda old, rules: fc.forms_feature_text(u"case", old, rules)),
+                (u"calt", fc.BEGIN % u"alternates", fc.END % u"alternates", lambda old, rules: fc.calt_text(old, rules)),
+                (u"liga", fc.BEGIN % u"ligatures", fc.END % u"ligatures",
+                 lambda old, rules: fc.feature_text(u"liga", old, [((u"x", u"y"), u"x_y")] if rules else [], u"ligatures"))):
+            for old in (u"lookup Own {\n%s\nsub a by a.alt;\n%s" % (begin, end),
+                        u"feature %s {\n%s\nsub a by a.alt;\n%s\n" % (tag, begin, end)):
+                for rules in ([], [u"sub x by y;"]):
+                    self.assertIsNone(refused_or(write, old, rules), (tag, old, rules))
 
     def test_prefix(self):
         old = u"languagesystem DFLT dflt;\nlanguagesystem latn dflt;\n@Upper = [A B];\n"
@@ -689,6 +1006,22 @@ class FakeItem(Anything):
     def __init__(self, texts=()):
         self.texts, self.values, self.checks, self.children, self.tree = list(texts) + [u""] * 3, {}, {}, [], None
         self.hints, self.tips = {}, {}  # its cells' size hints and tooltips, by column
+        self.spanned, self.up, self.expanded, self.hidden = False, None, False, False
+
+    def setFirstColumnSpanned(self, on):
+        self.spanned = on
+
+    def parent(self):
+        return self.up
+
+    def isExpanded(self):
+        return self.expanded
+
+    def setExpanded(self, on):
+        self.expanded = on
+
+    def isHidden(self):
+        return self.hidden
 
     def setSizeHint(self, column, size):
         self.hints[column] = size
@@ -723,7 +1056,7 @@ class FakeItem(Anything):
                 slot(self, column)
 
     def addChild(self, child):
-        child.tree = self.tree
+        child.tree, child.up = self.tree, self
         self.children.append(child)
 
     def child(self, index):
@@ -781,6 +1114,12 @@ class FakeButton(Anything):
 
     def setEnabled(self, on):
         self.enabled = on
+
+    def setWhatsThis(self, text):
+        self.whats = text
+
+    def setToolTip(self, text):
+        self.tip = text
 
     def connect(self, signal, slot):
         self.slots.setdefault(signal, []).append(slot)
@@ -1590,6 +1929,12 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(dialog.build_button.text, u"Build 30 checked glyphs")
         self.assertEqual(self.small_section(dialog, "subscript").child(0).checkState(0), UNCHECKED)
         sups = self.small_section(dialog, "sups")
+        # Owner's report 159: a folded group showed nothing in the other columns (its first column spanned them)
+        self.assertEqual(sups.text(1), u"10 of 10 glyphs checked")
+        self.assertEqual(sups.text(2), u"10 scaled from their figures", "a short note of what its rows say")
+        self.assertEqual(self.small_section(dialog, "superscript").text(2),
+                         u"10 copies of their set's glyphs; U+00B2 to U+2079")
+        self.assertFalse(sups.spanned, "not spanned: its count and note stand in their columns")
         dialog.small_expanded(sups)  # (its pictures drawn)
         self.assertIn(u"two at 59%, raised 357 units", sups.child(2).text(1))
         self.assertIn(u"a start to draw over", sups.child(2).text(2))
@@ -1633,17 +1978,34 @@ class DialogTests(unittest.TestCase):
         self.assertIn("sups", tags)
         self.assertIn("subs", tags)
         # What was built stays listed (a build replaces it once its settings change), checked as built; the
-        # button stays clickable, though nothing checked would change (a click says so)
+        # button grays out, nothing checked would change (owner's report 160), and says why
         self.assertEqual([item.data(0, USER_ROLE) for item in dialog.small_tree.items],
                          ["sups", "superscript", "subs", "subscript"])
         self.assertEqual(sorted(dialog.small_ours), sorted(t.split(u'">')[0] for t in
                                                           done[-1].split(u'<a href="glyphname:')[1:]))
         self.assertEqual(dialog.build_button.text, u"Build checked glyphs")
-        self.assertTrue(dialog.build_button.enabled)
+        self.assertFalse(dialog.build_button.enabled)
         self.assertEqual(dialog.small_counts(),
                          u"The font lacks <b>11 figure forms</b>. <b>29 figure forms</b> were built here before: a "
                          u"build replaces them once their settings change.")
         self.assertFalse([t for level, t in self.logged if level in ("error", "warning")], self.logged)
+
+    def test_a_ligature_choice_lasts_past_the_write(self):
+        """Codex review 8, finding 4: Off took f_i's rule out, the window read the font again, offered f_i as its
+        name suggests (Discretionary), and the next write put it back. The choices last for the same font."""
+        for choice, liga, dlig in (("off", 0, 0), ("liga", 1, 0), ("dlig", 0, 1)):
+            features = FakeFeatures({u"liga": u"feature liga {\n#> feature\n  sub f i by f_i;\n#< feature\n} liga;\n"})
+            dialog = self.dialog(features, self.with_glyphs(features, [u"f"]))
+            lig = [lig for lig in dialog.found if lig.glyph == u"f_i"][0]
+            self.assertFalse(lig.fixed, "FontLab's automatic rule: FreeLab's to move")
+            dialog.choose(lig, [key for key, _ in fc.CHOICES].index(choice))
+            for _ in range(2):  # (write, the font read again, write again)
+                dialog.write()
+                self.assertEqual([l.choice for l in dialog.found if l.glyph == u"f_i"], [choice], "the choice kept")
+                texts = dict((tag, features.texts.get(tag, u"")) for tag in (u"liga", u"dlig"))
+                self.assertEqual((texts[u"liga"].count(u"sub f i by f_i;"), texts[u"dlig"].count(u"sub f i by f_i;")),
+                                 (liga, dlig), (choice, texts))
+            self.assertFalse(dialog.write_button.enabled, "nothing left to write")
 
     def test_history_keeps_choices(self):
         dialog = self.dialog(FakeFeatures({}))
@@ -1735,6 +2097,8 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(states, {"often": False, "all": True, "none": True})
         dialog.check_turns("all")
         self.assertEqual(len(dialog.cycling()), len(letters))
+        # Owner's report 118: these buttons left no line in the log
+        self.assertEqual(self.logged[-1], ("info", u"<i>All</i> checked <b>%d glyphs</b>." % (len(letters) - 60)))
         self.assertIn(u"<b>by position</b>", dialog.turn_label.text)
         texts = dialog.new_texts()
         self.assertLess(len(texts["calt"]), 40000, "a few rules on classes, not megabytes")
@@ -1762,7 +2126,10 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(len(again.cycling()), len(letters), "restored as it first came: what the font's code has")
         again.check_turns("none")
         self.assertEqual(again.cycling(), {})
+        self.assertEqual(self.logged[-1], ("info", u"<i>None</i> unchecked <b>%d glyphs</b>." % len(letters)))
         self.assertIn(u"No glyph is checked", again.turn_label.text)
+        again.check_turns("none")
+        self.assertEqual(self.logged[-1], ("info", u"<i>None</i> changed nothing."))
 
     def with_glyphs(self, features, names):
         """The fake font with more glyphs (names, no characters)."""
@@ -2045,14 +2412,14 @@ class DialogTests(unittest.TestCase):
                          [u"Settings of", u"Scale", u"Baseline at", u"Width", u"Strokes"])
         for box in (dialog.small_scale, dialog.small_baseline, dialog.small_width, dialog.small_reset, dialog.stroke_box):
             self.assertIn(box, row.widgets)
-        self.assertLess(row.widgets.index(dialog.small_reset), row.widgets.index(dialog.stroke_box),
-                        "after Suggested, which puts back the three before it and not Strokes")
+        self.assertEqual(row.widgets[-1], dialog.small_reset,
+                         "Suggested last, after Strokes, which it puts back too (owner's report 158)")
         self.assertNotIn(dialog.build_button, row.widgets, "the build button stays under the list")
         self.assertFalse(hasattr(dialog, "small_why"), "no sentence beside the button")
         dialog.small_set_picked(fc.SMALL_SETS.index("numr"))
         self.assertEqual(dialog.small_reset.whats,
-                         u"Puts the picked set's scale, baseline, and width back as first suggested. This set's "
-                         u"suggestion: as most open-licensed fonts.")
+                         u"Puts the picked set's scale, baseline, and width back as first suggested, and <i>Strokes</i> "
+                         u"back at 107% (for every set). This set's suggestion: as most open-licensed fonts.")
         self.assertEqual(dialog.small_reset.tip, u"<table width=\"520\" cellspacing=\"0\" cellpadding=\"0\"><tr><td>%s"
                                                  u"</td></tr></table>" % dialog.small_reset.whats)
         dialog.small_first["sups"]["why"] = u"As the font's 5 drawn forms."  # (what the owner's font said)
@@ -2060,10 +2427,11 @@ class DialogTests(unittest.TestCase):
         self.assertTrue(dialog.small_reset.whats.endswith(u"This set's suggestion: as the font's 5 drawn forms."),
                         "the picked set's own")
         self.assertIn(u"as the font's 5 drawn forms.", dialog.small_reset.tip, "on hover too")
+        first = u"Puts the picked set's scale, baseline, and width back as first suggested, and <i>Strokes</i> back at 107% " \
+                u"(for every set)."
         self.assertEqual([fc.suggested_words(why) for why in (None, u"As the font's 1 drawn form.")],
-                         [u"Puts the picked set's scale, baseline, and width back as first suggested.",
-                          u"Puts the picked set's scale, baseline, and width back as first suggested. This set's "
-                          u"suggestion: as the font's 1 drawn form."])
+                         [first, first + u" This set's suggestion: as the font's 1 drawn form."])
+        self.assertIn(u"<i>Suggested</i>, after it, puts it back at 107% too.", dialog.stroke_box.whats)
         self.assertIn(u"<i>Strokes</i>, one value for every set", fc.HELP)
 
     def test_the_build_button_grays_out_when_nothing_is_left_to_build(self):
@@ -2083,7 +2451,15 @@ class DialogTests(unittest.TestCase):
         self.assertFalse(ContainedButton.container_disabled, "the lists answer again")
         self.assertEqual(len(dialog.small_tree.items), 4, "what was built is listed again, to replace")
         self.assertEqual(dialog.build_button.text, u"Build checked glyphs")
-        self.assertTrue(dialog.build_button.enabled, "built with these settings: a click says nothing changed")
+        # Owner's report 160: it stayed clickable, and a click only said "Nothing changed since the last build"
+        self.assertFalse(dialog.build_button.enabled, "built with these settings: nothing a build would change")
+        self.assertTrue(dialog.build_button.whats.endswith(
+            u"Grayed out: the 40 glyphs checked were built here with these very settings, so a build would change "
+            u"nothing. Change a setting, or check other glyphs, to build again."), dialog.build_button.whats)
+        self.assertIn(u"Grayed out: the 40 glyphs", dialog.build_button.tip, "on hover too")
+        self.assertIn(u"the glyph checked was built", fc.build_words(0, 1))
+        self.assertTrue(fc.build_words(0, 0).endswith(u"Grayed out: no glyph that can be built is checked."))
+        self.assertEqual(fc.build_words(3, 2), fc.BUILD_WHAT, "clickable: what it does only")
         for glyph in [g for g in package.glyphs if g not in before]:  # Edit > Undo in FontLab
             package.deleteGlyph(glyph)
         dialog.history_moved()
@@ -2101,16 +2477,18 @@ class DialogTests(unittest.TestCase):
         self.assertFalse(states["none"], "no glyph is checked: nothing to uncheck")
         self.assertTrue(states["all"])
 
-    def strokes_built(self, percent, contour=NodeContour, new_shape=NewShape, shape=NodeShape):
+    def strokes_built(self, percent, contour=NodeContour, new_shape=NewShape, shape=NodeShape, prepare=None):
         """The fake font's superiors built with Strokes at percent: (the dialog, the font). new_shape: what
         fontlab.flShape() makes (no_new_shape: FontLab makes none, and the old way is taken); shape: the
-        figures' shapes, whose copies the old way writes in."""
+        figures' shapes, whose copies the old way writes in; prepare: called with the dialog before."""
         features = FakeFeatures({})
         package = NodePackage(features, contour, shape)
         self.ak.layer_path = lambda layer, *args: NodePath(layer)
         try:
             dialog = self.dialog(features, package, core={"QPointF": FakePoint})
             self.fontlab.flShape = new_shape
+            if prepare is not None:
+                prepare(dialog)
             for group in ("superscript", "subs", "subscript"):
                 self.small_section(dialog, group).setCheckState(0, UNCHECKED)
             self.assertEqual(dialog.build_button.text, u"Build 10 checked glyphs")
@@ -2164,6 +2542,40 @@ class DialogTests(unittest.TestCase):
         self.assertEqual([fc.offset_words(values) for values in ([], [1.0], [0.5, 1.0], [6.64, 7.58], [2.0, 2.04])],
                          [u"", u" (each side moved out 1 unit)", u" (each side moved out 0.5 to 1 unit)",
                           u" (each side moved out 6.6 to 7.6 units)", u" (each side moved out 2 units)"])
+
+    def test_settings_typed_and_not_entered_are_built(self):
+        """Owner's report: 100 typed in Strokes over 130, then Build without Enter, built at 130. The build
+        reads every box as it starts: a scale typed (no valueChanged yet) and Strokes."""
+        dialog = self.recorded(FakeFeatures({}))
+        package = dialog.package
+        for group in ("superscript", "subs", "subscript"):
+            self.small_section(dialog, group).setCheckState(0, UNCHECKED)
+        dialog.small_clicked(self.small_section(dialog, "sups").child(2), 0)
+        self.assertEqual(dialog.small_scale.value, 59)
+        dialog.small_scale.value = 50  # (typed: the box shows it, no signal came)
+        dialog.stroke_box.value = 100  # (components: the scale read from their transform)
+        dialog.build_small_forms()
+        layer = package.findName(u"two.sups").made[u"Regular"]
+        self.assertEqual(layer.components[0].transform.args[:4], (0.5, 0.0, 0.0, 0.5), "built at the 50% shown")
+        self.assertEqual(dialog.small_setup["sups"]["scale"], 0.5, "the setting follows the box")
+
+    def test_strokes_that_cannot_apply_are_said(self):
+        """Owner's report 156: Strokes at 100% and 130% built the same glyphs, and the log said only "Scaling
+        thins strokes": where the figures' stroke cannot be measured (or a figure is made of components),
+        the forms are made of components, scaled, and the log says so, with why."""
+        def unmeasured(dialog):
+            dialog.figure_stem = lambda package, master: None
+        dialog, package = self.strokes_built(130, prepare=unmeasured)
+        layer = package.findName(u"two.sups").made[u"Regular"]
+        self.assertEqual([c.name for c in layer.components], [u"two"], "components, scaled")
+        warnings = [t for level, t in self.logged if level == "warning"]
+        self.assertEqual(len(warnings), 1, self.logged)
+        self.assertTrue(warnings[0].startswith(u"<i>Strokes</i> at 130% could not thicken <b>10 glyphs</b>: "
+                                               u'<a href="glyphname:'), warnings[0])
+        self.assertTrue(warnings[0].endswith(u"They are made of components, scaled (their strokes thinned), because "
+                                             u"the figures' stroke could not be measured."), warnings[0])
+        dialog, package = self.strokes_built(130)
+        self.assertFalse([t for level, t in self.logged if level == "warning"], "thickened: nothing to say")
 
     def test_strokes_fontlab_did_not_keep_are_said_not_assumed(self):
         """Where the nodes read back after the build are not where they were put (their contour gave
@@ -2334,9 +2746,9 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(len(dialog.small_ours), 10)
         self.assertEqual(self.small_section(dialog, "sups").childCount(), 10, "listed again")
         self.assertIn(fc.BUILT_NOTE, self.small_section(dialog, "sups").child(2).text(2))
-        self.assertTrue(dialog.build_button.enabled)
+        self.assertFalse(dialog.build_button.enabled, "grayed out: nothing that a build would change")
         self.assertEqual(dialog.build_button.text, u"Build checked glyphs", "nothing that a build would change")
-        # Nothing changed: said, nothing built, no step
+        # Nothing changed (were it clicked all the same): said, nothing built, no step
         dialog.build_small_forms()
         self.assertEqual(len(self.fontlab.flItems.steps), steps)
         self.assertTrue(self.logged[-1][1].startswith(u"Nothing changed since the last build"), self.logged[-1])
@@ -2508,6 +2920,15 @@ class DialogTests(unittest.TestCase):
         self.assertFalse(dialog.small_reset.enabled, "the picked set as suggested: nothing to put back")
         dialog.small_setting("scale", 50)
         self.assertTrue(dialog.small_reset.enabled)
+        dialog.small_suggested()
+        self.assertFalse(dialog.small_reset.enabled)
+        # Owner's report 158: changing Strokes left Suggested grayed out; it puts Strokes back now
+        dialog.stroke_box.setValue(130)
+        dialog.stroke_box.slots["valueChanged(int)"][0](130)
+        self.assertTrue(dialog.small_reset.enabled, "Strokes changed: something to put back")
+        dialog.small_suggested()
+        self.assertEqual(dialog.stroke_box.value, fc.STROKE_WEIGHT)
+        self.assertFalse(dialog.small_reset.enabled)
         empty = Anything()
         empty.packages = lambda: []
         self.fontlab.flWorkspace.instance = lambda: empty

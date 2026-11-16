@@ -483,7 +483,7 @@ class InkDistances(object):
 PREVIEW_HINTS = (u"Select a pair to see it here as it is, with its fix, and beside its base pair.",
                  u"Select an entry to see its first pair here, with the entry and without it.")
 COLLISION_COLUMNS = (u"Pair", u"Glyphs", u"Kerning", u"Distance", u"Fix", u"Set by", u"Compared with")
-NUMBER_COLUMNS = (u"Kerning", u"Distance", u"Fix", u"Value")  # right-aligned, their headers too
+NUMBER_COLUMNS = (u"Kerning", u"Distance", u"Fix", u"Value")  # columns of numbers (add_row right-aligns their cells)
 
 
 ACTIONS = {"collisions":(u"Write checked fixes", u"Write %s", (u"checked fix", u"checked fixes")),
@@ -538,8 +538,7 @@ class Tab(object):
         self.tree.setHeaderLabels(list(columns))
         self.tree.setRootIsDecorated(False)
         self.layout.addWidget(self.tree, 1)
-        self.buttons = QtGui.QHBoxLayout()
-        self.layout.addLayout(self.buttons)
+        # (its buttons sit in the window's bottom row, as every tool's: bottom_row; shown with its page)
         self.action = QtGui.QPushButton(action) if action else None
         self.restore = QtGui.QPushButton("Restore suggestions") if action else None
         self.check_all = QtGui.QPushButton("Check all") if action else None
@@ -562,7 +561,7 @@ class KerningCheckDialog(object):
         dialog.setWindowTitle("FreeLab Kerning Check")
         dialog.setWhatsThis(HELP)
         self.ak.size_dialog(dialog)
-        layout = QtGui.QVBoxLayout(dialog)
+        layout = self.ak.window_layout(dialog)  # (its content scrolls on a small screen)
         self.font_label = self.ak.status_label()
         self.font_label.setWordWrap(True)
         layout.addWidget(self.font_label)
@@ -683,25 +682,17 @@ class KerningCheckDialog(object):
                 tab.tree.setIconSize(QtCore.QSize(*self.ak.glyph_icon_size(2)))
                 tab.tree.setProperty(self.ak.LEAVE_ALONE_PROP, True)  # its pictures are drawn in the dialog's colors
             if tab.action is not None:
-                for button in (tab.check_all, tab.check_none, tab.restore):
-                    tab.buttons.addWidget(button)
+                for button in (tab.check_all, tab.check_none, tab.restore, tab.action):
                     button.setEnabled(False)
-                tab.buttons.addStretch(1)
-                tab.buttons.addWidget(tab.action)
-                tab.action.setEnabled(False)
             self.tabs.addTab(label)
             self.pages.addWidget(tab.widget)
         layout.addWidget(self.log.widget)
 
-        buttons = QtGui.QHBoxLayout()
         self.glyph_window_button = QtGui.QPushButton("Show in Glyph window")
         self.glyph_window_button.setWhatsThis(u"Opens the selected row's pair in a <i>Glyph</i> window, between H's, n's, "
                                               u"and o's.")
         self.close_button = QtGui.QPushButton("Close")
-        buttons.addWidget(self.glyph_window_button)
-        buttons.addStretch(1)
-        buttons.addWidget(self.close_button)
-        layout.addLayout(buttons)
+        layout.addLayout(self.bottom_row(QtGui))
 
         self.collisions_button.connect("clicked()", self.check_collisions)
         self.cleanup_button.connect("clicked()", self.check_cleanup)
@@ -879,10 +870,11 @@ class KerningCheckDialog(object):
         tab.first_checks = [item.checkState(0) == QtCore.Qt.Checked for item in self.rows(tab)]
 
     def check_every(self, tab, on):
-        """Check all, or Check none: every row of the list (a group's row follows its rows)."""
-        QtCore, QtGui = _qt()
-        for item in self.rows(tab):
-            item.setCheckState(0, QtCore.Qt.Checked if on else QtCore.Qt.Unchecked)
+        """Check all, or Check none: every row of the list (a group's row follows its rows), the rows of
+        closed groups too, which the log says (the shared check_rows)."""
+        self.ak.check_rows(self.rows(tab), bool(on), self.log, u"Check all" if on else u"Check none",
+                           u"pair" if tab is self.collisions else u"entry", None if tab is self.collisions else u"entries",
+                           (u"in a closed group", u"in closed groups"))
         self.update_buttons()
 
     def restore(self, tab):
@@ -995,18 +987,15 @@ class KerningCheckDialog(object):
         QtCore, QtGui = _qt()
         # every row measured, those of closed groups too: sized while the groups were closed, the names
         # were cut once one was opened (the shared fit_rows)
-        load_auto_kerning().fit_rows(tab.tree, range(tab.tree.columnCount - 1))
-        try:  # the headers of the columns of numbers right-aligned, as their cells are
-            header = tab.tree.headerItem()
-            for column in range(tab.tree.columnCount):
-                if header.text(column) in NUMBER_COLUMNS:
-                    header.setTextAlignment(column, int(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter))
-        except Exception:
-            pass
+        # (its headers centered by it, as every list's: owner's report 141)
+        ak = load_auto_kerning()
+        ak.fit_rows(tab.tree, range(tab.tree.columnCount - 1))
         # the first column holds the rows inside collapsed groups too, which the resize does not measure
         room = QtGui.QFontMetrics(tab.tree.font).width(u"MMMMMM") + 3 * tab.tree.indentation
         if tab.tree.columnWidth(0) < room:
             tab.tree.setColumnWidth(0, room)
+            ak.note_wants(tab.tree, {0: room})
+            ak.share_columns(tab.tree, after_fit=True)
 
     def check_collisions(self):
         if self.busy or not self.read_font():
@@ -1232,13 +1221,40 @@ class KerningCheckDialog(object):
         self.seen_history = self.ak.history_mark(self.package)
         self.update_buttons()
 
+    def bottom_row(self, QtGui):
+        """The window's bottom row, as every tool's (owner's report 152: they sat under each list, above
+        the previews and the log): the list's own Check all, Check none, and Restore suggestions, then
+        Show in Glyph window; at the right, the list's action, then Close. Every list's buttons are in
+        it, those of the list shown visible (show_tab_buttons)."""
+        row = QtGui.QHBoxLayout()
+        tabs = (self.collisions, self.cleanup, self.masters)
+        for tab in tabs:
+            if tab.action is not None:
+                for button in (tab.check_all, tab.check_none, tab.restore):
+                    row.addWidget(button)
+        row.addWidget(self.glyph_window_button)
+        row.addStretch(1)
+        for tab in tabs:
+            if tab.action is not None:
+                row.addWidget(tab.action)
+        row.addWidget(self.close_button)
+        self.show_tab_buttons(0)
+        return row
+
+    def show_tab_buttons(self, index):
+        """The bottom row's buttons of the list shown (by its tab's index), the others' hidden."""
+        for number, tab in enumerate((self.collisions, self.cleanup, self.masters)):
+            if tab.action is not None:
+                for button in (tab.check_all, tab.check_none, tab.restore, tab.action):
+                    button.setVisible(number == index)
+
     def switch_page(self, index):
-        QtCore, QtGui = _qt()
         self.pages.setCurrentIndex(index)
+        self.show_tab_buttons(index)
         self.update_previews()
         key = TABS[index]
         if key in self.stale and self.package is not None:
-            QtCore.QTimer.singleShot(0, lambda: self.check(key))  # checked as it is first shown
+            _qt()[0].QTimer.singleShot(0, lambda: self.check(key))  # checked as it is first shown
 
     def selected_finding(self):
         """The finding of the selected row (a group's first one), or None."""

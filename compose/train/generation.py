@@ -66,11 +66,15 @@ GROUPS = (
                                        "013F 0140"),
     ("fractions", u"Vulgar fractions", None),  # (the inventory's twenty)
     ("arrows", u"Arrows and triangles", "2190 2191 2193 21D0 21D1 21D3 25B2 25BC 25C0 25B3 25BD 25C1 2196 2197 2198 "
-                                        "2199"),
+                                        "2199 2192 21D2 25B6 25B7"),  # (the sources last: REVERSED_SOURCES)
     ("turned", u"Turned and reversed letters", None),  # (the inventory's 41: starting points, unless monoline)
 )
 EXPECTED = {"spaces": 18, "dashes": 10, "duplicates": 44, "punctuation": 28, "lookalikes": 52, "ligatures": 17,
-            "fractions": 20, "arrows": 16, "turned": 41}
+            "fractions": 20, "arrows": 20, "turned": 41}
+# Characters added to the first scope (2026-11-16, the owner's report): the sources the arrows and triangles
+# turn, built in turn from those where a font has one of them and not the source (⇒ from ⇐, ⇑, or ⇓). Not in
+# the research inventory's scope: no corpus counts, research confidence accepted.
+REVERSED_SOURCES = ("2192", "21D2", "25B6", "25B7")
 
 E, A, S = "exact", "accepted", "starting point"
 
@@ -139,6 +143,11 @@ def duplicates(inventory):
     found["02BC"].pop()  # (an apostrophe is not a turned comma: kept to the right single quote alone)
     found["02BD"].append(way("mirror", A, of="2019"))  # the reversed comma: the right single quote mirrored
     found["0189"].append(way("copy", A, of="0110"))
+    # Ð and Đ from Ɖ where the font has only that one (the owner's question of 2026-11-16): the same shape
+    # in most fonts (Ɖ copies Ð in 24 of the 50 families that build it). No loop: a way reading a glyph that
+    # is made of the row's own is refused (component_loop), and one the list builds after it is not taken
+    found["00D0"].append(way("copy", A, of="0189"))
+    found["0110"].append(way("copy", A, of="0189"))
     found["2027"].append(way("copy", A, of="00B7"))
     return found
 
@@ -228,7 +237,18 @@ def arrows():
         "25B3": turn("25B7", 90, "25B2"), "25BD": turn("25B7", 270, "25B2"), "25C1": turn("25B7", 180, "25C0"),
         "2196": turn("2192", 135, "2197"), "2197": turn("2192", 45, "2197"), "2198": turn("2192", 315, "2197"),
         "2199": turn("2192", 225, "2197"),
+        # The sources, from what they make (REVERSED_SOURCES): a half turn of the left one, else a quarter
+        # turn of the up or down one, its sidebearings the vertical rule's inverse (REVERSED_TURNS)
+        "2192": turn("2190", 180, "2190") + turn("2191", 270, "2192") + turn("2193", 90, "2192"),
+        "21D2": turn("21D0", 180, "2190") + turn("21D1", 270, "2192") + turn("21D3", 90, "2192"),
+        "25B6": turn("25C0", 180, "25C0") + turn("25B2", 270, "25B6") + turn("25BC", 90, "25B6"),
+        "25B7": turn("25C1", 180, "25C0") + turn("25B3", 270, "25B6") + turn("25BD", 90, "25B6"),
     }
+
+
+# A source made by a quarter turn of a vertical arrow or triangle: the vertical rule's sidebearings undone
+# (the measured rule takes a horizontal source's sidebearings to a vertical glyph's)
+REVERSED_TURNS = {"2192": "2191", "25B6": "25B2"}
 
 
 def turned(inventory):
@@ -612,6 +632,8 @@ def rules(layout, records=()):
         turns[key] = {"drop": median_of(layout, key + " drop/em", 0.0)}
     for key in ("2190", "2191", "2197", "25B2", "25C0"):
         turns[key] = {"sides": median_of(layout, key + " sidebearings/source's", 1.0)}
+    for key, measured in REVERSED_TURNS.items():
+        turns[key] = {"sides": round(1.0 / turns[measured]["sides"], 4) if turns[measured]["sides"] else 1.0}
     dots = {}
     for key in ("013F", "0140"):
         dots[key] = {"dot_left": median_of(layout, key + " dot left - letter advance", 0.0),
@@ -724,7 +746,7 @@ def main():
     for key, title, _ in GROUPS:
         groups.append({"id": key, "title": title, "count": len(GROUP_CODES[key])})
         for code in GROUP_CODES[key]:
-            e = inventory[code]
+            e = inventory[code] if code not in REVERSED_SOURCES else dict(inventory.get(code) or {}, confidence=A)
             corpus = e.get("corpus") or {}
             top = (corpus.get("constructions") or [{}])[0]
             entries.append({

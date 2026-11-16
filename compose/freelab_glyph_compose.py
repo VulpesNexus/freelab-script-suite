@@ -35,6 +35,7 @@ Valid Python 2.7 (FontLab 7) and Python 3. The planning below the Qt line needs 
 
 from __future__ import absolute_import, division, print_function
 
+import math
 import os
 import sys
 import time
@@ -1265,6 +1266,43 @@ def preview_parts(selected, editable, related):
             "strip_area": related and selected}
 
 
+def reset_text(marks):
+    """Reset diacritics' text: "Reset diacritic" for a glyph with one."""
+    return u"Reset diacritic" if marks == 1 else u"Reset diacritics"
+
+
+def propagate_text(targets):
+    """Apply to related letters' text, with how many where there are some."""
+    return u"Apply to %s" % counted(targets, u"related letter") if targets else u"Apply to related letters"
+
+
+def line_up_text(kind, side):
+    """Line up diacritics' text: by the kind of an attached diacritic (ogonek, cedilla, horn, vertical caron), else
+    by the side of the selected one (above, below), else plain (no diacritic to line up)."""
+    if side is None:
+        return u"Line up diacritics"
+    return u"Line up %ss" % kind if kind else u"Line up diacritics %s" % side
+
+
+ATTACHED_KINDS = ("ogonek", "cedilla", "horn", "vertical caron")
+
+
+def room_texts():
+    """{button: every text it takes}: the editor's buttons keep the width of their widest (keep_preview_room),
+    so that what stands beside them never moves when the selected row changes their texts (the owner's report
+    of 2026-11-16: Compact diacritics to fit the line moved 33 pixels right on a row that cannot be built)."""
+    return {"reset_marks_button": [reset_text(n) for n in (1, 2)],
+            "propagate_button": [propagate_text(n) for n in (0, 1, 888)],
+            "line_up_button": [line_up_text(None, None)] + [line_up_text(None, side) for side in ("above", "below")] +
+                              [line_up_text(kind, "above") for kind in ATTACHED_KINDS]}
+
+
+# The preview's parts that keep their room when hidden, so that what stays shown never moves: selecting a
+# glyph that cannot be built hid the editor, its buttons, and the strip, and Compact diacritics to fit the
+# line jumped up and right (the owner's report of 2026-11-16)
+ROOM_KEPT = ("editor", "reset_marks_button", "propagate_button", "line_up_button", "strip_label", "strip_area")
+
+
 def list_controls(font, rows, searching):
     """{what: whether it is clickable} of the controls over a list, with no font (font False) or no row
     (rows: how many the list holds, shown or not): the choices that make the list (the character set,
@@ -1440,23 +1478,47 @@ def room_counts(recipes):
     return compact, still, tall
 
 
-def compact_text(on, kept):
-    """The log's line when Compact diacritics to fit the line is switched: what the suggestions are now, and
-    how many glyphs placed by hand keep what was set."""
-    text = (u"Glyphs too tall for a 120% line are made compact again." if on else
-            u"Glyphs are no longer made compact: their diacritics keep their own gaps and size, and the rows say "
-            u"which are too tall for a 120% line.")
+def compact_text(on, kept, count=None):
+    """The log's line when Compact diacritics to fit the line is switched: what the suggestions are now
+    (count: the glyphs made compact, switched on; too tall as placed, switched off), and how many glyphs
+    placed by hand keep what was set. It names the box first: it began "Glyphs are no longer made compact",
+    which, after the log's time cut short, the owner read as "9 Glyphs" (2026-11-16)."""
+    box = u"<i>Compact diacritics to fit the line</i>"
+    one = count == 1
+    if on:
+        text = (u"%s on: glyphs too tall for a 120%% line are made compact." % box if count is None else
+                u"%s on: no glyph is too tall for a 120%% line." % box if not count else
+                u"%s on: %s too tall for a 120%% line %s made compact." % (box, counted(count, u"glyph"),
+                                                                       u"is" if one else u"are"))
+    else:
+        text = (u"%s off: diacritics keep their own gaps and size, and the rows say which glyphs are too tall for a "
+                u"120%% line." % box if count is None else
+                u"%s off: diacritics keep their own gaps and size, and every glyph fits a 120%% line." % box
+                if not count else
+                u"%s off: diacritics keep their own gaps and size, and %s %s too tall for a 120%% line (%s by how "
+                u"much)." % (box, counted(count, u"glyph"), u"is" if one else u"are",
+                             u"its row says" if one else u"their rows say"))
     if kept:
         text += u" %s placed by hand %s what you set." % (counted(kept, u"glyph"), u"keeps" if kept == 1 else u"keep")
     return text
 
 
 def room_details(compact, still, tall, bold=None):
-    """The top line's pieces about the room of a 120% line, each following its number."""
+    """The top line's sentences about the room of a 120% line, in glyphs, each following its number ("42
+    glyphs that were too tall for a 120% line were made compact.": the owner's words, 2026-11-16; it said
+    "42 made compact to fit a 120% line" among the other counts before)."""
     bold = bold or (lambda text: text)
-    return [text % bold(count) for count, text in ((compact, u"%s made compact to fit a 120%% line"),
-                                                   (still, u"%s too tall even so, left unchecked"),
-                                                   (tall, u"%s too tall for a 120%% line as placed")) if count]
+    found = []
+    if compact:
+        found.append(u"%s that %s too tall for a 120%% line %s made compact." % (
+            bold(counted(compact, u"glyph")), u"was" if compact == 1 else u"were", u"was" if compact == 1 else u"were"))
+    if still:
+        found.append(u"%s %s too tall even when compact: %s left unchecked." % (
+            bold(counted(still, u"glyph")), u"is" if still == 1 else u"are", u"it is" if still == 1 else u"they are"))
+    if tall:
+        found.append(u"%s %s too tall for a 120%% line as placed." % (bold(counted(tall, u"glyph")),
+                                                                     u"is" if tall == 1 else u"are"))
+    return found
 
 
 GAP_STEPS = 12  # halvings of the gaps' range that find how far a stack's gaps are closed (to 0.6/4096 of them)
@@ -1928,6 +1990,23 @@ def build_text(checked, hidden):
     return u"Build %s (%d not shown)" % (counted(checked, u"checked glyph"), hidden)
 
 
+def checks_text(on, changed, checked, hidden, bold=None, noun=u"glyph"):
+    """The log's line for Check all (on) or Check none: how many rows it changed, and how many are checked
+    now in all, those a search hides included, saying so (the owner's report of 2026-11-16: neither button
+    left a line). changed: the rows the click checked or unchecked; checked: the rows checked now, shown or
+    not; hidden: of those, the ones a search hides. "Checked 30 glyphs (42 checked in all, 12 of them not
+    shown)", "Unchecked 1 glyph (none checked now)"."""
+    bold = bold or (lambda text: text)
+    done = u"%s %s" % (u"Checked" if on else u"Unchecked", bold(counted(changed, noun)))
+    if not checked:
+        return u"%s (none checked now)." % done
+    if not hidden:
+        return u"%s (%d checked in all)." % (done, checked)
+    if on or hidden < checked:
+        return u"%s (%d checked in all, %d of them not shown)." % (done, checked, hidden)
+    return u"%s (%d still checked, not shown: a search hides %s)." % (done, hidden, u"it" if hidden == 1 else u"them")
+
+
 def anchors_button_text(checked, hidden):
     """The Mark anchors tab's write button's text, as build_text: it adds the anchors of every checked
     glyph, shown or not, so it says how many of those a search hides: "Add checked anchors", "Add anchors
@@ -2036,14 +2115,58 @@ def row_matches(query, name, char, code, parts=()):
     return False
 
 
-def search_count(shown, total, query, noun=u"glyph"):
-    """What stands beside a search field: nothing without a query, else "3 of 341 glyphs shown"."""
-    if not (query or u"").strip():
+def search_count(shown, total, query, noun=u"glyph", filtered=False):
+    """What stands beside a search field: nothing without a query or a filter (filtered: Only high-value
+    glyphs), else "3 of 341 glyphs shown"."""
+    if not (query or u"").strip() and not filtered:
         return u""
     return u"%d of %s shown" % (shown, counted(total, noun))
 
 
-LEFT_OUT_ORDER = ("have", "script", "unbuildable", "several")
+VALUE_ONLY_LABEL = u"Only high-value glyphs"
+VALUE_ONLY_HELP = (u"Shows only the glyphs <i>Font Check</i> lists under <i>High-value missing glyphs</i> for this font "
+                   u"(the missing glyphs of the languages already within reach, which they complete), as <i>Check only "
+                   u"high-value glyphs</i> reads them; rows not shown keep their checks. Grayed until <i>Font Check</i> "
+                   u"has been asked, and when its data cannot be read.")
+
+
+VALUE_BUTTON_HELP = (u"Checks the glyphs <i>Font Check</i> lists under <i>High-value missing glyphs</i> for this font "
+                     u"(the missing glyphs of the languages already within reach, which they complete), and unchecks "
+                     u"the others shown: gaps are closed without new ones being opened. <i>Font Check</i>'s own "
+                     u"settings count where its window is open, else those it starts with. Grayed while <i>Font "
+                     u"Check</i> is asked, when its data cannot be read, and when no glyph shown is among them.")
+
+
+def high_value_text(count, bold=None):
+    """The log's line for Check only high-value glyphs (either tab)."""
+    bold = bold or (lambda text: text)
+    return (u"Checked %s <i>Font Check</i> lists as high-value (%s complete languages already within reach), and no "
+            u"other shown." % (bold(counted(count, u"glyph")), u"it helps" if count == 1 else u"they help"))
+
+
+def value_filter(box, wanted):
+    """The characters a list shows while Only high-value glyphs is ticked (Font Check's high-value set), or
+    None: the box unticked, absent, or the set not known (then nothing is hidden for it)."""
+    try:
+        on = box is not None and bool(_property(box, "checked"))
+    except Exception:
+        on = False
+    return set(wanted) if on and wanted is not None else None
+
+
+LEFT_OUT_ORDER = ("built", "have", "script", "unbuildable", "several")
+
+
+def on_circle(ch):
+    """A character as a line of text shows it: a mark alone on a dotted circle (as Font Check shows one), so
+    that it is not drawn on the parenthesis before it or on nothing: the top line read "the font has it
+    already ()" for a combining mark (the owner's report of 2026-11-16)."""
+    try:
+        if ch and unicodedata.category(ch[0]).startswith(u"M"):
+            return unichr_(DOTTED_CIRCLE) + ch
+    except (TypeError, ValueError):
+        pass
+    return ch
 
 
 def single_code(text):
@@ -2057,11 +2180,14 @@ def single_code(text):
     return None
 
 
-def left_out_given(given, recipes, font, absent_scripts=()):
+def left_out_given(given, recipes, font, absent_scripts=(), built=()):
     """[(reason, [characters])] of the characters handed over (Font Check's) that the list has no row
-    for, in LEFT_OUT_ORDER: "have" (the font has its glyph already: built since, or there all along),
-    "script" (a script the font has no letters of), "unbuildable" (no letter with marks, and no
-    combining mark, that Glyph Compose builds), "several" (not one character)."""
+    for, in LEFT_OUT_ORDER: "built" (built in this window: a combining mark has no row once the font has
+    it, and the top line said "the font has it already" just after building it, which read as Font Check
+    having handed over a glyph the font had: the owner's report of 2026-11-16), "have" (the font has its
+    glyph already: there all along), "script" (a script the font has no letters of), "unbuildable" (no
+    letter with marks, and no combining mark, that Glyph Compose builds), "several" (not one character).
+    built: the characters built in this window."""
     listed_chars = set(r.char for r in recipes)
     found = dict((reason, []) for reason in LEFT_OUT_ORDER)
     for item in given:
@@ -2071,7 +2197,7 @@ def left_out_given(given, recipes, font, absent_scripts=()):
         if code is None:
             reason = "several"
         elif font.by_code.get(code) and font.by_code[code] not in font.empty:
-            reason = "have"
+            reason = "built" if item in built else "have"
         elif code > 0xFFFF:  # (two code units on FontLab's Python: no script of Unicode's names, the same on both)
             reason = "unbuildable"
         elif script_of(item) in absent_scripts:
@@ -2099,7 +2225,8 @@ def left_out_sentence(total, left_out, names=None):
     reasons = []
     for reason, chars in left_out:
         n = len(chars)
-        text = {"have": u"the font has it already" if sole else u"the font has %d already" % n,
+        text = {"built": u"it was built here" if sole else u"%d %s built here" % (n, u"was" if n == 1 else u"were"),
+                "have": u"the font has it already" if sole else u"the font has %d already" % n,
                 "script": are(n, u"is of a script the font has no letters of", u"are of a script the font has no "
                                                                                   u"letters of"),
                 "unbuildable": are(n, u"is not built from a letter and marks", u"are not built from a letter and marks"),
@@ -2571,6 +2698,31 @@ SAMPLE_MARKS = {"latin": {"top": 0x0301, "bottom": 0x0323}, "greek": {"top": 0x0
 REPRESENTATIVE_MARKS = {"top": (0x0302, 0x0301, 0x0300, 0x0308, 0x0304, 0x0303, 0x030C, 0x0306, 0x030A, 0x0307),
                         "bottom": (0x0323, 0x0331, 0x0326, 0x0325, 0x032D, 0x0324, 0x0330),
                         "ogonek": (0x0328,), "horn": (0x031B,)}
+
+
+# A combining mark's twin on the other side (a comma below's is the turned comma above, as Latvian's ģ
+# draws it): what the reference draws for a mark glyph whose ink sits on the other side than its code
+# point's (Bellefair's uni0326.salt, a comma above, was drawn in the reference as U+0326, below: the
+# owner's report of 2026-11-16)
+OTHER_SIDE_TWINS = dict([(0x0326, 0x0312), (0x0323, 0x0307), (0x0331, 0x0304), (0x032D, 0x0302), (0x032E, 0x0306),
+                         (0x0330, 0x0303), (0x0324, 0x0308), (0x0325, 0x030A), (0x032C, 0x030C), (0x0329, 0x030D),
+                         (0x0332, 0x0305), (0x0316, 0x0300), (0x0317, 0x0301)])
+OTHER_SIDE_TWINS.update(dict((above, below) for below, above in list(OTHER_SIDE_TWINS.items())))
+DIACRITICAL_BLOCKS = ((0x0300, 0x036F), (0x1AB0, 0x1AFF), (0x1DC0, 0x1DFF), (0x20D0, 0x20FF), (0xFE20, 0xFE2F))
+
+
+def reference_code(code, side):
+    """The character the reference draws for a mark glyph of that code point whose ink is on side ("top",
+    "bottom"; its anchors' side): its own, else, where a combining diacritic's glyph sits on the other side
+    than Unicode's (an alternate form, uni0326.salt drawn above), its twin of that side (OTHER_SIDE_TWINS),
+    else None (none drawn). Other scripts' marks keep theirs (Thai's below vowels are no Latin class)."""
+    if not code or side not in ("top", "bottom") or not any(low <= code <= high for low, high in DIACRITICAL_BLOCKS):
+        return code
+    unicode_side = side_of(code)
+    if (side == "top") == (unicode_side in ("above", "topright", "right")):
+        return code
+    twin = OTHER_SIDE_TWINS.get(code)
+    return twin if twin is not None and side_of(twin) != unicode_side else None
 
 
 def letter_row(model, script, side, code):
@@ -3307,7 +3459,38 @@ def same_points(points, others, slack=0.51):
         return points is None and others is None
     if len(points) != len(others):
         return False
-    return all(abs(a[0] - b[0]) <= slack and abs(a[1] - b[1]) <= slack for a, b in zip(sorted(points), sorted(others)))
+    # Each point matched with one of the others within slack, not paired by sorting both lists: FontLab rounds
+    # coordinates to whole units, which reorders points whose x differ by under a unit (458.3 and 458.45 both
+    # 458, then sorted by y), and a sorted pairing set points 800 units apart (the live pass of 2026-11-16)
+    buckets = {}
+    for at, (x, y) in enumerate(others):
+        buckets.setdefault((int(math.floor(x)), int(math.floor(y))), []).append(at)
+    used = set()
+    for x, y in points:
+        found = None
+        for bx in (int(math.floor(x)) - 1, int(math.floor(x)), int(math.floor(x)) + 1):
+            for by in (int(math.floor(y)) - 1, int(math.floor(y)), int(math.floor(y)) + 1):
+                for at in buckets.get((bx, by), ()):
+                    if at not in used and abs(others[at][0] - x) <= slack and abs(others[at][1] - y) <= slack:
+                        found = at
+                        break
+                if found is not None:
+                    break
+            if found is not None:
+                break
+        if found is None:
+            return False
+        used.add(found)
+    return True
+
+
+def same_points_in_order(points, others, slack=0.51):
+    """Whether two lists of points are the same, point by point in order (node by node, contour by contour),
+    each within slack (FontLab's whole-unit rounding); None as same_points takes it."""
+    if points is None or others is None:
+        return points is None and others is None
+    return len(points) == len(others) and all(abs(a[0] - b[0]) <= slack and abs(a[1] - b[1]) <= slack
+                                              for a, b in zip(points, others))
 
 
 def font_glyph(package, name):
@@ -3552,7 +3735,7 @@ def relink_plan(ak, package, master, glyph, corrected):
     return (layer, shapes, planned, changed) if changed else None
 
 
-def relink_mirrored(fontlab, ak, package, masters, glyph, corrected):
+def relink_mirrored(fontlab, ak, package, masters, glyph, corrected, before_write=None):
     """A glyph's mirrored components pointed to their corrected glyphs, in every master or in none:
     corrected(source, axis) gives the corrected glyph's name (or raises MirrorError). Every master is
     planned first (relink_plan), and nothing is written unless all of them can be: one master set right
@@ -3574,6 +3757,8 @@ def relink_mirrored(fontlab, ak, package, masters, glyph, corrected):
             plans.append((master, layer, shapes, planned, changed, components))
     if not plans:
         return 0
+    if before_write is not None:  # (every master planned: the parts it points to recorded before it changes)
+        before_write()
     written = []  # (layer, its shapes as they were, its width) of each master taken apart so far
     for master, layer, shapes, planned, changed, components in plans:
         before, points = layer_box(ak, layer), layer_points(layer)
@@ -3709,6 +3894,53 @@ CORRECT_HELP = (u"Sets right the mirrored components of the font's glyphs listed
 REFERENCE_SLICE = 40  # entries of the reference font's chooser given their own font per turn of the event loop
 OWN_WRITE_SECONDS = 3.0  # a History step FontLab records this soon after the dialog's own write is that write's
 REVEALED_WAIT_MS = 700  # a row selected: the glyph listed to show it goes this long after (past a double-click)
+
+
+def existing_glyphs(package, names):
+    """The font's glyphs of these names (those it has; each once), for begin_write: every glyph a write's
+    step records (notify_changed's glyphs, touched) must have a state of its own before it, or FontLab's
+    Undo has nothing to put it back to. Glyph Compose recorded only the font (and the glyphs given a second
+    code point) before its writes, and its steps recorded the glyphs they touched, the font's own among
+    them, with no state of theirs before: undoing them made FontLab print "We have a problem with the
+    component 'dotlessi' in glyph 'i:Regular'" for such glyphs (the owner's report of 2026-11-16; the
+    cause is read from the History's rules, docs/FONTLAB7-API.md of FreeLab MCP, not proven live)."""
+    found, seen = [], set()
+    for name in names:
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        try:
+            glyph = package.findName(name)
+        except Exception:
+            glyph = None
+        if glyph is not None and not getattr(glyph, "isNull", False):
+            found.append(glyph)
+    return found
+
+
+PARTS_TITLE = u"FreeLab Glyph Compose (parts)"  # (the History step of the glyphs a write adds that others are made of)
+
+
+def record_parts(ak, fontlab, package, parts, title=PARTS_TITLE):
+    """The glyphs a write adds that others of the same write are made of (corrected glyphs for mirrored parts,
+    a glyph built here first), recorded as a History step of their own before any glyph made of them is
+    written: notify_changed's WriteStatus, or None (no such glyph: no step). One step holding both made
+    FontLab's Undo take the parts out first and print "Component 'R.mirrored' referenced in glyph
+    'uni042F:Black' does not exist in the font"; in a step of their own (the coordinator's probe C, Rubik,
+    2026-11-16), every Undo and Redo was clean: the first Undo takes the glyphs made of them back, the
+    second the parts."""
+    if not parts:
+        return None
+    return ak.notify_changed(fontlab, package, title, list(parts))
+
+
+def parts_step_text(names):
+    """The log's line for a write recorded in two steps (record_parts)."""
+    names = [name for name in names if name]
+    one = len(names) == 1
+    return (u"This takes two steps of <i>Edit &gt; Undo</i>: %s %s added in a step of %s own first, so that FontLab's "
+            u"Undo never takes out a glyph that others still point to." % (
+                u", ".join(names), u"was" if one else u"were", u"its" if one else u"their"))
 
 
 def undo_words(status, text):
@@ -3978,19 +4210,63 @@ def text_width(metrics, text):
         return 7.0 * len(text or u"")
 
 
+def split_caption(text):
+    """(head, tail) of a caption whose detail is in parentheses ("Suggested", "(13 right, 8 down)"); (text,
+    None) for one without."""
+    at = text.find(u" (")
+    if at > 0 and text.endswith(u")"):
+        return text[:at], text[at + 1:]
+    return text, None
+
+
+def _spread(items, width):
+    """items [(center, width)] in order, laid side by side: each as near its center as the others leave it,
+    LABEL_SPACE apart, within the editor; [left]."""
+    lefts = [min(max(finite(c) - w / 2.0, 4.0), max(width - 4.0 - w, 4.0)) for c, w in items]
+    for k in range(1, len(items)):  # (pushed right, then back left where the right edge is passed)
+        lefts[k] = max(lefts[k], lefts[k - 1] + items[k - 1][1] + LABEL_SPACE)
+    for k in range(len(items) - 1, -1, -1):
+        edge = width - 4.0 if k == len(items) - 1 else lefts[k + 1] - LABEL_SPACE
+        lefts[k] = max(4.0, min(lefts[k], edge - items[k][1]))
+    return lefts
+
+
+def _clash(placed):
+    return any(row == other_row and left < other + other_wide + LABEL_SPACE and other < left + wide + LABEL_SPACE
+               for k, (_, _, left, wide, row) in enumerate(placed) for (_, _, other, other_wide, other_row) in placed[:k])
+
+
 def caption_layout(spans, width, row_height=CAPTION_HEIGHT):
-    """[(left, width, row)] of captions under glyphs, spans [(center, text width)]: each centered under
-    its glyph, kept within the editor, and put on the next row down where it would overlap one before it
-    (two glyphs too narrow for their captions). The rows' count is max(row) + 1."""
-    placed = []
-    for center, wide in spans:
-        wide = max(1.0, min(finite(wide), width - 8.0))
-        left = min(max(finite(center) - wide / 2.0, 4.0), max(width - 4.0 - wide, 4.0))
-        row = 0
-        while any(at == row and left < other + other_wide + LABEL_SPACE and other < left + wide + LABEL_SPACE
-                  for other, other_wide, at in placed):
-            row += 1
-        placed.append((left, wide, row))
+    """[(span index, piece, left, width, row)] of captions under glyphs, spans [(center, text width, head
+    width, tail width)] (head and tail: split_caption's, None for a caption that has no tail): each whole
+    and centered under its glyph where all fit so on one row; else the captions stay on one row, those with
+    a detail in parentheses split, the detail on the row under its head ("Current" beside "Suggested", "(13
+    right, 8 down)" under "Suggested": the owner's report of 2026-11-16, where the whole of the second went
+    to a row of its own), the heads moved apart, side by side, as little as keeps them LABEL_SPACE apart.
+    Only where even so they cannot fit the editor does a caption go a row down. Piece: "whole", "head", or
+    "tail". The rows' count is max(row) + 1."""
+    spans = [tuple(span) + (None, None) if len(span) == 2 else tuple(span) for span in spans]
+    room = max(1.0, width - 8.0)
+    whole = [(finite(center), max(1.0, min(finite(wide), room))) for center, wide, _, _ in spans]
+    placed = [(k, "whole", left, whole[k][1], 0) for k, left in
+              enumerate([min(max(c - w / 2.0, 4.0), max(width - 4.0 - w, 4.0)) for c, w in whole])]
+    if not _clash(placed):
+        return placed
+    heads = [(c, max(1.0, min(finite(head if tail is not None else wide), room)))
+             for (c, _), (_, wide, head, tail) in zip(whole, spans)]
+    order = sorted(range(len(spans)), key=lambda k: heads[k][0])
+    lefts = dict(zip(order, _spread([heads[k] for k in order], width)))
+    placed = [(k, "head" if spans[k][3] is not None else "whole", lefts[k], heads[k][1], 0) for k in range(len(spans))]
+    tails = [k for k in order if spans[k][3] is not None]
+    tail_items = [(lefts[k] + heads[k][1] / 2.0, max(1.0, min(finite(spans[k][3]), room))) for k in tails]
+    placed += [(k, "tail", left, item[1], 1) for k, left, item in zip(tails, _spread(tail_items, width), tail_items)]
+    while _clash(placed):  # (an editor too narrow for them side by side: the last that clashes goes down a row)
+        for k in range(len(placed) - 1, 0, -1):
+            index, piece, left, wide, row = placed[k]
+            if any(row == r and left < o + ow + LABEL_SPACE and o < left + wide + LABEL_SPACE
+                   for _, _, o, ow, r in placed[:k]):
+                placed[k] = (index, piece, left, wide, row + 1)
+                break
     return placed
 
 
@@ -4094,18 +4370,22 @@ def make_editor(owner):
             return scale, x0, y0
 
         def caption_places(self, captions, scale, x0, width):
-            """[(role, text, left, width, row)] of the captions, under their glyphs (caption_layout)."""
+            """[(role, text, left, width, row)] of the captions, under their glyphs (caption_layout): a
+            caption split there is two, its head and, a row down, its detail in parentheses."""
             try:
                 metrics = QtGui.QFontMetrics(_property(self, "font"))
             except Exception:
                 metrics = None
-            spans = []
+            spans, pieces = [], []
             for role, text in captions:
                 start = self.origin_of(role) or 0.0
                 advance = next((a for _, a, r in self.scene["glyphs"] if r == role), 0.0)
-                spans.append((x0 + (start + advance / 2.0) * scale, text_width(metrics, text) + 4.0))
-            return [(role, text, left, wide, row) for (role, text), (left, wide, row)
-                    in zip(captions, caption_layout(spans, width))]
+                head, tail = split_caption(text)
+                pieces.append({"whole": text, "head": head, "tail": tail})
+                spans.append((x0 + (start + advance / 2.0) * scale, text_width(metrics, text) + 4.0,
+                              text_width(metrics, head) + 4.0, text_width(metrics, tail) + 4.0 if tail else None))
+            return [(captions[k][0], pieces[k][piece], left, wide, row)
+                    for k, piece, left, wide, row in caption_layout(spans, width)]
 
         def origin_of(self, role):
             x = 0.0
@@ -5041,14 +5321,29 @@ class AnchorPage(object):
                 self.glyphs[index].checked = item.checkState(0) == QtCore.Qt.Checked
 
     def check_all(self, on):
+        """The rows shown checked or unchecked, and the log says how many (checks_text): the glyphs (and rules)
+        whose check changed, read from the list before and after, never its rows: "Checked 80 glyphs (78 checked
+        in all)" counted rows that are no glyph's (live 2026-11-16)."""
         QtCore, QtGui = _qt()
         hidden = getattr(self, "hidden", ())
+        state = QtCore.Qt.Checked if on else QtCore.Qt.Unchecked
+        self.harvest()
+        before = set(index for index, g in enumerate(self.glyphs) if g.checked)
         self.tree.blockSignals(True)
-        for item in self.items():
-            if item.flags() & QtCore.Qt.ItemIsUserCheckable and int(item.data(0, QtCore.Qt.UserRole)) not in hidden:
-                item.setCheckState(0, QtCore.Qt.Checked if on else QtCore.Qt.Unchecked)  # (the rows shown only)
-        self.tree.blockSignals(False)
+        try:
+            for item in self.items():
+                if item.flags() & QtCore.Qt.ItemIsUserCheckable and int(item.data(0, QtCore.Qt.UserRole)) not in hidden:
+                    if item.checkState(0) != state:  # (the rows shown only)
+                        item.setCheckState(0, state)
+        finally:
+            self.tree.blockSignals(False)
         self.update_buttons()
+        self.harvest()
+        checked = [index for index, g in enumerate(self.glyphs) if g.checked]
+        changed = len(set(checked) - before) if on else len(before - set(checked))
+        noun = u"row" if any(g.role == "rule" for g in self.glyphs) else u"glyph"  # (substitutions are no glyphs)
+        self.owner.log.add(checks_text(on, changed, len(checked), sum(1 for index in checked if index in hidden),
+                                       self.ak.b, noun))
 
     def changed(self):
         QtCore, QtGui = _qt()
@@ -5252,34 +5547,47 @@ class AnchorPage(object):
             return u""
         if g.role == "ligature":
             return unichr_(g.code)
+        code = self.ref_code
         if g.role == "base":
             placed = g.placed()
             # (only the sides the letter has an anchor for: the reference shows what the list says it takes)
-            marks = [(side, m) for side, m in self.samples(g) if m is not None and m.code and side in placed]
+            marks = [(side, m) for side, m in self.samples(g) if m is not None and code(m) and side in placed]
             if not marks:
                 return unichr_(g.code)
             letter = unichr_(g.code)
             by_side = dict(marks)
             stack = [by_side[side] for side in ("bottom", "top") if side in by_side]  # (below first, as Unicode orders them)
             upper = self.stack_mark(by_side["top"]) if "top" in by_side and self.shows_stack(g) else None
-            if upper is not None and upper.code:
+            if upper is not None and code(upper):
                 stack.append(upper)
-            clusters = [letter + u"".join(unichr_(m.code) for m in stack)] if stack else []
-            clusters += [letter + unichr_(m.code) for side, m in marks if side not in ("top", "bottom")]
+            clusters = [letter + u"".join(unichr_(code(m)) for m in stack)] if stack else []
+            clusters += [letter + unichr_(code(m)) for side, m in marks if side not in ("top", "bottom")]
             return u" ".join(clusters)
+        if not code(g):  # (a mark drawn on the other side than its code point's, with no twin there)
+            return u""
         side, base = self.samples(g)[0]
         letter = unichr_(base.code) if base is not None and base.code else unichr_(DOTTED_CIRCLE)
-        text = letter + unichr_(g.code)
+        text = letter + unichr_(code(g))
         upper = self.stack_mark(g)
-        if upper is not None and upper.code:  # and with a mark on it: mark to mark
-            text += u" " + letter + unichr_(g.code) + unichr_(upper.code)
+        if upper is not None and code(upper):  # and with a mark on it: mark to mark
+            text += u" " + letter + unichr_(code(g)) + unichr_(code(upper))
         return text
+
+    def ref_code(self, m):
+        """The character the reference draws for a mark glyph (reference_code: its own, else its twin of
+        the side its ink is on), or None."""
+        return reference_code(m.code, SIDE_FAMILY.get(m.side, m.side)) if m is not None else None
 
     def draw_reference(self, g):
         text = self.reference_text(g)
         if not text:
             self.reference.clear()
-            self.reference_note.setText(u"" if g is None else u"%s is no character's glyph: no reference." % g.name)
+            if g is not None and g.code and g.role == "mark":
+                self.reference_note.setText(u"%s is drawn %s, where U+%04X goes %s: no reference." % (
+                    g.name, u"above" if SIDE_FAMILY.get(g.side, g.side) == "top" else u"below", g.code,
+                    side_of(g.code)))
+            else:
+                self.reference_note.setText(u"" if g is None else u"%s is no character's glyph: no reference." % g.name)
             return
         family = chosen = None
         # Composed first (one character where Unicode has one: drawn as designed), else as written
@@ -5505,7 +5813,7 @@ class AnchorPage(object):
         coded = []  # the features whose code was written (a text the font has already is not)
         # The dialog's own write: the History's next step is not an edit made in FontLab (end_write). This
         # tab did not say so, and its step was logged as "The font's History moved" (the owner's report)
-        if not self.owner.begin_write(package):
+        if not self.owner.begin_write(package, existing_glyphs(package, list(chosen))):
             return  # (nothing added: the reason in the log)
         try:
             for master in list(package.masters) or [self.master]:
@@ -5588,7 +5896,7 @@ class AccentsDialog(object):
         dialog.setWindowTitle("FreeLab Glyph Compose")
         dialog.setWhatsThis(HELP.replace(u"{reference}", bundled_family_text(ak)))
         self.ak.size_dialog(dialog)
-        outer = QtGui.QVBoxLayout(dialog)
+        outer = ak.window_layout(dialog)  # (scrolls on a small screen)
         # Tab bars over plain pages (a QTabWidget's themed page frames its buttons in light colors in dark
         # mode): the window's two (Diacritics, Glyph generation), and Diacritics' own two under the first
         self.top_tabs = QtGui.QTabBar()
@@ -5654,6 +5962,9 @@ class AccentsDialog(object):
                                        u"those you check are rebuilt (their glyphs' outlines in each master replaced "
                                        u"by the letter and marks as components; <i>Edit &gt; Undo</i> takes it back).")
         row.addWidget(self.existing_box)
+        self.value_only_box = QtGui.QCheckBox(VALUE_ONLY_LABEL)  # (beside the other choice of what is listed)
+        self.value_only_box.setWhatsThis(VALUE_ONLY_HELP)
+        row.addWidget(self.value_only_box)
         self.settings = read_settings(ak)
         # Off unless switched on (the owner's choice of 2026-11-15); its own key, so that a choice saved for
         # the box as it was (on at first, every gap closed at once) is not taken for this one
@@ -5796,13 +6107,7 @@ class AccentsDialog(object):
         self.none_button = helped(QtGui.QPushButton("Check none"), u"Unchecks every glyph shown (rows a search hides "
                                   u"keep their checks).")
         self.value_button = QtGui.QPushButton(u"Check only high-value glyphs")
-        self.value_button.setWhatsThis(u"Checks the glyphs <i>Font Check</i> lists under <i>High-value missing "
-                                       u"glyphs</i> for this font (the missing glyphs of the languages already within "
-                                       u"reach, which they complete), and unchecks the others shown: gaps are closed "
-                                       u"without new ones being opened. <i>Font Check</i>'s own settings count where "
-                                       u"its window is open, else those it starts with. Grayed while <i>Font "
-                                       u"Check</i> is asked, when its data cannot be read, and when no glyph shown "
-                                       u"is among them.")
+        self.value_button.setWhatsThis(VALUE_BUTTON_HELP)
         self.restore_button = QtGui.QPushButton("Restore suggestions")
         self.restore_button.setWhatsThis(u"Puts every check, and every diacritic moved by hand, back as the list first came.")
         self.glyph_window_button = QtGui.QPushButton("Show in Glyph window")
@@ -5848,6 +6153,7 @@ class AccentsDialog(object):
         self.top_tabs.connect("currentChanged(int)", self.switch_top_page)
         self.set_box.connect("currentIndexChanged(int)", lambda index: self.run())
         self.existing_box.connect("toggled(bool)", lambda on: self.run())
+        self.value_only_box.connect("toggled(bool)", lambda on: self.searched())
         self.compact_box.connect("toggled(bool)", lambda on: self.compact_toggled())
         self.correct_button.connect("clicked()", self.correct_mirrored)
         self.all_button.connect("clicked()", lambda: self.check_all(True))
@@ -5898,6 +6204,7 @@ class AccentsDialog(object):
         self.flagging = [ak.flag_menu(self.tree, self, self.flag_names, self.row_names),
                          ak.flag_menu(self.anchors.tree, self, lambda: [self.anchors.selected().name]
                                       if self.anchors.selected() is not None else [], self.anchors.row_names)]
+        self.keep_preview_room()
         self.show_preview_parts(None)  # (nothing listed yet, nothing selected: nothing shown empty)
         self.update_buttons()
         if self.generation_given:  # (Font Check handed over glyphs Glyph generation builds)
@@ -6284,7 +6591,8 @@ class AccentsDialog(object):
             self.left_out = []
             if self.given and self.set_box.currentIndex == 0:
                 self.left_out = left_out_given(self.given, self.recipes, font,
-                                               [script for script in LISTED_SCRIPTS if script not in present])
+                                               [script for script in LISTED_SCRIPTS if script not in present],
+                                               set(getattr(self, "just_built", ())))
             self.limit_cache = {}
             self.inks, self.placements = {}, {}
             self.inks[self.master], self.placements[self.master] = self.learn(package, self.master)
@@ -6410,15 +6718,16 @@ class AccentsDialog(object):
         borrowed = sum(1 for index in buildable if notes(index, u"for "))
         drafted = sum(1 for index in buildable if notes(index, u"draft"))
         b = ak.b
-        details = [text % b(count) for count, text in ((borrowed, u"%s with a mark below borrowed from above"),
-                                                      (drafted, u"%s with a mark drafted from punctuation")) if count]
-        details += room_details(*room_counts([self.recipes[index] for index in buildable]), bold=b)
-        self.status.setText(u"%s, master %s: %s can be built%s; %s %s a mark or letter the font lacks. Nothing is "
+        details = [text % b(counted(count, u"glyph")) for count, text in (
+            (borrowed, u"%s with a mark below borrowed from above"),
+            (drafted, u"%s with a mark drafted from punctuation")) if count]  # (counts in glyphs: the owner's report)
+        room = room_details(*room_counts([self.recipes[index] for index in buildable]), bold=b)
+        self.status.setText(u"%s, master %s: %s can be built%s; %s %s a mark or letter the font lacks.%s Nothing is "
                             u"made until you click %s." % (
                                 b(self.package.tfn), b(self.master), b(counted(len(buildable), u"glyph")),
                                 (u" (%s)" % u", ".join(details)) if details else u"",
                                 b(counted(len(lacking), u"other")), u"needs" if len(lacking) == 1 else u"need",
-                                ak.i(u"Build checked glyphs")) + (
+                                u"".join(u" " + sentence for sentence in room), ak.i(u"Build checked glyphs")) + (
                                 u" The font has no %s letters: theirs are not listed." % u" or ".join(self.absent)
                                 if getattr(self, "absent", None) else u"") + self.left_out_text())
         self.apply_search()  # (and the buttons)
@@ -6429,7 +6738,7 @@ class AccentsDialog(object):
         left_out = getattr(self, "left_out", None)
         if not left_out:
             return u""
-        bold = names or (lambda chars: u" ".join(self.ak.b(ch) for ch in chars))
+        bold = names or (lambda chars: u" ".join(self.ak.b(on_circle(ch)) for ch in chars))
         return u" " + left_out_sentence(len(self.given), left_out, bold)
 
     def say_left_out(self):
@@ -6437,12 +6746,15 @@ class AccentsDialog(object):
         once per answer, not at every reading of the font."""
         left_out = getattr(self, "left_out", None)
         have = dict(left_out or []).get("have", [])
+        built = dict(left_out or []).get("built", [])
 
         def names(chars):
-            return self.ak.glyph_links(chars) if chars and chars[0] in have else self.ak.html(u" ".join(chars))
+            if chars and (chars[0] in have or chars[0] in built):
+                return self.ak.glyph_links(chars)  # (the log draws a linked glyph as the font has it)
+            return self.ak.html(u" ".join(on_circle(ch) for ch in chars))
         text = self.left_out_text(names).strip()
-        if text and text != getattr(self, "left_out_said", None):
-            self.log.add(text, "warning")
+        if text and text != getattr(self, "left_out_said", None):  # (built here only: no warning, the build's outcome)
+            self.log.add(text, "info" if all(reason == "built" for reason, _ in left_out) else "warning")
         self.left_out_said = text or None
 
     def searched(self):
@@ -6479,6 +6791,7 @@ class AccentsDialog(object):
             self.update_buttons()
             return
         query = u"%s" % (_property(self.search, "text") or u"")
+        wanted = value_filter(getattr(self, "value_only_box", None), getattr(self, "high_value", None))
         shown = total = 0
         try:
             for row in range(self.tree.topLevelItemCount):
@@ -6492,7 +6805,7 @@ class AccentsDialog(object):
                     r = self.recipes[index]
                     # (the glyphs it is built from, not its notes: what placing it took, how it compares)
                     found = row_matches(query, r.name, r.char, r.code, [r.base or u""] + [
-                        part[0] for mark in r.marks for part in mark.parts])
+                        part[0] for mark in r.marks for part in mark.parts]) and (wanted is None or r.char in wanted)
                     total += 1
                     found_here += 1 if found else 0
                     if not found:
@@ -6500,7 +6813,7 @@ class AccentsDialog(object):
                     item.setHidden(not found)
                 shown += found_here
                 top.setHidden(not found_here)
-            self.search_label.setText(search_count(shown, total, query))
+            self.search_label.setText(search_count(shown, total, query, filtered=wanted is not None))
         except Exception as exc:  # (rows that cannot be hidden: every one counts as shown, and the list still fills)
             self.hidden = set()
             self.search_label.setText(u"")
@@ -6634,11 +6947,29 @@ class AccentsDialog(object):
                 name = corrected(source, axis)
                 asked.append(name)
                 return name
-            if not self.begin_write(package):
+            if not self.begin_write(package, existing_glyphs(package, [r.existing for r in targets])):
                 return  # (nothing corrected: the reason in the log)
-            status = None
+            status, parts, parts_status, second = None, [], None, False
+            recorded_parts = {"parts": None, "status": None}
+
+            def ensure_parts():  # (once, just before the first letter is written: a refusal records no step)
+                if recorded_parts["parts"] is None:
+                    recorded_parts["parts"] = list(touched)
+                    recorded_parts["status"] = record_parts(self.ak, self.fontlab, package, recorded_parts["parts"],
+                                                            u"FreeLab Glyph Compose mirrored components (parts)")
             try:
-                self.correct_targets(package, masters, targets, counting, asked, used, touched, done, failed)
+                # The corrected glyphs first, in a step of their own (record_parts), before any letter is pointed to
+                # them: undone in one step with the letters, FontLab printed that the letters' components did not exist
+                for r in targets:
+                    glyph = font_glyph(package, r.existing)
+                    for master in (masters if glyph is not None else []):
+                        try:
+                            relink_plan(self.ak, package, master, glyph, counting)  # (plans only: nothing written)
+                        except MirrorError:
+                            pass  # (said by the letter's own correction below)
+                self.correct_targets(package, masters, targets, counting, asked, used, touched, done, failed,
+                                     ensure_parts)
+                parts, parts_status = recorded_parts["parts"] or [], recorded_parts["status"]
                 unused = [name for name in made if name not in used]  # made for a glyph then left as it was
                 for name in unused:
                     try:
@@ -6647,11 +6978,16 @@ class AccentsDialog(object):
                         pass
                 touched = [glyph for glyph in touched if u"%s" % getattr(glyph, "name", u"") not in unused]
                 made = [name for name in made if name in used]
-                if touched:
+                later = [glyph for glyph in touched if all(glyph is not part for part in parts)]
+                second = bool(parts) and bool(later or unused)
+                if later or (parts and unused) or (touched and not parts):
                     status = self.ak.notify_changed(self.fontlab, package, u"FreeLab Glyph Compose mirrored components",
-                                                    touched)
+                                                    later if parts else touched)
             finally:
-                self.end_write(package, bool(touched))
+                self.end_write(package, bool(touched) or bool(parts))
+            if parts and second:
+                self.log.add(parts_step_text([u"%s" % getattr(glyph, "name", u"") for glyph in parts]))
+            report_write(parts_status, self.log)
             b, html = self.ak.b, self.ak.html
             if done:
                 self.log.add(corrected_text(len(done), len(made), b) + u": %s%s. The letters stay glyphs of "
@@ -6666,7 +7002,7 @@ class AccentsDialog(object):
         except Exception as exc:
             self.log.add(u"Could not correct the mirrored components: %s" % self.ak.html(exc), "error")
 
-    def correct_targets(self, package, masters, targets, counting, asked, used, touched, done, failed):
+    def correct_targets(self, package, masters, targets, counting, asked, used, touched, done, failed, before_write=None):
         """Each target's mirrored components set right (relink_mirrored), in every master or none: the
         letters set right added to done, those left as they were to failed with why, the glyphs written to
         touched, and the corrected glyphs they point to now to used."""
@@ -6677,7 +7013,7 @@ class AccentsDialog(object):
             changed, why, written = 0, None, False
             del asked[:]
             try:  # (every master or none: masters that differ would not interpolate)
-                changed = relink_mirrored(self.fontlab, self.ak, package, masters, glyph, counting)
+                changed = relink_mirrored(self.fontlab, self.ak, package, masters, glyph, counting, before_write)
                 used.update(asked)  # (the corrected glyphs a letter now points to)
             except MirrorError as exc:
                 why, written = u"%s" % exc, exc.written
@@ -6733,13 +7069,27 @@ class AccentsDialog(object):
                 if wide or not (0 <= index < len(self.recipes) and self.recipes[index].existing)]
 
     def check_all(self, on):
-        """Every row shown checked (checked_by_all) or unchecked (rows a search hides keep their checks)."""
+        """Every row shown checked (checked_by_all) or unchecked (rows a search hides keep their checks),
+        and the log says how many, and how many are checked in all, those a search hides included."""
         QtCore, QtGui = _qt()
+        state = QtCore.Qt.Checked if on else QtCore.Qt.Unchecked
+        changed = 0
         self.tree.blockSignals(True)
-        for item, _ in (self.checked_by_all() if on else self.shown_items()):
-            item.setCheckState(0, QtCore.Qt.Checked if on else QtCore.Qt.Unchecked)
-        self.tree.blockSignals(False)
+        try:
+            for item, _ in (self.checked_by_all() if on else self.shown_items()):
+                if item.checkState(0) != state:
+                    changed += 1
+                    item.setCheckState(0, state)
+        finally:
+            self.tree.blockSignals(False)
         self.update_buttons()
+        try:
+            self.harvest()  # (the checks as the list now has them, for the count)
+        except Exception:
+            pass
+        hidden = getattr(self, "hidden", ())
+        checked = [index for index, r in enumerate(self.recipes) if r.checked and not r.missing]
+        self.log.add(checks_text(on, changed, len(checked), sum(1 for index in checked if index in hidden), self.ak.b))
         self.went_on()  # (checks changed: a glyph listed to show it goes)
 
     # -- Compact diacritics to fit the line --------------------------------------------------
@@ -6793,7 +7143,9 @@ class AccentsDialog(object):
                 self.select_recipe(selected)
             self.select()
             self.restore_scroll()
-            self.log.add(compact_text(self.compact, len(kept)))
+            to_build = list_sections(self.recipes, self.existing_shift, getattr(self, "just_built", ()))[0][1]
+            compact, _, tall = room_counts([self.recipes[index] for index in to_build])  # (as the top line counts)
+            self.log.add(compact_text(self.compact, len(kept), compact if self.compact else tall))
         except Exception as exc:
             self.log.add(u"Could not switch compacting: %s" % self.ak.html(exc), "error")
 
@@ -6870,7 +7222,12 @@ class AccentsDialog(object):
                 return
             self.high_value = self.read_high_value()
             self.high_value_key = self.high_value_stamp()
+            if value_filter(getattr(self, "value_only_box", None), self.high_value) is not None:
+                self.apply_search()  # (Only high-value glyphs ticked: the list follows the set read now)
             self.update_buttons()
+            generation = getattr(self, "generation", None)
+            if generation:  # (Glyph generation's tab reads the same set: its buttons and its filter follow)
+                generation.high_value_read()
         except Exception:
             self.high_value = None
 
@@ -6898,10 +7255,7 @@ class AccentsDialog(object):
                 self.tree.blockSignals(False)
             self.update_buttons()
             self.went_on()  # (checks changed: a glyph listed to show it goes)
-            count = sum(1 for on in wanted.values() if on)
-            self.log.add(u"Checked %s <i>Font Check</i> lists as high-value (%s complete languages already within "
-                         u"reach), and no other shown." % (self.ak.b(counted(count, u"glyph")),
-                                                           u"it helps" if count == 1 else u"they help"))
+            self.log.add(high_value_text(sum(1 for on in wanted.values() if on), self.ak.b))
         except Exception as exc:
             self.log.add(u"Could not check the high-value glyphs: %s" % self.ak.html(exc), "error")
 
@@ -6943,6 +7297,9 @@ class AccentsDialog(object):
         self.correct_button.setText(correct_button_text(len(correctable)))
         wanted = self.high_value_checks()  # (grayed when it would change nothing, as the others are)
         ak.enable(self.value_button, any(self.recipes[index].checked != on for index, on in wanted.items()))
+        box = getattr(self, "value_only_box", None)  # (once Font Check's set is known; ticked, it can be unticked)
+        ak.enable(box, box is not None and (getattr(self, "high_value", None) is not None and self.package is not None
+                                            or bool(_property(box, "checked"))))
         ak.enable(self.restore_button, any(r.adjust or self.first_checks.get(r.char, r.checked) != r.checked
                                            for r in self.recipes))
         r = self.selected()
@@ -6955,15 +7312,12 @@ class AccentsDialog(object):
         built = self.kerning_names()
         ak.enable(self.kerning_button, bool(built))
         self.kerning_button.setText(u"Check kerning of this glyph" if len(built) == 1 else u"Check kerning of these glyphs")
-        self.propagate_button.setText(u"Apply to %s" % counted(len(set(id(t) for t, _, _ in targets)), u"related letter")
-                                      if targets else u"Apply to related letters")
-        self.reset_marks_button.setText(u"Reset diacritic" if r is not None and len(r.marks) == 1 else u"Reset diacritics")
+        self.propagate_button.setText(propagate_text(len(set(id(t) for t, _, _ in targets))))
+        self.reset_marks_button.setText(reset_text(len(r.marks) if r is not None else 0))
         index = self.line_up_index(r)
         ak.enable(self.line_up_button, index is not None)
         kind = attached_kind(r.marks[index]) if index is not None else None
-        self.line_up_button.setText(u"Line up diacritics" if index is None else (
-            u"Line up %ss" % ("vertical caron" if kind == "vertical caron" else kind) if kind else
-            u"Line up diacritics %s" % r.marks[index].side))
+        self.line_up_button.setText(line_up_text(kind, r.marks[index].side if index is not None else None))
 
     def line_up_index(self, r):
         """The mark of r to line others up with: the one selected in the editor, else its first above or
@@ -7070,6 +7424,41 @@ class AccentsDialog(object):
                          u"first: <i>%s</i>, %s)." % (b(letters), b(others), here, why))
         else:
             self.log.add(u"From Font Check: %s, on <i>Glyph generation</i>." % b(others))
+
+    def hand_over_state(self):
+        """(whether the window still lists what Font Check handed over, the glyphs handed over still to be
+        built): the Diacritics tab on From Font Check (where it was handed letters), Glyph generation's List
+        on From Font Check (where it was handed others; a tab not opened yet lists them so), and the handed
+        glyphs a tab can still build that the font lacks. (False, []) for a window opened from the menu."""
+        given, others = list(getattr(self, "given", None) or []), list(getattr(self, "generation_given", None) or [])
+        if not given and not others:
+            return False, []
+        showing = not given or _property(self.set_box, "currentIndex") == 0
+        left = [r.char for r in self.recipes if r.char in given and not r.missing and not r.existing]
+        generation = getattr(self, "generation", None)
+        if others:
+            if generation:
+                showing = showing and generation.listed_codes() is not None
+                left += [r.char for r in generation.rows if r.char in others and r.layout is not None and not r.existing]
+            else:  # (its tab not opened yet: what the font still lacks of them is left)
+                left += [ch for ch in others if self.package is None or self.package.findUnicode(ord(ch)) is None]
+        return showing, left
+
+    def back_to_font_check(self, failed=False):
+        """After a build from Font Check's hand-over: Font Check opened again in this window's place (the
+        owner's report of 2026-11-16: back to it once its glyphs are built), when the window still lists
+        what was handed over, nothing of it is left to build, and nothing failed (else the window stays, its
+        log saying what is left). Font Check reads the font afresh, the glyphs built no longer missing.
+        Whether it was asked to."""
+        try:
+            showing, left = self.hand_over_state()
+            if not back_to_font_check_due(showing, left, failed):
+                return False
+            QtCore, QtGui = _qt()
+            QtCore.QTimer.singleShot(0, lambda: self.ak.open_tool(FONT_CHECK_TITLE, self.dialog))
+            return True
+        except Exception:
+            return False
 
     def switch_top_page(self, index):
         """Diacritics or Glyph generation shown; Glyph generation's tab made, and its list read, as it is
@@ -7285,6 +7674,37 @@ class AccentsDialog(object):
         cache[key] = result
         return result
 
+    def keep_preview_room(self):
+        """The parts of ROOM_KEPT keep their room when hidden (QSizePolicy's retainSizeWhenHidden, as Auto
+        Kerning's _keep_room_when_hidden sets it, without its fallback of disabling the widget): Compact
+        diacritics to fit the line and the line beside it stay where they are, whatever is selected."""
+        for name in ROOM_KEPT:
+            widget = getattr(self, name, None)
+            if widget is not None:
+                try:
+                    policy = _property(widget, "sizePolicy")
+                    policy.setRetainSizeWhenHidden(True)
+                    widget.setSizePolicy(policy)
+                except Exception:
+                    pass  # (an older Qt: the parts move as before)
+        # The buttons beside the box as wide as their widest text: their texts change with the row selected
+        # ("Apply to 3 related letters", "Line up diacritics above"), and their room kept while hidden was the
+        # width of the text they last had, so the box still moved 33 pixels (live, 2026-11-16)
+        for name, texts in room_texts().items():
+            button = getattr(self, name, None)
+            if button is None:
+                continue
+            try:
+                shown = _property(button, "text")
+                widths = []
+                for text in texts:
+                    button.setText(text)
+                    widths.append(int(_property(button, "sizeHint").width()))
+                button.setText(shown)
+                button.setMinimumWidth(max(widths))
+            except Exception:
+                pass
+
     def show_preview_parts(self, r, placed=True, related=True):
         """The preview's parts shown only where they show something (the owner's report of 2026-11-14:
         "Same diacritic:" and the Reference heading over an empty area, with no glyph selected): the
@@ -7387,13 +7807,20 @@ class AccentsDialog(object):
         # not one once stopped everything after it (the line under the picture kept the last number it
         # could write, and the buttons never heard the mark had moved, Reset diacritic staying grayed)
         dx, dy, kx, ky = clamped_adjust(change)
+        started = getattr(self, "adjust_from", None)  # (r, index, its adjustment as the move began)
+        if started is None or started[0] is not r or started[1] != index:
+            started = self.adjust_from = (r, index, list(r.adjust[index]) if index in r.adjust else None)
         if abs(dx) < 0.01 and abs(dy) < 0.01 and abs(kx - 1) < 1e-4 and abs(ky - 1) < 1e-4:
             r.adjust.pop(index, None)
         else:
             r.adjust[index] = [round(dx, 2), round(dy, 2), round(kx, 4), round(ky, 4)]
         self.sync_compact([r])
+        moved = final and r.adjust.get(index) != started[2]
         if final:
             self.held_font = None
+            self.adjust_from = None
+            if moved and not r.missing:
+                r.checked = True  # moved or scaled by hand: to be built (the owner's report of 2026-11-16)
         elif getattr(self, "held_font", None) is None:  # the font read once for the whole drag, not at every move
             self.held_font = self.font(self.package)
         try:
@@ -7407,6 +7834,8 @@ class AccentsDialog(object):
                     if item is not None:
                         self.tree.blockSignals(True)
                         self.refresh_item(item, r)
+                        if moved and r.checked and item.flags() & _qt()[0].Qt.ItemIsUserCheckable:
+                            item.setCheckState(0, _qt()[0].Qt.Checked)  # (so that Build checked glyphs builds it)
                         self.tree.blockSignals(False)
                 finally:
                     self.update_buttons()
@@ -7874,6 +8303,9 @@ class AccentsDialog(object):
         self.draw_reference(self.selected())
         if self.anchors_read:
             self.anchors.draw_reference(self.anchors.selected())
+        generation = getattr(self, "generation", None)
+        if generation:  # (Glyph generation's reference, in the same font)
+            generation.draw_reference(generation.selected())
 
     def theme_changed(self):
         """Dark mode switched, either way (the shared module's theme_switched, once the rows' pictures and
@@ -8006,19 +8438,33 @@ class AccentsDialog(object):
         used = set()  # the corrected glyphs a glyph built points to
         corrected = self.corrector(package, masters, helpers, touched)
         changing = None  # the glyph whose layers are being changed, for touched should an error stop the build
-        if not self.begin_write(package):
+        if not self.begin_write(package, existing_glyphs(package, [r.name for r in chosen])):
             return  # (nothing built: the reason in the log)
+        # The corrected glyphs the letters' mirrored parts point to are made first and recorded as a step of
+        # their own, before any letter made of them is written (record_parts: FontLab's Undo of one step holding
+        # both printed that the letters' components did not exist, live 2026-11-16)
+        recorded_parts = {"parts": None, "status": None}
+
+        def ensure_parts():  # (once, just before the first change to a letter: a build refused records no step)
+            if recorded_parts["parts"] is None:
+                recorded_parts["parts"] = list(touched)
+                recorded_parts["status"] = record_parts(self.ak, fontlab, package, recorded_parts["parts"])
         try:
-            for r in chosen:
+            self.make_helpers(chosen, masters, metrics, corrected)
+        except Exception as exc:
+            error = exc
+        try:
+            for r in (chosen if error is None else []):
                 glyph = package.findName(r.name)
                 if glyph is not None and not is_empty(glyph) and not r.existing:
                     skipped.append(r.char)  # made meanwhile
                     continue
                 added = glyph is None
+                if glyph is None and package.findUnicode(r.code) is not None:
+                    skipped.append(r.char)
+                    continue
+                ensure_parts()
                 if glyph is None:
-                    if package.findUnicode(r.code) is not None:
-                        skipped.append(r.char)
-                        continue
                     new = new_glyph(fontlab, package, r.name)
                     # (its code point set once its layers are made: given before, FontLab kept none of the
                     # layers made on it, live in Tsukimi Rounded 2026-11-11)
@@ -8138,10 +8584,19 @@ class AccentsDialog(object):
         touched = [glyph for glyph in touched if u"%s" % getattr(glyph, "name", u"") not in unused]
         helpers = [name for name in helpers if name in used]
         status = None
+        parts, parts_status = recorded_parts["parts"] or [], recorded_parts["status"]
+        later = [glyph for glyph in touched if all(glyph is not part for part in parts)]
         try:
-            status = self.ak.notify_changed(fontlab, package, u"FreeLab Glyph Compose", touched)
+            # (nothing changed, every glyph refused: no History step of nothing, live 2026-11-16; parts taken out
+            # again after their own step: a step that records it)
+            second = bool(parts) and bool(later or unused)
+            if later or (parts and unused) or (touched and not parts):
+                status = self.ak.notify_changed(fontlab, package, u"FreeLab Glyph Compose", later if parts else touched)
         finally:
-            self.end_write(package, bool(touched))
+            self.end_write(package, bool(touched) or bool(parts))
+        if parts and second:
+            self.log.add(parts_step_text([u"%s" % getattr(glyph, "name", u"") for glyph in parts]))
+        report_write(parts_status, self.log)
         b = self.ak.b
         if made:
             one = len(made) == 1
@@ -8207,6 +8662,43 @@ class AccentsDialog(object):
         self.run()
         if getattr(self, "generation", None):  # (Glyph generation's list reads the font again too)
             self.generation.run()
+        if made or rebuilt:  # (from Font Check's hand-over, all of it built: back to Font Check)
+            self.back_to_font_check(bool(failed or skipped or partial or mirrored) or error is not None)
+
+    def make_helpers(self, chosen, masters, metrics, corrected):
+        """The corrected glyphs the chosen letters' mirrored parts will point to, made now (corrected: the
+        build's), as the build plans each letter, before any letter is written (record_parts). A letter the
+        build will skip (made meanwhile) is passed over; what cannot be made is said by the letter's build."""
+        package, wanted = self.package, {}  # ((source, axis): whether every master it is planned in can be set right)
+        for r in chosen:
+            glyph = package.findName(r.name)
+            if glyph is not None and not is_empty(glyph) and not r.existing:
+                continue
+            if glyph is None and package.findUnicode(r.code) is not None:
+                continue
+            for master in masters:
+                ink, placement = self.inks[master], self.placements[master]
+                if ink(r.base) is None:
+                    continue
+                checked = r.checked
+                parts, width = place(r, ink, placement, metrics)
+                r.checked = checked
+                if parts is None:
+                    continue
+                if r.standalone:
+                    parts, width = standalone_parts(parts, ink), 0
+                for part in parts:
+                    name, sx, sy, dx, dy = unwrapped(package, master, *part)
+                    if reverses_direction(sx, sy):
+                        key = (name, mirror_axis(sx, 0.0, 0.0, sy))
+                        # (set right only where every master can be, as the build does: else unused, never made)
+                        wanted[key] = wanted.get(key, True) and source_mirror(self.ak, package, master, *key) is not None
+        for key, every in wanted.items():
+            if every:
+                try:
+                    corrected(*key)
+                except MirrorError:
+                    pass  # (the letter's build writes the mirrored component and says so)
 
     def why_empty(self, r, masters, placed):
         """Why a recipe came out with nothing drawn: the first of its glyphs with no outline, master by
@@ -8226,6 +8718,15 @@ class AccentsDialog(object):
         self.dialog.show()
         self.dialog.raise_()
         QtCore.QTimer.singleShot(50, self.run)
+
+
+FONT_CHECK_TITLE = u"Font Check"  # (its entry in Scripts > FreeLab: ak.open_tool opens it in this window's place)
+
+
+def back_to_font_check_due(showing, left, failed):
+    """Whether a build from Font Check's hand-over goes back to Font Check: the window still lists what was
+    handed over (showing), none of it is left to build (left), and the build failed nowhere."""
+    return bool(showing) and not left and not failed
 
 
 def generation_table(ak):

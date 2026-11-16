@@ -817,6 +817,182 @@ class InfoTests(unittest.TestCase):
         self.assertAlmostEqual(fp.fit_scale((300, 300), (600, 800)), 0.375, msg="the page's height decides")
 
 
+class SettleTests(unittest.TestCase):
+    """Sizes typed, then Save PDF or Show in Glyph window clicked at once: the proof those sizes make is laid
+    out first (the rebuild timer still waiting is run now), not the one before them."""
+
+    class Timer(object):
+        def __init__(self, active):
+            self.active, self.stopped = active, False
+
+        def isActive(self):
+            return self.active
+
+        def stop(self):
+            self.active, self.stopped = False, True
+
+    def dialog(self, waiting):
+        made = []
+
+        class Stand(object):
+            busy, proof, package = False, None, None
+            rebuild_timer = self.Timer(waiting)
+
+            def rebuild(self):
+                made.append("rebuild")
+
+            def selected_page(self):
+                return None
+        for name in ("settle", "save_pdf", "show_in_glyph_window"):
+            setattr(Stand, name, fp.ProofDialog.__dict__[name])
+        return Stand(), made
+
+    def test_a_rebuild_still_waiting_is_done_before_saving(self):
+        saved = fp._qt
+        try:
+            fp._qt = lambda: (None, None)
+            stand, made = self.dialog(True)
+            stand.save_pdf()
+        finally:
+            fp._qt = saved
+        self.assertEqual(made, ["rebuild"])
+        self.assertTrue(stand.rebuild_timer.stopped)
+
+    def test_and_before_showing_in_a_glyph_window(self):
+        stand, made = self.dialog(True)
+        stand.show_in_glyph_window()
+        self.assertEqual(made, ["rebuild"])
+
+    def test_nothing_waiting_nothing_rebuilt(self):
+        stand, made = self.dialog(False)
+        stand.show_in_glyph_window()
+        self.assertEqual(made, [])
+
+
+class ZoomTests(unittest.TestCase):
+    """The owner asked what zoom in the preview would cost (report 162): a Zoom dropdown, Ctrl with the wheel,
+    Ctrl+plus and Ctrl+minus. Fit page as before; a share of the printed size otherwise, scrolled."""
+
+    A4 = fp.page_size("A4")
+
+    def test_zoom_scales(self):
+        self.assertEqual([label for _, label in fp.ZOOMS][:4], [u"Fit page", u"50%", u"75%", u"100%"])
+        self.assertAlmostEqual(fp.zoom_scale(None, (300, 300), (600, 800)), 0.375, msg="Fit page: as before")
+        self.assertAlmostEqual(fp.zoom_scale(1.0, (300, 300), (600, 800)), 96.0 / 72.0, msg="100%: as printed")
+        self.assertAlmostEqual(fp.zoom_scale(2.0, (300, 300), (600, 800)), 2 * 96.0 / 72.0)
+
+    def test_steps(self):
+        index = dict((zoom, i) for i, (zoom, _) in enumerate(fp.ZOOMS))
+        self.assertEqual(fp.next_zoom(index[None], 1, 0.6), index[0.75], "from Fit page: the first zoom past it")
+        self.assertEqual(fp.next_zoom(index[None], -1, 0.6), index[0.5])
+        self.assertEqual(fp.next_zoom(index[None], -1, 0.4), index[None], "nothing smaller: as it is")
+        self.assertEqual(fp.next_zoom(index[1.0], 1, 0.6), index[1.5])
+        self.assertEqual(fp.next_zoom(index[0.5], -1, 0.6), index[None], "past the smallest: Fit page")
+        self.assertEqual(fp.next_zoom(index[4.0], 1, 0.6), index[4.0], "past the largest: as it is")
+
+    def test_a_zoomed_page_is_drawn_larger_and_never_too_large(self):
+        made = []
+
+        class Pixmap(object):
+            def __init__(self, width, height):
+                self.size = (width, height)
+                made.append(self)
+
+            def fill(self, color):
+                pass
+
+            def setDevicePixelRatio(self, ratio):
+                self.ratio = ratio
+
+        class Renderer(object):
+            rule = no_brush = None
+
+            def draw(self, painter, page, scale):
+                self.scale = scale
+
+        gui = _FakeQtModule()
+        gui.classes["QPixmap"] = Pixmap
+        fitted = fp.page_pixmap(None, gui, None, Renderer(), (300, 400), self.A4, None)
+        zoomed = fp.page_pixmap(None, gui, None, Renderer(), (300, 400), self.A4, None, zoom=2.0)
+        self.assertLess(fitted.size[0], 300 + 1)
+        self.assertEqual(zoomed.size, (int(self.A4[0] * 2 * 96 / 72.0), int(self.A4[1] * 2 * 96 / 72.0)))
+        crisp = fp.page_pixmap(None, gui, None, Renderer(), (300, 400), self.A4, None, ratio=2.0, zoom=4.0)
+        self.assertLessEqual(crisp.size[0] * crisp.size[1], fp.ZOOM_MOST_PIXELS * 1.01, "coarser, not larger")
+        self.assertGreaterEqual(crisp.size[0], int(self.A4[0] * 4 * 96 / 72.0) - 1, "the device pixels given up first")
+
+    def test_fontlabs_zoom_keys_are_proofs_while_it_is_active(self):
+        """Second live pass: FontLab's View zoom actions have Ctrl+plus, Ctrl+minus, and Ctrl+0 as application
+        shortcuts, matched before any widget sees the key: each Ctrl+plus zoomed FontLab's view, not Proof's.
+        While Proof is active, those actions give the keys up; they get them back after, always."""
+        class Sequence(object):
+            def __init__(self, text):
+                self.text = text
+
+            def toString(self):
+                return self.text
+
+        class Action(object):
+            def __init__(self, name, keys):
+                self.objectName, self.keys = name, [Sequence(key) for key in keys]
+
+            def shortcuts(self):
+                return list(self.keys)
+
+            def setShortcuts(self, keys):
+                self.keys = list(keys)
+
+            def now(self):
+                return [key.toString() for key in self.keys]
+
+        class Main(object):
+            def __init__(self, actions):
+                self.actions = actions
+
+            def findChildren(self, kind):
+                return list(self.actions)
+
+        gui = type("QtGui", (), {"QAction": Action, "QKeySequence": Sequence})
+        zoom_in, fit, undo = Action(u"actionZoomIn", [u"Ctrl++", u"Ctrl+="]), Action(u"actionZoomFit", [u"Ctrl+0", u"F9"]), \
+            Action(u"actionUndo", [u"Ctrl+Z"])
+        main = Main([zoom_in, fit, undo])
+        self.addCleanup(lambda: sys.__dict__.pop(fp.TAKEN_KEYS, None))
+        self.assertTrue(fp.take_zoom_keys(gui, main))
+        self.assertEqual((zoom_in.now(), fit.now(), undo.now()), ([], [u"F9"], [u"Ctrl+Z"]), "only the zoom keys")
+        self.assertFalse(fp.take_zoom_keys(gui, main), "taken already: as they are")
+        self.assertTrue(fp.give_back_zoom_keys(gui, Main([Action(u"actionZoomIn", []), fit, undo])),
+                        "given back to the actions found again by name")
+        self.assertEqual(fit.now(), [u"Ctrl+0", u"F9"])
+        self.assertFalse(fp.give_back_zoom_keys(gui, main), "nothing left to give back")
+        # A key given to the action meanwhile (FontLab's or the user's) is kept
+        fp.take_zoom_keys(gui, main)
+        zoom_in.setShortcuts([Sequence(u"Ctrl+=")])
+        fp.give_back_zoom_keys(gui, main)
+        self.assertEqual(zoom_in.now(), [u"Ctrl+="])
+        self.assertIsNone(getattr(sys, fp.TAKEN_KEYS, None))
+
+    def test_the_dropdown_lists_are_left_alone(self):
+        """Report 162: the Proof dropdown's list, a window of its own, was mapped by dark mode (light text with
+        ClearType's colored fringes): every dropdown's list asks to be left alone."""
+        class View(object):
+            def setProperty(self, name, value):
+                self.props = {name: value}
+
+        class Box(object):
+            def __init__(self):
+                self.list = View()
+
+            def view(self):
+                return self.list
+
+        box = Box()
+        self.assertIs(fp.leave_list_alone(box), box.list)
+        self.assertEqual(box.list.props, {fp.LEAVE_ALONE_PROP: True})
+        self.assertIsNone(fp.leave_list_alone(object()), "no list: nothing")
+        sys.path.insert(0, os.path.join(HERE, os.pardir, "kerning"))
+        import freelab_auto_kerning as ak
+        self.assertEqual(fp.LEAVE_ALONE_PROP, ak.LEAVE_ALONE_PROP, "the name dark mode reads")
+
+
 class ProofTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -1513,6 +1689,99 @@ class DialogTests(unittest.TestCase):
         dialog.history_moved()
         self.assertEqual(dialog.proof.masters, [u"Regular", u"Bold"])
 
+    def test_zoom_by_dropdown_wheel_and_keys(self):
+        qt = sys.modules["PythonQt"]
+        saved = qt.QtCore.classes.get("Qt")
+        qt.QtCore.classes["Qt"] = type("Qt", (Anything,), {"ControlModifier": 0x04000000, "Key_Plus": 0x2B,
+                                                            "Key_Equal": 0x3D, "Key_Minus": 0x2D, "Key_0": 0x30})
+        try:
+            dialog = self.dialog(fake_font())
+            dialog.languages = []
+            dialog.rebuild()
+            dialog.page_list.currentRow = 0
+            box = dialog.zoom_box
+            box.currentIndex = 0
+            shown = []
+            dialog.show_page = lambda: shown.append(dialog.zoom())
+            box.setCurrentIndex = lambda index: (setattr(box, "currentIndex", index), dialog.show_page())
+
+            class Event(object):
+                def __init__(self, kind, ctrl=True, key=0, delta=0):
+                    self.kind, self.ctrl, self.code, self.delta = kind, ctrl, key, delta
+
+                def type(self):
+                    return self.kind
+
+                def modifiers(self):
+                    return 0x04000000 if self.ctrl else 0
+
+                def key(self):
+                    return self.code
+
+                def angleDelta(self):
+                    return type("Point", (), {"y": lambda _: self.delta})()
+
+            dialog.room = lambda: (300, 400)  # (the page fitted at about 36%)
+            self.assertTrue(dialog.zoom_event(Event(31, delta=120)), "Ctrl with the wheel: taken")
+            self.assertEqual(shown[-1], 0.5, "from Fit page, the first zoom past the fitted one")
+            self.assertTrue(dialog.zoom_event(Event(6, key=0x2B)))
+            self.assertEqual(shown[-1], 0.75)
+            self.assertTrue(dialog.zoom_event(Event(6, key=0x2D)))
+            self.assertEqual(shown[-1], 0.5)
+            self.assertTrue(dialog.zoom_event(Event(6, key=0x30)))
+            self.assertIsNone(shown[-1], "Ctrl+0: Fit page")
+            self.assertFalse(dialog.zoom_event(Event(31, ctrl=False, delta=120)), "the wheel alone scrolls")
+            self.assertFalse(dialog.zoom_event(Event(6, key=0x41)))
+            # Live pass: the keys did nothing (FontLab's own View zoom shortcuts took them, as they took Ctrl+Z),
+            # and neither did the wheel. The window takes the keys at ShortcutOverride (accepted, no zoom yet),
+            # then zooms on the key press; the filter on the window, the scroll area, its viewport, and the page
+            # passes each of them on
+            accepted = []
+            override = Event(51, key=0x2B)
+            override.accept = lambda: accepted.append(True)
+            count = len(shown)
+            self.assertTrue(dialog.zoom_event(override), "taken before FontLab's shortcut sees it")
+            self.assertEqual((accepted, len(shown)), ([True], count), "accepted, not zoomed yet")
+            self.assertFalse(dialog.zoom_event(Event(51, key=0x41)), "another key: FontLab's")
+            watcher = [w for w in dialog.keep if callable(getattr(type(w), "eventFilter", None))][0]
+            self.assertTrue(watcher.eventFilter(dialog.dialog, override))
+            self.assertTrue(watcher.eventFilter(dialog.preview, Event(6, key=0x3D)))
+            self.assertEqual(shown[-1], 0.5, "Ctrl+= zooms in")
+            # The window takes FontLab's zoom keys while it is active, and gives them back after
+            calls = []
+            dialog.zoom_keys = calls.append
+            for kind in (24, 25, 24, 18, 24, 19):
+                watcher.eventFilter(dialog.dialog, Event(kind))
+            watcher.eventFilter(dialog.preview, Event(24))  # (a child's activation: not the window's)
+            self.assertEqual(calls, [True, False, True, False, True, False])
+
+            # PythonQt's other ways: values for methods, Qt enums and flags for numbers, the older wheel delta
+            class Flag(object):
+                def __init__(self, value):
+                    self.value = value
+
+                def __int__(self):
+                    return self.value
+
+            class ValueEvent(object):
+                def __init__(self, kind, mods, delta):
+                    self.type, self.modifiers = Flag(kind), Flag(mods)
+                    self.angleDelta = type("Point", (), {"y": delta})()
+
+            self.assertEqual(fp.zoom_command(ValueEvent(31, 0x04000000, -120)), -1)
+            self.assertIsNone(fp.zoom_command(ValueEvent(31, 0, -120)))
+            older = type("Older", (), {"type": lambda self: 31, "modifiers": lambda self: 0x04000000,
+                                        "delta": lambda self: 120})()
+            self.assertEqual(fp.zoom_command(older), 1)
+            dialog.page_list.currentRow = -1
+            dialog.selected_page = lambda: None
+            self.assertFalse(dialog.zoom_event(Event(51, key=0x2B)), "no page: the key stays FontLab's")
+        finally:
+            if saved is None:
+                qt.QtCore.classes.pop("Qt", None)
+            else:
+                qt.QtCore.classes["Qt"] = saved
+
     def test_a_page_of_one_master_names_it_in_parentheses(self):
         dialog = self.dialog(fake_font())
         dialog.languages = []
@@ -1650,8 +1919,9 @@ class DialogTests(unittest.TestCase):
             text for text in set(texts) if texts.count(text) > 1))
         named = {"masters": dialog.masters_box, "page": dialog.page_box, "pairs": dialog.pairs_box,
                  "scope": dialog.scope_box, "colors": dialog.colors_box, "languages": dialog.languages_box,
-                 "waterfall": dialog.waterfall_edit, "text": dialog.text_edit}
+                 "waterfall": dialog.waterfall_edit, "text": dialog.text_edit, "zoom": dialog.zoom_box}
         self.assertEqual(sorted(dialog.captions), sorted(named))
+        self.assertIn(u"<i>Ctrl</i> with the mouse wheel", dialog.zoom_box.whats, "the zoom's keys said")
         for name, control in named.items():
             self.assertEqual(dialog.captions[name].whats, control.whats, "%s: its caption answers for it" % name)
             self.assertEqual(dialog.captions[name].kind, "QLabel")

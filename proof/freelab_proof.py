@@ -2411,11 +2411,175 @@ def fit_scale(size, page_points):
     return max(0.01, min(size[0] / float(page_points[0]), size[1] / float(page_points[1])))
 
 
-def page_pixmap(QtCore, QtGui, page, renderer, size, page_points, paper, ratio=1.0):
-    """A page drawn into a pixmap that fits size (width, height in pixels) whole, on paper; ratio:
-    device pixels per pixel (a scaled display: drawn that much finer, so it stays crisp)."""
+# The preview's zoom (the Zoom dropdown, Ctrl+wheel, Ctrl+plus and Ctrl+minus over the page): the page
+# fitted whole, or a share of its printed size on a screen at 96 pixels an inch (100%: as large as the
+# printed page). Past ZOOM_MOST_PIXELS device pixels, a page is drawn coarser rather than larger.
+ZOOMS = ((None, u"Fit page"), (0.5, u"50%"), (0.75, u"75%"), (1.0, u"100%"), (1.5, u"150%"), (2.0, u"200%"),
+         (3.0, u"300%"), (4.0, u"400%"))
+SCREEN_POINT = 96.0 / 72.0  # pixels a point at 100%
+ZOOM_MOST_PIXELS = 36000000  # a zoomed page's device pixels at most (about 140 MB as a picture)
+
+
+def zoom_scale(zoom, size, page_points):
+    """Pixels per point of the preview: the page fitted to size (width, height in pixels) for zoom
+    None, else zoom times its printed size (SCREEN_POINT pixels a point at 1.0)."""
+    return fit_scale(size, page_points) if zoom is None else max(0.01, float(zoom) * SCREEN_POINT)
+
+
+def next_zoom(index, step, fitted):
+    """The zoom's index in ZOOMS after a step (1: larger, -1: smaller) from index; from Fit page, the
+    first zoom past the fitted one (fitted: its zoom, as a share of the printed size) that way; back to
+    Fit page past the smallest zoom. The same index where there is none further."""
+    zooms = [zoom for zoom, _ in ZOOMS]
+    current = zooms[index] if 0 <= index < len(zooms) else None
+    if current is None:
+        found = [i for i, zoom in enumerate(zooms) if zoom is not None and (zoom > fitted + 1e-6 if step > 0
+                                                                              else zoom < fitted - 1e-6)]
+        if not found:
+            return index
+        return found[0] if step > 0 else found[-1]
+    at = index + (1 if step > 0 else -1)
+    if at < 0 or at >= len(zooms):
+        return index
+    return at
+
+
+LEAVE_ALONE_PROP = "freelabLeaveAlone"  # (dark mode's and the shared module's name)
+
+
+def leave_list_alone(combo):
+    """A dropdown's list (a window of its own, which no flag on the box reaches) left as Qt draws it from
+    the palette: dark mode's mapping of lists gave its light text ClearType's colored fringes."""
+    try:
+        view = combo.view()
+        view.setProperty(LEAVE_ALONE_PROP, True)
+        return view
+    except Exception:
+        return None
+
+
+KEY_PRESS, WHEEL, SHORTCUT_OVERRIDE = 6, 31, 51  # QEvent's types
+CONTROL_MODIFIER = 0x04000000
+ZOOM_KEYS = {0x2B: 1, 0x3D: 1, 0x2D: -1, 0x30: "fit"}  # Qt.Key_Plus, Key_Equal, Key_Minus, Key_0
+
+
+# The keys Proof zooms with, as FontLab's own View actions have them (Ctrl++ and Ctrl+= zoom in, Ctrl+- out,
+# Ctrl+0 fits): application-wide shortcuts, which Qt matches before any widget sees the key wherever the
+# key goes (live pass: each Ctrl+plus ran FontLab's actionZoomIn, and Proof never saw it). While Proof is
+# the active window, FontLab's actions give those keys up (take_zoom_keys); they get them back whenever
+# Proof stops being active, hides, or closes (give_back_zoom_keys), and a later Proof gives back what one
+# left taken (a window that went away without the events).
+ZOOM_SEQUENCES = (u"Ctrl++", u"Ctrl+=", u"Ctrl+-", u"Ctrl+0")
+TAKEN_KEYS = "_freelab_proof_zoom_keys"  # on sys: [(action's objectName, its shortcuts as they were)]
+
+
+def take_zoom_keys(QtGui, main):
+    """FontLab's actions under main (its main window) that have one of ZOOM_SEQUENCES left without it, what
+    they had noted on sys (TAKEN_KEYS) first; True when any was. Keys taken already: left as they are."""
+    if main is None or getattr(sys, TAKEN_KEYS, None):
+        return False
+    taken = []
+    for action in main.findChildren(QtGui.QAction):
+        try:
+            keys = [u"%s" % sequence.toString() for sequence in action.shortcuts()]
+            if not any(key in ZOOM_SEQUENCES for key in keys) or not action.objectName:
+                continue
+            taken.append((u"%s" % action.objectName, keys))
+            setattr(sys, TAKEN_KEYS, taken)  # (noted before it changes: given back whatever happens next)
+            action.setShortcuts([QtGui.QKeySequence(key) for key in keys if key not in ZOOM_SEQUENCES])
+        except Exception:
+            continue
+    return bool(taken)
+
+
+def give_back_zoom_keys(QtGui, main):
+    """The shortcuts take_zoom_keys took, given back to the actions of those names (found again under main:
+    none is held meanwhile), each only where it still has none of them (FontLab's or the user's change
+    since is kept); nothing noted afterwards. True when any was."""
+    taken = getattr(sys, TAKEN_KEYS, None) or []
+    if not taken:
+        return False
+    try:
+        delattr(sys, TAKEN_KEYS)
+    except Exception:
+        pass
+    if main is None:
+        return False
+    names = dict(taken)
+    given = False
+    for action in main.findChildren(QtGui.QAction):
+        try:
+            keys = names.get(u"%s" % action.objectName)
+            now = [u"%s" % sequence.toString() for sequence in action.shortcuts()]
+            if keys is None or any(key in ZOOM_SEQUENCES for key in now):
+                continue
+            action.setShortcuts([QtGui.QKeySequence(key) for key in keys])
+            given = True
+        except Exception:
+            continue
+    return given
+
+
+def event_number(event, name):
+    """An event's type, key, or modifiers as a number, whether PythonQt gives it as a method or a value, an
+    int or a Qt enum or flags; None where it cannot be read."""
+    value = getattr(event, name, None)
+    try:
+        value = value() if callable(value) else value
+        return int(value)
+    except Exception:
+        return None
+
+
+def wheel_steps(event):
+    """1 (a wheel turned away: zoom in), -1, or 0, from its angle delta (a method or a value), its pixel
+    delta, or the older delta()."""
+    for name in ("angleDelta", "pixelDelta"):
+        point = getattr(event, name, None)
+        try:
+            point = point() if callable(point) else point
+            y = point.y() if callable(getattr(point, "y", None)) else point.y
+            if y:
+                return 1 if y > 0 else -1
+        except Exception:
+            continue
+    delta = event_number(event, "delta")
+    return (1 if delta > 0 else -1) if delta else 0
+
+
+def zoom_command(event, QtCore=None):
+    """What a key or wheel event asks of the preview's zoom with Ctrl held: 1, -1 (0 for a wheel event with
+    no turn), "fit" (Ctrl+0), or None (no Ctrl, another key, another event). The modifiers read from the
+    event, else from Qt's (an event that gives none)."""
+    kind = event_number(event, "type")
+    if kind not in (KEY_PRESS, WHEEL, SHORTCUT_OVERRIDE):
+        return None
+    held = event_number(event, "modifiers")
+    if held is None and QtCore is not None:
+        try:
+            held = int(QtCore.QCoreApplication.instance().keyboardModifiers())
+        except Exception:
+            held = None
+    if held is None or not held & CONTROL_MODIFIER:
+        return None
+    if kind == WHEEL:
+        return wheel_steps(event)
+    return ZOOM_KEYS.get(event_number(event, "key"))
+
+
+def page_pixmap(QtCore, QtGui, page, renderer, size, page_points, paper, ratio=1.0, zoom=None):
+    """A page drawn into a pixmap that fits size (width, height in pixels) whole, or at zoom (a share of
+    its printed size: zoom_scale), on paper; ratio: device pixels per pixel (a scaled display: drawn that
+    much finer, so it stays crisp), lowered where the page would pass ZOOM_MOST_PIXELS."""
     ratio = max(1.0, float(ratio or 1.0))
-    scale = fit_scale(size, page_points) * ratio
+    base = zoom_scale(zoom, size, page_points)
+    pixels = page_points[0] * page_points[1] * (base * ratio) ** 2
+    if pixels > ZOOM_MOST_PIXELS:  # (coarser, never larger: the device pixels first, then the page's)
+        ratio = max(1.0, ratio * (ZOOM_MOST_PIXELS / pixels) ** 0.5)
+        pixels = page_points[0] * page_points[1] * (base * ratio) ** 2
+        if pixels > ZOOM_MOST_PIXELS:
+            base *= (ZOOM_MOST_PIXELS / pixels) ** 0.5
+    scale = base * ratio
     width, height = max(1, int(page_points[0] * scale)), max(1, int(page_points[1] * scale))
     pixmap = QtGui.QPixmap(width, height)
     pixmap.fill(paper)
@@ -2431,7 +2595,7 @@ def page_pixmap(QtCore, QtGui, page, renderer, size, page_points, paper, ratio=1
         try:
             pixmap.setDevicePixelRatio(ratio)
         except Exception:  # (a Qt without it: drawn again at the window's pixels, or it would show too large)
-            return page_pixmap(QtCore, QtGui, page, renderer, size, page_points, paper)
+            return page_pixmap(QtCore, QtGui, page, renderer, size, page_points, paper, zoom=zoom)
     return pixmap
 
 
@@ -2529,6 +2693,10 @@ class ProofDialog(object):
         self.languages = None
         self.keep = []  # Python references to the slots and filters PythonQt does not hold
         main = ak.AutoKerningDialog.main_window()
+        try:
+            give_back_zoom_keys(QtGui, main)  # (left taken by a window that went away without saying so)
+        except Exception:
+            pass
         dialog = self.dialog = QtGui.QDialog(main) if main is not None else QtGui.QDialog()
         dialog.setWindowTitle("FreeLab Proof")
         dialog.setWhatsThis(HELP)
@@ -2580,8 +2748,22 @@ class ProofDialog(object):
         captioned(row, "colors", "Colors", self.colors_box,
                   u"The PDF's colors: this window's (its text on its background, light on dark in dark mode), or "
                   u"black on white, for printing. The page shown beside the list is the PDF as it will be.")
+        row.addSpacing(12)
+        self.zoom_box = QtGui.QComboBox()
+        for _, label in ZOOMS:
+            self.zoom_box.addItem(label)
+        captioned(row, "zoom", "Zoom", self.zoom_box,
+                  u"The page shown beside the list: whole (<i>Fit page</i>), or at a share of its printed size "
+                  u"(100%: as large as printed), scrolled. <i>Ctrl</i> with the mouse wheel over the page, or "
+                  u"<i>Ctrl+plus</i> and <i>Ctrl+minus</i> in this window, zoom in and out; <i>Ctrl+0</i> fits it "
+                  u"again (in this window, not FontLab's view). The PDF is the same at every zoom.")
         row.addStretch(1)
         layout.addLayout(row)
+        # Their lists open as windows of their own, which dark mode took for one of FontLab's lists and
+        # mapped: light text with ClearType's colored fringes, on the Proof dropdown that opens over the
+        # page (owner's report 162). Drawn from the dark palette, as the boxes are, they are left alone.
+        for box in (self.masters_box, self.page_box, self.pairs_box, self.scope_box, self.colors_box, self.zoom_box):
+            leave_list_alone(box)
 
         checks = QtGui.QHBoxLayout()
         self.summary_box = QtGui.QCheckBox(TITLES["summary"])
@@ -2615,6 +2797,7 @@ class ProofDialog(object):
         self.languages_box = QtGui.QComboBox()
         for _, label in SUMMARY_LANGUAGES:
             self.languages_box.addItem(label)
+        leave_list_alone(self.languages_box)  # (its list as the other dropdowns' lists: see above)
         keys = [key for key, _ in SUMMARY_LANGUAGES]
         if self.settings.get("summary_languages") in keys:
             self.languages_box.setCurrentIndex(keys.index(self.settings.get("summary_languages")))
@@ -2652,11 +2835,20 @@ class ProofDialog(object):
             self.preview.setSizePolicy(QtGui.QSizePolicy.Ignored, QtGui.QSizePolicy.Ignored)
         except Exception:
             pass
-        self.preview.setWhatsThis(u"The selected page as the PDF will be (in the colors <i>Colors</i> says), the whole "
-                                  u"page as large as the room here allows: drag the line beside the list, or make the "
-                                  u"window larger, to see it larger.")
+        shown = (u"The selected page as the PDF will be (in the colors <i>Colors</i> says): at <i>Fit page</i>, the "
+                 u"whole page as large as the room here allows (drag the line beside the list, or make the window "
+                 u"larger, to see it larger); zoomed (<i>Zoom</i>, or <i>Ctrl</i> with the mouse wheel), scrolled.")
+        self.preview.setWhatsThis(shown)
+        # The page in a scroll area: whole at Fit page, scrolled when zoomed (the label as large as the page)
+        self.preview_area = QtGui.QScrollArea()
+        self.preview_area.setProperty(ak.LEAVE_ALONE_PROP, True)  # (drawn from the palette; the page as drawn)
+        self.preview_area.setWidgetResizable(True)
+        self.preview_area.setAlignment(QtCore.Qt.AlignCenter)
+        self.preview_area.setFocusPolicy(QtCore.Qt.StrongFocus)  # (clicked, it takes Ctrl+plus and Ctrl+minus)
+        self.preview_area.setWhatsThis(shown)
+        self.preview_area.setWidget(self.preview)
         splitter.addWidget(self.page_list)
-        splitter.addWidget(self.preview)
+        splitter.addWidget(self.preview_area)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         try:
@@ -2702,6 +2894,7 @@ class ProofDialog(object):
         self.saved_timer.setInterval(0)
         self.saved_timer.connect("timeout()", self.update_buttons)
         self.colors_box.connect("currentIndexChanged(int)", lambda index: self.preview_timer.start())
+        self.zoom_box.connect("currentIndexChanged(int)", lambda index: self.show_page())
         later = self.rebuild_timer.start
         for box in self.section_boxes.values():
             box.connect("toggled(bool)", lambda on: later())
@@ -2736,11 +2929,19 @@ class ProofDialog(object):
         class Watcher(QtCore.QTimer):  # PythonQt has no QObject to subclass; a timer will do
             def eventFilter(self, obj, event):
                 try:
-                    kind = event.type()
+                    kind = event_number(event, "type")
                     if kind == 14 or kind in palette_events:  # Resize, palette changes
-                        owner.preview_timer.start()
-                    elif kind == 24 and owner.saved:  # WindowActivate
-                        owner.saved_timer.start()
+                        if owner.zoom() is None or obj is owner.dialog or kind != 14:
+                            owner.preview_timer.start()  # (zoomed, the page's size is its own: the label follows it)
+                    elif kind == 24:  # WindowActivate
+                        if obj is owner.dialog:
+                            owner.zoom_keys(True)
+                        if owner.saved:
+                            owner.saved_timer.start()
+                    elif kind in (25, 18, 19) and obj is owner.dialog:  # WindowDeactivate, Hide, Close
+                        owner.zoom_keys(False)
+                    elif kind in (KEY_PRESS, WHEEL, SHORTCUT_OVERRIDE):  # Ctrl+plus, Ctrl+minus, Ctrl+0, the wheel
+                        return bool(owner.zoom_event(event))
                 except Exception:
                     pass  # an event filter must never raise
                 return False
@@ -2749,6 +2950,8 @@ class ProofDialog(object):
             watcher = Watcher(self.dialog)  # (its parent the window: Qt deletes it with it)
             self.preview.installEventFilter(watcher)
             self.dialog.installEventFilter(watcher)
+            self.preview_area.installEventFilter(watcher)  # (its keys, once clicked)
+            self.preview_area.viewport().installEventFilter(watcher)  # (its resizes and the wheel over the page)
             self.keep.append(watcher)
         except Exception:
             pass
@@ -3300,6 +3503,66 @@ class ProofDialog(object):
                 continue
         return 1.0
 
+    def zoom(self):
+        """The preview's zoom (ZOOMS): None to fit the page, else a share of its printed size."""
+        try:
+            index = int(self.zoom_box.currentIndex)
+        except Exception:
+            index = 0
+        return ZOOMS[index][0] if 0 <= index < len(ZOOMS) else None
+
+    def room(self):
+        """(width, height) in pixels the page fits at Fit page: the scroll area's view, less a margin."""
+        view = self.preview_area.viewport()
+        return (max(60, self.ak._property(view, "width") - 4), max(60, self.ak._property(view, "height") - 4))
+
+    def zoom_step(self, step):
+        """The zoom one step larger (1) or smaller (-1), from Fit page too (the next past the fitted size)."""
+        size = page_size(self.page_options.page) if self.page_options is not None else page_size("A4")
+        fitted = fit_scale(self.room(), size) / SCREEN_POINT
+        index = next_zoom(int(self.zoom_box.currentIndex), step, fitted)
+        if index != int(self.zoom_box.currentIndex):
+            self.zoom_box.setCurrentIndex(index)  # (its signal draws the page)
+            return True
+        return False
+
+    def zoom_keys(self, take):
+        """FontLab's zoom shortcuts taken while this window is active (take), given back otherwise
+        (take_zoom_keys, give_back_zoom_keys)."""
+        QtGui = _qt()[1]
+        try:
+            main = self.ak.AutoKerningDialog.main_window()
+        except Exception:
+            main = None
+        try:
+            if take:
+                take_zoom_keys(QtGui, main)
+            else:
+                give_back_zoom_keys(QtGui, main)
+        except Exception:
+            pass
+
+    def zoom_event(self, event):
+        """Ctrl with the mouse wheel over the page, Ctrl+plus, Ctrl+minus, or Ctrl+0 in the window (zoom_command):
+        zoomed, and True (the event taken); anything else False (left to Qt: the wheel alone scrolls). Live
+        pass: the keys did nothing, FontLab's own View zoom shortcuts (Ctrl+plus, Ctrl+minus, Ctrl+0) took
+        them first, as they took Ctrl+Z. So the window takes them at Qt's ShortcutOverride, which comes before
+        any shortcut is looked up (accepted, Qt sends the key as a plain key press), and zooms on the key press."""
+        command = zoom_command(event, _qt()[0])
+        if command is None or self.selected_page() is None:
+            return False
+        try:
+            event.accept()
+        except Exception:
+            pass
+        if event_number(event, "type") == SHORTCUT_OVERRIDE:
+            return True  # (the key press that follows zooms)
+        if command == "fit":
+            self.zoom_box.setCurrentIndex(0)
+        elif command:
+            self.zoom_step(command)
+        return True
+
     def show_page(self):
         QtCore, QtGui = _qt()
         page = self.selected_page()
@@ -3311,14 +3574,29 @@ class ProofDialog(object):
             ink, paper = self.colors()
             renderer = Renderer(QtCore, QtGui, self.path, self.ak._property(self.dialog, "font").family(),
                                 QtGui.QColor(*ink), self.parts)
-            size = (max(60, self.ak._property(self.preview, "width") - 2),
-                    max(60, self.ak._property(self.preview, "height") - 2))
-            self.preview.setPixmap(page_pixmap(QtCore, QtGui, page, renderer, size, page_size(self.page_options.page),
-                                               QtGui.QColor(*paper), self.pixel_ratio()))
+            zoom = self.zoom()
+            pixmap = page_pixmap(QtCore, QtGui, page, renderer, self.room(), page_size(self.page_options.page),
+                                 QtGui.QColor(*paper), self.pixel_ratio(), zoom)
+            if zoom is None:
+                self.preview.setMinimumSize(200, 200)  # (the room's size: the page fitted to it)
+            else:  # the label as large as the page: the area scrolls it
+                ratio = self.pixel_ratio_of(pixmap)
+                self.preview.setMinimumSize(int(pixmap.width() / ratio) + 2, int(pixmap.height() / ratio) + 2)
+            self.preview.setPixmap(pixmap)
         except Exception as exc:
             self.preview.clear()
             self.log.add(u"The page could not be drawn: %s" % self.ak.html(exc), "error")
         self.update_buttons()
+
+    @staticmethod
+    def pixel_ratio_of(pixmap):
+        for name in ("devicePixelRatioF", "devicePixelRatio"):
+            try:
+                value = getattr(pixmap, name)
+                return max(1.0, float(value() if callable(value) else value))
+            except Exception:
+                continue
+        return 1.0
 
     # -- buttons --------------------------------------------------------------
 
@@ -3382,7 +3660,19 @@ class ProofDialog(object):
         self.rebuild_timer.start()
         self.log.add(u"Settings restored to the defaults.")
 
+    def settle(self):
+        """Settings changed a moment ago and still waiting on the rebuild timer (sizes typed, then a button
+        clicked) laid out now, so the button acts on the proof they make, not the one before them."""
+        try:
+            waiting = self.rebuild_timer.isActive()
+        except Exception:
+            waiting = False
+        if waiting and not self.busy:
+            self.rebuild_timer.stop()
+            self.rebuild()
+
     def show_in_glyph_window(self):
+        self.settle()
         page = self.selected_page()
         if page is None or self.package is None:
             return
@@ -3396,6 +3686,7 @@ class ProofDialog(object):
 
     def save_pdf(self):
         QtCore, QtGui = _qt()
+        self.settle()
         if self.busy or self.proof is None:
             return
         if not self.same_font():

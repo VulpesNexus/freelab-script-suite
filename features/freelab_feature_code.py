@@ -74,7 +74,6 @@ ALTERNATE_SUFFIX = re.compile(r"^(?P<base>[^.]+)\.(?:(?P<number>[2-9])|alt(?P<al
 # a.sc.alt1, a small capital's alternate, stays out of a's turn
 DESIGN_VARIANT = re.compile(r"^(?P<base>[^.]+)\.(?P<design>(?:ss|cv)[0-9]{2}|salt|c?alt[0-9]*|[0-9]+)\.alt(?P<alt>[0-9]+)$"
                             r"(?P<number>)(?P<calt>)")
-RULE = re.compile(r"^\s*sub(?:stitute)?\s+(?P<input>[A-Za-z0-9_.\- ]+?)\s+by\s+(?P<output>[A-Za-z0-9_.\-]+)\s*;\s*(?:#.*)?$")
 
 
 def unichr_(code):
@@ -99,17 +98,45 @@ class Ligature(object):
         self.glyph, self.parts, self.now = glyph, tuple(parts), now  # now: "liga", "dlig", or None
         self.choice = choice or now or "dlig"
         self.why = why  # what set its first choice, for its tooltip
+        self.fixed = False  # the font's own code has its rule (font_owned): left where it is, never moved
 
 
-def rules_of(text):
-    """[(input glyphs, output glyph)] of a feature's simple ligature rules (sub a b by a_b;)."""
-    found = []
-    for line in (text or u"").splitlines():
-        match = RULE.match(line)
-        if match:
-            parts = match.group("input").split()
-            if len(parts) > 1:
-                found.append((tuple(parts), match.group("output")))
+def rules_of(text, tag):
+    """[(input glyphs, output glyph, the feature it is in, FreeLab's)] of the simple ligature rules (sub a b
+    by a_b;) of a feature's code given under tag (ligature_statements): the feature each rule stands in
+    (another feature's code given under the tag stays that feature's: Codex review 7), and whether
+    FreeLab may manage it (managed_rule)."""
+    return [(rule[0], rule[1], rule[4] or tag, managed_rule(text, rule, tag)) for rule in ligature_statements(text)]
+
+
+def font_outputs(text, tag):
+    """{glyph: the feature it is in} of the outputs of the font's own substitutions in a feature's code
+    given under tag: every "sub ... by X;" whatever its input (classes, named classes, escaped names,
+    contexts), but those FreeLab manages (managed_rule: its own block's, FontLab's automatic plain ones)."""
+    rules = ligature_statements(text)
+    managed = set(rule[2] for rule in rules if managed_rule(text, rule, tag))
+    found, stack, statement = {}, [], []
+    for token in code_tokens(text):
+        word = token[0]
+        if word == u"{":
+            words = [t[0] for t in statement]
+            stack.append(words[1] if len(words) > 1 and words[0] == u"feature" else None)
+            statement = []
+        elif word == u"}":
+            if stack:
+                stack.pop()
+            statement = []
+        elif word == u";":
+            words = [t[0] for t in statement]
+            if words and words[0] in (u"sub", u"substitute") and u"by" in words and statement[0][1] not in managed:
+                outputs = words[words.index(u"by") + 1:]
+                glyph = outputs[0].strip(u"[]").lstrip(u"\\") if len(outputs) == 1 else u""
+                if glyph and not glyph.startswith(u"@"):
+                    features = [name for name in stack if name]
+                    found.setdefault(glyph, features[-1] if features else tag)
+            statement = []
+        else:
+            statement.append(token)
     return found
 
 
@@ -120,20 +147,39 @@ def ligatures(names, features, chars=None, model=None):
     dlig families]}, chars: {glyph: its character}), else dlig. features maps a tag to its code."""
     names = set(names)
     chars, counts_of = chars or {}, (model or {}).get("ligatures", {})
-    found, seen = [], set()
+    found, seen = [], {}
+    owned = {}  # {glyph: feature} of every output the font's own code makes, whatever its rule's input
     for tag in ("liga", "dlig"):
-        for parts, glyph in rules_of(features.get(tag)):
+        text = features.get(tag)
+        for parts, glyph, where, managed in rules_of(text, tag):
             if (parts, glyph) not in seen:
-                seen.add((parts, glyph))
-                found.append(Ligature(glyph, parts, tag, why=u"the font's own %s" % tag))
+                seen[(parts, glyph)] = Ligature(glyph, parts, where, why=u"the font's own %s" % where)
+                found.append(seen[(parts, glyph)])
+            if not managed:  # (the font's own rule: left where it is, never moved, never written again)
+                seen[(parts, glyph)].fixed = True
+                seen[(parts, glyph)].now = seen[(parts, glyph)].choice = where
+        for glyph, where in font_outputs(text, tag).items():
+            owned.setdefault(glyph, where)
+    # Codex review 8: a rule FreeLab does not read as a plain ligature (sub f [i i.alt] by f_i; a named class,
+    # an escaped name, a context) still makes its output: that ligature is the font's, never written again
+    for lig in found:
+        if lig.glyph in owned and not lig.fixed:
+            lig.fixed = True
+            lig.now = lig.choice = owned[lig.glyph]
     made = set(glyph for _, glyph in seen)
     for name in sorted(names):
         stem, _, suffix = name.partition(u".")
         parts = stem.split(u"_")
         if name in made or len(parts) < 2 or not all(part in names for part in parts):
             continue
-        if suffix in (u"liga", u"dlig"):
-            found.append(Ligature(name, parts, None, suffix, u"its name's .%s" % suffix))
+        if suffix in (u"liga", u"dlig") or (not suffix and name in owned):
+            if name in owned:  # (the font's own rule makes it: shown where it is, left to the font)
+                lig = Ligature(name, parts, owned[name], owned[name], u"the font's own %s (a rule of its own that "
+                                                                      u"FreeLab does not rewrite)" % owned[name])
+                lig.fixed = True
+            else:
+                lig = Ligature(name, parts, None, suffix, u"its name's .%s" % suffix)
+            found.append(lig)
             continue
         if suffix:
             continue  # a form of a ligature (.sc, .ss01, .case) or a localized one (.loclNLD): its own feature's
@@ -168,55 +214,437 @@ def load_ligature_model(path=None):
         return {}
 
 
+# ---------------------------------------------------------------------------
+# Feature code read by its tokens, never by lines (Codex reviews 4 to 6): a feature's braces, FreeLab's
+# own blocks, FontLab's automatic code, and the substitutions FreeLab manages are found as statements and
+# comments with their places in the text, wherever they stand on their lines. Feature Code, CJK Spacing,
+# and CJK Vertical all write through these (the CJK tools load this script for them).
+# ---------------------------------------------------------------------------
+
+class FeatureCodeUnreadable(ValueError):
+    """A feature's code FreeLab cannot read safely (its braces not found, or FreeLab's own markers not in
+    pairs): nothing is written to it, and the font's code is never made again from nothing (which would
+    drop the designer's rules)."""
+
+    def __init__(self, tag, why=None):
+        ValueError.__init__(self, u"%s: %s" % (tag, why or u"FreeLab cannot find where the feature's code begins "
+                                                         u"and ends"))
+        self.tag = tag
+
+
+def fea_tokens(text):
+    """[(token, start, end)] of feature code, every one: comments (from # to the line's end) and quoted
+    strings too (FEA_STATEMENT_TOKEN)."""
+    return [(m.group(0), m.start(), m.end()) for m in FEA_STATEMENT_TOKEN.finditer(text or u"")]
+
+
+def code_tokens(text):
+    """[(token, start, end)] of feature code, its comments and quoted strings left out."""
+    return [token for token in fea_tokens(text) if not token[0].startswith((u"#", u'"'))]
+
+
+def comment_tokens(text):
+    """[(comment, start, end)] of feature code's comments, each stripped, wherever it stands on its line."""
+    return [(token.strip(), start, end) for token, start, end in fea_tokens(text) if token.startswith(u"#")]
+
+
+def block_spans(text, begin, end, tag=u""):
+    """[(start, end)] of FreeLab's blocks in text: a begin marker, then the end marker after it, each a
+    comment wherever it stands (after code on its line too: "sub b by b.case; # <<< FreeLab forms" had
+    been missed, and the block taken to run to the end of the text, the font's rules after it lost). A
+    marker without its pair, or a block opened inside another, raises FeatureCodeUnreadable: what is
+    FreeLab's cannot be told from what is not."""
+    spans, opened = [], None
+    for comment, start, stop in comment_tokens(text):
+        if comment == begin:
+            if opened is not None:
+                raise FeatureCodeUnreadable(tag, u"FreeLab's block opens twice before it closes")
+            opened = start
+        elif comment == end:
+            if opened is None:
+                raise FeatureCodeUnreadable(tag, u"FreeLab's block closes without opening")
+            spans.append((opened, stop))
+            opened = None
+    if opened is not None:
+        raise FeatureCodeUnreadable(tag, u"FreeLab's block opens without closing")
+    return spans
+
+
+def without_blocks(text, begin, end, tag=u"", strict=True):
+    """text without FreeLab's blocks (block_spans): each from its begin marker (the code before it on its
+    line kept) to its end marker, and the line break after it where the block began its line. strict
+    False (a reader's view): text as it is where the markers do not pair."""
+    text = text or u""
+    try:
+        spans = block_spans(text, begin, end, tag)
+    except FeatureCodeUnreadable:
+        if strict:
+            raise
+        return text
+    for start, stop in reversed(spans):
+        line_start = text.rfind(u"\n", 0, start) + 1
+        if not text[line_start:start].strip():
+            start = line_start
+            if text[stop:stop + 2] == u"\r\n":
+                stop += 2
+            elif text[stop:stop + 1] == u"\n":
+                stop += 1
+        text = text[:start] + text[stop:]
+    return text
+
+
+def block_text(text, begin, end):
+    """What FreeLab's first block holds, between its markers (block_spans), or None (none, or markers not
+    in pairs)."""
+    try:
+        spans = block_spans(text or u"", begin, end)
+    except FeatureCodeUnreadable:
+        return None
+    if not spans:
+        return None
+    inner = text[spans[0][0]:spans[0][1]]
+    first = inner.find(u"\n")
+    if first < 0:
+        return u""
+    body = inner[first + 1:]
+    cut = body.rfind(u"#")  # (the end marker: the span's last comment)
+    body = body[:cut] if cut >= 0 else body
+    return body if not body.strip() or body.endswith(u"\n") else body + u"\n"
+
+
+def automatic_spans(text):
+    """([(marker start, marker end, close start)], whether one is left open) of FontLab's automatic code:
+    a "#> feature" comment, and the next "#<" comment, wherever they stand."""
+    found, opened = [], None
+    for comment, start, stop in comment_tokens(text):
+        if opened is None and comment.startswith(FONTLAB_AUTO):
+            opened = (start, stop)
+        elif opened is not None and comment.startswith(u"#<"):
+            found.append((opened[0], opened[1], start))
+            opened = None
+    return found, opened is not None
+
+
+def handed_back(text, drop=False, tag=u""):
+    """text with FontLab's automatic code handed back ("#> feature" becomes "#/> feature": FontLab no
+    longer rewrites it); drop: what it held taken out too (FreeLab's block makes the same feature), its
+    closing comment kept. A marker left open raises FeatureCodeUnreadable where its code would be dropped."""
+    text = text or u""
+    spans, open_left = automatic_spans(text)
+    if drop and open_left:
+        raise FeatureCodeUnreadable(tag, u"FontLab's automatic code opens without closing")
+    for start, stop, close in reversed(spans):
+        marker = text[start:stop].replace(FONTLAB_AUTO, FONTLAB_HANDED, 1)
+        middle = u"\n" if drop else text[stop:close]
+        text = text[:start] + marker + middle + text[close:]
+    if open_left:  # (only handed back: what it holds is kept)
+        at = text.rfind(FONTLAB_AUTO)
+        text = text[:at] + FONTLAB_HANDED + text[at + len(FONTLAB_AUTO):]
+    return text
+
+
+def own_code(text, begin, end):
+    """A reader's view of the font's own code in a feature: FreeLab's blocks taken out (as far as their
+    markers pair) and what FontLab's automatic code holds (FreeLab's block replaces it), by tokens."""
+    text = without_blocks(text, begin, end, strict=False)
+    spans, _ = automatic_spans(text)
+    for start, stop, close in reversed(spans):
+        text = text[:stop] + u"\n" + text[close:]
+    return text
+
+
+def declares_features(tokens):
+    """Whether code tokens declare a feature (a "feature" statement)."""
+    start = True
+    for token, _, _ in tokens:
+        if start and token == u"feature":
+            return True
+        start = token in (u";", u"{", u"}")
+    return False
+
+
+def braces_balance(tokens):
+    """Whether code tokens' braces close as they open, every one."""
+    depth = 0
+    for token, _, _ in tokens:
+        depth += 1 if token == u"{" else -1 if token == u"}" else 0
+        if depth < 0:
+            return False
+    return depth == 0
+
+
+def feature_bounds(text, tag):
+    """(where the code inside the feature's braces begins, where its closing brace is) as offsets in
+    text, found by statements, not lines (Codex review 5: "feature locl { ... } locl;" on one line, a
+    closing brace after the last rule, or a feature's keyword, tag, and brace on lines of their own, had
+    no closing line, and the font's own code was made again from nothing, its rules lost); comments and
+    strings skipped. "missing" where text has no such feature, None where its braces do not match."""
+    tokens = code_tokens(text)
+    start = True
+    for i, (token, _, _) in enumerate(tokens):
+        if start and token == u"feature" and i + 1 < len(tokens) and tokens[i + 1][0] == tag:
+            at = i + 2
+            if at < len(tokens) and tokens[at][0] == u"useExtension":
+                at += 1
+            if at >= len(tokens) or tokens[at][0] != u"{":
+                return None
+            depth = 0
+            for j in range(at, len(tokens)):
+                if tokens[j][0] == u"{":
+                    depth += 1
+                elif tokens[j][0] == u"}":
+                    depth -= 1
+                    if depth == 0:
+                        if j + 2 < len(tokens) and tokens[j + 1][0] == tag and tokens[j + 2][0] == u";":
+                            return tokens[at][2], tokens[j][1]
+                        return None
+            return None
+        start = token in (u";", u"{", u"}")
+    return "missing"
+
+
+def insert_block(text, tag, block, first=False, title=None, blank=False, scoped=False):
+    """text with block (lines) inside the feature tag's braces: before its closing brace, or first
+    (after its opening brace, and the comments right after it, FreeLab's markers and FontLab's excepted);
+    a brace that shares its line with code gets a line break beside it, the code itself kept as typed.
+    Where text has no such feature: no code at all, the feature made (title: its comment line; blank: a
+    blank line before its closing brace, as the ligature features had); other features only (Codex review
+    6: the block went after them, at the top level, in no feature), the feature made after them, whole;
+    code with no feature around it, its braces balanced, taken for the feature's body, the block at its
+    end. Anything else (braces that do not match) raises FeatureCodeUnreadable. scoped: the block goes
+    where the feature's default scope ends, before its first script, language, or lookupflag statement
+    (scope_change), not after it, where its rules would take that scope."""
+    text = text or u""
+    bounds = feature_bounds(text, tag)
+    tokens = code_tokens(text)
+    if bounds == "missing" and not tokens:
+        head = text.rstrip(u"\r\n") + u"\n" if text.strip() else u""
+        text = head + u"feature %s {\n# %s\n%s} %s;" % (tag, title or tag, u"\n" if blank else u"", tag)
+        bounds = feature_bounds(text, tag)
+    elif bounds == "missing":
+        if not braces_balance(tokens):
+            raise FeatureCodeUnreadable(tag, u"its code's braces do not match")
+        if not block:
+            return text
+        lines = u"\n".join(block)
+        if declares_features(tokens):  # (another feature's code: this one made after it, whole)
+            return text.rstrip(u"\r\n") + u"\nfeature %s {\n# %s\n%s%s\n} %s;" % (
+                tag, title or tag, u"\n" if blank else u"", lines, tag)
+        if first:
+            return lines + u"\n" + text
+        at = scope_change(text, None) if scoped else None
+        if at is not None:
+            return text_before(text, at, lines)
+        return text.rstrip(u"\r\n") + u"\n" + lines  # (the feature's body)
+    if not isinstance(bounds, tuple):
+        raise FeatureCodeUnreadable(tag)
+    opening, closing = bounds
+    if not block:
+        return text
+    lines = u"\n".join(block)
+    if first:
+        end = text.find(u"\n", opening)
+        rest = text[opening:end if end >= 0 else len(text)].strip()
+        if 0 <= end < closing and (not rest or rest.startswith(u"#")):  # the brace ends its line
+            while True:  # (past the comments that follow it)
+                after = text.find(u"\n", end + 1)
+                if after < 0 or after > closing:
+                    break
+                line = text[end + 1:after].strip()
+                if not line.startswith(u"#") or line.startswith((u"#>", u"#/>", u"#<", u"# >>>")):
+                    break
+                end = after
+            return text[:end + 1] + lines + u"\n" + text[end + 1:]
+        return text[:opening] + u"\n" + lines + u"\n" + text[opening:]
+    at = scope_change(text, tag) if scoped else None
+    return text_before(text, closing if at is None else at, lines)
+
+
+def text_before(text, at, lines):
+    """text with lines before offset at: on the lines before it where what is there begins its line, else
+    on lines of their own between the code and it (the code as typed)."""
+    line_start = text.rfind(u"\n", 0, at) + 1
+    if not text[line_start:at].strip():
+        return text[:line_start] + lines + u"\n" + text[line_start:]
+    return text[:at] + u"\n" + lines + u"\n" + text[at:]
+
+
+def scope_change(text, tag):
+    """Where the first script, language, lookupflag, or lookup statement of the feature tag stands right in
+    it (its offset), or None: past it, a rule applies only so. tag None: a body with no feature around it."""
+    tokens = code_tokens(text)
+    if tag is not None:
+        bounds = feature_bounds(text, tag)
+        if not isinstance(bounds, tuple):
+            return None
+        tokens = [t for t in tokens if bounds[0] <= t[1] < bounds[1]]
+    depth, start = 0, True
+    for word, begin, _ in tokens:
+        if depth == 0 and start and (word in SCOPING or word == u"lookup"):
+            return begin  # (a lookup, referred to or defined there, may carry its lookupflag on: Codex review 8)
+        depth += 1 if word == u"{" else -1 if word == u"}" else 0
+        start = word in (u";", u"{", u"}")
+    return None
+
+
+GLYPH_NAME = re.compile(r"^[A-Za-z0-9_.\-]+$")
+SCOPING = (u"script", u"language", u"lookupflag")  # statements after which a rule applies only so
+
+
+def ligature_statements(text):
+    """[(parts, glyph, start, end, feature, movable)] of feature code's simple ligature substitutions (sub f
+    i by f_i; substitute too), found by statements wherever they stand (Codex review 6: read by whole lines,
+    a compact "feature liga { sub f i by f_i; } liga;" was not seen). feature: the tag of the feature it
+    stands in (None in a body with no feature around it; Codex review 7: another feature's rule had been
+    taken for the one the text was given as). movable: the rule stands right in its feature, outside any
+    lookup block, before any script, language, or lookupflag statement of its feature."""
+    found, stack, statement, scoped = [], [], [], False
+    for token in code_tokens(text):
+        word = token[0]
+        if word == u"{":
+            words = [t[0] for t in statement]
+            kind = words[0] if words else u""
+            stack.append((kind if kind in (u"feature", u"lookup") else u"other",
+                          words[1] if kind == u"feature" and len(words) > 1 else None))
+            if kind == u"feature":
+                scoped = False
+            elif kind == u"lookup":
+                scoped = True  # (past a lookup, its lookupflag may hold: Codex review 8)
+            statement = []
+        elif word == u"}":
+            if stack:
+                stack.pop()
+            statement = []
+        elif word == u";":
+            words = [t[0] for t in statement]
+            if words and (words[0] in SCOPING or words[0] == u"lookup"):
+                scoped = True
+            if words and words[0] in (u"sub", u"substitute") and u"by" in words:
+                at = words.index(u"by")
+                parts, outputs = words[1:at], words[at + 1:]
+                if len(parts) >= 2 and len(outputs) == 1 and all(GLYPH_NAME.match(w) for w in parts + outputs):
+                    kinds = [kind for kind, _ in stack]
+                    feature = [name for kind, name in stack if kind == u"feature"]
+                    movable = (not stack or kinds[-1] == u"feature") and u"lookup" not in kinds and \
+                        u"other" not in kinds and not scoped
+                    found.append((tuple(parts), outputs[0], statement[0][1], token[2],
+                                  feature[-1] if feature else None, movable))
+            statement = []
+        else:
+            statement.append(token)
+    return found
+
+
+def managed_rule(text, rule, tag):
+    """Whether FreeLab manages a ligature rule (one of ligature_statements' of text, the code given under
+    tag), or the font's own code has it. FreeLab never moves or takes out a rule the font's code wrote
+    (Codex review 7: moved, it took the scope of where it went, and the next write lost it): it manages
+    only the rules of its own block, and those of FontLab's automatic code in the feature of that tag,
+    right in it (FontLab writes that code again from the glyph names; FreeLab's block replaces it)."""
+    parts, glyph, start, stop, feature, movable = rule
+    if (feature or tag) != tag:
+        return False  # (another feature's: the font's)
+    try:
+        if any(begin <= start < end for begin, end in block_spans(text, BEGIN % "ligatures", END % "ligatures")):
+            return True
+    except FeatureCodeUnreadable:
+        return False
+    spans, _ = automatic_spans(text)
+    return movable and any(marker_end <= start < close for _, marker_end, close in spans)
+
+
+def remove_statements(text, spans):
+    """text without the statements at spans [(start, end)]: a line left blank by them goes too."""
+    for start, stop in sorted(spans, reverse=True):
+        line_start = text.rfind(u"\n", 0, start) + 1
+        line_end = text.find(u"\n", stop)
+        line_end = len(text) if line_end < 0 else line_end
+        if not (text[line_start:start] + text[stop:line_end]).strip():
+            text = text[:line_start] + text[line_end + 1:]
+        else:
+            text = text[:start] + text[stop:]
+    return text
+
+
 def feature_text(tag, old, rules, block_name, managed=None):
-    """A feature's code with FreeLab's block of rules in place: the old code kept but for the managed
-    rules (by default the block's own, wherever they were) and an older FreeLab block, FontLab's
-    automatic block handed back to you ("#/> feature"), and the block before the feature's closing
-    line. rules and managed: [(parts, glyph)]."""
-    managed = set(u"%s %s" % (u" ".join(parts), glyph) for parts, glyph in (rules if managed is None else managed))
+    """A feature's code with FreeLab's block of rules in place: an older FreeLab block taken out, FontLab's
+    automatic block handed back to you ("#/> feature") with the managed rules taken out of it (by default
+    the block's own: FreeLab writes them now), everything else kept as it is, the font's own rules too.
+    The block goes where the feature's default scope ends (before its first script, language, or
+    lookupflag statement, else before its closing brace: Codex review 7, a rule written after a
+    lookupflag took it). rules and managed: [(parts, glyph)]. Raises FeatureCodeUnreadable where the code
+    cannot be read safely (readable: before and after, on a write that only takes a block out too)."""
+    managed = set((tuple(parts), glyph) for parts, glyph in (rules if managed is None else managed))
     begin, end = BEGIN % block_name, END % block_name
-    kept, inside = [], False
-    for line in (old or u"").splitlines():
-        stripped = line.strip()
-        if stripped == begin:
-            inside = True
-            continue
-        if stripped == end:
-            inside = False
-            continue
-        if inside:
-            continue
-        match = RULE.match(line)
-        if match and u"%s %s" % (u" ".join(match.group("input").split()), match.group("output")) in managed:
-            continue  # written in FreeLab's block now
-        if stripped.startswith(FONTLAB_AUTO):
-            line = line.replace(FONTLAB_AUTO, FONTLAB_HANDED, 1)
-        kept.append(line)
-    block = [begin] + [u"  %s" % rule for rule in rule_lines(rules)] + [end]
-    closing = None
-    for index in range(len(kept) - 1, -1, -1):
-        if re.match(r"^\s*}\s*%s\s*;" % re.escape(tag), kept[index]):
-            closing = index
-            break
-    if closing is None:  # a new feature
-        kept = [u"feature %s {" % tag, u"# %s" % FEATURE_TITLES.get(tag, tag), u""]
-        closing = len(kept)
-        kept.append(u"} %s;" % tag)
+    readable(old, tag)
+    text = without_blocks(old, begin, end, tag)
+    spans, _ = automatic_spans(text)
+    taken = [(start, stop) for parts, glyph, start, stop, feature, movable in ligature_statements(text)
+             if (parts, glyph) in managed and movable and (feature or tag) == tag
+             and any(marker_end <= start < close for _, marker_end, close in spans)]
+    text = handed_back(remove_statements(text, taken)).rstrip(u"\r\n")
     if not rules:
-        block = []
-    return u"\n".join(kept[:closing] + block + kept[closing:]) + u"\n"
+        if not code_tokens(text):  # (no code: the feature, empty, as a new one was)
+            return insert_block(text, tag, [], title=FEATURE_TITLES.get(tag, tag), blank=True) + u"\n"
+        readable(text, tag)
+        return text + u"\n"
+    block = [begin] + [u"  %s" % rule for rule in rule_lines(rules)] + [end]
+    return insert_block(text, tag, block, title=FEATURE_TITLES.get(tag, tag), blank=True, scoped=True) + u"\n"
 
 
-def ligature_texts(found, texts):
-    """{tag: new code} for liga and dlig: every ligature's rule taken out of both, and put back in the
-    one it is set to (none for Off). A feature is rewritten only where something of it changes."""
-    managed = [(lig.parts, lig.glyph) for lig in found]
+def readable(text, tag):
+    """Raises FeatureCodeUnreadable unless a feature's code can be read safely: no code, the feature with
+    its braces matched, another feature's code with its braces balanced, or a body with its braces
+    balanced (Codex review 7: a write that only took FreeLab's block out had written back an unclosed
+    "lookup Own {")."""
+    bounds = feature_bounds(text, tag)
+    if bounds is None or (bounds == "missing" and not braces_balance(code_tokens(text))):
+        raise FeatureCodeUnreadable(tag, u"its code's braces do not match")
+
+
+def refused_words(tags):
+    """The sentence for features FreeLab leaves as they are (FeatureCodeUnreadable), or empty."""
+    if not tags:
+        return u""
+    one = len(tags) == 1
+    return (u"FreeLab leaves %s as %s: it cannot find where %s code begins and ends (the feature's braces), "
+            u"so nothing of FreeLab's goes in. Check %s code in FontLab's Features panel." % (
+                describe_list(sorted(set(tags))), u"it is" if one else u"they are",
+                u"that feature's" if one else u"each one's", u"its" if one else u"their"))
+
+
+def stuck_words(glyphs):
+    """The sentence for ligatures set to another feature than the one the font's own code puts them in."""
+    if not glyphs:
+        return u""
+    one = len(glyphs) == 1
+    return (u"FreeLab does not move %s: the font's own code has %s rule, and FreeLab never moves or takes out "
+            u"a rule the font wrote. %s where %s: move %s in FontLab's Features panel." % (
+                describe_list(sorted(set(glyphs))), u"its" if one else u"each one's", u"It stays" if one else
+                u"They stay", u"it is" if one else u"they are", u"it" if one else u"them"))
+
+
+def ligature_texts(found, texts, refused=None, stuck=None):
+    """{tag: new code} for liga and dlig: FreeLab's ligatures (those not the font's own: fixed) written in
+    the block of the feature each is set to (none for Off), FontLab's automatic rules of them taken out.
+    A feature is rewritten only where something of it changes. refused: as forms_texts' (a feature whose
+    code FreeLab cannot read: neither is written). The font's own rules are never moved or written again
+    (Codex review 7); stuck, when given, gets those set to another feature than theirs."""
+    free = [lig for lig in found if not getattr(lig, "fixed", False)]
+    if stuck is not None:
+        stuck.extend(lig.glyph for lig in found if getattr(lig, "fixed", False) and lig.choice != lig.now)
+    managed = [(lig.parts, lig.glyph) for lig in free]
     new = {}
     for tag in ("liga", "dlig"):
-        rules = [(lig.parts, lig.glyph) for lig in found if lig.choice == tag]
+        rules = [(lig.parts, lig.glyph) for lig in free if lig.choice == tag]
         old = texts.get(tag)
-        if rules or any(lig.now == tag for lig in found) or (BEGIN % "ligatures") in (old or u""):
-            new[tag] = feature_text(tag, old, rules, "ligatures", managed)
+        if rules or any(lig.now == tag for lig in free) or (BEGIN % "ligatures") in (old or u""):
+            try:
+                new[tag] = feature_text(tag, old, rules, "ligatures", managed)
+            except FeatureCodeUnreadable:
+                if refused is not None:
+                    refused.append(tag)
+                return {}  # (a rule moved out of one and not into the other would be lost: neither written)
     return new
 
 
@@ -473,7 +901,7 @@ def used_in(names, texts):
     for tag, text in sorted(texts.items()):
         if tag in LISTS_EVERY_ALTERNATE:
             continue
-        kept = feature_text(tag, text, [], "alternates") if (BEGIN % "alternates") in (text or u"") else (text or u"")
+        kept = strip_block(text, "alternates")
         tokens = set(re.findall(r"[A-Za-z0-9_.]+", u"\n".join(line.split(u"#")[0] for line in kept.splitlines())))
         for name in names:
             if name in tokens:
@@ -614,21 +1042,22 @@ def plain(text):
 
 def calt_text(old, code_lines):
     """calt's code with FreeLab's alternates block (code_lines) in it, the rest kept."""
-    return feature_text("calt", old, [], "alternates").replace(
-        u"} calt;", u"\n".join([BEGIN % "alternates"] + [u"  " + line for line in code_lines] + [END % "alternates", u"} calt;"]), 1) \
-        if code_lines else feature_text("calt", old, [], "alternates")
+    kept = feature_text("calt", old, [], "alternates")
+    if not code_lines:
+        return kept
+    # (before the feature's closing brace found by statements: the first "} calt;" in the text, a comment's
+    # included, was taken for it)
+    block = [BEGIN % "alternates"] + [u"  " + line for line in code_lines] + [END % "alternates"]
+    return insert_block(kept.rstrip(u"\n"), "calt", block) + u"\n"
 
 
 def freelab_block(tag, text, block_name):
     """FreeLab's block of a feature's code, alone in a feature of its own (what check_code checks:
     the rest of the code may name classes FontLab keeps outside it), or None."""
-    begin, end = BEGIN % block_name, END % block_name
-    lines = (text or u"").splitlines()
-    starts = [i for i, line in enumerate(lines) if line.strip() == begin]
-    ends = [i for i, line in enumerate(lines) if line.strip() == end]
-    if not starts or not ends:
+    inner = block_text(text, BEGIN % block_name, END % block_name)  # (its markers found as comments)
+    if inner is None:
         return None
-    return u"\n".join([u"feature %s {" % tag] + lines[starts[0] + 1:ends[0]] + [u"} %s;" % tag]) + u"\n"
+    return u"feature %s {\n%s} %s;\n" % (tag, inner, tag)
 
 
 def check_code(text, names):
@@ -917,7 +1346,48 @@ def locl_rule(info, language, kind, line, glyphs, source, target, note=u""):
                     scripts=scripts)
 
 
-def locl_feature(info):
+
+
+def own_languages(text):
+    """{(script, language)} a feature's own code sets with its script and language statements (outside
+    FreeLab's block, and outside FontLab's automatic code, which FreeLab's block replaces). A feature
+    sets a language once: the feature compiler stops at a second "language CAT;" under the same script
+    (owner's report 153: Bellefair's own locl sets CAT, MOL, and ROM, and FreeLab's block beside it set
+    CAT again, "language-specific behavior already specified")."""
+    # (FreeLab's block and FontLab's automatic code found as comments wherever they stand: own_code)
+    kept = [own_code(text, BEGIN % FORMS, END % FORMS)]
+    # Read by statements, not by lines (Codex review 4: "script latn; language CAT; sub ...;" on one line,
+    # a tag on the line after its keyword, or two language statements on one line, were missed, and
+    # CAT was set again): comments and quoted strings skipped, a keyword counted only where a statement
+    # starts (after ;, {, or }), its tag the next word wherever it stands
+    found, script, start, want = set(), "DFLT", True, None
+    for match in FEA_STATEMENT_TOKEN.finditer(u"\n".join(kept)):
+        token = match.group(0)
+        if token.startswith((u"#", u'"')):
+            continue
+        if want is not None:
+            if token not in (u";", u"{", u"}"):
+                tag = token.strip()
+                if want == "script":
+                    script = tag
+                elif tag != "dflt":
+                    found.add((script, tag))
+            want = None
+        elif start and token in (u"script", u"language"):
+            want = token
+        start = token in (u";", u"{", u"}")
+    return found
+
+
+# A feature's code as tokens: a comment, a quoted string, a statement's end or a brace, or a word (a run of
+# anything else but white space)
+FEA_STATEMENT_TOKEN = re.compile(u'#[^\\n]*|"[^"]*"?|[;{}]|[^\\s;{}#"]+')
+
+
+def locl_feature(info, taken=()):
+    """The locl rows the font's glyphs call for. taken: the (script, language) pairs the font's own locl
+    code sets already (own_languages): a row of one is shown, never written (FreeLab's block cannot set
+    that language again), its rule left to the font's code."""
     rules, handled = [], set()
 
     # Romanian and Moldavian: S and T with a comma below, where the text has the cedilla's code point
@@ -1011,18 +1481,35 @@ def locl_feature(info):
              or (rule.data["language"], rule.glyphs[0]) not in own]
     if not rules:
         return None
-    return FormFeature("locl", rules, make_locl,
-                       u"Forms of a language, for text tagged with it (on unless turned off); the prefix "
-                       u"declares each language")
+    taken = set((script.strip(), language) for script, language in taken)
+    left = set()
+    for rule in rules:
+        if all((script.strip(), rule.data["language"]) in taken for script in rule.data["scripts"]):
+            left.add(rule.data["language"])
+            rule.warning, rule.on, rule.first_on = True, False, False
+            rule.note = u"; ".join(text for text in (rule.note, u"the font's own code sets %s already (a feature "
+                                                     u"sets a language once): add this rule there if it lacks "
+                                                     u"it" % rule.data["language"]) if text)
+    feature = FormFeature("locl", rules, make_locl,
+                          u"Forms of a language, for text tagged with it (on unless turned off); the prefix "
+                          u"declares each language")
+    feature.taken, feature.left = taken, sorted(left)
+    return feature
 
 
 LOCL_KINDS = ("ligature", "single", "context")  # a lookup each (a lookup holds one kind of rule)
 
 
 def make_locl(rules, feature):
+    """locl's block: a script statement each, then a language statement and its lookups each, every
+    language once, and none the font's own code sets already (feature.taken: set again, it stops the
+    compiler)."""
+    taken = getattr(feature, "taken", None) or set()
     groups = {}
     for rule in rules:
         for script in rule.data["scripts"]:
+            if (script.strip(), rule.data["language"]) in taken:
+                continue
             groups.setdefault(script, {}).setdefault(rule.data["language"], {}).setdefault(
                 rule.data["kind"], []).append(rule.line)
     lines = []
@@ -1682,18 +2169,9 @@ def aalt_first(features):
 # -- The features in the font ------------------------------------------------------------------
 
 def strip_block(text, block_name):
-    """text without FreeLab's block of that name."""
-    begin, end = BEGIN % block_name, END % block_name
-    kept, inside = [], False
-    for line in (text or u"").splitlines():
-        stripped = line.strip()
-        if stripped == begin:
-            inside = True
-        elif stripped == end:
-            inside = False
-        elif not inside:
-            kept.append(line)
-    return u"\n".join(kept)
+    """text without FreeLab's blocks of that name (a reader's view: without_blocks, as far as their
+    markers pair)."""
+    return without_blocks(text, BEGIN % block_name, END % block_name, strict=False)
 
 
 def feature_kind(text):
@@ -1702,32 +2180,24 @@ def feature_kind(text):
     outside both, or in a block handed back from FontLab)."""
     if not text or not text.strip():
         return "none"
-    fontlab = freelab = hand = False
-    automatic = inside = False
-    for line in text.splitlines():
-        stripped = line.strip()
-        if stripped == BEGIN % FORMS:
-            inside = freelab = True
-            continue
-        if stripped == END % FORMS:
-            inside = False
-            continue
-        if inside:
-            continue
-        if stripped.startswith(FONTLAB_AUTO):
-            automatic = fontlab = True
-            continue
-        if stripped.startswith(u"#<"):
-            automatic = False
-            continue
-        if automatic:
-            continue
-        code = stripped.split(u"#")[0].strip()
-        if not code or re.match(r"^feature\s+\S+\s*\{$", code) or re.match(r"^\}\s*\S+\s*;$", code):
-            continue
-        hand = True
-    if hand:
+    # By tokens (Codex review 6): FreeLab's markers and FontLab's are comments wherever they stand; markers
+    # that do not pair make the code the designer's (nothing of it is taken for FreeLab's)
+    try:
+        freelab = bool(block_spans(text, BEGIN % FORMS, END % FORMS))
+    except FeatureCodeUnreadable:
         return "hand"
+    rest = without_blocks(text, BEGIN % FORMS, END % FORMS)
+    spans, open_left = automatic_spans(rest)
+    fontlab = bool(spans) or open_left
+    words = [token[0] for token in code_tokens(own_code(rest, BEGIN % FORMS, END % FORMS))]
+    at = 0
+    while at < len(words):  # (the feature's own "feature tag {" and "} tag;" are no one's code)
+        if words[at] == u"feature" and at + 2 < len(words) and words[at + 2] == u"{":
+            at += 3
+        elif words[at] == u"}" and at + 2 < len(words) and words[at + 2] == u";":
+            at += 3
+        else:
+            return "hand"
     if freelab:
         return "freelab"
     return "fontlab" if fontlab else "none"
@@ -1767,7 +2237,7 @@ def form_features(info, texts):
     and its first check: on, but off where the font's code has the feature by hand, or where FontLab's
     automatic code does the same; a feature whose FreeLab block is all that is left (its glyphs gone)
     is listed with no rows, to take the block out."""
-    made = [locl_feature(info), case_feature(info)]
+    made = [locl_feature(info, own_languages(texts.get("locl"))), case_feature(info)]
     made.extend(fraction_features(info))
     made.append(scripted_feature(info, "sups", SUPS_SUFFIXES, "<super>", u"Superscripts (off unless turned on)"))
     made.append(scripted_feature(info, "subs", SUBS_SUFFIXES, "<sub>", u"Subscripts (off unless turned on)"))
@@ -1809,6 +2279,11 @@ def form_features(info, texts):
                 r"^\s*(script|language)\s", strip_block(text, FORMS), re.M):
             feature.kind_note += (u" Its code sets languages: FreeLab's block, at its end, would apply to the last "
                                   u"one only.")
+        left = getattr(feature, "left", None)
+        if left:  # (locl: the languages the font's own code sets, which FreeLab's block cannot set again)
+            feature.kind_note = (feature.kind_note + u" " if feature.kind_note else u"") + (
+                u"Its code sets %s already, and a feature sets a language once: %s rows are left to it." % (
+                    describe_list(left), u"that language's" if len(left) == 1 else u"those languages'"))
         feature.first_on = feature.on
         found.append(feature)
     return found, default
@@ -1821,60 +2296,43 @@ def forms_feature_text(tag, old, lines):
     (featureNames lead a feature), else before the feature's closing line. No lines: the block out,
     the rest as it was."""
     begin, end = BEGIN % FORMS, END % FORMS
-    kept, inside, automatic = [], False, False
-    for line in (old or u"").splitlines():
-        stripped = line.strip()
-        if stripped == begin:
-            inside = True
-            continue
-        if stripped == end:
-            inside = False
-            continue
-        if inside:
-            continue
-        if lines and stripped.startswith(FONTLAB_AUTO):
-            kept.append(line.replace(FONTLAB_AUTO, FONTLAB_HANDED, 1))
-            automatic = True
-            continue
-        if automatic:
-            if stripped.startswith(u"#<"):
-                automatic = False
-                kept.append(line)
-            continue
-        kept.append(line)
-    opening = closing = None
-    for index, line in enumerate(kept):
-        if opening is None and re.match(r"^\s*feature\s+%s\s*\{" % re.escape(tag), line):
-            opening = index
-        if re.match(r"^\s*}\s*%s\s*;" % re.escape(tag), line):
-            closing = index
-    if opening is None or closing is None:  # a new feature
-        kept = [u"feature %s {" % tag, u"# %s" % FORM_TITLES.get(tag, tag), u"} %s;" % tag]
-        opening, closing = 0, 2
+    # FreeLab's older block and FontLab's automatic code found by their comments wherever they stand (an end
+    # marker after code on its line had been missed, and the font's code after it taken out with the block);
+    # markers that do not pair raise FeatureCodeUnreadable, even to take a block out
+    readable(old, tag)  # (before and after, taking a block out too: Codex review 7)
+    text = without_blocks(old, begin, end, tag)
+    if lines:
+        text = handed_back(text, drop=True, tag=tag)
+    text = text.rstrip(u"\r\n")
     if not lines:
-        return u"\n".join(kept) + u"\n"
+        if not code_tokens(text):  # (no code: the feature, empty, as a new one was)
+            return insert_block(text, tag, [], title=FORM_TITLES.get(tag, tag)) + u"\n"
+        readable(text, tag)
+        return text + u"\n"
+    # The feature's braces found by statements (insert_block): the font's own code is never made again
+    # from nothing (FeatureCodeUnreadable where they cannot be found)
     block = [begin] + [u"  " + line for line in lines] + [end]
-    if lines[0].startswith((u"featureNames", u"cvParameters")):
-        at = opening + 1
-        while at < closing and kept[at].strip().startswith(u"#") and not kept[at].strip().startswith(
-                (u"#>", u"#/>", u"#<", u"# >>>")):
-            at += 1
-    else:
-        at = closing
-    return u"\n".join(kept[:at] + block + kept[at:]) + u"\n"
+    return insert_block(text, tag, block, first=lines[0].startswith((u"featureNames", u"cvParameters")),
+                        title=FORM_TITLES.get(tag, tag)) + u"\n"
 
 
-def forms_texts(features, texts):
+def forms_texts(features, texts, refused=None):
     """{tag: new code} for each form feature checked, and each unchecked one whose FreeLab block is in
-    the font (taken out); only where the code changes."""
+    the font (taken out); only where the code changes. refused: a list the tags of the features whose
+    code FreeLab cannot read go in (FeatureCodeUnreadable: nothing written to them)."""
     new = {}
     for feature in features:
         old = texts.get(feature.tag)
-        if feature.on:
-            text = forms_feature_text(feature.tag, old, feature.lines())
-        elif (BEGIN % FORMS) in (old or u""):
-            text = forms_feature_text(feature.tag, old, [])
-        else:
+        try:
+            if feature.on:
+                text = forms_feature_text(feature.tag, old, feature.lines())
+            elif (BEGIN % FORMS) in (old or u""):
+                text = forms_feature_text(feature.tag, old, [])
+            else:
+                continue
+        except FeatureCodeUnreadable:
+            if refused is not None:
+                refused.append(feature.tag)
             continue
         if text != old:
             new[feature.tag] = text
@@ -2445,7 +2903,8 @@ def suggested_words(why):
     """The Suggested button's What's This and tooltip (rich text): what a click does, then where the
     picked set's suggestion comes from (why: small_settings' sentence; None before a font is read).
     That sentence stood in the settings row, beside the button."""
-    text = u"Puts the picked set's scale, baseline, and width back as first suggested."
+    text = (u"Puts the picked set's scale, baseline, and width back as first suggested, and <i>Strokes</i> back at "
+            u"%d%% (for every set)." % STROKE_WEIGHT)
     if why:
         why = (u"%s" % why).replace(u"&", u"&amp;").replace(u"<", u"&lt;").replace(u">", u"&gt;")
         text += u" This set's suggestion: %s" % (why[:1].lower() + why[1:])
@@ -2455,6 +2914,59 @@ def suggested_words(why):
 def build_label(count):
     """The build button's words for this many checked glyphs."""
     return u"Build %s" % counted(count, u"checked glyph") if count else u"Build checked glyphs"
+
+
+GROUP_HOWS = (("scaled", u"scaled from %s", u"scaled from %s"), ("moved", u"moved from a drawn small figure",
+                                                                 u"moved from drawn small figures"),
+              ("copied", u"a copy of its set's glyph", u"copies of their set's glyphs"))
+
+
+def group_note(forms, plans, ours=()):
+    """A build list's group row's note (a cell's: no period), what its rows say in short: how many are
+    made each way, what they are scaled from, their code points' span, and how many were built here
+    before ("10 scaled from the figures; U+2070 to U+2079; 3 built here before")."""
+    parts = []
+    for how, one, many in GROUP_HOWS:
+        made = [form for form in forms if getattr(plans.get(form.name), "how", None) == how]
+        if not made:
+            continue
+        words = one if len(made) == 1 else many
+        if how == "scaled":  # (the ordinal indicators' from a and o, the rest from their figures)
+            letters = [form.base for form in made if form.group == "ordn"]
+            words %= describe_list(sorted(set(letters))) if letters else (
+                u"its figure" if len(made) == 1 else u"their figures")
+        parts.append(u"%d %s" % (len(made), words))
+    unplanned = sum(1 for form in forms if plans.get(form.name) is None)
+    if unplanned:
+        parts.append(u"%d not built (%s width could not be read)" % (
+            unplanned, u"its figure's" if unplanned == 1 else u"their figures'"))
+    codes = sorted(form.code for form in forms if form.code)
+    if codes:
+        parts.append(u"U+%04X" % codes[0] if len(codes) == 1 else u"U+%04X to U+%04X" % (codes[0], codes[-1]))
+    built = sum(1 for form in forms if form.name in ours)
+    if built:
+        parts.append(u"%d built here before" % built)
+    return u"; ".join(parts)
+
+
+BUILD_WHAT = (u"Adds the checked glyphs to the font, as shown (scaled forms with their strokes kept as <i>Strokes</i> "
+              u"says), in one step of FontLab's History. The font is read again: the forms above take them. What it "
+              u"built stays listed while nobody changes it: a build then replaces it with the settings shown (a glyph "
+              u"drawn over is left alone).")
+
+
+def build_words(count, unchanged):
+    """The build button's What's This and tooltip: what it does, and, grayed out (count: the checked glyphs
+    a build would make or change), why: the checked glyphs (unchanged of them) are as built here with
+    these very settings, or none is checked."""
+    if count:
+        return BUILD_WHAT
+    if unchanged:
+        return BUILD_WHAT + (u" Grayed out: %s, so a build would change nothing. Change a setting, or check other "
+                             u"glyphs, to build again." % (
+                                 u"the glyph checked was built here with these very settings" if unchanged == 1 else
+                                 u"the %d glyphs checked were built here with these very settings" % unchanged))
+    return BUILD_WHAT + u" Grayed out: no glyph that can be built is checked."
 
 
 def without_glyphs(info, names):
@@ -2810,7 +3322,9 @@ liga, c_t in dlig); its feature's tooltip says why. Applications let users switc
 both: in InDesign and Illustrator, the <i>Ligatures</i> and <i>Discretionary Ligatures</i> options; on the web,
 font-variant-ligatures. A feature written here is handed back from FontLab's automatic features (its
 "#&gt; feature" line becomes "#/&gt; feature"), so FontLab no longer rewrites it; the rest of its
-code is kept.<br>
+code is kept. A ligature whose rule the font's own code writes stays where it is: FreeLab never moves or
+takes out a rule the font wrote (set to another feature, the window says so); it moves only its own rules
+and FontLab's automatic ones.<br>
 <b>Alternates that take turns</b> (calt, on unless turned off): a letter, a figure, or a punctuation
 mark repeated within the look back set takes its next alternate (X.2, X.3, or X.alt1...), so repeated
 glyphs vary as handwriting does (<i>ll</i>, <i>1001</i>, <i>...</i>, <i>!!</i>). The nearest earlier
@@ -2832,7 +3346,8 @@ Unicode superscript and subscript figures, and ordinal indicators the font lacks
 figure (or <i>a</i> or <i>o</i>) as a component, scaled and raised or lowered as most open-licensed fonts place
 them (or as the font's own small figures, where it has some). Pick a set in the settings row to change
 its scale, baseline, and width; <i>Strokes</i>, one value for every set, is the strokes kept (outlines thickened
-evenly; 100%: components). A built form is a start to refine.
+evenly; 100%: components); <i>Suggested</i>, at the row's end, puts the four back. A built form is a start
+to refine.
 <i>Build checked glyphs</i> adds them in one step of FontLab's History; the font is read again, and
 the forms above take them. What it built stays listed: change a setting and build again to replace it
 (a glyph drawn over since is left alone).<br><br>
@@ -3829,9 +4344,9 @@ class FeatureCodeDialog(object):
                                    u"and moved (its strokes kept as <i>Strokes</i> says), or of a drawn small figure "
                                    u"where the font has a whole set of them.")
         part.addWidget(self.small_label)
-        # One row for every setting. Scale, Baseline at, and Width are the picked set's, and Suggested puts
-        # those three back; Strokes, after it, is one value for every set (it stood alone under the list,
-        # which said so by its place only: its What's This says it now).
+        # One row for every setting. Scale, Baseline at, and Width are the picked set's; Strokes is one value
+        # for every set (it stood alone under the list, which said so by its place only: its What's This says
+        # it now); Suggested, last, puts the four back.
         row = QtGui.QHBoxLayout()
         what = u"The set whose settings the boxes beside show and change (clicking a row picks its set)."
         row.addWidget(label_of(QtGui, u"Settings of", what))
@@ -3863,15 +4378,12 @@ class FeatureCodeDialog(object):
         self.small_width.setSuffix(u"%")
         self.small_width.setWhatsThis(what)
         row.addWidget(self.small_width)
-        self.small_reset = QtGui.QPushButton(u"Suggested")
-        describe(self.small_reset, suggested_words(None), True)  # (where the suggestion comes from: small_set_picked)
-        row.addWidget(self.small_reset)
         what = (u"For every set, not only the one picked: how thick the built forms' strokes are, as a share of "
                 u"their scaled figure's. Scaling a figure to 60%% thins its strokes to 60%%; drawn small figures are "
                 u"about 7%% bolder than scaled ones (the corpus's fonts), hence %d%%. Above 100%%, each scaled form is "
                 u"made of outlines (not components), offset outward evenly on both sides of each stroke; 100%%: "
-                u"components, scaled, as they are. <i>Suggested</i> leaves it as it is; <i>Restore suggestions</i> "
-                u"puts it back at %d%%." % (STROKE_WEIGHT, STROKE_WEIGHT))
+                u"components, scaled, as they are. <i>Suggested</i>, after it, puts it back at %d%% too." % (
+                    STROKE_WEIGHT, STROKE_WEIGHT))
         row.addWidget(label_of(QtGui, u"Strokes", what))
         self.stroke_box = QtGui.QSpinBox()
         self.stroke_box.setRange(100, 160)
@@ -3881,6 +4393,11 @@ class FeatureCodeDialog(object):
         row.addWidget(self.stroke_box)
         # (planned again: the open sections' pictures show the strokes, and the build's count follows)
         self.stroke_box.connect("valueChanged(int)", lambda value: self.replan())
+        # Suggested last: it puts back every setting before it, Strokes too (owner's report 158: changing
+        # Strokes did not make it clickable, as it stood before Strokes and left it as it was)
+        self.small_reset = QtGui.QPushButton(u"Suggested")
+        describe(self.small_reset, suggested_words(None), True)  # (where the suggestion comes from: small_set_picked)
+        row.addWidget(self.small_reset)
         row.addStretch(1)
         part.addLayout(row)
         self.small_tree = QtGui.QTreeWidget()
@@ -3895,12 +4412,7 @@ class FeatureCodeDialog(object):
         row = QtGui.QHBoxLayout()
         row.addStretch(1)
         self.build_button = QtGui.QPushButton(build_label(0))
-        self.build_button.setWhatsThis(u"Adds the checked glyphs to the font, as shown (scaled forms with their "
-                                       u"strokes kept as Strokes says), in one "
-                                       u"step of FontLab's History. The font is read again: the forms above take "
-                                       u"them. What it built stays listed while nobody changes it: a build then "
-                                       u"replaces it with the settings shown (a glyph drawn over is left alone), and "
-                                       u"says so when nothing changed.")
+        describe(self.build_button, build_words(0, 0), True)  # (why it is grayed out: update_small_buttons)
         self.build_button.setEnabled(False)
         row.addWidget(self.build_button)
         part.addLayout(row)
@@ -3996,7 +4508,9 @@ class FeatureCodeDialog(object):
                 item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsUserCheckable)
                 item.setCheckState(0, QtCore.Qt.Checked if any(form.on for form in forms) else QtCore.Qt.Unchecked)
                 tree.addTopLevelItem(item)
-                item.setFirstColumnSpanned(True)  # (its check box and count whole, not cut by the first column)
+                # (not spanned: its count and note stand in the other columns, as every other list's groups'
+                # do; spanned, a folded group showed nothing there, owner's report 159. Its title is whole:
+                # the first column is sized to it below.)
                 for form in forms:
                     child = QtGui.QTreeWidgetItem([form.name, u"", u""])
                     child.setData(0, QtCore.Qt.UserRole, u"\t" + form.name)
@@ -4063,6 +4577,10 @@ class FeatureCodeDialog(object):
                 on = sum(1 for form in self.small_forms if form.group == group and form.on)
                 total = sum(1 for form in self.small_forms if form.group == group)
                 item.setText(1, u"%d of %s checked" % (on, counted(total, u"glyph")))
+                note = group_note([form for form in self.small_forms if form.group == group], self.small_plans,
+                                  self.small_ours)
+                item.setText(2, note)
+                item.setToolTip(2, note)
                 for index in range(item.childCount()):
                     child = item.child(index)
                     form = self.small_form((u"%s" % child.data(0, QtCore.Qt.UserRole))[1:])
@@ -4248,13 +4766,18 @@ class FeatureCodeDialog(object):
         figure's stroke cannot be measured (the form is then made of components). Nothing is added here."""
         stem = self.figure_stem(package, master)
         if not stem:
+            self.stroke_trouble = u"the figures' stroke could not be measured"
             return None
         copies = []
         for part in plan.parts:
             name, sx, sy, dx, dy = unwrapped(package, master, *part)
             source = package.findName(name)
             source_layer = source.getLayerByName(master) if source is not None else None
-            if source_layer is None or any(shape.isComponent for shape in source_layer.shapes):
+            if source_layer is None:
+                self.stroke_trouble = u"%s has no layer in the master %s" % (name, master)
+                return None
+            if any(shape.isComponent for shape in source_layer.shapes):
+                self.stroke_trouble = u"%s is made of components" % name
                 return None
             distance = stem * abs(sx) * (weight - 1.0) / 2.0
             copies.append((source_layer, (sx, sy, float(round(dx)), float(round(dy))), distance))
@@ -4424,13 +4947,45 @@ class FeatureCodeDialog(object):
             setting["width"] = value / 100.0
         self.replan()
 
+    def sync_small_settings(self):
+        """The settings as the boxes show them, read at the click that builds: a value typed and not yet
+        entered is taken (interpretText, as Enter does), and the picked set's settings and the plans follow
+        the boxes where a change did not reach them (owner's report: 100 typed in Strokes over 130, then
+        Build without Enter, built at 130). Strokes itself is read from its box as the build starts."""
+        boxes = (("scale", "small_scale"), ("baseline", "small_baseline"), ("width", "small_width"))
+        for _, name in boxes + ((None, "stroke_box"),):
+            box = getattr(self, name, None)
+            try:
+                box.interpretText()  # (its valueChanged, where the text differs: the settings follow)
+            except Exception:
+                pass
+        setting = self.small_setup.get(SMALL_SETS[self.small_set_index]) if 0 <= self.small_set_index < len(
+            SMALL_SETS) else None
+        if setting is None:
+            return
+        for key, name in boxes:
+            value = getattr(getattr(self, name, None), "value", None)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                continue  # (no number: a box that is not there, or not read)
+            value = int(value)
+            now = setting.get(key)
+            shown = int(round(now * 100)) if key in ("scale", "width") and now is not None else now
+            if shown != value:
+                self.small_setting(key, value)  # (planned again)
+
     def small_suggested(self):
-        """The picked set's settings back as first suggested."""
+        """The picked set's settings back as first suggested, and Strokes back at STROKE_WEIGHT."""
         set_key = SMALL_SETS[self.small_set_index]
         if set_key in self.small_first:
             self.small_setup[set_key] = dict(self.small_first[set_key])
             self.small_set_picked(self.small_set_index)
-            self.replan()
+        if self.strokes_value() != STROKE_WEIGHT:
+            self.stroke_box.blockSignals(True)  # (planned once, below)
+            try:
+                self.stroke_box.setValue(STROKE_WEIGHT)
+            finally:
+                self.stroke_box.blockSignals(False)
+        self.replan()
 
     def small_changed(self):
         if hasattr(self, "stroke_box") and self.stroke_box.value != STROKE_WEIGHT:
@@ -4446,19 +5001,21 @@ class FeatureCodeDialog(object):
         self.build_button.setText(build_label(count))
         # (set_enabled, not Auto Kerning's enable: this runs while the font is read after a build or an
         # undo, the lists' part disabled meanwhile, and the button stayed clickable with nothing to build.)
-        # Checked forms built here with these very settings keep it clickable: the owner wants it there
-        # after a build, and a click says that nothing changed rather than building them again.
-        set_enabled(self.build_button, count > 0 or bool(unchanged))
+        # Only with something a build would make or change (owner's report 160: it stayed clickable when
+        # every checked glyph was as built here, and a click only said "Nothing changed since the last
+        # build"); its tooltip and What's This then say why it is grayed out.
+        set_enabled(self.build_button, count > 0)
+        describe(self.build_button, build_words(count, len(unchanged)), True)
         set_enabled(self.restore_button, self.restorable())
         # The settings act on the forms listed: none listed (no font, or nothing to build), none to set.
-        # Suggested only where the picked set is not as suggested (it would put nothing back).
+        # Suggested only where it would put something back: the picked set's three, or Strokes.
         listed = bool(self.small_forms)
         for box in (self.small_set, self.small_scale, self.small_baseline, self.small_width, self.stroke_box):
             set_enabled(box, listed)
         set_key = SMALL_SETS[self.small_set_index] if 0 <= self.small_set_index < len(SMALL_SETS) else None
         first, now = self.small_first.get(set_key), self.small_setup.get(set_key)
-        set_enabled(self.small_reset, listed and first is not None and now is not None and any(
-            first.get(k) != now.get(k) for k in ("scale", "baseline", "width")))
+        set_enabled(self.small_reset, listed and ((first is not None and now is not None and any(
+            first.get(k) != now.get(k) for k in ("scale", "baseline", "width"))) or self.strokes_value() != STROKE_WEIGHT))
 
     def build_masters(self, package):
         """The masters a build makes layers in (every master; the current one where none is listed)."""
@@ -4530,6 +5087,7 @@ class FeatureCodeDialog(object):
         QtCore, QtGui = _qt()
         if self.package is None or self.small_info is None:
             return
+        self.sync_small_settings()  # (what the boxes show now, typed and not yet entered included)
         chosen = [form for form in self.small_forms if form.on]
         if not chosen:
             return
@@ -4574,6 +5132,7 @@ class FeatureCodeDialog(object):
         # forms whose thicker strokes FontLab did not keep, and what was done to them (add_stroke_copies' counts);
         # how far the kept strokes' sides moved in the current master (asked: the form's under way)
         unkept, lost, offsets, asked = [], [0, 0, 0, 0, 0, 0], [], []
+        unstroked = []  # [(form, why)]: scaled forms Strokes above 100% could not thicken (made of components)
         self.stems = {}
         # (a form built again: its glyph is changed)
         if not self.ak.begin_write(fontlab, package, u"FreeLab Feature Code", self.log):
@@ -4601,9 +5160,13 @@ class FeatureCodeDialog(object):
                 outlines = {}
                 if weight > 1.0 and all(plan.how == "scaled" for _, plan in usable):
                     for master, plan in usable:
+                        self.stroke_trouble = None
                         copies = self.stroke_copies(package, master, plan, weight)
                         if copies is None:
                             outlines = {}
+                            # (said, not left to "Scaling thins strokes": owner's report 156 saw no
+                            # difference between 100% and 130%, and the log never said why)
+                            unstroked.append((form.name, self.stroke_trouble or u"FontLab did not say why"))
                             break
                         outlines[master] = copies
                 if again:  # its layers emptied, then made anew: the glyph, its code point, and what uses it stay
@@ -4717,6 +5280,15 @@ class FeatureCodeDialog(object):
                              counted(lost[1], u"node"), counted(lost[0], u"contour"), grouped(lost[2]),
                              grouped(lost[3]), grouped(lost[4]), drawn,
                              u"it" if len(unkept) == 1 else u"them"), "warning")
+        unstroked = [(name, why) for name, why in unstroked if name in made]
+        if unstroked:  # (Strokes above 100% that was not applied: said, with why)
+            one = len(unstroked) == 1
+            self.log.add(u"<i>Strokes</i> at %d%% could not thicken %s: %s. %s made of components, scaled (%s "
+                         u"thinned), because %s." % (
+                             strokes, b(counted(len(unstroked), u"glyph")),
+                             self.ak.glyph_name_links([name for name, _ in unstroked]),
+                             u"It is" if one else u"They are", u"its strokes" if one else u"their strokes",
+                             self.ak.html(describe_list(sorted(set(why for _, why in unstroked))))), "warning")
         if skipped:
             self.log.add(u"%s had been made or changed meanwhile and %s left as %s." % (
                 self.ak.glyph_name_links(skipped), u"was" if len(skipped) == 1 else u"were",
@@ -4725,8 +5297,9 @@ class FeatureCodeDialog(object):
             self.log.add(u"%s was not built: %s." % (b(name), self.ak.html(why)), "warning")
         if error is not None:
             self.log.add(u"Stopped by an error: %s" % self.ak.html(error), "error")
-        forms = self.form_state()
+        forms, choices = self.form_state(), self.choice_state()
         self.run()
+        self.apply_choices(choices)
         self.apply_form_state(forms)
         self.make_code()
 
@@ -4829,15 +5402,37 @@ class FeatureCodeDialog(object):
             except Exception:
                 pass
 
+    def choice_state(self):
+        """{(glyph, its parts): its choice} of the ligatures FreeLab writes, to keep across a fresh look at
+        the same font (a write, a build, an undo): read again, a ligature named f_i whose rule a write took
+        out (Off) was offered again as its name suggests, and the next write put it back (Codex review 8)."""
+        try:
+            key = self.ak.font_key(self.package)
+        except Exception:
+            key = None
+        return key, dict(((lig.glyph, lig.parts), lig.choice) for lig in self.found if not lig.fixed)
+
+    def apply_choices(self, state):
+        """The choices kept (choice_state) given back where the same font has the same ligature, FreeLab's
+        to write (the font's own stay where its code has them)."""
+        key, choices = state
+        try:
+            if key is None or self.package is None or self.ak.font_key(self.package) != key:
+                return
+        except Exception:
+            return
+        for row, lig in enumerate(self.found):
+            kept = choices.get((lig.glyph, lig.parts))
+            if kept is not None and not lig.fixed and kept != lig.choice:
+                lig.choice = kept
+                self.show_choice(self.ligature_tree.topLevelItem(row), lig)
+
     def history_moved(self):
         """An undo, a redo, or an edit in FontLab: the font read again, the choices kept where they still apply."""
-        choices = dict((lig.glyph, lig.choice) for lig in self.found)
+        choices = self.choice_state()
         forms = self.form_state()
         self.run()
-        for row, lig in enumerate(self.found):
-            if lig.glyph in choices and choices[lig.glyph] != lig.choice:
-                lig.choice = choices[lig.glyph]
-                self.show_choice(self.ligature_tree.topLevelItem(row), lig)
+        self.apply_choices(choices)
         self.apply_form_state(forms)
         self.make_code()
         self.log.add(u"The font's History moved (an undo, a redo, or an edit): read again.")
@@ -4924,13 +5519,16 @@ class FeatureCodeDialog(object):
         if self.busy or self.package is None:
             return
         tree = self.alternate_tree
+
+        def wanted(item):
+            base = u"%s" % item.data(0, QtCore.Qt.UserRole)
+            return base not in self.taken and (key == "all" or (key == "often" and base in self.often))
+
         tree.blockSignals(True)
-        try:
-            for row in range(tree.topLevelItemCount):
-                item = tree.topLevelItem(row)
-                base = u"%s" % item.data(0, QtCore.Qt.UserRole)
-                on = base not in self.taken and (key == "all" or (key == "often" and base in self.often))
-                item.setCheckState(0, QtCore.Qt.Checked if on else QtCore.Qt.Unchecked)
+        try:  # (the log told how many it checked and unchecked, hidden ones said: owner's report 118)
+            self.ak.check_rows([tree.topLevelItem(row) for row in range(tree.topLevelItemCount)], wanted,
+                               log=self.log, command=dict((k, label) for k, label, _ in TURN_CHECKS)[key],
+                               noun=u"glyph")
         finally:
             tree.blockSignals(False)
         self.make_code()
@@ -4998,14 +5596,19 @@ class FeatureCodeDialog(object):
     def new_texts(self):
         """{tag: its new code} for liga, dlig, and calt (only those with something of FreeLab's, or
         with rules FreeLab takes over), and for the form features that change."""
-        texts = ligature_texts(self.found, self.texts)
+        refused = self.refused = []  # (features whose braces FreeLab cannot find: left as they are, and said)
+        self.stuck = []  # (ligatures whose rule FreeLab cannot move: left where they are, and said)
+        texts = ligature_texts(self.found, self.texts, refused, self.stuck)
         cycling = self.cycling()
         if cycling or (BEGIN % "alternates") in (self.texts.get("calt") or u""):
             fits = cycling and not self.turn_trouble(cycling)  # (code that cannot compile is not made)
-            texts["calt"] = calt_text(self.texts.get("calt"),
-                                      cycle_code(cycling, self.letters, self.look_back.value, others=self.others)
-                                      if fits else [])
-        texts.update(forms_texts(self.forms, self.texts))
+            try:
+                texts["calt"] = calt_text(self.texts.get("calt"),
+                                          cycle_code(cycling, self.letters, self.look_back.value, others=self.others)
+                                          if fits else [])
+            except FeatureCodeUnreadable:
+                refused.append("calt")
+        texts.update(forms_texts(self.forms, self.texts, refused))
         return texts
 
     def show_code(self, text):
@@ -5066,12 +5669,14 @@ class FeatureCodeDialog(object):
         b = self.ak.b
         checked = [feature.tag for feature in self.forms if feature.on and feature.checked()]
         self.status.setText(u"%s: %s (%s standard, %s discretionary, %s off); %s with alternates taking turns.\n"
-                            u"Forms: %s checked of %s%s.%s%s" % (
+                            u"Forms: %s checked of %s%s.%s%s%s%s" % (
                                 b(self.package.tfn), b(counted(len(self.found), u"ligature")), b(counts["liga"]),
                                 b(counts["dlig"]), b(counts["off"]), b(counted(len(cycling), u"glyph")),
                                 b(len(checked)), b(counted(len(self.forms), u"form feature")),
                                 (u" (%s)" % self.ak.html(u", ".join(checked))) if checked else u"",
                                 u" The font has this code already." if not changes and (texts or self.forms) else u"",
+                                (u" " + self.ak.html(refused_words(self.refused))) if getattr(self, "refused", None) else u"",
+                                (u" " + self.ak.html(stuck_words(self.stuck))) if getattr(self, "stuck", None) else u"",
                                 (u" The code has problems, so nothing can be written: " +
                                  self.ak.html(u"; ".join(problems))) if problems else u""))
 
@@ -5124,8 +5729,9 @@ class FeatureCodeDialog(object):
             self.set_busy(False)
         # (the feature code only: the font's own state, which needs no before_changes, and no glyph added)
         status = self.ak.notify_changed(self.fontlab, self.package, u"FreeLab Feature Code", added=False)
-        forms = self.form_state()
+        forms, choices = self.form_state(), self.choice_state()
         self.run()
+        self.apply_choices(choices)  # (Off included: Codex review 8, the font read again set it back as named)
         self.apply_form_state(forms)
         self.make_code()
         them = u"it" if len(written) == 1 else u"them"
@@ -5134,6 +5740,10 @@ class FeatureCodeDialog(object):
             self.ak.compiled_note(self.compile_box, self.log)) if written else u"Wrote nothing.",
             "done" if written else "info")
         status.report(self.log)
+        if self.refused:
+            self.log.add(self.ak.html(refused_words(self.refused)), "warning")
+        if self.stuck:
+            self.log.add(self.ak.html(stuck_words(self.stuck)), "warning")
         if skipped is not None:
             self.log.add(u"locl was not written: the prefix could not be (%s). Add these lines to the prefix in "
                          u"FontLab's <i>Features</i> panel, then write again: %s" % (

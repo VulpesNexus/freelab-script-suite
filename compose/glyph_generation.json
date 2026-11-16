@@ -2642,6 +2642,11 @@
      "confidence": "exact",
      "of": "0110",
      "op": "shared"
+    },
+    {
+     "confidence": "accepted",
+     "of": "0189",
+     "op": "copy"
     }
    ]
   },
@@ -2662,6 +2667,11 @@
      "confidence": "exact",
      "of": "00D0",
      "op": "shared"
+    },
+    {
+     "confidence": "accepted",
+     "of": "0189",
+     "op": "copy"
     }
    ]
   },
@@ -5832,6 +5842,138 @@
    ]
   },
   {
+   "code": "2192",
+   "deriving": 0,
+   "families": 0,
+   "glyph_name": "rightArrow",
+   "group": "arrows",
+   "most": null,
+   "research_confidence": "accepted",
+   "unicode_name": "RIGHTWARDS ARROW",
+   "ways": [
+    {
+     "angle": 180,
+     "confidence": "accepted",
+     "of": "2190",
+     "op": "turn",
+     "pair": "2190"
+    },
+    {
+     "angle": 270,
+     "confidence": "accepted",
+     "of": "2191",
+     "op": "turn",
+     "pair": "2192"
+    },
+    {
+     "angle": 90,
+     "confidence": "accepted",
+     "of": "2193",
+     "op": "turn",
+     "pair": "2192"
+    }
+   ]
+  },
+  {
+   "code": "21D2",
+   "deriving": 0,
+   "families": 0,
+   "glyph_name": "rightDoubleArrow",
+   "group": "arrows",
+   "most": null,
+   "research_confidence": "accepted",
+   "unicode_name": "RIGHTWARDS DOUBLE ARROW",
+   "ways": [
+    {
+     "angle": 180,
+     "confidence": "accepted",
+     "of": "21D0",
+     "op": "turn",
+     "pair": "2190"
+    },
+    {
+     "angle": 270,
+     "confidence": "accepted",
+     "of": "21D1",
+     "op": "turn",
+     "pair": "2192"
+    },
+    {
+     "angle": 90,
+     "confidence": "accepted",
+     "of": "21D3",
+     "op": "turn",
+     "pair": "2192"
+    }
+   ]
+  },
+  {
+   "code": "25B6",
+   "deriving": 0,
+   "families": 0,
+   "glyph_name": "rightBlackTriangle",
+   "group": "arrows",
+   "most": null,
+   "research_confidence": "accepted",
+   "unicode_name": "BLACK RIGHT-POINTING TRIANGLE",
+   "ways": [
+    {
+     "angle": 180,
+     "confidence": "accepted",
+     "of": "25C0",
+     "op": "turn",
+     "pair": "25C0"
+    },
+    {
+     "angle": 270,
+     "confidence": "accepted",
+     "of": "25B2",
+     "op": "turn",
+     "pair": "25B6"
+    },
+    {
+     "angle": 90,
+     "confidence": "accepted",
+     "of": "25BC",
+     "op": "turn",
+     "pair": "25B6"
+    }
+   ]
+  },
+  {
+   "code": "25B7",
+   "deriving": 0,
+   "families": 0,
+   "glyph_name": "rightWhiteTriangle",
+   "group": "arrows",
+   "most": null,
+   "research_confidence": "accepted",
+   "unicode_name": "WHITE RIGHT-POINTING TRIANGLE",
+   "ways": [
+    {
+     "angle": 180,
+     "confidence": "accepted",
+     "of": "25C1",
+     "op": "turn",
+     "pair": "25C0"
+    },
+    {
+     "angle": 270,
+     "confidence": "accepted",
+     "of": "25B3",
+     "op": "turn",
+     "pair": "25B6"
+    },
+    {
+     "angle": 90,
+     "confidence": "accepted",
+     "of": "25BD",
+     "op": "turn",
+     "pair": "25B6"
+    }
+   ]
+  },
+  {
    "code": "0186",
    "deriving": 25,
    "families": 64,
@@ -6805,7 +6947,7 @@
    "title": "Vulgar fractions"
   },
   {
-   "count": 16,
+   "count": 20,
    "id": "arrows",
    "title": "Arrows and triangles"
   },
@@ -7691,11 +7833,17 @@
    "2191": {
     "sides": 1.4476
    },
+   "2192": {
+    "sides": 0.6908
+   },
    "2197": {
     "sides": 2.0552
    },
    "25B2": {
     "sides": 0.782
+   },
+   "25B6": {
+    "sides": 1.2788
    },
    "25C0": {
     "sides": 1.0

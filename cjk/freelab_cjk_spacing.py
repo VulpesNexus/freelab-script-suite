@@ -363,34 +363,108 @@ def value_rule(name, value):
 
 
 def feature_text(tag, old, rules):
-    """A feature's code with FreeLab's block of rules in place before its closing line: an older
-    FreeLab block taken out, the rest kept, FontLab's automatic block handed back ("#/> feature")."""
+    """A feature's code with FreeLab's block of rules in place before its closing brace: an older FreeLab
+    block taken out, the rest kept, FontLab's automatic block handed back ("#/> feature"); or None where
+    FreeLab cannot read the code safely (its own markers not in pairs, or the feature's braces not found):
+    nothing is written then. Read by tokens, as Feature Code reads every feature (feature_code: Codex
+    reviews 5 and 6, an end marker after code on its line, a feature on one line, another feature's code
+    given for this one)."""
+    fc = feature_code_or_none()
+    if fc is None:  # (no reader: nothing written; the window says why: feature_code_problem)
+        return None
     begin, end = BEGIN % tag, END % tag
-    kept, inside = [], False
-    for line in (old or u"").splitlines():
-        stripped = line.strip()
-        if stripped == begin:
-            inside = True
-            continue
-        if stripped == end:
-            inside = False
-            continue
-        if inside:
-            continue
-        if stripped.startswith(FONTLAB_AUTO):
-            line = line.replace(FONTLAB_AUTO, FONTLAB_HANDED, 1)
-        kept.append(line)
-    closing = None
-    for index in range(len(kept) - 1, -1, -1):
-        if re.match(r"^\s*}\s*%s\s*;" % re.escape(tag), kept[index]):
-            closing = index
-            break
-    if closing is None:
-        kept = [u"feature %s {" % tag, u"# %s" % FEATURE_TITLES.get(tag, tag), u""]
-        closing = len(kept)
-        kept.append(u"} %s;" % tag)
     block = [begin] + [u"  %s" % rule for rule in rules] + [end] if rules else []
-    return u"\n".join(kept[:closing] + block + kept[closing:]) + u"\n"
+    try:
+        fc.readable(old, tag)  # (taking a block out too: Codex review 7)
+        text = fc.handed_back(fc.without_blocks(old, begin, end, tag)).rstrip(u"\r\n")
+        if not block and fc.code_tokens(text):
+            fc.readable(text, tag)
+            return text + u"\n"
+        return fc.insert_block(text, tag, block, title=FEATURE_TITLES.get(tag, tag), blank=True) + u"\n"
+    except fc.FeatureCodeUnreadable:
+        return None
+
+
+def feature_code_or_none():
+    """Feature Code's reader (feature_code), or None where it cannot be loaded (missing, or broken): its
+    error kept for feature_code_problem. Codex review 7: a missing script raised out of the windows'
+    button updates and writes."""
+    try:
+        module = feature_code()
+        missing = [name for name in READER_API if not callable(getattr(module, name, None))]
+        unreadable = getattr(module, "FeatureCodeUnreadable", None)
+        if not isinstance(unreadable, type) or not issubclass(unreadable, Exception):
+            missing.append(u"FeatureCodeUnreadable")
+        if missing:  # (an older or incomplete script loads, then fails: Codex review 8, no readable in it)
+            raise ImportError(u"an older or incomplete one, without %s" % u", ".join(missing))
+    except Exception as exc:
+        FEATURE_CODE_ERROR[:] = [u"%s" % exc]
+        return None
+    del FEATURE_CODE_ERROR[:]
+    return module
+
+
+# What CJK Spacing and CJK Vertical call of Feature Code's reader: a script without one of them is unavailable
+READER_API = ("readable", "without_blocks", "handed_back", "code_tokens", "insert_block", "block_text",
+              "feature_bounds")
+
+
+FEATURE_CODE_ERROR = []  # (the last failure to load Feature Code's reader)
+
+
+def feature_code_problem(tool):
+    """What the window says, its write grayed out, where Feature Code's reader cannot be loaded; else empty."""
+    if feature_code_or_none() is not None:
+        return u""
+    return (u"%s cannot read the font's feature code: FreeLab's Feature Code script (freelab_feature_code.py), "
+            u"which it reads and writes code with, is missing or broken (%s). Reinstall FreeLab; nothing is "
+            u"written until then." % (tool, FEATURE_CODE_ERROR[0] if FEATURE_CODE_ERROR else u"not found"))
+
+
+FEATURE_CODE_FILE, FEATURE_CODE_MODULE = "freelab_feature_code.py", "freelab_feature_code"
+
+
+def feature_code():
+    """Feature Code as a module (its main() not run): its reading of feature code by tokens, which CJK
+    Spacing and CJK Vertical write through too. Beside this script once installed, in the repository's
+    features folder before; loaded again when its file changed."""
+    here = os.path.dirname(os.path.abspath(globals().get("__file__") or "."))
+    paths = [os.path.join(here, FEATURE_CODE_FILE), os.path.join(here, os.pardir, "features", FEATURE_CODE_FILE)]
+    path = next((path for path in paths if os.path.isfile(path)), paths[0])
+    try:
+        stamp = os.path.getmtime(path)
+    except OSError:
+        stamp = None
+    held = sys.modules.get(FEATURE_CODE_MODULE)
+    if held is not None and hasattr(held, "without_blocks") and getattr(held, "_freelab_stamp", stamp) == stamp:
+        return held
+    old = os.environ.get("FREELAB_NO_AUTOSTART")
+    os.environ["FREELAB_NO_AUTOSTART"] = "1"
+    try:
+        if sys.version_info[0] == 2:
+            import imp
+            module = imp.new_module(FEATURE_CODE_MODULE)
+            module.__file__ = path
+            sys.modules[FEATURE_CODE_MODULE] = module
+            with open(path, "rb") as handle:
+                source = handle.read()
+            exec(compile(source, FEATURE_CODE_FILE, "exec", 0, True), module.__dict__)
+        else:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location(FEATURE_CODE_MODULE, path)
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[FEATURE_CODE_MODULE] = module
+            spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(FEATURE_CODE_MODULE, None)
+        raise
+    finally:
+        if old is None:
+            os.environ.pop("FREELAB_NO_AUTOSTART", None)
+        else:
+            os.environ["FREELAB_NO_AUTOSTART"] = old
+    module._freelab_stamp = stamp
+    return module
 
 
 def expand_ranges(text):
@@ -470,17 +544,13 @@ def feature_statements(tag, text, lookups=None, begin=BEGIN, end=END, depth=0):
     first, last = begin % tag, end % tag
     known = dict(lookups or {})
     known.update(code_lookups(text))
-    inside = False
+    # (FreeLab's block found by its markers as comments, wherever they stand: Feature Code's without_blocks;
+    # markers not in pairs leave the text whole, every rule in it taken for the font's)
+    try:
+        text = feature_code_or_none().without_blocks(text, first, last, tag, strict=False)
+    except Exception:
+        pass  # (no Feature Code beside it: the text whole)
     for line in (text or u"").splitlines():
-        stripped = line.strip()
-        if stripped == first:
-            inside = True
-            continue
-        if stripped == last:
-            inside = False
-            continue
-        if inside:
-            continue
         for statement in without_comments(line).split(u";"):
             statement = statement.split(u"{")[-1].split(u"}")[-1]
             use = LOOKUP_USE.match(statement)
@@ -539,10 +609,11 @@ def font_classes(package, prefix):
     return classes
 
 
-def texts_for(trims, old_texts, palt_on=True, halt_on=True, kept=None, classes=None, lookups=None):
+def texts_for(trims, old_texts, palt_on=True, halt_on=True, kept=None, classes=None, lookups=None, refused=None):
     """{tag: new code} for palt and halt from the checked trims. Glyphs the feature's own code positions
     already (font_positioned: the font's classes and the prefix's lookups read too) keep it (no second
-    value); kept, when given, gets {tag: [their names]}."""
+    value); kept, when given, gets {tag: [their names]}; refused, when given, the tags of the features
+    whose braces FreeLab cannot find (left as they are)."""
     chosen = [t for t in trims if t.checked]
     new = {}
     for tag, on, value in (("palt", palt_on, lambda t: t.palt), ("halt", halt_on, lambda t: t.halt)):
@@ -552,8 +623,24 @@ def texts_for(trims, old_texts, palt_on=True, halt_on=True, kept=None, classes=N
         rules = [value_rule(t.name, value(t)) for t in chosen if value(t) and t.name not in own] if on else []
         old = old_texts.get(tag)
         if rules or (BEGIN % tag) in (old or u""):  # (an empty feature is not made; an old block is taken out)
-            new[tag] = feature_text(tag, old, rules)
+            text = feature_text(tag, old, rules)
+            if text is None:
+                if refused is not None:
+                    refused.append(tag)
+                continue
+            new[tag] = text
     return new
+
+
+def refused_words(tags):
+    """The log's sentence for features left as they are (feature_text found no braces), or empty."""
+    if not tags:
+        return u""
+    one = len(tags) == 1
+    return (u"FreeLab leaves %s as %s: it cannot find where %s code begins and ends (the feature's braces), so "
+            u"nothing of FreeLab's goes in. Check %s code in FontLab's Features panel." % (
+                u" and ".join(sorted(set(tags))), u"it is" if one else u"they are",
+                u"that feature's" if one else u"each one's", u"its" if one else u"their"))
 
 
 UNCOMPARED = object()
@@ -584,13 +671,11 @@ def changed_features(features, texts, tags, prefix=UNCOMPARED):
 
 def block_of(tag, text):
     """FreeLab's block of a feature, alone in a feature of its own (for the parser's check), or None."""
-    begin, end = BEGIN % tag, END % tag
-    lines = (text or u"").splitlines()
-    starts = [i for i, line in enumerate(lines) if line.strip() == begin]
-    ends = [i for i, line in enumerate(lines) if line.strip() == end]
-    if not starts or not ends:
+    fc = feature_code_or_none()
+    inner = fc.block_text(text, BEGIN % tag, END % tag) if fc is not None else None  # (markers as comments)
+    if inner is None:
         return None
-    return u"\n".join([u"feature %s {" % tag] + lines[starts[0] + 1:ends[0]] + [u"} %s;" % tag]) + u"\n"
+    return u"feature %s {\n%s} %s;\n" % (tag, inner, tag)
 
 
 # ---------------------------------------------------------------------------
@@ -1102,11 +1187,14 @@ class CJKSpacingDialog(object):
         return [c for c in self.hangul if self.hangul_checks.get(c.shape, True)]
 
     def check_all(self, on):
-        QtCore, QtGui = _qt()
+        """Check all, Check none: every row, the log told how many it checked or unchecked, and how many
+        of them were in closed groups (owner's report 118)."""
         self.tree.blockSignals(True)
-        for item in self.items():
-            item.setCheckState(0, QtCore.Qt.Checked if on else QtCore.Qt.Unchecked)
-        self.tree.blockSignals(False)
+        try:
+            self.ak.check_rows(self.items(), on, log=self.log, command=u"Check all" if on else u"Check none",
+                               noun=u"glyph", hidden_text=(u"in a closed group", u"in closed groups"))
+        finally:
+            self.tree.blockSignals(False)
         self.changed()
 
     def changed(self):
@@ -1132,7 +1220,11 @@ class CJKSpacingDialog(object):
         what = (u"Update the code" if present else u"Write the code") if changes else u""
         self.write_button.setText(u"%s and Hangul widths" % what if what and widths else what or
                                   (u"Set Hangul widths" if widths else u"Write the code"))
-        ak.enable(self.write_button, changes or widths)
+        problem = feature_code_problem(u"CJK Spacing")
+        ak.enable(self.write_button, (changes or widths) and not problem)
+        if problem and problem != getattr(self, "problem_said", None):
+            self.log.add(self.ak.html(problem), "error")  # (once, while it lasts)
+        self.problem_said = problem
         self.draw_previews()
 
     def restore(self):
@@ -1296,6 +1388,10 @@ class CJKSpacingDialog(object):
     def write(self):
         if self.package is None:
             return
+        problem = feature_code_problem(u"CJK Spacing")
+        if problem:  # (nothing written: no reader)
+            self.log.add(self.ak.html(problem), "error")
+            return
         self.harvest()
         package = self.package
         current = self.current_font()
@@ -1304,9 +1400,11 @@ class CJKSpacingDialog(object):
             self.log.add(u"The font changed: here is this one's list. Nothing was written.", "warning")
             return
         features = package.fgPackage.features
-        kept = {}
+        kept, refused = {}, []
         new = texts_for(self.trims, self.texts, self.palt_box.checked, self.halt_box.checked, kept, self.classes,
-                        self.lookups)
+                        self.lookups, refused)
+        if refused:
+            self.log.add(self.ak.html(refused_words(refused)), "warning")
         for tag, names in sorted(kept.items()):
             if names:
                 self.log.add(u"%s %s positioned by the font's own %s code already: %s, not FreeLab's trim "

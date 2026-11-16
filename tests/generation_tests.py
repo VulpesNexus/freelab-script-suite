@@ -129,11 +129,12 @@ def plan(font=None, existing=False, settings=None):
 class TableTests(unittest.TestCase):
     def test_first_scope(self):
         entries = DATA["entries"]
-        self.assertEqual(len(entries), 246)
+        self.assertEqual(len(entries), 250)
         counts = dict((g["id"], g["count"]) for g in DATA["groups"])
         self.assertEqual(counts, {"spaces": 18, "dashes": 10, "duplicates": 44, "punctuation": 28, "lookalikes": 52,
-                                  "ligatures": 17, "fractions": 20, "arrows": 16, "turned": 41})
-        self.assertEqual(len(set(e["code"] for e in entries)), 246, "each character once")
+                                  "ligatures": 17, "fractions": 20, "arrows": 20, "turned": 41},
+                         "the arrows' and triangles' sources added (2026-11-16): built from what they make")
+        self.assertEqual(len(set(e["code"] for e in entries)), 250, "each character once")
         turned = [e for e in entries if e["group"] == "turned"]
         self.assertTrue(all(any(w["confidence"] == "starting point" for w in e["ways"]) for e in turned),
                         "the turned and reversed letters are starting points")
@@ -399,6 +400,96 @@ class ArrowTests(unittest.TestCase):
         self.assertEqual(rows[u(0x25B3)].layout.parts[0].name, "uni25B7")
 
 
+LEFT_ARROW = [rect(100, 300, 740, 360), [(160, 230), (60, 330), (160, 430)]]
+
+
+def without(glyphs, *names):
+    return dict((name, value) for name, value in glyphs.items() if name not in names)
+
+
+class ReverseTests(unittest.TestCase):
+    """The owner's questions of 2026-11-16: the sources built from what they make (⇒ of ⇐), named where they
+    must be drawn, and Ð from Ɖ; the loop guards of Codex's rounds 1 to 3 kept closed."""
+
+    def test_a_source_is_built_from_what_it_makes(self):
+        glyphs = dict(without(BARE, "arrowright"), arrowleft=(0x2190, 800, LEFT_ARROW, None))
+        planner, rows = plan(FakeFont(glyphs))
+        right = rows[u(0x2192)]
+        self.assertEqual((right.way["op"], right.layout.parts[0].name, right.layout.advance), ("turn", "arrowleft", 800))
+        self.assertEqual(planner.part_box(right.layout.parts[0]), (60, 230, 740, 430), "a half turn: the sides swapped")
+        up = rows[u(0x2191)]
+        self.assertEqual(up.needs, ["rightArrow"], "the up arrow of the right one, built here first")
+
+    def test_a_quarter_turn_back_keeps_the_sidebearings(self):
+        down = [rect(300, 60, 360, 700), [(230, 640), (330, 740), (430, 640)]]
+        glyphs = dict(without(BARE, "arrowright"), arrowdown=(0x2193, 560, down, None))
+        planner, rows = plan(FakeFont(glyphs))
+        right = rows[u(0x2192)]
+        self.assertEqual(right.way_index, 2, "from the down arrow (the left and up ones are missing too)")
+        sides = (560 - 200) * DATA["rules"]["turns"]["2192"]["sides"] / 2.0
+        self.assertAlmostEqual(planner.part_box(right.layout.parts[0])[0], sides, delta=0.6)
+        self.assertAlmostEqual(DATA["rules"]["turns"]["2192"]["sides"] * DATA["rules"]["turns"]["2191"]["sides"], 1.0,
+                               delta=1e-3, msg="the vertical rule undone")
+        up = rows[u(0x2191)]
+        self.assertIsNotNone(up.layout, "planned for the right arrow first, the up arrow is planned again on its own: %s"
+                             % up.missing)
+        self.assertEqual(up.needs, ["rightArrow"])
+        self.assertIsNotNone(rows[u(0x2190)].layout)
+
+    def test_the_source_to_draw_is_named(self):
+        planner, rows = plan()  # (a right arrow, no double arrow)
+        self.assertEqual(rows[u(0x21D2)].missing, u"draw it: %s are built from it" % u" ".join(u(c) for c in (
+            0x21D0, 0x21D1, 0x21D3)), "⇒ listed, to draw: three arrows need it (the owner's report)")
+        self.assertEqual(rows[u(0x21D0)].missing, u"needs ⇒ (U+21D2)")
+        planner, rows = plan(FakeFont(without(BARE, "arrowright")))
+        self.assertEqual(rows[u(0x2192)].missing, u"draw it: %s are built from it" % u" ".join(u(c) for c in (
+            0x2190, 0x2191, 0x2193, 0x2196, 0x2197, 0x2198, 0x2199)))
+        self.assertEqual(rows[u(0x2190)].missing, u"needs → (U+2192)", "the ones made of it name it")
+        planner, rows = plan(FakeFont(dict(without(BARE, "arrowright"), arrowleft=(0x2190, 800, LEFT_ARROW, None))))
+        self.assertIsNone(rows[u(0x2192)].missing)
+
+    def test_eth_and_dcroat_from_the_african_d(self):
+        glyphs = dict(BARE, Dafrican=(0x0189, 680, [rect(80, 0, 600, 700)], None))
+        planner, rows = plan(FakeFont(glyphs))
+        for code in (0x00D0, 0x0110):
+            self.assertEqual((rows[u(code)].way["op"], rows[u(code)].layout.parts[0].name), ("copy", "Dafrican"))
+        planner, rows = plan()
+        self.assertTrue(all(rows[u(code)].missing for code in (0x00D0, 0x0110, 0x0189)), "none of them: none")
+
+    def test_no_loop_through_a_glyph_built_here(self):
+        """Ð drawn, Đ a copy of Ð, Ɖ missing: Ð rebuilt as a copy of Ɖ, which would be a copy of Đ, would be
+        made of itself. Refused when planned, not only at the build."""
+        glyphs = dict(BARE, Eth=(0x00D0, 680, [rect(80, 0, 600, 700)], None), Dcroat=(0x0110, 680, None, [("Eth", gg.IDENTITY)]))
+        planner, rows = plan(FakeFont(glyphs), existing=True)
+        self.assertIsNone(rows[u(0x00D0)].layout, rows[u(0x00D0)].way)
+        self.assertEqual(rows[u(0x00D0)].missing, u"made of Dcroat, which is made of Eth")
+        self.assertEqual([p.name for p in rows[u(0x0189)].layout.parts], ["Eth"], "Ɖ itself is fine")
+
+
+class SurenessTests(unittest.TestCase):
+    """The owner's question of 2026-11-16: ǝ (accepted: a copy of ə) was checked, ə (e turned) a starting point."""
+
+    def test_a_glyph_made_of_a_draft_is_one(self):
+        font = FakeFont(dict(BARE, e=(0x65, 500, [rect(40, 0, 460, 500)], None)))
+        planner, rows = plan(font)
+        turned_e, schwa = rows[u(0x01DD)], rows[u(0x0259)]
+        self.assertEqual((turned_e.confidence, schwa.sureness), (u"accepted", u"starting point"))
+        self.assertEqual(turned_e.sureness, u"starting point", "as sure as what it is made of")
+        self.assertEqual(turned_e.inherited, (u"starting point", u"schwa"))
+        self.assertTrue(turned_e.draft and schwa.draft, "neither checked at first")
+        self.assertEqual(gg.note_text(turned_e), u"%s; made of schwa (starting point), built here first" % gg.DRAFT_NOTE)
+        self.assertEqual(gg.confidence_text(turned_e), u"starting point")
+        self.assertFalse(rows[u(0x201C)].draft, "made of an accepted glyph: as before")
+        self.assertIsNone(rows[u(0x201C)].inherited)
+
+    def test_a_likely_usable_draft_passes_it_on(self):
+        glyphs = dict(TURNABLE, O=(0x4F, 720, frame(40, -10, 680, 710, 80, 80), None),
+                      e=(0x65, 500, [rect(40, 0, 460, 500)], None))
+        planner, rows = plan(FakeFont(glyphs))
+        self.assertEqual((rows[u(0x0259)].sureness, rows[u(0x01DD)].sureness), (gg.LIKELY, gg.LIKELY))
+        self.assertNotIn(gg.DRAFT_NOTE, gg.note_text(rows[u(0x01DD)]))
+
+
 def frame(x0, y0, x1, y1, side, cap):
     """An O of four strokes: sides side thick, top and bottom cap thick (its counter a hole)."""
     return [rect(x0, y0, x1, y1), rect(x0 + side, y0 + cap, x1 - side, y1 - cap)]
@@ -634,6 +725,13 @@ class Shape(object):
     def addContours(self, contours, keep):
         self.contours.extend(contours)
 
+    def applyTransform(self, transform):  # (its nodes moved, as FontLab's flShape does; refuse: left as they are)
+        if getattr(Shape, "refuse", False):
+            return
+        for contour in self.contours:
+            for node in contour.nodes():
+                node.x, node.y = gg.mapped(transform.values, node.x, node.y)
+
 
 class Layer(object):
     def __init__(self, shapes=(), advance=0):
@@ -775,6 +873,37 @@ class Cm(object):
     def build_text(self, checked, hidden):
         return u"Build checked glyphs"
 
+    def existing_glyphs(self, package, names):
+        return compose_module().existing_glyphs(package, names)
+
+    def checks_text(self, *args):
+        return compose_module().checks_text(*args)
+
+    def value_filter(self, box, wanted):
+        return compose_module().value_filter(box, wanted)
+
+    def layer_points(self, layer):
+        return compose_module().layer_points(layer)
+
+    def same_points(self, points, others):
+        return compose_module().same_points(points, others)
+
+    def same_points_in_order(self, points, others):
+        return compose_module().same_points_in_order(points, others)
+
+    def record_parts(self, ak, fontlab, package, parts, *title):
+        return compose_module().record_parts(ak, fontlab, package, parts, *title)
+
+    def parts_step_text(self, names):
+        return compose_module().parts_step_text(names)
+
+
+def compose_module():
+    """Glyph Compose's module (its functions the tab calls through cm), loaded once for these tests."""
+    if "freelab_glyph_compose" not in sys.modules:
+        import freelab_glyph_compose  # noqa: F401
+    return sys.modules["freelab_glyph_compose"]
+
 
 class WriteTests(unittest.TestCase):
     def page(self, font=None, masters=("Regular",)):
@@ -793,24 +922,28 @@ class WriteTests(unittest.TestCase):
         page.run = lambda same_font=True: None
         page.fontlab = Stub(GlyphComponent=Component, flShape=lambda: Shape())
         steps, logged = [], []
+        page.backs = []  # (each build's call to go back to Font Check, and whether something failed)
         page.ak = Stub(notify_changed=lambda fontlab, package_, title, touched: steps.append((title, list(touched))),
                        b=lambda text: u"%s" % text, html=lambda text: u"%s" % text)
         page.owner = Stub(package_key=lambda p: (u"bare", 7) if p is not None else None, current_font=lambda: package,
                           log=Stub(add=lambda text, kind="info": logged.append((kind, text))),
                           begin_write=lambda p, glyphs=(): steps.append(("begin", [g.name for g in glyphs])) or True,
                           end_write=lambda p, wrote=True: steps.append(("end", wrote)),
-                          corrector=lambda package_, masters_, made, touched: self.corrector(package_, made))
+                          back_to_font_check=lambda failed=False: page.backs.append(failed),
+                          corrector=lambda package_, masters_, made, touched: self.corrector(package_, made, touched))
         return page, package, steps, logged
 
     def place(self, node, x, y):
         node.x, node.y = x, y
 
-    def corrector(self, package, made):
-        def corrected(source, axis):
+    def corrector(self, package, made, touched=None):
+        def corrected(source, axis):  # (as Glyph Compose's corrector: each made once, listed, and touched)
             name = source + ".mirrored"
             if package.findName(name) is None:
                 package.addGlyph(Stub(name=name))
                 made.append(name)
+                if touched is not None:
+                    touched.append(package.findName(name))
             return name
         return corrected
 
@@ -1416,6 +1549,477 @@ class WriteTests(unittest.TestCase):
             self.assertIn(made, getattr(sys, cm.HELD_GLYPHS)[99], "held for the session")
         finally:
             getattr(sys, cm.HELD_GLYPHS, {}).pop(99, None)
+
+    def test_a_glyph_rebuilt_is_recorded_before_the_write(self):
+        """Items 139 and 140: the step records the glyphs it touched, the font's own rebuilt ones among them,
+        with no state of theirs before it; they are recorded with the font first now."""
+        ohm = dict(BARE, Ohm=(0x2126, 740, [rect(40, 0, 700, 710)], None))
+        page, package, steps, logged, calls = self.rebuilding(ohm)
+        self.build(page, [0x2126])
+        self.assertEqual(steps[0], ("begin", ["Ohm"]))
+        self.assertEqual(page.backs, [False], "built, nothing failed: Font Check may take the window back")
+
+    def test_a_build_that_failed_somewhere_stays(self):
+        page, package, steps, logged = self.page()
+        self.build(page, [0x2026, 0x201C])  # (“ without the ‘ it is made of: not built)
+        self.assertIsNotNone(package.findUnicode(0x2026))
+        self.assertEqual(page.backs, [True], "something was not built: the window stays, its log saying why")
+
+
+class ListControlTests(unittest.TestCase):
+    """The tab's list controls (the owner's reports of 2026-11-16): Check all and Check none say how many,
+    Check only high-value glyphs and Only high-value glyphs as on the Diacritics tab, and the rows that
+    cannot be built dimmed."""
+
+    QT = Stub(Qt=Stub(UserRole=32, ItemIsUserCheckable=1, ItemIsEnabled=2, ItemIsSelectable=4, Checked=2, Unchecked=0))
+
+    def page(self):
+        page = gg.GenerationPage.__new__(gg.GenerationPage)
+        page.data, page.settings = DATA, gg.settings_of(DATA)
+        page.planner_now = gg.Planner(DATA, FakeFont(), None, False)
+        page.rows = page.planner_now.plan()
+        page.hidden = set(i for i, r in enumerate(page.rows) if r.group != "punctuation")
+        page.cm = Cm()
+        page.cm.high_value_text = lambda count, bold=None: compose_module().high_value_text(count, bold)
+        lines = []
+        page.owner = Stub(log=Stub(add=lambda text, kind="info": lines.append(text)), high_value=None)
+        page.ak = Stub(b=lambda value: u"<b>%s</b>" % value, html=lambda value: u"%s" % value)
+        page.tree = Stub(blockSignals=lambda on: None)
+        items = []
+        for index, r in enumerate(page.rows):
+            item = Item(index, r.checked if r.layout is not None else None)
+            items.append(item)
+        page.items = lambda: items
+
+        def harvest():
+            for item in items:
+                if item.checked is not None:
+                    page.rows[item.index].checked = item.checked
+        page.update_buttons = harvest
+        return page, items, lines
+
+    def test_check_all_and_check_none_say_how_many(self):
+        page, items, lines = self.page()
+        shown = [i for i, r in enumerate(page.rows) if r.layout is not None and i not in page.hidden]
+        page.rows[[i for i, r in enumerate(page.rows) if r.layout is not None and i in page.hidden][0]].checked = True
+        items[[i for i, r in enumerate(page.rows) if r.layout is not None and i in page.hidden][0]].checked = True
+        saved = gg._qt
+        try:
+            gg._qt = lambda: (self.QT, None)
+            page.check_all(True)
+            page.check_all(False)
+        finally:
+            gg._qt = saved
+        self.assertEqual(lines, [u"Checked <b>%d glyphs</b> (%d checked in all, 1 of them not shown)." % (len(shown), len(shown) + 1),
+                                 u"Unchecked <b>%d glyphs</b> (1 still checked, not shown: a search hides it)." % len(shown)])
+
+    def test_only_high_value_glyphs(self):
+        page, items, lines = self.page()
+        page.hidden = set()
+        page.owner.high_value = set([u(0x2026), u(0x00AB)])
+        self.assertEqual(sorted(i for i, on in page.high_value_checks().items() if on),
+                         sorted(i for i, r in enumerate(page.rows) if r.char in page.owner.high_value))
+        saved = gg._qt
+        try:
+            gg._qt = lambda: (self.QT, None)
+            page.check_high_value()
+        finally:
+            gg._qt = saved
+        self.assertEqual(sorted(r.char for r in page.rows if r.checked), sorted(page.owner.high_value))
+        self.assertTrue(lines[-1].startswith(u"Checked <b>2 glyphs</b> <i>Font Check</i> lists as high-value"))
+        page.owner.high_value = None
+        self.assertEqual(page.high_value_checks(), {}, "not known yet: the button does nothing")
+
+    def test_the_rows_that_cannot_be_built_are_dimmed(self):
+        page, items, lines = self.page()
+        page.just_built = set()
+        page.owner.dialog = Stub(palette=Stub(color=lambda group, role: "gray"))
+        page.ak = Stub(section_row=lambda item, tree: None, icon_of=lambda picture: None)
+        page.cm.fit_tree_columns = lambda tree, count: None
+        page.picture = lambda r, size: None
+        page.apply_search = lambda: None
+        made = []
+        page.tree = Stub(blockSignals=lambda on: None, clear=lambda: None, font=None,
+                         addTopLevelItem=lambda item: made.append(item))
+        qtgui = Stub(QFont=lambda font: Stub(setBold=lambda on: None), QBrush=lambda color: ("brush", color),
+                     QTreeWidgetItem=lambda texts: Item(None, None, texts), QPalette=Stub(Disabled=1, Text=2))
+        saved = gg._qt
+        try:
+            gg._qt = lambda: (self.QT, qtgui)
+            page.fill()
+        finally:
+            gg._qt = saved
+        lacking = [section for section in made if section.texts[0].startswith(gg.LACKING)][0]
+        self.assertTrue(lacking.children and all(child.foreground == dict((c, ("brush", "gray")) for c in range(5))
+                                                 for child in lacking.children), "every cell dimmed")
+        built = [section for section in made if not section.texts[0].startswith(gg.LACKING)]
+        self.assertFalse(any(child.foreground for section in built for child in section.children))
+
+
+def alternates_module():
+    """Feature Code's Stylistic alternates module (features/, on the path): its variant changes are reused."""
+    import freelab_alternates
+    return freelab_alternates
+
+
+def vary(seed=7, strength="moderate"):
+    return gg.deformer(alternates_module(), seed, strength, 1000.0)
+
+
+VARIED = dict(BARE, R=(0x0052, 640, [rect(90, 0, 590, 700), rect(200, 300, 400, 500)], None))
+
+
+class VaryTests(unittest.TestCase):
+    """The owner's request of 2026-11-16: Vary turned and mirrored glyphs, with Feature Code's alternates'
+    changes from a seed, so that a reused glyph is no carbon copy in a hand-drawn font."""
+
+    def varied_plan(self, font=None, seed=7, strength="moderate", existing=False):
+        planner = gg.Planner(DATA, font or FakeFont(VARIED), None, existing, None, vary(seed, strength))
+        planner.plan()
+        return planner, dict((r.char, r) for r in planner.rows)
+
+    def test_the_same_seed_gives_the_same_glyph(self):
+        alt = alternates_module()
+        one, again, other = vary(7)("quoteleft", 100, 600), vary(7)("quoteleft", 100, 600), vary(8)("quoteleft", 100, 600)
+        self.assertEqual(one, again, "deterministic")
+        self.assertNotEqual(one, other, "another seed, another glyph")
+        self.assertEqual(one, tuple(alt.variant_matrix(alt.variant_params("quoteleft", 1, "moderate", 7), 100, 600, 1000.0)),
+                         "Feature Code's own changes, not a copy of them")
+        self.assertEqual(vary(7).label, (7, u"Moderate"))
+        self.assertEqual(gg.vary_settings({}, alt.STRENGTHS), (False, 1, "subtle"), "off at first")
+        self.assertEqual(gg.vary_settings({"vary": True, "vary_seed": 12, "vary_strength": "bold"}, alt.STRENGTHS),
+                         (True, 12, "bold"))
+        self.assertEqual(gg.vary_settings({"vary_seed": "x", "vary_strength": "wild"}, alt.STRENGTHS), (False, 1, "subtle"))
+
+    def test_turns_and_mirrors_are_varied_and_nothing_else(self):
+        plain, rows0 = plan(FakeFont(VARIED))
+        planner, rows = self.varied_plan()
+        turned, mirrored = rows[u(0x2018)], rows[u(0x042F)]
+        self.assertEqual((turned.layout.kind, mirrored.layout.kind), ("components", "mirrored"))
+        for r in (turned, mirrored):
+            self.assertIsNotNone(r.layout.deform, r.hex)
+            self.assertEqual([p.name for p in r.layout.parts], [p.name for p in rows0[r.char].layout.parts],
+                             "the same glyphs: a glyph of components still follows its source")
+            self.assertEqual(r.layout.parts[0].matrix, gg.compose(r.layout.deform, rows0[r.char].layout.parts[0].matrix))
+            self.assertEqual(r.layout.advance, rows0[r.char].layout.advance, "its advance kept")
+        self.assertNotEqual(planner.part_box(turned.layout.parts[0]), plain.part_box(rows0[turned.char].layout.parts[0]),
+                            "the preview draws the parts as varied")
+        for code in (0x0410, 0x2026, 0x2013, 0x2009, 0x2126):  # (a look-alike, a row, a stretch, a width, a code point)
+            self.assertIsNone(rows[u(code)].layout.deform, hex(code))
+        self.assertEqual(gg.note_text(turned), u"varied (seed 7, moderate), still following its source")
+        self.assertEqual(gg.note_text(mirrored), u"%s; outlines, contours set right; varied (seed 7, moderate)" % gg.DRAFT_NOTE)
+        self.assertNotIn(u"varied", gg.note_text(rows[u(0x0410)]))
+        again = self.varied_plan()[1][u(0x2018)].layout.deform
+        self.assertEqual(again, turned.layout.deform)
+        self.assertNotEqual(self.varied_plan(seed=8)[1][u(0x2018)].layout.deform, turned.layout.deform)
+
+    def test_every_master_is_varied_alike(self):
+        bold = dict(VARIED, quoteright=(0x2019, 260, [rect(70, 500, 190, 720)], None))
+        regular = self.varied_plan(FakeFont(VARIED))[1][u(0x2018)].layout.deform
+        heavy = self.varied_plan(FakeFont(bold))[1][u(0x2018)].layout.deform
+        self.assertEqual(gg.linear(regular), gg.linear(heavy), "the same change: the masters stay compatible")
+        self.assertNotEqual(regular[4:], heavy[4:], "each about its own ink's center")
+
+    def test_a_varied_turn_is_written_as_a_varied_component(self):
+        page, package, steps, logged = WriteTests("test_every_master").page(FakeFont(VARIED))
+        page.planner_now = gg.Planner(DATA, page.font, None, False, None, vary())
+        page.rows = page.planner_now.plan()
+        page.vary_of = lambda font: vary()
+        WriteTests("test_every_master").build(page, [0x2018, 0x042F])
+        quote = package.findName("quoteleft").getLayerByName("Regular").shapes
+        row = dict((r.char, r) for r in page.rows)[u(0x2018)]
+        self.assertEqual([(s.shapeData.componentGlyph, s.transform.values) for s in quote],
+                         [("quoteright", tuple(round(v, 6) for v in row.layout.parts[0].matrix))], "a component, varied")
+        ya = package.findName("Ya-cy") or package.findName("uni042F")
+        self.assertIsNotNone(ya, logged)
+        points = [(n.x, n.y) for s in ya.getLayerByName("Regular").shapes for c in s.contours for n in c.nodes()]
+        deform = dict((r.char, r) for r in page.rows)[u(0x042F)].layout.deform
+        self.assertEqual(points, [gg.mapped(deform, 0, 0)], "the mirrored outlines varied after they are made")
+
+    def test_outlines_fontlab_did_not_vary_are_taken_out(self):
+        page, package, steps, logged = WriteTests("test_every_master").page(FakeFont(VARIED))
+        page.planner_now = gg.Planner(DATA, page.font, None, False, None, vary())
+        page.rows = page.planner_now.plan()
+        Shape.refuse = True
+        try:
+            WriteTests("test_every_master").build(page, [0x042F])
+        finally:
+            Shape.refuse = False
+        self.assertIsNone(package.findUnicode(0x042F))
+        self.assertTrue(any(kind == "warning" and u"did not vary its outlines" in text and u"taken out again" in text
+                            for kind, text in logged), logged)
+
+    def two_masters(self, glyphs=None, existing=False):
+        writer = WriteTests("test_every_master")
+        if existing:
+            page, package, steps, logged, calls = writer.rebuilding(glyphs or VARIED, ("Regular", "Bold"))
+        else:
+            page, package, steps, logged = writer.page(FakeFont(glyphs or VARIED), ("Regular", "Bold"))
+        page.planner_now = gg.Planner(DATA, page.font, None, existing, None, vary())
+        page.rows = page.planner_now.plan()
+        page.vary_of = lambda font: vary()
+        page.existing_box = Stub(checked=existing)
+        return writer, page, package, steps, logged
+
+    def test_a_varied_mirror_that_cannot_be_taken_out_is_said_and_recorded(self):
+        """Codex's review, round 4: Bold refused the change, the deletion raised or did nothing, and the log
+        said "it was taken out again" while the glyph stayed, left out of the History's step."""
+        real = Shape.applyTransform
+        for deletion in ("raises", "does nothing", "works"):
+            writer, page, package, steps, logged = self.two_masters()
+            calls = []
+
+            def second_refused(shape, transform):
+                calls.append(1)
+                if len(calls) == 1:
+                    real(shape, transform)  # (Regular varied; Bold refused: left as it was)
+            Shape.applyTransform = second_refused
+            if deletion == "raises":
+                package.deleteGlyph = lambda glyph: 1 / 0
+            elif deletion == "does nothing":
+                package.deleteGlyph = lambda glyph: None
+            try:
+                writer.build(page, [0x042F])
+            finally:
+                Shape.applyTransform = real
+            texts = [text for kind, text in logged if kind == "warning"]
+            name = [r.name for r in page.rows if r.code == 0x042F][0]
+            if deletion == "works":
+                self.assertIsNone(package.findName(name))
+                self.assertTrue(any(u"it was taken out again" in text for text in texts), texts)
+                continue
+            self.assertIsNotNone(package.findName(name), deletion)
+            self.assertFalse(any(u"taken out again" in text and u"could not" not in text for text in texts), texts)
+            self.assertTrue(any(u"could not be taken out again, and stays varied in master Regular and as FontLab left "
+                                u"it in master Bold" in text for text in texts), texts)
+            recorded = [names for title, names in steps if title == u"FreeLab Glyph Compose"]
+            self.assertTrue(recorded and any(getattr(g, "name", None) == name for g in recorded[0]), "recorded")
+            self.assertIn(("end", True), steps, "a write: its step is the window's own")
+
+    def test_fontlabs_rounding_never_refuses_a_varied_outline(self):
+        """The live pass of 2026-11-16: Я (Bellefair) and Ǝ (Rubik) refused, "FontLab did not vary its outlines
+        as asked": FontLab rounds coordinates to whole units, which reordered near-equal points, and the read-back
+        paired the sorted lists (458 units apart; 0.498 in node order)."""
+        glyph = Glyph("Ya-cy", {"Regular": Layer([Shape([Contour([(458.3, 900.2), (458.45, 100.4), (10.2, 10.0)])])], 500)})
+        real, saved = Shape.applyTransform, gg._qt
+
+        def rounding(shape, transform):  # (as FontLab keeps them: whole units)
+            real(shape, transform)
+            for contour in shape.contours:
+                for node in contour.nodes():
+                    node.x, node.y = float(round(node.x)), float(round(node.y))
+        Shape.applyTransform = rounding
+        gg._qt = lambda: (None, Stub(QTransform=Transform))
+        try:
+            gg.deform_glyph(Cm(), glyph, ["Regular"], lambda master: (1.0, 0.0, 0.0, 1.0, 0.0, 0.0))
+            Shape.applyTransform = lambda shape, transform: None  # (a change FontLab did not make: still refused)
+            with self.assertRaises(gg.WriteError):
+                gg.deform_glyph(Cm(), glyph, ["Regular"], lambda master: (1.0, 0.0, 0.0, 1.0, 3.0, 0.0))
+        finally:
+            Shape.applyTransform, gg._qt = real, saved
+
+    def test_a_glyph_built_here_first_is_recorded_in_a_step_of_its_own(self):
+        """The live probe of 2026-11-16: the glyphs a build adds that others of it are made of are recorded first,
+        in a step of their own; one step holding both made FontLab's Undo say the components did not exist."""
+        writer = WriteTests("test_every_master")
+        page, package, steps, logged = writer.page()
+        writer.build(page, [0x201C, 0x2018, 0x2026])
+        titles = [(step[0], [getattr(g, "name", g) for g in step[1]]) for step in steps if step[0] not in ("begin", "end")]
+        self.assertEqual(titles, [(u"FreeLab Glyph Compose (parts)", ["quoteleft"]),
+                                  (u"FreeLab Glyph Compose", ["ellipsis", "quotedblleft"])], "in build order")
+        self.assertEqual(steps[-1], ("end", True))
+        self.assertIn(("info", u"This takes two steps of <i>Edit &gt; Undo</i>: quoteleft was added in a step of its own "
+                               u"first, so that FontLab's Undo never takes out a glyph that others still point to."), logged)
+        page, package, steps, logged = writer.page()
+        writer.build(page, [0x2026])
+        self.assertEqual([step[0] for step in steps if step[0] not in ("begin", "end")], [u"FreeLab Glyph Compose"],
+                         "nothing made of another: one step, as before")
+        self.assertFalse(any(u"two steps" in text for _, text in logged))
+
+    def test_corrected_glyphs_are_parts_too(self):
+        writer = WriteTests("test_every_master")
+        page, package, steps, logged = writer.page()
+        writer.build(page, [0x204F])  # (the reversed semicolon: comma and period mirrored, corrected glyphs)
+        titles = [(step[0], sorted(getattr(g, "name", g) for g in step[1])) for step in steps if step[0] not in ("begin", "end")]
+        self.assertEqual(titles[0], (u"FreeLab Glyph Compose (parts)", ["comma.mirrored", "period.mirrored"]))
+        self.assertEqual(titles[1][0], u"FreeLab Glyph Compose")
+        self.assertNotIn("comma.mirrored", titles[1][1])
+
+    def test_a_refused_build_records_no_step(self):
+        """The live pass of 2026-11-16: a refused build left an empty "Freelab Glyph Compose" History step."""
+        writer = WriteTests("test_every_master")
+        page, package, steps, logged = writer.page(FakeFont(VARIED))
+        writer.build(page, [0x201C])  # (“ without the ‘ it is made of: refused before anything is written)
+        self.assertNotIn(u"FreeLab Glyph Compose", [step[0] for step in steps], steps)
+        self.assertIn(("end", False), steps, "nothing written: the window's watch expects no step")
+
+    def test_a_sparse_master_names_the_mirrored_glyphs_too(self):
+        """The live pass of 2026-11-16 (Rubik): "In master Bold, 6 glyphs have no layer" left out ‛ and Ǝ."""
+        writer = WriteTests("test_every_master")
+        page, package, steps, logged = writer.page(FakeFont(VARIED), ("Regular", "Bold"))
+        sparse = FakeFont(VARIED)
+        sparse.has_layer = lambda name: name != "R"  # (Bold: R has no layer, so Я has none either)
+        page.font_in = lambda package_, master: sparse if master == "Bold" else page.font
+        writer.build(page, [0x042F])
+        self.assertTrue(any(u"In master Bold" in text and u(0x042F) in text for _, text in logged), logged)
+
+    def test_a_master_whose_change_raises_is_named_with_those_varied(self):
+        """Codex's review, round 5: Bold's applyTransform raising (not a read-back that differs) escaped without
+        the masters, and the log said "stays varied in no master ... master ?"."""
+        real = Shape.applyTransform
+        for deletion in ("raises", "does nothing"):
+            writer, page, package, steps, logged = self.two_masters()
+            calls = []
+
+            def second_raises(shape, transform):
+                calls.append(1)
+                if len(calls) > 1:
+                    raise RuntimeError(u"applyTransform refused")
+                real(shape, transform)
+            Shape.applyTransform = second_raises
+            package.deleteGlyph = (lambda glyph: 1 / 0) if deletion == "raises" else (lambda glyph: None)
+            try:
+                writer.build(page, [0x042F])
+            finally:
+                Shape.applyTransform = real
+            texts = [text for kind, text in logged if kind == "warning"]
+            name = [r.name for r in page.rows if r.code == 0x042F][0]
+            self.assertIsNotNone(package.findName(name), deletion)
+            self.assertTrue(any(u"applyTransform refused in master Bold" in text and u"stays varied in master Regular and "
+                                u"as FontLab left it in master Bold" in text for text in texts), texts)
+            self.assertFalse(any(u"no master" in text or u"master ?" in text for text in texts), texts)
+            recorded = [names for title, names in steps if title == u"FreeLab Glyph Compose"]
+            self.assertTrue(recorded and any(getattr(g, "name", None) == name for g in recorded[0]), "recorded")
+            self.assertIn(("end", True), steps)
+        self.assertNotIn(u"no master", gg.still_there(u"why", [], u"Regular"))
+
+    def test_a_master_that_drops_the_varied_transform_fails_the_glyph(self):
+        """Codex's review, round 4: FontLab keeping the component but not its varied matrix in Bold counted as built."""
+        plain = gg.Planner(DATA, FakeFont(VARIED), None, False)
+        plain.plan()
+        unvaried = plain.by_hex["2018"].layout.parts[0].matrix
+        real = Layer.setGlyphComponents
+
+        def bold_unvaried(layer, components, width, package_, flag):
+            seen.append(1)
+            if len(seen) == 2:  # (Bold: the name and the count kept, the transform the unvaried one)
+                for component in components:
+                    component.transform = Transform(*unvaried)
+            real(layer, components, width, package_, flag)
+        for existing in (False, True):
+            glyphs = dict(VARIED, quoteleft=(0x2018, 230, [rect(80, 520, 150, 700)], None)) if existing else VARIED
+            writer, page, package, steps, logged = self.two_masters(glyphs, existing)
+            before = [writer.geometry(package.findName("quoteleft").getLayerByName(m)) for m in ("Regular", "Bold")] \
+                if existing else None
+            seen = []
+            Layer.setGlyphComponents = bold_unvaried
+            try:
+                writer.build(page, [0x2018])
+            finally:
+                Layer.setGlyphComponents = real
+            self.assertTrue(any(kind == "warning" and u"was not built: FontLab did not keep its parts in master Bold" in text
+                                for kind, text in logged), logged)
+            if existing:
+                self.assertEqual([writer.geometry(package.findName("quoteleft").getLayerByName(m))
+                                  for m in ("Regular", "Bold")], before, "every master put back")
+            else:
+                self.assertIsNone(package.findName("quoteleft"), "the new glyph verifiably taken out")
+        self.assertTrue(gg.components_kept([Shape(component="a", transform=Transform(1.0001, 0, 0, 1, 100.4, 0))],
+                                           [("a", (1.0, 0.0, 0.0, 1.0, 100.0, 0.0))]), "within F2Dot14 and a rounding")
+        self.assertFalse(gg.components_kept([Shape(component="a", transform=Transform(1.0, 0, 0, 1, 100, 0))],
+                                            [("a", (0.9998, 0.014, -0.014, 0.9998, 100.0, 0.0))]), "a dropped rotation")
+        self.assertFalse(gg.components_kept([Shape(component="b", transform=Transform())], [("a", gg.IDENTITY)]))
+
+    def test_the_tabs_choice(self):
+        page = gg.GenerationPage.__new__(gg.GenerationPage)
+        page.alternates = alternates_module()
+        page.vary_keys = [row[0] for row in page.alternates.STRENGTHS]
+        page.cm = Stub(_property=lambda widget, name: getattr(widget, name),
+                       write_settings=lambda ak, settings: written.append(dict(settings[gg.SETTINGS_KEY])))
+        page.vary_box, page.vary_strength, page.vary_seed = Stub(checked=False), Stub(currentIndex=1), Stub(value=3)
+        written, runs = [], []
+        page.owner, page.ak = Stub(settings={}), None
+        page.run = lambda same_font=True: runs.append(True)
+        self.assertIsNone(page.vary_of(FakeFont()), "off: nothing varied")
+        page.vary_box.checked = True
+        self.assertEqual(page.vary_of(FakeFont()).label, (3, u"Moderate"))
+        page.vary_changed()
+        self.assertEqual((written, runs), ([{"vary": True, "vary_seed": 3, "vary_strength": "moderate"}], [True]),
+                         "kept, and the list planned again (the preview follows)")
+        page.alternates = None
+        self.assertIsNone(page.vary_of(FakeFont()), "Feature Code's module missing: nothing varied")
+
+    def test_the_loop_guards_hold_with_it(self):
+        # Codex's review, round 2, varied: R a mirrored component of Я, Я rebuilt as the mirrored R
+        glyphs = dict(BARE, R=(0x0052, 700, None, [("Ya-cy", WriteTests.MIRROR)]), **WriteTests.YA)
+        planner, rows = self.varied_plan(FakeFont(glyphs), existing=True)
+        self.assertIsNone(rows[u(0x042F)].layout)
+        self.assertEqual(gg.note_text(rows[u(0x042F)]), u"made of R, which is made of Ya-cy")
+
+
+class ReferenceTests(unittest.TestCase):
+    def test_the_selected_character_in_the_reference_font(self):
+        """Item 116: the tab had no reference font; it draws the row's character in the window's choice."""
+        page = gg.GenerationPage.__new__(gg.GenerationPage)
+        page.rows = gg.Planner(DATA, FakeFont(), None, False).plan()
+        rows = dict((r.char, r) for r in page.rows)
+        cmod = compose_module()
+        drawn, notes = [], []
+        page.cm = Stub(script_families=cmod.script_families, script_of=cmod.script_of, reference_note=cmod.reference_note,
+                       reference_picture=lambda text, family, palette: (text, family))
+        page.package = "a font"
+        page.owner = Stub(reference_family=lambda codes, more=(): (u"Noto Sans", u"Noto Sans"), dialog=Stub(palette=None),
+                          font_names={})
+        page.reference = Stub(setPixmap=drawn.append, clear=lambda: drawn.append(None))
+        page.reference_note = Stub(setText=notes.append)
+        page.draw_reference(rows[u(0x201F)])
+        self.assertEqual((drawn, notes), ([(u(0x201F), u"Noto Sans")], [u"%s in Noto Sans." % u(0x201F)]))
+        page.draw_reference(rows[u(0x2009)])
+        self.assertEqual((drawn[-1], notes[-1]), (None, u""), "a space: nothing to draw")
+        page.owner.reference_family = lambda codes, more=(): (None, u"")
+        page.draw_reference(rows[u(0x201F)])
+        self.assertEqual(notes[-1], u"No reference font has %s." % u(0x201F))
+
+
+class Item(object):
+    """A list row (QTreeWidgetItem), stubbed."""
+
+    def __init__(self, index, checked=None, texts=()):
+        self.index, self.checked, self.texts = index, checked, list(texts)
+        self.children, self.foreground, self.flag_bits = [], {}, 0
+
+    def flags(self):
+        return 1 if self.checked is not None else 0
+
+    def data(self, column, role):
+        return self.index
+
+    def setData(self, column, role, value):
+        self.index = value
+
+    def checkState(self, column):
+        return 2 if self.checked else 0
+
+    def setCheckState(self, column, state):
+        self.checked = state == 2
+
+    def setFlags(self, flags):
+        self.flag_bits = flags
+        if not flags & 1:
+            self.checked = None
+        elif self.checked is None:
+            self.checked = False
+
+    def setForeground(self, column, brush):
+        self.foreground[column] = brush
+
+    def addChild(self, child):
+        self.children.append(child)
+
+    def __getattr__(self, name):  # (setFont, setToolTip, setIcon, setFirstColumnSpanned, setExpanded...)
+        if name.startswith("set"):
+            return lambda *args: None
+        raise AttributeError(name)
 
 
 if __name__ == "__main__":

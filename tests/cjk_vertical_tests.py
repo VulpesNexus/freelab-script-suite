@@ -398,6 +398,25 @@ class CodeTests(unittest.TestCase):
         self.assertTrue(cv.feature_text("vert", u"  \n", [u"sub a by b;"]).startswith(u"feature vert {"),
                         "no code: a feature of its own")
 
+    def test_a_compact_feature_keeps_its_code(self):
+        """Codex review 5 (Feature Code's writer, the same as this one): a feature on one line, or its brace after
+        the last rule, had no "} vert;" line, and FreeLab's block went after the feature, outside it."""
+        rule = u"sub uni300C by uni300C.vert;"
+        for own in (u"feature vert { sub uni3001 by uniFE11; } vert;", u"feature vert {\nsub uni3001 by uniFE11; } vert;",
+                    u"feature\nvert\n{ sub uni3001 by uniFE11;\n}\nvert;"):
+            text = cv.feature_text("vert", own, [rule])
+            self.assertIn(u"sub uni3001 by uniFE11;", text)
+            self.assertLess(text.index(rule), cv.spacing().feature_code().feature_bounds(text, "vert")[1], "inside the feature: %r" % text)
+            self.assertEqual(cv.spacing().feature_code().feature_bounds(text, "vert")[1], text.rindex(u"}"))
+        self.assertIsNone(cv.feature_text("vert", u"feature vert { sub uni3001 by uniFE11;", [rule]),
+                          "braces not found: nothing written")
+        refused = []
+        forms, trims = self.forms_and_trims()
+        new = cv.texts_for(forms, trims, {"vert": u"feature vert { sub a by b;", "vrt2": u""}, refused=refused)
+        self.assertNotIn("vert", new)
+        self.assertEqual(refused, ["vert"])
+        self.assertIn(u"FreeLab leaves vert as it is", cv.CJKVerticalDialog.cj_refused_words(refused))
+
     def test_no_vpal_for_a_form_left_unbuilt(self):
         forms, trims = self.forms_and_trims()
         trims.append(cv.VTrim(0x300C, "uni300C", "uni300C.vert", "punctuation", (400, -500), 650, 100))
@@ -1552,6 +1571,86 @@ class NoFontTests(unittest.TestCase):
         dialog.run = lambda: runs.append(1)
         dialog.font_changed()
         self.assertEqual(runs, [1])
+
+
+class PreviewNoteTests(unittest.TestCase):
+    def test_the_note_says_what_the_previews_show(self):
+        """Owner's report 148: on Bellefair (no CJK glyph), the Korean sample's previews showed a comma and a
+        period only, and nothing said why: a line under the previews says what they show, and what the font
+        lacks (its Hangul, its CJK punctuation, named)."""
+        import freelab_cjk_spacing
+        korean = [s for s in freelab_cjk_spacing.SAMPLES if s[0] == "ko"][0][2]  # (the sample the owner saw)
+        names = {0x2C: u"comma", 0x2E: u"period"}
+        syllables = sum(1 for ch in korean if 0xAC00 <= ord(ch) <= 0xD7A3)
+        self.assertEqual(cv.preview_note(korean, names),
+                         u"The previews show only the 2 characters of the sample the font has (the comma and the period): it lacks %d Hangul "
+                         u"syllables and 2 CJK punctuation marks (the left corner bracket and the right corner bracket)." % syllables)
+        self.assertEqual(cv.preview_note(u"あ, x", {0x2C: u"comma"}),
+                         u"The previews show only the 1 character of the sample the font has (the comma): it lacks 1 kana and "
+                         u"1 other character.")
+        self.assertEqual(cv.preview_note(u"一、", {}),
+                         u"The font has none of the sample's characters, so the previews are empty: it lacks 1 ideograph "
+                         u"and 1 CJK punctuation mark (the ideographic comma).")
+        self.assertEqual(cv.preview_note(u"あ い", {0x3042: u"a", 0x3044: u"i"}), u"", "all there: nothing to say")
+        # Live pass: "(, .)" read oddly; marks by their names, anything else quoted
+        self.assertEqual(cv.character_words(u"a,.a"), u"“a”, the comma, and the period")
+        self.assertEqual(cv.character_words(u"abcdefgh", 2), u"“a”, “b”, and others")
+
+
+class ReaderAndRemovalTests(unittest.TestCase):
+    def test_no_reader_writes_nothing_and_says_why(self):
+        """Codex review 7, finding 3: without Feature Code's reader, the writer raised; now it writes nothing,
+        and the window's write refuses and says to reinstall FreeLab."""
+        cj = cv.spacing()
+        saved = cj.feature_code_or_none
+        cj.feature_code_or_none = lambda: None
+        cj.FEATURE_CODE_ERROR[:] = [u"no such file"]
+        try:
+            self.assertIsNone(cv.feature_text("vert", u"feature vert { sub a by b; } vert;", [u"sub x by x.vert;"]))
+            self.assertIsNone(cv.block_of("vert", u""))
+            dialog = cv.CJKVerticalDialog.__new__(cv.CJKVerticalDialog)  # (its window needs FontLab)
+            logged = []
+            dialog.package, dialog.busy = object(), False
+            dialog.ak = type("Ak", (), {"html": staticmethod(lambda text: text)})()
+            dialog.log = type("Log", (), {"add": lambda _, text, kind=None: logged.append((kind, text))})()
+            dialog.harvest = lambda: self.fail("nothing read before the refusal")
+            dialog.write()
+            self.assertEqual([kind for kind, _ in logged], ["error"])
+            self.assertIn(u"Reinstall FreeLab", logged[0][1])
+        finally:
+            cj.feature_code_or_none = saved
+            del cj.FEATURE_CODE_ERROR[:]
+
+    def test_taking_a_block_out_checks_the_braces_too(self):
+        """Codex review 7, finding 4: a write that only took FreeLab's block out returned an unclosed "lookup
+        Own {"; refused now, as a write that adds one is."""
+        cj = cv.spacing()
+        for write, tag, begin, end in ((cv.feature_text, "vert", cv.BEGIN % "vert", cv.END % "vert"),
+                                       (cj.feature_text, "palt", cj.BEGIN % "palt", cj.END % "palt")):
+            for old in (u"lookup Own {\n%s\nsub a by a.alt;\n%s" % (begin, end),
+                        u"feature %s {\n%s\nsub a by a.alt;\n%s\n" % (tag, begin, end)):
+                for rules in ([], [u"sub x by y;"]):
+                    self.assertIsNone(write(tag, old, rules), (tag, old, rules))
+
+
+class TokenReadingTests(unittest.TestCase):
+    def test_codex_review_6_scenarios(self):
+        """Markers found as comments wherever they stand, never past their pair; another feature's code is no
+        body; a body's braces must balance (Feature Code's writer_scenarios, through its token functions)."""
+        sys.path.insert(0, HERE)
+        import features_tests
+        features_tests.writer_scenarios(self, lambda old, rules: cv.feature_text("vert", old, rules), u"vert",
+                                        cv.BEGIN % "vert", cv.END % "vert", u"sub x by x.vert;")
+        own = u"feature vert {\n%s\nsub b by b.vert; %s\nsub c by c.vert;\n} vert;" % (cv.BEGIN % "vert", cv.END % "vert")
+        self.assertEqual(cv.freelab_substitutions("vert", own), {u"b": u"b.vert"}, "FreeLab's own, up to its end marker")
+
+
+class CheckAllTests(unittest.TestCase):
+    def test_check_all_and_none_say_how_many(self):
+        """Owner's report 118: Check all and Check none left no line in the log."""
+        sys.path.insert(0, HERE)
+        import cjk_tests
+        cjk_tests.check_all_logged(self, cv, cv.CJKVerticalDialog, u"row")
 
 
 if __name__ == "__main__":

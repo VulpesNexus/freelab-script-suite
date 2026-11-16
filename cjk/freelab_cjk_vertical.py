@@ -284,19 +284,17 @@ def own_substitutions(tag, text, classes=None, lookups=None):
 
 
 def freelab_substitutions(tag, text):
-    """{glyph: form} of FreeLab's own block in a feature (written by this tool before)."""
-    begin, end = BEGIN % tag, END % tag
-    found, inside = {}, False
-    for line in (text or u"").splitlines():
-        stripped = line.strip()
-        if stripped == begin:
-            inside = True
-        elif stripped == end:
-            inside = False
-        elif inside:
-            match = SUBSTITUTION.match(stripped)
-            if match:
-                found[match.group(1)] = match.group(2)
+    """{glyph: form} of FreeLab's own block in a feature (written by this tool before), its markers found
+    as comments wherever they stand (Feature Code's block_text)."""
+    found = {}
+    try:
+        inner = reader().block_text(text, BEGIN % tag, END % tag)
+    except Exception:
+        inner = None  # (no reader: nothing read; the window says why and writes nothing)
+    for line in (inner or u"").splitlines():
+        match = SUBSTITUTION.match(line.strip())
+        if match:
+            found[match.group(1)] = match.group(2)
     return found
 
 
@@ -504,36 +502,24 @@ def lookup_name(tag):
     return u"FreeLab_%s" % tag
 
 
+def reader():
+    """Feature Code's reader, through CJK Spacing, or None where either cannot be loaded."""
+    try:
+        return spacing().feature_code_or_none()
+    except Exception:
+        return None
+
+
 def feature_text(tag, old, rules):
-    """A feature's code with FreeLab's block of rules before its closing line: an older FreeLab block
-    taken out, the rest kept, FontLab's automatic block handed back ("#/> feature"). Code without the
-    feature's closing line is kept as it is, the block after it; only no code at all makes a new feature."""
+    """A feature's code with FreeLab's block of rules before its closing brace: an older FreeLab block
+    taken out, the rest kept, FontLab's automatic block handed back ("#/> feature"); or None where FreeLab
+    cannot read the code safely (its own markers not in pairs, or the feature's braces not found): nothing
+    is written then. Read by tokens through Feature Code, as CJK Spacing reads (spacing().feature_code:
+    Codex reviews 5 and 6)."""
+    fc = reader()
+    if fc is None:  # (no reader: nothing written; the window says why: reader_problem)
+        return None
     begin, end = BEGIN % tag, END % tag
-    kept, inside = [], False
-    for line in (old or u"").splitlines():
-        stripped = line.strip()
-        if stripped == begin:
-            inside = True
-            continue
-        if stripped == end:
-            inside = False
-            continue
-        if inside:
-            continue
-        if stripped.startswith(FONTLAB_AUTO):
-            line = line.replace(FONTLAB_AUTO, FONTLAB_HANDED, 1)
-        kept.append(line)
-    closing = None
-    for index in range(len(kept) - 1, -1, -1):
-        if re.match(r"^\s*}\s*%s\s*;" % re.escape(tag), kept[index]):
-            closing = index
-            break
-    if closing is None and not any(line.strip() for line in kept):  # (no code: a feature of its own)
-        kept = [u"feature %s {" % tag, u"# %s" % FEATURE_TITLES.get(tag, tag), u""]
-        closing = len(kept)
-        kept.append(u"} %s;" % tag)
-    elif closing is None:  # (code without its closing line: kept, FreeLab's block after it)
-        closing = len(kept)
     # FreeLab's rules in a lookup of their own: appended to the font's lookup, after its class pairs, a pair
     # was shadowed by them (live, IBM Plex Sans JP: "Single kern pair occurring after class kern pair in
     # feature 'vkrn'"). A later lookup's values add to an earlier one's: the font's own pairs, glyphs, and
@@ -541,7 +527,15 @@ def feature_text(tag, old, rules):
     name = lookup_name(tag)
     block = ([begin, u"  lookup %s {" % name] + [u"    %s" % rule for rule in rules] + [u"  } %s;" % name, end]
              if rules else [])
-    return u"\n".join(kept[:closing] + block + kept[closing:]) + u"\n"
+    try:
+        fc.readable(old, tag)  # (taking a block out too: Codex review 7)
+        text = fc.handed_back(fc.without_blocks(old, begin, end, tag)).rstrip(u"\r\n")
+        if not block and fc.code_tokens(text):
+            fc.readable(text, tag)
+            return text + u"\n"
+        return fc.insert_block(text, tag, block, title=FEATURE_TITLES.get(tag, tag), blank=True) + u"\n"
+    except fc.FeatureCodeUnreadable:
+        return None
 
 
 CODE_TAGS = ("vert", "vrt2", "vpal", "vkrn")  # (the features written, each read for the font's own code too)
@@ -583,13 +577,11 @@ def changed_features(features, texts, tags, prefix=UNCOMPARED):
 
 def block_of(tag, text):
     """FreeLab's block of a feature, alone in a feature of its own (for the parser's check), or None."""
-    begin, end = BEGIN % tag, END % tag
-    lines = (text or u"").splitlines()
-    starts = [i for i, line in enumerate(lines) if line.strip() == begin]
-    ends = [i for i, line in enumerate(lines) if line.strip() == end]
-    if not starts or not ends:
+    fc = reader()
+    inner = fc.block_text(text, BEGIN % tag, END % tag) if fc is not None else None  # (its markers as comments)
+    if inner is None:
         return None
-    return u"\n".join([u"feature %s {" % tag] + lines[starts[0] + 1:ends[0]] + [u"} %s;" % tag]) + u"\n"
+    return u"feature %s {\n%s} %s;\n" % (tag, inner, tag)
 
 
 def vrt2_rules(forms, vrt2_extra=None, turned=()):
@@ -611,13 +603,14 @@ def vrt2_rules(forms, vrt2_extra=None, turned=()):
 
 
 def texts_for(forms, trims, old_texts, forms_on=True, vpal_on=True, own_vpal=(), vrt2_extra=None, turned=(),
-              kerns=(), vkrn_on=True):
+              kerns=(), vkrn_on=True, refused=None):
     """{tag: new code} for vert, vrt2, vpal, and vkrn: vert and vrt2 take the same substitutions (vrt2 is a
     superset of vert, and applications that know it use it alone), vrt2 the turned proportional glyphs
     too (turned: those of the option, when it is on), vpal the checked trims and vkrn the checked pairs
     (not those of a form left unbuilt: its glyph would be missing); only where the code changes. An old
     FreeLab block is taken out when nothing is left to write in it. vrt2_extra: the font's own vert
-    substitutions its own vrt2 lacks (vrt2_rules)."""
+    substitutions its own vrt2 lacks (vrt2_rules). refused, when given: the tags of the features whose
+    braces FreeLab cannot find (left as they are)."""
     new = {}
     unbuilt = set(f.target for f in list(forms) + list(turned) if f.state == "build" and not (f.checked and forms_on))
     kern_rules = vkrn_rules([k for k in kerns if k.first not in unbuilt and k.second not in unbuilt])
@@ -629,6 +622,10 @@ def texts_for(forms, trims, old_texts, forms_on=True, vpal_on=True, own_vpal=(),
         old = old_texts.get(tag)
         if rules or (BEGIN % tag) in (old or u""):
             text = feature_text(tag, old, rules)
+            if text is None:  # (its braces not found: left as it is, and said)
+                if refused is not None:
+                    refused.append(tag)
+                continue
             if text != old:
                 new[tag] = text
     return new
@@ -959,6 +956,75 @@ def preview_column(text, names, own, chosen, trims, kerns, height, upm):
     return placed, chars, heights
 
 
+# What a sample's characters the font lacks are, for the previews' note: (name for one, for many, ranges)
+SAMPLE_KINDS = ((u"Hangul syllable", u"Hangul syllables", ((0xAC00, 0xD7A3), (0x1100, 0x11FF), (0x3130, 0x318F))),
+                (u"kana", u"kana", ((0x3040, 0x30FF), (0x31F0, 0x31FF), (0xFF66, 0xFF9F))),
+                (u"ideograph", u"ideographs", ((0x3400, 0x4DBF), (0x4E00, 0x9FFF), (0xF900, 0xFAFF),
+                                               (0x20000, 0x3FFFF))),
+                (u"CJK punctuation mark", u"CJK punctuation marks", ((0x3000, 0x303F), (0xFE10, 0xFE1F),
+                                                                     (0xFE30, 0xFE4F), (0xFF00, 0xFF65))))
+SAMPLE_SHOWN_MOST = 6  # characters named in the note's parentheses at most
+
+
+def character_words(chars, most=SAMPLE_SHOWN_MOST):
+    """A few characters named in words, the distinct ones in their order: a punctuation mark or a symbol
+    by its name ("the comma", "the period", "the left corner bracket"), anything else between quotation
+    marks; "and others" past most. A bare mark in parentheses, "(, .)", read oddly (live pass)."""
+    import unicodedata
+    distinct = []
+    for ch in chars:
+        if ch not in distinct:
+            distinct.append(ch)
+    words = []
+    for ch in distinct[:most]:
+        try:
+            kind, name = unicodedata.category(ch), unicodedata.name(ch, u"")
+        except (TypeError, ValueError):
+            kind, name = u"", u""
+        if kind[:1] in (u"P", u"S") and name:
+            words.append(u"the " + name.lower().replace(u"full stop", u"period"))
+        else:
+            words.append(u"\N{LEFT DOUBLE QUOTATION MARK}%s\N{RIGHT DOUBLE QUOTATION MARK}" % ch)
+    if len(distinct) > most:
+        words.append(u"others")
+    if len(words) <= 2:
+        return u" and ".join(words)
+    return u"%s, and %s" % (u", ".join(words[:-1]), words[-1])
+
+
+def preview_note(text, names):
+    """What the previews show of a sample, where the font lacks some of its characters (owner's report
+    148: on Bellefair, the Korean sample's previews held a comma and a period only, and nothing said
+    why): the characters the font has, and what it lacks, by kind (its Hangul, its CJK punctuation
+    marks, named). Empty where the font has every character. names: {code point: glyph}."""
+    shown, lacking = [], []
+    for code, ch in code_points(text):
+        if ch.isspace():
+            continue
+        (shown if code in names else lacking).append((code, ch))
+    if not lacking:
+        return u""
+    listed = character_words  # (the live pass: "(, .)" read oddly; named now, "(the comma and the period)")
+
+    kinds, sorted_out = [], 0
+    for one, many, ranges in SAMPLE_KINDS:
+        found = [ch for code, ch in lacking if any(low <= code <= high for low, high in ranges)]
+        if found:
+            sorted_out += len(found)
+            words = counted(len(found), one, many)
+            if one.startswith(u"CJK punctuation"):  # (named: the marks a vertical font turns or moves)
+                words += u" (%s)" % listed(found)
+            kinds.append(words)
+    if len(lacking) > sorted_out:
+        kinds.append(counted(len(lacking) - sorted_out, u"other character"))
+    lacks = kinds[0] if len(kinds) == 1 else (u"%s and %s" % tuple(kinds) if len(kinds) == 2 else
+                                              u"%s, and %s" % (u", ".join(kinds[:-1]), kinds[-1]))
+    if not shown:
+        return u"The font has none of the sample's characters, so the previews are empty: it lacks %s." % lacks
+    return u"The previews show only the %s of the sample the font has (%s): it lacks %s." % (
+        counted(len(shown), u"character"), listed([ch for _, ch in shown]), lacks)
+
+
 def fitting_em(chars, heights_at, width, height, largest, smallest=12):
     """The largest em (pixels, from largest down to smallest) at which a sample's columns fit a pane of
     width by height: its columns as vertical_lines breaks them, each step = em * COLUMN_STEP wide.
@@ -1231,6 +1297,14 @@ class CJKVerticalDialog(object):
             previews.addLayout(column, 1)
             self.previews.append(label)
         layout.addLayout(previews)
+        # What the previews show of the sample where the font lacks some of it (preview_note), else hidden
+        self.preview_note = QtGui.QLabel(u"")
+        self.preview_note.setWordWrap(True)
+        self.preview_note.setEnabled(False)  # (drawn in the quiet text color, as the captions)
+        self.preview_note.setWhatsThis(u"The previews leave out the sample's characters the font lacks: this line "
+                                       u"says which they show, and which are missing.")
+        self.preview_note.setVisible(False)
+        layout.addWidget(self.preview_note)
         layout.addWidget(self.log.widget)
         buttons = QtGui.QHBoxLayout()
         self.all_button = QtGui.QPushButton("Check all")
@@ -1889,12 +1963,16 @@ class CJKVerticalDialog(object):
                 rows[index].checked = item.checkState(0) == QtCore.Qt.Checked
 
     def check_all(self, on):
+        """Check all, Check none: every checkable row, the log told how many it checked or unchecked, and
+        how many of them were in closed groups (owner's report 118)."""
         QtCore, QtGui = _qt()
         self.tree.blockSignals(True)
-        for item in self.items():
-            if item.flags() & QtCore.Qt.ItemIsUserCheckable:
-                item.setCheckState(0, QtCore.Qt.Checked if on else QtCore.Qt.Unchecked)
-        self.tree.blockSignals(False)
+        try:
+            self.ak.check_rows([item for item in self.items() if item.flags() & QtCore.Qt.ItemIsUserCheckable], on,
+                               log=self.log, command=u"Check all" if on else u"Check none",
+                               hidden_text=(u"in a closed group", u"in closed groups"))
+        finally:
+            self.tree.blockSignals(False)
         self.changed()
 
     def changed(self):
@@ -1910,9 +1988,19 @@ class CJKVerticalDialog(object):
         """The feature code a write would make now, from the checks and the parts switched on."""
         if self.package is None:
             return {}
+        self.refused = []  # (features whose braces FreeLab cannot find: left as they are, said as a write starts)
         return texts_for(self.forms, self.trims, self.texts, self.forms_box.checked, self.vpal_box.checked,
                          self.own_vpal, self.vrt2_extra, list(self.turned) if self.turned_box.checked else [],
-                         self.kerns, self.vkrn_box.checked)
+                         self.kerns, self.vkrn_box.checked, self.refused)
+
+    @staticmethod
+    def cj_refused_words(tags):
+        """The log's sentence for features left as they are (feature_text found no braces)."""
+        one = len(tags) == 1
+        return (u"FreeLab leaves %s as %s: it cannot find where %s code begins and ends (the feature's braces), "
+                u"so nothing of FreeLab's goes in. Check %s code in FontLab's Features panel." % (
+                    u", ".join(sorted(set(tags))), u"it is" if one else u"they are",
+                    u"that feature's" if one else u"each one's", u"its" if one else u"their"))
 
     def pending(self):
         """What a write would do now: (new feature code, forms to build, metrics to set)."""
@@ -1942,7 +2030,11 @@ class CJKVerticalDialog(object):
         ak.enable(self.none_button, cjk and any(checks))
         ak.enable(self.restore_button, cjk and [row.checked for row in self.all_rows()] != self.first_checks)
         new, builds, metrics = self.pending()
-        ak.enable(self.write_button, cjk and bool(new or builds or metrics))
+        problem = self.reader_problem()
+        ak.enable(self.write_button, cjk and bool(new or builds or metrics) and not problem)
+        if problem and problem != getattr(self, "problem_said", None):
+            self.log.add(self.ak.html(problem), "error")  # (once, while it lasts)
+        self.problem_said = problem
         if not cjk:
             ak.enable(self.export_button, False)
         self.draw_previews()
@@ -1985,6 +2077,9 @@ class CJKVerticalDialog(object):
         """With no font open, the sample and its previews are hidden and the settings grayed out."""
         for widget in [self.sample_label, self.sample_box, self.sample] + list(self.preview_captions) + list(self.previews):
             widget.setVisible(on)
+        note = getattr(self, "preview_note", None)
+        if note is not None and not on:  # (shown again by draw_previews, where it has something to say)
+            note.setVisible(False)
         for widget in (self.forms_box, self.vpal_box, self.vkrn_box, self.turned_box, self.metrics_box, self.compile_box,
                        self.export_button):
             self.ak.enable(widget, on)
@@ -2118,11 +2213,30 @@ class CJKVerticalDialog(object):
                 label.clear()
             else:
                 label.setPixmap(pixmap)
+        note = getattr(self, "preview_note", None)
+        if note is not None:
+            words = preview_note(text, names)
+            note.setText(words)
+            note.setVisible(bool(words))
 
     # -- writing --------------------------------------------------------------------
 
+    def reader_problem(self):
+        """Why nothing can be written (Feature Code's reader, which CJK Spacing loads, cannot be loaded), or
+        empty (Codex review 7: a missing script raised out of the button updates and the write)."""
+        try:
+            return spacing().feature_code_problem(u"CJK Vertical")
+        except Exception as exc:
+            return (u"CJK Vertical cannot read the font's feature code: FreeLab's CJK Spacing script, which it "
+                    u"reads code through, is missing or broken (%s). Reinstall FreeLab; nothing is written until "
+                    u"then." % exc)
+
     def write(self):
         if self.package is None or self.busy:
+            return
+        problem = self.reader_problem()
+        if problem:  # (nothing written: no reader)
+            self.log.add(self.ak.html(problem), "error")
             return
         self.harvest()
         package = self.package
@@ -2132,6 +2246,8 @@ class CJKVerticalDialog(object):
             self.log.add(u"The font changed: here is this one's list. Nothing was written.", "warning")
             return
         new, builds, metrics = self.pending()
+        if getattr(self, "refused", None):
+            self.log.add(self.ak.html(self.cj_refused_words(self.refused)), "warning")
         fc = None
         try:
             fc = self.ak.load_sibling("freelab_feature_code.py", "freelab_feature_code")

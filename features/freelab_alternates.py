@@ -766,11 +766,10 @@ class AlternatesPage(object):
         try:
             if getattr(self.owner, "busy", False):
                 return
-            QtCore = _qt()[0]
             self.tree.blockSignals(True)  # (one answer for the whole list, not one a row)
-            try:
-                for row in range(self.tree.topLevelItemCount):
-                    self.tree.topLevelItem(row).setCheckState(0, QtCore.Qt.Checked if on else QtCore.Qt.Unchecked)
+            try:  # (the log told how many it checked or unchecked, hidden ones said: owner's report 118)
+                self.ak.check_rows([self.tree.topLevelItem(row) for row in range(self.tree.topLevelItemCount)], on,
+                                   log=self.owner.log, command=u"Check all" if on else u"Check none", noun=u"glyph")
             finally:
                 self.tree.blockSignals(False)
             self.draw_preview()

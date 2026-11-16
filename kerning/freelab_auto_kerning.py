@@ -2866,56 +2866,171 @@ def _center_on_main(dialog):
     dialog.move(x, y)
 
 
-UNDO_KEYS = ((u"Ctrl+Z", "actionUndo"), (u"Ctrl+Shift+Z", "actionRedo"), (u"Ctrl+Y", "actionRedo"))
 TEXT_INPUTS = ("QLineEdit", "QTextEdit", "QPlainTextEdit", "QAbstractSpinBox")
 
 
-def forward_undo(owner):
-    """Undo and redo typed in a tool's window reach FontLab (its own Edit > Undo and Redo commands):
-    the keys did nothing until FontLab's window was clicked, since the tool's window had them. A field
-    being typed in keeps its own undo. Nothing happens while the tool is busy (owner.busy: inside its
-    own loop, which lets events through), and FontLab's commands act on the font FontLab shows: with
-    another one shown, the log names this window's font to click instead (foreign_font)."""
+KEY_Z, KEY_Y = 0x5A, 0x59  # Qt::Key_Z, Qt::Key_Y
+CONTROL, SHIFT, ALT, META = 0x04000000, 0x02000000, 0x08000000, 0x10000000  # Qt's keyboard modifiers
+KEY_PRESS, SHORTCUT_OVERRIDE = 6, 51  # QEvent::KeyPress, QEvent::ShortcutOverride
+
+
+def undo_key(event):
+    """"actionUndo" for Ctrl+Z, "actionRedo" for Ctrl+Shift+Z or Ctrl+Y (FontLab's actions' names), None
+    for any other key event."""
+    try:
+        key, held = int(event.key()), int(event.modifiers()) & (CONTROL | SHIFT | ALT | META)
+    except Exception:
+        return None
+    if key == KEY_Z and held == CONTROL:
+        return "actionUndo"
+    if (key == KEY_Z and held == CONTROL | SHIFT) or (key == KEY_Y and held == CONTROL):
+        return "actionRedo"
+    return None
+
+
+def own_undo(widget, name):
+    """Whether the widget with the focus keeps undo and redo (name: "actionUndo" or "actionRedo") for
+    itself: every text field, spin box, or spin box's line edit that can be typed in does, whatever its
+    own undo holds, so FontLab's Undo runs only when the focus is elsewhere in the window (a list, a
+    button, nothing). A spin box applies its value as it is typed and its line edit then reports nothing
+    to undo: Ctrl+Z after typing 9 went to FontLab and undid a glyph build, the field still at 9 (live,
+    2026-11-17). Read-only text (the log) keeps nothing."""
+    try:
+        if widget is None or not any(widget.inherits(kind) for kind in TEXT_INPUTS):
+            return False
+    except Exception:
+        return False  # (no text field)
+    try:
+        return not _property(widget, "readOnly")
+    except Exception:
+        return True  # (unsure: the field keeps the key, as it would without FreeLab)
+
+
+COMMITTED_FIELDS = ("QLineEdit", "QAbstractSpinBox")  # one-line fields whose typing becomes a value
+
+
+def commit_typing(window, pressed=None):
+    """What is typed in the window's field with the focus taken as its value, before a button acts on
+    it: a spin box's text interpreted (interpretText: its value set and valueChanged emitted, as Enter
+    would), then the field's focus taken away, so it ends its editing as when a click moves the focus
+    (a line edit's editingFinished, a spin box's own). The owner typed 100 in Feature Code's Strokes over
+    130 and clicked Build without Enter: it built at 130. A button that takes no focus on a click (a tool
+    button, a button made NoFocus) left the field focused and its value as it was. pressed: the button
+    pressed (a field is never its own button). The field committed, or None."""
+    QtGui = _qt()[1]
+    try:
+        focus = QtGui.QApplication.focusWidget()
+    except Exception:
+        return None
+    if focus is None or focus is pressed:
+        return None
+    try:
+        if not _same(focus.window(), window) or not any(focus.inherits(kind) for kind in COMMITTED_FIELDS):
+            return None  # (another window's, or a text editor: nothing to commit, its focus kept)
+    except Exception:
+        return None
+    spin = focus
+    try:
+        if not spin.inherits("QAbstractSpinBox"):
+            parent = spin.parentWidget()  # (a spin box's own line edit has the focus while it is typed in)
+            spin = parent if parent is not None and parent.inherits("QAbstractSpinBox") else None
+    except Exception:
+        spin = None
+    try:
+        if spin is not None:
+            spin.interpretText()
+    except Exception:
+        pass
+    try:
+        focus.clearFocus()
+    except Exception:
+        pass
+    return focus
+
+
+def fontlab_undo(owner, name):
+    """FontLab's own Edit > Undo (name "actionUndo") or Redo ("actionRedo") run for a tool's window, on its
+    font: the QAction of that name among the main window's, triggered, then FontLab's views redrawn
+    (refresh_views). Nothing while the tool is busy (owner.busy: inside its own loop, which lets events
+    through), and nothing but a line in the log when FontLab shows another font (its commands act on the
+    font it shows: foreign_font), when FontLab has nothing to undo (its command grayed out), or when the
+    command cannot be found. True when FontLab's command was run."""
     QtCore, QtGui = _qt()
-    held = []
-
-    def run(name):
-        try:
-            if getattr(owner, "busy", False):
-                return  # (the History must not move under the tool's own work)
-            focus = QtGui.QApplication.focusWidget()
-            if focus is not None and any(focus.inherits(kind) for kind in TEXT_INPUTS) and not _property(focus, "readOnly"):
-                return
-            foreign = foreign_font(owner)
-            if foreign is not None:
-                log = getattr(owner, "log", None)
+    done, verb = (u"undone", u"undo") if name == "actionUndo" else (u"redone", u"redo")
+    log = getattr(owner, "log", None)
+    try:
+        if getattr(owner, "busy", False):
+            return False  # (the History must not move under the tool's own work)
+        foreign = foreign_font(owner)
+        if foreign is not None:
+            if log is not None:
+                log.add(u"Nothing was %s: FontLab's %s works on the font it shows, not on this window's (%s). "
+                        u"Click %s's Font window, then %s there." % (done, i(verb.capitalize()), b(foreign),
+                                                                     b(foreign), verb), "warning")
+            return False
+        main = AutoKerningDialog.main_window()
+        for action in (main.findChildren(QtGui.QAction) if main is not None else []):
+            if action.objectName != name:
+                continue
+            if not action.isEnabled():
                 if log is not None:
-                    done, verb = (u"undone", u"undo") if name == "actionUndo" else (u"redone", u"redo")
-                    log.add(u"Nothing was %s: FontLab's %s works on the font it shows, not on this window's (%s). "
-                            u"Click %s's Font window, then %s there." % (done, i(verb.capitalize()), b(foreign),
-                                                                         b(foreign), verb), "warning")
-                return
-            main = AutoKerningDialog.main_window()
-            for action in main.findChildren(QtGui.QAction):
-                if action.objectName == name:
-                    if action.isEnabled():
-                        action.trigger()
-                        # FontLab's Undo moved the font's History, but its own windows (Font, Glyph,
-                        # Kerning) were not drawn again while a FreeLab window was the active one: they
-                        # are told, once the command has run (refresh_views)
-                        refresh = lambda: refresh_views(owner)
-                        held[:] = [entry for entry in held if isinstance(entry, tuple)] + [refresh]
-                        QtCore.QTimer.singleShot(0, refresh)
-                    return
-        except Exception:
-            pass  # (a slot must not raise)
+                    log.add(u"FontLab has nothing to %s (its %s is grayed out)." % (
+                        verb, i(u"Edit > %s" % verb.capitalize())))
+                return False
+            action.trigger()
+            # FontLab's Undo moved the font's History, but its own windows (Font, Glyph, Kerning) were
+            # not drawn again while a FreeLab window was the active one: they are told, once the command
+            # has run (refresh_views)
+            refresh = lambda: refresh_views(owner)
+            owner.undo_refresh = refresh  # (held until it runs: PythonQt drops what no Python object holds)
+            QtCore.QTimer.singleShot(0, refresh)
+            return True
+        if log is not None:
+            log.add(u"Nothing was %s: FontLab's %s was not found." % (done, i(u"Edit > %s" % verb.capitalize())),
+                    "warning")
+    except Exception:
+        pass  # (called from slots and filters, which must not raise)
+    return False
 
-    for keys, name in UNDO_KEYS:
-        shortcut = QtGui.QShortcut(QtGui.QKeySequence(keys), owner.dialog)
-        slot = (lambda name: lambda *args: run(name))(name)
-        shortcut.connect("activated()", slot)
-        held.append((shortcut, slot))
-    owner.undo_shortcuts = held  # (PythonQt drops what no Python object holds)
+
+def undo_key_event(window, obj, event):
+    """The window's filter (filter_event) for Ctrl+Z, Ctrl+Shift+Z, and Ctrl+Y: True when it took the
+    event. Taken at Qt's ShortcutOverride, which comes before any shortcut is looked up (and goes up to
+    the window from whatever widget has the focus): Qt then sends the key as a plain key press, which
+    runs FontLab's command here (fontlab_undo). No shortcut of the window or of FontLab sees the key, so
+    none can make it ambiguous, whatever context FontLab gave its own (owner's report: undo pressed with
+    a FreeLab window in front never reached FontLab). A field that can be typed in keeps the key
+    (own_undo), whatever its own undo holds."""
+    name = undo_key(event)
+    if name is None:
+        return False
+    owner = window_owner(window)
+    if owner is None:
+        return False  # (not a FreeLab tool's window: never FontLab's own keys)
+    try:
+        focus = _qt()[1].QApplication.focusWidget()
+    except Exception:
+        focus = None
+    if own_undo(focus if focus is not None else obj, name):
+        return False
+    if event.type() == SHORTCUT_OVERRIDE:
+        event.accept()
+        return True
+    fontlab_undo(owner, name)
+    return True
+
+
+def forward_undo(owner):
+    """Undo and redo typed in a tool's window reach FontLab (its own Edit > Undo and Redo commands)
+    through the window's filter alone (undo_key_event). No shortcut of the window's own: FontLab's Edit
+    > Undo is an application-wide Ctrl+Z, and a window shortcut on the same keys made Qt's ambiguous case,
+    in which neither ran and the key press never came (live, 2026-11-17: the History did not move until
+    the window's Ctrl+Z shortcut was disabled)."""
+    owner.undo_shortcuts = []
+    try:
+        install_filters(owner.dialog)  # (the filter is on the window from the start)
+    except Exception:
+        pass
 
 
 def refresh_views(owner, fontlab=None):
@@ -3433,13 +3548,30 @@ def tools_icon(color, size=16):
     return pixmap
 
 
+def content_layout(dialog):
+    """The layout holding a window's content: the dialog's own, or, on a small screen, that of the body
+    in its scroll area (window_layout). The tools button went into the dialog's own layout there, beside
+    the scroll area, and left an empty strip at the window's right (live, 2026-11-17)."""
+    layout = dialog.layout()
+    try:
+        if layout is not None and layout.count() == 1:
+            area = layout.itemAt(0).widget()
+            if area is not None and area.property(WINDOW_BODY_PROP):
+                body = area.widget()
+                if body is not None and body.layout() is not None:
+                    return body.layout()
+    except Exception:
+        pass
+    return layout
+
+
 def add_tools_button(dialog, current, log=None):
     """A menu button at the right of a FreeLab window's first row, listing the font tools (FONT_TOOLS):
     picking one opens it, as Scripts > FreeLab does; the window's own is grayed out. log: a Log told
     when a tool could not be found."""
     QtCore, QtGui = _qt()
     try:
-        layout = dialog.layout()
+        layout = content_layout(dialog)
         if layout is None or not layout.count():
             return None
         first_item = layout.itemAt(0)
@@ -3829,11 +3961,45 @@ LONG_SHEET = u"QComboBox { combobox-popup: 0; }"
 # mode's Fusion draws it from the dark palette, the sheet holding no color).
 
 
+POPUP_GRAY_PROP = "freelab_popup_gray"  # on a dropdown's list an earlier build gave an opacity effect (taken off)
+
+
+def leave_popup_alone(combo):
+    """A dropdown's popup list: marked for dark mode to leave as drawn (LEAVE_ALONE_PROP, on the list
+    and on the popup window holding it, QComboBoxPrivateContainer): dark mode recolored it as one of
+    FontLab's lists, its light text in colored smears and tinted (owner's image 162). Left alone, it
+    shows Windows' ClearType, as every other text of the interface does (live, 2026-11-17: the same
+    share of colored edge pixels in the popup, in another tool's popup, and in the window's own labels).
+    An opacity effect meant to smooth it in gray changed nothing (the list paints an opaque background,
+    so Qt keeps ClearType) and cost an offscreen render at every repaint: a list that still has one from
+    a session before is given it back (POPUP_GRAY_PROP). Called for every dropdown of every FreeLab
+    window, at each update_states (style_combos, through long_choice)."""
+    try:
+        view = combo.view()
+    except Exception:
+        return
+    if view is None:
+        return
+    try:
+        for widget in (view, view.parentWidget()):
+            if widget is not None and not widget.property(LEAVE_ALONE_PROP):
+                widget.setProperty(LEAVE_ALONE_PROP, True)
+    except Exception:
+        pass
+    try:
+        if view.property(POPUP_GRAY_PROP):  # (an effect put on by an earlier build of this module)
+            view.setGraphicsEffect(None)  # (Qt deletes it)
+            view.setProperty(POPUP_GRAY_PROP, False)
+    except Exception:
+        pass
+
+
 def long_choice(combo):
     """A dropdown (every one, however many its choices) opens as a list under its box, scrolled past
     LONG_CHOICES rows; the sheet and its flag go on together (a one-choice dropdown's own sheet comes
     first, and gives this one back when it has choices again: single_choice). A sheet of the box's own
-    is left as it is."""
+    is left as it is. Its popup list is left alone by dark mode (leave_popup_alone), whatever its sheet."""
+    leave_popup_alone(combo)
     if combo.property(SINGLE_PROP):
         return
     sheet = combo.styleSheet or u""
@@ -3971,6 +4137,9 @@ def blank_press(window, target):
     picture a tool draws (previews: their pair is dragged or clicked)."""
     widget = target
     while widget is not None and not (widget is window or widget == window):
+        if widget.property(WINDOW_BODY_PROP):
+            widget = widget.parentWidget()  # (the scroll area a small screen's window holds its content in)
+            continue
         if _inherits_any(widget, NOT_BLANK) or widget.property(LEAVE_ALONE_PROP) or _property(widget, "mouseTracking"):
             return False
         widget = widget.parentWidget()
@@ -4054,6 +4223,11 @@ def filter_event(window, obj, event, pending):
     right-clicked, until its context menu comes (or does not)."""
     QtCore = _qt()[0]
     kind = event.type()
+    if kind in (KEY_PRESS, SHORTCUT_OVERRIDE):
+        return undo_key_event(window, obj, event)  # (Ctrl+Z and the like run FontLab's own Undo and Redo)
+    if kind == 2 and int(event.button()) == int(QtCore.Qt.LeftButton) and obj.inherits("QAbstractButton") \
+            and _property(obj, "enabled"):
+        commit_typing(window, obj)  # (the value typed in a field taken before the button acts on it)
     if kind == 110:  # ToolTip
         return show_tip(obj, event, _view_of(obj))
     if obj is window or obj == window:
@@ -4090,7 +4264,7 @@ def filter_event(window, obj, event, pending):
     return False
 
 
-WATCHED_EVENTS = (2, 3, 82, 110)  # MouseButtonPress, MouseButtonRelease, ContextMenu, ToolTip
+WATCHED_EVENTS = (2, 3, 6, 51, 82, 110)  # MouseButtonPress, MouseButtonRelease, KeyPress, ShortcutOverride, ContextMenu, ToolTip
 
 
 CHILD_ADDED = 68  # QEvent::ChildAdded, sent to a widget given a child
@@ -4196,14 +4370,19 @@ def update_states(dialog, hidden_too=False):
     except Exception:
         pass
     window = dialog.window()  # (a dialog opened from this one is a child too: its buttons and lists are its own)
+    # (the buttons shown only: Kerning Check's bottom row holds each tab's buttons, those of the tab shown
+    # visible; and of the lists equally near a button, a shown one first: a QStackedWidget's hidden pages
+    # are as near as its shown one, and the first of them judged Font Check's buttons)
     buttons = [b for b in dialog.findChildren(QtGui.QPushButton)
-               if any((u"%s" % b.text).startswith(t) for t in CHECK_BUTTON_TEXTS) and b.window() == window]
+               if any((u"%s" % b.text).startswith(t) for t in CHECK_BUTTON_TEXTS) and b.window() == window
+               and _property(b, "visible")]
     if not buttons:
         return
     views = [v for v in dialog.findChildren(QtGui.QAbstractItemView)
              if (v.inherits("QTreeWidget") or v.inherits("QListWidget")) and v.window() == window]
+    shown = dict((id(v), bool(_property(v, "visible"))) for v in views)
     for button in buttons:
-        mates = sorted(views, key=lambda v: -_shared_depth(button, v))
+        mates = sorted(views, key=lambda v: (-_shared_depth(button, v), not shown[id(v)]))
         if mates and not has_checkable_items(mates[0]) and button.isEnabled():
             button.setEnabled(False)  # nothing listed: the dialog enables it again once something is
 
@@ -4459,24 +4638,46 @@ def unicode_label(code):
     return u"U+%04X" % code if code else u""
 
 
+def header_alignment():
+    """Every list's headers: centered (owner's report 141), over text and numbers alike."""
+    Qt = _qt()[0].Qt
+    return int(getattr(Qt, "AlignHCenter", 0x4) | getattr(Qt, "AlignVCenter", 0x80))
+
+
+def center_headers(view, columns=None):
+    """A list's header texts centered, the header's own default too (columns: those set by a tool, all
+    by default)."""
+    centered = header_alignment()
+    header = _header_of(view)
+    try:
+        header.setDefaultAlignment(centered)
+    except Exception:
+        pass
+    try:
+        count = int(_property(view, "columnCount"))
+    except Exception:
+        count = 0
+    try:
+        item = view.headerItem()  # (a tree widget's)
+        for column in (range(count) if columns is None else columns):
+            item.setTextAlignment(column, centered)
+    except Exception:
+        pass
+
+
 def fit_columns(tree, numbers=()):
-    """A list's columns as wide as their contents, its stretch column (table_layout) given the rest of
-    the width too, if any (with none, no column takes it: a column of numbers stretched across the rest
-    ran the window's width), the headers of the columns of numbers right-aligned as their cells are."""
-    QtCore = _qt()[0]
+    """A list's columns as wide as their contents (what each wants, see share_columns), the width then
+    shared out so the columns fill the list (share_columns), the headers centered (numbers: the columns
+    of numbers, whose cells the tool right-aligns; their headers are centered as every other's)."""
     try:
         tree.header().setStretchLastSection(False)
     except Exception:
         pass
     for column in range(_property(tree, "columnCount")):
         tree.resizeColumnToContents(column)
-    stretch_column(tree, measure=True)
-    try:
-        header = tree.headerItem()
-        for column in numbers:
-            header.setTextAlignment(column, int(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter))
-    except Exception:
-        pass
+    note_wants(tree)
+    center_headers(tree)
+    share_columns(tree, after_fit=True)
 
 
 TEXT_MARGIN = 4  # pixels: Qt's delegate keeps its text this far from the cell's edge, each side (at most)
@@ -4582,10 +4783,12 @@ def fit_rows(view, columns=None, most=None, settle=True):
             widths[column] = max(widths.get(column, 0), text_width(head_font, header.text(column)) + 2 * HEADER_MARGIN)
     except Exception:
         pass
+    wanted = {}
     for column in columns:
         width = widths.get(column)
         if width is None:
             continue
+        wanted[column] = width  # (its whole content: what it is given first once there is room, share_columns)
         cap = most[column] if isinstance(most, (list, tuple)) and column < len(most) else most
         if isinstance(cap, (int, float)) and not isinstance(cap, bool):
             width = min(width, int(cap))
@@ -4594,6 +4797,9 @@ def fit_rows(view, columns=None, most=None, settle=True):
             view.setColumnWidth(column, width)
         except Exception:
             pass
+    note_wants(view, wanted, dict((column, widths[column]) for column in wanted))
+    center_headers(view)
+    share_columns(view, after_fit=True)
     return widths
 
 
@@ -4627,8 +4833,7 @@ def refit(view):
         kept = json.loads(u"%s" % kept)
     except Exception:
         return False
-    fit_rows(view, kept["columns"], most=kept["most"], settle=False)
-    stretch_column(view, measure=True)
+    fit_rows(view, kept["columns"], most=kept["most"], settle=False)  # (its columns shared out again too)
     return True
 
 
@@ -4677,16 +4882,11 @@ def settle_fit(view):
 
 
 def align_numbers(view, columns):
-    """The columns of numbers right-aligned, their headers and their cells in every row of a tree widget
-    (Font Compare's kerning values sat at the left, unlike every other list's numbers)."""
+    """The columns of numbers right-aligned in every row of a tree widget (Font Compare's kerning values
+    sat at the left, unlike every other list's numbers); their headers centered, as every header is."""
     QtCore = _qt()[0]
     right = int(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
-    try:
-        header = view.headerItem()
-        for column in columns:
-            header.setTextAlignment(column, right)
-    except Exception:
-        pass
+    center_headers(view, columns)
     for item, _ in _tree_rows(view):
         for column in columns:
             try:
@@ -4848,16 +5048,103 @@ def flat_scroll_bars(dialog):
         pass
 
 
-def size_dialog(dialog):
-    """1000 by 1000 pixels, or the most the screen's free area allows."""
-    QtCore, QtGui = _qt()
-    width = height = DIALOG_SIZE
+SCREEN_MARGIN = (40, 60)  # pixels kept free across a screen's free area beside a window, and down (its title bar)
+SMALL_SCREEN = (1000, 700)  # pixels: on a screen whose free area is narrower or lower, windows scroll (window_layout)
+WINDOW_BODY_PROP = "freelabWindowBody"  # on the scroll area holding a window's content, and on that content
+
+
+def screen_area(widget=None):
+    """The free part (left, top, right, bottom) of the screen FontLab's main window is on (FreeLab's
+    windows open over it), else of the widget's screen; None where Qt cannot tell."""
+    QtGui = _qt()[1]
+    for source in (AutoKerningDialog.main_window(), widget):
+        if source is None:
+            continue
+        try:
+            rect = QtGui.QApplication.desktop().availableGeometry(source)
+            return (int(rect.left()), int(rect.top()), int(rect.right()) + 1, int(rect.bottom()) + 1)
+        except Exception:
+            continue
+    return None
+
+
+def size_dialog(dialog, width=DIALOG_SIZE, height=DIALOG_SIZE):
+    """1000 by 1000 pixels (or the size given), or the most the free area of FontLab's screen allows
+    (screen_area). Its lists then widen it to show their columns whole (widen_window)."""
+    area = screen_area(dialog)
+    if area is not None:
+        width = min(width, area[2] - area[0] - SCREEN_MARGIN[0])
+        height = min(height, area[3] - area[1] - SCREEN_MARGIN[1])
+    dialog.resize(max(1, int(width)), max(1, int(height)))
+
+
+def small_screen(area):
+    """Whether a screen's free area (screen_area) is too small for FreeLab's windows as laid out."""
+    return area is not None and (area[2] - area[0] < SMALL_SCREEN[0] or area[3] - area[1] < SMALL_SCREEN[1])
+
+
+def window_layout(dialog, scroll=None):
+    """The layout a tool fills its window with. On a small screen (small_screen: a 480p or a 720p
+    display), the window's content sits in a scroll area, which scrolls once the window is smaller than
+    its content: else Qt grows a window to its layout's least size as it shows it, past the screen's
+    edges, its bottom buttons out of reach, and nothing scrolls. scroll: True or False to choose."""
+    QtGui = _qt()[1]
+    if scroll is None:
+        scroll = small_screen(screen_area(dialog))
+    if not scroll:
+        return QtGui.QVBoxLayout(dialog)
+    outer = QtGui.QVBoxLayout(dialog)
+    outer.setContentsMargins(0, 0, 0, 0)
+    area = QtGui.QScrollArea(dialog)
+    area.setWidgetResizable(True)
+    area.setFrameShape(QtGui.QFrame.NoFrame)
+    body = QtGui.QWidget(area)  # (parented from the start: PythonQt deletes a parentless one when it likes)
+    for widget in (area, body):
+        widget.setProperty(WINDOW_BODY_PROP, True)  # (a click on it is a click beside the lists: blank_press)
+    layout = QtGui.QVBoxLayout(body)
+    area.setWidget(body)
+    outer.addWidget(area)
+    return layout
+
+
+def widen_window(view):
+    """A tool's window made wider when a list just fitted cannot show its columns at their fitted widths
+    (note_wants' fits) without scrolling sideways: by what it lacks, at most to the free area of
+    FontLab's screen (screen_area, SCREEN_MARGIN kept), around its center. Never narrower, and never
+    once the owner gave a window its size by hand (this window since it opened, or every window this
+    session: note_size), nor while it is maximized, minimized, or not shown. The pixels it grew by."""
     try:
-        area = QtGui.QApplication.desktop().availableGeometry(dialog)
-        width, height = min(width, area.width() - 40), min(height, area.height() - 60)
+        window = view.window()
+        if not (_property(window, "visible") and _property(view, "visible")):
+            return 0
+        if _property(window, "maximized") or _property(window, "minimized"):
+            return 0
+        owner = window_owner(window)
+        if owner is None or not _same(owner.dialog, window) or _windows().get("size") is not None:
+            return 0
+        size, opened = _size(window), getattr(owner, "opened_size", None)
+        if opened is not None and (abs(size[0] - opened[0]) > 2 or abs(size[1] - opened[1]) > 2):
+            return 0  # (resized by hand: the owner's size stays)
+        count = int(_property(view, "columnCount"))
+        fits = _wants_of(view).get("fits") or []
+        total = sum(fits[c] if c < len(fits) and fits[c] is not None else int(view.columnWidth(c))
+                    for c in range(count) if not view.isColumnHidden(c))
+        lack = total - int(_property(view.viewport(), "width"))
+        if lack <= 0:
+            return 0
+        area, frame = screen_area(window), _free_area(window)[1]
+        most = area[2] - area[0] - SCREEN_MARGIN[0] - frame[0] if area is not None else size[0] + lack
+        width = min(size[0] + lack, most)
+        if width <= size[0]:
+            return 0
+        x, y = centered_place(_xy(_property(window, "pos")), size, (width, size[1]), area, frame)
+        window.resize(width, size[1])
+        window.move(x, y)
+        if opened is not None:
+            owner.opened_size = (width, size[1])  # (FreeLab's doing, not a size given by hand)
+        return width - size[0]
     except Exception:
-        pass
-    dialog.resize(width, height)
+        return 0
 
 
 def room_below(window):
@@ -5194,7 +5481,9 @@ def table_colors(palette):
 def table_sheet(colors, kind="QTreeView", grid=True, check_size=CHECK_SIZE, mark=None):
     """The stylesheet of a FreeLab list (table_layout) in colors (table_colors), between its marks."""
     line = _css(colors["grid"], TABLE_GRID_ALPHA)
-    rules = [TABLE_SHEET_MARK]
+    # (no focus rectangle: the style framed the clicked cell of the selected row, a faint box around the
+    # current column's cell, which serves nothing in lists selected by the row, owner's report 114)
+    rules = [TABLE_SHEET_MARK, u"%s { outline: 0; }" % kind]
     if kind == "QTableView":  # (a table draws its grid itself; its cells take only the padding)
         rules.append(u"QTableView { gridline-color: %s; }" % (line if grid else u"transparent"))
         rules.append(u"QTableView::item { padding: %dpx %dpx; }" % TABLE_PADDING)
@@ -5271,53 +5560,265 @@ def _header_of(view):
         return None
 
 
-TABLE_CONTENT_PROP = "freelabTableContent"  # the stretch column's width for its contents (pixels)
+TABLE_WANTS_PROP = "freelabTableWants"  # what each column wants and was fitted to (note_wants), as JSON
+TABLE_SHARING_PROP = "freelabTableSharing"  # True while share_columns sets the widths (the header's signals are its own)
 TABLE_FILL_PROP = "freelabTableFill"  # the key of the list's fill watch (sys._freelab_table_fills)
 RESIZE_EVENT = 14  # QEvent::Resize
 TABLE_FILLS_KEPT = 256  # watches held (those of windows long closed go first)
+LEAST_COLUMN = 24  # pixels: no column is narrowed below this (or its header's text) to fit a list's width
+INTERACTIVE = 0  # QHeaderView::Interactive: a column the owner can drag (a tool's other modes are its own)
+
+
+def _wants_of(view):
+    try:
+        kept = view.property(TABLE_WANTS_PROP)
+        found = json.loads(u"%s" % kept) if kept is not None else {}
+        return found if isinstance(found, dict) else {}
+    except Exception:
+        return {}
+
+
+def note_wants(view, wants=None, fits=None):
+    """What a list's columns want (share_columns): wants {column: pixels}, its whole content (a long
+    glyph list's whole length too); fits {column: pixels}, the width a fit gave it (capped: what
+    widen_window makes room for). None: every column's width now, for both. A column not given keeps
+    what it had. Kept on the list as JSON (TABLE_WANTS_PROP)."""
+    try:
+        count = int(_property(view, "columnCount"))
+        if wants is None:
+            wants = dict((column, int(view.columnWidth(column))) for column in range(count))
+    except Exception:
+        return
+    fits = wants if fits is None else fits
+    kept = _wants_of(view)
+    merged = {}
+    for key, given in (("wants", wants), ("fits", fits)):
+        old = list(kept.get(key) or [])
+        merged[key] = [int(given[c]) if c in given and given[c] is not None else (old[c] if c < len(old) else None)
+                       for c in range(count)]
+    try:
+        view.setProperty(TABLE_WANTS_PROP, u"%s" % json.dumps(merged))
+    except Exception:
+        pass
+
+
+def _spread(amount, weights):
+    """amount in whole pixels, split in proportion to weights (the largest remainders take the odd
+    pixels, the first column first on a tie); nothing for no weight."""
+    total = sum(weights)
+    if amount <= 0 or total <= 0:
+        return [0] * len(weights)
+    exact = [amount * float(w) / total for w in weights]
+    parts = [int(math.floor(e)) for e in exact]
+    for index in sorted(range(len(weights)), key=lambda i: (parts[i] - exact[i], i))[:amount - sum(parts)]:
+        parts[index] += 1
+    return parts
+
+
+def _level_down(widths, wants, columns, need):
+    """need pixels taken from the columns' room above wants (what they want, or their least), the
+    roomiest first: brought down to the next roomiest, then both together, and so on. What is still
+    needed."""
+    while need > 0:
+        rooms = sorted(((widths[c] - wants[c], c) for c in columns if widths[c] - wants[c] > 0),
+                       key=lambda room: (-room[0], room[1]))
+        if not rooms:
+            break
+        top = rooms[0][0]
+        level = [c for room, c in rooms if room == top]
+        below = max([room for room, _ in rooms if room < top] or [0])
+        take = min(need, (top - below) * len(level))
+        for column, part in zip(level, _spread(take, [1] * len(level))):
+            widths[column] -= part
+        need -= take
+    return need
+
+
+def _fill_up(widths, wants, columns, give):
+    """give pixels to the columns cut short of what they want: each that the room left can show whole,
+    the one lacking least first (a column nearly whole is never left a few pixels short); then the rest
+    to those still cut (a long note, a glyph list), in proportion to what they lack. What is left."""
+    for lack, column in sorted((wants[c] - widths[c], c) for c in columns if wants[c] > widths[c]):
+        if lack <= give:
+            widths[column] += lack
+            give -= lack
+    still = [c for c in columns if wants[c] > widths[c]]
+    if give > 0 and still:
+        lacks = [wants[c] - widths[c] for c in still]
+        part = min(give, sum(lacks))
+        for column, share in zip(still, _spread(part, lacks)):
+            widths[column] += share
+        give -= part
+    return give
+
+
+def share_widths(widths, wants, leasts, room, held=None, stretch=None):
+    """New widths (pixels, None for a hidden column) for a list's columns, so that together they fill
+    room exactly: never a gap at the list's right (owner's report 142), and no sideways scrolling as
+    long as no column must go below its least (leasts) for it.
+    Narrower: each column's spare room first (its width past what it wants, wants), the roomiest first;
+    after a column was dragged (held, kept as dragged), then its neighbor (the next column, or the one
+    before for the last); then the column with the most above its least, brought down to the next, and
+    so on (in proportion, Font Check's short "+N" counts were cut to "+..." beside a long list of
+    languages, live 2026-11-17).
+    Wider: the columns cut short first (_fill_up: made whole, the one lacking least first, then the rest
+    to those still cut, in proportion); once none is cut, the stretch column takes the rest (a tool's
+    pair pictures or names), or every column in proportion to its width when none is named."""
+    new = list(widths)
+    shown = [c for c in range(len(new)) if new[c] is not None]
+    others = [c for c in shown if c != held]
+    if not others:
+        return new
+    wants = [new[c] if wants[c] is None else wants[c] for c in range(len(new))]
+    delta = int(room) - sum(new[c] for c in shown)
+    if delta > 0:
+        give = _fill_up(new, wants, others, delta)
+        if give > 0:
+            if stretch in others:
+                new[stretch] += give
+            else:
+                for column, part in zip(others, _spread(give, [max(1, new[c]) for c in others])):
+                    new[column] += part
+    elif delta < 0:
+        need = _level_down(new, wants, others, -delta)
+        if need > 0 and held is not None:
+            after = [c for c in others if c > held]
+            before = [c for c in others if c < held]
+            neighbor = min(after) if after else (max(before) if before else None)
+            if neighbor is not None:
+                take = min(need, max(0, new[neighbor] - leasts[neighbor]))
+                new[neighbor] -= take
+                need -= take
+        if need > 0:  # (the widest above its least first: a short count or name stays whole the longest)
+            _level_down(new, leasts, others, need)
+    return new
+
+
+def _header_text(view, column):
+    try:
+        return u"%s" % view.headerItem().text(column)  # (a tree widget's)
+    except Exception:
+        pass
+    try:
+        QtCore = _qt()[0]
+        return u"%s" % (view.model().headerData(column, QtCore.Qt.Horizontal, QtCore.Qt.DisplayRole) or u"")
+    except Exception:
+        return u""
+
+
+OWN_COLUMNS_PROP = "freelab_own_columns"  # on a list whose tool sizes its columns itself (Font Check's right-hand lists)
+
+
+def _sharing_left_to_tool(header, count, view=None):
+    """Whether a list's columns are left to Qt or its tool: the tool says so (OWN_COLUMNS_PROP), Qt's own
+    last-section stretch is asked for again, or a column is in another mode than Interactive (Font
+    Check's own Stretch and ResizeToContents)."""
+    try:
+        if view is not None and view.property(OWN_COLUMNS_PROP):
+            return True
+    except Exception:
+        pass
+    try:
+        if _property(header, "stretchLastSection"):
+            return True
+    except Exception:
+        pass
+    try:
+        return any(int(header.sectionResizeMode(column)) != INTERACTIVE for column in range(count))
+    except Exception:
+        return False
+
+
+def share_columns(view, held=None, after_fit=False):
+    """A FreeLab list's columns sharing its width (share_widths). What each wants is its whole content
+    (note_wants, from the last fit; or the width the owner dragged it to); the least each may be given is
+    its header's text (at least LEAST_COLUMN pixels), and the stretch column's whole content (its
+    pictures are never cut). Called when the list is resized (watch_table, on the next turn of the event
+    loop), when a column is dragged (held: that column, kept as dragged), and after each fit of the list
+    (after_fit: its window then widens to show it whole, widen_window). The widths set, or None (left to
+    Qt or the tool)."""
+    QtGui = _qt()[1]
+    header = _header_of(view)
+    if header is None:
+        return None
+    try:
+        count = int(_property(view, "columnCount"))
+        if not count or _sharing_left_to_tool(header, count, view):
+            return None
+        widths = [None if view.isColumnHidden(c) else int(view.columnWidth(c)) for c in range(count)]
+        room = int(_property(view.viewport(), "width"))
+    except Exception:
+        return None
+    if room <= 0:
+        return None  # (not laid out yet: its first resize shares it out)
+    kept = _wants_of(view).get("wants") or []
+    try:
+        metrics = QtGui.QFontMetrics(_property(header, "font"))
+    except Exception:
+        metrics = None
+    wants, leasts = [], []
+    for column in range(count):
+        want = kept[column] if column < len(kept) else None
+        if want is None and widths[column] is not None:
+            try:
+                want = int(view.sizeHintForColumn(column)) or widths[column]
+            except Exception:
+                want = widths[column]
+        heading = 0
+        if metrics is not None:
+            try:
+                heading = int(metrics.width(_header_text(view, column))) + 2 * HEADER_MARGIN
+            except Exception:
+                heading = 0
+        want = max(want, heading) if want is not None else None
+        wants.append(want)
+        leasts.append(min(want or 0, max(LEAST_COLUMN, heading)))
+    stretch = table_stretch(view)
+    if stretch is not None and stretch < count and wants[stretch] is not None:
+        leasts[stretch] = wants[stretch]  # (its pair pictures or names never cut: the list scrolls first)
+    new = share_widths(widths, wants, leasts, room, held, stretch)
+    try:
+        view.setProperty(TABLE_SHARING_PROP, True)
+        for column in range(count):
+            if new[column] is not None and new[column] != widths[column]:
+                view.setColumnWidth(column, max(0, int(new[column])))
+    except Exception:
+        pass
+    finally:
+        try:
+            view.setProperty(TABLE_SHARING_PROP, False)
+        except Exception:
+            pass
+    if after_fit:
+        widen_window(view)
+    return new
 
 
 def stretch_column(view, measure=False):
-    """The list's stretch column (table_layout) given the width the other columns leave, never less
-    than its contents need (measure: as wide as they are now, after a fill): a narrow window scrolls
-    rather than squeezing it, and every column can still be dragged. In Qt's own Stretch mode, the
-    pair pictures and names shrank to nothing in a narrow window, and the column could not be resized
-    by hand. Its viewport's resizes give it the room anew (watch_stretch). None named: the columns are
-    left as they are (Qt stretches the last one)."""
-    stretch = table_stretch(view)
-    header = _header_of(view)
-    if stretch is None or header is None:
-        return None
-    try:
-        header.setStretchLastSection(False)
-        if measure:
-            view.setProperty(TABLE_CONTENT_PROP, int(view.columnWidth(stretch)))
-        content = view.property(TABLE_CONTENT_PROP)
-        content = int(content) if content is not None else int(view.columnWidth(stretch))
-        others = sum(int(view.columnWidth(column)) for column in range(_property(view, "columnCount"))
-                     if column != stretch and not view.isColumnHidden(column))
-        room = int(_property(view.viewport(), "width"))
-        width = max(content, room - others)
-        if width != int(view.columnWidth(stretch)):
-            view.setColumnWidth(stretch, width)
-        return width
-    except Exception:
-        return None
+    """The list's columns shared out again (share_columns; the name tools called before). measure: after
+    a fill, what the columns want noted first (their widths now), unless a fit noted it already
+    (fit_rows: the widths now are shared out, past what the columns want)."""
+    if measure and not _wants_of(view).get("wants"):
+        note_wants(view)
+    return share_columns(view, after_fit=measure)
 
 
-def watch_stretch(view):
-    """The list's stretch column given its room again as the list is resized (stretch_column), by a
-    watch on its viewport: parented to the list (Qt deletes it with it, never PythonQt at whatever
-    moment Python's collector picks) and held in sys (PythonQt drops a Python override no one holds). The
-    filter only starts the watch's own timer: the widths change on the next turn of the event loop,
-    never synchronously inside Qt's resizing (where setting a width re-enters the layout)."""
+def watch_table(view):
+    """The list's columns shared out again as the list is resized and as the owner drags a column
+    (share_columns), by a watch on its viewport and its header: parented to the list (Qt deletes it with
+    it, never PythonQt at whatever moment Python's collector picks) and held in sys (PythonQt drops a
+    Python override or a slot no one holds). The filter and the header's signal only start the watch's
+    own timer: the widths change on the next turn of the event loop, never synchronously inside Qt's
+    resizing (where setting a width re-enters the layout). A column dragged keeps the width given it,
+    which is what that column wants from then on, until the list is fitted again."""
     QtCore = _qt()[0]
-    modules, name, own = sys.modules, __name__, stretch_column
+    modules, name, own, own_note = sys.modules, __name__, share_columns, note_wants
+    dragged = [None]
     try:
         if view.property(TABLE_FILL_PROP) is not None:
             return None  # (watched already)
 
-        class StretchWatch(QtCore.QTimer):  # PythonQt has no QObject to subclass; a timer will do
+        class TableWatch(QtCore.QTimer):  # PythonQt has no QObject to subclass; a timer will do
             def eventFilter(self, obj, event):
                 try:
                     if event.type() == RESIZE_EVENT:
@@ -5326,13 +5827,36 @@ def watch_stretch(view):
                     pass  # an event filter must never raise
                 return False
 
-        watch = StretchWatch(view)
+        watch = TableWatch(view)
+
+        def share():  # (no globals below: a reload empties them)
+            try:
+                held, dragged[0] = dragged[0], None
+                (getattr(modules.get(name), "share_columns", None) or own)(view, held)
+            except Exception:
+                pass  # a slot must not raise
+
+        def resized(column, old, new):
+            try:
+                if view.property(TABLE_SHARING_PROP):
+                    return  # (share_columns' own widths)
+                dragged[0] = int(column)
+                (getattr(modules.get(name), "note_wants", None) or own_note)(view, {int(column): int(new)})
+                watch.start()
+            except Exception:
+                pass  # a slot must not raise
+
         watch.setSingleShot(True)
         watch.setInterval(0)
-        watch.connect("timeout()", lambda: (getattr(modules.get(name), "stretch_column", None) or own)(view))
+        watch.connect("timeout()", share)
+        watch.freelab_slots = (share, resized)  # (held: PythonQt drops a slot no Python object holds)
         view.viewport().installEventFilter(watch)
     except Exception:
         return None
+    try:
+        _header_of(view).connect("sectionResized(int,int,int)", resized)
+    except Exception:
+        pass  # (no header to drag: the list's resizes are still heard)
     held = getattr(sys, "_freelab_table_fills", None)
     if held is None:
         held = sys._freelab_table_fills = []
@@ -5345,25 +5869,30 @@ def watch_stretch(view):
     return watch
 
 
+def watch_stretch(view):
+    """watch_table (the name tools called before)."""
+    return watch_table(view)
+
+
 def set_stretch(view, column):
     """A FreeLab list's stretch column named after it was laid out (table_layout's stretch): the column
-    given the room the others leave, never less than its contents (stretch_column)."""
+    that takes the room left once every column shows its content whole, and is never cut (share_columns)."""
     try:
         view.setProperty(TABLE_PROP, int(column))
         _header_of(view).setStretchLastSection(False)
     except Exception:
         return
-    watch_stretch(view)
+    watch_table(view)
 
 
 def table_layout(view, stretch=None, numbers=(), grid=True):
     """FreeLab's one layout of a list of rows (tree, table, or list widget; see TABLE_PROP above):
     left alone by dark mode, grid lines (none: grid False), room around each cell's content, check
-    boxes and selected rows in the palette's selection colors, the columns filling the width (stretch:
-    the column given the rest, never less than its contents, see stretch_column; None: Qt's last one,
-    as Qt stretches it), the headers of the columns of numbers
-    right-aligned as their cells are. Returns the view."""
-    QtCore = _qt()[0]
+    boxes and selected rows in the palette's selection colors, no focus rectangle, headers centered,
+    the columns filling the width (share_columns; stretch: the column given what is left once every
+    column shows its content, never cut; None: every column in proportion). numbers: the columns of
+    numbers (the tool right-aligns their cells; their headers are centered as every other's). Returns
+    the view."""
     try:
         view.setProperty(LEAVE_ALONE_PROP, True)  # (the whole list: its header and scroll bars too)
         view.setProperty(TABLE_PROP, -1 if stretch is None else int(stretch))
@@ -5371,19 +5900,14 @@ def table_layout(view, stretch=None, numbers=(), grid=True):
     except Exception:
         pass
     style_table(view)
-    if stretch is not None:
+    header = _header_of(view)
+    if header is not None:
         try:
-            _header_of(view).setStretchLastSection(False)
+            header.setStretchLastSection(False)  # (share_columns fills the width: no gap, nothing squeezed by Qt)
         except Exception:
             pass
-        watch_stretch(view)
-    if numbers:
-        try:
-            header = view.headerItem()
-            for column in numbers:
-                header.setTextAlignment(column, int(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter))
-        except Exception:
-            pass
+        center_headers(view)
+        watch_table(view)
     return view
 
 
@@ -5432,6 +5956,86 @@ def checks_of(items, checked):
         if some_on and some_off:
             break
     return some_on, some_off
+
+
+def row_hidden(item):
+    """Whether a list's row is out of sight: hidden itself (filtered out), or inside a group that is
+    closed or hidden (scrolled out of view does not count)."""
+    try:
+        if item.isHidden():
+            return True
+        parent = item.parent()
+        while parent is not None:
+            if parent.isHidden() or not parent.isExpanded():
+                return True
+            parent = parent.parent()
+    except Exception:
+        pass
+    return False
+
+
+def check_line(command, checked, unchecked, hidden, noun=u"row", many=None, hidden_text=(u"hidden", u"hidden")):
+    """The log line of a button that checks or unchecks many rows (check_rows): "*Check all* checked 12
+    pairs (3 of them hidden)." command: the button's name; checked, unchecked: the rows it changed each
+    way; hidden: how many of those were out of sight (row_hidden), said so; hidden_text: how they were
+    hidden, for one and for many ("in a closed group", "in closed groups")."""
+    if not checked and not unchecked:
+        return u"%s changed nothing." % i(command)
+    parts = []
+    if checked:
+        parts.append(u"checked %s" % b(counted(checked, noun, many)))
+    if unchecked:
+        parts.append(u"unchecked %s" % (b(counted(unchecked, noun, many)) if not checked else b(unchecked)))
+    changed = checked + unchecked
+    note = u""
+    if hidden:
+        if changed == 1:
+            note = u" (%s)" % hidden_text[0]
+        elif hidden == changed:
+            note = u" (all of them %s)" % hidden_text[1]
+        else:
+            note = u" (%d of them %s)" % (hidden, hidden_text[0] if hidden == 1 else hidden_text[1])
+    return u"%s %s%s." % (i(command), u" and ".join(parts), note)
+
+
+def check_rows(items, wanted, log=None, command=u"Check all", noun=u"row", many=None,
+               hidden_text=(u"hidden", u"hidden")):
+    """What Check all, Check none, and every button that checks or unchecks many rows share: each
+    checkable row of items (QTreeWidgetItem or QListWidgetItem, column 0) set to wanted (True, False, or
+    a function of the item giving either, or None to leave it), and the log told how many it checked
+    and unchecked, and how many of those were out of sight (row_hidden: in a closed group, or filtered
+    out), as check_line words it (owner's report 118: these buttons left no line). Returns (checked,
+    unchecked, hidden). A tool calls it from its button's slot, then updates its buttons as before."""
+    QtCore = _qt()[0]
+    on, off = QtCore.Qt.Checked, QtCore.Qt.Unchecked
+    checked = unchecked = hidden = 0
+    for item in items:
+        try:
+            want = wanted(item) if callable(wanted) else wanted
+            if want is None:
+                continue
+            try:
+                state = item.checkState(0)  # (a tree's row)
+                tree_row = True
+            except Exception:
+                state, tree_row = item.checkState(), False  # (a list widget's)
+            if int(state) == int(on if want else off):
+                continue
+            if tree_row:
+                item.setCheckState(0, on if want else off)
+            else:
+                item.setCheckState(on if want else off)
+        except Exception:
+            continue
+        if want:
+            checked += 1
+        else:
+            unchecked += 1
+        if row_hidden(item):
+            hidden += 1
+    if log is not None:
+        log.add(check_line(command, checked, unchecked, hidden, noun, many, hidden_text))
+    return checked, unchecked, hidden
 
 
 HISTORY_POLL_MS = 700  # how often an open dialog looks whether the font's History moved
@@ -6750,7 +7354,7 @@ class AutoKerningDialog(object):
         dialog.setWindowTitle("FreeLab Auto Kerning")
         dialog.setWhatsThis(HELP)
         size_dialog(dialog)
-        layout = QtGui.QVBoxLayout(dialog)
+        layout = window_layout(dialog)  # (its content scrolls on a small screen)
         self.status = status_label(self.font_line())
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
@@ -7464,11 +8068,12 @@ class AutoKerningDialog(object):
                 self.suggestions[row].checked = item.checkState(0) == QtCore.Qt.Checked
 
     def check_all(self, on):
-        """Check every new pair, or uncheck everything; pairs the font kerns are checked one by one."""
-        QtCore, QtGui = _qt()
-        for row in range(min(self.row_count(), len(self.suggestions))):
-            checked = on and not self.suggestions[row].current
-            self.row_item(row).setCheckState(0, QtCore.Qt.Checked if checked else QtCore.Qt.Unchecked)
+        """Check every new pair, or uncheck everything; pairs the font kerns are checked one by one. The
+        log says how many it changed (check_rows)."""
+        items = [self.row_item(row) for row in range(min(self.row_count(), len(self.suggestions)))]
+        check_rows([item for item in items if item is not None],
+                   lambda item: on and not self.suggestions[self.row_of(item)].current, self.log,
+                   u"Check new pairs" if on else u"Check none", u"pair")
         self.update_buttons()
 
     def row_checked(self, row):
@@ -7490,7 +8095,9 @@ class AutoKerningDialog(object):
         checked = [self.row_checked(row) for row in rows]
         enable(self.all_button, any(not on and not self.suggestions[row].current for row, on in zip(rows, checked)))
         enable(self.none_button, any(checked))
-        enable(self.apply_button, any(checked))
+        # (only while a checked pair would get a value it has not: once written, its checks stay and it
+        # grays out; clicked again and again, it logged "Wrote 0 entries for 0 pairs", owner's report 151)
+        enable(self.apply_button, self.writes_pending([self.suggestions[row] for row, on in zip(rows, checked) if on]))
         enable(self.restore_button, self.edited())
         enable(self.classes_button, self.package is not None)
         enable(self.check_button, self.package is not None)
@@ -7818,40 +8425,65 @@ class AutoKerningDialog(object):
         painter.setPen(faint)
         painter.drawText(QtCore.QRect(left, top + 2 * line, PREVIEW_TEXT_WIDTH, line), flags, u"Ctrl+%d" % key)
 
-    def write(self):
-        """Each checked pair's value, written where it applies (FontKerning.target). Pairs sharing an
-        entry (a class pair) with other checked pairs get the value of the most common of them, even
-        when that one keeps its current value; ties go to the first in alphabetical order."""
-        QtCore, QtGui = _qt()
-        if self.busy:
-            return
-        self.harvest_checks()
+    def planned_writes(self, kerning, checked):
+        """What Write checked pairs would write now for the checked suggestions, on kerning (a
+        FontKerning): ([(entry, value, remove, its pairs)] for each entry whose value changes, the
+        number of pairs that take a commoner pair's value). Pairs sharing an entry (a class pair) get
+        the value of the most common of them, even when that one keeps its current value (the entry is
+        then left as it is); ties go to the first in alphabetical order."""
         source = self.source_key()
-        kerning = FontKerning(self.package.kerning(self.master))
         plans = {}
-        for s in self.suggestions:
-            if not s.checked:
-                continue
+        for s in checked:
             value = s.to_write(source)
             if value is None:
                 continue
             target = kerning.target(*s.key)
             plans.setdefault(target[0], []).append(((self.rank(s), s.left_char, s.right_char), s, value, target[1]))
-        shared = classes = entries = 0
+        todo, shared = [], 0
+        for entry, wanted in sorted(plans.items(), key=lambda plan: plan[0]):
+            wanted.sort(key=lambda plan: plan[0])
+            _, first, value, remove = wanted[0]
+            if len(set(plan[2] for plan in wanted)) > 1:
+                shared += len(wanted) - 1
+            if value != first.current:  # (else the commonest pair keeps its value: the entry stays as it is)
+                todo.append((entry, value, remove, [plan[1] for plan in wanted]))
+        return todo, shared
+
+    def writes_pending(self, checked):
+        """Whether Write checked pairs would change anything for these checked suggestions (planned_writes,
+        on the font's kerning as last read; without it, whether one's value differs from its current)."""
+        if not checked or self.busy:
+            return False
+        if self.font_kerning is not None:
+            try:
+                return bool(self.planned_writes(self.font_kerning, checked)[0])
+            except Exception:
+                pass
+        source = self.source_key()
+        return any(s.to_write(source) is not None and s.to_write(source) != s.current for s in checked)
+
+    def write(self):
+        """Each checked pair's value, written where it applies (FontKerning.target), as planned_writes
+        plans it. Nothing to write (each entry has its value already): said so, nothing recorded."""
+        QtCore, QtGui = _qt()
+        if self.busy:
+            return
+        self.harvest_checks()
+        kerning = FontKerning(self.package.kerning(self.master))
+        todo, shared = self.planned_writes(kerning, [s for s in self.suggestions if s.checked])
+        if not todo:
+            self.log.add(u"Nothing was written: every checked pair has the value it would be given already.")
+            self.update_buttons()
+            return
+        classes = entries = 0
         written, error = [], None
         try:
-            for entry, wanted in sorted(plans.items()):
-                wanted.sort(key=lambda plan: plan[0])
-                _, first, value, remove = wanted[0]
-                if len(set(plan[2] for plan in wanted)) > 1:
-                    shared += len(wanted) - 1
-                if value == first.current:
-                    continue  # the commonest pair keeps its value: the entry stays as it is
+            for entry, value, remove, pairs in todo:
                 kerning.write(entry, value, remove)
                 entries += 1
                 if kerning.reach(entry) > 1:
                     classes += 1
-                written.extend(plan[1] for plan in wanted)
+                written.extend(pairs)
         except Exception as exc:  # what was written stays written, and is reported
             error = exc
         status = self.after_writing(self.package)
@@ -7870,7 +8502,8 @@ class AutoKerningDialog(object):
         lines = [html(u"%s shared an entry with a commoner pair and took its value." % counted(shared, u"pair"))] if shared else []
         self.update_picked()
         self.fill_table()
-        self.log.add(u" ".join([first + u"."] + lines), "done" if entries else "info")
+        if entries:  # (none: the error below says why)
+            self.log.add(u" ".join([first + u"."] + lines), "done")
         if error is not None:
             self.log.add(u"Stopped by an error: %s" % html(error), "error")
         status.report(self.log)
@@ -7917,7 +8550,7 @@ class ClassDialog(object):
         dialog.setWindowTitle("FreeLab Kerning Classes")
         dialog.setWhatsThis(CLASS_HELP)
         size_dialog(dialog)
-        layout = QtGui.QVBoxLayout(dialog)
+        layout = window_layout(dialog)  # (its content scrolls on a small screen)
         self.status = status_label()  # (names in it made safe by html())
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
@@ -8074,13 +8707,14 @@ class ClassDialog(object):
         # ran 1,664 pixels wide in a 964-pixel view (Tinos, live); a row's tooltip holds the whole list
         fit_rows(self.tree, range(len(CLASS_COLUMNS) - 1), most=TEXT_COLUMN_MOST)
         plural = lambda count, one, many: u"%s %s" % (b(count), one if count == 1 else many)
-        self.status.setText(u"%s, master %s: %s, %s, %s, %s. Nothing is changed until you "
-                            u"create them." % (b(self.package.tfn), b(self.master),
-                                               plural(counts.get("new", 0), u"new class", u"new classes"),
-                                               plural(counts.get("add", 0), u"class to extend", u"classes to extend"),
-                                               plural(counts.get("same", 0), u"the font has already", u"the font has already"),
-                                               plural(counts.get("overlap", 0), u"left as it is (it overlaps the font's classes)",
-                                                      u"left as they are (they overlap the font's classes)")))
+        self.summary = (u"%s, master %s: %s, %s, %s, %s. Nothing is changed until you "
+                        u"create them." % (b(self.package.tfn), b(self.master),
+                                           plural(counts.get("new", 0), u"new class", u"new classes"),
+                                           plural(counts.get("add", 0), u"class to extend", u"classes to extend"),
+                                           plural(counts.get("same", 0), u"the font has already", u"the font has already"),
+                                           plural(counts.get("overlap", 0), u"left as it is (it overlaps the font's classes)",
+                                                  u"left as they are (they overlap the font's classes)")))
+        self.status.setText(self.summary)
         self.apply_button.setEnabled(bool(counts.get("new") or counts.get("add")))
         for button in (self.all_button, self.none_button):  # (grayed by update_states while the list was empty)
             button.setEnabled(True)
@@ -8196,10 +8830,15 @@ class ClassDialog(object):
         self.status.setText(u" ".join(notes) + u" " + self.status.text)
 
     def check_all(self, on):
+        """Check all or Check none over the rows that can be made, the window's status line saying how many
+        it changed (check_rows; this window has no log), the rows of closed sections included."""
         QtCore, QtGui = _qt()
-        for item in self.items() + self.items(exceptions=True):
-            if item.flags() & QtCore.Qt.ItemIsUserCheckable:
-                item.setCheckState(0, QtCore.Qt.Checked if on else QtCore.Qt.Unchecked)
+        items = [item for item in self.items() + self.items(exceptions=True)
+                 if int(item.flags()) & int(QtCore.Qt.ItemIsUserCheckable)]
+        counts = check_rows(items, on, command=u"Check all" if on else u"Check none")
+        line = check_line(u"Check all" if on else u"Check none", counts[0], counts[1], counts[2],
+                          hidden_text=(u"in a closed section", u"in closed sections"))
+        self.status.setText(line + u" " + (getattr(self, "summary", u"") or u""))
 
     def apply(self):
         QtCore, QtGui = _qt()

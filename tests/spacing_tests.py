@@ -2,6 +2,7 @@
 
 from __future__ import absolute_import, division, print_function
 
+import io
 import os
 import sys
 import unittest
@@ -66,6 +67,95 @@ class OverhangTests(unittest.TestCase):
     def test_an_accent_over_the_letter_never_overhangs(self):
         acute = _Layer(500, (40, 460), (200, 300))
         self.assertEqual(sp.mark_overhang(acute, -20, -40), 0.0)
+
+    def test_a_zero_width_mark_is_placed_by_its_components_transform(self):
+        # (owner's images 144/146: ucircumflexbelow was named as sticking out, its mark well inside its 451
+        # units: the mark's box was read in its own units, where a zero-width mark lies left of its origin)
+        class Rect(object):
+            def __init__(self, left, right):
+                self.l, self.r = left, right
+
+            def left(self):
+                return self.l
+
+            def right(self):
+                return self.r
+
+            def top(self):
+                return -230.0
+
+            def bottom(self):
+                return -120.0
+
+        class Transform(object):
+            def __init__(self, dx, scale=1.0):
+                self.x, self.scale = dx, scale
+
+            def m11(self):
+                return self.scale
+
+            def m21(self):
+                return 0.0
+
+            def dx(self):
+                return self.x
+
+        class Component(object):
+            isComponent = True
+
+            def __init__(self, name, dx, scale=1.0):
+                self.shapeData = type("Data", (), {"componentGlyph": name})()
+                self.transform = Transform(dx, scale)
+                self.boundingBox = Rect(-300, -100)  # (in its own units, as FontLab may give it)
+
+        layer = _Layer(451, (40, 410))
+        layer.shapes.append(Component("circumflexbelowcomb", 425))
+        boxes = {"circumflexbelowcomb": Rect(-300, -100)}
+        self.assertEqual(sp.mark_overhang(layer, -12, -24, boxes.get), 0.0, "placed at 125 to 325: inside")
+        self.assertGreater(sp.mark_overhang(layer, -12, -24), 0.0, "read in its own units: the false warning")
+        self.assertEqual(sp.shape_span(layer.shapes[1], boxes.get), (125.0, 325.0))
+        mirrored = Component("circumflexbelowcomb", 100, scale=-1.0)
+        self.assertEqual(sp.shape_span(mirrored, boxes.get), (200.0, 400.0), "a mirrored mark's corners mapped")
+        self.assertEqual(sp.shape_span(mirrored, lambda name: None), (-300.0, -100.0), "unreadable: its own box")
+        self.assertEqual(sp.shape_span(_Shape(10, 20), boxes.get), (10.0, 20.0), "a drawn shape: its own box")
+
+    def test_a_glyph_named_in_the_log_opens_between_its_references(self):
+        # (the owner could not see the diacritics the log named: each opened alone)
+        opened = []
+        dialog = sp.AutoSpacingDialog.__new__(sp.AutoSpacingDialog)
+
+        class Fg(object):
+            unicode, unicodes = 0x1E77, [0x1E77]
+
+        class Glyph(object):
+            isNull, fgGlyph = False, Fg()
+
+            def __init__(self, name):
+                self.name = name
+
+        class Package(object):
+            @staticmethod
+            def findName(name):
+                return Glyph(name) if name in (u"ucircumflexbelow", u"n", u"o") else None
+
+            @staticmethod
+            def findUnicode(code):
+                return Glyph({0x6E: u"n", 0x6F: u"o"}.get(code, u"x")) if code in (0x6E, 0x6F) else None
+
+        class Ak(object):
+            pass
+
+        for name in ("glyph_of_link", "main_code", "unichr_", "category", "script_of", "font_glyphs", "html",
+                     "linked_glyph_name", "linked_code", "GLYPH_NAME_LINK"):
+            setattr(Ak, name, getattr(ak, name) if not callable(getattr(ak, name)) else staticmethod(getattr(ak, name)))
+        Ak.show_in_glyph_window = staticmethod(lambda fontlab, text: opened.append(text))
+        dialog.ak, dialog.package, dialog.fontlab = Ak(), Package(), None
+        dialog.kind_of = lambda ch: None
+        self.assertIsNone(dialog.log_link(u"glyphname:ucircumflexbelow"))
+        self.assertEqual(opened, [u"/n/n/ucircumflexbelow/n/n/space/o/o/ucircumflexbelow/o/o"])
+        self.assertFalse(dialog.log_link(u"glyphname:gone"), "a glyph the font no longer has: left to the log")
+        with io.open(sp.__file__.replace(".pyc", ".py"), encoding="utf-8") as handle:
+            self.assertIn(u"self.log.link_handler = self.log_link", handle.read())
 
 
 class SpacingTests(unittest.TestCase):
@@ -235,6 +325,54 @@ class TableTests(unittest.TestCase):
         dialog.spaced = [u"A"]
         dialog.font_changed()
         self.assertEqual((runs, dialog.spaced), ([1], []), "measured anew (or the no-font line), nothing left to check")
+
+
+class ChoiceAndCheckTests(unittest.TestCase):
+    def source(self):
+        import io
+        with io.open(sp.__file__.replace(".pyc", ".py"), encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_the_dropdown_starts_on_everything(self):
+        # (owner's report 143)
+        self.assertEqual(sp.GROUPS[sp.default_group()], ("everything", "Everything"))
+        source = self.source()
+        self.assertLess(source.index(u"self.group.setCurrentIndex(default_group())"),
+                        source.index(u'self.group.connect("currentIndexChanged(int)"'), "set before it is heard")
+
+    def test_check_all_and_check_none_say_how_many(self):
+        # (owner's report 118: these buttons left no line in the log)
+        class Item(object):
+            def __init__(self, state):
+                self.state = state
+
+            def checkState(self, column):
+                return self.state
+
+            def setCheckState(self, column, state):
+                self.state = state
+
+            def isHidden(self):
+                return False
+
+            def parent(self):
+                return None
+
+        items = [Item(0), Item(2), Item(0)]
+        dialog = sp.AutoSpacingDialog.__new__(sp.AutoSpacingDialog)
+        dialog.ak, logged = ak, []
+        dialog.tree = type("Tree", (), {"topLevelItemCount": 3, "topLevelItem": lambda tree, row: items[row]})()
+        dialog.log = type("Log", (), {"add": lambda log, text, level="info": logged.append(text)})()
+        dialog.update_buttons = lambda: None
+        old = ak._qt
+        ak._qt = lambda: (type("Core", (), {"Qt": type("Qt", (), {"Checked": 2, "Unchecked": 0})}), None)
+        self.addCleanup(lambda: setattr(ak, "_qt", old))
+        dialog.check_all(True)
+        self.assertEqual(logged, [u"<i>Check all</i> checked <b>2 glyphs</b>."])
+        dialog.check_all(False)
+        self.assertEqual(logged[-1], u"<i>Check none</i> unchecked <b>3 glyphs</b>.")
+        self.assertEqual([item.state for item in items], [0, 0, 0])
+        self.assertIn(u"layout = self.ak.window_layout(dialog)", self.source(), "its window scrolls on a small screen")
 
 
 class HistoryFailureTests(unittest.TestCase):

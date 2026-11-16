@@ -993,9 +993,11 @@ class AnchorPageTests(unittest.TestCase):
         page.harvest = page.run = lambda keep_script=False: None
         page.code_box = Stub(checked=False)
         page.writes = []  # (what the owner was told of the write: begin, end)
+        page.recorded = []  # (the glyphs recorded before the write, with the font)
         page.owner = Stub(current_font=lambda: package, package_key=lambda p: (u"a.vfc", 1) if p is not None else None,
                           log=Stub(add=lambda text, kind="info": None),
-                          begin_write=lambda p: page.writes.append("begin") or True,  # (True: the font recorded)
+                          begin_write=lambda p, glyphs=(): page.writes.append("begin") or page.recorded.extend(glyphs)
+                          or True,  # (True: the font recorded)
                           end_write=lambda p, wrote=True: page.writes.append("end" if wrote else "end, nothing"))
         page.ak = Stub(notify_changed=lambda *args: None, b=lambda text: u"%s" % text, html=lambda text: u"%s" % text)
         page.fontlab = Stub(flPinPoint=lambda point: Anchor(point))
@@ -1021,6 +1023,17 @@ class AnchorPageTests(unittest.TestCase):
         again = page.plan_for("Regular")[0][0]
         again.adjust = g.adjust  # (as the refresh carries it)
         self.assertFalse(again.pending(), "nothing more to write")
+
+    def test_the_glyphs_given_anchors_are_recorded_before_the_write(self):
+        """Items 139 and 140: the step records the glyphs it gave anchors (i, j, ...), which had no state of
+        their own before it; undoing it made FontLab print "We have a problem with the component 'dotlessi'
+        in glyph 'i:Regular'". They are recorded with the font before the write now."""
+        page, built = self.page({"Regular": {"top": (250, 600), "bottom": (250, 0), "ogonek": (460, 0)}})
+        g = page.glyphs[0]
+        g.adjust, g.checked = {"top": [10, 0]}, True
+        self.write(page)
+        self.assertEqual(len(page.recorded), 1)
+        self.assertIs(page.recorded[0], page.package.findName("a"))
 
     def test_anchors_another_master_lacks(self):
         page, built = self.page({"Regular": {"top": (250, 600), "bottom": (250, 0), "ogonek": (460, 0)}, "Bold": {}})
@@ -1122,6 +1135,32 @@ class AnchorPageTests(unittest.TestCase):
         self.assertEqual(page.reference_text(found["F"]), text(0x0046, 0x0323, 0x0302), "below and above, on one letter")
         del found["F"].anchors["bottom"]  # (a letter left without that side)
         self.assertEqual(page.reference_text(found["F"]), text(0x0046, 0x0302), "no mark below a letter with no anchor for it")
+
+    def test_a_mark_drawn_on_the_other_side_is_referenced_by_its_twin_there(self):
+        """The owner's report of 2026-11-16 (Bellefair): uni0326.salt, a comma drawn above, was drawn in the
+        reference as U+0326, a comma below, and o's reference showed two commas under it ("o;") while the
+        preview put one above."""
+        self.assertEqual(ac.reference_code(0x0326, "top"), 0x0312, "a comma below drawn above: the turned comma above")
+        self.assertEqual(ac.reference_code(0x0326, "bottom"), 0x0326)
+        self.assertEqual(ac.reference_code(0x0302, "bottom"), 0x032D, "a circumflex drawn below: the circumflex below")
+        self.assertEqual(ac.reference_code(0x0328, "bottom"), 0x0328, "the ogonek, attached below, as it is")
+        self.assertEqual(ac.reference_code(0x031B, "top"), 0x031B, "the horn, at the top right, as it is")
+        self.assertEqual(ac.reference_code(0x0E38, "bottom"), 0x0E38, "another script's mark keeps its own")
+        self.assertIsNone(ac.reference_code(0x0335, "bottom"), "no twin: none drawn")
+        inks = {"o": ac.Ink(40, -10, 460, 480, advance=500), "uni0326": ac.Ink(-60, -220, 0, -40),
+                "uni0326.salt": ac.Ink(-60, 520, 0, 700)}
+        page = ac.AnchorPage.__new__(ac.AnchorPage)
+        page.glyphs = ac.plan_anchors([("o", 0x6F, "base", inks["o"], {}), ("uni0326", 0x0326, "mark", inks["uni0326"], {}),
+                                       ("uni0326.salt", 0x0326, "mark", inks["uni0326.salt"], {})],
+                                      {}, "latin", 1000, 500)
+        page.package, page.scripts, page.script_box = Stub(upm=1000), ["latin"], Stub(currentIndex=0)
+        found = dict((g.name, g) for g in page.glyphs)
+        self.assertEqual((found["uni0326"].side, found["uni0326.salt"].side), ("bottom", "top"))
+        self.assertEqual(page.reference_text(found["o"]), text(0x006F, 0x0326, 0x0312, 0x0312),
+                         "o with the comma below, the comma above as Unicode has it, and a second on it (as the preview)")
+        self.assertTrue(page.reference_text(found["uni0326.salt"]).startswith(text(0x006F, 0x0312)),
+                        "the mark itself above its letter, as the preview draws it")
+        self.assertTrue(page.reference_text(found["uni0326"]).startswith(text(0x006F, 0x0326, 0x0020)))
 
     def test_stacked_examples(self):
         page, found = self.latin_page([("e", 0x65, "base", {}), ("B", 0x42, "base", {})] + self.MARKS)
@@ -2197,8 +2236,10 @@ class HandedOverTests(unittest.TestCase):
         dialog.ak = Stub(b=lambda value: u"<b>%s</b>" % value, html=lambda value: u"%s" % value,
                          glyph_links=lambda chars: u"[%s]" % u" ".join(chars))
         dialog.log = Stub(add=lambda line, level="info": lines.append((level, line)))
+        # A combining mark stands on a dotted circle: alone, it was drawn on the parenthesis, the top line
+        # reading "the font has it already ()" (the owner's report of 2026-11-16)
         self.assertEqual(dialog.left_out_text(), u" The glyph Font Check handed over is not listed: the font has it "
-                                                 u"already (<b>%s</b>)." % self.MACRON_BELOW)
+                                                 u"already (<b>%s%s</b>)." % (ac.unichr_(0x25CC), self.MACRON_BELOW))
         dialog.say_left_out()
         dialog.say_left_out()
         self.assertEqual(lines, [("warning", u"The glyph Font Check handed over is not listed: the font has it already "
@@ -2207,6 +2248,31 @@ class HandedOverTests(unittest.TestCase):
         self.assertEqual(dialog.left_out_text(), u"")
         dialog.say_left_out()
         self.assertEqual(len(lines), 1)
+
+    def test_a_glyph_built_here_is_not_said_to_be_in_the_font_already(self):
+        """The owner's report of 2026-11-16: just after Built 1 glyph (a combining mark, which has no row once
+        the font has it), the top line said "the font has it already", read as Font Check having handed over a
+        glyph the font had."""
+        font = ac.Font([u"a", u"uni0331"], [(u"a", 0x61), (u"uni0331", 0x0331)])
+        given = [self.MACRON_BELOW]
+        self.assertEqual(ac.left_out_given(given, [], font), [("have", given)])
+        self.assertEqual(ac.left_out_given(given, [], font, built=set(given)), [("built", given)])
+        self.assertEqual(ac.left_out_sentence(1, [("built", given)]), u"The glyph Font Check handed over is not listed: "
+                                                                       u"it was built here (%s)." % self.MACRON_BELOW)
+        self.assertEqual(ac.left_out_sentence(3, [("built", [u"x", u"y"]), ("have", [u"z"])]),
+                         u"None of the 3 glyphs Font Check handed over is listed: 2 were built here (x y) and the font "
+                         u"has 1 already (z).")
+        dialog = ac.AccentsDialog.__new__(ac.AccentsDialog)
+        lines = []
+        dialog.given, dialog.left_out = given, [("built", given)]
+        dialog.ak = Stub(b=lambda value: u"<b>%s</b>" % value, html=lambda value: u"%s" % value,
+                         glyph_links=lambda chars: u"[%s]" % u" ".join(chars))
+        dialog.log = Stub(add=lambda line, level="info": lines.append((level, line)))
+        dialog.say_left_out()
+        self.assertEqual(lines, [("info", u"The glyph Font Check handed over is not listed: it was built here ([%s])."
+                                  % self.MACRON_BELOW)], "no warning: the build's outcome, its glyph a link")
+        self.assertEqual(ac.on_circle(u"a"), u"a")
+        self.assertEqual(ac.on_circle(ac.unichr_(0x0301)), ac.unichr_(0x25CC) + ac.unichr_(0x0301))
 
     def test_only_single_characters_are_planned(self):
         dialog = ac.AccentsDialog.__new__(ac.AccentsDialog)
@@ -2315,7 +2381,9 @@ class SearchTests(unittest.TestCase):
         dialog.tree = Stub(topLevelItemCount=2, topLevelItem=lambda row: dialog.tops[row], blockSignals=lambda on: None)
         dialog.search, dialog.search_label = Stub(text=u""), Stub(setText=lambda value: setattr(dialog, "count", value))
         dialog.update_buttons = lambda: None
-        dialog.log = Stub(add=lambda line, level="info": None)
+        dialog.lines = []
+        dialog.log = Stub(add=lambda line, level="info": dialog.lines.append(line))
+        dialog.ak = Stub(b=lambda value: u"<b>%s</b>" % value, html=lambda value: u"%s" % value)
         return dialog, build, lack
 
     def test_rows_are_hidden_and_keep_their_checks(self):
@@ -2333,6 +2401,10 @@ class SearchTests(unittest.TestCase):
             self.assertEqual([row.checked for row in build.rows], [True, True], "the rows shown")
             dialog.check_all(False)
             self.assertEqual([row.checked for row in build.rows], [True, False], "the hidden row as it was")
+            # Each click leaves a line: how many it changed, how many are checked in all, the hidden ones said
+            # (the owner's report of 2026-11-16: Check all and Check none left none)
+            self.assertEqual(dialog.lines, [u"Checked <b>1 glyph</b> (2 checked in all, 1 of them not shown).",
+                                            u"Unchecked <b>1 glyph</b> (1 still checked, not shown: a search hides it)."])
             dialog.search.text = u"U+1E0D"
             dialog.apply_search()
             self.assertEqual((build.hidden, lack.hidden, dialog.count), (True, False, u"1 of 3 glyphs shown"))
@@ -2372,6 +2444,9 @@ class SearchTests(unittest.TestCase):
         page.tree = Stub(topLevelItemCount=2, topLevelItem=lambda row: tops[row], blockSignals=lambda on: None)
         page.search, page.search_label = Stub(text=u"U+0042"), Stub(setText=lambda value: setattr(page, "count", value))
         page.update_buttons = lambda: None
+        lines = []
+        page.owner = Stub(log=Stub(add=lambda line, level="info": lines.append(line)))
+        page.ak = Stub(b=lambda value: u"<b>%s</b>" % value)
         saved = ac._qt
         try:
             ac._qt = lambda: (LIST_QT, None)
@@ -2381,6 +2456,7 @@ class SearchTests(unittest.TestCase):
             self.assertEqual(page.count, u"1 of 3 glyphs shown")
             page.check_all(False)
             self.assertEqual([row.checked for row in section.rows + marks.rows], [True, False, True], "the row shown only")
+            self.assertEqual(lines, [u"Unchecked <b>1 glyph</b> (2 still checked, not shown: a search hides them)."])
             page.search.text = u"acute"
             page.apply_search()
             self.assertEqual((bases.hidden, marks.hidden), (True, False))
@@ -2959,14 +3035,34 @@ class CompactTests(unittest.TestCase):
         ac.place(recipes[2], inks().get, placement, self.TIGHT)
         self.assertEqual(ac.room_counts(recipes), (2, 1, 1), "made compact (one of them too tall even so), and "
                                                              "one too tall as placed")
-        self.assertEqual(ac.room_details(2, 1, 0), [u"2 made compact to fit a 120% line", u"1 too tall even so, left unchecked"])
-        self.assertEqual(ac.room_details(0, 0, 42), [u"42 too tall for a 120% line as placed"])
+        # Counted in glyphs, in sentences of their own (the owner's report of 2026-11-16: "42 glyphs that were
+        # too tall for a 120% line were made compact"; it read "42 made compact to fit a 120% line")
+        self.assertEqual(ac.room_details(2, 1, 0), [u"2 glyphs that were too tall for a 120% line were made compact.",
+                                                    u"1 glyph is too tall even when compact: it is left unchecked."])
+        self.assertEqual(ac.room_details(1, 2, 0), [u"1 glyph that was too tall for a 120% line was made compact.",
+                                                    u"2 glyphs are too tall even when compact: they are left unchecked."])
+        self.assertEqual(ac.room_details(0, 0, 42), [u"42 glyphs are too tall for a 120% line as placed."])
+        self.assertEqual(ac.room_details(0, 0, 1), [u"1 glyph is too tall for a 120% line as placed."])
         self.assertEqual(ac.room_details(0, 0, 0), [])
-        self.assertEqual(ac.compact_text(False, 0), u"Glyphs are no longer made compact: their diacritics keep their own gaps "
-                                                    u"and size, and the rows say which are too tall for a 120% line.")
-        self.assertEqual(ac.compact_text(True, 1), u"Glyphs too tall for a 120% line are made compact again. 1 glyph "
-                                                   u"placed by hand keeps what you set.")
+        # The log's line names the box first: "Glyphs are no longer made compact", its time cut short, read as
+        # "9 Glyphs" (the owner's report of 2026-11-16)
+        box = u"<i>Compact diacritics to fit the line</i>"
+        self.assertEqual(ac.compact_text(False, 0), u"%s off: diacritics keep their own gaps and size, and the rows say "
+                                                    u"which glyphs are too tall for a 120%% line." % box)
+        self.assertEqual(ac.compact_text(False, 0, 9), u"%s off: diacritics keep their own gaps and size, and 9 glyphs are "
+                                                       u"too tall for a 120%% line (their rows say by how much)." % box)
+        self.assertEqual(ac.compact_text(False, 0, 1), u"%s off: diacritics keep their own gaps and size, and 1 glyph is "
+                                                       u"too tall for a 120%% line (its row says by how much)." % box)
+        self.assertEqual(ac.compact_text(False, 0, 0), u"%s off: diacritics keep their own gaps and size, and every "
+                                                       u"glyph fits a 120%% line." % box)
+        self.assertEqual(ac.compact_text(True, 1, 8), u"%s on: 8 glyphs too tall for a 120%% line are made compact. 1 glyph "
+                                                      u"placed by hand keeps what you set." % box)
+        self.assertEqual(ac.compact_text(True, 0, 1), u"%s on: 1 glyph too tall for a 120%% line is made compact." % box)
+        self.assertEqual(ac.compact_text(True, 0, 0), u"%s on: no glyph is too tall for a 120%% line." % box)
         self.assertTrue(ac.compact_text(True, 2).endswith(u"2 glyphs placed by hand keep what you set."))
+        for on in (True, False):
+            for count in (None, 0, 1, 9):
+                self.assertFalse(ac.compact_text(on, 0, count).startswith(u"Glyphs"), "never a capital G after the time")
 
     def dialog(self, metrics):
         placement = ac.Placement(1000.0, MODEL)
@@ -3215,6 +3311,9 @@ class WhatsThisTests(unittest.TestCase):
 
             def separator(self):
                 return gui.QFrame()
+
+            def window_layout(self, dialog):
+                return gui.QVBoxLayout(dialog)
 
             def Log(self):
                 return Stub(widget=gui.QTextBrowser(), link_handler=None, follow=lambda source: None,
@@ -3800,14 +3899,21 @@ class MirrorFixTests(unittest.TestCase):
                                  [signed_area(points) < 0 for points in source], "wound as the mark is, not reversed")
         self.assertEqual(font.glyphs["oplain"].by_master["Regular"].shapes[1].transform.values, (1.0, 0.0, 0.0, 1.0, 250.0, 400.0),
                          "a glyph with nothing mirrored is not touched")
-        self.assertEqual(len(dialog.steps), 1, "one step of the History")
-        self.assertEqual(dialog.steps[0][0], u"FreeLab Glyph Compose mirrored components")
-        self.assertEqual(dialog.steps[0][1], ["mark.flipped", "mark.mirrored", "oflip", "oflip.alt", "omirror"])
-        self.assertEqual(dialog.lines[0][0], "done")
+        # The corrected glyphs in a step of their own, before the letters made of them (the live probe of
+        # 2026-11-16: one step holding both made FontLab's Undo say the letters' components did not exist)
+        self.assertEqual(dialog.steps, [(u"FreeLab Glyph Compose mirrored components (parts)", ["mark.flipped", "mark.mirrored"]),
+                                        (u"FreeLab Glyph Compose mirrored components", ["oflip", "oflip.alt", "omirror"])])
+        self.assertEqual(dialog.lines[0], ("info", u"This takes two steps of <i>Edit &gt; Undo</i>: mark.flipped, "
+                                                   u"mark.mirrored were added in a step of their own first, so that "
+                                                   u"FontLab's Undo never takes out a glyph that others still point to."))
+        self.assertEqual(ac.parts_step_text([u"R.mirrored"]), u"This takes two steps of <i>Edit &gt; Undo</i>: R.mirrored "
+                                                               u"was added in a step of its own first, so that FontLab's "
+                                                               u"Undo never takes out a glyph that others still point to.")
+        self.assertEqual(dialog.lines[1][0], "done")
         self.assertIn(u"Corrected the mirrored components of 3 glyphs (2 glyphs added, mirrored with their contours "
-                      u"reversed)", dialog.lines[0][1])
-        self.assertIn(u"added: mark.flipped, mark.mirrored", dialog.lines[0][1])
-        self.assertEqual((len(dialog.lines), dialog.reads), (1, [1]), "and the list read again")
+                      u"reversed)", dialog.lines[1][1])
+        self.assertIn(u"added: mark.flipped, mark.mirrored", dialog.lines[1][1])
+        self.assertEqual((len(dialog.lines), dialog.reads), (2, [1]), "and the list read again")
         return font
 
     def test_outlines_fontlab_mirrors_in_place(self):
@@ -3851,7 +3957,9 @@ class MirrorFixTests(unittest.TestCase):
                          [("o", (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)), ("mark", (1.0, 0.0, 0.0, -1.0, 250.0, 600.0))], "as it was")
         self.assertNotIn("mark.flipped", font.glyphs, "the corrected glyph no letter uses is taken out again")
         self.assertIn(u"FontLab did not keep the new components in master", dialog.lines[-1][1])
-        self.assertEqual(len(dialog.steps), 1, "its shapes were taken out and put back: recorded, to be undone whole")
+        self.assertEqual(dialog.steps, [(u"FreeLab Glyph Compose mirrored components (parts)", ["mark.flipped"]),
+                                        (u"FreeLab Glyph Compose mirrored components", ["oflip"])],
+                         "its shapes were taken out and put back, the part taken out again: recorded, to be undone whole")
 
     def test_a_mark_made_of_components_is_left_and_named(self):
         font = fl_font("bake")
@@ -3981,6 +4089,26 @@ class MirrorFixTests(unittest.TestCase):
         dialog.built_names, dialog.built_font = [], None
         dialog.build()
         return dialog, recipe
+
+    def test_a_build_records_its_corrected_glyphs_in_a_step_of_their_own(self):
+        """The live probe of 2026-11-16 (Rubik): one step holding a corrected glyph and the glyph made of it made
+        FontLab's Undo print "Component 'R.mirrored' ... does not exist"; recorded first, in a step of its own,
+        every Undo and Redo was clean."""
+        font = fl_font("bake")
+        dialog, recipe = self.build_caron(font)
+        helper = [name for name in font.glyphs if name.startswith("caron.")]
+        self.assertEqual(len(helper), 1, font.glyphs.keys())
+        self.assertEqual(dialog.steps, [(u"FreeLab Glyph Compose (parts)", helper),
+                                        (u"FreeLab Glyph Compose", [recipe.name])], "the part first, then the letter")
+        self.assertTrue(any(level == "info" and u"two steps of <i>Edit &gt; Undo</i>: %s was added" % helper[0] in line
+                            for level, line in dialog.lines), dialog.lines)
+
+    def test_a_correction_refused_before_any_write_records_no_step(self):
+        font = fl_font("bake")
+        font.compose("mark", 300, [("o", (0.5, 0, 0, 0.4, 0, 0))])  # (made of components: refused, decompose first)
+        dialog = self.dialog(font, ["oflip"])
+        dialog.correct_mirrored()
+        self.assertEqual(dialog.steps, [], "nothing written: no step, not even the parts'")
 
     def test_a_build_sets_a_mirror_right_in_every_master_or_in_none(self):
         """A mirror set right in Regular and left in Bold (the caron has no outline there): the built glyph's
@@ -4281,12 +4409,25 @@ class EditorLayoutTests(unittest.TestCase):
                     (-430, u"120% line -430 (meets the line below)", True),
                     (-745, u"font, typo, and hhea descender, winDescent -745 (Windows and macOS clip below)", True)]
 
-    def test_captions_too_wide_for_their_glyphs_take_a_second_row(self):
-        self.assertEqual(ac.caption_layout([(100, 60), (300, 60)], 600), [(70.0, 60.0, 0), (270.0, 60.0, 0)])
-        placed = ac.caption_layout([(200, 120), (260, 230)], 600)
-        self.assertEqual([row for _, _, row in placed], [0, 1])
-        self.assertEqual(ac.caption_layout([(5, 100)], 600)[0][0], 4.0, "kept within the editor")
-        self.assertEqual(ac.caption_layout([(595, 100)], 600)[0][0], 496.0)
+    def test_captions_too_wide_for_their_glyphs_split_their_detail_under_them(self):
+        """The owner's report of 2026-11-16: "Current" and "Suggested (13 right, 8 down)" on one line, the
+        parenthesis under "Suggested", never overlapping or wrapping (the whole second caption went a row down)."""
+        self.assertEqual(ac.caption_layout([(100, 60), (300, 60)], 600),
+                         [(0, "whole", 70.0, 60.0, 0), (1, "whole", 270.0, 60.0, 0)], "room for both: whole, centered")
+        self.assertEqual(ac.split_caption(u"Suggested (13 right, 8 down)"), (u"Suggested", u"(13 right, 8 down)"))
+        self.assertEqual(ac.split_caption(u"Current"), (u"Current", None))
+        placed = ac.caption_layout([(200, 60, 60, None), (260, 200, 70, 130)], 600)
+        self.assertEqual([(k, piece, row) for k, piece, _, _, row in placed],
+                         [(0, "whole", 0), (1, "head", 0), (1, "tail", 1)], "Current and Suggested on one line")
+        (_, _, left0, wide0, _), (_, _, left1, wide1, _), (_, _, tail_left, tail_wide, _) = placed
+        self.assertGreaterEqual(left1 - (left0 + wide0), ac.LABEL_SPACE, "the heads apart, side by side")
+        self.assertAlmostEqual(tail_left + tail_wide / 2.0, left1 + wide1 / 2.0, msg="the detail centered under its head")
+        self.assertEqual(ac.caption_layout([(5, 100)], 600)[0][2], 4.0, "kept within the editor")
+        self.assertEqual(ac.caption_layout([(595, 100)], 600)[0][2], 496.0)
+        for width in (120, 180, 300, 600):  # (never overlapping, even in an editor too narrow for both side by side)
+            placed = ac.caption_layout([(width * 0.4, 60, 60, None), (width * 0.6, 200, 70, 130)], width)
+            boxes = [(left, row * 16, left + wide, row * 16 + 16) for _, _, left, wide, row in placed]
+            self.assertEqual(overlapping(boxes), [], width)
 
     def test_the_names_of_lines_close_together_never_overlap(self):
         for width in (220, 380, 640, 1000):
@@ -4334,7 +4475,9 @@ class EditorLayoutTests(unittest.TestCase):
             texts = [(left, size[1] - band + 1 + row * ac.CAPTION_HEIGHT, left + wide,
                       size[1] - band + 1 + (row + 1) * ac.CAPTION_HEIGHT) for _, _, left, wide, row in editor.captions_at]
             texts += [(left, top, left + wide, top + ac.LABEL_HEIGHT) for left, top, wide in names.values()]
-            self.assertEqual(len(editor.captions_at), 2)
+            self.assertIn(len(editor.captions_at), (2, 3), "whole, or the detail under its head")
+            heads = [text for _, text, _, _, row in editor.captions_at if row == 0]
+            self.assertEqual(len(heads), 2, "Current and Suggested on one line: %r" % (size,))
             self.assertEqual(len(names), len(self.OWNER_LIMITS), "every line named: %r" % (size,))
             self.assertEqual(overlapping(texts), [], size)
             self.assertTrue(all(0 <= box[0] and box[2] <= size[0] and 0 <= box[1] and box[3] <= size[1]
@@ -4554,14 +4697,16 @@ class OwnWriteTests(unittest.TestCase):
             dialog = test.dialog(fl_font("bake"))
             dialog.ak.history_mark = lambda package: len(dialog.steps)  # (a step recorded at each write)
             dialog.correct_mirrored()
-            self.assertEqual((dialog.busy, dialog.seen_history), (False, 1), "the correction's step seen as its own")
+            self.assertEqual((dialog.busy, dialog.seen_history), (False, 2), "the correction's steps (its parts', its "
+                                                                             "letters') seen as its own")
         finally:
             test.tearDown()
         with open(ac.__file__.replace(".pyc", ".py"), "rb") as handle:
             source = handle.read().decode("utf-8")
         writes = source.count(u"notify_changed(")
-        self.assertEqual(writes, 3, "Build, Correct mirrored components, Add anchors")
-        self.assertEqual(source.count(u"end_write(package, "), writes, "each followed by end_write")
+        self.assertEqual(writes, 4, "Build, Correct mirrored components, Add anchors, and the parts' own step "
+                                    "(record_parts, inside the first two)")
+        self.assertEqual(source.count(u"end_write(package, "), writes - 1, "each write followed by end_write")
 
 
 class JustBuiltTests(unittest.TestCase):
@@ -4844,7 +4989,7 @@ class OwnerReportNovember15Tests(unittest.TestCase):
     def test_what_is_placed_is_a_diacritic(self):
         """A diacritic is the sign as placed on a letter; a mark, the glyph (the owner's request of 2026-11-15)."""
         self.assertEqual(ac.HAND_NOTE, u"diacritics placed by hand")
-        self.assertIn(u"their diacritics keep their own gaps", ac.compact_text(False, 0))
+        self.assertIn(u"diacritics keep their own gaps", ac.compact_text(False, 0))
         self.assertEqual(ac.far_words("outside", None), u"a diacritic outside the view")
         for text in (ac.HINT_HELP, ac.STRIP_HELP, ac.LINES_HELP, ac.COMPACT_HELP):
             self.assertNotIn(u" mark ", text.replace(u",", u" ").replace(u".", u" "), text)
@@ -4985,6 +5130,208 @@ class OwnerReportNovember15Tests(unittest.TestCase):
         alone, marks = self.noto_page([row for row in self.NOTO if row[2] == "mark"])
         self.assertEqual(alone.reference_text(marks["uni0326"])[:1], text(ac.DOTTED_CIRCLE),
                          "a dotted circle only with no letter at all")
+
+
+class OwnerReportNovember16Tests(unittest.TestCase):
+    """The owner's checks of 2026-11-16 evening on Glyph Compose's Diacritics tab."""
+
+    def test_check_all_and_check_none_say_how_many(self):
+        """Item 118: neither button left a log line; the count says the rows a search hides too."""
+        b = lambda value: u"<b>%s</b>" % value
+        self.assertEqual(ac.checks_text(True, 30, 42, 0, b), u"Checked <b>30 glyphs</b> (42 checked in all).")
+        self.assertEqual(ac.checks_text(True, 1, 13, 12, b), u"Checked <b>1 glyph</b> (13 checked in all, 12 of them not "
+                                                              u"shown).")
+        self.assertEqual(ac.checks_text(False, 0, 0, 0, b), u"Unchecked <b>0 glyphs</b> (none checked now).")
+        self.assertEqual(ac.checks_text(False, 5, 1, 1, b), u"Unchecked <b>5 glyphs</b> (1 still checked, not shown: a "
+                                                             u"search hides it).")
+        self.assertEqual(ac.checks_text(False, 5, 3, 1), u"Unchecked 5 glyphs (3 checked in all, 1 of them not shown).")
+        self.assertEqual(ac.checks_text(True, 2, 2, 0, None, u"row"), u"Checked 2 rows (2 checked in all).")
+
+    def test_the_preview_keeps_its_room(self):
+        """Item 119: selecting a glyph that cannot be built hid the editor, its buttons, and the strip, and
+        Compact diacritics to fit the line jumped up and right."""
+        shown, missing = ac.preview_parts(True, True, True), ac.preview_parts(True, False, False)
+        gone = set(name for name, on in shown.items() if on and not missing[name])
+        self.assertTrue(gone <= set(ac.ROOM_KEPT), gone - set(ac.ROOM_KEPT))
+        self.assertTrue(missing["compact_box"], "the box stays, and now in its place")
+        dialog = ac.AccentsDialog.__new__(ac.AccentsDialog)
+        kept = []
+        for name in ac.ROOM_KEPT:
+            policy = Stub(setRetainSizeWhenHidden=(lambda key: lambda on: kept.append((key, on)))(name))
+            setattr(dialog, name, Stub(sizePolicy=policy, setSizePolicy=lambda p: None))
+        dialog.keep_preview_room()
+        self.assertEqual(sorted(kept), sorted((name, True) for name in ac.ROOM_KEPT))
+
+    def moving(self, r):
+        dialog = ac.AccentsDialog.__new__(ac.AccentsDialog)
+        row = Row(0, r.checked)
+        dialog.selected = lambda: r
+        dialog.sync_compact = lambda recipes=None: None
+        dialog.font = lambda package: None
+        dialog.package = None
+        dialog.scene = lambda recipe: None
+        dialog.editor = Stub(update=lambda: None)
+        dialog.mark_selected = lambda index: None
+        dialog.item_of = lambda recipe: row
+        dialog.refresh_item = lambda item, recipe: None
+        dialog.tree = Stub(blockSignals=lambda on: None)
+        dialog.update_buttons = lambda: None
+        return dialog, row
+
+    def test_moving_a_diacritic_checks_its_row(self):
+        """Item 138: a diacritic moved or scaled by hand left its row unchecked, and Build checked glyphs
+        did not build it."""
+        r = ac.Recipe(ac.unichr_(0x0101), u"amacron", "a")
+        r.checked = False
+        dialog, row = self.moving(r)
+        saved = ac._qt
+        try:
+            ac._qt = lambda: (LIST_QT, None)
+            dialog.set_adjust(0, (10.0, 0.0, 1.0, 1.0), False)
+            self.assertFalse(row.checked, "not while it is dragged")
+            dialog.set_adjust(0, (12.0, 3.0, 1.0, 1.0), True)
+            self.assertTrue(r.checked and row.checked, "moved: checked, to be built")
+            r2 = ac.Recipe(ac.unichr_(0x0103), u"abreve", "a")
+            r2.checked = False
+            dialog, row = self.moving(r2)
+            dialog.set_adjust(0, (0.0, 0.0, 1.0, 1.0), True)
+            self.assertFalse(r2.checked or row.checked, "a click that moves nothing leaves the check")
+            dialog.set_adjust(0, (0.0, 0.0, 1.2, 1.2), True)
+            self.assertTrue(r2.checked and row.checked, "scaled: checked")
+        finally:
+            ac._qt = saved
+
+    def test_the_buttons_beside_the_box_keep_one_width(self):
+        """The live pass of 2026-11-16: Compact diacritics to fit the line moved 33 px right on a row that
+        cannot be built: the buttons beside it kept the room of their last text, which the row changes."""
+        texts = ac.room_texts()
+        self.assertEqual(sorted(texts), sorted(["reset_marks_button", "propagate_button", "line_up_button"]))
+        for kind in ac.ATTACHED_KINDS:
+            self.assertIn(ac.line_up_text(kind, "above"), texts["line_up_button"])
+        self.assertEqual(ac.line_up_text("vertical caron", "topright"), u"Line up vertical carons")
+        self.assertEqual(ac.line_up_text(None, "below"), u"Line up diacritics below")
+        self.assertEqual(ac.propagate_text(3), u"Apply to 3 related letters")
+        self.assertEqual(ac.reset_text(1), u"Reset diacritic")
+        dialog = ac.AccentsDialog.__new__(ac.AccentsDialog)
+        widths = {}
+
+        class Button(object):
+            def __init__(self, name):
+                self.name, self.text = name, u"x"
+                self.sizeHint = None
+
+            def setText(self, text):
+                self.text = text
+                self.sizeHint = Stub(width=lambda text=text: 10 + 7 * len(text))
+
+            def setMinimumWidth(self, width):
+                widths[self.name] = width
+
+            def setSizePolicy(self, policy):
+                pass
+        for name in ac.ROOM_KEPT:
+            button = Button(name)
+            button.setText(u"x")
+            button.sizePolicy = Stub(setRetainSizeWhenHidden=lambda on: None)
+            setattr(dialog, name, button)
+        dialog.keep_preview_room()
+        for name, options in texts.items():
+            self.assertEqual(widths[name], max(10 + 7 * len(t) for t in options), name)
+            self.assertEqual(getattr(dialog, name).text, u"x", "its own text put back")
+
+    def test_mark_anchors_check_all_counts_glyphs(self):
+        """The live pass of 2026-11-16: "Checked 80 glyphs (78 checked in all)" (rows that are no glyph's counted)."""
+        inks = AnchorPageTests.INKS
+        page = ac.AnchorPage.__new__(ac.AnchorPage)
+        page.glyphs = ac.plan_anchors([("e", 0x65, "base", inks["e"], {}), ("B", 0x42, "base", inks["B"], {}),
+                                       ("acutecomb", 0x0301, "mark", inks["acutecomb"], {})], {}, "latin", 1000, 500)
+        for g in page.glyphs:
+            g.checked = False
+        rows = [Row(index, False) for index in range(len(page.glyphs))]
+        tops = [Row(-1, False, rows=[Row(-1, False, rows=rows[:2])]), Row(-1, False, rows=rows[2:])]  # (checkable sections)
+        page.tree = Stub(topLevelItemCount=2, topLevelItem=lambda row: tops[row], blockSignals=lambda on: None)
+        page.update_buttons, page.hidden = (lambda: None), set()
+        lines = []
+        page.owner = Stub(log=Stub(add=lambda line, level="info": lines.append(line)))
+        page.ak = Stub(b=lambda value: u"%s" % value)
+        saved = ac._qt
+        try:
+            ac._qt = lambda: (LIST_QT, None)
+            page.check_all(True)
+        finally:
+            ac._qt = saved
+        self.assertEqual(lines, [u"Checked 3 glyphs (3 checked in all)."])
+
+    def test_points_rounded_to_whole_units_are_the_same_points(self):
+        """The live pass of 2026-11-16: sorted pairing set rounded points 800 units apart (x 458.3 and 458.45 both
+        458, then sorted by y)."""
+        self.assertTrue(ac.same_points([(458.3, 900.2), (458.45, 100.4)], [(458.0, 100.0), (458.0, 900.0)]))
+        self.assertFalse(ac.same_points([(0, 0), (10, 0)], [(0, 0), (0, 0)]), "each point matched once")
+        self.assertFalse(ac.same_points([(0, 0)], [(2, 0)]))
+        self.assertTrue(ac.same_points_in_order([(458.3, 900.2), (458.45, 100.4)], [(458.0, 900.0), (458.0, 100.0)]))
+        self.assertFalse(ac.same_points_in_order([(0, 0), (10, 0)], [(10, 0), (0, 0)]), "in order: node by node")
+
+    def test_the_glyphs_a_write_records_have_a_state_before_it(self):
+        """Items 139 and 140: the font's glyphs a write's step records are recorded before it too."""
+        glyphs = {u"i": Stub(name=u"i", isNull=False), u"j": Stub(name=u"j", isNull=True)}
+        package = Stub(findName=lambda name: glyphs.get(name))
+        self.assertEqual([g.name for g in ac.existing_glyphs(package, [u"i", u"i", u"x", None, u"j"])], [u"i"],
+                         "the font's own, each once (a glyph not made yet has no state to record)")
+
+    def test_only_high_value_glyphs(self):
+        """The owner's request: Only high-value glyphs beside Also list existing glyphs."""
+        a_macron = ac.unichr_(0x0101)
+        self.assertIsNone(ac.value_filter(None, set([a_macron])))
+        self.assertIsNone(ac.value_filter(Stub(checked=False), set([a_macron])))
+        self.assertIsNone(ac.value_filter(Stub(checked=True), None), "the set not known: nothing hidden for it")
+        self.assertEqual(ac.value_filter(Stub(checked=True), [a_macron]), set([a_macron]))
+        self.assertEqual(ac.search_count(1, 3, u"", filtered=True), u"1 of 3 glyphs shown")
+        self.assertEqual(ac.search_count(1, 3, u""), u"")
+        self.assertEqual(ac.high_value_text(1), u"Checked 1 glyph <i>Font Check</i> lists as high-value (it helps "
+                                                 u"complete languages already within reach), and no other shown.")
+        dialog, build, lack = SearchTests("test_what_finds_a_row").dialog()
+        dialog.value_only_box, dialog.high_value = Stub(checked=True), set([a_macron])
+        saved = ac._qt
+        try:
+            ac._qt = lambda: (LIST_QT, None)
+            dialog.apply_search()
+        finally:
+            ac._qt = saved
+        self.assertEqual(([row.hidden for row in build.rows], lack.hidden), ([False, True], True))
+        self.assertEqual((dialog.hidden, dialog.count), (set([1, 2]), u"1 of 3 glyphs shown"))
+
+    def test_back_to_font_check_once_its_glyphs_are_built(self):
+        """Item 134: after a build from Font Check's hand-over, Font Check again, in this window's place."""
+        self.assertTrue(ac.back_to_font_check_due(True, [], False))
+        self.assertFalse(ac.back_to_font_check_due(True, [u"x"], False), "something handed over is left to build")
+        self.assertFalse(ac.back_to_font_check_due(False, [], False), "the list shows something else now")
+        self.assertFalse(ac.back_to_font_check_due(True, [], True), "something failed: the log says what")
+        dialog = ac.AccentsDialog.__new__(ac.AccentsDialog)
+        dialog.given, dialog.generation_given, dialog.generation = [A_CARON], [], None
+        dialog.set_box, dialog.package = Stub(currentIndex=0), None
+        built = ac.Recipe(A_CARON, u"Acaron", "A")
+        built.existing = u"Acaron"  # (just built: listed as the font's own)
+        dialog.recipes = [built]
+        self.assertEqual(dialog.hand_over_state(), (True, []))
+        opened = []
+        dialog.ak = Stub(open_tool=lambda title, window: opened.append((title, window)))
+        dialog.dialog = "the window"
+        saved = ac._qt
+        try:
+            ac._qt = lambda: (Stub(QTimer=Stub(singleShot=lambda ms, call: call())), None)
+            self.assertTrue(dialog.back_to_font_check(False))
+            self.assertEqual(opened, [(u"Font Check", "the window")])
+            dialog.set_box = Stub(currentIndex=2)  # (another set chosen since)
+            self.assertFalse(dialog.back_to_font_check(False))
+            dialog.set_box = Stub(currentIndex=0)
+            built.existing = None  # (still to build)
+            self.assertEqual(dialog.hand_over_state(), (True, [A_CARON]))
+            self.assertFalse(dialog.back_to_font_check(False))
+            dialog.given = []
+            self.assertEqual(dialog.hand_over_state(), (False, []), "a window opened from the menu")
+        finally:
+            ac._qt = saved
+        self.assertEqual(len(opened), 1)
 
 
 if __name__ == "__main__":

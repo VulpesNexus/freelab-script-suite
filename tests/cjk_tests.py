@@ -513,6 +513,190 @@ class StaleCodeTests(unittest.TestCase):
         self.assertEqual(features.written, ["halt"], "palt has nothing left to write")
 
 
+class CheckRow(object):
+    """A list's row as check_rows sees it: its check, its group (up), whether that group is open."""
+
+    def __init__(self, on, up=None, expanded=True):
+        self.on, self.up, self.expanded = on, up, expanded
+
+    def checkState(self, column):
+        return 2 if self.on else 0
+
+    def setCheckState(self, column, state):
+        self.on = state == 2
+
+    def parent(self):
+        return self.up
+
+    def isHidden(self):
+        return False
+
+    def isExpanded(self):
+        return self.expanded
+
+
+def check_all_logged(test, module, dialog_class, noun):
+    """Check all and Check none of a CJK tool (module's dialog_class) over two groups, one closed: what
+    the log says (owner's report 118: these buttons left no line)."""
+    sys.path.insert(0, os.path.join(HERE, os.pardir, "kerning"))
+    import freelab_auto_kerning as ak
+    saved = sys.modules.get("PythonQt")
+    qt = type("PythonQt", (), {})()
+    qt.QtCore = type("QtCore", (), {"Qt": type("Qt", (), {"Checked": 2, "Unchecked": 0, "ItemIsUserCheckable": 16})})
+    qt.QtGui = type("QtGui", (), {})
+    sys.modules["PythonQt"] = qt
+    try:
+        open_group, closed_group = CheckRow(False), CheckRow(False, expanded=False)
+        rows = [CheckRow(True, open_group), CheckRow(False, open_group), CheckRow(False, closed_group),
+                CheckRow(False, closed_group)]
+        for row in rows:
+            row.flags = lambda: 16
+        dialog = dialog_class.__new__(dialog_class)  # (its window needs FontLab)
+        logged = []
+        dialog.ak, dialog.items, dialog.changed = ak, lambda: rows, lambda: None
+        dialog.tree = type("Tree", (), {"blockSignals": lambda self, on: None})()
+        dialog.log = type("Log", (), {"add": lambda _, text, kind=None: logged.append(text)})()
+        dialog.check_all(True)
+        test.assertTrue(all(row.on for row in rows))
+        test.assertEqual(logged[-1], u"<i>Check all</i> checked <b>3 %ss</b> (2 of them in closed groups)." % noun)
+        rows[2].on = False
+        dialog.check_all(False)
+        test.assertEqual(logged[-1], u"<i>Check none</i> unchecked <b>3 %ss</b> (1 of them in a closed group)." % noun)
+        dialog.check_all(False)
+        test.assertEqual(logged[-1], u"<i>Check none</i> changed nothing.")
+    finally:
+        if saved is None:
+            sys.modules.pop("PythonQt", None)
+        else:
+            sys.modules["PythonQt"] = saved
+
+
+class ReaderLoadingTests(unittest.TestCase):
+    """Codex review 7, finding 3: without Feature Code's script (or with a broken one), its loader raised out of
+    the windows' button updates and writes. Now nothing is written, the write is grayed out, and the log says
+    to reinstall FreeLab."""
+
+    class Ak(object):
+        def __init__(self):
+            self.enabled = {}
+
+        def enable(self, widget, on):
+            self.enabled[widget] = bool(on)
+
+        @staticmethod
+        def html(text):
+            return text
+
+    def window(self, logged):
+        dialog = cj.CJKSpacingDialog.__new__(cj.CJKSpacingDialog)  # (its window needs FontLab)
+        dialog.ak = self.Ak()
+        dialog.trims, dialog.first_checks, dialog.texts, dialog.classes, dialog.lookups = [], [], {}, {}, {}
+        dialog.package = object()
+        for name in ("all_button", "none_button", "restore_button"):
+            setattr(dialog, name, name)
+        dialog.write_button = type("Button", (), {"setText": lambda self, text: None})()
+        dialog.palt_box = dialog.halt_box = type("Box", (), {"checked": True})()
+        dialog.harvest = dialog.draw_previews = lambda: None
+        dialog.hangul_chosen = lambda: [u"ga"]  # (Hangul widths to set: clickable but for the reader)
+        dialog.log = type("Log", (), {"add": lambda _, text, kind=None: logged.append((kind, text))})()
+        return dialog
+
+    def test_a_missing_or_broken_reader_writes_nothing_and_says_why(self):
+        import shutil
+        import tempfile
+        saved_file, saved = cj.__file__, sys.modules.pop(cj.FEATURE_CODE_MODULE, None)
+        saved_qt = sys.modules.get("PythonQt")
+        qt = type("PythonQt", (), {"QtCore": None, "QtGui": None})()  # (the window's update asks for Qt's modules)
+        sys.modules["PythonQt"] = qt
+        self.addCleanup(lambda: sys.modules.__setitem__("PythonQt", saved_qt) if saved_qt is not None
+                        else sys.modules.pop("PythonQt", None))
+        env = os.environ.get("FREELAB_NO_AUTOSTART")
+        folder = tempfile.mkdtemp(prefix="freelab-reader-")
+        old = u"feature palt { pos a <0 0 -5 0>; } palt;"
+        try:
+            os.makedirs(os.path.join(folder, "cjk"))
+            cj.__file__ = os.path.join(folder, "cjk", "freelab_cjk_spacing.py")
+            # Codex review 8, finding 3: an older script that loads but lacks what is called now (readable),
+            # made here from today's by taking it out (the real round-6 script was checked the same way)
+            with io.open(os.path.join(HERE, os.pardir, "features", cj.FEATURE_CODE_FILE), encoding="utf-8") as handle:
+                older = handle.read().replace(u"\ndef readable(", u"\ndef readable_not_yet(")
+            for broken in (None, u"def broken(:\n", older, older):  # (empty folder; no compile; older; older, cached)
+                if broken is not None:
+                    with io.open(os.path.join(folder, "cjk", cj.FEATURE_CODE_FILE), "w", encoding="utf-8") as handle:
+                        handle.write(broken)
+                self.assertIsNone(cj.feature_text("palt", old, [u"pos x <0 0 -10 0>;"]), "nothing written")
+                self.assertIsNone(cj.block_of("palt", old))
+                self.assertIn(u"Reinstall FreeLab", cj.feature_code_problem(u"CJK Spacing"))
+                if broken is older:
+                    self.assertIn(u"without readable", cj.feature_code_problem(u"CJK Spacing"))
+                    self.assertIn(cj.FEATURE_CODE_MODULE, sys.modules, "loaded (and kept), but not used")
+                else:
+                    self.assertNotIn(cj.FEATURE_CODE_MODULE, sys.modules, "no half-loaded module kept")
+                self.assertEqual(os.environ.get("FREELAB_NO_AUTOSTART"), env)
+                logged = []
+                dialog = self.window(logged)
+                dialog.update_buttons()
+                self.assertFalse(dialog.ak.enabled[dialog.write_button], "the write grayed out")
+                dialog.update_buttons()
+                self.assertEqual([kind for kind, _ in logged], ["error"], "said once")
+                self.assertIn(u"freelab_feature_code.py", logged[0][1])
+                dialog.write()  # (refused before anything is read or written)
+                self.assertEqual([kind for kind, _ in logged], ["error", "error"])
+        finally:
+            cj.__file__ = saved_file
+            sys.modules.pop(cj.FEATURE_CODE_MODULE, None)
+            if saved is not None:
+                sys.modules[cj.FEATURE_CODE_MODULE] = saved
+            shutil.rmtree(folder, ignore_errors=True)
+        # The script there (the control): loaded once, then the same module; nothing to say
+        self.assertIs(cj.feature_code(), cj.feature_code())
+        self.assertEqual(cj.feature_code_problem(u"CJK Spacing"), u"")
+        logged = []
+        self.window(logged).update_buttons()
+        self.assertEqual(logged, [])
+
+
+class TokenReadingTests(unittest.TestCase):
+    def test_codex_review_6_scenarios(self):
+        """Markers found as comments wherever they stand, never past their pair; another feature's code is no
+        body; a body's braces must balance (Feature Code's writer_scenarios, through its token functions)."""
+        sys.path.insert(0, HERE)
+        import features_tests
+        features_tests.writer_scenarios(self, lambda old, rules: cj.feature_text("palt", old, rules), u"palt",
+                                        cj.BEGIN % "palt", cj.END % "palt", u"pos x <0 0 -10 0>;")
+        own = u"feature palt {\npos a <0 0 -5 0>;\n%s\npos b <0 0 -5 0>; %s\npos c <0 0 -7 0>;\n} palt;" % (
+            cj.BEGIN % "palt", cj.END % "palt")
+        self.assertEqual(cj.font_positioned("palt", own), set(["a", "c"]), "the font's own, around FreeLab's block")
+        self.assertEqual(cj.block_of("palt", own), u"feature palt {\npos b <0 0 -5 0>; \n} palt;\n")
+
+
+class CompactFeatureTests(unittest.TestCase):
+    def test_a_compact_feature_keeps_its_code(self):
+        """Codex review 5 (Feature Code's writer, the same as this one): a feature on one line, or its brace after
+        the last rule, had no "} palt;" line, and the font's own code was made again from nothing."""
+        rule = u"pos uni3042 <-10 0 -20 0>;"
+        for own in (u"feature palt { pos uni3044 <-5 0 -10 0>; } palt;",
+                    u"feature palt {\npos uni3044 <-5 0 -10 0>; } palt;",
+                    u"feature\npalt\n{\npos uni3044 <-5 0 -10 0>;\n}\npalt;"):
+            text = cj.feature_text("palt", own, [rule])
+            self.assertIn(u"pos uni3044 <-5 0 -10 0>;", text, "the font's own rule kept: %r" % text)
+            self.assertLess(text.index(rule), cj.feature_code().feature_bounds(text, "palt")[1], "inside the feature")
+            self.assertEqual(text.count(u"feature"), 1)
+        broken = u"feature palt { pos uni3044 <-5 0 -10 0>;"
+        self.assertIsNone(cj.feature_text("palt", broken, [rule]))
+        refused = []
+        trims = [cj.suggest(cj.Trim(0x3042, "a-hira", "hiragana", 1000, 150, 880), MODEL, 1000.0)]
+        self.assertNotIn("palt", cj.texts_for(trims, {"palt": broken}, halt_on=False, refused=refused))
+        self.assertEqual(refused, ["palt"])
+        self.assertIn(u"FreeLab leaves palt as it is", cj.refused_words(refused))
+        self.assertEqual(cj.feature_text("palt", None, [rule]).splitlines()[0], u"feature palt {", "no code: a new feature")
+
+
+class CheckAllTests(unittest.TestCase):
+    def test_check_all_and_none_say_how_many(self):
+        check_all_logged(self, cj, cj.CJKSpacingDialog, u"glyph")
+
+
 class WordingTests(unittest.TestCase):
     """The owner's rules for interface texts: a text with a number follows it, and data beside data
     goes in parentheses."""

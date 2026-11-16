@@ -22,6 +22,7 @@ CRUBADAN = u"An Cr\N{LATIN SMALL LETTER U WITH ACUTE}bad\N{LATIN SMALL LETTER A 
 TRAIN = os.path.join(HERE, os.pardir, "checks", "train")
 u = fc.char_of
 LATIN_1 = list(range(0x20, 0x7F)) + list(range(0xA0, 0x180))  # ASCII, Latin-1, Latin Extended-A
+ELLIPSIS = u"\N{HORIZONTAL ELLIPSIS}"
 
 
 def language(base, auxiliary=u"", marks=u"", script=u"Latin", name=u"Test", speakers=0, status=u"living"):
@@ -703,7 +704,10 @@ class LanguageListTests(unittest.TestCase):
         self.assertIn(u"Esperanto", count(scripts), "constructed languages are in to start with")
         self.assertEqual(sorted(r.language.name for r in others), [u"Ancient Greek", u"Old Latin"])
         by_key = dict((key, statuses) for key, _, statuses in fc.STATUS_FILTERS)
-        self.assertEqual([key for key, _, _ in fc.STATUS_FILTERS], ["current", "living", "historical", "all"])
+        self.assertEqual([key for key, _, _ in fc.STATUS_FILTERS], ["current", "living", "historical", "high", "all"])
+        self.assertEqual([label for _, label, _ in fc.STATUS_FILTERS],
+                         [u"Living and constructed", u"Living only", u"Historical only", u"High-value only", u"All languages"],
+                         "the owner's report 129: the dropdown is Display, its choices short")
         scripts, others = self.scripts(by_key["living"])
         self.assertNotIn(u"Esperanto", count(scripts))
         self.assertEqual(len(others), 3)
@@ -713,6 +717,54 @@ class LanguageListTests(unittest.TestCase):
         scripts, others = self.scripts(by_key["all"])
         self.assertEqual((len(count(scripts)), others), (8, []))
 
+    def test_high_value_only(self):
+        """The owner's report 129: Display's High-value only keeps the orthographies high_value_languages.json
+        lists (by code and script: Serbian in both its scripts, a language's other scripts out), and a
+        search finds the others under a heading of their own, whatever their status."""
+        def one(iso, name, script=u"Latin", status=u"living"):
+            return fc.Language(iso, name, u"", script, status, u"verified", 0, [u"a", u"b"], [], u"")
+        languages = [one(u"eng", u"English"), one(u"srp", u"Serbian"), one(u"srp", u"Serbian", u"Cyrillic"),
+                     one(u"eng", u"English", u"Shavian"), one(u"aaq", u"Eastern Abnaki", status=u"historical"),
+                     one(u"xyz", u"Small")]
+        table = {(u"eng", u"Latin"): (u"modern",), (u"srp", u"Latin"): (u"modern",), (u"srp", u"Cyrillic"): (u"modern",)}
+        self.assertEqual([fc.kept_by(language, fc.HIGH_VALUE, table) for language in languages],
+                         [True, True, True, False, False, False])
+        self.assertEqual([fc.kept_by(language, None, table) for language in languages], [True] * 6)
+        saved = fc.high_value_orthographies
+        fc.high_value_orthographies = lambda path=None: table
+        try:
+            f = font([0x61, 0x62])
+            scripts = fc.coverage(languages, f, 3, False, fc.HIGH_VALUE)
+            others = fc.left_out(languages, f, 3, fc.HIGH_VALUE)
+        finally:
+            fc.high_value_orthographies = saved
+        self.assertEqual(sorted((r.language.iso, r.language.script) for s in scripts for r in s.results),
+                         [(u"eng", u"Latin"), (u"srp", u"Cyrillic"), (u"srp", u"Latin")])
+        self.assertEqual(sorted(r.language.name for r in others), [u"Eastern Abnaki", u"English", u"Small"])
+        sections, _ = fc.language_sections(scripts, [u"Latin", u"Cyrillic"], u"s", None, "az", others, fc.HIGH_VALUE)
+        self.assertEqual([(s.title, s.why, len(s.results)) for s in sections if s.why], [(fc.LESSER_TITLE, fc.STATUS_WHY, 3)],
+                         "left out for their value, not their status: one heading, whatever the status")
+        self.assertEqual(fc.left_title(languages[4]), u"Historical languages", "another choice: by status, as before")
+
+    @unittest.skipUnless(os.path.isfile(os.path.join(HERE, os.pardir, "checks", "high_value_languages.json")),
+                         "the high-value languages' file (made by "
+                         "checks/train/high_value.py) is not in this copy")
+    def test_high_value_data(self):
+        """The shipped list: the languages any font for the world's readers starts with, each in its own
+        scripts; a small unofficial language and a historical one are not on it."""
+        table = fc.high_value_orthographies()
+        self.assertTrue(250 < len(table) < 400, len(table))
+        for key in ((u"eng", u"Latin"), (u"cmn", u"Chinese"), (u"jpn", u"Kanji"), (u"jpn", u"Hiragana"),
+                    (u"jpn", u"Katakana"), (u"kor", u"Hangul"), (u"arb", u"Arabic"), (u"hin", u"Devanagari"),
+                    (u"rus", u"Cyrillic"), (u"srp", u"Latin"), (u"srp", u"Cyrillic"), (u"swh", u"Latin"),
+                    (u"yor", u"Latin"), (u"vie", u"Latin"), (u"ell", u"Greek"), (u"heb", u"Hebrew"), (u"tha", u"Thai")):
+            self.assertIn(key, table)
+        self.assertIn(u"modern", table[(u"eng", u"Latin")])
+        for key in ((u"aaq", u"Latin"), (u"lat", u"Latin"), (u"grc", u"Greek"), (u"rus", u"Latin")):
+            self.assertNotIn(key, table)
+        known = set((language.iso, language.script) for language in fc.load_languages())
+        self.assertEqual(set(table) - known, set(), "every row an orthography Font Check lists")
+
     def test_listed_without_a_search(self):
         scripts, others = self.scripts()
         sections, hidden = fc.language_sections(scripts, [u"Latin"], u"", None, "reach", others)
@@ -721,10 +773,10 @@ class LanguageListTests(unittest.TestCase):
         self.assertEqual(hidden, 0)
         self.assertEqual(fc.languages_line(sections, u"", 0, 1, 2),
                          u"1 language of the scripts not listed here is hidden: a search finds it too. "
-                         u"2 languages are left out by the choice of languages above: a search finds them too.")
+                         u"2 languages are left out by the Display choice above: a search finds them too.")
         self.assertEqual(fc.languages_line(sections, u"", 0, 2, 1),
                          u"2 languages of the scripts not listed here are hidden: a search finds them too. "
-                         u"1 language is left out by the choice of languages above: a search finds it too.")
+                         u"1 language is left out by the Display choice above: a search finds it too.")
         self.assertEqual(fc.languages_line(sections, u"", 0, 0, 0), u"", "nothing hidden: no line")
 
     def test_search_finds_every_language(self):
@@ -735,7 +787,7 @@ class LanguageListTests(unittest.TestCase):
                          u"1 language matches. 1 is under a heading that says why it is not listed otherwise.")
         sections, hidden = fc.language_sections(scripts, [u"Latin"], u"LAT", None, "reach", others)
         self.assertEqual(self.names(sections),
-                         [(u"Historical languages (1): left out by the choice of languages above", [u"Old Latin"])])
+                         [(u"Historical languages (1): left out by the Display choice above", [u"Old Latin"])])
         sections, hidden = fc.language_sections(scripts, [u"Latin"], u"a", None, "az", others)
         self.assertEqual([s.title for s in sections], [u"Latin", u"Lao", u"Historical languages"])
         self.assertEqual([s.why for s in sections], [u"", fc.ABSENT_WHY, fc.STATUS_WHY])
@@ -796,7 +848,7 @@ class LanguageListTests(unittest.TestCase):
         sections, _ = fc.language_sections(scripts, shown, u"lao", None, "reach", others)
         self.assertEqual(self.names(sections), [(u"Lao (1): a script the font has none of", [u"Lao"])])
         sections, _ = fc.language_sections(scripts, shown, u"lat", None, "reach", others)
-        self.assertIn((u"Historical languages (1): left out by the choice of languages above", [u"Latin"]),
+        self.assertIn((u"Historical languages (1): left out by the Display choice above", [u"Latin"]),
                       self.names(sections))
         every = len(languages)
         self.assertEqual(sum(len(s.results) for s in scripts) + len(others), every, "no language outside both")
@@ -1664,7 +1716,7 @@ class OrthographyTests(unittest.TestCase):
         self.assertEqual([(s.title, len(s.results)) for s in sections], [(u"Latin", 2)], "not listed without a search")
         sections, _ = fc.language_sections(scripts, [u"Latin"], u"e", None, "reach", others)
         self.assertEqual([s.heading() for s in sections if s.why],
-                         [u"Languages from texts and keyboards (2): left out by the choice of languages above"],
+                         [u"Languages from texts and keyboards (2): left out by the Display choice above"],
                          "a search finds them, under a heading that says why they are not listed")
         self.assertEqual(fc.left_title(languages[3]), fc.INFERRED_TITLE)
 
@@ -1800,12 +1852,162 @@ class WidthTests(unittest.TestCase):
         self.assertEqual(left + right, 1400)
         self.assertTrue(500 < left < right, "the languages' lists a little wider than the characters'")
 
-    def test_the_bar_gives_up_width_first(self):
-        whole = fc.BAR_COLUMN
-        self.assertEqual(fc.bar_width(900, 300, 250), whole, "room for all three: the bar whole")
-        self.assertEqual(fc.bar_width(600, 300, 250), 50, "a narrower list: the bar gives up what is missing")
-        self.assertEqual(fc.bar_width(500, 300, 250), 0, "narrower still: no bar, and only then are the names cut")
-        self.assertEqual(fc.bar_width(0, 300, 250), 0)
+    def test_columns_fill_the_list_and_the_bar_stays(self):
+        """The owner's reports 126 and 127: the columns fill the list exactly (no gap, nothing past it), the
+        counts stay whole, and the families' bar no longer gives up all its width to the names: it gives way
+        to BAR_LEAST first, then the names are cut to NAME_LEAST, and only then does the bar close."""
+        # The families' list as live at 1,000 pixels (the coordinator's check): the long Languages counts took the
+        # room, the names were cut to "Austr...", and the bars squeezed to about 20 pixels. The counts give way
+        # first now (down to COUNTS_LEAST, elided), then the bar to BAR_LEAST, then the names to NAME_LEAST; only
+        # then does the bar close, and the counts after it.
+        families = lambda room: fc.column_widths(room, [250, fc.BAR_COLUMN, 290, 140], 0, (2, 1),
+                                                 {0: fc.NAME_LEAST, 1: fc.BAR_LEAST, 2: fc.COUNTS_LEAST})
+        self.assertEqual(families(1000), [1000 - fc.BAR_COLUMN - 430, fc.BAR_COLUMN, 290, 140], "room for all")
+        self.assertEqual(families(555), [555 - fc.BAR_LEAST - fc.COUNTS_LEAST - 140, fc.BAR_LEAST, fc.COUNTS_LEAST, 140],
+                         "the names whole, the bar at its least, the counts elided")
+        self.assertEqual(families(250 + fc.BAR_COLUMN + 140 + fc.COUNTS_LEAST), [250, fc.BAR_COLUMN, fc.COUNTS_LEAST, 140],
+                         "the counts give way before the bar")
+        self.assertEqual(families(300), [fc.NAME_LEAST, 0, 300 - fc.NAME_LEAST - 140, 140],
+                         "very narrow: the names at their least, the bar closed, then the counts")
+        bars = lambda room, pinned=None: fc.column_widths(room, [300, fc.BAR_COLUMN, 200, 50], 0, (1,),
+                                                          {0: fc.NAME_LEAST, 1: fc.BAR_LEAST}, pinned)
+        self.assertEqual(bars(1000), [1000 - fc.BAR_COLUMN - 250, fc.BAR_COLUMN, 200, 50], "room to spare: the names")
+        self.assertEqual(bars(300 + 250 + 100), [300, 100, 200, 50], "a narrower list: the bar gives way first")
+        self.assertEqual(bars(500), [500 - 250 - fc.BAR_LEAST, fc.BAR_LEAST, 200, 50],
+                         "narrower still: the bar keeps BAR_LEAST, the names are cut (before, the bar had none)")
+        self.assertEqual(bars(250 + fc.NAME_LEAST + 10), [fc.NAME_LEAST, 10, 200, 50], "then the bar closes")
+        self.assertEqual(bars(100), [0, 0, 200, 50], "the counts stay whole")
+        for room in (100, 400, 650, 1000, 2000):
+            self.assertEqual(sum(bars(room)), max(room, 250), "the columns fill the list: %d" % room)
+        self.assertEqual(bars(1000, {2: 300}), [1000 - fc.BAR_COLUMN - 350, fc.BAR_COLUMN, 300, 50],
+                         "a column the user dragged keeps its width: the names take up the rest")
+        self.assertEqual(bars(1000, {0: 400}), [400, 350, 200, 50], "the names dragged: the bar takes up the rest")
+        names = fc.column_widths(600, [200, 120], 0, (), {0: fc.NAME_LEAST}, {0: 300})
+        self.assertEqual(names, [300, 300], "no bar: the last column takes up the rest")
+        self.assertEqual(fc.column_widths(600, [200, 120], 0, (), {}, {0: 300, 1: 100}), [300, 100],
+                         "every column dragged: as dragged")
+
+
+class TabNameTests(unittest.TestCase):
+    def test_the_chosen_tab_whole_the_others_elided(self):
+        """The owner's report 125: a narrow window gave the tabs scroll arrows; the tab not chosen is
+        elided with an ellipsis instead, and the elided one is whole once chosen."""
+        measure = lambda text: 7 * len(text)
+        texts = [u"High-value missing glyphs (971)", u"Select language, character set, or family"]
+        whole = sum(measure(text) + fc.TAB_PAD for text in texts)
+        self.assertEqual(fc.tab_texts(texts, 0, whole, measure), texts, "room for both: both whole")
+        self.assertEqual(fc.tab_texts(texts, 0, 0, measure), texts, "a bar not laid out yet: left whole")
+        room = whole - 100
+        shown = fc.tab_texts(texts, 0, room, measure)
+        self.assertEqual(shown[0], texts[0], "the chosen tab whole")
+        self.assertTrue(shown[1].endswith(ELLIPSIS) and texts[1].startswith(shown[1][:-1]), shown[1])
+        self.assertLessEqual(sum(measure(text) + fc.TAB_PAD for text in shown), room, "no arrows needed")
+        shown = fc.tab_texts(texts, 1, room, measure)
+        self.assertEqual(shown[1], texts[1], "chosen: whole")
+        self.assertTrue(shown[0].endswith(ELLIPSIS), "and the other elided")
+        three = [u"Languages (2645)", u"Character sets (317)", u"Families (240)"]
+        shown = fc.tab_texts(three, 0, measure(three[0]) + fc.TAB_PAD + 2 * (measure(three[2]) + fc.TAB_PAD) + 10, measure)
+        self.assertEqual((shown[0], shown[2]), (three[0], three[2]), "a short tab that fits its share stays whole")
+        self.assertTrue(shown[1].endswith(ELLIPSIS))
+        self.assertEqual(fc.tab_texts(three, 2, 10, measure)[0], u"L" + ELLIPSIS, "at least a glyph and the ellipsis")
+
+    def test_tab_names_follow_the_bar(self):
+        """TabNames: the whole names kept, the bar's texts fitted as a tab is renamed or chosen."""
+        class Bar(object):
+            def __init__(self, texts):
+                self.texts, self.currentIndex, self.width = list(texts), 0, 10000
+
+            def tabText(self, index):
+                return self.texts[index]
+
+            def setTabText(self, index, text):
+                self.texts[index] = text
+
+            def __getattr__(self, name):
+                if name.startswith("__"):
+                    raise AttributeError(name)
+                return lambda *args: None
+
+        saved = fc._qt
+        fc._qt = lambda: (Anything(), Anything())
+        try:
+            bar = Bar([u"One", u"Two"])
+            names = fc.TabNames(bar, bar.texts)
+            names.measure = lambda: (lambda text: 7 * len(text))
+            names.set_text(1, u"Select language, character set, or family")
+            self.assertEqual(bar.texts, [u"One", u"Select language, character set, or family"])
+            bar.width = 7 * 3 + 7 * 12 + 2 * fc.TAB_PAD
+            names.fit()
+            self.assertEqual(bar.texts[0], u"One")
+            self.assertTrue(bar.texts[1].endswith(ELLIPSIS))
+            bar.currentIndex = 1
+            names.chosen(1)
+            self.assertEqual(bar.texts[1], u"Select language, character set, or family", "chosen: whole again")
+            self.assertEqual(names.texts, [u"One", u"Select language, character set, or family"], "the whole names kept")
+        finally:
+            fc._qt = saved
+
+
+@unittest.skipUnless(sys.version_info[0] >= 3 and os.path.isfile(os.path.join(TRAIN, "high_value.py")),
+                     "the train script is Python 3, and is not in the Python 2.7 copy")
+class HighValueTrainTests(unittest.TestCase):
+    """checks/train/high_value.py's rule, on a small CLDR of its own (nothing downloaded)."""
+
+    def test_rule(self):
+        import io as io_
+        import json
+        import tempfile
+        import zipfile
+        sys.path.insert(0, TRAIN)
+        try:
+            import high_value
+        finally:
+            sys.path.remove(TRAIN)
+        folder = tempfile.mkdtemp(prefix="freelab-high-")
+        self.addCleanup(lambda: __import__("shutil").rmtree(folder, True))
+        supplemental = (u'<languageData><language type="sr" scripts="Cyrl Latn"/><language type="ja" scripts="Jpan"/>'
+                        u'<language type="ru" scripts="Cyrl"/><language type="ru" scripts="Latn" alt="secondary"/>'
+                        u'</languageData><territoryInfo>'
+                        u'<territory type="AA" population="10000000" literacyPercent="50">'
+                        u'<languagePopulation type="ru" populationPercent="30"/>'  # 1.5 million writers
+                        u'<languagePopulation type="xxx" populationPercent="30" writingPercent="10"/>'  # 300,000
+                        # 250,000: the language's own literacy before the territory's (1.25 million at 50%)
+                        u'<languagePopulation type="www" populationPercent="25" literacyPercent="10"/>'
+                        # its writingPercent before any literacy: 1.5 million
+                        u'<languagePopulation type="vvv" populationPercent="30" literacyPercent="10" '
+                        u'writingPercent="50"/>'
+                        u'<languagePopulation type="zzz" populationPercent="2" officialStatus="official"/>'
+                        u'<languagePopulation type="yyy" populationPercent="5" officialStatus="official_regional"/>'
+                        u'</territory></territoryInfo>')
+        archive_path = os.path.join(folder, "cldr.zip")
+        with zipfile.ZipFile(archive_path, "w") as archive:
+            archive.writestr("common/supplemental/supplementalData.xml", supplemental)
+            archive.writestr("common/supplemental/supplementalMetadata.xml",
+                             u'<languageAlias type="srp" replacement="sr" reason="overlong"/>'
+                             u'<languageAlias type="rus" replacement="ru" reason="overlong"/>'
+                             u'<languageAlias type="jpn" replacement="ja" reason="overlong"/>')
+            archive.writestr("common/supplemental/likelySubtags.xml", u'<likelySubtag from="zzz" to="zzz_Latn_AA"/>')
+            archive.writestr("common/properties/coverageLevels.txt",
+                             u"sr ;\tmodern ;\tSerbian\nja ;\tmodern ;\tJapanese\nxxx ;\tbasic ;\tX\n")
+        rows = [["srp", "Serbian", "", "Cyrillic"], ["srp", "Serbian", "", "Latin"], ["jpn", "Japanese", "", "Kanji"],
+                ["jpn", "Japanese", "", "Katakana"], ["rus", "Russian", "", "Cyrillic"], ["rus", "Russian", "", "Latin"],
+                ["xxx", "X", "", "Latin"], ["zzz", "Z", "", "Latin"], ["zzz", "Z", "", "Greek"], ["yyy", "Y", "", "Latin"],
+                ["www", "W", "", "Latin"], ["vvv", "V", "", "Latin"]]
+        data = os.path.join(folder, "data.json")
+        with io_.open(data, "w", encoding="utf-8") as handle:
+            handle.write(u"%s" % json.dumps({"orthographies": rows}))
+        codes = {u"Latin": "Latn", u"Cyrillic": "Cyrl", u"Han": "Hani", u"Katakana": "Kana", u"Greek": "Grek"}
+        found, unmapped = high_value.high_value(zipfile.ZipFile(archive_path), codes, [data])
+        self.assertEqual([row[:2] for row in found],
+                         [["jpn", "Kanji"], ["jpn", "Katakana"], ["rus", "Cyrillic"], ["srp", "Cyrillic"], ["srp", "Latin"],
+                          ["vvv", "Latin"], ["zzz", "Latin"]],
+                         "modern (Serbian in both its scripts, Japanese's Jpan), 1.5 million writers (Russian, not in its "
+                         "secondary script; V by its writingPercent), official (Z, in its likely script); not 300,000 "
+                         "writers, nor 250,000 by W's own literacy, nor a regional status")
+        self.assertEqual(unmapped, [])
+        self.assertEqual(found[2][2], ["writers 1500000"])
+        self.assertEqual(found[5][2], ["writers 1500000"])
+        self.assertEqual(found[6][2], ["official AA", "writers 100000"])
 
 
 @unittest.skipUnless(sys.version_info[0] >= 3 and os.path.isfile(os.path.join(TRAIN, "orthographies.py")),
@@ -2602,6 +2804,18 @@ class DiagramTests(unittest.TestCase):
         unset = fc.VerticalMetrics(upm=1000, typo_ascender=750, typo_descender=-250, typo_line_gap=0)
         self.assertIn(u"The hhea values are not set in Font Info",
                       [line.text for line in fc.check_lines(unset, [], fc.check_metrics(unset, []))])
+
+    def test_glyphs_past_the_line_counted_in_grammar(self):
+        """The owner's report 137: "1 glyph reach below the line's descender"."""
+        m = fc.VerticalMetrics(upm=1000, win_ascent=1200, win_descent=400, typo_ascender=950, typo_descender=-250,
+                               typo_line_gap=0, hhea_ascender=950, hhea_descender=-250, hhea_line_gap=0, use_typo=True,
+                               cap_height=700)
+        extents = [fc.Extent("Aring", 0xC5, "B", 0, 1082), fc.Extent("g", 0x67, "B", -300, 500),
+                   fc.Extent("uni05BB", 0x5BB, "B", -320, -100)]
+        lines = dict((line.text, line) for line in fc.check_lines(m, extents, fc.check_metrics(m, extents)))
+        self.assertIn(u"1 glyph reaches above the line's ascender", lines)
+        self.assertEqual(lines[u"2 glyphs reach below the line's descender"].glyphs, [u"uni05BB", u"g"],
+                         "the deepest first")
 
 
 class MasterRowsTests(unittest.TestCase):
@@ -3528,7 +3742,12 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(item.texts[0], u"Indo-European (%d)" % len(indo.all_results()))
         self.assertEqual(item.texts[2], fc.coverage_text(fc.level_counts(indo.all_results())), "counted as a script is")
         self.assertEqual(item.last("setExpanded"), (True,))
-        self.assertEqual(len([args for name, args in item.calls if name == "setIcon"]), 2, "its arrow and its bar")
+        self.assertEqual(len([args for name, args in item.calls if name == "setIcon"]), 1, "its arrow")
+        self.assertEqual(sorted(args[0] for name, args in item.calls if name == "setFont"), [2, 3],
+                         "its counts in the list's normal size, as the scripts' counts (the names enlarged)")
+        self.assertIn((1, fc.BAR_ROLE, fc.bar_counts(fc.level_counts(indo.all_results()))),
+                      [args for name, args in item.calls if name == "setData"],
+                      "its bar's counts, which the bar's delegate draws to the column's width (report 127)")
         self.assertTrue(item.children, "its branches and languages are rows under it")
         closed = [node for node in nodes if len(node.path) == 1 and node.path not in dialog.opened][0]
         item = [one for one in made if one.value == rows.index(closed)][0]
@@ -3593,7 +3812,7 @@ class DialogTests(unittest.TestCase):
 
     def test_defaults_and_captions(self):
         """The owner: one check box whose caption is the sentence with the count, ticked by default;
-        the Languages choice starts with Every language; the high-value tab is named with its count."""
+        the Display choice starts with All languages; the high-value tab is named with its count."""
         gui = sys.modules["PythonQt"].QtGui
         saved = dict(gui.classes)
         for name in ("QCheckBox", "QComboBox", "QTabBar"):
@@ -3606,7 +3825,7 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(dialog.show_absent.checked, True, "ticked to start with")
         self.assertEqual(dialog.show_absent.made, (u"Show the scripts whose glyphs are fully missing from the font.",),
                          "no count shown as a zero before the first check")
-        self.assertEqual(fc.STATUS_FILTERS[dialog.status_filter.currentIndex][1], u"Every language")
+        self.assertEqual(fc.STATUS_FILTERS[dialog.status_filter.currentIndex][1], u"All languages")
         self.assertEqual(fc.STATUS_START, "all")
         self.assertEqual(dialog.left_tabs.told("addTab"),
                          [(u"High-value missing glyphs",), (u"Select language, character set, or family",)])
@@ -3712,31 +3931,42 @@ class DialogTests(unittest.TestCase):
 
     def test_columns_degrade(self):
         """At 1000 pixels the families' counts were cut ("95 of 177 la..."): the last column of each list
-        at the right is as wide as its contents, the names take the rest, and the bar gives way first."""
+        at the right is as wide as its contents, the names take the rest, and the bar gives way first. The
+        owner's report 126: every column can be dragged (Qt's Stretch and ResizeToContents modes cannot),
+        and the list shares its width itself (column_widths); report 127: the families' bars are drawn to
+        their column's width (a delegate), not as pictures of a set width."""
         calls, original = [], fc.FontCheckDialog.size_columns
-        fc.FontCheckDialog.size_columns = lambda self, tree, modes: calls.append((tree, modes))
+        fc.FontCheckDialog.size_columns = lambda self, tree, kind: calls.append((tree, kind))
         try:
             dialog = self.dialog()
         finally:
             fc.FontCheckDialog.size_columns = original
         # (each tab's full list, then its script's and its search's: the same columns)
         views = len(fc.VIEW_MODES)
-        self.assertEqual([modes for _, modes in calls],
-                         [("stretch", "contents")] * 2 * views + [("stretch", "fixed", "contents", "contents")] * views)
+        self.assertEqual([kind for _, kind in calls], ["names"] * 2 * views + ["bars"] * views)
         self.assertTrue(all(tree is wanted for (tree, _), wanted in
                             zip(calls, [dialog.views[key][mode].tree for key in ("languages", "sets", "families")
                                         for mode in fc.VIEW_MODES])))
         self.assertIs(dialog.views["families"]["full"].tree, dialog.family_tree)
 
         class Modes(object):
-            Stretch, ResizeToContents, Fixed = "Stretch", "ResizeToContents", "Fixed"
+            Stretch, ResizeToContents, Fixed, Interactive = "Stretch", "ResizeToContents", "Fixed", "Interactive"
 
-        class Tree(object):
-            def __init__(self, room=600, names=300, counts=250):
-                self.head, self.room, self.names, self.counts, self.widths = Recorded(), room, names, counts, []
+        class Header(Recorded):
+            def sectionSizeHint(self, column):
+                return 40
+
+        class Tree(Recorded):
+            def __init__(self, room=500, names=300, counts=200):
+                Recorded.__init__(self)
+                self.__dict__.update(head=Header(), room=room, names=names, counts=counts, widths={},
+                                     columnCount=4, bar=Recorded(), delegate=[])
 
             def header(self):
                 return self.head
+
+            def verticalScrollBar(self):
+                return self.bar
 
             def viewport(self):
                 view = Anything()
@@ -3744,35 +3974,189 @@ class DialogTests(unittest.TestCase):
                 return view
 
             def sizeHintForColumn(self, column):
-                return self.names
+                return self.names if column == 0 else self.counts if column == 2 else 30
 
             def columnWidth(self, column):
-                return self.counts
+                return self.widths.get(column, 0)
 
             def setColumnWidth(self, column, width):
-                self.widths.append((column, width))
+                self.widths[column] = width
+
+            def setItemDelegateForColumn(self, column, delegate):
+                self.delegate.append(column)
 
         gui = sys.modules["PythonQt"].QtGui
         saved = dict(gui.classes)
         gui.classes["QHeaderView"] = Modes
         try:
             tree = Tree()
-            dialog.size_columns(tree, ("stretch", "fixed", "contents"))
+            dialog.size_columns(tree, "bars")
         finally:
             gui.classes.clear()
             gui.classes.update(saved)
         self.assertEqual(tree.head.told("setStretchLastSection"), [(False,)], "Qt's own stretch gave the last column the rest")
-        self.assertEqual(tree.head.told("setSectionResizeMode"), [(0, "Stretch"), (1, "Fixed"), (2, "ResizeToContents")])
-        dialog.size_columns(object(), ("stretch",))  # (a list without a header: nothing, no error)
-        dialog.fit_bar(tree, fc.FAMILY_NAMES_MOST)
-        self.assertEqual(tree.widths, [(1, 50)], "a narrow list: the bar's column gets what the names and counts leave")
-        wide = Tree(room=1000, names=900)
-        dialog.fit_bar(wide, 400)
-        self.assertEqual(wide.widths, [(1, fc.BAR_COLUMN)], "the bar whole once the names (400 of them at most) fit")
-        dialog.fit_bar(object(), 400)  # (never raises)
-        dialog.redraws = {"bars": True}
-        dialog.redraw_now()  # (the list resized: its bars fitted again)
+        self.assertEqual(tree.head.told("setSectionResizeMode"), [(column, "Interactive") for column in range(4)],
+                         "every column can be dragged")
+        self.assertEqual(tree.delegate, [1], "the bars drawn to their column's width")
+        dialog.share_columns(tree)
+        self.assertEqual([tree.widths[column] for column in range(4)], [500 - fc.COUNTS_LEAST - 40 - fc.BAR_LEAST, fc.BAR_LEAST, fc.COUNTS_LEAST, 40],
+                         "a narrow list: the counts elided to COUNTS_LEAST, the bar at BAR_LEAST, the names the rest")
+        held = sys.modules["PythonQt"].QtGui.QApplication
+        try:
+            sys.modules["PythonQt"].QtGui.QApplication = type("App", (object,), {"mouseButtons": staticmethod(lambda: 0)})
+            dialog.column_dragged(tree, 2, 300)
+            self.assertEqual(dialog.pinned_columns[id(tree)], {}, "a width set by the code is no drag")
+            sys.modules["PythonQt"].QtGui.QApplication = type("App", (object,), {"mouseButtons": staticmethod(lambda: 1)})
+            dialog.column_dragged(tree, 2, 300)
+        finally:
+            sys.modules["PythonQt"].QtGui.QApplication = held
+        self.assertEqual(dialog.pinned_columns[id(tree)], {2: 300}, "the user's drag: kept")
+        self.assertIn(("columns", id(tree)), dialog.redraws)
+        dialog.redraw_now()  # (the list shared again: its dragged column kept, the rest given to the others)
         self.assertEqual(dialog.redraws, {})
+        self.assertEqual([tree.widths[column] for column in range(4)], [500 - 300 - 40 - fc.BAR_LEAST, fc.BAR_LEAST, 300, 40])
+        dialog.size_columns(object(), "names")  # (a list without a header: nothing, no error)
+        dialog.share_columns(object())  # (never raises)
+
+    def test_busy_hides_the_top_line(self):
+        """The owner's report 135: the duplicate "Listing..." line went, but its empty line stayed over the
+        progress bar: the top line is hidden while the work runs, and shown again with what it says."""
+        dialog = self.dialog()
+        dialog.coverage.status = Recorded()
+        dialog.set_busy(True, fc.BUSY_STEPS[3])
+        self.assertEqual(dialog.coverage.status.told("setVisible")[-1], (False,))
+        dialog.set_busy(False)
+        self.assertEqual(dialog.coverage.status.told("setVisible")[-1], (True,))
+
+    def test_build_and_copy_say_this_or_those(self):
+        """The owner's report 132: "Build 2 glyphs with Glyph Compose" for one row selected (a capital and
+        its small letter) read as two rows: the buttons say this glyph or those glyphs, the count is in
+        their tooltips."""
+        self.assertEqual([fc.build_caption(count) for count in (0, 1, 2)],
+                         [u"Build with Glyph Compose", u"Build this glyph with Glyph Compose",
+                          u"Build those glyphs with Glyph Compose"])
+        self.assertEqual([fc.copy_caption(count) for count in (0, 1, 2)],
+                         [u"Copy glyphs", u"Copy this glyph", u"Copy those glyphs"])
+        self.assertEqual(fc.build_tip([u"\u1e20", u"\u1e21"]), u"Opens <i>Glyph Compose</i> on 2 glyphs: \u1e20 \u1e21.")
+        self.assertEqual(fc.copy_tip([u"<"]), u"Copies 1 glyph as text: &lt;.")
+        dialog = self.dialog()
+        dialog.diacritics_button, dialog.copy_chars_button = Recorded(), Recorded()
+        dialog.chosen_characters = lambda: [u"\u1e20", u"\u1e21"]
+        dialog.buildable_checked = lambda: [u"\u1e20", u"\u1e21"]
+        dialog.update_buttons()
+        self.assertEqual(dialog.diacritics_button.told("setText")[-1], (u"Build those glyphs with Glyph Compose",))
+        self.assertEqual(dialog.copy_chars_button.told("setText")[-1], (u"Copy those glyphs",))
+        self.assertIn(u"2 glyphs", dialog.copy_chars_button.told("setToolTip")[-1][0])
+        self.assertIn(u"2 glyphs", dialog.diacritics_button.told("setToolTip")[-1][0])
+
+    def test_check_buttons_mate_the_list_shown(self):
+        """The owner's report 133: Check all and Check only what Glyph Compose can build lit up as a row
+        was selected, then grayed out: the shared module grays them (ak.update_states, every 300 ms) when the
+        first of the lists nearest them has no check box, and Qt's stack raises the list it shows, which puts
+        it last among the stack's children. So once the selection's tab had been shown, the high-value tab's
+        buttons were judged by the selection's empty list. The list shown is now first."""
+        dialog = self.dialog()
+
+        class Widget(object):
+            def __init__(self, parent=None):
+                self.parent, self.kids = parent, []
+                if parent is not None:
+                    parent.kids.append(self)
+
+            def parentWidget(self):
+                return self.parent
+
+            def walk(self):
+                for kid in self.kids:
+                    yield kid
+                    for found in kid.walk():
+                        yield found
+
+            def lower(self):
+                self.parent.kids.remove(self)
+                self.parent.kids.insert(0, self)
+
+            def raise_(self):
+                self.parent.kids.remove(self)
+                self.parent.kids.append(self)
+
+        class Stack(Widget):
+            current = None
+
+            def setCurrentIndex(self, index):  # (as QStackedLayout::setCurrentIndex: the widget shown raised)
+                shown = [one for one in self.kids if isinstance(one, Widget)][0:2]
+                pages = sorted(shown, key=lambda one: one.page)
+                if pages[index] is not self.current:
+                    self.current = pages[index]
+                    pages[index].raise_()
+
+        left = Widget()
+        button = Widget(left)
+        dialog.left_pages = Stack(left)
+        dialog.add_tree, dialog.own_tree = Widget(dialog.left_pages), Widget(dialog.left_pages)
+        dialog.add_tree.page, dialog.own_tree.page = 0, 1
+        dialog.left_pages.current = dialog.add_tree
+        dialog.selection = fc.Selection("set", u"Test", [], u"set:test")
+        views = lambda: [one for one in left.walk() if one in (dialog.add_tree, dialog.own_tree)]
+        mate = lambda: sorted(views(), key=lambda view: -self.ak._shared_depth(button, view))[0]
+        self.assertIs(mate(), dialog.add_tree, "as built")
+        dialog.show_left("own")
+        self.assertIs(mate(), dialog.own_tree)
+        dialog.show_left("value")
+        self.assertIs(mate(), dialog.add_tree, "the high-value list shown: its buttons go by it, not by the other")
+        dialog.left_tab_changed(1)
+        self.assertIs(mate(), dialog.own_tree, "a click on the tab too")
+
+    def test_a_check_names_its_glyphs_as_links(self):
+        """The owner's report 137: a check about glyphs, clicked, names them in the log, each a link that opens
+        it in a Glyph window (a glyph past the line's descender is not clipped: the click selected nothing)."""
+        dialog = self.dialog()
+        said, opened = [], []
+        dialog.log.add = lambda text, level="info": said.append(text)
+        dialog.check_rows = [fc.CheckLine("info", u"1 glyph reaches below the line's descender", u"", [u"uni05BB"])]
+        dialog.selected_item = lambda tree: "row"
+        dialog.index_of = lambda item: 0
+        dialog.open_glyph_text = lambda text: opened.append(text)
+        dialog.check_selected()
+        self.assertEqual(said, [u"1 glyph reaches below the line's descender: %s." % self.ak.glyph_name_links([u"uni05BB"])])
+        self.assertIs(dialog.log_link(u"glyphname:uni05BB"), True)
+        self.assertEqual(opened, [u"/uni05BB"])
+        self.assertIs(dialog.log_link(u"https://example.org"), False, "left to the log")
+
+    def test_scripts_list_may_shrink_in_a_short_window(self):
+        """The owner asked what happens at 480p: the scripts' list had a fixed height of six rows, which held
+        the window taller than such a screen. It is six rows at most and two at least now."""
+        dialog = self.dialog()
+        dialog.nearly.value = 30
+        dialog.check_coverage()
+        dialog.script_tree = Recorded()
+        dialog.rows_height = lambda tree, rows, header=False: 30 * rows
+        dialog.fill_scripts()
+        self.assertEqual(dialog.script_tree.told("setFixedHeight"), [])
+        shown = min(len(dialog.shown_scripts()) + 1, 6)
+        self.assertEqual(dialog.script_tree.told("setMaximumHeight"), [(30 * shown,)])
+        self.assertEqual(dialog.script_tree.told("setMinimumHeight"), [(min(30 * shown, 60),)])
+
+    def test_metrics_checks_beside_the_values(self):
+        """The owner's report 128: the Checks list right of the values, its heading on the line of theirs,
+        above the buttons, as tall as the values (scrolled when longer); the buttons and the line spacing's
+        choice under both."""
+        gui = sys.modules["PythonQt"].QtGui
+        saved = dict(gui.classes)
+        gui.classes["QGridLayout"] = Recorded
+        try:
+            dialog = self.dialog()
+        finally:
+            gui.classes.clear()
+            gui.classes.update(saved)
+        body = dialog.metrics_body
+        widgets = body.told("addWidget")
+        self.assertIn((dialog.values_tree, 0, 0), widgets)
+        self.assertIn((dialog.checks_tree, 0, 1), widgets, "beside the values, on their row")
+        self.assertIn((dialog.mode_keep, 3, 0, 1, 2), widgets)
+        self.assertEqual([args[1:] for args in body.told("addLayout")], [(1, 0, 1, 2), (2, 0, 1, 2)],
+                         "the buttons, then the line spacing, under both")
+        self.assertEqual(body.told("setColumnStretch"), [(1, 1)])
 
     def test_inferred_languages(self):
         """The languages whose characters are inferred from a text, or read from a keyboard layout, are
@@ -4912,9 +5296,9 @@ class LoadingTests(unittest.TestCase):
         shared = dict((text, names) for text, names in texts.items() if len(names) > 1)
         self.assertEqual(shared, {}, "no two controls answer with the same text")
         labels = dict((one.made[0], one) for one in made if one.kind == "QLabel" and one.made and one.told("setBuddy"))
-        self.assertEqual(sorted(labels), [u"Beside it", u"Compare every master with", u"Languages", u"Master",
+        self.assertEqual(sorted(labels), [u"Beside it", u"Compare every master with", u"Display", u"Master",
                                           u"Within reach: missing at most"])
-        for text, control in ((u"Within reach: missing at most", dialog.nearly), (u"Languages", dialog.status_filter),
+        for text, control in ((u"Within reach: missing at most", dialog.nearly), (u"Display", dialog.status_filter),
                               (u"Master", dialog.clip_master), (u"Compare every master with", dialog.reference),
                               (u"Beside it", dialog.compare_master)):
             self.assertEqual(labels[text].told("setWhatsThis")[-1], control.told("setWhatsThis")[-1], text)
@@ -5821,6 +6205,81 @@ class ThemeChangedTests(unittest.TestCase):
             self.assertEqual(noted, [black])
         finally:
             fc._qt = saved
+
+
+class SpacesSaidOnceTests(unittest.TestCase):
+    """The owner saw the line on missing spaces logged again at every check: once a font, again only
+    when it changes."""
+
+    def test_once_a_font_again_when_it_changes(self):
+        lines = []
+
+        class Stand(object):
+            log = type("Log", (object,), {"add": lambda self, text, *rest: lines.append(text)})()
+            package = None
+
+        Stand.say_spaces = fc.FontCheckDialog.__dict__["say_spaces"]
+        stand = Stand()
+
+        def font(path):
+            return type("P", (object,), {"fgPackage": type("F", (object,), {"path": path})()})()
+        stand.package = font(u"a.ttf")
+        stand.say_spaces(u"The font lacks these spaces: hair (U+200A).")
+        stand.package = font(u"a.ttf")  # (a new wrapper for the same font, as each read makes)
+        stand.say_spaces(u"The font lacks these spaces: hair (U+200A).")
+        self.assertEqual(len(lines), 1, "the same font, the same line: said once")
+        stand.say_spaces(u"The font lacks these spaces: thin (U+2009).")
+        self.assertEqual(len(lines), 2, "changed: said again")
+        stand.package = font(u"b.ttf")
+        stand.say_spaces(u"The font lacks these spaces: thin (U+2009).")
+        self.assertEqual(len(lines), 3, "another font: said for it")
+        stand.say_spaces(u"")
+        self.assertEqual(len(lines), 3, "nothing lacking: nothing said")
+
+
+class SearchFirstTests(unittest.TestCase):
+    """A search typed, then a check button clicked at once: the search still waiting for the pause in the
+    typing runs first, so the button acts on the rows it lists."""
+
+    def test_a_search_still_waiting_runs_before_a_check_button(self):
+        steps = []
+
+        class Timer(object):
+            active = True
+
+            def isActive(self):
+                return self.active
+
+            def stop(self):
+                self.active = False
+                steps.append("stop")
+
+        class Stand(object):
+            filling, search_timer = False, Timer()
+
+            def languages_changed(self):
+                steps.append("search")
+
+            def check_targets(self):
+                steps.append("targets")
+                return {"all": [u"x"]}
+
+            def sync_checks(self):
+                pass
+
+            def update_gain(self):
+                pass
+
+            def update_buttons(self):
+                pass
+        for name in ("set_checks", "search_now", "search_paused"):
+            setattr(Stand, name, fc.FontCheckDialog.__dict__[name])
+        stand = Stand()
+        stand.set_checks("all")
+        self.assertEqual(steps, ["stop", "search", "targets"])
+        del steps[:]
+        stand.set_checks("all")
+        self.assertEqual(steps, ["targets"], "nothing waiting: no search again")
 
 
 if __name__ == "__main__":

@@ -1103,18 +1103,61 @@ def coverage_order(result):
     return (order[result.level], rest, -(language.speakers or 0), language.name)
 
 
-STATUS_FILTERS = (("current", u"Living and constructed languages", ("living", "constructed", NOT_GIVEN)),
-                  ("living", u"Living languages only", ("living", NOT_GIVEN)),
-                  ("historical", u"Historical languages only", ("historical",)),
-                  ("all", u"Every language", None))
-# Hyperglot's status of a language: living, historical (no native speakers left: Latin, Ancient Greek), or
-# constructed (Esperanto). The other sources say less: historical where Google's data says so, constructed
-# where Glottolog files the language under Artificial Language, and no status otherwise (NOT_GIVEN), which
-# counts with the living ones. None keeps every status; the dialog starts with STATUS_START, and coverage()
-# without a choice keeps the first one's.
+HIGH_VALUE = "high-value"  # the Display choice that keeps the languages of high value (is_high_value), not a status
+STATUS_FILTERS = (("current", u"Living and constructed", ("living", "constructed", NOT_GIVEN)),
+                  ("living", u"Living only", ("living", NOT_GIVEN)),
+                  ("historical", u"Historical only", ("historical",)),
+                  ("high", u"High-value only", HIGH_VALUE),
+                  ("all", u"All languages", None))
+# The Display dropdown (it was named Languages, and each of its choices said "languages" again). Hyperglot's
+# status of a language: living, historical (no native speakers left: Latin, Ancient Greek), or constructed
+# (Esperanto). The other sources say less: historical where Google's data says so, constructed where Glottolog
+# files the language under Artificial Language, and no status otherwise (NOT_GIVEN), which counts with the
+# living ones. None keeps every status; HIGH_VALUE keeps the orthographies high_value_languages.json lists
+# (checks/train/high_value.py: CLDR's modern coverage, official status, or a million people who read and write
+# the language); the dialog starts with STATUS_START, and coverage() without a choice keeps the first one's.
 STATUS_START = "all"
 STATUS_TITLES = {"living": u"Living languages", "historical": u"Historical languages",
                  "constructed": u"Constructed languages", NOT_GIVEN: u"Languages of no given status"}
+LESSER_TITLE = u"Other languages"  # the heading of the languages High-value only leaves out, in a search
+HIGH_VALUE_FILE = "high_value_languages.json"  # beside this script: checks/train/high_value.py makes it from CLDR
+_HIGH_VALUE = {}  # {path: (its date, its table)}: made once per file version
+
+
+def high_value_path():
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), HIGH_VALUE_FILE)
+
+
+def high_value_orthographies(path=None):
+    """{(ISO 639-3 code, script label): its reasons} of the orthographies of high value; {} without the
+    file (High-value only then keeps none, and says so)."""
+    path = path or high_value_path()
+    try:
+        stamp = os.path.getmtime(path)
+        held = _HIGH_VALUE.get(path)
+        if held is None or held[0] != stamp:
+            data = read_data(path, stamp)
+            held = _HIGH_VALUE[path] = (stamp, dict(((u"%s" % row[0], u"%s" % row[1]), tuple(row[2]))
+                                                    for row in data["orthographies"]))
+        return held[1]
+    except (OSError, IOError, ValueError, KeyError, IndexError, TypeError):
+        return {}
+
+
+def is_high_value(language, table=None):
+    """Whether a language's orthography is of high value (high_value_orthographies)."""
+    table = high_value_orthographies() if table is None else table
+    return (language.iso, language.script) in table
+
+
+def kept_by(language, statuses, table=None):
+    """Whether the Display choice (STATUS_FILTERS' third part: statuses, HIGH_VALUE, or None for all)
+    keeps a language."""
+    if statuses is None:
+        return True
+    if statuses == HIGH_VALUE:
+        return is_high_value(language, table)
+    return language.status in statuses
 # The check box of the languages no source declares, and the heading of those it leaves out, in a
 # search. It was "Languages inferred from text"; the keyboard layouts are no source's declaration
 # either, so it holds them too (one check box more would crowd the settings row for 41 rows).
@@ -1149,10 +1192,13 @@ def inferred_sentence(counted_in, aside=0, bold=None):
     return u""
 
 
-def left_title(language):
-    """The heading a language left out of the lists comes under, in a search."""
+def left_title(language, statuses=None):
+    """The heading a language left out of the lists comes under, in a search (statuses: the Display
+    choice's; a language High-value only leaves out comes under LESSER_TITLE, whatever its status)."""
     if language.evidence in UNDECLARED:
         return INFERRED_TITLE
+    if statuses == HIGH_VALUE:
+        return LESSER_TITLE
     return STATUS_TITLES.get(language.status, u"%s" % language.status)
 
 
@@ -1185,7 +1231,7 @@ def coverage(languages, font, nearly=NEARLY_MISSING, historical=False, statuses=
         statuses = STATUS_FILTERS[0][2]
     by_script = {}
     for language in languages:
-        if statuses is not None and language.status not in statuses:
+        if not kept_by(language, statuses):
             continue
         by_script.setdefault(script_group(language.script), []).append(check_language(language, font, nearly))
     found = []
@@ -1209,7 +1255,7 @@ def left_out(languages, font, nearly=NEARLY_MISSING, statuses=None, aside=()):
     """[Coverage] of the languages a choice of statuses leaves out of coverage(), and of those set
     aside (aside: the inferred ones, with their check box off): a search still finds them, under a
     heading that says why they are not listed."""
-    found = [] if statuses is None else [language for language in languages if language.status not in statuses]
+    found = [] if statuses is None else [language for language in languages if not kept_by(language, statuses)]
     return [check_language(language, font, nearly) for language in found + list(aside)]
 
 
@@ -2682,6 +2728,34 @@ def gain_text(checked_count, gained, bold=None):
     return head + u"%s (%s)" % (bold(count) if bold else count, where)
 
 
+def build_caption(count):
+    """The caption of the button that hands glyphs to Glyph Compose, for count glyphs it can build."""
+    if not count:
+        return u"Build with Glyph Compose"
+    return u"Build %s with Glyph Compose" % (u"this glyph" if count == 1 else u"those glyphs")
+
+
+def copy_caption(count):
+    """The caption of the button that copies count glyphs as text."""
+    if not count:
+        return u"Copy glyphs"
+    return u"Copy this glyph" if count == 1 else u"Copy those glyphs"
+
+
+def build_tip(chars, font=lambda text: text):
+    """The tooltip of the build button: how many glyphs, and which (rich text; font: how they are set)."""
+    return u"Opens <i>Glyph Compose</i> on %s: %s." % (counted(len(chars), u"glyph"), font(html_text(u" ".join(chars))))
+
+
+def copy_tip(chars, font=lambda text: text):
+    """The tooltip of the copy button: how many glyphs, and which (rich text)."""
+    return u"Copies %s as text: %s." % (counted(len(chars), u"glyph"), font(html_text(u" ".join(chars))))
+
+
+def html_text(text):
+    return u"%s" % text.replace(u"&", u"&amp;").replace(u"<", u"&lt;").replace(u">", u"&gt;")
+
+
 CHECK_BUTTONS = (("all", u"Check all"), ("none", u"Check none"), ("buildable", u"Check only what Glyph Compose can build"))
 
 
@@ -2998,7 +3072,8 @@ def check_lines(m, extents, findings, capitals=True):
             rows = [f for f in by.get("beyond", []) if f.kind == kind]
             if rows:
                 more = u"" if len(rows) < BEYOND_SHOWN else u" (the farthest %d)" % BEYOND_SHOWN
-                info.append(CheckLine("info", u"%s reach %s%s" % (counted(len(rows), u"glyph"), word, more),
+                info.append(CheckLine("info", u"%s %s %s%s" % (counted(len(rows), u"glyph"),
+                                                               u"reaches" if len(rows) == 1 else u"reach", word, more),
                                       u"They may touch the line %s at the font's own line spacing (tall diacritics often "
                                       u"do): %s." % (u"above" if kind == "beyond-top" else u"below",
                                                      u", ".join(u"%s %d" % (f.glyphs[0][1], f.value) for f in rows)),
@@ -3484,10 +3559,94 @@ def split_sizes(width, share=LEFT_SHARE):
     return left, int(width) - left
 
 
-def bar_width(room, names, counts, whole=BAR_COLUMN):
-    """The width of a list's bar column: what the names and the counts leave of room, at most whole
-    and never below zero."""
-    return int(max(0, min(whole, room - names - counts)))
+TAB_PAD = 30  # pixels a tab takes beside its text (ak.TAB_SHEET's padding and margin, and a little room)
+TAB_LEAST = 1  # characters an elided tab keeps before its ellipsis, at least
+
+
+def elided_text(text, width, measure):
+    """text cut to fit width pixels (measure: a text's width), an ellipsis at its end; never less than
+    TAB_LEAST characters and the ellipsis."""
+    if measure(text) <= width:
+        return text
+    cut = text
+    while len(cut) > TAB_LEAST and measure(cut.rstrip() + u"\N{HORIZONTAL ELLIPSIS}") > width:
+        cut = cut[:-1]
+    return cut.rstrip() + u"\N{HORIZONTAL ELLIPSIS}"
+
+
+def tab_texts(texts, current, room, measure, pad=TAB_PAD):
+    """The texts a tab bar of room pixels shows (texts: its tabs' whole names; current: the tab chosen):
+    all whole when they fit; else the chosen tab's whole and the others elided with an ellipsis to share
+    what it leaves, a short one kept whole when it fits in its share (the owner's report 125: the bar's
+    scroll arrows hid a tab; an elided tab is whole again once chosen)."""
+    texts = list(texts)
+    widths = [measure(text) + pad for text in texts]
+    if sum(widths) <= room or room <= 0 or not 0 <= current < len(texts):  # (0: not laid out yet)
+        return texts
+    others = sorted((index for index in range(len(texts)) if index != current), key=lambda index: widths[index])
+    left = room - widths[current]
+    shares = {}
+    while others:  # (the narrowest first: whole when it fits in an equal share, its spare room to the others)
+        fair = left / float(len(others))
+        if widths[others[0]] <= fair:
+            shares[others[0]] = widths[others[0]]
+            left -= widths[others.pop(0)]
+            continue
+        for index in others:
+            shares[index] = fair
+        break
+    return [text if index == current or widths[index] <= shares[index]
+            else elided_text(text, shares[index] - pad, measure) for index, text in enumerate(texts)]
+
+
+BAR_LEAST = 48  # pixels: the bar's column gives way to this before a name is cut (it was given none: report 127)
+NAME_LEAST = 90  # pixels: a name's column is cut to this before the bar gives way further
+COUNTS_LEAST = 120  # pixels: the families' long counts (their Languages column) give way to this first, elided
+BAR_MARGIN = 6  # pixels between a bar and its column's edges
+BAR_ROLE = 0x0100 + 78  # Qt.UserRole + 78: a row's bar counts, "covered,nearly,started,missed" (bar_delegate draws them)
+COLUMN_KINDS = {"languages": "names", "sets": "names", "families": "bars"}  # how a list at the right shares its width
+
+
+def column_widths(room, wanted, taker=0, giving=(), least=None, pinned=None):
+    """The widths of a list's columns, filling room exactly (no gap at the right, nothing past it): each
+    column as wide as it wants (wanted), a column the user dragged as they left it (pinned: {column:
+    width}); the taker column is given what they leave. When that is less than the taker wants, the
+    giving columns give way first, in their order, down to their least (least: {column: width}), then the
+    taker down to its least, then the giving columns to nothing, in the reverse order (the families' list:
+    its counts, then its bar, to their least; the names to theirs; the bar closed, then the counts), then
+    the taker. A taker the user dragged gives its part to the first giving column that was not dragged,
+    else to the last column not dragged."""
+    pinned, least = dict(pinned or {}), dict(least or {})
+    count = len(wanted)
+    if taker in pinned:
+        free = [column for column in giving if column not in pinned]
+        free = free or [column for column in reversed(range(count)) if column not in pinned]
+        if not free:
+            return [int(pinned.get(column, wanted[column])) for column in range(count)]
+        taker = free[0]
+    widths = [int(pinned.get(column, wanted[column])) for column in range(count)]
+    giving = [column for column in giving if column != taker and column not in pinned]
+
+    def rest():
+        return room - sum(widths[column] for column in range(count) if column != taker)
+
+    for goal, floor, order in ((wanted[taker], least, giving), (least.get(taker, 0), {}, giving[::-1])):
+        # (the giving columns down to their least while the taker lacks what it wants; then, while it lacks
+        # its own least, down to nothing, the last to give way first)
+        for column in order:
+            short = goal - rest()
+            if short <= 0:
+                break
+            widths[column] -= min(short, max(0, widths[column] - floor.get(column, 0)))
+    widths[taker] = max(0, rest())
+    return widths
+
+
+def bar_counts(counts):
+    """A row's bar counts as its cell holds them (BAR_ROLE): "covered,nearly,started,missed"."""
+    return u",".join(u"%d" % count for count in counts)
+
+
 DIAGRAM_GAP = 0.1  # of the em, between the diagram's glyphs
 DIAGRAM_NAME_MIN = 64  # pixels: room for a glyph's name under it in the diagram (longer ones elided)
 SCRIPT_SHEET = (u"QTreeView::item:selected { background: rgba(128, 128, 128, 70); color: palette(text); } "
@@ -4268,7 +4427,7 @@ def listing_text(tab, script):
 
 ABSENT_WHY = u"a script the font has none of"
 OTHER_SCRIPT_WHY = u"not the script chosen above"
-STATUS_WHY = u"left out by the choice of languages above"
+STATUS_WHY = u"left out by the Display choice above"
 RIGHT_TABS = (("languages", u"Languages"), ("sets", u"Character sets"), ("families", u"Families"))
 RIGHT_NOUNS = {"languages": (u"language", u"languages"), "sets": (u"character set", u"character sets"),
                "families": (u"language", u"languages")}
@@ -4294,7 +4453,7 @@ def kept_rows(results, text, level, sort, counts):
     return sort_languages(kept, sort)
 
 
-def language_sections(scripts, shown, text=u"", level=None, sort="reach", others=()):
+def language_sections(scripts, shown, text=u"", level=None, sort="reach", others=(), statuses=None):
     """([Section], hidden): the Languages tab. scripts: every ScriptCoverage; shown: the names of the
     scripts listed (those the font has, or the one chosen); others: the coverages of the languages
     the choice of statuses leaves out. Without a text searched, the scripts shown. A search looks
@@ -4315,9 +4474,9 @@ def language_sections(scripts, shown, text=u"", level=None, sort="reach", others
                      for s in scripts if s.script not in shown]
         titles = []
         for r in others:
-            if left_title(r.language) not in titles:
-                titles.append(left_title(r.language))
-        sections += [Section(title, rows([r for r in others if left_title(r.language) == title]), STATUS_WHY)
+            if left_title(r.language, statuses) not in titles:
+                titles.append(left_title(r.language, statuses))
+        sections += [Section(title, rows([r for r in others if left_title(r.language, statuses) == title]), STATUS_WHY)
                      for title in titles]
     return [section for section in sections if section.results], counts["hidden"]
 
@@ -4769,7 +4928,7 @@ def languages_line(sections, text=u"", hidden=0, outside=0, left=0, level=None, 
             lines.append(u"%s of the scripts not listed here %s hidden: a search finds %s too." % (
                 counted(outside, u"language"), u"is" if outside == 1 else u"are", u"it" if outside == 1 else u"them"))
         if left:
-            lines.append(u"%s left out by the choice of languages above: a search finds %s too." % (
+            lines.append(u"%s left out by the Display choice above: a search finds %s too." % (
                 u"1 language is" if left == 1 else u"%d languages are" % left, u"it" if left == 1 else u"them"))
     return u" ".join(lines)
 
@@ -5258,6 +5417,72 @@ class Tab(object):
         self.findings = []
 
 
+class TabNames(object):
+    """A tab bar that never scrolls: its tabs' whole names kept here, and shown elided (tab_texts) when
+    the bar is too narrow for them all, the chosen tab's whole; fitted again as a tab is chosen and, on
+    the next turn of the event loop, as the bar is resized. The bar ignores its names' width (it never
+    widens the window: the window sizes the bar)."""
+
+    def __init__(self, bar, texts):
+        QtCore, QtGui = _qt()
+        self.bar, self.texts = bar, [u"%s" % text for text in texts]
+        try:
+            bar.setUsesScrollButtons(False)
+            bar.setElideMode(QtCore.Qt.ElideRight)  # (Qt's own, should the chosen tab alone pass the room)
+            bar.setSizePolicy(QtGui.QSizePolicy.Ignored, QtGui.QSizePolicy.Fixed)
+        except Exception:
+            pass
+
+        class Resized(QtCore.QTimer):  # (as FontCheckDialog.watch_resize: a timer stands for a QObject)
+            def eventFilter(self, obj, event):
+                try:
+                    if event.type() == 14:  # Resize: fitted on the next turn, never inside Qt's layout
+                        self.start()
+                except Exception:
+                    pass  # an event filter must never raise
+                return False
+
+        self.watch = Resized(bar)  # (its parent the bar: Qt deletes it with it)
+        try:
+            self.watch.setSingleShot(True)
+            self.watch.setInterval(0)
+            self.watch.connect("timeout()", self.fit)
+            bar.installEventFilter(self.watch)
+            bar.connect("currentChanged(int)", self.chosen)
+        except Exception:
+            pass
+
+    def chosen(self, index):
+        self.fit()
+
+    def set_text(self, index, text):
+        """A tab named anew (its whole name), and the names fitted."""
+        if 0 <= index < len(self.texts):
+            self.texts[index] = u"%s" % text
+        self.fit()
+
+    def room(self):
+        return int(_prop(self.bar, "width"))
+
+    def measure(self):
+        QtCore, QtGui = _qt()
+        metrics = QtGui.QFontMetrics(_prop(self.bar, "font"))
+        return lambda text: int(metrics.width(text))
+
+    def fit(self):
+        """Each tab's name as tab_texts has it for the bar's width now. Never raises."""
+        try:
+            shown = tab_texts(self.texts, int(_prop(self.bar, "currentIndex")), self.room(), self.measure())
+        except Exception:
+            shown = self.texts
+        for index, text in enumerate(shown):
+            try:
+                if u"%s" % self.bar.tabText(index) != text:
+                    self.bar.setTabText(index, text)
+            except Exception:
+                pass
+
+
 class FontCheckDialog(object):
     def __init__(self):
         self.failed = None
@@ -5325,6 +5550,10 @@ class FontCheckDialog(object):
         self.pictures = {}  # (kind, key): an icon drawn (the characters to add)
         self.drawing_failed = False
         self.filters, self.redraws = [], {}
+        # The lists at the right share their width themselves (size_columns): each one's kind, its columns
+        # the user dragged, and the delegates that draw the families' bars, by list
+        self.column_kinds, self.pinned_columns, self.column_trees = {}, {}, {}
+        self.column_slots, self.delegates, self.sharing = [], [], False
         main = ak.AutoKerningDialog.main_window()
         dialog = QtGui.QDialog(main) if main is not None else QtGui.QDialog()
         self.dialog = dialog
@@ -5332,10 +5561,11 @@ class FontCheckDialog(object):
         dialog.setWhatsThis(HELP)
         ak.size_dialog(dialog)
         self.widen(dialog)  # (two lists side by side: the shared 1000 pixels cut the right one's last column)
-        layout = QtGui.QVBoxLayout(dialog)
+        layout = ak.window_layout(dialog)  # (scrolls on a small screen)
         self.font_label = ak.status_label()
         layout.addWidget(self.font_label)
         self.log = ak.Log()
+        self.log.link_handler = self.log_link  # (the glyphs a line names, each opened on a click)
         # A tab bar over plain pages: a QTabWidget's themed page drew its buttons with light frames in dark mode
         self.tabs = QtGui.QTabBar()
         self.tabs.setExpanding(False)
@@ -5356,6 +5586,9 @@ class FontCheckDialog(object):
         for tab, label in ((self.coverage, "Coverage"), (self.metrics, "Vertical metrics"), (self.masters, "Masters")):
             self.tabs.addTab(label)
             self.pages.addWidget(tab.widget)
+        self.tab_names = {"window": TabNames(self.tabs, (u"Coverage", u"Vertical metrics", u"Masters")),
+                          "left": TabNames(self.left_tabs, (value_title(None), selection_title(None))),
+                          "right": TabNames(self.right_tabs, [label for _, label in RIGHT_TABS])}
         layout.addWidget(self.log.widget)
         buttons = QtGui.QHBoxLayout()
         self.glyph_window_button = QtGui.QPushButton("Show in Glyph window")
@@ -5407,13 +5640,18 @@ class FontCheckDialog(object):
         except Exception:
             pass
 
-    def size_columns(self, tree, modes):
-        """How a list's columns share its width as the window is resized (modes: one of "stretch",
-        "contents", "fixed" per column): the last column sized to its contents, so no count is cut in
-        half, and the names' column taking the rest (cut with an ellipsis, whole in its tooltip).
-        Qt's own last-section stretch is switched off: it gave the last column what was left, however
-        little. Each call guarded: a header that refuses leaves the columns as fit_columns sets them."""
+    def size_columns(self, tree, kind):
+        """A list at the right whose columns the user can drag (the owner's report 126: Qt's Stretch and
+        ResizeToContents modes, set here before, cannot be dragged) and that shares its width itself
+        (share_columns, column_widths): the names' column takes what the others leave (cut with an
+        ellipsis, whole in its tooltip), the counts stay whole, the families' bar gives way to BAR_LEAST
+        first and is drawn to its column's width (bar_delegate). A column dragged keeps its width; the
+        names' column (or, when it is the one dragged, the bar's or the last one) takes up the rest, so
+        the frame is never left with a gap. kind: COLUMN_KINDS'. Each call guarded."""
         QtCore, QtGui = _qt()
+        self.column_kinds[id(tree)] = kind
+        self.pinned_columns[id(tree)] = {}
+        self.column_trees[id(tree)] = tree
         try:
             header = tree.header()
             header.setStretchLastSection(False)
@@ -5421,28 +5659,124 @@ class FontCheckDialog(object):
                 header.setMinimumSectionSize(0)  # (the bar's column may close altogether)
             except Exception:
                 pass
-            kinds = {"stretch": QtGui.QHeaderView.Stretch, "contents": QtGui.QHeaderView.ResizeToContents,
-                     "fixed": QtGui.QHeaderView.Fixed}
-            for column, mode in enumerate(modes):
-                header.setSectionResizeMode(column, kinds[mode])
+            for column in range(int(_prop(tree, "columnCount"))):
+                header.setSectionResizeMode(column, QtGui.QHeaderView.Interactive)
+            tree.setProperty("freelab_own_columns", True)  # (for the shared module: this list shares its own width)
+        except Exception:
+            pass
+        owner = self
+
+        def dragged(column, old, new):
+            owner.column_dragged(tree, column, new)
+
+        def moved(*args):
+            owner.columns_soon(tree)
+
+        slots = [dragged, moved]
+        self.column_slots.extend(slots)  # (kept: PythonQt holds no reference to a connected function)
+        try:
+            tree.header().connect("sectionResized(int,int,int)", dragged)
+            bar = tree.verticalScrollBar()
+            bar.connect("rangeChanged(int,int)", moved)  # (rows made, opened, or closed)
+            bar.connect("valueChanged(int)", moved)  # (other rows shown: their counts may be wider)
+        except Exception:
+            pass
+        if kind == "bars":
+            self.bar_delegate(tree)
+
+    def column_dragged(self, tree, column, width):
+        """A column resized: by the user's drag (a mouse button held) it keeps that width (pinned), and the
+        others share what is left; by share_columns itself, nothing. Never raises."""
+        try:
+            if self.sharing:
+                return
+            QtCore, QtGui = _qt()
+            if int(QtGui.QApplication.mouseButtons()) == 0:
+                return
+            self.pinned_columns.setdefault(id(tree), {})[int(column)] = int(width)
+            self.columns_soon(tree)
         except Exception:
             pass
 
-    def fit_bar(self, tree, name_most):
-        """The bar's column of a three-column list (names, bar, counts) given what the other two leave:
-        its whole width when the names (at most name_most pixels of them) and the counts fit beside
-        it, less in a narrower list, nothing in a very narrow one: the bar gives up width first, then
-        the names are cut, and the counts stay whole. Called as the list is filled and as it is
-        resized; never raises."""
+    def columns_soon(self, tree):
+        """The list's columns shared again a moment later (redraw_now), never inside Qt's own resizing."""
+        try:
+            self.redraws[("columns", id(tree))] = True
+            self.redraw_timer.start()
+        except Exception:
+            pass
+
+    def share_columns(self, tree):
+        """The list's columns given the widths column_widths finds for its viewport's width now, from what
+        its rows shown want (Qt measures those, as its own ResizeToContents did). Never raises."""
+        kind = self.column_kinds.get(id(tree))
+        if kind is None:
+            return
         try:
             room = int(_prop(tree.viewport(), "width"))
-            names = min(int(tree.sizeHintForColumn(0)), int(name_most))
-            counts = int(tree.columnWidth(2))
-            try:  # (the families' fourth column, the languages not yet covered: whole too)
-                counts += int(tree.columnWidth(3)) if int(_prop(tree, "columnCount")) > 3 else 0
-            except Exception:
-                pass
-            tree.setColumnWidth(1, bar_width(room, names, counts))
+            count = int(_prop(tree, "columnCount"))
+            header = tree.header()
+
+            def wants(column):
+                try:
+                    head = int(header.sectionSizeHint(column))
+                except Exception:
+                    head = 0
+                return max(int(tree.sizeHintForColumn(column)), head)
+
+            wanted = [wants(column) for column in range(count)]
+            if kind == "bars":
+                wanted[0] = min(wanted[0], FAMILY_NAMES_MOST)
+                wanted[1] = BAR_COLUMN
+                # (the long counts give way first, elided, then the bar: live at 1,000 pixels the counts kept
+                # their whole width, the names were cut to "Austr...", and the bars squeezed to 20 pixels)
+                widths = column_widths(room, wanted, 0, (2, 1), {0: NAME_LEAST, 1: BAR_LEAST, 2: COUNTS_LEAST},
+                                       self.pinned_columns.get(id(tree)))
+            else:
+                widths = column_widths(room, wanted, 0, (), {0: NAME_LEAST}, self.pinned_columns.get(id(tree)))
+        except Exception:
+            return
+        self.sharing = True
+        try:
+            for column, width in enumerate(widths):
+                if int(tree.columnWidth(column)) != width:
+                    tree.setColumnWidth(column, width)
+        except Exception:
+            pass
+        finally:
+            self.sharing = False
+
+    def bar_delegate(self, tree):
+        """The families' bars drawn in their cells, as wide as their column less BAR_MARGIN each side, from
+        the counts each row holds (BAR_ROLE): a picture of a set width was cut by a narrower column, and
+        gone with a column of nothing (the owner's reports 127 and 131). What it uses is held here: a
+        dropped module's globals turn None."""
+        QtCore, QtGui = _qt()
+        role, margin, levels, widths_of = BAR_ROLE, BAR_MARGIN, BAR_LEVELS, bar_widths
+        colors = dict((level, level_color(level)) for level in BAR_LEVELS)  # (the same in either palette)
+
+        class Bars(QtGui.QStyledItemDelegate):
+            def paint(self, painter, option, index):
+                QtGui.QStyledItemDelegate.paint(self, painter, option, index)
+                try:
+                    text = u"%s" % (index.data(role) or u"")
+                    counts = [int(part) for part in text.split(u",")] if text else []
+                    rect = option.rect
+                    width = int(rect.width()) - 2 * margin
+                    if len(counts) != len(levels) or width <= 0:
+                        return
+                    x, top = int(rect.left()) + margin, int(rect.top()) + int(rect.height()) // 2 - 4
+                    for level, w in zip(levels, widths_of(counts, width)):
+                        if w:
+                            painter.fillRect(QtCore.QRect(x, top, w, 8), colors[level])
+                            x += w
+                except Exception:
+                    pass  # a delegate's paint must never raise
+
+        try:
+            delegate = Bars(tree)  # (its parent the list: Qt deletes it with it)
+            tree.setItemDelegateForColumn(1, delegate)
+            self.delegates.append(delegate)
         except Exception:
             pass
 
@@ -5613,9 +5947,8 @@ class FontCheckDialog(object):
                     self.draw_diagram()
                 elif key == "comparison":
                     self.draw_comparison()
-                elif key == "bars":
-                    for view in self.views["families"].values():
-                        self.fit_bar(view.tree, FAMILY_NAMES_MOST)
+                elif isinstance(key, tuple) and key[0] == "columns":
+                    self.share_columns(self.column_trees[key[1]])
             except Exception:
                 pass  # a timer's handler must not raise
 
@@ -5634,13 +5967,17 @@ class FontCheckDialog(object):
         for _, label, _ in STATUS_FILTERS:
             self.status_filter.addItem(label)
         self.status_filter.setCurrentIndex([key for key, _, _ in STATUS_FILTERS].index(STATUS_START))
-        self.status_filter.setWhatsThis(u"Which languages are counted and listed, by their status: every "
-                                        u"language to start with, the living and constructed ones (Esperanto), the "
-                                        u"living ones only, or the historical ones only (no native speakers left: "
-                                        u"Latin, Ancient Greek). Hyperglot gives each language's status; a language "
-                                        u"from another source whose status is not given counts with the living "
-                                        u"ones. A search finds the languages left out too.")
-        tab.settings.addWidget(self.label_for("Languages", self.status_filter))  # (once its help is set: the label's too)
+        self.status_filter.setWhatsThis(u"Which languages are counted and listed: all of them to start with, by "
+                                        u"their status (the living and constructed ones, Esperanto among them; the "
+                                        u"living ones only; the historical ones only, with no native speakers left: "
+                                        u"Latin, Ancient Greek), or the high-value ones only. Hyperglot gives each "
+                                        u"language's status; a language from another source whose status is not given "
+                                        u"counts with the living ones. <i>High-value only</i> keeps the languages "
+                                        u"Unicode's CLDR targets at its modern level (those the major platforms ship "
+                                        u"in), those official in a country or territory, and those at least a million "
+                                        u"people read and write, in the scripts CLDR writes them in (about 300). A "
+                                        u"search finds the languages left out too.")
+        tab.settings.addWidget(self.label_for("Display", self.status_filter))  # (once its help is set: the label's too)
         tab.settings.addWidget(self.status_filter)
         self.inferred_box = QtGui.QCheckBox(INFERRED_TITLE)
         self.inferred_box.setChecked(True)
@@ -6007,14 +6344,14 @@ class FontCheckDialog(object):
             halves.setSizes(list(split_sizes(wide_width(self.screen_width(self.dialog)))))
         except Exception:
             pass
-        # The lists at the right: the names' column takes what the others leave, and the last one is as
-        # wide as its contents (at 1000 pixels the families' counts were cut: "95 of 177 la...").
-        for key, modes in (("languages", ("stretch", "contents")), ("sets", ("stretch", "contents")),
-                           ("families", ("stretch", "fixed", "contents", "contents"))):
+        # The lists at the right: the names' column takes what the others leave, and the counts are as
+        # wide as their contents (at 1000 pixels the families' counts were cut: "95 of 177 la..."); the
+        # user can drag any column (size_columns), and the families' bars are drawn to their column's width.
+        for key, _ in RIGHT_TABS:
             for mode in VIEW_MODES:
-                self.size_columns(self.views[key][mode].tree, modes)
-        for mode in VIEW_MODES:
-            self.watch_resize(self.views["families"][mode].tree, "bars")  # (its bars give up width first in a narrower list)
+                tree = self.views[key][mode].tree
+                self.size_columns(tree, COLUMN_KINDS[key])
+                self.watch_resize(tree, ("columns", id(tree)))  # (shared again as it is resized)
         # The shared module clears a list's selection on a click beside it (its empty part, the window's
         # background); these lists' selections feed the others (the script chosen, the selection's tab of
         # glyphs), and the lists at the right unselect on a click in their empty part themselves
@@ -6089,6 +6426,10 @@ class FontCheckDialog(object):
             for widget in (self.nearly, self.status_filter, self.inferred_box, self.composing, self.coverage_button):
                 widget.setEnabled(not on)
             self.tabs.setEnabled(not on)
+        except Exception:
+            pass
+        try:  # the top line hidden meanwhile: emptied (say_busy), it still took a line over the bar (report 135)
+            self.coverage.status.setVisible(not on)
         except Exception:
             pass
         try:  # the progress bar over the lists' area: shown while the work runs, gone with it
@@ -6205,11 +6546,15 @@ class FontCheckDialog(object):
                                   u"share of the em, the suggested values dashed in the highlight color. A glyph "
                                   u"selected among the clipped ones is drawn in it too.")
         tab.layout.addWidget(self.diagram, 1)
-        body = QtGui.QHBoxLayout()
-        side = QtGui.QVBoxLayout()
+        # The values and the checks side by side, their headings on one line, the checks as tall as the
+        # values (scrolled when they are more); under both, the buttons, then the line spacing's choice. The
+        # checks stood right of all of it before, as tall as the buttons and the choice too, far from the
+        # values (the owner's report 128).
+        body = QtGui.QGridLayout()
+        self.metrics_body = body
         self.values_tree = self.tree(("Value", "Now", "Suggested"))
         self.values_tree.setWhatsThis(u"The font's line metrics now and as suggested (in bold where they differ).")
-        side.addWidget(self.values_tree)
+        body.addWidget(self.values_tree, 0, 0)
         row = QtGui.QHBoxLayout()
         self.write_button = QtGui.QPushButton("Write suggested values")
         self.write_button.setWhatsThis(u"Writes the suggested values that differ into the font's info: the typo, hhea, "
@@ -6233,7 +6578,7 @@ class FontCheckDialog(object):
         row.addWidget(self.copy_button)
         row.addWidget(self.font_info_button)
         row.addStretch(1)
-        side.addLayout(row)
+        body.addLayout(row, 1, 0, 1, 2)
         row = QtGui.QHBoxLayout()
         self.mode_share = QtGui.QRadioButton("Line spacing")
         self.mode_share.setChecked(True)
@@ -6250,7 +6595,7 @@ class FontCheckDialog(object):
         row.addWidget(self.mode_share)
         row.addWidget(self.share)
         row.addStretch(1)
-        side.addLayout(row)
+        body.addLayout(row, 2, 0, 1, 2)
         self.mode_keep = QtGui.QRadioButton("Keep the font's current line spacing")
         self.mode_keep.setToolTip(self.tip(u"For an update of a font already released: documents set in it do not reflow."))
         self.mode_keep.setWhatsThis(u"For an update of a font already released: keeps its current line spacing, so "
@@ -6258,17 +6603,20 @@ class FontCheckDialog(object):
                                     u"they are when <i>Use Typo Metrics</i> is on, or else take the old win values, which "
                                     u"Windows spaced lines by; the win values grow to the ink and <i>Use Typo Metrics</i> "
                                     u"is turned on.")
-        side.addWidget(self.mode_keep)
-        side.addStretch(1)
-        body.addLayout(side)
-        side = QtGui.QVBoxLayout()
-        side.addWidget(self.heading(u"Checks"))
-        self.checks_tree = self.tree(("Check",), icon=(STATE_SIZE, STATE_SIZE), header=False, grid=False)
+        body.addWidget(self.mode_keep, 3, 0, 1, 2)
+        # (its heading is its list's own header, on the line of the values' header)
+        self.checks_tree = self.tree((u"Checks",), icon=(STATE_SIZE, STATE_SIZE), grid=False)
         self.checks_tree.setWhatsThis(u"What Google Fonts' vertical metrics guidance asks, one line each: a warning "
                                       u"where the font differs, a check where it does as asked. Click a line about "
-                                      u"glyphs to select them among the clipped glyphs.")
-        side.addWidget(self.checks_tree, 1)
-        body.addLayout(side, 1)
+                                      u"glyphs to name them in the log, each a link that opens it in a <i>Glyph</i> "
+                                      u"window, and to select those Windows clips among the clipped glyphs. As tall as "
+                                      u"the values beside it: scroll it when there are more lines.")
+        try:  # (as tall as the values: their row's height, never its own list's)
+            self.checks_tree.setSizePolicy(QtGui.QSizePolicy.Expanding, QtGui.QSizePolicy.Ignored)
+        except Exception:
+            pass
+        body.addWidget(self.checks_tree, 0, 1)
+        body.setColumnStretch(1, 1)
         tab.layout.addLayout(body)
         row = QtGui.QHBoxLayout()
         self.clipped_label = self.heading(u"Clipped on Windows")
@@ -6577,10 +6925,10 @@ class FontCheckDialog(object):
                     lambda: self.show_absent.setVisible(False),
                     lambda: [view.tree.clear() for key in self.views for view in self.views[key].values()],
                     lambda: self.add_tree.clear(), lambda: self.own_tree.clear(),
-                    lambda: self.left_tabs.setTabText(0, value_title(None)),
-                    lambda: self.left_tabs.setTabText(1, selection_title(None)),
+                    lambda: self.tab_names["left"].set_text(0, value_title(None)),
+                    lambda: self.tab_names["left"].set_text(1, selection_title(None)),
                     lambda: self.left_tabs.setTabEnabled(1, False), lambda: self.show_left("value"),
-                    lambda: [self.right_tabs.setTabText(index, label) for index, (_, label) in enumerate(RIGHT_TABS)],
+                    lambda: [self.tab_names["right"].set_text(index, label) for index, (_, label) in enumerate(RIGHT_TABS)],
                     lambda: self.gain_label.setText(u""), lambda: self.languages_note.setVisible(False),
                     lambda: self.values_tree.clear(), lambda: self.checks_tree.clear(),
                     lambda: self.clipped_list.clear(), lambda: self.diagram.clear(),
@@ -6618,11 +6966,12 @@ class FontCheckDialog(object):
         chosen = self.chosen_characters() if self.package is not None else []
         buildable = self.buildable_checked() if chosen else []
         ak.enable(self.diacritics_button, bool(buildable))
-        self.diacritics_button.setText(u"Build %s with Glyph Compose" % counted(len(buildable), u"glyph") if buildable
-                                       else u"Build with Glyph Compose")
+        # (no count on the buttons: "Build 2 glyphs" read as two rows for one row selected, a capital and its
+        # small letter; the count is in their tooltips, report 132)
+        self.diacritics_button.setText(build_caption(len(buildable)))
         self.diacritics_button.setToolTip(self.tip(
-            u"" if buildable else u"Check glyphs or select a row first." if not chosen else
-            u"<i>Glyph Compose</i> cannot build %s from the font's glyphs." % (
+            build_tip(buildable, self.in_list_font) if buildable else u"Check glyphs or select a row first."
+            if not chosen else u"<i>Glyph Compose</i> cannot build %s from the font's glyphs." % (
                 u"this glyph" if len(chosen) == 1 else u"any of these glyphs"), rich=True))
         targets = self.check_targets() if self.package is not None else {}
         listed = self.shown_rows()
@@ -6636,7 +6985,9 @@ class FontCheckDialog(object):
             ak.enable(button, on)
             button.setToolTip(self.tip(u"" if on else idle[key], rich=True))
         ak.enable(self.copy_chars_button, bool(chosen))
-        self.copy_chars_button.setText(u"Copy %s" % counted(len(chosen), u"glyph") if chosen else u"Copy glyphs")
+        self.copy_chars_button.setText(copy_caption(len(chosen)))
+        self.copy_chars_button.setToolTip(self.tip(copy_tip(chosen, self.in_list_font) if chosen
+                                                   else u"Check glyphs or select a row first.", rich=True))
         ak.enable(self.copy_button, bool(self.suggestions))
         writes = metric_writes(self.suggestions) if self.package is not None else []
         ak.enable(self.write_button, bool(writes) and not self.busy)
@@ -6957,6 +7308,9 @@ class FontCheckDialog(object):
         """The second step: the font's code points, and the languages the settings keep."""
         state["font"] = self.font_found = self.font_characters()
         state["statuses"] = self.choice(self.status_filter, STATUS_FILTERS)[2]
+        if state["statuses"] == HIGH_VALUE and not high_value_orthographies():
+            self.log.add(u"The list of high-value languages (%s) could not be read: <i>High-value only</i> keeps no "
+                         u"language. Install FreeLab again." % HIGH_VALUE_FILE, "warning")
         # (the languages inferred from a text: checked with the others, or set aside for a search to find)
         state["languages"], state["aside"] = chosen_languages(state["languages"], bool(self.inferred_box.checked))
         return checking_text(len(set(one.iso for one in state["languages"])))
@@ -6991,12 +7345,22 @@ class FontCheckDialog(object):
         try:  # the spaces the font lacks that the high-value list does not show (space_rows lists the others)
             has = lambda code: code in font.codes
             listed = [code_points(row.items[0])[0] for row in space_rows(self.results, has, space_conventions())]
-            note = spaces_note(has, listed)
-            if note:
-                self.log.add(note)
+            self.say_spaces(spaces_note(has, listed))
         except Exception:
             pass
         return BUSY_STEPS[3]
+
+    def say_spaces(self, note):
+        """The line on the spaces the font lacks, logged once a font and again only when it changes,
+        not at every check (the owner saw it repeated)."""
+        try:
+            font_key = self.package.fgPackage.path  # (a new wrapper at each read: its file names the font)
+        except Exception:
+            font_key = None
+        said = (font_key, note)
+        if note and said != getattr(self, "spaces_said", None):
+            self.log.add(note)
+        self.spaces_said = said
 
     def coverage_list(self, state):
         """The last step: the lists filled, the top line written, and the lists shown again."""
@@ -7135,7 +7499,7 @@ class FontCheckDialog(object):
         self.update_buttons()
 
     def status_changed(self):
-        """Another choice of Languages: the coverage is checked again with it."""
+        """Another choice of Display: the coverage is checked again with it."""
         if self.filling or self.package is None:
             return
         self.check_coverage()
@@ -7162,7 +7526,11 @@ class FontCheckDialog(object):
                     selected = item
             tree.setCurrentItem(selected)
             self.fit_columns(tree, (220, BAR_SIZE[0] + 12))
-            tree.setFixedHeight(self.rows_height(tree, min(len(shown) + 1, 6)))
+            # Six rows at most, as tall as that in a window with room; a short window (a 480-pixel screen) may
+            # take it down to two rows, scrolled, rather than be held taller than the screen by a fixed height
+            full = self.rows_height(tree, min(len(shown) + 1, 6))
+            tree.setMaximumHeight(full)
+            tree.setMinimumHeight(min(full, self.rows_height(tree, 2)))
             tree.setVisible(True)  # (hidden until a check has something to list)
         finally:
             self.filling = False
@@ -7330,7 +7698,7 @@ class FontCheckDialog(object):
         except Exception:
             pass  # (the list without them: never without the rest)
         self.fill_characters(self.add_tree, self.rows)
-        self.left_tabs.setTabText(0, value_title(len(self.rows)))
+        self.tab_names["left"].set_text(0, value_title(len(self.rows)))
         self.fill_own()
 
     def fill_own(self):
@@ -7338,7 +7706,7 @@ class FontCheckDialog(object):
         selected, named after it; grayed, and empty, with nothing selected."""
         self.own_rows, left = selection_rows(self.rows, self.selection)
         self.fill_characters(self.own_tree, self.own_rows)
-        self.left_tabs.setTabText(1, selection_title(self.selection))
+        self.tab_names["left"].set_text(1, selection_title(self.selection))
         self.left_tabs.setTabEnabled(1, self.selection is not None)
         self.own_label.setText(selection_text(self.selection, left, self.ak.b))
         self.own_label.setVisible(self.selection is not None and self.left_tab == "own")
@@ -7350,14 +7718,27 @@ class FontCheckDialog(object):
         self.left_tab = key
         index = 1 if key == "own" else 0
         self.left_tabs.setCurrentIndex(index)
-        self.left_pages.setCurrentIndex(index)
+        self.left_page(index)
         self.own_label.setVisible(self.selection is not None and key == "own")
+
+    def left_page(self, index):
+        """The tab of glyphs shown (0: the high-value list, 1: the selection's), its list first among the
+        stack's children. The shared module grays Check all, Check none, and Check only (ak.update_states,
+        every 300 ms) when the list nearest them has no check box, and the two lists are equally near: it
+        took the first, and Qt's stack raises the list it shows, which puts it last. So after a selection's
+        tab was shown, the high-value tab's buttons were grayed again within 300 ms of each click that
+        enabled them, as long as the selection's list was empty (the owner's report 133)."""
+        self.left_pages.setCurrentIndex(index)
+        try:
+            (self.own_tree if index == 1 else self.add_tree).lower()
+        except Exception:
+            pass
 
     def left_tab_changed(self, index):
         """The tab bar of characters clicked: its list shown; the buttons act on it."""
         try:
             self.left_tab = "own" if index == 1 and self.selection is not None else "value"
-            self.left_pages.setCurrentIndex(1 if self.left_tab == "own" else 0)
+            self.left_page(1 if self.left_tab == "own" else 0)
             self.own_label.setVisible(self.selection is not None and self.left_tab == "own")
             self.update_buttons()
         except Exception:
@@ -7421,6 +7802,7 @@ class FontCheckDialog(object):
 
     def set_checks(self, key):
         """A check button clicked: the checks set as it says for the tab shown, in place in both tabs."""
+        self.search_now()  # (a search typed a moment ago lists its rows first: the button acts on them)
         target = self.check_targets().get(key)
         if target is None or self.filling:
             return
@@ -7639,16 +8021,20 @@ class FontCheckDialog(object):
         A branch that is open takes its rows at once; a closed one waits (self.unfilled), and what is
         selected under it is noted in found without a row."""
         tree, rows = self.right_trees[tab], self.right_rows[tab]
-        colors = self.tools()[2]
         quiet = self.tools()[1]
+        # (the counts at the dialog's size, as the scripts' list has them: in the list's enlarged font they
+        # stood out as larger than every other list's text, live; the names keep the list's size)
+        counts_font = self.picture_font()
         for one in [one for one in node.children if not isinstance(one, UncoveredNode)]:
             counts_ = level_counts(one.all_results())
             open_ = self.family_open(one)
             label = u"%s (%d)" % (one.name, sum(counts_))
             item = self.item((label, u"", coverage_text(counts_),
                               uncovered_count_text(len(one.uncovered))), len(rows), self.later_tip(tab, one), True)
-            item.setIcon(1, self.icon(bar_pixmap, counts_, colors))
+            item.setData(1, BAR_ROLE, bar_counts(counts_))  # (drawn to the column's width: bar_delegate)
             item.setForeground(3, quiet)  # (in gray: known, not yet covered)
+            item.setFont(2, counts_font)
+            item.setFont(3, counts_font)
             item.setIcon(0, self.arrow(open_))
             self.add_row(tab, one, label)
             if parent is None:
@@ -7927,6 +8313,17 @@ class FontCheckDialog(object):
         except Exception:
             pass  # a timer's handler must not raise
 
+    def search_now(self):
+        """A search still waiting for the pause in the typing (search_timer) done now, so a button clicked
+        right after typing acts on the list the search makes, not the one before it."""
+        try:
+            waiting = self.search_timer.isActive()
+        except Exception:
+            waiting = False
+        if waiting:
+            self.search_timer.stop()
+            self.search_paused()
+
     def add_row(self, tab, row, label):
         """A row noted in the list being filled: what its item's data indexes, and the label that
         finds its item again (select_row)."""
@@ -7966,7 +8363,8 @@ class FontCheckDialog(object):
         made = {}
         for key in [key for key, _ in RIGHT_TABS if key != tab] + [tab]:
             if key == "languages":
-                made[key] = language_sections(self.scripts, shown, text, level, sort, self.other_results)
+                made[key] = language_sections(self.scripts, shown, text, level, sort, self.other_results,
+                                              self.choice(self.status_filter, STATUS_FILTERS)[2])
             elif key == "sets":
                 made[key] = set_sections(self.set_results, text, level, sort)
             else:
@@ -7977,7 +8375,7 @@ class FontCheckDialog(object):
         counts = {"languages": sum(len(s.results) for s in made["languages"][0]),
                   "sets": sum(len(s.results) for s in made["sets"][0]), "families": len(made["families"][0].children)}
         for index, (key, label) in enumerate(RIGHT_TABS):
-            self.right_tabs.setTabText(index, u"%s (%d)" % (label, counts[key]))
+            self.tab_names["right"].set_text(index, u"%s (%d)" % (label, counts[key]))
         try:  # (what the sets' count is made of: it adds up to the top line's counts, set_tally)
             index = [key for key, _ in RIGHT_TABS].index("sets")
             self.right_tabs.setTabToolTip(index, sets_tab_tip([r for s in made["sets"][0] for r in s.results]))
@@ -8015,9 +8413,7 @@ class FontCheckDialog(object):
             tree.clear()
             if tab == "families":
                 self.family_rows(tab, made[tab][0], None, wanted, found)
-                # (size_columns shares the width; these widths stand where the header refused its modes)
-                self.fit_columns(tree, (FAMILY_NAMES_MOST, BAR_COLUMN))
-                self.fit_bar(tree, FAMILY_NAMES_MOST)
+                self.share_columns(tree)
             else:
                 sections = made[tab][0]
                 headed = tab == "sets" or len(sections) > 1 or any(section.why for section in sections)
@@ -8074,7 +8470,7 @@ class FontCheckDialog(object):
                             held = [r for r in live if language_key(r) == wanted]
                             found["selection"] = selection_of(held[0]) if held else None
                     heading.setExpanded(open_)
-                self.fit_columns(tree, (FAMILY_NAMES_MOST,))  # (its larger text; size_columns shares the width)
+                self.share_columns(tree)
         finally:
             tree.setUpdatesEnabled(True)
             self.filling = False
@@ -8590,13 +8986,20 @@ class FontCheckDialog(object):
             self.filling = False
 
     def check_selected(self):
-        """A check about glyphs: those glyphs selected among the clipped ones."""
+        """A check about glyphs: those glyphs selected among the clipped ones, and named in the log, each a
+        link that opens it in a Glyph window (the owner's report 137: a glyph reaching below the line's
+        descender is not clipped, so the click selected nothing, and the line did not say which glyph)."""
         if self.filling:
             return
         index = self.index_of(self.selected_item(self.checks_tree))
         if not 0 <= index < len(self.check_rows) or not self.check_rows[index].glyphs:
             return
-        names = set(self.check_rows[index].glyphs)
+        line = self.check_rows[index]
+        try:
+            self.log.add(u"%s: %s." % (self.ak.html(line.text), self.ak.glyph_name_links(line.glyphs)))
+        except Exception:
+            pass
+        names = set(line.glyphs)
         if self.clip_master.currentIndex > 0:
             self.clip_master.setCurrentIndex(0)  # every master's
         first = None
@@ -9228,6 +9631,15 @@ class FontCheckDialog(object):
         if self.package is None:
             return
         self.open_glyph_text(self.glyph_window_text())
+
+    def log_link(self, target):
+        """A glyph named in a log line clicked: opened in a Glyph window (a link this window does not
+        take is left to the log: False)."""
+        name = self.ak.linked_glyph_name(u"%s" % target)
+        if not name or self.package is None:
+            return False
+        self.open_glyph_text(u"/%s" % name)
+        return True
 
     def open_glyph_text(self, text):
         """A Glyph window opened on a text (FontLab's own syntax); a failure goes to the log."""

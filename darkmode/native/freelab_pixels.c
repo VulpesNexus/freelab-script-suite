@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 114
+#define FREELAB_PIXELS_VERSION 115
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -1132,6 +1132,71 @@ static void survey_neighbors(const uint32_t *p, int64_t count, int64_t width, in
         h_anchor[anchors[k].slot] = -1;
 }
 
+/* ClearType's fringe of dark colored text on the dark paper (anchor 0): each of its channels lies
+ * between the paper's and the text's, at a coverage of its own (the Output panel's dark red compiler
+ * errors, about #8b0000, fringe in browns such as #340c00). The text it touches, mapped as ink (made
+ * lighter in its own hue), or -1; cov: each channel's coverage, from the paper (0) to the text (1).
+ * Mapped alone as dark ink, the fringe whose red is low turned light pink, lighter than the text it
+ * smooths: light dots inside every letter (owner's report 155). */
+#define CLEARTYPE_STEP 24.0 /* levels: a channel the text moves this far from the paper says its coverage */
+#define CLEARTYPE_FLAT 10.0 /* levels: a channel that moves less stays this near the paper in a fringe */
+#define CLEARTYPE_SLACK 0.08 /* a coverage this far past 0 or 1 still counts (rounding) */
+static int cleartype_partner(int k, double cov[3])
+{
+    const Anchor *c = &anchors[k], *paper = &anchors[0];
+    int j, best = -1;
+    double best_far = 0.0, found[3];
+    if (k == 0 || anchor_count < 3 || !paper->surface || paper->mapped || c->surface || c->long_line)
+        return -1;
+    for (j = 1; j < anchor_count; j++) { /* the farthest from the paper that fits: the text, not another fringe */
+        const Anchor *o = &anchors[j];
+        double cs[3], os[3], ps[3];
+        double sum = 0.0, low = 2.0, high = -1.0, far;
+        int ch, known = 0, fits = 1;
+        cs[0] = c->r, cs[1] = c->g, cs[2] = c->b;
+        os[0] = o->r, os[1] = o->g, os[2] = o->b;
+        ps[0] = paper->r, ps[1] = paper->g, ps[2] = paper->b;
+        if (j == k || o->surface || o->long_line || !o->mapped || o->chroma < INK_CHROMA || o->okl >= INK_MAX_OKL)
+            continue; /* dark colored text the mapping made lighter (light text keeps its own smoothing rules) */
+        if (c->touches != ~(uint64_t)0 && !((c->touches >> j) & 1U))
+            continue; /* smoothing touches the text it smooths */
+        for (ch = 0; ch < 3 && fits; ch++) {
+            double step = os[ch] - ps[ch];
+            if (step >= CLEARTYPE_STEP || step <= -CLEARTYPE_STEP) {
+                double t = (cs[ch] - ps[ch]) / step;
+                if (t < -CLEARTYPE_SLACK || t > 1.0 + CLEARTYPE_SLACK)
+                    fits = 0;
+                cov[ch] = t < 0.0 ? 0.0 : (t > 1.0 ? 1.0 : t);
+                sum += cov[ch];
+                known++;
+                if (cov[ch] < low)
+                    low = cov[ch];
+                if (cov[ch] > high)
+                    high = cov[ch];
+            } else {
+                cov[ch] = -1.0;
+                if (cs[ch] - ps[ch] > CLEARTYPE_FLAT || ps[ch] - cs[ch] > CLEARTYPE_FLAT)
+                    fits = 0;
+            }
+        }
+        if (!fits || known < 2 || high < 0.05 || low > 0.95)
+            continue; /* not between them, or the paper itself, or the text itself */
+        far = (os[0] - ps[0]) * (os[0] - ps[0]) + (os[1] - ps[1]) * (os[1] - ps[1]) + (os[2] - ps[2]) * (os[2] - ps[2]);
+        if (best >= 0 && far <= best_far)
+            continue;
+        for (ch = 0; ch < 3; ch++) /* (a channel the text leaves as the paper: the others' mean) */
+            found[ch] = cov[ch] < 0.0 ? sum / (double)known : cov[ch];
+        best = j;
+        best_far = far;
+    }
+    if (best >= 0) {
+        cov[0] = found[0];
+        cov[1] = found[1];
+        cov[2] = found[2];
+    }
+    return best;
+}
+
 /* A colored candidate inside a light surface that touches darker text there is ClearType's fringe
  * of that text (bluish, orange): it turns gray, not dark blue; colored text itself keeps its hue. */
 static int fringe_of_darker_text(int k)
@@ -1402,6 +1467,23 @@ static void find_anchors(const uint32_t *p, int64_t count, int64_t width, int mo
         a->mg = (double)((out >> 8) & 255);
         a->mb = (double)(out & 255);
         h_anchor[a->slot] = (int8_t)j;
+    }
+    /* ClearType's fringes of dark colored text on the dark paper, mapped as ink above, drawn again
+     * channel by channel from the paper and that text as they come out (cleartype_partner): as
+     * ClearType draws the lighter text on the dark paper. After every anchor is mapped: the text may
+     * come after its fringe. */
+    for (j = 1; mode == ANCHORS_INK && j < anchor_count; j++) {
+        Anchor *a = &anchors[j];
+        double cov[3];
+        int o;
+        if (!a->mapped)
+            continue;
+        o = cleartype_partner(j, cov);
+        if (o < 0)
+            continue;
+        a->mr = (double)clamp_byte(anchors[0].mr + cov[0] * (anchors[o].mr - anchors[0].mr));
+        a->mg = (double)clamp_byte(anchors[0].mg + cov[1] * (anchors[o].mg - anchors[0].mg));
+        a->mb = (double)clamp_byte(anchors[0].mb + cov[2] * (anchors[o].mb - anchors[0].mb));
     }
     /* Light text of the dark interface (gray, as light as the mapping's light end: the dark palette's
      * text color), kept as drawn, that FontLab also draws inside a surface it paints light itself

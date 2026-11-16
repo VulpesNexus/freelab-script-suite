@@ -353,6 +353,41 @@ class NativeTests(unittest.TestCase):
         self.assertEqual(rgb_at(buf, TEXT_ROW + 14 * 40 + 1), red, "the red stays")
         self.assertEqual(rgb_at(buf, 0), paper)
 
+    def test_cleartype_fringes_of_dark_red_text_stay_dark(self):
+        # Owner's report 155: FontLab's Output panel writes compiler errors in a dark red (about #8b0000) on its
+        # dark paper. The red is made lighter as ink; its ClearType fringes, each channel at its own coverage
+        # (#340c00: little red, more green and blue gone), were mapped alone as dark ink and turned light pink
+        # (#eac2b6), light dots inside every letter. They are drawn again, channel by channel, from the paper
+        # and the text as they come out.
+        paper, red = (30, 30, 30), (139, 0, 0)
+        covs = [(0.2, 0.6, 1.0), (1.0, 0.6, 0.2), (0.6, 0.3, 0.1)]
+        width = 6 * len(covs)
+        colors = []
+        for y in range(14):
+            for x in range(width):
+                k = x // 6
+                if 3 <= y <= 10 and x % 6 == 1:
+                    colors.append(red)
+                elif 3 <= y <= 10 and x % 6 == 2:
+                    colors.append(tuple(int(round(p + (c - p) * t)) for p, c, t in zip(paper, red, covs[k])))
+                else:
+                    colors.append(paper)
+        buf = pixels(colors)
+        anchors(LIB, buf, width, "ink")
+        text = rgb_at(buf, 3 * width + 1)
+        self.assertGreater(dm.oklab(*text)[0], 0.6, "the dark red made light enough to read: %r" % (text,))
+        self.assertGreater(text[0], text[1] + 60, "and still red")
+        for k, cov in enumerate(covs):
+            r, g, b = rgb_at(buf, 3 * width + 6 * k + 2)
+            self.assertLess(dm.oklab(r, g, b)[0], dm.oklab(*text)[0] + 0.02,
+                            "a fringe (%r) no lighter than its text: %r" % (cov, (r, g, b)))
+            if k == 2:
+                continue  # (its colors fit a blend of the others: resolved as that blend, dark enough)
+            for channel, value, t in zip("rgb", (r, g, b), cov):
+                want = paper["rgb".index(channel)] + t * (text["rgb".index(channel)] - paper["rgb".index(channel)])
+                self.assertLessEqual(abs(value - want), 3, "%s at its own coverage %.1f: %r" % (channel, t, (r, g, b)))
+        self.assertEqual(rgb_at(buf, 0), paper)
+
     def test_light_badges_turn_dark_without_touching_light_text_beside_them(self):
         # Gray text (192) on a dark row, and a gray badge (160) with black text: all on one gray line.
         width, rows = 60, 14

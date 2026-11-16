@@ -1696,26 +1696,167 @@ class WindowTests(unittest.TestCase):
         third.dialog.close()
         self.assertEqual(sys._freelab_windows.get("size"), (700, 300))
 
+    def press(self, owner, key, held=0x04000000):
+        """A key pressed in a tool's window, as Qt sends it to the window's filter: its ShortcutOverride, then
+        (once taken) its key press."""
+        override = self.KeyEvent(ak.SHORTCUT_OVERRIDE, key, held)
+        if ak.filter_event(owner.dialog, owner.dialog, override, []) and override.accepted:
+            ak.filter_event(owner.dialog, owner.dialog, self.KeyEvent(ak.KEY_PRESS, key, held), [])
+
     def test_undo_and_redo_reach_fontlab_for_this_windows_font_only(self):
         proof = self.open("Proof")
-        self.shortcuts["Ctrl+Z"]()
-        self.shortcuts["Ctrl+Y"]()
+        self.assertEqual(self.shortcuts, {}, "no Ctrl+Z of the window's own: with FontLab's application-wide one, "
+                                             "Qt's ambiguous case ran neither (live, 2026-11-17)")
+        self.press(proof, ak.KEY_Z)
+        self.press(proof, ak.KEY_Y)
         self.assertEqual(self.triggered, ["actionUndo", "actionRedo"])
         proof.busy = True  # inside its own loop
-        self.shortcuts["Ctrl+Z"]()
+        self.press(proof, ak.KEY_Z)
         self.assertEqual(len(self.triggered), 2, "nothing while the tool is busy")
         proof.busy = False
         self.workspace.currentPackage = self.two  # FontLab shows the other font: its History, not this one's
-        self.shortcuts["Ctrl+Z"]()
+        self.press(proof, ak.KEY_Z)
         self.assertEqual(len(self.triggered), 2)
         self.assertEqual(len(proof.lines), 1)
         level, text = proof.lines[0]
         self.assertEqual(level, "warning")
         self.assertIn(u"<b>One</b>'s Font window", text, "names the font to click")
 
+    class KeyEvent(object):
+        def __init__(self, kind, key, held):
+            self.kind, self.code, self.held, self.accepted = kind, key, held, False
+
+        def type(self):
+            return self.kind
+
+        def key(self):
+            return self.code
+
+        def modifiers(self):
+            return self.held
+
+        def accept(self):
+            self.accepted = True
+
+    def test_undo_keys_are_taken_before_any_shortcut_and_run_fontlabs_command(self):
+        # The owner (2026-11-16): undo and redo pressed while a FreeLab window is in front never reach
+        # FontLab. Taken at Qt's ShortcutOverride, before any shortcut is looked up, no shortcut of the
+        # window or of FontLab (whatever its context) can make the key ambiguous or take it.
+        proof = self.open("Proof")
+        window, key = proof.dialog, self.KeyEvent
+        override = key(ak.SHORTCUT_OVERRIDE, ak.KEY_Z, ak.CONTROL)
+        self.assertTrue(ak.filter_event(window, window, override, []))
+        self.assertTrue(override.accepted, "overridden: Qt then sends it as a plain key press")
+        self.assertEqual(self.triggered, [], "nothing run at the override")
+        self.assertTrue(ak.filter_event(window, window, key(ak.KEY_PRESS, ak.KEY_Z, ak.CONTROL), []))
+        self.assertEqual(self.triggered, ["actionUndo"], "FontLab's Edit > Undo")
+        keypad = 0x20000000
+        ak.filter_event(window, window, key(ak.KEY_PRESS, ak.KEY_Z, ak.CONTROL | ak.SHIFT | keypad), [])
+        ak.filter_event(window, window, key(ak.KEY_PRESS, ak.KEY_Y, ak.CONTROL), [])
+        self.assertEqual(self.triggered, ["actionUndo", "actionRedo", "actionRedo"], "Ctrl+Shift+Z and Ctrl+Y redo")
+        for held, code in ((ak.CONTROL | ak.ALT, ak.KEY_Z), (ak.CONTROL, 0x41), (0, ak.KEY_Z)):
+            self.assertFalse(ak.filter_event(window, window, key(ak.SHORTCUT_OVERRIDE, code, held), []), "not ours")
+        other = self.Window(u"FontLab")  # (a window no FreeLab tool shows: FontLab's own keys never touched)
+        foreign = key(ak.SHORTCUT_OVERRIDE, ak.KEY_Z, ak.CONTROL)
+        self.assertFalse(ak.filter_event(other, other, foreign, []))
+        self.assertFalse(foreign.accepted)
+        self.assertEqual(len(self.triggered), 3)
+
+        class Field(object):
+            readOnly, undoAvailable, redoAvailable = False, True, False
+
+            @staticmethod
+            def inherits(kind):
+                return kind == "QLineEdit"
+
+        field = Field()
+        ak._qt()[1].QApplication.focusWidget = staticmethod(lambda: field)
+        typed = key(ak.SHORTCUT_OVERRIDE, ak.KEY_Z, ak.CONTROL)
+        self.assertFalse(ak.filter_event(window, field, typed, []), "a field typed in keeps the key")
+        self.assertFalse(typed.accepted)
+        field.undoAvailable = False
+        for code, held in ((ak.KEY_Z, ak.CONTROL), (ak.KEY_Y, ak.CONTROL)):
+            self.assertFalse(ak.filter_event(window, field, key(ak.SHORTCUT_OVERRIDE, code, held), []),
+                             "nothing of its own to undo or redo: still its own, never FontLab's")
+            self.assertFalse(ak.filter_event(window, field, key(ak.KEY_PRESS, code, held), []))
+        self.assertEqual(len(self.triggered), 3)
+        field.readOnly = True  # (read-only text, as the log: nothing to type, FontLab's)
+        self.assertTrue(ak.filter_event(window, field, key(ak.KEY_PRESS, ak.KEY_Z, ak.CONTROL), []))
+        self.assertEqual(self.triggered[-1], "actionUndo")
+
+    def test_a_spin_box_typed_in_keeps_its_own_undo(self):
+        # (Codex, round 4, finding 1: Qt makes a spin box its line edit's focus proxy, so the focus widget is
+        # the box; Ctrl+Z while typing digits ran FontLab's Undo instead of the field's)
+        proof = self.open("Proof")
+        window, key = proof.dialog, self.KeyEvent
+
+        class Edit(object):
+            undoAvailable, redoAvailable = True, True
+
+        edit = Edit()
+
+        class Spin(object):
+            readOnly = False
+
+            @staticmethod
+            def inherits(kind):
+                return kind in ("QAbstractSpinBox", "QWidget")
+
+            @staticmethod
+            def findChildren(kind):
+                return [edit] if kind == "QLineEdit" else []
+
+        spin = Spin()
+        gui = ak._qt()[1]
+        gui.QLineEdit = "QLineEdit"
+        gui.QApplication.focusWidget = staticmethod(lambda: spin)
+        for code, held in ((ak.KEY_Z, ak.CONTROL), (ak.KEY_Z, ak.CONTROL | ak.SHIFT), (ak.KEY_Y, ak.CONTROL)):
+            override = key(ak.SHORTCUT_OVERRIDE, code, held)
+            self.assertFalse(ak.filter_event(window, spin, override, []), "left to the box")
+            self.assertFalse(override.accepted, "the box takes it as its own")
+            self.assertFalse(ak.filter_event(window, spin, key(ak.KEY_PRESS, code, held), []))
+        self.assertEqual(self.triggered, [], "FontLab's Undo and Redo untouched")
+        # (live, 2026-11-17: after typing 9, the value applied as typed, its line edit said nothing to undo,
+        # and Ctrl+Z went to FontLab and undid a glyph build, the field still at 9)
+        edit.undoAvailable = edit.redoAvailable = False
+        for code, held in ((ak.KEY_Z, ak.CONTROL), (ak.KEY_Y, ak.CONTROL)):
+            override = key(ak.SHORTCUT_OVERRIDE, code, held)
+            self.assertFalse(ak.filter_event(window, spin, override, []))
+            self.assertFalse(override.accepted)
+            self.assertFalse(ak.filter_event(window, spin, key(ak.KEY_PRESS, code, held), []))
+        self.assertEqual(self.triggered, [], "the box keeps it all the same")
+        gui.QApplication.focusWidget = staticmethod(lambda: None)  # (the focus on the list, or nowhere)
+        self.assertTrue(ak.filter_event(window, window, key(ak.KEY_PRESS, ak.KEY_Z, ak.CONTROL), []))
+        self.assertEqual(self.triggered, ["actionUndo"], "elsewhere in the window: FontLab's")
+
+    def test_an_undo_fontlab_cannot_do_is_said(self):
+        proof = self.open("Proof")
+
+        class Off(object):
+            objectName = "actionUndo"
+
+            @staticmethod
+            def isEnabled():
+                return False
+
+        class Main(object):
+            objectName = "MainWindow"
+
+            @staticmethod
+            def findChildren(kind):
+                return [Off()]
+
+        gui = ak._qt()[1]
+        gui.QApplication.topLevelWidgets = staticmethod(lambda: [Main()])
+        self.assertFalse(ak.fontlab_undo(proof, "actionUndo"))
+        self.assertEqual(proof.lines[-1], ("info", u"FontLab has nothing to undo (its <i>Edit &gt; Undo</i> is grayed out)."))
+        self.assertFalse(ak.fontlab_undo(proof, "actionRedo"))
+        self.assertEqual(proof.lines[-1], ("warning", u"Nothing was redone: FontLab's <i>Edit &gt; Redo</i> was not found."))
+        self.assertEqual(self.triggered, [])
+
     def test_an_undo_from_a_window_redraws_fontlabs_views(self):
         # The owner: "The log does mention the history changed, but it doesn't appear to actually reach FontLab"
-        self.open("Proof")
+        proof = self.open("Proof")
         told = []
 
         class Items(object):
@@ -1725,7 +1866,7 @@ class WindowTests(unittest.TestCase):
         fontlab = sys.modules["fontlab"]
         fontlab.flItems = Items()
         self.addCleanup(lambda: delattr(fontlab, "flItems"))
-        self.shortcuts["Ctrl+Z"]()
+        self.press(proof, ak.KEY_Z)
         self.assertEqual(self.triggered, ["actionUndo"])
         self.assertEqual(told, [], "told once FontLab's command has run")
         self.run_timers()
@@ -2473,13 +2614,19 @@ class TableLayoutTests(unittest.TestCase):
 
     class Header(object):
         def __init__(self):
-            self.calls = []
+            self.calls, self.default, self.slots = [], None, {}
 
         def setStretchLastSection(self, on):
             self.calls.append(("last", on))
 
         def setSectionResizeMode(self, column, mode):
             self.calls.append(("mode", column, mode))
+
+        def setDefaultAlignment(self, alignment):
+            self.default = alignment
+
+        def connect(self, signal, slot):
+            self.slots.setdefault(signal, []).append(slot)
 
     class HeaderItem(object):
         def __init__(self):
@@ -2594,7 +2741,41 @@ class TableLayoutTests(unittest.TestCase):
                       "the style's 14-pixel box, its frame inside it (a wider one cut the cell's text)")
         self.assertIn(u"QTreeView::indicator:checked { border: 1px solid rgb(0, 120, 215); background: rgb(0, 120, 215);",
                       sheet, "checked: filled with the selection's color")
-        self.assertEqual(view.head.calls, [], "no stretch column named: Qt's last one takes the rest")
+        self.assertEqual(view.head.calls, [("last", False)],
+                         "no stretch column named: the columns share the width (share_columns), not Qt's last one")
+
+    def test_no_focus_rectangle_in_a_clicked_cell(self):
+        # (owner's report 114: a faint rectangle in the cell clicked, in every list: the style's focus frame
+        # around the current column's cell, which serves nothing where whole rows are selected)
+        for kind in ("QTreeView", "QTableView", "QListView"):
+            view = self.View(self.light, kind=kind)
+            ak.table_layout(view)
+            self.assertIn(u"%s { outline: 0; }" % kind, view.styleSheet, kind)
+            ak.style_table(view)  # (a dark mode switch writes it again)
+            self.assertEqual(view.styleSheet.count(u"outline: 0;"), 1)
+
+    def test_headers_are_centered(self):
+        # (owner's report 141: the numbers' headers sat at the right, the names' at the left)
+        centered = 0x4 | 0x80
+        view = self.View(self.light)
+        ak.table_layout(view, stretch=1, numbers=(2, 3))
+        self.assertEqual(view.head.default, centered, "the header's own default")
+        self.assertEqual(view.head_item.aligned, dict((column, centered) for column in range(4)), "every column's")
+        view.head_item.aligned.clear()
+        ak.fit_columns(view, (2, 3))
+        self.assertEqual(view.head_item.aligned, dict((column, centered) for column in range(4)), "after a fit too")
+        child = self.Row([u"A V", u"-60", u"-80"])
+        rows = [self.Row([u"group"], children=[child])]
+        listed = self.rows_view(rows)
+        heads = {}
+        listed.headerItem = lambda: type("Head", (), {"setTextAlignment": lambda h, c, a: heads.update({c: a}),
+                                                      "text": lambda h, c: u""})()
+        ak.align_numbers(listed, (1, 2))
+        self.assertEqual(child.aligned, {1: 130, 2: 130}, "the numbers' cells right-aligned")
+        self.assertEqual(heads, {1: centered, 2: centered}, "their headers centered")
+        import freelab_kerning_check as kc
+        with io.open(kc.__file__.replace(".pyc", ".py"), encoding="utf-8") as handle:
+            self.assertNotIn(u"header.setTextAlignment", handle.read(), "Kerning Check's own right-aligned headers gone")
 
     def test_a_switch_writes_it_again_and_keeps_what_a_tool_added(self):
         view = self.View(self.light)
@@ -2620,21 +2801,22 @@ class TableLayoutTests(unittest.TestCase):
         view = self.View(self.light)
         ak.table_layout(view, stretch=1, numbers=(2, 3))
         self.assertEqual(view.head.calls, [("last", False)], "no column in Qt's Stretch mode: all can be dragged")
-        self.assertEqual(view.head_item.aligned, {2: 130, 3: 130})
         ak.fit_columns(view, (2, 3))
         self.assertEqual(view.resized, [0, 1, 2, 3], "every column sized to its contents")
         self.assertEqual(view.widths, [40, 450, 50, 60], "the names given the rest (Auto Spacing's list now fills)")
         self.assertNotIn("mode", [call[0] for call in view.head.calls])
         view.port.width = 200  # a narrow window
-        self.assertEqual(ak.stretch_column(view), 120, "never narrower than its contents: the list scrolls")
-        self.assertEqual(view.widths[1], 120)
+        ak.stretch_column(view)
+        self.assertEqual(view.widths[1], 120, "its spare room taken first, then never narrower than its contents")
+        self.assertEqual(sum(view.widths), 200, "the others give way (owner, 2026-11-16): no sideways scrolling")
         view.port.width = 800
         ak.stretch_column(view)
-        self.assertEqual(view.widths[1], 650, "and the room back once it is wider")
+        self.assertEqual(view.widths, [40, 650, 50, 60], "the others whole again first, then the rest to it")
         plain = self.View(self.light)
         ak.table_layout(plain)
         ak.fit_columns(plain)
-        self.assertEqual(plain.widths, [40, 120, 50, 60], "none named: no column takes the rest")
+        self.assertEqual(sum(plain.widths), 600, "none named: every column takes its share, no gap at the right")
+        self.assertEqual(plain.widths, [89, 267, 111, 133], "in proportion to its width")
 
     class Timer(object):
         """A QTimer as the watches use it: its slots run by fire(), its starts counted."""
@@ -2826,13 +3008,31 @@ class TableLayoutTests(unittest.TestCase):
                                         0 + 32 + ak.ICON_GAP + check + 40) + pad,
                          "a child's picture, check box, and indentation; the spanned heading counts for none")
         self.assertEqual(widths[2], len(u"none on 3,884 layers") * 7 + pad)
+        view.port.width = sum(widths.values())  # (a list as wide as its columns: nothing shared out)
+        ak.fit_rows(view)
         self.assertEqual(view.widths, [widths[0], widths[1], widths[2]])
         self.assertEqual(ak.fit_rows(view), widths, "the same every time: fonts and fixed margins alone")
         capped = ak.fit_rows(view, (1,), most=60)
         self.assertEqual(capped[1], 60, "a long glyph list capped (Kerning Classes ran 1,664 pixels wide)")
         ak.fit_rows(view, (0, 1, 2), most=[None, 50, None])
-        self.assertEqual(view.widths[1], 50)
-        self.assertEqual(view.widths[2], widths[2], "None: as measured")
+        kept = json.loads(view.props[ak.TABLE_WANTS_PROP])
+        self.assertEqual(kept["fits"], [widths[0], 50, widths[2]], "None: as measured")
+        self.assertEqual(kept["wants"], [widths[0], widths[1], widths[2]], "what each wants: its whole content")
+        self.assertEqual(view.widths[1], widths[1], "the room the cap left given back to the list it cut")
+
+    def test_a_bold_count_fitted_stays_whole_once_the_list_is_shared_out(self):
+        # (live, 2026-11-17: Font Check's high-value list showed "+..." for its bold "+N" counts, its third
+        # column with no header text, beside a long list of glyphs, in a narrow list)
+        row = self.Row([u"Latin", u"a" * 60, u"+12"])
+        row.font = lambda column: TableLayoutTests.Font(column == 2)  # (the count in bold)
+        view = self.rows_view([row])
+        view.headerItem = lambda: TableLayoutTests.Row([u"Pair", u"Glyphs", u""])
+        view.port.width = 200
+        widths = ak.fit_rows(view, (0, 1, 2))
+        pad = 2 * ak.TABLE_PADDING[1] + 2 * ak.TEXT_MARGIN + 1
+        self.assertEqual(widths[2], 3 * 8 + pad, "measured in bold")
+        self.assertEqual(view.widths[2], widths[2], "whole after sharing: the long glyph list gave the room")
+        self.assertEqual(sum(view.widths), 200)
 
     def test_a_row_is_measured_in_the_font_qt_draws_it_in(self):
         # (live, 2026-11-16: Font Check's "+N" column 35 pixels on opening, 39 after a dark mode round
@@ -2906,8 +3106,10 @@ class TableLayoutTests(unittest.TestCase):
         view.visible = True
         timer.fire()
         self.assertGreater(view.widths[0], first[0], "shown: fitted again")
-        self.assertEqual(view.widths[2], 100, "with the same widths at most")
-        self.assertEqual(view.widths[1], 5, "and the same columns only")
+        fits = json.loads(view.props[ak.TABLE_WANTS_PROP])["fits"]
+        self.assertEqual(fits[2], 100, "with the same widths at most")
+        self.assertEqual(fits[1], None, "and the same columns only")
+        self.assertEqual(sum(view.widths), view.port.width, "then the width shared out")
         self.assertEqual(len(made), 1, "a refit sets no timer of its own")
         self.assertNotIn(timer, sys._freelab_table_fills, "done: let go")
         hidden = self.rows_view([self.Row([u"a"])])
@@ -2972,6 +3174,456 @@ class TableLayoutTests(unittest.TestCase):
                 self.assertGreaterEqual(laid, lists, "%s: a list made without FreeLab's table layout" % name)
                 self.assertNotIn(u"grid_lines(", source.replace(u"def grid_lines(", u""), name)
         self.assertGreater(checked, 15)
+
+
+class ColumnShareTests(unittest.TestCase):
+    """How a list's columns share its width (owner, 2026-11-16, report 142: a column dragged narrower left
+    a gap in the list's frame; shrinking takes from the columns with spare room first, growing gives to
+    the columns cut short first, then in proportion)."""
+
+    LEASTS = [24, 24, 24, 24]
+
+    def share(self, widths, wants, room, held=None, stretch=None, leasts=None):
+        return ak.share_widths(list(widths), list(wants), list(leasts or self.LEASTS), room, held, stretch)
+
+    def test_a_column_dragged_narrower_leaves_no_gap(self):
+        new = self.share([100, 60, 100, 100], [100, 100, 100, 100], 400, held=1)
+        self.assertEqual(sum(new), 400, "the frame filled")
+        self.assertEqual(new[1], 60, "the column dragged keeps the width given it")
+        self.assertEqual(new, [114, 60, 113, 113], "the others share the room in proportion")
+
+    def test_a_column_dragged_wider_takes_from_the_roomiest_first(self):
+        new = self.share([150, 180, 100, 200], [100, 100, 100, 120], 550, held=1)
+        self.assertEqual(new, [125, 180, 100, 145], "the roomiest (80 spare) down to the next (50), then both")
+        self.assertEqual(sum(new), 550)
+
+    def test_then_its_neighbor_then_every_column(self):
+        self.assertEqual(self.share([100, 160, 100, 100], [100] * 4, 400, held=1), [100, 160, 40, 100],
+                         "no spare room anywhere: its neighbor gives way, as Qt's own")
+        self.assertEqual(self.share([100, 100, 100, 160], [100] * 4, 400, held=3), [100, 100, 40, 160],
+                         "the last column's neighbor is the one before it")
+        self.assertEqual(self.share([100, 250, 100, 100], [100] * 4, 400, held=1), [63, 250, 24, 63],
+                         "the neighbor at its least: the others in proportion")
+        squeezed = self.share([100, 390, 100, 100], [100] * 4, 400, held=1)
+        self.assertEqual(squeezed, [24, 390, 24, 24], "nothing left above the least: the list scrolls")
+
+    def test_a_narrower_list_takes_spare_room_first(self):
+        self.assertEqual(self.share([300, 100, 100, 100], [100, 100, 60, 100], 520), [220, 100, 100, 100],
+                         "the roomiest alone, while it has more spare room than the next")
+        self.assertEqual(self.share([300, 100, 100, 100], [100, 100, 60, 100], 400), [120, 100, 80, 100],
+                         "then both together; the columns without spare room left whole")
+        self.assertEqual(self.share([100, 100, 60, 100], [100, 100, 60, 100], 300), [80, 80, 60, 80],
+                         "no spare room left: the widest above its least first, levelled down together")
+
+    def test_a_short_count_beside_a_long_list_stays_whole(self):
+        # (live, 2026-11-17: Font Check's bold "+N" counts cut to "+..." in its narrow list of high-value
+        # glyphs, taken in proportion beside a long list of languages)
+        self.assertEqual(self.share([200, 40, 300], [200, 40, 300], 400, leasts=[24, 24, 24]), [180, 40, 180],
+                         "the long ones give first; the count, much narrower, keeps its 40 pixels")
+        self.assertEqual(self.share([180, 30, 180], [200, 40, 300], 450, leasts=[24, 24, 24]), [200, 40, 210],
+                         "and, cut, it is shown whole first once there is room")
+
+    def test_a_wider_list_shows_its_cut_columns_whole_first(self):
+        self.assertEqual(self.share([100, 60, 80], [100, 70, 300], 260, leasts=[24] * 3), [100, 70, 90],
+                         "the one lacking least made whole first, the rest to the one still cut")
+        # (the owner's "under 5 % still clipped" worry: a column nearly whole is never left short for a long note)
+        self.assertEqual(self.share([190, 300], [200, 1000], 520, leasts=[24, 24]), [200, 320])
+        self.assertEqual(self.share([100, 100, 100], [100, 100, 100], 360, leasts=[24] * 3, stretch=1), [100, 160, 100],
+                         "nothing cut: the rest to the stretch column (the pair pictures, the names)")
+        self.assertEqual(self.share([100, 50, 150], [100, 50, 150], 600, leasts=[24] * 3), [200, 100, 300],
+                         "none named: every column in proportion")
+
+    def test_a_hidden_column_is_left_alone(self):
+        self.assertEqual(self.share([100, None, 100], [100, 100, 100], 300, leasts=[24] * 3), [150, None, 150])
+
+    def view(self, widths, wants, room):
+        case = self
+
+        class Port(object):
+            def __init__(self):
+                self.width, self.filters = room, []
+
+            def installEventFilter(self, watch):
+                self.filters.append(watch)
+
+        class View(TableLayoutTests.View):
+            columnCount = len(widths)
+
+            def setColumnWidth(self, column, width):
+                old, self.widths[column] = self.widths[column], width
+                for slot in self.head.slots.get("sectionResized(int,int,int)", []):
+                    slot(column, old, width)  # (Qt says so for any width set, the tool's own too)
+
+        view = View(ThemeFakes.Palette(dict(ThemeFakes.LIGHT)))
+        view.widths, view.port = list(widths), Port()
+        case.made = []
+
+        class Timer(object):
+            def __init__(self, parent=None):
+                self.slots, self.started = [], 0
+                case.made.append(self)
+
+            def setSingleShot(self, on):
+                pass
+
+            def setInterval(self, ms):
+                pass
+
+            def connect(self, signal, slot):
+                self.slots.append(slot)
+
+            def start(self):
+                self.started += 1
+
+            def fire(self):
+                for slot in self.slots:
+                    slot()
+
+        class Core(object):
+            QTimer = Timer
+
+            class Qt(object):
+                AlignRight, AlignVCenter = 2, 128
+
+            class QDir(object):
+                @staticmethod
+                def tempPath():
+                    return u""
+
+        class Gui(object):
+            QPalette = ThemeFakes.Palette
+
+            class QStyle(object):
+                PM_IndicatorWidth = 1
+
+        old, saved = ak._qt, getattr(sys, "_freelab_table_fills", None)
+        ak._qt = lambda: (Core, Gui)
+
+        def restore():
+            ak._qt = old
+            sys._freelab_table_fills = saved
+        self.addCleanup(restore)
+        ak.table_layout(view)
+        ak.note_wants(view, dict(enumerate(wants)))
+        return view
+
+    def test_a_drag_is_shared_out_on_the_next_turn_and_kept(self):
+        view = self.view([100, 100, 100, 100], [100, 100, 100, 100], 400)
+        self.assertEqual(len(view.head.slots["sectionResized(int,int,int)"]), 1, "the header's drags heard")
+        watch = self.made[0]
+        view.setColumnWidth(1, 60)  # the owner drags the second column narrower
+        self.assertEqual(view.widths, [100, 60, 100, 100], "nothing changed inside Qt's resizing")
+        self.assertEqual(watch.started, 1)
+        watch.fire()
+        self.assertEqual(view.widths, [114, 60, 113, 113], "the gap shared out, the dragged column as dragged")
+        self.assertEqual(watch.started, 1, "its own widths are no drag")
+        self.assertEqual(json.loads(view.props[ak.TABLE_WANTS_PROP])["wants"][1], 60, "what it wants from now on")
+        view.port.width = 370  # the window made narrower
+        ak.share_columns(view)
+        self.assertEqual(view.widths, [103, 60, 103, 104], "the others' spare room taken, not the column dragged narrower")
+
+    def test_tool_modes_and_qts_own_stretch_are_left_alone(self):
+        view = self.view([100, 100], [100, 100], 400)
+        view.head.sectionResizeMode = lambda column: 1  # (Font Check's Stretch columns)
+        self.assertIsNone(ak.share_columns(view))
+        self.assertEqual(view.widths, [100, 100])
+        own = self.view([100, 100], [100, 100], 400)
+        own.setProperty(ak.OWN_COLUMNS_PROP, True)  # (Font Check's right-hand lists size their own columns)
+        self.assertIsNone(ak.share_columns(own))
+        own.setColumnWidth(0, 60)  # a drag
+        self.made[-1].fire()
+        self.assertEqual(own.widths, [60, 100], "left to the tool, drags too")
+
+    def test_a_check_button_is_judged_by_the_shown_list_of_those_equally_near(self):
+        # (the Font Check agent, 2026-11-16: a QStackedWidget's hidden page, as near as the shown one,
+        # grayed out Check all; and Kerning Check's bottom row lies as near to its three tabs' lists)
+        class Widget(object):
+            def __init__(self, parent=None, visible=True, kinds=()):
+                self.parent, self.visible, self.kinds = parent, visible, kinds
+
+            def parentWidget(self):
+                return self.parent
+
+            def window(self):
+                return dialog
+
+            def inherits(self, kind):
+                return kind in self.kinds
+
+        class Item(object):
+            def flags(self):
+                return 16
+
+            def data(self, column, role):
+                return 0
+
+            def childCount(self):
+                return 0
+
+        class Tree(Widget):
+            def __init__(self, parent, visible, rows):
+                Widget.__init__(self, parent, visible, ("QTreeWidget",))
+                self.rows = rows
+                self.topLevelItemCount = len(rows)
+
+            def topLevelItem(self, index):
+                return self.rows[index]
+
+        class Button(Widget):
+            text, enabled = u"Check all", True
+
+            def isEnabled(self):
+                return self.enabled
+
+            def setEnabled(self, on):
+                self.enabled = on
+
+        class Dialog(Widget):
+            def findChildren(self, kind):
+                return {"QPushButton": [button], "QAbstractItemView": [hidden, shown]}.get(kind, [])
+
+        dialog = Dialog()
+        stack = Widget(dialog)
+        hidden = Tree(Widget(stack, False), False, [])  # (an empty page, not shown)
+        shown = Tree(Widget(stack), True, [Item()])
+        button = Button(dialog)
+
+        class Core(object):
+            class Qt(object):
+                ItemIsUserCheckable, CheckStateRole = 16, 10
+
+        old = ak._qt
+        ak._qt = lambda: (Core, type("Gui", (), {"QPushButton": "QPushButton", "QAbstractItemView": "QAbstractItemView",
+                                                 "QComboBox": "QComboBox"}))
+        self.addCleanup(lambda: setattr(ak, "_qt", old))
+        ak.update_states(dialog)
+        self.assertTrue(button.enabled, "judged by the list shown, which has rows to check")
+        shown.rows, shown.topLevelItemCount = [], 0
+        ak.update_states(dialog)
+        self.assertFalse(button.enabled, "nothing listed in it: grayed out")
+
+    def test_a_list_too_narrow_widens_its_window(self):
+        view = self.view([100, 100], [100, 100], 150)
+
+        class Window(object):
+            visible, maximized, minimized, pos, width, height = True, False, False, (300, 100), 500, 400
+
+            def resize(self, width, height):
+                self.width, self.height = width, height
+
+            def move(self, x, y):
+                self.pos = (x, y)
+
+        window = Window()
+        owner = type("Owner", (), {"dialog": window, "opened_size": (500, 400)})()
+        view.window, view.visible = lambda: window, True
+        saved = ak.window_owner, ak._windows, ak.screen_area, ak._free_area
+        ak.window_owner = lambda widget: owner
+        ak._windows = lambda: {"size": None}
+        ak.screen_area = lambda widget=None: (0, 0, 1000, 800)
+        ak._free_area = lambda widget: ((0, 0, 1000, 800), (16, 39))
+
+        def restore():
+            ak.window_owner, ak._windows, ak.screen_area, ak._free_area = saved
+        self.addCleanup(restore)
+        self.assertEqual(ak.widen_window(view), 50, "by what its columns lack")
+        self.assertEqual((window.width, window.pos), (550, (275, 100)), "around its center")
+        self.assertEqual(owner.opened_size, (550, 400), "FreeLab's doing, not a size given by hand")
+        view.port.width = 150
+        ak.note_wants(view, {0: 900})
+        self.assertEqual(ak.widen_window(view), 1000 - 40 - 16 - 550, "at most to the screen's free area")
+        window.width = 700  # the owner drags its edge
+        self.assertEqual(ak.widen_window(view), 0, "a size given by hand stays")
+        owner.opened_size = (700, 400)
+        ak._windows = lambda: {"size": (700, 400)}
+        self.assertEqual(ak.widen_window(view), 0, "and so does every window's this session")
+
+    def test_a_window_scrolls_on_a_small_screen(self):
+        made = []
+
+        class Widget(object):
+            def __init__(self, *parent):
+                self.props, self.parent = {}, parent[0] if parent else None
+                made.append(self)
+
+            def setProperty(self, name, value):
+                self.props[name] = value
+
+            def property(self, name):
+                return self.props.get(name)
+
+        class Layout(Widget):
+            def setContentsMargins(self, *margins):
+                self.margins = margins
+
+            def addWidget(self, widget):
+                self.added = widget
+
+        class Area(Widget):
+            def setWidgetResizable(self, on):
+                self.resizable = on
+
+            def setFrameShape(self, shape):
+                pass
+
+            def setWidget(self, widget):
+                self.body = widget
+
+        class Gui(object):
+            QVBoxLayout, QWidget, QScrollArea = Layout, Widget, Area
+            QFrame = type("QFrame", (), {"NoFrame": 0})
+
+        old = ak._qt
+        ak._qt = lambda: (None, Gui)
+        self.addCleanup(lambda: setattr(ak, "_qt", old))
+        dialog = Widget()
+        plain = ak.window_layout(dialog, scroll=False)
+        self.assertIs(plain.parent, dialog, "a screen of a usual size: laid out as before")
+        layout = ak.window_layout(dialog, scroll=True)
+        area = [w for w in made if isinstance(w, Area)][0]
+        self.assertTrue(area.resizable)
+        self.assertIs(layout.parent, area.body, "the tool's content in the scroll area")
+        self.assertIs(area.body.parent, area, "parented from the start")
+        self.assertTrue(area.props[ak.WINDOW_BODY_PROP] and area.body.props[ak.WINDOW_BODY_PROP])
+        self.assertTrue(ak.small_screen((0, 0, 854, 440)), "480p (its taskbar taken)")
+        self.assertTrue(ak.small_screen((0, 0, 1280, 680)), "720p")
+        self.assertFalse(ak.small_screen((0, 0, 1920, 1040)))
+        self.assertFalse(ak.small_screen(None), "no screen known: as before")
+        import freelab_kerning_check as kc
+        with io.open(ak.__file__.replace(".pyc", ".py"), encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertEqual(source.count(u"layout = window_layout(dialog)"), 2, "Auto Kerning's and Kerning Classes' windows")
+        with io.open(kc.__file__.replace(".pyc", ".py"), encoding="utf-8") as handle:
+            self.assertIn(u"layout = self.ak.window_layout(dialog)", handle.read(), "Kerning Check's")
+
+    def test_the_tools_buttons_go_into_the_scrolling_content(self):
+        # (live, 2026-11-17: on a small screen the tools button went beside the scroll area, into the dialog's
+        # own layout, and left an empty strip 116 pixels wide at the window's right)
+        class Item(object):
+            def __init__(self, widget):
+                self.held = widget
+
+            def widget(self):
+                return self.held
+
+        class Layout(object):
+            def __init__(self, *widgets):
+                self.widgets = list(widgets)
+
+            def count(self):
+                return len(self.widgets)
+
+            def itemAt(self, index):
+                return Item(self.widgets[index])
+
+        inner = Layout("status")
+        body = type("Body", (), {"layout": lambda b: inner})()
+        area = type("Area", (), {"property": lambda a, name: name == ak.WINDOW_BODY_PROP, "widget": lambda a: body})()
+        scrolling = type("Dialog", (), {"layout": lambda d: Layout(area)})()
+        self.assertIs(ak.content_layout(scrolling), inner, "the body's layout, inside the scroll area")
+        plain_layout = Layout("status", "row")
+        plain = type("Dialog", (), {"layout": lambda d: plain_layout})()
+        self.assertIs(ak.content_layout(plain), plain_layout, "a usual window: its own layout")
+        with io.open(ak.__file__.replace(".pyc", ".py"), encoding="utf-8") as handle:
+            source = handle.read().split(u"def add_tools_button(")[1].split(u"\ndef ")[0]
+        self.assertIn(u"layout = content_layout(dialog)", source)
+
+    def test_a_click_on_a_scrolling_windows_background_is_beside_the_lists(self):
+        class Widget(object):
+            def __init__(self, parent, kinds=(), body=False):
+                self.parent, self.kinds, self.body, self.mouseTracking = parent, kinds, body, False
+
+            def parentWidget(self):
+                return self.parent
+
+            def inherits(self, kind):
+                return kind in self.kinds
+
+            def property(self, name):
+                return True if name == ak.WINDOW_BODY_PROP and self.body else None
+
+        window = Widget(None)
+        area = Widget(window, ("QAbstractScrollArea",), body=True)
+        port = Widget(area)
+        body = Widget(port, body=True)
+        label = Widget(body, ("QLabel",))
+        self.assertTrue(ak.blank_press(window, label), "its scroll area is the window's own")
+        self.assertFalse(ak.blank_press(window, Widget(body, ("QAbstractScrollArea",))), "a list is still no blank")
+
+    def test_size_dialog_keeps_to_fontlabs_screen(self):
+        sized = []
+        dialog = type("Dialog", (), {"resize": lambda d, w, h: sized.append((w, h))})()
+        saved = ak.screen_area
+        self.addCleanup(lambda: setattr(ak, "screen_area", saved))
+        ak.screen_area = lambda widget=None: (0, 0, 854, 440)
+        ak.size_dialog(dialog)
+        self.assertEqual(sized[-1], (854 - 40, 440 - 60))
+        ak.screen_area = lambda widget=None: None
+        ak.size_dialog(dialog)
+        self.assertEqual(sized[-1], (ak.DIALOG_SIZE, ak.DIALOG_SIZE), "where Qt cannot tell: 1000 by 1000")
+
+
+class CheckRowsTests(unittest.TestCase):
+    """Check all, Check none, and the like say what they did, rows out of sight included (owner, report 118)."""
+
+    class Item(object):
+        def __init__(self, checked=False, parent=None, open_=True, hidden=False, tree=True):
+            self.state, self.parent_item, self.open, self.hidden, self.tree = 2 if checked else 0, parent, open_, hidden, tree
+
+        def checkState(self, *column):
+            if bool(column) != self.tree:
+                raise TypeError("wrong number of arguments")
+            return self.state
+
+        def setCheckState(self, *args):
+            self.state = args[-1]
+
+        def isHidden(self):
+            return self.hidden
+
+        def isExpanded(self):
+            return self.open
+
+        def parent(self):
+            return self.parent_item
+
+    def setUp(self):
+        class Core(object):
+            class Qt(object):
+                Checked, Unchecked = 2, 0
+        old = ak._qt
+        ak._qt = lambda: (Core, None)
+        self.addCleanup(lambda: setattr(ak, "_qt", old))
+        self.lines = []
+        self.log = type("Log", (), {"add": lambda log, text, level="info": self.lines.append(text)})()
+
+    def test_counts_said_with_the_rows_out_of_sight(self):
+        closed = self.Item(parent=None, open_=False)
+        items = [self.Item(), self.Item(checked=True), self.Item(parent=closed), self.Item(hidden=True)]
+        self.assertEqual(ak.check_rows(items, True, self.log, u"Check all", u"pair"), (3, 0, 2))
+        self.assertEqual(self.lines[-1], u"<i>Check all</i> checked <b>3 pairs</b> (2 of them hidden).")
+        self.assertEqual([item.state for item in items], [2, 2, 2, 2])
+        ak.check_rows(items[:1], False, self.log, u"Check none", u"glyph")
+        self.assertEqual(self.lines[-1], u"<i>Check none</i> unchecked <b>1 glyph</b>.")
+        ak.check_rows(items[2:3], False, self.log, u"Check none", u"entry", u"entries", (u"in a closed group", u"in closed groups"))
+        self.assertEqual(self.lines[-1], u"<i>Check none</i> unchecked <b>1 entry</b> (in a closed group).")
+        ak.check_rows(items[2:], False, self.log, u"Check none", u"pair")
+        self.assertEqual(self.lines[-1], u"<i>Check none</i> unchecked <b>1 pair</b> (hidden).")
+        ak.check_rows(items, False, self.log, u"Check none", u"pair")
+        self.assertEqual(self.lines[-1], u"<i>Check none</i> unchecked <b>1 pair</b>.", "only those it changed")
+        ak.check_rows(items, False, self.log, u"Check none", u"pair")
+        self.assertEqual(self.lines[-1], u"<i>Check none</i> changed nothing.")
+
+    def test_both_ways_at_once_and_list_rows(self):
+        items = [self.Item(checked=True, tree=False), self.Item(tree=False), self.Item(tree=False, hidden=True)]
+        wanted = [False, True, True]
+        counts = ak.check_rows(items, lambda item: wanted[items.index(item)], self.log, u"Check new pairs", u"pair")
+        self.assertEqual(counts, (2, 1, 1))
+        self.assertEqual(self.lines[-1], u"<i>Check new pairs</i> checked <b>2 pairs</b> and unchecked <b>1</b> (1 of them hidden).")
+        hidden = [self.Item(hidden=True), self.Item(hidden=True)]
+        ak.check_rows(hidden, True, self.log, u"Check all", u"glyph")
+        self.assertEqual(self.lines[-1], u"<i>Check all</i> checked <b>2 glyphs</b> (all of them hidden).")
+        self.assertEqual(ak.check_rows([self.Item()], None, None), (0, 0, 0), "None: left alone, nothing said")
 
 
 class HeldFilterTests(unittest.TestCase):
@@ -3456,6 +4108,76 @@ class SingleChoiceTests(unittest.TestCase):
         ak.long_choice(own)
         self.assertEqual(own.styleSheet, u"QComboBox { color: red; }", "a sheet of its own is left as it is")
 
+    def test_every_dropdowns_popup_list_is_left_alone_by_dark_mode(self):
+        # (owner's image 162: the popup list, a window of its own, recolored by dark mode as one of FontLab's
+        # lists, its light text with colored fringes)
+        class Qt(object):
+            WA_TransparentForMouseEvents = NoFocus = StrongFocus = 0
+
+        old = ak._qt
+        ak._qt = lambda: (type("QtCore", (), {"Qt": Qt}), type("QtGui", (), {"QComboBox": "QComboBox"}))
+        self.addCleanup(lambda: setattr(ak, "_qt", old))
+
+        class View(object):
+            def __init__(self):
+                self.props, self.container = {}, None
+
+            def property(self, name):
+                return self.props.get(name)
+
+            def setProperty(self, name, value):
+                self.props[name] = value
+
+            def parentWidget(self):
+                return self.container
+
+        boxes = []
+        for count, sheet in ((7, u""), (1, u""), (3, u"QComboBox { color: red; }")):
+            combo = self.Combo(count)
+            combo.styleSheet, combo.setMaxVisibleItems = sheet, lambda count: None
+            popup = View()
+            popup.container = View()  # (QComboBoxPrivateContainer: the popup window holding it)
+            combo.view = lambda popup=popup: popup
+            boxes.append((combo, popup))
+            dialog = type("Dialog", (), {"findChildren": lambda dialog, kind, combo=combo: [combo]})()
+            ak.style_combos(dialog)  # (as every window's states are kept, update_states)
+            self.assertTrue(popup.property(ak.LEAVE_ALONE_PROP), "%d choices, sheet %r" % (count, sheet))
+            self.assertTrue(popup.container.property(ak.LEAVE_ALONE_PROP), "its popup window too")
+            self.assertFalse(popup.property(ak.POPUP_GRAY_PROP), "a light palette: ClearType's own text, no effect")
+        ak.leave_popup_alone(object())  # (a box without a list: nothing raised)
+
+    def test_a_dropdowns_list_gets_no_effect_and_loses_an_old_one(self):
+        # (live, 2026-11-17: an opacity effect meant to smooth the popup's text in gray changed nothing, the list
+        # paints an opaque background, and cost an offscreen render at every repaint: none now; one an earlier
+        # build put on is taken off)
+        class View(object):
+            def __init__(self):
+                self.props, self.effects = {}, []
+
+            def property(self, name):
+                return self.props.get(name)
+
+            def setProperty(self, name, value):
+                self.props[name] = value
+
+            def parentWidget(self):
+                return None
+
+            def setGraphicsEffect(self, effect):
+                self.effects.append(effect)
+
+        view = View()
+        combo = type("Combo", (), {"view": lambda c: view})()
+        ak.leave_popup_alone(combo)
+        self.assertEqual(view.effects, [], "no effect")
+        self.assertTrue(view.property(ak.LEAVE_ALONE_PROP))
+        view.setProperty(ak.POPUP_GRAY_PROP, True)  # (one an earlier build put on)
+        ak.leave_popup_alone(combo)
+        self.assertEqual(view.effects, [None], "taken off")
+        self.assertFalse(view.property(ak.POPUP_GRAY_PROP))
+        ak.leave_popup_alone(combo)
+        self.assertEqual(view.effects, [None], "once")
+
 
 class WindowFilterTests(unittest.TestCase):
     """Every FreeLab window's filter: help on a grayed-out control, tooltips laid out for the window, and
@@ -3602,6 +4324,46 @@ class WindowFilterTests(unittest.TestCase):
         self.assertEqual(ak.disabled_help(button), u"Write them.", "else its tooltip")
         button.toolTip = u""
         self.assertEqual(ak.disabled_help(button), u"The window's help.", "else its container's help")
+
+    def test_a_value_typed_without_enter_is_taken_before_a_button_acts(self):
+        # The owner (2026-11-16): 100 typed in Feature Code's Strokes over 130, Build clicked without Enter:
+        # it built at 130. A press on any button of the window first commits the field with the focus.
+        window = self.Widget()
+        spin = self.Widget(("QAbstractSpinBox",), window, value=130, text=u"100")
+        field = self.Widget(("QLineEdit",), spin)  # (the spin box's own line edit, focused while typed in)
+        log = self.Widget(("QTextEdit",), window)
+        build = self.Widget(("QAbstractButton",), window)
+        heard = []
+
+        def interpret():
+            spin.value = int(spin.text)
+            heard.append(("valueChanged", spin.value))
+        spin.interpretText = interpret
+        field.clearFocus = lambda: heard.append("focus out")
+        log.clearFocus = lambda: heard.append("log focus out")
+        focused = [field]
+        ak._qt()[1].QApplication = type("App", (), {"focusWidget": staticmethod(lambda: focused[0])})
+        self.assertFalse(ak.filter_event(window, build, self.Event(2), []), "the press goes on to the button")
+        self.assertEqual(heard, [("valueChanged", 100), "focus out"], "the value taken, then the field left")
+        self.assertEqual(spin.value, 100)
+        del heard[:]
+        ak.filter_event(window, build, self.Event(2, button=2), [])
+        build.enabled = False
+        ak.filter_event(window, build, self.Event(2), [])
+        focused[0] = log
+        build.enabled = True
+        ak.filter_event(window, build, self.Event(2), [])
+        other = self.Widget()
+        focused[0] = self.Widget(("QLineEdit",), other)
+        ak.filter_event(window, build, self.Event(2), [])
+        self.assertEqual(heard, [], "a right-click, a grayed-out button, a text editor, another window's field: left alone")
+        focused[0] = self.Widget(("QLineEdit",), window, clearFocus=lambda: heard.append("search left"))
+        self.assertIs(ak.commit_typing(window, build), focused[0])
+        self.assertEqual(heard, ["search left"], "a plain field: its editing ended (editingFinished)")
+        del heard[:]
+        spin.text, spin.clearFocus, focused[0] = u"120", lambda: heard.append("box left"), spin  # (Qt's focus proxy: the box)
+        self.assertIs(ak.commit_typing(window, build), spin)
+        self.assertEqual(heard, [("valueChanged", 120), "box left"], "the box focused itself: the same")
 
     def test_tooltips_are_as_wide_as_their_window_allows(self):
         # The owner: tooltips "stupidly compacted when there's ample space"
@@ -3774,6 +4536,90 @@ class KerningCheckTableTests(unittest.TestCase):
             source = handle.read().split(u"def resize(tab):")[1].split(u"\n    def ")[0]
         self.assertIn(u"fit_rows(tab.tree, range(tab.tree.columnCount - 1))", source)
         self.assertNotIn(u"resizeColumnToContents", source, "Qt measures only the rows it shows")
+
+    def test_its_buttons_sit_at_the_bottom_as_every_tools(self):
+        # (owner's report 152: they sat under each list, above the previews and the log)
+        class Button(object):
+            def __init__(self, name):
+                self.name, self.visible = name, True
+
+            def setVisible(self, on):
+                self.visible = on
+
+        class Row(object):
+            def __init__(self):
+                self.order = []
+
+            def addWidget(self, widget):
+                self.order.append(widget.name)
+
+            def addStretch(self, factor):
+                self.order.append("|")
+
+        class Tab(object):
+            def __init__(self, key, action=True):
+                self.action = Button(key + " action") if action else None
+                self.check_all, self.check_none, self.restore = (Button(key + " all"), Button(key + " none"),
+                                                                 Button(key + " restore"))
+
+        dialog = kc.KerningCheckDialog.__new__(kc.KerningCheckDialog)
+        dialog.collisions, dialog.cleanup, dialog.masters = Tab("collisions"), Tab("cleanup"), Tab("masters", False)
+        dialog.glyph_window_button, dialog.close_button = Button("glyph window"), Button("close")
+        row = dialog.bottom_row(type("QtGui", (), {"QHBoxLayout": Row}))
+        self.assertEqual(row.order, ["collisions all", "collisions none", "collisions restore", "cleanup all",
+                                     "cleanup none", "cleanup restore", "glyph window", "|", "collisions action",
+                                     "cleanup action", "close"], "checks at the left, the action then Close at the right")
+        shown = lambda: sorted(b.name for tab in (dialog.collisions, dialog.cleanup) for b in
+                               (tab.check_all, tab.check_none, tab.restore, tab.action) if b.visible)
+        self.assertEqual(shown(), ["collisions action", "collisions all", "collisions none", "collisions restore"])
+        dialog.pages = type("Pages", (), {"setCurrentIndex": lambda pages, index: None})()
+        dialog.update_previews, dialog.stale, dialog.package = lambda: None, set(), None
+        dialog.switch_page(1)
+        self.assertEqual(shown(), ["cleanup action", "cleanup all", "cleanup none", "cleanup restore"])
+        dialog.switch_page(2)
+        self.assertEqual(shown(), [], "Masters: nothing to check or write")
+        with io.open(kc.__file__, encoding="utf-8") as handle:
+            source = handle.read()
+        init = source.split(u"class KerningCheckDialog")[1].split(u"\n    def current_font")[0]
+        self.assertGreater(init.index(u"layout.addLayout(self.bottom_row(QtGui))"), init.index(u"layout.addWidget(self.log.widget)"),
+                           "the bottom row under the log")
+        self.assertNotIn(u"tab.buttons", source)
+
+    def test_check_all_and_check_none_say_what_they_did(self):
+        class Item(object):
+            def __init__(self, parent=None):
+                self.state, self.parent_item = 0, parent
+
+            def checkState(self, column):
+                return self.state
+
+            def setCheckState(self, column, state):
+                self.state = state
+
+            def isHidden(self):
+                return False
+
+            def isExpanded(self):
+                return False
+
+            def parent(self):
+                return self.parent_item
+
+        group = Item()
+        items = [Item(), Item(group), Item(group)]
+        dialog = kc.KerningCheckDialog.__new__(kc.KerningCheckDialog)
+        dialog.ak, logged = ak, []
+        dialog.log = type("Log", (), {"add": lambda log, text, level="info": logged.append(text)})()
+        dialog.collisions, dialog.cleanup = object(), object()
+        dialog.rows = lambda tab: items
+        dialog.update_buttons = lambda: None
+        old = ak._qt
+        ak._qt = lambda: (type("Core", (), {"Qt": type("Qt", (), {"Checked": 2, "Unchecked": 0})}), None)
+        self.addCleanup(lambda: setattr(ak, "_qt", old))
+        dialog.check_every(dialog.collisions, True)
+        self.assertEqual(logged[-1], u"<i>Check all</i> checked <b>3 pairs</b> (2 of them in closed groups).")
+        dialog.check_every(dialog.cleanup, False)
+        self.assertEqual(logged[-1], u"<i>Check none</i> unchecked <b>3 entries</b> (2 of them in closed groups).")
 
     def test_a_list_filled_says_what_the_pictures_room_is_for(self):
         # (live, 2026-11-16: the hint showed only once a pair was selected, then unselected)
@@ -4019,9 +4865,56 @@ class AutoKerningListTests(unittest.TestCase):
         d.only_picked, d.picked_room_kept = Stub(checked=False), True
         d.analysis, d.busy, d.common, d.fontlab, d.buttons_due = None, False, {}, None, False
         d.kerning_read = 1e12  # (the font's kerning read just now: not asked of FontLab again)
-        d.previewed = []
+        d.previewed, d.logged = [], []
         d.show_preview = lambda s: d.previewed.append((s.left, s.right))
+        d.log = type("Log", (), {"add": lambda log, text, level="info": d.logged.append((level, text))})()
         return d
+
+    def test_writing_again_writes_nothing_and_says_so(self):
+        # (owner's report 151: Write checked pairs, clicked again, logged "Wrote 0 entries for 0 pairs" each time)
+        av = self.suggestion(u"A", u"V", u"A", u"V", 0, halfkern=-80, contour=-60)
+        to = self.suggestion(u"T", u"o", u"T", u"o", 0, halfkern=-90, contour=-70)
+        d = self.window([av, to])
+        stored = FakeKerning({}, {})
+
+        class Package(object):
+            path, tfn, upm = u"a.vfc", u"A", 1000
+
+            @staticmethod
+            def kerning(master):
+                return stored
+
+        d.package, d.analysis = Package(), ak.Analysis([av, to], {}, (None, None))
+        d.after_writing = lambda package: type("Status", (), {"report": lambda status, log: None})()
+        d.refresh_kerning()
+        d.fill_table()
+        enabled = lambda: [call[1] for call in d.apply_button.calls if call[0] == "setEnabled"][-1]
+        self.assertTrue(enabled(), "two pairs to write")
+        d.write()
+        self.assertEqual(stored.stored, {(("A", False), ("V", False)): -70, (("T", False), ("o", False)): -80})
+        self.assertIn(u"Wrote 2 entries for 2 pairs to master Regular", d.logged[-1][1])
+        self.assertEqual([item.state for item in d.tree.items], [self.Qt.Checked] * 2, "its checks stay")
+        self.assertFalse(enabled(), "nothing new to write: grayed out")
+        d.write()
+        self.assertEqual(d.logged[-1], ("info", u"Nothing was written: every checked pair has the value it would be "
+                                               u"given already."))
+        self.assertFalse(any(u"Wrote 0" in text for _, text in d.logged))
+        d.source = self.Stub(currentIndex=[key for key, _ in ak.SOURCES].index("halfkern"))
+        d.update_buttons()
+        self.assertTrue(enabled(), "another source: something new to write")
+
+    def test_check_new_pairs_and_check_none_say_what_they_did(self):
+        av = self.suggestion(u"A", u"V", u"A", u"V", 0, halfkern=-80, contour=-60)
+        kerned = self.suggestion(u"T", u"o", u"T", u"o", -40, halfkern=-90, contour=-70)
+        d = self.window([av, kerned])
+        d.fill_table()
+        d.tree.items[1].setCheckState(0, self.Qt.Checked)
+        d.check_all(False)
+        self.assertEqual(d.logged[-1], ("info", u"<i>Check none</i> unchecked <b>2 pairs</b>."))
+        d.tree.items[1].setCheckState(0, self.Qt.Checked)
+        d.check_all(True)
+        self.assertEqual(d.logged[-1], ("info", u"<i>Check new pairs</i> checked <b>1 pair</b> and unchecked <b>1</b>."),
+                         "a pair the font kerns is unchecked by it, as before, and said so")
 
     def test_rows_in_the_layout_of_the_other_lists(self):
         av = self.suggestion(u"A", u"V", u"A", u"V", 0, halfkern=-80, contour=-60)
@@ -4039,7 +4932,8 @@ class AutoKerningListTests(unittest.TestCase):
         self.assertEqual(rows[0].texts[1:], [u"0", u"-80", u"-60", u"\N{EN DASH}", u"\N{EN DASH}", u"20", u"-70"])
         right = int(self.Qt.AlignRight | self.Qt.AlignVCenter)
         self.assertEqual(rows[0].aligned, dict((column, right) for column in range(1, 8)), "numbers right-aligned")
-        self.assertEqual(d.tree.header_aligned, dict((column, right) for column in range(1, 8)), "their headers too")
+        self.assertEqual(d.tree.header_aligned, dict((column, 0x4 | 0x80) for column in range(8)),
+                         "every header centered (owner's report 141)")
         self.assertEqual(self.drawn, [((u"A", u"V"), u"#000000", -70), ((u"T", u"o"), u"#000000", -80),
                                       ((u"bet", u"alef"), u"#000000", -15)],
                          "each pair drawn as on screen, at the value it takes, in the window's text color")
