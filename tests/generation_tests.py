@@ -1212,6 +1212,198 @@ class WriteTests(unittest.TestCase):
         package, logged = handed(False)
         self.assertIn(("done", u"‛ was built too, though not listed: ‟ is made of it."), logged)
 
+    # -- Codex's review, round 3 ---------------------------------------------------------------------------
+
+    def geometry(self, layer):
+        return (layer.advanceWidth, [(s.isComponent, s.shapeData.componentGlyph, s.transform.values,
+                                      [[(n.x, n.y, n.type) for n in c.nodes()] for c in s.contours]) for s in layer.shapes])
+
+    def test_an_unreadable_component_graph_is_never_taken_for_none(self):
+        def unreadable(*args):
+            raise RuntimeError(u"component graph unreadable")
+        # the write itself: Đ made of Ð, but Đ cannot be read; Ð would be made of Đ
+        glyphs = dict(BARE, Eth=(0x00D0, 680, [rect(80, 0, 600, 700)], None), Dcroat=(0x0110, 680, None, [("Eth", gg.IDENTITY)]))
+        package = package_of(FakeFont(glyphs))
+        eth = package.findName("Eth")
+        before = self.geometry(eth.getLayerByName("Regular"))
+        package.findName("Dcroat").getLayerByName = unreadable
+        calls, refuse, saved = [], Layer.setGlyphComponents, gg._qt
+        try:
+            gg._qt = lambda: (None, Stub(QTransform=Transform))
+            Layer.setGlyphComponents = lambda layer, components, *args: calls.append([c._glyph for c in components])
+            with self.assertRaises(gg.WriteError) as caught:
+                gg.write_layer(Stub(GlyphComponent=Component), None, None, Cm(), package, "Regular", ["Regular"], eth,
+                               gg.Layout([gg.Part("Dcroat")], 680), None)
+        finally:
+            Layer.setGlyphComponents, gg._qt = refuse, saved
+        self.assertEqual(calls, [], "an unreadable graph is not an empty one")
+        self.assertEqual(self.geometry(eth.getLayerByName("Regular")), before)
+        self.assertEqual(u"%s" % caught.exception, u"the components of Dcroat could not be read in master Regular, so it "
+                                                      u"cannot be told whether it would be made of itself")
+        # the check before any write: planned while Đ read as outlines, built once it cannot be read
+        eth_dcroat = dict(BARE, Eth=(0x00D0, 680, [rect(80, 0, 600, 700)], None),
+                          Dcroat=(0x0110, 680, [rect(80, 0, 600, 700)], None))
+        page, package, steps, logged, calls = self.rebuilding(eth_dcroat)
+        package.findName("Dcroat").getLayerByName = unreadable
+        self.build(page, [0x00D0])
+        self.assertEqual(calls, [])
+        self.assertIn(("warning", u"Ð was not built: the components of Dcroat could not be read in master Regular, so it "
+                                  u"cannot be told whether it would be made of itself: left as it was."), logged)
+        # planning: the row says so
+        font = FakeFont(eth_dcroat)
+        own = font.components
+
+        def components(name):
+            if name == "Dcroat":
+                raise gg.GraphUnreadable(name, "Regular")
+            return own(name)
+        font.components = components
+        rows = dict((r.hex, r) for r in gg.Planner(DATA, font, None, True).plan())
+        self.assertIsNone(rows["00D0"].layout)
+        self.assertEqual(gg.note_text(rows["00D0"]), u"the components of Dcroat could not be read in master Regular")
+
+    def test_a_master_fontlab_did_not_keep_puts_the_glyph_back_whole(self):
+        # Codex's review, round 3: Bold kept none of its parts (no error): Regular stayed rebuilt, Bold not
+        ohm = dict(BARE, Ohm=(0x2126, 740, [rect(30, 0, 690, 700)], None))
+        original = Layer.setGlyphComponents
+        for rejecting in ("Bold", "Regular"):
+            Layer.setGlyphComponents = original  # (each round its own spy, not the last round's)
+            page, package, steps, logged, calls = self.rebuilding(ohm, ("Regular", "Bold"))
+            glyph = package.findName("Ohm")
+            before = dict((m, self.geometry(glyph.getLayerByName(m))) for m in package.masters)
+            target, spy = glyph.getLayerByName(rejecting), Layer.setGlyphComponents
+
+            def keep_none(layer, components, width, package_, flag):
+                if layer is target:
+                    layer.advanceWidth = width
+                    return  # (FontLab keeps none of the components asked)
+                return spy(layer, components, width, package_, flag)
+            Layer.setGlyphComponents = keep_none
+            self.build(page, [0x2126])
+            self.assertEqual(dict((m, self.geometry(glyph.getLayerByName(m))) for m in package.masters), before, rejecting)
+            self.assertFalse(any(u"Rebuilt" in text for _, text in logged), logged)
+            self.assertIn(("warning", u"%s was not built: FontLab did not keep its parts in master %s; every master left as "
+                                      u"it was." % (u(0x2126), rejecting)), logged)
+
+    def test_a_put_back_is_read_back_whole(self):
+        # Codex's review, round 3: only node counts were compared: another drawing of as many nodes read as restored
+        layer = Layer([Shape([Contour(rect(0, 0, 100, 100))])], 500)
+        glyph = Glyph("emdash", {"Regular": layer})
+        saved = gg.glyph_layers(Cm(), glyph, ["Regular"])
+        self.assertTrue(gg.layer_as_saved(glyph, "Regular", saved["Regular"]))
+        layer.shapes = [Shape([Contour(rect(80, 50, 180, 150))])]
+        self.assertFalse(gg.layer_as_saved(glyph, "Regular", saved["Regular"]), "moved: not as it was")
+        layer.shapes = [Shape([Contour(rect(0, 0, 100, 100))], transform=Transform(1, 0, 0, 1, 5, 0))]
+        self.assertFalse(gg.layer_as_saved(glyph, "Regular", saved["Regular"]), "its shape moved")
+        turned = Contour(rect(0, 0, 100, 100))
+        turned._nodes[1].type = u"off"
+        layer.shapes = [Shape([turned])]
+        self.assertFalse(gg.layer_as_saved(glyph, "Regular", saved["Regular"]), "a node of another kind")
+        layer.shapes = [Shape([Contour(rect(0, 0, 100, 100)[:2]), Contour(rect(0, 0, 100, 100)[2:])])]
+        self.assertFalse(gg.layer_as_saved(glyph, "Regular", saved["Regular"]), "the same nodes in two contours")
+        # a rebuild that leaves another outline of as many nodes behind names its master
+        ohm = dict(BARE, Ohm=(0x2126, 740, [rect(40, 0, 700, 710)], None))
+        page, package, steps, logged, calls = self.rebuilding(ohm, ("Regular", "Bold"))
+        bold = package.findName("Ohm").getLayerByName("Bold")
+        real_write, real_restore = gg.write_parts, gg.put_back
+
+        def write(fontlab, ak, fc, cm, package_, master, layer_, layout, corrected, own=None):
+            result = real_write(fontlab, ak, fc, cm, package_, master, layer_, layout, corrected, own)
+            if layer_ is bold:
+                layer_.shapes = [Shape([Contour(rect(90, 10, 600, 690))])]  # (4 nodes, its own advance)
+                layer_.advanceWidth = 740
+                raise gg.WriteError(u"Bold failed after its write")
+            return result
+
+        def restore(layer_, shapes, width):
+            if layer_ is bold:
+                raise RuntimeError(u"no put-back")
+            return real_restore(layer_, shapes, width)
+        gg.write_parts, gg.put_back = write, restore
+        self.addCleanup(setattr, gg, "write_parts", real_write)
+        self.addCleanup(setattr, gg, "put_back", real_restore)
+        self.build(page, [0x2126])
+        self.assertFalse(any(u"every master left as it was" in text for _, text in logged), logged)
+        self.assertTrue(any(u"it was changed all the same in master Bold, which could not be put back" in text
+                            for _, text in logged), logged)
+
+    def test_a_prerequisite_a_glyph_left_in_the_font_is_made_of_stays(self):
+        # Codex's review, round 3: ‟ written, its code point refused: ‟ stayed, made of ‛, and ‛ was taken out
+        page, package, steps, logged = self.page()
+        page.planner_now = gg.Planner(DATA, page.font, None, False, set(["201F"]))
+        page.rows = page.planner_now.plan()
+        add = package.addGlyph
+
+        class Refusing(FgGlyph):
+            @property
+            def unicode(self):
+                return self.unicodes[0] if self.unicodes else None
+
+            @unicode.setter
+            def unicode(self, code):
+                raise RuntimeError(u"code point refused")
+
+        def adding(new):
+            add(new)
+            if new.name == "quotedblrightreversed":
+                package.findName(new.name).fgGlyph = Refusing([])
+        package.addGlyph = adding
+        self.build(page, [0x201F])
+        target = package.findName("quotedblrightreversed")
+        self.assertEqual(sorted(gg.glyph_components(package, ["Regular"], target.name)), ["quotereversed"])
+        self.assertIsNotNone(package.findName("quotereversed"), "what ‟ is made of stays")
+        self.assertIn(("warning", u"‛ was built for ‟, which was not built: a glyph left in the font is made of it, so "
+                                  u"it stays (Edit > Undo takes it back)."), logged)
+        self.assertFalse(any(u"built too" in text for _, text in logged), logged)
+
+    def test_a_prerequisite_left_in_the_font_keeps_what_it_is_made_of(self):
+        # (one FontLab did not take out: the glyph it is made of stays too, never deleted under it)
+        glyphs = dict(BARE, inner=(None, 300, [rect(0, 0, 10, 10)], None), outer=(None, 300, None, [("inner", gg.IDENTITY)]))
+        package = package_of(FakeFont(glyphs))
+        page = gg.GenerationPage.__new__(gg.GenerationPage)
+        inner, outer = Stub(name="inner", char=u"i", needs=[]), Stub(name="outer", char=u"o", needs=["inner"])
+        target = Stub(name="target", char=u"t", needs=["outer"])
+        page.planner_now = Stub(by_name={"inner": inner, "outer": outer})
+        deleted = []
+        package.deleteGlyph = lambda glyph: deleted.append(glyph.name)  # (FontLab takes nothing out)
+        made, built, touched = [u"i", u"o"], set(["inner", "outer"]), []
+        orphans, left = page.drop_orphans(package, ["Regular"], [outer, inner], [target], made, built, touched)
+        self.assertEqual(orphans, [])
+        self.assertEqual(sorted((r.name, why) for r, why in left), [("inner", "used"), ("outer", "stuck")])
+        self.assertEqual(deleted, ["outer"], "inner never asked out: outer, still in the font, is made of it")
+
+    def test_a_prerequisite_left_in_the_font_is_never_said_to_be_used(self):
+        # Codex's review, round 3: FontLab did not take ‛ out: the log still said "are made of it", of no glyph
+        real = gg.write_parts
+        self.addCleanup(setattr, gg, "write_parts", real)
+
+        def handed(codes, failing, delete_fails=False):
+            page, package, steps, logged = self.page()
+            page.planner_now = gg.Planner(DATA, page.font, None, False, set(codes))
+            page.rows = page.planner_now.plan()
+
+            def write(fontlab, ak, fc, cm, package_, master, layer, layout, corrected, own=None):
+                if failing and any(part.name == "quotereversed" for part in layout.parts):
+                    raise gg.WriteError(u"refused")
+                return real(fontlab, ak, fc, cm, package_, master, layer, layout, corrected, own)
+            gg.write_parts = write
+            if delete_fails:
+                package.deleteGlyph = lambda glyph: None
+            self.build(page, [int(code, 16) for code in codes])
+            return logged
+        logged = handed(["201F"], True, delete_fails=True)  # 0 glyphs built of it
+        self.assertFalse(any(u"made of it" in text for _, text in logged), logged)
+        self.assertIn(("warning", u"‛ was built for ‟, which was not built: FontLab did not take it out again, so it stays "
+                                  u"in the font (Edit > Undo takes it back)."), logged)
+        logged = handed(["201F"], False)  # 1
+        self.assertIn(("done", u"‛ was built too, though not listed: ‟ is made of it."), logged)
+        logged = handed(["201F", "02BD"], False)  # 2
+        self.assertIn(("done", u"‛ was built too, though not listed: ʽ ‟ are made of it."), logged)
+        logged = handed(["201F", "02BD"], True, delete_fails=True)  # 0 of 2
+        self.assertFalse(any(u"made of it" in text for _, text in logged), logged)
+        self.assertIn(("warning", u"‛ was built for ʽ ‟, which were not built: FontLab did not take it out again, so it "
+                                  u"stays in the font (Edit > Undo takes it back)."), logged)
+
     def test_python_made_glyphs_are_held(self):
         sys.modules.pop("freelab_glyph_compose", None)
         import freelab_glyph_compose as cm

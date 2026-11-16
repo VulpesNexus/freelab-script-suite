@@ -589,8 +589,12 @@ class Planner(object):
                 continue
             path = None
             if row.existing:  # (any part of its own glyph, then any loop through the font's components)
-                path = [row.name] if any(part.name == row.name for part in layout.parts) else \
-                    component_loop(row.name, component_names(layout), self.font.components)
+                try:
+                    path = [row.name] if any(part.name == row.name for part in layout.parts) else \
+                        component_loop(row.name, component_names(layout), self.font.components)
+                except GraphUnreadable as exc:
+                    first_need = first_need or u"%s" % exc
+                    continue
             if path is not None:  # (a glyph is never made a component of itself, through others neither)
                 first_need = first_need or loop_words(row.name, path)
                 continue
@@ -1150,18 +1154,30 @@ def unused_helpers(package, masters, helpers, touched):
     return [name for name in helpers if name not in used]
 
 
+class GraphUnreadable(Exception):
+    """A glyph's components could not be read: no loop of components can be ruled out (Codex's review,
+    round 3: read as none, a loop went through)."""
+
+    def __init__(self, name, master=None):
+        Exception.__init__(self, u"the components of %s could not be read%s" % (
+            name, u" in master %s" % master if master is not None else u""))
+        self.name, self.master = name, master
+
+
 def glyph_components(package, masters, name):
-    """The glyphs a glyph's components point to, in any of these masters (a set: [] for no such glyph)."""
-    found = set()
+    """The glyphs a glyph's components point to, in any of these masters (a set; empty for a glyph of
+    outlines, or no such glyph). GraphUnreadable where they cannot be read: never taken for none."""
+    found, at = set(), None
     try:
         glyph = package.findName(name)
         for master in masters:
+            at = master
             layer = glyph.getLayerByName(master) if glyph is not None else None
             for shape in (list(layer.shapes) if layer is not None else []):
-                if getattr(shape, "isComponent", False):
+                if shape.isComponent:
                     found.add(u"%s" % shape.shapeData.componentGlyph)
     except Exception:
-        pass
+        raise GraphUnreadable(name, at)
     return found
 
 
@@ -1182,22 +1198,34 @@ def component_loops(order, layouts_of, components_of):
         new = []
         for layout in layouts:
             new.extend(name for name in component_names(layout) if name not in new)
-        path = component_loop(row.name, new, edges)
+        try:
+            path = component_loop(row.name, new, edges)
+        except GraphUnreadable as exc:  # (no loop ruled out: refused as one)
+            loops[row] = u"%s, so it cannot be told whether it would be made of itself" % exc
+            continue
         if path is not None:
-            loops[row] = path
+            loops[row] = u"it would be %s, a loop of components" % loop_words(row.name, path)
         else:
             planned[row.name] = set(new)
     return loops
 
 
 def glyph_layers(cm, glyph, masters):
-    """{master: (its shapes copied, its advance), or None where the glyph has no layer}: a glyph as it was,
-    to put back whole (put_glyph_back)."""
+    """{master: (its shapes copied, its advance, what they read as now: shapes_read), or None where the glyph
+    has no layer}: a glyph as it was, to put back whole (put_glyph_back) and to read back against (the
+    reading is taken before anything is written: the copies themselves go back into the layer)."""
     saved = {}
     for master in masters:
         layer = glyph.getLayerByName(master)
-        saved[master] = None if layer is None else ([cm.shape_copy(shape) for shape in list(layer.shapes)],
-                                                     float(layer.advanceWidth or 0))
+        if layer is None:
+            saved[master] = None
+            continue
+        shapes = list(layer.shapes)
+        try:
+            reading = shapes_read(shapes)
+        except Exception:
+            reading = None  # (nothing to read back against: a put-back is then never said to hold)
+        saved[master] = ([cm.shape_copy(shape) for shape in shapes], float(layer.advanceWidth or 0), reading)
     return saved
 
 
@@ -1212,7 +1240,8 @@ def put_glyph_back(glyph, saved, masters):
                 if layer is not None:
                     glyph.removeLayer(layer)
             else:
-                put_back(layer if layer is not None else glyph.getLayerByName(master, True), *saved[master])
+                put_back(layer if layer is not None else glyph.getLayerByName(master, True), saved[master][0],
+                         saved[master][1])
         except Exception:
             pass  # (read back below, as every master is)
         if not layer_as_saved(glyph, master, saved.get(master)):
@@ -1221,16 +1250,20 @@ def put_glyph_back(glyph, saved, masters):
 
 
 def shapes_read(shapes):
-    """What a layer's shapes are, to compare: each a component's glyph and transform, or its contours'
-    node count."""
+    """What a layer's shapes are, to compare whole: each shape's transform, and a component's glyph or an
+    outline's contours, each its nodes' places and kinds in order (a count alone took another drawing of as
+    many nodes for the saved one: Codex's review, round 3)."""
     found = []
     for shape in shapes:
-        if getattr(shape, "isComponent", False):
-            t = shape.transform
-            found.append((u"%s" % shape.shapeData.componentGlyph,
-                          tuple(round(v, 3) for v in (t.m11(), t.m12(), t.m21(), t.m22(), t.dx(), t.dy()))))
+        t = shape.transform
+        matrix = tuple(round(float(v), 3) for v in (t.m11(), t.m12(), t.m21(), t.m22(), t.dx(), t.dy()))
+        if shape.isComponent:
+            found.append(("component", u"%s" % shape.shapeData.componentGlyph, matrix))
         else:
-            found.append(sum(len(list(contour.nodes())) for contour in list(shape.contours) if contour is not None))
+            contours = [None if contour is None else tuple((round(float(node.x), 3), round(float(node.y), 3),
+                                                            u"%s" % node.type) for node in list(contour.nodes()))
+                        for contour in list(shape.contours)]
+            found.append(("outline", matrix, tuple(contours)))
     return found
 
 
@@ -1242,7 +1275,7 @@ def layer_as_saved(glyph, master, saved):
             return layer is None
         if layer is None or abs(float(layer.advanceWidth or 0) - saved[1]) > 0.5:
             return False
-        return shapes_read(list(layer.shapes)) == shapes_read(saved[0])
+        return saved[2] is not None and shapes_read(list(layer.shapes)) == saved[2]
     except Exception:
         return False
 
@@ -1318,8 +1351,11 @@ def write_parts(fontlab, ak, fc, cm, package, master, layer, layout, corrected, 
         components.append(component)
         names.append(name)
     if own is not None:
-        path = component_loop(own, names,
-                              lambda name: glyph_components(package, list(package.masters) or [master], name))
+        try:
+            path = component_loop(own, names,
+                                  lambda name: glyph_components(package, list(package.masters) or [master], name))
+        except GraphUnreadable as exc:  # (an unreadable graph rules no loop out: the layer is left as it is)
+            raise WriteError(u"%s, so it cannot be told whether it would be made of itself" % exc)
         if path is not None:
             raise WriteError(u"it would be %s, a loop of components" % loop_words(own, path))
     layer.removeAllShapes()  # (only once every part is ready: a part that cannot be made leaves it as it was)
@@ -1884,29 +1920,43 @@ class GenerationPage(object):
             todo.extend(need.needs if need is not None else [])
         return found
 
-    def drop_orphans(self, package, unlisted, chosen, made, rebuilt, built_names, touched):
-        """The unlisted prerequisites this build made (prerequisites) that no glyph built is made of (the
-        glyphs that needed them were not built): taken out of the font again, and out of made, built_names,
-        and touched. (taken out, left: those FontLab did not take out)."""
-        orphans, stuck = [], []
+    def drop_orphans(self, package, masters, unlisted, chosen, made, built_names, touched):
+        """The unlisted prerequisites this build made (prerequisites) that no glyph in the font is made of
+        any more (the glyphs that needed them were not built and are gone, or were put back): taken out of
+        the font again, and out of made, built_names, and touched. Whether one is used is read from the
+        components of the glyphs this build wrote that are still in the font, in every master (a glyph that
+        failed may stay, made of it: Codex's review, round 3), never from what was built. (taken out, left:
+        [(row, "used" where a glyph left in the font is made of it, "stuck" where FontLab did not take it
+        out, "unread" where the components could not be read)])."""
+        orphans, left = [], []
+        candidates = [r for r in unlisted if r.char in made]
         while True:
-            used = set()
+            gone = set(r.name for r in orphans)
+            used, unread = set(), False
             for r in chosen + unlisted:
-                if (r.char in made or r.char in rebuilt) and r not in orphans and r not in stuck:
-                    used.update(r.needs)
-            found = [r for r in unlisted if r.char in made and r.name not in used and r not in orphans and r not in stuck]
+                if r.name in gone or package.findName(r.name) is None:
+                    continue
+                try:
+                    used.update(name for name in glyph_components(package, masters, r.name) if name != r.name)
+                except GraphUnreadable:
+                    unread = True
+            if unread:  # (no use ruled out: every one left that is not taken out yet stays, said so)
+                left.extend((r, "unread") for r in candidates if r not in orphans and all(r is not k for k, _ in left))
+                return orphans, left
+            found = [r for r in candidates if r.name not in used and r not in orphans and all(r is not k for k, _ in left)]
             if not found:
-                return orphans, stuck
+                left.extend((r, "used") for r in candidates if r not in orphans and all(r is not k for k, _ in left))
+                return orphans, left
             for r in found:
                 glyph = package.findName(r.name)
                 try:
                     if glyph is not None:
                         package.deleteGlyph(glyph)
-                    gone = package.findName(r.name) is None
+                    taken = package.findName(r.name) is None
                 except Exception:
-                    gone = False
-                if not gone:
-                    stuck.append(r)
+                    taken = False
+                if not taken:
+                    left.append((r, "stuck"))  # (still in the font: what it is made of stays too, read next round)
                     continue
                 orphans.append(r)
                 made.remove(r.char)
@@ -1942,7 +1992,7 @@ class GenerationPage(object):
                                 lambda name: glyph_components(package, masters, name))
         for r in order:
             if r in loops:
-                failed.append((r.char, u"it would be %s, a loop of components: left as it was" % loop_words(r.name, loops[r])))
+                failed.append((r.char, u"%s: left as it was" % loops[r]))
         order = [r for r in order if r not in loops]
         sharing = [package.findName(r.layout.shared) for r in order if r.layout.kind == "shared"]
         if not self.owner.begin_write(package, [g for g in sharing if g is not None]):
@@ -2014,6 +2064,9 @@ class GenerationPage(object):
                             empty_in.append(master)
                 except Exception as exc:  # (this glyph only: the others are built all the same)
                     why = u"%s" % exc
+                if why is None and empty_in:  # (a master FontLab did not keep: the glyph is rebuilt whole or not at all)
+                    why = u"FontLab did not keep its parts in %s %s" % (
+                        u"master" if len(empty_in) == 1 else u"masters", u", ".join(empty_in))
                 if why is not None or not kept:
                     if added:
                         package.deleteGlyph(package.findName(r.name))
@@ -2039,16 +2092,13 @@ class GenerationPage(object):
                 changing = None
                 (rebuilt if r.existing else made).append(r.char)
                 built_names.add(r.name)
-                if empty_in:
-                    log.add(u"%s was left as it was in %s %s: FontLab did not keep its parts there." % (
-                        b(r.char), u"master" if len(empty_in) == 1 else u"masters", html(u", ".join(empty_in))), "warning")
         except Exception as exc:
             error = exc
             if changing is not None:
                 touched.append(changing)
-        orphans, stuck = [], []  # (prerequisites built for glyphs not built: taken out, or left where they cannot be)
+        orphans, left = [], []  # (prerequisites built for glyphs not built: taken out, or left, and why)
         try:
-            orphans, stuck = self.drop_orphans(package, unlisted, chosen, made, rebuilt, built_names, touched)
+            orphans, left = self.drop_orphans(package, masters, unlisted, chosen, made, built_names, touched)
         except Exception as exc:
             error = error or exc
         try:  # (whatever happens here, the step below is recorded and the window's write ends)
@@ -2083,26 +2133,37 @@ class GenerationPage(object):
             log.add(u"Rebuilt %s from %s recipe, in place: %s.%s" % (
                 b(counted(len(rebuilt), u"glyph")), u"its" if len(rebuilt) == 1 else u"their", html(u" ".join(rebuilt)),
                 undo), "done")
-        extra = [r for r in unlisted if r.char in made]
-        if extra:  # (each used by a glyph built: drop_orphans took out the others)
+        done = set(r.char for r in chosen if r.char in made or r.char in rebuilt)
+        extra = [r for r in unlisted if r.char in made and any(
+            r.name in self.made_of(c) for c in chosen if c.char in done)]  # (only those a glyph built is made of)
+        if extra:
             names = set(r.name for r in extra)
-            users = [r.char for r in chosen if (r.char in made or r.char in rebuilt) and names & self.made_of(r)]
+            users = [r.char for r in chosen if r.char in done and names & self.made_of(r)]
             log.add(u"%s %s built too, though not listed: %s %s made of %s." % (
                 b(html(u" ".join(r.char for r in extra))), u"was" if len(extra) == 1 else u"were",
                 html(u" ".join(users)), u"is" if len(users) == 1 else u"are", u"it" if len(extra) == 1 else u"them"),
                 "done")
-        for gone, kept_in in ((orphans, False), (stuck, True)):
-            if gone:
-                names = set(g.name for g in gone)
-                users = [r.char for r in chosen if r.char not in made and r.char not in rebuilt and names & self.made_of(r)]
-                log.add(u"%s %s built for %s, which %s not built: %s." % (
-                    b(html(u" ".join(r.char for r in gone))), u"was" if len(gone) == 1 else u"were",
-                    html(u" ".join(users)) or u"the glyphs listed", u"was" if len(users) == 1 else u"were",
-                    (u"FontLab did not take %s out again, so %s in the font (Edit > Undo takes %s back)" % (
-                        u"it" if len(gone) == 1 else u"them", u"it stays" if len(gone) == 1 else u"they stay",
-                        u"it" if len(gone) == 1 else u"them")) if kept_in else
-                    u"%s taken out again" % (u"it was" if len(gone) == 1 else u"they were")),
-                    "warning" if kept_in else "info")
+        outcomes = [(orphans, None)] + [([r for r, why in left if why == key and all(r is not e for e in extra)], key)
+                                        for key in ("used", "stuck", "unread")]
+        for gone, key in outcomes:
+            if not gone:
+                continue
+            names = set(g.name for g in gone)
+            users = [r.char for r in chosen if r.char not in done and names & self.made_of(r)]
+            one = len(gone) == 1
+            it, they = (u"it", u"it stays") if one else (u"them", u"they stay")
+            then = {None: u"%s taken out again" % (u"it was" if one else u"they were"),
+                    "used": u"a glyph left in the font is made of %s, so %s (Edit > Undo takes %s back)" % (it, they, it),
+                    "stuck": u"FontLab did not take %s out again, so %s in the font (Edit > Undo takes %s back)" % (
+                        it, they, it),
+                    "unread": u"the components of the glyphs it was built for could not be read, so %s in the font "
+                              u"(Edit > Undo takes %s back)" % (they, it) if one else
+                              u"the components of the glyphs they were built for could not be read, so %s in the font "
+                              u"(Edit > Undo takes %s back)" % (they, it)}[key]
+            log.add(u"%s %s built for %s, which %s not built: %s." % (
+                b(html(u" ".join(r.char for r in gone))), u"was" if one else u"were",
+                html(u" ".join(users)) or u"the glyphs listed", u"was" if len(users) == 1 else u"were", then),
+                "info" if key is None else "warning")
         if not (made or shared or rebuilt):
             log.add(u"Built none.")
         for master in masters:
