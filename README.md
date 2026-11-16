@@ -1,6 +1,6 @@
-# FreeLab
+# FreeLab Script Suite
 
-Tools for FontLab 7 that run inside it: a dark mode for its whole interface, auto kerning, auto spacing, CJK spacing and vertical text, glyph composition (diacritics and other missing glyphs), feature code, a font check, a font comparison, and PDF proofs.
+FreeLab's tools for FontLab 7, which run inside it: a dark mode for its whole interface, auto kerning, auto spacing, CJK spacing and vertical text, glyph composition (diacritics and other missing glyphs), feature code, a font check, a font comparison, and PDF proofs.
 
 **Status: 0.3.0.** Dark mode runs in FontLab 7.2.
 

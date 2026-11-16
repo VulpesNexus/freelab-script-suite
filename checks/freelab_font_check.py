@@ -82,7 +82,7 @@ FLOAT_MOST = 200  # characters of a selected language, set, or family listed in 
 UNLISTED_SHOWN = 6  # languages Hyperglot does not describe that a search names, at most
 # Where a language Font Check cannot check yet is proposed: FreeLab's repository, shown as text and opened on a
 # click where Qt can. The one place this address is written (the repository is private until its release).
-REPOSITORY = u"https://github.com/VulpesNexus/freelab"
+REPOSITORY = u"https://github.com/VulpesNexus/freelab-script-suite"
 ISSUES_ADDRESS = REPOSITORY + u"/issues"
 CUSTOM_SETS_FILE = u"font_check_sets.json"  # in FreeLab's settings folder (ak.state_dir()): the sets a user saved
 CUSTOM_GROUP = u"Your sets"  # their section in the Character sets tab
