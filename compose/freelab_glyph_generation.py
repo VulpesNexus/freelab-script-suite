@@ -221,9 +221,11 @@ def box_of(polygons):
 
 
 def round_measures(polygons):
-    """(contrast, stress) of a round letter: its sides' thickness at mid-height over its top's and bottom's
-    at mid-width (1 for a monoline O), and how much its left and right sides differ a quarter up and down
-    (0 for an upright stress), as a share of their mean; None where it cannot be read."""
+    """(contrast, stress) of a round letter: its thicker strokes over its thinner ones, its sides' thickness at
+    mid-height against its top's and bottom's at mid-width (1 for a monoline O, 4 for sides four times its top's
+    thickness or for a top four times its sides': reverse contrast is no monoline either), and how much its
+    left and right sides differ a quarter up and down (0 for an upright stress), as a share of their mean;
+    None where it cannot be read."""
     box = box_of(polygons)
     if box is None:
         return None
@@ -234,7 +236,7 @@ def round_measures(polygons):
         return None
     sides = [across[0][1] - across[0][0], across[-1][1] - across[-1][0]]
     caps = [up_down[0][1] - up_down[0][0], up_down[-1][1] - up_down[-1][0]]
-    if min(caps) <= 0:
+    if min(caps) <= 0 or max(sides) <= 0:
         return None
     widths = []
     for at in (cy + h / 4.0, cy - h / 4.0):
@@ -244,7 +246,8 @@ def round_measures(polygons):
         widths.append((pieces[0][1] - pieces[0][0], pieces[-1][1] - pieces[-1][0]))
     mean = sum(a + b for a, b in widths) / 4.0
     stress = sum(abs(a - b) for a, b in widths) / (2.0 * mean) if mean > 0 else 0.0
-    return max(sides) / min(caps), stress
+    ratio = max(sides) / min(caps)
+    return max(ratio, 1.0 / ratio), stress
 
 
 def serif_measure(polygons):
@@ -362,21 +365,64 @@ class Row(object):
         return LIKELY if self.likely else self.confidence
 
 
-def describe_code(code_hex):
+def describe_code(code_hex, known=None):
     """A character for a note: a letter or a sign as itself, "‹ (U+2039)"; punctuation, a space, or a mark
-    by its Unicode name, "the middle dot (U+00B7)" (a dot or a dash between words reads as a separator)."""
+    by its Unicode name, "the middle dot (U+00B7)" (a dot or a dash between words reads as a separator).
+    known: the recipe table's "characters" ({hex: {"category", "name"}}, Unicode's as of the table's making):
+    FontLab's Python 2.7 has Unicode 5.2, where a later character (⸲ U+2E32, Ʞ U+A7B0) is unassigned."""
     import unicodedata
     ch = char_of(code_hex)
-    try:
-        category = unicodedata.category(ch)
-    except (TypeError, ValueError):
-        category = u"Cn"
-    if category[0] in u"PZCM":
+    given = (known or {}).get(code_hex)
+    if given:
+        category, name = given.get("category") or u"Cn", given.get("name") or u""
+    else:
         try:
-            return u"the %s (U+%s)" % (unicodedata.name(ch).lower(), code_hex)
+            category = unicodedata.category(ch)
+        except (TypeError, ValueError):
+            category = u"Cn"
+        try:
+            name = unicodedata.name(ch)
         except (ValueError, TypeError):
-            return u"U+%s" % code_hex
+            name = u""
+    if category[0] in u"PZCM":
+        return u"the %s (U+%s)" % (name.lower(), code_hex) if name else u"U+%s" % code_hex
     return u"%s (U+%s)" % (ch, code_hex)
+
+
+def component_names(layout):
+    """The glyphs a layout's parts point to, as far as a loop of components goes: every part but a stretched
+    one (outlines). A mirrored part counts too: it becomes a corrected glyph of outlines only where its glyph
+    is drawn; where its glyph is made of a mirrored component, the two mirrors cancel once flattened
+    (flat_parts) and the part points to that component's glyph as it is (Codex's review: R made as a mirrored
+    component of Я, Я rebuilt as the mirrored R became a component of itself). A second code point and an
+    empty glyph point to nothing."""
+    if layout is None or layout.kind != "components":
+        return []
+    return [part.name for part in layout.parts if part.stretch is None]
+
+
+def component_loop(name, parts, components_of):
+    """The part through which a glyph made of these parts would be made of itself ([part, ..., name]: the
+    chain of components), else None. components_of(glyph): the glyphs its components point to."""
+    for part in parts:
+        trail, seen = [(part, [part])], set()
+        while trail:
+            glyph, path = trail.pop()
+            if glyph == name:
+                return path
+            if glyph in seen:
+                continue
+            seen.add(glyph)
+            for inner in components_of(glyph) or ():
+                trail.append((inner, path + [inner]))
+    return None
+
+
+def loop_words(name, path):
+    """A loop of components, for a note: "made of Dcroat, which is made of Eth"."""
+    if len(path) == 1:
+        return u"made of its own glyph"
+    return u"made of %s, which %s made of %s" % (path[0], u"is" if len(path) == 2 else u"is in the end", name)
 
 
 class Font(object):
@@ -397,6 +443,10 @@ class Font(object):
         """A glyph's outline as polygons, curves flattened ([] where it cannot be read)."""
         return []
 
+    def components(self, name):
+        """The glyphs a glyph's components point to in this master ([] for one of outlines only)."""
+        return []
+
     def codes_of(self, name):
         """Every code point the font gives that glyph."""
         return [code for code in self.codes() if self.glyph_of(code) == name]
@@ -406,7 +456,9 @@ class Font(object):
 
 
 class Planner(object):
-    """The rows of the list for a font, and each row's layout in one of its masters."""
+    """The rows of the list for a font, and each row's layout in one of its masters. codes: the characters to
+    list (Font Check's hand-over), else every one; planned against the whole table all the same, so that a
+    character built of another the font lacks (‟ of two ‛) is built as the table builds it (prerequisites)."""
 
     def __init__(self, data, font, settings=None, include_existing=False, codes=None):
         self.data, self.font = data, font
@@ -415,8 +467,12 @@ class Planner(object):
         self.include_existing = include_existing
         entries = data.get("entries") or []
         self.entries = dict((e["code"], e) for e in entries)
-        self.order = [e["code"] for e in entries if codes is None or e["code"] in codes]
+        self.order = [e["code"] for e in entries]
+        self.listed = set(codes) if codes is not None else None
         self.rows, self.by_hex, self.by_name = [], {}, {}
+
+    def describe(self, code_hex):
+        return describe_code(code_hex, self.data.get("characters"))
 
     # -- the list ------------------------------------------------------------------------------------------
 
@@ -451,7 +507,50 @@ class Planner(object):
             check = (row.way or {}).get("check")
             if check and row.confidence == "starting point":
                 row.monoline = likely_usable(self.monoline(), (self.rules.get("monoline") or {}).get(check), check)
+        if self.listed is not None:  # (the others stay in by_hex and by_name: prerequisites)
+            drafts = self.draft_needs([row for row in self.rows if row.hex in self.listed])
+            self.rows = [row for row in self.rows if row.hex in self.listed or id(row) in drafts]
         return self.rows
+
+    def draft_needs(self, rows):
+        """{id(row)} of the starting points these rows are built of, through others too: listed with them
+        (unchecked, as every starting point is), so that a draft is built only once the owner checks it, as
+        in the whole table (Codex's review: ǝ handed over alone built a turned e, a draft, unasked)."""
+        found, seen = set(), set()
+
+        def visit(row):
+            for name in row.needs:
+                need = self.by_name.get(name)
+                if need is None or name in seen:
+                    continue
+                seen.add(name)
+                if need.layout is not None and need.confidence == "starting point":
+                    found.add(id(need))
+                visit(need)
+        for row in rows:
+            visit(row)
+        return found
+
+    def prerequisites(self, chosen):
+        """The rows the chosen ones are built of that the list does not show (Font Check's hand-over lists
+        only the characters handed over): built with them, before them; exact or accepted recipes only (a
+        starting point is listed: draft_needs). A listed one is the owner's to check, as before (unchecked,
+        the row that needs it is not built, and the log says so)."""
+        picked = set(row.name for row in chosen)
+        listed = set(id(row) for row in self.rows)
+        found = []
+
+        def visit(row):
+            for name in row.needs:
+                need = self.by_name.get(name)
+                if need is None or need.name in picked or need.layout is None or id(need) in listed:
+                    continue
+                picked.add(need.name)
+                visit(need)
+                found.append(need)
+        for row in chosen:
+            visit(row)
+        return found
 
     def monoline(self):
         """The font's monoline measures in this master (monoline_measures), read once; None where it has
@@ -488,9 +587,13 @@ class Planner(object):
                 if first_need is None:
                     first_need = u"%s" % need
                 continue
-            if row.existing and any(part.name == row.name for part in layout.parts):
-                first_need = first_need or u"made of its own glyph"
-                continue  # (a glyph is never made a component of itself)
+            path = None
+            if row.existing:  # (any part of its own glyph, then any loop through the font's components)
+                path = [row.name] if any(part.name == row.name for part in layout.parts) else \
+                    component_loop(row.name, component_names(layout), self.font.components)
+            if path is not None:  # (a glyph is never made a component of itself, through others neither)
+                first_need = first_need or loop_words(row.name, path)
+                continue
             row.way, row.way_index, row.layout, row.needs = way, index, layout, needs
             return row
         row.missing = first_need or u"no way the font can take"
@@ -511,7 +614,7 @@ class Planner(object):
                 if row.name not in needs:
                     needs.append(row.name)
                 return row.name, row.layout
-        raise Need(u"needs %s" % describe_code(hex_))
+        raise Need(u"needs %s" % self.describe(hex_))
 
     def drawn(self, name):
         """A source glyph of the font, once it is known to have a layer in this master: a variable font's
@@ -570,7 +673,7 @@ class Planner(object):
     def op_shared(self, way, row, stack, needs):
         name = self.font.glyph_of(int(way["of"], 16))
         if name is None:
-            raise Need(u"needs %s" % describe_code(way["of"]))
+            raise Need(u"needs %s" % self.describe(way["of"]))
         if row.existing:  # (its own glyph rebuilt as a copy: the code point cannot move to another glyph here)
             return Layout([Part(name)], self.advance(name))
         return Layout([Part(name)], self.advance(name), kind="shared", shared=name)
@@ -599,7 +702,7 @@ class Planner(object):
         rule = (self.rules.get("turns") or {}).get(way.get("pair"), {})
         cy = (box[1] + box[3]) / 2.0
         if way.get("about") == "body":  # (a letter: about the middle of its x-height or cap height)
-            cy = self.body_middle(row, cy)
+            cy = self.body_middle(way, cy)
         if angle == 180:
             # about the middle of the advance: the sidebearings change sides (as the corpus's turned quotes)
             matrix = rotation(180, advance / 2.0, cy)
@@ -615,21 +718,18 @@ class Planner(object):
         matrix = compose(translation(round(sides - turned[0]), 0), matrix)
         return Layout([Part(name, matrix)], round(turned[2] - turned[0] + 2 * sides))
 
-    def body_middle(self, row, fallback):
-        """The middle of a letter's body: half the cap height for a capital, half the x-height else (a
-        small capital's too), so that a turned letter's descender comes up as an ascender."""
-        import unicodedata
-        try:
-            capital = unicodedata.category(row.char) == "Lu"
-        except (TypeError, ValueError):
-            capital = False
-        height = self.font.cap_height if capital else self.font.x_height
+    def body_middle(self, way, fallback):
+        """The middle of a letter's body: half the cap height for a capital ("body": "cap", the table's), half
+        the x-height else (a small capital's too), so that a turned letter's descender comes up as an ascender.
+        The table says which, as Unicode's data had it when it was made: FontLab's Python 2.7 has Unicode 5.2,
+        where Ʞ (U+A7B0) and Ʇ (U+A7B1) are unassigned, not capitals (they turned about the x-height)."""
+        height = {"cap": self.font.cap_height, "x": self.font.x_height}.get(way.get("body"))
         return height / 2.0 if height else fallback
 
     def op_mirror(self, way, row, stack, needs):
         name = self.font.glyph_of(int(way["of"], 16))
         if name is None:
-            raise Need(u"needs %s" % describe_code(way["of"]))
+            raise Need(u"needs %s" % self.describe(way["of"]))
         advance = self.font.advance(self.drawn(name))
         kind = "components" if self.font.composite(name) or row.existing else "mirrored"
         if way.get("axis") == "y":  # upside down, about the middle of its ink (as a corrected glyph is made)
@@ -678,7 +778,7 @@ class Planner(object):
     def op_stretch(self, way, row, stack, needs):
         name = self.font.glyph_of(int(way["of"], 16))
         if name is None:
-            raise Need(u"needs %s" % describe_code(way["of"]))
+            raise Need(u"needs %s" % self.describe(way["of"]))
         box, advance = self.box(self.drawn(name)), self.font.advance(name)
         if box is None:
             raise Need(u"%s has no outline" % name)
@@ -705,7 +805,7 @@ class Planner(object):
     def op_minus(self, way, row, stack, needs):
         hyphen, plus = self.font.glyph_of(int(way["of"], 16)), self.font.glyph_of(int(way["on"], 16))
         if hyphen is None or plus is None:
-            raise Need(u"needs %s" % describe_code(way["of"] if hyphen is None else way["on"]))
+            raise Need(u"needs %s" % self.describe(way["of"] if hyphen is None else way["on"]))
         h, p = self.box(self.drawn(hyphen)), self.box(self.drawn(plus))
         if h is None or p is None:
             raise Need(u"%s has no outline" % (hyphen if h is None else plus))
@@ -931,6 +1031,9 @@ class FontLabFont(Font):
         except Exception:
             return False
 
+    def components(self, name):
+        return glyph_components(self.package, [self.master], name)
+
     def numr(self, digit):
         return self.forms.get(("numr", digit))
 
@@ -1047,6 +1150,103 @@ def unused_helpers(package, masters, helpers, touched):
     return [name for name in helpers if name not in used]
 
 
+def glyph_components(package, masters, name):
+    """The glyphs a glyph's components point to, in any of these masters (a set: [] for no such glyph)."""
+    found = set()
+    try:
+        glyph = package.findName(name)
+        for master in masters:
+            layer = glyph.getLayerByName(master) if glyph is not None else None
+            for shape in (list(layer.shapes) if layer is not None else []):
+                if getattr(shape, "isComponent", False):
+                    found.add(u"%s" % shape.shapeData.componentGlyph)
+    except Exception:
+        pass
+    return found
+
+
+def component_loops(order, layouts_of, components_of):
+    """{row: the chain of components} for the rows whose glyph would end up made of itself (FontLab is
+    handed a loop of components it can only recurse through), taken in build order: each row's new
+    components replace its glyph's own once it is let through, so of Ð and Đ checked together (each a copy
+    of the other) the first is built and the second refused. layouts_of(row): its layouts in every master;
+    components_of(glyph): the font's own (glyph_components)."""
+    planned, loops = {}, {}
+
+    def edges(glyph):
+        return planned[glyph] if glyph in planned else components_of(glyph)
+    for row in order:
+        layouts = [layout for layout in layouts_of(row) if layout is not None]
+        if all(layout.kind == "shared" for layout in layouts):
+            continue  # (a second code point: no glyph's shapes change)
+        new = []
+        for layout in layouts:
+            new.extend(name for name in component_names(layout) if name not in new)
+        path = component_loop(row.name, new, edges)
+        if path is not None:
+            loops[row] = path
+        else:
+            planned[row.name] = set(new)
+    return loops
+
+
+def glyph_layers(cm, glyph, masters):
+    """{master: (its shapes copied, its advance), or None where the glyph has no layer}: a glyph as it was,
+    to put back whole (put_glyph_back)."""
+    saved = {}
+    for master in masters:
+        layer = glyph.getLayerByName(master)
+        saved[master] = None if layer is None else ([cm.shape_copy(shape) for shape in list(layer.shapes)],
+                                                     float(layer.advanceWidth or 0))
+    return saved
+
+
+def put_glyph_back(glyph, saved, masters):
+    """The glyph put back as it was (glyph_layers) in these masters, each then read back against what was
+    saved; the masters it could not be put back in, or that do not read as they were."""
+    left = []
+    for master in masters:
+        try:
+            layer = glyph.getLayerByName(master)
+            if saved.get(master) is None:
+                if layer is not None:
+                    glyph.removeLayer(layer)
+            else:
+                put_back(layer if layer is not None else glyph.getLayerByName(master, True), *saved[master])
+        except Exception:
+            pass  # (read back below, as every master is)
+        if not layer_as_saved(glyph, master, saved.get(master)):
+            left.append(master)
+    return left
+
+
+def shapes_read(shapes):
+    """What a layer's shapes are, to compare: each a component's glyph and transform, or its contours'
+    node count."""
+    found = []
+    for shape in shapes:
+        if getattr(shape, "isComponent", False):
+            t = shape.transform
+            found.append((u"%s" % shape.shapeData.componentGlyph,
+                          tuple(round(v, 3) for v in (t.m11(), t.m12(), t.m21(), t.m22(), t.dx(), t.dy()))))
+        else:
+            found.append(sum(len(list(contour.nodes())) for contour in list(shape.contours) if contour is not None))
+    return found
+
+
+def layer_as_saved(glyph, master, saved):
+    """Whether a master's layer reads as glyph_layers saved it (None: no layer)."""
+    try:
+        layer = glyph.getLayerByName(master)
+        if saved is None:
+            return layer is None
+        if layer is None or abs(float(layer.advanceWidth or 0) - saved[1]) > 0.5:
+            return False
+        return shapes_read(list(layer.shapes)) == shapes_read(saved[0])
+    except Exception:
+        return False
+
+
 def held_glyph(cm, fontlab, package, name):
     """A new glyph added to the font (held for the session: Glyph Compose's new_glyph), or WriteError."""
     new = cm.new_glyph(fontlab, package, name)
@@ -1060,17 +1260,21 @@ def held_glyph(cm, fontlab, package, name):
 def write_layer(fontlab, ak, fc, cm, package, master, masters, glyph, layout, corrected):
     """A master's layer of glyph made as layout says (its shapes replaced): components, the mirrored ones
     pointing to their corrected glyphs (corrected(source): its name, made once), stretched outlines, or
-    nothing (an empty glyph). True when FontLab kept what was asked."""
+    nothing (an empty glyph). True when FontLab kept what was asked. An error is raised after the layer is
+    put back; where putting it back fails too, the error says both (the build puts it back again, whole)."""
     QtCore, QtGui = _qt()
     existed = glyph.getLayerByName(master) is not None
     layer = glyph.getLayerByName(master, True)
     own = [cm.shape_copy(shape) for shape in list(layer.shapes)]
     own_width = float(layer.advanceWidth or 0)
     try:
-        if write_parts(fontlab, ak, fc, cm, package, master, layer, layout, corrected):
+        if write_parts(fontlab, ak, fc, cm, package, master, layer, layout, corrected, u"%s" % glyph.name):
             return True
-    except Exception:
-        put_back(layer, own, own_width) if existed else drop_layer(glyph, layer)
+    except Exception as exc:
+        try:
+            put_back(layer, own, own_width) if existed else drop_layer(glyph, layer)
+        except Exception as again:
+            raise WriteError(u"%s; putting master %s back failed at first (%s)" % (exc, master, again))
         raise
     put_back(layer, own, own_width) if existed else drop_layer(glyph, layer)
     return False
@@ -1092,9 +1296,12 @@ def put_back(layer, shapes, width):
     layer.advanceWidth = width
 
 
-def write_parts(fontlab, ak, fc, cm, package, master, layer, layout, corrected):
+def write_parts(fontlab, ak, fc, cm, package, master, layer, layout, corrected, own=None):
+    """The layer's shapes replaced by layout's: own, the glyph's name, is never among the components handed
+    to FontLab, through other glyphs neither (checked on the parts as they are written, flattened and their
+    mirrors pointed to corrected glyphs, before the layer is cleared: WriteError, the layer as it was)."""
     QtCore, QtGui = _qt()
-    components, shapes = [], []
+    components, names, shapes = [], [], []  # (names: the components' glyphs; FontLab's GlyphComponent has no name)
     for part in flat_parts(package, master, layout.parts):
         if part.stretch is not None:
             shapes.append(stretched_shape(fontlab, fc, package, master, part))
@@ -1109,6 +1316,12 @@ def write_parts(fontlab, ak, fc, cm, package, master, layer, layout, corrected):
         component = fontlab.GlyphComponent(name)
         component.transform = QtGui.QTransform(*[float(round(v, 6)) for v in values])
         components.append(component)
+        names.append(name)
+    if own is not None:
+        path = component_loop(own, names,
+                              lambda name: glyph_components(package, list(package.masters) or [master], name))
+        if path is not None:
+            raise WriteError(u"it would be %s, a loop of components" % loop_words(own, path))
     layer.removeAllShapes()  # (only once every part is ready: a part that cannot be made leaves it as it was)
     # Always through setGlyphComponents, with no component too (an empty glyph, a stretched dash's outlines
     # added after): a new glyph whose layer was only made by getLayerByName(master, True) crashed FontLab
@@ -1659,6 +1872,47 @@ class GenerationPage(object):
 
     # -- the build -------------------------------------------------------------------------------------------
 
+    def made_of(self, row):
+        """The names of the glyphs of the list a row is built of, through others too."""
+        found, todo = set(), list(row.needs)
+        while todo:
+            name = todo.pop()
+            if name in found:
+                continue
+            found.add(name)
+            need = self.planner_now.by_name.get(name)
+            todo.extend(need.needs if need is not None else [])
+        return found
+
+    def drop_orphans(self, package, unlisted, chosen, made, rebuilt, built_names, touched):
+        """The unlisted prerequisites this build made (prerequisites) that no glyph built is made of (the
+        glyphs that needed them were not built): taken out of the font again, and out of made, built_names,
+        and touched. (taken out, left: those FontLab did not take out)."""
+        orphans, stuck = [], []
+        while True:
+            used = set()
+            for r in chosen + unlisted:
+                if (r.char in made or r.char in rebuilt) and r not in orphans and r not in stuck:
+                    used.update(r.needs)
+            found = [r for r in unlisted if r.char in made and r.name not in used and r not in orphans and r not in stuck]
+            if not found:
+                return orphans, stuck
+            for r in found:
+                glyph = package.findName(r.name)
+                try:
+                    if glyph is not None:
+                        package.deleteGlyph(glyph)
+                    gone = package.findName(r.name) is None
+                except Exception:
+                    gone = False
+                if not gone:
+                    stuck.append(r)
+                    continue
+                orphans.append(r)
+                made.remove(r.char)
+                built_names.discard(r.name)
+                touched[:] = [g for g in touched if u"%s" % getattr(g, "name", u"") != r.name]
+
     def build(self):
         """The checked rows built in every master, as one step of the History (the owner's write: its
         begin_write and end_write)."""
@@ -1675,14 +1929,25 @@ class GenerationPage(object):
         log, b, html = self.owner.log, self.ak.b, self.ak.html
         masters = list(package.masters) or [self.master]
         plans = {}  # master: Planner, the current master's way kept for each row
-        ways = dict((r.hex, r.way_index) for r in self.rows if r.way_index is not None)
+        unlisted = self.planner_now.prerequisites(chosen)  # (what the rows handed over are made of: built too)
+        ways = dict((r.hex, r.way_index) for r in list(self.rows) + unlisted if r.way_index is not None)
         for master in masters:
             plans[master] = self.planner_now if master == self.master else self.planner(self.font_in(package, master), ways)
-        order = build_order(chosen)
+        order = build_order(chosen + unlisted)
+        failed = []
+        # Before any write: no glyph may end up a component of itself, through others too (Ð and Đ are each
+        # a copy of the other: rebuilt together, or one while the other is made of it, they would loop)
+        loops = component_loops(order, lambda r: [(plans[m].by_hex.get(r.hex) or Row(r.entry, r.name)).layout
+                                                  for m in masters],
+                                lambda name: glyph_components(package, masters, name))
+        for r in order:
+            if r in loops:
+                failed.append((r.char, u"it would be %s, a loop of components: left as it was" % loop_words(r.name, loops[r])))
+        order = [r for r in order if r not in loops]
         sharing = [package.findName(r.layout.shared) for r in order if r.layout.kind == "shared"]
         if not self.owner.begin_write(package, [g for g in sharing if g is not None]):
             return
-        made, rebuilt, shared, failed, touched, error = [], [], [], [], [], None
+        made, rebuilt, shared, touched, error = [], [], [], [], None
         sparse = {}  # master: the glyphs left without a layer there, as their sources have none
         built_names = set()
         helpers = []  # the corrected glyphs made for mirrored parts
@@ -1731,7 +1996,8 @@ class GenerationPage(object):
                 if added:
                     glyph = held_glyph(self.cm, self.fontlab, package, r.name)
                 changing = glyph
-                kept, empty_in, why = [], [], None
+                kept, empty_in, tried, why = [], [], [], None
+                saved = glyph_layers(self.cm, glyph, masters) if not added else None  # (put back whole on an error)
                 try:
                     for master in masters:
                         row = plans[master].by_hex.get(r.hex)
@@ -1739,6 +2005,7 @@ class GenerationPage(object):
                         if layout is None:  # (a source with no layer there: a sparse master, said once below)
                             sparse.setdefault(master, []).append(r.char)
                             continue
+                        tried.append(master)
                         if write_layer(self.fontlab, self.ak, self.feature_code(), self.cm, package, master, masters,
                                        glyph, layout if layout.kind != "mirrored" else Layout(layout.parts, layout.advance),
                                        corrected):
@@ -1748,11 +2015,22 @@ class GenerationPage(object):
                 except Exception as exc:  # (this glyph only: the others are built all the same)
                     why = u"%s" % exc
                 if why is not None or not kept:
-                    failed.append((r.char, why or u"FontLab kept none of its parts"))
                     if added:
                         package.deleteGlyph(package.findName(r.name))
-                    elif kept or why is not None:
-                        touched.append(glyph)  # (its masters written so far stay written: recorded)
+                    elif tried and why is not None:
+                        # Every master written or tried put back from what was saved, the failing one too (its own
+                        # put-back may have failed), each read back: a glyph half rebuilt (Regular new, Bold old)
+                        # may no longer interpolate, while the log said it was not built
+                        left = put_glyph_back(glyph, saved, tried)
+                        if left:
+                            why = u"%s; it was changed all the same in %s %s, which could not be put back (the other " \
+                                  u"masters are as they were): Edit > Undo takes it back" % (
+                                      why, u"master" if len(left) == 1 else u"masters", u", ".join(left))
+                        else:
+                            why = u"%s; every master left as it was" % why
+                    if not added and (tried or why is not None):
+                        touched.append(glyph)  # (recorded all the same: one History step, whatever it holds)
+                    failed.append((r.char, why or u"FontLab kept none of its parts"))
                     changing = None
                     continue
                 if added:
@@ -1768,6 +2046,11 @@ class GenerationPage(object):
             error = exc
             if changing is not None:
                 touched.append(changing)
+        orphans, stuck = [], []  # (prerequisites built for glyphs not built: taken out, or left where they cannot be)
+        try:
+            orphans, stuck = self.drop_orphans(package, unlisted, chosen, made, rebuilt, built_names, touched)
+        except Exception as exc:
+            error = error or exc
         try:  # (whatever happens here, the step below is recorded and the window's write ends)
             unused = unused_helpers(package, masters, helpers, touched)
             for name in unused:  # (made for a glyph that was then not built: taken out, as Diacritics does)
@@ -1800,6 +2083,26 @@ class GenerationPage(object):
             log.add(u"Rebuilt %s from %s recipe, in place: %s.%s" % (
                 b(counted(len(rebuilt), u"glyph")), u"its" if len(rebuilt) == 1 else u"their", html(u" ".join(rebuilt)),
                 undo), "done")
+        extra = [r for r in unlisted if r.char in made]
+        if extra:  # (each used by a glyph built: drop_orphans took out the others)
+            names = set(r.name for r in extra)
+            users = [r.char for r in chosen if (r.char in made or r.char in rebuilt) and names & self.made_of(r)]
+            log.add(u"%s %s built too, though not listed: %s %s made of %s." % (
+                b(html(u" ".join(r.char for r in extra))), u"was" if len(extra) == 1 else u"were",
+                html(u" ".join(users)), u"is" if len(users) == 1 else u"are", u"it" if len(extra) == 1 else u"them"),
+                "done")
+        for gone, kept_in in ((orphans, False), (stuck, True)):
+            if gone:
+                names = set(g.name for g in gone)
+                users = [r.char for r in chosen if r.char not in made and r.char not in rebuilt and names & self.made_of(r)]
+                log.add(u"%s %s built for %s, which %s not built: %s." % (
+                    b(html(u" ".join(r.char for r in gone))), u"was" if len(gone) == 1 else u"were",
+                    html(u" ".join(users)) or u"the glyphs listed", u"was" if len(users) == 1 else u"were",
+                    (u"FontLab did not take %s out again, so %s in the font (Edit > Undo takes %s back)" % (
+                        u"it" if len(gone) == 1 else u"them", u"it stays" if len(gone) == 1 else u"they stay",
+                        u"it" if len(gone) == 1 else u"them")) if kept_in else
+                    u"%s taken out again" % (u"it was" if len(gone) == 1 else u"they were")),
+                    "warning" if kept_in else "info")
         if not (made or shared or rebuilt):
             log.add(u"Built none.")
         for master in masters:

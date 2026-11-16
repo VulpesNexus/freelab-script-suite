@@ -547,7 +547,7 @@ class AutoSpacingDialog(object):
             package = self.package = self.current_font()
             self.master = package.master if package is not None else None
             if package is None:
-                self.status.setText(self.ak.NO_FONT_LINE)
+                self.status.setText(self.ak.no_font_line())
                 return
             self.status.setText(u"Measuring\N{HORIZONTAL ELLIPSIS}")
             QtGui.QApplication.processEvents()
@@ -844,7 +844,7 @@ class AutoSpacingDialog(object):
         """Kerning Check on the glyphs the last spacing changed."""
         if not self.spaced:
             return
-        error = self.ak.open_kerning_check(self.spaced, u"Auto Spacing spaced")
+        error = self.ak.open_kerning_check(self.spaced, u"Auto Spacing spaced", caller=self.dialog)
         if error:
             self.log.add(u"<i>Kerning Check</i> did not open: %s" % self.ak.html(error), "error")
 
@@ -885,7 +885,8 @@ class AutoSpacingDialog(object):
         if s is None:
             return
         side, reference = key
-        error = self.ak.open_auto_kerning_at(*((reference, s.name) if side == "before" else (s.name, reference)))
+        error = self.ak.open_auto_kerning_at(*((reference, s.name) if side == "before" else (s.name, reference)),
+                                             caller=self.dialog)
         if error:
             self.log.add(u"<i>Auto Kerning</i> did not open: %s" % self.ak.html(error), "error")
 

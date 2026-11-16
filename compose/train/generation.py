@@ -19,6 +19,11 @@ confusables map the Cyrillic I to the Latin l, but the corpus's fonts copy the c
 wins and the recipe here says so.
 
     python compose/train/generation.py INVENTORY GLYPHSINFO_XML [--corpus DIR] [--out FILE] [--limit N]
+    python compose/train/generation.py --refresh TABLE [--records CALIBRATION]
+
+--refresh rewrites what an existing table takes from Unicode's data (each turned letter's body, the
+"characters" FontLab's Python 2.7 does not know: its Unicode is 5.2) and, given the calibration's records
+(--calibration's file), its monoline thresholds; the rest of the table as it was, no corpus read.
 
 Python 3 with fonttools.
 """
@@ -237,7 +242,7 @@ def turned(inventory):
         source = recipe["src"][0][0]
         ids = [m["id"] for m in recipe["machinery"]]
         if "rotate180" in ids:
-            found[code] = [way("turn", S, of=source, angle=180, about="body", check="turn")]
+            found[code] = [way("turn", S, of=source, angle=180, about="body", body=body_of(code), check="turn")]
         elif u"upside down" in recipe["text"]:
             found[code] = [way("mirror", S, of=source, axis="y", check="turn")]
         else:
@@ -245,6 +250,55 @@ def turned(inventory):
     found["0245"].insert(0, way("copy", A, of="039B"))  # (34 of 49 families: Λ)
     found["01DD"].insert(0, way("copy", A, of="0259"))  # (the corpus's first construction: ə)
     return found
+
+
+def body_of(code):
+    """Which height a turned letter turns about the middle of: "cap" for a capital (or a titlecase letter),
+    "x" else (a small capital's too). Stored in the table: FontLab's Python 2.7 has Unicode 5.2, where Ʞ and
+    Ʇ (U+A7B0, U+A7B1: Unicode 7.0) are unassigned, and they turned about the x-height."""
+    return "cap" if unicodedata.category(chr(int(code, 16))) in ("Lu", "Lt") else "x"
+
+
+def characters(entries):
+    """{hex: {"category", "name"}} of every character the table names (its characters, their sources):
+    the notes describe them so (freelab_glyph_generation.describe_code), whatever Unicode the runtime has."""
+    codes = set()
+    for e in entries:
+        codes.add(e["code"])
+        for w in e["ways"]:
+            for key in ("of", "on"):
+                value = w.get(key)
+                codes.update(value if isinstance(value, list) else [value] if value else [])
+    return dict((code, {"category": unicodedata.category(chr(int(code, 16))), "name": unicode_name(code)})
+                for code in sorted(codes))
+
+
+def refresh(path, records_path=None):
+    """The table at path, its Unicode-derived fields made again (body_of, characters) and, given the
+    calibration's records, its monoline thresholds (monoline_rules, the measures as the tab takes them now:
+    a record's contrast made two-sided, as round_measures gives it since reverse contrast counts)."""
+    with io.open(path, encoding="utf-8") as handle:
+        table = json.load(handle)
+    for e in table["entries"]:
+        for w in e["ways"]:
+            if w.get("about") == "body":
+                w["body"] = body_of(e["code"])
+    table["characters"] = characters(table["entries"])
+    if records_path:
+        with io.open(records_path, encoding="utf-8") as handle:
+            records = json.load(handle)
+        two_sided = [(target, found, dict(measures, contrast=max(measures["contrast"], 1.0 / measures["contrast"])))
+                     for target, found, measures in records]
+        table["rules"]["monoline"] = monoline_rules(two_sided)
+    write_table(table, path)
+    return table
+
+
+def write_table(table, path):
+    text = json.dumps(table, ensure_ascii=False, indent=1, sort_keys=True)
+    assert "fontlab" not in text.lower(), "nothing of FontLab's alias data may enter the table"
+    with io.open(path, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text + u"\n")
 
 
 def unichr_hex(code):
@@ -629,6 +683,13 @@ def unicode_name(code):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    if "--refresh" in sys.argv:
+        parser.add_argument("--refresh", required=True, help="an existing table to make again from Unicode's data")
+        parser.add_argument("--records", help="the calibration's records (--calibration's file): its thresholds again")
+        args = parser.parse_args()
+        table = refresh(args.refresh, args.records)
+        print("%d characters refreshed; monoline %s" % (len(table["entries"]), table["rules"]["monoline"]))
+        return
     parser.add_argument("inventory")
     parser.add_argument("glyphs_info", help="GlyphsInfo's GlyphData.xml")
     parser.add_argument("--corpus", default=CORPUS)
@@ -689,11 +750,9 @@ def main():
         "layout": layout,
         "groups": groups,
         "entries": entries,
+        "characters": characters(entries),
     }
-    text = json.dumps(out, ensure_ascii=False, indent=1, sort_keys=True)
-    assert "fontlab" not in text.lower(), "nothing of FontLab's alias data may enter the table"
-    with io.open(args.out, "w", encoding="utf-8", newline="\n") as handle:
-        handle.write(text + u"\n")
+    write_table(out, args.out)
     print("%d characters in %d groups; layout from %d families" % (len(entries), len(groups), families))
 
 

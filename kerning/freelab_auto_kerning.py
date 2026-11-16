@@ -986,22 +986,25 @@ def load_sibling(file_name, module_name):
     return module
 
 
-def open_sibling_script(file_name, module_name):
-    """Runs a FreeLab script beside this one (its main()); the error's text, or None."""
+def open_sibling_script(file_name, module_name, caller=None):
+    """Runs a FreeLab script beside this one (its main()), opened from caller's window (a widget of it:
+    opening_from); the error's text, or None."""
     try:
-        load_sibling(file_name, module_name).main()
+        with opening_from(caller):
+            load_sibling(file_name, module_name).main()
         return None
     except Exception as exc:
         return u"%s" % exc
 
 
-def open_kerning_check(glyphs=None, reason=None):
-    """Kerning Check on the current font, its lists limited to the pairs and entries with these glyphs
-    (names, or glyphs) when given; reason says what the caller did to them ("Auto Spacing spaced": the
-    line over the lists reads "Pairs with the 12 glyphs Auto Spacing spaced: ..."). The error's
-    text, or None."""
+def open_kerning_check(glyphs=None, reason=None, caller=None):
+    """Kerning Check on caller's font (a widget of the window it is opened from: opening_from), its lists
+    limited to the pairs and entries with these glyphs (names, or glyphs) when given; reason says what the
+    caller did to them ("Auto Spacing spaced": the line over the lists reads "Pairs with the 12 glyphs
+    Auto Spacing spaced: ..."). The error's text, or None."""
     try:
-        load_sibling(KERNING_CHECK_FILE, KERNING_CHECK_MODULE).main(glyphs=glyphs, reason=reason)
+        with opening_from(caller):
+            load_sibling(KERNING_CHECK_FILE, KERNING_CHECK_MODULE).main(glyphs=glyphs, reason=reason)
         return None
     except Exception as exc:
         return u"%s" % exc
@@ -1976,29 +1979,75 @@ def window_owner(widget):
 def calling_font():
     """The number of the font a tool is being opened for from another tool's window (its tools button,
     its arrows, a button handing glyphs over): that window's font, not the one FontLab shows. None when
-    it is opened from FontLab's menu."""
-    registry = _windows()
-    hint = registry.get("hint")
-    if hint is not None and time.time() - hint[1] <= HINT_SECONDS:
-        return hint[0]
-    try:
-        owner = window_owner(_qt()[1].QApplication.activeWindow())
-    except Exception:
-        owner = None
-    return getattr(owner, "font_id", None)
+    it is opened from FontLab's menu, or from a window without a font.
+
+    Only FreeLab's own controls say so, through the hint (opening_from), never the window that has the
+    focus: a tool opened from FontLab's menu while a FreeLab window was still the active one (another
+    font's) opened on that window's font, in its place (live 2026-11-16: the font tabs switched by a
+    script, FontLab showing Bellefair, Font Check opened on Varela Round and replaced its window)."""
+    hint = _live_hint()
+    return hint[0] if hint is not None else None
+
+
+def _live_hint():
+    """The hint, while it holds: a scoped one (opening_from) until its block ends, however long the tool
+    takes to open (Codex's review: a tool slower than HINT_SECONDS to load lost its caller and opened on the
+    font FontLab shows); one noted alone (note_caller) for HINT_SECONDS."""
+    hint = _windows().get("hint")
+    if hint is None:
+        return None
+    if len(hint) > 3 and hint[3]:
+        return hint
+    return hint if time.time() - hint[1] <= HINT_SECONDS else None
 
 
 def calling_owner():
     """The tool (its dialog object) whose window a tool is being opened from (its tools button, its
     arrows, a button handing glyphs over), or None when it is opened from FontLab's menu: the window
-    clicked, which the new tool replaces, whether or not it is its font's window in the registry."""
-    hint = _windows().get("hint")
-    if hint is not None and time.time() - hint[1] <= HINT_SECONDS:
+    clicked, which the new tool replaces, whether or not it is its font's window in the registry. Only
+    from the hint, as calling_font."""
+    hint = _live_hint()
+    if hint is not None:
         return _owners().get(hint[2]) if len(hint) > 2 else None
-    try:
-        return window_owner(_qt()[1].QApplication.activeWindow())
-    except Exception:
-        return None
+    return None
+
+
+def note_caller(widget, scoped=False):
+    """A FreeLab control about to open another tool (a window's tools button, its arrows, a button that
+    hands glyphs over): the tool opens on that window's font, in its place (calling_font, calling_owner).
+    The tool (its dialog object) whose window it is, or None (nothing noted: the tool then opens as from
+    FontLab's menu)."""
+    owner = window_owner(widget) if widget is not None else None
+    if owner is not None:
+        _windows()["hint"] = (getattr(owner, "font_id", None), time.time(), getattr(owner, "window_key", None),
+                              bool(scoped))
+    return owner
+
+
+def forget_caller():
+    """The hint let go once the tool it was for has opened (or failed to): a menu click after it is a menu
+    click, never a click in that window."""
+    _windows()["hint"] = None
+
+
+class opening_from(object):
+    """with opening_from(widget): a tool opened inside the block is opened from widget's window (its font,
+    its place: note_caller), as FreeLab's own controls open tools, however long it takes to open; the hint
+    is let go when the block ends, an error or not (the one before put back: a block inside another)."""
+
+    def __init__(self, widget):
+        self.widget, self.before = widget, None
+
+    def __enter__(self):
+        self.before = _windows().get("hint")
+        if note_caller(self.widget, scoped=True) is None:
+            _windows()["hint"] = None  # (no FreeLab window: a tool opened here opens as from FontLab's menu)
+        return self
+
+    def __exit__(self, *exc):
+        _windows()["hint"] = self.before if self.before is not None and len(self.before) > 3 and self.before[3] \
+            else None
+        return False
 
 
 def _move_window(owner, old_id, new_id):
@@ -2037,6 +2086,13 @@ def window_font(owner, workspace):
             return None  # (FontLab's fonts could not be read: never another font in its place)
         package = find_font(workspace, calling_font()) or workspace.currentPackage
         found = _font_id(package)
+        held = _windows()["fonts"].get(found) if found is not None else None
+        if (getattr(owner, "window_key", None) is not None and held is not None and held is not owner
+                and _shown(held)):
+            # A window without a font, shown (it waits for the next font: fonts_tick), never takes a font that
+            # has a window of its own: it would be a second window on it. It works on no font meanwhile.
+            title_window(owner, None)
+            return None
         if found is not None:
             _move_window(owner, None, found)
         owner.font_id = found
@@ -2245,6 +2301,35 @@ def hook_quit():
 
 FONTS_POLL_MS = 700  # how often FreeLab looks whether a window's font was closed, or a font opened
 NO_FONT_LINE = u"No font is open. This window takes the next font you open."  # a tool's top line meanwhile
+
+
+def no_font_line(own=None, workspace=None):
+    """A tool's top line while its window has no font: own (the tool's words, else NO_FONT_LINE) while no
+    font is open. While fonts are open, the window waits (window_font: it never takes a font that has a
+    window of its own), and the line says why, counted: never "No font is open" then."""
+    try:
+        if workspace is None:
+            import fontlab
+            workspace = fontlab.flWorkspace.instance()
+        open_ids = open_font_ids(workspace)
+    except Exception:
+        open_ids = None
+    if not open_ids:
+        return own or NO_FONT_LINE
+    fonts = _windows()["fonts"]
+    held = [font_id for font_id in open_ids if fonts.get(font_id) is not None and _shown(fonts[font_id])]
+    if len(held) == len(open_ids):
+        if len(open_ids) == 1:
+            return u"This window has no font: the font open has a window of its own. It takes the next font you open."
+        return (u"This window has no font: the %d fonts open each have a window of their own. It takes the next "
+                u"font you open." % len(open_ids))
+    try:
+        name = workspace.currentPackage.tfn
+    except Exception:
+        name = None
+    shown = u"%s, the font FontLab shows," % b(name) if name else u"The font FontLab shows"
+    return (u"This window has no font: %s has a window of its own. It takes the next font you open, or a font "
+            u"without a window once FontLab shows it." % shown)
 
 
 def font_switched(owner):
@@ -3221,6 +3306,7 @@ def take_window(tool, owner):
     except Exception:
         pass
     old = registry["fonts"].get(font_id)
+    own = old if old is not None and old is not owner and _shown(old) and font_id is not None else None
     if old is None or not _shown(old):
         # a window opened with no font is the next font's: it gives way, not a second window
         fontless = registry["fonts"].get(None)
@@ -3228,9 +3314,13 @@ def take_window(tool, owner):
             old = fontless
             if registry["fonts"].get(None) is fontless and font_id is not None:
                 del registry["fonts"][None]
+    caller_font = getattr(caller, "font_id", None)
     if (caller is not None and caller is not owner and _shown(caller)
-            and getattr(caller, "font_id", None) in (font_id, None)):
-        old = caller  # (the window clicked, its font this one's, or a window still without a font)
+            and (caller_font == font_id or (caller_font is None and own is None))):
+        # (the window clicked, its font this one's, or a window still without a font, unless the font this
+        # one works on has a window of its own: that window gives way, never a second window on one font,
+        # and the one without a font goes on waiting for the next font)
+        old = caller
     registry["fonts"][font_id] = owner
     # Kept while it is shown: a window with no owner lives only while Python holds it. Once closed (by
     # hand, or giving way to another tool) it is let go (release_window): kept for the session, as
@@ -3308,9 +3398,6 @@ def open_tool(title, dialog=None):
     """Opens a FreeLab tool by its entry in Scripts > FreeLab, as FontLab runs it, on the font of the
     window it is opened from (dialog); False when the entry is not there."""
     QtCore, QtGui = _qt()
-    owner = window_owner(dialog) if dialog is not None else None
-    if owner is not None and getattr(owner, "font_id", None) is not None:
-        _windows()["hint"] = (owner.font_id, time.time(), getattr(owner, "window_key", None))
     main = AutoKerningDialog.main_window()
     if main is None:
         return False
@@ -3324,7 +3411,8 @@ def open_tool(title, dialog=None):
                     continue
                 for entry in submenu.actions():
                     if not entry.isSeparator() and entry.text.replace(u"&", u"") == title:
-                        entry.trigger()
+                        with opening_from(dialog):  # (FontLab runs the entry's script before trigger returns)
+                            entry.trigger()
                         return True
         except Exception:
             continue
@@ -5849,16 +5937,17 @@ def flag_glyphs(owner, names, label, value):
         owner.log.add(u"Took the flag off %s." % b(u", ".join(g.name for g in glyphs)), "done")
 
 
-def open_auto_kerning_at(left, right):
-    """Auto Kerning, opened (or brought forward) on the pair of the glyphs named left and right; the
-    error's text, or None."""
+def open_auto_kerning_at(left, right, caller=None):
+    """Auto Kerning, opened (or brought forward) on the pair of the glyphs named left and right, on
+    caller's font (a widget of the window it is opened from: opening_from); the error's text, or None."""
     try:
-        held = _windows()["fonts"].get(calling_font())  # (the calling window's font: its own Auto Kerning, if open)
-        if held is None or getattr(held, "tool", None) != "Auto Kerning" or not _property(held.dialog, "visible"):
-            main(focus=(left, right))
-        else:
-            _bring_forward(held.dialog)
-            held.focus_pair(left, right)
+        with opening_from(caller):
+            held = _windows()["fonts"].get(calling_font())  # (the calling window's font: its own Auto Kerning, if open)
+            if held is None or getattr(held, "tool", None) != "Auto Kerning" or not _property(held.dialog, "visible"):
+                main(focus=(left, right))
+            else:
+                _bring_forward(held.dialog)
+                held.focus_pair(left, right)
         return None
     except Exception as exc:
         return u"%s" % exc
@@ -6863,7 +6952,7 @@ class AutoKerningDialog(object):
 
     def open_kerning_check(self):
         """Kerning Check, the script beside this one, on the same font."""
-        error = open_sibling_script(KERNING_CHECK_FILE, KERNING_CHECK_MODULE)
+        error = open_sibling_script(KERNING_CHECK_FILE, KERNING_CHECK_MODULE, caller=self.dialog)
         if error:
             self.log.add(u"<i>Kerning Check</i> did not open: %s" % html(error), "error")
 
@@ -7022,7 +7111,7 @@ class AutoKerningDialog(object):
 
     def font_line(self):
         if self.package is None:
-            return NO_FONT_LINE
+            return no_font_line()
         return u"%s, master %s. %s." % (b(self.package.tfn), b(self.master),
                                         ALL_SCRIPTS_LINE if self.script == ALL_SCRIPTS else SCRIPT_LINES[self.script])
 
@@ -7909,7 +7998,7 @@ class ClassDialog(object):
         self.exceptions_button.setEnabled(False)
         self.move.setEnabled(False)  # (back on once classes are listed)
         if package is None:
-            self.status.setText(u"No font is open. Open one, then run <i>Auto Kerning</i> again.")
+            self.status.setText(no_font_line(u"No font is open. Open one, then run <i>Auto Kerning</i> again."))
             return
         if class_model() is None:
             self.status.setText(u"The class model (%s) is missing beside the script: reinstall FreeLab." % CLASS_MODEL_FILE)

@@ -1163,6 +1163,7 @@ class WindowTests(unittest.TestCase):
             QApplication = Application
             QShortcut = Shortcut
             QAction = Action
+            QMenu = "QMenu"
 
             @staticmethod
             def QKeySequence(keys):
@@ -1326,12 +1327,268 @@ class WindowTests(unittest.TestCase):
         window = check.dialog  # (the tool's object is emptied once its window is let go: let_go)
         self.workspace.currentPackage = self.one  # FontLab shows the other font; the click is in Two's window
         self.active = check.dialog
-        diacritics = self.open("Glyph Compose")
+        with ak.opening_from(check.dialog):  # (its tools button, its arrows, a button handing glyphs over)
+            diacritics = self.open("Glyph Compose")
         self.assertIs(diacritics.current_font(), self.two)
         self.assertFalse(window.visible, "its window's tool gave way")
+        self.assertIsNone(sys._freelab_windows["hint"], "let go once it opened")
         self.active = None
         kerning = self.open("Auto Kerning")
         self.assertIs(kerning.current_font(), self.one, "from FontLab's menu: the font FontLab shows")
+
+    def test_a_menu_launch_while_another_fonts_window_is_active_opens_on_the_font_fontlab_shows(self):
+        # Live 2026-11-16: Glyph Compose open on Varela Round, still the active window; Bellefair brought
+        # forward in FontLab; Font Check from FontLab's menu opened on Varela Round, in Glyph Compose's place
+        compose = self.open("Glyph Compose")
+        window = compose.dialog
+        self.workspace.currentPackage = self.two
+        self.active = compose.dialog  # (FontLab's menu leaves the active window as it was)
+        check = self.open("Font Check")
+        self.assertIsNotNone(check)
+        self.assertIs(check.current_font(), self.two, "the font FontLab shows")
+        self.assertEqual(check.dialog.windowTitle, u"FreeLab Font Check (Two)")
+        self.assertTrue(window.visible, "the other font's window is left alone")
+        self.assertIs(sys._freelab_windows["fonts"][self.one.id], compose)
+        self.assertIs(sys._freelab_windows["fonts"][self.two.id], check)
+
+    def test_a_menu_launch_never_brings_forward_another_fonts_window(self):
+        check = self.open("Font Check")
+        self.workspace.currentPackage = self.two
+        self.active = check.dialog
+        other = self.open("Font Check")
+        self.assertIsNotNone(other, "Two has no Font Check: one is opened for it")
+        self.assertEqual(check.dialog.calls, [], "One's is not brought forward")
+        self.assertIs(other.current_font(), self.two)
+        self.assertIsNone(self.open("Font Check"), "Two's own, brought forward")
+        self.assertEqual(other.dialog.calls, ["raise", "activate"])
+
+    def test_a_menu_launch_with_a_window_without_a_font_around(self):
+        compose = self.open("Glyph Compose", u"FreeLab Glyph Compose")
+        self.workspace.currentPackage = self.two
+        compose_two = self.open("Glyph Compose")  # Two's window
+        fonts, current = self.workspace.fonts, self.workspace.currentPackage
+        self.workspace.fonts, self.workspace.currentPackage = [], self.Font(1, u"")  # (FontLab's placeholder)
+        fontless = self.open("Proof")  # (opened while no font was open, not yet given one)
+        self.workspace.fonts, self.workspace.currentPackage = fonts, current
+        self.assertIs(sys._freelab_windows["fonts"].get(None), fontless)
+        self.active = fontless.dialog  # clicked last, then FontLab's menu
+        self.assertIsNone(self.open("Glyph Compose"), "Two's own window comes forward")
+        self.assertEqual(compose_two.dialog.calls, ["raise", "activate"])
+        self.assertEqual(fontless.dialog.calls, [], "not the window without a font")
+        check = self.open("Font Check")
+        self.assertIs(check.current_font(), self.two)
+        self.assertFalse(compose_two.dialog.visible, "Two's window gives way: still one window for Two")
+        self.assertTrue(fontless.dialog.visible, "the window without a font stays, for the next font")
+        self.assertTrue(compose.dialog.visible)
+        self.assertEqual(sorted(sys._freelab_windows["fonts"], key=str), sorted([self.one.id, self.two.id, None], key=str))
+
+    def test_a_window_without_a_font_never_makes_a_second_window_on_a_font(self):
+        # The owner: no FreeLab window may land on a font that has a window of its own. A window opened with no
+        # font, still waiting while FontLab shows a font with its own window: its tools button and arrows
+        # open the tool on that font in that font's window (brought forward), and it goes on waiting
+        self.workspace.currentPackage = self.two
+        compose_two = self.open("Glyph Compose")  # Two's window
+        fonts, current = self.workspace.fonts, self.workspace.currentPackage
+        self.workspace.fonts, self.workspace.currentPackage = [], self.Font(1, u"")
+        fontless = self.open("Proof")
+        self.workspace.fonts, self.workspace.currentPackage = fonts, current
+        self.assertEqual(ak.fonts_tick(self.workspace), [], "Two has its window: this one waits")
+        with ak.opening_from(fontless.dialog):  # its tools button: the tool Two's window shows
+            self.assertIsNone(self.open("Glyph Compose"), "Two's window brought forward")
+        self.assertEqual(compose_two.dialog.calls, ["raise", "activate"])
+        with ak.opening_from(fontless.dialog):  # its arrow to the next tool
+            spacing = self.open("Auto Spacing")
+        self.assertIs(spacing.current_font(), self.two)
+        self.assertFalse(compose_two.dialog.visible, "Two's window gives way to it")
+        self.assertTrue(fontless.dialog.visible, "the window without a font goes on waiting")
+        shown = [o for o in sys._freelab_windows["kept"] if o.dialog.visible and o.font_id == self.two.id]
+        self.assertEqual(shown, [spacing], "one window on Two")
+        self.assertIs(sys._freelab_windows["fonts"][self.two.id], spacing)
+        self.assertIs(sys._freelab_windows["fonts"].get(None), fontless)
+        self.assertIsNone(fontless.current_font(), "read again, it takes no font that has a window of its own")
+        self.assertIsNone(fontless.font_id)
+        self.assertEqual(fontless.dialog.windowTitle, u"FreeLab Proof")
+        # Its top line: never "No font is open" while fonts are (One has no window: FontLab shows Two)
+        self.assertEqual(ak.no_font_line(u"No font is open. Open one.", self.workspace),
+                         u"This window has no font: <b>Two</b>, the font FontLab shows, has a window of its own. It "
+                         u"takes the next font you open, or a font without a window once FontLab shows it.")
+        self.workspace.fonts = [self.two]
+        self.assertEqual(ak.no_font_line(None, self.workspace), u"This window has no font: the font open has a window "
+                                                                u"of its own. It takes the next font you open.")
+        self.workspace.fonts = [self.one, self.two]
+        one = self.Tool(self.workspace, u"FreeLab Font Check")  # One's window (shown, as a race may leave it)
+        one.font_id, one.dialog.visible = self.one.id, True
+        sys._freelab_windows["fonts"][self.one.id] = one
+        self.assertEqual(ak.no_font_line(None, self.workspace), u"This window has no font: the 2 fonts open each have "
+                                                                u"a window of their own. It takes the next font you open.")
+        for line in (ak.no_font_line(None, self.workspace), ak.no_font_line(u"x", self.workspace)):
+            self.assertNotIn(u"No font is open", line)
+        self.workspace.fonts, self.workspace.currentPackage = [], self.Font(1, u"")
+        self.assertEqual(ak.no_font_line(None, self.workspace), ak.NO_FONT_LINE, "none open: as before")
+        self.assertEqual(ak.no_font_line(u"No font is open. Open one.", self.workspace), u"No font is open. Open one.")
+        self.workspace.fonts, self.workspace.currentPackage = [self.one, self.two], self.two
+        del sys._freelab_windows["fonts"][self.one.id]
+        three = self.Font(4242, u"Three")
+        self.workspace.fonts, self.workspace.currentPackage = fonts + [three], three  # a font opened
+        self.assertEqual(ak.fonts_tick(self.workspace), [fontless], "it takes the next font")
+        self.assertIs(fontless.current_font(), three)
+
+    def test_a_tool_opened_from_a_window_keeps_it_however_long_it_takes_to_open(self):
+        # Codex's review, round 2: a tool slower than HINT_SECONDS to load lost its caller inside opening_from
+        # and opened on the font FontLab shows, in that font's window
+        class Clock(object):
+            now = 1000.0
+
+            def time(self):
+                return self.now
+
+            def __getattr__(self, name):
+                return getattr(real_time, name)
+        real_time, clock = ak.time, Clock()
+        ak.time = clock
+        self.addCleanup(setattr, ak, "time", real_time)
+        one = self.open("Proof")  # One's window
+        self.workspace.currentPackage = self.two
+        two = self.open("Glyph Compose")  # Two's, FontLab showing Two
+        window = one.dialog
+        with ak.opening_from(one.dialog):  # One's tools button
+            clock.now += ak.HINT_SECONDS + 1  # (the tool's script loads slowly)
+            self.assertEqual(ak.calling_font(), self.one.id)
+            check = self.open("Font Check")
+        self.assertIs(check.current_font(), self.one, "One's window's font")
+        self.assertFalse(window.visible, "in its place")
+        self.assertTrue(two.dialog.visible, "Two's window left alone")
+        self.assertIsNone(sys._freelab_windows["hint"], "let go once the block ended")
+        with self.assertRaises(ZeroDivisionError):
+            with ak.opening_from(check.dialog):
+                1 / 0
+        self.assertIsNone(sys._freelab_windows["hint"], "an error lets it go too")
+        with ak.opening_from(check.dialog):
+            with ak.opening_from(two.dialog):
+                self.assertEqual(ak.calling_font(), self.two.id)
+            clock.now += 60
+            self.assertEqual(ak.calling_font(), self.one.id, "the outer block's caller, back")
+        self.assertIsNone(sys._freelab_windows["hint"])
+        ak.note_caller(check.dialog)  # (a hint noted alone, outside a block: it still lasts HINT_SECONDS)
+        self.assertEqual(ak.calling_font(), self.one.id)
+        clock.now += ak.HINT_SECONDS + 1
+        self.assertIsNone(ak.calling_font())
+
+    def test_freelabs_own_controls_open_a_tool_on_their_windows_font(self):
+        # A window's tools button and arrows (open_tool), and the buttons that hand glyphs over
+        # (open_kerning_check, open_auto_kerning_at, open_sibling_script, opening_from): the window's font,
+        # in its place, whatever FontLab shows and whichever window is the active one
+        case = self
+        opened = []
+
+        class Entry(object):
+            def __init__(self, text):
+                self.text = text
+
+            def isSeparator(self):
+                return False
+
+            def trigger(self):  # (FontLab runs the entry's script before trigger returns, live)
+                opened.append(case.open(self.text))
+
+        class Menu(object):
+            objectName = ak.SCRIPTS_MENU
+
+            def __init__(self, entries):
+                self.entries = entries
+
+            def actions(self):
+                return self.entries
+
+            def menu(self):
+                return self
+
+            text = ak.MENU_TITLE
+
+        class Main(object):
+            def findChildren(self, kind):
+                return [Menu([Menu([Entry(tool) for tool in ak.FONT_TOOLS])])]
+
+        old_main = ak.AutoKerningDialog.__dict__["main_window"]  # (the staticmethod: read from the class, Python 2.7
+        ak.AutoKerningDialog.main_window = staticmethod(lambda: Main())  # gives a function that goes back unbound)
+        self.addCleanup(setattr, ak.AutoKerningDialog, "main_window", old_main)
+        one = self.open("Proof")
+        self.workspace.currentPackage = self.two
+        two = self.open("Glyph Compose")
+        for tool in ("Font Check", "Auto Spacing", "Proof"):  # the tools button, then its arrows
+            window = one.dialog
+            self.active = two.dialog  # (the other font's window was clicked last)
+            self.assertTrue(ak.open_tool(tool, window))
+            one = opened[-1]
+            self.assertIs(one.current_font(), self.one, tool)
+            self.assertFalse(window.visible, "the window clicked gives way")
+            self.assertTrue(two.dialog.visible, "the other is left alone")
+            self.assertIsNone(sys._freelab_windows["hint"], "let go once it opened")
+        self.active = None
+        loaded = []
+
+        class Sibling(object):
+            def main(module, **given):
+                loaded.append(given)
+                opened.append(case.open("Kerning Check"))
+
+        old_load = ak.load_sibling
+        ak.load_sibling = lambda file_name, module_name: Sibling()
+        self.addCleanup(setattr, ak, "load_sibling", old_load)
+        window = one.dialog
+        self.assertIsNone(ak.open_kerning_check([u"A"], u"Auto Spacing spaced", caller=window))
+        self.assertEqual(loaded, [{"glyphs": [u"A"], "reason": u"Auto Spacing spaced"}])
+        one = opened[-1]
+        self.assertIs(one.current_font(), self.one, "Auto Spacing's Check kerning")
+        self.assertFalse(window.visible)
+        window = one.dialog
+        self.workspace.currentPackage = self.one
+        compose = self.open("Glyph Compose")  # (FontLab's menu: One's window, now Glyph Compose)
+        self.assertFalse(window.visible)
+        self.workspace.currentPackage = self.two
+        self.assertIsNone(ak.open_sibling_script(ak.KERNING_CHECK_FILE, ak.KERNING_CHECK_MODULE, caller=compose.dialog))
+        one = opened[-1]
+        self.assertIs(one.current_font(), self.one, "Auto Kerning's Kerning Check button")
+        self.assertFalse(compose.dialog.visible)
+        self.assertIsNone(sys._freelab_windows["hint"])
+        self.assertIsNone(ak.open_sibling_script(ak.KERNING_CHECK_FILE, ak.KERNING_CHECK_MODULE, caller=one.dialog))
+        self.assertIsNone(opened[-1], "its own window shows it already: brought forward")
+        self.assertEqual(one.dialog.calls[-2:], ["raise", "activate"])
+        window = one.dialog
+        old_main_ak = ak.main
+        ak.main = lambda focus=None: opened.append(case.open("Auto Kerning"))
+        self.addCleanup(setattr, ak, "main", old_main_ak)
+        self.assertIsNone(ak.open_auto_kerning_at(u"A", u"V", caller=window))
+        self.assertIs(opened[-1].current_font(), self.one, "Auto Spacing's kern-this-pair")
+        self.assertFalse(window.visible)
+        self.assertTrue(two.dialog.visible)
+        self.assertIsNone(sys._freelab_windows["hint"])
+        kerning = self.open("Font Check")  # then FontLab's menu: the font FontLab shows, again
+        self.assertIs(kerning.current_font(), self.two)
+
+    def test_every_control_that_opens_a_tool_names_its_window(self):
+        # A tool opened without its window named opens as from FontLab's menu: on the font FontLab shows
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        calls = {
+            os.path.join("spacing", "freelab_auto_spacing.py"): ("open_kerning_check(", "open_auto_kerning_at("),
+            os.path.join("kerning", "freelab_auto_kerning.py"): ("open_sibling_script(KERNING",),
+            os.path.join("compose", "freelab_glyph_compose.py"): ("module.main(glyphs=names",),
+            os.path.join("checks", "freelab_font_check.py"): ("dm.main(characters=chars)",),
+        }
+        for name, texts in sorted(calls.items()):
+            with io.open(os.path.join(root, name), encoding="utf-8") as handle:
+                lines = handle.read().splitlines()
+            for text in texts:
+                found = [n for n, line in enumerate(lines) if text in line and "def " not in line]
+                self.assertTrue(found, (name, text))
+                for n in found:
+                    near = u"\n".join(lines[max(0, n - 3):n + 2])
+                    self.assertTrue("caller=self.dialog" in near or "opening_from(self.dialog)" in near, (name, text))
+        with io.open(os.path.join(root, "kerning", "freelab_auto_kerning.py"), encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertIn("open_tool(title, _window_of(button))", source, "the tools button and its arrows")
+        self.assertNotIn("activeWindow()", source.split("def calling_font():")[1].split("def note_caller(")[0],
+                         "never the window that has the focus")
 
     def test_a_windows_button_names_its_font_for_the_tool_it_opens(self):
         # (FontLab may run the menu entry once the click is over, the window no longer the active one)
@@ -1409,14 +1666,13 @@ class WindowTests(unittest.TestCase):
         self.workspace.currentPackage = self.two
         other = self.open("Glyph Compose")
         one_window, other_window = one.dialog, other.dialog
-        self.active = one.dialog  # its tools button clicked, while FontLab shows Two
-        check = self.open("Font Check")
+        with ak.opening_from(one.dialog):  # its tools button clicked, while FontLab shows Two
+            check = self.open("Font Check")
         self.assertFalse(one_window.visible, "the window clicked gives way")
         self.assertTrue(other_window.visible, "the other is left alone")
         self.assertIs(check.current_font(), self.one, "on the clicked window's font")
         self.assertIs(sys._freelab_windows["fonts"][self.one.id], check)
         sys._freelab_windows["hint"] = (other.font_id, ak.time.time(), other.window_key)
-        self.active = None
         spacing = self.open("Auto Spacing")
         self.assertFalse(other_window.visible)
         self.assertTrue(check.dialog.visible)
@@ -1502,9 +1758,8 @@ class WindowTests(unittest.TestCase):
         self.assertIs(sys._freelab_windows["fonts"].get(None), spacing)
         self.assertEqual(ak.fonts_tick(self.workspace), [], "nothing to do")
         self.assertIsNone(self.open("Auto Spacing"), "FontLab's menu brings it forward: no second window")
-        self.active = spacing.dialog  # its arrow to the next tool
-        kerning = self.open("Auto Kerning")
-        self.active = None
+        with ak.opening_from(spacing.dialog):  # its arrow to the next tool
+            kerning = self.open("Auto Kerning")
         self.assertFalse(window.visible, "the window clicked gives way, as one with a font does")
         self.assertIs(sys._freelab_windows["fonts"].get(None), kerning)
         self.assertIsNone(self.open("Auto Kerning"), "and the menu finds it again")

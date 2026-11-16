@@ -1,5 +1,1419 @@
 {
  "about": "Glyph Compose's Glyph generation recipes (FreeLab's own), made by compose/train/generation.py from the research inventory of 2026-11-16, Unicode's data, GlyphsInfo's glyph names, and measurements of the open-licensed corpus. Sources and licenses: glyph_generation_LICENSE.",
+ "characters": {
+  "0021": {
+   "category": "Po",
+   "name": "EXCLAMATION MARK"
+  },
+  "002B": {
+   "category": "Sm",
+   "name": "PLUS SIGN"
+  },
+  "002C": {
+   "category": "Po",
+   "name": "COMMA"
+  },
+  "002D": {
+   "category": "Pd",
+   "name": "HYPHEN-MINUS"
+  },
+  "002E": {
+   "category": "Po",
+   "name": "FULL STOP"
+  },
+  "002F": {
+   "category": "Po",
+   "name": "SOLIDUS"
+  },
+  "003B": {
+   "category": "Po",
+   "name": "SEMICOLON"
+  },
+  "003F": {
+   "category": "Po",
+   "name": "QUESTION MARK"
+  },
+  "0041": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER A"
+  },
+  "0042": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER B"
+  },
+  "0043": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER C"
+  },
+  "0044": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER D"
+  },
+  "0045": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER E"
+  },
+  "0046": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER F"
+  },
+  "0048": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER H"
+  },
+  "0049": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER I"
+  },
+  "004A": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER J"
+  },
+  "004B": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER K"
+  },
+  "004C": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER L"
+  },
+  "004D": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER M"
+  },
+  "004E": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER N"
+  },
+  "004F": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER O"
+  },
+  "0050": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER P"
+  },
+  "0052": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER R"
+  },
+  "0053": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER S"
+  },
+  "0054": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER T"
+  },
+  "0056": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER V"
+  },
+  "0057": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER W"
+  },
+  "0058": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER X"
+  },
+  "0059": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER Y"
+  },
+  "005A": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER Z"
+  },
+  "005C": {
+   "category": "Po",
+   "name": "REVERSE SOLIDUS"
+  },
+  "0060": {
+   "category": "Sk",
+   "name": "GRAVE ACCENT"
+  },
+  "0061": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER A"
+  },
+  "0063": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER C"
+  },
+  "0064": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER D"
+  },
+  "0065": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER E"
+  },
+  "0068": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER H"
+  },
+  "0069": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER I"
+  },
+  "006A": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER J"
+  },
+  "006B": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER K"
+  },
+  "006C": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER L"
+  },
+  "006D": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER M"
+  },
+  "006E": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER N"
+  },
+  "006F": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER O"
+  },
+  "0070": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER P"
+  },
+  "0071": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER Q"
+  },
+  "0072": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER R"
+  },
+  "0073": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER S"
+  },
+  "0074": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER T"
+  },
+  "0076": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER V"
+  },
+  "0077": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER W"
+  },
+  "0078": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER X"
+  },
+  "0079": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER Y"
+  },
+  "007A": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER Z"
+  },
+  "007C": {
+   "category": "Sm",
+   "name": "VERTICAL LINE"
+  },
+  "00A0": {
+   "category": "Zs",
+   "name": "NO-BREAK SPACE"
+  },
+  "00A1": {
+   "category": "Po",
+   "name": "INVERTED EXCLAMATION MARK"
+  },
+  "00AB": {
+   "category": "Pi",
+   "name": "LEFT-POINTING DOUBLE ANGLE QUOTATION MARK"
+  },
+  "00AD": {
+   "category": "Cf",
+   "name": "SOFT HYPHEN"
+  },
+  "00B4": {
+   "category": "Sk",
+   "name": "ACUTE ACCENT"
+  },
+  "00B5": {
+   "category": "Ll",
+   "name": "MICRO SIGN"
+  },
+  "00B7": {
+   "category": "Po",
+   "name": "MIDDLE DOT"
+  },
+  "00BB": {
+   "category": "Pf",
+   "name": "RIGHT-POINTING DOUBLE ANGLE QUOTATION MARK"
+  },
+  "00BC": {
+   "category": "No",
+   "name": "VULGAR FRACTION ONE QUARTER"
+  },
+  "00BD": {
+   "category": "No",
+   "name": "VULGAR FRACTION ONE HALF"
+  },
+  "00BE": {
+   "category": "No",
+   "name": "VULGAR FRACTION THREE QUARTERS"
+  },
+  "00BF": {
+   "category": "Po",
+   "name": "INVERTED QUESTION MARK"
+  },
+  "00C5": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER A WITH RING ABOVE"
+  },
+  "00C6": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER AE"
+  },
+  "00D0": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER ETH"
+  },
+  "00DE": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER THORN"
+  },
+  "00E6": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER AE"
+  },
+  "0110": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER D WITH STROKE"
+  },
+  "0132": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LIGATURE IJ"
+  },
+  "0133": {
+   "category": "Ll",
+   "name": "LATIN SMALL LIGATURE IJ"
+  },
+  "013F": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER L WITH MIDDLE DOT"
+  },
+  "0140": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER L WITH MIDDLE DOT"
+  },
+  "0149": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER N PRECEDED BY APOSTROPHE"
+  },
+  "017D": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER Z WITH CARON"
+  },
+  "017E": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER Z WITH CARON"
+  },
+  "0186": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER OPEN O"
+  },
+  "0189": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER AFRICAN D"
+  },
+  "018E": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER REVERSED E"
+  },
+  "019C": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER TURNED M"
+  },
+  "01A7": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER TONE TWO"
+  },
+  "01A8": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER TONE TWO"
+  },
+  "01A9": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER ESH"
+  },
+  "01B7": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER EZH"
+  },
+  "01B8": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER EZH REVERSED"
+  },
+  "01B9": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER EZH REVERSED"
+  },
+  "01C0": {
+   "category": "Lo",
+   "name": "LATIN LETTER DENTAL CLICK"
+  },
+  "01C4": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER DZ WITH CARON"
+  },
+  "01C5": {
+   "category": "Lt",
+   "name": "LATIN CAPITAL LETTER D WITH SMALL LETTER Z WITH CARON"
+  },
+  "01C6": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER DZ WITH CARON"
+  },
+  "01C7": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER LJ"
+  },
+  "01C8": {
+   "category": "Lt",
+   "name": "LATIN CAPITAL LETTER L WITH SMALL LETTER J"
+  },
+  "01C9": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER LJ"
+  },
+  "01CA": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER NJ"
+  },
+  "01CB": {
+   "category": "Lt",
+   "name": "LATIN CAPITAL LETTER N WITH SMALL LETTER J"
+  },
+  "01CC": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER NJ"
+  },
+  "01DD": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER TURNED E"
+  },
+  "01F1": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER DZ"
+  },
+  "01F2": {
+   "category": "Lt",
+   "name": "LATIN CAPITAL LETTER D WITH SMALL LETTER Z"
+  },
+  "01F3": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER DZ"
+  },
+  "0245": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER TURNED V"
+  },
+  "0250": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER TURNED A"
+  },
+  "0251": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER ALPHA"
+  },
+  "0252": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER TURNED ALPHA"
+  },
+  "0254": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER OPEN O"
+  },
+  "0258": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER REVERSED E"
+  },
+  "0259": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER SCHWA"
+  },
+  "025B": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER OPEN E"
+  },
+  "025C": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER REVERSED OPEN E"
+  },
+  "0265": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER TURNED H"
+  },
+  "026F": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER TURNED M"
+  },
+  "0274": {
+   "category": "Ll",
+   "name": "LATIN LETTER SMALL CAPITAL N"
+  },
+  "0279": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER TURNED R"
+  },
+  "0280": {
+   "category": "Ll",
+   "name": "LATIN LETTER SMALL CAPITAL R"
+  },
+  "0281": {
+   "category": "Ll",
+   "name": "LATIN LETTER SMALL CAPITAL INVERTED R"
+  },
+  "0287": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER TURNED T"
+  },
+  "028C": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER TURNED V"
+  },
+  "028D": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER TURNED W"
+  },
+  "028E": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER TURNED Y"
+  },
+  "0292": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER EZH"
+  },
+  "0294": {
+   "category": "Lo",
+   "name": "LATIN LETTER GLOTTAL STOP"
+  },
+  "0295": {
+   "category": "Ll",
+   "name": "LATIN LETTER PHARYNGEAL VOICED FRICATIVE"
+  },
+  "029E": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER TURNED K"
+  },
+  "02B9": {
+   "category": "Lm",
+   "name": "MODIFIER LETTER PRIME"
+  },
+  "02BB": {
+   "category": "Lm",
+   "name": "MODIFIER LETTER TURNED COMMA"
+  },
+  "02BC": {
+   "category": "Lm",
+   "name": "MODIFIER LETTER APOSTROPHE"
+  },
+  "02BD": {
+   "category": "Lm",
+   "name": "MODIFIER LETTER REVERSED COMMA"
+  },
+  "02C0": {
+   "category": "Lm",
+   "name": "MODIFIER LETTER GLOTTAL STOP"
+  },
+  "02C1": {
+   "category": "Lm",
+   "name": "MODIFIER LETTER REVERSED GLOTTAL STOP"
+  },
+  "0300": {
+   "category": "Mn",
+   "name": "COMBINING GRAVE ACCENT"
+  },
+  "0301": {
+   "category": "Mn",
+   "name": "COMBINING ACUTE ACCENT"
+  },
+  "0313": {
+   "category": "Mn",
+   "name": "COMBINING COMMA ABOVE"
+  },
+  "0340": {
+   "category": "Mn",
+   "name": "COMBINING GRAVE TONE MARK"
+  },
+  "0341": {
+   "category": "Mn",
+   "name": "COMBINING ACUTE TONE MARK"
+  },
+  "0343": {
+   "category": "Mn",
+   "name": "COMBINING GREEK KORONIS"
+  },
+  "0374": {
+   "category": "Lm",
+   "name": "GREEK NUMERAL SIGN"
+  },
+  "037E": {
+   "category": "Po",
+   "name": "GREEK QUESTION MARK"
+  },
+  "0385": {
+   "category": "Sk",
+   "name": "GREEK DIALYTIKA TONOS"
+  },
+  "0386": {
+   "category": "Lu",
+   "name": "GREEK CAPITAL LETTER ALPHA WITH TONOS"
+  },
+  "0387": {
+   "category": "Po",
+   "name": "GREEK ANO TELEIA"
+  },
+  "0388": {
+   "category": "Lu",
+   "name": "GREEK CAPITAL LETTER EPSILON WITH TONOS"
+  },
+  "0389": {
+   "category": "Lu",
+   "name": "GREEK CAPITAL LETTER ETA WITH TONOS"
+  },
+  "038A": {
+   "category": "Lu",
+   "name": "GREEK CAPITAL LETTER IOTA WITH TONOS"
+  },
+  "038C": {
+   "category": "Lu",
+   "name": "GREEK CAPITAL LETTER OMICRON WITH TONOS"
+  },
+  "038E": {
+   "category": "Lu",
+   "name": "GREEK CAPITAL LETTER UPSILON WITH TONOS"
+  },
+  "038F": {
+   "category": "Lu",
+   "name": "GREEK CAPITAL LETTER OMEGA WITH TONOS"
+  },
+  "0390": {
+   "category": "Ll",
+   "name": "GREEK SMALL LETTER IOTA WITH DIALYTIKA AND TONOS"
+  },
+  "0391": {
+   "category": "Lu",
+   "name": "GREEK CAPITAL LETTER ALPHA"
+  },
+  "0392": {
+   "category": "Lu",
+   "name": "GREEK CAPITAL LETTER BETA"
+  },
+  "0393": {
+   "category": "Lu",
+   "name": "GREEK CAPITAL LETTER GAMMA"
+  },
+  "0394": {
+   "category": "Lu",
+   "name": "GREEK CAPITAL LETTER DELTA"
+  },
+  "0395": {
+   "category": "Lu",
+   "name": "GREEK CAPITAL LETTER EPSILON"
+  },
+  "0396": {
+   "category": "Lu",
+   "name": "GREEK CAPITAL LETTER ZETA"
+  },
+  "0397": {
+   "category": "Lu",
+   "name": "GREEK CAPITAL LETTER ETA"
+  },
+  "0399": {
+   "category": "Lu",
+   "name": "GREEK CAPITAL LETTER IOTA"
+  },
+  "039A": {
+   "category": "Lu",
+   "name": "GREEK CAPITAL LETTER KAPPA"
+  },
+  "039B": {
+   "category": "Lu",
+   "name": "GREEK CAPITAL LETTER LAMDA"
+  },
+  "039C": {
+   "category": "Lu",
+   "name": "GREEK CAPITAL LETTER MU"
+  },
+  "039D": {
+   "category": "Lu",
+   "name": "GREEK CAPITAL LETTER NU"
+  },
+  "039F": {
+   "category": "Lu",
+   "name": "GREEK CAPITAL LETTER OMICRON"
+  },
+  "03A1": {
+   "category": "Lu",
+   "name": "GREEK CAPITAL LETTER RHO"
+  },
+  "03A3": {
+   "category": "Lu",
+   "name": "GREEK CAPITAL LETTER SIGMA"
+  },
+  "03A4": {
+   "category": "Lu",
+   "name": "GREEK CAPITAL LETTER TAU"
+  },
+  "03A5": {
+   "category": "Lu",
+   "name": "GREEK CAPITAL LETTER UPSILON"
+  },
+  "03A7": {
+   "category": "Lu",
+   "name": "GREEK CAPITAL LETTER CHI"
+  },
+  "03A9": {
+   "category": "Lu",
+   "name": "GREEK CAPITAL LETTER OMEGA"
+  },
+  "03AC": {
+   "category": "Ll",
+   "name": "GREEK SMALL LETTER ALPHA WITH TONOS"
+  },
+  "03AD": {
+   "category": "Ll",
+   "name": "GREEK SMALL LETTER EPSILON WITH TONOS"
+  },
+  "03AE": {
+   "category": "Ll",
+   "name": "GREEK SMALL LETTER ETA WITH TONOS"
+  },
+  "03AF": {
+   "category": "Ll",
+   "name": "GREEK SMALL LETTER IOTA WITH TONOS"
+  },
+  "03B0": {
+   "category": "Ll",
+   "name": "GREEK SMALL LETTER UPSILON WITH DIALYTIKA AND TONOS"
+  },
+  "03BC": {
+   "category": "Ll",
+   "name": "GREEK SMALL LETTER MU"
+  },
+  "03CC": {
+   "category": "Ll",
+   "name": "GREEK SMALL LETTER OMICRON WITH TONOS"
+  },
+  "03CD": {
+   "category": "Ll",
+   "name": "GREEK SMALL LETTER UPSILON WITH TONOS"
+  },
+  "03CE": {
+   "category": "Ll",
+   "name": "GREEK SMALL LETTER OMEGA WITH TONOS"
+  },
+  "03F3": {
+   "category": "Ll",
+   "name": "GREEK LETTER YOT"
+  },
+  "03F7": {
+   "category": "Lu",
+   "name": "GREEK CAPITAL LETTER SHO"
+  },
+  "0405": {
+   "category": "Lu",
+   "name": "CYRILLIC CAPITAL LETTER DZE"
+  },
+  "0406": {
+   "category": "Lu",
+   "name": "CYRILLIC CAPITAL LETTER BYELORUSSIAN-UKRAINIAN I"
+  },
+  "0408": {
+   "category": "Lu",
+   "name": "CYRILLIC CAPITAL LETTER JE"
+  },
+  "0410": {
+   "category": "Lu",
+   "name": "CYRILLIC CAPITAL LETTER A"
+  },
+  "0412": {
+   "category": "Lu",
+   "name": "CYRILLIC CAPITAL LETTER VE"
+  },
+  "0413": {
+   "category": "Lu",
+   "name": "CYRILLIC CAPITAL LETTER GHE"
+  },
+  "0415": {
+   "category": "Lu",
+   "name": "CYRILLIC CAPITAL LETTER IE"
+  },
+  "0418": {
+   "category": "Lu",
+   "name": "CYRILLIC CAPITAL LETTER I"
+  },
+  "041C": {
+   "category": "Lu",
+   "name": "CYRILLIC CAPITAL LETTER EM"
+  },
+  "041D": {
+   "category": "Lu",
+   "name": "CYRILLIC CAPITAL LETTER EN"
+  },
+  "041E": {
+   "category": "Lu",
+   "name": "CYRILLIC CAPITAL LETTER O"
+  },
+  "0420": {
+   "category": "Lu",
+   "name": "CYRILLIC CAPITAL LETTER ER"
+  },
+  "0421": {
+   "category": "Lu",
+   "name": "CYRILLIC CAPITAL LETTER ES"
+  },
+  "0422": {
+   "category": "Lu",
+   "name": "CYRILLIC CAPITAL LETTER TE"
+  },
+  "0425": {
+   "category": "Lu",
+   "name": "CYRILLIC CAPITAL LETTER HA"
+  },
+  "042F": {
+   "category": "Lu",
+   "name": "CYRILLIC CAPITAL LETTER YA"
+  },
+  "0430": {
+   "category": "Ll",
+   "name": "CYRILLIC SMALL LETTER A"
+  },
+  "0435": {
+   "category": "Ll",
+   "name": "CYRILLIC SMALL LETTER IE"
+  },
+  "043E": {
+   "category": "Ll",
+   "name": "CYRILLIC SMALL LETTER O"
+  },
+  "0440": {
+   "category": "Ll",
+   "name": "CYRILLIC SMALL LETTER ER"
+  },
+  "0441": {
+   "category": "Ll",
+   "name": "CYRILLIC SMALL LETTER ES"
+  },
+  "0443": {
+   "category": "Ll",
+   "name": "CYRILLIC SMALL LETTER U"
+  },
+  "0445": {
+   "category": "Ll",
+   "name": "CYRILLIC SMALL LETTER HA"
+  },
+  "0455": {
+   "category": "Ll",
+   "name": "CYRILLIC SMALL LETTER DZE"
+  },
+  "0456": {
+   "category": "Ll",
+   "name": "CYRILLIC SMALL LETTER BYELORUSSIAN-UKRAINIAN I"
+  },
+  "0458": {
+   "category": "Ll",
+   "name": "CYRILLIC SMALL LETTER JE"
+  },
+  "04AE": {
+   "category": "Lu",
+   "name": "CYRILLIC CAPITAL LETTER STRAIGHT U"
+  },
+  "04BB": {
+   "category": "Ll",
+   "name": "CYRILLIC SMALL LETTER SHHA"
+  },
+  "04C0": {
+   "category": "Lu",
+   "name": "CYRILLIC LETTER PALOCHKA"
+  },
+  "04CF": {
+   "category": "Ll",
+   "name": "CYRILLIC SMALL LETTER PALOCHKA"
+  },
+  "04D4": {
+   "category": "Lu",
+   "name": "CYRILLIC CAPITAL LIGATURE A IE"
+  },
+  "04D5": {
+   "category": "Ll",
+   "name": "CYRILLIC SMALL LIGATURE A IE"
+  },
+  "0501": {
+   "category": "Ll",
+   "name": "CYRILLIC SMALL LETTER KOMI DE"
+  },
+  "051B": {
+   "category": "Ll",
+   "name": "CYRILLIC SMALL LETTER QA"
+  },
+  "051C": {
+   "category": "Lu",
+   "name": "CYRILLIC CAPITAL LETTER WE"
+  },
+  "051D": {
+   "category": "Ll",
+   "name": "CYRILLIC SMALL LETTER WE"
+  },
+  "1D09": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER TURNED I"
+  },
+  "1D0E": {
+   "category": "Ll",
+   "name": "LATIN LETTER SMALL CAPITAL REVERSED N"
+  },
+  "1D19": {
+   "category": "Ll",
+   "name": "LATIN LETTER SMALL CAPITAL REVERSED R"
+  },
+  "1D1A": {
+   "category": "Ll",
+   "name": "LATIN LETTER SMALL CAPITAL TURNED R"
+  },
+  "1F71": {
+   "category": "Ll",
+   "name": "GREEK SMALL LETTER ALPHA WITH OXIA"
+  },
+  "1F73": {
+   "category": "Ll",
+   "name": "GREEK SMALL LETTER EPSILON WITH OXIA"
+  },
+  "1F75": {
+   "category": "Ll",
+   "name": "GREEK SMALL LETTER ETA WITH OXIA"
+  },
+  "1F77": {
+   "category": "Ll",
+   "name": "GREEK SMALL LETTER IOTA WITH OXIA"
+  },
+  "1F79": {
+   "category": "Ll",
+   "name": "GREEK SMALL LETTER OMICRON WITH OXIA"
+  },
+  "1F7B": {
+   "category": "Ll",
+   "name": "GREEK SMALL LETTER UPSILON WITH OXIA"
+  },
+  "1F7D": {
+   "category": "Ll",
+   "name": "GREEK SMALL LETTER OMEGA WITH OXIA"
+  },
+  "1FBB": {
+   "category": "Lu",
+   "name": "GREEK CAPITAL LETTER ALPHA WITH OXIA"
+  },
+  "1FC9": {
+   "category": "Lu",
+   "name": "GREEK CAPITAL LETTER EPSILON WITH OXIA"
+  },
+  "1FCB": {
+   "category": "Lu",
+   "name": "GREEK CAPITAL LETTER ETA WITH OXIA"
+  },
+  "1FD3": {
+   "category": "Ll",
+   "name": "GREEK SMALL LETTER IOTA WITH DIALYTIKA AND OXIA"
+  },
+  "1FDB": {
+   "category": "Lu",
+   "name": "GREEK CAPITAL LETTER IOTA WITH OXIA"
+  },
+  "1FE3": {
+   "category": "Ll",
+   "name": "GREEK SMALL LETTER UPSILON WITH DIALYTIKA AND OXIA"
+  },
+  "1FEB": {
+   "category": "Lu",
+   "name": "GREEK CAPITAL LETTER UPSILON WITH OXIA"
+  },
+  "1FEE": {
+   "category": "Sk",
+   "name": "GREEK DIALYTIKA AND OXIA"
+  },
+  "1FEF": {
+   "category": "Sk",
+   "name": "GREEK VARIA"
+  },
+  "1FF9": {
+   "category": "Lu",
+   "name": "GREEK CAPITAL LETTER OMICRON WITH OXIA"
+  },
+  "1FFB": {
+   "category": "Lu",
+   "name": "GREEK CAPITAL LETTER OMEGA WITH OXIA"
+  },
+  "1FFD": {
+   "category": "Sk",
+   "name": "GREEK OXIA"
+  },
+  "2000": {
+   "category": "Zs",
+   "name": "EN QUAD"
+  },
+  "2001": {
+   "category": "Zs",
+   "name": "EM QUAD"
+  },
+  "2002": {
+   "category": "Zs",
+   "name": "EN SPACE"
+  },
+  "2003": {
+   "category": "Zs",
+   "name": "EM SPACE"
+  },
+  "2004": {
+   "category": "Zs",
+   "name": "THREE-PER-EM SPACE"
+  },
+  "2005": {
+   "category": "Zs",
+   "name": "FOUR-PER-EM SPACE"
+  },
+  "2006": {
+   "category": "Zs",
+   "name": "SIX-PER-EM SPACE"
+  },
+  "2007": {
+   "category": "Zs",
+   "name": "FIGURE SPACE"
+  },
+  "2008": {
+   "category": "Zs",
+   "name": "PUNCTUATION SPACE"
+  },
+  "2009": {
+   "category": "Zs",
+   "name": "THIN SPACE"
+  },
+  "200A": {
+   "category": "Zs",
+   "name": "HAIR SPACE"
+  },
+  "200B": {
+   "category": "Cf",
+   "name": "ZERO WIDTH SPACE"
+  },
+  "2010": {
+   "category": "Pd",
+   "name": "HYPHEN"
+  },
+  "2011": {
+   "category": "Pd",
+   "name": "NON-BREAKING HYPHEN"
+  },
+  "2012": {
+   "category": "Pd",
+   "name": "FIGURE DASH"
+  },
+  "2013": {
+   "category": "Pd",
+   "name": "EN DASH"
+  },
+  "2014": {
+   "category": "Pd",
+   "name": "EM DASH"
+  },
+  "2015": {
+   "category": "Pd",
+   "name": "HORIZONTAL BAR"
+  },
+  "2018": {
+   "category": "Pi",
+   "name": "LEFT SINGLE QUOTATION MARK"
+  },
+  "2019": {
+   "category": "Pf",
+   "name": "RIGHT SINGLE QUOTATION MARK"
+  },
+  "201A": {
+   "category": "Ps",
+   "name": "SINGLE LOW-9 QUOTATION MARK"
+  },
+  "201B": {
+   "category": "Pi",
+   "name": "SINGLE HIGH-REVERSED-9 QUOTATION MARK"
+  },
+  "201C": {
+   "category": "Pi",
+   "name": "LEFT DOUBLE QUOTATION MARK"
+  },
+  "201D": {
+   "category": "Pf",
+   "name": "RIGHT DOUBLE QUOTATION MARK"
+  },
+  "201E": {
+   "category": "Ps",
+   "name": "DOUBLE LOW-9 QUOTATION MARK"
+  },
+  "201F": {
+   "category": "Pi",
+   "name": "DOUBLE HIGH-REVERSED-9 QUOTATION MARK"
+  },
+  "2024": {
+   "category": "Po",
+   "name": "ONE DOT LEADER"
+  },
+  "2025": {
+   "category": "Po",
+   "name": "TWO DOT LEADER"
+  },
+  "2026": {
+   "category": "Po",
+   "name": "HORIZONTAL ELLIPSIS"
+  },
+  "2027": {
+   "category": "Po",
+   "name": "HYPHENATION POINT"
+  },
+  "202F": {
+   "category": "Zs",
+   "name": "NARROW NO-BREAK SPACE"
+  },
+  "2032": {
+   "category": "Po",
+   "name": "PRIME"
+  },
+  "2033": {
+   "category": "Po",
+   "name": "DOUBLE PRIME"
+  },
+  "2034": {
+   "category": "Po",
+   "name": "TRIPLE PRIME"
+  },
+  "2035": {
+   "category": "Po",
+   "name": "REVERSED PRIME"
+  },
+  "2036": {
+   "category": "Po",
+   "name": "REVERSED DOUBLE PRIME"
+  },
+  "2037": {
+   "category": "Po",
+   "name": "REVERSED TRIPLE PRIME"
+  },
+  "2039": {
+   "category": "Pi",
+   "name": "SINGLE LEFT-POINTING ANGLE QUOTATION MARK"
+  },
+  "203A": {
+   "category": "Pf",
+   "name": "SINGLE RIGHT-POINTING ANGLE QUOTATION MARK"
+  },
+  "203C": {
+   "category": "Po",
+   "name": "DOUBLE EXCLAMATION MARK"
+  },
+  "2047": {
+   "category": "Po",
+   "name": "DOUBLE QUESTION MARK"
+  },
+  "2048": {
+   "category": "Po",
+   "name": "QUESTION EXCLAMATION MARK"
+  },
+  "2049": {
+   "category": "Po",
+   "name": "EXCLAMATION QUESTION MARK"
+  },
+  "204F": {
+   "category": "Po",
+   "name": "REVERSED SEMICOLON"
+  },
+  "2057": {
+   "category": "Po",
+   "name": "QUADRUPLE PRIME"
+  },
+  "205F": {
+   "category": "Zs",
+   "name": "MEDIUM MATHEMATICAL SPACE"
+  },
+  "2060": {
+   "category": "Cf",
+   "name": "WORD JOINER"
+  },
+  "2126": {
+   "category": "Lu",
+   "name": "OHM SIGN"
+  },
+  "212A": {
+   "category": "Lu",
+   "name": "KELVIN SIGN"
+  },
+  "212B": {
+   "category": "Lu",
+   "name": "ANGSTROM SIGN"
+  },
+  "2150": {
+   "category": "No",
+   "name": "VULGAR FRACTION ONE SEVENTH"
+  },
+  "2151": {
+   "category": "No",
+   "name": "VULGAR FRACTION ONE NINTH"
+  },
+  "2152": {
+   "category": "No",
+   "name": "VULGAR FRACTION ONE TENTH"
+  },
+  "2153": {
+   "category": "No",
+   "name": "VULGAR FRACTION ONE THIRD"
+  },
+  "2154": {
+   "category": "No",
+   "name": "VULGAR FRACTION TWO THIRDS"
+  },
+  "2155": {
+   "category": "No",
+   "name": "VULGAR FRACTION ONE FIFTH"
+  },
+  "2156": {
+   "category": "No",
+   "name": "VULGAR FRACTION TWO FIFTHS"
+  },
+  "2157": {
+   "category": "No",
+   "name": "VULGAR FRACTION THREE FIFTHS"
+  },
+  "2158": {
+   "category": "No",
+   "name": "VULGAR FRACTION FOUR FIFTHS"
+  },
+  "2159": {
+   "category": "No",
+   "name": "VULGAR FRACTION ONE SIXTH"
+  },
+  "215A": {
+   "category": "No",
+   "name": "VULGAR FRACTION FIVE SIXTHS"
+  },
+  "215B": {
+   "category": "No",
+   "name": "VULGAR FRACTION ONE EIGHTH"
+  },
+  "215C": {
+   "category": "No",
+   "name": "VULGAR FRACTION THREE EIGHTHS"
+  },
+  "215D": {
+   "category": "No",
+   "name": "VULGAR FRACTION FIVE EIGHTHS"
+  },
+  "215E": {
+   "category": "No",
+   "name": "VULGAR FRACTION SEVEN EIGHTHS"
+  },
+  "215F": {
+   "category": "No",
+   "name": "FRACTION NUMERATOR ONE"
+  },
+  "2183": {
+   "category": "Lu",
+   "name": "ROMAN NUMERAL REVERSED ONE HUNDRED"
+  },
+  "2184": {
+   "category": "Ll",
+   "name": "LATIN SMALL LETTER REVERSED C"
+  },
+  "2189": {
+   "category": "No",
+   "name": "VULGAR FRACTION ZERO THIRDS"
+  },
+  "2190": {
+   "category": "Sm",
+   "name": "LEFTWARDS ARROW"
+  },
+  "2191": {
+   "category": "Sm",
+   "name": "UPWARDS ARROW"
+  },
+  "2192": {
+   "category": "Sm",
+   "name": "RIGHTWARDS ARROW"
+  },
+  "2193": {
+   "category": "Sm",
+   "name": "DOWNWARDS ARROW"
+  },
+  "2196": {
+   "category": "So",
+   "name": "NORTH WEST ARROW"
+  },
+  "2197": {
+   "category": "So",
+   "name": "NORTH EAST ARROW"
+  },
+  "2198": {
+   "category": "So",
+   "name": "SOUTH EAST ARROW"
+  },
+  "2199": {
+   "category": "So",
+   "name": "SOUTH WEST ARROW"
+  },
+  "21D0": {
+   "category": "So",
+   "name": "LEFTWARDS DOUBLE ARROW"
+  },
+  "21D1": {
+   "category": "So",
+   "name": "UPWARDS DOUBLE ARROW"
+  },
+  "21D2": {
+   "category": "Sm",
+   "name": "RIGHTWARDS DOUBLE ARROW"
+  },
+  "21D3": {
+   "category": "So",
+   "name": "DOWNWARDS DOUBLE ARROW"
+  },
+  "2206": {
+   "category": "Sm",
+   "name": "INCREMENT"
+  },
+  "2212": {
+   "category": "Sm",
+   "name": "MINUS SIGN"
+  },
+  "2215": {
+   "category": "Sm",
+   "name": "DIVISION SLASH"
+  },
+  "2216": {
+   "category": "Sm",
+   "name": "SET MINUS"
+  },
+  "2219": {
+   "category": "Sm",
+   "name": "BULLET OPERATOR"
+  },
+  "2223": {
+   "category": "Sm",
+   "name": "DIVIDES"
+  },
+  "22C5": {
+   "category": "Sm",
+   "name": "DOT OPERATOR"
+  },
+  "25B2": {
+   "category": "So",
+   "name": "BLACK UP-POINTING TRIANGLE"
+  },
+  "25B3": {
+   "category": "So",
+   "name": "WHITE UP-POINTING TRIANGLE"
+  },
+  "25B6": {
+   "category": "So",
+   "name": "BLACK RIGHT-POINTING TRIANGLE"
+  },
+  "25B7": {
+   "category": "Sm",
+   "name": "WHITE RIGHT-POINTING TRIANGLE"
+  },
+  "25BC": {
+   "category": "So",
+   "name": "BLACK DOWN-POINTING TRIANGLE"
+  },
+  "25BD": {
+   "category": "So",
+   "name": "WHITE DOWN-POINTING TRIANGLE"
+  },
+  "25C0": {
+   "category": "So",
+   "name": "BLACK LEFT-POINTING TRIANGLE"
+  },
+  "25C1": {
+   "category": "Sm",
+   "name": "WHITE LEFT-POINTING TRIANGLE"
+  },
+  "2C6D": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER ALPHA"
+  },
+  "2C6F": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER TURNED A"
+  },
+  "2C70": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER TURNED ALPHA"
+  },
+  "2E2E": {
+   "category": "Po",
+   "name": "REVERSED QUESTION MARK"
+  },
+  "2E31": {
+   "category": "Po",
+   "name": "WORD SEPARATOR MIDDLE DOT"
+  },
+  "2E32": {
+   "category": "Po",
+   "name": "TURNED COMMA"
+  },
+  "2E3A": {
+   "category": "Pd",
+   "name": "TWO-EM DASH"
+  },
+  "2E3B": {
+   "category": "Pd",
+   "name": "THREE-EM DASH"
+  },
+  "2E41": {
+   "category": "Po",
+   "name": "REVERSED COMMA"
+  },
+  "3000": {
+   "category": "Zs",
+   "name": "IDEOGRAPHIC SPACE"
+  },
+  "A7B0": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER TURNED K"
+  },
+  "A7B1": {
+   "category": "Lu",
+   "name": "LATIN CAPITAL LETTER TURNED T"
+  },
+  "A7FB": {
+   "category": "Lo",
+   "name": "LATIN EPIGRAPHIC LETTER REVERSED F"
+  },
+  "A7FC": {
+   "category": "Lo",
+   "name": "LATIN EPIGRAPHIC LETTER REVERSED P"
+  },
+  "A7FD": {
+   "category": "Lo",
+   "name": "LATIN EPIGRAPHIC LETTER INVERTED M"
+  },
+  "FEFF": {
+   "category": "Cf",
+   "name": "ZERO WIDTH NO-BREAK SPACE"
+  }
+ },
  "corpus_families": 667,
  "entries": [
   {
@@ -4475,6 +5889,7 @@
     {
      "about": "body",
      "angle": 180,
+     "body": "cap",
      "check": "turn",
      "confidence": "starting point",
      "of": "004D",
@@ -4587,6 +6002,7 @@
     {
      "about": "body",
      "angle": 180,
+     "body": "x",
      "check": "turn",
      "confidence": "starting point",
      "of": "0065",
@@ -4615,6 +6031,7 @@
     {
      "about": "body",
      "angle": 180,
+     "body": "cap",
      "check": "turn",
      "confidence": "starting point",
      "of": "0056",
@@ -4638,6 +6055,7 @@
     {
      "about": "body",
      "angle": 180,
+     "body": "x",
      "check": "turn",
      "confidence": "starting point",
      "of": "0061",
@@ -4661,6 +6079,7 @@
     {
      "about": "body",
      "angle": 180,
+     "body": "x",
      "check": "turn",
      "confidence": "starting point",
      "of": "0251",
@@ -4726,6 +6145,7 @@
     {
      "about": "body",
      "angle": 180,
+     "body": "x",
      "check": "turn",
      "confidence": "starting point",
      "of": "0065",
@@ -4770,6 +6190,7 @@
     {
      "about": "body",
      "angle": 180,
+     "body": "x",
      "check": "turn",
      "confidence": "starting point",
      "of": "0068",
@@ -4793,6 +6214,7 @@
     {
      "about": "body",
      "angle": 180,
+     "body": "x",
      "check": "turn",
      "confidence": "starting point",
      "of": "006D",
@@ -4816,6 +6238,7 @@
     {
      "about": "body",
      "angle": 180,
+     "body": "x",
      "check": "turn",
      "confidence": "starting point",
      "of": "0072",
@@ -4861,6 +6284,7 @@
     {
      "about": "body",
      "angle": 180,
+     "body": "x",
      "check": "turn",
      "confidence": "starting point",
      "of": "0074",
@@ -4884,6 +6308,7 @@
     {
      "about": "body",
      "angle": 180,
+     "body": "x",
      "check": "turn",
      "confidence": "starting point",
      "of": "0076",
@@ -4907,6 +6332,7 @@
     {
      "about": "body",
      "angle": 180,
+     "body": "x",
      "check": "turn",
      "confidence": "starting point",
      "of": "0077",
@@ -4930,6 +6356,7 @@
     {
      "about": "body",
      "angle": 180,
+     "body": "x",
      "check": "turn",
      "confidence": "starting point",
      "of": "0079",
@@ -4974,6 +6401,7 @@
     {
      "about": "body",
      "angle": 180,
+     "body": "x",
      "check": "turn",
      "confidence": "starting point",
      "of": "006B",
@@ -5060,6 +6488,7 @@
     {
      "about": "body",
      "angle": 180,
+     "body": "x",
      "check": "turn",
      "confidence": "starting point",
      "of": "0069",
@@ -5125,6 +6554,7 @@
     {
      "about": "body",
      "angle": 180,
+     "body": "x",
      "check": "turn",
      "confidence": "starting point",
      "of": "0280",
@@ -5190,6 +6620,7 @@
     {
      "about": "body",
      "angle": 180,
+     "body": "cap",
      "check": "turn",
      "confidence": "starting point",
      "of": "0041",
@@ -5213,6 +6644,7 @@
     {
      "about": "body",
      "angle": 180,
+     "body": "cap",
      "check": "turn",
      "confidence": "starting point",
      "of": "2C6D",
@@ -5236,6 +6668,7 @@
     {
      "about": "body",
      "angle": 180,
+     "body": "cap",
      "check": "turn",
      "confidence": "starting point",
      "of": "004B",
@@ -5259,6 +6692,7 @@
     {
      "about": "body",
      "angle": 180,
+     "body": "cap",
      "check": "turn",
      "confidence": "starting point",
      "of": "0054",
@@ -5324,6 +6758,7 @@
     {
      "about": "body",
      "angle": 180,
+     "body": "x",
      "check": "turn",
      "confidence": "starting point",
      "of": "004D",
@@ -6212,7 +7647,7 @@
     "contrast": 1.1,
     "families": 462,
     "finds": 0.396,
-    "right": 0.726,
+    "right": 0.744,
     "serif": 0.03,
     "stress": 0.03
    },

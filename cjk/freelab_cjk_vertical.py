@@ -1544,7 +1544,7 @@ class CJKVerticalDialog(object):
         package = self.package = self.current_font()
         self.show_font_parts(package is not None)
         if package is None:
-            self.status.setText(ak.NO_FONT_LINE)
+            self.status.setText(ak.no_font_line())
             self.update_buttons()
             return
         if not self.model:

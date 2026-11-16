@@ -6425,7 +6425,8 @@ class FontCheckDialog(object):
         self.package = package
         self.master = package.master if package is not None else None
         if package is None:
-            self.font_label.setText(getattr(self.ak, "NO_FONT_LINE", u"No font is open. Open one, then click Check."))
+            self.font_label.setText(self.ak.no_font_line() if hasattr(self.ak, "no_font_line")
+                                    else getattr(self.ak, "NO_FONT_LINE", u"No font is open. Open one, then click Check."))
             self.update_buttons()
             return False
         b = self.ak.b
@@ -8402,13 +8403,15 @@ class FontCheckDialog(object):
         i = lambda text: self.in_list_font(self.ak.i(text))  # (letters named in a message: italics, in FreeLang)
         try:
             dm = self.diacritics_module()
-            try:
-                dm.main(characters=chars)  # a Glyph Compose that lists the letters given only
-                self.log.add(u"<i>Glyph Compose</i> lists %s: check them there, then build." % i(u" ".join(chars)), "done")
-            except TypeError:
-                dm.main()  # (a Glyph Compose that takes no letters lists every one it can build)
-                self.log.add(u"<i>Glyph Compose</i> lists every letter with diacritics it can build, %s among them." % i(
-                    u" ".join(chars)), "done")
+            with self.ak.opening_from(self.dialog):  # (on this window's font, in its place)
+                try:
+                    dm.main(characters=chars)  # a Glyph Compose that lists the letters given only
+                    self.log.add(u"<i>Glyph Compose</i> lists %s: check them there, then build." % i(u" ".join(chars)),
+                                 "done")
+                except TypeError:
+                    dm.main()  # (a Glyph Compose that takes no letters lists every one it can build)
+                    self.log.add(u"<i>Glyph Compose</i> lists every letter with diacritics it can build, %s among them."
+                                 % i(u" ".join(chars)), "done")
         except Exception as exc:
             self.log.add(u"<i>Glyph Compose</i> did not open: %s" % self.ak.html(exc), "error")
 

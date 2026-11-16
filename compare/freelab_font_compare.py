@@ -2177,8 +2177,11 @@ class CompareDialog(object):
         """What keeps Compare grayed (missing_line), or u"" when both sides are chosen."""
         own = self.fonts[0] if self.own_listed and self.fonts else None
         first, second = self.first_key(), self.second_key
-        return missing_line(self.ak.b(own.tfn) if own is not None else None, len(self.fonts) - (1 if own is not None else 0),
+        line = missing_line(self.ak.b(own.tfn) if own is not None else None, len(self.fonts) - (1 if own is not None else 0),
                             len(self.first_rows), second is not None, second is not None and second == first)
+        if own is None and hasattr(self.ak, "no_font_line"):
+            line = self.ak.no_font_line(line)  # (while other fonts are open, why this window has none)
+        return line
 
     def say_state(self, changed=False):
         """The top line: what is missing, while something is; that Compare can be clicked, before the

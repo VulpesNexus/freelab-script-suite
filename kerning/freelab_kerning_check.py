@@ -753,7 +753,7 @@ class KerningCheckDialog(object):
         self.master = self.package.master if self.package is not None else None
         self.chars = {}  # {glyph name: its character or None}, for screen_pair (read again with the font)
         if self.package is None:
-            self.font_label.setText(self.ak.NO_FONT_LINE)
+            self.font_label.setText(self.ak.no_font_line())
             self.update_buttons_soon()  # (its settings grayed out)
             return False
         self.update_buttons_soon()  # (its settings back on)

@@ -2777,7 +2777,8 @@ class ProofDialog(object):
             self.proof = None
             self.page_list.clear()
             self.preview.clear()
-            self.font_label.setText(u"No font is open. Open one: its proof is laid out at once.")
+            own = u"No font is open. Open one: its proof is laid out at once."
+            self.font_label.setText(self.ak.no_font_line(own) if hasattr(self.ak, "no_font_line") else own)
             return False
         self.master = self.package.master
         masters = self.masters()

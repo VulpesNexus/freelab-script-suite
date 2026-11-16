@@ -1275,6 +1275,8 @@ def list_controls(font, rows, searching):
 
 def no_font_line(ak):
     """The top line with no font open: the shared one (windows take the next font opened), else plainly."""
+    if hasattr(ak, "no_font_line"):
+        return ak.no_font_line()  # (while other fonts are open, why this window has none)
     return getattr(ak, "NO_FONT_LINE", None) or u"No font is open."
 
 
@@ -7967,10 +7969,11 @@ class AccentsDialog(object):
             return
         try:
             module = self.ak.load_sibling("freelab_kerning_check.py", "freelab_kerning_check")
-            try:
-                module.main(glyphs=names, reason=u"Glyph Compose built")
-            except TypeError:  # (a Kerning Check that takes no glyphs: all its pairs)
-                module.main()
+            with self.ak.opening_from(self.dialog):  # (on this window's font, in its place)
+                try:
+                    module.main(glyphs=names, reason=u"Glyph Compose built")
+                except TypeError:  # (a Kerning Check that takes no glyphs: all its pairs)
+                    module.main()
         except Exception as exc:
             self.log.add(u"<i>Kerning Check</i> did not open: %s" % self.ak.html(exc), "error")
 

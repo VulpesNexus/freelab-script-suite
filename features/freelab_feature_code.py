@@ -3446,7 +3446,8 @@ class FeatureCodeDialog(object):
         self.restore_button.setEnabled(False)
         if package is None:
             # (the window takes the next font opened: ak.fonts_tick, then font_changed)
-            self.status.setText(getattr(self.ak, "NO_FONT_LINE", None) or u"No font is open.")
+            self.status.setText(self.ak.no_font_line() if hasattr(self.ak, "no_font_line")
+                                else getattr(self.ak, "NO_FONT_LINE", None) or u"No font is open.")
             self.forms_label.setText(u"")
             # Nothing of the font closed stays (its code, its turns' line, the third tab's list), and nothing
             # that acts on a font takes a click: the turns' buttons and look back, the build's settings
