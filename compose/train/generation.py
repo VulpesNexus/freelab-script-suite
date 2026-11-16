@@ -34,6 +34,10 @@ import sys
 import unicodedata
 import xml.etree.ElementTree as ET
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir))
+os.environ["FREELAB_NO_AUTOSTART"] = "1"
+import freelab_glyph_generation as gg  # noqa: E402  (the monoline measures, as the tab takes them)
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, os.pardir, "glyph_generation.json")
 CORPUS = os.path.join(os.environ.get("LOCALAPPDATA", ""), "FreeLab", "corpus")
@@ -58,9 +62,10 @@ GROUPS = (
     ("fractions", u"Vulgar fractions", None),  # (the inventory's twenty)
     ("arrows", u"Arrows and triangles", "2190 2191 2193 21D0 21D1 21D3 25B2 25BC 25C0 25B3 25BD 25C1 2196 2197 2198 "
                                         "2199"),
+    ("turned", u"Turned and reversed letters", None),  # (the inventory's 41: starting points, unless monoline)
 )
 EXPECTED = {"spaces": 18, "dashes": 10, "duplicates": 44, "punctuation": 28, "lookalikes": 52, "ligatures": 17,
-            "fractions": 20, "arrows": 16}
+            "fractions": 20, "arrows": 16, "turned": 41}
 
 E, A, S = "exact", "accepted", "starting point"
 
@@ -221,6 +226,27 @@ def arrows():
     }
 
 
+def turned(inventory):
+    """Turned letters about the middle of their body (a lowercase's x-height, a capital's cap height: ʎ's
+    descender comes up as y's tail), reversed ones mirrored, ʁ flipped upside down; every one a starting
+    point (the tab says "likely usable as it is" where the font measures monoline). Where most of the
+    corpus copies a look-alike instead (Ʌ of Λ, ǝ of ə), that copy first."""
+    found = {}
+    for code in GROUP_CODES["turned"]:
+        recipe = inventory[code]["recipes"][0]
+        source = recipe["src"][0][0]
+        ids = [m["id"] for m in recipe["machinery"]]
+        if "rotate180" in ids:
+            found[code] = [way("turn", S, of=source, angle=180, about="body", check="turn")]
+        elif u"upside down" in recipe["text"]:
+            found[code] = [way("mirror", S, of=source, axis="y", check="turn")]
+        else:
+            found[code] = [way("mirror", S, of=source, check="mirror")]
+    found["0245"].insert(0, way("copy", A, of="039B"))  # (34 of 49 families: Λ)
+    found["01DD"].insert(0, way("copy", A, of="0259"))  # (the corpus's first construction: ə)
+    return found
+
+
 def unichr_hex(code):
     return chr(int(code, 16))
 
@@ -308,8 +334,102 @@ def rotated_box(box, angle):
     return min(xs), min(ys), max(xs), max(ys)
 
 
+# -- the monoline check's calibration: a drawn Я against R mirrored, И against N, ə against e turned ----------
+
+CALIBRATION = []  # (pair, overlap, measures) per family, filled by survey()
+CALIBRATION_PAIRS = (("042F", "0052", "mirror"), ("0418", "004E", "mirror"), ("0259", "0065", "turn"))
+GRID = 100  # cells per em, for the overlap
+
+
+def polygons(m, name):
+    """A glyph's outline as polygons (curves flattened), in ems."""
+    from fontTools.pens.basePen import BasePen
+
+    class Flat(BasePen):
+        def __init__(self, glyphs):
+            BasePen.__init__(self, glyphs)
+            self.found, self.now = [], []
+
+        def _moveTo(self, p):
+            self.now = [p]
+
+        def _lineTo(self, p):
+            self.now.append(p)
+
+        def _curveToOne(self, p1, p2, p3):
+            p0 = self.now[-1]
+            for step in range(1, 9):
+                t = step / 8.0
+                u = 1 - t
+                self.now.append((u ** 3 * p0[0] + 3 * u * u * t * p1[0] + 3 * u * t * t * p2[0] + t ** 3 * p3[0],
+                                 u ** 3 * p0[1] + 3 * u * u * t * p1[1] + 3 * u * t * t * p2[1] + t ** 3 * p3[1]))
+
+        def _closePath(self):
+            if len(self.now) > 2:
+                self.found.append(self.now)
+            self.now = []
+
+        _endPath = _closePath
+    pen = Flat(m.glyphs)
+    try:
+        m.glyphs[name].draw(pen)
+    except Exception:
+        return []
+    return [[(x / m.em, y / m.em) for x, y in polygon] for polygon in pen.found]
+
+
+def raster(polys):
+    """The cells (row, column) an outline fills, even-odd, on a GRID-per-em grid."""
+    cells = set()
+    box = gg.box_of(polys)
+    if box is None:
+        return cells
+    for row in range(int(box[1] * GRID) - 1, int(box[3] * GRID) + 2):
+        for start, end in gg.strokes(polys, "y", (row + 0.5) / GRID):
+            for column in range(int(round(start * GRID)), int(round(end * GRID))):
+                cells.add((row, column))
+    return cells
+
+
+def overlap(drawn, made):
+    """How much two outlines cover alike (intersection over union), their inks centered on each other."""
+    a, b = gg.box_of(drawn), gg.box_of(made)
+    if a is None or b is None:
+        return None
+    dx, dy = (a[0] + a[2] - b[0] - b[2]) / 2.0, (a[1] + a[3] - b[1] - b[3]) / 2.0
+    moved = [[(x + dx, y + dy) for x, y in polygon] for polygon in made]
+    one, two = raster(drawn), raster(moved)
+    return len(one & two) / float(len(one | two)) if one | two else None
+
+
+def calibrate(m):
+    measures = gg.monoline_measures(lambda name: polygons(m, name), lambda code: m.name(code))
+    if measures is None:
+        return
+    for target, source, kind in CALIBRATION_PAIRS:
+        drawn, base = m.name(int(target, 16)), m.name(int(source, 16))
+        if not drawn or not base:
+            continue
+        made = polygons(m, base)
+        box = gg.box_of(made)
+        if box is None:
+            continue
+        cx, cy = (box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0
+        if kind == "mirror":
+            made = [[(2 * cx - x, y) for x, y in polygon] for polygon in made]
+        else:
+            made = [[(2 * cx - x, 2 * cy - y) for x, y in polygon] for polygon in made]
+        found = overlap(polygons(m, drawn), made)
+        if found is not None:
+            CALIBRATION.append((target, found, measures))
+
+
 def measure(font, found):
     m = Measured(font)
+    try:
+        calibrate(m)
+    except Exception:
+        pass
     x_box, h_box = m.box(0x78), m.box(0x48)
     x_height = x_box[3] if x_box else None
     cap = h_box[3] if h_box else None
@@ -388,7 +508,40 @@ def median_of(layout, key, default=None):
     return found["median"] if found else default
 
 
-def rules(layout):
+USABLE_OVERLAP = 0.9  # a drawn letter this close to the recipe's (intersection over union) is the recipe's
+PRECISION_FLOOR = 0.7  # "likely usable": right for at least this share of the corpus's families so measured,
+LIFT = 0.1  # and this much more often than for any family (a half turn is the recipe's in 75% of them already)
+CONTRASTS = (1.05, 1.1, 1.15, 1.2, 1.25, 1.3, 1.4, 1.5, 1.6, 1.8, 2.0)
+ASYMMETRIES = (0.03, 0.05, 0.1, 0.2)
+
+
+def monoline_rules(records):
+    """Per kind (mirror: Я and И; turn: ə), the thresholds under which "likely usable as it is" is right for
+    at least PRECISION_FLOOR of the corpus's families, finding the most of those that draw the letter as
+    the recipe makes it; with how right it is and how many it finds."""
+    found = {}
+    for kind, pairs in (("mirror", ("042F", "0418")), ("turn", ("0259",))):
+        rows = [r for r in records if r[0] in pairs]
+        usable = sum(1 for r in rows if r[1] >= USABLE_OVERLAP)
+        floor = max(PRECISION_FLOOR, usable / float(max(len(rows), 1)) + LIFT)
+        best = None
+        for contrast in CONTRASTS:
+            for asymmetry in ASYMMETRIES:
+                rule = {"contrast": contrast, "stress": asymmetry, "serif": asymmetry}
+                said = [r for r in rows if gg.likely_usable(r[2], rule, kind)]
+                right = sum(1 for r in said if r[1] >= USABLE_OVERLAP)
+                if not said or right / float(len(said)) < floor:
+                    continue
+                key = (right, -contrast, -asymmetry)
+                if best is None or key > best[0]:
+                    best = (key, dict(rule, right=round(right / float(len(said)), 3),
+                                      finds=round(right / float(max(usable, 1)), 3), families=len(rows),
+                                      base=round(usable / float(max(len(rows), 1)), 3)))
+        found[kind] = best[1] if best else None
+    return found
+
+
+def rules(layout, records=()):
     """The runtime's constants, from the survey's statistics: a row's gap (None: the parts at their own
     advances, as the corpus sets IJ and the ellipsis), a turn's place and sidebearings, the middle dot's
     height, and the Catalan dot's place."""
@@ -411,7 +564,8 @@ def rules(layout):
                      "dot_center": median_of(layout, key + " dot center/height", 0.5),
                      "right_side": median_of(layout, key + " right side - last right side", 0.0)}
     return {"rows": rows, "turns": turns, "dots": dots,
-            "middle_dot": median_of(layout, "00B7 center/x-height", 0.5)}
+            "middle_dot": median_of(layout, "00B7 center/x-height", 0.5),
+            "monoline": monoline_rules(records)}
 
 
 def stats(values):
@@ -480,6 +634,7 @@ def main():
     parser.add_argument("--corpus", default=CORPUS)
     parser.add_argument("--out", default=OUT)
     parser.add_argument("--limit", type=int)
+    parser.add_argument("--calibration", help="also write the monoline calibration's records here (not shipped)")
     args = parser.parse_args()
     with io.open(args.inventory, encoding="utf-8") as handle:
         data = json.load(handle)
@@ -490,16 +645,20 @@ def main():
     GROUP_CODES["lookalikes"] = [code for code, e in sorted(inventory.items())
                                  if e["group"] == "lookalikes" and e["confidence"] == A]
     GROUP_CODES["fractions"] = [code for code, e in sorted(inventory.items()) if e["group"] == "fractions"]
+    GROUP_CODES["turned"] = [code for code, e in sorted(inventory.items()) if e["group"] == "turned"]
     for key, count in EXPECTED.items():
         assert len(GROUP_CODES[key]) == count, (key, len(GROUP_CODES[key]))
     recipes = {}
     for made in (spaces(), dashes(), duplicates(inventory), punctuation(), lookalikes(inventory), ligatures(inventory),
-                 fractions(inventory), arrows()):
+                 fractions(inventory), arrows(), turned(inventory)):
         recipes.update(made)
     every = [code for key, _, _ in GROUPS for code in GROUP_CODES[key]]
     assert sorted(recipes) == sorted(every), set(recipes) ^ set(every)
     names = glyphs_names(args.glyphs_info, set(every))
     layout, families = survey(args.corpus, args.limit)
+    if args.calibration:
+        with io.open(args.calibration, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(CALIBRATION))
     groups, entries = [], []
     for key, title, _ in GROUPS:
         groups.append({"id": key, "title": title, "count": len(GROUP_CODES[key])})
@@ -526,7 +685,7 @@ def main():
                          "hair": u"1/11 em (the corpus's median 0.090 em)",
                          "en_dash": u"the corpus's median en dash, 0.528 em (507 families)",
                          "em_dash": u"the corpus's median em dash, 0.862 em (507 families)"},
-        "rules": rules(layout),
+        "rules": rules(layout, CALIBRATION),
         "layout": layout,
         "groups": groups,
         "entries": entries,

@@ -4416,6 +4416,920 @@
      "pair": "2197"
     }
    ]
+  },
+  {
+   "code": "0186",
+   "deriving": 25,
+   "families": 64,
+   "glyph_name": "Oopen",
+   "group": "turned",
+   "most": [
+    "drawn",
+    28
+   ],
+   "research_confidence": "starting point",
+   "unicode_name": "LATIN CAPITAL LETTER OPEN O",
+   "ways": [
+    {
+     "check": "mirror",
+     "confidence": "starting point",
+     "of": "0043",
+     "op": "mirror"
+    }
+   ]
+  },
+  {
+   "code": "018E",
+   "deriving": 38,
+   "families": 58,
+   "glyph_name": "Eturned",
+   "group": "turned",
+   "most": [
+    "outlines: U+0045(mirrored)",
+    26
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN CAPITAL LETTER REVERSED E",
+   "ways": [
+    {
+     "check": "mirror",
+     "confidence": "starting point",
+     "of": "0045",
+     "op": "mirror"
+    }
+   ]
+  },
+  {
+   "code": "019C",
+   "deriving": 2,
+   "families": 40,
+   "glyph_name": "Mturned",
+   "group": "turned",
+   "most": [
+    "drawn",
+    37
+   ],
+   "research_confidence": "starting point",
+   "unicode_name": "LATIN CAPITAL LETTER TURNED M",
+   "ways": [
+    {
+     "about": "body",
+     "angle": 180,
+     "check": "turn",
+     "confidence": "starting point",
+     "of": "004D",
+     "op": "turn"
+    }
+   ]
+  },
+  {
+   "code": "01A7",
+   "deriving": 4,
+   "families": 31,
+   "glyph_name": "Tonetwo",
+   "group": "turned",
+   "most": [
+    "drawn",
+    21
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN CAPITAL LETTER TONE TWO",
+   "ways": [
+    {
+     "check": "mirror",
+     "confidence": "starting point",
+     "of": "0053",
+     "op": "mirror"
+    }
+   ]
+  },
+  {
+   "code": "01A8",
+   "deriving": 4,
+   "families": 31,
+   "glyph_name": "tonetwo",
+   "group": "turned",
+   "most": [
+    "drawn",
+    20
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN SMALL LETTER TONE TWO",
+   "ways": [
+    {
+     "check": "mirror",
+     "confidence": "starting point",
+     "of": "0073",
+     "op": "mirror"
+    }
+   ]
+  },
+  {
+   "code": "01B8",
+   "deriving": 11,
+   "families": 38,
+   "glyph_name": "Ezhreversed",
+   "group": "turned",
+   "most": [
+    "drawn",
+    24
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN CAPITAL LETTER EZH REVERSED",
+   "ways": [
+    {
+     "check": "mirror",
+     "confidence": "starting point",
+     "of": "01B7",
+     "op": "mirror"
+    }
+   ]
+  },
+  {
+   "code": "01B9",
+   "deriving": 9,
+   "families": 37,
+   "glyph_name": "ezhreversed",
+   "group": "turned",
+   "most": [
+    "drawn",
+    24
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN SMALL LETTER EZH REVERSED",
+   "ways": [
+    {
+     "check": "mirror",
+     "confidence": "starting point",
+     "of": "0292",
+     "op": "mirror"
+    }
+   ]
+  },
+  {
+   "code": "01DD",
+   "deriving": 40,
+   "families": 58,
+   "glyph_name": "eturned",
+   "group": "turned",
+   "most": [
+    "components: U+0259(copy)",
+    17
+   ],
+   "research_confidence": "starting point",
+   "unicode_name": "LATIN SMALL LETTER TURNED E",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "0259",
+     "op": "copy"
+    },
+    {
+     "about": "body",
+     "angle": 180,
+     "check": "turn",
+     "confidence": "starting point",
+     "of": "0065",
+     "op": "turn"
+    }
+   ]
+  },
+  {
+   "code": "0245",
+   "deriving": 34,
+   "families": 49,
+   "glyph_name": "Vturned",
+   "group": "turned",
+   "most": [
+    "components: U+039B(copy)",
+    12
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN CAPITAL LETTER TURNED V",
+   "ways": [
+    {
+     "confidence": "accepted",
+     "of": "039B",
+     "op": "copy"
+    },
+    {
+     "about": "body",
+     "angle": 180,
+     "check": "turn",
+     "confidence": "starting point",
+     "of": "0056",
+     "op": "turn"
+    }
+   ]
+  },
+  {
+   "code": "0250",
+   "deriving": 27,
+   "families": 60,
+   "glyph_name": "aturned",
+   "group": "turned",
+   "most": [
+    "drawn",
+    25
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN SMALL LETTER TURNED A",
+   "ways": [
+    {
+     "about": "body",
+     "angle": 180,
+     "check": "turn",
+     "confidence": "starting point",
+     "of": "0061",
+     "op": "turn"
+    }
+   ]
+  },
+  {
+   "code": "0252",
+   "deriving": 14,
+   "families": 47,
+   "glyph_name": "alphaturned-latin",
+   "group": "turned",
+   "most": [
+    "drawn",
+    19
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN SMALL LETTER TURNED ALPHA",
+   "ways": [
+    {
+     "about": "body",
+     "angle": 180,
+     "check": "turn",
+     "confidence": "starting point",
+     "of": "0251",
+     "op": "turn"
+    }
+   ]
+  },
+  {
+   "code": "0254",
+   "deriving": 27,
+   "families": 77,
+   "glyph_name": "oopen",
+   "group": "turned",
+   "most": [
+    "drawn",
+    29
+   ],
+   "research_confidence": "starting point",
+   "unicode_name": "LATIN SMALL LETTER OPEN O",
+   "ways": [
+    {
+     "check": "mirror",
+     "confidence": "starting point",
+     "of": "0063",
+     "op": "mirror"
+    }
+   ]
+  },
+  {
+   "code": "0258",
+   "deriving": 10,
+   "families": 52,
+   "glyph_name": "ereversed",
+   "group": "turned",
+   "most": [
+    "drawn",
+    36
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN SMALL LETTER REVERSED E",
+   "ways": [
+    {
+     "check": "mirror",
+     "confidence": "starting point",
+     "of": "0065",
+     "op": "mirror"
+    }
+   ]
+  },
+  {
+   "code": "0259",
+   "deriving": 74,
+   "families": 205,
+   "glyph_name": "schwa",
+   "group": "turned",
+   "most": [
+    "drawn",
+    96
+   ],
+   "research_confidence": "starting point",
+   "unicode_name": "LATIN SMALL LETTER SCHWA",
+   "ways": [
+    {
+     "about": "body",
+     "angle": 180,
+     "check": "turn",
+     "confidence": "starting point",
+     "of": "0065",
+     "op": "turn"
+    }
+   ]
+  },
+  {
+   "code": "025C",
+   "deriving": 19,
+   "families": 49,
+   "glyph_name": "eopenreversed",
+   "group": "turned",
+   "most": [
+    "drawn",
+    22
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN SMALL LETTER REVERSED OPEN E",
+   "ways": [
+    {
+     "check": "mirror",
+     "confidence": "starting point",
+     "of": "025B",
+     "op": "mirror"
+    }
+   ]
+  },
+  {
+   "code": "0265",
+   "deriving": 20,
+   "families": 58,
+   "glyph_name": "hturned",
+   "group": "turned",
+   "most": [
+    "drawn",
+    22
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN SMALL LETTER TURNED H",
+   "ways": [
+    {
+     "about": "body",
+     "angle": 180,
+     "check": "turn",
+     "confidence": "starting point",
+     "of": "0068",
+     "op": "turn"
+    }
+   ]
+  },
+  {
+   "code": "026F",
+   "deriving": 29,
+   "families": 58,
+   "glyph_name": "mturned",
+   "group": "turned",
+   "most": [
+    "drawn",
+    24
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN SMALL LETTER TURNED M",
+   "ways": [
+    {
+     "about": "body",
+     "angle": 180,
+     "check": "turn",
+     "confidence": "starting point",
+     "of": "006D",
+     "op": "turn"
+    }
+   ]
+  },
+  {
+   "code": "0279",
+   "deriving": 29,
+   "families": 49,
+   "glyph_name": "rturned",
+   "group": "turned",
+   "most": [
+    "outlines: U+0072(turned)",
+    23
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN SMALL LETTER TURNED R",
+   "ways": [
+    {
+     "about": "body",
+     "angle": 180,
+     "check": "turn",
+     "confidence": "starting point",
+     "of": "0072",
+     "op": "turn"
+    }
+   ]
+  },
+  {
+   "code": "0281",
+   "deriving": 14,
+   "families": 47,
+   "glyph_name": "Rsmallinverted",
+   "group": "turned",
+   "most": [
+    "drawn",
+    28
+   ],
+   "research_confidence": "starting point",
+   "unicode_name": "LATIN LETTER SMALL CAPITAL INVERTED R",
+   "ways": [
+    {
+     "axis": "y",
+     "check": "turn",
+     "confidence": "starting point",
+     "of": "0280",
+     "op": "mirror"
+    }
+   ]
+  },
+  {
+   "code": "0287",
+   "deriving": 27,
+   "families": 37,
+   "glyph_name": "tturned",
+   "group": "turned",
+   "most": [
+    "outlines: U+0074(turned)",
+    24
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN SMALL LETTER TURNED T",
+   "ways": [
+    {
+     "about": "body",
+     "angle": 180,
+     "check": "turn",
+     "confidence": "starting point",
+     "of": "0074",
+     "op": "turn"
+    }
+   ]
+  },
+  {
+   "code": "028C",
+   "deriving": 48,
+   "families": 66,
+   "glyph_name": "vturned",
+   "group": "turned",
+   "most": [
+    "outlines: U+0076(turned)",
+    31
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN SMALL LETTER TURNED V",
+   "ways": [
+    {
+     "about": "body",
+     "angle": 180,
+     "check": "turn",
+     "confidence": "starting point",
+     "of": "0076",
+     "op": "turn"
+    }
+   ]
+  },
+  {
+   "code": "028D",
+   "deriving": 37,
+   "families": 48,
+   "glyph_name": "wturned",
+   "group": "turned",
+   "most": [
+    "outlines: U+0077(turned)",
+    28
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN SMALL LETTER TURNED W",
+   "ways": [
+    {
+     "about": "body",
+     "angle": 180,
+     "check": "turn",
+     "confidence": "starting point",
+     "of": "0077",
+     "op": "turn"
+    }
+   ]
+  },
+  {
+   "code": "028E",
+   "deriving": 30,
+   "families": 53,
+   "glyph_name": "yturned",
+   "group": "turned",
+   "most": [
+    "outlines: U+0079(turned)",
+    24
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN SMALL LETTER TURNED Y",
+   "ways": [
+    {
+     "about": "body",
+     "angle": 180,
+     "check": "turn",
+     "confidence": "starting point",
+     "of": "0079",
+     "op": "turn"
+    }
+   ]
+  },
+  {
+   "code": "0295",
+   "deriving": 20,
+   "families": 62,
+   "glyph_name": "glottalstopreversed",
+   "group": "turned",
+   "most": [
+    "drawn",
+    24
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN LETTER PHARYNGEAL VOICED FRICATIVE",
+   "ways": [
+    {
+     "check": "mirror",
+     "confidence": "starting point",
+     "of": "0294",
+     "op": "mirror"
+    }
+   ]
+  },
+  {
+   "code": "029E",
+   "deriving": 19,
+   "families": 41,
+   "glyph_name": "kturned",
+   "group": "turned",
+   "most": [
+    "outlines: U+006B(turned)",
+    17
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN SMALL LETTER TURNED K",
+   "ways": [
+    {
+     "about": "body",
+     "angle": 180,
+     "check": "turn",
+     "confidence": "starting point",
+     "of": "006B",
+     "op": "turn"
+    }
+   ]
+  },
+  {
+   "code": "02C1",
+   "deriving": 20,
+   "families": 42,
+   "glyph_name": "glottalstopreversedmod",
+   "group": "turned",
+   "most": [
+    "drawn",
+    17
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "MODIFIER LETTER REVERSED GLOTTAL STOP",
+   "ways": [
+    {
+     "check": "mirror",
+     "confidence": "starting point",
+     "of": "02C0",
+     "op": "mirror"
+    }
+   ]
+  },
+  {
+   "code": "0418",
+   "deriving": 44,
+   "families": 248,
+   "glyph_name": "Ii-cy",
+   "group": "turned",
+   "most": [
+    "drawn",
+    157
+   ],
+   "research_confidence": "starting point",
+   "unicode_name": "CYRILLIC CAPITAL LETTER I",
+   "ways": [
+    {
+     "check": "mirror",
+     "confidence": "starting point",
+     "of": "004E",
+     "op": "mirror"
+    }
+   ]
+  },
+  {
+   "code": "042F",
+   "deriving": 29,
+   "families": 248,
+   "glyph_name": "Ya-cy",
+   "group": "turned",
+   "most": [
+    "drawn",
+    189
+   ],
+   "research_confidence": "starting point",
+   "unicode_name": "CYRILLIC CAPITAL LETTER YA",
+   "ways": [
+    {
+     "check": "mirror",
+     "confidence": "starting point",
+     "of": "0052",
+     "op": "mirror"
+    }
+   ]
+  },
+  {
+   "code": "1D09",
+   "deriving": 9,
+   "families": 15,
+   "glyph_name": "iTurned",
+   "group": "turned",
+   "most": [
+    "outlines: U+0069(turned)",
+    6
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN SMALL LETTER TURNED I",
+   "ways": [
+    {
+     "about": "body",
+     "angle": 180,
+     "check": "turn",
+     "confidence": "starting point",
+     "of": "0069",
+     "op": "turn"
+    }
+   ]
+  },
+  {
+   "code": "1D0E",
+   "deriving": 3,
+   "families": 18,
+   "glyph_name": "NreversedSmall",
+   "group": "turned",
+   "most": [
+    "drawn",
+    9
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN LETTER SMALL CAPITAL REVERSED N",
+   "ways": [
+    {
+     "check": "mirror",
+     "confidence": "starting point",
+     "of": "0274",
+     "op": "mirror"
+    }
+   ]
+  },
+  {
+   "code": "1D19",
+   "deriving": 1,
+   "families": 18,
+   "glyph_name": "RreversedSmall",
+   "group": "turned",
+   "most": [
+    "drawn",
+    15
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN LETTER SMALL CAPITAL REVERSED R",
+   "ways": [
+    {
+     "check": "mirror",
+     "confidence": "starting point",
+     "of": "0280",
+     "op": "mirror"
+    }
+   ]
+  },
+  {
+   "code": "1D1A",
+   "deriving": 2,
+   "families": 18,
+   "glyph_name": "RturnedSmall",
+   "group": "turned",
+   "most": [
+    "drawn",
+    15
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN LETTER SMALL CAPITAL TURNED R",
+   "ways": [
+    {
+     "about": "body",
+     "angle": 180,
+     "check": "turn",
+     "confidence": "starting point",
+     "of": "0280",
+     "op": "turn"
+    }
+   ]
+  },
+  {
+   "code": "2183",
+   "deriving": 9,
+   "families": 21,
+   "glyph_name": "Onehundredreversed-roman",
+   "group": "turned",
+   "most": [
+    "drawn",
+    9
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "ROMAN NUMERAL REVERSED ONE HUNDRED",
+   "ways": [
+    {
+     "check": "mirror",
+     "confidence": "starting point",
+     "of": "0043",
+     "op": "mirror"
+    }
+   ]
+  },
+  {
+   "code": "2184",
+   "deriving": 10,
+   "families": 25,
+   "glyph_name": "creversed",
+   "group": "turned",
+   "most": [
+    "drawn",
+    12
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN SMALL LETTER REVERSED C",
+   "ways": [
+    {
+     "check": "mirror",
+     "confidence": "starting point",
+     "of": "0063",
+     "op": "mirror"
+    }
+   ]
+  },
+  {
+   "code": "2C6F",
+   "deriving": 19,
+   "families": 22,
+   "glyph_name": "Aturned",
+   "group": "turned",
+   "most": [
+    "outlines: U+0041(turned)",
+    13
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN CAPITAL LETTER TURNED A",
+   "ways": [
+    {
+     "about": "body",
+     "angle": 180,
+     "check": "turn",
+     "confidence": "starting point",
+     "of": "0041",
+     "op": "turn"
+    }
+   ]
+  },
+  {
+   "code": "2C70",
+   "deriving": 8,
+   "families": 14,
+   "glyph_name": "Alphaturned-latin",
+   "group": "turned",
+   "most": [
+    "drawn",
+    6
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN CAPITAL LETTER TURNED ALPHA",
+   "ways": [
+    {
+     "about": "body",
+     "angle": 180,
+     "check": "turn",
+     "confidence": "starting point",
+     "of": "2C6D",
+     "op": "turn"
+    }
+   ]
+  },
+  {
+   "code": "A7B0",
+   "deriving": 12,
+   "families": 13,
+   "glyph_name": "Kturned",
+   "group": "turned",
+   "most": [
+    "outlines: U+004B(turned)",
+    9
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN CAPITAL LETTER TURNED K",
+   "ways": [
+    {
+     "about": "body",
+     "angle": 180,
+     "check": "turn",
+     "confidence": "starting point",
+     "of": "004B",
+     "op": "turn"
+    }
+   ]
+  },
+  {
+   "code": "A7B1",
+   "deriving": 13,
+   "families": 14,
+   "glyph_name": "Tturned",
+   "group": "turned",
+   "most": [
+    "outlines: U+0054(turned)",
+    7
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN CAPITAL LETTER TURNED T",
+   "ways": [
+    {
+     "about": "body",
+     "angle": 180,
+     "check": "turn",
+     "confidence": "starting point",
+     "of": "0054",
+     "op": "turn"
+    }
+   ]
+  },
+  {
+   "code": "A7FB",
+   "deriving": 12,
+   "families": 15,
+   "glyph_name": "Fepigraphicreversed",
+   "group": "turned",
+   "most": [
+    "outlines: U+0046(mirrored)",
+    9
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN EPIGRAPHIC LETTER REVERSED F",
+   "ways": [
+    {
+     "check": "mirror",
+     "confidence": "starting point",
+     "of": "0046",
+     "op": "mirror"
+    }
+   ]
+  },
+  {
+   "code": "A7FC",
+   "deriving": 3,
+   "families": 15,
+   "glyph_name": "Pepigraphicreversed",
+   "group": "turned",
+   "most": [
+    "drawn",
+    12
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN EPIGRAPHIC LETTER REVERSED P",
+   "ways": [
+    {
+     "check": "mirror",
+     "confidence": "starting point",
+     "of": "0070",
+     "op": "mirror"
+    }
+   ]
+  },
+  {
+   "code": "A7FD",
+   "deriving": 11,
+   "families": 15,
+   "glyph_name": "Mepigraphicinverted",
+   "group": "turned",
+   "most": [
+    "outlines: U+004D(flipped)",
+    6
+   ],
+   "research_confidence": "accepted",
+   "unicode_name": "LATIN EPIGRAPHIC LETTER INVERTED M",
+   "ways": [
+    {
+     "about": "body",
+     "angle": 180,
+     "check": "turn",
+     "confidence": "starting point",
+     "of": "004D",
+     "op": "turn"
+    }
+   ]
   }
  ],
  "format": 1,
@@ -4459,6 +5373,11 @@
    "count": 16,
    "id": "arrows",
    "title": "Arrows and triangles"
+  },
+  {
+   "count": 41,
+   "id": "turned",
+   "title": "Turned and reversed letters"
   }
  ],
  "layout": {
@@ -5287,6 +6206,26 @@
    }
   },
   "middle_dot": 0.62,
+  "monoline": {
+   "mirror": {
+    "base": 0.333,
+    "contrast": 1.1,
+    "families": 462,
+    "finds": 0.396,
+    "right": 0.726,
+    "serif": 0.03,
+    "stress": 0.03
+   },
+   "turn": {
+    "base": 0.75,
+    "contrast": 2.0,
+    "families": 196,
+    "finds": 0.735,
+    "right": 0.85,
+    "serif": 0.1,
+    "stress": 0.1
+   }
+  },
   "rows": {
    "00AB": -0.0288,
    "0149": -0.029,

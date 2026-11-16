@@ -2429,6 +2429,44 @@ class TrainTests(unittest.TestCase):
         self.assertIn(0x1D100, codes, "Musical Symbols: a block of 225")
 
 
+class SpaceTests(unittest.TestCase):
+    """The spaces typesetting needs: the no-break spaces as high-value rows where a language the font covers
+    groups its numbers with one (CLDR), the others in a note; and Glyph Compose builds them."""
+
+    def coverage(self, iso, name, level):
+        one = fc.Language(iso, name, u"", u"Latin", u"living", u"verified", 1000, [u"a"], [], u"")
+        return fc.Coverage(one, [] if level == "covered" else [u"b"], [], [], [], [], level)
+
+    def test_french_needs_the_narrow_no_break_space(self):
+        conventions = fc.space_conventions()
+        self.assertIn(u"fra", conventions[0x202F], "CLDR: French groups thousands with U+202F")
+        self.assertIn(u"rus", conventions[0x00A0])
+        results = [self.coverage(u"fra", u"French", "covered"), self.coverage(u"rus", u"Russian", "nearly"),
+                   self.coverage(u"eng", u"English", "covered"), self.coverage(u"pol", u"Polish", "missed")]
+        rows = fc.space_rows(results, lambda code: False, conventions)
+        self.assertEqual([(r.items, [c.language.name for c in r.needing]) for r in rows],
+                         [([u"\u00a0"], [u"Russian"]), ([u"\u202f"], [u"French"])],
+                         "covered or within reach, never a language the font misses")
+        self.assertTrue(all(r.spacing and not r.completing for r in rows))
+        self.assertEqual(fc.space_rows(results, lambda code: True, conventions), [], "none the font has")
+        self.assertIn(u"Typesetting: these languages group the thousands", fc.row_tip(rows[1]))
+
+    def test_the_other_spaces_in_a_note(self):
+        has = lambda code: code in (0x2002, 0x2003, 0x2007, 0x2009)
+        self.assertEqual(fc.spaces_note(has, listed=[0x202F]),
+                         u"The font lacks these spaces: no-break (U+00A0), hair (U+200A). <i>Glyph Compose</i> builds "
+                         u"them on its Glyph generation tab (empty glyphs of the right width).")
+        self.assertEqual(fc.spaces_note(lambda code: code != 0x2009),
+                         u"The font lacks this space: thin (U+2009). <i>Glyph Compose</i> builds it on its Glyph "
+                         u"generation tab (empty glyphs of the right width).")
+        self.assertEqual(fc.spaces_note(lambda code: True), u"")
+
+    def test_a_row_glyph_generation_builds_says_so(self):
+        row = fc.AddRow([u"\u02bc"], [], [])
+        self.assertIn(u"its Glyph generation tab", fc.row_tip(row, True, True))
+        self.assertIn(u"from the font's letters and marks", fc.row_tip(row, True, False))
+
+
 class TipTests(unittest.TestCase):
     """Tooltips wrap: the owner's screen showed one a few thousand pixels wide (a tree row's plain
     text is laid out on one line). Each goes out as rich text, in a width when it needs one."""

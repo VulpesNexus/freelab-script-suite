@@ -1,6 +1,6 @@
 # Glyph Compose
 
-*Scripts > FreeLab > Glyph Compose* builds the glyphs a font lacks from the glyphs it has, on two tabs. *Diacritics* builds the letters with diacritics and places the anchors of scripts whose marks attach (below). *Glyph generation* builds spaces, hyphens and dashes, duplicates, punctuation, Greek and Cyrillic look-alikes, ligature letters, vulgar fractions, and arrows ([Glyph generation](#glyph-generation)). Nothing is made until you click a tab's *Build* button, and each build is one step of *Edit > Undo*.
+*Scripts > FreeLab > Glyph Compose* builds the glyphs a font lacks from the glyphs it has, on two tabs. *Diacritics* builds the letters with diacritics and places the anchors of scripts whose marks attach (below). *Glyph generation* builds spaces, hyphens and dashes, duplicates, punctuation, Greek and Cyrillic look-alikes, ligature letters, vulgar fractions, arrows, and turned and reversed letters ([Glyph generation](#glyph-generation)). Nothing is made until you click a tab's *Build* button, and each build is one step of *Edit > Undo*.
 
 It was called Diacritics until 2026-11-16, and Accented Glyphs before that (not every diacritic is an accent: a cedilla, an ogonek, a hook, a breathing). The rename keeps what Diacritics saved: its reference font and *Compact diacritics to fit the line* are read once from *diacritics.json* into *glyph_compose.json* (FreeLab's state folder), the mark features it wrote are still FreeLab's (their opening line, *made by FreeLab Diacritics*, is read as its own and replaced by the next write), and the installer removes the old *freelab_diacritics.py*.
 
@@ -170,7 +170,7 @@ The *Glyph generation* tab lists the characters of its scope the font lacks, in 
 
 ### What it builds
 
-The first scope is 205 characters, every one built by a recipe the research found exact or accepted:
+The first scope is 205 characters, every one built by a recipe the research found exact or accepted; the turned and reversed letters followed (41):
 
 - **Spaces** (18): the no-break space (the space's width), the en and em quads and spaces, the three-, four-, and six-per-em spaces, the figure space (a tabular figure's width: the zero's *.tf*, *.tosf*, or *.tnum* form, else the zero, read through Feature Code's figure forms), the punctuation space (the period's width), the thin space and the narrow no-break space (1/6 em), the hair space (1/11 em), the medium mathematical space (4/18 em), the zero-width space, word joiner, and zero-width no-break space, and, in a font with kana, hangul, or ideographs, the ideographic space (1 em). Each is an empty glyph of that advance.
 - **Hyphens and dashes** (10): the soft hyphen, hyphen, and non-breaking hyphen (the hyphen as a component), the figure dash (a tabular figure's width), the en dash (52.8% of the em) and em dash (86.2%), the horizontal bar (the em dash as a component), the minus, and the two- and three-em dashes (twice and three times the font's em dash).
@@ -180,17 +180,28 @@ The first scope is 205 characters, every one built by a recipe the research foun
 - **Ligature letters** (17): *Ĳ ĳ*, *Ǆ* to *ǌ*, *Ǳ* to *ǳ*, *ŉ*, *Ŀ ŀ*. *Ǆ ǅ ǆ* need *Ž ž*: the *Diacritics* tab builds them first.
 - **Vulgar fractions** (20): Feature Code's numerators (*.numr*) and denominators (*.dnom*) about the fraction slash. Where the font has no numerators or denominators, the row says to build them first (*Feature Code*, *Forms* tab); Glyph Compose makes no figure forms of its own.
 - **Arrows and triangles** (16): *← ↑ ↓* from *→*, *⇐ ⇑ ⇓* from *⇒*, *↖ ↗ ↘ ↙* from *→* at 45° steps, *▲ ▼ ◀ △ ▽ ◁* from *▶ ▷*.
+- **Turned and reversed letters** (41, starting points): *Я И Ǝ ɘ Ɔ ɔ Ↄ ↄ ᴙ Ƨ ƨ ꟻ ꟼ* and the like mirrored, *Ɐ ɐ ə ɥ ɯ ɹ ʇ ʌ ʍ ʎ ʞ Ʞ Ʇ* and the like turned a half turn about the middle of their body (a capital's cap height, a lowercase's x-height: *ʎ*'s tail comes up as an ascender), *ʁ* flipped upside down; *Ʌ* and *ǝ* copy *Λ* and *ə* first, as most of the corpus does. Each is a starting point, unless the font's design measures monoline (below): the row then says *likely usable as it is*.
 
 The confidence column says *exact* (no design in it: a width, a second code point), *accepted* (how most fonts that have the character build it), or *starting point* (a draft to draw over; none in the first scope, and a row whose recipe is one says so in plain words, so that nobody takes it for a finished glyph).
 
 A recipe may use a glyph the same list builds: *“* is two *‘*, *‘* the turned *’*. The list builds such glyphs first and the row says so (*made of quoteleft, built here first*); a checked row whose glyph of the list is left unchecked is not built, and the log says to check both. Nothing the font has is replaced unless *Also list existing glyphs* is ticked and its row checked (the row says *replaces the font's own glyph*); an existing duplicate is rebuilt as a component of its source, since its own glyph cannot hand its code point on.
+
+### Monoline: when a turned or reversed letter is likely usable
+
+A mirror of *R* is a fair *Я* only where mirroring changes nothing a reader sees. In a design with stroke contrast, *N*'s thick diagonal comes out on *И*'s thin side; an *O* whose stress leans left leans right once mirrored; and a serif on one side of a stem moves to the other. A half turn keeps contrast and stress as they are, and only uneven serifs count against it. The tab measures, in each master:
+
+- **Contrast**: *O*'s sides at mid-height over its top and bottom at mid-width (1 for a monoline *O*), else *o*'s.
+- **Stress**: how much *O*'s left and right sides differ a quarter up and a quarter down, as a share of their mean (0 for an upright stress).
+- **Serifs**: how unevenly *I*'s foot and head reach out on either side of its stem, as a share of the stem (0 for none, or serifs alike), else *l*'s.
+
+The thresholds come from the corpus (*compose/train/generation.py*): for each family, how much of its drawn *Я* and *И* the mirrored *R* and *N* cover alike (intersection over union, its ink centered; 0.9 counts as the same), and of its *ə* a turned *e*, against the three measures. *Likely usable* must be right for at least 70% of the families so measured, and 10 points more often than for any family; within that, the thresholds that find the most. For a mirror: contrast at most 1.10, stress and serifs at most 0.03, right for 73% of 462 letters (where 33% of all are), finding 40% of those drawn as the recipe makes them. For a half turn, contrast hardly matters (it keeps contrast as it is): contrast at most 2.0 and serifs at most 0.1, right for 85% of 196 families (75% of all), finding 74%. Stems' terminals are not measured. Rows so labeled stay unchecked, as every starting point does: the label says where to look first, not that nobody needs to.
 
 ### How each is made
 
 - **Width**: an empty glyph of a set advance in each master.
 - **Second code point**: the code point added to the source glyph's own (`fgGlyph.unicodes`), FontLab's lookups rebuilt (`rebuildMaps()`), and read back; where FontLab does not keep it, the code point is taken back and the log says so. The glyph is recorded with the font before the write, so that *Undo* takes the code point back (live, 2026-11-16: recorded with the font alone, *Undo* moved the History and left the code point).
 - **Component**, **move**: one component, as is or raised (the middle dot's center at 62% of the x-height, the corpus's median over 495 families; the research's "middle of the x-height" is lower than most fonts set it).
-- **Turn**: a component turned by any angle about the ink's center. A half turn keeps the advance and swaps the sidebearings (as the corpus's turned quotes: 517 families, no shift); *¡* and *¿* are then set with their top at the x-height, 0.01 em above it (494 families, quartiles 0 and 0.03 em: a much tighter rule than a fixed drop of the turned mark, whose quartiles span 0.06 em). A quarter or eighth turn takes the source's sidebearings times the corpus's factor for that kind (1.45 for vertical arrows, 2.06 for diagonal ones, 0.78 for triangles). Quotes are turned, never mirrored.
+- **Turn**: a component turned by any angle about the ink's center (a turned letter's about the middle of its body). A half turn keeps the advance and swaps the sidebearings (as the corpus's turned quotes: 517 families, no shift); *¡* and *¿* are then set with their top at the x-height, 0.01 em above it (494 families, quartiles 0 and 0.03 em: a much tighter rule than a fixed drop of the turned mark, whose quartiles span 0.06 em). A quarter or eighth turn takes the source's sidebearings times the corpus's factor for that kind (1.45 for vertical arrows, 2.06 for diagonal ones, 0.78 for triangles). Quotes are turned, never mirrored.
 - **Mirror**: left to right. A glyph of outlines is mirrored into the new glyph with its contours set right (the *Diacritics* tab's corrected-glyph machinery, `make_corrected`); where the source is made of components, each part points to its corrected glyph (*comma.mirrored*), made once and used by every glyph that needs it, as the *Diacritics* tab does for mirrored marks. A turned component reverses nothing and needs neither.
 - **Row**: components side by side, the first part's left sidebearing and the last part's right one kept. Between them, the corpus's gap: the ellipsis's periods and the digraphs' letters stand at their own advances (the gap between their inks is their inner sidebearings, 0.96 and 1.0 times, medians); double quotes stand 0.035 em apart (517 families), the low double quote 0.033 em, guillemets overlap by 0.029 em, *‼* 0.125 em, *⁇* 0.043 em, *⁈* and *⁉* 0.09 em, double primes 0.031 em. *Ŀ* and *ŀ* place their dot as the corpus's composites do (96 and 102 families): its left 0.193 em inside *L*'s advance at 51% of the cap height, 0.019 em inside *l*'s at 68% of the x-height.
 - **Stretch**: a dash drawn longer, not scaled: the nodes right of the hyphen's middle move right, so the dash keeps its thickness and its ends (rounded or angled), and its sidebearings stay the hyphen's. The en and em dashes take their width from the two settings (the corpus's medians, 507 families each); the figure dash a tabular figure's; the two- and three-em dashes twice and three times the em dash (the font's own where it has one, its ends kept).
@@ -202,6 +213,10 @@ Every glyph is built in every master, each measured on its own; a master where a
 ### Settings
 
 Beside *Also list existing glyphs*: *Thin space 1/6 em*, *Hair space 1/11 em*, *En dash 52.8% of the em*, and *Em dash 86.2% of the em*, kept in *glyph_compose.json* under *generation*. Unicode gives the thin space as 1/5 or 1/6 em and the corpus's median is 0.158 em; the hair space's median is 0.090 em. *Restore suggestions* puts the checks and the four settings back.
+
+### From Font Check
+
+Font Check's *Build with Glyph Compose* hands over the checked glyphs that either tab can build: a character that decomposes into a letter and marks goes to the *Diacritics* tab (its *Character set* then reads *From Font Check*), another of Glyph generation's table to that tab, whose *List* chooser reads *From Font Check (N glyphs)* (or *Every group*), those rows alone and checked. The window opens on the tab with more, and its log says what the other holds: two tabs, each with its own list and build, are clearer than one list mixing two kinds of recipe. Font Check counts as buildable what the Diacritics tab can build and what Glyph generation can build that is not a draft (a starting point counts only where it is likely usable), and each row's tooltip says which tab builds it.
 
 ### The data
 
@@ -232,4 +247,4 @@ Not yet run live: the export of the empty glyphs. Every glyph Python makes for a
 
 ### Next
 
-The research's next scope, with new machinery (stroke-compensated scaling for letters, condensing, enclosures, square layouts, centering in the em): superscript and subscript signs and letters, *™ ℠ ℡ ℅ ℆ № ℃ ℉ ‰*, Roman numerals, circled and parenthesized figures and letters, Latin unit squares (*㎞*), and full-width forms. Then, as starting points only: small capitals, turned letters, letters with bars, small kana, half-width forms, and squared katakana.
+The research's next scope, with new machinery (stroke-compensated scaling for letters, condensing, enclosures, square layouts, centering in the em): superscript and subscript signs and letters, *™ ℠ ℡ ℅ ℆ № ℃ ℉ ‰*, Roman numerals, circled and parenthesized figures and letters, Latin unit squares (*㎞*), and full-width forms. Then, as starting points only: small capitals, letters with bars, small kana, half-width forms, and squared katakana.

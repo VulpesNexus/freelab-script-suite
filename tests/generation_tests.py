@@ -79,6 +79,13 @@ class FakeFont(gg.Font):
                 return name
         return None
 
+    def polygons(self, name, matrix=gg.IDENTITY):
+        code, advance, contours, components = self.glyphs[name]
+        found = [[gg.mapped(matrix, x, y) for x, y in contour] for contour in contours or []]
+        for inner, values in components or []:
+            found.extend(self.polygons(inner, gg.compose(matrix, values)))
+        return found
+
     def points(self, name, matrix=gg.IDENTITY):
         code, advance, contours, components = self.glyphs[name]
         found = []
@@ -119,11 +126,14 @@ def plan(font=None, existing=False, settings=None):
 class TableTests(unittest.TestCase):
     def test_first_scope(self):
         entries = DATA["entries"]
-        self.assertEqual(len(entries), 205)
+        self.assertEqual(len(entries), 246)
         counts = dict((g["id"], g["count"]) for g in DATA["groups"])
         self.assertEqual(counts, {"spaces": 18, "dashes": 10, "duplicates": 44, "punctuation": 28, "lookalikes": 52,
-                                  "ligatures": 17, "fractions": 20, "arrows": 16})
-        self.assertEqual(len(set(e["code"] for e in entries)), 205, "each character once")
+                                  "ligatures": 17, "fractions": 20, "arrows": 16, "turned": 41})
+        self.assertEqual(len(set(e["code"] for e in entries)), 246, "each character once")
+        turned = [e for e in entries if e["group"] == "turned"]
+        self.assertTrue(all(any(w["confidence"] == "starting point" for w in e["ways"]) for e in turned),
+                        "the turned and reversed letters are starting points")
         ops = set(name[3:] for name in dir(gg.Planner) if name.startswith("op_"))
         for e in entries:
             self.assertTrue(e["ways"], e["code"])
@@ -384,6 +394,106 @@ class ArrowTests(unittest.TestCase):
         self.assertLess(diagonal[2] - diagonal[0], right[2] - right[0], "45 degrees: narrower than the arrow")
         self.assertEqual(rows[u(0x25C0)].layout.advance, 700)
         self.assertEqual(rows[u(0x25B3)].layout.parts[0].name, "uni25B7")
+
+
+def frame(x0, y0, x1, y1, side, cap):
+    """An O of four strokes: sides side thick, top and bottom cap thick (its counter a hole)."""
+    return [rect(x0, y0, x1, y1), rect(x0 + side, y0 + cap, x1 - side, y1 - cap)]
+
+
+TURNABLE = dict(BARE, **{
+    "h": (0x68, 560, [rect(80, 0, 160, 740), rect(80, 420, 480, 500), rect(400, 0, 480, 500)], None),
+    "R": (0x52, 640, [rect(90, 0, 590, 700)], None), "N": (0x4E, 700, [rect(80, 0, 620, 700)], None),
+    "Rsmall": (0x0280, 520, [rect(60, 0, 460, 500)], None)})
+
+
+class TurnedTests(unittest.TestCase):
+    def font(self, side, cap, serif=0):
+        glyphs = dict(TURNABLE, O=(0x4F, 720, frame(40, -10, 680, 710, side, cap), None))
+        if serif:  # (a foot reaching out on one side only)
+            glyphs["I"] = (0x49, 280, [rect(90, 0, 190, 700), rect(90 - serif, 0, 190, 20)], None)
+        return FakeFont(glyphs)
+
+    def test_a_turned_letter_turns_about_its_body(self):
+        planner, rows = plan(self.font(80, 80))
+        box = planner.part_box(rows[u(0x0265)].layout.parts[0])
+        self.assertEqual((box[1], box[3]), (-240, 500), "h's ascender comes down as a descender, about x-height/2")
+        self.assertEqual(rows[u(0x0265)].layout.advance, 560)
+        cap = planner.part_box(rows[u(0x2C6F)].layout.parts[0])
+        self.assertEqual((cap[1], cap[3]), (0, 700), "a capital about half its cap height")
+        flipped = rows[u(0x0281)].layout
+        self.assertEqual((flipped.axis, planner.part_box(flipped.parts[0])), ("y", (60, 0, 460, 500)), "upside down")
+        self.assertEqual(rows[u(0x042F)].way["op"], "mirror")
+
+    def test_monoline_measures(self):
+        self.assertAlmostEqual(gg.round_measures(frame(40, -10, 680, 710, 80, 80))[0], 1.0)
+        self.assertAlmostEqual(gg.round_measures(frame(40, -10, 680, 710, 120, 30))[0], 4.0)
+        self.assertEqual(gg.round_measures(frame(40, -10, 680, 710, 80, 80))[1], 0.0, "upright stress")
+        self.assertEqual(gg.serif_measure([rect(90, 0, 190, 700)]), 0.0)
+        self.assertAlmostEqual(gg.serif_measure([rect(90, 0, 190, 700), rect(40, 0, 190, 20)]), 0.5)
+        self.assertIsNone(gg.round_measures([rect(0, 0, 10, 10)]), "no counter: nothing to read")
+
+    def test_a_monoline_design_is_likely_usable_as_it_is(self):
+        mono = plan(self.font(80, 80))[1]
+        self.assertEqual(gg.confidence_text(mono[u(0x042F)]), gg.LIKELY)
+        self.assertNotIn(gg.DRAFT_NOTE, gg.note_text(mono[u(0x042F)]))
+        contrast = plan(self.font(90, 50))[1]  # (contrast 1.8: past a mirror's threshold, within a half turn's)
+        self.assertEqual(gg.confidence_text(contrast[u(0x042F)]), u"starting point", "a mirror in a contrast design")
+        self.assertIn(gg.DRAFT_NOTE, gg.note_text(contrast[u(0x042F)]))
+        self.assertEqual(gg.confidence_text(contrast[u(0x0265)]), gg.LIKELY, "a half turn keeps contrast as it is")
+        serifs = plan(self.font(80, 80, serif=60))[1]
+        self.assertEqual(gg.confidence_text(serifs[u(0x0265)]), u"starting point", "a foot on one side only")
+        self.assertEqual(gg.confidence_text(serifs[u(0x042F)]), u"starting point")
+
+    def test_the_corpus_thresholds(self):
+        rules = DATA["rules"]["monoline"]
+        self.assertLessEqual(rules["mirror"]["contrast"], 1.2, "a mirror wants a monoline design")
+        for kind in ("mirror", "turn"):
+            self.assertGreaterEqual(rules[kind]["right"], 0.7)
+            self.assertGreater(rules[kind]["right"], rules[kind]["base"], "better than saying it of every family")
+
+
+class HandOverTests(unittest.TestCase):
+    """Font Check's hand-over: letters with diacritics to the Diacritics tab, the rest of the table to Glyph
+    generation, which lists them alone at first."""
+
+    def test_split_between_the_tabs(self):
+        sys.modules.pop("freelab_glyph_compose", None)
+        import freelab_glyph_compose as cm
+        table = set(gg.unichr_(int(e["code"], 16)) for e in DATA["entries"])
+        letters, others = cm.handed_over([u(0x1EBD), u(0x02BC), u(0x2013), u(0x1F71), u(0x0101), u(0x00A0)], table)
+        self.assertEqual(others, [u(0x02BC), u(0x2013), u(0x00A0)])
+        self.assertEqual(letters, [u(0x1EBD), u(0x1F71), u(0x0101)], "a letter with an oxia is the Diacritics tab's")
+
+    def test_the_log_says_what_each_tab_holds(self):
+        sys.modules.pop("freelab_glyph_compose", None)
+        import freelab_glyph_compose as cm
+        lines = []
+        dialog = cm.AccentsDialog.__new__(cm.AccentsDialog)
+        dialog.ak = Stub(b=lambda text: u"%s" % text)
+        dialog.log = Stub(add=lambda text, kind="info": lines.append(text))
+        for letters, others in ((2, 2), (3, 1), (1, 2), (0, 1)):
+            dialog.given, dialog.generation_given = [u"a"] * letters, [u"-"] * others
+            dialog.say_handed_over()
+        self.assertEqual(lines, [
+            u"From Font Check: 2 letters with diacritics on the <i>Diacritics</i> tab and 2 other glyphs on <i>Glyph "
+            u"generation</i> (shown first: <i>Glyph generation</i>, as many on each).",
+            u"From Font Check: 3 letters with diacritics on the <i>Diacritics</i> tab and 1 other glyph on <i>Glyph "
+            u"generation</i> (shown first: <i>Diacritics</i>, the tab with more).",
+            u"From Font Check: 1 letter with diacritics on the <i>Diacritics</i> tab and 2 other glyphs on <i>Glyph "
+            u"generation</i> (shown first: <i>Glyph generation</i>, the tab with more).",
+            u"From Font Check: 1 other glyph, on <i>Glyph generation</i>."])
+
+    def test_the_list_holds_what_was_handed_over(self):
+        page = gg.GenerationPage.__new__(gg.GenerationPage)
+        page.given, page.list_box = [u(0x02BC), u(0x2013)], Stub(currentIndex=0)
+        self.assertEqual(page.listed_codes(), set(["02BC", "2013"]))
+        planner = gg.Planner(DATA, FakeFont(), None, False, page.listed_codes())
+        self.assertEqual(sorted(r.hex for r in planner.plan()), ["02BC", "2013"])
+        page.list_box = Stub(currentIndex=1)
+        self.assertIsNone(page.listed_codes(), "Every group")
+        page.given = []
+        self.assertIsNone(page.listed_codes())
 
 
 class TextTests(unittest.TestCase):

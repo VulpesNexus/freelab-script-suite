@@ -39,6 +39,7 @@ PY27_FILES = (
     "checks/character_sets.json", "checks/character_sets_LICENSE", "checks/coverage_gaps.json",
     "checks/language_families.json", "checks/language_families_LICENSE",
     "checks/language_orthographies.json", "checks/language_orthographies_LICENSE", "checks/font_characters.json",
+    "checks/space_conventions.json",
     "compare/freelab_font_compare.py", "tests/compare_tests.py", "proof/freelab_proof.py", "tests/proof_tests.py",
     "windows/freelab_tabs.py", "tests/tabs_tests.py",
     "features/freelab_alternates.py", "features/alternates_model.json", "tests/alternates_tests.py",

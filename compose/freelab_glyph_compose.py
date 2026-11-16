@@ -3624,7 +3624,8 @@ def component_parts(layer):
 HELP = u"""<b>FreeLab Glyph Compose</b><br>
 Builds the glyphs this font lacks from the glyphs it has. Two tabs: <i>Diacritics</i> (the letters with
 diacritics, and the anchors of scripts whose marks attach) and <i>Glyph generation</i> (spaces, dashes,
-punctuation, look-alike letters, ligature letters, fractions, and arrows). Nothing is made until you click a
+punctuation, look-alike letters, ligature letters, fractions, arrows, and turned and reversed letters). Nothing
+is made until you click a
 tab's <i>Build</i> button.<br><br>
 <b>Diacritics</b> builds the letters with diacritics this font lacks (Latin, Greek, Cyrillic, and the voiced
 kana) from its letters and marks, as glyphs of components, placing each diacritic as the font's own accented
@@ -3663,7 +3664,8 @@ glyphs of the font have.<br>
 move by as much in every master.<br><br>
 <b>Glyph generation</b> lists the characters the font lacks that it can make of glyphs it has: each with
 its recipe, a picture, and how sure the recipe is (<i>exact</i>: no design in it; <i>accepted</i>: how
-fonts commonly build it; <i>starting point</i>: a draft to draw over, never a finished glyph). Checked
+fonts commonly build it; <i>starting point</i>: a draft to draw over, never a finished glyph; <i>likely usable
+as it is</i>: a turned or reversed letter of a monoline design). Checked
 rows are built in every master as one step of the History.<br><br>
 Click this help's <i>?</i> button, then any control, for what it does."""
 
@@ -3676,10 +3678,10 @@ TOP_TABS = (u"Diacritics", u"Glyph generation")
 TOP_TABS_HELP = (u"<i>Diacritics</i> builds the letters with diacritics the font lacks, and places the anchors of "
                  u"scripts whose marks attach. <i>Glyph generation</i> builds other glyphs the font lacks from the "
                  u"glyphs it has: spaces, dashes, punctuation, look-alike letters, ligature letters, fractions, "
-                 u"and arrows.")
+                 u"arrows, and turned and reversed letters.")
 TOP_TAB_HELPS = (u"Letters with diacritics, and mark anchors.",
-                 u"Spaces, dashes, punctuation, look-alike letters, ligature letters, fractions, and arrows, made of "
-                 u"the glyphs the font has.")
+                 u"Spaces, dashes, punctuation, look-alike letters, ligature letters, fractions, arrows, and turned "
+                 u"and reversed letters, made of the glyphs the font has.")
 GENERATION_FILE, GENERATION_MODULE = "freelab_glyph_generation.py", "freelab_glyph_generation"  # (its tab)
 TABS_HELP = (u"<i>Letters with diacritics</i> builds the letters the font lacks from its letters and marks. "
              u"<i>Mark anchors</i> places anchors, and writes the mark features, for scripts whose marks are "
@@ -5574,8 +5576,11 @@ class AccentsDialog(object):
         QtCore, QtGui = _qt()
         import fontlab
         self.fontlab = fontlab
-        self.given = [c for c in (characters or []) if c]
         ak = self.ak = load_auto_kerning()
+        # What Font Check hands over: letters with diacritics for the Diacritics tab, the characters of
+        # Glyph generation's table for that tab (handed_over)
+        self.given, self.generation_given = handed_over([c for c in (characters or []) if c],
+                                                        generation_table(ak))
         main = ak.AutoKerningDialog.main_window()
         dialog = self.dialog = QtGui.QDialog(main) if main is not None else QtGui.QDialog()
         dialog.setWindowTitle("FreeLab Glyph Compose")
@@ -5893,6 +5898,10 @@ class AccentsDialog(object):
                                       if self.anchors.selected() is not None else [], self.anchors.row_names)]
         self.show_preview_parts(None)  # (nothing listed yet, nothing selected: nothing shown empty)
         self.update_buttons()
+        if self.generation_given:  # (Font Check handed over glyphs Glyph generation builds)
+            self.say_handed_over()
+            if len(self.generation_given) >= len(self.given):
+                self.top_tabs.setCurrentIndex(1)  # (the tab with more: switch_top_page makes it)
 
     # -- what both tabs share: a search field, the reference font's chooser, the font's limits --------
 
@@ -7045,6 +7054,20 @@ class AccentsDialog(object):
     def in_font(self, r):
         glyph = self.package.findName(r.name) if self.package is not None and r.name else None
         return glyph is not None and not is_empty(glyph)
+
+    def say_handed_over(self):
+        """The log's line on what Font Check handed over to each tab, when it handed over to both, or to
+        Glyph generation alone."""
+        b = self.ak.b
+        others = counted(len(self.generation_given), u"other glyph")
+        if self.given:
+            letters = counted(len(self.given), u"letter with diacritics", u"letters with diacritics")
+            here = u"Glyph generation" if len(self.generation_given) >= len(self.given) else u"Diacritics"
+            why = u"as many on each" if len(self.generation_given) == len(self.given) else u"the tab with more"
+            self.log.add(u"From Font Check: %s on the <i>Diacritics</i> tab and %s on <i>Glyph generation</i> (shown "
+                         u"first: <i>%s</i>, %s)." % (b(letters), b(others), here, why))
+        else:
+            self.log.add(u"From Font Check: %s, on <i>Glyph generation</i>." % b(others))
 
     def switch_top_page(self, index):
         """Diacritics or Glyph generation shown; Glyph generation's tab made, and its list read, as it is
@@ -8200,6 +8223,39 @@ class AccentsDialog(object):
         self.dialog.show()
         self.dialog.raise_()
         QtCore.QTimer.singleShot(50, self.run)
+
+
+def generation_table(ak):
+    """The characters of Glyph generation's table, or none where its module cannot be loaded."""
+    try:
+        module = ak.load_sibling(GENERATION_FILE, GENERATION_MODULE)
+        return set(module.unichr_(int(e["code"], 16)) for e in module.load_data().get("entries") or [])
+    except Exception:
+        return set()
+
+
+def handed_over(chars, table):
+    """(for the Diacritics tab, for Glyph generation) of the characters Font Check hands over: one that
+    decomposes into a letter and marks is the Diacritics tab's (ά too, which Glyph generation would only
+    copy), another of Glyph generation's table is that tab's, and the rest the Diacritics tab's (it says
+    what it cannot build)."""
+    letters, others = [], []
+    for ch in chars:
+        decomposed = unicodedata.normalize("NFD", ch) if len(ch) == 1 else ch
+        (others if ch in table and len(decomposed) == 1 else letters).append(ch)
+    return letters, others
+
+
+def generation_characters(ak, package):
+    """The characters Glyph generation can build in the font, in its current master, that are not drafts
+    (a starting point counts only where the font's design makes it likely usable): what Font Check counts
+    as buildable."""
+    module = ak.load_sibling(GENERATION_FILE, GENERATION_MODULE)
+    fc = ak.load_sibling("freelab_feature_code.py", "freelab_feature_code")
+    codes = ak.glyph_code_map(package.fgPackage.glyphs)
+    font = module.FontLabFont(ak, fc, package, package.master, codes)
+    rows = module.Planner(module.load_data(), font).plan()
+    return set(r.char for r in rows if r.layout is not None and r.sureness != "starting point")
 
 
 class _Globals(object):

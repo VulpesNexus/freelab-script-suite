@@ -3,8 +3,11 @@
 
 Lists the characters of its first scope the font lacks (spaces, hyphens and dashes, duplicates,
 punctuation, Greek and Cyrillic look-alikes, ligature letters, vulgar fractions, arrows and triangles:
-205 characters) that it can make of the glyphs the font has, and builds the checked ones in every
-master, as one step of FontLab's History.
+205 characters; then the turned and reversed letters, 41 starting points) that it can make of the
+glyphs the font has, and builds the checked ones in every master, as one step of FontLab's History. A
+turned or reversed letter is said "likely usable as it is" where the font's design measures monoline
+(likely_usable, its thresholds from the corpus). What Font Check hands over (the window's
+generation_given) is listed alone at first.
 
 The recipes are FreeLab's own (glyph_generation.json, made by compose/train/generation.py): each
 character's ways, the first the font can take used, each as sure as its confidence says:
@@ -36,6 +39,7 @@ import sys
 DATA_FILE = "glyph_generation.json"
 CONFIDENCES = ("exact", "accepted", "starting point")
 DRAFT_NOTE = u"starting point: a draft to draw over"  # in the row of a recipe that is one
+LIKELY = u"likely usable as it is"  # a starting point the font's monoline design makes so (likely_usable)
 SETTING_KEYS = ("thin", "hair", "en_dash", "em_dash")
 SETTINGS_KEY = "generation"  # its settings in Glyph Compose's settings file
 SETTING_REACH = {"thin": (2, 48), "hair": (2, 48), "en_dash": (0.2, 2.5), "em_dash": (0.2, 2.5)}  # (the boxes' too)
@@ -178,6 +182,125 @@ def stretched_points(points, split, amount):
 
 
 # ---------------------------------------------------------------------------
+# Monoline: whether a design's turned and mirrored letters may be used as they are
+# ---------------------------------------------------------------------------
+# A mirror of R is a fair Я only where mirroring changes nothing a reader sees: no stroke contrast (N's
+# thick diagonal would come out on И's thin side), no tilted stress (an O whose thick parts lean left
+# leans right once mirrored), and serifs alike on both sides. A half turn keeps contrast and stress as they
+# are, so only uneven serifs count against it. Measured on O (else o) and I (else l): the same functions
+# calibrate the thresholds on the corpus (compose/train/generation.py).
+
+MONOLINE_GLYPHS = ((0x004F, 0x006F), (0x0049, 0x006C))  # (the round letter, the straight one): first the font has
+
+
+def crossings(polygons, axis, at):
+    """Where a line meets the outline, sorted: x's of the horizontal line y = at (axis "y"), or y's of the
+    vertical line x = at (axis "x")."""
+    found = []
+    for polygon in polygons:
+        count = len(polygon)
+        for index in range(count):
+            (x0, y0), (x1, y1) = polygon[index], polygon[(index + 1) % count]
+            if axis == "x":
+                x0, y0, x1, y1 = y0, x0, y1, x1
+            if (y0 <= at < y1) or (y1 <= at < y0):
+                found.append(x0 + (at - y0) * (x1 - x0) / (y1 - y0))
+    return sorted(found)
+
+
+def strokes(polygons, axis, at):
+    """[(start, end)] of the ink along a line (crossings in pairs: a stroke between each)."""
+    cuts = crossings(polygons, axis, at)
+    return [(cuts[index], cuts[index + 1]) for index in range(0, len(cuts) - 1, 2)]
+
+
+def box_of(polygons):
+    xs = [x for polygon in polygons for x, _ in polygon]
+    ys = [y for polygon in polygons for _, y in polygon]
+    return (min(xs), min(ys), max(xs), max(ys)) if xs else None
+
+
+def round_measures(polygons):
+    """(contrast, stress) of a round letter: its sides' thickness at mid-height over its top's and bottom's
+    at mid-width (1 for a monoline O), and how much its left and right sides differ a quarter up and down
+    (0 for an upright stress), as a share of their mean; None where it cannot be read."""
+    box = box_of(polygons)
+    if box is None:
+        return None
+    cx, cy, h = (box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0, box[3] - box[1]
+    across = strokes(polygons, "y", cy)
+    up_down = strokes(polygons, "x", cx)
+    if len(across) < 2 or len(up_down) < 2:
+        return None
+    sides = [across[0][1] - across[0][0], across[-1][1] - across[-1][0]]
+    caps = [up_down[0][1] - up_down[0][0], up_down[-1][1] - up_down[-1][0]]
+    if min(caps) <= 0:
+        return None
+    widths = []
+    for at in (cy + h / 4.0, cy - h / 4.0):
+        pieces = strokes(polygons, "y", at)
+        if len(pieces) < 2:
+            return None
+        widths.append((pieces[0][1] - pieces[0][0], pieces[-1][1] - pieces[-1][0]))
+    mean = sum(a + b for a, b in widths) / 4.0
+    stress = sum(abs(a - b) for a, b in widths) / (2.0 * mean) if mean > 0 else 0.0
+    return max(sides) / min(caps), stress
+
+
+def serif_measure(polygons):
+    """How unevenly a straight letter's foot and head reach out on either side of its stem (0 for none, or
+    serifs alike both sides), as a share of the stem's width; None where it cannot be read."""
+    box = box_of(polygons)
+    if box is None:
+        return None
+    h = box[3] - box[1]
+    stem = strokes(polygons, "y", box[1] + h / 2.0)
+    if len(stem) != 1 or stem[0][1] <= stem[0][0]:
+        return None
+    s0, s1 = stem[0]
+    worst = 0.0
+    for at in (box[1] + h * 0.02, box[3] - h * 0.02):
+        pieces = strokes(polygons, "y", at)
+        if not pieces:
+            continue
+        left, right = s0 - pieces[0][0], pieces[-1][1] - s1
+        worst = max(worst, abs(left - right) / (s1 - s0))
+    return worst
+
+
+def monoline_measures(polygons_of, glyph_of):
+    """{"contrast", "stress", "serif"} of a font in one master (polygons_of(name): its outline as
+    polygons; glyph_of(code): its glyph), or None where it has no round letter to read."""
+    found = {}
+    for round_codes in MONOLINE_GLYPHS[:1]:
+        for code in round_codes:
+            name = glyph_of(code)
+            measured = round_measures(polygons_of(name)) if name else None
+            if measured:
+                found["contrast"], found["stress"] = measured
+                break
+    if "contrast" not in found:
+        return None
+    found["serif"] = 0.0
+    for code in MONOLINE_GLYPHS[1]:
+        name = glyph_of(code)
+        measured = serif_measure(polygons_of(name)) if name else None
+        if measured is not None:
+            found["serif"] = measured
+            break
+    return found
+
+
+def likely_usable(measures, rule, kind):
+    """Whether a turned (kind "turn") or mirrored ("mirror") letter of a design so measured may be used
+    as it is: every measure under the corpus's threshold (rule) that counts for it."""
+    if not measures or not rule:
+        return False
+    keys = ("contrast", "serif") if kind == "turn" else ("contrast", "stress", "serif")
+    return all(measures.get(key) is not None and measures[key] <= rule[key] for key in keys)
+
+
+# ---------------------------------------------------------------------------
 # Plans
 # ---------------------------------------------------------------------------
 
@@ -200,8 +323,9 @@ class Layout(object):
     shapes), "shared" (no glyph: the code point goes to shared), "components", or "mirrored" (one
     source's outlines mirrored into the glyph, its contours set right)."""
 
-    def __init__(self, parts, advance, kind="components", shared=None):
+    def __init__(self, parts, advance, kind="components", shared=None, axis="x"):
         self.parts, self.advance, self.kind, self.shared = list(parts), float(advance), kind, shared
+        self.axis = axis  # (a mirror's: "x" left to right, "y" upside down)
 
 
 class Need(Exception):
@@ -225,6 +349,17 @@ class Row(object):
     @property
     def confidence(self):
         return (self.way or {}).get("confidence") or self.entry.get("research_confidence") or u"accepted"
+
+    @property
+    def likely(self):
+        """A starting point the font's design makes likely usable as it is (a monoline font's mirrored or
+        turned letter: likely_usable)."""
+        return getattr(self, "monoline", False) and self.confidence == "starting point"
+
+    @property
+    def sureness(self):
+        """What the Confidence cell says: the recipe's confidence, or LIKELY for a likely usable draft."""
+        return LIKELY if self.likely else self.confidence
 
 
 def describe_code(code_hex):
@@ -257,6 +392,10 @@ class Font(object):
     def has_layer(self, name):
         """Whether the glyph has a layer in this master (a variable font's sparse masters lack some)."""
         return True
+
+    def polygons(self, name):
+        """A glyph's outline as polygons, curves flattened ([] where it cannot be read)."""
+        return []
 
     def codes_of(self, name):
         """Every code point the font gives that glyph."""
@@ -308,7 +447,21 @@ class Planner(object):
             self.by_name[name] = row
         for row in self.rows:
             self.choose(row, self.ways.get(row.hex))
+        for row in self.rows:
+            check = (row.way or {}).get("check")
+            if check and row.confidence == "starting point":
+                row.monoline = likely_usable(self.monoline(), (self.rules.get("monoline") or {}).get(check), check)
         return self.rows
+
+    def monoline(self):
+        """The font's monoline measures in this master (monoline_measures), read once; None where it has
+        no round letter or gives no outlines."""
+        if not hasattr(self, "measured"):
+            try:
+                self.measured = monoline_measures(self.font.polygons, self.font.glyph_of)
+            except Exception:
+                self.measured = None
+        return self.measured
 
     def free_name(self, entry, taken):
         """Glyphs' name for the character, else uniXXXX, else uniXXXX.1 and on: one no glyph has."""
@@ -445,6 +598,8 @@ class Planner(object):
         angle = int(way["angle"]) % 360
         rule = (self.rules.get("turns") or {}).get(way.get("pair"), {})
         cy = (box[1] + box[3]) / 2.0
+        if way.get("about") == "body":  # (a letter: about the middle of its x-height or cap height)
+            cy = self.body_middle(row, cy)
         if angle == 180:
             # about the middle of the advance: the sidebearings change sides (as the corpus's turned quotes)
             matrix = rotation(180, advance / 2.0, cy)
@@ -460,12 +615,29 @@ class Planner(object):
         matrix = compose(translation(round(sides - turned[0]), 0), matrix)
         return Layout([Part(name, matrix)], round(turned[2] - turned[0] + 2 * sides))
 
+    def body_middle(self, row, fallback):
+        """The middle of a letter's body: half the cap height for a capital, half the x-height else (a
+        small capital's too), so that a turned letter's descender comes up as an ascender."""
+        import unicodedata
+        try:
+            capital = unicodedata.category(row.char) == "Lu"
+        except (TypeError, ValueError):
+            capital = False
+        height = self.font.cap_height if capital else self.font.x_height
+        return height / 2.0 if height else fallback
+
     def op_mirror(self, way, row, stack, needs):
         name = self.font.glyph_of(int(way["of"], 16))
         if name is None:
             raise Need(u"needs %s" % describe_code(way["of"]))
         advance = self.font.advance(self.drawn(name))
         kind = "components" if self.font.composite(name) or row.existing else "mirrored"
+        if way.get("axis") == "y":  # upside down, about the middle of its ink (as a corrected glyph is made)
+            box = self.box(name)
+            if box is None:
+                raise Need(u"%s has no outline" % name)
+            matrix = (1.0, 0.0, 0.0, -1.0, 0.0, box[1] + box[3])
+            return Layout([Part(name, matrix)], advance, kind=kind, axis="y")
         return Layout([Part(name, mirror_x(advance))], advance, kind=kind)
 
     def op_row(self, way, row, stack, needs):
@@ -639,7 +811,7 @@ def note_text(row, needs_built=()):
     notes = []
     if row.missing:
         return row.missing
-    if row.confidence == "starting point":
+    if row.confidence == "starting point" and not row.likely:
         notes.append(DRAFT_NOTE)
     if row.existing:
         notes.append(u"replaces the font's own glyph" if not row.layout or row.layout.kind != "shared"
@@ -661,8 +833,16 @@ def corpus_text(families, deriving):
         u"builds" if deriving == 1 else u"build")
 
 
+def monoline_text(measured, rule, likely):
+    """Why a turned or mirrored letter is, or is not, likely usable as it is (a sentence)."""
+    return (u"Stroke contrast %.2f (monoline under %.2f), stress %.2f, serifs %.2f: %s. Of the corpus's families "
+            u"so measured, %d%% draw it as this recipe makes it." % (
+                measured["contrast"], rule["contrast"], measured.get("stress", 0.0), measured.get("serif", 0.0),
+                u"likely usable as it is" if likely else u"a starting point to draw over", round(100 * rule["right"])))
+
+
 def confidence_text(row):
-    return row.confidence if not row.missing else u""
+    return row.sureness if not row.missing else u""
 
 
 # ---------------------------------------------------------------------------
@@ -728,6 +908,21 @@ class FontLabFont(Font):
     def has_layer(self, name):
         return self.layer(name) is not None
 
+    def polygons(self, name):
+        """The glyph's outline flattened into polygons (QPainterPath.toSubpathPolygons), [] where it cannot be."""
+        path = self.path(name)[0] if name else None
+        if path is None or path.isEmpty():
+            return []
+        found = []
+        try:
+            for polygon in path.toSubpathPolygons():
+                points = polygon_points(polygon)
+                if len(points) > 2:
+                    found.append(points)
+        except Exception:
+            return []
+        return found
+
     def composite(self, name):
         layer = self.layer(name)
         try:
@@ -741,6 +936,15 @@ class FontLabFont(Font):
 
     def dnom(self, digit):
         return self.forms.get(("dnom", digit))
+
+
+def polygon_points(polygon):
+    """[(x, y)] of a QPolygonF, however PythonQt hands it over (a list of points, or a vector to index)."""
+    try:
+        return [(point.x(), point.y()) for point in polygon]
+    except TypeError:
+        count = polygon.count() if callable(getattr(polygon, "count", None)) else polygon.size()
+        return [(polygon.at(index).x(), polygon.at(index).y()) for index in range(count)]
 
 
 def figure_forms(fc, names, codes):
@@ -931,7 +1135,8 @@ ICON_SIZE = 40
 PREVIEW_SIZE = 150  # pixels per em
 HELP_LIST = (u"The characters the font lacks that it can make of the glyphs it has, by group: each with its "
              u"recipe, a picture of the glyph it makes, and how sure the recipe is (<i>exact</i>: no design in "
-             u"it; <i>accepted</i>: how most fonts build it; <i>starting point</i>: a draft to draw over). Checked "
+             u"it; <i>accepted</i>: how most fonts build it; <i>starting point</i>: a draft to draw over; <i>likely "
+             u"usable as it is</i>: a turned or reversed letter the font's monoline design makes so). Checked "
              u"rows are built. A row that needs a glyph the font lacks says which, at the end. Double-click a row "
              u"to open its glyph (built already) in a <i>Glyph</i> window.")
 
@@ -963,26 +1168,43 @@ class GenerationPage(object):
         layout.addWidget(self.status)
         layout.addWidget(ak.separator())
         row = QtGui.QHBoxLayout()
+        # What Font Check handed over (the window's generation_given): listed alone at first, as the
+        # Diacritics tab lists its own (its Character set's From Font Check)
+        self.given = [ch for ch in (getattr(owner, "generation_given", None) or []) if len(ch) == 1]
+        self.list_box = None
+        if self.given:
+            list_help = (u"Which characters are listed: those Font Check handed over (checked), or every group "
+                         u"of the table.")
+            row.addWidget(cm.helped(QtGui.QLabel(u"List:"), list_help))
+            self.list_box = QtGui.QComboBox()
+            self.list_box.addItem(u"From Font Check (%s)" % counted(len(self.given), u"glyph"))
+            self.list_box.addItem(u"Every group")
+            self.list_box.setWhatsThis(list_help)
+            row.addWidget(self.list_box)
+            row.addSpacing(12)
         self.existing_box = QtGui.QCheckBox(u"Also list existing glyphs")
         self.existing_box.setWhatsThis(u"Also lists the characters of these groups the font has already, in a section "
                                        u"of their own, unchecked: those you check are built again from their recipe, "
                                        u"their outlines in each master replaced (<i>Edit &gt; Undo</i> takes it back). "
                                        u"A glyph that shares its code point is rebuilt as a component of its source.")
         row.addWidget(self.existing_box)
-        row.addSpacing(12)
+        # The four widths in a row of their own: beside the List chooser and the search field, the search
+        # field was squeezed to two letters (live, 2026-11-16)
+        settings_row = QtGui.QHBoxLayout()
         self.spins = {}
         for key, label, help_text in (
                 ("thin", u"Thin space 1/", u"The thin space's width, and the narrow no-break space's: this share of the "
                                            u"em (1/6 at first; Unicode says 1/5 or 1/6, the corpus's median is 0.158 em)."),
                 ("hair", u"Hair space 1/", u"The hair space's width: this share of the em (1/11 at first, the corpus's "
                                            u"median 0.090 em).")):
-            row.addWidget(cm.helped(QtGui.QLabel(label), help_text))
+            settings_row.addWidget(cm.helped(QtGui.QLabel(label), help_text))
             spin = QtGui.QSpinBox()
             spin.setRange(*SETTING_REACH[key])
             spin.setValue(int(self.settings[key]))
             spin.setSuffix(u" em")
             spin.setWhatsThis(help_text)
-            row.addWidget(spin)
+            settings_row.addWidget(spin)
+            settings_row.addSpacing(12)
             self.spins[key] = spin
         for key, label, help_text in (
                 ("en_dash", u"En dash", u"The en dash's advance, as a share of the em (52.8% at first: the corpus's median, "
@@ -990,7 +1212,7 @@ class GenerationPage(object):
                 ("em_dash", u"Em dash", u"The em dash's advance, as a share of the em (86.2% at first: the corpus's median, "
                                         u"507 families); the two- and three-em dashes are two and three times the font's "
                                         u"em dash.")):
-            row.addWidget(cm.helped(QtGui.QLabel(label), help_text))
+            settings_row.addWidget(cm.helped(QtGui.QLabel(label), help_text))
             spin = QtGui.QDoubleSpinBox()
             spin.setRange(SETTING_REACH[key][0] * 100, SETTING_REACH[key][1] * 100)
             spin.setDecimals(1)
@@ -998,7 +1220,8 @@ class GenerationPage(object):
             spin.setValue(round(float(self.settings[key]) * 100, 1))
             spin.setSuffix(u"% of the em")
             spin.setWhatsThis(help_text)
-            row.addWidget(spin)
+            settings_row.addWidget(spin)
+            settings_row.addSpacing(12)
             self.spins[key] = spin
         row.addStretch(1)
         self.search, self.search_label = owner.search_field(
@@ -1009,6 +1232,8 @@ class GenerationPage(object):
         row.addWidget(self.search)
         row.addWidget(self.search_label)
         layout.addLayout(row)
+        settings_row.addStretch(1)
+        layout.addLayout(settings_row)
         self.tree = QtGui.QTreeWidget()
         self.tree.setColumnCount(len(COLUMNS))
         self.tree.setHeaderLabels(list(COLUMNS))
@@ -1050,6 +1275,8 @@ class GenerationPage(object):
         buttons.addWidget(self.build_button)
         layout.addLayout(buttons)
         self.existing_box.connect("toggled(bool)", lambda on: self.run())
+        if self.list_box is not None:
+            self.list_box.connect("currentIndexChanged(int)", lambda index: self.run())
         for key, spin in self.spins.items():
             spin.connect("valueChanged(double)" if key in ("en_dash", "em_dash") else "valueChanged(int)",
                          (lambda key: lambda value: self.setting_changed(key, value))(key))
@@ -1082,8 +1309,15 @@ class GenerationPage(object):
         codes = self.ak.glyph_code_map(package.fgPackage.glyphs)
         return FontLabFont(self.ak, self.feature_code(), package, master, codes)
 
+    def listed_codes(self):
+        """The table's codes to list: Font Check's alone (List: From Font Check), else None (every one)."""
+        box = getattr(self, "list_box", None)
+        if not getattr(self, "given", None) or box is None or box.currentIndex != 0:
+            return None
+        return set(u"%04X" % ord(ch) for ch in self.given)
+
     def planner(self, font, ways=None):
-        planner = Planner(self.data, font, self.settings, bool(self.existing_box.checked))
+        planner = Planner(self.data, font, self.settings, bool(self.existing_box.checked), self.listed_codes())
         planner.plan(ways)
         return planner
 
@@ -1123,8 +1357,9 @@ class GenerationPage(object):
         b = self.ak.b
         buildable = [r for r in self.rows if r.layout is not None and not r.existing]
         lacking = [r for r in self.rows if r.layout is None]
-        sure = dict((c, sum(1 for r in buildable if r.confidence == c)) for c in CONFIDENCES)
-        parts = [u"%s %s" % (b(sure[c]), c) for c in CONFIDENCES if sure[c]]
+        words = CONFIDENCES[:2] + (LIKELY, CONFIDENCES[2])
+        sure = dict((c, sum(1 for r in buildable if r.sureness == c)) for c in words)
+        parts = [u"%s %s" % (b(sure[c]), c) for c in words if sure[c]]
         self.status.setText(u"%s, master %s: %s can be built (%s)%s. Nothing changes until you click %s." % (
             b(self.package.tfn), b(self.master), b(counted(len(buildable), u"glyph")), u", ".join(parts) or u"none",
             u"; %s %s a glyph the font lacks" % (b(counted(len(lacking), u"glyph")), u"needs" if len(lacking) == 1 else u"need")
@@ -1307,7 +1542,11 @@ class GenerationPage(object):
         lines = [u"<b>%s</b> U+%s %s" % (self.ak.html(r.char) if r.layout is None or r.layout.kind != "empty" else u"",
                                            r.hex, self.ak.html(r.entry.get("unicode_name", u"")))]
         if r.layout is not None:
-            lines.append(u"%s (%s)" % (self.ak.html(recipe_text(r, self.settings, self.data.get("rules"))), r.confidence))
+            lines.append(u"%s (%s)" % (self.ak.html(recipe_text(r, self.settings, self.data.get("rules"))), r.sureness))
+            rule = (self.data.get("rules") or {}).get("monoline", {}).get((r.way or {}).get("check"))
+            measured = self.planner_now.monoline() if (r.way or {}).get("check") else None
+            if rule and measured:
+                lines.append(monoline_text(measured, rule, r.likely))
         else:
             lines.append(self.ak.html(r.missing))
         families, deriving = r.entry.get("families", 0), r.entry.get("deriving", 0)
@@ -1478,7 +1717,7 @@ class GenerationPage(object):
                 if r.layout.kind == "mirrored" and not r.existing:
                     try:
                         glyph = self.cm.make_corrected(self.fontlab, self.ak, package, masters, r.layout.parts[0].name,
-                                                       "x", r.name)
+                                                       r.layout.axis, r.name)
                     except self.cm.MirrorError as exc:
                         failed.append((r.char, u"%s" % exc))
                         continue

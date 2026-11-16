@@ -713,6 +713,61 @@ def fonts_sentence(fonts):
         u"%s (%s, a separate download)" % (font, license_) for font, license_ in fonts)
 
 
+SPACES_FILE = "space_conventions.json"  # beside this script: checks/train/spaces.py makes it from CLDR 49
+# The spaces typesetting needs: the two no-break spaces (a row of the high-value list where a language the font
+# covers or nearly covers groups its numbers with one), and the others a font is expected to have (a note)
+NO_BREAK_SPACES = (0x00A0, 0x202F)
+OTHER_SPACES = ((0x2007, u"figure"), (0x2009, u"thin"), (0x200A, u"hair"), (0x2002, u"en"), (0x2003, u"em"))
+SPACE_WORDS = {0x00A0: u"no-break", 0x202F: u"narrow no-break"}
+
+
+def spaces_path():
+    return os.path.join(os.path.dirname(os.path.abspath(globals().get("__file__") or ".")), SPACES_FILE)
+
+
+def space_conventions(path=None):
+    """{code point: the ISO 639-3 codes of the languages that group thousands with that space} (CLDR), {}
+    without the file."""
+    path = path or spaces_path()
+    try:
+        data = read_data(path, os.path.getmtime(path))
+    except (OSError, IOError, ValueError):
+        return {}
+    return dict((int(code, 16), set(isos)) for code, isos in (data.get("spaces") or {}).items())
+
+
+def space_rows(results, has, conventions):
+    """[AddRow] of the no-break spaces the font lacks (has(code): whether it has it) that languages it covers
+    or nearly covers set in their numbers ("12 345": CLDR's grouping separator), each needed by those
+    languages; it completes none (their letters decide that)."""
+    rows = []
+    for code in NO_BREAK_SPACES:
+        if has(code):
+            continue
+        isos = conventions.get(code, ())
+        needing = [r for r in results if r.level in ("covered", "nearly") and r.language.kind == "language"
+                   and r.language.iso in isos]
+        if needing:
+            row = AddRow([char_of(code)], sorted(needing, key=language_rank), [])
+            row.spacing = True
+            rows.append(row)
+    return rows
+
+
+def spaces_note(has, listed=()):
+    """The line the log gives the spaces the font lacks that no row lists (u"" for none): the no-break
+    spaces first, then the figure, thin, hair, en, and em spaces."""
+    lacking = [(code, SPACE_WORDS[code]) for code in NO_BREAK_SPACES if not has(code) and code not in listed]
+    lacking += [(code, word) for code, word in OTHER_SPACES if not has(code)]
+    if not lacking:
+        return u""
+    one = len(lacking) == 1
+    names = [u"%s (U+%04X)" % (word, code) for code, word in lacking]
+    return (u"The font lacks %s %s: %s. <i>Glyph Compose</i> builds %s on its Glyph generation tab (empty glyphs of "
+            u"the right width)." % (u"this" if one else u"these", u"space" if one else u"spaces",
+                                    u", ".join(names), u"it" if one else u"them"))
+
+
 def families_path():
     return os.path.join(os.path.dirname(os.path.abspath(globals().get("__file__") or ".")), FAMILIES_FILE)
 
@@ -2199,6 +2254,7 @@ class AddRow(object):
 
     def __init__(self, items, needing, completing, optional=False):
         self.items, self.needing, self.completing = items, needing, completing
+        self.spacing = False  # a no-break space the languages set in their numbers (space_rows)
         self.optional = optional  # a set's optional character (selection_rows: listed after the others, marked)
 
     def text(self):
@@ -4097,12 +4153,15 @@ def few_names(names, shown=None):
     return text
 
 
-def row_tip(row, buildable=False):
+def row_tip(row, buildable=False, generated=False):
     """A glyph's row's tooltip: its code points and names, then a paragraph each (a blank line
     between two) for what it completes, what needs it with other glyphs, and what the font has of it."""
     paragraphs = [u"\n".join(u"%s: %s" % (code_label(item), short_name(item)) for item in row.items)]
     if row.optional:
         paragraphs.append(u"Optional: the set selected holds it and is complete without it (%s)." % OPTIONAL_WHAT)
+    elif getattr(row, "spacing", False):
+        paragraphs.append(u"Typesetting: these languages group the thousands of their numbers with it (12 345, in "
+                          u"Unicode CLDR's conventions), and text set in them needs it.")
     elif row.auxiliary():
         paragraphs.append(u"Auxiliary: these languages use it in loan words, names, or rare spellings, and miss "
                           u"nothing else.")
@@ -4116,7 +4175,9 @@ def row_tip(row, buildable=False):
     parts = [item for item in row.items if any(item in r.parts for r in row.needing)]
     if parts:
         paragraphs.append(u"The font has the letter and marks of %s, but no anchors joining them." % u" ".join(parts))
-    if buildable:
+    if buildable and generated:
+        paragraphs.append(u"Glyph Compose can build it from the font's glyphs (its Glyph generation tab).")
+    elif buildable:
         paragraphs.append(u"Glyph Compose can build it from the font's letters and marks.")
     return u"\n\n".join(paragraphs)
 
@@ -5218,6 +5279,7 @@ class FontCheckDialog(object):
         self.seen_history, self.stale = None, set(TABS)
         self.diacritics = None  # Glyph Compose's module, loaded when first needed
         self.buildable = None  # the characters Glyph Compose can build, asked once per check
+        self.generated = None  # those of them its Glyph generation tab builds (buildable_set)
         self.plan_font = None  # (package, Glyph Compose's module, its Font of the glyphs): made once per check
         self.scripts, self.results, self.rows, self.own_rows = [], [], [], []  # rows: the high-value list's;
         # own_rows: the selection's own tab's
@@ -5715,7 +5777,8 @@ class FontCheckDialog(object):
         tips = {"all": u"Checks every glyph listed in the tab shown (the checks of rows not listed are kept).",
                 "none": u"Unchecks every glyph, those not listed in the tab shown too.",
                 "buildable": u"Checks the glyphs listed in the tab shown that <i>Glyph Compose</i> can build from "
-                             u"the font's letters and marks, and unchecks the others."}
+                             u"the font's glyphs (letters with diacritics, and the spaces, dashes, quotes, and other "
+                             u"glyphs of its Glyph generation tab), and unchecks the others."}
         def clicked(key):
             return lambda: self.set_checks(key)  # (no argument PythonQt could fill)
 
@@ -5754,8 +5817,10 @@ class FontCheckDialog(object):
         row = QtGui.QHBoxLayout()
         self.diacritics_button = QtGui.QPushButton("Build with Glyph Compose")
         self.diacritics_button.setWhatsThis(u"Opens <i>Glyph Compose</i> on the checked glyphs of the tab shown that it "
-                                            u"can build from the font's letters and marks (you check them there "
-                                            u"before anything is made).")
+                                            u"can build from the font's glyphs (you check them there before anything is "
+                                            u"made): letters with diacritics on its Diacritics tab, other glyphs (spaces, "
+                                            u"dashes, quotes...) on its Glyph generation tab, each listed alone; it opens "
+                                            u"on the tab with more, and its log says what the other holds.")
         self.copy_chars_button = QtGui.QPushButton("Copy glyphs")
         self.copy_chars_button.setWhatsThis(u"Copies the checked glyphs of the tab shown (or the selected row's) "
                                             u"as text.")
@@ -6556,7 +6621,7 @@ class FontCheckDialog(object):
                                        else u"Build with Glyph Compose")
         self.diacritics_button.setToolTip(self.tip(
             u"" if buildable else u"Check glyphs or select a row first." if not chosen else
-            u"<i>Glyph Compose</i> cannot build %s from the font's letters and marks." % (
+            u"<i>Glyph Compose</i> cannot build %s from the font's glyphs." % (
                 u"this glyph" if len(chosen) == 1 else u"any of these glyphs"), rich=True))
         targets = self.check_targets() if self.package is not None else {}
         listed = self.shown_rows()
@@ -6922,6 +6987,14 @@ class FontCheckDialog(object):
         if self.script_filter not in [s.script for s in scripts if s.present]:
             self.script_filter = None
         self.buildable_set()  # (Glyph Compose asked once: the rows' tooltips say what it can build)
+        try:  # the spaces the font lacks that the high-value list does not show (space_rows lists the others)
+            has = lambda code: code in font.codes
+            listed = [code_points(row.items[0])[0] for row in space_rows(self.results, has, space_conventions())]
+            note = spaces_note(has, listed)
+            if note:
+                self.log.add(note)
+        except Exception:
+            pass
         return BUSY_STEPS[3]
 
     def coverage_list(self, state):
@@ -7223,7 +7296,9 @@ class FontCheckDialog(object):
                 plus = u"+%d" % len(row.completing)
                 item = self.item((u"", row_label(row), plus,
                                   row_languages_text(row)), index,
-                                 row_tip(row, any(i in buildable for i in row.items)), True)
+                                 row_tip(row, any(i in buildable for i in row.items),
+                                         all(i in (self.generated or ()) for i in row.items if i in buildable)),
+                                 True)
                 item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsUserCheckable)
                 item.setCheckState(0, QtCore.Qt.Checked if set(row.items) <= self.checked else QtCore.Qt.Unchecked)
                 key = ("char", row.text())
@@ -7246,6 +7321,13 @@ class FontCheckDialog(object):
         tab's caption with the count of its rows, then the selection's own tab."""
         results = [r for s in self.filtered_scripts() for r in s.results]
         self.rows = add_rows(results)
+        try:  # the no-break spaces the languages shown set in their numbers, ranked as the others
+            codes = self.font_found.codes if getattr(self, "font_found", None) is not None else None
+            if codes is not None:
+                self.rows = sorted(self.rows + space_rows(results, lambda code: code in codes, space_conventions()),
+                                   key=lambda row: (-len(row.completing), -len(row.needing), code_points(row.items[0])))
+        except Exception:
+            pass  # (the list without them: never without the rest)
         self.fill_characters(self.add_tree, self.rows)
         self.left_tabs.setTabText(0, value_title(len(self.rows)))
         self.fill_own()
@@ -8252,6 +8334,11 @@ class FontCheckDialog(object):
             found = self.diacritics_plan([r for r in self.results if r.level == "nearly"])
         except Exception as exc:
             self.log.add(u"<i>Glyph Compose</i> could not be asked: %s" % self.ak.html(exc), "warning")
+        try:  # and what its Glyph generation tab builds of other glyphs (spaces, dashes, quotes...)
+            self.generated = set(self.diacritics_module().generation_characters(self.ak, self.package))
+        except Exception:
+            self.generated = set()  # (an older Glyph Compose, or none: its rows say nothing of it)
+        found = set(found) | self.generated
         self.buildable = found
         return found
 
