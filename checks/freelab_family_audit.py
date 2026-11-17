@@ -1286,20 +1286,31 @@ class FontLabCalls(object):
 
     @staticmethod
     def set_current_master(package, name):
-        """Assumed: flPackage.master is settable (Font Builder sets it), and the line metrics then read and
-        write that master's."""
-        package.master = name
+        """Live (2026-11-18): flPackage.setMaster(name[, notify]) (assigning flPackage.master is refused:
+        "attribute 'master' of 'flPackage' objects is not writable"); the line metrics then read and write
+        that master's."""
+        package.setMaster(name)
 
     def new_glyph(self, package, name):
         """Proven: fontlab.flGlyph(), its name set, flPackage.addGlyph() (FontLab adds a copy, without
         layers), then flPackage.findName(name) for the font's own glyph, on which layers are made. The
         Python-made glyph is held (Glyph Compose's new_glyph: a closing crash's suspect)."""
+        there = package.findName(name)
+        if there is not None and not there.isNull:
+            return there  # (a new font comes with its .notdef: added again, it was there twice, live)
         made = self.fontlab.flGlyph()
         made.name = name
         self.held.append(made)
         package.addGlyph(made)
         glyph = package.findName(name)
         return glyph if glyph is not None and not glyph.isNull else None
+
+    @staticmethod
+    def init_layer(package, layer):
+        """Live (2026-11-18): a new glyph's new layer given its (empty) components at once, as Font Builder
+        does: without it, setting the glyph's code point crashed FontLab (fgGlyph.unicode = 32 on a glyph
+        whose layer was only made and given a width; with this call first, unicode and unicodes both held)."""
+        layer.setGlyphComponents([], float(package.upm) / 2.0, package, False)
 
     @staticmethod
     def new_layer(glyph, master):
@@ -1392,8 +1403,8 @@ class FontLabCalls(object):
 
     @staticmethod
     def set_codes(glyph, codes):
-        """Proven: fgGlyph.unicode, then fgGlyph.unicodes for more than one (Glyph Compose's, on a glyph
-        just looked up: find_glyph)."""
+        """Live (2026-11-18): fgGlyph.unicode, then fgGlyph.unicodes for more than one, on a glyph looked up
+        again (find_glyph) whose layers were set up by init_layer (without it FontLab crashed here)."""
         codes = [int(c) for c in codes]
         glyph.fgGlyph.unicode = codes[0]
         if len(codes) > 1:
@@ -1645,7 +1656,9 @@ def build_font(calls, plan, sources, progress=None):
             continue
         glyphs[name] = True  # (never the glyph object itself: looked up again at each use, fresh())
         for master in names:
-            failed.attempt(u"Layers not made", u"%s (%s)" % (name, master), calls.new_layer, glyph, master)
+            layer = failed.attempt(u"Layers not made", u"%s (%s)" % (name, master), calls.new_layer, glyph, master)
+            if layer is not None:
+                failed.attempt(u"Layers not made", u"%s (%s)" % (name, master), calls.init_layer, package, layer)
 
     def fresh(name):
         """The new font's glyph of that name, looked up now (find_glyph: a kept one crashed FontLab)."""

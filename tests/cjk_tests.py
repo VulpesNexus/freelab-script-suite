@@ -852,6 +852,14 @@ class UIRound3Tests(unittest.TestCase):
         with io.open(cj.__file__.replace(".pyc", ".py"), encoding="utf-8") as handle:
             return handle.read()
 
+    def test_the_samples_text_fits_the_previews_height_too(self):
+        # (live, 2026-11-18: the previews as tall as their three lines left the list above them one row)
+        self.assertEqual(cj.fitted_em(44, None), 44, "height not known: as the width allows")
+        self.assertEqual(cj.fitted_em(44, 500), 44, "room enough")
+        self.assertEqual(cj.fitted_em(44, 128), int(120 / (cj.LINE_STEP * cj.SAMPLE_LINES)))
+        self.assertEqual(cj.fitted_em(44, 30), cj.SMALLEST_PREVIEW_EM, "never under the smallest")
+        self.assertIn(u"label.setMinimumHeight(PREVIEW_LEAST_HEIGHT)", self.source())
+
     def test_the_iroha_fits_three_lines_at_the_windows_usual_width(self):
         # (owner's image 303: at 44 pixels to the em the Iroha took four lines, the last a lone character)
         chars = [ch for ch in cj.SAMPLE]

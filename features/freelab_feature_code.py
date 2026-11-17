@@ -3840,7 +3840,7 @@ class FeatureCodeDialog(object):
             missing.setWordWrap(True)
             self.pages.addWidget(missing)
 
-        part = self.part(QtGui, 2)
+        part = self.part(QtGui, 1)  # (a quarter at first: the tabs above hold two parts each, live)
         what = (u"The code to be written, feature by feature, not in the font yet: <i>Write the code</i> writes it. "
                 u"FreeLab's blocks between their marker lines, the rest "
                 u"of each feature as it is; the prefix's language systems first where locl needs some. Keywords, "
@@ -3979,6 +3979,9 @@ class FeatureCodeDialog(object):
     def switch_page(self, index):
         self.pages.setCurrentIndex(index)
         self.show_tab_buttons(index)
+        share = getattr(self.ak, "share_splitters", None)
+        if share is not None:
+            share(self.dialog)  # (a tab hidden at first show: its splitters sized in their shares as it shows)
 
     def link_activated(self, link):
         """A link of a label clicked: "tab:2" opens that tab (the tab bar's signal shows its page); "read:"
@@ -5511,6 +5514,7 @@ class FeatureCodeDialog(object):
         else:
             splitter.insertWidget(at, widget)
         splitter.setStretchFactor(splitter.indexOf(widget), stretch)
+        widget.setProperty("freelabShare", stretch)  # (ak.share_splitters: the heights at first show, in these shares)
         return box
 
     def show_choice(self, item, lig):

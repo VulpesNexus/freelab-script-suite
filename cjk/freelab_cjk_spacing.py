@@ -825,6 +825,18 @@ SMALLEST_PREVIEW_EM = 20  # and at least (a long text of one's own takes more li
 SAMPLE_LINES = 3  # the lines a sample is set in, where the em allows (owner's image 303: the Iroha in three)
 
 
+LINE_STEP = 1.25  # a preview's line height, in ems (picture)
+PREVIEW_LEAST_HEIGHT = int(SMALLEST_PREVIEW_EM * LINE_STEP * SAMPLE_LINES) + 8  # a preview made as short as it can be
+
+
+def fitted_em(em, tall, lines=SAMPLE_LINES, smallest=SMALLEST_PREVIEW_EM):
+    """em, made no larger than SAMPLE_LINES lines fit in a preview tall pixels high (picture's lines are
+    LINE_STEP ems apart), never under smallest; em as it is when the height is not known (tall None)."""
+    if not tall:
+        return em
+    return max(smallest, min(em, int((tall - 8) / (LINE_STEP * lines))))
+
+
 def preview_em(chars, ems, room, lines=SAMPLE_LINES, largest=PREVIEW_EM, smallest=SMALLEST_PREVIEW_EM):
     """The previews' em, in pixels: the largest from largest down to smallest at which the sample (chars, each
     ems wide at an em of 1 pixel: its advance over the em, as it is set now) breaks into lines of room pixels
@@ -899,6 +911,7 @@ def splitter_part(QtGui, splitter, stretch):
     box.setContentsMargins(0, 0, 0, 0)
     splitter.addWidget(widget)
     splitter.setStretchFactor(splitter.indexOf(widget), stretch)
+    widget.setProperty("freelabShare", stretch)  # (ak.share_splitters: the heights at first show, in these shares)
     return box
 
 
@@ -1181,7 +1194,7 @@ class CJKSpacingDialog(object):
             pass
 
     def previews_resized(self):
-        if self.preview_room() != self.preview_width:
+        if self.preview_room() != self.preview_width or self.preview_tall() != getattr(self, "preview_height", None):
             self.draw_previews()
 
     def flag_names(self):
@@ -1652,7 +1665,7 @@ class CJKSpacingDialog(object):
         upm = float(self.package.upm)
         scale = size / upm
         total = max(sum(layer.advanceWidth + advance for layer, _, advance in layers) for layers in lines)
-        step = size * 1.25
+        step = size * LINE_STEP
         pixmap = QtGui.QPixmap(max(int(total * scale) + 8, 4), int(step * len(lines)))
         pixmap.fill(QtGui.QColor(0, 0, 0, 0))
         color = self.dialog.palette.color(QtGui.QPalette.WindowText)
@@ -1695,6 +1708,14 @@ class CJKSpacingDialog(object):
                          u"%s field to see them set." % (
                              self.ak.b(counted_chars(len(missed))), self.ak.html(shown), self.ak.i(u"Sample")),
                          "warning")
+
+    def preview_tall(self):
+        """The first preview's height in pixels (None where Qt does not say, or before it is laid out)."""
+        try:
+            height = int(self.ak._property(self.previews[0][0], "height"))
+            return height if height > PREVIEW_LEAST_HEIGHT // 2 else None
+        except Exception:
+            return None
 
     def preview_room(self):
         """The previews' width in pixels, for their lines (None where Qt does not say)."""
@@ -1742,6 +1763,8 @@ class CJKSpacingDialog(object):
         # One em for both, the largest that sets the sample as it is now (the wider) in three lines of the
         # previews' width (owner's image 303), so the two compare glyph for glyph
         em = preview_em(sets[0][1], sets[0][2], room) if sets else PREVIEW_EM
+        tall = self.preview_height = self.preview_tall()
+        em = fitted_em(em, tall)  # (and no taller than the previews' part: a list above it showed one row, live)
         self.preview_size = em
         for (label, caption), (placed, chars, ems) in zip(self.previews, sets):
             widths = [width * em for width in ems]
@@ -1751,8 +1774,8 @@ class CJKSpacingDialog(object):
                 label.clear()
             else:
                 label.setPixmap(pixmap)
-                try:  # as tall as its lines
-                    label.setMinimumHeight(max(int(em * 1.9), int(pixmap.height()) + 8))
+                try:  # its lines sized to its height (fitted_em): it may be made as short as the smallest text needs
+                    label.setMinimumHeight(PREVIEW_LEAST_HEIGHT)
                 except Exception:
                     pass
 

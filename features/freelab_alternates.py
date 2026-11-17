@@ -619,7 +619,7 @@ class AlternatesPage(object):
             self.parts.setChildrenCollapsible(False)
         except Exception:
             pass
-        layout = self.part(QtGui, 2)
+        layout = self.part(QtGui, 3)  # (the list the larger share: it held two rows at first, live)
         listed = (u"Two groups (click a group's arrow to close or open it). <i>%s</i>: the glyphs fonts most often "
                   u"give a stylistic alternate (counted in the open-licensed fonts of FreeLab's corpus: in how many "
                   u"families an ssXX, cvXX, or salt feature varies the character), those this font has, with the "
@@ -659,7 +659,7 @@ class AlternatesPage(object):
                                       u"next free stylistic set (a.ss01), its outlines as they are, to redraw by hand as "
                                       u"the alternate. The <i>Forms</i> tab then writes the set's feature. The variants "
                                       u"need no such copy. <i>Edit &gt; Undo</i> takes it back.")
-        layout = self.part(QtGui, 3)
+        layout = self.part(QtGui, 2)
         try:  # a line between the two jobs: neither is a step of the other (and the heading no caption of the list)
             layout.addWidget(self.ak.separator())
         except Exception:
@@ -832,6 +832,7 @@ class AlternatesPage(object):
         self.parts.addWidget(widget)
         try:
             self.parts.setStretchFactor(self.parts.indexOf(widget), stretch)
+            widget.setProperty("freelabShare", stretch)  # (ak.share_splitters: the heights at first show)
         except Exception:
             pass
         return box

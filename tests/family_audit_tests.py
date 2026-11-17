@@ -6,6 +6,7 @@ Python 3."""
 
 from __future__ import absolute_import, division, print_function
 
+import io
 import os
 import sys
 import unittest
@@ -488,6 +489,9 @@ class FakeCalls(object):
         self.record.found = getattr(self.record, "found", 0) + 1  # (looked up again at each use: a kept one crashed FontLab)
         return package.glyphs.get(name)
 
+    def init_layer(self, package, layer):
+        layer.ready = True  # (live: a code point set on a glyph whose layers were not set up so crashed FontLab)
+
     def new_layer(self, glyph, master):
         return glyph.layers.setdefault(master, NewLayer(glyph.name, master))
 
@@ -519,6 +523,8 @@ class FakeCalls(object):
         target.width = width
 
     def set_codes(self, glyph, codes):
+        if not glyph.layers or not all(getattr(layer, "ready", False) for layer in glyph.layers.values()):
+            raise RuntimeError("a code point on a glyph whose layers were not set up (crashed FontLab live)")
         glyph.codes = list(codes)
 
     def update_glyph(self, glyph):
@@ -610,6 +616,53 @@ class BuildTests(unittest.TestCase):
         self.assertEqual(report, [u"The Classes panel's feature classes of Regular are written as code, first in the "
                                   u"prefix.", u"The line metrics of Bold were not read (FontLab gives a script its font's "
                                   u"current master's only): set them in Font Info."], "Bold has no features: none lost")
+
+    def test_a_master_is_made_current_by_setmaster(self):
+        # (live, 2026-11-18: "attribute 'master' of 'flPackage' objects is not writable")
+        class Package(object):
+            current = u"Regular"
+
+            @property
+            def master(self):
+                return self.current
+
+            def setMaster(self, name):
+                self.current = name
+
+        package = Package()
+        fa.FontLabCalls.set_current_master(package, u"Bold")
+        self.assertEqual(package.master, u"Bold")
+        source = io.open(fa.__file__.replace(".pyc", ".py"), encoding="utf-8").read()
+        self.assertNotIn(u"package.master = ", source, "flPackage.master is never assigned")
+
+    def test_a_glyph_the_new_font_has_already_is_not_added_twice(self):
+        # (live, 2026-11-18: a new font comes with its .notdef, and the assembly's own made it twice)
+        class Glyph(object):
+            isNull = False
+
+            def __init__(self, name):
+                self.name = name
+
+        class Package(object):
+            def __init__(self):
+                self.glyphs, self.added = {u".notdef": Glyph(u".notdef")}, []
+
+            def findName(self, name):
+                return self.glyphs.get(name)
+
+            def addGlyph(self, glyph):
+                self.added.append(glyph.name)
+                self.glyphs[glyph.name] = Glyph(glyph.name)
+
+        class FontLab(object):
+            flGlyph = staticmethod(lambda: Glyph(u""))
+
+        calls, package = fa.FontLabCalls(FontLab), Package()
+        notdef = package.glyphs[u".notdef"]
+        self.assertIs(calls.new_glyph(package, u".notdef"), notdef)
+        self.assertEqual(package.added, [], "the font's own taken")
+        self.assertEqual(calls.new_glyph(package, u"A").name, u"A")
+        self.assertEqual(package.added, [u"A"])
 
     def test_no_glyph_object_is_kept_while_glyphs_are_added(self):
         # (live, 2026-11-18: setting the code points of the glyph objects kept from their adding crashed FontLab:

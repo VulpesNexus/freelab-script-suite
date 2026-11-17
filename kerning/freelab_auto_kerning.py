@@ -2330,6 +2330,53 @@ def centered_place(place, size, new_size, area=None, frame=(0, 0)):
     return x, y
 
 
+SHARE_PROP = "freelabShare"  # on a splitter's pane: its share of the splitter's height at first (share_splitters)
+SHARED_PROP = "freelabShared"  # on a splitter once share_splitters has given its panes their shares
+
+
+def shares_of(total, shares):
+    """The heights of panes sharing total pixels by their shares (None: a pane left as it is, taking none)."""
+    whole = float(sum(s for s in shares if s)) or 1.0
+    sizes = [int(total * s / whole) if s else 0 for s in shares]
+    if sizes:
+        last = max(range(len(sizes)), key=lambda k: shares[k] or 0)
+        sizes[last] += total - sum(sizes)
+    return sizes
+
+
+def share_splitters(window):
+    """Each splitter of a window whose panes carry their shares (SHARE_PROP) given heights in those shares, once,
+    as the window first shows: stretch factors only share what is left over the panes' own sizes, so a preview
+    of large text took the window and the list above it showed one row (live, 2026-11-18, CJK Spacing and
+    Feature Code's third tab). Sized on the next turn of the event loop, once laid out; never raises."""
+    QtCore, QtGui = _qt()
+
+    def share():
+        try:
+            for splitter in window.findChildren(QtGui.QSplitter):
+                if splitter.property(SHARED_PROP):
+                    continue
+                count = splitter.count()
+                panes = [splitter.widget(k) for k in range(count)]
+                shares = [p.property(SHARE_PROP) if p is not None else None for p in panes]
+                if not any(shares):
+                    continue
+                total = sum(int(size) for size in splitter.sizes())
+                if total <= 0:
+                    continue
+                splitter.setProperty(SHARED_PROP, True)
+                splitter.setSizes(shares_of(total, [int(s) if s else 0 for s in shares]))
+        except Exception:
+            pass
+
+    held = getattr(sys, "_freelab_share_slots", None)
+    if held is None:
+        held = sys._freelab_share_slots = []
+    held.append(share)  # (held: PythonQt drops a slot no Python object holds)
+    del held[:-8]
+    QtCore.QTimer.singleShot(0, share)
+
+
 def keep_center(owner):
     """A window that took another's place (register_window: owner.placed_from, the other's place and
     size), centered again on that window's center as it first shows: it was placed at the size asked for,
@@ -4718,6 +4765,7 @@ def filter_event(window, obj, event, pending):
             (getattr(module, "update_states", None) or update_states)(owner.dialog if owner is not None else window,
                                                                          hidden_too=True)
             (getattr(module, "keep_center", None) or keep_center)(owner)
+            (getattr(module, "share_splitters", None) or share_splitters)(window)
         except Exception:
             pass
         return False

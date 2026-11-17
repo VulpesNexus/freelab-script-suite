@@ -4377,6 +4377,13 @@ class SingleChoiceTests(unittest.TestCase):
             line.parentWidget = lambda parent=parent: parent
             self.assertEqual(ak.heads_section(line), kept, after and after.kind)
 
+    def test_a_splitters_panes_get_their_shares_at_first(self):
+        # (live: CJK Spacing's previews of large text took the window, its list showing one row)
+        self.assertEqual(ak.shares_of(600, [3, 2, 1]), [300, 200, 100])
+        self.assertEqual(sum(ak.shares_of(601, [3, 3, 2])), 601, "every pixel given")
+        self.assertEqual(ak.shares_of(500, [2, 0, 3]), [200, 0, 300], "a pane without a share takes none")
+        self.assertEqual(ak.shares_of(10, []), [])
+
     def test_a_tab_switch_hides_the_others_before_showing_its_own(self):
         # (owner's image 284, live: the bottom row held both tabs' buttons a moment and the window grew)
         calls = []

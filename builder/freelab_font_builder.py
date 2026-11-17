@@ -2009,7 +2009,7 @@ class FontBuilderDialog(object):
             if not list(package.masters or []):
                 package.addMaster("Regular", False, package, "", False, False)  # (a font as its source: None was refused live)
             if not package.master:
-                package.master = list(package.masters)[0]
+                package.setMaster(list(package.masters)[0])  # (flPackage.master is read-only: live, 2026-11-18)
             for attr, value in (("ascender_value", metrics.ascender), ("descender_value", metrics.descender),
                                 ("xHeight_value", metrics.x_height), ("capsHeight_value", metrics.cap_height)):
                 try:

@@ -1,5 +1,9 @@
 # FreeLab Script Suite
 
+This is a comprehensive script suite for FontLab to help you build and manage your fonts. This is not a clean-room recompilation of FontLab.
+
+It all started because I had wanted a dark theme for FontLab for ages. I was so happy to see that FontLab 8 came with one. I was not so happy when I found out I had to pay an extra $150 on top of the $200 I had already paid a year prior just to qualify for an upgrade. I want the fonts I make to be free, but I don't want to sacrifice the quality of the tools I use to make them. Thanks to the recent boom in AI, I finally had enough power to turn FontLab 7 into what I wish it were. The result of those efforts is what you see here, FreeLab Script Suite.
+
 FreeLab's tools for FontLab 7, which run inside it: a dark mode for its whole interface, a font builder from drawn template sheets, auto kerning, auto spacing, CJK spacing and vertical text, glyph composition (diacritics and other missing glyphs), feature code and its check, a font check, a font comparison, a family audit, and PDF proofs.
 
 **Status: 0.3.0.** Dark mode runs in FontLab 7.2.

@@ -557,6 +557,17 @@ class FakeTimer(object):
         self.slot = slot
 
 
+class FontLabCallTests(unittest.TestCase):
+    def test_a_new_fonts_master_calls_are_those_fontlab_takes(self):
+        # (live, 2026-11-18: addMaster refused None as its source font, and flPackage.master is read-only)
+        import io
+        with io.open(os.path.join(HERE, os.pardir, "builder", "freelab_font_builder.py"), encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertNotIn("addMaster(\"Regular\", False, None", source)
+        self.assertIn("package.addMaster(\"Regular\", False, package,", source)
+        self.assertNotIn("package.master = ", source)
+
+
 class UiRoundTests(unittest.TestCase):
     """The owner's UI round of 2026-11-17 (images 216, 239 to 241, 266 to 268, 274, 280) on Font Builder."""
 
