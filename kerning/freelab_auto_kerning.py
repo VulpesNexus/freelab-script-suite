@@ -997,6 +997,31 @@ def open_sibling_script(file_name, module_name, caller=None):
         return u"%s" % exc
 
 
+FEATURE_CHECK_FILE, FEATURE_CHECK_MODULE = "freelab_feature_check.py", "freelab_feature_check"
+
+
+def feature_code_refusal(package, texts, prefix=None, names=None, adding=()):
+    """For a script about to write feature code: why it must not (Feature Check's change_refusal: the
+    errors the code would bring that the font's code does not have now), or None. None too when Feature
+    Check or fontTools is not there: the write then goes ahead unchecked. texts: {tag: the whole
+    feature's new text}; prefix: the new prefix, or None to keep the font's; names: the font's glyph
+    names (read when None); adding: glyphs the same write adds (they count as in the font)."""
+    try:
+        checker = load_sibling(FEATURE_CHECK_FILE, FEATURE_CHECK_MODULE)
+        refusal = getattr(checker, "change_refusal", None)
+    except Exception:
+        return None
+    if refusal is None:
+        return None
+    try:
+        if names is None or adding:
+            names = list(names) if names is not None else [g.name for g in package.fgPackage.glyphs]
+            names += [name for name in adding if name not in set(names)]
+        return refusal(package, texts, prefix, names)
+    except Exception:
+        return None
+
+
 def open_kerning_check(glyphs=None, reason=None, caller=None):
     """Kerning Check on caller's font (a widget of the window it is opened from: opening_from), its lists
     limited to the pairs and entries with these glyphs (names, or glyphs) when given; reason says what the
@@ -1712,8 +1737,8 @@ def history_state(package):
 # The font tools in the order of the work, which the menu, each window's tools button, and its arrows
 # follow: the glyphs built (Glyph Compose), spaced, kerned, the features written, then the result
 # compared, checked (Font Check), and proofed.
-MENU_GROUPS = (("Glyph Compose", "Auto Spacing", "CJK Spacing", "CJK Vertical", "Auto Kerning", "Kerning Check",
-                "Feature Code", "Font Compare", "Font Check", "Proof"),
+MENU_GROUPS = (("Font Builder", "Glyph Compose", "Auto Spacing", "CJK Spacing", "CJK Vertical", "Auto Kerning", "Kerning Check",
+                "Feature Code", "Feature Check", "Font Compare", "Font Check", "Proof"),
                ("Dark Mode", "Toggle Dark Mode", "Dark Mode Settings", "Tab Docking", "Toggle Tab Docking"),
                ("Start MCP Listener", "Stop MCP Listener", "Start Listener", "Stop Listener"))  # (FreeLab MCP's, old names too)
 MENU_TITLE, SCRIPTS_MENU = "FreeLab", "menuScripts"

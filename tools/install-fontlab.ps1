@@ -86,6 +86,10 @@ $files = @(
     @{ From = 'compose\anchor_model.json'; Name = 'anchor_model.json' },
     @{ From = 'compose\GlyphData_LICENSE'; Name = 'GlyphData_LICENSE' },
     @{ From = 'features\freelab_feature_code.py'; Name = 'freelab_feature_code.py' },
+    @{ From = 'features\freelab_feature_check.py'; Name = 'freelab_feature_check.py' },
+    @{ From = 'builder\freelab_font_builder.py'; Name = 'freelab_font_builder.py' },
+    # Its tracer: a helper module, no menu entry of its own (see freelab_alternates.module)
+    @{ From = 'builder\freelab_trace.py'; Name = 'freelab_trace.module' },
     @{ From = 'features\ligature_model.json'; Name = 'ligature_model.json' },
     # A helper module, no script of its own: FontLab lists every .py of the folder in the Scripts menu,
     # so it goes in under the extension load_sibling (kerning/freelab_auto_kerning.py) also looks for.

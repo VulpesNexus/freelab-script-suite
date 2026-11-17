@@ -5808,6 +5808,13 @@ class AnchorPage(object):
                 if problem:
                     self.owner.log.add(u"The mark code has problems, so nothing was written: %s" % self.ak.html(problem), "error")
                     return
+            # (Feature Check: the whole font's code with it, which the block alone does not show)
+            changed = dict((t, new_texts[t]) for t in CODE_FEATURES if t in new_texts and new_texts[t] != self.texts.get(t))
+            refusal = getattr(self.ak, "feature_code_refusal", lambda *a, **k: None)(package, changed, None, self.names)
+            if refusal:
+                self.owner.log.add(u"Nothing was written: %s. <i>Feature Check</i> lists every finding." %
+                                   self.ak.html(refusal), "error")
+                return
         added, moved, touched, error = 0, 0, [], None
         written = set()  # (glyph, anchor) written in a master, as moved by hand
         coded = []  # the features whose code was written (a text the font has already is not)

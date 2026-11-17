@@ -1,0 +1,49 @@
+# Font builder
+
+*Scripts > FreeLab > Font Builder* makes template sheets to draw a font's glyphs on, in any app or on paper, and builds the glyphs from the sheets drawn: traced into outlines, or kept as images. The other tools then take over: *Auto Spacing* spaces them, *Glyph Compose* builds the accented letters and the rest from them, *Feature Code* writes their features.
+
+## Template
+
+- **Glyphs**: the characters typed or pasted in the box (each once; spaces do not count), or one of Font Check's character sets (its scripts, Unicode blocks, and foundries' sets).
+- **Leave out the glyphs the font has drawn** (with a font open): no box for a glyph that has outlines, components, or an image in the current master.
+- **Alternates of each**: boxes for *name.alt1*, *name.alt2*, and so on after each glyph, for a handwriting font's alternates (Feature Code makes them take turns).
+- **Glyphs a sheet** (100 by default, 400 at most): there are as many sheets as the glyphs need. A sheet larger than 120 megapixels gets fewer, so a CJK set at a large em size makes more, smaller sheets.
+- **Em size** (500 pixels by default): the em on the sheet. 500 draws well on a screen; for print at 300 dpi, an em of 500 pixels is 4.2 cm.
+
+A glyph is named as the font names it, where it has the character; else by its usual name (the Adobe Glyph List's for ASCII, Glyphs' for the rest, from Glyph Compose's *glyph_names.json*); else *uniXXXX*.
+
+Each glyph has a box: its em with the font's ascender, cap height, x-height, baseline (thicker), and descender, and an origin line, room above and below for accents and swashes, and the character over it with its glyph name. They are drawn in a pale blue (a gray of about 205) that the reading leaves out. Without a font open, the metrics are 1000 units to the em, ascender 800, descender −200, x-height 500, cap height 700.
+
+*Save template* writes one image a sheet, PNG or TIFF, numbered (*Family-1-of-3.png*).
+
+## Drawing
+
+Open a sheet in any app (Photoshop, Clip Studio Paint, Krita, Procreate, Illustrator) or print it. Draw each glyph in dark ink inside its box, on the image or on a layer above it, and save or export each sheet as an image again: PNG, JPEG, TIFF, BMP, WebP, or PSD (FontLab reads a PSD's flattened image). Paper can be scanned or photographed.
+
+The four corner squares and the two bands of black and white squares, over and under the boxes, tell the reading where the sheet is in the image and what it holds: its layout, its glyph names, and the metrics it was made with. A sheet needs no file beside it and no metadata (apps often drop it), so it can be read on another computer than the one that made it, and it can be turned, skewed, or photographed at a slant. Keep the squares and the bands clean and wholly in the image; one band is enough, so a smudge on one does no harm.
+
+## Build
+
+*Add sheets* adds the images drawn, in any order; *Read sheets* finds each in its image, reads its layout from a band, and takes every box that holds ink:
+
+- **Outlines (traced)**: each drawing traced into contours (FreeLab's tracer, after potrace's method: smooth curves, corners where the drawing turns sharply, nodes at extremes), specks and pinholes smaller than a square of 2 % of the em dropped.
+- **Images (as drawn)**: each drawing kept as an image in its glyph, cropped to its ink: black ink on a clear ground, opaque up to half the ink threshold and clear from halfway between it and white, so the guides and the paper drop out and the ink keeps its soft edges. For a bitmap or color font, or to trace by hand.
+
+**Ink darker than** (128 by default, 185 at most) is what counts as ink: raise it for pencil or light ink, lower it for gray paper. The guides are a gray of 205 once the image is gray, so they stay out at any setting. **Glyphs placed**: *Where drawn* keeps the ink where it was drawn against the box's origin line and gives the right side the left side's room; *With even sidebearings* sets both sides to 5 % of the em. *Auto Spacing* spaces them better either way.
+
+The list shows each glyph as traced, the sheet it came from, and a note (its contours; the glyph it goes into, where the font names it otherwise; a glyph drawn on two sheets; one the font has drawn already). *Build checked glyphs* writes the checked ones into the current master as one step of FontLab's History (*Edit > Undo* takes it back):
+
+- Each drawing goes into the font's glyph for its cell's character, whatever either is named: a sheet made from a font that calls A *A* fills this font's *uni0041*. Where the font has no glyph for the character, it goes into a glyph of the sheet's name, unless that glyph is for another character (a source font's *B* for A, where this font's *B* is U+0042): then into *uniXXXX*, or nowhere if that too is another character's (the log says so). A glyph added, or one of the font with no code point, takes the character's code point; none for alternates and ligatures, and none where another glyph of the font has it (the log names those).
+- A glyph drawn more than once among the checked rows (on two sheets, or under two names for one character) is built once, from the first; the log names the others.
+- A glyph the font has drawn in the current master is left as it is unless *Replace glyphs the font has drawn* is on, also when it was drawn after the sheets were read.
+- The lists stand for the font and master they were read for: after a switch to another master, *Build* asks to read the sheets again.
+- The ink is scaled from the units of the font the template was made with to this font's (a sheet made at 1000 units to the em, built in a font of 2048, keeps its size in ems).
+- The outlines turn the font's way (TrueType or PostScript, read from its glyphs), and each drawing is made before its glyph is touched.
+
+## Why FreeLab traces, not FontLab
+
+FontLab 7 has *Element > Image > Autotrace*, evaluated on 171 test images (six fonts' glyphs at 1000, 500, and 300 pixels to the em, clean, sharp-edged, and scan-like): it runs only through its own dialog, one glyph and one History step at a time, it ignores antialiasing, and on ten glyphs its outlines strayed two to four times as far from the drawing as potrace's, with up to eight smooth joins a glyph that bend. FreeLab's tracer follows potrace's published method, written anew from Peter Selinger's paper (potrace itself is GPL), and adds what fonts need: nodes at extremes, outlines turned the font's way, and coordinates in font units.
+
+## The sheet format
+
+A sheet is a whole number of units wide and high (a unit is a square of the corner patterns, about 1/24 of the em). The corners hold finder patterns as QR codes do (7 by 7 units: a black ring, a white ring, a 3 by 3 center), found by their 1:1:3:1:1 runs. Each band holds the layout as compact JSON, compressed, between a 4-byte mark (*FLFB*) and its length, and a CRC-32 after it, one bit a square, the top band read from its top left, the bottom one from its bottom left upward. The reading estimates the sheet's size in units from the corners' distances and each corner pattern's own square size, and tries the sizes near it: only the right one gives the mark and the CRC. From the size, the corners give the map from the sheet to the image (a homography), and each box is taken from the image through it, upright, at the image's own resolution.

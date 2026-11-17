@@ -1,0 +1,462 @@
+# -*- coding: utf-8 -*-
+"""Tests of Font Builder's sheets (their pure parts: layout, bands, finders, reading). Valid Python 2.7
+and Python 3."""
+from __future__ import absolute_import, division, print_function, unicode_literals
+
+import os
+import sys
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, os.pardir, "builder"))
+import freelab_font_builder as fb  # noqa: E402
+
+METRICS = fb.Metrics(1000, 800, -200, 500, 700)
+LATIN = ["A", "B", "C", "a", "b", "c", "uni00E9", "g.alt1", "f_f_i", "u1F600"]
+
+
+def sheet_of(names=LATIN, em=150, **options):
+    return fb.Sheet(names, [fb.label_of(n) for n in names], METRICS, em, **options)
+
+
+def raster(sheet, px):
+    """The sheet's marks as rows of bytes (0 ink, 255 paper), px pixels a unit."""
+    width, height = sheet.size_units()
+    rows = [bytearray(b"\xff" * (width * px)) for _ in range(height * px)]
+    for x, y, w, h in fb.marks(sheet):
+        for yy in range(int(round(y * px)), int(round((y + h) * px))):
+            rows[yy][int(round(x * px)):int(round((x + w) * px))] = b"\x00" * (int(round((x + w) * px)) - int(round(x * px)))
+    return [bytes(r) for r in rows]
+
+
+def warped_sampler(sheet, mapping):
+    """sample(x, y) of the sheet seen through mapping (sheet units to image pixels): each image point
+    taken back to the sheet, black where a mark is."""
+    inverse = fb.homography([fb.apply(mapping, *p) for p in ((0, 0), (1, 0), (1, 1), (0, 1))],
+                            [(0, 0), (1, 0), (1, 1), (0, 1)])
+    black = set()  # (every mark covers whole units)
+    for rx, ry, rw, rh in fb.marks(sheet):
+        for ux in range(int(round(rx)), int(round(rx + rw))):
+            for uy in range(int(round(ry)), int(round(ry + rh))):
+                black.add((ux, uy))
+
+    def sample(x, y):
+        u, v = fb.apply(inverse, x, y)
+        return 10 if (int(u // 1), int(v // 1)) in black else 245
+    return sample
+
+
+class LayoutTests(unittest.TestCase):
+    def test_labels(self):
+        self.assertEqual(fb.label_of("uni00E9"), "é")
+        self.assertEqual(fb.label_of("uni00E9.alt1"), "é.alt1")
+        self.assertEqual(fb.label_of("A"), "A")
+        self.assertEqual(fb.label_of("f_f_i"), "f_f_i")
+        self.assertEqual(len(fb.label_of("u1F600")) in (1, 2), True, "an astral character (a pair on a narrow build)")
+
+    def test_cells_fill_rows_and_the_sheet_is_whole_units(self):
+        sheet = sheet_of()
+        self.assertEqual((sheet.columns, sheet.rows), (4, 3))
+        w, h = sheet.size()
+        self.assertEqual((w % sheet.unit, h % sheet.unit), (0, 0))
+        cw, ch = sheet.cell_size()
+        left0, top0 = sheet.cell(0)
+        left5, top5 = sheet.cell(5)
+        self.assertEqual((left5 - left0, top5 - top0), (cw, ch))
+        last = sheet.cell(len(LATIN) - 1)
+        self.assertLess(last[1] + sheet.box_size()[1], h - sheet.margin() - sheet.band_height() + 1, "the last row clears the bottom band")
+
+    def test_units_map_back(self):
+        sheet = sheet_of()
+        ox, oy = sheet.origin(3)
+        self.assertEqual(sheet.to_units(3, ox, oy), (0.0, 0.0))
+        x, y = sheet.to_units(3, ox + sheet.em, oy - sheet.em / 2.0)
+        self.assertAlmostEqual(x, 1000)
+        self.assertAlmostEqual(y, 500)
+        guides = dict(sheet.guides(3))
+        self.assertAlmostEqual(guides["baseline"], oy)
+        self.assertAlmostEqual(oy - guides["x-height"], sheet.em / 2.0)
+
+    def test_sheets_split_by_count_and_by_size(self):
+        names = ["g%03d" % i for i in range(250)]
+        sheets = fb.split_sheets(names, names, METRICS, per_sheet=100, em=300)
+        self.assertEqual([len(s.names) for s in sheets], [100, 100, 50])
+        self.assertEqual([(s.index, s.count) for s in sheets], [(0, 3), (1, 3), (2, 3)])
+        big = fb.split_sheets(names, names, METRICS, per_sheet=400, em=1200)
+        for s in big:
+            w, h = s.size()
+            self.assertLessEqual(w * h, fb.SHEET_PIXELS_MAX)
+        self.assertEqual(sum(len(s.names) for s in big), 250)
+
+
+class BandTests(unittest.TestCase):
+    def test_the_payload_comes_back(self):
+        sheet = sheet_of(index=1, count=3, family="Test")
+        again = fb.Sheet.from_payload(fb.bits_payload(fb.band_bits(sheet.payload())))
+        self.assertEqual((again.names, again.labels, again.em, again.columns, again.index, again.count, again.family),
+                         (sheet.names, sheet.labels, sheet.em, sheet.columns, 1, 3, "Test"))
+        self.assertEqual(again.metrics.as_list(), METRICS.as_list())
+        self.assertEqual(again.size_units(), sheet.size_units())
+
+    def test_a_flipped_bit_is_caught(self):
+        bits = fb.band_bits(sheet_of().payload())
+        bits[100] ^= 1
+        self.assertIsNone(fb.bits_payload(bits))
+
+    def test_the_bands_stay_clear_of_the_cells_and_finders(self):
+        sheet = sheet_of()
+        w, h = sheet.size_units()
+        bits = len(fb.band_bits(sheet.payload()))
+        top = fb.band_squares(w, h, 0, bits)
+        bottom = fb.band_squares(w, h, 1, bits)
+        grid_top = sheet.grid_origin()[1] / float(sheet.unit)
+        grid_bottom = grid_top + sheet.rows * sheet.cell_size()[1] / float(sheet.unit)
+        self.assertLess(max(y for _, y in top), grid_top)
+        self.assertGreater(min(y for _, y in bottom), grid_bottom)
+        self.assertGreaterEqual(min(x for x, _ in top), fb.margin_units())
+        self.assertLessEqual(max(x for x, _ in top), w - fb.margin_units())
+
+
+class GeometryTests(unittest.TestCase):
+    def test_a_homography_maps_its_four_points(self):
+        src = [(0, 0), (10, 0), (10, 5), (0, 5)]
+        dst = [(3, 4), (100, 10), (95, 60), (0, 50)]
+        h = fb.homography(src, dst)
+        for (x, y), (u, v) in zip(src, dst):
+            a, b = fb.apply(h, x, y)
+            self.assertAlmostEqual(a, u, 6)
+            self.assertAlmostEqual(b, v, 6)
+
+
+class ReadTests(unittest.TestCase):
+    def test_finders_are_found_in_an_upright_sheet(self):
+        sheet = sheet_of(LATIN[:4])
+        rows = raster(sheet, 3)
+        found = fb.find_finders(rows)
+        corners = fb.corner_finders(found, len(rows[0]), len(rows))
+        self.assertIsNotNone(corners)
+        expected = [(x * 3, y * 3) for x, y in fb.finder_centers(*sheet.size_units())]
+        for (x, y, module, _), (ex, ey) in zip(corners, expected):
+            self.assertLess(abs(x - ex), 2)
+            self.assertLess(abs(y - ey), 2)
+            self.assertAlmostEqual(module, 3, delta=0.6)
+
+    def check_read(self, mapping, turn=0):
+        sheet = sheet_of()
+        w, h = sheet.size_units()
+        centers = [fb.apply(mapping, x, y) for x, y in fb.finder_centers(w, h)]
+        corners = centers[turn:] + centers[:turn]
+        # (each finder's square as find_finders measures it, a little off)
+        units = [1.02 * (fb.distance(fb.apply(mapping, x, y), fb.apply(mapping, x + 1, y)) +
+                         fb.distance(fb.apply(mapping, x, y), fb.apply(mapping, x, y + 1))) / 2.0
+                 for x, y in fb.finder_centers(w, h)]
+        units = units[turn:] + units[:turn]
+        found = fb.read_layout(corners, units, warped_sampler(sheet, mapping))
+        self.assertIsNotNone(found)
+        self.assertEqual(found.sheet.names, sheet.names)
+        return found
+
+    def test_a_sheet_reads_straight(self):
+        found = self.check_read(fb.homography([(0, 0), (1, 0), (1, 1), (0, 1)], [(0, 0), (4, 0), (4, 4), (0, 4)]))
+        x, y = found.to_image(*found.sheet.origin(0))
+        ox, oy = found.sheet.origin(0)
+        self.assertAlmostEqual(x, ox * 4.0 / found.sheet.unit, 3)
+
+    def test_a_sheet_reads_turned_skewed_and_in_perspective(self):
+        sheet = sheet_of()
+        w, h = sheet.size_units()
+        # (turned about 92 degrees, its far side shrunk by 6 %: a phone photo of a printed sheet)
+        corners_image = [(900, 40), (930, 40 + 3.1 * w), (930 - 3.0 * h, 30 + 3.05 * w), (900 - 3.15 * h, 60)]
+        mapping = fb.homography([(0, 0), (w, 0), (w, h), (0, h)], corners_image)
+        self.check_read(mapping, turn=1)
+
+    def test_the_bottom_band_reads_when_the_top_one_is_spoiled(self):
+        sheet = sheet_of()
+        w, h = sheet.size_units()
+        mapping = fb.homography([(0, 0), (1, 0), (1, 1), (0, 1)], [(0, 0), (3, 0), (3, 3), (0, 3)])
+        base = warped_sampler(sheet, mapping)
+        spoiled_bottom = (fb.margin_units() + 6) * 3  # (a smear across the top band's first rows)
+
+        def sample(x, y):
+            if y < spoiled_bottom and fb.margin_units() * 3 < x < (w - fb.margin_units()) * 3:
+                return 10
+            return base(x, y)
+        found = fb.read_layout([fb.apply(mapping, *c) for c in fb.finder_centers(w, h)], 3.0, sample)
+        self.assertIsNotNone(found)
+        self.assertEqual(found.band, 1)
+
+    def test_nothing_reads_from_a_blank_image(self):
+        self.assertIsNone(fb.read_layout([(10, 10), (500, 10), (500, 700), (10, 700)], 4.0, lambda x, y: 245, reach=2))
+
+
+class GlyphListTests(unittest.TestCase):
+    def test_characters_once_without_spaces(self):
+        self.assertEqual(fb.characters_of("ab a\nc\U0001F600"), ["a", "b", "c", "\U0001F600"])
+
+    def test_names_come_from_the_font_then_glyphs_names_then_uni(self):
+        nice = {0xE9: "eacute", 0x0434: "de-cy"}
+        glyphs = fb.template_glyphs(["a", "é", "д", "☃"], font_names=["a", "de-cy"],
+                                    by_code={0x61: "a"}, nice=nice)
+        self.assertEqual([n for n, _ in glyphs], ["a", "eacute", "uni0434", "uni2603"],
+                         "de-cy is taken by another glyph of the font: uni0434")
+
+    def test_glyphs_drawn_are_left_out_and_alternates_follow(self):
+        glyphs = fb.template_glyphs(["a", "b"], font_names=["a"], by_code={0x61: "a"}, lacking={"a"}, alternates=1)
+        self.assertEqual(glyphs, [("a.alt1", "a.alt1"), ("b", "b"), ("b.alt1", "b.alt1")])
+
+    def test_code_points_of_names(self):
+        nice = {0xE9: "eacute"}
+        self.assertEqual(fb.code_for("uni00E9", nice), 0xE9)
+        self.assertEqual(fb.code_for("u1F600", nice), 0x1F600)
+        self.assertEqual(fb.code_for("eacute", nice), 0xE9)
+        self.assertEqual(fb.code_for("a", nice), 0x61)
+        self.assertEqual(fb.code_for("zero", nice), 0x30)
+        self.assertEqual(fb.code_for("ampersand", nice), 0x26)
+        self.assertEqual(fb.template_glyphs(["0", "&"]), [("zero", "0"), ("ampersand", "&")])
+        self.assertIsNone(fb.code_for("a.alt1", nice))
+        self.assertIsNone(fb.code_for("f_i", nice))
+
+
+class PlacementTests(unittest.TestCase):
+    def square(self, x0, y0, side, clockwise=False):
+        pts = [(x0, y0, "on"), (x0 + side, y0, "on"), (x0 + side, y0 + side, "on"), (x0, y0 + side, "on")]
+        return list(reversed(pts)) if clockwise else pts
+
+    def test_drawn_keeps_the_ink_and_mirrors_its_left_room(self):
+        contours, advance = fb.placed([self.square(100, 0, 300)], "drawn", 1000)
+        self.assertEqual(contours[0][0][:2], (100, 0))
+        self.assertEqual(advance, 500)
+
+    def test_even_sets_both_sides(self):
+        contours, advance = fb.placed([self.square(100, 0, 300)], "even", 1000)
+        self.assertEqual(min(x for x, _, _ in contours[0]), 50)
+        self.assertEqual(advance, 400)
+
+    def test_outer_contours_and_holes_turn_the_way_asked(self):
+        outer = self.square(0, 0, 400)
+        hole = self.square(100, 100, 200)  # (drawn the same way as the outer one: wrong for a hole)
+        for clockwise_outer in (True, False):
+            out = fb.oriented([outer, hole], clockwise_outer)
+            self.assertEqual(fb.signed_area(out[0]) < 0, clockwise_outer)
+            self.assertEqual(fb.signed_area(out[1]) < 0, not clockwise_outer)
+
+    def test_the_ink_box_skips_guides_and_padding(self):
+        width, stride, height = 10, 12, 6
+        rows = [bytearray(b"\xff" * stride) for _ in range(height)]
+        rows[1][2:9] = b"\xcd" * 7  # (a guide, gray 205: not ink)
+        rows[2][3] = 0
+        rows[4][6] = 40
+        rows[3][11] = 0  # (past the width, in the row's padding: not the image's)
+        data = b"".join(bytes(r) for r in rows)
+        self.assertEqual(fb.ink_box(data, width, height, stride, 128), (3, 2, 7, 5))
+        self.assertIsNone(fb.ink_box(b"\xff" * (stride * height), width, height, stride, 128))
+
+    def test_a_cell_maps_to_units_through_its_origin(self):
+        sheet = sheet_of()
+        units, x0, y_top = fb.cell_mapping(sheet, 2, 2.0)
+        left, top = sheet.cell(2)
+        ox, oy = sheet.origin(2)
+        # the origin's place in the cell image (scale 2) maps to (0, 0)
+        px, py = (ox - left) * 2.0, (oy - top) * 2.0
+        self.assertAlmostEqual(x0 + px * units, 0.0, 6)
+        self.assertAlmostEqual(y_top - py * units, 0.0, 6)
+        self.assertAlmostEqual(units * sheet.em * 2.0, sheet.metrics.upm)
+
+
+class Box(object):
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+
+class FakeLayer(object):
+    def __init__(self, shapes=()):
+        self.shapes, self.removals, self.advanceWidth = list(shapes), 0, 0
+
+    def removeAllShapes(self):
+        self.removals += 1
+        self.shapes = []
+
+    def addShape(self, shape):
+        self.shapes.append(shape)
+
+    def setGlyphComponents(self, *args):
+        pass
+
+
+class FakeGlyph(object):
+    """An flGlyph (layers by master, fgGlyph.unicode) whose fontgate glyph (fg) is what the font's list
+    holds (name, unicodes), as in FontLab."""
+
+    def __init__(self, name, code=None):
+        self.name = name
+        self.layers = {}
+        self.fgGlyph = self
+        self.unicodes = [code] if code is not None else []
+
+    @property
+    def unicode(self):
+        return self.unicodes[0] if self.unicodes else None
+
+    @unicode.setter
+    def unicode(self, code):
+        self.unicodes = [code]
+
+    def getLayerByName(self, master, create=False):
+        if master not in self.layers and create:
+            self.layers[master] = FakeLayer()
+        return self.layers.get(master)
+
+
+class FakePackage(object):
+    def __init__(self, upm=1000):
+        self.master, self.upm = "Regular", upm
+        self.found = {}
+        self.fgPackage = Box(id="fake", glyphs=[])
+
+    def findName(self, name):
+        return self.found.get(name)
+
+    def addGlyph(self, glyph):
+        glyph = FakeGlyph(glyph.name)  # (FontLab adds a copy)
+        self.found[glyph.name] = glyph
+        self.fgPackage.glyphs.append(glyph)
+
+
+class FakeShape(object):
+    def addContours(self, contours, *args):
+        self.contours = contours
+
+
+SQUARE = [(50, 0, "on"), (450, 0, "on"), (450, 700, "on"), (50, 700, "on")]
+
+
+class BuildTests(unittest.TestCase):
+    """build_glyphs on a fake font (review 9: stale checks, code points, units per em)."""
+
+    def setUp(self):
+        self.saved = (fb._qt, fb.nice_names, fb.made_contour, fb.is_postscript)
+        fb._qt = lambda: (None, None)
+        fb.nice_names = lambda: {}
+        fb.made_contour = lambda host, nodes, core: nodes
+        fb.is_postscript = lambda package: False
+        self.logged = []
+
+    def tearDown(self):
+        fb._qt, fb.nice_names, fb.made_contour, fb.is_postscript = self.saved
+
+    def dialog(self, package, drawn, replace=False):
+        d = fb.FontBuilderDialog.__new__(fb.FontBuilderDialog)
+        d.busy, d.package = False, package
+        d.current_font = lambda: package
+        d.checked_drawn = lambda: drawn
+        d.placement = Box(currentIndex=0)
+        d.replace = Box(checked=replace)
+        d.show_drawn = lambda: None
+        d.log = Box(add=lambda text, level="info": self.logged.append(text))
+        d.fontlab = Box(flGlyph=lambda: Box(name=None), flShape=FakeShape)
+        status = Box(undo=lambda text: "", report=lambda log: None)
+        d.ak = Box(begin_write=lambda *a: True, notify_changed=lambda *a, **k: status, html=lambda s: s,
+                   font_key=lambda p: id(p))
+        d.read_for = d.target_key(package)
+        return d
+
+    def add(self, package, name, code=None, drawn=False):
+        glyph = FakeGlyph(name, code)
+        glyph.layers["Regular"] = FakeLayer(["ink"] if drawn else [])
+        package.found[name] = glyph
+        package.fgPackage.glyphs.append(glyph)
+        return glyph
+
+    def test_a_glyph_drawn_since_the_reading_is_kept_without_replace(self):
+        p = FakePackage()
+        glyph = self.add(p, "A", 0x41)
+        d = self.dialog(p, [fb.Drawn("A", "A", "sheet", contours=[SQUARE])])
+        glyph.layers["Regular"].shapes.append("drawn after the reading")
+        d.build_glyphs()
+        self.assertEqual(glyph.layers["Regular"].removals, 0)
+        self.assertTrue(any("Left as drawn" in line for line in self.logged))
+
+    def test_another_master_since_the_reading_builds_nothing(self):
+        p = FakePackage()
+        glyph = self.add(p, "A", 0x41)
+        d = self.dialog(p, [fb.Drawn("A", "A", "sheet", contours=[SQUARE])])
+        p.master = "Bold"
+        d.build_glyphs()
+        self.assertEqual(glyph.layers, {"Regular": glyph.layers["Regular"]})
+        self.assertTrue(any("Read sheets" in line for line in self.logged))
+
+    def test_a_drawing_goes_into_the_glyph_that_has_its_code_point(self):
+        p = FakePackage()
+        owner = self.add(p, "uni0041", 0x41)
+        self.dialog(p, [fb.Drawn("A", "A", "sheet", contours=[SQUARE])]).build_glyphs()
+        self.assertIsNone(p.findName("A"), "no second glyph for U+0041")
+        self.assertEqual(len(owner.layers["Regular"].shapes), 1)
+
+    def test_a_custom_name_keeps_its_cells_code_point(self):
+        p = FakePackage()
+        self.dialog(p, [fb.Drawn("customA", "A", "sheet", contours=[SQUARE])]).build_glyphs()
+        self.assertEqual(p.findName("customA").unicode, 0x41)
+
+    def test_a_character_drawn_twice_is_built_once(self):
+        # (review 10: the second drawing replaced the first, Replace off; two names for one character too)
+        p = FakePackage()
+        other = [(60, 0, "on"), (300, 0, "on"), (300, 300, "on")]
+        drawn = [fb.Drawn("A", "A", "sheet 1", contours=[SQUARE]), fb.Drawn("customA", "A", "sheet 2", contours=[other]),
+                 fb.Drawn("A", "A", "sheet 3", contours=[other])]
+        self.dialog(p, drawn).build_glyphs()
+        self.assertEqual(p.findName("A").unicode, 0x41)
+        self.assertIsNone(p.findName("customA"))
+        layer = p.findName("A").layers["Regular"]
+        self.assertEqual(layer.removals, 1)
+        self.assertEqual(len(layer.shapes[0].contours[0]), 4, "the first drawing")
+        self.assertTrue(any("more than once" in line for line in self.logged))
+
+    def test_a_name_held_by_another_character_is_not_drawn_into(self):
+        # (review 10: a source font's B for A, here B at U+0042)
+        p = FakePackage()
+        b = self.add(p, "B", 0x42)
+        self.dialog(p, [fb.Drawn("B", "A", "sheet", contours=[SQUARE])]).build_glyphs()
+        self.assertEqual(b.layers["Regular"].removals, 0)
+        self.assertEqual(b.unicode, 0x42)
+        self.assertEqual(p.findName("uni0041").unicode, 0x41, "into the character's own uni name")
+
+    def test_an_unencoded_glyph_of_the_name_takes_the_character(self):
+        p = FakePackage()
+        glyph = self.add(p, "A")
+        self.dialog(p, [fb.Drawn("A", "A", "sheet", contours=[SQUARE])]).build_glyphs()
+        self.assertEqual(glyph.unicode, 0x41)
+
+    def test_a_dotted_name_keeps_its_labels_character(self):
+        self.assertEqual(fb.cell_code("A.display", "A"), 0x41)
+        self.assertIsNone(fb.cell_code("A.display.alt1", "A.alt1"))
+
+    def test_ink_scales_to_the_fonts_units(self):
+        p = FakePackage(2048)
+        self.dialog(p, [fb.Drawn("A", "A", "sheet", contours=[SQUARE], upm=1000)]).build_glyphs()
+        made = p.findName("A").layers["Regular"].shapes[0].contours
+        self.assertAlmostEqual(max(y for c in made for _, y, _ in c), 700 * 2.048)
+
+    def test_cell_codes_and_targets(self):
+        self.assertEqual(fb.cell_code("customA", "A"), 0x41)
+        self.assertIsNone(fb.cell_code("a.alt1", "a.alt1"))
+        self.assertEqual(fb.target_name("A", 0x41, {0x41: "uni0041"}), "uni0041")
+        self.assertEqual(fb.target_name("A", 0x41, {}), "A")
+
+    def test_image_ink_leaves_guides_and_paper_clear(self):
+        table = fb.alpha_table(128)
+        self.assertEqual(table[0], 255)
+        self.assertEqual(table[205], 0, "a guide")
+        self.assertEqual(table[240], 0, "scanned paper")
+        self.assertTrue(0 < table[128] < 255, "an antialiased edge")
+        for threshold in (160, 180, fb.THRESHOLD_MAX):  # (review 10: at 180 a guide came back as faint ink)
+            self.assertEqual(fb.alpha_table(threshold)[fb.GUIDE_GRAY], 0)
+            self.assertEqual(fb.alpha_table(threshold)[0], 255)
+
+    def test_the_guides_gray_is_what_qt_makes_of_their_color(self):
+        r, g, b = fb.GUIDE_RGB
+        self.assertEqual((11 * r + 16 * g + 5 * b) // 32, fb.GUIDE_GRAY)
+        self.assertLessEqual(fb.THRESHOLD_MAX, fb.GUIDE_GRAY - 15)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -28,6 +28,8 @@ PY27_FILES = (
     "tests/darkmode_tests.py", "kerning/freelab_auto_kerning.py", "kerning/freelab_kerning_check.py", "kerning/common_pairs.txt", "kerning/script_pairs.txt",
     "tests/kern_tests.py", "spacing/freelab_auto_spacing.py", "tests/spacing_tests.py",
     "compose/freelab_glyph_compose.py", "compose/glyph_names.json", "features/freelab_feature_code.py",
+    "features/freelab_feature_check.py", "tests/feature_check_tests.py",
+    "builder/freelab_font_builder.py", "tests/font_builder_tests.py", "builder/freelab_trace.py", "tests/trace_tests.py",
     "compose/freelab_glyph_generation.py", "compose/glyph_generation.json", "compose/glyph_generation_LICENSE",
     "tests/generation_tests.py",
     "tests/glyphtools_tests.py",
@@ -55,7 +57,14 @@ PY27_SUITES = ("tests/darkmode_tests.py", "tests/kern_tests.py", "tests/spacing_
                "tests/cjk_tests.py", "tests/cjk_vertical_tests.py", "tests/glyphcodes_tests.py",
                "tests/features_tests.py", "tests/fontcheck_tests.py",
                "tests/compare_tests.py", "tests/proof_tests.py", "tests/tabs_tests.py",
-               "tests/alternates_tests.py", "tests/language_font_tests.py", "tests/generation_tests.py")
+               "tests/alternates_tests.py", "tests/language_font_tests.py", "tests/generation_tests.py",
+               "tests/feature_check_tests.py", "tests/font_builder_tests.py", "tests/trace_tests.py")
+# Suites run under 2.7 with the fontTools FontLab 7 ships (3.43), where FontLab is installed: Feature
+# Check runs on it inside FontLab, and its checks differ from fontTools 4's in places
+PY27_FONTTOOLS_SUITES = ("tests/feature_check_tests.py",)
+FONTLAB_SITE = Path(os.environ.get("FREELAB_FONTLAB_SITE") or
+                    Path(os.environ.get("ProgramFiles") or ".") / "Fontlab" / "FontLab 7" / "Resources" /
+                    "python" / "2.7" / "site-packages")
 
 
 def run_py3() -> tuple[bool, list[str]]:
@@ -82,11 +91,14 @@ def run_py27() -> bool | None:
         env["TEMP"] = env["TMP"] = str(work)
         for suite in PY27_SUITES:
             print("-- %s" % suite)
+            suite_env = dict(env)
+            if suite in PY27_FONTTOOLS_SUITES and (FONTLAB_SITE / "fontTools").is_dir():
+                suite_env["PYTHONPATH"] = str(FONTLAB_SITE)
             proc = subprocess.run(
                 # No -E: it would drop PYTHONIOENCODING; PYTHONPATH and PYTHONHOME are removed above instead.
                 [str(PY27), "-s", "-B", str(work / suite)],
                 cwd=str(work),
-                env=env,
+                env=suite_env,
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,

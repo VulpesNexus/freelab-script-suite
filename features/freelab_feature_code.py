@@ -1060,6 +1060,18 @@ def freelab_block(tag, text, block_name):
     return u"feature %s {\n%s} %s;\n" % (tag, inner, tag)
 
 
+def own_code_refusal(ak, package, texts, prefix=None, names=None):
+    """Why the code must not be written (the shared feature_code_refusal: the new errors it would bring
+    the font, by Feature Check), or None, as there: also when the shared module predates it."""
+    refusal = getattr(ak, "feature_code_refusal", None)
+    if refusal is None:
+        return None
+    try:
+        return refusal(package, texts, prefix, names)
+    except Exception:
+        return None
+
+
 def check_code(text, names):
     """fontTools' parser's complaint about feature code (glyph names checked against the font's), or
     None; None too where fontTools is not there."""
@@ -5701,6 +5713,12 @@ class FeatureCodeDialog(object):
             self.run()
             self.log.add(u"The features changed since they were read: here they are again. Nothing was written.",
                          "warning")
+            return
+        refusal = own_code_refusal(self.ak, self.package, dict((tag, texts[tag]) for tag in self.tags_shown(texts)),
+                                   prefix, self.names)
+        if refusal:
+            self.log.add(u"Nothing was written: %s. <i>Feature Check</i> lists every finding." % self.ak.html(refusal),
+                         "error")
             return
         written, error, skipped = [], None, None
         self.set_busy(True)  # (the window answers while the top line says what is under way)

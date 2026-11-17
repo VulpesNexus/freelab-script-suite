@@ -1439,6 +1439,12 @@ class CJKSpacingDialog(object):
             self.log.add(u"The feature code (%s) changed since the list was read: here is the list again, to check "
                          u"before writing. Nothing was written." % self.ak.html(self.ak.joined(changed)), "warning")
             return
+        refusal = getattr(self.ak, "feature_code_refusal", lambda *a, **k: None)(
+            package, dict((tag, new[tag]) for tag in ("palt", "halt") if tag in new and new[tag] != self.texts.get(tag)))
+        if refusal:  # (Feature Check: the code would bring an error the font's code does not have)
+            self.log.add(u"Nothing was written: %s. <i>Feature Check</i> lists every finding." % self.ak.html(refusal),
+                         "error")
+            return
         written, error, syllables = [], None, 0
         shapes = set(c.shape for c in self.hangul_chosen())
         try:

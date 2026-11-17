@@ -973,7 +973,8 @@ class BeforeChangesTests(unittest.TestCase):
         root = os.path.join(HERE, os.pardir)
         expected = {"spacing/freelab_auto_spacing.py": 1, "cjk/freelab_cjk_spacing.py": 1,
                     "compose/freelab_glyph_compose.py": 1, "features/freelab_feature_code.py": 1,
-                    "checks/freelab_font_check.py": 1,
+                    "checks/freelab_font_check.py": 1, "features/freelab_feature_check.py": 1,
+                    "builder/freelab_font_builder.py": 1,
                     "kerning/freelab_auto_kerning.py": 2}  # (flag_glyphs's, and begin_write's own before_changes)
         for path, count in expected.items():
             with io.open(os.path.join(root, path), encoding="utf-8") as handle:
@@ -2176,9 +2177,10 @@ class WindowTests(unittest.TestCase):
         self.assertIsNone(ak.show_in_glyph_window(sys.modules["fontlab"], u"/A"))
 
     def test_the_tools_follow_the_order_of_the_work(self):
-        self.assertEqual(ak.FONT_TOOLS[0], "Glyph Compose")
+        self.assertEqual(ak.FONT_TOOLS[0], "Font Builder", "drawn first, then the rest built from it")
         self.assertEqual(ak.FONT_TOOLS[-2:], ("Font Check", "Proof"), "checked before it is proofed")
-        self.assertEqual(ak.tool_neighbors("Glyph Compose"), (None, "Auto Spacing"))
+        self.assertEqual(ak.tool_neighbors("Glyph Compose"), ("Font Builder", "Auto Spacing"))
+        self.assertEqual(ak.tool_neighbors("Feature Check"), ("Feature Code", "Font Compare"), "code checked once written")
         self.assertEqual(ak.tool_neighbors("Kerning Check"), ("Auto Kerning", "Feature Code"))
         self.assertEqual(ak.tool_neighbors("Proof"), ("Font Check", None))
         self.assertEqual(ak.tool_neighbors("No Such Tool"), (None, None))

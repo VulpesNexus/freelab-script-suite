@@ -2263,6 +2263,12 @@ class CJKVerticalDialog(object):
         if problems:
             self.log.add(u"The code has problems, so nothing was written: %s" % self.ak.html(u"; ".join(problems)), "error")
             return
+        # (Feature Check: the whole font's code with it, the forms to build counted as there)
+        refusal = getattr(self.ak, "feature_code_refusal", lambda *a, **k: None)(package, new, None, list(names))
+        if refusal:
+            self.log.add(u"Nothing was written: %s. <i>Feature Check</i> lists every finding." % self.ak.html(refusal),
+                         "error")
+            return
         heights = [m for m in metrics if m.key == "advance_height"]
         vhea = [m for m in metrics if m.key != "advance_height"]
         self.set_busy(True, WRITE_STEPS, at_once=True)
