@@ -577,6 +577,12 @@ class FakeCombo(Anything):
         for slot in self.slots.get("activated(int)", []):
             slot(index)
 
+    def setProperty(self, name, value):
+        self.__dict__.setdefault("properties", {})[name] = value
+
+    def property(self, name):
+        return self.__dict__.get("properties", {}).get(name)
+
 
 class FakeSpin(Anything):
     """A spin box that keeps its value and its suffix, and signals a change of value."""
@@ -1305,62 +1311,75 @@ class DialogTests(unittest.TestCase):
 
     def test_a_comparison_shows_its_progress(self):
         # The owner: "the comparing step could potentially get its own loading bar, since CJK fonts can take a
-        # bit to load"
+        # bit to load". It is the window's own now, in its top row (ak.busy_*: owner's image 200)
         dialog = self.dialog([first_font(), second_font()])
         dialog.choice_b.pick(1)
-        told = []
-
-        class Widget(object):
-            def __init__(self, name):
-                self.name = name
-
-            def __getattr__(self, attr):
-                return lambda *args: told.append((self.name, attr) + args)
-
-        dialog.busy_row, dialog.busy_step, dialog.busy_bar = Widget("row"), Widget("step"), Widget("bar")
-        pumped, flags = [], []
-        gui, core = sys.modules["PythonQt"].QtGui, sys.modules["PythonQt"].QtCore
-        gui.classes["QApplication"] = type("QApplication", (), {"processEvents": staticmethod(
-            lambda *flag: pumped.append(flag))})
-        core.classes["QEventLoop"] = type("QEventLoop", (), {"ExcludeUserInputEvents": "no input"})
-        saved, enable, enabled = fcmp.SHOW_AFTER, self.ak.enable, {}
+        ak = self.ak
+        started, moved, ended, enabled = [], [], [], {}
+        real = ak.busy_start, ak.busy_progress, ak.busy_end, ak.enable, fcmp.SHOW_AFTER
 
         def restore():
-            del gui.classes["QApplication"], core.classes["QEventLoop"]
-            fcmp.SHOW_AFTER, self.ak.enable = saved, enable
+            ak.busy_start, ak.busy_progress, ak.busy_end, ak.enable, fcmp.SHOW_AFTER = real
         self.addCleanup(restore)
-        self.ak.enable = lambda widget, on: enabled.setdefault(id(widget), []).append(bool(on))
+        ak.busy_start = lambda owner, what=u"", stoppable=True: started.append(what)
+        ak.busy_progress = lambda owner, what=None, part=None, force=False, stoppable=True: moved.append(
+            (what, part, stoppable))
+        ak.busy_end = lambda owner: ended.append(owner.busy)
+        ak.enable = lambda widget, on: enabled.setdefault(id(widget), []).append(bool(on))
         dialog.compare()
-        self.assertEqual(told, [], "a small font compared at once: no bar to flicker")
+        self.assertEqual((started, moved, ended), ([], [], []), "a small font compared at once: no bar to flicker")
         fcmp.SHOW_AFTER = 0
         dialog.compare()
-        steps = [t[2] for t in told if t[:2] == ("step", "setText")]
-        self.assertEqual(steps, [label + self.ELLIPSIS for label, _ in fcmp.COMPARE_STEPS], "each step said in turn")
-        visible = [t[2] for t in told if t[:2] == ("row", "setVisible")]
-        self.assertEqual(visible, [True, False], "shown, then gone with the comparison")
-        values = [t[2] for t in told if t[:2] == ("bar", "setValue")]
+        self.assertEqual(started, [fcmp.READ_A_STEP], "the top row from the first step")
+        self.assertEqual([what for what, _, _ in moved if what is not None][::1],
+                         [what for what, _, _ in moved], "each move names its step")
+        steps = []
+        for what, _, _ in moved:
+            if not steps or steps[-1] != what:
+                steps.append(what)
+        self.assertEqual(steps, [label for label, _ in fcmp.COMPARE_STEPS], "each step said in turn")
+        values = [part for _, part, _ in moved]
         self.assertEqual(values, sorted(values))
-        self.assertEqual(values[-1], fcmp.BAR_RANGE)
-        self.assertTrue(pumped and all(flag == ("no input",) for flag in pumped), "the user's clicks wait")
+        self.assertEqual(values[-1], 1.0)
+        self.assertEqual(moved[-1][2], False, "the lists filled: too late to stop")
+        self.assertEqual(ended, [False], "gone with the comparison (not busy then)")
         self.assertFalse(dialog.busy)
         for widget in (dialog.choice_a, dialog.choice_b, dialog.threshold, dialog.compare_button, dialog.tabs,
                        dialog.pages):
             states = enabled.get(id(widget), [])
             self.assertTrue(False in states and states[-1], "grayed meanwhile, then clickable again")
         self.assertAlmostEqual(fcmp.bar_value(fcmp.COMPARE_STEPS, fcmp.GLYPHS_STEP, 0.5), (0.08 + 0.85) / 2)
-        # Review: a PythonQt that refuses the flag painted nothing at all (its error swallowed)
-        def refusing(*flag):
-            if flag:
-                raise TypeError("processEvents(): no such overload")
-            self.fail("the user's input is never let through")
-        gui.classes["QApplication"] = type("QApplication", (), {"processEvents": staticmethod(refusing)})
-        del told[:]
-        dialog.pump(force=True)
-        dialog.pump(force=True)
-        self.assertEqual(sorted(name for name, attr in [t[:2] for t in told] if attr == "repaint"),
-                         ["bar", "bar", "row", "row", "step", "step"], "the bar and its step painted alone")
-        self.assertTrue(dialog.pump_refused, "the flag not tried again")
         self.assertIsNone(fcmp.bar_value(fcmp.COMPARE_STEPS, u"elsewhere"))
+        # Stopped (the tools menu, an arrow, Close, Esc): the comparison shown before stays, as it was
+        compared = dialog.sides, dialog.results, dialog.kern_rows, dialog.package
+        lines = []
+        dialog.font_label = type("Line", (object,), {"text": u"Compared A with B.",
+                                                     "setText": lambda label, text: lines.append(text)})()
+
+        def stopping(owner, what=None, part=None, force=False, stoppable=True):
+            if what == fcmp.KERNING_STEP and stoppable:
+                raise ak.Stopped()
+        ak.busy_progress = stopping
+        logged = []
+        dialog.log.add = lambda text, level="info": logged.append((level, text))
+        dialog.compare()
+        self.assertEqual((dialog.sides, dialog.results, dialog.kern_rows, dialog.package), compared)
+        self.assertEqual(lines[-1], u"Compared A with B.", "its top line too")
+        self.assertEqual((logged[-1][0], dialog.busy, ended[-1]), ("warning", False, False))
+
+    def test_has_font_and_the_choices_kept_usable(self):
+        """Owner's image 209: with no comparison to make, the controls are grayed (ak.no_font_states, which
+        asks has_font) but the two dropdowns that choose the fonts."""
+        dialog = self.dialog([first_font(), second_font()])
+        prop = getattr(self.ak, "WITHOUT_FONT_PROP", "freelabWithoutFont")
+        self.assertTrue(dialog.choice_a.property(prop) and dialog.choice_b.property(prop))
+        self.assertFalse(dialog.threshold.property(prop))
+        self.assertFalse(dialog.has_font(), "no second side chosen yet")
+        dialog.choice_b.pick(1)
+        self.assertTrue(dialog.has_font())
+        self.assertTrue(self.ak.window_has_font(dialog))
+        dialog.missing = lambda: u"No font is open."
+        self.assertFalse(dialog.has_font(), "something missing: no comparison to make")
 
     def test_a_color_glyph_at_its_font_scale(self):
         a, b = first_font(), second_font()

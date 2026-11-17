@@ -129,12 +129,12 @@ def plan(font=None, existing=False, settings=None):
 class TableTests(unittest.TestCase):
     def test_first_scope(self):
         entries = DATA["entries"]
-        self.assertEqual(len(entries), 250)
+        self.assertEqual(len(entries), 250 + 206, "the table's, and the squared words and abbreviations (report 177)")
         counts = dict((g["id"], g["count"]) for g in DATA["groups"])
         self.assertEqual(counts, {"spaces": 18, "dashes": 10, "duplicates": 44, "punctuation": 28, "lookalikes": 52,
-                                  "ligatures": 17, "fractions": 20, "arrows": 20, "turned": 41},
+                                  "ligatures": 17, "fractions": 20, "arrows": 20, "turned": 41, "squared": 206},
                          "the arrows' and triangles' sources added (2026-11-16): built from what they make")
-        self.assertEqual(len(set(e["code"] for e in entries)), 250, "each character once")
+        self.assertEqual(len(set(e["code"] for e in entries)), 250 + 206, "each character once")
         turned = [e for e in entries if e["group"] == "turned"]
         self.assertTrue(all(any(w["confidence"] == "starting point" for w in e["ways"]) for e in turned),
                         "the turned and reversed letters are starting points")
@@ -1979,6 +1979,172 @@ class ReferenceTests(unittest.TestCase):
         page.owner.reference_family = lambda codes, more=(): (None, u"")
         page.draw_reference(rows[u(0x201F)])
         self.assertEqual(notes[-1], u"No reference font has %s." % u(0x201F))
+
+
+def kana_font(empty=(), more=None):
+    """A bare font with kana (each a full em wide, ink 100 to 900 across, -50 to 800 up), 平 and 成, an
+    ideographic space, k and g, and the glyphs named in empty drawn empty (a CID-keyed font's: its own
+    code point, nothing drawn)."""
+    glyphs = dict(BARE)
+    kana = {"ki": 0x30AD, "ro": 0x30ED, "me": 0x30E1, "choon": 0x30FC, "to": 0x30C8, "ru": 0x30EB, "se": 0x30BB,
+            "n-kata": 0x30F3, "chi": 0x30C1, "a-kata": 0x30A2, "pa": 0x30D1, "hei": 0x5E73, "sei": 0x6210}
+    for name, code in kana.items():
+        glyphs[name] = (code, 1000, [rect(100, -50, 900, 800)], None)
+    glyphs.update({"ideographicspace": (0x3000, 1000, [], None), "k": (0x6B, 500, [rect(40, 0, 460, 740)], None),
+                   "g": (0x67, 500, [rect(40, -200, 460, 500)], None)})
+    glyphs.update(more or {})
+    for name in empty:
+        glyphs[name] = (glyphs[name][0], glyphs[name][1], [], None)
+    return CidFont(glyphs)
+
+
+class CidFont(FakeFont):
+    """A FakeFont whose glyphs with neither contours nor components are empty (Font.is_empty)."""
+
+    def is_empty(self, name):
+        code, advance, contours, components = self.glyphs[name]
+        return not contours and not components
+
+
+class EmptySourceTests(unittest.TestCase):
+    def test_an_empty_glyph_is_no_source_but_for_an_advance(self):
+        # (review 12: a CID-keyed font's empty hyphen made an empty U+2010 counted as built, its empty K an
+        # empty Kelvin sign)
+        glyphs = dict(BARE)
+        for name in ("hyphen", "K"):
+            glyphs[name] = (glyphs[name][0], glyphs[name][1], [], None)
+        planner, rows = plan(CidFont(glyphs))
+        for char in (u(0x2010), u(0x212A)):
+            row = rows.get(char)
+            if row is not None and row.layout is not None:
+                names = [part.name for part in row.layout.parts]
+                self.assertNotIn("hyphen", names, char)
+                self.assertNotIn("K", names, char)
+        drawn = plan()[1]
+        self.assertEqual([part.name for part in drawn[u(0x212A)].layout.parts], ["K"], "drawn, it is shared as before")
+
+
+class SquaredTests(unittest.TestCase):
+    """Owner's report 177: "even a Japanese font doesn't offer the characters built from several kana into a
+    square composition". The squared words and abbreviations of the CJK Compatibility blocks, set in the em
+    square from the font's own glyphs, as starting points, in a font with CJK only."""
+
+    def test_the_table_is_unicodes(self):
+        """Every BMP character whose decomposition is <square>, with its components, and nothing else (Python
+        2.7's Unicode 5.2 lacks ㋿ U+32FF, which the table names itself)."""
+        import unicodedata
+        table = dict(gg.squared_table())
+        self.assertEqual(len(table), 206)
+        found = {}
+        for code in range(0x2000, 0x10000):
+            decomposition = unicodedata.decomposition(u(code))
+            if decomposition.startswith("<square>"):
+                found["%04X" % code] = decomposition.split()[1:]
+        if sys.version_info[0] < 3:
+            table.pop("32FF")
+        self.assertEqual(table, found)
+        entries = dict((e["code"], e) for e in DATA["entries"] if e["group"] == "squared")
+        self.assertEqual(len(entries), 206)
+        for code, entry in entries.items():
+            self.assertEqual(entry["ways"][0]["op"], "square")
+            self.assertEqual(entry["ways"][0]["confidence"], "starting point", "a draft, never checked at first")
+            self.assertEqual(entry["ways"][0]["only"], "cjk")
+            self.assertTrue(entry["unicode_name"].startswith(u"SQUARE") or code in ("3250", "32CF"), code)
+        self.assertEqual(entries["32FF"]["unicode_name"], u"SQUARE ERA NAME REIWA")
+        self.assertEqual(entries["337B"]["ways"][0]["of"], ["5E73", "6210"], u"㍻ is 平成")
+
+    def test_rows_by_count(self):
+        """As Japanese fonts set them: two stacked, three as two over one, four as two over two, five as two
+        over three, six as three over three, a unit's prefix on its own row."""
+        rows = lambda codes: gg.square_rows(codes.split())
+        self.assertEqual(rows("30DF 30EA"), [1, 1], u"㍉ ミ over リ")
+        self.assertEqual(rows("30BB 30F3 30C1"), [2, 1], u"㌢ セン over チ")
+        self.assertEqual(rows("30E1 30FC 30C8 30EB"), [2, 2], u"㍍ メー over トル")
+        self.assertEqual(rows("682A 5F0F 4F1A 793E"), [2, 2], u"㍿ 株式 over 会社")
+        self.assertEqual(rows("30D1 30FC 30BB 30F3 30C8"), [2, 3], u"㌫ パー over セント")
+        self.assertEqual(rows("30AD 30ED 30E1 30FC 30C8 30EB"), [2, 4], u"㌖ キロ over メートル")
+        self.assertEqual(rows("30A2 30A2 30A2 30A2 30A2 30A2"), [3, 3])
+        for code, parts in gg.squared_table():
+            if gg.square_kind(parts) == "cjk":
+                self.assertEqual(sum(gg.square_rows(parts)), len(parts), code)
+                self.assertLessEqual(max(gg.square_rows(parts)), 4, code)
+        self.assertEqual(gg.square_kind(["5E73", "6210"]), "cjk")
+        self.assertEqual(gg.square_kind(["006B", "0067"]), "latin")
+        self.assertEqual(gg.square_kind(["03BC", "2113"]), "latin")
+        self.assertEqual(gg.square_words(["30DF", "30EA"]), u"stacked")
+        self.assertEqual(gg.square_words(["30BB", "30F3", "30C1"]), u"2 over 1")
+        self.assertEqual(gg.square_words(["006B", "0067"]), u"in a row")
+
+    def test_the_layout(self):
+        """Each component's em box scaled into its cell: two stacked are full width, half height; four in two
+        rows of two are half each way; a Latin row scaled to fit and centered on the em box's middle."""
+        def boxes(placed, ink=(100, -50, 900, 800)):
+            return [gg.box_through(ink, matrix) for _, matrix in placed]
+        bottom = -120.0
+        stacked = boxes(gg.square_layout([("hei", 1000), ("sei", 1000)], 1000, 1000, bottom, "cjk", [1, 1]))
+        self.assertEqual(stacked[0], (100, 0.5 * (-50 + 120) + 380, 900, 0.5 * (800 + 120) + 380), u"平 on top")
+        self.assertEqual(stacked[1], (100, 0.5 * (-50 + 120) - 120, 900, 0.5 * (800 + 120) - 120), u"成 under it")
+        four = boxes(gg.square_layout([("a", 1000)] * 4, 1000, 1000, bottom, "cjk", [2, 2]))
+        self.assertEqual([b[0] for b in four], [50, 550, 50, 550])
+        self.assertEqual([b[2] for b in four], [450, 950, 450, 950])
+        self.assertEqual(four[0][3], four[1][3])
+        self.assertGreater(four[0][1], four[2][3], "the top row over the bottom one")
+        for b in four:  # (within the em box)
+            self.assertTrue(-120 <= b[1] and b[3] <= 880 and 0 <= b[0] and b[2] <= 1000, b)
+        three = boxes(gg.square_layout([("a", 1000)] * 5, 1000, 1000, bottom, "cjk", [2, 3]))
+        self.assertAlmostEqual(three[2][2] - three[2][0], 800 / 3.0, 3, "a row of three: narrower")
+        self.assertAlmostEqual(three[0][2] - three[0][0], 400, 3)
+        latin = gg.square_layout([("k", 500), ("g", 500)], 1000, 1000, bottom, "latin")
+        self.assertEqual([m[0] for _, m in latin], [gg.LATIN_MOST] * 2, "kg: at most 80% of its size")
+        self.assertEqual(latin[0][1][4], 100.0, "centered across: (1,000 - 800) / 2")
+        self.assertEqual(latin[1][1][4], 500.0)
+        middle = bottom + 500
+        self.assertEqual(latin[0][1][5], round(middle - gg.LATIN_MOST * middle), "about the em box's middle")
+        long = gg.square_layout([("k", 500)] * 4, 1000, 1000, bottom, "latin")
+        sx, sy = long[0][1][0], long[0][1][3]
+        self.assertAlmostEqual(sx, 940 / 2000.0)
+        self.assertEqual(sy, gg.LATIN_LEAST_HEIGHT, "kcal: narrowed, never shorter than that")
+
+    def test_planned_from_the_fonts_own_glyphs(self):
+        """In a font with kana, each squared character whose components it has drawn: a starting point, not
+        checked; one it lacks a component of needs it; none in a font without CJK."""
+        planner, rows = plan(kana_font())
+        kiro = rows[u(0x3314)]
+        self.assertEqual([part.name for part in kiro.layout.parts], ["ki", "ro"])
+        self.assertEqual(kiro.layout.advance, 1000)
+        self.assertEqual(kiro.sureness, u"starting point")
+        self.assertTrue(kiro.draft, "never checked at first")
+        self.assertEqual(gg.recipe_text(kiro, planner.settings), u"ki + ro (stacked, in the em square)")
+        self.assertIn(gg.DRAFT_NOTE, gg.note_text(kiro))
+        heisei = rows[u(0x337B)]
+        self.assertEqual([part.name for part in heisei.layout.parts], ["hei", "sei"])
+        kg = rows[u(0x338F)]
+        self.assertEqual([part.name for part in kg.layout.parts], ["k", "g"])
+        meter = rows[u(0x334D)]
+        self.assertEqual([part.name for part in meter.layout.parts], ["me", "choon", "to", "ru"])
+        self.assertEqual(gg.recipe_text(meter, planner.settings), u"me + choon + to + ru (2 over 2, in the em square)")
+        ri = rows[u(0x3349)]  # (ミリ: the font has no ミ)
+        self.assertIsNone(ri.layout)
+        self.assertIn(u"U+30DF", ri.missing)
+        self.assertNotIn(u(0x3314), plan()[1], "no squared word in a font without CJK")
+        empty = plan(kana_font(empty=["ro"]))[1][u(0x3314)]
+        self.assertIsNone(empty.layout, "a component drawn empty is one the font lacks")
+        self.assertIn(u"its glyph is empty", empty.missing)
+
+    def test_an_empty_glyph_of_the_fonts_is_filled(self):
+        """07LightNovelPOP has a glyph for ㍻ (a CID-keyed font keeps one for each character of its
+        collection), empty: listed to build, its glyph filled, never taken for the font's own; a space the
+        font has empty stays its own (an empty glyph is what it should be)."""
+        font = kana_font(more={"cid08323": (0x337B, 1000, [], None), "uni2009": (0x2009, 120, [], None)})
+        planner, rows = plan(font)
+        heisei = rows[u(0x337B)]
+        self.assertEqual(heisei.name, "cid08323", "built in the font's own glyph")
+        self.assertTrue(heisei.filled)
+        self.assertFalse(heisei.existing)
+        self.assertIn(u"its glyph is in the font, empty: filled when built", gg.note_text(heisei))
+        self.assertNotIn(u(0x2009), rows, "the font's empty thin space is its own, not listed")
+        planner, rows = plan(font, existing=True)
+        self.assertTrue(rows[u(0x2009)].existing and not rows[u(0x2009)].filled, "listed as the font's own")
 
 
 class Item(object):

@@ -35,7 +35,7 @@ scripts.py and kinds.py), not asked of the running Python. The button and the li
 many variants of which glyphs a click builds; a build that would pass what a font holds (65,535
 glyphs), what one click builds (BUILD_MOST), or the time one click may take (SECONDS_MOST, at the
 pace of the session's last build) is refused before anything is made, in a sentence that says what
-to choose instead. A long build shows its progress in the window's top line.
+to choose instead. A long build shows its progress in the window's top row.
 Valid Python 2.7 (FontLab) and 3 (tests).
 """
 from __future__ import absolute_import, division, print_function
@@ -496,6 +496,16 @@ def describe(widget, text, tip=False):
     return widget
 
 
+def say(label, text):
+    """A note's text, the note hidden while it says nothing: an empty label still took a line, a gap under
+    the heading (owner's image 198) and above the code's splitter handle (owner's image 196)."""
+    try:
+        label.setText(text)
+        label.setVisible(bool((u"%s" % (text or u"")).strip()))
+    except Exception:
+        pass
+
+
 def label_of(QtGui, text, what):
     """A setting's label with the What's This of the control beside it: a widget with none answers a
     right-click with its nearest container's, shown in that container's middle, over another control."""
@@ -523,6 +533,7 @@ class AlternatesPage(object):
         self.note.setWordWrap(True)
         describe(self.note, listed)
         layout.addWidget(self.note)
+        self.note.setVisible(False)  # (shown with something to say: say)
         self.tree = QtGui.QTreeWidget()
         self.tree.setColumnCount(4)
         self.tree.setHeaderLabels([u"Unicode", u"Glyph", u"Fonts with alternates", u"Current alternates"])
@@ -628,6 +639,7 @@ class AlternatesPage(object):
                                   u"and how many the font has already; or why nothing can be built, and what to "
                                   u"choose instead.")
         layout.addWidget(self.scope_note)
+        self.scope_note.setVisible(False)  # (shown with something to say: say)
         # Two previews side by side: what the font has of the character, and what would be built
         previews = QtGui.QHBoxLayout()
         self.existing_caption, self.existing = QtGui.QLabel(u""), QtGui.QLabel()
@@ -650,7 +662,11 @@ class AlternatesPage(object):
             picture.setWhatsThis(what)
             box.addWidget(picture, 1)
             previews.addLayout(box, 1)
-        layout.addLayout(previews, 1)
+            caption.setVisible(False)  # (shown with a glyph drawn: draw_preview)
+            picture.setVisible(False)
+        # (as tall as their pictures, the list taking the rest: the page's foot is the previews or the settings,
+        # never a blank band over the splitter's handle under it, owner's image 196)
+        layout.addLayout(previews)
         self.cmap, self.names = {}, set()  # the font's characters and names, as fill() read them
         self.index, self.in_scopes = {}, {}  # its alternates by glyph (alternates_index); each scope's glyphs, listed once
         self.pace = None  # seconds a variant, from the session's last build of PACE_FROM or more
@@ -689,8 +705,8 @@ class AlternatesPage(object):
         self.index, self.in_scopes, self.designs = {}, {}, False
         package = self.owner.package
         if package is None or self.model is None:
-            self.note.setText(u"" if package is None else
-                              u"The model (%s) is missing beside the script: reinstall FreeLab." % MODEL_FILE)
+            say(self.note, u"" if package is None else
+                u"The model (%s) is missing beside the script: reinstall FreeLab." % MODEL_FILE)
             self.show_scopes(())
             self.draw_preview()
             self.update_buttons()
@@ -703,13 +719,13 @@ class AlternatesPage(object):
                                       if self.takes_turns(ch)))
         found = suggestions(rows, cmap, names, index=self.index)
         if found:
-            self.note.setText(u"The glyphs fonts most often give a stylistic alternate (of %s open-licensed families, "
+            say(self.note, u"The glyphs fonts most often give a stylistic alternate (of %s open-licensed families, "
                               u"%s have alternates), those this font has. To draw an alternate by hand, check a glyph, "
                               u"then click %s: it gets a copy named for a stylistic set (a.ss01). The variants below "
                               u"are another job, and need no such copy." % (
                                   self.ak.b(families), self.ak.b(varied), self.ak.i(u"Make copies to redraw")))
         else:  # (an empty list said nothing of why it was empty)
-            self.note.setText(u"The font has none of the glyphs fonts most often give a stylistic alternate: nothing "
+            say(self.note, u"The font has none of the glyphs fonts most often give a stylistic alternate: nothing "
                               u"to copy here. The variants below are another job.")
         picture = getattr(self.owner, "picture", None)  # (the dialog's: glyphs side by side, in its text color)
         self.tree.blockSignals(True)  # (a row's first check state is no change to answer)
@@ -884,7 +900,7 @@ class AlternatesPage(object):
             problem = build_problem(new, len(names), self.pace)  # (refused here, before anything is made)
             label, line = build_words(plan, count, self.scope(), designs, problem, self.pace)
             self.build_button.setText(label)
-            self.scope_note.setText(line if has_font else u"")
+            say(self.scope_note, line if has_font else u"")
             set_enabled(self.build_button, has_font and new > 0 and not problem)
         except Exception:
             pass
@@ -967,7 +983,7 @@ class AlternatesPage(object):
 
     def build_variants(self):
         """The variants of the characters in scope added to the font, as one step of its History; the
-        window's top line counts them meanwhile (the window answers, its lists take no clicks)."""
+        window's top row counts them meanwhile (ak.busy_*: a write, never stopped half way)."""
         owner = self.owner
         package = owner.package
         if package is None or getattr(owner, "busy", False) or not self.same_font():
@@ -983,10 +999,11 @@ class AlternatesPage(object):
         upm = float(package.upm)
         made, letters, kept, touched, built, others, error = 0, 0, 0, [], [], 0, None
         started = time.time()
-        owner.set_busy(True)
+        # (the window's top row counts them; a write, one step of FontLab's History: never stopped half way)
+        owner.set_busy(True, u"Building variants", stoppable=False)
         try:
             for index, (glyph, variants) in enumerate(plan):
-                owner.progress(u"Building variants", index, len(plan))
+                owner.progress(u"Building variants", index, len(plan), stoppable=False)
                 layer = package.findName(glyph).getLayerByName(package.master)
                 if layer is None or not len(layer.shapes):
                     continue
@@ -1009,7 +1026,7 @@ class AlternatesPage(object):
                         others += source != glyph
                 letters += made > before
             if touched:
-                owner.progress(u"Adding the variants to FontLab's History", force=True)
+                owner.progress(u"Adding the variants to FontLab's History", force=True, stoppable=False)
         except Exception as exc:
             error = exc
         finally:
@@ -1082,6 +1099,22 @@ class AlternatesPage(object):
         shown = existing[:NAMED_MOST + 1]
         return [(name, None) for name in shown], planned, len(existing) - len(shown)
 
+    def show_previews(self, existing, planned):
+        """The previews shown while there is a glyph to draw (the right one's caption says when nothing is to
+        build), else hidden, emptied: blank, they left a band of nothing over the code's splitter handle
+        (owner's image 196). Never raises."""
+        for caption, picture, on in ((self.existing_caption, self.existing, existing),
+                                     (self.preview_caption, self.preview, planned)):
+            try:
+                if not on:
+                    picture.clear()
+                picture.setVisible(bool(on))
+                if not existing:
+                    caption.setText(u"")
+                caption.setVisible(bool(existing))
+            except Exception:
+                pass
+
     def draw_preview(self):
         """The previews drawn again: at the left the letter with the alternates the font has of it, at
         the right its variants as they would be built."""
@@ -1092,10 +1125,7 @@ class AlternatesPage(object):
             found = package.findName(glyph) if glyph else None
             layer = found.getLayerByName(package.master) if found is not None else None
             if layer is None:
-                for label in (self.existing, self.preview):
-                    label.clear()
-                for label in (self.existing_caption, self.preview_caption):
-                    label.setText(u"")
+                self.show_previews(False, False)
                 return
             upm = float(package.upm)
             existing, planned, more = self.preview_parts(glyph)
@@ -1106,6 +1136,7 @@ class AlternatesPage(object):
                 if other_layer is not None:
                     shapes.append((self.ak.layer_path(other_layer), float(other_layer.advanceWidth) or upm * 0.6))
             self.existing.setPixmap(self.row_pixmap(shapes, upm))
+            self.show_previews(True, bool(planned))
             self.existing_caption.setText(u"In the font: %s%s" % (
                 u", ".join(name for name, _ in existing),
                 (u", and %s" % counted(more, u"other")) if more else u""))
@@ -1129,6 +1160,7 @@ class AlternatesPage(object):
                 self.preview_caption.setText(u"Nothing to build of %s: the font has %s already (at the left)." % (
                     glyph, u"this variant" if self.count_box.value == 1 else u"these variants"))
         except Exception:
+            self.show_previews(False, False)
             for label in (self.existing, self.preview):
                 try:
                     label.clear()

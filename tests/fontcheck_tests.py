@@ -4020,13 +4020,31 @@ class DialogTests(unittest.TestCase):
 
     def test_busy_hides_the_top_line(self):
         """The owner's report 135: the duplicate "Listing..." line went, but its empty line stayed over the
-        progress bar: the top line is hidden while the work runs, and shown again with what it says."""
+        progress bar: the view's line is hidden while the work runs, and shown again only with something to
+        say (shown empty, it left a blank line under the Coverage controls: owner's image 204)."""
         dialog = self.dialog()
         dialog.coverage.status = Recorded()
         dialog.set_busy(True, fc.BUSY_STEPS[3])
-        self.assertEqual(dialog.coverage.status.told("setVisible")[-1], (False,))
+        self.assertEqual(dialog.coverage.status.told("setHidden")[-1], (True,))
         dialog.set_busy(False)
-        self.assertEqual(dialog.coverage.status.told("setVisible")[-1], (True,))
+        self.assertEqual(dialog.coverage.status.told("setHidden")[-1], (True,), "nothing to say: no blank line")
+        dialog.set_busy(True, fc.BUSY_STEPS[3])
+        dialog.coverage.status.setText(u"3 languages covered.")
+        dialog.set_busy(False)
+        self.assertEqual(dialog.coverage.status.told("setHidden")[-1], (False,))
+
+    def test_coverage_controls_go_through_the_shared_gate(self):
+        """Owner's image 203: with no font the Coverage controls were clickable: the check's end gave them
+        back with setEnabled, past the shared module's no-font gate (ak.enable keeps a marked one grayed)."""
+        dialog = self.dialog()
+        controls = (dialog.nearly, dialog.status_filter, dialog.inferred_box, dialog.composing, dialog.coverage_button,
+                    dialog.tabs)
+        for widget in controls:
+            widget.enabled = False
+            widget.property = lambda name: True if name == self.ak.NO_FONT_PROP else None
+        dialog.set_busy(True, fc.BUSY_STEPS[0])
+        dialog.set_busy(False)
+        self.assertEqual([widget.enabled for widget in controls], [False] * len(controls))
 
     def test_build_and_copy_say_this_or_those(self):
         """The owner's report 132: "Build 2 glyphs with Glyph Compose" for one row selected (a capital and
@@ -4258,23 +4276,23 @@ class DialogTests(unittest.TestCase):
         check goes in steps from a timer: the lists' area says which one runs, the controls are grayed,
         a second check does not start inside the first, and no count shows as a zero meanwhile."""
         dialog = self.dialog()
-        dialog.busy_label, dialog.coverage_stack, dialog.coverage.status = Recorded(), Recorded(), Recorded()
-        dialog.coverage_button, dialog.tabs, dialog.busy_step = Recorded(), Recorded(), Recorded()
-        dots = u(0x2026)
+        dialog.coverage_stack, dialog.coverage.status = Recorded(), Recorded()
+        dialog.coverage_button, dialog.tabs = Recorded(), Recorded()
+        what = lambda: getattr(dialog, "busy_state", {}).get("what")  # (the top row's step: ak.busy_progress)
         dialog.show()
         self.assertTrue(dialog.stepwise, "a window shown: step by step from now on")
-        self.assertEqual((dialog.busy, dialog.busy_step.text, dialog.coverage_stack.currentIndex),
-                         (False, u"Reading the language data" + dots, 0), "it opens on that line, not on empty lists")
+        self.assertEqual((dialog.busy, dialog.coverage_stack.currentIndex), (False, 0),
+                         "it opens on a blank page, not on empty lists")
         waiting = []
         dialog.defer = waiting.append
         dialog.nearly.value, dialog.inferred_box.checked = 30, True
         dialog.check_coverage()
-        # The owner: "'Listing...' appears twice": the step is said once, beside the bar, never also in the
-        # top line or in the middle of the lists' area
-        self.assertEqual((dialog.busy, dialog.busy_step.text, dialog.busy_label.text, dialog.coverage.status.text),
-                         (True, u"Reading the language data" + dots, u"", u""))
+        # The owner: "'Listing...' appears twice": the step is said once, in the top row, never also in the
+        # view's line or in the middle of the lists' area
+        self.assertEqual((dialog.busy, what(), dialog.coverage.status.told("setHidden")[-1]),
+                         (True, u"Reading the language data", (True,)))
         self.assertEqual((dialog.coverage_stack.currentIndex, dialog.coverage_button.enabled, dialog.tabs.enabled),
-                         (0, False, False), "the line in the lists' place, the controls grayed")
+                         (0, False, False), "the blank page in the lists' place, the controls grayed")
         self.assertEqual((len(waiting), dialog.scripts), (1, []), "nothing is done before the window is painted")
         dialog.check_coverage()
         dialog.status_changed()
@@ -4283,10 +4301,8 @@ class DialogTests(unittest.TestCase):
         while waiting:
             self.assertEqual(len(waiting), 1, "one step at a time")
             waiting.pop(0)()
-            said.append(dialog.busy_step.text)
-            if dialog.busy:
-                self.assertEqual((dialog.busy_label.text, dialog.coverage.status.text), (u"", u""), "said once")
-        self.assertEqual(said, [u"Reading the font" + dots, u"Checking 2,512 languages" + dots, u"Listing" + dots, u""])
+            said.append(what() if dialog.busy else None)
+        self.assertEqual(said, [u"Reading the font", u"Checking 2,512 languages", u"Listing", None])
         self.assertEqual((dialog.busy, dialog.coverage_stack.currentIndex, dialog.coverage_button.enabled,
                           dialog.tabs.enabled), (False, 1, True, True))
         self.assertTrue(dialog.scripts and dialog.rows)
@@ -4311,6 +4327,35 @@ class DialogTests(unittest.TestCase):
         dialog.coverage_stack.setCurrentIndex(0)
         dialog.check_coverage()
         self.assertEqual((dialog.busy, dialog.coverage_stack.currentIndex, waiting), (False, 1, []))
+
+    def test_a_check_stopped_leaves_the_view_unchecked(self):
+        """Owner's image 174: the tools menu, the arrows, and Close work while the coverage loads; they stop
+        it first (ak.busy_progress raises Stopped), and the view is left as if not checked, not half listed."""
+        dialog = self.dialog()
+        waiting, logged = [], []
+        dialog.show()
+        dialog.defer = waiting.append
+        dialog.log.add = lambda text, level="info": logged.append((level, text))
+        dialog.nearly.value, dialog.show_absent.checked = 30, True
+        for steps_before in (1, 3):  # (between two steps; in the listing's, at its first move)
+            dialog.check_coverage()
+            for _ in range(steps_before):
+                waiting.pop(0)()
+            dialog.busy_state["stop"] = True  # (what a click on Close does: ak's guard)
+            waiting.pop(0)()
+            self.assertEqual(waiting, [], "nothing more is done")
+            self.assertEqual((dialog.busy, dialog.has_coverage, dialog.scripts, dialog.rows, dialog.selection),
+                             (False, False, [], [], None))
+            self.assertIn("coverage", dialog.stale, "checked again when shown, or on Check")
+            self.assertTrue(all(view.signature is None and not view.rows for key in dialog.views
+                                for view in dialog.views[key].values()), "no list half made")
+            self.assertEqual(logged[-1][0], "warning")
+            self.assertIn(u"stopped", logged[-1][1])
+            self.assertFalse(dialog.busy_state.get("stop"), "the top row as it was: ak.busy_end ran")
+        dialog.check_coverage()
+        while waiting:
+            waiting.pop(0)()
+        self.assertTrue(dialog.has_coverage and dialog.scripts, "a check after it: whole")
 
     def test_data_kept_for_the_session(self):
         """FontLab runs the script anew at each opening: the files parsed are held on sys, as plain
@@ -4694,6 +4739,61 @@ class DialogTests(unittest.TestCase):
         dialog.draw_comparison()
         dialog.update_buttons()
 
+    def test_beside_it_only_with_a_glyph_drawn(self):
+        """Owner's image 211: "Beside it" stood under the empty frame, with no font or nothing compared."""
+        dialog = self.dialog()
+        dialog.beside_label, dialog.compare_master = Recorded(), Recorded()
+        dialog.draw_comparison()
+        self.assertEqual((dialog.beside_label.visible, dialog.compare_master.visible), (False, False), "nothing drawn")
+        dialog.reference.currentText, dialog.reference.currentIndex = u"Regular", 0
+        dialog.check_masters()
+        dialog.compare_master = Recorded()
+        dialog.selected_glyph = lambda: u"o"
+        dialog.compare_masters = [u"Bold"]
+        dialog.draw_comparison()
+        self.assertEqual((dialog.beside_label.visible, dialog.compare_master.visible), (True, True))
+        dialog.show_fontless()
+        self.assertEqual((dialog.beside_label.visible, dialog.compare_master.visible), (False, False), "a font closed")
+
+    def test_metrics_and_masters_stop_as_not_checked(self):
+        """Owner's image 180: the vertical metrics and the masters' comparison show their progress in the
+        window's top row, and stop there (the tools menu, an arrow, Close, Esc): the view as if not checked."""
+        dialog = self.dialog()
+        dialog.check_vertical()
+        self.assertIsNotNone(dialog.metric_values)
+        ak = self.ak
+        saved = fc.PROGRESS_EVERY, ak.busy_progress
+
+        def stopping(owner, what=None, part=None, force=False, stoppable=True):
+            if part and stoppable:
+                raise ak.Stopped()
+
+        def restore():
+            fc.PROGRESS_EVERY, ak.busy_progress = saved
+        self.addCleanup(restore)
+        fc.PROGRESS_EVERY, ak.busy_progress = 1, stopping
+        logged = []
+        dialog.log.add = lambda text, level="info": logged.append((level, text))
+        dialog.check_vertical()
+        self.assertEqual((dialog.metric_values, dialog.suggestions, dialog.check_rows, dialog.busy), (None, [], [], False))
+        self.assertIn("metrics", dialog.stale)
+        dialog.reference.currentText, dialog.reference.currentIndex = u"Regular", 0
+        dialog.check_masters()
+        self.assertEqual((dialog.problems, dialog.glyph_names, dialog.busy), ([], [], False))
+        self.assertIn("masters", dialog.stale)
+        self.assertEqual([level for level, _ in logged], ["warning", "warning"])
+
+    def test_check_buttons_grayed_with_nothing_listed(self):
+        """Owner's image 206: Check all, Check none, and Check only what Glyph Compose can build must be grayed
+        while nothing is listed (glyphs left checked kept Check none clickable)."""
+        dialog = self.dialog()
+        dialog.check_buttons = dict((key, Recorded()) for key in dialog.check_buttons)
+        dialog.rows, dialog.own_rows, dialog.checked = [], [], set([u"a"])
+        dialog.update_buttons()
+        self.assertEqual(sorted((key, button.enabled) for key, button in dialog.check_buttons.items()),
+                         [("all", False), ("buildable", False), ("none", False)])
+        self.assertTrue(all(u"No glyph is listed" in button.toolTip for button in dialog.check_buttons.values()))
+
     def test_fix(self):
         dialog = self.dialog()
         dialog.reference.currentText, dialog.reference.currentIndex = u"Regular", 0
@@ -4997,7 +5097,6 @@ class ScriptTests(unittest.TestCase):
         self.assertEqual(fc.checked_sentence(1, 1, 1, 2), u"Checked 1 language, 1 character set, and 1 script in 2.0 s.")
         self.assertEqual(fc.checked_sentence(0, 0, 0, 0), u"Checked 0 languages in 0.0 s.")
         self.assertEqual(fc.checked_sentence(2, 2, 0, 1.25), u"Checked 2 languages and 2 character sets in 1.2 s.")
-        self.assertIn(u"QProgressBar::chunk { background-color: rgb(30, 120, 40)", fc.BAR_SHEET % fc.BAR_GREEN[1])
 
 
 @unittest.skipUnless(sys.version_info[0] >= 3 and os.path.isfile(os.path.join(TRAIN, "character_sets.py")),
@@ -5129,42 +5228,39 @@ class LoadingTests(unittest.TestCase):
     def test_progress_bar(self):
         """The owner: "The loading of Font Check is not visible enough; a green progression bar or status
         in the log could help better visualize it." """
-        dialog, made = self.recorded_dialog(("QProgressBar",))
-        bar = dialog.busy_bar
-        self.assertEqual(bar.told("setRange"), [(0, fc.BAR_RANGE)])
-        self.assertEqual(bar.told("setTextVisible"), [(False,)])
-        self.assertEqual(bar.told("setProperty"), [(self.ak.LEAVE_ALONE_PROP, True)], "dark mode leaves its green alone")
-        sheet = bar.told("setStyleSheet")[-1][0]
-        light = self.ak.LOG_COLORS["done"][1]
-        self.assertIn(u"QProgressBar::chunk { background-color: rgb(%d, %d, %d)" % light, sheet, "the log's done green")
-        self.assertTrue(sheet.startswith(u"QProgressBar {"), "on the bar itself")
-        self.assertTrue(bar.told("setWhatsThis")[0][0])
-        dialog.busy_row, dialog.busy_step, dialog.busy_label = Recorded(), Recorded(), Recorded()
+        dialog = self.dialog()
         dialog.coverage_stack, dialog.coverage.status = Recorded(), Recorded()
         logged = []
         dialog.log.add = lambda text, level="info": logged.append((text, level))
+        # The bar is the window's own now, in its top row (owner's images 174 and 180): ak's, recorded here
+        ak, moved, started, ended = self.ak, [], [], []
+        real = ak.busy_start, ak.busy_progress, ak.busy_end
+
+        def restore():
+            ak.busy_start, ak.busy_progress, ak.busy_end = real
+        self.addCleanup(restore)
+        ak.busy_start = lambda owner, what=u"", stoppable=True: started.append(what)
+        ak.busy_progress = lambda owner, what=None, part=None, force=False, stoppable=True: moved.append((what, part))
+        ak.busy_end = lambda owner: ended.append(owner.busy)
         dialog.show()
-        self.assertEqual((dialog.busy_row.visible, dialog.busy_step.text), (True, u"Reading the language data" + u(0x2026)),
-                         "the bar from the first paint, the step's name beside it")
+        self.assertEqual(started, [], "the check starts once the window is painted (a timer)")
         waiting = []
         dialog.defer = waiting.append
         dialog.nearly.value, dialog.show_absent.checked, dialog.inferred_box.checked = 30, True, True
-        del bar.calls[:]
         dialog.check_coverage()
-        self.assertEqual((dialog.busy_row.visible, bar.value), (True, 0))
-        values, pages = [], []
+        self.assertEqual(started, [u"Reading the language data"], "the first step's name with the bar")
+        pages = []
         while waiting:
             waiting.pop(0)()
-            values.append(bar.value)
             pages.append(dialog.coverage_stack.currentIndex)
-        self.assertEqual(values[:3], [100, 200, 400], "determinate over the known steps")
-        self.assertEqual(values[-1], fc.BAR_RANGE)
-        moved = [args[0] for args in bar.told("setValue")]
-        self.assertEqual(moved, sorted(moved), "it only moves forward")
-        listing = [value for value in moved if 400 < value < fc.BAR_RANGE]
+        parts = [part for _, part in moved if part is not None]
+        self.assertEqual([round(part, 2) for part in parts[:3]], [0.1, 0.2, 0.4], "determinate over the known steps")
+        self.assertEqual(parts, sorted(parts), "it only moves forward")
+        listing = [part for part in parts if 0.4 < part < 1.0]
         self.assertGreater(len(set(listing)), 4, "and within the listing, by the rows made")
-        self.assertGreaterEqual(len(bar.told("repaint")) + len([1 for name, _ in bar.calls if name == "setValue"]), len(moved))
-        self.assertEqual((dialog.busy, dialog.busy_row.visible, pages[-1]), (False, False, 1), "gone with the lists shown")
+        self.assertEqual([what for what, _ in moved if what], [u"Reading the font", u"Checking 2,512 languages",
+                                                                u"Listing"], "each step said once")
+        self.assertEqual((dialog.busy, ended, pages[-1]), (False, [False], 1), "gone with the lists shown")
         done = [text for text, level in logged if level == "done"]
         self.assertEqual(len(done), 1, "one line when done, not one per step")
         self.assertTrue(re.match(u"^Checked 2,512 languages, 140 character sets, and 172 scripts in [0-9]+\\.[0-9] s\\.$",
@@ -5812,53 +5908,58 @@ class OwnerRoundTests(unittest.TestCase):
         self.assertIs(dialog.right_trees["sets"], dialog.views["sets"]["full"].tree)
         self.assertEqual(len(made), len(dialog.rows) + len(dialog.own_rows), "the same sets for any script")
         dialog.right_tab_changed(0)
-        # The progress bar and the wait cursor, while a click makes many rows
-        cursors = []
-        gui = sys.modules["PythonQt"].QtGui
-        gui.classes["QApplication"] = type("QApplication", (), {
-            "setOverrideCursor": staticmethod(lambda cursor: cursors.append("wait")),
-            "restoreOverrideCursor": staticmethod(lambda: cursors.append("restored"))})
-        busy = dialog.busy_row, dialog.busy_step, dialog.busy_bar, fc.LISTING_BUSY_ROWS, fc.LISTING_STEP_ROWS
+        # The window's top-row bar while a click makes many rows (owner's images 174 and 180: it was the
+        # view's own, over the lists, with a wait cursor)
+        ak = self.ak
+        real = ak.busy_start, ak.busy_progress, ak.busy_end
+        saved = fc.LISTING_BUSY_ROWS, fc.LISTING_STEP_ROWS
+        started, moved, ended = [], [], []
 
         def restore():
-            del gui.classes["QApplication"]
-            dialog.busy_row, dialog.busy_step, dialog.busy_bar, fc.LISTING_BUSY_ROWS, fc.LISTING_STEP_ROWS = busy
+            ak.busy_start, ak.busy_progress, ak.busy_end = real
+            fc.LISTING_BUSY_ROWS, fc.LISTING_STEP_ROWS = saved
         self.addCleanup(restore)
-        dialog.busy_row, dialog.busy_step, dialog.busy_bar = Recorded(), Recorded(), Recorded()
-        dialog.busy_row.__dict__["visible"] = False
-        shown = []
-        dialog.busy_row.setVisible = lambda on: shown.append(on) or dialog.busy_row.__dict__.update(visible=on)
+        ak.busy_start = lambda owner, what=u"", stoppable=True: started.append(what)
+        ak.busy_progress = lambda owner, what=None, part=None, force=False, stoppable=True: moved.append(part)
+        ak.busy_end = lambda owner: ended.append(owner.busy)
         fc.LISTING_STEP_ROWS = 2
         pick(u"")
-        self.assertEqual((shown, cursors), ([], []), "every script's list kept: nothing to wait for")
+        self.assertEqual((started, ended), ([], []), "every script's list kept: nothing to wait for")
         fc.LISTING_BUSY_ROWS = len(latin.results) + 1
         dialog.script_filter = None
         script.signature = None  # (a list to make anew)
         pick(u"Latin")
-        self.assertEqual((shown, cursors), ([], []), "fewer rows than that: no bar to flicker")
+        self.assertEqual((started, ended), ([], []), "fewer rows than that: no bar to flicker")
         fc.LISTING_BUSY_ROWS = 2
         script.signature = None
         pick(u"Latin")
-        self.assertEqual((shown, cursors), ([True, False], ["wait", "restored"]))
-        self.assertEqual(dialog.busy_step.told("setText")[0], (u"Listing the languages written in Latin" + u(0x2026),))
-        values = [args[0] for args in dialog.busy_bar.told("setValue")]
-        self.assertEqual(values[0], 0)
+        self.assertEqual((started, ended), ([u"Listing the languages written in Latin"], [False]))
+        values = [part for part in moved if part is not None]
         self.assertTrue(len(values) > 3 and values == sorted(values), values)
-        self.assertEqual(values[-1], int(round(0.9 * fc.BAR_RANGE)), "the glyphs' list after the languages'")
-        self.assertEqual(fc.listing_text("languages", u""), u"Listing the languages of all scripts" + u(0x2026))
+        self.assertLessEqual(values[-1], 0.9, "the glyphs' list after the languages'")
+        self.assertEqual(fc.listing_text("languages", u""), u"Listing the languages of all scripts")
         self.assertEqual(fc.listing_text("families", u"Greek"),
-                         u"Listing the families of the languages written in Greek" + u(0x2026))
+                         u"Listing the families of the languages written in Greek")
         dialog.fill_right = lambda refill=True, progress=None: 1 / 0
         script.signature = None
         self.assertRaises(ZeroDivisionError, pick, u"Latin")
-        self.assertEqual((shown[2:], cursors[2:]), ([True, False], ["wait", "restored"]), "gone, whatever happened")
-        # Review: a wait cursor that could not be set is not "restored" (that would put back another's)
+        self.assertEqual((ended[1:], dialog.busy), ([False], False), "gone, whatever happened")
         del dialog.fill_right
-        refused = lambda cursor: 1 / 0
-        gui.classes["QApplication"].setOverrideCursor = staticmethod(refused)
+
+        # Stopped (the tools menu, an arrow, Close, Esc): the rows made so far stay listed, the list made anew
+        # the next time it is shown, and the log says so
+        def stopping(owner, what=None, part=None, force=False, stoppable=True):
+            if part:
+                raise ak.Stopped()
+        ak.busy_progress = stopping
+        logged = []
+        dialog.log.add = lambda text, level="info": logged.append((level, text))
         script.signature = None
         pick(u"Latin")
-        self.assertEqual((shown[4:], cursors[4:]), ([True, False], []), "the bar all the same, no cursor put back")
+        self.assertTrue(0 < len(script.rows) < len(latin.results), len(script.rows))
+        self.assertIsNone(script.signature, "made anew the next time it is shown")
+        self.assertEqual((logged[-1][0], dialog.busy), ("warning", False))
+        ak.busy_progress = lambda owner, what=None, part=None, force=False, stoppable=True: None
         # The live pass: a second click on Latin, after Cyrillic, made Latin's 2,108 rows again (0.125 s). The
         # last three scripts' lists are kept, the least recently shown given to a new script
         others = [s.script for s in dialog.scripts if s.results and s.script != u"Latin"][:3]

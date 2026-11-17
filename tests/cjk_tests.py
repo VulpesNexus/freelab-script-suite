@@ -416,7 +416,8 @@ class NoFontTests(unittest.TestCase):
         self.assertFalse(any(w.enabled for w in (dialog.palt_box, dialog.halt_box, dialog.compile_box, dialog.hangul_box)))
         dialog.show_font_parts(True)
         self.assertTrue(all(w.visible for w in shown))
-        self.assertTrue(all(w.enabled for w in (dialog.palt_box, dialog.halt_box, dialog.compile_box)))
+        self.assertTrue(all(w.enabled for w in (dialog.palt_box, dialog.halt_box)))
+        self.assertFalse(dialog.compile_box.enabled, "given back by update_buttons, with the write button (image 195)")
         self.assertFalse(dialog.hangul_box.enabled, "the font's Hangul sets it as it is read")
         runs = []
         dialog.run = lambda: runs.append(1)
@@ -463,7 +464,13 @@ class StaleCodeTests(unittest.TestCase):
             before_changes=staticmethod(lambda *args: self.history.append("before")),
             notify_changed=staticmethod(lambda *args: self.history.append("notify")),
             compiled_note=staticmethod(lambda box, log: u""), b=staticmethod(lambda t: u"%s" % t),
-            html=staticmethod(lambda t: u"%s" % t), joined=staticmethod(lambda items: u" and ".join(items))))
+            html=staticmethod(lambda t: u"%s" % t), joined=staticmethod(lambda items: u" and ".join(items)),
+            busy_start=staticmethod(lambda owner, what=u"", stoppable=True: self.busy.append(("start", stoppable))),
+            busy_progress=staticmethod(lambda owner, what=None, part=None, force=False, stoppable=True:
+                                       self.busy.append(("progress", stoppable))),
+            busy_end=staticmethod(lambda owner: self.busy.append(("end", None))),
+            busy_stopping=staticmethod(lambda owner: False), Stopped=Exception))
+        self.busy = []
         dialog.harvest = lambda: None
         dialog.hangul_chosen = lambda: []
         dialog.current_font = lambda: package
@@ -493,6 +500,39 @@ class StaleCodeTests(unittest.TestCase):
         self.assertEqual(sorted(features.written), ["halt", "palt"])
         self.assertIn(u"pos uni3042 <-10 0 -20 0>;", features.texts["palt"], "the font's own rule kept")
         self.assertEqual(self.history, ["before", "notify"])
+        # (owner's image 183: under the top row's progress, never stoppable, always ended)
+        self.assertEqual((self.busy[0][0], self.busy[-1][0]), ("start", "end"))
+        self.assertFalse(any(stoppable for kind, stoppable in self.busy if kind != "end"), self.busy)
+        self.assertFalse(dialog.busy)
+
+    def test_compile_after_writing_is_grayed_with_the_write_button(self):
+        # (owner's image 195: checked and clickable beside a grayed Write the code)
+        self.assertFalse(cj.compile_on(False, True))
+        self.assertFalse(cj.compile_on(True, False), "Hangul widths alone: no code to compile")
+        self.assertTrue(cj.compile_on(True, True))
+        self.assertIn(u'<a href="%s">List again</a>' % cj.LIST_AGAIN, cj.stopped_line())
+        self.assertEqual(cj.bar_share(cj.LIST_STEPS, cj.READ_STEP, 1.0), cj.LIST_STEPS[0][1])
+        self.assertEqual(cj.bar_share(cj.LIST_STEPS, cj.PREVIEW_STEP, 1.0), 1.0)
+        self.assertIsNone(cj.bar_share(cj.LIST_STEPS, u"Something else"))
+
+    def test_a_stopped_listing_leaves_the_list_empty_with_a_link(self):
+        dialog, features = self.make({})
+        dialog.busy, dialog.trims = False, list(dialog.trims)
+        dialog.tree = type("Tree", (), {"blockSignals": lambda t, on: None, "clear": lambda t: None})()
+        dialog.status = type("Status", (), {"setText": lambda s, text: setattr(s, "text", text)})()
+        dialog.ak.history_mark = staticmethod(lambda package: "mark")
+        dialog.update_buttons = lambda: None
+
+        def read_font():
+            raise dialog.ak.Stopped()
+        dialog.read_font = read_font
+        del dialog.run
+        dialog.run()
+        self.assertEqual([kind for kind, _ in self.busy], ["start", "end"])
+        self.assertEqual(dialog.trims, [])
+        self.assertIn(u"Listing was stopped", dialog.status.text)
+        self.assertEqual(dialog.seen_history, "mark", "not read again for the History seen before")
+        self.assertFalse(dialog.busy)
 
     def test_a_new_prefix_is_seen_too(self):
         """The font's own positions are read through the prefix's classes: one changed since is a change."""
@@ -592,7 +632,7 @@ class ReaderLoadingTests(unittest.TestCase):
         dialog.ak = self.Ak()
         dialog.trims, dialog.first_checks, dialog.texts, dialog.classes, dialog.lookups = [], [], {}, {}, {}
         dialog.package = object()
-        for name in ("all_button", "none_button", "restore_button"):
+        for name in ("all_button", "none_button", "restore_button", "compile_box"):
             setattr(dialog, name, name)
         dialog.write_button = type("Button", (), {"setText": lambda self, text: None})()
         dialog.palt_box = dialog.halt_box = type("Box", (), {"checked": True})()
@@ -637,6 +677,7 @@ class ReaderLoadingTests(unittest.TestCase):
                 dialog = self.window(logged)
                 dialog.update_buttons()
                 self.assertFalse(dialog.ak.enabled[dialog.write_button], "the write grayed out")
+                self.assertFalse(dialog.ak.enabled["compile_box"], "and its compile with it (owner's image 195)")
                 dialog.update_buttons()
                 self.assertEqual([kind for kind, _ in logged], ["error"], "said once")
                 self.assertIn(u"freelab_feature_code.py", logged[0][1])

@@ -1689,6 +1689,39 @@ class DialogTests(unittest.TestCase):
         dialog.history_moved()
         self.assertEqual(dialog.proof.masters, [u"Regular", u"Bold"])
 
+    def test_laying_out_shows_in_the_top_row_and_stops(self):
+        """Owner's image 180: the proof's laying out in the window's top row (ak.busy_*), stopped by the tools
+        menu, an arrow, Close, or Esc: the pages shown stay those of before."""
+        dialog = self.dialog(fake_font())
+        dialog.languages = []
+        ak = self.ak
+        real = ak.busy_start, ak.busy_progress, ak.busy_end
+        started, moved, ended = [], [], []
+
+        def restore():
+            ak.busy_start, ak.busy_progress, ak.busy_end = real
+        self.addCleanup(restore)
+        ak.busy_start = lambda owner, what=u"", stoppable=True: started.append((what, stoppable))
+        ak.busy_progress = lambda owner, what=None, part=None, force=False, stoppable=True: moved.append(part)
+        ak.busy_end = lambda owner: ended.append(owner.busy)
+        dialog.rebuild()
+        before = dialog.proof
+        self.assertIsNotNone(before)
+        self.assertEqual((started, ended), ([(u"Reading the font", True)], [False]))
+        parts = [part for part in moved if part is not None]
+        self.assertEqual((parts, parts[-1]), (sorted(parts), 1.0))
+
+        def stopping(owner, what=None, part=None, force=False, stoppable=True):
+            if what == u"Laying out the pages" and stoppable:
+                raise ak.Stopped()
+        ak.busy_progress = stopping
+        logged = []
+        dialog.log.add = lambda text, level="info": logged.append((level, text))
+        dialog.masters_box.currentIndex = 1
+        dialog.rebuild()
+        self.assertIs(dialog.proof, before, "the pages of before")
+        self.assertEqual((logged[-1][0], dialog.busy, ended[-1]), ("warning", False, False))
+
     def test_zoom_by_dropdown_wheel_and_keys(self):
         qt = sys.modules["PythonQt"]
         saved = qt.QtCore.classes.get("Qt")

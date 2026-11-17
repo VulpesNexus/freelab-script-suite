@@ -29,6 +29,7 @@ Valid Python 2.7 (FontLab 7) and Python 3. The planning below the Qt line needs 
 
 from __future__ import absolute_import, division, print_function
 
+import math
 import os
 import re
 import sys
@@ -1025,13 +1026,59 @@ def preview_note(text, names):
         counted(len(shown), u"character"), listed([ch for _, ch in shown]), lacks)
 
 
-def fitting_em(chars, heights_at, width, height, largest, smallest=12):
+def ink_overflow(items, origin, height):
+    """How far a column's glyphs' ink reaches past their squares, in font units: (above the first square's
+    top, below the last square's bottom), each 0 or more. items: [(ink box (x0, y0, x1, y1) or None, y
+    placement, y advance change)], each glyph's square height + its advance change tall, its vertical origin
+    at the square's top (baseline_y). Taken over every item (each could end a column). Owner's image 181:
+    the columns' last glyphs were cut at the bottom, the picture as tall as the squares alone."""
+    above = below = 0.0
+    for box, placement, advance in items:
+        if box is None:
+            continue
+        above = max(above, (box[3] + placement) - origin)  # (the ink's top over the square's)
+        below = max(below, (origin - placement - box[1]) - (height + advance))  # (its bottom under the square's)
+    return above, below
+
+
+ORIGIN_SAMPLE = (0x6C38, 0x56FD, 0x6771, 0x5B57, 0x5929, 0x5730, 0x65E5, 0x6708, 0x3042, 0x3044, 0x304B, 0x30A2,
+                 0x30AB, 0xAC00, 0xD55C)  # full-width glyphs whose ink centers in the em: ideographs, kana, Hangul
+ORIGIN_SLACK = 0.1  # of the em: how far their ink's middle may sit from the square's under the origin
+
+
+def origin_from_ink(origin, boxes, height, upm, slack=ORIGIN_SLACK, others=()):
+    """(origin, moved): the vertical origin read from the font info's typographic ascender, or, where the
+    font's full-width glyphs' ink (boxes: (x0, y0, x1, y1) of ORIGIN_SAMPLE's glyphs) sits more than slack of
+    the em off the middle of the square under it, the first of the font's other values (others: its
+    ascender) under which it does sit centered (height: the square's height). Never a value of FreeLab's
+    own: an ink-centered origin made up overrode valid metrics of fonts drawn off-center (review 12). Live,
+    07LightNovelPOP: FontLab's typographic ascender 1048 (its OS/2 says 860), its ascender and VORG 860,
+    ideographs' ink -110 to 833: under 1048 they sat too low and the columns' last glyphs were cut (owner's
+    image 181); under 860 they are centered."""
+    centers = sorted((box[1] + box[3]) / 2.0 for box in boxes if box is not None)
+    if len(centers) < 3:
+        return origin, False
+    middle = centers[len(centers) // 2]
+
+    def centered(value):
+        return abs(middle - (value - height / 2.0)) <= slack * upm
+
+    if centered(origin):
+        return origin, False
+    for other in others:
+        if other is not None and centered(float(other)):
+            return float(other), True
+    return origin, False
+
+
+def fitting_em(chars, heights_at, width, height, largest, smallest=12, extra=0.0):
     """The largest em (pixels, from largest down to smallest) at which a sample's columns fit a pane of
     width by height: its columns as vertical_lines breaks them, each step = em * COLUMN_STEP wide.
-    heights_at(em): each character's height at that em. The smallest when none fits."""
+    heights_at(em): each character's height at that em; extra: ems each column needs besides (its ink past
+    its squares: ink_overflow). The smallest when none fits."""
     em = largest
     while em > smallest:
-        room = height - 8
+        room = height - 8 - extra * em
         if room > em:
             columns = len(vertical_lines(chars, heights_at(em), room)) if chars else 0
             if columns * em * COLUMN_STEP + 4 <= width - 8:
@@ -1097,8 +1144,9 @@ LIST_STEPS = ((READ_STEP, 0.6), (LIST_STEP, 0.95), (PREVIEW_STEP, 1.0))
 SHOW_STEPS = ((LIST_STEP, 0.95), (PREVIEW_STEP, 1.0))
 UNDO_STEP, BUILD_STEP, CODE_STEP = u"Opening an undo step", u"Building the vertical forms", u"Writing the code"
 HEIGHTS_STEP, UPDATE_STEP, VHEA_STEP = u"Setting advance heights", u"Updating the font", u"Writing vhea"
+COMPILE_STEP = u"Compiling"
 WRITE_STEPS = ((UNDO_STEP, 0.05), (BUILD_STEP, 0.1), (CODE_STEP, 0.12), (HEIGHTS_STEP, 0.15), (UPDATE_STEP, 0.25),
-               (VHEA_STEP, 0.5), (READ_STEP, 0.84), (LIST_STEP, 0.97), (PREVIEW_STEP, 1.0))
+               (VHEA_STEP, 0.47), (COMPILE_STEP, 0.5), (READ_STEP, 0.84), (LIST_STEP, 0.97), (PREVIEW_STEP, 1.0))
 VALUES_STEP, OPEN_STEP, SAVE_STEP, CHECK_STEP = (u"Reading this font's values", u"Reading the exported font",
                                                  u"Saving", u"Checking")
 # (add_vertical_metrics.add_tables reports its own steps by key)
@@ -1108,14 +1156,8 @@ EXPORT_STEPS = ((VALUES_STEP, 0.12), (OPEN_STEP, 0.13), (SCRIPT_STEPS["match"], 
 CFF_EXPORT_STEPS = ((VALUES_STEP, 0.12), (OPEN_STEP, 0.13), (SCRIPT_STEPS["match"], 0.14), (SCRIPT_STEPS["measure"], 0.56),
                     (SCRIPT_STEPS["build"], 0.57), (SAVE_STEP, 0.96), (CHECK_STEP, 1.0))
 SHOW_AFTER = 0.3  # seconds: the list read again (an undo, a check box) shows the bar only when it takes longer
-PUMP_SECONDS = 0.05  # the window redrawn at most this often during a step
 ROWS_PER_STEP = 100  # rows listed between two moves of the bar
-BAR_RANGE = 1000
-BAR_GREEN = ((120, 200, 120), (30, 120, 40))  # ak.LOG_COLORS["done"], should the shared module not have it
-# On the bar itself, never on the dialog: a thin bar, its chunk in the suite's "done" green (Font Check's)
-BAR_SHEET = (u"QProgressBar { border: 1px solid rgba(128, 128, 128, 140); border-radius: 3px; "
-             u"background: transparent; min-height: 10px; max-height: 10px; } "
-             u"QProgressBar::chunk { background-color: rgb(%d, %d, %d); border-radius: 2px; }")
+BAR_RANGE = 1000  # the top row's bar's range (ak.BUSY_RANGE), should the shared module not say
 
 
 def bar_value(steps, label, part=0.0):
@@ -1127,16 +1169,6 @@ def bar_value(steps, label, part=0.0):
             return start + (end - start) * min(max(float(part), 0.0), 1.0)
         start = end
     return None
-
-
-def pump_events(QtCore, QtGui):
-    """The window redrawn during long work, the user's clicks and keys left waiting until it is over (Feature
-    Code's pump_events): nothing may act on the font halfway."""
-    flag = getattr(getattr(QtCore, "QEventLoop", None), "ExcludeUserInputEvents", None)
-    if flag is None:
-        QtGui.QApplication.processEvents()
-    else:
-        QtGui.QApplication.processEvents(flag)
 
 
 HELP = u"""<b>FreeLab CJK Vertical</b><br>
@@ -1176,7 +1208,8 @@ def mark_modified(package):
 class CJKVerticalDialog(object):
     COLUMNS = ("Glyph", "Name", "Vertical form", "How", "Now", "After")
     # (long work's state, also for a dialog object made without its window: tests)
-    busy, busy_shown, run_due, busy_steps, busy_now, busy_since, pumped = False, False, False, (), None, 0.0, 0.0
+    busy, busy_shown, run_due, busy_steps, busy_now, busy_since = False, False, False, (), None, 0.0
+    stoppable, holding = True, False
 
     def __init__(self):
         QtCore, QtGui = _qt()
@@ -1192,6 +1225,7 @@ class CJKVerticalDialog(object):
         layout = QtGui.QVBoxLayout(dialog)
         self.status = ak.status_label()
         self.status.setWordWrap(True)
+        self.status.connect("linkActivated(QString)", self.status_link)  # (List again, once a listing was stopped)
         layout.addWidget(self.status)
         layout.addWidget(ak.separator())
         self.log = ak.Log()
@@ -1221,34 +1255,8 @@ class CJKVerticalDialog(object):
             row.addWidget(box)
         row.addStretch(1)
         layout.addLayout(row)
-        # A progress bar over the list while long work runs (Font Check's): the step's name beside it, its
-        # chunk in the log's "done" green, left alone by dark mode; hidden otherwise
-        self.busy_row = QtGui.QWidget()
-        busy_layout = QtGui.QHBoxLayout(self.busy_row)
-        busy_layout.setContentsMargins(0, 2, 0, 2)
-        self.busy_step = QtGui.QLabel(u"")
-        self.busy_bar = QtGui.QProgressBar()
-        try:
-            self.busy_bar.setRange(0, BAR_RANGE)
-            self.busy_bar.setValue(0)
-            self.busy_bar.setTextVisible(False)  # (the step's name stands beside it)
-            self.busy_bar.setProperty(ak.LEAVE_ALONE_PROP, True)
-        except Exception:
-            pass
-        try:  # (room for the longest step's name: the bar's left edge stays put from one step to the next)
-            longest = max([label for steps in (LIST_STEPS, WRITE_STEPS, EXPORT_STEPS) for label, _ in steps], key=len)
-            self.busy_step.setMinimumWidth(int(QtGui.QFontMetrics(self.busy_step.font).width(
-                u"%s\N{HORIZONTAL ELLIPSIS}" % longest)) + 8)
-        except Exception:
-            pass
-        busy_help = (u"How far the work is: reading the font and listing it, writing, or adding vertical metrics to "
-                     u"an exported font. The window waits for it; it goes away when the work is over.")
-        self.busy_bar.setWhatsThis(busy_help)
-        self.busy_step.setWhatsThis(busy_help)
-        busy_layout.addWidget(self.busy_step)
-        busy_layout.addWidget(self.busy_bar, 1)
-        self.busy_row.setVisible(False)
-        layout.addWidget(self.busy_row)
+        # (long work's progress is in the window's top row, ak.busy_start: owner's image 180, its own bar under
+        # the settings, "Listing...")
         self.tree = QtGui.QTreeWidget()
         self.tree.setColumnCount(len(self.COLUMNS))
         self.tree.setHeaderLabels(list(self.COLUMNS))
@@ -1426,14 +1434,18 @@ class CJKVerticalDialog(object):
             "sample", "all_button", "none_button", "restore_button", "put_back_button", "export_button",
             "write_button")]
 
-    def set_busy(self, on, steps=(), at_once=False):
-        """Long work begun (its steps: (label, share of the bar at its end)) or over. While busy, the History
-        watcher, dark mode, and the window's release wait, and so does another read of the list (run once the
-        work is over). The bar and the grayed controls show at once (at_once: a write, an export), or once
-        the work has taken SHOW_AFTER (a list read again for a small font never flickers). Never raises."""
-        self.busy, self.holding = bool(on), False
+    def set_busy(self, on, steps=(), at_once=False, stoppable=True):
+        """Long work begun (its steps: (label, share of the bar at its end)) or over, its progress in the
+        window's top row (ak.busy_start: owner's images 176 and 180, the bar this window had under its settings
+        moved there). While busy, the History watcher, dark mode, and the window's release wait, and so does
+        another read of the list (run once the work is over). The bar and the grayed controls show at once
+        (at_once: a write, an export), or once the work has taken SHOW_AFTER (a list read again for a small font
+        never flickers). stoppable: the top row's Esc, Close, a tool, or an arrow stops it (progress raises
+        ak.Stopped at its next step); a write is not (one step of FontLab's History, never half written).
+        Never raises."""
+        self.busy, self.holding, self.stoppable = bool(on), False, bool(stoppable)
         self.busy_steps, self.busy_now = (tuple(steps) if on else ()), None
-        self.busy_since, self.pumped = time.time(), 0.0
+        self.busy_since = time.time()
         if on:
             if at_once:
                 self.show_busy()
@@ -1441,7 +1453,10 @@ class CJKVerticalDialog(object):
         if self.busy_shown:
             self.busy_shown = False
             try:
-                self.busy_row.setVisible(False)
+                self.ak.busy_end(self)  # (what the user clicked meanwhile is done now)
+            except Exception:
+                pass
+            try:
                 for widget in self.busy_widgets():
                     if widget is not None:
                         self.ak.enable(widget, True)
@@ -1467,7 +1482,8 @@ class CJKVerticalDialog(object):
                 pass
 
     def show_busy(self):
-        """The bar shown and the controls grayed, painted at once."""
+        """The top row's progress shown (ak.busy_start: events let through, the user's input held off) and the
+        controls grayed."""
         if self.busy_shown:
             return
         self.busy_shown = True
@@ -1475,69 +1491,77 @@ class CJKVerticalDialog(object):
             for widget in self.busy_widgets():
                 if widget is not None:
                     self.ak.enable(widget, False)
-            self.busy_bar.setStyleSheet(self.bar_sheet())  # (the palette may have changed since)
-            self.busy_bar.setValue(0)
-            self.busy_row.setVisible(True)
         except Exception:
             pass
-        self.pump(force=True)
-
-    def bar_sheet(self):
-        """The bar's own stylesheet: its chunk in the log's "done" green, the one that reads on the window."""
-        rgb = BAR_GREEN[1]
+        first = self.busy_steps[0][0] if self.busy_steps else u""
+        self.busy_now = first
         try:
-            QtCore, QtGui = _qt()
-            pair = self.ak.LOG_COLORS["done"]
-            dark = self.dialog.palette.color(QtGui.QPalette.Window).lightness() < 128
-            rgb = tuple(int(value) for value in (pair[0] if dark else pair[1]))
+            self.ak.busy_start(self, first, stoppable=self.stoppable)
         except Exception:
             pass
-        return BAR_SHEET % rgb
 
     def progress(self, label, part=0.0, events=True):
-        """The work at this part (0 to 1) of the step of that label: the bar moved and the window redrawn (at
-        most every PUMP_SECONDS within a step), or, without events, only the bar painted (as the list is
-        filled: live, letting events through laid out the list made so far each time, and doubled its 0.8 s;
-        the window is redrawn when the step changes). A step the work does not list is passed over. While
+        """The work at this part (0 to 1) of the step of that label, in the window's top row (ak.busy_progress:
+        the window redrawn and its events let through at most every 0.1 s; raises ak.Stopped where the work
+        is stoppable and the user asked it to stop). A step the work does not list is passed over. While
         holding (a write, from its check of the font's code to the code written), no events go through at
-        all: the bar and its step are painted alone, and nothing can change the code meanwhile. Never
-        raises."""
+        all: the step and the bar are painted alone (paint_bar), and nothing can change the code meanwhile.
+        events is kept for the callers (the list filled: Qt lays out only what the throttle lets through)."""
         value = bar_value(self.busy_steps, label, part)
         if value is None or not self.busy:
             return
-        now = time.time()
-        if not self.busy_shown and now - self.busy_since >= SHOW_AFTER:
+        if not self.busy_shown and time.time() - self.busy_since >= SHOW_AFTER:
             self.show_busy()
         if not self.busy_shown:
             return
-        moved = label != self.busy_now
-        holding = getattr(self, "holding", False)
-        try:
-            if moved:
-                self.busy_now = label
-                self.busy_step.setText(u"%s\N{HORIZONTAL ELLIPSIS}" % label)
-                if holding:
-                    self.busy_step.repaint()
-            self.busy_bar.setValue(int(round(value * BAR_RANGE)))
-            if holding or not (moved or events):
-                self.busy_bar.repaint()
-        except Exception:
-            pass
-        if moved or events:
-            self.pump(force=moved)
-
-    def pump(self, force=False):
         if getattr(self, "holding", False):
-            return  # (a write between its check and its code: progress paints the bar alone)
-        now = time.time()
-        if not force and now - self.pumped < PUMP_SECONDS:
+            self.paint_bar(label, value)
             return
-        self.pumped = now
+        self.busy_now = label
+        self.ak.busy_progress(self, label, value, stoppable=self.stoppable)
+
+    def paint_bar(self, label, value):
+        """While holding: the top row's step and bar (ak.BUSY_NAME's) set and painted alone, no event let
+        through (busy_progress would let them through). Never raises."""
         try:
             QtCore, QtGui = _qt()
-            pump_events(QtCore, QtGui)
+            name = self.ak.BUSY_NAME
+            step = self.dialog.findChild(QtGui.QLabel, name + "Step")
+            bar = self.dialog.findChild(QtGui.QProgressBar, name + "Bar")
+            if step is not None and label != self.busy_now:
+                step.setText(u"%s\N{HORIZONTAL ELLIPSIS}" % label)
+                step.repaint()
+            if bar is not None:
+                bar.setValue(int(round(value * getattr(self.ak, "BUSY_RANGE", BAR_RANGE))))
+                bar.repaint()
         except Exception:
             pass
+        self.busy_now = label
+
+    def listing_stopped(self):
+        """The list's reading stopped by the user (the top row's Esc, Close, a tool, an arrow): nothing listed
+        (a list half read would offer half the forms), the status line saying so with a link to list again,
+        the History seen (not read again for it)."""
+        try:
+            self.tree.blockSignals(True)
+            self.tree.clear()
+            self.tree.blockSignals(False)
+        except Exception:
+            pass
+        self.forms, self.trims, self.metrics, self.turned, self.kerns, self.first_checks = [], [], [], [], [], []
+        self.status.setText(self.cj.stopped_line())
+        self.seen_history = self.ak.history_mark(self.package)
+
+    def status_link(self, target):
+        """A link of the status line clicked: List again (a listing stopped)."""
+        try:
+            if u"%s" % target == self.cj.LIST_AGAIN:
+                self.run()
+        except Exception as exc:  # (a slot must never raise)
+            try:
+                self.log.add(self.ak.html(exc), "error")
+            except Exception:
+                pass
 
     # -- reading the font --------------------------------------------------------------
 
@@ -1602,6 +1626,8 @@ class CJKVerticalDialog(object):
         self.set_busy(True, LIST_STEPS)
         try:
             self.read_font()
+        except self.ak.Stopped:
+            self.listing_stopped()
         finally:
             self.set_busy(False)
 
@@ -1654,6 +1680,25 @@ class CJKVerticalDialog(object):
         glyphs, shown_codes = [], []
         self.char_names = code_map(fg_glyphs)
         self.cjk = has_cjk(self.char_names)  # (none: not a CJK font, nothing listed but what says so)
+        boxes = [(self.measure(self.char_names[code]) or (0, None))[1] for code in ORIGIN_SAMPLE
+                 if code in self.char_names]
+        try:
+            ascender = float(package.ascender_value) + (
+                (self.model.get("metrics") or {}).get("origin_over_ascender") or 0.0) * upm
+        except Exception:
+            ascender = None
+        origin, moved = origin_from_ink(self.origin, boxes, self.height, upm, others=(ascender,))
+        if moved:  # (said once per font: the forms, vpal, and the exported values all rest on it)
+            key = (ak.font_key(package), self.origin, origin)
+            if key != getattr(self, "origin_said", None):
+                self.origin_said = key
+                self.log.add(u"The font info's typographic ascender (%s) puts this font's ideographs and kana %s in "
+                             u"the em's square under it; its ascender (%s) centers them: the vertical origin is "
+                             u"taken there. Set the typographic ascender to it in <i>Font Info</i> to make it the "
+                             u"font's." % (
+                                 ak.b(int(round(self.origin))), u"too low" if origin < self.origin else u"too high",
+                                 ak.b(int(origin))), "warning")
+            self.origin = origin
         codes = sorted(self.char_names.items()) if self.cjk else []
         for number, (code, name) in enumerate(codes):
             if number % ROWS_PER_STEP == 0:
@@ -1768,8 +1813,11 @@ class CJKVerticalDialog(object):
         except Exception:
             pass
         without = 0
-        for master in self.masters(package):
-            for name in self.names:
+        masters = self.masters(package)
+        for at, master in enumerate(masters):
+            for number, name in enumerate(self.names):
+                if number % ROWS_PER_STEP == 0:  # (the font's last read: every layer of every master)
+                    self.progress(READ_STEP, 0.8 + 0.2 * (at + number / float(len(self.names))) / len(masters))
                 layer = self.layer_of(name, master)
                 try:
                     if layer is not None and not layer.hasAdvanceHeight:
@@ -1836,14 +1884,14 @@ class CJKVerticalDialog(object):
             self.fill_rows(None)
             return
         try:
-            self.tree.setUpdatesEnabled(False)
+            self.ak.quiet_list(self.tree, True)
         except Exception:
             pass
         try:
             self.fill_rows(progress)
         finally:
             try:
-                self.tree.setUpdatesEnabled(True)
+                self.ak.quiet_list(self.tree, False)
             except Exception:
                 pass
 
@@ -2031,7 +2079,11 @@ class CJKVerticalDialog(object):
         ak.enable(self.restore_button, cjk and [row.checked for row in self.all_rows()] != self.first_checks)
         new, builds, metrics = self.pending()
         problem = self.reader_problem()
-        ak.enable(self.write_button, cjk and bool(new or builds or metrics) and not problem)
+        writable = bool(cjk and (new or builds or metrics) and not problem)
+        ak.enable(self.write_button, writable)
+        # Compile after writing, grayed with the button (owner's image 195), and while the write would change
+        # no feature code (forms or metrics alone: nothing to compile)
+        ak.enable(self.compile_box, writable and bool(new))
         if problem and problem != getattr(self, "problem_said", None):
             self.log.add(self.ak.html(problem), "error")  # (once, while it lasts)
         self.problem_said = problem
@@ -2048,6 +2100,8 @@ class CJKVerticalDialog(object):
             self.fill(lambda part: self.progress(LIST_STEP, part, False))
             self.progress(PREVIEW_STEP)
             self.draw_previews()
+        except self.ak.Stopped:
+            self.listing_stopped()
         except Exception as exc:
             self.log.add(u"Could not show the change: %s" % self.ak.html(exc), "error")
         finally:
@@ -2062,6 +2116,9 @@ class CJKVerticalDialog(object):
         self.set_busy(True, SHOW_STEPS)
         try:
             self.fill(lambda part: self.progress(LIST_STEP, part, False))
+        except self.ak.Stopped:
+            self.listing_stopped()
+            return
         finally:
             self.set_busy(False)
         self.log.add(u"Checks restored as suggested.")
@@ -2080,9 +2137,10 @@ class CJKVerticalDialog(object):
         note = getattr(self, "preview_note", None)
         if note is not None and not on:  # (shown again by draw_previews, where it has something to say)
             note.setVisible(False)
-        for widget in (self.forms_box, self.vpal_box, self.vkrn_box, self.turned_box, self.metrics_box, self.compile_box,
-                       self.export_button):
+        for widget in (self.forms_box, self.vpal_box, self.vkrn_box, self.turned_box, self.metrics_box, self.export_button):
             self.ak.enable(widget, on)
+        if not on:  # (with a font, update_buttons sets it with the write button)
+            self.ak.enable(self.compile_box, False)
 
     def flag_names(self):
         items = self.tree.selectedItems()
@@ -2144,6 +2202,13 @@ class CJKVerticalDialog(object):
                     return f.name, f.matrix
         return glyph, None
 
+    def preview_box(self, name, matrix):
+        """A glyph's ink box (x0, y0, x1, y1) as a preview draws it (mapped by a form's transform), or None."""
+        if name is None:
+            return None
+        box = (self.measure(name) or (0, None))[1]
+        return mapped_box(matrix, box) if box is not None and matrix is not None else box
+
     def form_matrix_of(self, name):
         for f in self.forms:
             if f.name == name and f.state == "build":
@@ -2152,7 +2217,9 @@ class CJKVerticalDialog(object):
 
     def picture(self, columns_of, size, columns=True):
         """Glyphs [(name, transform or None, y placement, y advance change)] set top to bottom in columns
-        right to left (columns_of: a list of columns), each square an em, in the dialog's text color."""
+        right to left (columns_of: a list of columns), each square an em, in the dialog's text color. The
+        picture is as tall as the squares and whatever ink reaches past them (owner's image 181: as tall as
+        the squares alone, it cut the ink under a column's last one)."""
         QtCore, QtGui = _qt()
         if self.package is None:
             return None
@@ -2161,29 +2228,42 @@ class CJKVerticalDialog(object):
         tall = max([sum(self.height + item[3] for item in column) for column in columns_of] + [self.height])
         step = size * COLUMN_STEP
         width = int(step * len(columns_of)) + 4 if columns else int(size) + 4
-        pixmap = QtGui.QPixmap(max(width, 4), max(int(tall * scale) + 4, 4))
+        draws, top, bottom = [], 0.0, tall * scale  # (the ink's reach, in pixels from the first square's top)
+        for number, column in enumerate(columns_of):
+            x = (width - step * (number + 1)) if columns else 2.0
+            y = 0.0
+            for name, matrix, placement, advance in column:
+                path = self.form_path(name, matrix) if name is not None else None
+                base = baseline_y(y, self.origin, placement, scale)
+                if path is not None:
+                    try:  # (the path's box in font units, y up: its top() is the ink's lowest y)
+                        box = path.boundingRect()
+                        if box.width() > 0 or box.height() > 0:
+                            top = min(top, base - box.bottom() * scale)
+                            bottom = max(bottom, base - box.top() * scale)
+                    except Exception:
+                        pass
+                draws.append((x, y, name, path, base))
+                y += (self.height + advance) * scale
+        shift = 2.0 - top  # (ink over the first square: everything drawn that much lower)
+        pixmap = QtGui.QPixmap(max(width, 4), max(int(math.ceil(bottom - top)) + 4, 4))
         pixmap.fill(QtGui.QColor(0, 0, 0, 0))
         color = self.dialog.palette.color(QtGui.QPalette.WindowText)
         painter = QtGui.QPainter(pixmap)
         try:  # ended before anything else can fail: a painter left open on a freed pixmap aborts FontLab
             painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
-            for number, column in enumerate(columns_of):
-                x = (width - step * (number + 1)) if columns else 2.0
-                y = 2.0
-                for name, matrix, placement, advance in column:
-                    path = self.form_path(name, matrix) if name is not None else None
-                    if name is None:  # (missing from the font: an empty box, as a font's .notdef)
-                        painter.save()
-                        painter.setPen(QtGui.QPen(color, 1.0))
-                        painter.drawRect(QtCore.QRectF(x + size * 0.15, y + size * 0.1, size * 0.7, size * 0.8))
-                        painter.restore()
-                    elif path is not None:
-                        painter.save()
-                        painter.translate(x, baseline_y(y, self.origin, placement, scale))
-                        painter.scale(scale, -scale)
-                        painter.fillPath(path, QtGui.QBrush(color))
-                        painter.restore()
-                    y += (self.height + advance) * scale
+            for x, y, name, path, base in draws:
+                if name is None:  # (missing from the font: an empty box, as a font's .notdef)
+                    painter.save()
+                    painter.setPen(QtGui.QPen(color, 1.0))
+                    painter.drawRect(QtCore.QRectF(x + size * 0.15, y + shift + size * 0.1, size * 0.7, size * 0.8))
+                    painter.restore()
+                elif path is not None:
+                    painter.save()
+                    painter.translate(x, base + shift)
+                    painter.scale(scale, -scale)
+                    painter.fillPath(path, QtGui.QBrush(color))
+                    painter.restore()
         finally:
             painter.end()
         # (in one color: redrawn in the new one when dark mode switches)
@@ -2205,9 +2285,14 @@ class CJKVerticalDialog(object):
             placed, chars, heights = preview_column(text, names, own, chosen if index else {}, trims if index else {},
                                                     kerns if index else {}, self.height, upm)
             width = self.pane_width(label)
-            em = fitting_em(chars, lambda size: [h * size for h in heights], width, room + 8, PREVIEW_EM) \
+            # (each column broken with room for its glyphs' ink past their squares: owner's image 181)
+            above, below = ink_overflow([(self.preview_box(name, matrix), placement, advance)
+                                         for name, matrix, placement, advance in placed], self.origin, self.height)
+            extra = (above + below) / upm
+            em = fitting_em(chars, lambda size: [h * size for h in heights], width, room + 8, PREVIEW_EM, extra=extra) \
                 if room and width else PREVIEW_EM
-            spans = vertical_lines(chars, [h * em for h in heights], room) if room and room > em else [(0, len(placed))]
+            fit = room - extra * em if room else room
+            spans = vertical_lines(chars, [h * em for h in heights], fit) if fit and fit > em else [(0, len(placed))]
             pixmap = self.picture([placed[a:b] for a, b in spans], em) if placed else None
             if pixmap is None:
                 label.clear()
@@ -2271,9 +2356,14 @@ class CJKVerticalDialog(object):
             return
         heights = [m for m in metrics if m.key == "advance_height"]
         vhea = [m for m in metrics if m.key != "advance_height"]
-        self.set_busy(True, WRITE_STEPS, at_once=True)
+        # Never stoppable while it writes (one step of FontLab's History, never half written: owner's image 183,
+        # several seconds; a click on Close, a tool, or an arrow is done once it is over); the list read again
+        # after it is (stoppable set again there)
+        self.set_busy(True, WRITE_STEPS, at_once=True, stoppable=False)
         try:  # (busy always ends: while it holds, the History watcher is silent and the window is kept)
             self.write_parts(package, new, builds, heights, vhea)
+        except self.ak.Stopped:
+            self.listing_stopped()
         finally:
             self.set_busy(False)
 
@@ -2290,7 +2380,7 @@ class CJKVerticalDialog(object):
         except Exception:
             changed = list(CODE_TAGS)  # (code that cannot be read counts as changed)
         if changed:
-            self.holding = False
+            self.holding, self.stoppable = False, True  # (nothing written: the list read again may stop)
             self.read_font()  # (under the same bar)
             self.log.add(u"The feature code (%s) changed since the list was read: here is the list again, to check "
                          u"before writing. Nothing was written." % self.ak.html(self.ak.joined(changed)), "warning")
@@ -2344,6 +2434,10 @@ class CJKVerticalDialog(object):
         except Exception as exc:
             error = error or exc
         self.holding = False
+        compiled = u""
+        if written:
+            self.progress(COMPILE_STEP)
+            compiled = self.ak.compiled_note(self.compile_box, self.log)
         b = self.ak.b
         undo = getattr(status, "recorded", True)
         if built:
@@ -2357,7 +2451,7 @@ class CJKVerticalDialog(object):
             self.log.add(u"Wrote %s%s.%s" % (
                 b(self.ak.joined(written)),
                 u"; <i>Edit &gt; Undo</i> takes %s back" % (u"it" if len(written) == 1 else u"them") if undo else u"",
-                self.ak.compiled_note(self.compile_box, self.log)), "done")
+                compiled), "done")
         if set_heights:
             self.log.add(u"Set the advance height of %s to %s." % (b(counted(set_heights, u"layer")), b(heights[0].value)),
                          "done")
@@ -2374,6 +2468,7 @@ class CJKVerticalDialog(object):
             self.log.add(status.message(), "error")
         if error is not None:
             self.log.add(u"Stopped by an error: %s" % self.ak.html(error), "error")
+        self.stoppable = True  # (written: the list read again may stop, at the user's Esc, Close, tool, or arrow)
         self.read_font()  # (under the same bar)
 
     def changed_code(self, package):
@@ -2477,7 +2572,9 @@ class CJKVerticalDialog(object):
         (256 of 7,866 layers kept it), while with it every one of 7,792 kept it."""
         done = 0
         masters = self.masters(package)
-        for name in self.names:
+        for number, name in enumerate(self.names):
+            if number % ROWS_PER_STEP == 0:
+                self.progress(HEIGHTS_STEP, number / float(len(self.names)))
             glyph = package.findName(name)
             if glyph is None:
                 continue
@@ -2525,7 +2622,10 @@ class CJKVerticalDialog(object):
         heights, vhea's values from the font info (the suggested ones where it has none)."""
         master = package.master
         heights, codes = {}, {}
-        for fg in package.fgPackage.glyphs:
+        every = list(package.fgPackage.glyphs)
+        for number, fg in enumerate(every):
+            if number % ROWS_PER_STEP == 0:
+                self.progress(VALUES_STEP, number / float(len(every)))
             name = u"%s" % fg.name
             glyph = package.findName(name)
             layer = glyph.getLayerByName(master) if glyph is not None else None
@@ -2607,6 +2707,9 @@ class CJKVerticalDialog(object):
                 return
             script.publish(staged, values_out)
             staged = None
+        except self.ak.Stopped:  # (the top row's Esc, Close, a tool, an arrow: before anything took its name)
+            self.log.add(u"Adding the vertical metrics was stopped: nothing was written.", "warning")
+            return
         except Exception as exc:
             self.log.add(u"Could not add the vertical metrics: %s" % self.ak.html(exc), "error")
             return

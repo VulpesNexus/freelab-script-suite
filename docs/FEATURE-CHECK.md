@@ -12,7 +12,7 @@ Findings are grouped by kind, errors first. A group's tooltip says what its kind
 - **Glyphs not in the font**: every glyph name the font lacks, once, with how many times the code names it.
 - **Rules the compiler refuses**: code that reads well but does not compile (a feature referred to and never defined, a `featureNames` block outside a stylistic set, two rule types in one named lookup). After each, the feature is set aside and the rest compiled again, so the list holds them all.
 - **Tables too large**: a layout table whose offsets overflow, even split up.
-- **Lookup flags without their class**: a `lookupflag` that sets UseMarkFilteringSet (16) or a mark attachment type without naming the class it needs. FontLab writes these when it opens some fonts (`lookupflag 16;`, 29 times in Amiri); fontTools refuses them, and the lookup's marks are not filtered as meant. Name the class (`lookupflag UseMarkFilteringSet @marks;`) or drop the flag. The rest of the code is compiled as if the flag were not set, so they hide no other error.
+- **Lookup flags without their class**: a `lookupflag` that sets UseMarkFilteringSet (16) or a mark attachment type without naming the class it needs. FontLab writes these when it opens some fonts (`lookupflag 16;`, 29 times in Amiri); fontTools refuses them, and the lookup's marks are not filtered as meant. Name the class (`lookupflag UseMarkFilteringSet @marks;`) or drop the flag. The rest of the code is compiled as if the flag were not set, so they hide no other error. Each has a fix to review, never applied automatically: the bit taken out (`lookupflag 0;`), after which the lookup applies to every mark. The class the font had cannot be told from the code (it was in the opened font's GDEF): to keep the filtering, write the class by hand instead.
 
 **Warnings** (it compiles, and probably does not do what was meant):
 
@@ -20,13 +20,15 @@ Findings are grouped by kind, errors first. A group's tooltip says what its kind
 - **Languages without a languagesystem line**: a feature names a script or language (`script cyrl;`, `language TRK;`) that no `languagesystem` line declares. The feature's rules then apply to it alone: in text in that language, the font's other features are missing.
 - **No default language system**: the prefix declares language systems but not `DFLT dflt`, so text in any script it does not name gets no features.
 - **Empty classes**: a rule using one never applies.
+- **Classes defined twice, differently**: in FontLab's *Classes* panel and in the code, or twice in the code, with other glyphs. Each rule uses the definition read last before it, which may not be the one meant. FontLab writes each of its classes into the prefix too, the same; those copies are not listed.
 
 **Advice** (it does nothing, or could be better):
 
 - **Rules written twice** in the same lookup: the second does nothing. A rule of another kind between them begins another lookup (`sub a by b; sub c d by a; sub a by b;` is three lookups in FontLab's fontTools, and the second `sub a by b` turns the *a* the ligature makes), as do a lookup flag, a script or language, a subtable break, and a lookup's reference: the same rule after one of those is no duplicate.
 - **Substitutions that change nothing**: `sub c by c;`.
-- **Glyphs listed twice in a class**.
-- **Classes never used**: defined in the code, used by no rule and no other class. FontLab's own classes (its *Classes* panel's) are never listed: the code may not use them, and they are kept there.
+- **Glyphs listed twice in a class**. Not a class whose glyphs pair with another's: in `sub @a by @b;`, two glyphs of `@a` may become one glyph, which `@b` names twice, and must.
+- **Classes defined twice** in the code, the same: the second definition does nothing (its fix removes it).
+- **Classes never used**: defined in the code, used by no rule and no other class. FontLab's own classes (its *Classes* panel's) are never listed: the code may not use them, and they are kept there. A class or lookup named by a feature set aside for a syntax error counts as used.
 - **Lookups never used**: a lookup outside every feature that no feature or rule refers to. It is compiled into the font and never applied.
 - **Empty lookups** and **features with no rule**: an app may list such a feature (a stylistic set with a name) that does nothing.
 - **aalt not first**: the specification asks for it before the other features.
@@ -39,9 +41,15 @@ A finding with a fix has a check box, unchecked: by default every finding is for
 
 - *changes nothing in the compiled font*: the font's code was compiled with the fix and without it, and the two layouts are the same, compared by what they do, not by their bytes: for each script and language, the lookups that apply, in their order, and which features they come from (a required feature told apart), with what each substitutes or positions (classes expanded to their glyphs, kerning to its pairs, a pair covered by an earlier subtable counted as that subtable's), the features' parameters and names, and GDEF's classes.
 - *changes the compiled font: review it*: the layouts differ.
-- *not proven*: the feature it is in does not compile, so there is nothing to compare with.
+- *not proven: part of the code does not compile; mend the errors first*: while any feature is set aside for an error, no fix is proven, since the code built without it cannot show what a fix does to it (a class or lookup it uses, directly or through others).
+- *changes what the font does: review it*: a fix that changes the font by design (a lookup flag taken out), never proven and never applied automatically.
+- *mends code that does not compile: review it*: a repair (aalt's lookups written into it, a class made FontLab's again), never applied automatically.
 
 Where the code compiles as it is, every fix is compared with it as it is. Only where it does not (a `lookupflag 16;`, or a single substitution written twice, which FontLab's fontTools refuses) is a copy made to compile, those statements blanked or cleared at the same width so the offsets of every fix stay right.
+
+Removals of classes and lookups nothing uses, and of a class's second identical definition, are proven together, a group that is not the same split in halves: taking out one of them leaves the others as they were. Every other fix is proven alone, since two fixes can work only together (two classes whose repeats pair: each removal alone breaks the rule).
+
+**Lookups inside aalt** (an error): FontLab writes the lookups of aalt inside the feature when it opens some fonts (`feature aalt { ... lookup aalt_2 useExtension { ... } aalt_2; }`), and neither its own compiler ("`lookup` use not allowed in 'aalt' feature") nor fontTools takes a lookup there, so none of the font's features compiles. The repair writes the lookups' rules straight into aalt, which both take. Until it is applied, aalt is set aside and nothing is proven. Before this, a fix to a class only aalt used was proven against the code without aalt: *Apply safe fixes automatically* took the repeats out of a CJK font's `@aalt2`, which its `sub @aalt by @aalt2;` needs (2026-11-17). Such a font shows *@aalt2 is defined twice, differently* (FontLab's class keeps the repeats), with a repair that makes the prefix's copy FontLab's class again.
 
 A fix that would not compile is no fix: the finding stays, without a check box, and says so. Dropping the repeated glyph of `[a b a]` in `sub [a b a] by [x y z];` is one: each glyph takes the glyph in its place, so the class must keep its length.
 
@@ -57,4 +65,4 @@ Feature Code, Glyph Compose (its mark features), CJK Spacing, and CJK Vertical c
 
 The checks use fontTools' feature compiler (feaLib), which FontLab 7 ships (3.43); the tests run on it and on fontTools 4. FontLab compiles with Adobe's compiler (hotconv), which differs in places: it keeps the first of two conflicting rules where fontTools refuses them, and it stops on its own limits. *Compile in FontLab* compiles there, as the *Features* panel's *Compile* button does, and adds what FontLab's *Output* panel shows to the log.
 
-A large font's code takes a while. Amiri (6,710 glyphs, a 231 KB prefix and 23 features) takes about 5 seconds to check and 3 more to prove its fixes inside FontLab: the code is parsed and built once, the font without fixes is built once for all the proofs, and each fix once more (a kerning change is compared pair by pair, up to 3 million pairs; past that, it is not proven). A writer's own check costs about as much as a check: 5 to 10 seconds on a font of that size, a fraction of a second on most.
+A large font's code takes a while, and a bar beside the status line shows the step (reading the code, compiling it, proving the fixes). Amiri (6,710 glyphs, a 231 KB prefix and 23 features) takes about 5 seconds to check inside FontLab: the code is parsed and built once, and the font without fixes is built once for all the proofs. The fixes of a kind are proven together, in one build; only a group that changes the layout or does not compile is split in halves, down to the fix that does (a kerning change is compared pair by pair, up to 3 million pairs; past that, it is not proven). A CJK font of 15,444 glyphs and 704 classes checks in about 3 seconds outside FontLab. A writer's own check costs about as much as a check: 5 to 10 seconds on a font of Amiri's size, a fraction of a second on most.

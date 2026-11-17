@@ -4284,7 +4284,14 @@ class PreviewPartsTests(unittest.TestCase):
         dialog.current_font = lambda: None
         dialog.selected = lambda: None
         dialog.ak = Stub(NO_FONT_LINE=u"No font is open. This window takes the next font you open.")
-        dialog.status = Stub(setText=lambda text: setattr(dialog, "top_line", text))
+        dialog.status = Stub(setText=lambda text: setattr(dialog, "tab_line", text))
+        moves = []
+        dialog.top_line = Stub(setText=lambda text: setattr(dialog, "window_line", text))
+        dialog.top_tabs = "the tabs"
+        dialog.header = Stub(removeWidget=lambda w: moves.append(("header -", w)),
+                             insertWidget=lambda at, w, stretch=0: moves.append(("header +", w)))
+        dialog.tabs_row = Stub(removeWidget=lambda w: moves.append(("under -", w)),
+                               addWidget=lambda w, stretch=0: moves.append(("under +", w)))
         dialog.editor = Stub(selected=None, scene="a scene of before", update=lambda: None,
                              setVisible=lambda on: shown.__setitem__("editor", on))
         dialog.fill_strip = lambda r: False
@@ -4294,8 +4301,17 @@ class PreviewPartsTests(unittest.TestCase):
         self.assertEqual(sorted(shown), sorted(ac.preview_parts(False, False, False)))
         self.assertFalse(any(shown.values()), shown)
         self.assertIsNone(dialog.editor.scene)
-        self.assertEqual(dialog.top_line, u"No font is open. This window takes the next font you open.",
+        # Owner's images 193 and 194: the line on the window's first row, beside the "?", the tabs under it
+        self.assertEqual(dialog.window_line, u"No font is open. This window takes the next font you open.",
                          "the shared line: the window takes the next font opened")
+        self.assertEqual(dialog.tab_line, u"", "not under the tabs any more")
+        self.assertEqual(moves, [("header -", "the tabs"), ("under +", "the tabs")])
+        self.assertTrue(dialog.tabs_under)
+        dialog.show_top_line(u"")  # (a font: the tabs back on the first row, the line hidden)
+        self.assertEqual(moves[2:], [("under -", "the tabs"), ("header +", "the tabs")])
+        self.assertEqual(dialog.window_line, u"")
+        dialog.show_top_line(u"")
+        self.assertEqual(len(moves), 4, "moved once")
         self.assertEqual(ac.no_font_line(None), u"No font is open.")
 
     def test_a_font_closed_or_opened_under_the_window_is_read_afresh(self):
@@ -5152,7 +5168,10 @@ class OwnerReportNovember16Tests(unittest.TestCase):
         Compact diacritics to fit the line jumped up and right."""
         shown, missing = ac.preview_parts(True, True, True), ac.preview_parts(True, False, False)
         gone = set(name for name, on in shown.items() if on and not missing[name])
-        self.assertTrue(gone <= set(ac.ROOM_KEPT), gone - set(ac.ROOM_KEPT))
+        # (owner's image 184: the editor's buttons give their room up, so that the box alone goes right)
+        self.assertTrue(gone <= set(ac.ROOM_KEPT + ac.ROOM_RELEASED), gone - set(ac.ROOM_KEPT + ac.ROOM_RELEASED))
+        self.assertEqual(set(ac.ROOM_RELEASED), set(ac.room_texts()), "the buttons beside the box")
+        self.assertFalse(set(ac.ROOM_KEPT) & set(ac.ROOM_RELEASED))
         self.assertTrue(missing["compact_box"], "the box stays, and now in its place")
         dialog = ac.AccentsDialog.__new__(ac.AccentsDialog)
         kept = []
@@ -5229,7 +5248,7 @@ class OwnerReportNovember16Tests(unittest.TestCase):
 
             def setSizePolicy(self, policy):
                 pass
-        for name in ac.ROOM_KEPT:
+        for name in ac.ROOM_KEPT + ac.ROOM_RELEASED:
             button = Button(name)
             button.setText(u"x")
             button.sizePolicy = Stub(setRetainSizeWhenHidden=lambda on: None)
@@ -5332,6 +5351,177 @@ class OwnerReportNovember16Tests(unittest.TestCase):
         finally:
             ac._qt = saved
         self.assertEqual(len(opened), 1)
+
+
+class OwnerReportNovember17Tests(unittest.TestCase):
+    """The owner's review of 2026-11-17 on 07LightNovelPOP, a CID-keyed font (Adobe-Japan1): its cmap
+    maps U+00C0 to cid00164 and U+0306 to cid00130, glyphs of its collection never drawn."""
+
+    U = staticmethod(ac.unichr_)
+
+    def cid_font(self):
+        """What the font gives: A, E, its Agrave empty, an empty acutecomb (U+0301) beside a drawn acute (U+00B4),
+        grave at U+0060 and U+0300 alike, an empty U+0306, an empty period."""
+        names = ["A", "E", "Agrave", "acutecomb", "acute", "grave", "uni0306", "period", "o"]
+        codes = [("A", 0x41), ("E", 0x45), ("Agrave", 0xC0), ("acutecomb", 0x301), ("acute", 0xB4),
+                 ("grave", 0x300), ("grave", 0x60), ("uni0306", 0x306), ("period", 0x2E), ("o", 0x6F)]
+        return ac.Font(names, codes, ["Agrave", "acutecomb", "uni0306", "period"])
+
+    def test_an_empty_glyph_of_the_letter_is_filled_and_an_empty_mark_never_used(self):
+        """Report 175: Agrave is listed with "its glyph is in the font, empty: filled when built", rightly (its glyph
+        is empty: nothing to compose from). Report 184: Ebreve was offered as E + uni0306, an empty breve, its
+        preview blank; an empty mark is passed over as one the font lacks."""
+        U = self.U
+        found = dict((r.char, r) for r in ac.plan(self.cid_font(), [U(0xC0), U(0xC1), U(0x114), U(0xE1)]))
+        agrave = found[U(0xC0)]
+        self.assertTrue(agrave.refill, "the font's empty Agrave, filled")
+        self.assertEqual((agrave.name, agrave.marks[0].glyph), ("Agrave", "grave"))
+        self.assertIn(u"its glyph is in the font, empty: filled when built", ac.row_text(agrave.describe(), True))
+        self.assertEqual(found[U(0xC1)].marks[0].glyph, "acute", "the drawn acute, not the empty acutecomb")
+        self.assertTrue(found[U(0x114)].missing and u"breve" in found[U(0x114)].missing, "no breve drawn")
+        self.assertTrue(found[U(0xE1)].missing, "no a in the font")
+        font = self.cid_font()
+        self.assertIsNone(font.drawn(0x306))
+        self.assertEqual(font.drawn(0x300), "grave")
+        self.assertFalse(font.usable("acutecomb"))
+        dots = ac.Font(["a", "period"], [("a", 0x61), ("period", 0x2E)], ["period"])
+        self.assertTrue(ac.plan(dots, [ac.unichr_(0x0227)])[0].missing, "no dot drafted from an empty period")
+
+    def test_the_font_read_tells_empty_marks_and_punctuation(self):
+        """AccentsDialog.font reads the emptiness of what marks are taken from (the punctuation drafts use, a
+        glyph named as a mark), and says how far it is (the window's top row)."""
+        class Glyph(object):
+            def __init__(self, name, code, drawn):
+                self.name, self.code = name, code
+                self.layers = [Stub(shapes=[1] if drawn else [])]
+        glyphs = [Glyph("A", 0x41, True), Glyph("period", 0x2E, False), Glyph("brevecomb", 0, False),
+                  Glyph("cid09000", 0, False), Glyph("quoteright", 0x2019, False)]
+        by_name = dict((g.name, g) for g in glyphs)
+        dialog = ac.AccentsDialog.__new__(ac.AccentsDialog)
+        dialog.ak = Stub(main_code=lambda g: g.code, glyph_codes=lambda g: [g.code] if g.code else [])
+        shares = []
+        font = dialog.font(Stub(fgPackage=Stub(glyphs=glyphs), findName=by_name.get), shares.append)
+        self.assertEqual(font.empty, set(["period", "brevecomb", "quoteright"]), "an unencoded cid glyph is not read")
+        self.assertEqual(shares, [0.0])
+
+    def test_reading_the_font_shows_in_the_top_row_and_can_be_stopped(self):
+        """Report 176: "Reading the font..." was a line under the tabs, the window frozen; now the shared top
+        row's step and bar, and the user can stop it: nothing is listed then, and the line says how to read
+        it again."""
+        class Stopped(Exception):
+            pass
+        calls, lines = [], []
+        dialog = ac.AccentsDialog.__new__(ac.AccentsDialog)
+        dialog.ak = Stub(Stopped=Stopped, enable=lambda button, on: None,
+                         busy_start=lambda owner, what, stoppable=True: calls.append(("start", what, stoppable)),
+                         busy_progress=lambda owner, what=None, part=None, stoppable=True: calls.append(("step", what)),
+                         busy_end=lambda owner: calls.append("end"))
+        dialog.recipes, dialog.package = [], None
+        dialog.tree = Stub(clear=lambda: None)
+        dialog.remember_list = lambda: None
+        dialog.build_button = Stub()
+        dialog.current_font = lambda: Stub(master="Regular")
+        dialog.package_key = lambda package: None if package is None else "font"
+        dialog.show_top_line = lines.append
+        dialog.status = Stub(setText=lambda text: setattr(dialog, "said", text))
+        dialog.log = Stub(add=lambda *args: calls.append("logged"))
+        dialog.select = lambda: None
+
+        def read(package, same_font, kept, built_now):
+            calls.append("read")
+            dialog.work_progress(u"Planning the glyphs", 0.35)
+            raise Stopped()
+        dialog.read_font = read
+        saved = ac._qt
+        try:
+            ac._qt = lambda: (Stub(QTimer=Stub(singleShot=lambda ms, slot: None)), None)
+            dialog.run()
+        finally:
+            ac._qt = saved
+        self.assertEqual(calls, [("start", u"Reading the font", True), "read", ("step", u"Planning the glyphs"),
+                                 "logged", "end"])
+        self.assertEqual(dialog.said, ac.STOPPED_READING)
+        self.assertEqual(lines, [u""], "a font: no top line")
+        self.assertFalse(dialog.busy or dialog.work_depth or dialog.reading)
+        dialog.reading = True  # (a read asked while one goes on: done once it is over)
+        dialog.run()
+        self.assertTrue(dialog.read_again)
+
+    def test_a_write_is_never_stopped_and_nested_work_shares_the_bar(self):
+        calls = []
+        dialog = ac.AccentsDialog.__new__(ac.AccentsDialog)
+        dialog.ak = Stub(busy_start=lambda owner, what, stoppable=True: calls.append(("start", what, stoppable)),
+                         busy_progress=lambda owner, what=None, part=None, stoppable=True: calls.append(
+                             ("step", what, stoppable)),
+                         busy_end=lambda owner: calls.append("end"))
+        dialog.work_begin(u"Building", stoppable=False)
+        dialog.work_progress(None, 0.5, stoppable=False)
+        dialog.work_begin(u"Reading the font")  # (the build reads the font again: the same bar)
+        dialog.work_end()
+        self.assertTrue(dialog.busy, "still at work")
+        dialog.work_end()
+        self.assertEqual(calls, [("start", u"Building", False), ("step", None, False), ("step", u"Reading the font", True),
+                                 "end"])
+        self.assertFalse(dialog.busy)
+        dialog.work_progress(u"outside any work")  # (nothing: no bar to move)
+        self.assertEqual(len(calls), 4)
+
+    def test_font_checks_list_is_kept_for_the_session(self):
+        """Report 186: going to another window and back, the list Font Check sent was gone (each window is
+        made anew). Kept by font until Font Check sends another or the font is closed, with its checks."""
+        E, O = self.U(0x114), self.U(0x150)
+        store = {}
+        self.assertEqual(ac.kept_hand_over(store, 7, [E, O], [7, 8]), [E, O], "handed over: kept")
+        self.assertEqual(ac.kept_hand_over(store, 7, None, [7, 8]), [E, O], "back from another window")
+        self.assertIsNone(ac.kept_hand_over(store, 8, None, [7, 8]), "another font has none")
+        self.assertIsNone(ac.kept_hand_over(store, None, None, [7, 8]), "a window on no font")
+        store[7]["checks"][E] = False
+        self.assertEqual(ac.kept_hand_over(store, 7, [O], [7, 8]), [O], "a new list")
+        self.assertEqual(store[7]["checks"], {}, "its checks start over")
+        self.assertEqual(ac.kept_hand_over(store, 7, None, None), [O], "FontLab could not tell: kept")
+        self.assertIsNone(ac.kept_hand_over(store, 7, None, [8]), "the font closed: forgotten")
+        self.assertEqual(store, {})
+
+    def test_the_checks_go_to_the_next_window(self):
+        E, O = self.U(0x114), self.U(0x150)
+        key = "a font of the checks test"
+        memory = ac.hand_over_memory()
+        memory[key] = {"characters": [E, O], "checks": {}}
+        try:
+            before = ac.AccentsDialog.__new__(ac.AccentsDialog)
+            before.given, before.generation_given, before.hand_over_key = [E, O], [], key
+            before.kept_checks = None
+            before.set_box = Stub(currentIndex=0)
+            before.remember_checks([(E, False), (O, True), (u"x", True)])
+            self.assertEqual(memory[key]["checks"], {E: False, O: True}, "only what Font Check handed over")
+            after = ac.AccentsDialog.__new__(ac.AccentsDialog)
+            after.given, after.generation_given, after.hand_over_key = [E, O], [], key
+            after.kept_checks = dict(memory[key]["checks"])
+            after.set_box = Stub(currentIndex=0)
+            after.remember_checks([(E, True), (O, True)])  # (the suggestions, before the checks are taken)
+            self.assertEqual(memory[key]["checks"], {E: False, O: True}, "not overwritten by the first suggestions")
+            rows = [ac.Recipe(E, u"Ebreve", "E"), ac.Recipe(O, u"Ohungarumlaut", "O")]
+            self.assertTrue(after.take_kept_checks(rows, lambda r: r.char))
+            self.assertEqual([r.checked for r in rows], [False, True])
+            self.assertFalse(after.take_kept_checks(rows, lambda r: r.char), "once")
+            after.remember_checks([(E, True)])
+            self.assertEqual(memory[key]["checks"][E], True, "and kept again as they change")
+            elsewhere = ac.AccentsDialog.__new__(ac.AccentsDialog)
+            elsewhere.given, elsewhere.generation_given, elsewhere.hand_over_key = [E, O], [], key
+            elsewhere.kept_checks = {E: False}
+            elsewhere.set_box = Stub(currentIndex=1)  # (another character set chosen)
+            self.assertFalse(elsewhere.take_kept_checks(rows, lambda r: r.char))
+        finally:
+            memory.pop(key, None)
+
+    def test_the_search_count_takes_no_room_while_empty(self):
+        """Report 185: the search field ended short of the rows' right edge, an empty count beside it."""
+        label = Stub(setText=lambda text: setattr(label, "text", text), setVisible=lambda on: setattr(label, "on", on))
+        ac.show_count(label, u"")
+        self.assertEqual((label.text, label.on), (u"", False))
+        ac.show_count(label, u"3 of 92 glyphs")
+        self.assertEqual((label.text, label.on), (u"3 of 92 glyphs", True))
+        ac.show_count(Stub(setText=lambda text: None), u"")  # (a label that cannot hide: the text alone)
 
 
 if __name__ == "__main__":

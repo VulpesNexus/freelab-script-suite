@@ -303,6 +303,64 @@ def marks(sheet):
     return out
 
 
+def _xml(text):
+    return ("%s" % text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+
+def _n(value):
+    return ("%.2f" % value).rstrip("0").rstrip(".")
+
+
+def sheet_svg(sheet, guide_rgb=(170, 215, 250)):
+    """A sheet as an SVG drawing, the same as render_sheet's image (its pixels its user units): the
+    template in a locked group, "template", for a vector app to draw on a layer above it. Read back as an
+    image (Qt renders it at its size), so whatever the app draws is traced as on a raster sheet."""
+    width, height = sheet.size()
+    guide = "rgb(%d,%d,%d)" % tuple(guide_rgb)
+    thin, base = max(1.0, sheet.em / 400.0), max(2.0, sheet.em / 200.0)
+    label_px, small_px = max(10, int(sheet.em * LABEL * 0.6)), max(9, int(sheet.em * LABEL * 0.35))
+    bw, bh = sheet.box_size()
+    out = ['<?xml version="1.0" encoding="UTF-8"?>',
+           '<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d">' % (
+               width, height, width, height),
+           '<title>%s</title>' % _xml("%s sheet %d of %d" % (sheet.family or "Font Builder", sheet.index + 1, sheet.count)),
+           '<g id="template" sodipodi:insensitive="true" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/'
+           'sodipodi-0.dtd">',
+           '<rect x="0" y="0" width="%d" height="%d" fill="#ffffff"/>' % (width, height),
+           '<g fill="none" stroke="%s" stroke-width="%s">' % (guide, _n(thin))]
+    for i in range(len(sheet.names)):
+        left, top = sheet.cell(i)
+        out.append('<rect x="%s" y="%s" width="%d" height="%d"/>' % (_n(left), _n(top), bw, bh))
+        for key, y in sheet.guides(i):
+            extra = ' stroke-width="%s"' % _n(base) if key == "baseline" else ""
+            out.append('<line x1="%s" y1="%s" x2="%s" y2="%s"%s/>' % (_n(left), _n(y), _n(left + bw), _n(y), extra))
+        ox, _ = sheet.origin(i)
+        out.append('<line x1="%s" y1="%s" x2="%s" y2="%s"/>' % (_n(ox), _n(top), _n(ox), _n(top + bh)))
+    out.append('</g>')
+    out.append('<g fill="%s" font-family="Arial, sans-serif">' % guide)
+    for i, (name, label) in enumerate(zip(sheet.names, sheet.labels)):
+        left, top = sheet.cell(i)
+        middle = top - LABEL * sheet.em / 2.0
+        if label != name:
+            out.append('<text x="%s" y="%s" font-size="%d" dominant-baseline="central">%s</text>' % (
+                _n(left), _n(middle + label_px * 0.35), label_px, _xml(label)))
+        out.append('<text x="%s" y="%s" font-size="%d" text-anchor="end">%s</text>' % (
+            _n(left + bw), _n(middle + small_px * 0.35), small_px, _xml(name)))
+    which = ("%s, sheet" % sheet.family) if sheet.family else "Sheet"
+    title = "%s %d of %d. Draw in dark ink inside the boxes; keep the corner squares and the bands clean." % (
+        which, sheet.index + 1, sheet.count)
+    out.append('<text x="%s" y="%s" font-size="%d" text-anchor="middle">%s</text>' % (
+        _n(width / 2.0), _n(QUIET * sheet.unit * 1.25 + small_px * 0.35), small_px, _xml(title)))
+    out.append('</g>')
+    u = sheet.unit
+    out.append('<path fill="#000000" d="%s"/>' % " ".join(
+        "M%s %sh%sv%sh-%sz" % (_n(x * u), _n(y * u), _n(w * u), _n(h * u), _n(w * u)) for x, y, w, h in marks(sheet)))
+    out.append('</g>')
+    out.append('<g id="drawing"></g>')
+    out.append('</svg>')
+    return "\n".join(out) + "\n"
+
+
 # ---------------------------------------------------------------------------
 # Geometry: the homography from the template to an image of it
 # ---------------------------------------------------------------------------
@@ -713,6 +771,19 @@ FIND_SIDE = 2400  # an image is looked through for its finder patterns at this m
 # first color, (150, 200, 245), came to 190, not the 205 the documentation said (review 10)
 GUIDE_RGB = (170, 215, 250)
 TYPED = "Characters typed below"
+# The sets listed first, for quick access (each also in the full list after them), as Font Check names them
+COMMON_SETS = ("GF Latin Kernel", "GF Latin Core", "GF Latin Plus", "GF Latin Vietnamese", "Adobe Latin 1",
+               "Adobe Latin 2", "Adobe Latin 3", "GF Cyrillic Core", "GF Greek Core", "GF Arabic Core", "Hebrew",
+               "Devanagari", "Thai", "Hiragana", "Katakana", "Jōyō kanji, 2010 (Unihan kJoyoKanji)",
+               "JIS X 0208-1990 (Unihan J0)", "GB/T 2312-1980 (Unihan G0)", "Big Five (Unihan kBigFive)",
+               "KS X 1001:2004 hanja (Unihan K0)", "Hangul", "General Punctuation (Unicode block)",
+               "Currency Symbols (Unicode block)")
+
+
+def common_sets(names):
+    """The numbers (in names) of the COMMON_SETS there are, in COMMON_SETS' order."""
+    where = dict((name, number) for number, name in enumerate(names))
+    return [where[name] for name in COMMON_SETS if name in where]
 
 
 def _qt():
@@ -944,20 +1015,23 @@ def has_ink(data, width, height, stride, threshold, least):
 
 HELP = """<b>FreeLab Font Builder</b><br>
 Makes template sheets to draw a font's glyphs on, then builds the glyphs from the sheets drawn.<br><br>
-<b>Template</b>: pick the glyphs (a character set of Font Check's, or characters typed or pasted), and with
-a font open, whether to leave out the glyphs it already has drawn; alternates add <i>name.alt1</i> and the
-like after each. Each sheet holds the glyphs a sheet you set (100 by default): one image, each glyph in a
-box with the font's metric lines (its baseline thicker) and an origin line, in a pale blue that the
-reading leaves out. <i>Save template</i> writes one image a sheet. Open them in any app, or print them;
-draw each glyph in dark ink inside its box, on the image or on a layer above it, and export each sheet as
-an image again (PNG, JPEG, TIFF, BMP, WebP, or PSD), or scan or photograph the paper.<br><br>
+<b>Template</b>: pick the glyphs (a character set of Font Check's, the common ones first, which fills
+the box with its characters to edit; or characters typed or pasted), and with a font open, whether to
+leave out the glyphs it already has drawn; alternates add <i>name.alt1</i> and the like after each. Each
+sheet holds the glyphs a sheet you set (100 by default): one image, each glyph in a box with the font's
+metric lines (its baseline thicker) and an origin line, in a pale blue that the reading leaves out.
+<i>Save template</i> writes one image a sheet (PNG or TIFF), or one SVG drawing a sheet for vector apps.
+Open them in any app, or print them; draw each glyph in dark ink inside its box, on the image or on a
+layer above it, and export each sheet again (PNG, JPEG, TIFF, BMP, WebP, PSD, or SVG), or scan or
+photograph the paper.<br><br>
 The corner squares and the two bands of squares tell the reading where the sheet is and what it holds,
 so a sheet can be read on another computer than the one that made it, turned, skewed, or photographed;
 keep them clean and wholly in the image.<br><br>
 <b>Build</b>: add the sheets drawn and click <i>Read sheets</i>: each drawn box is traced into outlines
 (or kept as an image, as drawn), and listed. Check the glyphs to build and click <i>Build checked
-glyphs</i> (one step of FontLab's History). Then space them (<i>Auto Spacing</i>) and build the rest
-(<i>Glyph Compose</i>)."""
+glyphs</i> (one step of FontLab's History). With no font open, building makes a new font: the units
+per em, metrics, and family name of the font that made the sheets. Then space the glyphs (<i>Auto
+Spacing</i>) and build the rest (<i>Glyph Compose</i>)."""
 
 
 def settings_path(ak):
@@ -1063,8 +1137,12 @@ class FontBuilderDialog(object):
         self.close_button.connect("clicked()", ak.close_slot(self))
         self.package = None
         self.busy = False
+        self.works_without_font = True  # (a template needs no font; building without one makes one)
         self.seen_history = None
         self.drawn = []
+        self.read_for = None  # (the font and master the sheets were read for; None: none open)
+        self.read_metrics, self.read_family = None, ""  # (the first sheet's: a new font takes them)
+        self.filling = False
         self.sets = None  # Font Check's character sets, read when first listed
         ak.add_tools_button(dialog, "Font Builder", self.log)
         ak.plain_buttons(dialog)
@@ -1081,7 +1159,9 @@ class FontBuilderDialog(object):
         row.addWidget(QtGui.QLabel("Glyphs:"))
         self.source = QtGui.QComboBox()
         self.source.setWhatsThis("Where the glyphs come from: the characters typed below, or one of Font Check's "
-                                 "character sets (its scripts, Unicode blocks, and foundries' sets).")
+                                 "character sets (its scripts, Unicode blocks, and foundries' sets; the common ones "
+                                 "first, then every set). A set picked fills the box below with its characters; "
+                                 "edit them there, and the choice becomes the characters typed.")
         row.addWidget(self.source, 1)
         box.addLayout(row)
         self.typed = QtGui.QPlainTextEdit()
@@ -1130,11 +1210,16 @@ class FontBuilderDialog(object):
         row = QtGui.QHBoxLayout()
         row.addStretch(1)
         self.save_button = QtGui.QPushButton("Save template...")
-        self.save_button.setWhatsThis("Writes the sheets as images (PNG, or TIFF), one a sheet, numbered.")
+        self.save_button.setWhatsThis("Writes the sheets as images (PNG, or TIFF), or as SVG drawings for vector apps "
+                                      "(the template a locked group, to draw above), one a sheet, numbered.")
         row.addWidget(self.save_button)
         box.addLayout(row)
-        self.source.connect("currentIndexChanged(int)", lambda i: self.update_summary())
-        self.typed.connect("textChanged()", self.update_summary)
+        self.summary_timer = QtCore.QTimer(page)  # (its parent the page: Qt deletes it with the window)
+        self.summary_timer.setSingleShot(True)
+        self.summary_timer.setInterval(250)
+        self.summary_timer.connect("timeout()", self.update_summary)
+        self.source.connect("currentIndexChanged(int)", self.set_chosen)
+        self.typed.connect("textChanged()", self.typed_changed)
         self.lacking.connect("toggled(bool)", lambda on: self.update_summary())
         for spin in (self.alternates, self.per_sheet, self.em):
             spin.connect("valueChanged(int)", lambda v: self.update_summary())
@@ -1142,6 +1227,9 @@ class FontBuilderDialog(object):
         return page
 
     def fill_sets(self):
+        """The dropdown: the characters typed, the common sets (COMMON_SETS, a quick way to them), a
+        separator, then every set of Font Check's, the common ones again among them."""
+        QtCore, QtGui = _qt()
         self.source.blockSignals(True)
         self.source.clear()
         self.source.addItem(TYPED)
@@ -1152,17 +1240,62 @@ class FontBuilderDialog(object):
             self.sets = [s for s in fc.load_character_sets() if s.size()]
         except Exception:
             self.sets = []
-        for s in self.sets:
-            self.source.addItem("%s (%s)" % (s.name, counted(s.size(), "character")))
+        common = common_sets([s.name for s in self.sets])
+        for number in common:
+            self.add_set(number)
+        if common:
+            self.source.insertSeparator(self.source.count)
+        for number in range(len(self.sets)):
+            self.add_set(number)
         self.source.blockSignals(False)
 
-    def chosen_characters(self):
-        index = self.source.currentIndex
-        if index <= 0 or not self.sets:
-            return characters_of("%s" % self.typed.toPlainText())
+    def add_set(self, number):
+        s = self.sets[number]
+        self.source.addItem("%s (%s)" % (s.name, counted(s.size(), "character")), number)
+
+    def set_number(self, index):
+        """The set (its number in self.sets) a dropdown row stands for, or None (the characters typed)."""
+        if index <= 0:
+            return None
+        try:
+            value = self.source.itemData(index)
+            return int(value) if value is not None and "%s" % value != "" else None
+        except (TypeError, ValueError):
+            return None
+
+    def set_chosen(self, index):
+        """A set picked: its characters fill the box below (each once), where they can be edited; typing
+        there makes the choice the characters typed again."""
+        number = self.set_number(index)
+        if number is None or not self.sets:
+            self.summary_soon()
+            return
         # (single characters: a letter with marks that has no character of its own is left to Glyph Compose)
-        return [item for item in self.sets[index - 1].base if len(item) == 1 or
-                (len(item) == 2 and 0xD800 <= ord(item[0]) < 0xDC00)]
+        chars = [item for item in self.sets[number].base if len(item) == 1 or
+                 (len(item) == 2 and 0xD800 <= ord(item[0]) < 0xDC00)]
+        self.filling = True
+        try:
+            self.typed.setPlainText("".join(chars))
+        finally:
+            self.filling = False
+        self.summary_soon()
+
+    def typed_changed(self):
+        if not getattr(self, "filling", False) and self.source.currentIndex != 0:
+            self.source.blockSignals(True)
+            self.source.setCurrentIndex(0)  # (the set edited: the characters typed now)
+            self.source.blockSignals(False)
+        self.summary_soon()
+
+    def summary_soon(self):
+        """update_summary once typing pauses (a set of 20,000 characters is not counted at each key)."""
+        try:
+            self.summary_timer.start()
+        except Exception:
+            self.update_summary()
+
+    def chosen_characters(self):
+        return characters_of("%s" % self.typed.toPlainText())
 
     def font_glyphs(self):
         """({name: its code points}, {code: name}, DrawnNames) of the font, or empty ones."""
@@ -1229,27 +1362,53 @@ class FontBuilderDialog(object):
         folder = self.settings.get("folder") or os.path.expanduser("~")
         base = (sheets[0].family or "template").replace(" ", "-")
         chosen = QtGui.QFileDialog.getSaveFileName(self.dialog, "Save the template", os.path.join(folder, base + ".png"),
-                                                   "PNG images (*.png);;TIFF images (*.tif *.tiff)")
+                                                   "PNG images (*.png);;TIFF images (*.tif *.tiff);;"
+                                                   "SVG drawings, for vector apps (*.svg)")
         if isinstance(chosen, (tuple, list)):
             chosen = chosen[0] if chosen else ""
         path = "%s" % (chosen or "")
         if not path:
             return
         stem, ext = os.path.splitext(path)
-        ext = ext.lower() if ext.lower() in (".png", ".tif", ".tiff") else ".png"
+        ext = ext.lower() if ext.lower() in (".png", ".tif", ".tiff", ".svg") else ".png"
         self.settings.update({"folder": os.path.dirname(path), "typed": "%s" % self.typed.toPlainText(),
                               "alternates": self.alternates.value, "per_sheet": self.per_sheet.value, "em": self.em.value})
         write_settings(self.ak, self.settings)
         written = []
+        self.busy = True
+        self.ak.busy_start(self, "Saving the template")
+        try:
+            self.write_sheets(sheets, stem, ext, written)
+        except self.ak.Stopped:
+            self.log.add("Saving was stopped after %s." % counted(len(written), "sheet"), "warning")
+            return
+        finally:
+            self.busy = False
+            self.ak.busy_end(self)
+        if written:
+            self.log.add("Saved %s: %s." % (counted(len(written), "sheet"), self.ak.html(", ".join(written))), "done")
+
+    def write_sheets(self, sheets, stem, ext, written):
+        """Each sheet written (its name added to written); stops at the first that cannot be."""
+        QtCore, QtGui = _qt()
         for sheet in sheets:
-            QtGui.QApplication.processEvents()
-            image = render_sheet(sheet, QtCore, QtGui)
+            self.ak.busy_progress(self, "Saving sheet %d of %d" % (sheet.index + 1, len(sheets)),
+                                  sheet.index / float(len(sheets)))
             name = stem + ("-%d-of-%d" % (sheet.index + 1, sheet.count) if sheet.count > 1 else "") + ext
+            if ext == ".svg":
+                try:
+                    with io.open(name, "w", encoding="utf-8", newline="\n") as handle:
+                        handle.write(sheet_svg(sheet, GUIDE_RGB))
+                except (IOError, OSError):
+                    self.log.add("%s could not be written." % self.ak.html(name), "error")
+                    return
+                written.append(os.path.basename(name))
+                continue
+            image = render_sheet(sheet, QtCore, QtGui)
             if not image.save(name):
                 self.log.add("%s could not be written." % self.ak.html(name), "error")
                 return
             written.append(os.path.basename(name))
-        self.log.add("Saved %s: %s." % (counted(len(written), "sheet"), self.ak.html(", ".join(written))), "done")
 
     # -- building ------------------------------------------------------------------
 
@@ -1270,6 +1429,7 @@ class FontBuilderDialog(object):
         self.sheet_list.setRootIsDecorated(False)
         self.sheet_list.setWhatsThis("The sheets added: which sheet each is, how many glyphs it holds, and whether it "
                                      "was read.")
+        self.ak.table_layout(self.sheet_list, stretch=3)  # (FreeLab's one list layout: headers centered, no light lines)
         box.addWidget(self.sheet_list, 1)
         row = QtGui.QHBoxLayout()
         row.addWidget(QtGui.QLabel("Make:"))
@@ -1312,15 +1472,20 @@ class FontBuilderDialog(object):
         self.glyph_list = QtGui.QTreeWidget()
         self.glyph_list.setHeaderLabels(["Glyph", "From", "Read"])
         self.glyph_list.setRootIsDecorated(False)
-        self.glyph_list.setIconSize(QtCore.QSize(48, 48))
+        self.glyph_list.setIconSize(QtCore.QSize(*self.ak.glyph_icon_size(1)))
         self.glyph_list.setWhatsThis("The glyphs read: as traced, the sheet each came from, and what was read. Checked "
                                      "ones are built.")
+        # (left alone by dark mode, its pictures drawn in the window's text color: mapped as one of FontLab's
+        # lists, each picture came out twice, the second cut off and outlined; owner's image 168)
+        self.ak.table_layout(self.glyph_list, stretch=2)
         box.addWidget(self.glyph_list, 2)
         row = QtGui.QHBoxLayout()
         row.addStretch(1)
         self.build_button = QtGui.QPushButton("Build checked glyphs")
         self.build_button.setWhatsThis("Writes the checked glyphs into the current master (new glyphs added with their "
-                                       "code points), as one step of FontLab's History.")
+                                       "code points), as one step of FontLab's History. With no font open, makes a new "
+                                       "font first: the units per em, metrics, and family name of the font that made "
+                                       "the sheets.")
         row.addWidget(self.build_button)
         box.addLayout(row)
         self.files = []
@@ -1335,7 +1500,7 @@ class FontBuilderDialog(object):
         QtCore, QtGui = _qt()
         folder = self.settings.get("read_folder") or self.settings.get("folder") or os.path.expanduser("~")
         chosen = QtGui.QFileDialog.getOpenFileNames(self.dialog, "Add sheets drawn", folder,
-                                                    "Images (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.psd)")
+                                                    "Images (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.psd *.svg)")
         if isinstance(chosen, tuple):
             chosen = chosen[0]
         paths = ["%s" % p for p in (chosen or [])]
@@ -1378,14 +1543,17 @@ class FontBuilderDialog(object):
                 self.update_buttons()
                 return
         self.drawn = []
+        self.read_metrics, self.read_family = None, ""
         self.read_for = self.target_key()  # (the lists stand for this font and master: build_glyphs checks)
         nice = nice_names()
         seen = {}
+        self.ak.busy_start(self, "Reading the sheets")
         try:
             for row, path in enumerate(self.files):
                 item = self.sheet_list.topLevelItem(row)
                 item.setText(3, "reading")
-                QtGui.QApplication.processEvents()
+                self.ak.busy_progress(self, "Reading sheet %d of %d" % (row + 1, len(self.files)),
+                                      row / float(len(self.files)))
                 image = QtGui.QImage(path)
                 if image.isNull():
                     item.setText(3, "not an image FontLab can read")
@@ -1395,6 +1563,8 @@ class FontBuilderDialog(object):
                     item.setText(3, "not read: %s" % gray)
                     continue
                 sheet = found.sheet
+                if self.read_metrics is None:  # (a new font, built with no font open, takes the first sheet's)
+                    self.read_metrics, self.read_family = sheet.metrics, sheet.family
                 item.setText(1, "%d of %d" % (sheet.index + 1, sheet.count))
                 item.setText(2, "%d" % len(sheet.names))
                 # (each box at the image's own resolution: its em in pixels as the image shows it)
@@ -1405,7 +1575,7 @@ class FontBuilderDialog(object):
                 for i, (name, label) in enumerate(zip(sheet.names, sheet.labels)):
                     if i % 4 == 0:
                         item.setText(3, "%d of %d boxes" % (i, len(sheet.names)))
-                        QtGui.QApplication.processEvents()
+                        self.ak.busy_progress(self, None, (row + i / float(max(1, len(sheet.names)))) / len(self.files))
                     cell = cell_image(found, i, gray, QtCore, QtGui, scale)
                     if cell is None:
                         continue
@@ -1433,10 +1603,13 @@ class FontBuilderDialog(object):
                     seen[name] = source
                     drawn_here += 1
                 item.setText(3, "%s drawn" % counted(drawn_here, "box", "boxes"))
+        except self.ak.Stopped:
+            self.log.add("Reading was stopped: the glyphs read so far are listed.", "warning")
         except Exception as exc:
             self.log.add("Reading stopped on an error: %s" % self.ak.html("%s" % exc), "error")
         finally:
             self.busy = False
+            self.ak.busy_end(self)
         self.show_drawn()
         self.log.add("Read %s from %s." % (counted(len(self.drawn), "drawn glyph"), counted(len(self.files), "sheet")))
         self.update_buttons()
@@ -1474,27 +1647,45 @@ class FontBuilderDialog(object):
         self.glyph_list.blockSignals(False)
 
     def drawn_icon(self, d):
+        """A row's picture of a drawing: on its baseline, at the size every FreeLab list draws glyphs
+        (Glyph Compose's), in the window's text color on nothing (inked: redrawn in the new color when dark
+        mode switches), as the glyph will stand in the font."""
         QtCore, QtGui = _qt()
-        size = 48
-        pix = QtGui.QPixmap(size, size)
-        pix.fill(QtGui.QColor(255, 255, 255))
+        width, height = self.ak.glyph_icon_size(1)
+        size = int(round(height / 1.45))
+        scale = float(size) / float(d.upm or 1000)
+        color = self.dialog.palette.color(QtGui.QPalette.WindowText)
+        pix = QtGui.QPixmap(width, height)
+        pix.fill(QtGui.QColor(0, 0, 0, 0))
         painter = QtGui.QPainter(pix)
-        try:
+        try:  # (ended before anything else can fail: a painter left open on a freed pixmap aborts FontLab)
             painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+            painter.setRenderHint(QtGui.QPainter.SmoothPixmapTransform, True)
             if d.image is not None:
-                painter.drawImage(QtCore.QRectF(0, 0, size, size), d.image[0])
+                cell, units, x0, y_top = d.image
+                ink = ink_image(cell, self.threshold.value, QtGui)
+                tinted = QtGui.QImage(ink.size(), QtGui.QImage.Format_ARGB32_Premultiplied)
+                tinted.fill(QtGui.QColor(0, 0, 0, 0))
+                inner = QtGui.QPainter(tinted)
+                try:
+                    inner.drawImage(0, 0, ink)
+                    inner.setCompositionMode(QtGui.QPainter.CompositionMode_SourceIn)
+                    inner.fillRect(tinted.rect(), color)
+                finally:
+                    inner.end()
+                left = min(0.0, x0)
+                box = QtCore.QRectF(4 + (x0 - left) * scale, size * 1.1 - y_top * scale,
+                                    cell.width() * units * scale, cell.height() * units * scale)
+                painter.drawImage(box, tinted)
             elif d.contours:
                 path = contours_path(d.contours, QtGui, QtCore)
-                box = path.boundingRect()
-                side = max(box.width(), box.height(), 1.0)
-                t = QtGui.QTransform()
-                t.translate(size / 2.0, size / 2.0)
-                t.scale(0.85 * size / side, -0.85 * size / side)
-                t.translate(-box.center().x(), -box.center().y())
-                painter.fillPath(t.map(path), QtGui.QBrush(QtGui.QColor(0, 0, 0)))
+                left = min(0.0, path.boundingRect().left())
+                painter.translate(4 - left * scale, size * 1.1)
+                painter.scale(scale, -scale)
+                painter.fillPath(path, QtGui.QBrush(color))
         finally:
             painter.end()
-        return QtGui.QIcon(pix)
+        return self.ak.icon_of(self.ak.inked(pix, color))
 
     def checked_drawn(self):
         QtCore, QtGui = _qt()
@@ -1511,7 +1702,18 @@ class FontBuilderDialog(object):
             return
         chosen = self.checked_drawn()
         package = self.current_font()
-        if package is None or not chosen:
+        if not chosen:
+            return
+        if package is None and getattr(self, "read_for", None) is None:
+            # No font open, nor when the sheets were read: a new font, its units, metrics, and name the
+            # sheets' (the font that made the template), the glyphs laid out in it as drawn
+            package = self.new_font()
+            if package is None:
+                return
+            self.read_for = self.target_key(package)
+        if package is None:
+            self.log.add("The font the sheets were read for was closed: open a font, or click <i>Read sheets</i> "
+                         "again to build a new one. Nothing was built.", "warning")
             return
         if self.target_key(package) != getattr(self, "read_for", None):
             # (the checks were made for another font or master: its glyphs drawn then are not these;
@@ -1529,8 +1731,12 @@ class FontBuilderDialog(object):
         how = "even" if self.placement.currentIndex == 1 else "drawn"
         given = set()  # (code points given in this build: one glyph each)
         written = set()  # (each glyph written once a build: a second drawing of it is left out; review 10)
+        self.busy = True
+        self.ak.busy_start(self, "Building the glyphs", stoppable=False)  # (one History step: never half)
         try:
-            for d in chosen:
+            for number, d in enumerate(chosen):
+                if number % 8 == 0:
+                    self.ak.busy_progress(self, None, number / float(len(chosen)), stoppable=False)
                 target = target_name(d.name, d.code, by_code, codes_of)
                 if target is None:
                     nowhere.append(d.name)  # (its name is another character's glyph, and so is uniXXXX)
@@ -1586,6 +1792,8 @@ class FontBuilderDialog(object):
         except Exception as exc:
             error = exc
         status = self.ak.notify_changed(self.fontlab, package, TITLE, touched, added=bool(added))
+        self.busy = False
+        self.ak.busy_end(self)
         if added or rebuilt:
             parts = []
             if added:
@@ -1611,6 +1819,56 @@ class FontBuilderDialog(object):
         if error is not None:
             self.log.add("Stopped by an error: %s" % self.ak.html("%s" % error), "error")
         self.show_drawn()
+
+    def new_font(self):
+        """A new font in FontLab, open in its own window: the units per em, ascender, descender, x-height,
+        cap height, and family name of the sheets read (the font that made them), its one master Regular.
+        None, logged, where FontLab refused."""
+        metrics = getattr(self, "read_metrics", None) or Metrics()
+        family = (getattr(self, "read_family", "") or "").strip() or "Untitled"
+        fl = self.fontlab
+        try:
+            package = fl.flPackage()  # (FontLab adds it to its workspace, current)
+            try:
+                if int(round(package.upm)) != int(metrics.upm):
+                    package.setUpm(int(metrics.upm), False)
+            except Exception:
+                pass
+            if not list(package.masters or []):
+                package.addMaster("Regular", False, None, "", False, False)
+            if not package.master:
+                package.master = list(package.masters)[0]
+            for attr, value in (("ascender_value", metrics.ascender), ("descender_value", metrics.descender),
+                                ("xHeight_value", metrics.x_height), ("capsHeight_value", metrics.cap_height)):
+                try:
+                    setattr(package, attr, float(value))
+                except Exception:
+                    pass
+            try:
+                package.info.familyName = family
+            except Exception:
+                pass
+            try:
+                package.updateFontMetrics()
+            except Exception:
+                pass
+            try:
+                fl.flItems.notifyPackageAdded(package)  # (its font window opens)
+            except Exception:
+                pass
+        except Exception as exc:
+            self.log.add("FontLab did not make a new font: %s. Open a font (<i>File &gt; New</i>), then build "
+                         "again." % self.ak.html("%s" % exc), "error")
+            return None
+        self.package = package
+        self.log.add("Made a new font, %s: %d units per em, the sheets' metrics." % (
+            self.ak.b(family), int(metrics.upm)), "done")
+        try:
+            self.font_label.setText("%s, master %s (its metrics shape the template's boxes)." % (
+                self.ak.b(package.tfn or family), self.ak.b(package.master)))
+        except Exception:
+            pass
+        return package
 
     def image_shape(self, d, factor, how):
         """(an image glyph's shape, its advance): the drawing's ink in black on clear (alpha_table at the
@@ -1672,7 +1930,9 @@ class FontBuilderDialog(object):
         self.ak.enable(self.lacking, self.package is not None)  # (no font: nothing drawn to leave out)
         self.ak.enable(self.read_button, bool(self.files) and not busy)
         self.ak.enable(self.clear_button, bool(self.files) and not busy)
-        self.ak.enable(self.build_button, bool(self.checked_drawn()) and self.package is not None and not busy)
+        # (no font open, nor when the sheets were read: building makes a new font)
+        can_build = self.package is not None or getattr(self, "read_for", None) is None
+        self.ak.enable(self.build_button, bool(self.checked_drawn()) and can_build and not busy)
 
     def show(self):
         self.dialog.show()

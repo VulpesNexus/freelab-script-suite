@@ -126,6 +126,9 @@ class Box(ft.Anything):
     def setText(self, text):
         self.text = text
 
+    def setVisible(self, on):
+        self.visible = on
+
     def setEnabled(self, on):
         self.enabled = on
 
@@ -231,6 +234,7 @@ class Owner(object):
         self.fontlab.flGlyph, self.fontlab.flItems = ft.FakeNewGlyph, ft.FakeItems()
         self.dialog, self.log = ft.Anything(), ft.Anything()
         self.logged, self.shown, self.busy, self.was_busy, self.runs, self.page = [], [], False, [], 0, None
+        self.stoppable = []  # (each set_busy's and progress's: a build is a write, never stopped)
         self.log.add = lambda text, level="info": self.logged.append((level, text))
 
     @staticmethod
@@ -249,12 +253,14 @@ class Owner(object):
     def picture(self, names):
         return ("picture",) + tuple(names)
 
-    def set_busy(self, on):
+    def set_busy(self, on, what=u"", stoppable=True):
         self.busy = on
         self.was_busy.append(on)
+        self.stoppable.append(stoppable)
 
-    def progress(self, what, done=None, total=None, force=False):
+    def progress(self, what, done=None, total=None, force=False, stoppable=True):
         self.shown.append((what, done, total))
+        self.stoppable.append(stoppable)
 
     def run(self):
         self.runs += 1
@@ -326,6 +332,17 @@ class PageTests(unittest.TestCase):
     def pick(self, page, key):
         page.scope_box.setCurrentIndex([scope for scope, _ in page.scope_rows].index(key))
         page.update_buttons()
+
+    def test_empty_notes_and_previews_take_no_room(self):
+        """Owner's images 196 and 198: the empty line under "Suggested alternates", and the blank previews over
+        the code's splitter handle (it sat in the middle of a gap): hidden while they show nothing."""
+        page, owner = self.page()
+        self.assertTrue(page.note.visible and page.existing.visible and page.existing_caption.visible)
+        owner.package = None
+        page.fill()
+        page.update_buttons()
+        self.assertEqual([label.visible for label in (page.note, page.scope_note, page.existing, page.preview,
+                                                      page.existing_caption, page.preview_caption)], [False] * 6)
 
     def test_the_build_says_its_scope_before_the_click(self):
         """Build variants built every letter of the Letters scope (1,102 of them) while two rows were
@@ -746,11 +763,13 @@ class PageTests(unittest.TestCase):
         self.assertNotIn(u"top line", page.scope_note.text)
         self.assertIn(u"uni0107\N{HORIZONTAL ELLIPSIS})", page.scope_note.text, "the first letters named, not all")
         seen = []
-        owner.progress = lambda what, done=None, total=None, force=False: seen.append((what, done, total, owner.busy))
+        owner.progress = lambda what, done=None, total=None, force=False, stoppable=True: seen.append(
+            (what, done, total, owner.busy and not stoppable))
         page.build_variants()
         counted = [row for row in seen if row[0] == u"Building variants"]
         self.assertEqual([row[1] for row in counted], list(range(letters)), "each letter counted")
-        self.assertTrue(all(row[2] == letters and row[3] for row in counted), "busy while the window answers")
+        self.assertTrue(all(row[2] == letters and row[3] for row in counted),
+                        "busy while the window answers, never stopped half way (a write)")
         self.assertEqual(owner.was_busy, [True, False])
         self.assertEqual(sum(1 for g in owner.package.glyphs if u".alt" in g.name), 2 * letters)
         self.assertNotIn(u"glyphname:", owner.logged[0][1], "a whole alphabet's variants are counted, not named")

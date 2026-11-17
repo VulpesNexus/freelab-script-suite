@@ -25,7 +25,10 @@ AUTO_KERNING_FILE, AUTO_KERNING_MODULE = "freelab_auto_kerning.py", "freelab_aut
 MIN_DISTANCE_SHARE = 0.02  # a kerned pair's ink closer than this share of the em is listed (contour distance's floor)
 TINY_UNITS = 5  # entries smaller than this (font units) are listed for cleanup, unchecked
 SIGN_TOLERANCE = 10  # a value counts as tightening or loosening beyond this many units, between masters
-PROGRESS_EVERY = 2000  # pairs between two looks at the event loop while checking
+PROGRESS_EVERY = 25  # pairs, entries, or glyphs between two calls to the progress (it lets events through at
+# most every 0.1 s: owner's images 176 to 180; every 2000 pairs held the window seconds at a time)
+DRAW_STEP, CHECK_STEP, CLEANUP_STEP = u"Drawing the glyphs", u"Checking pairs", u"Checking entries"
+COMPARE_STEP, WRITE_STEP, REMOVE_STEP = u"Comparing masters", u"Writing fixes", u"Removing entries"
 # The settings row reads as a sentence: "List kerned pairs whose ink comes within 20 units, and that
 # many units closer than without the accent" / "... within 20 units of each other, accented or not".
 COLLISION_MODES = (("relative", u"and that many units closer than without the accent "
@@ -255,16 +258,19 @@ CLEANUP_KINDS = (("missing", "Names what is gone"), ("overridden", "Overridden e
                  ("redundant", "Changes nothing"), ("tiny", "Tiny value"))
 
 
-def find_cleanup(kerning, glyph_exists, tiny=TINY_UNITS):
+def find_cleanup(kerning, glyph_exists, tiny=TINY_UNITS, progress=None):
     """Entries that change nothing, name a class with no members or a glyph the font lacks, or are
     smaller than tiny units; the first two kinds checked for removal. The entries are judged most
     specific first, each as if the ones found before it were removed already: an exception equal to
-    its class's value is listed, and the class's entry it then falls back on is not."""
+    its class's value is listed, and the class's entry it then falls back on is not. progress(done,
+    total), where given, every PROGRESS_EVERY entries (it may raise to stop)."""
     describe = kerning.describe
     found = []
     present = set(kerning.entries)
     specific_first = sorted(kerning.entries, key=lambda e: (int(e[0][1]) + int(e[1][1]), int(e[0][1]), e))
-    for entry in specific_first:
+    for done, entry in enumerate(specific_first):
+        if progress is not None and done % PROGRESS_EVERY == 0:
+            progress(done, len(specific_first))
         value = round_units(kerning.values.get(entry) or 0)
         missing = [name for name, is_class in entry
                    if (is_class and not kerning.members.get(name)) or (not is_class and not glyph_exists(name))]
@@ -301,16 +307,27 @@ def find_cleanup(kerning, glyph_exists, tiny=TINY_UNITS):
     return found
 
 
+def cleanup_status(listed, entries, counts, limited=u"", bold=lambda text: u"%s" % text):
+    """The Cleanup list's status line: "3 of 120 entries listed: 2 entries changing nothing, 1 tiny value."
+    (counts: {kind: how many}; limited: " with these 12 glyphs" while the lists are limited); with nothing
+    listed, "No entries listed." (owner's image 190: "0 of 0 entries listed: none.")."""
+    if not listed:
+        return u"No entries listed."
+    return u"%s of %s%s listed: %s." % (
+        bold(listed), bold(counted(entries, u"entry", u"entries")), limited,
+        u", ".join(counted(counts[kind], *CLEANUP_COUNTS[kind]) for kind, _ in CLEANUP_KINDS if kind in counts))
+
+
 AUTOMATIC_KINDS = ("missing", "overridden", "redundant")  # checked for removal: they change nothing
 
 
-def still_removable(kerning, chosen, glyph_exists, tiny=TINY_UNITS):
+def still_removable(kerning, chosen, glyph_exists, tiny=TINY_UNITS, progress=None):
     """(the cleanup findings chosen that may still go, the number left) judged again on the kerning as
     it is now: an entry whose value changed is left, and so is one that changed nothing at the check
     but would change something now (an exception equal to its class pair's value, that value edited
     since). The others may go in any order: find_cleanup judged each as if the ones found before it
     were removed, and keeping some of those changes nothing either."""
-    fresh = dict((c.entry, c.kind) for c in find_cleanup(kerning, glyph_exists, tiny))
+    fresh = dict((c.entry, c.kind) for c in find_cleanup(kerning, glyph_exists, tiny, progress))
     found, stale = [], 0
     for c in chosen:
         if c.entry not in kerning.entries or round_units(kerning.values.get(c.entry) or 0) != c.value:
@@ -455,10 +472,17 @@ def pair_text(package, left, right, ak=None):
 class InkDistances(object):
     """The narrowest gap between two glyphs' ink at some kerning, from Auto Kerning's measuring."""
 
-    def __init__(self, ak, package, master, names):
+    def __init__(self, ak, package, master, names, progress=None):
+        """progress(done, total), where given, every PROGRESS_EVERY glyphs drawn (it may raise to stop)."""
         self.ak = ak
         self.glyphs = ak.FontLabGlyphs(package, master, ak.EM_PIXELS)
-        self.known = set(name for name in names if self.glyphs.add(name))
+        self.known = set()
+        names = list(names)
+        for done, name in enumerate(names):
+            if progress is not None and done % PROGRESS_EVERY == 0:
+                progress(done, len(names))
+            if self.glyphs.add(name):
+                self.known.add(name)
         self.core = ak.Core()
         self.units_per_pixel = self.glyphs.upm / float(ak.EM_PIXELS)
         self.package, self.chars = package, {}
@@ -522,14 +546,14 @@ Click this help's <i>?</i> button, then any control, for what it does."""
 class Tab(object):
     """One list: its settings row, its tree, its status, its action button."""
 
-    def __init__(self, QtGui, columns, action, make_status):
+    def __init__(self, QtGui, columns, action, make_status, make_line):
         self.widget = QtGui.QWidget()
         self.layout = QtGui.QVBoxLayout(self.widget)
         self.settings = QtGui.QHBoxLayout()
         self.layout.addLayout(self.settings)
-        line = self.line = QtGui.QFrame()  # (as Auto Kerning's separator: a mid gray at half strength)
-        line.setFixedHeight(1)
-        line.setStyleSheet(u"QFrame { border: none; background: rgba(128, 128, 128, 128); }")
+        # (Auto Kerning's separator: hidden while the window has no font, owner's images 202 and 210; a line
+        # of its own here was not)
+        line = self.line = make_line()
         self.layout.addWidget(line)
         self.status = make_status()  # rich text (bold values), a line per sentence
         self.layout.addWidget(self.status)
@@ -612,7 +636,8 @@ class KerningCheckDialog(object):
                                           lambda step: self.ak.select_next_row(self.current_tab().tree, step),
                                           self.units_scale)
 
-        self.collisions = Tab(QtGui, COLLISION_COLUMNS, action_text("collisions", 0), self.ak.status_label)
+        self.collisions = Tab(QtGui, COLLISION_COLUMNS, action_text("collisions", 0), self.ak.status_label,
+                              self.ak.separator)
         tab = self.collisions
         tab.settings.addWidget(QtGui.QLabel("List"))
         self.pair_set = QtGui.QComboBox()
@@ -652,7 +677,8 @@ class KerningCheckDialog(object):
         tab.action.setWhatsThis(u"Writes each checked pair's fix as a pair of its own (the class it takes its value "
                                 u"from kerns its other glyphs as before).")
 
-        self.cleanup = Tab(QtGui, ("Entry", "Value", "Why"), action_text("cleanup", 0), self.ak.status_label)
+        self.cleanup = Tab(QtGui, ("Entry", "Value", "Why"), action_text("cleanup", 0), self.ak.status_label,
+                           self.ak.separator)
         tab = self.cleanup
         tab.settings.addWidget(QtGui.QLabel("Values smaller than"))
         self.tiny = QtGui.QSpinBox()
@@ -668,7 +694,7 @@ class KerningCheckDialog(object):
                               u"(unchecked).")
         tab.action.setWhatsThis(u"Cleans up: removes the checked entries from the current master.")
 
-        self.masters = Tab(QtGui, ("Entry or class", "Values", "Why"), None, self.ak.status_label)
+        self.masters = Tab(QtGui, ("Entry or class", "Values", "Why"), None, self.ak.status_label, self.ak.separator)
         tab = self.masters
         self.masters_button = QtGui.QPushButton("Compare masters")
         tab.settings.addWidget(self.masters_button)
@@ -683,7 +709,7 @@ class KerningCheckDialog(object):
                 tab.tree.setProperty(self.ak.LEAVE_ALONE_PROP, True)  # its pictures are drawn in the dialog's colors
             if tab.action is not None:
                 for button in (tab.check_all, tab.check_none, tab.restore, tab.action):
-                    button.setEnabled(False)
+                    self.ak.enable(button, False)
             self.tabs.addTab(label)
             self.pages.addWidget(tab.widget)
         layout.addWidget(self.log.widget)
@@ -776,11 +802,21 @@ class KerningCheckDialog(object):
         self.log.add(u"The font or master changed since the check: check again.", "warning")
         return False
 
-    def progress(self, tab, done, total, what):
-        QtCore, QtGui = _qt()
-        tab.status.setText(u"%s %s of %s\N{HORIZONTAL ELLIPSIS}" % (what, self.ak.b(done), self.ak.b(total)))
-        QtGui.QApplication.processEvents()
+    def progress(self, what, done, total, stoppable=True):
+        """The work at done of total, in the window's top row (ak.busy_progress: the window answers, the
+        user's input held off; the step's name kept, the bar moving); raises ak.Stopped where stoppable and
+        the user asked it to stop (the tools menu, an arrow, Close, Esc). True, for find_collisions'."""
+        self.ak.busy_progress(self, what, float(done) / total if total else None, stoppable=stoppable)
         return True
+
+    def stopped(self, tab, what=u"The check"):
+        """A list's work stopped by the user: the list left empty, its status line saying so."""
+        tab.tree.clear()
+        tab.findings, tab.first_checks = [], []
+        tab.status.setText(u"%s was stopped: nothing is listed. Click <i>%s</i> to check again." % (
+            what, u"Compare masters" if tab is getattr(self, "masters", None) else u"Check"))
+        self.update_previews()
+        self.update_buttons()
 
     def after_writing(self):
         """notify_changed's WriteStatus (kerning only: the font's own state, which needs no before_changes,
@@ -1000,12 +1036,13 @@ class KerningCheckDialog(object):
     def check_collisions(self):
         if self.busy or not self.read_font():
             return
-        QtCore, QtGui = _qt()
         tab = self.collisions
         self.busy = True
         tab.tree.clear()
         tab.findings = []
-        tab.action.setEnabled(False)
+        self.ak.enable(tab.action, False)
+        # Under the window's top-row progress, stoppable (owner's images 176 to 180: every long step there)
+        self.ak.busy_start(self, DRAW_STEP)
         try:
             kerning = self.kerning()
             if kerning.plain is None:
@@ -1017,9 +1054,8 @@ class KerningCheckDialog(object):
             else:  # the pairs with the glyphs given, and the key glyphs they are compared with
                 names = set(name for pair, _ in tight_pairs(kerning, only) for name in pair)
                 names.update(key for key in (key_glyph(kerning, name) for name in kerning.classes) if key)
-            tab.status.setText(u"Drawing %s\N{HORIZONTAL ELLIPSIS}" % counted(len(names), u"glyph"))
-            QtGui.QApplication.processEvents()
-            ink = InkDistances(self.ak, self.package, self.master, names)
+            ink = InkDistances(self.ak, self.package, self.master, names,
+                               lambda done, total: self.progress(DRAW_STEP, done, total))
             minimum = self.minimum.value
             relative = COLLISION_MODES[self.mode.currentIndex][0] == "relative"
             chars = {}
@@ -1039,16 +1075,22 @@ class KerningCheckDialog(object):
                 return a is not None and b is not None and self.ak.text_order(*self.ak.screen_of_key(a, b, a, b)) in self.common
 
             found = find_collisions(kerning, ink.closest_at, minimum, relative,
-                                    lambda done, total: self.progress(tab, done, total, u"Checking pair"),
+                                    lambda done, total: self.progress(CHECK_STEP, done, total),
                                     lambda name, key: is_variant(name, key, char_of), only)
             if common_only:
                 found = [c for c in (found or []) if common(c.left, c.right)]
+        except self.ak.Stopped:
+            found = self  # (said once busy is over: stopped)
         except Exception as exc:
             tab.status.setText(u"")
             self.log.add(self.ak.html(exc), "error")
             return
         finally:
+            self.ak.busy_end(self)
             self.busy = False
+        if found is self:
+            self.stopped(tab)
+            return
         tab.findings = found = found or []
         tab.tree.setRootIsDecorated(True)
         groups, order = {}, []  # the glyph that collides (its accent, its bar): its pairs together
@@ -1100,17 +1142,31 @@ class KerningCheckDialog(object):
             return
         kerning = self.kerning()
         written, stale, error = 0, 0, None
+        # Under the window's top-row progress, never stoppable: one step of FontLab's History, never half written
+        self.busy = True
+        self.ak.busy_start(self, WRITE_STEP, stoppable=False)
         try:
-            for c in chosen:
-                if kerning.current(c.left, c.right) != c.value:
-                    stale += 1  # changed since the check
-                    continue
-                kerning.write(((c.left, False), (c.right, False)), c.fix, False)
-                written += 1
-        except Exception as exc:
-            error = exc
-        status = self.after_writing()
-        self.check_collisions()
+            try:
+                for done, c in enumerate(chosen):
+                    if done % PROGRESS_EVERY == 0:
+                        self.progress(WRITE_STEP, done, len(chosen), stoppable=False)
+                    if kerning.current(c.left, c.right) != c.value:
+                        stale += 1  # changed since the check
+                        continue
+                    kerning.write(((c.left, False), (c.right, False)), c.fix, False)
+                    written += 1
+            except Exception as exc:
+                error = exc
+            status = self.after_writing()
+            asked_to_stop = self.ak.busy_stopping(self)  # (Esc, Close, a tool, an arrow, during the write)
+        finally:
+            self.ak.busy_end(self)
+            self.busy = False
+        if asked_to_stop:  # (what was clicked is done now: not checked again under it)
+            self.stopped(tab, u"Checking again")
+            self.seen_history = self.ak.history_mark(self.package)
+        else:
+            self.check_collisions()
         b = self.ak.b
         self.log.add(u"Wrote %s of %s own%s." % (
             b(counted(written, u"pair")), u"its" if written == 1 else u"their",
@@ -1129,9 +1185,23 @@ class KerningCheckDialog(object):
             return
         tab = self.cleanup
         tab.tree.clear()
-        tab.action.setEnabled(False)
-        kerning = self.kerning()
-        found = limited_cleanup(kerning, find_cleanup(kerning, self.glyph_exists, self.tiny.value), self.only)
+        tab.findings = []
+        self.ak.enable(tab.action, False)
+        self.busy = True
+        self.ak.busy_start(self, CLEANUP_STEP)  # (the window's top row, stoppable)
+        try:
+            kerning = self.kerning()
+            found = limited_cleanup(kerning, find_cleanup(kerning, self.glyph_exists, self.tiny.value,
+                                                          lambda done, total: self.progress(CLEANUP_STEP, done, total)),
+                                    self.only)
+        except self.ak.Stopped:
+            found = None
+        finally:
+            self.ak.busy_end(self)
+            self.busy = False
+        if found is None:
+            self.stopped(tab)
+            return
         tab.findings = found
         kinds = dict(CLEANUP_KINDS)
         for index, c in enumerate(found):
@@ -1145,10 +1215,7 @@ class KerningCheckDialog(object):
         for c in found:
             counts[c.kind] = counts.get(c.kind, 0) + 1
         entries = sum(1 for entry in kerning.entries if involves(kerning, entry, self.only))
-        tab.status.setText(u"%s of %s%s listed: %s." % (
-            self.ak.b(len(found)), self.ak.b(counted(entries, u"entry", u"entries")), self.limited(),
-            u", ".join(counted(counts[kind], *CLEANUP_COUNTS[kind]) for kind, _ in CLEANUP_KINDS if kind in counts)
-            or u"none"))
+        tab.status.setText(cleanup_status(len(found), entries, counts, self.limited(), self.ak.b))
 
     def glyph_exists(self, name):
         glyph = self.package.findName(name)
@@ -1163,15 +1230,30 @@ class KerningCheckDialog(object):
             return
         kerning = self.kerning()
         removed, stale, error = 0, 0, None
+        # Under the window's top-row progress, never stoppable: one step of FontLab's History, never half written
+        self.busy = True
+        self.ak.busy_start(self, REMOVE_STEP, stoppable=False)
         try:
-            chosen, stale = still_removable(kerning, chosen, self.glyph_exists, self.tiny.value)
-            for c in chosen:
-                kerning.write(c.entry, 0, True)
-                removed += 1
-        except Exception as exc:
-            error = exc
-        status = self.after_writing()
-        self.check_cleanup()
+            try:
+                chosen, stale = still_removable(kerning, chosen, self.glyph_exists, self.tiny.value,
+                                                lambda done, total: self.progress(CLEANUP_STEP, done, total, False))
+                for done, c in enumerate(chosen):
+                    if done % PROGRESS_EVERY == 0:
+                        self.progress(REMOVE_STEP, done, len(chosen), stoppable=False)
+                    kerning.write(c.entry, 0, True)
+                    removed += 1
+            except Exception as exc:
+                error = exc
+            status = self.after_writing()
+            asked_to_stop = self.ak.busy_stopping(self)  # (Esc, Close, a tool, an arrow, during the write)
+        finally:
+            self.ak.busy_end(self)
+            self.busy = False
+        if asked_to_stop:  # (what was clicked is done now: not checked again under it)
+            self.stopped(tab, u"Checking again")
+            self.seen_history = self.ak.history_mark(self.package)
+        else:
+            self.check_cleanup()
         b = self.ak.b
         self.log.add(u"Removed %s%s." % (
             b(counted(removed, u"entry", u"entries")),
@@ -1196,7 +1278,23 @@ class KerningCheckDialog(object):
             tab.findings = []
             tab.status.setText(u"This font has one master: nothing to compare.")
             return
-        found = compare_masters([(master, self.kerning(master)) for master in masters], only=self.only)
+        self.busy = True
+        self.ak.busy_start(self, COMPARE_STEP)  # (the window's top row, stoppable)
+        try:
+            kernings = []
+            for done, master in enumerate(masters):
+                self.progress(COMPARE_STEP, done, len(masters) + 1)
+                kernings.append((master, self.kerning(master)))
+            self.progress(COMPARE_STEP, len(masters), len(masters) + 1)
+            found = compare_masters(kernings, only=self.only)
+        except self.ak.Stopped:
+            found = None
+        finally:
+            self.ak.busy_end(self)
+            self.busy = False
+        if found is None:
+            self.stopped(tab, u"The comparison")
+            return
         tab.findings = found
         for index, d in enumerate(found):
             self.add_row(tab, index, (d.subject, u"; ".join(u"%s %s" % pair for pair in d.values), d.reason), False, False)
@@ -1307,7 +1405,8 @@ class KerningCheckDialog(object):
 
     def preview_hint(self):
         """What the pictures' room shows while no pair is selected: on the lists of pairs, what selecting
-        one does; elsewhere nothing."""
+        one does, while the list has one to select (owner's images 187 and 189: "Select a pair..." under an
+        empty list); elsewhere nothing."""
         try:
             index = self.tabs.currentIndex
             index = index() if callable(index) else index
@@ -1315,6 +1414,9 @@ class KerningCheckDialog(object):
             index = 0
         if self.package is None or index not in (0, 1):
             return u""
+        tab = getattr(self, TABS[index], None)
+        if not getattr(tab, "findings", None):
+            return u""  # (nothing listed: nothing to select)
         return PREVIEW_HINTS[index]
 
     # -- the Adjusted preview, dragged ---------------------------------------

@@ -216,6 +216,30 @@ class GlyphListTests(unittest.TestCase):
         self.assertIsNone(fb.code_for("a.alt1", nice))
         self.assertIsNone(fb.code_for("f_i", nice))
 
+    def test_common_sets_come_first_in_their_own_order(self):
+        names = ["Thai", "Arrows (Unicode block)", "GF Latin Core", "Hangul", "Adobe Latin 1"]
+        self.assertEqual(fb.common_sets(names), [2, 4, 0, 3], "Latin first, then Thai, then Hangul")
+        self.assertEqual(fb.common_sets(["Arrows (Unicode block)"]), [])
+
+
+class SvgTests(unittest.TestCase):
+    def test_an_svg_sheet_holds_the_raster_sheets_marks_and_boxes(self):
+        import xml.etree.ElementTree as ET
+        sheet = fb.split_sheets(["A", "uni00E9", "a.alt1"], ["A", "é", "a.alt1"], fb.Metrics(), em=200,
+                                family="Test & <Sans>")[0]
+        text = fb.sheet_svg(sheet)
+        root = ET.fromstring(text.encode("utf-8"))
+        width, height = sheet.size()
+        self.assertEqual((root.get("width"), root.get("height")), (str(width), str(height)))
+        ns = "{http://www.w3.org/2000/svg}"
+        paths = root.findall(".//%spath" % ns)
+        self.assertEqual(len(paths), 1)
+        self.assertEqual(paths[0].get("d").count("M"), len(fb.marks(sheet)), "every black square, finders and bands")
+        boxes = [r for r in root.findall(".//%srect" % ns) if r.get("fill") != "#ffffff"]
+        self.assertEqual(len(boxes), 3)
+        self.assertIn("é", text)
+        self.assertIsNotNone(root.find(".//%sg[@id='drawing']" % ns), "a layer to draw on")
+
 
 class PlacementTests(unittest.TestCase):
     def square(self, x0, y0, side, clockwise=False):
@@ -355,8 +379,13 @@ class BuildTests(unittest.TestCase):
         d.log = Box(add=lambda text, level="info": self.logged.append(text))
         d.fontlab = Box(flGlyph=lambda: Box(name=None), flShape=FakeShape)
         status = Box(undo=lambda text: "", report=lambda log: None)
+        self.progress = []
         d.ak = Box(begin_write=lambda *a: True, notify_changed=lambda *a, **k: status, html=lambda s: s,
-                   font_key=lambda p: id(p))
+                   font_key=lambda p: id(p), busy_start=lambda o, what="", stoppable=True: self.progress.append(
+                       ("start", stoppable)),
+                   busy_progress=lambda o, what=None, part=None, stoppable=True: self.progress.append(
+                       ("step", stoppable)),
+                   busy_end=lambda o: self.progress.append(("end", None)))
         d.read_for = d.target_key(package)
         return d
 
@@ -375,6 +404,16 @@ class BuildTests(unittest.TestCase):
         d.build_glyphs()
         self.assertEqual(glyph.layers["Regular"].removals, 0)
         self.assertTrue(any("Left as drawn" in line for line in self.logged))
+
+    def test_a_build_shows_its_progress_and_is_never_stopped_half_way(self):
+        p = FakePackage()
+        self.add(p, "A", 0x41)
+        d = self.dialog(p, [fb.Drawn("A", "A", "sheet", contours=[SQUARE])])
+        d.build_glyphs()
+        self.assertEqual(self.progress[0], ("start", False), "one History step: not stoppable")
+        self.assertTrue(all(s is False for kind, s in self.progress if kind == "step"))
+        self.assertEqual(self.progress[-1], ("end", None))
+        self.assertFalse(d.busy)
 
     def test_another_master_since_the_reading_builds_nothing(self):
         p = FakePackage()

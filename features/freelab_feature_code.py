@@ -46,7 +46,6 @@ import json
 import os
 import re
 import sys
-import time
 import unicodedata
 
 CHOICES = (("liga", "Standard (liga)"), ("dlig", "Discretionary (dlig)"), ("off", "Off"))
@@ -3168,17 +3167,6 @@ def _qt():
     return QtCore, QtGui
 
 
-def pump_events(QtCore, QtGui):
-    """The window redrawn during long work, user input left waiting (Qt delivers it once events are
-    processed without the flag): a click or a key would otherwise act on the font while it is being
-    changed. A Qt without the flag pumps everything."""
-    flag = getattr(getattr(QtCore, "QEventLoop", None), "ExcludeUserInputEvents", None)
-    if flag is None:
-        QtGui.QApplication.processEvents()
-    else:
-        QtGui.QApplication.processEvents(flag)
-
-
 UNWRAP_DEPTH = 4  # components inside components followed this deep
 
 
@@ -3238,16 +3226,35 @@ def tip_html(text, rich=False):
     return u"<span>%s</span>" % text
 
 
+NO_FONT_PROP = "freelabNoFont"  # ak.NO_FONT_PROP: a control ak.no_font_states grayed, its window having no font
+
+
 def set_enabled(widget, on):
     """A control grayed out, or not, whatever its container's state. Auto Kerning's enable() sets a
     state only when it differs from the one the widget reports, and a widget reports its container's
     too: while the window is busy (its lists' part disabled), a button to gray out read as grayed
     out already, was left alone, and came back clickable with its container (Build checked glyphs,
-    after a build that left nothing to build)."""
+    after a build that left nothing to build). A control the shared module grayed for want of a font
+    stays grayed (as ak.enable keeps it: it gives it back with a font)."""
+    try:
+        if on and widget.property(NO_FONT_PROP):
+            return
+    except Exception:
+        pass
     try:
         widget.setEnabled(bool(on))
     except Exception:
         pass  # a signal's handler must not raise
+
+
+def say(label, text):
+    """A note's text, the note hidden while it says nothing: an empty label still took a line, a gap
+    between a heading and what it heads (owner's images 197 and 198)."""
+    try:
+        label.setText(text)
+        label.setVisible(bool((u"%s" % (text or u"")).strip()))
+    except Exception:
+        pass
 
 
 def describe(widget, text, tip=False):
@@ -3389,7 +3396,6 @@ STYLISTIC_TAB = 2  # the Stylistic alternates tab's place, which builds variants
 NO_TURNS = (u"The font has no alternates to take turns (glyphs named X.2, X.alt1, or X.calt1). Build them on the "
             u"<a href=\"tab:%d\"><i>%s</i></a> tab, under <i>Variants that take turns</i>, or draw them and name "
             u"them so." % (STYLISTIC_TAB, TABS[STYLISTIC_TAB]))
-PROGRESS_SECONDS = 0.1  # long work shows its progress, and lets the window answer, this often
 FORM_ICON_WIDTH = 3  # a form row's picture: this many icons wide
 
 # The check boxes of a list whose pictures dark mode leaves alone (LEAVE_ALONE_PROP): the style drew
@@ -3622,8 +3628,15 @@ class FeatureCodeDialog(object):
         self.status = self.ak.status_label()
         self.status.setWordWrap(True)
         describe(self.status, u"What the font has (its ligatures, the glyphs whose alternates take turns, its form "
-                              u"features) and whether the code shown can be written; while the font is read, glyphs "
-                              u"are built, or the code is written, what is under way.")
+                              u"features) and whether the code shown can be written; after a read you stopped, a "
+                              u"link that reads the font again. While the font is read, glyphs are built, or the code "
+                              u"is written, a bar in its place says what is under way: the tools menu, the arrows, "
+                              u"<i>Close</i>, and Esc stop a read, and wait for a build or a write.")
+        try:  # (its link after a read stopped by the user reads the font again: read_stopped)
+            self.status.setOpenExternalLinks(False)
+            self.status.connect("linkActivated(QString)", self.link_activated)
+        except Exception:
+            pass
         layout.addWidget(self.status)
         layout.addWidget(self.ak.separator())
         self.log = self.ak.Log()
@@ -3714,6 +3727,7 @@ class FeatureCodeDialog(object):
         except Exception:
             pass
         part.addWidget(self.turn_label)
+        self.turn_label.setVisible(False)  # (shown with something to say: say)
         self.alternate_tree = QtGui.QTreeWidget()
         self.alternate_tree.setColumnCount(4)
         self.alternate_tree.setHeaderLabels(["Glyph", "Cycle", "Doubled in text", "Note"])
@@ -3733,6 +3747,7 @@ class FeatureCodeDialog(object):
                                    u"how that was read: the figure features (lnum, onum, pnum, and tnum) are written "
                                    u"from it.")
         box.addWidget(self.forms_label)
+        self.forms_label.setVisible(False)  # (shown with something to say: say)
         self.forms_parts = QtGui.QSplitter(QtCore.Qt.Vertical)
         self.forms_parts.setChildrenCollapsible(False)
         box.addWidget(self.forms_parts, 1)
@@ -3835,7 +3850,7 @@ class FeatureCodeDialog(object):
             self.pairs = self.ak.common_pairs()
         except Exception:
             self.pairs = {}
-        self.busy, self.progress_shown = False, 0.0
+        self.busy = False
         self.forms, self.figures, self.checked_code = [], None, {}
         self.texts, self.prefix = {}, u""
         self.ligature_model = load_ligature_model()
@@ -3861,13 +3876,16 @@ class FeatureCodeDialog(object):
         self.pages.setCurrentIndex(index)
 
     def link_activated(self, link):
-        """A link of a label clicked: "tab:2" opens that tab (the tab bar's signal shows its page)."""
+        """A link of a label clicked: "tab:2" opens that tab (the tab bar's signal shows its page); "read:"
+        reads the font again (after a read stopped)."""
         try:
             link = u"%s" % link
             if link.startswith(u"tab:"):
                 index = int(link[4:])
                 self.tabs.setCurrentIndex(index)
                 self.switch_page(index)  # (shown whether or not the bar's signal comes: it was the current tab)
+            elif link.startswith(u"read:"):  # (the top line's, after a read stopped: read_stopped)
+                self.run()
         except Exception:
             pass  # a signal's handler must not raise
 
@@ -3915,43 +3933,82 @@ class FeatureCodeDialog(object):
         package = getattr(self, "package", None)
         return self.fontlab, package, package.master if package is not None else None
 
-    def set_busy(self, on):
-        """Long work under way (or over). The window answers events while it shows the work's progress, so
-        a click could start the tool again inside itself: the lists and their buttons take no clicks
-        meanwhile, the buttons under them do nothing (each action checks busy), and ak.watch_history
-        waits on busy too."""
-        self.busy = bool(on)
+    def set_busy(self, on, what=u"", stoppable=True):
+        """Long work under way (or over), in the window's top row (ak.busy_start: what, the step's name, and
+        a bar; owner's image 180): while it runs, no click or key reaches the window or FontLab but the tools
+        menu's, the arrows', Close's, and Esc, which stop it at its next step when stoppable (a read), and are
+        done once it is over (a write: never stopped half way). The lists take no clicks meanwhile, the
+        buttons under them do nothing (each action checks busy), and ak.watch_history waits on busy too."""
+        was, self.busy = self.busy, bool(on)
         try:
             self.splitter.setEnabled(not on)
         except Exception:
             pass
+        if on and not was:
+            self.ak.busy_start(self, what, stoppable=stoppable)
+        elif was and not on:
+            self.ak.busy_end(self)
 
-    def progress(self, what, done=None, total=None, force=False):
-        """Long work's progress in the top line (what: "Building variants"; done of total, when counted),
-        the window left to redraw, at most every PROGRESS_SECONDS. Clicks and keys wait until the work is
-        done (Qt delivers them then): the font is being read or changed meanwhile, and nothing, here or in
-        FontLab, may act on it halfway."""
-        now = time.time()
-        if not force and now - self.progress_shown < PROGRESS_SECONDS:
+    def progress(self, what, done=None, total=None, force=False, stoppable=True):
+        """Long work's progress in the window's top row (what: "Building variants"; done of total, when
+        counted), the window redrawn at most every 0.1 s (ak.busy_progress). Raises ak.Stopped when the user
+        asked the work to stop, unless stoppable is False (a write)."""
+        self.ak.busy_progress(self, what, (float(done) / total) if total else None, force=force, stoppable=stoppable)
+
+    def run(self):
+        """The font read again, unless long work is under way (a click the window answered meanwhile). A read
+        stopped by the user (the tools menu, an arrow, Close, Esc) leaves nothing listed and nothing to
+        write (read_stopped)."""
+        if self.busy:
             return
-        self.progress_shown = now
+        self.set_busy(True, u"Reading the font")
+        stopped = False
         try:
-            QtCore, QtGui = _qt()
-            self.status.setText(u"%s: %s of %s\N{HORIZONTAL ELLIPSIS}" % (what, self.ak.b(done), self.ak.b(total))
-                                if total else u"%s\N{HORIZONTAL ELLIPSIS}" % what)
-            pump_events(QtCore, QtGui)
+            self.read_font()
+        except self.ak.Stopped:
+            stopped = True
+        finally:
+            self.set_busy(False)
+        if stopped:
+            self.read_stopped()
+
+    def read_stopped(self):
+        """A read stopped by the user: what it listed so far let go, nothing listed and nothing to write or
+        build (no font read: the shared module grays what acts on one), the top line saying so, with a link
+        that reads the font again (link_activated). Never raises."""
+        for tree in (self.ligature_tree, self.alternate_tree, self.forms_tree):
+            try:
+                tree.blockSignals(False)  # (a stop inside a filling: its signals held)
+                tree.clear()
+            except Exception:
+                pass
+        self.combos, self.name_edits = [], {}
+        self.package = None
+        try:
+            self.empty_views()
+            self.status.setText(u"Reading the font was stopped: nothing is listed. <a href=\"read:\">Read it</a>")
+            self.log.add(u"Reading the font was stopped: nothing is listed.", "warning")
         except Exception:
             pass
 
-    def run(self):
-        """The font read again, unless long work is under way (a click the window answered meanwhile)."""
-        if self.busy:
-            return
-        self.set_busy(True)
-        try:
-            self.read_font()
-        finally:
-            self.set_busy(False)
+    def empty_views(self):
+        """Nothing of a font stays (its code, its turns' line, the third tab's list), and nothing that acts
+        on a font takes a click: the turns' buttons and look back, the build's settings (no font, or a read
+        stopped)."""
+        say(self.forms_label, u"")
+        self.forms, self.figures = [], None
+        self.names, self.letters, self.found, self.sets, self.others = [], [], [], {}, {}
+        self.chars, self.often, self.taken, self.texts, self.prefix = {}, set(), set(), {}, u""
+        self.first_choices, self.first_checks = [], []
+        self.show_code(u"")
+        self.show_turns({})
+        self.small_forms, self.small_plans, self.small_info = [], {}, None
+        self.show_small_forms()
+        if self.alternates is not None:
+            try:
+                self.alternates.fill()
+            except Exception:
+                pass
 
     def read_font(self):
         QtCore, QtGui = _qt()
@@ -3975,21 +4032,7 @@ class FeatureCodeDialog(object):
             # (the window takes the next font opened: ak.fonts_tick, then font_changed)
             self.status.setText(self.ak.no_font_line() if hasattr(self.ak, "no_font_line")
                                 else getattr(self.ak, "NO_FONT_LINE", None) or u"No font is open.")
-            self.forms_label.setText(u"")
-            # Nothing of the font closed stays (its code, its turns' line, the third tab's list), and nothing
-            # that acts on a font takes a click: the turns' buttons and look back, the build's settings
-            self.names, self.letters, self.found, self.sets, self.others = [], [], [], {}, {}
-            self.chars, self.often, self.taken, self.texts, self.prefix = {}, set(), set(), {}, u""
-            self.first_choices, self.first_checks = [], []
-            self.show_code(u"")
-            self.show_turns({})
-            self.small_forms, self.small_plans, self.small_info = [], {}, None
-            self.show_small_forms()
-            if self.alternates is not None:
-                try:
-                    self.alternates.fill()
-                except Exception:
-                    pass
+            self.empty_views()
             return
         glyphs = list(package.fgPackage.glyphs)
         self.names = [g.name for g in glyphs]
@@ -4162,12 +4205,12 @@ class FeatureCodeDialog(object):
             pass
         tree.setColumnWidth(1, max(tree.columnWidth(1), ICON_SIZE * FORM_ICON_WIDTH + 160))
         if self.figures:
-            self.forms_label.setText(u"The default figures are %s (by %s). %s" % (
+            say(self.forms_label, u"The default figures are %s (by %s). %s" % (
                 self.ak.b(describe_style(*self.figures[:2])), self.ak.html(self.figures[2]),
                 u"Click a feature's arrow for its rows." if self.forms else u""))
         if not self.forms:
-            self.forms_label.setText(u"No glyph is named for a form feature (.case, .sc, .numr, .ss01...): "
-                                     u"nothing to write here.")
+            say(self.forms_label, u"No glyph is named for a form feature (.case, .sc, .numr, .ss01...): "
+                                  u"nothing to write here.")
 
     def measures(self, codes):
         """(widths, bounds, contours) the form builders use: the advance widths and ink of the figures and
@@ -4356,6 +4399,7 @@ class FeatureCodeDialog(object):
                                    u"and moved (its strokes kept as <i>Strokes</i> says), or of a drawn small figure "
                                    u"where the font has a whole set of them.")
         part.addWidget(self.small_label)
+        self.small_label.setVisible(False)  # (an empty line under the heading, owner's image 197: say)
         # One row for every setting. Scale, Baseline at, and Width are the picked set's; Strokes is one value
         # for every set (it stood alone under the list, which said so by its place only: its What's This says
         # it now); Suggested, last, puts the four back.
@@ -4539,9 +4583,9 @@ class FeatureCodeDialog(object):
         finally:
             tree.blockSignals(False)
         if self.package is None:
-            self.small_label.setText(u"")
+            say(self.small_label, u"")
         elif self.small_forms:
-            self.small_label.setText(
+            say(self.small_label,
                 u"%s Each is made of its figure (or <i>a</i> or <i>o</i>), scaled and moved, or of "
                 u"a drawn small figure where the font has a whole set of them. Scaling alone thins the strokes (a "
                 u"figure at 60%% has stems 60%% as thick); with <i>Strokes</i> above 100%%, the form is made of "
@@ -4549,10 +4593,10 @@ class FeatureCodeDialog(object):
                 u"bolder than scaled ones: 107%%), at 100%% of components. A start to refine, not a drawing. Built, the "
                 u"features above take them." % self.small_counts())
         elif self.small_info is not None and not any(self.small_info.figures()):
-            self.small_label.setText(u"The font has no figures 0 to 9 to build small forms of.")
+            say(self.small_label, u"The font has no figures 0 to 9 to build small forms of.")
         else:
-            self.small_label.setText(u"The font has every figure form FreeLab builds: numerators, denominators, "
-                                     u"superiors, inferiors, their Unicode characters, and the ordinal indicators.")
+            say(self.small_label, u"The font has every figure form FreeLab builds: numerators, denominators, "
+                                  u"superiors, inferiors, their Unicode characters, and the ordinal indicators.")
         self.small_set_picked(self.small_set_index)
         self.replan()
 
@@ -5097,7 +5141,7 @@ class FeatureCodeDialog(object):
         (placed by the current master's measures; widths from each master's own glyphs), as one step of
         FontLab's History; a code point set once its glyph's layers are made."""
         QtCore, QtGui = _qt()
-        if self.package is None or self.small_info is None:
+        if self.package is None or self.small_info is None or self.busy:
             return
         self.sync_small_settings()  # (what the boxes show now, typed and not yet entered included)
         chosen = [form for form in self.small_forms if form.on]
@@ -5149,10 +5193,15 @@ class FeatureCodeDialog(object):
         # (a form built again: its glyph is changed)
         if not self.ak.begin_write(fontlab, package, u"FreeLab Feature Code", self.log):
             return  # (nothing built: the reason in the log)
+        # The window's top row counts the forms built (there was no progress at all); a write, one step of
+        # FontLab's History: never stopped half way, what was clicked meanwhile done once it is over
+        self.set_busy(True, u"Building the figure forms", stoppable=False)
         try:
             for master in masters:
                 plans_of(master)  # (each master planned before anything is added)
-            for form in sorted(chosen, key=lambda f: f.group in ("superscript", "subscript")):
+            ordered = sorted(chosen, key=lambda f: f.group in ("superscript", "subscript"))
+            for at, form in enumerate(ordered):
+                self.progress(u"Building the figure forms", at, len(ordered), stoppable=False)
                 # A glyph of the name, or with the code point, that is not one this window built and left
                 # alone since is the font's: made meanwhile, or drawn over. Never replaced.
                 again = form.name in ours and package.findName(form.name) is not None
@@ -5244,6 +5293,8 @@ class FeatureCodeDialog(object):
                         lost = [a + b for a, b in zip(lost, done)]
         except Exception as exc:  # what was made stays made, and is reported
             error = exc
+        finally:
+            self.set_busy(False)
         status = self.ak.notify_changed(fontlab, package, u"FreeLab Feature Code", touched)
         if not status.recorded:  # (no Undo to promise)
             failed = [(name, why.replace(EMPTIED_UNDO, u"")) for name, why in failed]
@@ -5587,7 +5638,7 @@ class FeatureCodeDialog(object):
             text = u"No glyph is checked to take turns."
         else:  # (the section said nothing, and the owner looked for a minute for where they are made)
             text = NO_TURNS
-        self.turn_label.setText(text)
+        say(self.turn_label, text)
         set_enabled(self.look_back, bool(self.sets))  # (no glyph with alternates: no look back to set)
         free = [base for base in self.sets if base not in self.taken]
         often = set(base for base in free if base in self.often)
@@ -5721,9 +5772,10 @@ class FeatureCodeDialog(object):
                          "error")
             return
         written, error, skipped = [], None, None
-        self.set_busy(True)  # (the window answers while the top line says what is under way)
+        # (the window's top row says what is under way; a write is never stopped half way)
+        self.set_busy(True, u"Writing the code", stoppable=False)
         try:
-            self.progress(u"Writing the code", force=True)
+            self.progress(u"Writing the code", force=True, stoppable=False)
             if prefix is not None:
                 setter = getattr(features, "set_prefix", None)
                 try:

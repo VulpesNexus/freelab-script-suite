@@ -15,6 +15,112 @@ import freelab_auto_kerning as ak  # noqa: E402
 import freelab_auto_spacing as sp  # noqa: E402
 
 
+def fake_busy(test, stop_after=None):
+    """ak's top-row progress (busy_start, busy_progress, busy_end, busy_stopping) recorded, not shown: the
+    calls made, as (name, what, part, stoppable). stop_after: busy_progress raises ak.Stopped from that
+    call on, where it may (as the user's Esc would)."""
+    calls = []
+    saved = dict((name, getattr(ak, name)) for name in ("busy_start", "busy_progress", "busy_end", "busy_stopping"))
+    test.addCleanup(lambda: [setattr(ak, name, value) for name, value in saved.items()])
+
+    def progress(owner, what=None, part=None, force=False, stoppable=True):
+        calls.append(("progress", what, part, stoppable))
+        if stop_after is not None and stoppable and sum(1 for c in calls if c[0] == "progress") > stop_after:
+            raise ak.Stopped()
+
+    ak.busy_start = lambda owner, what=u"", stoppable=True: calls.append(("start", what, None, stoppable))
+    ak.busy_progress = progress
+    ak.busy_end = lambda owner: calls.append(("end", None, None, None))
+    ak.busy_stopping = lambda owner: False
+    return calls
+
+
+class BusyTests(unittest.TestCase):
+    """Owner's image 178: Measuring... held the window until Windows called it Not Responding. The long steps
+    now run under the window's top-row progress (ak.busy_*), stoppable; the write never is."""
+
+    def test_the_measuring_tells_its_progress_and_can_be_stopped(self):
+        glyphs = [sp.Spacing(ch, ch, "upper", 20, 20, 600) for ch in u"ABCD"]
+        parts = []
+        sp.suggest_spacing(glyphs, lambda a, b: -10, lambda ch: ch, lambda ch: "upper", progress=parts.append)
+        self.assertEqual(parts, [0.0, 0.25, 0.5, 0.75], "before each glyph")
+
+        def stop(part):
+            raise ak.Stopped()
+        self.assertRaises(ak.Stopped, sp.suggest_spacing, glyphs, lambda a, b: -10, lambda ch: ch, lambda ch: "upper",
+                          progress=stop)
+        parts = []
+        sp.settle_spacing(glyphs, lambda moved: (lambda a, b: -10), lambda ch: ch, lambda ch: "upper", passes=3,
+                          progress=parts.append)
+        self.assertTrue(parts and all(0.0 <= part <= 1.0 for part in parts), parts)
+        self.assertEqual(parts, sorted(parts), "the bar only moves on")
+        self.assertEqual(sp.measure_part(sp.DRAW_STEP, 0.0), 0.0)
+        self.assertEqual(sp.measure_part(sp.COMPOSITES_STEP, 1.0), 1.0)
+        self.assertLess(sp.measure_part(sp.MEASURE_STEP, 1.0), sp.measure_part(sp.SETTLE_STEP, 0.5))
+
+    def dialog(self):
+        class Widget(object):
+            def __init__(self):
+                self.text, self.visible, self.enabled = u"", True, True
+
+            def setText(self, text):
+                self.text = text
+
+            def setVisible(self, on):
+                self.visible = on
+
+            def setEnabled(self, on):
+                self.enabled = on
+
+            def clear(self):
+                self.text = u""
+
+            def property(self, name):
+                return None
+
+        dialog = sp.AutoSpacingDialog.__new__(sp.AutoSpacingDialog)
+        dialog.ak, dialog.busy, dialog.master = ak, False, "Regular"
+        dialog.tree, dialog.apply_button, dialog.composites_note, dialog.status = Widget(), Widget(), Widget(), Widget()
+        dialog.spacings, dialog.listed, dialog.composites, dialog.unspaced_references = [], [], {}, []
+        dialog.package = type("Package", (), {"master": "Regular"})()
+        dialog.current_font = lambda: dialog.package
+        dialog.update_buttons = lambda: None
+        dialog.log = type("Log", (), {"add": lambda log, text, kind="info": None})()
+        old = ak.history_mark
+        ak.history_mark = lambda package: None
+        self.addCleanup(lambda: setattr(ak, "history_mark", old))
+        return dialog
+
+    def test_a_stopped_measuring_leaves_the_list_empty(self):
+        calls = fake_busy(self, stop_after=1)
+        dialog = self.dialog()
+
+        def measure(package, master, only=None, progress=None):
+            for _ in range(5):
+                progress(sp.MEASURE_STEP, 0.5)
+            return [sp.Spacing(u"T", "T", "upper", 20, 25, 500)], {}
+        dialog.measure = measure
+        dialog.fill = lambda progress=None: self.fail("not listed once stopped")
+        dialog.run()
+        self.assertEqual([c[0] for c in calls], ["start", "progress", "progress", "end"], "ended though stopped")
+        self.assertTrue(calls[0][3], "stoppable")
+        self.assertFalse(dialog.busy)
+        self.assertEqual(dialog.spacings, [])
+        self.assertIn(u"Measuring was stopped", dialog.status.text)
+        self.assertFalse(dialog.composites_note.visible)
+
+    def test_measuring_ends_its_progress_on_an_error(self):
+        calls = fake_busy(self)
+        dialog = self.dialog()
+
+        def measure(package, master, only=None, progress=None):
+            raise ValueError("no references")
+        dialog.measure = measure
+        dialog.run()
+        self.assertEqual([c[0] for c in calls], ["start", "end"])
+        self.assertFalse(dialog.busy)
+
+
 class ReferenceTests(unittest.TestCase):
     MODEL = {"references": {"H": {"by": "height", "height_of": "H", "left": 0.08, "right": 0.075},
                             "o": {"by": "width", "height_of": "x", "left": 0.2, "right": 0.2}}}
@@ -383,6 +489,7 @@ class HistoryFailureTests(unittest.TestCase):
         self.saved = getattr(sys, "_freelab_history", None)
         sys._freelab_history = None
         self.addCleanup(lambda: setattr(sys, "_freelab_history", self.saved))
+        self.busy_calls = fake_busy(self)
 
     def dialog(self, refuse_before, refuse_after):
         steps = []
@@ -453,6 +560,21 @@ class HistoryFailureTests(unittest.TestCase):
         self.assertTrue(any(u"<i>Edit &gt; Undo</i> (or the <i>History</i> panel) takes it back." in text
                             for _, text in dialog.logged), dialog.logged)
         self.assertEqual([kind for kind, _ in dialog.logged if kind == "error"], [])
+        # (under the top row's progress, never stoppable: one History step)
+        self.assertEqual(self.busy_calls[0][0], "start")
+        self.assertEqual(self.busy_calls[-1][0], "end")
+        self.assertFalse(any(stoppable for name, _, _, stoppable in self.busy_calls if name in ("start", "progress")))
+
+    def test_a_write_that_raises_still_ends_its_progress(self):
+        dialog, steps = self.dialog(refuse_before=False, refuse_after=False)
+
+        def write_spacings(rows, tolerance, totals):
+            raise RuntimeError("FontLab refused")
+        dialog.write_spacings = write_spacings
+        dialog.apply()
+        self.assertEqual(self.busy_calls[-1][0], "end")
+        self.assertFalse(dialog.busy)
+        self.assertTrue(any(u"FontLab refused" in text for kind, text in dialog.logged if kind == "error"))
 
 
 class WordingTests(unittest.TestCase):
@@ -476,6 +598,17 @@ class WordingTests(unittest.TestCase):
     def test_the_units_box_follows_its_number(self):
         self.assertNotIn(u"setSuffix(", self.source(), "ak.counted_suffix sets it: 1 unit, 2 units")
         self.assertIn(u"counted_suffix(self.tolerance, u\"unit\")", self.source())
+
+    def test_the_composites_note_says_none_or_hides(self):
+        # (owner's image 188: "0 glyphs built from components follow the listed glyphs.")
+        self.assertEqual(sp.composites_text(0, 0), u"", "hidden: nothing to say")
+        self.assertEqual(sp.composites_text(1, 0), u"1 glyph built from components follows the listed glyphs.")
+        self.assertEqual(sp.composites_text(3, 0), u"3 glyphs built from components follow the listed glyphs.")
+        self.assertEqual(sp.composites_text(0, 2), u"No glyph built from components follows the listed glyphs; 2 built "
+                                                   u"on two of them are left as they are.")
+        self.assertEqual(sp.composites_text(2, 1), u"2 glyphs built from components follow the listed glyphs; 1 built "
+                                                   u"on two of them is left as it is.")
+        self.assertNotIn(u"QApplication.processEvents", self.source(), "the top row's progress lets events through")
 
     def test_the_log_counts(self):
         self.assertIn(u"1 glyph still had a side 1 unit or more off, and was spaced again", sp.apply_note(2, 1, 1))

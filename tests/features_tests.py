@@ -2108,9 +2108,10 @@ class DialogTests(unittest.TestCase):
             self.assertIsNone(fc.check_code(texts["calt"], dialog.names))
         self.assertTrue(dialog.write_button.enabled)
         shown = []
-        dialog.progress = lambda what, done=None, total=None, force=False: shown.append((what, dialog.busy))
+        dialog.progress = lambda what, done=None, total=None, force=False, stoppable=True: shown.append(
+            (what, dialog.busy and not stoppable))
         dialog.write()
-        self.assertIn((u"Writing the code", True), shown, "its progress said, the dialog busy meanwhile")
+        self.assertIn((u"Writing the code", True), shown, "its progress said, the dialog busy meanwhile, never stopped")
         self.assertFalse(dialog.busy)
         self.assertEqual(features.texts["calt"], texts["calt"])
         self.assertEqual(len(dialog.cycling()), len(letters), "read again after writing: the checks kept")
@@ -2264,31 +2265,77 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(len(dialog.forms_tree.items), rows)
         self.assertFalse(dialog.busy)
 
-    def test_progress_redraws_but_leaves_clicks_and_keys_waiting(self):
+    def test_progress_in_the_top_row_reads_stop_writes_do_not(self):
         """progress() processed every event during writes and builds, so a click or a key acted on the font
-        while it was being changed: user input waits until the work is done."""
-        class Events(object):
-            ExcludeUserInputEvents = "no user input"
+        while it was being changed; it is the window's top row now (ak.busy_*: owner's image 180), which holds
+        them but the tools menu, the arrows, Close, and Esc: those stop a read, and wait for a write."""
+        features = FakeFeatures({})
+        package, letters = self.big_font(features)
+        ak = self.ak
+        real = ak.busy_start, ak.busy_progress, ak.busy_end
+        started, moved, ended = [], [], []
 
-        pumped = []
-        app = type("App", (object,), {"processEvents": staticmethod(lambda *flags: pumped.append(flags))})
-        core, gui = type("Core", (object,), {"QEventLoop": Events}), type("Gui", (object,), {"QApplication": app})
-        fc.pump_events(core, gui)
-        self.assertEqual(pumped, [("no user input",)])
-        fc.pump_events(type("Core", (object,), {}), gui)  # (a Qt without the flag: everything, rather than nothing)
-        self.assertEqual(pumped[-1], ())
-        dialog = fc.FeatureCodeDialog.__new__(fc.FeatureCodeDialog)
-        texts = []
-        dialog.progress_shown, dialog.status, dialog.ak = 0.0, type("Status", (object,), {})(), None
-        dialog.status.setText = texts.append
-        saved = fc._qt
-        try:
-            fc._qt = lambda: (core, gui)
-            dialog.progress(u"Writing the code", force=True)
-        finally:
-            fc._qt = saved
-        self.assertEqual(texts, [u"Writing the code\N{HORIZONTAL ELLIPSIS}"])
-        self.assertEqual(pumped[-1], ("no user input",), "the dialog's own progress pumps that way")
+        def restore():
+            ak.busy_start, ak.busy_progress, ak.busy_end = real
+        self.addCleanup(restore)
+        ak.busy_start = lambda owner, what=u"", stoppable=True: started.append((what, stoppable))
+        ak.busy_progress = lambda owner, what=None, part=None, force=False, stoppable=True: moved.append(
+            (what, part, stoppable))
+        ak.busy_end = lambda owner: ended.append(owner.busy)
+        dialog = self.dialog(features, package)
+        self.assertEqual((started, ended), ([(u"Reading the font", True)], [False]))
+        listed = [part for what, part, _ in moved if what == u"Listing the glyphs with alternates"]
+        self.assertTrue(listed and listed == sorted(listed) and 0 < listed[-1] <= 1.0, listed)
+        del started[:], moved[:]
+        dialog.write()
+        self.assertEqual(started, [(u"Writing the code", False), (u"Reading the font", True)],
+                         "a write, never stopped half way; then the font read again")
+        self.assertTrue(moved and not any(stoppable for _, _, stoppable in moved if _ == u"Writing the code"))
+        # A read stopped by the user: nothing listed, nothing to write, and the top line's link reads it again
+
+        def stopping(owner, what=None, part=None, force=False, stoppable=True):
+            if what == u"Listing the glyphs with alternates" and stoppable:
+                raise ak.Stopped()
+        ak.busy_progress = stopping
+        dialog.package = None  # (read anew)
+        dialog.status = FakeEdit()
+        dialog.run()
+        self.assertIsNone(dialog.package)
+        self.assertEqual((dialog.found, dialog.sets, dialog.forms, dialog.busy), ([], {}, [], False))
+        self.assertEqual(len(dialog.alternate_tree.items), 0, "no list half made")
+        self.assertIn(u"<a href=\"read:\">", dialog.status.text)
+        self.assertEqual(self.logged[-1][0], "warning")
+        count = len(started)
+        dialog.write()  # (nothing to write: no font read)
+        self.assertEqual(len(started), count, "no write started")
+        ak.busy_progress = lambda owner, what=None, part=None, force=False, stoppable=True: None
+        dialog.link_activated(u"read:")
+        self.assertIs(dialog.package, package, "read again")
+        self.assertTrue(dialog.sets)
+
+    def test_set_enabled_keeps_the_no_font_gate(self):
+        """Owner's images 201 to 210: a control the shared module grayed for want of a font (ak.NO_FONT_PROP)
+        stays grayed whatever the tool asks; ak.no_font_states gives it back with a font."""
+        button = FakeButton()
+        button.property = lambda name: True if name == self.ak.NO_FONT_PROP else None
+        button.enabled = False
+        fc.set_enabled(button, True)
+        self.assertFalse(button.enabled)
+        self.assertEqual(fc.NO_FONT_PROP, self.ak.NO_FONT_PROP)
+        button.property = lambda name: None
+        fc.set_enabled(button, True)
+        self.assertTrue(button.enabled)
+
+    def test_empty_notes_take_no_line(self):
+        """Owner's images 197 and 198: empty labels under "Figure forms to build" and "Suggested alternates"
+        left blank lines: a note is hidden while it says nothing."""
+        label = FakeEdit()
+        shown = []
+        label.setVisible = shown.append
+        fc.say(label, u"")
+        fc.say(label, u"Something.")
+        fc.say(label, u"  ")
+        self.assertEqual(shown, [False, True, False])
 
     def test_a_small_set_starts_checked_whole(self):
         """A font with a few drawn alternates: every letter takes turns, doubled often or not."""

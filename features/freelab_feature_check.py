@@ -49,6 +49,10 @@ KINDS = {
              "class it needs (FontLab writes these when it opens some fonts): fontTools refuses it, and the "
              "lookup's marks are not filtered as meant. Name the class (UseMarkFilteringSet @marks;) or drop "
              "the flag."),
+    "aalt-lookups": (ERROR, "Lookups inside aalt", "feature", "features",
+                     "FontLab writes the lookups of aalt inside the feature when it opens some fonts; neither its "
+                     "own compiler nor fontTools takes a lookup there, so no feature compiles. The fix writes "
+                     "their rules straight into aalt, which both take."),
     "overflow": (ERROR, "Tables too large", "table", "tables",
                  "A layout table larger than its offsets reach, even split up."),
     "conflict": (WARNING, "Glyphs given two ways in one lookup", "glyph", "glyphs",
@@ -61,6 +65,10 @@ KINDS = {
                    "name gets no features."),
     "empty-class": (WARNING, "Empty classes", "class", "classes",
                     "A class with no glyph: a rule using it never applies."),
+    "class-redefined": (WARNING, "Classes defined twice, differently", "class", "classes",
+                        "A class defined again with other glyphs (in FontLab's classes and in the code, or twice in "
+                        "the code): each rule uses the definition last read before it, which may not be the one "
+                        "meant."),
     "aalt-order": (ADVICE, "aalt not first", "feature", "features",
                    "The specification asks for aalt before the other features."),
     "duplicate-rule": (ADVICE, "Rules written twice", "rule", "rules",
@@ -68,7 +76,10 @@ KINDS = {
     "identity": (ADVICE, "Substitutions that change nothing", "rule", "rules",
                  "A glyph substituted by itself."),
     "class-duplicates": (ADVICE, "Glyphs listed twice in a class", "class", "classes",
-                         "A class that names a glyph more than once."),
+                         "A class that names a glyph more than once (a class whose glyphs pair with another "
+                         "class's, as \"sub @a by @b;\" gives @b, needs its repeats: not listed)."),
+    "class-repeated": (ADVICE, "Classes defined twice", "class", "classes",
+                       "A class defined again in the code with the same glyphs: the second definition does nothing."),
     "unused-class": (ADVICE, "Classes never used", "class", "classes",
                      "A class defined in the code that no rule or other class uses."),
     "unused-lookup": (ADVICE, "Lookups never used", "lookup", "lookups",
@@ -81,7 +92,17 @@ KINDS = {
                 "Read from FontLab's Output panel after compiling there."),
 }
 # Kinds whose fixes the Apply safe fixes automatically option applies (each still proven first)
-AUTO_KINDS = ("duplicate-rule", "identity", "class-duplicates", "unused-class", "unused-lookup")
+AUTO_KINDS = ("duplicate-rule", "identity", "class-duplicates", "class-repeated", "unused-class", "unused-lookup")
+
+
+class Stopped(Exception):
+    """A check stopped from its progress callback."""
+
+
+def step(progress, what, done=0, total=1):
+    """progress(what, done, total), when given: the window's bar moved (it may raise Stopped)."""
+    if progress is not None:
+        progress(what, done, total)
 
 
 def counted(number, one, many=None):
@@ -209,6 +230,8 @@ class Fix(object):
         self.edits = list(edits)
         self.remove_feature = remove_feature  # a feature taken out of the font altogether (its tag)
         self.safe = None  # True: proven to leave the compiled layout as it was; False: proven not; None: unknown
+        self.review = False  # True: a fix that changes what the font does by design (never proven, never automatic)
+        self.repair = False  # True (with review): it mends code that does not compile
 
 
 class Finding(object):
@@ -250,9 +273,13 @@ def apply_edits(code, edits):
             if edit.start >= last:
                 kept.append(edit)
                 last = edit.end
-        for edit in reversed(kept):
-            text = text[:edit.start] + edit.new + text[edit.end:]
-        new = new.with_part(key, text)
+        pieces, at = [], 0  # (put together once: 688 edits each copied a 255 KB prefix; review 11)
+        for edit in kept:
+            pieces.append(text[at:edit.start])
+            pieces.append(edit.new)
+            at = edit.end
+        pieces.append(text[at:])
+        new = new.with_part(key, "".join(pieces))
     return new
 
 
@@ -361,6 +388,110 @@ def automatic_spans(text):
     if opened is not None:
         spans.append((opened, len(text)))
     return spans
+
+
+def block_end(toks, k):
+    """The index of the "}" closing the "{" at toks[k], or None."""
+    depth = 0
+    for j in range(k, len(toks)):
+        if toks[j][0] == "{":
+            depth += 1
+        elif toks[j][0] == "}":
+            depth -= 1
+            if depth == 0:
+                return j
+    return None
+
+
+def aalt_lookups(text):
+    """[(start, end, name, body start, body end)] of the lookup blocks written inside a feature aalt block
+    (FontLab writes its aalt so: "feature aalt { ... lookup aalt_2 useExtension { ... } aalt_2; }"), which
+    neither FontLab's compiler ("'lookup' use not allowed in 'aalt' feature", live) nor fontTools takes."""
+    toks = tokens(text)
+    out = []
+    k = 0
+    while k < len(toks) - 1:
+        if toks[k][0] == "feature" and toks[k + 1][0] == "aalt":
+            opening = k + 2
+            while opening < len(toks) and toks[opening][0] not in ("{", ";"):
+                opening += 1
+            if opening >= len(toks) or toks[opening][0] != "{":
+                return out
+            closing = block_end(toks, opening)
+            if closing is None:
+                return out
+            j = opening + 1
+            while j < closing:
+                tok = toks[j][0]
+                if tok == "{":
+                    j = (block_end(toks, j) or closing) + 1
+                    continue
+                if tok == "lookup" and j + 2 < closing:
+                    brace = j + 2
+                    if toks[brace][0] == "useExtension":
+                        brace += 1
+                    if toks[brace][0] == "{":
+                        end = block_end(toks, brace)
+                        if end is None or end + 2 > closing or toks[end + 2][0] != ";":
+                            return out
+                        out.append((toks[j][1], toks[end + 2][2], toks[j + 1][0], toks[brace][2], toks[end][1]))
+                        j = end + 3
+                        continue
+                j += 1
+            k = closing + 1
+            continue
+        k += 1
+    return out
+
+
+AALT_REFUSAL = re.compile(r"Lookup blocks cannot be placed inside 'aalt'|not allowed in 'aalt'", re.I)
+AALT_FLAG = re.compile(r"^\s*lookupflag\b[^;]*;[ \t]*\n?", re.M)
+
+
+def aalt_unwrap_fix(text, key, found):
+    """A Fix writing the rules of aalt's lookup blocks straight into aalt, where both compilers take them
+    (aalt makes its own lookups of the single and alternate substitutions it holds): each block's body
+    kept, its "lookup NAME {", "} NAME;" and lookup flags taken out."""
+    edits = []
+    for start, end, name, body_start, body_end in found:
+        body = AALT_FLAG.sub("", text[body_start:body_end]).strip()
+        if body and "#" in body.splitlines()[-1]:
+            body += "\n"  # (a comment ending it: what follows on the line stays out of it; review 12)
+        edits.append(Edit(key, start, end, body))
+    fix = Fix("Write the rules of %s straight into aalt" % ", ".join(f[2] for f in found[:4]) +
+              (", ..." if len(found) > 4 else ""), edits)
+    fix.review = True
+    fix.repair = True
+    return fix
+
+
+def aalt_findings(code):
+    """FontLab's aalt with lookup blocks inside it: an error each part that has one, with its repair."""
+    out = []
+    for key in code.keys():
+        text = code.part(key)
+        if key == "classes" or not text or "aalt" not in text:
+            continue
+        found = aalt_lookups(text)
+        if found:
+            line = line_of(text, found[0][0])
+            out.append(Finding("aalt-lookups", "aalt holds %s (%s): neither FontLab's compiler nor fontTools takes "
+                               "a lookup there" % (counted(len(found), "lookup block"),
+                                                   ", ".join(f[2] for f in found[:4]) + (", ..." if len(found) > 4 else "")),
+                               key, line, subject="aalt lookups", fix=aalt_unwrap_fix(text, key, found)))
+    return out
+
+
+NAME_IN_WORD = re.compile(r"@?[A-Za-z_.][\w.\-]*")
+
+
+def part_words(text):
+    """Every name a part's code uses (comments and strings left out): glyph classes as "@name" (also inside
+    a compact "@B=[@A]"), lookups and other words bare."""
+    out = set()
+    for tok in tokens(text):
+        out.update(NAME_IN_WORD.findall(tok[0]))
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -634,14 +765,15 @@ class Report(object):
         return groups
 
 
-def check(code, glyph_order):
+def check(code, glyph_order, progress=None):
     """A Report of the font's code (a FontCode) against its glyphs (in the font's order): every
-    finding, with the fixes found (not yet proven: prove_fixes)."""
+    finding, with the fixes found (not yet proven: prove_fixes). progress: see step."""
     lib = fealib()
     findings = []
     names = set(glyph_order)
     if lib is None:
         return Report(code, findings, unavailable="fontTools is not installed")
+    step(progress, "Reading the code")
     text, spans = code.text()
     doc, parse_error = None, None
     try:
@@ -650,8 +782,8 @@ def check(code, glyph_order):
         parse_error = exc
     good = code
     if parse_error is not None:
-        findings.extend(syntax_findings(lib, code, names))
-        good = readable_code(lib, code, names)
+        syntax, good = readable_parts(lib, code, names, progress)
+        findings.extend(syntax)
         text, spans = good.text()
         try:
             doc = parse(lib, text, names)
@@ -659,9 +791,16 @@ def check(code, glyph_order):
             doc = None
     if doc is None:
         return Report(code, sort_findings(findings), parsed=False)
+    step(progress, "Looking through the code")
+    # The words of the parts set aside for a syntax error: a class or lookup they name is used, though
+    # the parsed code no longer shows it (a CJK font's 688 aalt classes were all "never used", live)
+    aside = set()
+    for key in code.keys():
+        if code.part(key) is not None and good.part(key) != code.part(key):
+            aside |= part_words(code.part(key))
     uses = glyph_uses(doc)
     findings.extend(missing_glyphs(uses, spans, names))
-    findings.extend(lint(doc, good, spans, names))
+    findings.extend(lint(doc, good, spans, names, aside))
     flags = flag_findings(doc, good, spans)
     findings.extend(flags)
     order = list(glyph_order)  # (with the glyphs the font lacks after its own: they hide no other error)
@@ -674,16 +813,24 @@ def check(code, glyph_order):
     # The code as it is, where it compiles, is what every fix is proven against; the made-buildable copy
     # only where it does not (a fix proven against a copy that already lacked what it removes proved
     # nothing: review 9)
-    font, built_findings, provable = build_findings(lib, good, order, doc)
+    # FontLab's aalt, its lookups written inside it: neither compiler takes it (live, 2026-11-17: FontLab's
+    # "'lookup' use not allowed in 'aalt' feature"). An error with its repair; fontTools' own words for it
+    # are left out of the list
+    aalt = aalt_findings(code)
+    findings.extend(aalt)
+    step(progress, "Compiling")
     buildable = good
+    font, built_findings, provable = build_findings(lib, buildable, order, doc)
     neutral = [f.neutral for f in findings if getattr(f, "neutral", None) is not None]
     if neutral and (font is None or built_findings):
         buildable = apply_edits(good, neutral)
         font, built_findings, provable = build_findings(lib, buildable, order, None)
+    if aalt:
+        built_findings = [f for f in built_findings if not AALT_REFUSAL.search(f.message)]
     findings.extend(built_findings)
     findings = mark_automatic(findings, code)
     report = Report(code, sort_findings(findings), compiled=font, parsed=parse_error is None,
-                    built=parse_error is None and font is not None and not built_findings and not flags,
+                    built=parse_error is None and font is not None and not built_findings and not flags and not aalt,
                     provable=provable)
     report.order = order
     report.buildable = buildable
@@ -723,6 +870,12 @@ def flag_findings(doc, code, spans):
             new = re.sub(r"\b%d\b" % value, "%d" % cleared, statement, count=1)
             if new != statement:
                 f.neutral = Edit(part, start, end, new + " " * (len(statement) - len(new)))
+                # The fix a review can take: the bit dropped (its class cannot be told from the code: the
+                # font FontLab opened had it in its GDEF); never proven safe, since the lookup then
+                # applies to marks it skipped
+                f.fix = Fix("Clear %s (every mark then counts)" % " and ".join(m[0] for m in missing),
+                            [Edit(part, start, end, new)])
+                f.fix.review = True
         out.append(f)
     return out
 
@@ -735,12 +888,15 @@ def part_lines(code):
     return dict((key, text) for key, text in code.pieces())
 
 
-def syntax_findings(lib, code, names):
-    """One syntax error per part that has one: each part parsed after the parts before it that read
-    well (the classes and lookups they define stay known)."""
-    findings = []
-    context = ""
-    for key, text in code.pieces():
+def readable_parts(lib, code, names, progress=None):
+    """(one syntax error per part that has one, code without the features that do not read: the prefix
+    kept unless it does not read): each part parsed after the parts before it that read well (the
+    classes and lookups they define stay known). One pass for both (two parsed a CJK font's 255 KB
+    prefix 24 times)."""
+    findings, good, context = [], code, ""
+    pieces = code.pieces()
+    for number, (key, text) in enumerate(pieces):
+        step(progress, "Reading the code", number, len(pieces))
         try:
             parse(lib, context + text, names)
             context += text
@@ -750,22 +906,19 @@ def syntax_findings(lib, code, names):
             if line is not None and line < first:
                 line = None  # (an error the part's own code does not hold: reported at the part)
             findings.append(Finding("syntax", error_message(exc), key, (line - first + 1) if line else None))
-    return findings
-
-
-def readable_code(lib, code, names):
-    """code without the features that do not read (the prefix kept unless it does not read)."""
-    good, context = code, ""
-    for key, text in code.pieces():
-        try:
-            parse(lib, context + text, names)
-            context += text
-        except Exception:
             if key.startswith("feature:"):
                 good = good.with_part(key, None)
             elif key == "prefix":
                 good = good.with_part(key, "")
-    return good
+    return findings, good
+
+
+def syntax_findings(lib, code, names):
+    return readable_parts(lib, code, names)[0]
+
+
+def readable_code(lib, code, names):
+    return readable_parts(lib, code, names)[1]
 
 
 def missing_glyphs(uses, spans, names):
@@ -814,36 +967,118 @@ def removal(code, spans, node, what):
     return Fix(what, [Edit(key, start, end, "")])
 
 
-def lint(doc, code, spans, names):
+def lint(doc, code, spans, names, aside=frozenset()):
+    """aside: the words of the parts set aside for a syntax error (a class or lookup they name is used)."""
     findings = []
-    findings.extend(class_findings(doc, code, spans))
-    findings.extend(lookup_findings(doc, code, spans))
+    findings.extend(class_findings(doc, code, spans, aside))
+    findings.extend(lookup_findings(doc, code, spans, aside))
     findings.extend(feature_findings(doc, code, spans))
     findings.extend(rule_findings(doc, code, spans))
     findings.extend(language_findings(doc, code, spans))
     return findings
 
 
-def class_findings(doc, code, spans):
+def paired_classes(doc):
+    """ids of the class definitions whose glyphs pair one by one with another class's: the replacement of
+    "sub @a by @b;" (two of @a's glyphs may become one glyph: @b names it twice, and must)."""
+    out = set()
+    for st in all_statements(doc):
+        if kind_of(st) != "SingleSubstStatement":
+            continue
+        for value in getattr(st, "replacements", None) or []:
+            target = getattr(value, "glyphclass", None) if type(value).__name__ == "GlyphClassName" else None
+            if target is not None:
+                out.add(id(target))
+    return out
+
+
+def class_glyphs(definition):
+    glyphs = list(getattr(definition.glyphs, "glyphs", None) or []) if hasattr(definition, "glyphs") else []
+    try:
+        glyphs = list(definition.glyphSet())
+    except Exception:
+        pass
+    return glyphs
+
+
+def redefinition_findings(definitions, code, spans):
+    """A class defined more than once: with other glyphs (a warning: rules use whichever was read last
+    before them), or with the same ones in the code (advice: the later ones removed). FontLab writes each
+    of its classes into the prefix too, the same: those are not listed."""
+    by_name = {}
+    for definition, owner in definitions:
+        if owner is None:
+            by_name.setdefault(_text(definition.name), []).append(definition)
+    out = []
+    for name, found in by_name.items():
+        if len(found) < 2:
+            continue
+        places = []
+        for definition in found:
+            line, _ = location_of(definition)
+            key, at = locate(spans, line) if line else ("prefix", None)
+            places.append((key, at, class_glyphs(definition), definition))
+        first_key, first_at = places[0][0], places[0][1]
+        if any(p[2] != places[0][2] for p in places[1:]):
+            shown = "; ".join("%s (%s)" % (part_label(k) + (", line %d" % a if a else ""),
+                                           counted(len(g), "glyph")) for k, a, g, _ in places[:4])
+            last_key, last_at = places[-1][0], places[-1][1]
+            fix = None
+            panel = [p for p in places if p[0] == "classes"]
+            if panel and places[-1][0] != "classes":
+                # (FontLab's class is what it keeps: the code's copy made the same again, for review; a CJK
+                # font's prefix copy of @aalt2 lost its repeats, and "sub @aalt by @aalt2;" broke, live)
+                found = node_span(code, spans, places[-1][3])
+                if found is not None:
+                    part, start, end = found
+                    fix = Fix("Make it FontLab's class again (%s)" % counted(len(panel[-1][2]), "glyph"),
+                              [Edit(part, start, end, "@%s = [%s];" % (name, " ".join(panel[-1][2])))])
+                    fix.review = True
+            out.append(Finding("class-redefined", "@%s is defined %s, differently: %s" % (
+                name, "twice" if len(places) == 2 else "%d times" % len(places), shown), last_key, last_at,
+                subject="@" + name, fix=fix))
+            continue
+        later = [p for p in places[1:] if p[0] != "classes"]
+        if not later or (len(later) == len(places) - 1 and places[0][0] == "classes" and len(later) == 1):
+            continue  # (FontLab's class and its copy in the prefix: FontLab's own)
+        for key, at, _, definition in later:
+            fix = removal(code, spans, definition, "Remove this definition")
+            out.append(Finding("class-repeated", "@%s is defined again, the same (first: %s)" % (
+                name, part_label(first_key) + (", line %d" % first_at if first_at else "")), key, at,
+                subject="@%s again" % name, fix=fix))
+    return out
+
+
+def class_findings(doc, code, spans, aside=frozenset()):
     out = []
     used = class_references(doc)
-    for definition, owner in class_definitions(doc):
+    paired = paired_classes(doc)
+    definitions = class_definitions(doc)
+    out.extend(redefinition_findings(definitions, code, spans))
+    counts = {}
+    for definition, owner in definitions:
+        if owner is None:
+            counts[_text(definition.name)] = counts.get(_text(definition.name), 0) + 1
+    # (a class defined twice: its earlier definition is "unused" as rules see the later one; listed as
+    # defined twice instead, never removed as unused too)
+    redefined = set("@" + n for n, c in counts.items() if c > 1)
+    for definition, owner in definitions:
         name = _text(definition.name)
         line, _ = location_of(definition)
         key, at = locate(spans, line) if line else ("prefix", None)
         if key == "classes":
             continue  # (FontLab's own classes: kept in its Classes panel, used or not)
-        glyphs = list(getattr(definition.glyphs, "glyphs", None) or []) if hasattr(definition, "glyphs") else []
-        try:
-            glyphs = list(definition.glyphSet())
-        except Exception:
-            pass
+        glyphs = class_glyphs(definition)
         if not glyphs:
             out.append(Finding("empty-class", "@%s has no glyph" % name, key, at, subject="@" + name))
         seen_once, twice = set(), set()  # (one pass: a 20,000-glyph class was counted glyph by glyph; review 9)
         for g in glyphs:
             (twice if g in seen_once else seen_once).add(g)
         doubled = sorted(twice)
+        if doubled and id(definition) in paired:
+            doubled = []  # (its repeats pair with the other class's glyphs: needed)
+        if id(definition) not in used and ("@" + name in aside or "@" + name in redefined):
+            used[id(definition)] = 1  # (named by a part set aside, or another definition of it is used)
         if doubled:
             # (an unused class is removed whole instead: two fixes of one statement would collide)
             fix = class_dedupe_fix(code, spans, definition) if id(definition) in used else None
@@ -877,7 +1112,7 @@ def class_dedupe_fix(code, spans, definition):
     return Fix("List each glyph once", [Edit(key, start, end, new)])
 
 
-def lookup_findings(doc, code, spans):
+def lookup_findings(doc, code, spans, aside=frozenset()):
     out = []
     used = lookup_references(doc)
     for st in statements_of(doc):
@@ -886,7 +1121,7 @@ def lookup_findings(doc, code, spans):
         name = _text(st.name)
         line, _ = location_of(st)
         key, at = locate(spans, line) if line else ("prefix", None)
-        if id(st) not in used:
+        if id(st) not in used and name not in aside:
             fix = removal(code, spans, st, "Remove lookup %s" % name)
             out.append(Finding("unused-lookup", "Lookup %s is never used" % name, key, at, subject=name, fix=fix))
         elif not has_rules(st):
@@ -1466,9 +1701,44 @@ def same_layout(lib, before, after, order, cache=None):
         return None
 
 
-def prove_fixes(report, glyph_order):
-    """Sets each fix's safe: True where the code with it compiles to the same layout as without it.
-    The code itself must compile; else no fix is proven."""
+def set_aside(report, base):
+    """The parts of the code that base (the code built) lacks: set aside for an error."""
+    return [key for key in report.code.keys() if report.code.part(key) is not None and base.part(key) is None]
+
+
+# Kinds whose fixes only take out a definition nothing uses (or a second, identical one): taking out any of
+# them leaves the others as they were, so a group of them proven together is proven for each. Other fixes
+# can depend on each other (two classes' repeats that pair: each removal alone breaks the code, both
+# together do not; review 11), and are proven one by one
+BATCH_KINDS = ("unused-class", "unused-lookup", "class-repeated")
+
+
+def disjoint_groups(fixes):
+    """fixes split into groups whose edits never overlap (apply_edits keeps the first of two that do: a
+    fix left out of its group's code would be proven by nothing). Sorted by where they begin, each goes
+    into the first group whose edits so far end before it, per part: no fix is compared with every other."""
+    groups = []  # [[fixes], {part key: where its last edit ends}]
+    for fix in sorted(fixes, key=lambda f: min([(e.key, e.start) for e in f.edits] or [("", 0)])):
+        for group in groups:
+            if all(group[1].get(e.key, -1) <= e.start for e in fix.edits):
+                break
+        else:
+            group = [[], {}]
+            groups.append(group)
+        group[0].append(fix)
+        for e in fix.edits:
+            group[1][e.key] = max(group[1].get(e.key, -1), e.end)
+    return [g[0] for g in groups]
+
+
+def prove_fixes(report, glyph_order, progress=None):
+    """Sets each fix's safe: True where the code with it compiles to the same layout as without it. A fix
+    that would make the code fail to compile is withdrawn. Nothing is proven while part of the code is set
+    aside for an error: the code built then lacks what a fix may change for it (a CJK font's aalt was set
+    aside, and the repeats its "sub @aalt by @aalt2;" needs were taken out as "safe", live, 2026-11-17;
+    classes defined inside features and compact definitions defeated a finer guard, review 11). Fixes of
+    BATCH_KINDS are proven together, a group that is not the same split in halves (a CJK font's 688 took
+    one build each, 15 minutes in FontLab); every other fix alone."""
     lib = fealib()
     fixes = [f.fix for f in report.findings if f.fix is not None]
     if lib is None or not fixes:
@@ -1477,23 +1747,59 @@ def prove_fixes(report, glyph_order):
         return fixes
     order = list(report.order or glyph_order)
     base = report.provable
+    built = getattr(report, "buildable", None) or report.code
+    owners = dict((id(f.fix), f) for f in report.findings if f.fix is not None)
+    for fix in fixes:
+        fix.safe = None
+    report.proven = True
+    if base is None or set_aside(report, base):
+        return fixes
+    cache = base_cache(report, base)
+    if compiled(lib, base, order, cache) is None:
+        return fixes
+    base_key = base.text()[0]
+    batched, single = {}, []
     for finding in report.findings:
         fix = finding.fix
-        if fix is None:
+        if fix is None or fix.review or not fix_applies(base, built, fix):
             continue
-        fix.safe = None
-        if base is None or not fix_applies(base, getattr(report, "buildable", None) or report.code, fix):
-            continue  # (its part does not compile: nothing to compare it with)
-        cache = base_cache(report, base)
-        fixed = apply_fixes(base, [fix])
-        if compiled(lib, base, order, cache) is not None and compiled(lib, fixed, order, cache) is None:
+        if finding.kind in BATCH_KINDS:
+            batched.setdefault(finding.kind, []).append(fix)
+        else:
+            single.append([fix])
+    pending = []
+    for kind in sorted(batched):
+        pending.extend(disjoint_groups(batched[kind]))
+    pending.extend(single)
+    total, done = sum(len(g) for g in pending), 0
+
+    def withdraw(fix):
+        finding = owners.get(id(fix))
+        if finding is not None:
             # A fix that would not compile is no fix (a class's repeats that pair its glyphs with
             # another class's, in order): the finding stays, without one
             finding.fix = None
             finding.message += " (no fix: taking it out would break the code)"
+
+    while pending:
+        group = pending.pop(0)
+        step(progress, "Proving the fixes", done, total)
+        fixed = apply_fixes(base, group)
+        builds = compiled(lib, fixed, order, cache) is not None
+        result = same_layout(lib, base, fixed, order, cache) if builds else None
+        if fixed.text()[0] != base_key:
+            cache.pop(fixed.text()[0], None)  # (each variant built once and dropped: the base alone is kept)
+        if not builds and len(group) == 1:
+            withdraw(group[0])
+            done += 1
             continue
-        fix.safe = same_layout(lib, base, fixed, order, cache)
-    report.proven = True
+        if builds and (result is None or result or len(group) == 1):
+            for fix in group:
+                fix.safe = result  # (None: too large to compare, and halves would be too)
+            done += len(group)
+            continue
+        half = len(group) // 2
+        pending[:0] = [group[:half], group[half:]]
     return [f.fix for f in report.findings if f.fix is not None]
 
 
@@ -1517,12 +1823,13 @@ def fix_applies(base, code, fix):
     return all(base.part(key) is not None and base.part(key) == code.part(key) for key in keys)
 
 
-def safe_fixes(report, glyph_order):
-    """The fixes the automatic option applies: of AUTO_KINDS, each proven alone, then all together
-    proven again (dropped one by one from the end until the whole set is)."""
-    prove_fixes(report, glyph_order)
+def safe_fixes(report, glyph_order, progress=None):
+    """The fixes the automatic option applies: of AUTO_KINDS, each proven, then all together proven
+    again (dropped one by one from the end until the whole set is)."""
+    prove_fixes(report, glyph_order, progress)
+    step(progress, "Proving the fixes together")
     chosen = [f.fix for f in report.findings if f.fix is not None and f.fix.safe and f.kind in AUTO_KINDS
-              and not f.automatic]
+              and not f.automatic and not f.fix.review]
     lib = fealib()
     base = report.provable
     while chosen and base is not None:
@@ -1615,15 +1922,22 @@ FEATURE_CODE_FILE, FEATURE_CODE_MODULE = "freelab_feature_code.py", "freelab_fea
 COLUMNS = ("Finding", "Where", "Fix")
 SAFE_NOTE = "changes nothing in the compiled font"
 UNSAFE_NOTE = "changes the compiled font: review it"
-UNPROVEN_NOTE = "not proven: the code around it does not compile"
+UNPROVEN_NOTE = "not proven: part of the code does not compile; mend the errors first"
+REVIEW_NOTE = "changes what the font does: review it"
+REPAIR_NOTE = "mends code that does not compile: review it"
+# Where each step of a check starts on the bar (the window's top row), and its share of it
+STEPS = {"Reading the code": (0.0, 0.3), "Looking through the code": (0.3, 0.05), "Compiling": (0.35, 0.15),
+         "Proving the fixes": (0.5, 0.45), "Proving the fixes together": (0.95, 0.05)}
 TITLE = "FreeLab Feature Check"
 
 HELP = """<b>FreeLab Feature Check</b><br>
 Checks the current font's feature code, whatever made it: what stops it from compiling (syntax errors,
 glyphs the font lacks, rules the compiler refuses, tables too large), what probably does not do what was
 meant (a language no <code>languagesystem</code> line declares, no default language system, empty
-classes, a glyph given two ways in one lookup), and what does nothing (rules written twice, a glyph
-substituted by itself, classes and lookups never used, empty lookups and features).<br><br>
+classes, a class defined twice with other glyphs, a glyph given two ways in one lookup), and what does
+nothing (rules written twice, a glyph substituted by itself, classes defined twice the same, classes and
+lookups never used, empty lookups and features). A fix that changes what the font does (a lookup flag
+FontLab wrote without its class, taken out) is offered for review, never applied automatically.<br><br>
 Findings are grouped by kind, errors first; select one to see its code under the list, its line
 selected. A finding with a fix has a check box: check the fixes you want, then <i>Apply checked
 fixes</i> (one step of FontLab's History: <i>Edit &gt; Undo</i> takes it back). Each fix is tried first,
@@ -1712,6 +2026,10 @@ def fix_note(fix):
     """The Fix column's text: what it does, and whether it was proven."""
     if fix is None:
         return ""
+    if getattr(fix, "repair", False):
+        return "%s (%s)" % (fix.what, REPAIR_NOTE)
+    if getattr(fix, "review", False):
+        return "%s (%s)" % (fix.what, REVIEW_NOTE)
     if fix.safe is True:
         return "%s (%s)" % (fix.what, SAFE_NOTE)
     if fix.safe is False:
@@ -1898,12 +2216,23 @@ class FeatureCheckDialog(object):
     # -- checking --------------------------------------------------------------
 
     def set_busy(self, on, what=""):
-        QtCore, QtGui = _qt()
+        """The check under way (or over): its steps in the window's top row (ak.busy_start), the buttons
+        grayed; the tools menu, the arrows, and Close stop it, then do what was clicked."""
         self.busy = on
         if on:
-            self.status.setText("%s\N{HORIZONTAL ELLIPSIS}" % what)
-            QtGui.QApplication.processEvents()
+            self.status.setText("")
+            self.ak.busy_start(self, what)
+        else:
+            self.ak.busy_end(self)
         self.update_buttons()
+
+    def progress(self, what, done=0, total=1):
+        """The check at a step (STEPS), done of total within it: the bar in the top row moved, the window
+        redrawn. Raises Stopped when the user asked it to stop."""
+        first, width = STEPS.get(what, (0.0, 0.0))
+        share = float(done) / total if total else 0.0
+        self.ak.busy_progress(self, "%s" % what + (" (%d of %d)" % (done, total) if total > 1 else ""),
+                              first + width * min(1.0, share))
 
     def run(self, automatic=True):
         """Checks the font's code; with the automatic option (and automatic), applies the safe fixes and
@@ -1922,13 +2251,17 @@ class FeatureCheckDialog(object):
         code = font_code(self.package)
         self.set_busy(True, "Checking the feature code")
         try:
-            report = check(code, self.order)
-            prove_fixes(report, self.order)
+            report = check(code, self.order, self.progress)
+            prove_fixes(report, self.order, self.progress)
             if automatic and self.auto_box.checked and report.provable is not None:
-                chosen = safe_fixes(report, self.order)
+                chosen = safe_fixes(report, self.order, self.progress)
                 if chosen and self.write(report.code, apply_fixes(report.code, chosen), chosen, automatic=True):
-                    report = check(font_code(self.package), self.order)
-                    prove_fixes(report, self.order)
+                    report = check(font_code(self.package), self.order, self.progress)
+                    prove_fixes(report, self.order, self.progress)
+        except self.ak.Stopped:
+            self.set_busy(False)
+            self.status.setText("The check was stopped. Click Check to check again.")
+            return
         except Exception as exc:
             self.set_busy(False)
             self.log.add("The check stopped on an error: %s" % self.ak.html("%s" % exc), "error")

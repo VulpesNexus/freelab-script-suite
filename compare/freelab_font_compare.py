@@ -32,17 +32,16 @@ THRESHOLD = 1  # units: metrics, anchors, nodes, components, and kerning differi
 SHAPE_SHARE = 0.002  # outlines differ when their symmetric difference passes this share of the ink
 SHAPE_ROWS = 160  # scan lines across a glyph's height, measuring its area
 CURVE_STEPS = 8  # straight pieces per curve, measuring its area
-PROGRESS_EVERY = 100  # glyphs between two moves of the progress bar
-# A comparison's steps, with the share of the progress bar at the end of each (the owner: "the comparing
-# step could potentially get its own loading bar, since CJK fonts can take a bit to load")
+PROGRESS_EVERY = 25  # glyphs between two moves of the progress bar (it lets events through at most every 0.1 s)
+# A comparison's steps, with the share of the progress bar (the window's top row: ak.busy_start) at the end of
+# each (the owner: "the comparing step could potentially get its own loading bar, since CJK fonts can take a
+# bit to load")
 READ_A_STEP, READ_B_STEP, GLYPHS_STEP, KERNING_STEP, FEATURES_STEP, LIST_STEP = (
     u"Reading the first font's glyphs", u"Reading the second font's glyphs", u"Comparing the glyphs",
     u"Comparing the kerning", u"Comparing the features", u"Listing the differences")
 COMPARE_STEPS = ((READ_A_STEP, 0.04), (READ_B_STEP, 0.08), (GLYPHS_STEP, 0.85), (KERNING_STEP, 0.95),
                  (FEATURES_STEP, 0.98), (LIST_STEP, 1.0))
 SHOW_AFTER = 0.3  # seconds: a comparison shows the bar only once it has taken this long (a small font never flickers)
-PUMP_SECONDS = 0.05  # the window redrawn at most this often during a comparison
-BAR_RANGE = 1000
 OPEN_SETTLE_MS = 400  # a font just opened: FontLab activates its window as it lists it; this window comes back after
 OPEN_LATE_MS = 1500  # ... and once more this long after the comparison
 DIFF_CONTEXT = 3  # unchanged lines shown around each change of a feature's code
@@ -1150,7 +1149,8 @@ changes.<br><br>
 The first is this window's font (<i>Compare</i> lists its masters). Choose the second in <i>with</i>:
 another open font, another master of the first, or <i>Open a font\N{HORIZONTAL ELLIPSIS}</i> for a font
 file; then click <i>Compare</i>. A font opened from there, or from the fonts installed on Windows listed
-under it, is compared at once. A progress bar shows how far a comparison is.
+under it, is compared at once. A long comparison shows how far it is in the window's top row; the tools
+menu, the arrows, <i>Close</i>, and Esc stop it (the lists keep the comparison before it).
 Differences of at most the units set are left out (metrics, anchors, nodes, components, kerning).
 A font of another em is scaled to the first one's.<br><br>
 <b>Glyphs</b>: a chip per kind of difference, each showing or hiding that kind in the list (a glyph
@@ -1179,12 +1179,6 @@ CHIP_SHEET = (u"QToolButton { background: transparent; color: rgba(128, 128, 128
 # over either palette, set on each chip (never on the dialog, whose fields dark mode then maps) and
 # left alone by dark mode, as Auto Kerning's TAB_SHEET is. Windows' own style drew a checked tool
 # button light whatever the palette: mapped, it came out garbled, white in dark mode.
-
-BAR_GREEN = ((120, 200, 120), (30, 120, 40))  # ak.LOG_COLORS["done"], should the shared module not have it
-# On the bar itself, never on the dialog: a thin bar, its chunk in the suite's "done" green (Font Check's)
-BAR_SHEET = (u"QProgressBar { border: 1px solid rgba(128, 128, 128, 140); border-radius: 3px; "
-             u"background: transparent; min-height: 10px; max-height: 10px; } "
-             u"QProgressBar::chunk { background-color: rgb(%d, %d, %d); border-radius: 2px; }")
 
 GRAY = (128, 128, 128)
 LINE_ALPHA = 128  # the lists' lines: a mid gray at half strength
@@ -1463,36 +1457,8 @@ class CompareDialog(object):
         settings.addWidget(self.compare_button)
         settings.addStretch(1)
         layout.addLayout(settings)
-        # A progress bar under the choices while a comparison runs (Font Check's and CJK Vertical's): the step's
-        # name beside it, its chunk in the log's "done" green, left alone by dark mode; hidden otherwise
-        self.busy_row = QtGui.QWidget()
-        busy_layout = QtGui.QHBoxLayout(self.busy_row)
-        busy_layout.setContentsMargins(0, 2, 0, 2)
-        self.busy_step = QtGui.QLabel(u"")
-        self.busy_bar = QtGui.QProgressBar()
-        try:
-            self.busy_bar.setRange(0, BAR_RANGE)
-            self.busy_bar.setValue(0)
-            self.busy_bar.setTextVisible(False)  # (the step's name stands beside it)
-            self.busy_bar.setProperty(ak.LEAVE_ALONE_PROP, True)
-        except Exception:
-            pass
-        try:  # (room for the longest step's name: the bar's left edge stays put from one step to the next)
-            longest = max([label for label, _ in COMPARE_STEPS], key=len)
-            self.busy_step.setMinimumWidth(int(QtGui.QFontMetrics(_prop(self.busy_step, "font")).width(
-                u"%s\N{HORIZONTAL ELLIPSIS}" % longest)) + 8)
-        except Exception:
-            pass
-        busy_help = (u"How far the comparison is: reading each font's glyphs, comparing the glyphs, the kerning, and "
-                     u"the features, then listing the differences. The window waits for it; it goes away when the "
-                     u"lists are shown.")
-        self.busy_bar.setWhatsThis(busy_help)
-        self.busy_step.setWhatsThis(u"The step the comparison is at: reading each font's glyphs, comparing the "
-                                    u"glyphs, the kerning, or the features, or listing the differences.")
-        busy_layout.addWidget(self.busy_step)
-        busy_layout.addWidget(self.busy_bar, 1)
-        self.busy_row.setVisible(False)
-        layout.addWidget(self.busy_row)
+        # (a comparison's progress shows in the window's top row, ak.busy_start: owner's image 200, the bar that
+        # stood under the choices took a line of its own)
         self.log = ak.Log()
         # A tab bar over plain pages, as in Font Check: a QTabWidget's page drew light frames in dark mode
         self.tabs = QtGui.QTabBar()
@@ -1518,6 +1484,10 @@ class CompareDialog(object):
         buttons.addWidget(self.close_button)
         layout.addLayout(buttons)
         self.close_button.connect("clicked()", self.ak.close_slot(self))  # (never the window itself: see let_go)
+        # What chooses the fonts stays usable with no comparison to make (ak.no_font_states grays the rest
+        # while has_font says no: owner's image 209); update_buttons still grays the second without a first
+        for box in (self.choice_a, self.choice_b):
+            box.setProperty(getattr(ak, "WITHOUT_FONT_PROP", "freelabWithoutFont"), True)
         self.compare_button.connect("clicked()", self.compare)
         self.swap_button.connect("clicked()", self.swap)
         self.choice_slots = [lambda index: self.choice_changed(), lambda index: self.second_activated(index)]
@@ -2244,31 +2214,40 @@ class CompareDialog(object):
 
     # -- long work -----------------------------------------------------------
 
-    busy_shown, busy_since, busy_now, pumped, pump_refused = False, 0.0, None, 0.0, False
+    busy_shown, busy_since = False, 0.0
+
+    def has_font(self):
+        """Whether a comparison can be made (ak.window_has_font): this window's font and a second side
+        chosen, nothing missing. Without one, the shared module grays the controls but those that choose
+        the fonts (owner's image 209). Never raises."""
+        try:
+            return self.first_key() is not None and self.second_key is not None and not self.missing()
+        except Exception:
+            return True
 
     def busy_widgets(self):
-        """What is grayed while a comparison runs (Close is not: a click waits for it, then closes)."""
+        """What is grayed while a comparison runs (Close is not: a click stops it, then closes)."""
         return [getattr(self, name, None) for name in ("choice_a", "choice_b", "swap_button", "threshold",
                                                        "compare_button", "tabs", "pages")]
 
     def set_busy(self, on):
         """A comparison begun or over. While busy, the History watchers, dark mode, the dropdowns' reading,
-        and the window's release wait. The bar and the grayed controls show once the comparison has taken
-        SHOW_AFTER (progress). Never raises."""
+        and the window's release wait. The top row's bar and the grayed controls show once the comparison
+        has taken SHOW_AFTER (progress). Never raises."""
         self.busy = bool(on)
-        self.busy_since, self.busy_now, self.pumped = time.time(), None, 0.0
+        self.busy_since = time.time()
         if on or not self.busy_shown:
             return
         self.busy_shown = False
+        self.ak.busy_end(self)  # (and what was clicked meanwhile done: a tool, an arrow, Close)
         try:
-            self.busy_row.setVisible(False)
             for widget in (self.choice_a, self.tabs, self.pages):  # (the others as the choices want them: update_buttons)
                 self.ak.enable(widget, True)
         except Exception:
             pass
 
-    def show_busy(self):
-        """The bar shown and the controls grayed, painted at once."""
+    def show_busy(self, label):
+        """The top row's bar shown (its step, label) and the controls grayed."""
         if self.busy_shown:
             return
         self.busy_shown = True
@@ -2276,70 +2255,22 @@ class CompareDialog(object):
             for widget in self.busy_widgets():
                 if widget is not None:
                     self.ak.enable(widget, False)
-            self.busy_bar.setStyleSheet(self.bar_sheet())  # (the palette may have changed since)
-            self.busy_bar.setValue(0)
-            self.busy_row.setVisible(True)
         except Exception:
             pass
-        self.pump(force=True)
+        self.ak.busy_start(self, label)
 
-    def bar_sheet(self):
-        """The bar's own stylesheet: its chunk in the log's "done" green, the one that reads on the window."""
-        rgb = BAR_GREEN[1]
-        try:
-            QtCore, QtGui = _qt()
-            pair = self.ak.LOG_COLORS["done"]
-            dark = _prop(self.dialog, "palette").color(QtGui.QPalette.Window).lightness() < 128
-            rgb = tuple(int(value) for value in (pair[0] if dark is True else pair[1]))
-        except Exception:
-            pass
-        return BAR_SHEET % rgb
-
-    def progress(self, label, part=0.0):
-        """The comparison at this part (0 to 1) of the step of that label (COMPARE_STEPS): the bar moved and
-        the window redrawn (at most every PUMP_SECONDS within a step), the user's clicks and keys left
-        waiting until it is over. Never raises."""
+    def progress(self, label, part=0.0, stoppable=True):
+        """The comparison at this part (0 to 1) of the step of that label (COMPARE_STEPS), in the window's top
+        row once it has taken SHOW_AFTER (ak.busy_progress: the window redrawn, the user's clicks and keys
+        held but the tools menu's, the arrows', Close's, and Esc, which stop it). Raises ak.Stopped when the
+        user asked it to stop, unless stoppable is False."""
         value = bar_value(COMPARE_STEPS, label, part)
         if value is None or not self.busy:
             return
         if not self.busy_shown and time.time() - self.busy_since >= SHOW_AFTER:
-            self.show_busy()
-        if not self.busy_shown:
-            return
-        moved = label != self.busy_now
-        try:
-            if moved:
-                self.busy_now = label
-                self.busy_step.setText(u"%s\N{HORIZONTAL ELLIPSIS}" % label)
-            self.busy_bar.setValue(int(round(value * BAR_RANGE)))
-        except Exception:
-            pass
-        self.pump(force=moved)
-
-    def pump(self, force=False):
-        """The window redrawn, nothing else let through: no click may change the choices halfway. Where Qt
-        will not take the flag that holds input back (or has none), the bar and its step are painted alone,
-        as Font Check paints its own: the user's input is never let through halfway. Never raises."""
-        now = time.time()
-        if not force and now - self.pumped < PUMP_SECONDS:
-            return
-        self.pumped = now
-        try:
-            QtCore, QtGui = _qt()
-            flag = getattr(getattr(QtCore, "QEventLoop", None), "ExcludeUserInputEvents", None)
-        except Exception:
-            flag = None
-        if flag is not None and not self.pump_refused:
-            try:
-                QtGui.QApplication.processEvents(flag)
-                return
-            except Exception:
-                self.pump_refused = True  # (not tried again: the bar painted alone from now on)
-        for widget in (self.busy_row, self.busy_step, self.busy_bar):
-            try:
-                widget.repaint()
-            except Exception:
-                pass
+            self.show_busy(label)
+        if self.busy_shown:
+            self.ak.busy_progress(self, label, value, stoppable=stoppable)
 
     # -- comparing -----------------------------------------------------------
 
@@ -2444,14 +2375,44 @@ class CompareDialog(object):
             return
         self.set_busy(True)
         ak.enable(self.compare_button, False)
+        before = self.compared_state()
         try:
             self.run(a, b)
+        except ak.Stopped:  # (by the user: the comparison shown before stays, as it was)
+            self.put_back_state(before)
+            self.log.add(u"The comparison was stopped: the lists show the one before it.", "warning")
         except Exception as exc:
             self.font_label.setText(u"The comparison stopped: see the log.")
             self.log.add(ak.html(exc), "error")
         finally:
             self.set_busy(False)
         self.update_buttons()
+
+    STATE_NAMES = ("sides", "masters_mode", "results", "kern_rows", "feature_rows", "rename", "package", "seen_history")
+
+    def compared_state(self):
+        """What a comparison changes before it lists anything (put_back_state)."""
+        state = dict((name, getattr(self, name, None)) for name in self.STATE_NAMES)
+        state["second"] = (self.second.package, self.second.seen_history)
+        try:
+            state["line"] = u"%s" % (_prop(self.font_label, "text") or u"")
+        except Exception:
+            state["line"] = None
+        return state
+
+    def put_back_state(self, state):
+        """A comparison stopped before its lists were filled: what it changed put back, so the lists, the
+        top line, and the History's watchers stay with the comparison they show. Never raises."""
+        try:
+            for name in self.STATE_NAMES:
+                setattr(self, name, state[name])
+            self.second.package, self.second.seen_history = state["second"]
+            if state["line"] is not None:
+                self.font_label.setText(state["line"])
+            else:
+                self.say_state()
+        except Exception:
+            pass
 
     def run(self, a, b):
         ak, b_ = self.ak, self.ak.b
@@ -2550,12 +2511,12 @@ class CompareDialog(object):
             noted.add(side.package.tfn)
             if note:
                 self.log.add(note)
-        self.progress(LIST_STEP)
+        self.progress(LIST_STEP)  # (the last chance to stop: the lists are filled from here on)
         self.fill_chips()
         self.fill_glyphs()
         self.fill_kerning()
         self.fill_features()
-        self.progress(LIST_STEP, 1.0)
+        self.progress(LIST_STEP, 1.0, stoppable=False)
 
     def font_changed(self):
         """This window's font was closed, or a font opened for this window without one (fonts_tick): the
@@ -2719,7 +2680,7 @@ class CompareDialog(object):
         rows = self.glyph_names = found[:ROWS_SHOWN]
         opened = self.open_numbers()  # (once per filling: path_of reads a font only while it is open)
         self.filling = True
-        tree.setUpdatesEnabled(False)
+        self.ak.quiet_list(tree, True)
         try:
             tree.clear()
             for index, r in enumerate(rows):
@@ -2730,7 +2691,7 @@ class CompareDialog(object):
                 tree.addTopLevelItem(item)
             self.fit_columns(tree, (COLUMN_MAX,))
         finally:
-            tree.setUpdatesEnabled(True)
+            self.ak.quiet_list(tree, False)
             self.filling = False
         changed = len(self.results)
         if self.results:
@@ -2823,7 +2784,7 @@ class CompareDialog(object):
         except Exception:
             pass
         self.filling = True
-        tree.setUpdatesEnabled(False)
+        self.ak.quiet_list(tree, True)
         try:
             tree.clear()
             for index, d in enumerate(rows):
@@ -2837,7 +2798,7 @@ class CompareDialog(object):
             self.ak.align_numbers(tree, (1, 2, 3))
             self.fit_columns(tree, (COLUMN_MAX, None, None, None))
         finally:
-            tree.setUpdatesEnabled(True)
+            self.ak.quiet_list(tree, False)
             self.filling = False
         counts_ = kern_counts(self.kern_rows)
         listed = sum(n for kind, n in counts_.items() if kind != "absent")

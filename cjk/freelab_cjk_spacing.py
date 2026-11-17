@@ -71,6 +71,41 @@ CODE_PAGE_HINTS = {17: "ja", 18: "zh-hans", 19: "ko", 20: "zh-hant", 21: "ko"}
 MIN_SAMPLE_SHARE = 0.5  # a sample the font covers less than this share of is never picked for a hint
 HANGUL_SYLLABLES, KANA = (0xAC00, 0xD7A3), (0x3041, 0x30FF)
 
+# The long steps, named in the window's top row while they run (ak.busy_start: owner's image 179, no bar
+# while listing; 183, none while writing), each with the share of the bar at which it ends
+READ_STEP, HANGUL_STEP, LIST_STEP, PREVIEW_STEP = (u"Reading the font", u"Measuring Hangul", u"Listing",
+                                                   u"Drawing the previews")
+LIST_STEPS = ((READ_STEP, 0.55), (HANGUL_STEP, 0.75), (LIST_STEP, 0.95), (PREVIEW_STEP, 1.0))
+UNDO_STEP, CODE_STEP, WIDTHS_STEP, UPDATE_STEP, COMPILE_STEP = (u"Opening an undo step", u"Writing the code",
+                                                                u"Setting Hangul widths", u"Updating the font",
+                                                                u"Compiling")
+WRITE_STEPS = ((UNDO_STEP, 0.05), (CODE_STEP, 0.15), (WIDTHS_STEP, 0.8), (UPDATE_STEP, 0.9), (COMPILE_STEP, 1.0))
+PUMP_EVERY = 50  # glyphs read between two calls to the progress (it lets events through at most every 0.1 s)
+LIST_AGAIN = u"freelab:list-again"  # the status line's link once a listing was stopped
+
+
+def bar_share(steps, label, part=0.0):
+    """How far the bar is, 0 to 1, at this part (0 to 1) of the step of that label; None for a step that is
+    not one of these steps."""
+    start = 0.0
+    for name, end in steps:
+        if name == label:
+            return start + (end - start) * min(max(float(part), 0.0), 1.0)
+        start = end
+    return None
+
+
+def compile_on(writable, code):
+    """Whether Compile after writing is clickable: only with the write button (owner's image 195), and only
+    when the write would change feature code (code) for the compile to read."""
+    return bool(writable and code)
+
+
+def stopped_line(what=u"Listing"):
+    """The status line once the user stopped the work (the top row's Esc, Close, a tool, an arrow): nothing is
+    listed, and a link lists it again (the window has no button of its own for it)."""
+    return u'%s was stopped: nothing is listed. <a href="%s">List again</a>' % (what, LIST_AGAIN)
+
 
 def sample_share(index, codes):
     """The share of the sample's characters the font has."""
@@ -781,6 +816,7 @@ class CJKSpacingDialog(object):
         layout = QtGui.QVBoxLayout(dialog)
         self.status = ak.status_label()
         self.status.setWordWrap(True)
+        self.status.connect("linkActivated(QString)", self.status_link)  # (List again, once a listing was stopped)
         layout.addWidget(self.status)
         layout.addWidget(ak.separator())
         self.log = ak.Log()
@@ -956,7 +992,65 @@ class CJKSpacingDialog(object):
             return None
         return package
 
+    def step(self, steps, label, part=0.0, stoppable=True):
+        """The work at this part (0 to 1) of the step of that label, in the window's top row (ak.busy_progress:
+        events let through, the user's Stop asked raises ak.Stopped where stoppable)."""
+        self.ak.busy_progress(self, label, bar_share(steps, label, part), stoppable=stoppable)
+
     def run(self):
+        """The list read again for this window's font, under the window's top-row progress (owner's image
+        179: none while listing), stoppable: the list then left empty, the status line's link lists it
+        again."""
+        if self.busy:
+            return
+        self.busy = True
+        # (the previews' pictures hidden while the font is read: the window repaints meanwhile, and the old
+        # pictures, laid out for the list's height before it was filled, were drawn over each other and the
+        # log, live)
+        self.previews_shown(False)
+        self.ak.busy_start(self, READ_STEP)
+        try:
+            self.read_font()
+        except self.ak.Stopped:
+            self.listing_stopped()
+        finally:
+            self.ak.busy_end(self)
+            self.busy = False
+            self.previews_shown(self.package is not None)
+        self.update_buttons()
+
+    def previews_shown(self, on):
+        widgets = list(getattr(self, "preview_captions", []))
+        for entry in getattr(self, "previews", []):  # ((picture label, caption) pairs)
+            widgets.extend(entry if isinstance(entry, (list, tuple)) else [entry])
+        for widget in widgets:
+            try:
+                widget.setVisible(bool(on))
+            except Exception:
+                pass
+
+    def listing_stopped(self, what=u"Listing"):
+        """The work stopped by the user: nothing listed (a list half read would offer half the trims), the
+        status line saying so, with a link to list again; the History seen (not read again for it)."""
+        self.tree.blockSignals(True)
+        self.tree.clear()
+        self.tree.blockSignals(False)
+        self.trims, self.hangul, self.first_checks = [], [], []
+        self.status.setText(stopped_line(what))
+        self.seen_history = self.ak.history_mark(self.package)
+
+    def status_link(self, target):
+        """A link of the status line clicked: List again (a listing stopped)."""
+        try:
+            if u"%s" % target == LIST_AGAIN:
+                self.run()
+        except Exception as exc:  # (a slot must never raise)
+            try:
+                self.log.add(self.ak.html(exc), "error")
+            except Exception:
+                pass
+
+    def read_font(self):
         QtCore, QtGui = _qt()
         ak = self.ak
         kept = dict((t.name, t.checked) for t in self.trims)
@@ -977,7 +1071,10 @@ class CJKSpacingDialog(object):
         master = package.master
         glyphs, hangul = [], 0
         self.hangul_glyphs = []
-        for fg in package.fgPackage.glyphs:
+        every = list(package.fgPackage.glyphs)
+        for number, fg in enumerate(every):
+            if number % PUMP_EVERY == 0:
+                self.step(LIST_STEPS, READ_STEP, number / float(len(every)))
             codes = self.ak.glyph_codes(fg)  # (the one of its code points that is a kind: not a radical it is encoded at too)
             code = next((c for c in codes if kind_of(c)), codes[0] if codes else None)
             kind = kind_of(code) if code else None
@@ -1011,11 +1108,12 @@ class CJKSpacingDialog(object):
             self.sample_box.setCurrentIndex(index)
             self.sample.setText(SAMPLES[index][2])
         self.note_font(package)
-        self.hangul_box.setEnabled(bool(hangul))
+        self.ak.enable(self.hangul_box, bool(hangul))
         self.hangul = []
         if hangul and HANGUL_MODES[self.hangul_box.currentIndex][0] != "leave":
-            self.measure_hangul()
-        self.fill()
+            self.measure_hangul(progress=lambda part: self.step(LIST_STEPS, HANGUL_STEP, part))
+        self.step(LIST_STEPS, LIST_STEP)
+        self.fill(lambda part: self.step(LIST_STEPS, LIST_STEP, part))
         self.first_checks = [True for _ in self.trims]
         self.update_buttons()  # (fill compared the checks with the last font's)
         b = ak.b
@@ -1032,6 +1130,7 @@ class CJKSpacingDialog(object):
                                     b(sum(1 for t in self.trims if t.palt)), b(sum(1 for t in self.trims if t.halt)),
                                     ak.i(self.write_button.text), korean))
         self.seen_history = ak.history_mark(package)
+        self.step(LIST_STEPS, PREVIEW_STEP)
         self.draw_previews()
 
     # -- Hangul -----------------------------------------------------------------------
@@ -1039,15 +1138,17 @@ class CJKSpacingDialog(object):
     def hangul_mode(self):
         return HANGUL_MODES[self.hangul_box.currentIndex][0]
 
-    def measure_hangul(self, master=None):
-        """The changes the chosen Hangul mode makes to the master's syllables (and the width it sets)."""
-        QtCore, QtGui = _qt()
+    def measure_hangul(self, master=None, progress=None):
+        """The changes the chosen Hangul mode makes to the master's syllables (and the width it sets).
+        progress(part), where given, every PUMP_EVERY syllables (the top row's: it may raise ak.Stopped)."""
         package = self.package
         master = master or package.master
         mode = self.hangul_mode()
         upm = float(package.upm)
         measured = []
         for count, (code, name) in enumerate(self.hangul_glyphs):
+            if progress is not None and count % PUMP_EVERY == 0:
+                progress(count / float(len(self.hangul_glyphs)))
             glyph = package.findName(name)
             layer = glyph.getLayerByName(master) if glyph is not None else None
             if layer is None:
@@ -1055,10 +1156,6 @@ class CJKSpacingDialog(object):
             box = layer.boundingBox
             if box.width() > 0:
                 measured.append((code, name, layer.advanceWidth, box.left(), box.right()))
-            if count % 1000 == 999:
-                self.status.setText(u"Measuring Hangul: %s of %s\N{HORIZONTAL ELLIPSIS}" % (
-                    self.ak.b(count + 1), self.ak.b(len(self.hangul_glyphs))))
-                QtGui.QApplication.processEvents()
         widths = sorted(set(int(round(m[2])) for m in measured))
         width = None
         if mode == "fixed":
@@ -1072,11 +1169,29 @@ class CJKSpacingDialog(object):
         return changes
 
     def plan_hangul(self):
-        if self.package is None:
+        """The Hangul setting changed: the syllables measured for it (a Korean font's 11,172 take a while: under
+        the window's top-row progress, stoppable, the setting then put back to leaving them)."""
+        if self.package is None or self.busy:
             return
         self.hangul = []
         if self.hangul_glyphs and self.hangul_mode() != "leave":
-            self.measure_hangul()
+            self.busy = True
+            self.ak.busy_start(self, HANGUL_STEP)
+            try:
+                self.measure_hangul(progress=lambda part: self.ak.busy_progress(self, None, part))
+            except self.ak.Stopped:
+                self.hangul = []
+                self.hangul_box.blockSignals(True)
+                self.hangul_box.setCurrentIndex(0)  # (leave as they are: what the list shows)
+                self.hangul_box.blockSignals(False)
+                self.log.add(u"Measuring Hangul was stopped: the syllables are left as they are.", "warning")
+            finally:
+                self.ak.busy_end(self)
+                self.busy = False
+            if self.hangul_mode() == "leave":
+                self.fill()
+                self.draw_previews()
+                return
             self.log.add(u"Hangul, %s: %s would change%s." % (
                 self.ak.html(HANGUL_MODES[self.hangul_box.currentIndex][1].lower()),
                 self.ak.b(counted(len(self.hangul), u"syllable")),
@@ -1094,10 +1209,20 @@ class CJKSpacingDialog(object):
             self.log.add(u"Could not show the change: %s" % self.ak.html(exc), "error")
         self.update_buttons()
 
-    def fill(self):
+    def fill(self, progress=None):
+        """The list made from the trims (and the Hangul rows); progress(part), where given, every PUMP_EVERY
+        rows (each draws its glyph: the top row's progress, it may raise ak.Stopped)."""
         QtCore, QtGui = _qt()
         self.tree.blockSignals(True)
+        try:
+            self.fill_rows(QtCore, QtGui, progress)
+        finally:
+            self.tree.blockSignals(False)
+        self.update_buttons()
+
+    def fill_rows(self, QtCore, QtGui, progress):
         self.tree.clear()
+        listed = 0
         bold = QtGui.QFont(self.tree.font)
         bold.setBold(True)
         palt_on, halt_on = self.palt_box.checked, self.halt_box.checked
@@ -1119,6 +1244,9 @@ class CJKSpacingDialog(object):
             top.setFirstColumnSpanned(True)
             self.ak.section_row(top, self.tree)
             for index, t in members:
+                if progress is not None and listed % PUMP_EVERY == 0:
+                    progress(listed / float(len(self.trims)))
+                listed += 1
                 item = QtGui.QTreeWidgetItem([t.char, t.name, u"%d" % t.advance,
                                               u"%+d, %+d" % t.palt if t.palt else u"\N{EN DASH}",
                                               u"%d" % t.width_after(),
@@ -1163,8 +1291,6 @@ class CJKSpacingDialog(object):
             top.setExpanded(True)
         for column in range(len(self.COLUMNS)):
             self.tree.resizeColumnToContents(column)
-        self.tree.blockSignals(False)
-        self.update_buttons()
 
     def items(self):
         found = []
@@ -1221,7 +1347,11 @@ class CJKSpacingDialog(object):
         self.write_button.setText(u"%s and Hangul widths" % what if what and widths else what or
                                   (u"Set Hangul widths" if widths else u"Write the code"))
         problem = feature_code_problem(u"CJK Spacing")
-        ak.enable(self.write_button, (changes or widths) and not problem)
+        writable = bool((changes or widths) and not problem)
+        ak.enable(self.write_button, writable)
+        # Compile after writing, grayed with the button (owner's image 195: checked and clickable beside a
+        # grayed Write the code), and while only Hangul widths would be set: no code to compile
+        ak.enable(self.compile_box, compile_on(writable, changes))
         if problem and problem != getattr(self, "problem_said", None):
             self.log.add(self.ak.html(problem), "error")  # (once, while it lasts)
         self.problem_said = problem
@@ -1245,12 +1375,13 @@ class CJKSpacingDialog(object):
     def show_font_parts(self, on):
         """With no font open, what has nothing to act on is hidden (the sample and its previews) or
         grayed out (the features to write, the Hangul setting, compiling)."""
-        for widget in [self.sample_label, self.sample_box, self.sample] + list(self.preview_captions):
+        for widget in [self.sample_label, self.sample_box, self.sample]:
             widget.setVisible(on)
-        for label, _ in self.previews:
-            label.setVisible(on)
-        for widget in (self.palt_box, self.halt_box, self.compile_box):
+        self.previews_shown(on and not getattr(self, "busy", False))  # (shown once the read is over: run)
+        for widget in (self.palt_box, self.halt_box):
             self.ak.enable(widget, on)
+        if not on:  # (with a font, update_buttons sets it with the button: compile_on)
+            self.ak.enable(self.compile_box, False)
         if not on:
             self.ak.enable(self.hangul_box, False)  # (a font's Hangul sets it again as it is read)
 
@@ -1427,48 +1558,42 @@ class CJKSpacingDialog(object):
         if problems:
             self.log.add(u"The code has problems, so nothing was written: %s" % self.ak.html(u"; ".join(problems)), "error")
             return
-        # The code written is composed from the code read with the list: an edit made since (before the
-        # History watcher saw it, or one that leaves the History where it was) would be replaced. Checked
-        # last, with nothing between it and the write that lets events through
-        # (the prefix and the font's classes too: the font's own positions were read through them)
-        changed = changed_features(features, self.texts, ("palt", "halt"), self.prefix)
-        if u"prefix" not in changed and font_classes(package, self.prefix) != self.classes:
-            changed.append(u"classes")
-        if changed:
-            self.run()
+        # Under the window's top-row progress (owner's image 183: several seconds with none), never stoppable:
+        # one step of FontLab's History, never half written (a click on Close, a tool, or an arrow is done
+        # once it is over). Begun before the code is checked: busy_start lets events through once
+        self.busy = True
+        self.ak.busy_start(self, CODE_STEP, stoppable=False)
+        outcome = None
+        try:
+            outcome = self.write_parts(package, features, new)
+        finally:
+            asked_to_stop = self.ak.busy_stopping(self)  # (Esc, Close, a tool, an arrow, during the write)
+            self.ak.busy_end(self)
+            self.busy = False
+        if outcome is None:
+            return  # (nothing written: said in the log)
+        if outcome == "changed":
+            if asked_to_stop:  # (what was clicked is done now: the list is not read again under it)
+                self.listing_stopped(u"Reading the font again")
+                self.update_buttons()
+            else:
+                self.run()
             self.log.add(u"The feature code (%s) changed since the list was read: here is the list again, to check "
-                         u"before writing. Nothing was written." % self.ak.html(self.ak.joined(changed)), "warning")
+                         u"before writing. Nothing was written." % self.ak.html(self.ak.joined(self.changed_parts)),
+                         "warning")
             return
-        refusal = getattr(self.ak, "feature_code_refusal", lambda *a, **k: None)(
-            package, dict((tag, new[tag]) for tag in ("palt", "halt") if tag in new and new[tag] != self.texts.get(tag)))
-        if refusal:  # (Feature Check: the code would bring an error the font's code does not have)
-            self.log.add(u"Nothing was written: %s. <i>Feature Check</i> lists every finding." % self.ak.html(refusal),
-                         "error")
-            return
-        written, error, syllables = [], None, 0
-        shapes = set(c.shape for c in self.hangul_chosen())
-        try:
-            self.ak.before_changes(self.fontlab, package, u"FreeLab CJK Spacing")
-        except getattr(self.ak, "HistoryError", ()) as exc:  # (nothing written: Undo could not take it back)
-            self.log.add(u"%s" % (exc,), "error")
-            return
-        try:
-            for tag in ("palt", "halt"):
-                if tag in new and new[tag] != self.texts.get(tag):
-                    features.set_feature(tag, new[tag])
-                    written.append(tag)
-            if shapes:
-                syllables = self.write_hangul(package, shapes)
-        except Exception as exc:
-            error = exc
-        status = self.ak.notify_changed(self.fontlab, package, u"FreeLab CJK Spacing")
+        written, syllables, status, error, compiled = outcome
         undo = getattr(status, "recorded", True)  # (Undo promised only when FontLab's History recorded the write)
-        self.run()
+        if asked_to_stop:  # (what was clicked is done now: the list is not read again under it)
+            self.listing_stopped(u"Reading the font again")
+            self.update_buttons()
+        else:
+            self.run()
         if written:
             them = u"it" if len(written) == 1 else u"them"
             self.log.add(u"Wrote %s%s.%s" % (
                 self.ak.b(u" and ".join(written)), u"; <i>Edit &gt; Undo</i> takes %s back" % them if undo else u"",
-                self.ak.compiled_note(self.compile_box, self.log)), "done")
+                compiled), "done")
         if syllables:
             self.log.add(u"Set %s in every master; the font's kerning of Hangul, if any, was set for the old widths.%s" % (
                 self.ak.b(counted(syllables, u"syllable width", u"syllable widths")),
@@ -1480,13 +1605,67 @@ class CJKSpacingDialog(object):
         if error is not None:
             self.log.add(u"Stopped by an error: %s" % self.ak.html(error), "error")
 
-    def write_hangul(self, package, shapes):
+    def write_parts(self, package, features, new):
+        """The write itself, under the top row's progress (write): None when nothing was written (said in
+        the log), "changed" when the font's code changed since the list was read (self.changed_parts: what),
+        else (features written, syllables set, notify_changed's status, an error or None, the compile's
+        note)."""
+        # The code written is composed from the code read with the list: an edit made since (before the
+        # History watcher saw it, or one that leaves the History where it was) would be replaced. Checked
+        # last, with nothing between it and the write that lets events through (no progress until the code
+        # is written)
+        # (the prefix and the font's classes too: the font's own positions were read through them)
+        changed = changed_features(features, self.texts, ("palt", "halt"), self.prefix)
+        if u"prefix" not in changed and font_classes(package, self.prefix) != self.classes:
+            changed.append(u"classes")
+        if changed:
+            self.changed_parts = changed
+            return "changed"
+        refusal = getattr(self.ak, "feature_code_refusal", lambda *a, **k: None)(
+            package, dict((tag, new[tag]) for tag in ("palt", "halt") if tag in new and new[tag] != self.texts.get(tag)))
+        if refusal:  # (Feature Check: the code would bring an error the font's code does not have)
+            self.log.add(u"Nothing was written: %s. <i>Feature Check</i> lists every finding." % self.ak.html(refusal),
+                         "error")
+            return None
+        written, error, syllables = [], None, 0
+        shapes = set(c.shape for c in self.hangul_chosen())
+        try:
+            self.ak.before_changes(self.fontlab, package, u"FreeLab CJK Spacing")
+        except getattr(self.ak, "HistoryError", ()) as exc:  # (nothing written: Undo could not take it back)
+            self.log.add(u"%s" % (exc,), "error")
+            return None
+        try:
+            for tag in ("palt", "halt"):
+                if tag in new and new[tag] != self.texts.get(tag):
+                    features.set_feature(tag, new[tag])
+                    written.append(tag)
+            if shapes:
+                self.step(WRITE_STEPS, WIDTHS_STEP, 0.0, False)
+                syllables = self.write_hangul(package, shapes,
+                                              lambda part: self.step(WRITE_STEPS, WIDTHS_STEP, part, False))
+        except Exception as exc:
+            error = exc
+        self.step(WRITE_STEPS, UPDATE_STEP, 0.0, False)
+        status = self.ak.notify_changed(self.fontlab, package, u"FreeLab CJK Spacing")
+        compiled = u""
+        if written:
+            self.step(WRITE_STEPS, COMPILE_STEP, 0.0, False)
+            compiled = self.ak.compiled_note(self.compile_box, self.log)
+        return written, syllables, status, error, compiled
+
+    def write_hangul(self, package, shapes, progress=None):
         """Each chosen syllable set anew in every master (each measured on its own): its shapes moved
-        (components and outlines alike, by their transforms) and its width changed. How many changed."""
+        (components and outlines alike, by their transforms) and its width changed. How many changed.
+        progress(part), where given, as the masters are measured and set (the write's: never stops)."""
         QtCore, QtGui = _qt()
         done = 0
-        for master in list(package.masters) or [package.master]:
-            for change in self.measure_hangul(master):
+        masters = list(package.masters) or [package.master]
+        for number, master in enumerate(masters):
+            share = lambda part: progress((number + part) / float(len(masters))) if progress is not None else None
+            changes = self.measure_hangul(master, lambda part: share(part * 0.5))
+            for count, change in enumerate(changes):
+                if count % PUMP_EVERY == 0:
+                    share(0.5 + 0.5 * count / float(len(changes)))
                 if change.shape not in shapes:
                     continue
                 glyph = package.findName(change.name)

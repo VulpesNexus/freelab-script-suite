@@ -35,6 +35,46 @@ def rounded(values):
     return tuple(int(round(v)) for v in values)
 
 
+class TopRow(object):
+    """ak's top-row progress as a fake Ak's members (busy_start, busy_progress, busy_end, busy_stopping,
+    Stopped, BUSY_NAME), each call recorded: ("start", what, stoppable), ("progress", what, part, stoppable),
+    ("end",). on_progress(), where set, runs at each busy_start or busy_progress (as events let through);
+    stop_after: busy_progress raises Stopped past that many calls, where stoppable (the user's Esc)."""
+
+    def __init__(self, stop_after=None):
+        self.calls, self.on_progress, self.stop_after = [], None, stop_after
+
+        class Stopped(Exception):
+            pass
+        self.Stopped = Stopped
+
+    def members(self):
+        top = self
+
+        def start(owner, what=u"", stoppable=True):
+            top.calls.append(("start", what, stoppable))
+            if top.on_progress is not None:
+                top.on_progress()
+
+        def progress(owner, what=None, part=None, force=False, stoppable=True):
+            top.calls.append(("progress", what, part, stoppable))
+            if top.on_progress is not None:
+                top.on_progress()
+            if top.stop_after is not None and stoppable and sum(1 for c in top.calls if c[0] == "progress") > top.stop_after:
+                raise top.Stopped()
+
+        return dict(busy_start=staticmethod(start), busy_progress=staticmethod(progress),
+                    busy_end=staticmethod(lambda owner: top.calls.append(("end",))),
+                    busy_stopping=staticmethod(lambda owner: False), Stopped=self.Stopped, BUSY_NAME="freelabBusy",
+                    BUSY_RANGE=1000)
+
+    def kinds(self):
+        return [call[0] for call in self.calls]
+
+    def last(self, kind="progress"):
+        return [call for call in self.calls if call[0] == kind][-1]
+
+
 class GeometryTests(unittest.TestCase):
     def test_a_quarter_turn_about_the_ems_center(self):
         """Live (IBM Plex Sans JP, 2026-11-14): this transform on a component of uni300C gave a box of
@@ -878,11 +918,13 @@ class FakeQtTests(unittest.TestCase):
         dialog.texts, dialog.prefix, dialog.classes = {}, u"", {}
         logged = []
         raising = lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("FontLab said no"))
+        top = TopRow()
         dialog.ak = type("Ak", (), dict(
             font_key=staticmethod(lambda p: 1), load_sibling=staticmethod(raising),
             before_changes=staticmethod(lambda *args: []),
             notify_changed=staticmethod(raising), b=staticmethod(lambda t: t), html=staticmethod(lambda t: u"%s" % t),
-            joined=staticmethod(lambda items: u", ".join(items))))
+            joined=staticmethod(lambda items: u", ".join(items)), enable=staticmethod(lambda w, on: None),
+            **top.members()))
         dialog.log = type("Log", (), {"add": lambda self, text, kind=None: logged.append((kind, text))})()
         dialog.harvest = dialog.run = dialog.read_font = lambda: None
         dialog.current_font = lambda: package
@@ -892,6 +934,9 @@ class FakeQtTests(unittest.TestCase):
         dialog.write()
         self.assertFalse(dialog.busy)
         self.assertTrue(any(kind == "error" and u"FontLab said no" in text for kind, text in logged), logged)
+        # (owner's image 183: under the top row's progress at once, never stoppable while it writes, and ended)
+        self.assertEqual((top.kinds()[0], top.kinds()[-1]), ("start", "end"))
+        self.assertFalse(top.calls[0][2], "the write is not stoppable")
 
     def test_a_glyph_of_one_component_is_followed(self):
         inner = self.Glyph("uniFF08", {"Regular": self.Layer(1000.0)})
@@ -1028,15 +1073,16 @@ class StaleCodeTests(unittest.TestCase):
         import qtfakes
         qtfakes.install()
         self.addCleanup(qtfakes.uninstall)
-        kept = cv.pump_events
-        self.addCleanup(setattr, cv, "pump_events", kept)
+        gui = sys.modules["PythonQt.QtGui"]
+        gui.QLabel, gui.QProgressBar = "QLabel", "QProgressBar"  # (the top row's parts, found by name: paint_bar)
         self.pumps, self.on_pump = [], None
+        self.top = TopRow()
 
-        def pump_events(QtCore, QtGui):
+        def pumped():  # (ak's busy_start and busy_progress let events through)
             self.pumps.append(self.dialog.holding)
             if self.on_pump is not None:
                 self.on_pump()
-        cv.pump_events = pump_events
+        self.top.on_progress = pumped
 
     def make(self, texts, prefix=u""):
         features = self.Features(texts, prefix)
@@ -1048,19 +1094,21 @@ class StaleCodeTests(unittest.TestCase):
         dialog.texts, dialog.prefix, dialog.classes = dict(texts), features.get_prefix(), {}
         dialog.holding, dialog.busy, dialog.busy_shown, dialog.run_due = False, False, False, False
         widget = ProgressTests.Widget
-        dialog.busy_row, dialog.busy_bar, dialog.busy_step = widget(), widget(), widget()
+        dialog.busy_step, dialog.busy_bar = widget(), widget()  # (the top row's, as ak's busy_row makes them)
+        parts = {"freelabBusyStep": dialog.busy_step, "freelabBusyBar": dialog.busy_bar}
+        dialog.dialog = type("Dialog", (), {"findChild": lambda _, kind, name: parts.get(name)})()
         dialog.tree, dialog.write_button, dialog.export_button, dialog.compile_box = widget(), widget(), widget(), None
         self.logged, self.steps, self.reads, self.history = [], [], [], []
         dialog.log = type("Log", (), {"add": lambda _, text, kind=None: self.logged.append((kind, text))})()
         raising = lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("no Feature Code here"))
         dialog.ak = type("Ak", (), dict(
             font_key=staticmethod(lambda p: 1), load_sibling=staticmethod(raising), LOG_COLORS={},
-            enable=staticmethod(lambda w, on: w.setEnabled(bool(on))),
+            enable=staticmethod(lambda w, on: w.setEnabled(bool(on)) if w is not None else None),
             before_changes=staticmethod(lambda *args: self.history.append("before")),
             notify_changed=staticmethod(lambda *args, **kwargs: self.history.append("notify")),
             compiled_note=staticmethod(lambda box, log: u""), glyph_name_links=staticmethod(lambda names: u" ".join(names)),
             b=staticmethod(lambda t: u"%s" % t), html=staticmethod(lambda t: u"%s" % t),
-            joined=staticmethod(lambda items: u" and ".join(items))))
+            joined=staticmethod(lambda items: u" and ".join(items)), **self.top.members()))
         dialog.harvest = dialog.show_font_parts = lambda *args: None
         dialog.update_buttons = dialog.update_put_back = lambda: None
         dialog.read_font = lambda: self.reads.append(dialog.busy)
@@ -1128,9 +1176,13 @@ class StaleCodeTests(unittest.TestCase):
         self.assertNotIn(True, self.pumps, "no event let through while holding")
         held = [label for label, holding in self.steps if holding]
         self.assertEqual(held, [cv.UNDO_STEP, cv.BUILD_STEP, cv.BUILD_STEP, cv.CODE_STEP], "the bar still moves meanwhile")
-        self.assertEqual(dialog.busy_step.repaints, 3, "each new step painted without events")
+        self.assertEqual(dialog.busy_step.repaints, 2, "each new step painted without events (the first by busy_start)")
+        self.assertEqual(dialog.busy_bar.value, int(round(1000 * cv.bar_value(cv.WRITE_STEPS, cv.CODE_STEP))),
+                         "the top row's bar moved meanwhile")
         self.assertFalse(dialog.holding)
         self.assertIn(False, self.pumps[1:], "events go through again once the code is written")
+        self.assertFalse(any(call[-1] for call in self.top.calls if call[0] != "end"), "never stoppable while it writes")
+        self.assertEqual(self.top.kinds()[-1], "end")
 
 
 class ExportTests(unittest.TestCase):
@@ -1170,8 +1222,25 @@ class ExportTests(unittest.TestCase):
         dialog.metrics = [cv.Metric("vhea_line_gap", u"vhea line gap", None, 0, None)]
         self.logged = []
         dialog.log = type("Log", (), {"add": lambda _, text, kind=None: self.logged.append((kind, text))})()
-        dialog.ak = type("Ak", (), {"b": staticmethod(lambda t: t), "html": staticmethod(lambda t: u"%s" % t)})
+        self.top = TopRow()
+        dialog.ak = type("Ak", (), dict(b=staticmethod(lambda t: t), html=staticmethod(lambda t: u"%s" % t),
+                                        **self.top.members()))
         return dialog
+
+    def test_a_stopped_export_writes_nothing(self):
+        """Stoppable (the top row's Esc, Close, a tool, an arrow): stopped before the copy takes its name, the
+        folder is left as it was."""
+        path = self.exported()
+        folder = os.path.dirname(path)
+        listed = sorted(os.listdir(folder))
+        dialog = self.dialog(self.package())
+        self.top.stop_after = 3
+        dialog.add_metrics_to_export(path)
+        self.assertEqual([kind for kind, _ in self.logged], ["warning"], self.logged)
+        self.assertIn(u"was stopped: nothing was written", self.logged[0][1])
+        self.assertEqual(sorted(os.listdir(folder)), listed, "no copy, no values file, no staged file")
+        self.assertEqual(self.top.kinds()[-1], "end")
+        self.assertFalse(dialog.busy)
 
     def test_the_values_hold_the_heights_that_are_not_the_em(self):
         values = cv.export_values(1000.0, 880.4, (500.0, -500.0, 0.0), {"a": 1000.0, "b": 500.2}, {"a": [0x3042], "c": []},
@@ -1344,7 +1413,8 @@ class ExportTests(unittest.TestCase):
 
 
 class ProgressTests(unittest.TestCase):
-    """Long work under a progress bar (the owner: about 13 s without one adding vertical metrics)."""
+    """Long work under a progress bar (the owner: about 13 s without one adding vertical metrics), in the
+    window's top row since owner's images 176 and 180 (ak.busy_*: its own bar under the settings before)."""
 
     class Widget(object):
         def __init__(self):
@@ -1368,20 +1438,24 @@ class ProgressTests(unittest.TestCase):
         def setStyleSheet(self, sheet):
             pass
 
-    def dialog(self):
+        def blockSignals(self, on):
+            pass
+
+        def clear(self):
+            pass
+
+    def dialog(self, stop_after=None):
         dialog = cv.CJKVerticalDialog.__new__(cv.CJKVerticalDialog)
         widget = self.Widget
-        dialog.ak = type("Ak", (), {"enable": staticmethod(lambda w, on: w.setEnabled(bool(on))), "LOG_COLORS": {}})
-        dialog.busy_row, dialog.busy_bar, dialog.busy_step = widget(), widget(), widget()
+        self.top = TopRow(stop_after)
+        dialog.ak = type("Ak", (), dict(enable=staticmethod(lambda w, on: w.setEnabled(bool(on))), LOG_COLORS={},
+                                        history_mark=staticmethod(lambda package: "mark"), **self.top.members()))
         dialog.tree, dialog.write_button, dialog.export_button = widget(), widget(), widget()
         dialog.package = None
         self.restored = []
         dialog.show_font_parts = lambda on: self.restored.append("parts")
         dialog.update_buttons = lambda: self.restored.append("buttons")
         dialog.update_put_back = lambda: self.restored.append("put back")
-        self.pumps = []
-        kept = dialog.pump
-        dialog.pump = lambda force=False: (self.pumps.append(force), kept(force))
         return dialog
 
     def test_each_step_has_its_share_and_the_bar_ends_full(self):
@@ -1398,24 +1472,29 @@ class ProgressTests(unittest.TestCase):
             self.assertIsNotNone(cv.bar_value(cv.EXPORT_STEPS, label), "add_tables' own steps on the bar")
         for label, _ in cv.LIST_STEPS:
             self.assertIsNotNone(cv.bar_value(cv.WRITE_STEPS, label), "the list read again at a write's end")
+        self.assertIsNotNone(cv.bar_value(cv.WRITE_STEPS, cv.COMPILE_STEP), "the compile on the bar too")
 
     def test_a_write_shows_the_bar_at_once_and_moves_it(self):
         dialog = self.dialog()
         dialog.set_busy(True, cv.EXPORT_STEPS, at_once=True)
         self.assertTrue(dialog.busy)
-        self.assertTrue(dialog.busy_row.visible)
+        self.assertEqual(self.top.calls[0], ("start", cv.VALUES_STEP, True), "in the top row at once")
         self.assertFalse(any(w.enabled for w in (dialog.tree, dialog.write_button, dialog.export_button)))
         dialog.progress(u"Measuring the glyphs", 0.5)
-        self.assertEqual(dialog.busy_bar.value, int(round(1000 * cv.bar_value(cv.EXPORT_STEPS, u"Measuring the glyphs", 0.5))))
-        self.assertEqual(dialog.busy_step.text, u"Measuring the glyphs\N{HORIZONTAL ELLIPSIS}")
-        self.assertTrue(self.pumps and self.pumps[-1], "the window redrawn at once at a new step")
+        self.assertEqual(self.top.last(), ("progress", u"Measuring the glyphs",
+                                           cv.bar_value(cv.EXPORT_STEPS, u"Measuring the glyphs", 0.5), True))
         dialog.progress(cv.SAVE_STEP)
-        self.assertEqual(dialog.busy_bar.value, 960, "where building the tables ends")
+        self.assertAlmostEqual(self.top.last()[2], 0.96, msg="where building the tables ends")
         dialog.set_busy(False)
         self.assertFalse(dialog.busy)
-        self.assertFalse(dialog.busy_row.visible)
+        self.assertEqual(self.top.kinds()[-1], "end")
         self.assertTrue(dialog.tree.enabled)
         self.assertEqual(self.restored, ["parts", "buttons", "put back"], "each control as the font wants it")
+        dialog.set_busy(True, cv.WRITE_STEPS, at_once=True, stoppable=False)
+        self.assertEqual(self.top.last("start"), ("start", cv.UNDO_STEP, False), "a write never stops half way")
+        dialog.progress(cv.BUILD_STEP)
+        self.assertFalse(self.top.last()[3])
+        dialog.set_busy(False)
 
     def test_a_quick_list_sets_the_buttons_and_a_font_without_cjk_grays_them(self):
         """The live pass, on Noto Sans: Write and Restore suggestions stayed clickable over an empty list, left as
@@ -1423,7 +1502,7 @@ class ProgressTests(unittest.TestCase):
         again). A font with no CJK glyph has every button that acts on the list grayed, and the export's."""
         dialog = self.dialog()
         del dialog.update_buttons  # (the real one)
-        for name in ("all_button", "none_button", "restore_button", "export_button"):
+        for name in ("all_button", "none_button", "restore_button", "export_button", "compile_box"):
             setattr(dialog, name, self.Widget())
         dialog.harvest = dialog.draw_previews = lambda: None
         dialog.forms, dialog.turned, dialog.trims, dialog.kerns, dialog.metrics, dialog.first_checks = [], [], [], [], [], []
@@ -1433,30 +1512,56 @@ class ProgressTests(unittest.TestCase):
         dialog.update_buttons()  # (held off while the list is read)
         self.assertTrue(dialog.write_button.enabled, "as the font before left it")
         dialog.set_busy(False)
-        self.assertFalse(dialog.busy_row.visible, "a quick list: no bar")
+        self.assertEqual(self.top.calls, [], "a quick list: no bar")
         self.assertEqual([getattr(dialog, name).enabled for name in ("all_button", "none_button", "restore_button",
-                                                                     "write_button", "export_button")],
-                         [False] * 5, "set once the list is read: nothing to act on")
+                                                                     "write_button", "export_button", "compile_box")],
+                         [False] * 6, "set once the list is read: nothing to act on")
         dialog.cjk = True
         dialog.update_buttons()
         self.assertTrue(dialog.write_button.enabled, "a CJK font's change: Write")
+        self.assertTrue(dialog.compile_box.enabled, "and its compile, with it (owner's image 195)")
+        dialog.pending = lambda: ({}, [], [])  # (nothing to write)
+        dialog.update_buttons()
+        self.assertEqual((dialog.write_button.enabled, dialog.compile_box.enabled), (False, False),
+                         "Compile after writing grayed with the write button")
 
     def test_a_quick_list_never_shows_the_bar(self):
         dialog = self.dialog()
         dialog.set_busy(True, cv.LIST_STEPS)
         dialog.progress(cv.LIST_STEP, 0.5)
-        self.assertFalse(dialog.busy_row.visible)
+        self.assertEqual(self.top.calls, [])
         self.assertTrue(dialog.tree.enabled)
         dialog.busy_since -= cv.SHOW_AFTER + 0.01  # (as if it had taken that long)
         dialog.progress(cv.LIST_STEP, 0.6)
-        self.assertTrue(dialog.busy_row.visible)
-        self.assertEqual(dialog.busy_bar.value, int(round((0.6 + 0.35 * 0.6) * 1000)))
-        pumps = len(self.pumps)
-        dialog.progress(cv.LIST_STEP, 0.8, False)
-        self.assertEqual(len(self.pumps), pumps, "while the list fills, only the bar painted (live: twice as slow)")
-        self.assertEqual(dialog.busy_bar.value, int(round((0.6 + 0.35 * 0.8) * 1000)))
+        self.assertEqual(self.top.kinds(), ["start", "progress"])
+        self.assertTrue(self.top.calls[0][2], "a listing is stoppable")
+        self.assertAlmostEqual(self.top.last()[2], 0.6 + 0.35 * 0.6)
+        self.assertFalse(dialog.tree.enabled)
         dialog.set_busy(False)
-        self.assertFalse(dialog.busy_row.visible)
+        self.assertEqual(self.top.kinds()[-1], "end")
+
+    def test_a_stopped_listing_leaves_the_list_empty_with_a_link(self):
+        dialog = self.dialog(stop_after=0)
+        dialog.cj = cv.spacing()
+        dialog.status = self.Widget()
+        dialog.forms = [object()]
+
+        def read_font():
+            dialog.busy_since -= cv.SHOW_AFTER + 0.01
+            dialog.progress(cv.READ_STEP, 0.5)
+            self.fail("stopped at its first step")
+        dialog.read_font = read_font
+        dialog.run()
+        self.assertEqual(self.top.kinds(), ["start", "progress", "end"])
+        self.assertEqual(dialog.forms, [])
+        self.assertIn(u"Listing was stopped", dialog.status.text)
+        self.assertIn(dialog.cj.LIST_AGAIN, dialog.status.text)
+        self.assertEqual(dialog.seen_history, "mark", "not read again for the History seen before")
+        self.assertFalse(dialog.busy)
+        runs = []
+        dialog.run = lambda: runs.append(1)
+        dialog.status_link(dialog.cj.LIST_AGAIN)
+        self.assertEqual(runs, [1], "the link lists it again")
 
     def test_the_list_read_during_work_waits_for_it(self):
         dialog = self.dialog()
@@ -1497,6 +1602,54 @@ class ProgressTests(unittest.TestCase):
         dialog.add_metrics_to_export(u"x.otf")
         self.assertEqual(seen, [label for label, _ in cv.EXPORT_STEPS])
         self.assertFalse(dialog.busy)
+
+    def test_no_bar_of_its_own(self):
+        """Owner's image 180: its own bar under the settings ("Listing..."); the top row's now."""
+        with io.open(os.path.join(HERE, os.pardir, "cjk", "freelab_cjk_vertical.py"), encoding="utf-8") as handle:
+            source = handle.read()
+        for gone in (u"QProgressBar()", u"processEvents", u"ExcludeUserInputEvents", u"self.busy_row"):
+            self.assertNotIn(gone, source)
+
+
+class PreviewLayoutTests(unittest.TestCase):
+    """Owner's image 181 (07LightNovelPOP): the previews cut some glyphs at the bottom of a column. The font's
+    own values are sane (VORG and typographic ascender 860, the ideographs' ink -110 to 833 in a 1000 em, every
+    advance height 1000); the pictures were as tall as their squares alone, and the glyphs sat lower in them
+    than the font has them, from an origin read higher than its own."""
+
+    def test_the_ink_past_the_squares_is_measured(self):
+        boxes = [((50.0, -110.0, 950.0, 833.0), 0, 0)]
+        self.assertEqual(cv.ink_overflow(boxes, 860.0, 1000.0), (0.0, 0.0), "the font's own origin: inside")
+        above, below = cv.ink_overflow(boxes, 1060.0, 1000.0)
+        self.assertEqual((above, below), (0.0, 170.0), "an origin 200 too high: 170 units under the last square")
+        above, below = cv.ink_overflow([((50.0, -110.0, 950.0, 900.0), -100, 0)], 860.0, 1000.0)
+        self.assertEqual(above, 0.0)
+        self.assertEqual(below, 70.0, "placed lower by vpal (y placement -100)")
+        self.assertEqual(cv.ink_overflow([((0.0, 0.0, 10.0, 950.0), 0, 0), (None, 0, 0)], 860.0, 1000.0), (90.0, 0.0))
+
+    def test_a_column_leaves_room_for_its_ink(self):
+        chars = list(u"天地玄黄宇宙洪荒日月")
+        heights_at = lambda em: [em] * len(chars)
+        tight = cv.fitting_em(chars, heights_at, 1000, 248, 40)
+        roomy = cv.fitting_em(chars, heights_at, 1000, 248, 40, extra=0.5)
+        self.assertEqual(tight, 40)
+        self.assertEqual(roomy, 40, "wide enough: the same em, the columns shorter")
+        narrow = cv.fitting_em(chars, heights_at, 150, 248, 40)
+        self.assertLessEqual(cv.fitting_em(chars, heights_at, 150, 248, 40, extra=0.5), narrow)
+
+    def test_an_origin_off_the_glyphs_ink_is_taken_from_the_fonts_ascender(self):
+        boxes = [(53, -83, 947, 773), (40, -79, 973, 809), (52, -83, 965, 833), (128, -78, 872, 784),
+                 (104, -78, 907, 808)]  # (07LightNovelPOP's, from the font file)
+        self.assertEqual(cv.origin_from_ink(860.0, boxes, 1000.0, 1000.0), (860.0, False), "its own: kept")
+        self.assertEqual(cv.origin_from_ink(880.0, boxes, 1000.0, 1000.0), (880.0, False), "within the slack: kept")
+        # (FontLab's typographic ascender 1048, the font's ascender 860)
+        self.assertEqual(cv.origin_from_ink(1048.0, boxes, 1000.0, 1000.0, others=(860.0,)), (860.0, True))
+        # (review 12: never a value of its own: with no other value of the font's that centers them, kept)
+        self.assertEqual(cv.origin_from_ink(1048.0, boxes, 1000.0, 1000.0), (1048.0, False))
+        self.assertEqual(cv.origin_from_ink(1048.0, boxes, 1000.0, 1000.0, others=(1040.0,)), (1048.0, False))
+        self.assertEqual(cv.origin_from_ink(1048.0, boxes[:2], 1000.0, 1000.0, others=(860.0,)), (1048.0, False),
+                         "too few to tell")
+
 
 
 class SourceTests(unittest.TestCase):

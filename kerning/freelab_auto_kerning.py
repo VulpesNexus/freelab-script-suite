@@ -29,6 +29,25 @@ import time
 import os
 import sys
 
+def hold_module(module):
+    """A FreeLab module kept alive once a newer copy replaces it (load_sibling, a reinstall in the same
+    FontLab session): Python 2.7 empties a module's globals when the module object is freed, and a window
+    of the old copy still open, or closed but not yet deleted, then printed a traceback at each of its
+    signals (its slots' globals all None). Every copy is kept for the session: a window may outlive any
+    number of reinstalls (a bounded list let go of a copy whose window was still open; review 11), and a
+    copy costs a few megabytes, reinstalls being rare."""
+    if module is None:
+        return
+    held = getattr(sys, "_freelab_held_modules", None)
+    if held is None:
+        held = sys._freelab_held_modules = []
+    if any(m is module for m in held):
+        return
+    held.append(module)
+
+
+hold_module(sys.modules.get(__name__))  # (this copy: the windows it serves keep working after a reinstall)
+
 VERSION = "0.2.0"
 KERN_VERSION = 2  # FREELAB_KERN_VERSION in kerning/native/freelab_kern.c
 EM_PIXELS = 200  # rendering size, pixels per em (halfkern renders at 100; finer steps here)
@@ -954,6 +973,7 @@ def load_sibling(file_name, module_name):
     held = sys.modules.get(module_name)
     if held is not None and hasattr(held, "main") and getattr(held, "_freelab_stamp", None) == stamp:
         return held
+    hold_module(held)  # (its open windows keep their globals)
     old = os.environ.get("FREELAB_NO_AUTOSTART")
     os.environ["FREELAB_NO_AUTOSTART"] = "1"
     try:
@@ -3665,22 +3685,299 @@ def add_tools_button(dialog, current, log=None):
         held.append(whats_this)
         help_button.connect("clicked()", whats_this)
         connections.append((help_button, "clicked()", whats_this))
+        busy = busy_row(dialog)
         if first is not None:  # a widget: it and the buttons share a row
             layout.removeWidget(first)
             row = QtGui.QHBoxLayout()
             row.setContentsMargins(0, 0, 0, 0)
-            row.addWidget(first, 1)
+            # (the top line and the bar take the row's width; the spacer only once both are hidden: an
+            # empty top line hides itself, and the buttons were spread across the row, live)
+            row.addWidget(first, 1000)
+            row.addWidget(busy, 1000)
+            row.addStretch(1)
             for widget in [help_button] + arrows + [button]:
                 row.addWidget(widget, 0, QtCore.Qt.AlignTop)
             layout.insertLayout(0, row)
         else:  # a row already: the buttons at its end
+            first_row.addWidget(busy, 1000)
+            first_row.addStretch(1)
             for widget in [help_button] + arrows + [button]:
                 first_row.addWidget(widget, 0, QtCore.Qt.AlignTop)
+        for widget in arrows + [button]:
+            widget.setProperty(BUSY_ALLOWED_PROP, True)  # (usable while the window works: busy_progress)
         # (PythonQt drops what no Python object holds; let_go drops them with the window)
         _TOOL_BUTTONS.append((button, menu, held, connections))
         return button
     except Exception:
         return None
+
+
+# A window's long work, shown in its top row and stoppable (owner's images 174 to 183): the step's name
+# and a bar between the window's left edge and its "?", the top line hidden meanwhile. While it runs, the
+# events go through (the window repaints, Windows never calls it Not Responding: a window it calls so and
+# is told to end takes FontLab with it, the scripts running inside FontLab), but no click, key, or wheel
+# reaches this window's controls or FontLab's, so nothing changes what the work reads. The tools menu, the
+# arrows, Close, and the title bar's close stay usable: one asks the work to stop (busy_progress raises
+# Stopped at its next step), and once the tool has unwound (busy_end), it does what was clicked.
+BUSY_NAME = "freelabBusy"  # the top row's busy part (a label and a bar), made by add_tools_button
+BUSY_ALLOWED_PROP = "freelabBusyAllowed"  # on the controls a click on which stops the work, then is done
+BUSY_LINE_PROP = "freelabBusyLine"  # on a window's top line while its bar takes its place
+BUSY_RANGE = 1000
+BUSY_PUMP_SECONDS = 0.1  # events let through at most this often during the work
+BUSY_GREEN = ((120, 200, 120), (30, 120, 40))  # LOG_COLORS["done"]: the bar's chunk (on dark, on light)
+BUSY_SHEET = (u"QProgressBar { border: 1px solid rgba(128, 128, 128, 140); border-radius: 3px; "
+              u"background: transparent; min-height: 10px; max-height: 10px; } "
+              u"QProgressBar::chunk { background-color: rgb(%d, %d, %d); border-radius: 2px; }")
+INPUT_EVENTS = (2, 3, 4, 6, 7, 31, 51, 63, 82, 92, 93)  # presses, releases, double clicks, keys, wheel,
+# shortcuts, drops, context menus, a tablet's presses and releases
+GUARD_IDLE_SECONDS = 10.0  # a guard whose tool is no longer busy and whose work has not moved for this long lets go
+GUARD_LOST_SECONDS = 120.0  # and any guard, once no FreeLab work has moved for this long while events run
+_LAST_PUMP = [0.0]  # when any window's work last moved (busy_progress)
+
+
+class Stopped(Exception):
+    """The work stopped by the user (busy_progress): the tool unwinds, quietly."""
+
+    def __str__(self):
+        return u"stopped"
+
+
+def busy_row(dialog):
+    """The top row's busy part: the step's name and the bar, hidden until busy_start."""
+    QtCore, QtGui = _qt()
+    row = QtGui.QWidget()
+    row.setObjectName(BUSY_NAME)
+    box = QtGui.QHBoxLayout(row)
+    box.setContentsMargins(0, 0, 8, 0)
+    label = QtGui.QLabel(u"")
+    label.setObjectName(BUSY_NAME + "Step")
+    bar = QtGui.QProgressBar()
+    bar.setObjectName(BUSY_NAME + "Bar")
+    bar.setRange(0, BUSY_RANGE)
+    bar.setTextVisible(False)
+    bar.setProperty(LEAVE_ALONE_PROP, True)
+    tip = (u"How far the work is. The tools menu, the arrows, and Close stop it first (at its next step), "
+           u"then do what was clicked; Esc stops it.")
+    for widget in (row, label, bar):
+        widget.setWhatsThis(tip)
+    box.addWidget(label)
+    box.addWidget(bar, 1)
+    row.setVisible(False)
+    return row
+
+
+def _busy_parts(dialog):
+    QtGui = _qt()[1]
+    try:
+        row = dialog.findChild(QtGui.QWidget, BUSY_NAME)
+        if row is None:
+            return None, None, None
+        return row, row.findChild(QtGui.QLabel, BUSY_NAME + "Step"), row.findChild(QtGui.QProgressBar, BUSY_NAME + "Bar")
+    except Exception:
+        return None, None, None
+
+
+def _busy_state(owner):
+    state = getattr(owner, "busy_state", None)
+    if state is None:
+        state = owner.busy_state = {}
+    return state
+
+
+def busy_start(owner, what=u"", stoppable=True):
+    """The window's work begins: its top row shows what (a step's name) and the bar at 0, its top line
+    hidden meanwhile, the input guard on. owner.busy is the tool's own (it grays what it must)."""
+    QtCore, QtGui = _qt()
+    dialog = owner.dialog
+    state = _busy_state(owner)
+    row, label, bar = _busy_parts(dialog)
+    state.update({"stop": False, "then": None, "pumped": 0.0, "what": None})
+    if row is not None:
+        try:
+            dark = _property(dialog, "palette").color(QtGui.QPalette.Window).lightness() < 128
+            bar.setStyleSheet(BUSY_SHEET % (BUSY_GREEN[0] if dark else BUSY_GREEN[1]))
+            bar.setValue(0)
+            line = _top_line(dialog, row)
+            state["line"] = (line, None if line is None else bool(line.isHidden()))
+            if line is not None:
+                line.setProperty(BUSY_LINE_PROP, True)
+                line.setHidden(True)
+            row.setVisible(True)
+        except Exception:
+            pass
+    _guard_on(owner)
+    # (never raises: a stop asked while the bar first paints is seen at the work's first step, inside the
+    # tool's own try and its busy_end; raised here, it left the tool busy; review 12)
+    busy_progress(owner, what, 0.0, force=True, stoppable=False)
+
+
+def _top_line(dialog, row):
+    """The label sharing the top row with the busy part (a window's top line), or None."""
+    try:
+        layout = content_layout(dialog)
+        item = layout.itemAt(0)
+        inner = item.layout() if item is not None else None
+        if inner is None:
+            return None
+        for k in range(inner.count()):
+            widget = inner.itemAt(k).widget()
+            if widget is not None and widget.inherits("QLabel"):
+                return widget
+    except Exception:
+        pass
+    return None
+
+
+def busy_progress(owner, what=None, part=None, force=False, stoppable=True):
+    """The work at a step: what (its name, or None to keep it) and part (0 to 1 of the whole, or None).
+    The window repaints and its events go through the guard (at most every BUSY_PUMP_SECONDS); raises
+    Stopped when the user asked the work to stop, unless stoppable is False (a write, which must end as
+    one whole step of FontLab's History: what was clicked is done once it is over)."""
+    QtCore, QtGui = _qt()
+    state = _busy_state(owner)
+    row, label, bar = _busy_parts(owner.dialog)
+    moved = what is not None and what != state.get("what")
+    try:
+        if moved:
+            state["what"] = what
+            label.setText(u"%s\N{HORIZONTAL ELLIPSIS}" % what if what else u"")
+        if part is not None and bar is not None:
+            bar.setValue(int(round(min(max(float(part), 0.0), 1.0) * BUSY_RANGE)))
+    except Exception:
+        pass
+    now = time.time()
+    _LAST_PUMP[0] = now
+    if force or moved or now - state.get("pumped", 0.0) >= BUSY_PUMP_SECONDS:
+        state["pumped"] = now
+        try:
+            QtGui.QApplication.processEvents()
+        except Exception:
+            pass
+    if state.get("stop") and stoppable:
+        raise Stopped()
+
+
+def quiet_list(view, on):
+    """A list filled row by row while its window repaints (busy_progress): its rows hidden meanwhile
+    (on), shown again after (off). Turned off with setUpdatesEnabled, it painted as a black box at every
+    repaint while it filled (live, 2026-11-17, Font Check's languages); its viewport hidden, the list's
+    frame and background show, and its scroll position is kept."""
+    try:
+        view.viewport().setVisible(not on)
+    except Exception:
+        try:
+            view.setUpdatesEnabled(not on)
+        except Exception:
+            pass
+
+
+def busy_stopping(owner):
+    """Whether the user asked the work to stop (a tool that cannot raise looks)."""
+    return bool(_busy_state(owner).get("stop"))
+
+
+def busy_end(owner):
+    """The work over (done, failed, or stopped): the top row as it was, the guard off, and what the user
+    clicked meanwhile (a tool, an arrow, Close) done now. Never raises."""
+    QtCore, QtGui = _qt()
+    state = _busy_state(owner)
+    _guard_off(owner)
+    try:
+        row, label, bar = _busy_parts(owner.dialog)
+        if row is not None:
+            row.setVisible(False)
+            label.setText(u"")
+        line, hidden = state.pop("line", (None, None))
+        if line is not None:
+            # (shown as its text is now: the work wrote it meanwhile; put back as it was before the work,
+            # a line empty then stayed hidden over the status the work wrote, live)
+            line.setProperty(BUSY_LINE_PROP, None)
+            line.setHidden(not (u"%s" % _property(line, "text")).strip())
+    except Exception:
+        pass
+    then, state["then"], state["stop"] = state.get("then"), None, False
+    if then is not None:
+        QtCore.QTimer.singleShot(0, then)
+
+
+def _guard_on(owner):
+    """The input guard (see BUSY_NAME): an event filter on the application while the work runs."""
+    QtCore, QtGui = _qt()
+    state = _busy_state(owner)
+    if state.get("guard") is not None:
+        return
+    dialog = owner.dialog
+
+    def ask(then):
+        if not state.get("stop"):
+            state["stop"], state["then"] = True, then
+
+    class Guard(QtCore.QTimer):  # PythonQt has no QObject to subclass; a timer will do
+        def eventFilter(self, obj, event):
+            try:
+                kind = event.type()
+                if kind == 19 and obj is dialog:  # (the title bar's close: stop, then close)
+                    event.ignore()
+                    ask(dialog.close)
+                    return True
+                if kind not in INPUT_EVENTS or not obj.isWidgetType():
+                    return False
+                if kind == 6 and event.key() == QtCore.Qt.Key_Escape and obj.window() == dialog.window():
+                    ask(None)
+                    return True
+                if obj.window() == dialog.window():
+                    target = obj
+                    for _ in range(4):
+                        if target is None:
+                            break
+                        if target.property(BUSY_ALLOWED_PROP) or (
+                                target.inherits("QPushButton") and (u"%s" % target.text).replace(u"&", u"") in ALWAYS_ON_TEXTS):
+                            if kind == 3:  # (on release: stop, then click it, or open its menu)
+                                menu = target.menu() if target.inherits("QToolButton") else None
+                                ask(target.showMenu if menu is not None else target.click)
+                            return True
+                        target = target.parentWidget()
+                return True  # (any other input, here or in FontLab, waits until the work is over)
+            except Exception:
+                return False  # an event filter must never raise
+
+    guard = Guard(dialog)  # (its parent the window: Qt deletes it with it)
+    state["guard"] = guard
+
+    def idle():
+        # (a tool that never called busy_end must not leave FontLab deaf: its work over (owner.busy off)
+        # and not moved for GUARD_IDLE_SECONDS while the event loop ran. A tool still busy keeps its guard:
+        # another window's work pumping events meanwhile is no sign that this one is over (review 12),
+        # unless nothing has moved anywhere for GUARD_LOST_SECONDS)
+        try:
+            quiet = time.time() - state.get("pumped", 0.0)
+            anywhere = time.time() - _LAST_PUMP[0]
+            if (quiet > GUARD_IDLE_SECONDS and not getattr(owner, "busy", False)) or anywhere > GUARD_LOST_SECONDS:
+                _guard_off(owner)
+        except Exception:
+            pass
+
+    guard.idle = idle  # (held)
+    guard.setInterval(1000)
+    guard.connect("timeout()", idle)
+    guard.start()
+    try:
+        QtGui.QApplication.instance().installEventFilter(guard)
+    except Exception:
+        pass
+
+
+def _guard_off(owner):
+    QtGui = _qt()[1]
+    state = _busy_state(owner)
+    guard = state.pop("guard", None)
+    if guard is None:
+        return
+    try:
+        guard.stop()
+        QtGui.QApplication.instance().removeEventFilter(guard)
+    except Exception:
+        pass
 
 
 MENU_HOOK_RETRY_MS = 500  # how often FreeLab's startup block looks again for the Scripts menu,
@@ -4029,12 +4326,35 @@ def long_choice(combo):
         return
     sheet = combo.styleSheet or u""
     if sheet and sheet != LONG_SHEET:
+        popup_scroll_bar(combo)
         return  # a sheet of its own: left as it is
     if not sheet:
         combo.setMaxVisibleItems(LONG_CHOICES)
         combo.setStyleSheet(LONG_SHEET)
     if not combo.property(LEAVE_ALONE_PROP):  # (taken off when a one-choice dropdown got its choices back)
         combo.setProperty(LEAVE_ALONE_PROP, True)
+    popup_scroll_bar(combo)
+
+
+def popup_scroll_bar(combo):
+    """A dropdown's list scrolls with a scroll bar, FreeLab's flat one (SCROLL_SHEET), when its choices
+    pass LONG_CHOICES. Qt sets the list's bar off for a style that opens dropdowns as menus (Fusion's)
+    when the list is first made, and leave_popup_alone makes it before LONG_SHEET is on: the Font
+    Builder's 300 sets scrolled with the wheel alone, no bar to show there were more (owner's image
+    163)."""
+    try:
+        QtCore = _qt()[0]
+        view = combo.view()
+        if view is None:
+            return
+        # (a property in PythonQt, read as one: called, it raised, and the bar stayed off, live)
+        if _property(view, "verticalScrollBarPolicy") != QtCore.Qt.ScrollBarAsNeeded:
+            view.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+        bar = view.verticalScrollBar()
+        if bar is not None and (_property(bar, "styleSheet") or u"") != SCROLL_SHEET:
+            bar.setStyleSheet(SCROLL_SHEET)
+    except Exception:
+        pass
 
 
 # What every FreeLab window's widgets share through one event filter (put on by update_states as they
@@ -4392,6 +4712,10 @@ def update_states(dialog, hidden_too=False):
     style_combos(dialog)
     try:
         install_filters(dialog)
+    except Exception:
+        pass
+    try:
+        no_font_states(dialog)
     except Exception:
         pass
     window = dialog.window()  # (a dialog opened from this one is a child too: its buttons and lists are its own)
@@ -5001,19 +5325,37 @@ def rich(label):
 SENTENCE_END = re.compile(u"([.!?]|\N{HORIZONTAL ELLIPSIS})((?:</[bi]>)?)\\s+(?=[A-Z<(\u00c0-\u024f])")
 
 
+ONE_LINE = (NO_FONT_LINE,)  # the only sentences kept on one line, across the suite (the owner's image 191)
+_JOINED = u"\N{NO-BREAK SPACE}⁠"  # (stands for the space between them while the others are split)
+
+
+def _split_sentences(text, breaks):
+    text = u"%s" % text
+    for line in ONE_LINE:
+        text = text.replace(line, line.replace(u". ", u"." + _JOINED))
+    text = SENTENCE_END.sub(lambda m: m.group(1) + m.group(2) + breaks, text)
+    return text.replace(u"." + _JOINED, u". ")
+
+
 def sentences(text):
-    """Rich text with a line per sentence (a status line's sentences each start a line)."""
-    return SENTENCE_END.sub(lambda m: m.group(1) + m.group(2) + u"<br>", u"%s" % text).replace(u"\n", u"<br>")
+    """Rich text with a line per sentence (a status line's sentences each start a line), but the two of
+    NO_FONT_LINE, which share one."""
+    return _split_sentences(text, u"<br>").replace(u"\n", u"<br>")
 
 
 def status_label(text=u"", plain=False):
-    """A dialog's top line: rich text (or plain), wrapped, a line per sentence (its setText splits them)."""
+    """A dialog's top line: rich text (or plain), wrapped, a line per sentence (its setText splits them).
+    Hidden while it says nothing: an empty one still took a line, a gap over the fields (owner's images
+    197 to 204)."""
     QtCore, QtGui = _qt()
 
     class StatusLabel(QtGui.QLabel):
         def setText(self, text):
-            QtGui.QLabel.setText(self, SENTENCE_END.sub(lambda m: m.group(1) + m.group(2) + u"\n", u"%s" % text)
-                                 if plain else sentences(text))
+            QtGui.QLabel.setText(self, _split_sentences(text, u"\n") if plain else sentences(text))
+            try:  # (kept hidden while the window's bar takes its place: busy_start)
+                self.setHidden(bool(self.property(BUSY_LINE_PROP)) or not (u"%s" % text).strip())
+            except Exception:
+                pass
 
     label = StatusLabel()
     if not plain:
@@ -5776,6 +6118,9 @@ def share_columns(view, held=None, after_fit=False):
         return None
     if room <= 0:
         return None  # (not laid out yet: its first resize shares it out)
+    empty_bars(view)
+    if view.property(TABLE_DRAG_PROP):
+        return None  # (a column being dragged: Qt keeps the last one at the edge until it is let go)
     kept = _wants_of(view).get("wants") or []
     try:
         metrics = QtGui.QFontMetrics(_property(header, "font"))
@@ -5819,6 +6164,35 @@ def share_columns(view, held=None, after_fit=False):
     return new
 
 
+MIN_SECTION = 24  # pixels: a column dragged narrower stops here (at 0 it vanished, with no way to get it back)
+TABLE_DRAG_PROP = "freelabTableDrag"  # on a list while the owner drags one of its column edges
+
+
+def view_rows(view):
+    """How many rows a list shows at its top level (a tree's, a table's, a list's), or None."""
+    for name in ("topLevelItemCount", "rowCount", "count"):
+        try:
+            value = getattr(view, name)
+            return int(value() if callable(value) else value)
+        except Exception:
+            continue
+    return None
+
+
+def empty_bars(view):
+    """A list with no row shows no scroll bar: while it was resized, its columns (shared on the next turn
+    of the event loop) passed its width for a moment, and an empty list flashed its bars (owner's image
+    192). Its bars come back as needed once it has rows."""
+    try:
+        QtCore = _qt()[0]
+        policy = QtCore.Qt.ScrollBarAlwaysOff if view_rows(view) == 0 else QtCore.Qt.ScrollBarAsNeeded
+        for name in ("horizontalScrollBarPolicy", "verticalScrollBarPolicy"):
+            if _property(view, name) != policy:
+                getattr(view, "set" + name[0].upper() + name[1:])(policy)
+    except Exception:
+        pass
+
+
 def stretch_column(view, measure=False):
     """The list's columns shared out again (share_columns; the name tools called before). measure: after
     a fill, what the columns want noted first (their widths now), unless a fit noted it already
@@ -5846,8 +6220,19 @@ def watch_table(view):
         class TableWatch(QtCore.QTimer):  # PythonQt has no QObject to subclass; a timer will do
             def eventFilter(self, obj, event):
                 try:
-                    if event.type() == RESIZE_EVENT:
+                    kind = event.type()
+                    if kind == RESIZE_EVENT:
                         self.start()  # (the widths changed on the next turn: never inside Qt's layout)
+                    elif kind in (2, 3) and obj is not view.viewport():  # (a press or release on the header)
+                        # While a column edge is dragged, Qt keeps the last column at the list's edge; the
+                        # columns are shared out once it is let go. Shared at each move, the last column
+                        # came off the edge and back (owner's image 173: "jittery")
+                        header = _header_of(view)
+                        dragging = kind == 2
+                        view.setProperty(TABLE_DRAG_PROP, dragging)
+                        header.setStretchLastSection(dragging)
+                        if not dragging:
+                            self.start()
                 except Exception:
                     pass  # an event filter must never raise
                 return False
@@ -5876,6 +6261,12 @@ def watch_table(view):
         watch.connect("timeout()", share)
         watch.freelab_slots = (share, resized)  # (held: PythonQt drops a slot no Python object holds)
         view.viewport().installEventFilter(watch)
+        try:
+            header = _header_of(view)
+            header.setMinimumSectionSize(MIN_SECTION)
+            header.viewport().installEventFilter(watch)  # (its presses and releases: a drag's start and end)
+        except Exception:
+            pass
     except Exception:
         return None
     try:
@@ -5962,11 +6353,92 @@ def flat_combo(box):
 def enable(button, on):
     """A button clickable only when it would do something."""
     try:
+        if on and button.property(NO_FONT_PROP):
+            return  # (grayed while its window has no font: no_font_states gives it back with a font)
+    except Exception:
+        pass
+    try:
         # Always asked: a button inside a grayed panel reports itself grayed whatever it was last told, so
         # "gray it out" was skipped while a tool was busy, and the button came back clickable.
         button.setEnabled(bool(on))
     except Exception:
         pass
+
+
+NO_FONT_PROP = "freelabNoFont"  # on a control no_font_states grayed (its window has no font)
+WITHOUT_FONT_PROP = "freelabWithoutFont"  # on a control a tool keeps usable without a font (a font chooser)
+SEPARATOR_PROP = "freelabSeparator"  # on separator()'s lines
+NO_FONT_KINDS = ("QPushButton", "QCheckBox", "QRadioButton", "QComboBox", "QAbstractSpinBox", "QLineEdit",
+                 "QAbstractSlider")
+ALWAYS_ON_TEXTS = (u"Close",)  # buttons usable whatever the window holds
+
+
+def window_has_font(owner):
+    """Whether a tool's window works on a font now (its own has_font(), else its package); True for a
+    tool that works without one (works_without_font: Font Builder)."""
+    if owner is None or getattr(owner, "works_without_font", False):
+        return True
+    own = getattr(owner, "has_font", None)
+    if callable(own):
+        try:
+            return bool(own())
+        except Exception:
+            return True
+    return getattr(owner, "package", None) is not None
+
+
+def no_font_states(dialog):
+    """A window with no font (owner's images 193 to 210): its separators hidden (there is nothing under
+    them to set apart), and its controls grayed (nothing they act on), but the tools menu, the arrows,
+    help, Close, and what a tool keeps usable without a font (WITHOUT_FONT_PROP). Given back as a font
+    comes; meanwhile enable() keeps them grayed whatever the tool asks."""
+    QtGui = _qt()[1]
+    owner = window_owner(dialog)
+    if owner is None:
+        return
+    has_font = window_has_font(owner)
+    window = dialog.window()
+    restored = []
+    if getattr(owner, "busy", False):
+        return  # (a tool at work sets its own states)
+    for line in dialog.findChildren(QtGui.QFrame):
+        try:
+            if line.property(SEPARATOR_PROP) and bool(_property(line, "visible")) != has_font and line.window() == window:
+                line.setVisible(has_font)
+        except Exception:
+            continue
+    for view in dialog.findChildren(QtGui.QAbstractItemView):
+        try:
+            if view.property(TABLE_PROP) is not None:
+                empty_bars(view)
+        except Exception:
+            continue
+    for kind in NO_FONT_KINDS:
+        for widget in dialog.findChildren(getattr(QtGui, kind)):
+            try:
+                if widget.window() != window or widget.property(WITHOUT_FONT_PROP):
+                    continue
+                if kind == "QPushButton" and (u"%s" % widget.text).replace(u"&", u"") in ALWAYS_ON_TEXTS:
+                    continue
+                if kind == "QAbstractSpinBox" and widget.parentWidget() is not None and \
+                        widget.parentWidget().inherits("QAbstractSpinBox"):
+                    continue
+                marked = bool(widget.property(NO_FONT_PROP))
+                if not has_font and not marked and widget.isEnabled():
+                    widget.setProperty(NO_FONT_PROP, True)
+                    widget.setEnabled(False)
+                elif has_font and marked:
+                    widget.setProperty(NO_FONT_PROP, None)
+                    widget.setEnabled(True)
+                    restored.append(widget)
+            except Exception:
+                continue
+    refresh = getattr(owner, "update_buttons", None)
+    if restored and callable(refresh):  # (the tool's own states over them again: some stay grayed)
+        try:
+            refresh()
+        except Exception:
+            pass
 
 
 def checks_of(items, checked):
@@ -6310,6 +6782,7 @@ def separator():
     line = QtGui.QFrame()
     line.setFixedHeight(1)
     line.setStyleSheet(u"QFrame { border: none; background: rgba(128, 128, 128, 128); }")
+    line.setProperty(SEPARATOR_PROP, True)  # (hidden while the window has no font: no_font_states)
     return line
 
 
@@ -7466,6 +7939,7 @@ class AutoKerningDialog(object):
         note_row = QtGui.QHBoxLayout()
         self.preview_note = QtGui.QLabel("Select a pair to compare the methods; click one to use it for that pair.")
         self.preview_note.setWordWrap(True)
+        self.preview_note.setVisible(False)  # (shown once pairs are listed: hint_shown)
         note_row.addWidget(self.preview_note, 1)
         self.reset_button = QtGui.QPushButton("Reset pair")
         self.reset_button.setToolTip("Give this pair the suggested value again.")
@@ -7630,6 +8104,16 @@ class AutoKerningDialog(object):
 
     def clear_list(self):
         self.tree.clear()
+        self.hint_shown()
+
+    def hint_shown(self):
+        """The preview's hint ("Select a pair...") only while pairs are listed and none is selected: with
+        none listed, there is nothing to select (owner's image 187)."""
+        try:
+            if self.selected_row() is None:
+                self.preview_note.setVisible(bool(self.suggestions))
+        except Exception:
+            pass
 
     def tint_rows(self):
         """The list's delegate: a row picked by hand tinted (PICKED_ROLE) in the highlight color of the
@@ -7819,9 +8303,13 @@ class AutoKerningDialog(object):
         QtCore.QTimer.singleShot(50, self.run)  # analyzed as it opens, once it is drawn
 
     def progress(self, done, total, what="Measuring pairs"):
-        QtCore, QtGui = _qt()
-        self.status.setText(u"%s: %s of %s\N{HORIZONTAL ELLIPSIS}" % (what, b(done), b(total)))
-        QtGui.QApplication.processEvents()
+        """The measuring at done of total, in the window's top row (busy_progress): False once the user
+        asked it to stop (the tools menu, an arrow, Close, Esc), which analyze takes as "stop"."""
+        try:
+            busy_progress(self, u"%s (%d of %d)" % (what, done, total) if total else what,
+                          float(done) / total if total else None)
+        except Stopped:
+            self.stop = True
         return not self.stop
 
     def run(self):
@@ -7829,9 +8317,12 @@ class AutoKerningDialog(object):
         if self.busy:
             return  # a click while measuring or asking FontLab: the work under way finishes first
         self.busy = True
+        self.stop = False
+        busy_start(self, u"Measuring pairs")
         try:
             self.run_once()
         finally:
+            busy_end(self)
             self.busy = False
             self.analyze_button.setEnabled(True)
             self.update_buttons()  # (no font, or nothing analyzed: the settings grayed out)
@@ -7931,12 +8422,23 @@ class AutoKerningDialog(object):
     def ask_fontlab(self, suggestions):
         """FontLab's own value for the pairs not asked yet (a call per pair)."""
         missing = [s for s in suggestions if "fontlab" not in s.values]
-        for index, s in enumerate(missing):
-            s.values["fontlab"] = fontlab_autokern(self.package, self.master, s.left, s.right)
-            if index % 50 == 0:
-                self.progress(index, len(missing), "Asking FontLab")
-        if missing:
+        if not missing:
+            return
+        # (its own guarded progress when a filter change asks, outside run's: events pumped with no guard
+        # let clicks change the list it was filling; and a stop now stops it; review 12)
+        own = _busy_state(self).get("guard") is None
+        if own:
+            self.stop = False
+            busy_start(self, u"Asking FontLab")
+        try:
+            for index, s in enumerate(missing):
+                s.values["fontlab"] = fontlab_autokern(self.package, self.master, s.left, s.right)
+                if index % 50 == 0 and not self.progress(index, len(missing), "Asking FontLab"):
+                    break  # (the pairs asked so far keep FontLab's value; the others show none)
             self.analysis.remember_fontlab()
+        finally:
+            if own:
+                busy_end(self)
 
     def picked_count(self):
         return sum(1 for s in self.analysis.suggestions if s.override) if self.analysis is not None else 0
@@ -7998,6 +8500,7 @@ class AutoKerningDialog(object):
         else:
             listed.sort(key=change)
         self.suggestions = listed
+        self.hint_shown()
         summary = factor_summary(self.analysis)
         analysis = self.analysis
         work = (u"%s: %s measured, %s unchanged since the last analysis" % (

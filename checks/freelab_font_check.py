@@ -99,7 +99,7 @@ CAPPED_SCRIPTS = ("Latin", "Greek", "Cyrillic")
 START_MIN_SPREAD = 0.01  # a contour's start point is compared once its nodes are this far from the reference's (normalized)
 START_GAIN = 0.25  # ... and counts as moved when another start fits at most this share of that distance
 DIRECTION_SHARE = 0.05  # a contour's area at least this share of its box's has a plain direction
-PROGRESS_EVERY = 200  # glyphs between two looks at the event loop
+PROGRESS_EVERY = 25  # glyphs between two moves of the top row's bar (it lets events through at most every 0.1 s)
 
 
 def load_auto_kerning():
@@ -2514,16 +2514,11 @@ def value_title(count):
 
 
 BUSY_STEPS = (u"Reading the language data", u"Reading the font", u"Checking the languages", u"Listing")
-# The progress bar: the share of its length reached as each step ends. The first three are the Python
-# side (about a third of a second in all); the listing is Qt's and takes most of the time.
+# The progress bar (the window's top row: ak.busy_start): the share of its length reached as each step
+# ends. The first three are the Python side (about a third of a second in all); the listing is Qt's and
+# takes most of the time.
 BUSY_SHARES = (0.10, 0.20, 0.40, 1.0)
-BAR_RANGE = 1000
 LIST_PARTS = (0.05, 0.75, 0.95)  # of the listing: the scripts listed, the list at the right, the glyphs to add
-BAR_GREEN = ((120, 200, 120), (30, 120, 40))  # ak.LOG_COLORS["done"], should the shared module not be asked
-# On the bar itself, never on the dialog: a thin bar, its chunk in the suite's "done" green.
-BAR_SHEET = (u"QProgressBar { border: 1px solid rgba(128, 128, 128, 140); border-radius: 3px; "
-             u"background: transparent; min-height: 10px; max-height: 10px; } "
-             u"QProgressBar::chunk { background-color: rgb(%d, %d, %d); border-radius: 2px; }")
 
 
 def busy_share(done, part=0.0):
@@ -4413,8 +4408,8 @@ LISTING_STEP_ROWS = 100  # rows made between two moves of that bar
 
 
 def listing_text(tab, script):
-    """What the progress bar says while a script's click lists the tab at the right (script: None or
-    u"" for All scripts)."""
+    """What the top row's bar says while a click lists the tab at the right (script: None or u"" for All
+    scripts); the top row adds the ellipsis (ak.busy_progress)."""
     if tab == "families":
         text = (u"Listing the families of the languages written in %s" % script if script
                 else u"Listing the families of all scripts' languages")
@@ -4422,7 +4417,7 @@ def listing_text(tab, script):
         text = u"Listing the character sets"
     else:
         text = u"Listing the languages written in %s" % script if script else u"Listing the languages of all scripts"
-    return text + u"\N{HORIZONTAL ELLIPSIS}"
+    return text
 
 
 ABSENT_WHY = u"a script the font has none of"
@@ -6017,7 +6012,7 @@ class FontCheckDialog(object):
                                       u"it has none). Click a script to see only its languages below.")
         # The lists stand on the second page of a stack; the first is blank, shown while the data is read
         # and the font checked (the window opened on empty lists and zero counts for seconds, as if broken),
-        # under the progress bar, whose label alone says what is happening (it was said there, in a
+        # the progress bar in the window's top row saying alone what is happening (it was said there, in a
         # centered line on this page, and in the top line: twice at once). set_busy shows one or the other.
         self.coverage_stack = QtGui.QStackedWidget()
         self.busy_label = QtGui.QLabel(u"")
@@ -6034,39 +6029,9 @@ class FontCheckDialog(object):
         content_layout.setContentsMargins(0, 0, 0, 0)
         self.coverage_stack.addWidget(content)
         self.coverage_stack.setCurrentIndex(1)
-        # A progress bar spanning the top of the lists' area, with the step's name beside it: the owner
-        # found the centered line alone "not visible enough". It stands outside the stack, so it is
-        # still there, and still painted, while the lists' page is filled under it; it is determinate
-        # over the four steps (BUSY_SHARES) and, within the listing, over the rows made. Its green is
-        # the log's "done", set on the bar's own stylesheet, and dark mode is told to leave it alone
-        # (it would remap the green).
-        self.busy_row = QtGui.QWidget()
-        busy_layout = QtGui.QHBoxLayout(self.busy_row)
-        busy_layout.setContentsMargins(0, 2, 0, 2)
-        self.busy_step = QtGui.QLabel(u"")
-        self.busy_bar = QtGui.QProgressBar()
-        try:
-            self.busy_bar.setRange(0, BAR_RANGE)
-            self.busy_bar.setValue(0)
-            self.busy_bar.setTextVisible(False)  # (the step's name stands beside it)
-            self.busy_bar.setProperty(ak.LEAVE_ALONE_PROP, True)
-            self.busy_bar.setStyleSheet(self.bar_sheet())
-        except Exception:
-            pass
-        help_text = (u"How far the check is: reading the language data, reading the font, checking the languages "
-                     u"and character sets, then listing them. It goes away when the lists are shown; the log says "
-                     u"how long the check took.")
-        try:  # (room for the longest step's name, so the bar's left edge stays put from one step to the next)
-            self.busy_step.setMinimumWidth(int(QtGui.QFontMetrics(_prop(self.busy_step, "font")).width(
-                u"%s\N{HORIZONTAL ELLIPSIS}" % max(list(BUSY_STEPS) + [checking_text(88888)], key=len))) + 8)
-        except Exception:
-            pass
-        self.busy_bar.setWhatsThis(help_text)
-        self.busy_step.setWhatsThis(help_text)
-        busy_layout.addWidget(self.busy_step)
-        busy_layout.addWidget(self.busy_bar, 1)
-        self.busy_row.setVisible(False)
-        tab.layout.addWidget(self.busy_row)
+        # The check's progress is the window's own, in its top row (ak.busy_start: owner's images 174 and 180),
+        # determinate over the four steps (BUSY_SHARES) and, within the listing, over the rows made; the
+        # tools menu, the arrows, Close, and Esc stop it (coverage_stopped). It stood over the lists before.
         tab.layout.addWidget(self.coverage_stack, 1)
         content_layout.addWidget(self.script_tree)
         absent = QtGui.QHBoxLayout()
@@ -6078,10 +6043,12 @@ class FontCheckDialog(object):
         absent.addStretch(1)
         content_layout.addLayout(absent)
 
+        # (the lists' frames hug the splitter's handle: margins beside it set it in the middle of a gap, away
+        # from the frames it sizes, owner's image 196)
         halves = QtGui.QSplitter(QtCore.Qt.Horizontal)
         left = QtGui.QWidget()
         box = QtGui.QVBoxLayout(left)
-        box.setContentsMargins(0, 0, 4, 0)
+        box.setContentsMargins(0, 0, 0, 0)
         # Two tabs of characters: the high-value list, and the selection's own missing characters, which
         # moved to the top of the first list before, above the high-value rows. A tab bar over a stack, as
         # the window's own tabs (a QTabWidget's themed page drew light frames in dark mode).
@@ -6167,7 +6134,7 @@ class FontCheckDialog(object):
         box.addLayout(row)
         right = QtGui.QWidget()
         box = QtGui.QVBoxLayout(right)
-        box.setContentsMargins(4, 0, 0, 0)
+        box.setContentsMargins(0, 0, 0, 0)
         # Three tabs: the languages by script, the character sets that are no languages (they came under
         # the languages before), and the languages by family. Each has a list of its own, so each keeps
         # its place as the tabs are switched; the search, the level, and the order act on the tab shown.
@@ -6370,7 +6337,7 @@ class FontCheckDialog(object):
 
         self.coverage_button.connect("clicked()", self.check_coverage)
         self.script_tree.connect("itemSelectionChanged()", self.script_selected)
-        self.show_absent.connect("toggled(bool)", lambda on: self.refill_coverage())
+        self.show_absent.connect("toggled(bool)", lambda on: self.absent_toggled())
         self.list_slots = []  # (kept: PythonQt holds no reference to a connected lambda)
 
         def left_slots(key, tree):
@@ -6416,75 +6383,48 @@ class FontCheckDialog(object):
     # -- the loading state, and the steps long work is done in ------------------
 
     def set_busy(self, on, message=u""):
-        """Long work under way (or over), as Feature Code shows its own: the lists' area gives way to
-        a blank page under the progress bar, whose label says what is happening, and the controls that
-        would do nothing meanwhile are grayed. The bar is painted here and now, so the window shows
-        it before the work starts. busy also holds off the History's watch and a second check."""
-        self.busy = bool(on)
+        """Long work under way (or over), in the window's top row (ak.busy_start: the step's name and the
+        bar, the tools menu, the arrows, Close, and Esc stopping it): the lists' area gives way to a blank
+        page, and the controls that would do nothing meanwhile are grayed, through ak.enable (a control
+        grayed for want of a font stays grayed: owner's image 203). busy also holds off the History's watch
+        and a second check."""
+        was, self.busy = self.busy, bool(on)
         try:
             self.coverage_stack.setCurrentIndex(0 if on else 1)
-            for widget in (self.nearly, self.status_filter, self.inferred_box, self.composing, self.coverage_button):
-                widget.setEnabled(not on)
-            self.tabs.setEnabled(not on)
+            for widget in (self.nearly, self.status_filter, self.inferred_box, self.composing, self.coverage_button,
+                           self.tabs):
+                self.ak.enable(widget, not on)
         except Exception:
             pass
-        try:  # the top line hidden meanwhile: emptied (say_busy), it still took a line over the bar (report 135)
-            self.coverage.status.setVisible(not on)
+        try:  # the view's line hidden meanwhile (the top row says what runs), shown again only with something to say
+            # (shown empty, it left a blank line under the Coverage controls: owner's image 204)
+            text = u"%s" % (_prop(self.coverage.status, "text") or u"")
+            self.coverage.status.setHidden(bool(on) or not text.strip())
         except Exception:
             pass
-        try:  # the progress bar over the lists' area: shown while the work runs, gone with it
-            if on:
-                self.busy_bar.setStyleSheet(self.bar_sheet())  # (the palette may have changed since)
-                self.busy_bar.setValue(0)
-            self.busy_row.setVisible(bool(on))
-        except Exception:
-            pass
-        self.say_busy(message if on else u"")
-
-    def bar_sheet(self):
-        """The progress bar's own stylesheet (never the dialog's): its chunk in the log's "done" green,
-        the one of the pair that reads on the dialog's background."""
-        rgb = BAR_GREEN[1]
-        try:
-            QtCore, QtGui = _qt()
-            pair = self.ak.LOG_COLORS["done"]
-            dark = _prop(self.dialog, "palette").color(QtGui.QPalette.Window).lightness() < 128
-            rgb = tuple(int(value) for value in (pair[0] if dark is True else pair[1]))
-        except Exception:
-            pass
-        return BAR_SHEET % rgb
+        if on and not was:
+            self.ak.busy_start(self, message)
+        elif on:
+            self.say_busy(message)
+        elif was:
+            self.ak.busy_end(self)
 
     def progress_to(self, done, part=0.0):
-        """The bar moved and painted at once: done steps of BUSY_STEPS are over, and this part (0 to
-        1) of the next one. Never raises."""
-        try:
-            value = busy_share(done, part)
-            self.busy_bar.setValue(int(round(value * BAR_RANGE)))
-            self.busy_bar.repaint()
-        except Exception:
-            pass
+        """The top row's bar moved: done steps of BUSY_STEPS are over, and this part (0 to 1) of the next
+        one. Raises ak.Stopped when the user asked the check to stop."""
+        self.ak.busy_progress(self, None, busy_share(done, part))
 
-    def say_busy(self, message):
-        """What is happening now, said once, beside the bar, painted at once. It was said in the top
-        line and in the middle of the lists' area too (the owner: "'Listing...' appears twice"): the top
-        line is empty meanwhile, and the lists' area blank until they are shown."""
-        text = u"%s\N{HORIZONTAL ELLIPSIS}" % message if message else u""
-        try:
-            self.busy_label.setText(u"")
-            self.busy_step.setText(text)
-            if message:
-                self.coverage.status.setText(u"")
-            self.busy_label.repaint()
-            self.busy_step.repaint()
-            self.busy_bar.repaint()
-            self.coverage.status.repaint()
-        except Exception:
-            pass
+    def say_busy(self, message, done=None):
+        """What is happening now, said once, in the top row (it was said in the top line and in the middle
+        of the lists' area too, the owner: "'Listing...' appears twice"), the bar at done steps of
+        BUSY_STEPS when given. Raises ak.Stopped when the user asked the check to stop."""
+        self.ak.busy_progress(self, message or None, busy_share(done) if done is not None else None)
 
     def defer(self, function):
         """The next step of long work: from a zero timer in a window that is shown, so Qt repaints
-        between two steps and the tool is never entered again from inside itself (no events are
-        processed in a step); at once otherwise (a window not shown has nothing to repaint)."""
+        between two steps and the tool is never entered again from inside itself (only the top row's
+        guard lets events through in a step, and no click or key: ak.busy_progress); at once otherwise
+        (a window not shown has nothing to repaint)."""
         if not self.stepwise:
             function()
             return
@@ -6502,18 +6442,41 @@ class FontCheckDialog(object):
 
     def run_steps(self, steps, index=0):
         """One step of long work, then the next (defer): each step does its part and returns what the
-        window says while the next one runs. A step that fails ends the work, and says why."""
+        window says while the next one runs. A step that fails ends the work, and says why; a stop asked
+        meanwhile (the tools menu, an arrow, Close, Esc: owner's image 174) is taken before the next step
+        and at each of the listing's (coverage_stopped)."""
         try:
+            self.ak.busy_progress(self)  # (asked between two steps: nothing more is done)
             message = steps[index]()
+            if index + 1 < len(steps):
+                self.say_busy(message, index + 1)
+        except self.ak.Stopped:
+            self.coverage_stopped()
+            return
         except Exception as exc:
             self.set_busy(False)
             self.coverage.status.setText(u"")
             self.log.add(self.ak.html(exc), "error")
             return
         if index + 1 < len(steps):
-            self.progress_to(index + 1)
-            self.say_busy(message)
             self.defer(lambda: self.run_steps(steps, index + 1))
+
+    def coverage_stopped(self):
+        """The coverage check stopped by the user: what it made is let go, the Coverage view as if it had
+        not been checked (its lists empty), the log saying so; Check checks it anew, and so does the view
+        shown again. Then the top row does what was clicked (ak.busy_end). Never raises."""
+        try:
+            self.clear_coverage()
+        except Exception:
+            pass
+        self.stale.add("coverage")
+        try:
+            self.set_busy(False)
+            self.log.add(u"The coverage check was stopped: nothing is listed. Click <i>Check</i> to check it again.",
+                         "warning")
+            self.update_buttons()
+        except Exception:
+            pass
 
     def open_address(self, address):
         """A click on the repository's address: opened in the browser where Qt can (FontLab's Python
@@ -6693,7 +6656,7 @@ class FontCheckDialog(object):
         halves = QtGui.QSplitter(QtCore.Qt.Horizontal)
         left = QtGui.QWidget()
         box = QtGui.QVBoxLayout(left)
-        box.setContentsMargins(0, 0, 4, 0)
+        box.setContentsMargins(0, 0, 0, 0)  # (the list's frame hugs the handle; the picture keeps its margin: owner's image 196)
         self.glyph_tree = self.tree(("Glyph", "Masters", "Fix"), icon=(THUMB_SIZE, THUMB_SIZE))
         self.glyph_tree.setWhatsThis(u"The glyphs that keep the masters from interpolating, the worst first, with a "
                                      u"symbol per master in order: a ring for the master compared with, red where the "
@@ -6734,10 +6697,12 @@ class FontCheckDialog(object):
         self.compare_master.setSizeAdjustPolicy(QtGui.QComboBox.AdjustToContents)
         self.compare_master.setWhatsThis(u"The master drawn beside the one compared with (those with problems say "
                                          u"how many).")
-        row.addWidget(self.label_for(u"Beside it", self.compare_master))
+        self.beside_label = self.label_for(u"Beside it", self.compare_master)
+        row.addWidget(self.beside_label)
         row.addWidget(self.compare_master)
         row.addStretch(1)
         box.addLayout(row)
+        self.show_beside(False)  # (shown with a glyph drawn: draw_comparison)
         halves.addWidget(right)
         halves.setStretchFactor(0, 2)
         halves.setStretchFactor(1, 3)
@@ -6856,11 +6821,6 @@ class FontCheckDialog(object):
                 self.log.add(u"A picture could not be drawn: %s" % self.ak.html(exc), "warning")
             return QtGui.QIcon()
 
-    def progress(self, tab, done, total, what):
-        QtCore, QtGui = _qt()
-        tab.status.setText(u"%s %s of %s\N{HORIZONTAL ELLIPSIS}" % (what, self.ak.b(done), self.ak.b(total)))
-        QtGui.QApplication.processEvents()
-
     # -- the tabs, buttons, and the History ---------------------------------
 
     def tab_of(self, key):
@@ -6909,45 +6869,71 @@ class FontCheckDialog(object):
     def show_fontless(self):
         """Every view emptied: what was listed belonged to a font that is closed. The lists, pictures,
         and lines go, and what acts on them is grayed (update_buttons) until a font is read."""
-        QtCore, QtGui = _qt()
+        self.clear_coverage()
+        self.clear_metrics()
+        self.clear_masters()
+        self.update_buttons()
+
+    def emptied(self, steps):
+        """Each step of emptying a view run, the lists' handlers held off; one that fails leaves the others."""
+        was, self.filling = self.filling, True
+        try:
+            for step in steps:
+                try:
+                    step()
+                except Exception:
+                    pass
+        finally:
+            self.filling = was
+
+    def clear_coverage(self):
+        """The Coverage view as before any check: its findings let go, its lists and lines empty (a font
+        closed, or a check stopped: coverage_stopped)."""
         self.scripts, self.results, self.other_results, self.set_results = [], [], [], []
         self.rows, self.own_rows, self.checked, self.selection = [], [], set(), None
         self.has_coverage, self.font_found, self.script_filter = False, None, None
         self.groups_of, self.tip_cache = {}, {}
         self.generation += 1
-        self.metric_values, self.extents_found, self.suggestions, self.notes = None, [], [], []
-        self.check_rows, self.clipped, self.problems, self.glyph_names = [], [], [], []
-        self.coverage.findings = self.metrics.findings = self.masters.findings = []
+        self.coverage.findings = []
+        self.emptied((
+            lambda: self.script_tree.clear(), lambda: self.script_tree.setVisible(False),
+            lambda: self.show_absent.setVisible(False),
+            lambda: [view.tree.clear() for key in self.views for view in self.views[key].values()],
+            lambda: self.add_tree.clear(), lambda: self.own_tree.clear(),
+            lambda: self.tab_names["left"].set_text(0, value_title(None)),
+            lambda: self.tab_names["left"].set_text(1, selection_title(None)),
+            lambda: self.left_tabs.setTabEnabled(1, False), lambda: self.show_left("value"),
+            lambda: [self.tab_names["right"].set_text(index, label) for index, (_, label) in enumerate(RIGHT_TABS)],
+            lambda: self.gain_label.setText(u""), lambda: self.languages_note.setVisible(False),
+            lambda: self.coverage.status.setText(u"")))
         was, self.filling = self.filling, True
         try:
-            for step in (
-                    lambda: self.script_tree.clear(), lambda: self.script_tree.setVisible(False),
-                    lambda: self.show_absent.setVisible(False),
-                    lambda: [view.tree.clear() for key in self.views for view in self.views[key].values()],
-                    lambda: self.add_tree.clear(), lambda: self.own_tree.clear(),
-                    lambda: self.tab_names["left"].set_text(0, value_title(None)),
-                    lambda: self.tab_names["left"].set_text(1, selection_title(None)),
-                    lambda: self.left_tabs.setTabEnabled(1, False), lambda: self.show_left("value"),
-                    lambda: [self.tab_names["right"].set_text(index, label) for index, (_, label) in enumerate(RIGHT_TABS)],
-                    lambda: self.gain_label.setText(u""), lambda: self.languages_note.setVisible(False),
-                    lambda: self.values_tree.clear(), lambda: self.checks_tree.clear(),
-                    lambda: self.clipped_list.clear(), lambda: self.diagram.clear(),
-                    lambda: self.glyph_tree.clear(), lambda: self.comparison.clear(),
-                    lambda: self.problem_label.setText(u""), lambda: self.compare_master.clear(),
-                    lambda: [chip.setVisible(False) for _, _, chip in self.chips]):
-                try:
-                    step()
-                except Exception:
-                    pass
             for key in sorted(self.views, key=lambda one: one == self.right_tab):  # (the tab shown last: its page)
                 for view in self.views[key].values():
                     view.rows, view.labels, view.unfilled, view.signature = [], [], {}, None
                 self.activate(key, "full")
-            for tab in (self.coverage, self.metrics, self.masters):
-                tab.status.setText(u"")
         finally:
             self.filling = was
-        self.update_buttons()
+
+    def clear_metrics(self):
+        """The Vertical metrics view as before any check (a font closed, or a check stopped)."""
+        self.metric_values, self.extents_found, self.suggestions, self.notes = None, [], [], []
+        self.check_rows, self.clipped = [], []
+        self.metrics.findings = []
+        self.emptied((lambda: self.values_tree.clear(), lambda: self.checks_tree.clear(),
+                      lambda: self.clipped_list.clear(), lambda: self.diagram.clear(),
+                      lambda: self.metrics.status.setText(u"")))
+
+    def clear_masters(self):
+        """The Masters view as before any comparison (a font closed, or a comparison stopped)."""
+        self.problems, self.glyph_names, self.compare_masters = [], [], []
+        self.fixable_names = set()
+        self.masters.findings = []
+        self.emptied((lambda: self.glyph_tree.clear(), lambda: self.comparison.clear(),
+                      lambda: self.problem_label.setText(u""), lambda: self.compare_master.clear(),
+                      lambda: self.show_beside(False),
+                      lambda: [chip.setVisible(False) for _, _, chip in self.chips],
+                      lambda: self.masters.status.setText(u"")))
 
     def switch_page(self, index):
         QtCore, QtGui = _qt()
@@ -6976,12 +6962,16 @@ class FontCheckDialog(object):
         targets = self.check_targets() if self.package is not None else {}
         listed = self.shown_rows()
         can = any(item in (self.buildable or set()) for row in listed for item in row.items)
-        idle = {"all": u"Every glyph listed is checked." if listed else u"No glyph is listed.",
+        idle = {"all": u"Every glyph listed is checked.",
                 "none": u"No glyph is checked.",
                 "buildable": u"Only what <i>Glyph Compose</i> can build is checked." if can
                 else u"<i>Glyph Compose</i> can build none of the glyphs listed."}
         for key, button in self.check_buttons.items():
-            on = targets.get(key) is not None
+            # (nothing listed: all three grayed, Check none too, though glyphs of another tab or check stay
+            # checked: owner's image 206)
+            on = bool(listed) and targets.get(key) is not None
+            if not listed:
+                idle[key] = u"No glyph is listed."
             ak.enable(button, on)
             button.setToolTip(self.tip(u"" if on else idle[key], rich=True))
         ak.enable(self.copy_chars_button, bool(chosen))
@@ -7267,8 +7257,9 @@ class FontCheckDialog(object):
 
     def check_coverage(self):
         """The coverage checked, in four steps (the data files read, the font read, the languages
-        checked, the lists filled): the window says which one runs, in the lists' place, and repaints
-        between two (set_busy, run_steps). It opened on empty lists and zero counts for seconds."""
+        checked, the lists filled): the window's top row says which one runs, and the window repaints
+        between two (set_busy, run_steps). It opened on empty lists and zero counts for seconds. A stop
+        leaves the view as if not checked (coverage_stopped)."""
         tab = self.coverage
         if not self.start(tab):
             if not self.busy:
@@ -7389,8 +7380,7 @@ class FontCheckDialog(object):
         listed, of_unicode = set_tally(sets)[:2]  # (the one count Proof gives too)
         text += sets_sentence(sets, b)
         tab.status.setText(text)
-        self.progress_to(len(BUSY_SHARES))
-        self.set_busy(False)
+        self.set_busy(False)  # (the lists made: a stop asked now comes too late, and the check stands)
         self.log.add(checked_sentence(len(set(one.iso for one in state["languages"])), len(listed), len(of_unicode),
                                       time.time() - state.get("started", time.time())), "done")
         self.checked_now("coverage")
@@ -7491,11 +7481,25 @@ class FontCheckDialog(object):
         self.update_gain()
         self.update_buttons()
 
+    def absent_toggled(self):
+        """The scripts the font has none of shown or hidden: the lists filled again (the top row's bar
+        meanwhile, when it makes many rows: listing). Never raises."""
+        try:
+            if self.filling or self.busy:
+                return
+            if not self.listing(self.refill_coverage, listing_text(self.right_tab, self.script_filter)):
+                self.fill_add()  # (stopped in the list at the right: the glyphs' lists follow what it shows so far)
+                self.update_gain()
+                self.update_buttons()
+        except Exception:
+            pass  # a signal's handler must not raise
+
     def languages_changed(self):
-        """The search, the level, or the order changed: the tab shown at the right listed again."""
-        if self.filling:
+        """The search, the level, or the order changed: the tab shown at the right listed again (the top
+        row's bar meanwhile, when it makes many rows: listing)."""
+        if self.filling or self.busy:
             return
-        self.fill_right()
+        self.listing(lambda progress: self.fill_right(progress=progress), listing_text(self.right_tab, self.script_filter))
         self.update_buttons()
 
     def status_changed(self):
@@ -7541,22 +7545,24 @@ class FontCheckDialog(object):
     def script_selected(self):
         """A script's row clicked (or All scripts): the lists follow it. Each tab keeps every script's list
         and the chosen script's apart (VIEW_MODES), so going back to All scripts makes no row; a list made
-        anew that makes many rows shows the progress bar and the wait cursor meanwhile (listing_rows)."""
-        if self.filling:
+        anew that makes many rows shows the top row's bar meanwhile (listing)."""
+        if self.filling or self.busy:
             return
         item = self.selected_item(self.script_tree)
         if item is None:
             return
         key = u"%s" % self.data_of(item, u"")
         self.script_filter = key or None
-        shown = self.listing_shown(self.listing_rows(), key)
-        try:
-            self.fill_right(False, progress=(lambda part: self.listing_progress(part * 0.9)) if shown else None)
-            self.listing_progress(0.9)
+
+        def work(progress):
+            self.fill_right(False, progress=(lambda part: progress(part * 0.9)) if progress is not None else None)
             self.fill_add()
             self.update_gain()
-        finally:
-            self.listing_over(shown)
+
+        if not self.listing(work, listing_text(self.right_tab, key)):
+            # (stopped in the list at the right: the glyphs' lists follow what it shows so far)
+            self.fill_add()
+            self.update_gain()
         self.update_buttons()
 
     def listing_rows(self):
@@ -7581,58 +7587,27 @@ class FontCheckDialog(object):
         except Exception:
             return 0
 
-    def listing_shown(self, rows, script):
-        """The progress bar shown over the lists, and the wait cursor, while a script's click makes many
-        rows (LISTING_BUSY_ROWS: a few make none of it flicker); painted at once, since no event is let
-        through meanwhile. True when shown (listing_over hides it). Never raises."""
-        if rows < LISTING_BUSY_ROWS:
-            return False
-        try:
-            QtCore, QtGui = _qt()
-            self.busy_bar.setStyleSheet(self.bar_sheet())  # (the palette may have changed since)
-            self.busy_bar.setValue(0)
-            self.busy_step.setText(listing_text(self.right_tab, script))
-            self.busy_row.setVisible(True)
-            self.listing_cursor = False
-            try:
-                QtGui.QApplication.setOverrideCursor(QtGui.QCursor(QtCore.Qt.WaitCursor))
-                self.listing_cursor = True  # (put back by listing_over: only one this set)
-            except Exception:
-                pass
-            self.busy_row.repaint()
-            self.busy_step.repaint()
-            self.busy_bar.repaint()
+    def listing(self, work, what):
+        """work(progress) done, with the window's top-row bar (what: the step's name) while it makes many
+        rows in the list at the right (LISTING_BUSY_ROWS: a few make none of it flicker), at once
+        otherwise (progress None). The bar was the Coverage view's own (owner's images 174 and 180); the
+        tools menu, the arrows, Close, and Esc stop it now: the list keeps the rows made so far, and is made
+        anew the next time it is shown (fill_right). False when stopped."""
+        if self.listing_rows() < LISTING_BUSY_ROWS:
+            work(None)
             return True
-        except Exception:
+        ak = self.ak
+        self.busy = True
+        ak.busy_start(self, what)
+        try:
+            work(lambda part: ak.busy_progress(self, None, part))
+        except ak.Stopped:
+            self.log.add(u"Listing stopped: the list shows the rows made so far.", "warning")
             return False
-
-    def listing_progress(self, part):
-        """The progress bar at part (0 to 1) of a script's listing, painted at once (nothing when it is
-        hidden). Never raises."""
-        try:
-            if _prop(self.busy_row, "visible") and not self.busy:
-                self.busy_bar.setValue(int(round(min(max(part, 0.0), 1.0) * BAR_RANGE)))
-                self.busy_bar.repaint()
-        except Exception:
-            pass
-
-    def listing_over(self, shown):
-        """The progress bar and the wait cursor of a script's listing gone (listing_shown). Never raises."""
-        if not shown:
-            return
-        try:
-            QtCore, QtGui = _qt()
-            self.busy_row.setVisible(False)
-            self.busy_step.setText(u"")
-        except Exception:
-            pass
-        if getattr(self, "listing_cursor", False):  # (never another's cursor: only the one listing_shown set)
-            self.listing_cursor = False
-            try:
-                QtCore, QtGui = _qt()
-                QtGui.QApplication.restoreOverrideCursor()
-            except Exception:
-                pass
+        finally:
+            self.busy = False
+            ak.busy_end(self)
+        return True
 
     def picture_font(self):
         """The font the missing characters are drawn in: the dialog's, in FreeLang once it is
@@ -7656,7 +7631,7 @@ class FontCheckDialog(object):
         font = self.picture_font()
         buildable = self.buildable or set()
         self.filling = True
-        tree.setUpdatesEnabled(False)
+        self.ak.quiet_list(tree, True)
         try:
             tree.clear()
             bold = self.bold(tree)
@@ -7682,7 +7657,7 @@ class FontCheckDialog(object):
                 tree.addTopLevelItem(item)
             self.fit_columns(tree, (None, COLUMN_MAX, None))
         finally:
-            tree.setUpdatesEnabled(True)
+            self.ak.quiet_list(tree, False)
             self.filling = False
 
     def fill_add(self):
@@ -8348,7 +8323,10 @@ class FontCheckDialog(object):
         character sets under their groups, or the languages under their families. The tabs' captions
         count what each lists. What is selected stays selected when the tab still lists it (found again
         by what it is: the rows are new); when it does not, the selection's tab of characters empties
-        (refill: here; False when the caller fills the characters next)."""
+        (refill: here; False when the caller fills the characters next). progress(part), when given: told
+        how far the rows are made (it may raise ak.Stopped: the rows made so far stay, and what follows them
+        is set as for a whole list, but the list is made anew the next time it is shown; then it is raised
+        again)."""
         QtCore, QtGui = _qt()
         tab = self.right_tab
         level = self.choice(self.level_filter, LANGUAGE_FILTERS)[0]
@@ -8407,8 +8385,9 @@ class FontCheckDialog(object):
         pending = self.unfilled[tab] = view.unfilled = {}
         self.row_tools = None  # (the rows' dots made anew: the palette may have changed)
 
+        stopped = None
         self.filling = True
-        tree.setUpdatesEnabled(False)
+        self.ak.quiet_list(tree, True)
         try:
             tree.clear()
             if tab == "families":
@@ -8471,10 +8450,15 @@ class FontCheckDialog(object):
                             found["selection"] = selection_of(held[0]) if held else None
                     heading.setExpanded(open_)
                 self.share_columns(tree)
+        except self.ak.Stopped as exc:
+            stopped = exc  # (by the user: listing)
+            view.signature = None
         finally:
-            tree.setUpdatesEnabled(True)
+            self.ak.quiet_list(tree, False)
             self.filling = False
         self.after_fill(tab, made, text, level, shown, found, refill)
+        if stopped is not None:
+            raise stopped
 
     def after_fill(self, tab, made, text, level, shown, found, refill):
         """What follows the list at the right, filled or shown as it was: the line under it, and the
@@ -8576,12 +8560,13 @@ class FontCheckDialog(object):
         (scrolled where it was), else filled (the search, the level, and the order act on it); the
         selection goes with it when the tab lists it too."""
         try:
-            if self.filling or not 0 <= index < len(RIGHT_TABS):
+            if self.filling or self.busy or not 0 <= index < len(RIGHT_TABS):
                 return
             self.right_tab = RIGHT_TABS[index][0]
             self.custom_row.setVisible(self.right_tab == "sets")  # (a set of the user's own is pasted there)
             self.reveal = True
-            self.fill_right()
+            self.listing(lambda progress: self.fill_right(progress=progress),
+                         listing_text(self.right_tab, self.script_filter))
             self.update_buttons()
         except Exception:
             pass  # a signal's handler must not raise
@@ -8825,7 +8810,8 @@ class FontCheckDialog(object):
     # -- Vertical metrics ---------------------------------------------------------
 
     def extents(self, tab):
-        """[Extent] of every glyph with ink, in every master."""
+        """[Extent] of every glyph with ink, in every master; the top row's bar moved meanwhile (it raises
+        ak.Stopped when the user asked to stop)."""
         found = []
         glyphs = self.glyphs()
         masters = self.master_names()
@@ -8838,7 +8824,7 @@ class FontCheckDialog(object):
             for master in masters:
                 done += 1
                 if done % PROGRESS_EVERY == 0:
-                    self.progress(tab, done, total, u"Measuring glyph")
+                    self.ak.busy_progress(self, None, done / float(total or 1))
                 layer = glyph.getLayerByName(master)
                 if layer is None:
                     continue
@@ -8854,7 +8840,8 @@ class FontCheckDialog(object):
         if not self.start(tab):
             return
         ak, b = self.ak, self.ak.b
-        self.busy = True
+        self.busy, stopped = True, False
+        ak.busy_start(self, u"Measuring the glyphs")  # (the window's top row: stoppable, owner's image 180)
         try:
             m = read_metrics(self.package)
             if not m.upm:
@@ -8863,12 +8850,22 @@ class FontCheckDialog(object):
             codes = set(code for name, glyph_codes_ in self.glyphs() for code in glyph_codes_)
             capitals = has_capitals(codes)
             findings = check_metrics(m, extents, capitals)
+        except ak.Stopped:
+            stopped = True
         except Exception as exc:
             tab.status.setText(u"")
             self.log.add(ak.html(exc), "error")
             return
         finally:
             self.busy = False
+            ak.busy_end(self)
+        if stopped:  # (as if not checked: the view empty, checked again when shown or on Check)
+            self.clear_metrics()
+            self.stale.add("metrics")
+            self.log.add(u"The vertical metrics check was stopped: nothing is listed. Click <i>Check</i> to check "
+                         u"them again.", "warning")
+            self.update_buttons()
+            return
         self.metric_values, self.extents_found, self.capitals = m, extents, capitals
         self.letters = None if capitals else other_letters(codes)
         tab.findings = findings
@@ -9290,13 +9287,14 @@ class FontCheckDialog(object):
         if basis != self.fix_basis:  # another font or reference: every fixable row checked again
             self.fix_basis, self.fix_unchecked = basis, set()
         order = [reference] + [m for m in masters if m != reference]
-        self.busy = True
+        self.busy, stopped = True, False
+        ak.busy_start(self, u"Comparing the masters")  # (the window's top row: stoppable, owner's image 180)
         found, unread = [], []
         try:
             glyphs = self.glyphs()
             for done, (name, _) in enumerate(glyphs):
                 if done % PROGRESS_EVERY == 0:
-                    self.progress(tab, done, len(glyphs), u"Comparing glyph")
+                    ak.busy_progress(self, None, done / float(len(glyphs) or 1))
                 glyph = self.package.findName(name)
                 if glyph is None or glyph.isNull:
                     continue
@@ -9310,12 +9308,22 @@ class FontCheckDialog(object):
                         unread.append(name)
                     outlines.append((master, outline))
                 found.extend(compare_glyph(name, outlines))
+        except ak.Stopped:
+            stopped = True
         except Exception as exc:
             tab.status.setText(u"")
             self.log.add(ak.html(exc), "error")
             return
         finally:
             self.busy = False
+            ak.busy_end(self)
+        if stopped:  # (as if not compared: the view empty, compared again when shown or on Compare masters)
+            self.clear_masters()
+            self.stale.add("masters")
+            self.log.add(u"The masters' comparison was stopped: nothing is listed. Click <i>Compare masters</i> to "
+                         u"compare them again.", "warning")
+            self.update_buttons()
+            return
         self.problems = tab.findings = found
         self.fill_chips()
         self.fill_glyphs()
@@ -9355,7 +9363,7 @@ class FontCheckDialog(object):
         tree.setIconSize(QtCore.QSize(icon[0], icon[1]))
         quiet = QtGui.QBrush(faded(colors["text"], QUIET_ALPHA))
         self.filling = True
-        tree.setUpdatesEnabled(False)
+        self.ak.quiet_list(tree, True)
         try:
             tree.clear()
             for name, problems in rows:
@@ -9378,7 +9386,7 @@ class FontCheckDialog(object):
                 tree.addTopLevelItem(item)
             self.fit_columns(tree, (COLUMN_MAX, None))
         finally:
-            tree.setUpdatesEnabled(True)
+            self.ak.quiet_list(tree, False)
             self.filling = False
         items = self.top_items(tree)
         if items:
@@ -9421,6 +9429,15 @@ class FontCheckDialog(object):
         self.draw_comparison()
         self.update_buttons()
 
+    def show_beside(self, on):
+        """The choice of the master drawn beside the one compared with, shown only while a glyph is drawn:
+        "Beside it" stood under an empty frame, with no font or nothing compared (owner's image 211)."""
+        for widget in (self.beside_label, self.compare_master):
+            try:
+                widget.setVisible(bool(on))
+            except Exception:
+                pass
+
     def draw_comparison(self):
         if self.filling:
             return
@@ -9428,7 +9445,9 @@ class FontCheckDialog(object):
         if name is None or self.package is None:
             self.comparison.clear()
             self.problem_label.setText(u"")
+            self.show_beside(False)
             return
+        self.show_beside(bool(self.compare_masters))
         reference = self.reference_name()
         index = self.compare_master.currentIndex
         master = self.compare_masters[index] if 0 <= index < len(self.compare_masters) else None
@@ -9513,8 +9532,12 @@ class FontCheckDialog(object):
         if not ak.begin_write(self.fontlab, self.package, u"FreeLab Font Check: masters", self.log):
             return  # (nothing fixed: the reason in the log)
         self.busy = True
+        # (the top row's bar for many glyphs; a write, one step of FontLab's History: never stopped half way,
+        # what was clicked meanwhile done once it is over)
+        ak.busy_start(self, u"Fixing the glyphs", stoppable=False)
         try:
-            for name in names:
+            for at, name in enumerate(names):
+                ak.busy_progress(self, None, at / float(len(names)), stoppable=False)
                 glyph = self.package.findName(name)
                 reference_layer = self.layer(name, reference)
                 original = read_outline(reference_layer) if reference_layer is not None else None
@@ -9552,6 +9575,7 @@ class FontCheckDialog(object):
             failed.append(u"%s" % exc)
         finally:
             self.busy = False
+            ak.busy_end(self)
         status = ak.WriteStatus()
         if touched:
             status = ak.notify_changed(self.fontlab, self.package, u"FreeLab Font Check: masters", touched, added=False)
@@ -9653,16 +9677,12 @@ class FontCheckDialog(object):
         QtCore, QtGui = _qt()
         self.stepwise = True  # (a window shown: long work goes step by step, the window repainted in between)
         if self.package is not None:
-            # It opens on the line that says what is being read, not on empty lists; the work starts from a
-            # zero timer, once the window is shown and painted.
+            # It opens on a blank page, not on empty lists; the check starts from a zero timer, once the window
+            # is shown and painted, its first step's name and bar in the window's top row (set_busy)
             try:
                 self.coverage_stack.setCurrentIndex(0)
-                self.busy_bar.setStyleSheet(self.bar_sheet())
-                self.busy_bar.setValue(0)
-                self.busy_row.setVisible(True)  # (the bar, from the first paint)
             except Exception:
                 pass
-            self.say_busy(BUSY_STEPS[0])
         self.dialog.show()
         self.dialog.raise_()
         if self.package is not None:

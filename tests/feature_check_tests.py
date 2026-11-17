@@ -273,7 +273,159 @@ class ProofTests(unittest.TestCase):
         c = code(liga=feature("liga", "  sub f i by f_i;\n  sub f i by f_i;\n"), calt=feature("calt", "  sub a' b by\n"))
         report = fc.check(c, ORDER)
         fc.prove_fixes(report, ORDER)
-        self.assertIs(finding(report, "duplicate-rule").fix.safe, True, "liga compiles without calt: proven on it")
+        # (calt set aside: nothing is proven until it is mended; review 11 found classes and lookups a fix
+        # changes reaching set-aside code past every finer guard)
+        self.assertIsNone(finding(report, "duplicate-rule").fix.safe)
+        self.assertIn("mend the errors first", fc.fix_note(finding(report, "duplicate-rule").fix))
+
+    def test_a_fix_to_a_class_that_code_set_aside_uses_is_not_proven(self):
+        # (live, 2026-11-17: a CJK font's aalt was set aside, and @aalt2's repeats, which its "sub @aalt by
+        # @aalt2;" needs, were removed as "safe", breaking it)
+        prefix = DECLARED + "@x = [a b a];\n"
+        c = code(prefix, calt=feature("calt", "  sub @x by c;\n  sub a' b by\n"), smcp=feature("smcp", "  sub a by a.sc;\n"))
+        report = fc.check(c, ORDER)
+        self.assertIsNone(finding(report, "unused-class"), "@x is named by calt, set aside")
+        dup = finding(report, "class-duplicates")
+        self.assertIsNotNone(dup.fix)
+        fc.prove_fixes(report, ORDER)
+        self.assertIsNone(dup.fix.safe, "calt uses @x and was not built: nothing proven")
+        self.assertEqual(fc.safe_fixes(report, ORDER), [])
+
+    def test_through_another_class_too(self):
+        prefix = DECLARED + "@x = [a b a];\n@y = [@x c];\n"
+        c = code(prefix, calt=feature("calt", "  sub @y by c;\n  sub a' b by\n"), smcp=feature("smcp", "  sub @x by c;\n"))
+        report = fc.check(c, ORDER)
+        fc.prove_fixes(report, ORDER)
+        self.assertIsNone(finding(report, "class-duplicates").fix.safe)
+
+    def test_fontlab_aalt_with_its_lookups_inside_is_an_error_with_a_repair(self):
+        # (FontLab writes its aalt so; neither its compiler, live, nor fontTools takes a lookup in aalt)
+        aalt = ("feature aalt useExtension {\n  sub @lc by @sc;\n  lookup aalt_2 useExtension {\n  lookupflag 0;\n"
+                "    sub a from [a.sc b.sc];\n  } aalt_2;\n} aalt;\n")
+        prefix = DECLARED + "@lc = [a b c];\n@sc = [a.sc b.sc a.sc];\n"
+        c = fc.FontCode(prefix, [("aalt", aalt), ("smcp", feature("smcp", "  sub @lc by @sc;\n"))])
+        report = fc.check(c, ORDER)
+        self.assertEqual(kinds(report), ["aalt-lookups"], [f.message for f in report.findings])
+        self.assertFalse(report.built)
+        repair = finding(report, "aalt-lookups").fix
+        self.assertTrue(repair.repair and repair.review, "for review, never automatic")
+        self.assertEqual(fc.safe_fixes(report, ORDER), [])
+        mended = fc.apply_fixes(c, [repair])
+        self.assertNotIn("lookup", mended.part("feature:aalt"))
+        self.assertIn("sub a from [a.sc b.sc];", mended.part("feature:aalt"))
+        again = fc.check(mended, ORDER)
+        self.assertEqual(again.findings, [], [f.message for f in again.findings])
+        self.assertTrue(again.built)
+        self.assertEqual([f[2] for f in fc.aalt_lookups(aalt)], ["aalt_2"])
+
+    def test_aalts_repair_keeps_a_rule_after_a_commented_block(self):
+        # (review 12: a lookup ending with a comment, a rule after it on the same line)
+        aalt = ("feature aalt {\n  lookup aalt_2 {\n    sub a from [a.sc b.sc]; # alternates\n  } aalt_2; sub b from [b.sc];\n"
+                "} aalt;\n")
+        c = fc.FontCode(DECLARED, [("aalt", aalt)])
+        repair = finding(fc.check(c, ORDER), "aalt-lookups").fix
+        mended = fc.apply_fixes(c, [repair])
+        self.assertIn("\n sub b from [b.sc];", mended.part("feature:aalt"))
+        self.assertTrue(fc.check(mended, ORDER).built)
+
+    def test_two_fixes_that_only_work_together_are_not_proven_one_by_one(self):
+        # (review 11: @In's and @Out's repeats pair through @Alias; either alone breaks the rule)
+        prefix = DECLARED + "@In = [a b a];\n@Out = [a.sc b.sc a.sc];\n@Alias = [@Out];\n"
+        report = fc.check(code(prefix, smcp=feature("smcp", "  sub @In by @Alias;\n")), ORDER)
+        fc.prove_fixes(report, ORDER)
+        for f in report.findings:
+            if f.kind == "class-duplicates":
+                self.assertTrue(f.fix is None or f.fix.safe is not True, f.message)
+
+    def test_a_compact_definition_names_the_class_it_holds(self):
+        self.assertIn("@A", fc.part_words("@B=[@A];\nsub x by [@A];\n"))
+        self.assertIn("@B", fc.part_words("@B=[@A];\n"))
+
+    def test_a_replacement_class_needs_its_repeats(self):
+        prefix = DECLARED + "@lc = [a b c];\n@sc = [a.sc b.sc a.sc];\n"
+        report = fc.check(code(prefix, smcp=feature("smcp", "  sub @lc by @sc;\n")), ORDER)
+        self.assertIsNone(finding(report, "class-duplicates"))
+
+    def test_a_class_defined_twice(self):
+        prefix = DECLARED + "@x = [a b];\n@y = [c];\n@x = [a];\n@y = [c];\n"
+        report = fc.check(code(prefix, smcp=feature("smcp", "  sub @x by a.sc;\n  sub @y by c.sc;\n")), ORDER)
+        self.assertEqual(finding(report, "class-redefined").subject, "@x")
+        repeated = finding(report, "class-repeated")
+        self.assertEqual((repeated.subject, repeated.line), ("@y again", 6))
+        self.assertIsNone(finding(report, "unused-class"), "the first one is not also removed as unused")
+        fixed = fc.apply_fixes(report.code, fc.safe_fixes(report, ORDER))
+        self.assertEqual(fixed.prefix.count("@y = [c];"), 1)
+        self.assertEqual(fixed.prefix.count("@x ="), 2, "a class defined differently is left to review")
+
+    def test_a_prefix_copy_unlike_fontlabs_class_can_be_made_the_same_again(self):
+        # (the CJK font's @aalt2, its repeats taken out of the prefix copy: "sub @lc by @sc;" no longer read)
+        prefix = DECLARED + "@lc = [a b c];\n@sc = [a.sc b.sc];\n"
+        c = fc.FontCode(prefix, [("smcp", feature("smcp", "  sub @lc by @sc;\n"))],
+                        [("lc", ["a", "b", "c"]), ("sc", ["a.sc", "b.sc", "a.sc"])])
+        report = fc.check(c, ORDER)
+        redefined = finding(report, "class-redefined")
+        self.assertEqual(redefined.subject, "@sc")
+        self.assertTrue(redefined.fix.review, "for review, never automatic")
+        mended = fc.apply_fixes(c, [redefined.fix])
+        self.assertIn("@sc = [a.sc b.sc a.sc];", mended.prefix)
+        self.assertTrue(fc.check(mended, ORDER).built)
+
+    def test_fontlab_class_and_its_copy_in_the_prefix_are_not_listed(self):
+        c = fc.FontCode(DECLARED + "@figures = [one two];\n", [("onum", feature("onum", "  sub @figures by [one.osf two.osf];\n"))],
+                        [("figures", ["one", "two"])])
+        self.assertEqual(fc.check(c, ORDER).findings, [])
+
+    def test_a_flag_without_its_class_has_a_fix_to_review(self):
+        prefix = DECLARED + "lookup MARKS { lookupflag 16; sub a by a.sc; } MARKS;\n"
+        report = fc.check(code(prefix, smcp=feature("smcp", "  lookup MARKS;\n")), ORDER)
+        flag = finding(report, "flag")
+        self.assertTrue(flag.fix.review)
+        self.assertEqual(fc.safe_fixes(report, ORDER), [], "never applied automatically")
+        self.assertIn("lookupflag 0;", fc.apply_fixes(report.code, [flag.fix]).prefix)
+        self.assertIn("review it", fc.fix_note(flag.fix))
+        self.assertTrue(fc.check(fc.apply_fixes(report.code, [flag.fix]), ORDER).built)
+
+    def test_fixes_are_proven_together(self):
+        # (one build a fix took a CJK font's 688 fixes 15 minutes in FontLab, live)
+        spare = "".join("@s%d = [c];\n" % i for i in range(40))
+        c = code(DECLARED + spare, smcp=feature("smcp", "  sub a by a.sc;\n"))
+        report = fc.check(c, ORDER)
+        built = []
+        saved = fc.Compiled.__init__
+
+        def counting(self, *args):
+            built.append(1)
+            saved(self, *args)
+        fc.Compiled.__init__ = counting
+        try:
+            fc.prove_fixes(report, ORDER)
+        finally:
+            fc.Compiled.__init__ = saved
+        self.assertTrue(all(f.fix.safe for f in report.findings if f.kind == "unused-class"))
+        self.assertLessEqual(len(built), 3, "the base and the 40 fixes together")
+
+    def test_a_bad_fix_among_good_ones_is_found_by_halves(self):
+        prefix = DECLARED + "@in = [a b a];\n@out = [a.sc b.sc c.sc];\n@other = [c c];\n"
+        c = code(prefix, smcp=feature("smcp", "  sub @in by @out;\n  sub @other by c.sc;\n"))
+        report = fc.check(c, ORDER)
+        fc.prove_fixes(report, ORDER)
+        dups = dict((f.subject, f) for f in report.findings if f.kind == "class-duplicates")
+        self.assertIsNone(dups["@in"].fix, "breaks the pairing: withdrawn")
+        self.assertIs(dups["@other"].fix.safe, True)
+
+    def test_progress_is_reported_by_steps(self):
+        seen = []
+        c = code(DECLARED + "@s = [c];\n", smcp=feature("smcp", "  sub a by a.sc;\n"), calt=feature("calt", "  sub a' b by\n"))
+        fc.check(c, ORDER, lambda what, done, total: seen.append(what))
+        clean = code(DECLARED + "@s = [c];\n", smcp=feature("smcp", "  sub a by a.sc;\n"))
+        report = fc.check(clean, ORDER)
+        fc.safe_fixes(report, ORDER, lambda what, done, total: seen.append(what))
+        for what in ("Reading the code", "Compiling", "Proving the fixes"):
+            self.assertIn(what, seen)
+
+        def stop(what, done, total):
+            raise fc.Stopped()
+        self.assertRaises(fc.Stopped, fc.check, c, ORDER, stop)
 
 
 @unittest.skipUnless(HAS_FONTTOOLS, "fontTools is not installed")

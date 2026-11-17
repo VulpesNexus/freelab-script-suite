@@ -3384,14 +3384,21 @@ class ProofDialog(object):
             if not self.read_font():
                 self.update_buttons()
                 return
+        ak = self.ak
         self.busy = True
         self.update_buttons()
         row = max(0, self.page_list.currentRow)
+        stopped = False
+        # The window's top row says what runs (ak.busy_start: the tools menu, the arrows, Close, and Esc stop
+        # it); it said "Laying out the proof" in the top line before, the window painted once
+        ak.busy_start(self, u"Reading the font")
         try:
-            self.font_label.setText(u"Laying out the proof of %s\N{HORIZONTAL ELLIPSIS}" % self.ak.b(self.package.tfn))
-            QtGui.QApplication.processEvents()
             masters = self.masters() if self.masters_box.currentIndex == 1 else [self.master]
-            fonts = [self.proof_font(master) for master in masters]
+            fonts = []
+            for master in masters:
+                ak.busy_progress(self, None, 0.6 * len(fonts) / float(len(masters)))
+                fonts.append(self.proof_font(master))
+            ak.busy_progress(self, u"Laying out the pages", 0.6)
             options = self.options()
             languages = self.load_languages()
             self.fill_scopes(fonts[0], languages)
@@ -3407,14 +3414,25 @@ class ProofDialog(object):
                 else:  # the languages written in that script (all of them, where none is named so: Han)
                     same = [language for language in languages if (u"%s" % language.script).upper() == scope[1]]
                     languages = same or languages
-            self.proof = build_proof(fonts, options, languages, info=self.font_info(), summary=summary)
+            ak.busy_progress(self, None, 0.8)
+            proof = build_proof(fonts, options, languages, info=self.font_info(), summary=summary)
+            ak.busy_progress(self, None, 1.0, stoppable=False)  # (laid out: shown, a stop asked now comes too late)
+            self.proof = proof
             self.page_options = options
             self.note_font(fonts[0], options)
+        except ak.Stopped:  # (by the user: the pages shown stay those of before)
+            stopped = True
         except Exception as exc:
             self.proof = None
             self.log.add(u"The proof could not be laid out: %s" % self.ak.html(exc), "error")
         finally:
             self.busy = False
+            ak.busy_end(self)
+        if stopped:
+            self.log.add(u"Laying out the proof was stopped: the pages shown are those of before.", "warning")
+            self.status()
+            self.update_buttons()
+            return
         wanted, self.show_section = getattr(self, "show_section", None), None
         if wanted is not None and self.proof is not None:  # (a setting that changes pages further on: shown)
             row = next((number for number, page in enumerate(self.proof.pages) if wanted in page.sections), row)
@@ -3712,10 +3730,13 @@ class ProofDialog(object):
         self.update_buttons()
         b = self.ak.b
         pages = self.proof.pages
+        # The pages written in the window's top row (owner's image 180), never stopped half way: a PDF half
+        # written is no PDF (what was clicked meanwhile is done once it is whole)
+        self.ak.busy_start(self, u"Writing the PDF", stoppable=False)
         try:
             def progress(done, total):
-                self.font_label.setText(u"Writing page %s of %s\N{HORIZONTAL ELLIPSIS}" % (b(done), b(total)))
-                QtGui.QApplication.processEvents()
+                self.ak.busy_progress(self, u"Writing page %d of %d" % (done, total),
+                                      done / float(total or 1), stoppable=False)
 
             ink, paper = self.colors()
             renderer = Renderer(QtCore, QtGui, self.path, self.ak._property(self.dialog, "font").family(),
@@ -3730,6 +3751,7 @@ class ProofDialog(object):
             self.log.add(u"The PDF could not be written: %s" % self.ak.html(exc), "error")
         finally:
             self.busy = False
+            self.ak.busy_end(self)
             self.status()
             self.update_buttons()
 

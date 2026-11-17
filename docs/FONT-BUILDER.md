@@ -4,21 +4,21 @@
 
 ## Template
 
-- **Glyphs**: the characters typed or pasted in the box (each once; spaces do not count), or one of Font Check's character sets (its scripts, Unicode blocks, and foundries' sets).
-- **Leave out the glyphs the font has drawn** (with a font open): no box for a glyph that has outlines, components, or an image in the current master.
+- **Glyphs**: the characters typed or pasted in the box (each once; spaces do not count), or one of Font Check's character sets (its scripts, Unicode blocks, and foundries' sets). The common sets come first (Latin, Cyrillic, Greek, Arabic, Hebrew, Devanagari, Thai, kana, the main Chinese, Japanese, and Korean sets, punctuation, currency), then a line, then every set, the common ones again among them. A set picked fills the box with its characters, to edit: once edited, the choice is *Characters typed below*. A list too long for its screen scrolls, with a scroll bar (every FreeLab dropdown does).
+- **Leave out the glyphs the font has drawn** (with a font open; grayed out without one): no box for a glyph that has outlines, components, or an image in the current master.
 - **Alternates of each**: boxes for *name.alt1*, *name.alt2*, and so on after each glyph, for a handwriting font's alternates (Feature Code makes them take turns).
 - **Glyphs a sheet** (100 by default, 400 at most): there are as many sheets as the glyphs need. A sheet larger than 120 megapixels gets fewer, so a CJK set at a large em size makes more, smaller sheets.
 - **Em size** (500 pixels by default): the em on the sheet. 500 draws well on a screen; for print at 300 dpi, an em of 500 pixels is 4.2 cm.
 
 A glyph is named as the font names it, where it has the character; else by its usual name (the Adobe Glyph List's for ASCII, Glyphs' for the rest, from Glyph Compose's *glyph_names.json*); else *uniXXXX*.
 
-Each glyph has a box: its em with the font's ascender, cap height, x-height, baseline (thicker), and descender, and an origin line, room above and below for accents and swashes, and the character over it with its glyph name. They are drawn in a pale blue (a gray of about 205) that the reading leaves out. Without a font open, the metrics are 1000 units to the em, ascender 800, descender −200, x-height 500, cap height 700.
+Each glyph has a box: its em with the font's ascender, cap height, x-height, baseline (thicker), and descender, and an origin line, room above and below for accents and swashes, and the character over it with its glyph name. They are drawn in a pale blue (a gray of about 205) that the reading leaves out. Without a font open, the metrics are 1000 units to the em, ascender 750, descender −250, x-height 500, cap height 700.
 
-*Save template* writes one image a sheet, PNG or TIFF, numbered (*Family-1-of-3.png*).
+*Save template* writes one image a sheet, PNG or TIFF, numbered (*Family-1-of-3.png*), or one SVG drawing a sheet for vector apps (Illustrator, Inkscape, Affinity Designer): the same sheet, its pixels the drawing's units, the template in a locked group (*template*) and an empty group (*drawing*) above it to draw in.
 
 ## Drawing
 
-Open a sheet in any app (Photoshop, Clip Studio Paint, Krita, Procreate, Illustrator) or print it. Draw each glyph in dark ink inside its box, on the image or on a layer above it, and save or export each sheet as an image again: PNG, JPEG, TIFF, BMP, WebP, or PSD (FontLab reads a PSD's flattened image). Paper can be scanned or photographed.
+Open a sheet in any app (Photoshop, Clip Studio Paint, Krita, Procreate, Illustrator, Inkscape) or print it. Draw each glyph in dark ink inside its box, on the image or on a layer above it, and save or export each sheet again: PNG, JPEG, TIFF, BMP, WebP, PSD (FontLab reads a PSD's flattened image), or SVG. An SVG sheet is read as FontLab's Qt draws it, at its own size, then traced as any image: filled shapes and strokes alike, so a vector app needs no *Outline Stroke*. Paper can be scanned or photographed.
 
 The four corner squares and the two bands of black and white squares, over and under the boxes, tell the reading where the sheet is in the image and what it holds: its layout, its glyph names, and the metrics it was made with. A sheet needs no file beside it and no metadata (apps often drop it), so it can be read on another computer than the one that made it, and it can be turned, skewed, or photographed at a slant. Keep the squares and the bands clean and wholly in the image; one band is enough, so a smudge on one does no harm.
 
@@ -39,6 +39,9 @@ The list shows each glyph as traced, the sheet it came from, and a note (its con
 - The lists stand for the font and master they were read for: after a switch to another master, *Build* asks to read the sheets again.
 - The ink is scaled from the units of the font the template was made with to this font's (a sheet made at 1000 units to the em, built in a font of 2048, keeps its size in ems).
 - The outlines turn the font's way (TrueType or PostScript, read from its glyphs), and each drawing is made before its glyph is touched.
+- With no font open (when the sheets were read and when building), *Build checked glyphs* makes a new font first, open in its own window: the units per em, ascender, descender, x-height, cap height, and family name of the font that made the sheets (the first sheet read), one master, *Regular*. The glyphs go in as drawn, with their code points. FontLab names the new font's window *Unnamed Regular* until it is saved.
+
+The list draws each glyph on its baseline, in the window's text color, as every FreeLab list draws glyphs.
 
 ## Why FreeLab traces, not FontLab
 

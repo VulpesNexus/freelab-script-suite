@@ -51,6 +51,7 @@ It runs everything under Python 3, including the native helper's tests, then the
 
 ## More
 
+- [docs/WINDOWS.md](docs/WINDOWS.md): what every FreeLab window shares (long work and stopping it, no font, lists).
 - [docs/DARKMODE.md](docs/DARKMODE.md): how FontLab 7 colors itself, and how dark mode turns each part dark.
 - [docs/KERNING.md](docs/KERNING.md): auto kerning, how it measures, and its limits.
 - [docs/SPACING.md](docs/SPACING.md): auto spacing, how it measures, and its limits.

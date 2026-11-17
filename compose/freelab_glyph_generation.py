@@ -4,8 +4,11 @@
 Lists the characters of its first scope the font lacks (spaces, hyphens and dashes, duplicates,
 punctuation, Greek and Cyrillic look-alikes, ligature letters, vulgar fractions, arrows and triangles:
 205 characters; then the turned and reversed letters, 41 starting points; then the four sources the
-arrows and triangles turn, built back from them) that it can make of the
-glyphs the font has, and builds the checked ones in every master, as one step of FontLab's History. A
+arrows and triangles turn, built back from them; and, in a font with CJK, the squared words and
+abbreviations of the CJK Compatibility blocks, 206 starting points: SQUARED, square_layout) that it can make
+of the glyphs the font has, and builds the checked ones in every master, as one step of FontLab's History.
+A character whose glyph the font has empty (a CID-keyed font keeps one for each character of its
+collection) is listed as one it lacks, and its glyph filled when built (Row.filled). A
 turned or reversed letter is said "likely usable as it is" where the font's design measures monoline
 (likely_usable, its thresholds from the corpus). What Font Check hands over (the window's
 generation_given) is listed alone at first.
@@ -95,7 +98,7 @@ def load_data(path=None):
     if path not in _DATA:
         try:
             with io.open(path, encoding="utf-8") as handle:
-                _DATA[path] = json.load(handle)
+                _DATA[path] = with_squares(json.load(handle))
         except (IOError, OSError, ValueError):
             _DATA[path] = {}
     return _DATA[path]
@@ -115,6 +118,196 @@ def settings_of(data, saved=None):
         if low is not None and low <= value <= high:
             found[key] = int(round(value)) if key in ("thin", "hair") else value
     return found
+
+
+# -- Squared words and abbreviations (owner's report 177: "even a Japanese font doesn't offer the characters
+# built from several kana into a square composition") -------------------------------------------------------
+# The characters of Unicode's CJK Compatibility blocks whose decomposition is <square>: the katakana words
+# (U+3300 to U+3357), the era names and the corporation sign (U+337B to U+337F, U+32FF), and the Latin units and
+# abbreviations (U+3371 to U+33DF, U+33FF, U+3250, U+32CC to U+32CF). Their components set in the em square,
+# scaled (square_layout), only where the font has every one drawn and has CJK; a starting point, never checked
+# at first: Japanese fonts draw them by hand, and a scaled kana is thinner than its neighbors. The table is
+# Unicode 16's (FontLab's Python 2.7 has Unicode 5.2, without U+32FF; the tests check it against Python 3's).
+SQUARED = (
+    u"3250:0050 0054 0045 / 32CC:0048 0067 / 32CD:0065 0072 0067 / 32CE:0065 0056 / 32CF:004C 0054 0044 / "
+    u"32FF:4EE4 548C / 3300:30A2 30D1 30FC 30C8 / 3301:30A2 30EB 30D5 30A1 / 3302:30A2 30F3 30DA 30A2 / "
+    u"3303:30A2 30FC 30EB / 3304:30A4 30CB 30F3 30B0 / 3305:30A4 30F3 30C1 / 3306:30A6 30A9 30F3 / "
+    u"3307:30A8 30B9 30AF 30FC 30C9 / 3308:30A8 30FC 30AB 30FC / 3309:30AA 30F3 30B9 / 330A:30AA 30FC 30E0 / "
+    u"330B:30AB 30A4 30EA / 330C:30AB 30E9 30C3 30C8 / 330D:30AB 30ED 30EA 30FC / 330E:30AC 30ED 30F3 / "
+    u"330F:30AC 30F3 30DE / 3310:30AE 30AC / 3311:30AE 30CB 30FC / 3312:30AD 30E5 30EA 30FC / "
+    u"3313:30AE 30EB 30C0 30FC / 3314:30AD 30ED / 3315:30AD 30ED 30B0 30E9 30E0 / "
+    u"3316:30AD 30ED 30E1 30FC 30C8 30EB / 3317:30AD 30ED 30EF 30C3 30C8 / 3318:30B0 30E9 30E0 / "
+    u"3319:30B0 30E9 30E0 30C8 30F3 / 331A:30AF 30EB 30BC 30A4 30ED / 331B:30AF 30ED 30FC 30CD / "
+    u"331C:30B1 30FC 30B9 / 331D:30B3 30EB 30CA / 331E:30B3 30FC 30DD / 331F:30B5 30A4 30AF 30EB / "
+    u"3320:30B5 30F3 30C1 30FC 30E0 / 3321:30B7 30EA 30F3 30B0 / 3322:30BB 30F3 30C1 / 3323:30BB 30F3 30C8 / "
+    u"3324:30C0 30FC 30B9 / 3325:30C7 30B7 / 3326:30C9 30EB / 3327:30C8 30F3 / 3328:30CA 30CE / "
+    u"3329:30CE 30C3 30C8 / 332A:30CF 30A4 30C4 / 332B:30D1 30FC 30BB 30F3 30C8 / 332C:30D1 30FC 30C4 / "
+    u"332D:30D0 30FC 30EC 30EB / 332E:30D4 30A2 30B9 30C8 30EB / 332F:30D4 30AF 30EB / 3330:30D4 30B3 / "
+    u"3331:30D3 30EB / 3332:30D5 30A1 30E9 30C3 30C9 / 3333:30D5 30A3 30FC 30C8 / 3334:30D6 30C3 30B7 30A7 30EB / "
+    u"3335:30D5 30E9 30F3 / 3336:30D8 30AF 30BF 30FC 30EB / 3337:30DA 30BD / 3338:30DA 30CB 30D2 / "
+    u"3339:30D8 30EB 30C4 / 333A:30DA 30F3 30B9 / 333B:30DA 30FC 30B8 / 333C:30D9 30FC 30BF / "
+    u"333D:30DD 30A4 30F3 30C8 / 333E:30DC 30EB 30C8 / 333F:30DB 30F3 / 3340:30DD 30F3 30C9 / "
+    u"3341:30DB 30FC 30EB / 3342:30DB 30FC 30F3 / 3343:30DE 30A4 30AF 30ED / 3344:30DE 30A4 30EB / "
+    u"3345:30DE 30C3 30CF / 3346:30DE 30EB 30AF / 3347:30DE 30F3 30B7 30E7 30F3 / 3348:30DF 30AF 30ED 30F3 / "
+    u"3349:30DF 30EA / 334A:30DF 30EA 30D0 30FC 30EB / 334B:30E1 30AC / 334C:30E1 30AC 30C8 30F3 / "
+    u"334D:30E1 30FC 30C8 30EB / 334E:30E4 30FC 30C9 / 334F:30E4 30FC 30EB / 3350:30E6 30A2 30F3 / "
+    u"3351:30EA 30C3 30C8 30EB / 3352:30EA 30E9 / 3353:30EB 30D4 30FC / 3354:30EB 30FC 30D6 30EB / "
+    u"3355:30EC 30E0 / 3356:30EC 30F3 30C8 30B2 30F3 / 3357:30EF 30C3 30C8 / 3371:0068 0050 0061 / "
+    u"3372:0064 0061 / 3373:0041 0055 / 3374:0062 0061 0072 / 3375:006F 0056 / 3376:0070 0063 / 3377:0064 006D / "
+    u"3378:0064 006D 00B2 / 3379:0064 006D 00B3 / 337A:0049 0055 / 337B:5E73 6210 / 337C:662D 548C / "
+    u"337D:5927 6B63 / 337E:660E 6CBB / 337F:682A 5F0F 4F1A 793E / 3380:0070 0041 / 3381:006E 0041 / "
+    u"3382:03BC 0041 / 3383:006D 0041 / 3384:006B 0041 / 3385:004B 0042 / 3386:004D 0042 / 3387:0047 0042 / "
+    u"3388:0063 0061 006C / 3389:006B 0063 0061 006C / 338A:0070 0046 / 338B:006E 0046 / 338C:03BC 0046 / "
+    u"338D:03BC 0067 / 338E:006D 0067 / 338F:006B 0067 / 3390:0048 007A / 3391:006B 0048 007A / "
+    u"3392:004D 0048 007A / 3393:0047 0048 007A / 3394:0054 0048 007A / 3395:03BC 2113 / 3396:006D 2113 / "
+    u"3397:0064 2113 / 3398:006B 2113 / 3399:0066 006D / 339A:006E 006D / 339B:03BC 006D / 339C:006D 006D / "
+    u"339D:0063 006D / 339E:006B 006D / 339F:006D 006D 00B2 / 33A0:0063 006D 00B2 / 33A1:006D 00B2 / "
+    u"33A2:006B 006D 00B2 / 33A3:006D 006D 00B3 / 33A4:0063 006D 00B3 / 33A5:006D 00B3 / 33A6:006B 006D 00B3 / "
+    u"33A7:006D 2215 0073 / 33A8:006D 2215 0073 00B2 / 33A9:0050 0061 / 33AA:006B 0050 0061 / "
+    u"33AB:004D 0050 0061 / 33AC:0047 0050 0061 / 33AD:0072 0061 0064 / 33AE:0072 0061 0064 2215 0073 / "
+    u"33AF:0072 0061 0064 2215 0073 00B2 / 33B0:0070 0073 / 33B1:006E 0073 / 33B2:03BC 0073 / 33B3:006D 0073 / "
+    u"33B4:0070 0056 / 33B5:006E 0056 / 33B6:03BC 0056 / 33B7:006D 0056 / 33B8:006B 0056 / 33B9:004D 0056 / "
+    u"33BA:0070 0057 / 33BB:006E 0057 / 33BC:03BC 0057 / 33BD:006D 0057 / 33BE:006B 0057 / 33BF:004D 0057 / "
+    u"33C0:006B 03A9 / 33C1:004D 03A9 / 33C2:0061 002E 006D 002E / 33C3:0042 0071 / 33C4:0063 0063 / "
+    u"33C5:0063 0064 / 33C6:0043 2215 006B 0067 / 33C7:0043 006F 002E / 33C8:0064 0042 / 33C9:0047 0079 / "
+    u"33CA:0068 0061 / 33CB:0048 0050 / 33CC:0069 006E / 33CD:004B 004B / 33CE:004B 004D / 33CF:006B 0074 / "
+    u"33D0:006C 006D / 33D1:006C 006E / 33D2:006C 006F 0067 / 33D3:006C 0078 / 33D4:006D 0062 / "
+    u"33D5:006D 0069 006C / 33D6:006D 006F 006C / 33D7:0050 0048 / 33D8:0070 002E 006D 002E / "
+    u"33D9:0050 0050 004D / 33DA:0050 0052 / 33DB:0073 0072 / 33DC:0053 0076 / 33DD:0057 0062 / "
+    u"33DE:0056 2215 006D / 33DF:0041 2215 006D / 33FF:0067 0061 006C")
+SQUARED_GROUP = {"id": "squared", "title": u"Squared words and abbreviations"}
+SQUARED_NAMES = {"32FF": u"SQUARE ERA NAME REIWA"}  # (Unicode 12.1: past FontLab's Python 2.7)
+# A word that starts with a unit's prefix keeps it on the top row (キロ over メートル, as fonts set ㌖)
+SQUARE_PREFIXES = (("30AD", "30ED"), ("30DF", "30EA"), ("30E1", "30AC"), ("30AE", "30AC"))
+EM_BOX_BOTTOM = -0.12  # the ideographic em box's bottom, of the em (Adobe's: 880 over the baseline, 120 under)
+LATIN_MOST = 0.8  # a Latin abbreviation's letters at most this share of their size, the row across the em
+LATIN_LEAST_HEIGHT = 0.55  # and never shorter than this: a long one (kcal) is narrowed instead
+SQUARE_ROOM = 0.94  # of the em's width, the most a Latin row takes
+
+
+def squared_table():
+    """[(code hex, [component hex])] of SQUARED, in Unicode's order."""
+    found = []
+    for item in SQUARED.split(u" / "):
+        code, parts = item.split(u":")
+        found.append((str(code), [str(part) for part in parts.split()]))
+    return found
+
+
+def squared_entries():
+    """The table's entries for the squared characters (Glyph generation's table is compose/train's; these
+    are added as it is read: load_data): each a starting point, for fonts with CJK."""
+    entries = []
+    for code, parts in squared_table():
+        entries.append({"code": code, "group": SQUARED_GROUP["id"], "unicode_name": square_character(code)["name"],
+                        "glyph_name": u"uni%s" % code, "families": 0, "deriving": 0,
+                        "research_confidence": CONFIDENCES[2],
+                        "ways": [{"op": "square", "of": parts, "confidence": CONFIDENCES[2], "only": "cjk"}]})
+    return entries
+
+
+def square_character(code):
+    """{"category", "name"} of a squared character or of one of its components, as the table's "characters"
+    give them (Unicode's own, else SQUARED_NAMES: FontLab's Python 2.7 lacks ㋿)."""
+    import unicodedata
+    ch = char_of(code)
+    try:
+        return {"category": unicodedata.category(ch), "name": unicodedata.name(ch)}
+    except (ValueError, TypeError):
+        return {"category": u"So", "name": SQUARED_NAMES.get(code, u"")}
+
+
+def with_squares(data):
+    """The recipe table with the squared characters added (a group of their own, last; a code the table has
+    already keeps its own recipe), each and its components named in its "characters"."""
+    if not data or not isinstance(data, dict):
+        return data
+    have = set(entry.get("code") for entry in data.get("entries") or [])
+    added = [entry for entry in squared_entries() if entry["code"] not in have]
+    if added:
+        known = data.setdefault("characters", {})
+        for entry in added:
+            for code in [entry["code"]] + list(entry["ways"][0]["of"]):
+                if code not in known:
+                    known[code] = square_character(code)
+        data["entries"] = list(data.get("entries") or []) + added
+        groups = list(data.get("groups") or [])
+        if all(group.get("id") != SQUARED_GROUP["id"] for group in groups):
+            groups.append(dict(SQUARED_GROUP, count=len(added)))
+        data["groups"] = groups
+    return data
+
+
+def square_kind(parts):
+    """"cjk" for a squared word of kana or ideographs (each a full em wide, set in rows), "latin" for one of
+    Latin, Greek, and signs (set in one row, at their own widths)."""
+    def wide(hex_):
+        code = int(hex_, 16)
+        return 0x3040 <= code <= 0x30FF or 0x3400 <= code <= 0x9FFF or 0xF900 <= code <= 0xFAFF
+    return "cjk" if parts and all(wide(part) for part in parts) else "latin"
+
+
+def square_rows(parts):
+    """How many components each row of a squared word of kana or ideographs holds, top row first, as
+    Japanese fonts set them: two stacked (㌔ キ over ロ, ㍻ 平 over 成), three as two over one (㌢ セン over
+    チ), four as two over two (㍍ メー over トル, ㍿ 株式 over 会社), five as two over three (㌫ パー over
+    セント), six as three over three; a unit's prefix keeps its row (㌖ キロ over メートル)."""
+    count = len(parts)
+    if count <= 2:
+        return [1] * count
+    if count > 4 and tuple(parts[:2]) in SQUARE_PREFIXES and count - 2 <= 4:
+        return [2, count - 2]
+    if count == 3:
+        return [2, 1]
+    if count > 8:  # (none in Unicode: three rows, as even as they go)
+        third = int(math.ceil(count / 3.0))
+        return [third, third, count - 2 * third]
+    top = count // 2
+    return [top, count - top]
+
+
+def square_layout(cells, em, upm, bottom, kind, rows=None):
+    """[(glyph, matrix)] of a squared character's components in its em square: cells [(glyph, advance)];
+    em: the square's width (a full-width glyph's advance); upm: its height; bottom: the em box's bottom.
+    Kana and ideographs ("cjk"): rows (square_rows) of cells as tall as the square over their count, each
+    component's own em box scaled into its cell (narrower in a row of more). Latin ("latin"): one row at the
+    components' own advances, scaled to fit SQUARE_ROOM of the width (at most LATIN_MOST, narrowed rather
+    than made shorter than LATIN_LEAST_HEIGHT), centered across and on the em box's middle."""
+    em, upm, bottom = float(em), float(upm), float(bottom)
+    placed = []
+    if kind == "cjk":
+        rows = rows or [1] * len(cells)
+        height = upm / len(rows)
+        at = 0
+        for row, count in enumerate(rows):
+            width = em / count
+            row_bottom = bottom + upm - (row + 1) * height
+            for column in range(count):
+                name, advance = cells[at]
+                at += 1
+                sx, sy = width / float(advance or em), height / upm
+                placed.append((name, (sx, 0.0, 0.0, sy, float(round(column * width)),
+                                      float(round(row_bottom - sy * bottom)))))
+        return placed
+    total = float(sum(advance for _, advance in cells)) or em
+    sx = min(LATIN_MOST, em * SQUARE_ROOM / total)
+    sy = min(LATIN_MOST, max(sx, LATIN_LEAST_HEIGHT))
+    middle = bottom + upm / 2.0
+    x = (em - sx * total) / 2.0
+    for name, advance in cells:
+        placed.append((name, (sx, 0.0, 0.0, sy, float(round(x)), float(round(middle - sy * middle)))))
+        x += sx * advance
+    return placed
+
+
+def square_words(parts):
+    """How a squared character's components are set, for its Recipe cell: "stacked", "2 over 1", "in a row"."""
+    if square_kind(parts) != "cjk":
+        return u"in a row"
+    rows = square_rows(parts)
+    if rows == [1, 1]:
+        return u"stacked"
+    return u" over ".join(u"%d" % count for count in rows)
 
 
 # ---------------------------------------------------------------------------
@@ -374,6 +567,10 @@ def vary_settings(saved, strengths):
     return saved.get("vary") is True, seed, strength
 
 
+class NotStopped(Exception):
+    """Stands for the shared module's Stopped where the window has none (never raised)."""
+
+
 class Need(Exception):
     """A way the font cannot take: what it lacks, in words; hex: the character of the table it lacks, where it
     is one."""
@@ -393,6 +590,7 @@ class Row(object):
         self.entry, self.name, self.group = entry, name, entry["group"]
         self.way, self.way_index, self.layout, self.missing = None, None, None, None
         self.existing = False  # the font has the character already (listed to rebuild)
+        self.filled = False  # the font has a glyph for it, empty: filled when built (a CID-keyed font's)
         self.needs = []  # the glyphs of this list it is built of: built first
         self.checked = False
         self.notes = []
@@ -528,6 +726,11 @@ class Font(object):
         """Whether the glyph has a layer in this master (a variable font's sparse masters lack some)."""
         return True
 
+    def is_empty(self, name):
+        """Whether the glyph has a layer in this master with nothing in it (a CID-keyed font's glyph never
+        drawn: 07LightNovelPOP's ㍻ is one)."""
+        return False
+
     def polygons(self, name):
         """A glyph's outline as polygons, curves flattened ([] where it cannot be read)."""
         return []
@@ -560,6 +763,7 @@ class Planner(object):
         self.order = [e["code"] for e in entries]
         self.listed = set(codes) if codes is not None else None
         self.rows, self.by_hex, self.by_name = [], {}, {}
+        self.progress = None  # (progress(share) told as the plan goes: the window's top row)
 
     def describe(self, code_hex):
         return describe_code(code_hex, self.data.get("characters"))
@@ -574,25 +778,37 @@ class Planner(object):
         taken = set(names)
         self.ways = dict(ways or {})
         self.rows, self.by_hex, self.by_name = [], {}, {}
-        for hex_ in self.order:
+        cjk = None
+        for at, hex_ in enumerate(self.order):
+            if self.progress is not None and not at % 50:
+                self.progress(0.5 * at / float(len(self.order)))
             entry = self.entries[hex_]
             code = int(hex_, 16)
             own = font.glyph_of(code)
-            if any(way.get("only") == "cjk" for way in entry["ways"]) and not font.has_cjk():
-                continue
-            if own is not None and not self.include_existing:
+            if any(way.get("only") == "cjk" for way in entry["ways"]):
+                cjk = font.has_cjk() if cjk is None else cjk
+                if not cjk:
+                    continue
+            # A glyph the font has for it, empty (a CID-keyed font keeps one for each character of its
+            # collection, drawn or not): filled when built, as the Diacritics tab fills one (row.filled)
+            empty = own is not None and font.is_empty(own)
+            if own is not None and not self.include_existing and not empty:
                 continue
             if own is not None and len(font.codes_of(own)) > 1:
                 continue  # (its glyph stands for other characters too: rebuilt, they would change with it)
             name = own or self.free_name(entry, taken)
             taken.add(name)
             row = Row(entry, name)
-            row.existing = own is not None
+            row.existing = own is not None and not empty
+            row.filled = empty
             self.rows.append(row)
             self.by_hex[hex_] = row
             self.by_name[name] = row
-        for row in self.rows:
+        for at, row in enumerate(self.rows):
+            if self.progress is not None and not at % 20:
+                self.progress(0.5 + 0.5 * at / float(len(self.rows)))
             self.choose(row, self.ways.get(row.hex))
+        self.unfilled()
         self.draw_notes()
         for row in self.rows:
             check = (row.way or {}).get("check")
@@ -603,6 +819,19 @@ class Planner(object):
             drafts = self.draft_needs([row for row in self.rows if row.hex in self.listed])
             self.rows = [row for row in self.rows if row.hex in self.listed or id(row) in drafts]
         return self.rows
+
+    def unfilled(self):
+        """A row whose empty glyph its recipe would leave empty (a space: the font's empty glyph is what it
+        should be), or that no way can fill: the font's own glyph, as before (listed only with Also list
+        existing glyphs)."""
+        for row in list(self.rows):
+            if not row.filled or (row.layout is not None and row.layout.kind != "empty"):
+                continue
+            row.filled, row.existing = False, True
+            if not self.include_existing:
+                self.rows.remove(row)
+                self.by_hex.pop(row.hex, None)
+                self.by_name.pop(row.name, None)
 
     def draw_notes(self):
         """The source to draw named as such: a row that cannot be built, which two rows or more need, and
@@ -696,7 +925,7 @@ class Planner(object):
                     lacking.append(need.hex)
                 continue
             path = None
-            if row.existing:  # (any part of its own glyph, then any loop through the font's components)
+            if row.existing or row.filled:  # (any part of its own glyph, then any loop through the font's components)
                 try:
                     path = [row.name] if any(part.name == row.name for part in layout.parts) else \
                         component_loop(row.name, component_names(layout), self.planned_components)
@@ -740,20 +969,37 @@ class Planner(object):
         layout plans them; else the font's own (Font.components, GraphUnreadable where they cannot be read).
         A loop through a glyph built here is seen at planning too: with Ð built from Ɖ (2026-11-16), a rebuilt
         Ð was offered as a copy of Ɖ made of Đ, itself made of Ð, refused only at the build."""
-        row = self.by_name.get(name)
-        if row is not None and row.layout is not None and not row.existing and self.font.glyph_of(row.code) is None:
+        row = self.planned(name)
+        if row is not None:
             return component_names(row.layout)
         return self.font.components(name)
 
+    def planned(self, name):
+        """The row this list builds a glyph as, where its glyph is not the font's to read: a glyph the font
+        lacks, or an empty one it fills (row.filled); else None."""
+        row = self.by_name.get(name)
+        if row is None or row.layout is None or row.existing:
+            return None
+        if self.font.glyph_of(row.code) is None or (getattr(row, "filled", False) and row.layout.kind != "empty"):
+            return row
+        return None
+
     # -- sources ---------------------------------------------------------------------------------------------
 
-    def source(self, hex_, stack, needs, outlines=False):
+    def source(self, hex_, stack, needs, outlines=False, ink=True):
         """(glyph name, its layout or None) of a character: the font's glyph, else one this list builds
         first (never when outlines are wanted: a mirror or a stretch reads the source's own outlines)."""
         name = self.font.glyph_of(int(hex_, 16))
-        if name is not None:
-            return self.drawn(name), None
         row = self.by_hex.get(hex_)
+        if name is not None and row is not None and getattr(row, "filled", False) and not outlines and hex_ not in stack:
+            # (an empty glyph of the font's that this list fills: built first, as one the font lacks)
+            self.choose(row, getattr(self, "ways", {}).get(hex_), stack=stack)
+            if row.layout is not None and row.layout.kind in ("components", "mirrored"):
+                if row.name not in needs:
+                    needs.append(row.name)
+                return row.name, row.layout
+        if name is not None:
+            return self.drawn(name, ink), None
         if row is not None and not outlines and hex_ not in stack and not row.existing:
             self.choose(row, getattr(self, "ways", {}).get(hex_), stack=stack)
             if row.layout is not None and row.layout.kind in ("components", "mirrored"):
@@ -762,17 +1008,21 @@ class Planner(object):
                 return row.name, row.layout
         raise Need(u"needs %s" % self.describe(hex_), hex_)
 
-    def drawn(self, name):
+    def drawn(self, name, ink=True):
         """A source glyph of the font, once it is known to have a layer in this master: a variable font's
-        sparse master (Rubik's Bold) has none for many glyphs, and a glyph made of them gets none either."""
+        sparse master (Rubik's Bold) has none for many glyphs, and a glyph made of them gets none either.
+        With ink (all but a space's advance), drawn too: a CID-keyed font's empty hyphen made an empty
+        U+2010 counted as built, its empty K an empty Kelvin sign (review 12)."""
         if not self.font.has_layer(name):
             raise Need(NO_LAYER % name)
+        if ink and self.font.is_empty(name):
+            raise Need(u"%s: its glyph is empty" % name)
         return name
 
     def box(self, name, matrix=IDENTITY):
         """A glyph's ink through a transform: the font's own, or a planned glyph's parts'."""
-        row = self.by_name.get(name)
-        if row is not None and row.layout is not None and not row.existing and self.font.glyph_of(row.code) is None:
+        row = self.planned(name)
+        if row is not None:
             return union([self.part_box(part.moved(matrix)) for part in row.layout.parts])
         return self.font.box(name, matrix)
 
@@ -789,6 +1039,9 @@ class Planner(object):
     def advance(self, name):
         row = self.by_name.get(name)
         if row is not None and row.layout is not None and self.font.glyph_of(row.code) is None:
+            return row.layout.advance
+        row = self.planned(name)  # (an empty glyph this list fills)
+        if row is not None:
             return row.layout.advance
         return self.font.advance(name)
 
@@ -810,9 +1063,9 @@ class Planner(object):
             figure = self.font.figure
             if figure is None:
                 raise Need(u"needs the figures (0 to 9)")
-            advance = self.font.advance(self.drawn(figure))
+            advance = self.font.advance(self.drawn(figure, ink=False))
         else:
-            name, _ = self.source(way["advance_of"], stack, needs)
+            name, _ = self.source(way["advance_of"], stack, needs, ink=False)
             advance = self.advance(name)
         return Layout([], round(advance), kind="empty")
 
@@ -820,7 +1073,8 @@ class Planner(object):
         name = self.font.glyph_of(int(way["of"], 16))
         if name is None:
             raise Need(u"needs %s" % self.describe(way["of"]), way["of"])
-        if row.existing:  # (its own glyph rebuilt as a copy: the code point cannot move to another glyph here)
+        self.drawn(name)  # (shared with a glyph that has ink: an empty K gave the Kelvin sign nothing; review 12)
+        if row.existing or row.filled:  # (its own glyph rebuilt as a copy: the code point cannot move to another glyph here)
             return Layout([Part(name)], self.advance(name))
         return Layout([Part(name)], self.advance(name), kind="shared", shared=name)
 
@@ -877,7 +1131,8 @@ class Planner(object):
         if name is None:
             raise Need(u"needs %s" % self.describe(way["of"]), way["of"])
         advance = self.font.advance(self.drawn(name))
-        kind = "components" if self.font.composite(name) or row.existing else "mirrored"
+        # (a glyph of the font's, drawn or empty, keeps its name: a mirrored one is a new glyph, made under it)
+        kind = "components" if self.font.composite(name) or row.existing or row.filled else "mirrored"
         if way.get("axis") == "y":  # upside down, about the middle of its ink (as a corrected glyph is made)
             box = self.box(name)
             if box is None:
@@ -959,6 +1214,33 @@ class Planner(object):
         amount = round((p[2] - p[0]) - (h[2] - h[0]))
         dx, dy = round(p[0] - h[0]), round((p[1] + p[3]) / 2.0 - (h[1] + h[3]) / 2.0)
         return Layout([Part(hyphen, translation(dx, dy), ((h[0] + h[2]) / 2.0, amount))], self.font.advance(plus))
+
+    def op_square(self, way, row, stack, needs):
+        """A squared word or abbreviation: its components, the font's own drawn glyphs only, set in the em
+        square (square_layout), as wide as a full-width glyph."""
+        cells = []
+        for hex_ in way["of"]:
+            name = self.font.glyph_of(int(hex_, 16))
+            if name is None:
+                raise Need(u"needs %s" % self.describe(hex_), hex_)
+            if self.font.box(self.drawn(name)) is None:  # (drawn in the font: never one this list fills first)
+                raise Need(u"needs %s (its glyph is empty)" % self.describe(hex_), hex_)
+            cells.append((name, self.font.advance(name)))
+        em = self.em_width()
+        kind = square_kind(way["of"])
+        placed = square_layout(cells, em, self.font.upm, EM_BOX_BOTTOM * self.font.upm, kind,
+                               square_rows(way["of"]) if kind == "cjk" else None)
+        return Layout([Part(name, matrix) for name, matrix in placed], round(em))
+
+    def em_width(self):
+        """A full-width glyph's advance (the ideographic space's, 一's, あ's, or ア's), else the em."""
+        for code in (0x3000, 0x4E00, 0x3042, 0x30A2):
+            name = self.font.glyph_of(code)
+            if name is not None and self.font.has_layer(name):
+                advance = self.font.advance(name)
+                if advance:
+                    return float(advance)
+        return float(self.font.upm)
 
     def op_fraction(self, way, row, stack, needs):
         slash = self.font.glyph_of(int(FRACTION_SLASH, 16))
@@ -1050,6 +1332,8 @@ def recipe_text(row, settings, rules=None):
         return u"%s drawn %s wide" % (names[0], counted(int(layout.advance), u"unit"))
     if op == "minus":
         return u"%s on the plus" % names[0]
+    if op == "square":
+        return u"%s (%s, in the em square)" % (u" + ".join(names), square_words(way["of"]))
     return op
 
 
@@ -1063,6 +1347,8 @@ def note_text(row, needs_built=()):
     if row.existing:
         notes.append(u"replaces the font's own glyph" if not row.layout or row.layout.kind != "shared"
                      else u"the font has it")
+    if getattr(row, "filled", False):  # (as the Diacritics tab says it of a letter's empty glyph)
+        notes.append(u"its glyph is in the font, empty: filled when built")
     if row.layout is not None and row.layout.kind == "shared" and not row.existing:
         notes.append(u"no new glyph")
     if row.layout is not None and row.layout.kind == "mirrored":
@@ -1160,6 +1446,17 @@ class FontLabFont(Font):
 
     def has_layer(self, name):
         return self.layer(name) is not None
+
+    def is_empty(self, name):
+        """A layer in this master with nothing drawn (no outline, no component); a glyph with no layer here
+        is not empty, only absent from this master (has_layer)."""
+        if self.layer(name) is None:
+            return False
+        path = self.path(name)[0]
+        try:
+            return path is None or bool(path.isEmpty())
+        except Exception:
+            return False
 
     def polygons(self, name):
         """The glyph's outline flattened into polygons (QPainterPath.toSubpathPolygons), [] where it cannot be."""
@@ -1768,8 +2065,8 @@ class GenerationPage(object):
                              u"this text, whose character it is, whose Unicode value it is (<i>U+2013</i>, <i>2013</i>), "
                              u"or whose Unicode name holds it (<i>dash</i>). Rows not shown keep their checks; <i>Check "
                              u"all</i> and <i>Check none</i> act on the rows shown.")
+        row.addWidget(self.search_label)  # (left of the field: the field ends at the rows' right edge, owner's image 185)
         row.addWidget(self.search)
-        row.addWidget(self.search_label)
         layout.addLayout(row)
         settings_row.addStretch(1)
         layout.addLayout(settings_row)
@@ -1876,9 +2173,10 @@ class GenerationPage(object):
             return None
         return set(u"%04X" % ord(ch) for ch in self.given)
 
-    def planner(self, font, ways=None):
+    def planner(self, font, ways=None, progress=None):
         planner = Planner(self.data, font, self.settings, bool(self.existing_box.checked), self.listed_codes(),
                           self.vary_of(font))
+        planner.progress = progress
         planner.plan(ways)
         return planner
 
@@ -1921,15 +2219,42 @@ class GenerationPage(object):
         package = self.package = self.owner.current_font()
         self.rows = []
         if package is None:
-            self.status.setText(self.cm.no_font_line(self.ak))
+            # (the window's top line says so, beside the "?": owner's images 193 and 194)
+            self.status.setText(u"")
+            show = getattr(self.owner, "show_top_line", None)
+            if show is not None:
+                show(self.cm.no_font_line(self.ak))
             self.fill()
             return
         if not same_font or self.owner.package_key(package) != old_key:
             kept, self.just_built = {}, set()
         self.master = package.master
+        owner = self.owner
+        work = getattr(owner, "work_begin", None)
+        stopped = owner.stopped_error() if work is not None else NotStopped
+        try:  # (in the window's top row, stoppable: owner's image 176)
+            if work is not None:
+                work(u"Reading the font")
+            self.read_rows(package, kept)
+        except stopped:
+            self.rows = []
+            self.tree.clear()
+            self.status.setText(u"Stopped while reading the font: nothing is listed. Tick or untick a box above "
+                                u"the list to read it again.")
+            owner.log.add(u"Stopped reading the font for Glyph generation: nothing is listed.")
+            self.update_buttons()
+        finally:
+            if work is not None:
+                owner.work_end()
+
+    def read_rows(self, package, kept):
+        """run's work: the font read, the rows planned and listed (progress in the window's top row)."""
+        progress = getattr(self.owner, "work_progress", lambda *args, **kwargs: None)
         try:
             self.font = self.font_in(package, self.master)
-            self.planner_now = self.planner(self.font)
+            self.planner_now = self.planner(self.font, progress=lambda share: progress(None, 0.6 * share))
+        except getattr(self.owner, "stopped_error", lambda: NotStopped)():
+            raise
         except Exception as exc:
             self.status.setText(u"Could not read the font: %s" % self.ak.html(exc))
             self.fill()
@@ -1939,7 +2264,11 @@ class GenerationPage(object):
             suggested = row.layout is not None and not row.existing and not row.draft  # (made of a draft too)
             row.checked = kept.get(row.hex, suggested) and row.layout is not None
             self.first_checks[row.hex] = suggested
-        self.fill()
+        take = getattr(self.owner, "take_kept_checks", None)  # (Font Check's list, as the window before left it)
+        if take is not None:
+            take([row for row in self.rows if row.layout is not None], lambda row: row.char, "others")
+        progress(u"Listing the glyphs", 0.6)
+        self.fill(lambda share: progress(None, 0.6 + 0.4 * share))
         self.say_status()
         try:  # (Font Check's high-value set, read by the window once and after each build: high_value_read)
             self.owner.ask_high_value_soon()
@@ -1958,7 +2287,8 @@ class GenerationPage(object):
             u"; %s %s a glyph the font lacks" % (b(counted(len(lacking), u"glyph")), u"needs" if len(lacking) == 1 else u"need")
             if lacking else u"", self.ak.i(u"Build checked glyphs")))
 
-    def fill(self):
+    def fill(self, progress=None):
+        """The list made of the rows (each row's picture drawn); progress(share): told as it goes."""
         QtCore, QtGui = _qt()
         self.tree.blockSignals(True)
         self.tree.clear()
@@ -1975,6 +2305,17 @@ class GenerationPage(object):
         sections.append((EXISTING, [i for i, r in enumerate(self.rows) if r.existing and r.char not in self.just_built
                                     and r.layout is not None]))
         sections.append((LACKING, [i for i, r in enumerate(self.rows) if r.layout is None]))
+        try:  # (the list's signals given back whatever happens: the work may be stopped as rows are drawn)
+            self.fill_sections(sections, bold, dimmed, progress)
+        finally:
+            self.tree.blockSignals(False)
+        self.cm.fit_tree_columns(self.tree, len(COLUMNS) - 1)
+        self.apply_search()
+
+    def fill_sections(self, sections, bold, dimmed, progress=None):
+        """fill's rows, section by section (progress(share): told every 20 rows)."""
+        QtCore, QtGui = _qt()
+        total, done = float(sum(len(members) for _, members in sections) or 1), 0
         for title, members in sections:
             if not members:
                 continue
@@ -1984,6 +2325,9 @@ class GenerationPage(object):
             top.setFirstColumnSpanned(True)
             self.ak.section_row(top, self.tree)
             for index in members:
+                if progress is not None and not done % 20:
+                    progress(done / total)
+                done += 1
                 r = self.rows[index]
                 item = QtGui.QTreeWidgetItem([r.char if r.layout is None or r.layout.kind != "empty" else u"",
                                               r.name, recipe_text(r, self.settings, self.data.get("rules")),
@@ -2007,9 +2351,6 @@ class GenerationPage(object):
                     pass
                 top.addChild(item)
             top.setExpanded(title not in (EXISTING, LACKING))
-        self.cm.fit_tree_columns(self.tree, len(COLUMNS) - 1)
-        self.tree.blockSignals(False)
-        self.apply_search()
 
     # -- the list's controls --------------------------------------------------------------------------------
 
@@ -2060,6 +2401,9 @@ class GenerationPage(object):
             self.harvest()
         except Exception:
             pass
+        remember = getattr(self.owner, "remember_checks", None)  # (Font Check's list's checks, for the session)
+        if remember is not None and getattr(self.owner, "hand_over_key", None) is not None:
+            remember([(r.char, r.checked) for r in self.rows if r.layout is not None], "others")
         shown = [r for i, r in enumerate(self.rows) if r.layout is not None and i not in self.hidden]
         ak.enable(self.all_button, any(not r.checked for r in shown))
         ak.enable(self.none_button, any(r.checked for r in shown))
@@ -2154,7 +2498,9 @@ class GenerationPage(object):
                 item.setHidden(not found)
                 any_shown = any_shown or found
             section.setHidden(not any_shown)
-        self.search_label.setText(self.cm.search_count(shown, total, query, filtered=wanted is not None))
+        text = self.cm.search_count(shown, total, query, filtered=wanted is not None)
+        show = getattr(self.cm, "show_count", None)  # (hidden while empty: owner's image 185)
+        show(self.search_label, text) if show is not None else self.search_label.setText(text)
         self.update_buttons()
 
     def setting_changed(self, key, value):
@@ -2284,7 +2630,9 @@ class GenerationPage(object):
         QtCore, QtGui = _qt()
         planner = self.planner_now
         row = planner.by_name.get(part.name)
-        if row is not None and row.layout is not None and self.font.glyph_of(row.code) is None and depth:
+        if row is not None and row.layout is not None and depth and (
+                self.font.glyph_of(row.code) is None or
+                getattr(planner, "planned", lambda name: None)(part.name) is not None):
             path = QtGui.QPainterPath()
             for inner in row.layout.parts:
                 found = self.part_path(inner.moved(part.matrix), depth - 1)
@@ -2392,7 +2740,8 @@ class GenerationPage(object):
         [(row, "used" where a glyph left in the font is made of it, "stuck" where FontLab did not take it
         out, "unread" where the components could not be read)])."""
         orphans, left = [], []
-        candidates = [r for r in unlisted if r.char in made]
+        # (an empty glyph the font had, filled, is the font's: never taken out)
+        candidates = [r for r in unlisted if r.char in made and not getattr(r, "filled", False)]
         while True:
             gone = set(r.name for r in orphans)
             used, unread = set(), False
@@ -2427,8 +2776,26 @@ class GenerationPage(object):
                 touched[:] = [g for g in touched if u"%s" % getattr(g, "name", u"") != r.name]
 
     def build(self):
+        """Build checked glyphs, in the window's top row (owner's image 176): the other masters planned first,
+        which can be stopped (nothing is built then); the write never is (one step of FontLab's History)."""
+        owner = self.owner
+        work = getattr(owner, "work_begin", None)
+        stopped = owner.stopped_error() if work is not None else NotStopped
+        try:
+            if work is not None:
+                work(u"Planning the masters")
+            try:
+                self.build_now()
+            finally:
+                if work is not None:
+                    owner.work_end()
+        except stopped:
+            owner.log.add(u"Stopped before anything was built: nothing was built.")
+
+    def build_now(self):
         """The checked rows built in every master, as one step of the History (the owner's write: its
         begin_write and end_write)."""
+        progress = getattr(self.owner, "work_progress", lambda *args, **kwargs: None)
         self.harvest()
         chosen = [r for r in self.rows if r.checked and r.layout is not None]
         if not chosen or self.package is None:
@@ -2444,7 +2811,8 @@ class GenerationPage(object):
         plans = {}  # master: Planner, the current master's way kept for each row
         unlisted = self.planner_now.prerequisites(chosen)  # (what the rows handed over are made of: built too)
         ways = dict((r.hex, r.way_index) for r in list(self.rows) + unlisted if r.way_index is not None)
-        for master in masters:
+        for at, master in enumerate(masters):  # (stoppable: nothing is written yet)
+            progress(None, at / float(len(masters)))
             plans[master] = self.planner_now if master == self.master else self.planner(self.font_in(package, master), ways)
         order = build_order(chosen + unlisted)
         failed = []
@@ -2460,7 +2828,8 @@ class GenerationPage(object):
         # The glyphs whose own state the step records, recorded before it too where they have none (begin_write):
         # those given a second code point, and those rebuilt (the font's own, which the step records as touched)
         sharing = [r.layout.shared for r in order if r.layout.kind == "shared"]
-        recorded = self.cm.existing_glyphs(package, sharing + [r.name for r in order if r.existing])
+        recorded = self.cm.existing_glyphs(package, sharing + [r.name for r in order
+                                                               if r.existing or getattr(r, "filled", False)])
         if not self.owner.begin_write(package, recorded):
             return
         made, rebuilt, shared, touched, error = [], [], [], [], None
@@ -2470,8 +2839,13 @@ class GenerationPage(object):
         corrected = self.owner.corrector(package, masters, helpers, touched)
         state = {"changing": None}  # the glyph whose layers are being changed, for touched should an error stop the build
 
+        progress(u"Building", 0.0, stoppable=False)  # (a write: never stopped half way)
+        written = [0]
+
         def write_row(r):
             """One row built in every master (the build's own loop, row by row)."""
+            progress(None, written[0] / float(len(order) or 1), stoppable=False)
+            written[0] += 1
             lacking = unbuilt_needs(r, [c for c in order if c.name in built_names],
                                     lambda name: package.findName(name) is not None)
             if lacking:
@@ -2479,9 +2853,11 @@ class GenerationPage(object):
                     u", ".join(lacking), u"was" if len(lacking) == 1 else u"were",
                     u"it" if len(lacking) == 1 else u"them")))
                 return
-            if not r.existing and package.findUnicode(r.code) is not None:
-                failed.append((r.char, u"the font has it now"))
-                return
+            if not r.existing:
+                found = package.findUnicode(r.code)
+                if found is not None and not (getattr(r, "filled", False) and self.cm.is_empty(found)):
+                    failed.append((r.char, u"the font has it now"))  # (an empty glyph of its own is filled)
+                    return
             if state.get("second"):  # (its first change: the parts it may be made of recorded before it)
                 ensure_parts()
             if r.layout.kind == "shared":
@@ -2585,7 +2961,8 @@ class GenerationPage(object):
         # glyph 'uni042F:Black' does not exist in the font" (live, Rubik, 2026-11-16); in a step of their own, it
         # was clean, the first Undo taking the glyphs back, the second the parts
         needed = set(name for c in order for name in c.needs)
-        first = [r for r in order if not r.existing and r.name in needed]
+        # (glyphs added: an empty glyph the font had, filled, was recorded with the step's own glyphs)
+        first = [r for r in order if not r.existing and not getattr(r, "filled", False) and r.name in needed]
         recorded_parts = {"parts": None, "status": None}
 
         def ensure_parts():

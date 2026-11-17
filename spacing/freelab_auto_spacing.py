@@ -55,6 +55,29 @@ SETTLE_SHARE = 0.002  # a side has settled when measuring it again asks less tha
 KERNING_BUTTON = u"Check kerning of these glyphs\N{HORIZONTAL ELLIPSIS}"  # Kerning Check on the glyphs just spaced
 APPLY_PASSES = 3  # Space checked glyphs writes, measures again, and writes what is still off, at most this many times
 SIDE_ALPHA = 110  # the references beside the glyph, dimmed
+# The long steps, named in the window's top row while they run (ak.busy_start), and the share of the bar
+# measuring takes before the list is filled; within it, how far each part of the measuring goes
+MEASURE_STEP, DRAW_STEP, SETTLE_STEP = u"Measuring", u"Drawing the glyphs", u"Measuring with the changes made"
+COMPOSITES_STEP, LIST_STEP, SPACE_STEP = u"Finding the glyphs built from components", u"Listing", u"Spacing"
+FOLLOW_STEP, UPDATE_STEP = u"Moving the glyphs built on them", u"Updating the font"
+MEASURE_SHARE = 0.9
+MEASURE_PARTS = ((DRAW_STEP, 0.0, 0.15), (MEASURE_STEP, 0.15, 0.5), (SETTLE_STEP, 0.5, 0.9), (COMPOSITES_STEP, 0.9, 1.0))
+PUMP_EVERY = 50  # glyphs read between two calls to the progress (it lets events through at most every 0.1 s)
+
+
+def stopped_text(what, measured=False):
+    """The status line once the user stopped the work (what: "Measuring", "Listing")."""
+    return u"%s was stopped: nothing is listed. %s" % (
+        what, u"Change the tolerance, or click <i>Analyze</i>, to list the glyphs." if measured
+        else u"Click <i>Analyze</i> to measure the glyphs.")
+
+
+def measure_part(step, part):
+    """Where a part of the measuring (step: one of MEASURE_PARTS', part 0 to 1 of it) lies in the whole."""
+    for name, start, end in MEASURE_PARTS:
+        if name == step:
+            return start + (end - start) * min(max(float(part), 0.0), 1.0)
+    return None
 
 
 def load_auto_kerning():
@@ -156,20 +179,24 @@ def fixed_characters(ak):
     return found
 
 
-def suggest_spacing(glyphs, measure, kind_of, category, script_of=None):
+def suggest_spacing(glyphs, measure, kind_of, category, script_of=None, progress=None):
     """Each Spacing's suggested changes: its right side as the pair (glyph, reference) asks (the
     kerning that pair would want is what its right sidebearing lacks), its left side as (reference,
     glyph) asks. measure(left char, right char) gives that kerning in font units, or None;
     kind_of(char) the character whose kind sets its references (its base letter); script_of, the
-    script of a letter, for the other scripts' own references (see reference_for)."""
-    for g in glyphs:
+    script of a letter, for the other scripts' own references (see reference_for). progress(part),
+    where given, is told how far it is (0 to 1) before each glyph (it may raise to stop)."""
+    for number, g in enumerate(glyphs):
+        if progress is not None:
+            progress(number / float(len(glyphs)))
         reference = reference_for(kind_of(g.char), category, script_of)
         g.right_change = measure(g.char, reference)
         g.left_change = measure(reference, g.char)
     return glyphs
 
 
-def settle_spacing(glyphs, measure_at, kind_of, category, script_of=None, settle=2, passes=SETTLE_PASSES):
+def settle_spacing(glyphs, measure_at, kind_of, category, script_of=None, settle=2, passes=SETTLE_PASSES,
+                   progress=None):
     """Each Spacing's changes (from suggest_spacing) measured again with them made, until they settle;
     the passes measured (1 when nothing needed another).
 
@@ -180,7 +207,9 @@ def settle_spacing(glyphs, measure_at, kind_of, category, script_of=None, settle
     changes so far made: measure_at(moved) gives a measure as suggest_spacing's, with the glyphs set
     as moved says ({glyph name: (left change, right change)}). A side settles when the next step is
     under settle units, or when it overshoots (its sign flips: half of it is taken, the target lying
-    between), or when it can no longer be measured (it keeps what it had)."""
+    between), or when it can no longer be measured (it keeps what it had). progress(part), where
+    given, is told how far the passes are (0 to 1, as if each ran) before each glyph measured again
+    (it may raise to stop)."""
     moving = {}
     for g in glyphs:
         for side in ("left", "right"):
@@ -191,13 +220,17 @@ def settle_spacing(glyphs, measure_at, kind_of, category, script_of=None, settle
     while moving and done < passes:
         moved = dict((g.name, (g.left_change or 0, g.right_change or 0)) for g in glyphs
                      if g.left_change or g.right_change)
+        if progress is not None:
+            progress((done - 1) / float(passes - 1))
         measure = measure_at(moved)
         done += 1
         still = {}
-        for g in glyphs:
+        for number, g in enumerate(glyphs):
             sides = [side for side in ("left", "right") if (g.name, side) in moving]
             if not sides:
                 continue
+            if progress is not None:
+                progress((done - 2 + number / float(len(glyphs))) / float(passes - 1))
             reference = reference_for(kind_of(g.char), category, script_of)
             for side in sides:
                 step = measure(reference, g.char) if side == "left" else measure(g.char, reference)
@@ -308,6 +341,23 @@ def composite_moves(composites, changes):
             added = True
         if not added:
             return moves
+
+
+def composites_text(following, left_out):
+    """The note under the list: how many glyphs built from components follow the listed glyphs, and
+    how many built on two of them are left as they are; empty (the note hidden) when neither: "0 glyphs
+    built from components follow the listed glyphs" said nothing worth a line (owner's image 188)."""
+    if not following and not left_out:
+        return u""
+    if following:
+        text = u"%s built from components %s the listed glyphs" % (
+            counted(following, u"glyph"), u"follows" if following == 1 else u"follow")
+    else:
+        text = u"No glyph built from components follows the listed glyphs"
+    if left_out:
+        text += u"; %d built on two of them %s left as %s" % (left_out, u"is" if left_out == 1 else u"are",
+                                                             u"it is" if left_out == 1 else u"they are")
+    return text + u"."
 
 
 # ---------------------------------------------------------------------------
@@ -472,7 +522,7 @@ class AutoSpacingDialog(object):
         layout.addLayout(buttons)
         self.analyze_button.connect("clicked()", self.run)
         self.group.connect("currentIndexChanged(int)", lambda index: self.run())
-        self.tolerance.connect("valueChanged(int)", lambda value: self.fill())
+        self.tolerance.connect("valueChanged(int)", lambda value: self.refill())
         self.all_button.connect("clicked()", lambda: self.check_all(True))
         self.none_button.connect("clicked()", lambda: self.check_all(False))
         self.restore_button.connect("clicked()", self.restore)
@@ -510,7 +560,9 @@ class AutoSpacingDialog(object):
             return None
         return package
 
-    def characters(self):
+    def characters(self, pump=None):
+        """The characters to space, by the dropdown's choice; pump(), where given, called every
+        PUMP_EVERY glyphs of the font read (the progress: it may raise to stop)."""
         ak = self.ak
         group = GROUPS[self.group.currentIndex][0]
         letters = [ch for ch in ak.class_characters() if ch.isalpha()]
@@ -532,45 +584,61 @@ class AutoSpacingDialog(object):
                     chosen += [ch for ch in marks[script] if ch not in chosen]
         if group == "everything" and self.package is not None:
             import unicodedata
-            for fg in self.package.fgPackage.glyphs:
+            taken = set(chosen)  # (a list searched for each of a CJK font's thousands of glyphs took seconds)
+            for number, fg in enumerate(self.package.fgPackage.glyphs):
+                if pump is not None and number % PUMP_EVERY == 0:
+                    pump()
                 code = ak.main_code(fg)  # (an ideograph, not the Kangxi radical FontLab may give first)
                 if not code or code > sys.maxunicode:
                     continue  # (past U+FFFF, FontLab's narrow Python has no single character for it)
                 ch = ak.unichr_(code)
-                if unicodedata.category(ch)[0] in "LNPS" and ch not in chosen:
+                if unicodedata.category(ch)[0] in "LNPS" and ch not in taken:
                     chosen.append(ch)  # each spaced against its case's reference (H, n, or 0; n for symbols)
+                    taken.add(ch)
         return chosen
 
     def run(self):
+        """The current master measured and listed, under the window's top-row progress (owner's image 178:
+        "Measuring..." held the window until Windows called it Not Responding); stoppable, the list then
+        left empty."""
         if self.busy:
             return
-        QtCore, QtGui = _qt()
         self.busy = True
         self.tree.clear()
         self.spacings, self.listed = [], []
-        self.apply_button.setEnabled(False)
+        self.ak.enable(self.apply_button, False)
         self.composites_note.setText(u"")  # (the last font's, until this one is measured)
         self.composites_note.setVisible(False)
+        started = False
         try:
             package = self.package = self.current_font()
             self.master = package.master if package is not None else None
             if package is None:
                 self.status.setText(self.ak.no_font_line())
                 return
-            self.status.setText(u"Measuring\N{HORIZONTAL ELLIPSIS}")
-            QtGui.QApplication.processEvents()
-            self.spacings, self.composites = self.measure(package, self.master)
+            self.status.setText(u"")  # (the step is named in the top row)
+            self.ak.busy_start(self, MEASURE_STEP)
+            started = True
+            self.spacings, self.composites = self.measure(
+                package, self.master, progress=lambda what, part: self.ak.busy_progress(
+                    self, what, None if part is None else part * MEASURE_SHARE))
+            self.first_checks = dict((s.name, s.checked) for s in self.spacings)
+            self.ak.busy_progress(self, LIST_STEP, MEASURE_SHARE)
+            self.fill(lambda part: self.ak.busy_progress(self, None, MEASURE_SHARE + part * (1.0 - MEASURE_SHARE)))
+        except self.ak.Stopped:
+            self.stopped(u"Measuring")
+            return
         except Exception as exc:
             message = u"%s" % exc
             self.status.setText(u"")
             self.log.add(self.ak.html(message[:1].upper() + message[1:]), "error")
             return
         finally:
+            if started:
+                self.ak.busy_end(self)
             self.busy = False
             self.seen_history = self.ak.history_mark(self.package)
             self.update_buttons()  # (no font, or nothing measured: the settings grayed out)
-        self.first_checks = dict((s.name, s.checked) for s in self.spacings)
-        self.fill()
         if self.unspaced_references:
             self.log.add(u"This font's references look unspaced (a side at its ink, or one side three times the other): "
                          u"%s come first, unchecked, spaced as %s open-licensed families space theirs. If the font is not "
@@ -579,17 +647,29 @@ class AutoSpacingDialog(object):
                              self.ak.b(u", ".join(self.unspaced_references)),
                              self.ak.b(self.reference_model.get("families", 0)), self.ak.i(u"Analyze")), "warning")
 
-    def measure(self, package, master, only=None):
+    def measure(self, package, master, only=None, progress=None):
         """(spacings, composites) of the master: the drawn glyphs' suggestions, each measured again with
         its change made until it settles (settle_spacing), and the composites {name: (base glyph, other
         components' glyphs)}. only: glyph names; when given, only their suggestions (no reference rows,
-        no composites)."""
+        no composites). progress(step, part), where given, is told the step and how far the whole is (0
+        to 1, or None to leave the bar), often enough to keep the window answering (it may raise
+        ak.Stopped)."""
         ak = self.ak
+        step = (lambda name, part: progress(name, measure_part(name, part))) if progress is not None else \
+            (lambda name, part: None)
+        step(DRAW_STEP, 0.0)
         em = ak.EM_PIXELS
         glyphs = ak.FontLabGlyphs(package, master, em)
-        wanted = self.characters()
+        wanted = self.characters(lambda: step(DRAW_STEP, 0.0))
+        wanted_set = set(wanted)  # (a list searched for each of a CJK font's thousands of glyphs: slow)
         fixed = fixed_characters(ak)
-        found = [(ch, name) for ch, name in ak.font_glyphs(package, sorted(fixed) + wanted) if glyphs.add(name)]
+        every = ak.font_glyphs(package, sorted(fixed) + wanted)
+        found = []
+        for number, (ch, name) in enumerate(every):
+            if number % PUMP_EVERY == 0:
+                step(DRAW_STEP, number / float(len(every)))
+            if glyphs.add(name):
+                found.append((ch, name))
         names = dict(found)
         upm = glyphs.upm
         scripts = [script for script, _ in ak.SCRIPTS if all(ch in names for ch in ak.SCRIPT_TUNING[script])
@@ -644,14 +724,18 @@ class AutoSpacingDialog(object):
             outlines shifted by the left change and their widths changed by both, as spacing does."""
             again = ak.FontLabGlyphs(package, master, em, dict((name, (left, left + right))
                                                                for name, (left, right) in moved.items()))
-            for name in sorted(fixed_names | set(moved)):
+            for number, name in enumerate(sorted(fixed_names | set(moved))):
+                if number % PUMP_EVERY == 0 and progress is not None:
+                    progress(SETTLE_STEP, None)  # (the window answers; the bar stays where the pass is)
                 again.add(name)
             again.top, again.bottom = glyphs.top, glyphs.bottom  # (the same height and baseline as the bands')
             return measuring(again)
 
         spacings, composites = [], {}
         seen = set()
-        for ch, name in found:
+        for number, (ch, name) in enumerate(found):
+            if number % PUMP_EVERY == 0:
+                step(MEASURE_STEP, 0.0)
             if name in seen or ch in fixed or kind_of(ch) is None:
                 continue
             seen.add(name)
@@ -660,18 +744,22 @@ class AutoSpacingDialog(object):
             if parts and all(parts):
                 composites[name] = (parts[0], parts[1:])  # built from components: follows them
                 continue
-            if ch not in wanted or (only is not None and name not in only):
+            if ch not in wanted_set or (only is not None and name not in only):
                 continue
             left, right, width = ink_sides(layer)
             spacings.append(Spacing(ch, name, ak.category(kind_of(ch)), left, right, width))
-        suggest_spacing(spacings, measure, kind_of, ak.category, ak.script_of)
+        suggest_spacing(spacings, measure, kind_of, ak.category, ak.script_of, lambda part: step(MEASURE_STEP, part))
         self.settle_passes = settle_spacing(spacings, measure_at, kind_of, ak.category, ak.script_of,
-                                            max(1, round_units(SETTLE_SHARE * upm)))
+                                            max(1, round_units(SETTLE_SHARE * upm)),
+                                            progress=lambda part: step(SETTLE_STEP, part))
         if only is not None:
             return spacings, {}
         self.unspaced_references = self.space_references(package, master, names, spacings)
         # every composite of the font, not only those of the characters measured (alternates, ligatures)
-        for fg in package.fgPackage.glyphs:
+        every = list(package.fgPackage.glyphs)
+        for number, fg in enumerate(every):
+            if number % PUMP_EVERY == 0:
+                step(COMPOSITES_STEP, number / float(len(every)))
             name = fg.name
             if name in composites or name in seen:
                 continue
@@ -752,7 +840,9 @@ class AutoSpacingDialog(object):
 
     # -- the list ---------------------------------------------------------
 
-    def fill(self):
+    def fill(self, progress=None):
+        """The list made from the spacings within the tolerance; progress(part), where given, every
+        PUMP_EVERY rows (a CJK font's Everything lists thousands; it may raise ak.Stopped)."""
         QtCore, QtGui = _qt()
         self.harvest()
         self.tree.clear()
@@ -762,6 +852,8 @@ class AutoSpacingDialog(object):
         bold.setBold(True)
         color = self.dialog.palette.color(QtGui.QPalette.WindowText)
         for index, s in enumerate(self.listed):
+            if progress is not None and index % PUMP_EVERY == 0:
+                progress(index / float(len(self.listed)))
             item = QtGui.QTreeWidgetItem(self.row_texts(s, tolerance))
             item.setData(0, QtCore.Qt.UserRole, index)
             item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsUserCheckable)
@@ -781,12 +873,9 @@ class AutoSpacingDialog(object):
             moves = composite_moves(self.composites, changes)
             following = sum(1 for move in moves.values() if move is not None)
             left_out = sum(1 for m in moves.values() if m is None)
-            self.composites_note.setVisible(bool(self.listed))  # (nothing listed: nothing follows)
-            self.composites_note.setText(u"%s built from components %s the listed glyphs%s." % (
-                counted(following, u"glyph"), u"follows" if following == 1 else u"follow",
-                u"; %d built on two of them %s left as %s" % (left_out, u"is" if left_out == 1 else u"are",
-                                                             u"it is" if left_out == 1 else u"they are")
-                if any(m is None for m in moves.values()) else u""))
+            note = composites_text(following, left_out) if self.listed else u""  # (nothing listed: nothing follows)
+            self.composites_note.setText(note)
+            self.composites_note.setVisible(bool(note))
             ak = self.ak
             self.status.setText(u"%s, master %s: %s of %s %s a side %s or more from the suggestion. Nothing changes "
                                 u"until you click %s."
@@ -798,6 +887,33 @@ class AutoSpacingDialog(object):
                                    u"passes): halfkern closes half of a tightening at a time, so one measure leaves part "
                                    u"of it." % ak.b(self.settle_passes) if getattr(self, "settle_passes", 1) > 1 else u""))
         self.select()
+
+    def refill(self):
+        """The list filtered again (the tolerance changed), under the window's top-row progress; stopped,
+        the list is left empty until the tolerance changes again or Analyze is clicked."""
+        if self.busy:
+            return
+        self.busy = True
+        self.ak.busy_start(self, LIST_STEP)
+        try:
+            self.fill(lambda part: self.ak.busy_progress(self, None, part))
+        except self.ak.Stopped:
+            self.stopped(u"Listing", measured=True)
+        finally:
+            self.ak.busy_end(self)
+            self.busy = False
+            self.update_buttons()
+
+    def stopped(self, what, measured=False):
+        """The work stopped by the user (the top row's Esc, Close, a tool, an arrow): the list left
+        empty, and the status line says so."""
+        self.tree.clear()
+        self.listed = []
+        if not measured:
+            self.spacings = []
+        self.composites_note.setText(u"")
+        self.composites_note.setVisible(False)
+        self.status.setText(stopped_text(what, measured))
 
     def row_texts(self, s, tolerance):
         """A row's cells: the glyph's character, its name (a reference says so), its code point, its
@@ -869,7 +985,7 @@ class AutoSpacingDialog(object):
             if index < len(self.listed):
                 item.setCheckState(0, QtCore.Qt.Checked if self.listed[index].checked else QtCore.Qt.Unchecked)
         self.tree.blockSignals(False)
-        self.fill()
+        self.refill()
         self.log.add(u"Checks restored as suggested.")
 
     def double_clicked(self, item, column):
@@ -1039,39 +1155,56 @@ class AutoSpacingDialog(object):
         if not self.ak.begin_write(self.fontlab, self.package, u"FreeLab Auto Spacing", self.log):
             return  # (nothing written: the reason in the log)
         self.busy = True
+        # Under the window's top-row progress, never stoppable: one step of the History, never half written
+        # (a click on Close, a tool, or an arrow is done once it is over)
+        batches = [references, others] if references and others else [chosen]
+        units = len(batches) * APPLY_PASSES * 2 + 2  # (each write and each measuring again; following; the step)
+        self.write_span = (0, units)
+        self.ak.busy_start(self, SPACE_STEP, stoppable=False)
         try:
-            batches = [references, others] if references and others else [chosen]
-            written = []
-            for number, batch in enumerate(batches):
-                last = number == len(batches) - 1
-                if number:  # the references were spaced: the others measured against them as they are now
-                    if not self.reads_back(written):
-                        unread = True
-                        break
-                    batch = self.measured_again(batch, tolerance)
-                    measured_again = len(others)
-                for attempt in range(APPLY_PASSES):
-                    written, stale_now = self.write_spacings(batch, tolerance, totals)
-                    stale += stale_now
-                    if last:
-                        passes = attempt + 1
-                    if not written or attempt == APPLY_PASSES - 1 or not last:
-                        break  # (the references are written once: they are not measured, but spaced from the corpus)
-                    if not self.reads_back(written):
-                        unread = True
-                        break
-                    batch = self.measured_again([s for s, _, _ in written], tolerance)
-                    if not batch:
-                        break
-                    if last and attempt == 0:
-                        again = len(batch)
-            if self.follow.checked:
-                moved = self.follow_composites(totals)
-        except Exception as exc:  # what was changed stays changed, and is reported
-            error = exc
+            try:
+                written = []
+                for number, batch in enumerate(batches):
+                    last = number == len(batches) - 1
+                    if number:  # the references were spaced: the others measured against them as they are now
+                        if not self.reads_back(written):
+                            unread = True
+                            break
+                        self.write_span = (number * APPLY_PASSES * 2 - 1, units)
+                        batch = self.measured_again(batch, tolerance)
+                        measured_again = len(others)
+                    for attempt in range(APPLY_PASSES):
+                        self.write_span = ((number * APPLY_PASSES + attempt) * 2, units)
+                        self.write_progress(SPACE_STEP, 0.0)
+                        written, stale_now = self.write_spacings(batch, tolerance, totals)
+                        stale += stale_now
+                        if last:
+                            passes = attempt + 1
+                        if not written or attempt == APPLY_PASSES - 1 or not last:
+                            break  # (the references are written once: they are not measured, but spaced from the corpus)
+                        if not self.reads_back(written):
+                            unread = True
+                            break
+                        self.write_span = ((number * APPLY_PASSES + attempt) * 2 + 1, units)
+                        batch = self.measured_again([s for s, _, _ in written], tolerance)
+                        if not batch:
+                            break
+                        if last and attempt == 0:
+                            again = len(batch)
+                if self.follow.checked:
+                    self.write_span = (units - 2, units)
+                    self.write_progress(FOLLOW_STEP, 0.0)
+                    moved = self.follow_composites(totals)
+            except Exception as exc:  # what was changed stays changed, and is reported
+                error = exc
+            finally:
+                self.busy = False
+            self.write_span = (units - 1, units)
+            self.write_progress(UPDATE_STEP, 0.0)
+            status = self.after_writing()
+            asked_to_stop = self.ak.busy_stopping(self)  # (Esc, Close, a tool, an arrow, during the write)
         finally:
-            self.busy = False
-        status = self.after_writing()
+            self.ak.busy_end(self)
         ak = self.ak
         self.spaced = sorted(totals) + sorted(name for name in moved if name not in totals)
         lines = [u"Spaced %s%s." % (ak.b(counted(len(totals), u"glyph")),
@@ -1099,7 +1232,19 @@ class AutoSpacingDialog(object):
                 "warning")
         if error is not None:
             self.log.add(u"Stopped by an error: %s" % ak.html(error), "error")
+        if asked_to_stop:  # (what was clicked is done now: the glyphs are not measured again under it)
+            self.stopped(u"Measuring again")
+            self.seen_history = ak.history_mark(self.package)  # (this write's own step: not measured again for it)
+            self.update_buttons()
+            return
         self.run()
+
+    def write_progress(self, what=None, part=None):
+        """The write's progress in the window's top row (part: 0 to 1 of the unit of work under way, out of
+        write_span's), never stoppable: the write is one step of FontLab's History."""
+        done, units = getattr(self, "write_span", (0, 1))
+        self.ak.busy_progress(self, what, None if part is None else (done + min(max(part, 0.0), 1.0)) / float(units),
+                              stoppable=False)
 
     def write_spacings(self, rows, tolerance, totals):
         """Each row's changes written (its outline moved by the left change, its width changed by both),
@@ -1108,7 +1253,9 @@ class AutoSpacingDialog(object):
         QtCore, QtGui = _qt()
         package, master = self.package, self.master
         written, stale = [], 0
-        for s in rows:
+        for number, s in enumerate(rows):
+            if number % PUMP_EVERY == 0:
+                self.write_progress(None, number / float(len(rows)))
             glyph = package.findName(s.name)
             layer = glyph.getLayerByName(master) if glyph is not None else None
             if layer is None:
@@ -1148,7 +1295,9 @@ class AutoSpacingDialog(object):
     def measured_again(self, rows, tolerance):
         """The rows' glyphs measured again as they are now: those with a side tolerance units or more
         off, as new rows."""
-        spacings, _ = self.measure(self.package, self.master, only=set(s.name for s in rows))
+        spacings, _ = self.measure(self.package, self.master, only=set(s.name for s in rows),
+                                   progress=lambda what, part: self.write_progress(
+                                       SETTLE_STEP, None if part is None else part / measure_part(COMPOSITES_STEP, 0.0)))
         return [s for s in spacings if s.listed(tolerance)]
 
     def follow_composites(self, totals):
@@ -1167,7 +1316,10 @@ class AutoSpacingDialog(object):
             layer = glyph.getLayerByName(master) if glyph is not None and not glyph.isNull else None
             return layer.boundingBox if layer is not None else None
 
-        for name, move in composite_moves(self.composites, totals).items():
+        moves = list(composite_moves(self.composites, totals).items())
+        for number, (name, move) in enumerate(moves):
+            if number % PUMP_EVERY == 0:
+                self.write_progress(None, number / float(len(moves)))
             if move is None:
                 continue
             glyph = package.findName(name)

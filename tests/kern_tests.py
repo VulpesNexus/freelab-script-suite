@@ -4110,6 +4110,144 @@ class SingleChoiceTests(unittest.TestCase):
         ak.long_choice(own)
         self.assertEqual(own.styleSheet, u"QComboBox { color: red; }", "a sheet of its own is left as it is")
 
+    def test_a_long_dropdown_has_a_flat_scroll_bar(self):
+        # (owner's image 163: Font Builder's 300 sets scrolled with no bar; Qt had turned the list's bar off
+        # for Fusion's menu-like dropdowns when the list was made, before the sheet)
+        class Qt(object):
+            WA_TransparentForMouseEvents = NoFocus = StrongFocus = 0
+            ScrollBarAlwaysOff, ScrollBarAsNeeded = 1, 0
+
+        class QtCore(object):
+            pass
+
+        QtCore.Qt = Qt
+        old = ak._qt
+        ak._qt = lambda: (QtCore, None)
+        self.addCleanup(lambda: setattr(ak, "_qt", old))
+
+        class Bar(object):
+            styleSheet = u""
+
+            def setStyleSheet(self, sheet):
+                self.styleSheet = sheet
+
+        class View(object):
+            policy = Qt.ScrollBarAlwaysOff
+            bar = Bar()
+
+            def property(self, name):
+                return None
+
+            def setProperty(self, name, value):
+                pass
+
+            def parentWidget(self):
+                return None
+
+            def verticalScrollBarPolicy(self):
+                return self.policy
+
+            def setVerticalScrollBarPolicy(self, policy):
+                self.policy = policy
+
+            def verticalScrollBar(self):
+                return self.bar
+
+        view = View()
+        for sheet in (u"", u"QComboBox { color: red; }"):
+            combo = self.Combo(300)
+            combo.styleSheet = sheet
+            combo.setMaxVisibleItems = lambda count: None
+            combo.view = lambda: view
+            view.policy, view.bar.styleSheet = Qt.ScrollBarAlwaysOff, u""
+            ak.long_choice(combo)
+            self.assertEqual(view.policy, Qt.ScrollBarAsNeeded, "sheet %r" % sheet)
+            self.assertEqual(view.bar.styleSheet, ak.SCROLL_SHEET, "the bar every FreeLab list has")
+
+    def test_the_no_font_sentences_share_a_line_and_no_others(self):
+        # (owner's image 191: "the only two sentences that I'll allow on a single line across the suite")
+        text = ak.sentences(ak.NO_FONT_LINE + u" A template can still be made.")
+        self.assertEqual(text, ak.NO_FONT_LINE + u"<br>A template can still be made.")
+        self.assertEqual(ak.sentences(u"Done. Next one."), u"Done.<br>Next one.")
+
+    def test_an_empty_list_shows_no_scroll_bars(self):
+        class Qt(object):
+            ScrollBarAlwaysOff, ScrollBarAsNeeded = 1, 0
+
+        class QtCore(object):
+            pass
+
+        QtCore.Qt = Qt
+        old = ak._qt
+        ak._qt = lambda: (QtCore, None)
+        self.addCleanup(lambda: setattr(ak, "_qt", old))
+
+        class View(object):
+            topLevelItemCount = 0
+            horizontalScrollBarPolicy = verticalScrollBarPolicy = Qt.ScrollBarAsNeeded
+
+            def setHorizontalScrollBarPolicy(self, value):
+                self.horizontalScrollBarPolicy = value
+
+            def setVerticalScrollBarPolicy(self, value):
+                self.verticalScrollBarPolicy = value
+
+        view = View()
+        ak.empty_bars(view)
+        self.assertEqual((view.horizontalScrollBarPolicy, view.verticalScrollBarPolicy), (1, 1))
+        view.topLevelItemCount = 3
+        ak.empty_bars(view)
+        self.assertEqual((view.horizontalScrollBarPolicy, view.verticalScrollBarPolicy), (0, 0), "back with rows")
+
+    def test_a_control_grayed_for_no_font_stays_grayed_whatever_the_tool_asks(self):
+        class Button(object):
+            def __init__(self):
+                self.enabled, self.props = True, {}
+
+            def property(self, name):
+                return self.props.get(name)
+
+            def setEnabled(self, on):
+                self.enabled = on
+
+        button = Button()
+        button.props[ak.NO_FONT_PROP] = True
+        button.enabled = False
+        ak.enable(button, True)
+        self.assertFalse(button.enabled)
+        button.props[ak.NO_FONT_PROP] = None
+        ak.enable(button, True)
+        self.assertTrue(button.enabled)
+
+    def test_a_window_has_a_font_by_its_package_or_its_own_word(self):
+        class Tool(object):
+            package = None
+        self.assertFalse(ak.window_has_font(Tool()))
+        tool = Tool()
+        tool.works_without_font = True
+        self.assertTrue(ak.window_has_font(tool), "Font Builder works without one")
+        tool = Tool()
+        tool.has_font = lambda: True
+        self.assertTrue(ak.window_has_font(tool))
+
+    def test_a_replaced_module_is_kept_alive(self):
+        # (Python 2.7 empties a freed module's globals: a window of the copy a reinstall replaced printed
+        # tracebacks at its signals)
+        import types
+        made = [types.ModuleType("m%d" % i) for i in range(30)]
+        first = id(made[0])
+        for module in made:
+            ak.hold_module(module)
+        ak.hold_module(made[-1])
+        held = sys._freelab_held_modules
+        del made[:]  # (only the holder keeps them now: none is let go, however many came after)
+        self.assertTrue(any(id(m) == first for m in held), "the first is still held after 29 more")
+        self.assertEqual(sum(1 for m in held if m is held[-1]), 1, "held once")
+        for module in [m for m in held if m.__name__.startswith("m") and m.__name__[1:].isdigit()]:
+            held.remove(module)  # (the test's own, let go)
+        with io.open(ak.__file__.replace(".pyc", ".py"), encoding="utf-8") as handle:
+            self.assertIn(u"hold_module(held)", handle.read(), "load_sibling holds the copy it replaces")
+
     def test_every_dropdowns_popup_list_is_left_alone_by_dark_mode(self):
         # (owner's image 162: the popup list, a window of its own, recolored by dark mode as one of FontLab's
         # lists, its light text with colored fringes)
@@ -4521,10 +4659,18 @@ class KerningCheckTableTests(unittest.TestCase):
         dialog.package = object()
         dialog.selected_finding = lambda: None
         dialog.update_buttons_soon = lambda: None
+        listed = type("Tab", (), {"findings": [object()]})()
+        dialog.collisions = dialog.cleanup = dialog.masters = listed
         for index, wanted in ((0, kc.PREVIEW_HINTS[0]), (1, kc.PREVIEW_HINTS[1]), (2, u"")):
             dialog.tabs = type("Tabs", (), {"currentIndex": index})()
             dialog.update_previews()
             self.assertEqual([label.text for label in dialog.previews], [u"", wanted, u""])
+        # (owner's images 187 and 189: "Select a pair..." under a list with no pair to select)
+        dialog.collisions = dialog.cleanup = type("Tab", (), {"findings": []})()
+        for index in (0, 1):
+            dialog.tabs = type("Tabs", (), {"currentIndex": index})()
+            dialog.update_previews()
+            self.assertEqual(dialog.previews[1].text, u"", "nothing listed: nothing to select")
         dialog.package, dialog.tabs = None, type("Tabs", (), {"currentIndex": 0})()
         dialog.update_previews()
         self.assertEqual(dialog.previews[1].text, u"", "no font: nothing to select")
@@ -4632,6 +4778,103 @@ class KerningCheckTableTests(unittest.TestCase):
         self.assertEqual(len(fills), 3, "the three lists' fillings")
         self.assertEqual([lines[index + 1].split(u"  #")[0] for index in fills], [u"self.update_previews()"] * 3,
                          "each followed by the pictures' room")
+
+
+class KerningCheckReviewTests(unittest.TestCase):
+    """The owner's review of 2026-11-17: Kerning Check's long steps in the window's top row (ak.busy_*), its
+    Cleanup line with nothing listed, its separators with no font."""
+
+    def fake_busy(self, stop_after=None):
+        calls = []
+        saved = dict((name, getattr(ak, name)) for name in ("busy_start", "busy_progress", "busy_end", "busy_stopping"))
+        self.addCleanup(lambda: [setattr(ak, name, value) for name, value in saved.items()])
+
+        def progress(owner, what=None, part=None, force=False, stoppable=True):
+            calls.append(("progress", what, stoppable))
+            if stop_after is not None and stoppable and sum(1 for c in calls if c[0] == "progress") > stop_after:
+                raise ak.Stopped()
+        ak.busy_start = lambda owner, what=u"", stoppable=True: calls.append(("start", what, stoppable))
+        ak.busy_progress = progress
+        ak.busy_end = lambda owner: calls.append(("end", None, None))
+        ak.busy_stopping = lambda owner: False
+        return calls
+
+    def test_the_cleanup_line_with_nothing_listed(self):
+        # (owner's image 190: "0 of 0 entries listed: none.")
+        self.assertEqual(kc.cleanup_status(0, 0, {}), u"No entries listed.")
+        self.assertEqual(kc.cleanup_status(0, 120, {}), u"No entries listed.")
+        self.assertEqual(kc.cleanup_status(3, 120, {"redundant": 2, "tiny": 1}),
+                         u"3 of 120 entries listed: 2 entries changing nothing, 1 tiny value.")
+        self.assertEqual(kc.cleanup_status(1, 1, {"missing": 1}, u" with this glyph"),
+                         u"1 of 1 entry with this glyph listed: 1 entry naming what is gone.")
+
+    def test_its_separators_are_the_shared_ones(self):
+        # (owner's images 202 and 210: hidden with no font, which only ak.separator's are)
+        with io.open(kc.__file__, encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertEqual(source.count(u"self.ak.separator)"), 3, "each list's line")
+        self.assertNotIn(u"QtGui.QFrame()", source)
+        self.assertNotIn(u".setEnabled(", source, "every control's state through ak.enable")
+        self.assertNotIn(u"processEvents", source, "the top row's progress lets events through")
+
+    def tab(self):
+        class Tree(object):
+            def clear(self):
+                pass
+
+        class Status(object):
+            text = None
+
+            def setText(self, text):
+                self.text = text
+        return type("Tab", (), {"tree": Tree(), "status": Status(), "action": None, "findings": [1],
+                                "first_checks": [True]})()
+
+    def test_a_stopped_check_lists_nothing_and_says_so(self):
+        calls = self.fake_busy(stop_after=1)
+        dialog = kc.KerningCheckDialog.__new__(kc.KerningCheckDialog)
+        dialog.ak, dialog.busy, dialog.only = ak, False, None
+        dialog.cleanup = dialog.collisions = self.tab()
+        dialog.masters = object()
+        dialog.read_font = lambda: True
+        dialog.update_previews = dialog.update_buttons = lambda: None
+        dialog.tiny = type("Box", (), {"value": 5})()
+        entries = [((u"A", False), (u"V%d" % n, False)) for n in range(60)]
+        kerning = type("Kerning", (), {"entries": entries, "values": dict((e, -40) for e in entries), "members": {},
+                                       "describe": staticmethod(lambda e: u"%s %s" % (e[0][0], e[1][0])),
+                                       "pairs": staticmethod(lambda e: []),
+                                       "candidates": staticmethod(lambda a, b: [])})()
+        dialog.kerning = lambda master=None: kerning
+        dialog.glyph_exists = lambda name: True
+        dialog.check_cleanup()
+        self.assertEqual([c[0] for c in calls], ["start", "progress", "progress", "end"])
+        self.assertTrue(calls[0][2], "stoppable")
+        self.assertFalse(dialog.busy)
+        self.assertEqual(dialog.cleanup.findings, [])
+        self.assertIn(u"was stopped: nothing is listed", dialog.cleanup.status.text)
+
+    def test_a_write_is_never_stopped_and_always_ends(self):
+        calls = self.fake_busy(stop_after=0)
+        dialog = kc.KerningCheckDialog.__new__(kc.KerningCheckDialog)
+        dialog.ak, dialog.busy = ak, False
+        dialog.collisions = self.tab()
+        dialog.same_font = lambda: True
+        chosen = [kc.Collision(u"T", u"o%d" % n, -60, 2, -40, None) for n in range(30)]
+        dialog.checked = lambda tab: chosen
+        written = []
+        kerning = type("Kerning", (), {"current": staticmethod(lambda a, b: -60),
+                                       "write": staticmethod(lambda *args: written.append(args))})()
+        dialog.kerning = lambda master=None: kerning
+        status = type("Status", (), {"undo": lambda s, text: text, "report": lambda s, log: None})()
+        dialog.after_writing = lambda: status
+        checks = []
+        dialog.check_collisions = lambda: checks.append(dialog.busy)
+        dialog.log = type("Log", (), {"add": lambda log, text, kind="info": None})()
+        dialog.write_fixes()
+        self.assertEqual(len(written), 30, "all written, whatever was asked meanwhile")
+        self.assertEqual((calls[0][0], calls[-1][0]), ("start", "end"))
+        self.assertFalse(any(c[2] for c in calls if c[0] != "end"), "never stoppable")
+        self.assertEqual(checks, [False], "checked again once the write is over")
 
 
 class ChoiceSheetTests(unittest.TestCase):
