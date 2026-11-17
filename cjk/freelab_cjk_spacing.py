@@ -101,6 +101,41 @@ def compile_on(writable, code):
     return bool(writable and code)
 
 
+def trims_status(trimmed, full, palt, halt, button, korean=u"", bold=lambda text: u"%s" % text,
+                 italic=lambda text: u"%s" % text):
+    """The status line under the font's: how many of the font's full-width kana and punctuation (full) get a
+    trim (trimmed: palt of them in palt, halt in halt), right at 0, 1, and 2; button: the write button's name;
+    korean: hangul_note's sentence."""
+    number = lambda value: bold(u"{:,}".format(value))
+    if not full:
+        return u"No full-width kana or CJK punctuation: nothing to trim.%s" % korean
+    if not trimmed:
+        text = (u"The only full-width kana or punctuation mark needs no trim." if full == 1 else
+                u"None of the %s full-width kana and punctuation needs a trim." % number(full))
+        return text + korean
+    if full == 1:
+        text = u"The only full-width kana or punctuation mark gets a trim"
+    else:
+        text = u"%s of the %s full-width kana and punctuation %s a trim" % (number(trimmed), number(full),
+                                                                           u"gets" if trimmed == 1 else u"get")
+    return u"%s (palt: %s, halt: %s). Nothing is written until you click %s.%s" % (
+        text, number(palt), number(halt), italic(button), korean)
+
+
+def font_line(ak, package, master=None):
+    """The top line's start, as every window's (ak.font_named): the font, its master, and how many masters it
+    has where more than one (owner's images 223 and 238); u"" without a font. Shared with CJK Vertical."""
+    if package is None:
+        return u""
+    masters = getattr(package, "mastersCount", None)
+    if masters is None:
+        try:
+            masters = len(list(package.masters))
+        except Exception:
+            masters = 1
+    return ak.font_named(getattr(package, "tfn", u""), master or getattr(package, "master", None), masters) + u"."
+
+
 def stopped_line(what=u"Listing"):
     """The status line once the user stopped the work (the top row's Esc, Close, a tool, an arrow): nothing is
     listed, and a link lists it again (the window has no button of its own for it)."""
@@ -788,7 +823,7 @@ click <i>Write the code</i>.<br><br>
 <b>The list</b>: each full-width kana and punctuation mark, grouped, with its trim: how far its ink
 moves (x placement) and how much its width changes (x advance), trimmed to its ink and the
 sidebearings the open-licensed CJK fonts give theirs (about 0.07 em on each side for kana; each
-punctuation mark its own: a comma keeps its left, an opening bracket its right). Checked glyphs are
+punctuation mark its own: a comma keeps its left, an opening bracket its right). Ticked glyphs are
 written.<br>
 <b>The previews</b>: the sample text set as it is, and with palt, in the font's glyphs, in as many
 lines as the window's width needs: the Iroha (every kana once), a Hangul pangram, or the opening of the
@@ -796,7 +831,7 @@ Thousand Character Classic in Simplified or Traditional Chinese, each with full-
 Type your own sample.<br>
 <b>Hangul</b> stays out of palt, as the corpus's Korean fonts leave it: <i>Hangul:</i> sets the
 syllables' widths instead (one width for all, or each by its shape), in every master.<br>
-<i>Restore suggestions</i> puts every check back as the list first came.<br><br>
+<i>Restore suggestions</i> puts every tick back as the list first came.<br><br>
 Click this help's <i>?</i> button, then any control, for what it does."""
 
 
@@ -818,7 +853,7 @@ class CJKSpacingDialog(object):
         self.status.setWordWrap(True)
         self.status.connect("linkActivated(QString)", self.status_link)  # (List again, once a listing was stopped)
         layout.addWidget(self.status)
-        layout.addWidget(ak.separator())
+        layout.addWidget(ak.header_separator())  # (always shown, as every window's: owner's images 222 and 223)
         self.log = ak.Log()
         row = QtGui.QHBoxLayout()
         self.palt_box = QtGui.QCheckBox("Proportional widths (palt)")
@@ -848,7 +883,7 @@ class CJKSpacingDialog(object):
         self.tree.setProperty(ak.LEAVE_ALONE_PROP, True)  # its pictures are drawn in the dialog's colors
         ak.table_layout(self.tree)
         self.tree.setWhatsThis(u"Each full-width kana and punctuation mark with its trims: palt's x placement and x "
-                               u"advance, the width after, and halt's. Checked glyphs are written. Double-click one "
+                               u"advance, the width after, and halt's. Ticked glyphs are written. Double-click one "
                                u"to see it in a <i>Glyph</i> window.")
         layout.addWidget(self.tree, 1)
         sample_row = QtGui.QHBoxLayout()
@@ -869,12 +904,8 @@ class CJKSpacingDialog(object):
         self.previews, self.preview_captions = [], []
         for number, caption in enumerate((u"Now", u"With palt")):
             if number:
-                layout.addWidget(ak.separator())
-            title = QtGui.QLabel(caption)
-            quiet = QtGui.QFont(title.font)
-            quiet.setPointSizeF(quiet.pointSizeF() * 0.9)
-            title.setFont(quiet)
-            title.setEnabled(False)  # (drawn in the quiet text color)
+                layout.addWidget(ak.separator())  # (between two previews stacked)
+            title = ak.preview_caption(caption)  # (smaller, in the quiet text color: every tool's previews' captions)
             layout.addWidget(title)
             self.preview_captions.append(title)
             label = QtGui.QLabel()
@@ -890,12 +921,12 @@ class CJKSpacingDialog(object):
             self.previews.append((label, caption))
         layout.addWidget(self.log.widget)
         buttons = QtGui.QHBoxLayout()
-        self.all_button = QtGui.QPushButton("Check all")
-        self.none_button = QtGui.QPushButton("Check none")
+        self.all_button = QtGui.QPushButton("Tick all")
+        self.none_button = QtGui.QPushButton("Tick none")
         self.restore_button = QtGui.QPushButton("Restore suggestions")
-        self.restore_button.setWhatsThis(u"Puts every check back as the list first came.")
+        self.restore_button.setWhatsThis(u"Puts every tick back as the list first came.")
         self.write_button = QtGui.QPushButton("Write the code")
-        self.write_button.setWhatsThis(u"Writes palt and halt for the checked glyphs, between FreeLab's marker lines; the "
+        self.write_button.setWhatsThis(u"Writes palt and halt for the ticked glyphs, between FreeLab's marker lines; the "
                                        u"rest of each feature is kept. <i>Edit &gt; Undo</i> takes it back.")
         self.close_button = QtGui.QPushButton("Close")
         for button in (self.all_button, self.none_button, self.restore_button):
@@ -1036,7 +1067,7 @@ class CJKSpacingDialog(object):
         self.tree.clear()
         self.tree.blockSignals(False)
         self.trims, self.hangul, self.first_checks = [], [], []
-        self.status.setText(stopped_line(what))
+        self.status.setText((u"%s %s" % (font_line(self.ak, self.package), stopped_line(what))).strip())
         self.seen_history = self.ak.history_mark(self.package)
 
     def status_link(self, target):
@@ -1064,8 +1095,8 @@ class CJKSpacingDialog(object):
             self.status.setText(ak.no_font_line())
             self.update_buttons()
             return
-        if not self.model:
-            self.status.setText(u"")
+        if not self.model:  # (the font line kept, the reason in the log: owner's image 224)
+            self.status.setText(u"%s Could not list the trims: the log says why." % font_line(ak, package))
             self.log.add(u"The corpus's trims (palt_model.json) are missing beside this script: reinstall FreeLab.", "error")
             return
         master = package.master
@@ -1119,16 +1150,9 @@ class CJKSpacingDialog(object):
         b = ak.b
         full = sum(1 for g in glyphs if g[2] >= FULL_WIDTH_SHARE * package.upm)
         korean = hangul_note(hangul, ak.i(u"Hangul:"), b)
-        if not full:
-            self.status.setText(u"%s, master %s, has no full-width kana or CJK punctuation: nothing to trim.%s" % (
-                b(package.tfn), b(master), korean))
-        else:
-            self.status.setText(u"%s, master %s: %s of the %s full-width kana and punctuation %s a trim (palt: %s, halt: "
-                                u"%s). Nothing is written until you click %s.%s" % (
-                                    b(package.tfn), b(master), b(len(self.trims)), b(full),
-                                    u"gets" if len(self.trims) == 1 else u"get",
-                                    b(sum(1 for t in self.trims if t.palt)), b(sum(1 for t in self.trims if t.halt)),
-                                    ak.i(self.write_button.text), korean))
+        self.status.setText(u"%s %s" % (font_line(ak, package, master), trims_status(
+            len(self.trims), full, sum(1 for t in self.trims if t.palt), sum(1 for t in self.trims if t.halt),
+            self.write_button.text, korean, b, ak.i)))
         self.seen_history = ak.history_mark(package)
         self.step(LIST_STEPS, PREVIEW_STEP)
         self.draw_previews()
@@ -1313,11 +1337,11 @@ class CJKSpacingDialog(object):
         return [c for c in self.hangul if self.hangul_checks.get(c.shape, True)]
 
     def check_all(self, on):
-        """Check all, Check none: every row, the log told how many it checked or unchecked, and how many
+        """Tick all, Tick none: every row, the log told how many it ticked or unticked, and how many
         of them were in closed groups (owner's report 118)."""
         self.tree.blockSignals(True)
         try:
-            self.ak.check_rows(self.items(), on, log=self.log, command=u"Check all" if on else u"Check none",
+            self.ak.check_rows(self.items(), on, log=self.log, command=u"Tick all" if on else u"Tick none",
                                noun=u"glyph", hidden_text=(u"in a closed group", u"in closed groups"))
         finally:
             self.tree.blockSignals(False)
@@ -1361,7 +1385,7 @@ class CJKSpacingDialog(object):
         for t, on in zip(self.trims, self.first_checks):
             t.checked = on
         self.fill()
-        self.log.add(u"Checks restored as suggested.")
+        self.log.add(u"Ticks restored as suggested.")
 
     def history_moved(self):
         self.log.add(u"The font's History moved (an undo, a redo, or an edit): read again.")
@@ -1624,8 +1648,8 @@ class CJKSpacingDialog(object):
         refusal = getattr(self.ak, "feature_code_refusal", lambda *a, **k: None)(
             package, dict((tag, new[tag]) for tag in ("palt", "halt") if tag in new and new[tag] != self.texts.get(tag)))
         if refusal:  # (Feature Check: the code would bring an error the font's code does not have)
-            self.log.add(u"Nothing was written: %s. <i>Feature Check</i> lists every finding." % self.ak.html(refusal),
-                         "error")
+            self.log.add(u"Nothing was written: %s. %s lists every finding." % (  # (a link: owner's image 220)
+                self.ak.html(refusal), self.ak.tool_link(u"Feature Check")), "error")
             return None
         written, error, syllables = [], None, 0
         shapes = set(c.shape for c in self.hangul_chosen())

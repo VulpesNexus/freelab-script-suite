@@ -2,6 +2,10 @@
 
 *Scripts > FreeLab > Feature Check* checks the current font's OpenType feature code, whatever made it (FreeLab, FontLab's automatic features, another app, or a hand), and lists what it finds for review. It reads the code as FontLab compiles it: the feature classes of FontLab's *Classes* panel, then the prefix, then each feature in the *Features* panel's order.
 
+## The window
+
+The top line names the font, in bold, and counts its glyphs, thousands grouped (**BIZ UDGothic** (**13,932 glyphs**)). The check's result goes right under it, above the header's line: its counts of errors, warnings, and pieces of advice in bold, or that it found nothing. Under the line, the *Apply safe fixes automatically* option, then *Check*, which checks again. The bottom row holds *Tick all* and *Tick none* at the left, and *Compile in FontLab*, *Apply ticked fixes*, and *Close* at the right. *Compile in FontLab* is grayed while the font has no feature code (or the window has no font), and *Apply ticked fixes* while nothing is ticked.
+
 ## What it finds
 
 Findings are grouped by kind, errors first. A group's tooltip says what its kind means.
@@ -37,7 +41,7 @@ FontLab's automatic code (between its `#> feature` and `#<` comment lines) is ch
 
 ## Fixes, and when one counts as safe
 
-A finding with a fix has a check box, unchecked: by default every finding is for you to review. Its last column says what the fix does and how it was proven:
+A finding with a fix has a check box, unticked: by default every finding is for you to review. Its last column says what the fix does and how it was proven:
 
 - *changes nothing in the compiled font*: the font's code was compiled with the fix and without it, and the two layouts are the same, compared by what they do, not by their bytes: for each script and language, the lookups that apply, in their order, and which features they come from (a required feature told apart), with what each substitutes or positions (classes expanded to their glyphs, kerning to its pairs, a pair covered by an earlier subtable counted as that subtable's), the features' parameters and names, and GDEF's classes.
 - *changes the compiled font: review it*: the layouts differ.
@@ -53,9 +57,9 @@ Removals of classes and lookups nothing uses, and of a class's second identical 
 
 A fix that would not compile is no fix: the finding stays, without a check box, and says so. Dropping the repeated glyph of `[a b a]` in `sub [a b a] by [x y z];` is one: each glyph takes the glyph in its place, so the class must keep its length.
 
-*Apply checked fixes* applies the checked ones as one step of FontLab's History (*Edit > Undo* takes it back), then checks again. The code is read again first: if it changed since the check, nothing is written and the list is made again.
+*Apply ticked fixes* applies the ticked ones as one step of FontLab's History (*Edit > Undo* takes it back), then checks again. The code is read again first: if it changed since the check, nothing is written and the list is made again.
 
-**Apply safe fixes automatically**: at each check, the fixes of the kinds that only ever take out dead code (rules written twice, substitutions that change nothing, glyphs listed twice in a class, classes and lookups never used) are applied once each is proven alone and all together, and the list shows what is left. Empty features are never taken out automatically, since an app's menu may show them; check them by hand. The option is remembered. It applies when the window opens and when *Check* is clicked, never when FontLab's History moves: after *Edit > Undo* of the automatic fixes, the window checks again and leaves the code as the undo put it back, until you click *Check*.
+*Apply safe fixes automatically*: at each check, the fixes of the kinds that only ever take out dead code (rules written twice, substitutions that change nothing, glyphs listed twice in a class, classes and lookups never used) are applied once each is proven alone and all together, and the list shows what is left. Empty features are never taken out automatically, since an app's menu may show them; tick them by hand. The option is remembered. It applies when the window opens and when *Check* is clicked, never when FontLab's History moves: after *Edit > Undo* of the automatic fixes, the window checks again and leaves the code as the undo put it back, until you click *Check*.
 
 ## FreeLab's writers check their own code
 
@@ -63,6 +67,6 @@ Feature Code, Glyph Compose (its mark features), CJK Spacing, and CJK Vertical c
 
 ## The compiler
 
-The checks use fontTools' feature compiler (feaLib), which FontLab 7 ships (3.43); the tests run on it and on fontTools 4. FontLab compiles with Adobe's compiler (hotconv), which differs in places: it keeps the first of two conflicting rules where fontTools refuses them, and it stops on its own limits. *Compile in FontLab* compiles there, as the *Features* panel's *Compile* button does, and adds what FontLab's *Output* panel shows to the log.
+The checks use fontTools' feature compiler (feaLib), which FontLab 7 ships (3.43); the tests run on it and on fontTools 4. FontLab compiles with Adobe's compiler (hotconv), which differs in places: it keeps the first of two conflicting rules where fontTools refuses them, and it stops on its own limits. *Compile in FontLab* compiles there, as the *Features* panel's *Compile* button does, and adds what FontLab's *Output* panel shows to the log. While FontLab compiles, and until what its compiler said is read (a few seconds at most), the window's top row shows a bar in place of the font line; a compile cannot be stopped halfway, so the tools menu, the arrows, and *Close* wait for it.
 
-A large font's code takes a while, and a bar beside the status line shows the step (reading the code, compiling it, proving the fixes). Amiri (6,710 glyphs, a 231 KB prefix and 23 features) takes about 5 seconds to check inside FontLab: the code is parsed and built once, and the font without fixes is built once for all the proofs. The fixes of a kind are proven together, in one build; only a group that changes the layout or does not compile is split in halves, down to the fix that does (a kerning change is compared pair by pair, up to 3 million pairs; past that, it is not proven). A CJK font of 15,444 glyphs and 704 classes checks in about 3 seconds outside FontLab. A writer's own check costs about as much as a check: 5 to 10 seconds on a font of Amiri's size, a fraction of a second on most.
+A large font's code takes a while, and a bar in the window's top row shows the step (reading the code, compiling it, proving the fixes). Amiri (6,710 glyphs, a 231 KB prefix and 23 features) takes about 5 seconds to check inside FontLab: the code is parsed and built once, and the font without fixes is built once for all the proofs. The fixes of a kind are proven together, in one build; only a group that changes the layout or does not compile is split in halves, down to the fix that does (a kerning change is compared pair by pair, up to 3 million pairs; past that, it is not proven). A CJK font of 15,444 glyphs and 704 classes checks in about 3 seconds outside FontLab. A writer's own check costs about as much as a check: 5 to 10 seconds on a font of Amiri's size, a fraction of a second on most.

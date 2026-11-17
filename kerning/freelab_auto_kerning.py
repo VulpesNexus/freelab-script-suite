@@ -458,7 +458,12 @@ def calibrate(core, tuning, em, max_bias=None):
         if low > high / 2:
             return Band(bias, low, high)
         bias += 1
-    raise ValueError(u"no halo makes %s agree" % u", ".join(u"%s%s" % (g.name, g.name) for g in tuning))
+    # (it said "no halo makes ll, nn, oo agree", which meant nothing to the user: owner's image 218)
+    names = [g.name for g in tuning]
+    raise ValueError(u"the font's %s, each set beside itself (%s), sit too differently apart to measure the other "
+                     u"glyphs by: space them by eye first" % (
+                         u", ".join(names[:-1]) + (u", and " if len(names) > 2 else u" and ") + names[-1]
+                         if len(names) > 1 else u"".join(names), u", ".join(n + n for n in names)))
 
 
 def category(ch):
@@ -2345,7 +2350,7 @@ def hook_quit():
 
 
 FONTS_POLL_MS = 700  # how often FreeLab looks whether a window's font was closed, or a font opened
-NO_FONT_LINE = u"No font is open. This window takes the next font you open."  # a tool's top line meanwhile
+NO_FONT_LINE = u"No font is open. This window hooks to the next font you open."  # a tool's top line meanwhile
 
 
 def no_font_line(own=None, workspace=None):
@@ -2365,16 +2370,16 @@ def no_font_line(own=None, workspace=None):
     held = [font_id for font_id in open_ids if fonts.get(font_id) is not None and _shown(fonts[font_id])]
     if len(held) == len(open_ids):
         if len(open_ids) == 1:
-            return u"This window has no font: the font open has a window of its own. It takes the next font you open."
-        return (u"This window has no font: the %d fonts open each have a window of their own. It takes the next "
+            return u"This window has no font: the font open has a window of its own. It hooks to the next font you open."
+        return (u"This window has no font: the %d fonts open each have a window of their own. It hooks to the next "
                 u"font you open." % len(open_ids))
     try:
         name = workspace.currentPackage.tfn
     except Exception:
         name = None
     shown = u"%s, the font FontLab shows," % b(name) if name else u"The font FontLab shows"
-    return (u"This window has no font: %s has a window of its own. It takes the next font you open, or a font "
-            u"without a window once FontLab shows it." % shown)
+    return (u"This window has no font: %s has a window of its own. It hooks to the next font you open, or to a "
+            u"font without a window once FontLab shows it." % shown)
 
 
 def font_switched(owner):
@@ -3688,6 +3693,7 @@ def add_tools_button(dialog, current, log=None):
         busy = busy_row(dialog)
         if first is not None:  # a widget: it and the buttons share a row
             layout.removeWidget(first)
+            first = window_head(layout, first)
             row = QtGui.QHBoxLayout()
             row.setContentsMargins(0, 0, 0, 0)
             # (the top line and the bar take the row's width; the spacer only once both are hidden: an
@@ -3740,6 +3746,42 @@ class Stopped(Exception):
 
     def __str__(self):
         return u"stopped"
+
+
+HEAD_PROP = "freelabWindowHead"  # on the column holding a window's top line and its status lines (window_head)
+HEAD_PART_PROP = "freelabHeadPart"  # on a widget of status lines under the top line, not a label itself (Glyph Compose's)
+
+
+def window_head(layout, first):
+    """The window's top line (first, taken out of layout already) and the status lines right under it in
+    layout (labels, up to the header's separator) in one column, which shares the top row with the
+    buttons: the status lines started under the row, a button's height below the top line (owner's
+    image 229 asked for them under the font line; live 2026-11-17 they came a blank line lower).
+    Returns the column, or first alone when no label follows it or first is no label."""
+    QtGui = _qt()[1]
+    try:
+        if not first.inherits("QLabel"):
+            return first
+        lines = []
+        while layout.count():
+            item = layout.itemAt(0)
+            widget = item.widget() if item is not None else None
+            if widget is None or not (widget.inherits("QLabel") or widget.property(HEAD_PART_PROP)):
+                break
+            layout.removeWidget(widget)
+            lines.append(widget)
+        if not lines:
+            return first
+        head = QtGui.QWidget()
+        head.setProperty(HEAD_PROP, True)
+        column = QtGui.QVBoxLayout(head)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(0)
+        for widget in [first] + lines:
+            column.addWidget(widget)
+        return head
+    except Exception:
+        return first
 
 
 def busy_row(dialog):
@@ -3821,8 +3863,8 @@ def _top_line(dialog, row):
             return None
         for k in range(inner.count()):
             widget = inner.itemAt(k).widget()
-            if widget is not None and widget.inherits("QLabel"):
-                return widget
+            if widget is not None and (widget.inherits("QLabel") or widget.property(HEAD_PROP)):
+                return widget  # (a label, or the column of the top line and its status lines: window_head)
     except Exception:
         pass
     return None
@@ -3892,7 +3934,10 @@ def busy_end(owner):
             # (shown as its text is now: the work wrote it meanwhile; put back as it was before the work,
             # a line empty then stayed hidden over the status the work wrote, live)
             line.setProperty(BUSY_LINE_PROP, None)
-            line.setHidden(not (u"%s" % _property(line, "text")).strip())
+            if line.property(HEAD_PROP):
+                line.setHidden(False)  # (its lines show or hide themselves by their text)
+            else:
+                line.setHidden(not (u"%s" % _property(line, "text")).strip())
     except Exception:
         pass
     then, state["then"], state["stop"] = state.get("then"), None, False
@@ -4200,7 +4245,8 @@ def plain_buttons(dialog):
 # Check none (and the like) grayed out when the list beside them has nothing to check, and a
 # dropdown with one choice drawn as its text (no arrow, nothing to open).
 STATES_MS = 300
-CHECK_BUTTON_TEXTS = (u"Check all", u"Check none", u"Check only")
+CHECK_BUTTON_TEXTS = (u"Tick all", u"Tick none", u"Tick only", u"Tick high-value", u"Tick often",
+                      u"Check all", u"Check none", u"Check only")  # ("Check" was their verb before the owner's image 261)
 SINGLE_PROP = "freelab_single_choice"
 SINGLE_SHEET = (u"QComboBox { border: none; background: transparent; padding-left: 0px; } "
                 u"QComboBox::drop-down { width: 0px; border: none; } QComboBox::down-arrow { image: none; width: 0px; }")
@@ -4575,6 +4621,17 @@ def filter_event(window, obj, event, pending):
         commit_typing(window, obj)  # (the value typed in a field taken before the button acts on it)
     if kind == 110:  # ToolTip
         return show_tip(obj, event, _view_of(obj))
+    if kind == SHOW_EVENT and (obj is window or obj == window):
+        # The window's states set before it first paints: set on update_states' first tick, its controls
+        # showed usable and its separators shown for a moment (owner's images 275, 276, 282)
+        try:
+            owner = window_owner(window)
+            module = sys.modules.get(__name__)
+            (getattr(module, "update_states", None) or update_states)(owner.dialog if owner is not None else window,
+                                                                         hidden_too=True)
+        except Exception:
+            pass
+        return False
     if obj is window or obj == window:
         if kind == 2 and int(event.button()) == int(QtCore.Qt.LeftButton):  # a press no widget took
             target = window.childAt(event.pos())
@@ -4609,7 +4666,9 @@ def filter_event(window, obj, event, pending):
     return False
 
 
-WATCHED_EVENTS = (2, 3, 6, 51, 82, 110)  # MouseButtonPress, MouseButtonRelease, KeyPress, ShortcutOverride, ContextMenu, ToolTip
+SHOW_EVENT = 17  # QEvent::Show, sent before the window's first paint
+WATCHED_EVENTS = (2, 3, 6, 17, 51, 82, 110)  # MouseButtonPress, MouseButtonRelease, KeyPress, Show, ShortcutOverride,
+# ContextMenu, ToolTip
 
 
 CHILD_ADDED = 68  # QEvent::ChildAdded, sent to a widget given a child
@@ -4682,6 +4741,15 @@ def install_filters(dialog):
                 widget.setProperty(FILTER_PROP, True)
             except Exception:
                 continue
+    try:
+        captions = getattr(sys, "_freelab_window_captions", None)
+        if captions is None:
+            captions = sys._freelab_window_captions = {}
+        captions[int(key)] = find_captions(window)
+        for gone_key in [k for k in captions if k not in holder]:
+            del captions[gone_key]
+    except Exception:
+        pass
     child_watch = getattr(watcher, "child_watch", None)
     if child_watch is not None:
         for widget in window.findChildren(QtGui.QWidget):
@@ -4692,6 +4760,128 @@ def install_filters(dialog):
             except Exception:
                 continue
     return True
+
+
+CAPTIONED_KINDS = ("QComboBox", "QAbstractSpinBox", "QLineEdit", "QAbstractSlider")  # what a label can caption
+CAPTION_MOST = 80  # characters: a longer label is a sentence of its own, never a caption
+CAPTION_OWN_TIP_PROP = "freelabCaptionOwnTip"  # on a caption that had help of its own (kept as it is)
+_NOT_FOUND = object()
+
+
+def _next_widget(layout, widget):
+    """The widget after widget in the row (layout) holding it, searched through nested layouts: None when
+    widget ends its row or a layout follows it, _NOT_FOUND when the layout does not hold it."""
+    try:
+        count = layout.count()
+    except Exception:
+        return _NOT_FOUND
+    for k in range(count):
+        item = layout.itemAt(k)
+        if item is None:
+            continue
+        held = item.widget()
+        if held is not None and (held is widget or held == widget):
+            for j in range(k + 1, count):
+                after = layout.itemAt(j)
+                if after is None:
+                    continue
+                if after.widget() is not None:
+                    return after.widget()
+                if after.layout() is not None:
+                    return None
+            return None
+        inner = item.layout()
+        if inner is not None:
+            found = _next_widget(inner, widget)
+            if found is not _NOT_FOUND:
+                return found
+    return _NOT_FOUND
+
+
+def caption(label, control):
+    """label made the caption of control (a dropdown, a field, a spin box): a right-click on it shows the
+    control's help, not the window's (owner's image 216), and it is grayed with the control (owner's
+    image 281). caption_states keeps both in step."""
+    try:
+        label.setBuddy(control)
+        label.setProperty(CAPTION_PROP, True)
+        if _property(label, "whatsThis") or _property(label, "toolTip"):
+            label.setProperty(CAPTION_OWN_TIP_PROP, True)
+    except Exception:
+        pass
+    return label
+
+
+def find_captions(window):
+    """Each short label of the window that comes just before a dropdown, a field, or a spin box in its
+    row made that control's caption (caption): "Sample:" before its dropdown, "List changes of at least"
+    before its spin box. A tool's own captions (caption()) are kept. The captions, as a list."""
+    QtGui = _qt()[1]
+    found = []
+    for label in window.findChildren(QtGui.QLabel):
+        try:
+            if not (label.window() is window or label.window() == window):
+                continue
+            if label.property(CAPTION_PROP):
+                found.append(label)
+                continue
+            if label.property(PREVIEW_CAPTION_PROP):
+                continue
+            if label.buddy() is not None:  # (a tool's own buddy: a caption too)
+                caption(label, label.buddy())
+                found.append(label)
+                continue
+            if _property(label, "wordWrap"):
+                continue
+            text = u"%s" % _property(label, "text")
+            if not text.strip() or len(text) > CAPTION_MOST or u"<br" in text or u"\n" in text:
+                continue
+            parent = label.parentWidget()
+            layout = parent.layout() if parent is not None else None
+            if layout is None:
+                continue
+            control = _next_widget(layout, label)
+            if control is None or control is _NOT_FOUND or not _inherits_any(control, CAPTIONED_KINDS):
+                continue
+            caption(label, control)
+            found.append(label)
+        except Exception:
+            continue
+    return found
+
+
+def caption_states(labels):
+    """Each caption (caption) grayed as its control is, its help the control's (tooltip and What's This)
+    unless it has its own. Cheap enough for each update_states: the captions are found once a window's
+    widgets change (install_filters)."""
+    for label in labels:
+        try:
+            control = label.buddy()
+            if control is None:
+                continue
+            on = bool(_property(control, "enabled"))
+            if bool(_property(label, "enabled")) != on:
+                label.setEnabled(on)
+            if label.property(CAPTION_OWN_TIP_PROP):
+                continue
+            tip = u"%s" % (_property(control, "toolTip") or u"")
+            what = u"%s" % (_property(control, "whatsThis") or u"") or tip
+            if u"%s" % (_property(label, "toolTip") or u"") != tip:
+                label.setToolTip(tip)
+            if u"%s" % (_property(label, "whatsThis") or u"") != what:
+                label.setWhatsThis(what)
+        except Exception:
+            continue
+
+
+def _window_captions(window):
+    """The captions found last for the window (install_filters keeps them), as a list."""
+    holder = getattr(sys, "_freelab_window_captions", None)
+    try:
+        key = window.property(WINDOW_FILTER_PROP)
+        return list(holder.get(int(key), [])) if holder is not None and key is not None else []
+    except Exception:
+        return []
 
 
 def style_combos(dialog):
@@ -4718,6 +4908,10 @@ def update_states(dialog, hidden_too=False):
         no_font_states(dialog)
     except Exception:
         pass
+    try:
+        caption_states(_window_captions(dialog.window()))
+    except Exception:
+        pass
     window = dialog.window()  # (a dialog opened from this one is a child too: its buttons and lists are its own)
     # (the buttons shown only: Kerning Check's bottom row holds each tab's buttons, those of the tab shown
     # visible; and of the lists equally near a button, a shown one first: a QStackedWidget's hidden pages
@@ -4730,9 +4924,24 @@ def update_states(dialog, hidden_too=False):
     views = [v for v in dialog.findChildren(QtGui.QAbstractItemView)
              if (v.inherits("QTreeWidget") or v.inherits("QListWidget")) and v.window() == window]
     shown = dict((id(v), bool(_property(v, "visible"))) for v in views)
+    checkable = {}  # (asked only of the nearest lists: a long list without tick boxes is walked whole)
+
+    def boxed(view):
+        if id(view) not in checkable:
+            checkable[id(view)] = has_checkable_items(view)
+        return checkable[id(view)]
+
     for button in buttons:
-        mates = sorted(views, key=lambda v: (-_shared_depth(button, v), not shown[id(v)]))
-        if mates and not has_checkable_items(mates[0]) and button.isEnabled():
+        if not button.isEnabled():
+            continue
+        key = lambda v: (-_shared_depth(button, v), not shown[id(v)])
+        mates = sorted(views, key=key)
+        if not mates:
+            continue
+        # (of the lists equally near, a shown one, then any with tick boxes: Feature Code's first tab has
+        # its ligatures' list, which has none, as near its tick buttons as the turns' list)
+        nearest = [v for v in mates if key(v) == key(mates[0])]
+        if not any(boxed(v) for v in nearest):
             button.setEnabled(False)  # nothing listed: the dialog enables it again once something is
 
 
@@ -4796,6 +5005,37 @@ def watch_states(dialog):
 # What every FreeLab dialog shares: rich status lines, a log, grid lines, button states, the font's
 # History watched, and previews whose neighbors can be clicked
 # ---------------------------------------------------------------------------
+
+TOOL_LINK = u"freelab-tool:"  # a link's target that opens a FreeLab tool (tool_link, Log.link_clicked)
+
+
+def tool_link(title):
+    """A FreeLab tool's name as an italic link a log opens it by, in the window's place (owner's image
+    220: "Write palt with CJK Spacing first")."""
+    return u'<a href="%s%s"><i>%s</i></a>' % (TOOL_LINK, html(title).replace(u" ", u"%20"), html(title))
+
+
+def with_tool_links(text):
+    """Rich text (escaped already) with each FreeLab tool it names made a link (tool_link): a name inside
+    a tag or a link already is left alone."""
+    parts = re.split(u"(<[^>]*>)", u"%s" % text)
+    inside_link = False
+    for index, part in enumerate(parts):
+        if part.startswith(u"<"):
+            lowered = part.lower()
+            if lowered.startswith(u"<a "):
+                inside_link = True
+            elif lowered.startswith(u"</a"):
+                inside_link = False
+            continue
+        if inside_link:
+            continue
+        for title in sorted(FONT_TOOLS, key=len, reverse=True):
+            if title in part:
+                part = part.replace(title, u"\x00%d\x00" % FONT_TOOLS.index(title))
+        parts[index] = re.sub(u"\x00(\\d+)\x00", lambda m: tool_link(FONT_TOOLS[int(m.group(1))]), part)
+    return u"".join(parts)
+
 
 def html(text):
     """Text made safe for a rich-text label."""
@@ -5269,9 +5509,33 @@ def b(value):
     return u"<b>%s</b>" % html(value)
 
 
+def grouped(number):
+    """A whole number with its thousands set apart by commas: 13,932 (owner's image 231)."""
+    try:
+        return u"{:,}".format(int(number))
+    except Exception:
+        return u"%s" % number
+
+
 def counted(number, one, many=None):
-    """"1 pair", "2 pairs": a count with its noun in the right number."""
-    return u"%d %s" % (number, one if number == 1 else (many or one + u"s"))
+    """"1 pair", "2 pairs", "13,932 glyphs": a count (thousands set apart, grouped) with its noun in the
+    right number."""
+    return u"%s %s" % (grouped(number), one if number == 1 else (many or one + u"s"))
+
+
+def font_named(name, master=None, masters=1):
+    """The start of a window's top line, the same in every tool (owner's images 223 and 238 asked what
+    decided "(1 master)"): the font's name in bold, then its master's, then how many masters it has only
+    when it has more than one. "<b>Cardo</b>, master <b>Bold</b> (of <b>3 masters</b>)"."""
+    text = b(name)
+    if master:
+        text += u", master %s" % b(master)
+    try:
+        if int(masters) > 1:
+            text += u" (of %s)" % b(counted(int(masters), u"master"))
+    except Exception:
+        pass
+    return text
 
 
 def counted_suffix(spin, one, many=None):
@@ -5325,7 +5589,16 @@ def rich(label):
 SENTENCE_END = re.compile(u"([.!?]|\N{HORIZONTAL ELLIPSIS})((?:</[bi]>)?)\\s+(?=[A-Z<(\u00c0-\u024f])")
 
 
-ONE_LINE = (NO_FONT_LINE,)  # the only sentences kept on one line, across the suite (the owner's image 191)
+ONE_LINE = [NO_FONT_LINE]  # the only sentences kept on one line, across the suite (the owner's images 191, 278, 280)
+
+
+def one_line(text):
+    """text's sentences kept on one line by sentences() and status_label (a tool's own no-font line:
+    Proof's, Font Builder's); returns text."""
+    text = u"%s" % text
+    if text not in ONE_LINE:
+        ONE_LINE.append(text)
+    return text
 _JOINED = u"\N{NO-BREAK SPACE}⁠"  # (stands for the space between them while the others are split)
 
 
@@ -5338,8 +5611,8 @@ def _split_sentences(text, breaks):
 
 
 def sentences(text):
-    """Rich text with a line per sentence (a status line's sentences each start a line), but the two of
-    NO_FONT_LINE, which share one."""
+    """Rich text with a line per sentence (a status line's sentences each start a line), but those of
+    NO_FONT_LINE and the lines given one_line, which share one."""
     return _split_sentences(text, u"<br>").replace(u"\n", u"<br>")
 
 
@@ -5696,9 +5969,16 @@ class Log(object):
             bar.setValue(at)  # (where the reader was)
 
     def link_clicked(self, url):
-        """A link in a line clicked: handed to the dialog's handler (its text: the link's target)."""
+        """A link in a line clicked: a tool's (tool_link) opens it in this window's place; any other is
+        handed to the dialog's handler (its text: the link's target)."""
         try:
             target = u"%s" % (url.toString() if hasattr(url, "toString") else url)
+            if target.startswith(TOOL_LINK):
+                title = target[len(TOOL_LINK):].replace(u"%20", u" ")
+                if title in FONT_TOOLS and not open_tool(title, self.view.window()):
+                    self.add(u"%s is not in <i>Scripts &gt; FreeLab</i>: run <i>Refresh Scripts</i>, or reinstall "
+                             u"FreeLab." % b(title), "warning")
+                return
             if self.link_handler is not None and self.link_handler(target) is not False:
                 return  # (a handler returns False for a link it leaves to the log)
             self.open_linked(target)
@@ -6096,6 +6376,63 @@ def _sharing_left_to_tool(header, count, view=None):
         return False
 
 
+def column_needs(view, widths):
+    """(wants, leasts) for a list's columns (share_columns): what each wants (note_wants, else Qt's
+    measure of its content, at least its header's text) and the least it may be given (its header's
+    text, at least LEAST_COLUMN pixels, at most what it wants); None for a hidden column's want."""
+    QtGui = _qt()[1]
+    header = _header_of(view)
+    kept = _wants_of(view).get("wants") or []
+    try:
+        metrics = QtGui.QFontMetrics(_property(header, "font"))
+    except Exception:
+        metrics = None
+    wants, leasts = [], []
+    for column in range(len(widths)):
+        want = kept[column] if column < len(kept) else None
+        if want is None and widths[column] is not None:
+            try:
+                want = int(view.sizeHintForColumn(column)) or widths[column]
+            except Exception:
+                want = widths[column]
+        heading = 0
+        if metrics is not None:
+            try:
+                heading = int(metrics.width(_header_text(view, column))) + 2 * HEADER_MARGIN
+            except Exception:
+                heading = 0
+        want = max(want, heading) if want is not None else None
+        wants.append(want)
+        leasts.append(min(want or 0, max(LEAST_COLUMN, heading)))
+    return wants, leasts
+
+
+def drag_limit(widths, leasts, column, room):
+    """The widest a column being dragged may be made (owner's image 214: a column dragged past the
+    list's frame pushed every column after it out of sight): the room the list shows, less the columns
+    before it as they are and those after it at their least (share_columns brings them down to it once
+    the drag ends). widths: the columns' widths now, None for a hidden one. Never under MIN_SECTION."""
+    taken = 0
+    for other, width in enumerate(widths):
+        if other == column or width is None:
+            continue
+        taken += width if other < column else max(MIN_SECTION, min(width, leasts[other] if other < len(leasts) else width))
+    return max(MIN_SECTION, int(room) - taken)
+
+
+def drag_limit_of(view, column):
+    """drag_limit for a list's column now; None when it cannot be read."""
+    try:
+        count = int(_property(view, "columnCount"))
+        widths = [None if view.isColumnHidden(c) else int(view.columnWidth(c)) for c in range(count)]
+        room = int(_property(view.viewport(), "width"))
+    except Exception:
+        return None
+    if room <= 0:
+        return None
+    return drag_limit(widths, column_needs(view, widths)[1], column, room)
+
+
 def share_columns(view, held=None, after_fit=False):
     """A FreeLab list's columns sharing its width (share_widths). What each wants is its whole content
     (note_wants, from the last fit; or the width the owner dragged it to); the least each may be given is
@@ -6121,28 +6458,7 @@ def share_columns(view, held=None, after_fit=False):
     empty_bars(view)
     if view.property(TABLE_DRAG_PROP):
         return None  # (a column being dragged: Qt keeps the last one at the edge until it is let go)
-    kept = _wants_of(view).get("wants") or []
-    try:
-        metrics = QtGui.QFontMetrics(_property(header, "font"))
-    except Exception:
-        metrics = None
-    wants, leasts = [], []
-    for column in range(count):
-        want = kept[column] if column < len(kept) else None
-        if want is None and widths[column] is not None:
-            try:
-                want = int(view.sizeHintForColumn(column)) or widths[column]
-            except Exception:
-                want = widths[column]
-        heading = 0
-        if metrics is not None:
-            try:
-                heading = int(metrics.width(_header_text(view, column))) + 2 * HEADER_MARGIN
-            except Exception:
-                heading = 0
-        want = max(want, heading) if want is not None else None
-        wants.append(want)
-        leasts.append(min(want or 0, max(LEAST_COLUMN, heading)))
+    wants, leasts = column_needs(view, widths)
     stretch = table_stretch(view)
     if stretch is not None and stretch < count and wants[stretch] is not None:
         leasts[stretch] = wants[stretch]  # (its pair pictures or names never cut: the list scrolls first)
@@ -6212,6 +6528,7 @@ def watch_table(view):
     which is what that column wants from then on, until the list is fitted again."""
     QtCore = _qt()[0]
     modules, name, own, own_note = sys.modules, __name__, share_columns, note_wants
+    own_limit, _header_of_now, MIN_SECTION_NOW = drag_limit_of, _header_of, [MIN_SECTION]
     dragged = [None]
     try:
         if view.property(TABLE_FILL_PROP) is not None:
@@ -6250,6 +6567,16 @@ def watch_table(view):
             try:
                 if view.property(TABLE_SHARING_PROP):
                     return  # (share_columns' own widths)
+                if view.property(TABLE_DRAG_PROP):  # (the owner's drag: kept inside the frame, MIN_SECTION at least)
+                    module = modules.get(name)
+                    limit = (getattr(module, "drag_limit_of", None) or own_limit)(view, int(column))
+                    if limit is not None and (int(new) > limit or int(new) < MIN_SECTION_NOW[0]):
+                        new = limit if int(new) > limit else MIN_SECTION_NOW[0]
+                        view.setProperty(TABLE_SHARING_PROP, True)
+                        try:
+                            _header_of_now(view).resizeSection(int(column), int(new))
+                        finally:
+                            view.setProperty(TABLE_SHARING_PROP, False)
                 dragged[0] = int(column)
                 (getattr(modules.get(name), "note_wants", None) or own_note)(view, {int(column): int(new)})
                 watch.start()
@@ -6368,6 +6695,9 @@ def enable(button, on):
 NO_FONT_PROP = "freelabNoFont"  # on a control no_font_states grayed (its window has no font)
 WITHOUT_FONT_PROP = "freelabWithoutFont"  # on a control a tool keeps usable without a font (a font chooser)
 SEPARATOR_PROP = "freelabSeparator"  # on separator()'s lines
+HEADER_SEPARATOR_PROP = "freelabHeaderSeparator"  # on the line under a window's top text (separator(header=True))
+PREVIEW_CAPTION_PROP = "freelabPreviewCaption"  # on a preview's caption (preview_caption): quiet, whatever
+CAPTION_PROP = "freelabCaption"  # on a label that captions the control after it (caption_states)
 NO_FONT_KINDS = ("QPushButton", "QCheckBox", "QRadioButton", "QComboBox", "QAbstractSpinBox", "QLineEdit",
                  "QAbstractSlider")
 ALWAYS_ON_TEXTS = (u"Close",)  # buttons usable whatever the window holds
@@ -6472,7 +6802,7 @@ def row_hidden(item):
 
 
 def check_line(command, checked, unchecked, hidden, noun=u"row", many=None, hidden_text=(u"hidden", u"hidden")):
-    """The log line of a button that checks or unchecks many rows (check_rows): "*Check all* checked 12
+    """The log line of a button that ticks or unticks many rows (check_rows): "*Tick all* ticked 12
     pairs (3 of them hidden)." command: the button's name; checked, unchecked: the rows it changed each
     way; hidden: how many of those were out of sight (row_hidden), said so; hidden_text: how they were
     hidden, for one and for many ("in a closed group", "in closed groups")."""
@@ -6480,9 +6810,9 @@ def check_line(command, checked, unchecked, hidden, noun=u"row", many=None, hidd
         return u"%s changed nothing." % i(command)
     parts = []
     if checked:
-        parts.append(u"checked %s" % b(counted(checked, noun, many)))
+        parts.append(u"ticked %s" % b(counted(checked, noun, many)))
     if unchecked:
-        parts.append(u"unchecked %s" % (b(counted(unchecked, noun, many)) if not checked else b(unchecked)))
+        parts.append(u"unticked %s" % (b(counted(unchecked, noun, many)) if not checked else b(unchecked)))
     changed = checked + unchecked
     note = u""
     if hidden:
@@ -6495,7 +6825,7 @@ def check_line(command, checked, unchecked, hidden, noun=u"row", many=None, hidd
     return u"%s %s%s." % (i(command), u" and ".join(parts), note)
 
 
-def check_rows(items, wanted, log=None, command=u"Check all", noun=u"row", many=None,
+def check_rows(items, wanted, log=None, command=u"Tick all", noun=u"row", many=None,
                hidden_text=(u"hidden", u"hidden")):
     """What Check all, Check none, and every button that checks or unchecks many rows share: each
     checkable row of items (QTreeWidgetItem or QListWidgetItem, column 0) set to wanted (True, False, or
@@ -6657,7 +6987,7 @@ def pair_pixmap(package, master, left, right, value, caption, color, font, room=
         width = int((layers[0][0].advanceWidth + max(0, layers[1][0].advanceWidth + value)) * scale) + 2 * margin
         if room:
             width += int(em * ADJUST_ROOM)
-    line = QtGui.QFontMetrics(font).height()
+    line = QtGui.QFontMetrics(font).height() if caption else 0  # (no caption: no blank band under the pair)
     height = int(em * 1.35) + line
     pixmap = QtGui.QPixmap(max(width, 2 * margin), height)
     pixmap.fill(QtGui.QColor(0, 0, 0, 0))
@@ -6678,8 +7008,9 @@ def pair_pixmap(package, master, left, right, value, caption, color, font, room=
             fill_glyph(painter, path, QtGui.QBrush(ink), parts)
             painter.restore()
             x += (layer.advanceWidth + (value if index == 0 else 0)) * scale
-        painter.setPen(color)
-        painter.drawText(QtCore.QRect(0, height - line, pixmap.width(), line), int(QtCore.Qt.AlignCenter), caption)
+        if caption:
+            painter.setPen(color)
+            painter.drawText(QtCore.QRect(0, height - line, pixmap.width(), line), int(QtCore.Qt.AlignCenter), caption)
     finally:
         painter.end()
     return pixmap if colored else inked(pixmap, color)  # (one color, at two strengths: redrawn on a switch)
@@ -6775,15 +7106,59 @@ def flag_segments(text, left, width):
     return found
 
 
-def separator():
-    """A thin line between a window's top text and its fields: a mid gray at half strength, as the
-    lists' cell lines."""
+def separator(header=False, vertical=False):
+    """A thin line between parts of a window: a mid gray at half strength, as the lists' cell lines.
+    header: the line under a window's top text (its font line and status lines), shown whatever the
+    window holds (owner's images 222, 223, 275, 276: every window has one, and it stays with no font:
+    the grayed fields are still under it); any other is hidden while the window has no font
+    (no_font_states: nothing under it to set apart). vertical: a line between two previews side by side."""
     QtCore, QtGui = _qt()
     line = QtGui.QFrame()
-    line.setFixedHeight(1)
+    if vertical:
+        line.setFixedWidth(1)
+    else:
+        line.setFixedHeight(1)
     line.setStyleSheet(u"QFrame { border: none; background: rgba(128, 128, 128, 128); }")
-    line.setProperty(SEPARATOR_PROP, True)  # (hidden while the window has no font: no_font_states)
+    line.setProperty(HEADER_SEPARATOR_PROP if header else SEPARATOR_PROP, True)
     return line
+
+
+def sentence_end(row):
+    """The period that ends a sentence the controls of row finish ("List changes of at least [20 units]."),
+    against its last control: the row's spacing taken back before it (a spacing of its own, the period
+    floated a word's width away, live 2026-11-17). Returns the label."""
+    QtGui = _qt()[1]
+    try:
+        spacing = int(_property(row, "spacing"))
+    except Exception:
+        spacing = -1
+    row.addSpacing(-(spacing if spacing >= 0 else 6) + 1)  # (live: a negative spacing is taken as it is)
+    label = QtGui.QLabel(u".")
+    row.addWidget(label)
+    return label
+
+
+def header_separator():
+    """separator(header=True): the line under a window's top text, always shown."""
+    return separator(header=True)
+
+
+def preview_caption(text=u"", label=None):
+    """A preview's caption ("Now", "Suggested", "In the font: a"), as CJK Spacing first drew them
+    (owner's image 246): a tenth smaller, in the quiet (grayed) text color. label: an existing label to
+    style, else a new one. Marked so that caption_states never gives it the color of a control."""
+    QtGui = _qt()[1]
+    if label is None:
+        label = QtGui.QLabel(text)
+    quiet = QtGui.QFont(_property(label, "font"))
+    try:
+        quiet.setPointSizeF(quiet.pointSizeF() * 0.9)
+    except Exception:
+        pass
+    label.setFont(quiet)
+    label.setEnabled(False)  # (drawn in the quiet text color)
+    label.setProperty(PREVIEW_CAPTION_PROP, True)
+    return label
 
 
 def flag_color(mark, alpha=255):
@@ -7856,20 +8231,17 @@ class AutoKerningDialog(object):
         self.status = status_label(self.font_line())
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
-        layout.addWidget(separator())
+        layout.addWidget(header_separator())
         self.log = Log()
         # (the pairs a line names drawn as the font draws them; a glyph clicked opens in a Glyph window)
         self.log.follow(lambda: (self.fontlab, self.package, self.master))
         self.seen_history, self.first_pass, self.pinned = None, True, set()
+        # Two rows of options (owner's images 222, 262, 271, 272): what Analyze measures, ending with it
+        # (a tool's run button follows the options it reads, never pushed to the window's right edge), then
+        # how the list shows what was measured. Captions: "Noun: [choice]", or a sentence the controls
+        # finish, with its period.
         row = QtGui.QHBoxLayout()
-        row.addWidget(QtGui.QLabel("List changes of at least"))
-        self.tolerance = QtGui.QSpinBox()
-        self.tolerance.setRange(1, 200)
-        self.tolerance.setValue(TOLERANCE_UNITS)
-        self.suffix_slot = counted_suffix(self.tolerance, u"unit")  # ("1 unit", "2 units")
-        self.tolerance.setWhatsThis("A pair is listed when a method would change its kerning by at least this much.")
-        row.addWidget(self.tolerance)
-        row.addWidget(QtGui.QLabel("Script"))
+        row.addWidget(QtGui.QLabel("Script:"))
         self.script_box = QtGui.QComboBox()
         self.script_keys = ["latin"]
         self.script_box.addItem(dict(SCRIPTS)["latin"])
@@ -7879,7 +8251,8 @@ class AutoKerningDialog(object):
                                      u"(for a font with two or more) analyzes each, against its own references, and lists "
                                      u"their pairs together: a pair's glyphs show its script, and its tooltip names it.")
         row.addWidget(self.script_box)
-        row.addWidget(QtGui.QLabel("Show"))
+        row.addSpacing(12)
+        row.addWidget(QtGui.QLabel("Show:"))
         self.show_kind = self.combo(SHOW)
         self.show_kind.setWhatsThis("Which glyphs' pairs are listed.")
         row.addWidget(self.show_kind)
@@ -7890,26 +8263,39 @@ class AutoKerningDialog(object):
         if not self.common:
             self.pairs.setEnabled(False)
         row.addWidget(self.pairs)
-        row.addStretch(1)
+        row.addSpacing(12)
+        row.addWidget(QtGui.QLabel("List changes of at least"))
+        self.tolerance = QtGui.QSpinBox()
+        self.tolerance.setRange(1, 200)
+        self.tolerance.setValue(TOLERANCE_UNITS)
+        self.suffix_slot = counted_suffix(self.tolerance, u"unit")  # ("1 unit", "2 units")
+        self.tolerance.setWhatsThis("A pair is listed when a method would change its kerning by at least this much.")
+        row.addWidget(self.tolerance)
+        sentence_end(row)
+        row.addSpacing(12)
         self.analyze_button = QtGui.QPushButton("Analyze")
         self.analyze_button.setWhatsThis("Measures the font's current master again. Pairs whose glyphs have not "
                                          "changed since the last analysis are not measured again.")
         row.addWidget(self.analyze_button)
+        row.addStretch(1)
         layout.addLayout(row)
         row = QtGui.QHBoxLayout()
-        row.addWidget(QtGui.QLabel("Suggested values from"))
+        row.addWidget(QtGui.QLabel("Suggested values:"))
         self.source = self.combo(SOURCES)
         self.source.setWhatsThis("The method whose values fill the Suggested column and are written, for every "
                                  "pair not picked by hand. Changing it does not change the list.")
         row.addWidget(self.source)
+        row.addSpacing(12)
+        row.addWidget(QtGui.QLabel("Order:"))
         self.order = self.combo(ORDERS)
         self.order.setWhatsThis("The order of the list.")
         row.addWidget(self.order)
+        row.addSpacing(12)
         # Pairs the font kerns already are the designer's choices (a j tucked under the letter before
         # it, which the methods do not model): hidden unless asked for, and never checked for writing.
         self.include_kerned = QtGui.QCheckBox("Include existing kerned pairs")
         self.include_kerned.setWhatsThis("Also lists the pairs the font kerns already, through its classes too, "
-                                          "and the pairs written here since. They start unchecked.")
+                                          "and the pairs written here since. They start unticked.")
         row.addWidget(self.include_kerned)
         self.only_picked = QtGui.QCheckBox(u"Only pairs picked by hand (%d)" % PICKED_ROOM)
         self.only_picked.setWhatsThis("Lists only the pairs whose value you picked yourself.")
@@ -7931,7 +8317,7 @@ class AutoKerningDialog(object):
         self.tree.setProperty(LEAVE_ALONE_PROP, True)  # its pictures are drawn in the dialog's colors
         self.tree.setWhatsThis(u"The pairs, each drawn at the value it takes, each method's value, and the value to "
                                u"write (Suggested). Double-click a value to use it for that pair, or press <i>Ctrl+1</i> "
-                               u"to <i>Ctrl+6</i>; <i>Space</i> checks the pair; <i>Backspace</i> gives it the suggested "
+                               u"to <i>Ctrl+6</i>; <i>Space</i> ticks the pair; <i>Backspace</i> gives it the suggested "
                                u"value again. Double-click a pair to open it in a <i>Glyph</i> window.")
         table_layout(self.tree, stretch=0)  # (the pairs take the room the numbers leave)
         layout.addWidget(self.tree, 1)
@@ -7945,13 +8331,11 @@ class AutoKerningDialog(object):
         self.reset_button.setToolTip("Give this pair the suggested value again.")
         self.reset_button.setWhatsThis("Gives the selected pair the value of the source chosen above, undoing a pick.")
         self.reset_button.setEnabled(False)
-        note_row.addWidget(self.reset_button)
         self.glyph_window_button = QtGui.QPushButton(u"Show in Glyph window")
         self.glyph_window_button.setWhatsThis(u"Opens the selected pair in a <i>Glyph</i> window, between H's, n's, and o's, "
                                               u"to look at it (and edit it) with FontLab's own tools.")
         self.glyph_window_button.setEnabled(False)
-        note_row.addWidget(self.glyph_window_button)
-        layout.addLayout(note_row)
+        layout.addLayout(note_row)  # (the pair's buttons in the bottom row, with the others acting on the list)
         self.related = QtGui.QLabel(u"")
         self.related.setWordWrap(True)
         self.related.setWhatsThis("The glyph pairs the selected pair's entry kerns: writing it changes all of them.")
@@ -7980,11 +8364,11 @@ class AutoKerningDialog(object):
         layout.addLayout(grid)
         layout.addWidget(self.log.widget)
         buttons = QtGui.QHBoxLayout()
-        self.all_button = QtGui.QPushButton("Check new pairs")
-        self.all_button.setWhatsThis("Checks every listed pair the font does not kern yet.")
-        self.none_button = QtGui.QPushButton("Check none")
+        self.all_button = QtGui.QPushButton("Tick new pairs")
+        self.all_button.setWhatsThis("Ticks every listed pair the font does not kern yet.")
+        self.none_button = QtGui.QPushButton("Tick none")
         self.restore_button = QtGui.QPushButton("Restore suggestions")
-        self.restore_button.setWhatsThis("Puts every check and every value picked by hand back as the list first "
+        self.restore_button.setWhatsThis("Puts every tick and every value picked by hand back as the list first "
                                          "came, after the last analysis.")
         self.classes_button = QtGui.QPushButton(u"Suggest classes…")
         self.classes_button.setWhatsThis("Suggests kerning classes for this master, from the open-licensed fonts FreeLab "
@@ -7993,11 +8377,12 @@ class AutoKerningDialog(object):
         self.check_button = QtGui.QPushButton(u"Check kerning…")
         self.check_button.setWhatsThis(u"Opens <i>Kerning Check</i>: pairs whose kerning makes them collide, entries that "
                                        u"do nothing or name what is gone, and differences between masters.")
-        self.apply_button = QtGui.QPushButton("Write checked pairs")
-        self.apply_button.setWhatsThis("Writes the Suggested value of every checked pair to the current master, "
+        self.apply_button = QtGui.QPushButton("Write ticked pairs")
+        self.apply_button.setWhatsThis("Writes the Suggested value of every ticked pair to the current master, "
                                        "where the pair's value comes from: see Kerning classes in the help.")
         self.close_button = QtGui.QPushButton("Close")
-        for button in (self.all_button, self.none_button, self.restore_button, self.classes_button, self.check_button):
+        for button in (self.all_button, self.none_button, self.restore_button, self.reset_button,
+                       self.glyph_window_button, self.classes_button, self.check_button):
             buttons.addWidget(button)
         buttons.addStretch(1)
         buttons.addWidget(self.apply_button)
@@ -8225,8 +8610,12 @@ class AutoKerningDialog(object):
     def font_line(self):
         if self.package is None:
             return no_font_line()
-        return u"%s, master %s. %s." % (b(self.package.tfn), b(self.master),
-                                        ALL_SCRIPTS_LINE if self.script == ALL_SCRIPTS else SCRIPT_LINES[self.script])
+        try:
+            masters = len(list(self.package.masters))
+        except Exception:
+            masters = 1
+        return u"%s. %s." % (font_named(self.package.tfn, self.master, masters),
+                             ALL_SCRIPTS_LINE if self.script == ALL_SCRIPTS else SCRIPT_LINES[self.script])
 
     def fill_scripts(self, package, wanted=None):
         """The script list: the scripts the font has; the script to analyze: wanted (or the last one)
@@ -8366,7 +8755,7 @@ class AutoKerningDialog(object):
                 except ValueError as exc:
                     if len(scripts) == 1:
                         raise
-                    self.log.add(u"Kana left out: %s" % html(u"%s" % exc), "warning")  # (the other scripts analyzed)
+                    self.log.add(u"Kana left out: %s" % with_tool_links(html(u"%s" % exc)), "warning")  # (the other scripts analyzed)
                     continue
                 self.adjustments.update(adjustments)
                 # kana: the pairs common in text only (all of them, some 45,000, would each be listed and asked of FontLab)
@@ -8384,7 +8773,7 @@ class AutoKerningDialog(object):
         except Exception as exc:
             message = u"%s" % exc
             self.status.setText(self.font_line())
-            self.log.add(html(message[:1].upper() + message[1:]), "error")
+            self.log.add(with_tool_links(html(message[:1].upper() + message[1:])), "error")
             return
         if result is None:
             self.status.setText(self.font_line())
@@ -8601,7 +8990,7 @@ class AutoKerningDialog(object):
         items = [self.row_item(row) for row in range(min(self.row_count(), len(self.suggestions)))]
         check_rows([item for item in items if item is not None],
                    lambda item: on and not self.suggestions[self.row_of(item)].current, self.log,
-                   u"Check new pairs" if on else u"Check none", u"pair")
+                   u"Tick new pairs" if on else u"Tick none", u"pair")
         self.update_buttons()
 
     def row_checked(self, row):
@@ -8653,7 +9042,7 @@ class AutoKerningDialog(object):
             s.override, s.checked = None, None
         self.update_picked()
         self.fill_table()
-        self.log.add(u"Checks and values restored as suggested.")
+        self.log.add(u"Ticks and values restored as suggested.")
 
     def focus_neighbor(self, key):
         """An H beside a preview's pair clicked: its pair with the glyph beside it."""
@@ -9000,7 +9389,7 @@ class AutoKerningDialog(object):
         kerning = FontKerning(self.package.kerning(self.master))
         todo, shared = self.planned_writes(kerning, [s for s in self.suggestions if s.checked])
         if not todo:
-            self.log.add(u"Nothing was written: every checked pair has the value it would be given already.")
+            self.log.add(u"Nothing was written: every ticked pair has the value it would be given already.")
             self.update_buttons()
             return
         classes = entries = 0
@@ -9087,8 +9476,8 @@ class ClassDialog(object):
         self.tree.setColumnCount(len(CLASS_COLUMNS))
         self.tree.setHeaderLabels(list(CLASS_COLUMNS))
         table_layout(self.tree)
-        self.tree.setWhatsThis(u"Each class suggested for this master: checked ones are made (or extended) when you click "
-                               u"<i>Create checked classes</i>. Gray ones are shown for reference and left as they are. "
+        self.tree.setWhatsThis(u"Each class suggested for this master: ticked ones are made (or extended) when you click "
+                               u"<i>Create ticked classes</i>. Gray ones are shown for reference and left as they are. "
                                u"<i>May need pairs of their own</i> names the members that need looser kerning than the "
                                u"class's first glyph (an accent reaching toward the neighbor), at the pair where they "
                                u"differ most: the class's value would bring them too close there, so check those pairs "
@@ -9119,11 +9508,11 @@ class ClassDialog(object):
                                u"that side, so every member kerns as A does. Without it, the class starts with no kerning.")
         layout.addWidget(self.move)
         buttons = QtGui.QHBoxLayout()
-        self.all_button = QtGui.QPushButton("Check all")
-        self.none_button = QtGui.QPushButton("Check none")
-        self.apply_button = QtGui.QPushButton("Create checked classes")
-        self.exceptions_button = QtGui.QPushButton("Write checked pairs")
-        self.exceptions_button.setWhatsThis(u"Gives each checked pair of <i>Pairs too close with their class's "
+        self.all_button = QtGui.QPushButton("Tick all")
+        self.none_button = QtGui.QPushButton("Tick none")
+        self.apply_button = QtGui.QPushButton("Create ticked classes")
+        self.exceptions_button = QtGui.QPushButton("Write ticked pairs")
+        self.exceptions_button.setWhatsThis(u"Gives each ticked pair of <i>Pairs too close with their class's "
                                             u"value</i> the value shown, as a pair of its own: the class kerns "
                                             u"its other glyphs as before.")
         self.close_button = QtGui.QPushButton("Close")
@@ -9363,8 +9752,8 @@ class ClassDialog(object):
         QtCore, QtGui = _qt()
         items = [item for item in self.items() + self.items(exceptions=True)
                  if int(item.flags()) & int(QtCore.Qt.ItemIsUserCheckable)]
-        counts = check_rows(items, on, command=u"Check all" if on else u"Check none")
-        line = check_line(u"Check all" if on else u"Check none", counts[0], counts[1], counts[2],
+        counts = check_rows(items, on, command=u"Tick all" if on else u"Tick none")
+        line = check_line(u"Tick all" if on else u"Tick none", counts[0], counts[1], counts[2],
                           hidden_text=(u"in a closed section", u"in closed sections"))
         self.status.setText(line + u" " + (getattr(self, "summary", u"") or u""))
 

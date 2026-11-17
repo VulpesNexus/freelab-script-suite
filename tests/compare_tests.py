@@ -222,12 +222,14 @@ class ChoiceTests(unittest.TestCase):
     def test_what_is_missing(self):
         line = fcmp.missing_line
         self.assertIn(u"No font is open", line(None, 0, 0, False))
+        self.assertIn(u"hooks to the next font you open", line(None, 0, 0, False), "as the shared no-font line")
         one = line(u"<b>Sans</b>", 0, 1, False)
         self.assertIn(u"Only <b>Sans</b> is open, with one master.", one)
         self.assertIn(u"<i>Open a font" + self.ELLIPSIS + u"</i>", one)
         self.assertIn(u"the master to compare with", line(u"<b>Sans</b>", 0, 2, False))
+        # Owner's image 257: a font picked in "with" is compared at once (no click on Compare to ask for)
         self.assertEqual(line(u"<b>Sans</b>", 1, 1, False),
-                         u"Choose in <i>with</i> the font to compare <b>Sans</b> with, then click <i>Compare</i>.")
+                         u"Choose in <i>with</i> the font to compare <b>Sans</b> with: it is compared at once.")
         self.assertEqual(line(u"<b>Sans</b>", 3, 2, False), line(u"<b>Sans</b>", 1, 1, False))
         self.assertEqual(line(u"<b>Sans</b>", 1, 1, True), u"", "both sides chosen: nothing is missing")
         self.assertIn(u"the same master", line(u"<b>Sans</b>", 0, 2, True, True))
@@ -856,6 +858,19 @@ class DialogTests(unittest.TestCase):
             else:
                 sys.modules[name] = module
 
+    def setUp(self):
+        # The font kept for "with" for the session (on sys): each test starts without one, and leaves none
+        held = getattr(sys, fcmp.REMEMBERED, None)
+        if hasattr(sys, fcmp.REMEMBERED):
+            delattr(sys, fcmp.REMEMBERED)
+
+        def restore():
+            if hasattr(sys, fcmp.REMEMBERED):
+                delattr(sys, fcmp.REMEMBERED)
+            if held is not None:
+                setattr(sys, fcmp.REMEMBERED, held)
+        self.addCleanup(restore)
+
     def dialog(self, packages):
         self.workspace.packages = lambda: list(packages)
         self.workspace.currentPackage = packages[0]
@@ -892,7 +907,9 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(dialog.second_key, (second.fgPackage.id, u"Regular"))
         self.assertTrue(dialog.compare_button.enabled)
         self.assertEqual(dialog.missing(), u"")
-        self.assertEqual(texts[-1], u"Click <i>Compare</i> to compare the fonts chosen.")
+        # Owner's image 257: a font picked in "with" is compared at once, no click on Compare
+        self.assertIsNotNone(dialog.sides, "compared on the pick")
+        self.assertTrue(texts[-1].startswith(u"Compared <b>Fake A</b> with <b>Fake B</b>"), texts[-1])
         self.assertFalse(dialog.swap_button.enabled, "two fonts: the first stays this window's")
         dialog.choice_b.pick(0)
         self.assertEqual(dialog.second_key, (second.fgPackage.id, u"Regular"),
@@ -1290,8 +1307,13 @@ class DialogTests(unittest.TestCase):
         del raised[:]
         dialog.open_font(second.path)  # (open already: chosen and compared all the same)
         self.assertEqual((requested, raised), ([second.path], [dialog.dialog]))
+        compared = []
+        real_compare = dialog.compare
+        dialog.compare = lambda: compared.append(1) or real_compare()
         dialog.choice_b.pick(1)
-        self.assertEqual(raised, [dialog.dialog], "a font picked among those open: compared on a click, as before")
+        self.assertEqual(raised, [dialog.dialog], "a font picked among those open: the window is in front already")
+        self.assertEqual(compared, [1], "and compared at once (owner's image 257)")
+        dialog.compare = real_compare
         # Review: the timers once the window is minimized or closed, and a click on Compare meanwhile
         stopped = []
         dialog.settle_timer = type("Timer", (), {"stop": lambda timer: stopped.append(1),
@@ -1426,6 +1448,7 @@ class DialogTests(unittest.TestCase):
         self.assertIsNone(dialog.failed, dialog.failed)
         self.assertEqual((dialog.choice_a.rows, dialog.first_key(), dialog.second_key), ([], None, None))
         self.assertIn(u"No font is open", dialog.missing())
+        self.assertIn(fcmp.NO_FONT_LINE, self.ak.ONE_LINE, "a no-font line: on one line")
         self.assertFalse(dialog.compare_button.enabled)
         dialog.compare()
         self.assertIsNone(dialog.sides)
@@ -1441,6 +1464,141 @@ class DialogTests(unittest.TestCase):
             dialog.feature_rows = rows
             dialog.fill_features()
         self.assertEqual(texts, [u"The one feature is alike in both.", u"The <b>2 features</b> are alike."])
+
+    def test_the_tabs_count_in_parentheses(self):
+        # Owner's image 235: "Glyphs 13,956" read as a name; every header puts its count in parentheses
+        dialog = self.dialog([first_font(), second_font()])
+        texts = {}
+        dialog.tabs.setTabText = lambda index, text: texts.__setitem__(index, text)
+        dialog.update_buttons()
+        self.assertEqual(texts, {0: u"Glyphs", 1: u"Kerning", 2: u"Features"}, "nothing compared: no count")
+        dialog.choice_b.pick(1)
+        dialog.update_buttons()
+        self.assertEqual(texts, {0: u"Glyphs (6)", 1: u"Kerning (3)", 2: u"Features (3)"})
+        self.assertEqual(fcmp.tab_text(u"Glyphs", 13956), u"Glyphs (13,956)")
+        self.assertEqual(fcmp.counted(13956, u"glyph"), u"13,956 glyphs")
+
+    def test_the_tab_lines(self):
+        # Owner's image 256: "632 glyphs differ." and "231 shown." on one line; names and counts in bold,
+        # the chips' names in italics
+        line = fcmp.glyphs_line
+        self.assertEqual(line(632, 231, 231, [u"Only in A"]),
+                         u"<b>632 glyphs</b> differ (<b>231</b> shown; hidden: <i>Only in A</i>).")
+        self.assertEqual(line(5000, 2000, 2400), u"<b>5,000 glyphs</b> differ (the <b>2,000</b> worst shown).")
+        self.assertEqual(line(1, 1, 1), u"<b>1 glyph</b> differs.")
+        self.assertIn(u"alike", line(0, 0, 0))
+        counts = {"only_a": 3, "only_b": 2, "value": 442, "absent": 1}
+        self.assertEqual(fcmp.kerning_line(counts, (u"A", u"B")),
+                         u"<b>447 glyph pairs</b> kerned differently: <b>3</b> only in <b>A</b>, <b>2</b> only in "
+                         u"<b>B</b>, <b>442</b> with differing values. <b>1 pair</b> of a glyph one font lacks.")
+        self.assertIn(u"(the <b>2,000</b> largest differences shown).", fcmp.kerning_line(counts, (u"A", u"B"), 2000))
+        rows = [fcmp.FeatureDifference(u"liga", "only_a", u"", u"", []),
+                fcmp.FeatureDifference(u"kern", "same", u"", u"", [])]
+        self.assertEqual(fcmp.features_line(rows, (u"A", u"B")),
+                         u"<b>1 feature</b> differs: <b>1</b> only in <b>A</b>, <b>0</b> only in <b>B</b>, <b>0</b> "
+                         u"with code that differs.")
+
+    def test_the_code_is_written_in_the_views_enabled_colors(self):
+        # Owner's image 233: a font compared from the Features tab showed its code dimmed until another feature
+        # was selected. The pages are grayed while comparing, and Qt's palette() then gives the disabled
+        # colors, which the code's HTML kept: the colors are read for the enabled view, whatever it is now
+        dialog = self.dialog([first_font(), second_font()])
+        gui = sys.modules["PythonQt"].QtGui
+        asked = []
+
+        class Color(object):
+            def __init__(self, value):
+                self.value = value
+
+            def red(self):
+                return self.value
+
+            green = blue = red
+
+        class Palette(object):
+            def color(self, *args):
+                asked.append(args)
+                return Color(200 if len(args) == 2 and args[0] == "active" else 90)
+
+        gui.classes["QPalette"] = type("QPalette", (), {"Active": "active", "Base": "base", "Text": "text"})
+        self.addCleanup(lambda: gui.classes.pop("QPalette", None))
+        dialog.diff_view = type("View", (), {"palette": Palette()})()
+        self.assertEqual(dialog.code_colors(), ((200, 200, 200), (200, 200, 200)))
+        self.assertEqual(asked, [("active", "base"), ("active", "text")])
+
+    def test_the_first_font_is_as_wide_as_its_name_and_bold(self):
+        # Owner's images 236 and 237: a tab's width between the name and the swap button, the name not bold
+        made = []
+        real = FakeCombo.__init__
+
+        def init(box, *args, **kwargs):
+            real(box)
+            made.append(box)
+            box.calls = []
+            box.setSizeAdjustPolicy = lambda policy: box.calls.append(("policy", policy))
+            box.setMinimumContentsLength = lambda length: box.calls.append(("length", length))
+            box.setFont = lambda font: box.calls.append(("font", font))
+        FakeCombo.__init__ = init
+        self.addCleanup(setattr, FakeCombo, "__init__", real)
+        FakeCombo.AdjustToContents = "to contents"
+        self.addCleanup(delattr, FakeCombo, "AdjustToContents")
+        gui = sys.modules["PythonQt"].QtGui
+        bolded = []
+        gui.classes["QFont"] = type("QFont", (), {"__init__": lambda font, *args: None,
+                                                  "setBold": lambda font, on: bolded.append(on)})
+        self.addCleanup(lambda: gui.classes.pop("QFont", None))
+        dialog = self.dialog([first_font(), second_font()])
+        calls = dict((kind, value) for kind, value in dialog.choice_a.calls)
+        self.assertEqual(calls["policy"], "to contents")
+        self.assertEqual(calls["length"], 0)
+        self.assertIn("font", calls)
+        self.assertEqual(bolded, [True])
+        self.assertNotIn("font", dict(dialog.choice_b.calls), "the second lists other fonts: plain")
+
+    def test_the_font_picked_is_kept_for_the_session(self):
+        # Owner's image 257: "the last loaded font should stay loaded and keep being compared with for the rest
+        # of the session (or until a new font is selected for comparison)"
+        first, second, third = first_font(), second_font(), two_master_font()
+        packages = [first, second, third]
+        dialog = self.dialog(packages)
+        dialog.choice_b.pick(1)  # Fake B
+        self.assertEqual(getattr(sys, fcmp.REMEMBERED)["number"], second.fgPackage.id)
+        # A new window on the same font: Fake B chosen, and compared once it is shown
+        other = self.dialog(packages)
+        self.assertEqual(other.second_key, (second.fgPackage.id, u"Regular"))
+        self.assertIsNone(other.sides, "not compared before it is shown")
+        other.shown = lambda: True
+        other.compare_recalled()
+        self.assertIsNotNone(other.sides)
+        self.assertEqual(other.labels(), (u"Fake A", u"Fake B"))
+        other.sides = None
+        other.compare_recalled()
+        self.assertIsNone(other.sides, "once")
+        # Another font picked: kept instead
+        index = next(k for k, row in enumerate(dialog.second_rows) if row[0] == "font" and row[1] == third.fgPackage.id)
+        dialog.choice_b.pick(index)
+        self.assertEqual(getattr(sys, fcmp.REMEMBERED)["number"], third.fgPackage.id)
+        # The font closed and its file opened again (another number): still the one
+        reopened = second_font()
+        reopened.path = second.path
+        packages[:] = [first, reopened]
+        setattr(sys, fcmp.REMEMBERED, {"number": second.fgPackage.id, "path": second.path, "master": u"Regular"})
+        again = self.dialog(packages)
+        self.assertEqual(again.second_key, (reopened.fgPackage.id, u"Regular"))
+        # Not open at all: nothing chosen
+        packages[:] = [first, third]
+        none = self.dialog(packages)
+        self.assertIsNone(none.second_key)
+        # The window's own font (one master) kept elsewhere: nothing to compare it with here
+        setattr(sys, fcmp.REMEMBERED, {"number": first.fgPackage.id, "path": first.path, "master": u"Regular"})
+        own = self.dialog([first, third])
+        self.assertIsNone(own.second_key)
+        # Read again later (a press on the dropdown): never chosen then, under the user's pick
+        setattr(sys, fcmp.REMEMBERED, {"number": third.fgPackage.id, "path": third.path, "master": u"Bold"})
+        own.read_fonts()
+        self.assertIsNone(own.second_key)
+        own.font_changed()  # (as the window takes a font: chosen then)
+        self.assertEqual(own.second_key, (third.fgPackage.id, u"Bold"))
 
 
 class ThemeChangedTests(unittest.TestCase):

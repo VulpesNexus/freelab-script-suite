@@ -940,9 +940,9 @@ class SmallFormTests(unittest.TestCase):
         self.assertEqual(fc.rescaled_baseline(dict(setting, top_of=None), 0.5), 305)
 
     def test_build_label(self):
-        self.assertEqual(fc.build_label(0), u"Build checked glyphs")
-        self.assertEqual(fc.build_label(1), u"Build 1 checked glyph")
-        self.assertEqual(fc.build_label(12), u"Build 12 checked glyphs")
+        self.assertEqual(fc.build_label(0), u"Build ticked figure forms")
+        self.assertEqual(fc.build_label(1), u"Build 1 ticked figure form")
+        self.assertEqual(fc.build_label(12), u"Build 12 ticked figure forms")
 
     def test_built_forms_reach_the_features(self):
         """Once built (the font read again), the forms features take them."""
@@ -1181,6 +1181,9 @@ class Recorded(Anything):
 
     def setEnabled(self, on):
         self.enabled = on
+
+    def setVisible(self, on):
+        self.visible = on
 
     def addItem(self, label):
         self.labels.append(label)
@@ -1923,14 +1926,14 @@ class DialogTests(unittest.TestCase):
         package = dialog.package
         self.assertEqual([item.data(0, USER_ROLE) for item in dialog.small_tree.items],
                          ["sups", "superscript", "subs", "subscript"], "numerators, denominators, a, and o drawn")
-        self.assertEqual(dialog.build_button.text, u"Build 40 checked glyphs")
+        self.assertEqual(dialog.build_button.text, u"Build 40 ticked figure forms")
         self.assertTrue(dialog.build_button.enabled)
         self.small_section(dialog, "subscript").setCheckState(0, UNCHECKED)
-        self.assertEqual(dialog.build_button.text, u"Build 30 checked glyphs")
+        self.assertEqual(dialog.build_button.text, u"Build 30 ticked figure forms")
         self.assertEqual(self.small_section(dialog, "subscript").child(0).checkState(0), UNCHECKED)
         sups = self.small_section(dialog, "sups")
         # Owner's report 159: a folded group showed nothing in the other columns (its first column spanned them)
-        self.assertEqual(sups.text(1), u"10 of 10 glyphs checked")
+        self.assertEqual(sups.text(1), u"10 of 10 glyphs ticked")
         self.assertEqual(sups.text(2), u"10 scaled from their figures", "a short note of what its rows say")
         self.assertEqual(self.small_section(dialog, "superscript").text(2),
                          u"10 copies of their set's glyphs; U+00B2 to U+2079")
@@ -1946,10 +1949,10 @@ class DialogTests(unittest.TestCase):
         self.assertIn(u"two at 50%", sups.child(2).text(1))
         dialog.restore()
         self.assertEqual(dialog.small_plans[u"two.sups"].parts[0][1], 0.59)
-        self.assertEqual(dialog.build_button.text, u"Build 40 checked glyphs", "the checks restored too")
+        self.assertEqual(dialog.build_button.text, u"Build 40 ticked figure forms", "the checks restored too")
         self.small_section(dialog, "subscript").setCheckState(0, UNCHECKED)
         self.small_section(dialog, "subs").child(0).setCheckState(0, UNCHECKED)  # zero.subs
-        self.assertEqual(dialog.build_button.text, u"Build 29 checked glyphs")
+        self.assertEqual(dialog.build_button.text, u"Build 29 ticked figure forms")
         dialog.build_small_forms()
         self.assertEqual(self.fontlab.flItems.steps, [u"FreeLab Feature Code (before)", u"FreeLab Feature Code"],
                          "the font's first write from FreeLab: the font as it was recorded first, for Undo to go back to")
@@ -1983,7 +1986,7 @@ class DialogTests(unittest.TestCase):
                          ["sups", "superscript", "subs", "subscript"])
         self.assertEqual(sorted(dialog.small_ours), sorted(t.split(u'">')[0] for t in
                                                           done[-1].split(u'<a href="glyphname:')[1:]))
-        self.assertEqual(dialog.build_button.text, u"Build checked glyphs")
+        self.assertEqual(dialog.build_button.text, u"Build ticked figure forms")
         self.assertFalse(dialog.build_button.enabled)
         self.assertEqual(dialog.small_counts(),
                          u"The font lacks <b>11 figure forms</b>. <b>29 figure forms</b> were built here before: a "
@@ -2091,14 +2094,14 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(checked, dialog.often, "more letters than rules by letter serve: the doubled ones start checked")
         self.assertTrue(set(u"lLsSeEoOtTfF") <= checked and u"x" not in checked and u"q" not in checked)
         self.assertEqual(fc.turn_mode(dialog.cycling(), 2), "letter")
-        self.assertIn(u"<b>60 glyphs</b> checked, taking turns <b>by glyph</b>", dialog.turn_label.text)
+        self.assertIn(u"<b>60 glyphs</b> ticked, taking turns <b>by glyph</b>", dialog.turn_label.text)
         self.assertIn(u"  ignore sub l.alt2 l';\n", dialog.new_texts()["calt"])
         states = dict((key, button.enabled) for (key, _, _), button in zip(fc.TURN_CHECKS, dialog.turn_buttons))
         self.assertEqual(states, {"often": False, "all": True, "none": True})
         dialog.check_turns("all")
         self.assertEqual(len(dialog.cycling()), len(letters))
         # Owner's report 118: these buttons left no line in the log
-        self.assertEqual(self.logged[-1], ("info", u"<i>All</i> checked <b>%d glyphs</b>." % (len(letters) - 60)))
+        self.assertEqual(self.logged[-1], ("info", u"<i>Tick all</i> ticked <b>%d glyphs</b>." % (len(letters) - 60)))
         self.assertIn(u"<b>by position</b>", dialog.turn_label.text)
         texts = dialog.new_texts()
         self.assertLess(len(texts["calt"]), 40000, "a few rules on classes, not megabytes")
@@ -2127,10 +2130,10 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(len(again.cycling()), len(letters), "restored as it first came: what the font's code has")
         again.check_turns("none")
         self.assertEqual(again.cycling(), {})
-        self.assertEqual(self.logged[-1], ("info", u"<i>None</i> unchecked <b>%d glyphs</b>." % len(letters)))
-        self.assertIn(u"No glyph is checked", again.turn_label.text)
+        self.assertEqual(self.logged[-1], ("info", u"<i>Tick none</i> unticked <b>%d glyphs</b>." % len(letters)))
+        self.assertIn(u"No glyph is ticked", again.turn_label.text)
         again.check_turns("none")
-        self.assertEqual(self.logged[-1], ("info", u"<i>None</i> changed nothing."))
+        self.assertEqual(self.logged[-1], ("info", u"<i>Tick none</i> changed nothing."))
 
     def with_glyphs(self, features, names):
         """The fake font with more glyphs (names, no characters)."""
@@ -2158,7 +2161,7 @@ class DialogTests(unittest.TestCase):
         self.assertEqual([row.text(2) for row in rows], [u"Often"] * 5 + [u"Seldom"] * 2)
         self.assertEqual(dialog.often, set([u"l", u"zero", u"nine", u"period", u"hyphen"]))
         self.assertEqual(sorted(dialog.cycling()), sorted(row.data(0, USER_ROLE) for row in rows), "few: all checked")
-        self.assertIn(u"<b>7 glyphs</b> checked, taking turns <b>by glyph</b>", dialog.turn_label.text)
+        self.assertIn(u"<b>7 glyphs</b> ticked, taking turns <b>by glyph</b>", dialog.turn_label.text)
         self.assertIn(u"<b>7 glyphs</b> with alternates taking turns", dialog.status.text)
         calt = dialog.new_texts()["calt"]
         classes = classes_of(calt)
@@ -2178,7 +2181,8 @@ class DialogTests(unittest.TestCase):
             self.assertIsNone(fc.check_code(calt, dialog.names))
         dialog.check_turns("often")
         self.assertEqual(set(dialog.cycling()), dialog.often, "the button checks the figures and marks often doubled too")
-        self.assertEqual(fc.TURN_CHECKS[0][1], u"Often doubled")
+        self.assertEqual([label for _, label, _ in fc.TURN_CHECKS], [u"Tick all", u"Tick none", u"Tick often doubled"],
+                         "the suite's order (owner's images 260, 261): Tick, not Check, all and none first")
         self.assertEqual(dialog.kind(u"9"), fc.FIGURES)
         self.assertTrue(dialog.doubled(u".") and dialog.doubled(u"0") and not dialog.doubled(u"/"))
 
@@ -2427,7 +2431,7 @@ class DialogTests(unittest.TestCase):
         is_label = lambda w: isinstance(w, RECORDED["QLabel"])
         rows = [row for row in RecordedRow.made if any(isinstance(w, Recorded) or isinstance(w, RecordedTree)
                                                        for w in row.widgets)]
-        self.assertGreater(len(rows), 5)
+        self.assertGreater(len(rows), 3)
         for row in rows:
             texts = [w.whats for w in row.widgets if not is_label(w) and hasattr(w, "whats")]
             self.assertEqual(len(texts), len(set(texts)), "two controls of a row share a What's This: %r" % (texts,))
@@ -2439,7 +2443,7 @@ class DialogTests(unittest.TestCase):
                     continue  # a label and its field
                 self.assertNotIn(widget.whats, texts, "the label %r has another control's What's This" % widget.text)
         # Strokes: its label and its box answer with its own text, which says it is for every set
-        strokes = [w for w in labels if w.text == u"Strokes"][0]
+        strokes = [w for w in labels if w.text == u"Strokes:"][0]
         self.assertEqual(strokes.whats, dialog.stroke_box.whats)
         self.assertTrue(strokes.whats.startswith(u"For every set, not only the one picked: how thick"))
         self.assertNotEqual(strokes.whats, dialog.small_reset.whats)
@@ -2456,7 +2460,7 @@ class DialogTests(unittest.TestCase):
         dialog = self.recorded(FakeFeatures({}))
         row = [row for row in RecordedRow.made if dialog.small_set in row.widgets][0]
         self.assertEqual([w.text for w in row.widgets if isinstance(w, RECORDED["QLabel"])],
-                         [u"Settings of", u"Scale", u"Baseline at", u"Width", u"Strokes"])
+                         [u"Set:", u"Scale:", u"Baseline:", u"Width:", u"Strokes:"])
         for box in (dialog.small_scale, dialog.small_baseline, dialog.small_width, dialog.small_reset, dialog.stroke_box):
             self.assertIn(box, row.widgets)
         self.assertEqual(row.widgets[-1], dialog.small_reset,
@@ -2491,26 +2495,26 @@ class DialogTests(unittest.TestCase):
         ContainedButton.container_disabled = False
         dialog = self.dialog(FakeFeatures({}), classes={"QPushButton": ContainedButton, "QSplitter": BusySplitter})
         package = dialog.package
-        self.assertEqual(dialog.build_button.text, u"Build 40 checked glyphs")
+        self.assertEqual(dialog.build_button.text, u"Build 40 ticked figure forms")
         self.assertTrue(dialog.build_button.enabled)
         before = list(package.glyphs)
         dialog.build_small_forms()
         self.assertFalse(ContainedButton.container_disabled, "the lists answer again")
         self.assertEqual(len(dialog.small_tree.items), 4, "what was built is listed again, to replace")
-        self.assertEqual(dialog.build_button.text, u"Build checked glyphs")
+        self.assertEqual(dialog.build_button.text, u"Build ticked figure forms")
         # Owner's report 160: it stayed clickable, and a click only said "Nothing changed since the last build"
         self.assertFalse(dialog.build_button.enabled, "built with these settings: nothing a build would change")
         self.assertTrue(dialog.build_button.whats.endswith(
-            u"Grayed out: the 40 glyphs checked were built here with these very settings, so a build would change "
-            u"nothing. Change a setting, or check other glyphs, to build again."), dialog.build_button.whats)
-        self.assertIn(u"Grayed out: the 40 glyphs", dialog.build_button.tip, "on hover too")
-        self.assertIn(u"the glyph checked was built", fc.build_words(0, 1))
-        self.assertTrue(fc.build_words(0, 0).endswith(u"Grayed out: no glyph that can be built is checked."))
+            u"Grayed out: the 40 figure forms ticked were built here with these very settings, so a build would "
+            u"change nothing. Change a setting, or tick other figure forms, to build again."), dialog.build_button.whats)
+        self.assertIn(u"Grayed out: the 40 figure forms", dialog.build_button.tip, "on hover too")
+        self.assertIn(u"the figure form ticked was built", fc.build_words(0, 1))
+        self.assertTrue(fc.build_words(0, 0).endswith(u"Grayed out: no figure form that can be built is ticked."))
         self.assertEqual(fc.build_words(3, 2), fc.BUILD_WHAT, "clickable: what it does only")
         for glyph in [g for g in package.glyphs if g not in before]:  # Edit > Undo in FontLab
             package.deleteGlyph(glyph)
         dialog.history_moved()
-        self.assertEqual(dialog.build_button.text, u"Build 40 checked glyphs")
+        self.assertEqual(dialog.build_button.text, u"Build 40 ticked figure forms")
         self.assertTrue(dialog.build_button.enabled, "the forms are to build again")
         for section in list(dialog.small_tree.items):
             section.setCheckState(0, UNCHECKED)
@@ -2538,7 +2542,7 @@ class DialogTests(unittest.TestCase):
                 prepare(dialog)
             for group in ("superscript", "subs", "subscript"):
                 self.small_section(dialog, group).setCheckState(0, UNCHECKED)
-            self.assertEqual(dialog.build_button.text, u"Build 10 checked glyphs")
+            self.assertEqual(dialog.build_button.text, u"Build 10 ticked figure forms")
             dialog.stroke_box = Anything()
             dialog.stroke_box.value = percent  # (read as the build starts)
             dialog.build_small_forms()
@@ -2794,7 +2798,7 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(self.small_section(dialog, "sups").childCount(), 10, "listed again")
         self.assertIn(fc.BUILT_NOTE, self.small_section(dialog, "sups").child(2).text(2))
         self.assertFalse(dialog.build_button.enabled, "grayed out: nothing that a build would change")
-        self.assertEqual(dialog.build_button.text, u"Build checked glyphs", "nothing that a build would change")
+        self.assertEqual(dialog.build_button.text, u"Build ticked figure forms", "nothing that a build would change")
         # Nothing changed (were it clicked all the same): said, nothing built, no step
         dialog.build_small_forms()
         self.assertEqual(len(self.fontlab.flItems.steps), steps)
@@ -2802,7 +2806,7 @@ class DialogTests(unittest.TestCase):
         # A setting changed: made again in place, the same glyphs, as one more step
         dialog.small_clicked(self.small_section(dialog, "sups").child(2), 0)
         dialog.small_setting("scale", 50)
-        self.assertEqual(dialog.build_button.text, u"Build 10 checked glyphs")
+        self.assertEqual(dialog.build_button.text, u"Build 10 ticked figure forms")
         two = package.findName(u"two.sups")
         dialog.build_small_forms()
         self.assertEqual(len(self.fontlab.flItems.steps), steps + 1, "one step of the History")
@@ -2832,7 +2836,7 @@ class DialogTests(unittest.TestCase):
             package.deleteGlyph(package.findName(name))
         dialog.history_moved()
         self.assertEqual(dialog.small_ours, {})
-        self.assertEqual(dialog.build_button.text, u"Build 9 checked glyphs")
+        self.assertEqual(dialog.build_button.text, u"Build 9 ticked figure forms")
         self.assertEqual(fc.plan_signature(None, 107), None)
         self.assertEqual(fc.layer_print(two.made[u"Regular"])[0], 999)
 
@@ -2981,7 +2985,9 @@ class DialogTests(unittest.TestCase):
         self.fontlab.flWorkspace.instance = lambda: empty
         dialog.font_changed()
         self.assertIsNone(dialog.package)
-        self.assertEqual(dialog.status.text, self.ak.sentences(self.ak.NO_FONT_LINE))
+        # (the top line says so, over the header's separator; no status line under it: convention 1)
+        self.assertEqual(dialog.top_line.text, self.ak.sentences(self.ak.NO_FONT_LINE))
+        self.assertEqual(dialog.status.text, u"")
         self.assertEqual(dialog.code_text, u"")
         self.assertEqual(dialog.turn_label.text, u"")
         for tree in (dialog.ligature_tree, dialog.alternate_tree, dialog.forms_tree, dialog.small_tree):
@@ -3010,6 +3016,125 @@ class DialogTests(unittest.TestCase):
         dialog.font_changed()
         self.assertFalse(dialog.busy)
         self.assertTrue(self.logged[-1][1].startswith(u"The font could not be read"), self.logged[-1])
+
+
+    # -- the owner's round of 2026-11-17 (images 212 to 282) --------------------------------
+
+    def with_lines(self, features):
+        """A recorded dialog whose separators are recorded too (each a Recorded, header and vertical kept)."""
+        separator = self.ak.separator
+
+        def line(header=False, vertical=False):
+            made = Recorded()
+            made.header, made.vertical = header, vertical
+            return made
+        self.ak.separator = line
+        try:
+            return self.recorded(features)
+        finally:
+            self.ak.separator = separator
+
+    def test_the_header_names_the_font_over_the_status_and_its_separator(self):
+        """Owner's images 217, 222, 223, 224: the window started with its tab bar (the busy bar ran into it),
+        and its first line mixed the font's name with the counts. The top line names the font and its
+        master (ak.font_named), the status lines under it, then the header's separator, then the tabs; a
+        heading that follows a list or previews has a line over it (image 234), and the two previews a line
+        between them (image 269)."""
+        dialog = self.with_lines(FakeFeatures({"liga": u"feature liga {\n  sub f i by f_i;\n} liga;\n"}))
+        made = Recorded.made
+        is_line = lambda w: isinstance(w, Recorded) and "header" in w.__dict__
+        lines = [w for w in made if is_line(w)]
+        self.assertTrue(lines[0].header and not any(line.header for line in lines[1:]), "one header separator, first")
+        self.assertLess(made.index(dialog.top_line), made.index(dialog.status))
+        self.assertLess(made.index(dialog.status), made.index(lines[0]))
+        self.assertEqual(dialog.top_line.text, self.ak.sentences(self.ak.font_named(u"Fake", u"Regular", 1)))
+        self.assertNotIn(u"Fake", dialog.status.text, "the font is named once, in the top line")
+        self.assertIn(u"Forms: <b>12 of 12 form features</b> ticked (", dialog.status.text)
+        self.assertIn(u"<b>1 ligature</b> (<b>1 standard</b>, <b>0 discretionary</b>, <b>0 off</b>)", dialog.status.text)
+        labels = [w for w in made if isinstance(w, RECORDED["QLabel"])]
+        for heading in (u"Alternates that take turns", u"Figure forms to build", u"Code", u"Variants that take turns"):
+            label = [w for w in labels if w.text == heading][0]
+            before = made[made.index(label) - 1]
+            self.assertTrue(is_line(before) and not before.header, "a line over %s" % heading)
+        self.assertEqual(len([line for line in lines if line.vertical]), 1, "a line between the two previews")
+        self.assertNotIn(u"Variants that take turns (handwriting)", [w.text for w in labels], "owner's image 244")
+        # A read stopped: the top line still names the font (image 224)
+        dialog.read_stopped()
+        self.assertEqual(dialog.top_line.text, self.ak.sentences(self.ak.font_named(u"Fake", u"Regular", 1)))
+        self.assertIn(u"Reading the font was stopped", dialog.status.text)
+
+    def test_the_bottom_row_holds_the_shown_tabs_buttons(self):
+        """Owner's images 258, 260, 264: the turns' Check buttons stood over their list, the figure forms'
+        build between the list and its splitter handle, the third tab's under its list. Every tick and build
+        button is in the window's bottom row, those of the tab shown visible: Tick buttons at the left, then
+        Restore suggestions; Compile after writing, the builds, Update the code, and Close at the right."""
+        dialog = self.recorded(FakeFeatures({}))
+        page = dialog.alternates
+        row = [r for r in RecordedRow.made if dialog.close_button in r.widgets][0]
+        self.assertEqual(row.widgets, list(dialog.turn_buttons) + [page.all_button, page.none_button, dialog.restore_button,
+                                                                   dialog.compile_box, dialog.build_button, page.copy_button,
+                                                                   page.build_button, dialog.write_button,
+                                                                   dialog.close_button])
+        self.assertEqual([button.text for button in dialog.turn_buttons],
+                         [u"Tick all", u"Tick none", u"Tick often doubled"])
+        moved = list(dialog.turn_buttons) + [dialog.build_button, page.build_button, page.copy_button, page.all_button]
+        self.assertEqual([r for r in RecordedRow.made if r is not row and any(w in r.widgets for w in moved)], [],
+                         "no tick or build button left in a tab")
+        tabs = (list(dialog.turn_buttons), [dialog.build_button], [page.all_button, page.none_button, page.copy_button,
+                                                                    page.build_button])
+        for index in (0, 1, 2, 0):
+            dialog.switch_page(index)
+            for number, buttons in enumerate(tabs):
+                self.assertEqual([button.visible for button in buttons], [number == index] * len(buttons), (index, number))
+        left, right = dialog.tab_buttons()
+        shifted = [button for buttons in left + right for button in buttons]
+        self.assertEqual([w for w in (dialog.restore_button, dialog.compile_box, dialog.write_button, dialog.close_button)
+                          if w in shifted], [], "the window's own buttons stay whatever the tab")
+        self.assertEqual(fc.build_label(62), u"Build 62 ticked figure forms", "named for its section (owner's image 258)")
+        self.assertIsNotNone(page.parts, "the third tab's two parts share a splitter, as the other tabs' (image 259)")
+
+    def test_the_ligatures_boxes_are_set_once_their_columns_are_sized(self):
+        """Owner's image 221: while the forms were read, the Feature column's boxes stood over the Replaces
+        column. Each box is placed where its cell is when it is set, and the columns were sized after: the
+        rows come first, the columns are sized, then the boxes are set and the list laid out at once, its
+        rows hidden meanwhile (ak.quiet_list)."""
+        events = []
+
+        class Viewport(Anything):
+            def setVisible(self, on):
+                events.append(("rows shown", self.tree, on))
+
+        class OrderedTree(FakeTree):
+            def resizeColumnToContents(self, column):
+                events.append(("sized", id(self), column))
+
+            def setItemWidget(self, item, column, widget):
+                FakeTree.setItemWidget(self, item, column, widget)
+                events.append(("box", id(self)))
+
+            def doItemsLayout(self):
+                events.append(("laid out", id(self)))
+
+            def viewport(self):
+                viewport = Viewport()
+                viewport.tree = id(self)
+                return viewport
+
+        features = FakeFeatures({"liga": u"feature liga {\n  sub f i by f_i;\n} liga;\n"})
+        dialog = self.dialog(features, self.with_glyphs(features, [u"f_l", u"f_f"]), {"QTreeWidget": OrderedTree})
+        tree = id(dialog.ligature_tree)
+        self.assertTrue(dialog.combos)
+        mine = [event for event in events if event[1] == tree]
+        mine = mine[mine.index(("rows shown", tree, False)):]
+        boxes = [at for at, event in enumerate(mine) if event[0] == "box"]
+        sized = [at for at, event in enumerate(mine) if event[0] == "sized"]
+        self.assertTrue(sized and boxes and max(sized) < min(boxes), "the columns sized before any box is set")
+        laid = [at for at, event in enumerate(mine) if event[0] == "laid out"]
+        self.assertTrue(laid and laid[0] > max(boxes), "laid out once the boxes are in")
+        shown = mine.index(("rows shown", tree, True))
+        self.assertGreater(shown, laid[0], "the rows shown again once the boxes are in place")
+        self.assertTrue(fc.place_cell_widgets(OrderedTree()))
+        self.assertFalse(fc.place_cell_widgets(object()), "a list that cannot be laid out: said, nothing raised")
 
 
 MARKUP = re.compile(u"</?[A-Za-z]+>|&[a-z]+;")
@@ -3122,9 +3247,9 @@ class TurnTests(unittest.TestCase):
         self.assertEqual(fc.turn_mode(few, 6), "position", "a long look back takes more rules")
         self.assertEqual(fc.turn_mode({}, 2), "none")
         huge = dict((u"h%05d" % n, [u"h%05d.alt%d" % (n, k) for k in (1, 2, 3, 4)]) for n in range(1600))
-        self.assertIn(u"1600 glyphs taking turns need more room", fc.turn_problem(huge, 2),
+        self.assertIn(u"1,600 glyphs taking turns need more room", fc.turn_problem(huge, 2),
                       "past what GSUB's offsets reach: said, not written")
-        self.assertIn(u"uncheck some glyphs", fc.turn_problem(huge, 2))
+        self.assertIn(u"untick some glyphs", fc.turn_problem(huge, 2))
         self.assertIn(u"(about 51,200 of 48,000 bytes)", fc.turn_problem(huge, 2), "numbers grouped by thousands")
 
     def test_a_cjk_fonts_letters_are_counted_before_a_glyph_taking_turns(self):

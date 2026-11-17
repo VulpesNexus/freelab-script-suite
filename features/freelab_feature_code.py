@@ -802,7 +802,7 @@ def turn_problem(sets, look_back=DEFAULT_LOOK_BACK, context=0):
     mode = turn_mode(sets, look_back)
     if mode == "position" and turn_bytes(sets) > TURN_BYTES_MAX:
         return (u"%s taking turns need more room than one feature's tables have (about %s of %s bytes): "
-                u"uncheck some glyphs" % (counted(len(sets), u"glyph"), grouped(turn_bytes(sets) + context),
+                u"untick some glyphs" % (counted(len(sets), u"glyph"), grouped(turn_bytes(sets) + context),
                                           grouped(TURN_BYTES_MAX)))
     if mode != "none" and context + (turn_bytes(sets) if mode == "position" else 0) > TURN_BYTES_MAX:
         return (u"the glyphs that may stand before a glyph taking turns need more room than one feature's tables "
@@ -2275,12 +2275,12 @@ def form_features(info, texts):
         feature.kind = feature_kind(text)
         if feature.kind == "hand":
             feature.on = False
-            feature.kind_note = (u"The font's code has its own %s: left alone unless you check it (FreeLab's block "
+            feature.kind_note = (u"The font's code has its own %s: left alone unless you tick it (FreeLab's block "
                                  u"then goes in beside it, the rest kept)." % tag)
         elif feature.kind == "fontlab" and covered(feature, text):
             feature.on = False
             feature.kind_note = (u"FontLab makes this feature automatically, and its code does the same: left to "
-                                 u"it. Checked, FreeLab's code replaces FontLab's (handed back from it).")
+                                 u"it. Ticked, FreeLab's code replaces FontLab's (handed back from it).")
         elif feature.kind == "fontlab":
             feature.kind_note = (u"FontLab makes this feature automatically: FreeLab's code replaces its code, "
                                  u"and the feature is handed back from FontLab (no longer rewritten by it).")
@@ -2923,8 +2923,9 @@ def suggested_words(why):
 
 
 def build_label(count):
-    """The build button's words for this many checked glyphs."""
-    return u"Build %s" % counted(count, u"checked glyph") if count else u"Build checked glyphs"
+    """The build button's words for this many ticked figure forms (named for its section: it sits in the
+    window's bottom row, owner's images 258 and 260)."""
+    return u"Build %s" % counted(count, u"ticked figure form") if count else u"Build ticked figure forms"
 
 
 GROUP_HOWS = (("scaled", u"scaled from %s", u"scaled from %s"), ("moved", u"moved from a drawn small figure",
@@ -2960,24 +2961,25 @@ def group_note(forms, plans, ours=()):
     return u"; ".join(parts)
 
 
-BUILD_WHAT = (u"Adds the checked glyphs to the font, as shown (scaled forms with their strokes kept as <i>Strokes</i> "
+BUILD_WHAT = (u"Adds the ticked figure forms to the font, as shown (scaled forms with their strokes kept as <i>Strokes</i> "
               u"says), in one step of FontLab's History. The font is read again: the forms above take them. What it "
               u"built stays listed while nobody changes it: a build then replaces it with the settings shown (a glyph "
               u"drawn over is left alone).")
 
 
 def build_words(count, unchanged):
-    """The build button's What's This and tooltip: what it does, and, grayed out (count: the checked glyphs
-    a build would make or change), why: the checked glyphs (unchanged of them) are as built here with
-    these very settings, or none is checked."""
+    """The build button's What's This and tooltip: what it does, and, grayed out (count: the ticked figure
+    forms a build would make or change), why: the ticked ones (unchanged of them) are as built here with
+    these very settings, or none is ticked."""
     if count:
         return BUILD_WHAT
     if unchanged:
-        return BUILD_WHAT + (u" Grayed out: %s, so a build would change nothing. Change a setting, or check other "
-                             u"glyphs, to build again." % (
-                                 u"the glyph checked was built here with these very settings" if unchanged == 1 else
-                                 u"the %d glyphs checked were built here with these very settings" % unchanged))
-    return BUILD_WHAT + u" Grayed out: no glyph that can be built is checked."
+        return BUILD_WHAT + (u" Grayed out: %s, so a build would change nothing. Change a setting, or tick other "
+                             u"figure forms, to build again." % (
+                                 u"the figure form ticked was built here with these very settings" if unchanged == 1
+                                 else u"the %s ticked were built here with these very settings" % counted(
+                                     unchanged, u"figure form")))
+    return BUILD_WHAT + u" Grayed out: no figure form that can be built is ticked."
 
 
 def without_glyphs(info, names):
@@ -3207,7 +3209,8 @@ def is_empty(glyph):
 
 
 def counted(number, one, many=None):
-    return u"%d %s" % (number, one if number == 1 else (many or one + u"s"))
+    """"1 glyph", "2 glyphs", "13,932 glyphs" (thousands set apart, as the shared module's)."""
+    return u"%s %s" % (grouped(number), one if number == 1 else (many or one + u"s"))
 
 
 def tip_html(text, rich=False):
@@ -3285,6 +3288,30 @@ def describe_handles(splitter, text):
         pass
 
 
+def place_cell_widgets(view):
+    """The widgets a list shows in its cells (setItemWidget: the ligatures' feature boxes) put where
+    their cells are now, at once: Qt places one where its cell is when it is set, and moves it after a
+    column's width changes only once it lays the list out again, later (owner's image 221: the boxes
+    stood over the next column while the font was read). True when the list was laid out."""
+    for name in ("doItemsLayout", "updateGeometries"):
+        try:
+            getattr(view, name)()
+            return True
+        except Exception:
+            continue
+    return False
+
+
+def fit_combo(QtGui, combo):
+    """A dropdown as wide as its widest item, never stretched across its row (owner's image 239); the
+    combo."""
+    try:
+        combo.setSizeAdjustPolicy(QtGui.QComboBox.AdjustToContents)
+    except Exception:
+        pass
+    return combo
+
+
 FORM_SOURCE_MOST = 220  # pixels: the Forms list's first column grows this far for its rows' glyph names
 
 
@@ -3344,20 +3371,21 @@ font-variant-ligatures. A feature written here is handed back from FontLab's aut
 code is kept. A ligature whose rule the font's own code writes stays where it is: FreeLab never moves or
 takes out a rule the font wrote (set to another feature, the window says so); it moves only its own rules
 and FontLab's automatic ones.<br>
-<b>Alternates that take turns</b> (calt, on unless turned off): a letter, a figure, or a punctuation
-mark repeated within the look back set takes its next alternate (X.2, X.3, or X.alt1...), so repeated
-glyphs vary as handwriting does (<i>ll</i>, <i>1001</i>, <i>...</i>, <i>!!</i>). The nearest earlier
+<b>Alternates that take turns</b> (calt, on unless turned off): a glyph (a letter's, a figure's, or a
+punctuation mark's) repeated within the look back set takes its next alternate (X.2, X.3, or X.alt1...), so
+repeated glyphs vary as handwriting does (<i>ll</i>, <i>1001</i>, <i>...</i>, <i>!!</i>). The nearest earlier
 form decides; each looks back among its own kind, so a space, or punctuation between letters, ends the
 look back. Ligatures come first: where liga makes l_l of <i>ll</i>, the alternates take turns around
-it.<br><br>
+it. Ticked glyphs take turns: <i>Tick all</i>, <i>Tick none</i>, and <i>Tick often doubled</i>, in the bottom
+row, tick them at once.<br><br>
 <b>Forms</b> (the second tab): one row per feature, its substitutions under it (click its arrow):
 case (.case), locl (Romanian and Moldavian <i>S</i> and <i>T</i> with a comma below, Catalan
 <i>l\N{MIDDLE DOT}l</i>, Dutch <i>\N{LATIN SMALL LETTER I WITH ACUTE}j</i>, the Turkic dotted <i>i</i>, and any
 .loclXXX glyph), frac, numr, and dnom
 (.numr, .dnom), sups, subs, and sinf, ordn, smcp and c2sc (.sc, .smcp, .c2sc), lnum, onum, pnum, and
 tnum (.tf, .lf, .osf, .tosf...), and the stylistic sets (.ss01 to .ss20, each with a name you can edit)
-and character variants (.cv01...). Check a feature to write it, and its rows to keep them in it. A
-feature the font's code has by hand starts unchecked, as does one FontLab's automatic code already
+and character variants (.cv01...). Tick a feature to write it, and its rows to keep them in it. A
+feature the font's code has by hand starts unticked, as does one FontLab's automatic code already
 makes the same way; a warning row (figures of a tabular set that do not share one width) is for you
 to review, and changes nothing.<br>
 <b>Figure forms to build</b> (under the forms): the numerators, denominators, superiors, inferiors,
@@ -3367,29 +3395,34 @@ them (or as the font's own small figures, where it has some). Pick a set in the 
 its scale, baseline, and width; <i>Strokes</i>, one value for every set, is the strokes kept (outlines thickened
 evenly; 100%: components); <i>Suggested</i>, at the row's end, puts the four back. A built form is a start
 to refine.
-<i>Build checked glyphs</i> adds them in one step of FontLab's History; the font is read again, and
-the forms above take them. What it built stays listed: change a setting and build again to replace it
-(a glyph drawn over since is left alone).<br><br>
+<i>Build ticked figure forms</i> (in the bottom row) adds them in one step of FontLab's History; the font is
+read again, and the forms above take them. What it built stays listed: change a setting and build again to
+replace it (a glyph drawn over since is left alone).<br><br>
 <b>Stylistic alternates</b> (the third tab) holds two separate jobs. <b>Suggested alternates</b>: the
-glyphs fonts most often give a stylistic alternate; <i>Make copies to redraw</i> gives each checked one
+glyphs fonts most often give a stylistic alternate; <i>Make copies to redraw</i> gives each ticked one
 a copy named for a stylistic set (a.ss01), to redraw by hand. <b>Variants that take turns</b>: computed
 copies of the glyphs in scope, each changed a little as a whole (X.alt1, X.alt2...), which the first
 tab then cycles; they need no copy made first. <i>Also build variants from existing alternates</i> spreads a
-glyph's variants over the glyph and the alternates drawn for it (W.ss01.alt2 is a changed copy of
-W.ss01).<br><br>
+glyph's variants over the glyph and the alternates the font has of it, variants built before included
+(W.ss01.alt2 is a changed copy of W.ss01). Variants built here and left as they were are replaced in place
+when <i>Strength</i> or <i>Seed</i> changes and you build again.<br><br>
 The code is made again as you change the choices. Pick a ligature's feature in its box; drag between the parts to give one more room;
-double-click a ligature, a glyph, or a form to see it in a <i>Glyph</i> window. <i>Restore suggestions</i> puts the
-choices back as they first came.<br><br>
+double-click a ligature, a glyph, or a form to see it in a <i>Glyph</i> window. The bottom row holds the buttons
+of the tab shown, then <i>Restore suggestions</i>, which puts the choices back as they first came.<br><br>
 Click this help's <i>?</i> button, then any control, for what it does."""
 
 TABS = (u"Ligatures and alternates", u"Forms", u"Stylistic alternates")
 CODE_HEADING = u"Code"  # the part under the tabs
-# The buttons that check the glyphs taking turns: (key, label, what it does)
-TURN_CHECKS = (("often", u"Often doubled", u"Checks the glyphs that often stand doubled in text (ll, ee, ss, tt; "
-                                           u"00 and 99; marks doubled by convention, such as ..., !!, and --), and "
-                                           u"only them: those whose alternates matter most."),
-               ("all", u"All", u"Checks every glyph whose alternates have no other job in the font's code."),
-               ("none", u"None", u"Unchecks every glyph: none takes turns."))
+# The buttons that tick the glyphs taking turns, in the window's bottom row while the first tab is shown, in
+# the suite's order (Tick all, Tick none, then the tool's own): (key, label, what it does)
+TURN_CHECKS = (("all", u"Tick all", u"Ticks every glyph of <i>Alternates that take turns</i> whose alternates have no "
+                                    u"other job in the font's code."),
+               ("none", u"Tick none", u"Unticks every glyph of <i>Alternates that take turns</i>: none takes turns."),
+               ("often", u"Tick often doubled", u"Ticks the glyphs of <i>Alternates that take turns</i> that often "
+                                                u"stand doubled in text (ll, ee, ss, tt; 00 and 99; marks doubled by "
+                                                u"convention, such as ..., !!, and --), and only them: those whose "
+                                                u"alternates matter most."))
+TURN_CHECK_LABELS = dict((key, label) for key, label, _ in TURN_CHECKS)
 STYLISTIC_TAB = 2  # the Stylistic alternates tab's place, which builds variants that take turns
 # What Alternates that take turns says where the font has none: where they are built, named as the tab
 # is (a link that opens it)
@@ -3625,20 +3658,28 @@ class FeatureCodeDialog(object):
         dialog.setWhatsThis(HELP)
         self.ak.size_dialog(dialog)
         layout = QtGui.QVBoxLayout(dialog)
+        # The header, as every tool's (owner's images 217, 222, 223): the top line (the font, or the no-font
+        # line) first, where the tools button and the busy bar join it (add_tools_button takes the layout's
+        # first row), then the status lines under it, then the header's separator, then the tabs. The tab
+        # bar stood first: the busy bar ran into it.
+        self.top_line = self.ak.status_label()
+        describe(self.top_line, u"The font this window works on, and its current master (whose outlines the lists "
+                                u"draw and the figure forms are measured in). While the font is read, glyphs are "
+                                u"built, or the code is written, a bar in its place says what is under way: the tools "
+                                u"menu, the arrows, <i>Close</i>, and Esc stop a read, and wait for a build or a write.")
+        layout.addWidget(self.top_line)
         self.status = self.ak.status_label()
         self.status.setWordWrap(True)
         describe(self.status, u"What the font has (its ligatures, the glyphs whose alternates take turns, its form "
                               u"features) and whether the code shown can be written; after a read you stopped, a "
-                              u"link that reads the font again. While the font is read, glyphs are built, or the code "
-                              u"is written, a bar in its place says what is under way: the tools menu, the arrows, "
-                              u"<i>Close</i>, and Esc stop a read, and wait for a build or a write.")
+                              u"link that reads the font again.")
         try:  # (its link after a read stopped by the user reads the font again: read_stopped)
             self.status.setOpenExternalLinks(False)
             self.status.connect("linkActivated(QString)", self.link_activated)
         except Exception:
             pass
         layout.addWidget(self.status)
-        layout.addWidget(self.ak.separator())
+        layout.addWidget(self.ak.header_separator())
         self.log = self.ak.Log()
         # The glyphs a line names are links, drawn from the font's own outlines (the interface's fonts
         # lack many characters: they came out as empty boxes), and a click opens one in a Glyph tab
@@ -3670,33 +3711,26 @@ class FeatureCodeDialog(object):
         self.lists = QtGui.QSplitter(QtCore.Qt.Vertical)
         self.lists.setChildrenCollapsible(False)
         self.pages.addWidget(self.lists)
-        part = self.part(QtGui, 2, self.lists)
-        what = (u"Each ligature, what it replaces, and the feature it goes in (pick it to change it). Standard "
-                u"ligatures are on unless a user turns them off; discretionary ones off unless turned on.")
-        part.addWidget(describe(self.heading(QtGui, u"Ligatures"), what))
-        self.ligature_tree = QtGui.QTreeWidget()
-        self.ligature_tree.setColumnCount(3)
-        self.ligature_tree.setHeaderLabels(["Ligature", "Replaces", "Feature"])
-        self.ligature_tree.setRootIsDecorated(False)
-        self.ligature_tree.setIconSize(QtCore.QSize(ICON_SIZE, ICON_SIZE))
-        self.ligature_tree.setWhatsThis(what)
-        self.ligature_tree.setProperty(self.ak.LEAVE_ALONE_PROP, True)  # its pictures are drawn in the dialog's colors
-        self.ak.table_layout(self.ligature_tree)
-        part.addWidget(self.ligature_tree, 1)
-
+        # The turns' part is made first and the ligatures' put above it: Qt lists a window's widgets in the
+        # order they were made, and the shared module grays a Tick button whose first list shown has no
+        # check box (update_states). The ligatures' list has none: listed first, it grayed the bottom row's
+        # Tick all, Tick none, and Tick often doubled on the first tab.
         part = self.part(QtGui, 1, self.lists)
-        turns = (u"The letters, figures, and punctuation marks with alternates (named X.2, X.alt1, or X.calt1), and "
-                 u"their cycle: the forms they take in turn. Checked glyphs take turns. Those that often stand "
-                 u"doubled in text (ll, ee, ss, tt, 00, and 99: counted in the text of 24 languages, and in kana, "
-                 u"Armenian, and Georgian text; and the marks doubled by convention: ..., !!, ??, --, and '') come "
-                 u"first; where the font has more glyphs with alternates than rules by glyph can serve, only those "
-                 u"start checked.")
+        turns = (u"The glyphs with alternates (named X.2, X.alt1, or X.calt1: a letter's, a figure's, or a "
+                 u"punctuation mark's), and their cycle: the forms they take in turn. Ticked glyphs take turns. Those "
+                 u"that often stand doubled in text (ll, ee, ss, tt, 00, and 99: counted in the text of 24 languages, "
+                 u"and in kana, Armenian, and Georgian text; and the marks doubled by convention: ..., !!, ??, --, "
+                 u"and '') come first; where the font has more glyphs with alternates than rules by glyph can serve, "
+                 u"only those start ticked. <i>Tick all</i>, <i>Tick none</i>, and <i>Tick often doubled</i>, in the "
+                 u"bottom row, tick them at once.")
+        # (a line over the heading: it read as a caption of the list above, owner's image 234)
+        part.addWidget(self.ak.separator())
         part.addWidget(describe(self.heading(QtGui, u"Alternates that take turns"), turns))
         row = QtGui.QHBoxLayout()
-        what = (u"How many glyphs of its kind may stand between a glyph and its earlier form for it to take the "
-                u"next alternate (0: only side by side). A letter looks back over letters, a figure over figures, a "
-                u"punctuation mark over punctuation marks; anything else between ends the look back.")
-        row.addWidget(label_of(QtGui, u"Look back over at most", what))
+        what = (u"How many glyphs of its kind may stand between a glyph and its earlier form, at most, for it to take "
+                u"the next alternate (0: only side by side). A letter looks back over letters, a figure over figures, "
+                u"a punctuation mark over punctuation marks; anything else between ends the look back.")
+        row.addWidget(label_of(QtGui, u"Look back:", what))
         self.look_back = QtGui.QSpinBox()
         self.look_back.setRange(0, 6)
         self.look_back.setValue(DEFAULT_LOOK_BACK)
@@ -3704,20 +3738,18 @@ class FeatureCodeDialog(object):
         self.look_back.setWhatsThis(what)
         row.addWidget(self.look_back)
         row.addStretch(1)
-        row.addWidget(label_of(QtGui, u"Check", u"The three buttons beside check the glyphs of the list below at "
-                                                u"once: those often doubled in text, all, or none."))
+        part.addLayout(row)
+        # Its Tick buttons go in the window's bottom row (bottom_row), shown with the first tab
         self.turn_buttons = []
         for key, label, what in TURN_CHECKS:
             button = QtGui.QPushButton(label)
             button.setWhatsThis(what)
             button.connect("clicked()", lambda key=key: self.check_turns(key))
-            row.addWidget(button)
             self.turn_buttons.append(button)
-        part.addLayout(row)
-        self.turn_label = QtGui.QLabel(u"")  # how the checked glyphs take turns: by glyph, or by position
+        self.turn_label = QtGui.QLabel(u"")  # how the ticked glyphs take turns: by glyph, or by position
         self.turn_label.setWordWrap(True)
         self.ak.rich(self.turn_label)
-        describe(self.turn_label, u"How the checked glyphs take turns: by glyph (each looks back for its own earlier "
+        describe(self.turn_label, u"How the ticked glyphs take turns: by glyph (each looks back for its own earlier "
                                   u"form) while that takes few enough rules, else by position (each takes the form "
                                   u"after the form of the glyph of its kind before it). Where the font has no "
                                   u"alternates, where to build them: click the tab's name to open it.")
@@ -3737,6 +3769,20 @@ class FeatureCodeDialog(object):
         self.alternate_tree.setProperty(self.ak.LEAVE_ALONE_PROP, True)
         self.ak.table_layout(self.alternate_tree)
         part.addWidget(self.alternate_tree, 1)
+
+        part = self.part(QtGui, 2, self.lists, at=0)  # (above the turns: see the turns' part)
+        what = (u"Each ligature, what it replaces, and the feature it goes in (pick it to change it). Standard "
+                u"ligatures are on unless a user turns them off; discretionary ones off unless turned on.")
+        part.addWidget(describe(self.heading(QtGui, u"Ligatures"), what))
+        self.ligature_tree = QtGui.QTreeWidget()
+        self.ligature_tree.setColumnCount(3)
+        self.ligature_tree.setHeaderLabels(["Ligature", "Replaces", "Feature"])
+        self.ligature_tree.setRootIsDecorated(False)
+        self.ligature_tree.setIconSize(QtCore.QSize(ICON_SIZE, ICON_SIZE))
+        self.ligature_tree.setWhatsThis(what)
+        self.ligature_tree.setProperty(self.ak.LEAVE_ALONE_PROP, True)  # its pictures are drawn in the dialog's colors
+        self.ak.table_layout(self.ligature_tree)
+        part.addWidget(self.ligature_tree, 1)
 
         forms_page = QtGui.QWidget()
         box = QtGui.QVBoxLayout(forms_page)
@@ -3763,7 +3809,7 @@ class FeatureCodeDialog(object):
         except Exception:
             pass
         self.forms_tree.setWhatsThis(u"The form features the font's glyph names call for, each with its substitutions "
-                                     u"under it (click its arrow). A checked feature is written, with its checked "
+                                     u"under it (click its arrow). A ticked feature is written, with its ticked "
                                      u"rows; a set's name (the Becomes column of its row) is what applications show, "
                                      u"and you can edit it. Amber rows are warnings to review: they change nothing. "
                                      u"A note too long for its column is whole in its cell's tooltip.")
@@ -3793,6 +3839,9 @@ class FeatureCodeDialog(object):
                 u"of each feature as it is; the prefix's language systems first where locl needs some. Keywords, "
                 u"tags, glyph classes (@name), glyph lists ([...]), numbers, and comments (#...) are in colors of "
                 u"their own; code of more than %s lines is shown plain." % grouped(HIGHLIGHT_LINES))
+        # (a line over the heading: it follows a list or the previews of whichever tab is shown, owner's
+        # images 234 and 269)
+        part.addWidget(self.ak.separator())
         # "Code", not "The code": the owner's name for the part, in every tool that writes and compiles code
         part.addWidget(describe(self.heading(QtGui, CODE_HEADING), what))
         self.code = QtGui.QPlainTextEdit()
@@ -3804,28 +3853,25 @@ class FeatureCodeDialog(object):
             self.highlighting = make_highlighter(self.code)
         except Exception:
             self.highlighting = None
-        for splitter in (self.splitter, self.lists, self.forms_parts):  # (once their parts are in)
+        splitters = [self.splitter, self.lists, self.forms_parts]
+        if self.alternates is not None and getattr(self.alternates, "parts", None) is not None:
+            splitters.append(self.alternates.parts)  # (the third tab's: owner's image 259, it had none)
+        for splitter in splitters:  # (once their parts are in)
             describe_handles(splitter, u"Drag the space between two parts up or down to give one more room.")
 
         layout.addWidget(self.log.widget)
-        buttons = QtGui.QHBoxLayout()
         self.restore_button = QtGui.QPushButton("Restore suggestions")
         self.restore_button.setWhatsThis(u"Puts every ligature's feature, every glyph's, form's, and figure form's "
-                                         u"check, every set's name, and the build settings back as they first came.")
+                                         u"tick, every set's name, and the build settings back as they first came.")
         self.write_button = QtGui.QPushButton("Write the code")
-        self.write_button.setWhatsThis(u"Writes the features as shown (liga, dlig, calt, and the checked forms) to the "
+        self.write_button.setWhatsThis(u"Writes the features as shown (liga, dlig, calt, and the ticked forms) to the "
                                        u"font, and the language systems locl needs to its prefix (<i>Update the code</i>: "
                                        u"FreeLab's code is in them already, and changes).")
         self.close_button = QtGui.QPushButton("Close")
         self.close_button.setWhatsThis(u"Closes the window. What was written or built stays in the font; choices "
                                        u"not written are not kept.")
-        buttons.addWidget(self.restore_button)
-        buttons.addStretch(1)
         self.compile_box = self.ak.compile_box()
-        buttons.addWidget(self.compile_box)
-        buttons.addWidget(self.write_button)
-        buttons.addWidget(self.close_button)
-        layout.addLayout(buttons)
+        layout.addLayout(self.bottom_row(QtGui))
         self.restore_button.connect("clicked()", self.restore)
         self.write_button.connect("clicked()", self.write)
         self.close_button.connect("clicked()", self.ak.close_slot(self))  # (never the window itself: see let_go)
@@ -3872,8 +3918,52 @@ class FeatureCodeDialog(object):
         except Exception:
             self.check_watcher = None
 
+    def bottom_row(self, QtGui):
+        """The window's bottom row, as every tool's (owner's images 258, 260, 264): at the left the buttons
+        that tick the shown tab's list (the turns' Tick all, Tick none, and Tick often doubled; the third
+        tab's Tick all and Tick none), then Restore suggestions; at the right Compile after writing, the
+        shown tab's builds (Build ticked figure forms; Make copies to redraw and Build variants), Update the
+        code, and Close. Every tab's buttons are in it, those of the tab shown visible (show_tab_buttons):
+        no button is left between a list and its splitter handle."""
+        row = QtGui.QHBoxLayout()
+        left, right = self.tab_buttons()
+        for buttons in left:
+            for button in buttons:
+                row.addWidget(button)
+        row.addWidget(self.restore_button)
+        row.addStretch(1)
+        row.addWidget(self.compile_box)
+        for buttons in right:
+            for button in buttons:
+                row.addWidget(button)
+        row.addWidget(self.write_button)
+        row.addWidget(self.close_button)
+        self.show_tab_buttons(0)
+        return row
+
+    def tab_buttons(self):
+        """([each tab's buttons for the left of the bottom row], [each tab's for its right]), by tab."""
+        page_left, page_right = [], []
+        if self.alternates is not None:
+            try:
+                page_left, page_right = self.alternates.bottom_buttons()
+            except Exception:
+                page_left, page_right = [], []
+        return [list(self.turn_buttons), [], list(page_left)], [[], [self.build_button], list(page_right)]
+
+    def show_tab_buttons(self, index):
+        """The bottom row's buttons of the tab shown (by its index), the other tabs' hidden."""
+        left, right = self.tab_buttons()
+        for number, buttons in enumerate(left):
+            for button in buttons + right[number]:
+                try:
+                    button.setVisible(number == index)
+                except Exception:
+                    pass
+
     def switch_page(self, index):
         self.pages.setCurrentIndex(index)
+        self.show_tab_buttons(index)
 
     def link_activated(self, link):
         """A link of a label clicked: "tab:2" opens that tab (the tab bar's signal shows its page); "read:"
@@ -3969,6 +4059,10 @@ class FeatureCodeDialog(object):
             stopped = True
         finally:
             self.set_busy(False)
+            try:  # (the ligatures' rows shown again whatever stopped the read: read_font hides them as it fills)
+                self.ak.quiet_list(self.ligature_tree, False)
+            except Exception:
+                pass
         if stopped:
             self.read_stopped()
 
@@ -3983,9 +4077,11 @@ class FeatureCodeDialog(object):
             except Exception:
                 pass
         self.combos, self.name_edits = [], {}
+        read = self.package
         self.package = None
         try:
             self.empty_views()
+            self.show_font_line(read)  # (the top line still names the font: owner's image 224)
             self.status.setText(u"Reading the font was stopped: nothing is listed. <a href=\"read:\">Read it</a>")
             self.log.add(u"Reading the font was stopped: nothing is listed.", "warning")
         except Exception:
@@ -4030,10 +4126,11 @@ class FeatureCodeDialog(object):
         self.restore_button.setEnabled(False)
         if package is None:
             # (the window takes the next font opened: ak.fonts_tick, then font_changed)
-            self.status.setText(self.ak.no_font_line() if hasattr(self.ak, "no_font_line")
-                                else getattr(self.ak, "NO_FONT_LINE", None) or u"No font is open.")
+            self.show_font_line()
+            self.status.setText(u"")
             self.empty_views()
             return
+        self.show_font_line()  # (the font named from the start, whatever happens next: owner's image 224)
         glyphs = list(package.fgPackage.glyphs)
         self.names = [g.name for g in glyphs]
         codes = dict((g.name, self.ak.main_code(g)) for g in glyphs)  # (not a radical it is encoded at too)
@@ -4058,6 +4155,16 @@ class FeatureCodeDialog(object):
         bold = QtGui.QFont(self.ligature_tree.font)
         bold.setBold(True)
         self.ligature_tree.blockSignals(True)
+        # Owner's image 221: while the rest of the font was read, the Feature column's boxes stood over the
+        # Replaces column. Each box is placed where its cell is when it is set, and the first two columns
+        # were sized to their contents after the boxes were in: the boxes kept their old place until Qt laid
+        # the list out again, after the read. So the rows come first, the columns are sized to them, and
+        # only then are the boxes set, the list laid out at once (place_cell_widgets); the list's rows stay
+        # hidden meanwhile (ak.quiet_list: the window repaints during the read).
+        quiet = getattr(self.ak, "quiet_list", None)
+        if quiet is not None:
+            quiet(self.ligature_tree, True)
+        items = []
         for index, lig in enumerate(self.found):
             item = QtGui.QTreeWidgetItem([lig.glyph, u" ".join(lig.parts), u""])
             item.setFont(0, bold)
@@ -4068,6 +4175,10 @@ class FeatureCodeDialog(object):
             item.setToolTip(1, u"Now: %s." % (dict(CHOICES)[lig.now] if lig.now else u"in no feature"))
             item.setToolTip(2, u"Its feature. First set by %s." % (lig.why or u"default"))
             self.ligature_tree.addTopLevelItem(item)
+            items.append(item)
+        self.ligature_tree.resizeColumnToContents(0)
+        self.ligature_tree.resizeColumnToContents(1)
+        for lig, item in zip(self.found, items):
             combo = self.ak.flat_combo(QtGui.QComboBox())
             for _, label in CHOICES:
                 combo.addItem(label)
@@ -4078,6 +4189,9 @@ class FeatureCodeDialog(object):
             self.ligature_tree.setItemWidget(item, 2, combo)
             self.combos.append(combo)
             self.show_choice(item, lig)
+        place_cell_widgets(self.ligature_tree)
+        if quiet is not None:
+            quiet(self.ligature_tree, False)  # (before the read's next step, which a stop may end)
         self.first_choices = [lig.choice for lig in self.found]
         self.ligature_tree.blockSignals(False)
         self.alternate_tree.blockSignals(True)
@@ -4114,10 +4228,8 @@ class FeatureCodeDialog(object):
                 self.progress(u"Listing the glyphs with alternates", row + 1, len(order))
         self.alternate_tree.blockSignals(False)
         self.first_checks = [base in first for base in order]  # (what Restore suggestions puts back)
-        for tree in (self.ligature_tree, self.alternate_tree):
-            tree.resizeColumnToContents(0)
-            tree.resizeColumnToContents(1)
-        self.alternate_tree.resizeColumnToContents(2)
+        for column in (0, 1, 2):  # (the ligatures' columns were sized before their boxes were set)
+            self.alternate_tree.resizeColumnToContents(column)
         self.checked_code = {}
         self.progress(u"Reading the forms", force=True)
         self.read_forms(glyphs)
@@ -4127,6 +4239,7 @@ class FeatureCodeDialog(object):
                 self.alternates.fill()
             except Exception as exc:
                 self.log.add(u"The Stylistic alternates tab could not be read: %s" % self.ak.html(exc), "error")
+        place_cell_widgets(self.ligature_tree)  # (and again once the whole font is read: the window may have moved)
         self.seen_history = self.ak.history_mark(package)
 
     # -- forms --------------------------------------------------------------------------
@@ -4391,7 +4504,9 @@ class FeatureCodeDialog(object):
     def build_part(self, QtCore, QtGui, part):
         """The Forms tab's lower part: the figure forms the font lacks, their settings, and the build."""
         listed = (u"The figure forms the font lacks, by set (click a set's arrow): each glyph, what it would be made "
-                  u"of, drawn beside its figure, and its code point. Checked glyphs are built.")
+                  u"of, drawn beside its figure, and its code point. Ticked ones are built (<i>Build ticked figure "
+                  u"forms</i>, in the bottom row).")
+        part.addWidget(self.ak.separator())  # (a line over the heading: not a caption of the list above, image 234)
         part.addWidget(describe(self.heading(QtGui, u"Figure forms to build"), listed))
         self.small_label = QtGui.QLabel(u"")
         self.small_label.setWordWrap(True)
@@ -4405,22 +4520,24 @@ class FeatureCodeDialog(object):
         # it now); Suggested, last, puts the four back.
         row = QtGui.QHBoxLayout()
         what = u"The set whose settings the boxes beside show and change (clicking a row picks its set)."
-        row.addWidget(label_of(QtGui, u"Settings of", what))
+        # (label form, the same in every tool: a noun naming the setting, a colon, the control; owner's image 271)
+        row.addWidget(label_of(QtGui, u"Set:", what))
         self.small_set = QtGui.QComboBox()
         for key in SMALL_SETS:
             self.small_set.addItem(SMALL_SET_TITLES[key])
         self.small_set.setWhatsThis(what)
+        fit_combo(QtGui, self.small_set)
         row.addWidget(self.small_set)
         what = (u"The size of the set's glyphs, of their figure's (or letter's). Numerators and ordinal indicators "
                 u"keep their top where it is; the others their baseline.")
-        row.addWidget(label_of(QtGui, u"Scale", what))
+        row.addWidget(label_of(QtGui, u"Scale:", what))
         self.small_scale = QtGui.QSpinBox()
         self.small_scale.setRange(20, 95)
         self.small_scale.setSuffix(u"%")
         self.small_scale.setWhatsThis(what)
         row.addWidget(self.small_scale)
         what = u"Where the scaled figure's baseline goes, in font units above the font's baseline (below it, negative)."
-        row.addWidget(label_of(QtGui, u"Baseline at", what))
+        row.addWidget(label_of(QtGui, u"Baseline:", what))
         self.small_baseline = QtGui.QSpinBox()
         self.small_baseline.setRange(-3000, 3000)
         self.small_baseline.setSuffix(units_suffix(0))  # (follows its number: show_baseline_suffix)
@@ -4428,7 +4545,7 @@ class FeatureCodeDialog(object):
         row.addWidget(self.small_baseline)
         what = (u"The advance width, of the scaled figure's: above 100%, a little more room around the small figure "
                 u"(most open-licensed fonts give them 112%).")
-        row.addWidget(label_of(QtGui, u"Width", what))
+        row.addWidget(label_of(QtGui, u"Width:", what))
         self.small_width = QtGui.QSpinBox()
         self.small_width.setRange(50, 200)
         self.small_width.setSuffix(u"%")
@@ -4440,7 +4557,7 @@ class FeatureCodeDialog(object):
                 u"made of outlines (not components), offset outward evenly on both sides of each stroke; 100%%: "
                 u"components, scaled, as they are. <i>Suggested</i>, after it, puts it back at %d%% too." % (
                     STROKE_WEIGHT, STROKE_WEIGHT))
-        row.addWidget(label_of(QtGui, u"Strokes", what))
+        row.addWidget(label_of(QtGui, u"Strokes:", what))
         self.stroke_box = QtGui.QSpinBox()
         self.stroke_box.setRange(100, 160)
         self.stroke_box.setSuffix(u"%")
@@ -4464,14 +4581,12 @@ class FeatureCodeDialog(object):
         self.small_tree.setWhatsThis(listed)
         self.small_tree.setProperty(self.ak.LEAVE_ALONE_PROP, True)
         self.ak.table_layout(self.small_tree)
-        part.addWidget(self.small_tree, 1)
-        row = QtGui.QHBoxLayout()
-        row.addStretch(1)
+        part.addWidget(self.small_tree, 1)  # (the last of its part: the splitter's handle right under its frame)
+        # The build goes in the window's bottom row (bottom_row), shown with the Forms tab: under the list,
+        # it stood between the list and the splitter's handle (owner's image 258)
         self.build_button = QtGui.QPushButton(build_label(0))
         describe(self.build_button, build_words(0, 0), True)  # (why it is grayed out: update_small_buttons)
         self.build_button.setEnabled(False)
-        row.addWidget(self.build_button)
-        part.addLayout(row)
         self.small_set.connect("currentIndexChanged(int)", self.small_set_picked)
         self.small_scale.connect("valueChanged(int)", lambda value: self.small_setting("scale", value))
         self.small_baseline.connect("valueChanged(int)", lambda value: self.small_setting("baseline", value))
@@ -4632,7 +4747,7 @@ class FeatureCodeDialog(object):
                 group = u"%s" % item.data(0, QtCore.Qt.UserRole)
                 on = sum(1 for form in self.small_forms if form.group == group and form.on)
                 total = sum(1 for form in self.small_forms if form.group == group)
-                item.setText(1, u"%d of %s checked" % (on, counted(total, u"glyph")))
+                item.setText(1, u"%s of %s ticked" % (grouped(on), counted(total, u"glyph")))
                 note = group_note([form for form in self.small_forms if form.group == group], self.small_plans,
                                   self.small_ours)
                 item.setText(2, note)
@@ -5168,8 +5283,8 @@ class FeatureCodeDialog(object):
         chosen += [form for form in self.small_forms if form.name in following and form not in chosen]
         signatures.update((name, plan_signature(self.small_plans.get(name), strokes)) for name in following)
         if not chosen:
-            self.log.add(u"Nothing changed since the last build: the checked glyphs are as these settings make them, "
-                         u"so none was built again. Change a setting, or check other glyphs, to build again.")
+            self.log.add(u"Nothing changed since the last build: the ticked figure forms are as these settings make "
+                         u"them, so none was built again. Change a setting, or tick other figure forms, to build again.")
             return
         fontlab = self.fontlab
         masters = self.build_masters(package)
@@ -5324,7 +5439,7 @@ class FeatureCodeDialog(object):
                 strokes, offset_words(offsets), self.ak.glyph_name_links(kept)) if kept else
                 u"Scaling thins strokes: draw over what was scaled.")
             if new:
-                words.append(u"The forms above take %s now: check their features and write the code." % (
+                words.append(u"The forms above take %s now: tick their features and write the code." % (
                     u"it" if len(new) == 1 else u"them"))
             if same:
                 words.append(u"%s, as built before with these settings, %s left as %s." % (
@@ -5368,14 +5483,17 @@ class FeatureCodeDialog(object):
 
     # -- the rest -----------------------------------------------------------------------
 
-    def part(self, QtGui, stretch, splitter=None):
+    def part(self, QtGui, stretch, splitter=None, at=None):
         """A part of a splitter (the dialog's, unless another is given): its layout, to fill (stretch:
-        its share of the height at first)."""
+        its share of the height at first; at: its place among the parts, else the last)."""
         splitter = splitter if splitter is not None else self.splitter
         widget = QtGui.QWidget()
         box = QtGui.QVBoxLayout(widget)
         box.setContentsMargins(0, 0, 0, 0)
-        splitter.addWidget(widget)
+        if at is None:
+            splitter.addWidget(widget)
+        else:
+            splitter.insertWidget(at, widget)
         splitter.setStretchFactor(splitter.indexOf(widget), stretch)
         return box
 
@@ -5620,22 +5738,22 @@ class FeatureCodeDialog(object):
             for base, forms in cycling.items():
                 kind = char_kind(self.chars.get(base)) or LETTERS
                 deepest[kind] = max(deepest.get(kind, 0), len(forms))
-            text = (u"%s checked: more than rules by glyph can serve in a font (%s rules; %s at most). They "
+            text = (u"%s ticked: more than rules by glyph can serve in a font (%s rules; %s at most). They "
                     u"take turns %s instead: each takes the form after the form of the glyph of its kind "
-                    u"before it, in %s, and the look back does not apply. Check fewer glyphs (%s) for each to "
+                    u"before it, in %s, and the look back does not apply. Tick fewer glyphs (%s) for each to "
                     u"look back for its own earlier form." % (
                         self.ak.b(counted(len(cycling), u"glyph")), grouped(turn_rules(cycling, look_back)),
                         grouped(TURN_RULES_MAX), self.ak.b(u"by position"),
-                        counted(sum(deepest.values()), u"rule"), self.ak.i(TURN_CHECKS[0][1])))
+                        counted(sum(deepest.values()), u"rule"), self.ak.i(TURN_CHECK_LABELS["often"])))
         elif mode == "letter":
-            text = (u"%s checked, taking turns %s: each looks back among its own kind (letters, figures, or "
+            text = (u"%s ticked, taking turns %s: each looks back among its own kind (letters, figures, or "
                     u"punctuation marks) for its own earlier form (%s)." % (
                         self.ak.b(counted(len(cycling), u"glyph")), self.ak.b(u"by glyph"),
                         counted(turn_rules(cycling, look_back), u"rule")))
         elif self.package is None:
             text = u""
         elif self.sets:
-            text = u"No glyph is checked to take turns."
+            text = u"No glyph is ticked to take turns."
         else:  # (the section said nothing, and the owner looked for a minute for where they are made)
             text = NO_TURNS
         say(self.turn_label, text)
@@ -5731,17 +5849,43 @@ class FeatureCodeDialog(object):
         counts = dict((key, sum(1 for lig in self.found if lig.choice == key)) for key, _ in CHOICES)
         b = self.ak.b
         checked = [feature.tag for feature in self.forms if feature.on and feature.checked()]
-        self.status.setText(u"%s: %s (%s standard, %s discretionary, %s off); %s with alternates taking turns.\n"
-                            u"Forms: %s checked of %s%s.%s%s%s%s" % (
-                                b(self.package.tfn), b(counted(len(self.found), u"ligature")), b(counts["liga"]),
-                                b(counts["dlig"]), b(counts["off"]), b(counted(len(cycling), u"glyph")),
-                                b(len(checked)), b(counted(len(self.forms), u"form feature")),
-                                (u" (%s)" % self.ak.html(u", ".join(checked))) if checked else u"",
+        self.show_font_line()
+        # (under the top line, which names the font: the status lines, results first, then what stops a write)
+        if not self.forms:  # (never "0 of 0 form features": owner's wording rule)
+            forms = u"none"
+        elif not checked:
+            forms = u"%s, none ticked" % b(counted(len(self.forms), u"form feature"))
+        else:
+            forms = u"%s ticked (%s)" % (b(u"%s of %s" % (grouped(len(checked)), counted(len(self.forms), u"form feature"))),
+                                         self.ak.html(u", ".join(checked)))
+        self.status.setText(u"%s (%s, %s, %s); %s with alternates taking turns. "
+                            u"Forms: %s.%s%s%s%s" % (
+                                b(counted(len(self.found), u"ligature")), b(u"%s standard" % grouped(counts["liga"])),
+                                b(u"%s discretionary" % grouped(counts["dlig"])), b(u"%s off" % grouped(counts["off"])),
+                                b(counted(len(cycling), u"glyph")), forms,
                                 u" The font has this code already." if not changes and (texts or self.forms) else u"",
                                 (u" " + self.ak.html(refused_words(self.refused))) if getattr(self, "refused", None) else u"",
                                 (u" " + self.ak.html(stuck_words(self.stuck))) if getattr(self, "stuck", None) else u"",
                                 (u" The code has problems, so nothing can be written: " +
                                  self.ak.html(u"; ".join(problems))) if problems else u""))
+
+    def show_font_line(self, package=None):
+        """The top line: the font and its current master (ak.font_named, the same in every tool), the font
+        given or the window's; the no-font line without one. Never raises."""
+        package = package if package is not None else self.package
+        try:
+            if package is None:
+                text = self.ak.no_font_line() if hasattr(self.ak, "no_font_line") else \
+                    getattr(self.ak, "NO_FONT_LINE", None) or u"No font is open."
+            else:
+                try:
+                    masters = len(list(package.masters))
+                except Exception:
+                    masters = 1
+                text = self.ak.font_named(package.tfn, package.master, masters)
+            self.top_line.setText(text)
+        except Exception:
+            pass
 
     def write(self):
         if self.package is None or self.busy:
@@ -5768,8 +5912,10 @@ class FeatureCodeDialog(object):
         refusal = own_code_refusal(self.ak, self.package, dict((tag, texts[tag]) for tag in self.tags_shown(texts)),
                                    prefix, self.names)
         if refusal:
-            self.log.add(u"Nothing was written: %s. <i>Feature Check</i> lists every finding." % self.ak.html(refusal),
-                         "error")
+            link = getattr(self.ak, "tool_link", None)  # (a link that opens it in the window's place: image 220)
+            self.log.add(u"Nothing was written: %s. %s lists every finding." % (
+                self.ak.html(refusal), link(u"Feature Check") if link is not None else u"<i>Feature Check</i>"),
+                "error")
             return
         written, error, skipped = [], None, None
         # (the window's top row says what is under way; a write is never stopped half way)

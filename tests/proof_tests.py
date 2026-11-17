@@ -1084,7 +1084,9 @@ class SummaryTests(unittest.TestCase):
         self.assertEqual(fp.feature_title(u"ss00"), u"")
 
     def test_kerning_in_one_line_in_its_numbers(self):
-        self.assertEqual(fp.kerning_text(0, u"Regular"), u"0 kerned pairs in master Regular, classes resolved")
+        # (a count right at 0: never "0 kerned pairs", owner's image 228)
+        self.assertEqual(fp.kerning_text(0, u"Regular"), u"No kerned pairs in master Regular")
+        self.assertEqual(fp.kerning_text(0, u"Regular", 0, 0), u"No kerned pairs in master Regular")
         self.assertEqual(fp.kerning_text(1, u"Regular", 1, 1),
                          u"1 kerned pair in master Regular, classes resolved (1 entry, 1 class)")
         self.assertEqual(fp.kerning_text(1204, u"Bold", 86, 2),
@@ -1523,7 +1525,8 @@ def _remembering(name, made):
     def set_text(self, text):
         self.text = text
 
-    members = {"__init__": init, "setWhatsThis": set_whats, "setText": set_text}
+    members = {"__init__": init, "setWhatsThis": set_whats, "setText": set_text,
+               "setBuddy": lambda self, control: setattr(self, "buddy_of", control)}
     if name == "QCheckBox":
         members["setChecked"] = lambda self, on: setattr(self, "on", bool(on))
         members["isChecked"] = lambda self: getattr(self, "on", False)
@@ -1861,6 +1864,56 @@ class DialogTests(unittest.TestCase):
         dialog.save_pdf()
         dialog.show_in_glyph_window()
 
+    def test_the_no_font_line_is_one_line_and_hooks_to_the_next_font(self):
+        # Owner's image 278: "No font is open." and "Open one: its proof is laid out at once." on two lines
+        dialog = self.dialog(None)
+        self.assertIn(u"hooks to the next font you open", fp.NO_FONT_LINE)
+        self.assertIn(fp.NO_FONT_LINE, self.ak.ONE_LINE, "registered: its sentences share one line")
+        self.assertNotIn(u"<br>", self.ak.sentences(fp.NO_FONT_LINE))
+        self.assertIsNone(dialog.package)
+
+    def test_without_a_font_its_own_controls_are_grayed(self):
+        # Owner's image 282: every control showed usable before graying. Those Proof itself sets are grayed with
+        # no font (the shared no_font_states grays the rest), the summary's list too
+        dialog = self.dialog(None)
+        states = {}
+        enable = dialog.ak.enable
+        dialog.ak.enable = lambda widget, on: states.__setitem__(id(widget), bool(on))
+        try:
+            dialog.summary_box.isChecked = lambda: True
+            dialog.update_buttons()
+        finally:
+            dialog.ak.enable = enable
+        for widget in (dialog.masters_box, dialog.scope_box, dialog.languages_box, dialog.page_list, dialog.save_button,
+                       dialog.glyph_window_button, dialog.open_button):
+            self.assertIs(states.get(id(widget)), False)
+
+    def test_the_top_line_names_the_font_and_counts_right(self):
+        # Owner's image 228: "0 kerned pairs"; the font and master in bold (ak.font_named), the sections' names
+        # in italics, their pages in parentheses
+        ak = self.ak
+
+        class Proof(object):
+            pages, masters, kerned, left_out = [1, 2, 3], [u"Regular"], [0], []
+
+            def section_pages(self):
+                return {"summary": 1, "charset": 2}
+
+        proof = Proof()
+        line = fp.status_line(ak.font_named(u"Sans", u"Regular"), proof, u"A4", ak)
+        self.assertEqual(line, u"<b>Sans</b>, master <b>Regular</b>: <b>3 pages</b> (A4). Pages per section: "
+                               u"<i>Summary</i> (1), <i>Character set</i> (2). No kerned pairs to apply; OpenType "
+                               u"features not applied.")
+        proof.kerned = [1204]
+        self.assertIn(u"Kerning applied (<b>1,204 kerned pairs</b>, classes resolved);",
+                      fp.status_line(u"", proof, u"A4", ak))
+        proof.masters, proof.kerned = [u"Regular", u"Bold"], [3, 0]
+        self.assertIn(u"Kerning applied (<b>3 kerned pairs</b> in <b>Regular</b>, no kerned pairs in <b>Bold</b>, "
+                      u"classes resolved);", fp.status_line(u"", proof, u"A4", ak))
+        dialog = self.dialog(fake_font())
+        self.assertEqual(dialog.font_named([u"Regular", u"Bold"]), u"<b>Fake Sans</b>, all <b>2 masters</b>")
+        self.assertEqual(dialog.font_named([u"Bold"]), u"<b>Fake Sans</b>, master <b>Bold</b> (of <b>2 masters</b>)")
+
     def test_a_setting_saved_changes_only_its_own_key(self):
         # Two Proof windows (two fonts) each read proof.json once: the second to save wrote back the first's
         # other setting as it had read it
@@ -1956,11 +2009,19 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(sorted(dialog.captions), sorted(named))
         self.assertIn(u"<i>Ctrl</i> with the mouse wheel", dialog.zoom_box.whats, "the zoom's keys said")
         for name, control in named.items():
-            self.assertEqual(dialog.captions[name].whats, control.whats, "%s: its caption answers for it" % name)
-            self.assertEqual(dialog.captions[name].kind, "QLabel")
+            # The help is the control's: its caption (ak.caption) shows it on a right-click and grays with it,
+            # and has none of its own (the brief of the owner's images 216 and 281)
+            caption = dialog.captions[name]
+            self.assertIs(getattr(caption, "buddy_of", None), control, "%s: its caption answers for it" % name)
+            self.assertEqual(caption.whats, u"", name)
+            self.assertEqual(caption.kind, "QLabel")
+            # The label form (owner's image 271): a noun, a colon, then the control
+            self.assertTrue(caption.text.endswith(u":") and caption.text[0].isupper(), caption.text)
+        for box in (dialog.pairs_box, dialog.languages_box):
+            self.assertTrue(all(row[0].isupper() for row in box.rows), "items capitalized after a label: %r" % box.rows)
         labels = [widget for widget in made if widget.kind == "QLabel" and widget.captioned and widget.text]
         self.assertEqual(sorted(label.text for label in labels), sorted(label.text for label in dialog.captions.values()),
-                         "no caption without its control's help")
+                         "no caption without its control")
         for box in [dialog.summary_box, dialog.close_button, dialog.page_list] + list(dialog.section_boxes.values()):
             self.assertIn(box, controls)
 
@@ -2002,7 +2063,9 @@ class DialogTests(unittest.TestCase):
         finally:
             dialog.ak.load_sibling = load
         self.assertEqual(fp.features_text([(u"ss01", u"Round a")]), u"1 feature: ss01 (Stylistic Set 1: Round a)")
-        self.assertIn(u"summary 1", dialog.font_label.text)
+        self.assertIn(u"<i>Summary</i> (1)", dialog.font_label.text)
+        self.assertTrue(dialog.font_label.text.startswith(u"<b>Fake Sans</b>, master <b>Regular</b> (of <b>2 masters</b>): "),
+                        dialog.font_label.text)
         self.assertEqual(self.said, [], "nothing left out")
         # once per font read: not per layout, not as a page is drawn
         dialog.rebuild()
@@ -2128,7 +2191,7 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(rest, sorted(rest, key=lambda text: text.lower()), "the others A to Z")
         self.assertIn(u"come first, then the other %d, A to Z" % (covered - fp.SCOPE_LANGUAGES_TOP),
                       dialog.scope_box.whats)
-        self.assertEqual(dialog.captions["scope"].whats, dialog.scope_box.whats)
+        self.assertIs(dialog.captions["scope"].buddy_of, dialog.scope_box, "its caption shows the dropdown's help")
         dialog.scope_box.setCurrentIndex(len(rows) - 1)  # one of the others, picked at once
         dialog.scope_chosen(len(rows) - 1)
         self.assertEqual(fp.scope_label(dialog.scope_kept), rows[-1])

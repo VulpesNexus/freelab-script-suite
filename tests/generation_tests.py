@@ -613,13 +613,13 @@ class HandOverTests(unittest.TestCase):
             dialog.given, dialog.generation_given = [u"a"] * letters, [u"-"] * others
             dialog.say_handed_over()
         self.assertEqual(lines, [
-            u"From Font Check: 2 letters with diacritics on the <i>Diacritics</i> tab and 2 other glyphs on <i>Glyph "
+            u"From <i>Font Check</i>: 2 letters with diacritics on the <i>Diacritics</i> tab and 2 other glyphs on <i>Glyph "
             u"generation</i> (shown first: <i>Glyph generation</i>, as many on each).",
-            u"From Font Check: 3 letters with diacritics on the <i>Diacritics</i> tab and 1 other glyph on <i>Glyph "
+            u"From <i>Font Check</i>: 3 letters with diacritics on the <i>Diacritics</i> tab and 1 other glyph on <i>Glyph "
             u"generation</i> (shown first: <i>Diacritics</i>, the tab with more).",
-            u"From Font Check: 1 letter with diacritics on the <i>Diacritics</i> tab and 2 other glyphs on <i>Glyph "
+            u"From <i>Font Check</i>: 1 letter with diacritics on the <i>Diacritics</i> tab and 2 other glyphs on <i>Glyph "
             u"generation</i> (shown first: <i>Glyph generation</i>, the tab with more).",
-            u"From Font Check: 1 other glyph, on <i>Glyph generation</i>."])
+            u"From <i>Font Check</i>: 1 other glyph, on <i>Glyph generation</i>."])
 
     def test_the_list_holds_what_was_handed_over(self):
         page = gg.GenerationPage.__new__(gg.GenerationPage)
@@ -992,7 +992,7 @@ class WriteTests(unittest.TestCase):
         page, package, steps, logged = self.page()
         self.build(page, [0x201C])
         self.assertIsNone(package.findName("quotedblleft"))
-        self.assertTrue(any(u"it needs quoteleft, which was not built: check it too" in text for _, text in logged))
+        self.assertTrue(any(u"it needs quoteleft, which was not built: tick it too" in text for _, text in logged))
 
     def test_mirrors_are_set_right(self):
         page, package, steps, logged = self.page()
@@ -1303,7 +1303,7 @@ class WriteTests(unittest.TestCase):
             self.build(page, [0x01DD])
             self.assertIsNone(package.findUnicode(0x0259), codes)
             self.assertIsNone(package.findUnicode(0x01DD), codes)
-            self.assertIn(("warning", u"%s was not built: it needs schwa, which was not built: check it too." % u(0x01DD)),
+            self.assertIn(("warning", u"%s was not built: it needs schwa, which was not built: tick it too." % u(0x01DD)),
                           logged)
             page, package, steps, logged = self.page(font)
             page.planner_now = gg.Planner(DATA, font, None, False, codes)
@@ -1610,8 +1610,8 @@ class ListControlTests(unittest.TestCase):
             page.check_all(False)
         finally:
             gg._qt = saved
-        self.assertEqual(lines, [u"Checked <b>%d glyphs</b> (%d checked in all, 1 of them not shown)." % (len(shown), len(shown) + 1),
-                                 u"Unchecked <b>%d glyphs</b> (1 still checked, not shown: a search hides it)." % len(shown)])
+        self.assertEqual(lines, [u"Ticked <b>%d glyphs</b> (%d ticked in all, 1 of them not shown)." % (len(shown), len(shown) + 1),
+                                 u"Unticked <b>%d glyphs</b> (1 still ticked, not shown: a search hides it)." % len(shown)])
 
     def test_only_high_value_glyphs(self):
         page, items, lines = self.page()
@@ -1626,7 +1626,7 @@ class ListControlTests(unittest.TestCase):
         finally:
             gg._qt = saved
         self.assertEqual(sorted(r.char for r in page.rows if r.checked), sorted(page.owner.high_value))
-        self.assertTrue(lines[-1].startswith(u"Checked <b>2 glyphs</b> <i>Font Check</i> lists as high-value"))
+        self.assertTrue(lines[-1].startswith(u"Ticked <b>2 glyphs</b> <i>Font Check</i> lists as high-value"))
         page.owner.high_value = None
         self.assertEqual(page.high_value_checks(), {}, "not known yet: the button does nothing")
 
@@ -1639,8 +1639,9 @@ class ListControlTests(unittest.TestCase):
         page.picture = lambda r, size: None
         page.apply_search = lambda: None
         made = []
-        page.tree = Stub(blockSignals=lambda on: None, clear=lambda: None, font=None,
+        page.tree = Stub(blockSignals=lambda on: None, clear=lambda: None, font=None, clearSelection=lambda: None,
                          addTopLevelItem=lambda item: made.append(item))
+        page.select = lambda: None
         qtgui = Stub(QFont=lambda font: Stub(setBold=lambda on: None), QBrush=lambda color: ("brush", color),
                      QTreeWidgetItem=lambda texts: Item(None, None, texts), QPalette=Stub(Disabled=1, Text=2))
         saved = gg._qt
@@ -1654,6 +1655,18 @@ class ListControlTests(unittest.TestCase):
                                                  for child in lacking.children), "every cell dimmed")
         built = [section for section in made if not section.texts[0].startswith(gg.LACKING)]
         self.assertFalse(any(child.foreground for section in built for child in section.children))
+
+    def test_the_status_counts_right_at_0_1_and_2(self):
+        """Owner's images 247 and 265: the status under the window's top line (which names the font), "No glyph
+        can be built" rather than "0 glyphs", Build ticked glyphs named only when something can be built."""
+        b, i = (lambda text: u"<b>%s</b>" % text), (lambda text: u"<i>%s</i>" % text)
+        self.assertEqual(gg.status_text(134, [u"<b>19</b> exact"], 84, b, i),
+                         u"<b>134 glyphs</b> can be built (<b>19</b> exact); <b>84 glyphs</b> need a glyph the font "
+                         u"lacks. Nothing changes until you click <i>Build ticked glyphs</i>.")
+        self.assertEqual(gg.status_text(1, [], 0), u"1 glyph can be built. Nothing changes until you click Build ticked "
+                                                   u"glyphs.")
+        self.assertEqual(gg.status_text(0, [], 1), u"No glyph can be built: 1 glyph needs a glyph the font lacks.")
+        self.assertEqual(gg.status_text(0, [], 0), u"No glyph can be built.")
 
 
 def alternates_module():
@@ -1719,6 +1732,45 @@ class VaryTests(unittest.TestCase):
         heavy = self.varied_plan(FakeFont(bold))[1][u(0x2018)].layout.deform
         self.assertEqual(gg.linear(regular), gg.linear(heavy), "the same change: the masters stay compatible")
         self.assertNotEqual(regular[4:], heavy[4:], "each about its own ink's center")
+
+    def test_the_preview_shows_the_glyph_as_planned_now(self):
+        """Owner's image 252: ticking Vary turned and mirrored glyphs did not change the preview. The list is
+        planned again and refilled with its signals blocked, so the selection went silently and the preview
+        kept the glyph as it was: the row is selected again and the preview drawn from the new plan."""
+        planner, rows = self.varied_plan(strength="bold")
+        page = gg.GenerationPage.__new__(gg.GenerationPage)
+        page.rows = planner.rows
+        index = [i for i, r in enumerate(page.rows) if r.char == u(0x2018)][0]
+        items = [Item(i, True) for i in range(len(page.rows))]
+        page.items = lambda: items
+        current, selections = [], []
+        page.tree = Stub(blockSignals=lambda on: None, setCurrentItem=current.append, scrollToItem=lambda item: None,
+                         clearSelection=lambda: current.append(None))
+        page.select = lambda: selections.append(list(current))
+        page.reselect = page.rows[index].hex
+        saved = gg._qt
+        try:
+            gg._qt = lambda: (ListControlTests.QT, None)
+            page.restore_selection()
+            self.assertEqual(current, [items[index]], "the row selected before, selected again")
+            self.assertEqual(len(selections), 1, "and its preview drawn anew")
+            page.reselect = None
+            page.restore_selection()
+        finally:
+            gg._qt = saved
+        self.assertEqual(current[-1], None, "nothing selected before: the preview cleared, never left stale")
+        self.assertEqual(len(selections), 2)
+        varied = rows[u(0x2018)].layout
+        self.assertIsNotNone(varied.plain, "the unchanged glyph, outlined under the varied one")
+        self.assertIsNone(varied.plain.deform)
+        self.assertEqual(varied.params, alternates_module().variant_params(rows[u(0x2018)].name, 1, "bold", 7))
+
+    def test_the_preview_says_what_changed(self):
+        self.assertEqual(gg.vary_words((1.419, 0.9486, 1.017, 3.502, 0.00475), 1000.0),
+                         u"turned 1.4° counterclockwise, slanted 3.5° right, 95% as wide, 102% as tall, raised 5 units")
+        self.assertEqual(gg.vary_words((-0.8, 1.0, 1.0, -1.0, -0.001), 1000.0),
+                         u"turned 0.8° clockwise, slanted 1.0° left, lowered 1 unit")
+        self.assertEqual(gg.vary_words((0.0, 1.0, 1.0, 0.0, 0.0)), u"unchanged at this strength")
 
     def test_a_varied_turn_is_written_as_a_varied_component(self):
         page, package, steps, logged = WriteTests("test_every_master").page(FakeFont(VARIED))
@@ -2181,6 +2233,9 @@ class Item(object):
 
     def addChild(self, child):
         self.children.append(child)
+
+    def isHidden(self):
+        return False
 
     def __getattr__(self, name):  # (setFont, setToolTip, setIcon, setFirstColumnSpanned, setExpanded...)
         if name.startswith("set"):

@@ -89,14 +89,20 @@ def load_auto_kerning():
     return module
 
 
-def counted(number, one, many=None):
-    """"1 glyph", "2 glyphs": a count with its noun in the right number."""
-    return u"%d %s" % (number, one if number == 1 else (many or one + u"s"))
-
-
 def grouped(number):
     """1234 as "1,234"."""
     return u"{:,}".format(int(number))
+
+
+def counted(number, one, many=None):
+    """"1 glyph", "2 glyphs", "13,956 glyphs": a count (thousands grouped) with its noun in the right number."""
+    return u"%s %s" % (grouped(number), one if number == 1 else (many or one + u"s"))
+
+
+def tab_text(title, count=None):
+    """A tab's title with its count in parentheses, thousands grouped: "Glyphs (13,956)" (owner's image 235);
+    the title alone before a comparison."""
+    return title if count is None else u"%s (%s)" % (title, grouped(count))
 
 
 def round_units(value):
@@ -316,7 +322,7 @@ def missing_line(name, others, masters, chosen, same_master=False):
     open; masters: how many masters the window's font has; chosen: whether the second side is chosen;
     same_master: it is the first side's own master."""
     if name is None:
-        return u"No font is open. Open a font in FontLab, then choose the font to compare it with in <i>with</i>."
+        return NO_FONT_LINE
     if chosen and same_master:
         return (u"Both sides are the same master of %s: choose another master, or another font, in <i>with</i>."
                 % name)
@@ -327,8 +333,14 @@ def missing_line(name, others, masters, chosen, same_master=False):
                 u"FontLab, to have a font to compare it with." % (name, OPEN_ENTRY))
     if not others:
         return (u"Only %s is open. Choose in <i>with</i> the master to compare with, or <i>%s</i> for another "
-                u"font, then click <i>Compare</i>." % (name, OPEN_ENTRY))
-    return u"Choose in <i>with</i> the font to compare %s with, then click <i>Compare</i>." % name
+                u"font: it is compared at once." % (name, OPEN_ENTRY))
+    return u"Choose in <i>with</i> the font to compare %s with: it is compared at once." % name
+
+
+# The window's line while no font is open: one line (ak.one_line), "hooks to" as the shared NO_FONT_LINE
+NO_FONT_LINE = (u"No font is open. This window hooks to the next font you open: then choose in <i>with</i> the font "
+                u"to compare it with.")
+REMEMBERED = "_freelab_compare_with"  # on sys: the font last chosen in "with", kept for the session (owner's image 257)
 
 
 # ---------------------------------------------------------------------------
@@ -1020,6 +1032,60 @@ def feature_state(f, labels):
     return u", ".join(parts) or u"differs"
 
 
+def bold(text):
+    return u"<b>%s</b>" % html_escape(text)
+
+
+def glyphs_line(changed, shown, listed, hidden=()):
+    """The Glyphs tab's line, one line (owner's image 256: "632 glyphs differ." and "231 shown." were two):
+    changed: the glyphs that differ; shown: those in the list; listed: those the kinds shown keep (shown
+    is fewer when the list stops at ROWS_SHOWN); hidden: the chips' names of the kinds hidden, in italics."""
+    if not changed:
+        return u"The glyphs are alike: names, code points, metrics, outlines, components, and anchors."
+    text = u"%s %s" % (bold(counted(changed, u"glyph")), u"differs" if changed == 1 else u"differ")
+    notes = []
+    if shown < listed:
+        notes.append(u"the %s worst shown" % bold(grouped(shown)))
+    elif shown != changed:
+        notes.append(u"%s shown" % bold(grouped(shown)))
+    if hidden:
+        notes.append(u"hidden: %s" % u", ".join(u"<i>%s</i>" % html_escape(name) for name in hidden))
+    return text + (u" (%s)." % u"; ".join(notes) if notes else u".")
+
+
+def kerning_line(counts, labels, cut=None):
+    """The Kerning tab's line: counts (kern_counts), the fonts' names in bold; cut: how many pairs the list
+    shows when it stops at ROWS_SHOWN (else None)."""
+    listed = sum(n for kind, n in counts.items() if kind != "absent")
+    if listed:
+        text = u"%s kerned differently: %s only in %s, %s only in %s, %s with differing values" % (
+            bold(counted(listed, u"glyph pair")), bold(grouped(counts.get("only_a", 0))), bold(labels[0]),
+            bold(grouped(counts.get("only_b", 0))), bold(labels[1]), bold(grouped(counts.get("value", 0))))
+        text += u" (the %s largest differences shown)." % bold(grouped(cut)) if cut is not None else u"."
+    else:
+        text = u"The pairs of glyphs both fonts have are kerned alike."
+    if counts.get("absent"):
+        text += u" %s of a glyph one font lacks." % bold(counted(counts["absent"], u"pair"))
+    return text
+
+
+def features_line(rows, labels, masters=False):
+    """The Features tab's line (rows: FeatureDifference), the fonts' names in bold."""
+    if masters:
+        return u"Two masters of one font share their features and classes."
+    if not rows:
+        return u"Neither font has features."
+    differing = [f for f in rows if f.kind != "same"]
+    if not differing:
+        return (u"The one feature is alike in both." if len(rows) == 1
+                else u"The %s are alike." % bold(counted(len(rows), u"feature")))
+    return u"%s %s: %s only in %s, %s only in %s, %s with code that differs." % (
+        bold(counted(len(differing), u"feature")), u"differs" if len(differing) == 1 else u"differ",
+        bold(grouped(sum(1 for f in differing if f.kind == "only_a"))), bold(labels[0]),
+        bold(grouped(sum(1 for f in differing if f.kind == "only_b"))), bold(labels[1]),
+        bold(grouped(sum(1 for f in differing if f.kind == "differs"))))
+
+
 def html_escape(text):
     return (u"%s" % text).replace(u"&", u"&amp;").replace(u"<", u"&lt;").replace(u">", u"&gt;")
 
@@ -1148,22 +1214,24 @@ Two open fonts, or two masters of one font, compared glyph by glyph. Nothing in 
 changes.<br><br>
 The first is this window's font (<i>Compare</i> lists its masters). Choose the second in <i>with</i>:
 another open font, another master of the first, or <i>Open a font\N{HORIZONTAL ELLIPSIS}</i> for a font
-file; then click <i>Compare</i>. A font opened from there, or from the fonts installed on Windows listed
-under it, is compared at once. A long comparison shows how far it is in the window's top row; the tools
+file. A font picked there, opened from there, or opened from the fonts installed on Windows listed under
+it, is compared at once, and stays the font chosen in <i>with</i> for the rest of the FontLab session (in
+the <i>Font Compare</i> windows opened after too) until another is chosen; <i>Compare</i> compares
+again. A long comparison shows how far it is in the window's top row; the tools
 menu, the arrows, <i>Close</i>, and Esc stop it (the lists keep the comparison before it).
 Differences of at most the units set are left out (metrics, anchors, nodes, components, kerning).
 A font of another em is scaled to the first one's.<br><br>
-<b>Glyphs</b>: a chip per kind of difference, each showing or hiding that kind in the list (a glyph
+<i>Glyphs</i>: a chip per kind of difference, each showing or hiding that kind in the list (a glyph
 with none of the kinds shown is left out; the glyphs only in one font are hidden to start with); the
 glyphs that differ, the worst first by the kinds
 shown, both drawn small; the selected glyph from both fonts, the first in the text
 color and the second in the highlight color, overlaid in the middle, its differences in one sentence
 under it. How much two outlines differ is the area where one has ink and the other not, as a share of
 the ink: a node moved shows.<br>
-<b>Kerning</b>: the glyph pairs kerned differently, classes resolved as FontLab applies them, the
+<i>Kerning</i>: the glyph pairs kerned differently, classes resolved as FontLab applies them, the
 largest difference first, and the selected pair drawn in both. The pairs both fonts kern, with
 differing values, are shown to start with; a chip shows the others.<br>
-<b>Features</b>: the features only in one font, and the lines of code that differ, removed in red and
+<i>Features</i>: the features only in one font, and the lines of code that differ, removed in red and
 added in green.<br><br>
 Right-click a glyph or a pair to flag it in the first font. Compared again after an undo or an edit
 in either font. Click this help's <i>?</i> button, then any control, for what it does."""
@@ -1183,6 +1251,7 @@ CHIP_SHEET = (u"QToolButton { background: transparent; color: rgba(128, 128, 128
 GRAY = (128, 128, 128)
 LINE_ALPHA = 128  # the lists' lines: a mid gray at half strength
 QUIET_ALPHA = 150
+CAPTION_SCALE = 0.9  # the pictures' captions: as ak.preview_caption's
 FIRST_ALPHA = 120  # the first font's ink, overlaid
 SECOND_ALPHA = 150  # the second's, in the highlight color
 THUMB_SIZE = 32
@@ -1266,6 +1335,13 @@ def comparison_pixmap(width, height, a, b, colors, font):
     QtCore, QtGui = _qt()
     pixmap = new_pixmap(width, height)
     text, highlight = colors["text"], colors["highlight"]
+    try:  # (the captions as every preview's, ak.preview_caption: a tenth smaller, the first two quiet)
+        small = QtGui.QFont(font)
+        if small.pointSizeF() > 0:  # (-1 for a font sized in pixels)
+            small.setPointSizeF(small.pointSizeF() * CAPTION_SCALE)
+            font = small
+    except Exception:
+        pass
     line_height = QtGui.QFontMetrics(font).height()
     xs, ys = [], [0.0]
     for side in (a, b):
@@ -1287,7 +1363,8 @@ def comparison_pixmap(width, height, a, b, colors, font):
     painter = QtGui.QPainter(pixmap)
     try:
         painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
-        panels = ((a[0], [(a, faded(text, 210))], text), (u"Both", [(a, faded(text, FIRST_ALPHA)), (b, faded(highlight, SECOND_ALPHA))], text),
+        quiet = faded(text, QUIET_ALPHA)  # (the second's caption keeps the highlight color: it says which is which)
+        panels = ((a[0], [(a, faded(text, 210))], quiet), (u"Both", [(a, faded(text, FIRST_ALPHA)), (b, faded(highlight, SECOND_ALPHA))], quiet),
                   (b[0], [(b, faded(highlight, 210))], highlight))
         for index, (caption, drawn, caption_color) in enumerate(panels):
             x0 = index * third + third / 2.0 - (left + right) / 2.0 * scale
@@ -1407,6 +1484,7 @@ class CompareDialog(object):
         self.own_listed = False  # whether fonts starts with this window's font
         self.first_rows, self.second_rows = [], []  # the dropdowns' rows (first_entries, second_entries)
         self.second_key = None  # the second side chosen: (font number, master), or None
+        self.recalled = False  # the second side is the font kept for the session, not compared yet (compare_recalled)
         self.sides = None  # (Side, Side) compared
         self.masters_mode = False
         self.results, self.glyph_names = [], []
@@ -1422,13 +1500,27 @@ class CompareDialog(object):
         dialog.setWhatsThis(HELP)
         ak.size_dialog(dialog)
         layout = QtGui.QVBoxLayout(dialog)
+        if hasattr(ak, "one_line"):
+            ak.one_line(NO_FONT_LINE)  # (a no-font line: its sentences on one line)
         self.font_label = ak.status_label()
         layout.addWidget(self.font_label)
-        layout.addWidget(ak.separator())
+        # (the header's line: shown even before a comparison can be made, the choices under it)
+        layout.addWidget(ak.header_separator() if hasattr(ak, "header_separator") else ak.separator())
+        # One sentence (owner's image 271): "Compare [font] ⇋ with [font] ignoring differences up to [1 unit]."
         settings = QtGui.QHBoxLayout()
         settings.addWidget(QtGui.QLabel("Compare"))
         self.choice_a = self.combo(u"The first font: this window's, with a row for each of its masters. Its glyph "
                                    u"names are the ones listed, and its glyphs are flagged by a right-click.")
+        # As wide as its name, in bold: the swap button right after it (owner's images 236 and 237: a gap
+        # as wide as a tab stood between them)
+        try:
+            self.choice_a.setSizeAdjustPolicy(QtGui.QComboBox.AdjustToContents)
+            self.choice_a.setMinimumContentsLength(0)
+            bold = QtGui.QFont(_prop(self.choice_a, "font"))
+            bold.setBold(True)
+            self.choice_a.setFont(bold)
+        except Exception:
+            pass
         settings.addWidget(self.choice_a)
         self.swap_button = QtGui.QToolButton()
         self.swap_button.setText(u"\N{LEFTWARDS ARROW OVER RIGHTWARDS ARROW}")
@@ -1441,11 +1533,12 @@ class CompareDialog(object):
                                    u"another master of the first. <i>%s</i> opens a font file in FontLab (as "
                                    u"<i>File &gt; Open</i> does, starting in Windows' font folder) and chooses it. "
                                    u"Under it, the fonts installed on Windows (yours too), A to Z: picking one opens it "
-                                   u"in FontLab and chooses it. A font opened either way is compared at once, without a "
-                                   u"click on <i>Compare</i>. The list follows the fonts FontLab has open." % OPEN_ENTRY)
+                                   u"in FontLab and chooses it. A font picked or opened is compared at once, without a "
+                                   u"click on <i>Compare</i>, and stays the one chosen here for the rest of the FontLab "
+                                   u"session, in new <i>Font Compare</i> windows too, until another is chosen. The list "
+                                   u"follows the fonts FontLab has open." % OPEN_ENTRY)
         settings.addWidget(self.choice_b)
-        settings.addSpacing(12)
-        settings.addWidget(QtGui.QLabel("Ignore differences up to"))
+        settings.addWidget(QtGui.QLabel("ignoring differences up to"))
         self.threshold = QtGui.QSpinBox()
         self.threshold.setRange(0, 100)
         self.threshold.setValue(THRESHOLD)
@@ -1453,7 +1546,12 @@ class CompareDialog(object):
         self.threshold.setWhatsThis(u"Widths, sidebearings, anchors, nodes, components, and kerning values that differ "
                                     u"by at most this many units count as alike.")
         settings.addWidget(self.threshold)
+        ak.sentence_end(settings)
+        settings.addSpacing(8)
         self.compare_button = QtGui.QPushButton("Compare")
+        self.compare_button.setWhatsThis(u"Compares the two fonts chosen again (a font picked in <i>with</i> is "
+                                         u"compared at once): after a change in either font made elsewhere, or "
+                                         u"with other differences ignored.")
         settings.addWidget(self.compare_button)
         settings.addStretch(1)
         layout.addLayout(settings)
@@ -1498,7 +1596,11 @@ class CompareDialog(object):
         self.tabs.connect("currentChanged(int)", self.switch_page)
         ak.add_tools_button(dialog, "Font Compare", getattr(self, "log", None))  # (the other font tools, a click away)
         ak.plain_buttons(dialog)
-        self.read_fonts()
+        self.may_recall = True  # (the font kept for the session, chosen as the window opens: recall_second)
+        try:
+            self.read_fonts()
+        finally:
+            self.may_recall = False
         self.history_timer = ak.watch_history(self)
         self.second_timer = ak.watch_history(self.second)
         self.flagging = [ak.flag_menu(self.glyph_tree, self, self.selected_glyphs, self.row_glyph),
@@ -1962,6 +2064,7 @@ class CompareDialog(object):
         except Exception:
             current = None
         self.set_second((key, current if current in masters else masters[0]))
+        self.remember_second(package, self.second_key[1] if self.second_key else None)
         self.say_state(True)
         self.update_buttons()
         if then_compare:
@@ -2088,7 +2191,7 @@ class CompareDialog(object):
         if own is not None:  # (the fonts installed on Windows, those not open already, to compare with directly)
             installed_rows = self.installed_rows(fonts)
         second = second_entries(listed, own[0] if own is not None else None, installed_rows=installed_rows)
-        lost = False
+        lost = recalled = False
         self.filling = True
         try:
             if first != self.first_rows:
@@ -2108,8 +2211,16 @@ class CompareDialog(object):
                 self.placeholder_unpickable()
             held = self.second_key
             lost = not self.set_second(held) and held is not None  # (its font closed, or its master gone)
+            recalled = self.recall_second()  # (the font kept for the session, while nothing else is chosen)
         finally:
             self.filling = False
+        if recalled:
+            self.recalled = True
+            try:
+                QtCore = _qt()[0]
+                QtCore.QTimer.singleShot(0, self.compare_recalled)  # (once the window is shown: show())
+            except Exception:
+                pass
         if lost:
             self.log.add(u"The second font chosen is no longer open (or no longer has that master): choose again in "
                          u"<i>with</i>.", "warning")
@@ -2174,8 +2285,74 @@ class CompareDialog(object):
                 self.open_font()
             elif kind == "installed":
                 self.open_font(row[1])  # (opened in FontLab, then chosen once it is in)
+            elif kind == "font" and self.second_key == tuple(row[1:3]):
+                # An open font picked: compared at once, as a font opened from here is, and kept as the choice
+                # for the session (owner's image 257)
+                self.remember_second(self.by_id.get(row[1]), row[2])
+                if not self.missing():
+                    self.compare()
         except Exception as exc:  # a signal's handler must not raise
             self.log.add(u"Could not open a font: %s" % self.ak.html(exc), "error")
+
+    # -- the font compared with, kept for the session (owner's image 257) ---------
+
+    def remember_second(self, package, master):
+        """The font chosen in "with" (picked, or opened from a file) kept for the rest of the FontLab session:
+        this window and the Font Compare windows opened after compare with it until another is chosen.
+        Kept on sys (a reinstall reloads this module), by FontLab's number of the font and by its file."""
+        if package is None:
+            return
+        try:
+            path = u"%s" % (getattr(package, "path", None) or u"")
+        except Exception:
+            path = u""
+        setattr(sys, REMEMBERED, {"number": self.font_number(package), "path": path, "master": master})
+
+    def remembered_key(self):
+        """(font number, master) of the font kept for "with" (remember_second) as this window lists it now: the
+        same font (by its number), else a font open from the same file (opened again); its master, or the first
+        listed that is not the first side's. None when it is not open, or is this window's own font with no other
+        master to compare."""
+        held = getattr(sys, REMEMBERED, None)
+        if not isinstance(held, dict):
+            return None
+        rows = [row for row in self.second_rows if row[0] == "font"]
+        numbers = [row[1] for row in rows]
+        number = held.get("number") if held.get("number") in numbers else None
+        if number is None and held.get("path"):
+            for package in self.fonts:
+                path = getattr(package, "path", None)
+                if path and self.same_file(path, held["path"]) and self.font_number(package) in numbers:
+                    number = self.font_number(package)
+                    break
+        if number is None:
+            return None
+        first = self.first_key()
+        masters = [row[2] for row in rows if row[1] == number and (first is None or (number, row[2]) != tuple(first))]
+        if not masters:
+            return None
+        return (number, held.get("master") if held.get("master") in masters else masters[0])
+
+    def recall_second(self):
+        """As the window opens, or takes a font (may_recall), with nothing chosen in "with" and nothing compared
+        yet: the font kept for the session chosen (True). Not at the other readings of the fonts (a press on a
+        dropdown reads them: a comparison then would start under the user's pick)."""
+        if not getattr(self, "may_recall", False):
+            return False
+        if self.second_key is not None or self.sides is not None or self.first_key() is None:
+            return False
+        key = self.remembered_key()
+        return key is not None and self.set_second(key)
+
+    def compare_recalled(self):
+        """The font kept for the session, chosen by recall_second, compared once the window is shown (never
+        over a comparison made meanwhile, nor while one runs). Never raises."""
+        try:
+            if self.recalled and self.shown() and not self.busy and self.sides is None and not self.missing():
+                self.recalled = False
+                self.compare()
+        except Exception:
+            pass  # a timer's handler must not raise
 
     def choice_changed(self):
         """A dropdown's row changed (by the user: the code's own changes are made while filling)."""
@@ -2497,12 +2674,13 @@ class CompareDialog(object):
         both = len(pairs)
         text = u"Compared %s with %s: %s in both" % (b_(labels[0]), b_(labels[1]), b_(counted(both, u"glyph")))
         if not same:
-            text += u", %s only in %s, %s only in %s" % (b_(grouped(len(only_a))), html_escape(labels[0]),
-                                                         b_(grouped(len(only_b))), html_escape(labels[1]))
+            text += u", %s only in %s, %s only in %s" % (b_(grouped(len(only_a))), b_(labels[0]),
+                                                         b_(grouped(len(only_b))), b_(labels[1]))
         text += u"."
-        if factor != 1:
-            text += u" %s has %s units per em, %s has %s: its values are scaled to %s." % (
-                html_escape(labels[1]), b_(round_units(upm_b)), html_escape(labels[0]), b_(round_units(upm_a)), b_(round_units(upm_a)))
+        if factor != 1:  # (font names in bold, as everywhere: owner's image 273)
+            text += u" %s has %s, %s has %s: its values are scaled to %s." % (
+                b_(labels[1]), b_(counted(round_units(upm_b), u"unit") + u" per em"), b_(labels[0]),
+                b_(grouped(round_units(upm_a))), b_(grouped(round_units(upm_a))))
         self.font_label.setText(text)
         self.log.add(u"Compared %s with %s." % (b_(labels[0]), b_(labels[1])), "done")
         noted = set()
@@ -2525,7 +2703,11 @@ class CompareDialog(object):
         if self.busy:
             return
         compared = self.sides is not None
-        self.read_fonts()
+        self.may_recall = True  # (a window that had no font: the font kept for the session chosen and compared)
+        try:
+            self.read_fonts()
+        finally:
+            self.may_recall = False
         if compared:
             self.log.add(u"This window's font changed: the lists show the last comparison until you click %s."
                          % self.ak.i(u"Compare"), "warning")
@@ -2584,11 +2766,11 @@ class CompareDialog(object):
         own = self.first_key() is not None
         ak.enable(self.choice_b, own and not self.busy)
         ak.enable(self.threshold, own)
-        tab_texts = (u"Glyphs", u"Kerning", u"Features")
-        if self.sides is not None:
-            tab_texts = (u"Glyphs %s" % grouped(len(self.results)), u"Kerning %s" % grouped(
-                sum(1 for d in self.kern_rows if d.kind != "absent")),
-                u"Features %s" % grouped(sum(1 for f in self.feature_rows if f.kind != "same")))
+        tab_texts = (tab_text(u"Glyphs"), tab_text(u"Kerning"), tab_text(u"Features"))
+        if self.sides is not None:  # (counts in parentheses, as every header's: owner's image 235)
+            tab_texts = (tab_text(u"Glyphs", len(self.results)),
+                         tab_text(u"Kerning", sum(1 for d in self.kern_rows if d.kind != "absent")),
+                         tab_text(u"Features", sum(1 for f in self.feature_rows if f.kind != "same")))
         for index, text in enumerate(tab_texts):
             try:
                 self.tabs.setTabText(index, text)
@@ -2653,14 +2835,14 @@ class CompareDialog(object):
         on = kinds_first_on(counts_, GLYPH_KINDS_FIRST)
         for kind, chip in self.glyph_chips:
             count = counts_.get(kind, 0)
-            chip.setText(u"%s %s" % (kind_label(kind, labels, self.masters_mode), grouped(count)))
+            chip.setText(tab_text(kind_label(kind, labels, self.masters_mode), count))
             chip.setChecked(kind in on)
             chip.setVisible(bool(count))
         counts_ = kern_counts(self.kern_rows)
         on = kinds_first_on(counts_, KERN_KINDS_FIRST)
         for kind, chip in self.kern_chips:
             count = counts_.get(kind, 0)
-            chip.setText(u"%s %s" % (kern_label(kind, labels), grouped(count)))
+            chip.setText(tab_text(kern_label(kind, labels), count))
             chip.setChecked(kind in on)
             chip.setVisible(bool(count))
 
@@ -2693,21 +2875,10 @@ class CompareDialog(object):
         finally:
             self.ak.quiet_list(tree, False)
             self.filling = False
-        changed = len(self.results)
-        if self.results:
-            text = u"%s %s." % (self.ak.b(counted(changed, u"glyph")), u"differs" if changed == 1 else u"differ")
-            if len(rows) < len(found):
-                text += u" The %s worst shown." % self.ak.b(grouped(len(rows)))
-            elif len(rows) != changed:
-                text += u" %s shown." % self.ak.b(grouped(len(rows)))
-            counts_ = glyph_counts(self.results)
-            hidden = [kind_label(kind, labels, self.masters_mode) for kind, _ in self.glyph_chips
-                      if counts_.get(kind) and kind not in kinds]
-            if hidden:
-                text += u" Hidden: %s." % html_escape(u", ".join(hidden))
-        else:
-            text = u"The glyphs are alike: names, code points, metrics, outlines, components, and anchors."
-        self.glyph_status.setText(text)
+        counts_ = glyph_counts(self.results)
+        hidden = [kind_label(kind, labels, self.masters_mode) for kind, _ in self.glyph_chips
+                  if counts_.get(kind) and kind not in kinds]
+        self.glyph_status.setText(glyphs_line(len(self.results), len(rows), len(found), hidden))
         self.select_first(tree, self.glyph_selected)
 
     def selected_result(self):
@@ -2801,19 +2972,7 @@ class CompareDialog(object):
             self.ak.quiet_list(tree, False)
             self.filling = False
         counts_ = kern_counts(self.kern_rows)
-        listed = sum(n for kind, n in counts_.items() if kind != "absent")
-        b = self.ak.b
-        if listed:
-            text = u"%s kerned differently: %s only in %s, %s only in %s, %s with differing values." % (
-                b(counted(listed, u"glyph pair")), b(grouped(counts_.get("only_a", 0))), html_escape(labels[0]),
-                b(grouped(counts_.get("only_b", 0))), html_escape(labels[1]), b(grouped(counts_.get("value", 0))))
-        else:
-            text = u"The pairs of glyphs both fonts have are kerned alike."
-        if counts_.get("absent"):
-            text += u" %s of a glyph one font lacks." % b(counted(counts_["absent"], u"pair"))
-        if len(rows) < len(found):
-            text += u" The %s largest differences shown." % b(grouped(len(rows)))
-        self.kern_status.setText(text)
+        self.kern_status.setText(kerning_line(counts_, labels, len(rows) if len(rows) < len(found) else None))
         self.select_first(tree, self.draw_pair)
 
     def selected_pair(self):
@@ -2888,25 +3047,7 @@ class CompareDialog(object):
             self.fit_columns(tree, (COLUMN_MAX,))
         finally:
             self.filling = False
-        b = self.ak.b
-        if self.masters_mode:
-            text = u"Two masters of one font share their features and classes."
-        elif not self.feature_rows:
-            text = u"Neither font has features."
-        else:
-            differing = [f for f in self.feature_rows if f.kind != "same"]
-            if differing:
-                text = u"%s differ: %s only in %s, %s only in %s, %s with code that differs." % (
-                    b(counted(len(differing), u"feature")),
-                    b(grouped(sum(1 for f in differing if f.kind == "only_a"))), html_escape(labels[0]),
-                    b(grouped(sum(1 for f in differing if f.kind == "only_b"))), html_escape(labels[1]),
-                    b(grouped(sum(1 for f in differing if f.kind == "differs"))))
-                if len(differing) == 1:
-                    text = text.replace(u" differ:", u" differs:")
-            else:
-                text = (u"The one feature is alike in both." if len(self.feature_rows) == 1
-                    else u"The %s are alike." % b(counted(len(self.feature_rows), u"feature")))
-        self.feature_status.setText(text)
+        self.feature_status.setText(features_line(self.feature_rows, labels, self.masters_mode))
         self.select_first(tree, self.feature_selected)
 
     def feature_selected(self):
@@ -2917,12 +3058,25 @@ class CompareDialog(object):
         if f is None:
             self.diff_view.clear()
             return
+        rows = f.rows if f.kind != "same" else [(u" ", line) for line in code_lines(f.a)]
+        base, text = self.code_colors()
+        self.diff_view.setHtml(diff_html(rows, self.labels(), base, text))
+
+    def code_colors(self):
+        """(base, text) as (red, green, blue) for the code's HTML: the view's palette's colors when it is
+        enabled, whatever it is now. The view is grayed while a comparison runs (show_busy grays the pages),
+        and Qt's palette() then gives its disabled colors: the code of a font compared from the Features tab
+        was written in them, dimmed until another feature was selected (owner's image 233)."""
         QtCore, QtGui = _qt()
         palette = _prop(self.diff_view, "palette")
-        base, text = palette.color(QtGui.QPalette.Base), palette.color(QtGui.QPalette.Text)
+        group = getattr(QtGui.QPalette, "Active", None)
         rgb = lambda c: (c.red(), c.green(), c.blue())
-        rows = f.rows if f.kind != "same" else [(u" ", line) for line in code_lines(f.a)]
-        self.diff_view.setHtml(diff_html(rows, self.labels(), rgb(base), rgb(text)))
+        try:
+            if group is None:
+                raise AttributeError("Active")
+            return (rgb(palette.color(group, QtGui.QPalette.Base)), rgb(palette.color(group, QtGui.QPalette.Text)))
+        except Exception:
+            return rgb(palette.color(QtGui.QPalette.Base)), rgb(palette.color(QtGui.QPalette.Text))
 
     # -- flags ---------------------------------------------------------------
 
@@ -2941,7 +3095,9 @@ class CompareDialog(object):
     def show(self):
         QtCore, QtGui = _qt()
         self.dialog.show()
-        self.dialog.raise_()  # (nothing compared as it opens: the second font is the user's to choose)
+        self.dialog.raise_()
+        if self.recalled:  # (the font kept for the session chosen in "with": compared as the window opens)
+            QtCore.QTimer.singleShot(50, self.compare_recalled)
 
 
 def main():

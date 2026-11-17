@@ -41,6 +41,7 @@ QUIET = 2  # white modules around a finder and a band
 GUIDE_GRAY = 205  # the guides' gray (and the label's), as Qt makes gray of GUIDE_RGB: above any threshold allowed
 THRESHOLD_MAX = 185  # the ink threshold at most: the guides 20 grays above it, for JPEG noise and soft edges
 INK_THRESHOLD = 128
+EVEN_SIDE = 0.05  # each sidebearing, in ems, of a glyph placed With even sidebearings
 
 
 # ---------------------------------------------------------------------------
@@ -571,7 +572,7 @@ def read_layout(corners, unit, sample, reach=SIZE_GUESSES):
     turning: each tried), the size of a unit in the image (a finder's square: one number, or one a
     finder, as find_finders measures them: a photographed sheet's far side is smaller), and
     sample(x, y): the image's gray at a point (0 ink, 255 paper). None when no band reads. The sheet's
-    size in units is guessed from the finders' distances and tried a few units either way (reach, or 6 %
+    size in units is guessed from the finders' distances and tried a few units either way (reach, or 6%
     of the size where that is more): the magic bytes and the CRC say which size is right."""
     units = list(unit) if isinstance(unit, (list, tuple)) else [unit] * 4
     for turn in range(4):
@@ -703,7 +704,7 @@ def cell_mapping(sheet, i, scale):
     return units, x0, y_top
 
 
-def placed(contours, how, upm, sidebearing=0.05):
+def placed(contours, how, upm, sidebearing=EVEN_SIDE):
     """(contours moved, advance) for a glyph: "drawn" keeps the ink where it was drawn against the
     origin line and gives the right side the left side's room; "even" sets both sides to sidebearing
     ems. contours: [[(x, y, kind)]]."""
@@ -1028,10 +1029,37 @@ The corner squares and the two bands of squares tell the reading where the sheet
 so a sheet can be read on another computer than the one that made it, turned, skewed, or photographed;
 keep them clean and wholly in the image.<br><br>
 <b>Build</b>: add the sheets drawn and click <i>Read sheets</i>: each drawn box is traced into outlines
-(or kept as an image, as drawn), and listed. Check the glyphs to build and click <i>Build checked
-glyphs</i> (one step of FontLab's History). With no font open, building makes a new font: the units
-per em, metrics, and family name of the font that made the sheets. Then space the glyphs (<i>Auto
-Spacing</i>) and build the rest (<i>Glyph Compose</i>)."""
+(or kept as an image, as drawn), and listed. Tick the glyphs to build and click <i>Build ticked
+glyphs</i> (one step of FontLab's History). With no font open, building makes a new font, which this
+window then works on: the units per em, metrics, and family name of the font that made the sheets.
+Then space the glyphs (<i>Auto Spacing</i>) and build the rest (<i>Glyph Compose</i>)."""
+
+# The top line while no font is open, on one line (ak.one_line: owner's images 274 and 280): the window
+# hooks to a font it builds too
+NO_FONT_TEXT = (u"No font is open. This window hooks to the next font you open (or build here). A template can still "
+                u"be made, with default metrics.")
+FLOW_SPACING = 16  # pixels between two options of a row that wraps (FlowRow)
+
+
+def flow_rows(widths, room, spacing=FLOW_SPACING):
+    """How many items each line of a row that wraps holds ([5], or [3, 2]): the items in their order, as
+    many on a line as room allows (each width, spacing between two), at least one a line. room 0 or less
+    (not laid out yet): all on one line. The owner's images 241, 266, and 267: the options and their run
+    button on one line where the window is wide enough, wrapped where it is not, nothing lost."""
+    widths = [max(0, int(w)) for w in widths]
+    if not widths:
+        return []
+    if room <= 0:
+        return [len(widths)]
+    counts, used = [], None
+    for width in widths:
+        if used is not None and used + spacing + width <= room:
+            used += spacing + width
+            counts[-1] += 1
+        else:
+            counts.append(1)
+            used = width
+    return counts
 
 
 def settings_path(ak):
@@ -1059,7 +1087,8 @@ def write_settings(ak, data):
 
 
 def counted(number, one, many=None):
-    return "%d %s" % (number, one if number == 1 else (many or one + "s"))
+    """"1 glyph", "1,412 glyphs": the count, thousands grouped, with its noun in the right number."""
+    return "%s %s" % (grouped(number), one if number == 1 else (many or one + "s"))
 
 
 def grouped(number):
@@ -1101,6 +1130,90 @@ class DrawnNames(object):
         return self.known[name]
 
 
+def _value(widget, name):
+    """A Qt property's value: an attribute in PythonQt (a method in some builds)."""
+    value = getattr(widget, name)
+    return value() if callable(value) else value
+
+
+class FlowRow(object):
+    """A row of options (each a group: a caption and its control, a check box, the run button last) that
+    stands on one line where the window is wide enough and wraps onto more lines where it is not
+    (flow_rows), in its order, nothing lost or overlapping: the owner's images 241, 266, and 267 ("both
+    lines of options could sit on the same line"; on a tiny screen, "wrapping/reflowing" must break
+    nothing but the looks). Each line is a box of its own, its groups at the left (a stretch after
+    them); a line with no group takes no room. Its width never holds the window wide (Ignored): the
+    groups move to the next line instead, once it is resized (on the next turn of the event loop,
+    never inside Qt's layout)."""
+
+    def __init__(self, groups, spacing=FLOW_SPACING):
+        QtCore, QtGui = _qt()
+        self.spacing = spacing
+        self.widget = QtGui.QWidget()
+        try:
+            self.widget.setSizePolicy(QtGui.QSizePolicy.Ignored, QtGui.QSizePolicy.Preferred)
+        except Exception:
+            pass
+        box = QtGui.QVBoxLayout(self.widget)
+        box.setContentsMargins(0, 0, 0, 0)
+        self.groups, self.lines, self.counts = [], [], None
+        for parts in groups:
+            group = QtGui.QWidget()
+            inner = QtGui.QHBoxLayout(group)
+            inner.setContentsMargins(0, 0, 0, 0)
+            for part in parts:
+                inner.addWidget(part)
+            self.groups.append(group)
+            line = QtGui.QHBoxLayout()
+            line.setContentsMargins(0, 0, 0, 0)
+            line.setSpacing(spacing)
+            line.addStretch(1)
+            box.addLayout(line)
+            self.lines.append(line)
+        self.place([len(self.groups)])
+        owner = self
+
+        class Resized(QtCore.QTimer):  # (PythonQt has no QObject to subclass; a timer will do)
+            def eventFilter(self, obj, event):
+                try:
+                    if event.type() == 14:  # Resize: fitted on the next turn
+                        self.start()
+                except Exception:
+                    pass  # an event filter must never raise
+                return False
+
+        self.watch = Resized(self.widget)  # (its parent the row: Qt deletes it with it)
+        try:
+            self.watch.setSingleShot(True)
+            self.watch.setInterval(0)
+            self.watch.connect("timeout()", self.fit)
+            self.widget.installEventFilter(self.watch)
+        except Exception:
+            pass
+
+    def place(self, counts):
+        """The groups put on the lines counts says (flow_rows), in their order."""
+        if counts == self.counts:
+            return
+        at = 0
+        for number, line in enumerate(self.lines):
+            for index in range(counts[number] if number < len(counts) else 0):
+                group = self.groups[at]
+                for other in self.lines:
+                    other.removeWidget(group)
+                line.insertWidget(index, group)
+                at += 1
+        self.counts = list(counts)
+
+    def fit(self):
+        """The groups on as few lines as the row's width allows. Never raises."""
+        try:
+            widths = [int(_value(_value(group, "sizeHint"), "width")) for group in self.groups]
+            self.place(flow_rows(widths, int(_value(self.widget, "width")), self.spacing))
+        except Exception:
+            pass
+
+
 class FontBuilderDialog(object):
     def __init__(self):
         QtCore, QtGui = _qt()
@@ -1114,9 +1227,19 @@ class FontBuilderDialog(object):
         ak.size_dialog(dialog)
         layout = ak.window_layout(dialog)
         self.settings = read_settings(ak)
+        try:  # (its no-font line on one line, the only lines allowed to be: owner's images 274 and 280)
+            ak.one_line(NO_FONT_TEXT)
+        except Exception:
+            pass
+        # The header, as every window's (owner's images 222, 223, 240): the top line, the template's status
+        # under it (the Template tab's: what it holds, or why there is nothing to draw), the header's line
+        # (shown even with no font), then the tabs
         self.font_label = ak.status_label()
         self.font_label.setWordWrap(True)
         layout.addWidget(self.font_label)
+        self.summary = ak.status_label()
+        layout.addWidget(self.summary)
+        layout.addWidget(ak.header_separator())
         self.tabs = QtGui.QTabBar()
         self.tabs.setExpanding(False)
         self.tabs.addTab("Template")
@@ -1128,12 +1251,15 @@ class FontBuilderDialog(object):
         self.pages.addWidget(self.build_page(QtCore, QtGui))
         self.log = ak.Log()
         layout.addWidget(self.log.widget)
+        # The bottom row, as every window's (owner's images 258 to 265): the Build tab's committing button at
+        # the right, shown with its tab, then Close
         buttons = QtGui.QHBoxLayout()
         buttons.addStretch(1)
+        buttons.addWidget(self.build_button)
         self.close_button = QtGui.QPushButton("Close")
         buttons.addWidget(self.close_button)
         layout.addLayout(buttons)
-        self.tabs.connect("currentChanged(int)", self.pages.setCurrentIndex)
+        self.tabs.connect("currentChanged(int)", self.tab_changed)
         self.close_button.connect("clicked()", ak.close_slot(self))
         self.package = None
         self.busy = False
@@ -1149,71 +1275,80 @@ class FontBuilderDialog(object):
         self.read_font()
         self.fill_sets()
         self.update_summary()
+        self.tab_changed(0)
+
+    def tab_changed(self, index):
+        """A tab shown: its page, its status in the header (the template's on the Template tab only, kept
+        hidden as it is written meanwhile by the property that keeps a top line hidden while the busy bar
+        stands in for it: ak.status_label), and its button in the bottom row (Build ticked glyphs on the
+        Build tab only)."""
+        try:
+            self.pages.setCurrentIndex(index)
+        except Exception:
+            pass
+        template = index == 0
+        try:
+            self.summary.setProperty(getattr(self.ak, "BUSY_LINE_PROP", "freelabBusyLine"), None if template else True)
+            self.summary.setHidden(not template or not (u"%s" % (_value(self.summary, "text") or u"")).strip())
+        except Exception:
+            pass
+        try:
+            self.build_button.setVisible(not template)
+        except Exception:
+            pass
 
     # -- the template ------------------------------------------------------------
 
     def template_page(self, QtCore, QtGui):
         page = QtGui.QWidget()
         box = QtGui.QVBoxLayout(page)
+        box.setContentsMargins(0, 0, 0, 0)  # (its frames in line with the log's: owner's image 268)
         row = QtGui.QHBoxLayout()
         row.addWidget(QtGui.QLabel("Glyphs:"))
         self.source = QtGui.QComboBox()
+        self.source.setSizeAdjustPolicy(QtGui.QComboBox.AdjustToContents)  # (as wide as its widest item: image 239)
         self.source.setWhatsThis("Where the glyphs come from: the characters typed below, or one of Font Check's "
                                  "character sets (its scripts, Unicode blocks, and foundries' sets; the common ones "
                                  "first, then every set). A set picked fills the box below with its characters; "
                                  "edit them there, and the choice becomes the characters typed.")
-        row.addWidget(self.source, 1)
+        row.addWidget(self.source)
+        row.addStretch(1)
         box.addLayout(row)
         self.typed = QtGui.QPlainTextEdit()
         self.typed.setPlaceholderText("Type or paste the characters to draw (each once; spaces do not count).")
         self.typed.setPlainText(self.settings.get("typed") or "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
         self.typed.setWhatsThis("The characters to draw, when the glyphs come from them.")
         box.addWidget(self.typed, 1)
-        row = QtGui.QHBoxLayout()
         self.lacking = QtGui.QCheckBox("Leave out the glyphs the font has drawn")
         self.lacking.setChecked(True)
         self.lacking.setWhatsThis("With a font open: no box for a glyph that has outlines, components, or an image in "
                                   "its current master.")
-        row.addWidget(self.lacking)
-        row.addSpacing(16)
-        row.addWidget(QtGui.QLabel("Alternates of each:"))
         self.alternates = QtGui.QSpinBox()
         self.alternates.setRange(0, 9)
         self.alternates.setValue(int(self.settings.get("alternates", 0)))
         self.alternates.setWhatsThis("Boxes for alternates of each glyph (name.alt1, name.alt2, ...), after it: for a "
                                      "handwriting font, Feature Code makes them take turns.")
-        row.addWidget(self.alternates)
-        row.addStretch(1)
-        box.addLayout(row)
-        row = QtGui.QHBoxLayout()
-        row.addWidget(QtGui.QLabel("Glyphs a sheet:"))
         self.per_sheet = QtGui.QSpinBox()
         self.per_sheet.setRange(1, PER_SHEET_MAX)
         self.per_sheet.setValue(int(self.settings.get("per_sheet", PER_SHEET)))
         self.per_sheet.setWhatsThis("How many glyphs each sheet holds; there are as many sheets as the glyphs need. "
                                     "A sheet larger than %s megapixels gets fewer." % grouped(SHEET_PIXELS_MAX // 1000000))
-        row.addWidget(self.per_sheet)
-        row.addSpacing(16)
-        row.addWidget(QtGui.QLabel("Em size:"))
         self.em = QtGui.QSpinBox()
         self.em.setRange(EM_PIXELS_RANGE[0], EM_PIXELS_RANGE[1])
         self.em.setSuffix(" px")
         self.em.setValue(int(self.settings.get("em", EM_PIXELS)))
         self.em.setWhatsThis("The em's size on the sheet, in pixels: 500 draws well on a screen; for print, 300 "
                              "pixels a centimeter of em at 300 dpi is about 118, so raise it for small paper sizes.")
-        row.addWidget(self.em)
-        row.addStretch(1)
-        box.addLayout(row)
-        self.summary = self.ak.status_label()
-        self.summary.setWordWrap(True)
-        box.addWidget(self.summary)
-        row = QtGui.QHBoxLayout()
-        row.addStretch(1)
         self.save_button = QtGui.QPushButton("Save template...")
         self.save_button.setWhatsThis("Writes the sheets as images (PNG, or TIFF), or as SVG drawings for vector apps "
                                       "(the template a locked group, to draw above), one a sheet, numbered.")
-        row.addWidget(self.save_button)
-        box.addLayout(row)
+        # The options on one line with the run button at their end (owner's images 241 and 266), wrapping
+        # onto the next line where the window is too narrow (FlowRow); the template's status is in the header
+        self.template_options = FlowRow([
+            [self.lacking], [QtGui.QLabel("Alternates of each:"), self.alternates],
+            [QtGui.QLabel("Glyphs a sheet:"), self.per_sheet], [QtGui.QLabel("Em size:"), self.em],
+            [self.save_button]])
+        box.addWidget(self.template_options.widget)
         self.summary_timer = QtCore.QTimer(page)  # (its parent the page: Qt deletes it with the window)
         self.summary_timer.setSingleShot(True)
         self.summary_timer.setInterval(250)
@@ -1348,8 +1483,9 @@ class FontBuilderDialog(object):
                 return
             sheets = self.sheets()
             w, h = sheets[0].size()
+            b = self.ak.b  # (counts with their nouns in bold: owner's convention 8)
             self.summary.setText("%s on %s of %s by %s pixels (%s megapixels)." % (
-                counted(len(glyphs), "glyph"), counted(len(sheets), "sheet"), grouped(w), grouped(h),
+                b(counted(len(glyphs), "glyph")), b(counted(len(sheets), "sheet")), grouped(w), grouped(h),
                 "%.1f" % (w * h / 1e6)))
             self.ak.enable(self.save_button, True)
         except Exception as exc:
@@ -1380,13 +1516,13 @@ class FontBuilderDialog(object):
         try:
             self.write_sheets(sheets, stem, ext, written)
         except self.ak.Stopped:
-            self.log.add("Saving was stopped after %s." % counted(len(written), "sheet"), "warning")
+            self.log.add("Saving was stopped after %s." % self.ak.b(counted(len(written), "sheet")), "warning")
             return
         finally:
             self.busy = False
             self.ak.busy_end(self)
         if written:
-            self.log.add("Saved %s: %s." % (counted(len(written), "sheet"), self.ak.html(", ".join(written))), "done")
+            self.log.add("Saved %s: %s." % (self.ak.b(counted(len(written), "sheet")), self.ak.html(", ".join(written))), "done")
 
     def write_sheets(self, sheets, stem, ext, written):
         """Each sheet written (its name added to written); stops at the first that cannot be."""
@@ -1415,6 +1551,7 @@ class FontBuilderDialog(object):
     def build_page(self, QtCore, QtGui):
         page = QtGui.QWidget()
         box = QtGui.QVBoxLayout(page)
+        box.setContentsMargins(0, 0, 0, 0)  # (its lists' frames in line with the log's: owner's image 268)
         row = QtGui.QHBoxLayout()
         self.add_button = QtGui.QPushButton("Add sheets...")
         self.add_button.setWhatsThis("Adds sheets drawn (images: PNG, JPEG, TIFF, BMP, WebP, PSD) to read.")
@@ -1431,63 +1568,53 @@ class FontBuilderDialog(object):
                                      "was read.")
         self.ak.table_layout(self.sheet_list, stretch=3)  # (FreeLab's one list layout: headers centered, no light lines)
         box.addWidget(self.sheet_list, 1)
-        row = QtGui.QHBoxLayout()
-        row.addWidget(QtGui.QLabel("Make:"))
         self.mode = QtGui.QComboBox()
+        self.mode.setSizeAdjustPolicy(QtGui.QComboBox.AdjustToContents)
         self.mode.addItem("Outlines (traced)")
         self.mode.addItem("Images (as drawn)")
         self.mode.setWhatsThis("Outlines: each drawing traced into contours, nodes at extremes. Images: each kept as "
                                "drawn, an image in the glyph (a bitmap or color font, or to trace by hand).")
-        row.addWidget(self.mode)
-        row.addSpacing(12)
-        row.addWidget(QtGui.QLabel("Ink darker than:"))
         self.threshold = QtGui.QSpinBox()
         self.threshold.setRange(1, THRESHOLD_MAX)  # (higher, the guides would count as ink)
         self.threshold.setValue(min(THRESHOLD_MAX, int(self.settings.get("threshold", INK_THRESHOLD))))
         self.threshold.setWhatsThis("What counts as ink: pixels darker than this gray (0 black, 255 white). Raise it for "
                                     "pencil or light ink, lower it for a gray paper; up to %d, so the guides (gray "
                                     "%d) always stay out." % (THRESHOLD_MAX, GUIDE_GRAY))
-        row.addWidget(self.threshold)
-        row.addSpacing(12)
-        row.addWidget(QtGui.QLabel("Glyphs placed:"))
         self.placement = QtGui.QComboBox()
+        self.placement.setSizeAdjustPolicy(QtGui.QComboBox.AdjustToContents)
         self.placement.addItem("Where drawn")
         self.placement.addItem("With even sidebearings")
+        # (no space before the percent sign: owner's image 216)
         self.placement.setWhatsThis("Where drawn: the ink stays where it was drawn against the box's origin line, the "
-                                    "right side given the left side's room. Even: both sides 5 % of the em. Either way, "
-                                    "Auto Spacing spaces them better after.")
-        row.addWidget(self.placement)
-        row.addStretch(1)
-        box.addLayout(row)
-        row = QtGui.QHBoxLayout()
+                                    "right side given the left side's room. Even: both sides %d%% of the em. Either "
+                                    "way, <i>Auto Spacing</i> spaces them better after." % int(round(EVEN_SIDE * 100)))
         self.replace = QtGui.QCheckBox("Replace glyphs the font has drawn")
         self.replace.setWhatsThis("Off: a glyph that has outlines, components, or an image in the current master is "
-                                  "listed unchecked and left as it is unless you check it.")
-        row.addWidget(self.replace)
-        row.addStretch(1)
+                                  "listed unticked and left as it is unless you tick it.")
         self.read_button = QtGui.QPushButton("Read sheets")
         self.read_button.setWhatsThis("Reads every sheet added: finds it in its image, and traces each drawn box.")
-        row.addWidget(self.read_button)
-        box.addLayout(row)
+        # The options on one line with Read sheets at their end (owner's image 267), wrapping where the window
+        # is too narrow (FlowRow)
+        self.build_options = FlowRow([
+            [QtGui.QLabel("Make:"), self.mode], [QtGui.QLabel("Ink darker than:"), self.threshold],
+            [QtGui.QLabel("Glyphs placed:"), self.placement], [self.replace], [self.read_button]])
+        box.addWidget(self.build_options.widget)
         self.glyph_list = QtGui.QTreeWidget()
         self.glyph_list.setHeaderLabels(["Glyph", "From", "Read"])
         self.glyph_list.setRootIsDecorated(False)
         self.glyph_list.setIconSize(QtCore.QSize(*self.ak.glyph_icon_size(1)))
-        self.glyph_list.setWhatsThis("The glyphs read: as traced, the sheet each came from, and what was read. Checked "
+        self.glyph_list.setWhatsThis("The glyphs read: as traced, the sheet each came from, and what was read. Ticked "
                                      "ones are built.")
         # (left alone by dark mode, its pictures drawn in the window's text color: mapped as one of FontLab's
         # lists, each picture came out twice, the second cut off and outlined; owner's image 168)
         self.ak.table_layout(self.glyph_list, stretch=2)
         box.addWidget(self.glyph_list, 2)
-        row = QtGui.QHBoxLayout()
-        row.addStretch(1)
-        self.build_button = QtGui.QPushButton("Build checked glyphs")
-        self.build_button.setWhatsThis("Writes the checked glyphs into the current master (new glyphs added with their "
+        # (in the window's bottom row, at its right, shown with this tab: owner's images 258 to 265)
+        self.build_button = QtGui.QPushButton("Build ticked glyphs")
+        self.build_button.setWhatsThis("Writes the ticked glyphs into the current master (new glyphs added with their "
                                        "code points), as one step of FontLab's History. With no font open, makes a new "
-                                       "font first: the units per em, metrics, and family name of the font that made "
-                                       "the sheets.")
-        row.addWidget(self.build_button)
-        box.addLayout(row)
+                                       "font first, which this window then works on: the units per em, metrics, and "
+                                       "family name of the font that made the sheets.")
         self.files = []
         self.add_button.connect("clicked()", self.add_sheets)
         self.clear_button.connect("clicked()", self.clear_sheets)
@@ -1611,7 +1738,8 @@ class FontBuilderDialog(object):
             self.busy = False
             self.ak.busy_end(self)
         self.show_drawn()
-        self.log.add("Read %s from %s." % (counted(len(self.drawn), "drawn glyph"), counted(len(self.files), "sheet")))
+        self.log.add("Read %s from %s." % (self.ak.b(counted(len(self.drawn), "drawn glyph")),
+                                           self.ak.b(counted(len(self.files), "sheet"))))
         self.update_buttons()
 
     def show_drawn(self):
@@ -1632,7 +1760,7 @@ class FontBuilderDialog(object):
             elif target != d.name:
                 note = (note + "; " if note else "") + "into %s" % target
             if targets.get(target, 0) > 1:
-                note = (note + "; " if note else "") + "drawn more than once: the first checked is built"
+                note = (note + "; " if note else "") + "drawn more than once: the first ticked is built"
             exists = target in drawn_in_font
             if exists:
                 note = (note + "; " if note else "") + "the font has it drawn"
@@ -1797,9 +1925,9 @@ class FontBuilderDialog(object):
         if added or rebuilt:
             parts = []
             if added:
-                parts.append("built %s" % counted(len(added), "new glyph"))
+                parts.append("built %s" % self.ak.b(counted(len(added), "new glyph")))
             if rebuilt:
-                parts.append("redrew %s" % counted(len(rebuilt), "glyph"))
+                parts.append("redrew %s" % self.ak.b(counted(len(rebuilt), "glyph")))
             done = " and ".join(parts)
             self.log.add("%s%s.%s" % (done[0].upper(), done[1:], status.undo(" <i>Edit &gt; Undo</i> takes it back.")),
                          "done")
@@ -1811,7 +1939,7 @@ class FontBuilderDialog(object):
             self.log.add("Left without a code point, since another glyph of the font has it: %s." %
                          self.ak.html(", ".join(unencoded)), "warning")
         if twice:
-            self.log.add("Drawn more than once among the checked: built from the first, the others left out: %s." %
+            self.log.add("Drawn more than once among the ticked: built from the first, the others left out: %s." %
                          self.ak.html(", ".join(sorted(set(twice)))), "warning")
         if nowhere:
             self.log.add("Not built, since the font's glyphs of these names are other characters' (and so are their "
@@ -1861,14 +1989,38 @@ class FontBuilderDialog(object):
                          "again." % self.ak.html("%s" % exc), "error")
             return None
         self.package = package
-        self.log.add("Made a new font, %s: %d units per em, the sheets' metrics." % (
-            self.ak.b(family), int(metrics.upm)), "done")
+        self.log.add("Made a new font, %s: %s units per em, the sheets' metrics." % (
+            self.ak.b(family), grouped(int(metrics.upm))), "done")
+        self.hook_built_font(package)
         try:
-            self.font_label.setText("%s, master %s (its metrics shape the template's boxes)." % (
-                self.ak.b(package.tfn or family), self.ak.b(package.master)))
+            self.font_label.setText(font_text(self.ak, package, family))
         except Exception:
             pass
         return package
+
+    def hook_built_font(self, package):
+        """The new font this window built is its font from now on (owner's images 274 and 280: "This window
+        hooks to the next font you open (or build here)"): taken as a window without a font takes the font
+        opened (ak.window_font: its registry, its title), at once rather than at the next look at the fonts,
+        and only while FontLab shows that font (it adds a new font as the current one): never another.
+        True when it took it. Never raises."""
+        try:
+            if getattr(self, "font_id", None) is not None:
+                return False  # (a window that has a font keeps it)
+            workspace = self.fontlab.flWorkspace.instance()
+            if workspace.currentPackage.fgPackage.id != package.fgPackage.id:
+                return False  # (left to the shared module's watch of the fonts)
+            taken = self.current_font()
+            if taken is None or taken.fgPackage.id != package.fgPackage.id:
+                return False
+            self.package = taken
+        except Exception:
+            return False
+        try:
+            self.summary_soon()  # (the template now takes its metrics, and leaves out what it has drawn)
+        except Exception:
+            pass
+        return True
 
     def image_shape(self, d, factor, how):
         """(an image glyph's shape, its advance): the drawing's ink in black on clear (alpha_table at the
@@ -1912,10 +2064,9 @@ class FontBuilderDialog(object):
     def read_font(self):
         self.package = self.current_font()
         if self.package is None:
-            self.font_label.setText(self.ak.no_font_line() + " A template can still be made, with default metrics.")
+            self.font_label.setText(no_font_text(self.ak))
         else:
-            self.font_label.setText("%s, master %s (its metrics shape the template's boxes)." % (
-                self.ak.b(self.package.tfn), self.ak.b(self.package.master)))
+            self.font_label.setText(font_text(self.ak, self.package))
         self.update_buttons()
 
     def font_changed(self):
@@ -1937,6 +2088,34 @@ class FontBuilderDialog(object):
     def show(self):
         self.dialog.show()
         self.dialog.raise_()
+
+
+def no_font_text(ak):
+    """The top line with no font open: NO_FONT_TEXT, on one line; while fonts are open that each have a
+    window (the shared no_font_line says why this one has none), that line, then what a template still
+    takes."""
+    try:
+        line = ak.no_font_line(NO_FONT_TEXT)
+    except TypeError:  # (a shared module from before own lines)
+        line = ak.no_font_line()
+    if line == NO_FONT_TEXT:
+        return line
+    return line + " A template can still be made, with default metrics."
+
+
+def font_text(ak, package, family=""):
+    """The top line with a font: its name and master, as every window's (ak.font_named), and what the
+    font is for here."""
+    name = package.tfn or family
+    try:
+        masters = len(list(package.masters or []))
+    except Exception:
+        masters = 1
+    try:
+        start = ak.font_named(name, package.master, masters)
+    except Exception:
+        start = "%s, master %s" % (ak.b(name), ak.b(package.master))
+    return "%s: its metrics shape the template's boxes." % start  # (after "(of 3 masters)": no second parentheses)
 
 
 def is_postscript(package):
@@ -2060,7 +2239,7 @@ def made_contour(fontlab, nodes, QtCore):
 
 def trace_cell(tracer, data, width, height, stride, threshold, units, x0, y_top, em_pixels):
     """A cell's drawing as contours in font units [[(x, y, kind)]], by the tracer (freelab_trace): specks
-    and pinholes smaller than a square of 2 % of the em dropped, nodes at extremes, coordinates whole
+    and pinholes smaller than a square of 2% of the em dropped, nodes at extremes, coordinates whole
     units (smooth nodes kept smooth)."""
     return tracer.trace_glyph(data, width, height, units, x0, y_top, stride=stride, em_px=em_pixels,
                               threshold=threshold)

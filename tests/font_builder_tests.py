@@ -381,6 +381,7 @@ class BuildTests(unittest.TestCase):
         status = Box(undo=lambda text: "", report=lambda log: None)
         self.progress = []
         d.ak = Box(begin_write=lambda *a: True, notify_changed=lambda *a, **k: status, html=lambda s: s,
+                   b=lambda s: "<b>%s</b>" % s,
                    font_key=lambda p: id(p), busy_start=lambda o, what="", stoppable=True: self.progress.append(
                        ("start", stoppable)),
                    busy_progress=lambda o, what=None, part=None, stoppable=True: self.progress.append(
@@ -495,6 +496,171 @@ class BuildTests(unittest.TestCase):
         r, g, b = fb.GUIDE_RGB
         self.assertEqual((11 * r + 16 * g + 5 * b) // 32, fb.GUIDE_GRAY)
         self.assertLessEqual(fb.THRESHOLD_MAX, fb.GUIDE_GRAY - 15)
+
+
+class FakeLine(object):
+    """A QHBoxLayout as FlowRow uses it: its widgets in order (its trailing stretch left out)."""
+
+    def __init__(self, parent=None):
+        self.items = []
+
+    def setContentsMargins(self, *args):
+        pass
+
+    def setSpacing(self, spacing):
+        self.spacing = spacing
+
+    def addStretch(self, factor=0):
+        pass
+
+    def addWidget(self, widget, *args):
+        self.items.append(widget)
+
+    def addLayout(self, layout, *args):
+        self.items.append(layout)
+
+    def removeWidget(self, widget):
+        if widget in self.items:
+            self.items.remove(widget)
+
+    def insertWidget(self, index, widget):
+        self.items.insert(index, widget)
+
+
+class FakeWidget(object):
+    def __init__(self, *args):
+        self.width = 0
+        self.hint = 0
+
+    def setSizePolicy(self, *args):
+        pass
+
+    def installEventFilter(self, watcher):
+        pass
+
+    @property
+    def sizeHint(self):
+        return Box(width=self.hint)
+
+
+class FakeTimer(object):
+    def __init__(self, parent=None):
+        pass
+
+    def setSingleShot(self, on):
+        pass
+
+    def setInterval(self, ms):
+        pass
+
+    def connect(self, signal, slot):
+        self.slot = slot
+
+
+class UiRoundTests(unittest.TestCase):
+    """The owner's UI round of 2026-11-17 (images 216, 239 to 241, 266 to 268, 274, 280) on Font Builder."""
+
+    def setUp(self):
+        self.saved = fb._qt
+        gui = Box(QWidget=FakeWidget, QVBoxLayout=FakeLine, QHBoxLayout=FakeLine,
+                  QSizePolicy=Box(Ignored=0, Preferred=1))
+        fb._qt = lambda: (Box(QTimer=FakeTimer), gui)
+
+    def tearDown(self):
+        fb._qt = self.saved
+
+    def test_a_row_of_options_flows_onto_as_few_lines_as_its_width_allows(self):
+        """Images 241, 266, 267: the options and their run button on one line where the window is wide
+        enough; on a narrow window (a tiny screen), wrapped onto more lines, in their order, nothing lost."""
+        self.assertEqual(fb.flow_rows([200, 100, 150, 120, 110], 2000, 16), [5])
+        self.assertEqual(fb.flow_rows([200, 100, 150, 120, 110], 500, 16), [3, 2], "200+16+100+16+150 = 482")
+        self.assertEqual(fb.flow_rows([200, 100, 150, 120, 110], 482, 16), [3, 2], "exactly the room: it fits")
+        self.assertEqual(fb.flow_rows([200, 100, 150], 150, 16), [1, 1, 1], "one a line at least, wider or not")
+        self.assertEqual(fb.flow_rows([200, 100], 0, 16), [2], "not laid out yet: one line")
+        self.assertEqual(fb.flow_rows([], 500), [])
+        groups = [["a"], ["b", "B"], ["c"], ["d"]]
+        row = fb.FlowRow(groups, spacing=10)
+        made = row.groups
+        self.assertEqual([len(line.items) for line in row.lines], [4, 0, 0, 0], "one line to start with")
+        for group, hint in zip(made, (300, 200, 100, 120)):
+            group.hint = hint
+        row.widget.width = 400  # (300 alone; 200, 100; 120)
+        row.fit()
+        self.assertEqual([line.items for line in row.lines], [[made[0]], [made[1], made[2]], [made[3]], []])
+        row.widget.width = 2000
+        row.fit()
+        self.assertEqual([line.items for line in row.lines], [made, [], [], []], "wide again: one line, in order")
+        self.assertEqual(sum(len(line.items) for line in row.lines), 4, "no group lost or twice")
+        self.assertEqual(row.lines[0].spacing, 10)
+
+    def test_the_header_and_bottom_row_parts_follow_the_tab(self):
+        """Image 240: the template's status sits under the top line (the Template tab's only); the Build
+        tab's committing button in the bottom row, shown with its tab."""
+        d = fb.FontBuilderDialog.__new__(fb.FontBuilderDialog)
+        calls = []
+
+        class Recorder(object):
+            text = "No glyph to draw."
+
+            def __getattr__(self, name):
+                return lambda *args: calls.append((name, args))
+
+        d.pages, d.summary, d.build_button = Recorder(), Recorder(), Recorder()
+        d.ak = Box(BUSY_LINE_PROP="freelabBusyLine")
+        d.tab_changed(1)
+        self.assertIn(("setHidden", (True,)), calls)
+        self.assertIn(("setProperty", ("freelabBusyLine", True)), calls, "kept hidden as it is written meanwhile")
+        self.assertIn(("setVisible", (True,)), calls, "Build ticked glyphs shown")
+        del calls[:]
+        d.tab_changed(0)
+        self.assertIn(("setHidden", (False,)), calls)
+        self.assertIn(("setProperty", ("freelabBusyLine", None)), calls)
+        self.assertIn(("setVisible", (False,)), calls)
+
+    def test_the_no_font_line_is_one_line_and_says_a_built_font_is_hooked(self):
+        """Images 274 and 280: "This window hooks to the next font you open (or build here)", one line."""
+        self.assertEqual(fb.NO_FONT_TEXT, "No font is open. This window hooks to the next font you open (or build "
+                                          "here). A template can still be made, with default metrics.")
+        asked = []
+        ak = Box(no_font_line=lambda own=None: asked.append(own) or own)
+        self.assertEqual(fb.no_font_text(ak), fb.NO_FONT_TEXT)
+        self.assertEqual(asked, [fb.NO_FONT_TEXT], "the tool's own line, which ak.one_line keeps on one line")
+        waiting = Box(no_font_line=lambda own=None: "This window has no font: the font open has a window of its own.")
+        self.assertTrue(fb.no_font_text(waiting).endswith("A template can still be made, with default metrics."))
+        named = Box(font_named=lambda name, master, masters: "%s/%s/%d" % (name, master, masters), b=lambda s: s)
+        package = Box(tfn="Cardo", master="Bold", masters=["Regular", "Bold"])
+        self.assertEqual(fb.font_text(named, package), "Cardo/Bold/2: its metrics shape the template's boxes.")
+
+    def test_a_font_built_with_no_font_open_is_this_windows(self):
+        d = fb.FontBuilderDialog.__new__(fb.FontBuilderDialog)
+        built = Box(fgPackage=Box(id=7))
+        shown = Box(currentPackage=built)
+        d.fontlab = Box(flWorkspace=Box(instance=lambda: shown))
+        d.current_font = lambda: built
+        d.summary_soon = lambda: None
+        d.package = None
+        self.assertTrue(d.hook_built_font(built))
+        self.assertIs(d.package, built)
+        d.package = None
+        shown.currentPackage = Box(fgPackage=Box(id=8))
+        self.assertFalse(d.hook_built_font(built), "FontLab shows another font: never that one")
+        self.assertIsNone(d.package)
+        d.font_id = 3
+        shown.currentPackage = built
+        self.assertFalse(d.hook_built_font(built), "a window with a font keeps it")
+
+    def test_no_space_before_a_percent_sign_and_thousands_grouped(self):
+        """Image 216: "5 % of the em" in the Glyphs placed dropdown's help."""
+        import io
+        with io.open(os.path.join(HERE, os.pardir, "builder", "freelab_font_builder.py"), encoding="utf-8") as handle:
+            source = handle.read()
+        import re
+        # (a number then a space and a percent sign that is no format's: "5 % of", "6 %)")
+        self.assertEqual(re.findall(r"\d %(?![sdr0-9.(])", source), [], "a number and its percent sign kept together")
+        self.assertIn('Even: both sides %d%% of the em', source, "the dropdown's help: 5% of the em")
+        self.assertEqual(fb.EVEN_SIDE, 0.05)
+        self.assertEqual(fb.counted(13932, "glyph"), "13,932 glyphs")
+        self.assertEqual(fb.counted(1, "sheet"), "1 sheet")
 
 
 if __name__ == "__main__":

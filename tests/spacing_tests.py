@@ -35,6 +35,42 @@ def fake_busy(test, stop_after=None):
     return calls
 
 
+def fake_dialog(test):
+    """An Auto Spacing dialog made without its window (it needs FontLab), its widgets recording what they
+    are told; test: the TestCase whose cleanup puts ak back."""
+    class Widget(object):
+        def __init__(self):
+            self.text, self.visible, self.enabled = u"", True, True
+
+        def setText(self, text):
+            self.text = text
+
+        def setVisible(self, on):
+            self.visible = on
+
+        def setEnabled(self, on):
+            self.enabled = on
+
+        def clear(self):
+            self.text = u""
+
+        def property(self, name):
+            return None
+
+    dialog = sp.AutoSpacingDialog.__new__(sp.AutoSpacingDialog)
+    dialog.ak, dialog.busy, dialog.master = ak, False, "Regular"
+    dialog.tree, dialog.apply_button, dialog.composites_note, dialog.status = Widget(), Widget(), Widget(), Widget()
+    dialog.spacings, dialog.listed, dialog.composites, dialog.unspaced_references = [], [], {}, []
+    dialog.package = type("Package", (), {"master": "Regular"})()
+    dialog.current_font = lambda: dialog.package
+    dialog.update_buttons = lambda: None
+    dialog.log = type("Log", (), {"add": lambda log, text, kind="info": None})()
+    old = ak.history_mark
+    ak.history_mark = lambda package: None
+    test.addCleanup(lambda: setattr(ak, "history_mark", old))
+    return dialog
+
+
 class BusyTests(unittest.TestCase):
     """Owner's image 178: Measuring... held the window until Windows called it Not Responding. The long steps
     now run under the window's top-row progress (ak.busy_*), stoppable; the write never is."""
@@ -59,37 +95,7 @@ class BusyTests(unittest.TestCase):
         self.assertLess(sp.measure_part(sp.MEASURE_STEP, 1.0), sp.measure_part(sp.SETTLE_STEP, 0.5))
 
     def dialog(self):
-        class Widget(object):
-            def __init__(self):
-                self.text, self.visible, self.enabled = u"", True, True
-
-            def setText(self, text):
-                self.text = text
-
-            def setVisible(self, on):
-                self.visible = on
-
-            def setEnabled(self, on):
-                self.enabled = on
-
-            def clear(self):
-                self.text = u""
-
-            def property(self, name):
-                return None
-
-        dialog = sp.AutoSpacingDialog.__new__(sp.AutoSpacingDialog)
-        dialog.ak, dialog.busy, dialog.master = ak, False, "Regular"
-        dialog.tree, dialog.apply_button, dialog.composites_note, dialog.status = Widget(), Widget(), Widget(), Widget()
-        dialog.spacings, dialog.listed, dialog.composites, dialog.unspaced_references = [], [], {}, []
-        dialog.package = type("Package", (), {"master": "Regular"})()
-        dialog.current_font = lambda: dialog.package
-        dialog.update_buttons = lambda: None
-        dialog.log = type("Log", (), {"add": lambda log, text, kind="info": None})()
-        old = ak.history_mark
-        ak.history_mark = lambda package: None
-        self.addCleanup(lambda: setattr(ak, "history_mark", old))
-        return dialog
+        return fake_dialog(self)
 
     def test_a_stopped_measuring_leaves_the_list_empty(self):
         calls = fake_busy(self, stop_after=1)
@@ -119,6 +125,76 @@ class BusyTests(unittest.TestCase):
         dialog.run()
         self.assertEqual([c[0] for c in calls], ["start", "end"])
         self.assertFalse(dialog.busy)
+        self.assertFalse(dialog.failed, "not the font's doing: Analyze may try again")
+
+
+class FailureTests(unittest.TestCase):
+    """Owner's images 218, 224, and 253: "No halo makes ll, nn, oo agree" in red, said nothing; the top line
+    went blank; Analyze stayed clickable though nothing could be done."""
+
+    def test_the_failure_is_said_in_plain_words(self):
+        text = sp.references_failed_text(ak.SCRIPT_TUNING["latin"], ValueError(u"no halo makes ll, nn, oo agree"))
+        self.assertNotIn(u"halo", text.lower())
+        self.assertIn(u"each set beside itself (ll, nn, oo)", text)
+        self.assertIn(u"too differently apart", text, "why it failed for this font")
+        self.assertIn(u"Space l, n, and o by eye first", text, "what the user can do")
+        thin = sp.references_failed_text(u"lno", ValueError(u"l has no solid ink to measure from"))
+        self.assertIn(u"no stroke thick enough", thin)
+        self.assertTrue(issubclass(sp.CannotSpace, ValueError))
+
+    def dialog(self):
+        dialog = fake_dialog(self)
+        dialog.package =type("Package", (), {"master": "Regular", "tfn": u"!The Black Bloc", "mastersCount": 1})()
+        logged = dialog.logged = []
+        dialog.log = type("Log", (), {"add": lambda log, text, kind="info": logged.append((kind, text))})()
+        return dialog
+
+    def test_the_top_line_keeps_the_font_and_analyze_grays(self):
+        fake_busy(self)
+        dialog = self.dialog()
+
+        def measure(package, master, only=None, progress=None):
+            raise sp.CannotSpace(sp.references_failed_text(u"lno", u"no halo makes ll, nn, oo agree"))
+        dialog.measure = measure
+        dialog.run()
+        self.assertTrue(dialog.failed)
+        self.assertEqual(dialog.status.text, u"<b>!The Black Bloc</b>, master <b>Regular</b>. " + sp.FAILED_TEXT)
+        self.assertEqual([kind for kind, _ in dialog.logged], ["error"])
+        self.assertIn(u"Auto Spacing measures every glyph against l, n, and o", dialog.logged[0][1])
+
+        # Analyze and the choice that only feeds it grayed; given back once the font changes so that it can
+        class Widget(object):
+            def __init__(self):
+                self.enabled = True
+
+            def setEnabled(self, on):
+                self.enabled = on
+
+            def property(self, name):
+                return None
+
+        for name in ("all_button", "none_button", "restore_button", "glyph_window_button", "kerning_button", "follow",
+                     "group", "tolerance", "analyze_button"):
+            setattr(dialog, name, Widget())
+        dialog.tree = type("Tree", (), {"topLevelItemCount": 0})()
+        dialog.first_checks, dialog.spaced, dialog.buttons_due = {}, [], False
+        dialog.selected = lambda: None
+        old = sp._qt
+        sp._qt = lambda: (type("Core", (), {"Qt": type("Qt", (), {"Checked": 2, "Unchecked": 0})}), None)
+        self.addCleanup(lambda: setattr(sp, "_qt", old))
+        sp.AutoSpacingDialog.update_buttons(dialog)
+        self.assertEqual((dialog.analyze_button.enabled, dialog.group.enabled), (False, False))
+        dialog.failed = False  # (run measured the changed font)
+        sp.AutoSpacingDialog.update_buttons(dialog)
+        self.assertEqual((dialog.analyze_button.enabled, dialog.group.enabled), (True, True))
+
+    def test_a_stopped_measuring_keeps_the_font_line(self):
+        fake_busy(self, stop_after=0)
+        dialog = self.dialog()
+        dialog.measure = lambda package, master, only=None, progress=None: progress(sp.MEASURE_STEP, 0.5)
+        dialog.run()
+        self.assertTrue(dialog.status.text.startswith(u"<b>!The Black Bloc</b>, master <b>Regular</b>. Measuring was "
+                                                      u"stopped"), dialog.status.text)
 
 
 class ReferenceTests(unittest.TestCase):
@@ -474,9 +550,10 @@ class ChoiceAndCheckTests(unittest.TestCase):
         ak._qt = lambda: (type("Core", (), {"Qt": type("Qt", (), {"Checked": 2, "Unchecked": 0})}), None)
         self.addCleanup(lambda: setattr(ak, "_qt", old))
         dialog.check_all(True)
-        self.assertEqual(logged, [u"<i>Check all</i> checked <b>2 glyphs</b>."])
+        # (Tick, not Check, for check boxes: owner's image 261)
+        self.assertEqual(logged, [u"<i>Tick all</i> ticked <b>2 glyphs</b>."])
         dialog.check_all(False)
-        self.assertEqual(logged[-1], u"<i>Check none</i> unchecked <b>3 glyphs</b>.")
+        self.assertEqual(logged[-1], u"<i>Tick none</i> unticked <b>3 glyphs</b>.")
         self.assertEqual([item.state for item in items], [0, 0, 0])
         self.assertIn(u"layout = self.ak.window_layout(dialog)", self.source(), "its window scrolls on a small screen")
 
@@ -609,6 +686,55 @@ class WordingTests(unittest.TestCase):
         self.assertEqual(sp.composites_text(2, 1), u"2 glyphs built from components follow the listed glyphs; 1 built "
                                                    u"on two of them is left as it is.")
         self.assertNotIn(u"QApplication.processEvents", self.source(), "the top row's progress lets events through")
+
+    def test_the_options_row_holds_the_tick_and_analyze_inline(self):
+        # (owner's images 254 and 262: the tick above the list beside "List changes of at least"; Analyze at the
+        # end of its options, not at the window's right edge; "Show: [Everything]", brief's captions)
+        source = self.source()
+        init = source.split(u"class AutoSpacingDialog")[1].split(u"\n    def current_font")[0]
+        row = init.split(u"row = QtGui.QHBoxLayout()")[1].split(u"layout.addLayout(row)")[0]
+        order = [row.index(text) for text in (u'QLabel("Show:")', u"row.addWidget(self.group)",
+                                              u'QLabel("List changes of at least")', u"row.addWidget(self.tolerance)",
+                                              u'sentence_end(row)', u"row.addWidget(self.follow)",
+                                              u"row.addWidget(self.analyze_button)", u"row.addStretch(1)")]
+        self.assertEqual(order, sorted(order), "left-aligned: the stretch after Analyze")
+        self.assertEqual(row.count(u"addStretch"), 1)
+        self.assertNotIn(u"layout.addWidget(self.follow)", init, "no longer above the log")
+        self.assertIn(u"layout.addWidget(self.ak.header_separator())", init)
+        self.assertLess(init.index(u"layout.addWidget(self.composites_note)"), init.index(u"row = QtGui.QHBoxLayout()"),
+                        "the note in the header, not under the list")
+
+    def test_the_previews_have_quiet_captions_and_a_line_between(self):
+        # (brief: every preview caption the shared preview_caption, a line between two previews side by side)
+        source = self.source()
+        self.assertIn(u"self.ak.preview_caption(caption)", source)
+        self.assertEqual(source.count(u"self.ak.separator(vertical=True)"), 1)
+        picture = source.split(u"    def picture(")[1].split(u"\n    def ")[0]
+        self.assertNotIn(u"drawText", picture, "the caption is the label over the picture")
+
+    def test_tick_not_check(self):
+        # (owner's image 261)
+        source = self.source()
+        for old in (u'"Check all"', u'"Check none"', u"Space checked glyphs", u"Checks restored"):
+            self.assertNotIn(old, source)
+        self.assertEqual(sp.APPLY_BUTTON, u"Space ticked glyphs")
+        # (a tool named in the log is a link that opens it: owner's image 220)
+        self.assertIn(u'ak.tool_link(u"Auto Kerning")', source)
+
+    def test_the_status_counts_right_at_zero_one_and_two(self):
+        status = lambda listed, drawn: sp.spacing_status(listed, drawn, 6)
+        self.assertEqual(status(0, 0), u"No drawn glyph of this choice to space.")
+        self.assertEqual(status(0, 1), u"The only drawn glyph does not have a side 6 units or more from the suggestion.")
+        self.assertEqual(status(1, 1), u"The only drawn glyph has a side 6 units or more from the suggestion. Nothing "
+                                       u"changes until you click Space ticked glyphs.")
+        self.assertEqual(status(0, 2), u"None of the 2 drawn glyphs has a side 6 units or more from the suggestion.")
+        self.assertEqual(status(1, 2), u"1 of 2 drawn glyphs has a side 6 units or more from the suggestion. Nothing "
+                                       u"changes until you click Space ticked glyphs.")
+        self.assertEqual(sp.spacing_status(1200, 13932, 1, 3, ak.b, ak.i),
+                         u"<b>1,200</b> of <b>13,932 drawn glyphs</b> have a side <b>1 unit</b> or more from the "
+                         u"suggestion. Nothing changes until you click <i>Space ticked glyphs</i>. Each change was "
+                         u"measured again with it made, until the changes settled (<b>3</b> passes): halfkern closes "
+                         u"half of a tightening at a time, so one measure leaves part of it.")
 
     def test_the_log_counts(self):
         self.assertIn(u"1 glyph still had a side 1 unit or more off, and was spaced again", sp.apply_note(2, 1, 1))

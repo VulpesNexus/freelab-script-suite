@@ -155,8 +155,9 @@ def sentence(text):
 
 
 def counted(number, one, many=None):
-    """"1 glyph", "2 glyphs": a count with its noun in the right number."""
-    return u"%d %s" % (number, one if number == 1 else (many or one + u"s"))
+    """"1 glyph", "2 glyphs", "13,932 glyphs": a count (thousands set apart) with its noun in the right
+    number."""
+    return u"%s %s" % (u"{0:,}".format(int(number)), one if number == 1 else (many or one + u"s"))
 
 
 def round_units(value):
@@ -763,8 +764,8 @@ def spaces_note(has, listed=()):
         return u""
     one = len(lacking) == 1
     names = [u"%s (U+%04X)" % (word, code) for code, word in lacking]
-    return (u"The font lacks %s %s: %s. <i>Glyph Compose</i> builds %s on its Glyph generation tab (empty glyphs of "
-            u"the right width)." % (u"this" if one else u"these", u"space" if one else u"spaces",
+    return (u"The font lacks %s %s: %s. <i>Glyph Compose</i> builds %s on its <i>Glyph generation</i> tab (empty "
+            u"glyphs of the right width)." % (u"this" if one else u"these", u"space" if one else u"spaces",
                                     u", ".join(names), u"it" if one else u"them"))
 
 
@@ -2499,7 +2500,7 @@ def selection_title(selection):
     to do while nothing is selected."""
     if selection is None:
         return UNSELECTED_TITLE
-    return u"%s (%d)" % (selection.name, selection.count() + selection.optional_count())  # (all its tab lists)
+    return u"%s (%s)" % (selection.name, grouped(selection.count() + selection.optional_count()))  # (all its tab lists)
 
 
 # The grayed tab's caption: what to do, since the tab works on a family or a character set as well.
@@ -2510,7 +2511,7 @@ def value_title(count):
     """The high-value tab's caption, with its count of rows (None: not known yet, no count)."""
     if count is None:
         return u"High-value missing glyphs"
-    return u"High-value missing glyphs (%d)" % count
+    return u"High-value missing glyphs (%s)" % grouped(count)  # (thousands grouped: image 231)
 
 
 BUSY_STEPS = (u"Reading the language data", u"Reading the font", u"Checking the languages", u"Listing")
@@ -2700,10 +2701,10 @@ def languages_gained(results, checked):
 
 
 def gain_text(checked_count, gained, bold=None):
-    """The live line over the tabs of glyphs: "With 6 glyphs checked: +14 languages (Latin)" (bold: how
+    """The live line over the tabs of glyphs: "With 6 glyphs ticked: +14 languages (Latin)" (bold: how
     the count gained is set in rich text)."""
     if not checked_count:
-        return u"Check glyphs to see how many languages they complete."
+        return u"Tick glyphs to see how many languages they complete."
     scripts, order = {}, []
     for r in gained:
         group = script_group(r.language.script)  # (as the scripts are listed: Cree under Canadian Syllabics)
@@ -2711,7 +2712,7 @@ def gain_text(checked_count, gained, bold=None):
             scripts[group] = 0
             order.append(group)
         scripts[group] += 1
-    head = u"With %s checked: " % counted(checked_count, u"glyph")
+    head = u"With %s ticked: " % counted(checked_count, u"glyph")
     if not gained:
         return head + u"no language is complete yet"
     if len(order) == 1:
@@ -2751,7 +2752,8 @@ def html_text(text):
     return u"%s" % text.replace(u"&", u"&amp;").replace(u"<", u"&lt;").replace(u">", u"&gt;")
 
 
-CHECK_BUTTONS = (("all", u"Check all"), ("none", u"Check none"), ("buildable", u"Check only what Glyph Compose can build"))
+# ("Tick", not "Check": owner's image 261, Check is the verb of the button that runs the check)
+CHECK_BUTTONS = (("all", u"Tick all"), ("none", u"Tick none"), ("buildable", u"Tick only what Glyph Compose can build"))
 
 
 def checks_for(rows, checked, buildable):
@@ -2936,10 +2938,43 @@ def extreme_glyphs(extents, count=3):
             top[e.name] = e
         if e.name not in bottom or e.bottom < bottom[e.name].bottom:
             bottom[e.name] = e
-    tallest = sorted(top.values(), key=lambda e: (-e.top, e.name))[:count]
+    # (in whole units: glyphs a fraction of a unit apart reach as far, and go by name)
+    tallest = sorted(top.values(), key=lambda e: (-round_units(e.top), e.name))[:count]
     taken = set(e.name for e in tallest)
-    deepest = [e for e in sorted(bottom.values(), key=lambda e: (e.bottom, e.name)) if e.name not in taken][:count]
+    deepest = [e for e in sorted(bottom.values(), key=lambda e: (round_units(e.bottom), e.name))
+               if e.name not in taken][:count]
     return tallest, deepest
+
+
+def extreme_notes(extents):
+    """{glyph name: its note in the diagram} for the glyph whose ink reaches highest and the one reaching
+    lowest (each among extreme_glyphs' pictures: the first tallest, and the lowest, in the tallest or the
+    first deepest): "highest", "lowest", "highest and lowest" for one glyph that is both, each with how
+    many other glyphs reach the same value, in whole units ("highest (and 3 others)"). The owner's image
+    215: the diagram did not say which glyph was which, nor that others reach as far."""
+    top, bottom = {}, {}
+    for e in extents:
+        if e.name not in top or e.top > top[e.name].top:
+            top[e.name] = e
+        if e.name not in bottom or e.bottom < bottom[e.name].bottom:
+            bottom[e.name] = e
+    if not top:
+        return {}
+    # (as extreme_glyphs orders them; among the lowest, the highest glyph first when it is one of them:
+    # one picture, one caption)
+    highest = min(top.values(), key=lambda e: (-round_units(e.top), e.name))
+    lowest = min(bottom.values(), key=lambda e: (round_units(e.bottom), e.name != highest.name, e.name))
+    high, low = round_units(highest.top), round_units(lowest.bottom)
+
+    def said(word, others):
+        return word + (u" (and %s)" % counted(others, u"other") if others else u"")
+
+    notes = {}
+    for name, word, others in (
+            (highest.name, u"highest", sum(1 for e in top.values() if round_units(e.top) == high) - 1),
+            (lowest.name, u"lowest", sum(1 for e in bottom.values() if round_units(e.bottom) == low) - 1)):
+        notes[name] = (notes[name] + u" and " if name in notes else u"") + said(word, others)
+    return notes
 
 
 class Clipped(object):
@@ -3478,14 +3513,14 @@ Unicode CLDR, SIL's Locale Data Repository, Unilex, An Cr&uacute;bad&aacute;n, a
 layouts: a language's tooltip names its source. Where no source declares a language's characters,
 they are inferred from counting a text (its row says <i>inferred</i>: rare letters may be missing),
 or read from a keyboard layout (its row says <i>keyboard</i>: the characters its keys and rules
-type). Uncheck <i>Languages from texts and keyboards</i> to leave both out. At the left, two
+type). Untick <i>Languages from texts and keyboards</i> to leave both out. At the left, two
 tabs of glyphs. <i>High-value missing glyphs</i> ranks the glyphs to add by the languages each
-completes on its own: check some (or all, none, or only those <i>Glyph Compose</i> can build), and the
+completes on its own: tick some (or all, none, or only those <i>Glyph Compose</i> can build), and the
 line above says how many languages they complete together. The second tab is grayed, and reads
 <i>Select language, character set, or family</i>, until a language, a character set (a script of Unicode
 is one), or a family is selected at the right: it then lists what that one misses, and is
-named after it; clicking the selected row again, or an empty part of its list, unselects it. Checks
-are shared by the two tabs, and the buttons act on the tab shown; a double-click on a row opens its
+named after it; clicking the selected row again, or an empty part of its list, unselects it. Ticks
+are shared by the two tabs, and the buttons under the log act on the tab shown; a double-click on a row opens its
 glyph in a <i>Glyph</i> window. At the right, three tabs: <i>Languages</i>, under their scripts
 (click a heading to close or open it); <i>Character sets</i> that are no languages (IPA, mathematics,
 symbols, Unicode blocks, Google Fonts' and Adobe's sets), checked the same way, each one's tooltip
@@ -3513,7 +3548,7 @@ the glyphs Windows clips. <i>Write suggested values</i> sets the font's typo, hh
 with, are left as they are.<br>
 <b>Masters</b>: the glyphs that keep the masters from interpolating, worst first, a symbol per master;
 the selected glyph drawn in the master compared with and in another, the contour at fault highlighted
-and its nodes numbered. <i>Fix</i> sets right, in the other masters, the contours' order, directions,
+and its nodes numbered. <i>Fix ticked glyphs</i> sets right, in the other masters, the contours' order, directions,
 start points, and the components' order; contour and node counts, node types, missing layers, and
 anchors need the designer. The master compared with never changes.<br><br>
 Each view is checked as its tab is first shown, and again after an undo or an edit in FontLab. Click
@@ -3602,6 +3637,9 @@ BAR_ROLE = 0x0100 + 78  # Qt.UserRole + 78: a row's bar counts, "covered,nearly,
 COLUMN_KINDS = {"languages": "names", "sets": "names", "families": "bars"}  # how a list at the right shares its width
 
 
+PINNED_FLOOR = 24  # pixels: what the other columns keep at least beside one dragged (the shared MIN_SECTION)
+
+
 def column_widths(room, wanted, taker=0, giving=(), least=None, pinned=None):
     """The widths of a list's columns, filling room exactly (no gap at the right, nothing past it): each
     column as wide as it wants (wanted), a column the user dragged as they left it (pinned: {column:
@@ -3613,14 +3651,34 @@ def column_widths(room, wanted, taker=0, giving=(), least=None, pinned=None):
     else to the last column not dragged."""
     pinned, least = dict(pinned or {}), dict(least or {})
     count = len(wanted)
+    pinned = dict((column, width) for column, width in pinned.items() if 0 <= column < count)
     if taker in pinned:
         free = [column for column in giving if column not in pinned]
         free = free or [column for column in reversed(range(count)) if column not in pinned]
-        if not free:
-            return [int(pinned.get(column, wanted[column])) for column in range(count)]
-        taker = free[0]
-    widths = [int(pinned.get(column, wanted[column])) for column in range(count)]
+        taker = free[0] if free else None
     giving = [column for column in giving if column != taker and column not in pinned]
+    # A column dragged never takes the room the others need at their least (owner's image 214: dragged
+    # past the frame, it left every other column at nothing): the widest it keeps leaves the taker and
+    # the giving columns their least (PINNED_FLOOR at least), the other columns as wide as they want
+    # (they never give way), and a column dragged too its width (PINNED_FLOOR until it is capped itself).
+    floors = [min(int(wanted[c]), max(int(least.get(c, 0)), PINNED_FLOOR)) for c in range(count)]
+    capped = set()
+    for column in sorted(pinned):
+        others = 0
+        for c in range(count):
+            if c == column:
+                continue
+            if c in pinned:
+                others += int(pinned[c]) if c in capped else PINNED_FLOOR
+            elif c == taker or c in giving:
+                others += floors[c]
+            else:
+                others += int(wanted[c])
+        pinned[column] = max(PINNED_FLOOR, min(int(pinned[column]), int(room) - others))
+        capped.add(column)
+    if taker is None:
+        return [int(pinned.get(column, wanted[column])) for column in range(count)]
+    widths = [int(pinned.get(column, wanted[column])) for column in range(count)]
 
     def rest():
         return room - sum(widths[column] for column in range(count) if column != taker)
@@ -3644,6 +3702,7 @@ def bar_counts(counts):
 
 DIAGRAM_GAP = 0.1  # of the em, between the diagram's glyphs
 DIAGRAM_NAME_MIN = 64  # pixels: room for a glyph's name under it in the diagram (longer ones elided)
+DIAGRAM_NOTE_MAX = 170  # pixels: room for a glyph's note under it at most ("highest (and 3 others)")
 SCRIPT_SHEET = (u"QTreeView::item:selected { background: rgba(128, 128, 128, 70); color: palette(text); } "
                 u"QTreeView { selection-background-color: rgba(128, 128, 128, 70); }")
 # (the script clicked shows in a faint gray, which leaves its bar's four colors as they are)
@@ -3909,10 +3968,12 @@ def marks_pixmap(states, colors, box=None, size=MARK_SIZE):
 
 class Picture(object):
     """A glyph to draw: its path (font units), ink box, advance, caption, a second caption line (its
-    master), and whether it is the one selected."""
+    master), a note under them (the diagram's "highest (and 3 others)": extreme_notes), and whether it
+    is the one selected."""
 
-    def __init__(self, name, path, advance, master=u"", selected=False):
+    def __init__(self, name, path, advance, master=u"", selected=False, note=u""):
         self.name, self.path, self.advance, self.master, self.selected = name, path, advance, master, selected
+        self.note = note
         self.box = ink_box(path)
 
 
@@ -3943,8 +4004,9 @@ def diagram_pixmap(width, height, lines, pictures, line, upm, win, colors, font)
     label_room = max([text_width(font, t) for t in labels] + [40]) + 16
     share_text = u"%d%%" % round_units((line[0] - line[1] + line[2]) * 100.0 / upm) if line else u""
     bracket_room = (max(text_width(bold, share_text), text_width(font, u"of the em")) + 22) if line else 8
-    caption_room = 2 * line_height + 6
     pictures = [p for p in pictures if p.box is not None]
+    noted = any(getattr(p, "note", u"") for p in pictures)
+    caption_room = (3 if noted else 2) * line_height + 6  # (name, master, and the note: highest, lowest)
     values = [l.value for l in lines] + [0]
     if line:
         values += [line[0] + line[2], line[1]]
@@ -3953,7 +4015,10 @@ def diagram_pixmap(width, height, lines, pictures, line, upm, win, colors, font)
     high, low = max(values), min(values)
     span = max(high - low, upm * 0.5)
     high, low = high + span * 0.04, low - span * 0.04
-    names = [min(text_width(font, p.name), DIAGRAM_NAME_MIN) + 8 for p in pictures]  # (longer ones elided)
+    # (longer names elided; a note, "highest (and 3 others)", kept whole up to DIAGRAM_NOTE_MAX)
+    names = [max(min(text_width(font, p.name), DIAGRAM_NAME_MIN),
+                 min(text_width(font, getattr(p, "note", u"")), DIAGRAM_NOTE_MAX) if getattr(p, "note", u"") else 0) + 8
+             for p in pictures]
     room_x = width - label_room - bracket_room - 16
     room_y = height - caption_room - line_height - 10  # (a line at the top for the legend)
     if names and sum(names) + 14.0 * (len(names) - 1) > room_x:
@@ -4068,10 +4133,17 @@ def diagram_pixmap(width, height, lines, pictures, line, upm, win, colors, font)
             rect = QtCore.QRectF(x_at + slot / 2.0 - column / 2.0, caption_top, column, line_height)
             painter.setPen(highlight if p.selected else text)
             painter.drawText(rect, int(QtCore.Qt.AlignCenter), elided(font, p.name, int(column)))
+            lines_down = 1
             if p.master:
                 painter.setPen(faded(text, QUIET_ALPHA))
                 painter.drawText(rect.translated(0, line_height), int(QtCore.Qt.AlignCenter),
                                  elided(font, p.master, int(column)))
+                lines_down = 2
+            note = getattr(p, "note", u"")
+            if note:  # (which glyph reaches highest, which lowest: owner's image 215)
+                painter.setPen(faded(text, QUIET_ALPHA))
+                painter.drawText(rect.translated(0, line_height * lines_down), int(QtCore.Qt.AlignCenter),
+                                 elided(font, note, int(column)))
     finally:
         painter.end()
     return pixmap
@@ -5397,7 +5469,10 @@ def tip_html(text, width=None, family=None, rich=False):
 
 
 class Tab(object):
-    """A page: its settings row, a line, its status, then what it shows."""
+    """A page: its settings row, a line, then what it shows. Its status line stands in the window's
+    header, under the top line (FontCheckDialog.show_tab_parts: the shown tab's only; the owner wanted
+    every window's status there, never under its controls), and its buttons in the window's bottom row
+    (actions: at the left; commit: at the right, before Close), shown with the tab."""
 
     def __init__(self, ak, QtGui):
         self.widget = QtGui.QWidget()
@@ -5407,8 +5482,11 @@ class Tab(object):
         self.layout.addLayout(self.settings)
         self.line = ak.separator()
         self.layout.addWidget(self.line)
-        self.status = ak.status_label()
-        self.layout.addWidget(self.status)
+        self.status = ak.status_label()  # (placed in the header by the dialog)
+        self.actions = QtGui.QWidget()  # (the bottom row's left part, this tab's)
+        self.actions_row = QtGui.QHBoxLayout(self.actions)
+        self.actions_row.setContentsMargins(0, 0, 0, 0)
+        self.commit = None  # (the bottom row's committing button, this tab's, if any)
         self.findings = []
 
 
@@ -5554,11 +5632,17 @@ class FontCheckDialog(object):
         self.dialog = dialog
         dialog.setWindowTitle("FreeLab Font Check")
         dialog.setWhatsThis(HELP)
-        ak.size_dialog(dialog)
-        self.widen(dialog)  # (two lists side by side: the shared 1000 pixels cut the right one's last column)
+        ak.size_dialog(dialog)  # (as wide as the other tools until a font comes: widen, read_font)
         layout = ak.window_layout(dialog)  # (scrolls on a small screen)
+        # The header, as every window's (owner's images 222, 223, 276): the top line, the shown tab's
+        # status line under it, the header's line (shown even with no font), then the tabs
         self.font_label = ak.status_label()
         layout.addWidget(self.font_label)
+        self.header_box = QtGui.QVBoxLayout()  # (the tabs' status lines: show_tab_parts)
+        self.header_box.setContentsMargins(0, 0, 0, 0)
+        layout.addLayout(self.header_box)
+        self.header_line = ak.header_separator()
+        layout.addWidget(self.header_line)
         self.log = ak.Log()
         self.log.link_handler = self.log_link  # (the glyphs a line names, each opened on a click)
         # A tab bar over plain pages: a QTabWidget's themed page drew its buttons with light frames in dark mode
@@ -5581,23 +5665,33 @@ class FontCheckDialog(object):
         for tab, label in ((self.coverage, "Coverage"), (self.metrics, "Vertical metrics"), (self.masters, "Masters")):
             self.tabs.addTab(label)
             self.pages.addWidget(tab.widget)
+            self.header_box.addWidget(tab.status)
         self.tab_names = {"window": TabNames(self.tabs, (u"Coverage", u"Vertical metrics", u"Masters")),
                           "left": TabNames(self.left_tabs, (value_title(None), selection_title(None))),
                           "right": TabNames(self.right_tabs, [label for _, label in RIGHT_TABS])}
         layout.addWidget(self.log.widget)
+        # The bottom row, as every window's (owner's images 258 to 265, 279): at the left the shown tab's
+        # buttons that act on its lists' ticks and rows, and Show in Glyph window; at the right the shown
+        # tab's committing button, then Close
         buttons = QtGui.QHBoxLayout()
         self.glyph_window_button = QtGui.QPushButton("Show in Glyph window")
-        self.glyph_window_button.setWhatsThis(u"Opens a <i>Glyph</i> window on the checked glyphs of the tab "
-                                              u"shown, or, with none checked, on the selected row's (FontLab shows "
+        self.glyph_window_button.setWhatsThis(u"Opens a <i>Glyph</i> window on the ticked glyphs of the tab "
+                                              u"shown, or, with none ticked, on the selected row's (FontLab shows "
                                               u"the ones the font lacks as placeholders), or on the selected glyph. "
                                               u"A double-click on a row opens that row's glyph alone.")
         self.close_button = QtGui.QPushButton("Close")
         self.close_button.setWhatsThis(u"Closes <i>Font Check</i>. Nothing is written by closing: what was written "
                                        u"to the font stays, and the sets you saved stay on this computer.")
+        for tab in (self.coverage, self.metrics, self.masters):
+            buttons.addWidget(tab.actions)
         buttons.addWidget(self.glyph_window_button)
         buttons.addStretch(1)
+        for tab in (self.coverage, self.metrics, self.masters):
+            if tab.commit is not None:
+                buttons.addWidget(tab.commit)
         buttons.addWidget(self.close_button)
         layout.addLayout(buttons)
+        self.show_tab_parts()
         self.glyph_window_button.connect("clicked()", self.show_in_glyph_window)
         self.tabs.connect("currentChanged(int)", self.switch_page)
         self.close_button.connect("clicked()", self.ak.close_slot(self))  # (never the window itself: see let_go)
@@ -5608,7 +5702,10 @@ class FontCheckDialog(object):
             self.check_watcher = fc.watch_check_boxes(dialog, [self.add_tree, self.own_tree, self.glyph_tree])
         except Exception:
             self.check_watcher = None
-        self.read_font()
+        if self.read_font():
+            # (two lists side by side: the shared 1000 pixels cut the right one's last column; with no font,
+            # as wide as the other tools, widened when a font comes: font_changed, owner's image 279)
+            self.widen(dialog)
         self.history_timer = ak.watch_history(self)
         self.flagging = [ak.flag_menu(self.glyph_tree, self, self.selected_glyphs, self.row_glyph),
                          ak.flag_menu(self.clipped_list, self, self.selected_glyphs)]
@@ -5635,6 +5732,45 @@ class FontCheckDialog(object):
         except Exception:
             pass
 
+    def widen_for_font(self):
+        """A font came to this window, opened without one at the other tools' size (owner's image 279: "maybe
+        this window can stay the same size as the others? Then if a font is opened and the window hooks to
+        it, window widens according to its content"): it widens as it would have opened with the font (widen),
+        around its center, kept on the screen, as ak.widen_window does: never narrower, never once the owner
+        gave a window its size by hand (this one since it opened, or every window this session: ak.note_size),
+        nor while it is maximized, minimized, or hidden. The pixels it grew by; never raises."""
+        try:
+            ak, dialog = self.ak, self.dialog
+            if not _prop(dialog, "visible") or _prop(dialog, "maximized") or _prop(dialog, "minimized"):
+                return 0
+            registry = getattr(ak, "_windows", None)
+            if registry is not None and registry().get("size") is not None:
+                return 0  # (a size given by hand this session: every window opens at it)
+            size = (int(_prop(dialog, "width")), int(_prop(dialog, "height")))
+            opened = getattr(self, "opened_size", None)
+            if opened is not None and (abs(size[0] - opened[0]) > 2 or abs(size[1] - opened[1]) > 2):
+                return 0  # (resized by hand: the owner's size stays)
+            width = wide_width(self.screen_width(dialog))
+            if width <= size[0]:
+                return 0
+            place = _prop(dialog, "pos")
+            place = (int(place.x()), int(place.y()))
+            area = ak.screen_area(dialog)
+            frame = (0, 0)
+            try:
+                outer = _prop(dialog, "frameGeometry")
+                frame = (max(0, int(outer.width()) - size[0]), max(0, int(outer.height()) - size[1]))
+            except Exception:
+                pass
+            x, y = ak.centered_place(place, size, (width, size[1]), area, frame)
+            dialog.resize(width, size[1])
+            dialog.move(x, y)
+            if opened is not None:
+                self.opened_size = (width, size[1])  # (FreeLab's doing, not a size given by hand)
+            return width - size[0]
+        except Exception:
+            return 0
+
     def size_columns(self, tree, kind):
         """A list at the right whose columns the user can drag (the owner's report 126: Qt's Stretch and
         ResizeToContents modes, set here before, cannot be dragged) and that shares its width itself
@@ -5651,7 +5787,9 @@ class FontCheckDialog(object):
             header = tree.header()
             header.setStretchLastSection(False)
             try:
-                header.setMinimumSectionSize(0)  # (the bar's column may close altogether)
+                # (a drag stops at the shared least: dragged to nothing, a column could not be found again,
+                # owner's image 214; column_widths may still close the bar's column in a narrow window)
+                header.setMinimumSectionSize(int(getattr(self.ak, "MIN_SECTION", 24)))
             except Exception:
                 pass
             for column in range(int(_prop(tree, "columnCount"))):
@@ -5959,6 +6097,7 @@ class FontCheckDialog(object):
         tab.settings.addWidget(self.label_for("Within reach: missing at most", self.nearly))
         tab.settings.addWidget(self.nearly)
         self.status_filter = QtGui.QComboBox()
+        self.status_filter.setSizeAdjustPolicy(QtGui.QComboBox.AdjustToContents)  # (as wide as its widest item: image 239)
         for _, label, _ in STATUS_FILTERS:
             self.status_filter.addItem(label)
         self.status_filter.setCurrentIndex([key for key, _, _ in STATUS_FILTERS].index(STATUS_START))
@@ -5972,7 +6111,8 @@ class FontCheckDialog(object):
                                         u"in), those official in a country or territory, and those at least a million "
                                         u"people read and write, in the scripts CLDR writes them in (about 300). A "
                                         u"search finds the languages left out too.")
-        tab.settings.addWidget(self.label_for("Display", self.status_filter))  # (once its help is set: the label's too)
+        # (once its help is set: the label's too; "Display:" with its colon, as every caption: image 271)
+        tab.settings.addWidget(self.label_for("Display:", self.status_filter))
         tab.settings.addWidget(self.status_filter)
         self.inferred_box = QtGui.QCheckBox(INFERRED_TITLE)
         self.inferred_box.setChecked(True)
@@ -5984,7 +6124,7 @@ class FontCheckDialog(object):
                                        u"characters a keyboard layout of Language Tools types, so a letter its rules "
                                        u"do not spell out may be missing and a spare one present: their rows say "
                                        u"<i>keyboard</i>, and some are a second script of a language a source declares "
-                                       u"in another. Their tooltips name the source. Unchecked, only the languages a "
+                                       u"in another. Their tooltips name the source. Unticked, only the languages a "
                                        u"source declares are counted (Hyperglot, Google Fonts' language data, Unicode "
                                        u"CLDR, SIL's Locale Data Repository); a search still finds the others.")
         tab.settings.addWidget(self.inferred_box)
@@ -5992,7 +6132,7 @@ class FontCheckDialog(object):
         self.composing.setChecked(True)
         self.composing.setWhatsThis(u"A letter with a diacritic the font lacks as one glyph counts as there when the "
                                     u"font has the letter and the combining mark, and the letter has an anchor the "
-                                    u"mark attaches to (top and _top): applications compose it. Unchecked, only the "
+                                    u"mark attaches to (top and _top): applications compose it. Unticked, only the "
                                     u"font's own glyphs count.")
         tab.settings.addWidget(self.composing)
         self.coverage_button = QtGui.QPushButton("Check")
@@ -6033,6 +6173,15 @@ class FontCheckDialog(object):
         # determinate over the four steps (BUSY_SHARES) and, within the listing, over the rows made; the
         # tools menu, the arrows, Close, and Esc stop it (coverage_stopped). It stood over the lists before.
         tab.layout.addWidget(self.coverage_stack, 1)
+        # (the lists' halves a child of the page before the scripts' list, though laid out under it: the shared
+        # module grays a Tick button when the first shown list it finds has nothing to tick, every list as near
+        # to the bottom row's buttons; in the order Qt finds them, the glyphs' list shown comes first, then the
+        # scripts' list, which has no ticks: ak.update_states)
+        self.coverage_halves_made = QtGui.QSplitter(QtCore.Qt.Horizontal)
+        try:
+            self.coverage_halves_made.setParent(content)
+        except Exception:
+            pass
         content_layout.addWidget(self.script_tree)
         absent = QtGui.QHBoxLayout()
         self.show_absent = QtGui.QCheckBox(absent_caption(None))  # (its caption carries the count: fill_scripts)
@@ -6045,7 +6194,7 @@ class FontCheckDialog(object):
 
         # (the lists' frames hug the splitter's handle: margins beside it set it in the middle of a gap, away
         # from the frames it sizes, owner's image 196)
-        halves = QtGui.QSplitter(QtCore.Qt.Horizontal)
+        halves = self.coverage_halves_made
         left = QtGui.QWidget()
         box = QtGui.QVBoxLayout(left)
         box.setContentsMargins(0, 0, 0, 0)
@@ -6061,8 +6210,8 @@ class FontCheckDialog(object):
                                     u"by the languages each glyph completes. The second lists only the missing "
                                     u"glyphs of the language, character set (a script of Unicode is one), or "
                                     u"family selected at the right: it is grayed, and reads <i>%s</i>, until one "
-                                    u"is selected, and is then named after it. A glyph checked in "
-                                    u"one tab is checked in the other." % UNSELECTED_TITLE)
+                                    u"is selected, and is then named after it. A glyph ticked in "
+                                    u"one tab is ticked in the other." % UNSELECTED_TITLE)
         try:  # (each tab says the same when pointed at)
             self.left_tabs.setTabToolTip(0, self.tip(u"What the languages within reach miss, ranked by the "
                                                      u"languages each glyph completes."))
@@ -6076,13 +6225,16 @@ class FontCheckDialog(object):
         self.own_label = ak.status_label()  # (whose characters the second tab lists, while it is shown)
         self.own_label.setVisible(False)
         box.addWidget(self.own_label)
-        row = QtGui.QHBoxLayout()
+        # (the buttons on the glyphs' ticks, and those that hand the ticked glyphs on, stand in the window's
+        # bottom row, the tab's own, as every window's: owner's image 279)
+        row = tab.actions_row
         self.check_buttons, self.check_slots = {}, []
-        tips = {"all": u"Checks every glyph listed in the tab shown (the checks of rows not listed are kept).",
-                "none": u"Unchecks every glyph, those not listed in the tab shown too.",
-                "buildable": u"Checks the glyphs listed in the tab shown that <i>Glyph Compose</i> can build from "
-                             u"the font's glyphs (letters with diacritics, and the spaces, dashes, quotes, and other "
-                             u"glyphs of its Glyph generation tab), and unchecks the others."}
+        tips = {"all": u"Ticks every glyph listed in the tab of glyphs shown (the ticks of rows not listed are "
+                       u"kept).",
+                "none": u"Unticks every glyph, those not listed in the tab of glyphs shown too.",
+                "buildable": u"Ticks the glyphs listed in the tab of glyphs shown that <i>Glyph Compose</i> can "
+                             u"build from the font's glyphs (glyphs with diacritics, and the spaces, dashes, quotes, "
+                             u"and other glyphs of its <i>Glyph generation</i> tab), and unticks the others."}
         def clicked(key):
             return lambda: self.set_checks(key)  # (no argument PythonQt could fill)
 
@@ -6094,20 +6246,18 @@ class FontCheckDialog(object):
             self.check_slots.append(slot)
             row.addWidget(button)
             self.check_buttons[key] = button
-        row.addStretch(1)
-        box.addLayout(row)
         self.left_pages = QtGui.QStackedWidget()
         self.add_tree = self.tree(("", "Glyph", "", "Languages"), icon=CHAR_ICON)
         self.add_tree.setWhatsThis(u"The glyphs the languages within reach miss, the ones completing the most "
                                    u"languages on their own first (+N: the languages it completes alone; a capital and "
-                                   u"its small letter together). Check some: the line above says how many languages "
+                                   u"its small letter together). Tick some: the line above says how many languages "
                                    u"they complete together. A double-click on a row opens its glyph in a "
                                    u"<i>Glyph</i> window.")
         self.own_tree = self.tree(("", "Glyph", "", "Languages"), icon=CHAR_ICON)
         self.own_tree.setWhatsThis(u"The missing glyphs of the language, character set (a script of Unicode is one), "
                                    u"or family selected at the "
                                    u"right, and nothing else: those the first tab ranks come first, then the others "
-                                   u"(the first 200; the line above counts the rest). Checks are shared with the "
+                                   u"(the first 200; the line above counts the rest). Ticks are shared with the "
                                    u"first tab. A double-click on a row "
                                    u"opens its glyph in a <i>Glyph</i> window.")
         self.left_pages.addWidget(self.add_tree)
@@ -6118,20 +6268,19 @@ class FontCheckDialog(object):
         for widget in (self.add_tree, self.own_tree, self.own_label, self.gain_label, self.left_tabs):
             self.use_list_font(widget, 1)
         box.addWidget(self.left_pages, 1)
-        row = QtGui.QHBoxLayout()
         self.diacritics_button = QtGui.QPushButton("Build with Glyph Compose")
-        self.diacritics_button.setWhatsThis(u"Opens <i>Glyph Compose</i> on the checked glyphs of the tab shown that it "
-                                            u"can build from the font's glyphs (you check them there before anything is "
-                                            u"made): letters with diacritics on its Diacritics tab, other glyphs (spaces, "
-                                            u"dashes, quotes...) on its Glyph generation tab, each listed alone; it opens "
-                                            u"on the tab with more, and its log says what the other holds.")
+        self.diacritics_button.setWhatsThis(u"Opens <i>Glyph Compose</i> on the ticked glyphs of the tab of glyphs shown "
+                                            u"that it can build from the font's glyphs (you tick them there before "
+                                            u"anything is made): glyphs with diacritics on its <i>Diacritics</i> tab, "
+                                            u"other glyphs (spaces, dashes, quotes...) on its <i>Glyph generation</i> "
+                                            u"tab, each listed alone; it opens on the tab with more, and its log says "
+                                            u"what the other holds.")
         self.copy_chars_button = QtGui.QPushButton("Copy glyphs")
-        self.copy_chars_button.setWhatsThis(u"Copies the checked glyphs of the tab shown (or the selected row's) "
-                                            u"as text.")
+        self.copy_chars_button.setWhatsThis(u"Copies the ticked glyphs of the tab of glyphs shown (or the selected "
+                                            u"row's) as text.")
+        row = tab.actions_row
         row.addWidget(self.diacritics_button)
         row.addWidget(self.copy_chars_button)
-        row.addStretch(1)
-        box.addLayout(row)
         right = QtGui.QWidget()
         box = QtGui.QVBoxLayout(right)
         box.setContentsMargins(0, 0, 0, 0)
@@ -6174,12 +6323,14 @@ class FontCheckDialog(object):
                                  u"left out by <i>Languages</i>, comes under a heading that says so, and a language "
                                  u"none of Font Check's sources describes is named under the list.")
         self.level_filter = QtGui.QComboBox()
+        self.level_filter.setSizeAdjustPolicy(QtGui.QComboBox.AdjustToContents)  # (as wide as its widest item: image 239)
         for _, label in LANGUAGE_FILTERS:
             self.level_filter.addItem(label)
         self.level_filter.setWhatsThis(u"Shows every language, or only the covered ones, those within reach, those "
                                        u"started (the font has at least one of their glyphs, too few to be within "
                                        u"reach), or those missed (it has none).")
         self.sort_box = QtGui.QComboBox()
+        self.sort_box.setSizeAdjustPolicy(QtGui.QComboBox.AdjustToContents)  # (as wide as its widest item: image 239)
         for _, label in SORTS:
             self.sort_box.addItem(label)
         self.sort_box.setWhatsThis(u"The order of the languages within each script or family: those within reach "
@@ -6399,7 +6550,7 @@ class FontCheckDialog(object):
         try:  # the view's line hidden meanwhile (the top row says what runs), shown again only with something to say
             # (shown empty, it left a blank line under the Coverage controls: owner's image 204)
             text = u"%s" % (_prop(self.coverage.status, "text") or u"")
-            self.coverage.status.setHidden(bool(on) or not text.strip())
+            self.coverage.status.setHidden(bool(on) or not text.strip() or self.current_key() != "coverage")
         except Exception:
             pass
         if on and not was:
@@ -6500,17 +6651,19 @@ class FontCheckDialog(object):
                                          u"and after an undo or an edit in FontLab.")
         self.measured_label = QtGui.QLabel(measured_text(2))  # (read_font says "the single master" for a font with one)
         tab.settings.addWidget(self.measured_label)
+        tab.settings.addWidget(self.metrics_button)  # (inline after what it reads, as every run button: image 262)
         tab.settings.addStretch(1)
-        tab.settings.addWidget(self.metrics_button)
         self.diagram = self.picture_label((320, 200))
         self.diagram.setWhatsThis(u"The font's tallest and deepest glyphs, by ink across its masters, on one "
-                                  u"baseline, with its line metrics as lines (equal ones as one line): what Windows "
+                                  u"baseline (the one reaching highest and the one reaching lowest captioned so, with "
+                                  u"how many other glyphs reach as far), with its line metrics as lines (equal ones as one line): what Windows "
                                   u"clips (past winAscent or winDescent) in red, the line's height at the left as a "
                                   u"share of the em, the suggested values dashed in the highlight color. A glyph "
                                   u"selected among the clipped ones is drawn in it too.")
         tab.layout.addWidget(self.diagram, 1)
         # The values and the checks side by side, their headings on one line, the checks as tall as the
-        # values (scrolled when they are more); under both, the buttons, then the line spacing's choice. The
+        # values (scrolled when they are more); under both, the line spacing's choice (the buttons stand in the
+        # window's bottom row, as every window's: owner's images 258 to 265). The
         # checks stood right of all of it before, as tall as the buttons and the choice too, far from the
         # values (the owner's report 128).
         body = QtGui.QGridLayout()
@@ -6518,7 +6671,7 @@ class FontCheckDialog(object):
         self.values_tree = self.tree(("Value", "Now", "Suggested"))
         self.values_tree.setWhatsThis(u"The font's line metrics now and as suggested (in bold where they differ).")
         body.addWidget(self.values_tree, 0, 0)
-        row = QtGui.QHBoxLayout()
+        row = tab.actions_row  # (the window's bottom row, this tab's part: the write at its right, before Close)
         self.write_button = QtGui.QPushButton("Write suggested values")
         self.write_button.setWhatsThis(u"Writes the suggested values that differ into the font's info: the typo, hhea, "
                                        u"and win values and <i>Use Typo Metrics</i>, for the whole font, then checks again; "
@@ -6530,7 +6683,7 @@ class FontCheckDialog(object):
         self.copy_button.setWhatsThis(u"Copies the suggested values as text.")
         self.font_info_button = QtGui.QPushButton("Open Font Info")
         self.font_info_button.setWhatsThis(u"Opens FontLab's <i>Font Info</i>, where these values are set.")
-        row.addWidget(self.write_button)
+        tab.commit = self.write_button
         self.put_back_button = QtGui.QPushButton("Put back old values")
         self.put_back_button.setWhatsThis(u"Puts back the font info values <i>Write suggested values</i> replaced "
                                           u"(FontLab's <i>Edit &gt; Undo</i> does not cover the font info), into the font "
@@ -6540,8 +6693,6 @@ class FontCheckDialog(object):
         row.addWidget(self.put_back_button)
         row.addWidget(self.copy_button)
         row.addWidget(self.font_info_button)
-        row.addStretch(1)
-        body.addLayout(row, 1, 0, 1, 2)
         row = QtGui.QHBoxLayout()
         self.mode_share = QtGui.QRadioButton("Line spacing")
         self.mode_share.setChecked(True)
@@ -6558,7 +6709,7 @@ class FontCheckDialog(object):
         row.addWidget(self.mode_share)
         row.addWidget(self.share)
         row.addStretch(1)
-        body.addLayout(row, 2, 0, 1, 2)
+        body.addLayout(row, 1, 0, 1, 2)
         self.mode_keep = QtGui.QRadioButton("Keep the font's current line spacing")
         self.mode_keep.setToolTip(self.tip(u"For an update of a font already released: documents set in it do not reflow."))
         self.mode_keep.setWhatsThis(u"For an update of a font already released: keeps its current line spacing, so "
@@ -6566,7 +6717,7 @@ class FontCheckDialog(object):
                                     u"they are when <i>Use Typo Metrics</i> is on, or else take the old win values, which "
                                     u"Windows spaced lines by; the win values grow to the ink and <i>Use Typo Metrics</i> "
                                     u"is turned on.")
-        body.addWidget(self.mode_keep, 3, 0, 1, 2)
+        body.addWidget(self.mode_keep, 2, 0, 1, 2)
         # (its heading is its list's own header, on the line of the values' header)
         self.checks_tree = self.tree((u"Checks",), icon=(STATE_SIZE, STATE_SIZE), grid=False)
         self.checks_tree.setWhatsThis(u"What Google Fonts' vertical metrics guidance asks, one line each: a warning "
@@ -6581,6 +6732,7 @@ class FontCheckDialog(object):
         body.addWidget(self.checks_tree, 0, 1)
         body.setColumnStretch(1, 1)
         tab.layout.addLayout(body)
+        tab.layout.addWidget(ak.separator())  # (a heading after a table: never read as its caption, image 234)
         row = QtGui.QHBoxLayout()
         self.clipped_label = self.heading(u"Clipped on Windows")
         row.addWidget(self.clipped_label)
@@ -6588,7 +6740,7 @@ class FontCheckDialog(object):
         self.clip_master = QtGui.QComboBox()
         self.clip_master.setSizeAdjustPolicy(QtGui.QComboBox.AdjustToContents)
         self.clip_master.setWhatsThis(u"The clipped glyphs of every master (each in its worst one), or of one master.")
-        self.clip_master_label = self.label_for(u"Master", self.clip_master)
+        self.clip_master_label = self.label_for(u"Master:", self.clip_master)
         row.addWidget(self.clip_master_label)
         row.addWidget(self.clip_master)
         tab.layout.addLayout(row)
@@ -6627,9 +6779,11 @@ class FontCheckDialog(object):
         ak = self.ak
         tab = self.masters = Tab(ak, QtGui)
         self.reference = QtGui.QComboBox()
+        self.reference.setSizeAdjustPolicy(QtGui.QComboBox.AdjustToContents)  # (as wide as its widest item: image 239)
         self.reference.setWhatsThis(u"The master each other master is compared with.")
         tab.settings.addWidget(self.label_for("Compare every master with", self.reference))
         tab.settings.addWidget(self.reference)
+        ak.sentence_end(tab.settings)  # (a sentence with a verb ends with a period: owner's image 271)
         self.masters_button = QtGui.QPushButton("Compare masters")
         self.masters_button.setWhatsThis(u"Compares every master's glyphs with the chosen master's again, and lists "
                                          u"the glyphs that keep them from interpolating. Nothing in the font changes.")
@@ -6663,23 +6817,22 @@ class FontCheckDialog(object):
                                      u"glyph cannot interpolate (a dashed square: no layer), amber where it "
                                      u"interpolates oddly (direction, start point, components, anchors), a faint dot "
                                      u"where all is well. <i>Fix</i> says whether Font Check can set its problems "
-                                     u"right (checked to start) or they need the designer. Right-click to flag a glyph.")
+                                     u"right (ticked to start) or they need the designer. Right-click to flag a glyph.")
         box.addWidget(self.glyph_tree, 1)
-        row = QtGui.QHBoxLayout()
-        self.fix_checked_button = QtGui.QPushButton("Fix checked")
-        self.fix_checked_button.setWhatsThis(u"Sets right, in the checked glyphs, what needs no designer: the contours' "
+        # (in the window's bottom row, as every window's: Fix this at its left, the fix of the ticked glyphs at
+        # its right, before Close)
+        self.fix_checked_button = QtGui.QPushButton("Fix ticked glyphs")
+        self.fix_checked_button.setWhatsThis(u"Sets right, in the ticked glyphs, what needs no designer: the contours' "
                                              u"order, directions, start points, and the components' order, in every "
                                              u"master but the one compared with (which never changes). One step of "
                                              u"<i>Edit &gt; Undo</i>; the masters are compared again and the log says "
                                              u"what was fixed. Contour and node counts, node types, missing layers, and "
                                              u"anchors are left to you.")
         self.fix_this_button = QtGui.QPushButton("Fix this")
-        self.fix_this_button.setWhatsThis(u"Sets right what needs no designer in the selected glyph, as <i>Fix checked</i> "
-                                          u"does.")
-        row.addWidget(self.fix_checked_button)
-        row.addWidget(self.fix_this_button)
-        row.addStretch(1)
-        box.addLayout(row)
+        self.fix_this_button.setWhatsThis(u"Sets right what needs no designer in the selected glyph, as <i>Fix ticked "
+                                          u"glyphs</i> does.")
+        tab.actions_row.addWidget(self.fix_this_button)
+        tab.commit = self.fix_checked_button
         halves.addWidget(left)
         right = QtGui.QWidget()
         box = QtGui.QVBoxLayout(right)
@@ -6697,7 +6850,7 @@ class FontCheckDialog(object):
         self.compare_master.setSizeAdjustPolicy(QtGui.QComboBox.AdjustToContents)
         self.compare_master.setWhatsThis(u"The master drawn beside the one compared with (those with problems say "
                                          u"how many).")
-        self.beside_label = self.label_for(u"Beside it", self.compare_master)
+        self.beside_label = self.label_for(u"Beside it:", self.compare_master)
         row.addWidget(self.beside_label)
         row.addWidget(self.compare_master)
         row.addStretch(1)
@@ -6744,7 +6897,11 @@ class FontCheckDialog(object):
             return False
         b = self.ak.b
         masters = self.master_names()
-        self.font_label.setText(u"%s, master %s (%s)." % (b(package.tfn), b(self.master), b(counted(len(masters), u"master"))))
+        if hasattr(self.ak, "font_named"):  # (one rule in every window: the masters counted only when more than one)
+            self.font_label.setText(u"%s." % self.ak.font_named(package.tfn, self.master, len(masters)))
+        else:
+            self.font_label.setText(u"%s, master %s (%s)." % (b(package.tfn), b(self.master),
+                                                              b(counted(len(masters), u"master"))))
         self.tabs.setTabEnabled(TABS.index("masters"), len(masters) > 1)
         self.tabs.setTabToolTip(TABS.index("masters"), self.tip(
             u"" if len(masters) > 1 else u"This font has one master: nothing to compare."))
@@ -6856,9 +7013,12 @@ class FontCheckDialog(object):
             self.asked = set()
             if self.busy:
                 return  # (the check under way reads the font as it goes on: the shared module asks again)
+            had = self.package is not None
             if not self.read_font():
                 self.show_fontless()
                 return
+            if not had:
+                self.widen_for_font()  # (opened without a font, at the others' size: owner's image 279)
             self.check(self.current_key())
         except Exception as exc:
             try:
@@ -6935,9 +7095,31 @@ class FontCheckDialog(object):
                       lambda: [chip.setVisible(False) for _, _, chip in self.chips],
                       lambda: self.masters.status.setText(u"")))
 
+    def show_tab_parts(self):
+        """The shown tab's own parts, the others' hidden: its status line in the header (the others kept
+        hidden as they are written, by the property that keeps a top line hidden while the busy bar
+        stands in for it: ak.status_label), and its buttons in the bottom row. Never raises."""
+        prop = getattr(self.ak, "BUSY_LINE_PROP", "freelabBusyLine")
+        try:
+            current = self.current_key()
+        except Exception:
+            current = TABS[0]
+        for key in TABS:
+            try:
+                tab, mine = self.tab_of(key), key == current
+                tab.status.setProperty(prop, None if mine else True)
+                text = u"%s" % (_prop(tab.status, "text") or u"")
+                tab.status.setHidden(not mine or not text.strip() or (key == "coverage" and self.busy))
+                tab.actions.setVisible(mine)
+                if tab.commit is not None:
+                    tab.commit.setVisible(mine)
+            except Exception:
+                pass
+
     def switch_page(self, index):
         QtCore, QtGui = _qt()
         self.pages.setCurrentIndex(index)
+        self.show_tab_parts()
         self.update_buttons()
         key = TABS[index]
         if key in self.stale and self.package is not None:
@@ -6956,15 +7138,15 @@ class FontCheckDialog(object):
         # small letter; the count is in their tooltips, report 132)
         self.diacritics_button.setText(build_caption(len(buildable)))
         self.diacritics_button.setToolTip(self.tip(
-            build_tip(buildable, self.in_list_font) if buildable else u"Check glyphs or select a row first."
+            build_tip(buildable, self.in_list_font) if buildable else u"Tick glyphs or select a row first."
             if not chosen else u"<i>Glyph Compose</i> cannot build %s from the font's glyphs." % (
                 u"this glyph" if len(chosen) == 1 else u"any of these glyphs"), rich=True))
         targets = self.check_targets() if self.package is not None else {}
         listed = self.shown_rows()
         can = any(item in (self.buildable or set()) for row in listed for item in row.items)
-        idle = {"all": u"Every glyph listed is checked.",
-                "none": u"No glyph is checked.",
-                "buildable": u"Only what <i>Glyph Compose</i> can build is checked." if can
+        idle = {"all": u"Every glyph listed is ticked.",
+                "none": u"No glyph is ticked.",
+                "buildable": u"Only what <i>Glyph Compose</i> can build is ticked." if can
                 else u"<i>Glyph Compose</i> can build none of the glyphs listed."}
         for key, button in self.check_buttons.items():
             # (nothing listed: all three grayed, Check none too, though glyphs of another tab or check stay
@@ -6977,7 +7159,7 @@ class FontCheckDialog(object):
         ak.enable(self.copy_chars_button, bool(chosen))
         self.copy_chars_button.setText(copy_caption(len(chosen)))
         self.copy_chars_button.setToolTip(self.tip(copy_tip(chosen, self.in_list_font) if chosen
-                                                   else u"Check glyphs or select a row first.", rich=True))
+                                                   else u"Tick glyphs or select a row first.", rich=True))
         ak.enable(self.copy_button, bool(self.suggestions))
         writes = metric_writes(self.suggestions) if self.package is not None else []
         ak.enable(self.write_button, bool(writes) and not self.busy)
@@ -6987,9 +7169,10 @@ class FontCheckDialog(object):
                                               if self.suggestions else u"Check the vertical metrics first."))
         fixing = self.checked_fix_glyphs() if self.package is not None else []
         ak.enable(self.fix_checked_button, bool(fixing) and not self.busy)
-        self.fix_checked_button.setText(u"Fix %s" % counted(len(fixing), u"checked glyph") if fixing else u"Fix checked")
+        self.fix_checked_button.setText(u"Fix %s" % counted(len(fixing), u"ticked glyph") if fixing
+                                        else u"Fix ticked glyphs")
         self.fix_checked_button.setToolTip(self.tip(
-            u"" if fixing else u"Check glyphs Font Check can fix (their row says so)."
+            u"" if fixing else u"Tick glyphs Font Check can fix (their row says so)."
             if self.fixable_names else u"No glyph listed has a problem Font Check can fix."))
         name = self.selected_glyph() if self.package is not None else None
         ak.enable(self.fix_this_button, name in self.fixable_names and not self.busy)
@@ -7041,16 +7224,16 @@ class FontCheckDialog(object):
         checked = self.checked_listed()
         if checked:
             what = u"Opens the %s of this tab in a Glyph window." % (
-                u"1 checked glyph" if len(checked) == 1 else u"%d checked glyphs" % len(checked))
+                u"1 ticked glyph" if len(checked) == 1 else u"%s ticked glyphs" % grouped(len(checked)))
         elif chosen:
-            what = u"Opens the selected row's %s in a Glyph window (no glyph is checked)." % (
+            what = u"Opens the selected row's %s in a Glyph window (no glyph is ticked)." % (
                 u"glyph" if len(chosen) == 1 else u"glyphs")
         elif self.selection is not None and self.selection_glyph_text():
-            what = u"Opens the glyphs %s misses in a Glyph window (no glyph is checked, no row selected)." % (
+            what = u"Opens the glyphs %s misses in a Glyph window (no glyph is ticked, no row selected)." % (
                 self.selection.name)
         else:
-            return u"Check glyphs or select a row first. A double-click on a row opens that row's glyph alone."
-        return what + u"\nA double-click on a row opens that row's glyph alone, whatever is checked."
+            return u"Tick glyphs or select a row first. A double-click on a row opens that row's glyph alone."
+        return what + u"\nA double-click on a row opens that row's glyph alone, whatever is ticked."
 
     def tip(self, text, names=False, rich=False):
         """A tooltip's text for Qt: rich text, which Qt wraps (plain text ran on one line, thousands of
@@ -7350,8 +7533,19 @@ class FontCheckDialog(object):
             font_key = None
         said = (font_key, note)
         if note and said != getattr(self, "spaces_said", None):
-            self.log.add(note)
+            # (amber: something the font lacks, owner's image 242; Glyph Compose a link that opens it)
+            self.log.add(self.tool_links(note), "warning")
         self.spaces_said = said
+
+    def tool_links(self, text):
+        """Rich text whose FreeLab tools named in italics (<i>Glyph Compose</i>) are links the log opens
+        them by, in this window's place (ak.tool_link: owner's image 220). Never raises."""
+        try:
+            for title in getattr(self.ak, "FONT_TOOLS", ()):
+                text = text.replace(u"<i>%s</i>" % self.ak.html(title), self.ak.tool_link(title))
+        except Exception:
+            pass
+        return text
 
     def coverage_list(self, state):
         """The last step: the lists filled, the top line written, and the lists shown again."""
@@ -8353,7 +8547,7 @@ class FontCheckDialog(object):
         counts = {"languages": sum(len(s.results) for s in made["languages"][0]),
                   "sets": sum(len(s.results) for s in made["sets"][0]), "families": len(made["families"][0].children)}
         for index, (key, label) in enumerate(RIGHT_TABS):
-            self.tab_names["right"].set_text(index, u"%s (%d)" % (label, counts[key]))
+            self.tab_names["right"].set_text(index, u"%s (%s)" % (label, grouped(counts[key])))
         try:  # (what the sets' count is made of: it adds up to the top line's counts, set_tally)
             index = [key for key, _ in RIGHT_TABS].index("sets")
             self.right_tabs.setTabToolTip(index, sets_tab_tip([r for s in made["sets"][0] for r in s.results]))
@@ -8787,14 +8981,14 @@ class FontCheckDialog(object):
             with self.ak.opening_from(self.dialog):  # (on this window's font, in its place)
                 try:
                     dm.main(characters=chars)  # a Glyph Compose that lists the letters given only
-                    self.log.add(u"<i>Glyph Compose</i> lists %s: check them there, then build." % i(u" ".join(chars)),
-                                 "done")
+                    self.log.add(self.tool_links(u"<i>Glyph Compose</i> lists %s: tick them there, then build." %
+                                                 i(u" ".join(chars))), "done")
                 except TypeError:
                     dm.main()  # (a Glyph Compose that takes no letters lists every one it can build)
-                    self.log.add(u"<i>Glyph Compose</i> lists every letter with diacritics it can build, %s among them."
-                                 % i(u" ".join(chars)), "done")
+                    self.log.add(self.tool_links(u"<i>Glyph Compose</i> lists every glyph with diacritics it can "
+                                                 u"build, %s among them." % i(u" ".join(chars))), "done")
         except Exception as exc:
-            self.log.add(u"<i>Glyph Compose</i> did not open: %s" % self.ak.html(exc), "error")
+            self.log.add(self.tool_links(u"<i>Glyph Compose</i> did not open: %s" % self.ak.html(exc)), "error")
 
     def copy_characters(self):
         QtCore, QtGui = _qt()
@@ -8946,6 +9140,10 @@ class FontCheckDialog(object):
             tallest, deepest = extreme_glyphs(self.extents_found)
             several = len(self.master_names()) > 1
             pictures = [self.picture(e.name, e.master, caption_master=several) for e in tallest + deepest]
+            notes = extreme_notes(self.extents_found)  # (the highest and the lowest, said so: owner's image 215)
+            for p in pictures:
+                if p is not None:
+                    p.note = notes.get(p.name, u"")
             chosen = self.selected_clip()
             if chosen is not None and (chosen.extent.name, chosen.extent.master) not in \
                     [(e.name, e.master) for e in tallest + deepest]:
@@ -9597,13 +9795,13 @@ class FontCheckDialog(object):
         elsewhere = sorted(set(f.glyph for f in after if f.glyph not in names))
         if elsewhere:
             self.log.add(u"New problems in %s since the fix (a shared element changed with it?): %s." % (
-                counted(len(elsewhere), u"other glyph"), ak.html(u", ".join(elsewhere[:20]))), "warning")
+                b(counted(len(elsewhere), u"other glyph")), ak.html(u", ".join(elsewhere[:20]))), "warning")
         left = sorted(set(f.glyph for f in self.problems if f.glyph in names))
         designer = [g for g in left if g not in self.fixable_names]
         if designer:
             self.log.add(u"%s still %s problems that need the designer: %s." % (
                 b(counted(len(designer), u"glyph")), u"has" if len(designer) == 1 else u"have",
-                ak.html(u", ".join(designer[:20]))))
+                ak.html(u", ".join(designer[:20]))), "warning")  # (what the font still does wrong: amber)
         unfixed = [g for g in left if g in self.fixable_names]
         if unfixed:
             self.log.add(u"%s still %s problems Fix sets right: %s. Look at %s in a <i>Glyph</i> window." % (

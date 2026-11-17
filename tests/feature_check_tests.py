@@ -500,5 +500,263 @@ class FontTests(unittest.TestCase):
                                             glyph_order=ORDER + ["a.smcp"]), "a glyph the same write adds")
 
 
+class LineTests(unittest.TestCase):
+    def test_counts_group_their_thousands(self):
+        # Owner's image 231: "13932 glyphs"
+        self.assertEqual(fc.counted(13932, "glyph"), "13,932 glyphs")
+        self.assertEqual(fc.counted(1, "rule"), "1 rule")
+
+    def test_the_summary_line_in_bold_and_escaped(self):
+        report = fc.Report(code(), [fc.Finding("unused-class", "@x is never used"),
+                                    fc.Finding("empty-class", "@y is empty")], built=True)
+        self.assertEqual(fc.summary_line(report), "1 warning, 1 piece of advice. It compiles.")
+        self.assertEqual(fc.summary_line(report, rich=True),
+                         "<b>1 warning</b>, <b>1 piece of advice</b>. It compiles.")
+        self.assertEqual(fc.summary_line(fc.Report(code(), [], unavailable="no <fontTools>"), rich=True),
+                         "Nothing was checked: no &lt;fontTools&gt;.")
+
+    def test_code_to_compile(self):
+        self.assertFalse(fc.has_code(fc.FontCode("", [])))
+        self.assertFalse(fc.has_code(fc.FontCode("  \n", [("liga", "")], [("x", ["a"])])), "classes alone")
+        self.assertTrue(fc.has_code(fc.FontCode("", [("liga", "feature liga { } liga;")])))
+        self.assertTrue(fc.has_code(fc.FontCode(DECLARED, [])))
+
+
+# ---------------------------------------------------------------------------
+# The window on a fake Qt (PythonQt's API, every call accepted) and a fake FontLab: the dialog's own
+# code paths, not how Qt or FontLab answer.
+# ---------------------------------------------------------------------------
+
+class _AnyMeta(type):
+    def __getattr__(cls, name):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        return Anything()
+
+
+def _no_dunder(self, name):
+    if name.startswith("__"):
+        raise AttributeError(name)
+    return Anything()
+
+
+Anything = _AnyMeta(str("Anything"), (object,), {
+    "__init__": lambda self, *args, **kwargs: None,
+    "__getattr__": _no_dunder,
+    "__call__": lambda self, *args, **kwargs: Anything(),
+    "__iter__": lambda self: iter([]),
+    "__len__": lambda self: 0,
+    "__int__": lambda self: 0, "__index__": lambda self: 0, "__float__": lambda self: 0.0,
+    "__bool__": lambda self: False, "__nonzero__": lambda self: False,
+    "__or__": lambda self, other: Anything(), "__ror__": lambda self, other: Anything(),
+    "__add__": lambda self, other: 0, "__radd__": lambda self, other: 0, "__sub__": lambda self, other: 0,
+    "__rsub__": lambda self, other: 0, "__mul__": lambda self, other: 0, "__rmul__": lambda self, other: 0,
+    "__truediv__": lambda self, other: 0, "__div__": lambda self, other: 0, "__neg__": lambda self: 0,
+    "__lt__": lambda self, other: False, "__gt__": lambda self, other: False, "__le__": lambda self, other: False,
+    "__ge__": lambda self, other: False, "__str__": lambda self: "", "__unicode__": lambda self: ""})
+
+
+class _FakeQtModule(object):
+    def __init__(self):
+        self.classes = {}
+
+    def __getattr__(self, name):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        if name not in self.classes:
+            self.classes[name] = _AnyMeta(str(name), (Anything,), {})
+        return self.classes[name]
+
+
+class FakeButton(Anything):
+    """A button that keeps its text and whether it is enabled."""
+
+    def __init__(self, text="", *args, **kwargs):
+        self.text, self.enabled, self.slots = text, True, {}
+
+    def setEnabled(self, on):
+        self.enabled = bool(on)
+
+    def setText(self, text):
+        self.text = text
+
+    def connect(self, signal, slot):
+        self.slots.setdefault(signal, []).append(slot)
+
+
+class FakeLayout(Anything):
+    """A row or column that keeps what is added to it, in order (None: a stretch)."""
+
+    def __init__(self, *args, **kwargs):
+        self.items = []
+
+    def addWidget(self, widget, *args):
+        self.items.append(widget)
+
+    def addLayout(self, layout, *args):
+        self.items.append(layout)
+
+    def addStretch(self, *args):
+        self.items.append(None)
+
+
+class FakeLabel(Anything):
+    def __init__(self, *args, **kwargs):
+        self.text = ""
+
+    def setText(self, text):
+        self.text = text
+
+
+class FakeDialogPackage(FakePackage):
+    isNull, glyphsCount = False, len(ORDER)
+    tfn = "Fake Sans"
+
+    def currentHistoryState(self):
+        return 0
+
+
+class DialogTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        sys.path.insert(0, os.path.join(HERE, os.pardir, "kerning"))
+        import freelab_auto_kerning as ak
+        cls.saved = dict((name, sys.modules.get(name)) for name in ("PythonQt", "fontlab", fc.AUTO_KERNING_MODULE))
+        qt = Anything()
+        qt.QtCore, qt.QtGui = _FakeQtModule(), _FakeQtModule()
+        qt.QtGui.classes.update({"QPushButton": FakeButton, "QHBoxLayout": FakeLayout, "QVBoxLayout": FakeLayout})
+        cls.workspace = workspace = Anything()
+        fontlab = Anything()
+        fontlab.flWorkspace = Anything()
+        fontlab.flWorkspace.instance = lambda: workspace
+        fontlab.flPackage = lambda item: item
+        sys.modules["PythonQt"], sys.modules["fontlab"] = qt, fontlab
+        cls.ak_stamp = getattr(ak, "_freelab_stamp", "unset")
+        ak._freelab_stamp = None  # (load_auto_kerning finds no file beside the script: the one loaded here is kept)
+        sys.modules[fc.AUTO_KERNING_MODULE] = ak
+        cls.ak = ak
+        cls.real = dict((name, getattr(ak, name)) for name in ("window_layout", "status_label", "header_separator",
+                                                                "busy_start", "busy_progress", "busy_end",
+                                                                "compiled_note"))
+        ak.window_layout = lambda dialog, scroll=None: FakeLayout()
+        ak.status_label = lambda text="", plain=False: FakeLabel()
+        ak.header_separator = lambda: "header line"
+        cls.settings = fc.read_settings, fc.write_settings
+        fc.read_settings = lambda ak: {}
+        fc.write_settings = lambda ak, data: None
+
+    @classmethod
+    def tearDownClass(cls):
+        fc.read_settings, fc.write_settings = cls.settings
+        for name, value in cls.real.items():
+            setattr(cls.ak, name, value)
+        if cls.ak_stamp == "unset":
+            del cls.ak._freelab_stamp
+        else:
+            cls.ak._freelab_stamp = cls.ak_stamp
+        for name, module in cls.saved.items():
+            if module is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module
+
+    def tearDown(self):
+        for name, value in self.real.items():
+            setattr(self.ak, name, value)
+        self.ak.window_layout = lambda dialog, scroll=None: FakeLayout()
+        self.ak.status_label = lambda text="", plain=False: FakeLabel()
+        self.ak.header_separator = lambda: "header line"
+
+    def dialog(self, package):
+        self.workspace.packages = lambda: [package] if package is not None else []
+        self.workspace.currentPackage = package
+        real = self.ak.window_font
+        self.ak.window_font = lambda owner, workspace=None: package
+        # (the function itself put back: kept on the class, it came back a bound method, and every later
+        # test module's window_font took one argument too many)
+        self.addCleanup(setattr, self.ak, "window_font", real)
+        dialog = fc.FeatureCheckDialog()
+        self.said = []
+        dialog.log.add = lambda text, level="info": self.said.append((level, text))
+        return dialog
+
+    def test_the_header_then_the_options_then_the_bottom_row(self):
+        # Owner's images 231, 237, and 255: the result under the font line; Check at the end of its option;
+        # Compile in FontLab in the bottom row, left of Apply ticked fixes
+        package = FakeDialogPackage(DECLARED, [("liga", feature("liga", "  sub f i by f_i;\n"))], ORDER * 800)
+        package.glyphsCount = len(ORDER) * 800
+        dialog = self.dialog(package)
+        self.assertEqual(dialog.font_label.text, "<b>Fake Sans</b> (<b>%s glyphs</b>)." % fc.grouped(len(ORDER) * 800))
+        self.assertIn(",", dialog.font_label.text, "thousands grouped")
+        self.assertEqual(dialog.check_all.text, "Tick all")
+        self.assertEqual(dialog.check_none.text, "Tick none")
+        self.assertEqual(dialog.apply_button.text, "Apply ticked fixes")
+        self.assertTrue(dialog.compile_button.enabled, "a font with code: something to compile")
+        self.assertFalse(dialog.apply_button.enabled, "nothing ticked")
+
+    def test_the_rows_in_order(self):
+        made = []
+        real = FakeLayout.__init__
+
+        def init(layout, *args, **kwargs):
+            real(layout)
+            made.append(layout)
+        FakeLayout.__init__ = init
+        self.addCleanup(setattr, FakeLayout, "__init__", real)
+        dialog = self.dialog(FakeDialogPackage(DECLARED, [("liga", feature("liga", "  sub f i by f_i;\n"))], ORDER))
+        window = made[0]
+        self.assertIs(window.items[0], dialog.font_label, "the top line first (the tools' buttons join its row)")
+        self.assertIs(window.items[1], dialog.status, "the check's result under the font line")
+        self.assertEqual(window.items[2], "header line")
+        options = window.items[3]
+        self.assertEqual(options.items, [dialog.auto_box, dialog.check_button, None], "Check after its option")
+        bottom = window.items[-1]
+        self.assertEqual(bottom.items, [dialog.check_all, dialog.check_none, None, dialog.compile_button,
+                                        dialog.apply_button, dialog.close_button])
+
+    def test_compile_and_apply_gray_with_nothing_to_do(self):
+        dialog = self.dialog(None)
+        self.assertFalse(dialog.compile_button.enabled, "no font")
+        self.assertFalse(dialog.apply_button.enabled)
+        dialog = self.dialog(FakeDialogPackage("", [], ORDER))
+        self.assertFalse(dialog.compile_button.enabled, "a font without feature code")
+        dialog = self.dialog(FakeDialogPackage("", [("liga", feature("liga", "  sub f i by f_i;\n"))], ORDER))
+        self.assertTrue(dialog.compile_button.enabled)
+
+    def test_compiling_shows_in_the_top_row_until_fontlab_reports(self):
+        # Owner's image 212: no visual feedback while FontLab compiled
+        ak = self.ak
+        dialog = self.dialog(FakeDialogPackage(DECLARED, [("liga", feature("liga", "  sub f i by f_i;\n"))], ORDER))
+        started, moved, ended, reports = [], [], [], []
+        ak.busy_start = lambda owner, what="", stoppable=True: started.append((what, stoppable))
+        ak.busy_progress = lambda owner, what=None, part=None, force=False, stoppable=True: moved.append(
+            (what, stoppable))
+        ak.busy_end = lambda owner: ended.append(owner.busy)
+
+        def note(box, log=None):
+            self.assertTrue(dialog.busy and not dialog.compile_button.enabled, "busy while FontLab compiles")
+            ak._COMPILE_READS.append(lambda: None)
+            reports.append(log)
+            return " Compiled: what FontLab's compiler reports follows in this log."
+        ak.compiled_note = note
+        dialog.compile_in_fontlab()
+        self.assertEqual(started, [(fc.COMPILE_STEP, False)], "a compile cannot be stopped halfway")
+        self.assertEqual(moved, [(fc.READ_STEP, False)])
+        self.assertTrue(dialog.busy, "still reading what FontLab said")
+        self.assertEqual(ended, [])
+        reports[0].add("Compiled: FontLab reported no errors.", "info")
+        self.assertEqual(ended, [False])
+        self.assertFalse(dialog.busy)
+        self.assertTrue(dialog.compile_button.enabled)
+        self.assertEqual(self.said[-1], ("info", "Compiled: FontLab reported no errors."))
+        dialog.compile_slot()  # (the wait's end, later: nothing more)
+        self.assertEqual(ended, [False])
+        # Nothing to read (the Features panel never opened): over at once
+        ak.compiled_note = lambda box, log=None: " Not compiled: FontLab's <i>Features</i> panel was never opened."
+        dialog.compile_in_fontlab()
+        self.assertEqual((len(started), ended[-1], dialog.busy), (2, False, False))
+        self.assertIn("Not compiled", self.said[-1][1])
+
+
 if __name__ == "__main__":
     unittest.main()

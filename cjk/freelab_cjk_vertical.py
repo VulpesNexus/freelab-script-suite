@@ -55,7 +55,7 @@ SECTION_LABELS = (("rotated", u"Turned a quarter (brackets, dashes, the long vow
                   ("moved", u"Moved to the upper right (small kana, comma and full stop)"),
                   ("ours", u"In FreeLab's code already (written before)"),
                   ("glyph", u"Drawn in the font already, not in its code yet"),
-                  ("other", u"Others the fonts give a form (Greek, Cyrillic, symbols): left unchecked"),
+                  ("other", u"Others the fonts give a form (Greek, Cyrillic, symbols): left unticked"),
                   ("font", u"In the font's own code"),
                   ("turned", u"Turned proportional glyphs (vrt2)"),
                   ("vpal", u"Proportional heights (vpal)"),
@@ -1187,13 +1187,16 @@ without one, and vhea's ascender, descender, and line gap (0; the corpus's media
 FontLab 7's export writes no vhea, vmtx, or VORG table: these stay in the font (its .vfc), and
 <i>Add vertical metrics to an exported font</i> adds them to a copy of the font FontLab exported
 (.vert before its extension; the exported font is not changed).
-<i>Turned proportional glyphs (vrt2)</i>, off unless checked, adds turned copies of the font's
-proportional glyphs to vrt2, as a third of those fonts do. Checked rows are written.<br>
+<i>Turned proportional glyphs (vrt2)</i>, off unless ticked, adds turned copies of the font's
+proportional glyphs to vrt2, as a third of those fonts do. Ticked rows are written.<br>
 <b>The previews</b>: the sample set in vertical columns, right to left, as the font's own code sets
-it, and with what is checked.<br>
-<i>Restore suggestions</i> puts every check back as the list first came; <i>Put back vhea</i> puts
+it, and with what is ticked.<br>
+<i>Restore suggestions</i> puts every tick back as the list first came; <i>Put back vhea</i> puts
 the font info back as it was before the last write (FontLab's History does not hold it).<br><br>
 Click this help's <i>?</i> button, then any control, for what it does."""
+
+
+PREVIEW_CAPTIONS = (u"Now (the font's own code)", u"With what is ticked")  # (Tick, not Check: owner's image 261)
 
 
 def mark_modified(package):
@@ -1227,12 +1230,12 @@ class CJKVerticalDialog(object):
         self.status.setWordWrap(True)
         self.status.connect("linkActivated(QString)", self.status_link)  # (List again, once a listing was stopped)
         layout.addWidget(self.status)
-        layout.addWidget(ak.separator())
+        layout.addWidget(ak.header_separator())  # (always shown, as every window's: owner's images 222 and 223)
         self.log = ak.Log()
         row = QtGui.QHBoxLayout()
         self.forms_box = QtGui.QCheckBox(u"Vertical forms (vert, vrt2)")
         self.forms_box.setChecked(True)
-        self.forms_box.setWhatsThis(u"Builds the checked vertical forms and writes vert and vrt2 for them.")
+        self.forms_box.setWhatsThis(u"Builds the ticked vertical forms and writes vert and vrt2 for them.")
         self.vpal_box = QtGui.QCheckBox(u"Proportional heights (vpal)")
         self.vpal_box.setChecked(True)
         self.vpal_box.setWhatsThis(u"Writes vpal: kana and punctuation trimmed to their ink and the corpus's top and "
@@ -1246,10 +1249,10 @@ class CJKVerticalDialog(object):
         self.turned_box.setChecked(False)
         self.turned_box.setWhatsThis(u"Builds turned copies of the font's proportional glyphs (Latin, figures, half-width "
                                      u"forms) for vrt2, as a third of the corpus's fonts do; the others leave them to "
-                                     u"applications, which turn them themselves. Off unless checked.")
+                                     u"applications, which turn them themselves. Off unless ticked.")
         self.metrics_box = QtGui.QCheckBox(u"Vertical metrics")
         self.metrics_box.setChecked(True)
-        self.metrics_box.setWhatsThis(u"Sets the checked vertical metrics: advance heights for the glyphs without one, and "
+        self.metrics_box.setWhatsThis(u"Sets the ticked vertical metrics: advance heights for the glyphs without one, and "
                                       u"vhea's values in the font info (its line gap 0; the corpus's median is 0.15 em).")
         for box in (self.forms_box, self.vpal_box, self.vkrn_box, self.turned_box, self.metrics_box):
             row.addWidget(box)
@@ -1264,7 +1267,7 @@ class CJKVerticalDialog(object):
         self.tree.setProperty(ak.LEAVE_ALONE_PROP, True)  # its pictures are drawn in the dialog's colors
         ak.table_layout(self.tree)
         self.tree.setWhatsThis(u"The vertical forms (the picture shows the form), the vpal trims (y placement and y "
-                               u"advance), and the vertical metrics, each with its value now and after. Checked rows "
+                               u"advance), and the vertical metrics, each with its value now and after. Ticked rows "
                                u"are written. Double-click a glyph to see it in a <i>Glyph</i> window.")
         layout.addWidget(self.tree, 1)
         sample_row = QtGui.QHBoxLayout()
@@ -1284,12 +1287,15 @@ class CJKVerticalDialog(object):
         self.sample.setWhatsThis(u"The text the previews set in vertical columns, right to left.")
         sample_row.addWidget(self.sample, 1)
         layout.addLayout(sample_row)
+        # The previews side by side, a line between them as CJK Spacing's stacked ones (owner's image 219), each
+        # under its caption (the shared preview_caption: smaller, in the quiet text color)
         previews = QtGui.QHBoxLayout()
         self.previews, self.preview_captions = [], []
-        for caption in (u"Now (the font's own code)", u"With what is checked"):
+        for number, caption in enumerate(PREVIEW_CAPTIONS):
+            if number:
+                previews.addWidget(ak.separator(vertical=True))  # (hidden with no font, as the previews)
             column = QtGui.QVBoxLayout()
-            title = QtGui.QLabel(caption)
-            title.setEnabled(False)  # (drawn in the quiet text color)
+            title = ak.preview_caption(caption)
             column.addWidget(title)
             self.preview_captions.append(title)
             label = QtGui.QLabel()
@@ -1315,10 +1321,10 @@ class CJKVerticalDialog(object):
         layout.addWidget(self.preview_note)
         layout.addWidget(self.log.widget)
         buttons = QtGui.QHBoxLayout()
-        self.all_button = QtGui.QPushButton("Check all")
-        self.none_button = QtGui.QPushButton("Check none")
+        self.all_button = QtGui.QPushButton("Tick all")
+        self.none_button = QtGui.QPushButton("Tick none")
         self.restore_button = QtGui.QPushButton("Restore suggestions")
-        self.restore_button.setWhatsThis(u"Puts every check back as the list first came.")
+        self.restore_button.setWhatsThis(u"Puts every tick back as the list first came.")
         self.put_back_button = QtGui.QPushButton("Put back vhea")
         self.put_back_button.setWhatsThis(u"Puts vhea's values in the font info back as they were before the last write "
                                           u"(FontLab's <i>Edit &gt; Undo</i> does not take the font info back).")
@@ -1329,8 +1335,8 @@ class CJKVerticalDialog(object):
                                         u"origin at the typographic ascender; VORG for a CFF font). The exported "
                                         u"font is not changed.")
         self.write_button = QtGui.QPushButton("Write")
-        self.write_button.setWhatsThis(u"Builds the checked vertical forms, writes vert, vrt2, and vpal between FreeLab's "
-                                       u"marker lines (the rest of each feature kept), and sets the checked vertical "
+        self.write_button.setWhatsThis(u"Builds the ticked vertical forms, writes vert, vrt2, and vpal between FreeLab's "
+                                       u"marker lines (the rest of each feature kept), and sets the ticked vertical "
                                        u"metrics. <i>Edit &gt; Undo</i> takes the glyphs, the code, and the advance "
                                        u"heights back; <i>Put back vhea</i> the font info.")
         self.close_button = QtGui.QPushButton("Close")
@@ -1549,7 +1555,8 @@ class CJKVerticalDialog(object):
         except Exception:
             pass
         self.forms, self.trims, self.metrics, self.turned, self.kerns, self.first_checks = [], [], [], [], [], []
-        self.status.setText(self.cj.stopped_line())
+        # (the font line kept: owner's image 224)
+        self.status.setText((u"%s %s" % (self.cj.font_line(self.ak, self.package), self.cj.stopped_line())).strip())
         self.seen_history = self.ak.history_mark(self.package)
 
     def status_link(self, target):
@@ -1647,8 +1654,8 @@ class CJKVerticalDialog(object):
             self.status.setText(ak.no_font_line())
             self.update_buttons()
             return
-        if not self.model:
-            self.status.setText(u"")
+        if not self.model:  # (the font line kept, the reason in the log: owner's image 224)
+            self.status.setText(u"%s Could not list the vertical forms: the log says why." % self.cj.font_line(ak, package))
             self.log.add(u"The corpus's vertical forms (vertical_model.json) are missing beside this script: reinstall "
                          u"FreeLab.", "error")
             return
@@ -1838,21 +1845,28 @@ class CJKVerticalDialog(object):
         builds = sum(1 for f in self.forms if f.state == "build")
         drawn = sum(1 for f in self.forms if f.state == "glyph")
         own = sum(1 for f in self.forms if f.state == "font")
+        font = self.cj.font_line(self.ak, package, master)  # (as every window's top line: ak.font_named)
         if not getattr(self, "cjk", True):
-            return u"%s, master %s, has no kana, Hangul, ideographs, or CJK punctuation: not a CJK font, nothing to " \
-                   u"add for vertical text." % (b(package.tfn), b(master))
+            return u"%s No kana, Hangul, ideographs, or CJK punctuation: not a CJK font, nothing to add for vertical " \
+                   u"text." % font
         if not self.forms and not self.trims:
-            return u"%s, master %s, has none of the characters that turn or move in vertical text, and no full-width " \
-                   u"kana or punctuation." % (b(package.tfn), b(master))
-        parts = [u"%s to build" % b(counted(builds, u"vertical form")), u"%s drawn already" % b(drawn),
-                 u"%s the font's own code makes" % b(own), u"%s" % b(counted(len(self.trims), u"vpal trim")),
-                 u"%s" % b(counted(len(self.kerns), u"vkrn pair"))]
+            return u"%s No character that turns or moves in vertical text, and no full-width kana or " \
+                   u"punctuation." % font
+        # (a count at 0 left out, the forms' noun on the first one said: "0 drawn already" read as noise)
+        parts, noun = [], True
+        for count, what in ((builds, u"%s to build"), (drawn, u"%s drawn already"), (own, u"%s the font's own code makes")):
+            if count:
+                parts.append(what % b(counted(count, u"vertical form") if noun else u"{:,}".format(count)))
+                noun = False
+        for count, one in ((len(self.trims), u"vpal trim"), (len(self.kerns), u"vkrn pair")):
+            if count:
+                parts.append(b(counted(count, one)))
         if self.own_vkrn:
             parts.append(u"%s the font's own vkrn kerns (kept)" % b(counted(len(self.own_vkrn), u"pair")))
         if self.own_vpal:
             parts.append(u"%s the font's own vpal positions (kept)" % b(counted(len(self.own_vpal), u"glyph")))
-        return u"%s, master %s: %s. Nothing is written until you click %s." % (
-            b(package.tfn), b(master), self.ak.joined(parts), self.ak.i(u"Write"))
+        text = self.ak.joined(parts)
+        return u"%s %s. Nothing is written until you click %s." % (font, text[:1].upper() + text[1:], self.ak.i(u"Write"))
 
     # -- the list ------------------------------------------------------------------------
 
@@ -2011,13 +2025,13 @@ class CJKVerticalDialog(object):
                 rows[index].checked = item.checkState(0) == QtCore.Qt.Checked
 
     def check_all(self, on):
-        """Check all, Check none: every checkable row, the log told how many it checked or unchecked, and
+        """Tick all, Tick none: every checkable row, the log told how many it ticked or unticked, and
         how many of them were in closed groups (owner's report 118)."""
         QtCore, QtGui = _qt()
         self.tree.blockSignals(True)
         try:
             self.ak.check_rows([item for item in self.items() if item.flags() & QtCore.Qt.ItemIsUserCheckable], on,
-                               log=self.log, command=u"Check all" if on else u"Check none",
+                               log=self.log, command=u"Tick all" if on else u"Tick none",
                                hidden_text=(u"in a closed group", u"in closed groups"))
         finally:
             self.tree.blockSignals(False)
@@ -2121,7 +2135,7 @@ class CJKVerticalDialog(object):
             return
         finally:
             self.set_busy(False)
-        self.log.add(u"Checks restored as suggested.")
+        self.log.add(u"Ticks restored as suggested.")
 
     def history_moved(self):
         self.log.add(u"The font's History moved (an undo, a redo, or an edit): read again.")
@@ -2281,7 +2295,7 @@ class CJKVerticalDialog(object):
         self.preview_room = (room, self.pane_width(self.previews[0]))
         upm = float(self.package.upm) or 1000.0
         for index, label in enumerate(self.previews):
-            own = self.own_vert if index == 0 else self.font_vert  # (now: the code as it stands; after: the font's own and what is checked)
+            own = self.own_vert if index == 0 else self.font_vert  # (now: the code as it stands; after: the font's own and what is ticked)
             placed, chars, heights = preview_column(text, names, own, chosen if index else {}, trims if index else {},
                                                     kerns if index else {}, self.height, upm)
             width = self.pane_width(label)
@@ -2351,8 +2365,8 @@ class CJKVerticalDialog(object):
         # (Feature Check: the whole font's code with it, the forms to build counted as there)
         refusal = getattr(self.ak, "feature_code_refusal", lambda *a, **k: None)(package, new, None, list(names))
         if refusal:
-            self.log.add(u"Nothing was written: %s. <i>Feature Check</i> lists every finding." % self.ak.html(refusal),
-                         "error")
+            self.log.add(u"Nothing was written: %s. %s lists every finding." % (  # (a link: owner's image 220)
+                self.ak.html(refusal), self.ak.tool_link(u"Feature Check")), "error")
             return
         heights = [m for m in metrics if m.key == "advance_height"]
         vhea = [m for m in metrics if m.key != "advance_height"]

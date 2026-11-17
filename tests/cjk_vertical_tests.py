@@ -1013,7 +1013,9 @@ class FakeQtTests(unittest.TestCase):
             dialog.samples = [(u"ja", u"Japanese", cv.SAMPLE_JA)]
             dialog.ak = type("Ak", (), dict(b=staticmethod(lambda t: u"%s" % t), i=staticmethod(lambda t: u"%s" % t),
                                             joined=staticmethod(lambda items: u", ".join(items)),
-                                            history_mark=staticmethod(lambda p: None)))
+                                            history_mark=staticmethod(lambda p: None),
+                                            font_named=staticmethod(lambda name, master=None, masters=1:
+                                                                    u"%s, master %s" % (name, master))))
             for name in ("show_font_parts", "fill", "update_buttons", "update_put_back", "draw_previews", "progress"):
                 setattr(dialog, name, lambda *args, **kwargs: None)
             dialog.current_checks = lambda: {}
@@ -1024,7 +1026,8 @@ class FakeQtTests(unittest.TestCase):
 
         latin = listed([0x41, 0x2015])
         self.assertEqual((latin.forms, latin.trims, latin.turned, latin.kerns, latin.metrics), ([], [], [], [], []))
-        self.assertEqual(latin.status.text, u"Fake Sans, master Regular, has no kana, Hangul, ideographs, or CJK "
+        # (the font line first, as every window's: ak.font_named, owner's images 223 and 238)
+        self.assertEqual(latin.status.text, u"Fake Sans, master Regular. No kana, Hangul, ideographs, or CJK "
                                             u"punctuation: not a CJK font, nothing to add for vertical text.")
         cjk = listed([0x41, 0x2015, 0x300C])
         self.assertEqual(sorted(f.name for f in cjk.forms), [u"uni2015", u"uni300C"], "a CJK font's dash turns")
@@ -1692,6 +1695,42 @@ class SourceTests(unittest.TestCase):
         self.assertNotIn(u"%d units", text)
         interface = text.split(u"# FontLab\n")[-1]
         self.assertNotIn(u" letter", interface.lower(), "the interface says glyph")
+
+    def test_previews_have_a_line_between_and_quiet_captions(self):
+        # (owner's image 219: CJK Spacing's previews have a line between them, these did not; brief: the shared
+        # preview_caption for every preview's caption; image 261: Tick, not Check)
+        text = self.source("cjk", "freelab_cjk_vertical.py")
+        init = text.split(u"class CJKVerticalDialog")[1].split(u"\n    def watch_previews")[0]
+        previews = init.split(u"previews = QtGui.QHBoxLayout()")[1].split(u"layout.addLayout(previews)")[0]
+        self.assertIn(u"previews.addWidget(ak.separator(vertical=True))", previews)
+        self.assertIn(u"ak.preview_caption(caption)", previews)
+        self.assertIn(u"layout.addWidget(ak.header_separator())", init)
+        self.assertEqual(cv.PREVIEW_CAPTIONS, (u"Now (the font's own code)", u"With what is ticked"))
+        for old in (u'"Check all"', u'"Check none"', u"Checks restored", u"what is checked", u"Checked rows",
+                    u"left unchecked"):
+            self.assertNotIn(old, text)
+        # (a tool named in the log is a link that opens it: owner's image 220)
+        self.assertIn(u'self.ak.tool_link(u"Feature Check")', text)
+        self.assertNotIn(u"<i>Feature Check</i> lists", text)
+
+    def test_the_top_line_names_the_font_then_counts_what_is_there(self):
+        # (owner's images 223 and 238: one font line for every window; brief: no "0 drawn already")
+        dialog = cv.CJKVerticalDialog.__new__(cv.CJKVerticalDialog)
+        dialog.ak = type("Ak", (), dict(b=staticmethod(lambda t: u"<b>%s</b>" % t), i=staticmethod(lambda t: u"<i>%s</i>" % t),
+                                        joined=staticmethod(lambda items: u", ".join(items)),
+                                        font_named=staticmethod(lambda name, master=None, masters=1:
+                                                                u"<b>%s</b>, master <b>%s</b>" % (name, master))))
+        dialog.cj = cv.spacing()
+        form = lambda state: type("Form", (), {"state": state})()
+        dialog.forms, dialog.trims, dialog.kerns = [form("build"), form("build"), form("font")], [1], []
+        dialog.own_vkrn, dialog.own_vpal, dialog.cjk = set(), set(), True
+        package = type("Package", (), {"tfn": u"Fake Sans", "master": u"Regular", "mastersCount": 1})()
+        self.assertEqual(dialog.status_text(package, u"Regular"),
+                         u"<b>Fake Sans</b>, master <b>Regular</b>. <b>2 vertical forms</b> to build, <b>1</b> the font's "
+                         u"own code makes, <b>1 vpal trim</b>. Nothing is written until you click <i>Write</i>.")
+        dialog.forms = [form("glyph")]
+        self.assertIn(u"master <b>Regular</b>. <b>1 vertical form</b> drawn already, <b>1 vpal trim</b>.",
+                      dialog.status_text(package, u"Regular"), "the noun on the first count said")
 
 
 class NoFontTests(unittest.TestCase):

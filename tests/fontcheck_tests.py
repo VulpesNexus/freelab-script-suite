@@ -480,14 +480,14 @@ class AddTests(unittest.TestCase):
 
     def test_gain_text(self):
         results, (schwa, small_schwa, _, _) = self.results()
-        self.assertEqual(fc.gain_text(0, []), u"Check glyphs to see how many languages they complete.")
-        self.assertEqual(fc.gain_text(1, []), u"With 1 glyph checked: no language is complete yet")
+        self.assertEqual(fc.gain_text(0, []), u"Tick glyphs to see how many languages they complete.")
+        self.assertEqual(fc.gain_text(1, []), u"With 1 glyph ticked: no language is complete yet")
         gained = fc.languages_gained(results, [schwa, small_schwa])
-        self.assertEqual(fc.gain_text(2, gained), u"With 2 glyphs checked: +2 languages (Latin)")
+        self.assertEqual(fc.gain_text(2, gained), u"With 2 glyphs ticked: +2 languages (Latin)")
         self.assertEqual(fc.gain_text(2, gained[:1], lambda text: u"<b>%s</b>" % text),
-                         u"With 2 glyphs checked: <b>+1 language</b> (Latin)")
+                         u"With 2 glyphs ticked: <b>+1 language</b> (Latin)")
         greek = fc.check_language(language(u(0x3B1), script=u"Greek", name=u"Greek"), font([]))
-        self.assertEqual(fc.gain_text(3, gained + [greek]), u"With 3 glyphs checked: +3 languages (Latin 2, Greek 1)")
+        self.assertEqual(fc.gain_text(3, gained + [greek]), u"With 3 glyphs ticked: +3 languages (Latin 2, Greek 1)")
 
     def test_check_buttons(self):
         results, (schwa, small_schwa, eng, small_eng) = self.results()
@@ -1887,6 +1887,27 @@ class WidthTests(unittest.TestCase):
         self.assertEqual(fc.column_widths(600, [200, 120], 0, (), {}, {0: 300, 1: 100}), [300, 100],
                          "every column dragged: as dragged")
 
+    def test_a_column_dragged_past_the_frame_leaves_the_others_room(self):
+        """The owner's image 214: a column dragged to the frame's edge, or past it, left every other column
+        at nothing (all but one vanished), the columns wider than the list. It stops where the others keep
+        their least (PINNED_FLOOR at least), and the columns still fill the list exactly."""
+        bars = lambda pinned: fc.column_widths(1000, [300, fc.BAR_COLUMN, 200, 50], 0, (1,),
+                                               {0: fc.NAME_LEAST, 1: fc.BAR_LEAST}, pinned)
+        self.assertEqual(bars({0: 5000}), [1000 - fc.BAR_LEAST - 250, fc.BAR_LEAST, 200, 50],
+                         "the names dragged past the frame: the bar keeps its least, the counts theirs")
+        self.assertEqual(bars({2: 5000}), [fc.NAME_LEAST, fc.BAR_LEAST, 1000 - fc.NAME_LEAST - fc.BAR_LEAST - 50, 50],
+                         "the counts dragged past it: the names and the bar at their least")
+        self.assertEqual(bars({0: 0}), [fc.PINNED_FLOOR, 1000 - fc.PINNED_FLOOR - 250, 200, 50],
+                         "dragged to nothing: it keeps PINNED_FLOOR")
+        for pinned in ({0: 5000}, {1: 5000}, {2: 5000}, {3: 5000}, {0: 5000, 2: 5000}, {0: 0, 3: 0}):
+            widths = bars(pinned)
+            self.assertEqual(sum(widths), 1000, "never past the frame: %r" % pinned)
+            self.assertTrue(all(w >= fc.PINNED_FLOOR for w in widths), "no column vanishes: %r %r" % (pinned, widths))
+        self.assertEqual(fc.column_widths(600, [200, 120, 80], 0, (), {}, {1: 5000}), [fc.PINNED_FLOOR, 496, 80],
+                         "a column that never gives way keeps its width: the taker keeps PINNED_FLOOR")
+        self.assertEqual(fc.column_widths(600, [200, 120], 0, (), {}, {0: 5000, 1: 5000}), [576, fc.PINNED_FLOOR],
+                         "every column dragged past the frame: the last one dragged keeps PINNED_FLOOR")
+
 
 class TabNameTests(unittest.TestCase):
     def test_the_chosen_tab_whole_the_others_elided(self):
@@ -2657,10 +2678,10 @@ class SpaceTests(unittest.TestCase):
         has = lambda code: code in (0x2002, 0x2003, 0x2007, 0x2009)
         self.assertEqual(fc.spaces_note(has, listed=[0x202F]),
                          u"The font lacks these spaces: no-break (U+00A0), hair (U+200A). <i>Glyph Compose</i> builds "
-                         u"them on its Glyph generation tab (empty glyphs of the right width).")
+                         u"them on its <i>Glyph generation</i> tab (empty glyphs of the right width).")
         self.assertEqual(fc.spaces_note(lambda code: code != 0x2009),
-                         u"The font lacks this space: thin (U+2009). <i>Glyph Compose</i> builds it on its Glyph "
-                         u"generation tab (empty glyphs of the right width).")
+                         u"The font lacks this space: thin (U+2009). <i>Glyph Compose</i> builds it on its <i>Glyph "
+                         u"generation</i> tab (empty glyphs of the right width).")
         self.assertEqual(fc.spaces_note(lambda code: True), u"")
 
     def test_a_row_glyph_generation_builds_says_so(self):
@@ -2767,6 +2788,32 @@ class DiagramTests(unittest.TestCase):
         tallest, deepest = fc.extreme_glyphs(extents, 2)
         self.assertEqual([(e.name, e.master) for e in tallest], [("Aring", "B"), ("bracket", "B")])
         self.assertEqual([e.name for e in deepest], ["p", "g"], "a glyph in one list only")
+
+    def test_the_highest_and_lowest_are_captioned(self):
+        """The owner's image 215: the diagram should always show and caption the highest and the lowest
+        glyph, saying how many other glyphs reach the same value."""
+        extents = [fc.Extent(n, None, m, b, t) for n, m, b, t in
+                   [("A", "L", 0, 700), ("Aring", "L", 0, 900), ("Aring", "B", 0, 950), ("p", "B", -250, 500),
+                    ("g", "L", -230, 500), ("bracket", "B", -260, 920), ("dot", "L", -50, 40)]]
+        self.assertEqual(fc.extreme_notes(extents), {"Aring": u"highest", "bracket": u"lowest"},
+                         "the lowest is among the tallest pictures: captioned there")
+        tallest, deepest = fc.extreme_glyphs(extents, 2)
+        drawn = set(e.name for e in tallest + deepest)
+        self.assertTrue(set(fc.extreme_notes(extents)) <= drawn, "both are always drawn")
+        tied = [fc.Extent(n, None, "R", b, t) for n, b, t in
+                [(".notdef", -246, 1802), ("_12259", 0, 1802), ("_13196", -246, 1500), ("_13200", -246.2, 1500),
+                 ("a", 0, 500)]]
+        self.assertEqual(fc.extreme_notes(tied), {".notdef": u"highest (and 1 other) and lowest (and 2 others)"},
+                         "one glyph both: one caption, ties counted in whole units")
+        self.assertEqual(fc.extreme_notes([]), {})
+        tied.append(fc.Extent("_12306", None, "R", -100, 1802.3))
+        self.assertEqual(fc.extreme_notes(tied), {".notdef": u"highest (and 2 others) and lowest (and 2 others)"},
+                         "a fraction of a unit higher: as high, by name")
+        tied.append(fc.Extent("Z", None, "R", -100, 1803))
+        self.assertEqual(fc.extreme_notes(tied), {"Z": u"highest", ".notdef": u"lowest (and 2 others)"})
+        tallest, deepest = fc.extreme_glyphs(tied)
+        self.assertEqual(tallest[0].name, "Z")
+        self.assertIn(".notdef", [e.name for e in tallest + deepest], "the lowest drawn too")
 
     def test_clipped(self):
         m = fc.VerticalMetrics(upm=1000, win_ascent=1000, win_descent=250)
@@ -3451,11 +3498,11 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(opened, [u"".join(target.items)], "that row's character, whatever is checked")
         self.assertEqual(dialog.glyph_window_text(), u"".join(sorted(dialog.checked, key=fc.code_points)),
                          "the button: the checked ones")
-        self.assertIn(u"checked glyphs of this tab", dialog.glyph_window_tip())
+        self.assertIn(u"ticked glyphs of this tab", dialog.glyph_window_tip())
         self.assertIn(u"A double-click on a row opens that row's glyph alone", dialog.glyph_window_tip())
         dialog.checked = set(dialog.rows[0].items[:1])
         if len(dialog.rows[0].items) == 1:
-            self.assertIn(u"Opens the 1 checked glyph of this tab", dialog.glyph_window_tip())
+            self.assertIn(u"Opens the 1 ticked glyph of this tab", dialog.glyph_window_tip())
         dialog.checked = set()
         dialog.selected_row = lambda: target
         self.assertEqual(dialog.glyph_window_text(), u"".join(sorted(target.items, key=fc.code_points)),
@@ -3463,7 +3510,7 @@ class DialogTests(unittest.TestCase):
         self.assertIn(u"selected row's", dialog.glyph_window_tip())
         dialog.selected_row = lambda: None
         self.assertEqual(dialog.glyph_window_text(), u"")
-        self.assertTrue(dialog.glyph_window_tip().startswith(u"Check glyphs or select a row first."))
+        self.assertTrue(dialog.glyph_window_tip().startswith(u"Tick glyphs or select a row first."))
         dialog.select(fc.selection_of(target.needing[0]))
         dialog.character_double_clicked("own", Row(0))
         self.assertEqual(opened[-1], u"".join(dialog.own_rows[0].items), "in the selection's tab too")
@@ -3854,7 +3901,7 @@ class DialogTests(unittest.TestCase):
                          [(0, u"High-value missing glyphs (%d)" % len(dialog.rows)),
                           (1, u"Select language, character set, or family")])
         captions = dict(dialog.right_tabs.told("setTabText")[-3:])
-        self.assertEqual(captions[0], u"Languages (%d)" % every)
+        self.assertEqual(captions[0], u"Languages (%s)" % fc.grouped(every), "thousands grouped: image 231")
         self.assertEqual(captions[1], u"Character sets (%d)" % len(dialog.set_results))
         self.assertTrue(captions[2].startswith(u"Families ("))
         one = [r for r in dialog.results if r.level == "nearly"][0]
@@ -3885,7 +3932,7 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(dialog.set_tree.told("setHeaderLabels"), [(["Character set", "Missing"],)])
         self.assertEqual(fc.RIGHT_TABS[1][1], u"Character sets")
         self.assertEqual(fc.value_title(3), u"High-value missing glyphs (3)")
-        self.assertEqual(fc.gain_text(1, []), u"With 1 glyph checked: no language is complete yet")
+        self.assertEqual(fc.gain_text(1, []), u"With 1 glyph ticked: no language is complete yet")
         f = font([0x61])
         tip = fc.coverage_tip(fc.check_language(language(u"a b", u"c"), f))
         self.assertIn(u"Base characters missing: b", tip, "the orthography's own terms are kept")
@@ -4157,8 +4204,9 @@ class DialogTests(unittest.TestCase):
 
     def test_metrics_checks_beside_the_values(self):
         """The owner's report 128: the Checks list right of the values, its heading on the line of theirs,
-        above the buttons, as tall as the values (scrolled when longer); the buttons and the line spacing's
-        choice under both."""
+        as tall as the values (scrolled when longer); the line spacing's choice under both. The buttons stand in
+        the window's bottom row now (owner's images 258 to 265): Write suggested values at its right, the others
+        at its left, shown with the tab."""
         gui = sys.modules["PythonQt"].QtGui
         saved = dict(gui.classes)
         gui.classes["QGridLayout"] = Recorded
@@ -4171,9 +4219,10 @@ class DialogTests(unittest.TestCase):
         widgets = body.told("addWidget")
         self.assertIn((dialog.values_tree, 0, 0), widgets)
         self.assertIn((dialog.checks_tree, 0, 1), widgets, "beside the values, on their row")
-        self.assertIn((dialog.mode_keep, 3, 0, 1, 2), widgets)
-        self.assertEqual([args[1:] for args in body.told("addLayout")], [(1, 0, 1, 2), (2, 0, 1, 2)],
-                         "the buttons, then the line spacing, under both")
+        self.assertIn((dialog.mode_keep, 2, 0, 1, 2), widgets)
+        self.assertEqual([args[1:] for args in body.told("addLayout")], [(1, 0, 1, 2)], "the line spacing, under both")
+        self.assertIs(dialog.metrics.commit, dialog.write_button, "the committing button, at the bottom row's right")
+        self.assertIs(dialog.masters.commit, dialog.fix_checked_button)
         self.assertEqual(body.told("setColumnStretch"), [(1, 1)])
 
     def test_inferred_languages(self):
@@ -4806,7 +4855,9 @@ class DialogTests(unittest.TestCase):
         logged = []
         dialog.log.add = lambda text, level="info": logged.append((level, text))
         dialog.fix_glyphs([u"o", u"i", u"Hacute", u"x"])
-        self.assertEqual([level for level, _ in logged if level in ("error", "warning")], [], logged)
+        # (what the font still does wrong in amber, as every line that says so: owner's image 242)
+        self.assertEqual([(level, text) for level, text in logged if level in ("error", "warning")],
+                         [("warning", u"<b>1 glyph</b> still has problems that need the designer: x.")], logged)
         found = sorted((f.glyph, f.master, f.kind) for f in dialog.masters.findings)
         self.assertEqual(found, [(u"x", u"Bold", "nodes")], "what needs the designer only")
         self.assertEqual([c.points for c in package.findName(u"o").getLayerByName(u"Bold").shapes[0].contours],
@@ -5034,7 +5085,7 @@ class ScriptTests(unittest.TestCase):
         selection = fc.selection_of(r)
         self.assertEqual((selection.count(), len(selection.wanted())), (needed - 1, fc.WANTED_MOST))
         self.assertEqual(selection.optional_count(), 1002)
-        self.assertEqual(fc.selection_title(selection), u"Han (103350)", "what its tab lists, the optional ones too")
+        self.assertEqual(fc.selection_title(selection), u"Han (103,350)", "what its tab lists, the optional ones too (thousands grouped)")
         rows, left = fc.selection_rows([], selection)
         listed = sum(len(row.items) for row in rows)
         self.assertEqual((listed, left), (fc.FLOAT_MOST, 103350 - fc.FLOAT_MOST), "the first 200, the rest counted")
@@ -5392,11 +5443,12 @@ class LoadingTests(unittest.TestCase):
         shared = dict((text, names) for text, names in texts.items() if len(names) > 1)
         self.assertEqual(shared, {}, "no two controls answer with the same text")
         labels = dict((one.made[0], one) for one in made if one.kind == "QLabel" and one.made and one.told("setBuddy"))
-        self.assertEqual(sorted(labels), [u"Beside it", u"Compare every master with", u"Display", u"Master",
+        # (every caption with its colon, but a sentence's, which ends with a period after its control: image 271)
+        self.assertEqual(sorted(labels), [u"Beside it:", u"Compare every master with", u"Display:", u"Master:",
                                           u"Within reach: missing at most"])
-        for text, control in ((u"Within reach: missing at most", dialog.nearly), (u"Display", dialog.status_filter),
-                              (u"Master", dialog.clip_master), (u"Compare every master with", dialog.reference),
-                              (u"Beside it", dialog.compare_master)):
+        for text, control in ((u"Within reach: missing at most", dialog.nearly), (u"Display:", dialog.status_filter),
+                              (u"Master:", dialog.clip_master), (u"Compare every master with", dialog.reference),
+                              (u"Beside it:", dialog.compare_master)):
             self.assertEqual(labels[text].told("setWhatsThis")[-1], control.told("setWhatsThis")[-1], text)
             self.assertIs(labels[text].told("setBuddy")[-1][0], control)
 
@@ -5794,7 +5846,7 @@ class OwnerRoundTests(unittest.TestCase):
         self.assertEqual([(s.script, len(s.results)) for s in scripts], [(u"Canadian Syllabics", 2)])
         tip = fc.coverage_tip(fc.check_language(cree, f))
         self.assertTrue(tip.startswith(u"Swampy Cree, Canadian Syllabics script (Cree): within reach"), tip)
-        self.assertEqual(fc.gain_text(2, [fc.check_language(cree, f)]), u"With 2 glyphs checked: +1 language "
+        self.assertEqual(fc.gain_text(2, [fc.check_language(cree, f)]), u"With 2 glyphs ticked: +1 language "
                                                                          u"(Canadian Syllabics)")
         self.assertEqual(fc.proxy_sentence([u"Chinese"]), u"Recorded as written in Chinese: the languages listed "
                                                           u"under Han are the nearest measure.")
@@ -6320,6 +6372,7 @@ class SpacesSaidOnceTests(unittest.TestCase):
             package = None
 
         Stand.say_spaces = fc.FontCheckDialog.__dict__["say_spaces"]
+        Stand.tool_links = fc.FontCheckDialog.__dict__["tool_links"]
         stand = Stand()
 
         def font(path):
@@ -6336,6 +6389,26 @@ class SpacesSaidOnceTests(unittest.TestCase):
         self.assertEqual(len(lines), 3, "another font: said for it")
         stand.say_spaces(u"")
         self.assertEqual(len(lines), 3, "nothing lacking: nothing said")
+
+    def test_said_in_amber_with_glyph_compose_a_link(self):
+        """The owner's image 242: a line logged as the window reads a font that says what the font lacks is a
+        warning (amber), and Glyph Compose in it opens that tool."""
+        said = []
+        sys.path.insert(0, os.path.join(HERE, os.pardir, "kerning"))
+        import freelab_auto_kerning as ak
+
+        class Stand(object):
+            log = type("Log", (object,), {"add": lambda self, text, level="info": said.append((text, level))})()
+            package = None
+
+        Stand.say_spaces = fc.FontCheckDialog.__dict__["say_spaces"]
+        Stand.tool_links = fc.FontCheckDialog.__dict__["tool_links"]
+        stand = Stand()
+        stand.ak = ak
+        stand.say_spaces(fc.spaces_note(lambda code: code != 0x2009))
+        self.assertEqual(said[0][1], "warning")
+        self.assertIn(ak.tool_link(u"Glyph Compose"), said[0][0])
+        self.assertIn(u"its <i>Glyph generation</i> tab", said[0][0])
 
 
 class SearchFirstTests(unittest.TestCase):
@@ -6381,6 +6454,134 @@ class SearchFirstTests(unittest.TestCase):
         del steps[:]
         stand.set_checks("all")
         self.assertEqual(steps, ["targets"], "nothing waiting: no search again")
+
+
+class UiRoundTests(unittest.TestCase):
+    """The owner's UI round of 2026-11-17 (images 212 to 282) on Font Check: the header as every window's,
+    each tab's status and buttons shown with it, the bottom row, the window as wide as the others until
+    a font comes."""
+
+    setUpClass = classmethod(DialogTests.__dict__["setUpClass"].__func__)
+    tearDownClass = classmethod(DialogTests.__dict__["tearDownClass"].__func__)
+    dialog = DialogTests.__dict__["dialog"]
+
+    def test_header_line_between_the_top_line_and_the_tabs(self):
+        """Images 276 and 279: with no font, no line under "No font is open." (the window started with its
+        tab bar). The top line, the tabs' status lines, the header's line (always shown), then the tabs."""
+        layout, header = Recorded(), Recorded()
+        saved = self.ak.window_layout, self.ak.header_separator
+        self.ak.window_layout = lambda dialog, scroll=None: layout
+        self.ak.header_separator = lambda: header
+        try:
+            dialog = self.dialog()
+        finally:
+            self.ak.window_layout, self.ak.header_separator = saved
+        order = [args[0] for name, args in layout.calls if name in ("addWidget", "addLayout")]
+        self.assertIs(order[0], dialog.font_label, "the top line first: the tools button's row")
+        self.assertIs(order[1], dialog.header_box)
+        self.assertIs(order[2], header, "the header's line, shown even with no font")
+        self.assertIs(order[3], dialog.tabs)
+
+    def test_each_tab_shows_its_own_status_and_buttons(self):
+        """Convention 1 and 4: the shown tab's status line in the header, its buttons in the bottom row
+        (Tick all, Tick none, Tick only..., Build with Glyph Compose, and Copy glyphs on Coverage only)."""
+        dialog = self.dialog()
+        self.assertEqual([label for _, label in fc.CHECK_BUTTONS],
+                         [u"Tick all", u"Tick none", u"Tick only what Glyph Compose can build"])
+        for key in fc.TABS:
+            tab = dialog.tab_of(key)
+            tab.status, tab.actions = Recorded(), Recorded()
+            tab.status.text = u"Something said."
+            if tab.commit is not None:
+                tab.commit = Recorded()
+        prop = getattr(self.ak, "BUSY_LINE_PROP", "freelabBusyLine")
+        for index, key in enumerate(fc.TABS):
+            dialog.tabs.currentIndex = index
+            dialog.show_tab_parts()
+            for other in fc.TABS:
+                tab, mine = dialog.tab_of(other), other == key
+                self.assertEqual(tab.status.told("setHidden")[-1], (not mine,), (key, other))
+                self.assertEqual(tab.status.told("setProperty")[-1], (prop, None if mine else True),
+                                 "kept hidden as it is written while another tab is shown")
+                self.assertEqual(tab.actions.told("setVisible")[-1], (mine,))
+                if tab.commit is not None:
+                    self.assertEqual(tab.commit.told("setVisible")[-1], (mine,))
+        dialog.tabs.currentIndex = 0
+        dialog.coverage.status.text = u""
+        dialog.show_tab_parts()
+        self.assertEqual(dialog.coverage.status.told("setHidden")[-1], (True,), "nothing to say: no blank line")
+
+    def test_as_wide_as_the_others_until_a_font_comes(self):
+        """Image 279: with no font the window opens at the shared size; a font hooked to it widens it, unless
+        the owner gave a window its size by hand."""
+        widened = []
+        saved = fc.FontCheckDialog.widen
+        fc.FontCheckDialog.widen = lambda owner, window: widened.append(window)
+        packages = self.workspace.packages
+        try:
+            self.workspace.packages = lambda: []
+            fc.FontCheckDialog()
+            self.assertEqual(widened, [], "no font: the shared size")
+            self.workspace.packages = packages
+            self.dialog()
+            self.assertEqual(len(widened), 1, "a font: wider at once")
+        finally:
+            fc.FontCheckDialog.widen = saved
+            self.workspace.packages = packages
+
+        class Point(object):
+            def __init__(self, x, y):
+                self.at = (x, y)
+
+            def x(self):
+                return self.at[0]
+
+            def y(self):
+                return self.at[1]
+
+        class Window(object):
+            def __init__(self):
+                self.visible, self.maximized, self.minimized = True, False, False
+                self.width, self.height, self.pos = 1000, 900, Point(300, 50)
+                self.sizes = []
+
+            def resize(self, width, height):
+                self.sizes.append((width, height))
+
+            def move(self, x, y):
+                pass
+
+        dialog = self.dialog()
+        dialog.screen_width = lambda window: 1920
+        registry = self.ak._windows()
+        held = registry.get("size")
+        try:
+            registry["size"] = None
+            for opened, hand, shown, wanted in (((1000, 900), None, True, [(fc.WIDE, 900)]),
+                                                (None, None, True, [(fc.WIDE, 900)]),
+                                                ((900, 900), None, True, []),
+                                                ((1000, 900), (1100, 800), True, []),
+                                                ((1000, 900), None, False, [])):
+                dialog.dialog, dialog.opened_size = Window(), opened
+                dialog.dialog.visible = shown
+                registry["size"] = hand
+                dialog.widen_for_font()
+                self.assertEqual(dialog.dialog.sizes, wanted, (opened, hand, shown))
+                if wanted and opened is not None:
+                    self.assertEqual(dialog.opened_size, (fc.WIDE, 900), "FreeLab's doing, not a size given by hand")
+        finally:
+            registry["size"] = held
+        dialog.dialog = Window()
+        dialog.dialog.width = fc.WIDE
+        self.assertEqual(dialog.widen_for_font(), 0, "never narrower, nor wider than it is when wide already")
+        dialog = self.dialog()
+        grown = []
+        dialog.widen_for_font = lambda: grown.append(True)
+        dialog.package = None  # (opened without a font)
+        dialog.font_changed()  # (a font hooked to it: fonts_tick)
+        self.assertEqual(grown, [True], "widened as the font comes")
+        dialog.font_changed()
+        self.assertEqual(grown, [True], "once: a window that had its font already is left as it is")
 
 
 if __name__ == "__main__":

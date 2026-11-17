@@ -105,9 +105,20 @@ def step(progress, what, done=0, total=1):
         progress(what, done, total)
 
 
+def grouped(number):
+    """A whole number with its thousands set apart by commas: 13,932 (owner's image 231)."""
+    return "{:,}".format(int(number))
+
+
 def counted(number, one, many=None):
-    """"1 rule", "2 rules": a count with its noun in the right number."""
-    return "%d %s" % (number, one if number == 1 else (many or one + "s"))
+    """"1 rule", "2 rules", "13,932 glyphs": a count (thousands grouped) with its noun in the right number."""
+    return "%s %s" % (grouped(number), one if number == 1 else (many or one + "s"))
+
+
+def has_code(code):
+    """Whether a FontCode holds any feature code to compile (a prefix or a feature with text): without
+    it, Compile in FontLab has nothing to do."""
+    return bool((code.prefix or "").strip() or any((text or "").strip() for _, text in code.features))
 
 
 def _text(value):
@@ -1929,6 +1940,10 @@ REPAIR_NOTE = "mends code that does not compile: review it"
 STEPS = {"Reading the code": (0.0, 0.3), "Looking through the code": (0.3, 0.05), "Compiling": (0.35, 0.15),
          "Proving the fixes": (0.5, 0.45), "Proving the fixes together": (0.95, 0.05)}
 TITLE = "FreeLab Feature Check"
+APPLY_TEXT = "Apply ticked fixes"  # (with a count once some are ticked: "Apply 3 ticked fixes")
+COMPILE_STEP = "Compiling in FontLab"  # the top row's step while FontLab compiles (owner's image 212)
+READ_STEP = "Reading what FontLab's compiler said"
+COMPILE_WAIT_MS = 4000  # the bar ends by then whatever happens (ak.compiled_note reads the Output panel for ~3.2 s)
 
 HELP = """<b>FreeLab Feature Check</b><br>
 Checks the current font's feature code, whatever made it: what stops it from compiling (syntax errors,
@@ -1939,14 +1954,15 @@ nothing (rules written twice, a glyph substituted by itself, classes defined twi
 lookups never used, empty lookups and features). A fix that changes what the font does (a lookup flag
 FontLab wrote without its class, taken out) is offered for review, never applied automatically.<br><br>
 Findings are grouped by kind, errors first; select one to see its code under the list, its line
-selected. A finding with a fix has a check box: check the fixes you want, then <i>Apply checked
+selected. A finding with a fix has a check box: tick the fixes you want, then <i>Apply ticked
 fixes</i> (one step of FontLab's History: <i>Edit &gt; Undo</i> takes it back). Each fix is tried first,
 and its last column says whether the font's layout, compiled with it, stays the same.<br><br>
-<b>Apply safe fixes automatically</b>: at each check, the fixes proven to change nothing in the compiled
+<i>Apply safe fixes automatically</i>: at each check, the fixes proven to change nothing in the compiled
 font (rules written twice, substitutions by the glyph itself, glyphs listed twice in a class, classes and
 lookups never used) are applied at once, and the list shows what is left to review.<br><br>
 The checks use fontTools' compiler, which FontLab ships; FontLab compiles with Adobe's, which differs
-in places: <i>Compile in FontLab</i> compiles there and adds what it reports to the log.
+in places: <i>Compile in FontLab</i> compiles there (the window's top row shows it meanwhile) and adds
+what it reports to the log.
 FontLab's automatic code (between its <code>#&gt; feature</code> and <code>#&lt;</code> lines) is checked
 but never fixed: FontLab writes it again on compiling."""
 
@@ -2043,10 +2059,17 @@ def group_title(kind, count):
     return "%s (%s, %s)" % (title, counted(count, one, many), word)
 
 
-def summary_line(report):
-    """The status line over the list."""
+def _escaped(text):
+    return _text(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def summary_line(report, rich=False):
+    """The status line under the font line (owner's images 231 and 237). rich: as rich text, the counts
+    and their nouns in bold (the rest escaped)."""
+    escape = _escaped if rich else _text
+    strong = (lambda text: "<b>%s</b>" % _escaped(text)) if rich else _text
     if report.unavailable:
-        return "Nothing was checked: %s." % report.unavailable
+        return "Nothing was checked: %s." % escape(report.unavailable)
     if not report.findings:
         return "No finding: the code compiles, and nothing in it is unused or written twice."
     groups = report.by_kind()
@@ -2056,9 +2079,16 @@ def summary_line(report):
     for severity, one, many in ((ERROR, "error", "errors"), (WARNING, "warning", "warnings"),
                                 (ADVICE, "piece of advice", "pieces of advice")):
         if totals[severity]:
-            parts.append(counted(totals[severity], one, many))
+            parts.append(strong(counted(totals[severity], one, many)))
     state = "It compiles." if report.built else ("It does not compile." if totals[ERROR] else "")
     return ("%s. %s" % (", ".join(parts), state)).strip()
+
+
+def font_line(ak, name, glyphs):
+    """The window's top line: the font's name in bold (its subject is the whole font: no master), and its
+    glyphs counted, thousands grouped: "<b>BIZ UDGothic</b> (<b>13,932 glyphs</b>)." (owner's image 231)."""
+    named = ak.font_named(name) if hasattr(ak, "font_named") else ak.b(name)
+    return "%s (%s)." % (named, ak.b(counted(glyphs, "glyph")))
 
 
 def written_parts(before, after):
@@ -2083,14 +2113,17 @@ class FeatureCheckDialog(object):
         dialog.setWhatsThis(HELP)
         ak.size_dialog(dialog)
         layout = ak.window_layout(dialog)  # (its content scrolls on a small screen)
+        # The header, as in every window (owner's images 231 and 237): the font line (the busy bar in its place
+        # while a check or a compile runs), the check's result under it, then the header's line
         self.font_label = ak.status_label()
         self.font_label.setWordWrap(True)
         layout.addWidget(self.font_label)
+        self.status = ak.status_label()
+        self.status.setWordWrap(True)
+        layout.addWidget(self.status)
+        layout.addWidget(ak.header_separator())
 
         row = QtGui.QHBoxLayout()
-        self.check_button = QtGui.QPushButton("Check")
-        self.check_button.setWhatsThis("Checks the font's feature code again as it is now.")
-        row.addWidget(self.check_button)
         self.auto_box = QtGui.QCheckBox("Apply safe fixes automatically")
         self.auto_box.setWhatsThis("At each check, applies the fixes proven to change nothing in the compiled font "
                                    "(rules written twice, substitutions by the glyph itself, glyphs listed twice in a "
@@ -2099,17 +2132,12 @@ class FeatureCheckDialog(object):
         self.settings = read_settings(ak)
         self.auto_box.setChecked(bool(self.settings.get("auto")))
         row.addWidget(self.auto_box)
+        self.check_button = QtGui.QPushButton("Check")  # (the run button, at the end of the option it reads)
+        self.check_button.setWhatsThis("Checks the font's feature code again as it is now.")
+        row.addWidget(self.check_button)
         row.addStretch(1)
-        self.compile_button = QtGui.QPushButton("Compile in FontLab")
-        self.compile_button.setWhatsThis("Compiles the font's features with FontLab's own compiler (Adobe's), as the "
-                                         "<i>Features</i> panel's <i>Compile</i> button does, and adds what it reports "
-                                         "to the log.")
-        row.addWidget(self.compile_button)
         layout.addLayout(row)
 
-        self.status = ak.status_label()
-        self.status.setWordWrap(True)
-        layout.addWidget(self.status)
         self.splitter = QtGui.QSplitter(QtCore.Qt.Vertical)
         self.tree = QtGui.QTreeWidget()
         self.tree.setColumnCount(len(COLUMNS))
@@ -2135,18 +2163,26 @@ class FeatureCheckDialog(object):
         self.log = ak.Log()
         layout.addWidget(self.log.widget)
 
+        # The bottom row, as in every window (owner's image 255): the list's tick buttons at the left; at the
+        # right the compile, then the committing action, then Close
         buttons = QtGui.QHBoxLayout()
-        self.check_all = QtGui.QPushButton("Check all")
-        self.check_all.setWhatsThis("Checks every fix of the list.")
-        self.check_none = QtGui.QPushButton("Check none")
-        self.check_none.setWhatsThis("Unchecks every fix of the list.")
-        self.apply_button = QtGui.QPushButton("Apply checked fixes")
-        self.apply_button.setWhatsThis("Applies the checked fixes to the font's feature code, as one step of FontLab's "
+        self.check_all = QtGui.QPushButton("Tick all")
+        self.check_all.setWhatsThis("Ticks every fix in the list.")
+        self.check_none = QtGui.QPushButton("Tick none")
+        self.check_none.setWhatsThis("Unticks every fix in the list.")
+        self.compile_button = QtGui.QPushButton("Compile in FontLab")
+        self.compile_button.setWhatsThis("Compiles the font's features with FontLab's own compiler (Adobe's), as the "
+                                         "<i>Features</i> panel's <i>Compile</i> button does, and adds what it reports "
+                                         "to the log; the window's top row shows it meanwhile. Grayed while the font has "
+                                         "no feature code.")
+        self.apply_button = QtGui.QPushButton(APPLY_TEXT)
+        self.apply_button.setWhatsThis("Applies the ticked fixes to the font's feature code, as one step of FontLab's "
                                        "History, then checks the code again.")
         self.close_button = QtGui.QPushButton("Close")
         for button in (self.check_all, self.check_none):
             buttons.addWidget(button)
         buttons.addStretch(1)
+        buttons.addWidget(self.compile_button)
         buttons.addWidget(self.apply_button)
         buttons.addWidget(self.close_button)
         layout.addLayout(buttons)
@@ -2156,6 +2192,8 @@ class FeatureCheckDialog(object):
         self.items = []
         self.order = []
         self.busy = False
+        self.code_there = False  # whether the font has feature code (has_code): Compile in FontLab grays without
+        self.compiling = None  # the compile under way (compile_in_fontlab), until FontLab's report is read
         self.seen_history = None
         self.check_button.connect("clicked()", lambda: self.run())
         self.auto_box.connect("toggled(bool)", self.auto_toggled)
@@ -2190,10 +2228,15 @@ class FeatureCheckDialog(object):
     def read_font(self):
         self.package = self.current_font()
         if self.package is None:
+            self.code_there = False
             self.font_label.setText(self.ak.no_font_line())
             return False
         self.order = [g.name for g in self.package.fgPackage.glyphs]
-        self.font_label.setText("%s (%s)." % (self.ak.b(self.package.tfn), counted(len(self.order), "glyph")))
+        self.font_label.setText(font_line(self.ak, self.package.tfn, len(self.order)))
+        try:
+            self.code_there = has_code(font_code(self.package))
+        except Exception:
+            self.code_there = True  # (unreadable here: FontLab's compiler may still say what is wrong)
         return True
 
     def font_changed(self):
@@ -2210,18 +2253,20 @@ class FeatureCheckDialog(object):
         """An undo, a redo, or an edit in FontLab: checked again, nothing applied automatically (an undo
         of the automatic fixes was undone at once by them, live)."""
         self.log.add("The font's History moved (an undo, a redo, or an edit): checked again%s." % (
-            "; nothing is applied automatically until you click Check" if self.auto_box.checked else ""))
+            "; nothing is applied automatically until you click <i>Check</i>" if self.auto_box.checked else ""))
         self.run(automatic=False)
 
     # -- checking --------------------------------------------------------------
 
-    def set_busy(self, on, what=""):
-        """The check under way (or over): its steps in the window's top row (ak.busy_start), the buttons
-        grayed; the tools menu, the arrows, and Close stop it, then do what was clicked."""
+    def set_busy(self, on, what="", stoppable=True):
+        """The check (or a compile in FontLab) under way, or over: its steps in the window's top row
+        (ak.busy_start), the buttons grayed; the tools menu, the arrows, and Close stop a check, then do
+        what was clicked (a compile, which cannot be stopped halfway, is let finish first)."""
         self.busy = on
         if on:
-            self.status.setText("")
-            self.ak.busy_start(self, what)
+            if stoppable:
+                self.status.setText("")
+            self.ak.busy_start(self, what, stoppable=stoppable)
         else:
             self.ak.busy_end(self)
         self.update_buttons()
@@ -2249,6 +2294,7 @@ class FeatureCheckDialog(object):
         if self.package is None or self.ak.font_key(current) != self.ak.font_key(self.package):
             self.read_font()
         code = font_code(self.package)
+        self.code_there = has_code(code)
         self.set_busy(True, "Checking the feature code")
         try:
             report = check(code, self.order, self.progress)
@@ -2260,7 +2306,7 @@ class FeatureCheckDialog(object):
                     prove_fixes(report, self.order, self.progress)
         except self.ak.Stopped:
             self.set_busy(False)
-            self.status.setText("The check was stopped. Click Check to check again.")
+            self.status.setText("The check was stopped. Click <i>Check</i> to check again.")
             return
         except Exception as exc:
             self.set_busy(False)
@@ -2301,7 +2347,7 @@ class FeatureCheckDialog(object):
                 item.setData(0, QtCore.Qt.UserRole, index)
                 if finding.fix is not None:
                     item.setFlags(flags | QtCore.Qt.ItemIsUserCheckable)
-                    item.setCheckState(0, QtCore.Qt.Unchecked)  # (reviewed by hand: none checked at first)
+                    item.setCheckState(0, QtCore.Qt.Unchecked)  # (reviewed by hand: none ticked at first)
                 else:
                     item.setFlags(flags)
                 item.setToolTip(0, self.ak.html(message))
@@ -2314,7 +2360,7 @@ class FeatureCheckDialog(object):
             self.ak.fit_rows(self.tree, range(len(COLUMNS) - 1))
         except Exception:
             pass
-        self.status.setText(self.ak.html(summary_line(report)))
+        self.status.setText(summary_line(report, rich=True))
         self.code.setPlainText("")
         self.update_buttons()
 
@@ -2347,7 +2393,7 @@ class FeatureCheckDialog(object):
 
     def check_every(self, on):
         rows = [item for item in self.rows() if (self.finding_of(item) or Finding("build", "")).fix is not None]
-        self.ak.check_rows(rows, bool(on), self.log, "Check all" if on else "Check none", "fix", "fixes",
+        self.ak.check_rows(rows, bool(on), self.log, "Tick all" if on else "Tick none", "fix", "fixes",
                            ("in a closed group", "in closed groups"))
         self.update_buttons()
 
@@ -2356,11 +2402,12 @@ class FeatureCheckDialog(object):
         fixes = [f for f in self.items if f.fix is not None]
         checked = len(self.checked_findings()) if fixes else 0
         self.ak.enable(self.check_button, not self.busy and (has_font or self.ak.fonts_open(self.fontlab)))
-        self.ak.enable(self.compile_button, not self.busy and has_font)
-        self.ak.enable(self.apply_button, not self.busy and checked > 0)
+        # (grayed with nothing to do: no font, or a font without feature code; owner's image 255)
+        self.ak.enable(self.compile_button, not self.busy and has_font and self.code_there)
+        self.ak.enable(self.apply_button, not self.busy and has_font and checked > 0)
         self.ak.enable(self.check_all, not self.busy and checked < len(fixes))
         self.ak.enable(self.check_none, not self.busy and checked > 0)
-        text = "Apply %s" % counted(checked, "checked fix", "checked fixes") if checked else "Apply checked fixes"
+        text = "Apply %s" % counted(checked, "ticked fix", "ticked fixes") if checked else APPLY_TEXT
         try:
             if self.apply_button.text != text:
                 self.apply_button.setText(text)
@@ -2430,7 +2477,7 @@ class FeatureCheckDialog(object):
         if written:
             what = "; ".join(sorted(set(f.what for f in fixes)))
             self.log.add("%s %s (%s) in %s.%s" % (
-                "Applied automatically" if automatic else "Applied", counted(len(fixes), "fix", "fixes"),
+                "Applied automatically" if automatic else "Applied", self.ak.b(counted(len(fixes), "fix", "fixes")),
                 self.ak.html(what), self.ak.b(", ".join(written)),
                 status.undo(" <i>Edit &gt; Undo</i> takes %s back." % ("it" if len(fixes) == 1 else "them"))), "done")
         status.report(self.log)
@@ -2439,12 +2486,56 @@ class FeatureCheckDialog(object):
         return bool(written)
 
     def compile_in_fontlab(self):
+        """The font's features compiled by FontLab (ak.compiled_note), the window's top row showing it until
+        what FontLab's compiler said is in the log (owner's image 212: no feedback before). A compile cannot
+        be stopped halfway: the tools menu, the arrows, and Close wait for it."""
+        QtCore, QtGui = _qt()
+        if self.busy or self.package is None:
+            return
+
         class Box(object):  # (compiled_note's check box, always on here)
             checked = True
+
+        token = object()
+        self.compiling = token
+        owner = self
+
+        class Told(object):  # the log compiled_note reports to once it has read FontLab's Output panel
+            def add(self, *args, **kwargs):
+                owner.log.add(*args, **kwargs)
+                owner.compiled(token)
+
+        self.set_busy(True, COMPILE_STEP, stoppable=False)
+        reads = getattr(self.ak, "_COMPILE_READS", None)
+        last = reads[-1] if reads else None
         try:
-            self.log.add(self.ak.compiled_note(Box(), self.log).strip())
+            note = self.ak.compiled_note(Box(), Told())
         except Exception as exc:
             self.log.add("FontLab did not compile: %s" % self.ak.html("%s" % exc), "error")
+            self.compiled(token)
+            return
+        self.log.add(note.strip())
+        # (a read of the Output panel to come: the bar stays until it reports, COMPILE_WAIT_MS at most)
+        waiting = bool(reads) and reads[-1] is not last if reads is not None else u"follows in this log" in note
+        if not waiting:
+            self.compiled(token)
+            return
+        try:
+            self.ak.busy_progress(self, READ_STEP, 0.5, stoppable=False)
+        except Exception:
+            pass
+        self.compile_slot = lambda: self.compiled(token)  # (held: PythonQt drops a slot no Python object holds)
+        QtCore.QTimer.singleShot(COMPILE_WAIT_MS, self.compile_slot)
+
+    def compiled(self, token):
+        """A compile's report in the log (or its wait over): the top row back as it was. Never raises."""
+        try:
+            if self.compiling is not token:
+                return  # (another compile's, or done already)
+            self.compiling = None
+            self.set_busy(False)
+        except Exception:
+            pass
 
     def show(self):
         QtCore, QtGui = _qt()

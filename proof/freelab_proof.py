@@ -43,9 +43,10 @@ TITLES = dict(SECTIONS, summary=u"Summary", about=u"About this proof", info=u"Fo
 FONT_CHECK_FILE, FONT_CHECK_MODULE = "freelab_font_check.py", "freelab_font_check"
 FEATURE_CODE_FILE, FEATURE_CODE_MODULE = "freelab_feature_code.py", "freelab_feature_code"
 SETTINGS_FILE = u"proof.json"  # in FreeLab's settings folder (ak.state_dir()): the summary's two settings
-# What the summary lists of the languages, after their counts (the dropdown's texts follow "Summary lists")
-SUMMARY_LANGUAGES = (("covered", u"covered languages"), ("reach", u"covered languages and those within reach"),
-                     ("none", u"no languages (counts only)"))
+# What the summary lists of the languages, after their counts (the dropdown's items, after "Summary lists:":
+# capitalized, as every dropdown's in the label form, owner's image 271)
+SUMMARY_LANGUAGES = (("covered", u"Covered languages"), ("reach", u"Covered languages and those within reach"),
+                     ("none", u"No languages (counts only)"))
 SUMMARY_TITLE_SIZE = 30  # points: the family's name, in the font itself
 SUMMARY_TITLE_MIN = 12  # ... made smaller, down to this, for a name wider than the page
 SUMMARY_COLUMNS = 5  # the languages' names, in columns
@@ -73,7 +74,10 @@ ALPHABET_MAX = 120  # characters at most, when a script's letters stand in for i
 WATERFALL_MIN = 120  # characters of sample text the waterfall wants (it is cut at the page's edge)
 ALL_MASTERS = u"All masters"
 NOTE = u"Kerning applied; OpenType features not applied"
-KERNING_SETS = (("all", u"every kerned pair"), ("common", u"common pairs only"))
+KERNING_SETS = (("all", u"Every kerned pair"), ("common", u"Common pairs only"))
+# The window's line while no font is open, on one line (ak.one_line; owner's image 278), "hooks to" as the
+# shared NO_FONT_LINE
+NO_FONT_LINE = u"No font is open. This window hooks to the next font you open, and lays out its proof at once."
 COLOR_MODES = (("window", u"As the window"), ("print", u"Print (black on white)"))
 PRINT_COLORS = ((0, 0, 0), (255, 255, 255))  # (ink, paper)
 DARK_COLORS = ((235, 235, 235), (30, 30, 30))  # the second choice beside a light window: light on dark
@@ -206,6 +210,11 @@ def load_auto_kerning():
 # ---------------------------------------------------------------------------
 # Characters
 # ---------------------------------------------------------------------------
+
+def grouped(number):
+    """13932 as "13,932"."""
+    return u"{:,}".format(number)
+
 
 def counted(number, one, many=None):
     """"1 page", "2 pages": a count with its noun in the right number."""
@@ -1413,6 +1422,8 @@ def features_text(features):
 def kerning_text(pairs, master, entries=None, classes=None):
     """A master's kerning in one line: its pairs of glyphs with the classes resolved, then the entries
     and classes they come from, where FontLab gives them."""
+    if not pairs:  # (a count right at 0: never "0 kerned pairs", owner's image 228)
+        return u"No kerned pairs in master %s" % master
     text = u"%s in master %s, classes resolved" % (counted(pairs, u"kerned pair"), master)
     if entries is not None and classes is not None:
         text += u" (%s, %s)" % (counted(entries, u"entry", u"entries"), counted(classes, u"class", u"classes"))
@@ -2254,6 +2265,35 @@ def common_filter(common, codes, ak=None):
     return keep
 
 
+def kerning_note(kerned, masters, b):
+    """What the top line says of the kerning applied: each master's kerned pairs counted, in bold, "no
+    kerned pairs" at 0 (owner's image 228: "0 kerned pairs"); the master named only when several are."""
+    if not any(kerned):
+        return u"No kerned pairs to apply"
+    if len(masters) == 1:
+        return u"Kerning applied (%s, classes resolved)" % b(counted(kerned[0], u"kerned pair"))
+    parts = [(u"%s in %s" % (b(counted(count, u"kerned pair")), b(master)) if count else
+              u"no kerned pairs in %s" % b(master)) for count, master in zip(kerned, masters)]
+    return u"Kerning applied (%s, classes resolved)" % u", ".join(parts)
+
+
+def status_line(named, proof, size, ak):
+    """The window's top line once a proof is laid out (rich text): named (the font and master, in bold:
+    ProofDialog.font_named), its pages counted in bold, each section's pages after its tick box's name in
+    italics, then what is applied."""
+    text = u"%s: %s (%s)." % (named, ak.b(counted(len(proof.pages), u"page")), size)
+    counts = proof.section_pages()
+    parts = [u"%s (%s)" % (ak.i(title), grouped(counts[key]))
+             for key, title in ((("summary", TITLES["summary"]),) + SECTIONS) if key in counts]
+    if parts:
+        text += u" Pages per section: %s." % u", ".join(parts)
+    text += u" %s; OpenType features not applied." % kerning_note(proof.kerned, proof.masters, ak.b)
+    if proof.left_out:
+        text += u" No text for %s: %s shaping." % (ak.html(u", ".join(proof.left_out)),
+                                                  u"it needs" if len(proof.left_out) == 1 else u"they need")
+    return text
+
+
 def pdf_name(family, master, date):
     """A file name for the proof: "Family Regular proof 2026-11-11.pdf", without the characters
     Windows forbids."""
@@ -2702,41 +2742,45 @@ class ProofDialog(object):
         dialog.setWhatsThis(HELP)
         ak.size_dialog(dialog)
         layout = QtGui.QVBoxLayout(dialog)
+        if hasattr(ak, "one_line"):
+            ak.one_line(NO_FONT_LINE)  # (a no-font line: its two sentences on one line, owner's image 278)
         self.font_label = ak.status_label()
         layout.addWidget(self.font_label)
-        layout.addWidget(ak.separator())
+        # (the header's line: shown with no font too, the grayed controls under it)
+        layout.addWidget(ak.header_separator() if hasattr(ak, "header_separator") else ak.separator())
 
         self.settings = read_settings(ak)  # the summary's two settings, kept between FontLab sessions
         self.captions = {}  # each control's caption (a label), by the control's name here: it shows the control's help
 
         def captioned(into, name, caption, control, tip, stretch=0):
-            """A control after its caption, both with the control's own What's This: a click on the
-            caption in What's This mode answers for its control, not for the window (or a neighbor)."""
+            """A control after its caption, in the label form (owner's image 271: "Page: [A4]"): the help is
+            the control's; the caption (ak.caption) shows it on a right-click, and grays with the control."""
             label = self.captions[name] = QtGui.QLabel(caption)
-            label.setWhatsThis(tip)
             control.setWhatsThis(tip)
+            if hasattr(ak, "caption"):
+                ak.caption(label, control)
             into.addWidget(label)
             into.addWidget(control, stretch)
             return control
 
         row = QtGui.QHBoxLayout()
-        self.masters_box = captioned(row, "masters", "Masters", QtGui.QComboBox(),
+        self.masters_box = captioned(row, "masters", "Masters:", QtGui.QComboBox(),
                                      u"The current master only, or each master in turn (each starting on a new "
                                      u"page, after a page of the masters side by side).")
         row.addSpacing(12)
         self.page_box = QtGui.QComboBox()
         for _, label, _ in PAGE_SIZES:
             self.page_box.addItem(label)
-        captioned(row, "page", "Page", self.page_box, u"The PDF's page size, portrait.")
+        captioned(row, "page", "Page:", self.page_box, u"The PDF's page size, portrait.")
         row.addSpacing(12)
         self.pairs_box = QtGui.QComboBox()
         for _, label in KERNING_SETS:
             self.pairs_box.addItem(label)
-        captioned(row, "pairs", "Kerning strings for", self.pairs_box,
+        captioned(row, "pairs", "Kerning strings:", self.pairs_box,
                   u"Every kerned pair (a font with class kerning can have tens of thousands: the PDF grows with them), "
                   u"or only the pairs common in text (the list <i>Auto Kerning</i>'s <i>Common pairs</i> uses).")
         row.addSpacing(12)
-        self.scope_box = captioned(row, "scope", "Proof", QtGui.QComboBox(), scope_help(0, 0, True))
+        self.scope_box = captioned(row, "scope", "Proof:", QtGui.QComboBox(), scope_help(0, 0, True))
         self.scopes = [None]
         self.scope_kept = None  # the scope chosen last (the dropdown is filled again around it)
         self.scope_expanded = False  # More languages... was chosen: the dropdown lists every covered language
@@ -2745,14 +2789,14 @@ class ProofDialog(object):
         self.colors_box = QtGui.QComboBox()
         for _, label in COLOR_MODES:
             self.colors_box.addItem(label)
-        captioned(row, "colors", "Colors", self.colors_box,
+        captioned(row, "colors", "Colors:", self.colors_box,
                   u"The PDF's colors: this window's (its text on its background, light on dark in dark mode), or "
                   u"black on white, for printing. The page shown beside the list is the PDF as it will be.")
         row.addSpacing(12)
         self.zoom_box = QtGui.QComboBox()
         for _, label in ZOOMS:
             self.zoom_box.addItem(label)
-        captioned(row, "zoom", "Zoom", self.zoom_box,
+        captioned(row, "zoom", "Zoom:", self.zoom_box,
                   u"The page shown beside the list: whole (<i>Fit page</i>), or at a share of its printed size "
                   u"(100%: as large as printed), scrolled. <i>Ctrl</i> with the mouse wheel over the page, or "
                   u"<i>Ctrl+plus</i> and <i>Ctrl+minus</i> in this window, zoom in and out; <i>Ctrl+0</i> fits it "
@@ -2772,7 +2816,7 @@ class ProofDialog(object):
                                       u"the master proofed, the version and dates the font records, its units per em, "
                                       u"its counts of glyphs and of encoded characters, its vertical metrics, its "
                                       u"OpenType features and kerning, and the scripts and languages it covers, as "
-                                      u"<i>Font Check</i> counts them, with the data's sources. Unchecked, a few lines "
+                                      u"<i>Font Check</i> counts them, with the data's sources. Unticked, a few lines "
                                       u"about the proof take its place. Kept from one FontLab session to the next.")
         checks.addWidget(self.summary_box)
         self.section_boxes = {}
@@ -2801,7 +2845,7 @@ class ProofDialog(object):
         keys = [key for key, _ in SUMMARY_LANGUAGES]
         if self.settings.get("summary_languages") in keys:
             self.languages_box.setCurrentIndex(keys.index(self.settings.get("summary_languages")))
-        captioned(sizes, "languages", "Summary lists", self.languages_box,
+        captioned(sizes, "languages", "Summary lists:", self.languages_box,
                   u"What the summary lists after the counts of each script's languages: the languages the font covers "
                   u"(under their scripts, A to Z, in five columns of small type; some 435 fill a page, and a longer "
                   u"list goes on over the following pages, never cut: a font with the Latin of Western and Central "
@@ -2811,12 +2855,12 @@ class ProofDialog(object):
                   u"FontLab session to the next.")
         sizes.addSpacing(12)
         self.waterfall_edit = captioned(
-            sizes, "waterfall", "Waterfall sizes", QtGui.QLineEdit(u" ".join(format_size(s) for s in WATERFALL_SIZES)),
+            sizes, "waterfall", "Waterfall sizes:", QtGui.QLineEdit(u" ".join(format_size(s) for s in WATERFALL_SIZES)),
             u"The waterfall's point sizes, a line of sample text at each: typed, separated by spaces or commas (%d to "
             u"%d points)." % SIZE_RANGE, 2)
         sizes.addSpacing(12)
         self.text_edit = captioned(
-            sizes, "text", "Text sizes", QtGui.QLineEdit(u" ".join(format_size(s) for s in TEXT_SIZES)),
+            sizes, "text", "Text sizes:", QtGui.QLineEdit(u" ".join(format_size(s) for s in TEXT_SIZES)),
             u"The point sizes the text section sets each script's sample text at: typed, separated by spaces or "
             u"commas (%d to %d points)." % SIZE_RANGE, 1)
         layout.addLayout(sizes)
@@ -2980,8 +3024,8 @@ class ProofDialog(object):
             self.proof = None
             self.page_list.clear()
             self.preview.clear()
-            own = u"No font is open. Open one: its proof is laid out at once."
-            self.font_label.setText(self.ak.no_font_line(own) if hasattr(self.ak, "no_font_line") else own)
+            self.font_label.setText(self.ak.no_font_line(NO_FONT_LINE) if hasattr(self.ak, "no_font_line")
+                                    else NO_FONT_LINE)
             return False
         self.master = self.package.master
         masters = self.masters()
@@ -3347,9 +3391,8 @@ class ProofDialog(object):
             self.scope_box.setCurrentIndex(index)
             if not index:
                 self.scope_kept = None  # (the font read now lacks it: every script again)
-            tip = scope_help(len(covered), len(rest), listed)
-            for widget in (self.scope_box, self.captions["scope"]):
-                widget.setWhatsThis(tip)
+            # (its caption shows the dropdown's help: ak.caption)
+            self.scope_box.setWhatsThis(scope_help(len(covered), len(rest), listed))
         finally:
             self.scope_box.blockSignals(False)
 
@@ -3458,27 +3501,24 @@ class ProofDialog(object):
             self.page_list.blockSignals(False)
         self.show_page()
 
+    def font_named(self, masters=None):
+        """The top line's start (ak.font_named, the same in every tool): the font in bold, then the master
+        proofed, or all of them."""
+        ak = self.ak
+        count = len(self.masters())
+        if masters is not None and len(masters) > 1:
+            return u"%s, all %s" % (ak.b(self.package.tfn), ak.b(counted(len(masters), u"master")))
+        master = masters[0] if masters else self.master
+        if hasattr(ak, "font_named"):
+            return ak.font_named(self.package.tfn, master, count)
+        return u"%s, master %s" % (ak.b(self.package.tfn), ak.b(master))
+
     def status(self):
-        b = self.ak.b
-        if self.proof is None:
-            self.font_label.setText(u"%s: no proof (see the log)." % b(self.package.tfn))
+        if self.proof is None:  # (the top line still says which font: owner's image 224)
+            self.font_label.setText(u"%s: no proof (see the log)." % self.font_named())
             return
-        counts = self.proof.section_pages()
-        parts = [u"%s %d" % (title.lower(), counts[key]) for key, title in ((("summary", TITLES["summary"]),) + SECTIONS)
-                 if key in counts]
         size = dict((key, label) for key, label, _ in PAGE_SIZES).get(self.page_options.page, u"")
-        masters = self.proof.masters
-        which = u"master %s" % b(masters[0]) if len(masters) == 1 else b(counted(len(masters), u"master"))
-        text = u"%s, %s: %s (%s)." % (b(self.package.tfn), which, b(counted(len(self.proof.pages), u"page")), size)
-        if parts:
-            text += u" Pages per section: %s." % u", ".join(parts)
-        pairs = u", ".join(u"%s in %s" % (counted(count, u"kerned pair"), master)
-                           for count, master in zip(self.proof.kerned, masters))
-        text += u" Kerning applied (%s, classes resolved); OpenType features not applied." % pairs
-        if self.proof.left_out:
-            text += u" No text for %s: %s shaping." % (u", ".join(self.proof.left_out),
-                                                      u"it needs" if len(self.proof.left_out) == 1 else u"they need")
-        self.font_label.setText(text)
+        self.font_label.setText(status_line(self.font_named(self.proof.masters), self.proof, size, self.ak))
 
     def selected_page(self):
         if self.proof is None:
@@ -3632,13 +3672,13 @@ class ProofDialog(object):
         ready = self.proof is not None and bool(self.proof.pages) and not self.busy
         enable(self.save_button, ready)
         enable(self.open_button, self.saved_there())
-        enable(self.languages_box, bool(self.summary_box.isChecked()))  # (nothing to list without the page)
-        enable(self.captions["languages"], bool(self.summary_box.isChecked()))
-        # No font: no masters and no scripts or languages to choose from, no pages to look at
         has_font = self.package is not None
-        for key, box in (("masters", self.masters_box), ("scope", self.scope_box)):
+        # (nothing to list without the summary page; the captions gray with their controls: ak.caption)
+        enable(self.languages_box, has_font and bool(self.summary_box.isChecked()))
+        # No font: no masters and no scripts or languages to choose from, no pages to look at (owner's image
+        # 282: ak.no_font_states grays every other control meanwhile, Close and the tools aside)
+        for box in (self.masters_box, self.scope_box):
             enable(box, has_font)
-            enable(self.captions[key], has_font)
         enable(self.page_list, self.proof is not None and bool(self.proof.pages))
         page = self.selected_page()
         enable(self.glyph_window_button, ready and page is not None and bool(page.runs()))

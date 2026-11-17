@@ -52,8 +52,8 @@ TABULAR = ("tf", "tosf", "tnum")  # a figure's tabular forms, in the order taken
 NUMR, DNOM = ("numr", "numerator"), ("dnom", "denominator")  # (Feature Code's own, where it is read)
 FRACTION_SLASH = "2044"
 LACKING = u"Need a glyph the font lacks"
-EXISTING = u"Existing glyphs (check to rebuild)"
-JUST_BUILT = u"Just built (check to rebuild)"
+EXISTING = u"Existing glyphs (tick to rebuild)"
+JUST_BUILT = u"Just built (tick to rebuild)"
 FIGURE_FORMS_FIRST = u"build the numerators and denominators first (Feature Code, Forms tab)"
 NO_LAYER = u"%s has no layer in this master"  # (a variable font's sparse master: the glyph gets none there either)
 
@@ -525,6 +525,8 @@ class Layout(object):
         self.axis = axis  # (a mirror's: "x" left to right, "y" upside down)
         self.deform = None  # (Vary turned and mirrored glyphs: the matrix its parts were changed by, else None)
         self.varied = None  # ((seed, strength's label) it was varied with, else None)
+        self.plain = None  # (varied: the layout as it was unchanged, which the preview outlines)
+        self.params = None  # (varied: freelab_alternates.variant_params' changes, which the preview says)
 
 
 # -- Vary turned and mirrored glyphs (the owner's request of 2026-11-16) ---------------------------------------
@@ -550,6 +552,7 @@ def deformer(alternates, seed, strength, upm):
         return tuple(float(v) for v in alternates.variant_matrix(alternates.variant_params(name, 1, strength, seed),
                                                                  cx, cy, upm))
     vary.label = (int(seed), alternates.strength_of(strength)[1])
+    vary.params = lambda name: alternates.variant_params(name, 1, strength, seed)  # (what the preview's line says)
     return vary
 
 
@@ -962,6 +965,9 @@ class Planner(object):
         out = Layout([part.moved(matrix) for part in layout.parts], layout.advance, layout.kind, layout.shared,
                      layout.axis)
         out.deform, out.varied = matrix, getattr(self.vary, "label", None)
+        out.plain = layout  # (the glyph unchanged: the preview outlines it under the varied one)
+        params = getattr(self.vary, "params", None)
+        out.params = params(row.name) if params is not None else None
         return out
 
     def planned_components(self, name):
@@ -1382,6 +1388,43 @@ def monoline_text(measured, rule, likely):
 
 def confidence_text(row):
     return row.sureness if not row.missing else u""
+
+
+def status_text(buildable, sureness, lacking, bold=None, italic=None, build=u"Build ticked glyphs"):
+    """The tab's status lines, under the window's top line (which names the font and master, owner's image
+    265): how many glyphs can be built (sureness: "19 exact" and the like), how many need a glyph the font
+    lacks, and which button builds them. Every count right at 0, 1, and 2 (owner's image 247)."""
+    bold = bold or (lambda text: text)
+    italic = italic or (lambda text: text)
+    needs = lambda n: u"%s %s a glyph the font lacks" % (bold(counted(n, u"glyph")), u"needs" if n == 1 else u"need")
+    if buildable:
+        text = u"%s can be built%s" % (bold(counted(buildable, u"glyph")),
+                                       u" (%s)" % u", ".join(sureness) if sureness else u"")
+        if lacking:
+            text += u"; " + needs(lacking)
+        return text + u". Nothing changes until you click %s." % italic(build)
+    if lacking:
+        return u"No glyph can be built: %s." % needs(lacking)
+    return u"No glyph can be built."
+
+
+def vary_words(params, upm=1000.0):
+    """What Vary turned and mirrored glyphs changed in a glyph, from freelab_alternates.variant_params'
+    (rotation degrees, x scale, y scale, slant degrees, baseline shift in em): "turned 1.4° counterclockwise,
+    slanted 3.5°, 95% as wide, 102% as tall, raised 5 units" (what the preview shows, said)."""
+    rotation, sx, sy, slant, rise = params
+    words = []
+    if round(rotation, 1):
+        words.append(u"turned %.1f° %s" % (abs(rotation), u"counterclockwise" if rotation > 0 else u"clockwise"))
+    if round(slant, 1):
+        words.append(u"slanted %.1f° %s" % (abs(slant), u"right" if slant > 0 else u"left"))
+    for scale, word in ((sx, u"wide"), (sy, u"tall")):
+        if int(round(scale * 100)) != 100:
+            words.append(u"%d%% as %s" % (int(round(scale * 100)), word))
+    units = int(round(rise * upm))
+    if units:
+        words.append(u"%s %s" % (u"raised" if units > 0 else u"lowered", counted(abs(units), u"unit")))
+    return u", ".join(words) or u"unchanged at this strength"
 
 
 # ---------------------------------------------------------------------------
@@ -1933,7 +1976,7 @@ PREVIEW_SIZE = 150  # pixels per em
 HELP_LIST = (u"The characters the font lacks that it can make of the glyphs it has, by group: each with its "
              u"recipe, a picture of the glyph it makes, and how sure the recipe is (<i>exact</i>: no design in "
              u"it; <i>accepted</i>: how most fonts build it; <i>starting point</i>: a draft to draw over; <i>likely "
-             u"usable as it is</i>: a turned or reversed letter the font's monoline design makes so). Checked "
+             u"usable as it is</i>: a turned or reversed letter the font's monoline design makes so). Ticked "
              u"rows are built. A row that needs a glyph the font lacks says which, at the end. Double-click a row "
              u"to open its glyph (built already) in a <i>Glyph</i> window.")
 
@@ -1962,26 +2005,32 @@ class GenerationPage(object):
         self.status.setWordWrap(True)
         self.status.setWhatsThis(u"What the list holds for this font and master: how many glyphs can be built, how "
                                  u"sure their recipes are, and how many need a glyph the font lacks.")
-        layout.addWidget(self.status)
-        layout.addWidget(ak.separator())
+        add_status = getattr(owner, "add_status", None)  # (under the window's top line: owner's image 265)
+        if add_status is not None:
+            add_status(self.status, "generation")
+        else:
+            layout.addWidget(self.status)
         row = QtGui.QHBoxLayout()
         # What Font Check handed over (the window's generation_given): listed alone at first, as the
         # Diacritics tab lists its own (its Character set's From Font Check)
         self.given = [ch for ch in (getattr(owner, "generation_given", None) or []) if len(ch) == 1]
         self.list_box = None
         if self.given:
-            list_help = (u"Which characters are listed: those Font Check handed over (checked), or every group "
+            list_help = (u"Which characters are listed: those Font Check handed over (ticked), or every group "
                          u"of the table.")
             row.addWidget(cm.helped(QtGui.QLabel(u"List:"), list_help))
             self.list_box = QtGui.QComboBox()
             self.list_box.addItem(u"From Font Check (%s)" % counted(len(self.given), u"glyph"))
             self.list_box.addItem(u"Every group")
             self.list_box.setWhatsThis(list_help)
+            fit = getattr(cm, "fit_to_contents", None)
+            if fit is not None:
+                fit(self.list_box)
             row.addWidget(self.list_box)
             row.addSpacing(12)
         self.existing_box = QtGui.QCheckBox(u"Also list existing glyphs")
         self.existing_box.setWhatsThis(u"Also lists the characters of these groups the font has already, in a section "
-                                       u"of their own, unchecked: those you check are built again from their recipe, "
+                                       u"of their own, unticked: those you tick are built again from their recipe, "
                                        u"their outlines in each master replaced (<i>Edit &gt; Undo</i> takes it back). "
                                        u"A glyph that shares its code point is rebuilt as a component of its source.")
         row.addWidget(self.existing_box)
@@ -1996,26 +2045,30 @@ class GenerationPage(object):
         # line of all of them needs about 1,100 pixels (1,300 with the List chooser), so they stay apart
         settings_row = QtGui.QHBoxLayout()
         self.spins = {}
+        # (label form, "Thin space: [1/6 em]": a noun, a colon, then the control, the "1/" in the spin box; owner's
+        # image 271 asked for one form of caption)
         for key, label, help_text in (
-                ("thin", u"Thin space 1/", u"The thin space's width, and the narrow no-break space's: this share of the "
-                                           u"em (1/6 at first; Unicode says 1/5 or 1/6, the corpus's median is 0.158 em)."),
-                ("hair", u"Hair space 1/", u"The hair space's width: this share of the em (1/11 at first, the corpus's "
-                                           u"median 0.090 em).")):
-            settings_row.addWidget(cm.helped(QtGui.QLabel(label), help_text))
+                ("thin", u"Thin space:", u"The thin space's width, and the narrow no-break space's: this share of the "
+                                         u"em (1/6 at first; Unicode says 1/5 or 1/6, the corpus's median is 0.158 em)."),
+                ("hair", u"Hair space:", u"The hair space's width: this share of the em (1/11 at first, the corpus's "
+                                         u"median 0.090 em).")):
+            settings_row.addWidget(cm.helped(QtGui.QLabel(label), help_text))  # (its spin box's help: one for both)
             spin = QtGui.QSpinBox()
             spin.setRange(*SETTING_REACH[key])
             spin.setValue(int(self.settings[key]))
+            spin.setPrefix(u"1/")
             spin.setSuffix(u" em")
             spin.setWhatsThis(help_text)
+            spin.setToolTip(help_text)
             settings_row.addWidget(spin)
             settings_row.addSpacing(12)
             self.spins[key] = spin
         for key, label, help_text in (
-                ("en_dash", u"En dash", u"The en dash's advance, as a share of the em (52.8% at first: the corpus's median, "
-                                        u"507 families). Built from the hyphen, its thickness and ends kept."),
-                ("em_dash", u"Em dash", u"The em dash's advance, as a share of the em (86.2% at first: the corpus's median, "
-                                        u"507 families); the two- and three-em dashes are two and three times the font's "
-                                        u"em dash.")):
+                ("en_dash", u"En dash:", u"The en dash's advance, as a share of the em (52.8% at first: the corpus's median, "
+                                         u"507 families). Built from the hyphen, its thickness and ends kept."),
+                ("em_dash", u"Em dash:", u"The em dash's advance, as a share of the em (86.2% at first: the corpus's median, "
+                                         u"507 families); the two- and three-em dashes are two and three times the font's "
+                                         u"em dash.")):
             settings_row.addWidget(cm.helped(QtGui.QLabel(label), help_text))
             spin = QtGui.QDoubleSpinBox()
             spin.setRange(SETTING_REACH[key][0] * 100, SETTING_REACH[key][1] * 100)
@@ -2024,6 +2077,7 @@ class GenerationPage(object):
             spin.setValue(round(float(self.settings[key]) * 100, 1))
             spin.setSuffix(u"% of the em")
             spin.setWhatsThis(help_text)
+            spin.setToolTip(help_text)
             settings_row.addWidget(spin)
             settings_row.addSpacing(12)
             self.spins[key] = spin
@@ -2052,24 +2106,32 @@ class GenerationPage(object):
         self.vary_keys = [row_[0] for row_ in strengths]
         self.vary_strength.setCurrentIndex(self.vary_keys.index(strength) if strength in self.vary_keys else 0)
         self.vary_strength.setWhatsThis(vary_help)
+        self.vary_strength.setToolTip(u"How much each glyph is changed: Feature Code's strengths.")
+        fit = getattr(cm, "fit_to_contents", None)
+        if fit is not None:
+            fit(self.vary_strength)
+        settings_row.addWidget(cm.helped(QtGui.QLabel(u"Strength:"), vary_help))  # (label form: owner's image 271)
         settings_row.addWidget(self.vary_strength)
-        settings_row.addWidget(cm.helped(QtGui.QLabel(u"Seed"), vary_help))
+        settings_row.addWidget(cm.helped(QtGui.QLabel(u"Seed:"), vary_help))
         self.vary_seed = QtGui.QSpinBox()
         self.vary_seed.setRange(*VARY_SEED_REACH)
         self.vary_seed.setValue(seed)
         self.vary_seed.setWhatsThis(vary_help)
+        self.vary_seed.setToolTip(u"The same seed gives the same glyphs, another seed others.")
         settings_row.addWidget(self.vary_seed)
         row.addStretch(1)
         self.search, self.search_label = owner.search_field(
             u"Find a glyph", u"Shows only the rows whose glyph name, or the name of a glyph they are built from, holds "
                              u"this text, whose character it is, whose Unicode value it is (<i>U+2013</i>, <i>2013</i>), "
-                             u"or whose Unicode name holds it (<i>dash</i>). Rows not shown keep their checks; <i>Check "
-                             u"all</i> and <i>Check none</i> act on the rows shown.")
+                             u"or whose Unicode name holds it (<i>dash</i>). Rows not shown keep their ticks; <i>Tick "
+                             u"all</i>, <i>Tick none</i>, and <i>Tick high-value glyphs</i> act on the rows shown.")
         row.addWidget(self.search_label)  # (left of the field: the field ends at the rows' right edge, owner's image 185)
         row.addWidget(self.search)
-        layout.addLayout(row)
+        # The settings of how the glyphs are drawn first, then what is listed and the search, right over the list
+        # (owner's image 249: "the top line should be below the second one")
         settings_row.addStretch(1)
         layout.addLayout(settings_row)
+        layout.addLayout(row)
         self.tree = QtGui.QTreeWidget()
         self.tree.setColumnCount(len(COLUMNS))
         self.tree.setHeaderLabels(list(COLUMNS))
@@ -2079,27 +2141,22 @@ class GenerationPage(object):
         self.tree.setWhatsThis(HELP_LIST)
         layout.addWidget(self.tree, 3)
         lower = QtGui.QHBoxLayout()
-        # The selected row's character in the reference font, as on the Diacritics tab (the owner asked why
-        # this tab had none, 2026-11-16): the font chosen there, its chooser on that tab
-        reference = QtGui.QVBoxLayout()
-        reference_help = u"The selected row's character in the reference font chosen on the Diacritics tab, to compare."
-        self.reference = QtGui.QLabel()
-        self.reference.setProperty(ak.LEAVE_ALONE_PROP, True)
-        self.reference.setAlignment(QtCore.Qt.AlignCenter)
-        self.reference.setFixedWidth(cm.REFERENCE_WIDTH)
-        self.reference.setWhatsThis(reference_help)
-        reference.addWidget(self.reference, 1)
-        self.reference_note = cm.helped(QtGui.QLabel(u""), reference_help)
-        self.reference_note.setWordWrap(True)
-        self.reference_note.setFixedWidth(cm.REFERENCE_WIDTH)
-        reference.addWidget(self.reference_note)
+        # The selected row's character in the reference font: the Diacritics tab's very section (owner's images
+        # 250 and 251: this tab had no Reference heading and no chooser), one choice for both tabs, and a line
+        # between it and the preview at its right
+        reference_help = u"The selected row's character in the reference font, to compare."
+        (reference, self.reference_title, self.reference_font, self.reference, self.reference_note,
+         self.reference_line) = owner.reference_section(reference_help, cm.REFERENCE_NOTE_HELP)
         lower.addLayout(reference)
+        lower.addWidget(self.reference_line)
         self.preview = QtGui.QLabel()
         self.preview.setProperty(ak.LEAVE_ALONE_PROP, True)
         self.preview.setAlignment(QtCore.Qt.AlignCenter)
         self.preview.setMinimumHeight(int(PREVIEW_SIZE * 1.5))
-        self.preview.setWhatsThis(u"The selected row's glyph as it would be built in this master, between dashed lines "
-                                  u"at its advance's ends and on the baseline; an empty glyph shows its advance alone.")
+        self.preview.setWhatsThis(u"The selected row's glyph as it would be built in this master with the settings above, "
+                                  u"between dashed lines at its advance's ends and on the baseline; an empty glyph shows "
+                                  u"its advance alone. A glyph changed by <i>Vary turned and mirrored glyphs</i> is drawn "
+                                  u"over the glyph it would be unchanged, outlined faintly, so that the change shows.")
         lower.addWidget(self.preview, 1)
         self.details = QtGui.QLabel(u"")
         self.details.setWordWrap(True)
@@ -2107,25 +2164,28 @@ class GenerationPage(object):
                                   u"the corpus's families have it and build it so.")
         lower.addWidget(self.details, 1)
         layout.addLayout(lower, 2)
-        buttons = QtGui.QHBoxLayout()
-        self.all_button = cm.helped(QtGui.QPushButton(u"Check all"), u"Checks every row shown that can be built (rows "
-                                    u"a search hides keep their checks).")
-        self.none_button = cm.helped(QtGui.QPushButton(u"Check none"), u"Unchecks every row shown (rows a search hides "
-                                     u"keep their checks).")
-        self.value_button = cm.helped(QtGui.QPushButton(u"Check only high-value glyphs"), cm.VALUE_BUTTON_HELP)
-        self.restore_button = cm.helped(QtGui.QPushButton(u"Restore suggestions"), u"Puts every check, and the four "
-                                        u"settings, back as the list first came.")
-        self.build_button = QtGui.QPushButton(u"Build checked glyphs")
-        self.build_button.setWhatsThis(u"Adds each checked glyph to the font with its Unicode value, in every master, as "
+        self.all_button = cm.helped(QtGui.QPushButton(cm.TICK_ALL), u"Ticks every row shown that can be built (rows "
+                                    u"a search hides keep their ticks).")
+        self.none_button = cm.helped(QtGui.QPushButton(cm.TICK_NONE), u"Unticks every row shown (rows a search hides "
+                                     u"keep their ticks).")
+        self.value_button = cm.helped(QtGui.QPushButton(cm.TICK_HIGH_VALUE), cm.VALUE_BUTTON_HELP)
+        self.restore_button = cm.helped(QtGui.QPushButton(u"Restore suggestions"), u"Puts every tick, and the "
+                                        u"settings above the list, back as the list first came.")
+        self.build_button = QtGui.QPushButton(cm.BUILD_TICKED)
+        self.build_button.setWhatsThis(u"Adds each ticked glyph to the font with its Unicode value, in every master, as "
                                        u"its recipe says; a glyph made of others of this list is built after them. A "
-                                       u"duplicate's code point goes to its source glyph (no new glyph). Every checked "
+                                       u"duplicate's code point goes to its source glyph (no new glyph). Every ticked "
                                        u"row is built, those a search hides too: the button then says how many are not "
                                        u"shown. <i>Edit &gt; Undo</i> takes it back, in one step.")
+        bottom = getattr(owner, "bottom_row", None)  # (the window's bottom row, under the log: brief 4)
+        if bottom is not None:
+            left, right = bottom("generation")
+        else:
+            left = right = QtGui.QHBoxLayout()
+            layout.addLayout(left)
         for button in (self.all_button, self.none_button, self.value_button, self.restore_button):
-            buttons.addWidget(button)
-        buttons.addStretch(1)
-        buttons.addWidget(self.build_button)
-        layout.addLayout(buttons)
+            left.addWidget(button)
+        right.addWidget(self.build_button)
         self.existing_box.connect("toggled(bool)", lambda on: self.run())
         self.value_only_box.connect("toggled(bool)", lambda on: self.searched())
         self.vary_box.connect("toggled(bool)", lambda on: self.vary_changed())
@@ -2153,6 +2213,7 @@ class GenerationPage(object):
             self.flagging = ak.flag_menu(self.tree, owner, self.flag_names, self.row_names)
         except Exception:
             self.flagging = None
+        self.show_reference(False)  # (nothing selected yet: the reference shown empty was noise)
         self.update_buttons()
 
     # -- the font ----------------------------------------------------------------------------------------
@@ -2216,16 +2277,22 @@ class GenerationPage(object):
             return
         kept = dict((row.hex, row.checked) for row in self.rows) if same_font else {}
         old_key = self.owner.package_key(self.package) if self.package is not None else None
+        try:  # (the row selected, selected again once the list is read: its preview drawn anew)
+            was = self.selected()
+            self.reselect = was.hex if was is not None else None
+        except Exception:
+            self.reselect = None
         package = self.package = self.owner.current_font()
         self.rows = []
+        say_font = getattr(self.owner, "say_font", None)  # (the window's top line: this font, or none)
+        if say_font is not None:
+            say_font(package)
         if package is None:
-            # (the window's top line says so, beside the "?": owner's images 193 and 194)
-            self.status.setText(u"")
-            show = getattr(self.owner, "show_top_line", None)
-            if show is not None:
-                show(self.cm.no_font_line(self.ak))
+            self.status.setText(u"")  # (the window's top line says why, beside the "?")
             self.fill()
             return
+        if self.owner.package_key(package) != old_key:
+            self.reselect = None  # (another font: nothing of the old selection)
         if not same_font or self.owner.package_key(package) != old_key:
             kept, self.just_built = {}, set()
         self.master = package.master
@@ -2282,10 +2349,7 @@ class GenerationPage(object):
         words = CONFIDENCES[:2] + (LIKELY, CONFIDENCES[2])
         sure = dict((c, sum(1 for r in buildable if r.sureness == c)) for c in words)
         parts = [u"%s %s" % (b(sure[c]), c) for c in words if sure[c]]
-        self.status.setText(u"%s, master %s: %s can be built (%s)%s. Nothing changes until you click %s." % (
-            b(self.package.tfn), b(self.master), b(counted(len(buildable), u"glyph")), u", ".join(parts) or u"none",
-            u"; %s %s a glyph the font lacks" % (b(counted(len(lacking), u"glyph")), u"needs" if len(lacking) == 1 else u"need")
-            if lacking else u"", self.ak.i(u"Build checked glyphs")))
+        self.status.setText(status_text(len(buildable), parts, len(lacking), b, self.ak.i, self.cm.BUILD_TICKED))
 
     def fill(self, progress=None):
         """The list made of the rows (each row's picture drawn); progress(share): told as it goes."""
@@ -2311,6 +2375,35 @@ class GenerationPage(object):
             self.tree.blockSignals(False)
         self.cm.fit_tree_columns(self.tree, len(COLUMNS) - 1)
         self.apply_search()
+        self.restore_selection()
+
+    def restore_selection(self):
+        """The row selected before the list was made again (by its character: run's reselect) selected again,
+        and the preview drawn from the rows as planned now. The list is cleared with its signals blocked, so
+        the preview kept the glyph as it was before: ticking Vary turned and mirrored glyphs, or another
+        strength or seed, left the old glyph in the preview (owner's image 252)."""
+        QtCore = _qt()[0]
+        wanted = getattr(self, "reselect", None)
+        found = None
+        if wanted is not None:
+            for item in self.items():
+                index = int(item.data(0, QtCore.Qt.UserRole))
+                if 0 <= index < len(self.rows) and self.rows[index].hex == wanted and not item.isHidden():
+                    found = item
+                    break
+        self.tree.blockSignals(True)
+        try:
+            if found is not None:
+                self.tree.setCurrentItem(found)
+                try:
+                    self.tree.scrollToItem(found)
+                except Exception:
+                    pass
+            else:
+                self.tree.clearSelection()
+        finally:
+            self.tree.blockSignals(False)
+        self.select()
 
     def fill_sections(self, sections, bold, dimmed, progress=None):
         """fill's rows, section by section (progress(share): told every 20 rows)."""
@@ -2459,7 +2552,7 @@ class GenerationPage(object):
             self.update_buttons()
             self.owner.log.add(self.cm.high_value_text(sum(1 for on in wanted.values() if on), self.ak.b))
         except Exception as exc:
-            self.owner.log.add(u"Could not check the high-value glyphs: %s" % self.ak.html(exc), "error")
+            self.owner.log.add(u"Could not tick the high-value glyphs: %s" % self.ak.html(exc), "error")
 
     def high_value_read(self):
         """The window read Font Check's set again: the filter (when ticked) and the buttons follow it."""
@@ -2536,7 +2629,7 @@ class GenerationPage(object):
         except Exception:
             pass
         self.run(same_font=False)
-        self.owner.log.add(u"Glyph generation's checks and settings restored as suggested.")
+        self.owner.log.add(u"Glyph generation's ticks and settings restored as suggested.")
 
     def selected(self):
         QtCore = _qt()[0]
@@ -2563,9 +2656,18 @@ class GenerationPage(object):
         self.reference_note.setText(cm.reference_note(r.char, family, chosen,
                                                       names=getattr(self.owner, "font_names", None)))
 
+    def show_reference(self, on):
+        """The reference section (heading, chooser, picture, caption, and the line beside it) shown while a row
+        is selected, as on the Diacritics tab (nothing selected: it only showed empty)."""
+        for name in ("reference_title", "reference_font", "reference", "reference_note", "reference_line"):
+            widget = getattr(self, name, None)
+            if widget is not None:
+                widget.setVisible(bool(on))
+
     def select(self):
         r = self.selected()
         self.preview.clear()
+        self.show_reference(r is not None)
         try:
             self.draw_reference(r)
         except Exception:
@@ -2583,6 +2685,10 @@ class GenerationPage(object):
                                            r.hex, self.ak.html(r.entry.get("unicode_name", u"")))]
         if r.layout is not None:
             lines.append(u"%s (%s)" % (self.ak.html(recipe_text(r, self.settings, self.data.get("rules"))), r.sureness))
+            if r.layout.varied and r.layout.params:  # (Vary turned and mirrored glyphs: what the preview shows)
+                seed, strength = r.layout.varied
+                lines.append(u"Varied (%s, seed %d): %s; its glyph unchanged is outlined under it." % (
+                    strength.lower(), seed, vary_words(r.layout.params, float(self.font.upm) if self.font else 1000.0)))
             rule = (self.data.get("rules") or {}).get("monoline", {}).get((r.way or {}).get("check"))
             measured = self.planner_now.monoline() if (r.way or {}).get("check") else None
             if rule and measured:
@@ -2671,7 +2777,18 @@ class GenerationPage(object):
             found = self.part_path(part)
             if found is not None:
                 path.addPath(found)
+        # The preview (frame) of a varied glyph outlines it unchanged under it: a change of a degree or two is
+        # what the strengths make, and alone it did not show (owner's image 252)
+        plain = QtGui.QPainterPath()
+        plain.setFillRule(QtCore.Qt.WindingFill)
+        if frame and getattr(r.layout, "plain", None) is not None:
+            for part in r.layout.plain.parts:
+                found = self.part_path(part)
+                if found is not None:
+                    plain.addPath(found)
         box = path.boundingRect() if not path.isEmpty() else None
+        if box is not None and not plain.isEmpty():
+            box = box.united(plain.boundingRect())
         left = min(0.0, box.left()) if box else 0.0
         right = max(r.layout.advance, box.right() if box else 0.0)
         width = max(int((right - left) * scale) + 8, 8)
@@ -2695,8 +2812,23 @@ class GenerationPage(object):
                     painter.drawLine(QtCore.QPointF(left, 0), QtCore.QPointF(right, 0))
             if not path.isEmpty():
                 painter.fillPath(path, QtGui.QBrush(color))
+            if not plain.isEmpty():  # (over the fill, in the selection's color: it shows where the two overlap too)
+                try:
+                    faint = QtGui.QColor(self.owner.dialog.palette.color(QtGui.QPalette.Highlight))
+                except Exception:
+                    faint = QtGui.QColor(color)
+                faint.setAlpha(220)
+                pen = QtGui.QPen(faint)
+                pen.setCosmetic(True)
+                pen.setWidthF(1.0)
+                pen.setStyle(QtCore.Qt.DotLine)
+                painter.setPen(pen)
+                painter.setBrush(QtCore.Qt.NoBrush)
+                painter.drawPath(plain)
         finally:
             painter.end()
+        if not plain.isEmpty():  # (two colors: not one to redraw in at a dark mode switch, the window's theme_changed draws it again)
+            return pixmap
         return self.ak.inked(pixmap, color)
 
     # -- the build -------------------------------------------------------------------------------------------
@@ -2849,7 +2981,7 @@ class GenerationPage(object):
             lacking = unbuilt_needs(r, [c for c in order if c.name in built_names],
                                     lambda name: package.findName(name) is not None)
             if lacking:
-                failed.append((r.char, u"it needs %s, which %s not built: check %s too" % (
+                failed.append((r.char, u"it needs %s, which %s not built: tick %s too" % (
                     u", ".join(lacking), u"was" if len(lacking) == 1 else u"were",
                     u"it" if len(lacking) == 1 else u"them")))
                 return

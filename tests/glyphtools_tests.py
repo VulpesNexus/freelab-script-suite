@@ -1375,7 +1375,7 @@ class GoToTests(unittest.TestCase):
         self.assertEqual([(r.char, r.existing, r.checked) for r in dialog.recipes if r.existing],
                          [(O_HORN_HOOK, "ohornhookabove", False)], "the font's own glyph, unchecked, and no other")
         self.assertEqual((done["runs"], done["selected"], done["opened"]), (1, [O_HORN_HOOK], []))
-        self.assertIn(u"listed to show it, unchecked, and selected (Also list existing glyphs stays off)",
+        self.assertIn(u"listed to show it, unticked, and selected (Also list existing glyphs stays off)",
                       done["log"][0][1])
         self.assertEqual(done["log"][0][0], "info", "not a warning: it did what was asked")
 
@@ -1853,9 +1853,10 @@ class CellTextTests(unittest.TestCase):
             self.assertNotIn(u"\N{MIDDLE DOT}", text)
 
     def test_counted_texts_follow_their_number(self):
-        self.assertEqual([ac.anchors_sentence(n) for n in (0, 1, 2)], [u"0 get anchors", u"1 gets anchors", u"2 get anchors"])
+        self.assertEqual([ac.anchors_sentence(n) for n in (0, 1, 2)], [u"none gets anchors", u"1 gets anchors", u"2 get anchors"])
         self.assertEqual([ac.corpus_sentence(n, u"Thai") for n in (0, 1, 2)],
-                         [u"0 of the corpus's Thai fonts place theirs", u"the corpus's 1 Thai font places its own",
+                         [u"the corpus's Latin fonts place theirs (none of its Thai fonts was measured)",
+                          u"the corpus's 1 Thai font places its own",
                           u"2 of the corpus's Thai fonts place theirs"])
         self.assertEqual([ac.units_up(value) for value in (0.2, 1.0, 1.4, 2.0)], [u"1 unit", u"1 unit", u"2 units", u"2 units"])
         acute = one_mark(0xF3, "o", "acute", "above", "acute")
@@ -2403,8 +2404,8 @@ class SearchTests(unittest.TestCase):
             self.assertEqual([row.checked for row in build.rows], [True, False], "the hidden row as it was")
             # Each click leaves a line: how many it changed, how many are checked in all, the hidden ones said
             # (the owner's report of 2026-11-16: Check all and Check none left none)
-            self.assertEqual(dialog.lines, [u"Checked <b>1 glyph</b> (2 checked in all, 1 of them not shown).",
-                                            u"Unchecked <b>1 glyph</b> (1 still checked, not shown: a search hides it)."])
+            self.assertEqual(dialog.lines, [u"Ticked <b>1 glyph</b> (2 ticked in all, 1 of them not shown).",
+                                            u"Unticked <b>1 glyph</b> (1 still ticked, not shown: a search hides it)."])
             dialog.search.text = u"U+1E0D"
             dialog.apply_search()
             self.assertEqual((build.hidden, lack.hidden, dialog.count), (True, False, u"1 of 3 glyphs shown"))
@@ -2456,7 +2457,7 @@ class SearchTests(unittest.TestCase):
             self.assertEqual(page.count, u"1 of 3 glyphs shown")
             page.check_all(False)
             self.assertEqual([row.checked for row in section.rows + marks.rows], [True, False, True], "the row shown only")
-            self.assertEqual(lines, [u"Unchecked <b>1 glyph</b> (2 still checked, not shown: a search hides them)."])
+            self.assertEqual(lines, [u"Unticked <b>1 glyph</b> (2 still ticked, not shown: a search hides them)."])
             page.search.text = u"acute"
             page.apply_search()
             self.assertEqual((bases.hidden, marks.hidden), (True, False))
@@ -2466,10 +2467,10 @@ class SearchTests(unittest.TestCase):
     def test_the_anchors_button_counts_the_checked_glyphs_a_search_hides(self):
         """Add checked anchors wrote every checked row, those a search hid too, and did not say so: it
         counts them as Build does."""
-        self.assertEqual(ac.anchors_button_text(3, 0), u"Add checked anchors")
-        self.assertEqual(ac.anchors_button_text(0, 0), u"Add checked anchors")
-        self.assertEqual(ac.anchors_button_text(1, 1), u"Add anchors to 1 checked glyph (1 not shown)")
-        self.assertEqual(ac.anchors_button_text(12, 5), u"Add anchors to 12 checked glyphs (5 not shown)")
+        self.assertEqual(ac.anchors_button_text(3, 0), u"Add ticked anchors")
+        self.assertEqual(ac.anchors_button_text(0, 0), u"Add ticked anchors")
+        self.assertEqual(ac.anchors_button_text(1, 1), u"Add anchors to 1 ticked glyph (1 not shown)")
+        self.assertEqual(ac.anchors_button_text(12, 5), u"Add anchors to 12 ticked glyphs (5 not shown)")
         inks = AnchorPageTests.INKS
         page = ac.AnchorPage.__new__(ac.AnchorPage)
         page.glyphs = ac.plan_anchors([("e", 0x65, "base", inks["e"], {}), ("B", 0x42, "base", inks["B"], {}),
@@ -2487,13 +2488,13 @@ class SearchTests(unittest.TestCase):
             ac._qt = lambda: (LIST_QT, None)
             page.hidden = set([names.index("e"), names.index("acutecomb")])
             page.update_buttons()
-            self.assertEqual(texts[-1], u"Add anchors to 3 checked glyphs (2 not shown)")
+            self.assertEqual(texts[-1], u"Add anchors to 3 ticked glyphs (2 not shown)")
             page.glyphs[names.index("e")].checked = False
             page.update_buttons()
-            self.assertEqual(texts[-1], u"Add anchors to 2 checked glyphs (1 not shown)", "an unchecked row is not written")
+            self.assertEqual(texts[-1], u"Add anchors to 2 ticked glyphs (1 not shown)", "an unchecked row is not written")
             page.hidden = set()
             page.update_buttons()
-            self.assertEqual(texts[-1], u"Add checked anchors")
+            self.assertEqual(texts[-1], u"Add ticked anchors")
         finally:
             ac._qt = saved
 
@@ -2538,13 +2539,13 @@ class HighValueTests(unittest.TestCase):
             self.assertEqual(dialog.high_value_checks(), {0: False, 1: True, 2: True})
             dialog.check_high_value()
             self.assertEqual([row.checked for row in rows], [False, True, True])
-            self.assertEqual(dialog.lines, [u"Checked 2 glyphs <i>Font Check</i> lists as high-value (they help complete "
+            self.assertEqual(dialog.lines, [u"Ticked 2 glyphs <i>Font Check</i> lists as high-value (they help complete "
                                             u"languages already within reach), and no other shown."])
             dialog.hidden = set([1])  # a search hides aogonek: its check stays
             rows[1].checked = False
             dialog.check_high_value()
             self.assertEqual([row.checked for row in rows], [False, False, True])
-            self.assertIn(u"Checked 1 glyph <i>Font Check</i> lists as high-value (it helps", dialog.lines[-1])
+            self.assertIn(u"Ticked 1 glyph <i>Font Check</i> lists as high-value (it helps", dialog.lines[-1])
         finally:
             ac._qt = saved
 
@@ -3038,9 +3039,9 @@ class CompactTests(unittest.TestCase):
         # Counted in glyphs, in sentences of their own (the owner's report of 2026-11-16: "42 glyphs that were
         # too tall for a 120% line were made compact"; it read "42 made compact to fit a 120% line")
         self.assertEqual(ac.room_details(2, 1, 0), [u"2 glyphs that were too tall for a 120% line were made compact.",
-                                                    u"1 glyph is too tall even when compact: it is left unchecked."])
+                                                    u"1 glyph is too tall even when compact: it is left unticked."])
         self.assertEqual(ac.room_details(1, 2, 0), [u"1 glyph that was too tall for a 120% line was made compact.",
-                                                    u"2 glyphs are too tall even when compact: they are left unchecked."])
+                                                    u"2 glyphs are too tall even when compact: they are left unticked."])
         self.assertEqual(ac.room_details(0, 0, 42), [u"42 glyphs are too tall for a 120% line as placed."])
         self.assertEqual(ac.room_details(0, 0, 1), [u"1 glyph is too tall for a 120% line as placed."])
         self.assertEqual(ac.room_details(0, 0, 0), [])
@@ -3142,11 +3143,11 @@ class BuildTextTests(unittest.TestCase):
     """Build builds every checked glyph, shown or not, and says how many a search hides."""
 
     def test_the_button_says_how_many_are_not_shown(self):
-        self.assertEqual(ac.build_text(12, 0), u"Build checked glyphs")
-        self.assertEqual(ac.build_text(12, 5), u"Build 12 checked glyphs (5 not shown)")
-        self.assertEqual(ac.build_text(1, 1), u"Build 1 checked glyph (1 not shown)")
-        self.assertEqual(ac.build_text(2, 1), u"Build 2 checked glyphs (1 not shown)")
-        self.assertEqual(ac.build_text(0, 0), u"Build checked glyphs")
+        self.assertEqual(ac.build_text(12, 0), u"Build ticked glyphs")
+        self.assertEqual(ac.build_text(12, 5), u"Build 12 ticked glyphs (5 not shown)")
+        self.assertEqual(ac.build_text(1, 1), u"Build 1 ticked glyph (1 not shown)")
+        self.assertEqual(ac.build_text(2, 1), u"Build 2 ticked glyphs (1 not shown)")
+        self.assertEqual(ac.build_text(0, 0), u"Build ticked glyphs")
         self.assertEqual([ac.correct_button_text(n) for n in (0, 1, 2)],
                          [u"Correct mirrored components", u"Correct mirrored components of 1 glyph",
                           u"Correct mirrored components of 2 glyphs"])
@@ -3174,10 +3175,10 @@ class BuildTextTests(unittest.TestCase):
         try:
             ac._qt = lambda: (LIST_QT, None)
             dialog.update_buttons()
-            self.assertEqual(texts["build"], u"Build 2 checked glyphs (1 not shown)")
+            self.assertEqual(texts["build"], u"Build 2 ticked glyphs (1 not shown)")
             dialog.hidden = set()
             dialog.update_buttons()
-            self.assertEqual(texts["build"], u"Build checked glyphs")
+            self.assertEqual(texts["build"], u"Build ticked glyphs")
         finally:
             ac._qt = saved
         self.assertEqual(texts["correct"], u"Correct mirrored components")
@@ -3273,7 +3274,7 @@ def recording_qt():
     def checked(self, on):
         self.__dict__["checked"] = on
     base = meta("Base", (object,), {"__init__": init, "__getattr__": missing, "setWhatsThis": whats,
-                                    "addWidget": add, "setChecked": checked})
+                                    "addWidget": add, "addLayout": add, "setChecked": checked})
     classes = {}
 
     class Namespace(object):
@@ -3309,7 +3310,7 @@ class WhatsThisTests(unittest.TestCase):
             def status_label(self, *args):
                 return gui.QLabel()
 
-            def separator(self):
+            def separator(self, header=False, vertical=False):
                 return gui.QFrame()
 
             def window_layout(self, dialog):
@@ -3368,7 +3369,25 @@ class WhatsThisTests(unittest.TestCase):
         finally:
             ac._qt, gg._qt = saved
         self.assertIsInstance(dialog.generation, gg.GenerationPage)
-        self.assertEqual(later, [dialog.generation.run], "its list read once the tab is up")
+        self.assertEqual([slot for slot in later if slot == dialog.generation.run], [dialog.generation.run],
+                         "its list read once the tab is up")
+        # Owner's images 250 and 251: the tab's own Reference section, its chooser one more of the window's
+        self.assertIs(dialog.generation.reference_font, dialog.reference_boxes[-1])
+        self.assertEqual(len(dialog.reference_boxes), 3, "a chooser per tab, one choice")
+        self.assertIn(dialog.set_reference_fonts, later, "its names given their own fonts too")
+        page = dialog.generation
+        holding = lambda widget: [w for w in made if widget in w.__dict__.get("added", [])][0]  # noqa: E731
+        lower = holding(page.reference_line)
+        self.assertEqual(lower.added.index(page.reference_line), 1, "between the reference and the preview (image 251)")
+        self.assertIs(lower.added[2], page.preview)
+        column = [w for w in made if type(w).__name__ == "QVBoxLayout" and w.args[:1] == (page.widget,)][0]
+        self.assertLess(column.added.index(holding(page.vary_box)), column.added.index(holding(page.existing_box)),
+                        "the settings first, then what is listed and the search, over the list (image 249)")
+        self.assertIs(holding(page.vary_box), holding(page.spins["thin"]))
+        left, right = dialog.bottom_row("generation")
+        self.assertEqual(left.added, [page.all_button, page.none_button, page.value_button, page.restore_button])
+        self.assertEqual(right.added, [page.build_button], "in the window's bottom row (image 265)")
+        self.assertIn("generation", dialog.status_holders, "its status lines under the window's top line")
         kinds = [w for w in made if type(w).__name__ in self.CONTROLS + ("QLabel",)]
         self.assertGreaterEqual(len([w for w in kinds if type(w).__name__ in ("QSpinBox", "QDoubleSpinBox")]), 4)
         for widget in kinds:
@@ -3376,7 +3395,7 @@ class WhatsThisTests(unittest.TestCase):
         buttons = [w.whats for w in made if type(w).__name__ == "QPushButton"]
         self.assertEqual(len(set(buttons)), len(buttons))
         labels = dict((w.args[0], w) for w in made if type(w).__name__ == "QLabel" and w.args)
-        self.assertEqual(labels[u"Thin space 1/"].whats, dialog.generation.spins["thin"].whats)
+        self.assertEqual(labels[u"Thin space:"].whats, dialog.generation.spins["thin"].whats)
         dialog, made = self.build()  # (a module that will not load: the tab says why, once)
         try:
             ac._qt = lambda: (core, gui)
@@ -3413,7 +3432,7 @@ class WhatsThisTests(unittest.TestCase):
         self.assertEqual(dialog.reference_font.whats, dialog.anchors.reference_font.whats, "one chooser, on both tabs")
         self.assertIn(u"FreeLab's own font", dialog.reference_font.whats, "named plainly where Font Check is not read")
         self.assertTrue(dialog.compact_box.whats.startswith(u"Makes the diacritics of a glyph too tall for a 120% line compact"))
-        self.assertIn(u"Every checked glyph is built, those a search hides too", dialog.build_button.whats)
+        self.assertIn(u"Every ticked glyph is built, those a search hides too", dialog.build_button.whats)
         self.assertNotEqual(dialog.dialog.whats, dialog.tabs.whats, "the tab bar's own, not the whole dialog's")
 
 
@@ -4248,7 +4267,8 @@ class PreviewPartsTests(unittest.TestCase):
                          "nothing selected: no reference heading, chooser, editor, or Same diacritic strip")
         missing = ac.preview_parts(True, False, False)
         self.assertEqual(sorted(name for name, on in missing.items() if on),
-                         ["compact_box", "hint", "reference", "reference_font", "reference_note", "reference_title"],
+                         ["compact_box", "hint", "reference", "reference_font", "reference_line", "reference_note",
+                          "reference_title"],
                          "a glyph that cannot be built: its letter in the reference and what it needs, no editor")
         alone = ac.preview_parts(True, True, False)
         self.assertFalse(alone["strip_label"] or alone["strip_area"], "no letter with the same diacritic: no strip")
@@ -4283,15 +4303,9 @@ class PreviewPartsTests(unittest.TestCase):
         dialog.build_button = Stub(setEnabled=lambda on: None)
         dialog.current_font = lambda: None
         dialog.selected = lambda: None
-        dialog.ak = Stub(NO_FONT_LINE=u"No font is open. This window takes the next font you open.")
+        dialog.ak = Stub(NO_FONT_LINE=u"No font is open. This window hooks to the next font you open.")
         dialog.status = Stub(setText=lambda text: setattr(dialog, "tab_line", text))
-        moves = []
         dialog.top_line = Stub(setText=lambda text: setattr(dialog, "window_line", text))
-        dialog.top_tabs = "the tabs"
-        dialog.header = Stub(removeWidget=lambda w: moves.append(("header -", w)),
-                             insertWidget=lambda at, w, stretch=0: moves.append(("header +", w)))
-        dialog.tabs_row = Stub(removeWidget=lambda w: moves.append(("under -", w)),
-                               addWidget=lambda w, stretch=0: moves.append(("under +", w)))
         dialog.editor = Stub(selected=None, scene="a scene of before", update=lambda: None,
                              setVisible=lambda on: shown.__setitem__("editor", on))
         dialog.fill_strip = lambda r: False
@@ -4301,17 +4315,11 @@ class PreviewPartsTests(unittest.TestCase):
         self.assertEqual(sorted(shown), sorted(ac.preview_parts(False, False, False)))
         self.assertFalse(any(shown.values()), shown)
         self.assertIsNone(dialog.editor.scene)
-        # Owner's images 193 and 194: the line on the window's first row, beside the "?", the tabs under it
-        self.assertEqual(dialog.window_line, u"No font is open. This window takes the next font you open.",
+        # Owner's images 193, 194, and 217: the line on the window's first row, beside the "?" (the tabs stay
+        # under the header, never on that row, where the busy bar crashed into them)
+        self.assertEqual(dialog.window_line, u"No font is open. This window hooks to the next font you open.",
                          "the shared line: the window takes the next font opened")
         self.assertEqual(dialog.tab_line, u"", "not under the tabs any more")
-        self.assertEqual(moves, [("header -", "the tabs"), ("under +", "the tabs")])
-        self.assertTrue(dialog.tabs_under)
-        dialog.show_top_line(u"")  # (a font: the tabs back on the first row, the line hidden)
-        self.assertEqual(moves[2:], [("under -", "the tabs"), ("header +", "the tabs")])
-        self.assertEqual(dialog.window_line, u"")
-        dialog.show_top_line(u"")
-        self.assertEqual(len(moves), 4, "moved once")
         self.assertEqual(ac.no_font_line(None), u"No font is open.")
 
     def test_a_font_closed_or_opened_under_the_window_is_read_afresh(self):
@@ -4540,7 +4548,7 @@ class ScrollKeptTests(unittest.TestCase):
             ac._qt, ac.write_settings = saved
         self.assertEqual(bar.value, 240, "where the list was scrolled")
         self.assertEqual(dialog.open_sections, {u"Can be built": False}, "a section closed by hand stays closed")
-        self.assertEqual(ac.section_title(u"Just built (check to rebuild) (12)"), u"Just built (check to rebuild)")
+        self.assertEqual(ac.section_title(u"Just built (tick to rebuild) (12)"), u"Just built (tick to rebuild)")
 
 
 class FarOffTests(unittest.TestCase):
@@ -5059,11 +5067,11 @@ class OwnerReportNovember15Tests(unittest.TestCase):
         moved.existing = u"ograve"
         shifts = {existing.char: (0, 0), moved.char: (3, 0)}
         titles = [title for title, rows in ac.list_sections([existing, moved], lambda r: shifts[r.char]) if rows]
-        self.assertEqual(titles, [u"Existing glyphs with suggestions (check to rebuild)",
-                                  u"Existing glyphs that match suggestions (check to rebuild)"])
-        self.assertEqual(ac.section_title(u"Existing glyphs with suggestions (check to rebuild) (767)"),
-                         u"Existing glyphs with suggestions (check to rebuild)")
-        self.assertEqual(ac.JUST_BUILT, u"Just built (check to rebuild)")
+        self.assertEqual(titles, [u"Existing glyphs with suggestions (tick to rebuild)",
+                                  u"Existing glyphs that match suggestions (tick to rebuild)"])
+        self.assertEqual(ac.section_title(u"Existing glyphs with suggestions (tick to rebuild) (767)"),
+                         u"Existing glyphs with suggestions (tick to rebuild)")
+        self.assertEqual(ac.JUST_BUILT, u"Just built (tick to rebuild)")
 
     def test_the_check_box_sits_with_the_preview_unticked_at_first(self):
         saved = ac.read_settings
@@ -5154,14 +5162,15 @@ class OwnerReportNovember16Tests(unittest.TestCase):
     def test_check_all_and_check_none_say_how_many(self):
         """Item 118: neither button left a log line; the count says the rows a search hides too."""
         b = lambda value: u"<b>%s</b>" % value
-        self.assertEqual(ac.checks_text(True, 30, 42, 0, b), u"Checked <b>30 glyphs</b> (42 checked in all).")
-        self.assertEqual(ac.checks_text(True, 1, 13, 12, b), u"Checked <b>1 glyph</b> (13 checked in all, 12 of them not "
+        self.assertEqual(ac.checks_text(True, 30, 42, 0, b), u"Ticked <b>30 glyphs</b> (42 ticked in all).")
+        self.assertEqual(ac.checks_text(True, 1, 13, 12, b), u"Ticked <b>1 glyph</b> (13 ticked in all, 12 of them not "
                                                               u"shown).")
-        self.assertEqual(ac.checks_text(False, 0, 0, 0, b), u"Unchecked <b>0 glyphs</b> (none checked now).")
-        self.assertEqual(ac.checks_text(False, 5, 1, 1, b), u"Unchecked <b>5 glyphs</b> (1 still checked, not shown: a "
+        self.assertEqual(ac.checks_text(False, 0, 0, 0, b), u"<i>Tick none</i> changed nothing.")
+        self.assertEqual(ac.checks_text(False, 2, 0, 0, b), u"Unticked <b>2 glyphs</b> (none ticked now).")
+        self.assertEqual(ac.checks_text(False, 5, 1, 1, b), u"Unticked <b>5 glyphs</b> (1 still ticked, not shown: a "
                                                              u"search hides it).")
-        self.assertEqual(ac.checks_text(False, 5, 3, 1), u"Unchecked 5 glyphs (3 checked in all, 1 of them not shown).")
-        self.assertEqual(ac.checks_text(True, 2, 2, 0, None, u"row"), u"Checked 2 rows (2 checked in all).")
+        self.assertEqual(ac.checks_text(False, 5, 3, 1), u"Unticked 5 glyphs (3 ticked in all, 1 of them not shown).")
+        self.assertEqual(ac.checks_text(True, 2, 2, 0, None, u"row"), u"Ticked 2 rows (2 ticked in all).")
 
     def test_the_preview_keeps_its_room(self):
         """Item 119: selecting a glyph that cannot be built hid the editor, its buttons, and the strip, and
@@ -5279,7 +5288,7 @@ class OwnerReportNovember16Tests(unittest.TestCase):
             page.check_all(True)
         finally:
             ac._qt = saved
-        self.assertEqual(lines, [u"Checked 3 glyphs (3 checked in all)."])
+        self.assertEqual(lines, [u"Ticked 3 glyphs (3 ticked in all)."])
 
     def test_points_rounded_to_whole_units_are_the_same_points(self):
         """The live pass of 2026-11-16: sorted pairing set rounded points 800 units apart (x 458.3 and 458.45 both
@@ -5306,7 +5315,7 @@ class OwnerReportNovember16Tests(unittest.TestCase):
         self.assertEqual(ac.value_filter(Stub(checked=True), [a_macron]), set([a_macron]))
         self.assertEqual(ac.search_count(1, 3, u"", filtered=True), u"1 of 3 glyphs shown")
         self.assertEqual(ac.search_count(1, 3, u""), u"")
-        self.assertEqual(ac.high_value_text(1), u"Checked 1 glyph <i>Font Check</i> lists as high-value (it helps "
+        self.assertEqual(ac.high_value_text(1), u"Ticked 1 glyph <i>Font Check</i> lists as high-value (it helps "
                                                  u"complete languages already within reach), and no other shown.")
         dialog, build, lack = SearchTests("test_what_finds_a_row").dialog()
         dialog.value_only_box, dialog.high_value = Stub(checked=True), set([a_macron])
@@ -5420,7 +5429,7 @@ class OwnerReportNovember17Tests(unittest.TestCase):
         dialog.tree = Stub(clear=lambda: None)
         dialog.remember_list = lambda: None
         dialog.build_button = Stub()
-        dialog.current_font = lambda: Stub(master="Regular")
+        dialog.current_font = lambda: Stub(master="Regular", tfn=u"Cardo", mastersCount=1)
         dialog.package_key = lambda package: None if package is None else "font"
         dialog.show_top_line = lines.append
         dialog.status = Stub(setText=lambda text: setattr(dialog, "said", text))
@@ -5441,7 +5450,8 @@ class OwnerReportNovember17Tests(unittest.TestCase):
         self.assertEqual(calls, [("start", u"Reading the font", True), "read", ("step", u"Planning the glyphs"),
                                  "logged", "end"])
         self.assertEqual(dialog.said, ac.STOPPED_READING)
-        self.assertEqual(lines, [u""], "a font: no top line")
+        self.assertEqual(lines, [u"<b>Cardo</b>, master <b>Regular</b>"],
+                         "a font: the top line names it before the reading, and stays when the reading stops (brief 2)")
         self.assertFalse(dialog.busy or dialog.work_depth or dialog.reading)
         dialog.reading = True  # (a read asked while one goes on: done once it is over)
         dialog.run()
@@ -5522,6 +5532,148 @@ class OwnerReportNovember17Tests(unittest.TestCase):
         ac.show_count(label, u"3 of 92 glyphs")
         self.assertEqual((label.text, label.on), (u"3 of 92 glyphs", True))
         ac.show_count(Stub(setText=lambda text: None), u"")  # (a label that cannot hide: the text alone)
+
+
+class UiRoundNovember17Tests(unittest.TestCase):
+    """The owner's UI review of 2026-11-17 (images 217 to 265): one header and one bottom row in every window,
+    Tick for check boxes, counts right at 0, kana lowercase, a reference section on every tab."""
+
+    def built(self):
+        return WhatsThisTests("test_every_control_and_label_has_its_own").build()
+
+    def outer(self, dialog, made):
+        return [w for w in made if type(w).__name__ == "QVBoxLayout" and w.args[:1] == (dialog.dialog,)][0]
+
+    def holding(self, made, widget):
+        return [w for w in made if widget in w.__dict__.get("added", [])]
+
+    def test_the_header_comes_before_the_tabs(self):
+        """Image 217: the busy bar crashed into the tabs, the window's first row. The top line comes first (the
+        shared add_tools_button and busy bar take the layout's first row), then the status lines, the header's
+        line, and only then the tabs; the letters' status lines sit under the top line (image 265)."""
+        dialog, made = self.built()
+        outer = self.outer(dialog, made).added
+        self.assertIs(outer[0], dialog.top_line, "the first row: the top line, never the tab bar")
+        holder = dialog.status_box.args[0]  # (a widget the shared top row takes into the top line's column)
+        self.assertIs(outer[1], holder)
+        tabs_row = self.holding(made, dialog.top_tabs)[0]
+        self.assertGreater(outer.index(tabs_row), outer.index(holder), "the tabs under the header")
+        self.assertEqual(self.holding(made, dialog.status)[0].args[:1], (dialog.status_holders["letters"],))
+        self.assertIn(dialog.status_holders["letters"], dialog.status_box.added)
+        self.assertEqual(sorted(dialog.status_holders), ["anchors", "letters"], "Glyph generation's: made with its tab")
+
+    def test_the_tick_buttons_and_the_build_sit_in_the_bottom_row(self):
+        """Image 265: the only window whose buttons were not at the very bottom. Left the tick and row buttons,
+        right the committing action, then Close, under the log; Mark anchors' compile tick (Write the feature
+        code) before its Add ticked anchors, out of the script's row where it stood after an empty slot (248)."""
+        dialog, made = self.built()
+        left, right = dialog.bottom_row("letters")
+        self.assertEqual(left.added, [dialog.all_button, dialog.none_button, dialog.value_button,
+                                      dialog.restore_button, dialog.glyph_window_button, dialog.kerning_button,
+                                      dialog.correct_button])
+        self.assertEqual([w.args[0] for w in left.added[:3]], [u"Tick all", u"Tick none", u"Tick high-value glyphs"])
+        self.assertEqual(right.added, [dialog.build_button])
+        self.assertEqual(dialog.build_button.args[0], u"Build ticked glyphs")
+        self.assertEqual(dialog.kerning_button.args[0], u"Check kerning of these glyphs", "it runs a check: Check")
+        left, right = dialog.bottom_row("anchors")
+        anchors = dialog.anchors
+        self.assertEqual(left.added, [anchors.all_button, anchors.none_button, anchors.restore_button])
+        self.assertEqual(right.added, [anchors.code_box, anchors.write_button])
+        self.assertFalse([w for w in self.holding(made, anchors.script_label) if anchors.code_box in w.added],
+                         "not in the script's row any more")
+        closing = self.holding(made, dialog.close_button)[0]
+        self.assertIs(closing.added[-1], dialog.close_button)
+        outer = self.outer(dialog, made).added
+        self.assertGreater(outer.index(closing), outer.index(dialog.log.widget), "under the log")
+        for key in ac.TAB_KEYS:  # (each tab's parts, the left ones before the stretch, the right ones after)
+            self.assertIn(dialog.bottom_parts[key][0][0], closing.added)
+            self.assertIn(dialog.bottom_parts[key][1][0], closing.added)
+
+    def test_only_the_shown_tabs_status_and_buttons_show(self):
+        dialog = ac.AccentsDialog.__new__(ac.AccentsDialog)
+        shown = {}
+
+        def part(name):
+            return Stub(setVisible=lambda on: shown.__setitem__(name, on))
+        dialog.status_holders = dict((key, part(key)) for key in ac.TAB_KEYS)
+        dialog.bottom_parts = dict((key, [(part(key + " left"), None), (part(key + " right"), None)])
+                                   for key in ac.TAB_KEYS)
+        dialog.top_tabs, dialog.tabs = Stub(currentIndex=0), Stub(currentIndex=1)
+        dialog.show_tab_parts()
+        self.assertEqual(sorted(name for name, on in shown.items() if on), ["anchors", "anchors left", "anchors right"])
+        dialog.top_tabs.currentIndex = 1
+        dialog.show_tab_parts()
+        self.assertEqual(sorted(name for name, on in shown.items() if on),
+                         ["generation", "generation left", "generation right"])
+        dialog.top_tabs.currentIndex, dialog.tabs.currentIndex = 0, 0
+        self.assertEqual(dialog.shown_tab(), "letters")
+
+    def test_the_top_line_names_the_font_and_master(self):
+        """Brief 1 and 2: every tab's reading starts by naming the font in the top line (the shared font_named:
+        "(of 3 masters)" only with several), or the no-font line."""
+        ak = Stub(font_named=lambda name, master, masters: u"%s/%s/%d" % (name, master, masters))
+        self.assertEqual(ac.font_line(ak, Stub(tfn=u"Cardo", master=u"Bold", mastersCount=3)), u"Cardo/Bold/3")
+        self.assertEqual(ac.font_line(Stub(), Stub(tfn=u"Cardo", master=u"Bold", mastersCount=1)),
+                         u"<b>Cardo</b>, master <b>Bold</b>")
+        self.assertEqual(ac.font_line(Stub(NO_FONT_LINE=u"No font."), None), u"No font.")
+        lines = []
+        page = ac.AnchorPage.__new__(ac.AnchorPage)
+        page.loading, page.glyphs, page.package = False, [], None
+        page.owner = Stub(package_key=lambda p: None, current_font=lambda: None, say_font=lines.append)
+        page.tree = Stub(blockSignals=lambda on: None, clear=lambda: None)
+        page.show_scripts = lambda: None
+        page.status = Stub(setText=lambda text: None)
+        page.select = lambda: None
+        saved = ac._qt
+        try:
+            ac._qt = lambda: (None, None)
+            page.run()
+        finally:
+            ac._qt = saved
+        self.assertEqual(lines, [None], "Mark anchors says there is no font in the window's top line")
+
+    def test_the_letters_status_counts_right_at_0_1_and_2(self):
+        """Image 247 and 265: "0 glyphs can be built; 46 others need", "Cyrillic or Greek or Kana"."""
+        b, i = (lambda text: u"<b>%s</b>" % text), (lambda text: u"<i>%s</i>" % text)
+        self.assertEqual(ac.letters_status(0, 46, absent=["cyrillic", "greek", "kana"], bold=b, italic=i),
+                         u"No glyph can be built: <b>46 glyphs</b> need a mark or letter the font lacks. The font "
+                         u"has no Cyrillic, Greek, or kana letters: theirs are not listed.")
+        self.assertEqual(ac.letters_status(0, 1), u"No glyph can be built: 1 glyph needs a mark or letter the font lacks.")
+        self.assertEqual(ac.letters_status(0, 0), u"No glyph can be built.")
+        self.assertEqual(ac.letters_status(1, 0, italic=i), u"1 glyph can be built. Nothing is made until you click "
+                                                            u"<i>Build ticked glyphs</i>.")
+        self.assertEqual(ac.letters_status(2, 1, [u"1 glyph with a mark drafted from punctuation"], [u"Room."],
+                                           ["kana"]),
+                         u"2 glyphs can be built (1 glyph with a mark drafted from punctuation); 1 other needs a mark "
+                         u"or letter the font lacks. Room. Nothing is made until you click Build ticked glyphs. The "
+                         u"font has no kana letters: theirs are not listed.")
+        self.assertEqual(ac.listed([u"Greek", u"kana"], u"or"), u"Greek or kana")
+        self.assertEqual(ac.listed([u"a", u"b", u"c"]), u"a, b, and c")
+
+    def test_the_anchors_status_follows_the_top_line(self):
+        b = lambda text: u"<b>%s</b>" % text
+        text = ac.anchors_status(u"Thai", 40, 12, [u"2 substitutions"], 30, 8, 1, True, b)
+        self.assertTrue(text.startswith(u"<b>Thai</b>: <b>40 bases</b> and <b>12 marks</b>, <b>2 substitutions</b>; "
+                                        u"<b>30</b> get anchors, placed as <b>8</b> of the corpus's Thai fonts place "
+                                        u"theirs."), text)
+        self.assertIn(u"<b>1 letter</b> that takes no marks", text)
+        self.assertIn(u"With several masters", text)
+        self.assertTrue(text.endswith(u"Nothing changes until you click Add ticked anchors."))
+        none = ac.anchors_status(u"Latin", 0, 3, [], 0, 12, 0, False)
+        self.assertEqual(none, u"Latin: 0 bases and 3 marks; none gets anchors, placed as 12 of the corpus's Latin "
+                               u"fonts place theirs.", "nothing to add: no button to wait for")
+
+    def test_the_anchors_reference_hides_with_its_line(self):
+        """Image 251: a line between the reference and the preview, hidden with the reference."""
+        page = ac.AnchorPage.__new__(ac.AnchorPage)
+        shown = {}
+        for name in ("reference_title", "reference_font", "reference", "reference_note", "reference_line", "editor",
+                     "hint", "reset_button"):
+            setattr(page, name, Stub(setVisible=(lambda key: lambda on: shown.__setitem__(key, on))(name)))
+        page.show_preview(False, False)
+        self.assertFalse(any(shown.values()))
+        page.show_preview(True, False)
+        self.assertTrue(shown["reference_line"] and shown["reference"] and not shown["editor"])
 
 
 if __name__ == "__main__":

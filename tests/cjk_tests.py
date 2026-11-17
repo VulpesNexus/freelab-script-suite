@@ -469,7 +469,8 @@ class StaleCodeTests(unittest.TestCase):
             busy_progress=staticmethod(lambda owner, what=None, part=None, force=False, stoppable=True:
                                        self.busy.append(("progress", stoppable))),
             busy_end=staticmethod(lambda owner: self.busy.append(("end", None))),
-            busy_stopping=staticmethod(lambda owner: False), Stopped=Exception))
+            busy_stopping=staticmethod(lambda owner: False), Stopped=Exception,
+            font_named=staticmethod(lambda name, master=None, masters=1: u"%s, master %s" % (name, master))))
         self.busy = []
         dialog.harvest = lambda: None
         dialog.hangul_chosen = lambda: []
@@ -531,6 +532,7 @@ class StaleCodeTests(unittest.TestCase):
         self.assertEqual([kind for kind, _ in self.busy], ["start", "end"])
         self.assertEqual(dialog.trims, [])
         self.assertIn(u"Listing was stopped", dialog.status.text)
+        self.assertTrue(dialog.status.text.startswith(u", master None."), "the font line kept (owner's image 224)")
         self.assertEqual(dialog.seen_history, "mark", "not read again for the History seen before")
         self.assertFalse(dialog.busy)
 
@@ -576,8 +578,8 @@ class CheckRow(object):
 
 
 def check_all_logged(test, module, dialog_class, noun):
-    """Check all and Check none of a CJK tool (module's dialog_class) over two groups, one closed: what
-    the log says (owner's report 118: these buttons left no line)."""
+    """Tick all and Tick none of a CJK tool (module's dialog_class) over two groups, one closed: what
+    the log says (owner's report 118: these buttons left no line; image 261: Tick, not Check)."""
     sys.path.insert(0, os.path.join(HERE, os.pardir, "kerning"))
     import freelab_auto_kerning as ak
     saved = sys.modules.get("PythonQt")
@@ -598,12 +600,12 @@ def check_all_logged(test, module, dialog_class, noun):
         dialog.log = type("Log", (), {"add": lambda _, text, kind=None: logged.append(text)})()
         dialog.check_all(True)
         test.assertTrue(all(row.on for row in rows))
-        test.assertEqual(logged[-1], u"<i>Check all</i> checked <b>3 %ss</b> (2 of them in closed groups)." % noun)
+        test.assertEqual(logged[-1], u"<i>Tick all</i> ticked <b>3 %ss</b> (2 of them in closed groups)." % noun)
         rows[2].on = False
         dialog.check_all(False)
-        test.assertEqual(logged[-1], u"<i>Check none</i> unchecked <b>3 %ss</b> (1 of them in a closed group)." % noun)
+        test.assertEqual(logged[-1], u"<i>Tick none</i> unticked <b>3 %ss</b> (1 of them in a closed group)." % noun)
         dialog.check_all(False)
-        test.assertEqual(logged[-1], u"<i>Check none</i> changed nothing.")
+        test.assertEqual(logged[-1], u"<i>Tick none</i> changed nothing.")
     finally:
         if saved is None:
             sys.modules.pop("PythonQt", None)
@@ -763,6 +765,54 @@ class WordingTests(unittest.TestCase):
         for mark in escaped + [u" \N{EM DASH} ", u" \N{MIDDLE DOT} "]:
             self.assertNotIn(mark, source)
         self.assertNotIn(u"%d units", source, "a number's word through counted: 1 unit")
+
+
+class UIRoundTests(unittest.TestCase):
+    """The owner's UI round (images 212 to 282): one header for every window, Tick for check boxes, every preview
+    caption the shared one, counts right at 0, 1, and 2."""
+
+    def source(self):
+        import io
+        with io.open(cj.__file__.replace(".pyc", ".py"), encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_the_status_counts_right_at_zero_one_and_two(self):
+        status = lambda trimmed, full: cj.trims_status(trimmed, full, trimmed, 0, u"Write the code")
+        self.assertEqual(status(0, 0), u"No full-width kana or CJK punctuation: nothing to trim.")
+        self.assertEqual(status(0, 1), u"The only full-width kana or punctuation mark needs no trim.")
+        self.assertEqual(status(1, 1), u"The only full-width kana or punctuation mark gets a trim (palt: 1, halt: 0). "
+                                       u"Nothing is written until you click Write the code.")
+        self.assertEqual(status(0, 2), u"None of the 2 full-width kana and punctuation needs a trim.")
+        self.assertEqual(status(1, 2), u"1 of the 2 full-width kana and punctuation gets a trim (palt: 1, halt: 0). "
+                                       u"Nothing is written until you click Write the code.")
+        self.assertEqual(cj.trims_status(2, 1200, 2, 1, u"Write the code", u" Its 3 Hangul syllables.",
+                                         lambda text: u"<b>%s</b>" % text, lambda text: u"<i>%s</i>" % text),
+                         u"<b>2</b> of the <b>1,200</b> full-width kana and punctuation get a trim (palt: <b>2</b>, halt: "
+                         u"<b>1</b>). Nothing is written until you click <i>Write the code</i>. Its 3 Hangul syllables.")
+
+    def test_the_top_line_names_the_font_its_way(self):
+        # (owner's images 223 and 238: the masters counted only beyond one; image 224: the font line kept on a failure)
+        sys.path.insert(0, os.path.join(HERE, os.pardir, "kerning"))
+        import freelab_auto_kerning as ak
+        one = type("Package", (), {"tfn": u"BIZ UDGothic", "master": u"Regular", "mastersCount": 1})()
+        three = type("Package", (), {"tfn": u"Cardo", "master": u"Bold", "masters": [u"Regular", u"Bold", u"Black"]})()
+        self.assertEqual(cj.font_line(ak, one), u"<b>BIZ UDGothic</b>, master <b>Regular</b>.")
+        self.assertEqual(cj.font_line(ak, three), u"<b>Cardo</b>, master <b>Bold</b> (of <b>3 masters</b>).")
+        self.assertEqual(cj.font_line(ak, None), u"")
+        source = self.source()
+        self.assertNotIn(u'self.status.setText(u"")', source, "a failure keeps the font line")
+        self.assertNotIn(u", master %s", source, "the shared font_named, not a line of its own")
+
+    def test_header_previews_and_ticks(self):
+        source = self.source()
+        self.assertIn(u"layout.addWidget(ak.header_separator())", source)
+        self.assertIn(u"ak.preview_caption(caption)", source, "the shared quiet caption")
+        self.assertNotIn(u"setPointSizeF", source)
+        for old in (u'"Check all"', u'"Check none"', u"Checks restored", u"Checked glyphs", u"checked glyphs"):
+            self.assertNotIn(old, source)
+        # (a tool named in the log is a link that opens it: owner's image 220)
+        self.assertIn(u'self.ak.tool_link(u"Feature Check")', source)
+        self.assertNotIn(u"<i>Feature Check</i> lists", source)
 
 
 if __name__ == "__main__":

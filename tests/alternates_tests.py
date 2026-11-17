@@ -190,6 +190,9 @@ class Layer(object):
     def addShape(self, shape):
         self.shapes.append(shape)
 
+    def removeAllShapes(self):
+        self.shapes = []
+
 
 class Glyph(object):
     def __init__(self, name, code=None, drawn=True):
@@ -237,9 +240,23 @@ class Owner(object):
         self.stoppable = []  # (each set_busy's and progress's: a build is a write, never stopped)
         self.log.add = lambda text, level="info": self.logged.append((level, text))
 
+    headings = []  # (the headings' words, as the tab asked for them)
+
     @staticmethod
     def heading(QtGui, text):
+        Owner.headings.append(text)
         return Box()
+
+    def build_masters(self, package):
+        return list(package.masters)
+
+    def glyph_print(self, package, name, masters):
+        """What a glyph is in each master, as the dialog's glyph_print tells a glyph changed since."""
+        glyph = package.findName(name)
+        if glyph is None:
+            return None
+        return tuple((master, tuple(id(shape) for shape in glyph.layers[master].shapes),
+                      glyph.layers[master].advanceWidth) for master in masters if master in glyph.layers)
 
     def current_font(self):
         return self.package
@@ -352,7 +369,7 @@ class PageTests(unittest.TestCase):
         self.assertEqual(page.scope(), "checked")
         self.assertEqual(page.build_button.text, u"Build variants")
         self.assertFalse(page.build_button.enabled, "nothing checked: nothing to build")
-        self.assertIn(u"No letter, figure, or punctuation mark is checked", page.scope_note.text)
+        self.assertIn(u"No glyph ticked in the list above can take turns", page.scope_note.text)
         self.row(page, u"a").setCheckState(0, ft.CHECKED)
         self.row(page, u"l").setCheckState(0, ft.CHECKED)
         self.row(page, u"plus").setCheckState(0, ft.CHECKED)
@@ -415,9 +432,10 @@ class PageTests(unittest.TestCase):
         self.assertEqual(page.build_button.text, u"Build 13 variants")
         # A scope's name is the name alone; what it holds is in the box's What's This
         self.assertEqual([label for _, label in fa.SCOPES],
-                         [u"The checked glyphs", u"Often doubled", u"These glyphs",
+                         [u"The ticked glyphs", u"Often doubled", u"These glyphs",
                           u"Lowercase letters", u"Capitals", u"Capitals and lowercase", u"Everything"])
-        self.assertEqual(ft.fc.TURN_CHECKS[0][1], u"Often doubled", "the first tab's words for the same glyphs")
+        self.assertEqual(ft.fc.TURN_CHECK_LABELS["often"], u"Tick often doubled",
+                         "the first tab's words for the same glyphs (its button in the bottom row)")
         for words in (u"<i>Often doubled</i>, the glyphs that often stand doubled in text",
                       u"<i>Everything</i>, every letter, figure, and punctuation mark of the font"):
             self.assertIn(words, page.scope_box.whats)
@@ -460,38 +478,45 @@ class PageTests(unittest.TestCase):
         self.assertEqual([button.enabled for button in buttons], [False, False, False],
                          "grayed out once the container is enabled again")
 
-    def test_the_option_is_grayed_out_in_a_font_with_no_alternate(self):
+    def test_the_option_is_grayed_out_while_no_glyph_in_scope_has_an_alternate(self):
         """The owner: the option should read "Also build variants from existing alternates", and be grayed
-        out where the font has no alternate at all. It then counts as unchecked, its check kept."""
+        out where there is no alternate to build from. It then counts as unticked, its tick kept. Owner's
+        image 269: it stayed grayed out after a build of variants, the font's only alternates being the
+        ones FreeLab built: they are alternates to build from too, and the scope decides (not the font)."""
         self.assertEqual(fa.DESIGNS_LABEL, u"Also build variants from existing alternates")
         turns = lambda ch: bool(ch) and ft.fc.char_kind(ch) is not None
         self.assertTrue(fa.has_designs({0x57: u"W"}, fa.alternates_index([u"W", u"W.ss01"]), turns))
-        self.assertFalse(fa.has_designs({0x57: u"W"}, fa.alternates_index([u"W", u"W.alt1", u"W.sc"]), turns),
-                         "a built variant and a small capital are no designs to build from")
+        self.assertTrue(fa.has_designs({0x57: u"W"}, fa.alternates_index([u"W", u"W.alt1"]), turns),
+                        "a variant built before is an alternate to build from")
+        self.assertFalse(fa.has_designs({0x57: u"W"}, fa.alternates_index([u"W", u"W.sc"]), turns),
+                         "a small capital is no design to build from")
         self.assertFalse(fa.has_designs({0x2B: u"plus"}, fa.alternates_index([u"plus", u"plus.ss01"]), turns),
                          "a symbol takes no turns: its alternate serves no variant")
+        self.assertTrue(fa.designs_in([u"a", u"W"], fa.alternates_index([u"a", u"W", u"a.alt1"])))
+        self.assertFalse(fa.designs_in([u"W"], fa.alternates_index([u"a", u"W", u"a.alt1"])), "W has none")
         page, owner = self.page([(u"a", 0x61), (u"W", 0x57), (u"a.alt1", None), (u"space", 0x20)], ((u"a", 49), (u"W", 22)))
-        self.assertFalse(page.designs)
-        self.assertFalse(page.designs_box.enabled)
-        self.assertTrue(page.designs_box.whats.startswith(u"Grayed out: this font has no alternate to build from"))
-        self.assertIn(u"Grayed out", page.designs_box.tip, "said on hover too")
-        page.designs_box.setChecked(True)  # (set in a font that had some, kept here)
-        page.update_buttons()
-        self.assertFalse(page.from_designs(), "counts as unchecked")
-        self.assertTrue(page.designs_box.checked, "the user's setting is kept")
+        self.assertFalse(page.designs_box.enabled, "nothing ticked: no glyph in scope")
         self.row(page, u"W").setCheckState(0, ft.CHECKED)
+        self.assertFalse(page.designs_box.enabled, "W has no alternate")
+        self.assertTrue(page.designs_box.whats.startswith(u"Grayed out: no glyph in scope has an alternate to build from"))
+        self.assertIn(u"Grayed out", page.designs_box.tip, "said on hover too")
+        page.designs_box.setChecked(True)  # (set for other glyphs, kept here)
+        page.update_buttons()
+        self.assertFalse(page.from_designs(), "counts as unticked")
+        self.assertTrue(page.designs_box.checked, "the user's setting is kept")
         self.assertEqual(page.scope_note.text, u"1 glyph (W): 2 variants to build.", "no count of alternates: none used")
-        # An alternate drawn (the font read again): the option is back, checked as it was left
-        drawn = ft.FakeNewGlyph()
-        drawn.name = u"W.ss01"
-        owner.package.addGlyph(drawn)
-        owner.package.by_name[u"W.ss01"].layers[u"Regular"] = Layer()
-        page.fill()
-        self.assertTrue(page.designs and page.designs_box.enabled and page.from_designs())
+        # a has a.alt1 (a variant built before): ticked, the option is back, ticked as it was left
+        self.row(page, u"a").setCheckState(0, ft.CHECKED)
+        self.assertTrue(page.designs_box.enabled and page.from_designs())
         self.assertEqual(page.designs_box.whats, fa.DESIGNS_WHAT)
         self.assertEqual(page.designs_box.tip, u"")
-        # The fonts of the other tests have alternates: the option is theirs to check
-        self.assertTrue(self.page()[0].designs_box.enabled, "u.01 and u.02 are designs of u")
+        self.assertEqual(page.scope_note.text, u"2 glyphs (a, W): 3 variants to build (1 from the font's alternates); "
+                                               u"1 variant the font has already is left as it is.",
+                         "a.alt2 made of a.alt1, the alternate it has")
+        # The fonts of the other tests have alternates: the option is theirs to tick
+        page = self.page()[0]
+        self.row(page, u"u").setCheckState(0, ft.CHECKED)
+        self.assertTrue(page.designs_box.enabled, "u.01 and u.02 are designs of u")
 
     def test_a_scope_per_script_and_one_for_every_glyph(self):
         """The owner asked for a dropdown of which glyphs get a variant (common pairs, all Latin, all
@@ -501,7 +526,7 @@ class PageTests(unittest.TestCase):
                           (u"uni0434.loclBGR", None)]
         page, owner = self.page(glyphs)
         self.assertEqual(page.scope_box.labels,
-                         [u"The checked glyphs", u"Often doubled", u"These glyphs",
+                         [u"The ticked glyphs", u"Often doubled", u"These glyphs",
                           u"Latin glyphs", u"Cyrillic glyphs", u"Greek glyphs",
                           u"Lowercase letters", u"Capitals", u"Capitals and lowercase", u"Everything"],
                          "Latin first, then the script with the most glyphs")
@@ -606,13 +631,13 @@ class PageTests(unittest.TestCase):
         row = self.row(page, u"u")
         self.assertEqual(row.icons, {1: ("picture", u"u"), 3: ("picture", u"u.01", u"u.02")})
         self.assertEqual(self.row(page, u"a").icons, {1: ("picture", u"a")}, "no alternate: no picture of one")
-        self.assertEqual((page.all_button.text, page.none_button.text), (u"Check all", u"Check none"))
+        self.assertEqual((page.all_button.text, page.none_button.text), (u"Tick all", u"Tick none"))
         self.assertTrue(page.all_button.enabled)
         self.assertFalse(page.none_button.enabled, "nothing checked: nothing to uncheck")
         page.all_button.slots["clicked()"][0]()
         self.assertEqual(len(page.checked_glyphs()), len(page.tree.items))
         # Owner's report 118: these buttons left no line in the log
-        self.assertEqual(owner.logged[-1][1], u"<i>Check all</i> checked <b>%d glyphs</b>." % len(page.tree.items))
+        self.assertEqual(owner.logged[-1][1], u"<i>Tick all</i> ticked <b>%d glyphs</b>." % len(page.tree.items))
         self.assertFalse(page.all_button.enabled, "all checked: nothing more to check")
         self.assertTrue(page.none_button.enabled)
         self.assertTrue(page.copy_button.enabled)
@@ -621,7 +646,7 @@ class PageTests(unittest.TestCase):
         self.assertTrue(page.all_button.enabled and page.none_button.enabled)
         page.none_button.slots["clicked()"][0]()
         self.assertEqual(page.checked_glyphs(), [])
-        self.assertEqual(owner.logged[-1][1], u"<i>Check none</i> unchecked <b>%d glyphs</b>." % (len(page.tree.items) - 1))
+        self.assertEqual(owner.logged[-1][1], u"<i>Tick none</i> unticked <b>%d glyphs</b>." % (len(page.tree.items) - 1))
         self.assertFalse(page.copy_button.enabled)
         owner.busy = True
         page.check_all(True)
@@ -632,7 +657,7 @@ class PageTests(unittest.TestCase):
         the button says what its copies are for, and each part says that neither is a step of the other."""
         page, owner = self.page()
         self.assertEqual(page.copy_button.text, u"Make copies to redraw")
-        self.assertIn(u"To draw an alternate by hand, check a glyph, then click <i>Make copies to redraw</i>",
+        self.assertIn(u"To draw an alternate by hand, tick a glyph, then click <i>Make copies to redraw</i>",
                       page.note.text)
         self.assertIn(u"The variants below are another job, and need no such copy.", page.note.text)
         for glyph in (u"a", u"l"):
@@ -655,8 +680,9 @@ class PageTests(unittest.TestCase):
                  u"W.calt1", u"W.swsh", u"Wacute.ss01"]
         alternates = fa.alternates_of(u"W", names)
         self.assertEqual(fa.designs_of(u"W", alternates),
-                         [u"W", u"W.2", u"W.alt", u"W.calt1", u"W.cv05", u"W.salt", u"W.ss01"],
-                         "the glyph and its drawn alternates; no built variant, no small capital, no other glyph's")
+                         [u"W", u"W.2", u"W.alt", u"W.alt1", u"W.calt1", u"W.cv05", u"W.salt", u"W.ss01"],
+                         "the glyph and its alternates, a variant built before among them (owner's image 269); no "
+                         "variant of an alternate, no small capital, no other glyph's")
         self.assertEqual(fa.variant_numbers(u"W", alternates), {1: u"W.alt1", 2: u"W.ss01.alt2"})
         self.assertEqual(fa.alternates_index(names)[u"W"], alternates, "the same alternates, read once for the font")
         self.assertEqual(fa.designs_of(u"a", []), [u"a"])
@@ -674,7 +700,8 @@ class PageTests(unittest.TestCase):
                          [(u"W", [(u"W.alt1", 1, u"W"), (u"W.alt2", 2, u"W")])], "without the option: as before")
         # A number is given once, whatever the design: no two variants of a glyph share one
         names.update([u"W.alt1", u"W.ss01.alt2"])
-        self.assertEqual(fa.variants_planned([u"W"], 3, names, designs=True), [(u"W", [(u"W.alt3", 3, u"W")])])
+        self.assertEqual(fa.variants_planned([u"W"], 3, names, designs=True), [(u"W", [(u"W.ss01.alt3", 3, u"W.ss01")])],
+                         "W, W.alt1 (built before), and W.ss01 in turn: the third from W.ss01")
         self.assertEqual(fa.variants_planned([u"W"], 3, names), [(u"W", [(u"W.alt3", 3, u"W")])],
                          "number 2 is taken by the alternate's variant: W.alt2 is not built beside it")
 
@@ -705,14 +732,15 @@ class PageTests(unittest.TestCase):
         done = [text for level, text in owner.logged if level == "done"][0]
         self.assertIn(u"Built <b>2 variants</b> of 1 glyph: ", done)
         self.assertIn(u"(subtle, seed 1, 1 from the font's alternates)", done)
-        # Read again: the variants are the font's, and no design; nothing more to build of W
+        # Read again: the variants are the font's; nothing more to build of W
         item = self.row(page, u"W")
         page.draw_preview()
         self.assertEqual(page.existing_caption.text, u"In the font: W, W.alt1, W.ss01, W.ss01.alt2")
         self.assertIn(u"Nothing to build of W", page.preview_caption.text)
         page.count_box.setValue(3)
         page.draw_preview()
-        self.assertEqual(page.preview_caption.text, u"To build (Subtle, seed 1): W.alt3", "the third from W again")
+        self.assertEqual(page.preview_caption.text, u"To build (Subtle, seed 1): W.ss01.alt3",
+                         "the third from the third design: W, W.alt1 (built before), W.ss01")
         # The first tab cycles them all in W's turn, and leaves W.ss01 to the Forms tab, as before
         names = [g.name for g in font.glyphs]
         sets = ft.fc.alternate_sets(names, lambda name: name in (u"W", u"w", u"a"))
@@ -743,9 +771,10 @@ class PageTests(unittest.TestCase):
                           u"2 glyphs (g0, g1): 2 variants to build (1 from the font's alternates).",
                           u"2 glyphs (g0, g1): 2 variants to build (2 from the font's alternates)."])
         self.assertEqual(fa.build_words([(u"a", [])], 1, "all"),
-                         (u"Build variants", u"1 glyph (a): 0 variants to build; 1 variant the font has already is "
+                         (u"Build variants", u"1 glyph (a): no variant to build; 1 variant the font has already is "
                                              u"left as it is."))
-        self.assertEqual(fa.build_words([], 2, "all")[1], u"The font has no letter, figure, or punctuation mark.")
+        self.assertEqual(fa.build_words([], 2, "all")[1],
+                         u"The font has no glyph that can take turns (a letter's, a figure's, or a punctuation mark's).")
         self.assertEqual([fa.counted(n, u"glyph") for n in (0, 1, 2, 65535)],
                          [u"0 glyphs", u"1 glyph", u"2 glyphs", u"65,535 glyphs"])
         self.assertEqual(fa.build_words(plan(3), 1, "all", problem=u"Refused.")[1], u"Refused.")
@@ -814,7 +843,7 @@ class PageTests(unittest.TestCase):
         page.draw_preview()
         self.assertIsNone(page.preview.pixmap)
         self.assertEqual(page.preview_caption.text,
-                         u"Nothing to build of l: the font has this variant already (at the left).")
+                         u"Nothing to build of l: the font has this variant already (see left).")
         # Built, the variants move to the left of the same letter's previews
         page.count_box.setValue(2)
         item.setCheckState(0, ft.CHECKED)
@@ -845,6 +874,77 @@ class PageTests(unittest.TestCase):
         page, owner = self.page([(u"zero", 0x30), (u"space", 0x20)], ((u"a", 49),))
         self.assertEqual(page.tree.items, [])
         self.assertTrue(page.note.text.startswith(u"The font has none of the glyphs fonts most often give"))
+
+    def test_a_new_seed_builds_the_variants_built_here_again_in_place(self):
+        """Owner's image 270: after a build, another seed left nothing to build ("the font has these variants
+        already"), where the owner wanted the same variants with another seed. Variants this tab built and
+        nobody changed since are built again in place, as one step of the History; the font's own variants,
+        and one drawn over since, are left as they are."""
+        page, owner = self.page()
+        self.row(page, u"a").setCheckState(0, ft.CHECKED)
+        self.row(page, u"l").setCheckState(0, ft.CHECKED)
+        page.build_variants()  # a.alt1, a.alt2, l.alt2 (l.alt1 is the font's own)
+        font = owner.package
+        self.assertEqual(sorted(page.ours), [u"a.alt1", u"a.alt2", u"l.alt2"])
+        self.assertEqual(sorted(page.checked_glyphs()), [u"a", u"l"], "the font read again: its ticks kept")
+        self.assertEqual(page.ours[u"a.alt1"], (u"subtle", 1))
+        self.assertEqual(page.build_button.text, u"Build variants")
+        self.assertFalse(page.build_button.enabled, "the same settings: nothing to build")
+        item = self.row(page, u"a")
+        page.tree.selectedItems = lambda: [item]
+        page.draw_preview()
+        self.assertEqual(page.preview_caption.text, u"Nothing to build of a: the font has these variants already (see left).")
+        page.seed_box.setValue(2)
+        page.update_buttons()
+        self.assertTrue(page.build_button.enabled, "another seed: the variants built here are to build again")
+        self.assertEqual(page.build_button.text, u"Build 3 variants")
+        self.assertEqual(page.scope_note.text, u"2 glyphs (a, l): 3 variants to build, all of them built here before "
+                                               u"with other settings, replaced in place; 1 variant the font has "
+                                               u"already is left as it is.")
+        page.draw_preview()
+        self.assertEqual(page.existing_caption.text, u"In the font: a, a.alt1, a.alt2")
+        self.assertEqual(page.preview_caption.text, u"To build (Subtle, seed 2): a.alt1, a.alt2")
+        before = [shape for shape in font.by_name[u"a.alt1"].layers[u"Regular"].shapes]
+        count = len(font.glyphs)
+        steps = [step for step in owner.fontlab.flItems.steps if not step.endswith(u"(before)")]
+        del owner.logged[:]
+        page.build_variants()
+        self.assertEqual(len(font.glyphs), count, "replaced in place: no glyph added")
+        after = font.by_name[u"a.alt1"].layers[u"Regular"].shapes
+        self.assertTrue(after and not any(shape in before for shape in after), "a.alt1 made again")
+        self.assertEqual([step for step in owner.fontlab.flItems.steps if not step.endswith(u"(before)")],
+                         steps + [u"FreeLab Feature Code"], "one step of the History: one Undo takes it back")
+        done = [text for level, text in owner.logged if level == "done"]
+        self.assertTrue(done and done[0].startswith(u"Built <b>3 variants</b> again in place: "), owner.logged)
+        self.assertIn(u"(subtle, seed 2): they were built here before with other settings.", done[0])
+        self.assertEqual(page.ours[u"a.alt1"], (u"subtle", 2))
+        # A variant drawn over since is the user's: never replaced; the strength changes the others too
+        font.by_name[u"a.alt2"].layers[u"Regular"].shapes.append(ft.Anything())
+        page.fill()
+        self.assertNotIn(u"a.alt2", page.ours)
+        page.strength_box.setCurrentIndex(1)
+        page.update_buttons()
+        self.assertEqual(page.build_button.text, u"Build 2 variants", "a.alt1 and l.alt2; not a.alt2, drawn over")
+        page.seed_box.setValue(1)
+        page.strength_box.setCurrentIndex(0)
+        self.assertEqual(fa.variants_planned([u"a"], 2, set([u"a", u"a.alt1", u"a.alt2"]), ours={u"a.alt1": (u"subtle", 1)},
+                                             settings=(u"subtle", 1)), [(u"a", [])], "as built: left as it is")
+        self.assertEqual(fa.variant_source(u"W.ss01.alt2", 2), u"W.ss01")
+
+    def test_the_tab_is_two_parts_and_its_buttons_go_to_the_bottom_row(self):
+        """Owner's images 244, 245, 246, 258 to 260: the heading lost "(handwriting)"; the tab is two parts of a
+        splitter (it had no handle), its buttons in the window's bottom row (none between a list and its
+        handle); the previews' captions are a preview's (quiet), a line between the two previews."""
+        del Owner.headings[:]
+        page, owner = self.page()
+        self.assertEqual(Owner.headings, [u"Suggested alternates", u"Variants that take turns"])
+        self.assertIs(page.widget, page.parts, "the tab is its splitter")
+        left, right = page.bottom_buttons()
+        self.assertEqual([button.text for button in left], [u"Tick all", u"Tick none"])
+        self.assertEqual([button.text for button in right], [u"Make copies to redraw", u"Build variants"])
+        self.assertFalse(page.existing_caption.enabled or page.preview_caption.enabled,
+                         "drawn in the quiet color (ak.preview_caption)")
+        self.assertIsNotNone(page.preview_line, "a line between the two previews")
 
     def test_what_a_click_builds_in_words(self):
         plan = fa.variants_planned([u"a", u"g"], 2, set([u"a", u"g", u"a.alt1", u"a.alt2"]))
