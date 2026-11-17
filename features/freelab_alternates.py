@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """FreeLab Feature Code's Stylistic alternates tab (loaded by freelab_feature_code.py; not a script of its own).
 
-Suggested alternates: the characters fonts give stylistic alternates most (features/alternates_model.json,
+Suggestions: the characters fonts give stylistic alternates most (features/alternates_model.json,
 from features/train/alternates.py: which characters the corpus's open-licensed fonts vary in ssXX, cvXX,
 and salt), those the font has listed with how many families vary them and the alternates it has already.
 A ticked one gets a copy to redraw by hand, X.ss01 (the next free set), its outlines as they are; the
@@ -36,9 +36,14 @@ build left them, and the strength and seed it was built with, kept for the windo
 with another strength or seed, they are replaced in place, as one step of FontLab's History (owner's
 image 270: a new seed could not rebuild what was just built); with the same, they are left as they are.
 
-The scope is the glyphs ticked in the list (at first), those that often stand doubled in text,
-characters typed in a box, a script the font has (Latin first), a case of letters, or every letter,
-figure, and punctuation mark. Scripts and cases are read from the model's tables (features/train/
+The list has two groups (owner's image 302): Suggestions, the copies' glyphs, and Selected glyphs, the
+glyphs the Glyphs dropdown picks for the variants, all ticked (a new pick replaces the last; a glyph
+unticked there is out of the build and the previews). The pick is the ticked suggestions (at first, kept
+in step as they are ticked), those that often stand doubled in text, characters typed in a box, a script
+the font has (Latin first), a case of letters, or every letter, figure, and punctuation mark (a pick of
+more than SELECTED_MOST glyphs is not listed: one click could not build them). Make copies to redraw acts
+on the ticked suggestions, Build N variants on the ticked selected glyphs; Tick all and Tick none on
+both groups. Scripts and cases are read from the model's tables (features/train/
 scripts.py and kinds.py), not asked of the running Python. The button and the line under it say how
 many variants of which glyphs a click builds (the line in the paragraph over the settings, owner's
 image 245); a build that would pass what a font holds (65,535
@@ -71,13 +76,24 @@ STRENGTHS = (("subtle", u"Subtle", 0.8, 0.02, 1.0, 0.005),
 # (scopes_for), keyed SCRIPT_SCOPE and the script's name. A scope's name is its name alone ("Everything",
 # not "Every letter, figure, and punctuation mark"; "Often doubled", the first tab's words for the same
 # glyphs): what it holds is said in the box's What's This.
-SCOPES = (("checked", u"The ticked glyphs"), ("doubled", u"Often doubled"),
+SCOPES = (("checked", u"The ticked suggestions"), ("doubled", u"Often doubled"),
           ("typed", u"These glyphs"), ("lower", u"Lowercase letters"), ("upper", u"Capitals"),
           ("both", u"Capitals and lowercase"), ("all", u"Everything"))
 SCRIPT_SCOPE, SCRIPTS_AFTER, FIRST_SCRIPT = u"script:", "typed", u"Latin"
 # What the box beside the scopes says while These glyphs is picked (and only then: grayed out, it is
-# empty). It takes characters typed one after another, spaces or not; the gray example "lest" read as a word.
-TYPED_HINT = u"Type characters: a g 0 !"
+# empty). It takes characters typed one after another, spaces or not (its What's This gives an example;
+# the gray example "lest" read as a word). A field's placeholder ends with an ellipsis (owner's image 309).
+TYPED_HINT = u"Type characters\N{HORIZONTAL ELLIPSIS}"
+NO_FONT_FIELD = u"n/a"  # (what the field says, grayed out, while the window has no font)
+# The list's two groups (owner's image 302): the suggestions, which Make copies to redraw copies, and the
+# glyphs the Glyphs dropdown picks, which Build N variants builds. Each group row is bold, its count in
+# parentheses, and closes as every grouped list's; a row's group is told by its group row's key.
+SUGGESTIONS_GROUP, SELECTED_GROUP = u"Suggestions", u"Selected glyphs"
+LIST_HEADING = u"Glyphs for alternates"  # (it was "Suggested alternates": the list holds both groups now)
+SUGGESTIONS_KEY, SELECTED_KEY = u"\tsuggestions", u"\tselected"
+NO_DATA = u"\N{EN DASH}"  # a cell that means nothing for its row (no count of a glyph the model lacks)
+ROW_PICTURES = 120  # the selected glyphs drawn as the list is made; the rest when their row is clicked
+ROW_PICTURE_TIP = u"Click the row to draw it."
 DESIGNS_LABEL = u"Also build variants from existing alternates"
 DESIGNS_WHAT = (u"Spreads a glyph's variants over its designs in turn: the glyph and the alternates the font has of "
                 u"it (W.ss01, W.2, W.salt, and variants built before, such as W.alt1). Variant 1 is a changed copy of "
@@ -107,6 +123,10 @@ VARIANT_SUFFIX = u".alt%d"
 # PACE_FROM variants or more.
 GLYPHS_MOST = 65535
 BUILD_MOST = 6000
+# The glyphs a pick lists at most (Selected glyphs): a click builds BUILD_MOST variants at most, one a
+# glyph at least, so a larger pick could never be built in one click; listed, a whole CJK font's tens of
+# thousands of rows would take seconds at each pick
+SELECTED_MOST = BUILD_MOST
 SECONDS_MOST = 600
 PACE_FROM = 20
 # An alternate's suffix the builder builds from: a set, a character variant, salt, alt (its own variants,
@@ -250,6 +270,22 @@ def counted(number, one, many=None):
     return u"%s %s" % (grouped(number), one if number == 1 else (many or one + u"s"))
 
 
+def bold(text):
+    """A count in bold with its noun (owner's images 297 and 301: one rule for every status line, note,
+    and log line), as the shared module's b()."""
+    return u"<b>%s</b>" % text
+
+
+def html(text):
+    """Text shown as it is in a rich-text line (a glyph's name with &, <, or >)."""
+    return (u"%s" % text).replace(u"&", u"&amp;").replace(u"<", u"&lt;").replace(u">", u"&gt;")
+
+
+def group_title(title, count):
+    """A group row's words: its name and its count in parentheses, as every grouped list's ("Suggestions (12)")."""
+    return u"%s (%s)" % (title, grouped(count))
+
+
 def duration(seconds):
     """A build's time in words: "1 minute", "12 minutes" (a minute at least: a guess from one pace)."""
     return counted(max(1, int(round(seconds / 60.0))), u"minute")
@@ -259,35 +295,50 @@ def build_problem(new, font_glyphs, pace=None):
     """Why a click may not build this many variants, as a sentence that says what to choose instead,
     or None: the font would pass the glyphs a font can hold; more than one click builds (BUILD_MOST);
     or longer than one click may take (SECONDS_MOST), at the pace of the last build (seconds a variant,
-    None before one was timed)."""
+    None before one was timed). Its counts are bold (rich text: the line and the log show it so)."""
     if new and font_glyphs + new > GLYPHS_MOST:
         return (u"Nothing can be built: the font has %s, this build would add %s, and a font holds %s at most. "
                 u"Choose fewer glyphs (a script, a case, or the glyphs that often double in text) or fewer "
-                u"variants each." % (counted(font_glyphs, u"glyph"), counted(new, u"glyph"),
-                                    counted(GLYPHS_MOST, u"glyph")))
+                u"variants each." % (bold(counted(font_glyphs, u"glyph")), bold(counted(new, u"glyph")),
+                                    bold(counted(GLYPHS_MOST, u"glyph"))))
     if new > BUILD_MOST:
         return (u"Nothing can be built: %s is more than one click builds (%s at most: more could not all take "
                 u"turns in the first tab's code). Choose fewer glyphs (a script, a case, or the glyphs that "
                 u"often double in text) or fewer variants each." % (
-                    counted(new, u"variant"), grouped(BUILD_MOST)))
+                    bold(counted(new, u"variant")), bold(grouped(BUILD_MOST))))
     if pace and new * pace > SECONDS_MOST:
         return (u"Nothing can be built: %s would take about %s at the last build's pace, and one click builds "
                 u"for %s at most. Choose fewer glyphs or fewer variants each." % (
-                    counted(new, u"variant"), duration(new * pace), duration(SECONDS_MOST)))
+                    bold(counted(new, u"variant")), bold(duration(new * pace)), bold(duration(SECONDS_MOST))))
     return None
 
 
-def build_words(plan, count, scope, designs=False, problem=None, pace=None, again=0):
+def scope_problem(count):
+    """Why a pick of count glyphs is not listed, nor built, or None: past SELECTED_MOST, one click could
+    not build a variant of each."""
+    if count <= SELECTED_MOST:
+        return None
+    return (u"Nothing can be built: %s are picked, and one click builds %s at most (more could not all take "
+            u"turns in the first tab's code), so they are not listed. Choose fewer glyphs (a script, a case, or "
+            u"the glyphs that often double in text)." % (bold(counted(count, u"glyph")),
+                                                         bold(counted(BUILD_MOST, u"variant"))))
+
+
+def build_words(plan, count, scope, designs=False, problem=None, pace=None, again=0, listed=0):
     """(the build button's label, the line over the settings) for a plan (variants_planned): how many
     variants of which glyphs a click builds, said before the click; how many of them come from the
     font's alternates (designs: that option is on); how many of them replace variants built here with
     other settings (again); the problem's sentence in place of the count where the build is refused
     (build_problem); a sentence that a long build may take a bit (pace: what build_problem measures by,
-    the line no longer says a time)."""
+    the line no longer says a time). listed: the glyphs Selected glyphs lists (a plan of none, with some
+    listed: every one of them unticked). The line is rich text, each count bold with its noun."""
     glyphs = [glyph for glyph, _ in plan]
     new = sum(len(variants) for _, variants in plan)
     if not glyphs:
-        why = {"checked": u"No glyph ticked in the list above can take turns (a letter's, a figure's, or a "
+        if listed:
+            return u"Build variants", (u"Every glyph of <i>%s</i> is unticked: tick some in the list above, or pick "
+                                       u"other glyphs here." % SELECTED_GROUP)
+        why = {"checked": u"No suggestion ticked in the list above can take turns (a letter's, a figure's, or a "
                           u"punctuation mark's): tick some, or pick other glyphs here.",
                "typed": u"Type the characters of the glyphs to vary in the box (the glyphs of letters, figures, and "
                         u"punctuation marks the font has are taken).",
@@ -297,19 +348,19 @@ def build_words(plan, count, scope, designs=False, problem=None, pace=None, agai
         return u"Build variants", why
     if problem:
         return u"Build variants", problem
-    named = u", ".join(glyphs[:NAMED_MOST]) + (u"\N{HORIZONTAL ELLIPSIS}" if len(glyphs) > NAMED_MOST else u"")
+    named = html(u", ".join(glyphs[:NAMED_MOST]) + (u"\N{HORIZONTAL ELLIPSIS}" if len(glyphs) > NAMED_MOST else u""))
     kept = len(glyphs) * count - new
-    line = u"%s (%s): %s to build" % (counted(len(glyphs), u"glyph"), named,
-                                      counted(new, u"variant") if new else u"no variant")
+    line = u"%s (%s): %s to build" % (bold(counted(len(glyphs), u"glyph")), named,
+                                      bold(counted(new, u"variant")) if new else u"no variant")
     if designs and new:
-        line += u" (%s from the font's alternates)" % grouped(
-            sum(1 for glyph, variants in plan for _, _, source in variants if source != glyph))
+        line += u" (%s from the font's alternates)" % bold(grouped(
+            sum(1 for glyph, variants in plan for _, _, source in variants if source != glyph)))
     if again:  # (variants built here with another strength or seed: replaced in place)
         line += u", %s built here before with other settings, replaced in place" % (
-            u"it" if new == 1 else (u"all of them" if again == new else u"%s of them" % grouped(again)))
+            u"it" if new == 1 else (u"all of them" if again == new else u"%s of them" % bold(grouped(again))))
     if kept:
         line += u"; %s the font has already %s left as %s" % (
-            counted(kept, u"variant"), u"is" if kept == 1 else u"are", u"it is" if kept == 1 else u"they are")
+            bold(counted(kept, u"variant")), u"is" if kept == 1 else u"are", u"it is" if kept == 1 else u"they are")
     line += u"."
     if new >= LONG_BUILD:  # (the owner's words, nothing more: the top line's count needs no announcing)
         line += u" " + LONG_BUILD_WORDS
@@ -569,13 +620,17 @@ class AlternatesPage(object):
         except Exception:
             pass
         layout = self.part(QtGui, 2)
-        listed = (u"The glyphs fonts most often give a stylistic alternate (counted in the open-licensed fonts of "
-                  u"FreeLab's corpus: in how many families an ssXX, cvXX, or salt feature varies the character), "
-                  u"those this font has, with the alternates it has already. To draw an alternate by hand, tick a "
-                  u"glyph, then click <i>Make copies to redraw</i> (in the bottom row). The ticks also serve the "
-                  u"builder below, whose first scope is the ticked glyphs.")
-        # (every label has a What's This of its own: one without answers with its container's: label_of)
-        layout.addWidget(describe(owner.heading(QtGui, u"Suggested alternates"), listed))
+        listed = (u"Two groups (click a group's arrow to close or open it). <i>%s</i>: the glyphs fonts most often "
+                  u"give a stylistic alternate (counted in the open-licensed fonts of FreeLab's corpus: in how many "
+                  u"families an ssXX, cvXX, or salt feature varies the character), those this font has, with the "
+                  u"alternates it has already; to draw an alternate by hand, tick a glyph, then click <i>Make copies "
+                  u"to redraw</i> (in the bottom row). <i>%s</i>: the glyphs the <i>Glyphs</i> dropdown below picks "
+                  u"(at first the ticked suggestions), all ticked; <i>Build N variants</i> builds the variants of "
+                  u"those ticked (untick one to leave it out). A column that means nothing for a row shows "
+                  u"%s." % (SUGGESTIONS_GROUP, SELECTED_GROUP, NO_DATA))
+        # (every label has a What's This of its own: one without answers with its container's: label_of). The
+        # list holds both jobs' glyphs (owner's image 302), so its heading names neither alone.
+        layout.addWidget(describe(owner.heading(QtGui, LIST_HEADING), listed))
         self.note = QtGui.QLabel(u"")
         self.note.setWordWrap(True)
         describe(self.note, listed)
@@ -584,7 +639,7 @@ class AlternatesPage(object):
         self.tree = QtGui.QTreeWidget()
         self.tree.setColumnCount(4)
         self.tree.setHeaderLabels([u"Unicode", u"Glyph", u"Fonts with alternates", u"Current alternates"])
-        self.tree.setRootIsDecorated(False)
+        self.tree.setRootIsDecorated(True)  # (its two groups close and open by their arrows)
         # Its rows as tall as the window's other lists': theirs are set by their pictures, and this list
         # drew none (text alone made rows half as high). Each row draws its glyph and its alternates.
         self.tree.setIconSize(QtCore.QSize(ICON_SIZE * 3, ICON_SIZE))
@@ -595,11 +650,12 @@ class AlternatesPage(object):
         # The list's buttons and the two jobs' go in the window's bottom row (bottom_buttons), shown with
         # this tab: under the list, they stood between it and the next part (owner's images 258 and 260)
         self.all_button = QtGui.QPushButton(u"Tick all")
-        self.all_button.setWhatsThis(u"Ticks every glyph of <i>Suggested alternates</i>.")
+        self.all_button.setWhatsThis(u"Ticks every glyph of the list, in both groups (with <i>The ticked suggestions</i> "
+                                     u"picked, <i>%s</i> follows the suggestions)." % SELECTED_GROUP)
         self.none_button = QtGui.QPushButton(u"Tick none")
-        self.none_button.setWhatsThis(u"Unticks every glyph of <i>Suggested alternates</i>.")
+        self.none_button.setWhatsThis(u"Unticks every glyph of the list, in both groups: nothing to copy or build.")
         self.copy_button = QtGui.QPushButton(u"Make copies to redraw")
-        self.copy_button.setWhatsThis(u"Adds a copy of each glyph ticked in <i>Suggested alternates</i>, named for the "
+        self.copy_button.setWhatsThis(u"Adds a copy of each glyph ticked in <i>Suggestions</i>, named for the "
                                       u"next free stylistic set (a.ss01), its outlines as they are, to redraw by hand as "
                                       u"the alternate. The <i>Forms</i> tab then writes the set's feature. The variants "
                                       u"need no such copy. <i>Edit &gt; Undo</i> takes it back.")
@@ -608,8 +664,8 @@ class AlternatesPage(object):
             layout.addWidget(self.ak.separator())
         except Exception:
             pass
-        what = (u"Computed copies of each glyph in scope (a letter's, a figure's, or a punctuation mark's), changed a "
-                u"little as a whole (a slight rotation, uneven scaling, a slant, a baseline shift), named X.alt1, "
+        what = (u"Computed copies of each glyph ticked in <i>Selected glyphs</i> (a letter's, a figure's, or a "
+                u"punctuation mark's), changed a little as a whole (a slight rotation, uneven scaling, a slant, a baseline shift), named X.alt1, "
                 u"X.alt2...: the first tab's <i>Alternates that take turns</i> then cycles them, so repeated glyphs "
                 u"differ. They need no copy to redraw made first. The same seed makes the same variants; variants "
                 u"built here are built again in place with another strength or seed.")
@@ -628,14 +684,17 @@ class AlternatesPage(object):
         layout.addWidget(self.scope_note)
         self.scope_note.setVisible(False)  # (shown with something to say: say)
         settings = QtGui.QHBoxLayout()
-        what = (u"The glyphs that get variants: <i>The ticked glyphs</i>, those ticked in the list above (a letter's, "
-                u"a figure's, or a punctuation mark's); <i>Often doubled</i>, the glyphs that often stand doubled in "
+        what = (u"The glyphs that get variants, listed in the list's <i>Selected glyphs</i> group, all ticked (a new "
+                u"pick replaces the last; untick a glyph there to leave it out): <i>The ticked suggestions</i>, those "
+                u"ticked in <i>Suggestions</i> (a letter's, a figure's, or a punctuation mark's), kept in step as you "
+                u"tick them; <i>Often doubled</i>, the glyphs that often stand doubled in "
                 u"text (ll, ee, ss, tt; 00 and 99; marks doubled by convention, such as ..., !!, and --), whose "
                 u"variants matter most; <i>These glyphs</i>, the glyphs of the characters typed in the box; every glyph "
                 u"of one of the font's scripts (Latin, Cyrillic, and so on: letters, not figures or shared "
                 u"punctuation); every lowercase letter, capital, or both; or <i>Everything</i>, every letter, "
                 u"figure, and punctuation mark of the font. The line over these settings says how many glyphs "
-                u"that is; a build too large for one click is refused there, before anything is made.")
+                u"that is; a build too large for one click is refused there, before anything is made (a pick of "
+                u"more than %s is not listed: one click could not build them all)." % grouped(SELECTED_MOST))
         # (label form, the same in every tool: a noun naming the setting, a colon, the control; image 271)
         settings.addWidget(label_of(QtGui, u"Glyphs:", what))
         self.scope_box = QtGui.QComboBox()
@@ -650,10 +709,11 @@ class AlternatesPage(object):
         self.letters_edit.setMaximumWidth(180)  # (room for TYPED_HINT, shown while its scope is picked: update_buttons)
         self.letters_edit.setWhatsThis(u"With <i>These glyphs</i>: the characters of the glyphs to vary, typed one "
                                        u"after another, with spaces or without (a g 0 !). The glyphs of the letters, "
-                                       u"figures, and punctuation marks the font has are taken; anything else is passed "
-                                       u"over. Grayed out with any other choice of <i>Glyphs</i>.")
+                                       u"figures, and punctuation marks the font has are taken, and listed in "
+                                       u"<i>Selected glyphs</i> as you type; anything else is passed over. Grayed out "
+                                       u"with any other choice of <i>Glyphs</i>.")
         settings.addWidget(self.letters_edit)
-        what = (u"How many variants each glyph in scope gets (X.alt1 to X.alt4 at most). One the font has already "
+        what = (u"How many variants each glyph ticked in <i>Selected glyphs</i> gets (X.alt1 to X.alt4 at most). One the font has already "
                 u"is left as it is, and not built again (one built here with another strength or seed is built again "
                 u"in place).")
         settings.addWidget(label_of(QtGui, u"Variants each:", what))
@@ -690,7 +750,8 @@ class AlternatesPage(object):
         settings.addStretch(1)
         layout.addLayout(settings)
         self.build_button = QtGui.QPushButton(u"Build variants")
-        self.build_button.setWhatsThis(u"Adds the variants of the glyphs in scope (X.alt1 and on; one the font "
+        self.build_button.setWhatsThis(u"Adds the variants of the glyphs ticked in <i>Selected glyphs</i> (X.alt1 and "
+                                       u"on; one the font "
                                        u"has already is left as it is, one built here with another strength or seed is "
                                        u"built again in place): its label and the line over the settings say how many, "
                                        u"of which glyphs. <i>Edit &gt; Undo</i> takes them back.")
@@ -701,8 +762,8 @@ class AlternatesPage(object):
         self.existing_caption, self.existing = self.caption_label(QtGui), QtGui.QLabel()
         self.preview_caption, self.preview = self.caption_label(QtGui), QtGui.QLabel()
         sides = ((self.existing_caption, self.existing,
-                  u"The selected glyph (else the first in scope, else a) and the alternates the font has of "
-                  u"it already, built variants among them."),
+                  u"The selected glyph (else the first ticked in <i>Selected glyphs</i>; nothing while none is) "
+                  u"and the alternates the font has of it already, built variants among them."),
                  (self.preview_caption, self.preview,
                   u"The same glyph's variants as they would be built with these settings, each drawn from the "
                   u"design it is a copy of (a variant named W.ss01.alt2 is made of W.ss01); one the font has "
@@ -727,12 +788,18 @@ class AlternatesPage(object):
             box.addWidget(picture, 1)
             previews.addLayout(box, 1)
             caption.setVisible(False)  # (shown with a glyph drawn: draw_preview)
-            picture.setVisible(False)
-        # (as tall as their pictures, the part taking the rest: the page's foot is the previews or the settings,
-        # never a blank band over the splitter's handle under it, owner's image 196)
+        # The previews take the part's spare height, drawn or empty (owner's image 287: hidden, they left it to
+        # the heading and the paragraph, which Qt spread into blank bands above and below the paragraph); the
+        # part's foot is always the previews, right over the splitter's handle under it (convention 21)
         layout.addLayout(previews, 1)
         self.cmap, self.names = {}, set()  # the font's characters and names, as fill() read them
         self.index, self.in_scopes = {}, {}  # its alternates by glyph (alternates_index); each scope's glyphs, listed once
+        self.codes, self.counts, self.found, self.icons = {}, {}, [], {}  # (fill: each glyph's code point, the
+        # model's count by character, the suggestions, the rows' pictures drawn once a read)
+        # Selected glyphs: the glyphs the last pick listed, those of them unticked, the pick they came from,
+        # and how many the pick had (more than SELECTED_MOST: none listed)
+        self.selected, self.selected_off, self.picked, self.pick_count = [], set(), None, 0
+        self.refill_due = False  # (a refill asked from a row's tick: made on the next turn of the event loop)
         self.pace = None  # seconds a variant, from the session's last build of PACE_FROM or more
         # The variants this tab built, by font: {font key: {variant: (what it was as built, every master:
         # owner.glyph_print; (strength, seed))}}; those still as built are its own (own_variants, read with
@@ -740,19 +807,21 @@ class AlternatesPage(object):
         self.built, self.ours = {}, {}
         self.slots = [lambda *args: self.make_copies(), lambda *args: self.build_variants(),
                       lambda *args: (self.draw_preview(), self.update_buttons()),
-                      lambda *args: (self.draw_preview(), self.update_buttons()),
-                      lambda *args: self.check_all(True), lambda *args: self.check_all(False)]
+                      lambda *args: self.row_ticked(*args),
+                      lambda *args: self.check_all(True), lambda *args: self.check_all(False),
+                      lambda *args: self.picked_again(), lambda *args: self.row_picked(),
+                      lambda: self.refill_now()]
         self.copy_button.connect("clicked()", self.slots[0])
         self.build_button.connect("clicked()", self.slots[1])
         self.all_button.connect("clicked()", self.slots[4])
         self.none_button.connect("clicked()", self.slots[5])
-        for box in (self.scope_box, self.strength_box):
-            box.connect("currentIndexChanged(int)", self.slots[2])
+        self.scope_box.connect("currentIndexChanged(int)", self.slots[6])
+        self.strength_box.connect("currentIndexChanged(int)", self.slots[2])
         for box in (self.count_box, self.seed_box):
             box.connect("valueChanged(int)", self.slots[2])
         self.designs_box.connect("toggled(bool)", self.slots[2])
-        self.letters_edit.connect("textChanged(QString)", self.slots[2])
-        self.tree.connect("itemSelectionChanged()", self.slots[2])
+        self.letters_edit.connect("textChanged(QString)", self.slots[6])
+        self.tree.connect("itemSelectionChanged()", self.slots[7])
         self.tree.connect("itemChanged(QTreeWidgetItem*,int)", self.slots[3])
 
     def part(self, QtGui, stretch):
@@ -794,69 +863,279 @@ class AlternatesPage(object):
         return cmap, names
 
     def fill(self):
-        """The suggestions for the font open now."""
-        QtCore, QtGui = _qt()
+        """The list for the font open now: its suggestions, and the glyphs the Glyphs dropdown picks."""
         package = self.owner.package
         # The ticks kept for the same font read again (after a build, a copy, an undo): they went with the
-        # list, and a new seed for the variants just built took ticking the glyphs again (owner's image 270)
+        # list, and a new seed for the variants just built took ticking the glyphs again (owner's image 270);
+        # so are the selected glyphs unticked
         try:
             key = self.ak.font_key(package) if package is not None else None
         except Exception:
             key = None
-        ticked = set(self.checked_glyphs()) if key is not None and key == getattr(self, "filled_key", None) else set()
+        same = key is not None and key == getattr(self, "filled_key", None)
+        ticked = set(self.checked_glyphs()) if same else set()
+        if not same:
+            self.selected_off, self.picked = set(), None
         self.filled_key = key
-        self.tree.clear()
-        self.cmap, self.names = {}, set()
+        self.cmap, self.names, self.codes, self.counts, self.found, self.icons = {}, set(), {}, {}, [], {}
         self.index, self.in_scopes, self.designs, self.ours = {}, {}, False, {}
         if package is not None:
             self.ours = self.own_variants(package)  # (read once per read of the font: each one's outlines are asked)
-        if package is None or self.model is None:
-            say(self.note, u"" if package is None else
-                u"The model (%s) is missing beside the script: reinstall FreeLab." % MODEL_FILE)
+        if package is None:
+            say(self.note, u"")
             self.show_scopes(())
+            self.show_rows(ticked)
             self.draw_preview()
             self.update_buttons()
             return
-        rows, families, varied = self.model
         cmap, names = self.cmap, self.names = self.font_maps()
+        for code, glyph in sorted(cmap.items()):
+            self.codes.setdefault(glyph, code)  # (a glyph's first code point)
         self.index = alternates_index(names)
         self.designs = has_designs(cmap, self.index, self.takes_turns)
         self.show_scopes(font_scripts(ch for ch in (to_char(code) for code, glyph in cmap.items() if u"." not in glyph)
                                       if self.takes_turns(ch)))
-        found = suggestions(rows, cmap, names, index=self.index)
-        if found:
-            say(self.note, u"The glyphs fonts most often give a stylistic alternate (of %s open-licensed families, "
-                              u"%s have alternates), those this font has. To draw an alternate by hand, tick a glyph, "
-                              u"then click %s: it gets a copy named for a stylistic set (a.ss01). The variants below "
-                              u"are another job, and need no such copy." % (
-                                  self.ak.b(families), self.ak.b(varied), self.ak.i(u"Make copies to redraw")))
-        else:  # (an empty list said nothing of why it was empty)
-            say(self.note, u"The font has none of the glyphs fonts most often give a stylistic alternate: nothing "
-                              u"to copy here. The variants below are another job.")
-        picture = getattr(self.owner, "picture", None)  # (the dialog's: glyphs side by side, in its text color)
-        self.tree.blockSignals(True)  # (a row's first check state is no change to answer)
-        try:
-            for ch, glyph, count, alternates in found:
-                item = QtGui.QTreeWidgetItem([ch, glyph, u"%d" % count, u" ".join(alternates) or u"\N{EN DASH}"])
-                item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsUserCheckable)
-                item.setCheckState(0, QtCore.Qt.Checked if glyph in ticked else QtCore.Qt.Unchecked)
-                item.setData(0, QtCore.Qt.UserRole, glyph)
-                item.setTextAlignment(2, int(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter))
-                for column, drawn in ((1, [glyph]), (3, alternates)):
-                    try:
-                        icon = picture(drawn) if picture is not None and drawn else None
-                        if icon is not None:  # (noted in its color: redrawn in the new one when dark mode switches)
-                            make = getattr(getattr(self.owner, "ak", None), "icon_of", None) or QtGui.QIcon
-                            item.setIcon(column, make(icon))
-                    except Exception:
-                        pass  # a row without its picture still reads
-                self.tree.addTopLevelItem(item)
-        finally:
-            self.tree.blockSignals(False)
+        b = self.ak.b
+        if self.model is None:  # (the variants still work: the suggestions alone are missing)
+            say(self.note, u"The model (%s) is missing beside the script: reinstall FreeLab for the suggestions."
+                % MODEL_FILE)
+        else:
+            rows, families, varied = self.model
+            self.counts = dict(rows)
+            self.found = suggestions(rows, cmap, names, index=self.index)
+            if self.found:
+                # (a count bold with its noun; "128 have", whose noun is outside, bold alone: image 301)
+                say(self.note, u"<i>%s</i>: the glyphs fonts most often give a stylistic alternate (of %s, %s have "
+                               u"alternates), those this font has. To draw an alternate by hand, tick a glyph, then "
+                               u"click %s: it gets a copy named for a stylistic set (a.ss01). <i>%s</i>: the glyphs "
+                               u"<i>Variants that take turns</i> builds, as its <i>Glyphs</i> dropdown picks them, "
+                               u"another job, which needs no such copy." % (
+                                   SUGGESTIONS_GROUP, b(counted(families or 0, u"open-licensed family",
+                                                                u"open-licensed families")),
+                                   b(grouped(varied or 0)), self.ak.i(u"Make copies to redraw"), SELECTED_GROUP))
+            else:  # (an empty list said nothing of why it was empty)
+                say(self.note, u"The font has none of the glyphs fonts most often give a stylistic alternate: nothing "
+                               u"to copy here. <i>%s</i>, the glyphs the variants below are built of, is another "
+                               u"job." % SELECTED_GROUP)
+        self.show_rows(ticked)
         for column in range(3):
             self.tree.resizeColumnToContents(column)
         self.draw_preview()
         self.update_buttons()
+
+    # -- the list: Suggestions and Selected glyphs (owner's image 302) ----------
+
+    def group_rows(self, key):
+        """The rows of a group of the list (SUGGESTIONS_KEY or SELECTED_KEY), in order."""
+        QtCore = _qt()[0]
+        try:
+            for row in range(self.tree.topLevelItemCount):
+                group = self.tree.topLevelItem(row)
+                if u"%s" % group.data(0, QtCore.Qt.UserRole) == key:
+                    return [group.child(at) for at in range(group.childCount())]
+        except Exception:
+            pass
+        return []
+
+    def group_of(self, item):
+        """The key of a row's group, or None (a group's own row)."""
+        QtCore = _qt()[0]
+        try:
+            parent = item.parent()
+            return None if parent is None else u"%s" % parent.data(0, QtCore.Qt.UserRole)
+        except Exception:
+            return None
+
+    def picture_of(self, names):
+        """A row's picture of glyphs side by side (the dialog's picture, in its text color), drawn once a
+        read; None where it cannot be drawn."""
+        names = tuple(names)
+        if names not in self.icons:
+            picture = getattr(self.owner, "picture", None)
+            icon = None
+            try:
+                drawn = picture(list(names)) if picture is not None and names else None
+                if drawn is not None:  # (noted in its color: redrawn in the new one when dark mode switches)
+                    QtGui = _qt()[1]
+                    make = getattr(getattr(self.owner, "ak", None), "icon_of", None) or QtGui.QIcon
+                    icon = make(drawn)
+            except Exception:
+                icon = None  # a row without its picture still reads
+            self.icons[names] = icon
+        return self.icons[names]
+
+    def draw_row(self, item, glyph):
+        """A row's pictures: its glyph's, and its alternates' (those the font has)."""
+        QtCore = _qt()[0]
+        alternates = list(self.index.get(glyph, ()))
+        for column, drawn in ((1, [glyph]), (3, alternates)):
+            icon = self.picture_of(drawn) if drawn else None
+            if icon is not None:
+                try:
+                    item.setIcon(column, icon)
+                except Exception:
+                    pass
+        try:
+            item.setData(1, QtCore.Qt.UserRole, False)
+            item.setToolTip(1, u"")
+        except Exception:
+            pass
+
+    def add_group(self, QtCore, QtGui, key, title, count):
+        """A group row, bold, its count in parentheses, as every grouped list's (no tick box: Tick all and
+        Tick none tick its rows)."""
+        item = QtGui.QTreeWidgetItem([group_title(title, count)])
+        item.setData(0, QtCore.Qt.UserRole, key)
+        item.setFlags(QtCore.Qt.ItemIsEnabled)
+        self.tree.addTopLevelItem(item)
+        try:
+            item.setFirstColumnSpanned(True)
+        except Exception:
+            pass
+        self.ak.section_row(item, self.tree)
+        return item
+
+    def add_row(self, QtCore, QtGui, group, ch, glyph, families, alternates, on, drawn=True):
+        """A glyph's row in a group: its character, its name (drawn), how many families vary it (NO_DATA
+        where the model does not count it), and its alternates in the font (drawn)."""
+        item = QtGui.QTreeWidgetItem([ch or NO_DATA, glyph, u"%d" % families if families is not None else NO_DATA,
+                                      u" ".join(alternates) or NO_DATA])
+        item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsUserCheckable)
+        item.setCheckState(0, QtCore.Qt.Checked if on else QtCore.Qt.Unchecked)
+        item.setData(0, QtCore.Qt.UserRole, glyph)
+        item.setTextAlignment(2, int(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter))
+        group.addChild(item)
+        if drawn:
+            self.draw_row(item, glyph)
+        else:  # (a whole script's rows drawn at once took seconds: the rest when clicked)
+            item.setData(1, QtCore.Qt.UserRole, True)
+            item.setToolTip(1, ROW_PICTURE_TIP)
+        return item
+
+    def show_rows(self, ticked=None):
+        """The list made again: Suggestions (ticked: the suggestions to tick; else those ticked now), then
+        Selected glyphs, the glyphs the dropdown picks (characters_in_scope), all ticked but those unticked
+        since the pick (a new pick replaces the last, its glyphs all ticked). A group closed stays closed,
+        the row selected stays selected, and the list keeps its place. Nothing with no font."""
+        QtCore, QtGui = _qt()
+        tree = self.tree
+        if ticked is None:
+            ticked = set(self.checked_glyphs())
+        closed, chosen = set(), None
+        try:
+            for row in range(tree.topLevelItemCount):
+                group = tree.topLevelItem(row)
+                if not group.isExpanded():
+                    closed.add(u"%s" % group.data(0, QtCore.Qt.UserRole))
+            items = tree.selectedItems()
+            if items:
+                chosen = (self.group_of(items[0]), u"%s" % items[0].data(0, QtCore.Qt.UserRole))
+        except Exception:
+            pass
+        try:
+            place = tree.verticalScrollBar().value
+        except Exception:
+            place = None
+        scope = self.scope()
+        if scope != self.picked:  # (a new pick: its glyphs all ticked)
+            self.selected_off, self.picked = set(), scope
+        tree.blockSignals(True)  # (a row's first tick is no change to answer)
+        try:
+            tree.clear()
+            self.selected, self.pick_count = [], 0
+            if self.owner.package is None:
+                return
+            group = self.add_group(QtCore, QtGui, SUGGESTIONS_KEY, SUGGESTIONS_GROUP, len(self.found))
+            for ch, glyph, count, alternates in self.found:
+                self.add_row(QtCore, QtGui, group, ch, glyph, count, alternates, glyph in ticked)
+            group.setExpanded(SUGGESTIONS_KEY not in closed)
+            picked = self.characters_in_scope([glyph for _, glyph, _, _ in self.found if glyph in ticked])[0]
+            self.pick_count = len(picked)
+            if scope_problem(len(picked)) is None:
+                self.selected = list(picked)
+            group = self.add_group(QtCore, QtGui, SELECTED_KEY, SELECTED_GROUP, len(picked))
+            for at, glyph in enumerate(self.selected):
+                code = self.codes.get(glyph)
+                ch = to_char(code) if code is not None else None
+                self.add_row(QtCore, QtGui, group, ch, glyph, self.counts.get(ch), self.index.get(glyph, ()),
+                             glyph not in self.selected_off, at < ROW_PICTURES)
+            group.setExpanded(SELECTED_KEY not in closed)
+            if chosen is not None:  # (the row selected before, selected again: the previews show it still)
+                for item in self.group_rows(chosen[0]):
+                    if u"%s" % item.data(0, QtCore.Qt.UserRole) == chosen[1]:
+                        item.setSelected(True)
+                        break
+        finally:
+            tree.blockSignals(False)
+            if place is not None:
+                try:
+                    tree.verticalScrollBar().setValue(place)
+                except Exception:
+                    pass
+
+    def picked_again(self):
+        """The Glyphs dropdown or the typed characters changed: Selected glyphs lists the new pick."""
+        try:
+            if getattr(self.owner, "busy", False):
+                return
+            self.show_rows()
+            self.draw_preview()
+            self.update_buttons()
+        except Exception:
+            pass  # a signal's handler must not raise
+
+    def row_ticked(self, item=None, column=0):
+        """A row's tick changed. In Selected glyphs: in or out of the build and the previews. In Suggestions:
+        Selected glyphs follows while it lists the ticked suggestions, made again on the next turn of the
+        event loop (never inside Qt's own signal, whose row the list's remaking deletes)."""
+        try:
+            QtCore = _qt()[0]
+            key = self.group_of(item) if item is not None else None
+            if key is None:
+                return
+            glyph = u"%s" % item.data(0, QtCore.Qt.UserRole)
+            on = item.checkState(0) == QtCore.Qt.Checked
+            if on:
+                self.selected_off.discard(glyph)
+            elif key == SELECTED_KEY:
+                self.selected_off.add(glyph)
+            if key == SUGGESTIONS_KEY and self.scope() == "checked":
+                self.refill_later()
+                return
+            self.draw_preview()
+            self.update_buttons()
+        except Exception:
+            pass  # a signal's handler must not raise
+
+    def refill_later(self):
+        """show_rows on the next turn of the event loop (once, however many ticks ask meanwhile)."""
+        if self.refill_due:
+            return
+        self.refill_due = True
+        try:
+            _qt()[0].QTimer.singleShot(0, self.slots[8])
+        except Exception:
+            self.refill_now()
+
+    def refill_now(self):
+        self.refill_due = False
+        self.picked_again()
+
+    def row_picked(self):
+        """A row selected: drawn, where the list was too long to draw every row; the previews show it."""
+        try:
+            QtCore = _qt()[0]
+            for item in self.tree.selectedItems():
+                if item.data(1, QtCore.Qt.UserRole):
+                    self.tree.blockSignals(True)  # (a picture set is no tick to answer)
+                    try:
+                        self.draw_row(item, u"%s" % item.data(0, QtCore.Qt.UserRole))
+                    finally:
+                        self.tree.blockSignals(False)
+            self.draw_preview()
+            self.update_buttons()
+        except Exception:
+            pass  # a signal's handler must not raise
 
     def show_scopes(self, scripts):
         """The scope box's choices for the font read: a scope per script it has among them; the scope
@@ -875,25 +1154,37 @@ class AlternatesPage(object):
             box.blockSignals(False)
 
     def checked_glyphs(self):
+        """The suggestions ticked (Make copies to redraw copies them; The ticked suggestions picks them)."""
         QtCore = _qt()[0]
-        found = []
-        for row in range(self.tree.topLevelItemCount):
-            item = self.tree.topLevelItem(row)
-            if item.checkState(0) == QtCore.Qt.Checked:
-                found.append(u"%s" % item.data(0, QtCore.Qt.UserRole))
-        return found
+        return [u"%s" % item.data(0, QtCore.Qt.UserRole) for item in self.group_rows(SUGGESTIONS_KEY)
+                if item.checkState(0) == QtCore.Qt.Checked]
+
+    def build_glyphs(self):
+        """The glyphs ticked in Selected glyphs, in its order: those Build N variants builds, and the previews
+        show."""
+        return [glyph for glyph in self.selected if glyph not in self.selected_off]
 
     def check_all(self, on):
-        """Every row ticked, or none (Tick all, Tick none); the previews and the build's count follow."""
+        """Every row of both groups ticked, or none (Tick all, Tick none); the previews and the build's count
+        follow. While Selected glyphs lists the ticked suggestions, it follows them (its rows are not ticked
+        twice)."""
         try:
             if getattr(self.owner, "busy", False):
                 return
+            follows = self.scope() == "checked"
+            rows = self.group_rows(SUGGESTIONS_KEY) + ([] if follows else self.group_rows(SELECTED_KEY))
             self.tree.blockSignals(True)  # (one answer for the whole list, not one a row)
             try:  # (the log told how many it ticked or unticked, hidden ones said: owner's report 118)
-                self.ak.check_rows([self.tree.topLevelItem(row) for row in range(self.tree.topLevelItemCount)], on,
-                                   log=self.owner.log, command=u"Tick all" if on else u"Tick none", noun=u"glyph")
+                self.ak.check_rows(rows, on, log=self.owner.log, command=u"Tick all" if on else u"Tick none",
+                                   noun=u"glyph", hidden_text=(u"in a closed group", u"in closed groups"))
             finally:
                 self.tree.blockSignals(False)
+            if on:
+                self.selected_off = set()
+            elif not follows:
+                self.selected_off = set(self.selected)
+            if follows:
+                self.show_rows()
             self.draw_preview()
             self.update_buttons()
         except Exception:
@@ -914,7 +1205,7 @@ class AlternatesPage(object):
         if not self.designs_box.checked:
             return False
         if glyphs is None:
-            glyphs = self.characters_in_scope()[0] if self.owner.package is not None else []
+            glyphs = self.build_glyphs() if self.owner.package is not None else []
         return designs_in(glyphs, self.index)
 
     def settings(self):
@@ -1031,24 +1322,29 @@ class AlternatesPage(object):
         return build_problem(new - again, len(names)) or build_problem(new, 0, self.pace)
 
     def update_buttons(self):
-        """Each button grayed out when it has nothing to do; the build button and the line over the
-        settings say what a click builds."""
+        """Each button grayed out when it has nothing to do (Make copies to redraw by the ticked suggestions,
+        Build N variants by the ticked selected glyphs); the build button and the line over the settings say
+        what a click builds."""
         try:
+            QtCore = _qt()[0]
             has_font = self.owner.package is not None
             checked = self.checked_glyphs()
             set_enabled(self.copy_button, has_font and bool(checked))
-            # Tick all and Tick none grayed out when they would change nothing
-            set_enabled(self.all_button, has_font and len(checked) < self.tree.topLevelItemCount)
-            set_enabled(self.none_button, has_font and bool(checked))
+            # Tick all and Tick none (both groups) grayed out when they would change nothing
+            rows = self.group_rows(SUGGESTIONS_KEY) + self.group_rows(SELECTED_KEY)
+            ticks = [item.checkState(0) == QtCore.Qt.Checked for item in rows]
+            set_enabled(self.all_button, has_font and not all(ticks))
+            set_enabled(self.none_button, has_font and any(ticks))
             typed = self.scope() == "typed"
             set_enabled(self.letters_edit, has_font and typed)
             set_enabled(self.scope_box, has_font)  # (no font: no glyph to pick, and no script to list)
-            try:  # its words say what to type while it is used; grayed out, it says nothing
-                self.letters_edit.setPlaceholderText(TYPED_HINT if typed else u"")
+            try:  # its words say what to type while it is used; grayed out, nothing, or n/a with no font
+                self.letters_edit.setPlaceholderText(
+                    (TYPED_HINT if typed else u"") if has_font else NO_FONT_FIELD)
             except Exception:
                 pass
-            glyphs, names = self.characters_in_scope() if has_font else ([], set())
-            # Grayed out while no glyph in scope has an alternate to build from (it would change nothing), and
+            glyphs, names = (self.build_glyphs(), self.names) if has_font else ([], set())
+            # Grayed out while no glyph to build has an alternate to build from (it would change nothing), and
             # why; usable once one has, the variants built here among them (owner's image 269)
             usable = has_font and designs_in(glyphs, self.index)
             set_enabled(self.designs_box, usable)
@@ -1057,7 +1353,7 @@ class AlternatesPage(object):
             else:
                 describe(self.designs_box, DESIGNS_WHAT)
                 self.designs_box.setToolTip(u"")
-            # How many, how strong, and from what seed say nothing while no glyph is in scope (no font, or
+            # How many, how strong, and from what seed say nothing while no glyph is to build (no font, or
             # nothing ticked or typed): grayed out until there is one, as the button is
             for box in (self.count_box, self.strength_box, self.seed_box):
                 set_enabled(box, bool(glyphs))
@@ -1065,8 +1361,11 @@ class AlternatesPage(object):
             plan = self.plan(glyphs, names)
             new = sum(len(variants) for _, variants in plan)
             again = sum(1 for _, variants in plan for name, _, _ in variants if name in names)
-            problem = self.problem(new, again, names)  # (refused here, before anything is made)
-            label, line = build_words(plan, count, self.scope(), designs, problem, self.pace, again)
+            # (refused here, before anything is made; a pick too large to list, first)
+            problem = scope_problem(self.pick_count) or self.problem(new, again, names)
+            label, line = build_words(plan, count, self.scope(), designs, problem, self.pace, again, len(self.selected))
+            if not glyphs and self.pick_count > SELECTED_MOST:
+                line = problem
             self.build_button.setText(label)
             say(self.scope_note, line if has_font else u"")
             set_enabled(self.build_button, has_font and new > 0 and not problem)
@@ -1110,16 +1409,17 @@ class AlternatesPage(object):
         mark, as the dialog tells them (the same characters in both tabs, whatever the Python)."""
         return bool(ch) and len(ch) == 1 and self.owner.kind(ch) is not None
 
-    def characters_in_scope(self):
-        """(the glyphs of the characters in scope, the font's names): the letters, figures, and
-        punctuation marks checked in the list, those that often stand doubled in text, those typed in
-        the box, a script's, a case's letters, or all of them. The font as fill() read it (read once
-        per font, not at every click), and a scope of the whole font listed once per font too."""
+    def characters_in_scope(self, ticked=None):
+        """(the glyphs the Glyphs dropdown picks, the font's names): the letters, figures, and punctuation
+        marks ticked in Suggestions (ticked: those, where the list is being made again), those that often
+        stand doubled in text, those typed in the box, a script's, a case's letters, or all of them; what
+        Selected glyphs lists. The font as fill() read it (read once per font, not at every click), and a
+        scope of the whole font listed once per font too."""
         cmap, names = self.cmap, self.names
         scope = self.scope()
         if scope == "checked":
-            codes = dict((glyph, code) for code, glyph in cmap.items())
-            return [glyph for glyph in self.checked_glyphs()
+            codes = self.codes or dict((glyph, code) for code, glyph in cmap.items())
+            return [glyph for glyph in (self.checked_glyphs() if ticked is None else ticked)
                     if glyph in codes and self.takes_turns(to_char(codes[glyph])) and u"." not in glyph], names
         if scope == "typed":
             found = []
@@ -1150,22 +1450,22 @@ class AlternatesPage(object):
         return found, names
 
     def build_variants(self):
-        """The variants of the glyphs in scope added to the font, and those this tab built with other settings
-        made again in place (owner's image 270), as one step of its History; the window's top row counts
-        them meanwhile (ak.busy_*: a write, never stopped half way)."""
+        """The variants of the glyphs ticked in Selected glyphs added to the font, and those this tab built with
+        other settings made again in place (owner's image 270), as one step of its History; the window's top
+        row counts them meanwhile (ak.busy_*: a write, never stopped half way)."""
         owner = self.owner
         package = owner.package
         if package is None or getattr(owner, "busy", False) or not self.same_font():
             return
         package = owner.package
-        glyphs, names = self.characters_in_scope()
+        glyphs, names = self.build_glyphs(), self.names
         self.ours = self.own_variants(package)  # (asked of the font now: one drawn over since is the user's)
         count, (strength, seed), designs = self.count_box.value, self.settings(), self.from_designs(glyphs)
         plan = self.plan(glyphs, names)
         new = sum(len(variants) for _, variants in plan)
         problem = self.problem(new, sum(1 for _, variants in plan for name, _, _ in variants if name in names), names)
         if problem:  # (the button is grayed out with this sentence over it; a click that got through is refused too)
-            owner.log.add(self.ak.html(problem), "warning")
+            owner.log.add(problem, "warning")  # (its own markup: bold counts, no text of the font's)
             return
         # (variants built before are changed in place: the font recorded first, for Undo to go back to)
         if not self.ak.begin_write(owner.fontlab, package, u"FreeLab Feature Code", owner.log):
@@ -1218,8 +1518,8 @@ class AlternatesPage(object):
             named = (u": %s" % self.ak.glyph_name_links(built)) if len(built) <= LINKED_MOST else u""
             words.append(u"Built %s of %s%s (%s, seed %d%s)." % (
                 self.ak.b(self.ak.counted(len(built), u"variant")),
-                self.ak.counted(len(built_of), u"glyph"), named, strength,
-                seed, (u", %d from the font's alternates" % others) if designs else u""))
+                self.ak.b(self.ak.counted(len(built_of), u"glyph")), named, strength,
+                seed, (u", %s from the font's alternates" % self.ak.b(grouped(others))) if designs else u""))
         if replaced:
             named = (u": %s" % self.ak.glyph_name_links(replaced)) if len(replaced) <= LINKED_MOST else u""
             words.append(u"Built %s again in place%s (%s, seed %d): %s built here before with other settings." % (
@@ -1258,13 +1558,18 @@ class AlternatesPage(object):
     # -- preview ----------------------------------------------------------
 
     def preview_glyph(self):
-        """The glyph the previews show: the selected row's, else the first character in scope, else a."""
+        """The glyph the previews show: the selected row's (not one unticked in Selected glyphs: unticked, it
+        is out of the preview as of the build), else the first glyph ticked in Selected glyphs, else none
+        (owner's image 296: with These glyphs and nothing typed, the previews showed a)."""
         QtCore, QtGui = _qt()
-        items = self.tree.selectedItems()
-        if items:
-            return u"%s" % items[0].data(0, QtCore.Qt.UserRole)
-        glyphs, names = self.characters_in_scope()
-        return glyphs[0] if glyphs else (u"a" if u"a" in names else None)
+        for item in self.tree.selectedItems():
+            key = self.group_of(item)
+            glyph = u"%s" % item.data(0, QtCore.Qt.UserRole)
+            if key is None or (key == SELECTED_KEY and glyph in self.selected_off):
+                continue
+            return glyph
+        glyphs = self.build_glyphs()
+        return glyphs[0] if glyphs else None
 
     def row_pixmap(self, shapes, upm):
         """Outlines side by side ((path, advance) each), in the dialog's text color."""
@@ -1304,25 +1609,22 @@ class AlternatesPage(object):
         return [(name, None) for name in shown], planned, len(existing) - len(shown)
 
     def show_previews(self, existing, planned):
-        """The previews shown while there is a glyph to draw (the right one's caption says when nothing is to
-        build), else hidden, emptied: blank, they left a band of nothing over the code's splitter handle
-        (owner's image 196). Never raises."""
+        """The previews' captions shown while there is a glyph to draw (the right one's says when nothing is
+        to build), else hidden; the pictures emptied when they have nothing to show, never hidden: they hold
+        the part's spare height (owner's image 287, blank bands between the heading and its paragraph while
+        they were hidden), and the part ends with them, right over the splitter's handle under it. The line
+        between them is the shared module's to show (a separator, hidden with no font). Never raises."""
         for caption, picture, on in ((self.existing_caption, self.existing, existing),
                                      (self.preview_caption, self.preview, planned)):
             try:
                 if not on:
                     picture.clear()
-                picture.setVisible(bool(on))
+                picture.setVisible(True)
                 if not existing:
                     caption.setText(u"")
                 caption.setVisible(bool(existing))
             except Exception:
                 pass
-        try:  # (the line between them, with them)
-            if self.preview_line is not None:
-                self.preview_line.setVisible(bool(existing))
-        except Exception:
-            pass
 
     def draw_preview(self):
         """The previews drawn again: at the left the letter with the alternates the font has of it, at

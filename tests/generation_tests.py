@@ -129,12 +129,15 @@ def plan(font=None, existing=False, settings=None):
 class TableTests(unittest.TestCase):
     def test_first_scope(self):
         entries = DATA["entries"]
-        self.assertEqual(len(entries), 250 + 206, "the table's, and the squared words and abbreviations (report 177)")
+        # (the table's, the squared words and abbreviations of report 177, and the compatibility characters of
+        # 2026-11-18: 212 Kangxi radicals, 68 telegraph symbols, 32 Roman numerals, 66 parenthesized and numbered)
+        self.assertEqual(len(entries), 250 + 206 + 378)
         counts = dict((g["id"], g["count"]) for g in DATA["groups"])
         self.assertEqual(counts, {"spaces": 18, "dashes": 10, "duplicates": 44, "punctuation": 28, "lookalikes": 52,
-                                  "ligatures": 17, "fractions": 20, "arrows": 20, "turned": 41, "squared": 206},
+                                  "ligatures": 17, "fractions": 20, "arrows": 20, "turned": 41, "squared": 206,
+                                  "kangxi": 212, "telegraph": 68, "roman": 32, "enclosed": 66},
                          "the arrows' and triangles' sources added (2026-11-16): built from what they make")
-        self.assertEqual(len(set(e["code"] for e in entries)), 250 + 206, "each character once")
+        self.assertEqual(len(set(e["code"] for e in entries)), 250 + 206 + 378, "each character once")
         turned = [e for e in entries if e["group"] == "turned"]
         self.assertTrue(all(any(w["confidence"] == "starting point" for w in e["ways"]) for e in turned),
                         "the turned and reversed letters are starting points")
@@ -666,6 +669,9 @@ class TextTests(unittest.TestCase):
     def test_counts_follow_their_number(self):
         self.assertEqual(gg.corpus_text(1, 1), u"1 family of the corpus has it; 1 of them builds it of other glyphs.")
         self.assertEqual(gg.corpus_text(509, 0), u"509 families of the corpus have it; 0 of them build it of other glyphs.")
+        bold = lambda text: u"<b>%s</b>" % text  # noqa: E731  (owner's images 297 and 301: a count bold with its noun)
+        self.assertEqual(gg.corpus_text(509, 12, bold), u"<b>509 families</b> of the corpus have it; <b>12</b> of them "
+                                                        u"build it of other glyphs.")
 
     def test_a_starting_point_says_so(self):
         planner, rows = plan()
@@ -1610,8 +1616,8 @@ class ListControlTests(unittest.TestCase):
             page.check_all(False)
         finally:
             gg._qt = saved
-        self.assertEqual(lines, [u"Ticked <b>%d glyphs</b> (%d ticked in all, 1 of them not shown)." % (len(shown), len(shown) + 1),
-                                 u"Unticked <b>%d glyphs</b> (1 still ticked, not shown: a search hides it)." % len(shown)])
+        self.assertEqual(lines, [u"Ticked <b>%d glyphs</b> (<b>%d</b> ticked in all, <b>1</b> of them not shown)." % (len(shown), len(shown) + 1),
+                                 u"Unticked <b>%d glyphs</b> (<b>1</b> still ticked, not shown: a search hides it)." % len(shown)])
 
     def test_only_high_value_glyphs(self):
         page, items, lines = self.page()
@@ -2107,14 +2113,16 @@ class SquaredTests(unittest.TestCase):
 
     def test_rows_by_count(self):
         """As Japanese fonts set them: two stacked, three as two over one, four as two over two, five as two
-        over three, six as three over three, a unit's prefix on its own row."""
+        over three, six as three over three (㌖ too: the ten Japanese fonts measured on 2026-11-18 all set it
+        キロメ over ートル, none キロ over メートル)."""
         rows = lambda codes: gg.square_rows(codes.split())
         self.assertEqual(rows("30DF 30EA"), [1, 1], u"㍉ ミ over リ")
         self.assertEqual(rows("30BB 30F3 30C1"), [2, 1], u"㌢ セン over チ")
         self.assertEqual(rows("30E1 30FC 30C8 30EB"), [2, 2], u"㍍ メー over トル")
         self.assertEqual(rows("682A 5F0F 4F1A 793E"), [2, 2], u"㍿ 株式 over 会社")
         self.assertEqual(rows("30D1 30FC 30BB 30F3 30C8"), [2, 3], u"㌫ パー over セント")
-        self.assertEqual(rows("30AD 30ED 30E1 30FC 30C8 30EB"), [2, 4], u"㌖ キロ over メートル")
+        self.assertEqual(rows("30AD 30ED 30E1 30FC 30C8 30EB"), [3, 3], u"㌖ キロメ over ートル")
+        self.assertEqual(rows("30AD 30ED 30B0 30E9 30E0"), [2, 3], u"㌕ キロ over グラム")
         self.assertEqual(rows("30A2 30A2 30A2 30A2 30A2 30A2"), [3, 3])
         for code, parts in gg.squared_table():
             if gg.square_kind(parts) == "cjk":
@@ -2157,6 +2165,34 @@ class SquaredTests(unittest.TestCase):
         self.assertAlmostEqual(sx, 940 / 2000.0)
         self.assertEqual(sy, gg.LATIN_LEAST_HEIGHT, "kcal: narrowed, never shorter than that")
 
+    def test_a_lone_kana_keeps_its_rows_cell(self):
+        """Owner's image 315: ㌉ オンス set オン over ス, ス stretched across the whole second row. The ten
+        Japanese fonts of Windows 11 and Noto (2026-11-18) all draw the lone kana of a word of three as wide as
+        a kana of the row above (0.37 to 0.48 em of ink, against 0.84 to 0.94 for the two above), at the left,
+        under the first one: so does the layout now. Two stacked stay as wide as the square."""
+        def boxes(placed, ink=(100, -50, 900, 800)):
+            return [gg.box_through(ink, matrix) for _, matrix in placed]
+        bottom = -120.0
+        ons = boxes(gg.square_layout([("o", 1000), ("n", 1000), ("su", 1000)], 1000, 1000, bottom, "cjk", [2, 1]))
+        self.assertEqual(ons[2][2] - ons[2][0], ons[0][2] - ons[0][0], u"ス as wide as オ")
+        self.assertEqual(ons[2][0], ons[0][0], u"under オ, at the left")
+        self.assertEqual(ons[2][2] - ons[2][0], 400)
+        stacked = boxes(gg.square_layout([("ki", 1000), ("ro", 1000)], 1000, 1000, bottom, "cjk", [1, 1]))
+        self.assertEqual([b[2] - b[0] for b in stacked], [800, 800], u"㌔: each as wide as the square")
+
+    def test_the_condensed_row(self):
+        """The telegraph symbols (㋀ 1月): one row narrowed into the em at the components' full height,
+        centered across (as the six Japanese fonts that have them draw them); never widened."""
+        placed = gg.square_layout([("one", 500), ("tsuki", 1000)], 1000, 1000, -120.0, "condensed")
+        sx = 940 / 1500.0
+        self.assertEqual([m[0] for _, m in placed], [sx, sx])
+        self.assertEqual([m[3] for _, m in placed], [1.0, 1.0], "full height")
+        self.assertEqual([m[5] for _, m in placed], [0.0, 0.0], "on the baseline")
+        self.assertEqual(placed[0][1][4], 30.0, "(1,000 - 940) / 2")
+        narrow = gg.square_layout([("one", 300)], 1000, 1000, -120.0, "condensed")
+        self.assertEqual(narrow[0][1][0], 1.0, "never widened")
+        self.assertEqual(gg.square_words(["0031", "6708"], "condensed"), u"in a row, condensed")
+
     def test_planned_from_the_fonts_own_glyphs(self):
         """In a font with kana, each squared character whose components it has drawn: a starting point, not
         checked; one it lacks a component of needs it; none in a font without CJK."""
@@ -2197,6 +2233,69 @@ class SquaredTests(unittest.TestCase):
         self.assertNotIn(u(0x2009), rows, "the font's empty thin space is its own, not listed")
         planner, rows = plan(font, existing=True)
         self.assertTrue(rows[u(0x2009)].existing and not rows[u(0x2009)].filled, "listed as the font's own")
+
+
+class CompatTests(unittest.TestCase):
+    """Owner's question of 2026-11-18 (image 315): "whether our glyph generator can cover more glyphs from
+    scripts we may have not investigated". The compatibility characters the generator's recipes fit, made from
+    Unicode's decompositions: the Kangxi radicals (the ideograph's own glyph, as Japanese fonts share it), the
+    telegraph symbols (condensed in the em square), the Roman numerals, and the parenthesized and numbered forms
+    (side by side)."""
+
+    def test_the_groups(self):
+        import unicodedata
+        entries = dict((e["code"], e) for e in DATA["entries"])
+        radical = entries["2F00"]
+        self.assertEqual(radical["group"], "kangxi")
+        self.assertEqual(radical["ways"], [{"op": "shared", "of": "4E00", "confidence": "accepted", "only": "han"}])
+        self.assertNotIn("2F3E", entries, u"⼾: Japanese fonts draw it apart from 戶")
+        self.assertNotIn("2FCA", entries, u"⿊: and it apart from 黑")
+        self.assertEqual(len([e for e in entries.values() if e["group"] == "kangxi"]), 214 - 2)
+        april = entries["32C3"]
+        self.assertEqual(april["ways"][0], {"op": "square", "of": ["0034", "6708"], "layout": "condensed",
+                                            "confidence": "starting point", "only": "han"})
+        self.assertEqual(entries["2163"]["ways"][0], {"op": "row", "of": ["0049", "0056"], "confidence": "starting point"},
+                         u"Ⅳ: I and V")
+        self.assertEqual(entries["2160"]["ways"][0], {"op": "copy", "of": "0049", "confidence": "starting point"})
+        self.assertEqual(entries["2474"]["ways"][0]["of"], ["0028", "0031", "0029"], u"⑴")
+        for code, entry in entries.items():
+            if entry["group"] in ("kangxi", "telegraph", "roman", "enclosed"):
+                self.assertTrue(unicodedata.decomposition(u(int(code, 16))).startswith("<compat>"), code)
+                for part in [entry["code"]] + list(entry["ways"][0]["of"] if isinstance(entry["ways"][0]["of"], list)
+                                                   else [entry["ways"][0]["of"]]):
+                    self.assertIn(part, DATA["characters"], "named where it is needed")
+
+    def test_planned(self):
+        more = {"ichi": (0x4E00, 1000, [rect(100, 300, 900, 380)], None),
+                "tsuki": (0x6708, 1000, [rect(150, -60, 850, 820)], None),
+                "V": (0x56, 640, [rect(20, 0, 620, 700)], None),
+                "parenleft": (0x28, 300, [rect(80, -150, 220, 750)], None),
+                "parenright": (0x29, 300, [rect(80, -150, 220, 750)], None)}
+        planner, rows = plan(kana_font(more=more))
+        radical = rows[u(0x2F00)]
+        self.assertEqual(radical.layout.kind, "shared")
+        self.assertEqual(radical.layout.shared, "ichi", u"⼀ on 一's own glyph")
+        self.assertFalse(radical.draft, "the ideograph's own glyph: ticked at first")
+        self.assertIsNone(rows[u(0x2F01)].layout, u"⼁: the font has no 丨")
+        april = rows[u(0x32C3)]
+        self.assertEqual([part.name for part in april.layout.parts], ["four", "tsuki"])
+        self.assertEqual(april.layout.advance, 1000, "the em square")
+        self.assertTrue(april.draft)
+        self.assertEqual(gg.recipe_text(april, planner.settings), u"four + tsuki (in a row, condensed, in the em square)")
+        four = rows[u(0x2163)]
+        self.assertEqual([part.name for part in four.layout.parts], ["I", "V"])
+        self.assertEqual(four.layout.advance, 280 + 640, "at their own advances")
+        self.assertTrue(four.draft, "a starting point")
+        self.assertEqual([part.name for part in rows[u(0x2474)].layout.parts], ["parenleft", "one", "parenright"])
+        self.assertEqual([part.name for part in rows[u(0x2488)].layout.parts], ["one", "period"], u"⒈")
+        kana_only = dict((name, g) for name, g in kana_font(more=more).glyphs.items()
+                         if name not in ("hei", "sei", "ichi", "tsuki"))
+        rows = plan(CidFont(kana_only))[1]
+        self.assertNotIn(u(0x2F00), rows, "no Kangxi radical in a font without ideographs")
+        self.assertNotIn(u(0x32C3), rows, "nor a telegraph symbol")
+        self.assertIn(u(0x3314), rows, "its squared words still")
+        self.assertNotIn(u(0x2F00), plan()[1], "none in a Latin font")
+        self.assertIn(u(0x2160), plan()[1], u"Ⅰ in a Latin font")
 
 
 class Item(object):

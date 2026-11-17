@@ -105,19 +105,20 @@ def trims_status(trimmed, full, palt, halt, button, korean=u"", bold=lambda text
                  italic=lambda text: u"%s" % text):
     """The status line under the font's: how many of the font's full-width kana and punctuation (full) get a
     trim (trimmed: palt of them in palt, halt in halt), right at 0, 1, and 2; button: the write button's name;
-    korean: hangul_note's sentence."""
+    korean: hangul_note's sentence. A count is bold with the noun it counts (owner's images 297 and 301: "2 of
+    the 1,200 full-width kana and punctuation"); palt's and halt's numbers, with no noun of their own, alone."""
     number = lambda value: bold(u"{:,}".format(value))
     if not full:
         return u"No full-width kana or CJK punctuation: nothing to trim.%s" % korean
     if not trimmed:
         text = (u"The only full-width kana or punctuation mark needs no trim." if full == 1 else
-                u"None of the %s full-width kana and punctuation needs a trim." % number(full))
+                u"None of the %s needs a trim." % bold(u"{:,} full-width kana and punctuation".format(full)))
         return text + korean
     if full == 1:
         text = u"The only full-width kana or punctuation mark gets a trim"
     else:
-        text = u"%s of the %s full-width kana and punctuation %s a trim" % (number(trimmed), number(full),
-                                                                           u"gets" if trimmed == 1 else u"get")
+        text = u"%s %s a trim" % (bold(u"{:,} of the {:,} full-width kana and punctuation".format(trimmed, full)),
+                                  u"gets" if trimmed == 1 else u"get")
     return u"%s (palt: %s, halt: %s). Nothing is written until you click %s.%s" % (
         text, number(palt), number(halt), italic(button), korean)
 
@@ -193,6 +194,49 @@ def best_sample(codes, family=u"", code_pages=()):
     return max(range(len(SAMPLES)), key=score)
 
 
+# What a font lacks that makes a sample show only its punctuation, by the sample's key (its Sample: item)
+SAMPLE_LACKS = {"ja": u"no kana", "ko": u"no Hangul", "zh-hans": u"no ideographs", "zh-hant": u"no ideographs"}
+
+
+def offered_samples(samples, codes):
+    """Which samples (samples: (key, label, text) as SAMPLES) a font is offered: those it has a character of
+    in the sample's own writing (SAMPLE_SCRIPTS: kana for Japanese, Hangul syllables for Korean, ideographs
+    for Chinese). Without one, a sample's previews held its punctuation alone (owner's image 304: the Korean
+    sample showed 「 , . in a Japanese font with no Hangul). A font with none of any (punctuation alone) is
+    offered every sample: its punctuation is all there is to see, in any of them. [True or False] per sample."""
+    codes = set(codes)
+    offered = []
+    for key, _, text in samples:
+        ranges = SAMPLE_SCRIPTS.get(key, ())
+        offered.append(any(ord(ch) in codes and any(low <= ord(ch) <= high for low, high in ranges) for ch in text))
+    return offered if any(offered) else [True] * len(offered)
+
+
+def sample_label(sample, offered):
+    """A sample's item in the Sample: dropdown: its name, and what the font lacks for it where it is not
+    offered (grayed): "Korean (no Hangul in the font)", "Chinese (Simplified, no ideographs in the font)"."""
+    key, label = sample[0], sample[1]
+    lacks = SAMPLE_LACKS.get(key)
+    if offered or not lacks:
+        return label
+    if label.endswith(u")"):  # (one pair of parentheses: never "Chinese (Simplified) (no ...)")
+        return u"%s, %s in the font)" % (label[:-1], lacks)
+    return u"%s (%s in the font)" % (label, lacks)
+
+
+def offer_samples(combo, samples, offered, QtCore):
+    """The Sample: dropdown's items named and grayed as offered_samples says (a grayed item cannot be
+    picked: its flags, Qt.UserRole - 1 of the dropdown's model, set to none; given back unset). Never
+    raises."""
+    for index, sample in enumerate(samples):
+        on = offered[index] if index < len(offered) else True
+        try:
+            combo.setItemText(index, sample_label(sample, on))
+            combo.setItemData(index, None if on else 0, QtCore.Qt.UserRole - 1)
+        except Exception:
+            pass
+
+
 def font_hints(package):
     """(family name, OS/2 code page bits) of a FontLab font, for best_sample: ("", ()) where it has none."""
     try:
@@ -233,7 +277,7 @@ def sample_misses(codes, text):
 
 
 def counted_chars(number):
-    return u"%d CJK character%s" % (number, u"" if number == 1 else u"s")
+    return counted(number, u"CJK character")
 
 
 # Kinsoku, as Japanese sets lines: never first on a line (closing marks, small kana, the long vowel
@@ -748,13 +792,55 @@ def block_of(tag, text):
     return u"feature %s {\n%s} %s;\n" % (tag, inner, tag)
 
 
+CODE_PREVIEW_HEADING = u"Code preview"  # (not "Code": it is not written yet, owner's images 299 and 305)
+NO_CODE = u"# No code to write: what is ticked changes none of the font's feature code."
+CODE_PREVIEW_WHAT = (u"The code <i>Write the code</i> would write, as the ticks and options stand: palt and halt "
+                     u"whole, FreeLab's block between its marker lines, the rest of each feature as it is (a feature "
+                     u"the font has as shown already is left out: nothing to write). Nothing is written until you click "
+                     u"the button. Keywords, tags, glyph classes, numbers, and comments are in colors of their own, as "
+                     u"in <i>Feature Code</i>.")
+
+
+def preview_code(new, old_texts, tags, also=()):
+    """The Code preview's text (owner's image 305: CJK Spacing and CJK Vertical wrote code and showed none):
+    the code the write button would write, feature by feature in tags' order, each whole as it would stand in
+    the font (new: {tag: feature code}; those the same as the font's, old_texts, left out: not written), else
+    NO_CODE. also: comment lines for what the write changes besides code (Hangul widths, glyphs built), each
+    one under the code."""
+    shown = [new[tag].rstrip(u"\r\n") for tag in tags if tag in new and new[tag] != old_texts.get(tag)]
+    notes = [u"# %s" % line for line in also if line]
+    if not shown:
+        return u"\n".join([NO_CODE] + notes)
+    return u"\n\n".join(shown) + (u"\n\n" + u"\n".join(notes) if notes else u"") + u"\n"
+
+
 # ---------------------------------------------------------------------------
 # FontLab
 # ---------------------------------------------------------------------------
 
 AUTO_KERNING_FILE, AUTO_KERNING_MODULE = "freelab_auto_kerning.py", "freelab_auto_kerning"
 ICON_SIZE = 32
-PREVIEW_EM = 44  # pixels per em, the sample's previews
+PREVIEW_EM = 44  # pixels per em, the sample's previews at most
+SMALLEST_PREVIEW_EM = 20  # and at least (a long text of one's own takes more lines)
+SAMPLE_LINES = 3  # the lines a sample is set in, where the em allows (owner's image 303: the Iroha in three)
+
+
+def preview_em(chars, ems, room, lines=SAMPLE_LINES, largest=PREVIEW_EM, smallest=SMALLEST_PREVIEW_EM):
+    """The previews' em, in pixels: the largest from largest down to smallest at which the sample (chars, each
+    ems wide at an em of 1 pixel: its advance over the em, as it is set now) breaks into lines of room pixels
+    (break_lines, kinsoku kept) no more than lines of them: owner's image 303, the Iroha at 44 pixels took four
+    lines in the window's usual width, a lone character on the last. Derived from the previews' width and the
+    sample's length, so a wider window sets it larger (to largest), a narrower one smaller. smallest where
+    none fits; largest without room (Qt does not say) or text."""
+    if not room or not chars:
+        return largest
+    total = float(sum(ems)) or 1.0
+    em = int(min(largest, max(smallest, room * lines / total)))  # (no em above this fills fewer lines)
+    while em > smallest:
+        if len(break_lines(chars, [width * em for width in ems], room)) <= lines:
+            return em
+        em -= 1
+    return smallest
 
 
 def load_auto_kerning():
@@ -802,8 +888,77 @@ def _qt():
     return QtCore, QtGui
 
 
+HIGHLIGHT_LINES = 2000  # (Feature Code's, where its script does not say: past this, the code is shown plain)
+
+
+def splitter_part(QtGui, splitter, stretch):
+    """A pane of a splitter (Feature Code's part): its layout, no margins, so the splitter's handle sits right
+    against the frame above it (owner's images 258 and 318); stretch: its share of the height at first."""
+    widget = QtGui.QWidget()
+    box = QtGui.QVBoxLayout(widget)
+    box.setContentsMargins(0, 0, 0, 0)
+    splitter.addWidget(widget)
+    splitter.setStretchFactor(splitter.indexOf(widget), stretch)
+    return box
+
+
+class CodePreview(object):
+    """The Code preview, as Feature Code shows its code (owner's image 305): a pane of the window's splitter,
+    a separator first (under the handle, before the heading: owner's images 288 and 318), the bold heading,
+    then the code, read-only, colored by Feature Code's highlighter (fc: its module, or None: plain). Shared by
+    CJK Spacing and CJK Vertical."""
+
+    def __init__(self, ak, fc, splitter, what, stretch=2):
+        QtCore, QtGui = _qt()
+        part = splitter_part(QtGui, splitter, stretch)
+        part.addWidget(ak.separator())
+        self.heading = QtGui.QLabel(CODE_PREVIEW_HEADING)
+        font = QtGui.QFont(self.heading.font)
+        font.setBold(True)
+        self.heading.setFont(font)
+        self.heading.setWhatsThis(what)
+        part.addWidget(self.heading)
+        self.code = QtGui.QPlainTextEdit()
+        self.code.setReadOnly(True)
+        self.code.setWhatsThis(what)
+        part.addWidget(self.code, 1)
+        self.text = None
+        self.lines = getattr(fc, "HIGHLIGHT_LINES", HIGHLIGHT_LINES)
+        try:  # its colors; without them (no Feature Code, or a PythonQt that cannot subclass the highlighter) plain
+            self.highlighting = fc.make_highlighter(self.code) if fc is not None else None
+        except Exception:
+            self.highlighting = None
+
+    def show(self, text):
+        """The code shown, colored while it has self.lines lines at most, plain past that; left alone when it
+        is the text shown already (Qt would color every line again: Feature Code's show_code). Never raises."""
+        text = u"%s" % (text or u"")
+        if text == self.text:
+            return
+        self.text = text
+        highlighting = self.highlighting
+        long_code = text.count(u"\n") + 1 > self.lines
+        try:
+            if highlighting is not None and long_code:
+                highlighting.detach()  # (before the text: none of its lines is colored)
+            self.code.setPlainText(text)
+            if highlighting is not None and not long_code:
+                highlighting.attach()  # (after it, where it was detached: colored once, not twice)
+        except Exception:
+            pass
+
+    def refresh(self):
+        """The colors read again from the palette (dark mode switched)."""
+        if self.highlighting is not None:
+            try:
+                self.highlighting.refresh()
+            except Exception:
+                pass
+
+
 def counted(number, one, many=None):
-    return u"%d %s" % (number, one if number == 1 else (many or one + u"s"))
+    """u"1 syllable", u"11,172 syllables": the word follows the number, grouped by thousands (ak.counted)."""
+    return u"%s %s" % (format(int(number), ","), one if number == 1 else (many or one + u"s"))
 
 
 def hangul_note(count, where, bold=lambda text: text):
@@ -825,12 +980,17 @@ moves (x placement) and how much its width changes (x advance), trimmed to its i
 sidebearings the open-licensed CJK fonts give theirs (about 0.07 em on each side for kana; each
 punctuation mark its own: a comma keeps its left, an opening bracket its right). Ticked glyphs are
 written.<br>
-<b>The previews</b>: the sample text set as it is, and with palt, in the font's glyphs, in as many
-lines as the window's width needs: the Iroha (every kana once), a Hangul pangram, or the opening of the
-Thousand Character Classic in Simplified or Traditional Chinese, each with full-width punctuation.
-Type your own sample.<br>
+<b>The previews</b>: the sample text set as it is, and with palt, in the font's glyphs, in three
+lines where the window's width allows (the text set smaller to fit, as small as 20 pixels to the em):
+the Iroha (every kana once), a Hangul pangram, or the opening of the Thousand Character Classic in
+Simplified or Traditional Chinese, each with full-width punctuation. A sample in a writing the font
+has none of is grayed. Type your own sample.<br>
+<b>Code preview</b>: the code <i>Write the code</i> would write, as the ticks and options stand
+(nothing is written yet).<br>
 <b>Hangul</b> stays out of palt, as the corpus's Korean fonts leave it: <i>Hangul:</i> sets the
-syllables' widths instead (one width for all, or each by its shape), in every master.<br>
+syllables' widths instead (one width for all, or each by its shape), in every master; it is grayed
+for a font with no Hangul syllables.<br>
+Drag the space between two parts (the list, the previews, the code) to give one more room.<br>
 <i>Restore suggestions</i> puts every tick back as the list first came.<br><br>
 Click this help's <i>?</i> button, then any control, for what it does."""
 
@@ -864,7 +1024,8 @@ class CJKSpacingDialog(object):
         self.halt_box.setWhatsThis(u"Writes halt: each punctuation mark set in half the em, as the corpus's fonts set it.")
         row.addWidget(self.palt_box)
         row.addWidget(self.halt_box)
-        row.addWidget(QtGui.QLabel(u"Hangul:"))
+        self.hangul_label = QtGui.QLabel(u"Hangul:")  # (the shared module's caption: grayed with its dropdown)
+        row.addWidget(self.hangul_label)
         self.hangul_box = QtGui.QComboBox()
         for _, label in HANGUL_MODES:
             self.hangul_box.addItem(label)
@@ -872,10 +1033,17 @@ class CJKSpacingDialog(object):
                                      u"own where its syllables share one, else the corpus's 0.9 em), each one's ink "
                                      u"centered; or proportionally, each with the sidebearings the corpus's proportional "
                                      u"Korean fonts give its shape. Their outlines move and their widths change, in every "
-                                     u"master.")
+                                     u"master. Grayed for a font with no Hangul syllables: it sets nothing else (Korean "
+                                     u"punctuation is palt's and halt's, as Japanese).")
         row.addWidget(self.hangul_box)
         row.addStretch(1)
         layout.addLayout(row)
+        # The list, the sample's previews, and the Code preview share the height in a splitter, as Feature Code's
+        # lists and code: drag a handle to see more of one (owner's image 310: the list had none over the previews)
+        self.splitter = QtGui.QSplitter(QtCore.Qt.Vertical)
+        self.splitter.setChildrenCollapsible(False)
+        layout.addWidget(self.splitter, 1)
+        list_part = splitter_part(QtGui, self.splitter, 3)
         self.tree = QtGui.QTreeWidget()
         self.tree.setColumnCount(len(self.COLUMNS))
         self.tree.setHeaderLabels(list(self.COLUMNS))
@@ -885,7 +1053,8 @@ class CJKSpacingDialog(object):
         self.tree.setWhatsThis(u"Each full-width kana and punctuation mark with its trims: palt's x placement and x "
                                u"advance, the width after, and halt's. Ticked glyphs are written. Double-click one "
                                u"to see it in a <i>Glyph</i> window.")
-        layout.addWidget(self.tree, 1)
+        list_part.addWidget(self.tree, 1)  # (the last of its pane: the handle right under its frame)
+        preview_part = splitter_part(QtGui, self.splitter, 2)
         sample_row = QtGui.QHBoxLayout()
         self.sample_label = QtGui.QLabel(u"Sample:")
         sample_row.addWidget(self.sample_label)
@@ -893,20 +1062,22 @@ class CJKSpacingDialog(object):
         for _, label, _ in SAMPLES:
             self.sample_box.addItem(label)
         self.sample_box.setWhatsThis(u"A sample per writing system (the one in the font's own writing is chosen as it "
-                                     u"is read); the field beside it takes text of your own.")
+                                     u"is read; one in a writing the font has none of, which would show its punctuation "
+                                     u"alone, is grayed); the field beside it takes text of your own.")
         sample_row.addWidget(self.sample_box)
         self.sample = QtGui.QLineEdit(SAMPLE)
-        self.sample.setWhatsThis(u"The text the previews set, as it is and with palt, in as many lines as the window's "
-                                 u"width needs: the Iroha (every kana once), a Hangul pangram, or the opening of the "
-                                 u"Thousand Character Classic, each with full-width punctuation; or text of your own.")
+        self.sample.setWhatsThis(u"The text the previews set, as it is and with palt, in three lines where the window's "
+                                 u"width allows (set smaller to fit), more for a long text: the Iroha (every kana once), a "
+                                 u"Hangul pangram, or the opening of the Thousand Character Classic, each with full-width "
+                                 u"punctuation; or text of your own.")
         sample_row.addWidget(self.sample, 1)
-        layout.addLayout(sample_row)
+        preview_part.addLayout(sample_row)
         self.previews, self.preview_captions = [], []
         for number, caption in enumerate((u"Now", u"With palt")):
             if number:
-                layout.addWidget(ak.separator())  # (between two previews stacked)
+                preview_part.addWidget(ak.separator())  # (between two previews stacked)
             title = ak.preview_caption(caption)  # (smaller, in the quiet text color: every tool's previews' captions)
-            layout.addWidget(title)
+            preview_part.addWidget(title)
             self.preview_captions.append(title)
             label = QtGui.QLabel()
             label.setProperty(ak.LEAVE_ALONE_PROP, True)
@@ -917,8 +1088,16 @@ class CJKSpacingDialog(object):
             except Exception:
                 pass
             label.setToolTip(caption)
-            layout.addWidget(label)
+            preview_part.addWidget(label)
             self.previews.append((label, caption))
+        preview_part.addStretch(1)  # (a taller pane: the previews stay under the sample row)
+        # The Code preview, last, as Feature Code's code under its lists (owner's image 305)
+        self.code_preview = CodePreview(ak, feature_code_or_none(), self.splitter, CODE_PREVIEW_WHAT)
+        try:  # (the splitter's hint on its handles, as Feature Code's: not on every label inside it)
+            feature_code_or_none().describe_handles(self.splitter, u"Drag the space between two parts up or down to "
+                                                                   u"give one more room.")
+        except Exception:
+            pass
         layout.addWidget(self.log.widget)
         buttons = QtGui.QHBoxLayout()
         self.all_button = QtGui.QPushButton("Tick all")
@@ -926,16 +1105,17 @@ class CJKSpacingDialog(object):
         self.restore_button = QtGui.QPushButton("Restore suggestions")
         self.restore_button.setWhatsThis(u"Puts every tick back as the list first came.")
         self.write_button = QtGui.QPushButton("Write the code")
-        self.write_button.setWhatsThis(u"Writes palt and halt for the ticked glyphs, between FreeLab's marker lines; the "
-                                       u"rest of each feature is kept. <i>Edit &gt; Undo</i> takes it back.")
+        self.write_button.setWhatsThis(u"Writes palt and halt for the ticked glyphs, between FreeLab's marker lines (the "
+                                       u"code <i>Code preview</i> shows); the rest of each feature is kept. <i>Edit &gt; "
+                                       u"Undo</i> takes it back.")
         self.close_button = QtGui.QPushButton("Close")
         for button in (self.all_button, self.none_button, self.restore_button):
             buttons.addWidget(button)
         buttons.addStretch(1)
         self.compile_box = ak.compile_box()
-        buttons.addWidget(self.compile_box)
-        buttons.addWidget(self.write_button)
-        buttons.addWidget(self.close_button)
+        # (the compile tick, then the button it is about, then Close: owner's image 298)
+        for widget in self.bottom_right():
+            buttons.addWidget(widget)
         layout.addLayout(buttons)
         self.all_button.connect("clicked()", lambda: self.check_all(True))
         self.none_button.connect("clicked()", lambda: self.check_all(False))
@@ -962,11 +1142,17 @@ class CJKSpacingDialog(object):
         self.flagging = ak.flag_menu(self.tree, self, self.flag_names, self.row_names)
         self.preview_width, self.watchers = None, []
         self.watch_previews()
-        try:  # the check boxes drawn plain to see in either palette (the list's pictures stay unmapped)
+        try:  # the check boxes drawn plain to see in either palette (the list's pictures stay unmapped), and the
+            # Code preview's colors read again when dark mode switches
             fc = ak.load_sibling("freelab_feature_code.py", "freelab_feature_code")
-            self.watchers.append(fc.watch_check_boxes(self.dialog, [self.tree]))
+            self.watchers.append(fc.watch_check_boxes(self.dialog, [self.tree], self.code_preview.refresh))
         except Exception:
             pass
+
+    def bottom_right(self):
+        """The bottom row's right group, in the suite's order (owner's image 298): the compile tick, the write
+        button it is about, then Close."""
+        return [self.compile_box, self.write_button, self.close_button]
 
     def watch_previews(self):
         """The previews set again when their width changes (their lines break to fit it)."""
@@ -1088,7 +1274,7 @@ class CJKSpacingDialog(object):
         self.tree.blockSignals(True)
         self.tree.clear()
         self.tree.blockSignals(False)
-        self.trims = []
+        self.trims, self.hangul_glyphs, self.hangul = [], [], []  # (the last font's Hangul never grays this one's box)
         package = self.package = self.current_font()
         self.show_font_parts(package is not None)
         if package is None:
@@ -1101,7 +1287,6 @@ class CJKSpacingDialog(object):
             return
         master = package.master
         glyphs, hangul = [], 0
-        self.hangul_glyphs = []
         every = list(package.fgPackage.glyphs)
         for number, fg in enumerate(every):
             if number % PUMP_EVERY == 0:
@@ -1134,12 +1319,16 @@ class CJKSpacingDialog(object):
         self.trims = plan(glyphs, self.model, float(package.upm))
         for t in self.trims:
             t.checked = kept.get(t.name, t.checked)
+        codes = set(all_codes(package.fgPackage.glyphs))
+        offered = offered_samples(SAMPLES, codes)  # (a sample in a writing the font lacks grayed: owner's image 304)
+        offer_samples(self.sample_box, SAMPLES, offered, QtCore)
         if u"%s" % self.sample.text in [text for _, _, text in SAMPLES]:  # (text of one's own is kept)
-            index = best_sample(set(all_codes(package.fgPackage.glyphs)), *font_hints(package))
+            index = best_sample(codes, *font_hints(package))
+            index = index if offered[index] else offered.index(True)
             self.sample_box.setCurrentIndex(index)
             self.sample.setText(SAMPLES[index][2])
         self.note_font(package)
-        self.ak.enable(self.hangul_box, bool(hangul))
+        self.hangul_shown()
         self.hangul = []
         if hangul and HANGUL_MODES[self.hangul_box.currentIndex][0] != "leave":
             self.measure_hangul(progress=lambda part: self.step(LIST_STEPS, HANGUL_STEP, part))
@@ -1161,6 +1350,21 @@ class CJKSpacingDialog(object):
 
     def hangul_mode(self):
         return HANGUL_MODES[self.hangul_box.currentIndex][0]
+
+    def hangul_shown(self):
+        """Hangul: clickable only for a font with Hangul syllables (its caption grayed with it, the shared
+        module's caption_states), and set back to leaving them where there are none: it sets nothing else.
+        Owner's image 304: clickable over a Japanese font with none, the read had grayed it, then the shared
+        no_font_states gave it back with the font (its update_buttons, called then, did not set it)."""
+        box = getattr(self, "hangul_box", None)
+        if box is None:
+            return
+        has = bool(getattr(self, "package", None) is not None and getattr(self, "hangul_glyphs", None))
+        if not has and box.currentIndex != 0:
+            box.blockSignals(True)
+            box.setCurrentIndex(0)  # (leave as they are)
+            box.blockSignals(False)
+        self.ak.enable(box, has)
 
     def measure_hangul(self, master=None, progress=None):
         """The changes the chosen Hangul mode makes to the master's syllables (and the width it sets).
@@ -1219,7 +1423,7 @@ class CJKSpacingDialog(object):
             self.log.add(u"Hangul, %s: %s would change%s." % (
                 self.ak.html(HANGUL_MODES[self.hangul_box.currentIndex][1].lower()),
                 self.ak.b(counted(len(self.hangul), u"syllable")),
-                u" (one width: %s)" % counted(self.hangul_width, u"unit") if self.hangul_width else u""))
+                u" (one width: %s)" % self.ak.b(counted(self.hangul_width, u"unit")) if self.hangul_width else u""))
         self.fill()
         self.draw_previews()
 
@@ -1379,7 +1583,23 @@ class CJKSpacingDialog(object):
         if problem and problem != getattr(self, "problem_said", None):
             self.log.add(self.ak.html(problem), "error")  # (once, while it lasts)
         self.problem_said = problem
+        self.hangul_shown()  # (the shared no_font_states calls this once it gives the controls back)
+        self.show_code(new, widths)
         self.draw_previews()
+
+    def show_code(self, new, widths=False):
+        """The Code preview: the code a write would write now (preview_code), the Hangul widths it sets besides
+        said under it; empty with no font."""
+        preview = getattr(self, "code_preview", None)
+        if preview is None:
+            return
+        if self.package is None:
+            preview.show(u"")
+            return
+        chosen = self.hangul_chosen() if widths else []
+        also = [u"And the widths of %s, set on their glyphs in every master (no code)." % counted(
+            len(chosen), u"Hangul syllable")] if chosen else []
+        preview.show(preview_code(new, self.texts, ("palt", "halt"), also))
 
     def restore(self):
         for t, on in zip(self.trims, self.first_checks):
@@ -1499,8 +1719,9 @@ class CJKSpacingDialog(object):
             self.preview_captions[1].setText(u"With palt" if palt_on else u"With palt (off: palt is not written)")
         except Exception:
             pass
-        for index, (label, caption) in enumerate(self.previews):
-            placed, chars, widths = [], [], []
+        sets = []  # (each preview's glyphs placed, its characters, and each one's width in ems)
+        for index in range(len(self.previews)):
+            placed, chars, ems = [], [], []
             for ch in text:
                 name = names.get(ord(ch))
                 if name is None:
@@ -1516,15 +1737,22 @@ class CJKSpacingDialog(object):
                     layer = self.layer_of(name)
                     advances[name] = layer.advanceWidth if layer is not None else 0
                 chars.append(ch)
-                widths.append((advances[name] + placed[-1][2]) * PREVIEW_EM / upm)
+                ems.append((advances[name] + placed[-1][2]) / upm)
+            sets.append((placed, chars, ems))
+        # One em for both, the largest that sets the sample as it is now (the wider) in three lines of the
+        # previews' width (owner's image 303), so the two compare glyph for glyph
+        em = preview_em(sets[0][1], sets[0][2], room) if sets else PREVIEW_EM
+        self.preview_size = em
+        for (label, caption), (placed, chars, ems) in zip(self.previews, sets):
+            widths = [width * em for width in ems]
             rows = [placed[start:end] for start, end in break_lines(chars, widths, room)] if room else None
-            pixmap = self.picture(placed, PREVIEW_EM, rows) if placed else None
+            pixmap = self.picture(placed, em, rows) if placed else None
             if pixmap is None:
                 label.clear()
             else:
                 label.setPixmap(pixmap)
                 try:  # as tall as its lines
-                    label.setMinimumHeight(max(int(PREVIEW_EM * 1.9), int(pixmap.height()) + 8))
+                    label.setMinimumHeight(max(int(em * 1.9), int(pixmap.height()) + 8))
                 except Exception:
                     pass
 

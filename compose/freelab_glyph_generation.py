@@ -5,7 +5,9 @@ Lists the characters of its first scope the font lacks (spaces, hyphens and dash
 punctuation, Greek and Cyrillic look-alikes, ligature letters, vulgar fractions, arrows and triangles:
 205 characters; then the turned and reversed letters, 41 starting points; then the four sources the
 arrows and triangles turn, built back from them; and, in a font with CJK, the squared words and
-abbreviations of the CJK Compatibility blocks, 206 starting points: SQUARED, square_layout) that it can make
+abbreviations of the CJK Compatibility blocks, 206 starting points: SQUARED, square_layout; and, from Unicode's
+decompositions, the Kangxi radicals, the telegraph symbols, the Roman numerals, and the parenthesized and
+numbered forms: COMPAT_GROUPS) that it can make
 of the glyphs the font has, and builds the checked ones in every master, as one step of FontLab's History.
 A character whose glyph the font has empty (a CID-keyed font keeps one for each character of its
 collection) is listed as one it lacks, and its glyph filled when built (Row.filled). A
@@ -48,6 +50,7 @@ SETTING_KEYS = ("thin", "hair", "en_dash", "em_dash")
 SETTINGS_KEY = "generation"  # its settings in Glyph Compose's settings file
 SETTING_REACH = {"thin": (2, 48), "hair": (2, 48), "en_dash": (0.2, 2.5), "em_dash": (0.2, 2.5)}  # (the boxes' too)
 CJK_RANGES = ((0x3040, 0x30FF), (0x3400, 0x4DBF), (0x4E00, 0x9FFF), (0xAC00, 0xD7AF))
+HAN_RANGES = ((0x3400, 0x4DBF), (0x4E00, 0x9FFF))
 TABULAR = ("tf", "tosf", "tnum")  # a figure's tabular forms, in the order taken (its own glyph last)
 NUMR, DNOM = ("numr", "numerator"), ("dnom", "denominator")  # (Feature Code's own, where it is read)
 FRACTION_SLASH = "2044"
@@ -177,8 +180,6 @@ SQUARED = (
     u"33DE:0056 2215 006D / 33DF:0041 2215 006D / 33FF:0067 0061 006C")
 SQUARED_GROUP = {"id": "squared", "title": u"Squared words and abbreviations"}
 SQUARED_NAMES = {"32FF": u"SQUARE ERA NAME REIWA"}  # (Unicode 12.1: past FontLab's Python 2.7)
-# A word that starts with a unit's prefix keeps it on the top row (キロ over メートル, as fonts set ㌖)
-SQUARE_PREFIXES = (("30AD", "30ED"), ("30DF", "30EA"), ("30E1", "30AC"), ("30AE", "30AC"))
 EM_BOX_BOTTOM = -0.12  # the ideographic em box's bottom, of the em (Adobe's: 880 over the baseline, 120 under)
 LATIN_MOST = 0.8  # a Latin abbreviation's letters at most this share of their size, the row across the em
 LATIN_LEAST_HEIGHT = 0.55  # and never shorter than this: a long one (kcal) is narrowed instead
@@ -235,6 +236,92 @@ def with_squares(data):
         if all(group.get("id") != SQUARED_GROUP["id"] for group in groups):
             groups.append(dict(SQUARED_GROUP, count=len(added)))
         data["groups"] = groups
+    return with_compat(data)
+
+
+# -- Compatibility characters built as Unicode decomposes them (owner's question of 2026-11-18, image 315: "whether
+# our glyph generator can cover more glyphs"). Made from Unicode's own data as the table is read (every one is in
+# FontLab's Unicode 5.2), each group with what Japanese and Latin fonts were measured to do (2026-11-18, the fonts
+# of Windows 11 and Noto):
+# - the Kangxi radicals (U+2F00 to U+2FD5, <compat> of one ideograph): the ideograph's own glyph takes the radical's
+#   code point (Yu Gothic, Yu Mincho, Meiryo, Noto Sans JP, and Noto Serif JP share 211 or 212 of the 214); not
+#   ⼾ (U+2F3E) and ⿊ (U+2FCA), whose radical every one of them draws apart (戸 and 黒 over the 戶 and 黑 they
+#   decompose to). In a font with ideographs only.
+# - the telegraph symbols for months, hours, and days (㋀ 1月, ㍘ 0点, ㏠ 1日, <compat>): one row in the em square,
+#   condensed at full height, as all six Japanese fonts that have them draw them. In a font with ideographs only.
+# - the Roman numerals (Ⅰ to ⅿ, U+2160 to U+217F, <compat> of Latin letters): the letters side by side,
+#   as Times New Roman sets them (Ⅳ is I and V); one letter, a copy of it.
+# - the parenthesized digits and letters and the digits with a full stop (⑴ to ⒇, ⒈ to ⒛, ⒜ to ⒵, <compat>): the
+#   characters side by side, at their own advances.
+# Each a starting point, never ticked at first, but for the radicals, whose glyph is the ideograph's own (accepted).
+COMPAT_GROUPS = (
+    {"id": "kangxi", "title": u"Kangxi radicals", "ranges": ((0x2F00, 0x2FD5),), "skip": (0x2F3E, 0x2FCA),
+     "only": "han"},
+    {"id": "telegraph", "title": u"Telegraph symbols",
+     "ranges": ((0x32C0, 0x32CB), (0x3358, 0x3370), (0x33E0, 0x33FE)), "only": "han"},
+    {"id": "roman", "title": u"Roman numerals", "ranges": ((0x2160, 0x217F),)},
+    {"id": "enclosed", "title": u"Parenthesized and numbered forms", "ranges": ((0x2474, 0x24B5),)},
+)
+
+
+def compat_way(group, parts):
+    """The way a compatibility character of a COMPAT_GROUPS group is built of its decomposition's parts."""
+    if group["id"] == "kangxi":
+        way = {"op": "shared", "of": parts[0], "confidence": CONFIDENCES[1]}
+    elif group["id"] == "telegraph":
+        way = {"op": "square", "of": parts, "layout": "condensed", "confidence": CONFIDENCES[2]}
+    elif len(parts) == 1:
+        way = {"op": "copy", "of": parts[0], "confidence": CONFIDENCES[2]}
+    else:
+        way = {"op": "row", "of": parts, "confidence": CONFIDENCES[2]}
+    if group.get("only"):
+        way["only"] = group["only"]
+    return way
+
+
+def compat_entries():
+    """The table's entries for COMPAT_GROUPS, from Unicode's decompositions ("<compat> 0049 0049" for Ⅱ)."""
+    import unicodedata
+    entries = []
+    for group in COMPAT_GROUPS:
+        for low, high in group["ranges"]:
+            for code in range(low, high + 1):
+                if code in group.get("skip", ()):
+                    continue
+                decomposition = unicodedata.decomposition(unichr_(code)).split()
+                if not decomposition or decomposition[0] != "<compat>":
+                    continue
+                parts = [str(part) for part in decomposition[1:]]
+                way = compat_way(group, parts)
+                entries.append({"code": "%04X" % code, "group": group["id"],
+                                "unicode_name": square_character("%04X" % code)["name"],
+                                "glyph_name": u"uni%04X" % code, "families": 0, "deriving": 0,
+                                "research_confidence": way["confidence"], "ways": [way]})
+    return entries
+
+
+def with_compat(data):
+    """The recipe table with COMPAT_GROUPS' characters added (each group last, in order; a code the table has
+    already keeps its own recipe), each and its parts named in its "characters"."""
+    if not data or not isinstance(data, dict):
+        return data
+    have = set(entry.get("code") for entry in data.get("entries") or [])
+    added = [entry for entry in compat_entries() if entry["code"] not in have]
+    if not added:
+        return data
+    known = data.setdefault("characters", {})
+    for entry in added:
+        way = entry["ways"][0]
+        for code in [entry["code"]] + (list(way["of"]) if isinstance(way["of"], list) else [way["of"]]):
+            if code not in known:
+                known[code] = square_character(code)
+    data["entries"] = list(data.get("entries") or []) + added
+    groups = list(data.get("groups") or [])
+    for group in COMPAT_GROUPS:
+        count = sum(1 for entry in added if entry["group"] == group["id"])
+        if count and all(other.get("id") != group["id"] for other in groups):
+            groups.append({"id": group["id"], "title": group["title"], "count": count})
+    data["groups"] = groups
     return data
 
 
@@ -251,12 +338,11 @@ def square_rows(parts):
     """How many components each row of a squared word of kana or ideographs holds, top row first, as
     Japanese fonts set them: two stacked (㌔ キ over ロ, ㍻ 平 over 成), three as two over one (㌢ セン over
     チ), four as two over two (㍍ メー over トル, ㍿ 株式 over 会社), five as two over three (㌫ パー over
-    セント), six as three over three; a unit's prefix keeps its row (㌖ キロ over メートル)."""
+    セント), six as three over three (㌖ キロメ over ートル: the ten Japanese fonts of Windows 11 and Noto
+    measured on 2026-11-18 all split it so; a rule that kept the prefix キロ on its own row was dropped)."""
     count = len(parts)
     if count <= 2:
         return [1] * count
-    if count > 4 and tuple(parts[:2]) in SQUARE_PREFIXES and count - 2 <= 4:
-        return [2, count - 2]
     if count == 3:
         return [2, 1]
     if count > 8:  # (none in Unicode: three rows, as even as they go)
@@ -270,17 +356,23 @@ def square_layout(cells, em, upm, bottom, kind, rows=None):
     """[(glyph, matrix)] of a squared character's components in its em square: cells [(glyph, advance)];
     em: the square's width (a full-width glyph's advance); upm: its height; bottom: the em box's bottom.
     Kana and ideographs ("cjk"): rows (square_rows) of cells as tall as the square over their count, each
-    component's own em box scaled into its cell (narrower in a row of more). Latin ("latin"): one row at the
-    components' own advances, scaled to fit SQUARE_ROOM of the width (at most LATIN_MOST, narrowed rather
-    than made shorter than LATIN_LEAST_HEIGHT), centered across and on the em box's middle."""
+    component's own em box scaled into its cell (narrower in a row of more). A component alone on its row
+    under a row of several (ス of ㌉ オン over ス) keeps a cell of that row's width, at the left, as Japanese
+    fonts set it (owner's image 315: stretched across the whole row, it was twice as wide as its neighbors;
+    the ten Japanese fonts measured on 2026-11-18 all draw it half the em wide, under the first of the row
+    above). Latin ("latin"): one row at the components' own advances, scaled to fit SQUARE_ROOM of the width
+    (at most LATIN_MOST, narrowed rather than made shorter than LATIN_LEAST_HEIGHT), centered across and on
+    the em box's middle. Condensed ("condensed", the telegraph symbols ㋀ 1月, ㍘ 0点, ㏠ 1日): one row at
+    the components' full height, narrowed to fit SQUARE_ROOM of the width (never widened), centered across."""
     em, upm, bottom = float(em), float(upm), float(bottom)
     placed = []
     if kind == "cjk":
         rows = rows or [1] * len(cells)
         height = upm / len(rows)
+        widest = max(rows)
         at = 0
         for row, count in enumerate(rows):
-            width = em / count
+            width = em / (widest if count == 1 else count)
             row_bottom = bottom + upm - (row + 1) * height
             for column in range(count):
                 name, advance = cells[at]
@@ -290,6 +382,13 @@ def square_layout(cells, em, upm, bottom, kind, rows=None):
                                       float(round(row_bottom - sy * bottom)))))
         return placed
     total = float(sum(advance for _, advance in cells)) or em
+    if kind == "condensed":
+        sx = min(1.0, em * SQUARE_ROOM / total)
+        x = (em - sx * total) / 2.0
+        for name, advance in cells:
+            placed.append((name, (sx, 0.0, 0.0, 1.0, float(round(x)), 0.0)))
+            x += sx * advance
+        return placed
     sx = min(LATIN_MOST, em * SQUARE_ROOM / total)
     sy = min(LATIN_MOST, max(sx, LATIN_LEAST_HEIGHT))
     middle = bottom + upm / 2.0
@@ -300,9 +399,13 @@ def square_layout(cells, em, upm, bottom, kind, rows=None):
     return placed
 
 
-def square_words(parts):
-    """How a squared character's components are set, for its Recipe cell: "stacked", "2 over 1", "in a row"."""
-    if square_kind(parts) != "cjk":
+def square_words(parts, kind=None):
+    """How a squared character's components are set, for its Recipe cell: "stacked", "2 over 1", "in a row",
+    "in a row, condensed" (kind: the way's own layout, else square_kind's)."""
+    kind = kind or square_kind(parts)
+    if kind == "condensed":
+        return u"in a row, condensed"
+    if kind != "cjk":
         return u"in a row"
     rows = square_rows(parts)
     if rows == [1, 1]:
@@ -540,6 +643,7 @@ class Layout(object):
 # transforms, so it still follows its source. The same seed gives the same glyph; another seed, another.
 VARY_OPS = ("turn", "mirror")
 VARY_LABEL = u"Vary turned and mirrored glyphs"
+FIND_A_GLYPH = u"Find a glyph…"  # (a placeholder ends with an ellipsis: owner's image 309)
 VARY_SEED_REACH = (1, 9999)
 VARY_SETTINGS = ("vary", "vary_seed", "vary_strength")  # (in Glyph Compose's settings file, under generation)
 
@@ -749,6 +853,10 @@ class Font(object):
     def has_cjk(self):
         return any(low <= code <= high for code in self.codes() for low, high in CJK_RANGES)
 
+    def has_han(self):
+        """Whether the font has ideographs (a kana-only Japanese font has CJK, not these)."""
+        return any(low <= code <= high for code in self.codes() for low, high in HAN_RANGES)
+
 
 class Planner(object):
     """The rows of the list for a font, and each row's layout in one of its masters. codes: the characters to
@@ -781,17 +889,20 @@ class Planner(object):
         taken = set(names)
         self.ways = dict(ways or {})
         self.rows, self.by_hex, self.by_name = [], {}, {}
-        cjk = None
+        scripts = {}  # ("cjk": kana, Hangul, or ideographs; "han": ideographs), each read once
         for at, hex_ in enumerate(self.order):
             if self.progress is not None and not at % 50:
                 self.progress(0.5 * at / float(len(self.order)))
             entry = self.entries[hex_]
             code = int(hex_, 16)
             own = font.glyph_of(code)
-            if any(way.get("only") == "cjk" for way in entry["ways"]):
-                cjk = font.has_cjk() if cjk is None else cjk
-                if not cjk:
-                    continue
+            wanted = set(way.get("only") for way in entry["ways"] if way.get("only"))
+            for kind in wanted:
+                if kind not in scripts:
+                    test = getattr(font, "has_" + kind, None)
+                    scripts[kind] = bool(test()) if test is not None else False
+            if not all(scripts[kind] for kind in wanted):
+                continue
             # A glyph the font has for it, empty (a CID-keyed font keeps one for each character of its
             # collection, drawn or not): filled when built, as the Diacritics tab fills one (row.filled)
             empty = own is not None and font.is_empty(own)
@@ -1233,7 +1344,7 @@ class Planner(object):
                 raise Need(u"needs %s (its glyph is empty)" % self.describe(hex_), hex_)
             cells.append((name, self.font.advance(name)))
         em = self.em_width()
-        kind = square_kind(way["of"])
+        kind = way.get("layout") or square_kind(way["of"])
         placed = square_layout(cells, em, self.font.upm, EM_BOX_BOTTOM * self.font.upm, kind,
                                square_rows(way["of"]) if kind == "cjk" else None)
         return Layout([Part(name, matrix) for name, matrix in placed], round(em))
@@ -1339,7 +1450,7 @@ def recipe_text(row, settings, rules=None):
     if op == "minus":
         return u"%s on the plus" % names[0]
     if op == "square":
-        return u"%s (%s, in the em square)" % (u" + ".join(names), square_words(way["of"]))
+        return u"%s (%s, in the em square)" % (u" + ".join(names), square_words(way["of"], way.get("layout")))
     return op
 
 
@@ -1370,11 +1481,13 @@ def note_text(row, needs_built=()):
     return u"; ".join(notes)
 
 
-def corpus_text(families, deriving):
+def corpus_text(families, deriving, bold=None):
     """How many of the corpus's families have the character, and how many of those build it of other
-    glyphs (a sentence)."""
-    return u"%s of the corpus %s it; %d of them %s it of other glyphs." % (
-        counted(families, u"family", u"families"), u"has" if families == 1 else u"have", deriving,
+    glyphs (a sentence; bold: the shared module's b, the families bold with their noun and the number of
+    those that build it bold alone, owner's images 297 and 301)."""
+    bold = bold or (lambda text: text)
+    return u"%s of the corpus %s it; %s of them %s it of other glyphs." % (
+        bold(counted(families, u"family", u"families")), u"has" if families == 1 else u"have", bold(u"%d" % deriving),
         u"builds" if deriving == 1 else u"build")
 
 
@@ -2026,8 +2139,7 @@ class GenerationPage(object):
             fit = getattr(cm, "fit_to_contents", None)
             if fit is not None:
                 fit(self.list_box)
-            row.addWidget(self.list_box)
-            row.addSpacing(12)
+            row.addWidget(self.list_box)  # (the row's own spacing after it: owner's image 307 found the gaps wide)
         self.existing_box = QtGui.QCheckBox(u"Also list existing glyphs")
         self.existing_box.setWhatsThis(u"Also lists the characters of these groups the font has already, in a section "
                                        u"of their own, unticked: those you tick are built again from their recipe, "
@@ -2042,8 +2154,11 @@ class GenerationPage(object):
         # The four widths in a row of their own: beside the List chooser and the search field, the search
         # field was squeezed to two letters (live, 2026-11-16); the owner asked whether Also list existing
         # glyphs and the search field could join them (2026-11-16): with Only high-value glyphs beside them, a
-        # line of all of them needs about 1,100 pixels (1,300 with the List chooser), so they stay apart
-        settings_row = QtGui.QHBoxLayout()
+        # line of all of them needs about 1,100 pixels (1,300 with the List chooser), so they stay apart. The
+        # row's own spacing between the settings, no wider gap: with 12 pixels more after each and Vary turned
+        # and mirrored glyphs at its end, this row alone made the tab 1,047 pixels wide at the least, wider
+        # than the window opens (the lead's measure of 2026-11-18, owner's images 307 and 308)
+        settings_row = self.settings_row = QtGui.QHBoxLayout()
         self.spins = {}
         # (label form, "Thin space: [1/6 em]": a noun, a colon, then the control, the "1/" in the spin box; owner's
         # image 271 asked for one form of caption)
@@ -2061,7 +2176,6 @@ class GenerationPage(object):
             spin.setWhatsThis(help_text)
             spin.setToolTip(help_text)
             settings_row.addWidget(spin)
-            settings_row.addSpacing(12)
             self.spins[key] = spin
         for key, label, help_text in (
                 ("en_dash", u"En dash:", u"The en dash's advance, as a share of the em (52.8% at first: the corpus's median, "
@@ -2079,10 +2193,12 @@ class GenerationPage(object):
             spin.setWhatsThis(help_text)
             spin.setToolTip(help_text)
             settings_row.addWidget(spin)
-            settings_row.addSpacing(12)
             self.spins[key] = spin
-        # Vary turned and mirrored glyphs, at the end of the widths' line (settings of how the glyphs are drawn):
-        # Feature Code's variant changes (freelab_alternates, loaded beside it), off at first
+        # Vary turned and mirrored glyphs, under the preview it changes (vary_row, laid out with it below), as
+        # the Diacritics tab's Compact diacritics to fit the line (the owner's report of 2026-11-15): at the
+        # end of the widths' line, it made the tab wider than the window (owner's images 307 and 308). Feature
+        # Code's variant changes (freelab_alternates, loaded beside it), off at first
+        vary_row = QtGui.QHBoxLayout()
         try:
             self.alternates = ak.load_sibling("freelab_alternates.py", "freelab_alternates")  # (held for the tab)
             strengths = list(self.alternates.STRENGTHS)
@@ -2099,7 +2215,7 @@ class GenerationPage(object):
                      u"first: FreeLab has no measure of how hand-drawn a font is.")
         self.vary_box = cm.helped(QtGui.QCheckBox(VARY_LABEL), vary_help)
         self.vary_box.setChecked(on and self.alternates is not None)
-        settings_row.addWidget(self.vary_box)
+        vary_row.addWidget(self.vary_box)
         self.vary_strength = QtGui.QComboBox()
         for key, label in [(row_[0], row_[1]) for row_ in strengths]:
             self.vary_strength.addItem(label)
@@ -2110,18 +2226,21 @@ class GenerationPage(object):
         fit = getattr(cm, "fit_to_contents", None)
         if fit is not None:
             fit(self.vary_strength)
-        settings_row.addWidget(cm.helped(QtGui.QLabel(u"Strength:"), vary_help))  # (label form: owner's image 271)
-        settings_row.addWidget(self.vary_strength)
-        settings_row.addWidget(cm.helped(QtGui.QLabel(u"Seed:"), vary_help))
+        self.vary_labels = [cm.helped(QtGui.QLabel(u"Strength:"), vary_help),  # (label form: owner's image 271)
+                            cm.helped(QtGui.QLabel(u"Seed:"), vary_help)]
+        vary_row.addWidget(self.vary_labels[0])
+        vary_row.addWidget(self.vary_strength)
+        vary_row.addWidget(self.vary_labels[1])
         self.vary_seed = QtGui.QSpinBox()
         self.vary_seed.setRange(*VARY_SEED_REACH)
         self.vary_seed.setValue(seed)
         self.vary_seed.setWhatsThis(vary_help)
         self.vary_seed.setToolTip(u"The same seed gives the same glyphs, another seed others.")
-        settings_row.addWidget(self.vary_seed)
+        vary_row.addWidget(self.vary_seed)
+        vary_row.addStretch(1)
         row.addStretch(1)
         self.search, self.search_label = owner.search_field(
-            u"Find a glyph", u"Shows only the rows whose glyph name, or the name of a glyph they are built from, holds "
+            FIND_A_GLYPH, u"Shows only the rows whose glyph name, or the name of a glyph they are built from, holds "
                              u"this text, whose character it is, whose Unicode value it is (<i>U+2013</i>, <i>2013</i>), "
                              u"or whose Unicode name holds it (<i>dash</i>). Rows not shown keep their ticks; <i>Tick "
                              u"all</i>, <i>Tick none</i>, and <i>Tick high-value glyphs</i> act on the rows shown.")
@@ -2132,6 +2251,7 @@ class GenerationPage(object):
         settings_row.addStretch(1)
         layout.addLayout(settings_row)
         layout.addLayout(row)
+        self.options_row = row  # (as tall as the Diacritics tab's rows: Glyph Compose's line_up_rows, brief 23)
         self.tree = QtGui.QTreeWidget()
         self.tree.setColumnCount(len(COLUMNS))
         self.tree.setHeaderLabels(list(COLUMNS))
@@ -2140,6 +2260,11 @@ class GenerationPage(object):
         ak.table_layout(self.tree, stretch=len(COLUMNS) - 1)
         self.tree.setWhatsThis(HELP_LIST)
         layout.addWidget(self.tree, 3)
+        # The line that sets the Reference heading apart from the list above it (brief 11 and 21: a heading after
+        # a table never reads as the table's caption), shown with the heading (show_reference): in a holder, as the
+        # shared module shows and hides the line itself with the font
+        self.lower_line = cm.heading_line(ak) if hasattr(cm, "heading_line") else ak.separator()
+        layout.addWidget(self.lower_line)
         lower = QtGui.QHBoxLayout()
         # The selected row's character in the reference font: the Diacritics tab's very section (owner's images
         # 250 and 251: this tab had no Reference heading and no chooser), one choice for both tabs, and a line
@@ -2157,12 +2282,17 @@ class GenerationPage(object):
                                   u"between dashed lines at its advance's ends and on the baseline; an empty glyph shows "
                                   u"its advance alone. A glyph changed by <i>Vary turned and mirrored glyphs</i> is drawn "
                                   u"over the glyph it would be unchanged, outlined faintly, so that the change shows.")
-        lower.addWidget(self.preview, 1)
+        showing = QtGui.QVBoxLayout()  # (the preview and its details, Vary turned and mirrored glyphs under them)
+        pictures = QtGui.QHBoxLayout()
+        pictures.addWidget(self.preview, 1)
         self.details = QtGui.QLabel(u"")
         self.details.setWordWrap(True)
         self.details.setWhatsThis(u"The selected row's character, its Unicode name, the way it is built, and how many of "
                                   u"the corpus's families have it and build it so.")
-        lower.addWidget(self.details, 1)
+        pictures.addWidget(self.details, 1)
+        showing.addLayout(pictures, 1)
+        showing.addLayout(vary_row)
+        lower.addLayout(showing, 1)
         layout.addLayout(lower, 2)
         self.all_button = cm.helped(QtGui.QPushButton(cm.TICK_ALL), u"Ticks every row shown that can be built (rows "
                                     u"a search hides keep their ticks).")
@@ -2426,7 +2556,8 @@ class GenerationPage(object):
                                               r.name, recipe_text(r, self.settings, self.data.get("rules")),
                                               confidence_text(r), note_text(r)])
                 item.setData(0, QtCore.Qt.UserRole, index)
-                item.setFont(0, bold)
+                chars = getattr(self.owner, "char_font", None)  # (in FreeLang: owner's images 316 and 317)
+                item.setFont(0, chars(bold, r.char) if chars is not None else bold)
                 if r.layout is not None:
                     item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsUserCheckable)
                     item.setCheckState(0, QtCore.Qt.Checked if r.checked else QtCore.Qt.Unchecked)
@@ -2653,14 +2784,20 @@ class GenerationPage(object):
             self.reference_note.setText(u"No reference font has %s." % r.char)
             return
         self.reference.setPixmap(cm.reference_picture(r.char, family, self.owner.dialog.palette))
-        self.reference_note.setText(cm.reference_note(r.char, family, chosen,
+        html = getattr(self.owner, "char_html", None)  # (its character in FreeLang: owner's images 316 and 317)
+        self.reference_note.setText(cm.reference_note(html(r.char) if html is not None else r.char, family, chosen,
                                                       names=getattr(self.owner, "font_names", None)))
 
     def show_reference(self, on):
         """The reference section (heading, chooser, picture, caption, and the line beside it) shown while a row
-        is selected, as on the Diacritics tab (nothing selected: it only showed empty)."""
-        for name in ("reference_title", "reference_font", "reference", "reference_note", "reference_line"):
+        is selected, as on the Diacritics tab (nothing selected: it only showed empty); Vary turned and mirrored
+        glyphs under the preview with it, as Compact diacritics to fit the line is on the Diacritics tab."""
+        for name in ("reference_title", "reference_font", "reference", "reference_note", "reference_line", "lower_line"):
             widget = getattr(self, name, None)
+            if widget is not None:
+                widget.setVisible(bool(on))
+        for widget in [getattr(self, name, None) for name in ("vary_box", "vary_strength", "vary_seed")] + list(
+                getattr(self, "vary_labels", None) or []):
             if widget is not None:
                 widget.setVisible(bool(on))
 
@@ -2697,7 +2834,7 @@ class GenerationPage(object):
             lines.append(self.ak.html(r.missing))
         families, deriving = r.entry.get("families", 0), r.entry.get("deriving", 0)
         if families:
-            lines.append(corpus_text(families, deriving))
+            lines.append(corpus_text(families, deriving, self.ak.b))
         self.details.setText(u"<br>".join(lines))
 
     def glyph_in_font(self, r):
@@ -3200,11 +3337,11 @@ class GenerationPage(object):
             if chars:
                 log.add(u"In master %s, %s %s no layer, as %s sources have none there (a variable font's sparse "
                         u"master): %s." % (
-                    b(master), counted(len(chars), u"glyph"), u"has" if len(chars) == 1 else u"have",
+                    b(master), b(counted(len(chars), u"glyph")), u"has" if len(chars) == 1 else u"have",
                     u"its" if len(chars) == 1 else u"their", html(u" ".join(chars))))
         if helpers:
             log.add(u"Added %s for mirrored parts, mirrored with %s contours reversed: %s." % (
-                counted(len(helpers), u"glyph"), u"its" if len(helpers) == 1 else u"their", html(u", ".join(helpers))),
+                b(counted(len(helpers), u"glyph")), u"its" if len(helpers) == 1 else u"their", html(u", ".join(helpers))),
                 "done")
         for char, why in failed:
             log.add(u"%s was not built: %s." % (b(char), html(why)), "warning")

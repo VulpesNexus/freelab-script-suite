@@ -78,6 +78,7 @@ KERNING_SETS = (("all", u"Every kerned pair"), ("common", u"Common pairs only"))
 # The window's line while no font is open, on one line (ak.one_line; owner's image 278), "hooks to" as the
 # shared NO_FONT_LINE
 NO_FONT_LINE = u"No font is open. This window hooks to the next font you open, and lays out its proof at once."
+NOT_AVAILABLE = u"n/a"  # a dropdown that lists the font's content, with no font (grayed: owner's images 289 and 290)
 COLOR_MODES = (("window", u"As the window"), ("print", u"Print (black on white)"))
 PRINT_COLORS = ((0, 0, 0), (255, 255, 255))  # (ink, paper)
 DARK_COLORS = ((235, 235, 235), (30, 30, 30))  # the second choice beside a light window: light on dark
@@ -2280,10 +2281,11 @@ def kerning_note(kerned, masters, b):
 def status_line(named, proof, size, ak):
     """The window's top line once a proof is laid out (rich text): named (the font and master, in bold:
     ProofDialog.font_named), its pages counted in bold, each section's pages after its tick box's name in
-    italics, then what is applied."""
+    italics (a number in parentheses with no noun of its own: bold alone, the suite's one rule for counts),
+    then what is applied."""
     text = u"%s: %s (%s)." % (named, ak.b(counted(len(proof.pages), u"page")), size)
     counts = proof.section_pages()
-    parts = [u"%s (%s)" % (ak.i(title), grouped(counts[key]))
+    parts = [u"%s (%s)" % (ak.i(title), ak.b(grouped(counts[key])))
              for key, title in ((("summary", TITLES["summary"]),) + SECTIONS) if key in counts]
     if parts:
         text += u" Pages per section: %s." % u", ".join(parts)
@@ -3024,6 +3026,7 @@ class ProofDialog(object):
             self.proof = None
             self.page_list.clear()
             self.preview.clear()
+            self.no_font_choices()
             self.font_label.setText(self.ak.no_font_line(NO_FONT_LINE) if hasattr(self.ak, "no_font_line")
                                     else NO_FONT_LINE)
             return False
@@ -3040,6 +3043,26 @@ class ProofDialog(object):
         finally:
             self.masters_box.blockSignals(False)
         return True
+
+    def no_font_choices(self):
+        """The dropdowns that list the font's content, with no font (owner's images 289 and 290: an empty
+        dropdown said nothing): Masters shows a grayed "n/a" (no_font_states grays it), and Proof its first
+        choice, Every script, the last font's scripts and languages gone (the choice kept for the next
+        font: scope_kept). Filled again as a font is read."""
+        for box, item in ((self.masters_box, NOT_AVAILABLE), (self.scope_box, u"Every script")):
+            box.blockSignals(True)
+            try:
+                box.clear()
+                box.addItem(item)
+                box.setCurrentIndex(0)
+            finally:
+                box.blockSignals(False)
+        self.scopes = [None]
+        self.scopes_font = None  # (the next font's scopes made anew, even the same font opened again)
+        try:
+            self.scope_box.setWhatsThis(scope_help(0, 0, True))
+        except Exception:
+            pass
 
     def masters(self):
         try:

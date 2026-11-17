@@ -600,10 +600,10 @@ def check_all_logged(test, module, dialog_class, noun):
         dialog.log = type("Log", (), {"add": lambda _, text, kind=None: logged.append(text)})()
         dialog.check_all(True)
         test.assertTrue(all(row.on for row in rows))
-        test.assertEqual(logged[-1], u"<i>Tick all</i> ticked <b>3 %ss</b> (2 of them in closed groups)." % noun)
+        test.assertEqual(logged[-1], u"<i>Tick all</i> ticked <b>3 %ss</b> (<b>2</b> of them in closed groups)." % noun)
         rows[2].on = False
         dialog.check_all(False)
-        test.assertEqual(logged[-1], u"<i>Tick none</i> unticked <b>3 %ss</b> (1 of them in a closed group)." % noun)
+        test.assertEqual(logged[-1], u"<i>Tick none</i> unticked <b>3 %ss</b> (<b>1</b> of them in a closed group)." % noun)
         dialog.check_all(False)
         test.assertEqual(logged[-1], u"<i>Tick none</i> changed nothing.")
     finally:
@@ -787,8 +787,11 @@ class UIRoundTests(unittest.TestCase):
                                        u"Nothing is written until you click Write the code.")
         self.assertEqual(cj.trims_status(2, 1200, 2, 1, u"Write the code", u" Its 3 Hangul syllables.",
                                          lambda text: u"<b>%s</b>" % text, lambda text: u"<i>%s</i>" % text),
-                         u"<b>2</b> of the <b>1,200</b> full-width kana and punctuation get a trim (palt: <b>2</b>, halt: "
+                         u"<b>2 of the 1,200 full-width kana and punctuation</b> get a trim (palt: <b>2</b>, halt: "
                          u"<b>1</b>). Nothing is written until you click <i>Write the code</i>. Its 3 Hangul syllables.")
+        # (owner's images 297 and 301: a count bold with its noun, never the number alone before it)
+        self.assertEqual(cj.trims_status(0, 2, 0, 0, u"Write the code", u"", lambda text: u"<b>%s</b>" % text),
+                         u"None of the <b>2 full-width kana and punctuation</b> needs a trim.")
 
     def test_the_top_line_names_the_font_its_way(self):
         # (owner's images 223 and 238: the masters counted only beyond one; image 224: the font line kept on a failure)
@@ -813,6 +816,198 @@ class UIRoundTests(unittest.TestCase):
         # (a tool named in the log is a link that opens it: owner's image 220)
         self.assertIn(u'self.ak.tool_link(u"Feature Check")', source)
         self.assertNotIn(u"<i>Feature Check</i> lists", source)
+
+
+class FakeBox(object):
+    """A check box, dropdown, or button as the window's states see it."""
+
+    def __init__(self, index=0):
+        self.enabled, self.currentIndex, self.blocked, self.texts, self.data = True, index, [], {}, {}
+
+    def setEnabled(self, on):
+        self.enabled = bool(on)
+
+    def setCurrentIndex(self, index):
+        self.currentIndex = index
+
+    def blockSignals(self, on):
+        self.blocked.append(on)
+
+    def setText(self, text):
+        self.text = text
+
+    def setItemText(self, index, text):
+        self.texts[index] = text
+
+    def setItemData(self, index, value, role):
+        self.data[index] = (value, role)
+
+
+class UIRound3Tests(unittest.TestCase):
+    """The owner's UI round 3 (images 283 to 318): the sample in three lines (303), the Hangul setting and the
+    samples grayed for a font without their writing (304), a Code preview (305), the bottom row's order (298),
+    splitter handles (310, 318)."""
+
+    def source(self):
+        with io.open(cj.__file__.replace(".pyc", ".py"), encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_the_iroha_fits_three_lines_at_the_windows_usual_width(self):
+        # (owner's image 303: at 44 pixels to the em the Iroha took four lines, the last a lone character)
+        chars = [ch for ch in cj.SAMPLE]
+        ems = [1.0] * len(chars)  # (full-width kana and punctuation, as they are set Now)
+        room = 18 * 44  # (the preview's width there: 18 glyphs to a line at 44 pixels)
+        self.assertGreater(len(cj.break_lines(chars, [44.0] * len(chars), room)), 3, "the owner's four lines")
+        em = cj.preview_em(chars, ems, room)
+        self.assertLess(em, cj.PREVIEW_EM)
+        self.assertLessEqual(len(cj.break_lines(chars, [em * 1.0] * len(chars), room)), 3, "three lines")
+        self.assertGreater(len(cj.break_lines(chars, [em + 1.0] * len(chars), room)), 3, "the largest em that fits")
+        # (from the width and the sample's length, within bounds: not a fixed size)
+        self.assertGreater(cj.preview_em(chars, ems, room + 100), em, "a wider window, a larger em")
+        self.assertLess(cj.preview_em(chars, ems, room - 150), em, "a narrower one, a smaller em")
+        self.assertEqual(cj.preview_em(chars, ems, 10 * room), cj.PREVIEW_EM, "never past the largest")
+        self.assertEqual(cj.preview_em(chars, ems, 200), cj.SMALLEST_PREVIEW_EM, "a long text takes more lines")
+        self.assertEqual(cj.preview_em(chars, ems, None), cj.PREVIEW_EM, "Qt does not say: the largest")
+        self.assertEqual(cj.preview_em([], [], room), cj.PREVIEW_EM)
+        short = chars[:10]
+        self.assertEqual(cj.preview_em(short, [1.0] * 10, room), cj.PREVIEW_EM, "a short text: one line, the largest")
+
+    def test_the_previews_use_one_em_from_the_wider_sample(self):
+        source = self.source()
+        draw = source.split(u"    def draw_previews(self):")[1].split(u"\n    def ")[0]
+        self.assertIn(u"em = preview_em(sets[0][1], sets[0][2], room)", draw, "the Now preview's widths")
+        self.assertIn(u"self.picture(placed, em, rows)", draw, "both previews at that em")
+        self.assertNotIn(u"PREVIEW_EM / upm", draw)
+
+    def test_a_sample_in_a_writing_the_font_lacks_is_grayed(self):
+        # (owner's image 304: the Korean sample showed its corner bracket, comma, and period alone in a Japanese font with no Hangul)
+        japanese = set(ord(ch) for ch in cj.SAMPLE) | set(range(0x4E00, 0x9FFF))
+        offered = cj.offered_samples(cj.SAMPLES, japanese)
+        self.assertEqual(dict(zip([key for key, _, _ in cj.SAMPLES], offered)),
+                         {"ja": True, "ko": False, "zh-hans": True, "zh-hant": True})
+        korean = [s for s in cj.SAMPLES if s[0] == "ko"][0]
+        self.assertEqual(cj.sample_label(korean, False), u"Korean (no Hangul in the font)")
+        self.assertEqual(cj.sample_label(korean, True), u"Korean")
+        self.assertEqual(cj.sample_label(cj.SAMPLES[2], False), u"Chinese (Simplified, no ideographs in the font)",
+                         "one pair of parentheses")
+        latin = set(range(0x20, 0x7F)) | set([0x300C, 0x300D])
+        self.assertEqual(cj.offered_samples(cj.SAMPLES, latin), [True] * 4,
+                         "a font of punctuation alone: every sample, its punctuation all there is to see")
+        hangul_only = set(ord(ch) for ch in korean[2])
+        self.assertEqual(cj.offered_samples(cj.SAMPLES, hangul_only), [False, True, False, False])
+        combo = FakeBox()
+        cj.offer_samples(combo, cj.SAMPLES, offered, type("QtCore", (), {"Qt": type("Qt", (), {"UserRole": 256})}))
+        self.assertEqual(combo.texts[1], u"Korean (no Hangul in the font)")
+        self.assertEqual(combo.data[1], (0, 255), "no flags: grayed, cannot be picked")
+        self.assertEqual(combo.data[0], (None, 255), "unset: the item's own flags again")
+        cj.offer_samples(combo, cj.SAMPLES, offered, None)  # (never raises)
+
+    def window(self, hangul_glyphs, index=2):
+        dialog = cj.CJKSpacingDialog.__new__(cj.CJKSpacingDialog)  # (its window needs FontLab)
+        dialog.ak = ReaderLoadingTests.Ak()
+        dialog.hangul_box = FakeBox(index)
+        dialog.package, dialog.hangul_glyphs = object(), hangul_glyphs
+        return dialog
+
+    def test_the_hangul_setting_is_grayed_without_hangul(self):
+        # (owner's image 304: clickable over a Japanese font with none: the shared no_font_states gave it back
+        # with the font, and update_buttons, which it calls then, did not set it)
+        dialog = self.window([])
+        dialog.hangul_shown()
+        self.assertFalse(dialog.ak.enabled[dialog.hangul_box])
+        self.assertEqual(dialog.hangul_box.currentIndex, 0, "set back to leaving them: it sets nothing else")
+        self.assertEqual(dialog.hangul_box.blocked, [True, False], "no measuring for it")
+        dialog = self.window([(0xAC00, u"uniAC00")])
+        dialog.hangul_shown()
+        self.assertTrue(dialog.ak.enabled[dialog.hangul_box])
+        self.assertEqual(dialog.hangul_box.currentIndex, 2, "a Korean font's choice kept")
+        dialog.package = None
+        dialog.hangul_shown()
+        self.assertFalse(dialog.ak.enabled[dialog.hangul_box], "no font")
+        update = self.source().split(u"    def update_buttons(self):")[1].split(u"\n    def ")[0]
+        self.assertIn(u"self.hangul_shown()", update, "set again whenever the buttons are")
+        self.assertIn(u'self.hangul_label = QtGui.QLabel(u"Hangul:")', self.source(),
+                      "its caption just before it: grayed with it (the shared caption_states)")
+
+    def test_the_code_preview_shows_what_a_write_would_write(self):
+        trims = CodeTests("test_new_features").trims()
+        new = cj.texts_for(trims, {})
+        text = cj.preview_code(new, {}, ("palt", "halt"))
+        self.assertTrue(text.startswith(u"feature palt {"), text)
+        self.assertIn(u"pos a-hira <-70 0 -130 0>;", text)
+        self.assertIn(u"} palt;\n\nfeature halt {", text, "feature by feature, palt first")
+        noted = cj.preview_code(new, {}, ("palt", "halt"), [u"And the widths of 3 Hangul syllables."])
+        self.assertTrue(noted.endswith(u"} halt;\n\n# And the widths of 3 Hangul syllables.\n"), noted)
+        same = cj.preview_code(new, dict(new), ("palt", "halt"))
+        self.assertEqual(same, cj.NO_CODE, "the font has it already: nothing to write")
+        self.assertEqual(cj.preview_code({}, {}, ("palt", "halt"), [u"Widths."]), cj.NO_CODE + u"\n# Widths.")
+        self.assertEqual(cj.CODE_PREVIEW_HEADING, u"Code preview", "not Code: it is not written yet (image 299)")
+
+    def test_the_code_preview_follows_the_ticks(self):
+        logged, shown = [], []
+        dialog = ReaderLoadingTests("test_a_missing_or_broken_reader_writes_nothing_and_says_why").window(logged)
+        dialog.texts = {}
+        dialog.trims = CodeTests("test_new_features").trims()
+        dialog.first_checks = [True, True]
+        dialog.hangul_chosen = lambda: []
+        dialog.code_preview = type("Preview", (), {"show": lambda _, text: shown.append(text)})()
+        saved = sys.modules.get("PythonQt")
+        sys.modules["PythonQt"] = type("PythonQt", (), {"QtCore": None, "QtGui": None})()
+        try:
+            dialog.update_buttons()
+            self.assertIn(u"pos ideographiccomma <0 0 -500 0>;", shown[-1])
+            dialog.trims[1].checked = False
+            dialog.update_buttons()
+            self.assertNotIn(u"ideographiccomma", shown[-1], "unticked: not in the code")
+            dialog.palt_box = type("Box", (), {"checked": False})()
+            dialog.halt_box = dialog.palt_box
+            dialog.update_buttons()
+            self.assertEqual(shown[-1], cj.NO_CODE, "palt and halt off")
+            dialog.package = None
+            dialog.update_buttons()
+            self.assertEqual(shown[-1], u"", "no font: nothing")
+        finally:
+            if saved is None:
+                sys.modules.pop("PythonQt", None)
+            else:
+                sys.modules["PythonQt"] = saved
+
+    def test_the_code_box_colors_short_code_and_is_not_set_again_unchanged(self):
+        preview = cj.CodePreview.__new__(cj.CodePreview)  # (its widgets need Qt)
+        calls = []
+        preview.code = type("Box", (), {"setPlainText": lambda _, text: calls.append(("text", text))})()
+        preview.highlighting = type("H", (), {"attach": lambda _: calls.append("attach"),
+                                              "detach": lambda _: calls.append("detach"),
+                                              "refresh": lambda _: calls.append("refresh")})()
+        preview.text, preview.lines = None, 3
+        preview.show(u"a\nb")
+        self.assertEqual(calls, [("text", u"a\nb"), "attach"])
+        preview.show(u"a\nb")
+        self.assertEqual(len(calls), 2, "the same text: not set (and colored) again")
+        preview.show(u"a\nb\nc\nd")
+        self.assertEqual(calls[2:], ["detach", ("text", u"a\nb\nc\nd")], "too long: plain")
+        preview.refresh()
+        self.assertEqual(calls[-1], "refresh", "dark mode switched")
+
+    def test_the_layout_splitter_code_preview_and_bottom_row(self):
+        source = self.source()
+        init = source.split(u"class CJKSpacingDialog")[1].split(u"\n    def watch_previews")[0]
+        # (owner's image 310: a handle between the list and the previews; 305: a Code preview pane under them;
+        # 318: its separator first, under the handle, then its heading)
+        self.assertIn(u"self.splitter = QtGui.QSplitter(QtCore.Qt.Vertical)", init)
+        self.assertIn(u"list_part.addWidget(self.tree, 1)", init)
+        self.assertNotIn(u"layout.addWidget(self.tree", init)
+        self.assertIn(u"preview_part.addLayout(sample_row)", init)
+        self.assertIn(u"CodePreview(ak, feature_code_or_none(), self.splitter", init)
+        part = source.split(u"class CodePreview")[1].split(u"\n    def show")[0]
+        self.assertLess(part.index(u"part.addWidget(ak.separator())"), part.index(u"part.addWidget(self.heading)"))
+        self.assertIn(u"self.code.setReadOnly(True)", part)
+        self.assertIn(u"fc.make_highlighter(self.code)", part, "Feature Code's colors, not a copy")
+        # (owner's image 298: the compile tick, the write it is about, then Close)
+        dialog = cj.CJKSpacingDialog.__new__(cj.CJKSpacingDialog)
+        dialog.compile_box, dialog.write_button, dialog.close_button = "compile", "write", "close"
+        self.assertEqual(dialog.bottom_right(), ["compile", "write", "close"])
+        self.assertIn(u"for widget in self.bottom_right():", init)
 
 
 if __name__ == "__main__":

@@ -88,6 +88,11 @@ CUSTOM_SETS_FILE = u"font_check_sets.json"  # in FreeLab's settings folder (ak.s
 CUSTOM_GROUP = u"Your sets"  # their section in the Character sets tab
 PASTED_KEY, PASTED_NAME = u"custom-pasted", u"Pasted characters"
 TABS = ("coverage", "metrics", "masters")
+NOT_AVAILABLE = u"n/a"  # a dropdown of the font's masters with no font: grayed (owner's image 289), never empty
+# The fields' placeholders end with an ellipsis, not a period (owner's image 309); a single word stays as it is
+SEARCH_PLACEHOLDER = u"Find a language, a character set, or a family\N{HORIZONTAL ELLIPSIS}"
+PASTE_PLACEHOLDER = u"Paste text or characters to check as a set of your own\N{HORIZONTAL ELLIPSIS}"
+NAME_PLACEHOLDER = u"Name"
 NEARLY_MISSING = 3  # a language missing at most this many base characters (and marks) is within reach
 SCRIPT_MINIMUM = 5  # a font with fewer of a script's characters than this has none of it (its languages summed up)
 LINE_SHARE = 1.2  # Google Fonts: typo (and hhea) ascender plus descender at 120% of the em, suggested to start with
@@ -722,6 +727,24 @@ OTHER_SPACES = ((0x2007, u"figure"), (0x2009, u"thin"), (0x200A, u"hair"), (0x20
 SPACE_WORDS = {0x00A0: u"no-break", 0x202F: u"narrow no-break"}
 
 
+def masters_status(failing, glyphs, masters, reference, unread=0, b=lambda text: text):
+    """The Masters view's status line: failing glyphs of glyphs that do not interpolate, of masters compared
+    with the reference master; unread: glyph layers that could not be read. Each count bold with its noun
+    ("**12 of the 2,000 glyphs**", "all **4 masters**": owner's images 297 and 301)."""
+    if failing:
+        text = u"%s %s interpolate, compared with %s." % (
+            b(u"%s of the %s" % (u"{0:,}".format(failing), counted(glyphs, u"glyph"))),
+            u"does not" if failing == 1 else u"do not", b(reference))
+    else:
+        text = (u"The %s %s in %s, compared with %s: contours, nodes, start points, directions, components, and "
+                u"anchors." % (b(counted(glyphs, u"glyph")), u"matches" if glyphs == 1 else u"match",
+                               u"both masters" if masters == 2
+                               else u"all %s" % b(counted(masters, u"master")), b(reference)))
+    if unread:
+        text += u" %s could not be read." % b(counted(unread, u"glyph layer"))
+    return text
+
+
 def spaces_path():
     return os.path.join(os.path.dirname(os.path.abspath(globals().get("__file__") or ".")), SPACES_FILE)
 
@@ -755,18 +778,45 @@ def space_rows(results, has, conventions):
     return rows
 
 
+SPACES_LINK = u"freelab-spaces:"  # a log link's target: Glyph Compose opened on these spaces (hexadecimal, "-" between)
+
+
+def spaces_link(codes):
+    """The link of the spaces line (spaces_note): its target names the spaces, which Font Check's log hands
+    to Glyph Compose (log_link, build_spaces) as its Build button hands glyphs over."""
+    return u"%s%s" % (SPACES_LINK, u"-".join(u"%04X" % code for code in codes))
+
+
+def linked_spaces(target):
+    """The characters a spaces link names (spaces_link), or None for another link."""
+    target = u"%s" % target
+    if not target.startswith(SPACES_LINK):
+        return None
+    found = []
+    for part in target[len(SPACES_LINK):].split(u"-"):
+        try:
+            found.append(char_of(int(part, 16)))
+        except ValueError:
+            continue
+    return found
+
+
 def spaces_note(has, listed=()):
     """The line the log gives the spaces the font lacks that no row lists (u"" for none): the no-break
-    spaces first, then the figure, thin, hair, en, and em spaces."""
+    spaces first, then the figure, thin, hair, en, and em spaces. Glyph Compose named in it is a link
+    that opens it with these spaces listed and ticked on its Glyph generation tab (owner's image 313: the
+    tool's link opened it on its first tab, with nothing done)."""
     lacking = [(code, SPACE_WORDS[code]) for code in NO_BREAK_SPACES if not has(code) and code not in listed]
     lacking += [(code, word) for code, word in OTHER_SPACES if not has(code)]
     if not lacking:
         return u""
     one = len(lacking) == 1
     names = [u"%s (U+%04X)" % (word, code) for code, word in lacking]
-    return (u"The font lacks %s %s: %s. <i>Glyph Compose</i> builds %s on its <i>Glyph generation</i> tab (empty "
-            u"glyphs of the right width)." % (u"this" if one else u"these", u"space" if one else u"spaces",
-                                    u", ".join(names), u"it" if one else u"them"))
+    link = u'<a href="%s"><i>Glyph Compose</i></a>' % spaces_link([code for code, _ in lacking])
+    return (u"The font lacks %s %s: %s. %s builds %s (empty glyphs of the right width): click it to list %s on "
+            u"its <i>Glyph generation</i> tab, ticked." % (
+                u"this" if one else u"these", u"space" if one else u"spaces", u", ".join(names), link,
+                u"it" if one else u"them", u"it" if one else u"them"))
 
 
 def families_path():
@@ -2461,37 +2511,35 @@ def required_rows(rows, selection, wanted, most):
 
 def selection_text(selection, left, b=None):
     """The line over the selection's own tab: whose missing characters it lists, how many, and how to
-    unselect (b: how its name is set in rich text)."""
+    unselect (b: how its name, and each count with its noun, are set in rich text: owner's images 297, 301)."""
     if selection is None:
         return u""
-    name = b(selection.name) if b else selection.name
+    c = b or (lambda text: text)
+    name = c(selection.name)
     count = selection.count()
     if selection.kind == "family":
         short = sum(1 for r in selection.results if r.level != "covered")
         if not count:
-            return u"%s: the font covers %s." % (name, u"its 1 language" if len(selection.results) == 1 else
-                                                 u"all its %d languages" % len(selection.results))
-        text = u"%s: %s not covered %s." % (
-            name, u"its 1 language" if short == 1 else u"its %d languages" % short,
-            u"misses 1 glyph" if short == 1 and count == 1 else
-            u"misses %d glyphs" % count if short == 1 else
-            u"miss 1 glyph" if count == 1 else u"miss %d glyphs" % count)
+            return u"%s: the font covers %s." % (name, u"its %s" % c(u"1 language") if len(selection.results) == 1 else
+                                                 u"all its %s" % c(counted(len(selection.results), u"language")))
+        text = u"%s: its %s not covered %s %s." % (
+            name, c(counted(short, u"language")), u"misses" if short == 1 else u"miss", c(counted(count, u"glyph")))
     else:
         optional = selection.optional_count()  # (a set's optional glyphs: listed after the others, marked so)
         if not count and not optional:
             return u"%s misses nothing." % name
         if not optional:
-            text = u"%s misses %s." % (name, counted(count, u"glyph"))
+            text = u"%s misses %s." % (name, c(counted(count, u"glyph")))
         elif not count:
             text = u"%s misses no glyph it needs, but %s (%s)." % (
-                name, counted_grouped(optional, u"optional glyph"), OPTIONAL_WHAT)
+                name, c(counted_grouped(optional, u"optional glyph")), OPTIONAL_WHAT)
         else:
             text = u"%s misses %s, and %s, listed after them." % (
-                name, counted_grouped(count, u"glyph"), counted_grouped(optional, u"optional glyph"))
+                name, c(counted_grouped(count, u"glyph")), c(counted_grouped(optional, u"optional glyph")))
         count += optional
-    if left:
-        text += u" %s not listed (the first %s are)." % (
-            u"1 more is" if left == 1 else u"%s more are" % grouped(left), grouped(count - left))
+    if left:  # (numbers with no noun of their own: bold alone)
+        text += u" %s %s not listed (the first %s are)." % (
+            c(grouped(left)), u"more is" if left == 1 else u"more are", c(grouped(count - left)))
     return text + u" Click it again, or an empty part of its list, to unselect it."
 
 
@@ -2565,7 +2613,7 @@ def sets_sentence(results, b=lambda text: text):
             text += u" %s of %d is covered" % (b(u"No character set"), len(counted_))
         if legacy:
             text += (u" (the Legacy set, wholly optional, is not counted)" if len(legacy) == 1 else
-                     u" (the %d Legacy sets, wholly optional, are not counted)" % len(legacy))
+                     u" (the %s, wholly optional, are not counted)" % b(counted(len(legacy), u"Legacy set")))
         text += u"."
     if scripts:  # (each script as a set: its whole repertoire, whatever languages are written in it)
         whole = sum(1 for r in scripts if r.level == "covered")
@@ -2599,14 +2647,15 @@ def sets_tab_tip(results):
     return u"%s %s: %s." % (grouped(total), u"row" if total == 1 else u"rows", listed)
 
 
-def checked_sentence(languages, sets, scripts, seconds):
+def checked_sentence(languages, sets, scripts, seconds, b=lambda text: text):
     """The log's one line when a check is done: "Checked 2,492 languages, 99 character sets, and 172
-    scripts in 0.4 s." (each count with its noun in the right number; what there is none of is left out)."""
-    parts = [u"%s %s" % (grouped(languages), u"language" if languages == 1 else u"languages")]
+    scripts in 0.4 s." (each count with its noun in the right number, b: bold, the two together; what
+    there is none of is left out)."""
+    parts = [b(u"%s %s" % (grouped(languages), u"language" if languages == 1 else u"languages"))]
     if sets:
-        parts.append(u"%s %s" % (grouped(sets), u"character set" if sets == 1 else u"character sets"))
+        parts.append(b(u"%s %s" % (grouped(sets), u"character set" if sets == 1 else u"character sets")))
     if scripts:
-        parts.append(u"%s %s" % (grouped(scripts), u"script" if scripts == 1 else u"scripts"))
+        parts.append(b(u"%s %s" % (grouped(scripts), u"script" if scripts == 1 else u"scripts")))
     return u"Checked %s in %.1f s." % (word_list(parts), max(0.0, seconds))
 
 
@@ -2712,7 +2761,8 @@ def gain_text(checked_count, gained, bold=None):
             scripts[group] = 0
             order.append(group)
         scripts[group] += 1
-    head = u"With %s ticked: " % counted(checked_count, u"glyph")
+    glyphs = counted(checked_count, u"glyph")  # (bold with its noun, as the count gained: owner's images 297, 301)
+    head = u"With %s ticked: " % (bold(glyphs) if bold else glyphs)
     if not gained:
         return head + u"no language is complete yet"
     if len(order) == 1:
@@ -2799,10 +2849,11 @@ def script_text(s):
 
 def absent_caption(count):
     """The check box under the scripts, its caption a sentence with the count of the scripts it shows
-    (None: not known yet, before the first check: no count is shown as a zero)."""
+    (None: not known yet, before the first check: no count is shown as a zero). No period: a tick's text
+    names an option, as a button's does (owner's image 306)."""
     if count is None:
-        return u"Show the scripts whose glyphs are fully missing from the font."
-    return u"Show the %s whose glyphs are fully missing from the font." % counted(count, u"script")
+        return u"Show the scripts whose glyphs are fully missing from the font"
+    return u"Show the %s whose glyphs are fully missing from the font" % counted(count, u"script")
 
 
 def bar_widths(counts, width):
@@ -5468,6 +5519,41 @@ def tip_html(text, width=None, family=None, rich=False):
     return u"<span%s>%s</span>" % (style, text)
 
 
+def hint_height(widget):
+    """A widget's size hint's height (0 where it cannot be read)."""
+    try:
+        hint = widget.sizeHint
+        hint = hint() if callable(hint) else hint
+        return max(0, int(hint.height()))
+    except Exception:
+        return 0
+
+
+def level_rows(boxes):
+    """Rows of controls (each a widget whose layout holds a row) made as tall as one another, so what is
+    under them stays where it is as tabs are switched (owner's images 285 and 286, in Kerning Check: a row
+    of a button alone was a few pixels shorter than one with a spin box, and the table under it moved up):
+    each row's least height the tallest size hint of the controls in any of them, hidden ones too. Read
+    when called (after the window's styles). The height set, or 0. Never raises."""
+    tallest = 0
+    for box in boxes:
+        try:
+            layout = box.layout()
+            for index in range(int(layout.count())):
+                widget = layout.itemAt(index).widget()
+                if widget is not None:
+                    tallest = max(tallest, hint_height(widget))
+        except Exception:
+            continue
+    if tallest:
+        for box in boxes:
+            try:
+                box.setMinimumHeight(tallest)
+            except Exception:
+                pass
+    return tallest
+
+
 class Tab(object):
     """A page: its settings row, a line, then what it shows. Its status line stands in the window's
     header, under the top line (FontCheckDialog.show_tab_parts: the shown tab's only; the owner wanted
@@ -5478,8 +5564,11 @@ class Tab(object):
         self.widget = QtGui.QWidget()
         self.layout = QtGui.QVBoxLayout(self.widget)
         self.layout.setContentsMargins(0, 0, 0, 0)
-        self.settings = QtGui.QHBoxLayout()
-        self.layout.addLayout(self.settings)
+        # (its settings row in a widget of its own: as tall as the other tabs' rows, level_rows)
+        self.settings_box = QtGui.QWidget()
+        self.settings = QtGui.QHBoxLayout(self.settings_box)
+        self.settings.setContentsMargins(0, 0, 0, 0)
+        self.layout.addWidget(self.settings_box)
         self.line = ak.separator()
         self.layout.addWidget(self.line)
         self.status = ak.status_label()  # (placed in the header by the dialog)
@@ -5697,6 +5786,7 @@ class FontCheckDialog(object):
         self.close_button.connect("clicked()", self.ak.close_slot(self))  # (never the window itself: see let_go)
         ak.add_tools_button(dialog, "Font Check", getattr(self, "log", None))  # (the other font tools, a click away)
         ak.plain_buttons(dialog)
+        self.level_settings()
         try:  # the check boxes drawn plain to see in either palette (the lists' pictures stay unmapped)
             fc = ak.load_sibling("freelab_feature_code.py", "freelab_feature_code")
             self.check_watcher = fc.watch_check_boxes(dialog, [self.add_tree, self.own_tree, self.glyph_tree])
@@ -6302,7 +6392,7 @@ class FontCheckDialog(object):
         row = QtGui.QHBoxLayout()
         self.search = QtGui.QLineEdit()
         try:
-            self.search.setPlaceholderText(u"Find a language, a character set, or a family")
+            self.search.setPlaceholderText(SEARCH_PLACEHOLDER)
         except Exception:
             pass
         try:  # (a cross in the field clears it at once, as the owner asked; PythonQt may lack the call)
@@ -6416,8 +6506,8 @@ class FontCheckDialog(object):
         self.paste_field = QtGui.QLineEdit()
         self.name_field = QtGui.QLineEdit()
         try:
-            self.paste_field.setPlaceholderText(u"Paste text or characters to check as a set of your own.")
-            self.name_field.setPlaceholderText(u"Name")  # (the owner's wording for both)
+            self.paste_field.setPlaceholderText(PASTE_PLACEHOLDER)
+            self.name_field.setPlaceholderText(NAME_PLACEHOLDER)  # (the owner's wording for both)
         except Exception:
             pass
         self.paste_field.setWhatsThis(u"Text or characters pasted here are checked as a character set of your own, "
@@ -6650,6 +6740,8 @@ class FontCheckDialog(object):
                                          u"metrics against them. The view is also checked as its tab is first shown "
                                          u"and after an undo or an edit in FontLab.")
         self.measured_label = QtGui.QLabel(measured_text(2))  # (read_font says "the single master" for a font with one)
+        # (it says what Check does: grayed with it, as a caption is with its control, owner's image 292)
+        ak.caption(self.measured_label, self.metrics_button)
         tab.settings.addWidget(self.measured_label)
         tab.settings.addWidget(self.metrics_button)  # (inline after what it reads, as every run button: image 262)
         tab.settings.addStretch(1)
@@ -6893,6 +6985,7 @@ class FontCheckDialog(object):
         if package is None:
             self.font_label.setText(self.ak.no_font_line() if hasattr(self.ak, "no_font_line")
                                     else getattr(self.ak, "NO_FONT_LINE", u"No font is open. Open one, then click Check."))
+            self.show_no_masters()
             self.update_buttons()
             return False
         b = self.ak.b
@@ -6914,6 +7007,23 @@ class FontCheckDialog(object):
             if default in masters:
                 self.reference.setCurrentIndex(masters.index(default))
         return True
+
+    def show_no_masters(self):
+        """With no font, nothing that names its masters (owner's images 289 and 291): the master compared with
+        reads a grayed "n/a" (no_font_states grays it), not an empty box before its period; the clipped
+        glyphs' Master caption and dropdown are hidden (shown again once a check lists clipped glyphs of
+        several masters: fill_clip_masters, fill_clipped). Never raises."""
+        try:
+            if [self.reference.itemText(index) for index in range(self.reference.count)] != [NOT_AVAILABLE]:
+                self.reference.clear()
+                self.reference.addItem(NOT_AVAILABLE)
+        except Exception:
+            pass
+        for widget in (self.clip_master_label, self.clip_master):
+            try:
+                widget.setVisible(False)
+            except Exception:
+                pass
 
     def master_names(self):
         try:
@@ -7104,7 +7214,7 @@ class FontCheckDialog(object):
             current = self.current_key()
         except Exception:
             current = TABS[0]
-        for key in TABS:
+        for key in sorted(TABS, key=lambda k: k == current):  # (the others hidden first: owner's image 284)
             try:
                 tab, mine = self.tab_of(key), key == current
                 tab.status.setProperty(prop, None if mine else True)
@@ -7116,8 +7226,15 @@ class FontCheckDialog(object):
             except Exception:
                 pass
 
+    def level_settings(self):
+        """The three tabs' settings rows as tall as one another (level_rows: what is under them never moves
+        as a tab is shown), measured again at each switch, after the window's styles and a dark mode switch."""
+        level_rows([tab.settings_box for tab in (getattr(self, key, None) for key in TABS)
+                    if getattr(tab, "settings_box", None) is not None])
+
     def switch_page(self, index):
         QtCore, QtGui = _qt()
+        self.level_settings()  # (before the page shows: owner's images 285 and 286)
         self.pages.setCurrentIndex(index)
         self.show_tab_parts()
         self.update_buttons()
@@ -7533,8 +7650,9 @@ class FontCheckDialog(object):
             font_key = None
         said = (font_key, note)
         if note and said != getattr(self, "spaces_said", None):
-            # (amber: something the font lacks, owner's image 242; Glyph Compose a link that opens it)
-            self.log.add(self.tool_links(note), "warning")
+            # (amber: something the font lacks, owner's image 242; Glyph Compose a link of its own, which opens
+            # it on these spaces, never tool_links' plain one: owner's image 313)
+            self.log.add(note, "warning")
         self.spaces_said = said
 
     def tool_links(self, text):
@@ -7562,7 +7680,7 @@ class FontCheckDialog(object):
         covered = sum(s.count("covered") for s in present)
         nearly = sum(s.count("nearly") for s in present)
         text = u"%s covered and %s within reach (missing at most %s), of the languages of %s the font has." % (
-            b(counted(covered, u"language")), b(nearly), counted(self.nearly.value, u"base character"),
+            b(counted(covered, u"language")), b(nearly), b(counted(self.nearly.value, u"base character")),
             b(counted(len(present), u"script")))
         composed = sum(1 for s in present for r in s.results if r.composed and r.level != "missed")
         if composed:
@@ -7576,7 +7694,7 @@ class FontCheckDialog(object):
         tab.status.setText(text)
         self.set_busy(False)  # (the lists made: a stop asked now comes too late, and the check stands)
         self.log.add(checked_sentence(len(set(one.iso for one in state["languages"])), len(listed), len(of_unicode),
-                                      time.time() - state.get("started", time.time())), "done")
+                                      time.time() - state.get("started", time.time()), b), "done")
         self.checked_now("coverage")
 
     def custom_languages(self):
@@ -7628,7 +7746,7 @@ class FontCheckDialog(object):
             save_custom_sets(self.custom_path(), self.custom_sets)
             self.log.add(u"Saved the set %s (%s) in FreeLab's settings folder." % (
                 self.in_list_font(self.ak.b(self.ak.html(name))),
-                counted(len(pasted_characters(self.pasted_text)), u"character")))
+                self.ak.b(counted(len(pasted_characters(self.pasted_text)), u"character"))))
             self.recheck_custom(custom_key(name))
         except Exception as exc:
             self.log.add(u"The set could not be saved: %s" % self.ak.html(exc), "error")
@@ -8990,6 +9108,21 @@ class FontCheckDialog(object):
         except Exception as exc:
             self.log.add(self.tool_links(u"<i>Glyph Compose</i> did not open: %s" % self.ak.html(exc)), "error")
 
+    def build_spaces(self, chars):
+        """The spaces the font lacks (the log's spaces line, its Glyph Compose clicked) handed to Glyph Compose
+        as Build with Glyph Compose hands glyphs over: it opens on its Glyph generation tab, which lists them
+        alone, ticked (owner's image 313: the plain link opened it on its first tab, with nothing done)."""
+        try:
+            dm = self.diacritics_module()
+            with self.ak.opening_from(self.dialog):  # (on this window's font, in its place)
+                dm.main(characters=list(chars))
+            self.log.add(self.tool_links(u"<i>Glyph Compose</i> lists %s on its <i>Glyph generation</i> tab, ticked: "
+                                         u"<i>Build ticked glyphs</i> adds %s." % (
+                                             self.ak.b(counted(len(chars), u"space")),
+                                             u"it" if len(chars) == 1 else u"them")), "done")
+        except Exception as exc:
+            self.log.add(self.tool_links(u"<i>Glyph Compose</i> did not open: %s" % self.ak.html(exc)), "error")
+
     def copy_characters(self):
         QtCore, QtGui = _qt()
         chars = self.chosen_characters()
@@ -9525,16 +9658,7 @@ class FontCheckDialog(object):
         self.problems = tab.findings = found
         self.fill_chips()
         self.fill_glyphs()
-        names = set(f.glyph for f in found)
-        if found:
-            text = u"%s of the %s glyphs %s interpolate, compared with %s." % (
-                b(len(names)), b(len(glyphs)), u"does not" if len(names) == 1 else u"do not", b(reference))
-        else:
-            text = u"The %s glyphs match in %s masters, compared with %s: contours, nodes, start points, " \
-                   u"directions, components, and anchors." % (
-                       b(len(glyphs)), u"both" if len(masters) == 2 else u"all %s" % b(len(masters)), b(reference))
-        if unread:
-            text += u" %s could not be read." % b(counted(len(unread), u"glyph layer"))
+        text = masters_status(len(set(f.glyph for f in found)), len(glyphs), len(masters), reference, len(unread), b)
         tab.status.setText(text)
         self.checked_now("masters")
 
@@ -9855,8 +9979,15 @@ class FontCheckDialog(object):
         self.open_glyph_text(self.glyph_window_text())
 
     def log_link(self, target):
-        """A glyph named in a log line clicked: opened in a Glyph window (a link this window does not
-        take is left to the log: False)."""
+        """A glyph named in a log line clicked: opened in a Glyph window; the spaces line's Glyph Compose
+        clicked: opened on those spaces (build_spaces). A link this window does not take is left to the log
+        (False)."""
+        spaces = linked_spaces(target)
+        if spaces is not None:
+            if self.package is None or not spaces:
+                return True  # (no font: nothing to build them in; the link is this window's all the same)
+            self.build_spaces(spaces)
+            return True
         name = self.ak.linked_glyph_name(u"%s" % target)
         if not name or self.package is None:
             return False

@@ -617,6 +617,65 @@ class UiRoundTests(unittest.TestCase):
         self.assertIn(("setProperty", ("freelabBusyLine", None)), calls)
         self.assertIn(("setVisible", (False,)), calls)
 
+    def test_a_tab_switch_hides_the_other_tabs_buttons_first(self):
+        """Round 3's convention 24 (owner's image 284): the bottom row's buttons swapped through the shared
+        show_only, which hides the other tab's before it shows this one's (shown first, the row held both a
+        moment and Qt widened the window for good)."""
+        d = fb.FontBuilderDialog.__new__(fb.FontBuilderDialog)
+        swaps = []
+
+        class Quiet(object):
+            text = ""
+
+            def __getattr__(self, name):
+                return lambda *args: None
+
+        d.pages, d.summary, d.build_button = Quiet(), Quiet(), Quiet()
+        d.ak = Box(BUSY_LINE_PROP="freelabBusyLine", show_only=lambda groups, shown: swaps.append((groups, shown)))
+        d.tab_changed(1)
+        d.tab_changed(0)
+        self.assertEqual([shown for _, shown in swaps], [1, 0])
+        self.assertEqual(swaps[0][0], {0: [], 1: [d.build_button]}, "Build ticked glyphs is the Build tab's")
+
+    def test_the_rows_above_the_tabs_frames_are_as_tall(self):
+        """Round 3's convention 23 (owner's images 285 and 286): the Template tab's row (a dropdown) and the
+        Build tab's (two buttons) made as tall as the taller, so the frame under them never shifts as the tabs
+        switch; again at each switch and as the window shows."""
+
+        class Bar(object):
+            def __init__(self, height):
+                self.hint, self.minimumHeight, self.set = height, 0, []
+
+            def sizeHint(self):
+                return Box(height=lambda: self.hint)
+
+            def setMinimumHeight(self, height):
+                self.minimumHeight = height
+                self.set.append(height)
+
+        dropdown, buttons = Bar(24), Bar(21)
+        self.assertEqual(fb.even_height([dropdown, None, buttons]), 24)
+        self.assertEqual((dropdown.minimumHeight, buttons.minimumHeight), (24, 24))
+        fb.even_height([dropdown, buttons])
+        self.assertEqual((dropdown.set, buttons.set), ([24], [24]), "set once, not at every switch")
+        self.assertIsNone(fb.even_height([None]))
+        d = fb.FontBuilderDialog.__new__(fb.FontBuilderDialog)
+        d.template_bar, d.build_bar = Bar(20), Bar(26)
+        d.even_rows()
+        self.assertEqual((d.template_bar.minimumHeight, d.build_bar.minimumHeight), (26, 26))
+        import io
+        with io.open(os.path.join(HERE, os.pardir, "builder", "freelab_font_builder.py"), encoding="utf-8") as handle:
+            source = handle.read()
+        for bar in ("self.template_bar = QtGui.QWidget()", "self.build_bar = QtGui.QWidget()"):
+            self.assertIn(bar, source)
+        self.assertIn("self.even_rows()  # (again in the window's own style", source)
+
+    def test_the_new_fonts_units_are_bold_with_their_noun(self):
+        """Round 3's convention 18: a count bold with its noun ("1,000 units per em": the number was plain)."""
+        ak = Box(b=lambda text: "<b>%s</b>" % text)
+        self.assertEqual(fb.new_font_line(ak, "Hand", 1000.0),
+                         "Made a new font, <b>Hand</b>: <b>1,000 units</b> per em, the sheets' metrics.")
+
     def test_the_no_font_line_is_one_line_and_says_a_built_font_is_hooked(self):
         """Images 274 and 280: "This window hooks to the next font you open (or build here)", one line."""
         self.assertEqual(fb.NO_FONT_TEXT, "No font is open. This window hooks to the next font you open (or build "

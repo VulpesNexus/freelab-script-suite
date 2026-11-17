@@ -252,10 +252,11 @@ class Cleanup(object):
         self.entry, self.value, self.kind, self.reason, self.checked = entry, value, kind, reason, checked
 
 
-CLEANUP_COUNTS = {"missing": (u"entry naming what is gone", u"entries naming what is gone"),
-                  "overridden": (u"entry overridden everywhere", u"entries overridden everywhere"),
-                  "redundant": (u"entry changing nothing", u"entries changing nothing"),
-                  "tiny": (u"tiny value", u"tiny values")}
+# (each kind's count: its noun, one and many, bold with the count, then what follows the noun: convention 18)
+CLEANUP_COUNTS = {"missing": (u"entry", u"entries", u" naming what is gone"),
+                  "overridden": (u"entry", u"entries", u" overridden everywhere"),
+                  "redundant": (u"entry", u"entries", u" changing nothing"),
+                  "tiny": (u"tiny value", u"tiny values", u"")}
 CLEANUP_KINDS = (("missing", "Names what is gone"), ("overridden", "Overridden everywhere"),
                  ("redundant", "Changes nothing"), ("tiny", "Tiny value"))
 
@@ -312,12 +313,14 @@ def find_cleanup(kerning, glyph_exists, tiny=TINY_UNITS, progress=None):
 def cleanup_status(listed, entries, counts, limited=u"", bold=lambda text: u"%s" % text):
     """The Cleanup list's status line: "3 of 120 entries listed: 2 entries changing nothing, 1 tiny value."
     (counts: {kind: how many}; limited: " with these 12 glyphs" while the lists are limited); with nothing
-    listed, "No entries listed." (owner's image 190: "0 of 0 entries listed: none.")."""
+    listed, "No entries listed." (owner's image 190: "0 of 0 entries listed: none."). Each count bold with
+    its noun ("**3 of 120 entries**", "**2 entries** changing nothing": owner's images 297 and 301)."""
     if not listed:
         return u"No entries listed."
-    return u"%s of %s%s listed: %s." % (
-        bold(listed), bold(counted(entries, u"entry", u"entries")), limited,
-        u", ".join(counted(counts[kind], *CLEANUP_COUNTS[kind]) for kind, _ in CLEANUP_KINDS if kind in counts))
+    return u"%s%s listed: %s." % (
+        bold(u"%s of %s" % (u"{:,}".format(listed), counted(entries, u"entry", u"entries"))), limited,
+        u", ".join(bold(counted(counts[kind], CLEANUP_COUNTS[kind][0], CLEANUP_COUNTS[kind][1])) + CLEANUP_COUNTS[kind][2]
+                   for kind, _ in CLEANUP_KINDS if kind in counts))
 
 
 def collision_status(found, tight, minimum, relative=True, common=False, limited=u"", bold=lambda text: u"%s" % text):
@@ -334,11 +337,25 @@ def collision_status(found, tight, minimum, relative=True, common=False, limited
     if tight == 1:
         return u"The only %s%s kerned tighter %s %s%s." % (noun, limited, u"comes" if found else u"does not come", what,
                                                          u", kerning applied" if found else u"")
-    pairs = bold(counted(tight, noun)) + limited
     if not found:
-        return u"None of the %s kerned tighter comes %s." % (pairs, what)
-    return u"%s of the %s kerned tighter %s %s, kerning applied." % (bold(u"{:,}".format(found)), pairs, u"comes" if found == 1 else u"come",
-                                                                    what)
+        return u"None of the %s%s kerned tighter comes %s." % (bold(counted(tight, noun)), limited, what)
+    # (the count bold with its noun: "**2 of the 1,438 pairs**", owner's images 297 and 301)
+    return u"%s%s kerned tighter %s %s, kerning applied." % (
+        bold(u"%s of the %s" % (u"{:,}".format(found), counted(tight, noun))), limited,
+        u"comes" if found == 1 else u"come", what)
+
+
+def masters_status(found, masters, limited_lists=False, limited=u"", bold=lambda text: u"%s" % text):
+    """The Masters list's status line: found differences between masters (a count); limited_lists: the
+    lists limited to some glyphs (limited: " with these 12 glyphs"). Each count bold with its noun
+    ("between **3 masters**", not "between **3** masters": owner's images 297 and 301)."""
+    differences, between = bold(counted(found, u"difference")), bold(counted(masters, u"master"))
+    if not limited_lists:
+        return (u"%s between %s." % (differences, between) if found
+                else u"The %s kern the same entries, with the same signs." % between)
+    return (u"%s between %s, in the entries and classes%s." % (differences, between, limited) if found
+            else u"The %s kern the entries%s the same, with the same signs, and their classes hold the same "
+                 u"glyphs." % (between, limited))
 
 
 AUTOMATIC_KINDS = ("missing", "overridden", "redundant")  # ticked for removal: they change nothing
@@ -586,6 +603,41 @@ class TabStatus(object):
             pass
 
 
+def hint_height(widget):
+    """A widget's size hint's height (0 where it cannot be read)."""
+    try:
+        hint = widget.sizeHint
+        hint = hint() if callable(hint) else hint
+        return max(0, int(hint.height()))
+    except Exception:
+        return 0
+
+
+def level_rows(boxes):
+    """Rows of controls (each a widget whose layout holds a row) made as tall as one another, so a table
+    under them stays where it is as tabs are switched (owner's images 285 and 286: the Masters tab's row,
+    a button alone, was a few pixels shorter than Cleanup's, whose spin box is taller, and its table moved
+    up): each row's least height the tallest size hint of the controls in any of them, hidden ones too.
+    Read when called (after the window's styles). The height set, or 0. Never raises."""
+    tallest = 0
+    for box in boxes:
+        try:
+            layout = box.layout()
+            for index in range(int(layout.count())):
+                widget = layout.itemAt(index).widget()
+                if widget is not None:
+                    tallest = max(tallest, hint_height(widget))
+        except Exception:
+            continue
+    if tallest:
+        for box in boxes:
+            try:
+                box.setMinimumHeight(tallest)
+            except Exception:
+                pass
+    return tallest
+
+
 class Tab(object):
     """One list: its settings row, its tree, its status (in the window's header), its action button."""
 
@@ -593,8 +645,11 @@ class Tab(object):
         self.widget = QtGui.QWidget()
         self.layout = QtGui.QVBoxLayout(self.widget)
         self.layout.setContentsMargins(0, 0, 0, 0)  # (the list's frame level with the log's, owner's image 268)
-        self.settings = QtGui.QHBoxLayout()
-        self.layout.addLayout(self.settings)
+        # (its settings row in a widget of its own: as tall as the other tabs' rows, level_rows)
+        self.settings_box = QtGui.QWidget()
+        self.settings = QtGui.QHBoxLayout(self.settings_box)
+        self.settings.setContentsMargins(0, 0, 0, 0)
+        self.layout.addWidget(self.settings_box)
         self.status = status  # (TabStatus: in the window's header, rich text, a line per sentence)
         self.tree = QtGui.QTreeWidget()
         self.tree.setColumnCount(len(columns))
@@ -799,6 +854,7 @@ class KerningCheckDialog(object):
         self.busy = False
         self.ak.add_tools_button(dialog, "Kerning Check", getattr(self, "log", None))  # (the other font tools, a click away)
         self.ak.plain_buttons(dialog)
+        self.level_settings()
         self.read_font()
         self.show_limit()
         self.history_timer = self.ak.watch_history(self)
@@ -1351,15 +1407,7 @@ class KerningCheckDialog(object):
             self.add_row(tab, index, (d.subject, u"; ".join(u"%s %s" % pair for pair in d.values), d.reason), False, False)
         self.resize(tab)
         self.update_previews()  # (refilled: nothing selected now, the pictures' room says what it is for)
-        b = self.ak.b
-        if self.only is None:
-            tab.status.setText(u"%s between %s masters." % (b(counted(len(found), u"difference")), b(len(masters))) if found
-                               else u"The %s masters kern the same entries, with the same signs." % b(len(masters)))
-        else:
-            tab.status.setText(u"%s between %s masters, in the entries and classes%s." % (
-                b(counted(len(found), u"difference")), b(len(masters)), self.limited()) if found
-                else u"The %s masters kern the entries%s the same, with the same signs, and their classes hold the "
-                     u"same glyphs." % (b(len(masters)), self.limited()))
+        tab.status.setText(masters_status(len(found), len(masters), self.only is not None, self.limited(), self.ak.b))
 
     # -- looking at a pair ----------------------------------------------
 
@@ -1391,11 +1439,17 @@ class KerningCheckDialog(object):
         return row
 
     def show_tab_buttons(self, index):
-        """The bottom row's buttons of the list shown (by its tab's index), the others' hidden."""
-        for number, tab in enumerate((self.collisions, self.cleanup, self.masters)):
-            if tab.action is not None:
-                for button in (tab.check_all, tab.check_none, tab.restore, tab.action):
-                    button.setVisible(number == index)
+        """The bottom row's buttons of the list shown (by its tab's index), the others' hidden first (the row
+        never holds two lists' buttons at once: owner's image 284, the window grew to fit both)."""
+        groups = [[tab.check_all, tab.check_none, tab.restore, tab.action] if tab.action is not None else []
+                  for tab in (self.collisions, self.cleanup, self.masters)]
+        show_only = getattr(getattr(self, "ak", None), "show_only", None)
+        if show_only is not None:
+            show_only(groups, index)
+            return
+        for number in sorted(range(len(groups)), key=lambda n: n == index):
+            for button in groups[number]:
+                button.setVisible(number == index)
 
     def show_tab_status(self, index):
         """The header's status line: the list's shown (by its tab's index), as its last check left it."""
@@ -1404,7 +1458,15 @@ class KerningCheckDialog(object):
         if line is not None and status is not None:
             line.setText(getattr(status, "text", u""))
 
+    def level_settings(self):
+        """The three lists' settings rows as tall as one another (level_rows: a table never moves as its tab
+        is shown), measured again at each switch, after the window's styles and a dark mode switch."""
+        level_rows([getattr(tab, "settings_box", None) for tab in
+                    (getattr(self, "collisions", None), getattr(self, "cleanup", None), getattr(self, "masters", None))
+                    if getattr(tab, "settings_box", None) is not None])
+
     def switch_page(self, index):
+        self.level_settings()  # (before the page shows: owner's images 285 and 286)
         self.pages.setCurrentIndex(index)
         self.show_tab_buttons(index)
         self.show_tab_status(index)

@@ -3358,8 +3358,9 @@ def units_suffix(value):
 
 HELP = u"""<b>FreeLab Feature Code</b><br>
 Writes the OpenType code for the font's ligatures, for alternates that take turns, and for the forms
-its glyph names call for. The code is shown under the tabs, in <i>Code</i> (in colors: keywords, tags,
-classes, glyph lists, numbers, and comments), and checked, before anything is written.<br><br>
+its glyph names call for. The code is shown under the tabs, in <i>Code preview</i> (in colors: keywords, tags,
+classes, glyph lists, numbers, and comments), and checked, before anything is written: it is in the font only
+once <i>Write the code</i> is clicked.<br><br>
 <b>Ligatures and alternates</b> (the first tab):<br>
 <b>Ligatures</b>: each ligature with what it replaces, set to <i>Standard</i> (liga, on unless a user turns
 it off), <i>Discretionary</i> (dlig, off unless a user turns it on), or <i>Off</i>. A ligature the font's code and
@@ -3398,21 +3399,26 @@ to refine.
 <i>Build ticked figure forms</i> (in the bottom row) adds them in one step of FontLab's History; the font is
 read again, and the forms above take them. What it built stays listed: change a setting and build again to
 replace it (a glyph drawn over since is left alone).<br><br>
-<b>Stylistic alternates</b> (the third tab) holds two separate jobs. <b>Suggested alternates</b>: the
-glyphs fonts most often give a stylistic alternate; <i>Make copies to redraw</i> gives each ticked one
-a copy named for a stylistic set (a.ss01), to redraw by hand. <b>Variants that take turns</b>: computed
-copies of the glyphs in scope, each changed a little as a whole (X.alt1, X.alt2...), which the first
-tab then cycles; they need no copy made first. <i>Also build variants from existing alternates</i> spreads a
+<b>Stylistic alternates</b> (the third tab) holds two separate jobs, and its list two groups.
+<i>Suggestions</i>: the glyphs fonts most often give a stylistic alternate; <i>Make copies to redraw</i>
+gives each ticked one a copy named for a stylistic set (a.ss01), to redraw by hand. <b>Variants that take
+turns</b>: computed copies of the glyphs ticked in the list's <i>Selected glyphs</i> group, which the
+<i>Glyphs</i> dropdown fills (the ticked suggestions, a script, a case, the glyphs typed...), each changed a
+little as a whole (X.alt1, X.alt2...), which the first tab then cycles; they need no copy made first.
+<i>Build N variants</i> builds them. <i>Also build variants from existing alternates</i> spreads a
 glyph's variants over the glyph and the alternates the font has of it, variants built before included
 (W.ss01.alt2 is a changed copy of W.ss01). Variants built here and left as they were are replaced in place
 when <i>Strength</i> or <i>Seed</i> changes and you build again.<br><br>
 The code is made again as you change the choices. Pick a ligature's feature in its box; drag between the parts to give one more room;
 double-click a ligature, a glyph, or a form to see it in a <i>Glyph</i> window. The bottom row holds the buttons
-of the tab shown, then <i>Restore suggestions</i>, which puts the choices back as they first came.<br><br>
+of the tab shown, then <i>Restore suggestions</i>, which puts the choices back as they first came; at the
+right, <i>Compile after writing</i>, <i>Write the code</i> beside it, the tab's builds, and <i>Close</i>.<br><br>
 Click this help's <i>?</i> button, then any control, for what it does."""
 
 TABS = (u"Ligatures and alternates", u"Forms", u"Stylistic alternates")
-CODE_HEADING = u"Code"  # the part under the tabs
+# The part under the tabs: "Code preview", not "Code" (owner's image 299: people must see that the code
+# shown is not in the font yet, and that Write the code writes it)
+CODE_HEADING = u"Code preview"
 # The buttons that tick the glyphs taking turns, in the window's bottom row while the first tab is shown, in
 # the suite's order (Tick all, Tick none, then the tool's own): (key, label, what it does)
 TURN_CHECKS = (("all", u"Tick all", u"Ticks every glyph of <i>Alternates that take turns</i> whose alternates have no "
@@ -3703,7 +3709,7 @@ class FeatureCodeDialog(object):
         describe(self.tabs, u"The window's three tabs: <i>Ligatures and alternates</i> (liga, dlig, and calt), "
                             u"<i>Forms</i> (case, locl, fractions and figures, small capitals, stylistic sets, and the "
                             u"figure forms to build), and <i>Stylistic alternates</i> (copies to redraw, and variants "
-                            u"that take turns). <i>Code</i>, under them, is the same whichever tab is open.")
+                            u"that take turns). <i>%s</i>, under them, is the same whichever tab is open." % CODE_HEADING)
         top.addWidget(self.tabs)
         self.pages = QtGui.QStackedWidget()
         top.addWidget(self.pages, 1)
@@ -3835,14 +3841,16 @@ class FeatureCodeDialog(object):
             self.pages.addWidget(missing)
 
         part = self.part(QtGui, 2)
-        what = (u"The code to be written, feature by feature: FreeLab's blocks between their marker lines, the rest "
+        what = (u"The code to be written, feature by feature, not in the font yet: <i>Write the code</i> writes it. "
+                u"FreeLab's blocks between their marker lines, the rest "
                 u"of each feature as it is; the prefix's language systems first where locl needs some. Keywords, "
                 u"tags, glyph classes (@name), glyph lists ([...]), numbers, and comments (#...) are in colors of "
                 u"their own; code of more than %s lines is shown plain." % grouped(HIGHLIGHT_LINES))
         # (a line over the heading: it follows a list or the previews of whichever tab is shown, owner's
         # images 234 and 269)
         part.addWidget(self.ak.separator())
-        # "Code", not "The code": the owner's name for the part, in every tool that writes and compiles code
+        # "Code preview" (owner's image 299: "Code" read as if it were the font's own), the same in every tool
+        # that writes feature code
         part.addWidget(describe(self.heading(QtGui, CODE_HEADING), what))
         self.code = QtGui.QPlainTextEdit()
         self.code.setReadOnly(True)
@@ -3921,10 +3929,11 @@ class FeatureCodeDialog(object):
     def bottom_row(self, QtGui):
         """The window's bottom row, as every tool's (owner's images 258, 260, 264): at the left the buttons
         that tick the shown tab's list (the turns' Tick all, Tick none, and Tick often doubled; the third
-        tab's Tick all and Tick none), then Restore suggestions; at the right Compile after writing, the
-        shown tab's builds (Build ticked figure forms; Make copies to redraw and Build variants), Update the
-        code, and Close. Every tab's buttons are in it, those of the tab shown visible (show_tab_buttons):
-        no button is left between a list and its splitter handle."""
+        tab's Tick all and Tick none), then Restore suggestions; at the right Compile after writing, Write
+        the code (or Update the code) right beside it (the tick is about that button: owner's image 298),
+        then the shown tab's builds (Build ticked figure forms; Make copies to redraw and Build N variants),
+        and Close. Every tab's buttons are in it, those of the tab shown visible (show_tab_buttons): no
+        button is left between a list and its splitter handle."""
         row = QtGui.QHBoxLayout()
         left, right = self.tab_buttons()
         for buttons in left:
@@ -3933,10 +3942,10 @@ class FeatureCodeDialog(object):
         row.addWidget(self.restore_button)
         row.addStretch(1)
         row.addWidget(self.compile_box)
+        row.addWidget(self.write_button)
         for buttons in right:
             for button in buttons:
                 row.addWidget(button)
-        row.addWidget(self.write_button)
         row.addWidget(self.close_button)
         self.show_tab_buttons(0)
         return row
@@ -3952,10 +3961,16 @@ class FeatureCodeDialog(object):
         return [list(self.turn_buttons), [], list(page_left)], [[], [self.build_button], list(page_right)]
 
     def show_tab_buttons(self, index):
-        """The bottom row's buttons of the tab shown (by its index), the other tabs' hidden."""
+        """The bottom row's buttons of the tab shown (by its index), the other tabs' hidden first (the row
+        never holds two tabs' buttons at once: owner's image 284, the window grew to fit both)."""
         left, right = self.tab_buttons()
-        for number, buttons in enumerate(left):
-            for button in buttons + right[number]:
+        groups = [list(buttons) + list(right[number]) for number, buttons in enumerate(left)]
+        show_only = getattr(self.ak, "show_only", None)
+        if show_only is not None:
+            show_only(groups, index)
+            return
+        for number in sorted(range(len(groups)), key=lambda n: n == index):
+            for button in groups[number]:
                 try:
                     button.setVisible(number == index)
                 except Exception:
@@ -5443,20 +5458,21 @@ class FeatureCodeDialog(object):
                     u"it" if len(new) == 1 else u"them"))
             if same:
                 words.append(u"%s, as built before with these settings, %s left as %s." % (
-                    counted(len(same), u"glyph"), u"was" if len(same) == 1 else u"were",
+                    b(counted(len(same), u"glyph")), u"was" if len(same) == 1 else u"were",
                     u"it was" if len(same) == 1 else u"they were"))
             self.log.add(u" ".join(word for word in words if word), "done")
         else:
             self.log.add(u"Built none.")
         status.report(self.log)
         if unkept:  # (said, not assumed: the outlines were read back after they were written)
-            drawn = (u", %s drawn as before" % counted(lost[5], u"shape")) if lost[5] else u""
+            # (each count bold with its noun; "40 on-curve" and the like, whose noun is the nodes', bold alone)
+            drawn = (u", %s drawn as before" % b(counted(lost[5], u"shape"))) if lost[5] else u""
             self.log.add(u"FontLab did not keep the thicker strokes of %s: %s. Read back, %s as scaled (%s in %s, "
                          u"%s on-curve, %s given a new place, %s found there%s): draw over %s." % (
                              b(counted(len(unkept), u"glyph")), self.ak.glyph_name_links(sorted(unkept)),
                              u"its outline was" if len(unkept) == 1 else u"their outlines were",
-                             counted(lost[1], u"node"), counted(lost[0], u"contour"), grouped(lost[2]),
-                             grouped(lost[3]), grouped(lost[4]), drawn,
+                             b(counted(lost[1], u"node")), b(counted(lost[0], u"contour")), b(grouped(lost[2])),
+                             b(grouped(lost[3])), b(grouped(lost[4])), drawn,
                              u"it" if len(unkept) == 1 else u"them"), "warning")
         unstroked = [(name, why) for name, why in unstroked if name in made]
         if unstroked:  # (Strokes above 100% that was not applied: said, with why)
@@ -5738,18 +5754,19 @@ class FeatureCodeDialog(object):
             for base, forms in cycling.items():
                 kind = char_kind(self.chars.get(base)) or LETTERS
                 deepest[kind] = max(deepest.get(kind, 0), len(forms))
-            text = (u"%s ticked: more than rules by glyph can serve in a font (%s rules; %s at most). They "
+            text = (u"%s ticked: more than rules by glyph can serve in a font (%s; %s at most). They "
                     u"take turns %s instead: each takes the form after the form of the glyph of its kind "
                     u"before it, in %s, and the look back does not apply. Tick fewer glyphs (%s) for each to "
                     u"look back for its own earlier form." % (
-                        self.ak.b(counted(len(cycling), u"glyph")), grouped(turn_rules(cycling, look_back)),
-                        grouped(TURN_RULES_MAX), self.ak.b(u"by position"),
-                        counted(sum(deepest.values()), u"rule"), self.ak.i(TURN_CHECK_LABELS["often"])))
+                        self.ak.b(counted(len(cycling), u"glyph")),
+                        self.ak.b(counted(turn_rules(cycling, look_back), u"rule")),
+                        self.ak.b(grouped(TURN_RULES_MAX)), self.ak.b(u"by position"),
+                        self.ak.b(counted(sum(deepest.values()), u"rule")), self.ak.i(TURN_CHECK_LABELS["often"])))
         elif mode == "letter":
             text = (u"%s ticked, taking turns %s: each looks back among its own kind (letters, figures, or "
                     u"punctuation marks) for its own earlier form (%s)." % (
                         self.ak.b(counted(len(cycling), u"glyph")), self.ak.b(u"by glyph"),
-                        counted(turn_rules(cycling, look_back), u"rule")))
+                        self.ak.b(counted(turn_rules(cycling, look_back), u"rule"))))
         elif self.package is None:
             text = u""
         elif self.sets:
@@ -5858,10 +5875,12 @@ class FeatureCodeDialog(object):
         else:
             forms = u"%s ticked (%s)" % (b(u"%s of %s" % (grouped(len(checked)), counted(len(self.forms), u"form feature"))),
                                          self.ak.html(u", ".join(checked)))
-        self.status.setText(u"%s (%s, %s, %s); %s with alternates taking turns. "
+        # (a count bold with its noun; a number inside the parentheses, whose noun is outside, bold alone:
+        # owner's images 297 and 301)
+        self.status.setText(u"%s (%s standard, %s discretionary, %s off); %s with alternates taking turns. "
                             u"Forms: %s.%s%s%s%s" % (
-                                b(counted(len(self.found), u"ligature")), b(u"%s standard" % grouped(counts["liga"])),
-                                b(u"%s discretionary" % grouped(counts["dlig"])), b(u"%s off" % grouped(counts["off"])),
+                                b(counted(len(self.found), u"ligature")), b(grouped(counts["liga"])),
+                                b(grouped(counts["dlig"])), b(grouped(counts["off"])),
                                 b(counted(len(cycling), u"glyph")), forms,
                                 u" The font has this code already." if not changes and (texts or self.forms) else u"",
                                 (u" " + self.ak.html(refused_words(self.refused))) if getattr(self, "refused", None) else u"",

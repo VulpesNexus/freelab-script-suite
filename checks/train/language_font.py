@@ -18,7 +18,9 @@ character the font lacks from another font, and some lists looked uneven (Cyrill
 wide, rare scripts as boxes). With this one font as their family, every character comes from one
 family of designs. What it must draw is checks/font_characters.json (checks/train/orthographies.py
 --characters writes it from the data files): the names, the other names, the orthographies' base,
-auxiliary, and mark characters, and the character sets'. Every one of them a Noto font has is bundled,
+auxiliary, and mark characters, and the character sets'; and, since 2026-11-18, what Glyph Compose's lists
+show (TOOLS_PART: its Glyph generation table's rows and what they are made of, its Diacritics tab's letters
+and their marks, read from compose/ by tool_characters). Every one of them a Noto font has is bundled,
 the Hangul syllables, ideographs, cuneiform signs, and hieroglyphs included. What no Noto font has
 comes from the sources of EXTRA, looked in last (Noto Emoji, then Andika, then Unicodia Funky, each
 an outline font: no source is a bitmap's pixels); language_font.json lists what each source supplies,
@@ -86,6 +88,10 @@ FAMILIES_FILE = os.path.join(CHECKS, "language_families.json")
 SETS_FILE = os.path.join(CHECKS, "character_sets.json")
 CHARACTERS_FILE = os.path.join(CHECKS, "font_characters.json")  # checks/train/orthographies.py --characters
 PARTS = ("names", "other_names", "orthographies", "sets")
+# What Glyph Compose's lists show beyond the data files (tool_characters): a part of what FreeLang draws since
+# 2026-11-18, counted in language_font.json under this name
+TOOLS_PART = "tools"
+COMPOSE = os.path.normpath(os.path.join(CHECKS, os.pardir, "compose"))
 OUT_DIR = os.path.join(CHECKS, "language_font")
 LICENSE_FILE, INFO_FILE = "FreeLang_LICENSE", "language_font.json"
 FAMILY = "FreeLang"  # the fonts together, as the tools name them to the user
@@ -545,10 +551,43 @@ def list_characters(labels, others, lists):
     return dict(votes), dict(ideographs)
 
 
+def tool_characters():
+    """The characters Glyph Compose's lists show beyond the data files (TOOLS_PART): every row of its Glyph
+    generation table (compose/glyph_generation.json, with the squared words and the compatibility characters
+    its module adds as it reads it) and the characters each is made of, and the letters with diacritics its
+    Diacritics tab lists (its SETS: those Unicode decomposes into a letter and marks) with their letters and
+    marks. Its lists draw their characters in FreeLang (owner's images 316 and 317, 2026-11-18): the Kangxi
+    radicals Glyph generation lists since then were in none of the five fonts."""
+    import unicodedata
+    if COMPOSE not in sys.path:
+        sys.path.insert(0, COMPOSE)
+    os.environ.setdefault("FREELAB_NO_AUTOSTART", "1")
+    import freelab_glyph_compose as compose  # (by this name: the module starts no window)
+    import freelab_glyph_generation as generation
+    codes = set()
+    data = generation.load_data(os.path.join(COMPOSE, generation.DATA_FILE))
+    for entry in data.get("entries") or []:
+        codes.add(int(entry["code"], 16))
+        for way in entry["ways"]:
+            for key in ("of", "on"):
+                found = way.get(key)
+                codes.update(int(part, 16) for part in (found if isinstance(found, list) else [found] if found else []))
+    for _, _, ranges in compose.SETS:
+        for low, high in ranges:
+            for code in range(low, high):
+                parts = unicodedata.normalize("NFD", chr(code))
+                if len(parts) > 1:
+                    codes.add(code)
+                    codes.update(ord(part) for part in parts)
+    return set(code for code in codes if not unicodedata.category(chr(code)).startswith("C"))
+
+
 def required_characters():
-    """{part: its code points} of checks/font_characters.json, and every one of them."""
+    """{part: its code points} of checks/font_characters.json, then the tools' own (TOOLS_PART:
+    tool_characters), and every one of them."""
     data = load(CHARACTERS_FILE)
     parts = collections.OrderedDict((part, codes_of(data[part])) for part in PARTS)
+    parts[TOOLS_PART] = tool_characters()
     return parts, set().union(*parts.values())
 
 
@@ -1746,8 +1785,9 @@ def build(args):
         ("archives", archives),  # (the release archives opened: {URL: SHA-256})
         ("covers", "every character of checks/font_characters.json a source font has, each in one of the "
                    "fonts: the names, autonyms, and headings, the languages' other names, the "
-                   "orthographies' base, auxiliary, and mark characters, and the character sets' (not_covered "
-                   "lists the others)"),
+                   "orthographies' base, auxiliary, and mark characters, and the character sets'; and every "
+                   "character Glyph Compose's lists show (tools: its Glyph generation table's rows and what they "
+                   "are made of, its Diacritics tab's letters and their marks); not_covered lists the others"),
         ("units_per_em", UNITS_PER_EM),
         ("line", [line[0], -line[1]] if line else None),  # (ascent and descent, the same in every font)
         ("shaping_checked", checked),

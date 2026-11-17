@@ -3604,7 +3604,7 @@ class CheckRowsTests(unittest.TestCase):
         closed = self.Item(parent=None, open_=False)
         items = [self.Item(), self.Item(checked=True), self.Item(parent=closed), self.Item(hidden=True)]
         self.assertEqual(ak.check_rows(items, True, self.log, u"Check all", u"pair"), (3, 0, 2))
-        self.assertEqual(self.lines[-1], u"<i>Check all</i> ticked <b>3 pairs</b> (2 of them hidden).")
+        self.assertEqual(self.lines[-1], u"<i>Check all</i> ticked <b>3 pairs</b> (<b>2</b> of them hidden).")
         self.assertEqual([item.state for item in items], [2, 2, 2, 2])
         ak.check_rows(items[:1], False, self.log, u"Check none", u"glyph")
         self.assertEqual(self.lines[-1], u"<i>Check none</i> unticked <b>1 glyph</b>.")
@@ -3622,7 +3622,7 @@ class CheckRowsTests(unittest.TestCase):
         wanted = [False, True, True]
         counts = ak.check_rows(items, lambda item: wanted[items.index(item)], self.log, u"Check new pairs", u"pair")
         self.assertEqual(counts, (2, 1, 1))
-        self.assertEqual(self.lines[-1], u"<i>Check new pairs</i> ticked <b>2 pairs</b> and unticked <b>1</b> (1 of them hidden).")
+        self.assertEqual(self.lines[-1], u"<i>Check new pairs</i> ticked <b>2 pairs</b> and unticked <b>1</b> (<b>1</b> of them hidden).")
         hidden = [self.Item(hidden=True), self.Item(hidden=True)]
         ak.check_rows(hidden, True, self.log, u"Check all", u"glyph")
         self.assertEqual(self.lines[-1], u"<i>Check all</i> ticked <b>2 glyphs</b> (all of them hidden).")
@@ -4221,6 +4221,11 @@ class SingleChoiceTests(unittest.TestCase):
         body = source[source.index(u"def no_font_states("):source.index(u"def checks_of(")]
         self.assertIn(u"line.property(SEPARATOR_PROP)", body)
         self.assertNotIn(u"HEADER_SEPARATOR_PROP", body, "the header's line is never hidden")
+        # (owner's image 283: "Now" and "Suggested" over previews of nothing; hidden, and only those it hid
+        # shown again with a font)
+        self.assertIn(u"label.property(PREVIEW_CAPTION_PROP)", body)
+        self.assertIn(u"label.setProperty(NO_FONT_HIDDEN_PROP, True)", body)
+        self.assertIn(u"has_font and label.property(NO_FONT_HIDDEN_PROP)", body)
 
     def test_the_label_before_a_control_in_its_row_captions_it(self):
         class Item(object):
@@ -4318,7 +4323,187 @@ class SingleChoiceTests(unittest.TestCase):
         self.assertEqual((view.horizontalScrollBarPolicy, view.verticalScrollBarPolicy), (1, 1))
         view.topLevelItemCount = 3
         ak.empty_bars(view)
-        self.assertEqual((view.horizontalScrollBarPolicy, view.verticalScrollBarPolicy), (0, 0), "back with rows")
+        self.assertEqual(view.verticalScrollBarPolicy, 0, "back with rows")
+        self.assertEqual(view.horizontalScrollBarPolicy, 1, "the horizontal one as the columns are shared (fitted_bar)")
+        # (owner's image 295: the horizontal bar flashed as the window was resized, the columns shared on the
+        # next turn of the event loop passing the new width meanwhile)
+        ak.fitted_bar(view, [100, None, 199], 300)
+        self.assertEqual(view.horizontalScrollBarPolicy, 1, "off while the columns fit")
+        ak.fitted_bar(view, [100, None, 250], 300)
+        self.assertEqual(view.horizontalScrollBarPolicy, 0, "as needed once they pass the width")
+        ak.fitted_bar(view, [100, 200], 300)
+        self.assertEqual(view.horizontalScrollBarPolicy, 1, "off again")
+        view.topLevelItemCount = 0
+        view.horizontalScrollBarPolicy = 0
+        ak.fitted_bar(view, [500], 300)
+        self.assertEqual(view.horizontalScrollBarPolicy, 0, "an empty list is empty_bars' alone")
+
+    def test_a_line_over_a_sections_heading_stays_without_a_font(self):
+        # (owner's image 318: "missing on all windows where it should be present", Feature Code with no font)
+        class Widget(object):
+            def __init__(self, kind, props=None):
+                self.kind, self.props = kind, props or {}
+
+            def inherits(self, name):
+                return name == self.kind
+
+            def property(self, name):
+                return self.props.get(name)
+
+        class Item(object):
+            def __init__(self, widget):
+                self._widget = widget
+
+            def widget(self):
+                return self._widget
+
+            def layout(self):
+                return None
+
+        class Layout(object):
+            def __init__(self, *widgets):
+                self.items = [Item(w) for w in widgets]
+
+            def count(self):
+                return len(self.items)
+
+            def itemAt(self, k):
+                return self.items[k]
+
+        line, heading, caption, table = (Widget("QFrame"), Widget("QLabel"),
+                                         Widget("QLabel", {ak.PREVIEW_CAPTION_PROP: True}), Widget("QTreeWidget"))
+        for after, kept in ((heading, True), (caption, False), (table, False), (None, False)):
+            parent = type("Parent", (object,), {"layout": lambda self, l=Layout(*[w for w in (line, after) if w]): l})()
+            line.parentWidget = lambda parent=parent: parent
+            self.assertEqual(ak.heads_section(line), kept, after and after.kind)
+
+    def test_a_tab_switch_hides_the_others_before_showing_its_own(self):
+        # (owner's image 284, live: the bottom row held both tabs' buttons a moment and the window grew)
+        calls = []
+
+        class Widget(object):
+            def __init__(self, name, visible):
+                self.name, self.visible = name, visible
+
+            def setVisible(self, on):
+                calls.append((self.name, on))
+                self.visible = on
+
+        a1, a2, b1 = Widget("a1", True), Widget("a2", True), Widget("b1", False)
+        ak.show_only({"a": [a1, a2], "b": [b1]}, "b")
+        self.assertEqual(calls, [("a1", False), ("a2", False), ("b1", True)])
+        del calls[:]
+        ak.show_only([[b1], [a1, a2]], 1)
+        self.assertEqual(calls[0], ("b1", False), "a list of groups too, the others hidden first")
+        self.assertEqual(sorted(calls[1:]), [("a1", True), ("a2", True)])
+        del calls[:]
+        ak.show_only([[b1], [a1, a2]], 1)
+        self.assertEqual(calls, [("b1", False)], "nothing shown again that is shown")
+        ak.show_only([[b1], []], 5)  # (no such group: all hidden, no error)
+
+    def test_a_window_taking_anothers_place_is_centered_at_the_size_it_shows_at(self):
+        # (owner's image 311: Qt grew each new window to its least width to the right; the arrows walked the
+        # windows off to the right of the screen)
+        moved = []
+
+        class Dialog(object):
+            width, height, pos = 1400, 800, None
+
+            def move(self, x, y):
+                moved.append((x, y))
+
+        class Owner(object):
+            dialog = Dialog()
+
+        owner = Owner()
+        old_area, old_xy = ak._free_area, ak._xy
+        ak._free_area = lambda dialog: ((0, 0, 1920, 1040), (16, 39))
+        ak._xy = lambda pos: (300, 100)
+        self.addCleanup(lambda: (setattr(ak, "_free_area", old_area), setattr(ak, "_xy", old_xy)))
+        owner.placed_from = ((300, 100), (1000, 800))  # (the old window's place and size)
+        ak.keep_center(owner)
+        self.assertEqual(moved, [(100, 100)], "200 pixels each side of the old center")
+        self.assertIsNone(owner.placed_from, "once")
+        ak.keep_center(owner)
+        self.assertEqual(moved, [(100, 100)])
+        ak.keep_center(object())  # (a window that took no place: nothing, no error)
+
+    def test_a_tools_font_is_shown_before_fontlabs_commands_act(self):
+        # (owner's image 314: a Glyph window asked for while FontLab showed another font was refused)
+        class Package(object):
+            def __init__(self, name):
+                self.tfn = name
+
+        one, two = Package(u"One"), Package(u"Two")
+
+        class Workspace(object):
+            currentPackage = two
+
+        workspace = Workspace()
+
+        class FontLab(object):
+            class flWorkspace(object):
+                @staticmethod
+                def instance():
+                    return workspace
+
+        class Window(object):
+            def __init__(self, package):
+                self.package = package
+
+            def inherits(self, name):
+                return name == ak.FONT_WINDOW_CLASS and self.package is not None
+
+        tried = []
+
+        class Tabs(object):
+            pages = [(u"Sketchboard", Window(None)), (u" Two ", Window(two)), (u" One Regular ", Window(one))]
+            currentIndex = 1
+            count = 3
+
+            def widget(self, k):
+                return self.pages[k][1]
+
+            def tabText(self, k):
+                return self.pages[k][0]
+
+            def setCurrentIndex(self, k):
+                tried.append(k)
+                self.currentIndex = k
+                if self.pages[k][1].package is not None:
+                    workspace.currentPackage = self.pages[k][1].package
+
+        tabs = Tabs()
+        saved = (ak._font_id, ak.find_font, ak._main_tab_widgets, ak.AutoKerningDialog.__dict__["main_window"])  # (the staticmethod itself: read off the class, Python 2 gave an unbound method)
+        ak._font_id = lambda package: None if package is None else package.tfn
+        ak.find_font = lambda ws, font_id: {u"One": one, u"Two": two}.get(font_id)
+        ak._main_tab_widgets = lambda main: [tabs]
+        ak.AutoKerningDialog.main_window = staticmethod(lambda: object())
+
+        def restore():
+            ak._font_id, ak.find_font, ak._main_tab_widgets = saved[:3]
+            ak.AutoKerningDialog.main_window = saved[3]
+        self.addCleanup(restore)
+
+        class Owner(object):
+            font_id = u"One"
+
+        self.assertTrue(ak.focus_font(Owner(), FontLab))
+        self.assertEqual(tried, [2], "the tab naming the font first")
+        self.assertIs(workspace.currentPackage, one)
+        self.assertTrue(ak.focus_font(Owner(), FontLab), "shown already: nothing switched")
+        self.assertEqual(tried, [2])
+        tabs.pages[2] = (u" Renamed ", Window(one))
+        workspace.currentPackage, tabs.currentIndex = two, 1
+        self.assertTrue(ak.focus_font(Owner(), FontLab), "found by trying the Font windows")
+        tabs.pages[2] = (u" One ", Window(two))  # (no tab of the font: the tab shown before put back)
+        workspace.currentPackage, tabs.currentIndex = two, 1
+        del tried[:]
+        self.assertFalse(ak.focus_font(Owner(), FontLab))
+        self.assertEqual(tabs.currentIndex, 1)
+        no_font = Owner()
+        no_font.font_id = None
+        self.assertTrue(ak.focus_font(no_font, FontLab), "a window with no font: nothing to show")
 
     def test_a_control_grayed_for_no_font_stays_grayed_whatever_the_tool_asks(self):
         class Button(object):
@@ -4889,9 +5074,9 @@ class KerningCheckTableTests(unittest.TestCase):
         self.addCleanup(lambda: setattr(ak, "_qt", old))
         dialog.check_every(dialog.collisions, True)
         # (Tick, not Check, for check boxes: owner's image 261)
-        self.assertEqual(logged[-1], u"<i>Tick all</i> ticked <b>3 pairs</b> (2 of them in closed groups).")
+        self.assertEqual(logged[-1], u"<i>Tick all</i> ticked <b>3 pairs</b> (<b>2</b> of them in closed groups).")
         dialog.check_every(dialog.cleanup, False)
-        self.assertEqual(logged[-1], u"<i>Tick none</i> unticked <b>3 entries</b> (2 of them in closed groups).")
+        self.assertEqual(logged[-1], u"<i>Tick none</i> unticked <b>3 entries</b> (<b>2</b> of them in closed groups).")
 
     def test_a_list_filled_says_what_the_pictures_room_is_for(self):
         # (live, 2026-11-16: the hint showed only once a pair was selected, then unselected)
@@ -5082,6 +5267,93 @@ class KerningCheckReviewTests(unittest.TestCase):
         self.assertEqual((calls[0][0], calls[-1][0]), ("start", "end"))
         self.assertFalse(any(c[2] for c in calls if c[0] != "end"), "never stoppable")
         self.assertEqual(checks, [False], "checked again once the write is over")
+
+
+class KerningCheckRoundThreeTests(unittest.TestCase):
+    """The owner's round of images 283 to 318: the tabs' settings rows as tall as one another (285, 286), and
+    every count bold with its noun (297, 301)."""
+
+    def test_the_settings_rows_are_as_tall_as_one_another(self):
+        # (owner's images 285 and 286: Masters' row, a button alone, was shorter than Cleanup's spin box row,
+        # and its table moved up a few pixels as the tab was shown)
+        class Hint(object):
+            def __init__(self, height):
+                self.value = height
+
+            def height(self):
+                return self.value
+
+        class Control(object):
+            def __init__(self, height):
+                self.sizeHint = Hint(height)  # (PythonQt: a property read as an attribute)
+
+        class Item(object):
+            def __init__(self, widget):
+                self.held = widget
+
+            def widget(self):
+                return self.held
+
+        class Layout(object):
+            def __init__(self, widgets):
+                self.items = [Item(widget) for widget in widgets]
+
+            def count(self):
+                return len(self.items)
+
+            def itemAt(self, index):
+                return self.items[index]
+
+        class Box(object):
+            def __init__(self, *heights):
+                self.held, self.least = Layout([Control(h) for h in heights] + [None]), None  # (None: a stretch)
+
+            def layout(self):
+                return self.held
+
+            def setMinimumHeight(self, height):
+                self.least = height
+
+        collisions, cleanup, masters = Box(16, 24, 22, 23), Box(16, 24, 23), Box(23)
+        self.assertEqual(kc.level_rows([collisions, cleanup, masters]), 24)
+        self.assertEqual([box.least for box in (collisions, cleanup, masters)], [24, 24, 24],
+                         "the button's row as tall as the spin box's")
+        self.assertEqual(kc.level_rows([object()]), 0, "nothing readable: nothing set, and no error")
+        dialog = kc.KerningCheckDialog.__new__(kc.KerningCheckDialog)
+        dialog.collisions, dialog.cleanup, dialog.masters = [type("Tab", (), {"settings_box": box})()
+                                                             for box in (Box(30), Box(20), Box(10))]
+        dialog.pages = type("Pages", (), {"setCurrentIndex": lambda pages, index: None})()
+        dialog.show_tab_buttons = dialog.show_tab_status = dialog.update_previews = lambda *args: None
+        dialog.stale, dialog.package = set(), None
+        dialog.switch_page(2)
+        self.assertEqual([tab.settings_box.least for tab in (dialog.collisions, dialog.cleanup, dialog.masters)],
+                         [30, 30, 30], "measured again as a tab is shown")
+        with io.open(kc.__file__, encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertIn(u"self.settings = QtGui.QHBoxLayout(self.settings_box)", source, "each row in a widget of its own")
+        self.assertLess(source.index(u"self.level_settings()\n        self.read_font()"),
+                        source.index(u"def current_font"), "levelled as the window is made")
+
+    def test_counts_are_bold_with_their_nouns(self):
+        # (owner's images 297 and 301: "**3** of **120 entries**" and "between **3** masters" bolded the number alone)
+        self.assertEqual(kc.cleanup_status(3, 120, {"redundant": 2, "tiny": 1}, bold=ak.b),
+                         u"<b>3 of 120 entries</b> listed: <b>2 entries</b> changing nothing, <b>1 tiny value</b>.")
+        self.assertEqual(kc.cleanup_status(1, 1, {"missing": 1}, u" with this glyph", ak.b),
+                         u"<b>1 of 1 entry</b> with this glyph listed: <b>1 entry</b> naming what is gone.")
+        self.assertEqual(kc.collision_status(2, 1438, 41, False, bold=ak.b),
+                         u"<b>2 of the 1,438 pairs</b> kerned tighter come within <b>41 units</b> of each other, "
+                         u"kerning applied.")
+        self.assertEqual(kc.collision_status(0, 2, 41, False, limited=u" with this glyph", bold=ak.b),
+                         u"None of the <b>2 pairs</b> with this glyph kerned tighter comes within <b>41 units</b> of "
+                         u"each other.")
+        self.assertEqual(kc.masters_status(3, 2, bold=ak.b), u"<b>3 differences</b> between <b>2 masters</b>.")
+        self.assertEqual(kc.masters_status(0, 3, bold=ak.b),
+                         u"The <b>3 masters</b> kern the same entries, with the same signs.")
+        self.assertEqual(kc.masters_status(1, 2, True, u" with this glyph", ak.b),
+                         u"<b>1 difference</b> between <b>2 masters</b>, in the entries and classes with this glyph.")
+        self.assertEqual(kc.masters_status(0, 2, True, u" with this glyph"),
+                         u"The 2 masters kern the entries with this glyph the same, with the same signs, and their "
+                         u"classes hold the same glyphs.")
 
 
 class ChoiceSheetTests(unittest.TestCase):
@@ -5344,7 +5616,7 @@ class AutoKerningListTests(unittest.TestCase):
         self.assertTrue(enabled(), "two pairs to write")
         d.write()
         self.assertEqual(stored.stored, {(("A", False), ("V", False)): -70, (("T", False), ("o", False)): -80})
-        self.assertIn(u"Wrote 2 entries for 2 pairs to master Regular", d.logged[-1][1])
+        self.assertIn(u"Wrote <b>2 entries</b> for <b>2 pairs</b> to master <b>Regular</b>", d.logged[-1][1])
         self.assertEqual([item.state for item in d.tree.items], [self.Qt.Checked] * 2, "its checks stay")
         self.assertFalse(enabled(), "nothing new to write: grayed out")
         d.write()

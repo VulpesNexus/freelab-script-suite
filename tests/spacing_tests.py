@@ -731,15 +731,36 @@ class WordingTests(unittest.TestCase):
         self.assertEqual(status(1, 2), u"1 of 2 drawn glyphs has a side 6 units or more from the suggestion. Nothing "
                                        u"changes until you click Space ticked glyphs.")
         self.assertEqual(sp.spacing_status(1200, 13932, 1, 3, ak.b, ak.i),
-                         u"<b>1,200</b> of <b>13,932 drawn glyphs</b> have a side <b>1 unit</b> or more from the "
+                         u"<b>1,200 of 13,932 drawn glyphs</b> have a side <b>1 unit</b> or more from the "
                          u"suggestion. Nothing changes until you click <i>Space ticked glyphs</i>. Each change was "
-                         u"measured again with it made, until the changes settled (<b>3</b> passes): halfkern closes "
+                         u"measured again with it made, until the changes settled (<b>3 passes</b>): halfkern closes "
                          u"half of a tightening at a time, so one measure leaves part of it.")
 
     def test_the_log_counts(self):
         self.assertIn(u"1 glyph still had a side 1 unit or more off, and was spaced again", sp.apply_note(2, 1, 1))
         self.assertIn(u"2 glyphs still had a side 2 units or more off, and were spaced again", sp.apply_note(3, 2, 2))
         self.assertEqual(sp.apply_note(1, 0, 2), u"")
+
+    def test_counts_are_bold_with_their_nouns(self):
+        # Round 3's convention 18 (owner's images 297 and 301): a count bold together with its noun, a number
+        # with no noun of its own bold alone; never only the number when its noun follows
+        self.assertEqual(sp.apply_note(3, 2, 2, 20, ak.b),
+                         u"The references were spaced first, and the other <b>20 glyphs</b> measured against them "
+                         u"again: their changes differ from the list's. It took <b>3 passes</b>: measured again after "
+                         u"spacing, <b>2 glyphs</b> still had a side <b>2 units</b> or more off, and were spaced again "
+                         u"(the measuring's pixels round each change a little).")
+        self.assertEqual(sp.composites_text(3, 2, ak.b), u"<b>3 glyphs</b> built from components follow the listed "
+                                                         u"glyphs; <b>2</b> built on two of them are left as they are.")
+        self.assertEqual(sp.composites_text(0, 1, ak.b), u"No glyph built from components follows the listed glyphs; "
+                                                         u"<b>1</b> built on two of them is left as it is.")
+        line = sp.unspaced_line([u"H", u"n"], 412, ak.b, ak.i)
+        self.assertIn(u"<b>H, n</b> come first, unticked, spaced as <b>412 open-licensed families</b> space theirs.",
+                      line)
+        self.assertIn(u"then click <i>Analyze</i>:", line)
+        self.assertIn(u"as 1 open-licensed family spaces theirs.", sp.unspaced_line([u"H"], 1))
+        source = self.source()
+        self.assertIn(u"composites_text(following, left_out, self.ak.b)", source, "the note under the font line, bold")
+        self.assertIn(u"measured_again if not unread else 0, ak.b)", source, "the log's note, bold")
 
 
 if __name__ == "__main__":

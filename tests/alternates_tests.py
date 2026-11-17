@@ -9,6 +9,23 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, os.pardir, "features"))
 import freelab_alternates as fa  # noqa: E402
+import re  # noqa: E402
+
+
+def plain(text):
+    """A rich-text line without its bold (each count bold with its noun: tested on its own)."""
+    return re.sub(u"</?b>", u"", text) if text is not None else text
+
+
+def words(*args, **kwargs):
+    """fa.build_words, its line without its bold."""
+    label, line = fa.build_words(*args, **kwargs)
+    return label, plain(line)
+
+
+def problem_words(*args, **kwargs):
+    """fa.build_problem, without its bold."""
+    return plain(fa.build_problem(*args, **kwargs))
 
 
 class SuggestionTests(unittest.TestCase):
@@ -164,6 +181,14 @@ class Item(ft.FakeItem):
         self.__dict__.setdefault("icons", {})[column] = icon
 
 
+class Timer(ft.Anything):
+    """Qt's timer: a call on the next turn of the event loop, made at once here."""
+
+    @staticmethod
+    def singleShot(interval, slot):
+        slot()
+
+
 class Pixmap(ft.Anything):
     def __init__(self, *args):
         self.drawn = []
@@ -303,7 +328,7 @@ def install_fake_qt():
     """PythonQt faked for the tab; what was there before, to put back."""
     saved = sys.modules.get("PythonQt")
     qt = ft.Anything()
-    qt.QtCore = ft._FakeQtModule({"Qt": ft.FakeQt, "QSize": Size})
+    qt.QtCore = ft._FakeQtModule({"Qt": ft.FakeQt, "QSize": Size, "QTimer": Timer})
     qt.QtGui = ft._FakeQtModule({"QTreeWidget": Tree, "QTreeWidgetItem": Item, "QLineEdit": Box,
                                  "QPushButton": ft.FakeButton, "QSpinBox": Box, "QComboBox": Box, "QLabel": Box,
                                  "QCheckBox": Box, "QIcon": lambda picture: picture, "QTransform": Transform,
@@ -343,23 +368,45 @@ class PageTests(unittest.TestCase):
     def page(self, *args):
         return make_page(self.ak, *args)
 
-    def row(self, page, glyph):
-        return [item for item in page.tree.items if item.data(0, ft.USER_ROLE) == glyph][0]
+    def row(self, page, glyph, key=fa.SUGGESTIONS_KEY):
+        """A glyph's row in a group of the list (Suggestions, unless another is named)."""
+        return [item for item in page.group_rows(key) if item.data(0, ft.USER_ROLE) == glyph][0]
+
+    def listed(self, page, key=fa.SELECTED_KEY):
+        """The glyphs a group lists, and those of them ticked."""
+        rows = page.group_rows(key)
+        return ([item.data(0, ft.USER_ROLE) for item in rows],
+                [item.data(0, ft.USER_ROLE) for item in rows if item.checkState(0) == ft.CHECKED])
 
     def pick(self, page, key):
-        page.scope_box.setCurrentIndex([scope for scope, _ in page.scope_rows].index(key))
-        page.update_buttons()
+        """A scope picked in the Glyphs dropdown, as Qt tells the tab."""
+        index = [scope for scope, _ in page.scope_rows].index(key)
+        page.scope_box.setCurrentIndex(index)
+        page.scope_box.slots["currentIndexChanged(int)"][0](index)
 
-    def test_empty_notes_and_previews_take_no_room(self):
-        """Owner's images 196 and 198: the empty line under "Suggested alternates", and the blank previews over
-        the code's splitter handle (it sat in the middle of a gap): hidden while they show nothing."""
+    def type(self, page, text):
+        """Characters typed in the box, as Qt tells the tab."""
+        page.letters_edit.setText(text)
+        page.letters_edit.slots["textChanged(QString)"][0](text)
+
+    def test_empty_notes_take_no_room_and_the_previews_hold_the_spare_height(self):
+        """Owner's image 198: the empty line under the list's heading: hidden while it says nothing. Owner's
+        image 287: with the previews hidden, the part's spare height went to the heading and the paragraph,
+        blank bands above and below the paragraph. The previews stay, empty when there is nothing to draw
+        (owner's image 296), their captions hidden; the part ends with them, over the splitter's handle."""
         page, owner = self.page()
-        self.assertTrue(page.note.visible and page.existing.visible and page.existing_caption.visible)
+        self.assertTrue(page.note.visible)
+        self.assertEqual(page.build_glyphs(), [], "nothing ticked: nothing to build, nothing to preview")
+        self.assertTrue(page.existing.visible and page.preview.visible, "the previews' room stays")
+        self.assertIsNone(page.existing.pixmap)
+        self.assertFalse(page.existing_caption.visible or page.preview_caption.visible)
         owner.package = None
         page.fill()
         page.update_buttons()
-        self.assertEqual([label.visible for label in (page.note, page.scope_note, page.existing, page.preview,
-                                                      page.existing_caption, page.preview_caption)], [False] * 6)
+        self.assertEqual([label.visible for label in (page.note, page.scope_note, page.existing_caption,
+                                                      page.preview_caption)], [False] * 4)
+        self.assertTrue(page.existing.visible and page.preview.visible)
+        self.assertEqual(page.tree.items, [], "no font: no group")
 
     def test_the_build_says_its_scope_before_the_click(self):
         """Build variants built every letter of the Letters scope (1,102 of them) while two rows were
@@ -369,20 +416,22 @@ class PageTests(unittest.TestCase):
         self.assertEqual(page.scope(), "checked")
         self.assertEqual(page.build_button.text, u"Build variants")
         self.assertFalse(page.build_button.enabled, "nothing checked: nothing to build")
-        self.assertIn(u"No glyph ticked in the list above can take turns", page.scope_note.text)
+        self.assertIn(u"No suggestion ticked in the list above can take turns", plain(page.scope_note.text))
         self.row(page, u"a").setCheckState(0, ft.CHECKED)
         self.row(page, u"l").setCheckState(0, ft.CHECKED)
         self.row(page, u"plus").setCheckState(0, ft.CHECKED)
         self.assertEqual(page.characters_in_scope()[0], [u"a", u"l"], "the checked letters; a plus sign takes no turns")
+        self.assertEqual(self.listed(page), ([u"a", u"l"], [u"a", u"l"]), "listed in Selected glyphs, ticked")
         self.assertEqual(page.build_button.text, u"Build 3 variants")
-        self.assertEqual(page.scope_note.text, u"2 glyphs (a, l): 3 variants to build; 1 variant the font has "
-                                               u"already is left as it is.")
+        # (each count bold with its noun: owner's image 297)
+        self.assertEqual(page.scope_note.text, u"<b>2 glyphs</b> (a, l): <b>3 variants</b> to build; <b>1 variant</b> "
+                                               u"the font has already is left as it is.")
         self.assertTrue(page.build_button.enabled)
         page.build_variants()
         self.assertEqual(sorted(g.name for g in owner.package.glyphs if u".alt" in g.name),
                          [u"a.alt1", u"a.alt2", u"l.alt1", u"l.alt2"], "the checked letters' variants, and no other")
         done = [text for level, text in owner.logged if level == "done"]
-        self.assertTrue(done and u"Built <b>3 variants</b> of 2 glyphs" in done[0], owner.logged)
+        self.assertTrue(done and u"Built <b>3 variants</b> of <b>2 glyphs</b>" in done[0], owner.logged)
         self.assertIn(u': <a href="glyphname:a.alt1">a.alt1</a> <a href="glyphname:a.alt2">a.alt2</a> '
                       u'<a href="glyphname:l.alt2">l.alt2</a> (subtle, seed 1)', done[0],
                       "a few variants: each named, a link the log draws and opens")
@@ -403,14 +452,14 @@ class PageTests(unittest.TestCase):
             self.row(page, glyph).setCheckState(0, ft.CHECKED)
         self.assertEqual(page.characters_in_scope()[0], [u"ampersand", u"nine", u"period"],
                          "a figure and two punctuation marks; not the plus sign, a symbol")
-        self.assertEqual(page.scope_note.text, u"3 glyphs (ampersand, nine, period): 6 variants to build.")
+        self.assertEqual(page.scope_note.text, u"<b>3 glyphs</b> (ampersand, nine, period): <b>6 variants</b> to build.")
         page.build_variants()
         built = sorted(g.name for g in owner.package.glyphs if u".alt" in g.name and not g.name.startswith(u"l."))
         self.assertEqual(built, [u"ampersand.alt1", u"ampersand.alt2", u"nine.alt1", u"nine.alt2", u"period.alt1",
                                  u"period.alt2"])
         self.assertEqual(owner.package.by_name[u"nine.alt1"].layers[u"Regular"].advanceWidth, 500, "the figure's width")
         done = [text for level, text in owner.logged if level == "done"]
-        self.assertIn(u"Built <b>6 variants</b> of 3 glyphs", done[0])
+        self.assertIn(u"Built <b>6 variants</b> of <b>3 glyphs</b>", done[0])
         self.assertIn(u"the glyphs that double most in text first", done[0])
 
     def test_the_other_scopes(self):
@@ -420,8 +469,7 @@ class PageTests(unittest.TestCase):
         self.assertEqual(page.characters_in_scope()[0], [u"period", u"nine", u"e", u"l", u"s"],
                          "the letters, figures, and marks that often stand doubled in text; no symbol, no space")
         self.pick(page, "typed")
-        page.letters_edit.setText(u"xu9.+ xq")
-        page.update_buttons()
+        self.type(page, u"xu9.+ xq")
         self.assertEqual(page.characters_in_scope()[0], [u"x", u"u", u"nine", u"period"],
                          "as typed, once each; those the font has, a figure and a period among them")
         self.assertTrue(page.letters_edit.enabled)
@@ -432,7 +480,7 @@ class PageTests(unittest.TestCase):
         self.assertEqual(page.build_button.text, u"Build 13 variants")
         # A scope's name is the name alone; what it holds is in the box's What's This
         self.assertEqual([label for _, label in fa.SCOPES],
-                         [u"The ticked glyphs", u"Often doubled", u"These glyphs",
+                         [u"The ticked suggestions", u"Often doubled", u"These glyphs",
                           u"Lowercase letters", u"Capitals", u"Capitals and lowercase", u"Everything"])
         self.assertEqual(ft.fc.TURN_CHECK_LABELS["often"], u"Tick often doubled",
                          "the first tab's words for the same glyphs (its button in the bottom row)")
@@ -442,22 +490,34 @@ class PageTests(unittest.TestCase):
 
     def test_the_box_says_what_to_type_only_while_it_is_used(self):
         """Its gray example read "lest", which nobody took for one: the box says what to type while These
-        glyphs is picked, and is grayed out, with no words in it, otherwise."""
+        glyphs is picked, and is grayed out, with no words in it, otherwise. Its words end with an ellipsis,
+        as every field's (owner's image 309); with no font, it says n/a. Owner's image 296: with nothing
+        typed, the previews showed a; they are empty."""
         page, owner = self.page()
         self.assertEqual(page.scope(), "checked")
         self.assertFalse(page.letters_edit.enabled)
         self.assertEqual(page.letters_edit.placeholder, u"", "grayed out: no words in it")
         self.pick(page, "typed")
         self.assertTrue(page.letters_edit.enabled)
-        self.assertEqual(page.letters_edit.placeholder, u"Type characters: a g 0 !")
-        page.letters_edit.setText(fa.TYPED_HINT.split(u": ")[1])  # (what it says to type is taken as it says)
-        page.update_buttons()
+        self.assertEqual(page.letters_edit.placeholder, u"Type characters\N{HORIZONTAL ELLIPSIS}")
+        self.assertEqual(self.listed(page), ([], []))
+        self.assertIsNone(page.preview_glyph(), "nothing typed: nothing previewed")
+        page.draw_preview()
+        self.assertIsNone(page.existing.pixmap)
+        self.assertFalse(page.existing_caption.visible)
+        self.type(page, u"a g 0 !")  # (the example its What's This gives, taken as it says)
         self.assertEqual(page.characters_in_scope()[0], [u"a"], "of a, g, 0, and !, the font has a; spaces pass")
+        self.assertEqual(self.listed(page), ([u"a"], [u"a"]), "listed as typed")
+        self.assertEqual(page.preview_glyph(), u"a")
         self.assertNotIn(u"lest", page.letters_edit.whats)
         self.assertIn(u"with spaces or without (a g 0 !)", page.letters_edit.whats)
         self.pick(page, "all")
         self.assertFalse(page.letters_edit.enabled)
         self.assertEqual(page.letters_edit.placeholder, u"")
+        owner.package = None
+        page.fill()
+        self.assertEqual(page.letters_edit.placeholder, u"n/a", "no font: grayed out, n/a")
+        self.assertFalse(page.letters_edit.enabled)
 
     def test_buttons_are_grayed_out_while_the_window_is_busy_too(self):
         """Auto Kerning's enable() leaves a widget alone when it reports the state asked for, and a widget
@@ -504,13 +564,13 @@ class PageTests(unittest.TestCase):
         page.update_buttons()
         self.assertFalse(page.from_designs(), "counts as unticked")
         self.assertTrue(page.designs_box.checked, "the user's setting is kept")
-        self.assertEqual(page.scope_note.text, u"1 glyph (W): 2 variants to build.", "no count of alternates: none used")
+        self.assertEqual(plain(page.scope_note.text), u"1 glyph (W): 2 variants to build.", "no count of alternates: none used")
         # a has a.alt1 (a variant built before): ticked, the option is back, ticked as it was left
         self.row(page, u"a").setCheckState(0, ft.CHECKED)
         self.assertTrue(page.designs_box.enabled and page.from_designs())
         self.assertEqual(page.designs_box.whats, fa.DESIGNS_WHAT)
         self.assertEqual(page.designs_box.tip, u"")
-        self.assertEqual(page.scope_note.text, u"2 glyphs (a, W): 3 variants to build (1 from the font's alternates); "
+        self.assertEqual(plain(page.scope_note.text), u"2 glyphs (a, W): 3 variants to build (1 from the font's alternates); "
                                                u"1 variant the font has already is left as it is.",
                          "a.alt2 made of a.alt1, the alternate it has")
         # The fonts of the other tests have alternates: the option is theirs to tick
@@ -526,7 +586,7 @@ class PageTests(unittest.TestCase):
                           (u"uni0434.loclBGR", None)]
         page, owner = self.page(glyphs)
         self.assertEqual(page.scope_box.labels,
-                         [u"The ticked glyphs", u"Often doubled", u"These glyphs",
+                         [u"The ticked suggestions", u"Often doubled", u"These glyphs",
                           u"Latin glyphs", u"Cyrillic glyphs", u"Greek glyphs",
                           u"Lowercase letters", u"Capitals", u"Capitals and lowercase", u"Everything"],
                          "Latin first, then the script with the most glyphs")
@@ -575,21 +635,23 @@ class PageTests(unittest.TestCase):
         variants than the first tab's turns serve are of no use: the line under the settings says so,
         the button is grayed out, and a click builds nothing."""
         self.assertEqual(fa.BUILD_MOST, ft.fc.TURN_BYTES_MAX // 8, "what the first tab's turns by position serve")
-        self.assertIsNone(fa.build_problem(6000, 59535))
-        self.assertEqual(fa.build_problem(3000, 62536),
+        self.assertIsNone(problem_words(6000, 59535))
+        self.assertEqual(problem_words(3000, 62536),
                          u"Nothing can be built: the font has 62,536 glyphs, this build would add 3,000 glyphs, and "
                          u"a font holds 65,535 glyphs at most. Choose fewer glyphs (a script, a case, or the glyphs "
                          u"that often double in text) or fewer variants each.")
-        self.assertIn(u"the font has 65,535 glyphs, this build would add 1 glyph,", fa.build_problem(1, 65535))
-        self.assertEqual(fa.build_problem(6001, 100),
+        self.assertIn(u"the font has 65,535 glyphs, this build would add 1 glyph,", problem_words(1, 65535))
+        self.assertEqual(problem_words(6001, 100),
                          u"Nothing can be built: 6,001 variants is more than one click builds (6,000 at most: more "
                          u"could not all take turns in the first tab's code). Choose fewer glyphs (a script, a case, "
                          u"or the glyphs that often double in text) or fewer variants each.")
-        self.assertIsNone(fa.build_problem(6000, 100, pace=0.1), "10 minutes: allowed")
-        self.assertEqual(fa.build_problem(3000, 100, pace=0.5),
+        self.assertIsNone(problem_words(6000, 100, pace=0.1), "10 minutes: allowed")
+        self.assertEqual(problem_words(3000, 100, pace=0.5),
                          u"Nothing can be built: 3,000 variants would take about 25 minutes at the last build's pace, "
                          u"and one click builds for 10 minutes at most. Choose fewer glyphs or fewer variants each.")
-        self.assertIsNone(fa.build_problem(0, 65535), "nothing to build: nothing to refuse")
+        self.assertIsNone(problem_words(0, 65535), "nothing to build: nothing to refuse")
+        self.assertIn(u"<b>6,001 variants</b> is more than one click builds (<b>6,000</b> at most",
+                      fa.build_problem(6001, 100), "each count bold with its noun, a number alone bold alone")
         self.assertEqual([fa.duration(seconds) for seconds in (0, 20, 60, 100, 600)],
                          [u"1 minute", u"1 minute", u"1 minute", u"2 minutes", u"10 minutes"])
         # In the tab: 2,200 ideographs, 3 variants each
@@ -603,7 +665,7 @@ class PageTests(unittest.TestCase):
         page.update_buttons()
         self.assertEqual(page.build_button.text, u"Build variants")
         self.assertFalse(page.build_button.enabled)
-        self.assertIn(u"6,600 variants is more than one click builds (6,000 at most", page.scope_note.text)
+        self.assertIn(u"6,600 variants is more than one click builds (6,000 at most", plain(page.scope_note.text))
         page.build_variants()
         self.assertEqual(len(owner.package.glyphs), 2200, "nothing made")
         self.assertEqual(owner.was_busy, [])
@@ -613,13 +675,13 @@ class PageTests(unittest.TestCase):
         page.count_box.setValue(1)
         page.pace = 0.25
         page.update_buttons()
-        self.assertTrue(page.scope_note.text.endswith(u"to build. A build this large may take a bit."),
-                        page.scope_note.text)
-        self.assertNotIn(u"minute", page.scope_note.text)
+        self.assertTrue(plain(page.scope_note.text).endswith(u"to build. A build this large may take a bit."),
+                        plain(page.scope_note.text))
+        self.assertNotIn(u"minute", plain(page.scope_note.text))
         page.pace = 0.5
         page.update_buttons()
         self.assertFalse(page.build_button.enabled)
-        self.assertIn(u"would take about 18 minutes at the last build's pace", page.scope_note.text)
+        self.assertIn(u"would take about 18 minutes at the last build's pace", plain(page.scope_note.text))
 
     def test_the_list_checks_all_or_none_and_looks_like_the_other_lists(self):
         """The suggestions had no quick way to check all or none, and looked cramped: its rows were one
@@ -634,10 +696,11 @@ class PageTests(unittest.TestCase):
         self.assertEqual((page.all_button.text, page.none_button.text), (u"Tick all", u"Tick none"))
         self.assertTrue(page.all_button.enabled)
         self.assertFalse(page.none_button.enabled, "nothing checked: nothing to uncheck")
+        suggested = len(page.group_rows(fa.SUGGESTIONS_KEY))
         page.all_button.slots["clicked()"][0]()
-        self.assertEqual(len(page.checked_glyphs()), len(page.tree.items))
+        self.assertEqual(len(page.checked_glyphs()), suggested)
         # Owner's report 118: these buttons left no line in the log
-        self.assertEqual(owner.logged[-1][1], u"<i>Tick all</i> ticked <b>%d glyphs</b>." % len(page.tree.items))
+        self.assertEqual(owner.logged[-1][1], u"<i>Tick all</i> ticked <b>%d glyphs</b>." % suggested)
         self.assertFalse(page.all_button.enabled, "all checked: nothing more to check")
         self.assertTrue(page.none_button.enabled)
         self.assertTrue(page.copy_button.enabled)
@@ -646,7 +709,7 @@ class PageTests(unittest.TestCase):
         self.assertTrue(page.all_button.enabled and page.none_button.enabled)
         page.none_button.slots["clicked()"][0]()
         self.assertEqual(page.checked_glyphs(), [])
-        self.assertEqual(owner.logged[-1][1], u"<i>Tick none</i> unticked <b>%d glyphs</b>." % (len(page.tree.items) - 1))
+        self.assertEqual(owner.logged[-1][1], u"<i>Tick none</i> unticked <b>%d glyphs</b>." % (suggested - 1))
         self.assertFalse(page.copy_button.enabled)
         owner.busy = True
         page.check_all(True)
@@ -659,7 +722,10 @@ class PageTests(unittest.TestCase):
         self.assertEqual(page.copy_button.text, u"Make copies to redraw")
         self.assertIn(u"To draw an alternate by hand, tick a glyph, then click <i>Make copies to redraw</i>",
                       page.note.text)
-        self.assertIn(u"The variants below are another job, and need no such copy.", page.note.text)
+        self.assertIn(u"<i>Selected glyphs</i>: the glyphs <i>Variants that take turns</i> builds, as its "
+                      u"<i>Glyphs</i> dropdown picks them, another job, which needs no such copy.", page.note.text)
+        # (a count bold with its noun; a number whose noun is outside, bold alone: owner's image 301)
+        self.assertIn(u"(of <b>412 open-licensed families</b>, <b>128</b> have alternates)", page.note.text)
         for glyph in (u"a", u"l"):
             self.row(page, glyph).setCheckState(0, ft.CHECKED)
         page.make_copies()
@@ -708,10 +774,10 @@ class PageTests(unittest.TestCase):
     def test_the_option_builds_from_both_designs(self):
         page, owner = self.page(DESIGNS, ((u"W", 22), (u"w", 20), (u"a", 49)))
         self.row(page, u"W").setCheckState(0, ft.CHECKED)
-        self.assertEqual(page.scope_note.text, u"1 glyph (W): 2 variants to build.")
+        self.assertEqual(plain(page.scope_note.text), u"1 glyph (W): 2 variants to build.")
         page.designs_box.setChecked(True)
         page.designs_box.slots["toggled(bool)"][0](True)
-        self.assertEqual(page.scope_note.text, u"1 glyph (W): 2 variants to build (1 from the font's alternates).")
+        self.assertEqual(plain(page.scope_note.text), u"1 glyph (W): 2 variants to build (1 from the font's alternates).")
         item = self.row(page, u"W")
         page.tree.selectedItems = lambda: [item]
         page.draw_preview()
@@ -730,8 +796,8 @@ class PageTests(unittest.TestCase):
         self.assertEqual((built.advanceWidth, len(built.shapes)), (640, 2), "a copy of the alternate, with its width")
         self.assertEqual(font.by_name[u"W.alt1"].layers[u"Regular"].advanceWidth, 500)
         done = [text for level, text in owner.logged if level == "done"][0]
-        self.assertIn(u"Built <b>2 variants</b> of 1 glyph: ", done)
-        self.assertIn(u"(subtle, seed 1, 1 from the font's alternates)", done)
+        self.assertIn(u"Built <b>2 variants</b> of <b>1 glyph</b>: ", done)
+        self.assertIn(u"(subtle, seed 1, <b>1</b> from the font's alternates)", done)
         # Read again: the variants are the font's; nothing more to build of W
         item = self.row(page, u"W")
         page.draw_preview()
@@ -763,21 +829,21 @@ class PageTests(unittest.TestCase):
     def test_counted_texts_follow_their_number(self):
         plan = lambda n, others=0: [(u"g%d" % i, [(u"g%d.alt1" % i, 1, u"g%d.ss01" % i if i < others else u"g%d" % i)])
                                     for i in range(n)]
-        self.assertEqual(fa.build_words(plan(1), 1, "all"), (u"Build 1 variant", u"1 glyph (g0): 1 variant to build."))
-        self.assertEqual(fa.build_words(plan(2), 1, "all"),
+        self.assertEqual(words(plan(1), 1, "all"), (u"Build 1 variant", u"1 glyph (g0): 1 variant to build."))
+        self.assertEqual(words(plan(2), 1, "all"),
                          (u"Build 2 variants", u"2 glyphs (g0, g1): 2 variants to build."))
-        self.assertEqual([fa.build_words(plan(2, others), 1, "all", designs=True)[1] for others in (0, 1, 2)],
+        self.assertEqual([words(plan(2, others), 1, "all", designs=True)[1] for others in (0, 1, 2)],
                          [u"2 glyphs (g0, g1): 2 variants to build (0 from the font's alternates).",
                           u"2 glyphs (g0, g1): 2 variants to build (1 from the font's alternates).",
                           u"2 glyphs (g0, g1): 2 variants to build (2 from the font's alternates)."])
-        self.assertEqual(fa.build_words([(u"a", [])], 1, "all"),
+        self.assertEqual(words([(u"a", [])], 1, "all"),
                          (u"Build variants", u"1 glyph (a): no variant to build; 1 variant the font has already is "
                                              u"left as it is."))
-        self.assertEqual(fa.build_words([], 2, "all")[1],
+        self.assertEqual(words([], 2, "all")[1],
                          u"The font has no glyph that can take turns (a letter's, a figure's, or a punctuation mark's).")
         self.assertEqual([fa.counted(n, u"glyph") for n in (0, 1, 2, 65535)],
                          [u"0 glyphs", u"1 glyph", u"2 glyphs", u"65,535 glyphs"])
-        self.assertEqual(fa.build_words(plan(3), 1, "all", problem=u"Refused.")[1], u"Refused.")
+        self.assertEqual(words(plan(3), 1, "all", problem=u"Refused.")[1], u"Refused.")
 
     def test_a_long_build_shows_its_progress_and_takes_no_clicks(self):
         """A build of a whole alphabet left FontLab not responding: each letter is counted in the top
@@ -787,9 +853,9 @@ class PageTests(unittest.TestCase):
         self.pick(page, "both")
         letters = len(glyphs)
         self.assertEqual(page.build_button.text, u"Build %d variants" % (2 * letters))
-        self.assertTrue(page.scope_note.text.endswith(u" " + fa.LONG_BUILD_WORDS))
+        self.assertTrue(plain(page.scope_note.text).endswith(u" " + fa.LONG_BUILD_WORDS))
         self.assertEqual(fa.LONG_BUILD_WORDS, u"A build this large may take a bit.", "the owner's words")
-        self.assertNotIn(u"top line", page.scope_note.text)
+        self.assertNotIn(u"top line", plain(page.scope_note.text))
         self.assertIn(u"uni0107\N{HORIZONTAL ELLIPSIS})", page.scope_note.text, "the first letters named, not all")
         seen = []
         owner.progress = lambda what, done=None, total=None, force=False, stoppable=True: seen.append(
@@ -863,7 +929,7 @@ class PageTests(unittest.TestCase):
         controls = [page.all_button, page.none_button, page.copy_button, page.scope_box, page.letters_edit,
                     page.count_box, page.strength_box, page.seed_box, page.designs_box, page.build_button]
         self.assertEqual([c for c in controls if c.enabled], [], "no font: nothing clickable")
-        self.assertEqual((page.note.text, page.scope_note.text), (u"", u""))
+        self.assertEqual((page.note.text, plain(page.scope_note.text)), (u"", u""))
         page, owner = self.page()
         self.assertEqual(page.scope(), "checked")
         self.assertTrue(page.scope_box.enabled, "a font: its scope can be picked")
@@ -872,7 +938,8 @@ class PageTests(unittest.TestCase):
         self.row(page, u"a").setCheckState(0, ft.CHECKED)
         self.assertEqual([box.enabled for box in (page.count_box, page.strength_box, page.seed_box)], [True] * 3)
         page, owner = self.page([(u"zero", 0x30), (u"space", 0x20)], ((u"a", 49),))
-        self.assertEqual(page.tree.items, [])
+        self.assertEqual(page.group_rows(fa.SUGGESTIONS_KEY), [])
+        self.assertEqual([group.text(0) for group in page.tree.items], [u"Suggestions (0)", u"Selected glyphs (0)"])
         self.assertTrue(page.note.text.startswith(u"The font has none of the glyphs fonts most often give"))
 
     def test_a_new_seed_builds_the_variants_built_here_again_in_place(self):
@@ -898,7 +965,7 @@ class PageTests(unittest.TestCase):
         page.update_buttons()
         self.assertTrue(page.build_button.enabled, "another seed: the variants built here are to build again")
         self.assertEqual(page.build_button.text, u"Build 3 variants")
-        self.assertEqual(page.scope_note.text, u"2 glyphs (a, l): 3 variants to build, all of them built here before "
+        self.assertEqual(plain(page.scope_note.text), u"2 glyphs (a, l): 3 variants to build, all of them built here before "
                                                u"with other settings, replaced in place; 1 variant the font has "
                                                u"already is left as it is.")
         page.draw_preview()
@@ -937,7 +1004,7 @@ class PageTests(unittest.TestCase):
         handle); the previews' captions are a preview's (quiet), a line between the two previews."""
         del Owner.headings[:]
         page, owner = self.page()
-        self.assertEqual(Owner.headings, [u"Suggested alternates", u"Variants that take turns"])
+        self.assertEqual(Owner.headings, [u"Glyphs for alternates", u"Variants that take turns"])
         self.assertIs(page.widget, page.parts, "the tab is its splitter")
         left, right = page.bottom_buttons()
         self.assertEqual([button.text for button in left], [u"Tick all", u"Tick none"])
@@ -946,17 +1013,148 @@ class PageTests(unittest.TestCase):
                          "drawn in the quiet color (ak.preview_caption)")
         self.assertIsNotNone(page.preview_line, "a line between the two previews")
 
+    # -- the owner's round of 2026-11-18 (images 283 to 318) --------------------------------
+
+    def test_the_list_has_suggestions_and_the_selected_glyphs(self):
+        """Owner's image 302: the glyphs a set of the Glyphs dropdown picks were nowhere to see or untick. The
+        list has two groups, laid out as the window's other grouped lists (a bold row, its count in
+        parentheses, closable): Suggestions (copied by Make copies to redraw) and Selected glyphs (built by
+        Build N variants), each button acting on its own group's ticks."""
+        page, owner = self.page(LATIN + [(u"uni0434", 0x434), (u"uni0436", 0x436)])
+        groups = page.tree.items
+        self.assertEqual([group.text(0) for group in groups], [u"Suggestions (7)", u"Selected glyphs (0)"])
+        self.assertTrue(all(group.expanded for group in groups), "open at first")
+        self.assertEqual([group.checkState(0) for group in groups], [ft.UNCHECKED] * 2, "no tick box of their own")
+        self.assertEqual(self.listed(page, fa.SUGGESTIONS_KEY)[0], [u"a", u"u", u"l", u"ampersand", u"plus", u"nine",
+                                                                    u"period"], "the model's order")
+        # The ticked suggestions (at first): Selected glyphs follows the ticks
+        self.assertEqual(fa.SCOPES[0], ("checked", u"The ticked suggestions"))
+        self.row(page, u"a").setCheckState(0, ft.CHECKED)
+        self.row(page, u"u").setCheckState(0, ft.CHECKED)
+        self.assertEqual(self.listed(page), ([u"a", u"u"], [u"a", u"u"]))
+        self.assertEqual(page.tree.items[1].text(0), u"Selected glyphs (2)")
+        self.assertEqual(page.build_button.text, u"Build 4 variants")
+        # Unticked in Selected glyphs: out of the build and of the previews, the suggestion still ticked
+        self.row(page, u"a", fa.SELECTED_KEY).setCheckState(0, ft.UNCHECKED)
+        self.assertEqual(page.build_glyphs(), [u"u"])
+        self.assertEqual(page.build_button.text, u"Build 2 variants")
+        self.assertEqual(page.preview_glyph(), u"u")
+        item = self.row(page, u"a", fa.SELECTED_KEY)
+        page.tree.selectedItems = lambda: [item]
+        self.assertEqual(page.preview_glyph(), u"u", "an unticked glyph is out of the preview, selected or not")
+        page.tree.selectedItems = lambda: []
+        self.assertEqual(page.checked_glyphs(), [u"a", u"u"], "Make copies to redraw: the ticked suggestions")
+        self.assertTrue(page.copy_button.enabled)
+        self.row(page, u"l").setCheckState(0, ft.CHECKED)  # (a new tick: listed, ticked; a stays unticked)
+        self.assertEqual(self.listed(page), ([u"a", u"u", u"l"], [u"u", u"l"]))
+        self.row(page, u"u").setCheckState(0, ft.UNCHECKED)  # (unticked as a suggestion: out of the pick)
+        self.assertEqual(self.listed(page), ([u"a", u"l"], [u"l"]))
+        # A set picked: its glyphs listed, all ticked, in place of the last pick; the suggestions keep theirs
+        self.pick(page, "script:Cyrillic")
+        self.assertEqual(self.listed(page), ([u"uni0434", u"uni0436"], [u"uni0434", u"uni0436"]))
+        self.assertEqual(page.checked_glyphs(), [u"a", u"l"])
+        row = self.row(page, u"uni0434", fa.SELECTED_KEY)
+        self.assertEqual(row.texts[:4], [u"\N{CYRILLIC SMALL LETTER DE}", u"uni0434", fa.NO_DATA, fa.NO_DATA],
+                         "a column that means nothing for it (no count of the model, no alternate): a dash")
+        self.assertEqual(self.row(page, u"u", fa.SUGGESTIONS_KEY).texts[3], u"u.01 u.02")
+        row.setCheckState(0, ft.UNCHECKED)
+        self.assertEqual(page.build_glyphs(), [u"uni0436"])
+        page.build_variants()
+        self.assertEqual(sorted(g.name for g in owner.package.glyphs if u".alt" in g.name),
+                         [u"l.alt1", u"uni0436.alt1", u"uni0436.alt2"], "the ticked selected glyph only")
+        self.assertEqual(self.listed(page), ([u"uni0434", u"uni0436"], [u"uni0436"]),
+                         "the font read again: the pick and its ticks kept")
+        self.pick(page, "both")  # (another pick: its glyphs all ticked)
+        self.assertEqual(self.listed(page)[0], self.listed(page)[1])
+        self.assertIn(u"uni0434", self.listed(page)[0])
+        # Every glyph of Selected glyphs unticked: the line says so
+        for item in page.group_rows(fa.SELECTED_KEY):
+            item.setCheckState(0, ft.UNCHECKED)
+        self.assertEqual(plain(page.scope_note.text), u"Every glyph of <i>Selected glyphs</i> is unticked: tick some in the list "
+                                                      u"above, or pick other glyphs here.")
+        self.assertFalse(page.build_button.enabled)
+        # Tick all and Tick none: both groups
+        page.all_button.slots["clicked()"][0]()
+        self.assertEqual(self.listed(page)[0], self.listed(page)[1])
+        self.assertEqual(len(page.checked_glyphs()), 7)
+        page.none_button.slots["clicked()"][0]()
+        self.assertEqual((self.listed(page)[1], page.checked_glyphs(), page.build_glyphs()), ([], [], []))
+        # A group closed stays closed when the list is made again
+        page.tree.items[0].setExpanded(False)
+        self.pick(page, "upper")
+        self.assertEqual([group.expanded for group in page.tree.items], [False, True])
+
+    def test_selected_glyphs_follow_the_ticks_on_the_next_turn(self):
+        """The list is made again when a suggestion's tick changes (Selected glyphs follows it), and making it
+        again deletes the row whose tick Qt is telling of: made on the next turn of the event loop, never
+        inside Qt's own signal (FontLab would read a deleted row)."""
+        later = []
+
+        class Waiting(ft.Anything):
+            @staticmethod
+            def singleShot(interval, slot):
+                later.append(slot)
+
+        page, owner = self.page()
+        timer, page_qt = Timer, sys.modules["PythonQt"].QtCore.classes
+        page_qt["QTimer"] = Waiting
+        try:
+            self.row(page, u"a").setCheckState(0, ft.CHECKED)
+            self.row(page, u"l").setCheckState(0, ft.CHECKED)
+            self.assertEqual(self.listed(page), ([], []), "not inside the signal")
+            self.assertEqual(len(later), 1, "once for both ticks")
+            later.pop()()
+            self.assertEqual(self.listed(page), ([u"a", u"l"], [u"a", u"l"]))
+        finally:
+            page_qt["QTimer"] = timer
+
+    def test_a_pick_too_large_for_one_click_is_not_listed(self):
+        """A whole CJK font's glyphs in Selected glyphs took seconds at each pick, and one click could never
+        build them (a variant each passes what one click builds): such a pick is counted, not listed, and
+        the line says why."""
+        glyphs = [(u"uni%04X" % code, code) for code in range(0x4E00, 0x4E00 + 30)]
+        most = fa.SELECTED_MOST
+        fa.SELECTED_MOST = 20
+        try:
+            page, owner = self.page(glyphs)
+            self.pick(page, "all")
+            self.assertEqual(self.listed(page), ([], []))
+            self.assertEqual(page.tree.items[1].text(0), u"Selected glyphs (30)")
+            self.assertTrue(plain(page.scope_note.text).startswith(u"Nothing can be built: 30 glyphs are picked"),
+                            page.scope_note.text)
+            self.assertFalse(page.build_button.enabled)
+            fa.SELECTED_MOST = 40
+            self.pick(page, "all")
+            self.assertEqual(len(self.listed(page)[1]), 30)
+            # Past ROW_PICTURES, a row is drawn once it is clicked
+            pictures = fa.ROW_PICTURES
+            fa.ROW_PICTURES = 10
+            try:
+                self.pick(page, "script:Han")
+            finally:
+                fa.ROW_PICTURES = pictures
+            rows = page.group_rows(fa.SELECTED_KEY)
+            self.assertIn(1, rows[0].icons)
+            self.assertFalse(getattr(rows[20], "icons", {}))
+            self.assertEqual(rows[20].toolTip(1), fa.ROW_PICTURE_TIP)
+            page.tree.selectedItems = lambda: [rows[20]]
+            page.tree.slots["itemSelectionChanged()"][0]()
+            self.assertIn(1, rows[20].icons)
+            self.assertEqual(rows[20].toolTip(1), u"")
+        finally:
+            fa.SELECTED_MOST = most
+
     def test_what_a_click_builds_in_words(self):
         plan = fa.variants_planned([u"a", u"g"], 2, set([u"a", u"g", u"a.alt1", u"a.alt2"]))
         self.assertEqual(plan, [(u"a", []), (u"g", [(u"g.alt1", 1, u"g"), (u"g.alt2", 2, u"g")])])
-        self.assertEqual(fa.build_words(plan, 2, "both"),
+        self.assertEqual(words(plan, 2, "both"),
                          (u"Build 2 variants", u"2 glyphs (a, g): 2 variants to build; 2 variants the font has already "
                                                u"are left as they are."))
-        self.assertEqual(fa.build_words([(u"period", [u"period.alt1"])], 1, "typed"),
+        self.assertEqual(words([(u"period", [u"period.alt1"])], 1, "typed"),
                          (u"Build 1 variant", u"1 glyph (period): 1 variant to build."))
-        self.assertEqual(fa.build_words([], 2, "typed")[0], u"Build variants")
-        self.assertEqual(fa.build_words([], 2, "doubled")[1], u"The font has no glyph that often stands doubled in text.")
-        self.assertEqual(fa.build_words([], 2, "lower")[1], u"The font has no such letters.")
+        self.assertEqual(words([], 2, "typed")[0], u"Build variants")
+        self.assertEqual(words([], 2, "doubled")[1], u"The font has no glyph that often stands doubled in text.")
+        self.assertEqual(words([], 2, "lower")[1], u"The font has no such letters.")
         self.assertEqual(fa.alternates_of(u"u", [u"u", u"u.01", u"u.sc", u"u.alt1", u"ugrave.01"]), [u"u.01", u"u.alt1"])
 
 

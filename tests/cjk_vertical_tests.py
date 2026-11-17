@@ -1701,7 +1701,7 @@ class SourceTests(unittest.TestCase):
         # preview_caption for every preview's caption; image 261: Tick, not Check)
         text = self.source("cjk", "freelab_cjk_vertical.py")
         init = text.split(u"class CJKVerticalDialog")[1].split(u"\n    def watch_previews")[0]
-        previews = init.split(u"previews = QtGui.QHBoxLayout()")[1].split(u"layout.addLayout(previews)")[0]
+        previews = init.split(u"previews = QtGui.QHBoxLayout()")[1].split(u"preview_part.addLayout(previews, 1)")[0]
         self.assertIn(u"previews.addWidget(ak.separator(vertical=True))", previews)
         self.assertIn(u"ak.preview_caption(caption)", previews)
         self.assertIn(u"layout.addWidget(ak.header_separator())", init)
@@ -1784,6 +1784,17 @@ class PreviewNoteTests(unittest.TestCase):
                          u"The font has none of the sample's characters, so the previews are empty: it lacks 1 ideograph "
                          u"and 1 CJK punctuation mark (the ideographic comma).")
         self.assertEqual(cv.preview_note(u"あ い", {0x3042: u"a", 0x3044: u"i"}), u"", "all there: nothing to say")
+        # (owner's images 297 and 301: each count bold with its noun; the sample's characters made safe)
+        bold = lambda text: u"<b>%s</b>" % text
+        escape = lambda text: text.replace(u"<", u"&lt;")
+        self.assertEqual(cv.preview_note(u"<あ", {0x3C: u"less"}, bold, escape),
+                         u"The previews show only the <b>1 character</b> of the sample the font has (the less-than "
+                         u"sign): it lacks <b>1 kana</b>.")
+        self.assertEqual(cv.preview_note(u"a<b", {0x61: u"a"}, bold, escape),
+                         u"The previews show only the <b>1 character</b> of the sample the font has (“a”): it "
+                         u"lacks <b>2 other characters</b>.")
+        self.assertIn(u"<b>1 ideograph</b> and <b>1 CJK punctuation mark</b> (the ideographic comma)",
+                      cv.preview_note(u"一、", {}, bold, escape))
         # Live pass: "(, .)" read oddly; marks by their names, anything else quoted
         self.assertEqual(cv.character_words(u"a,.a"), u"“a”, the comma, and the period")
         self.assertEqual(cv.character_words(u"abcdefgh", 2), u"“a”, “b”, and others")
@@ -1843,6 +1854,77 @@ class CheckAllTests(unittest.TestCase):
         sys.path.insert(0, HERE)
         import cjk_tests
         cjk_tests.check_all_logged(self, cv, cv.CJKVerticalDialog, u"row")
+
+
+class UIRound3Tests(unittest.TestCase):
+    """The owner's UI round 3: a Code preview (image 305), the bottom row's order (298), splitter handles (310,
+    318), and the samples grayed for a font without their writing (304), as CJK Spacing's."""
+
+    def source(self):
+        with io.open(os.path.join(HERE, os.pardir, "cjk", "freelab_cjk_vertical.py"), encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_the_code_preview_shows_what_write_would_write(self):
+        dialog = ProgressTests("test_no_bar_of_its_own").dialog()
+        del dialog.update_buttons  # (the real one)
+        widget = ProgressTests.Widget
+        for name in ("all_button", "none_button", "restore_button", "export_button", "compile_box"):
+            setattr(dialog, name, widget())
+        dialog.harvest = dialog.draw_previews = lambda: None
+        dialog.forms, dialog.turned, dialog.trims, dialog.kerns, dialog.metrics, dialog.first_checks = [], [], [], [], [], []
+        dialog.cjk, dialog.package, dialog.texts, dialog.cj = True, object(), {}, cv.spacing()
+        shown = []
+        dialog.code_preview = type("Preview", (), {"show": lambda _, text: shown.append(text)})()
+        form = cv.Form(0x300C, "uni300C", "rotated", "uni300C.vert", "build", (0, -1, 1, 0, 120, 880))
+        heights = cv.Metric("advance_height", u"Advance heights", None, 1000, 9507)
+        vert = cv.feature_text("vert", None, [u"sub uni300C by uni300C.vert;"])
+        dialog.pending = lambda: ({"vert": vert}, [form], [heights])
+        dialog.update_buttons()
+        self.assertTrue(shown[-1].startswith(u"feature vert {"), shown[-1])
+        self.assertIn(u"sub uni300C by uni300C.vert;", shown[-1])
+        self.assertIn(u"# And 1 glyph built, each a component of its glyph turned or moved", shown[-1])
+        self.assertIn(u"# And an advance height of 1,000 units set on 9,507 layers without one (no code).", shown[-1])
+        dialog.pending = lambda: ({}, [], [])
+        dialog.update_buttons()
+        self.assertEqual(shown[-1], dialog.cj.NO_CODE)
+        dialog.package = None
+        dialog.update_buttons()
+        self.assertEqual(shown[-1], u"", "no font: nothing")
+        vhea = [cv.Metric("vhea_ascent", u"vhea ascender", None, 500), cv.Metric("vhea_descent", u"vhea descender", None, -500)]
+        self.assertEqual(cv.code_notes([], vhea), [u"And vhea in the font info: vhea ascender 500, vhea descender -500 (no code)."])
+        self.assertEqual(cv.code_notes([], []), [])
+
+    def test_the_layout_splitter_code_preview_and_bottom_row(self):
+        init = self.source().split(u"class CJKVerticalDialog")[1].split(u"\n    def watch_previews")[0]
+        self.assertIn(u"self.splitter = QtGui.QSplitter(QtCore.Qt.Vertical)", init)
+        self.assertIn(u"list_part.addWidget(self.tree, 1)", init, "a handle under the list (owner's image 310)")
+        self.assertNotIn(u"layout.addWidget(self.tree", init)
+        self.assertIn(u"preview_part.addWidget(self.preview_note)", init)
+        self.assertIn(u"self.cj.CodePreview(ak, reader(), self.splitter, CODE_PREVIEW_WHAT", init)
+        self.assertIn(u"self.code_preview.refresh", init, "its colors again when dark mode switches")
+        # (owner's image 298: the compile tick, the write it is about, the other committing buttons, Close)
+        dialog = cv.CJKVerticalDialog.__new__(cv.CJKVerticalDialog)
+        for name in ("compile_box", "write_button", "put_back_button", "export_button", "close_button"):
+            setattr(dialog, name, name)
+        self.assertEqual(dialog.bottom_right(), ["compile_box", "write_button", "put_back_button", "export_button",
+                                                 "close_button"])
+        self.assertIn(u"for button in (self.all_button, self.none_button, self.restore_button):", init,
+                      "the left group: what acts on the list's ticks")
+
+    def test_a_sample_in_a_writing_the_font_lacks_is_grayed(self):
+        cj = cv.spacing()
+        samples = [(u"ja", u"Japanese", cv.SAMPLE_JA)] + [s for s in cj.SAMPLES if s[0] != "ja"]
+        japanese = set(ord(ch) for ch in cv.SAMPLE_JA) | set(range(0x4E00, 0x9FFF))
+        self.assertEqual(cj.offered_samples(samples, japanese), [True, False, True, True], "no Hangul: Korean grayed")
+        read = self.source().split(u"    def read_font(self):")[1].split(u"\n    def ")[0]
+        self.assertIn(u"self.cj.offer_samples(self.sample_box, self.samples, offered, QtCore)", read)
+        self.assertIn(u"index = index if offered[index] else offered.index(True)", read)
+
+    def test_counts_bold_with_their_nouns_in_the_log(self):
+        source = self.source()
+        self.assertIn(u'b(counted(heights[0].value, u"unit"))', source)
+        self.assertIn(u'b(counted(int(round(time.time() - started)) or 1, u"second"))', source)
+        self.assertIn(u"preview_note(text, names, self.ak.b, self.ak.html)", source)
 
 
 if __name__ == "__main__":

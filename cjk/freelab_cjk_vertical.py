@@ -993,11 +993,13 @@ def character_words(chars, most=SAMPLE_SHOWN_MOST):
     return u"%s, and %s" % (u", ".join(words[:-1]), words[-1])
 
 
-def preview_note(text, names):
+def preview_note(text, names, bold=lambda text: text, escape=lambda text: text):
     """What the previews show of a sample, where the font lacks some of its characters (owner's report
     148: on Bellefair, the Korean sample's previews held a comma and a period only, and nothing said
     why): the characters the font has, and what it lacks, by kind (its Hangul, its CJK punctuation
-    marks, named). Empty where the font has every character. names: {code point: glyph}."""
+    marks, named). Empty where the font has every character. names: {code point: glyph}; bold: how a
+    count is set off, with its noun (owner's images 297 and 301); escape: the sample's characters made
+    safe in rich text (ak.html), as bold makes it rich."""
     shown, lacking = [], []
     for code, ch in code_points(text):
         if ch.isspace():
@@ -1012,18 +1014,18 @@ def preview_note(text, names):
         found = [ch for code, ch in lacking if any(low <= code <= high for low, high in ranges)]
         if found:
             sorted_out += len(found)
-            words = counted(len(found), one, many)
+            words = bold(counted(len(found), one, many))
             if one.startswith(u"CJK punctuation"):  # (named: the marks a vertical font turns or moves)
-                words += u" (%s)" % listed(found)
+                words += u" (%s)" % escape(listed(found))
             kinds.append(words)
     if len(lacking) > sorted_out:
-        kinds.append(counted(len(lacking) - sorted_out, u"other character"))
+        kinds.append(bold(counted(len(lacking) - sorted_out, u"other character")))
     lacks = kinds[0] if len(kinds) == 1 else (u"%s and %s" % tuple(kinds) if len(kinds) == 2 else
                                               u"%s, and %s" % (u", ".join(kinds[:-1]), kinds[-1]))
     if not shown:
         return u"The font has none of the sample's characters, so the previews are empty: it lacks %s." % lacks
     return u"The previews show only the %s of the sample the font has (%s): it lacks %s." % (
-        counted(len(shown), u"character"), listed([ch for _, ch in shown]), lacks)
+        bold(counted(len(shown), u"character")), escape(listed([ch for _, ch in shown])), lacks)
 
 
 def ink_overflow(items, origin, height):
@@ -1190,13 +1192,38 @@ FontLab 7's export writes no vhea, vmtx, or VORG table: these stay in the font (
 <i>Turned proportional glyphs (vrt2)</i>, off unless ticked, adds turned copies of the font's
 proportional glyphs to vrt2, as a third of those fonts do. Ticked rows are written.<br>
 <b>The previews</b>: the sample set in vertical columns, right to left, as the font's own code sets
-it, and with what is ticked.<br>
+it, and with what is ticked. A sample in a writing the font has none of is grayed.<br>
+<b>Code preview</b>: the code <i>Write</i> would write, as the ticks and options stand (nothing is
+written yet), and what it builds and sets besides, in comments.<br>
+Drag the space between two parts (the list, the previews, the code) to give one more room.<br>
 <i>Restore suggestions</i> puts every tick back as the list first came; <i>Put back vhea</i> puts
 the font info back as it was before the last write (FontLab's History does not hold it).<br><br>
 Click this help's <i>?</i> button, then any control, for what it does."""
 
 
 PREVIEW_CAPTIONS = (u"Now (the font's own code)", u"With what is ticked")  # (Tick, not Check: owner's image 261)
+CODE_PREVIEW_WHAT = (u"The code <i>Write</i> would write, as the ticks and options stand: vert, vrt2, vpal, and vkrn "
+                     u"whole, FreeLab's block between its marker lines, the rest of each feature as it is (a feature "
+                     u"that would not change is left out), then, in comments, the glyphs it builds and the metrics it "
+                     u"sets. Nothing is written until you click the button. Keywords, tags, glyph classes, numbers, and "
+                     u"comments are in colors of their own, as in <i>Feature Code</i>.")
+
+
+def code_notes(builds, metrics):
+    """The Code preview's comment lines for what a write does besides code: the vertical forms it builds (the
+    rules above name them) and the vertical metrics it sets."""
+    notes = []
+    if builds:
+        notes.append(u"And %s built, each a component of its glyph turned or moved (the rules above name them)." % (
+            counted(len(builds), u"glyph")))
+    heights = [m for m in metrics if m.key == "advance_height"]
+    if heights:
+        notes.append(u"And an advance height of %s set on %s without one (no code)." % (
+            counted(heights[0].value, u"unit"), counted(heights[0].count or 0, u"layer")))
+    vhea = [m for m in metrics if m.key != "advance_height"]
+    if vhea:
+        notes.append(u"And vhea in the font info: %s (no code)." % u", ".join(u"%s %d" % (m.label, m.value) for m in vhea))
+    return notes
 
 
 def mark_modified(package):
@@ -1260,6 +1287,12 @@ class CJKVerticalDialog(object):
         layout.addLayout(row)
         # (long work's progress is in the window's top row, ak.busy_start: owner's image 180, its own bar under
         # the settings, "Listing...")
+        # The list, the previews, and the Code preview share the height in a splitter, as CJK Spacing's and
+        # Feature Code's parts: drag a handle to see more of one (owner's image 310)
+        self.splitter = QtGui.QSplitter(QtCore.Qt.Vertical)
+        self.splitter.setChildrenCollapsible(False)
+        layout.addWidget(self.splitter, 1)
+        list_part = self.cj.splitter_part(QtGui, self.splitter, 3)
         self.tree = QtGui.QTreeWidget()
         self.tree.setColumnCount(len(self.COLUMNS))
         self.tree.setHeaderLabels(list(self.COLUMNS))
@@ -1269,7 +1302,8 @@ class CJKVerticalDialog(object):
         self.tree.setWhatsThis(u"The vertical forms (the picture shows the form), the vpal trims (y placement and y "
                                u"advance), and the vertical metrics, each with its value now and after. Ticked rows "
                                u"are written. Double-click a glyph to see it in a <i>Glyph</i> window.")
-        layout.addWidget(self.tree, 1)
+        list_part.addWidget(self.tree, 1)  # (the last of its pane: the handle right under its frame)
+        preview_part = self.cj.splitter_part(QtGui, self.splitter, 3)
         sample_row = QtGui.QHBoxLayout()
         self.sample_label = QtGui.QLabel(u"Sample:")
         sample_row.addWidget(self.sample_label)
@@ -1281,12 +1315,14 @@ class CJKVerticalDialog(object):
         self.sample_box = QtGui.QComboBox()
         for _, label, _ in self.samples:
             self.sample_box.addItem(label)
-        self.sample_box.setWhatsThis(u"A sample per writing system; the field beside it takes text of your own.")
+        self.sample_box.setWhatsThis(u"A sample per writing system (one in a writing the font has none of, which would "
+                                     u"show its punctuation alone, is grayed); the field beside it takes text of your "
+                                     u"own.")
         sample_row.addWidget(self.sample_box)
         self.sample = QtGui.QLineEdit(SAMPLE_JA)
         self.sample.setWhatsThis(u"The text the previews set in vertical columns, right to left.")
         sample_row.addWidget(self.sample, 1)
-        layout.addLayout(sample_row)
+        preview_part.addLayout(sample_row)
         # The previews side by side, a line between them as CJK Spacing's stacked ones (owner's image 219), each
         # under its caption (the shared preview_caption: smaller, in the quiet text color)
         previews = QtGui.QHBoxLayout()
@@ -1310,7 +1346,7 @@ class CJKVerticalDialog(object):
             column.addWidget(label, 1)
             previews.addLayout(column, 1)
             self.previews.append(label)
-        layout.addLayout(previews)
+        preview_part.addLayout(previews, 1)
         # What the previews show of the sample where the font lacks some of it (preview_note), else hidden
         self.preview_note = QtGui.QLabel(u"")
         self.preview_note.setWordWrap(True)
@@ -1318,7 +1354,14 @@ class CJKVerticalDialog(object):
         self.preview_note.setWhatsThis(u"The previews leave out the sample's characters the font lacks: this line "
                                        u"says which they show, and which are missing.")
         self.preview_note.setVisible(False)
-        layout.addWidget(self.preview_note)
+        preview_part.addWidget(self.preview_note)
+        # The Code preview, last, as Feature Code's code under its lists (owner's image 305)
+        self.code_preview = self.cj.CodePreview(ak, reader(), self.splitter, CODE_PREVIEW_WHAT, 2)
+        try:  # (the splitter's hint on its handles, as Feature Code's: not on every label inside it)
+            reader().describe_handles(self.splitter, u"Drag the space between two parts up or down to give one more "
+                                                     u"room.")
+        except Exception:
+            pass
         layout.addWidget(self.log.widget)
         buttons = QtGui.QHBoxLayout()
         self.all_button = QtGui.QPushButton("Tick all")
@@ -1340,13 +1383,12 @@ class CJKVerticalDialog(object):
                                        u"metrics. <i>Edit &gt; Undo</i> takes the glyphs, the code, and the advance "
                                        u"heights back; <i>Put back vhea</i> the font info.")
         self.close_button = QtGui.QPushButton("Close")
-        for button in (self.all_button, self.none_button, self.restore_button, self.put_back_button, self.export_button):
+        for button in (self.all_button, self.none_button, self.restore_button):
             buttons.addWidget(button)
         buttons.addStretch(1)
         self.compile_box = ak.compile_box()
-        buttons.addWidget(self.compile_box)
-        buttons.addWidget(self.write_button)
-        buttons.addWidget(self.close_button)
+        for widget in self.bottom_right():  # (owner's image 298: the compile tick by the write it is about)
+            buttons.addWidget(widget)
         layout.addLayout(buttons)
         self.all_button.connect("clicked()", lambda: self.check_all(True))
         self.none_button.connect("clicked()", lambda: self.check_all(False))
@@ -1375,13 +1417,20 @@ class CJKVerticalDialog(object):
         self.history_timer = ak.watch_history(self)
         self.flagging = ak.flag_menu(self.tree, self, self.flag_names, self.row_names)
         self.watchers = []
-        try:  # the check boxes drawn plain to see in either palette (the list's pictures stay unmapped)
+        try:  # the check boxes drawn plain to see in either palette (the list's pictures stay unmapped), and the
+            # Code preview's colors read again when dark mode switches
             fc = ak.load_sibling("freelab_feature_code.py", "freelab_feature_code")
-            self.watchers.append(fc.watch_check_boxes(self.dialog, [self.tree]))
+            self.watchers.append(fc.watch_check_boxes(self.dialog, [self.tree], self.code_preview.refresh))
         except Exception:
             pass
         self.preview_room = None
         self.watch_previews()
+
+    def bottom_right(self):
+        """The bottom row's right group, in the suite's order (owner's image 298): the compile tick, the write
+        button it is about, the other buttons that change the font or a file (Put back vhea, Add vertical
+        metrics to an exported font...), then Close."""
+        return [self.compile_box, self.write_button, self.put_back_button, self.export_button, self.close_button]
 
     def watch_previews(self):
         """The previews set again when their height changes (their columns break to fit it)."""
@@ -1740,10 +1789,14 @@ class CJKVerticalDialog(object):
         self.metrics = self.plan_metrics(package) if self.cjk else []
         for item, on in zip(self.all_rows(), [kept.get(self.row_key(row), row.checked) for row in self.all_rows()]):
             item.checked = on
+        # (a sample in a writing the font has none of grayed, as CJK Spacing's: owner's image 304)
+        offered = self.cj.offered_samples(self.samples, set(self.char_names))
+        self.cj.offer_samples(self.sample_box, self.samples, offered, QtCore)
         if u"%s" % self.sample.text in [text for _, _, text in self.samples]:  # (text of one's own is kept)
             key = self.cj.SAMPLES[self.cj.best_sample(set(self.char_names), *self.cj.font_hints(package))][0]
             keys = [k for k, _, _ in self.samples]
             index = keys.index(key) if key in keys else 0
+            index = index if offered[index] else offered.index(True)
             self.sample_box.setCurrentIndex(index)
             self.sample.setText(self.samples[index][2])
         self.progress(LIST_STEP)
@@ -2103,7 +2156,19 @@ class CJKVerticalDialog(object):
         self.problem_said = problem
         if not cjk:
             ak.enable(self.export_button, False)
+        self.show_code(new, builds, metrics)
         self.draw_previews()
+
+    def show_code(self, new, builds=(), metrics=()):
+        """The Code preview: the code a write would write now (the shared preview_code), what it builds and
+        sets besides said under it in comments; empty with no font."""
+        preview = getattr(self, "code_preview", None)
+        if preview is None:
+            return
+        if self.package is None:
+            preview.show(u"")
+            return
+        preview.show(self.cj.preview_code(new, self.texts, CODE_TAGS, code_notes(builds, metrics)))
 
     def toggled(self):
         if self.busy:
@@ -2314,7 +2379,7 @@ class CJKVerticalDialog(object):
                 label.setPixmap(pixmap)
         note = getattr(self, "preview_note", None)
         if note is not None:
-            words = preview_note(text, names)
+            words = preview_note(text, names, self.ak.b, self.ak.html)  # (counts bold: owner's images 297, 301)
             note.setText(words)
             note.setVisible(bool(words))
 
@@ -2467,8 +2532,8 @@ class CJKVerticalDialog(object):
                 u"; <i>Edit &gt; Undo</i> takes %s back" % (u"it" if len(written) == 1 else u"them") if undo else u"",
                 compiled), "done")
         if set_heights:
-            self.log.add(u"Set the advance height of %s to %s." % (b(counted(set_heights, u"layer")), b(heights[0].value)),
-                         "done")
+            self.log.add(u"Set the advance height of %s to %s." % (b(counted(set_heights, u"layer")),
+                                                                   b(counted(heights[0].value, u"unit"))), "done")
         if vhea_done:
             self.log.add(u"Wrote %s into the font info: %s. FontLab's <i>Edit &gt; Undo</i> does not take the font info "
                          u"back: <i>Put back vhea</i> does." % (
@@ -2696,8 +2761,8 @@ class CJKVerticalDialog(object):
             try:
                 if font["head"].unitsPerEm != values["upm"]:
                     self.log.add(u"%s has an em of %s, this font %s: export it from this font again." % (
-                        b(os.path.basename(path)), counted(font["head"].unitsPerEm, u"unit"),
-                        counted(values["upm"], u"unit")), "error")
+                        b(os.path.basename(path)), b(counted(font["head"].unitsPerEm, u"unit")),
+                        b(counted(values["upm"], u"unit"))), "error")
                     return
                 if "CFF " in font or "CFF2" in font:
                     self.busy_steps = CFF_EXPORT_STEPS  # (its glyphs measured faster, its copy saved slower)
@@ -2730,11 +2795,12 @@ class CJKVerticalDialog(object):
         finally:
             if staged is not None and script is not None:
                 script.discard(staged)
-        self.log.add(u"Wrote %s: %s for %s, from this font's values (master %s; vertical origin %d), in %s. The "
+        self.log.add(u"Wrote %s: %s for %s, from this font's values (master %s; vertical origin %s), in %s. The "
                      u"exported font is unchanged; its values are in %s, for <i>add_vertical_metrics</i> run again%s." % (
                          b(os.path.basename(out)), u"vhea, vmtx, and VORG" if cff else u"vhea and vmtx",
-                         b(counted(len(metrics), u"glyph")), self.ak.html(values["master"]), values["origin"],
-                         counted(int(round(time.time() - started)) or 1, u"second"),
+                         b(counted(len(metrics), u"glyph")), b(self.ak.html(values["master"])),
+                         b(u"%d" % values["origin"]),
+                         b(counted(int(round(time.time() - started)) or 1, u"second")),
                          b(os.path.basename(values_out)), u" (with <i>--values</i>)" if kept else u""), "done")
         if kept:
             self.log.add(u"%s is kept as it was: it holds another font's or master's values, or could not be read." % (

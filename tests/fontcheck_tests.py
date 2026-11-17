@@ -484,8 +484,9 @@ class AddTests(unittest.TestCase):
         self.assertEqual(fc.gain_text(1, []), u"With 1 glyph ticked: no language is complete yet")
         gained = fc.languages_gained(results, [schwa, small_schwa])
         self.assertEqual(fc.gain_text(2, gained), u"With 2 glyphs ticked: +2 languages (Latin)")
+        # (every count bold with its noun, the glyphs ticked too: owner's images 297 and 301)
         self.assertEqual(fc.gain_text(2, gained[:1], lambda text: u"<b>%s</b>" % text),
-                         u"With 2 glyphs ticked: <b>+1 language</b> (Latin)")
+                         u"With <b>2 glyphs</b> ticked: <b>+1 language</b> (Latin)")
         greek = fc.check_language(language(u(0x3B1), script=u"Greek", name=u"Greek"), font([]))
         self.assertEqual(fc.gain_text(3, gained + [greek]), u"With 3 glyphs ticked: +3 languages (Latin 2, Greek 1)")
 
@@ -627,14 +628,22 @@ class AddTests(unittest.TestCase):
                          u"Kwa: its 2 languages not covered miss 1 glyph." + tail)
         self.assertEqual(fc.selection_text(family([covered]), 0), u"Kwa: the font covers its 1 language.")
         self.assertEqual(fc.selection_text(family([covered, covered]), 0), u"Kwa: the font covers all its 2 languages.")
+        # (in rich text, each count bold with its noun; a number with none of its own alone: images 297, 301)
+        bold = lambda text: u"<b>%s</b>" % text
+        self.assertEqual(fc.selection_text(family([results[2], results[5], covered]), 0, bold),
+                         u"<b>Kwa</b>: its <b>2 languages</b> not covered miss <b>6 glyphs</b>." + tail)
+        self.assertEqual(fc.selection_text(family([covered]), 0, bold), u"<b>Kwa</b>: the font covers its <b>1 language</b>.")
+        self.assertEqual(fc.selection_text(wolof, 0, bold), u"<b>Wolof</b> misses <b>2 glyphs</b>." + tail)
+        self.assertIn(u" <b>1</b> more is not listed (the first <b>3</b> are).", fc.selection_text(far, 1, bold))
         # The tabs' captions: the high-value list's with its count of rows, the selection's with its name
         self.assertEqual(fc.value_title(34), u"High-value missing glyphs (34)")
         self.assertEqual(fc.value_title(0), u"High-value missing glyphs (0)")
         self.assertEqual(fc.selection_title(None), u"Select language, character set, or family",
                          "the owner's caption: the tab works on families and character sets too")
         self.assertEqual(fc.selection_title(wolof), u"Wolof (2)")
-        self.assertEqual(fc.absent_caption(48), u"Show the 48 scripts whose glyphs are fully missing from the font.")
-        self.assertEqual(fc.absent_caption(1), u"Show the 1 script whose glyphs are fully missing from the font.")
+        # (a tick's text takes no period: it names an option, owner's image 306)
+        self.assertEqual(fc.absent_caption(48), u"Show the 48 scripts whose glyphs are fully missing from the font")
+        self.assertEqual(fc.absent_caption(1), u"Show the 1 script whose glyphs are fully missing from the font")
 
     def test_missed_language_gained_once_all_checked(self):
         results, _ = self.results()
@@ -2676,13 +2685,20 @@ class SpaceTests(unittest.TestCase):
 
     def test_the_other_spaces_in_a_note(self):
         has = lambda code: code in (0x2002, 0x2003, 0x2007, 0x2009)
+        # (owner's image 313: Glyph Compose's link sends the spaces there, listed and ticked, as Build with
+        # Glyph Compose sends glyphs; the tool's plain link opened it on its first tab with nothing done)
         self.assertEqual(fc.spaces_note(has, listed=[0x202F]),
-                         u"The font lacks these spaces: no-break (U+00A0), hair (U+200A). <i>Glyph Compose</i> builds "
-                         u"them on its <i>Glyph generation</i> tab (empty glyphs of the right width).")
+                         u"The font lacks these spaces: no-break (U+00A0), hair (U+200A). <a href=\"freelab-spaces:00A0-200A\">"
+                         u"<i>Glyph Compose</i></a> builds them (empty glyphs of the right width): click it to list them "
+                         u"on its <i>Glyph generation</i> tab, ticked.")
         self.assertEqual(fc.spaces_note(lambda code: code != 0x2009),
-                         u"The font lacks this space: thin (U+2009). <i>Glyph Compose</i> builds it on its <i>Glyph "
-                         u"generation</i> tab (empty glyphs of the right width).")
+                         u"The font lacks this space: thin (U+2009). <a href=\"freelab-spaces:2009\"><i>Glyph Compose</i></a> "
+                         u"builds it (empty glyphs of the right width): click it to list it on its <i>Glyph generation</i> "
+                         u"tab, ticked.")
         self.assertEqual(fc.spaces_note(lambda code: True), u"")
+        self.assertEqual(fc.linked_spaces(fc.spaces_link([0xA0, 0x200A])), [u"\N{NO-BREAK SPACE}", u"\N{HAIR SPACE}"])
+        self.assertIsNone(fc.linked_spaces(u"glyph:0041"), "another link: not this one")
+        self.assertIsNone(fc.linked_spaces(u"freelab-tool:Glyph%20Compose"))
 
     def test_a_row_glyph_generation_builds_says_so(self):
         row = fc.AddRow([u"\u02bc"], [], [])
@@ -3870,8 +3886,8 @@ class DialogTests(unittest.TestCase):
             gui.classes.clear()
             gui.classes.update(saved)
         self.assertEqual(dialog.show_absent.checked, True, "ticked to start with")
-        self.assertEqual(dialog.show_absent.made, (u"Show the scripts whose glyphs are fully missing from the font.",),
-                         "no count shown as a zero before the first check")
+        self.assertEqual(dialog.show_absent.made, (u"Show the scripts whose glyphs are fully missing from the font",),
+                         "no count shown as a zero before the first check (and no period: owner's image 306)")
         self.assertEqual(fc.STATUS_FILTERS[dialog.status_filter.currentIndex][1], u"All languages")
         self.assertEqual(fc.STATUS_START, "all")
         self.assertEqual(dialog.left_tabs.told("addTab"),
@@ -3895,7 +3911,7 @@ class DialogTests(unittest.TestCase):
             self.assertIn(words, said)
         absent = len([s for s in dialog.scripts if not s.present])
         self.assertGreater(absent, 1)
-        self.assertEqual(dialog.show_absent.text, u"Show the %d scripts whose glyphs are fully missing from the font." % absent)
+        self.assertEqual(dialog.show_absent.text, u"Show the %d scripts whose glyphs are fully missing from the font" % absent)
         self.assertEqual(len(dialog.shown_scripts()), len(dialog.scripts), "and they are listed")
         self.assertEqual(dialog.left_tabs.told("setTabText")[-2:],
                          [(0, u"High-value missing glyphs (%d)" % len(dialog.rows)),
@@ -4358,7 +4374,7 @@ class DialogTests(unittest.TestCase):
         self.assertIn(u"covered and", dialog.coverage.status.text)
         self.assertEqual(fc.checking_text(1), u"Checking 1 language")
         self.assertEqual((fc.value_title(None), fc.value_title(0)), (u"High-value missing glyphs", u"High-value missing glyphs (0)"))
-        self.assertEqual(fc.absent_caption(None), u"Show the scripts whose glyphs are fully missing from the font.")
+        self.assertEqual(fc.absent_caption(None), u"Show the scripts whose glyphs are fully missing from the font")
         # A step that fails ends the work: the lists come back, and the log says why
         errors = []
         dialog.log.add = lambda text, level="info": errors.append((text, level))
@@ -5314,12 +5330,14 @@ class LoadingTests(unittest.TestCase):
         self.assertEqual((dialog.busy, ended, pages[-1]), (False, [False], 1), "gone with the lists shown")
         done = [text for text, level in logged if level == "done"]
         self.assertEqual(len(done), 1, "one line when done, not one per step")
-        self.assertTrue(re.match(u"^Checked 2,512 languages, 140 character sets, and 172 scripts in [0-9]+\\.[0-9] s\\.$",
-                                 done[0]), done[0])
+        # (each count bold with its noun, in the log and the status line: owner's images 297 and 301)
+        self.assertTrue(re.match(u"^Checked <b>2,512 languages</b>, <b>140 character sets</b>, and <b>172 scripts</b> in "
+                                 u"[0-9]+\\.[0-9] s\\.$", done[0]), done[0])
         self.assertIn(u"<b>No script</b> of Unicode's 172 is covered whole.", dialog.coverage.status.text,
                       "zero says No, not 0 ... are (owner, 2026-11-16)")
-        self.assertIn(u"<b>No character set</b> of 140 is covered (the 5 Legacy sets, wholly optional, are not counted).",
-                      dialog.coverage.status.text, "the 5 Legacy sets not counted, and said so")
+        self.assertIn(u"<b>No character set</b> of 140 is covered (the <b>5 Legacy sets</b>, wholly optional, are not "
+                      u"counted).", dialog.coverage.status.text, "the 5 Legacy sets not counted, and said so")
+        self.assertIn(u"(missing at most <b>30 base characters</b>)", dialog.coverage.status.text)
 
     def test_tooltips_made_when_asked_for(self):
         """Some 2,600 rows each had a rich tooltip made, measured, and set as the list was filled: a
@@ -5444,13 +5462,18 @@ class LoadingTests(unittest.TestCase):
         self.assertEqual(shared, {}, "no two controls answer with the same text")
         labels = dict((one.made[0], one) for one in made if one.kind == "QLabel" and one.made and one.told("setBuddy"))
         # (every caption with its colon, but a sentence's, which ends with a period after its control: image 271)
-        self.assertEqual(sorted(labels), [u"Beside it:", u"Compare every master with", u"Display:", u"Master:",
-                                          u"Within reach: missing at most"])
+        # (and the sentence beside Check, which says what it does: grayed with it, owner's image 292)
+        measured = u"Every glyph measured in every master."
+        self.assertEqual(sorted(labels), [u"Beside it:", u"Compare every master with", u"Display:", measured,
+                                          u"Master:", u"Within reach: missing at most"])
         for text, control in ((u"Within reach: missing at most", dialog.nearly), (u"Display:", dialog.status_filter),
                               (u"Master:", dialog.clip_master), (u"Compare every master with", dialog.reference),
                               (u"Beside it:", dialog.compare_master)):
             self.assertEqual(labels[text].told("setWhatsThis")[-1], control.told("setWhatsThis")[-1], text)
             self.assertIs(labels[text].told("setBuddy")[-1][0], control)
+        self.assertIs(labels[measured].told("setBuddy")[-1][0], dialog.metrics_button)
+        self.assertIn((self.ak.CAPTION_PROP, True), labels[measured].told("setProperty"),
+                      "the shared caption: grayed as Check is (ak.caption_states), its help Check's")
 
     def test_spin_box_says_its_number(self):
         """The shared plural helper keeps the box's word in step: "1 glyph", "2 glyphs"."""
@@ -5464,6 +5487,131 @@ class LoadingTests(unittest.TestCase):
             box.setValue(value)
             self.ak.counted_suffix(box, u"glyph")
             self.assertEqual(box.told("setSuffix"), [(suffix,)])
+
+
+class ListCombo(object):
+    """A dropdown that keeps its rows, as Qt's: the first row added becomes the current one."""
+
+    def __init__(self, rows=()):
+        self.rows, self.currentIndex, self.enabled, self.properties = [], -1, True, {}
+        for row in rows:
+            self.addItem(row)
+
+    @property
+    def count(self):
+        return len(self.rows)
+
+    @property
+    def currentText(self):
+        return self.rows[self.currentIndex] if 0 <= self.currentIndex < len(self.rows) else u""
+
+    def itemText(self, index):
+        return self.rows[index]
+
+    def clear(self):
+        self.rows, self.currentIndex = [], -1
+
+    def addItem(self, text):
+        self.rows.append(text)
+        if self.currentIndex < 0:
+            self.currentIndex = 0
+
+    def setCurrentIndex(self, index):
+        self.currentIndex = index
+
+    def setEnabled(self, on):
+        self.enabled = on
+
+    def setProperty(self, name, value):
+        self.properties[name] = value
+
+    def property(self, name):
+        return self.properties.get(name)
+
+
+class RoundThreeTests(unittest.TestCase):
+    """The owner's images 283 to 318: nothing that names a font's masters with no font (289, 291), the tabs'
+    settings rows as tall as one another (285, 286), and counts bold with their nouns (297, 301). On
+    DialogTests' fakes."""
+
+    setUpClass = classmethod(DialogTests.__dict__["setUpClass"].__func__)
+    tearDownClass = classmethod(DialogTests.__dict__["tearDownClass"].__func__)
+    dialog = DialogTests.__dict__["dialog"]
+
+    def test_no_font_no_masters_named(self):
+        dialog = self.dialog()
+        dialog.reference = ListCombo([u"Regular", u"Bold"])
+        dialog.clip_master_label, dialog.clip_master = Recorded(), Recorded()
+        packages = self.workspace.packages
+        self.workspace.packages = lambda: []
+        try:
+            dialog.font_changed()
+        finally:
+            self.workspace.packages = packages
+        # (owner's image 289: "Compare every master with [ ] ." with an empty box)
+        self.assertEqual((dialog.reference.rows, dialog.reference.enabled), ([fc.NOT_AVAILABLE], False),
+                         "a grayed n/a")
+        self.assertEqual(fc.NOT_AVAILABLE, u"n/a")
+        # (owner's image 291: "Master:" over the clipped glyphs with no font)
+        self.assertEqual((dialog.clip_master_label.visible, dialog.clip_master.visible), (False, False))
+        dialog.font_changed()  # (a font opened: its masters)
+        self.assertEqual(dialog.reference.rows, dialog.master_names())
+        self.assertNotIn(fc.NOT_AVAILABLE, dialog.reference.rows)
+
+    def test_the_settings_rows_are_as_tall_as_one_another(self):
+        class Hint(object):
+            def __init__(self, height):
+                self.value = height
+
+            def height(self):
+                return self.value
+
+        class Control(object):
+            def __init__(self, height):
+                self.sizeHint = lambda: Hint(height)  # (a build of PythonQt that gives it as a method)
+
+        class Item(object):
+            def __init__(self, widget):
+                self.held = widget
+
+            def widget(self):
+                return self.held
+
+        class Box(object):
+            def __init__(self, *heights):
+                self.items, self.least = [Item(Control(h)) for h in heights], None
+
+            def layout(self):
+                box = self
+                return type("Layout", (), {"count": lambda layout: len(box.items),
+                                           "itemAt": lambda layout, index: box.items[index]})()
+
+            def setMinimumHeight(self, height):
+                self.least = height
+
+        coverage, metrics, masters = Box(22, 24, 18, 23), Box(16, 23), Box(16, 22, 23)
+        self.assertEqual(fc.level_rows([coverage, metrics, masters]), 24)
+        self.assertEqual([box.least for box in (coverage, metrics, masters)], [24, 24, 24])
+        dialog = self.dialog()
+        for key, box in zip(fc.TABS, (Box(20), Box(30), Box(10))):
+            getattr(dialog, key).settings_box = box
+        dialog.switch_page(1)
+        self.assertEqual([getattr(dialog, key).settings_box.least for key in fc.TABS], [30, 30, 30],
+                         "measured again as a tab is shown")
+
+    def test_the_masters_line_counts_with_their_nouns(self):
+        b = lambda text: u"<b>%s</b>" % text
+        self.assertEqual(fc.masters_status(12, 2000, 2, u"Regular", 0, b),
+                         u"<b>12 of the 2,000 glyphs</b> do not interpolate, compared with <b>Regular</b>.")
+        self.assertEqual(fc.masters_status(1, 5, 2, u"Regular", 0, b),
+                         u"<b>1 of the 5 glyphs</b> does not interpolate, compared with <b>Regular</b>.")
+        self.assertEqual(fc.masters_status(0, 5, 4, u"Regular", 2, b),
+                         u"The <b>5 glyphs</b> match in all <b>4 masters</b>, compared with <b>Regular</b>: contours, "
+                         u"nodes, start points, directions, components, and anchors. <b>2 glyph layers</b> could not be "
+                         u"read.")
+        self.assertTrue(fc.masters_status(0, 1, 2, u"Regular").startswith(u"The 1 glyph matches in both masters"))
+        self.assertEqual(fc.checked_sentence(2, 2, 0, 1.25, b),
+                         u"Checked <b>2 languages</b> and <b>2 character sets</b> in 1.2 s.")
 
 
 class OptionalTests(unittest.TestCase):
@@ -6161,11 +6309,14 @@ class OwnerRoundTests(unittest.TestCase):
                          and one.language.iso == u"cmn"], "opened from three characters on")
 
     def test_own_set_fields(self):
-        """Item 9: the owner's wording for the two fields."""
+        """Item 9: the owner's wording for the two fields; owner's image 309: a placeholder ends with an
+        ellipsis, not a period ("Name" stays as it is)."""
         dialog, made = self.recorded_dialog(("QLineEdit",))
         self.assertEqual(dialog.paste_field.told("setPlaceholderText"),
-                         [(u"Paste text or characters to check as a set of your own.",)])
+                         [(u"Paste text or characters to check as a set of your own\N{HORIZONTAL ELLIPSIS}",)])
         self.assertEqual(dialog.name_field.told("setPlaceholderText"), [(u"Name",)])
+        self.assertEqual(dialog.search.told("setPlaceholderText"),
+                         [(u"Find a language, a character set, or a family\N{HORIZONTAL ELLIPSIS}",)])
 
     def test_languages_glottolog_does_not_classify(self):
         """Item 10: "Not classified (1)" read as a family's name. Its one language, Minang (xrg), has no
@@ -6392,7 +6543,8 @@ class SpacesSaidOnceTests(unittest.TestCase):
 
     def test_said_in_amber_with_glyph_compose_a_link(self):
         """The owner's image 242: a line logged as the window reads a font that says what the font lacks is a
-        warning (amber), and Glyph Compose in it opens that tool."""
+        warning (amber), and Glyph Compose in it opens that tool; image 313: on the spaces, listed and ticked
+        on its Glyph generation tab (the tool's plain link opened it on its first tab, with nothing done)."""
         said = []
         sys.path.insert(0, os.path.join(HERE, os.pardir, "kerning"))
         import freelab_auto_kerning as ak
@@ -6401,14 +6553,48 @@ class SpacesSaidOnceTests(unittest.TestCase):
             log = type("Log", (object,), {"add": lambda self, text, level="info": said.append((text, level))})()
             package = None
 
-        Stand.say_spaces = fc.FontCheckDialog.__dict__["say_spaces"]
-        Stand.tool_links = fc.FontCheckDialog.__dict__["tool_links"]
+        for name in ("say_spaces", "tool_links", "log_link", "build_spaces"):
+            setattr(Stand, name, fc.FontCheckDialog.__dict__[name])
         stand = Stand()
         stand.ak = ak
-        stand.say_spaces(fc.spaces_note(lambda code: code != 0x2009))
+        stand.say_spaces(fc.spaces_note(lambda code: code not in (0x2009, 0x200A)))
         self.assertEqual(said[0][1], "warning")
-        self.assertIn(ak.tool_link(u"Glyph Compose"), said[0][0])
-        self.assertIn(u"its <i>Glyph generation</i> tab", said[0][0])
+        self.assertNotIn(ak.tool_link(u"Glyph Compose"), said[0][0], "not the tool's plain link")
+        self.assertIn(u'<a href="freelab-spaces:2009-200A"><i>Glyph Compose</i></a>', said[0][0])
+        self.assertEqual(ak.with_tool_links(said[0][0]), said[0][0], "the log's own links leave it alone")
+        self.assertIn(u"its <i>Glyph generation</i> tab, ticked.", said[0][0])
+        # Clicked: Glyph Compose opened on those spaces, as Build with Glyph Compose opens it on glyphs
+        opened, places = [], []
+
+        class Compose(object):
+            @staticmethod
+            def main(characters=None):
+                opened.append(characters)
+
+        class Place(object):
+            def __enter__(self):
+                places.append("in")
+
+            def __exit__(self, *args):
+                places.append("out")
+
+        stand.diacritics_module = lambda: Compose
+        stand.dialog = object()
+        saved = ak.opening_from
+        ak.opening_from = lambda dialog: Place()
+        self.addCleanup(setattr, ak, "opening_from", saved)
+        self.assertIs(stand.log_link(u"freelab-spaces:2009-200A"), True, "this window's link")
+        self.assertEqual(opened, [], "no font: nothing to build them in")
+        stand.package = object()
+        self.assertIs(stand.log_link(u"freelab-spaces:2009-200A"), True)
+        self.assertEqual(opened, [[u"\N{THIN SPACE}", u"\N{HAIR SPACE}"]], "handed over as Build with Glyph Compose hands glyphs")
+        self.assertEqual(places, ["in", "out"], "in this window's place, on its font")
+        self.assertEqual(said[-1], (u"%s lists <b>2 spaces</b> on its <i>Glyph generation</i> tab, ticked: <i>Build "
+                                    u"ticked glyphs</i> adds them." % ak.tool_link(u"Glyph Compose"), "done"))
+        import io
+        with io.open(fc.__file__, encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertIn(u"self.log.link_handler = self.log_link", source, "the log hands its links to log_link")
 
 
 class SearchFirstTests(unittest.TestCase):

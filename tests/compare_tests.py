@@ -1444,14 +1444,85 @@ class DialogTests(unittest.TestCase):
     def test_no_font(self):
         self.workspace.packages = lambda: []
         self.workspace.currentPackage = None
+        enabled = {}
+        FakeCombo.setEnabled = lambda box, on: enabled.__setitem__(id(box), on)
+        self.addCleanup(delattr, FakeCombo, "setEnabled")
         dialog = fcmp.CompareDialog()
         self.assertIsNone(dialog.failed, dialog.failed)
-        self.assertEqual((dialog.choice_a.rows, dialog.first_key(), dialog.second_key), ([], None, None))
+        # (owner's image 290: "Compare [ ]" then the swap button, an empty box; a grayed "n/a" instead)
+        self.assertEqual((dialog.choice_a.rows, dialog.first_key(), dialog.second_key), ([fcmp.NOT_AVAILABLE], None, None))
+        self.assertEqual(fcmp.NOT_AVAILABLE, u"n/a")
+        self.assertIs(enabled.get(id(dialog.choice_a)), False, "grayed")
         self.assertIn(u"No font is open", dialog.missing())
         self.assertIn(fcmp.NO_FONT_LINE, self.ak.ONE_LINE, "a no-font line: on one line")
         self.assertFalse(dialog.compare_button.enabled)
         dialog.compare()
         self.assertIsNone(dialog.sides)
+        # A font opened for the window: its masters instead, the box usable again
+        self.workspace.packages = lambda: [first_font()]
+        self.workspace.currentPackage = self.workspace.packages()[0]
+        dialog.font_changed()
+        self.assertEqual(dialog.choice_a.rows, [u"Fake A"])
+        self.assertIs(enabled.get(id(dialog.choice_a)), True)
+
+    def test_the_tick_of_the_features_alike_says_how_many(self):
+        # Owner's image 293: "I don't seem to be able to see a difference when ticking this option". It works:
+        # it lists the features whose code is the same in both fonts too; two fonts with none alike (every
+        # feature differs or is only in one) leave it nothing to show. It says how many, and grays with none.
+        self.assertEqual(fcmp.same_caption(None), u"Show the features that are alike")
+        self.assertEqual(fcmp.same_caption(0), u"Show the features that are alike")
+        self.assertEqual(fcmp.same_caption(1), u"Show the feature that is alike")
+        self.assertEqual(fcmp.same_caption(1200), u"Show the 1,200 features that are alike")
+        dialog = self.dialog([first_font(), second_font()])
+        told = {}
+        dialog.show_same = type("Tick", (), {
+            "checked": False, "setText": lambda tick, text: told.__setitem__("text", text),
+            "setEnabled": lambda tick, on: told.__setitem__("enabled", on),
+            "setToolTip": lambda tick, text: told.__setitem__("tip", text),
+            "property": lambda tick, name: None})()
+        dialog.update_buttons()
+        self.assertEqual((told["text"], told["enabled"], told["tip"]),
+                         (u"Show the features that are alike", False, u"Compare two fonts first."))
+        dialog.choice_b.pick(1)  # (compared at once: the Classes panel's classes are alike in both)
+        self.assertEqual((told["text"], told["enabled"], told["tip"]), (u"Show the feature that is alike", True, u""))
+        self.assertEqual([f.tag for f in dialog.feature_shown], [u"liga", u"kern", u"ss01"], "unticked: alike left out")
+        dialog.show_same.checked = True
+        dialog.fill_features()
+        self.assertEqual([f.tag for f in dialog.feature_shown], [u"liga", u"kern", u"ss01", fcmp.CLASSES],
+                         "ticked: the one alike listed too")
+        dialog.feature_rows = [f for f in dialog.feature_rows if f.kind != "same"]  # (two fonts with none alike)
+        dialog.update_buttons()
+        self.assertEqual(told["enabled"], False)
+        self.assertIn(u"No feature is alike", told["tip"])
+
+    def test_the_options_rows_are_as_tall_as_one_another(self):
+        # (owner's images 285 and 286, in Kerning Check: a tab's row of options shorter than another's moved the
+        # list under it as the tab was shown; here the chips' rows and the Features tab's tick)
+        dialog = self.dialog([first_font(), second_font()])
+        self.assertEqual(len(dialog.option_rows), 3, "the chips' two rows and the tick's")
+
+        class Hint(object):
+            def __init__(self, height):
+                self.value = height
+
+            def height(self):
+                return self.value
+
+        def box(*heights):
+            items = [type("Item", (), {"widget": (lambda item, h=h: type("W", (), {"sizeHint": Hint(h)})())})()
+                     for h in heights]
+            found = type("Box", (), {"least": None})()
+            found.layout = lambda: type("Layout", (), {"count": lambda layout: len(items),
+                                                       "itemAt": lambda layout, index: items[index]})()
+            found.setMinimumHeight = lambda height: setattr(found, "least", height)
+            return found
+
+        dialog.option_rows = [box(24, 24), box(24), box(18)]
+        dialog.switch_page(2)
+        self.assertEqual([row.least for row in dialog.option_rows], [24, 24, 24], "the tick's row as tall as the chips'")
+        with io.open(fcmp.__file__, encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertIn(u"self.level_options()\n        self.may_recall = True", source, "levelled as the window is made")
 
     def test_one_feature_alike(self):
         dialog = self.dialog([first_font(), second_font()])

@@ -1541,8 +1541,8 @@ def show_in_glyph_window(fontlab, text, owner=None):
     """Opens a new Glyph tab (FontLab's own New Glyph Tab) and sets its text (FontLab's /glyphname
     syntax), as typing it would; the error's text, or None. requestContent alone sets the text of the
     active Glyph window only, and does nothing without one. Both act on the font FontLab shows: asked
-    from a tool's window (owner, else the active window's tool) whose font is another, it is refused,
-    naming the font to click (FontLab offers scripts no safe way to make a font the current one)."""
+    from a tool's window (owner, else the active window's tool) whose font is another, that font is shown
+    first (focus_font), and the command refused, naming the font to click, only when it cannot be."""
     QtCore, QtGui = _qt()
     try:
         if owner is None:
@@ -1550,9 +1550,9 @@ def show_in_glyph_window(fontlab, text, owner=None):
     except Exception:
         owner = None
     foreign = foreign_font(owner, fontlab)
-    if foreign is not None:
-        return (u"FontLab opens it on the font it shows, not on this window's (%s): click %s's Font window, then "
-                u"try again" % (foreign, foreign))
+    if foreign is not None and not focus_font(owner, fontlab):
+        return (u"FontLab opens it on the font it shows, not on this window's (%s), and FreeLab could not "
+                u"show that font: click %s's Font window, then try again." % (foreign, foreign))
     try:
         symbols = fontlab.fgSymbolList(text, True)
     except Exception as exc:
@@ -1763,7 +1763,7 @@ def history_state(package):
 # follow: the glyphs built (Glyph Compose), spaced, kerned, the features written, then the result
 # compared, checked (Font Check), and proofed.
 MENU_GROUPS = (("Font Builder", "Glyph Compose", "Auto Spacing", "CJK Spacing", "CJK Vertical", "Auto Kerning", "Kerning Check",
-                "Feature Code", "Feature Check", "Font Compare", "Font Check", "Proof"),
+                "Feature Code", "Feature Check", "Font Compare", "Family Audit", "Font Check", "Proof"),
                ("Dark Mode", "Toggle Dark Mode", "Dark Mode Settings", "Tab Docking", "Toggle Tab Docking"),
                ("Start MCP Listener", "Stop MCP Listener", "Start Listener", "Stop Listener"))  # (FreeLab MCP's, old names too)
 MENU_TITLE, SCRIPTS_MENU = "FreeLab", "menuScripts"
@@ -2153,8 +2153,8 @@ def window_font(owner, workspace):
 def foreign_font(owner, fontlab=None):
     """The name of the font a tool's window works on when FontLab shows another font, else None (that
     font, no window, or nothing to tell). FontLab's own commands (Undo, Redo, a new Glyph tab) act on
-    the font it shows, and scripts have no safe way to make a font the current one: callers refuse,
-    naming the font to click."""
+    the font it shows: callers show the window's font first (focus_font), and refuse, naming the font to
+    click, only when that fails."""
     try:
         font_id = getattr(owner, "font_id", None)
         if font_id is None:
@@ -2171,6 +2171,69 @@ def foreign_font(owner, fontlab=None):
         return u"%s" % (package.tfn or u"its font")
     except Exception:
         return None
+
+
+FONT_WINDOW_CLASS = "FontWindow"  # the class of a font's Font window, a tab of FontLab's main window
+
+
+def _main_tab_widgets(main):
+    """The tab widgets of FontLab's main window that hold its Font and Glyph windows (YTabWidget), the
+    ones docked in the main window first."""
+    QtGui = _qt()[1]
+    found = []
+    try:
+        for widget in main.findChildren(QtGui.QTabWidget):
+            if widget.inherits("YTabWidget") or u"%s" % widget.className() == u"YTabWidget":
+                found.append(widget)
+    except Exception:
+        return []
+    return found
+
+
+def focus_font(owner, fontlab=None):
+    """Whether FontLab shows the font of a tool's window now: when it shows another, the main window's
+    tab of that font's Font window is made the current one (as a click on it would), the tab whose
+    title names the font tried first, each checked by FontLab's current font (live, 2026-11-18: the
+    current font follows the tab at once). The tab shown before is put back when none is that font's.
+    Undo, Redo, and a new Glyph tab then act on the window's font instead of refusing (owner's image
+    314: "can't the script suite in general refocus on the right font in such cases?")."""
+    try:
+        font_id = getattr(owner, "font_id", None)
+        if font_id is None:
+            return True
+        if fontlab is None:
+            import fontlab
+        workspace = fontlab.flWorkspace.instance()
+        if _font_id(workspace.currentPackage) == font_id:
+            return True
+        package = find_font(workspace, font_id)
+        main = AutoKerningDialog.main_window()
+        if package is None or main is None:
+            return False
+        name = (u"%s" % (package.tfn or u"")).strip()
+    except Exception:
+        return False
+    for tabs in _main_tab_widgets(main):
+        try:
+            before = int(_property(tabs, "currentIndex"))
+            fonts = [k for k in range(int(_property(tabs, "count")))
+                     if tabs.widget(k) is not None and tabs.widget(k).inherits(FONT_WINDOW_CLASS)]
+        except Exception:
+            continue
+        named = [k for k in fonts if name and name in (u"%s" % tabs.tabText(k))]
+        for k in named + [k for k in fonts if k not in named]:
+            try:
+                tabs.setCurrentIndex(k)
+                if _font_id(workspace.currentPackage) == font_id:
+                    return True
+            except Exception:
+                continue
+        try:
+            if int(_property(tabs, "currentIndex")) != before:
+                tabs.setCurrentIndex(before)
+        except Exception:
+            pass
+    return False
 
 
 def title_window(owner, package):
@@ -2267,6 +2330,25 @@ def centered_place(place, size, new_size, area=None, frame=(0, 0)):
     return x, y
 
 
+def keep_center(owner):
+    """A window that took another's place (register_window: owner.placed_from, the other's place and
+    size), centered again on that window's center as it first shows: it was placed at the size asked for,
+    and Qt then grew it to its layout's least width, all of it to the right, so going from tool to tool
+    with the arrows walked the windows off to the right of the screen (owner's image 311). Once."""
+    try:
+        place = getattr(owner, "placed_from", None)
+        if place is None:
+            return
+        owner.placed_from = None
+        dialog = owner.dialog
+        area, frame = _free_area(dialog)
+        x, y = centered_place(place[0], place[1], _size(dialog), area, frame)
+        if (x, y) != _xy(_property(dialog, "pos")):
+            dialog.move(x, y)
+    except Exception:
+        pass
+
+
 def _free_area(dialog):
     """The free part of the dialog's screen, (left, top, right, bottom), and what its frame adds to its
     size; (None, (0, 0)) where Qt cannot tell."""
@@ -2351,6 +2433,7 @@ def hook_quit():
 
 FONTS_POLL_MS = 700  # how often FreeLab looks whether a window's font was closed, or a font opened
 NO_FONT_LINE = u"No font is open. This window hooks to the next font you open."  # a tool's top line meanwhile
+NOT_AVAILABLE = u"n/a"  # what a dropdown or a name that would be empty with no font shows (owner's images 289, 290)
 
 
 def no_font_line(own=None, workspace=None):
@@ -3012,7 +3095,7 @@ def fontlab_undo(owner, name):
         if getattr(owner, "busy", False):
             return False  # (the History must not move under the tool's own work)
         foreign = foreign_font(owner)
-        if foreign is not None:
+        if foreign is not None and not focus_font(owner):  # (its font shown first: owner's image 314)
             if log is not None:
                 log.add(u"Nothing was %s: FontLab's %s works on the font it shows, not on this window's (%s). "
                         u"Click %s's Font window, then %s there." % (done, i(verb.capitalize()), b(foreign),
@@ -3520,6 +3603,7 @@ def take_window(tool, owner):
             area, frame = _free_area(owner.dialog)
             x, y = centered_place(place[0], place[1], _size(owner.dialog), area, frame)
             owner.dialog.move(x, y)
+            owner.placed_from = place  # (centered again as it shows, at the size its layout gives it: keep_center)
         else:
             _center_on_main(owner.dialog)
     except Exception:
@@ -3883,6 +3967,10 @@ def busy_progress(owner, what=None, part=None, force=False, stoppable=True):
         if moved:
             state["what"] = what
             label.setText(u"%s\N{HORIZONTAL ELLIPSIS}" % what if what else u"")
+            try:
+                row.layout().activate()  # (laid out now: painted at the last text's width, a longer one was cut by the bar, owner's image 312)
+            except Exception:
+                pass
         if part is not None and bar is not None:
             bar.setValue(int(round(min(max(float(part), 0.0), 1.0) * BUSY_RANGE)))
     except Exception:
@@ -4629,6 +4717,7 @@ def filter_event(window, obj, event, pending):
             module = sys.modules.get(__name__)
             (getattr(module, "update_states", None) or update_states)(owner.dialog if owner is not None else window,
                                                                          hidden_too=True)
+            (getattr(module, "keep_center", None) or keep_center)(owner)
         except Exception:
             pass
         return False
@@ -6475,9 +6564,28 @@ def share_columns(view, held=None, after_fit=False):
             view.setProperty(TABLE_SHARING_PROP, False)
         except Exception:
             pass
+    fitted_bar(view, new, room)
     if after_fit:
         widen_window(view)
     return new
+
+
+def fitted_bar(view, widths, room):
+    """A list whose columns fit its width shows no horizontal scroll bar until they no longer do: the
+    columns are shared on the next turn of the event loop after a resize, so between the two the old
+    widths passed the new width and the bar flashed on and off as the window was resized (owner's image
+    295). Off while the columns fit; as needed once even their least passes the width. Not for an empty
+    list (empty_bars keeps its bars off)."""
+    try:
+        if view_rows(view) == 0:
+            return
+        QtCore = _qt()[0]
+        total = sum(int(w) for w in widths if w is not None)
+        policy = QtCore.Qt.ScrollBarAlwaysOff if total <= room + 1 else QtCore.Qt.ScrollBarAsNeeded
+        if _property(view, "horizontalScrollBarPolicy") != policy:
+            view.setHorizontalScrollBarPolicy(policy)
+    except Exception:
+        pass
 
 
 MIN_SECTION = 24  # pixels: a column dragged narrower stops here (at 0 it vanished, with no way to get it back)
@@ -6498,11 +6606,13 @@ def view_rows(view):
 def empty_bars(view):
     """A list with no row shows no scroll bar: while it was resized, its columns (shared on the next turn
     of the event loop) passed its width for a moment, and an empty list flashed its bars (owner's image
-    192). Its bars come back as needed once it has rows."""
+    192). Its bars come back as needed once it has rows: the vertical one here, the horizontal one when
+    its columns no longer fit (fitted_bar, as they are shared out)."""
     try:
         QtCore = _qt()[0]
-        policy = QtCore.Qt.ScrollBarAlwaysOff if view_rows(view) == 0 else QtCore.Qt.ScrollBarAsNeeded
-        for name in ("horizontalScrollBarPolicy", "verticalScrollBarPolicy"):
+        empty = view_rows(view) == 0
+        policy = QtCore.Qt.ScrollBarAlwaysOff if empty else QtCore.Qt.ScrollBarAsNeeded
+        for name in ("horizontalScrollBarPolicy", "verticalScrollBarPolicy") if empty else ("verticalScrollBarPolicy",):
             if _property(view, name) != policy:
                 getattr(view, "set" + name[0].upper() + name[1:])(policy)
     except Exception:
@@ -6693,6 +6803,7 @@ def enable(button, on):
 
 
 NO_FONT_PROP = "freelabNoFont"  # on a control no_font_states grayed (its window has no font)
+NO_FONT_HIDDEN_PROP = "freelabNoFontHidden"  # on a preview caption no_font_states hid (shown again with a font)
 WITHOUT_FONT_PROP = "freelabWithoutFont"  # on a control a tool keeps usable without a font (a font chooser)
 SEPARATOR_PROP = "freelabSeparator"  # on separator()'s lines
 HEADER_SEPARATOR_PROP = "freelabHeaderSeparator"  # on the line under a window's top text (separator(header=True))
@@ -6733,8 +6844,21 @@ def no_font_states(dialog):
         return  # (a tool at work sets its own states)
     for line in dialog.findChildren(QtGui.QFrame):
         try:
-            if line.property(SEPARATOR_PROP) and bool(_property(line, "visible")) != has_font and line.window() == window:
-                line.setVisible(has_font)
+            shown = has_font or heads_section(line)
+            if line.property(SEPARATOR_PROP) and bool(_property(line, "visible")) != shown and line.window() == window:
+                line.setVisible(shown)
+        except Exception:
+            continue
+    for label in dialog.findChildren(QtGui.QLabel):  # (a preview's caption over nothing: owner's image 283)
+        try:
+            if not label.property(PREVIEW_CAPTION_PROP) or label.window() != window:
+                continue
+            if not has_font and bool(_property(label, "visible")):
+                label.setProperty(NO_FONT_HIDDEN_PROP, True)
+                label.setVisible(False)
+            elif has_font and label.property(NO_FONT_HIDDEN_PROP):
+                label.setProperty(NO_FONT_HIDDEN_PROP, None)
+                label.setVisible(True)
         except Exception:
             continue
     for view in dialog.findChildren(QtGui.QAbstractItemView):
@@ -6769,6 +6893,19 @@ def no_font_states(dialog):
             refresh()
         except Exception:
             pass
+
+
+def heads_section(line):
+    """Whether a separator sets apart a section's heading (the label right after it in its layout): it
+    stays with no font, the list's frame above and the heading below being shown then too (owner's image
+    318, Feature Code's Figure forms to build: "missing on all windows where it should be present")."""
+    try:
+        parent = line.parentWidget()
+        after = _next_widget(parent.layout(), line) if parent is not None else None
+        return (after is not None and after is not _NOT_FOUND and bool(after.inherits("QLabel"))
+                and not after.property(PREVIEW_CAPTION_PROP))  # (a line between two previews goes)
+    except Exception:
+        return False
 
 
 def checks_of(items, checked):
@@ -6812,7 +6949,7 @@ def check_line(command, checked, unchecked, hidden, noun=u"row", many=None, hidd
     if checked:
         parts.append(u"ticked %s" % b(counted(checked, noun, many)))
     if unchecked:
-        parts.append(u"unticked %s" % (b(counted(unchecked, noun, many)) if not checked else b(unchecked)))
+        parts.append(u"unticked %s" % (b(counted(unchecked, noun, many)) if not checked else b(grouped(unchecked))))
     changed = checked + unchecked
     note = u""
     if hidden:
@@ -6821,7 +6958,7 @@ def check_line(command, checked, unchecked, hidden, noun=u"row", many=None, hidd
         elif hidden == changed:
             note = u" (all of them %s)" % hidden_text[1]
         else:
-            note = u" (%d of them %s)" % (hidden, hidden_text[0] if hidden == 1 else hidden_text[1])
+            note = u" (%s of them %s)" % (b(grouped(hidden)), hidden_text[0] if hidden == 1 else hidden_text[1])
     return u"%s %s%s." % (i(command), u" and ".join(parts), note)
 
 
@@ -7141,6 +7278,28 @@ def sentence_end(row):
 def header_separator():
     """separator(header=True): the line under a window's top text, always shown."""
     return separator(header=True)
+
+
+def show_only(groups, shown):
+    """Shows the widgets of groups[shown] and hides every other group's (groups: a dict or a list of
+    lists of widgets), the others hidden FIRST: a tab's buttons share the window's bottom row, and a
+    switch that showed the new tab's before hiding the old ones held both a moment, so Qt grew the window
+    to fit them and never gave the width back (owner's image 284, live 2026-11-18: Glyph Compose went from
+    1,084 to 1,568 pixels with no font). Never raises."""
+    try:
+        keys = list(groups.keys()) if hasattr(groups, "keys") else list(range(len(groups)))
+    except Exception:
+        return
+    for show in (False, True):
+        for key in keys:
+            if (key == shown) != show:
+                continue
+            for widget in groups[key] or ():
+                try:
+                    if bool(_property(widget, "visible")) != show or not show:
+                        widget.setVisible(show)
+                except Exception:
+                    pass
 
 
 def preview_caption(text=u"", label=None):
@@ -8607,15 +8766,35 @@ class AutoKerningDialog(object):
             return None
         return package
 
-    def font_line(self):
-        if self.package is None:
-            return no_font_line()
+    def font_named_now(self):
+        """The font and master as every top line names them (font_named: the masters counted when several)."""
         try:
             masters = len(list(self.package.masters))
         except Exception:
             masters = 1
-        return u"%s. %s." % (font_named(self.package.tfn, self.master, masters),
+        return font_named(self.package.tfn, self.master, masters)
+
+    def font_line(self):
+        if self.package is None:
+            return no_font_line()
+        return u"%s. %s." % (self.font_named_now(),
                              ALL_SCRIPTS_LINE if self.script == ALL_SCRIPTS else SCRIPT_LINES[self.script])
+
+    def no_font_scripts(self):
+        """With no font, Script: says "n/a" (grayed with it), not the scripts of a font closed or Latin
+        (owner's images 289, 290); fill_scripts lists the next font's, its keys being others."""
+        try:
+            self.script_box.blockSignals(True)
+            self.script_box.clear()
+            self.script_box.addItem(NOT_AVAILABLE)
+            self.script_keys = []
+        except Exception:
+            pass
+        finally:
+            try:
+                self.script_box.blockSignals(False)
+            except Exception:
+                pass
 
     def fill_scripts(self, package, wanted=None):
         """The script list: the scripts the font has; the script to analyze: wanted (or the last one)
@@ -8728,6 +8907,7 @@ class AutoKerningDialog(object):
         if package is None:
             self.package, self.analysis, self.suggestions = None, None, []
             self.clear_list()
+            self.no_font_scripts()
             self.status.setText(self.font_line())
             return
         if self.package is None or font_key(package) != font_key(self.package) or package.master != self.master:
@@ -8893,12 +9073,12 @@ class AutoKerningDialog(object):
         summary = factor_summary(self.analysis)
         analysis = self.analysis
         work = (u"%s: %s measured, %s unchanged since the last analysis" % (
-                    b(counted(len(analysis.suggestions), u"pair")), b(analysis.measured), b(analysis.reused))
+                    b(counted(len(analysis.suggestions), u"pair")), b(grouped(analysis.measured)), b(grouped(analysis.reused)))
                 if analysis.reused else u"%s measured" % b(counted(len(analysis.suggestions), u"pair")))
-        what = (u"%s listed, picked by hand" % b(len(listed)) if picked_only
-                else u"%s listed" % b(len(listed)))
-        self.status.setText(u"%s, master %s, %s. %s; %s.<br>%s."
-                            % (b(self.package.tfn), b(self.master), b(self.script_note()), work, what, html("; ".join(summary))))
+        what = (u"%s listed, picked by hand" % b(grouped(len(listed))) if picked_only
+                else u"%s listed" % b(grouped(len(listed))))
+        self.status.setText(u"%s, %s. %s; %s.<br>%s."
+                            % (self.font_named_now(), b(self.script_note()), work, what, html("; ".join(summary))))
         if self.first_pass:
             self.first_pass = False
             self.log.add(u"Analyzed %s, master %s: %s listed." % (b(self.package.tfn), b(self.master),
@@ -8940,7 +9120,7 @@ class AutoKerningDialog(object):
         entry = self.font_kerning.target(*s.key)[0]
         reach = self.font_kerning.reach(entry)
         if reach > 1:
-            return u"Writes to %s, which kerns %d glyph pairs." % (FontKerning.describe(entry), reach)
+            return u"Writes to %s, which kerns %s." % (FontKerning.describe(entry), counted(reach, u"glyph pair"))
         return u"Writes to the pair %s alone." % FontKerning.describe(entry)
 
     def fill_row(self, row, s, source, item=None):
@@ -9236,7 +9416,7 @@ class AutoKerningDialog(object):
         names = [u"%s %s" % pair for pair in pairs if pair != s.key]  # (in the font's key order)
         shown = u", ".join(names[:RELATED_SHOWN])
         if len(names) > RELATED_SHOWN:
-            shown += u", and %d more" % (len(names) - RELATED_SHOWN)
+            shown += u", and %s more" % grouped(len(names) - RELATED_SHOWN)
         self.related.setText(u"Also kerns: %s." % shown)
         self.related.setToolTip(u"\n".join(names))
         self.related.setVisible(True)
@@ -9409,14 +9589,14 @@ class AutoKerningDialog(object):
             s.current = self.font_kerning.current(*s.key)
         for s in written:
             s.override = None
-        first = html(u"Wrote %s for %s to master %s%s" % (
-            counted(entries, u"entry", u"entries"), counted(len(written), u"pair"), self.master,
+        first = u"Wrote %s for %s to master %s%s" % (
+            b(counted(entries, u"entry", u"entries")), b(counted(len(written), u"pair")), b(html(self.master)),
             (u" (%s, which kern%s %s classes' other glyphs too)" % (
-                u"one of them a kerning class pair" if classes == 1 else u"%d of them kerning class pairs" % classes,
-                u"s" if classes == 1 else u"", u"its" if classes == 1 else u"their")) if classes else u""))
+                u"one of them a kerning class pair" if classes == 1 else u"%s of them kerning class pairs" % b(grouped(classes)),
+                u"s" if classes == 1 else u"", u"its" if classes == 1 else u"their")) if classes else u"")
         if 0 < len(written) <= LOG_PAIRS_SHOWN:  # the pairs, drawn from the font, each glyph opened on a click
             first += u": %s" % pair_links([(s.left, s.right) for s in written])
-        lines = [html(u"%s shared an entry with a commoner pair and took its value." % counted(shared, u"pair"))] if shared else []
+        lines = [u"%s shared an entry with a commoner pair and took its value." % b(counted(shared, u"pair"))] if shared else []
         self.update_picked()
         self.fill_table()
         if entries:  # (none: the error below says why)

@@ -29,7 +29,7 @@ FreeLab's scripts run inside FontLab, in its own thread. If Windows ever offers 
 
 ## With no font
 
-A window with no font open says so on its first line, *No font is open. This window hooks to the next font you open.* (with Proof's and Font Builder's own no-font lines, the only sentences FreeLab puts on one line). Its controls are grayed until a font comes, all but the tools menu, the arrows, help, Close, and what a tool can do without a font (Font Builder's template, Font Compare's choice of fonts); they are grayed before the window first shows, so nothing flashes usable. The line under the top text stays; the other lines, which set apart parts that are empty, are hidden. An empty status line takes no room. A window with no font opens at the size every tool opens at, and one that opens wider for its content (Font Check) widens once it hooks to a font.
+A window with no font open says so on its first line, *No font is open. This window hooks to the next font you open.* (with Proof's and Font Builder's own no-font lines, the only sentences FreeLab puts on one line). Its controls are grayed until a font comes, all but the tools menu, the arrows, help, Close, and what a tool can do without a font (Font Builder's template, Font Compare's choice of fonts, Family Audit's *Add files…*); they are grayed before the window first shows, so nothing flashes usable. The line under the top text stays; the other lines, which set apart parts that are empty, are hidden. An empty status line takes no room. A window with no font opens at the size every tool opens at, and one that opens wider for its content (Font Check) widens once it hooks to a font.
 
 ## Lists
 

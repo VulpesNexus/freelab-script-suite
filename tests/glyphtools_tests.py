@@ -2214,6 +2214,10 @@ class HandedOverTests(unittest.TestCase):
         self.assertEqual(ac.left_out_sentence(2, [("unbuildable", [u"x"])]),
                          u"Of the 2 glyphs Font Check handed over, 1 is not listed: it is not built from a letter and "
                          u"marks (x).")
+        bold = lambda text: u"<b>%s</b>" % text  # noqa: E731  (owner's images 297 and 301)
+        self.assertEqual(ac.left_out_sentence(3, [("built", [u"x", u"y"])], None, bold),
+                         u"Of the <b>3 glyphs</b> Font Check handed over, <b>2</b> are not listed: <b>2</b> were built "
+                         u"here (x y).")
 
     def test_a_character_past_the_basic_plane_is_one_character(self):
         """On FontLab's narrow Python 2 a character past U+FFFF is two code units, and was said to be "not
@@ -2404,8 +2408,8 @@ class SearchTests(unittest.TestCase):
             self.assertEqual([row.checked for row in build.rows], [True, False], "the hidden row as it was")
             # Each click leaves a line: how many it changed, how many are checked in all, the hidden ones said
             # (the owner's report of 2026-11-16: Check all and Check none left none)
-            self.assertEqual(dialog.lines, [u"Ticked <b>1 glyph</b> (2 ticked in all, 1 of them not shown).",
-                                            u"Unticked <b>1 glyph</b> (1 still ticked, not shown: a search hides it)."])
+            self.assertEqual(dialog.lines, [u"Ticked <b>1 glyph</b> (<b>2</b> ticked in all, <b>1</b> of them not shown).",
+                                            u"Unticked <b>1 glyph</b> (<b>1</b> still ticked, not shown: a search hides it)."])
             dialog.search.text = u"U+1E0D"
             dialog.apply_search()
             self.assertEqual((build.hidden, lack.hidden, dialog.count), (True, False, u"1 of 3 glyphs shown"))
@@ -2457,7 +2461,7 @@ class SearchTests(unittest.TestCase):
             self.assertEqual(page.count, u"1 of 3 glyphs shown")
             page.check_all(False)
             self.assertEqual([row.checked for row in section.rows + marks.rows], [True, False, True], "the row shown only")
-            self.assertEqual(lines, [u"Unticked <b>1 glyph</b> (2 still ticked, not shown: a search hides them)."])
+            self.assertEqual(lines, [u"Unticked <b>1 glyph</b> (<b>2</b> still ticked, not shown: a search hides them)."])
             page.search.text = u"acute"
             page.apply_search()
             self.assertEqual((bases.hidden, marks.hidden), (True, False))
@@ -3061,6 +3065,9 @@ class CompactTests(unittest.TestCase):
         self.assertEqual(ac.compact_text(True, 0, 1), u"%s on: 1 glyph too tall for a 120%% line is made compact." % box)
         self.assertEqual(ac.compact_text(True, 0, 0), u"%s on: no glyph is too tall for a 120%% line." % box)
         self.assertTrue(ac.compact_text(True, 2).endswith(u"2 glyphs placed by hand keep what you set."))
+        bold = lambda text: u"<b>%s</b>" % text  # noqa: E731  (owner's images 297 and 301: a count bold with its noun)
+        self.assertEqual(ac.compact_text(True, 1, 8, bold), u"%s on: <b>8 glyphs</b> too tall for a 120%% line are made "
+                                                            u"compact. <b>1 glyph</b> placed by hand keeps what you set." % box)
         for on in (True, False):
             for count in (None, 0, 1, 9):
                 self.assertFalse(ac.compact_text(on, 0, count).startswith(u"Glyphs"), "never a capital G after the time")
@@ -3076,7 +3083,7 @@ class CompactTests(unittest.TestCase):
         dialog.item_of = lambda recipe: None
         dialog.lines, dialog.written = [], []
         dialog.log = Stub(add=lambda line, level="info": dialog.lines.append(line))
-        dialog.ak = Stub(html=lambda value: u"%s" % value)
+        dialog.ak = Stub(html=lambda value: u"%s" % value, b=lambda value: u"<b>%s</b>" % value)
 
         def fill():  # as the list's rows are first drawn: each placed (which unchecks one too tall even compact)
             for r in dialog.recipes:
@@ -3108,7 +3115,7 @@ class CompactTests(unittest.TestCase):
         self.assertEqual(dialog.shift_cache, {})
         self.assertTrue(plain.notes[0].endswith(ac.TOO_TALL_NOTE), "its row says it is too tall, not that it was compacted")
         self.assertEqual(ac.place(by_hand, inks().get, placement, self.TIGHT)[0], before, "what the hand set, kept")
-        self.assertIn(u"1 glyph placed by hand keeps what you set", dialog.lines[-1])
+        self.assertIn(u"<b>1 glyph</b> placed by hand keeps what you set", dialog.lines[-1], "bold (images 297, 301)")
         self.switch(dialog, True)
         self.assertEqual(ac.place(plain, inks().get, placement, self.TIGHT)[0], compact, "the compact suggestion again")
         self.assertEqual(ac.place(by_hand, inks().get, placement, self.TIGHT)[0], before)
@@ -3362,6 +3369,21 @@ class WhatsThisTests(unittest.TestCase):
                 return gg
             raise IOError(file_name)
         dialog.ak.load_sibling = load_sibling
+        spaced = []
+
+        def size(height):
+            return property(lambda self: Stub(height=lambda: height))
+        gui.QHBoxLayout.addSpacing = lambda self, pixels: spaced.append(pixels)
+        strut = lambda self, pixels: self.__dict__.setdefault("struts", []).append(pixels)  # noqa: E731
+        gui.QHBoxLayout.addStrut = strut
+        gui.QLineEdit.setPlaceholderText = lambda self, text: self.__dict__.__setitem__("placeholder", text)
+        gui.QLabel.setMinimumWidth = lambda self, width: self.__dict__.__setitem__("least", width)
+        gui.QComboBox.sizeHint, gui.QLineEdit.sizeHint, gui.QSpinBox.sizeHint = size(24), size(22), size(23)
+        gui.QDoubleSpinBox.sizeHint, gui.QTabBar.sizeHint = size(23), size(30)
+        for widget in (dialog.set_box, dialog.search, dialog.anchors.script_box, dialog.anchors.search, dialog.tabs):
+            type(widget).sizeHint = {"QComboBox": size(24), "QLineEdit": size(22),
+                                     "QTabBar": size(30)}[type(widget).__name__]
+        type(dialog.options_row).addStrut = strut  # (the dialog's own stand-in Qt's)
         saved = ac._qt, gg._qt
         try:
             ac._qt = gg._qt = lambda: (core, gui)
@@ -3379,11 +3401,23 @@ class WhatsThisTests(unittest.TestCase):
         holding = lambda widget: [w for w in made if widget in w.__dict__.get("added", [])][0]  # noqa: E731
         lower = holding(page.reference_line)
         self.assertEqual(lower.added.index(page.reference_line), 1, "between the reference and the preview (image 251)")
-        self.assertIs(lower.added[2], page.preview)
+        showing = lower.added[2]
+        self.assertIs(holding(page.preview), showing.added[0], "the preview and its details, then...")
+        self.assertIs(showing.added[1], holding(page.vary_box), "...Vary turned and mirrored glyphs under them")
         column = [w for w in made if type(w).__name__ == "QVBoxLayout" and w.args[:1] == (page.widget,)][0]
-        self.assertLess(column.added.index(holding(page.vary_box)), column.added.index(holding(page.existing_box)),
+        self.assertLess(column.added.index(holding(page.spins["thin"])), column.added.index(holding(page.existing_box)),
                         "the settings first, then what is listed and the search, over the list (image 249)")
-        self.assertIs(holding(page.vary_box), holding(page.spins["thin"]))
+        self.assertIsNot(holding(page.vary_box), holding(page.spins["thin"]),
+                         "not at the end of the widths' row: it made the tab 1,047 pixels wide (images 307, 308)")
+        self.assertEqual(column.added.index(page.lower_line), column.added.index(page.tree) + 1,
+                         "a line between the list and the Reference heading (images 288, 318)")
+        self.assertEqual(page.search.placeholder, u"Find a glyph\u2026", "an ellipsis (image 309)")
+        self.assertEqual(page.search_label.least, 1, "the count never makes the window wider (images 307, 308)")
+        self.assertEqual(spaced, [], "the rows' own spacing, no wider gaps (image 307)")
+        self.assertEqual(page.settings_row.struts, [30], "as tall as the Diacritics tab's tab bar (brief 23)")
+        self.assertEqual(page.options_row.struts, [24], "as tall as the Diacritics tab's options row")
+        self.assertEqual(dialog.options_row.struts, [24])
+        self.assertEqual(dialog.anchors.options_row.struts, [24], "its dropdown's height, the dropdown hidden or not")
         left, right = dialog.bottom_row("generation")
         self.assertEqual(left.added, [page.all_button, page.none_button, page.value_button, page.restore_button])
         self.assertEqual(right.added, [page.build_button], "in the window's bottom row (image 265)")
@@ -3885,6 +3919,9 @@ class MirrorFixTests(unittest.TestCase):
         self.assertEqual(ac.corrected_text(3, 2), u"Corrected the mirrored components of 3 glyphs (2 glyphs added, "
                                                   u"mirrored with their contours reversed)")
         self.assertEqual(ac.corrected_text(2, 0), u"Corrected the mirrored components of 2 glyphs")
+        self.assertEqual(ac.corrected_text(3, 2, lambda text: u"<b>%s</b>" % text),
+                         u"Corrected the mirrored components of <b>3 glyphs</b> (<b>2 glyphs</b> added, mirrored with "
+                         u"their contours reversed)", "every count bold with its noun (images 297, 301)")
 
     def check_corrected(self, how):
         font = fl_font(how)
@@ -4258,6 +4295,56 @@ def overlapping(boxes):
             if a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]]
 
 
+class FreeLangCharactersTests(unittest.TestCase):
+    """Owner's images 316 and 317: Glyph generation's list drew \u33de and \u33ff as boxes, and the reference's caption
+    "Noto Sans lacks \u33de" too. FreeLang CJK has both: the lists drew their characters in the dialog's font, and
+    Qt's Windows fallback (MS Gothic, which lacks \u33de \u33df \u33ff and has the rest of the block) drew them. Each list's
+    characters, and a caption's, are now drawn in the FreeLang family that has them."""
+
+    def test_each_character_in_the_freelang_family_that_draws_it(self):
+        has = {u"FreeLang Essential": set([0x41, 0x20]), u"FreeLang CJK": set([0x33DE, 0x33FF, 0x41])}
+        opened = []
+
+        class QFont(object):
+            def __init__(self, other=None):
+                self.family = other.family if isinstance(other, QFont) else other
+
+            def setFamily(self, family):
+                self.family = family
+
+        class Raw(object):
+            def __init__(self, family):
+                self.family, self.isValid = family, True
+
+            def supportsCharacter(self, code):
+                return code in has.get(self.family, ())
+
+        def from_font(font):
+            opened.append(font.family)
+            return Raw(font.family)
+        gui = Stub(QFont=QFont, QRawFont=Stub(fromFont=from_font))
+        dialog = ac.AccentsDialog.__new__(ac.AccentsDialog)
+        dialog.freelang = [u"FreeLang Essential", u"FreeLang CJK"]
+        dialog.ak = Stub(html=lambda text: text.replace(u"<", u"&lt;"))
+        saved = ac._qt
+        try:
+            ac._qt = lambda: (None, gui)
+            base = QFont(u"Segoe UI")
+            self.assertEqual(dialog.char_font(base, u"\u33de").family, u"FreeLang CJK", u"\u33de from FreeLang CJK")
+            self.assertEqual(dialog.char_font(base, u"A").family, u"FreeLang Essential", "the first that has it")
+            self.assertIs(dialog.char_font(base, u"\u2f00"), base, "none has it: the row's own font")
+            self.assertEqual(base.family, u"Segoe UI", "a copy changed, never the row's font")
+            self.assertEqual(dialog.char_font(base, u"\u33ff").family, u"FreeLang CJK")
+            self.assertEqual(sorted(opened), [u"FreeLang CJK", u"FreeLang Essential"], "each family's font read once")
+            self.assertEqual(dialog.char_html(u"\u33de"), u"<span style=\"font-family: 'FreeLang CJK'\">\u33de</span>")
+            self.assertEqual(dialog.char_html(u"\u2f00"), u"\u2f00", "plain where no FreeLang family has it")
+            self.assertIn(u"FreeLang CJK", ac.reference_note(dialog.char_html(u"\u33de"), u"FreeLang CJK", u"Noto Sans"))
+        finally:
+            ac._qt = saved
+        bare = ac.AccentsDialog.__new__(ac.AccentsDialog)  # (no FreeLang registered: as before)
+        self.assertIs(bare.char_font(base, u"A"), base)
+
+
 class PreviewPartsTests(unittest.TestCase):
     """Item 2: nothing shown over an empty area, nothing clickable that would do nothing ("We agreed those
     shouldn't be displayed when no diacritic is selected")."""
@@ -4267,9 +4354,10 @@ class PreviewPartsTests(unittest.TestCase):
                          "nothing selected: no reference heading, chooser, editor, or Same diacritic strip")
         missing = ac.preview_parts(True, False, False)
         self.assertEqual(sorted(name for name, on in missing.items() if on),
-                         ["compact_box", "hint", "reference", "reference_font", "reference_line", "reference_note",
-                          "reference_title"],
-                         "a glyph that cannot be built: its letter in the reference and what it needs, no editor")
+                         ["compact_box", "hint", "lower_line", "reference", "reference_font", "reference_line",
+                          "reference_note", "reference_title"],
+                         "a glyph that cannot be built: its letter in the reference and what it needs, no editor; "
+                         "the line over the Reference heading with it (owner's images 288 and 318)")
         alone = ac.preview_parts(True, True, False)
         self.assertFalse(alone["strip_label"] or alone["strip_area"], "no letter with the same diacritic: no strip")
         self.assertTrue(all(ac.preview_parts(True, True, True).values()))
@@ -5162,12 +5250,12 @@ class OwnerReportNovember16Tests(unittest.TestCase):
     def test_check_all_and_check_none_say_how_many(self):
         """Item 118: neither button left a log line; the count says the rows a search hides too."""
         b = lambda value: u"<b>%s</b>" % value
-        self.assertEqual(ac.checks_text(True, 30, 42, 0, b), u"Ticked <b>30 glyphs</b> (42 ticked in all).")
-        self.assertEqual(ac.checks_text(True, 1, 13, 12, b), u"Ticked <b>1 glyph</b> (13 ticked in all, 12 of them not "
+        self.assertEqual(ac.checks_text(True, 30, 42, 0, b), u"Ticked <b>30 glyphs</b> (<b>42</b> ticked in all).")
+        self.assertEqual(ac.checks_text(True, 1, 13, 12, b), u"Ticked <b>1 glyph</b> (<b>13</b> ticked in all, <b>12</b> of them not "
                                                               u"shown).")
         self.assertEqual(ac.checks_text(False, 0, 0, 0, b), u"<i>Tick none</i> changed nothing.")
         self.assertEqual(ac.checks_text(False, 2, 0, 0, b), u"Unticked <b>2 glyphs</b> (none ticked now).")
-        self.assertEqual(ac.checks_text(False, 5, 1, 1, b), u"Unticked <b>5 glyphs</b> (1 still ticked, not shown: a "
+        self.assertEqual(ac.checks_text(False, 5, 1, 1, b), u"Unticked <b>5 glyphs</b> (<b>1</b> still ticked, not shown: a "
                                                              u"search hides it).")
         self.assertEqual(ac.checks_text(False, 5, 3, 1), u"Unticked 5 glyphs (3 ticked in all, 1 of them not shown).")
         self.assertEqual(ac.checks_text(True, 2, 2, 0, None, u"row"), u"Ticked 2 rows (2 ticked in all).")

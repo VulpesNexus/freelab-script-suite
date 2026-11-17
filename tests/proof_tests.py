@@ -1888,6 +1888,27 @@ class DialogTests(unittest.TestCase):
                        dialog.glyph_window_button, dialog.open_button):
             self.assertIs(states.get(id(widget)), False)
 
+    def test_with_no_font_the_masters_dropdown_says_n_a(self):
+        # Owner's images 289 and 290 (round 3's convention 22): a dropdown that lists the font's content was
+        # empty with no font, or kept the closed font's masters and languages: a grayed "n/a" instead, and the
+        # Proof dropdown back at its first choice
+        dialog, made = self.remembering(None)
+        self.assertEqual(dialog.masters_box.rows, [fp.NOT_AVAILABLE])
+        self.assertEqual(fp.NOT_AVAILABLE, u"n/a")
+        self.assertEqual(dialog.scope_box.rows, [u"Every script"])
+        package = fake_font()
+        dialog, made = self.remembering(package)
+        dialog.rebuild()
+        self.assertEqual(dialog.masters_box.rows, [u"Current master (Regular)", u"All 2 masters"])
+        self.assertGreater(len(dialog.scopes), 1, "the font's scripts and languages")
+        dialog.scope_kept = dialog.scopes[-1]
+        self.workspace.packages = lambda: []
+        self.workspace.currentPackage = None
+        dialog.font_changed()  # (its font closed)
+        self.assertEqual(dialog.masters_box.rows, [fp.NOT_AVAILABLE])
+        self.assertEqual((dialog.scope_box.rows, dialog.scopes), ([u"Every script"], [None]))
+        self.assertIsNotNone(dialog.scope_kept, "the choice kept for the next font")
+
     def test_the_top_line_names_the_font_and_counts_right(self):
         # Owner's image 228: "0 kerned pairs"; the font and master in bold (ak.font_named), the sections' names
         # in italics, their pages in parentheses
@@ -1902,7 +1923,7 @@ class DialogTests(unittest.TestCase):
         proof = Proof()
         line = fp.status_line(ak.font_named(u"Sans", u"Regular"), proof, u"A4", ak)
         self.assertEqual(line, u"<b>Sans</b>, master <b>Regular</b>: <b>3 pages</b> (A4). Pages per section: "
-                               u"<i>Summary</i> (1), <i>Character set</i> (2). No kerned pairs to apply; OpenType "
+                               u"<i>Summary</i> (<b>1</b>), <i>Character set</i> (<b>2</b>). No kerned pairs to apply; OpenType "
                                u"features not applied.")
         proof.kerned = [1204]
         self.assertIn(u"Kerning applied (<b>1,204 kerned pairs</b>, classes resolved);",
@@ -2063,7 +2084,7 @@ class DialogTests(unittest.TestCase):
         finally:
             dialog.ak.load_sibling = load
         self.assertEqual(fp.features_text([(u"ss01", u"Round a")]), u"1 feature: ss01 (Stylistic Set 1: Round a)")
-        self.assertIn(u"<i>Summary</i> (1)", dialog.font_label.text)
+        self.assertIn(u"<i>Summary</i> (<b>1</b>)", dialog.font_label.text)
         self.assertTrue(dialog.font_label.text.startswith(u"<b>Fake Sans</b>, master <b>Regular</b> (of <b>2 masters</b>): "),
                         dialog.font_label.text)
         self.assertEqual(self.said, [], "nothing left out")

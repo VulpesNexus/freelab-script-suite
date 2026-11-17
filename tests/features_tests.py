@@ -2642,15 +2642,17 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(len(warnings), 1, self.logged)
         self.assertTrue(warnings[0].startswith(u"FontLab did not keep the thicker strokes of <b>10 glyphs</b>: "
                                                u'<a href="glyphname:'), warnings[0])
-        self.assertTrue(warnings[0].endswith(u"Read back, their outlines were as scaled (40 nodes in 10 contours, 40 "
-                                             u"on-curve, 40 given a new place, 0 found there): draw over them."),
-                        warnings[0])
+        # (each count bold with its noun; a number whose noun is outside, bold alone: owner's images 297, 301)
+        self.assertTrue(warnings[0].endswith(u"Read back, their outlines were as scaled (<b>40 nodes</b> in <b>10 "
+                                             u"contours</b>, <b>40</b> on-curve, <b>40</b> given a new place, <b>0</b> "
+                                             u"found there): draw over them."), warnings[0])
         self.assertEqual(warnings[0].count(u'<a href="glyphname:'), 10)
         # The same where no node reads as an on-curve one (none is moved): the counts say where it stopped
         dialog, package = self.strokes_built(130, OddContour)
         warnings = [t for level, t in self.logged if level == "warning"]
         self.assertEqual(len(warnings), 1, self.logged)
-        self.assertIn(u"(40 nodes in 10 contours, 0 on-curve, 0 given a new place, 0 found there)", warnings[0])
+        self.assertIn(u"(40 nodes in 10 contours, 0 on-curve, 0 given a new place, 0 found there)",
+                      MARKUP.sub(u"", warnings[0]))
         self.assertNotIn(u"strokes at 130%", [t for level, t in self.logged if level == "done"][-1])
 
     # -- the owner's round of 2026-11-14 ------------------------------------------------
@@ -2686,8 +2688,10 @@ class DialogTests(unittest.TestCase):
         self.assertNotIn(u"strokes at 130%", done)
         warnings = [t for level, t in self.logged if level == "warning"]
         self.assertEqual(len(warnings), 1, self.logged)
-        self.assertTrue(warnings[0].endswith(u"(40 nodes in 10 contours, 40 on-curve, 40 given a new place, 40 found "
-                                             u"there, 10 shapes drawn as before): draw over them."), warnings[0])
+        self.assertTrue(MARKUP.sub(u"", warnings[0]).endswith(
+            u"(40 nodes in 10 contours, 40 on-curve, 40 given a new place, 40 found there, 10 shapes drawn as before): "
+            u"draw over them."), warnings[0])
+        self.assertIn(u"<b>10 shapes</b> drawn as before", warnings[0])
 
     def test_a_layer_built_again_measures_itself_again(self):
         """Live (IBM Plex Sans JP): zero.sups built again at 130% and 160% had its new shape's box grow,
@@ -2840,17 +2844,21 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(fc.plan_signature(None, 107), None)
         self.assertEqual(fc.layer_print(two.made[u"Regular"])[0], 999)
 
-    def test_the_code_part_is_named_code_and_colored(self):
-        """The owner: "it should just be 'Code'; also, syntax highlighting would be neat." The heading
-        reads Code; the box is colored by a highlighter whose colors follow the palette, shown plain past
-        HIGHLIGHT_LINES lines (each click makes the code again, and Qt colors every line again); where
-        PythonQt cannot make the highlighter, the box stays plain."""
+    def test_the_code_part_is_named_code_preview_and_colored(self):
+        """The owner: "it should just be 'Code'; also, syntax highlighting would be neat." Then (owner's
+        image 299): "Code preview", so people understand they still have to write it. The heading reads
+        Code preview, everywhere the part is named; the box is colored by a highlighter whose colors follow
+        the palette, shown plain past HIGHLIGHT_LINES lines (each click makes the code again, and Qt colors
+        every line again); where PythonQt cannot make the highlighter, the box stays plain."""
         dialog = self.recorded(FakeFeatures({}), classes={"QTabBar": type("QTabBar", (Recorded,), {})})
         texts = [w.text for w in Recorded.made if isinstance(w, RECORDED["QLabel"])]
-        self.assertIn(u"Code", texts)
+        self.assertEqual(fc.CODE_HEADING, u"Code preview")
+        self.assertIn(u"Code preview", texts)
+        self.assertNotIn(u"Code", texts)
         self.assertNotIn(u"The code", texts)
-        self.assertIn(u"<i>Code</i>, under them", dialog.tabs.whats)
-        self.assertIn(u"in <i>Code</i>", fc.HELP)
+        self.assertIn(u"<i>Code preview</i>, under them", dialog.tabs.whats)
+        self.assertIn(u"in <i>Code preview</i>", fc.HELP)
+        self.assertNotIn(u"<i>Code</i>", fc.HELP)
 
         class Highlighter(Anything):
             def __init__(self, parent):  # (as PythonQt makes it: a QObject parent, no document colored)
@@ -3050,9 +3058,11 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(dialog.top_line.text, self.ak.sentences(self.ak.font_named(u"Fake", u"Regular", 1)))
         self.assertNotIn(u"Fake", dialog.status.text, "the font is named once, in the top line")
         self.assertIn(u"Forms: <b>12 of 12 form features</b> ticked (", dialog.status.text)
-        self.assertIn(u"<b>1 ligature</b> (<b>1 standard</b>, <b>0 discretionary</b>, <b>0 off</b>)", dialog.status.text)
+        # (a number inside the parentheses, its noun outside them, bold alone: owner's images 297 and 301)
+        self.assertIn(u"<b>1 ligature</b> (<b>1</b> standard, <b>0</b> discretionary, <b>0</b> off)", dialog.status.text)
         labels = [w for w in made if isinstance(w, RECORDED["QLabel"])]
-        for heading in (u"Alternates that take turns", u"Figure forms to build", u"Code", u"Variants that take turns"):
+        for heading in (u"Alternates that take turns", u"Figure forms to build", u"Code preview",
+                        u"Variants that take turns"):
             label = [w for w in labels if w.text == heading][0]
             before = made[made.index(label) - 1]
             self.assertTrue(is_line(before) and not before.header, "a line over %s" % heading)
@@ -3071,10 +3081,11 @@ class DialogTests(unittest.TestCase):
         dialog = self.recorded(FakeFeatures({}))
         page = dialog.alternates
         row = [r for r in RecordedRow.made if dialog.close_button in r.widgets][0]
+        # (owner's image 298: the write button right after Compile after writing, the tick that is about it)
         self.assertEqual(row.widgets, list(dialog.turn_buttons) + [page.all_button, page.none_button, dialog.restore_button,
-                                                                   dialog.compile_box, dialog.build_button, page.copy_button,
-                                                                   page.build_button, dialog.write_button,
-                                                                   dialog.close_button])
+                                                                   dialog.compile_box, dialog.write_button,
+                                                                   dialog.build_button, page.copy_button,
+                                                                   page.build_button, dialog.close_button])
         self.assertEqual([button.text for button in dialog.turn_buttons],
                          [u"Tick all", u"Tick none", u"Tick often doubled"])
         moved = list(dialog.turn_buttons) + [dialog.build_button, page.build_button, page.copy_button, page.all_button]

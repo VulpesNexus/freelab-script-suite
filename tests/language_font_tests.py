@@ -417,6 +417,33 @@ def required_characters():
     return dict((part, codes_of(data[part])) for part in PARTS), data["counts"]
 
 
+def tool_characters():
+    """What Glyph Compose's lists show beyond the data files, as checks/train/language_font.py's
+    tool_characters reads it (owner's images 316 and 317, 2026-11-18: its lists draw their characters in
+    FreeLang): Glyph generation's rows and what they are made of, and the Diacritics tab's letters with
+    diacritics and their parts (in this Python's Unicode: FontLab's 5.2 knows fewer of them)."""
+    compose = os.path.join(HERE, os.pardir, "compose")
+    if compose not in sys.path:
+        sys.path.insert(0, compose)
+    import freelab_glyph_compose as gc  # (by this name: the module starts no window)
+    import freelab_glyph_generation as gg
+    codes = set()
+    for entry in gg.load_data(os.path.join(compose, gg.DATA_FILE)).get("entries") or []:
+        codes.add(int(entry["code"], 16))
+        for way in entry["ways"]:
+            for key in ("of", "on"):
+                found = way.get(key)
+                codes.update(int(part, 16) for part in (found if isinstance(found, list) else [found] if found else []))
+    for _, _, ranges in gc.SETS:
+        for low, high in ranges:
+            for code in range(low, high):
+                parts = unicodedata.normalize("NFD", fc.char_of(code))
+                if len(parts) > 1:
+                    codes.add(code)
+                    codes.update(ord(part) for part in parts)
+    return set(code for code in codes if not is_format(code))
+
+
 def names(table):
     """{name ID: text} of a name table's Windows Unicode records."""
     count, strings = struct.unpack(">HH", table[2:6])
@@ -577,13 +604,31 @@ class ListFontTests(unittest.TestCase):
         self.assertEqual(codes_of(self.info["not_covered"]), not_supplied, "language_font.json lists the same")
         self.assertEqual(sum(self.info["not_covered_blocks"].values()), len(not_supplied))
 
+    def test_glyph_compose_characters_drawn(self):
+        """Owner's images 316 and 317: Glyph generation's list drew \u33de and \u33ff as boxes. FreeLang CJK has them
+        (the list drew in the dialog's font: Glyph Compose now draws its lists in FreeLang), but the Kangxi
+        radicals Glyph generation lists since 2026-11-18 were in none of the five fonts: every character
+        Glyph Compose's lists show is drawn (checks/train/language_font.py's tools part)."""
+        tools = tool_characters()
+        self.assertGreater(len(tools), 2000)
+        for code in (0x33DE, 0x33DF, 0x33FF, 0x2F00, 0x2FD5, 0x32C0, 0x2160, 0x2474):
+            self.assertIn(code, tools, u"U+%04X" % code)
+        missing = [u"U+%04X" % code for code in sorted(tools - self.absent - self.cmap)]
+        self.assertEqual(missing, [], "FreeLang lacks these Glyph Compose characters: run checks/train/language_font.py")
+
     def test_every_part_counted(self):
         """language_font.json's counts: [asked, drawn] for the whole and for each part."""
         parts, counts = required_characters()
         not_supplied = codes_of(NOT_SUPPLIED)
         for part in PARTS:
             self.assertEqual(self.info["counts"][part], [counts[part], len(parts[part] - not_supplied)], part)
-        self.assertEqual(self.info["counts"]["all"], [counts["all"], counts["all"] - len(not_supplied)])
+        # (and Glyph Compose's own characters since 2026-11-18, all drawn: the build counts them as "tools")
+        tools = tool_characters()
+        self.assertEqual(self.info["counts"]["tools"][0], self.info["counts"]["tools"][1], "every one drawn")
+        if sys.version_info[0] >= 3:  # (the build's Unicode: Python 2.7's 5.2 decomposes fewer letters)
+            self.assertEqual(self.info["counts"]["tools"][0], len(tools))
+            asked = len(set().union(*parts.values()) | tools)
+            self.assertEqual(self.info["counts"]["all"], [asked, asked - len(not_supplied)])
         for part in ("names", "other_names"):  # (what a row or a tooltip always shows is whole)
             self.assertEqual(sorted(parts[part] & not_supplied), [], part)
 

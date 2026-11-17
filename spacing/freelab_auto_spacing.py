@@ -87,14 +87,15 @@ def spacing_status(listed, drawn, tolerance, passes=1, bold=lambda text: u"%s" %
         text = u"The only drawn glyph %s %s." % (u"has" if listed else u"does not have", off)
     elif not listed:
         text = u"None of the %s has %s." % (bold(counted(drawn, u"drawn glyph")), off)
-    else:
-        text = u"%s of %s %s %s." % (bold(u"{:,}".format(listed)), bold(counted(drawn, u"drawn glyph")),
-                                     u"has" if listed == 1 else u"have", off)
+    else:  # (the count bold with its noun, "of" included: "1,200 of 13,932 drawn glyphs", round 3's rule)
+        text = u"%s %s %s." % (bold(u"%s of %s" % (u"{:,}".format(listed), counted(drawn, u"drawn glyph"))),
+                               u"has" if listed == 1 else u"have", off)
     if listed:
         text += u" Nothing changes until you click %s." % italic(APPLY_BUTTON)
     if passes > 1:
-        text += (u" Each change was measured again with it made, until the changes settled (%s passes): halfkern "
-                 u"closes half of a tightening at a time, so one measure leaves part of it." % bold(passes))
+        text += (u" Each change was measured again with it made, until the changes settled (%s): halfkern "
+                 u"closes half of a tightening at a time, so one measure leaves part of it."
+                 % bold(counted(passes, u"pass", u"passes")))
     return text
 
 
@@ -301,18 +302,20 @@ def settle_spacing(glyphs, measure_at, kind_of, category, script_of=None, settle
     return done
 
 
-def apply_note(passes, again, tolerance, references_first=0):
+def apply_note(passes, again, tolerance, references_first=0, bold=lambda text: u"%s" % text):
     """What a click on Space ticked glyphs took, for the log: passes writes, again glyphs spaced again
     after the first (still a side tolerance units or more off when measured again), and how many glyphs
-    were measured again against references spaced first. Empty when one pass did it all."""
+    were measured again against references spaced first. Empty when one pass did it all. bold: the log's
+    (ak.b), each count bold with its noun (round 3's rule); its text holds no markup of its own."""
     notes = []
     if references_first:
         notes.append(u"The references were spaced first, and the other %s measured against them again: their "
-                     u"changes differ from the list's." % counted(references_first, u"glyph"))
+                     u"changes differ from the list's." % bold(counted(references_first, u"glyph")))
     if passes > 1:
-        notes.append(u"It took %d passes: measured again after spacing, %s still had a side %s or more off, and %s "
+        notes.append(u"It took %s: measured again after spacing, %s still had a side %s or more off, and %s "
                      u"spaced again (the measuring's pixels round each change a little)." % (
-                         passes, counted(again, u"glyph"), counted(tolerance, u"unit"), u"was" if again == 1 else u"were"))
+                         bold(counted(passes, u"pass", u"passes")), bold(counted(again, u"glyph")),
+                         bold(counted(tolerance, u"unit")), u"was" if again == 1 else u"were"))
     return u" ".join(notes)
 
 
@@ -396,19 +399,34 @@ def composite_moves(composites, changes):
             return moves
 
 
-def composites_text(following, left_out):
+def unspaced_line(references, families, bold=lambda text: u"%s" % text, italic=lambda text: u"%s" % text):
+    """The log's warning when the font's references look unspaced: they come first, unticked, spaced from
+    the corpus; its families counted in bold with their noun ("**412 open-licensed families**", round 3's
+    rule: the number alone was bold)."""
+    families = int(families or 0)
+    return (u"This font's references look unspaced (a side at its ink, or one side three times the other): %s come "
+            u"first, unticked, spaced as %s %s theirs. If the font is not spaced yet, tick them, space them, then "
+            u"click %s: the other glyphs are measured against them. A font tight on purpose leaves them unticked." % (
+                bold(u", ".join(references)), bold(counted(families, u"open-licensed family", u"open-licensed families")),
+                u"spaces" if families == 1 else u"space", italic(u"Analyze")))
+
+
+def composites_text(following, left_out, bold=lambda text: u"%s" % text):
     """The note under the list: how many glyphs built from components follow the listed glyphs, and
     how many built on two of them are left as they are; empty (the note hidden) when neither: "0 glyphs
-    built from components follow the listed glyphs" said nothing worth a line (owner's image 188)."""
+    built from components follow the listed glyphs" said nothing worth a line (owner's image 188).
+    bold: the status line's (ak.b): the count bold with its noun, a number with no noun bold alone
+    (round 3's rule: "**3 glyphs** built from components follow ...; **2** built on two of them")."""
     if not following and not left_out:
         return u""
     if following:
         text = u"%s built from components %s the listed glyphs" % (
-            counted(following, u"glyph"), u"follows" if following == 1 else u"follow")
+            bold(counted(following, u"glyph")), u"follows" if following == 1 else u"follow")
     else:
         text = u"No glyph built from components follows the listed glyphs"
     if left_out:
-        text += u"; %d built on two of them %s left as %s" % (left_out, u"is" if left_out == 1 else u"are",
+        text += u"; %s built on two of them %s left as %s" % (bold(u"{:,}".format(left_out)),
+                                                             u"is" if left_out == 1 else u"are",
                                                              u"it is" if left_out == 1 else u"they are")
     return text + u"."
 
@@ -718,12 +736,8 @@ class AutoSpacingDialog(object):
             self.seen_history = self.ak.history_mark(self.package)
             self.update_buttons()  # (no font, or nothing measured: the settings grayed out)
         if self.unspaced_references:
-            self.log.add(u"This font's references look unspaced (a side at its ink, or one side three times the other): "
-                         u"%s come first, unticked, spaced as %s open-licensed families space theirs. If the font is not "
-                         u"spaced yet, tick them, space them, then click %s: the other glyphs are measured against them. "
-                         u"A font tight on purpose leaves them unticked." % (
-                             self.ak.b(u", ".join(self.unspaced_references)),
-                             self.ak.b(self.reference_model.get("families", 0)), self.ak.i(u"Analyze")), "warning")
+            self.log.add(unspaced_line(self.unspaced_references, self.reference_model.get("families", 0), self.ak.b,
+                                       self.ak.i), "warning")
 
     def measure(self, package, master, only=None, progress=None):
         """(spacings, composites) of the master: the drawn glyphs' suggestions, each measured again with
@@ -951,7 +965,7 @@ class AutoSpacingDialog(object):
             moves = composite_moves(self.composites, changes)
             following = sum(1 for move in moves.values() if move is not None)
             left_out = sum(1 for m in moves.values() if m is None)
-            note = composites_text(following, left_out) if self.listed else u""  # (nothing listed: nothing follows)
+            note = composites_text(following, left_out, self.ak.b) if self.listed else u""  # (nothing listed: nothing follows)
             self.composites_note.setText(note)
             self.composites_note.setVisible(bool(note))
             self.status.setText(u"%s %s" % (self.font_line(), spacing_status(
@@ -1291,9 +1305,9 @@ class AutoSpacingDialog(object):
         lines = [u"Spaced %s%s." % (ak.b(counted(len(totals), u"glyph")),
                                     u", and %s built on them followed" % ak.b(counted(len(moved), u"glyph"))
                                     if self.follow.checked and totals else u"")]
-        note = apply_note(passes, again, tolerance, measured_again if not unread else 0)
+        note = apply_note(passes, again, tolerance, measured_again if not unread else 0, ak.b)  # (rich: counts bold)
         if note:
-            lines.append(ak.html(note))
+            lines.append(note)
         if totals:
             lines.append(u"The kerning was set for the old spacing: click %s to see whether pairs with these glyphs now "
                          u"collide, or run %s again with <i>Include existing kerned pairs</i>." % (

@@ -103,6 +103,8 @@ class InstallerTests(unittest.TestCase):
         self.assertTrue((self.scripts / "FreeLab" / "glyph_names.json").exists(), "and Glyphs' glyph names")
         self.assertTrue((self.scripts / "FreeLab" / "GlyphData_LICENSE").exists(), "with their notice")
         self.assertTrue((self.scripts / "FreeLab" / "freelab_feature_code.py").exists(), "and Feature Code")
+        self.assertTrue((self.scripts / "FreeLab" / "freelab_family_audit.py").exists(), "and Family Audit")
+        self.assertTrue((self.scripts / "FreeLab" / "freelab_font_compare.py").exists(), "with Font Compare, whose code it reads")
         self.assertTrue((self.scripts / "FreeLab" / "freelab_cjk_spacing.py").exists(), "and CJK Spacing")
         self.assertTrue((self.scripts / "FreeLab" / "palt_model.json").exists(), "with its trims")
         self.assertTrue((self.scripts / "FreeLab" / "hangul_model.json").exists(), "and its Hangul widths")

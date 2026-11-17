@@ -1214,6 +1214,29 @@ class FlowRow(object):
             pass
 
 
+def even_height(bars):
+    """The bars (widgets holding a row each; None skipped) given one least height, the tallest's size hint:
+    each tab's row above its frame as tall as the others', so switching tabs never shifts the frames
+    (round 3's convention 23). The height set, or None where none could be read. Never raises."""
+    bars = [bar for bar in bars or () if bar is not None]
+    heights = []
+    for bar in bars:
+        try:
+            heights.append(int(_value(_value(bar, "sizeHint"), "height")))
+        except Exception:
+            continue
+    if not heights:
+        return None
+    tallest = max(heights)
+    for bar in bars:
+        try:
+            if int(_value(bar, "minimumHeight") or 0) != tallest:
+                bar.setMinimumHeight(tallest)
+        except Exception:
+            continue
+    return tallest
+
+
 class FontBuilderDialog(object):
     def __init__(self):
         QtCore, QtGui = _qt()
@@ -1292,10 +1315,25 @@ class FontBuilderDialog(object):
             self.summary.setHidden(not template or not (u"%s" % (_value(self.summary, "text") or u"")).strip())
         except Exception:
             pass
+        # (the other tab's buttons hidden before this one's are shown, ak.show_only: shown first, the row held
+        # both a moment and Qt widened the window for good, owner's image 284)
+        groups = {0: [], 1: [self.build_button]}
+        show_only = getattr(self.ak, "show_only", None)
         try:
-            self.build_button.setVisible(not template)
+            if show_only is not None:
+                show_only(groups, index)
+            else:
+                self.build_button.setVisible(not template)
         except Exception:
             pass
+        self.even_rows()
+
+    def even_rows(self):
+        """The rows above the two tabs' frames (the Template tab's Glyphs dropdown, the Build tab's Add
+        sheets... and Clear) made as tall as the taller (even_height): a row of buttons was lower than one
+        with a dropdown, so the frame under it moved as the tabs switched (owner's images 285 and 286). At
+        each switch, as the window's style may have changed their sizes since. Never raises."""
+        even_height([getattr(self, "template_bar", None), getattr(self, "build_bar", None)])
 
     # -- the template ------------------------------------------------------------
 
@@ -1303,7 +1341,11 @@ class FontBuilderDialog(object):
         page = QtGui.QWidget()
         box = QtGui.QVBoxLayout(page)
         box.setContentsMargins(0, 0, 0, 0)  # (its frames in line with the log's: owner's image 268)
-        row = QtGui.QHBoxLayout()
+        # The row above the tab's frame, in a bar of its own: as tall as the Build tab's (even_rows), so the
+        # frames under them never shift as the tabs switch (owner's images 285 and 286)
+        bar = self.template_bar = QtGui.QWidget()
+        row = QtGui.QHBoxLayout(bar)
+        row.setContentsMargins(0, 0, 0, 0)
         row.addWidget(QtGui.QLabel("Glyphs:"))
         self.source = QtGui.QComboBox()
         self.source.setSizeAdjustPolicy(QtGui.QComboBox.AdjustToContents)  # (as wide as its widest item: image 239)
@@ -1313,9 +1355,9 @@ class FontBuilderDialog(object):
                                  "edit them there, and the choice becomes the characters typed.")
         row.addWidget(self.source)
         row.addStretch(1)
-        box.addLayout(row)
+        box.addWidget(bar)
         self.typed = QtGui.QPlainTextEdit()
-        self.typed.setPlaceholderText("Type or paste the characters to draw (each once; spaces do not count).")
+        self.typed.setPlaceholderText(u"Type or paste the characters to draw (each once; spaces do not count)…")
         self.typed.setPlainText(self.settings.get("typed") or "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
         self.typed.setWhatsThis("The characters to draw, when the glyphs come from them.")
         box.addWidget(self.typed, 1)
@@ -1552,7 +1594,9 @@ class FontBuilderDialog(object):
         page = QtGui.QWidget()
         box = QtGui.QVBoxLayout(page)
         box.setContentsMargins(0, 0, 0, 0)  # (its lists' frames in line with the log's: owner's image 268)
-        row = QtGui.QHBoxLayout()
+        bar = self.build_bar = QtGui.QWidget()  # (as tall as the Template tab's row: even_rows)
+        row = QtGui.QHBoxLayout(bar)
+        row.setContentsMargins(0, 0, 0, 0)
         self.add_button = QtGui.QPushButton("Add sheets...")
         self.add_button.setWhatsThis("Adds sheets drawn (images: PNG, JPEG, TIFF, BMP, WebP, PSD) to read.")
         self.clear_button = QtGui.QPushButton("Clear")
@@ -1560,7 +1604,7 @@ class FontBuilderDialog(object):
         row.addWidget(self.add_button)
         row.addWidget(self.clear_button)
         row.addStretch(1)
-        box.addLayout(row)
+        box.addWidget(bar)
         self.sheet_list = QtGui.QTreeWidget()
         self.sheet_list.setHeaderLabels(["File", "Sheet", "Glyphs", "Read"])
         self.sheet_list.setRootIsDecorated(False)
@@ -1963,7 +2007,7 @@ class FontBuilderDialog(object):
             except Exception:
                 pass
             if not list(package.masters or []):
-                package.addMaster("Regular", False, None, "", False, False)
+                package.addMaster("Regular", False, package, "", False, False)  # (a font as its source: None was refused live)
             if not package.master:
                 package.master = list(package.masters)[0]
             for attr, value in (("ascender_value", metrics.ascender), ("descender_value", metrics.descender),
@@ -1989,8 +2033,7 @@ class FontBuilderDialog(object):
                          "again." % self.ak.html("%s" % exc), "error")
             return None
         self.package = package
-        self.log.add("Made a new font, %s: %s units per em, the sheets' metrics." % (
-            self.ak.b(family), grouped(int(metrics.upm))), "done")
+        self.log.add(new_font_line(self.ak, family, metrics.upm), "done")
         self.hook_built_font(package)
         try:
             self.font_label.setText(font_text(self.ak, package, family))
@@ -2088,6 +2131,13 @@ class FontBuilderDialog(object):
     def show(self):
         self.dialog.show()
         self.dialog.raise_()
+        self.even_rows()  # (again in the window's own style, now that it shows)
+
+
+def new_font_line(ak, family, upm):
+    """The log's line once a new font is made: its name in bold, its units per em counted in bold with
+    their noun ("**1,000 units** per em", round 3's rule: the number alone was plain)."""
+    return "Made a new font, %s: %s per em, the sheets' metrics." % (ak.b(family), ak.b(counted(int(upm), "unit")))
 
 
 def no_font_text(ak):
