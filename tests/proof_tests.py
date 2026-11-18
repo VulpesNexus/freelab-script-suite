@@ -312,6 +312,59 @@ class StringTests(unittest.TestCase):
         self.assertIn([u"he", u"he", u"yod", u"bet", u"he", u"samekh", u"he", u"samekh"], layout.page.runs(),
                       "the Glyph window gets the string in text order (FontLab kerns it by the same key)")
 
+    def test_colliding_glyphs_are_marked_on_the_strings_only_when_asked(self):
+        # (owner's image 348: a tick to draw colliding glyphs in red, off at first, kerning and spacing strings)
+        font = hebrew_font({(u"yod", u"bet"): -64})
+        for collisions in (False, True):
+            layout = fp.Layout()
+            layout.begin("kerning", u"Regular")
+            fp.section_kerning(layout, font, collisions=collisions)
+            fp.section_spacing(layout, font, collisions=collisions)
+            glyphs = [item for page in layout.pages for item in page.items if item.kind == "glyphs"]
+            self.assertTrue(glyphs)
+            self.assertEqual(set(item.collide for item in glyphs), set([collisions]))
+            notes = [item.text for page in layout.pages for item in page.items if item.kind == "text"]
+            self.assertEqual(any(u"drawn in red" in text for text in notes), collisions)
+        self.assertFalse(fp.Options().collisions, "off at first")
+        self.assertTrue(fp.Options(collisions=True).collisions)
+
+    def test_the_glyphs_that_overlap_a_neighbor(self):
+        placed = [(u"H", 0.0), (u"T", 600.0), (u"o", 1100.0), (u"H", 1700.0)]
+        hits = set([(u"T", u"o")])
+        found = fp.colliding_indexes(placed, lambda first, second, offset: (first, second) in hits)
+        self.assertEqual(found, set([1, 2]), "both glyphs of the pair, nothing else")
+        self.assertEqual(fp.colliding_indexes([(u"H", 0.0)], lambda *args: True), set())
+
+        class Box(object):
+            def __init__(self, left, right):
+                self.l, self.r = left, right
+
+            def left(self):
+                return self.l
+
+            def right(self):
+                return self.r
+
+            def isEmpty(self):
+                return self.r <= self.l
+
+        class Path(object):
+            def __init__(self, left, right, shift=0.0):
+                self.l, self.r, self.shift = left, right, shift
+
+            def boundingRect(self):
+                return Box(self.l, self.r)
+
+            def translated(self, dx, dy):
+                return Path(self.l + dx, self.r + dx)
+
+            def intersects(self, other):
+                return other.l < self.r and other.r > self.l
+
+        self.assertTrue(fp.ink_overlaps(Path(50, 550), Path(20, 400), 500), "T's bar over o")
+        self.assertFalse(fp.ink_overlaps(Path(50, 550), Path(60, 400), 500), "apart")
+        self.assertFalse(fp.ink_overlaps(None, Path(0, 1), 0))
+
     def test_a_group_of_both_directions_is_set_in_runs(self):
         font = hebrew_font({(u"period", u"T"): -20, (u"period", u"yod"): -30})
         groups = dict(fp.kerning_strings(font))
@@ -2189,8 +2242,21 @@ class DialogTests(unittest.TestCase):
         dialog.summary_box.setChecked(False)
         dialog.languages_box.setCurrentIndex(1)
         dialog.summary_changed()
-        self.assertEqual(self.written[-1], {"summary": False, "summary_languages": "reach"})
+        self.assertEqual(self.written[-1], {"summary": False, "summary_languages": "reach", "collisions": False})
         self.assertTrue(dialog.defaults_changed())
+        # (the collision tick, off at first and kept the same way: owner's image 348)
+        dialog, made = self.remembering(fake_font())
+        self.assertFalse(dialog.collisions_box.isChecked(), "off at first")
+        self.assertEqual(dialog.collisions_box.text, fp.COLLISIONS_LABEL)
+        dialog.collisions_box.setChecked(True)
+        dialog.summary_changed("collisions")
+        self.assertTrue(self.written[-1]["collisions"])
+        self.assertTrue(dialog.options().collisions)
+        self.assertTrue(dialog.defaults_changed())
+        dialog, made = self.remembering(fake_font(), {"collisions": True})
+        self.assertTrue(dialog.collisions_box.isChecked(), "as it was left")
+        dialog.restore_defaults()
+        self.assertFalse(dialog.collisions_box.isChecked())
         dialog, made = self.remembering(fake_font(), {"summary": False, "summary_languages": "none"})
         self.assertFalse(dialog.summary_box.isChecked(), "as it was left")
         self.assertEqual(dialog.languages_box.currentIndex, 2)

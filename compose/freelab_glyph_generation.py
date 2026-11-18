@@ -56,7 +56,7 @@ NUMR, DNOM = ("numr", "numerator"), ("dnom", "denominator")  # (Feature Code's o
 FRACTION_SLASH = "2044"
 LACKING = u"Need a glyph the font lacks"
 EXISTING = u"Existing glyphs (tick to rebuild)"
-JUST_BUILT = u"Just built (tick to rebuild)"
+JUST_BUILT = u"Built in this window (tick to rebuild)"
 FIGURE_FORMS_FIRST = u"build the numerators and denominators first (Feature Code, Forms tab)"
 NO_LAYER = u"%s has no layer in this master"  # (a variable font's sparse master: the glyph gets none there either)
 
@@ -2144,7 +2144,9 @@ class GenerationPage(object):
         self.existing_box.setWhatsThis(u"Also lists the characters of these groups the font has already, in a section "
                                        u"of their own, unticked: those you tick are built again from their recipe, "
                                        u"their outlines in each master replaced (<i>Edit &gt; Undo</i> takes it back). "
-                                       u"A glyph that shares its code point is rebuilt as a component of its source.")
+                                       u"A glyph that shares its code point is rebuilt as a component of its source. "
+                                       u"The glyphs built in this window stay listed either way, under <i>Built in "
+                                       u"this window</i>, until it closes.")
         row.addWidget(self.existing_box)
         # Font Check's high-value glyphs alone, as on the Diacritics tab (the set is read there, once a list is
         # shown: high_value_read)

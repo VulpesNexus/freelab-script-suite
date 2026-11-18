@@ -1267,7 +1267,7 @@ def suggested_caption(shift):
 CAN_BE_BUILT = u"Can be built"
 EXISTING_OTHERWISE = u"Existing glyphs with suggestions (tick to rebuild)"
 EXISTING_AS_SUGGESTED = u"Existing glyphs that match suggestions (tick to rebuild)"
-JUST_BUILT = u"Just built (tick to rebuild)"  # the list's section of the glyphs built in this window
+JUST_BUILT = u"Built in this window (tick to rebuild)"  # the list's section of the glyphs built in this window
 LACKING = u"Need a mark or letter the font lacks"
 
 
@@ -4093,7 +4093,7 @@ REFERENCE_NOTE_HELP = (u"Which font the reference is drawn in: the one chosen, o
 HINT_HELP = (u"What is selected in the picture: the diacritic, how far it was moved and scaled by hand, and whether it "
              u"lies outside the picture; else what a click there does.")
 CORRECT_HELP = (u"Sets right the mirrored components of the font's glyphs listed here, those shown: under <i>Also "
-                u"list existing glyphs</i>, and those just built. A component mirrored one way (scaled by a negative number across or up, not "
+                u"list existing glyphs</i>, and those under <i>Built in this window</i>. A component mirrored one way (scaled by a negative number across or up, not "
                 u"both) has its contours reversed: where it overlaps another part, renderers leave a hole. Each "
                 u"such mark is mirrored into a glyph of its own with its contours reversed (<i>caron.flipped</i> "
                 u"for one turned upside down, <i>comma.mirrored</i> for one mirrored left to right), made once "
@@ -6320,7 +6320,9 @@ class AccentsDialog(object):
                                        u"glyph as the font has it, to compare. Placements applied to related letters "
                                        u"and diacritics lined up reach them too, so a font can be made consistent; only "
                                        u"those you tick are rebuilt (their glyphs' outlines in each master replaced "
-                                       u"by the letter and marks as components; <i>Edit &gt; Undo</i> takes it back).")
+                                       u"by the letter and marks as components; <i>Edit &gt; Undo</i> takes it back). "
+                                       u"The glyphs built in this window stay listed either way, under <i>Built in "
+                                       u"this window</i>, until it closes.")
         row.addWidget(self.existing_box)
         self.value_only_box = QtGui.QCheckBox(VALUE_ONLY_LABEL)  # (beside the other choice of what is listed)
         self.value_only_box.setWhatsThis(VALUE_ONLY_HELP)

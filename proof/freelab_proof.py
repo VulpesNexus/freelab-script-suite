@@ -897,9 +897,10 @@ class Layout(object):
                          text=line, size=size, style="plain", align="left")
                 self.y += height
 
-    def glyphs(self, font, placed, width, size, label=None, indent=0.0, align="left", rtl=False):
+    def glyphs(self, font, placed, width, size, label=None, indent=0.0, align="left", rtl=False, collide=False):
         """A line of glyphs at size points per em (placed and width in font units); rtl: a line set
-        right to left (its text order is from its right end: Page.runs)."""
+        right to left (its text order is from its right end: Page.runs); collide: its glyphs whose ink
+        overlaps a neighbor's drawn in red (Renderer.colliding)."""
         height = line_height(font, size)
         self.need(height)
         x = self.left + indent
@@ -909,17 +910,17 @@ class Layout(object):
             self.add("text", x=self.left, y=self.y, width=indent - 4.0, height=height, text=label, size=7,
                      style="quiet", align="left")
         self.add("glyphs", x=x, baseline=self.y + baseline_in(font, size, height), size=size, upm=font.upm,
-                 master=font.master, placed=placed, rtl=rtl)
+                 master=font.master, placed=placed, rtl=rtl, collide=bool(collide))
         self.y += height
 
-    def lines(self, font, tokens, size, rtl=False, kerning=True, space=None, label=None, indent=0.0):
+    def lines(self, font, tokens, size, rtl=False, kerning=True, space=None, label=None, indent=0.0, collide=False):
         """Tokens broken into lines of the page's width and laid out (label: on the first line); right to
         left, each line set flush right, its first token at the right."""
         room = (self.width() - indent) * font.upm / size
         for index, line in enumerate(wrap(font, tokens, room, rtl, kerning, space)):
             placed, width = place(font, line, rtl, kerning, space)
             self.glyphs(font, placed, width, size, label if index == 0 else None, indent, "right" if rtl else "left",
-                        rtl)
+                        rtl, collide)
 
     def finish(self, title, date, note=NOTE):
         """A header (the font, the master, the date) and a footer (the sections, the note, the page
@@ -1666,13 +1667,17 @@ class Summary(object):
 
 class Options(object):
     """What a proof shows: sections (keys of SECTIONS), the page size (a key of PAGE_SIZES), the
-    waterfall's and the text's sizes, and keep(left, right): the kerned pairs to list (None: all)."""
+    waterfall's and the text's sizes, keep(left, right): the kerned pairs to list (None: all), and
+    collisions: the glyphs of the kerning and spacing strings whose ink overlaps a neighbor's drawn in red
+    (owner's image 348; off at first: a script font's letters may overlap on purpose)."""
 
-    def __init__(self, sections=None, page="A4", waterfall=WATERFALL_SIZES, text_sizes=TEXT_SIZES, keep=None):
+    def __init__(self, sections=None, page="A4", waterfall=WATERFALL_SIZES, text_sizes=TEXT_SIZES, keep=None,
+                 collisions=False):
         self.sections = set(sections if sections is not None else [key for key, _ in SECTIONS])
         self.page = page
         self.waterfall, self.text_sizes = tuple(waterfall), tuple(text_sizes)
         self.keep = keep
+        self.collisions = bool(collisions)
 
 
 def page_size(key):
@@ -1760,14 +1765,19 @@ def section_text(layout, font, groups, sizes, left_out):
             layout.y += size * 0.4
 
 
-def section_kerning(layout, font, keep=None, size=STRING_SIZE):
+COLLISIONS_NOTE = u" Glyphs whose ink overlaps the next glyph's are drawn in red."
+COLLISIONS_LABEL = u"Draw colliding glyphs in red."  # (the tick: a sentence, with its period)
+
+
+def section_kerning(layout, font, keep=None, size=STRING_SIZE, collisions=False):
     layout.heading(TITLES["kerning"])
     groups = kerning_strings(font, keep)
     total = sum(len(strings) for _, strings in groups)
     which = u"common kerned pair" if keep is not None else u"kerned pair"
     layout.text(u"%s, grouped by first glyph, between control letters (HH?HOHO, nn?nono), kerning applied "
                 u"(classes resolved). Right-to-left pairs are set right to left, as they read: their first "
-                u"glyph is the right one." % counted(total, which), style="quiet")
+                u"glyph is the right one.%s" % (counted(total, which), COLLISIONS_NOTE if collisions else u""),
+                style="quiet")
     if not groups:
         layout.text(u"No %s in this master." % (which + u"s"))
         return
@@ -1776,7 +1786,7 @@ def section_kerning(layout, font, keep=None, size=STRING_SIZE):
         layout.text(u"%s (%s)" % (first, counted(len(strings), u"pair")), 8, "bold", gap=4.0,
                     keep=line_height(font, size))
         for rtl, tokens in direction_runs(font, first, strings):
-            layout.lines(font, tokens, size, rtl, space=space)
+            layout.lines(font, tokens, size, rtl, space=space, collide=collisions)
 
 
 def direction_runs(font, first, strings):
@@ -1791,11 +1801,11 @@ def direction_runs(font, first, strings):
     return runs
 
 
-def section_spacing(layout, font, size=STRING_SIZE):
+def section_spacing(layout, font, size=STRING_SIZE, collisions=False):
     layout.heading(TITLES["spacing"])
     groups = spacing_strings(font)
     layout.text(u"Each letter and figure between control letters (HHxHOxOO, nnxnoxoo), set without kerning: the "
-                u"sidebearings alone.", style="quiet")
+                u"sidebearings alone.%s" % (COLLISIONS_NOTE if collisions else u""), style="quiet")
     if not groups:
         layout.text(u"The font has no encoded letters or figures of the scripts spaced here.")
         return
@@ -1803,7 +1813,8 @@ def section_spacing(layout, font, size=STRING_SIZE):
     for label, strings in groups:
         layout.text(u"%s (%s)" % (label, counted(len(strings), u"glyph")), 8, "bold", gap=4.0, keep=line_height(font, size))
         rtl = font.direction(strings[0][0]) == "rtl"  # (Hebrew's read from the right, as its kerning strings)
-        layout.lines(font, [(names, True) for _, names in strings], size, rtl, kerning=False, space=space)
+        layout.lines(font, [(names, True) for _, names in strings], size, rtl, kerning=False, space=space,
+                     collide=collisions)
 
 
 def section_diacritics(layout, font, size=SHOWCASE_SIZE):
@@ -2230,8 +2241,8 @@ def build_proof(fonts, options=None, languages=(), date=None, info=None, summary
         "charset": lambda font: section_charset(layout, font),
         "waterfall": lambda font: section_waterfall(layout, font, line, rtl, options.waterfall),
         "text": lambda font: section_text(layout, font, groups, options.text_sizes, left_out),
-        "kerning": lambda font: section_kerning(layout, font, options.keep),
-        "spacing": lambda font: section_spacing(layout, font),
+        "kerning": lambda font: section_kerning(layout, font, options.keep, collisions=options.collisions),
+        "spacing": lambda font: section_spacing(layout, font, collisions=options.collisions),
         "diacritics": lambda font: section_diacritics(layout, font),
         "figures": lambda font: section_figures(layout, font),
     }
@@ -2335,6 +2346,39 @@ def colors_label(mode, ink, paper):
     return u"the window's: %s on %s" % (u"light" if light(ink) else u"dark", u"light" if light(paper) else u"dark")
 
 
+COLLISION_ON_LIGHT = (205, 25, 20)  # the red of a collision on light paper (Options.collisions)
+COLLISION_ON_DARK = (240, 96, 86)  # ... and on dark paper (the log's error red)
+
+
+def colliding_indexes(placed, overlaps):
+    """The indexes of the glyphs of a line ([(name, x)] in font units, in the order set) whose ink overlaps
+    their neighbor's: overlaps(first, second, offset) says whether the second glyph's ink, offset units
+    right of the first's origin, overlaps the first's. Only neighbors: a space between them keeps them
+    apart anyway."""
+    found = set()
+    for index in range(len(placed) - 1):
+        (first, x1), (second, x2) = placed[index], placed[index + 1]
+        if overlaps(first, second, x2 - x1):
+            found.update((index, index + 1))
+    return found
+
+
+def ink_overlaps(first, second, offset):
+    """Whether two glyphs' outlines (QPainterPaths in font units, None for none) overlap, the second offset
+    units right of the first: their boxes first, then their filled areas (a touch along an edge is no
+    overlap). False when either cannot be read."""
+    if first is None or second is None:
+        return False
+    try:
+        box_a, box_b = first.boundingRect(), second.boundingRect()
+        if box_a.isEmpty() or box_b.isEmpty() or box_b.left() + offset >= box_a.right() \
+                or box_b.right() + offset <= box_a.left():
+            return False
+        return bool(first.intersects(second.translated(offset, 0)))
+    except Exception:
+        return False
+
+
 class Renderer(object):
     """Draws a page's items with a QPainter, scale device pixels per point. path_of(master, name):
     a glyph's QPainterPath in font units, y up (None: nothing to draw). parts_of(master, name): a color
@@ -2346,6 +2390,10 @@ class Renderer(object):
         self.parts_of = parts_of
         self.family = family
         self.ink = QtGui.QColor(ink) if ink is not None else QtGui.QColor(0, 0, 0)
+        # The red of a collision (Options.collisions), as the log's errors: a lighter one on dark paper
+        light_ink = self.ink.lightness() > 127 if hasattr(self.ink, "lightness") else False
+        self.alert = QtGui.QColor(*(COLLISION_ON_DARK if light_ink else COLLISION_ON_LIGHT))
+        self.overlaps = {}  # (master, first, second, offset): whether their ink overlaps (colliding)
         self.quiet = QtGui.QColor(self.ink)
         self.quiet.setAlpha(150)
         self.rule = QtGui.QColor(self.ink)
@@ -2367,16 +2415,29 @@ class Renderer(object):
             self.fonts[key] = font
         return self.fonts[key]
 
+    def colliding(self, item):
+        """The indexes in a line of glyphs (item.placed) of the glyphs whose ink overlaps the next one's or
+        the one before's (colliding_indexes), each pair's answer kept for the proof (the same pairs come
+        back on every page of strings)."""
+        def overlaps(first, second, offset, master=item.master):
+            key = (master, first, second, round(offset, 1))
+            if key not in self.overlaps:
+                self.overlaps[key] = ink_overlaps(self.path_of(master, first), self.path_of(master, second), offset)
+            return self.overlaps[key]
+        return colliding_indexes(item.placed, overlaps)
+
     def draw(self, painter, page, scale):
         QtCore, QtGui = self.QtCore, self.QtGui
         painter.setRenderHint(self.antialiasing, True)
         brush = QtGui.QBrush(self.ink)
         rule = QtGui.QPen(self.rule)
         rule.setWidthF(max(1.0, 0.5 * scale))
+        alert = QtGui.QBrush(self.alert)
         for item in page.items:
             if item.kind == "glyphs":
                 factor = item.size / item.upm * scale
-                for name, x in item.placed:
+                red = self.colliding(item) if getattr(item, "collide", False) else ()
+                for index, (name, x) in enumerate(item.placed):
                     path = self.path_of(item.master, name)
                     if path is None:
                         continue
@@ -2388,7 +2449,7 @@ class Renderer(object):
                         for part, color in parts:
                             painter.fillPath(part, QtGui.QBrush(color))
                     else:
-                        painter.fillPath(path, brush)
+                        painter.fillPath(path, alert if index in red else brush)
                     painter.restore()
             elif item.kind == "text":
                 font = self.font(max(1, int(round(item.size * scale))), item.style == "bold")
@@ -2692,7 +2753,8 @@ Pick the sections: the <b>character set</b> (every glyph with its name and code 
 <b>waterfalls</b> and <b>text</b> at the sizes typed (sample text in each script the font covers,
 from Font Check's language data), <b>kerning strings</b> (every kerned pair, or the common ones,
 between control letters: HH?HOHO, nn?nono), <b>spacing strings</b> (each letter as HHxHOxOO or
-nnxnoxoo, without kerning), <b>diacritics</b>, and <b>figures and punctuation</b>; for the current
+nnxnoxoo, without kerning; <i>Draw colliding glyphs in red</i> marks the glyphs of both whose ink
+overlaps the next one's), <b>diacritics</b>, and <b>figures and punctuation</b>; for the current
 master, or for each master (with a page of the masters side by side). The proof opens on a
 <b>summary</b>: the family's name in the font itself, the font and the master proofed, its vertical
 metrics, and its OpenType features and kerning. The font's info follows (names, version, designer,
@@ -2847,6 +2909,16 @@ class ProofDialog(object):
             box.setWhatsThis(tips[key])
             checks.addWidget(box)
             self.section_boxes[key] = box
+        checks.addSpacing(12)
+        # (owner's image 348: off at first, a script font's letters may overlap on purpose)
+        self.collisions_box = QtGui.QCheckBox(COLLISIONS_LABEL)
+        self.collisions_box.setChecked(bool(self.settings.get("collisions")))
+        self.collisions_box.setWhatsThis(u"Draws in red, in <i>Kerning strings</i> and <i>Spacing strings</i>, the glyphs "
+                                         u"whose ink overlaps the next glyph's, kerning applied (the kerning strings) "
+                                         u"or not (the spacing strings), in the preview and in the PDF. Off at first: "
+                                         u"the letters of a script font may join on purpose. Kept from one FontLab "
+                                         u"session to the next.")
+        checks.addWidget(self.collisions_box)
         checks.addStretch(1)
         layout.addLayout(checks)
 
@@ -2959,6 +3031,7 @@ class ProofDialog(object):
             box.connect("currentIndexChanged(int)", lambda index: later())
         self.scope_box.connect("currentIndexChanged(int)", self.scope_chosen)
         self.summary_box.connect("toggled(bool)", lambda on: self.summary_changed("summary"))
+        self.collisions_box.connect("toggled(bool)", lambda on: self.summary_changed("collisions"))
         self.languages_box.connect("currentIndexChanged(int)", lambda index: self.summary_changed("summary_languages"))
         for edit in (self.waterfall_edit, self.text_edit):
             edit.connect("editingFinished()", later)
@@ -3326,7 +3399,8 @@ class ProofDialog(object):
             self.show_section = "coverage"
         try:
             mode = SUMMARY_LANGUAGES[max(0, min(self.languages_box.currentIndex, len(SUMMARY_LANGUAGES) - 1))][0]
-            values = {"summary": bool(self.summary_box.isChecked()), "summary_languages": mode}
+            values = {"summary": bool(self.summary_box.isChecked()), "summary_languages": mode,
+                      "collisions": bool(self.collisions_box.isChecked())}
             settings = read_settings(self.ak)
             for name in ([key] if key in values else list(values)):
                 settings[name] = values[name]
@@ -3363,7 +3437,7 @@ class ProofDialog(object):
                     self.log.add(u"The common pairs could not be read: %s" % self.ak.html(exc), "warning")
             keep = common_filter(self.common, self.glyph_list()[1], self.ak)
         return Options(sections, page, parse_sizes(self.waterfall_edit.text, WATERFALL_SIZES),
-                       parse_sizes(self.text_edit.text, TEXT_SIZES), keep)
+                       parse_sizes(self.text_edit.text, TEXT_SIZES), keep, bool(self.collisions_box.isChecked()))
 
     def note_font(self, font, options):
         """Said once per font: a color font's glyphs, and scripts the font has letters of that its text
@@ -3731,6 +3805,7 @@ class ProofDialog(object):
                 or self.masters_box.currentIndex != 0 or self.colors_box.currentIndex != 0
                 or self.scope_box.currentIndex > 0 or self.scope_expanded
                 or not self.summary_box.isChecked() or self.languages_box.currentIndex != 0
+                or self.collisions_box.isChecked()
                 or parse_sizes(self.waterfall_edit.text, ()) != tuple(float(s) for s in WATERFALL_SIZES)
                 or parse_sizes(self.text_edit.text, ()) != tuple(float(s) for s in TEXT_SIZES))
 
@@ -3742,6 +3817,8 @@ class ProofDialog(object):
         has_font = self.package is not None
         # (nothing to list without the summary page; the captions gray with their controls: ak.caption)
         enable(self.languages_box, has_font and bool(self.summary_box.isChecked()))
+        # (it marks the kerning and spacing strings: grayed while neither section is ticked)
+        enable(self.collisions_box, has_font and any(self.section_boxes[key].isChecked() for key in ("kerning", "spacing")))
         # No font: no masters and no scripts or languages to choose from, no pages to look at (owner's image
         # 282: ak.no_font_states grays every other control meanwhile, Close and the tools aside)
         for box in (self.masters_box, self.scope_box):
@@ -3779,6 +3856,7 @@ class ProofDialog(object):
         self.scope_kept, self.scope_expanded = None, False
         self.scopes_font = None  # (the dropdown filled again, short, as the proof is laid out)
         self.summary_box.setChecked(True)
+        self.collisions_box.setChecked(False)
         self.languages_box.setCurrentIndex(0)
         self.waterfall_edit.setText(u" ".join(format_size(s) for s in WATERFALL_SIZES))
         self.text_edit.setText(u" ".join(format_size(s) for s in TEXT_SIZES))

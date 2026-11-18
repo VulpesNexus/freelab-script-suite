@@ -4653,7 +4653,7 @@ class ScrollKeptTests(unittest.TestCase):
             ac._qt, ac.write_settings = saved
         self.assertEqual(bar.value, 240, "where the list was scrolled")
         self.assertEqual(dialog.open_sections, {u"Can be built": False}, "a section closed by hand stays closed")
-        self.assertEqual(ac.section_title(u"Just built (tick to rebuild) (12)"), u"Just built (tick to rebuild)")
+        self.assertEqual(ac.section_title(u"Built in this window (tick to rebuild) (12)"), u"Built in this window (tick to rebuild)")
 
 
 class FarOffTests(unittest.TestCase):
@@ -5176,7 +5176,7 @@ class OwnerReportNovember15Tests(unittest.TestCase):
                                   u"Existing glyphs that match suggestions (tick to rebuild)"])
         self.assertEqual(ac.section_title(u"Existing glyphs with suggestions (tick to rebuild) (767)"),
                          u"Existing glyphs with suggestions (tick to rebuild)")
-        self.assertEqual(ac.JUST_BUILT, u"Just built (tick to rebuild)")
+        self.assertEqual(ac.JUST_BUILT, u"Built in this window (tick to rebuild)")
 
     def test_the_check_box_sits_with_the_preview_unticked_at_first(self):
         saved = ac.read_settings
