@@ -738,6 +738,32 @@ class PageTests(unittest.TestCase):
         self.assertIn(u"Made <b>1 copy to redraw</b>: ", owner.logged[0][1])
         self.assertIn(u"writes its set; <i>Edit &gt; Undo</i> takes it back.", owner.logged[0][1])
 
+    def test_copies_to_redraw_record_the_font_first(self):
+        """Make copies to redraw added glyphs without recording the font first (adversarial review 1): as
+        a font's first write, Undo had nothing to go back to. The font is recorded before the first copy,
+        and nothing is copied when FontLab's History cannot record it."""
+        page, owner = self.page()
+        self.ak._history()["whole"].discard(7)
+        steps = owner.fontlab.flItems.steps
+        self.row(page, u"a").setCheckState(0, ft.CHECKED)
+        page.make_copies()
+        self.assertIn(u"a.ss01", [g.name for g in owner.package.glyphs])
+        self.assertEqual(steps[-2:], [u"FreeLab Feature Code (before)", u"FreeLab Feature Code"])
+        # FontLab refuses to record the font: nothing is copied, and the log says why
+        page, owner = self.page()
+        self.ak._history()["whole"].discard(7)
+
+        def refuse(title, objects, whole):
+            raise RuntimeError("no History")
+        owner.fontlab.flItems.notifyChangesApplied = refuse
+        count = len(owner.package.glyphs)
+        self.row(page, u"a").setCheckState(0, ft.CHECKED)
+        del owner.logged[:]
+        page.make_copies()
+        self.assertEqual(len(owner.package.glyphs), count, "no copy made")
+        self.assertEqual([level for level, text in owner.logged], ["error"])
+        self.assertIn(u"Nothing was changed", owner.logged[0][1])
+
     # Variants built from a glyph's alternates as well as from the glyph (the owner's font has W and
     # W.ss01, two designs: both variants were made of W)
 

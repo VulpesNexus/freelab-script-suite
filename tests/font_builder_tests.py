@@ -893,6 +893,114 @@ class SheetFileTests(unittest.TestCase):
         self.assertEqual(fb.template_ext("C:/Temp/a/sheet"), ("C:/Temp/a/sheet", ".svg"), "no type typed: SVG")
         self.assertEqual(fb.template_ext("C:/Temp/a/Hand.v2"), ("C:/Temp/a/Hand.v2", ".svg"), "a dot in the name kept")
 
+    def saving_dialog(self, answer, sheets=2):
+        """A dialog that saves sheets of "A" as Hand.svg, its question answered with answer ("Replace", or None
+        for Cancel); (the dialog, what was asked, what was logged)."""
+        asked, logged = [], []
+
+        class Box_(object):
+            AcceptRole, RejectRole, Cancel, Warning = "accept", "reject", "cancel", "warning"
+
+            def __init__(self, parent):
+                self.buttons, self.clicked = {}, None
+
+            def setText(self, text):
+                asked.append(text)
+
+            def addButton(self, label, role=None):
+                button = object()
+                self.buttons[button] = "reject" if label == "cancel" else role
+                if label == answer:
+                    self.clicked = button
+                return button
+
+            def exec_(self):
+                if self.clicked is None:
+                    self.clicked = [b for b, role in self.buttons.items() if role == "reject"][0]
+
+            def clickedButton(self):
+                return self.clicked
+
+            def buttonRole(self, button):
+                return self.buttons[button]
+
+            def __getattr__(self, name):
+                return lambda *args: None
+        stem = os.path.join(self.folder, "Hand")
+        fb._qt = lambda: (None, Box(QFileDialog=Box(getSaveFileName=lambda *args: stem + ".svg"), QMessageBox=Box_))
+        d = fb.FontBuilderDialog.__new__(fb.FontBuilderDialog)
+        d.settings, d.dialog, d.typed = {"folder": self.folder}, None, Box(toPlainText=lambda: "A")
+        d.alternates = d.per_sheet = d.em = Box(value=1)
+        d.ak = Box(busy_start=lambda *a: None, busy_end=lambda *a: None, busy_progress=lambda *a: None,
+                   Stopped=KeyboardInterrupt, html=lambda s: s, b=lambda s: s)
+        d.log = Box(add=lambda text, level="info": logged.append((level, text)))
+        d.sheets = lambda: [fb.Sheet(["A"], ["A"], METRICS, 150, index=i, count=sheets) for i in range(sheets)]
+        return d, asked, logged
+
+    def read(self, name):
+        import io
+        with io.open(os.path.join(self.folder, name), encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_numbered_sheets_already_there_are_asked_of_before_any_is_replaced(self):
+        """Saving the template again as Hand.svg replaced Hand-2-of-2.svg, drawn in place, with an empty sheet
+        without a word: the dialog asked of Hand.svg, which was never written (adversarial review 2). Every file
+        the save would replace is named in one question; Cancel leaves them all as they were."""
+        self.write("Hand-2-of-2.svg", "OWNER DRAWING")
+        d, asked, logged = self.saving_dialog(None)
+        d.save_template()
+        self.assertEqual(asked, ["This sheet's file is there already: Hand-2-of-2.svg. Replace it with the "
+                                 "template's empty sheet?"])
+        self.assertEqual(self.read("Hand-2-of-2.svg"), "OWNER DRAWING", "canceled: left as it was")
+        self.assertFalse(os.path.exists(os.path.join(self.folder, "Hand-1-of-2.svg")), "and nothing else written")
+        self.assertEqual(logged, [("warning", "Nothing was saved: the file there already left as it was.")])
+        self.write("Hand-1-of-2.svg", "OWNER DRAWING")
+        d, asked, logged = self.saving_dialog("Replace")
+        d.save_template()
+        self.assertEqual(asked, ["These sheets' files are there already: Hand-1-of-2.svg, Hand-2-of-2.svg. Replace "
+                                 "them with the template's empty sheets?"], "one question for both")
+        for name in ("Hand-1-of-2.svg", "Hand-2-of-2.svg"):
+            self.assertIn("<svg", self.read(name))
+        self.assertEqual(sorted(os.listdir(self.folder)), ["Hand-1-of-2.svg", "Hand-2-of-2.svg"], "nothing left beside")
+        self.assertEqual(logged[-1][0], "done")
+        # One sheet: the dialog asked of its own name already
+        self.write("Hand.svg", "OWNER DRAWING")
+        d, asked, logged = self.saving_dialog(None, sheets=1)
+        d.save_template()
+        self.assertEqual(asked, [])
+        self.assertIn("<svg", self.read("Hand.svg"))
+
+    def test_a_sheet_that_cannot_be_written_leaves_the_file_there_as_it_was(self):
+        self.write("Hand-1-of-2.svg", "OWNER DRAWING")
+        d, asked, logged = self.saving_dialog("Replace")
+        saved = fb.sheet_svg
+
+        def broken(*args):
+            raise IOError("disk full")
+        fb.sheet_svg = broken
+        try:
+            d.save_template()
+        finally:
+            fb.sheet_svg = saved
+        self.assertEqual(self.read("Hand-1-of-2.svg"), "OWNER DRAWING", "the write failed before it took the file's place")
+        self.assertEqual(os.listdir(self.folder), ["Hand-1-of-2.svg"], "the staged file removed")
+        self.assertEqual(logged[-1][0], "error")
+        # Python 2.7's way, without os.replace: the old file set aside, then removed
+        staged = fb.staged_beside(os.path.join(self.folder, "Hand-1-of-2.svg"))
+        self.assertTrue(os.path.basename(staged).startswith("Hand-1-of-2.") and staged.endswith(".part.svg"))
+        with open(staged, "w") as handle:
+            handle.write("NEW")
+        real = getattr(os, "replace", None)
+        if real is not None:
+            del os.replace
+        try:
+            fb.put_in_place(staged, os.path.join(self.folder, "Hand-1-of-2.svg"))
+        finally:
+            if real is not None:
+                os.replace = real
+        self.assertEqual(self.read("Hand-1-of-2.svg"), "NEW")
+        self.assertEqual(os.listdir(self.folder), ["Hand-1-of-2.svg"])
+
     def test_an_svgs_size_is_its_viewbox_else_its_width_and_height(self):
         self.assertEqual(fb.svg_size('<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" width="100mm" '
                                      'height="80mm" viewBox="0 0 640 480">'), (640.0, 480.0))
@@ -997,6 +1105,8 @@ class RevealTests(unittest.TestCase):
         self.assertIsNone(ak.revealed_path("glyph:0041"))
         self.assertIsNone(ak.revealed_path(ak.REVEAL_LINK + "zz"), "broken: no path")
 
+    # (Python 2 encodes the command line in the ANSI code page, "mbcs", which only Windows has: adversarial review 12)
+    @unittest.skipIf(sys.version_info[0] < 3 and os.name != "nt", "Python 2's ANSI command line exists on Windows only")
     def test_windows_starts_explorer_without_a_console_window(self):
         ak = self.ak
         self.assertIsNone(ak.reveal_file(self.here, "win32"))

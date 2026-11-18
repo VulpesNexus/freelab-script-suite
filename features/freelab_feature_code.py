@@ -231,6 +231,10 @@ class FeatureCodeUnreadable(ValueError):
         self.tag = tag
 
 
+class _NothingWritten(Exception):
+    """Raised inside FeatureCodeDialog.write when the font's code changed after the write began: nothing is set."""
+
+
 def fea_tokens(text):
     """[(token, start, end)] of feature code, every one: comments (from # to the line's end) and quoted
     strings too (FEA_STATEMENT_TOKEN)."""
@@ -244,11 +248,14 @@ def code_tokens(text):
 
 def same_code(a, b):
     """Whether two pieces of feature code say the same: the same tokens, comments (FreeLab's markers among them)
-    and quoted strings included, whatever the spaces and line breaks around and inside them. FontLab may hand
-    code back spaced otherwise than it was written; compared as raw text, a write offered "Update the code" at
-    once, and the next one wrote the features again unchanged (owner's images 341, 363, and 365)."""
+    and quoted strings included, whatever the spaces and line breaks around them and inside comments. FontLab may
+    hand code back spaced otherwise than it was written; compared as raw text, a write offered "Update the code"
+    at once, and the next one wrote the features again unchanged (owner's images 341, 363, and 365). A quoted
+    string is compared as it is: its spaces are its text (a stylistic set's name, "Alternate  A", is not
+    "Alternate A": adversarial review 11)."""
     def tokens(text):
-        return [re.sub(u"\\s+", u" ", token).strip() for token, _, _ in fea_tokens(text or u"")]
+        return [token if token.startswith(u'"') else re.sub(u"\\s+", u" ", token).strip()
+                for token, _, _ in fea_tokens(text or u"")]
     return tokens(a) == tokens(b)
 
 
@@ -5921,6 +5928,17 @@ class FeatureCodeDialog(object):
         except Exception:
             pass
 
+    def code_changed(self, features, tags):
+        """Whether the font's code differs from the code read with the list: a feature of tags, or the prefix
+        (one that cannot be read counts as unchanged, as it reads as the one read)."""
+        try:
+            prefix_now = features.get_prefix() or u""
+        except Exception:
+            prefix_now = self.prefix
+        keys = features.keys()
+        return prefix_now != self.prefix or \
+            any((features.get_feature(tag) if tag in keys else None) != self.texts.get(tag) for tag in tags)
+
     def write(self):
         if self.package is None or self.busy:
             return
@@ -5932,16 +5950,11 @@ class FeatureCodeDialog(object):
         features = self.package.fgPackage.features
         texts = self.new_texts()
         prefix = self.new_prefix()
-        try:
-            prefix_now = features.get_prefix() or u""
-        except Exception:
-            prefix_now = self.prefix
         tags = set(("liga", "dlig", "calt")) | set(texts)
-        if any((features.get_feature(tag) if tag in features.keys() else None) != self.texts.get(tag) for tag in tags) \
-                or prefix_now != self.prefix:
+        stale = u"The features changed since they were read: here they are again. Nothing was written."
+        if self.code_changed(features, tags):
             self.run()
-            self.log.add(u"The features changed since they were read: here they are again. Nothing was written.",
-                         "warning")
+            self.log.add(stale, "warning")
             return
         refusal = own_code_refusal(self.ak, self.package, dict((tag, texts[tag]) for tag in self.tags_shown(texts)),
                                    prefix, self.names)
@@ -5956,11 +5969,18 @@ class FeatureCodeDialog(object):
         # glyph built from components (owner's image 336, a kerning write's)
         if not self.ak.begin_write(self.fontlab, self.package, u"FreeLab Feature Code", self.log):
             return
-        written, error, skipped = [], None, None
+        written, error, skipped, changed = [], None, None, False
         # (the window's top row says what is under way; a write is never stopped half way)
         self.set_busy(True, u"Writing the code", stoppable=False)
         try:
             self.progress(u"Writing the code", force=True, stoppable=False)
+            # The features compared with the font again after the bar's last event pump, and nothing lets events
+            # through from here to the last setter: a queued callback that changed a feature after the first
+            # comparison (set_busy and the bar let events through) would otherwise be overwritten with the code
+            # composed before it (adversarial review 10)
+            changed = self.code_changed(features, tags)
+            if changed:
+                raise _NothingWritten()
             if prefix is not None:
                 setter = getattr(features, "set_prefix", None)
                 try:
@@ -5980,10 +6000,16 @@ class FeatureCodeDialog(object):
                 written.append(tag)
             if u"aalt" in written and aalt_first(features):
                 written[written.index(u"aalt")] = u"aalt (first among the features)"
+        except _NothingWritten:
+            pass
         except Exception as exc:
             error = exc
         finally:
             self.set_busy(False)
+        if changed:  # (nothing written: the font's code, as it is now, read again)
+            self.run()
+            self.log.add(stale, "warning")
+            return
         # (the feature code only, no glyph added; begun with begin_write above)
         status = self.ak.notify_changed(self.fontlab, self.package, u"FreeLab Feature Code", added=False)
         forms, choices = self.form_state(), self.choice_state()

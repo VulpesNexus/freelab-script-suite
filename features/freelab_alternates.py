@@ -1393,11 +1393,15 @@ class AlternatesPage(object):
             pass
 
     def make_copies(self):
-        package = self.owner.package
+        owner = self.owner
+        package = owner.package
         chosen = self.checked_glyphs()
-        if package is None or not chosen or getattr(self.owner, "busy", False) or not self.same_font():
+        if package is None or not chosen or getattr(owner, "busy", False) or not self.same_font():
             return
         cmap, names = self.font_maps()
+        # (the font recorded first, for Undo to go back to; nothing is copied when FontLab could not record it)
+        if not self.ak.begin_write(owner.fontlab, package, u"FreeLab Feature Code", owner.log):
+            return
         made, touched, error = [], [], None
         try:
             for glyph in chosen:

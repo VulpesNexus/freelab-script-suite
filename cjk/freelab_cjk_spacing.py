@@ -586,6 +586,23 @@ def preview_note(text, names, bold=lambda text: text, escape=lambda text: text):
 FEATURE_CODE_FILE, FEATURE_CODE_MODULE = "freelab_feature_code.py", "freelab_feature_code"
 
 
+def hold_module(module):
+    """A FreeLab module kept alive once a newer copy replaces it in sys.modules (a reinstall in the same FontLab
+    session), in the list freelab_auto_kerning's hold_module keeps in sys, which this script need not load to
+    use: Python 2.7 empties a module's globals when the module object is freed, and a window of the old copy
+    still open then ran its slots with every global None (adversarial review 3: these loaders let it go)."""
+    if module is None:
+        return
+    held = getattr(sys, "_freelab_held_modules", None)
+    if held is None:
+        held = sys._freelab_held_modules = []
+    if not any(m is module for m in held):
+        held.append(module)
+
+
+hold_module(sys.modules.get(__name__))  # (this copy: the windows it serves keep working after a reinstall)
+
+
 def feature_code():
     """Feature Code as a module (its main() not run): its reading of feature code by tokens, which CJK
     Spacing and CJK Vertical write through too. Beside this script once installed, in the repository's
@@ -600,6 +617,7 @@ def feature_code():
     held = sys.modules.get(FEATURE_CODE_MODULE)
     if held is not None and hasattr(held, "without_blocks") and getattr(held, "_freelab_stamp", stamp) == stamp:
         return held
+    hold_module(held)  # (a Feature Code window of the copy replaced keeps its globals)
     old = os.environ.get("FREELAB_NO_AUTOSTART")
     os.environ["FREELAB_NO_AUTOSTART"] = "1"
     try:
@@ -914,6 +932,7 @@ def load_auto_kerning():
     held = sys.modules.get(AUTO_KERNING_MODULE)
     if held is not None and hasattr(held, "load_sibling") and getattr(held, "_freelab_stamp", None) == stamp:
         return held
+    hold_module(held)  # (the windows of the copy replaced keep their globals)
     old = os.environ.get("FREELAB_NO_AUTOSTART")
     os.environ["FREELAB_NO_AUTOSTART"] = "1"
     try:

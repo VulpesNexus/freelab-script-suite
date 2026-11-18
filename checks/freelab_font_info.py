@@ -502,14 +502,23 @@ def win_needed(extents):
 def apply_win(info, font, extents, names):
     """The Win ascent and descent raised to the ink of the glyphs the write drew (extents: [(bottom, top)]
     of each of their master layers), never lowered, and never set where they are not (0 or none); recorded
-    with the glyphs' names. [Change]."""
+    with the glyphs' names. Glyphs whose ink is within a value FreeLab raised before but past the value
+    before that raise are recorded with it too, though the write raises nothing: they rely on the raise, and
+    a follow must not lower it under them once the glyphs it was raised for are gone (adversarial review 5:
+    A raised 900 to 1000, B built to 950 was not recorded, and A undone took the value back to 900, under
+    B). [Change]."""
     changes = []
     ascent, descent = win_needed(extents)
     record = _record(font)["win"]
     for field, need in ((INFO_WIN_ASCENT, ascent), (INFO_WIN_DESCENT, descent)):
         now = _number(info, field)
         # (0 reads as not set, as Font Check takes it: a value made from these glyphs alone would clip the others)
-        if need is None or not now or need <= now:
+        if need is None or not now:
+            continue
+        if need <= now:
+            first, left, earlier = record.get(field, (None, None, ()))
+            if left is not None and left == now and need > first:  # (FreeLab's raise, as it left it)
+                record[field] = (first, left, tuple(sorted(set(earlier) | set(names))))
             continue
         setattr(info, field, float(need))
         kept = _number(info, field)
@@ -551,32 +560,33 @@ def follow(info, font, extent_of):
 
 def note_mark(font, count, state, wrote=False):
     """Where the font stands (its glyph count, its place in FontLab's History) once a write or a follow
-    is done; wrote: a write that changed the font info (its place is then the one an undo goes back past)."""
+    is done; wrote: a write whose glyphs the font info follows (its place is then one an undo goes back
+    past, and a redo forward past). Every such place is kept: each undo or redo across any of them is
+    followed, not only across the last (adversarial review 6: a second undo, below the last write, left the
+    value the first undo had put back)."""
     held = getattr(sys, "_freelab_font_info", None) or {}
     entry = held.get(font)
     if not entry:
         return
-    if wrote:
-        entry["write_state"] = state
-    written = entry.get("write_state")
-    entry["undone"] = written is not None and state is not None and state < written
+    if wrote and state is not None:
+        entry.setdefault("writes", set()).add(state)
     entry["mark"] = (count, state)
 
 
 def needs_follow(font, count, state):
     """Whether the glyphs may have changed what FreeLab's updates follow since note_mark: the glyph count
-    differs, or the History went back past FreeLab's last write that changed the font info, or forward
-    again. Cheap: follow reads every glyph."""
+    differs, or the History moved back or forward across any of FreeLab's writes the font info follows
+    (note_mark). Cheap; follow reads the glyphs recorded."""
     if not recorded(font):
         return False
     entry = sys._freelab_font_info[font]
     mark = entry.get("mark")
     if mark is None or mark[0] != count:
         return True
-    written = entry.get("write_state")
-    if written is None or state is None:
-        return state != mark[1]
-    return (state < written) != entry.get("undone", False)
+    before = mark[1]
+    if state is None or before is None or not entry.get("writes"):
+        return state != before
+    return any((state >= written) != (before >= written) for written in entry["writes"])
 
 
 def forget(font=None):

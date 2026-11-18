@@ -495,7 +495,7 @@ glyphs</i> opens <i>Kerning Check</i> on the glyphs just spaced (collisions and 
 run <i>Auto Kerning</i> again, with <i>Include existing kerned pairs</i>, to see which pairs now want
 other values.<br>
 <b>Preview</b>: the selected glyph between its references, as it is (left) and as suggested
-(right). Click a reference beside it to open that pair in <i>Auto Kerning</i>; double-click a glyph's name
+(right). Double-click a reference beside it to open that pair in <i>Auto Kerning</i>; double-click a glyph's name
 to open it in a <i>Glyph</i> window.<br>
 <i>Restore suggestions</i> puts the ticks back as the list first came.<br><br>
 Click this help's <i>?</i> button, then any control, for what it does."""

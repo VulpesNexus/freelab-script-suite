@@ -1910,6 +1910,33 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(dialog.form_feature("ss01").name, u"Single-story a")
         self.assertEqual(dialog.form_feature("tnum").kind, "freelab")
 
+    def test_a_feature_changed_once_the_write_began_is_kept(self):
+        """The features were compared with the font before the write's top row started, which lets events through:
+        a callback run then that changed a feature was overwritten with the code composed before it (adversarial
+        review 10). They are compared again after the bar's last event pump, right before the setters."""
+        features = FakeFeatures({})
+        dialog = self.dialog(features)
+        ak = self.ak
+        real = ak.busy_progress
+        self.addCleanup(setattr, ak, "busy_progress", real)
+        theirs = u"feature smcp {\n  sub a by a.sc; # theirs\n} smcp;\n"
+
+        def edited_meanwhile(owner, what=None, part=None, force=False, stoppable=True):
+            if what == u"Writing the code" and force:
+                features.texts["smcp"] = theirs
+        ak.busy_progress = edited_meanwhile
+        del self.logged[:]
+        steps = len(self.fontlab.flItems.steps)
+        dialog.write()
+        self.assertEqual(features.texts, {"smcp": theirs}, "nothing written over it, nothing else written")
+        self.assertEqual(self.logged[-1], ("warning", u"The features changed since they were read: here they are "
+                                                      u"again. Nothing was written."))
+        self.assertFalse(dialog.busy)
+        self.assertNotIn(u"FreeLab Feature Code", self.fontlab.flItems.steps[steps:], "no write step")
+        ak.busy_progress = real  # (unchanged meanwhile: written)
+        dialog.write()
+        self.assertIn("locl", features.texts)
+
     def test_locl_waits_for_the_prefix(self):
         features = FakeFeatures({}, u"", can_prefix=False)
         dialog = self.dialog(features)
@@ -3808,6 +3835,14 @@ class SameCodeTests(unittest.TestCase):
         self.assertFalse(fc.same_code(u"sub f f t by f_f_t;", u"sub f f i by f_f_i;"))
         self.assertFalse(fc.same_code(u"# >>> FreeLab ligatures\nsub a by b;", u"sub a by b;"), "FreeLab's markers count")
         self.assertTrue(fc.same_code(None, u""))
+
+    def test_a_quoted_strings_spaces_are_its_text(self):
+        """A stylistic set's name with two spaces where it had one was the same code, and the write skipped it
+        (adversarial review 11): a quoted string is compared as it is; the spaces around it still do not count."""
+        old = u'feature ss01 {\n  featureNames { name "Alternate A"; };\n  sub a by a.ss01;\n} ss01;\n'
+        self.assertFalse(fc.same_code(old, old.replace(u"Alternate A", u"Alternate  A")))
+        self.assertFalse(fc.same_code(old, old.replace(u'"Alternate A"', u'"Alternate A "')))
+        self.assertTrue(fc.same_code(old, u'feature ss01 { featureNames {name  "Alternate A" ;};\r\nsub a by a.ss01; } ss01;'))
 
 
 if __name__ == "__main__":

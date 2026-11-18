@@ -860,8 +860,8 @@ def coverage_differences(module, differences):
 
 
 def declared_note(module, differences, html):
-    """The log's line when the font info's coverage differs from the font's glyphs, with the link that
-    declares it (u"" when it does not differ)."""
+    """The log's line when the font info's coverage differs from the font's glyphs, naming the Coverage tab's
+    button that declares it (u"" when it does not differ)."""
     if not differences:
         return u""
     # (the button, in the bottom row, rather than a link the log alone showed: owner's image 372)
@@ -3604,7 +3604,7 @@ def register_list_font(QtCore, QtGui):
 
 HELP = u"""<b>FreeLab Font Check</b><br>
 Three views of the current font. Nothing in the font changes until you click <i>Write suggested
-values</i>, <i>Fix</i>, or the log's <i>Declare what the font covers</i> (the font info's Unicode ranges and code
+values</i>, <i>Fix</i>, or the Coverage tab's <i>Declare coverage</i> (the font info's Unicode ranges and code
 pages set to what the glyphs cover, where they differ). A fix or a declaration is one step of <i>Edit &gt;
 Undo</i>; the vertical metrics written are not in FontLab's History: <i>Put back old values</i> takes them back
 (a value that was not set before stays as written).<br><br>

@@ -1537,6 +1537,15 @@ def proof_text(left, right, contexts=PROOF_CONTEXTS):
 GLYPH_TAB_ACTION = "actionOpen_Editor_Window"  # FontLab's Window > New Glyph Tab
 
 
+def pending_slots():
+    """The single-shot timers' slots waiting to run, held in sys until each runs and lets itself go: PythonQt
+    drops a slot no Python object holds (QTimer.singleShot keeps none), and sys outlives a reinstall's module."""
+    held = getattr(sys, "_freelab_pending_slots", None)
+    if held is None:
+        held = sys._freelab_pending_slots = set()
+    return held
+
+
 def show_in_glyph_window(fontlab, text, owner=None):
     """Opens a new Glyph tab (FontLab's own New Glyph Tab) and sets its text (FontLab's /glyphname
     syntax), as typing it would; the error's text, or None. requestContent alone sets the text of the
@@ -1549,10 +1558,13 @@ def show_in_glyph_window(fontlab, text, owner=None):
             owner = window_owner(QtGui.QApplication.activeWindow())
     except Exception:
         owner = None
-    foreign = foreign_font(owner, fontlab)
-    if foreign is not None and not focus_font(owner, fontlab):
+    foreign = own_font_refusal(owner, fontlab)
+    if foreign:
         return (u"FontLab opens it on the font it shows, not on this window's (%s), and FreeLab could not "
                 u"show that font: click %s's Font window, then try again." % (foreign, foreign))
+    if foreign is not None:
+        return (u"FontLab opens it on the font it shows, and this window's font is no longer open (or FontLab "
+                u"could not say which font it shows)")
     try:
         symbols = fontlab.fgSymbolList(text, True)
     except Exception as exc:
@@ -1567,14 +1579,19 @@ def show_in_glyph_window(fontlab, text, owner=None):
     if action is None:
         return u"FontLab's New Glyph Tab command was not found"
 
+    pending = pending_slots()
+
     def fill():
         try:
             fontlab.flItems.requestContent(symbols, 0)
         except Exception:
             pass
+        finally:
+            pending.discard(fill)
 
     try:
         action.trigger()
+        pending.add(fill)  # (held until it runs: PythonQt drops a slot no Python object holds)
         QtCore.QTimer.singleShot(150, fill)  # once the new tab is the active Glyph window
         return None
     except Exception as exc:
@@ -1901,7 +1918,10 @@ def notify_changed(fontlab, package, title, glyphs=(), added=None, coverage=Fals
     if coverage:
         module = font_info()
         if module is not None and font is not None:  # (where the font stands once the write is in the History)
-            module.note_mark(font, _glyph_count(package), history_state(package), wrote=bool(status.info_changes))
+            # (a write the font info follows: one that changed it, or any while FreeLab's raises are recorded, as
+            # its glyphs may be among those they rely on: freelab_font_info.apply_win)
+            module.note_mark(font, _glyph_count(package), history_state(package),
+                             wrote=bool(status.info_changes) or module.recorded(font))
     before = held["counts"].pop(font, None)
     if added is None:
         added = before is None or before != _glyph_count(package)
@@ -2340,6 +2360,38 @@ def foreign_font(owner, fontlab=None):
         return u"%s" % (package.tfn or u"its font")
     except Exception:
         return None
+
+
+def font_shown(owner, fontlab=None):
+    """Whether FontLab shows the font of a tool's window, as FontLab's current font says positively (True for no
+    window, or a window with no font: nothing to tell apart). False when the window's font is another, is closed,
+    or when the font FontLab shows cannot be read."""
+    try:
+        font_id = getattr(owner, "font_id", None)
+        if font_id is None:
+            return True
+        if fontlab is None:
+            import fontlab
+        current = _font_id(fontlab.flWorkspace.instance().currentPackage)
+        return current is not None and current == font_id
+    except Exception:
+        return False
+
+
+def own_font_refusal(owner, fontlab=None):
+    """None when FontLab shows the font of a tool's window, shown first where it showed another (focus_font):
+    FontLab's own commands (Undo, Redo, a new Glyph tab) may then run. Else why they must not, as they act on the
+    font FontLab shows: the name of the window's font, which FreeLab could not show, or u"" when that font is
+    closed or FontLab's current font cannot be read. A window whose font cannot be found never lets a command
+    act on the font in front (adversarial review 4: foreign_font's None for a closed font let Undo do so)."""
+    if font_shown(owner, fontlab):
+        return None
+    foreign = foreign_font(owner, fontlab)
+    if foreign is None:
+        return u""  # (closed, or not to be told: refused all the same)
+    if focus_font(owner, fontlab) and font_shown(owner, fontlab):
+        return None
+    return foreign
 
 
 FONT_WINDOW_CLASS = "FontWindow"  # the class of a font's Font window, a tab of FontLab's main window
@@ -3301,21 +3353,28 @@ def fontlab_undo(owner, name):
     """FontLab's own Edit > Undo (name "actionUndo") or Redo ("actionRedo") run for a tool's window, on its
     font: the QAction of that name among the main window's, triggered, then FontLab's views redrawn
     (refresh_views). Nothing while the tool is busy (owner.busy: inside its own loop, which lets events
-    through), and nothing but a line in the log when FontLab shows another font (its commands act on the
-    font it shows: foreign_font), when FontLab has nothing to undo (its command grayed out), or when the
-    command cannot be found. True when FontLab's command was run."""
+    through), and nothing but a line in the log when FontLab shows another font it cannot be made to show the
+    window's instead (its commands act on the font it shows: own_font_refusal), when the window's font is
+    closed or FontLab's current font cannot be read, when FontLab has nothing to undo (its command grayed out),
+    or when the command cannot be found. True when FontLab's command was run."""
     QtCore, QtGui = _qt()
     done, verb = (u"undone", u"undo") if name == "actionUndo" else (u"redone", u"redo")
     log = getattr(owner, "log", None)
     try:
         if getattr(owner, "busy", False):
             return False  # (the History must not move under the tool's own work)
-        foreign = foreign_font(owner)
-        if foreign is not None and not focus_font(owner):  # (its font shown first: owner's image 314)
+        foreign = own_font_refusal(owner)  # (its font shown first: owner's image 314)
+        if foreign:
             if log is not None:
                 log.add(u"Nothing was %s: FontLab's %s works on the font it shows, not on this window's (%s). "
                         u"Click %s's Font window, then %s there." % (done, i(verb.capitalize()), b(foreign),
                                                                      b(foreign), verb), "warning")
+            return False
+        if foreign is not None:
+            if log is not None:
+                log.add(u"Nothing was %s: FontLab's %s works on the font it shows, and this window's font is no "
+                        u"longer open (or FontLab could not say which font it shows)." % (done, i(verb.capitalize())),
+                        "warning")
             return False
         main = AutoKerningDialog.main_window()
         for action in (main.findChildren(QtGui.QAction) if main is not None else []):
@@ -7621,6 +7680,7 @@ def watch_history(owner):
         except Exception:
             pass  # a timer's handler must not raise
 
+    owner.history_tick = tick  # (held with the tool: PythonQt drops a slot no Python object holds)
     timer.connect("timeout()", tick)
     timer.start()
     return timer
@@ -7637,7 +7697,21 @@ class ClickRegions(object):
         QtCore, QtGui = _qt()
         self.widget, self.on_click, self.tip = widget, on_click, tip
         self.regions, self.size = [], (0, 0)
+        self.pending = []  # (a double-click's call, held until its timer runs it: see below)
         regions = self
+
+        def later(key):
+            """on_click(key) once the event is over, as a slot held here until it runs: PythonQt drops a slot
+            no Python object holds (adversarial review 9)."""
+            def call():
+                try:
+                    if call in regions.pending:
+                        regions.pending.remove(call)
+                    regions.on_click(key)
+                except Exception:
+                    pass  # (a timer's slot must not raise)
+            regions.pending.append(call)
+            QtCore.QTimer.singleShot(0, call)
 
         class Filter(QtCore.QTimer):  # PythonQt has no QObject to subclass; a timer will do
             def eventFilter(self, obj, event):
@@ -7647,7 +7721,7 @@ class ClickRegions(object):
                         key = regions.hit(event)
                         if key is not None:
                             if kind == 4:
-                                QtCore.QTimer.singleShot(0, lambda: regions.on_click(key))
+                                later(key)
                             return True  # the widget's own click does not happen
                     elif kind == 5:  # MouseMove
                         over = regions.hit(event) is not None
@@ -8975,8 +9049,8 @@ while the list has the focus. A pair picked by hand is tinted; <i>Backspace</i> 
 suggested value again. <i>Restore suggestions</i> puts every check and pick back as the list first came.<br>
 <b>Keys in the list</b>: arrows move, a letter jumps to the pairs starting with it, <i>Space</i> checks or
 unchecks the pair, <i>Ctrl+1</i> to <i>Ctrl+6</i> pick, <i>Backspace</i> resets.<br>
-<b>The H's around a pair</b> (the script's own straight letter past Latin): click one, in any
-preview, to go to its pair with the pair's glyph beside it (H and T for HTo).<br>
+<b>The H's around a pair</b> (the script's own straight letter past Latin): double-click one, in any
+preview, to go to its pair with the pair's glyph beside it (H and T for HTo); a single click there does nothing.<br>
 <b>The pair's name</b>: double-click it to open the pair in a <i>Glyph</i> window.<br>
 <b>Kerning classes</b>: a pair is written where its value comes from: its own pair, or else its
 classes' pair, which kerns every glyph of both classes. The line under the list says which.<br><br>

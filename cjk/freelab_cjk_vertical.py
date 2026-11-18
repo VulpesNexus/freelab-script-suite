@@ -130,8 +130,26 @@ def load_model(path=None, name=MODEL_FILE):
         return {}
 
 
+def hold_module(module):
+    """A FreeLab module kept alive once a newer copy replaces it in sys.modules (a reinstall in the same FontLab
+    session), in the list freelab_auto_kerning's hold_module keeps in sys, which this script need not load to
+    use: Python 2.7 empties a module's globals when the module object is freed, and a window of the old copy
+    still open then ran its slots with every global None (adversarial review 3: load_script let it go)."""
+    if module is None:
+        return
+    held = getattr(sys, "_freelab_held_modules", None)
+    if held is None:
+        held = sys._freelab_held_modules = []
+    if not any(m is module for m in held):
+        held.append(module)
+
+
+hold_module(sys.modules.get(__name__))  # (this copy: the windows it serves keep working after a reinstall)
+
+
 def load_script(file_name, module_name):
-    """A FreeLab script beside this one, loaded as a module without starting it."""
+    """A FreeLab script beside this one, loaded as a module without starting it; loaded again when its file
+    changed (a reinstall), the copy it replaces held (hold_module)."""
     here = os.path.dirname(os.path.abspath(globals().get("__file__") or "."))
     path = os.path.join(here, file_name)
     try:
@@ -141,6 +159,7 @@ def load_script(file_name, module_name):
     held = sys.modules.get(module_name)
     if held is not None and getattr(held, "_freelab_stamp", stamp) == stamp and hasattr(held, "kind_of"):
         return held
+    hold_module(held)  # (its open windows keep their globals)
     old = os.environ.get("FREELAB_NO_AUTOSTART")
     os.environ["FREELAB_NO_AUTOSTART"] = "1"
     try:
@@ -1228,11 +1247,21 @@ def code_notes(builds, metrics):
 
 def mark_modified(package):
     """The font marked modified (ofChanged): a script's write leaves it unmarked, and FontLab would close it
-    without asking to save. The font info alone needs no step of FontLab's History (it is not in it)."""
+    without asking to save. The font info alone needs no step of FontLab's History (it is not in it). None when
+    it was marked; else why not, for the log (UNMARKED: adversarial review 7, a failure was swallowed)."""
     try:
         package.setFlag(2, True)
-    except Exception:
-        pass
+        return None
+    except Exception as exc:
+        try:
+            return u"%s" % (exc,)
+        except Exception:
+            return u"%r" % (exc,)
+
+
+# (ak.WriteStatus's words, for the font info written outside FontLab's History)
+UNMARKED = (u"FontLab did not mark the font as modified (%s): save the font before closing it, since FontLab "
+            u"may not ask.")
 
 
 class CJKVerticalDialog(object):
@@ -2464,7 +2493,7 @@ class CJKVerticalDialog(object):
     def write_parts(self, package, new, builds, heights, vhea):
         """The write itself, under the progress bar (write), then its log and the list read again."""
         built, failed, written, set_heights, error, touched = [], [], [], 0, None, []
-        vhea_done = []
+        vhea_done, self.vhea_unmarked = [], None
         # The code written is composed from the code read with the list: an edit made since (before the History
         # watcher saw it, or one that leaves the History where it was) would be replaced. Checked after the last
         # event let through (the bar's); from here until the code is written, the bar is painted alone
@@ -2560,6 +2589,9 @@ class CJKVerticalDialog(object):
             self.log.add(u"Wrote nothing.")
         if not getattr(status, "ok", True):
             self.log.add(status.message(), "error")
+        unmarked = getattr(self, "vhea_unmarked", None) if vhea else None
+        if unmarked is not None and getattr(status, "marked", True):  # (said once: the History's write said it)
+            self.log.add(UNMARKED % self.ak.html(unmarked), "error")
         if error is not None:
             self.log.add(u"Stopped by an error: %s" % self.ak.html(error), "error")
         self.stoppable = True  # (written: the list read again may stop, at the user's Esc, Close, tool, or arrow)
@@ -2691,10 +2723,12 @@ class CJKVerticalDialog(object):
 
     def write_vhea(self, package, metrics):
         """vhea's checked values into the font info (outside FontLab's History): the old ones kept for Put
-        back vhea (an unset value goes back to unset). The metrics written."""
+        back vhea (an unset value goes back to unset). The metrics written; self.vhea_unmarked, why the font
+        could not be marked modified (mark_modified), or None."""
         info = package.fgPackage.info
         fields = dict((key, field) for key, field, _ in VHEA_FIELDS)
         old, done = {}, []
+        self.vhea_unmarked = None
         for metric in metrics:
             field = fields[metric.key]
             try:
@@ -2707,7 +2741,7 @@ class CJKVerticalDialog(object):
                 self.log.add(u"FontLab did not take %s: %s" % (metric.label, self.ak.html(exc)), "warning")
         if old:
             self.put_back = (self.ak.font_key(package), old)
-            mark_modified(package)
+            self.vhea_unmarked = mark_modified(package)
         self.update_put_back()
         return done
 
@@ -2834,17 +2868,30 @@ class CJKVerticalDialog(object):
             self.update_put_back()
             return
         info = current.fgPackage.info
-        restored = 0
-        for field, value in held[1].items():
+        restored, kept = 0, {}
+        for field, value in sorted(held[1].items()):
             try:
                 setattr(info, field, None if value is None else float(value))  # (None unsets it: live, 2026-11-14)
-                restored += 1
+                now = getattr(info, field, None)  # (read back: counted only when FontLab took it)
+                if value is None and now is None or value is not None and now is not None and \
+                        abs(float(now) - float(value)) < 0.5:
+                    restored += 1
+                    continue
+                self.log.add(u"FontLab did not take %s back." % field, "warning")
             except Exception as exc:
                 self.log.add(u"FontLab did not take %s back: %s" % (field, self.ak.html(exc)), "warning")
-        self.put_back = None
-        mark_modified(current)
-        self.log.add(u"Put back %s as %s." % (self.ak.b(counted(restored, u"vhea value")),
-                                               u"it was" if restored == 1 else u"they were"), "done")
+            kept[field] = value  # (outside FontLab's History: its old value kept for another try)
+        # (only the values put back are let go: adversarial review 8, a refused one lost its old value)
+        self.put_back = (held[0], kept) if kept else None
+        unmarked = mark_modified(current) if restored else None
+        if restored:
+            self.log.add(u"Put back %s as %s." % (self.ak.b(counted(restored, u"vhea value")),
+                                                   u"it was" if restored == 1 else u"they were"), "done")
+        if kept:
+            self.log.add(u"%s not put back: <i>Put back vhea</i> tries again." % (
+                self.ak.b(counted(len(kept), u"vhea value")) + (u" was" if len(kept) == 1 else u" were")), "warning")
+        if unmarked is not None:
+            self.log.add(UNMARKED % self.ak.html(unmarked), "error")
         self.run()
 
     def show(self):

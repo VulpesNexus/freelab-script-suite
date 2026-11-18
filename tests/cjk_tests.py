@@ -699,6 +699,43 @@ class ReaderLoadingTests(unittest.TestCase):
         self.assertEqual(logged, [])
 
 
+class ReplacedModuleTests(unittest.TestCase):
+    def test_a_module_these_loaders_replace_keeps_its_globals(self):
+        """CJK Spacing's Feature Code loader and CJK Vertical's load_script replaced a module whose file changed (a
+        reinstall) without holding the copy replaced: Python 2.7 empties a freed module's globals, and a window of
+        that copy still open ran its slots with every global None (adversarial review 3). Run under Python 2.7 by
+        the gate, where the slot's globals would be None without the hold."""
+        import gc
+        import types
+        import freelab_cjk_vertical as cv
+        loaders = ((cj.feature_code, cj.FEATURE_CODE_MODULE, "without_blocks"),
+                   (lambda: cv.load_script(cv.SPACING_FILE, cv.SPACING_MODULE), cv.SPACING_MODULE, "kind_of"))
+        for loader, name, marker in loaders:
+            saved = sys.modules.get(name)
+            try:
+                old = types.ModuleType(str(name))
+                exec("VALUE = 7\ndef value():\n    return VALUE\n", old.__dict__)
+                setattr(old, marker, None)
+                old._freelab_stamp = -1.0  # (its file changed since it was loaded: a reinstall)
+                slot = old.value  # (all an open window of it keeps: its slots, whose globals are the module's)
+                sys.modules[name] = old
+                del old
+                self.assertIsNotNone(loader(), name)
+                self.assertIsNot(sys.modules[name].__dict__, slot.__globals__, "a new copy loaded")
+                gc.collect()
+                self.assertEqual(slot(), 7, "%s: the old copy's globals kept" % name)
+                self.assertTrue(any(m.__dict__ is slot.__globals__ for m in getattr(sys, "_freelab_held_modules", [])),
+                                name)
+            finally:
+                held = getattr(sys, "_freelab_held_modules", [])
+                for module in [m for m in held if getattr(m, "VALUE", None) == 7]:
+                    held.remove(module)  # (the test's own, let go)
+                if saved is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = saved
+
+
 class TokenReadingTests(unittest.TestCase):
     def test_codex_review_6_scenarios(self):
         """Markers found as comments wherever they stand, never past their pair; another feature's code is no

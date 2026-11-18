@@ -984,6 +984,7 @@ class BeforeChangesTests(unittest.TestCase):
         expected = {"spacing/freelab_auto_spacing.py": 1, "cjk/freelab_cjk_spacing.py": 1,
                     "compose/freelab_glyph_compose.py": 1,
                     "features/freelab_feature_code.py": 2,  # (the figure forms' build, the code's write)
+                    "features/freelab_alternates.py": 2,  # (Make copies to redraw, Build variants)
                     "checks/freelab_font_check.py": 2,  # (the masters' fixes, begin_info_write)
                     "features/freelab_feature_check.py": 1, "builder/freelab_font_builder.py": 1,
                     "kerning/freelab_kerning_check.py": 1,  # (begin_writing)
@@ -2188,6 +2189,40 @@ class WindowTests(unittest.TestCase):
         self.active = None  # from no tool window: FontLab's current font, as before
         self.workspace.currentPackage = self.two
         self.assertIsNone(ak.show_in_glyph_window(sys.modules["fontlab"], u"/A"))
+
+    def test_a_window_whose_font_is_gone_never_acts_on_the_font_in_front(self):
+        """Undo from the window of a font just closed (before fonts_tick closes the window) undid the font FontLab
+        showed: foreign_font said nothing of a font it could not find (adversarial review 4). Undo, Redo, and a new
+        Glyph tab refuse unless FontLab's current font is positively the window's."""
+        proof = self.open("Proof")
+        self.active = proof.dialog
+        self.workspace.fonts.remove(self.one)  # (One closed; Two in front)
+        self.workspace.currentPackage = self.two
+        for name, done in (("actionUndo", u"undone"), ("actionRedo", u"redone")):
+            self.assertFalse(ak.fontlab_undo(proof, name))
+            self.assertEqual(proof.lines[-1], ("warning", u"Nothing was %s: FontLab's <i>%s</i> works on the font it "
+                                                          u"shows, and this window's font is no longer open (or FontLab "
+                                                          u"could not say which font it shows)." % (
+                                                              done, u"Undo" if done == u"undone" else u"Redo")))
+        self.assertIn(u"no longer open", ak.show_in_glyph_window(sys.modules["fontlab"], u"/A"))
+        self.assertEqual(self.triggered, [], "nothing run on Two")
+        # FontLab's current font unreadable: refused too, the window's font open or not
+        self.workspace.fonts.insert(0, self.one)
+        self.workspace.currentPackage = object()
+        self.assertFalse(ak.fontlab_undo(proof, "actionUndo"))
+        self.assertIsNotNone(ak.show_in_glyph_window(sys.modules["fontlab"], u"/A"))
+        self.assertEqual(self.triggered, [])
+        self.assertFalse(ak.font_shown(proof))
+        # Its own font in front: run
+        self.workspace.currentPackage = self.one
+        self.assertTrue(ak.font_shown(proof))
+        self.assertTrue(ak.fontlab_undo(proof, "actionUndo"))
+        self.assertIsNone(ak.show_in_glyph_window(sys.modules["fontlab"], u"/A"))
+        self.assertEqual(self.triggered, ["actionUndo", ak.GLYPH_TAB_ACTION])
+        fills = ak.pending_slots() & set(self.timers)
+        self.assertEqual(len(fills), 1, "the Glyph tab's fill held until it runs")
+        self.run_timers()
+        self.assertFalse(fills & ak.pending_slots(), "and let go once it ran")
 
     def test_the_tools_follow_the_order_of_the_work(self):
         self.assertEqual(ak.FONT_TOOLS[0], "Font Builder", "drawn first, then the rest built from it")
@@ -3707,6 +3742,49 @@ class HeldFilterTests(unittest.TestCase):
         drag = ak.PairDrag(label, lambda: 0, lambda value: None, lambda step: None, lambda: 1.0)
         self.assertIs(regions.filter.owner, button, "Qt deletes it with its widget, never PythonQt at random")
         self.assertIs(drag.filter.owner, label)
+
+    def test_a_double_clicks_call_and_the_history_tick_are_held(self):
+        """A neighbor's double-click handed QTimer.singleShot a lambda nothing held, and watch_history's tick was
+        held by nothing but its connection (adversarial review 9): PythonQt drops a slot no Python object holds."""
+        import gc
+        import weakref
+        Timer, queue, clicked = ak._qt()[0].QTimer, [], []
+        Timer.singleShot = staticmethod(lambda ms, slot: queue.append(weakref.ref(slot)))
+
+        class Event(object):
+            def __init__(self, kind):
+                self.kind = kind
+
+            def type(self):
+                return self.kind
+
+        widget = self.Widget()
+        regions = ak.ClickRegions(widget, clicked.append)
+        regions.hit = lambda event: "neighbor"
+        for kind in (2, 3):  # (a single click: taken, nothing called)
+            self.assertTrue(regions.filter.eventFilter(widget, Event(kind)))
+        self.assertEqual(queue, [])
+        self.assertTrue(regions.filter.eventFilter(widget, Event(4)))
+        gc.collect()
+        (slot,) = queue
+        self.assertIsNotNone(slot(), "held until it runs")
+        slot()()
+        self.assertEqual(clicked, ["neighbor"])
+        self.assertEqual(regions.pending, [], "and let go once it ran")
+        # The History's watch
+        connected = []
+        Timer.setInterval = Timer.start = lambda self, *args: None
+        Timer.connect = lambda self, signal, slot: connected.append(weakref.ref(slot))
+
+        class Tool(object):
+            dialog = None
+
+        tool = Tool()
+        timer = ak.watch_history(tool)
+        gc.collect()
+        self.assertIsNotNone(connected[0](), "its tick held with the tool")
+        self.assertIs(connected[0](), tool.history_tick)
+        del timer
 
     def test_timers_anywhere_a_tool_holds_them_are_found(self):
         class Tool(object):

@@ -938,6 +938,79 @@ class FakeQtTests(unittest.TestCase):
         self.assertEqual((top.kinds()[0], top.kinds()[-1]), ("start", "end"))
         self.assertFalse(top.calls[0][2], "the write is not stoppable")
 
+    def vhea_dialog(self, package, refuse_flag):
+        """A dialog that writes vhea alone into package's info, FontLab's setFlag refusing where asked; (the dialog,
+        what it logged)."""
+        package.fgPackage.features = StaleCodeTests.Features({})
+
+        def set_flag(flag, on):
+            if refuse_flag:
+                raise RuntimeError("cannot mark modified")
+        package.setFlag = set_flag
+        dialog = self.dialog(package)
+        dialog.texts, dialog.prefix, dialog.classes = {}, u"", {}
+        logged = []
+        raising = lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("no Feature Code"))
+        dialog.ak = type("Ak", (), dict(
+            font_key=staticmethod(lambda p: 1), load_sibling=staticmethod(raising),
+            b=staticmethod(lambda t: t), html=staticmethod(lambda t: u"%s" % t),
+            joined=staticmethod(lambda items: u", ".join(items)), enable=staticmethod(lambda w, on: None),
+            **TopRow().members()))
+        dialog.log = type("Log", (), {"add": lambda self, text, kind=None: logged.append((kind, text))})()
+        dialog.harvest = dialog.run = dialog.read_font = lambda: None
+        dialog.current_font = lambda: package
+        dialog.put_back, dialog.put_back_button = None, None
+        return dialog, logged
+
+    def test_a_vhea_write_that_cannot_mark_the_font_says_so(self):
+        """Written outside FontLab's History, vhea alone marked the font modified through mark_modified, which
+        swallowed a failure: the log said it was written, and FontLab could close the font without asking to save
+        it (adversarial review 7). The failure is said, as notify_changed's is."""
+        package = self.Package([self.Glyph("uni300C", {"Regular": self.Layer(1000.0)})], masters=("Regular",))
+        package.fgPackage.info.openTypeVheaVertTypoAscender = 400.0
+        dialog, logged = self.vhea_dialog(package, refuse_flag=True)
+        dialog.pending = lambda: ({}, [], [cv.Metric("vhea_ascent", u"vhea ascender", None, 500, None)])
+        dialog.write()
+        self.assertEqual(package.fgPackage.info.openTypeVheaVertTypoAscender, 500.0)
+        self.assertIn((u"error", u"FontLab did not mark the font as modified (cannot mark modified): save the font "
+                                 u"before closing it, since FontLab may not ask."), logged)
+        self.assertEqual(cv.mark_modified(package), u"cannot mark modified")
+        # Marked: nothing said of it
+        dialog, logged = self.vhea_dialog(package, refuse_flag=False)
+        dialog.pending = lambda: ({}, [], [cv.Metric("vhea_ascent", u"vhea ascender", None, 600, None)])
+        dialog.write()
+        self.assertFalse([text for kind, text in logged if kind == "error"], logged)
+        self.assertIsNone(cv.mark_modified(package))
+
+    def test_put_back_vhea_keeps_what_fontlab_refused(self):
+        """Put back vhea let go of every old value, one FontLab refused too, which nothing else holds (the font
+        info is outside FontLab's History): adversarial review 8. A value refused is kept for another try."""
+        package = self.Package([self.Glyph("uni300C", {"Regular": self.Layer(1000.0)})], masters=("Regular",))
+        refusals = ["openTypeVheaVertTypoAscender"]
+
+        class Info(object):
+            def __setattr__(self, field, value):
+                if field in refusals:
+                    refusals.remove(field)  # (refused once)
+                    raise RuntimeError("cannot restore this field")
+                object.__setattr__(self, field, value)
+        info = package.fgPackage.info = Info()
+        object.__setattr__(info, "openTypeVheaVertTypoAscender", 500.0)
+        object.__setattr__(info, "openTypeVheaVertTypoLineGap", 0.0)
+        dialog, logged = self.vhea_dialog(package, refuse_flag=False)
+        dialog.put_back = (1, {"openTypeVheaVertTypoAscender": 700.0, "openTypeVheaVertTypoLineGap": None})
+        dialog.put_back_values()
+        self.assertEqual(dialog.put_back, (1, {"openTypeVheaVertTypoAscender": 700.0}), "the refused one kept")
+        self.assertIsNone(info.openTypeVheaVertTypoLineGap, "unset again, as it was")
+        self.assertEqual([kind for kind, _ in logged], ["warning", "done", "warning"])
+        self.assertEqual(logged[1][1], u"Put back 1 vhea value as it was.")
+        self.assertEqual(logged[2][1], u"1 vhea value was not put back: <i>Put back vhea</i> tries again.")
+        del logged[:]
+        dialog.put_back_values()  # (tried again: FontLab takes it now)
+        self.assertEqual(info.openTypeVheaVertTypoAscender, 700.0)
+        self.assertIsNone(dialog.put_back)
+        self.assertEqual(logged, [(u"done", u"Put back 1 vhea value as it was.")])
+
     def test_a_glyph_of_one_component_is_followed(self):
         inner = self.Glyph("uniFF08", {"Regular": self.Layer(1000.0)})
         outer = self.Glyph("uniFF08.alt", {"Regular": self.Layer(1000.0, [self.Shape("uniFF08", self.Transform(1, 0, 0, 1, 30, 0))])})

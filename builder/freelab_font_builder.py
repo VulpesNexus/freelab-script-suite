@@ -1212,6 +1212,62 @@ def template_ext(path):
     return (stem if not ext else path), TEMPLATE_FORMATS[0][0]
 
 
+def sheet_names(sheets, stem, ext):
+    """Every sheet's file, in order: the name chosen, numbered (-1-of-2, -2-of-2) when there are several sheets."""
+    return [stem + ("-%d-of-%d" % (sheet.index + 1, sheet.count) if sheet.count > 1 else "") + ext for sheet in sheets]
+
+
+def files_to_replace(names, confirmed=None):
+    """The names given that are files already, but the one the save dialog asked about (confirmed): the dialog
+    asks of the name typed, never of the numbered ones written instead (adversarial review 2: a sheet drawn in
+    place, Hand-2-of-2.svg, was replaced by an empty one without a word)."""
+    def same(first, second):
+        return os.path.normcase(os.path.abspath(first)) == os.path.normcase(os.path.abspath(second))
+    return [name for name in names if os.path.exists(name) and not (confirmed and same(name, confirmed))]
+
+
+def staged_beside(name):
+    """A new, empty file beside name (its name, then .part before its extension, by which Qt picks an image's
+    format), for a sheet to be written whole before it takes name's place."""
+    import tempfile
+    folder = os.path.dirname(os.path.abspath(name))
+    stem, ext = os.path.splitext(os.path.basename(name))
+    handle, staged = tempfile.mkstemp(prefix=stem + ".", suffix=".part" + ext, dir=folder)
+    os.close(handle)
+    return staged
+
+
+def put_in_place(staged, name):
+    """A staged file moved to name, replacing a file there. Python 2.7 has no os.replace, and its rename onto a
+    file fails on Windows: the old file is set aside first, and put back when the new one cannot take its place."""
+    replace = getattr(os, "replace", None)
+    if replace is not None:
+        replace(staged, name)
+        return
+    if not os.path.exists(name):
+        os.rename(staged, name)
+        return
+    aside = staged + ".old"
+    os.rename(name, aside)
+    try:
+        os.rename(staged, name)
+    except OSError:
+        os.rename(aside, name)
+        raise
+    try:
+        os.remove(aside)
+    except OSError:
+        pass
+
+
+def discard_staged(staged):
+    try:
+        if staged is not None and os.path.exists(staged):
+            os.remove(staged)
+    except OSError:
+        pass
+
+
 _TEXT_TYPES = (type(u""), type(b""))
 
 
@@ -1761,11 +1817,19 @@ class FontBuilderDialog(object):
         self.settings.update({"folder": os.path.dirname(path), "typed": "%s" % self.typed.toPlainText(),
                               "alternates": self.alternates.value, "per_sheet": self.per_sheet.value, "em": self.em.value})
         write_settings(self.ak, self.settings)
+        names = sheet_names(sheets, stem, ext)
+        # (every file the save replaces, asked of once: the dialog asked of the name typed only)
+        existing = files_to_replace(names, path)
+        if existing and not self.ask_replace(existing):
+            self.log.add("Nothing was saved: %s left as %s." % (
+                "the file there already" if len(existing) == 1 else "the files there already",
+                "it was" if len(existing) == 1 else "they were"), "warning")
+            return
         written = []
         self.busy = True
         self.ak.busy_start(self, "Saving the template")
         try:
-            self.write_sheets(sheets, stem, ext, written)
+            self.write_sheets(sheets, stem, ext, written, names)
         except self.ak.Stopped:
             self.log.add("Saving was stopped after %s." % self.ak.b(counted(len(written), "sheet")), "warning")
             return
@@ -1781,26 +1845,52 @@ class FontBuilderDialog(object):
         reveal = getattr(self.ak, "reveal_clicked", None)
         return reveal(target, self.log) if reveal is not None else False
 
-    def write_sheets(self, sheets, stem, ext, written):
-        """Each sheet written (its path added to written); stops at the first that cannot be."""
+    def ask_replace(self, existing):
+        """One question for every sheet's file the save would replace: True to replace them all, False (Cancel,
+        Esc, or a question that could not be shown) to save nothing."""
         QtCore, QtGui = _qt()
-        for sheet in sheets:
+        one = len(existing) == 1
+        text = "%s there already: %s. Replace %s with the template's empty %s?" % (
+            "This sheet's file is" if one else "These sheets' files are",
+            ", ".join(os.path.basename(name) for name in existing), "it" if one else "them", "sheet" if one else "sheets")
+        try:
+            box = QtGui.QMessageBox(self.dialog)
+            box.setWindowTitle("Save the template")
+            box.setIcon(QtGui.QMessageBox.Warning)
+            box.setText(text)
+            box.addButton("Replace", QtGui.QMessageBox.AcceptRole)
+            cancel = box.addButton(QtGui.QMessageBox.Cancel)
+            box.setDefaultButton(cancel)
+            box.setEscapeButton(cancel)
+            box.exec_()
+            clicked = box.clickedButton()
+            return clicked is not None and box.buttonRole(clicked) == QtGui.QMessageBox.AcceptRole
+        except Exception:
+            return False
+
+    def write_sheets(self, sheets, stem, ext, written, names=None):
+        """Each sheet written (its path added to written); stops at the first that cannot be. A sheet is written
+        whole beside its file first, and takes its place only then: a write that fails leaves the file as it was."""
+        QtCore, QtGui = _qt()
+        names = names or sheet_names(sheets, stem, ext)
+        for sheet, name in zip(sheets, names):
             self.ak.busy_progress(self, "Saving sheet %d of %d" % (sheet.index + 1, len(sheets)),
                                   sheet.index / float(len(sheets)))
-            name = stem + ("-%d-of-%d" % (sheet.index + 1, sheet.count) if sheet.count > 1 else "") + ext
-            if ext == ".svg":
-                try:
-                    with io.open(name, "w", encoding="utf-8", newline="\n") as handle:
+            staged = None
+            try:
+                staged = staged_beside(name)
+                if ext == ".svg":
+                    with io.open(staged, "w", encoding="utf-8", newline="\n") as handle:
                         handle.write(sheet_svg(sheet, GUIDE_RGB))
-                except (IOError, OSError):
-                    self.log.add("%s could not be written." % self.ak.html(name), "error")
-                    return
-                written.append(name)
-                continue
-            image = render_sheet(sheet, QtCore, QtGui)
-            if not image.save(name):
+                elif not render_sheet(sheet, QtCore, QtGui).save(staged):
+                    raise IOError("not saved")
+                put_in_place(staged, name)
+                staged = None
+            except (IOError, OSError):
                 self.log.add("%s could not be written." % self.ak.html(name), "error")
                 return
+            finally:
+                discard_staged(staged)
             written.append(name)
 
     # -- building ------------------------------------------------------------------

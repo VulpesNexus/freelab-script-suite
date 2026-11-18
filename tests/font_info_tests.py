@@ -188,6 +188,55 @@ class FollowTests(unittest.TestCase):
         self.assertTrue(fi.needs_follow(1, 500, 4), "forward again: redone")
         self.assertFalse(fi.needs_follow(2, 500, 4), "a font FreeLab never changed the info of")
 
+    def test_a_later_glyph_within_a_raise_keeps_it(self):
+        """A raised the Win ascent 900 to 1000; B, built later to 950, raised nothing and was not recorded, so A
+        undone took the value back to 900, under B (adversarial review 5). B relies on the raise: recorded with it."""
+        fi.forget()
+        info = Info(ascent=900.0, descent=250.0)
+        fi.apply_win(info, 101, [(-400.0, 1000.0)], [u"A"])
+        self.assertEqual(fi.apply_win(info, 101, [(-300.0, 950.0)], [u"B"]), [], "nothing raised")
+        fi.apply_win(info, 101, [(-100.0, 850.0)], [u"C"])  # (within the value before the raise: relies on none)
+        self.extents = {u"A": [(-100.0, 800.0)], u"B": [(-300.0, 950.0)], u"C": [(-100.0, 850.0)]}
+        fi.follow(info, 101, self.extent_of)
+        self.assertEqual((info.openTypeOS2WinAscent, info.openTypeOS2WinDescent), (950.0, 300.0),
+                         "A redrawn lower: B's ink kept, ascent and descent alike")
+        self.extents = {u"C": [(-100.0, 850.0)]}
+        fi.follow(info, 101, self.extent_of)
+        self.assertEqual((info.openTypeOS2WinAscent, info.openTypeOS2WinDescent), (900.0, 250.0), "both gone: as before")
+        self.assertNotIn(u"C", sys._freelab_font_info[101]["win"][fi.INFO_WIN_ASCENT][2])
+        # A value changed by hand since FreeLab left it: a later glyph within it is not FreeLab's to record
+        info.openTypeOS2WinAscent = 1200.0
+        fi.apply_win(info, 101, [(-100.0, 1100.0)], [u"D"])
+        self.assertNotIn(u"D", sys._freelab_font_info[101]["win"][fi.INFO_WIN_ASCENT][2])
+
+    def test_every_undo_and_redo_across_successive_writes_follows(self):
+        """A redrawn twice, the Win ascent raised 900 to 1000, then to 1100, the glyph count unchanged: a second
+        undo, below the last write only, was not followed and left 1000 (adversarial review 6). Each step across
+        any of the writes is followed, back and forth."""
+        fi.forget()
+        info = Info(ascent=900.0, descent=250.0)
+
+        def top(state):
+            return 800.0 if state < 2 else 1000.0 if state < 4 else 1100.0
+
+        def write(state):
+            fi.apply_win(info, 102, [(-100.0, top(state))], [u"A"])
+            fi.note_mark(102, 500, state, wrote=True)
+
+        def move(state):
+            if fi.needs_follow(102, 500, state):
+                fi.follow(info, 102, lambda names: [(-100.0, top(state))])
+            fi.note_mark(102, 500, state)
+            return info.openTypeOS2WinAscent
+
+        write(2)
+        write(4)
+        self.assertEqual(info.openTypeOS2WinAscent, 1100.0)
+        steps = [3, 2, 1, 0, 1, 2, 3, 4, 2, 0, 4]  # (one step at a time, back and forth, then several at once)
+        self.assertEqual([move(state) for state in steps],
+                         [1000.0, 1000.0, 900.0, 900.0, 900.0, 1000.0, 1000.0, 1100.0, 1000.0, 900.0, 1100.0])
+        self.assertFalse(fi.needs_follow(102, 500, 5), "a later edit crossing no write: nothing read")
+
 
 # -- Auto Kerning's writes asking for it --------------------------------------------------------------
 
