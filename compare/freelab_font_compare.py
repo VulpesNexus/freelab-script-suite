@@ -897,11 +897,19 @@ def bar_value(steps, label, part=0.0):
     return None
 
 
+LAST_RESORT_KINDS = ("absent",)  # kinds checked to start with only when nothing else has anything (owner's image 369)
+ALWAYS_SHOWN_KINDS = ("value",)  # chips shown even at 0: the pairs both fonts kern, the list's first kind (image 369)
+
+
 def kinds_first_on(counts, first):
-    """The kinds whose chips are checked after a comparison: those of first that have something; every
-    kind that has something when none of them has (else the list would start empty)."""
+    """The kinds whose chips are checked after a comparison: those of first that have something; when none
+    of them has, every other kind that has something, but the pairs of a glyph one font lacks only when they
+    are all there is (else the list would start empty)."""
     found = set(kind for kind in first if counts.get(kind))
-    return found or set(kind for kind, count in counts.items() if count)
+    if found:
+        return found
+    others = set(kind for kind, count in counts.items() if count and kind not in LAST_RESORT_KINDS)
+    return others or set(kind for kind, count in counts.items() if count)
 
 
 def kerning_diff(a, b, threshold=0, rename=None, glyphs_a=None, glyphs_b=None):
@@ -2928,9 +2936,11 @@ class CompareDialog(object):
         on = kinds_first_on(counts_, KERN_KINDS_FIRST)
         for kind, chip in self.kern_chips:
             count = counts_.get(kind, 0)
-            chip.setText(tab_text(kern_label(kind, labels), count))
+            chip.setText(tab_text(kern_label(kind, labels), count) if count else u"%s (none)" % kern_label(kind, labels))
             chip.setChecked(kind in on)
-            chip.setVisible(bool(count))
+            # (the pairs both fonts kern always shown, grayed at none: hidden, it read as no such filter, image 369)
+            chip.setVisible(bool(count) or kind in ALWAYS_SHOWN_KINDS)
+            chip.setEnabled(bool(count))
 
     @staticmethod
     def kinds_on(chips):

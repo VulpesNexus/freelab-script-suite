@@ -733,5 +733,324 @@ class UiRoundTests(unittest.TestCase):
         self.assertEqual(fb.counted(1, "sheet"), "1 sheet")
 
 
+def shared_module():
+    """FreeLab's shared module (Auto Kerning's), as the tools load it: its dialog not opened."""
+    os.environ["FREELAB_NO_AUTOSTART"] = "1"
+    folder = os.path.join(HERE, os.pardir, "kerning")
+    if folder not in sys.path:
+        sys.path.insert(0, folder)
+    import freelab_auto_kerning
+    return freelab_auto_kerning
+
+
+class FakeImage(object):
+    """A QImage: made at a size (width, height, format), or read from a path FILES knows ((width, height, has
+    alpha); any other path reads as a null image)."""
+    Format_RGB32 = 4
+    FILES = {}
+
+    def __init__(self, *args):
+        self.args, self.filled, self.drawn = args, None, []
+        if len(args) == 3:
+            self.w, self.h, self.alpha, self.null = args[0], args[1], False, False
+        else:
+            spec = self.FILES.get(args[0]) if args else None
+            self.null = spec is None
+            self.w, self.h, self.alpha = spec or (0, 0, False)
+
+    def isNull(self):
+        return self.null
+
+    def width(self):
+        return self.w
+
+    def height(self):
+        return self.h
+
+    def hasAlphaChannel(self):
+        return self.alpha
+
+    def fill(self, color):
+        self.filled = color
+
+
+class FakePainter(object):
+    Antialiasing = 1
+
+    def __init__(self, image):
+        self.image, self.ended = image, False
+
+    def setRenderHint(self, *args):
+        pass
+
+    def drawImage(self, x, y, image):
+        self.image.drawn.append(image)
+
+    def end(self):
+        self.ended = True
+
+
+class FakeRenderer(object):
+    VALID = set()
+    rendered = []
+
+    def __init__(self, path):
+        self.path = path
+
+    def isValid(self):
+        return self.path in self.VALID
+
+    def defaultSize(self):
+        return Box(width=lambda: 120, height=lambda: 90)
+
+    def render(self, painter, rect):
+        FakeRenderer.rendered.append((self.path, rect, painter.image))
+
+
+class FakeReader(object):
+    scaled = []
+
+    def __init__(self, path):
+        self.path = path
+
+    def setScaledSize(self, size):
+        FakeReader.scaled.append(size)
+
+    def read(self):
+        return FakeImage(self.path)
+
+
+class SheetFileTests(unittest.TestCase):
+    """The sheets' files: the save dialog's type (owner's image 374), the sheets picked (image 376: one file read
+    as 20 sheets, a character each), SVG sheets read back, and the log's link to the folder (image 375)."""
+
+    def setUp(self):
+        self.saved = (fb._qt, fb.write_settings, sys.modules.get("PythonQt", "absent"))
+        sys.modules["PythonQt"] = None  # (no PythonQt here: QtSvg is looked for in the Qt module given)
+        fb.write_settings = lambda ak, data: None  # (never this machine's settings file)
+        import tempfile
+        import shutil
+        self.folder = tempfile.mkdtemp(prefix="freelab-sheets-")
+        self.addCleanup(shutil.rmtree, self.folder, True)
+        FakeImage.FILES, FakeRenderer.VALID = {}, set()
+        del FakeRenderer.rendered[:], FakeReader.scaled[:]
+
+    def tearDown(self):
+        fb._qt, fb.write_settings = self.saved[:2]
+        if self.saved[2] == "absent":
+            sys.modules.pop("PythonQt", None)
+        else:
+            sys.modules["PythonQt"] = self.saved[2]
+
+    def write(self, name, text):
+        import io
+        path = os.path.join(self.folder, name)
+        with io.open(path, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        return path
+
+    def test_the_files_picked_are_paths_whatever_form_the_dialog_gives(self):
+        path = "C:/Temp/Sheets/Your-Highschool-Crush.svg"
+        self.assertEqual(fb.picked_paths((path,)), [path], "PythonQt's tuple of one: one path, not its characters")
+        self.assertEqual(fb.picked_paths((path, "C:/Temp/Sheets/b.png")), [path, "C:/Temp/Sheets/b.png"], "two files")
+        self.assertEqual(fb.picked_paths(path), [path], "a string")
+        self.assertEqual(fb.picked_paths([path]), [path])
+        self.assertEqual(fb.picked_paths(([path], "Images (*.png *.svg)")), [path], "PyQt's (files, filter)")
+        self.assertEqual(fb.picked_paths(([], "Images (*.png)")), [])
+        for nothing in (None, "", (), []):
+            self.assertEqual(fb.picked_paths(nothing), [])
+        self.assertEqual(fb.picked_path(path), path)
+        self.assertEqual(fb.picked_path((path, "SVG drawings (*.svg)")), path, "PyQt's (path, filter)")
+        self.assertEqual(fb.picked_path(""), "")
+
+    def test_one_sheet_picked_is_one_row(self):
+        picked = ("C:/Temp/Sheets/Your-Highschool-Crush.svg",)  # (what PythonQt gives for one file)
+        rows = []
+        gui = Box(QFileDialog=Box(getOpenFileNames=lambda *args: picked), QTreeWidgetItem=lambda texts: texts)
+        fb._qt = lambda: (None, gui)
+        d = fb.FontBuilderDialog.__new__(fb.FontBuilderDialog)
+        d.settings, d.files, d.dialog, d.ak = {}, [], None, None
+        d.sheet_list = Box(addTopLevelItem=rows.append)
+        d.update_buttons = lambda: None
+        d.add_sheets()
+        self.assertEqual(d.files, list(picked))
+        self.assertEqual(rows, [["Your-Highschool-Crush.svg", "", "", "not yet"]])
+        self.assertEqual(d.settings["read_folder"], "C:/Temp/Sheets")
+
+    def test_the_template_saves_as_svg_unless_another_type_is_picked(self):
+        asked = []
+        fb._qt = lambda: (None, Box(QFileDialog=Box(getSaveFileName=lambda *args: asked.append(args) or "")))
+        d = fb.FontBuilderDialog.__new__(fb.FontBuilderDialog)
+        d.settings, d.dialog = {"folder": self.folder}, None
+        d.sheets = lambda: [fb.Sheet(["A"], ["A"], METRICS, 150, family="Your Highschool Crush")]
+        d.save_template()  # (the dialog canceled: nothing written)
+        name, filters = asked[0][2], asked[0][3]
+        self.assertEqual(os.path.basename(name), "Your-Highschool-Crush.svg")
+        self.assertTrue(filters.startswith("SVG drawings, for vector apps (*.svg);;"), filters)
+        self.assertIn("PNG images (*.png)", filters)
+        self.assertEqual(fb.template_ext("C:/Temp/a/sheet.PNG"), ("C:/Temp/a/sheet", ".png"))
+        self.assertEqual(fb.template_ext("C:/Temp/a/sheet.tiff"), ("C:/Temp/a/sheet", ".tiff"))
+        self.assertEqual(fb.template_ext("C:/Temp/a/sheet"), ("C:/Temp/a/sheet", ".svg"), "no type typed: SVG")
+        self.assertEqual(fb.template_ext("C:/Temp/a/Hand.v2"), ("C:/Temp/a/Hand.v2", ".svg"), "a dot in the name kept")
+
+    def test_an_svgs_size_is_its_viewbox_else_its_width_and_height(self):
+        self.assertEqual(fb.svg_size('<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" width="100mm" '
+                                     'height="80mm" viewBox="0 0 640 480">'), (640.0, 480.0))
+        self.assertEqual(fb.svg_size("<svg\n viewBox='0,0,640.5,480'\n>"), (640.5, 480.0), "commas, single quotes")
+        self.assertEqual(fb.svg_size('<svg width="300" height="200px">'), (300.0, 200.0))
+        self.assertEqual(fb.svg_size('<svg width="72pt" height="1in">'), (96.0, 96.0))
+        self.assertIsNone(fb.svg_size('<svg width="100%" height="100%">'))
+        self.assertIsNone(fb.svg_size('<svg data-width="3" data-height="4">'), "another attribute's name")
+        self.assertIsNone(fb.svg_size("<html></html>"))
+        sheet = sheet_of()
+        self.assertEqual(fb.svg_size(fb.sheet_svg(sheet)), tuple(float(v) for v in sheet.size()), "a template's own")
+        self.assertEqual(fb.capped_size(640.4, 480.0), (640, 480))
+        w, h = fb.capped_size(20000, 20000)
+        self.assertLessEqual(w * h, fb.SHEET_PIXELS_MAX)
+        self.assertEqual(w, h)
+
+    def gui(self, renderer=True):
+        return Box(QImage=FakeImage, QPainter=FakePainter, QColor=lambda *rgb: rgb, QImageReader=FakeReader,
+                   **({"QSvgRenderer": FakeRenderer} if renderer else {}))
+
+    def test_an_svg_sheet_is_drawn_at_its_viewboxs_size_on_white(self):
+        core = Box(QRectF=lambda *rect: rect, QSize=lambda *size: size)
+        path = self.write("Your-Highschool-Crush.svg", '<svg xmlns="http://www.w3.org/2000/svg" width="169.33mm" '
+                                                       'height="127mm" viewBox="0 0 640 480"></svg>')
+        FakeRenderer.VALID.add(path)
+        image, why = fb.read_sheet_image(path, core, self.gui())
+        self.assertIsNone(why)
+        self.assertEqual((image.width(), image.height(), image.filled), (640, 480, (255, 255, 255)))
+        self.assertEqual(FakeRenderer.rendered, [(path, (0, 0, 640, 480), image)], "the whole drawing, on white")
+        # Without QtSvg in this PythonQt: Qt's SVG image plugin, asked for that size, its clear ground made white
+        FakeImage.FILES[path] = (640, 480, True)
+        image, why = fb.read_sheet_image(path, core, self.gui(renderer=False))
+        self.assertEqual(FakeReader.scaled, [(640, 480)])
+        self.assertEqual((image.w, image.h, image.filled), (640, 480, (255, 255, 255)))
+        self.assertEqual(len(image.drawn), 1, "the drawing laid on white paper")
+        # Neither: said, not read as a blank sheet
+        del FakeImage.FILES[path]
+        self.assertEqual(fb.read_sheet_image(path, core, self.gui(renderer=False)), (None, fb.SVG_NOT_DRAWN))
+        self.assertIn("PNG", fb.SVG_NOT_DRAWN)
+
+    def test_other_sheets_are_read_as_images_their_clear_parts_white(self):
+        core = Box(QRectF=lambda *rect: rect, QSize=lambda *size: size)
+        FakeImage.FILES.update({"scan.jpg": (800, 600, False), "layer.png": (800, 600, True)})
+        image, why = fb.read_sheet_image("scan.jpg", core, self.gui())
+        self.assertEqual((image.args, why), (("scan.jpg",), None), "as read")
+        image, why = fb.read_sheet_image("layer.png", core, self.gui())
+        self.assertEqual((image.filled, len(image.drawn)), ((255, 255, 255), 1), "drawn on a clear layer: on white")
+        self.assertEqual(fb.read_sheet_image("sheet.pdf", core, self.gui()), (None, fb.NOT_AN_IMAGE))
+        self.assertEqual(FakeRenderer.rendered, [], "an image is never handed to the SVG renderer")
+
+    def test_the_saved_line_links_to_the_folder_and_the_link_shows_the_file(self):
+        ak = shared_module()
+        first = os.path.join(self.folder, "Hand-1-of-2.svg")
+        line = fb.saved_line(ak, [first, os.path.join(self.folder, "Hand-2-of-2.svg")])
+        link = ak.reveal_link(first, os.path.normpath(self.folder))
+        self.assertEqual(line, "Saved <b>2 sheets</b> in %s: Hand-1-of-2.svg, Hand-2-of-2.svg." % link)
+        target = link.split('"')[1]
+        self.assertEqual(ak.revealed_path(target), first)
+        self.assertIn(">%s</a>" % ak.html(os.path.normpath(self.folder)), link, "the folder's path the link's words")
+        plain = fb.saved_line(Box(b=lambda s: "<b>%s</b>" % s, html=lambda s: s), ["C:/Temp/a/Hand.svg"])
+        self.assertEqual(plain, "Saved <b>1 sheet</b> in %s: Hand.svg." % os.path.normpath("C:/Temp/a"),
+                         "a shared module without links: the folder named")
+        # A click on it: handed to the shared module, which shows the file; other links left to the log
+        shown = []
+        d = fb.FontBuilderDialog.__new__(fb.FontBuilderDialog)
+        d.log = Box(add=lambda text, level="info": shown.append((level, text)))
+        d.ak = Box(reveal_clicked=lambda target, log: shown.append((target, log)) or True)
+        self.assertTrue(d.log_link(target))
+        self.assertEqual(shown, [(target, d.log)])
+        d.ak = Box()
+        self.assertFalse(d.log_link(target), "a shared module without it: the log's own")
+
+
+class RevealTests(unittest.TestCase):
+    """The shared module's link to a file saved (owner's image 375): Explorer on Windows (explorer /select,
+    no shell, no console window), the Finder on macOS (open -R), the folder elsewhere."""
+
+    def setUp(self):
+        import subprocess
+        self.ak = shared_module()
+        self.calls = []
+        real = subprocess.Popen
+        subprocess.Popen = lambda *args, **kwargs: self.calls.append((args, kwargs))
+        self.addCleanup(setattr, subprocess, "Popen", real)
+        self.here = os.path.abspath(__file__)
+        if not isinstance(self.here, type("")):  # (Python 2: bytes; the copied tree's path is ASCII)
+            self.here = self.here.decode("ascii")
+
+    def test_the_commands(self):
+        ak = self.ak
+        old = os.environ.get("SystemRoot")
+        os.environ["SystemRoot"] = str("C:\\Windows")
+        self.addCleanup(lambda: os.environ.__setitem__("SystemRoot", old) if old else os.environ.pop("SystemRoot", None))
+        self.assertEqual(ak.reveal_command("C:/Temp/My Hand/Hand-1-of-2.svg", "win32"),
+                         '"C:\\Windows\\explorer.exe" /select,"C:\\Temp\\My Hand\\Hand-1-of-2.svg"',
+                         "Explorer by its full path, the file's slashes made backslashes, quoted")
+        self.assertEqual(ak.reveal_command("/Volumes/Fonts/Hand.svg", "darwin"),
+                         ["/usr/bin/open", "-R", "/Volumes/Fonts/Hand.svg"])
+        self.assertIsNone(ak.reveal_command("/srv/fonts/Hand.svg", "linux"))
+        path = "C:\\Temp\\\u10d0 \"x\".svg"
+        self.assertEqual(ak.revealed_path(ak.reveal_link(path).split('"')[1]), path, "any character comes back")
+        self.assertIsNone(ak.revealed_path("glyph:0041"))
+        self.assertIsNone(ak.revealed_path(ak.REVEAL_LINK + "zz"), "broken: no path")
+
+    def test_windows_starts_explorer_without_a_console_window(self):
+        ak = self.ak
+        self.assertIsNone(ak.reveal_file(self.here, "win32"))
+        (args, kwargs), = self.calls
+        command = ak.reveal_command(self.here, "win32")
+        self.assertEqual(args[0], command if sys.version_info[0] >= 3 else command.encode("mbcs"))
+        self.assertEqual(kwargs.get("creationflags"), 0x08000000, "CREATE_NO_WINDOW")
+        self.assertNotIn("shell", kwargs)
+
+    @unittest.skipIf(sys.version_info[0] >= 3 or os.name != "nt", "Python 2's ANSI command line, on Windows")
+    def test_a_path_the_ansi_code_page_cannot_spell_goes_through_shell_execute(self):
+        import io
+        import shutil
+        import tempfile
+        ak = self.ak
+        folder = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, folder, True)
+        path = os.path.join(folder.decode("mbcs"), "\u10d0\u10d1 sheet.svg")
+        io.open(path, "w").close()
+        shell = []
+        real = ak._shell_execute
+        ak._shell_execute = lambda program, parameters: shell.append((program, parameters)) or True
+        self.addCleanup(setattr, ak, "_shell_execute", real)
+        self.assertIsNone(ak.reveal_file(path, "win32"))
+        command = ak.reveal_command(path, "win32")
+        if command.encode("mbcs", "replace").decode("mbcs") == command:
+            self.skipTest("this code page spells it")
+        self.assertEqual(self.calls, [])
+        self.assertEqual(shell, [(command[1:].split('" ')[0], '/select,"%s"' % path)])
+
+    def test_macos_asks_the_finder_and_elsewhere_the_folder_opens(self):
+        ak = self.ak
+        self.assertIsNone(ak.reveal_file(self.here, "darwin"))
+        (args, kwargs), = self.calls
+        self.assertEqual(list(args[0])[:2], ["/usr/bin/open", "-R"])
+        opened = []
+        real = ak._qt
+        ak._qt = lambda: (Box(QUrl=Box(fromLocalFile=lambda folder: folder)),
+                          Box(QDesktopServices=Box(openUrl=lambda url: opened.append(url) or True)))
+        self.addCleanup(setattr, ak, "_qt", real)
+        self.assertIsNone(ak.reveal_file(self.here, "linux"))
+        self.assertEqual(opened, [os.path.dirname(self.here)])
+
+    def test_a_file_gone_is_said_and_other_links_are_the_logs(self):
+        ak = self.ak
+        logged = []
+        log = Box(add=lambda text, level="info": logged.append((level, text)))
+        gone = os.path.join(os.path.dirname(self.here), "no such sheet.svg")
+        self.assertTrue(ak.reveal_clicked(ak.reveal_link(gone).split('"')[1], log))
+        self.assertEqual(self.calls, [], "nothing started")
+        self.assertEqual(logged[0][0], "warning")
+        self.assertIn("not there anymore", logged[0][1])
+        self.assertFalse(ak.reveal_clicked("glyph:0041", log))
+
+
 if __name__ == "__main__":
     unittest.main()

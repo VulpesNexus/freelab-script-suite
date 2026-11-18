@@ -482,20 +482,28 @@ def scopes_for(scripts):
     return rows
 
 
+BASELINE_MOST = 500  # units: the Baseline field's reach at most
+
+
 def strength_of(key):
     return next((row for row in STRENGTHS if row[0] == key), STRENGTHS[0])
 
 
-def variant_params(glyph, number, strength, seed):
+def variant_params(glyph, number, strength, seed, baseline=0, upm=1000.0):
     """(rotation degrees, x scale, y scale, slant degrees, baseline shift in em) of glyph's variant number:
     each drawn within the strength's reach, from the seed (the same seed, the same variants; Python 2 and
-    3 alike: the generator is seeded with a CRC of the text, not Python's hash)."""
+    3 alike: the generator is seeded with a CRC of the text, not Python's hash). baseline: up to that many
+    units more up or down, drawn from the same seed after the others (owner's image 366; 0: the variants
+    are as before it existed)."""
     _, _, rotation, scale, slant, rise = strength_of(strength)
     key = (u"%s|%s|%d|%s" % (seed, glyph, number, strength)).encode("utf-8")
     rng = random.Random(zlib.crc32(key) & 0xFFFFFFFF)
     pick = lambda reach: rng.uniform(-reach, reach)
-    return (round(pick(rotation), 3), round(1.0 + pick(scale), 4), round(1.0 + pick(scale), 4),
-            round(pick(slant), 3), round(pick(rise), 5))
+    params = (round(pick(rotation), 3), round(1.0 + pick(scale), 4), round(1.0 + pick(scale), 4),
+              round(pick(slant), 3), round(pick(rise), 5))
+    if baseline:
+        params = params[:4] + (round(params[4] + pick(float(baseline)) / float(upm or 1000.0), 5),)
+    return params
 
 
 def variant_matrix(params, cx, cy, upm):
@@ -743,6 +751,15 @@ class AlternatesPage(object):
         self.seed_box.setValue(1)
         self.seed_box.setWhatsThis(what)
         settings.addWidget(self.seed_box)
+        what = (u"How far each variant may move up or down besides the strength's own shift: up to this many units, "
+                u"drawn from the seed like the other changes (the same seed, the same moves). 0: none more.")
+        settings.addWidget(label_of(QtGui, u"Baseline: \u00b1", what))
+        self.baseline_box = QtGui.QSpinBox()
+        self.baseline_box.setRange(0, BASELINE_MOST)
+        self.baseline_box.setValue(0)
+        self.baseline_box.setSuffix(u" units")
+        self.baseline_box.setWhatsThis(what)
+        settings.addWidget(self.baseline_box)
         self.designs_box = QtGui.QCheckBox(DESIGNS_LABEL)
         describe(self.designs_box, DESIGNS_WHAT)
         self.designs = False  # whether the font has an alternate to build from (has_designs), once read: fill()
@@ -817,7 +834,7 @@ class AlternatesPage(object):
         self.none_button.connect("clicked()", self.slots[5])
         self.scope_box.connect("currentIndexChanged(int)", self.slots[6])
         self.strength_box.connect("currentIndexChanged(int)", self.slots[2])
-        for box in (self.count_box, self.seed_box):
+        for box in (self.count_box, self.seed_box, self.baseline_box):
             box.connect("valueChanged(int)", self.slots[2])
         self.designs_box.connect("toggled(bool)", self.slots[2])
         self.letters_edit.connect("textChanged(QString)", self.slots[6])
@@ -1210,8 +1227,10 @@ class AlternatesPage(object):
         return designs_in(glyphs, self.index)
 
     def settings(self):
-        """What a variant is built with besides its glyph, number, and design: (strength, seed)."""
-        return self.strength(), int(self.seed_box.value)
+        """What a variant is built with besides its glyph, number, and design: (strength, seed), and the
+        baseline's reach where it is not 0 (strength, seed, baseline)."""
+        baseline = int(getattr(getattr(self, "baseline_box", None), "value", 0) or 0)
+        return (self.strength(), int(self.seed_box.value)) + ((baseline,) if baseline else ())
 
     def plan(self, glyphs, names):
         """variants_planned for these glyphs with the settings shown: the variants this tab built with
@@ -1356,7 +1375,7 @@ class AlternatesPage(object):
                 self.designs_box.setToolTip(u"")
             # How many, how strong, and from what seed say nothing while no glyph is to build (no font, or
             # nothing ticked or typed): grayed out until there is one, as the button is
-            for box in (self.count_box, self.strength_box, self.seed_box):
+            for box in (self.count_box, self.strength_box, self.seed_box, self.baseline_box):
                 set_enabled(box, bool(glyphs))
             count, designs = self.count_box.value, self.from_designs(glyphs)
             plan = self.plan(glyphs, names)
@@ -1461,7 +1480,9 @@ class AlternatesPage(object):
         package = owner.package
         glyphs, names = self.build_glyphs(), self.names
         self.ours = self.own_variants(package)  # (asked of the font now: one drawn over since is the user's)
-        count, (strength, seed), designs = self.count_box.value, self.settings(), self.from_designs(glyphs)
+        count, settings, designs = self.count_box.value, self.settings(), self.from_designs(glyphs)
+        strength, seed = settings[0], settings[1]
+        baseline = settings[2] if len(settings) > 2 else 0
         plan = self.plan(glyphs, names)
         new = sum(len(variants) for _, variants in plan)
         problem = self.problem(new, sum(1 for _, variants in plan for name, _, _ in variants if name in names), names)
@@ -1489,7 +1510,7 @@ class AlternatesPage(object):
                     if package.findName(name) is not None and not again:  # (added since the list was read: left)
                         kept += 1
                         continue
-                    params = variant_params(glyph, number, strength, seed)
+                    params = variant_params(glyph, number, strength, seed, baseline, upm)
 
                     def matrix_of(master_layer, params=params):  # (around each master's own center)
                         center = master_layer.boundingBox.center()
@@ -1510,7 +1531,7 @@ class AlternatesPage(object):
         finally:
             owner.set_busy(False)
         status = self.ak.notify_changed(self.owner.fontlab, package, u"FreeLab Feature Code", touched)
-        self.record(package, built + replaced, (strength, seed))
+        self.record(package, built + replaced, settings)
         if made >= PACE_FROM:  # (what the next build's time is told from)
             self.pace = (time.time() - started) / made
         words = []
@@ -1659,7 +1680,8 @@ class AlternatesPage(object):
                 if design_layer is None:
                     continue
                 center = design_layer.boundingBox.center()
-                a, b, c, d, e, f = variant_matrix(variant_params(glyph, number, self.strength(), self.seed_box.value),
+                a, b, c, d, e, f = variant_matrix(variant_params(glyph, number, self.strength(), self.seed_box.value,
+                                                                 self.baseline_box.value, upm),
                                                   center.x(), center.y(), upm)
                 shapes.append((QtGui.QTransform(a, b, c, d, e, f).map(self.ak.layer_path(design_layer)),
                                float(design_layer.advanceWidth) or upm * 0.6))

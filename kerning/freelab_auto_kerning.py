@@ -4034,8 +4034,10 @@ BUSY_GREEN = ((120, 200, 120), (30, 120, 40))  # LOG_COLORS["done"]: the bar's c
 BUSY_SHEET = (u"QProgressBar { border: 1px solid rgba(128, 128, 128, 140); border-radius: 3px; "
               u"background: transparent; min-height: 10px; max-height: 10px; } "
               u"QProgressBar::chunk { background-color: rgb(%d, %d, %d); border-radius: 2px; }")
-INPUT_EVENTS = (2, 3, 4, 6, 7, 31, 51, 63, 82, 92, 93)  # presses, releases, double clicks, keys, wheel,
-# shortcuts, drops, context menus, a tablet's presses and releases
+INPUT_EVENTS = (2, 3, 4, 6, 7, 31, 51, 63, 82, 92, 93, 117)  # presses, releases, double clicks, keys, wheel,
+# shortcut overrides, drops, context menus, a tablet's presses and releases, and shortcuts themselves (117:
+# Ctrl+Z reached FontLab's Undo during a read, owner's images 373 and 377)
+SHORTCUT_EVENT = 117  # QEvent::Shortcut: a key sequence sent to its action (busy guard)
 GUARD_IDLE_SECONDS = 10.0  # a guard whose tool is no longer busy and whose work has not moved for this long lets go
 GUARD_LOST_SECONDS = 120.0  # and any guard, once no FreeLab work has moved for this long while events run
 _LAST_PUMP = [0.0]  # when any window's work last moved (busy_progress)
@@ -4070,8 +4072,6 @@ def window_head(layout, first):
                 break
             layout.removeWidget(widget)
             lines.append(widget)
-        if not lines:
-            return first
         head = QtGui.QWidget()
         head.setProperty(HEAD_PROP, True)
         column = QtGui.QVBoxLayout(head)
@@ -4082,11 +4082,15 @@ def window_head(layout, first):
         # (owner's image 346): the first line under it set that much lower, so the gap goes with it while it is
         # hidden (nothing found yet, no font)
         try:
-            lines[0].setContentsMargins(0, head_gap(first), 0, 0)
+            if lines:
+                lines[0].setContentsMargins(0, head_gap(first), 0, 0)
         except Exception:
             pass
         for widget in lines:
             column.addWidget(widget)
+        # The column's spare height below its lines: the font's line stays at the top of the row whether lines
+        # follow it or not (owner's images 350, 351: alone, the row's button height centered it lower)
+        column.addStretch(1)
         return head
     except Exception:
         return first
@@ -4286,6 +4290,8 @@ def _guard_on(owner):
                     event.ignore()
                     ask(dialog.close)
                     return True
+                if kind == SHORTCUT_EVENT:
+                    return True  # (a shortcut goes to its action, no widget: FontLab's Undo during the work)
                 if kind not in INPUT_EVENTS or not obj.isWidgetType():
                     return False
                 if kind == 6 and event.key() == QtCore.Qt.Key_Escape and obj.window() == dialog.window():
@@ -4537,13 +4543,32 @@ def compile_report(said):
     lines = [line.strip() for line in said.splitlines() if line.strip()]
     errors = [line for line in lines if any(mark in line for mark in COMPILE_ERROR_MARKS)]
     if errors:
-        return u"The features did not compile: %s" % html(u" ".join(errors[:3])), "error"
+        text = u"The features did not compile: %s" % html(u" ".join(errors[:3]))
+        hint = compile_hint(u" ".join(errors))
+        return (u"%s %s" % (text, hint) if hint else text), "error"
     warnings = [line for line in lines if u"[W]" in line]
     if warnings:
         return (u"Compiled: FontLab reported no errors, and %s: %s" % (
             u"a warning" if len(warnings) == 1 else u"%d warnings" % len(warnings),
             html(u" ".join(warnings[:3]))), "info")
     return u"Compiled: FontLab reported no errors.", "info"
+
+
+COMPILE_HINTS = (
+    # (what FontLab's compiler says, what the log adds: the error is in the font's own code, and where it is fixed)
+    (u"use not allowed in 'aalt'", u"That is the font's own <i>aalt</i>, not the code just written: FontLab writes "
+                                   u"aalt's lookups inside it when it opens some fonts, and its own compiler refuses "
+                                   u"them. %s lists it and fixes it."),
+)  # (owner's image 383: CJK Vertical's write was blamed for the font's own aalt)
+
+
+def compile_hint(said):
+    """The log's words after a compile error the font's own code causes, naming where it is fixed (COMPILE_HINTS);
+    u"" for any other."""
+    for words, hint in COMPILE_HINTS:
+        if words in said:
+            return hint % tool_link(u"Feature Check")
+    return u""
 
 
 _COMPILE_READS = []  # (held: PythonQt drops a slot no Python object holds)
@@ -4733,6 +4758,34 @@ def popup_scroll_bar(combo):
         bar = view.verticalScrollBar()
         if bar is not None and (_property(bar, "styleSheet") or u"") != SCROLL_SHEET:
             bar.setStyleSheet(SCROLL_SHEET)
+    except Exception:
+        pass
+    popup_width(combo)
+
+
+POPUP_WIDTH_PROP = "freelabPopupWidth"  # on a dropdown: the choices its list was last made wide enough for
+POPUP_PAD = 36  # pixels a list row takes beside its text (margins, and the scroll bar of a long list)
+
+
+def popup_width(combo):
+    """A dropdown's list as wide as its longest choice, never cut short: Qt makes the list as wide as the box,
+    and a longer choice ended in "..." (owner's image 357: "Korean (no... the font)"). Measured again only
+    when the choices change."""
+    QtCore = _qt()[0]
+    try:
+        view = combo.view()
+        if view is None:
+            return
+        count = int(combo.count)
+        texts = [u"%s" % combo.itemText(k) for k in range(count)]
+        key = u"%d:%s" % (count, u"\n".join(texts))
+        if (u"%s" % (combo.property(POPUP_WIDTH_PROP) or u"")) == key:
+            return
+        combo.setProperty(POPUP_WIDTH_PROP, key)
+        metrics = view.fontMetrics()
+        widest = max([metrics.width(text) for text in texts] or [0])
+        view.setTextElideMode(QtCore.Qt.ElideNone)
+        view.setMinimumWidth(int(widest) + POPUP_PAD)
     except Exception:
         pass
 
@@ -4973,6 +5026,10 @@ def filter_event(window, obj, event, pending):
             pass
         return False
     if obj is window or obj == window:
+        if kind == PALETTE_CHANGE:
+            # (dark mode switched on or off: the tab bars take the sheet of the new palette, tab_sheet)
+            (getattr(sys.modules.get(__name__), "flat_scroll_bars", None) or flat_scroll_bars)(window)
+            return False
         if kind == RESIZE_EVENT:
             owner = window_owner(window)
             log = getattr(owner, "log", None) if owner is not None else None
@@ -5017,8 +5074,9 @@ def filter_event(window, obj, event, pending):
 SHOW_EVENT = 17  # QEvent::Show, sent before the window's first paint
 CONTEXT_MENU, WHATS_THIS = 82, 111  # QEvent::ContextMenu (a right-click), QEvent::WhatsThis (a click after "?")
 RESIZE_EVENT = 14  # QEvent::Resize: the window's log yields room first (Log.yield_room)
-WATCHED_EVENTS = (2, 3, 6, 14, 17, 51, 82, 110, 111)  # MouseButtonPress, MouseButtonRelease, KeyPress, Resize,
-# Show, ShortcutOverride, ContextMenu, ToolTip, WhatsThis
+PALETTE_CHANGE = 39  # QEvent::PaletteChange: dark mode switched (tab_sheet)
+WATCHED_EVENTS = (2, 3, 6, 14, 17, 39, 51, 82, 110, 111)  # MouseButtonPress, MouseButtonRelease, KeyPress, Resize,
+# Show, PaletteChange, ShortcutOverride, ContextMenu, ToolTip, WhatsThis
 
 
 def help_section(text, title):
@@ -5277,6 +5335,7 @@ def find_captions(window):
                 continue
             if label.property(CAPTION_PROP):
                 found.append(label)
+                group_gap(label)
                 continue
             if label.property(PREVIEW_CAPTION_PROP):
                 continue
@@ -5298,9 +5357,64 @@ def find_captions(window):
                 continue
             caption(label, control)
             found.append(label)
+            group_gap(label)
         except Exception:
             continue
     return found
+
+
+GROUP_GAP = 8  # pixels more before a caption that follows another control in its row (a group's start)
+GROUP_GAP_PROP = "freelabGroupGap"  # on a caption given its gap (group_gap): once
+
+
+def group_gap(label):
+    """A wider gap before a caption that starts a group of its row ("Show:" after the Script dropdown), the
+    caption and its control left at the row's spacing: every gap was the same, so a caption sat as near the
+    group before it as its own control and the row read unevenly (owner's images 389 and 390). Once per
+    caption; a caption after its control (a sentence's period) or first in its row gets none."""
+    QtGui = _qt()[1]
+    try:
+        if label.property(GROUP_GAP_PROP):
+            return
+        label.setProperty(GROUP_GAP_PROP, True)
+        parent = label.parentWidget()
+        found = _box_holding(parent.layout() if parent is not None else None, label)
+        if found is None:
+            return
+        box, index = found
+        if not box.inherits("QHBoxLayout") or index == 0:
+            return
+        before = box.itemAt(index - 1)
+        widget = before.widget() if before is not None else None
+        buddy = label.buddy()
+        if widget is None or (buddy is not None and (widget is buddy or widget == buddy)):
+            return  # (a spacing or a stretch before it already, or the caption follows its own control)
+        if not _inherits_any(widget, CAPTIONED_KINDS + ("QAbstractButton",)):
+            return
+        box.insertSpacing(index, GROUP_GAP)
+    except Exception:
+        pass
+
+
+def _box_holding(layout, widget):
+    """(the layout that holds widget itself, its index there), searched through nested layouts; None."""
+    try:
+        count = layout.count()
+    except Exception:
+        return None
+    for k in range(count):
+        item = layout.itemAt(k)
+        if item is None:
+            continue
+        held = item.widget()
+        if held is not None and (held is widget or held == widget):
+            return layout, k
+        inner = item.layout()
+        if inner is not None:
+            found = _box_holding(inner, widget)
+            if found is not None:
+                return found
+    return None
 
 
 def caption_states(labels):
@@ -6069,6 +6183,19 @@ def sentences(text):
     return _split_sentences(text, u"<br>").replace(u"\n", u"<br>")
 
 
+HEAD_BREAK = u"<br><br>"  # the blank line under the font's sentence in a one-label top line (head_join)
+
+
+def head_join(font, rest):
+    """A one-label top line: the font's sentence (font_named's, with its period), a blank line, then what the
+    tool found (rest), as the windows whose top line and status lines are separate labels have it (window_head,
+    owner's images 346, 355, 358); the font's alone when rest says nothing."""
+    font, rest = (u"%s" % (font or u"")).strip(), (u"%s" % (rest or u"")).strip()
+    if not font or not rest:
+        return font or rest
+    return font + HEAD_BREAK + rest
+
+
 def status_label(text=u"", plain=False):
     """A dialog's top line: rich text (or plain), wrapped, a line per sentence (its setText splits them).
     Hidden while it says nothing: an empty one still took a line, a gap over the fields (owner's images
@@ -6117,6 +6244,23 @@ TAB_SHEET = (u"QTabBar::tab { background: transparent; color: rgba(128, 128, 128
 # FreeLab's tab bars: flat, the chosen tab underlined in the highlight color, the others in a mid gray,
 # over either palette, and left alone by dark mode. Windows' own style drew the chosen tab light
 # whatever the palette: mapped, its text came out garbled, and the edges changed with the tab chosen.
+TAB_SHEET_LIGHT = TAB_SHEET.replace(u"QTabBar::tab { background: transparent; color: rgba(128, 128, 128, 255);",
+                                    u"QTabBar::tab { background: transparent; color: palette(window-text);")
+# On a light window the mid gray read as grayed out (owner's image 352): every tab there takes the text's
+# color, the chosen one told by its underline alone.
+
+
+def tab_sheet(bar):
+    """The tab bar's sheet for its window's palette: TAB_SHEET_LIGHT on a light one, else TAB_SHEET."""
+    QtGui = _qt()[1]
+    try:
+        light = bar.palette.color(QtGui.QPalette.Window).lightness() > 128
+    except Exception:
+        try:
+            light = bar.palette().color(QtGui.QPalette.Window).lightness() > 128
+        except Exception:
+            light = False
+    return TAB_SHEET_LIGHT if light else TAB_SHEET
 
 
 def flat_scroll_bars(dialog):
@@ -6133,8 +6277,9 @@ def flat_scroll_bars(dialog):
         pass
     try:  # and its tab bars (TAB_SHEET)
         for bar in dialog.findChildren(QtGui.QTabBar):
-            if (_property(bar, "styleSheet") or u"") != TAB_SHEET:
-                bar.setStyleSheet(TAB_SHEET)
+            sheet = tab_sheet(bar)
+            if (_property(bar, "styleSheet") or u"") != sheet:
+                bar.setStyleSheet(sheet)
                 bar.setProperty(LEAVE_ALONE_PROP, True)
                 bar.setDrawBase(False)
     except Exception:
@@ -7462,8 +7607,17 @@ def watch_history(owner):
             follow_font_info(package, getattr(owner, "log", None), when_needed=True)
             now = history_mark(package)
             if now != seen:
+                # Read again only once the History has stayed at one place for a tick: Undo pressed several
+                # times in a row otherwise landed inside a window's read (its events pumped), on glyphs the
+                # next Undo had put back (owner's images 373 and 377)
+                if getattr(owner, "history_settling", None) != now:
+                    owner.history_settling = now
+                    return
+                owner.history_settling = None
                 owner.seen_history = now
                 owner.history_moved()
+            else:
+                owner.history_settling = None
         except Exception:
             pass  # a timer's handler must not raise
 
@@ -7474,8 +7628,10 @@ def watch_history(owner):
 
 class ClickRegions(object):
     """Spans of a widget's picture (a label's pixmap, or a button's icon, drawn centered) that can be
-    clicked: each (left, right, key) across the picture, in its pixels. A click on one calls
-    on_click(key) instead of the widget's own click; the pointer becomes a hand over one."""
+    double-clicked: each (left, right, key) across the picture, in its pixels. A double-click on one calls
+    on_click(key); a single click there does nothing (the widget's own click does not happen either): a
+    click meant for the button took it to another pair (owner's image 362, as Glyph Compose's previews,
+    image 333). The pointer becomes a hand over one."""
 
     def __init__(self, widget, on_click, tip=u""):
         QtCore, QtGui = _qt()
@@ -7490,7 +7646,7 @@ class ClickRegions(object):
                     if kind in (2, 3, 4):  # MouseButtonPress, -Release, -DblClick
                         key = regions.hit(event)
                         if key is not None:
-                            if kind == 3:
+                            if kind == 4:
                                 QtCore.QTimer.singleShot(0, lambda: regions.on_click(key))
                             return True  # the widget's own click does not happen
                     elif kind == 5:  # MouseMove
@@ -7559,6 +7715,13 @@ def pair_pixmap(package, master, left, right, value, caption, color, font, room=
             width += int(em * ADJUST_ROOM)
     line = QtGui.QFontMetrics(font).height() if caption else 0  # (no caption: no blank band under the pair)
     height = int(em * 1.35) + line
+    drawn = width  # (the pair's own width; a caption wider than it widens the picture, the pair centered in it:
+    # a long font name was cut at both ends, owner's image 368)
+    if caption and not room:
+        try:
+            width = max(width, int(QtGui.QFontMetrics(font).width(caption)) + 2 * margin)
+        except Exception:
+            pass
     pixmap = QtGui.QPixmap(max(width, 2 * margin), height)
     pixmap.fill(QtGui.QColor(0, 0, 0, 0))
     ink = QtGui.QColor(color)
@@ -7568,7 +7731,7 @@ def pair_pixmap(package, master, left, right, value, caption, color, font, room=
     try:  # ended before anything else can fail: a painter left open on a freed pixmap aborts FontLab
         painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
         painter.setFont(font)
-        x = float(margin)
+        x = float(margin) + max(0, width - drawn) / 2.0
         for index, (layer, path) in enumerate(layers):
             painter.save()
             painter.translate(x, em * 1.05)
@@ -8975,7 +9138,7 @@ class AutoKerningDialog(object):
             grid.addWidget(button, number // 2, number % 2)
             _keep_room_when_hidden(button)  # drawn once a pair is selected
         self.neighbors = dict((key, ClickRegions(button, self.focus_neighbor,
-                                                 u"Click to go to this H's pair with the glyph beside it."))
+                                                 u"Double-click to go to this H's pair with the glyph beside it."))
                               for key, button in self.choice_buttons.items())
         layout.addLayout(grid)
         layout.addWidget(self.log.widget)
@@ -9234,8 +9397,8 @@ class AutoKerningDialog(object):
     def font_line(self):
         if self.package is None:
             return no_font_line()
-        return u"%s. %s." % (self.font_named_now(),
-                             ALL_SCRIPTS_LINE if self.script == ALL_SCRIPTS else SCRIPT_LINES[self.script])
+        return head_join(u"%s." % self.font_named_now(),
+                         u"%s." % (ALL_SCRIPTS_LINE if self.script == ALL_SCRIPTS else SCRIPT_LINES[self.script]))
 
     def no_font_scripts(self):
         """With no font, Script: says "n/a" (grayed with it), not the scripts of a font closed or Latin
@@ -9534,8 +9697,8 @@ class AutoKerningDialog(object):
                 if analysis.reused else u"%s measured" % b(counted(len(analysis.suggestions), u"pair")))
         what = (u"%s listed, picked by hand" % b(grouped(len(listed))) if picked_only
                 else u"%s listed" % b(grouped(len(listed))))
-        self.status.setText(u"%s, %s. %s; %s.<br>%s."
-                            % (self.font_named_now(), b(self.script_note()), work, what, html("; ".join(summary))))
+        self.status.setText(head_join(u"%s, %s." % (self.font_named_now(), b(self.script_note())),
+                                      u"%s; %s.<br>%s." % (work, what, html("; ".join(summary)))))
         if self.first_pass:
             self.first_pass = False
             self.log.add(u"Analyzed %s, master %s: %s listed." % (b(self.package.tfn), b(self.master),
@@ -10489,3 +10652,116 @@ def main(focus=None):
 
 if not os.environ.get("FREELAB_NO_AUTOSTART") and __name__ != "freelab_auto_kerning":
     main()
+
+
+# ---------------------------------------------------------------------------
+# A file saved, shown in its folder: a log line names the folder as a link (reveal_link) whose click shows the
+# file selected in a new window of the system's file manager (owner's image 375: Font Builder's templates,
+# Proof's PDFs). A dialog's log handler hands the link here (reveal_clicked).
+# ---------------------------------------------------------------------------
+
+REVEAL_LINK = u"freelab-reveal:"  # a log link's target: a file shown in its folder (its path's UTF-8 in hexadecimal)
+CREATE_NO_WINDOW = 0x08000000  # (a process started on Windows opens no console window)
+
+
+def reveal_link(path, text=None):
+    """A link (rich text) a log shows: text (escaped here), else the folder that holds path; a click shows the
+    file selected in its folder (reveal_clicked). The path goes in hexadecimal, which QUrl keeps as it is (it
+    rewrites backslashes, spaces, and other characters a path may hold)."""
+    import binascii
+    path = u"%s" % path
+    if text is None:
+        text = os.path.normpath(os.path.dirname(path)) or path
+    target = binascii.hexlify(path.encode("utf-8")).decode("ascii")
+    return u'<a href="%s%s">%s</a>' % (REVEAL_LINK, target, html(text))
+
+
+def revealed_path(target):
+    """The path a reveal link names, or None (another link, or a broken one)."""
+    import binascii
+    target = u"%s" % target
+    if not target.startswith(REVEAL_LINK):
+        return None
+    try:
+        return binascii.unhexlify(target[len(REVEAL_LINK):].encode("ascii")).decode("utf-8") or None
+    except (TypeError, ValueError, UnicodeError, binascii.Error):
+        return None
+
+
+def reveal_command(path, platform=None):
+    """How the system's file manager is asked to show path selected, in a new window: on Windows the command line
+    (Explorer by its full path: explorer /select,"path", its slashes made backslashes), on macOS the program and
+    its arguments (open -R path: the Finder), elsewhere None (the folder is opened instead: reveal_file)."""
+    import ntpath
+    platform = platform or sys.platform
+    path = u"%s" % path
+    if platform.startswith("win"):
+        root = os.environ.get("SystemRoot") or os.environ.get("WINDIR") or u"C:\\Windows"
+        if not isinstance(root, type(u"")):  # (Python 2's environment is bytes)
+            root = root.decode("mbcs" if os.name == "nt" else "utf-8", "replace")
+        explorer = root.rstrip(u"\\/") + u"\\explorer.exe"
+        return u'"%s" /select,"%s"' % (explorer, ntpath.normpath(path))
+    if platform == "darwin":
+        return [u"/usr/bin/open", u"-R", path]
+    return None
+
+
+def _shell_execute(program, parameters):
+    """ShellExecuteW (Windows), for a command line Python 2's subprocess cannot pass (characters outside the ANSI
+    code page): through PyDLL, which keeps the interpreter lock, since the call may send FontLab's windows
+    messages (docs/DARKMODE.md: windll crashed FontLab that way). True when Windows took it."""
+    import ctypes
+    function = ctypes.PyDLL("shell32").ShellExecuteW
+    function.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_wchar_p,
+                         ctypes.c_int]
+    function.restype = ctypes.c_void_p
+    return (function(None, u"open", program, parameters, None, 1) or 0) > 32
+
+
+def reveal_file(path, platform=None):
+    """Shows path selected in a new window of the system's file manager: Explorer on Windows (no shell, no
+    console window), the Finder on macOS; elsewhere its folder opened (QDesktopServices). None once asked, else
+    why not, for the log. Never raises."""
+    import subprocess
+    path = u"%s" % path
+    platform = platform or sys.platform
+    try:
+        if not os.path.exists(path):
+            return u"it is not there anymore (moved or deleted since)"
+        command = reveal_command(path, platform)
+        if command is None:
+            QtCore, QtGui = _qt()
+            folder = os.path.dirname(os.path.abspath(path))
+            if not QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(folder)):
+                return u"no application opens folders"
+            return None
+        if isinstance(command, list):
+            if sys.version_info[0] < 3:
+                command = [part.encode("utf-8") for part in command]
+            subprocess.Popen(command, close_fds=True)
+            return None
+        line = command
+        if sys.version_info[0] < 3:
+            # (Python 2 passes a command line through the ANSI code page: a path it cannot spell goes to
+            # ShellExecuteW instead, Explorer and its arguments as they are)
+            line = command.encode("mbcs", "replace")
+            if line.decode("mbcs", "replace") != command:
+                explorer, parameters = command[1:].split(u'" ', 1)
+                return None if _shell_execute(explorer, parameters) else u"Windows did not start Explorer"
+        subprocess.Popen(line, creationflags=CREATE_NO_WINDOW, close_fds=True)
+        return None
+    except Exception as exc:
+        return u"%s" % exc
+
+
+def reveal_clicked(target, log=None):
+    """A dialog's log handler's part for reveal links (Log.link_handler): the file shown in its folder
+    (reveal_file), and True; False for any other link (left to the log). Why it could not be is said in the
+    log."""
+    path = revealed_path(target)
+    if path is None:
+        return False
+    why = reveal_file(path)
+    if why and log is not None:
+        log.add(u"%s could not be shown in its folder: %s." % (i(os.path.basename(path)), html(why)), "warning")
+    return True

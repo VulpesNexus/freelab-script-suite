@@ -1124,7 +1124,9 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(fcmp.kinds_first_on({"value": 3, "only_a": 2, "absent": 1}, fcmp.KERN_KINDS_FIRST),
                          set(["value"]))
         self.assertEqual(fcmp.kinds_first_on({"only_a": 2, "absent": 1}, fcmp.KERN_KINDS_FIRST),
-                         set(["only_a", "absent"]), "no differing value: every other kind")
+                         set(["only_a"]), "no differing value: every other kind but the glyphs one font lacks")
+        self.assertEqual(fcmp.kinds_first_on({"absent": 4}, fcmp.KERN_KINDS_FIRST), set(["absent"]),
+                         "those too when they are all there is (owner's image 369)")
         self.assertEqual(fcmp.kinds_first_on({}, fcmp.KERN_KINDS_FIRST), set())
         first, second = first_font(), second_font()
         second.by_name.pop(u"o")  # (the only glyph whose outline differs: the Glyphs list keeps something)

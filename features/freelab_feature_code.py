@@ -242,6 +242,16 @@ def code_tokens(text):
     return [token for token in fea_tokens(text) if not token[0].startswith((u"#", u'"'))]
 
 
+def same_code(a, b):
+    """Whether two pieces of feature code say the same: the same tokens, comments (FreeLab's markers among them)
+    and quoted strings included, whatever the spaces and line breaks around and inside them. FontLab may hand
+    code back spaced otherwise than it was written; compared as raw text, a write offered "Update the code" at
+    once, and the next one wrote the features again unchanged (owner's images 341, 363, and 365)."""
+    def tokens(text):
+        return [re.sub(u"\\s+", u" ", token).strip() for token, _, _ in fea_tokens(text or u"")]
+    return tokens(a) == tokens(b)
+
+
 def comment_tokens(text):
     """[(comment, start, end)] of feature code's comments, each stripped, wherever it stands on its line."""
     return [(token.strip(), start, end) for token, start, end in fea_tokens(text) if token.startswith(u"#")]
@@ -5863,7 +5873,8 @@ class FeatureCodeDialog(object):
         present = any((BEGIN % kind) in (self.texts.get(tag) or u"")
                       for tag, kind in (("liga", "ligatures"), ("dlig", "ligatures"), ("calt", "alternates"))) or \
             any((BEGIN % FORMS) in (text or u"") for text in self.texts.values())
-        changes = bool(texts and any(texts[tag] != self.texts.get(tag) for tag in texts)) or prefix is not None
+        changes = bool(texts and any(not same_code(texts[tag], self.texts.get(tag)) for tag in texts)) or \
+            prefix is not None
         self.write_button.setText(u"Update the code" if present else u"Write the code")
         set_enabled(self.write_button, changes and not problems)
         set_enabled(self.restore_button, self.restorable())
@@ -5963,6 +5974,8 @@ class FeatureCodeDialog(object):
                     skipped = exc
                     texts.pop("locl", None)
             for tag in self.tags_shown(texts):
+                if tag in self.texts and same_code(texts[tag], self.texts.get(tag)):
+                    continue  # (the same code: not written again, nor named as written)
                 features.set_feature(tag, texts[tag])
                 written.append(tag)
             if u"aalt" in written and aalt_first(features):

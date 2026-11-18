@@ -1216,7 +1216,7 @@ def code_notes(builds, metrics):
     if builds:
         notes.append(u"And %s built, each a component of its glyph turned or moved (the rules above name them)." % (
             counted(len(builds), u"glyph")))
-    heights = [m for m in metrics if m.key == "advance_height"]
+    heights = [m for m in metrics if m.key == "advance_height" and (m.count or 0) > 0]  # ("on 0 layers": image 385)
     if heights:
         notes.append(u"And an advance height of %s set on %s without one (no code)." % (
             counted(heights[0].value, u"unit"), counted(heights[0].count or 0, u"layer")))
@@ -1605,7 +1605,7 @@ class CJKVerticalDialog(object):
             pass
         self.forms, self.trims, self.metrics, self.turned, self.kerns, self.first_checks = [], [], [], [], [], []
         # (the font line kept: owner's image 224)
-        self.status.setText((u"%s %s" % (self.cj.font_line(self.ak, self.package), self.cj.stopped_line())).strip())
+        self.status.setText(self.cj.head_join(self.ak, self.cj.font_line(self.ak, self.package), self.cj.stopped_line()))
         self.seen_history = self.ak.history_mark(self.package)
 
     def status_link(self, target):
@@ -1686,6 +1686,20 @@ class CJKVerticalDialog(object):
             self.listing_stopped()
         finally:
             self.set_busy(False)
+            # (whatever the read found, even a font with nothing to list: Put back vhea only for the font it
+            # wrote to; the window that had moved to a font with no CJK kept it usable, owner's image 361)
+            self.update_put_back()
+            # (the options and the sample grayed for a font with no kana, Hangul, ideographs, or CJK punctuation:
+            # nothing they act on, owner's images 379 and 380)
+            cjk = self.package is not None and bool(getattr(self, "cjk", True))
+            for name in ("forms_box", "vpal_box", "vkrn_box", "turned_box", "metrics_box", "sample_box", "sample"):
+                widget = getattr(self, name, None)
+                if widget is None:
+                    continue
+                try:
+                    self.ak.enable(widget, cjk)
+                except Exception:
+                    pass
 
     def read_font(self):
         QtCore, QtGui = _qt()
@@ -1704,7 +1718,7 @@ class CJKVerticalDialog(object):
             self.update_buttons()
             return
         if not self.model:  # (the font line kept, the reason in the log: owner's image 224)
-            self.status.setText(u"%s Could not list the vertical forms: the log says why." % self.cj.font_line(ak, package))
+            self.status.setText(self.cj.head_join(ak, self.cj.font_line(ak, package), u"Could not list the vertical forms: the log says why."))
             self.log.add(u"The corpus's vertical forms (vertical_model.json) are missing beside this script: reinstall "
                          u"FreeLab.", "error")
             return
@@ -1900,11 +1914,11 @@ class CJKVerticalDialog(object):
         own = sum(1 for f in self.forms if f.state == "font")
         font = self.cj.font_line(self.ak, package, master)  # (as every window's top line: ak.font_named)
         if not getattr(self, "cjk", True):
-            return u"%s No kana, Hangul, ideographs, or CJK punctuation: not a CJK font, nothing to add for vertical " \
-                   u"text." % font
+            return self.cj.head_join(self.ak, font, u"No kana, Hangul, ideographs, or CJK punctuation: not a CJK font, nothing "
+                                           u"to add for vertical text.")
         if not self.forms and not self.trims:
-            return u"%s No character that turns or moves in vertical text, and no full-width kana or " \
-                   u"punctuation." % font
+            return self.cj.head_join(self.ak, font, u"No character that turns or moves in vertical text, and no full-width "
+                                           u"kana or punctuation.")
         # (a count at 0 left out, the forms' noun on the first one said: "0 drawn already" read as noise)
         parts, noun = [], True
         for count, what in ((builds, u"%s to build"), (drawn, u"%s drawn already"), (own, u"%s the font's own code makes")):
@@ -1919,7 +1933,8 @@ class CJKVerticalDialog(object):
         if self.own_vpal:
             parts.append(u"%s the font's own vpal positions (kept)" % b(counted(len(self.own_vpal), u"glyph")))
         text = self.ak.joined(parts)
-        return u"%s %s. Nothing is written until you click %s." % (font, text[:1].upper() + text[1:], self.ak.i(u"Write"))
+        return self.cj.head_join(self.ak, font, u"%s. Nothing is written until you click %s." % (
+            text[:1].upper() + text[1:], self.ak.i(u"Write")))
 
     # -- the list ------------------------------------------------------------------------
 

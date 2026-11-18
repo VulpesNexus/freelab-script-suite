@@ -6580,5 +6580,29 @@ class ScriptPairCountTests(unittest.TestCase):
                                         u"\N{HIRAGANA LETTER RU}\N{IDEOGRAPHIC FULL STOP}")
 
 
+
+class ReviewOfNov19Tests(unittest.TestCase):
+    """The owner's review of Nov 19 (images 350 to 392): the shared module's part."""
+
+    def test_head_join_puts_a_blank_line_after_the_font(self):
+        self.assertEqual(ak.head_join(u"<b>Sans</b>, master <b>Regular</b>.", u"Nothing to trim."),
+                         u"<b>Sans</b>, master <b>Regular</b>.<br><br>Nothing to trim.")
+        self.assertEqual(ak.head_join(u"<b>Sans</b>.", u""), u"<b>Sans</b>.", "the font alone: no blank line under it")
+        self.assertEqual(ak.head_join(u"", u"No font is open."), u"No font is open.")
+
+    def test_a_compile_error_in_the_fonts_own_aalt_says_where_it_is_fixed(self):
+        line, level = ak.compile_report(u"[E] \"lookup\" use not allowed in 'aalt' feature\n[F] [internal] label not found")
+        self.assertEqual(level, "error")
+        self.assertIn(u"the font's own <i>aalt</i>", line)
+        self.assertIn(u"Feature%20Check", line, "a link that opens Feature Check")
+        line, level = ak.compile_report(u"[F] glyph class not defined (text was \"@nope\")")
+        self.assertNotIn(u"aalt", line)
+
+    def test_tabs_on_a_light_window_take_the_texts_color(self):
+        self.assertIn(u"color: palette(window-text);", ak.TAB_SHEET_LIGHT.split(u"}")[0])
+        self.assertIn(u"rgba(128, 128, 128, 255)", ak.TAB_SHEET.split(u"}")[0], "dark windows keep the mid gray")
+        self.assertIn(ak.PALETTE_CHANGE, ak.WATCHED_EVENTS, "dark mode switched: the sheets follow")
+
+
 if __name__ == "__main__":
     unittest.main()

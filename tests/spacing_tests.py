@@ -158,7 +158,7 @@ class FailureTests(unittest.TestCase):
         dialog.measure = measure
         dialog.run()
         self.assertTrue(dialog.failed)
-        self.assertEqual(dialog.status.text, u"<b>!The Black Bloc</b>, master <b>Regular</b>. " + sp.FAILED_TEXT)
+        self.assertEqual(dialog.status.text, u"<b>!The Black Bloc</b>, master <b>Regular</b>.<br><br>" + sp.FAILED_TEXT)
         self.assertEqual([kind for kind, _ in dialog.logged], ["error"])
         self.assertIn(u"Auto Spacing measures every glyph against l, n, and o", dialog.logged[0][1])
 
@@ -193,7 +193,7 @@ class FailureTests(unittest.TestCase):
         dialog = self.dialog()
         dialog.measure = lambda package, master, only=None, progress=None: progress(sp.MEASURE_STEP, 0.5)
         dialog.run()
-        self.assertTrue(dialog.status.text.startswith(u"<b>!The Black Bloc</b>, master <b>Regular</b>. Measuring was "
+        self.assertTrue(dialog.status.text.startswith(u"<b>!The Black Bloc</b>, master <b>Regular</b>.<br><br>Measuring was "
                                                       u"stopped"), dialog.status.text)
 
 

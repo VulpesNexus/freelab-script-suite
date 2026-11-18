@@ -6793,8 +6793,8 @@ class DeclaredCoverageTests(unittest.TestCase):
         note = fc.declared_note(self.fi, found, lambda t: t)
         self.assertEqual(note, u"The font info's coverage differs from the glyphs: Unicode ranges (not declared: Hangul "
                                u"Syllables; declared, without a glyph of it: Cyrillic); code pages (not declared: Latin 1 "
-                               u"(1252)). <a href=\"freelab-declare-coverage:\">Declare what the font covers</a> (<i>Edit "
-                               u"&gt; Undo</i> takes it back).")
+                               u"(1252)). <i>Declare coverage</i> declares what the font covers (<i>Edit &gt; Undo</i> takes it "
+                               u"back).")
 
     def test_a_code_page_declared_but_not_complete(self):
         found = fc.declared_coverage(self.fi, [0, 1, 2], [0], self.latin[:-1])

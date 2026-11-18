@@ -869,6 +869,22 @@ class InfoTests(unittest.TestCase):
         self.assertEqual(fp.colors_label("print", (0, 0, 0), (255, 255, 255)), u"black on white")
         self.assertAlmostEqual(fp.fit_scale((300, 300), (600, 800)), 0.375, msg="the page's height decides")
 
+    def test_the_dark_choice_is_named_as_its_colors_are(self):
+        # Owner's image 378: "Dark (white on black)" drew light gray on an off-black
+        ink, paper = fp.DARK_COLORS
+        self.assertNotEqual(ink, (255, 255, 255))
+        self.assertNotEqual(paper, (0, 0, 0))
+        self.assertTrue(all(200 <= c < 255 for c in ink) and len(set(ink)) == 1, "a light gray")
+        self.assertTrue(all(0 < c <= 40 for c in paper) and len(set(paper)) == 1, "an off-black")
+        self.assertEqual(fp.DARK_LABEL, u"Dark (light gray on off-black)")
+        self.assertEqual(fp.colors_label("print", ink, paper), u"light gray on off-black", "never the window's")
+        self.assertEqual(fp.COLOR_MODES[1][1], fp.PRINT_LABEL)
+        import io
+        with io.open(fp.__file__.replace(".pyc", ".py"), encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertNotIn(u"white on black", source)
+        self.assertIn(u"light gray on off-black (beside a", source, "the dropdown's help names it")
+
 
 class SettleTests(unittest.TestCase):
     """Sizes typed, then Save PDF or Show in Glyph window clicked at once: the proof those sizes make is laid
@@ -1975,7 +1991,7 @@ class DialogTests(unittest.TestCase):
 
         proof = Proof()
         line = fp.status_line(ak.font_named(u"Sans", u"Regular"), proof, u"A4", ak)
-        self.assertEqual(line, u"<b>Sans</b>, master <b>Regular</b>: <b>3 pages</b> (A4). Pages per section: "
+        self.assertEqual(line, u"<b>Sans</b>, master <b>Regular</b>.<br><br><b>3 pages</b> (A4). Pages per section: "
                                u"<i>Summary</i> (<b>1</b>), <i>Character set</i> (<b>2</b>). No kerned pairs to apply; OpenType "
                                u"features not applied.")
         proof.kerned = [1204]
@@ -2028,6 +2044,27 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(dialog.colors(), fp.PRINT_COLORS)
         self.assertTrue(dialog.defaults_changed())
         dialog.show_page()
+
+    def test_the_saved_line_links_to_the_folder_and_a_click_shows_the_pdf(self):
+        # Owner's image 375: the log reminds where the PDF went, its folder a link that shows it selected
+        ak = self.ak
+        path = os.path.join(HERE, u"Fake Sans-Regular-2026-11-19.pdf")
+        folder = os.path.normpath(HERE)
+        line = fp.saved_line(ak, 12, path, u"black on white")
+        link = ak.reveal_link(path, folder)
+        self.assertEqual(line, u"Saved <b>12 pages</b> (black on white) in %s: <i>Fake Sans-Regular-2026-11-19.pdf</i>."
+                         % link)
+        target = link.split(u'"')[1]
+        self.assertEqual(ak.revealed_path(target), path)
+        dialog = self.dialog(fake_font())
+        self.assertEqual(dialog.log.link_handler, dialog.log_link)
+        shown = []
+        real = ak.reveal_file
+        ak.reveal_file = lambda where: shown.append(where)
+        self.addCleanup(setattr, ak, "reveal_file", real)
+        self.assertTrue(dialog.log_link(target))
+        self.assertEqual(shown, [path])
+        self.assertFalse(dialog.log_link(u"glyph:0041"), "another link: the log's own")
 
     def test_a_pdf_moved_away_is_said_once_and_its_button_grays_out(self):
         dialog = self.dialog(fake_font())
@@ -2146,7 +2183,8 @@ class DialogTests(unittest.TestCase):
             dialog.ak.load_sibling = load
         self.assertEqual(fp.features_text([(u"ss01", u"Round a")]), u"1 feature: ss01 (Stylistic Set 1: Round a)")
         self.assertIn(u"<i>Summary</i> (<b>1</b>)", dialog.font_label.text)
-        self.assertTrue(dialog.font_label.text.startswith(u"<b>Fake Sans</b>, master <b>Regular</b> (of <b>2 masters</b>): "),
+        self.assertTrue(dialog.font_label.text.startswith(u"<b>Fake Sans</b>, master <b>Regular</b> (of <b>2 masters</b>)."
+                                                          u"<br><br>"),
                         dialog.font_label.text)
         self.assertEqual(self.said, [], "nothing left out")
         # once per font read: not per layout, not as a page is drawn

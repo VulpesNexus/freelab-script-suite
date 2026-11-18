@@ -904,6 +904,103 @@ def gray_bytes(image, QtGui):
     return ctypes.string_at(address, stride * gray.height()), gray.width(), gray.height(), stride, gray
 
 
+NOT_AN_IMAGE = "not an image FontLab can read"
+SVG_NOT_DRAWN = "an SVG drawing FontLab's Qt cannot draw: save the sheet as PNG"
+
+
+def on_white(image, QtGui):
+    """An image with any transparency laid on white paper (a sheet drawn on a clear layer, or an SVG drawn on
+    nothing: transparent pixels read as black ink once made gray)."""
+    try:
+        clear = bool(_value(image, "hasAlphaChannel"))
+    except Exception:
+        clear = False
+    if not clear:
+        return image
+    out = QtGui.QImage(image.width(), image.height(), QtGui.QImage.Format_RGB32)
+    out.fill(QtGui.QColor(255, 255, 255))
+    painter = QtGui.QPainter(out)
+    try:
+        painter.drawImage(0, 0, image)
+    finally:
+        painter.end()
+    return out
+
+
+def svg_renderer_class(QtGui):
+    """Qt's QSvgRenderer where this PythonQt wraps QtSvg (its own module, or among every class), else None."""
+    holders = []
+    try:
+        import PythonQt
+        holders += [getattr(PythonQt, "QtSvg", None), getattr(PythonQt, "Qt", None)]
+    except Exception:
+        pass
+    holders.append(QtGui)
+    for holder in holders:
+        found = getattr(holder, "QSvgRenderer", None) if holder is not None else None
+        if found is not None:
+            return found
+    return None
+
+
+def read_svg_size(path):
+    """svg_size of an SVG file (its root element is near its start), or None."""
+    try:
+        with io.open(path, "rb") as handle:
+            head = handle.read(1 << 16)
+    except (IOError, OSError):
+        return None
+    return svg_size(head.decode("utf-8", "replace"))
+
+
+def render_svg(path, QtCore, QtGui):
+    """(an SVG sheet drawn on white, None), or (None, why): drawn by QtSvg's renderer at the size its viewBox
+    gives (a template's own pixels: the resolution it was made at, whatever units a vector app saved it in),
+    else read by Qt's SVG image plugin at that size; SHEET_PIXELS_MAX pixels at the most."""
+    size = read_svg_size(path)
+    renderer_class = svg_renderer_class(QtGui)
+    if renderer_class is not None:
+        try:
+            renderer = renderer_class(path)
+            if _value(renderer, "isValid"):
+                if size is None:
+                    default = _value(renderer, "defaultSize")
+                    size = (_value(default, "width"), _value(default, "height"))
+                width, height = capped_size(*size)
+                image = QtGui.QImage(width, height, QtGui.QImage.Format_RGB32)
+                image.fill(QtGui.QColor(255, 255, 255))
+                painter = QtGui.QPainter(image)
+                try:
+                    painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+                    renderer.render(painter, QtCore.QRectF(0, 0, width, height))
+                finally:
+                    painter.end()
+                return image, None
+        except Exception:
+            pass  # (the image plugin tried next)
+    try:
+        reader = QtGui.QImageReader(path)
+        if size is not None:
+            reader.setScaledSize(QtCore.QSize(*capped_size(*size)))
+        image = reader.read()
+    except Exception:
+        image = QtGui.QImage(path)
+    if image is None or image.isNull():
+        return None, SVG_NOT_DRAWN
+    return on_white(image, QtGui), None
+
+
+def read_sheet_image(path, QtCore, QtGui):
+    """(a sheet's image on white, None), or (None, why it cannot be read): an SVG drawing rendered (render_svg),
+    any other file read by Qt's image readers (PNG, JPEG, TIFF, BMP, WebP, PSD where FontLab has their plugins)."""
+    if os.path.splitext(path)[1].lower() == ".svg":
+        return render_svg(path, QtCore, QtGui)
+    image = QtGui.QImage(path)
+    if image.isNull():
+        return None, NOT_AN_IMAGE
+    return on_white(image, QtGui), None
+
+
 def binarized_rows(data, width, height, stride, threshold=INK_THRESHOLD):
     """Rows of 0 (ink) and 255 (paper) bytes."""
     table = bytes(bytearray(0 if v < threshold else 255 for v in range(256)))
@@ -1021,10 +1118,10 @@ the box with its characters to edit; or characters typed or pasted), and with a 
 leave out the glyphs it already has drawn; alternates add <i>name.alt1</i> and the like after each. Each
 sheet holds the glyphs a sheet you set (100 by default): one image, each glyph in a box with the font's
 metric lines (its baseline thicker) and an origin line, in a pale blue that the reading leaves out.
-<i>Save template</i> writes one image a sheet (PNG or TIFF), or one SVG drawing a sheet for vector apps.
-Open them in any app, or print them; draw each glyph in dark ink inside its box, on the image or on a
-layer above it, and export each sheet again (PNG, JPEG, TIFF, BMP, WebP, PSD, or SVG), or scan or
-photograph the paper.<br><br>
+<i>Save template</i> writes one SVG drawing a sheet (the template a locked group, to draw above), or
+one image a sheet (PNG or TIFF); the log's link then shows them in their folder. Open them in any app, or
+print them; draw each glyph in dark ink inside its box, on the sheet or on a layer above it, and save or
+export each sheet again (SVG, PNG, JPEG, TIFF, BMP, WebP, or PSD), or scan or photograph the paper.<br><br>
 The corner squares and the two bands of squares tell the reading where the sheet is and what it holds,
 so a sheet can be read on another computer than the one that made it, turned, skewed, or photographed;
 keep them clean and wholly in the image.<br><br>
@@ -1093,6 +1190,114 @@ def counted(number, one, many=None):
 
 def grouped(number):
     return "{:,}".format(int(number))
+
+
+# The template's file types, the first the save dialog's own (owner's image 374: SVG, which every vector app and
+# most drawing apps open, and which Read sheets reads back)
+TEMPLATE_FORMATS = ((".svg", "SVG drawings, for vector apps (*.svg)"), (".png", "PNG images (*.png)"),
+                    (".tif", "TIFF images (*.tif *.tiff)"))
+
+
+def template_filter():
+    """The save dialog's file types, SVG first."""
+    return ";;".join(label for _, label in TEMPLATE_FORMATS)
+
+
+def template_ext(path):
+    """(the path without its extension, the extension the sheets are written with): the one typed where it is
+    a template's (.tiff kept), else SVG's."""
+    stem, ext = os.path.splitext(path)
+    if ext.lower() in (".svg", ".png", ".tif", ".tiff"):
+        return stem, ext.lower()
+    return (stem if not ext else path), TEMPLATE_FORMATS[0][0]
+
+
+_TEXT_TYPES = (type(u""), type(b""))
+
+
+def picked_paths(chosen):
+    """The files a file dialog of several gave (getOpenFileNames), as a list of paths: PythonQt gives them as a
+    tuple of strings, PyQt and PySide as (the list, the filter chosen), and a dialog of one file a string. The
+    tuple of one string had been taken for the PyQt form, and its path read character by character, each a
+    sheet "not an image FontLab can read" (owner's image 376)."""
+    if not chosen:
+        return []
+    if isinstance(chosen, _TEXT_TYPES):
+        return ["%s" % chosen]
+    items = list(chosen)
+    if items and not isinstance(items[0], _TEXT_TYPES):
+        try:
+            items = list(items[0])  # (PyQt's and PySide's form: the files first, then the filter)
+        except TypeError:
+            return []
+    out = []
+    for item in items:
+        path = "%s" % (item or "")
+        if path and path not in out:
+            out.append(path)
+    return out
+
+
+def picked_path(chosen):
+    """The file a dialog of one file gave (getSaveFileName, getOpenFileName): a string in PythonQt, (the path,
+    the filter chosen) in PyQt and PySide; "" when none."""
+    if not chosen:
+        return ""
+    if isinstance(chosen, _TEXT_TYPES):
+        return "%s" % chosen
+    items = list(chosen)
+    return picked_path(items[0]) if items else ""
+
+
+SVG_UNITS = {"": 1.0, "px": 1.0, "pt": 96 / 72.0, "pc": 16.0, "in": 96.0, "mm": 96 / 25.4, "cm": 96 / 2.54}
+
+
+def svg_size(text):
+    """(width, height) of an SVG drawing in its own units, as read from its root element: its viewBox's (a
+    template's are its pixels, kept by the vector apps that draw on it), else its width and height (pixels;
+    points, picas, inches, and millimeters at 96 pixels an inch). None when it says neither, or a percentage."""
+    root = re.search(r"<svg\b([^>]*)>", text or "", re.S)
+    if root is None:
+        return None
+    attributes = root.group(1)
+
+    def attribute(name):
+        found = re.search(r"(?:^|\s)%s\s*=\s*(?:\"([^\"]*)\"|'([^']*)')" % name, attributes)
+        return (found.group(1) if found.group(1) is not None else found.group(2)).strip() if found else None
+
+    box = attribute("viewBox")
+    if box:
+        parts = [p for p in re.split(r"[\s,]+", box) if p]
+        try:
+            width, height = float(parts[2]), float(parts[3])
+            if width > 0 and height > 0:
+                return width, height
+        except (IndexError, ValueError):
+            pass
+    sizes = []
+    for name in ("width", "height"):
+        value = re.match(r"^([0-9.]+(?:[eE][-+]?\d+)?)\s*([a-z]*)$", attribute(name) or "")
+        if value is None or value.group(2) not in SVG_UNITS:
+            return None
+        sizes.append(float(value.group(1)) * SVG_UNITS[value.group(2)])
+    return tuple(sizes) if min(sizes) > 0 else None
+
+
+def capped_size(width, height, most=SHEET_PIXELS_MAX):
+    """(width, height) in whole pixels, scaled down (in proportion) to most pixels at the most."""
+    scale = min(1.0, math.sqrt(most / float(max(1.0, width * height))))
+    return max(1, int(round(width * scale))), max(1, int(round(height * scale)))
+
+
+def saved_line(ak, paths, one="sheet"):
+    """The log's line once files are saved: how many in bold, the folder they are in as a link that shows the
+    first selected in a new window of the system's file manager (ak.reveal_link: owner's image 375), then their
+    names."""
+    folder = os.path.normpath(os.path.dirname(paths[0]))
+    link = getattr(ak, "reveal_link", None)
+    place = link(paths[0], folder) if link is not None else ak.html(folder)
+    return "Saved %s in %s: %s." % (ak.b(counted(len(paths), one)), place,
+                                    ak.html(", ".join(os.path.basename(p) for p in paths)))
 
 
 class Drawn(object):
@@ -1278,6 +1483,7 @@ class FontBuilderDialog(object):
         self.pages.addWidget(self.template_page(QtCore, QtGui))
         self.pages.addWidget(self.build_page(QtCore, QtGui))
         self.log = ak.Log()
+        self.log.link_handler = self.log_link  # (a template saved: its folder, the file selected, on a click)
         layout.addWidget(self.log.widget)
         # The bottom row, as every window's (owner's images 258 to 265): the Build tab's committing button at
         # the right, shown with its tab, then Close
@@ -1387,8 +1593,9 @@ class FontBuilderDialog(object):
         self.em.setWhatsThis("The em's size on the sheet, in pixels: 500 draws well on a screen; for print, 300 "
                              "pixels a centimeter of em at 300 dpi is about 118, so raise it for small paper sizes.")
         self.save_button = QtGui.QPushButton("Save template...")
-        self.save_button.setWhatsThis("Writes the sheets as images (PNG, or TIFF), or as SVG drawings for vector apps "
-                                      "(the template a locked group, to draw above), one a sheet, numbered.")
+        self.save_button.setWhatsThis("Writes the sheets as SVG drawings (the template a locked group, to draw above, "
+                                      "in a vector app or any app that opens SVG), or as images (PNG or TIFF), one a "
+                                      "sheet, numbered. The log then links to the folder.")
         # The options on one line with the run button at their end (owner's images 241 and 266), wrapping
         # onto the next line where the window is too narrow (FlowRow); the template's status is in the header
         self.template_options = FlowRow([
@@ -1544,16 +1751,13 @@ class FontBuilderDialog(object):
         sheets = self.sheets()
         folder = self.settings.get("folder") or os.path.expanduser("~")
         base = (sheets[0].family or "template").replace(" ", "-")
-        chosen = QtGui.QFileDialog.getSaveFileName(self.dialog, "Save the template", os.path.join(folder, base + ".png"),
-                                                   "PNG images (*.png);;TIFF images (*.tif *.tiff);;"
-                                                   "SVG drawings, for vector apps (*.svg)")
-        if isinstance(chosen, (tuple, list)):
-            chosen = chosen[0] if chosen else ""
-        path = "%s" % (chosen or "")
+        # (SVG first, the name ending in it: the dialog's type is SVG unless another is picked, owner's image 374)
+        chosen = QtGui.QFileDialog.getSaveFileName(self.dialog, "Save the template",
+                                                   os.path.join(folder, base + TEMPLATE_FORMATS[0][0]), template_filter())
+        path = picked_path(chosen)
         if not path:
             return
-        stem, ext = os.path.splitext(path)
-        ext = ext.lower() if ext.lower() in (".png", ".tif", ".tiff", ".svg") else ".png"
+        stem, ext = template_ext(path)
         self.settings.update({"folder": os.path.dirname(path), "typed": "%s" % self.typed.toPlainText(),
                               "alternates": self.alternates.value, "per_sheet": self.per_sheet.value, "em": self.em.value})
         write_settings(self.ak, self.settings)
@@ -1569,10 +1773,16 @@ class FontBuilderDialog(object):
             self.busy = False
             self.ak.busy_end(self)
         if written:
-            self.log.add("Saved %s: %s." % (self.ak.b(counted(len(written), "sheet")), self.ak.html(", ".join(written))), "done")
+            self.log.add(saved_line(self.ak, written), "done")
+
+    def log_link(self, target):
+        """A link of the log clicked: a file saved (ak.reveal_link) shown selected in its folder; any other
+        left to the log (False)."""
+        reveal = getattr(self.ak, "reveal_clicked", None)
+        return reveal(target, self.log) if reveal is not None else False
 
     def write_sheets(self, sheets, stem, ext, written):
-        """Each sheet written (its name added to written); stops at the first that cannot be."""
+        """Each sheet written (its path added to written); stops at the first that cannot be."""
         QtCore, QtGui = _qt()
         for sheet in sheets:
             self.ak.busy_progress(self, "Saving sheet %d of %d" % (sheet.index + 1, len(sheets)),
@@ -1585,13 +1795,13 @@ class FontBuilderDialog(object):
                 except (IOError, OSError):
                     self.log.add("%s could not be written." % self.ak.html(name), "error")
                     return
-                written.append(os.path.basename(name))
+                written.append(name)
                 continue
             image = render_sheet(sheet, QtCore, QtGui)
             if not image.save(name):
                 self.log.add("%s could not be written." % self.ak.html(name), "error")
                 return
-            written.append(os.path.basename(name))
+            written.append(name)
 
     # -- building ------------------------------------------------------------------
 
@@ -1603,7 +1813,8 @@ class FontBuilderDialog(object):
         row = QtGui.QHBoxLayout(bar)
         row.setContentsMargins(0, 0, 0, 0)
         self.add_button = QtGui.QPushButton("Add sheets...")
-        self.add_button.setWhatsThis("Adds sheets drawn (images: PNG, JPEG, TIFF, BMP, WebP, PSD) to read.")
+        self.add_button.setWhatsThis("Adds sheets drawn to read: images (PNG, JPEG, TIFF, BMP, WebP, PSD) or SVG "
+                                     "drawings.")
         self.clear_button = QtGui.QPushButton("Clear")
         self.clear_button.setWhatsThis("Takes every sheet and glyph off the lists.")
         row.addWidget(self.add_button)
@@ -1677,9 +1888,7 @@ class FontBuilderDialog(object):
         folder = self.settings.get("read_folder") or self.settings.get("folder") or os.path.expanduser("~")
         chosen = QtGui.QFileDialog.getOpenFileNames(self.dialog, "Add sheets drawn", folder,
                                                     "Images (*.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp *.psd *.svg)")
-        if isinstance(chosen, tuple):
-            chosen = chosen[0]
-        paths = ["%s" % p for p in (chosen or [])]
+        paths = picked_paths(chosen)
         if not paths:
             return
         self.settings["read_folder"] = os.path.dirname(paths[0])
@@ -1730,9 +1939,9 @@ class FontBuilderDialog(object):
                 item.setText(3, "reading")
                 self.ak.busy_progress(self, "Reading sheet %d of %d" % (row + 1, len(self.files)),
                                       row / float(len(self.files)))
-                image = QtGui.QImage(path)
-                if image.isNull():
-                    item.setText(3, "not an image FontLab can read")
+                image, why = read_sheet_image(path, QtCore, QtGui)
+                if image is None:
+                    item.setText(3, why)
                     continue
                 found, gray = find_sheet(image, QtCore, QtGui)
                 if found is None:

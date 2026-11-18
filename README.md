@@ -38,6 +38,7 @@ The font tools share their ways: a window of 1000 by 1000 pixels (Font Check's, 
 ## Requirements
 
 - FontLab 7 for Windows (developed against 7.2.0), with its Python working. FontLab 7 runs scripts with a **64-bit** Python 2.7 installed on the system (a 32-bit one does not work); the FontLab 7 installer offers one. If *Window > Panels > Scripting* cannot run a one-line `print(1)`, fix that first: [docs/PYTHON27.md](docs/PYTHON27.md).
+- macOS is not supported yet, and nothing has run on a Mac. FontLab 7 for macOS has the same Qt, PythonQt, and Python 2.7 (installed separately on macOS 12.3 and newer), and most of FreeLab is plain Qt and Python that should carry over (a saved file's log link opens the Finder there). What is Windows-only: the installer (PowerShell, Windows paths), the native libraries (built as Windows DLLs, among them the auto kerning core that Auto Kerning, Auto Spacing, Kerning Check, and Glyph Compose need), dark mode's title bars, its following of the system theme, and its native engine ([docs/DARKMODE.md](docs/DARKMODE.md#platforms-and-builds)), and Font Compare's list of installed fonts, which reads Windows' font folders only.
 - LLVM (clang) or Visual Studio with the C++ tools, to build FreeLab's native libraries once: the auto kerning core, which Auto Kerning, Auto Spacing, Kerning Check, and Glyph Compose measure with (required), and dark mode's small helper (without it, dark mode still works, with flipped hues in the widgets FontLab paints itself).
 
 ## Install

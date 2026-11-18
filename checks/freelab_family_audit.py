@@ -2505,8 +2505,11 @@ class FamilyAuditDialog(object):
         QtCore, QtGui = _qt()
         picked = QtGui.QFileDialog.getOpenFileNames(self.dialog, u"Add font files to the audit",
                                                     getattr(self, "last_folder", u"") or u"", OPEN_FILTER)
-        if isinstance(picked, tuple) and len(picked) == 2 and not isinstance(picked[1], (list, tuple)):
-            picked = picked[0]  # (PyQt's form: the files and the filter chosen)
+        if isinstance(picked, tuple) and len(picked) == 2 and isinstance(picked[0], (list, tuple)):
+            picked = picked[0]  # (PyQt's form: the files and the filter chosen; PythonQt's two files are two strings,
+            # which this read as one path character by character: Font Builder's image 376)
+        elif not isinstance(picked, (list, tuple)):
+            picked = [picked] if picked else []
         paths = []
         for path in list(picked or []):
             path = font_path_of(path)

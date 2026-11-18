@@ -74,6 +74,15 @@ def stopped_text(what, measured=False):
         else u"Click <i>Analyze</i> to measure the glyphs.")
 
 
+
+def head_join(ak, font, rest):
+    """ak.head_join (the font's sentence, a blank line, what the tool found), or the two joined by a space where
+    the shared module has none (an older one, a test's stand-in)."""
+    join = getattr(ak, "head_join", None)
+    if join is not None:
+        return join(font, rest)
+    return (u"%s %s" % (font or u"", rest or u"")).strip()
+
 FAILED_TEXT = u"Could not space this font: the log says why."  # the status line under the font's when it fails
 
 
@@ -587,7 +596,7 @@ class AutoSpacingDialog(object):
             label.setAlignment(QtCore.Qt.AlignCenter)
             column.addWidget(label, 1)
             previews.addLayout(column, 1)
-        self.neighbors = [self.ak.ClickRegions(label, self.open_pair, u"Click to open this pair in <i>Auto Kerning</i>.")
+        self.neighbors = [self.ak.ClickRegions(label, self.open_pair, u"Double-click to open this pair in <i>Auto Kerning</i>.")
                           for label in (self.preview_now, self.preview_after)]
         layout.addLayout(previews)
         layout.addWidget(self.log.widget)
@@ -728,7 +737,7 @@ class AutoSpacingDialog(object):
             # analysis, Analyze and what feeds it grayed until the font changes (owner's image 253)
             message = u"%s" % exc
             self.failed = isinstance(exc, CannotSpace)
-            self.status.setText(u"%s %s" % (self.font_line(), FAILED_TEXT))
+            self.status.setText(head_join(self.ak, self.font_line(), FAILED_TEXT))
             self.log.add(self.ak.html(message[:1].upper() + message[1:]), "error")
             return
         finally:
@@ -970,7 +979,7 @@ class AutoSpacingDialog(object):
             note = composites_text(following, left_out, self.ak.b) if self.listed else u""  # (nothing listed: nothing follows)
             self.composites_note.setText(note)
             self.composites_note.setVisible(bool(note))
-            self.status.setText(u"%s %s" % (self.font_line(), spacing_status(
+            self.status.setText(head_join(self.ak, self.font_line(), spacing_status(
                 len(self.listed), len(self.spacings), tolerance, getattr(self, "settle_passes", 1), self.ak.b, self.ak.i)))
         self.select()
 
@@ -1007,7 +1016,7 @@ class AutoSpacingDialog(object):
             self.spacings = []
         self.composites_note.setText(u"")
         self.composites_note.setVisible(False)
-        self.status.setText((u"%s %s" % (self.font_line(), stopped_text(what, measured))).strip())
+        self.status.setText(head_join(self.ak, self.font_line(), stopped_text(what, measured)))
 
     def row_texts(self, s, tolerance):
         """A row's cells: the glyph's character, its name (a reference says so), its code point, its

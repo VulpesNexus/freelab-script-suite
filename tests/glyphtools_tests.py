@@ -1703,7 +1703,8 @@ class DirectionTests(unittest.TestCase):
     def qt(self, paths):
         def path():
             made = Recorder()
-            made.boundingRect = lambda: Stub(width=lambda: 100.0, left=lambda: 0.0, top=lambda: -70.0, bottom=lambda: 0.0)
+            made.boundingRect = lambda: Stub(width=lambda: 100.0, left=lambda: 0.0, top=lambda: -70.0, bottom=lambda: 0.0,
+                                             right=lambda: 100.0, height=lambda: 70.0)
             paths.append(made)
             return made
         gui = Stub(QFont=Recorder, QPainterPath=path, QPixmap=Recorder, QColor=Recorder, QPainter=Recorder,
@@ -5779,6 +5780,15 @@ class UiRoundNovember17Tests(unittest.TestCase):
         self.assertFalse(any(shown.values()))
         page.show_preview(True, False)
         self.assertTrue(shown["reference_line"] and shown["reference"] and not shown["editor"])
+
+
+
+class DoubleMarkTests(unittest.TestCase):
+    def test_marks_over_two_letters_are_no_ones_sample(self):
+        for code in (0x035C, 0x0361, 0x0362, 0x1DCD):
+            self.assertIn(code, ac.DOUBLE_MARKS)
+        for code in (0x0301, 0x0323, 0x0306):
+            self.assertNotIn(code, ac.DOUBLE_MARKS)
 
 
 if __name__ == "__main__":

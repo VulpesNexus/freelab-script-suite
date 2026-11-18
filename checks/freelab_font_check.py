@@ -819,6 +819,7 @@ def spaces_note(has, listed=()):
                 u"it" if one else u"them", u"it" if one else u"them"))
 
 
+DECLARE_BUTTON = u"Declare coverage"  # the Coverage tab's button that sets the font info to what the font covers
 DECLARE_LINK = u"freelab-declare-coverage:"  # a log link's target: the font info set to declare what the font covers
 COVERAGE_KEYS = (("unicode_ranges", "openTypeOS2UnicodeRanges", u"Unicode ranges"),
                  ("code_pages", "openTypeOS2CodePageRanges", u"code pages"))
@@ -863,8 +864,9 @@ def declared_note(module, differences, html):
     declares it (u"" when it does not differ)."""
     if not differences:
         return u""
-    return (u"The font info's coverage differs from the glyphs: %s. <a href=\"%s\">Declare what the font covers</a> "
-            u"(<i>Edit &gt; Undo</i> takes it back)." % (html(coverage_differences(module, differences)), DECLARE_LINK))
+    # (the button, in the bottom row, rather than a link the log alone showed: owner's image 372)
+    return (u"The font info's coverage differs from the glyphs: %s. <i>%s</i> declares what the font covers "
+            u"(<i>Edit &gt; Undo</i> takes it back)." % (html(coverage_differences(module, differences)), DECLARE_BUTTON))
 
 
 def families_path():
@@ -6427,9 +6429,16 @@ class FontCheckDialog(object):
         self.copy_chars_button = QtGui.QPushButton("Copy glyphs")
         self.copy_chars_button.setWhatsThis(u"Copies the ticked glyphs of the tab of glyphs shown (or the selected "
                                             u"row's) as text.")
+        self.declare_button = QtGui.QPushButton(DECLARE_BUTTON)
+        self.declare_button.setWhatsThis(u"Sets the font info's Unicode ranges and code pages to what the font's glyphs "
+                                         u"cover, where they differ (the log says how). One step of FontLab's History: "
+                                         u"<i>Edit &gt; Undo</i> takes it back. Usable only while they differ.")
+        self.declare_button.setEnabled(False)
+        self.declare_button.connect("clicked()", self.declare_coverage)
         row = tab.actions_row
         row.addWidget(self.diacritics_button)
         row.addWidget(self.copy_chars_button)
+        row.addWidget(self.declare_button)
         right = QtGui.QWidget()
         box = QtGui.QVBoxLayout(right)
         box.setContentsMargins(0, 0, 0, 0)
@@ -7700,7 +7709,19 @@ class FontCheckDialog(object):
         except Exception:
             pass
         self.say_declared(font.codes)
+        self.say_kerning()
         return BUSY_STEPS[3]
+
+    def say_kerning(self):
+        """Once a window, after its first check: where the kerning is checked, a link that opens it (owner's
+        image 391: Font Check checks the glyphs and the font info, not the kerning)."""
+        if getattr(self, "kerning_said", False):
+            return
+        self.kerning_said = True
+        link = getattr(self.ak, "tool_link", None)
+        tool = link(u"Kerning Check") if link is not None else u"<i>Kerning Check</i>"
+        self.log.add(u"To check the kerning (pairs that collide, entries that do nothing, masters that differ), open %s."
+                     % tool)
 
     def coverage_now(self, codes):
         """{key: (declared, would declare)} of the font info's coverage fields that differ from the glyphs'
@@ -7725,6 +7746,10 @@ class FontCheckDialog(object):
         except Exception:
             font_key = None
         note = declared_note(self.ak.font_info(), differences, self.ak.html) if differences else u""
+        try:
+            self.declare_button.setEnabled(bool(differences))
+        except Exception:
+            pass
         said = (font_key, note)
         if note and said != getattr(self, "declared_said", None):
             self.log.add(note, "warning")

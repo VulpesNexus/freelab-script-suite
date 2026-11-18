@@ -2428,6 +2428,14 @@ class FeatureCheckDialog(object):
             block = self.code.document().findBlockByNumber(finding.line - 1)
             cursor = QtGui.QTextCursor(block)
             cursor.select(QtGui.QTextCursor.LineUnderCursor)
+            try:  # (marked as strongly with the focus on the list as in the box: in light mode the box's unfocused
+                # selection was a faint gray, owner's image 367; copied from the palette now, dark or light)
+                palette = self.code.palette
+                for role in (QtGui.QPalette.Highlight, QtGui.QPalette.HighlightedText):
+                    palette.setColor(QtGui.QPalette.Inactive, role, palette.color(QtGui.QPalette.Active, role))
+                self.code.setPalette(palette)
+            except Exception:
+                pass
             self.code.setTextCursor(cursor)
             self.code.centerCursor()
 

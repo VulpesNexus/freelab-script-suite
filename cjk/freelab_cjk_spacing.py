@@ -137,6 +137,15 @@ def font_line(ak, package, master=None):
     return ak.font_named(getattr(package, "tfn", u""), master or getattr(package, "master", None), masters) + u"."
 
 
+def head_join(ak, font, rest):
+    """ak.head_join (the font's sentence, a blank line, what the tool found), or the two joined by a space where
+    the shared module has none (an older one, a test's stand-in)."""
+    join = getattr(ak, "head_join", None)
+    if join is not None:
+        return join(font, rest)
+    return (u"%s %s" % (font or u"", rest or u"")).strip()
+
+
 def stopped_line(what=u"Listing"):
     """The status line once the user stopped the work (the top row's Esc, Close, a tool, an arrow): nothing is
     listed, and a link lists it again (the window has no button of its own for it)."""
@@ -533,6 +542,45 @@ def feature_code_problem(tool):
     return (u"%s cannot read the font's feature code: FreeLab's Feature Code script (freelab_feature_code.py), "
             u"which it reads and writes code with, is missing or broken (%s). Reinstall FreeLab; nothing is "
             u"written until then." % (tool, FEATURE_CODE_ERROR[0] if FEATURE_CODE_ERROR else u"not found"))
+
+
+VERTICAL_FILE, VERTICAL_MODULE = "freelab_cjk_vertical.py", "freelab_cjk_vertical"
+
+
+def preview_note(text, names, bold=lambda text: text, escape=lambda text: text):
+    """CJK Vertical's line on what the previews show of a sample the font lacks some of (its preview_note),
+    for this window's previews too (owner's image 360); u"" where CJK Vertical cannot be loaded."""
+    try:
+        here = os.path.dirname(os.path.abspath(globals().get("__file__") or "."))
+        path = os.path.join(here, VERTICAL_FILE)
+        held = sys.modules.get(VERTICAL_MODULE)
+        if held is None or not callable(getattr(held, "preview_note", None)):
+            if not os.path.isfile(path):
+                return u""
+            old = os.environ.get("FREELAB_NO_AUTOSTART")
+            os.environ["FREELAB_NO_AUTOSTART"] = "1"
+            try:
+                if sys.version_info[0] == 2:
+                    import imp
+                    held = imp.new_module(VERTICAL_MODULE)
+                    held.__file__ = path
+                    with open(path, "rb") as handle:
+                        source = handle.read()
+                    exec(compile(source, VERTICAL_FILE, "exec", 0, True), held.__dict__)
+                else:
+                    import importlib.util
+                    spec = importlib.util.spec_from_file_location(VERTICAL_MODULE, path)
+                    held = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(held)
+                sys.modules[VERTICAL_MODULE] = held
+            finally:
+                if old is None:
+                    os.environ.pop("FREELAB_NO_AUTOSTART", None)
+                else:
+                    os.environ["FREELAB_NO_AUTOSTART"] = old
+        return held.preview_note(text, names, bold, escape)
+    except Exception:
+        return u""
 
 
 FEATURE_CODE_FILE, FEATURE_CODE_MODULE = "freelab_feature_code.py", "freelab_feature_code"
@@ -1103,6 +1151,14 @@ class CJKSpacingDialog(object):
             label.setToolTip(caption)
             preview_part.addWidget(label)
             self.previews.append((label, caption))
+        # What the previews show of the sample where the font lacks some of it, as CJK Vertical's (image 360)
+        self.preview_note = QtGui.QLabel(u"")
+        self.preview_note.setWordWrap(True)
+        self.preview_note.setEnabled(False)  # (drawn in the quiet text color, as the captions)
+        self.preview_note.setWhatsThis(u"The previews leave out the sample's characters the font lacks: this line "
+                                       u"says which they show, and which are missing.")
+        self.preview_note.setVisible(False)
+        preview_part.addWidget(self.preview_note)
         preview_part.addStretch(1)  # (a taller pane: the previews stay under the sample row)
         # The Code preview, last, as Feature Code's code under its lists (owner's image 305)
         self.code_preview = CodePreview(ak, feature_code_or_none(), self.splitter, CODE_PREVIEW_WHAT)
@@ -1266,7 +1322,7 @@ class CJKSpacingDialog(object):
         self.tree.clear()
         self.tree.blockSignals(False)
         self.trims, self.hangul, self.first_checks = [], [], []
-        self.status.setText((u"%s %s" % (font_line(self.ak, self.package), stopped_line(what))).strip())
+        self.status.setText(head_join(self.ak, font_line(self.ak, self.package), stopped_line(what)))
         self.seen_history = self.ak.history_mark(self.package)
 
     def status_link(self, target):
@@ -1295,7 +1351,7 @@ class CJKSpacingDialog(object):
             self.update_buttons()
             return
         if not self.model:  # (the font line kept, the reason in the log: owner's image 224)
-            self.status.setText(u"%s Could not list the trims: the log says why." % font_line(ak, package))
+            self.status.setText(head_join(ak, font_line(ak, package), u"Could not list the trims: the log says why."))
             self.log.add(u"The corpus's trims (palt_model.json) are missing beside this script: reinstall FreeLab.", "error")
             return
         master = package.master
@@ -1352,12 +1408,23 @@ class CJKSpacingDialog(object):
         b = ak.b
         full = sum(1 for g in glyphs if g[2] >= FULL_WIDTH_SHARE * package.upm)
         korean = hangul_note(hangul, ak.i(u"Hangul:"), b)
-        self.status.setText(u"%s %s" % (font_line(ak, package, master), trims_status(
+        self.status.setText(head_join(ak, font_line(ak, package, master), trims_status(
             len(self.trims), full, sum(1 for t in self.trims if t.palt), sum(1 for t in self.trims if t.halt),
             self.write_button.text, korean, b, ak.i)))
         self.seen_history = ak.history_mark(package)
+        self.cjk_states(bool(glyphs) or bool(hangul))
         self.step(LIST_STEPS, PREVIEW_STEP)
         self.draw_previews()
+
+    def cjk_states(self, cjk):
+        """The ticks and the sample grayed for a font with no kana, Hangul, or CJK punctuation: nothing they act
+        on or show (owner's images 379 and 380; a Latin font's comma and period were offered the Korean sample,
+        image 359)."""
+        for widget in (self.palt_box, self.halt_box, self.sample_box, self.sample):
+            try:
+                self.ak.enable(widget, cjk)
+            except Exception:
+                pass
 
     # -- Hangul -----------------------------------------------------------------------
 
@@ -1778,6 +1845,11 @@ class CJKSpacingDialog(object):
                     label.setMinimumHeight(PREVIEW_LEAST_HEIGHT)
                 except Exception:
                     pass
+        note = getattr(self, "preview_note", None)
+        if note is not None:
+            words = preview_note(text, names, self.ak.b, self.ak.html)
+            note.setText(words)
+            note.setVisible(bool(words))
 
     def show_in_glyph_window(self, item):
         QtCore, QtGui = _qt()

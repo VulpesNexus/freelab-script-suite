@@ -47,7 +47,7 @@ Known island classes are listed in the script; a glyph window's canvas is its `Q
 
 Written and tested on FontLab 7.2.0 for Windows (Qt 5.14.2, PythonQt, Python 2.7). Other FontLab 7 builds share the same interface code and should work, since unknown light widgets are found by rendering them, but only 7.2.0 has been run. FontLab 8 has a dark theme of its own.
 
-FontLab 7 for macOS uses the same Qt, PythonQt, and Python 2.7 (installed separately on macOS 12.3 and newer), so the Qt side of dark mode should carry over. These parts are Windows-only and would need a macOS counterpart: the native helper (the C compiles as a *.dylib*; it loads as a *.dll* now), the dark title bars (DWM), following the system theme (the registry), and the installer (PowerShell, Windows paths). The macOS menu bar is native and outside Qt's styling. None of it has run on a Mac.
+FontLab 7 for macOS uses the same Qt, PythonQt, and Python 2.7 (installed separately on macOS 12.3 and newer), so the Qt side of dark mode should carry over. These parts are Windows-only and would need a macOS counterpart: the native helper (the C compiles as a *.dylib*; it loads as a *.dll* now, so dark mode on a Mac would fall back as it does without the helper), the native engine (its hooks patch the imports of FontLab's Windows executable), the dark title bars (DWM: skipped on other systems), following the system theme (the registry: on other systems, *Automatic* keeps FontLab's light look), and the installer (PowerShell, Windows paths). The macOS menu bar is native and outside Qt's styling. None of it has run on a Mac.
 
 ## The native helper
 

@@ -79,9 +79,13 @@ KERNING_SETS = (("all", u"Every kerned pair"), ("common", u"Common pairs only"))
 # shared NO_FONT_LINE
 NO_FONT_LINE = u"No font is open. This window hooks to the next font you open, and lays out its proof at once."
 NOT_AVAILABLE = u"n/a"  # a dropdown that lists the font's content, with no font (grayed: owner's images 289 and 290)
-COLOR_MODES = (("window", u"As the window"), ("print", u"Print (black on white)"))
+PRINT_LABEL = u"Print (black on white)"
+# The second choice beside a light window: light gray (#ebebeb) on an off-black (#1e1e1e), named as they are
+# (owner's image 378: the label said white ink on black paper, which neither is)
+DARK_LABEL = u"Dark (light gray on off-black)"
+COLOR_MODES = (("window", u"As the window"), ("print", PRINT_LABEL))
 PRINT_COLORS = ((0, 0, 0), (255, 255, 255))  # (ink, paper)
-DARK_COLORS = ((235, 235, 235), (30, 30, 30))  # the second choice beside a light window: light on dark
+DARK_COLORS = ((235, 235, 235), (30, 30, 30))
 INFO_LABEL_WIDTH = 110.0  # points left of the font info's values, for their names
 INFO_TEXT_MAX = 1200  # characters of one font info field shown (a license's whole text is cut)
 
@@ -2294,7 +2298,8 @@ def status_line(named, proof, size, ak):
     ProofDialog.font_named), its pages counted in bold, each section's pages after its tick box's name in
     italics (a number in parentheses with no noun of its own: bold alone, the suite's one rule for counts),
     then what is applied."""
-    text = u"%s: %s (%s)." % (named, ak.b(counted(len(proof.pages), u"page")), size)
+    text = u"%s (%s)." % (ak.b(counted(len(proof.pages), u"page")), size)
+    text = text[:1].upper() + text[1:]
     counts = proof.section_pages()
     parts = [u"%s (%s)" % (ak.i(title), ak.b(grouped(counts[key])))
              for key, title in ((("summary", TITLES["summary"]),) + SECTIONS) if key in counts]
@@ -2304,7 +2309,10 @@ def status_line(named, proof, size, ak):
     if proof.left_out:
         text += u" No text for %s: %s shaping." % (ak.html(u", ".join(proof.left_out)),
                                                   u"it needs" if len(proof.left_out) == 1 else u"they need")
-    return text
+    # (the font's sentence, a blank line, then the proof's: every window's top line, owner's images 346 and 355)
+    if not named:
+        return text
+    return ak.head_join(u"%s." % named, text) if hasattr(ak, "head_join") else u"%s. %s" % (named, text)
 
 
 def pdf_name(family, master, date):
@@ -2339,11 +2347,24 @@ def page_colors(mode, ink=None, paper=None):
 
 
 def colors_label(mode, ink, paper):
-    """How the colors read, for the log: "black on white", or "the window's: light on dark"."""
+    """How the colors read, for the log: "black on white", "light gray on off-black" (the dark choice beside a
+    light window), or "the window's: light on dark"."""
     if (tuple(ink), tuple(paper)) == PRINT_COLORS:
         return u"black on white"
+    if mode != "window" and (tuple(ink), tuple(paper)) == DARK_COLORS:
+        return u"light gray on off-black"
     light = lambda rgb: 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2] >= 128
     return u"the window's: %s on %s" % (u"light" if light(ink) else u"dark", u"light" if light(paper) else u"dark")
+
+
+def saved_line(ak, pages, path, colors):
+    """The log's line once the PDF is written: its pages counted in bold, its colors (colors_label), the
+    folder as a link that shows the file selected in a new window of the system's file manager (ak.reveal_link:
+    owner's image 375), and its name in italics."""
+    folder = os.path.normpath(os.path.dirname(path))
+    link = getattr(ak, "reveal_link", None)
+    place = link(path, folder) if link is not None else ak.html(folder)
+    return u"Saved %s (%s) in %s: %s." % (ak.b(counted(pages, u"page")), colors, place, ak.i(os.path.basename(path)))
 
 
 COLLISION_ON_LIGHT = (205, 25, 20)  # the red of a collision on light paper (Options.collisions)
@@ -2767,10 +2788,12 @@ Kerning is applied as FontLab applies it, classes resolved. OpenType features ar
 no contextual or localized forms, no mark positioning, so each character shows its own glyph, and
 scripts that need shaping (Arabic, the Indic scripts, Thai) get no text. Hebrew is set right to left,
 its kerning strings too, each pair kerned as the font keeps it (its right glyph first).<br><br>
-<i>Colors</i>: the PDF in this window's colors (light on dark in dark mode), or black on white for
-printing; the page beside the list shows the PDF as it will be.<br><br>
-The list shows the pages; select one to see it. <i>Save PDF</i> writes them all, <i>Open PDF</i> opens
-the file saved. <i>Show in Glyph window</i> opens the page's lines in FontLab.
+<i>Colors</i>: the PDF in this window's colors (light on dark in dark mode), or the other of black on
+white (for printing, beside a dark window) and light gray on off-black (beside a light one); the page
+beside the list shows the PDF as it will be.<br><br>
+The list shows the pages; select one to see it. <i>Save PDF</i> writes them all (the log's link then shows
+the file in its folder), <i>Open PDF</i> opens the file saved. <i>Show in Glyph window</i> opens the page's
+lines in FontLab.
 Click this help's <i>?</i> button, then any control, for what it does."""
 
 DEFAULT_KERNING_SET = "all"
@@ -2865,8 +2888,9 @@ class ProofDialog(object):
         for _, label in COLOR_MODES:
             self.colors_box.addItem(label)
         captioned(row, "colors", "Colors:", self.colors_box,
-                  u"The PDF's colors: this window's (its text on its background, light on dark in dark mode), or "
-                  u"black on white, for printing. The page shown beside the list is the PDF as it will be.")
+                  u"The PDF's colors: this window's (its text on its background, light on dark in dark mode), or the "
+                  u"other of black on white (for printing, beside a dark window) and light gray on off-black (beside a "
+                  u"light one). The page shown beside the list is the PDF as it will be.")
         row.addSpacing(12)
         self.zoom_box = QtGui.QComboBox()
         for _, label in ZOOMS:
@@ -2987,6 +3011,7 @@ class ProofDialog(object):
             pass
         layout.addWidget(splitter, 1)
         self.log = ak.Log()
+        self.log.link_handler = self.log_link  # (a PDF saved: its folder, the file selected, on a click)
         layout.addWidget(self.log.widget)
 
         buttons = QtGui.QHBoxLayout()
@@ -2997,7 +3022,7 @@ class ProofDialog(object):
         self.save_button = QtGui.QPushButton(u"Save PDF\N{HORIZONTAL ELLIPSIS}")
         self.save_button.setWhatsThis(u"Writes every page to a PDF file you name (in <i>Documents</i> at first).")
         self.open_button = QtGui.QPushButton("Open PDF")
-        self.open_button.setWhatsThis(u"Opens the PDF saved last in the application Windows opens PDF files with.")
+        self.open_button.setWhatsThis(u"Opens the PDF saved last in the application the system opens PDF files with.")
         self.close_button = QtGui.QPushButton("Close")
         self.close_button.setWhatsThis(u"Closes this window. Nothing is written to the font; a PDF saved stays where "
                                        u"it was saved.")
@@ -3652,7 +3677,7 @@ class ProofDialog(object):
         # the second choice is the other of the two: black on white beside a dark window, light on dark
         # beside a light one (black on white twice said nothing)
         try:
-            self.colors_box.setItemText(1, u"Print (black on white)" if dark_window else u"Dark (white on black)")
+            self.colors_box.setItemText(1, PRINT_LABEL if dark_window else DARK_LABEL)
         except Exception:
             pass
         if mode == "window":
@@ -3930,8 +3955,7 @@ class ProofDialog(object):
                       u"%s proof" % self.package.tfn, progress, None if paper == PRINT_COLORS[1] else QtGui.QColor(*paper))
             self.saved = path
             self.gone_said = False
-            self.log.add(u"Saved %s to %s, in %s." % (b(counted(len(pages), u"page")), self.ak.i(os.path.basename(path)),
-                                                      colors_label(self.color_mode(), ink, paper)), "done")
+            self.log.add(saved_line(self.ak, len(pages), path, colors_label(self.color_mode(), ink, paper)), "done")
         except Exception as exc:
             self.log.add(u"The PDF could not be written: %s" % self.ak.html(exc), "error")
         finally:
@@ -3949,10 +3973,16 @@ class ProofDialog(object):
             opened = QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(self.saved))
         except Exception as exc:
             opened = False
-            self.log.add(u"Windows did not open the PDF: %s" % self.ak.html(exc), "error")
+            self.log.add(u"The system did not open the PDF: %s" % self.ak.html(exc), "error")
             return
         if not opened:
-            self.log.add(u"Windows did not open the PDF: no application opens PDF files?", "warning")
+            self.log.add(u"The system did not open the PDF: no application opens PDF files?", "warning")
+
+    def log_link(self, target):
+        """A link of the log clicked: the PDF saved (ak.reveal_link) shown selected in its folder; any other left
+        to the log (False)."""
+        reveal = getattr(self.ak, "reveal_clicked", None)
+        return reveal(target, self.log) if reveal is not None else False
 
     def show(self):
         QtCore, QtGui = _qt()

@@ -2892,6 +2892,7 @@ LETTER_HEIGHT_FROM_SCRIPT = ("latin",)  # per-letter placement across only: heig
 # The marks whose landing on each letter the corpus's per-letter placements are (diacritics/train/shaped.py
 # samples them), per script and side: a base's anchor is set so that this mark lands there, the others
 # then sitting as their own anchors say (Thai's right-aligned)
+DOUBLE_MARKS = frozenset(list(range(0x035C, 0x0363)) + [0x1DCD, 0x1DFC])  # combining marks over or under two letters
 SAMPLE_MARKS = {"latin": {"top": 0x0301, "bottom": 0x0323}, "greek": {"top": 0x0301},
                 "cyrillic": {"top": 0x0301, "bottom": 0x0323},
                 "hebrew": {"top": 0x05BF, "bottom": 0x05B7, "center": 0x05BC, "topleft": 0x05B9, "topright": 0x05C1},
@@ -4373,8 +4374,20 @@ def reference_picture(text, family, palette):
     path.setFillRule(QtCore.Qt.WindingFill)
     path.addText(QtCore.QPointF(0, 0), font, text)
     box = path.boundingRect()
+    # Its edges too, dashed, as the font's own preview beside it has them: a space, or a glyph of no ink, showed
+    # nothing at all (owner's image 353). The advance is Qt's for the text in that font.
+    try:
+        metrics = QtGui.QFontMetricsF(font)
+        measure = getattr(metrics, "horizontalAdvance", None) or metrics.width  # (Qt before 5.11 has width only)
+        advance = float(measure(text))
+    except Exception:
+        advance = None
+    left, right = box.left(), box.right()
+    if advance is not None and advance > 0:
+        left, right = min(left, 0.0) if box.width() > 0 else 0.0, max(right, advance) if box.width() > 0 else advance
+    top, bottom = (box.top(), box.bottom()) if box.height() > 0 else (-size * 0.7, 0.0)
     height = int(size * 1.6)
-    scale, baseline = reference_fit(box.top(), box.bottom(), box.width(), REFERENCE_WIDTH, height, size * 1.15)
+    scale, baseline = reference_fit(top, bottom, right - left, REFERENCE_WIDTH, height, size * 1.15)
     pixmap = QtGui.QPixmap(REFERENCE_WIDTH, height)
     pixmap.fill(QtGui.QColor(0, 0, 0, 0))
     painter = QtGui.QPainter(pixmap)
@@ -4382,8 +4395,17 @@ def reference_picture(text, family, palette):
         painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
         painter.translate(REFERENCE_WIDTH / 2.0, baseline)
         painter.scale(scale, scale)
-        painter.translate(-box.left() - box.width() / 2.0, 0)
-        painter.fillPath(path, QtGui.QBrush(palette.color(QtGui.QPalette.WindowText)))
+        painter.translate(-left - (right - left) / 2.0, 0)
+        color = palette.color(QtGui.QPalette.WindowText)
+        painter.fillPath(path, QtGui.QBrush(color))
+        if advance is not None and advance > 0:
+            edge = QtGui.QColor(color)
+            edge.setAlpha(140)
+            pen = QtGui.QPen(edge, 1.0 / max(scale, 0.001), QtCore.Qt.DashLine)
+            painter.setPen(pen)
+            reach = (height / max(scale, 0.001))
+            for x in (0.0, advance):
+                painter.drawLine(QtCore.QPointF(x, -reach), QtCore.QPointF(x, reach))
     finally:
         painter.end()
     return pixmap
@@ -5293,6 +5315,9 @@ class AnchorPage(object):
             code = codes.get(fg.name)
             if code and anchor_script(code) == script:
                 category = unicodedata.category(unichr_(code))
+                if code in DOUBLE_MARKS:
+                    continue  # (a mark across two letters, never one letter's: owner's image 354, a CJK font's
+                    # one Latin mark, U+0361, drawn as the sample over every letter and placing their anchors)
                 if category in ("Mn", "Me"):
                     roles[fg.name] = ("mark", code, 0)
                 elif category.startswith("L"):

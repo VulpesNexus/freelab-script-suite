@@ -1158,5 +1158,19 @@ class PageTests(unittest.TestCase):
         self.assertEqual(fa.alternates_of(u"u", [u"u", u"u.01", u"u.sc", u"u.alt1", u"ugrave.01"]), [u"u.01", u"u.alt1"])
 
 
+
+class BaselineReachTests(unittest.TestCase):
+    def test_no_reach_keeps_the_variants_as_before(self):
+        self.assertEqual(fa.variant_params(u"a", 1, "bold", 3), fa.variant_params(u"a", 1, "bold", 3, 0, 1000.0))
+
+    def test_a_reach_moves_up_or_down_within_it_from_the_seed(self):
+        plain = fa.variant_params(u"a", 1, "bold", 3)
+        moved = fa.variant_params(u"a", 1, "bold", 3, 40, 1000.0)
+        self.assertEqual(moved[:4], plain[:4], "the other changes are the same")
+        self.assertLessEqual(abs(moved[4] - plain[4]), 0.040001)
+        self.assertNotEqual(moved[4], plain[4])
+        self.assertEqual(moved, fa.variant_params(u"a", 1, "bold", 3, 40, 1000.0), "the same seed, the same move")
+
+
 if __name__ == "__main__":
     unittest.main()

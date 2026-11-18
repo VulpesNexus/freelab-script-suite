@@ -3794,5 +3794,21 @@ class PlaceNodeTests(unittest.TestCase):
         self.assertEqual((node.x, node.y), (13.5, 18.0))
 
 
+
+class SameCodeTests(unittest.TestCase):
+    """Owner's images 341, 363, and 365: code FontLab hands back spaced otherwise is the same code."""
+
+    def test_spaces_and_line_breaks_do_not_count(self):
+        written = u"feature liga {\n# >>> FreeLab ligatures\n  sub f f t by f_f_t;\n# <<< FreeLab ligatures\n} liga;\n"
+        back = u"feature liga {\r\n# >>> FreeLab ligatures\r\nsub f f t  by f_f_t ;\r\n# <<< FreeLab ligatures\r\n} liga;"
+        self.assertTrue(fc.same_code(written, back))
+        self.assertTrue(fc.same_code(u"sub [a  -  z] by b;", u"sub [a - z] by b;"))
+
+    def test_a_rule_or_a_marker_does(self):
+        self.assertFalse(fc.same_code(u"sub f f t by f_f_t;", u"sub f f i by f_f_i;"))
+        self.assertFalse(fc.same_code(u"# >>> FreeLab ligatures\nsub a by b;", u"sub a by b;"), "FreeLab's markers count")
+        self.assertTrue(fc.same_code(None, u""))
+
+
 if __name__ == "__main__":
     unittest.main()
