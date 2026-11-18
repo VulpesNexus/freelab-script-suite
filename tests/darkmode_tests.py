@@ -9,7 +9,6 @@ import os
 import shutil
 import sys
 import tempfile
-import types
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -701,41 +700,6 @@ class EditorTests(DarkModeCase):
         self.assertNotIn("sci", record)
 
 
-class FakeHooks(object):
-    """The native engine's library, faked: what dark mode asks of it."""
-
-    def __init__(self):
-        self.calls = []
-
-    def freelab_hooks_set_palette(self, dark, light):
-        self.calls.append("set_palette")
-        return 63
-
-    def freelab_hooks_install(self, dark_l, light_l, keep_tint):
-        self.calls.append("install")
-        return 24
-
-    def freelab_hooks_set_hooked(self, widgets, count):
-        self.calls.append("set_hooked")
-        self.hooked = count
-        return count
-
-    def freelab_hooks_set_ink(self, widgets, count):
-        self.calls.append("set_ink")
-        return count
-
-    def freelab_hooks_add_ink_module(self, module):
-        return 2
-
-    def freelab_hooks_set_subpixel(self, widgets, count, background_okl):
-        self.calls.append("set_subpixel")
-        return count
-
-    def freelab_hooks_remove(self):
-        self.calls.append("remove")
-        return 24
-
-
 class SelectedAsPaintedTests(unittest.TestCase):
     """A selected row is drawn again as FontLab painted it only when that is light text on a dark row."""
 
@@ -1024,141 +988,84 @@ class ListIconTests(DarkModeCase):
         self.assertEqual(lst.rows[0].icon().label, "page")
 
 
-class EngineTests(DarkModeCase):
+class RetiredEngineTests(DarkModeCase):
+    """The native engine is gone: a saved choice of it, its start guard, its library left in the bin
+    folder, and its hooks put in by an earlier version this session all end in the script engine."""
+
     def save(self, **values):
-        settings = dm.load_settings()
-        settings.update(values)
-        dm.save_settings(settings)
+        """darkmode.json as an older version wrote it (load_settings drops the retired keys)."""
+        with open(os.path.join(self.tmp, "darkmode.json"), "w") as handle:
+            json.dump(values, handle)
 
-    def test_engine_setting(self):
-        self.assertEqual(dm.engine_setting({}), "script")
-        self.assertEqual(dm.engine_setting({"engine": "native"}), "native")
-        self.assertEqual(dm.engine_setting({"engine": "warp"}), "script")
-
-    def test_native_without_its_library_falls_back_to_the_script_engine(self):
-        self.save(engine="native")
-        self.on()
-        status = dm.status()
-        self.assertEqual((status["engine"], status["hooked"]), ("script", False))
-        self.assertTrue(any("native engine" in e for e in status["errors"]))
-        self.assertEqual(self.kind(self.search), "island", "the script engine's effects are in place")
-        self.assertNotIn("native_pending", self.settings(), "nothing left to guard")
-
-    def test_another_qt_is_refused_before_anything_is_hooked(self):
-        # Review of 2026-11-15: the guard checked the library's version and the symbols it looks up, so a
-        # Qt of another version exporting the same names passed. Qt's own version is checked first now.
-        self.assertIsNone(dm.native_build_problem("5.14.2", 8))
-        self.assertIn("5.15.2", dm.native_build_problem("5.15.2", 8))
-        self.assertIn("unknown version", dm.native_build_problem(None, 8))
-        self.assertIn("64-bit", dm.native_build_problem("5.14.2", 4))
-        calls = []
-
-        class Lib(object):
-            def freelab_hooks_version(self):
-                return dm.HOOKS_VERSION * 1000 + dm.NATIVE_VERSION
-
-            def __getattr__(self, name):
-                calls.append(name)
-                raise AssertionError("looked up %s: nothing may be looked up for another Qt" % name)
+    def test_a_saved_native_engine_runs_the_script_engine_and_loads_no_hooks(self):
+        self.save(engine="native", native_pending=True, enabled=True)
+        folder = os.path.join(self.tmp, "bin")
+        os.makedirs(folder)
+        with open(os.path.join(folder, "freelab_hooks-v20-115.dll"), "wb") as handle:
+            handle.write(b"")  # left by an older install
         import ctypes
-        library = os.path.join(self.tmp, "hooks.dll")
-        with open(library, "wb") as handle:
-            handle.write(b"")
-        os.environ["FREELAB_HOOKS_DLL"] = library
-        saved = ctypes.PyDLL
-        ctypes.PyDLL = lambda path, *args, **kwargs: Lib()
-        self.patch("_qt_runtime_version", lambda: "5.15.2")
+        loaded, saved = [], (ctypes.CDLL, ctypes.PyDLL, ctypes.WinDLL)
+
+        def recorder(original):
+            def load(name, *args, **kwargs):
+                loaded.append(name)
+                return original(name, *args, **kwargs)
+            return load
+        ctypes.CDLL, ctypes.PyDLL, ctypes.WinDLL = [recorder(original) for original in saved]
         try:
-            with self.assertRaises(RuntimeError) as raised:
-                dm._hooks()
+            self.on()
+            dm.configure(dark=True, shade="medium")  # a save: what is read is what is written back
+            dm.run_queue()
         finally:
-            ctypes.PyDLL = saved
-            del os.environ["FREELAB_HOOKS_DLL"]
-        self.assertIn("Qt is 5.15.2", "%s" % raised.exception)
-        self.assertEqual(calls, [])
+            ctypes.CDLL, ctypes.PyDLL, ctypes.WinDLL = saved
+        self.assertEqual([name for name in loaded if "hooks" in str(name)], [], "the hooks library is never loaded")
+        self.assertEqual(dm.status()["errors"], [])
+        self.assertEqual(self.kind(self.search), "island", "the script engine's island")
+        self.assertNotIn("engine", dm.load_settings(), "read as nothing")
+        written = self.settings()
+        self.assertNotIn("engine", written)
+        self.assertNotIn("native_pending", written)
+        self.assertEqual(written.get("shade"), "medium")
 
-    def test_a_crash_while_starting_turns_the_native_engine_off(self):
-        self.save(engine="native", native_pending=True)
-        dm._state().pop("native_pending_mine", None)  # the mark is an earlier session's
-        self.patch("_hooks", lambda: self.fail("the hooks must not go in again"))
-        self.on()
-        self.assertEqual(dm.status()["engine"], "script")
-        self.assertEqual(self.settings().get("engine"), "script")
-        self.assertNotIn("native_pending", self.settings())
+    def test_hooks_an_earlier_version_put_in_this_session_are_taken_out(self):
+        class Library(object):  # the earlier version's library, loaded in FontLab already
+            removed = 0
 
-    def test_native_engine_maps_no_pixels_of_what_fontlab_paints(self):
-        hooks = FakeHooks()
-        self.patch("_hooks", lambda: hooks)
-        self.patch("_palette_table", lambda palette: (dm.ctypes_array(1) if hasattr(dm, "ctypes_array") else __import__("ctypes").c_uint32(0)))
-        self.save(engine="native")
-        popup = FakeWidget("YPopupHost", parent=self.canvas)  # FontLab's labels over the glyph canvas
-        del qtfakes.QTimer.single_shots[:]
+            def freelab_hooks_remove(self):
+                Library.removed += 1
+                return 24
         self.on()
-        status = dm.status()
-        self.assertEqual((status["engine"], status["hooked"]), ("native", True), status["errors"])
-        self.assertEqual(hooks.calls[:2], ["set_palette", "install"])
-        self.assertIsNone(self.kind(self.search), "an island FontLab paints: hooked, no effect")
-        self.assertTrue(self.search.property(dm.HOOKED_PROP))
-        self.assertIn(self.search, list(self.dock.effect.freelab_protect.values()),
-                      "dark as it is painted: the dock's effect must not map it again")
-        self.assertTrue(self.canvas.property(dm.HOOKED_PROP))
-        self.assertTrue(popup.property(dm.HOOKED_PROP), "FontLab's own painting inside a hooked island: hooked too")
-        self.assertIsNone(self.edit.property(dm.HOOKED_PROP), "a line edit (Qt draws it) inside one: processed as any")
-        self.assertEqual(self.kind(self.panel), "title", "the script engine's other effects stay")
-        self.assertNotEqual(self.search.styleSheet, u"QWidget{background:white;}", "Qt draws stylesheets: darkened as ever")
-        self.assertTrue(self.settings().get("native_pending"), "guarded until it has run a while")
-        settle = [cb for ms, cb in qtfakes.QTimer.single_shots if ms == dm.NATIVE_SETTLE_MS]
-        self.assertEqual(len(settle), 1)
-        settle[0]()
-        self.assertNotIn("native_pending", self.settings())
+        state = dm._state()
+        state["hooked"], state["hooked_lib"], state["engine"] = True, Library(), "native"
+        self.search.setProperty("freelabHooked", True)
+        dm.apply_dark()  # this version run from the Scripts menu (or the next switch)
+        dm.run_queue()
+        self.assertEqual(Library.removed, 1)
+        self.assertNotIn("hooked", state)
+        self.assertNotIn("hooked_lib", state)
+        self.assertNotIn("engine", state)
+        self.assertTrue(dm.status()["on"])
+        self.assertEqual(self.kind(self.search), "island", "rebuilt by the script engine")
         self.off()
-        self.assertIn("remove", hooks.calls)
-        self.assertFalse(dm.status()["hooked"])
+        self.assertEqual(Library.removed, 1, "taken out once")
+        self.assertIsNone(self.search.property("freelabHooked"), "its mark removed with dark mode's own")
 
-    def test_hooks_that_cannot_all_go_in_fall_back_to_the_script_engine(self):
-        hooks = FakeHooks()
-        hooks.freelab_hooks_install = lambda dark_l, light_l, keep_tint: -2  # a slot it could not write
-        self.patch("_hooks", lambda: hooks)
-        self.patch("_palette_table", lambda palette: __import__("ctypes").c_uint32(0))
-        self.save(engine="native")
+    def test_an_old_library_that_fails_is_noted_not_raised(self):
+        class Broken(object):
+            def freelab_hooks_remove(self):
+                raise OSError("gone")
         self.on()
-        status = dm.status()
-        self.assertEqual((status["engine"], status["hooked"]), ("script", False))
-        self.assertTrue(any("could not hook" in e for e in status["errors"]), status["errors"])
-        self.assertEqual(self.kind(self.search), "island", "the script engine's effects are in place")
-        self.assertNotIn("native_pending", self.settings(), "nothing left to guard")
+        state = dm._state()
+        state["hooked"], state["hooked_lib"] = True, Broken()
+        self.off()
+        self.assertNotIn("hooked", state)
+        self.assertTrue(any("old native engine" in e for e in dm.status()["errors"]), dm.status()["errors"])
 
-    def test_applying_again_while_on_keeps_the_hooks(self):
-        # the re-applies after a switch (0, 1.5, and 5 s) came while the start was still settling,
-        # took their own mark for a crash, and ran the script engine over the hooks
-        hooks = FakeHooks()
-        self.patch("_hooks", lambda: hooks)
-        self.patch("_palette_table", lambda palette: __import__("ctypes").c_uint32(0))
-        self.save(engine="native", enabled=True)
-        self.on()
-        dm.apply_dark()
-        dm.run_queue()
-        dm._reapply_if_on()
-        dm.run_queue()
-        status = dm.status()
-        self.assertEqual((status["engine"], status["hooked"], status["errors"]), ("native", True, []))
-        self.assertEqual(hooks.calls.count("install"), 1)
-        self.assertIsNone(self.kind(self.search), "no script effects over the hooks")
+    def test_the_settings_dialog_offers_no_engine(self):
+        import freelab_dark_mode_settings as settings
+        self.assertFalse(hasattr(settings, "ENGINES"))
+        self.assertFalse(hasattr(dm, "engine_setting") or hasattr(dm, "hooks_path") or hasattr(dm, "native"))
 
-    def test_switching_engines_rebuilds(self):
-        hooks = FakeHooks()
-        self.patch("_hooks", lambda: hooks)
-        self.patch("_palette_table", lambda palette: __import__("ctypes").c_uint32(0))
-        self.on()
-        self.assertEqual(self.kind(self.search), "island")
-        dm.configure(dark=True, engine="native")
-        dm.run_queue()
-        self.assertEqual((dm.status()["engine"], dm.status()["hooked"]), ("native", True), dm.status()["errors"])
-        self.assertIsNone(self.kind(self.search))
-        dm.configure(dark=True, engine="script")
-        dm.run_queue()
-        self.assertEqual(self.kind(self.search), "island")
-        self.assertIn("remove", hooks.calls)
 
 
 class KindTests(DarkModeCase):
@@ -1950,111 +1857,6 @@ class OldQtTests(DarkModeCase):
         self.assertIn("Window", roles)
 
 
-class _Shape(object):
-    def __init__(self, kind):
-        self.shapeType = kind
-
-
-class _Layer(object):
-    def __init__(self, kinds):
-        self.shapes = [_Shape(k) for k in kinds]
-
-
-class _FgGlyph(object):
-    def __init__(self, name, colors=False):
-        self.name, self.colors = name, colors
-
-    def hasColors(self):
-        return self.colors
-
-
-class _Glyph(object):
-    def __init__(self, kinds):
-        self.layer = _Layer(kinds)
-
-    def getLayerByName(self, name):
-        return self.layer
-
-
-class _FgPackage(object):
-    def __init__(self, glyphs):
-        self.glyphs = glyphs
-
-
-class _Package(object):
-    master = "Regular"
-
-    def __init__(self, glyphs, kinds):
-        self.fgPackage = _FgPackage(glyphs)
-        self.kinds = kinds
-
-    def findName(self, name):
-        return _Glyph(self.kinds.get(name, ["ShapeContours"]))
-
-
-class ColorFontTests(unittest.TestCase):
-    def test_a_font_in_one_ink_is_not_in_color(self):
-        glyphs = [_FgGlyph("g%d" % i) for i in range(200)]
-        self.assertFalse(dm.font_in_color(_Package(glyphs, {})))
-
-    def test_colored_shapes_make_a_color_font(self):
-        glyphs = [_FgGlyph("g%d" % i, colors=(i == 150)) for i in range(200)]
-        self.assertTrue(dm.font_in_color(_Package(glyphs, {})))
-
-    def test_svg_pictures_make_a_color_font(self):
-        glyphs = [_FgGlyph("g%d" % i) for i in range(200)]
-        kinds = dict(("g%d" % i, ["ShapeImage"]) for i in range(100, 200))  # its emoji, after the letters
-        self.assertTrue(dm.font_in_color(_Package(glyphs, kinds)))
-
-    def test_a_failing_font_is_not_in_color(self):
-        self.assertFalse(dm.font_in_color(object()))
-
-    def test_pictures_are_found_without_a_color_flag(self):
-        class NoFlag(object):
-            def __init__(self, name):
-                self.name = name
-        glyphs = [NoFlag("g%d" % i) for i in range(200)]
-        kinds = dict(("g%d" % i, ["ShapeImage"]) for i in range(100, 200))
-        self.assertTrue(dm.font_in_color(_Package(glyphs, kinds)), "one test failing leaves the other")
-
-    def test_the_glyphs_are_never_indexed(self):
-        class Glyphs(object):  # FontLab's native sequence: indexing one crashed FontLab 8
-            def __init__(self, items):
-                self.items = items
-
-            def __len__(self):
-                return len(self.items)
-
-            def __iter__(self):
-                return iter(self.items)
-
-            def __getitem__(self, i):
-                raise AssertionError("indexed")
-        glyphs = Glyphs([_FgGlyph("g%d" % i) for i in range(200)])
-        kinds = dict(("g%d" % i, ["ShapeImage"]) for i in range(100, 200))
-        self.assertTrue(dm.font_in_color(_Package(glyphs, kinds)))
-
-    def test_the_answer_is_kept_until_the_glyph_count_changes(self):
-        glyphs = [_FgGlyph("g%d" % i) for i in range(200)]
-        package, cache = _Package(glyphs, {}), {}
-        self.assertFalse(dm.font_in_color(package, cache))
-        glyphs[150].colors = True
-        self.assertFalse(dm.font_in_color(package, cache), "kept: the font is not looked at again")
-        glyphs.append(_FgGlyph("new"))
-        self.assertTrue(dm.font_in_color(package, cache), "a glyph more: looked at anew")
-
-    def test_two_open_fonts_of_one_name_and_count_are_told_apart(self):
-        # a mono and a color version of one font: same name, master, and glyph count
-        mono = _Package([_FgGlyph("g%d" % i) for i in range(200)], {})
-        color = _Package([_FgGlyph("g%d" % i, colors=(i == 150)) for i in range(200)], {})
-        mono.tfn = color.tfn = "Font"
-        mono.fgPackage.id, color.fgPackage.id = 1, 2
-        cache = {}
-        self.assertFalse(dm.font_in_color(mono, cache))
-        self.assertTrue(dm.font_in_color(color, cache), "not the mono version's answer")
-        self.assertFalse(dm.font_in_color(mono, cache))
-
-
 class _Image(object):
     """A QImage's pixels (ARGB32), for keep_colors."""
 
@@ -2190,59 +1992,13 @@ class SelectedRowTests(DarkModeCase):
         self.assertEqual(dm._selected_rows(self.View(selected=set(), scrolled=0), 300, 100), [])
 
 
-class FollowColorFontTests(DarkModeCase):
-    def test_switching_between_two_versions_of_one_font_follows_the_current_one(self):
-        class Hooks(object):
-            def __init__(self):
-                self.flags = []
-
-            def freelab_hooks_set_color_content(self, on):
-                self.flags.append(on)
-                return 0
-
-        mono = _Package([_FgGlyph("g%d" % i) for i in range(200)], {})
-        color = _Package([_FgGlyph("g%d" % i, colors=(i == 150)) for i in range(200)], {})
-        mono.tfn = color.tfn = "Font"
-        mono.fgPackage.id, color.fgPackage.id = 1, 2
-        current = [mono]
-
-        class Workspace(object):
-            @property
-            def currentPackage(self):
-                return current[0]
-
-        fontlab = types.ModuleType("fontlab")
-        fontlab.flWorkspace = type("flWorkspace", (object,), {"instance": staticmethod(lambda: Workspace())})
-        saved = sys.modules.get("fontlab")
-        sys.modules["fontlab"] = fontlab
-        try:
-            hooks = Hooks()
-            state = dm._state()
-            state["hooked"], state["hooked_lib"] = True, hooks
-            dm._follow_color_font(False)
-            current[0] = color  # not a full sweep: the key alone tells the fonts apart
-            dm._follow_color_font(False)
-            current[0] = mono
-            dm._follow_color_font(False)
-        finally:
-            state["hooked"] = False
-            state.pop("hooked_lib", None)
-            if saved is None:
-                sys.modules.pop("fontlab", None)
-            else:
-                sys.modules["fontlab"] = saved
-        self.assertEqual(hooks.flags, [1, 0])
-
-
 class RestoreCacheTests(DarkModeCase):
-    def test_switching_off_forgets_the_list_logos_and_color_fonts(self):
+    def test_switching_off_forgets_the_list_logos(self):
         self.on()
         state = dm._state()
         state["logo_keys"] = {1: "logo at the dark shade"}
-        state["color_fonts"] = {("Font", "Regular"): (200, True)}
         self.off()
         self.assertNotIn("logo_keys", state)
-        self.assertNotIn("color_fonts", state)
 
 
 def _ancestors(widget):

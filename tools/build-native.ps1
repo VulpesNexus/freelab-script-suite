@@ -1,10 +1,9 @@
 # Build darkmode/native/freelab_pixels.c into a 64-bit DLL for FontLab's Python.
 #
-#   build-native.ps1 [-Out <path>] [-Hooks | -Kern]
+#   build-native.ps1 [-Out <path>] [-Kern]
 #
-# -Hooks builds the experimental native dark mode instead (darkmode/native/freelab_hooks.c, which
-# includes freelab_pixels.c), into freelab_hooks-v<version>.dll. -Kern builds the auto kerning
-# core instead (kerning/native/freelab_kern.c), into freelab_kern-v<version>.dll.
+# -Kern builds the auto kerning core instead (kerning/native/freelab_kern.c), into
+# freelab_kern-v<version>.dll.
 #
 # The default output is %LOCALAPPDATA%\FreeLab\bin\freelab_pixels-v<version>.dll, where the
 # dark-mode script looks for it. Without the DLL, dark mode still works, with
@@ -14,12 +13,12 @@
 #
 # ASCII only: Windows PowerShell 5.1 reads a BOM-less script in the ANSI code page.
 
-param([string]$Out, [switch]$Hooks, [switch]$Kern)
+param([string]$Out, [switch]$Kern)
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 $source = Join-Path $repo 'darkmode\native\freelab_pixels.c'
-$name = if ($Hooks) { 'freelab_hooks' } else { 'freelab_pixels' }
+$name = 'freelab_pixels'
 $versionName = 'FREELAB_PIXELS_VERSION'
 if ($Kern) {
     $source = Join-Path $repo 'kerning\native\freelab_kern.c'
@@ -30,18 +29,11 @@ $match = [regex]::Match([System.IO.File]::ReadAllText($source), '#define ' + $ve
 if (-not $match.Success) { throw ($versionName + ' not found in ' + (Split-Path -Leaf $source)) }
 # Versioned name: FontLab keeps a loaded DLL locked, so a newer build must not need the same file.
 $version = $match.Groups[1].Value
-if ($Hooks) {
-    # Named after both versions: FontLab keeps a loaded library locked, and the hooks change on their own.
-    $hooksMatch = [regex]::Match([System.IO.File]::ReadAllText((Join-Path $repo 'darkmode\native\freelab_hooks.c')), '#define FREELAB_HOOKS_VERSION (\d+)')
-    if (-not $hooksMatch.Success) { throw 'FREELAB_HOOKS_VERSION not found in freelab_hooks.c' }
-    $version = $hooksMatch.Groups[1].Value + '-' + $version
-}
 if (-not $Out) { $Out = Join-Path $env:LOCALAPPDATA ('FreeLab\bin\' + $name + '-v' + $version + '.dll') }
 $work = Join-Path ([System.IO.Path]::GetTempPath()) ('freelab-build-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $work | Out-Null
 try {
     Copy-Item $source $work
-    if ($Hooks) { Copy-Item (Join-Path $repo 'darkmode\native\freelab_hooks.c') $work }
     Push-Location $work
     try {
         $clang = Get-Command clang -ErrorAction SilentlyContinue

@@ -19,7 +19,6 @@ INSTALLER = ROOT / "tools" / "install-fontlab.ps1"
 POWERSHELL = shutil.which("powershell.exe") if sys.platform == "win32" else None
 NO_WINDOW = 0x08000000
 VERSION = re.search(r"#define FREELAB_PIXELS_VERSION (\d+)", (ROOT / "darkmode" / "native" / "freelab_pixels.c").read_text()).group(1)
-HOOKS = re.search(r"#define FREELAB_HOOKS_VERSION (\d+)", (ROOT / "darkmode" / "native" / "freelab_hooks.c").read_text()).group(1)
 KERN = re.search(r"#define FREELAB_KERN_VERSION (\d+)", (ROOT / "kerning" / "native" / "freelab_kern.c").read_text()).group(1)
 
 LEGACY = b"# >>> FreeLab (managed by FreeLab tools/install-fontlab.ps1; -Uninstall removes it)\ndef _freelab_startup():\n    pass\n# <<< FreeLab\n"
@@ -44,7 +43,7 @@ class InstallerTests(unittest.TestCase):
         for folder in (self.scripts / "FreeLab", self.bin, self.state / "cache" / "images-old"):
             folder.mkdir(parents=True)
         (self.bin / ("freelab_pixels-v%s.dll" % VERSION)).write_bytes(b"")  # present: nothing is built
-        (self.bin / ("freelab_hooks-v%s-%s.dll" % (HOOKS, VERSION))).write_bytes(b"")
+        (self.bin / "freelab_hooks-v20-115.dll").write_bytes(b"")  # the retired native engine's, from an older install
         (self.bin / "freelab_pixels-v1.dll").write_bytes(b"")
         (self.bin / "freelab_hooks-v1-1.dll").write_bytes(b"")
         (self.bin / ("freelab_kern-v%s.dll" % KERN)).write_bytes(b"")
@@ -88,8 +87,8 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(text.count(b"# >>> FreeLab tools"), 1)
         self.assertIn("combined FreeLab block", out)
         self.assertFalse((self.bin / "freelab_pixels-v1.dll").exists(), "a superseded helper is retired")
-        self.assertFalse((self.bin / "freelab_hooks-v1-1.dll").exists(), "and a superseded native engine")
-        self.assertTrue((self.bin / ("freelab_hooks-v%s-%s.dll" % (HOOKS, VERSION))).exists())
+        self.assertFalse((self.bin / "freelab_hooks-v1-1.dll").exists(), "the retired native engine's libraries go")
+        self.assertFalse((self.bin / "freelab_hooks-v20-115.dll").exists(), "the last one built too")
         self.assertFalse((self.bin / "freelab_kern-v0.dll").exists(), "and a superseded auto kerning core")
         self.assertTrue((self.bin / ("freelab_kern-v%s.dll" % KERN)).exists())
         self.assertTrue((self.scripts / "FreeLab" / "freelab_auto_kerning.py").exists(), "Auto Kerning is in the FreeLab submenu")
@@ -118,6 +117,18 @@ class InstallerTests(unittest.TestCase):
         before = self.read()
         code, out = self.run_installer()
         self.assertEqual((code, self.read()), (0, before), "a second install changes nothing")
+
+    def test_a_retired_native_engine_library_fontlab_holds_never_fails_the_install(self):
+        held = self.bin / "freelab_hooks-v20-115.dll"
+        self.write(MINE)
+        with open(str(held), "rb"):  # (loaded by a FontLab still running: locked until it quits)
+            code, out = self.run_installer()
+        self.assertEqual(code, 0, out)
+        self.assertTrue(held.exists(), "left for the next install")
+        self.assertIn("Could not remove the retired", out)
+        self.assertFalse((self.bin / "freelab_hooks-v1-1.dll").exists(), "the free one removed")
+        self.assertTrue((self.bin / ("freelab_pixels-v%s.dll" % VERSION)).exists(), "the pixel helper kept")
+        self.assertTrue((self.bin / ("freelab_kern-v%s.dll" % KERN)).exists(), "and the auto kerning core")
 
     def test_the_block_starts_freelab_once_a_session(self):
         # Live: the startup script ran again as each FreeLab tool opened (FreeLab MCP's listener started
@@ -489,13 +500,13 @@ class InstallerTests(unittest.TestCase):
 
     def test_without_the_auto_kerning_core_the_status_says_so(self):
         copy = self.tmp / "copy"
-        for relative in ["tools/install-fontlab.ps1", "darkmode/native/freelab_pixels.c", "darkmode/native/freelab_hooks.c",
+        for relative in ["tools/install-fontlab.ps1", "darkmode/native/freelab_pixels.c",
                          "kerning/native/freelab_kern.c"]:
             target = copy / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(str(ROOT / relative), str(target))
         (copy / "tools" / "build-native.ps1").write_text(
-            "param([string]$Out, [switch]$Hooks, [switch]$Kern)\nthrow 'No compiler found (test)'\n")
+            "param([string]$Out, [switch]$Kern)\nthrow 'No compiler found (test)'\n")
         text = INSTALLER.read_text(encoding="ascii")
         for source, _ in re.findall(r"From = '([^']+)'; Name = '([^']+)'", text):
             if (ROOT / Path(*source.split("\\"))).exists():
