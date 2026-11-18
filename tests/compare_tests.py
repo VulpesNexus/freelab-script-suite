@@ -1469,10 +1469,10 @@ class DialogTests(unittest.TestCase):
         # Owner's image 293: "I don't seem to be able to see a difference when ticking this option". It works:
         # it lists the features whose code is the same in both fonts too; two fonts with none alike (every
         # feature differs or is only in one) leave it nothing to show. It says how many, and grays with none.
-        self.assertEqual(fcmp.same_caption(None), u"Show the features that are alike")
-        self.assertEqual(fcmp.same_caption(0), u"Show the features that are alike")
-        self.assertEqual(fcmp.same_caption(1), u"Show the feature that is alike")
-        self.assertEqual(fcmp.same_caption(1200), u"Show the 1,200 features that are alike")
+        self.assertEqual(fcmp.same_caption(None), u"Show the features that are alike.")
+        self.assertEqual(fcmp.same_caption(0), u"Show the features that are alike.")
+        self.assertEqual(fcmp.same_caption(1), u"Show the feature that is alike.")
+        self.assertEqual(fcmp.same_caption(1200), u"Show the 1,200 features that are alike.")
         dialog = self.dialog([first_font(), second_font()])
         told = {}
         dialog.show_same = type("Tick", (), {
@@ -1482,9 +1482,9 @@ class DialogTests(unittest.TestCase):
             "property": lambda tick, name: None})()
         dialog.update_buttons()
         self.assertEqual((told["text"], told["enabled"], told["tip"]),
-                         (u"Show the features that are alike", False, u"Compare two fonts first."))
+                         (u"Show the features that are alike.", False, u"Compare two fonts first."))
         dialog.choice_b.pick(1)  # (compared at once: the Classes panel's classes are alike in both)
-        self.assertEqual((told["text"], told["enabled"], told["tip"]), (u"Show the feature that is alike", True, u""))
+        self.assertEqual((told["text"], told["enabled"], told["tip"]), (u"Show the feature that is alike.", True, u""))
         self.assertEqual([f.tag for f in dialog.feature_shown], [u"liga", u"kern", u"ss01"], "unticked: alike left out")
         dialog.show_same.checked = True
         dialog.fill_features()
@@ -1547,6 +1547,8 @@ class DialogTests(unittest.TestCase):
         dialog.update_buttons()
         self.assertEqual(texts, {0: u"Glyphs (6)", 1: u"Kerning (3)", 2: u"Features (3)"})
         self.assertEqual(fcmp.tab_text(u"Glyphs", 13956), u"Glyphs (13,956)")
+        # (owner's images 327 and 328: "(0)" over features alike read as nothing compared)
+        self.assertEqual(fcmp.tab_text(u"Features", 0), u"Features (alike)")
         self.assertEqual(fcmp.counted(13956, u"glyph"), u"13,956 glyphs")
 
     def test_the_tab_lines(self):

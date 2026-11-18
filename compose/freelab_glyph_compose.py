@@ -2180,11 +2180,10 @@ ADD_TICKED_ANCHORS = u"Add ticked anchors"
 
 
 def build_text(checked, hidden):
-    """The Build button's text: what it builds, and how many of those a search hides (it builds every
-    ticked glyph, shown or not): "Build ticked glyphs", "Build 12 ticked glyphs (5 not shown)"."""
-    if not hidden or not checked:
-        return BUILD_TICKED
-    return u"Build %s (%d not shown)" % (counted(checked, u"ticked glyph"), hidden)
+    """The Build button's text: "Build ticked glyphs", always. It builds every ticked glyph, shown or not; how
+    many of those a search hides is said beside the search field (search_count): said on the button, "Build 12
+    ticked glyphs (5 not shown)" made the window wider as a filter was ticked (owner's images 331 and 332)."""
+    return BUILD_TICKED
 
 
 def checks_text(on, changed, checked, hidden, bold=None, noun=u"glyph"):
@@ -2211,10 +2210,8 @@ def checks_text(on, changed, checked, hidden, bold=None, noun=u"glyph"):
 def anchors_button_text(checked, hidden):
     """The Mark anchors tab's write button's text, as build_text: it adds the anchors of every ticked
     glyph, shown or not, so it says how many of those a search hides: "Add ticked anchors", "Add anchors
-    to 12 ticked glyphs (5 not shown)"."""
-    if not hidden or not checked:
-        return ADD_TICKED_ANCHORS
-    return u"Add anchors to %s (%d not shown)" % (counted(checked, u"ticked glyph"), hidden)
+    to 12 ticked glyphs (5 not shown)"; now always the first, the count beside the search field (build_text)."""
+    return ADD_TICKED_ANCHORS
 
 
 # ---------------------------------------------------------------------------
@@ -2316,16 +2313,20 @@ def row_matches(query, name, char, code, parts=()):
     return False
 
 
-def search_count(shown, total, query, noun=u"glyph", filtered=False):
-    """What stands beside a search field: nothing without a query or a filter (filtered: Only high-value
-    glyphs), else "3 of 341 glyphs shown"."""
+def search_count(shown, total, query, noun=u"glyph", filtered=False, ticked_hidden=0):
+    """What stands beside a search field: nothing without a query or a filter (filtered: List only
+    high-value glyphs), else "3 of 341 glyphs shown." (a sentence, with its period: owner's image 332), and
+    how many of the rows hidden are ticked, which the tab's button writes too: "3 of 341 glyphs shown (5
+    ticked among those hidden)." (build_text)."""
     if not (query or u"").strip() and not filtered:
         return u""
-    return u"%d of %s shown" % (shown, counted(total, noun))
+    if ticked_hidden:
+        return u"%d of %s shown (%d ticked among those hidden)." % (shown, counted(total, noun), ticked_hidden)
+    return u"%d of %s shown." % (shown, counted(total, noun))
 
 
 FIND_A_GLYPH = u"Find a glyph…"  # (a placeholder ends with an ellipsis: owner's image 309)
-VALUE_ONLY_LABEL = u"Only high-value glyphs"
+VALUE_ONLY_LABEL = u"List only high-value glyphs."
 VALUE_ONLY_HELP = (u"Shows only the glyphs <i>Font Check</i> lists under <i>High-value missing glyphs</i> for this font "
                    u"(the missing glyphs of the languages already within reach, which they complete), as <i>Tick "
                    u"high-value glyphs</i> reads them; rows not shown keep their ticks. Grayed until <i>Font Check</i> "
@@ -2347,7 +2348,7 @@ def high_value_text(count, bold=None):
 
 
 def value_filter(box, wanted):
-    """The characters a list shows while Only high-value glyphs is ticked (Font Check's high-value set), or
+    """The characters a list shows while List only high-value glyphs is ticked (Font Check's high-value set), or
     None: the box unticked, absent, or the set not known (then nothing is hidden for it)."""
     try:
         on = box is not None and bool(_property(box, "checked"))
@@ -4033,7 +4034,7 @@ decomposition names (Latvian's comma below for a cedilla, the vertical caron of 
 used, and the row says why. Double-click a row to open its glyph (or, not built yet, its letter) in a
 <i>Glyph</i> window.<br>
 <b>The editor</b> (under the list): the selected glyph between its letter and a letter the font has
-with the same base (click that one to go to its row). Click a diacritic to select it; drag it (its center snaps to the letter's center, a guide drawn;
+with the same base (double-click that one to go to its row; double-click the glyph to open it). Click a diacritic to select it; drag it (its center snaps to the letter's center, a guide drawn;
 <i>Alt</i>: no snapping), or press the arrow keys (<i>Shift</i>: 10 units),
 to move it; drag a corner or a side of its frame to scale it (<i>Shift</i> on a corner: in proportion);
 <i>Tab</i> selects the next diacritic, <i>Backspace</i> puts the selected one back. Your changes stay with the glyph as
@@ -4046,7 +4047,7 @@ of a glyph too tall for a 120% line compact, by no more than it needs (its gaps 
 its diacritics made smaller); glyphs you placed by hand keep what you set.<br>
 <b>Finding glyphs</b>: type in <i>Find a glyph</i> to show only the rows with that text in their name or in
 what they are built from, that character, or that Unicode value; the others keep their ticks, and <i>Build
-ticked glyphs</i> builds them too (the button says how many are not shown). <i>Tick
+ticked glyphs</i> builds them too (the count beside the field says how many ticked ones are hidden). <i>Tick
 high-value glyphs</i> ticks those <i>Font Check</i> lists as completing languages already within reach.<br>
 <b>Reference</b>: the character in another font, to compare: {reference} at first,
 or one you pick (its entry at the top of the list takes the pick back).<br>
@@ -4235,6 +4236,7 @@ EDITOR_HEIGHT = 300  # pixels, the editor's least height
 STRIP_HEIGHT = 34  # pixels, the strip of letters with the same diacritic
 REFERENCE_WIDTH = 170  # pixels, the reference's column
 HANDLE = 4  # half the side of a frame's handle, in pixels
+GLYPH_HIT = 4  # pixels around a glyph's ink that still count as on it (glyph_at)
 SETTINGS_FILE = "glyph_compose.json"  # in FreeLab's state folder: the reference font chosen, and the like
 OLD_SETTINGS_FILES = ("diacritics.json",)  # the same settings under the tool's earlier name: read once, then gone
 NEIGHBOR_ALPHA = 110  # the letters beside the edited glyph, dimmed
@@ -4709,11 +4711,20 @@ def make_editor(owner):
             for index, (ax, ay, _, _) in sorted(self.outside().items(), key=lambda item: item[0] != self.selected):
                 if abs(x - ax) <= EDGE_MARGIN + 3 and abs(y - ay) <= EDGE_MARGIN + 3:
                     return ("mark", index)  # the arrow of a mark outside the view: a click selects the mark
-            ux, _ = self.to_units(x, y)
+            role = self.glyph_at(x, y)
+            return ("glyph", role) if role is not None and role != "new" else None
+
+        def glyph_at(self, x, y):
+            """The role of the glyph whose ink is under (x, y) on screen, a few pixels around it counted; None
+            for none. Its ink's box, not its advance's column from the top of the editor to its bottom: the
+            letter after the edited one answered clicks far past it (owner's image 333)."""
             start = 0.0
-            for _, advance, role in self.scene["glyphs"]:
-                if start <= ux < start + advance and role != "new":
-                    return ("glyph", role)
+            for parts, advance, role in self.scene["glyphs"]:
+                box = parts_box(parts, self.scene["ink"])
+                if box is not None:
+                    left, top, right, bottom = self.screen_box((box[0] + start, box[1], box[2] + start, box[3]))
+                    if left - GLYPH_HIT <= x <= right + GLYPH_HIT and top - GLYPH_HIT <= y <= bottom + GLYPH_HIT:
+                        return role
                 start += advance
             return None
 
@@ -4901,10 +4912,9 @@ def make_editor(owner):
                     return
                 kind, what = found
                 if kind == "glyph":
-                    # A letter with diacritics of its own beside it: a click goes to its row and its preview
-                    # (the plain letter has no marks to place; the owner says which it is)
-                    go = getattr(owner, "neighbor_clicked", None)
-                    self.went = bool(go is not None and go(what))
+                    # A letter beside the edited glyph: a double-click goes to its row (mouseDoubleClickEvent),
+                    # never one click, which went there on a misclick (owner's image 333)
+                    self.select(None)
                     return
                 if kind == "mark":
                     self.select(what)
@@ -5023,18 +5033,27 @@ def make_editor(owner):
                 self.drag = self.held = None
 
         def mouseDoubleClickEvent(self, event):
-            """The glyph opened in a Glyph window (Letters with diacritics: the built glyph, else its letter)."""
+            """A double-click on the letter with diacritics beside the edited glyph goes to its row and its
+            preview (neighbor_clicked: the plain letter before it has no marks to place, and goes nowhere); on
+            the edited glyph or one of its marks, opens it in a Glyph window (Letters with diacritics: the
+            built glyph, else its letter). Elsewhere nothing: both took one click, or a click beside the
+            glyphs, and a misclick went somewhere (owner's image 333)."""
             try:
-                if self.went:  # its first click went to a neighbor's row: the second opens nothing there
-                    self.went = False
-                    self.drag = self.held = None
+                if event.button() != QtCore.Qt.LeftButton:
                     return
-                found = self.hit(event.pos().x(), event.pos().y())
-                if event.button() == QtCore.Qt.LeftButton and (found is None or found[0] != "glyph"):  # (not a neighbor)
-                    self.drag = self.held = None
-                    opened = getattr(owner, "editor_double_clicked", None) or getattr(owner, "show_in_glyph_window", None)
-                    if opened is not None:
-                        opened()
+                x, y = event.pos().x(), event.pos().y()
+                found = self.hit(x, y)
+                self.drag = self.held = None
+                if found is not None and found[0] == "glyph":
+                    go = getattr(owner, "neighbor_clicked", None)
+                    if go is not None:
+                        go(found[1])
+                    return
+                if found is None and self.glyph_at(x, y) != "new":
+                    return
+                opened = getattr(owner, "editor_double_clicked", None) or getattr(owner, "show_in_glyph_window", None)
+                if opened is not None:
+                    opened()
             except Exception:
                 pass
 
@@ -5142,7 +5161,7 @@ class AnchorPage(object):
         fit_to_contents(self.script_box)
         # Write the feature code: the compile tick of Add ticked anchors, beside it at the bottom row's right
         # (brief 4); in this row, it stood after an empty slot where the script's name was (owner's image 248)
-        self.code_box = QtGui.QCheckBox(u"Write the feature code")
+        self.code_box = QtGui.QCheckBox(u"Write the feature code.")
         self.code_box.setChecked(True)
         self.code_box.setWhatsThis(u"Also writes the mark and mkmk features that attach the marks by these anchors "
                                    u"(and the ticked substitutions: ccmp, pres), between FreeLab's marker lines (a "
@@ -5532,6 +5551,7 @@ class AnchorPage(object):
         try:
             for row in range(self.tree.topLevelItemCount):
                 visit(self.tree.topLevelItem(row))
+            self.count_args = (total[0], total[1], query, False)  # (update_buttons adds the ticks hidden)
             show_count(self.search_label, search_count(total[0], total[1], query))
         except Exception as exc:  # (rows that cannot be hidden: every one counts as shown, and the list still fills)
             self.hidden = set()
@@ -5633,9 +5653,14 @@ class AnchorPage(object):
         ak.enable(self.all_button, any(not g.checked for g in checkable))
         ak.enable(self.none_button, any(g.checked for g in checkable))
         ak.enable(self.write_button, any(g.checked and (g.pending() or g.role == "rule") for g in self.glyphs))
-        # it writes every checked glyph, those a search hides too: its text says how many are not shown
+        # it writes every checked glyph, those a search hides too: the count beside the search says how many are
+        # not shown (build_text)
         writing = [index for index, g in enumerate(self.glyphs) if g.checked and g.pending() and g.role != "rule"]
-        self.write_button.setText(anchors_button_text(len(writing), sum(1 for index in writing if index in hidden)))
+        self.write_button.setText(anchors_button_text(len(writing), 0))
+        args = getattr(self, "count_args", None)
+        if args is not None and getattr(self, "search_label", None) is not None:
+            show_count(self.search_label, search_count(args[0], args[1], args[2], filtered=args[3],
+                                                       ticked_hidden=sum(1 for index in writing if index in hidden)))
         ak.enable(self.restore_button, any(g.adjust or self.first_checks.get(g.name, g.checked) != g.checked
                                            for g in self.glyphs))
         g = self.selected()
@@ -6289,7 +6314,7 @@ class AccentsDialog(object):
         self.set_box.setWhatsThis(set_help)
         fit_to_contents(self.set_box)  # (as wide as its widest choice, never stretched: owner's image 239)
         row.addWidget(self.set_box)
-        self.existing_box = QtGui.QCheckBox(u"Also list existing glyphs")
+        self.existing_box = QtGui.QCheckBox(u"Also list existing glyphs.")
         self.existing_box.setWhatsThis(u"Also lists the letters with diacritics the font already has (Latin, Greek, "
                                        u"and Cyrillic), in a section of their own, unticked: each shown beside its "
                                        u"glyph as the font has it, to compare. Placements applied to related letters "
@@ -6304,7 +6329,7 @@ class AccentsDialog(object):
         # Off unless switched on (the owner's choice of 2026-11-15); its own key, so that a choice saved for
         # the box as it was (on at first, every gap closed at once) is not taken for this one
         self.compact = self.settings.get(COMPACT_KEY) is True
-        self.compact_box = QtGui.QCheckBox(u"Compact diacritics to fit the line")
+        self.compact_box = QtGui.QCheckBox(u"Compact diacritics to fit the line.")
         self.compact_box.setChecked(self.compact)
         self.compact_box.setWhatsThis(COMPACT_HELP)
         row.addStretch(1)
@@ -6371,8 +6396,9 @@ class AccentsDialog(object):
         self.editor = make_editor(self)
         self.editor.setProperty(ak.LEAVE_ALONE_PROP, True)  # dark mode leaves what it draws alone
         self.editor.setWhatsThis(u"The selected glyph as it would be built, between its letter and a letter the font "
-                                 u"has with the same base (click that one to go to its row: it is listed, "
-                                 u"unticked, until you go on to another letter, unless you tick it). Click a diacritic to select it, drag it (its center snaps to "
+                                 u"has with the same base (double-click that one to go to its row: it is listed, "
+                                 u"unticked, until you go on to another letter, unless you tick it; double-click the "
+                                 u"glyph to open it in a <i>Glyph</i> window). Click a diacritic to select it, drag it (its center snaps to "
                                  u"the letter's box center or top center, a guide drawn; <i>Alt</i>: no snapping) or "
                                  u"press the arrow keys "
                                  u"to move it, drag its frame to scale it; <i>Tab</i> selects the next diacritic, <i>Backspace</i> "
@@ -7383,6 +7409,7 @@ class AccentsDialog(object):
                     item.setHidden(not found)
                 shown += found_here
                 top.setHidden(not found_here)
+            self.count_args = (shown, total, query, wanted is not None)  # (update_buttons adds the ticks hidden)
             show_count(self.search_label, search_count(shown, total, query, filtered=wanted is not None))
         except Exception as exc:  # (rows that cannot be hidden: every one counts as shown, and the list still fills)
             self.hidden = set()
@@ -7805,7 +7832,7 @@ class AccentsDialog(object):
             self.high_value = self.read_high_value()
             self.high_value_key = self.high_value_stamp()
             if value_filter(getattr(self, "value_only_box", None), self.high_value) is not None:
-                self.apply_search()  # (Only high-value glyphs ticked: the list follows the set read now)
+                self.apply_search()  # (List only high-value glyphs ticked: the list follows the set read now)
             self.update_buttons()
             generation = getattr(self, "generation", None)
             if generation:  # (Glyph generation's tab reads the same set: its buttons and its filter follow)
@@ -7872,10 +7899,15 @@ class AccentsDialog(object):
         self.harvest()
         if getattr(self, "hand_over_key", None) is not None:  # (Font Check's list's checks, kept for the session)
             self.remember_checks([(r.char, r.checked) for r in self.recipes if not r.missing])
-        # Build builds every checked glyph, those a search hides too: its text says how many are not shown
+        # Build builds every checked glyph, those a search hides too: the count beside the search says how many
+        # are not shown (search_count; on the button, it made the window wider: owner's images 331 and 332)
         hidden = getattr(self, "hidden", ())
         buildable = [(index, r) for index, r in enumerate(self.recipes) if not r.missing and r.checked]
-        self.build_button.setText(build_text(len(buildable), sum(1 for index, _ in buildable if index in hidden)))
+        self.build_button.setText(build_text(len(buildable), 0))
+        args = getattr(self, "count_args", None)
+        if args is not None and getattr(self, "search_label", None) is not None:
+            show_count(self.search_label, search_count(args[0], args[1], args[2], filtered=args[3],
+                                                       ticked_hidden=sum(1 for index, _ in buildable if index in hidden)))
         correctable = self.correctable()
         ak.enable(self.correct_button, bool(correctable) and self.package is not None)
         self.correct_button.setText(correct_button_text(len(correctable)))

@@ -1935,6 +1935,14 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(dialog.font_named([u"Regular", u"Bold"]), u"<b>Fake Sans</b>, all <b>2 masters</b>")
         self.assertEqual(dialog.font_named([u"Bold"]), u"<b>Fake Sans</b>, master <b>Bold</b> (of <b>2 masters</b>)")
 
+    def test_the_wheel_turns_the_page_past_its_edges(self):
+        # (owner's image 347: the wheel at the top or the bottom of a page should go to the next page)
+        self.assertEqual(fp.page_turn(1, 0, 0, 900), -1, "turned up at the top: the page before")
+        self.assertEqual(fp.page_turn(-1, 900, 0, 900), 1, "turned down at the bottom: the page after")
+        self.assertEqual(fp.page_turn(-1, 300, 0, 900), 0, "in between: it scrolls")
+        self.assertEqual(fp.page_turn(-1, 0, 0, 0), 1, "a page shown whole: each turn a page")
+        self.assertEqual(fp.page_turn(0, 0, 0, 0), 0)
+
     def test_a_setting_saved_changes_only_its_own_key(self):
         # Two Proof windows (two fonts) each read proof.json once: the second to save wrote back the first's
         # other setting as it had read it

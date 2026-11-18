@@ -149,9 +149,12 @@ def codes_text(codes):
 
 
 def tab_text(title, count=None):
-    """A tab's title with its count in parentheses, thousands grouped: "Compatibility (40)"; the title
-    alone before an audit."""
-    return title if count is None else u"%s (%s)" % (title, grouped(count))
+    """A tab's title with its count of differences in parentheses, thousands grouped: "Compatibility
+    (40)"; "(alike)" when nothing differs ("Metrics and info (alike)": a "(0)" over 20 fields alike read as
+    nothing compared, owner's images 327 and 328); the title alone before an audit."""
+    if count is None:
+        return title
+    return u"%s (%s)" % (title, grouped(count) if count else u"alike")
 
 
 def by_value(pairs):
@@ -2190,7 +2193,47 @@ class FamilyAuditDialog(object):
         ak.add_tools_button(dialog, TOOL, self.log)  # (the other font tools, a click away)
         ak.plain_buttons(dialog)
         self.read_fonts()
+        self.restore_last()
         self.update_buttons()
+
+    def remember_last(self):
+        """The audit shown kept for the FontLab session (sys._freelab_family_audit_last), with each audited
+        font's place in its History: restore_last shows it again in the next Family Audit window."""
+        try:
+            marks = dict((s.key, self.ak.history_mark(s.package)) for s in self.sources.values() if s.package is not None)
+            sys._freelab_family_audit_last = {"audit": self.audit, "audited": self.audited, "sources": self.sources,
+                                              "marks": marks}
+        except Exception:
+            sys._freelab_family_audit_last = None
+
+    def restore_last(self):
+        """The last audit of the session shown again, its sources ticked, when every one of them is still open
+        and none changed since (each font's History where it was): the window reopened (after another tool,
+        or closed) kept nothing (owner's image 330). Otherwise nothing is shown. Whether it was shown."""
+        last = getattr(sys, "_freelab_family_audit_last", None)
+        if not last or self.audit is not None or self.busy:
+            return False
+        try:
+            keys, reference = last["audited"]
+            open_keys = set(e.key for e in self.entries)
+            if any(key not in open_keys for key in keys):
+                return False
+            for key, mark in last["marks"].items():
+                source = last["sources"].get(key)
+                if source is None or source.package is None or self.ak.history_mark(source.package) != mark:
+                    return False
+        except Exception:
+            return False
+        self.audit, self.audited, self.sources = last["audit"], (list(keys), reference), dict(last["sources"])
+        self.ticked, self.reference = set(keys), reference
+        self.fill_sources()
+        self.fill_reference()
+        self.watch_sources(list(self.sources.values()))
+        self.fill_tabs()
+        self.say_top()
+        self.log.add(u"The last comparison is shown again (%s, reference %s): no source changed since." %
+                     (bold(counted(len(keys), u"source")), bold(reference_of(list(self.sources.values()), reference).label)))
+        return True
 
     def part(self, QtGui, splitter, stretch):
         """A part of a splitter: its layout, to fill (stretch: its share of the height at first)."""
@@ -2544,15 +2587,37 @@ class FamilyAuditDialog(object):
                 paths[e.font_number] = e.path
         matched, self.pending, _ = match_opened(self.pending, [(n, paths[n]) for n in numbers])
         for path, number in matched:
-            keys = [e.key for e in self.entries if e.font_number == number]
-            labels = [e.label for e in self.entries if e.font_number == number]
-            self.ticked.update(keys)
-            self.log.add(u"Opened %s in FontLab: ticked as %s." % (
-                self.ak.i(os.path.basename(path)), listed([self.ak.b(label) for label in labels])), "done")
+            family = self.audited_family()  # (the files ticked so far say it, in a window without a font)
+            opened = [e for e in self.entries if e.font_number == number]
+            labels = listed([self.ak.b(e.label) for e in opened])
+            other = [e.family for e in opened if family is not None and e.family != family]
+            if other:
+                # (another family's font, added by mistake or for a look: not compared with this family unless
+                # ticked by hand; it was ticked with it, owner's image 344)
+                self.log.add(u"Opened %s in FontLab as %s, of another family (%s): left unticked; tick it to compare "
+                             u"it with %s all the same." % (self.ak.i(os.path.basename(path)), labels,
+                                                            self.ak.html(other[0] or u"no family name"),
+                                                            self.ak.b(family)), "warning")
+                continue
+            self.ticked.update(e.key for e in opened)
+            self.log.add(u"Opened %s in FontLab: ticked as %s." % (self.ak.i(os.path.basename(path)), labels), "done")
         self.known_fonts = set(e.font_number for e in self.entries)
         if matched:
             self.fill_sources()
             self.bring_forward()
+
+    def audited_family(self):
+        """The family the window audits: its own font's, else the one most ticked sources belong to; None
+        when nothing tells (no font of its own, nothing ticked)."""
+        own = self.calls.font_number(self.package) if self.package is not None else None
+        for e in self.entries:
+            if own is not None and e.font_number == own:
+                return e.family
+        counts = {}
+        for e in self.entries:
+            if e.key in self.ticked:
+                counts[e.family] = counts.get(e.family, 0) + 1
+        return max(sorted(counts), key=lambda name: counts[name]) if counts else None
 
     def bring_forward(self):
         """This window back in front: FontLab activates a font's window as it opens it."""
@@ -2604,6 +2669,7 @@ class FamilyAuditDialog(object):
             self.audited = ([s.key for s in sources], reference)
             self.sources = dict((s.key, s) for s in sources)
             self.watch_sources(sources)
+            self.remember_last()
             self.fill_tabs()
             unread = [s.label for s in sources if s.shapes is not None and any(v is None for v in s.shapes.values())]
             self.log.add(u"Compared %s (reference %s)." % (bold(counted(len(sources), u"source")),

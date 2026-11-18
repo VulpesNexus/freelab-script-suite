@@ -322,8 +322,10 @@ def apply_note(passes, again, tolerance, references_first=0, bold=lambda text: u
 REFERENCE_MODEL_FILE = "reference_model.json"
 UNSPACED_SHARE = 0.005  # a reference side closer to its ink than this share of the em counts as unspaced
 # Each script's straight references (looked at for unspaced sides) and all its references (spaced
-# from the corpus when a straight one looks unspaced): Latin's, Armenian's, Georgian's.
-REFERENCE_GROUPS = ((u"Hn", u"HOno0"),
+# from the corpus when a straight one looks unspaced): Latin's, Armenian's, Georgian's. Latin's l with
+# them: every glyph is measured against l, n, and o (ll, nn, oo), and n and o spaced without l left ll
+# far from them, so nothing could be spaced after (owner's image 335).
+REFERENCE_GROUPS = ((u"Hn", u"HOlno0"),
                     (u"Ոո",
                      u"ՈՕո"
                      u"օ"),
@@ -542,7 +544,7 @@ class AutoSpacingDialog(object):
                                     u"much; a glyph is listed when one of its sides is.")
         row.addWidget(self.tolerance)
         self.ak.sentence_end(row)
-        self.follow = QtGui.QCheckBox("Glyphs built from components follow the glyphs they are built on")
+        self.follow = QtGui.QCheckBox("Glyphs built from components follow the glyphs they are built on.")
         self.follow.setChecked(True)
         self.follow.setWhatsThis(u"\N{LATIN SMALL LETTER E WITH ACUTE} built from e and an acute keeps its acute "
                                  u"over the e and takes e's change of width. Without it, its e moves under the "
@@ -898,7 +900,7 @@ class AutoSpacingDialog(object):
             return []
         upm = float(package.upm)
         sides, heights = {}, {}
-        for ch in (u"H", u"x", u"O", u"n", u"o", u"0") + tuple(ch for _, group in REFERENCE_GROUPS[1:] for ch in group):
+        for ch in (u"H", u"x", u"O", u"l", u"n", u"o", u"0") + tuple(ch for _, group in REFERENCE_GROUPS[1:] for ch in group):
             name = names.get(ch) or (package.findUnicode(ord(ch)).name if package.findUnicode(ord(ch)) is not None else None)
             glyph = package.findName(name) if name else None
             layer = glyph.getLayerByName(master) if glyph is not None else None
@@ -1290,6 +1292,9 @@ class AutoSpacingDialog(object):
                     self.write_span = (units - 2, units)
                     self.write_progress(FOLLOW_STEP, 0.0)
                     moved = self.follow_composites(totals)
+            except CannotSpace:
+                pass  # (the font can no longer be measured: the analysis after the write says so, once; it was
+                # said twice, the second time as an error, owner's image 335)
             except Exception as exc:  # what was changed stays changed, and is reported
                 error = exc
             finally:

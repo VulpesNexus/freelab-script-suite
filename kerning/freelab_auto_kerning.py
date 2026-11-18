@@ -4077,11 +4077,28 @@ def window_head(layout, first):
         column = QtGui.QVBoxLayout(head)
         column.setContentsMargins(0, 0, 0, 0)
         column.setSpacing(0)
-        for widget in [first] + lines:
+        column.addWidget(first)
+        # A blank line between the font's line and what the tool found, in every window, as Font Check had it
+        # (owner's image 346): the first line under it set that much lower, so the gap goes with it while it is
+        # hidden (nothing found yet, no font)
+        try:
+            lines[0].setContentsMargins(0, head_gap(first), 0, 0)
+        except Exception:
+            pass
+        for widget in lines:
             column.addWidget(widget)
         return head
     except Exception:
         return first
+
+
+def head_gap(label):
+    """The blank line under a window's top line (window_head): a line of its text, in pixels."""
+    QtGui = _qt()[1]
+    try:
+        return int(QtGui.QFontMetrics(_property(label, "font")).lineSpacing())
+    except Exception:
+        return 14
 
 
 def busy_row(dialog):
@@ -4409,7 +4426,7 @@ def compile_features():
 def compile_box():
     """The "Compile after writing" check box a dialog that writes feature code shows beside its button."""
     QtGui = _qt()[1]
-    box = QtGui.QCheckBox(u"Compile after writing")
+    box = QtGui.QCheckBox(u"Compile after writing.")
     box.setChecked(True)
     box.setWhatsThis(u"Compiles the font's features right after the code is written, as the <i>Features</i> panel's "
                      u"<i>Compile</i> button does, so the new code can be tried at once. Off: the code is only "
@@ -4419,6 +4436,19 @@ def compile_box():
 
 COMPILE_READ_MS = 400  # after the click: FontLab's Output panel read for what the compiler said, again while it grows
 COMPILE_READS_MAX = 8  # reads at most (a slow compile's output is read once it stops growing)
+COMPILE_EMPTY_READS_MAX = 40  # reads at most while the panel stays empty (16 seconds: see read_again)
+
+
+def read_again(reads, before, last, after):
+    """Whether the Output panel is read once more after a compile (reads: done so far; before: its text
+    before the click; last: at the read before; after: now). FontLab clears the panel as it compiles and
+    prints nothing when the code compiles, so an empty panel is either a clean compile or one still under
+    way: it is read for COMPILE_EMPTY_READS_MAX reads before it counts as clean (a font of 42,000 kerned
+    pairs was said to compile with no errors while its code named a class it lacks: owner's image 342).
+    Text is read until it stops growing, or COMPILE_READS_MAX reads."""
+    if not (after or u"").strip():
+        return reads < COMPILE_EMPTY_READS_MAX
+    return reads < COMPILE_READS_MAX and (after != last or after == before)
 COMPILE_ERROR_MARKS = (u"[F]", u"[E]", u"error", u"Error")
 
 
@@ -4463,7 +4493,7 @@ def compiled_note(box, log=None):
         try:
             after = output_text(view) or u""
             state["reads"] += 1
-            if state["reads"] < COMPILE_READS_MAX and (after != state["last"] or after == before):
+            if read_again(state["reads"], before, state["last"], after):
                 state["last"] = after  # the first read, still growing, or not changed yet: read again
                 QtCore.QTimer.singleShot(COMPILE_READ_MS, read)
                 return
@@ -4721,7 +4751,8 @@ OWN_TIPS_PROP = "freelab_own_tips"  # on a widget or list that lays its tooltips
 KEEP_SELECTION = {"Font Check": ("script_tree", "language_tree", "set_tree", "family_tree"), "Proof": ("page_list",)}
 OWN_TIPS = ("Font Check",)  # tools whose lists build their rows' tooltips as they show (left to them)
 HELP_KINDS = ("QAbstractButton", "QComboBox", "QAbstractSpinBox", "QLineEdit", "QAbstractSlider", "QLabel",
-              "QSplitterHandle", "QGroupBox")  # (a splitter's handle: Feature Code's tooltip came out four words wide)
+              "QSplitterHandle", "QGroupBox", "QTabBar")  # (a splitter's handle: Feature Code's tooltip came out four
+# words wide; a tab bar: each tab's own help, show_tab_help)
 NOT_BLANK = ("QAbstractButton", "QComboBox", "QAbstractSpinBox", "QLineEdit", "QAbstractSlider", "QTabBar",
              "QAbstractScrollArea", "QSplitterHandle", "QMenu")  # a press on these is no click beside the lists
 TIP_WIDTH = (360, 900)  # a tooltip is at most half its window's width, within these (pixels)
@@ -4925,6 +4956,9 @@ def filter_event(window, obj, event, pending):
         commit_typing(window, obj)  # (the value typed in a field taken before the button acts on it)
     if kind == 110:  # ToolTip
         return show_tip(obj, event, _view_of(obj))
+    if kind in (CONTEXT_MENU, WHATS_THIS) and obj.inherits("QTabBar") and _property(obj, "enabled"):
+        # a tab's own help, where it was clicked (owner's image 329: the window's, in the middle of it)
+        return show_tab_help(obj, event, kind == CONTEXT_MENU)
     if kind == SHOW_EVENT and (obj is window or obj == window):
         # The window's states set before it first paints: set on update_states' first tick, its controls
         # showed usable and its separators shown for a moment (owner's images 275, 276, 282)
@@ -4939,10 +4973,18 @@ def filter_event(window, obj, event, pending):
             pass
         return False
     if obj is window or obj == window:
+        if kind == RESIZE_EVENT:
+            owner = window_owner(window)
+            log = getattr(owner, "log", None) if owner is not None else None
+            if log is not None and hasattr(log, "yield_room"):
+                log.yield_room(window)
+            return False
         if kind == 2 and int(event.button()) == int(QtCore.Qt.LeftButton):  # a press no widget took
             target = window.childAt(event.pos())
             if blank_press(window, target if target is not None else window):
                 clear_selections(window)
+        if kind == CONTEXT_MENU and window_owner(window) is not None:  # (never FontLab's own window, docked)
+            return show_context_help(window, event)
         return False
     view = _view_of(obj)
     if view is not None:
@@ -4973,8 +5015,113 @@ def filter_event(window, obj, event, pending):
 
 
 SHOW_EVENT = 17  # QEvent::Show, sent before the window's first paint
-WATCHED_EVENTS = (2, 3, 6, 17, 51, 82, 110)  # MouseButtonPress, MouseButtonRelease, KeyPress, Show, ShortcutOverride,
-# ContextMenu, ToolTip
+CONTEXT_MENU, WHATS_THIS = 82, 111  # QEvent::ContextMenu (a right-click), QEvent::WhatsThis (a click after "?")
+RESIZE_EVENT = 14  # QEvent::Resize: the window's log yields room first (Log.yield_room)
+WATCHED_EVENTS = (2, 3, 6, 14, 17, 51, 82, 110, 111)  # MouseButtonPress, MouseButtonRelease, KeyPress, Resize,
+# Show, ShortcutOverride, ContextMenu, ToolTip, WhatsThis
+
+
+def help_section(text, title):
+    """The part of a window's help about one of its tabs ("<i>Kerning</i>: the glyph pairs kerned
+    differently..." up to the next line break or the next tab's title), its first letter capitalized; u""
+    when the help has none."""
+    if not text or not title:
+        return u""
+    found = re.search(u"<i>%s</i>:\\s*(.*?)(?=<br|\\s<i>[^<]{1,40}</i>:|$)" % re.escape(title), u"%s" % text, re.S)
+    if found is None:
+        return u""
+    part = re.sub(u"\\s+", u" ", found.group(1)).strip()
+    return part[:1].upper() + part[1:] if part else u""
+
+
+def tab_title(text):
+    """A tab's title without its count ("Compatibility (52)": "Compatibility") or its shortcut's ampersand."""
+    return re.sub(u"\\s*\\([^()]*\\)$", u"", (u"%s" % (text or u"")).replace(u"&", u"")).strip()
+
+
+def tab_help(bar, index):
+    """A tab's help: its own What's This, else its tooltip, else what the bar's help or its window's says
+    of it (help_section), else the help of the list on the page it shows (the pages beside the bar); u""
+    for none."""
+    try:
+        for text in (bar.tabWhatsThis(index), bar.tabToolTip(index)):
+            if text:
+                return u"%s" % text
+        owner = window_owner(bar)
+        dialog = owner.dialog if owner is not None else bar.window()
+        title = tab_title(bar.tabText(index))
+        for holder in (bar, dialog):
+            found = help_section(_property(holder, "whatsThis"), title)
+            if found:
+                return found
+        parent = bar.parentWidget()
+        pages = _next_widget(parent.layout(), bar) if parent is not None else None
+        if pages is not None and pages is not _NOT_FOUND and pages.inherits("QStackedWidget"):
+            page = pages.widget(index)
+            QtGui = _qt()[1]
+            for view in ([page] if page.inherits("QAbstractItemView") else []) + list(page.findChildren(QtGui.QAbstractItemView)):
+                text = _property(view, "whatsThis")
+                if text:
+                    return u"%s" % text
+    except Exception:
+        pass
+    return u""
+
+
+def _whats_this_menu(window, where):
+    """Qt's own right-click menu of help ("What's This?"): whether it was picked."""
+    QtGui = _qt()[1]
+    menu = QtGui.QMenu(window)
+    action = menu.addAction(u"What's This?")
+    picked = menu.exec_(where)
+    return picked is not None and (picked is action or picked.text == action.text)
+
+
+def show_tab_help(bar, event, menu):
+    """A tab's help (tab_help) where the tab was clicked: after the What's This menu of a right-click (menu),
+    or at once in What's This mode. False (left to Qt) where no tab is, or it has no help."""
+    QtGui = _qt()[1]
+    try:
+        index = bar.tabAt(event.pos())
+    except Exception:
+        return False
+    if index is None or index < 0:
+        return False
+    text = tab_help(bar, index)
+    if not text:
+        return False
+    where = event.globalPos()
+    if menu and not _whats_this_menu(bar.window(), where):
+        return True
+    if widget_alive(bar):
+        QtGui.QWhatsThis.showText(where, text, bar)
+    return True
+
+
+def show_context_help(window, event):
+    """A right-click's help where the click was, for a widget of a FreeLab window that leaves its right-click
+    to its window: the help of the widget under it, else of the nearest container with one, the window's
+    last (Qt's own showed it at the middle of that container: owner's image 329, the window's help in the
+    middle of the window, far from the click). False to leave it to Qt."""
+    QtGui = _qt()[1]
+    target = window.childAt(event.pos())
+    widget, text = target if target is not None else window, u""
+    while widget is not None:
+        if widget.inherits("QTabBar"):
+            try:
+                text = tab_help(widget, widget.tabAt(widget.mapFromGlobal(event.globalPos())))
+            except Exception:
+                text = u""
+        text = text or u"%s" % (_property(widget, "whatsThis") or u"")
+        if text or widget is window or widget == window or widget.isWindow():
+            break
+        widget = widget.parentWidget()
+    if not text:
+        return False
+    where = event.globalPos()
+    if _whats_this_menu(window, where) and widget_alive(widget):
+        QtGui.QWhatsThis.showText(where, text, widget)
+    return True
 
 
 CHILD_ADDED = 68  # QEvent::ChildAdded, sent to a widget given a child
@@ -6129,6 +6276,42 @@ LOG_COLORS = {"warning": ((224, 160, 40), (150, 95, 0)), "error": ((240, 96, 86)
 
 
 LOG_HEIGHT = []  # the log's height as last dragged, kept for the next window (pixels)
+LOG_LEAST_LINES = 2  # the log's height at least, in lines, however little room the lists have
+COMFORT_ROWS = 4  # a list showing less than this many rows takes room from the log first (Log.yield_room)
+
+
+def list_shortfall(view):
+    """The pixels a list lacks to show COMFORT_ROWS rows under its header (0 when it has them, or cannot
+    tell)."""
+    try:
+        row = int(view.sizeHintForRow(0))
+        if row <= 0:
+            row = int(line_height_of(view)) + 6
+        head = 0
+        header = view.header() if hasattr(view, "header") else None
+        if header is not None and _property(header, "visible"):
+            head = int(_property(header, "height"))
+        frame = 2 * int(_property(view, "frameWidth") or 0)
+        return max(0, head + COMFORT_ROWS * row + frame - int(_property(view, "height")))
+    except Exception:
+        return 0
+
+
+def line_height_of(widget):
+    """A widget's font's line height in pixels."""
+    QtGui = _qt()[1]
+    return QtGui.QFontMetrics(_property(widget, "font")).lineSpacing()
+
+
+def log_height(now, wanted, least, short, grown):
+    """The log's height for the room the window gives it (Log.yield_room): now less what the lists lack
+    (short), never under least; or, nothing lacking and the window grown taller (grown, pixels), back
+    toward wanted by as much; else as it is."""
+    if short > 0:
+        return max(least, min(now, now - short)) if now > least else now
+    if grown > 0 and now < wanted:
+        return min(wanted, now + grown)
+    return now
 
 
 class Log(object):
@@ -6201,6 +6384,35 @@ class Log(object):
         self.start = None
         self.drag = Drag(grip)  # (its parent the grip: Qt deletes it with the grip, never PythonQt at random)
         grip.installEventFilter(self.drag)
+
+    def wanted_height(self):
+        """The log's height when the window has room: as last dragged (LOG_HEIGHT), else LOG_LINES lines."""
+        return LOG_HEIGHT[0] if LOG_HEIGHT else int(self.line * LOG_LINES + 12)
+
+    def yield_room(self, window):
+        """The log gives up room first (owner's image 340: its dragged height kept while the lists above it
+        were squeezed to a row): while a list of the window shows less than COMFORT_ROWS rows' room, the log
+        is made shorter by what they lack, down to LOG_LEAST_LINES lines; as the window grows taller, the log
+        takes its height back first. Called as the window is resized (filter_event). Never raises."""
+        if getattr(self, "start", None):
+            return  # (its edge being dragged: the height asked for)
+        QtGui = _qt()[1]
+        try:
+            height = int(_property(window, "height"))
+            grown = height - getattr(self, "window_height", height)
+            self.window_height = height
+            now = int(_property(self.view, "height"))
+            short = 0
+            for view in window.findChildren(QtGui.QAbstractItemView):
+                # (a dropdown's list is a window of its own; a header is its list's)
+                if (view.window() is window or view.window() == window) and _property(view, "visible") \
+                        and not view.inherits("QHeaderView"):
+                    short += list_shortfall(view)
+            target = log_height(now, self.wanted_height(), int(self.line * LOG_LEAST_LINES + 12), short, grown)
+            if target != now:
+                self.view.setFixedHeight(target)
+        except Exception:
+            pass
 
     def follow(self, source):
         """source() gives (fontlab, package, master) of the font the dialog looks at now. The glyphs its
@@ -7484,16 +7696,40 @@ def separator(header=False, vertical=False):
 def sentence_end(row):
     """The period that ends a sentence the controls of row finish ("List changes of at least [20 units]."),
     against its last control: the row's spacing taken back before it (a spacing of its own, the period
-    floated a word's width away, live 2026-11-17). Returns the label."""
+    floated a word's width away, live 2026-11-17). The period is that control's caption (caption): grayed
+    with it, as with no font (owner's images 319 to 323: it stayed bright), and its help the control's.
+    Returns the label."""
     QtGui = _qt()[1]
     try:
         spacing = int(_property(row, "spacing"))
     except Exception:
         spacing = -1
+    last = _last_widget(row)
     row.addSpacing(-(spacing if spacing >= 0 else 6) + 1)  # (live: a negative spacing is taken as it is)
     label = QtGui.QLabel(u".")
     row.addWidget(label)
+    if last is not None:
+        caption(label, last)
     return label
+
+
+def _last_widget(layout):
+    """The last widget of a row (layout), its nested layouts searched from the end; None if it holds none."""
+    try:
+        count = layout.count()
+    except Exception:
+        return None
+    for k in range(count - 1, -1, -1):
+        item = layout.itemAt(k)
+        if item is None:
+            continue
+        if item.widget() is not None:
+            return item.widget()
+        if item.layout() is not None:
+            found = _last_widget(item.layout())
+            if found is not None:
+                return found
+    return None
 
 
 def header_separator():
@@ -8673,11 +8909,11 @@ class AutoKerningDialog(object):
         row.addSpacing(12)
         # Pairs the font kerns already are the designer's choices (a j tucked under the letter before
         # it, which the methods do not model): hidden unless asked for, and never checked for writing.
-        self.include_kerned = QtGui.QCheckBox("Include existing kerned pairs")
+        self.include_kerned = QtGui.QCheckBox("Include existing kerned pairs.")
         self.include_kerned.setWhatsThis("Also lists the pairs the font kerns already, through its classes too, "
                                           "and the pairs written here since. They start unticked.")
         row.addWidget(self.include_kerned)
-        self.only_picked = QtGui.QCheckBox(u"Only pairs picked by hand (%d)" % PICKED_ROOM)
+        self.only_picked = QtGui.QCheckBox(u"List only pairs picked by hand (%d)." % PICKED_ROOM)
         self.only_picked.setWhatsThis("Lists only the pairs whose value you picked yourself.")
         # Its room is kept from the start, so the window does not grow when the first pair is picked
         self.only_picked.setMinimumWidth(_property(self.only_picked, "sizeHint").width())
@@ -9236,7 +9472,7 @@ class AutoKerningDialog(object):
     def update_picked(self):
         """The "picked by hand" filter, shown while a pair is picked (or while it is on)."""
         count = self.picked_count()
-        self.only_picked.setText(u"Only pairs picked by hand (%d)" % count)
+        self.only_picked.setText(u"List only pairs picked by hand (%d)." % count)
         wanted = bool(count) or self.only_picked.checked
         if self.picked_room_kept:
             self.only_picked.setVisible(wanted)
@@ -9793,6 +10029,8 @@ class AutoKerningDialog(object):
             self.log.add(u"Nothing was written: every ticked pair has the value it would be given already.")
             self.update_buttons()
             return
+        if not self.begin_kerning_write():
+            return
         classes = entries = 0
         written, error = [], None
         try:
@@ -9827,11 +10065,18 @@ class AutoKerningDialog(object):
         status.report(self.log)
         self.seen_history = history_mark(self.package)
 
+    def begin_kerning_write(self):
+        """before_changes for a kerning write (begin_write: False, said in the log, when nothing may be
+        written). The kerning is the font's own state, which FontLab records when it opens a font, but the
+        step notify_changed makes records the whole font, its glyphs too, and they have no state of their
+        own in a font opened afresh: undoing the step made FontLab print "We have a problem with the
+        component 'P' in glyph 'Rho:Regular'" for each glyph built from components (owner's image 336)."""
+        return begin_write(self.fontlab, self.package, u"FreeLab Auto Kerning", self.log)
+
     def after_writing(self, package):
         """FontLab told of the change, and the font marked modified: a script's kerning writes leave it
-        unmarked, and FontLab would close it without asking to save. Kerning needs no before_changes:
-        it is the font's own state, which FontLab records when it opens a font (live: a first write's
-        pair went on Undo). notify_changed's WriteStatus."""
+        unmarked, and FontLab would close it without asking to save (begun by begin_kerning_write).
+        notify_changed's WriteStatus."""
         return notify_changed(self.fontlab, package, u"FreeLab Auto Kerning", added=False)
 
 
@@ -9903,7 +10148,7 @@ class ClassDialog(object):
                                   lambda step: select_next_row(self.tree, step),
                                   lambda: float(PAIR_PREVIEW_EM) / float(self.package.upm))
         self.tree.connect("itemSelectionChanged()", self.update_previews)
-        self.move = QtGui.QCheckBox("Move each new class's first glyph's pairs into the class")
+        self.move = QtGui.QCheckBox("Move each new class's first glyph's pairs into the class.")
         self.move.setChecked(True)
         self.move.setWhatsThis(u"A new class made from A, \N{LATIN CAPITAL LETTER A WITH GRAVE}, ... takes over A's own pairs on "
                                u"that side, so every member kerns as A does. Without it, the class starts with no kerning.")

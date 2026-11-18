@@ -2080,8 +2080,10 @@ def summary_line(report, rich=False):
                                 (ADVICE, "piece of advice", "pieces of advice")):
         if totals[severity]:
             parts.append(strong(counted(totals[severity], one, many)))
-    state = "It compiles." if report.built else ("It does not compile." if totals[ERROR] else "")
-    return ("%s. %s" % (", ".join(parts), state)).strip()
+    # (one sentence, so one line: the top line puts each sentence on a line of its own, and "1 error." over
+    # "It does not compile." took two, owner's image 343)
+    state = "It compiles" if report.built else ("It does not compile" if totals[ERROR] else "")
+    return "%s: %s." % (state, ", ".join(parts)) if state else "%s." % ", ".join(parts)
 
 
 def font_line(ak, name, glyphs):
@@ -2124,7 +2126,7 @@ class FeatureCheckDialog(object):
         layout.addWidget(ak.header_separator())
 
         row = QtGui.QHBoxLayout()
-        self.auto_box = QtGui.QCheckBox("Apply safe fixes automatically")
+        self.auto_box = QtGui.QCheckBox("Apply safe fixes automatically.")
         self.auto_box.setWhatsThis("At each check, applies the fixes proven to change nothing in the compiled font "
                                    "(rules written twice, substitutions by the glyph itself, glyphs listed twice in a "
                                    "class, classes and lookups never used), as one step of FontLab's History; the list "

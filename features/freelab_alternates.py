@@ -94,7 +94,7 @@ SUGGESTIONS_KEY, SELECTED_KEY = u"\tsuggestions", u"\tselected"
 NO_DATA = u"\N{EN DASH}"  # a cell that means nothing for its row (no count of a glyph the model lacks)
 ROW_PICTURES = 120  # the selected glyphs drawn as the list is made; the rest when their row is clicked
 ROW_PICTURE_TIP = u"Click the row to draw it."
-DESIGNS_LABEL = u"Also build variants from existing alternates"
+DESIGNS_LABEL = u"Also build variants from existing alternates."
 DESIGNS_WHAT = (u"Spreads a glyph's variants over its designs in turn: the glyph and the alternates the font has of "
                 u"it (W.ss01, W.2, W.salt, and variants built before, such as W.alt1). Variant 1 is a changed copy of "
                 u"the glyph, variant 2 of its first alternate, and around again; each is a copy of one design, never "

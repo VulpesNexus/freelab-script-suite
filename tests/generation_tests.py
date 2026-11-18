@@ -1574,7 +1574,7 @@ class WriteTests(unittest.TestCase):
 
 class ListControlTests(unittest.TestCase):
     """The tab's list controls (the owner's reports of 2026-11-16): Check all and Check none say how many,
-    Check only high-value glyphs and Only high-value glyphs as on the Diacritics tab, and the rows that
+    Check only high-value glyphs and List only high-value glyphs as on the Diacritics tab, and the rows that
     cannot be built dimmed."""
 
     QT = Stub(Qt=Stub(UserRole=32, ItemIsUserCheckable=1, ItemIsEnabled=2, ItemIsSelectable=4, Checked=2, Unchecked=0))

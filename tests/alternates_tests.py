@@ -543,7 +543,7 @@ class PageTests(unittest.TestCase):
         out where there is no alternate to build from. It then counts as unticked, its tick kept. Owner's
         image 269: it stayed grayed out after a build of variants, the font's only alternates being the
         ones FreeLab built: they are alternates to build from too, and the scope decides (not the font)."""
-        self.assertEqual(fa.DESIGNS_LABEL, u"Also build variants from existing alternates")
+        self.assertEqual(fa.DESIGNS_LABEL, u"Also build variants from existing alternates.")
         turns = lambda ch: bool(ch) and ft.fc.char_kind(ch) is not None
         self.assertTrue(fa.has_designs({0x57: u"W"}, fa.alternates_index([u"W", u"W.ss01"]), turns))
         self.assertTrue(fa.has_designs({0x57: u"W"}, fa.alternates_index([u"W", u"W.alt1"]), turns),

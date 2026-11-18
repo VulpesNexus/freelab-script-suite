@@ -642,7 +642,7 @@ class Layout(object):
 # the masters stay compatible), and a glyph of components stays one: the change goes into its components'
 # transforms, so it still follows its source. The same seed gives the same glyph; another seed, another.
 VARY_OPS = ("turn", "mirror")
-VARY_LABEL = u"Vary turned and mirrored glyphs"
+VARY_LABEL = u"Vary turned and mirrored glyphs."
 FIND_A_GLYPH = u"Find a glyph…"  # (a placeholder ends with an ellipsis: owner's image 309)
 VARY_SEED_REACH = (1, 9999)
 VARY_SETTINGS = ("vary", "vary_seed", "vary_strength")  # (in Glyph Compose's settings file, under generation)
@@ -2140,7 +2140,7 @@ class GenerationPage(object):
             if fit is not None:
                 fit(self.list_box)
             row.addWidget(self.list_box)  # (the row's own spacing after it: owner's image 307 found the gaps wide)
-        self.existing_box = QtGui.QCheckBox(u"Also list existing glyphs")
+        self.existing_box = QtGui.QCheckBox(u"Also list existing glyphs.")
         self.existing_box.setWhatsThis(u"Also lists the characters of these groups the font has already, in a section "
                                        u"of their own, unticked: those you tick are built again from their recipe, "
                                        u"their outlines in each master replaced (<i>Edit &gt; Undo</i> takes it back). "
@@ -2153,7 +2153,7 @@ class GenerationPage(object):
         row.addWidget(self.value_only_box)
         # The four widths in a row of their own: beside the List chooser and the search field, the search
         # field was squeezed to two letters (live, 2026-11-16); the owner asked whether Also list existing
-        # glyphs and the search field could join them (2026-11-16): with Only high-value glyphs beside them, a
+        # glyphs and the search field could join them (2026-11-16): with List only high-value glyphs beside them, a
         # line of all of them needs about 1,100 pixels (1,300 with the List chooser), so they stay apart. The
         # row's own spacing between the settings, no wider gap: with 12 pixels more after each and Vary turned
         # and mirrored glyphs at its end, this row alone made the tab 1,047 pixels wide at the least, wider
@@ -2633,7 +2633,17 @@ class GenerationPage(object):
         ak.enable(self.none_button, any(r.checked for r in shown))
         checked = [i for i, r in enumerate(self.rows) if r.checked and r.layout is not None]
         ak.enable(self.build_button, bool(checked))
-        self.build_button.setText(self.cm.build_text(len(checked), sum(1 for i in checked if i in self.hidden)))
+        self.build_button.setText(self.cm.build_text(len(checked), 0))
+        # (the ticked rows a search hides, which Build builds too: said beside the search, owner's images 331 and 332)
+        args = getattr(self, "count_args", None)
+        if args is not None and getattr(self, "search_label", None) is not None:
+            try:
+                text = self.cm.search_count(args[0], args[1], args[2], filtered=args[3],
+                                            ticked_hidden=sum(1 for i in checked if i in self.hidden))
+            except TypeError:  # (a Glyph Compose of before: the count alone)
+                text = self.cm.search_count(args[0], args[1], args[2], filtered=args[3])
+            show = getattr(self.cm, "show_count", None)
+            show(self.search_label, text) if show is not None else self.search_label.setText(text)
         defaults = settings_of(self.data)
         ak.enable(self.restore_button, any(r.checked != self.first_checks.get(r.hex, r.checked) for r in self.rows)
                   or any(abs(float(self.settings[k]) - float(defaults[k])) > 1e-9 for k in SETTING_KEYS)
@@ -2722,6 +2732,7 @@ class GenerationPage(object):
                 item.setHidden(not found)
                 any_shown = any_shown or found
             section.setHidden(not any_shown)
+        self.count_args = (shown, total, query, wanted is not None)  # (update_buttons adds the ticks hidden)
         text = self.cm.search_count(shown, total, query, filtered=wanted is not None)
         show = getattr(self.cm, "show_count", None)  # (hidden while empty: owner's image 185)
         show(self.search_label, text) if show is not None else self.search_label.setText(text)

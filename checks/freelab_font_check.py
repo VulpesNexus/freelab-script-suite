@@ -2897,11 +2897,11 @@ def script_text(s):
 
 def absent_caption(count):
     """The check box under the scripts, its caption a sentence with the count of the scripts it shows
-    (None: not known yet, before the first check: no count is shown as a zero). No period: a tick's text
-    names an option, as a button's does (owner's image 306)."""
+    (None: not known yet, before the first check: no count is shown as a zero). A tick's caption that is a
+    sentence ends with a period (owner's image 324); one that names a thing (a feature, a section) has none."""
     if count is None:
-        return u"Show the scripts whose glyphs are fully missing from the font"
-    return u"Show the %s whose glyphs are fully missing from the font" % counted(count, u"script")
+        return u"Show the scripts whose glyphs are fully missing from the font."
+    return u"Show the %s whose glyphs are fully missing from the font." % counted(count, u"script")
 
 
 def bar_widths(counts, width):
@@ -5801,8 +5801,17 @@ class FontCheckDialog(object):
         self.build_coverage(QtCore, QtGui)
         self.build_metrics(QtCore, QtGui)
         self.build_masters(QtCore, QtGui)
-        for tab, label in ((self.coverage, "Coverage"), (self.metrics, "Vertical metrics"), (self.masters, "Masters")):
-            self.tabs.addTab(label)
+        tab_helps = (u"The languages, character sets, and scripts the font's glyphs cover, and the glyphs each one "
+                     u"misses. Checked as the tab is first shown.",
+                     u"The font's line metrics against its tallest and deepest glyphs, and the values to write "
+                     u"instead. Checked as the tab is first shown.",
+                     u"What keeps the font's masters from interpolating: each glyph missing in a master, or whose "
+                     u"contours, nodes, components, or anchors differ from the chosen master's, and the fixes that "
+                     u"can be made. Checked as the tab is first shown.")
+        for tab, label, text in zip((self.coverage, self.metrics, self.masters), ("Coverage", "Vertical metrics", "Masters"),
+                                    tab_helps):
+            index = self.tabs.addTab(label)
+            self.tabs.setTabWhatsThis(index, text)  # (a right-click on a tab tells of it: owner's image 329)
             self.pages.addWidget(tab.widget)
             self.header_box.addWidget(tab.status)
         self.tab_names = {"window": TabNames(self.tabs, (u"Coverage", u"Vertical metrics", u"Masters")),
@@ -6268,7 +6277,7 @@ class FontCheckDialog(object):
                                        u"source declares are counted (Hyperglot, Google Fonts' language data, Unicode "
                                        u"CLDR, SIL's Locale Data Repository); a search still finds the others.")
         tab.settings.addWidget(self.inferred_box)
-        self.composing = QtGui.QCheckBox("Count letters its anchors compose")
+        self.composing = QtGui.QCheckBox("Count letters its anchors compose.")
         self.composing.setChecked(True)
         self.composing.setWhatsThis(u"A letter with a diacritic the font lacks as one glyph counts as there when the "
                                     u"font has the letter and the combining mark, and the letter has an anchor the "
@@ -6850,8 +6859,7 @@ class FontCheckDialog(object):
                                 u"Fonts asks 120% to 130% for Latin, Greek, and Cyrillic; tall scripts may need more.")
         row.addWidget(self.mode_share)
         row.addWidget(self.share)
-        row.addStretch(1)
-        body.addLayout(row, 1, 0, 1, 2)
+        row.addSpacing(12)
         self.mode_keep = QtGui.QRadioButton("Keep the font's current line spacing")
         self.mode_keep.setToolTip(self.tip(u"For an update of a font already released: documents set in it do not reflow."))
         self.mode_keep.setWhatsThis(u"For an update of a font already released: keeps its current line spacing, so "
@@ -6859,7 +6867,9 @@ class FontCheckDialog(object):
                                     u"they are when <i>Use Typo Metrics</i> is on, or else take the old win values, which "
                                     u"Windows spaced lines by; the win values grow to the ink and <i>Use Typo Metrics</i> "
                                     u"is turned on.")
-        body.addWidget(self.mode_keep, 2, 0, 1, 2)
+        row.addWidget(self.mode_keep)  # (both choices on one line: owner's image 345)
+        row.addStretch(1)
+        body.addLayout(row, 1, 0, 1, 2)
         # (its heading is its list's own header, on the line of the values' header)
         self.checks_tree = self.tree((u"Checks",), icon=(STATE_SIZE, STATE_SIZE), grid=False)
         self.checks_tree.setWhatsThis(u"What Google Fonts' vertical metrics guidance asks, one line each: a warning "
@@ -7732,8 +7742,8 @@ class FontCheckDialog(object):
             self.log.add(u"The font info declares what the font covers already: nothing to write.")
             return
         module = self.ak.font_info()
-        # (no before_changes: the font info is the font's own state, recorded as FontLab opens it, and the
-        # declaration went on Undo without one, live 2026-11-18)
+        if not self.begin_info_write(self.package, u"FreeLab Font Check: coverage declared"):
+            return
         info = self.package.fgPackage.info
         fields = dict((key, attribute) for key, attribute, _label in COVERAGE_KEYS)
         done, failed = [], []
@@ -9575,6 +9585,14 @@ class FontCheckDialog(object):
         self.check(self.current_key())
         return False
 
+    def begin_info_write(self, package, title):
+        """before_changes for a write to the font info (begin_write: False, said in the log, when nothing may
+        be written). The font info is the font's own state, but the step notify_changed makes records the
+        whole font, its glyphs too, which have no state of their own in a font opened afresh: undoing such a
+        step made FontLab print "We have a problem with the component 'P' in glyph 'Rho:Regular'" for each
+        glyph built from components (owner's image 336, a kerning write's)."""
+        return self.ak.begin_write(self.fontlab, package, title, self.log)
+
     def write_suggestions(self):
         """The suggested values that differ written into the font info (fgPackage.info: font-wide), the old
         ones kept for Put back old values (FontLab's History does not cover the font info: found live); the
@@ -9585,6 +9603,8 @@ class FontCheckDialog(object):
         writes = metric_writes(self.suggestions)
         if not writes:
             self.log.add(u"The font's values are as suggested: nothing to write.")
+            return
+        if not self.begin_info_write(self.package, u"FreeLab Font Check: vertical metrics"):
             return
         fields = dict(INFO_FIELDS)
         done, failed = [], []
@@ -9667,6 +9687,8 @@ class FontCheckDialog(object):
             self.update_put_back()
             return
         ident, old, keys, unset, labels = held
+        if not self.begin_info_write(current, u"FreeLab Font Check: vertical metrics put back"):
+            return
         fields = dict(INFO_FIELDS)
         info = current.fgPackage.info
         restored, failed, left, kept = [], [], [], []

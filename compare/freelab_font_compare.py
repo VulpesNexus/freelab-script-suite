@@ -100,9 +100,12 @@ def counted(number, one, many=None):
 
 
 def tab_text(title, count=None):
-    """A tab's title with its count in parentheses, thousands grouped: "Glyphs (13,956)" (owner's image 235);
-    the title alone before a comparison."""
-    return title if count is None else u"%s (%s)" % (title, grouped(count))
+    """A tab's title with its count of differences in parentheses, thousands grouped: "Glyphs (13,956)"
+    (owner's image 235); "(alike)" when nothing differs (a "(0)" read as nothing compared: owner's images 327
+    and 328, Family Audit's); the title alone before a comparison."""
+    if count is None:
+        return title
+    return u"%s (%s)" % (title, grouped(count) if count else u"alike")
 
 
 def round_units(value):
@@ -1035,14 +1038,14 @@ def feature_state(f, labels):
 
 def same_caption(count):
     """The Features tab's tick, with the count of the features alike (None: nothing compared yet, no count;
-    no period, a tick's text names an option). The owner saw no change on ticking it (image 293): with two
-    fonts whose every feature differs or is only in one, there is nothing alike to show, so it says so by its
-    count, and is grayed (update_buttons)."""
+    a sentence, so it ends with a period: owner's image 324). The owner saw no change on ticking it (image
+    293): with two fonts whose every feature differs or is only in one, there is nothing alike to show, so it
+    says so by its count, and is grayed (update_buttons)."""
     if not count:
-        return u"Show the features that are alike"
+        return u"Show the features that are alike."
     if count == 1:
-        return u"Show the feature that is alike"
-    return u"Show the %s features that are alike" % grouped(count)
+        return u"Show the feature that is alike."
+    return u"Show the %s features that are alike." % grouped(count)
 
 
 def bold(text):

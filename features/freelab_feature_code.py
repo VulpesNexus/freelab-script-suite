@@ -5940,6 +5940,11 @@ class FeatureCodeDialog(object):
                 self.ak.html(refusal), link(u"Feature Check") if link is not None else u"<i>Feature Check</i>"),
                 "error")
             return
+        # The feature code is the font's own state, but the step records the whole font, its glyphs too, which
+        # have no state of their own in a font opened afresh: undone, FontLab printed a problem with each
+        # glyph built from components (owner's image 336, a kerning write's)
+        if not self.ak.begin_write(self.fontlab, self.package, u"FreeLab Feature Code", self.log):
+            return
         written, error, skipped = [], None, None
         # (the window's top row says what is under way; a write is never stopped half way)
         self.set_busy(True, u"Writing the code", stoppable=False)
@@ -5966,7 +5971,7 @@ class FeatureCodeDialog(object):
             error = exc
         finally:
             self.set_busy(False)
-        # (the feature code only: the font's own state, which needs no before_changes, and no glyph added)
+        # (the feature code only, no glyph added; begun with begin_write above)
         status = self.ak.notify_changed(self.fontlab, self.package, u"FreeLab Feature Code", added=False)
         forms, choices = self.form_state(), self.choice_state()
         self.run()

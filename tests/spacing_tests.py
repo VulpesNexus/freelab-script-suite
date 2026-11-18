@@ -414,6 +414,25 @@ class SpacingTests(unittest.TestCase):
         self.assertEqual(sp.references_to_space(sides, 1000), [])
         sides[u"n"] = ("n", 0, 2, 500)
         self.assertEqual(sp.references_to_space(sides, 1000), [u"H", u"n", u"o"], "Latin's alone")
+        # (owner's image 335: n and o spaced from the corpus without l, ll no longer agreed with nn and oo,
+        # and nothing could be spaced after: l is spaced with them)
+        sides[u"l"] = ("l", 3, 4, 200)
+        self.assertEqual(sp.references_to_space(sides, 1000), [u"H", u"l", u"n", u"o"])
+
+    def test_a_write_that_leaves_the_font_unmeasurable_says_it_once(self):
+        # (owner's image 335: "Stopped by an error" with the analysis's own message, then that message again)
+        source = io.open(os.path.join(HERE, os.pardir, "spacing", "freelab_auto_spacing.py"), encoding="utf-8").read()
+        write = source[source.index(u"except CannotSpace:\n                pass"):]
+        self.assertLess(write.index(u"except CannotSpace:"), write.index(u"except Exception as exc:  # what was changed"))
+
+    def test_l_has_a_row_in_the_reference_model(self):
+        path = os.path.join(HERE, os.pardir, "spacing", sp.REFERENCE_MODEL_FILE)
+        if not os.path.exists(path):
+            self.skipTest("the model is not beside this copy of the tests (the Python 2.7 run copies the code)")
+        model = sp.load_reference_model(path)
+        changes = sp.reference_changes(u"l", 0, 0, 80, {u"x": 500, u"H": 700}, model)
+        self.assertIsNotNone(changes, "spaced as the corpus spaces it, or ll stays apart from nn and oo")
+        self.assertTrue(all(change > 0 for change in changes))
 
     def test_changes_settle_in_one_analysis(self):
         # the methods want T's right side 40 units tighter and its left side 30 looser, but each measure
@@ -667,10 +686,9 @@ class WordingTests(unittest.TestCase):
         for mark in escaped + [u" \N{EM DASH} ", u" \N{MIDDLE DOT} "]:
             self.assertNotIn(mark, self.source())
 
-    def test_a_check_box_label_takes_no_period(self):
-        import re
-        self.assertEqual(re.findall(u"QCheckBox\\(u?\"[^\"]*\\.\"\\)", self.source()), [])
-        self.assertIn(u"QCheckBox(\"Glyphs built from components follow the glyphs they are built on\")", self.source())
+    def test_a_check_box_sentence_ends_with_a_period(self):
+        # (owner's image 324: a tick's caption that is a sentence takes its period)
+        self.assertIn(u"QCheckBox(\"Glyphs built from components follow the glyphs they are built on.\")", self.source())
 
     def test_the_units_box_follows_its_number(self):
         self.assertNotIn(u"setSuffix(", self.source(), "ak.counted_suffix sets it: 1 unit, 2 units")

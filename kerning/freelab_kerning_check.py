@@ -303,7 +303,10 @@ def find_cleanup(kerning, glyph_exists, tiny=TINY_UNITS, progress=None):
         elif fallbacks == set([value]):
             below_text = u"the class pair's value" if value else u"no kerning"
             found.append(Cleanup(entry, value, "redundant", u"its pairs get %s (%d) without it" % (below_text, value), True))
-        elif value and abs(value) < tiny:
+        elif value and abs(value) < tiny and all(abs(below - value) < tiny for below in fallbacks if below is not None):
+            # (tiny, and its pairs as near without it: an exception of -4 to a class pair of -32 keeps its pairs
+            # apart, and removing it brought their collisions back, whose fixes were tiny values again: owner's
+            # images 338 and 339)
             found.append(Cleanup(entry, value, "tiny", u"smaller than %s" % counted(tiny, u"unit"), False))
     order = dict((kind, index) for index, (kind, _) in enumerate(CLEANUP_KINDS))
     found.sort(key=lambda c: (order[c.kind], describe(c.entry)))
@@ -544,8 +547,6 @@ class InkDistances(object):
 
 # The Collisions list's columns: the pair (drawn from the font beside its characters), its glyphs' names,
 # then its numbers and where its value comes from
-PREVIEW_HINTS = (u"Select a pair to see it here as it is, with its fix, and beside its base pair.",
-                 u"Select an entry to see its first pair here, with the entry and without it.")
 COLLISION_COLUMNS = (u"Pair", u"Glyphs", u"Kerning", u"Distance", u"Fix", u"Set by", u"Compared with")
 NUMBER_COLUMNS = (u"Kerning", u"Distance", u"Fix", u"Value")  # columns of numbers (add_row right-aligns their cells)
 
@@ -931,9 +932,15 @@ class KerningCheckDialog(object):
         self.update_previews()
         self.update_buttons()
 
+    def begin_writing(self):
+        """before_changes for a kerning write (begin_write: False, said in the log, when nothing may be
+        written): the step records the whole font, its glyphs too, which have no state of their own in a font
+        opened afresh, and undoing it made FontLab print "We have a problem with the component 'P' in glyph
+        'Rho:Regular'" for each glyph built from components (owner's image 336)."""
+        return self.ak.begin_write(self.fontlab, self.package, u"FreeLab Kerning Check", self.log)
+
     def after_writing(self):
-        """notify_changed's WriteStatus (kerning only: the font's own state, which needs no before_changes,
-        and no glyph added)."""
+        """notify_changed's WriteStatus (kerning only, no glyph added; begun by begin_writing)."""
         return self.ak.notify_changed(self.fontlab, self.package, u"FreeLab Kerning Check", added=False)
 
     # -- the lists limited to some glyphs ------------------------------------
@@ -1247,6 +1254,8 @@ class KerningCheckDialog(object):
         chosen = self.checked(tab)
         if not chosen:
             return
+        if not self.begin_writing():
+            return
         kerning = self.kerning()
         written, stale, error = 0, 0, None
         # Under the window's top-row progress, never stoppable: one step of FontLab's History, never half written
@@ -1334,6 +1343,8 @@ class KerningCheckDialog(object):
         tab = self.cleanup
         chosen = self.checked(tab)
         if not chosen:
+            return
+        if not self.begin_writing():
             return
         kerning = self.kerning()
         removed, stale, error = 0, 0, None
@@ -1529,20 +1540,9 @@ class KerningCheckDialog(object):
         self.update_buttons_soon()
 
     def preview_hint(self):
-        """What the pictures' room shows while no pair is selected: on the lists of pairs, what selecting
-        one does, while the list has one to select (owner's images 187 and 189: "Select a pair..." under an
-        empty list); elsewhere nothing."""
-        try:
-            index = self.tabs.currentIndex
-            index = index() if callable(index) else index
-        except Exception:
-            index = 0
-        if self.package is None or index not in (0, 1):
-            return u""
-        tab = getattr(self, TABS[index], None)
-        if not getattr(tab, "findings", None):
-            return u""  # (nothing listed: nothing to select)
-        return PREVIEW_HINTS[index]
+        """What the pictures' room shows while no pair is selected: nothing, as every other tool's previews
+        (owner's image 337: "Select a pair to see it here..." was this window's alone)."""
+        return u""
 
     # -- the Adjusted preview, dragged ---------------------------------------
 

@@ -642,8 +642,8 @@ class AddTests(unittest.TestCase):
                          "the owner's caption: the tab works on families and character sets too")
         self.assertEqual(fc.selection_title(wolof), u"Wolof (2)")
         # (a tick's text takes no period: it names an option, owner's image 306)
-        self.assertEqual(fc.absent_caption(48), u"Show the 48 scripts whose glyphs are fully missing from the font")
-        self.assertEqual(fc.absent_caption(1), u"Show the 1 script whose glyphs are fully missing from the font")
+        self.assertEqual(fc.absent_caption(48), u"Show the 48 scripts whose glyphs are fully missing from the font.")
+        self.assertEqual(fc.absent_caption(1), u"Show the 1 script whose glyphs are fully missing from the font.")
 
     def test_missed_language_gained_once_all_checked(self):
         results, _ = self.results()
@@ -3886,7 +3886,7 @@ class DialogTests(unittest.TestCase):
             gui.classes.clear()
             gui.classes.update(saved)
         self.assertEqual(dialog.show_absent.checked, True, "ticked to start with")
-        self.assertEqual(dialog.show_absent.made, (u"Show the scripts whose glyphs are fully missing from the font",),
+        self.assertEqual(dialog.show_absent.made, (u"Show the scripts whose glyphs are fully missing from the font.",),
                          "no count shown as a zero before the first check (and no period: owner's image 306)")
         self.assertEqual(fc.STATUS_FILTERS[dialog.status_filter.currentIndex][1], u"All languages")
         self.assertEqual(fc.STATUS_START, "all")
@@ -3911,7 +3911,7 @@ class DialogTests(unittest.TestCase):
             self.assertIn(words, said)
         absent = len([s for s in dialog.scripts if not s.present])
         self.assertGreater(absent, 1)
-        self.assertEqual(dialog.show_absent.text, u"Show the %d scripts whose glyphs are fully missing from the font" % absent)
+        self.assertEqual(dialog.show_absent.text, u"Show the %d scripts whose glyphs are fully missing from the font." % absent)
         self.assertEqual(len(dialog.shown_scripts()), len(dialog.scripts), "and they are listed")
         self.assertEqual(dialog.left_tabs.told("setTabText")[-2:],
                          [(0, u"High-value missing glyphs (%d)" % len(dialog.rows)),
@@ -4235,7 +4235,8 @@ class DialogTests(unittest.TestCase):
         widgets = body.told("addWidget")
         self.assertIn((dialog.values_tree, 0, 0), widgets)
         self.assertIn((dialog.checks_tree, 0, 1), widgets, "beside the values, on their row")
-        self.assertIn((dialog.mode_keep, 2, 0, 1, 2), widgets)
+        # (both choices of the line spacing on one line, owner's image 345)
+        self.assertNotIn(dialog.mode_keep, [args[0] for args in widgets], "in the line spacing's row, not a row of its own")
         self.assertEqual([args[1:] for args in body.told("addLayout")], [(1, 0, 1, 2)], "the line spacing, under both")
         self.assertIs(dialog.metrics.commit, dialog.write_button, "the committing button, at the bottom row's right")
         self.assertIs(dialog.masters.commit, dialog.fix_checked_button)
@@ -4374,7 +4375,7 @@ class DialogTests(unittest.TestCase):
         self.assertIn(u"covered and", dialog.coverage.status.text)
         self.assertEqual(fc.checking_text(1), u"Checking 1 language")
         self.assertEqual((fc.value_title(None), fc.value_title(0)), (u"High-value missing glyphs", u"High-value missing glyphs (0)"))
-        self.assertEqual(fc.absent_caption(None), u"Show the scripts whose glyphs are fully missing from the font")
+        self.assertEqual(fc.absent_caption(None), u"Show the scripts whose glyphs are fully missing from the font.")
         # A step that fails ends the work: the lists come back, and the log says why
         errors = []
         dialog.log.add = lambda text, level="info": errors.append((text, level))
@@ -5464,7 +5465,8 @@ class LoadingTests(unittest.TestCase):
         # (every caption with its colon, but a sentence's, which ends with a period after its control: image 271)
         # (and the sentence beside Check, which says what it does: grayed with it, owner's image 292)
         measured = u"Every glyph measured in every master."
-        self.assertEqual(sorted(labels), [u"Beside it:", u"Compare every master with", u"Display:", measured,
+        # (and a sentence's period, its control's caption: grayed with it, owner's images 319 to 323)
+        self.assertEqual(sorted(labels), [u".", u"Beside it:", u"Compare every master with", u"Display:", measured,
                                           u"Master:", u"Within reach: missing at most"])
         for text, control in ((u"Within reach: missing at most", dialog.nearly), (u"Display:", dialog.status_filter),
                               (u"Master:", dialog.clip_master), (u"Compare every master with", dialog.reference),

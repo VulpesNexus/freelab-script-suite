@@ -509,9 +509,13 @@ class LineTests(unittest.TestCase):
     def test_the_summary_line_in_bold_and_escaped(self):
         report = fc.Report(code(), [fc.Finding("unused-class", "@x is never used"),
                                     fc.Finding("empty-class", "@y is empty")], built=True)
-        self.assertEqual(fc.summary_line(report), "1 warning, 1 piece of advice. It compiles.")
+        # (one sentence, one line: owner's image 343)
+        self.assertEqual(fc.summary_line(report), "It compiles: 1 warning, 1 piece of advice.")
         self.assertEqual(fc.summary_line(report, rich=True),
-                         "<b>1 warning</b>, <b>1 piece of advice</b>. It compiles.")
+                         "It compiles: <b>1 warning</b>, <b>1 piece of advice</b>.")
+        error_kind = sorted(kind for kind, row in fc.KINDS.items() if row[0] == fc.ERROR)[0]
+        broken = fc.Report(code(), [fc.Finding(error_kind, "Unknown glyph class @uppercase")], built=False)
+        self.assertEqual(fc.summary_line(broken), "It does not compile: 1 error.")
         self.assertEqual(fc.summary_line(fc.Report(code(), [], unavailable="no <fontTools>"), rich=True),
                          "Nothing was checked: no &lt;fontTools&gt;.")
 

@@ -1499,32 +1499,41 @@ class EditorClickTests(unittest.TestCase):
         finally:
             ac._qt = saved
         part = [("o", 1.0, 1.0, 0.0, 0.0)]
+        # (each glyph's ink 50 to 450 units into its 500 of advance, from the baseline up to 700)
         editor.scene = {"glyphs": [(part, 500.0, "before"), (part, 500.0, "new"), (part, 500.0, "after")],
-                        "parts": part, "ranges": [], "ink": lambda name: None, "upm": 1000.0}
+                        "parts": part, "ranges": [], "upm": 1000.0,
+                        "ink": lambda name: Stub(left=50.0, right=450.0, bottom=0.0, top=700.0)}
         editor.view = (1.0, 0.0, 0.0)  # one pixel a unit, the origin at the left
         return editor
 
-    def event(self, x):
-        return Stub(button=lambda: 1, pos=lambda: Stub(x=lambda: x, y=lambda: 0))
+    def event(self, x, y=-100):
+        return Stub(button=lambda: 1, pos=lambda: Stub(x=lambda: x, y=lambda: y))
 
-    def test_a_click_on_the_other_letter_goes_to_it_and_opens_nothing(self):
+    def test_a_double_click_on_the_other_letter_goes_to_it_and_one_click_does_nothing(self):
+        # (owner's image 333: one click went to the letter after the glyph, and far past its ink too)
         calls = []
         owner = Stub(neighbor_clicked=lambda role: calls.append(("go", role)) or role == "after",
                      neighbor_char=lambda role: u"x" if role == "after" else None,
                      mark_selected=lambda index: None, editor_double_clicked=lambda: calls.append(("open",)))
         editor = self.editor(owner)
         editor.mousePressEvent(self.event(1200))
+        self.assertEqual(calls, [], "one click goes nowhere")
+        editor.mouseDoubleClickEvent(self.event(1200))
         self.assertEqual(calls, [("go", "after")])
-        editor.mouseDoubleClickEvent(self.event(700))  # (the list moved on: the glyph itself is under the pointer now)
-        self.assertEqual(calls, [("go", "after")], "the same click's second half opens no Glyph window")
+        editor.mouseDoubleClickEvent(self.event(1480))
+        editor.mouseDoubleClickEvent(self.event(1200, y=40))
+        self.assertEqual(calls, [("go", "after")], "past its ink's box, by more than a few pixels: nothing")
         editor.mouseDoubleClickEvent(self.event(700))
-        self.assertEqual(calls[-1], ("open",), "a double-click of its own does")
+        self.assertEqual(calls[-1], ("open",), "a double-click on the glyph opens it")
         del calls[:]
-        editor.mousePressEvent(self.event(100))  # the plain letter: asked, and nothing to go to
-        editor.mouseDoubleClickEvent(self.event(100))
+        editor.mouseDoubleClickEvent(self.event(500))
+        self.assertEqual(calls, [], "between two glyphs' ink: nothing")
+        editor.mouseDoubleClickEvent(self.event(100))  # the plain letter: asked, and nothing to go to
         self.assertEqual(calls, [("go", "before")], "a neighbor opens nothing")
         editor.mouseMoveEvent(self.event(1200))
         self.assertEqual(editor.cursor, "hand")
+        editor.mouseMoveEvent(self.event(1480))
+        self.assertEqual(editor.cursor, "arrow")
         editor.mouseMoveEvent(self.event(100))
         self.assertEqual(editor.cursor, "arrow")
 
@@ -1863,7 +1872,7 @@ class CellTextTests(unittest.TestCase):
         self.assertIn(u"within 1 unit of", ac.touch_note(acute, [(False, True, False, False)], 1.2))
         self.assertIn(u"within 2 units of", ac.touch_note(acute, [(False, True, False, False)], 2))
         self.assertEqual([ac.search_count(n, total, u"x") for n, total in ((0, 1), (1, 1), (1, 2), (2, 2))],
-                         [u"0 of 1 glyph shown", u"1 of 1 glyph shown", u"1 of 2 glyphs shown", u"2 of 2 glyphs shown"])
+                         [u"0 of 1 glyph shown.", u"1 of 1 glyph shown.", u"1 of 2 glyphs shown.", u"2 of 2 glyphs shown."])
         self.assertEqual(ac.search_count(3, 3, u"  "), u"", "no search: no count")
         self.assertEqual(ac.propagated_text(1, 0, u"C"), u"Placed the diacritics of 1 letter as on C")
         self.assertEqual(ac.propagated_text(2, 1, u"C"), u"Placed the diacritics of 2 letters as on C (1 put back as suggested)")
@@ -2366,10 +2375,10 @@ class SearchTests(unittest.TestCase):
         try:
             ac._qt = lambda: (LIST_QT, None)
             page.apply_search()
-            self.assertEqual(page.count, u"0 of 2 glyphs shown", "no row has the glyph h")
+            self.assertEqual(page.count, u"0 of 2 glyphs shown.", "no row has the glyph h")
             page.search.text = u"e"
             page.apply_search()
-            self.assertEqual(page.count, u"1 of 2 glyphs shown")
+            self.assertEqual(page.count, u"1 of 2 glyphs shown.")
         finally:
             ac._qt = saved
         self.assertEqual(ac.ascii_lower(u"AbZ" + ac.unichr_(0x0104)), u"abz" + ac.unichr_(0x0104),
@@ -2400,7 +2409,7 @@ class SearchTests(unittest.TestCase):
             dialog.apply_search()
             self.assertEqual([row.hidden for row in build.rows], [True, False])
             self.assertEqual((build.hidden, lack.hidden), (False, True), "a section with no row left is hidden with them")
-            self.assertEqual((dialog.hidden, dialog.count), (set([0, 2]), u"1 of 3 glyphs shown"))
+            self.assertEqual((dialog.hidden, dialog.count), (set([0, 2]), u"1 of 3 glyphs shown."))
             self.assertEqual([row.checked for row in build.rows], [True, False], "a hidden row keeps its check")
             dialog.check_all(True)
             self.assertEqual([row.checked for row in build.rows], [True, True], "the rows shown")
@@ -2412,7 +2421,7 @@ class SearchTests(unittest.TestCase):
                                             u"Unticked <b>1 glyph</b> (<b>1</b> still ticked, not shown: a search hides it)."])
             dialog.search.text = u"U+1E0D"
             dialog.apply_search()
-            self.assertEqual((build.hidden, lack.hidden, dialog.count), (True, False, u"1 of 3 glyphs shown"))
+            self.assertEqual((build.hidden, lack.hidden, dialog.count), (True, False, u"1 of 3 glyphs shown."))
             dialog.search.text = u""
             dialog.apply_search()
             self.assertEqual((dialog.hidden, dialog.count), (set(), u""))
@@ -2458,7 +2467,7 @@ class SearchTests(unittest.TestCase):
             page.apply_search()
             self.assertEqual([row.hidden for row in section.rows], [True, False])
             self.assertEqual((section.hidden, bases.hidden, marks.hidden), (False, False, True))
-            self.assertEqual(page.count, u"1 of 3 glyphs shown")
+            self.assertEqual(page.count, u"1 of 3 glyphs shown.")
             page.check_all(False)
             self.assertEqual([row.checked for row in section.rows + marks.rows], [True, False, True], "the row shown only")
             self.assertEqual(lines, [u"Unticked <b>1 glyph</b> (<b>2</b> still ticked, not shown: a search hides them)."])
@@ -2473,8 +2482,7 @@ class SearchTests(unittest.TestCase):
         counts them as Build does."""
         self.assertEqual(ac.anchors_button_text(3, 0), u"Add ticked anchors")
         self.assertEqual(ac.anchors_button_text(0, 0), u"Add ticked anchors")
-        self.assertEqual(ac.anchors_button_text(1, 1), u"Add anchors to 1 ticked glyph (1 not shown)")
-        self.assertEqual(ac.anchors_button_text(12, 5), u"Add anchors to 12 ticked glyphs (5 not shown)")
+        self.assertEqual(ac.anchors_button_text(12, 5), u"Add ticked anchors", "the count beside the search says it")
         inks = AnchorPageTests.INKS
         page = ac.AnchorPage.__new__(ac.AnchorPage)
         page.glyphs = ac.plan_anchors([("e", 0x65, "base", inks["e"], {}), ("B", 0x42, "base", inks["B"], {}),
@@ -2487,18 +2495,22 @@ class SearchTests(unittest.TestCase):
         page.ak = Stub(enable=lambda button, on: None)
         page.all_button = page.none_button = page.restore_button = page.reset_button = Stub()
         page.write_button = Stub(setText=texts.append)
+        counts = []
+        page.search_label = Stub(setText=counts.append, setVisible=lambda on: None)
+        page.count_args = (1, 3, u"b", False)
         saved = ac._qt
         try:
             ac._qt = lambda: (LIST_QT, None)
             page.hidden = set([names.index("e"), names.index("acutecomb")])
             page.update_buttons()
-            self.assertEqual(texts[-1], u"Add anchors to 3 ticked glyphs (2 not shown)")
+            self.assertEqual(texts[-1], u"Add ticked anchors")
+            self.assertEqual(counts[-1], u"1 of 3 glyphs shown (2 ticked among those hidden).")
             page.glyphs[names.index("e")].checked = False
             page.update_buttons()
-            self.assertEqual(texts[-1], u"Add anchors to 2 ticked glyphs (1 not shown)", "an unchecked row is not written")
+            self.assertEqual(counts[-1], u"1 of 3 glyphs shown (1 ticked among those hidden).", "an unchecked row is not written")
             page.hidden = set()
             page.update_buttons()
-            self.assertEqual(texts[-1], u"Add ticked anchors")
+            self.assertEqual(counts[-1], u"1 of 3 glyphs shown.")
         finally:
             ac._qt = saved
 
@@ -3149,12 +3161,13 @@ class CompactTests(unittest.TestCase):
 class BuildTextTests(unittest.TestCase):
     """Build builds every checked glyph, shown or not, and says how many a search hides."""
 
-    def test_the_button_says_how_many_are_not_shown(self):
-        self.assertEqual(ac.build_text(12, 0), u"Build ticked glyphs")
-        self.assertEqual(ac.build_text(12, 5), u"Build 12 ticked glyphs (5 not shown)")
-        self.assertEqual(ac.build_text(1, 1), u"Build 1 ticked glyph (1 not shown)")
-        self.assertEqual(ac.build_text(2, 1), u"Build 2 ticked glyphs (1 not shown)")
-        self.assertEqual(ac.build_text(0, 0), u"Build ticked glyphs")
+    def test_the_count_beside_the_search_says_how_many_are_not_shown(self):
+        # (owner's images 331 and 332: "Build 12 ticked glyphs (5 not shown)" on the button made the window wider
+        # as a filter was ticked; the button keeps its text, the count beside the search says it)
+        self.assertEqual(ac.build_text(12, 5), u"Build ticked glyphs")
+        self.assertEqual(ac.search_count(3, 341, u"a", ticked_hidden=5), u"3 of 341 glyphs shown (5 ticked among those hidden).")
+        self.assertEqual(ac.search_count(3, 341, u"a", ticked_hidden=1), u"3 of 341 glyphs shown (1 ticked among those hidden).")
+        self.assertEqual(ac.search_count(3, 341, u"a"), u"3 of 341 glyphs shown.")
         self.assertEqual([ac.correct_button_text(n) for n in (0, 1, 2)],
                          [u"Correct mirrored components", u"Correct mirrored components of 1 glyph",
                           u"Correct mirrored components of 2 glyphs"])
@@ -3181,8 +3194,12 @@ class BuildTextTests(unittest.TestCase):
         saved = ac._qt
         try:
             ac._qt = lambda: (LIST_QT, None)
+            counts = []
+            dialog.search_label = Stub(setText=counts.append, setVisible=lambda on: None)
+            dialog.count_args = (2, 4, u"a", False)
             dialog.update_buttons()
-            self.assertEqual(texts["build"], u"Build 2 ticked glyphs (1 not shown)")
+            self.assertEqual(texts["build"], u"Build ticked glyphs")
+            self.assertEqual(counts[-1], u"2 of 4 glyphs shown (1 ticked among those hidden).")
             dialog.hidden = set()
             dialog.update_buttons()
             self.assertEqual(texts["build"], u"Build ticked glyphs")
@@ -5169,7 +5186,7 @@ class OwnerReportNovember15Tests(unittest.TestCase):
         finally:
             ac.read_settings = saved
         box = dialog.compact_box
-        self.assertEqual(box.args[0], u"Compact diacritics to fit the line")
+        self.assertEqual(box.args[0], u"Compact diacritics to fit the line.")
         self.assertIs(box.__dict__.get("checked"), False, "unticked by default")
         self.assertFalse(dialog.compact)
         rows = [w for w in made if dialog.reset_marks_button in w.__dict__.get("added", [])]
@@ -5395,13 +5412,13 @@ class OwnerReportNovember16Tests(unittest.TestCase):
                          "the font's own, each once (a glyph not made yet has no state to record)")
 
     def test_only_high_value_glyphs(self):
-        """The owner's request: Only high-value glyphs beside Also list existing glyphs."""
+        """The owner's request: List only high-value glyphs beside Also list existing glyphs."""
         a_macron = ac.unichr_(0x0101)
         self.assertIsNone(ac.value_filter(None, set([a_macron])))
         self.assertIsNone(ac.value_filter(Stub(checked=False), set([a_macron])))
         self.assertIsNone(ac.value_filter(Stub(checked=True), None), "the set not known: nothing hidden for it")
         self.assertEqual(ac.value_filter(Stub(checked=True), [a_macron]), set([a_macron]))
-        self.assertEqual(ac.search_count(1, 3, u"", filtered=True), u"1 of 3 glyphs shown")
+        self.assertEqual(ac.search_count(1, 3, u"", filtered=True), u"1 of 3 glyphs shown.")
         self.assertEqual(ac.search_count(1, 3, u""), u"")
         self.assertEqual(ac.high_value_text(1), u"Ticked 1 glyph <i>Font Check</i> lists as high-value (it helps "
                                                  u"complete languages already within reach), and no other shown.")
@@ -5414,7 +5431,7 @@ class OwnerReportNovember16Tests(unittest.TestCase):
         finally:
             ac._qt = saved
         self.assertEqual(([row.hidden for row in build.rows], lack.hidden), ([False, True], True))
-        self.assertEqual((dialog.hidden, dialog.count), (set([1, 2]), u"1 of 3 glyphs shown"))
+        self.assertEqual((dialog.hidden, dialog.count), (set([1, 2]), u"1 of 3 glyphs shown."))
 
     def test_back_to_font_check_once_its_glyphs_are_built(self):
         """Item 134: after a build from Font Check's hand-over, Font Check again, in this window's place."""

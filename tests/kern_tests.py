@@ -642,6 +642,13 @@ class KerningUpgradeTests(unittest.TestCase):
         self.assertEqual([(c.kind, c.checked) for c in tiny], [("tiny", False)])
         self.assertEqual(tiny[0].reason, u"smaller than 5 units")
         self.assertFalse([c.reason for c in found + tiny if c.reason.endswith(u".")], "a cell's note: no period")
+        # (owner's images 338 and 339: -4 for A and lacute, an exception to the class pair's -32, was listed as
+        # tiny; removed, the pair collided again, and its fix was a tiny value again)
+        exception = kc.find_cleanup(fake_font({"L": (["l", "lacute"], "KernRight")},
+                                              {(("A", False), ("L", True)): -32, (("A", False), ("lacute", False)): -4,
+                                               (("A", False), ("x", False)): -3}), lambda name: True, 5)
+        self.assertEqual([(c.entry, c.kind) for c in exception], [((("A", False), ("x", False)), "tiny")],
+                         "A lacute's pair would move 28 units without it: not tiny")
 
     def test_cleanup_judged_again_before_removing(self):
         # A V equals its class's -50 at the check; the class pair is then edited to -100: A V now sets A V
@@ -969,14 +976,19 @@ class BeforeChangesTests(unittest.TestCase):
         self.assertEqual(status.message(), u"")
 
     def test_every_write_begins_with_before_changes_where_undo_needs_it(self):
-        """Each tool that changes glyphs records the font first; kerning, feature code, and font info are
-        the font's own state (recorded when FontLab opens a font: live, they went on Undo)."""
+        """Each tool that writes records the font first. Kerning, feature code, and font info are the font's
+        own state (recorded when FontLab opens a font: live, they went on Undo), but the step records the
+        whole font, its glyphs too, which have none in a font opened afresh: undone, FontLab printed "We have
+        a problem with the component 'P' in glyph 'Rho:Regular'" (owner's image 336, Kerning Check's)."""
         root = os.path.join(HERE, os.pardir)
         expected = {"spacing/freelab_auto_spacing.py": 1, "cjk/freelab_cjk_spacing.py": 1,
-                    "compose/freelab_glyph_compose.py": 1, "features/freelab_feature_code.py": 1,
-                    "checks/freelab_font_check.py": 1, "features/freelab_feature_check.py": 1,
-                    "builder/freelab_font_builder.py": 1,
-                    "kerning/freelab_auto_kerning.py": 2}  # (flag_glyphs's, and begin_write's own before_changes)
+                    "compose/freelab_glyph_compose.py": 1,
+                    "features/freelab_feature_code.py": 2,  # (the figure forms' build, the code's write)
+                    "checks/freelab_font_check.py": 2,  # (the masters' fixes, begin_info_write)
+                    "features/freelab_feature_check.py": 1, "builder/freelab_font_builder.py": 1,
+                    "kerning/freelab_kerning_check.py": 1,  # (begin_writing)
+                    # (flag_glyphs's, begin_write's own before_changes, begin_kerning_write)
+                    "kerning/freelab_auto_kerning.py": 3}
         for path, count in expected.items():
             with io.open(os.path.join(root, path), encoding="utf-8") as handle:
                 source = handle.read()
@@ -4296,6 +4308,184 @@ class SingleChoiceTests(unittest.TestCase):
         ak.caption_states([own])
         self.assertEqual(own.toolTip, u"Its own.", "a caption's own help is kept")
 
+    def test_a_sentences_period_grays_with_the_control_before_it(self):
+        # (owner's images 319 to 323: "List changes of at least [6 units] ." with its period bright, no font open)
+        class Item(object):
+            def __init__(self, widget=None, layout=None):
+                self._widget, self._layout = widget, layout
+
+            def widget(self):
+                return self._widget
+
+            def layout(self):
+                return self._layout
+
+        class Label(object):
+            def __init__(self, text=u""):
+                self.text, self.props, self._buddy = text, {}, None
+
+            def setBuddy(self, other):
+                self._buddy = other
+
+            def buddy(self):
+                return self._buddy
+
+            def setProperty(self, name, value):
+                self.props[name] = value
+
+            def property(self, name):
+                return self.props.get(name)
+
+        class Row(object):
+            spacing = 6
+
+            def __init__(self, *items):
+                self.items = list(items)
+
+            def count(self):
+                return len(self.items)
+
+            def itemAt(self, k):
+                return self.items[k]
+
+            def addSpacing(self, value):
+                self.items.append(Item())
+
+            def addWidget(self, widget):
+                self.items.append(Item(widget))
+
+        old = ak._qt
+        ak._qt = lambda: (None, type("QtGui", (), {"QLabel": Label}))
+        self.addCleanup(lambda: setattr(ak, "_qt", old))
+        spin = object()
+        row = Row(Item(Label(u"List changes of at least")), Item(layout=Row(Item(spin))))
+        period = ak.sentence_end(row)
+        self.assertEqual(period.text, u".")
+        self.assertIs(period.buddy(), spin, "the last control in the row, a nested row searched")
+        self.assertTrue(period.property(ak.CAPTION_PROP), "grayed and explained with it (caption_states)")
+
+    def test_a_blank_line_under_the_font_line(self):
+        # (owner's image 346: Font Check's results stood a blank line under the font's line; every window now)
+        class Widget(object):
+            def __init__(self, label=True):
+                self.label, self.props, self.margins = label, {}, None
+
+            def inherits(self, kind):
+                return self.label and kind == "QLabel"
+
+            def property(self, name):
+                return self.props.get(name)
+
+            def setProperty(self, name, value):
+                self.props[name] = value
+
+            def setContentsMargins(self, *margins):
+                self.margins = margins
+
+        class Item(object):
+            def __init__(self, widget):
+                self._widget = widget
+
+            def widget(self):
+                return self._widget
+
+        class Layout(object):
+            def __init__(self, parent=None, items=()):
+                self.items, self.added = [Item(w) for w in items], []
+
+            def count(self):
+                return len(self.items)
+
+            def itemAt(self, k):
+                return self.items[k]
+
+            def removeWidget(self, widget):
+                self.items = [i for i in self.items if i.widget() is not widget]
+
+            def setContentsMargins(self, *margins):
+                pass
+
+            def setSpacing(self, value):
+                pass
+
+            def addWidget(self, widget):
+                self.added.append(widget)
+
+        old_qt, old_gap = ak._qt, ak.head_gap
+        # (staticmethod: a function in a class is a method in Python 2.7)
+        ak._qt = lambda: (None, type("QtGui", (), {"QWidget": staticmethod(lambda: Widget(False)), "QVBoxLayout": Layout}))
+        ak.head_gap = lambda label: 15
+        self.addCleanup(lambda: (setattr(ak, "_qt", old_qt), setattr(ak, "head_gap", old_gap)))
+        first, status, line = Widget(), Widget(), Widget(False)
+        head = ak.window_head(Layout(items=[status, line]), first)
+        self.assertEqual(status.margins, (0, 15, 0, 0), "a line of text above what the tool found")
+        self.assertIsNone(first.margins)
+
+    def test_an_empty_output_panel_is_read_longer(self):
+        # (owner's image 342: "FontLab reported no errors" while the code named a class the font lacks; FontLab
+        # clears the panel as it compiles, so an empty panel may be a compile still under way)
+        self.assertTrue(ak.read_again(8, u"", u"", u""), "empty: still read")
+        self.assertFalse(ak.read_again(ak.COMPILE_EMPTY_READS_MAX, u"", u"", u""), "then a clean compile")
+        self.assertTrue(ak.read_again(2, u"", u"", u"[F] glyph class not defined"), "text that came: read once more")
+        self.assertFalse(ak.read_again(3, u"", u"[F] x", u"[F] x"), "stopped growing: read")
+
+    def test_the_log_yields_room_first(self):
+        # (owner's image 340: the log kept its dragged height while the lists above it showed a row each)
+        self.assertEqual(ak.log_height(180, 180, 40, 100, 0), 80, "the lists lack 100 pixels: the log gives them")
+        self.assertEqual(ak.log_height(180, 180, 40, 500, 0), 40, "never under two lines")
+        self.assertEqual(ak.log_height(40, 180, 40, 30, 0), 40)
+        self.assertEqual(ak.log_height(80, 180, 40, 0, 60), 140, "the window grown: the log takes it back first")
+        self.assertEqual(ak.log_height(160, 180, 40, 0, 60), 180, "up to its height")
+        self.assertEqual(ak.log_height(180, 180, 40, 0, -50), 180, "shorter, the lists still with room: as it is")
+
+    def test_a_tabs_help_is_its_own(self):
+        # (owner's image 329: a right-click on a tab showed the window's whole help, in its middle)
+        help_text = (u"<b>Audit</b><br><br><i>Glyph sets</i>: the glyphs each source lacks. <i>Compatibility</i>: each\n"
+                     u"glyph's contours across the sources. <i>Features</i>: features some sources lack.<br><br>More.")
+        self.assertEqual(ak.help_section(help_text, u"Compatibility"), u"Each glyph's contours across the sources.")
+        self.assertEqual(ak.help_section(help_text, u"Features"), u"Features some sources lack.")
+        self.assertEqual(ak.help_section(help_text, u"Kerning"), u"")
+        self.assertEqual(ak.tab_title(u"Compatibility (52)"), u"Compatibility")
+        self.assertEqual(ak.tab_title(u"&Metrics and info (alike)"), u"Metrics and info")
+
+        class Bar(object):
+            def __init__(self, texts, whats=(), tips=()):
+                self.texts, self.whats, self.tips = texts, list(whats), list(tips)
+                self.whatsThis = u""
+
+            def tabText(self, index):
+                return self.texts[index]
+
+            def tabWhatsThis(self, index):
+                return self.whats[index] if index < len(self.whats) else u""
+
+            def tabToolTip(self, index):
+                return self.tips[index] if index < len(self.tips) else u""
+
+            def parentWidget(self):
+                return None
+
+            def window(self):
+                return Window()
+
+            def property(self, name):
+                return None
+
+        class Window(object):
+            whatsThis = help_text
+
+            def property(self, name):
+                return None
+
+            def parentWidget(self):
+                return None
+
+        bar = Bar([u"Glyph sets (3)", u"Compatibility (alike)", u"Kerning"], whats=[u"", u""], tips=[u"", u"", u""])
+        self.assertEqual(ak.tab_help(bar, 0), u"The glyphs each source lacks.", "from the window's help")
+        bar.whats[0] = u"Its own."
+        self.assertEqual(ak.tab_help(bar, 0), u"Its own.")
+        self.assertEqual(ak.tab_help(bar, 2), u"", "nothing to say: left to Qt")
+
     def test_an_empty_list_shows_no_scroll_bars(self):
         class Qt(object):
             ScrollBarAlwaysOff, ScrollBarAsNeeded = 1, 0
@@ -4955,8 +5145,9 @@ class KerningCheckTableTests(unittest.TestCase):
         self.assertEqual(calls, ["read", "previews", "buttons"])
         self.assertEqual(dialog.stale, set(kc.TABS), "each list checked again as it is shown")
 
-    def test_the_pictures_room_says_what_it_is_for(self):
-        # (live, 2026-11-16: with no pair selected, it read as an empty band between the buttons and the log)
+    def test_the_pictures_room_shows_nothing_until_a_pair_is_selected(self):
+        # (owner's image 337: "Select a pair to see it here..." in this window's previews alone; no other
+        # tool's empty previews say anything)
         class Label(object):
             def __init__(self):
                 self.text = None
@@ -4975,24 +5166,12 @@ class KerningCheckTableTests(unittest.TestCase):
         dialog.update_buttons_soon = lambda: None
         listed = type("Tab", (), {"findings": [object()]})()
         dialog.collisions = dialog.cleanup = dialog.masters = listed
-        for index, wanted in ((0, kc.PREVIEW_HINTS[0]), (1, kc.PREVIEW_HINTS[1]), (2, u"")):
+        for index in (0, 1, 2):
             dialog.tabs = type("Tabs", (), {"currentIndex": index})()
             dialog.update_previews()
-            self.assertEqual([label.text for label in dialog.previews], [u"", wanted, u""])
+            self.assertEqual([label.text for label in dialog.previews], [u"", u"", u""])
             self.assertEqual([label.text for label in dialog.preview_captions], [u""] * 3, "nothing shown: no caption")
-        # (owner's images 187 and 189: "Select a pair..." under a list with no pair to select)
-        dialog.collisions = dialog.cleanup = type("Tab", (), {"findings": []})()
-        for index in (0, 1):
-            dialog.tabs = type("Tabs", (), {"currentIndex": index})()
-            dialog.update_previews()
-            self.assertEqual(dialog.previews[1].text, u"", "nothing listed: nothing to select")
-        dialog.package, dialog.tabs = None, type("Tabs", (), {"currentIndex": 0})()
-        dialog.update_previews()
-        self.assertEqual(dialog.previews[1].text, u"", "no font: nothing to select")
-        with io.open(kc.__file__, encoding="utf-8") as handle:
-            source = handle.read()
-        self.assertIn(u"label.setWordWrap(False)", source, "the hint stays on one line")
-        self.assertNotIn(u"label.setWordWrap(True)  # (its hint", source)
+        self.assertFalse(hasattr(kc, "PREVIEW_HINTS"))
 
     def test_columns_fit_every_row_closed_groups_too(self):
         with io.open(kc.__file__, encoding="utf-8") as handle:
@@ -5266,6 +5445,7 @@ class KerningCheckReviewTests(unittest.TestCase):
         dialog.kerning = lambda master=None: kerning
         status = type("Status", (), {"undo": lambda s, text: text, "report": lambda s, log: None})()
         dialog.after_writing = lambda: status
+        dialog.begin_writing = lambda: True
         checks = []
         dialog.check_collisions = lambda: checks.append(dialog.busy)
         dialog.log = type("Log", (), {"add": lambda log, text, kind="info": None})()
@@ -5617,6 +5797,7 @@ class AutoKerningListTests(unittest.TestCase):
 
         d.package, d.analysis = Package(), ak.Analysis([av, to], {}, (None, None))
         d.after_writing = lambda package: type("Status", (), {"report": lambda status, log: None})()
+        d.begin_kerning_write = lambda: True
         d.refresh_kerning()
         d.fill_table()
         enabled = lambda: [call[1] for call in d.apply_button.calls if call[0] == "setEnabled"][-1]
@@ -5890,7 +6071,8 @@ class CountedTextTests(unittest.TestCase):
                 source = handle.read()
             for mark in escaped + [u" \N{EM DASH} ", u" \N{MIDDLE DOT} "]:
                 self.assertNotIn(mark, source)
-            self.assertEqual(re.findall(u"QCheckBox\\(u?\"[^\"]*\\.\"\\)", source), [])
+            # (a tick's caption that is a sentence ends with a period: owner's image 324)
+            self.assertEqual(re.findall(u"QCheckBox\\(u?\"[^\"]*[^.]\"\\)", source), [])
             self.assertNotIn(u"setSuffix(\"", source)
             self.assertNotIn(u"%d units ", source)
         self.assertEqual([text for text in ak.CHECK_BUTTON_TEXTS + ak.CLASS_COLUMNS if text.endswith(u".")], [])

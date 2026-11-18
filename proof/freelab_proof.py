@@ -2589,6 +2589,17 @@ def wheel_steps(event):
     return (1 if delta > 0 else -1) if delta else 0
 
 
+def page_turn(steps, value, low, high):
+    """The page the wheel goes to over the preview, from where its scroll bar stands (value, between low and
+    high: low == high when the page is shown whole): -1 (the page before) turned up at the top, 1 turned down
+    at the bottom, else 0 (the page scrolls, or the wheel did not turn)."""
+    if steps > 0 and value <= low:
+        return -1
+    if steps < 0 and value >= high:
+        return 1
+    return 0
+
+
 def zoom_command(event, QtCore=None):
     """What a key or wheel event asks of the preview's zoom with Ctrl held: 1, -1 (0 for a wheel event with
     no turn), "fit" (Ctrl+0), or None (no Ctrl, another key, another event). The modifiers read from the
@@ -3630,6 +3641,8 @@ class ProofDialog(object):
         them first, as they took Ctrl+Z. So the window takes them at Qt's ShortcutOverride, which comes before
         any shortcut is looked up (accepted, Qt sends the key as a plain key press), and zooms on the key press."""
         command = zoom_command(event, _qt()[0])
+        if command is None and event_number(event, "type") == WHEEL and self.selected_page() is not None:
+            return self.wheel_page(event)
         if command is None or self.selected_page() is None:
             return False
         try:
@@ -3642,6 +3655,37 @@ class ProofDialog(object):
             self.zoom_box.setCurrentIndex(0)
         elif command:
             self.zoom_step(command)
+        return True
+
+    def wheel_page(self, event):
+        """The wheel alone over the page: past its top or its bottom, the page before or after (owner's image 347),
+        shown from its bottom or its top, as a PDF viewer goes on; elsewhere the page scrolls (False: left to
+        Qt). True once the page turned."""
+        QtCore = _qt()[0]
+        try:
+            bar = self.preview_area.verticalScrollBar()
+            turn = page_turn(wheel_steps(event), int(bar.value), int(bar.minimum), int(bar.maximum))
+            row = int(self.page_list.currentRow) if not callable(self.page_list.currentRow) else \
+                int(self.page_list.currentRow())
+            count = int(self.page_list.count) if not callable(self.page_list.count) else int(self.page_list.count())
+        except Exception:
+            return False
+        if not turn or not 0 <= row + turn < count:
+            return False
+        self.page_list.setCurrentRow(row + turn)
+
+        def to_edge(bar=bar, turn=turn):
+            try:
+                bar.setValue(int(bar.minimum) if turn > 0 else int(bar.maximum))
+            except Exception:
+                pass
+        self.keep.append(to_edge)
+        del self.keep[:-40]
+        QtCore.QTimer.singleShot(60, to_edge)  # (once the new page is laid out: its scroll range is its own)
+        try:
+            event.accept()
+        except Exception:
+            pass
         return True
 
     def show_page(self):

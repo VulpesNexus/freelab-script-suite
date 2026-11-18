@@ -1,4 +1,4 @@
-"""Learn how fonts space their straight and round references (H, O, n, o, zero; Armenian's vo and oh,
+"""Learn how fonts space their straight and round references (H, O, l, n, o, zero; Armenian's vo and oh,
 capital and small; Georgian's in and on, Mkhedruli and Mtavruli), from the open-licensed fonts at hand (SIL Open Font License and Apache License fonts only, as kerning/train/dataset.py finds
 them, plus FreeLab's corpus folder, %LOCALAPPDATA%\\FreeLab\\corpus).
 
@@ -31,6 +31,7 @@ import dataset  # noqa: E402  (the corpus's folders and its license check)
 MODEL_FILE = os.path.join(HERE, os.pardir, "reference_model.json")
 CORPUS_DIR = os.path.join(os.environ.get("LOCALAPPDATA", ""), "FreeLab", "corpus")
 REFERENCES = {"H": "H", "O": "H", "n": "x", "o": "x", "0": "H",  # each reference and the letter giving its height
+              "l": "x",  # (a tuning letter beside n and o: spaced with them, or ll no longer agreed with nn and oo)
               "\N{ARMENIAN CAPITAL LETTER VO}": "\N{ARMENIAN CAPITAL LETTER VO}",
               "\N{ARMENIAN CAPITAL LETTER OH}": "\N{ARMENIAN CAPITAL LETTER VO}",
               "\N{ARMENIAN SMALL LETTER VO}": "\N{ARMENIAN SMALL LETTER VO}",

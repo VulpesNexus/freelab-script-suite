@@ -58,6 +58,8 @@ class WordTests(unittest.TestCase):
         self.assertEqual(fa.counted(2, u"entry", u"entries"), u"2 entries")
         self.assertEqual(fa.tab_text(u"Compatibility"), u"Compatibility", "no count before an audit")
         self.assertEqual(fa.tab_text(u"Compatibility", 1240), u"Compatibility (1,240)")
+        # (owner's images 327 and 328: "Metrics and info (0)" over 20 fields alike read as nothing compared)
+        self.assertEqual(fa.tab_text(u"Metrics and info", 0), u"Metrics and info (alike)")
         self.assertEqual(fa.sentence(u"two fields differ"), u"Two fields differ.")
         self.assertEqual(fa.sentence(u"<b>2 fields</b> differ"), u"<b>2 fields</b> differ.", "a tag left as it is")
 
@@ -1040,10 +1042,14 @@ class DialogTests(unittest.TestCase):
             else:
                 sys.modules[name] = module
 
+    def setUp(self):
+        sys._freelab_family_audit_last = None  # (a window shows the session's last audit again: none here)
+
     def tearDown(self):
         for name, value in self.real.items():
             setattr(self.ak, name, value)
         self.fakes()
+        sys._freelab_family_audit_last = None
 
     def dialog(self, fonts, own=None):
         self.workspace.packages = lambda: list(fonts)
@@ -1181,6 +1187,24 @@ class DialogTests(unittest.TestCase):
         dialog.compare()
         return dialog
 
+    def test_a_window_opened_again_shows_the_last_audit_while_no_source_changed(self):
+        # (owner's image 330: Family Audit opened again showed nothing of the comparison made before)
+        first = self.compared()
+        fonts = list(self.workspace.packages())
+        own = self.workspace.currentPackage
+        again = self.dialog(fonts, own=own)
+        self.assertIs(again.audit, first.audit, "the last audit, not read again")
+        self.assertEqual(again.ticked, set([(1, u"Regular"), (2, u"Bold")]))
+        self.assertFalse(again.stale())
+        self.assertEqual(again.tabs.texts[:3], [u"Glyph sets (alike)", u"Compatibility (alike)", u"Metrics and info (1)"])
+        # a source edited since (its History moved): nothing shown
+        real = self.ak.history_mark
+        self.ak.history_mark = lambda package: ("moved", id(package))
+        self.addCleanup(setattr, self.ak, "history_mark", real)
+        moved = self.dialog(fonts, own=own)
+        self.assertIsNone(moved.audit)
+        self.assertEqual(moved.tabs.texts, list(fa.TAB_TITLES))
+
     def test_an_edit_in_a_source_puts_the_audit_out_of_date(self):
         dialog = self.compared()
         self.assertEqual(len(dialog.watches), 2, "each audited font's History watched")
@@ -1232,8 +1256,16 @@ class DialogTests(unittest.TestCase):
         fonts.append(FakeFont(9, u"Serif", u"Bold", weight=700, path=u"\\f\\Serif-Bold.otf"))
         dialog.open_tick()
         self.assertEqual(dialog.pending, [])
-        self.assertIn((9, u"Bold"), dialog.ticked, "another family, ticked since it was added here")
-        self.assertEqual(self.said[-1], ("done", u"Opened <i>Serif-Bold.otf</i> in FontLab: ticked as <b>Bold</b>."))
+        # (owner's image 344: a font of another family was ticked with the window's family's)
+        self.assertNotIn((9, u"Bold"), dialog.ticked, "another family: left unticked, and said")
+        self.assertEqual(self.said[-1][0], "warning")
+        self.assertIn(u"of another family (Serif): left unticked", self.said[-1][1])
+        asked[:] = []
+        dialog.open_paths([u"/f/Sans-Bold.otf"])
+        fonts.append(FakeFont(10, u"Sans", u"Bold", weight=700, path=u"/f/Sans-Bold.otf"))
+        dialog.open_tick()
+        self.assertIn((10, u"Bold"), dialog.ticked, "the window's family: ticked")
+        self.assertEqual(self.said[-1], ("done", u"Opened <i>Sans-Bold.otf</i> in FontLab: ticked as <b>Bold (Sans)</b>."))
 
 
 if __name__ == "__main__":

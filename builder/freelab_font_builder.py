@@ -1267,6 +1267,11 @@ class FontBuilderDialog(object):
         self.tabs.setExpanding(False)
         self.tabs.addTab("Template")
         self.tabs.addTab("Build")
+        # (a right-click on a tab tells of it: owner's image 329)
+        self.tabs.setTabWhatsThis(0, u"Makes template sheets to draw the glyphs on, in any app or on paper: a box for "
+                                     u"each glyph picked here, shaped by the font's metrics.")
+        self.tabs.setTabWhatsThis(1, u"Reads the sheets drawn and builds their glyphs in the font: traced into "
+                                     u"outlines, or kept as images.")
         layout.addWidget(self.tabs)
         self.pages = QtGui.QStackedWidget()
         layout.addWidget(self.pages, 1)
@@ -1361,7 +1366,7 @@ class FontBuilderDialog(object):
         self.typed.setPlainText(self.settings.get("typed") or "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
         self.typed.setWhatsThis("The characters to draw, when the glyphs come from them.")
         box.addWidget(self.typed, 1)
-        self.lacking = QtGui.QCheckBox("Leave out the glyphs the font has drawn")
+        self.lacking = QtGui.QCheckBox("Leave out the glyphs the font has drawn.")
         self.lacking.setChecked(True)
         self.lacking.setWhatsThis("With a font open: no box for a glyph that has outlines, components, or an image in "
                                   "its current master.")
@@ -1632,7 +1637,7 @@ class FontBuilderDialog(object):
         self.placement.setWhatsThis("Where drawn: the ink stays where it was drawn against the box's origin line, the "
                                     "right side given the left side's room. Even: both sides %d%% of the em. Either "
                                     "way, <i>Auto Spacing</i> spaces them better after." % int(round(EVEN_SIDE * 100)))
-        self.replace = QtGui.QCheckBox("Replace glyphs the font has drawn")
+        self.replace = QtGui.QCheckBox("Replace glyphs the font has drawn.")
         self.replace.setWhatsThis("Off: a glyph that has outlines, components, or an image in the current master is "
                                   "listed unticked and left as it is unless you tick it.")
         self.read_button = QtGui.QPushButton("Read sheets")
