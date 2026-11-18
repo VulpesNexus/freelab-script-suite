@@ -728,6 +728,33 @@ class BuildTests(unittest.TestCase):
         self.assertEqual(package.axes, [(u"Weight", u"wght", 400, 400, 700)])
         self.assertEqual(package.locations, {u"Regular": {u"Weight": 400}, u"Bold": {u"Weight": 700}})
 
+    def test_coverage_and_win_values_follow_what_the_masters_bring(self):
+        import freelab_font_info as fi  # (checks is on the path)
+        regular = source(u"Regular", [(u"A", [0x41])],
+                         info={"weight_class": 400, "unicode_ranges": [0, 9], "code_pages": [0], "win_ascent": 900.0,
+                               "win_descent": 250.0})
+        bold = source(u"Bold", [(u"A", [0x41]), (u"uniAC00", [0xAC00])],
+                      info={"weight_class": 700, "unicode_ranges": [0, 56], "code_pages": [], "win_ascent": 950.0,
+                            "win_descent": 240.0})
+        regular.package = SourcePackage({(u"A", u"Regular"): SourceLayer(u"Regular", 600)})
+        bold.package = SourcePackage({(u"A", u"Bold"): SourceLayer(u"Bold", 640),
+                                      (u"uniAC00", u"Bold"): SourceLayer(u"Bold", 1000)})
+        calls = FakeCalls()
+        calls.font_info_module = lambda: fi
+        plan = fa.plan_assembly([regular, bold], regular.key)
+        package, report = fa.build_font(calls, plan, dict((s.key, s) for s in (regular, bold)))
+        self.assertEqual(package.info["openTypeOS2UnicodeRanges"], [0, 9, 56],
+                         "the reference's, its hand-set bit 9 kept, with Hangul brought by Bold")
+        self.assertEqual(package.info["openTypeOS2CodePageRanges"], [0], "no code page completed")
+        self.assertEqual((package.info["openTypeOS2WinAscent"], package.info["openTypeOS2WinDescent"]), (950.0, 250.0))
+        self.assertIn(u"The Win ascent is 950, the largest of the sources' (Regular's is 900), so that no master's glyphs "
+                      u"are clipped.", report)
+        self.assertFalse([line for line in report if u"Win descent" in line], "the reference's is the largest")
+
+    def test_without_the_shared_module_the_coverage_is_left_alone(self):
+        calls, plan, package, report = self.build()
+        self.assertNotIn("openTypeOS2UnicodeRanges", package.info, "not read: left as FontLab makes it")
+
     def test_what_fontlab_refuses_is_one_line_a_kind(self):
         calls, plan, package, report = self.build(FakeCalls(refuse=("copy_anchors",)))
         lines = [line for line in report if line.startswith(u"Anchors not copied")]

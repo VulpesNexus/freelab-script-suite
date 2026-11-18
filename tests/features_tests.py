@@ -1970,7 +1970,8 @@ class DialogTests(unittest.TestCase):
         self.assertLess(package.events.index(("add", u"two.sups")), package.events.index(("add", u"uni00B2")))
         self.assertIsNone(package.findName(u"uni2080"), "unchecked: not built")
         self.assertIsNone(package.findName(u"zero.subs"))
-        done = [t for level, t in self.logged if level == "done"]
+        # (the Built line; the font info's line may follow it, where the shared module is loaded: font_info_tests)
+        done = [t for level, t in self.logged if level == "done" and not t.startswith(u"Updated the font info")]
         self.assertTrue(done and u"Built <b>29 glyphs</b>" in done[-1], self.logged)
         # The glyphs a log line names are links (drawn from the font's outlines, opened by a click)
         self.assertIn(u'<a href="glyphname:two.sups">two.sups</a>', done[-1])

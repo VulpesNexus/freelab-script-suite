@@ -996,10 +996,10 @@ class AnchorPageTests(unittest.TestCase):
         page.recorded = []  # (the glyphs recorded before the write, with the font)
         page.owner = Stub(current_font=lambda: package, package_key=lambda p: (u"a.vfc", 1) if p is not None else None,
                           log=Stub(add=lambda text, kind="info": None),
-                          begin_write=lambda p, glyphs=(): page.writes.append("begin") or page.recorded.extend(glyphs)
+                          begin_write=lambda p, glyphs=(), coverage=False: page.writes.append("begin") or page.recorded.extend(glyphs)
                           or True,  # (True: the font recorded)
                           end_write=lambda p, wrote=True: page.writes.append("end" if wrote else "end, nothing"))
-        page.ak = Stub(notify_changed=lambda *args: None, b=lambda text: u"%s" % text, html=lambda text: u"%s" % text)
+        page.ak = Stub(notify_changed=lambda *args, **kwargs: None, b=lambda text: u"%s" % text, html=lambda text: u"%s" % text)
         page.fontlab = Stub(flPinPoint=lambda point: Anchor(point))
         return page, built
 
@@ -1052,7 +1052,7 @@ class AnchorPageTests(unittest.TestCase):
         page, built = self.page({"Regular": {"top": (250, 600), "bottom": (250, 0), "ogonek": (460, 0)}})
         logged, notified = [], []
         page.owner.log = Stub(add=lambda text, kind="info": logged.append((kind, text)))
-        page.ak.notify_changed = lambda *args: notified.append(args)
+        page.ak.notify_changed = lambda *args, **kwargs: notified.append(args)
         g = page.glyphs[0]
         g.elsewhere = g.checked = True  # (listed as pending, but the font has them all by the write)
         self.write(page)
@@ -1064,7 +1064,7 @@ class AnchorPageTests(unittest.TestCase):
         page, built = self.page({"Regular": {"top": (250, 600), "bottom": (250, 0), "ogonek": (460, 0)}, "Bold": {}})
         logged, notified = [], []
         page.owner.log = Stub(add=lambda text, kind="info": logged.append((kind, text)))
-        page.ak.notify_changed = lambda *args: notified.append(args)
+        page.ak.notify_changed = lambda *args, **kwargs: notified.append(args)
         g = page.glyphs[0]
         g.elsewhere = g.checked = True
         self.write(page)
@@ -3869,8 +3869,8 @@ class MirrorFixTests(unittest.TestCase):
         dialog.steps, dialog.lines, dialog.reads = [], [], []
         dialog.ak = Stub(layer_path=fl_path, b=lambda value: u"%s" % value, html=lambda value: u"%s" % value,
                          glyph_links=lambda chars: u" ".join(chars),
-                         before_changes=lambda fontlab, package, title, glyphs=(): [],
-                         notify_changed=lambda fontlab, package, title, glyphs=(): dialog.steps.append(
+                         before_changes=lambda fontlab, package, title, glyphs=(), coverage=False: [],
+                         notify_changed=lambda fontlab, package, title, glyphs=(), coverage=False: dialog.steps.append(
                              (title, sorted(set(g.name for g in glyphs)))))
         dialog.current_font = lambda: font
         dialog.package_key = lambda package: None if package is None else id(package)
@@ -4762,7 +4762,7 @@ class OwnWriteTests(unittest.TestCase):
         dialog.recorded = []  # (the fonts recorded before a write: before_changes)
         dialog.fontlab = None
         dialog.ak = Stub(history_mark=lambda package: marks[0],
-                         before_changes=lambda fontlab, package, title, glyphs=(): dialog.recorded.append(title))
+                         before_changes=lambda fontlab, package, title, glyphs=(), coverage=False: dialog.recorded.append(title))
         dialog.log = Stub(add=lambda line, level="info": dialog.lines.append(line))
         dialog.run = lambda: dialog.reads.append(1)
         dialog.anchors_read = False

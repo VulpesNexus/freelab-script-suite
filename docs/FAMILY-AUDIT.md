@@ -57,6 +57,7 @@ After an audit, *Assemble 3 sources as masters* (its count follows the sources) 
 - the code points of the reference's glyphs (else of the first source that has the glyph); where sources give a glyph other code points, the reference's are kept, and the log says which;
 - each master's kerning from its source: its classes, then its entries;
 - the reference's feature code, its prefix with the Classes panel's feature classes written first as code (FontLab offers a script no way to fill the Classes panel), and its font info (family name, version, the OpenType line values, copyright, designer, manufacturer, license, vendor);
+- the reference's Unicode ranges and code pages, updated for what the new font covers as the tools update them after a write ([WINDOWS.md](WINDOWS.md#the-font-info)): a range or code page the other sources' glyphs complete is set, and the reference's own choices stay; and the largest Win ascent and descent of the sources (each source's covers its own glyphs; the font's are one for every master), the log saying so where it is not the reference's;
 - each master's line metrics from its source, where they could be read (see *Metrics and info*);
 - a *Weight* axis (*wght*) where the sources' weight classes differ, a *Width* axis (*wdth*) where their width classes differ, each master placed at its source's classes; no axis where they are alike. Sources that would share a location (a Regular and an Italic of one weight) are said: an italic needs an axis of its own, which the tool does not set.
 

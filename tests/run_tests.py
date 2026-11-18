@@ -44,6 +44,7 @@ PY27_FILES = (
     "checks/space_conventions.json",
     "compare/freelab_font_compare.py", "tests/compare_tests.py", "proof/freelab_proof.py", "tests/proof_tests.py",
     "checks/freelab_family_audit.py", "tests/family_audit_tests.py",
+    "checks/freelab_font_info.py", "tests/font_info_tests.py",
     "windows/freelab_tabs.py", "tests/tabs_tests.py",
     "features/freelab_alternates.py", "features/alternates_model.json", "tests/alternates_tests.py",
     "checks/language_font/FreeLang-Essential.ttf", "checks/language_font/FreeLang-CJK.ttf",
@@ -60,7 +61,7 @@ PY27_SUITES = ("tests/darkmode_tests.py", "tests/kern_tests.py", "tests/spacing_
                "tests/compare_tests.py", "tests/proof_tests.py", "tests/tabs_tests.py",
                "tests/alternates_tests.py", "tests/language_font_tests.py", "tests/generation_tests.py",
                "tests/feature_check_tests.py", "tests/font_builder_tests.py", "tests/trace_tests.py",
-               "tests/family_audit_tests.py")
+               "tests/family_audit_tests.py", "tests/font_info_tests.py")
 # Suites run under 2.7 with the fontTools FontLab 7 ships (3.43), where FontLab is installed: Feature
 # Check runs on it inside FontLab, and its checks differ from fontTools 4's in places
 PY27_FONTTOOLS_SUITES = ("tests/feature_check_tests.py",)

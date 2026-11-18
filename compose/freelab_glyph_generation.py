@@ -3099,7 +3099,7 @@ class GenerationPage(object):
         sharing = [r.layout.shared for r in order if r.layout.kind == "shared"]
         recorded = self.cm.existing_glyphs(package, sharing + [r.name for r in order
                                                                if r.existing or getattr(r, "filled", False)])
-        if not self.owner.begin_write(package, recorded):
+        if not self.owner.begin_write(package, recorded, coverage=True):  # (the font info follows: notify_changed)
             return
         made, rebuilt, shared, touched, error = [], [], [], [], None
         sparse = {}  # master: the glyphs left without a layer there, as their sources have none
@@ -3281,7 +3281,8 @@ class GenerationPage(object):
         try:
             second = bool(parts) and bool(later or taken)
             if later or taken or (touched and not parts):  # (nothing changed: no History step of nothing, live 2026-11-16)
-                status = self.ak.notify_changed(self.fontlab, package, u"FreeLab Glyph Compose", later if parts else touched)
+                status = self.ak.notify_changed(self.fontlab, package, u"FreeLab Glyph Compose", later if parts else touched,
+                                                coverage=True)
         finally:
             self.owner.end_write(package, bool(touched) or bool(parts))
         undo = self.cm.undo_words(status or parts_status, u" <i>Edit &gt; Undo</i> takes it back.")

@@ -819,6 +819,54 @@ def spaces_note(has, listed=()):
                 u"it" if one else u"them", u"it" if one else u"them"))
 
 
+DECLARE_LINK = u"freelab-declare-coverage:"  # a log link's target: the font info set to declare what the font covers
+COVERAGE_KEYS = (("unicode_ranges", "openTypeOS2UnicodeRanges", u"Unicode ranges"),
+                 ("code_pages", "openTypeOS2CodePageRanges", u"code pages"))
+
+
+def declared_coverage(module, ranges, pages, codes):
+    """What the font info would declare to say what the font covers, by the rules FreeLab's tools keep it
+    with after their writes (freelab_font_info: a Unicode range with a character of it, a code page with
+    every letter of it; the code pages FreeLab leaves alone kept as declared): {key: (now, new)} of the
+    fields that differ, empty when it says so already."""
+    measured = module.coverage(codes)
+    managed = module.managed_pages()
+    new = {"unicode_ranges": sorted(measured[module.INFO_UNICODE]),
+           "code_pages": sorted(set(bit for bit in pages if bit not in managed) | measured[module.INFO_PAGES])}
+    now = {"unicode_ranges": sorted(set(ranges)), "code_pages": sorted(set(pages))}
+    return dict((key, (now[key], new[key])) for key in new if now[key] != new[key])
+
+
+def coverage_differences(module, differences):
+    """The fields that differ, for the log (plain text): "Unicode ranges (not declared: Hangul Syllables;
+    declared without a glyph: Arabic); code pages (not declared: Korean Wansung (949))"."""
+    parts = []
+    for key, _attribute, label in COVERAGE_KEYS:
+        if key not in differences:
+            continue
+        now, new = differences[key]
+        name = module.range_name if key == "unicode_ranges" else module.page_name
+        words = []
+        missing = [bit for bit in new if bit not in now]
+        extra = [bit for bit in now if bit not in new]
+        if missing:
+            words.append(u"not declared: %s" % u", ".join(name(bit) for bit in missing))
+        if extra:
+            words.append(u"declared, %s: %s" % (u"without a glyph of it" if key == "unicode_ranges" else u"not complete",
+                                                u", ".join(name(bit) for bit in extra)))
+        parts.append(u"%s (%s)" % (label, u"; ".join(words)))
+    return u"; ".join(parts)
+
+
+def declared_note(module, differences, html):
+    """The log's line when the font info's coverage differs from the font's glyphs, with the link that
+    declares it (u"" when it does not differ)."""
+    if not differences:
+        return u""
+    return (u"The font info's coverage differs from the glyphs: %s. <a href=\"%s\">Declare what the font covers</a> "
+            u"(<i>Edit &gt; Undo</i> takes it back)." % (html(coverage_differences(module, differences)), DECLARE_LINK))
+
+
 def families_path():
     return os.path.join(os.path.dirname(os.path.abspath(globals().get("__file__") or ".")), FAMILIES_FILE)
 
@@ -3554,8 +3602,10 @@ def register_list_font(QtCore, QtGui):
 
 HELP = u"""<b>FreeLab Font Check</b><br>
 Three views of the current font. Nothing in the font changes until you click <i>Write suggested
-values</i> or <i>Fix</i>. A fix is one step of <i>Edit &gt; Undo</i>; the font info written is not in FontLab's
-History: <i>Put back old values</i> takes it back (a value that was not set before stays as written).<br><br>
+values</i>, <i>Fix</i>, or the log's <i>Declare what the font covers</i> (the font info's Unicode ranges and code
+pages set to what the glyphs cover, where they differ). A fix or a declaration is one step of <i>Edit &gt;
+Undo</i>; the vertical metrics written are not in FontLab's History: <i>Put back old values</i> takes them back
+(a value that was not set before stays as written).<br><br>
 <b>Coverage</b>: the scripts, each with a bar of its languages covered
 (green), within reach (amber), started (red: the font has some of their glyphs, too few to be
 within reach), and missed (gray: it has none); click one to see only its languages. The languages'
@@ -7639,7 +7689,76 @@ class FontCheckDialog(object):
             self.say_spaces(spaces_note(has, listed))
         except Exception:
             pass
+        self.say_declared(font.codes)
         return BUSY_STEPS[3]
+
+    def coverage_now(self, codes):
+        """{key: (declared, would declare)} of the font info's coverage fields that differ from the glyphs'
+        code points (declared_coverage), or None where it cannot be read."""
+        try:
+            module = self.ak.font_info()
+            info = self.package.fgPackage.info
+            if module is None:
+                return None
+            ranges = [int(bit) for bit in (info.openTypeOS2UnicodeRanges or [])]
+            pages = [int(bit) for bit in (info.openTypeOS2CodePageRanges or [])]
+            return declared_coverage(module, ranges, pages, codes)
+        except Exception:
+            return None
+
+    def say_declared(self, codes):
+        """The line on the font info's coverage when it differs from the glyphs, logged once a font and again
+        only when it changes (as say_spaces)."""
+        differences = self.coverage_now(codes)
+        try:
+            font_key = self.package.fgPackage.path
+        except Exception:
+            font_key = None
+        note = declared_note(self.ak.font_info(), differences, self.ak.html) if differences else u""
+        said = (font_key, note)
+        if note and said != getattr(self, "declared_said", None):
+            self.log.add(note, "warning")
+        self.declared_said = said
+
+    def declare_coverage(self):
+        """The font info's Unicode ranges and code pages set to what the glyphs cover (declared_coverage),
+        one step of FontLab's History: unlike the vertical metrics, Edit > Undo takes them back (they are the
+        font's coding, which the step records: live 2026-11-18)."""
+        if self.busy or self.package is None or not self.same_font():
+            return
+        codes = set(code for _name, glyph_codes_ in self.glyphs() for code in glyph_codes_)
+        differences = self.coverage_now(codes)
+        if not differences:
+            self.log.add(u"The font info declares what the font covers already: nothing to write.")
+            return
+        module = self.ak.font_info()
+        # (no before_changes: the font info is the font's own state, recorded as FontLab opens it, and the
+        # declaration went on Undo without one, live 2026-11-18)
+        info = self.package.fgPackage.info
+        fields = dict((key, attribute) for key, attribute, _label in COVERAGE_KEYS)
+        done, failed = [], []
+        for key in sorted(differences):
+            now, new = differences[key]
+            try:
+                setattr(info, fields[key], list(new))
+                kept = sorted(int(bit) for bit in (getattr(info, fields[key]) or []))
+            except Exception as exc:
+                failed.append(u"%s (%s)" % (key, exc))
+                continue
+            if kept != list(new):
+                failed.append(u"%s (FontLab kept %s)" % (key, kept))
+                continue
+            done.append(key)
+        status = self.ak.notify_changed(self.fontlab, self.package, u"FreeLab Font Check: coverage declared",
+                                        added=False)
+        if done:
+            self.log.add(u"Declared what the font covers in the font info, where it differed (%s).%s" % (
+                self.ak.html(coverage_differences(module, dict((key, differences[key]) for key in done))),
+                status.undo(u" <i>Edit &gt; Undo</i> takes it back.")), "done")
+        status.report(self.log)
+        if failed:
+            self.log.add(u"Not written: %s." % self.ak.html(u"; ".join(failed)), "error")
+        self.say_declared(codes)
 
     def say_spaces(self, note):
         """The line on the spaces the font lacks, logged once a font and again only when it changes,
@@ -9579,7 +9698,8 @@ class FontCheckDialog(object):
                                    added=False).report(self.log)
         b = self.ak.b
         if restored:
-            self.log.add(u"Put back %s as they were." % b(counted(len(restored), u"value")), "done")
+            self.log.add(u"Put back %s as %s." % (b(counted(len(restored), u"value")),
+                                                  u"it was" if len(restored) == 1 else u"they were"), "done")
         if left:
             self.log.add(u"Not put back: %s." % self.ak.html(u"; ".join(left)), "warning")
         if failed:
@@ -9982,6 +10102,10 @@ class FontCheckDialog(object):
         """A glyph named in a log line clicked: opened in a Glyph window; the spaces line's Glyph Compose
         clicked: opened on those spaces (build_spaces). A link this window does not take is left to the log
         (False)."""
+        if u"%s" % target == DECLARE_LINK:
+            if self.package is not None:
+                self.declare_coverage()
+            return True
         spaces = linked_spaces(target)
         if spaces is not None:
             if self.package is None or not spaces:

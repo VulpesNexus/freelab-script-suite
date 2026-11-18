@@ -5324,8 +5324,8 @@ class FeatureCodeDialog(object):
         unstroked = []  # [(form, why)]: scaled forms Strokes above 100% could not thicken (made of components)
         self.stems = {}
         # (a form built again: its glyph is changed)
-        if not self.ak.begin_write(fontlab, package, u"FreeLab Feature Code", self.log):
-            return  # (nothing built: the reason in the log)
+        if not self.ak.begin_write(fontlab, package, u"FreeLab Feature Code", self.log, coverage=True):
+            return  # (nothing built: the reason in the log; coverage: the font info follows the forms' code points)
         # The window's top row counts the forms built (there was no progress at all); a write, one step of
         # FontLab's History: never stopped half way, what was clicked meanwhile done once it is over
         self.set_busy(True, u"Building the figure forms", stoppable=False)
@@ -5428,7 +5428,7 @@ class FeatureCodeDialog(object):
             error = exc
         finally:
             self.set_busy(False)
-        status = self.ak.notify_changed(fontlab, package, u"FreeLab Feature Code", touched)
+        status = self.ak.notify_changed(fontlab, package, u"FreeLab Feature Code", touched, coverage=True)
         if not status.recorded:  # (no Undo to promise)
             failed = [(name, why.replace(EMPTIED_UNDO, u"")) for name, why in failed]
         try:  # what each glyph is now, and from what it was built: a later build may replace it

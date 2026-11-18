@@ -1618,10 +1618,43 @@ class WriteStatus(object):
     def __init__(self):
         self.recorded = self.marked = True
         self.reasons = []  # (what failed, the error), for the log
+        self.info_changes = []  # the font info FreeLab updated to match (freelab_font_info's Change)
+        self.info_error = None  # why it could not, if it failed
 
     @property
     def ok(self):
         return self.recorded and self.marked
+
+    def info_text(self):
+        """The log's line (HTML) for the font info updated to match the write, or u"" when none was."""
+        if not self.info_changes:
+            return u""
+        undo = u""
+        if self.recorded:  # (the History takes back the ranges and code pages; FreeLab follows it with the Win values)
+            win = any(change.field in ("openTypeOS2WinAscent", "openTypeOS2WinDescent") for change in self.info_changes)
+            undo = u" <i>Edit &gt; Undo</i> takes it back with the glyphs%s." % (
+                u" (the Win values while this window is open)" if win else u"")
+        return u"Updated the font info to match: %s.%s" % (
+            html(u"; ".join(change.text() for change in self.info_changes)), undo)
+
+    def info_failure(self):
+        """The log's line (HTML) when the font info could not be updated to match, or u""."""
+        if self.info_error is None:
+            return u""
+        return u"The font info's Unicode ranges, code pages, and Win values were not updated to match (%s)." % html(
+            self.info_error)
+
+    def report_info(self, log):
+        """The font info's line, if any, added to a tool's log."""
+        if log is None:
+            return
+        try:
+            if self.info_text():
+                log.add(self.info_text(), "done")
+            if self.info_failure():
+                log.add(self.info_failure(), "warning")
+        except Exception:
+            pass
 
     def undo(self, text):
         """The text promising Undo (as given) when the History recorded the write; u"" when it did not."""
@@ -1640,12 +1673,14 @@ class WriteStatus(object):
         return u" ".join(parts)
 
     def report(self, log):
-        """The error line added to a tool's log when something failed. Whether nothing did."""
+        """The error line added to a tool's log when something failed, and the font info's line when it
+        was updated to match. Whether nothing failed."""
         if not self.ok and log is not None:
             try:
                 log.add(self.message(), "error")
             except Exception:
                 pass
+        self.report_info(log)
         return self.ok
 
 
@@ -1656,7 +1691,125 @@ def _error_text(exc):
         return u"%r" % (exc,)
 
 
-def before_changes(fontlab, package, title, glyphs=()):
+FONT_INFO_FILE, FONT_INFO_MODULE = "freelab_font_info.py", "freelab_font_info"
+
+
+def font_info():
+    """The helper module that keeps the font info in step with FreeLab's writes (freelab_font_info), or
+    None. Where it is not beside this file (the tests), the one already loaded."""
+    if not os.path.isfile(sibling_path(FONT_INFO_FILE)):
+        return sys.modules.get(FONT_INFO_MODULE)
+    try:
+        return load_sibling(FONT_INFO_FILE, FONT_INFO_MODULE)
+    except Exception:
+        return sys.modules.get(FONT_INFO_MODULE)
+
+
+def master_extents(package, glyphs):
+    """[(bottom, top)] of the ink of each glyph's master layers (as Font Check measures it: components
+    and color glyphs' fallback outlines included)."""
+    try:
+        masters = [u"%s" % name for name in package.masters]
+    except Exception:
+        masters = []
+    found = []
+    for glyph in glyphs:
+        for master in masters:
+            try:
+                layer = glyph.getLayerByName(master)
+                if layer is None:
+                    continue
+                path = layer_path(layer)
+                if path.isEmpty():
+                    continue
+                rect = path.boundingRect()  # (font units grow upward: the rect's top is the ink's bottom)
+                found.append((rect.top(), rect.bottom()))
+            except Exception:
+                continue
+    return found
+
+
+def _named_extents(package):
+    def extents(names):
+        glyphs = []
+        for name in names:
+            try:
+                glyph = package.findName(name)
+            except Exception:
+                glyph = None
+            if glyph is not None:
+                glyphs.append(glyph)
+        return master_extents(package, glyphs)
+    return extents
+
+
+def follow_font_info(package, log=None, when_needed=False):
+    """The Win values FreeLab raised this session put back in step with the glyphs they were raised for
+    (after an undo, a redo, or an edit in FontLab: the History does not take them back, though it takes
+    back the Unicode ranges and code pages), its line added to the log. when_needed: only when the font's
+    glyph count or place in the History says the glyphs may have changed. [Change]."""
+    module, font = font_info(), _font_id(package)
+    if module is None or font is None or not module.recorded(font):
+        return []
+    count, state = _glyph_count(package), history_state(package)
+    if when_needed and not module.needs_follow(font, count, state):
+        return []
+    changes = []
+    try:
+        changes = module.follow(package.fgPackage.info, font, _named_extents(package))
+    except Exception:
+        changes = []
+    module.note_mark(font, count, state)
+    if changes:
+        try:
+            package.setFlag(2, True)  # ofChanged (the font info is not in the History: no step for it)
+        except Exception:
+            pass
+        if log is not None:
+            try:
+                log.add(u"Put the font info back in step with the glyphs: %s." % html(module.changes_text(changes)), "done")
+            except Exception:
+                pass
+    return changes
+
+
+def _coverage_before(package):
+    """The font's code points before a write that asks for the font info to follow it, its Win values first
+    put in step with the glyphs (an undo made while no FreeLab window watched); None where they cannot be
+    read."""
+    module = font_info()
+    if module is None:
+        return None
+    follow_font_info(package)
+    try:
+        return module.font_codes(package)
+    except Exception:
+        return None
+
+
+def _update_font_info(status, package, before, glyphs):
+    """After a write that asked for it: the font info's Unicode ranges and code pages the write's code
+    points changed, and its Win values raised to the ink it drew (freelab_font_info), noted in status."""
+    module, font = font_info(), _font_id(package)
+    if module is None or before is None or font is None:
+        return
+    try:
+        info = package.fgPackage.info
+        after = module.font_codes(package)
+        changes = module.apply_bits(info, font, module.coverage(before), module.coverage(after))
+        names = []
+        for glyph in glyphs:
+            try:
+                names.append(u"%s" % glyph.name)
+            except Exception:
+                pass
+        changes += module.apply_win(info, font, master_extents(package, glyphs), names)
+        status.info_changes = changes
+    except Exception as exc:
+        status.info_error = _error_text(exc)
+
+
+def before_changes(fontlab, package, title, glyphs=(), coverage=False):
     """Called before a script changes a font, so that Undo can put back what it changes. A step of
     FontLab's History records each object as it is after the change, and Undo puts back each object's
     state before it: an object with none stays as written while the History moves back (live, on a font
@@ -1666,10 +1819,14 @@ def before_changes(fontlab, package, title, glyphs=()):
     The glyphs given are recorded too when they have no state: the whole font's record holds their
     layers, not the glyphs themselves (their flags). The glyph count is noted for notify_changed. The
     objects recorded, as a list (empty when none had to be). Raises HistoryError, before anything is
-    changed, when FontLab could not record them: the caller must then write nothing (begin_write)."""
+    changed, when FontLab could not record them: the caller must then write nothing (begin_write).
+    coverage: a write that adds glyphs or code points, whose code points are read now so that
+    notify_changed can update the font info to match (_update_font_info)."""
     held = _history()
     font = _font_id(package)
     held["counts"][font] = _glyph_count(package)
+    if coverage:
+        held.setdefault("coverage", {})[font] = _coverage_before(package)
     objects = []
     if font not in held["whole"] or _without_state(package):
         objects.append(package)
@@ -1679,6 +1836,7 @@ def before_changes(fontlab, package, title, glyphs=()):
             fontlab.flItems.notifyChangesApplied(u"%s (before)" % title, objects, True)
         except Exception as exc:
             held["counts"].pop(font, None)
+            held.setdefault("coverage", {}).pop(font, None)
             raise HistoryError(u"Nothing was changed: FontLab's History could not record the font before the change "
                                u"(%s), so <i>Edit &gt; Undo</i> could not have taken it back." % html(_error_text(exc)))
         if objects[0] is package:
@@ -1686,11 +1844,11 @@ def before_changes(fontlab, package, title, glyphs=()):
     return objects
 
 
-def begin_write(fontlab, package, title, log, glyphs=()):
+def begin_write(fontlab, package, title, log, glyphs=(), coverage=False):
     """before_changes for a tool: True when the write may go ahead; False, with the reason in its log
     (as an error), when FontLab's History could not record the font first and nothing may be written."""
     try:
-        before_changes(fontlab, package, title, glyphs)
+        before_changes(fontlab, package, title, glyphs, coverage)
         return True
     except HistoryError as exc:
         if log is not None:
@@ -1701,7 +1859,7 @@ def begin_write(fontlab, package, title, log, glyphs=()):
         return False
 
 
-def notify_changed(fontlab, package, title, glyphs=(), added=None):
+def notify_changed(fontlab, package, title, glyphs=(), added=None, coverage=False):
     """FontLab told of a script's changes, as one step of its History, and its windows redrawn; the
     write began with before_changes, so that Undo has something to go back to.
 
@@ -1717,7 +1875,12 @@ def notify_changed(fontlab, package, title, glyphs=(), added=None):
     twice. The font is marked modified: a script's writes leave it unmarked, and FontLab would close it
     without asking to save. A WriteStatus: whether the History recorded the step and the font was
     marked (a caller promises Undo only through status.undo, and status.report logs a failure); the
-    redraws (glyph.update, notifyPackageContentUpdated) are not part of it."""
+    redraws (glyph.update, notifyPackageContentUpdated) are not part of it.
+
+    coverage: the write began with before_changes' coverage, and the glyphs given are those it drew: the
+    font info is updated to match (_update_font_info: its Unicode ranges and code pages, its Win values),
+    in status.info_changes, which status.report logs. FontLab's History does not cover the font info: the
+    changes are kept so that follow_font_info puts them back in step after an undo."""
     status = WriteStatus()
     glyphs = list(glyphs)
     for glyph in glyphs:
@@ -1726,6 +1889,8 @@ def notify_changed(fontlab, package, title, glyphs=(), added=None):
         except Exception:
             pass  # (a redraw)
     held, font = _history(), _font_id(package)
+    if coverage:  # (a step of the write's own before it, such as Glyph Compose's parts, leaves the codes read)
+        _update_font_info(status, package, held.setdefault("coverage", {}).pop(font, None), glyphs)
     try:
         fontlab.flItems.notifyChangesApplied(title, [package] + glyphs if glyphs else package, True)
         held["whole"].add(font)
@@ -1733,6 +1898,10 @@ def notify_changed(fontlab, package, title, glyphs=(), added=None):
         status.recorded = False
         status.reasons.append(("history", _error_text(exc)))
         held["whole"].discard(font)  # (the next write records the font first again)
+    if coverage:
+        module = font_info()
+        if module is not None and font is not None:  # (where the font stands once the write is in the History)
+            module.note_mark(font, _glyph_count(package), history_state(package), wrote=bool(status.info_changes))
     before = held["counts"].pop(font, None)
     if added is None:
         added = before is None or before != _glyph_count(package)
@@ -7075,6 +7244,10 @@ def watch_history(owner):
             package, seen = getattr(owner, "package", None), getattr(owner, "seen_history", None)
             if package is None or seen is None:
                 return
+            # (at each tick, not only when the place moved since owner's last look: a window that was busy when
+            # the History moved notes the new place itself once done, and a redo then went unfollowed, live
+            # 2026-11-18; cheap: nothing is read for a font whose info FreeLab never updated)
+            follow_font_info(package, getattr(owner, "log", None), when_needed=True)
             now = history_mark(package)
             if now != seen:
                 owner.seen_history = now

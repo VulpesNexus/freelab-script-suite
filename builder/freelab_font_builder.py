@@ -1896,7 +1896,7 @@ class FontBuilderDialog(object):
         self.package = package
         master = package.master
         codes_of, by_code, drawn_now = self.font_glyphs()  # (read again: the font may have changed since)
-        if not self.ak.begin_write(self.fontlab, package, TITLE, self.log):
+        if not self.ak.begin_write(self.fontlab, package, TITLE, self.log, coverage=True):  # (the font info follows)
             return
         added, rebuilt, touched, kept, unencoded, twice, nowhere, error = [], [], [], [], [], [], [], None
         clockwise_outer = not is_postscript(package)
@@ -1963,7 +1963,7 @@ class FontBuilderDialog(object):
                 touched.append(glyph)
         except Exception as exc:
             error = exc
-        status = self.ak.notify_changed(self.fontlab, package, TITLE, touched, added=bool(added))
+        status = self.ak.notify_changed(self.fontlab, package, TITLE, touched, added=bool(added), coverage=True)
         self.busy = False
         self.ak.busy_end(self)
         if added or rebuilt:

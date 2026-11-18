@@ -6770,5 +6770,35 @@ class UiRoundTests(unittest.TestCase):
         self.assertEqual(grown, [True], "once: a window that had its font already is left as it is")
 
 
+class DeclaredCoverageTests(unittest.TestCase):
+    """The font info's Unicode ranges and code pages, against what the glyphs cover: a log line with a link
+    that declares it (the tools keep it in step after their own writes: freelab_font_info)."""
+
+    def setUp(self):
+        import freelab_font_info as fi  # (checks is on the path)
+        self.fi = fi
+        self.latin = list(range(0x20, 0x7F)) + [c for c in range(0xC0, 0x100) if c not in (0xD7, 0xF7)] + [
+            0x152, 0x153, 0x160, 0x161, 0x178, 0x17D, 0x17E]
+
+    def test_a_font_declaring_what_it_covers_says_nothing(self):
+        self.assertEqual(fc.declared_coverage(self.fi, [0, 1, 2], [0, 29], self.latin), {},
+                         "Macintosh Roman: a code page FreeLab leaves as declared")
+        self.assertEqual(fc.declared_note(self.fi, {}, lambda t: t), u"")
+
+    def test_what_differs_and_the_link(self):
+        found = fc.declared_coverage(self.fi, [0, 1, 2, 9], [], self.latin + [0xAC00])
+        self.assertEqual(found, {"unicode_ranges": ([0, 1, 2, 9], [0, 1, 2, 56]), "code_pages": ([], [0])})
+        note = fc.declared_note(self.fi, found, lambda t: t)
+        self.assertEqual(note, u"The font info's coverage differs from the glyphs: Unicode ranges (not declared: Hangul "
+                               u"Syllables; declared, without a glyph of it: Cyrillic); code pages (not declared: Latin 1 "
+                               u"(1252)). <a href=\"freelab-declare-coverage:\">Declare what the font covers</a> (<i>Edit "
+                               u"&gt; Undo</i> takes it back).")
+
+    def test_a_code_page_declared_but_not_complete(self):
+        found = fc.declared_coverage(self.fi, [0, 1, 2], [0], self.latin[:-1])
+        self.assertEqual(found, {"code_pages": ([0], [])})
+        self.assertIn(u"declared, not complete: Latin 1 (1252)", fc.coverage_differences(self.fi, found))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1255,7 +1255,20 @@ class FontLabCalls(object):
                 found[key] = None  # (the font's, not each master's: its master's name tells instead, style_weight)
                 continue
             found[key] = value(info, attribute) if info is not None else None
+        for key, attribute in COVERAGE_ATTRIBUTES:  # (bit lists, live 2026-11-18: [0L, 1L, 4L])
+            try:
+                found[key] = [int(bit) for bit in (getattr(info, attribute) or [])]
+            except Exception:
+                found[key] = None
         return found
+
+    def font_info_module(self):
+        """The shared module that keeps the font info's coverage in step (freelab_font_info, through Auto
+        Kerning's font_info), or None."""
+        try:
+            return self.ak.font_info()
+        except Exception:
+            return None
 
     # -- opening ---------------------------------------------------------------
 
@@ -1525,6 +1538,46 @@ INFO_TEXTS = ("copyright", "trademark", "openTypeNameDesigner", "openTypeNameDes
 MASTER_METRICS = (("ascender", "ascender_value"), ("descender", "descender_value"), ("x_height", "xHeight_value"),
                   ("cap_height", "capsHeight_value"), ("line_gap", "lineGap_value"))
 MASTER_INFO = ("italic_angle", "weight_class", "width_class")  # each master's own: not written as the font's
+# The coverage the font info declares, read from each source: (Source.info key, fgPackage.info name)
+COVERAGE_ATTRIBUTES = (("unicode_ranges", "openTypeOS2UnicodeRanges"), ("code_pages", "openTypeOS2CodePageRanges"))
+WIN_KEYS = (("win_ascent", "openTypeOS2WinAscent"), ("win_descent", "openTypeOS2WinDescent"))
+
+
+def assembled_coverage(module, reference, plan):
+    """[(fgPackage.info name, bits)] the new font declares: the reference's Unicode ranges and code pages,
+    with those the new font's code points complete or no longer reach set or cleared, as a FreeLab tool
+    updates them after a write (freelab_font_info's changed_bits: the reference's own choices kept). Where
+    the reference's could not be read, what the new font's code points cover."""
+    if module is None:
+        return []
+    before_codes = set(code for codes in dict(reference.glyphs or {}).values() for code in codes)
+    after_codes = set(code for codes in plan.codes.values() for code in codes)
+    before, after = module.coverage(before_codes), module.coverage(after_codes)
+    found = []
+    info = reference.info or {}
+    for key, attribute in COVERAGE_ATTRIBUTES:
+        declared = info.get(key)
+        if declared is None:
+            found.append((attribute, sorted(after[attribute])))
+            continue
+        bits = set(declared)
+        for bit, on in module.changed_bits(bits, before[attribute], after[attribute]).items():
+            if attribute == module.INFO_PAGES and bit not in module.managed_pages():
+                continue
+            (bits.add if on else bits.discard)(bit)
+        found.append((attribute, sorted(bits)))
+    return found
+
+
+def assembled_win(sources):
+    """[(fgPackage.info name, value)]: the largest Win ascent and descent of the sources, each source's
+    covering its own glyphs (the Win values are the whole font's: one for every master)."""
+    found = []
+    for key, attribute in WIN_KEYS:
+        values = [s.info.get(key) for s in sources if s.info and s.info.get(key) is not None]
+        if values:
+            found.append((attribute, max(values)))
+    return found
 
 
 def read_source(calls, entry, shapes=True, progress=None):
@@ -1776,6 +1829,20 @@ def build_font(calls, plan, sources, progress=None):
     for attribute in INFO_TEXTS:
         if texts.get(attribute):
             failed.attempt(u"Font info not set", attribute, calls.set_info, package, attribute, texts[attribute])
+    # What the font covers, as FreeLab's tools keep it after their writes: the reference's, updated for the
+    # glyphs the other sources bring; and Win values that clip none of the masters' glyphs
+    module = getattr(calls, "font_info_module", lambda: None)()
+    for attribute, bits in assembled_coverage(module, reference, plan):
+        failed.attempt(u"Font info not set", attribute, calls.set_info, package, attribute, bits)
+    used = [sources[key] for _, key in plan.masters]
+    for attribute, value in assembled_win(used):
+        key = dict((a, k) for k, a in WIN_KEYS)[attribute]
+        if value != info.get(key):
+            failed.attempt(u"Font info not set", attribute, calls.set_info, package, attribute, value)
+            notes.append(u"The %s is %s, the largest of the sources' (%s's is %s), so that no master's glyphs are "
+                         u"clipped." % (u"Win ascent" if key == "win_ascent" else u"Win descent", number_text(value),
+                                        reference.label, number_text(info.get(key)) if info.get(key) is not None
+                                        else u"not set"))
     unmeasured = []
     for master, key in plan.masters:
         values = [(attribute, (sources[key].info or {}).get(field)) for field, attribute in MASTER_METRICS]

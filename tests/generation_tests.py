@@ -929,11 +929,11 @@ class WriteTests(unittest.TestCase):
         page.fontlab = Stub(GlyphComponent=Component, flShape=lambda: Shape())
         steps, logged = [], []
         page.backs = []  # (each build's call to go back to Font Check, and whether something failed)
-        page.ak = Stub(notify_changed=lambda fontlab, package_, title, touched: steps.append((title, list(touched))),
+        page.ak = Stub(notify_changed=lambda fontlab, package_, title, touched, coverage=False: steps.append((title, list(touched))),
                        b=lambda text: u"%s" % text, html=lambda text: u"%s" % text)
         page.owner = Stub(package_key=lambda p: (u"bare", 7) if p is not None else None, current_font=lambda: package,
                           log=Stub(add=lambda text, kind="info": logged.append((kind, text))),
-                          begin_write=lambda p, glyphs=(): steps.append(("begin", [g.name for g in glyphs])) or True,
+                          begin_write=lambda p, glyphs=(), coverage=False: steps.append(("begin", [g.name for g in glyphs])) or True,
                           end_write=lambda p, wrote=True: steps.append(("end", wrote)),
                           back_to_font_check=lambda failed=False: page.backs.append(failed),
                           corrector=lambda package_, masters_, made, touched: self.corrector(package_, made, touched))

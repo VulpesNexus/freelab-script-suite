@@ -4159,9 +4159,12 @@ def undo_words(status, text):
 
 def report_write(status, log):
     """notify_changed's failure, if any (not recorded in the History, the font not marked modified),
-    added to the log as an error."""
+    added to the log as an error; and the font info updated to match the write, if it was."""
     if status is not None and not getattr(status, "ok", True):
         log.add(status.message(), "error")
+    report_info = getattr(status, "report_info", None)
+    if report_info is not None:
+        report_info(log)
 
 
 def fit_tree_columns(tree, count):
@@ -8176,17 +8179,19 @@ class AccentsDialog(object):
 
     # -- the dialog's own writes, told apart from the History moving in FontLab -----------------------
 
-    def begin_write(self, package, glyphs=()):
+    def begin_write(self, package, glyphs=(), coverage=False):
         """Before a write to the font (Build, Correct mirrored components, Add anchors, Build checked
         glyphs on Glyph generation): the History watch held (watch_history skips while busy), the font
         recorded where Undo needs it (before_changes; glyphs: those whose own properties the write
         changes, such as their code points, recorded too: recorded with the font alone, a code point
         added stayed on Undo, live 2026-11-16), and where the History stands then noted. True when the
         write may go ahead; False, with the reason in the log, when FontLab's History could not record
-        the font first: nothing may be written then (Undo could not take it back)."""
+        the font first: nothing may be written then (Undo could not take it back). coverage: a write that
+        adds glyphs or code points (the builds): the font info is updated to match it (Auto Kerning's
+        notify_changed)."""
         self.busy = True
         try:
-            self.ak.before_changes(self.fontlab, package, u"FreeLab Glyph Compose", list(glyphs))
+            self.ak.before_changes(self.fontlab, package, u"FreeLab Glyph Compose", list(glyphs), coverage)
         except getattr(self.ak, "HistoryError", Exception) as exc:
             self.busy = False
             self.log.add(u"%s" % (exc,), "error")
@@ -9203,7 +9208,7 @@ class AccentsDialog(object):
         used = set()  # the corrected glyphs a glyph built points to
         corrected = self.corrector(package, masters, helpers, touched)
         changing = None  # the glyph whose layers are being changed, for touched should an error stop the build
-        if not self.begin_write(package, existing_glyphs(package, [r.name for r in chosen])):
+        if not self.begin_write(package, existing_glyphs(package, [r.name for r in chosen]), coverage=True):
             return  # (nothing built: the reason in the log)
         # The corrected glyphs the letters' mirrored parts point to are made first and recorded as a step of
         # their own, before any letter made of them is written (record_parts: FontLab's Undo of one step holding
@@ -9357,7 +9362,8 @@ class AccentsDialog(object):
             # again after their own step: a step that records it)
             second = bool(parts) and bool(later or unused)
             if later or (parts and unused) or (touched and not parts):
-                status = self.ak.notify_changed(fontlab, package, u"FreeLab Glyph Compose", later if parts else touched)
+                status = self.ak.notify_changed(fontlab, package, u"FreeLab Glyph Compose", later if parts else touched,
+                                                coverage=True)
         finally:
             self.end_write(package, bool(touched) or bool(parts))
         if parts and second:

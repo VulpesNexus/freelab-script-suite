@@ -380,7 +380,7 @@ class BuildTests(unittest.TestCase):
         d.fontlab = Box(flGlyph=lambda: Box(name=None), flShape=FakeShape)
         status = Box(undo=lambda text: "", report=lambda log: None)
         self.progress = []
-        d.ak = Box(begin_write=lambda *a: True, notify_changed=lambda *a, **k: status, html=lambda s: s,
+        d.ak = Box(begin_write=lambda *a, **k: True, notify_changed=lambda *a, **k: status, html=lambda s: s,
                    b=lambda s: "<b>%s</b>" % s,
                    font_key=lambda p: id(p), busy_start=lambda o, what="", stoppable=True: self.progress.append(
                        ("start", stoppable)),
