@@ -60,6 +60,19 @@ SAMPLES = (("ja", u"Japanese", SAMPLE),
            ("zh-hant", u"Chinese (Traditional)", u"「天地玄黃，宇宙洪荒。日月盈昃，辰宿列張。寒來暑往，秋收冬藏。」（千字文）"))
 SAMPLE_SCRIPTS = {"ja": ((0x3041, 0x30FA),), "ko": ((0xAC00, 0xD7A3),),
                   "zh-hans": ((0x4E00, 0x9FFF), (0x3400, 0x4DBF)), "zh-hant": ((0x4E00, 0x9FFF), (0x3400, 0x4DBF))}
+# What makes a font a CJK one (has_cjk): kana, Hangul, ideographs, bopomofo, CJK punctuation and full-width
+# forms, as CJK Vertical counts them. Not the curly quotes palt trims where they are full width: a Latin font
+# has them too, proportional, and counted, they kept CJK Spacing's ticks and sample usable over Bellefair
+# (owner's images 379 and 380, live 2026-11-19).
+CJK_RANGES = ((0x1100, 0x11FF), (0x2E80, 0x2FDF), (0x2FF0, 0x303F), (0x3040, 0x30FF), (0x3100, 0x31FF),
+              (0x3200, 0x33FF), (0x3400, 0x4DBF), (0x4E00, 0x9FFF), (0xA960, 0xA97F), (0xAC00, 0xD7FF),
+              (0xF900, 0xFAFF), (0xFE10, 0xFE1F), (0xFE30, 0xFE4F), (0xFF00, 0xFFEF), (0x1B000, 0x1B16F),
+              (0x20000, 0x323AF))
+
+
+def has_cjk(codes):
+    """Whether a font's code points include a CJK character (CJK_RANGES)."""
+    return any(low <= code <= high for code in codes for low, high in CJK_RANGES)
 
 
 # The writing a font is for, as its family name says it (a word of it: IBM Plex Sans JP, Noto Sans TC)
@@ -179,8 +192,12 @@ def best_sample(codes, family=u"", code_pages=()):
     Hangul syllables, Japanese for one with kana, and Chinese otherwise, Simplified or Traditional as it covers
     them; the sample it covers best where it has none of these (a font of punctuation alone). Kana alone
     cannot say Japanese: the Chinese fonts carry kana too (GB 2312 and Big5 have it; IBM Plex Sans JP's
-    covers the Traditional sample as fully as the Iroha, which put the Traditional sample first for it)."""
+    covers the Traditional sample as fully as the Iroha, which put the Traditional sample first for it).
+    A font with no CJK character at all (has_cjk: a Latin font) gets the first: its comma and period made the
+    Korean sample the one it covered best (owner's image 359)."""
     codes = set(codes)
+    if not has_cjk(codes):
+        return 0
     keys = [key for key, _, _ in SAMPLES]
 
     def covered(key):
@@ -231,6 +248,29 @@ def sample_label(sample, offered):
     if label.endswith(u")"):  # (one pair of parentheses: never "Chinese (Simplified) (no ...)")
         return u"%s, %s in the font)" % (label[:-1], lacks)
     return u"%s (%s in the font)" % (label, lacks)
+
+
+def shown_whole(label, pixmap, QtCore):
+    """A preview's picture (pixmap, as last drawn) shown whole in its label as the window is resized: scaled down
+    where the label is now smaller, as drawn otherwise, until it is drawn again for its new size (debounced:
+    a drag of the window's edge restarts the wait at each step, and meanwhile the label cut the centered
+    lines' ends off, owner's image 356). Never raises."""
+    if pixmap is None:
+        return
+    try:
+        width, height = (int(_value(label, name)) for name in ("width", "height"))
+        if width > 0 and height > 0 and (pixmap.width() > width or pixmap.height() > height):
+            label.setPixmap(pixmap.scaled(width, height, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation))
+        else:
+            label.setPixmap(pixmap)
+    except Exception:
+        pass
+
+
+def _value(obj, name):
+    """A Qt property as PythonQt gives it: an attribute, or a method in some builds."""
+    value = getattr(obj, name)
+    return value() if callable(value) else value
 
 
 def offer_samples(combo, samples, offered, QtCore):
@@ -1251,6 +1291,7 @@ class CJKSpacingDialog(object):
             def eventFilter(self, obj, event):
                 try:
                     if event.type() == 14:  # Resize
+                        owner.fit_previews()  # (whole meanwhile: shown_whole)
                         owner.redraw_timer.start()
                 except Exception:
                     pass  # an event filter must never raise
@@ -1262,15 +1303,23 @@ class CJKSpacingDialog(object):
             self.redraw_timer.setSingleShot(True)
             self.redraw_timer.setInterval(80)
             self.redraw_timer.connect("timeout()", self.previews_resized)
-            watcher = Watcher(self.previews[0][0])
-            self.previews[0][0].installEventFilter(watcher)
-            self.watchers.append(watcher)
+            for label, _ in self.previews:  # (each: the layout sizes one after the other, the second after the first's event)
+                watcher = Watcher(label)
+                label.installEventFilter(watcher)
+                self.watchers.append(watcher)
         except Exception:
             pass
 
     def previews_resized(self):
         if self.preview_room() != self.preview_width or self.preview_tall() != getattr(self, "preview_height", None):
             self.draw_previews()
+
+    def fit_previews(self):
+        """Each preview's last picture shown whole at the previews' size now (shown_whole), while a resize waits
+        for the previews to be drawn again."""
+        QtCore = _qt()[0]
+        for (label, caption), pixmap in zip(self.previews, getattr(self, "preview_pixmaps", [])):
+            shown_whole(label, pixmap, QtCore)
 
     def flag_names(self):
         QtCore, QtGui = _qt()
@@ -1431,7 +1480,8 @@ class CJKSpacingDialog(object):
             len(self.trims), full, sum(1 for t in self.trims if t.palt), sum(1 for t in self.trims if t.halt),
             self.write_button.text, korean, b, ak.i)))
         self.seen_history = ak.history_mark(package)
-        self.cjk_states(bool(glyphs) or bool(hangul))
+        self.cjk = has_cjk(codes)
+        self.cjk_states(self.cjk)
         self.step(LIST_STEPS, PREVIEW_STEP)
         self.draw_previews()
 
@@ -1439,7 +1489,10 @@ class CJKSpacingDialog(object):
         """The ticks and the sample grayed for a font with no kana, Hangul, or CJK punctuation: nothing they act
         on or show (owner's images 379 and 380; a Latin font's comma and period were offered the Korean sample,
         image 359)."""
-        for widget in (self.palt_box, self.halt_box, self.sample_box, self.sample):
+        for name in ("palt_box", "halt_box", "sample_box", "sample"):
+            widget = getattr(self, name, None)
+            if widget is None:
+                continue
             try:
                 self.ak.enable(widget, cjk)
             except Exception:
@@ -1683,6 +1736,9 @@ class CJKSpacingDialog(object):
             self.log.add(self.ak.html(problem), "error")  # (once, while it lasts)
         self.problem_said = problem
         self.hangul_shown()  # (the shared no_font_states calls this once it gives the controls back)
+        # (and the ticks and the sample grayed again for a font with no CJK: no_font_states gave them back after
+        # the read had grayed them, live 2026-11-19 over Bellefair)
+        self.cjk_states(self.package is not None and getattr(self, "cjk", True))
         self.show_code(new, widths)
         self.draw_previews()
 
@@ -1852,10 +1908,12 @@ class CJKSpacingDialog(object):
         tall = self.preview_height = self.preview_tall()
         em = fitted_em(em, tall)  # (and no taller than the previews' part: a list above it showed one row, live)
         self.preview_size = em
+        self.preview_pixmaps = []  # (as drawn: fit_previews shows them whole while a resize waits)
         for (label, caption), (placed, chars, ems) in zip(self.previews, sets):
             widths = [width * em for width in ems]
             rows = [placed[start:end] for start, end in break_lines(chars, widths, room)] if room else None
             pixmap = self.picture(placed, em, rows) if placed else None
+            self.preview_pixmaps.append(pixmap)
             if pixmap is None:
                 label.clear()
             else:

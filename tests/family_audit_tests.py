@@ -87,6 +87,37 @@ class WordTests(unittest.TestCase):
         self.assertFalse(fa.same_path(u"/a.ttf", u"/b.ttf"))
 
 
+class StatusHeightTests(unittest.TestCase):
+    def test_the_status_line_keeps_the_tallest_tabs_height(self):
+        """Owner's images 370 and 371: a tab whose status took a line more than another's moved the lists below
+        as the tabs switched. The line is as tall as the tallest tab's at its width."""
+        class Label(object):
+            text, width, minimum = u"", 400, None
+
+            def setText(self, text):
+                self.text = text
+
+            def heightForWidth(self, width):
+                return 16 * (1 + self.text.count(u".")) if self.text else 0
+
+            def setMinimumHeight(self, height):
+                self.minimum = height
+
+        texts = {"glyphs": u"One. Two. Three.", "compatibility": u"One.", "metrics": u"One. Two.",
+                 "kerning": u"One.", "features": u"One."}
+        window = fa.FamilyAuditDialog.__new__(fa.FamilyAuditDialog)
+        window.status_line, window.entries, window.audit = Label(), [1], object()
+        window.status_of = lambda key: texts[key]
+        for key, lines in (("compatibility", 2), ("glyphs", 4), ("metrics", 3)):
+            window.current_key = lambda key=key: key
+            window.show_status()
+            self.assertEqual(window.status_line.text, texts[key], "the shown tab's line")
+            self.assertEqual(window.status_line.minimum, 16 * 4, "as tall as the glyph sets' three sentences")
+        window.audit = None
+        window.show_status()
+        self.assertEqual(window.status_line.minimum, 0, "nothing compared: no room kept")
+
+
 class SourceTests(unittest.TestCase):
     def test_labels_name_a_master_or_a_style_uniquely(self):
         entries = [(u"Sans", u"Regular", u"Regular", 1, u"Sans-Regular.otf"),

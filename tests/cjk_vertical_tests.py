@@ -1534,6 +1534,31 @@ class ProgressTests(unittest.TestCase):
         dialog.update_put_back = lambda: self.restored.append("put back")
         return dialog
 
+    def test_a_font_with_no_cjk_grays_its_options_at_each_update(self):
+        """Live 2026-11-19 (Bellefair): the read grayed the options, the sample, and Put back vhea, then the shared
+        no_font_states gave every control back with the font and called update_buttons, which left them usable.
+        cjk_states runs after each read and at each update_buttons."""
+        dialog = self.dialog()
+        names = ("forms_box", "vpal_box", "vkrn_box", "turned_box", "metrics_box", "sample_box", "sample")
+        for name in names:
+            setattr(dialog, name, self.Widget())
+        dialog.package, dialog.cjk = object(), False
+        dialog.cjk_states()
+        self.assertEqual([getattr(dialog, name).enabled for name in names], [False] * len(names))
+        self.assertEqual(self.restored, ["put back"])
+        dialog.cjk = True
+        dialog.cjk_states()
+        self.assertEqual([getattr(dialog, name).enabled for name in names], [True] * len(names))
+        dialog.package = None
+        dialog.cjk_states()
+        self.assertFalse(dialog.sample.enabled, "no font: nothing to act on")
+        with io.open(cv.__file__.replace(".pyc", ".py"), encoding="utf-8") as handle:
+            source = handle.read()
+        buttons = source.split(u"    def update_buttons(self):")[1].split(u"\n    def ")[0]
+        self.assertIn(u"self.cjk_states()", buttons)
+        run = source.split(u"    def run(self):")[1].split(u"\n    def ")[0]
+        self.assertIn(u"self.cjk_states()", run)
+
     def test_each_step_has_its_share_and_the_bar_ends_full(self):
         for steps in (cv.LIST_STEPS, cv.SHOW_STEPS, cv.WRITE_STEPS, cv.EXPORT_STEPS, cv.CFF_EXPORT_STEPS):
             ends = [end for _, end in steps]

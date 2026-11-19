@@ -1253,6 +1253,10 @@ class FontLabGlyphs(object):
         self.paths, self.advances, self.signatures = {}, {}, {}
         self.top = self.bottom = 0.0
         self.images = {}
+        # At most `most` images kept (the oldest let go, drawn again if asked for), but those of `keep`; None:
+        # every image kept. Auto Spacing measures each glyph against a few references only, and kept every
+        # glyph's image with its envelopes: 5 GB more for Noto Sans JP's 4,954 glyphs (live 2026-11-19).
+        self.keep, self.most, self._drawn = set(), None, []
 
     def add(self, name):
         glyph = self.package.findName(name)
@@ -1305,8 +1309,15 @@ class FontLabGlyphs(object):
         address = ctypes.addressof(ctypes.c_char.from_buffer(image.bits()))
         coverage = (ctypes.c_uint8 * (stride * height)).from_buffer_copy(ctypes.string_at(address, stride * height))
         advance = round_units(self.advances[name] * scale)
-        glyph = Glyph(name, coverage, width, height, stride, origin_x, advance, baseline)
+        return self.remember(name, Glyph(name, coverage, width, height, stride, origin_x, advance, baseline))
+
+    def remember(self, name, glyph):
+        """glyph kept as name's image; past `most`, the oldest drawn let go (but those of `keep`). Returns glyph."""
         self.images[name] = glyph
+        if self.most is not None and name not in self.keep:
+            self._drawn.append(name)
+            while len(self._drawn) > self.most:
+                self.images.pop(self._drawn.pop(0), None)
         return glyph
 
 
@@ -4829,22 +4840,24 @@ POPUP_PAD = 36  # pixels a list row takes beside its text (margins, and the scro
 def popup_width(combo):
     """A dropdown's list as wide as its longest choice, never cut short: Qt makes the list as wide as the box,
     and a longer choice ended in "..." (owner's image 357: "Korean (no... the font)"). Measured again only
-    when the choices change."""
-    QtCore = _qt()[0]
+    when the choices change. The width is measured with a QFontMetrics of the list's font: PythonQt has no
+    widget.fontMetrics(), and the call that used it failed silently, every list as wide as its box (live
+    2026-11-19, the owner's image 357 again)."""
+    QtCore, QtGui = _qt()
     try:
         view = combo.view()
         if view is None:
             return
-        count = int(combo.count)
+        count = int(_property(combo, "count"))
         texts = [u"%s" % combo.itemText(k) for k in range(count)]
         key = u"%d:%s" % (count, u"\n".join(texts))
         if (u"%s" % (combo.property(POPUP_WIDTH_PROP) or u"")) == key:
             return
-        combo.setProperty(POPUP_WIDTH_PROP, key)
-        metrics = view.fontMetrics()
+        metrics = QtGui.QFontMetrics(_property(view, "font"))
         widest = max([metrics.width(text) for text in texts] or [0])
         view.setTextElideMode(QtCore.Qt.ElideNone)
         view.setMinimumWidth(int(widest) + POPUP_PAD)
+        combo.setProperty(POPUP_WIDTH_PROP, key)  # (set once measured: a failure is tried again)
     except Exception:
         pass
 
@@ -5526,6 +5539,7 @@ def update_states(dialog, hidden_too=False):
     if not hidden_too and not _property(dialog, "visible"):
         return
     style_combos(dialog)
+    light_fields(dialog)  # (fields made since the window was built: a read's, a tab's)
     try:
         install_filters(dialog)
     except Exception:
@@ -6322,6 +6336,47 @@ def tab_sheet(bar):
     return TAB_SHEET_LIGHT if light else TAB_SHEET
 
 
+LIGHT_FIELD_PROP = "freelabLightField"  # on a field whose grayed background light_fields set
+LIGHT_FIELD_DARKER = 107  # percent: a grayed field's background on a light window, darker than the window's
+
+
+def light_field_color(window_color, QtGui):
+    """The background of a grayed field on a light window: a shade darker than the window's. Windows' own style
+    fills a grayed field with the window's color, its frame a faint line: Feature Code's empty field beside
+    Glyphs and its spin boxes vanished in light mode (owner's image 366, live 2026-11-19)."""
+    return QtGui.QColor(window_color).darker(LIGHT_FIELD_DARKER)
+
+
+def light_fields(dialog):
+    """Each field and spin box of a light window drawn, grayed, on light_field_color; on a dark window (dark
+    mode switched on) the background its palette gives it back, dark mode's as before. Never raises."""
+    QtGui = _qt()[1]
+    try:
+        app = QtGui.QApplication.instance()
+        window = _property(dialog, "palette").color(QtGui.QPalette.Window)
+        light = window.lightness() > 128
+        want = light_field_color(window, QtGui) if light else app.palette().color(QtGui.QPalette.Disabled,
+                                                                                   QtGui.QPalette.Base)
+        for kind in ("QLineEdit", "QAbstractSpinBox"):
+            for field in dialog.findChildren(getattr(QtGui, kind)):
+                try:
+                    if kind == "QLineEdit" and field.parentWidget() is not None and (
+                            field.parentWidget().inherits("QAbstractSpinBox") or field.parentWidget().inherits("QComboBox")):
+                        continue  # (drawn by its box)
+                    if not light and not field.property(LIGHT_FIELD_PROP):
+                        continue  # (never set here: dark mode's own)
+                    palette = _property(field, "palette")
+                    if palette.color(QtGui.QPalette.Disabled, QtGui.QPalette.Base) != want:
+                        palette = QtGui.QPalette(palette)
+                        palette.setColor(QtGui.QPalette.Disabled, QtGui.QPalette.Base, want)
+                        field.setPalette(palette)
+                    field.setProperty(LIGHT_FIELD_PROP, True)  # (kept: in dark, it follows the palette's)
+                except Exception:
+                    continue
+    except Exception:
+        pass
+
+
 def flat_scroll_bars(dialog):
     """SCROLL_SHEET on each scroll bar of a dialog's lists and text views, on the bars themselves: a
     stylesheet on the dialog would reach its combo boxes and fields, which dark mode leaves to the
@@ -6334,6 +6389,7 @@ def flat_scroll_bars(dialog):
                     bar.setStyleSheet(SCROLL_SHEET)
     except Exception:
         pass
+    light_fields(dialog)  # (and its grayed fields seen on a light window)
     try:  # and its tab bars (TAB_SHEET)
         for bar in dialog.findChildren(QtGui.QTabBar):
             sheet = tab_sheet(bar)

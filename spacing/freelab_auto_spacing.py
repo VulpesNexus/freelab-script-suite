@@ -232,6 +232,20 @@ def reference_for(kind_char, category, script_of=None):
     return SPACING_REFERENCES.get(category(kind_char), SPACING_REFERENCES["lower"])
 
 
+IMAGES_KEPT = 64  # glyph images a measuring keeps besides the references' (each glyph is measured against a few)
+
+
+def keep_few(images, references):
+    """A measuring's images (ak.FontLabGlyphs) kept to the references' and the IMAGES_KEPT drawn last: kept
+    all, with their envelopes, Noto Sans JP's 4,954 glyphs took 5 GB more of FontLab's memory until the
+    analysis ended (live 2026-11-19). The values measured are the same; an image let go is drawn again if it
+    is asked for. Nothing is done with an older shared module (no keep)."""
+    if hasattr(images, "keep") and hasattr(images, "most"):
+        images.keep = set(references)
+        images.most = IMAGES_KEPT
+    return images
+
+
 def fixed_characters(ak):
     """The references and tuning letters of every script: never changed."""
     found = set(FIXED)
@@ -821,12 +835,14 @@ class AutoSpacingDialog(object):
 
         measure = measuring(glyphs)
         fixed_names = set(name for ch, name in found if ch in fixed)
+        keep_few(glyphs, fixed_names)
 
         def measure_at(moved):
             """The measuring with glyphs moved ({name: (left change, right change)}): drawn again, their
             outlines shifted by the left change and their widths changed by both, as spacing does."""
             again = ak.FontLabGlyphs(package, master, em, dict((name, (left, left + right))
                                                                for name, (left, right) in moved.items()))
+            keep_few(again, fixed_names)
             for number, name in enumerate(sorted(fixed_names | set(moved))):
                 if number % PUMP_EVERY == 0 and progress is not None:
                     progress(SETTLE_STEP, None)  # (the window answers; the bar stays where the pass is)

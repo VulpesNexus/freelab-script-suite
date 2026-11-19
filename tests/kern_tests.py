@@ -6681,6 +6681,150 @@ class ReviewOfNov19Tests(unittest.TestCase):
         self.assertIn(u"rgba(128, 128, 128, 255)", ak.TAB_SHEET.split(u"}")[0], "dark windows keep the mid gray")
         self.assertIn(ak.PALETTE_CHANGE, ak.WATCHED_EVENTS, "dark mode switched: the sheets follow")
 
+    def test_an_open_list_is_as_wide_as_its_longest_choice(self):
+        """Live 2026-11-19 (owner's image 357 again): popup_width called view.fontMetrics(), which PythonQt does not
+        have; the failure was swallowed after the choices were marked measured, and every list stayed as wide
+        as its box ("Korean (no... the font)"). Measured with a QFontMetrics of the list's font."""
+        class Metrics(object):
+            def __init__(self, font):
+                self.font = font
+
+            def width(self, text):
+                return 7 * len(text)
+
+        class View(object):  # (as PythonQt shows a list: its font a property, no fontMetrics())
+            font, minimum, elide = "font", None, None
+
+            def setTextElideMode(self, mode):
+                self.elide = mode
+
+            def setMinimumWidth(self, width):
+                self.minimum = width
+
+        class Combo(object):
+            def __init__(self, texts):
+                self.texts, self.list, self.props = texts, View(), {}
+                self.count = len(texts)
+
+            def view(self):
+                return self.list
+
+            def itemText(self, k):
+                return self.texts[k]
+
+            def property(self, name):
+                return self.props.get(name)
+
+            def setProperty(self, name, value):
+                self.props[name] = value
+
+        QtCore = type("QtCore", (), {"Qt": type("Qt", (), {"ElideNone": 3})})
+        QtGui = type("QtGui", (), {"QFontMetrics": Metrics})
+        real = ak._qt
+        ak._qt = lambda: (QtCore, QtGui)
+        try:
+            combo = Combo([u"Japanese", u"Korean (no Hangul in the font)"])
+            ak.popup_width(combo)
+            self.assertEqual(combo.list.minimum, 7 * len(u"Korean (no Hangul in the font)") + ak.POPUP_PAD)
+            self.assertEqual(combo.list.elide, 3, "never elided")
+            combo.list.minimum = None
+            ak.popup_width(combo)
+            self.assertIsNone(combo.list.minimum, "the same choices: not measured again")
+            broken = Combo([u"A", u"B"])
+            QtGui.QFontMetrics = None  # (a failure: tried again next time)
+            ak.popup_width(broken)
+            self.assertIsNone(broken.property(ak.POPUP_WIDTH_PROP))
+            QtGui.QFontMetrics = Metrics
+            ak.popup_width(broken)
+            self.assertEqual(broken.list.minimum, 7 + ak.POPUP_PAD)
+        finally:
+            ak._qt = real
+
+    def test_grayed_fields_show_on_a_light_window(self):
+        """Live 2026-11-19 (owner's image 366): on a light window, Windows' style filled a grayed field with the
+        window's color, its frame a faint line, and Feature Code's empty field beside Glyphs vanished. Light
+        windows' fields take a darker gray; dark windows keep dark mode's, and a field set while light follows
+        the palette's again once dark."""
+        class Color(object):
+            def __init__(self, value):
+                self.value = value.value if isinstance(value, Color) else value
+
+            def lightness(self):
+                return self.value
+
+            def darker(self, percent):
+                return Color(int(self.value * 100 / percent))
+
+            def __eq__(self, other):
+                return isinstance(other, Color) and other.value == self.value
+
+            def __ne__(self, other):
+                return not self == other
+
+        class Palette(object):
+            Disabled, Base, Window = "disabled", "base", "window"
+
+            def __init__(self, colors=None):
+                self.colors = dict(colors.colors) if isinstance(colors, Palette) else dict(colors or {})
+
+            def color(self, *roles):
+                return self.colors[roles[-1] if len(roles) == 1 else roles]
+
+            def setColor(self, group, role, color):
+                self.colors[(group, role)] = color
+
+        class Widget(object):
+            def __init__(self, palette, parent=None, kind="QLineEdit"):
+                self.palette, self.parent, self.kind, self.props, self.set = palette, parent, kind, {}, 0
+
+            def parentWidget(self):
+                return self.parent
+
+            def inherits(self, name):
+                return name == self.kind
+
+            def setPalette(self, palette):
+                self.palette, self.set = palette, self.set + 1
+
+            def property(self, name):
+                return self.props.get(name)
+
+            def setProperty(self, name, value):
+                self.props[name] = value
+
+        dark_base = Color(40)
+        app_palette = Palette({("disabled", "base"): dark_base})
+
+        def palette_of(window):
+            return Palette({"window": Color(window), ("disabled", "base"): Color(window)})
+
+        field, spin = Widget(palette_of(240)), Widget(palette_of(240), kind="QAbstractSpinBox")
+        inner = Widget(palette_of(240), parent=spin)
+        dialog = type("Dialog", (), {"palette": palette_of(240)})()
+        QtGui = type("QtGui", (), {"QColor": Color, "QPalette": Palette, "QLineEdit": "QLineEdit",
+                                   "QAbstractSpinBox": "QAbstractSpinBox",
+                                   "QApplication": type("App", (), {"instance": staticmethod(lambda: type(
+                                       "A", (), {"palette": lambda self: app_palette})())})})
+        dialog.findChildren = lambda kind: {"QLineEdit": [field, inner], "QAbstractSpinBox": [spin]}[kind]
+        real = ak._qt
+        ak._qt = lambda: (None, QtGui)
+        try:
+            ak.light_fields(dialog)
+            want = Color(240).darker(ak.LIGHT_FIELD_DARKER)
+            self.assertEqual(field.palette.color("disabled", "base"), want)
+            self.assertEqual(spin.palette.color("disabled", "base"), want)
+            self.assertEqual(inner.set, 0, "a spin box's own field is drawn by its box")
+            ak.light_fields(dialog)
+            self.assertEqual(field.set, 1, "set once")
+            untouched = Widget(palette_of(40))
+            dialog.findChildren = lambda kind: {"QLineEdit": [field, untouched], "QAbstractSpinBox": [spin]}[kind]
+            dialog.palette = palette_of(40)  # (dark mode switched on)
+            ak.light_fields(dialog)
+            self.assertEqual(field.palette.color("disabled", "base"), dark_base, "the dark palette's again")
+            self.assertEqual(untouched.set, 0, "a field never set here is left to dark mode")
+        finally:
+            ak._qt = real
+
 
 if __name__ == "__main__":
     unittest.main()

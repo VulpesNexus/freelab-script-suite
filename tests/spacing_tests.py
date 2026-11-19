@@ -71,6 +71,34 @@ def fake_dialog(test):
     return dialog
 
 
+class ImageMemoryTests(unittest.TestCase):
+    def test_a_measuring_keeps_the_references_and_a_few_images(self):
+        """Live 2026-11-19: Auto Spacing kept every measured glyph's image with its envelopes, 5 GB more of
+        FontLab's memory for Noto Sans JP's 4,954 glyphs until the analysis ended."""
+        images = ak.FontLabGlyphs.__new__(ak.FontLabGlyphs)
+        images.images, images.keep, images.most, images._drawn = {}, set(), None, []
+        for k in range(10):
+            images.remember(u"g%d" % k, k)
+        self.assertEqual(len(images.images), 10, "unlimited by default (Auto Kerning's)")
+        self.assertIs(sp.keep_few(images, [u"H", u"n"]), images)
+        self.assertEqual((images.keep, images.most), (set([u"H", u"n"]), sp.IMAGES_KEPT))
+        images.images, images._drawn = {}, []
+        images.remember(u"H", "h")
+        for k in range(sp.IMAGES_KEPT + 20):
+            images.remember(u"g%d" % k, k)
+        self.assertEqual(len(images.images), sp.IMAGES_KEPT + 1, "the references and the last drawn")
+        self.assertIn(u"H", images.images)
+        self.assertNotIn(u"g0", images.images, "the oldest let go")
+        self.assertIn(u"g%d" % (sp.IMAGES_KEPT + 19), images.images)
+        old = object()
+        self.assertIs(sp.keep_few(old, [u"H"]), old, "an older shared module: nothing done")
+        with io.open(sp.__file__.replace(".pyc", ".py"), encoding="utf-8") as handle:
+            source = handle.read()
+        measure = source.split(u"    def measure(self, package, master")[1].split(u"\n    def ")[0]
+        self.assertIn(u"keep_few(glyphs, fixed_names)", measure)
+        self.assertIn(u"keep_few(again, fixed_names)", measure, "and each settling pass's")
+
+
 class BusyTests(unittest.TestCase):
     """Owner's image 178: Measuring... held the window until Windows called it Not Responding. The long steps
     now run under the window's top-row progress (ak.busy_*), stoppable; the write never is."""

@@ -5849,6 +5849,23 @@ class FeatureCodeDialog(object):
         return [tag for tag in ("liga", "dlig", "calt") if tag in texts] + \
             [feature.tag for feature in self.forms if feature.tag in texts]
 
+    def update_buttons(self):
+        """Every control's state set again from what is listed: the code's (Write the code, Restore suggestions,
+        the turns' buttons and Look back: make_code), the forms' builds, and the Stylistic alternates tab's.
+        The shared no_font_states calls it once it gives the controls back with the font, after the read had
+        set them: without it, everything came back clickable (live 2026-11-19, Bellefair: Write the code beside
+        "The font has this code already", Make copies to redraw with nothing ticked). Never raises."""
+        if self.package is None or self.busy:
+            return
+        for step in (self.make_code, self.update_small_buttons,
+                     getattr(self.alternates, "update_buttons", None) if self.alternates is not None else None):
+            if step is None:
+                continue
+            try:
+                step()
+            except Exception:
+                pass
+
     def make_code(self):
         if self.package is None:
             return

@@ -924,6 +924,61 @@ class UIRound3Tests(unittest.TestCase):
         self.assertIn(u"self.picture(placed, em, rows)", draw, "both previews at that em")
         self.assertNotIn(u"PREVIEW_EM / upm", draw)
 
+    def test_a_preview_stays_whole_while_the_window_is_resized(self):
+        """Owner's image 356: a drag of the window's edge restarted the previews' redraw wait at each step, and the
+        labels cut the centered lines' ends off meanwhile. Each label's last picture is shown scaled down to it."""
+        class Pixmap(object):
+            def __init__(self, w, h):
+                self.w, self.h = w, h
+
+            def width(self):
+                return self.w
+
+            def height(self):
+                return self.h
+
+            def scaled(self, w, h, aspect, mode):
+                factor = min(float(w) / self.w, float(h) / self.h)
+                return Pixmap(int(self.w * factor), int(self.h * factor))
+
+        class Label(object):
+            def __init__(self, w, h):
+                self.width, self.height, self.shown = w, h, None
+
+            def setPixmap(self, pixmap):
+                self.shown = pixmap
+
+        QtCore = type("QtCore", (), {"Qt": type("Qt", (), {"KeepAspectRatio": 1, "SmoothTransformation": 1})})
+        drawn = Pixmap(800, 100)
+        label = Label(400, 120)
+        cj.shown_whole(label, drawn, QtCore)
+        self.assertEqual((label.shown.w, label.shown.h), (400, 50), "scaled down to the label, whole")
+        wide = Label(900, 120)
+        cj.shown_whole(wide, drawn, QtCore)
+        self.assertIs(wide.shown, drawn, "room enough: as drawn")
+        cj.shown_whole(wide, None, QtCore)
+        self.assertIs(wide.shown, drawn, "nothing drawn: left as it is")
+        source = self.source()
+        watch = source.split(u"    def watch_previews(self):")[1].split(u"\n    def ")[0]
+        self.assertIn(u"owner.fit_previews()", watch)
+        self.assertIn(u"for label, _ in self.previews:", watch, "every preview watched")
+
+    def test_a_latin_font_is_no_cjk_font(self):
+        """Live 2026-11-19 (Bellefair): its curly quotes, a palt kind where they are full width, kept the ticks and
+        the sample usable, and its comma and period picked the Korean sample (owner's images 359, 379, 380)."""
+        latin = set(range(0x20, 0x7F)) | set([0x2018, 0x2019, 0x201C, 0x201D, 0xE9])
+        self.assertFalse(cj.has_cjk(latin))
+        self.assertEqual(cj.best_sample(latin), 0, "the first sample, grayed with the rest")
+        self.assertTrue(cj.has_cjk(latin | set([0x3001])), "CJK punctuation alone counts")
+        self.assertTrue(cj.has_cjk(set([0xAC00])))
+        self.assertEqual(cj.SAMPLES[cj.best_sample(latin | set(ord(ch) for ch in cj.SAMPLES[1][2]))][0], "ko")
+        source = self.source()
+        read = source.split(u"    def read_font(self):")[1].split(u"\n    def ")[0]
+        self.assertIn(u"self.cjk = has_cjk(codes)", read)
+        self.assertNotIn(u"bool(glyphs) or bool(hangul)", read)
+        buttons = source.split(u"    def update_buttons(self):")[1].split(u"\n    def ")[0]
+        self.assertIn(u"self.cjk_states(", buttons, "grayed again after no_font_states gives them back")
+
     def test_a_sample_in_a_writing_the_font_lacks_is_grayed(self):
         # (owner's image 304: the Korean sample showed its corner bracket, comma, and period alone in a Japanese font with no Hangul)
         japanese = set(ord(ch) for ch in cj.SAMPLE) | set(range(0x4E00, 0x9FFF))

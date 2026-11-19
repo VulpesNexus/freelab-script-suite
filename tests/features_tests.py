@@ -1910,6 +1910,30 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(dialog.form_feature("ss01").name, u"Single-story a")
         self.assertEqual(dialog.form_feature("tnum").kind, "freelab")
 
+    def test_update_buttons_grays_again_what_the_font_gave_back(self):
+        """Live 2026-11-19 (Bellefair): the shared no_font_states gives every control back once the window has its
+        font, after the read had set them, then calls the window's update_buttons; Feature Code had none, so Write
+        the code stayed clickable beside "The font has this code already", and Make copies to redraw with nothing
+        ticked."""
+        dialog = self.recorded(FakeFeatures({}))
+        dialog.write()
+        self.assertFalse(dialog.write_button.enabled, "written: nothing more to write")
+        for button in (dialog.write_button, dialog.restore_button, dialog.alternates.copy_button,
+                       dialog.alternates.build_button):
+            button.setEnabled(True)  # (as no_font_states gives them back)
+        dialog.update_buttons()
+        self.assertFalse(dialog.write_button.enabled, "grayed again: the font has this code")
+        self.assertFalse(dialog.restore_button.enabled, "nothing to restore")
+        self.assertFalse(dialog.alternates.copy_button.enabled, "nothing ticked to copy")
+        self.assertFalse(dialog.alternates.build_button.enabled, "nothing to build")
+        dialog.busy = True
+        dialog.write_button.setEnabled(True)
+        dialog.update_buttons()
+        self.assertTrue(dialog.write_button.enabled, "busy: left to the work's end")
+        dialog.busy = False
+        dialog.package = None
+        dialog.update_buttons()  # (no font: nothing done, never raises)
+
     def test_a_feature_changed_once_the_write_began_is_kept(self):
         """The features were compared with the font before the write's top row started, which lets events through:
         a callback run then that changed a feature was overwritten with the code composed before it (adversarial

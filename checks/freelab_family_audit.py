@@ -2762,10 +2762,34 @@ class FamilyAuditDialog(object):
         return text
 
     def show_status(self):
+        """The shown tab's status line, as tall as the tallest tab's: a tab whose line took one line more than
+        another's moved the sources and the results down as the tabs switched (owner's images 370 and 371)."""
         try:
-            self.status_line.setText(self.status_of(self.current_key()) if self.entries else u"")
+            label = self.status_line
+            shown = self.status_of(self.current_key()) if self.entries else u""
+            label.setText(shown)
+            label.setMinimumHeight(self.tallest_status(label) if shown and self.audit is not None else 0)
         except Exception:
             pass
+
+    def tallest_status(self, label):
+        """The height (pixels) of the tallest tab's status line at the label's width: each one set on the label
+        and measured (heightForWidth, its blank line above included), the shown one set last by show_status.
+        0 where Qt does not say. Never raises."""
+        shown = u"%s" % _prop(label, "text")
+        tallest = 0
+        try:
+            width = int(_prop(label, "width"))
+            for key in TABS:
+                label.setText(self.status_of(key))
+                tallest = max(tallest, int(label.heightForWidth(width)))
+        except Exception:
+            tallest = 0
+        try:
+            label.setText(self.status_of(self.current_key()))
+        except Exception:
+            pass
+        return tallest if shown else 0
 
     def group(self, tree, title, count, noun, many=None, expanded=True):
         """A row heading a group of rows, with its count: "Missing from Bold (12 glyphs)"."""

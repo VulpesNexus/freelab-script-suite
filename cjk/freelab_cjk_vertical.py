@@ -1470,6 +1470,7 @@ class CJKVerticalDialog(object):
             def eventFilter(self, obj, event):
                 try:
                     if event.type() == 14:  # Resize
+                        owner.fit_previews()  # (whole meanwhile: CJK Spacing's shown_whole)
                         owner.redraw_timer.start()
                 except Exception:
                     pass  # an event filter must never raise
@@ -1481,11 +1482,22 @@ class CJKVerticalDialog(object):
             self.redraw_timer.setSingleShot(True)
             self.redraw_timer.setInterval(80)
             self.redraw_timer.connect("timeout()", self.previews_resized)
-            watcher = Watcher(self.previews[0])
-            self.previews[0].installEventFilter(watcher)
-            self.watchers.append(watcher)
+            for label in self.previews:  # (each: the layout sizes one after the other, the second after the first's event)
+                watcher = Watcher(label)
+                label.installEventFilter(watcher)
+                self.watchers.append(watcher)
         except Exception:
             pass
+
+    def fit_previews(self):
+        """Each preview's last picture shown whole at the previews' size now (CJK Spacing's shown_whole), while a
+        resize waits for the previews to be drawn again (owner's image 356: a drag cut their ends off)."""
+        shown = getattr(self.cj, "shown_whole", None)
+        if shown is None:
+            return
+        QtCore = _qt()[0]
+        for label, pixmap in zip(self.previews, getattr(self, "preview_pixmaps", [])):
+            shown(label, pixmap, QtCore)
 
     def previews_resized(self):
         if self.busy:
@@ -1717,18 +1729,27 @@ class CJKVerticalDialog(object):
             self.set_busy(False)
             # (whatever the read found, even a font with nothing to list: Put back vhea only for the font it
             # wrote to; the window that had moved to a font with no CJK kept it usable, owner's image 361)
+            self.cjk_states()
+
+    def cjk_states(self):
+        """Put back vhea for the font it wrote to only, and the options and the sample grayed for a font with no
+        kana, Hangul, ideographs, or CJK punctuation: nothing they act on (owner's images 379 and 380). After a
+        read, and at each update_buttons: the shared no_font_states gives every control back once the window
+        has its font, after the read had grayed these (live 2026-11-19, Bellefair: all of them clickable).
+        Never raises."""
+        try:
             self.update_put_back()
-            # (the options and the sample grayed for a font with no kana, Hangul, ideographs, or CJK punctuation:
-            # nothing they act on, owner's images 379 and 380)
-            cjk = self.package is not None and bool(getattr(self, "cjk", True))
-            for name in ("forms_box", "vpal_box", "vkrn_box", "turned_box", "metrics_box", "sample_box", "sample"):
-                widget = getattr(self, name, None)
-                if widget is None:
-                    continue
-                try:
-                    self.ak.enable(widget, cjk)
-                except Exception:
-                    pass
+        except Exception:
+            pass
+        cjk = self.package is not None and bool(getattr(self, "cjk", True))
+        for name in ("forms_box", "vpal_box", "vkrn_box", "turned_box", "metrics_box", "sample_box", "sample"):
+            widget = getattr(self, name, None)
+            if widget is None:
+                continue
+            try:
+                self.ak.enable(widget, cjk)
+            except Exception:
+                pass
 
     def read_font(self):
         QtCore, QtGui = _qt()
@@ -2200,6 +2221,7 @@ class CJKVerticalDialog(object):
         self.problem_said = problem
         if not cjk:
             ak.enable(self.export_button, False)
+        self.cjk_states()
         self.show_code(new, builds, metrics)
         self.draw_previews()
 
@@ -2403,6 +2425,7 @@ class CJKVerticalDialog(object):
         room = self.room()
         self.preview_room = (room, self.pane_width(self.previews[0]))
         upm = float(self.package.upm) or 1000.0
+        self.preview_pixmaps = []  # (as drawn: fit_previews shows them whole while a resize waits)
         for index, label in enumerate(self.previews):
             own = self.own_vert if index == 0 else self.font_vert  # (now: the code as it stands; after: the font's own and what is ticked)
             placed, chars, heights = preview_column(text, names, own, chosen if index else {}, trims if index else {},
@@ -2417,6 +2440,7 @@ class CJKVerticalDialog(object):
             fit = room - extra * em if room else room
             spans = vertical_lines(chars, [h * em for h in heights], fit) if fit and fit > em else [(0, len(placed))]
             pixmap = self.picture([placed[a:b] for a, b in spans], em) if placed else None
+            self.preview_pixmaps.append(pixmap)
             if pixmap is None:
                 label.clear()
             else:
