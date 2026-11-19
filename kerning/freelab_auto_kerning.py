@@ -4311,6 +4311,8 @@ def ask_open_fixed(parent, crashers):
     copy of each, False (Skip, Esc, or a question that could not be shown) to open none of them."""
     QtCore, QtGui = _qt()
     one = len(crashers) == 1
+    single = sum(scan["count"] for path, scan in crashers) == 1  # (the subtables counted, not the files: live,
+    # NotoSansJP[wght].ttf alone read "such a subtable positions nothing, and it is made" of its two)
     if one:
         path, scan = crashers[0]
         said = u"FontLab 7.2 crashes on opening %s (not every time: it depends on what its memory holds), and a " \
@@ -4322,8 +4324,8 @@ def ask_open_fixed(parent, crashers):
                    u"%s, %s" % (os.path.basename(path), crasher_summary(scan)) for path, scan in crashers))
     said += u"\n\n%s, written to a temporary folder, is the same font to FontLab: %s nothing, and %s made an " \
             u"empty one FontLab opens. Your %s not changed." % (
-                u"A fixed copy" if one else u"Fixed copies", u"such a subtable positions" if one else
-                u"such subtables position", u"it is" if one else u"each is", u"file is" if one else u"files are")
+                u"A fixed copy" if one else u"Fixed copies", u"such a subtable positions" if single else
+                u"such subtables position", u"it is" if single else u"each is", u"file is" if one else u"files are")
     try:
         box = mcp_script_window(QtGui.QMessageBox(parent))  # (FreeLab's question, not FontLab's)
         box.setWindowTitle(u"A font FontLab crashes on" if one else u"Fonts FontLab crashes on")
@@ -4344,14 +4346,28 @@ def crash_checked_paths(paths, parent, log, is_open=None):
     """The font files to open in FontLab for the files picked, each checked first for what FontLab 7.2 crashes on
     (scan_font_file). When some hold it, one question (ask_open_fixed) asks whether to open a fixed copy of each,
     written to a temporary folder (safe_copies_folder), or to skip them; the log says what was done with each.
-    A file that could not be checked is opened as it is, the log saying so. A copy is_open(path) says is open
-    in FontLab already is not written again. Returns [(path to open, the file picked)], in the order picked."""
+    A file that could not be checked is opened as it is, the log saying so. A file whose fixed copy is_open(path)
+    says is open in FontLab already is not asked about, nor its copy written again: the copy is returned for the
+    caller to tick or choose, as a font open already. Returns [(path to open, the file picked)], in the order
+    picked."""
     scans = [(path, scan_font_file(path)) for path in paths]
-    crashers = [(path, scan) for path, scan in scans if scan["count"]]
+    copies_open = {}  # {the file picked: its fixed copy, open already}
+    for path, scan in scans:
+        if scan["count"] and is_open is not None:
+            try:
+                target = safe_copy_path(path, scan, safe_copies_folder())
+            except (FontFileError, IOError, OSError):
+                continue
+            if is_open(target):
+                copies_open[path] = target
+    crashers = [(path, scan) for path, scan in scans if scan["count"] and path not in copies_open]
     fix = bool(crashers) and ask_open_fixed(parent, crashers)
     chosen = []
     for path, scan in scans:
         name = i(os.path.basename(path))
+        if path in copies_open:  # (asked again live, and the log said a copy was opened: it was open already)
+            chosen.append((copies_open[path], path))
+            continue
         if not scan["count"]:
             if scan.get("why_not"):
                 log.add(u"%s was not checked for the FontLab 7.2 crash (%s): opened as it is." % (
@@ -4364,8 +4380,7 @@ def crash_checked_paths(paths, parent, log, is_open=None):
             continue
         try:
             target = safe_copy_path(path, scan, safe_copies_folder())
-            if is_open is None or not is_open(target):
-                write_safe_copy(path, scan, target)
+            write_safe_copy(path, scan, target)
         except (FontFileError, IOError, OSError) as exc:
             log.add(u"%s not opened: FontLab 7.2 crashes on it, and no fixed copy could be made (%s). Its GPOS "
                     u"holds %s." % (name, html(exc), summary), "error")

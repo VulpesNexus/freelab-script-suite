@@ -1147,17 +1147,20 @@ class FontLabCalls(object):
 
     @staticmethod
     def names(package):
-        """(family, style) of a font. Assumed: fgPackage.info.familyName and styleName (UFO's names, as
-        Proof reads them); proven: flPackage.tfn and tsn, used where those are empty."""
+        """(family, style) of a font. The family is flPackage.tfn (FontLab's family name: live, the typographic
+        family), else fgPackage.info.familyName: for a variable TTF that is its name ID 1 (live, 2026-11-19:
+        NotoSansJP[wght].ttf gave "Noto Sans JP Thin" there and "Noto Sans JP" in tfn, so it was taken for another
+        family than its own static instance). The style is fgPackage.info.styleName (its typographic subfamily,
+        "Thin" there), else flPackage.tsn."""
         family = style = u""
         try:
-            info = package.fgPackage.info
-            family = u"%s" % (getattr(info, "familyName", None) or u"")
-            style = u"%s" % (getattr(info, "styleName", None) or u"")
+            family = u"%s" % (package.tfn or u"")
         except Exception:
             pass
         try:
-            family = family or u"%s" % (package.tfn or u"")
+            info = package.fgPackage.info
+            family = family or u"%s" % (getattr(info, "familyName", None) or u"")
+            style = u"%s" % (getattr(info, "styleName", None) or u"")
         except Exception:
             pass
         try:

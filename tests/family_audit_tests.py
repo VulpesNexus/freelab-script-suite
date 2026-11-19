@@ -670,6 +670,16 @@ class BuildTests(unittest.TestCase):
         source = io.open(fa.__file__.replace(".pyc", ".py"), encoding="utf-8").read()
         self.assertNotIn(u"package.master = ", source, "flPackage.master is never assigned")
 
+    def test_a_fonts_family_is_fontlabs_family_name(self):
+        # (live, 2026-11-19: FontLab gave NotoSansJP[wght].ttf the info familyName "Noto Sans JP Thin", its name
+        # ID 1, and the tfn "Noto Sans JP": its fixed copy was left unticked as another family than its instance)
+        variable = FakeFont(1, u"Noto Sans JP Thin", u"Thin")
+        variable.tfn = u"Noto Sans JP"
+        self.assertEqual(fa.FontLabCalls.names(variable), (u"Noto Sans JP", u"Thin"))
+        unnamed = FakeFont(2, u"Sans", u"Bold")
+        unnamed.tfn = None
+        self.assertEqual(fa.FontLabCalls.names(unnamed), (u"Sans", u"Bold"), "the info's when FontLab gives none")
+
     def test_a_glyph_the_new_font_has_already_is_not_added_twice(self):
         # (live, 2026-11-18: a new font comes with its .notdef, and the assembly's own made it twice)
         class Glyph(object):

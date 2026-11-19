@@ -224,10 +224,19 @@ class QuestionTests(Case):
         first = ak.crash_checked_paths([self.crasher], None, self.Log())[0][0]
         with open(first, "wb") as handle:
             handle.write(b"as FontLab has it")
-        again = ak.crash_checked_paths([self.crasher], None, self.Log(), is_open=lambda path: path == first)
-        self.assertEqual(again, [(first, self.crasher)])
+        # (live, 2026-11-19: the file added again was asked about again, and the log said a copy was opened)
+        asked = []
+        ak.ask_open_fixed = lambda parent, crashers: asked.append([p for p, s in crashers]) or True
+        del self.log[:]
+        again = ak.crash_checked_paths([self.crasher, self.clean], None, self.Log(),
+                                       is_open=lambda path: path == first)
+        self.assertEqual(again, [(first, self.crasher), (self.clean, self.clean)])
+        self.assertEqual((asked, self.log), ([], []), "not asked about, and nothing said: the caller ticks it")
         with open(first, "rb") as handle:
             self.assertEqual(handle.read(), b"as FontLab has it")
+        other = self.write("Other.otf", fb.sfnt(font(fb.gpos([fb.lookup(1, [EMPTY])])), b"OTTO"))
+        ak.crash_checked_paths([self.crasher, other], None, self.Log(), is_open=lambda path: path == first)
+        self.assertEqual(asked, [[other]], "asked only about the file whose copy is not open")
 
     def test_a_copy_that_cannot_be_made_opens_nothing(self):
         ak.ask_open_fixed = lambda parent, crashers: True
@@ -278,6 +287,11 @@ class QuestionTests(Case):
         self.assertIn(u"a crash loses the unsaved work in every open font", box.text)
         self.assertIn(u"2 single adjustment subtables of format 2 with no values (lookups 1 and 2)", box.text)
         self.assertIn(u"Your file is not changed.", box.text)
+        # (the subtables counted, not the files: live, one file of two read "such a subtable positions nothing")
+        self.assertIn(u"such subtables position nothing, and each is made an empty one", box.text)
+        one = self.write("One.otf", fb.sfnt(font(fb.gpos([fb.lookup(1, [EMPTY])])), b"OTTO"))
+        ak.ask_open_fixed("window", [(one, ak.scan_font_file(one))])
+        self.assertIn(u"such a subtable positions nothing, and it is made an empty one", boxes[-1].text)
         Box.exec_ = lambda self: setattr(self, "answer", u"Open fixed copies")
         self.assertTrue(ak.ask_open_fixed(None, [(self.crasher, scan), (self.crasher, scan)]))
         self.assertEqual(sorted(boxes[-1].buttons), [u"Open fixed copies", u"Skip them"])
