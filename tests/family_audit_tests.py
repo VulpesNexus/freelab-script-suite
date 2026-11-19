@@ -1342,6 +1342,15 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(dialog.pending, [u"/f/Sans-Bold.otf", copy])
         self.assertIn(u"a fixed copy is opened instead", self.said[0][1])
         self.assertEqual(self.said[-1], ("info", u"Opening <i>Sans-Black.ttf</i> in FontLab\N{HORIZONTAL ELLIPSIS}"))
+        # (Codex, 2026-11-19: picked again before it came in, it was asked about, written, and opened again)
+        self.ak.ask_open_fixed = lambda parent, crashers: self.fail("its copy is on its way: not asked about")
+        os.utime(copy, (1, 1))
+        dialog.open_paths([path, u"/f/Sans-Bold.otf"])
+        self.assertEqual((asked[-1], dialog.pending), (copy, [u"/f/Sans-Bold.otf", copy]), "asked for once")
+        self.assertEqual(os.path.getmtime(copy), 1, "the copy not written again")
+        self.assertEqual([text for level, text in self.said[-2:]],
+                         [u"<i>Sans-Bold.otf</i> is being opened already: ticked once it is in.",
+                          u"<i>Sans-Black.ttf</i> is being opened already: ticked once it is in."])
         fonts.append(FakeFont(11, u"Sans", u"Black", weight=900, path=copy))
         dialog.open_tick()
         self.assertIn((11, u"Black"), dialog.ticked, "the copy's font ticked once it is in")

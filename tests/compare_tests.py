@@ -1321,6 +1321,14 @@ class DialogTests(unittest.TestCase):
         self.assertEqual((os.path.basename(copy), os.path.dirname(os.path.dirname(copy))),
                          (u"NotoSansJP[wght].ttf", os.path.join(folder, "copies")), "its fixed copy opened")
         self.assertEqual(dialog.opening[0], copy, "the copy looked for")
+        # (Codex, 2026-11-19: picked again before it came in, it was asked about, written, and opened again)
+        self.ak.ask_open_fixed = lambda parent, crashers: self.fail("its copy is on its way: not asked about")
+        os.utime(copy, (1, 1))
+        dialog.open_font(path)
+        self.assertEqual((requested, os.path.getmtime(copy)), ([copy], 1), "asked for once, the copy not rewritten")
+        self.assertEqual(said[-1], ("info", u"<i>NotoSansJP[wght].ttf</i> is being opened already: chosen once it "
+                                            u"is in."))
+        self.ak.ask_open_fixed = lambda parent, crashers: True
         second = second_font()
         second.path = copy
         packages.append(second)

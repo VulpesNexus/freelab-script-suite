@@ -2089,8 +2089,13 @@ class CompareDialog(object):
         fonts = self.open_fonts()
         if self.choose_open(fonts, path):
             return
-        # A file FontLab 7.2 crashes on is asked about first: a fixed copy opened instead, or skipped
-        checked = self.ak.crash_checked_paths([path], self.dialog, self.log, lambda copy: any(
+        earlier = getattr(self, "opening", None)
+
+        def coming(name):  # (Codex, 2026-11-19: picked again while it loaded, it was asked about and opened twice)
+            return earlier is not None and self.same_file(earlier[0], name)
+        # A file FontLab 7.2 crashes on is asked about first: a fixed copy opened instead, or skipped (a copy on its
+        # way is not asked about, nor written again)
+        checked = self.ak.crash_checked_paths([path], self.dialog, self.log, lambda copy: coming(copy) or any(
             getattr(p, "path", None) and self.same_file(p.path, copy) for p in fonts))
         if not checked:
             return
@@ -2098,6 +2103,9 @@ class CompareDialog(object):
             path = checked[0][0]
             if self.choose_open(fonts, path):
                 return  # (its fixed copy, opened earlier)
+        if coming(path):
+            self.log.add(u"%s is being opened already: chosen once it is in." % self.ak.i(os.path.basename(path)))
+            return
         before = set(self.font_number(p) for p in fonts)
         try:
             self.fontlab.flItems.requestLoadingFont(path)
@@ -2107,7 +2115,6 @@ class CompareDialog(object):
         self.log.add(u"Opening %s in FontLab\N{HORIZONTAL ELLIPSIS}" % self.ak.i(os.path.basename(path)))
         # One poll pending at a time: a second font opened before the first came in is the one looked for,
         # and the files picked before it (superseded) may still come in first
-        earlier = getattr(self, "opening", None)
         superseded = (earlier[2] | set([earlier[0]])) if earlier is not None else set()
         self.opening, self.open_tries = (path, before, superseded), 0
         timer = getattr(self, "open_timer", None)

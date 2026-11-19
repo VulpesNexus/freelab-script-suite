@@ -2532,11 +2532,17 @@ class FamilyAuditDialog(object):
         for path in paths:
             if not self.tick_open(path):
                 closed.append(path)
-        checked = self.ak.crash_checked_paths(closed, self.dialog, self.log,
-                                              lambda copy: any(same_path(e.path, copy) for e in self.entries))
+        def coming(path):  # (being opened: asked for before, not in yet)
+            return any(same_path(p, path) for p in self.pending)
+        closed = [path for path in closed if not (coming(path) and self.say_coming(path))]
+        checked = self.ak.crash_checked_paths(closed, self.dialog, self.log, lambda copy: coming(copy) or any(
+            same_path(e.path, copy) for e in self.entries))  # (a copy on its way is not asked about, nor written again)
         for path, picked in checked:
             if path != picked and self.tick_open(path):
                 continue  # (its fixed copy, opened earlier)
+            if coming(path):  # (Codex, 2026-11-19: picked again while it loaded, it was asked for twice)
+                self.say_coming(path)
+                continue
             try:
                 self.calls.request_font(path)
             except Exception as exc:
@@ -2553,6 +2559,11 @@ class FamilyAuditDialog(object):
         if self.pending:
             self.open_tries = 0
             self.start_open_timer()
+
+    def say_coming(self, path):
+        """A file picked again while FontLab opens it, said (it is ticked once it is in); True."""
+        self.log.add(u"%s is being opened already: ticked once it is in." % self.ak.i(os.path.basename(path)))
+        return True
 
     def tick_open(self, path):
         """The sources open from path ticked, and said; whether there were any."""

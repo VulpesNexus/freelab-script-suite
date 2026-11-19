@@ -9,6 +9,7 @@ import shutil
 import struct
 import sys
 import tempfile
+import time
 import unittest
 
 os.environ["FREELAB_NO_AUTOSTART"] = "1"
@@ -118,6 +119,72 @@ class DetectionTests(Case):
         self.assertEqual(cut["checked"], False)
         self.assertIn("could not be read", cut["why_not"])
 
+    def test_a_crasher_found_before_a_damaged_part_still_counts(self):
+        # (Codex, 2026-11-19: an error part-way threw away what was found, and the file was opened as it is)
+        broken = bytearray(fb.lookup(1, [fb.single(1, 0)]))
+        struct.pack_into(">H", broken, 6, 0xFFF0)  # (its subtable past the table's end)
+        gpos = fb.gpos([fb.lookup(1, [EMPTY]), bytes(broken), fb.lookup(1, [EMPTY])])
+        scan = ak.scan_font_file(self.write("Half.ttf", fb.sfnt(font(gpos))))
+        self.assertEqual((scan["checked"], scan["count"]), (False, 2), "the lookups after the damaged one are read")
+        self.assertEqual([s["lookup"] for s in scan["fonts"][0]["subtables"]], [0, 2])
+        data = bytearray(fb.collection([font(crasher_gpos()), font(clean_gpos())]))
+        second = struct.unpack_from(">I", data, 16)[0]
+        struct.pack_into(">H", data, second + 4, 0xFFFF)  # (font 1's table directory past the file's end)
+        path = self.write("Half.ttc", bytes(data))
+        scan = ak.scan_font_file(path)
+        self.assertEqual((scan["checked"], scan["count"], [e["font"] for e in scan["fonts"]]), (False, 2, [0]))
+        self.assertEqual(ak.write_safe_copy(path, scan, ak.safe_copy_path(path, scan, self.tmp)), 2,
+                         "font 0 fixed; font 1 left as it is")
+
+    def test_a_gpos_that_lists_its_data_over_and_over_is_read_only_so_far(self):
+        # (Codex, 2026-11-19: lookups sharing one lookup of 65,535 subtables made 4 billion reads of 260 KB)
+        count, lookups = 4000, 100
+        sub = fb.single(1, 0)
+        shared = struct.pack(">HHH", 1, 0, count) + struct.pack(">H", 6 + 2 * count) * count + sub
+        first = fb.lookup(1, [EMPTY])
+        listing = 2 + 2 * (lookups + 1)
+        table = (struct.pack(">HHHHH", 1, 0, 10, 12, 14) + struct.pack(">HH", 0, 0) + struct.pack(">H", lookups + 1) +
+                 struct.pack(">H", listing) + struct.pack(">H", listing + len(first)) * lookups + first + shared)
+        started = time.time()
+        scan = ak.scan_font_file(self.write("Loop.ttf", fb.sfnt(font(table))))
+        self.assertLess(time.time() - started, 10)
+        self.assertEqual((scan["checked"], scan["count"]), (False, 1), "the crasher before the limit is kept")
+        self.assertIn("over and over", scan["why_not"])
+        self.assertRaises(ak.FontFileLimit, ak.empty_single_adjustments, table)
+
+    def test_lengths_past_the_file_are_refused_before_they_are_read(self):
+        # (Codex, 2026-11-19: a collection of 4 billion fonts asked for 17 GB; a WOFF table could inflate past its length)
+        scan = ak.scan_font_file(self.write("Huge.ttc", b"ttcf" + struct.pack(">HHI", 1, 0, 0xFFFFFFFF)))
+        self.assertEqual((scan["format"], scan["checked"]), ("collection", False))
+        self.assertIn("ends before", scan["why_not"])
+        data = bytearray(fb.woff(font(crasher_gpos() + b"\0" * 5000)))
+        self.assertEqual(bytes(data[44:48]), b"GPOS")
+        struct.pack_into(">I", data, 44 + 12, 200)  # (its length said to be 200 bytes: the stream holds more)
+        scan = ak.scan_font_file(self.write("Bomb.woff", bytes(data)))
+        self.assertIn("longer than its directory says", scan["why_not"])
+        struct.pack_into(">I", data, 44 + 12, ak.MAX_WOFF_TABLE + 1)
+        self.assertIn("more than any font's", ak.scan_font_file(self.write("Bomb2.woff", bytes(data)))["why_not"])
+
+    def test_a_copy_with_its_head_past_the_end_and_a_failed_write(self):
+        data = bytearray(fb.sfnt(font(crasher_gpos())))
+        entry = [12 + 16 * k for k in range(3) if bytes(data[12 + 16 * k:16 + 16 * k]) == b"head"][0]
+        struct.pack_into(">I", data, entry + 8, len(data) + 100)  # (head past the file's end)
+        path = self.write("NoHead.ttf", bytes(data))
+        scan = ak.scan_font_file(path)
+        self.assertEqual(scan["count"], 2, "head is not read by the check")
+        target = os.path.join(self.tmp, "copies", "NoHead.ttf")
+        self.assertEqual(ak.write_safe_copy(path, scan, target), 2, "fixed, head left as it is")
+        real = os.rename
+
+        def refused(*args):
+            raise OSError("refused")
+        ak.os.rename = refused
+        try:
+            self.assertRaises(OSError, ak.write_safe_copy, path, scan, os.path.join(self.tmp, "other", "NoHead.ttf"))
+        finally:
+            ak.os.rename = real
+        self.assertEqual(os.listdir(os.path.join(self.tmp, "other")), [], "no .tmp left")
+
 
 class CopyTests(Case):
     def test_the_copy_holds_format_1_with_no_values_and_nothing_else_changed(self):
@@ -218,6 +285,18 @@ class QuestionTests(Case):
         self.assertEqual(chosen, [(self.clean, self.clean), (web, web), (missing, missing)])
         self.assertEqual(self.log, [("warning", u"<i>Web.woff2</i> was not checked for the FontLab 7.2 crash (WOFF2 "
                                                 u"needs brotli, which FontLab's Python does not have): opened as it is.")])
+
+    def test_a_crasher_with_a_damaged_part_is_asked_about_and_the_rest_said(self):
+        broken = bytearray(fb.lookup(1, [fb.single(1, 0)]))
+        struct.pack_into(">H", broken, 6, 0xFFF0)
+        half = self.write("Half.ttf", fb.sfnt(font(fb.gpos([fb.lookup(1, [EMPTY]), bytes(broken)]))))
+        asked = []
+        ak.ask_open_fixed = lambda parent, crashers: asked.append([p for p, s in crashers]) or True
+        chosen = ak.crash_checked_paths([half], None, self.Log())
+        self.assertEqual((asked, [p for c, p in chosen]), ([[half]], [half]), "asked about, and its copy opened")
+        self.assertNotEqual(chosen[0][0], half)
+        self.assertEqual([level for level, text in self.log], ["info", "warning"])
+        self.assertIn(u"Part of <i>Half.ttf</i> was not checked", self.log[1][1])
 
     def test_a_copy_open_already_is_not_written_again(self):
         ak.ask_open_fixed = lambda parent, crashers: True
