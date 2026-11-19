@@ -1271,6 +1271,50 @@ class DialogTests(unittest.TestCase):
             del gui.classes["QFileDialog"]
             del fontlab.flItems
 
+    def test_a_font_fontlab_crashes_on_is_asked_about_first(self):
+        """FontLab 7.2 crashes on a font whose GPOS holds a single adjustment of format 2 with no values (Noto Sans
+        JP): Open a font... opens a fixed copy of it, or nothing, as the one question asked first is answered."""
+        import fontbytes
+        folder = tempfile.mkdtemp(prefix="freelab-compare-crash-")
+        self.addCleanup(shutil.rmtree, folder, True)
+        path = os.path.join(folder, u"NotoSansJP[wght].ttf")
+        with open(path, "wb") as handle:
+            handle.write(fontbytes.sfnt({b"head": fontbytes.head(), b"GPOS": fontbytes.gpos(
+                [fontbytes.lookup(9, [fontbytes.extension(fontbytes.single(2, 0, 0))])])}))
+        for name in ("ask_open_fixed", "safe_copies_folder"):
+            self.addCleanup(setattr, self.ak, name, getattr(self.ak, name))
+        self.ak.safe_copies_folder = lambda: os.path.join(folder, "copies")
+        first = first_font()
+        packages = [first]
+        dialog = self.dialog(packages)
+        self.workspace.packages = lambda: list(packages)
+        said, requested = [], []
+        dialog.log.add = lambda text, level="info": said.append((level, text))
+        fontlab = sys.modules["fontlab"]
+        fontlab.flItems = type("Items", (), {"requestLoadingFont": staticmethod(requested.append)})
+        self.addCleanup(lambda: delattr(fontlab, "flItems"))
+        self.ak.ask_open_fixed = lambda parent, crashers: False
+        dialog.open_font(path)
+        self.assertEqual((requested, getattr(dialog, "opening", None)), ([], None), "skipped: nothing opened")
+        self.assertEqual(said[-1][0], "warning")
+        self.assertIn(u"skipped: FontLab 7.2 crashes on it", said[-1][1])
+        self.ak.ask_open_fixed = lambda parent, crashers: True
+        dialog.open_font(path)
+        copy = requested[-1]
+        self.assertEqual((os.path.basename(copy), os.path.dirname(os.path.dirname(copy))),
+                         (u"NotoSansJP[wght].ttf", os.path.join(folder, "copies")), "its fixed copy opened")
+        self.assertEqual(dialog.opening[0], copy, "the copy looked for")
+        second = second_font()
+        second.path = copy
+        packages.append(second)
+        dialog.look_for_opened()
+        self.assertEqual(dialog.second_key, (second.fgPackage.id, u"Regular"), "chosen once it is in")
+        del requested[:]
+        mark = len(said)
+        dialog.open_font(path)
+        self.assertEqual(requested, [], "its copy open already: chosen, not opened again")
+        self.assertTrue(any(u"open already" in text for level, text in said[mark:]), said[mark:])
+
     def test_a_font_opened_is_compared_and_the_window_comes_back(self):
         # The owner: choosing a font "sends the script window in the background and doesn't bring it back to
         # the front after opening (...) Could opening a font also automatically run the first

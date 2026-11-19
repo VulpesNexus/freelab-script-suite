@@ -2521,15 +2521,19 @@ class FamilyAuditDialog(object):
         self.open_paths(paths)
 
     def open_paths(self, paths):
-        """Each path opened in FontLab (the ones open already ticked), then looked for until it is in."""
+        """Each path opened in FontLab (the ones open already ticked), then looked for until it is in. A file
+        FontLab 7.2 crashes on is asked about first: a fixed copy opened instead, or skipped (the shared
+        crash_checked_paths)."""
         self.read_fonts()
+        closed = []
         for path in paths:
-            there = [e for e in self.entries if same_path(e.path, path)]
-            if there:
-                for e in there:
-                    self.ticked.add(e.key)
-                self.log.add(u"%s is open already: ticked." % self.ak.i(os.path.basename(path)))
-                continue
+            if not self.tick_open(path):
+                closed.append(path)
+        checked = self.ak.crash_checked_paths(closed, self.dialog, self.log,
+                                              lambda copy: any(same_path(e.path, copy) for e in self.entries))
+        for path, picked in checked:
+            if path != picked and self.tick_open(path):
+                continue  # (its fixed copy, opened earlier)
             try:
                 self.calls.request_font(path)
             except Exception as exc:
@@ -2546,6 +2550,15 @@ class FamilyAuditDialog(object):
         if self.pending:
             self.open_tries = 0
             self.start_open_timer()
+
+    def tick_open(self, path):
+        """The sources open from path ticked, and said; whether there were any."""
+        there = [e for e in self.entries if same_path(e.path, path)]
+        for e in there:
+            self.ticked.add(e.key)
+        if there:
+            self.log.add(u"%s is open already: ticked." % self.ak.i(os.path.basename(path)))
+        return bool(there)
 
     def start_open_timer(self):
         QtCore, QtGui = _qt()

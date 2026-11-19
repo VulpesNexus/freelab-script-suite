@@ -2067,14 +2067,17 @@ class CompareDialog(object):
         if not path:
             return
         fonts = self.open_fonts()
-        there = [p for p in fonts if getattr(p, "path", None) and self.same_file(p.path, path)]
-        if there:
-            self.opening = None  # (a font still being looked for is not chosen over this one)
-            try:
-                self.choose_second(there[0], u"%s is open already", True)
-            except Exception as exc:
-                self.log.add(u"Could not choose that font: %s" % self.ak.html(exc), "error")
+        if self.choose_open(fonts, path):
             return
+        # A file FontLab 7.2 crashes on is asked about first: a fixed copy opened instead, or skipped
+        checked = self.ak.crash_checked_paths([path], self.dialog, self.log, lambda copy: any(
+            getattr(p, "path", None) and self.same_file(p.path, copy) for p in fonts))
+        if not checked:
+            return
+        if checked[0][0] != path:
+            path = checked[0][0]
+            if self.choose_open(fonts, path):
+                return  # (its fixed copy, opened earlier)
         before = set(self.font_number(p) for p in fonts)
         try:
             self.fontlab.flItems.requestLoadingFont(path)
@@ -2094,6 +2097,18 @@ class CompareDialog(object):
             timer.setInterval(self.OPEN_WAIT_MS)
             timer.connect("timeout()", self.look_for_opened)
         timer.start()
+
+    def choose_open(self, fonts, path):
+        """The font open from path chosen as the second font, and said; whether there was one."""
+        there = [p for p in fonts if getattr(p, "path", None) and self.same_file(p.path, path)]
+        if not there:
+            return False
+        self.opening = None  # (a font still being looked for is not chosen over this one)
+        try:
+            self.choose_second(there[0], u"%s is open already", True)
+        except Exception as exc:
+            self.log.add(u"Could not choose that font: %s" % self.ak.html(exc), "error")
+        return True
 
     def look_for_opened(self):
         """The font being opened (open_font), chosen once it is in; looked for again until OPEN_TRIES.

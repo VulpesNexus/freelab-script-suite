@@ -8,7 +8,9 @@ from __future__ import absolute_import, division, print_function
 
 import io
 import os
+import shutil
 import sys
+import tempfile
 import unittest
 
 os.environ["FREELAB_NO_AUTOSTART"] = "1"
@@ -1297,6 +1299,46 @@ class DialogTests(unittest.TestCase):
         dialog.open_tick()
         self.assertIn((10, u"Bold"), dialog.ticked, "the window's family: ticked")
         self.assertEqual(self.said[-1], ("done", u"Opened <i>Sans-Bold.otf</i> in FontLab: ticked as <b>Bold (Sans)</b>."))
+
+    def test_a_file_fontlab_crashes_on_is_asked_about_first(self):
+        """FontLab 7.2 crashes on a font whose GPOS holds a single adjustment of format 2 with no values (Noto Sans
+        JP): such a file is opened as a fixed copy, or skipped, as the one question asked first is answered."""
+        import fontbytes
+        folder = tempfile.mkdtemp(prefix="freelab-audit-crash-")
+        self.addCleanup(shutil.rmtree, folder, True)
+        path = os.path.join(folder, u"Sans-Black.ttf")
+        with open(path, "wb") as handle:
+            handle.write(fontbytes.sfnt({b"head": fontbytes.head(), b"GPOS": fontbytes.gpos(
+                [fontbytes.lookup(1, [fontbytes.single(2, 0, 0)])])}))
+        for name in ("ask_open_fixed", "safe_copies_folder"):
+            self.addCleanup(setattr, self.ak, name, getattr(self.ak, name))
+        self.ak.safe_copies_folder = lambda: os.path.join(folder, "copies")
+        regular = FakeFont(1, u"Sans", u"Regular", path=u"/f/Sans-Regular.vfc")
+        fonts = [regular]
+        dialog = self.dialog(fonts, own=regular)
+        asked, questions = [], []
+        dialog.calls.request_font = asked.append
+        dialog.start_open_timer = lambda: None
+        self.ak.ask_open_fixed = lambda parent, crashers: questions.append([p for p, s in crashers]) and False
+        dialog.open_paths([path, u"/f/Sans-Bold.otf"])
+        self.assertEqual((questions, asked), ([[path]], [u"/f/Sans-Bold.otf"]), "skipped: not opened")
+        self.assertIn(u"<i>Sans-Black.ttf</i> skipped: FontLab 7.2 crashes on it", self.said[0][1])
+        self.ak.ask_open_fixed = lambda parent, crashers: True
+        del self.said[:]
+        dialog.open_paths([path])
+        copy = asked[-1]
+        self.assertEqual((os.path.basename(copy), os.path.dirname(os.path.dirname(copy))),
+                         (u"Sans-Black.ttf", os.path.join(folder, "copies")), "its fixed copy opened")
+        self.assertEqual(dialog.pending, [u"/f/Sans-Bold.otf", copy])
+        self.assertIn(u"a fixed copy is opened instead", self.said[0][1])
+        self.assertEqual(self.said[-1], ("info", u"Opening <i>Sans-Black.ttf</i> in FontLab\N{HORIZONTAL ELLIPSIS}"))
+        fonts.append(FakeFont(11, u"Sans", u"Black", weight=900, path=copy))
+        dialog.open_tick()
+        self.assertIn((11, u"Black"), dialog.ticked, "the copy's font ticked once it is in")
+        del asked[:]
+        dialog.open_paths([path])
+        self.assertEqual(asked, [], "its copy open already: ticked, not opened again")
+        self.assertIn(u"is open already: ticked", self.said[-1][1])
 
 
 if __name__ == "__main__":

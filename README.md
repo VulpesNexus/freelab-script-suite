@@ -55,6 +55,10 @@ python tests/run_tests.py
 
 It runs everything under Python 3, including the native helper's tests, then the dark-mode tests under Python 2.7, which *tools/get-python27.ps1* fetches (a hash-checked copy of the official package, kept outside the repository). The gate fails if the Python 2.7 run is missing or the native helper is not built (*tools/build-native.ps1*).
 
+## Limits
+
+- FontLab 7.2 can crash as it opens a font whose `GPOS` holds a single adjustment of format 2 with no values (Noto Sans JP's and KR's variable fonts, among others), losing the unsaved work in every open font. The tools that open font files (Family Audit's *Add files…*, Font Compare's *Open a font…* and its installed fonts) check each file first and offer to open a fixed copy from a temporary folder instead, or to skip it ([docs/FAMILY-AUDIT.md](docs/FAMILY-AUDIT.md#fonts-fontlab-72-crashes-on)). FontLab's own *File > Open Fonts* is not checked, and a WOFF2 is opened unchecked, since FontLab's Python has no brotli.
+
 ## More
 
 - [docs/WINDOWS.md](docs/WINDOWS.md): what every FreeLab window shares (long work and stopping it, no font, lists).
