@@ -110,6 +110,23 @@ class ChoiceTests(unittest.TestCase):
                                     ("separator", None, None, u""), ("installed", u"a.otf", None, u"alpha"),
                                     ("installed", u"b.ttf", None, u"Beta")], "A to Z, its file's path for an id")
 
+    def test_installed_fonts_of_one_name_show_their_files(self):
+        # (Noto Sans JP listed twice: Windows' variable .ttf and the user's static .otf)
+        system = os.path.join(u"C:", os.sep, u"Windows", u"Fonts")
+        mine = os.path.join(u"C:", os.sep, u"Users", u"me", u"AppData", u"Local", u"Microsoft", u"Windows", u"Fonts")
+        found = [(os.path.join(system, u"NotoSansJP-VF.ttf"), u"Noto Sans JP"),
+                 (os.path.join(mine, u"NotoSansJP-Regular.otf"), u"Noto Sans JP"),
+                 (os.path.join(system, u"Cardo.ttf"), u"Cardo"),
+                 (os.path.join(system, u"Twin.ttf"), u"Twin"), (os.path.join(mine, u"Twin.ttf"), u"Twin")]
+        real = fcmp.user_font_folder
+        fcmp.user_font_folder = lambda: mine
+        self.addCleanup(setattr, fcmp, "user_font_folder", real)
+        texts = [row[3] for row in fcmp.installed_entries(found)[1:]]
+        self.assertEqual(sorted(texts), sorted([u"Cardo", u"Noto Sans JP (NotoSansJP-Regular.otf)",
+                                                u"Noto Sans JP (NotoSansJP-VF.ttf)", u"Twin (Twin.ttf)",
+                                                u"Twin (Twin.ttf, yours)"]),
+                         "a lone name stays bare; the user's copy of a shared file is marked")
+
     def test_the_open_list_leaves_out_the_placeholder(self):
         # (the owner's screenshot 98: "Choose a font..." in the box and again as the list's first row)
         alone = fcmp.second_entries([(7, u"Sans", [u"Regular"], u"Sans.vfc")], 7, [(u"a.otf", u"alpha")])

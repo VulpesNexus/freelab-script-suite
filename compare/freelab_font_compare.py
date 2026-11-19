@@ -168,12 +168,25 @@ def first_entries(font):
 
 def installed_entries(installed):
     """The second dropdown's rows of the installed fonts ([(path, name)]): set apart ("separator"), then
-    one per font ("installed", its file's path for the id), A to Z; none without any."""
+    one per font ("installed", its file's path for the id), A to Z; none without any. Fonts of one name
+    are told apart by their files' names (a variable .ttf and a static .otf both called "Noto Sans JP"),
+    and the copy installed for the user only, where the file's name is shared too, by "yours"."""
     if not installed:
         return []
+    names = [name.lower() for _, name in installed]
+    labels = [(name.lower(), os.path.basename(path).lower()) for path, name in installed]
+    mine = user_font_folder()
     rows = [("separator", None, None, u"")]
     for path, name in sorted(installed, key=lambda pair: (pair[1].lower(), pair[0].lower())):
-        rows.append(("installed", path, None, name))
+        file_name = os.path.basename(path)
+        note = None
+        if names.count(name.lower()) > 1:
+            notes = [file_name]
+            if (labels.count((name.lower(), file_name.lower())) > 1 and mine
+                    and os.path.normcase(os.path.dirname(path)) == os.path.normcase(mine)):
+                notes.append(u"yours")
+            note = u", ".join(notes)
+        rows.append(("installed", path, None, choice_text(name, None, 1, note)))
     return rows
 
 
@@ -215,18 +228,25 @@ _INSTALLED = {}  # folder: (its time stamp, [(path, name)]), read once a session
 # None: (the folders' stamps, the list installed_fonts last gave of them all)
 
 
+def _font_folder(variable, fallback, tail):
+    """A font folder under an environment variable's folder (None when it is not set)."""
+    base = os.environ.get(variable) or (os.environ.get(fallback) if fallback else None)
+    if not base:
+        return None
+    if not isinstance(base, type(u"")):  # (Python 2's environment is bytes: unicode paths list unicode names)
+        base = base.decode(sys.getfilesystemencoding() or "mbcs", "replace")
+    return os.path.join(base, *tail)
+
+
+def user_font_folder():
+    """The user's own font folder (fonts installed for one account only), whether it is there or not."""
+    return _font_folder("LOCALAPPDATA", None, (u"Microsoft", u"Windows", u"Fonts"))
+
+
 def font_folders():
     """Windows' font folder and the user's own (fonts installed for one account only), those there are."""
-    found = []
-    for base, tail in ((os.environ.get("WINDIR") or os.environ.get("SystemRoot"), (u"Fonts",)),
-                       (os.environ.get("LOCALAPPDATA"), (u"Microsoft", u"Windows", u"Fonts"))):
-        if base:
-            if not isinstance(base, type(u"")):  # (Python 2's environment is bytes: unicode paths list unicode names)
-                base = base.decode(sys.getfilesystemencoding() or "mbcs", "replace")
-            folder = os.path.join(base, *tail)
-            if os.path.isdir(folder):
-                found.append(folder)
-    return found
+    folders = (_font_folder("WINDIR", "SystemRoot", (u"Fonts",)), user_font_folder())
+    return [folder for folder in folders if folder and os.path.isdir(folder)]
 
 
 def name_table_name(read):
