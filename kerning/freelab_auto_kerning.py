@@ -3820,6 +3820,149 @@ def _drop_tool_buttons(dialog):
     return dropped
 
 
+# FreeLab MCP's window tools drive any Qt window; a script that follows their optional conventions (FreeLab
+# MCP's docs/WINDOW-TOOLS.md) is driven more surely. FreeLab follows them and needs nothing of the MCP: they
+# are Qt's own objectName and accessible name, and dynamic properties nothing else reads.
+MCP_SCRIPT_WINDOW = "mcpScriptWindow"  # on each window and dialog FreeLab shows: its own, not a question of FontLab's
+MCP_BUSY = "mcpBusy"  # on a tool's window: the step's name while it works (busy_start), False once it is over
+MCP_RISKY = "mcpRisky"  # on a control that writes files outside FontLab's History: its use needs risky mode
+MCP_CONTROL_CLASSES = ("QAbstractButton", "QComboBox", "QAbstractSpinBox", "QLineEdit", "QTextEdit", "QPlainTextEdit",
+                       "QTabBar", "QTabWidget", "QAbstractItemView", "QLabel", "QProgressBar", "QAbstractSlider")
+MCP_UNNAMED_PREFIXES = ("flag", "qt_")  # names dark mode reads as FontLab's (a flag swatch) or Qt keeps for itself
+MCP_NAMES_DONE = "freelabNamed"  # on a widget named here (never named twice, nor renamed)
+
+
+def mcp_script_window(window):
+    """Marks a window or a dialog (a QMessageBox asking something) as FreeLab's own: FreeLab MCP then drives
+    it as a script's, never taking it for a question of FontLab's. Returns the window. Never raises."""
+    try:
+        window.setProperty(MCP_SCRIPT_WINDOW, True)
+    except Exception:
+        pass
+    return window
+
+
+def mark_risky(widget):
+    """Marks a control whose use writes files outside FontLab's History (a template, a PDF, an exported
+    font): FreeLab MCP's window tools then click it only in risky mode. Returns the control. Never raises."""
+    try:
+        widget.setProperty(MCP_RISKY, True)
+    except Exception:
+        pass
+    return widget
+
+
+def _mcp_busy(owner, what):
+    """The window's mcpBusy: the step's name (True when it has none) while it works, False once over."""
+    try:
+        if what is False:
+            owner.dialog.setProperty(MCP_BUSY, False)
+        else:
+            owner.dialog.setProperty(MCP_BUSY, (u"%s" % what) if what else True)
+    except Exception:
+        pass
+
+
+def _is_qt_widget(value):
+    try:
+        return hasattr(value, "inherits") and hasattr(value, "metaObject") and bool(value.isWidgetType())
+    except Exception:
+        return False
+
+
+def _mcp_slug(text):
+    """A tab's text as part of a name: lowercase words joined by _ (Vertical metrics: vertical_metrics)."""
+    words = re.findall(u"[0-9A-Za-z]+", re.sub(u"\\s*\\(.*$", u"", u"%s" % (text or u"")))
+    return u"_".join(word.lower() for word in words)
+
+
+def name_controls(owner):
+    """Gives each control of a tool's window that has no objectName one from the attribute the tool holds it
+    in (self.check_button: check_button), so FreeLab MCP addresses it whatever its text or place; a control
+    held by a part the tool holds (its log, a tab's parts) takes the part's name and its own (coverage.status;
+    a part's view alone, the part's name: log). Pages a tab bar switches (a QStackedWidget held as pages,
+    beside a QTabBar held as tabs) take their tab's name (pages.coverage). Only the window's own controls,
+    each once: a name given is never changed, and a name kept by FreeLab or dark mode is left alone. Called
+    as the window is taken (take_window) and after each work (busy_end), for the controls made since.
+    Returns the names given. Never raises."""
+    given = []
+    try:
+        window = owner.dialog
+    except Exception:
+        return given
+    taken = set()
+
+    def is_control(widget):
+        return any(widget.inherits(name) for name in MCP_CONTROL_CLASSES)
+
+    def name(widget, wanted, any_kind=False):
+        try:
+            if not _is_qt_widget(widget) or widget.isWindow() or not _same(widget.window(), window):
+                return
+            if not wanted or wanted in taken or wanted.lower().startswith(MCP_UNNAMED_PREFIXES):
+                return
+            if u"%s" % (_property(widget, "objectName") or u"") or widget.property(MCP_NAMES_DONE):
+                return
+            if not (any_kind or is_control(widget)):
+                return
+            widget.setObjectName(wanted)
+            widget.setProperty(MCP_NAMES_DONE, True)
+            taken.add(wanted)
+            given.append(wanted)
+        except Exception:
+            pass  # (a deleted widget, or a fake without these calls)
+
+    try:
+        attributes = sorted(getattr(owner, "__dict__", {}).items(), key=lambda item: item[0])
+    except Exception:
+        return given
+    parts = []
+    for attribute, value in attributes:
+        if attribute.startswith("_") or isinstance(value, _PLAIN):
+            continue
+        if _is_qt_widget(value):
+            name(value, attribute)
+        elif (hasattr(value, "__dict__") and not isinstance(value, (type(sys), type)) and not callable(value)
+              and not hasattr(value, "inherits") and value is not owner):
+            parts.append((attribute, value))
+    for attribute, part in parts:
+        try:
+            inner = sorted(part.__dict__.items(), key=lambda item: item[0])
+        except Exception:
+            continue
+        for sub, value in inner:
+            if not sub.startswith("_") and _is_qt_widget(value):
+                name(value, attribute if sub == "view" else u"%s.%s" % (attribute, sub))
+    # The pages a tab bar switches: each named after its tab (FreeLab MCP walks a QTabWidget's tabs itself)
+    for attribute, value in attributes:
+        try:
+            if not _is_qt_widget(value) or not value.inherits("QStackedWidget") or "pages" not in attribute:
+                continue
+            bar = getattr(owner, attribute.replace("pages", "tabs"), None)
+            texts = []
+            if _is_qt_widget(bar) and bar.inherits("QTabBar") and int(_property(bar, "count")) == int(_property(value, "count")):
+                texts = [_mcp_slug(bar.tabText(index)) for index in range(int(_property(bar, "count")))]
+            for index in range(int(_property(value, "count"))):
+                page = value.widget(index)
+                slug = texts[index] if index < len(texts) and texts[index] else u"%d" % (index + 1)
+                name(page, u"%s.%s" % (attribute, slug), any_kind=True)
+        except Exception:
+            continue
+    return given
+
+
+def mcp_conventions(owner):
+    """FreeLab MCP's conventions on a tool's window (see MCP_SCRIPT_WINDOW): the window FreeLab's own, not busy,
+    and its controls named (name_controls). Never raises."""
+    try:
+        mcp_script_window(owner.dialog)
+        if owner.dialog.property(MCP_BUSY) is None:
+            _mcp_busy(owner, False)
+    except Exception:
+        pass
+    return name_controls(owner)
+
+
 def take_window(tool, owner):
     """A tool's main() calls this before it shows its window: the window is tied to its font, made a
     window of its own, and takes the place of the tool that font's window showed, which is closed: the
@@ -3839,6 +3982,7 @@ def take_window(tool, owner):
         owner.dialog.setProperty(WINDOW_PROP, key)
     except Exception:
         pass
+    mcp_conventions(owner)  # (FreeLab MCP's: the window its own, its controls named)
     old = registry["fonts"].get(font_id)
     own = old if old is not None and old is not owner and _shown(old) and font_id is not None else None
     if old is None or not _shown(old):
@@ -3985,6 +4129,11 @@ def content_layout(dialog):
     return layout
 
 
+TOOLS_BUTTON_NAME = "freelabTools"  # the top row's buttons' objectNames (FreeLab MCP addresses them by these)
+TOOL_STEP_NAMES = {u"Previous": "freelabPreviousTool", u"Next": "freelabNextTool"}
+HELP_BUTTON_NAME = "freelabHelp"
+
+
 def add_tools_button(dialog, current, log=None):
     """A menu button at the right of a FreeLab window's first row, listing the font tools (FONT_TOOLS):
     picking one opens it, as Scripts > FreeLab does; the window's own is grayed out. log: a Log told
@@ -4000,6 +4149,9 @@ def add_tools_button(dialog, current, log=None):
             return None
         button = QtGui.QToolButton()
         button.setAutoRaise(True)
+        # (an icon alone: its name and objectName for FreeLab MCP and screen readers, as the arrows' and ?'s)
+        button.setObjectName(TOOLS_BUTTON_NAME)
+        button.setAccessibleName(u"Tools")
         button.setToolTip(u"Open another FreeLab tool.")
         button.setWhatsThis(u"Lists FreeLab's font tools in the order of the work. Picking one opens it on this window's "
                             u"font, in this window's place.")
@@ -4032,6 +4184,8 @@ def add_tools_button(dialog, current, log=None):
             step = QtGui.QToolButton()
             step.setAutoRaise(True)
             step.setArrowType(arrow)
+            step.setObjectName(TOOL_STEP_NAMES[word])
+            step.setAccessibleName(u"%s tool" % word)
             step.setEnabled(neighbor is not None)
             step.setToolTip(u"%s tool: %s" % (word, neighbor) if neighbor
                             else u"%s tool: none" % word)
@@ -4050,6 +4204,8 @@ def add_tools_button(dialog, current, log=None):
         # Windows shows no title-bar "?" beside minimize and maximize: the help button is here instead
         help_button = QtGui.QToolButton()
         help_button.setAutoRaise(True)
+        help_button.setObjectName(HELP_BUTTON_NAME)
+        help_button.setAccessibleName(u"Help")
         help_button.setText(u"?")
         bold = QtGui.QFont(help_button.font)
         bold.setBold(True)
@@ -4225,6 +4381,7 @@ def busy_start(owner, what=u"", stoppable=True):
     state = _busy_state(owner)
     row, label, bar = _busy_parts(dialog)
     state.update({"stop": False, "then": None, "pumped": 0.0, "what": None})
+    _mcp_busy(owner, what)  # (FreeLab MCP waits on it: set before the first events go through)
     if row is not None:
         try:
             dark = _property(dialog, "palette").color(QtGui.QPalette.Window).lightness() < 128
@@ -4273,6 +4430,7 @@ def busy_progress(owner, what=None, part=None, force=False, stoppable=True):
     try:
         if moved:
             state["what"] = what
+            _mcp_busy(owner, what)
             label.setText(u"%s\N{HORIZONTAL ELLIPSIS}" % what if what else u"")
             try:
                 row.layout().activate()  # (laid out now: painted at the last text's width, a longer one was cut by the bar, owner's image 312)
@@ -4319,6 +4477,8 @@ def busy_end(owner):
     QtCore, QtGui = _qt()
     state = _busy_state(owner)
     _guard_off(owner)
+    _mcp_busy(owner, False)
+    name_controls(owner)  # (the controls the work made, for FreeLab MCP)
     try:
         row, label, bar = _busy_parts(owner.dialog)
         if row is not None:
@@ -10402,7 +10562,7 @@ class ClassDialog(object):
         QtCore, QtGui = _qt()
         self.owner = owner
         parent = owner.dialog
-        dialog = self.dialog = QtGui.QDialog(parent)
+        dialog = self.dialog = mcp_script_window(QtGui.QDialog(parent))
         dialog.setWindowTitle("FreeLab Kerning Classes")
         dialog.setWhatsThis(CLASS_HELP)
         size_dialog(dialog)
@@ -10470,6 +10630,7 @@ class ClassDialog(object):
         self.plans, self.names, self.exceptions = [], {}, []
         self.package = self.master = None
         plain_buttons(dialog)
+        name_controls(self)  # (FreeLab MCP's addresses: tree, apply_button, ...)
 
     def show(self):
         QtCore, QtGui = _qt()

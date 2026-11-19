@@ -931,8 +931,11 @@ class SheetFileTests(unittest.TestCase):
         d = fb.FontBuilderDialog.__new__(fb.FontBuilderDialog)
         d.settings, d.dialog, d.typed = {"folder": self.folder}, None, Box(toPlainText=lambda: "A")
         d.alternates = d.per_sheet = d.em = Box(value=1)
+        self.marked = []  # (FreeLab MCP's conventions: the question FreeLab's own, its Replace risky)
         d.ak = Box(busy_start=lambda *a: None, busy_end=lambda *a: None, busy_progress=lambda *a: None,
-                   Stopped=KeyboardInterrupt, html=lambda s: s, b=lambda s: s)
+                   Stopped=KeyboardInterrupt, html=lambda s: s, b=lambda s: s,
+                   mcp_script_window=lambda w: self.marked.append(("script", w)) or w,
+                   mark_risky=lambda w: self.marked.append(("risky", w)) or w)
         d.log = Box(add=lambda text, level="info": logged.append((level, text)))
         d.sheets = lambda: [fb.Sheet(["A"], ["A"], METRICS, 150, index=i, count=sheets) for i in range(sheets)]
         return d, asked, logged
@@ -951,6 +954,8 @@ class SheetFileTests(unittest.TestCase):
         d.save_template()
         self.assertEqual(asked, ["This sheet's file is there already: Hand-2-of-2.svg. Replace it with the "
                                  "template's empty sheet?"])
+        self.assertEqual([kind for kind, _w in self.marked], ["script", "risky"],
+                         "FreeLab's own question for FreeLab MCP, its Replace needing risky mode")
         self.assertEqual(self.read("Hand-2-of-2.svg"), "OWNER DRAWING", "canceled: left as it was")
         self.assertFalse(os.path.exists(os.path.join(self.folder, "Hand-1-of-2.svg")), "and nothing else written")
         self.assertEqual(logged, [("warning", "Nothing was saved: the file there already left as it was.")])

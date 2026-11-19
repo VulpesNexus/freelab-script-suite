@@ -3020,6 +3020,7 @@ class ProofDialog(object):
         self.restore_button = QtGui.QPushButton("Restore defaults")
         self.restore_button.setWhatsThis(u"Puts the sections, sizes, and choices back as the window first came.")
         self.save_button = QtGui.QPushButton(u"Save PDF\N{HORIZONTAL ELLIPSIS}")
+        self.ak.mark_risky(self.save_button)  # (writes a file: FreeLab MCP clicks it only in risky mode)
         self.save_button.setWhatsThis(u"Writes every page to a PDF file you name (in <i>Documents</i> at first).")
         self.open_button = QtGui.QPushButton("Open PDF")
         self.open_button.setWhatsThis(u"Opens the PDF saved last in the application the system opens PDF files with.")

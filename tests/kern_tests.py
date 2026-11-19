@@ -6826,5 +6826,299 @@ class ReviewOfNov19Tests(unittest.TestCase):
             ak._qt = real
 
 
+class McpConventionTests(unittest.TestCase):
+    """FreeLab follows FreeLab MCP's optional window conventions (its docs/WINDOW-TOOLS.md), so the MCP's generic
+    window tools drive FreeLab's windows surely: each window and dialog says it is a script's, a window says what
+    step it works at, controls take stable objectNames from the tool's attributes, icon-only buttons have names,
+    and the buttons that write files need risky mode. FreeLab needs nothing of the MCP."""
+
+    class Widget(object):
+        def __init__(self, cls, window=None, bases=(), name=u""):
+            self.cls, self.bases, self.win = cls, set((cls,) + tuple(bases)), window
+            self.objectName, self.props, self.accessible = name, {}, None
+
+        def inherits(self, name):
+            return name in self.bases
+
+        def metaObject(self):
+            return self.cls
+
+        def isWidgetType(self):
+            return True
+
+        def isWindow(self):
+            return self.win is None
+
+        def window(self):
+            return self if self.win is None else self.win
+
+        def setObjectName(self, name):
+            self.objectName = name
+
+        def setAccessibleName(self, name):
+            self.accessible = name
+
+        def property(self, name):
+            return self.props.get(name)
+
+        def setProperty(self, name, value):
+            self.props[name] = value
+
+    def tool(self):
+        W = self.Widget
+        window = W("QDialog")
+        owner = type("Tool", (object,), {})()
+        owner.dialog = window
+        owner.check_button = W("QPushButton", window, ("QAbstractButton",))
+        owner.tree = W("QTreeWidget", window, ("QAbstractItemView",))
+        owner.font_label = W("QLabel", window, ("QFrame",))
+        owner.named = W("QComboBox", window, name=u"chosenAlready")
+        owner.box = W("QWidget", window)  # (a container: FreeLab MCP never lists it)
+        owner.flag_button = W("QPushButton", window, ("QAbstractButton",))  # (dark mode reads flag... as FontLab's swatches)
+        owner.other = W("QPushButton", W("QDialog"), ("QAbstractButton",))  # (another window's)
+        owner.busy, owner.rows, owner.ak = False, [W("QLabel", window)], ak
+
+        class Log(object):
+            pass
+
+        owner.log = Log()
+        owner.log.view = W("QTextBrowser", window, ("QTextEdit",))
+        owner.log.widget = W("QWidget", window)
+
+        class Tab(object):
+            pass
+
+        owner.coverage = Tab()
+        owner.coverage.status = W("QLabel", window)
+        owner.coverage.owner = owner
+        tabs = owner.tabs = W("QTabBar", window)
+        tabs.count, tabs.tabText = 2, lambda index: [u"Coverage", u"Vertical metrics (3)"][index]
+        pages = owner.pages = W("QStackedWidget", window)
+        page_widgets = [W("QWidget", window), W("QWidget", window)]
+        pages.count, pages.widget = 2, lambda index: page_widgets[index]
+        return owner, page_widgets
+
+    def test_a_tools_window_is_marked_and_its_controls_named_after_its_attributes(self):
+        owner, page_widgets = self.tool()
+        given = ak.mcp_conventions(owner)
+        self.assertIs(owner.dialog.props.get("mcpScriptWindow"), True, "FreeLab's own window")
+        self.assertIs(owner.dialog.props.get("mcpBusy"), False, "not busy: the property set, so FreeLab MCP reads it")
+        self.assertEqual(owner.check_button.objectName, u"check_button")
+        self.assertEqual(owner.tree.objectName, u"tree")
+        self.assertEqual(owner.font_label.objectName, u"font_label", "a label too, for read_text")
+        self.assertEqual(owner.tabs.objectName, u"tabs")
+        self.assertEqual(owner.named.objectName, u"chosenAlready", "a name given is kept")
+        self.assertEqual(owner.box.objectName, u"", "containers are left unnamed")
+        self.assertEqual(owner.flag_button.objectName, u"", "never a name dark mode reads as FontLab's")
+        self.assertEqual(owner.other.objectName, u"", "only the window's own controls")
+        self.assertEqual(owner.rows[0].objectName, u"", "nor what a list holds")
+        self.assertEqual(owner.log.view.objectName, u"log", "a part's view takes the part's name")
+        self.assertEqual(owner.log.widget.objectName, u"")
+        self.assertEqual(owner.coverage.status.objectName, u"coverage.status", "a part's control: the part's name and its own")
+        self.assertEqual([page.objectName for page in page_widgets], [u"pages.coverage", u"pages.vertical_metrics"],
+                         "the pages a tab bar switches, after their tabs")
+        self.assertEqual(len(given), len(set(given)), "each name once")
+
+    def test_names_are_given_once_and_never_changed(self):
+        owner, _pages = self.tool()
+        ak.mcp_conventions(owner)
+        owner.renamed = owner.check_button  # (held under another name since)
+        del owner.check_button
+        owner.later_button = self.Widget("QPushButton", owner.dialog, ("QAbstractButton",))  # (made by the work)
+        given = ak.name_controls(owner)
+        self.assertEqual(owner.renamed.objectName, u"check_button")
+        self.assertEqual(given, [u"later_button"], "only the control made since")
+        owner.dialog.props["mcpBusy"] = u"Checking"
+        ak.mcp_conventions(owner)
+        self.assertEqual(owner.dialog.props["mcpBusy"], u"Checking", "a window at work stays busy")
+
+    def test_busy_says_the_step_and_ends_false(self):
+        owner, _pages = self.tool()
+        timers = []
+
+        class Timer(object):
+            def __init__(self, parent=None):
+                timers.append(self)
+
+            def __getattr__(self, name):
+                if name.startswith("__"):
+                    raise AttributeError(name)
+                return lambda *args: None
+
+        class App(object):
+            def installEventFilter(self, guard):
+                pass
+
+            def removeEventFilter(self, guard):
+                pass
+
+        class Gui(object):
+            class QApplication(object):
+                @staticmethod
+                def instance():
+                    return App()
+
+                @staticmethod
+                def processEvents():
+                    steps.append(owner.dialog.props.get("mcpBusy"))
+
+        class Core(object):
+            QTimer = Timer
+
+            class Qt(object):
+                Key_Escape = 0x01000000
+
+                @staticmethod
+                def singleShot(ms, slot):
+                    pass
+        steps = []
+        real = ak._qt
+        ak._qt = lambda: (Core, Gui)
+        try:
+            ak.busy_start(owner, u"Reading the font")
+            self.assertEqual(owner.dialog.props["mcpBusy"], u"Reading the font")
+            ak.busy_progress(owner, u"Checking", 0.5)
+            self.assertEqual(owner.dialog.props["mcpBusy"], u"Checking", "each step's name")
+            ak.busy_progress(owner, None, 0.7, force=True)
+            self.assertEqual(owner.dialog.props["mcpBusy"], u"Checking", "kept while the step goes on")
+            self.assertEqual(steps[0], u"Reading the font", "set before the first events go through")
+            ak.busy_end(owner)
+            self.assertIs(owner.dialog.props["mcpBusy"], False, "over: False, never left unset")
+            ak.busy_start(owner)
+            self.assertIs(owner.dialog.props["mcpBusy"], True, "work with no step's name is busy too")
+            ak.busy_end(owner)
+        finally:
+            ak._qt = real
+
+    def test_the_top_rows_icon_buttons_have_names(self):
+        made = []
+
+        class Any(object):
+            """A Qt object that does whatever it is asked, recording the names and properties it is given."""
+
+            def __init__(self, *args):
+                self.objectName, self.accessible, self.text_ = u"", None, None
+
+            def __getattr__(self, name):
+                if name.startswith("__"):
+                    raise AttributeError(name)
+                return Any()
+
+            def __call__(self, *args, **kwargs):
+                return Any()
+
+            def setObjectName(self, name):
+                self.objectName = name
+
+            def setAccessibleName(self, name):
+                self.accessible = name
+
+            def setText(self, text):
+                self.text_ = text
+
+        class ToolButton(Any):
+            InstantPopup = 2
+
+            def __init__(self, *args):
+                Any.__init__(self)
+                made.append(self)
+
+        class First(object):
+            def inherits(self, name):
+                return False
+
+            def property(self, name):
+                return None
+
+        class Item(object):
+            def __init__(self, widget):
+                self.item = widget
+
+            def widget(self):
+                return self.item
+
+            def layout(self):
+                return None
+
+        class Layout(object):
+            def __init__(self):
+                self.items = [Item(First())]
+
+            def count(self):
+                return len(self.items)
+
+            def itemAt(self, index):
+                return self.items[index] if index < len(self.items) else None
+
+            def removeWidget(self, widget):
+                self.items = [item for item in self.items if item.widget() is not widget]
+
+            def insertLayout(self, index, layout):
+                self.items.insert(index, Item(None))
+
+        class Dialog(Any):
+            def layout(self):
+                return self.held
+
+        class Gui(object):
+            def __getattr__(self, name):
+                return ToolButton if name == "QToolButton" else Any()
+        dialog = Dialog()
+        dialog.held = Layout()
+        real, held = ak._qt, list(ak._TOOL_BUTTONS)
+        ak._qt = lambda: (Any(), Gui())
+        try:
+            button = ak.add_tools_button(dialog, "Auto Kerning")
+        finally:
+            ak._qt = real
+            ak._TOOL_BUTTONS[:] = held
+        self.assertIsNotNone(button)
+        names = dict((made_button.objectName, made_button.accessible) for made_button in made)
+        self.assertEqual(names, {"freelabTools": u"Tools", "freelabPreviousTool": u"Previous tool",
+                                 "freelabNextTool": u"Next tool", "freelabHelp": u"Help"})
+
+    def test_the_file_writers_need_risky_mode_and_the_dialogs_are_freelabs(self):
+        # The buttons that write files outside FontLab's History are marked mcpRisky where they are made
+        root = os.path.join(HERE, os.pardir)
+        writers = (("builder/freelab_font_builder.py", "self.save_button"), ("proof/freelab_proof.py", "self.save_button"),
+                   ("cjk/freelab_cjk_vertical.py", "self.export_button"),
+                   ("checks/freelab_font_check.py", "self.save_set_button"),
+                   ("checks/freelab_font_check.py", "self.remove_set_button"))
+        sources = {}
+        for path, _attribute in writers:
+            with io.open(os.path.join(root, path), encoding="utf-8") as handle:
+                sources[path] = handle.read()
+        for path, attribute in writers:
+            source = sources[path]
+            made = source.index(attribute + " = QtGui.QPushButton(")
+            marked = re.search(r"mark_risky\((%s|button)\)" % re.escape(attribute), source[made:made + 600])
+            self.assertTrue(marked, "%s in %s is marked risky right where it is made" % (attribute, path))
+        # Every save dialog is reached from a marked button: each file asking where to save has a mark
+        for name in os.listdir(root):
+            folder = os.path.join(root, name)
+            if not os.path.isdir(folder) or name in ("tests", "tools", "docs"):
+                continue
+            for file_name in os.listdir(folder):
+                if not file_name.endswith(".py"):
+                    continue
+                with io.open(os.path.join(folder, file_name), encoding="utf-8") as handle:
+                    source = handle.read()
+                if "getSaveFileName(" in source and "darkmode" not in name:
+                    self.assertIn("mark_risky(", source, "%s/%s writes a file the user names" % (name, file_name))
+                # every message box FreeLab shows says it is FreeLab's own
+                for match in re.finditer(r"QMessageBox\((self\.dialog|[a-z_.]+)\)", source):
+                    line = source[source.rfind("\n", 0, match.start()) + 1:source.find("\n", match.end())]
+                    self.assertIn("mcp_script_window(", line, "%s/%s: %s" % (name, file_name, line.strip()))
+                # and every dialog either is a tool's window (take_window marks it) or is marked where it is made
+                for match in re.finditer(r"QtGui\.QDialog\(", source):
+                    line = source[source.rfind("\n", 0, match.start()) + 1:source.find("\n", match.end())]
+                    self.assertTrue("mcp_script_window(" in line or "take_window(" in source,
+                                    "%s/%s: %s" % (name, file_name, line.strip()))
+        self.assertEqual((ak.MCP_SCRIPT_WINDOW, ak.MCP_BUSY, ak.MCP_RISKY), ("mcpScriptWindow", "mcpBusy", "mcpRisky"))
+        button = self.Widget("QPushButton")
+        self.assertIs(ak.mark_risky(button), button)
+        self.assertIs(button.props["mcpRisky"], True)
+
+
 if __name__ == "__main__":
     unittest.main()

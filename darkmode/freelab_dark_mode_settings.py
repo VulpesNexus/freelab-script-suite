@@ -22,6 +22,7 @@ THEMES = (("dark", "Dark"), ("automatic", "Automatic (matches system theme)"))
 MIXED = "Mixed (dark interface, light canvases)"
 SHADES = (("dark", "Dark grays"), ("medium", "Medium grays"))
 SYSTEM_CHECK_MS = 2000  # how often the open dialog looks at Windows' theme
+SCRIPT_WINDOW_PROP = "mcpScriptWindow"  # FreeLab MCP's convention: the dialog is a script's, not FontLab's question
 
 
 def dark_mode_module():
@@ -134,6 +135,9 @@ def _run(dialog, watch, slots, dm):
                   follow_windows=bool(settings.get("follow_windows")), shade=settings.get("shade", "dark"))
     theme, mixed, shade = current_choice(settings, dm)
     dialog.setWindowTitle("FreeLab Dark Mode")
+    # FreeLab's own dialog, not a question of FontLab's, for FreeLab MCP's window tools (its mcpScriptWindow
+    # convention: a Qt property nothing else reads)
+    dialog.setProperty(SCRIPT_WINDOW_PROP, True)
     # No "?" in the title bar: it offered help this dialog does not have.
     flags = int(dialog.windowFlags()) if callable(dialog.windowFlags) else int(dialog.windowFlags)
     dialog.setWindowFlags(Qt.WindowFlags(flags & ~int(Qt.WindowContextHelpButtonHint)))

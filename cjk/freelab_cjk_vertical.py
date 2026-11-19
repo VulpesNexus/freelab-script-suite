@@ -1401,6 +1401,7 @@ class CJKVerticalDialog(object):
         self.put_back_button.setWhatsThis(u"Puts vhea's values in the font info back as they were before the last write "
                                           u"(FontLab's <i>Edit &gt; Undo</i> does not take the font info back).")
         self.export_button = QtGui.QPushButton(u"Add vertical metrics to an exported font\N{HORIZONTAL ELLIPSIS}")
+        ak.mark_risky(self.export_button)  # (writes a font file: FreeLab MCP clicks it only in risky mode)
         self.export_button.setWhatsThis(u"FontLab 7's export writes no vhea, vmtx, or VORG table. Pick the font FontLab "
                                         u"exported (.otf or .ttf): a copy of it, named .vert, gets them from this "
                                         u"font's values (each glyph's advance height, vhea's values, the vertical "

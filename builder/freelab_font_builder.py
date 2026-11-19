@@ -1649,6 +1649,7 @@ class FontBuilderDialog(object):
         self.em.setWhatsThis("The em's size on the sheet, in pixels: 500 draws well on a screen; for print, 300 "
                              "pixels a centimeter of em at 300 dpi is about 118, so raise it for small paper sizes.")
         self.save_button = QtGui.QPushButton("Save template...")
+        self.ak.mark_risky(self.save_button)  # (writes files: FreeLab MCP clicks it only in risky mode)
         self.save_button.setWhatsThis("Writes the sheets as SVG drawings (the template a locked group, to draw above, "
                                       "in a vector app or any app that opens SVG), or as images (PNG or TIFF), one a "
                                       "sheet, numbered. The log then links to the folder.")
@@ -1854,11 +1855,11 @@ class FontBuilderDialog(object):
             "This sheet's file is" if one else "These sheets' files are",
             ", ".join(os.path.basename(name) for name in existing), "it" if one else "them", "sheet" if one else "sheets")
         try:
-            box = QtGui.QMessageBox(self.dialog)
+            box = self.ak.mcp_script_window(QtGui.QMessageBox(self.dialog))  # (FreeLab's question, not FontLab's)
             box.setWindowTitle("Save the template")
             box.setIcon(QtGui.QMessageBox.Warning)
             box.setText(text)
-            box.addButton("Replace", QtGui.QMessageBox.AcceptRole)
+            self.ak.mark_risky(box.addButton("Replace", QtGui.QMessageBox.AcceptRole))  # (it overwrites files)
             cancel = box.addButton(QtGui.QMessageBox.Cancel)
             box.setDefaultButton(cancel)
             box.setEscapeButton(cancel)

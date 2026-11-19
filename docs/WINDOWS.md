@@ -49,6 +49,17 @@ Every other bit and value stays as declared, set by hand or not. The log says wh
 
 The `meta` table's language tags (`dlng`, `slng`) are not written: FontLab 7 keeps no `meta` table for export (one added to the font was dropped from the exported file, live).
 
+## Driving FreeLab with FreeLab MCP
+
+FreeLab MCP (the separate `freelab-mcp` repository) has window tools that drive any of FontLab's windows as a user would: `list_windows`, `list_window_controls`, `click`, `set_value`, `read_list`, `read_text`, `click_link`, `run_menu_command`, and `wait_idle`. They know nothing of FreeLab, and FreeLab needs nothing of them; FreeLab follows the optional conventions their [WINDOW-TOOLS.md](https://github.com/VulpesNexus/freelab-mcp/blob/main/docs/WINDOW-TOOLS.md#conventions-a-script-can-follow) describes, so that its windows are driven surely:
+
+- **Its windows are its own.** Every tool window, *FreeLab Kerning Classes*, *FreeLab Dark Mode*, and Font Builder's question before it replaces sheets carry `mcpScriptWindow`: the MCP drives them as a script's, never taking them for a question of FontLab's.
+- **Busy, with the step.** While a window works, its `mcpBusy` is the step shown in its top row (*Checking*); once the work is over, `False`. `wait_idle` waits on it.
+- **Controls by name.** Each control a tool holds takes the name of the attribute that holds it as its objectName, once, as the window is built (and after each work, for the controls made since): *check_button*, *tree*, *log* (a part's view takes the part's name), *coverage.status* (a part's control: the part's name, then its own). The pages a tab bar switches take their tab's name (*pages.coverage*). The top row's buttons are *freelabTools* (named *Tools*: give `entry`, a tool's name, to open it), *freelabPreviousTool* and *freelabNextTool* (*Previous tool*, *Next tool*), and *freelabHelp* (*Help*). `list_window_controls` gives each control's objectName; a control is found by it whatever its text.
+- **Files need risky mode.** The buttons that write files outside FontLab's *History* carry `mcpRisky`, so the MCP clicks them only in its risky mode: Font Builder's *Save template…* and its *Replace*, Proof's *Save PDF…*, CJK Vertical's *Add vertical metrics to an exported font…*, and Font Check's *Save set* and *Remove set*. A write to the font is an ordinary action: *Edit > Undo* takes it back.
+
+What the MCP cannot do here: Windows' own file dialogs (*Add files…*, Font Builder's sheets, Font Compare's font file, and the files the risky buttons ask for) wait for you; a right-click (the rows' *Flag* menu, a caption's help) and *Ctrl+Z* in a window are not available to it (`run_menu_command` with *Edit > Undo* undoes the font in front).
+
 ## A reinstall in the same session
 
 Installing FreeLab again while FontLab runs replaces its scripts; windows opened before keep working on the copy they were opened with (it is kept for the session) until they are closed.

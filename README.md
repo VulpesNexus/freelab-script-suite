@@ -8,7 +8,7 @@ FreeLab's tools for FontLab 7, which run inside it: a dark mode for its whole in
 
 **Status: 0.3.0.** Dark mode runs in FontLab 7.2.
 
-FreeLab MCP, the separate `freelab-mcp` repository, lets an AI app such as Claude Code read and drive the font open in FontLab. Neither needs the other; installed together, they share FontLab's *Scripts > FreeLab* menu.
+FreeLab MCP, the separate `freelab-mcp` repository, lets an AI app such as Claude Code read and drive the font open in FontLab. Neither needs the other; installed together, they share FontLab's *Scripts > FreeLab* menu, and the MCP's window tools drive FreeLab's windows as a user would ([docs/WINDOWS.md](docs/WINDOWS.md#driving-freelab-with-freelab-mcp)).
 
 ## What is here
 

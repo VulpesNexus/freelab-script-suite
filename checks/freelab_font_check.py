@@ -6591,6 +6591,8 @@ class FontCheckDialog(object):
                                           u"settings folder on this computer (not in the font): it is listed under "
                                           u"<i>Your sets</i> each time <i>Font Check</i> opens.")
         self.remove_set_button = QtGui.QPushButton("Remove set")
+        for button in (self.save_set_button, self.remove_set_button):  # (each writes your sets' file, outside the
+            ak.mark_risky(button)  # font's History, and may replace or remove a set: FreeLab MCP's risky mode)
         self.remove_set_button.setWhatsThis(u"Removes the selected set of your own from the saved ones.")
         row.addWidget(self.paste_field, 3)
         row.addWidget(self.name_field, 1)

@@ -434,8 +434,11 @@ class _SettingsDialog(_Control):
 
     def __init__(self, parent=None):
         _Control.__init__(self)
-        self.parent_, self.deleted = parent, 0
+        self.parent_, self.deleted, self.props = parent, 0, {}
         _SettingsDialog.made.append(self)
+
+    def setProperty(self, name, value):
+        self.props[name] = value
 
     def windowFlags(self):
         return 0
@@ -528,6 +531,13 @@ class SettingsDialogLifetimeTests(unittest.TestCase):
         watch = self.watch(dialog)
         self.assertFalse(watch.running)
         self.assertIsNone(watch.callback, "disconnected")
+        self.freed_once(dialog)
+
+    def test_the_dialog_says_it_is_freelabs_own(self):
+        # FreeLab MCP's window tools take a modal dialog for a question of FontLab's (risky mode) unless it says so
+        self.show(_FakeDarkMode(), lambda dialog: 0)
+        dialog = _SettingsDialog.made[-1]
+        self.assertIs(dialog.props.get("mcpScriptWindow"), True)
         self.freed_once(dialog)
 
     def test_ok_frees_it_too(self):
