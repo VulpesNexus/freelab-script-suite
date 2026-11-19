@@ -3597,6 +3597,8 @@ def let_go(owner):
         pass
     if dialog is not None and hand_to_qt(dialog):
         done.append("deleting")
+    if release_caches():
+        done.append("caches")
     owner.__dict__.clear()
     setattr(owner, RELEASED, True)
     try:
@@ -3606,6 +3608,22 @@ def let_go(owner):
     except TypeError:
         pass  # (a class of another kind: its attributes are gone all the same)
     return done
+
+
+def release_caches():
+    """The caches that hold a font's compiled code, emptied as a window closes: Feature Check's checks of a
+    writer's code (its _REPORTS: a compiled stub font of every glyph per check, the code before and after the
+    last write), which outlived every window (live, 2026-11-19: two TTFonts of BIZ UDPGothic's 13,932 glyphs
+    still held once Feature Code had closed). It is a cache only: the next write checks again. Whether
+    anything was emptied. Never raises."""
+    try:
+        cache = getattr(sys.modules.get(FEATURE_CHECK_MODULE), "_REPORTS", None)
+        if isinstance(cache, dict) and cache:
+            cache.clear()
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def _adopt(made, parent):

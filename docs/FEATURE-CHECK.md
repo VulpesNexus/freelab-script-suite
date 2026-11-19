@@ -63,7 +63,7 @@ A fix that would not compile is no fix: the finding stays, without a check box, 
 
 ## FreeLab's writers check their own code
 
-Feature Code, Glyph Compose (its mark features), CJK Spacing, and CJK Vertical check the whole font's code as it would be after their write before they write it: when it would bring an error the font's code does not have now, nothing is written and the log says what and where. Errors the font already had do not stop them, and neither does a rule only moved; glyphs the same write adds (CJK Vertical's built forms) count as in the font. Without Feature Check installed, or without fontTools, they write as before.
+Feature Code, Glyph Compose (its mark features), CJK Spacing, and CJK Vertical check the whole font's code as it would be after their write before they write it: when it would bring an error the font's code does not have now, nothing is written and the log says what and where. Errors the font already had do not stop them, and neither does a rule only moved; glyphs the same write adds (CJK Vertical's built forms) count as in the font. Without Feature Check installed, or without fontTools, they write as before. The checks of the code before and after the last write (a compiled copy of the layout of every glyph each) are kept for the next write, and let go as any FreeLab window closes: on BIZ UDPGothic (13,932 glyphs) two of them outlived Feature Code's window (live, 2026-11-19). What a write keeps after that is FontLab's: its History records the whole font at the write's steps, about 0.5 GB on BIZ UDPGothic, which *Edit > Undo* needs.
 
 ## The compiler
 

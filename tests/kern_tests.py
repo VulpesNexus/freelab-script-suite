@@ -6826,6 +6826,32 @@ class ReviewOfNov19Tests(unittest.TestCase):
             ak._qt = real
 
 
+class ReleaseCachesTests(unittest.TestCase):
+    """Feature Check's checks of a writer's code (two compiled stub fonts of a CJK font's every glyph) outlived
+    every window (live, 2026-11-19): a window let go empties them; the next write checks again."""
+
+    def test_a_window_let_go_empties_feature_checks_cache(self):
+        import types
+        held = sys.modules.get(ak.FEATURE_CHECK_MODULE)
+        module = types.ModuleType(ak.FEATURE_CHECK_MODULE)
+        module._REPORTS = {("code", 3, 7): object(), ("code2", 3, 7): object()}
+        sys.modules[ak.FEATURE_CHECK_MODULE] = module
+        try:
+            self.assertTrue(ak.release_caches())
+            self.assertEqual(module._REPORTS, {})
+            self.assertFalse(ak.release_caches(), "nothing left to empty")
+            module._REPORTS[("code", 3, 7)] = object()
+            owner = type("Tool", (object,), {})()
+            owner.dialog = None
+            self.assertIn("caches", ak.let_go(owner))
+            self.assertEqual(module._REPORTS, {})
+        finally:
+            if held is None:
+                sys.modules.pop(ak.FEATURE_CHECK_MODULE, None)
+            else:
+                sys.modules[ak.FEATURE_CHECK_MODULE] = held
+
+
 class McpConventionTests(unittest.TestCase):
     """FreeLab follows FreeLab MCP's optional window conventions (its docs/WINDOW-TOOLS.md), so the MCP's generic
     window tools drive FreeLab's windows surely: each window and dialog says it is a script's, a window says what
