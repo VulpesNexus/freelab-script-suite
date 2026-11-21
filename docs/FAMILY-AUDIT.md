@@ -93,8 +93,6 @@ Every FontLab call of the tool is a method of `FontLabCalls`, each with a docstr
 - `fgPackage.info.italicAngle`, `openTypeOS2WeightClass`, `openTypeOS2WidthClass`, and `styleName` as read: compare with *Font Info* on a static font. (`familyName` was read live: name ID 1, so a variable font's family is taken from `tfn`.)
 - Opening each format through `requestLoadingFont`, and whether a font opened from a binary file (OpenType, WOFF, Type 1) gives that file as its `path` (else it is matched as the first file awaited).
 - How long reading and assembling take on four static fonts of a few thousand glyphs, and on a CJK family.
-- The question's text at 150 % display scaling (it fits its box at 100 %, live; the owner's display settings are not changed for a test).
-
 ## The crash check, live (2026-11-19)
 
 FontLab 7.2, the suite's window on a static instance of *NotoSansJP[wght].ttf* at `wght` 400 (fontTools' instancer drops the two subtables), and FreeLab MCP's heap fill (a million 64-byte blocks of 0x41, every other one freed: the same fill made FontLab crash on the original that day) made before the files were added. The file dialog is Windows' own, which the window tools cannot fill: the files were passed to the window's `open_paths` through `run_python`, as *Add files…* passes them, and its question was answered with the window tools.
@@ -103,6 +101,7 @@ FontLab 7.2, the suite's window on a static instance of *NotoSansJP[wght].ttf* a
 - Added again, *Open a fixed copy*: the copy opened from *FreeLab\safe-copies* in the temporary folder, matched by its path, without a crash. It was left unticked at first, as of another family (*Noto Sans JP Thin*, its `familyName`): the family is now FontLab's `tfn` (*Noto Sans JP*), and the copy was ticked as *Thin* and *Black*.
 - Added a third time: the question was asked again, and the log said a copy was opened, while the copy open already was ticked. A file whose copy is open is now not asked about; live, it was ticked at once (*is open already: ticked*), with no question.
 - The question's text fits its box at 100 % (*such subtables position nothing, and each is made…*: it said *such a subtable positions nothing* of NotoSansJP's two, counting files instead of subtables; fixed).
+- It fits its box at 150 % display scaling too (2026-11-21, a Windows 10 test machine at 1920 × 1080, FontLab in its trial mode): the question as Qt drew it and as the screen showed it, both lines of text whole, the two buttons unclipped.
 
 ## Limits
 
