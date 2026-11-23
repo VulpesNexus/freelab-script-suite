@@ -2245,7 +2245,7 @@ class GenerationPage(object):
             FIND_A_GLYPH, u"Shows only the rows whose glyph name, or the name of a glyph they are built from, holds "
                              u"this text, whose character it is, whose Unicode value it is (<i>U+2013</i>, <i>2013</i>), "
                              u"or whose Unicode name holds it (<i>dash</i>). Rows not shown keep their ticks; <i>Tick "
-                             u"all</i>, <i>Tick none</i>, and <i>Tick high-value glyphs</i> act on the rows shown.")
+                             u"all</i>, <i>Untick all</i>, and <i>Tick high-value glyphs</i> act on the rows shown.")
         row.addWidget(self.search_label)  # (left of the field: the field ends at the rows' right edge, owner's image 185)
         row.addWidget(self.search)
         # The settings of how the glyphs are drawn first, then what is listed and the search, right over the list

@@ -16,8 +16,18 @@ short timer then watches the mouse until its button is released.
 - Released farther away, the tab is a window of its own, as FontLab makes it.
 - A window of its own gets a Dock button beside its tabs; a double-click on one of its tabs docks it.
 
+That is the first of two options ("reorder", on by default). The second ("no_undock", off by
+default) keeps the main window's tabs in it: FontLab makes its window on the drop all the same (no
+filter can stop it), so a tab pressed in the main window and found in a window of its own after the
+release is merged back at the place it had when pressed, and FontLab's Undock commands
+(Window > Docking) are hidden. With both, a tab released on or near the bar docks at the marker's
+place and one released anywhere else goes back; with no_undock alone, every dragged tab goes back
+(FontLab itself makes a window of a tab dropped on its own bar), so tabs do not reorder, as in
+FontLab.
+
 Runs at FontLab's start (FreeLab's startup block). Scripts > FreeLab > Tab Docking switches
-it off and on; the choice is kept in %LOCALAPPDATA%\\FreeLab\\tabs.json.
+it off and on, and Scripts > FreeLab > Tab Docking Settings chooses the options; both are kept in
+%LOCALAPPDATA%\\FreeLab\\tabs.json.
 
 Every timer, connection, and filter calls through _dispatcher, which looks the module up when it is
 called: Python 2 empties a module's globals once nothing holds it, and a reloaded module (or a
@@ -41,6 +51,10 @@ WATCHED_PROP = "freelab_tabs"
 LEAVE_ALONE_PROP = "freelabLeaveAlone"  # dark mode leaves the marker as drawn
 DOCK_BUTTON_NAME = "freelabDockButton"
 MERGE_WINDOW = "actionMerge_Window"
+# Window > Docking > Undock All Tabs, Undock Font Tabs, and Undock Glyph Tabs: hidden while no_undock is on
+UNDOCK_ACTIONS = ("actionUndock_All", "actionUndock_Font", "actionUndock_Glyph")
+DEFAULT_OPTIONS = {"reorder": True, "no_undock": False}
+FILTER_REVISION, FILTER_CLASS_KEY = 3, "filter_class_v3"  # the tab bars' filter: on a bar (WATCHED_PROP), and its class
 
 
 def _qt():
@@ -106,6 +120,41 @@ def save_settings(data):
 
 def enabled_setting(settings):
     return bool(settings.get("enabled", True))
+
+
+def options(settings):
+    """The two options as saved: reorder (a tab released on or near the main tab bar docks there) and
+    no_undock (a main window tab never stays in a window of its own). A value that is not a boolean (a
+    hand-edited file) counts as the default."""
+    found = {}
+    for key, default in DEFAULT_OPTIONS.items():
+        value = settings.get(key, default) if isinstance(settings, dict) else default
+        found[key] = value if isinstance(value, bool) else default
+    return found
+
+
+def _options():
+    """The options tab docking runs with now (the defaults before start() has set them)."""
+    found = _state().get("options")
+    return found if isinstance(found, dict) else dict(DEFAULT_OPTIONS)
+
+
+def is_on():
+    return bool(_state().get("on"))
+
+
+def summary(chosen, on=True):
+    """One plain sentence saying what is on, for the Output panel."""
+    if not on or not (chosen.get("reorder") or chosen.get("no_undock")):
+        return u"FreeLab tab docking is off: FontLab's own tab dragging again."
+    if chosen.get("reorder") and chosen.get("no_undock"):
+        return (u"FreeLab tab docking is on: drag a tab along the tab bar to move it; a tab dragged away from "
+                u"the main window goes back where it was.")
+    if chosen.get("reorder"):
+        return (u"FreeLab tab docking is on: drag a tab along the tab bar to move it; released on or near "
+                u"the tab bar, a tab goes back into the main window.")
+    return (u"FreeLab tab docking is on: tabs never undock; a tab dragged away from the main window goes "
+            u"back where it was.")
 
 
 # ---------------------------------------------------------------------------
@@ -283,10 +332,22 @@ def on_pressed(tab_widget, index):
     if index < 0:
         state["drag"] = None
         return
-    state["drag"] = {"page": tab_widget.widget(index), "start": cursor_pos(), "started": False}
+    # (where it was pressed: no_undock puts a main window tab back there, and leaves one that was in a
+    # window of its own already to FontLab)
+    state["drag"] = {"page": tab_widget.widget(index), "start": cursor_pos(), "started": False,
+                     "from_main": _in_main_window(tab_widget), "index": index}
     timer = state.get("poll_timer")
     if timer is not None:
         timer.start()
+
+
+def _in_main_window(tab_widget):
+    """True when tab_widget is the main window's document area (not a window of its own)."""
+    try:
+        frame = tab_widget.parentWidget()
+        return frame is not None and frame.objectName == MAIN_FRAME_NAME and not frame.isWindow()
+    except Exception:
+        return False
 
 
 def on_dropped(tab_widget):
@@ -296,32 +357,47 @@ def on_dropped(tab_widget):
 
 
 def poll():
-    """While a drag is followed: the marker where the tab would go; at the release, the tab docked
-    back if it is on or near the main tab bar."""
-    QtCore, QtGui = _qt()
+    """While a drag is followed: the marker where the tab would go (reorder); at the release, the tab
+    docked back if it is on or near the main tab bar (reorder), else put back where it was pressed if it
+    came from the main window (no_undock)."""
     state = _state()
     drag = state.get("drag")
     if drag is None:
         _stop_polling()
         return
+    chosen = _options()
     point = cursor_pos()
     if button_down():
         if not drag["started"]:
             moved = abs(point.x() - drag["start"].x()) + abs(point.y() - drag["start"].y())
             drag["started"] = moved >= drag_distance()
-        if drag["started"]:
+        if drag["started"] and chosen["reorder"]:
             show_marker(drag["page"], point)
         return
     _stop_polling()
     hide_marker()
     state["drag"] = None
-    if not drag["started"] or drag["page"] is None:
+    page = drag["page"]
+    if page is None:
         return
-    bar, main = main_tabs()
-    if main is None or not near_bar(bar, main, point):
-        return  # released away: a window of its own, as FontLab made it
-    page, slot = drag["page"], drop_slot(bar, point, main.widget, drag["page"])
-    later = (lambda call: lambda: call("dock_after_drop", page, slot))(_dispatcher())
+    if chosen["reorder"] and drag["started"]:
+        bar, main = main_tabs()
+        if main is not None and near_bar(bar, main, point):
+            _later("dock_after_drop", page, drop_slot(bar, point, main.widget, page),
+                   bool(drag.get("from_main")), drag.get("index", -1))
+            return
+    if chosen["no_undock"] and drag.get("from_main") and drag.get("index", -1) >= 0:
+        # Not only after a drag that passed the start distance: whether FontLab made a window is looked
+        # at after its drop (put_back), and a tab still in the main window is left alone.
+        _later("put_back", page, drag["index"])
+    # (else released away: a window of its own, as FontLab made it)
+
+
+def _later(function, *args):
+    """function(*args) through the dispatcher once FontLab has finished its own drop."""
+    QtCore = _qt()[0]
+    state = _state()
+    later = (lambda call: lambda: call(function, *args))(_dispatcher())
     state["pending"].append(later)
     del state["pending"][:-16]  # the last few kept alive until they have run
     QtCore.QTimer.singleShot(DOCK_DELAY_MS, later)
@@ -333,9 +409,32 @@ def _stop_polling():
         timer.stop()
 
 
-def dock_after_drop(page, slot):
+def dock_after_drop(page, slot, from_main=False, index=-1):
+    """A tab released on or near the bar docked at its slot, once FontLab's own drop is over. Decided with
+    the options of now, not of the release (Codex, 2026-11-23: reorder switched off within the delay, the
+    tab still went to the marker's place): without reorder, a main window tab goes back where it was
+    pressed when no_undock is on, and nothing is docked otherwise."""
+    chosen = _options()
+    if not chosen["reorder"]:
+        if chosen["no_undock"] and from_main and index >= 0:
+            put_back(page, index)
+        return
     dock(page, slot)
     refresh_main()
+
+
+def put_back(page, index):
+    """no_undock: a main window tab that FontLab made a window of its own of (on the drop, wherever it
+    was) merged back, at the index it had when pressed (valid then; clamped to the bar by dock). One
+    still in the main window (a click, or a drag FontLab did nothing with) is left alone. True when
+    put back."""
+    if not _options()["no_undock"]:
+        return False
+    if holder_of(page) is None:
+        return False
+    done = dock(page, index)
+    refresh_main()
+    return done
 
 
 def refresh_main():
@@ -367,8 +466,12 @@ def _marker():
 
 
 def show_marker(page, point):
-    """The marker at the gap the tab would go into, when the mouse is on or near the main tab bar."""
+    """The marker at the gap the tab would go into, when the mouse is on or near the main tab bar (and
+    reorder is on: no_undock alone docks nowhere new)."""
     QtCore, QtGui = _qt()
+    if not _options()["reorder"]:
+        hide_marker()
+        return
     bar, main = main_tabs()
     if main is None or not near_bar(bar, main, point):
         hide_marker()
@@ -480,8 +583,11 @@ def dock(page, target=None):
         at = main.indexOf(page)
         if at < 0:
             return _fail(u"FontLab's Merge Window ran, but the tab is not in the main window.")
-    if target is not None and 0 <= target < bar.count and target != at:
-        bar.moveTab(at, target)
+    if target is not None and bar.count > 0:
+        # (clamped: a place found at the press or the release may be past the end if a tab closed since)
+        target = max(0, min(target, bar.count - 1))
+        if target != at:
+            bar.moveTab(at, target)
     for widget, frame in document_tab_widgets():
         if frame.isWindow() and frame.isVisible() and widget.count == 0:
             frame.close()
@@ -493,10 +599,84 @@ def dock(page, target=None):
 
 
 def dock_frame(tab_widget):
+    """A window of its own docked (its Dock button, a double-click on its tab): reorder's, so nothing while
+    it is off (a click or a filter queued before the option changed, or an earlier version's filter)."""
+    if not _options()["reorder"]:
+        return
     page = tab_widget.currentWidget()
     if page is not None:
         dock(page)
         refresh_main()
+
+
+def on_double_click(tab_widget):
+    """A double-click on a document tab (the bar's event filter): True when taken, to dock the window of
+    its own that holds it (reorder only; otherwise, and on a main window tab, the double-click is
+    FontLab's). Decided here rather than in the filter, so that a reloaded module decides."""
+    if not _options()["reorder"]:
+        return False
+    frame = tab_widget.parentWidget() if tab_widget is not None else None
+    if frame is None or not frame.isWindow():
+        return False
+    QtCore = _qt()[0]
+    state = _state()
+    later = (lambda call: lambda: call("dock_frame", tab_widget))(_dispatcher())
+    state["pending"].append(later)
+    del state["pending"][:-16]
+    QtCore.QTimer.singleShot(0, later)
+    return True
+
+
+# ---------------------------------------------------------------------------
+# FontLab's Undock commands, hidden while no_undock is on
+# ---------------------------------------------------------------------------
+
+def undock_actions():
+    """Window > Docking's Undock commands (QActions of the main window). Kept once found, while each is
+    alive: watch() asks every second, and the typed search wraps every action of the main window. Where
+    none is found, searched again only this late (EMPTY_WALK_SECONDS)."""
+    QtGui = _qt()[1]
+    state = _state()
+    found = state.get("undock_actions")
+    if found and all(_alive(action) for action in found):
+        return found
+    if found is not None and not found and time.time() - state.get("undock_search", 0) < EMPTY_WALK_SECONDS:
+        return []
+    main = main_window()
+    found = [a for a in main.findChildren(QtGui.QAction) if a.objectName in UNDOCK_ACTIONS] if main is not None else []
+    state["undock_actions"], state["undock_search"] = found, time.time()
+    return found
+
+
+def hide_undock():
+    """Hide the Undock commands that are shown (each pass: FontLab may show them again), noting the ones
+    FreeLab hid, so that only those are shown again. FontLab's enabling of them is left as it is. The
+    number newly hidden."""
+    state = _state()
+    hidden = state.setdefault("undock_hidden", [])
+    count = 0
+    for action in undock_actions():
+        if action.isVisible():
+            action.setVisible(False)
+            count += 1
+            # (the action itself, not its name: one FontLab made anew under the same name was never hidden
+            # by FreeLab, and is not FreeLab's to show; Codex, 2026-11-23)
+            if all(action is not known for known in hidden):
+                hidden.append(action)
+    return count
+
+
+def show_undock():
+    """Show again the Undock commands FreeLab hid (no_undock switched off, or tab docking stopped)."""
+    state = _state()
+    hidden = state.get("undock_hidden") or []
+    state["undock_hidden"] = []
+    for action in hidden:
+        try:
+            if _alive(action):  # (one deleted since is gone with its menu entry)
+                action.setVisible(True)
+        except Exception:
+            continue
 
 
 # ---------------------------------------------------------------------------
@@ -523,12 +703,13 @@ def _add_dock_button(tab_widget):
 def _filter_class():
     QtCore = _qt()[0]
     state = _state()
-    if "filter_class_v2" not in state:
-        call, holder = _dispatcher(), sys  # (the closure's: this module's globals may be gone when it runs)
+    if FILTER_CLASS_KEY not in state:
+        call = _dispatcher()  # (the closure's: this module's globals may be gone when it runs)
 
         class TabPresses(QtCore.QTimer):  # PythonQt has no QObject to subclass; a timer will do
             """On a document tab bar: a press starts following a possible drag; a double-click on a
-            tab of a window of its own docks that window."""
+            tab of a window of its own docks that window (on_double_click decides; while off, the
+            dispatcher calls nothing and the double-click is FontLab's)."""
 
             def eventFilter(self, obj, event):
                 try:
@@ -536,18 +717,30 @@ def _filter_class():
                     if kind == QtCore.QEvent.MouseButtonPress and event.button() == QtCore.Qt.LeftButton:
                         call("on_pressed", obj.parentWidget(), obj.tabAt(event.pos()))
                     elif kind == QtCore.QEvent.MouseButtonDblClick and obj.tabAt(event.pos()) >= 0:
-                        if not (getattr(holder, "_freelab_tabs_state", None) or {}).get("on"):
-                            return False  # off: the double-click is FontLab's
-                        tab_widget = obj.parentWidget()
-                        frame = tab_widget.parentWidget() if tab_widget is not None else None
-                        if frame is not None and frame.isWindow():
-                            QtCore.QTimer.singleShot(0, lambda: call("dock_frame", tab_widget))
-                            return True
+                        return bool(call("on_double_click", obj.parentWidget()))
                 except Exception:
                     pass  # an event filter must never raise
                 return False
-        state["filter_class_v2"] = TabPresses
-    return state["filter_class_v2"]
+        state[FILTER_CLASS_KEY] = TabPresses
+    return state[FILTER_CLASS_KEY]
+
+
+def _drop_old_filters(bar):
+    """An earlier version's filter taken off a tab bar (those FreeLab holds whose parent is the bar): the one
+    before the options took a double-click on a window's tab and docked it itself, whatever reorder says,
+    and stayed on its bar when FreeLab was installed again in the same FontLab session (Codex, 2026-11-23).
+    The filter object stays held: Qt deletes it with its bar. Never raises."""
+    state = _state()
+    current = state.get(FILTER_CLASS_KEY)
+    for held in state.get("held", []):
+        try:
+            if not hasattr(held, "eventFilter") or (current is not None and isinstance(held, current)):
+                continue
+            parent = held.parent()
+            if parent is bar or parent == bar:
+                bar.removeEventFilter(held)
+        except Exception:
+            continue
 
 
 def watch(force=False):
@@ -555,13 +748,15 @@ def watch(force=False):
     document area found is looked at every pass, a few calls each (whether its bar is hooked, its Dock
     button there): a key of the areas' addresses was no proof, as a window docked and another torn off
     within one pass may take the same address. True when something was hooked or added. (force: kept
-    for callers of an earlier version; every pass looks.)"""
+    for callers of an earlier version; every pass looks.) The Dock buttons only while reorder is on; the
+    Undock commands hidden again while no_undock is on (FontLab may show them again)."""
     QtCore, QtGui = _qt()
     state = _state()
+    chosen = _options()
     changed = False
     for tab_widget, frame in document_tab_widgets():
         try:
-            if frame.isWindow():
+            if frame.isWindow() and chosen["reorder"]:
                 button = tab_widget.findChild(QtGui.QToolButton, DOCK_BUTTON_NAME)
                 if button is None:
                     _add_dock_button(tab_widget)
@@ -571,14 +766,22 @@ def watch(force=False):
                     button.show()
                     changed = True
             bar = _bar_of(tab_widget)
-            if bar is not None and bar.property(WATCHED_PROP) != 2:
+            if bar is not None and bar.property(WATCHED_PROP) != FILTER_REVISION:
+                _drop_old_filters(bar)  # (2: the filter before the options, which docked on a double-click itself)
                 presses = _filter_class()(bar)  # (its parent the bar: Qt deletes it with it, never PythonQt)
                 state["held"].append(presses)
                 bar.installEventFilter(presses)
-                bar.setProperty(WATCHED_PROP, 2)  # (1 or True: an earlier version's filter, which does nothing now)
+                bar.setProperty(WATCHED_PROP, FILTER_REVISION)  # (1 or True: a filter that does nothing now)
                 changed = True
         except Exception as exc:
             print("FreeLab tab docking: %s" % (exc,))
+    try:
+        if chosen["no_undock"]:
+            changed = bool(hide_undock()) or changed
+        elif state.get("undock_hidden"):
+            show_undock()
+    except Exception as exc:
+        print("FreeLab tab docking: %s" % (exc,))
     return changed
 
 
@@ -601,25 +804,37 @@ def _timer(key, interval, function):
     return timer
 
 
-def start():
+def start(chosen=None):
+    """On, with the options given (else those saved)."""
     state = _state()
     state["on"] = True
     state["module"] = sys.modules.get(__name__)  # what the dispatcher calls, should FontLab drop it
     _timer("timer", WATCH_MS, "watch").start()
     _timer("poll_timer", POLL_MS, "poll")
-    watch(force=True)  # (the Dock buttons put back after an off)
+    apply_options(options(load_settings()) if chosen is None else chosen)  # (watch: the Dock buttons put back after an off)
 
 
-def stop():
-    """Off: FontLab's own ways again. Filters stay (they do nothing while off); Dock buttons go."""
-    QtCore, QtGui = _qt()
+def apply_options(chosen):
+    """The options in force at once, without a restart: reorder off takes the marker and the Dock buttons
+    away (windows of their own stay as they are); no_undock hides FontLab's Undock commands, and off
+    shows again the ones it hid."""
     state = _state()
-    state["on"] = False
-    state["drag"] = None
-    for key in ("timer", "poll_timer"):
-        if state.get(key) is not None:
-            state[key].stop()
-    hide_marker()
+    chosen = options(chosen)
+    state["options"] = chosen
+    if not chosen["reorder"]:
+        hide_marker()
+        _remove_dock_buttons()
+    if not chosen["no_undock"]:
+        try:
+            show_undock()
+        except Exception as exc:
+            print("FreeLab tab docking: %s" % (exc,))
+    if state.get("on"):
+        watch(force=True)  # (Dock buttons added, the Undock commands hidden)
+
+
+def _remove_dock_buttons():
+    QtCore, QtGui = _qt()
     for tab_widget, frame in document_tab_widgets():
         button = tab_widget.findChild(QtGui.QToolButton, DOCK_BUTTON_NAME)
         if button is not None:
@@ -627,22 +842,73 @@ def stop():
             button.hide()
 
 
+def stop():
+    """Off: FontLab's own ways again. Filters stay (they do nothing while off); Dock buttons go, and the
+    Undock commands FreeLab hid are shown."""
+    state = _state()
+    state["on"] = False
+    state["drag"] = None
+    for key in ("timer", "poll_timer"):
+        if state.get(key) is not None:
+            state[key].stop()
+    hide_marker()
+    _remove_dock_buttons()
+    try:
+        show_undock()
+    except Exception as exc:
+        print("FreeLab tab docking: %s" % (exc,))
+
+
+def _anything(chosen):
+    return bool(chosen["reorder"] or chosen["no_undock"])
+
+
 def startup():
-    """Called by FontLab's startup script: on unless switched off."""
-    if enabled_setting(load_settings()):
-        start()
+    """Called by FontLab's startup script: on unless switched off (or both options are)."""
+    settings = load_settings()
+    chosen = options(settings)
+    if enabled_setting(settings) and _anything(chosen):
+        start(chosen)
+
+
+def configure(enabled=None, reorder=None, no_undock=None):
+    """Save what is given (None: kept as saved) and apply it at once: started, stopped, or the options
+    changed while running. Both options off is off. The settings as saved."""
+    settings = load_settings()
+    chosen = options(settings)
+    if reorder is not None:
+        chosen["reorder"] = bool(reorder)
+    if no_undock is not None:
+        chosen["no_undock"] = bool(no_undock)
+    on = enabled_setting(settings) if enabled is None else bool(enabled)
+    on = on and _anything(chosen)
+    settings.update(chosen)
+    settings["enabled"] = on
+    save_settings(settings)
+    if on and is_on():
+        apply_options(chosen)
+    elif on:
+        start(chosen)
+    elif is_on():
+        stop()
+    return dict(settings)
 
 
 def toggle():
+    """Scripts > FreeLab > Tab Docking: the master switch. On, with the options last chosen; with both
+    off, reorder is switched on (and saved), so that on always does something."""
     settings = load_settings()
     on = not _state()["on"]
+    chosen = options(settings)
     if on:
-        start()
-        message = (u"FreeLab tab docking is on: drag a tab along the tab bar to move it; released on or near "
-                   u"the tab bar, a tab goes back into the main window. Run this script again to switch it off.")
+        if not _anything(chosen):
+            chosen["reorder"] = True
+        settings.update(chosen)
+        start(chosen)
+        message = summary(chosen) + u" Run this script again to switch it off."
     else:
         stop()
-        message = u"FreeLab tab docking is off: FontLab's own tab dragging again."
+        message = summary(chosen, on=False)
     settings["enabled"] = on
     save_settings(settings)
     print(message)

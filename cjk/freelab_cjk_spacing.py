@@ -1193,12 +1193,17 @@ class CJKSpacingDialog(object):
         sample_row.addWidget(self.sample, 1)
         preview_part.addLayout(sample_row)
         self.previews, self.preview_captions = [], []
+        # The captions and the line between the previews: shown only while a sample is drawn (draw_previews, the
+        # review of November 23: no caption or line over nothing)
+        self.preview_parts, self.previews_drawn = [], False
         for number, caption in enumerate((u"Now", u"With palt")):
             if number:
-                preview_part.addWidget(ak.separator())  # (between two previews stacked)
+                self.preview_parts.append(ak.separator())
+                preview_part.addWidget(self.preview_parts[-1])  # (between two previews stacked)
             title = ak.preview_caption(caption)  # (smaller, in the quiet text color: every tool's previews' captions)
             preview_part.addWidget(title)
             self.preview_captions.append(title)
+            self.preview_parts.append(title)
             label = QtGui.QLabel()
             label.setProperty(ak.LEAVE_ALONE_PROP, True)
             label.setAlignment(QtCore.Qt.AlignCenter)
@@ -1210,6 +1215,7 @@ class CJKSpacingDialog(object):
             label.setToolTip(caption)
             preview_part.addWidget(label)
             self.previews.append((label, caption))
+        ak.preview_filled(self.preview_parts, False)  # (nothing drawn yet)
         # What the previews show of the sample where the font lacks some of it, as CJK Vertical's (image 360)
         self.preview_note = QtGui.QLabel(u"")
         self.preview_note.setWordWrap(True)
@@ -1229,7 +1235,7 @@ class CJKSpacingDialog(object):
         layout.addWidget(self.log.widget)
         buttons = QtGui.QHBoxLayout()
         self.all_button = QtGui.QPushButton("Tick all")
-        self.none_button = QtGui.QPushButton("Tick none")
+        self.none_button = QtGui.QPushButton("Untick all")
         self.restore_button = QtGui.QPushButton("Restore suggestions")
         self.restore_button.setWhatsThis(u"Puts every tick back as the list first came.")
         self.write_button = QtGui.QPushButton("Write the code")
@@ -1374,7 +1380,8 @@ class CJKSpacingDialog(object):
         self.update_buttons()
 
     def previews_shown(self, on):
-        widgets = list(getattr(self, "preview_captions", []))
+        self.pictures_shown = bool(on)  # (draw_previews shows the captions and the line only with the pictures)
+        widgets = []
         for entry in getattr(self, "previews", []):  # ((picture label, caption) pairs)
             widgets.extend(entry if isinstance(entry, (list, tuple)) else [entry])
         for widget in widgets:
@@ -1382,6 +1389,15 @@ class CJKSpacingDialog(object):
                 widget.setVisible(bool(on))
             except Exception:
                 pass
+        # (the captions and the line between: with the pictures, and only where draw_previews drew a sample)
+        self.parts_filled(on and getattr(self, "previews_drawn", False))
+
+    def parts_filled(self, filled):
+        """The captions and the line between the previews shown or hidden (ak.preview_filled): shown only while
+        a sample is drawn, the review of November 23. Nothing to do before they are built."""
+        parts = getattr(self, "preview_parts", None)
+        if parts:
+            self.ak.preview_filled(parts, filled)
 
     def listing_stopped(self, what=u"Listing"):
         """The work stopped by the user: nothing listed (a list half read would offer half the trims), the
@@ -1693,11 +1709,11 @@ class CJKSpacingDialog(object):
         return [c for c in self.hangul if self.hangul_checks.get(c.shape, True)]
 
     def check_all(self, on):
-        """Tick all, Tick none: every row, the log told how many it ticked or unticked, and how many
+        """Tick all, Untick all: every row, the log told how many it ticked or unticked, and how many
         of them were in closed groups (owner's report 118)."""
         self.tree.blockSignals(True)
         try:
-            self.ak.check_rows(self.items(), on, log=self.log, command=u"Tick all" if on else u"Tick none",
+            self.ak.check_rows(self.items(), on, log=self.log, command=u"Tick all" if on else u"Untick all",
                                noun=u"glyph", hidden_text=(u"in a closed group", u"in closed groups"))
         finally:
             self.tree.blockSignals(False)
@@ -1869,6 +1885,8 @@ class CJKSpacingDialog(object):
 
     def draw_previews(self):
         if self.package is None:
+            self.previews_drawn = False  # (no font: nothing drawn, no caption or line over nothing)
+            self.parts_filled(False)
             return
         by_code = dict((t.code, t) for t in self.trims if t.checked and t.palt)
         by_code.update((c.code, c) for c in self.hangul_chosen())
@@ -1922,6 +1940,10 @@ class CJKSpacingDialog(object):
                     label.setMinimumHeight(PREVIEW_LEAST_HEIGHT)
                 except Exception:
                     pass
+        # (the captions and the line between only over a sample drawn: an empty sample, or one the font has none
+        # of, draws nothing; while the font is read, the pictures are hidden, and run shows them with these)
+        self.previews_drawn = any(pixmap is not None for pixmap in self.preview_pixmaps)
+        self.parts_filled(self.previews_drawn and getattr(self, "pictures_shown", True))
         note = getattr(self, "preview_note", None)
         if note is not None:
             words = preview_note(text, names, self.ak.b, self.ak.html)

@@ -45,7 +45,7 @@ PY27_FILES = (
     "compare/freelab_font_compare.py", "tests/compare_tests.py", "proof/freelab_proof.py", "tests/proof_tests.py",
     "checks/freelab_family_audit.py", "tests/family_audit_tests.py",
     "checks/freelab_font_info.py", "tests/font_info_tests.py",
-    "windows/freelab_tabs.py", "tests/tabs_tests.py",
+    "windows/freelab_tabs.py", "windows/freelab_tabs_settings.py", "tests/tabs_tests.py",
     "features/freelab_alternates.py", "features/alternates_model.json", "tests/alternates_tests.py",
     "checks/language_font/FreeLang-Essential.ttf", "checks/language_font/FreeLang-CJK.ttf",
     "checks/language_font/FreeLangPlus-General.ttf", "checks/language_font/FreeLangPlus-Mongolian-Tibetan.ttf",

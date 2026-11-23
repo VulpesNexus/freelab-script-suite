@@ -595,15 +595,18 @@ class AutoSpacingDialog(object):
         previews = QtGui.QHBoxLayout()
         self.preview_now, self.preview_after = QtGui.QLabel(), QtGui.QLabel()
         self.preview_captions = []
+        self.preview_parts = []  # the captions and the line between the previews: shown with a glyph drawn (select)
         for number, (label, caption, tip) in enumerate(((self.preview_now, u"Now", u"The glyph as it is"),
                                                         (self.preview_after, u"Suggested", u"As suggested"))):
             if number:
-                previews.addWidget(self.ak.separator(vertical=True))
+                self.preview_parts.append(self.ak.separator(vertical=True))
+                previews.addWidget(self.preview_parts[-1])
             column = QtGui.QVBoxLayout()
             title = self.ak.preview_caption(caption)
             title.setAlignment(QtCore.Qt.AlignCenter)
             column.addWidget(title)
             self.preview_captions.append(title)
+            self.preview_parts.append(title)
             label.setProperty(self.ak.LEAVE_ALONE_PROP, True)  # dark mode leaves the drawn pictures alone
             label.setToolTip(tip)
             label.setMinimumHeight(int(PREVIEW_SIZE * PREVIEW_HEIGHT))
@@ -613,10 +616,11 @@ class AutoSpacingDialog(object):
         self.neighbors = [self.ak.ClickRegions(label, self.open_pair, u"Double-click to open this pair in <i>Auto Kerning</i>.")
                           for label in (self.preview_now, self.preview_after)]
         layout.addLayout(previews)
+        self.ak.preview_filled(self.preview_parts, False)  # (nothing drawn yet: no caption, no line)
         layout.addWidget(self.log.widget)
         buttons = QtGui.QHBoxLayout()
         self.all_button = QtGui.QPushButton("Tick all")
-        self.none_button = QtGui.QPushButton("Tick none")
+        self.none_button = QtGui.QPushButton("Untick all")
         self.restore_button = QtGui.QPushButton("Restore suggestions")
         self.restore_button.setWhatsThis(u"Puts the ticks back as the list first came after the analysis.")
         self.glyph_window_button = QtGui.QPushButton("Show in Glyph window")
@@ -1053,9 +1057,9 @@ class AutoSpacingDialog(object):
                 self.listed[index].checked = item.checkState(0) == QtCore.Qt.Checked
 
     def check_all(self, on):
-        """Tick all or Tick none, the log saying how many glyphs it changed (the shared check_rows)."""
+        """Tick all or Untick all, the log saying how many glyphs it changed (the shared check_rows)."""
         items = [self.tree.topLevelItem(row) for row in range(self.tree.topLevelItemCount)]
-        self.ak.check_rows(items, bool(on), self.log, u"Tick all" if on else u"Tick none", u"glyph")
+        self.ak.check_rows(items, bool(on), self.log, u"Tick all" if on else u"Untick all", u"glyph")
         self.update_buttons()
 
     def update_buttons_soon(self):
@@ -1162,7 +1166,10 @@ class AutoSpacingDialog(object):
             self.preview_after.clear()
             for regions in self.neighbors:
                 regions.set([], (0, 0))
+            # (nothing to preview: a font that could not be measured, no row picked; image 6 of November 23)
+            self.ak.preview_filled(self.preview_parts, False)
             return
+        self.ak.preview_filled(self.preview_parts, True)
         left, right = s.changes(self.tolerance.value)
         for label, regions, (l, r) in zip((self.preview_now, self.preview_after), self.neighbors,
                                            ((0, 0), (left, right))):

@@ -761,9 +761,11 @@ def reverse_contour(c):
 # ---------------------------------------------------------------------------
 
 
-AUTO_KERNING_FILE, AUTO_KERNING_MODULE = "freelab_auto_kerning.py", "freelab_auto_kerning"
-FONT_CHECK_FILE, FONT_CHECK_MODULE = "freelab_font_check.py", "freelab_font_check"
-TRACER_FILE, TRACER_MODULE = "freelab_trace.py", "freelab_trace"
+# (module names as str: this file's literals are unicode in Python 2, and a unicode key in sys.modules is one
+# FontLab's own code never puts there; found beside a session whose Scripts menu stopped running scripts)
+AUTO_KERNING_FILE, AUTO_KERNING_MODULE = "freelab_auto_kerning.py", str("freelab_auto_kerning")
+FONT_CHECK_FILE, FONT_CHECK_MODULE = "freelab_font_check.py", str("freelab_font_check")
+TRACER_FILE, TRACER_MODULE = "freelab_trace.py", str("freelab_trace")
 NAMES_FILE = "glyph_names.json"
 SETTINGS_FILE = "font_builder.json"
 TITLE = "FreeLab Font Builder"

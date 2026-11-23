@@ -1172,5 +1172,14 @@ class RevealTests(unittest.TestCase):
         self.assertFalse(ak.reveal_clicked("glyph:0041", log))
 
 
+class ModuleNameTests(unittest.TestCase):
+    """This file's literals are unicode in Python 2 (unicode_literals): a module loaded under such a name put a
+    unicode key in sys.modules, found on 2026-11-23 beside a FontLab session whose Scripts menu ran no script."""
+
+    def test_the_modules_it_loads_are_named_with_plain_strings(self):
+        for name in ('AUTO_KERNING_MODULE', 'FONT_CHECK_MODULE', 'TRACER_MODULE'):
+            self.assertIs(type(getattr(fb, name)), str, name)
+
+
 if __name__ == "__main__":
     unittest.main()

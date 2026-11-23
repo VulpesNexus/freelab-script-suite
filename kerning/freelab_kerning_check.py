@@ -554,7 +554,7 @@ NUMBER_COLUMNS = (u"Kerning", u"Distance", u"Fix", u"Value")  # columns of numbe
 ACTIONS = {"collisions": (u"Write ticked fixes", u"Write %s", (u"ticked fix", u"ticked fixes")),
            "cleanup": (u"Clean up ticked entries", u"Clean up %s", (u"ticked entry", u"ticked entries"))}
 # (Tick, not Check, for check boxes: owner's image 261, "Check" being the verb of the buttons that run checks)
-TICK_ALL, TICK_NONE = u"Tick all", u"Tick none"
+TICK_ALL, TICK_NONE = u"Tick all", u"Untick all"
 
 
 def action_text(key, count):
@@ -582,7 +582,7 @@ them says; <i>Show all</i> lists the whole font's.<br><br>
 Each list is checked as its tab is first shown, and again after an undo or an edit in FontLab; the line
 under the font's name says what the list shown holds.
 Double-click a row's pair (or select it and click <i>Show in Glyph window</i>) to look at it with
-FontLab's own tools. <i>Tick all</i> and <i>Tick none</i> tick or untick a whole list;
+FontLab's own tools. <i>Tick all</i> and <i>Untick all</i> tick or untick a whole list;
 <i>Restore suggestions</i> puts its ticks back as it first came.
 Click this help's <i>?</i> button, then any control, for what it does."""
 
@@ -721,14 +721,21 @@ class KerningCheckDialog(object):
         # The previews side by side, each under its caption (the shared preview_caption), a line between two
         previews = QtGui.QHBoxLayout()
         self.previews, self.preview_captions = [], []
+        # Each preview's caption and the line before it, shown only while that preview has a pair drawn
+        # (update_previews: no line or caption over nothing, the review of November 23, image 12)
+        self.preview_parts = []
         for number in range(3):
+            self.preview_parts.append([])
             if number:
-                previews.addWidget(self.ak.separator(vertical=True))
+                self.preview_parts[-1].append(self.ak.separator(vertical=True))
+                previews.addWidget(self.preview_parts[-1][-1])
             column = QtGui.QVBoxLayout()
             caption = self.ak.preview_caption()
             caption.setAlignment(QtCore.Qt.AlignCenter)
             column.addWidget(caption)
             self.preview_captions.append(caption)
+            self.preview_parts[-1].append(caption)
+            self.ak.preview_filled(self.preview_parts[-1], False)  # (nothing selected yet)
             label = QtGui.QLabel()
             label.setProperty(self.ak.LEAVE_ALONE_PROP, True)  # dark mode leaves the drawn pictures alone
             label.setAlignment(QtCore.Qt.AlignCenter)
@@ -912,6 +919,7 @@ class KerningCheckDialog(object):
             tab.tree.clear()
             tab.findings = []
         self.read_font()
+        self.update_previews()  # (the lists emptied: no pair left to draw, nor a caption or line over nothing)
         self.update_buttons()
         self.log.add(u"The font or master changed since the check: check again.", "warning")
         return False
@@ -1026,7 +1034,7 @@ class KerningCheckDialog(object):
         tab.first_checks = [item.checkState(0) == QtCore.Qt.Checked for item in self.rows(tab)]
 
     def check_every(self, tab, on):
-        """Tick all, or Tick none: every row of the list (a group's row follows its rows), the rows of
+        """Tick all, or Untick all: every row of the list (a group's row follows its rows), the rows of
         closed groups too, which the log says (the shared check_rows)."""
         self.ak.check_rows(self.rows(tab), bool(on), self.log, TICK_ALL if on else TICK_NONE,
                            u"pair" if tab is self.collisions else u"entry", None if tab is self.collisions else u"entries",
@@ -1431,7 +1439,7 @@ class KerningCheckDialog(object):
 
     def bottom_row(self, QtGui):
         """The window's bottom row, as every tool's (owner's report 152: they sat under each list, above
-        the previews and the log): the list's own Tick all, Tick none, and Restore suggestions, then
+        the previews and the log): the list's own Tick all, Untick all, and Restore suggestions, then
         Show in Glyph window; at the right, the list's action, then Close. Every list's buttons are in
         it, those of the list shown visible (show_tab_buttons)."""
         row = QtGui.QHBoxLayout()
@@ -1522,6 +1530,11 @@ class KerningCheckDialog(object):
             shown = []
         self.adjust_width = None
         captions = getattr(self, "preview_captions", [])
+        parts = getattr(self, "preview_parts", [])
+        for index in range(min(len(parts), len(self.previews))):
+            # (a preview's caption and the line before it only over a pair drawn: with two pairs, the third's
+            # line and caption stay hidden, and with none, or only the hint, every one of them)
+            self.ak.preview_filled(parts[index], index < len(shown))
         for index, label in enumerate(self.previews):
             if index < len(shown):
                 pair, value, caption = shown[index]

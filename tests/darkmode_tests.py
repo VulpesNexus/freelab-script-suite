@@ -1889,6 +1889,221 @@ class _Image(object):
         return _Image(self.w, self.h, self.pixels)
 
 
+class MenuTickFrameTests(unittest.TestCase):
+    """The review of November 23, image 13: on a menu's highlighted row, dark pixels showed at the right, the
+    bottom, and the corners of a ticked switch's box (Scripts > FreeLab > Dark Mode): Fusion's own outline,
+    a pixel wider and taller than dark mode's rounded frame. In a menu the frame is drawn right over it."""
+
+    class Rect(object):
+        def __init__(self, x, y, w, h):
+            self.box = (x, y, w, h)
+
+        def adjusted(self, left, top, right, bottom):
+            x, y, w, h = self.box
+            return MenuTickFrameTests.Rect(x + left, y + top, w + right - left, h + bottom - top)
+
+        def x(self):
+            return self.box[0]
+
+        def y(self):
+            return self.box[1]
+
+        def width(self):
+            return self.box[2]
+
+        def height(self):
+            return self.box[3]
+
+        def center(self):
+            return (self.box[0] + self.box[2] // 2, self.box[1] + self.box[3] // 2)
+
+    class Action(object):
+        def __init__(self, checked):
+            self.checked = checked
+
+        def isChecked(self):
+            return self.checked
+
+    class Painter(object):
+        Antialiasing = "antialiasing"
+
+        def __init__(self):
+            self.drawn, self.pens = [], []
+
+        def drawLine(self, start, end):
+            self.drawn.append(("line", start, end))
+
+        def save(self):
+            pass
+
+        def restore(self):
+            pass
+
+        def setRenderHint(self, hint, on):
+            pass
+
+        def setBrush(self, brush):
+            pass
+
+        def setPen(self, pen):
+            self.pens.append(pen)
+
+        def drawRoundedRect(self, rect, rx, ry):
+            self.drawn.append(("rounded", rect.box))
+
+        def drawRect(self, rect):
+            self.drawn.append(("square", rect.box))
+
+        def drawEllipse(self, rect):
+            self.drawn.append(("ellipse", rect.box))
+
+    class Widget(object):
+        def __init__(self, kind, action=None):
+            self.kind, self.styleSheet, self.action, self.asked = kind, u"", action, []
+
+        def inherits(self, name):
+            return name == self.kind
+
+        def parentWidget(self):
+            return None
+
+        def actionAt(self, point):
+            self.asked.append(point)
+            return self.action
+
+        def logicalDpiX(self):
+            return 96
+
+    def framed(self, window=30):
+        tests = self
+
+        class Pen(object):
+            def __init__(self, color):
+                self.color, self.width = color, 1.0
+
+            def setWidthF(self, width):
+                self.width = width
+
+        class ProxyStyle(object):
+            def __init__(self, base=None):
+                self.base = base
+
+            def drawPrimitive(self, element, option, painter, widget=None):
+                painter.drawn.append(("fusion", element))
+
+        class Color(object):
+            def __init__(self, *args):
+                self.args = args
+
+            def red(self):
+                return window
+
+            green = blue = red
+
+            def name(self):
+                return u"#%02x%02x%02x" % (window, window, window)
+
+        gui = {"QProxyStyle": ProxyStyle,
+               "QStyle": type("QStyle", (), {"PE_IndicatorCheckBox": 7, "PE_IndicatorRadioButton": 8, "PE_PanelMenu": 9}),
+               "QPainter": tests.Painter, "QBrush": lambda: "no brush", "QPen": Pen,
+               "QPalette": type("QPalette", (), {"Window": "window", "WindowText": "text"})}
+        saved = (dm._gui, dm._core, dm._qt, dm._state)
+        state = {"shade": "dark"}
+        dm._gui = lambda name: gui[name]
+        dm._core = lambda name: {"QRectF": lambda rect: rect, "QPointF": lambda x, y: (round(x, 2), round(y, 2))}[name]
+        dm._qt = lambda: (None, None, Color)
+        dm._state = lambda: state
+
+        def restore():
+            dm._gui, dm._core, dm._qt, dm._state = saved
+        self.addCleanup(restore)
+        option = type("Option", (), {"rect": tests.Rect(10, 20, 13, 13),
+                                     "palette": type("P", (), {"color": lambda self, role: Color(role)})()})()
+        return dm._framed_style("fusion"), option
+
+    def test_a_ticked_menu_entry_shows_the_mark_alone_in_the_texts_color(self):
+        """The owner, November 23: the tick FontLab's light look has (the mark alone), in the text's color."""
+        style, option = self.framed()
+        painter, menu = self.Painter(), self.Widget("QMenu", self.Action(True))
+        style.drawPrimitive(7, option, painter, menu)
+        lines = [entry for entry in painter.drawn if entry[0] == "line"]
+        self.assertEqual(len(painter.drawn), 2, "no box: Fusion's is not drawn")
+        self.assertEqual(len(lines), 2, "down to the corner, up to the end")
+        self.assertEqual(lines[0][2], lines[1][1], "one stroke after the other")
+        for _, start, end in lines:
+            for x, y in (start, end):
+                self.assertTrue(10 <= x <= 23 and 20 <= y <= 33, "inside the entry's box")
+        self.assertEqual(menu.asked, [(16, 26)], "the entry under the box says whether it is ticked")
+        self.assertEqual(painter.pens[-1].color.args, ("text",))
+        self.assertEqual(painter.pens[-1].width, dm.MENU_TICK_WIDTH)
+
+    def test_a_menu_entry_not_ticked_shows_nothing(self):
+        style, option = self.framed()
+        painter = self.Painter()
+        style.drawPrimitive(7, option, painter, self.Widget("QMenu", self.Action(False)))
+        self.assertEqual(painter.drawn, [])
+
+    def test_a_light_menu_is_left_to_the_style(self):
+        style, option = self.framed(window=240)
+        painter = self.Painter()
+        style.drawPrimitive(7, option, painter, self.Widget("QMenu", self.Action(True)))
+        self.assertEqual(painter.drawn, [("fusion", 7)])
+        painter = self.Painter()
+        style.drawPrimitive(9, option, painter, self.Widget("QMenu"))
+        self.assertEqual(painter.drawn, [("fusion", 9)], "no line beside the ticks either")
+
+    def test_a_dark_menu_gets_the_line_beside_its_ticks(self):
+        """The owner, November 23: FontLab's light look has a line beside a menu's ticks; Fusion draws none."""
+        style, option = self.framed()
+        option.rect = self.Rect(0, 0, 176, 375)
+        painter = self.Painter()
+        style.drawPrimitive(9, option, painter, self.Widget("QMenu"))
+        self.assertEqual(painter.drawn, [("fusion", 9), ("line", (dm.MENU_GUTTER + 0.5, 3), (dm.MENU_GUTTER + 0.5, 371))],
+                         "over the panel, before the entries are drawn")
+        self.assertEqual(painter.pens[-1].args, (dm.lighter_name(u"#1e1e1e", dm.SEPARATOR_LIGHTER),),
+                         "the color of dark mode's menu separators")
+        painter = self.Painter()
+        style.drawPrimitive(9, option, painter, self.Widget("QFrame"))
+        self.assertEqual(painter.drawn, [("fusion", 9)], "a menu's panel only")
+
+    def test_the_separators_start_where_the_menus_line_is_drawn_at_any_scale(self):
+        """Codex, 2026-11-23: the line was drawn at the menu's scale (34 px in at 150 %) and the separators' start
+        was a fixed 23 px: they ran into the ticks' column on a scaled display."""
+        for dpi, offset in ((96, 23), (144, 34), (192, 46)):
+            menu = self.Widget("QMenu")
+            menu.logicalDpiX = lambda dpi=dpi: dpi
+            self.assertEqual(dm._gutter_offset(menu), offset)
+            style, option = self.framed()
+            option.rect = self.Rect(0, 0, 176, 375)
+            painter = self.Painter()
+            style.drawPrimitive(9, option, painter, menu)
+            self.assertEqual(painter.drawn[-1][1][0], offset + 0.5, "the line")
+            self.assertIn(u"margin: 4px 8px 4px %dpx;" % offset, dm.separator_sheet(u"#3a3a3a", dm._gutter_offset(menu)),
+                          "the separators' start")
+        self.assertEqual(dm._gutter_offset(object()), dm.MENU_GUTTER, "a menu that cannot say its scale: unscaled")
+        self.assertIn(u"%dpx; }" % dm.MENU_GUTTER, dm.separator_sheet(u"#3a3a3a"))
+
+    def test_a_menus_tick_that_cannot_be_read_is_framed_right_over_the_styles_outline(self):
+        style, option = self.framed()
+        painter = self.Painter()
+        style.drawPrimitive(7, option, painter, self.Widget("QMenu"))
+        self.assertEqual(painter.drawn, [("fusion", 7), ("square", (10.5, 20.5, 12, 12))],
+                         "every side on the outline's own pixels, corners included")
+
+    def test_a_check_box_anywhere_else_keeps_its_rounded_frame(self):
+        style, option = self.framed()
+        painter = self.Painter()
+        style.drawPrimitive(7, option, painter, self.Widget("QCheckBox"))
+        self.assertEqual(painter.drawn, [("fusion", 7), ("rounded", (10.5, 20.5, 11, 11))])
+        painter = self.Painter()
+        style.drawPrimitive(7, option, painter, None)  # (drawn with no widget: a list's own box)
+        self.assertEqual(painter.drawn[-1], ("rounded", (10.5, 20.5, 11, 11)))
+        painter = self.Painter()
+        style.drawPrimitive(8, option, painter, self.Widget("QMenu"))
+        self.assertEqual(painter.drawn[-1][0], "ellipse", "a radio button's ring is as it was")
+        self.assertFalse(dm._in_menu(object()), "a widget that cannot say: no menu, nothing raised")
+
+
 class KeepColorsTests(unittest.TestCase):
     BLUE, WHITE, PALE = 0xff1060c0, 0xffffffff, 0xff90b8e8
 

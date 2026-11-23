@@ -2853,7 +2853,7 @@ def html_text(text):
 
 
 # ("Tick", not "Check": owner's image 261, Check is the verb of the button that runs the check)
-CHECK_BUTTONS = (("all", u"Tick all"), ("none", u"Tick none"), ("buildable", u"Tick only what Glyph Compose can build"))
+CHECK_BUTTONS = (("all", u"Tick all"), ("none", u"Untick all"), ("buildable", u"Tick only what Glyph Compose can build"))
 
 
 def checks_for(rows, checked, buildable):
@@ -8984,11 +8984,17 @@ class FontCheckDialog(object):
         return u" ".join(line for line in lines if line)
 
     def note_html(self, note):
-        """The line under the list as rich text: the repository's address in it a link (opened on a
-        click where Qt can), and written out all the same."""
+        """The line under the list as rich text: "issue" in it a link to the repository's issues (opened on a
+        click), the address no longer written out after it (the owner's image of November 23: the address in
+        parentheses made the line run long). A tooltip, where nothing can be clicked, keeps the address
+        written out (CONTRIBUTE as it is). An address the sentence does not introduce is a link as written."""
         text = self.ak.html(note)
         address = self.ak.html(ISSUES_ADDRESS)
-        text = text.replace(address, u'<a href="%s">%s</a>' % (address, address))
+        linked = text.replace(u"open an issue on FreeLab's repository (%s)" % address,
+                              u"open an <a href=\"%s\">issue</a> on FreeLab's repository" % address)
+        if linked == text:
+            linked = text.replace(address, u'<a href="%s">%s</a>' % (address, address))
+        text = linked
         for _, _, block in NOTATION_SCRIPTS:  # (a notation's set: a click shows it in the Character sets tab)
             name = self.ak.html(block)
             text = text.replace(name, u'<a href="%s%s">%s</a>' % (SET_LINK, name, name))

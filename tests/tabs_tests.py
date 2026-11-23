@@ -2,8 +2,11 @@
 """Tests of FreeLab's tab docking (where a dropped tab goes). Valid Python 2.7 and Python 3."""
 from __future__ import absolute_import, division, print_function
 
+import json
 import os
+import shutil
 import sys
+import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -12,6 +15,7 @@ os.environ["FREELAB_NO_AUTOSTART"] = "1"
 import freelab_tabs as ft  # noqa: E402
 
 TAB_WIDTH, BAR_HEIGHT = 100, 24
+unichr_ = chr if sys.version_info[0] > 2 else unichr  # noqa: F821 (Python 2's)
 
 
 class Point(object):
@@ -212,6 +216,15 @@ class HookTests(unittest.TestCase):
             self.assertFalse(presses.eventFilter(bar, Event(4)), "off: left to FontLab")
             self.assertEqual(len(qt.later), 1)
 
+    def test_a_double_click_is_fontlabs_without_reorder(self):
+        frame = Widget(window=True, kind="YFrameWindow")
+        bar = Widget(Widget(frame))
+        with FakeQt() as qt:
+            sys._freelab_tabs_state["options"] = {"reorder": False, "no_undock": True}
+            presses = ft._filter_class()()
+            self.assertFalse(presses.eventFilter(bar, Event(4)), "no_undock alone: FontLab's own double-click")
+            self.assertEqual(qt.later, [])
+
     def test_the_repaint_reaches_the_frame_and_what_it_holds(self):
         frame = Widget(kind="YFrameWindow")
         inner, outside = Widget(Widget(frame)), Widget()
@@ -330,6 +343,41 @@ class FindTests(unittest.TestCase):
         finally:
             ft._bar_of, ft._add_dock_button, ft._filter_class = saved
 
+    def test_no_dock_button_without_reorder(self):
+        hooked, buttons, hidden = [], [], []
+
+        class Bar(object):
+            def __init__(self):
+                self.props = {}
+
+            def property(self, name):
+                return self.props.get(name)
+
+            def setProperty(self, name, value):
+                self.props[name] = value
+
+            def installEventFilter(self, watcher):
+                hooked.append(self)
+
+        bars = {self.tabs: Bar(), self.loose_tabs: Bar()}
+        saved = (ft._bar_of, ft._add_dock_button, ft._filter_class, ft.hide_undock)
+        ft._bar_of = lambda tab_widget: bars[tab_widget]
+        ft._add_dock_button = lambda tab_widget: buttons.append(tab_widget)
+        ft._filter_class = lambda: (lambda parent: ("filter of", parent))
+        ft.hide_undock = lambda: hidden.append(1) or 0
+        self.loose_tabs.findChild = lambda kind, name: None
+        core = type("QtCore", (), {"Qt": type("Qt", (), {"TopRightCorner": 1})})
+        ft._qt = lambda: (core, self.gui)
+        sys._freelab_tabs_state["options"] = {"reorder": False, "no_undock": True}
+        try:
+            self.gui.QToolButton = "QToolButton"
+            ft.watch()
+            self.assertEqual(buttons, [], "no_undock alone: no Dock button")
+            self.assertEqual(len(hooked), 2, "the bars hooked all the same (their presses are followed)")
+            self.assertEqual(hidden, [1], "the Undock commands looked at")
+        finally:
+            ft._bar_of, ft._add_dock_button, ft._filter_class, ft.hide_undock = saved
+
 
 class MergeTests(unittest.TestCase):
     """Docking goes through FontLab's Merge Window, which FontLab enables once it has seen the tab's
@@ -412,6 +460,771 @@ class SettingTests(unittest.TestCase):
     def test_on_unless_switched_off(self):
         self.assertTrue(ft.enabled_setting({}))
         self.assertFalse(ft.enabled_setting({"enabled": False}))
+
+    def test_the_options_default_to_reorder_alone(self):
+        self.assertEqual(ft.options({}), {"reorder": True, "no_undock": False}, "today's behavior")
+        self.assertEqual(ft.options({"enabled": True}), {"reorder": True, "no_undock": False}, "an earlier tabs.json")
+        self.assertEqual(ft.options({"reorder": False, "no_undock": True}), {"reorder": False, "no_undock": True})
+
+    def test_junk_counts_as_the_default(self):
+        for junk in ("yes", 1, 0, None, [], {"a": 1}):
+            self.assertEqual(ft.options({"reorder": junk, "no_undock": junk}), {"reorder": True, "no_undock": False},
+                             repr(junk))
+        self.assertEqual(ft.options(None), {"reorder": True, "no_undock": False})
+        self.assertEqual(ft.options(["not", "a", "dict"]), {"reorder": True, "no_undock": False})
+
+    def test_each_summary_says_what_is_on(self):
+        texts = [ft.summary({"reorder": True, "no_undock": False}), ft.summary({"reorder": True, "no_undock": True}),
+                 ft.summary({"reorder": False, "no_undock": True}), ft.summary({"reorder": True}, on=False),
+                 ft.summary({"reorder": False, "no_undock": False})]
+        self.assertEqual(len(set(texts[:4])), 4)
+        self.assertEqual(texts[3], texts[4], "both options off is off")
+        self.assertIn(u"is off", texts[3])
+        for text in texts:
+            self.assertTrue(text.endswith(u"."), text)
+            self.assertNotIn(u"(s)", text)
+        self.assertIn(u"never undock", texts[2])
+
+
+class Capture(object):
+    """sys.stdout for a test: what print() wrote (unicode or str, as either Python gives it)."""
+
+    def __init__(self):
+        self.parts = []
+
+    def write(self, text):
+        self.parts.append(text)
+
+    def flush(self):
+        pass
+
+    def text(self):
+        return u"".join(part if isinstance(part, type(u"")) else part.decode("ascii") for part in self.parts)
+
+
+class StateCase(unittest.TestCase):
+    """A fresh tab docking state (on), tabs.json in a temporary folder, and fake Qt modules whose single
+    shots are collected in self.later; ft's functions patched for one test with self.patch."""
+
+    def setUp(self):
+        saved = (getattr(sys, "_freelab_tabs_state", None), os.environ.get("FREELAB_STATE_DIR"),
+                 sys.modules.get("freelab_tabs"), sys.stdout)
+        self.folder = tempfile.mkdtemp(prefix="freelab-tabs-")
+        os.environ["FREELAB_STATE_DIR"] = self.folder
+        sys._freelab_tabs_state = {"on": True}
+        sys.modules["freelab_tabs"] = ft  # (what the dispatcher calls)
+
+        def restore():
+            state, folder, module, stdout = saved
+            sys.stdout = stdout
+            if state is None:
+                if hasattr(sys, "_freelab_tabs_state"):
+                    del sys._freelab_tabs_state
+            else:
+                sys._freelab_tabs_state = state
+            if folder is None:
+                os.environ.pop("FREELAB_STATE_DIR", None)
+            else:
+                os.environ["FREELAB_STATE_DIR"] = folder
+            if module is not None:
+                sys.modules["freelab_tabs"] = module
+            shutil.rmtree(self.folder, ignore_errors=True)
+        self.addCleanup(restore)
+        self.later = []
+        later = self.later
+        core = type("QtCore", (), {
+            "QTimer": type("QTimer", (object,), {"singleShot": staticmethod(lambda ms, function: later.append(function))}),
+            "Qt": type("Qt", (), {"TopRightCorner": 1})})
+        gui = type("QtGui", (), {"QAction": "QAction", "QToolButton": "QToolButton"})
+        self.patch("_qt", lambda: (core, gui))
+
+    def patch(self, name, value):
+        original = getattr(ft, name)
+        setattr(ft, name, value)
+        self.addCleanup(setattr, ft, name, original)
+
+    def run_later(self):
+        while self.later:
+            self.later.pop(0)()
+
+    def saved(self):
+        with open(os.path.join(self.folder, "tabs.json")) as handle:
+            return json.load(handle)
+
+    def save(self, data):
+        with open(os.path.join(self.folder, "tabs.json"), "w") as handle:
+            json.dump(data, handle)
+
+    def set_options(self, reorder, no_undock):
+        sys._freelab_tabs_state["options"] = {"reorder": reorder, "no_undock": no_undock}
+
+
+class ConfigureTests(StateCase):
+    """configure() saves the settings and applies them at once: started, stopped, or the options changed
+    while running, without a restart."""
+
+    def setUp(self):
+        StateCase.setUp(self)
+        self.calls = []
+        state = sys._freelab_tabs_state
+
+        def start(chosen=None):
+            self.calls.append(("start", chosen))
+            state["on"] = True
+
+        def stop():
+            self.calls.append(("stop",))
+            state["on"] = False
+        self.patch("start", start)
+        self.patch("stop", stop)
+        self.patch("apply_options", lambda chosen: self.calls.append(("apply", chosen)))
+
+    def test_switching_on_saves_and_starts(self):
+        sys._freelab_tabs_state["on"] = False
+        result = ft.configure(enabled=True, reorder=True, no_undock=True)
+        self.assertEqual(result, {"enabled": True, "reorder": True, "no_undock": True})
+        self.assertEqual(self.saved(), result)
+        self.assertEqual(self.calls, [("start", {"reorder": True, "no_undock": True})])
+
+    def test_while_on_the_options_apply_at_once(self):
+        self.save({"enabled": True, "other": 1})
+        result = ft.configure(no_undock=True)
+        self.assertEqual(result, {"enabled": True, "reorder": True, "no_undock": True, "other": 1}, "the rest kept")
+        self.assertEqual(self.calls, [("apply", {"reorder": True, "no_undock": True})], "no restart")
+
+    def test_both_options_off_is_off(self):
+        result = ft.configure(enabled=True, reorder=False, no_undock=False)
+        self.assertEqual(result, {"enabled": False, "reorder": False, "no_undock": False})
+        self.assertEqual(self.saved(), result)
+        self.assertEqual(self.calls, [("stop",)])
+
+    def test_off_keeps_the_options(self):
+        self.save({"enabled": True, "reorder": False, "no_undock": True})
+        result = ft.configure(enabled=False)
+        self.assertEqual(result, {"enabled": False, "reorder": False, "no_undock": True})
+        self.assertEqual(self.calls, [("stop",)])
+        self.calls[:] = []
+        ft.configure(enabled=False)
+        self.assertEqual(self.calls, [], "off already: nothing to stop")
+
+    def test_startup_reads_the_options(self):
+        sys._freelab_tabs_state["on"] = False
+        self.save({"reorder": False, "no_undock": True})
+        ft.startup()
+        self.assertEqual(self.calls, [("start", {"reorder": False, "no_undock": True})])
+        sys._freelab_tabs_state["on"] = False
+        self.calls[:] = []
+        self.save({"enabled": True, "reorder": False, "no_undock": False})
+        ft.startup()
+        self.assertEqual(self.calls, [], "both options off: not started")
+
+    def test_the_switch_turns_reorder_on_when_both_are_off(self):
+        sys._freelab_tabs_state["on"] = False
+        self.save({"enabled": False, "reorder": False, "no_undock": False})
+        sys.stdout = out = Capture()
+        self.assertTrue(ft.toggle())
+        self.assertEqual(self.calls, [("start", {"reorder": True, "no_undock": False})], "on always does something")
+        self.assertEqual(self.saved(), {"enabled": True, "reorder": True, "no_undock": False})
+        self.assertIn(u"is on", out.text())
+        self.assertFalse(ft.toggle())
+        self.assertEqual(self.calls[-1], ("stop",))
+        self.assertEqual(self.saved(), {"enabled": False, "reorder": True, "no_undock": False}, "the options kept")
+        self.assertIn(u"is off", out.text())
+
+    def test_the_switch_keeps_the_options_chosen(self):
+        sys._freelab_tabs_state["on"] = False
+        self.save({"enabled": False, "reorder": False, "no_undock": True})
+        sys.stdout = out = Capture()
+        ft.toggle()
+        self.assertEqual(self.calls, [("start", {"reorder": False, "no_undock": True})])
+        self.assertIn(u"never undock", out.text())
+
+
+class ApplyTests(StateCase):
+    def setUp(self):
+        StateCase.setUp(self)
+        self.calls = []
+        for name in ("hide_marker", "_remove_dock_buttons", "show_undock"):
+            self.patch(name, (lambda name: lambda: self.calls.append(name))(name))
+        self.patch("watch", lambda force=False: self.calls.append("watch"))
+
+    def test_reorder_off_takes_the_marker_and_the_dock_buttons_away(self):
+        ft.apply_options({"reorder": False, "no_undock": True})
+        self.assertEqual(self.calls, ["hide_marker", "_remove_dock_buttons", "watch"])
+        self.assertEqual(ft._options(), {"reorder": False, "no_undock": True})
+
+    def test_no_undock_off_shows_the_undock_commands(self):
+        ft.apply_options({"reorder": True, "no_undock": False})
+        self.assertEqual(self.calls, ["show_undock", "watch"])
+
+    def test_junk_options_are_the_defaults(self):
+        ft.apply_options({"reorder": "yes"})
+        self.assertEqual(ft._options(), {"reorder": True, "no_undock": False})
+
+
+class Frame(object):
+    def __init__(self, name="", window=False):
+        self.objectName, self.window = name, window
+
+    def isWindow(self):
+        return self.window
+
+
+class Tabs(object):
+    """A document area's tab widget: its pages, in its frame."""
+
+    def __init__(self, frame, pages):
+        self.frame, self.pages = frame, pages
+
+    def parentWidget(self):
+        return self.frame
+
+    def widget(self, index):
+        return self.pages[index]
+
+
+class MainTabs(Bar):
+    """The main window's tab bar and tab widget in one (as near_bar and drop_slot read them)."""
+
+    def __init__(self, pages):
+        Bar.__init__(self, len(pages))
+        self.pages = pages
+
+    def widget(self, index):
+        return self.pages[index]
+
+
+AWAY, NEAR = Point(500, 400), Point(110, 110)  # far below the bar; on it, at the second tab
+
+
+class DragTests(StateCase):
+    """A drag followed from the press to the release, and what is docked (dock() recorded) once FontLab has
+    made its window (holder_of: the pages a window of its own holds)."""
+
+    def setUp(self):
+        StateCase.setUp(self)
+        self.pages = [Page("YSketchBoard"), Page(), Page(), Page()]
+        self.main = MainTabs(self.pages)
+        self.main_area = Tabs(Frame(ft.MAIN_FRAME_NAME), self.pages)
+        self.windows, self.docked, self.markers = {}, [], []
+        self.down, self.at = True, Point(250, 110)
+        self.patch("cursor_pos", lambda: self.at)
+        self.patch("button_down", lambda: self.down)
+        self.patch("drag_distance", lambda: 10)
+        self.patch("main_tabs", lambda: (self.main, self.main))
+        self.patch("show_marker", lambda page, point: self.markers.append(point))
+        self.patch("hide_marker", lambda: None)
+        self.patch("holder_of", lambda page: self.windows.get(page))
+        self.patch("dock", lambda page, target=None: self.docked.append((page, target)) or True)
+        self.patch("refresh_main", lambda: None)
+
+    def drag(self, tabs, index, to, moved=True, made_window=True):
+        """Press tabs' tab at index, move (unless not moved), release at to; FontLab makes the tab a window
+        of its own on the drop (unless not made_window); then what was put off for after the drop runs."""
+        page = tabs.widget(index)
+        self.down, self.at = True, Point(250, 110)
+        ft.on_pressed(tabs, index)
+        if moved:
+            self.at = to
+            ft.poll()
+        self.down, self.at = False, to
+        ft.poll()
+        if made_window:
+            self.windows[page] = Frame(window=True)
+        self.run_later()
+        return page
+
+    def test_reorder_alone_is_as_before(self):
+        self.set_options(True, False)
+        page = self.drag(self.main_area, 2, NEAR)
+        self.assertEqual(self.docked, [(page, 1)], "docked at the marker's place")
+        self.assertEqual(len(self.markers), 1, "the marker shown while dragging")
+        self.docked[:] = []
+        self.drag(self.main_area, 2, AWAY)
+        self.assertEqual(self.docked, [], "released away: a window of its own")
+
+    def test_no_undock_puts_a_main_window_tab_back_where_it_was(self):
+        self.set_options(False, True)
+        page = self.drag(self.main_area, 2, AWAY)
+        self.assertEqual(self.docked, [(page, 2)])
+
+    def test_no_undock_alone_puts_back_even_on_the_bar(self):
+        # (FontLab makes a window of a tab dropped on its own bar: with no_undock alone it goes back, so
+        # tabs do not reorder, as in FontLab)
+        self.set_options(False, True)
+        page = self.drag(self.main_area, 2, NEAR)
+        self.assertEqual(self.docked, [(page, 2)], "its own place, not the marker's")
+        self.assertEqual(self.markers, [], "no marker")
+
+    def test_a_tab_still_in_the_main_window_is_left_alone(self):
+        self.set_options(False, True)
+        self.drag(self.main_area, 2, AWAY, made_window=False)
+        self.assertEqual(self.docked, [], "a click, or FontLab did nothing")
+        self.set_options(True, True)
+        self.drag(self.main_area, 2, AWAY, made_window=False)
+        self.assertEqual(self.docked, [])
+
+    def test_a_short_drag_that_fontlab_made_a_window_of_goes_back(self):
+        self.set_options(False, True)
+        page = self.drag(self.main_area, 1, Point(252, 111), moved=False)
+        self.assertEqual(self.docked, [(page, 1)], "the proof is the window, not the start distance")
+
+    def test_with_both_near_the_bar_docks_at_the_slot_and_away_goes_back(self):
+        self.set_options(True, True)
+        page = self.drag(self.main_area, 2, NEAR)
+        self.assertEqual(self.docked, [(page, 1)])
+        self.docked[:] = []
+        page = self.drag(self.main_area, 3, AWAY)
+        self.assertEqual(self.docked, [(page, 3)])
+
+    def test_a_tab_pressed_in_a_window_of_its_own_is_not_put_back(self):
+        loose = Tabs(Frame(ft.MAIN_FRAME_NAME, window=True), [Page()])  # (a window of its own, whatever its name)
+        self.set_options(False, True)
+        self.drag(loose, 0, AWAY)
+        self.assertEqual(self.docked, [], "undocked already: FontLab's")
+        self.set_options(True, True)
+        page = self.drag(loose, 0, NEAR)
+        self.assertEqual(self.docked, [(page, 1)], "reorder still docks it on the bar")
+
+    def test_put_back_does_nothing_once_no_undock_is_off(self):
+        page = self.pages[2]
+        self.windows[page] = Frame(window=True)
+        self.set_options(True, False)
+        self.assertFalse(ft.put_back(page, 2))
+        self.assertEqual(self.docked, [])
+
+
+class MarkerOptionTests(StateCase):
+    def test_no_marker_without_reorder(self):
+        hidden = []
+        self.patch("hide_marker", lambda: hidden.append(1))
+
+        def no_marker():
+            raise AssertionError("a marker made")
+        self.patch("_marker", no_marker)
+        self.patch("main_tabs", lambda: (Bar(3), Bar(3)))
+        self.set_options(False, True)
+        ft.show_marker(Page(), NEAR)
+        self.assertEqual(hidden, [1])
+
+
+class Action(object):
+    """A QAction of FontLab's main window: its name, whether it is shown, and its setVisible calls."""
+
+    def __init__(self, name, visible=True):
+        self.objectName, self.visible, self.sets, self.deleted = name, visible, [], False
+
+    def isVisible(self):
+        return self.visible
+
+    def setVisible(self, value):
+        self.sets.append(value)
+        self.visible = value
+
+    def metaObject(self):
+        if self.deleted:
+            raise ValueError("destroyed")
+        return type("Meta", (), {"className": lambda _self: "QAction"})()
+
+
+class UndockTests(StateCase):
+    """FontLab's Undock commands are hidden while no_undock is on, hidden again when FontLab shows them,
+    and shown again after, but only the ones FreeLab hid."""
+
+    def setUp(self):
+        StateCase.setUp(self)
+        self.actions = {name: Action(name) for name in ft.UNDOCK_ACTIONS}
+        self.actions["actionUndock_Glyph"].visible = False  # (hidden by FontLab itself: not FreeLab's to show)
+        self.merge = Action(ft.MERGE_WINDOW)
+        self.searches = 0
+        case = self
+
+        class Main(object):
+            def findChildren(self, kind):
+                case.searches += 1
+                return [case.merge] + [a for a in case.actions.values() if not a.deleted]
+
+        self.patch("main_window", lambda: Main())
+        self.patch("document_tab_widgets", lambda: [])
+        self.patch("hide_marker", lambda: None)
+
+    def shown(self):
+        return sorted(name for name, action in self.actions.items() if action.visible)
+
+    def test_hidden_while_on_and_shown_after(self):
+        self.set_options(True, True)
+        self.assertEqual(ft.hide_undock(), 2)
+        self.assertEqual(self.shown(), [])
+        self.assertEqual(sorted(action.objectName for action in sys._freelab_tabs_state["undock_hidden"]),
+                         ["actionUndock_All", "actionUndock_Font"])
+        self.actions["actionUndock_All"].visible = True  # (FontLab shows it again)
+        self.assertTrue(ft.watch())
+        self.assertEqual(self.shown(), [], "hidden again by the next pass")
+        self.assertFalse(ft.watch(), "nothing new")
+        ft.apply_options({"reorder": True, "no_undock": False})
+        self.assertEqual(self.shown(), ["actionUndock_All", "actionUndock_Font"])
+        self.assertEqual(self.actions["actionUndock_Glyph"].sets, [], "FontLab's own hidden one left alone")
+        self.assertEqual(self.merge.sets, [], "Merge Window untouched")
+        ft.watch()
+        self.assertEqual(self.shown(), ["actionUndock_All", "actionUndock_Font"], "not hidden while no_undock is off")
+
+    def test_stopping_shows_them(self):
+        self.set_options(False, True)
+        ft.watch()
+        self.assertEqual(self.shown(), [])
+        ft.stop()
+        self.assertEqual(self.shown(), ["actionUndock_All", "actionUndock_Font"])
+        self.assertEqual(sys._freelab_tabs_state["undock_hidden"], [])
+
+    def test_an_action_fontlab_made_anew_is_not_freelabs_to_show(self):
+        """Codex, 2026-11-23: the hidden commands were remembered by name, so one FontLab deleted and made anew,
+        hidden by FontLab itself, was shown when no_undock went off."""
+        self.set_options(False, True)
+        ft.watch()
+        old = self.actions["actionUndock_All"]
+        old.deleted = True
+        new = self.actions["actionUndock_All"] = Action("actionUndock_All", visible=False)
+        ft.apply_options({"reorder": True, "no_undock": False})
+        self.assertEqual(new.sets, [], "never hidden by FreeLab: left as FontLab has it")
+        self.assertEqual(old.sets, [False], "the deleted one is not touched again")
+        self.assertTrue(self.actions["actionUndock_Font"].visible, "the one FreeLab hid, still there, is shown")
+
+    def test_searched_once_while_they_live(self):
+        ft.undock_actions()
+        ft.undock_actions()
+        self.assertEqual(self.searches, 1, "kept: not every action of the main window wrapped each second")
+        self.actions["actionUndock_Font"].deleted = True
+        self.assertEqual(len(ft.undock_actions()), 2)
+        self.assertEqual(self.searches, 2, "one deleted: searched again")
+
+    def test_none_found_is_searched_again_only_later(self):
+        self.actions.clear()
+        self.assertEqual(ft.undock_actions(), [])
+        self.assertEqual(ft.undock_actions(), [])
+        self.assertEqual(self.searches, 1)
+        sys._freelab_tabs_state["undock_search"] -= ft.EMPTY_WALK_SECONDS + 1
+        ft.undock_actions()
+        self.assertEqual(self.searches, 2)
+
+
+class LateDecisionTests(StateCase):
+    """Codex, 2026-11-23: what was queued or installed before the options changed must not act on the options
+    of before."""
+
+    def calls(self):
+        seen = []
+        self.patch("dock", lambda page, target=None: seen.append(("dock", page, target)) or True)
+        self.patch("put_back", lambda page, index: seen.append(("put back", page, index)) or True)
+        self.patch("refresh_main", lambda: None)
+        return seen
+
+    def test_a_queued_drop_decides_with_the_options_of_now(self):
+        seen = self.calls()
+        self.set_options(True, True)
+        ft.dock_after_drop("page", 1, True, 3)
+        self.assertEqual(seen, [("dock", "page", 1)], "reorder on: at the marker's place")
+        del seen[:]
+        self.set_options(False, True)  # (switched off within the delay)
+        ft.dock_after_drop("page", 1, True, 3)
+        self.assertEqual(seen, [("put back", "page", 3)], "where it was pressed, not the marker's place")
+        del seen[:]
+        ft.dock_after_drop("page", 1, False, 0)
+        self.assertEqual(seen, [], "a tab from a window of its own is left to FontLab")
+        self.set_options(False, False)
+        ft.dock_after_drop("page", 1, True, 3)
+        self.assertEqual(seen, [], "both off: nothing docked")
+
+    def test_a_window_is_not_docked_while_reorder_is_off(self):
+        seen = self.calls()
+        tabs = type("Tabs", (), {"currentWidget": lambda self: "page"})()
+        self.set_options(False, True)
+        ft.dock_frame(tabs)  # (a double-click queued before the switch, or an earlier version's filter)
+        self.assertEqual(seen, [])
+        self.set_options(True, False)
+        ft.dock_frame(tabs)
+        self.assertEqual(seen, [("dock", "page", None)])
+
+    def test_an_earlier_versions_filter_is_taken_off_its_bar(self):
+        """The filter before the options docked on a double-click itself, and stayed on its bar when FreeLab was
+        installed again in the same session."""
+        class Bar(object):
+            def __init__(self):
+                self.removed = []
+
+            def removeEventFilter(self, watcher):
+                self.removed.append(watcher)
+
+        class Old(object):
+            def __init__(self, bar):
+                self.bar = bar
+
+            def eventFilter(self, obj, event):
+                return True
+
+            def parent(self):
+                return self.bar
+
+        class New(Old):
+            pass
+
+        bar, other = Bar(), Bar()
+        old, elsewhere, new = Old(bar), Old(other), New(bar)
+        state = sys._freelab_tabs_state
+        state["held"] = [old, elsewhere, new, "a slot", lambda: None]
+        state[ft.FILTER_CLASS_KEY] = New
+        ft._drop_old_filters(bar)
+        self.assertEqual(bar.removed, [old], "the old one on this bar; this version's stays")
+        self.assertEqual(other.removed, [])
+        self.assertIn(old, state["held"], "still held: Qt deletes it with its bar")
+        self.assertNotEqual(ft.FILTER_REVISION, 2, "a bar hooked by the version before is hooked again")
+        self.assertNotEqual(ft.FILTER_CLASS_KEY, "filter_class_v2")
+
+
+class SettingsScriptTests(unittest.TestCase):
+    """windows/freelab_tabs_settings.py: Scripts > FreeLab > Tab Docking Settings."""
+
+    def setUp(self):
+        saved = (getattr(sys, "_freelab_tabs_state", None), sys.modules.get("freelab_tabs"),
+                 os.environ.get("FREELAB_NO_AUTOSTART"))
+
+        def restore():
+            state, module, autostart = saved
+            if state is None:
+                if hasattr(sys, "_freelab_tabs_state"):
+                    del sys._freelab_tabs_state
+            else:
+                sys._freelab_tabs_state = state
+            sys.modules["freelab_tabs"] = module
+            if autostart is None:
+                os.environ.pop("FREELAB_NO_AUTOSTART", None)
+            else:
+                os.environ["FREELAB_NO_AUTOSTART"] = autostart
+        self.addCleanup(restore)
+        os.environ["FREELAB_NO_AUTOSTART"] = "1"
+        import freelab_tabs_settings as settings
+        self.settings = settings
+
+    def test_the_running_module_is_used(self):
+        sys._freelab_tabs_state = {"on": True, "module": ft}
+        sys.modules.pop("freelab_tabs", None)
+        self.assertIs(self.settings.tabs_module(), ft)
+
+    def test_the_module_beside_it_is_loaded_without_starting(self):
+        for autostart in (None, "1"):
+            if hasattr(sys, "_freelab_tabs_state"):
+                del sys._freelab_tabs_state
+            sys.modules.pop("freelab_tabs", None)
+            if autostart is None:
+                os.environ.pop("FREELAB_NO_AUTOSTART", None)
+            else:
+                os.environ["FREELAB_NO_AUTOSTART"] = autostart
+            module = self.settings.tabs_module()
+            self.assertIsNot(module, ft)
+            self.assertTrue(hasattr(module, "configure"))
+            self.assertIs(sys.modules.get("freelab_tabs"), module)
+            self.assertFalse((getattr(sys, "_freelab_tabs_state", None) or {}).get("on"), "not started")
+            self.assertEqual(os.environ.get("FREELAB_NO_AUTOSTART"), autostart, "the environment as it was")
+
+    def test_an_earlier_running_version_is_not_used(self):
+        sys._freelab_tabs_state = {"on": True, "module": type("Old", (), {})()}  # (no configure)
+        sys.modules.pop("freelab_tabs", None)
+        self.assertTrue(hasattr(self.settings.tabs_module(), "configure"))
+
+    def test_the_texts(self):
+        s = self.settings
+        for text in (s.REORDER, s.NO_UNDOCK, s.REORDER_TIP, s.NO_UNDOCK_TIP, s.OFF_NOTE):
+            self.assertTrue(text.endswith(u"."), text)
+            self.assertFalse(set(text) & set([unichr_(0xb7), unichr_(0x2014)]), "no interpuncts or em dashes")
+        self.assertIn(u"window of its own", s.REORDER_TIP)
+        self.assertIn(u"Window > Docking", s.NO_UNDOCK_TIP)
+
+
+class _Control(object):
+    """A dialog control: whatever it is asked to do, it does nothing, but its text, tooltip, and check."""
+    made = []
+
+    def __init__(self, *args):
+        self.text = args[0] if args and isinstance(args[0], (type(u""), str)) else None
+        self.checked, self.tip = False, None
+        _Control.made.append(self)
+
+    def __getattr__(self, name):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        return lambda *args: None
+
+    def setChecked(self, value):
+        self.checked = bool(value)
+
+    def isChecked(self):
+        return self.checked
+
+    def setToolTip(self, text):
+        self.tip = text
+
+
+class _Box(_Control):
+    pass
+
+
+class _Dialog(_Control):
+    made = []
+    run = [lambda dialog: 0]  # what exec_ does (a test sets it)
+
+    def __init__(self, parent=None):
+        _Control.__init__(self)
+        self.parent_, self.deleted, self.props, self.title = parent, 0, {}, None
+        _Dialog.made.append(self)
+
+    def setWindowTitle(self, title):
+        self.title = title
+
+    def setProperty(self, name, value):
+        self.props[name] = value
+
+    def windowFlags(self):
+        return 0
+
+    def exec_(self):
+        return _Dialog.run[0](self)
+
+    def deleteLater(self):
+        self.deleted += 1
+
+
+class FakeTabs(object):
+    """Tab docking as the settings dialog uses it: the saved settings, whether it runs, configure() noted."""
+    options = staticmethod(ft.options)
+    summary = staticmethod(ft.summary)
+
+    def __init__(self, saved, on=True):
+        self.saved, self.on, self.configured = saved, on, []
+
+    def load_settings(self):
+        return dict(self.saved)
+
+    def is_on(self):
+        return self.on
+
+    def configure(self, **values):
+        self.configured.append(values)
+        return {"enabled": values["enabled"], "reorder": values["reorder"], "no_undock": values["no_undock"]}
+
+
+class SettingsDialogTests(unittest.TestCase):
+    """The dialog shows the saved options, OK configures tab docking with the boxes' choice, Cancel changes
+    nothing; it has FontLab's main window as its parent and Qt deletes it once (as dark mode's settings)."""
+
+    def setUp(self):
+        import qtfakes
+        qtfakes.install()
+        self.qtfakes = qtfakes
+        saved = (os.environ.get("FREELAB_NO_AUTOSTART"), sys.stdout)
+        os.environ["FREELAB_NO_AUTOSTART"] = "1"
+        import freelab_tabs_settings as settings
+        self.settings = settings
+        original = settings.tabs_module
+        gui = sys.modules["PythonQt.QtGui"]
+        self.main = qtfakes.FakeWidget("QMainWindow", name="MainWindow")
+        gui.QApplication = type("App", (), {"topLevelWidgets": staticmethod(lambda: [self.main])})
+        for name in ("QVBoxLayout", "QHBoxLayout", "QPushButton", "QLabel"):
+            setattr(gui, name, _Control)
+        gui.QCheckBox, gui.QDialog = _Box, _Dialog
+        sys.modules["PythonQt.QtCore"].Qt.WindowFlags = staticmethod(int)
+        sys.modules["PythonQt.QtCore"].Qt.WindowContextHelpButtonHint = 0x00010000
+        _Dialog.made, _Control.made = [], []
+        del qtfakes.QTimer.single_shots[:]
+        sys.stdout = self.out = Capture()
+
+        def restore():
+            settings.tabs_module = original
+            _Dialog.run[0] = lambda dialog: 0
+            autostart, sys.stdout = saved
+            if autostart is None:
+                os.environ.pop("FREELAB_NO_AUTOSTART", None)
+            else:
+                os.environ["FREELAB_NO_AUTOSTART"] = autostart
+            if hasattr(sys, "_freelab_tabs_settings_held"):
+                del sys._freelab_tabs_settings_held
+            qtfakes.uninstall()
+        self.addCleanup(restore)
+
+    def show(self, tabs, run):
+        _Dialog.run[0] = run
+        self.settings.tabs_module = lambda: tabs
+        return self.settings.show_dialog()
+
+    def boxes(self):
+        return [c for c in _Control.made if isinstance(c, _Box)]
+
+    def labels(self):
+        return [c.text for c in _Control.made if type(c) is _Control and c.text]
+
+    def freed_once(self, dialog):
+        self.assertIn(dialog, self.settings.held_dialogs(), "held until Qt deletes it")
+        for _ms, callback in list(self.qtfakes.QTimer.single_shots):
+            callback()
+        self.assertEqual(dialog.deleted, 1)
+        self.assertNotIn(dialog, self.settings.held_dialogs())
+
+    def test_ok_saves_what_the_boxes_say(self):
+        tabs = FakeTabs({"enabled": True, "reorder": True, "no_undock": False})
+        seen = {}
+
+        def run(dialog):
+            reorder, no_undock = self.boxes()
+            seen["shown"] = (reorder.checked, no_undock.checked)
+            seen["texts"] = (reorder.text, no_undock.text)
+            seen["tips"] = (reorder.tip, no_undock.tip)
+            no_undock.setChecked(True)
+            return 1
+        result = self.show(tabs, run)
+        self.assertEqual(seen["shown"], (True, False), "the saved options")
+        self.assertEqual(seen["texts"], (self.settings.REORDER, self.settings.NO_UNDOCK))
+        self.assertEqual(seen["tips"], (self.settings.REORDER_TIP, self.settings.NO_UNDOCK_TIP))
+        self.assertEqual(tabs.configured, [{"enabled": True, "reorder": True, "no_undock": True}])
+        self.assertEqual(result, {"enabled": True, "reorder": True, "no_undock": True})
+        self.assertNotIn(self.settings.OFF_NOTE, self.labels(), "running: no note")
+        self.assertIn(u"is on", self.out.text())
+        dialog = _Dialog.made[-1]
+        self.assertIs(dialog.parent_, self.main)
+        self.assertEqual(dialog.title, "FreeLab Tab Docking")
+        self.assertIs(dialog.props.get("mcpScriptWindow"), True)
+        self.freed_once(dialog)
+
+    def test_both_unticked_is_off(self):
+        tabs = FakeTabs({"enabled": True, "reorder": True, "no_undock": True})
+
+        def run(dialog):
+            for box in self.boxes():
+                box.setChecked(False)
+            return 1
+        self.show(tabs, run)
+        self.assertEqual(tabs.configured, [{"enabled": False, "reorder": False, "no_undock": False}])
+        self.assertIn(u"is off", self.out.text())
+
+    def test_cancel_changes_nothing(self):
+        tabs = FakeTabs({"enabled": True})
+
+        def run(dialog):
+            self.boxes()[1].setChecked(True)
+            return 0
+        self.assertIsNone(self.show(tabs, run))
+        self.assertEqual(tabs.configured, [])
+        self.assertEqual(self.out.text(), u"")
+        self.freed_once(_Dialog.made[-1])
+
+    def test_off_says_so(self):
+        tabs = FakeTabs({"enabled": False, "reorder": False, "no_undock": True}, on=False)
+        seen = {}
+
+        def run(dialog):
+            seen["shown"] = tuple(box.checked for box in self.boxes())
+            return 1
+        self.show(tabs, run)
+        self.assertEqual(seen["shown"], (False, True), "the saved options, though off")
+        self.assertIn(self.settings.OFF_NOTE, self.labels())
+        self.assertEqual(tabs.configured, [{"enabled": True, "reorder": False, "no_undock": True}], "OK switches it on")
 
 
 if __name__ == "__main__":

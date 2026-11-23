@@ -3063,10 +3063,13 @@ def lighter_name(name, factor):
     return u"#" + u"".join(u"%02x" % min(255, int(round(c * factor / 100.0))) for c in channels)
 
 
-def separator_sheet(color_name):
-    """The stylesheet a dark menu's separators are drawn with: a line of the given color. (Only that:
+def separator_sheet(color_name, gutter=None):
+    """The stylesheet a dark menu's separators are drawn with: a line of the given color, starting at the line
+    beside the menu's ticks. (Only that:
     any rule more, a check mark's, made Qt draw the whole menu by the stylesheet, out of Fusion's look.)"""
-    return u"QMenu::separator { height: 1px; background: %s; margin: 4px 8px; }" % color_name
+    # (from the line beside the ticks to the right edge, as FontLab's light look has them: _menu_gutter)
+    return u"QMenu::separator { height: 1px; background: %s; margin: 4px 8px 4px %dpx; }" % (
+        color_name, MENU_GUTTER if gutter is None else gutter)
 
 
 def _lighten_separators(menu):
@@ -3077,7 +3080,9 @@ def _lighten_separators(menu):
     palette = _prop(menu, "palette")
     window = palette.color(_gui("QPalette").Window).name()
     # (a check mark drawn by an indicator rule here made Qt draw the whole menu by the stylesheet: no)
-    sheet = separator_sheet(lighter_name(window, SEPARATOR_LIGHTER))
+    # (the separators start where this menu's line beside the ticks is drawn, at its own scale: Codex,
+    # 2026-11-23, a fixed 23 px against a line drawn at 34 on a display at 150 %)
+    sheet = separator_sheet(lighter_name(window, SEPARATOR_LIGHTER), _gutter_offset(menu))
     menu.setProperty(SEPARATOR_PROP, sheet)
     menu.setStyleSheet(sheet)
 
@@ -3409,10 +3414,24 @@ def _framed_style(fusion):
         QStyle, QColor, QRectF, QPainter = _gui("QStyle"), _qt()[2], _core("QRectF"), _gui("QPainter")
         antialiasing, no_brush = QPainter.Antialiasing, _gui("QBrush")()  # an empty brush fills nothing
         check, radio = int(QStyle.PE_IndicatorCheckBox), int(QStyle.PE_IndicatorRadioButton)
+        panel_menu = int(getattr(QStyle, "PE_PanelMenu", -1))
         window_role = _gui("QPalette").Window
+
+        def dark(option):
+            window = option.palette.color(window_role)
+            return _lightness(window.red(), window.green(), window.blue()) < INDICATOR_FRAME_DARK_BELOW
 
         class FreeLabStyle(QProxyStyle):
             def drawPrimitive(self, element, option, painter, widget=None):
+                which = -2
+                try:
+                    which = int(element)
+                    # A menu's tick, as FontLab's light look has it (the owner, November 23): the mark alone, in
+                    # the text's color, and nothing for an entry not ticked. Fusion's own is a filled box.
+                    if which == check and _in_menu(widget) and dark(option) and _menu_tick(option, painter, widget):
+                        return
+                except Exception as exc:  # (drawn as the style draws it, below)
+                    _note_error("style", exc)
                 try:
                     QProxyStyle.drawPrimitive(self, element, option, painter, widget)
                 except ValueError:
@@ -3423,13 +3442,15 @@ def _framed_style(fusion):
                     except Exception:
                         return
                 try:
-                    which = int(element)
+                    if which == panel_menu and which >= 0:
+                        if _in_menu(widget) and dark(option):
+                            _menu_gutter(option, painter, widget)
+                        return
                     if which != check and which != radio:
                         return
                     if _sheet_styles_indicators(widget):
                         return  # FontLab's own images (blue boxes): a frame would show at their rounded corners
-                    window = option.palette.color(window_role)
-                    if _lightness(window.red(), window.green(), window.blue()) >= INDICATOR_FRAME_DARK_BELOW:
+                    if not dark(option):
                         return
                     painter.save()
                     try:
@@ -3437,7 +3458,14 @@ def _framed_style(fusion):
                         painter.setBrush(no_brush)
                         painter.setPen(QColor(INDICATOR_BORDER.get(_state().get("shade", "dark"), INDICATOR_BORDER["dark"])))
                         box = QRectF(option.rect).adjusted(0.5, 0.5, -1.5, -1.5)
-                        if which == check:
+                        if which == check and _in_menu(widget):
+                            # A menu's tick whose entry could not be read (_menu_tick): Fusion's box, whose own
+                            # outline, a dark one a pixel wider and taller than this frame and square at its
+                            # corners, showed around it on the highlighted row (the review of November 23,
+                            # image 13). Drawn right over it, corners included (on half pixels, so each side is
+                            # one whole pixel).
+                            painter.drawRect(QRectF(option.rect).adjusted(0.5, 0.5, -0.5, -0.5))
+                        elif which == check:
                             painter.drawRoundedRect(box, 1.5, 1.5)
                         else:
                             painter.drawEllipse(box)
@@ -3450,6 +3478,71 @@ def _framed_style(fusion):
     style = cls(fusion)
     state.setdefault("styles", []).append(style)  # Qt owns it once set; PythonQt would delete it if unreferenced
     return style
+
+
+MENU_TICK = ((0.20, 0.52), (0.42, 0.74), (0.82, 0.26))  # a menu's tick across its box: down to the corner, up to the end
+MENU_TICK_WIDTH = 1.4  # pixels: the tick's stroke
+MENU_GUTTER = 23  # pixels at 96 dpi from a menu's left edge to the line beside its ticks and icons (Fusion's text: 27)
+
+
+def _menu_tick(option, painter, widget):
+    """A menu entry's tick drawn as FontLab's light look draws it, the mark alone: in the text's color when the
+    entry is ticked, nothing when it is not. The entry is the one under the box (PythonQt cannot read the
+    option's own state). False when the entry cannot be read: the style then draws its box."""
+    action = widget.actionAt(option.rect.center())
+    if action is None:
+        return False
+    if not action.isChecked():
+        return True
+    QPointF, QPen, QPainter, QPalette = _core("QPointF"), _gui("QPen"), _gui("QPainter"), _gui("QPalette")
+    rect = option.rect
+    x, y, w, h = rect.x(), rect.y(), rect.width(), rect.height()
+    points = [QPointF(x + fx * w, y + fy * h) for fx, fy in MENU_TICK]
+    painter.save()
+    try:
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        pen = QPen(option.palette.color(QPalette.WindowText))
+        pen.setWidthF(MENU_TICK_WIDTH)
+        painter.setPen(pen)
+        painter.drawLine(points[0], points[1])
+        painter.drawLine(points[1], points[2])
+    finally:
+        painter.restore()
+    return True
+
+
+def _gutter_offset(menu):
+    """How far in from a menu's left edge the line beside its ticks is, in pixels: MENU_GUTTER at the menu's
+    own scale (its logical dots per inch over 96), the one figure the line and the separators' start share."""
+    try:
+        scale = float(menu.logicalDpiX()) / 96.0
+    except Exception:
+        scale = 1.0
+    return int(MENU_GUTTER * max(1.0, scale))
+
+
+def _menu_gutter(option, painter, widget):
+    """The line beside a menu's ticks and icons, which FontLab's light look has and Fusion does not (the owner,
+    November 23): drawn over the menu's panel, before its entries, in the color of dark mode's menu separators.
+    A highlighted entry covers it, as it covers the panel."""
+    QPalette, QColor, QPointF = _gui("QPalette"), _qt()[2], _core("QPointF")
+    rect = option.rect
+    x = rect.x() + _gutter_offset(widget) + 0.5
+    window = option.palette.color(QPalette.Window).name()
+    painter.save()
+    try:
+        painter.setPen(QColor(lighter_name(window, SEPARATOR_LIGHTER)))
+        painter.drawLine(QPointF(x, rect.y() + 3), QPointF(x, rect.y() + rect.height() - 4))
+    finally:
+        painter.restore()
+
+
+def _in_menu(widget):
+    """True when a primitive is drawn for a menu (the widget Qt hands the style is the QMenu). Never raises."""
+    try:
+        return widget is not None and bool(widget.inherits("QMenu"))
+    except Exception:
+        return False
 
 
 def _sheet_styles_indicators(widget, depth=8):

@@ -3394,7 +3394,7 @@ punctuation mark's) repeated within the look back set takes its next alternate (
 repeated glyphs vary as handwriting does (<i>ll</i>, <i>1001</i>, <i>...</i>, <i>!!</i>). The nearest earlier
 form decides; each looks back among its own kind, so a space, or punctuation between letters, ends the
 look back. Ligatures come first: where liga makes l_l of <i>ll</i>, the alternates take turns around
-it. Ticked glyphs take turns: <i>Tick all</i>, <i>Tick none</i>, and <i>Tick often doubled</i>, in the bottom
+it. Ticked glyphs take turns: <i>Tick all</i>, <i>Untick all</i>, and <i>Tick often doubled</i>, in the bottom
 row, tick them at once.<br><br>
 <b>Forms</b> (the second tab): one row per feature, its substitutions under it (click its arrow):
 case (.case), locl (Romanian and Moldavian <i>S</i> and <i>T</i> with a comma below, Catalan
@@ -3433,14 +3433,15 @@ right, <i>Compile after writing</i>, <i>Write the code</i> beside it, the tab's 
 Click this help's <i>?</i> button, then any control, for what it does."""
 
 TABS = (u"Ligatures and alternates", u"Forms", u"Stylistic alternates")
+ALTERNATES_TAB = 2  # the third tab's index (its page is the tab's own module: freelab_alternates.py)
 # The part under the tabs: "Code preview", not "Code" (owner's image 299: people must see that the code
 # shown is not in the font yet, and that Write the code writes it)
 CODE_HEADING = u"Code preview"
 # The buttons that tick the glyphs taking turns, in the window's bottom row while the first tab is shown, in
-# the suite's order (Tick all, Tick none, then the tool's own): (key, label, what it does)
+# the suite's order (Tick all, Untick all, then the tool's own): (key, label, what it does)
 TURN_CHECKS = (("all", u"Tick all", u"Ticks every glyph of <i>Alternates that take turns</i> whose alternates have no "
                                     u"other job in the font's code."),
-               ("none", u"Tick none", u"Unticks every glyph of <i>Alternates that take turns</i>: none takes turns."),
+               ("none", u"Untick all", u"Unticks every glyph of <i>Alternates that take turns</i>: none takes turns."),
                ("often", u"Tick often doubled", u"Ticks the glyphs of <i>Alternates that take turns</i> that often "
                                                 u"stand doubled in text (ll, ee, ss, tt; 00 and 99; marks doubled by "
                                                 u"convention, such as ..., !!, and --), and only them: those whose "
@@ -3737,14 +3738,14 @@ class FeatureCodeDialog(object):
         # The turns' part is made first and the ligatures' put above it: Qt lists a window's widgets in the
         # order they were made, and the shared module grays a Tick button whose first list shown has no
         # check box (update_states). The ligatures' list has none: listed first, it grayed the bottom row's
-        # Tick all, Tick none, and Tick often doubled on the first tab.
+        # Tick all, Untick all, and Tick often doubled on the first tab.
         part = self.part(QtGui, 1, self.lists)
         turns = (u"The glyphs with alternates (named X.2, X.alt1, or X.calt1: a letter's, a figure's, or a "
                  u"punctuation mark's), and their cycle: the forms they take in turn. Ticked glyphs take turns. Those "
                  u"that often stand doubled in text (ll, ee, ss, tt, 00, and 99: counted in the text of 24 languages, "
                  u"and in kana, Armenian, and Georgian text; and the marks doubled by convention: ..., !!, ??, --, "
                  u"and '') come first; where the font has more glyphs with alternates than rules by glyph can serve, "
-                 u"only those start ticked. <i>Tick all</i>, <i>Tick none</i>, and <i>Tick often doubled</i>, in the "
+                 u"only those start ticked. <i>Tick all</i>, <i>Untick all</i>, and <i>Tick often doubled</i>, in the "
                  u"bottom row, tick them at once.")
         # (a line over the heading: it read as a caption of the list above, owner's image 234)
         part.addWidget(self.ak.separator())
@@ -3945,8 +3946,8 @@ class FeatureCodeDialog(object):
 
     def bottom_row(self, QtGui):
         """The window's bottom row, as every tool's (owner's images 258, 260, 264): at the left the buttons
-        that tick the shown tab's list (the turns' Tick all, Tick none, and Tick often doubled; the third
-        tab's Tick all and Tick none), then Restore suggestions; at the right Compile after writing, Write
+        that tick the shown tab's list (the turns' Tick all, Untick all, and Tick often doubled; the third
+        tab's Tick all and Untick all), then Restore suggestions; at the right Compile after writing, Write
         the code (or Update the code) right beside it (the tick is about that button: owner's image 298),
         then the shown tab's builds (Build ticked figure forms; Make copies to redraw and Build N variants),
         and Close. Every tab's buttons are in it, those of the tab shown visible (show_tab_buttons): no
@@ -3993,9 +3994,36 @@ class FeatureCodeDialog(object):
                 except Exception:
                     pass
 
+    QUIET_HANDLE = 1  # pixels: a splitter's handle this thin draws no dots (Fusion), and Qt still takes drags 5 wide
+
+    def quiet_handle(self, quiet):
+        """The handle between the tabs and the code drawn as nothing while the third tab is shown, still
+        dragged where it was (the pointer shows it): under that tab's two previews, the dotted handle met
+        the line between them (the review of November 23, image 11). The handle is made one pixel thin,
+        which Fusion draws no dots for, and Qt then takes drags on five pixels around it; given its own
+        width back with another tab, and the shape Qt cut it to for the thin one taken off (Qt leaves that
+        mask on a handle made wide again: only a sliver of it would draw and take the mouse). Never raises."""
+        try:
+            if getattr(self, "handle_width", None) is None:
+                width = getattr(self.splitter, "handleWidth", None)
+                self.handle_width = int(width() if callable(width) else width)
+            wanted = self.QUIET_HANDLE if quiet else self.handle_width
+            now = getattr(self.splitter, "handleWidth", None)
+            if int(now() if callable(now) else now) == wanted:
+                return
+            self.splitter.setHandleWidth(wanted)
+            if not quiet:
+                for index in range(1, self.splitter.count()):
+                    handle = self.splitter.handle(index)
+                    handle.clearMask()
+                    handle.setContentsMargins(0, 0, 0, 0)
+        except Exception:
+            pass
+
     def switch_page(self, index):
         self.pages.setCurrentIndex(index)
         self.show_tab_buttons(index)
+        self.quiet_handle(self.alternates is not None and index == ALTERNATES_TAB)
         share = getattr(self.ak, "share_splitters", None)
         if share is not None:
             share(self.dialog)  # (a tab hidden at first show: its splitters sized in their shares as it shows)

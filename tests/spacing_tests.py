@@ -600,7 +600,7 @@ class ChoiceAndCheckTests(unittest.TestCase):
         # (Tick, not Check, for check boxes: owner's image 261)
         self.assertEqual(logged, [u"<i>Tick all</i> ticked <b>2 glyphs</b>."])
         dialog.check_all(False)
-        self.assertEqual(logged[-1], u"<i>Tick none</i> unticked <b>3 glyphs</b>.")
+        self.assertEqual(logged[-1], u"<i>Untick all</i> unticked <b>3 glyphs</b>.")
         self.assertEqual([item.state for item in items], [0, 0, 0])
         self.assertIn(u"layout = self.ak.window_layout(dialog)", self.source(), "its window scrolls on a small screen")
 

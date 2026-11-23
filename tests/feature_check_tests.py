@@ -693,7 +693,7 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(dialog.font_label.text, "<b>Fake Sans</b> (<b>%s glyphs</b>)." % fc.grouped(len(ORDER) * 800))
         self.assertIn(",", dialog.font_label.text, "thousands grouped")
         self.assertEqual(dialog.check_all.text, "Tick all")
-        self.assertEqual(dialog.check_none.text, "Tick none")
+        self.assertEqual(dialog.check_none.text, "Untick all")
         self.assertEqual(dialog.apply_button.text, "Apply ticked fixes")
         self.assertTrue(dialog.compile_button.enabled, "a font with code: something to compile")
         self.assertFalse(dialog.apply_button.enabled, "nothing ticked")
@@ -760,6 +760,15 @@ class DialogTests(unittest.TestCase):
         dialog.compile_in_fontlab()
         self.assertEqual((len(started), ended[-1], dialog.busy), (2, False, False))
         self.assertIn("Not compiled", self.said[-1][1])
+
+
+class ModuleNameTests(unittest.TestCase):
+    """This file's literals are unicode in Python 2 (unicode_literals): a module loaded under such a name put a
+    unicode key in sys.modules, found on 2026-11-23 beside a FontLab session whose Scripts menu ran no script."""
+
+    def test_the_modules_it_loads_are_named_with_plain_strings(self):
+        for name in ('AUTO_KERNING_MODULE', 'FEATURE_CODE_MODULE'):
+            self.assertIs(type(getattr(fc, name)), str, name)
 
 
 if __name__ == "__main__":

@@ -24,7 +24,9 @@ import os
 import re
 import sys
 
-AUTO_KERNING_FILE, AUTO_KERNING_MODULE = "freelab_auto_kerning.py", "freelab_auto_kerning"
+# (module names as str: this file's literals are unicode in Python 2, and a unicode key in sys.modules is one
+# FontLab's own code never puts there; found beside a session whose Scripts menu stopped running scripts)
+AUTO_KERNING_FILE, AUTO_KERNING_MODULE = "freelab_auto_kerning.py", str("freelab_auto_kerning")
 SETTINGS_FILE = "feature_check.json"
 LAYOUT_TABLES = ("GSUB", "GPOS")
 BUILT_TABLES = ("GDEF", "GPOS", "GSUB", "name", "BASE")  # what the checks build (not head, OS/2, hhea, vhea)
@@ -1929,7 +1931,7 @@ def change_refusal(package, new_texts, new_prefix=None, glyph_order=None):
 # The window (FontLab, Qt)
 # ---------------------------------------------------------------------------
 
-FEATURE_CODE_FILE, FEATURE_CODE_MODULE = "freelab_feature_code.py", "freelab_feature_code"
+FEATURE_CODE_FILE, FEATURE_CODE_MODULE = "freelab_feature_code.py", str("freelab_feature_code")
 COLUMNS = ("Finding", "Where", "Fix")
 SAFE_NOTE = "changes nothing in the compiled font"
 UNSAFE_NOTE = "changes the compiled font: review it"
@@ -2170,7 +2172,7 @@ class FeatureCheckDialog(object):
         buttons = QtGui.QHBoxLayout()
         self.check_all = QtGui.QPushButton("Tick all")
         self.check_all.setWhatsThis("Ticks every fix in the list.")
-        self.check_none = QtGui.QPushButton("Tick none")
+        self.check_none = QtGui.QPushButton("Untick all")
         self.check_none.setWhatsThis("Unticks every fix in the list.")
         self.compile_button = QtGui.QPushButton("Compile in FontLab")
         self.compile_button.setWhatsThis("Compiles the font's features with FontLab's own compiler (Adobe's), as the "
@@ -2395,7 +2397,7 @@ class FeatureCheckDialog(object):
 
     def check_every(self, on):
         rows = [item for item in self.rows() if (self.finding_of(item) or Finding("build", "")).fix is not None]
-        self.ak.check_rows(rows, bool(on), self.log, "Tick all" if on else "Tick none", "fix", "fixes",
+        self.ak.check_rows(rows, bool(on), self.log, "Tick all" if on else "Untick all", "fix", "fixes",
                            ("in a closed group", "in closed groups"))
         self.update_buttons()
 

@@ -50,6 +50,7 @@ $files = @(
     @{ From = 'darkmode\freelab_dark_mode.py'; Name = 'freelab_dark_mode.py' },
     @{ From = 'darkmode\freelab_dark_mode_settings.py'; Name = 'freelab_dark_mode_settings.py' },
     @{ From = 'windows\freelab_tabs.py'; Name = 'freelab_tabs.py' },
+    @{ From = 'windows\freelab_tabs_settings.py'; Name = 'freelab_tabs_settings.py' },
     @{ From = 'kerning\freelab_auto_kerning.py'; Name = 'freelab_auto_kerning.py' },
     @{ From = 'kerning\freelab_kerning_check.py'; Name = 'freelab_kerning_check.py' },
     @{ From = 'checks\freelab_font_check.py'; Name = 'freelab_font_check.py' },

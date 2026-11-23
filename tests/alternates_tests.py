@@ -693,7 +693,7 @@ class PageTests(unittest.TestCase):
         row = self.row(page, u"u")
         self.assertEqual(row.icons, {1: ("picture", u"u"), 3: ("picture", u"u.01", u"u.02")})
         self.assertEqual(self.row(page, u"a").icons, {1: ("picture", u"a")}, "no alternate: no picture of one")
-        self.assertEqual((page.all_button.text, page.none_button.text), (u"Tick all", u"Tick none"))
+        self.assertEqual((page.all_button.text, page.none_button.text), (u"Tick all", u"Untick all"))
         self.assertTrue(page.all_button.enabled)
         self.assertFalse(page.none_button.enabled, "nothing checked: nothing to uncheck")
         suggested = len(page.group_rows(fa.SUGGESTIONS_KEY))
@@ -709,7 +709,7 @@ class PageTests(unittest.TestCase):
         self.assertTrue(page.all_button.enabled and page.none_button.enabled)
         page.none_button.slots["clicked()"][0]()
         self.assertEqual(page.checked_glyphs(), [])
-        self.assertEqual(owner.logged[-1][1], u"<i>Tick none</i> unticked <b>%d glyphs</b>." % (suggested - 1))
+        self.assertEqual(owner.logged[-1][1], u"<i>Untick all</i> unticked <b>%d glyphs</b>." % (suggested - 1))
         self.assertFalse(page.copy_button.enabled)
         owner.busy = True
         page.check_all(True)
@@ -720,12 +720,17 @@ class PageTests(unittest.TestCase):
         the button says what its copies are for, and each part says that neither is a step of the other."""
         page, owner = self.page()
         self.assertEqual(page.copy_button.text, u"Make copies to redraw")
-        self.assertIn(u"To draw an alternate by hand, tick a glyph, then click <i>Make copies to redraw</i>",
+        self.assertIn(u"To draw one by hand, tick a glyph, then click <i>Make copies to redraw</i>",
                       page.note.text)
-        self.assertIn(u"<i>Selected glyphs</i>: the glyphs <i>Variants that take turns</i> builds, as its "
-                      u"<i>Glyphs</i> dropdown picks them, another job, which needs no such copy.", page.note.text)
+        self.assertIn(u"<i>Selected glyphs</i>: the glyphs <i>Variants that take turns</i> builds (picked by its "
+                      u"<i>Glyphs</i> dropdown), with no such copy.", page.note.text)
         # (a count bold with its noun; a number whose noun is outside, bold alone: owner's image 301)
-        self.assertIn(u"(of <b>412 open-licensed families</b>, <b>128</b> have alternates)", page.note.text)
+        self.assertIn(u"(counted in <b>128</b> of <b>412 open-licensed families</b>)", page.note.text)
+        # The review of November 23, image 7: the note ran to a third line for its last word at the window's
+        # first size, where two lines held 400 characters
+        plain = re.sub(u"<[^>]+>", u"", page.note.text)
+        self.assertLessEqual(len(plain), fa.LIST_NOTE_MOST)
+        self.assertLess(fa.LIST_NOTE_MOST, 400 - 20, "room to spare: the lines break at words")
         for glyph in (u"a", u"l"):
             self.row(page, glyph).setCheckState(0, ft.CHECKED)
         page.make_copies()
@@ -1033,7 +1038,7 @@ class PageTests(unittest.TestCase):
         self.assertEqual(Owner.headings, [u"Glyphs for alternates", u"Variants that take turns"])
         self.assertIs(page.widget, page.parts, "the tab is its splitter")
         left, right = page.bottom_buttons()
-        self.assertEqual([button.text for button in left], [u"Tick all", u"Tick none"])
+        self.assertEqual([button.text for button in left], [u"Tick all", u"Untick all"])
         self.assertEqual([button.text for button in right], [u"Make copies to redraw", u"Build variants"])
         self.assertFalse(page.existing_caption.enabled or page.preview_caption.enabled,
                          "drawn in the quiet color (ak.preview_caption)")
@@ -1099,7 +1104,7 @@ class PageTests(unittest.TestCase):
         self.assertEqual(plain(page.scope_note.text), u"Every glyph of <i>Selected glyphs</i> is unticked: tick some in the list "
                                                       u"above, or pick other glyphs here.")
         self.assertFalse(page.build_button.enabled)
-        # Tick all and Tick none: both groups
+        # Tick all and Untick all: both groups
         page.all_button.slots["clicked()"][0]()
         self.assertEqual(self.listed(page)[0], self.listed(page)[1])
         self.assertEqual(len(page.checked_glyphs()), 7)

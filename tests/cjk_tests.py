@@ -404,10 +404,13 @@ class NoFontTests(unittest.TestCase):
 
     def test_with_no_font_the_sample_and_previews_are_hidden_and_the_settings_grayed(self):
         dialog = cj.CJKSpacingDialog.__new__(cj.CJKSpacingDialog)  # (its window needs FontLab)
-        dialog.ak = type("Ak", (), {"enable": staticmethod(lambda widget, on: widget.setEnabled(bool(on)))})  # (ak.enable)
+        dialog.ak = type("Ak", (), {"enable": staticmethod(lambda widget, on: widget.setEnabled(bool(on))),  # (ak.enable)
+                                    "preview_filled": staticmethod(lambda parts, filled: [
+                                        part.setVisible(bool(filled)) for part in parts])})  # (ak.preview_filled)
         widget = self.Widget
         dialog.sample_label, dialog.sample_box, dialog.sample = widget(), widget(), widget()
         dialog.preview_captions = [widget(), widget()]
+        dialog.preview_parts, dialog.previews_drawn = list(dialog.preview_captions), True  # (a sample drawn)
         dialog.previews = [(widget(), u"Now"), (widget(), u"With palt")]
         dialog.palt_box, dialog.halt_box, dialog.compile_box, dialog.hangul_box = widget(), widget(), widget(), widget()
         dialog.show_font_parts(False)
@@ -423,6 +426,98 @@ class NoFontTests(unittest.TestCase):
         dialog.run = lambda: runs.append(1)
         dialog.font_changed()
         self.assertEqual(runs, [1], "a font closed or opened: read anew")
+        dialog.previews_drawn = False
+        dialog.show_font_parts(True)
+        self.assertFalse(any(w.visible for w in dialog.preview_captions), "a font, but nothing drawn: no caption")
+
+
+class PreviewRuleTests(unittest.TestCase):
+    """The review of November 23 (images 6 and 12): a preview area shows nothing until it has something to
+    preview, its captions and the line between its previews hidden while its pictures are empty."""
+
+    class Part(object):
+        def __init__(self):
+            self.visible, self.properties = True, {}
+
+        def setVisible(self, on):
+            self.visible = on
+
+        def setProperty(self, name, value):
+            self.properties[name] = value
+
+        def property(self, name):
+            return self.properties.get(name)
+
+    class Label(Part):
+        def __init__(self):
+            PreviewRuleTests.Part.__init__(self)
+            self.pixmap = None
+
+        def clear(self):
+            self.pixmap = None
+
+        def setPixmap(self, pixmap):
+            self.pixmap = pixmap
+
+        def setMinimumHeight(self, height):
+            pass
+
+        def setText(self, text):
+            pass
+
+    def dialog(self):
+        sys.path.insert(0, os.path.join(HERE, os.pardir, "kerning"))
+        import freelab_auto_kerning as ak
+        dialog = cj.CJKSpacingDialog.__new__(cj.CJKSpacingDialog)  # (its window needs FontLab)
+        dialog.ak = ak
+        dialog.preview_captions = [self.Label(), self.Label()]
+        dialog.preview_parts = [dialog.preview_captions[0], self.Part(), dialog.preview_captions[1]]  # (the line between)
+        dialog.previews = [(self.Label(), u"Now"), (self.Label(), u"With palt")]
+        ak.preview_filled(dialog.preview_parts, False)  # (as built)
+        glyph = type("Glyph", (), {"unicodes": [0x3042], "name": u"uni3042"})()
+        dialog.package = type("Package", (), {"upm": 1000, "fgPackage": type("Fg", (), {"glyphs": [glyph]})()})()
+        dialog.trims, dialog.hangul = [], []
+        dialog.palt_box = type("Box", (), {"checked": True})()
+        dialog.sample = type("Sample", (), {"text": u"\N{HIRAGANA LETTER A}"})()
+        dialog.preview_room, dialog.preview_tall = lambda: 400, lambda: None
+        dialog.layer_of = lambda name: type("Layer", (), {"advanceWidth": 1000})()
+        dialog.picture = lambda placed, em, rows: "a picture of %d glyphs" % len(placed)
+        return ak, dialog
+
+    def test_the_captions_and_the_line_show_only_over_a_sample_drawn(self):
+        ak, dialog = self.dialog()
+        self.assertFalse(any(part.visible for part in dialog.preview_parts), "nothing drawn yet")
+        self.assertTrue(all(part.property(ak.PREVIEW_EMPTY_PROP) for part in dialog.preview_parts),
+                        "marked empty: the shared no_font_states leaves them hidden with a font")
+        dialog.draw_previews()
+        self.assertEqual([label.pixmap for label, _ in dialog.previews], ["a picture of 1 glyphs"] * 2)
+        self.assertTrue(all(part.visible for part in dialog.preview_parts), "drawn: Now, the line, With palt")
+        self.assertFalse(any(part.property(ak.PREVIEW_EMPTY_PROP) for part in dialog.preview_parts))
+        dialog.sample.text = u"\N{KATAKANA LETTER A}"  # (a sample the font has none of: nothing drawn)
+        dialog.draw_previews()
+        self.assertEqual([label.pixmap for label, _ in dialog.previews], [None, None])
+        self.assertFalse(any(part.visible for part in dialog.preview_parts), "emptied: hidden again")
+        dialog.sample.text = u"\N{HIRAGANA LETTER A}"
+        dialog.draw_previews()
+        dialog.package = None  # (the font closed)
+        dialog.draw_previews()
+        self.assertFalse(any(part.visible for part in dialog.preview_parts), "no font: hidden")
+
+    def test_while_the_font_is_read_they_wait_for_the_pictures(self):
+        # (run hides the pictures while the font is read, and draw_previews draws meanwhile: the captions and the
+        # line come back with the pictures, and only over a sample drawn)
+        ak, dialog = self.dialog()
+        dialog.previews_shown(False)
+        dialog.draw_previews()
+        self.assertFalse(any(part.visible for part in dialog.preview_parts), "the pictures hidden: their parts too")
+        dialog.previews_shown(True)
+        self.assertTrue(all(part.visible for part in dialog.preview_parts))
+        self.assertTrue(all(label.visible for label, _ in dialog.previews))
+        dialog.sample.text = u""
+        dialog.draw_previews()
+        dialog.previews_shown(False)
+        dialog.previews_shown(True)
+        self.assertFalse(any(part.visible for part in dialog.preview_parts), "shown again, but nothing drawn")
 
 
 class StaleCodeTests(unittest.TestCase):
@@ -578,7 +673,7 @@ class CheckRow(object):
 
 
 def check_all_logged(test, module, dialog_class, noun):
-    """Tick all and Tick none of a CJK tool (module's dialog_class) over two groups, one closed: what
+    """Tick all and Untick all of a CJK tool (module's dialog_class) over two groups, one closed: what
     the log says (owner's report 118: these buttons left no line; image 261: Tick, not Check)."""
     sys.path.insert(0, os.path.join(HERE, os.pardir, "kerning"))
     import freelab_auto_kerning as ak
@@ -603,9 +698,9 @@ def check_all_logged(test, module, dialog_class, noun):
         test.assertEqual(logged[-1], u"<i>Tick all</i> ticked <b>3 %ss</b> (<b>2</b> of them in closed groups)." % noun)
         rows[2].on = False
         dialog.check_all(False)
-        test.assertEqual(logged[-1], u"<i>Tick none</i> unticked <b>3 %ss</b> (<b>1</b> of them in a closed group)." % noun)
+        test.assertEqual(logged[-1], u"<i>Untick all</i> unticked <b>3 %ss</b> (<b>1</b> of them in a closed group)." % noun)
         dialog.check_all(False)
-        test.assertEqual(logged[-1], u"<i>Tick none</i> changed nothing.")
+        test.assertEqual(logged[-1], u"<i>Untick all</i> changed nothing.")
     finally:
         if saved is None:
             sys.modules.pop("PythonQt", None)

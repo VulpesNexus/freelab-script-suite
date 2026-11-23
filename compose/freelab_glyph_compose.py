@@ -2173,7 +2173,7 @@ def mark_line(label, change, outside=False):
 # The list's buttons and the committing actions, with "Tick" for what sets check boxes ("Check" is the verb
 # of the buttons that run checks: owner's image 261)
 TICK_ALL = u"Tick all"
-TICK_NONE = u"Tick none"
+TICK_NONE = u"Untick all"
 TICK_HIGH_VALUE = u"Tick high-value glyphs"
 BUILD_TICKED = u"Build ticked glyphs"
 ADD_TICKED_ANCHORS = u"Add ticked anchors"
@@ -2187,7 +2187,7 @@ def build_text(checked, hidden):
 
 
 def checks_text(on, changed, checked, hidden, bold=None, noun=u"glyph"):
-    """The log's line for Tick all (on) or Tick none: how many rows it changed, and how many are ticked
+    """The log's line for Tick all (on) or Untick all: how many rows it changed, and how many are ticked
     now in all, those a search hides included, saying so (the owner's report of 2026-11-16: neither button
     left a line). changed: the rows the click ticked or unticked; checked: the rows ticked now, shown or
     not; hidden: of those, the ones a search hides. "Ticked 30 glyphs (42 ticked in all, 12 of them not
@@ -5193,7 +5193,7 @@ class AnchorPage(object):
             FIND_A_GLYPH, u"Shows only the glyphs whose name holds this text, whose character it is (a "
                              u"character typed alone finds that glyph and its forms, such as <i>h.sc</i>), or whose "
                              u"Unicode value it is (<i>U+0E48</i>, <i>0E48</i>); anchors and notes are not searched. "
-                             u"Rows not shown keep their ticks; <i>Tick all</i> and <i>Tick none</i> act on the "
+                             u"Rows not shown keep their ticks; <i>Tick all</i> and <i>Untick all</i> act on the "
                              u"rows shown.")
         row.addWidget(self.search_label)  # (left of the field: the field ends at the rows' right edge, owner's image 185)
         row.addWidget(self.search)
@@ -6371,7 +6371,7 @@ class AccentsDialog(object):
                              u"holds this text, whose character it is (a letter typed alone also finds the "
                              u"letters with diacritics built on it), or whose Unicode value it is (<i>U+0105</i>, "
                              u"<i>0105</i>); notes are not searched. Rows not shown keep their ticks; <i>Tick "
-                             u"all</i>, <i>Tick none</i>, and <i>Tick high-value glyphs</i> act on the rows "
+                             u"all</i>, <i>Untick all</i>, and <i>Tick high-value glyphs</i> act on the rows "
                              u"shown.")
         row.addWidget(self.search_label)  # (left of the field: the field ends at the rows' right edge, owner's image 185)
         row.addWidget(self.search)

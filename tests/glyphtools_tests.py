@@ -5271,7 +5271,7 @@ class OwnerReportNovember16Tests(unittest.TestCase):
         self.assertEqual(ac.checks_text(True, 30, 42, 0, b), u"Ticked <b>30 glyphs</b> (<b>42</b> ticked in all).")
         self.assertEqual(ac.checks_text(True, 1, 13, 12, b), u"Ticked <b>1 glyph</b> (<b>13</b> ticked in all, <b>12</b> of them not "
                                                               u"shown).")
-        self.assertEqual(ac.checks_text(False, 0, 0, 0, b), u"<i>Tick none</i> changed nothing.")
+        self.assertEqual(ac.checks_text(False, 0, 0, 0, b), u"<i>Untick all</i> changed nothing.")
         self.assertEqual(ac.checks_text(False, 2, 0, 0, b), u"Unticked <b>2 glyphs</b> (none ticked now).")
         self.assertEqual(ac.checks_text(False, 5, 1, 1, b), u"Unticked <b>5 glyphs</b> (<b>1</b> still ticked, not shown: a "
                                                              u"search hides it).")
@@ -5677,7 +5677,7 @@ class UiRoundNovember17Tests(unittest.TestCase):
         self.assertEqual(left.added, [dialog.all_button, dialog.none_button, dialog.value_button,
                                       dialog.restore_button, dialog.glyph_window_button, dialog.kerning_button,
                                       dialog.correct_button])
-        self.assertEqual([w.args[0] for w in left.added[:3]], [u"Tick all", u"Tick none", u"Tick high-value glyphs"])
+        self.assertEqual([w.args[0] for w in left.added[:3]], [u"Tick all", u"Untick all", u"Tick high-value glyphs"])
         self.assertEqual(right.added, [dialog.build_button])
         self.assertEqual(dialog.build_button.args[0], u"Build ticked glyphs")
         self.assertEqual(dialog.kerning_button.args[0], u"Check kerning of these glyphs", "it runs a check: Check")

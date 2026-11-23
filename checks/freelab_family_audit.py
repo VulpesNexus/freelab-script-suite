@@ -2154,7 +2154,7 @@ class FamilyAuditDialog(object):
         buttons = QtGui.QHBoxLayout()
         self.tick_all = QtGui.QPushButton(u"Tick all")
         self.tick_all.setWhatsThis(u"Ticks every source.")
-        self.tick_none = QtGui.QPushButton(u"Tick none")
+        self.tick_none = QtGui.QPushButton(u"Untick all")
         self.tick_none.setWhatsThis(u"Unticks every source.")
         self.glyph_window_button = QtGui.QPushButton(u"Show in Glyph window")
         self.glyph_window_button.setWhatsThis(u"Opens the selected row's glyphs in a <i>Glyph</i> window of this "
@@ -2475,14 +2475,14 @@ class FamilyAuditDialog(object):
         self.update_buttons()
 
     def tick_every(self, on):
-        """Tick all, Tick none: every source (the shared check_rows: the log says how many)."""
+        """Tick all, Untick all: every source (the shared check_rows: the log says how many)."""
         try:
             items = [self.source_tree.topLevelItem(k) for k in range(int(_prop(self.source_tree, "topLevelItemCount")))]
         except Exception:
             items = []
         self.filling = True
         try:
-            self.ak.check_rows(items, bool(on), self.log, u"Tick all" if on else u"Tick none", u"source")
+            self.ak.check_rows(items, bool(on), self.log, u"Tick all" if on else u"Untick all", u"source")
         finally:
             self.filling = False
         self.ticked = set(e.key for e in self.entries) if on else set()

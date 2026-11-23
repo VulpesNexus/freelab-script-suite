@@ -42,7 +42,7 @@ unticked there is out of the build and the previews). The pick is the ticked sug
 in step as they are ticked), those that often stand doubled in text, characters typed in a box, a script
 the font has (Latin first), a case of letters, or every letter, figure, and punctuation mark (a pick of
 more than SELECTED_MOST glyphs is not listed: one click could not build them). Make copies to redraw acts
-on the ticked suggestions, Build N variants on the ticked selected glyphs; Tick all and Tick none on
+on the ticked suggestions, Build N variants on the ticked selected glyphs; Tick all and Untick all on
 both groups. Scripts and cases are read from the model's tables (features/train/
 scripts.py and kinds.py), not asked of the running Python. The button and the line under it say how
 many variants of which glyphs a click builds (the line in the paragraph over the settings, owner's
@@ -598,6 +598,21 @@ def say(label, text):
         pass
 
 
+LIST_NOTE_MOST = 375  # characters: what the list's note may hold to stay on two lines at the window's first size
+
+
+def list_note(varied, families, copy_button):
+    """The note over the list, which fits two lines in a window of the size it opens at (the review of
+    November 23, image 7: it ran to a third line for its last word; two lines held 400 characters there,
+    so it keeps under LIST_NOTE_MOST). varied: how many families have alternates (bold alone: its noun
+    is the next count's); families: the corpus's families, counted (bold with its noun: image 301);
+    copy_button: the button's name, in italics."""
+    return (u"<i>%s</i>: the glyphs fonts most often give a stylistic alternate (counted in %s of %s), those this "
+            u"font has. To draw one by hand, tick a glyph, then click %s: it gets a copy named for a stylistic set "
+            u"(a.ss01). <i>%s</i>: the glyphs <i>Variants that take turns</i> builds (picked by its <i>Glyphs</i> "
+            u"dropdown), with no such copy." % (SUGGESTIONS_GROUP, varied, families, copy_button, SELECTED_GROUP))
+
+
 def label_of(QtGui, text, what):
     """A setting's label with the What's This of the control beside it: a widget with none answers a
     right-click with its nearest container's, shown in that container's middle, over another control."""
@@ -660,7 +675,7 @@ class AlternatesPage(object):
         self.all_button = QtGui.QPushButton(u"Tick all")
         self.all_button.setWhatsThis(u"Ticks every glyph of the list, in both groups (with <i>The ticked suggestions</i> "
                                      u"picked, <i>%s</i> follows the suggestions)." % SELECTED_GROUP)
-        self.none_button = QtGui.QPushButton(u"Tick none")
+        self.none_button = QtGui.QPushButton(u"Untick all")
         self.none_button.setWhatsThis(u"Unticks every glyph of the list, in both groups: nothing to copy or build.")
         self.copy_button = QtGui.QPushButton(u"Make copies to redraw")
         self.copy_button.setWhatsThis(u"Adds a copy of each glyph ticked in <i>Suggestions</i>, named for the "
@@ -867,7 +882,7 @@ class AlternatesPage(object):
 
     def bottom_buttons(self):
         """([the buttons for the left of the window's bottom row], [those for its right]): the list's Tick all
-        and Tick none; the two jobs' Make copies to redraw and Build variants."""
+        and Untick all; the two jobs' Make copies to redraw and Build variants."""
         return [self.all_button, self.none_button], [self.copy_button, self.build_button]
 
     # -- reading ----------------------------------------------------------
@@ -922,15 +937,9 @@ class AlternatesPage(object):
             self.counts = dict(rows)
             self.found = suggestions(rows, cmap, names, index=self.index)
             if self.found:
-                # (a count bold with its noun; "128 have", whose noun is outside, bold alone: image 301)
-                say(self.note, u"<i>%s</i>: the glyphs fonts most often give a stylistic alternate (of %s, %s have "
-                               u"alternates), those this font has. To draw an alternate by hand, tick a glyph, then "
-                               u"click %s: it gets a copy named for a stylistic set (a.ss01). <i>%s</i>: the glyphs "
-                               u"<i>Variants that take turns</i> builds, as its <i>Glyphs</i> dropdown picks them, "
-                               u"another job, which needs no such copy." % (
-                                   SUGGESTIONS_GROUP, b(counted(families or 0, u"open-licensed family",
-                                                                u"open-licensed families")),
-                                   b(grouped(varied or 0)), self.ak.i(u"Make copies to redraw"), SELECTED_GROUP))
+                say(self.note, list_note(b(grouped(varied or 0)),
+                                         b(counted(families or 0, u"open-licensed family", u"open-licensed families")),
+                                         self.ak.i(u"Make copies to redraw")))
             else:  # (an empty list said nothing of why it was empty)
                 say(self.note, u"The font has none of the glyphs fonts most often give a stylistic alternate: nothing "
                                u"to copy here. <i>%s</i>, the glyphs the variants below are built of, is another "
@@ -1001,7 +1010,7 @@ class AlternatesPage(object):
 
     def add_group(self, QtCore, QtGui, key, title, count):
         """A group row, bold, its count in parentheses, as every grouped list's (no tick box: Tick all and
-        Tick none tick its rows)."""
+        Untick all tick its rows)."""
         item = QtGui.QTreeWidgetItem([group_title(title, count)])
         item.setData(0, QtCore.Qt.UserRole, key)
         item.setFlags(QtCore.Qt.ItemIsEnabled)
@@ -1183,7 +1192,7 @@ class AlternatesPage(object):
         return [glyph for glyph in self.selected if glyph not in self.selected_off]
 
     def check_all(self, on):
-        """Every row of both groups ticked, or none (Tick all, Tick none); the previews and the build's count
+        """Every row of both groups ticked, or none (Tick all, Untick all); the previews and the build's count
         follow. While Selected glyphs lists the ticked suggestions, it follows them (its rows are not ticked
         twice)."""
         try:
@@ -1193,7 +1202,7 @@ class AlternatesPage(object):
             rows = self.group_rows(SUGGESTIONS_KEY) + ([] if follows else self.group_rows(SELECTED_KEY))
             self.tree.blockSignals(True)  # (one answer for the whole list, not one a row)
             try:  # (the log told how many it ticked or unticked, hidden ones said: owner's report 118)
-                self.ak.check_rows(rows, on, log=self.owner.log, command=u"Tick all" if on else u"Tick none",
+                self.ak.check_rows(rows, on, log=self.owner.log, command=u"Tick all" if on else u"Untick all",
                                    noun=u"glyph", hidden_text=(u"in a closed group", u"in closed groups"))
             finally:
                 self.tree.blockSignals(False)
@@ -1350,7 +1359,7 @@ class AlternatesPage(object):
             has_font = self.owner.package is not None
             checked = self.checked_glyphs()
             set_enabled(self.copy_button, has_font and bool(checked))
-            # Tick all and Tick none (both groups) grayed out when they would change nothing
+            # Tick all and Untick all (both groups) grayed out when they would change nothing
             rows = self.group_rows(SUGGESTIONS_KEY) + self.group_rows(SELECTED_KEY)
             ticks = [item.checkState(0) == QtCore.Qt.Checked for item in rows]
             set_enabled(self.all_button, has_font and not all(ticks))
@@ -1639,7 +1648,8 @@ class AlternatesPage(object):
         to build), else hidden; the pictures emptied when they have nothing to show, never hidden: they hold
         the part's spare height (owner's image 287, blank bands between the heading and its paragraph while
         they were hidden), and the part ends with them, right over the splitter's handle under it. The line
-        between them is the shared module's to show (a separator, hidden with no font). Never raises."""
+        between them shows with the captions, only while a glyph is drawn (the shared preview_filled: with a
+        font, the shared module showed it over two empty previews). Never raises."""
         for caption, picture, on in ((self.existing_caption, self.existing, existing),
                                      (self.preview_caption, self.preview, planned)):
             try:
@@ -1649,6 +1659,15 @@ class AlternatesPage(object):
                 if not existing:
                     caption.setText(u"")
                 caption.setVisible(bool(existing))
+            except Exception:
+                pass
+        # (the captions and the line between the previews: nothing shown over nothing, as in every tool)
+        filled = getattr(self.ak, "preview_filled", None)
+        if filled is not None:
+            filled([self.existing_caption, self.preview_caption, self.preview_line], bool(existing))
+        elif self.preview_line is not None:
+            try:
+                self.preview_line.setVisible(bool(existing))
             except Exception:
                 pass
 

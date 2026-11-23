@@ -970,6 +970,10 @@ def sibling_path(file_name, here=None):
 def load_sibling(file_name, module_name):
     """A FreeLab script beside this one, loaded as a module without starting it (its main() not run);
     loaded again when its file changed (a reinstall)."""
+    # (a str, whatever the caller's literals are: a tool with unicode literals in Python 2 put a unicode key in
+    # sys.modules, which FontLab's own code never does; found beside a session whose Scripts menu stopped
+    # running scripts, 2026-11-23)
+    module_name = str(module_name)
     path = sibling_path(file_name)
     try:
         stamp = os.path.getmtime(path)
@@ -1964,7 +1968,8 @@ def history_state(package):
 # compared, checked (Font Check), and proofed.
 MENU_GROUPS = (("Font Builder", "Glyph Compose", "Auto Spacing", "CJK Spacing", "CJK Vertical", "Auto Kerning", "Kerning Check",
                 "Feature Code", "Feature Check", "Font Compare", "Family Audit", "Font Check", "Proof"),
-               ("Dark Mode", "Toggle Dark Mode", "Dark Mode Settings", "Tab Docking", "Toggle Tab Docking"),
+               ("Dark Mode", "Toggle Dark Mode", "Dark Mode Settings", "Tab Docking", "Toggle Tab Docking",
+                "Tab Docking Settings"),
                ("Start MCP Listener", "Stop MCP Listener", "Start Listener", "Stop Listener"))  # (FreeLab MCP's, old names too)
 MENU_TITLE, SCRIPTS_MENU = "FreeLab", "menuScripts"
 MENU_ORDER_PROP = "freelab_menu_order"
@@ -3049,12 +3054,36 @@ def retheme_items(view, mapping):
     return count
 
 
+def popup_windows(window):
+    """The popups holding the lists of a window's dropdowns (Qt's QComboBoxPrivateContainer, the parent of
+    each box's view): windows of their own. A box whose list cannot be read is left out. Never raises."""
+    QtGui = _qt()[1]
+    found = []
+    try:
+        combos = list(window.findChildren(QtGui.QComboBox))
+    except Exception:
+        return found
+    for combo in combos:
+        try:
+            view = combo.view()
+            popup = view.parentWidget() if view is not None else None
+            if popup is not None and all(popup is not known for known in found):
+                found.append(popup)
+        except Exception:
+            continue
+    return found
+
+
 def window_widgets(window):
     """The widgets of a window, itself first, each before its children (a child polished before its
-    parent would take the parent's colors of before)."""
+    parent would take the parent's colors of before). Its dropdowns' lists are among them: each is a
+    window of its own (Qt's popup holding the list), which isAncestorOf stops at, and under its box's
+    stylesheet (LONG_SHEET), so it kept the palette it was polished with: the list of a light window
+    opened dark after a switch, and the other way round (the review of November 23, images 3 and 4)."""
     QtGui = _qt()[1]
     try:  # (a dialog the tool opened from its window, Auto Kerning's classes, is a window of its own)
         roots = [window] + list(window.findChildren(QtGui.QDialog))
+        roots.extend(popup_windows(window))
         found = [w for w in QtGui.QApplication.instance().allWidgets() if any(root.isAncestorOf(w) for root in roots)]
     except Exception:
         return [window]
@@ -5468,7 +5497,7 @@ def plain_buttons(dialog):
 # Check none (and the like) grayed out when the list beside them has nothing to check, and a
 # dropdown with one choice drawn as its text (no arrow, nothing to open).
 STATES_MS = 300
-CHECK_BUTTON_TEXTS = (u"Tick all", u"Tick none", u"Tick only", u"Tick high-value", u"Tick often",
+CHECK_BUTTON_TEXTS = (u"Tick all", u"Untick all", u"Tick only", u"Tick high-value", u"Tick often",
                       u"Check all", u"Check none", u"Check only")  # ("Check" was their verb before the owner's image 261)
 SINGLE_PROP = "freelab_single_choice"
 SINGLE_SHEET = (u"QComboBox { border: none; background: transparent; padding-left: 0px; } "
@@ -5675,7 +5704,8 @@ HELP_KINDS = ("QAbstractButton", "QComboBox", "QAbstractSpinBox", "QLineEdit", "
 NOT_BLANK = ("QAbstractButton", "QComboBox", "QAbstractSpinBox", "QLineEdit", "QAbstractSlider", "QTabBar",
              "QAbstractScrollArea", "QSplitterHandle", "QMenu")  # a press on these is no click beside the lists
 TIP_WIDTH = (360, 900)  # a tooltip is at most half its window's width, within these (pixels)
-TIP_MARGIN = 8  # pixels added to a tooltip's longest line, so that it does not wrap
+TIP_MARGIN = 8  # pixels added to a tooltip's longest line as estimated, so that it does not wrap
+TIP_EXACT_MARGIN = 1  # pixels added to a tooltip's width as Qt laid its text out (show_tip): a rounding's worth
 _TAG = re.compile(u"<[^>]+>")
 _BREAK = re.compile(u"<br\\s*/?>", re.IGNORECASE)
 # a line break after a sentence's end is a new paragraph (a list of names, a line each, is not)
@@ -5699,11 +5729,14 @@ def _plain(line):
             .replace(u"&amp;", u"&"))
 
 
-def tip_html(text, width, measure):
+def tip_html(text, width, measure, exact=None):
     """A tooltip laid out for its window: rich text, a blank line between its paragraphs, as wide as its
     longest line when that fits in width (a short tooltip stays on one line: Qt wrapped short ones into
-    a narrow column of a few words), else width. measure(text) gives a line's width in pixels. None for
-    one left as it is (empty, or laid out by its tool)."""
+    a narrow column of a few words), else width. measure(text) gives a plain line's width in pixels, an
+    estimate for a line with bold or italic words, so TIP_MARGIN is added to it. exact(rich text), when
+    given, gives the width of the whole text as Qt lays it out unwrapped: the tooltip is then that wide
+    and TIP_EXACT_MARGIN more (the review of November 23, image 9: the estimate's margin showed as room
+    after every tooltip's text). None for one left as it is (empty, or laid out by its tool)."""
     text = u"%s" % (text or u"")
     if not text.strip() or tip_built(text):
         return None
@@ -5711,12 +5744,21 @@ def tip_html(text, width, measure):
         text = html(text)
     text = _BREAK.sub(u"<br>", text.replace(u"\r\n", u"\n").replace(u"\n", u"<br>"))
     text = _PARAGRAPH.sub(lambda m: m.group(1) + u"<br><br>", text)
-    longest = 0
-    for line in text.split(u"<br>"):
-        if line:
-            longest = max(longest, int(measure(_plain(line)) * (1.1 if u"<b>" in line else 1.0)))
+    text = italic_gaps(text)  # (room after its italics, measured with the rest)
+    needed = None
+    if exact is not None:
+        try:
+            needed = int(exact(text) + 0.999) + TIP_EXACT_MARGIN
+        except Exception:
+            needed = None  # (not measured: estimated, as before)
+    if needed is None:
+        longest = 0
+        for line in text.split(u"<br>"):
+            if line:
+                longest = max(longest, int(measure(_plain(line)) * (1.1 if u"<b>" in line else 1.0)))
+        needed = longest + TIP_MARGIN
     return (u'<table width="%d" cellspacing="0" cellpadding="0"><tr><td>%s</td></tr></table>'
-            % (min(width, longest + TIP_MARGIN), text))
+            % (min(width, needed), text))
 
 
 def disabled_help(widget):
@@ -5834,6 +5876,19 @@ def _view_of(viewport):
     return None
 
 
+def rich_width(text):
+    """How wide Qt lays a tooltip's rich text out when nothing makes it wrap, in pixels: a text document in
+    the tooltips' font, asked for its ideal width (bold and italic words counted as drawn, which a plain
+    measure of the words can only estimate). The document is this call's own and goes with it."""
+    QtGui = _qt()[1]
+    document = QtGui.QTextDocument()
+    document.setDefaultFont(QtGui.QToolTip.font())
+    document.setDocumentMargin(0)
+    document.setHtml(text)
+    ideal = document.idealWidth
+    return float(ideal() if callable(ideal) else ideal)
+
+
 def show_tip(obj, event, view=None):
     """A tooltip laid out for its window (tip_html): True once shown, False to leave it to Qt."""
     QtCore, QtGui = _qt()
@@ -5853,7 +5908,8 @@ def show_tip(obj, event, view=None):
     if not text:
         return False
     metrics = QtGui.QFontMetrics(QtGui.QToolTip.font())
-    laid_out = tip_html(text, tip_width(_property(obj.window(), "width")), lambda line: metrics.width(line))
+    laid_out = tip_html(text, tip_width(_property(obj.window(), "width")), lambda line: metrics.width(line),
+                        rich_width)
     if laid_out is None:
         return False
     if rect is not None:
@@ -7010,6 +7066,25 @@ def i(name):
     return u"<i>%s</i>" % html(name)
 
 
+ITALIC_GAP = u'<span style="font-size:5pt">&nbsp;</span>'  # two pixels in FontLab's interface font, a line no taller
+_ITALIC_END = re.compile(u"</i>(?!%s)" % re.escape(ITALIC_GAP), re.IGNORECASE)
+
+
+def italic_gaps(text):
+    """Rich text with a hair of room after each italic run, so that its last letter does not run into what
+    follows (the review of November 23, image 8: "Condense.otf in" read as "otfin"). FontLab's interface font
+    (MS Shell Dlg 2, Tahoma) has no italic of its own: Windows slants the upright one, and each slanted
+    letter then reaches one or two pixels past its own width (measured live in FontLab 7.2: f, l, d, i, and
+    most capitals two, the others one), into a space three pixels wide or onto the colon, comma, or
+    parenthesis right after. ITALIC_GAP is a no-break space set small: two pixels wide there, never a place
+    where a line breaks, and it leaves the line's height alone. Given once: a text that has them is left as
+    it is. Used where the suite shows its rich text (status lines, logs, tooltips, notes)."""
+    text = u"%s" % (text or u"")
+    if u"</i>" not in text and u"</I>" not in text:
+        return text
+    return _ITALIC_END.sub(lambda match: match.group(0) + ITALIC_GAP, text)
+
+
 def rich(label):
     """The label shows rich text (bold values, italic names)."""
     QtCore, QtGui = _qt()
@@ -7071,7 +7146,8 @@ def status_label(text=u"", plain=False):
 
     class StatusLabel(QtGui.QLabel):
         def setText(self, text):
-            QtGui.QLabel.setText(self, _split_sentences(text, u"\n") if plain else sentences(text))
+            # (rich text: room after its italics, italic_gaps)
+            QtGui.QLabel.setText(self, _split_sentences(text, u"\n") if plain else italic_gaps(sentences(text)))
             try:  # (kept hidden while the window's bar takes its place: busy_start)
                 self.setHidden(bool(self.property(BUSY_LINE_PROP)) or not (u"%s" % text).strip())
             except Exception:
@@ -7103,31 +7179,22 @@ SCROLL_SHEET = (u"QScrollBar:vertical { background: transparent; width: 12px; ma
 # pointer passed over it (a hover repaints the bar alone).
 
 
-TAB_SHEET = (u"QTabBar::tab { background: transparent; color: rgba(128, 128, 128, 255); border: none; "
+TAB_SHEET = (u"QTabBar::tab { background: transparent; color: palette(window-text); border: none; "
              u"border-bottom: 2px solid transparent; padding: 5px 12px 4px 12px; margin-right: 2px; } "
              u"QTabBar::tab:selected { color: palette(window-text); border-bottom: 2px solid palette(highlight); } "
              u"QTabBar::tab:hover:!selected { color: palette(window-text); } "
              u"QTabBar::tab:disabled { color: rgba(128, 128, 128, 110); }")
-# FreeLab's tab bars: flat, the chosen tab underlined in the highlight color, the others in a mid gray,
-# over either palette, and left alone by dark mode. Windows' own style drew the chosen tab light
-# whatever the palette: mapped, its text came out garbled, and the edges changed with the tab chosen.
-TAB_SHEET_LIGHT = TAB_SHEET.replace(u"QTabBar::tab { background: transparent; color: rgba(128, 128, 128, 255);",
-                                    u"QTabBar::tab { background: transparent; color: palette(window-text);")
-# On a light window the mid gray read as grayed out (owner's image 352): every tab there takes the text's
-# color, the chosen one told by its underline alone.
+# FreeLab's tab bars: flat, every tab in the text's color, the chosen one told by its underline in the
+# highlight color alone, over either palette, and left alone by dark mode. Windows' own style drew the
+# chosen tab light whatever the palette: mapped, its text came out garbled, and the edges changed with the
+# tab chosen. The other tabs were a mid gray at first, which read as grayed out: on a light window (owner's
+# image 352), then on a dark one too (the review of November 23, image 5).
+TAB_SHEET_LIGHT = TAB_SHEET  # (the light window's own sheet, until both took the text's color: kept for callers)
 
 
 def tab_sheet(bar):
-    """The tab bar's sheet for its window's palette: TAB_SHEET_LIGHT on a light one, else TAB_SHEET."""
-    QtGui = _qt()[1]
-    try:
-        light = bar.palette.color(QtGui.QPalette.Window).lightness() > 128
-    except Exception:
-        try:
-            light = bar.palette().color(QtGui.QPalette.Window).lightness() > 128
-        except Exception:
-            light = False
-    return TAB_SHEET_LIGHT if light else TAB_SHEET
+    """The tab bar's sheet: TAB_SHEET, whatever its window's palette (its colors are the palette's own)."""
+    return TAB_SHEET
 
 
 LIGHT_FIELD_PROP = "freelabLightField"  # on a field whose grayed background light_fields set
@@ -7141,30 +7208,47 @@ def light_field_color(window_color, QtGui):
     return QtGui.QColor(window_color).darker(LIGHT_FIELD_DARKER)
 
 
+def light_field_bases(app_palette, window_color, QtGui):
+    """The backgrounds a field of a light window is given, by color group: the application palette's own
+    while it is usable, light_field_color while grayed. All three are set, read from the application's
+    palette of now, never from the field's: a palette holds a role for every group at once, so setting
+    the grayed background alone on a copy of the field's palette also kept the usable one it had at that
+    moment, and the field's palette is still the theme before when the window hears of a switch (the
+    review of November 23, images 2 and 4: spin boxes dark on a light window, then light on a dark one)."""
+    role = QtGui.QPalette.Base
+    return ((QtGui.QPalette.Active, app_palette.color(QtGui.QPalette.Active, role)),
+            (QtGui.QPalette.Inactive, app_palette.color(QtGui.QPalette.Inactive, role)),
+            (QtGui.QPalette.Disabled, light_field_color(window_color, QtGui)))
+
+
 def light_fields(dialog):
-    """Each field and spin box of a light window drawn, grayed, on light_field_color; on a dark window (dark
-    mode switched on) the background its palette gives it back, dark mode's as before. Never raises."""
+    """Each field and spin box of a light window drawn, grayed, on light_field_color (light_field_bases);
+    on a dark window (dark mode switched on) a field given one takes its window's palette whole again,
+    dark mode's as before. Never raises."""
     QtGui = _qt()[1]
     try:
-        app = QtGui.QApplication.instance()
-        window = _property(dialog, "palette").color(QtGui.QPalette.Window)
+        app_palette = QtGui.QApplication.instance().palette()
+        window = app_palette.color(QtGui.QPalette.Window)  # (the application's: a window's own may lag a switch)
         light = window.lightness() > 128
-        want = light_field_color(window, QtGui) if light else app.palette().color(QtGui.QPalette.Disabled,
-                                                                                   QtGui.QPalette.Base)
+        bases = light_field_bases(app_palette, window, QtGui) if light else ()
         for kind in ("QLineEdit", "QAbstractSpinBox"):
             for field in dialog.findChildren(getattr(QtGui, kind)):
                 try:
                     if kind == "QLineEdit" and field.parentWidget() is not None and (
                             field.parentWidget().inherits("QAbstractSpinBox") or field.parentWidget().inherits("QComboBox")):
                         continue  # (drawn by its box)
-                    if not light and not field.property(LIGHT_FIELD_PROP):
+                    if not light:
+                        if field.property(LIGHT_FIELD_PROP):  # (set here on a light window: its window's again)
+                            field.setPalette(QtGui.QPalette())
+                            field.setProperty(LIGHT_FIELD_PROP, False)
                         continue  # (never set here: dark mode's own)
                     palette = _property(field, "palette")
-                    if palette.color(QtGui.QPalette.Disabled, QtGui.QPalette.Base) != want:
-                        palette = QtGui.QPalette(palette)
-                        palette.setColor(QtGui.QPalette.Disabled, QtGui.QPalette.Base, want)
-                        field.setPalette(palette)
-                    field.setProperty(LIGHT_FIELD_PROP, True)  # (kept: in dark, it follows the palette's)
+                    if any(palette.color(group, QtGui.QPalette.Base) != color for group, color in bases):
+                        fresh = QtGui.QPalette()  # (nothing of the field's palette of before kept)
+                        for group, color in bases:
+                            fresh.setColor(group, QtGui.QPalette.Base, color)
+                        field.setPalette(fresh)
+                    field.setProperty(LIGHT_FIELD_PROP, True)  # (told apart on a dark window: its palette taken back)
                 except Exception:
                     continue
     except Exception:
@@ -7522,7 +7606,7 @@ class Log(object):
             # links (glyphs to select) in the line's own color, underlined: not the palette's blue
             text = text.replace(u'<a href=', u'<a style="color:#%02x%02x%02x" href=' % (rgb[0], rgb[1], rgb[2]))
             text = u'<span style="color:#%02x%02x%02x">%s</span>' % (rgb[0], rgb[1], rgb[2], text)
-        return u"%s&nbsp; %s" % (stamp, text)
+        return u"%s&nbsp; %s" % (stamp, italic_gaps(text))  # (room after a line's italics)
 
     def restyle(self):
         """Every line written again in the colors of now (dark mode switched: retheme_window); the
@@ -8327,14 +8411,21 @@ def no_font_states(dialog):
         return  # (a tool at work sets its own states)
     for line in dialog.findChildren(QtGui.QFrame):
         try:
-            shown = has_font or heads_section(line)
-            if line.property(SEPARATOR_PROP) and bool(_property(line, "visible")) != shown and line.window() == window:
+            if not line.property(SEPARATOR_PROP):
+                continue
+            # (a line between previews with nothing to show stays hidden, font or not: preview_filled)
+            shown = (has_font or heads_section(line)) and not line.property(PREVIEW_EMPTY_PROP)
+            if bool(_property(line, "visible")) != shown and line.window() == window:
                 line.setVisible(shown)
         except Exception:
             continue
     for label in dialog.findChildren(QtGui.QLabel):  # (a preview's caption over nothing: owner's image 283)
         try:
             if not label.property(PREVIEW_CAPTION_PROP) or label.window() != window:
+                continue
+            if label.property(PREVIEW_EMPTY_PROP):  # (its preview shows nothing: hidden, font or not)
+                if bool(_property(label, "visible")):
+                    label.setVisible(False)
                 continue
             if not has_font and bool(_property(label, "visible")):
                 label.setProperty(NO_FONT_HIDDEN_PROP, True)
@@ -8862,6 +8953,30 @@ def preview_caption(text=u"", label=None):
     label.setEnabled(False)  # (drawn in the quiet text color)
     label.setProperty(PREVIEW_CAPTION_PROP, True)
     return label
+
+
+PREVIEW_EMPTY_PROP = "freelabPreviewEmpty"  # on a preview's caption or dividing line while it has nothing to show
+
+
+def preview_filled(parts, filled):
+    """A preview area's captions and the lines between its previews (parts) shown only while it has
+    something to preview: the rule for every tool (the review of November 23, images 6 and 12: Auto
+    Spacing kept "Now" and "Suggested" over a font it could not measure, Kerning Check its two lines
+    between three empty previews, while other tools showed nothing until a row was picked). Called by a
+    tool each time it draws or clears its previews; no_font_states, which shows a window's lines and
+    captions again as a font comes, leaves the parts of an empty preview hidden (PREVIEW_EMPTY_PROP).
+    None among parts is skipped. Never raises."""
+    filled = bool(filled)
+    for widget in parts or ():
+        if widget is None:
+            continue
+        try:
+            widget.setProperty(PREVIEW_EMPTY_PROP, None if filled else True)
+            if filled:
+                widget.setProperty(NO_FONT_HIDDEN_PROP, None)  # (shown here: nothing left for a font to bring back)
+            widget.setVisible(filled)
+        except Exception:
+            continue
 
 
 def flag_color(mark, alpha=255):
@@ -10069,7 +10184,7 @@ class AutoKerningDialog(object):
         buttons = QtGui.QHBoxLayout()
         self.all_button = QtGui.QPushButton("Tick new pairs")
         self.all_button.setWhatsThis("Ticks every listed pair the font does not kern yet.")
-        self.none_button = QtGui.QPushButton("Tick none")
+        self.none_button = QtGui.QPushButton("Untick all")
         self.restore_button = QtGui.QPushButton("Restore suggestions")
         self.restore_button.setWhatsThis("Puts every tick and every value picked by hand back as the list first "
                                          "came, after the last analysis.")
@@ -10714,7 +10829,7 @@ class AutoKerningDialog(object):
         items = [self.row_item(row) for row in range(min(self.row_count(), len(self.suggestions)))]
         check_rows([item for item in items if item is not None],
                    lambda item: on and not self.suggestions[self.row_of(item)].current, self.log,
-                   u"Tick new pairs" if on else u"Tick none", u"pair")
+                   u"Tick new pairs" if on else u"Untick all", u"pair")
         self.update_buttons()
 
     def row_checked(self, row):
@@ -11242,7 +11357,7 @@ class ClassDialog(object):
         layout.addWidget(self.move)
         buttons = QtGui.QHBoxLayout()
         self.all_button = QtGui.QPushButton("Tick all")
-        self.none_button = QtGui.QPushButton("Tick none")
+        self.none_button = QtGui.QPushButton("Untick all")
         self.apply_button = QtGui.QPushButton("Create ticked classes")
         self.exceptions_button = QtGui.QPushButton("Write ticked pairs")
         self.exceptions_button.setWhatsThis(u"Gives each ticked pair of <i>Pairs too close with their class's "
@@ -11486,8 +11601,8 @@ class ClassDialog(object):
         QtCore, QtGui = _qt()
         items = [item for item in self.items() + self.items(exceptions=True)
                  if int(item.flags()) & int(QtCore.Qt.ItemIsUserCheckable)]
-        counts = check_rows(items, on, command=u"Tick all" if on else u"Tick none")
-        line = check_line(u"Tick all" if on else u"Tick none", counts[0], counts[1], counts[2],
+        counts = check_rows(items, on, command=u"Tick all" if on else u"Untick all")
+        line = check_line(u"Tick all" if on else u"Untick all", counts[0], counts[1], counts[2],
                           hidden_text=(u"in a closed section", u"in closed sections"))
         self.status.setText(line + u" " + (getattr(self, "summary", u"") or u""))
 

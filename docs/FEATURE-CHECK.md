@@ -4,7 +4,7 @@
 
 ## The window
 
-The top line names the font, in bold, and counts its glyphs, thousands grouped (**BIZ UDGothic** (**13,932 glyphs**)). The check's result goes right under it, above the header's line: its counts of errors, warnings, and pieces of advice in bold, or that it found nothing. Under the line, the *Apply safe fixes automatically* option, then *Check*, which checks again. The bottom row holds *Tick all* and *Tick none* at the left, and *Compile in FontLab*, *Apply ticked fixes*, and *Close* at the right. *Compile in FontLab* is grayed while the font has no feature code (or the window has no font), and *Apply ticked fixes* while nothing is ticked.
+The top line names the font, in bold, and counts its glyphs, thousands grouped (**BIZ UDGothic** (**13,932 glyphs**)). The check's result goes right under it, above the header's line: its counts of errors, warnings, and pieces of advice in bold, or that it found nothing. Under the line, the *Apply safe fixes automatically* option, then *Check*, which checks again. The bottom row holds *Tick all* and *Untick all* at the left, and *Compile in FontLab*, *Apply ticked fixes*, and *Close* at the right. *Compile in FontLab* is grayed while the font has no feature code (or the window has no font), and *Apply ticked fixes* while nothing is ticked.
 
 ## What it finds
 

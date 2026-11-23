@@ -2182,7 +2182,8 @@ class DialogTests(unittest.TestCase):
         finally:
             dialog.ak.load_sibling = load
         self.assertEqual(fp.features_text([(u"ss01", u"Round a")]), u"1 feature: ss01 (Stylistic Set 1: Round a)")
-        self.assertIn(u"<i>Summary</i> (<b>1</b>)", dialog.font_label.text)
+        # (a status line shows its italics with a hair of room after them: ak.italic_gaps)
+        self.assertIn(u"<i>Summary</i>%s (<b>1</b>)" % dialog.ak.ITALIC_GAP, dialog.font_label.text)
         self.assertTrue(dialog.font_label.text.startswith(u"<b>Fake Sans</b>, master <b>Regular</b> (of <b>2 masters</b>)."
                                                           u"<br><br>"),
                         dialog.font_label.text)

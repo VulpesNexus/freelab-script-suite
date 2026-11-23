@@ -4497,7 +4497,9 @@ class DialogTests(unittest.TestCase):
                       u"in %d of Unicode's 172 scripts (%d not yet covered, and 2 notations checked as character sets)."
                       % (known.known - len(known.not_covered), listed), note)
         self.assertIn(u"of the 5,035 languages not covered, 4,500 have a script on record", note)
-        self.assertIn(u'<a href="%s">%s</a>' % (fc.ISSUES_ADDRESS, fc.ISSUES_ADDRESS), note, "a link, and the address as text")
+        self.assertIn(u"open an <a href=\"%s\">issue</a> on FreeLab's repository with the characters" % fc.ISSUES_ADDRESS, note,
+                      "the word is the link: the address is not written out after it")
+        self.assertEqual(note.count(fc.ISSUES_ADDRESS), 1, "in the link alone")
         node = rows[family.value]
         dialog.toggle_family(node, Row(family.value))
         last = rows[-1]
@@ -6672,10 +6674,10 @@ class UiRoundTests(unittest.TestCase):
 
     def test_each_tab_shows_its_own_status_and_buttons(self):
         """Convention 1 and 4: the shown tab's status line in the header, its buttons in the bottom row
-        (Tick all, Tick none, Tick only..., Build with Glyph Compose, and Copy glyphs on Coverage only)."""
+        (Tick all, Untick all, Tick only..., Build with Glyph Compose, and Copy glyphs on Coverage only)."""
         dialog = self.dialog()
         self.assertEqual([label for _, label in fc.CHECK_BUTTONS],
-                         [u"Tick all", u"Tick none", u"Tick only what Glyph Compose can build"])
+                         [u"Tick all", u"Untick all", u"Tick only what Glyph Compose can build"])
         for key in fc.TABS:
             tab = dialog.tab_of(key)
             tab.status, tab.actions = Recorded(), Recorded()

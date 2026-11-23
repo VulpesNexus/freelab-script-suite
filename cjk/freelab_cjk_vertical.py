@@ -1356,13 +1356,18 @@ class CJKVerticalDialog(object):
         # under its caption (the shared preview_caption: smaller, in the quiet text color)
         previews = QtGui.QHBoxLayout()
         self.previews, self.preview_captions = [], []
+        # The captions and the line between: shown only while a sample is drawn (draw_previews, the review of
+        # November 23: no caption or line over nothing)
+        self.preview_parts, self.previews_drawn = [], False
         for number, caption in enumerate(PREVIEW_CAPTIONS):
             if number:
-                previews.addWidget(ak.separator(vertical=True))  # (hidden with no font, as the previews)
+                self.preview_parts.append(ak.separator(vertical=True))
+                previews.addWidget(self.preview_parts[-1])  # (hidden with no font, as the previews)
             column = QtGui.QVBoxLayout()
             title = ak.preview_caption(caption)
             column.addWidget(title)
             self.preview_captions.append(title)
+            self.preview_parts.append(title)
             label = QtGui.QLabel()
             label.setProperty(ak.LEAVE_ALONE_PROP, True)
             label.setAlignment(QtCore.Qt.AlignCenter)
@@ -1375,6 +1380,7 @@ class CJKVerticalDialog(object):
             column.addWidget(label, 1)
             previews.addLayout(column, 1)
             self.previews.append(label)
+        ak.preview_filled(self.preview_parts, False)  # (nothing drawn yet)
         preview_part.addLayout(previews, 1)
         # What the previews show of the sample where the font lacks some of it (preview_note), else hidden
         self.preview_note = QtGui.QLabel(u"")
@@ -1394,7 +1400,7 @@ class CJKVerticalDialog(object):
         layout.addWidget(self.log.widget)
         buttons = QtGui.QHBoxLayout()
         self.all_button = QtGui.QPushButton("Tick all")
-        self.none_button = QtGui.QPushButton("Tick none")
+        self.none_button = QtGui.QPushButton("Untick all")
         self.restore_button = QtGui.QPushButton("Restore suggestions")
         self.restore_button.setWhatsThis(u"Puts every tick back as the list first came.")
         self.put_back_button = QtGui.QPushButton("Put back vhea")
@@ -2144,13 +2150,13 @@ class CJKVerticalDialog(object):
                 rows[index].checked = item.checkState(0) == QtCore.Qt.Checked
 
     def check_all(self, on):
-        """Tick all, Tick none: every checkable row, the log told how many it ticked or unticked, and
+        """Tick all, Untick all: every checkable row, the log told how many it ticked or unticked, and
         how many of them were in closed groups (owner's report 118)."""
         QtCore, QtGui = _qt()
         self.tree.blockSignals(True)
         try:
             self.ak.check_rows([item for item in self.items() if item.flags() & QtCore.Qt.ItemIsUserCheckable], on,
-                               log=self.log, command=u"Tick all" if on else u"Tick none",
+                               log=self.log, command=u"Tick all" if on else u"Untick all",
                                hidden_text=(u"in a closed group", u"in closed groups"))
         finally:
             self.tree.blockSignals(False)
@@ -2278,8 +2284,11 @@ class CJKVerticalDialog(object):
 
     def show_font_parts(self, on):
         """With no font open, the sample and its previews are hidden and the settings grayed out."""
-        for widget in [self.sample_label, self.sample_box, self.sample] + list(self.preview_captions) + list(self.previews):
+        for widget in [self.sample_label, self.sample_box, self.sample] + list(self.previews):
             widget.setVisible(on)
+        # (the captions and the line between: with the pictures, and only where draw_previews drew a sample)
+        self.pictures_shown = bool(on)
+        self.parts_filled(on and getattr(self, "previews_drawn", False))
         note = getattr(self, "preview_note", None)
         if note is not None and not on:  # (shown again by draw_previews, where it has something to say)
             note.setVisible(False)
@@ -2287,6 +2296,13 @@ class CJKVerticalDialog(object):
             self.ak.enable(widget, on)
         if not on:  # (with a font, update_buttons sets it with the write button)
             self.ak.enable(self.compile_box, False)
+
+    def parts_filled(self, filled):
+        """The captions and the line between the previews shown or hidden (ak.preview_filled): shown only while
+        a sample is drawn, the review of November 23. Nothing to do before they are built."""
+        parts = getattr(self, "preview_parts", None)
+        if parts:
+            self.ak.preview_filled(parts, filled)
 
     def flag_names(self):
         items = self.tree.selectedItems()
@@ -2417,6 +2433,8 @@ class CJKVerticalDialog(object):
 
     def draw_previews(self):
         if self.package is None:
+            self.previews_drawn = False  # (no font: nothing drawn, no caption or line over nothing)
+            self.parts_filled(False)
             return
         names = self.char_names
         text = u"%s" % self.sample.text
@@ -2446,6 +2464,10 @@ class CJKVerticalDialog(object):
                 label.clear()
             else:
                 label.setPixmap(pixmap)
+        # (the captions and the line between only over a sample drawn: an empty sample, or one the font has none
+        # of, draws nothing; with the pictures hidden, show_font_parts shows them together)
+        self.previews_drawn = any(pixmap is not None for pixmap in self.preview_pixmaps)
+        self.parts_filled(self.previews_drawn and getattr(self, "pictures_shown", True))
         note = getattr(self, "preview_note", None)
         if note is not None:
             words = preview_note(text, names, self.ak.b, self.ak.html)  # (counts bold: owner's images 297, 301)

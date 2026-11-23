@@ -2182,10 +2182,10 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(len(again.cycling()), len(letters), "restored as it first came: what the font's code has")
         again.check_turns("none")
         self.assertEqual(again.cycling(), {})
-        self.assertEqual(self.logged[-1], ("info", u"<i>Tick none</i> unticked <b>%d glyphs</b>." % len(letters)))
+        self.assertEqual(self.logged[-1], ("info", u"<i>Untick all</i> unticked <b>%d glyphs</b>." % len(letters)))
         self.assertIn(u"No glyph is ticked", again.turn_label.text)
         again.check_turns("none")
-        self.assertEqual(self.logged[-1], ("info", u"<i>Tick none</i> changed nothing."))
+        self.assertEqual(self.logged[-1], ("info", u"<i>Untick all</i> changed nothing."))
 
     def with_glyphs(self, features, names):
         """The fake font with more glyphs (names, no characters)."""
@@ -2233,7 +2233,7 @@ class DialogTests(unittest.TestCase):
             self.assertIsNone(fc.check_code(calt, dialog.names))
         dialog.check_turns("often")
         self.assertEqual(set(dialog.cycling()), dialog.often, "the button checks the figures and marks often doubled too")
-        self.assertEqual([label for _, label, _ in fc.TURN_CHECKS], [u"Tick all", u"Tick none", u"Tick often doubled"],
+        self.assertEqual([label for _, label, _ in fc.TURN_CHECKS], [u"Tick all", u"Untick all", u"Tick often doubled"],
                          "the suite's order (owner's images 260, 261): Tick, not Check, all and none first")
         self.assertEqual(dialog.kind(u"9"), fc.FIGURES)
         self.assertTrue(dialog.doubled(u".") and dialog.doubled(u"0") and not dialog.doubled(u"/"))
@@ -3139,7 +3139,7 @@ class DialogTests(unittest.TestCase):
                                                                    dialog.build_button, page.copy_button,
                                                                    page.build_button, dialog.close_button])
         self.assertEqual([button.text for button in dialog.turn_buttons],
-                         [u"Tick all", u"Tick none", u"Tick often doubled"])
+                         [u"Tick all", u"Untick all", u"Tick often doubled"])
         moved = list(dialog.turn_buttons) + [dialog.build_button, page.build_button, page.copy_button, page.all_button]
         self.assertEqual([r for r in RecordedRow.made if r is not row and any(w in r.widgets for w in moved)], [],
                          "no tick or build button left in a tab")
@@ -3867,6 +3867,64 @@ class SameCodeTests(unittest.TestCase):
         self.assertFalse(fc.same_code(old, old.replace(u"Alternate A", u"Alternate  A")))
         self.assertFalse(fc.same_code(old, old.replace(u'"Alternate A"', u'"Alternate A "')))
         self.assertTrue(fc.same_code(old, u'feature ss01 { featureNames {name  "Alternate A" ;};\r\nsub a by a.ss01; } ss01;'))
+
+
+class QuietHandleTests(unittest.TestCase):
+    """The review of November 23, image 11: under the third tab's two previews, the dotted handle between the
+    tabs and the code met the line between them. While that tab shows, the handle is one pixel thin (no dots,
+    still dragged: Qt takes drags on five pixels around it), and given its width back with another tab."""
+
+    class Handle(object):
+        def __init__(self):
+            self.done = []
+
+        def clearMask(self):
+            self.done.append("mask off")
+
+        def setContentsMargins(self, *margins):
+            self.done.append(margins)
+
+    class Splitter(object):
+        def __init__(self, width=5):
+            self.handleWidth, self.set, self.handles = width, [], [None, QuietHandleTests.Handle(), QuietHandleTests.Handle()]
+
+        def setHandleWidth(self, width):
+            self.handleWidth = width
+            self.set.append(width)
+
+        def count(self):
+            return 3
+
+        def handle(self, index):
+            return self.handles[index]
+
+    def dialog(self, alternates=True):
+        owner = type("Owner", (), {"splitter": self.Splitter(), "alternates": object() if alternates else None,
+                                   "handle_width": None, "QUIET_HANDLE": fc.FeatureCodeDialog.QUIET_HANDLE})()
+        owner.quiet = lambda quiet: fc.FeatureCodeDialog.quiet_handle.__get__(owner)(quiet)
+        return owner
+
+    def test_the_handle_is_thin_under_the_third_tab_and_its_own_width_elsewhere(self):
+        owner = self.dialog()
+        owner.quiet(True)
+        self.assertEqual(owner.splitter.set, [1], "one pixel: Fusion draws no dots for it")
+        self.assertEqual(owner.handle_width, 5, "the style's own width, kept to give back")
+        owner.quiet(True)
+        self.assertEqual(owner.splitter.set, [1], "asked once")
+        owner.quiet(False)
+        self.assertEqual(owner.splitter.set, [1, 5])
+        for handle in owner.splitter.handles[1:]:
+            self.assertEqual(handle.done, ["mask off", (0, 0, 0, 0)],
+                             "the shape Qt cut the thin handle to is taken off: a wide one draws and is dragged whole")
+        owner.quiet(False)
+        self.assertEqual(owner.splitter.set, [1, 5], "as it was already: nothing asked")
+
+    def test_a_splitter_that_cannot_say_its_width_changes_nothing(self):
+        owner = self.dialog()
+        owner.splitter = object()
+        owner.quiet(True)  # (nothing raised)
+        self.assertEqual(fc.ALTERNATES_TAB, 2)
+        self.assertEqual(fc.TABS[fc.ALTERNATES_TAB], u"Stylistic alternates")
 
 
 if __name__ == "__main__":

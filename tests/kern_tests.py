@@ -5105,7 +5105,7 @@ class WindowFilterTests(unittest.TestCase):
         measure = lambda text: 7 * len(text)
         self.assertIn(u"It is checked.<br><br>Click to write it.",
                       ak.tip_html(u"It is checked.\nClick to write it.", 500, measure))
-        self.assertIn(u"<i>Now</i>.<br><br>Then", ak.tip_html(u"<i>Now</i>.<br>Then", 500, measure))
+        self.assertIn(u"<i>Now</i>%s.<br><br>Then" % ak.ITALIC_GAP, ak.tip_html(u"<i>Now</i>.<br>Then", 500, measure))
         self.assertIn(u"A V<br>T o", ak.tip_html(u"A V\nT o", 500, measure), "a list, a line each, stays")
         self.assertNotIn(u"<br><br><br>", ak.tip_html(u"One.<br><br>Two.", 500, measure))
 
@@ -5186,6 +5186,106 @@ class WindowFilterTests(unittest.TestCase):
         self.assertFalse(ak.install_filters(window))
         watcher.eventFilter(window, self.Event(ak.CHILD_ADDED))  # (a child of the window itself)
         self.assertTrue(ak.install_filters(window))
+
+
+class KerningCheckPreviewRuleTests(unittest.TestCase):
+    """The review of November 23 (image 12): Kerning Check's two lines showed between three empty previews.
+    A preview's caption and the line before it show only while that preview has a pair drawn."""
+
+    class Part(object):
+        def __init__(self):
+            self.visible, self.properties, self.text, self.pixmap = True, {}, None, None
+
+        def setVisible(self, on):
+            self.visible = on
+
+        def setProperty(self, name, value):
+            self.properties[name] = value
+
+        def property(self, name):
+            return self.properties.get(name)
+
+        def setText(self, text):
+            self.text = text
+
+        def clear(self):
+            self.text, self.pixmap = u"", None
+
+        def setPixmap(self, pixmap):
+            self.pixmap = pixmap
+
+    class Picture(object):
+        def width(self):
+            return 120
+
+    def dialog(self):
+        part = self.Part
+        dialog = kc.KerningCheckDialog.__new__(kc.KerningCheckDialog)  # (its window needs FontLab)
+        dialog.ak = ak
+        dialog.previews = [part(), part(), part()]
+        dialog.preview_captions = [part(), part(), part()]
+        dialog.lines = [part(), part()]
+        dialog.preview_parts = [[dialog.preview_captions[0]], [dialog.lines[0], dialog.preview_captions[1]],
+                                [dialog.lines[1], dialog.preview_captions[2]]]
+        for parts in dialog.preview_parts:  # (as built)
+            ak.preview_filled(parts, False)
+        dialog.package = object()
+        dialog.update_buttons_soon = lambda: None
+        dialog.pair_picture = lambda left, right, value, room=False, width=None: self.Picture()
+        return dialog
+
+    @staticmethod
+    def shown(dialog):
+        return ([caption.visible for caption in dialog.preview_captions], [line.visible for line in dialog.lines])
+
+    def test_captions_and_lines_only_over_a_pair_drawn(self):
+        dialog = self.dialog()
+        self.assertEqual(self.shown(dialog), ([False] * 3, [False] * 2), "nothing selected yet")
+        self.assertTrue(all(p.property(ak.PREVIEW_EMPTY_PROP) for parts in dialog.preview_parts for p in parts),
+                        "marked empty: the shared no_font_states leaves them hidden with a font")
+        selected = [kc.Collision(u"T", u"o", -40, 5, -20, None, reference=(u"T", u"e"))]
+        dialog.selected_finding = lambda: selected[0]
+        dialog.update_previews()
+        self.assertEqual(self.shown(dialog), ([True] * 3, [True] * 2), "now, adjusted, and the base pair")
+        self.assertEqual([c.text for c in dialog.preview_captions], [u"Now: -40", u"Adjusted: -20", u"Base pair: -40"])
+        selected[0] = kc.Collision(u"T", u"o", -40, 5, -20, None)  # (no base pair: two previews)
+        dialog.update_previews()
+        self.assertEqual(self.shown(dialog), ([True, True, False], [True, False]),
+                         "no line beside the third preview's empty room, nor its caption")
+        selected[0] = None  # (nothing selected: only the hint, if any, in the middle preview's room)
+        dialog.update_previews()
+        self.assertEqual(self.shown(dialog), ([False] * 3, [False] * 2), "emptied: hidden again")
+        self.assertEqual(dialog.previews[1].text, dialog.preview_hint(), "the hint kept, without lines or captions")
+        self.assertTrue(all(p.property(ak.PREVIEW_EMPTY_PROP) for parts in dialog.preview_parts for p in parts))
+        dialog.package = None  # (the font closed: nothing to draw)
+        selected[0] = kc.Collision(u"T", u"o", -40, 5, -20, None)
+        dialog.update_previews()
+        self.assertEqual(self.shown(dialog), ([False] * 3, [False] * 2))
+
+    def test_lists_emptied_for_another_font_empty_the_previews(self):
+        class Tree(object):
+            def clear(self):
+                pass
+
+        calls = []
+        dialog = kc.KerningCheckDialog.__new__(kc.KerningCheckDialog)
+        dialog.collisions, dialog.cleanup, dialog.masters = [type("Tab", (), {"tree": Tree()})() for _ in range(3)]
+        dialog.current_font, dialog.package = lambda: None, object()
+        dialog.read_font = lambda: calls.append("read")
+        dialog.update_previews = lambda: calls.append("previews")
+        dialog.update_buttons = lambda: calls.append("buttons")
+        dialog.log = type("Log", (), {"add": lambda log, text, kind=None: None})()
+        self.assertFalse(dialog.same_font())
+        self.assertEqual(calls, ["read", "previews", "buttons"])
+
+    def test_the_parts_are_hidden_as_built(self):
+        with io.open(kc.__file__, encoding="utf-8") as handle:
+            source = handle.read()
+        init = source.split(u"class KerningCheckDialog")[1].split(u"\n    def current_font")[0]
+        built = init.split(u"self.preview_parts = []")[1].split(u"layout.addLayout(previews)")[0]
+        self.assertIn(u"self.preview_parts[-1].append(self.ak.separator(vertical=True))", built)
+        self.assertIn(u"self.preview_parts[-1].append(caption)", built)
+        self.assertIn(u"self.ak.preview_filled(self.preview_parts[-1], False)", built)
 
 
 class KerningCheckTableTests(unittest.TestCase):
@@ -5340,7 +5440,7 @@ class KerningCheckTableTests(unittest.TestCase):
         # (Tick, not Check, for check boxes: owner's image 261)
         self.assertEqual(logged[-1], u"<i>Tick all</i> ticked <b>3 pairs</b> (<b>2</b> of them in closed groups).")
         dialog.check_every(dialog.cleanup, False)
-        self.assertEqual(logged[-1], u"<i>Tick none</i> unticked <b>3 entries</b> (<b>2</b> of them in closed groups).")
+        self.assertEqual(logged[-1], u"<i>Untick all</i> unticked <b>3 entries</b> (<b>2</b> of them in closed groups).")
 
     def test_a_list_filled_says_what_the_pictures_room_is_for(self):
         # (live, 2026-11-16: the hint showed only once a pair was selected, then unselected)
@@ -5452,7 +5552,7 @@ class KerningCheckReviewTests(unittest.TestCase):
         self.assertLess(row.index(u"sentence_end(tab.settings)"), row.index(u"tab.settings.addWidget(self.collisions_button)"))
         self.assertIn(u"QLabel(\"Also list values smaller than\")", source)
         self.assertIn(u"QPushButton(TICK_ALL)", source)
-        self.assertEqual((kc.TICK_ALL, kc.TICK_NONE), (u"Tick all", u"Tick none"))
+        self.assertEqual((kc.TICK_ALL, kc.TICK_NONE), (u"Tick all", u"Untick all"))
 
     def test_the_collisions_line_is_right_at_zero_one_and_two(self):
         # (owner's image 229: "None of the 0 pairs kerned tighter comes within 41 units")
@@ -5900,7 +6000,7 @@ class AutoKerningListTests(unittest.TestCase):
         d.fill_table()
         d.tree.items[1].setCheckState(0, self.Qt.Checked)
         d.check_all(False)
-        self.assertEqual(d.logged[-1], ("info", u"<i>Tick none</i> unticked <b>2 pairs</b>."))
+        self.assertEqual(d.logged[-1], ("info", u"<i>Untick all</i> unticked <b>2 pairs</b>."))
         d.tree.items[1].setCheckState(0, self.Qt.Checked)
         d.check_all(True)
         self.assertEqual(d.logged[-1], ("info", u"<i>Tick new pairs</i> ticked <b>1 pair</b> and unticked <b>1</b>."),
@@ -6676,9 +6776,17 @@ class ReviewOfNov19Tests(unittest.TestCase):
         line, level = ak.compile_report(u"[F] glyph class not defined (text was \"@nope\")")
         self.assertNotIn(u"aalt", line)
 
-    def test_tabs_on_a_light_window_take_the_texts_color(self):
-        self.assertIn(u"color: palette(window-text);", ak.TAB_SHEET_LIGHT.split(u"}")[0])
-        self.assertIn(u"rgba(128, 128, 128, 255)", ak.TAB_SHEET.split(u"}")[0], "dark windows keep the mid gray")
+    def test_tabs_take_the_texts_color_on_either_window(self):
+        """Owner's image 352 (a light window), then the review of November 23, image 5 (a dark one): a tab not
+        chosen read as grayed out in a mid gray. Every tab takes the text's color; only a disabled one is gray."""
+        first = ak.TAB_SHEET.split(u"}")[0]
+        self.assertIn(u"color: palette(window-text);", first)
+        self.assertNotIn(u"rgba(128, 128, 128, 255)", ak.TAB_SHEET, "no mid gray for a tab that can be chosen")
+        self.assertIn(u"QTabBar::tab:disabled { color: rgba(128, 128, 128, 110); }", ak.TAB_SHEET)
+        self.assertIn(u"QTabBar::tab:selected { color: palette(window-text); border-bottom: 2px solid palette(highlight); }",
+                      ak.TAB_SHEET, "the chosen tab told by its underline")
+        self.assertEqual(ak.tab_sheet(object()), ak.TAB_SHEET, "whatever the bar's palette")
+        self.assertEqual(ak.TAB_SHEET_LIGHT, ak.TAB_SHEET)
         self.assertIn(ak.PALETTE_CHANGE, ak.WATCHED_EVENTS, "dark mode switched: the sheets follow")
 
     def test_an_open_list_is_as_wide_as_its_longest_choice(self):
@@ -6743,8 +6851,9 @@ class ReviewOfNov19Tests(unittest.TestCase):
     def test_grayed_fields_show_on_a_light_window(self):
         """Live 2026-11-19 (owner's image 366): on a light window, Windows' style filled a grayed field with the
         window's color, its frame a faint line, and Feature Code's empty field beside Glyphs vanished. Light
-        windows' fields take a darker gray; dark windows keep dark mode's, and a field set while light follows
-        the palette's again once dark."""
+        windows' fields take a darker gray while grayed. The review of November 23 (images 2 and 4): the usable
+        background was kept from the field's palette of the theme before, so every group is set from the
+        application's palette of now, and a dark window's field takes its window's palette whole again."""
         class Color(object):
             def __init__(self, value):
                 self.value = value.value if isinstance(value, Color) else value
@@ -6762,13 +6871,14 @@ class ReviewOfNov19Tests(unittest.TestCase):
                 return not self == other
 
         class Palette(object):
-            Disabled, Base, Window = "disabled", "base", "window"
+            Active, Inactive, Disabled, Base, Window = "active", "inactive", "disabled", "base", "window"
 
             def __init__(self, colors=None):
                 self.colors = dict(colors.colors) if isinstance(colors, Palette) else dict(colors or {})
 
             def color(self, *roles):
-                return self.colors[roles[-1] if len(roles) == 1 else roles]
+                key = roles[-1] if len(roles) == 1 else roles
+                return self.colors.get(key, Color(-1))  # (-1: nothing set, the window's own)
 
             def setColor(self, group, role, color):
                 self.colors[(group, role)] = color
@@ -6792,38 +6902,166 @@ class ReviewOfNov19Tests(unittest.TestCase):
             def setProperty(self, name, value):
                 self.props[name] = value
 
-        dark_base = Color(40)
-        app_palette = Palette({("disabled", "base"): dark_base})
+        def theme(window, base):
+            return Palette({"window": Color(window), ("active", "base"): Color(base),
+                            ("inactive", "base"): Color(base), ("disabled", "base"): Color(window)})
 
-        def palette_of(window):
-            return Palette({"window": Color(window), ("disabled", "base"): Color(window)})
-
-        field, spin = Widget(palette_of(240)), Widget(palette_of(240), kind="QAbstractSpinBox")
-        inner = Widget(palette_of(240), parent=spin)
-        dialog = type("Dialog", (), {"palette": palette_of(240)})()
+        app = {"palette": theme(240, 255)}
+        # (the fields' own palettes are the dark theme's still, as when a window hears of a switch to light)
+        field, spin = Widget(theme(40, 30)), Widget(theme(40, 30), kind="QAbstractSpinBox")
+        inner = Widget(theme(40, 30), parent=spin)
+        dialog = type("Dialog", (), {})()
         QtGui = type("QtGui", (), {"QColor": Color, "QPalette": Palette, "QLineEdit": "QLineEdit",
                                    "QAbstractSpinBox": "QAbstractSpinBox",
                                    "QApplication": type("App", (), {"instance": staticmethod(lambda: type(
-                                       "A", (), {"palette": lambda self: app_palette})())})})
+                                       "A", (), {"palette": lambda self: app["palette"]})())})})
         dialog.findChildren = lambda kind: {"QLineEdit": [field, inner], "QAbstractSpinBox": [spin]}[kind]
         real = ak._qt
         ak._qt = lambda: (None, QtGui)
         try:
             ak.light_fields(dialog)
             want = Color(240).darker(ak.LIGHT_FIELD_DARKER)
-            self.assertEqual(field.palette.color("disabled", "base"), want)
-            self.assertEqual(spin.palette.color("disabled", "base"), want)
+            for widget in (field, spin):
+                self.assertEqual(widget.palette.color("disabled", "base"), want)
+                self.assertEqual(widget.palette.color("active", "base"), Color(255),
+                                 "usable, the light theme's own: never the dark one its palette still held")
+                self.assertEqual(widget.palette.color("inactive", "base"), Color(255))
             self.assertEqual(inner.set, 0, "a spin box's own field is drawn by its box")
             ak.light_fields(dialog)
             self.assertEqual(field.set, 1, "set once")
-            untouched = Widget(palette_of(40))
+            untouched = Widget(theme(40, 30))
             dialog.findChildren = lambda kind: {"QLineEdit": [field, untouched], "QAbstractSpinBox": [spin]}[kind]
-            dialog.palette = palette_of(40)  # (dark mode switched on)
+            app["palette"] = theme(40, 30)  # (dark mode switched on)
             ak.light_fields(dialog)
-            self.assertEqual(field.palette.color("disabled", "base"), dark_base, "the dark palette's again")
+            self.assertEqual(field.palette.colors, {}, "its window's palette whole again: nothing of the light theme kept")
+            self.assertEqual(spin.palette.colors, {})
             self.assertEqual(untouched.set, 0, "a field never set here is left to dark mode")
+            sets = field.set
+            ak.light_fields(dialog)
+            self.assertEqual(field.set, sets, "taken back once")
+            app["palette"] = theme(240, 255)  # (and off again)
+            ak.light_fields(dialog)
+            self.assertEqual(field.palette.color("active", "base"), Color(255))
+            self.assertEqual(field.palette.color("disabled", "base"), want)
         finally:
             ak._qt = real
+
+
+class ReviewOfNov23Tests(unittest.TestCase):
+    """The owner's review of November 23 (thirteen images): the shared module's part."""
+
+    def test_italics_get_a_hair_of_room_after_them(self):
+        """Image 8: "Condense.otf in" read as "otfin". The interface font's italic is the upright one slanted,
+        each letter reaching one or two pixels past its width (measured live); a small no-break space follows
+        every italic run."""
+        gap = ak.ITALIC_GAP
+        self.assertEqual(ak.italic_gaps(u"Opening <i>a.otf</i> in FontLab"), u"Opening <i>a.otf</i>%s in FontLab" % gap)
+        self.assertEqual(ak.italic_gaps(u"<i>Now</i>: <i>Then</i>."), u"<i>Now</i>%s: <i>Then</i>%s." % (gap, gap))
+        once = ak.italic_gaps(u"<i>Tick all</i> and <b>bold</b>")
+        self.assertEqual(ak.italic_gaps(once), once, "given once: a text that has them is left as it is")
+        self.assertEqual(ak.italic_gaps(u"No italics, <b>bold</b>."), u"No italics, <b>bold</b>.")
+        self.assertEqual(ak.italic_gaps(u""), u"")
+        self.assertEqual(ak.italic_gaps(None), u"")
+        self.assertIn(u"&nbsp;", gap, "never a place where a line breaks")
+        self.assertNotIn(u"<i>", ak.i(u"plain").replace(u"<i>plain</i>", u""), "i() itself is as it was")
+
+    def test_status_lines_and_log_lines_show_their_italics_with_room(self):
+        self.assertIn(u"</i>%s" % ak.ITALIC_GAP, ak.italic_gaps(ak.sentences(u"Click <i>Analyze</i> first.")))
+        source = io.open(ak.__file__.replace(".pyc", ".py"), encoding="utf-8").read()
+        self.assertIn(u"italic_gaps(sentences(text))", source, "a status line's text")
+        self.assertIn(u"(stamp, italic_gaps(text))", source, "a log's line")
+
+    def test_a_tooltip_is_as_wide_as_qt_lays_its_text_out(self):
+        """Image 9: every tooltip had room after its text, the margin of an estimated width. With the text's
+        width as Qt lays it out, the tooltip is that wide and a pixel more; estimated when that fails."""
+        measure = lambda text: 7 * len(text)
+        asked = []
+
+        def exact(text):
+            asked.append(text)
+            return 151.2
+
+        laid_out = ak.tip_html(u"Tick glyphs or select a row first.", 500, measure, exact)
+        self.assertIn(u'width="%d"' % (152 + ak.TIP_EXACT_MARGIN), laid_out)
+        self.assertEqual(asked, [u"Tick glyphs or select a row first."], "the text as shown, measured once")
+        self.assertLess(ak.TIP_EXACT_MARGIN, ak.TIP_MARGIN)
+        self.assertIn(u'width="500"', ak.tip_html(u"Long.", 500, measure, lambda text: 2000.0), "never past its window's share")
+
+        def broken(text):
+            raise RuntimeError("no document")
+
+        self.assertIn(u'width="%d"' % (7 * len(u"Short.") + ak.TIP_MARGIN), ak.tip_html(u"Short.", 500, measure, broken))
+        italic = ak.tip_html(u"Click <i>Analyze</i> first.", 500, measure, exact)
+        self.assertIn(u"<i>Analyze</i>%s first." % ak.ITALIC_GAP, italic)
+        self.assertIn(ak.ITALIC_GAP, asked[-1], "measured with the room after its italics")
+
+    def test_a_windows_dropdown_lists_follow_a_switch_of_theme(self):
+        """Images 3 and 4: a dropdown's list kept the theme before (dark on a light window, then light on a dark
+        one). The list is in a popup, a window of its own, which the walk over a window's widgets left out."""
+        class Popup(object):
+            pass
+
+        class View(object):
+            def __init__(self, popup):
+                self.popup = popup
+
+            def parentWidget(self):
+                return self.popup
+
+        class Combo(object):
+            def __init__(self, view):
+                self._view = view
+
+            def view(self):
+                if self._view == "raises":
+                    raise RuntimeError("no list")
+                return self._view
+
+        one, two = Popup(), Popup()
+        combos = [Combo(View(one)), Combo(View(two)), Combo(View(one)), Combo(None), Combo("raises")]
+        window = type("Window", (), {"findChildren": lambda self, kind: combos})()
+        real = ak._qt
+        ak._qt = lambda: (None, type("QtGui", (), {"QComboBox": "QComboBox"}))
+        try:
+            self.assertEqual(ak.popup_windows(window), [one, two], "each popup once; a box without a list left out")
+            broken = type("Window", (), {"findChildren": lambda self, kind: 1 / 0})()
+            self.assertEqual(ak.popup_windows(broken), [])
+        finally:
+            ak._qt = real
+        source = io.open(ak.__file__.replace(".pyc", ".py"), encoding="utf-8").read()
+        self.assertIn(u"roots.extend(popup_windows(window))", source, "the walk a switch of theme makes takes them in")
+
+    def test_a_previews_captions_and_lines_show_only_with_something_to_preview(self):
+        """Images 6 and 12: captions over nothing (Auto Spacing), lines between empty previews (Kerning Check)."""
+        class Part(object):
+            def __init__(self):
+                self.props, self.visible, self.calls = {}, True, []
+
+            def setProperty(self, name, value):
+                self.props[name] = value
+
+            def property(self, name):
+                return self.props.get(name)
+
+            def setVisible(self, on):
+                self.visible = on
+                self.calls.append(on)
+
+        caption, line = Part(), Part()
+        ak.preview_filled([caption, None, line], False)
+        self.assertEqual((caption.visible, line.visible), (False, False))
+        self.assertTrue(caption.property(ak.PREVIEW_EMPTY_PROP) and line.property(ak.PREVIEW_EMPTY_PROP),
+                        "marked: a font coming does not show them again (no_font_states)")
+        caption.props[ak.NO_FONT_HIDDEN_PROP] = True
+        ak.preview_filled([caption, None, line], True)
+        self.assertEqual((caption.visible, line.visible), (True, True))
+        self.assertIsNone(caption.property(ak.PREVIEW_EMPTY_PROP))
+        self.assertIsNone(caption.property(ak.NO_FONT_HIDDEN_PROP))
+        ak.preview_filled(None, True)  # (nothing raised)
+        ak.preview_filled([object()], False)  # (a part that takes none of it: nothing raised)
+        source = io.open(ak.__file__.replace(".pyc", ".py"), encoding="utf-8").read()
+        self.assertIn(u"(has_font or heads_section(line)) and not line.property(PREVIEW_EMPTY_PROP)", source)
+        self.assertIn(u"if label.property(PREVIEW_EMPTY_PROP):", source)
 
 
 class ReleaseCachesTests(unittest.TestCase):

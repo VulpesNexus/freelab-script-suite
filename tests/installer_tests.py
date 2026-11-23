@@ -114,6 +114,9 @@ class InstallerTests(unittest.TestCase):
         self.assertTrue((self.scripts / "FreeLab" / "anchor_model.json").exists(), "and Glyph Compose's anchors")
         self.assertTrue((self.scripts / "FreeLab" / "ligature_model.json").exists(), "the corpus's ligatures")
         self.assertTrue((self.scripts / "FreeLab" / "reference_model.json").exists(), "and its references' spacing")
+        self.assertEqual((self.scripts / "FreeLab" / "freelab_tabs_settings.py").read_bytes(),
+                         (ROOT / "windows" / "freelab_tabs_settings.py").read_bytes(),
+                         "Tab Docking Settings beside Tab Docking, which it loads")
         before = self.read()
         code, out = self.run_installer()
         self.assertEqual((code, self.read()), (0, before), "a second install changes nothing")
