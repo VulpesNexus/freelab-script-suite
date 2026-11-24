@@ -19,7 +19,7 @@ When anything required could not be done, the installer lists it and ends with e
 
 ## FreeLang Extras
 
-Font Check draws its lists in FreeLang, a font of five files ([FONT-CHECK.md](FONT-CHECK.md#five-files)). The repository holds the first, *FreeLang Essential* (Latin, Greek, Cyrillic, and the other scripts in common modern use). The four others come with each [release](https://github.com/VulpesNexus/freelab-script-suite/releases) as *FreeLang-Extras.zip* (17.6 MB, 33.0 MB unpacked), which *tools/freelang_extras.py* packs: FreeLang CJK, FreeLang+ General (every other script and symbol block), FreeLang+ Mongolian–Tibetan, and FreeLang+ Duployan. Unpack it into *checks/language_font* before running the installer. Without them, Font Check still works and takes those scripts from Windows' own fonts, which draw most of them in another design and some as boxes.
+Font Check draws its lists in FreeLang, a font of five files ([FONT-CHECK.md](FONT-CHECK.md#five-files)). The repository holds the first, *FreeLang Essential* (Latin, Greek, Cyrillic, and the other scripts in common modern use). The four others come with each [release](https://github.com/VulpesNexus/freelab-script-suite/releases) as *FreeLang-Extras.zip* (15.6 MB, 29.2 MB unpacked), which *tools/freelang_extras.py* packs: FreeLang CJK, FreeLang+ General (every other script and symbol block), FreeLang+ Mongolian–Tibetan, and FreeLang+ Duployan. Unpack it into *checks/language_font* before running the installer. Without them, Font Check still works and takes those scripts from Windows' own fonts, which draw most of them in another design and some as boxes.
 
 ## macOS
 
