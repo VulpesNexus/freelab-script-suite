@@ -1739,7 +1739,10 @@ GRAYSCALE_TEXT_CLASSES = ("YSelector",)
 # orange and blue fringes on the dark cells (the Glyph window's metrics table: the owner, November 24). Drawn
 # in grays before the mapping, as fields are.
 GRAY_INK_CLASSES = ("MetricsTable",)
-STYLE_DRAWN_BUTTONS = ("QRadioButton", "QCheckBox", "QPushButton")  # never ink by render detection
+# (a slider too: Fusion draws its groove and handle from the dark palette, and taken for ink, Autotrace's
+# handles came out light with ragged corners: the owner, November 24; not seen again here, Autotrace needing
+# a picture in the glyph)
+STYLE_DRAWN_BUTTONS = ("QRadioButton", "QCheckBox", "QPushButton", "QSlider")  # never ink by render detection
 # Bars dark mode's stylesheet already darkens inside a window drawn through the ink effect: kept
 # out of its mapping (which garbled their labels) and drawn with their text's ClearType fringes
 # made gray. (parent class, object name)
@@ -2543,6 +2546,87 @@ def _colored_part(image, area):
     return part if any_colored else None
 
 
+# A text button FontLab paints itself, light whatever its stylesheet says (Replace Element's Elements and
+# Glyphs: white, pale blue when checked), with its text in the color the stylesheet gives, which dark mode
+# has made light: light on light, and mapped, dark on dark (the owner, November 24: "two bad buttons"). Its
+# text is made dark by a rule of its own, so that it is the light button FontLab meant, and it is mapped
+# whole, as an island.
+BUTTON_INK = u"\nQToolButton{color:#000000;}"
+
+
+# Icon buttons FontLab paints itself, white, and gray when checked (the Font window's five view buttons). Their
+# icons were mapped for a dark face, the buttons kept as drawn for their white marks, and so they stood white
+# in the dark bar, or dark once something else mapped them: "the only buttons that still keep stale painting"
+# (the owner, November 24). One found white marks its siblings too: a checked one is gray when looked at.
+LIGHT_FACE_PROP = "freelab_light_face"
+LIGHT_FACE_SHARE = 0.6  # of its opaque pixels near white: a white face (a checked one, gray under a white icon: 0.37)
+
+
+def _light_face_button(widget, look):
+    """Whether a tool button is one FontLab paints white itself: marked so already, or (look: it may be
+    rendered now) found white, its siblings with icons then marked with it and looked at again. Never raises."""
+    try:
+        if not widget.inherits("QToolButton"):
+            return False
+        if widget.property(LIGHT_FACE_PROP):
+            return True
+        icon = _prop(widget, "icon")
+        if not look or icon is None or icon.isNull() or _class_name(widget) == "QtColorPicker":
+            return False
+        opaque, white, _black = image_stats(own_render(widget))
+        if not opaque or white < LIGHT_FACE_SHARE * opaque:
+            return False
+        widget.setProperty(LIGHT_FACE_PROP, True)
+        parent = widget.parentWidget()
+        for sibling in (parent.children() if parent is not None else ()):
+            if sibling is widget or not sibling.isWidgetType() or not sibling.inherits("QToolButton"):
+                continue
+            other = _prop(sibling, "icon")
+            if other is None or other.isNull() or _class_name(sibling) == "QtColorPicker" or not _prop(sibling, "checkable"):
+                continue
+            sibling.setProperty(LIGHT_FACE_PROP, True)
+            sibling.setProperty(CHECKED_PROP, None)  # (looked at again at the next sweep)
+        return True
+    except Exception:
+        return False
+
+
+def _light_faced_text_button(widget):
+    """A tool button with text and no icon whose text the palette makes light, found to paint light all the
+    same (the caller's ink detection). Never raises."""
+    try:
+        if not widget.inherits("QToolButton") or not (_prop(widget, "text") or u"").strip():
+            return False
+        icon = _prop(widget, "icon")
+        if icon is not None and not icon.isNull():
+            return False
+        return _color_lightness(widget.palette.color(_gui("QPalette").ButtonText)) >= LIGHT_LABEL_MIN
+    except Exception:
+        return False
+
+
+def _dark_button_text(widget):
+    own = _prop(widget, "styleSheet") or u""
+    if own == widget.property(DARK_SHEET_PROP):
+        return
+    widget.setProperty(SHEET_PROP, own)
+    widget.setProperty(DARK_SHEET_PROP, own + BUTTON_INK)
+    widget.setStyleSheet(own + BUTTON_INK)
+
+
+def _in_fontlab_view(widget):
+    """Whether a widget is one of FontLab's own lists or its viewport (not a FreeLab tool's). Never raises."""
+    try:
+        if widget is None:
+            return False
+        view = widget if widget.inherits("QAbstractItemView") else widget.parentWidget()
+        if view is None or not view.inherits("QAbstractItemView"):
+            return False
+        return view.window().property(FREELAB_WINDOW_PROP) is None
+    except Exception:
+        return False
+
+
 def _frame_picker(widget):
     own = _prop(widget, "styleSheet") or u""
     if own == widget.property(DARK_SHEET_PROP):
@@ -2754,6 +2838,8 @@ def detect_light(widget):
     width, height = _prop(widget, "width"), _prop(widget, "height")
     if width * height < AUTO_MIN_AREA or widget.isWindow() or _shows_picture(widget):
         return None
+    if widget.inherits("QSlider"):
+        return None  # the style's (see STYLE_DRAWN_BUTTONS)
     covered = sum(_prop(c, "width") * _prop(c, "height") for c in _visible_child_widgets(widget))
     mostly_own = covered < AUTO_OWN_SHARE * width * height
     return classify_render(width, height, image_stats(own_render(widget)), mostly_own)
@@ -3157,6 +3243,7 @@ def process(widget):
     widget.setProperty(SEEN_PROP, True)
     _drop_stray_effect(widget)
     visible_unchecked = widget.isVisible() and _unchecked(widget)
+    first_look = visible_unchecked  # (kept: the rules below switch visible_unchecked off as they decide)
     if visible_unchecked:
         widget.setProperty(CHECKED_PROP, _size_key(widget))  # sweeps need not queue it again at this size
     name = _class_name(widget)
@@ -3214,6 +3301,17 @@ def process(widget):
             if found == "island":
                 _make_island(widget)
                 return
+    if _light_face_button(widget, kind is None and first_look):
+        # FontLab paints it itself, white (gray when checked), whatever its stylesheet says: mapped as ink with
+        # the icon FontLab gave it (see _light_face_button)
+        record = _record(widget)
+        if "icon" in record:
+            widget.setIcon(record.pop("icon"))  # (the one mapped for a dark face goes)
+        else:
+            _show_original_icon(widget)
+        widget.setProperty(ISLAND_PROP, "ink")
+        _set_effect(widget, record, "ink")
+        return
     _darken_icons(widget)
     if widget.inherits("QAbstractButton") and _icon_has_white_artwork(_prop(widget, "icon")):
         _protect(widget)  # its white mark as it is: the dock's keyed effect turned the white middles dark
@@ -3222,6 +3320,12 @@ def process(widget):
         if found:
             widget.setProperty(ISLAND_PROP, found)
             kind = found
+    if kind == "ink" and widget.property(ISLAND_PROP) == "ink" and _light_faced_text_button(widget):
+        # (found to paint light, by either look above: see BUTTON_INK)
+        _dark_button_text(widget)
+        widget.setProperty(ISLAND_PROP, "island")
+        _make_island(widget)
+        return
     if kind in ("ink", "edges", "title", "subpixel", "defringe"):
         _set_effect(widget, _record(widget), kind)
     elif kind == "keyed" and widget.isVisible():
@@ -3786,6 +3890,7 @@ def _framed_style(fusion):
         antialiasing, no_brush = QPainter.Antialiasing, _gui("QBrush")()  # an empty brush fills nothing
         check, radio = int(QStyle.PE_IndicatorCheckBox), int(QStyle.PE_IndicatorRadioButton)
         panel_menu = int(getattr(QStyle, "PE_PanelMenu", -1))
+        focus_rect = int(getattr(QStyle, "PE_FrameFocusRect", -1))
         frame_menu = int(getattr(QStyle, "PE_FrameMenu", -1))
         window_role = _gui("QPalette").Window
 
@@ -3801,6 +3906,11 @@ def _framed_style(fusion):
                     # A menu's tick, as FontLab's light look has it (the owner, November 23): the mark alone, in
                     # the text's color, and nothing for an entry not ticked. Fusion's own is a filled box.
                     if which == check and _in_menu(widget) and dark(option) and _menu_tick(option, painter, widget):
+                        return
+                    # No focus frame around the current row of FontLab's lists: Fusion draws it dark, and the
+                    # list's mapping, which turns dark ink light, made it a white frame around the row last
+                    # clicked (the Actions list: the owner, November 24). The row's highlight shows where it is.
+                    if which == focus_rect and which >= 0 and _in_fontlab_view(widget):
                         return
                 except Exception as exc:  # (drawn as the style draws it, below)
                     _note_error("style", exc)

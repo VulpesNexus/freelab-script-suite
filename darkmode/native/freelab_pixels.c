@@ -2590,6 +2590,53 @@ static int find_glyph_icons(const uint32_t *p, int64_t count, int64_t width)
     return 1;
 }
 
+/* Whether a ClearType fringe is dark text's on a white ground: a near-white, low-color pixel within reach
+ * along its row, and no pixel there lighter than it by much that is colored (light text's fringes on a dark
+ * or colored ground have none), and none of pure white (see DARK_TEXT_PURE_WHITE). */
+#define DARK_TEXT_REACH 4
+#define DARK_TEXT_VETO_REACH 12 /* pure white this near, along the row: not a tag */
+#define DARK_TEXT_PAPER_HLS 0.9
+#define DARK_TEXT_PURE_WHITE 253 /* every channel: FontLab's tags and pills are off-white (f8f8f9) */
+static int dark_text_fringe(const uint32_t *p, int64_t i, int64_t width, int64_t count)
+{
+    int64_t x = i % width, d;
+    int found = 0;
+    for (d = -DARK_TEXT_VETO_REACH; d <= DARK_TEXT_VETO_REACH; d++) {
+        const uint8_t *q;
+        if (d == 0 || x + d < 0 || x + d >= width || i + d < 0 || i + d >= count)
+            continue;
+        q = (const uint8_t *)&p[i + d];
+        if (q[3] < ANCHOR_MIN_ALPHA)
+            continue;
+        if (q[0] >= DARK_TEXT_PURE_WHITE && q[1] >= DARK_TEXT_PURE_WHITE && q[2] >= DARK_TEXT_PURE_WHITE)
+            return 0; /* on pure white: TrueType Hinting's preview, whose ClearType colors are what it shows */
+        if (d < -DARK_TEXT_REACH || d > DARK_TEXT_REACH)
+            continue;
+        /* the tag's ground: off-white, flat (the same color twice running: smoothing never is) */
+        if (spread_of(q) < CLEARTYPE_MIN_SPREAD && lightness(q[2], q[1], q[0]) >= DARK_TEXT_PAPER_HLS
+            && ((x + d + 1 < width && i + d + 1 < count && p[i + d + 1] == p[i + d])
+                || (x + d - 1 >= 0 && i + d - 1 >= 0 && p[i + d - 1] == p[i + d])))
+            found = 1;
+    }
+    /* above and below too: inside a word no ground runs flat along the row, but the tag's does just over
+     * and under the line of text */
+    for (d = -DARK_TEXT_VETO_REACH; d <= DARK_TEXT_VETO_REACH; d++) {
+        const uint8_t *q;
+        int64_t at = i + d * width;
+        if (d == 0 || at < 0 || at >= count)
+            continue;
+        q = (const uint8_t *)&p[at];
+        if (q[3] < ANCHOR_MIN_ALPHA)
+            continue;
+        if (q[0] >= DARK_TEXT_PURE_WHITE && q[1] >= DARK_TEXT_PURE_WHITE && q[2] >= DARK_TEXT_PURE_WHITE)
+            return 0;
+        if (spread_of(q) < CLEARTYPE_MIN_SPREAD && lightness(q[2], q[1], q[0]) >= DARK_TEXT_PAPER_HLS
+            && ((x + 1 < width && at + 1 < count && p[at + 1] == p[at]) || (x - 1 >= 0 && at - 1 >= 0 && p[at - 1] == p[at])))
+            found = 1;
+    }
+    return found;
+}
+
 EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width, int mode, double dark_l,
                                    double light_l, double keep_tint, double main_default, int apply)
 {
@@ -2784,6 +2831,15 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
             continue;
         }
         c = v & 0xffffff;
+        if (fringes && white_mark[i] == 3 && dark_text_fringe(p, i, width, count)) {
+            /* ClearType's smoothing of dark text on white, kept content (a FontAudit caption on its white tag,
+             * the sizes under TrueType Hinting's preview): each channel holds another third of the stroke,
+             * so the pixel's own lightness is a third or two of the ink at most, and turned over, thin text
+             * came out dim, most of it fringe (the owner, 2026-11-24). Its darkest channel says how much ink
+             * the stroke has there: mapped from that, as gray. */
+            uint32_t m = (uint32_t)min_channel((const uint8_t *)&v);
+            c = (m << 16) | (m << 8) | m;
+        }
         if (mode == ANCHORS_SUBPIXEL) {
             int a_here = local ? a_index[i] : -1;
             /* only surfaces map as anchors: ClearType's frequent fringe colors are anchors too, and
