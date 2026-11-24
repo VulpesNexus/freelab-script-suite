@@ -641,7 +641,7 @@ class AddTests(unittest.TestCase):
         self.assertEqual(fc.selection_title(None), u"Select language, character set, or family",
                          "the owner's caption: the tab works on families and character sets too")
         self.assertEqual(fc.selection_title(wolof), u"Wolof (2)")
-        # (a tick's text takes no period: it names an option, owner's image 306)
+        # (a tick's caption that is a sentence ends with its period, owner's image 324)
         self.assertEqual(fc.absent_caption(48), u"Show the 48 scripts whose glyphs are fully missing from the font.")
         self.assertEqual(fc.absent_caption(1), u"Show the 1 script whose glyphs are fully missing from the font.")
 
@@ -2852,6 +2852,11 @@ class DiagramTests(unittest.TestCase):
         self.assertEqual(texts[:2], [("warn", u"Windows clips 1 glyph at the top, up to 82 units (Aring)"),
                                      ("warn", u"Windows clips 1 glyph at the bottom, up to 50 units (g)")])
         self.assertEqual(lines[0].glyphs, [u"Aring"])
+        # (the review of 2026-11-24: one unit over is "1 unit", through counted)
+        one = [fc.Extent("Aring", 0xC5, "B", 0, 1001), fc.Extent("Ccedilla", 0xC7, "B", -252, 700)]
+        self.assertEqual([line.text for line in fc.check_lines(m, one, fc.check_metrics(m, one))][:2],
+                         [u"Windows clips 1 glyph at the top, up to 1 unit (Aring)",
+                          u"Windows clips 1 glyph at the bottom, up to 2 units (Ccedilla)"])
         for passed in (u"Use Typo Metrics is on", u"hhea and typo values match", u"Line gaps are 0",
                        u"The line is 120% of the em", u(0xC0) + u" stays under the line's ascender",
                        u"Capitals are centered in the line"):
@@ -3018,7 +3023,8 @@ class FixPlanTests(unittest.TestCase):
         self.assertEqual(fc.fix_state(found), "some")
         plan = fc.plan_fixes(reference, bold)
         self.assertEqual(([at for at, _, _, _ in plan.contours], plan.order, plan.components), ([0], None, None))
-        self.assertEqual(fc.fix_sentence(found), u"Fix sets the direction right; the node count (add or remove nodes), "
+        self.assertEqual(fc.fix_sentence(found), u"Font Check can set the direction right; the node count (add or "
+                                                 u"remove nodes), "
                                                  u"the components (add or remove them), and the anchors (add or remove "
                                                  u"them) need the designer.")
         types = fc.Outline([fc.Contour([(0, 0, u"on"), (100, 0, u"off"), (100, 100, u"on"), (0, 100, u"on")])])
@@ -3068,7 +3074,21 @@ class FixPlanTests(unittest.TestCase):
         I = fc.Incompatibility
         fixable = [I(u"o", u"Bold", 1, "direction", u"", True), I(u"o", u"Bold", 2, "start", u"", True)]
         self.assertEqual(fc.fix_state(fixable), "all")
-        self.assertEqual(fc.fix_sentence(fixable), u"Fix sets the direction and the start point right.")
+        self.assertEqual(fc.fix_sentence(fixable), u"Font Check can set the direction and the start point right.")
+        # (no button is named "Fix": the help and the log name the real ones, or Font Check itself)
+        self.assertNotIn(u"<i>Fix</i>,", fc.HELP)
+        self.assertIn(u"<i>Fix ticked glyphs</i>, <i>Fix this</i>, or", fc.HELP)
+        import io
+        with io.open(os.path.join(os.path.dirname(os.path.abspath(fc.__file__)), "freelab_font_check.py"),
+                     encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertNotIn(u"problems Fix sets right: %s", source)
+        self.assertIn(u"problems Font Check can set right: %s", source)
+        self.assertNotIn(u"Install FreeLab again", source)
+        # (the dropdown is captioned Display: and has five choices, all named)
+        self.assertIn(u"<i>Display</i>, at the top", fc.HELP)
+        self.assertIn(u"the high-value ones only.", fc.HELP)
+        self.assertEqual(len(fc.STATUS_FILTERS), 5)
         designer = [I(u"a", u"Bold", None, "missing", u"")]
         self.assertEqual(fc.fix_sentence(designer), u"Needs the designer: the missing layer (add it).")
         self.assertEqual(fc.FIX_LABELS[fc.fix_state(designer)], u"Needs the designer")
@@ -3524,6 +3544,17 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(dialog.glyph_window_text(), u"".join(sorted(target.items, key=fc.code_points)),
                          "none checked: the selected row")
         self.assertIn(u"selected row's", dialog.glyph_window_tip())
+        # (the review of 2026-11-24: the window's name in italics, as in the button's first help; rich text)
+        self.assertIn(u"in a <i>Glyph</i> window", dialog.glyph_window_tip())
+        self.assertIn(u"<br>A double-click", dialog.glyph_window_tip())
+        # Build with Glyph Compose: the rows arrive ticked there, and Font Check comes back once all are built
+        self.assertIn(u"listed alone and ticked", fc.HANDOFF_HELP)
+        self.assertIn(u"<i>Font Check</i> opens again in its place", fc.HANDOFF_HELP)
+        self.assertNotIn(u"you tick them there", fc.HANDOFF_HELP)
+        with open(fc.__file__.replace(".pyc", ".py"), "rb") as handle:
+            source = handle.read().decode("utf-8")
+        self.assertIn(u"left out by <i>Display</i>", source, "the caption's name since the rename")
+        self.assertNotIn(u"left out by <i>Languages</i>", source)
         dialog.selected_row = lambda: None
         self.assertEqual(dialog.glyph_window_text(), u"")
         self.assertTrue(dialog.glyph_window_tip().startswith(u"Tick glyphs or select a row first."))
@@ -4200,9 +4231,15 @@ class DialogTests(unittest.TestCase):
         dialog.open_glyph_text = lambda text: opened.append(text)
         dialog.check_selected()
         self.assertEqual(said, [u"1 glyph reaches below the line's descender: %s." % self.ak.glyph_name_links([u"uni05BB"])])
+        dialog.package.by_name[u"uni05BB"] = FakeGlyph(u"uni05BB", 0x5BB, {})
         self.assertIs(dialog.log_link(u"glyphname:uni05BB"), True)
         self.assertEqual(opened, [u"/uni05BB"])
         self.assertIs(dialog.log_link(u"https://example.org"), False, "left to the log")
+        # A glyph named by its name (a fix's line: ak.glyph_name_link) opens the same way; one gone says so
+        self.assertIs(dialog.log_link(self.ak.glyph_name_link(u"eacute").split(u'"')[1]), True)
+        self.assertEqual(opened, [u"/uni05BB", u"/eacute"])
+        self.assertIs(dialog.log_link(u"glyphname:gone"), True)
+        self.assertEqual((opened[-1], said[-1]), (u"/eacute", u"The font does not have that glyph now."))
 
     def test_scripts_list_may_shrink_in_a_short_window(self):
         """The owner asked what happens at 480p: the scripts' list had a fixed height of six rows, which held
@@ -4862,6 +4899,70 @@ class DialogTests(unittest.TestCase):
                          [("all", False), ("buildable", False), ("none", False)])
         self.assertTrue(all(u"No glyph is listed" in button.toolTip for button in dialog.check_buttons.values()))
 
+    def test_cancel_sits_before_close_usable_while_it_checks_not_while_it_fixes(self):
+        """The owner, 2026-11-24: a Cancel left of Close, grayed but while work that can stop runs (ak.cancel_button),
+        as Esc stops it; its help says what a stop leaves."""
+        import io
+        import qtfakes
+        rows = []
+
+        class Row(Anything):
+            def __init__(self, *args):
+                self.items = []
+                rows.append(self)
+
+            def addWidget(self, widget, *args):
+                self.items.append(widget)
+
+            def addStretch(self, *args):
+                self.items.append(None)
+
+            def count(self):
+                return len(self.items)
+
+            def itemAt(self, k):
+                held = self.items[k]
+                return type("Item", (Anything,), {"widget": lambda item: held})()
+
+            def insertWidget(self, k, widget):
+                self.items.insert(k, widget)
+
+        classes = sys.modules["PythonQt"].QtGui.classes
+        before = classes.get("QHBoxLayout")
+        classes["QHBoxLayout"] = Row
+        self.addCleanup(lambda: classes.pop("QHBoxLayout") if before is None else classes.update(QHBoxLayout=before))
+        dialog = self.dialog()
+        bottom = [row for row in rows if dialog.close_button in row.items][0]
+        self.assertEqual(bottom.items[-2:], [dialog.cancel_button, dialog.close_button], "right before Close")
+        with io.open(fc.__file__.replace(".pyc", ".py"), encoding="utf-8") as handle:
+            self.assertIn(u"buttons.addWidget(self.close_button)\n        ak.cancel_button(self, buttons, "
+                          u"self.close_button, CANCEL_NOTE)", handle.read())
+        # (PythonQt's buttons are the fakes' nothing-doing ones here: one as the shared function makes it, to read)
+        row, button, close = qtfakes.cancel_made(self.ak, dialog, fc.CANCEL_NOTE, (u"Fix ticked glyphs",))
+        self.assertFalse(button.enabled, "grayed while nothing runs")
+        self.assertEqual(button.whats, self.ak.CANCEL_HELP + u" A check or a listing stopped changes nothing in the font.")
+        ak = self.ak
+        real = ak.busy_start, ak.busy_progress, ak.busy_end
+
+        def restore():
+            ak.busy_start, ak.busy_progress, ak.busy_end = real
+        self.addCleanup(restore)
+        ak.busy_start = lambda owner, what=u"", stoppable=True: None  # (the real ones need a window)
+        ak.busy_progress = lambda owner, what=None, part=None, force=False, stoppable=True: None
+        ak.busy_end = lambda owner: None
+        seen = qtfakes.follow_cancel(self, ak)
+        dialog.reference.currentText, dialog.reference.currentIndex = u"Regular", 0
+        for _, _, chip in dialog.chips:
+            chip.checked = True
+        dialog.check_masters()
+        self.assertEqual(seen, [(u"Comparing the masters", True, True), (None, None, False)], "usable while it checks")
+        del seen[:]
+        dialog.log.add = lambda text, level="info": None
+        dialog.fix_glyphs([u"o"])
+        self.assertEqual(seen[:2], [(u"Fixing the glyphs", False, False), (None, None, False)], "grayed while it fixes")
+        self.assertEqual(seen[2:], [(u"Comparing the masters", True, True), (None, None, False)],
+                         "usable as the masters are compared again")
+
     def test_fix(self):
         dialog = self.dialog()
         dialog.reference.currentText, dialog.reference.currentIndex = u"Regular", 0
@@ -4876,7 +4977,8 @@ class DialogTests(unittest.TestCase):
         dialog.fix_glyphs([u"o", u"i", u"Hacute", u"x"])
         # (what the font still does wrong in amber, as every line that says so: owner's image 242)
         self.assertEqual([(level, text) for level, text in logged if level in ("error", "warning")],
-                         [("warning", u"<b>1 glyph</b> still has problems that need the designer: x.")], logged)
+                         [("warning", u"<b>1 glyph</b> still has problems that need the designer: %s."
+                           % self.ak.glyph_name_link(u"x"))], logged)
         found = sorted((f.glyph, f.master, f.kind) for f in dialog.masters.findings)
         self.assertEqual(found, [(u"x", u"Bold", "nodes")], "what needs the designer only")
         self.assertEqual([c.points for c in package.findName(u"o").getLayerByName(u"Bold").shapes[0].contours],
@@ -4892,6 +4994,9 @@ class DialogTests(unittest.TestCase):
         self.assertTrue(done and u"3 glyph layers" in done[0], logged)
         self.assertIn(u"contour 1 reversed", done[0])
         self.assertTrue(any(u"need the designer" in text and u"x" in text for _, text in logged), logged)
+        # Each glyph fixed named by its name, a link that opens it (owner's request of 2026-11-24)
+        self.assertIn(u"%s in Bold (" % self.ak.glyph_name_link(u"o"), done[0])
+        self.assertNotIn(u"&lt;", done[0], "no tag escaped into text")
 
     def test_write_metrics(self):
         dialog = self.dialog()

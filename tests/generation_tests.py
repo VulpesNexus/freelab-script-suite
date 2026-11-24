@@ -119,6 +119,12 @@ class FakeFont(gg.Font):
     def dnom(self, digit):
         return self.forms.get(("dnom", digit))
 
+    def form(self, name, suffixes):  # (as Feature Code's forms_index reads names: n.sups, h.sc)
+        for suffix in suffixes:
+            if u"%s.%s" % (name, suffix) in self.glyphs:
+                return u"%s.%s" % (name, suffix)
+        return None
+
 
 def plan(font=None, existing=False, settings=None):
     planner = gg.Planner(DATA, font or FakeFont(), settings, existing)
@@ -130,14 +136,17 @@ class TableTests(unittest.TestCase):
     def test_first_scope(self):
         entries = DATA["entries"]
         # (the table's, the squared words and abbreviations of report 177, and the compatibility characters of
-        # 2026-11-18: 212 Kangxi radicals, 68 telegraph symbols, 32 Roman numerals, 66 parenthesized and numbered)
-        self.assertEqual(len(entries), 250 + 206 + 378)
+        # 2026-11-18: 212 Kangxi radicals, 68 telegraph symbols, 32 Roman numerals, 66 parenthesized and numbered;
+        # then the next scope of 2026-11-24, 618 characters in the table: NextScopeTableTests)
+        self.assertEqual(len(entries), 250 + 618 + 206 + 378)
         counts = dict((g["id"], g["count"]) for g in DATA["groups"])
         self.assertEqual(counts, {"spaces": 18, "dashes": 10, "duplicates": 44, "punctuation": 28, "lookalikes": 52,
                                   "ligatures": 17, "fractions": 20, "arrows": 20, "turned": 41, "squared": 206,
-                                  "kangxi": 212, "telegraph": 68, "roman": 32, "enclosed": 66},
+                                  "kangxi": 212, "telegraph": 68, "roman": 32, "enclosed": 66, "scripts": 154,
+                                  "signs": 8, "circled": 203, "fullwidth": 103, "smallcaps": 30, "bars": 17,
+                                  "smallkana": 40, "halfwidth": 63},
                          "the arrows' and triangles' sources added (2026-11-16): built from what they make")
-        self.assertEqual(len(set(e["code"] for e in entries)), 250 + 206 + 378, "each character once")
+        self.assertEqual(len(set(e["code"] for e in entries)), 250 + 618 + 206 + 378, "each character once")
         turned = [e for e in entries if e["group"] == "turned"]
         self.assertTrue(all(any(w["confidence"] == "starting point" for w in e["ways"]) for e in turned),
                         "the turned and reversed letters are starting points")
@@ -900,8 +909,8 @@ class Cm(object):
     def record_parts(self, ak, fontlab, package, parts, *title):
         return compose_module().record_parts(ak, fontlab, package, parts, *title)
 
-    def parts_step_text(self, names):
-        return compose_module().parts_step_text(names)
+    def parts_step_text(self, names, named=None):
+        return compose_module().parts_step_text(names, named)
 
 
 def compose_module():
@@ -909,6 +918,14 @@ def compose_module():
     if "freelab_glyph_compose" not in sys.modules:
         import freelab_glyph_compose  # noqa: F401
     return sys.modules["freelab_glyph_compose"]
+
+
+def kerning_module():
+    """Auto Kerning's module (the helpers every tool shares, as ak), loaded once for these tests."""
+    if "freelab_auto_kerning" not in sys.modules:
+        sys.path.insert(0, os.path.join(HERE, os.pardir, "kerning"))
+        import freelab_auto_kerning  # noqa: F401
+    return sys.modules["freelab_auto_kerning"]
 
 
 class WriteTests(unittest.TestCase):
@@ -929,8 +946,11 @@ class WriteTests(unittest.TestCase):
         page.fontlab = Stub(GlyphComponent=Component, flShape=lambda: Shape())
         steps, logged = [], []
         page.backs = []  # (each build's call to go back to Font Check, and whether something failed)
+        ak = kerning_module()  # (a glyph named in the log: FreeLab's own link, in italics)
         page.ak = Stub(notify_changed=lambda fontlab, package_, title, touched, coverage=False: steps.append((title, list(touched))),
-                       b=lambda text: u"%s" % text, html=lambda text: u"%s" % text)
+                       b=lambda text: u"%s" % text, html=lambda text: u"%s" % text,
+                       glyph_name_link=ak.glyph_name_link, glyph_names_linked=ak.glyph_names_linked, grouped=ak.grouped,
+                       i=ak.i, error_sentence=lambda lead, error: u"%s: %s." % (lead, error))  # (ak's: one period)
         page.owner = Stub(package_key=lambda p: (u"bare", 7) if p is not None else None, current_font=lambda: package,
                           log=Stub(add=lambda text, kind="info": logged.append((kind, text))),
                           begin_write=lambda p, glyphs=(), coverage=False: steps.append(("begin", [g.name for g in glyphs])) or True,
@@ -983,8 +1003,17 @@ class WriteTests(unittest.TestCase):
         nodes = [(n.x, n.y) for c in en.shapes[0].contours for n in c.nodes()]
         self.assertEqual(sorted(nodes), sorted([(50, 250), (478, 250), (478, 310), (50, 310)]), "stretched outlines")
         self.assertIn(("done", u"Built 2 glyphs:   –. <i>Edit &gt; Undo</i> takes it back."), logged)
-        self.assertTrue(any(u"Added 1 code point to a glyph the font has already, no new glyph: Ω on Omega" in text
-                            for _, text in logged), logged)
+        self.assertTrue(any(u"Added 1 code point to a glyph the font has already, no new glyph: Ω on "
+                            u'<a href="glyphname:Omega"><i>Omega</i></a>.' in text for _, text in logged), logged)
+
+    def test_the_log_names_at_most_some_shared_glyphs(self):
+        # A build of hundreds named every glyph it added a code point to: a link each, the rest counted
+        ak = kerning_module()
+        shared = [(u"x", u"g%d" % index) for index in range(gg.SHARED_LINKED + 3)]
+        text = gg.shared_text(shared, ak)
+        self.assertEqual(text.count(u"<a href="), gg.SHARED_LINKED)
+        self.assertTrue(text.endswith(u", and 3 more"), text)
+        self.assertEqual(gg.shared_text([(u"&", u"a.alt1")], ak), u'&amp; on <a href="glyphname:a.alt1"><i>a.alt1</i></a>')
 
     def test_a_glyph_of_the_list_is_built_first_and_never_without_it(self):
         page, package, steps, logged = self.page()
@@ -1028,6 +1057,9 @@ class WriteTests(unittest.TestCase):
             gg.unused_helpers = saved
         self.assertEqual([s[0] for s in steps], ["begin", u"FreeLab Glyph Compose", "end"], "recorded, the write ended")
         self.assertTrue(any(kind == "error" for kind, _ in logged))
+        # (the review of 2026-11-24: the sentence is made by ak.error_sentence, which ends it with one period)
+        self.assertTrue(any(kind == "error" and text.startswith(u"Stopped by an error: ") and text.endswith(u".")
+                            for kind, text in logged), logged)
 
     def test_a_layer_fontlab_did_not_keep_is_put_back(self):
         glyph = Glyph("minus", {"Regular": Layer([Shape([Contour(rect(0, 0, 10, 10))])], 400)})
@@ -1347,7 +1379,7 @@ class WriteTests(unittest.TestCase):
         package, logged = handed(True, delete_fails=True)
         self.assertIsNotNone(package.findName("quotereversed"))
         self.assertIn(("warning", u"‛ was built for ‟, which was not built: FontLab did not take it out again, so it stays "
-                                  u"in the font (Edit > Undo takes it back)."), logged)
+                                  u"in the font (<i>Edit &gt; Undo</i> takes it back)."), logged)
         package, logged = handed(False)
         self.assertIn(("done", u"‛ was built too, though not listed: ‟ is made of it."), logged)
 
@@ -1492,7 +1524,7 @@ class WriteTests(unittest.TestCase):
         self.assertEqual(sorted(gg.glyph_components(package, ["Regular"], target.name)), ["quotereversed"])
         self.assertIsNotNone(package.findName("quotereversed"), "what ‟ is made of stays")
         self.assertIn(("warning", u"‛ was built for ‟, which was not built: a glyph left in the font is made of it, so "
-                                  u"it stays (Edit > Undo takes it back)."), logged)
+                                  u"it stays (<i>Edit &gt; Undo</i> takes it back)."), logged)
         self.assertFalse(any(u"built too" in text for _, text in logged), logged)
 
     def test_a_prerequisite_left_in_the_font_keeps_what_it_is_made_of(self):
@@ -1533,7 +1565,7 @@ class WriteTests(unittest.TestCase):
         logged = handed(["201F"], True, delete_fails=True)  # 0 glyphs built of it
         self.assertFalse(any(u"made of it" in text for _, text in logged), logged)
         self.assertIn(("warning", u"‛ was built for ‟, which was not built: FontLab did not take it out again, so it stays "
-                                  u"in the font (Edit > Undo takes it back)."), logged)
+                                  u"in the font (<i>Edit &gt; Undo</i> takes it back)."), logged)
         logged = handed(["201F"], False)  # 1
         self.assertIn(("done", u"‛ was built too, though not listed: ‟ is made of it."), logged)
         logged = handed(["201F", "02BD"], False)  # 2
@@ -1541,7 +1573,7 @@ class WriteTests(unittest.TestCase):
         logged = handed(["201F", "02BD"], True, delete_fails=True)  # 0 of 2
         self.assertFalse(any(u"made of it" in text for _, text in logged), logged)
         self.assertIn(("warning", u"‛ was built for ʽ ‟, which were not built: FontLab did not take it out again, so it "
-                                  u"stays in the font (Edit > Undo takes it back)."), logged)
+                                  u"stays in the font (<i>Edit &gt; Undo</i> takes it back)."), logged)
 
     def test_python_made_glyphs_are_held(self):
         sys.modules.pop("freelab_glyph_compose", None)
@@ -1886,8 +1918,10 @@ class VaryTests(unittest.TestCase):
         self.assertEqual(titles, [(u"FreeLab Glyph Compose (parts)", ["quoteleft"]),
                                   (u"FreeLab Glyph Compose", ["ellipsis", "quotedblleft"])], "in build order")
         self.assertEqual(steps[-1], ("end", True))
-        self.assertIn(("info", u"This takes two steps of <i>Edit &gt; Undo</i>: quoteleft was added in a step of its own "
-                               u"first, so that FontLab's Undo never takes out a glyph that others still point to."), logged)
+        # (the glyph's name in italics, a link that opens it: owner's request of 2026-11-24)
+        self.assertIn(("info", u'This takes two steps of <i>Edit &gt; Undo</i>: <a href="glyphname:quoteleft"><i>quoteleft</i></a> '
+                               u"was added in a step of its own first, so that FontLab's Undo never takes out a glyph that "
+                               u"others still point to."), logged)
         page, package, steps, logged = writer.page()
         writer.build(page, [0x2026])
         self.assertEqual([step[0] for step in steps if step[0] not in ("begin", "end")], [u"FreeLab Glyph Compose"],
@@ -2296,6 +2330,548 @@ class CompatTests(unittest.TestCase):
         self.assertIn(u(0x3314), rows, "its squared words still")
         self.assertNotIn(u(0x2F00), plan()[1], "none in a Latin font")
         self.assertIn(u(0x2160), plan()[1], u"Ⅰ in a Latin font")
+
+
+# -- The next scope (2026-11-24): superscripts and subscripts, signs made of letters, circled forms, full-width and
+# half-width forms, small capitals, letters with bars, small kana -------------------------------------------------
+
+NEXT_GROUPS = ("scripts", "signs", "circled", "fullwidth", "smallcaps", "bars", "smallkana", "halfwidth")
+# A bare font with what the next scope is made of: H of two stems and a bar (Hbar's bar crosses them), h and d with
+# their ascender apart (hbar's and dcroat's bar crosses it alone), T, M, S, E, o, c, u, C, F, the degree sign, and
+# the white circle (a ring 500 units across, its middle 350 up)
+NEXT = dict(BARE, **{
+    "H": (0x48, 700, [rect(80, 0, 180, 700), rect(520, 0, 620, 700), rect(180, 330, 520, 390)], None),
+    "h": (0x68, 560, [rect(80, 0, 160, 740), rect(160, 420, 400, 500), rect(400, 0, 480, 500)], None),
+    "d": (0x64, 560, [rect(60, 0, 400, 500), rect(400, 0, 480, 740)], None),
+    "T": (0x54, 600, [rect(40, 640, 560, 700), rect(270, 0, 330, 640)], None),
+    "M": (0x4D, 800, [rect(80, 0, 720, 700)], None), "S": (0x53, 560, [rect(50, -10, 510, 710)], None),
+    "E": (0x45, 560, [rect(80, 0, 500, 700)], None), "o": (0x6F, 540, [rect(40, -10, 500, 510)], None),
+    "c": (0x63, 480, [rect(40, -10, 440, 510)], None), "u": (0x75, 560, [rect(70, -10, 490, 500)], None),
+    "C": (0x43, 640, [rect(50, -10, 600, 710)], None), "F": (0x46, 540, [rect(80, 0, 500, 700)], None),
+    "degree": (0xB0, 400, [rect(80, 450, 320, 700)], None),
+    "uni25CB": (0x25CB, 700, [rect(100, 100, 600, 600), rect(150, 150, 550, 550)], None)})
+
+
+def near(test, got, wanted, slack=1.0, why=None):
+    test.assertTrue(abs(got - wanted) <= slack, "%s: %r, not %r" % (why or "", got, wanted))
+
+
+def ink_of(font, part):
+    return font.box(part.name, part.matrix)
+
+
+class NextScopeTableTests(unittest.TestCase):
+    """The roadmap's "Glyph Compose's next scope": the characters, their ways, and the figures they are placed by,
+    in the table (compose/train/generation_next.py)."""
+
+    def entries(self, group=None):
+        return dict((e["code"], e) for e in DATA["entries"] if e["group"] in ((group,) if group else NEXT_GROUPS))
+
+    def test_the_groups_and_their_ways(self):
+        ops = set(name[3:] for name in dir(gg.Planner) if name.startswith("op_"))
+        counts = dict((group, len(self.entries(group))) for group in NEXT_GROUPS)
+        self.assertEqual(counts, {"scripts": 154, "signs": 8, "circled": 203, "fullwidth": 103, "smallcaps": 30,
+                                  "bars": 17, "smallkana": 40, "halfwidth": 63})
+        for code, entry in self.entries().items():
+            for way in entry["ways"]:
+                self.assertIn(way["op"], ops, code)
+                self.assertIn(way["confidence"], gg.CONFIDENCES, code)
+                for part in way["of"] if isinstance(way["of"], list) else [way["of"]]:
+                    self.assertIn(part, DATA["characters"], "named for the notes: %s of %s" % (part, code))
+            self.assertIn(code, DATA["characters"])
+            self.assertTrue(entry["unicode_name"], code)
+        surest = dict((code, e["ways"][0]["confidence"]) for code, e in self.entries().items())
+        self.assertEqual(set(code for code, c in surest.items() if c == "accepted"),
+                         set(code for code, e in self.entries().items() if e["ways"][0]["op"] == "form") |
+                         set(["2103", "2109"]),
+                         "accepted: the font's own drawn form, and the degree signs (a row at full size, as the "
+                         "corpus draws them); every other way a starting point")
+        for group in ("smallcaps", "bars", "smallkana", "halfwidth", "circled", "fullwidth"):
+            for code, entry in self.entries(group).items():
+                self.assertEqual(entry["ways"][-1]["confidence"], "starting point", code)
+        for group in ("fullwidth", "halfwidth", "smallkana"):
+            self.assertTrue(all(e["ways"][0]["only"] == "cjk" for e in self.entries(group).values()), group)
+        self.assertEqual(self.entries("circled")["32D0"]["ways"][0]["only"], "cjk", "a circled kana: a CJK font's")
+        self.assertNotIn("only", self.entries("circled")["2460"]["ways"][0], "a circled figure: any font's")
+
+    def test_the_characters_are_unicodes(self):
+        """Every BMP character Unicode decomposes as <super> or <sub> of one character (but Feature Code's figures
+        and ordinal indicators, and the kanbun marks), as <circle> (but the circled Hangul: conjoining jamo), as
+        <wide> (but the ideographic space, a space already), and as <narrow> from U+FF61 to U+FF9F. FontLab's
+        Python 2.7 has Unicode 5.2: what it knows is all in the table; Python 3's every one."""
+        import unicodedata
+        feature_code = set(fc.SUPERSCRIPT_FIGURES) | set(fc.SUBSCRIPT_FIGURES) | set([0xAA, 0xBA])
+        found = dict((group, set()) for group in ("scripts", "circled", "fullwidth", "halfwidth"))
+        for code in range(0x00A0, 0x10000):
+            if 0xD800 <= code < 0xE000:
+                continue
+            parts = unicodedata.decomposition(u(code)).split()
+            if not parts or not parts[0].startswith("<"):
+                continue
+            tag, rest = parts[0], parts[1:]
+            if tag in ("<super>", "<sub>") and len(rest) == 1 and code not in feature_code and \
+                    not 0x3192 <= code <= 0x319F:
+                found["scripts"].add("%04X" % code)
+            elif tag == "<circle>" and not any(0x1100 <= int(p, 16) <= 0x11FF for p in rest):
+                found["circled"].add("%04X" % code)
+            elif tag == "<wide>" and code != 0x3000:
+                found["fullwidth"].add("%04X" % code)
+            elif tag == "<narrow>" and 0xFF61 <= code <= 0xFF9F:
+                found["halfwidth"].add("%04X" % code)
+        for group, codes in found.items():
+            table = set(self.entries(group))
+            self.assertTrue(codes <= table, (group, sorted(codes - table)[:5]))
+            if sys.version_info[0] >= 3 and unicodedata.unidata_version >= "16.0.0":
+                self.assertEqual(table, codes, group)
+        self.assertEqual(self.entries("scripts")["207F"]["ways"],
+                         [{"op": "form", "of": "006E", "forms": "sups", "confidence": "accepted"},
+                          {"op": "script", "of": "006E", "kind": "super", "confidence": "starting point"}])
+        self.assertEqual(self.entries("circled")["2469"]["ways"][0]["of"], ["0031", "0030"], u"(10)")
+        self.assertEqual(self.entries("fullwidth")["FF21"]["ways"][0]["of"], "0041")
+        self.assertEqual(self.entries("halfwidth")["FF71"]["ways"][0]["of"], "30A2")
+        self.assertEqual(self.entries("smallkana")["3041"]["ways"][0]["of"], "3042")
+        self.assertEqual(self.entries("smallkana")["31F0"]["ways"][0]["of"], "30AF", "the Ainu small ku: ku")
+        self.assertEqual(self.entries("smallcaps")["029C"]["ways"][-1]["of"], "0048")
+        self.assertEqual(sorted(self.entries("bars")), sorted(["0126", "0127", "0111", "0166", "0167", "01B5",
+                                                                  "01B6", "0197", "0268", "0244", "0289", "0243",
+                                                                  "0180", "01E4", "01E5", "0141", "0142"]))
+        self.assertEqual(sorted(self.entries("signs")), ["2103", "2105", "2106", "2109", "2116", "2120", "2121", "2122"])
+
+    def test_nothing_is_offered_twice(self):
+        """Feature Code's Forms tab builds the superscript and subscript figures and the ordinal indicators; the
+        Diacritics tab the letters Unicode decomposes into a letter and marks (handed_over sends it those): none
+        is in the next scope, and D with stroke stays the duplicate of Eth it was (one row)."""
+        import unicodedata
+        mine = set(int(code, 16) for code in self.entries())
+        self.assertFalse(mine & (set(fc.SUPERSCRIPT_FIGURES) | set(fc.SUBSCRIPT_FIGURES) |
+                                 set(code for _, code, _ in fc.ORDINAL_LETTERS)))
+        for code in mine:
+            self.assertEqual(len(unicodedata.normalize("NFD", u(code))), 1, "%04X: the Diacritics tab's" % code)
+        sys.modules.pop("freelab_glyph_compose", None)
+        import freelab_glyph_compose as cm
+        table = set(u(int(e["code"], 16)) for e in DATA["entries"])
+        letters, others = cm.handed_over([u(code) for code in sorted(mine)], table)
+        self.assertEqual(letters, [], "Font Check hands every one to Glyph generation")
+        self.assertEqual([e["group"] for e in DATA["entries"] if e["code"] == "0110"], ["duplicates"])
+
+    def test_the_rules_feature_code_shares(self):
+        """The superscript and subscript signs take Feature Code's figures' scale, baseline, and width (the
+        corpus's signs measure within a few hundredths of its figures: a sign beside a superscript figure Feature
+        Code built matches it); the letters the corpus's own scale and width, on the figures' baseline. The forms
+        are read by Feature Code's suffixes."""
+        scripts = DATA["rules"]["scripts"]
+        for kind, key, baseline in (("super", "sups", fc.SUPS_BASELINE), ("sub", "subs", fc.SUBS_BASELINE)):
+            sign, letter = scripts["%s sign" % kind], scripts["%s letter" % kind]
+            self.assertEqual((sign["scale"], sign["baseline"], sign["width"]),
+                             (fc.CORPUS_SCALE[key], baseline, fc.CORPUS_WIDTH[key]))
+            self.assertEqual(letter["baseline"], baseline)
+            self.assertTrue(0.55 <= letter["scale"] <= 0.7 and letter["families"] >= 20, letter)
+            near(self, sign["measured"]["scale"], sign["scale"], 0.05, "the corpus's signs as its figures")
+        self.assertEqual(gg.FORM_SUFFIXES["sups"], fc.SUPS_SUFFIXES)
+        self.assertEqual(gg.FORM_SUFFIXES["subs"], fc.SUBS_SUFFIXES)
+        self.assertEqual(gg.FORM_SUFFIXES["smcp"], fc.SMALL_CAP_SUFFIXES)
+        self.assertEqual(gg.FORM_SUFFIXES["c2sc"], ("c2sc", "sc"), "as Feature Code reads a capital's small capital")
+
+    def test_the_corpus_figures(self):
+        rules = DATA["rules"]
+        self.assertEqual(DATA["next_scope"]["families"], 667)
+        trade = rules["signs"]["2122"]
+        self.assertTrue(trade["families"] >= 400 and 0.45 < trade["scale"] < 0.55 and abs(trade["top/cap"] - 1) < 0.02)
+        numero = rules["signs"]["2116"]
+        self.assertEqual((numero["N scale"], numero["underline"]), (1.0, 1.0), "N whole, an underline in most")
+        self.assertTrue(0.6 < numero["o scale"] < 0.8)
+        self.assertLess(rules["signs"]["2121"]["squeeze"], gg.NARROWED, "the telephone sign drawn narrowed")
+        self.assertEqual(rules["rows"]["2103"], rules["signs"]["2103"]["gap"])
+        self.assertEqual((rules["signs"]["2103"]["letter scale"], rules["signs"]["2103"]["degree scale"]), (1.0, 1.0))
+        self.assertEqual(rules["circled"]["cjk figure"]["diameter/25EF"], 1.0, "CJK fonts' ring: their own large circle")
+        self.assertTrue(0.9 < rules["circled"]["cjk figure"]["diameter"] < 0.96)
+        self.assertEqual(rules["cells"]["fullwidth"]["letter"]["advance/em"], 1.0)
+        self.assertTrue(0.7 < rules["cells"]["fullwidth"]["FF08"]["x share"] < 0.85, "a full-width ( at the right")
+        self.assertTrue(rules["cells"]["fullwidth"]["FF0C"]["x share"] < 0.3, "a full-width comma at the left")
+        self.assertEqual(rules["cells"]["halfwidth"]["kana"]["advance/em"], 0.5)
+        self.assertTrue(0.75 < rules["cells"]["smallkana"]["hiragana"]["up"] < 0.85)
+        self.assertEqual(rules["smallcaps"]["top/x-height"], 1.0)
+        for code in ("0126", "0127", "0111", "0166", "0167"):
+            self.assertGreaterEqual(rules["bars"][code]["families"], 250, code)
+        self.assertEqual(rules["bars"]["0126"]["stems"], 2.0)
+
+
+class ScriptTests(unittest.TestCase):
+    def test_superscript_and_subscript_letters_and_signs(self):
+        planner, rows = plan(FakeFont(NEXT))
+        rules = DATA["rules"]["scripts"]
+        for char, kind, cls, name, advance in ((u(0x207F), "super", "letter", "n", 560),
+                                               (u(0x2099), "sub", "letter", "n", 560),
+                                               (u(0x207A), "super", "sign", "plus", 500),
+                                               (u(0x208A), "sub", "sign", "plus", 500)):
+            row, rule = rows[char], rules["%s %s" % (kind, cls)]
+            scale = rule["scale"]
+            new = round(advance * scale * rule["width"])
+            dy = round(rule["baseline"] * 700)
+            self.assertEqual([p.name for p in row.layout.parts], [name], char)
+            self.assertEqual(row.layout.parts[0].matrix, (scale, 0.0, 0.0, scale, round((new - advance * scale) / 2.0),
+                                                          dy), "scaled about the baseline, centered in its advance")
+            self.assertEqual(row.layout.advance, new)
+            self.assertEqual(gg.recipe_text(row, planner.settings), u"%s at %d%%, %s %d units" % (
+                name, round(100 * scale), u"raised" if dy > 0 else u"lowered", abs(dy)))
+            self.assertEqual(row.sureness, u"starting point")
+            self.assertTrue(row.draft, "never ticked at first")
+            for note in (gg.DRAFT_NOTE, gg.SCALED_NOTE):
+                self.assertIn(note, gg.note_text(row))
+        self.assertEqual(rows[u(0x207A)].layout.parts[0].matrix[0], fc.CORPUS_SCALE["sups"], "as Feature Code's figures")
+        self.assertEqual(rows[u(0x207F)].layout.parts[0].matrix[5], round(fc.SUPS_BASELINE * 700),
+                         "on Feature Code's superscript baseline")
+        self.assertEqual(plan()[1][u(0x02B0)].missing, u"needs h (U+0068)", "a letter the font lacks")
+
+    def test_the_fonts_own_superior_first(self):
+        glyphs = dict(NEXT, **{"n.sups": (None, 380, [rect(50, 400, 330, 700)], None),
+                               "plus.subs": (None, 330, [rect(40, -150, 290, 100)], None)})
+        planner, rows = plan(FakeFont(glyphs))
+        row = rows[u(0x207F)]
+        self.assertEqual([p.name for p in row.layout.parts], ["n.sups"])
+        self.assertEqual((row.layout.parts[0].matrix, row.layout.advance), (gg.IDENTITY, 380.0))
+        self.assertEqual(row.sureness, u"accepted")
+        self.assertFalse(row.draft, "the font's own drawn form: ticked at first")
+        self.assertEqual(gg.recipe_text(row, planner.settings), u"n.sups (component, the font's own superior)")
+        self.assertEqual([p.name for p in rows[u(0x208A)].layout.parts], ["plus.subs"])
+        self.assertNotIn(gg.SCALED_NOTE, gg.note_text(row))
+
+    def test_feature_codes_figures_are_not_listed(self):
+        rows = plan(FakeFont(NEXT))[1]
+        for code in tuple(fc.SUPERSCRIPT_FIGURES) + tuple(fc.SUBSCRIPT_FIGURES) + (0xAA, 0xBA):
+            self.assertNotIn(u(code), rows, "%04X: Feature Code's Forms tab builds it" % code)
+
+
+class SignTests(unittest.TestCase):
+    def setUp(self):
+        self.font = FakeFont(dict(NEXT, L=(0x4C, 520, [rect(90, 0, 490, 700)], None)))
+        self.planner, self.rows = plan(self.font)
+        self.rules = DATA["rules"]["signs"]
+
+    def test_the_trade_mark_sign(self):
+        row, rule = self.rows[u(0x2122)], self.rules["2122"]
+        t, m = row.layout.parts
+        self.assertEqual((t.name, m.name), ("T", "M"))
+        scale = rule["scale"]
+        self.assertEqual((t.matrix[0], t.matrix[3], m.matrix[0]), (scale, scale, scale))
+        near(self, ink_of(self.font, t)[3], rule["top/cap"] * 700, 1, "its top at the cap height")
+        near(self, ink_of(self.font, m)[0] - ink_of(self.font, t)[2], 1000 * rule["gap"], 1, "the corpus's gap")
+        near(self, ink_of(self.font, t)[0], 1000 * rule["left"] + scale * 40, 1)
+        near(self, row.layout.advance, ink_of(self.font, m)[2] + scale * 80 + 1000 * rule["right"], 1)
+        self.assertEqual(gg.recipe_text(row, self.planner.settings), u"T + M at %d%%, top at the cap height" % round(
+            100 * scale))
+        self.assertTrue(row.draft)
+        self.assertEqual([p.name for p in self.rows[u(0x2120)].layout.parts], ["S", "M"])
+
+    def test_the_telephone_sign_is_narrowed(self):
+        row, rule = self.rows[u(0x2121)], self.rules["2121"]
+        self.assertEqual([p.name for p in row.layout.parts], ["T", "E", "L"])
+        first = row.layout.parts[0].matrix
+        near(self, first[0], rule["scale"] * rule["squeeze"], 1e-9, "as narrow as the corpus's")
+        self.assertEqual(first[3], rule["scale"], "at the letters' height")
+        self.assertIn(u"(%d%% as wide)" % round(100 * rule["squeeze"]), gg.recipe_text(row, self.planner.settings))
+
+    def test_the_numero_sign(self):
+        row, rule = self.rows[u(0x2116)], self.rules["2116"]
+        letter, o, line = row.layout.parts
+        self.assertEqual((letter.name, letter.matrix), ("N", gg.IDENTITY))
+        self.assertEqual(o.name, "o")
+        self.assertEqual(o.matrix[0], rule["o scale"])
+        ring = ink_of(self.font, o)
+        near(self, ring[3], rule["o top/cap"] * 700, 1, "the o raised")
+        near(self, ring[0] - 620, 1000 * rule["gap"], 1, "after N's ink")
+        self.assertEqual(line.name, "hyphen")
+        self.assertIsNotNone(line.stretch, "drawn as long as the underline, as a dash is")
+        split, amount = line.stretch
+        near(self, (200 + amount), rule["underline width/o"] * (ring[2] - ring[0]), 1, "as long as the corpus's")
+        top = rule["underline/hyphen"] * 310 + line.matrix[5]
+        near(self, ring[1] - top, 1000 * rule["underline gap"], 1, "under the o")
+        self.assertEqual(gg.recipe_text(row, self.planner.settings), u"N + o at %d%%, top at %d%% of the cap height, "
+                                                                     u"hyphen under it" % (
+                                                                         round(100 * rule["o scale"]),
+                                                                         round(100 * rule["o top/cap"])))
+
+    def test_degrees_are_a_row(self):
+        for code, letter in ((0x2103, "C"), (0x2109, "F")):
+            row = self.rows[u(code)]
+            degree, other = row.layout.parts
+            self.assertEqual((degree.name, other.name), ("degree", letter))
+            self.assertEqual((degree.matrix[0], other.matrix[0]), (1.0, 1.0), "at their own size")
+            near(self, ink_of(self.font, other)[0] - ink_of(self.font, degree)[2],
+                 1000 * DATA["rules"]["rows"]["%04X" % code], 1)
+            self.assertEqual(row.sureness, u"accepted")
+            self.assertFalse(row.draft, "ticked at first")
+
+    def test_care_of(self):
+        row, rule = self.rows[u(0x2105)], self.rules["2105"]
+        upper, slash, lower = row.layout.parts
+        self.assertEqual((upper.name, slash.name, lower.name), ("c", "fraction", "o"))
+        near(self, ink_of(self.font, upper)[3], rule["upper top/cap"] * 700, 1)
+        near(self, ink_of(self.font, lower)[1], rule["lower bottom/cap"] * 700, 1)
+        self.assertEqual([p.name for p in self.rows[u(0x2106)].layout.parts], ["c", "fraction", "u"])
+
+    def test_what_the_font_lacks(self):
+        rows = plan()[1]
+        self.assertEqual(rows[u(0x2122)].missing, u"needs T (U+0054)")
+        self.assertEqual(rows[u(0x2103)].missing, u"needs %s (U+00B0)" % u(0xB0))
+
+
+def cjk_ring_font():
+    """kana_font with a large circle (920 units across, its middle on the em box's: 380), a, and A."""
+    return kana_font(more={"uni25EF": (0x25EF, 1000, [rect(40, -80, 960, 840), rect(80, -40, 920, 800)], None),
+                           "a": (0x61, 500, [rect(40, -10, 460, 500)], None)})
+
+
+class CircleTests(unittest.TestCase):
+    def test_a_latin_font(self):
+        font = FakeFont(NEXT)
+        planner, rows = plan(font)
+        rule = DATA["rules"]["circled"]["latin figure"]
+        row = rows[u(0x2460)]
+        ring, one = row.layout.parts
+        self.assertEqual((ring.name, one.name), ("uni25CB", "one"))
+        size = 1000 * rule["diameter"] / 500.0
+        near(self, ring.matrix[0], size, 1e-9, "the white circle sized to the corpus's ring")
+        rb, ob = ink_of(font, ring), ink_of(font, one)
+        near(self, (rb[1] + rb[3]) / 2.0, 1000 * rule["center"], 1, "the ring's middle as high as the corpus's")
+        near(self, rb[0], 1000 * rule["side"], 1, "after the corpus's sidebearing")
+        near(self, row.layout.advance, rb[2] + 1000 * rule["side"], 1)
+        self.assertEqual(one.matrix[0], rule["scale"])
+        near(self, (ob[0] + ob[2]) / 2.0, (rb[0] + rb[2]) / 2.0 + rule["content x"] * 1000 * rule["diameter"], 1)
+        near(self, (ob[1] + ob[3]) / 2.0, (rb[1] + rb[3]) / 2.0 + rule["content y"] * 1000 * rule["diameter"], 1)
+        self.assertEqual(gg.recipe_text(row, planner.settings), u"one at %d%% in uni25CB at %d%%" % (
+            round(100 * rule["scale"]), round(100 * size)))
+        self.assertTrue(row.draft)
+        self.assertIn(gg.SCALED_NOTE, gg.note_text(row))
+        ten = rows[u(0x2469)]
+        self.assertEqual([p.name for p in ten.layout.parts], ["uni25CB", "one", "zero"])
+        self.assertNotIn(u(0x32D0), rows, "a circled kana in a font with kana only")
+
+    def test_a_cjk_font_keeps_its_ring(self):
+        font = cjk_ring_font()
+        planner, rows = plan(font)
+        rule = DATA["rules"]["circled"]["cjk figure"]
+        row = rows[u(0x2460)]
+        ring = row.layout.parts[0]
+        self.assertEqual(ring.name, "uni25EF", "the large circle first")
+        self.assertEqual(ring.matrix[0], 1.0, "within 5% of the corpus's diameter: at its own size, its stroke kept")
+        self.assertEqual(row.layout.advance, 1000, "a full-width cell")
+        rb = ink_of(font, ring)
+        near(self, (rb[0] + rb[2]) / 2.0, 500, 1, "in its middle")
+        near(self, (rb[1] + rb[3]) / 2.0, 1000 * rule["center"], 1)
+        kana = rows[u(0x32D0)]
+        self.assertEqual([p.name for p in kana.layout.parts], ["uni25EF", "a-kata"])
+        self.assertEqual(kana.layout.parts[1].matrix[0], DATA["rules"]["circled"]["cjk kana"]["scale"])
+        self.assertEqual(gg.recipe_text(row, planner.settings), u"one at %d%% in uni25EF" % round(100 * rule["scale"]))
+
+    def test_a_font_without_a_ring(self):
+        row = plan()[1][u(0x2460)]
+        self.assertEqual(row.missing, u"needs %s (U+25EF) or %s (U+25CB)" % (u(0x25EF), u(0x25CB)))
+
+
+class CellTests(unittest.TestCase):
+    def test_full_width_forms(self):
+        font = cjk_ring_font()
+        planner, rows = plan(font)
+        cells = DATA["rules"]["cells"]["fullwidth"]
+        for code, name in ((0xFF21, "A"), (0xFF0C, "comma")):
+            row = rows[u(code)]
+            rule = cells.get("%04X" % code)
+            part = row.layout.parts[0]
+            self.assertEqual(part.name, name)
+            self.assertEqual(row.layout.advance, 1000, "a full-width cell")
+            self.assertEqual((part.matrix[0], part.matrix[3]), (rule["across"], rule["up"]), "%04X: its own figures" % code)
+            ink = ink_of(font, part)
+            near(self, (ink[0] + ink[2]) / 2.0, rule["x share"] * 1000, 1, "%04X: where the fonts set it" % code)
+            self.assertTrue(row.draft)
+        self.assertLess(rows[u(0xFF0C)].layout.parts[0].matrix[4], 250, "a full-width comma at the left")
+        self.assertEqual(gg.recipe_text(rows[u(0xFF21)], planner.settings), u"A, in a full-width cell")
+        self.assertNotIn(u(0xFF21), plan(FakeFont(NEXT))[1], "in a font with CJK only")
+
+    def test_half_width_kana_and_small_kana(self):
+        font = cjk_ring_font()
+        planner, rows = plan(font)
+        cells = DATA["rules"]["cells"]
+        half = rows[u(0xFF71)]
+        rule = cells["halfwidth"].get("FF71") or cells["halfwidth"]["kana"]
+        part = half.layout.parts[0]
+        self.assertEqual(part.name, "a-kata")
+        self.assertEqual(half.layout.advance, 500, "half of a full-width cell")
+        self.assertEqual(part.matrix[0], rule["across"])
+        self.assertLess(part.matrix[0], 0.6, "narrowed")
+        near(self, (ink_of(font, part)[0] + ink_of(font, part)[2]) / 2.0, rule["x share"] * 500, 1)
+        small = rows[u(0x30A1)]
+        rule = cells["smallkana"].get("30A1") or cells["smallkana"]["katakana"]
+        part = small.layout.parts[0]
+        self.assertEqual((part.name, small.layout.advance), ("a-kata", 1000))
+        self.assertEqual((part.matrix[0], part.matrix[3]), (rule["across"], rule["up"]))
+        ink = ink_of(font, part)
+        near(self, (ink[1] + ink[3]) / 2.0, (-50 + 800) / 2.0 + 1000 * rule["raised"], 1, "set low")
+        self.assertIn(u"its middle lowered", gg.recipe_text(small, planner.settings))
+        self.assertTrue(small.draft)
+        self.assertEqual(rows[u(0xFF67)].needs, ["uni30A1"], "a half-width small a: of the small a built here first")
+
+
+class SmallCapTests(unittest.TestCase):
+    def test_a_capital_scaled_to_the_x_height(self):
+        font = FakeFont(NEXT)
+        planner, rows = plan(font)
+        rule = DATA["rules"]["smallcaps"]
+        row = rows[u(0x029C)]
+        scale = rule["top/x-height"] * 500 / 700.0
+        new = round(700 * scale * rule["width"])
+        self.assertEqual(row.layout.parts[0].name, "H")
+        self.assertEqual(row.layout.parts[0].matrix, (scale, 0.0, 0.0, scale, round((new - 700 * scale) / 2.0), 0.0))
+        self.assertEqual(row.layout.advance, new)
+        near(self, ink_of(font, row.layout.parts[0])[3], 500, 1, "as tall as the x-height")
+        self.assertEqual(gg.recipe_text(row, planner.settings), u"H at %d%%, as tall as the x-height" % round(
+            100 * scale))
+        self.assertTrue(row.draft)
+
+    def test_the_fonts_own_small_capitals_first(self):
+        rows = plan(FakeFont(dict(NEXT, **{"h.sc": (None, 520, [rect(60, 0, 460, 500)], None),
+                                           "A.c2sc": (None, 500, [rect(20, 0, 480, 500)], None)})))[1]
+        self.assertEqual([p.name for p in rows[u(0x029C)].layout.parts], ["h.sc"], "the lowercase's small capital")
+        self.assertEqual([p.name for p in rows[u(0x1D00)].layout.parts], ["A.c2sc"], "else the capital's")
+        self.assertEqual(rows[u(0x029C)].sureness, u"accepted")
+        self.assertFalse(rows[u(0x029C)].draft)
+
+
+class BarTests(unittest.TestCase):
+    def test_a_bar_across_the_stems(self):
+        font = FakeFont(NEXT)
+        planner, rows = plan(font)
+        bars = DATA["rules"]["bars"]
+        for code, stems, height in ((0x0126, (80, 620), 700), (0x0127, (80, 160), 740), (0x0111, (400, 480), 740)):
+            row, rule = rows[u(code)], bars["%04X" % code]
+            letter, bar = row.layout.parts
+            self.assertEqual(letter.matrix, gg.IDENTITY)
+            self.assertEqual(bar.name, "hyphen")
+            split, amount = bar.stretch
+            self.assertEqual(split, 150.0, "the hyphen's middle: its right end moved, its ends kept")
+            near(self, 50 + bar.matrix[4], stems[0] - 1000 * rule["left overhang"], 1, "%04X: its left end" % code)
+            near(self, 250 + amount + bar.matrix[4], stems[1] + 1000 * rule["right overhang"], 1, "its right end")
+            near(self, bar.matrix[3], rule["thickness/hyphen"], 1e-9, "as thick as the corpus's against its hyphen")
+            near(self, bar.matrix[3] * 280 + bar.matrix[5], rule["height share"] * height, 1, "at the corpus's height")
+            self.assertEqual(row.layout.advance, font.advance(letter.name), "the letter's advance")
+            self.assertTrue(row.draft)
+        self.assertEqual(gg.recipe_text(rows[u(0x0126)], planner.settings), u"H + hyphen across it at %d%% of its "
+                                                                           u"height" % round(100 * bars["0126"]["height share"]))
+
+    def test_a_slash(self):
+        import math
+        font = FakeFont(NEXT)
+        planner, rows = plan(font)
+        rule = DATA["rules"]["bars"]["0141"]
+        letter, slash = rows[u(0x0141)].layout.parts
+        angle = math.radians(rule["angle"])
+        thick = rule["thickness/hyphen"]
+        near(self, slash.matrix[0], math.cos(angle), 1e-9)
+        near(self, slash.matrix[1], math.sin(angle), 1e-9)
+        near(self, slash.matrix[3], thick * math.cos(angle), 1e-9, "turned, as thick as a bar")
+        split, amount = slash.stretch
+        near(self, 200 + amount, 1000 * rule["length"], 1, "as long as the corpus's")
+        middle = gg.mapped(slash.matrix, (50 + 250 + amount) / 2.0, 280)
+        near(self, middle[1], rule["center/height"] * 700, 1, "its middle at the corpus's height")
+        near(self, middle[0], 290 + 1000 * rule["center - stem"], 1, "beside the stem's middle as the corpus's")
+        self.assertIn(u"turned %d degrees" % round(rule["angle"]), gg.recipe_text(rows[u(0x0141)], planner.settings))
+
+    def test_what_the_font_lacks(self):
+        rows = plan()[1]
+        self.assertEqual(rows[u(0x0127)].missing, u"needs h (U+0068)")
+        glyphs = dict(NEXT)
+        del glyphs["hyphen"]
+        self.assertIn(u"hyphen", plan(FakeFont(glyphs))[1][u(0x0126)].missing, "a bar is drawn of the hyphen")
+
+
+class NextWriteTests(unittest.TestCase):
+    """The next scope's ways written through FontLab's objects stubbed, in every master, each master planned on
+    its own (Bold's H is taller and wider apart): the calls the earlier ways make (GlyphComponent with a
+    transform, setGlyphComponents, a stretched dash's outlines added), nothing else."""
+    page = WriteTests.__dict__["page"]
+    place = WriteTests.__dict__["place"]
+    corrector = WriteTests.__dict__["corrector"]
+    build = WriteTests.__dict__["build"]
+
+    def built(self, codes):
+        bold = FakeFont(dict(NEXT, H=(0x48, 760, [rect(80, 0, 200, 720), rect(560, 0, 680, 720),
+                                                  rect(200, 330, 560, 400)], None)))
+        regular = FakeFont(NEXT)
+        page, package, steps, logged = self.page(regular, ("Regular", "Bold"))
+        page.font_in = lambda package_, master: bold if master == "Bold" else regular
+        self.build(page, codes)
+        return package, steps, logged
+
+    def components(self, layer):
+        return [(shape.shapeData.componentGlyph, tuple(shape.transform.values)) for shape in layer.shapes
+                if shape.isComponent]
+
+    def test_scaled_components_in_every_master(self):
+        package, steps, logged = self.built([0x207F, 0x2122, 0x029C, 0x2460])
+        rules = DATA["rules"]
+        letter = rules["scripts"]["super letter"]
+        for master, cap in (("Regular", 700), ("Bold", 720)):
+            n = self.components(package.findName("uni207F").getLayerByName(master))
+            self.assertEqual([name for name, _ in n], ["n"])
+            self.assertEqual(n[0][1][5], round(letter["baseline"] * cap), "%s: on its own cap height" % master)
+            self.assertEqual(n[0][1][0], letter["scale"])
+            trade = self.components(package.findName("trademark").getLayerByName(master))
+            self.assertEqual([name for name, _ in trade], ["T", "M"])
+            self.assertEqual(trade[0][1][0], rules["signs"]["2122"]["scale"])
+            ring = self.components(package.findName("uni2460").getLayerByName(master))
+            self.assertEqual([name for name, _ in ring], ["uni25CB", "one"])
+        hsmall = self.components(package.findName("Hsmall").getLayerByName("Bold"))
+        near(self, hsmall[0][1][0], rules["smallcaps"]["top/x-height"] * 500 / 720.0, 1e-6, "Bold's H is taller")
+        self.assertEqual([s[0] for s in steps], ["begin", u"FreeLab Glyph Compose", "end"], "one History step")
+        self.assertTrue(any(kind == "done" and u"Built 4 glyphs" in text for kind, text in logged), logged)
+
+    def test_a_bar_is_a_component_and_a_dash_drawn_across(self):
+        package, steps, logged = self.built([0x0126, 0x2116])
+        rule = DATA["rules"]["bars"]["0126"]
+        ends = {}
+        for master in ("Regular", "Bold"):
+            layer = package.findName("Hbar").getLayerByName(master)
+            self.assertEqual(self.components(layer), [("H", gg.IDENTITY)])
+            outlines = [shape for shape in layer.shapes if not shape.isComponent]
+            self.assertEqual(len(outlines), 1, "the bar: the hyphen's outlines, drawn longer")
+            xs = sorted(set(n.x for c in outlines[0].contours for n in c.nodes()))
+            ends[master] = (xs[0], xs[-1])
+        near(self, ends["Regular"][0], 80 - 1000 * rule["left overhang"], 1)
+        near(self, ends["Regular"][1], 620 + 1000 * rule["right overhang"], 1)
+        near(self, ends["Bold"][1], 680 + 1000 * rule["right overhang"], 1, "Bold's own stems")
+        numero = package.findName("uni2116").getLayerByName("Regular")
+        self.assertEqual([name for name, _ in self.components(numero)], ["N", "o"])
+        self.assertEqual(len([s for s in numero.shapes if not s.isComponent]), 1, "the underline")
+
+    def test_a_sparse_master_gets_no_layer(self):
+        """As the earlier ways: where a source has no layer in a master (a variable font's sparse master), the
+        glyph made of it gets none there, and the log says so."""
+        bold = FakeFont(NEXT)
+        bold.has_layer = lambda name: name not in ("n", "hyphen")
+        page, package, steps, logged = self.page(FakeFont(NEXT), ("Light", "Bold"))
+        page.font_in = lambda package_, master: bold if master == "Bold" else page.font
+        for name in ("n", "hyphen"):
+            del package.findName(name).layers_by["Bold"]
+        self.build(page, [0x207F, 0x0126, 0x2122])
+        for name in ("uni207F", "Hbar"):
+            self.assertIsNotNone(package.findName(name).getLayerByName("Light"), name)
+            self.assertIsNone(package.findName(name).getLayerByName("Bold"), "%s: none where its source has none" % name)
+        self.assertIsNotNone(package.findName("trademark").getLayerByName("Bold"), "T and M are there: built")
+        self.assertTrue(any(u"In master Bold, 2 glyphs have no layer" in text for _, text in logged), logged)
+
+    def test_the_cells_are_short_notes(self):
+        for font in (FakeFont(NEXT), cjk_ring_font()):
+            planner, rows = plan(font)
+            for r in planner.rows:
+                if r.group not in NEXT_GROUPS:
+                    continue
+                for text in (gg.recipe_text(r, planner.settings, DATA["rules"]), gg.note_text(r), gg.confidence_text(r)):
+                    self.assertFalse(text.endswith(u"."), (r.hex, text))
+                    for banned in TextTests.BANNED + (u"(s)",):
+                        self.assertNotIn(banned, text, (r.hex, text))
+        self.assertEqual(gg.moved_words(1), u"raised 1 unit")
+        self.assertEqual(gg.moved_words(-2), u"lowered 2 units")
+        self.assertEqual(gg.moved_words(0), u"on the baseline")
 
 
 class Item(object):

@@ -7,7 +7,9 @@ punctuation, Greek and Cyrillic look-alikes, ligature letters, vulgar fractions,
 arrows and triangles turn, built back from them; and, in a font with CJK, the squared words and
 abbreviations of the CJK Compatibility blocks, 206 starting points: SQUARED, square_layout; and, from Unicode's
 decompositions, the Kangxi radicals, the telegraph symbols, the Roman numerals, and the parenthesized and
-numbered forms: COMPAT_GROUPS) that it can make
+numbered forms: COMPAT_GROUPS; then the next scope of 2026-11-24, from the table: the superscript and subscript
+signs and letters, the signs made of letters, the circled figures and letters, the full-width forms, and, as
+starting points, the small capitals, the letters with bars, the small kana, and the half-width forms) that it can make
 of the glyphs the font has, and builds the checked ones in every master, as one step of FontLab's History.
 A character whose glyph the font has empty (a CID-keyed font keeps one for each character of its
 collection) is listed as one it lacks, and its glyph filled when built (Row.filled). A
@@ -27,7 +29,12 @@ glyph), copy (one component), move (one component raised), turn (by any angle, a
 center), mirror (left to right, the contours set right), row (side by side, at the corpus's gaps),
 stretch (a dash drawn longer: the nodes right of the source's middle moved, so it keeps its thickness
 and its ends), minus (the hyphen stretched on the plus: the plus's width and height, the hyphen's
-thickness), and fraction (Feature Code's numerators and denominators about the fraction slash).
+thickness), fraction (Feature Code's numerators and denominators about the fraction slash); and, for the next
+scope, form (the font's own drawn superior, inferior, or small capital, a component), script (scaled and raised
+or lowered, as Feature Code places its small figures), scaled (letters scaled side by side: the trade mark sign),
+numero (N, a raised o, the hyphen under it), over (care of: letters about the fraction slash), circle (the font's
+ring and a scaled character in it), cell (a character in a full-width or half-width cell, or a small kana),
+smallcap (a capital scaled to the x-height), and bar (a letter and the hyphen drawn across it, as a dash is drawn).
 
 A recipe may use a glyph this list builds (two right single quotes make the right double quote):
 the list builds that one first, and the row says so. Nothing is replaced unless the row says so:
@@ -323,6 +330,29 @@ def with_compat(data):
             groups.append({"id": group["id"], "title": group["title"], "count": count})
     data["groups"] = groups
     return data
+
+
+# -- The next scope (2026-11-24, the roadmap's "Glyph Compose's next scope"): superscript and subscript signs and
+# letters, signs made of letters (U+2122, U+2116, U+2103), circled figures and letters, and full-width forms;
+# then, as starting points, small capitals, letters with bars, small kana, and half-width forms. Their characters,
+# ways, and figures are the table's (compose/train/generation_next.py, from Unicode's data and the corpus's
+# medians: rules "scripts", "signs", "circled", "cells", "smallcaps", "bars"). The superscript and subscript
+# figures and the ordinal indicators are Feature Code's (its Forms tab builds them, encoded or not); its figures'
+# scale and baseline are the ones the signs and letters here are placed by (the table's rules, tested equal to
+# its own). Nothing here is read at import: the table is read with the tab, as before.
+FORM_SUFFIXES = {"sups": ("sups", "superior"), "subs": ("subs", "inferior", "inf", "sinf"),
+                 "smcp": ("sc", "smcp", "c2sc"), "c2sc": ("c2sc", "sc")}  # (Feature Code's, tested equal)
+FORM_WORDS = {"sups": u"superior", "subs": u"inferior", "smcp": u"small capital", "c2sc": u"small capital"}
+# The strokes a letter's bar crosses at its height: every one from the first to the last (U+0126's two stems,
+# U+0244's), the last (U+01E4's right stem), else the first (U+0243's stem, U+0127's and U+0111's ascender; a letter
+# of one stroke there)
+BAR_STEMS = {"0126": "all", "0244": "all", "0289": "all", "01E4": "last", "01E5": "last"}
+RINGS = ("25EF", "25CB", "20DD")  # a circled glyph's ring, the first the font has: the large circle, the white one,
+# the combining enclosing circle
+RING_KEPT = 0.05  # a ring within this share of the corpus's diameter is used at its own size (its stroke kept)
+NARROWED = 0.9  # a sign whose corpus's letters are narrower than this share of their scaled width is set narrowed
+SCALING_OPS = ("script", "scaled", "numero", "over", "circle", "cell", "smallcap")  # (the row says scaling thins)
+SCALED_NOTE = u"scaling thins its strokes"
 
 
 def square_kind(parts):
@@ -630,6 +660,7 @@ class Layout(object):
         self.varied = None  # ((seed, strength's label) it was varied with, else None)
         self.plain = None  # (varied: the layout as it was unchanged, which the preview outlines)
         self.params = None  # (varied: freelab_alternates.variant_params' changes, which the preview says)
+        self.words = None  # (its Recipe cell, where the way says it with its figures: the next scope's)
 
 
 # -- Vary turned and mirrored glyphs (the owner's request of 2026-11-16) ---------------------------------------
@@ -849,6 +880,10 @@ class Font(object):
     def codes_of(self, name):
         """Every code point the font gives that glyph."""
         return [code for code in self.codes() if self.glyph_of(code) == name]
+
+    def form(self, name, suffixes):
+        """A glyph's drawn form by the first of the suffixes the font has (n.sups, h.sc), else None."""
+        return None
 
     def has_cjk(self):
         return any(low <= code <= high for code in self.codes() for low, high in CJK_RANGES)
@@ -1375,6 +1410,294 @@ class Planner(object):
             x += self.font.advance(name)
         return Layout(parts, x)
 
+    # -- the next scope (2026-11-24): each a scaled or moved copy of glyphs the font has, as the table's figures
+    # place it (its rules, the corpus's medians); a bar is the hyphen drawn longer (op_stretch's outlines)
+
+    def rule(self, group, key):
+        """A figure set of the table's rules for the next scope (rules[group][key]), or Need where the table has
+        none (an older table)."""
+        found = (self.rules.get(group) or {}).get(key)
+        if not found:
+            raise Need(u"the recipe table has no figures for it: reinstall FreeLab")
+        return found
+
+    def cap(self):
+        if not self.font.cap_height:
+            raise Need(u"needs an H to measure the cap height")
+        return float(self.font.cap_height)
+
+    def inked(self, hex_, stack, needs):
+        """(glyph, its ink box, its advance) of a character the font has or this list builds first."""
+        name, _ = self.source(hex_, stack, needs)
+        box = self.box(name)
+        if box is None:
+            raise Need(u"%s has no outline" % name)
+        return name, box, self.advance(name)
+
+    def category(self, hex_):
+        known = (self.data.get("characters") or {}).get(hex_) or {}
+        return known.get("category") or u"So"
+
+    def op_form(self, way, row, stack, needs):
+        """The font's own drawn form of the character (n.sups for U+207F, h.sc for U+029C), as a component: Feature Code's
+        suffixes (FORM_SUFFIXES), its glyph's form found as Feature Code finds it (Font.form)."""
+        base = self.font.glyph_of(int(way["of"], 16))
+        if base is None:
+            raise Need(u"needs %s" % self.describe(way["of"]), way["of"])
+        form = self.font.form(base, FORM_SUFFIXES[way["forms"]])
+        if form is None:
+            raise Need(u"no drawn %s form of %s" % (FORM_WORDS[way["forms"]], base))
+        out = Layout([Part(self.drawn(form))], self.advance(form))
+        out.words = u"%s (component, the font's own %s)" % (form, FORM_WORDS[way["forms"]])
+        return out
+
+    def op_script(self, way, row, stack, needs):
+        """A superscript or subscript sign or letter: its character scaled and moved, as Feature Code places its
+        superscript and subscript figures (scaled about the baseline, the scaled baseline at a share of the cap
+        height, centered in an advance a little wider than the scaled one); letters at the size of the ordinal
+        indicators, signs at the figures'."""
+        name, box, advance = self.inked(way["of"], stack, needs)
+        cls = u"letter" if self.category(way["of"]).startswith(u"L") else u"sign"
+        rule = self.rule("scripts", u"%s %s" % (way["kind"], cls))
+        scale = float(rule["scale"])
+        new = round(advance * scale * float(rule["width"]))
+        dx, dy = round((new - advance * scale) / 2.0), round(float(rule["baseline"]) * self.cap())
+        out = Layout([Part(name, (scale, 0.0, 0.0, scale, dx, dy))], new)
+        out.words = u"%s at %s, %s" % (name, percent(scale), moved_words(dy))
+        return out
+
+    def op_scaled(self, way, row, stack, needs):
+        """The trade mark, service mark, and telephone signs: their letters scaled alike (the tallest to the rule's
+        share of its height; narrowed too where the corpus's are, the telephone sign's), side by side at the corpus's
+        gap between their inks, their top at the rule's share of the cap height."""
+        rule = self.rule("signs", way["rule"])
+        sources = [self.inked(hex_, stack, needs) for hex_ in way["of"]]
+        scale, cap = float(rule["scale"]), self.cap()
+        narrowed = float(rule.get("squeeze", 1.0)) < NARROWED  # (the corpus's telephone signs: 65% as wide)
+        across = scale * float(rule["squeeze"]) if narrowed else scale
+        gap = self.em(float(rule["squeezed gap"] if narrowed else rule["gap"]))
+        dy = round(float(rule["top/cap"]) * cap - scale * max(box[3] for _, box, _ in sources))
+        parts, right = [], None
+        for name, box, advance in sources:
+            left = self.em(float(rule.get("left", 0.0))) + across * box[0] if right is None else right + gap
+            dx = round(left - across * box[0])
+            parts.append(Part(name, (across, 0.0, 0.0, scale, dx, dy)))
+            right = dx + across * box[2]
+        name, box, advance = sources[-1]
+        out = Layout(parts, round(right + across * (advance - box[2]) + self.em(float(rule.get("right", 0.0)))))
+        out.words = u"%s at %s%s, top at %s" % (
+            u" + ".join(name for name, _, _ in sources), percent(scale),
+            u" (%s as wide)" % percent(across / scale) if narrowed else u"", top_words(float(rule["top/cap"])))
+        return out
+
+    def op_numero(self, way, row, stack, needs):
+        """The numero sign: N as it is, then o scaled and raised (its top at the rule's share of the cap height) at
+        the corpus's gap, and, where most of the corpus's numero signs have one, the hyphen under the o (drawn as
+        long as the rule says, as a dash is: op_stretch's outlines)."""
+        rule = self.rule("signs", u"2116")
+        (letter, lb, _), (o, ob, _) = [self.inked(hex_, stack, needs) for hex_ in way["of"]]
+        scale = float(rule["o scale"])
+        ox = round(lb[2] + self.em(float(rule["gap"])) - scale * ob[0])
+        oy = round(float(rule["o top/cap"]) * self.cap() - scale * ob[3])
+        ring = (scale * ob[0] + ox, scale * ob[1] + oy, scale * ob[2] + ox, scale * ob[3] + oy)
+        parts = [Part(letter), Part(o, (scale, 0.0, 0.0, scale, ox, oy))]
+        right = ring[2]
+        underlined = float(rule.get("underline", 0.0)) >= 0.5
+        if underlined:
+            hyphen, hb = self.hyphen()
+            length = float(rule.get("underline width/o", 1.0)) * (ring[2] - ring[0])
+            thick = float(rule.get("underline/hyphen", 1.0))
+            amount = round(length - (hb[2] - hb[0]))
+            dx = round((ring[0] + ring[2]) / 2.0 - (hb[0] + hb[2] + amount) / 2.0)
+            dy = round(ring[1] - self.em(float(rule.get("underline gap", 0.0))) - thick * hb[3])
+            parts.append(Part(hyphen, (1.0, 0.0, 0.0, thick, dx, dy), ((hb[0] + hb[2]) / 2.0, amount)))
+            right = max(right, hb[2] + amount + dx)
+        out = Layout(parts, round(right + self.em(float(rule.get("right", 0.0)))))
+        out.words = u"%s + %s at %s, top at %s%s" % (letter, o, percent(scale), top_words(float(rule["o top/cap"])),
+                                                    u", %s under it" % parts[-1].name if underlined else u"")
+        return out
+
+    def hyphen(self):
+        """(the hyphen's glyph, its ink box): what a bar or an underline is drawn of."""
+        name = self.font.glyph_of(0x2D)
+        if name is None:
+            raise Need(u"needs %s" % self.describe(u"002D"), u"002D")
+        box = self.box(self.drawn(name))
+        if box is None:
+            raise Need(u"%s has no outline" % name)
+        return name, box
+
+    def op_over(self, way, row, stack, needs):
+        """Care of and cada una (U+2105, U+2106): a letter scaled over the fraction slash (else the solidus) and
+        another under it, as the vulgar fractions are set (each at its advance), sized and placed as the corpus's."""
+        signs = self.rules.get("signs") or {}
+        rule = signs.get(row.hex) if (signs.get(row.hex) or {}).get("upper scale") else self.rule("signs", u"2105")
+        (upper, ub, ua), (lower, lb, la) = [self.inked(hex_, stack, needs) for hex_ in way["of"]]
+        slash = self.font.glyph_of(int(FRACTION_SLASH, 16)) or self.font.glyph_of(0x2F)
+        if slash is None:
+            raise Need(u"needs the fraction slash (U+2044)", FRACTION_SLASH)
+        self.drawn(slash)
+        cap = self.cap()
+        su, sl = float(rule["upper scale"]), float(rule["lower scale"])
+        parts = [Part(upper, (su, 0.0, 0.0, su, 0.0, round(float(rule["upper top/cap"]) * cap - su * ub[3])))]
+        x = round(su * ua)
+        parts.append(Part(slash, translation(x, 0)))
+        x += self.font.advance(slash)
+        parts.append(Part(lower, (sl, 0.0, 0.0, sl, x, round(float(rule["lower bottom/cap"]) * cap - sl * lb[1]))))
+        out = Layout(parts, round(x + sl * la))
+        out.words = u"%s at %s + %s + %s at %s" % (upper, percent(su), slash, lower, percent(sl))
+        return out
+
+    def op_circle(self, way, row, stack, needs):
+        """A circled figure, letter, kana, or ideograph: the font's ring (RINGS: the large circle, else the white one)
+        sized to the corpus's diameter (at its own size where it is within 5% of it: its stroke kept), centered in
+        its advance at the corpus's height, and the character scaled into it (two figures side by side, narrowed
+        as the corpus narrows them), centered on the ring."""
+        ring = next((self.font.glyph_of(int(hex_, 16)) for hex_ in RINGS if self.font.glyph_of(int(hex_, 16))), None)
+        if ring is None:
+            raise Need(u"needs %s or %s" % (self.describe(RINGS[0]), self.describe(RINGS[1])), RINGS[0])
+        rb = self.box(self.drawn(ring))
+        if rb is None:
+            raise Need(u"%s has no outline" % ring)
+        circles = self.rules.get("circled") or {}
+        if getattr(self, "cjk", None) is None:  # (read once: a CJK font has some 20,000 code points to look through)
+            self.cjk = bool(self.font.has_cjk())
+        kind = u"cjk" if self.cjk else u"latin"
+        rule = circles.get(u"%s %s" % (kind, way["class"])) or self.rule("circled", u"%s %s" % (
+            u"latin" if kind == u"cjk" else u"cjk", way["class"]))
+        diameter, side = self.em(float(rule["diameter"])), self.em(float(rule["side"]))
+        size = diameter / float(rb[3] - rb[1])
+        size = 1.0 if abs(size - 1.0) <= RING_KEPT else size
+        width = size * (rb[2] - rb[0])
+        if self.cjk:  # (a full-width cell: the corpus's CJK fonts give every circled glyph one, the ring in its middle)
+            advance = self.em_width()
+        else:  # (the ring between the corpus's sidebearings)
+            advance = width + 2 * side
+        cx, cy = advance / 2.0, self.em(float(rule["center"]))
+        parts = [Part(ring, (size, 0.0, 0.0, size, round(cx - size * (rb[0] + rb[2]) / 2.0),
+                             round(cy - size * (rb[1] + rb[3]) / 2.0)))]
+        sources = [self.inked(hex_, stack, needs) for hex_ in way["of"]]
+        scale = float(rule["scale"])
+        across = scale * min(1.0, float(rule.get("squeeze", 1.0))) if len(sources) > 1 else scale
+        placed, x = [], 0.0
+        for name, box, own in sources:  # (side by side at their own advances, before they are scaled)
+            placed.append((name, box, x))
+            x += own
+        ink = union([(across * (box[0] + at), scale * box[1], across * (box[2] + at), scale * box[3])
+                     for _, box, at in placed])
+        # (the content's ink centered on the ring, moved by the corpus's offset: a share of the diameter)
+        dx = round(cx + float(rule.get("content x", 0.0)) * diameter - (ink[0] + ink[2]) / 2.0)
+        dy = round(cy + float(rule.get("content y", 0.0)) * diameter - (ink[1] + ink[3]) / 2.0)
+        for name, box, at in placed:
+            parts.append(Part(name, (across, 0.0, 0.0, scale, dx + round(across * at), dy)))
+        out = Layout(parts, round(advance))
+        out.words = u"%s at %s in %s%s" % (u" + ".join(name for name, _, _ in placed), percent(scale), ring,
+                                           u"" if size == 1.0 else u" at %s" % percent(size))
+        return out
+
+    def op_cell(self, way, row, stack, needs):
+        """A full-width form (its character in a full-width cell), a half-width one (a kana in half of one,
+        narrowed), or a small kana (its kana scaled where the fonts set it): sized and placed as the corpus's
+        fonts with kana draw them (rules "cells": the character's own figures where 3 fonts or more have it,
+        else its kind's)."""
+        name, box, advance = self.inked(way["of"], stack, needs)
+        group = way["cell"]
+        cells = (self.rules.get("cells") or {}).get(group) or {}
+        rule = cells.get(row.hex) or self.rule("cells", group).get(cell_kind(group, row.hex, way["of"],
+                                                                             self.category(way["of"])))
+        if not rule:
+            raise Need(u"the recipe table has no figures for it: reinstall FreeLab")
+        sx, sy = float(rule.get("across", 1.0)), float(rule.get("up", 1.0))
+        center = ((box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0)
+        if group == u"smallkana":  # (in its kana's advance, its ink's center moved as the fonts move it)
+            new = advance
+            x = center[0] + self.em(float(rule.get("x shift", 0.0)))
+        else:  # (a full-width cell, or half of one: its ink's center at the fonts' share of it)
+            new = self.em_width() * (1.0 if group == u"fullwidth" else 0.5)
+            x = float(rule.get("x share", 0.5)) * new
+        raised = self.em(float(rule.get("raised", 0.0)))
+        y = center[1] + raised
+        out = Layout([Part(name, (sx, 0.0, 0.0, sy, round(x - sx * center[0]), round(y - sy * center[1])))], round(new))
+        size = u"" if abs(sx - 1) < 0.005 and abs(sy - 1) < 0.005 else u" at %s" % percent(sy) if abs(sx - sy) < 0.005 \
+            else u" (%s as wide)" % percent(sx) if abs(sy - 1) < 0.005 else u" at %s (%s as wide)" % (percent(sy),
+                                                                                                    percent(sx / sy))
+        where = {u"fullwidth": u"in a full-width cell", u"halfwidth": u"in a half-width cell"}.get(group)
+        out.words = u"%s%s, %s" % (name, size, where or (u"its middle %s" % moved_words(round(raised), u"in place")))
+        return out
+
+    def op_smallcap(self, way, row, stack, needs):
+        """A small capital: its capital scaled to the x-height (its top at the corpus's share of it), centered in an
+        advance as much wider than the scaled one as the corpus's small capitals are."""
+        name, box, advance = self.inked(way["of"], stack, needs)
+        if not self.font.x_height:
+            raise Need(u"needs an x to measure the x-height")
+        rule = self.rules.get("smallcaps") or {}
+        if not rule.get("scale"):
+            raise Need(u"the recipe table has no figures for it: reinstall FreeLab")
+        if box[3] <= 0:
+            raise Need(u"%s has no ink over the baseline" % name)
+        scale = float(rule["top/x-height"]) * float(self.font.x_height) / float(box[3])
+        new = round(advance * scale * float(rule["width"]))
+        out = Layout([Part(name, (scale, 0.0, 0.0, scale, round((new - advance * scale) / 2.0), 0.0))], new)
+        out.words = u"%s at %s, as tall as the x-height" % (name, percent(scale))
+        return out
+
+    def op_bar(self, way, row, stack, needs):
+        """A letter with a bar: the letter, and the hyphen drawn as long as the bar (op_stretch's outlines, its
+        ends kept), as thick as the corpus's bars are against their hyphen, across the stroke the bar crosses
+        (BAR_STEMS) at the corpus's height, reaching past it as far as the corpus's bars do; L and l's a slash,
+        the hyphen drawn as long and turned. Only the font's own drawn letter: its strokes are read."""
+        letter = self.font.glyph_of(int(way["of"], 16))
+        if letter is None:
+            raise Need(u"needs %s" % self.describe(way["of"]), way["of"])
+        lb = self.box(self.drawn(letter))
+        if lb is None:
+            raise Need(u"%s has no outline" % letter)
+        rule = self.rule("bars", row.hex)
+        hyphen, hb = self.hyphen()
+        thick = float(rule.get("thickness/hyphen", 1.0))
+        share = float(rule["center/height"] if "angle" in rule else rule["height share"])
+        y = lb[1] + share * (lb[3] - lb[1])
+        runs = strokes(self.font.polygons(letter), "y", y)
+        if not runs:
+            raise Need(u"%s has no stroke where the bar goes" % letter)
+        middle = ((hb[0] + hb[2]) / 2.0, (hb[1] + hb[3]) / 2.0)
+        if "angle" in rule:  # (a slash: the hyphen drawn as long, turned about its middle, on the stem's middle)
+            length = self.em(float(rule["length"]))
+            amount = round(length - (hb[2] - hb[0]))
+            stem = runs[0]
+            cx = (stem[0] + stem[1]) / 2.0 + self.em(float(rule.get("center - stem", 0.0)))
+            matrix = compose(translation(round(cx), round(y)), compose(
+                rotation(float(rule["angle"]), 0.0, 0.0), (1.0, 0.0, 0.0, thick, -(middle[0] + amount / 2.0),
+                                                           -thick * middle[1])))
+            out = Layout([Part(letter), Part(hyphen, matrix, (middle[0], amount))], self.advance(letter))
+            out.words = u"%s + %s %s long, turned %d degrees across its stem" % (
+                letter, hyphen, counted(int(round(length)), u"unit"), int(round(float(rule["angle"]))))
+            return out
+        crossed = BAR_STEMS.get(row.hex, u"first")
+        stem = (runs[0][0], runs[-1][1]) if crossed == u"all" else runs[-1] if crossed == u"last" else runs[0]
+        left = stem[0] - self.em(float(rule["left overhang"]))
+        right = stem[1] + self.em(float(rule["right overhang"]))
+        amount = round((right - left) - (hb[2] - hb[0]))
+        matrix = (1.0, 0.0, 0.0, thick, round(left - hb[0]), round(y - thick * middle[1]))
+        out = Layout([Part(letter), Part(hyphen, matrix, (middle[0], amount))], self.advance(letter))
+        out.words = u"%s + %s across it at %s of its height" % (letter, hyphen, percent(share))
+        return out
+
+
+def cell_kind(group, hex_, source_hex, category):
+    """The kind whose figures a cell takes where its character has none of its own: a full-width form's
+    "letter", "figure", or "sign" (its source's category), a half-width one's "kana", "mark" (the voiced
+    marks), or "sign", a small kana's "hiragana", "katakana", or "extension" (U+31F0 on)."""
+    if group == u"fullwidth":
+        return u"letter" if category.startswith(u"L") else u"figure" if category == u"Nd" else u"sign"
+    if group == u"halfwidth":
+        source = int(source_hex, 16)
+        return u"mark" if source in (0x3099, 0x309A, 0x309B, 0x309C) else u"kana" if 0x30A0 <= source <= 0x30FF \
+            else u"sign"
+    code = int(hex_, 16)
+    return u"hiragana" if code < 0x30A0 else u"katakana" if code < 0x3100 else u"extension"
+
 
 def build_order(rows):
     """The rows in an order that builds each glyph after the glyphs of this list it is made of."""
@@ -1401,6 +1724,22 @@ def unbuilt_needs(row, chosen, font_has):
 
 
 # -- the words of a row ---------------------------------------------------------------------------------------
+
+def percent(value):
+    """A share as a whole percent, for a cell ("63%")."""
+    return u"%d%%" % int(round(100 * value))
+
+
+def moved_words(dy, still=u"on the baseline"):
+    """How far a part is raised or lowered, in units (Feature Code's words for its small figures)."""
+    dy = int(round(dy))
+    return still if not dy else u"%s %s" % (u"raised" if dy > 0 else u"lowered", counted(abs(dy), u"unit"))
+
+
+def top_words(share):
+    """Where a part's top sits: "the cap height", else a share of it."""
+    return u"the cap height" if abs(share - 1.0) < 0.02 else u"%s of the cap height" % percent(share)
+
 
 def angle_words(angle):
     angle = int(angle) % 360
@@ -1431,6 +1770,8 @@ def recipe_text(row, settings, rules=None):
         return u""
     op = way["op"]
     names = [part.name for part in layout.parts]
+    if getattr(layout, "words", None):  # (the next scope's ways: said with their figures as they are planned)
+        return layout.words
     if op == "width":
         return width_words(way, layout, settings)
     if op == "shared" and layout.kind == "shared":
@@ -1470,6 +1811,9 @@ def note_text(row, needs_built=()):
         notes.append(u"no new glyph")
     if row.layout is not None and row.layout.kind == "mirrored":
         notes.append(u"outlines, contours set right")
+    if row.layout is not None and (row.way or {}).get("op") in SCALING_OPS and any(
+            part.matrix[0] < 0.99 or part.matrix[3] < 0.99 for part in row.layout.parts):
+        notes.append(SCALED_NOTE)  # (made smaller, as Feature Code says of its scaled small figures)
     if row.layout is not None and row.layout.varied:  # (Vary turned and mirrored glyphs)
         seed, strength = row.layout.varied
         notes.append(u"varied (seed %d, %s)%s" % (seed, strength.lower(), u"" if row.layout.kind == "mirrored" else
@@ -1562,6 +1906,18 @@ class FontLabFont(Font):
         self.x_height = self.box(x)[3] if x and self.box(x) else None
         self.cap_height = self.box(h)[3] if h and self.box(h) else None
         self.figure, self.forms = figure_forms(fc, self.names, codes)
+        self.fc, self.index = fc, None
+
+    def form(self, name, suffixes):
+        """Feature Code's reading of a glyph's forms (forms_index: n.sups, h.sc, a.sc.ss01's sc), made the first
+        time a form is asked for."""
+        if self.index is None:
+            self.index = self.fc.forms_index(self.names)
+        for suffix in suffixes:
+            found = self.index.get(suffix, {}).get(name)
+            if found:
+                return found
+        return None
 
     def codes(self):
         return list(self.code_map.keys())
@@ -1958,6 +2314,19 @@ def vary_master(cm, glyph, master, matrix, QtGui):
     return True
 
 
+SHARED_LINKED = 40  # code points added to glyphs the font had that the log names, at most (the rest counted)
+
+
+def shared_text(shared, ak, most=SHARED_LINKED):
+    """The log's list of code points added to glyphs the font has already, [(character, glyph name)]: u"x on
+    name, ...", each glyph's name a link (ak.glyph_name_link); past most, counted ("and 12 more": a build of
+    hundreds once named them all, and a link per name weighs on the log)."""
+    shown = [u"%s on %s" % (ak.html(char), ak.glyph_name_link(name)) for char, name in shared[:most]]
+    if len(shared) > most:
+        shown.append(u"and %s more" % ak.grouped(len(shared) - most))
+    return u", ".join(shown)
+
+
 def taken_out(package, name):
     """A glyph this build added taken out again, read back: whether the font no longer has it (Codex's review,
     round 4: a deletion that raised, or did nothing, was said to have taken it out)."""
@@ -2208,13 +2577,12 @@ class GenerationPage(object):
             self.alternates, strengths = None, [("subtle", u"Subtle")]
         on, seed, strength = vary_settings(saved, strengths)
         vary_help = (u"Changes each glyph built by a turn or a mirror (turned and reversed letters, turned quotes, "
-                     u"¡ and ¿, arrows) a little, from a seed, so that it is no carbon copy of its source in a "
-                     u"hand-drawn or quirky font: the changes Feature Code's <i>Stylistic alternates</i> makes its "
-                     u"variants with (a slight rotation, uneven scaling, a slant, a baseline shift, about the glyph's "
-                     u"ink), at its strengths. The same seed gives the same glyphs, another seed others (rebuild to "
-                     u"replace them). Every master is changed alike, so the masters stay compatible. A glyph of "
-                     u"components stays one and still follows its source: the change is in its components. Off at "
-                     u"first: FreeLab has no measure of how hand-drawn a font is.")
+                     u"¡ and ¿, arrows) a little, from a seed, so that in a hand-drawn or quirky font it is not an "
+                     u"exact copy of its source: a slight rotation, uneven scaling, a slant, and a baseline shift, as "
+                     u"Feature Code's <i>Stylistic alternates</i> makes its variants, at its strengths. The same seed "
+                     u"gives the same glyphs (rebuild to apply another). Every master is changed alike, so the masters "
+                     u"stay compatible; a glyph of components stays one and still follows its source, the change in "
+                     u"its components. Off at first.")
         self.vary_box = cm.helped(QtGui.QCheckBox(VARY_LABEL), vary_help)
         self.vary_box.setChecked(on and self.alternates is not None)
         vary_row.addWidget(self.vary_box)
@@ -2301,14 +2669,17 @@ class GenerationPage(object):
         self.none_button = cm.helped(QtGui.QPushButton(cm.TICK_NONE), u"Unticks every row shown (rows a search hides "
                                      u"keep their ticks).")
         self.value_button = cm.helped(QtGui.QPushButton(cm.TICK_HIGH_VALUE), cm.VALUE_BUTTON_HELP)
-        self.restore_button = cm.helped(QtGui.QPushButton(u"Restore suggestions"), u"Puts every tick, and the "
-                                        u"settings above the list, back as the list first came.")
+        self.restore_button = cm.helped(QtGui.QPushButton(u"Restore suggestions"), u"Puts every tick back as the "
+                                        u"list first came, and the four widths and <i>Vary turned and mirrored "
+                                        u"glyphs</i> back to their defaults.")
         self.build_button = QtGui.QPushButton(cm.BUILD_TICKED)
         self.build_button.setWhatsThis(u"Adds each ticked glyph to the font with its Unicode value, in every master, as "
                                        u"its recipe says; a glyph made of others of this list is built after them. A "
                                        u"duplicate's code point goes to its source glyph (no new glyph). Every ticked "
-                                       u"row is built, those a search hides too: the button then says how many are not "
-                                       u"shown. <i>Edit &gt; Undo</i> takes it back, in one step.")
+                                       u"row is built, those a search hides too: the count beside the search field "
+                                       u"says how many of them are hidden. <i>Edit &gt; Undo</i> takes them back (in "
+                                       u"two steps when some of them are made of others built with them, as the log "
+                                       u"says).")
         bottom = getattr(owner, "bottom_row", None)  # (the window's bottom row, under the log: brief 4)
         if bottom is not None:
             left, right = bottom("generation")
@@ -2874,7 +3245,8 @@ class GenerationPage(object):
             return
         name = self.glyph_in_font(r)
         if name is None:
-            self.owner.log.add(u"%s is not in the font yet: build it first." % self.ak.b(r.name), "warning")
+            # (a glyph's name in italics; no link: the font has no such glyph to open)
+            self.owner.log.add(u"%s is not in the font yet: build it first." % self.ak.i(r.name), "warning")
             return
         self.owner.open_glyph(name)
 
@@ -3300,7 +3672,7 @@ class GenerationPage(object):
             self.owner.end_write(package, bool(touched) or bool(parts))
         undo = self.cm.undo_words(status or parts_status, u" <i>Edit &gt; Undo</i> takes it back.")
         if parts and second:
-            log.add(self.cm.parts_step_text([u"%s" % getattr(glyph, "name", u"") for glyph in parts]))
+            log.add(self.cm.parts_step_text([u"%s" % getattr(glyph, "name", u"") for glyph in parts], self.ak.glyph_name_link))
         self.cm.report_write(parts_status, log)
         if made:
             log.add(u"Built %s: %s.%s" % (b(counted(len(made), u"glyph")), html(u" ".join(made)), undo), "done")
@@ -3308,7 +3680,7 @@ class GenerationPage(object):
             glyphs = len(set(name for _, name in shared))
             log.add(u"Added %s to %s the font has already, no new glyph: %s.%s" % (
                 b(counted(len(shared), u"code point")), u"a glyph" if glyphs == 1 else u"glyphs",
-                html(u", ".join(u"%s on %s" % pair for pair in shared)), undo), "done")
+                shared_text(shared, self.ak), undo), "done")
         if rebuilt:
             log.add(u"Rebuilt %s from %s recipe, in place: %s.%s" % (
                 b(counted(len(rebuilt), u"glyph")), u"its" if len(rebuilt) == 1 else u"their", html(u" ".join(rebuilt)),
@@ -3333,13 +3705,14 @@ class GenerationPage(object):
             one = len(gone) == 1
             it, they = (u"it", u"it stays") if one else (u"them", u"they stay")
             then = {None: u"%s taken out again" % (u"it was" if one else u"they were"),
-                    "used": u"a glyph left in the font is made of %s, so %s (Edit > Undo takes %s back)" % (it, they, it),
-                    "stuck": u"FontLab did not take %s out again, so %s in the font (Edit > Undo takes %s back)" % (
+                    "used": u"a glyph left in the font is made of %s, so %s (<i>Edit &gt; Undo</i> takes %s back)" % (
                         it, they, it),
+                    "stuck": u"FontLab did not take %s out again, so %s in the font (<i>Edit &gt; Undo</i> takes %s "
+                             u"back)" % (it, they, it),
                     "unread": u"the components of the glyphs it was built for could not be read, so %s in the font "
-                              u"(Edit > Undo takes %s back)" % (they, it) if one else
+                              u"(<i>Edit &gt; Undo</i> takes %s back)" % (they, it) if one else
                               u"the components of the glyphs they were built for could not be read, so %s in the font "
-                              u"(Edit > Undo takes %s back)" % (they, it)}[key]
+                              u"(<i>Edit &gt; Undo</i> takes %s back)" % (they, it)}[key]
             log.add(u"%s %s built for %s, which %s not built: %s." % (
                 b(html(u" ".join(r.char for r in gone))), u"was" if one else u"were",
                 html(u" ".join(users)) or u"the glyphs listed", u"was" if len(users) == 1 else u"were", then),
@@ -3355,13 +3728,13 @@ class GenerationPage(object):
                     u"its" if len(chars) == 1 else u"their", html(u" ".join(chars))))
         if helpers:
             log.add(u"Added %s for mirrored parts, mirrored with %s contours reversed: %s." % (
-                b(counted(len(helpers), u"glyph")), u"its" if len(helpers) == 1 else u"their", html(u", ".join(helpers))),
-                "done")
+                b(counted(len(helpers), u"glyph")), u"its" if len(helpers) == 1 else u"their",
+                self.ak.glyph_names_linked(helpers, word=None)), "done")
         for char, why in failed:
             log.add(u"%s was not built: %s." % (b(char), html(why)), "warning")
         self.cm.report_write(status, log)
         if error is not None:
-            log.add(u"Stopped by an error: %s" % html(error), "error")
+            log.add(self.ak.error_sentence(u"Stopped by an error", error), "error")
         self.just_built |= set(made) | set(rebuilt)
         self.run()
         try:  # the Diacritics tab's list reads the font again too (a letter built here may be one it listed)

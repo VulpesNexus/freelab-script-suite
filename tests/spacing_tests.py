@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.join(HERE, os.pardir, "spacing"))
 sys.path.insert(0, os.path.join(HERE, os.pardir, "kerning"))
 import freelab_auto_kerning as ak  # noqa: E402
 import freelab_auto_spacing as sp  # noqa: E402
+import qtfakes  # noqa: E402  (beside this file: the Cancel button's fakes, shared by every tool's tests)
 
 
 def fake_busy(test, stop_after=None):
@@ -142,6 +143,30 @@ class BusyTests(unittest.TestCase):
         self.assertEqual(dialog.spacings, [])
         self.assertIn(u"Measuring was stopped", dialog.status.text)
         self.assertFalse(dialog.composites_note.visible)
+
+    def test_cancel_sits_before_close_usable_while_it_measures(self):
+        """The owner, 2026-11-24: a Cancel left of Close, grayed but while work that can stop runs (ak.cancel_button),
+        as Esc stops it; its help says what a stop leaves."""
+        with io.open(sp.__file__.replace(".pyc", ".py"), encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertIn(u"buttons.addWidget(self.close_button)\n        self.ak.cancel_button(self, buttons, "
+                      u"self.close_button, CANCEL_NOTE)", source)
+        fake_busy(self, stop_after=0)
+        dialog = self.dialog()
+        row, button, close = qtfakes.cancel_made(ak, dialog, sp.CANCEL_NOTE, (sp.APPLY_BUTTON,))
+        self.assertEqual(row.items.index(button) + 1, row.items.index(close), "right before Close")
+        self.assertFalse(button.enabled, "grayed while nothing runs")
+        self.assertEqual(button.whats, ak.CANCEL_HELP + u" A measuring or a listing stopped changes nothing in the "
+                                                        u"font: the list is left empty.")
+        seen = qtfakes.follow_cancel(self, ak)
+
+        def measure(package, master, only=None, progress=None):
+            progress(sp.MEASURE_STEP, 0.5)  # (raises: Cancel clicked)
+        dialog.measure = measure
+        dialog.run()
+        self.assertEqual(seen, [(sp.MEASURE_STEP, True, True), (None, None, False)], "usable while it measures")
+        self.assertIn(u"Measuring was stopped: nothing is listed", dialog.status.text)
+        # (grayed while it writes: HistoryFailureTests.test_cancel_is_grayed_while_it_spaces)
 
     def test_measuring_ends_its_progress_on_an_error(self):
         calls = fake_busy(self)
@@ -447,6 +472,16 @@ class SpacingTests(unittest.TestCase):
         sides[u"l"] = ("l", 3, 4, 200)
         self.assertEqual(sp.references_to_space(sides, 1000), [u"H", u"l", u"n", u"o"])
 
+    def test_everything_says_what_it_leaves_out(self):
+        # (the review of 2026-11-24: Everything takes letters, numbers, punctuation, and symbols only)
+        self.assertIn(u"a letter, a number, punctuation, or a symbol", sp.GROUP_HELP)
+        self.assertIn(u"marks, spaces, and characters past U+FFFF are left out", sp.GROUP_HELP)
+        self.assertNotIn(u"every glyph with a character", sp.GROUP_HELP)
+        source = io.open(os.path.join(HERE, os.pardir, "spacing", "freelab_auto_spacing.py"), encoding="utf-8").read()
+        self.assertIn(u'unicodedata.category(ch)[0] in "LNPS"', source)
+        self.assertIn(u"self.group.setWhatsThis(GROUP_HELP)", source)
+        self.assertIn(u'ak.error_sentence(u"Stopped by an error", error)', source)
+
     def test_a_write_that_leaves_the_font_unmeasurable_says_it_once(self):
         # (owner's image 335: "Stopped by an error" with the analysis's own message, then that message again)
         source = io.open(os.path.join(HERE, os.pardir, "spacing", "freelab_auto_spacing.py"), encoding="utf-8").read()
@@ -506,7 +541,7 @@ class SpacingTests(unittest.TestCase):
         self.assertEqual(sp.apply_note(1, 0, 6), u"")
         self.assertEqual(sp.apply_note(2, 1, 6),
                          u"It took 2 passes: measured again after spacing, 1 glyph still had a side 6 units or more off, "
-                         u"and was spaced again (the measuring's pixels round each change a little).")
+                         u"and was spaced again.")
         self.assertIn(u"the other 20 glyphs measured against them again", sp.apply_note(1, 0, 6, 20))
 
     def test_composites_follow_their_base(self):
@@ -689,6 +724,15 @@ class HistoryFailureTests(unittest.TestCase):
         self.assertEqual(self.busy_calls[-1][0], "end")
         self.assertFalse(any(stoppable for name, _, _, stoppable in self.busy_calls if name in ("start", "progress")))
 
+    def test_cancel_is_grayed_while_it_spaces(self):
+        # (the owner, 2026-11-24: Cancel usable only while work that can stop runs; a write is one History step)
+        dialog, steps = self.dialog(refuse_before=False, refuse_after=False)
+        qtfakes.cancel_made(ak, dialog, sp.CANCEL_NOTE, (sp.APPLY_BUTTON,))
+        seen = qtfakes.follow_cancel(self, ak)
+        dialog.apply()
+        self.assertEqual(seen, [(sp.SPACE_STEP, False, False), (None, None, False)])
+        self.assertEqual(dialog.writes, [["T"]])
+
     def test_a_write_that_raises_still_ends_its_progress(self):
         dialog, steps = self.dialog(refuse_before=False, refuse_after=False)
 
@@ -778,9 +822,9 @@ class WordingTests(unittest.TestCase):
                                        u"changes until you click Space ticked glyphs.")
         self.assertEqual(sp.spacing_status(1200, 13932, 1, 3, ak.b, ak.i),
                          u"<b>1,200 of 13,932 drawn glyphs</b> have a side <b>1 unit</b> or more from the "
-                         u"suggestion. Nothing changes until you click <i>Space ticked glyphs</i>. Each change was "
-                         u"measured again with it made, until the changes settled (<b>3 passes</b>): halfkern closes "
-                         u"half of a tightening at a time, so one measure leaves part of it.")
+                         u"suggestion. Nothing changes until you click <i>Space ticked glyphs</i>. Measured in "
+                         u"<b>3 passes</b>, each with the changes made so far.")
+        self.assertTrue(sp.spacing_status(1, 2, 6, 2).endswith(u"Measured in 2 passes, each with the changes made so far."))
 
     def test_the_log_counts(self):
         self.assertIn(u"1 glyph still had a side 1 unit or more off, and was spaced again", sp.apply_note(2, 1, 1))
@@ -793,8 +837,7 @@ class WordingTests(unittest.TestCase):
         self.assertEqual(sp.apply_note(3, 2, 2, 20, ak.b),
                          u"The references were spaced first, and the other <b>20 glyphs</b> measured against them "
                          u"again: their changes differ from the list's. It took <b>3 passes</b>: measured again after "
-                         u"spacing, <b>2 glyphs</b> still had a side <b>2 units</b> or more off, and were spaced again "
-                         u"(the measuring's pixels round each change a little).")
+                         u"spacing, <b>2 glyphs</b> still had a side <b>2 units</b> or more off, and were spaced again.")
         self.assertEqual(sp.composites_text(3, 2, ak.b), u"<b>3 glyphs</b> built from components follow the listed "
                                                          u"glyphs; <b>2</b> built on two of them are left as they are.")
         self.assertEqual(sp.composites_text(0, 1, ak.b), u"No glyph built from components follows the listed glyphs; "
@@ -807,6 +850,45 @@ class WordingTests(unittest.TestCase):
         source = self.source()
         self.assertIn(u"composites_text(following, left_out, self.ak.b)", source, "the note under the font line, bold")
         self.assertIn(u"measured_again if not unread else 0, ak.b)", source, "the log's note, bold")
+
+
+class TextReviewTests(unittest.TestCase):
+    """The interface-text review of November 24: the help names every script spaced and its references, says
+    the references can be spaced, and each button has its help."""
+
+    def source(self):
+        with io.open(sp.__file__.replace(".pyc", ".py"), encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_the_help_names_each_script_and_its_reference_pair(self):
+        import unicodedata
+        scripts = sp.HELP.split(u"<b>Scripts</b>")[1].split(u"<br>")[0].replace(u"\n", u" ")
+        for script in sp.SCRIPT_SPACING_REFERENCES:
+            self.assertIn(script, scripts.lower(), script)
+        # each straight reference beside its round one, named as Unicode names the letters
+        for straight, word in ((u"\N{CYRILLIC SMALL LETTER EN}", u"en and o"),
+                               (u"\N{GREEK SMALL LETTER ETA}", u"eta and omicron"),
+                               (u"\N{ARMENIAN SMALL LETTER VO}", u"vo and oh"),
+                               (u"\N{GEORGIAN LETTER IN}", u"in and on"),
+                               (u"\N{DEVANAGARI LETTER NA}", u"na and ttha"),
+                               (u"\N{HEBREW LETTER HE}", u"he and samekh"),
+                               (u"\N{THAANA LETTER NOONU}", u"noonu and meemu"),
+                               (u"\N{KATAKANA LETTER RO}", u"RO and NO")):
+            self.assertIn(word, scripts)
+            round_name = unicodedata.name(sp.ROUND_REFERENCES[straight]).split()[-1].lower()
+            self.assertEqual(word.split()[-1].lower(), round_name, word)
+        self.assertNotIn(u"never changed", sp.HELP, "unspaced references are listed, unticked, to space")
+        self.assertIn(u"listed first, unticked", sp.HELP)
+
+    def test_each_button_has_its_help(self):
+        init = self.source().split(u"class AutoSpacingDialog")[1].split(u"\n    def ")[1]  # (its __init__)
+        for button in (u"all_button", u"none_button", u"glyph_window_button"):
+            self.assertIn(u"self.%s.setWhatsThis(" % button, init)
+        apply_help = init.split(u"self.apply_button.setWhatsThis(")[1].split(u")\n")[0]
+        self.assertIn(u"<i>Glyphs built from components follow the glyphs they are built on</i> is", apply_help,
+                      "the glyphs built on them follow only with the box ticked (self.follow.checked)")
+        self.assertIn(u"if self.follow.checked:", self.source())
+        self.assertIn(u"changed since the analysis: it is measured again. Nothing was spaced.", self.source())
 
 
 if __name__ == "__main__":

@@ -17,13 +17,13 @@ short timer then watches the mouse until its button is released.
 - A window of its own gets a Dock button beside its tabs; a double-click on one of its tabs docks it.
 
 That is the first of two options ("reorder", on by default). The second ("no_undock", off by
-default) keeps the main window's tabs in it: FontLab makes its window on the drop all the same (no
-filter can stop it), so a tab pressed in the main window and found in a window of its own after the
-release is merged back at the place it had when pressed, and FontLab's Undock commands
-(Window > Docking) are hidden. With both, a tab released on or near the bar docks at the marker's
-place and one released anywhere else goes back; with no_undock alone, every dragged tab goes back
-(FontLab itself makes a window of a tab dropped on its own bar), so tabs do not reorder, as in
-FontLab.
+default) keeps the main window's tabs in it: the press on a main window tab is kept from FontLab's tab
+bar, so there is no tab for it to drag away (the tab is chosen by FreeLab, as the click would have, and
+FreeLab shows a close cross of its own on the tab under the mouse, FontLab showing none on such tabs);
+should FontLab make a window all the same, the tab is merged back at the place it had when pressed;
+and FontLab's Undock commands (Window > Docking) are hidden. With both, FreeLab follows the drag itself: the marker shows along the bar,
+and a tab released on or near it moves to that place, one released anywhere else stays where it is;
+with no_undock alone, a drag does nothing, so tabs do not reorder, as in FontLab.
 
 Runs at FontLab's start (FreeLab's startup block). Scripts > FreeLab > Tab Docking switches
 it off and on, and Scripts > FreeLab > Tab Docking Settings chooses the options; both are kept in
@@ -50,11 +50,16 @@ MAIN_FRAME_NAME = "YDropTargetContainer"  # the main window's document area
 WATCHED_PROP = "freelab_tabs"
 LEAVE_ALONE_PROP = "freelabLeaveAlone"  # dark mode leaves the marker as drawn
 DOCK_BUTTON_NAME = "freelabDockButton"
+# The Dock button's tooltip, a sentence as the settings' tooltips are, saying what it does
+DOCK_TIP = u"Puts this window's tabs back into the main window. A double-click on one of its tabs does the same."
 MERGE_WINDOW = "actionMerge_Window"
 # Window > Docking > Undock All Tabs, Undock Font Tabs, and Undock Glyph Tabs: hidden while no_undock is on
 UNDOCK_ACTIONS = ("actionUndock_All", "actionUndock_Font", "actionUndock_Glyph")
 DEFAULT_OPTIONS = {"reorder": True, "no_undock": False}
-FILTER_REVISION, FILTER_CLASS_KEY = 3, "filter_class_v3"  # the tab bars' filter: on a bar (WATCHED_PROP), and its class
+FILTER_REVISION, FILTER_CLASS_KEY = 6, "filter_class_v6"
+MOVE_EVENT = 13  # QEvent::Move, sent to a window as it is dragged by its title bar
+WINDOW_MARGIN = 12  # pixels around the main tab bar where a window dragged by its title bar docks (a tab's: TEAR_MARGIN)
+FRAME_PROP = "freelab_tabs_frame"  # on a window of its own whose moves are followed  # the tab bars' filter: on a bar (WATCHED_PROP), and its class
 
 
 def _qt():
@@ -146,15 +151,14 @@ def is_on():
 def summary(chosen, on=True):
     """One plain sentence saying what is on, for the Output panel."""
     if not on or not (chosen.get("reorder") or chosen.get("no_undock")):
-        return u"FreeLab tab docking is off: FontLab's own tab dragging again."
+        return u"FreeLab tab docking is off: FontLab handles tab dragging again."
     if chosen.get("reorder") and chosen.get("no_undock"):
-        return (u"FreeLab tab docking is on: drag a tab along the tab bar to move it; a tab dragged away from "
-                u"the main window goes back where it was.")
+        return (u"FreeLab tab docking is on: drag a tab along the tab bar to move it; a tab cannot be dragged "
+                u"out of the main window.")
     if chosen.get("reorder"):
         return (u"FreeLab tab docking is on: drag a tab along the tab bar to move it; released on or near "
                 u"the tab bar, a tab goes back into the main window.")
-    return (u"FreeLab tab docking is on: tabs never undock; a tab dragged away from the main window goes "
-            u"back where it was.")
+    return u"FreeLab tab docking is on: a tab cannot be dragged out of the main window."
 
 
 # ---------------------------------------------------------------------------
@@ -325,20 +329,283 @@ def marker_x(bar, page_of, page, slot):
 # Following a drag
 # ---------------------------------------------------------------------------
 
-def on_pressed(tab_widget, index):
+CROSS_WIDTH = 24  # the close cross's zone: this far from a tab's left end
+CROSS_INSET, CROSS_SIZE = 5, 16  # FreeLab's own cross: this far in from the tab's left end, this wide
+HOVER_MS = 80  # how often the tab under the mouse is looked for, while the mouse is over the main tab bar
+ENTER_EVENT = 10  # QEvent::Enter
+
+
+def cross_zone(bar, index):
+    """(left, right) in the bar of a tab's close cross, or None: the tab's left end. Read from the owner's
+    own closing clicks, 2026-11-24 (8 to 13 pixels from the left edge of tabs 571 wide, their titles
+    centered far to the right); two earlier guesses, the tab's right end and the place of its icon, each
+    left the cross needing two clicks. Never raises."""
+    try:
+        if bar is None or index < 0 or not bar.tabsClosable:
+            return None
+        rect = bar.tabRect(index)
+        return rect.left(), rect.left() + CROSS_WIDTH
+    except Exception:
+        return None
+
+
+def on_close_cross(bar, index, pos):
+    """Whether a press at pos (in the bar) lies on a tab's close cross (cross_zone). Never raises."""
+    zone = cross_zone(bar, index)
+    try:
+        return zone is not None and pos is not None and zone[0] <= pos.x() < zone[1]
+    except Exception:
+        return False
+
+
+def on_pressed(tab_widget, index, bar=None, pos=None):
     """A press on a document tab (the bar's event filter): the tab a drag would take, then the mouse
     followed until it is released. FontLab takes the tab out of its bar as the drag starts."""
     state = _state()
+    state["own_press"] = None
     if index < 0:
         state["drag"] = None
-        return
+        return False
     # (where it was pressed: no_undock puts a main window tab back there, and leaves one that was in a
     # window of its own already to FontLab)
-    state["drag"] = {"page": tab_widget.widget(index), "start": cursor_pos(), "started": False,
-                     "from_main": _in_main_window(tab_widget), "index": index}
+    from_main = _in_main_window(tab_widget)
+    # no_undock: the press on a main window tab is kept from FontLab's tab bar, which then has no tab to
+    # take away (the owner, 2026-11-23: put back after the drop, a tab could still be grabbed, which was
+    # the nuisance). With reorder FreeLab follows the mouse itself and moves the tab along the bar at the
+    # release; no window is ever made. Nothing is chosen at the press: a click chooses its tab at the
+    # release (on_released), so that the view does not change under a tab being moved (the owner,
+    # 2026-11-23).
+    # (but a press on the tab's close cross, which is the bar's own: kept, the cross took two clicks; and
+    # handed to the bar afterwards as a click made up here, the cross was no longer shown, a held tab was
+    # chosen after two seconds, and a window no longer merged into another, the owner, 2026-11-23. FontLab
+    # follows the mouse beneath Qt's events, and a made-up click left it waiting for a release.)
+    # (2026-11-24: FontLab showed no cross on main window tabs once their presses were kept from it, and
+    # its own took two clicks. A press on the cross's place is kept like any other, and closes the tab at
+    # its release there, _end_own; FreeLab shows a cross of its own on the tab under the mouse,
+    # hover_cross.)
+    own = bool(_options()["no_undock"] and from_main)
+    on_cross = own and on_close_cross(bar, index, pos)
+    if from_main:
+        zone = cross_zone(bar, index)
+        _note("press at %s, cross zone %s, %s" % (None if pos is None else pos.x(), zone, "kept" if own else "FontLab's"),
+              "presses")
+    drag = {"page": tab_widget.widget(index), "start": cursor_pos(), "started": False,
+            "from_main": from_main, "index": index, "own": own, "tabs": tab_widget, "bar": bar,
+            "at": None if pos is None else (pos.x(), pos.y()), "cross": on_cross}
+    state["drag"] = drag
+    if own:
+        state["own_press"] = drag
+    if from_main and not on_cross:
+        try:  # (the tab shown at the press: kept until the release, hold_view)
+            drag["shown"], drag["count"] = tab_widget.currentIndex, tab_widget.count
+        except Exception:
+            pass
     timer = state.get("poll_timer")
     if timer is not None:
         timer.start()
+    return own
+
+
+def on_window_moved(frame):
+    """A window of its own moved (the filter on it, each step of a drag by its title bar): followed as a tab's
+    drag is, so that released with the mouse on the main tab bar it docks there, at the marker's place.
+    FontLab docks such a window only where its own blue highlight shows, which was hard to get (the owner,
+    2026-11-23). reorder only, and only while the mouse button is held: a window moved by a program, or
+    snapped by Windows, is not being dragged."""
+    state = _state()
+    if state.get("drag") is not None or not _options()["reorder"]:
+        return
+    if not frame.isWindow() or not button_down():
+        return  # (a tab bar moved in its layout sends the same event: no window)
+    for tab_widget, holder in document_tab_widgets():
+        if (holder is frame or holder == frame) and holder.isWindow():
+            page = tab_widget.currentWidget()
+            if page is None:
+                return
+            state["drag"] = {"page": page, "start": cursor_pos(), "started": True, "from_main": False,
+                             "index": -1, "own": False, "window": True}
+            timer = state.get("poll_timer")
+            if timer is not None:
+                timer.start()
+            return
+
+
+def on_released():
+    """The release that ends a press FreeLab kept from the tab bar (on_pressed): kept from it too, since the
+    bar never saw the press. True when kept. What the press was for is done from here, once the filter has
+    returned: a click (the mouse not moved) handed to the bar, a drag ended (finish_own)."""
+    state = _state()
+    held = state.get("own_press")
+    state["own_press"] = None
+    if not held:
+        return False
+    drag = held
+    if drag.get("released"):
+        return True  # (poll saw the button up first, and ended the drag)
+    if button_down():
+        # A release with the button still held is not the owner's (the owner, 2026-11-23: a tab held some two
+        # seconds without moving was shown, as if clicked): kept from the bar like the real one, which is
+        # still to come, or which poll sees.
+        state["own_press"] = held
+        _note("a release came with the button still held")
+        return True
+    _end_own(drag, cursor_pos())
+    return True
+
+
+def _end_own(drag, point):
+    """The end of a press FreeLab kept, once: a click (the mouse not moved) chooses its tab, a drag is ended
+    (finish_own), both once the filter or the timer that saw the release has returned."""
+    drag["released"] = True
+    start = drag["start"]
+    moved = drag["started"] or abs(point.x() - start.x()) + abs(point.y() - start.y()) >= drag_distance()
+    if moved:
+        _later_in(0, "finish_own", drag["page"], drag["index"], point, True)
+    elif drag.get("cross") and _released_on_cross(drag, point):
+        _later_in(0, "close_tab", drag.get("tabs"), drag["page"])
+    else:
+        _later_in(0, "choose_tab", drag.get("tabs"), drag["page"])
+        if _options()["no_undock"] and drag["index"] >= 0:
+            _later("put_back", drag["page"], drag["index"])  # (should FontLab have made a window all the same)
+
+
+def _released_on_cross(drag, point):
+    """Whether a press on a tab's close cross was released on it too (as a button's click is). Never raises."""
+    try:
+        bar = drag.get("bar")
+        return on_close_cross(bar, drag["index"], bar.mapFromGlobal(point))
+    except Exception:
+        return False
+
+
+def close_tab(tab_widget, page):
+    """A click on a main window tab's close cross (no_undock, whose presses FontLab never sees): the tab
+    closed by FontLab's own slot, which asks about unsaved changes as its cross does. Not the Sketchboard."""
+    try:
+        at = tab_widget.indexOf(page)
+        if at >= 0 and _class(page) != "YSketchBoard":
+            tab_widget.onTabCloseRequested(at)
+    except Exception as exc:
+        print("FreeLab tab docking: %s" % (exc,))
+
+
+def on_bar_entered(bar):
+    """The mouse came over a tab bar (its filter): over the main window's, with no_undock, the tab under it
+    is looked for until the mouse leaves, to show its close cross (hover_cross)."""
+    state = _state()
+    if not _options()["no_undock"] or not _in_main_window(bar.parentWidget()):
+        return
+    state["hover_bar"] = bar
+    timer = state.get("hover_timer")
+    if timer is not None and not timer.active:
+        timer.start()
+
+
+def _cross_label(bar):
+    """FreeLab's close cross, a child of the bar (Qt deletes it with it) that takes no mouse event: the
+    press goes to the bar's filter, like any press on the tab."""
+    QtCore, QtGui = _qt()
+    state = _state()
+    label = state.get("cross_label")
+    if label is None or not _alive(label) or label.parentWidget() is not bar:
+        label = QtGui.QLabel(u"\u00d7", bar)
+        label.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, True)
+        label.setAlignment(QtCore.Qt.AlignCenter)
+        font = QtGui.QFont(bar.font)
+        font.setPointSizeF(max(font.pointSizeF(), 8.0) + 3.0)
+        label.setFont(font)
+        label.hide()
+        state["cross_label"] = label
+    return label
+
+
+def hover_cross():
+    """The close cross shown at the left end of the main window tab under the mouse (no_undock: FontLab
+    shows none on tabs it gets no press on, the owner, 2026-11-24), and taken away as the mouse leaves the
+    bar, which also ends the looking. Not on the Sketchboard, which does not close. Never raises."""
+    state = _state()
+    bar = state.get("hover_bar")
+    try:
+        inside = False
+        if bar is not None and _alive(bar) and _options()["no_undock"] and bar.isVisible():
+            local = bar.mapFromGlobal(cursor_pos())
+            inside = 0 <= local.x() < bar.width and 0 <= local.y() < bar.height
+        if not inside:
+            _hide_cross()
+            return
+        index = bar.tabAt(local)
+        tabs = bar.parentWidget()
+        if index < 0 or cross_zone(bar, index) is None or _class(tabs.widget(index)) == "YSketchBoard":
+            label = state.get("cross_label")
+            if label is not None and _alive(label):
+                label.hide()
+            return
+        label = _cross_label(bar)
+        rect = bar.tabRect(index)
+        label.setGeometry(rect.left() + CROSS_INSET, 0, CROSS_SIZE, bar.height)
+        if not label.isVisible():
+            label.show()
+        label.raise_()
+    except Exception:
+        _hide_cross()
+
+
+def _hide_cross():
+    """FreeLab's cross hidden and the looking for a tab under the mouse ended. Never raises."""
+    state = _state()
+    try:
+        timer = state.get("hover_timer")
+        if timer is not None:
+            timer.stop()
+        label = state.get("cross_label")
+        if label is not None and _alive(label):
+            label.hide()
+    except Exception:
+        pass
+    state["hover_bar"] = None
+
+
+def _note(what, key="notes"):
+    """Something unexpected, kept with its time (state["notes"], the last few; "presses": where the last
+    presses on main window tabs were, against the close cross's zone), to be read when the owner reports
+    what it led to. Never raises."""
+    try:
+        notes = _state().setdefault(key, [])
+        notes.append((time.strftime("%H:%M:%S"), what))
+        del notes[:-12]
+    except Exception:
+        pass
+
+
+def choose_tab(tab_widget, page):
+    """A click FreeLab kept from the tab bar (no_undock) chooses its tab, as FontLab's own would have at the
+    press."""
+    try:
+        at = tab_widget.indexOf(page)
+        if at >= 0 and tab_widget.currentIndex != at:
+            tab_widget.setCurrentIndex(at)
+    except Exception as exc:
+        print("FreeLab tab docking: %s" % (exc,))
+
+
+def finish_own(page, index, point, moved):
+    """The end of a drag whose press FreeLab kept (no_undock): the tab is still in the main window. Moved
+    and released on or near the bar, it goes to the marker's place (reorder); moved and released anywhere
+    else, it stays where it is and is chosen, as FontLab's own press would have."""
+    chosen = _options()
+    bar, main = main_tabs()
+    if moved and main is not None:
+        if chosen["reorder"] and near_bar(bar, main, point):
+            dock(page, drop_slot(bar, point, main.widget, page))
+            return
+        try:
+            at = main.indexOf(page)
+            if at >= 0 and main.currentIndex != at:
+                main.setCurrentIndex(at)
+        except Exception as exc:
+            print("FreeLab tab docking: %s" % (exc,))
+    if chosen["no_undock"] and index >= 0:
+        _later("put_back", page, index)  # (should FontLab have made a window all the same)
 
 
 def _in_main_window(tab_widget):
@@ -372,17 +639,31 @@ def poll():
             moved = abs(point.x() - drag["start"].x()) + abs(point.y() - drag["start"].y())
             drag["started"] = moved >= drag_distance()
         if drag["started"] and chosen["reorder"]:
-            show_marker(drag["page"], point)
+            show_marker(drag["page"], point, WINDOW_MARGIN if drag.get("window") else TEAR_MARGIN)
+        if "shown" in drag:
+            hold_view(drag)
+        follow_drop(drag)
         return
     _stop_polling()
     hide_marker()
     state["drag"] = None
+    _trace(drag, "released")
+    for delay in TRACE_AFTER_MS:
+        _later_in(delay, "trace_after", drag)
     page = drag["page"]
     if page is None:
         return
+    if drag.get("reverted") and not drag["started"] and not drag.get("own"):
+        _later("choose_tab", drag.get("tabs"), page)  # (a click whose tab FreeLab held back: chosen now)
+    if drag.get("own"):
+        # (the press was kept from FontLab: ended by its release, on_released; here only when the bar was
+        # not given that release)
+        if not drag.get("released"):
+            _end_own(drag, point)
+        return
     if chosen["reorder"] and drag["started"]:
         bar, main = main_tabs()
-        if main is not None and near_bar(bar, main, point):
+        if main is not None and near_bar(bar, main, point, WINDOW_MARGIN if drag.get("window") else TEAR_MARGIN):
             _later("dock_after_drop", page, drop_slot(bar, point, main.widget, page),
                    bool(drag.get("from_main")), drag.get("index", -1))
             return
@@ -393,14 +674,151 @@ def poll():
     # (else released away: a window of its own, as FontLab made it)
 
 
+HOLD_REVERTS = 2  # how many times the tab shown is put back under a held press, before FontLab is let be
+DROP_TIMER_FAST_MS = 1  # FontLab's wait before its blue drop highlight, for a window dragged by its title bar
+TRACE_AFTER_MS = (100, 300, 600, 1000, 1500)  # after a release, when FontLab's own drop is looked at again
+
+
+def hold_view(drag):
+    """The tab shown kept as it was at the press, while the press is held and the mouse has not moved:
+    FontLab shows a tab held some two seconds, as if clicked (the owner, 2026-11-23 and 24, with its own
+    press as with one FreeLab kept). Put back at most HOLD_REVERTS times; the tab is chosen at the release
+    (poll, or the kept press's own end). Not once a drag has started, nor when the bar has lost or gained a
+    tab (FontLab took it for its drag). Never raises."""
+    try:
+        tabs = drag.get("tabs")
+        shown = drag["shown"]
+        if tabs is None or drag["started"] or tabs.count != drag.get("count", tabs.count):
+            del drag["shown"]
+            return
+        if tabs.currentIndex == shown:
+            return
+        _note("the tab shown changed while a press was held")
+        _trace(drag, "tab shown changed to %s" % (tabs.currentIndex,))
+        if drag.get("reverted", 0) >= HOLD_REVERTS:
+            del drag["shown"]
+            return
+        drag["reverted"] = drag.get("reverted", 0) + 1
+        tabs.setCurrentIndex(shown)
+    except Exception:
+        drag.pop("shown", None)
+
+
+def _drop_parts(frame):
+    """(FontLab's drop timer, its blue highlight or None) of a document area's frame: the frame's own
+    QTimer child (YFrameWindow.dropTimerOnTimeout is its slot) and its YDropHighlight child, made at the
+    first drag over it."""
+    timer = highlight = None
+    for child in frame.children():
+        name = _class(child)
+        if name == HIGHLIGHT_CLASS:
+            highlight = child
+        elif name == "QTimer" and timer is None:
+            timer = child
+    return timer, highlight
+
+
+def follow_drop(drag):
+    """FontLab's own drop target on the main window, each step of a drag. Never raises.
+
+    - A tab dragged out of the main window: FontLab's blue highlight came up over the document area the tab
+      had just left, and a release there put the tab back, which made undocking hard (the owner,
+      2026-11-24: a tab is put back by dragging it to the tab bar). Its drop timer is stopped before it
+      fires, and the highlight hidden should it show all the same.
+    - A window dragged by its title bar, or a tab of one: the highlight came half a second late (the owner,
+      2026-11-23 and 24). The timer, once FontLab has started it, is started again with almost no wait.
+
+    What is seen is kept (_trace), to be read when the owner reports how it went."""
+    try:
+        frame = drag.get("frame")
+        if frame is None or not _alive(frame):
+            bar, main = main_tabs()
+            frame = drag["frame"] = main.parentWidget() if main is not None else None
+            if frame is None:
+                return
+        timer, highlight = _drop_parts(frame)
+        active = bool(timer is not None and timer.active)
+        interval = timer.interval if timer is not None else None
+        lit = bool(highlight is not None and highlight.isVisible())
+        seen = (active, interval, lit, drag["tabs"].count if drag.get("tabs") is not None else None)
+        if seen != drag.get("seen"):
+            drag["seen"] = seen
+            _trace(drag, "drop timer %s (%s ms), highlight %s, tabs %s" % (
+                "running" if active else "idle", interval, "shown" if lit else "hidden", seen[3]))
+        if not _options()["reorder"]:
+            return
+        if drag.get("from_main") and not drag.get("own") and not drag.get("window"):
+            if active:
+                timer.stop()
+            if lit:
+                highlight.hide()
+        elif active and interval > DROP_TIMER_FAST_MS:
+            timer.start(DROP_TIMER_FAST_MS)
+    except Exception:
+        pass
+
+
+def _trace(drag, what):
+    """A step of a drag, with the milliseconds since its press (state["traces"]: the last few drags).
+    Never raises."""
+    try:
+        steps = drag.get("trace")
+        if steps is None:
+            steps = drag["trace"] = []
+            drag["t0"] = time.time()
+            traces = _state().setdefault("traces", [])
+            traces.append(steps)
+            del traces[:-12]
+            steps.append((time.strftime("%H:%M:%S"), "from main" if drag.get("from_main") else
+                          "a window" if drag.get("window") else "from a window", "kept" if drag.get("own") else ""))
+        if len(steps) < 60:
+            steps.append((int((time.time() - drag["t0"]) * 1000), what))
+    except Exception:
+        pass
+
+
+def trace_after(drag):
+    """After a release: how FontLab's own drop stands (its timer, its highlight, the windows of their own)."""
+    try:
+        frame = drag.get("frame")
+        if frame is None or not _alive(frame):
+            return
+        timer, highlight = _drop_parts(frame)
+        windows = len([1 for widget, holder in document_tab_widgets() if holder.isWindow() and holder.isVisible()])
+        _trace(drag, "after: drop timer %s, highlight %s, windows %s" % (
+            "running" if timer is not None and timer.active else "idle",
+            "shown" if highlight is not None and highlight.isVisible() else "hidden", windows))
+    except Exception:
+        pass
+
+
+DOCK_RETRY_MS, DOCK_RETRIES = 250, 2  # Merge Window not yet available just after a drop: asked again this late
+
+
+def dock_retry(page, slot, left):
+    """A dock that failed just after a drop tried again (FontLab's Merge Window stayed unavailable for the
+    window just dropped, twice in one session, 2026-11-24), while the tab is still in a window of its own."""
+    if not _alive(page) or holder_of(page) is None or not _options()["reorder"]:
+        return
+    if dock(page, slot):
+        refresh_main()
+    elif left > 1:
+        _later_in(DOCK_RETRY_MS, "dock_retry", page, slot, left - 1)
+
+
 def _later(function, *args):
     """function(*args) through the dispatcher once FontLab has finished its own drop."""
+    _later_in(DOCK_DELAY_MS, function, *args)
+
+
+def _later_in(delay, function, *args):
+    """function(*args) through the dispatcher, delay milliseconds from now."""
     QtCore = _qt()[0]
     state = _state()
     later = (lambda call: lambda: call(function, *args))(_dispatcher())
     state["pending"].append(later)
     del state["pending"][:-16]  # the last few kept alive until they have run
-    QtCore.QTimer.singleShot(DOCK_DELAY_MS, later)
+    QtCore.QTimer.singleShot(delay, later)
 
 
 def _stop_polling():
@@ -419,7 +837,8 @@ def dock_after_drop(page, slot, from_main=False, index=-1):
         if chosen["no_undock"] and from_main and index >= 0:
             put_back(page, index)
         return
-    dock(page, slot)
+    if not dock(page, slot) and _alive(page) and holder_of(page) is not None:
+        _later_in(DOCK_RETRY_MS, "dock_retry", page, slot, DOCK_RETRIES)
     refresh_main()
 
 
@@ -430,7 +849,7 @@ def put_back(page, index):
     put back."""
     if not _options()["no_undock"]:
         return False
-    if holder_of(page) is None:
+    if not _alive(page) or holder_of(page) is None:  # (not alive: the click was on its close cross)
         return False
     done = dock(page, index)
     refresh_main()
@@ -449,6 +868,32 @@ def refresh_main():
     for widget in QtGui.QApplication.instance().allWidgets():
         if frame.isAncestorOf(widget) and widget.isVisible():
             widget.update()
+    clear_highlight()
+    for delay in HIGHLIGHT_CHECKS_MS:  # (FontLab shows it from a timer of its own, which may come after the merge)
+        _later_in(delay, "clear_highlight")
+
+
+HIGHLIGHT_CLASS = "YDropHighlight"  # FontLab's blue drop highlight: a child of a document area's frame, hidden but in a drag
+HIGHLIGHT_CHECKS_MS = (400, 1500)
+
+
+def clear_highlight():
+    """FontLab's blue drop highlight hidden where it shows with no mouse button held: it stayed over the
+    whole document area after a window was merged by Merge Window while FontLab was showing a drop for it
+    (the owner, 2026-11-23; read live: still visible minutes later, no drag, no window of its own left).
+    FontLab shows it again at its next drag. The number hidden; never raises."""
+    count = 0
+    try:
+        if button_down():
+            return 0
+        for tab_widget, frame in document_tab_widgets():
+            for child in frame.children():
+                if _class(child) == HIGHLIGHT_CLASS and child.isVisible():
+                    child.hide()
+                    count += 1
+    except Exception:
+        pass
+    return count
 
 
 def _marker():
@@ -465,7 +910,7 @@ def _marker():
     return marker
 
 
-def show_marker(page, point):
+def show_marker(page, point, margin=TEAR_MARGIN):
     """The marker at the gap the tab would go into, when the mouse is on or near the main tab bar (and
     reorder is on: no_undock alone docks nowhere new)."""
     QtCore, QtGui = _qt()
@@ -473,7 +918,7 @@ def show_marker(page, point):
         hide_marker()
         return
     bar, main = main_tabs()
-    if main is None or not near_bar(bar, main, point):
+    if main is None or not near_bar(bar, main, point, margin):
         hide_marker()
         return
     slot = drop_slot(bar, point, main.widget, page)
@@ -562,8 +1007,11 @@ def merge_window(frame):
     if active is not None and active is not frame and _class(active) == "YFrameWindow":
         # another window of its own is still the active one: Merge Window would merge that one
         return _fail(u"another window stayed the active one (%s), not %s." % (_describe(active), _describe(frame)))
+    began = time.time()
     actions[0].trigger()
     QtGui.QApplication.processEvents()
+    _note("Merge Window took %d ms (%d tries to make its window active)" % ((time.time() - began) * 1000, attempt + 1),
+          "merges")
     return True
 
 
@@ -692,7 +1140,7 @@ def _add_dock_button(tab_widget):
     button.setObjectName(DOCK_BUTTON_NAME)
     button.setText(u"Dock")
     button.setAutoRaise(True)
-    button.setToolTip(u"Put this window's tabs back into the main window (or double-click a tab)")
+    button.setToolTip(DOCK_TIP)
     handler = (lambda call: lambda *args: call("dock_frame", tab_widget))(_dispatcher())
     _state()["held"].append(handler)
     button.connect("clicked()", handler)
@@ -714,8 +1162,17 @@ def _filter_class():
             def eventFilter(self, obj, event):
                 try:
                     kind = event.type()
+                    if kind == ENTER_EVENT:  # (the mouse over a tab bar: its close cross, no_undock)
+                        call("on_bar_entered", obj)
+                        return False
+                    if kind == MOVE_EVENT:  # (on a window of its own: dragged by its title bar)
+                        call("on_window_moved", obj)
+                        return False
                     if kind == QtCore.QEvent.MouseButtonPress and event.button() == QtCore.Qt.LeftButton:
-                        call("on_pressed", obj.parentWidget(), obj.tabAt(event.pos()))
+                        # (True: kept from the bar, so that FontLab has no tab to drag away, no_undock)
+                        return bool(call("on_pressed", obj.parentWidget(), obj.tabAt(event.pos()), obj, event.pos()))
+                    elif kind == getattr(QtCore.QEvent, "MouseButtonRelease", 3) and event.button() == QtCore.Qt.LeftButton:
+                        return bool(call("on_released"))
                     elif kind == QtCore.QEvent.MouseButtonDblClick and obj.tabAt(event.pos()) >= 0:
                         return bool(call("on_double_click", obj.parentWidget()))
                 except Exception:
@@ -743,6 +1200,22 @@ def _drop_old_filters(bar):
             continue
 
 
+def _follow_moves(frame):
+    """A window of its own given the filter that follows its moves (on_window_moved), once: dragged by its
+    title bar onto the main tab bar, it docks there. True when it was put on. A window that will not take
+    it is left as it is (its tab bar is hooked all the same). Never raises."""
+    try:
+        if not frame.isWindow() or frame.property(FRAME_PROP) == FILTER_REVISION:
+            return False
+        moves = _filter_class()(frame)  # (its parent the window: Qt deletes it with it, never PythonQt)
+        _state()["held"].append(moves)
+        frame.installEventFilter(moves)
+        frame.setProperty(FRAME_PROP, FILTER_REVISION)
+        return True
+    except Exception:
+        return False
+
+
 def watch(force=False):
     """Hook every document tab bar not hooked yet, and give windows of their own their Dock button. Each
     document area found is looked at every pass, a few calls each (whether its bar is hooked, its Dock
@@ -765,6 +1238,7 @@ def watch(force=False):
                     tab_widget.setCornerWidget(button, QtCore.Qt.TopRightCorner)
                     button.show()
                     changed = True
+            changed = _follow_moves(frame) or changed
             bar = _bar_of(tab_widget)
             if bar is not None and bar.property(WATCHED_PROP) != FILTER_REVISION:
                 _drop_old_filters(bar)  # (2: the filter before the options, which docked on a double-click itself)
@@ -811,6 +1285,7 @@ def start(chosen=None):
     state["module"] = sys.modules.get(__name__)  # what the dispatcher calls, should FontLab drop it
     _timer("timer", WATCH_MS, "watch").start()
     _timer("poll_timer", POLL_MS, "poll")
+    _timer("hover_timer", HOVER_MS, "hover_cross")
     apply_options(options(load_settings()) if chosen is None else chosen)  # (watch: the Dock buttons put back after an off)
 
 
@@ -848,7 +1323,8 @@ def stop():
     state = _state()
     state["on"] = False
     state["drag"] = None
-    for key in ("timer", "poll_timer"):
+    _hide_cross()
+    for key in ("timer", "poll_timer", "hover_timer"):
         if state.get(key) is not None:
             state[key].stop()
     hide_marker()

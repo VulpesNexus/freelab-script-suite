@@ -29,6 +29,8 @@ PROGRESS_EVERY = 25  # pairs, entries, or glyphs between two calls to the progre
 # most every 0.1 s: owner's images 176 to 180; every 2000 pairs held the window seconds at a time)
 DRAW_STEP, CHECK_STEP, CLEANUP_STEP = u"Drawing the glyphs", u"Checking pairs", u"Checking entries"
 COMPARE_STEP, WRITE_STEP, REMOVE_STEP = u"Comparing masters", u"Writing fixes", u"Removing entries"
+# The Cancel button's own line (ak.cancel_button): what a stop leaves (stopped: the list left empty, said so)
+CANCEL_NOTE = u"A check stopped changes nothing in the font: its list is left empty."
 # The settings row reads as a sentence, its period after the last dropdown (owner's image 243): "List
 # kerned pairs whose ink comes within 20 units and that many units closer than without the accent (e.g.,
 # Ťo vs. To)." / "... within 20 units of each other, accented or not."
@@ -565,10 +567,13 @@ def action_text(key, count):
 
 HELP = u"""<b>FreeLab Kerning Check</b><br>
 Three lists for the current font's kerning. Nothing changes until you click a list's button.<br><br>
-<b>Collisions</b>: kerned pairs whose ink comes closer than the distance you set, at the kerning
-FontLab applies (kerning classes included), all of them or only those common in text. The fix is
-the value that keeps that distance; written, it is a pair of its own, so the class kerns its other
-glyphs as before. If a fix looks off, drag the <i>Adjusted</i> preview's right glyph left or right
+<b>Collisions</b>: kerned pairs whose ink comes within the distance you set, at the kerning FontLab
+applies (kerning classes included), all of them or only those common in text. As the list starts, a pair
+is listed only when its class's value also brings it that much closer than its base pair
+(\N{LATIN CAPITAL LETTER T WITH CARON}o against To: the class's key glyph beside the same partner), and
+its fix sets it as far apart as the base pair. With <i>of each other, accented or not</i>, every such
+pair is listed, and its fix keeps the distance you set. A fix is written as a pair of its own, so the
+class kerns its other glyphs as before. If a fix looks off, drag the <i>Adjusted</i> preview's right glyph left or right
 (or click it and press <i>Left</i> or <i>Right</i>, with <i>Shift</i> for 10 units): the fix follows.<br>
 <b>Cleanup</b>: entries that change nothing (their pairs get the same value without them, or each
 pair they cover has a value of its own), entries naming a class or glyph that is gone (ticked), and
@@ -584,7 +589,7 @@ under the font's name says what the list shown holds.
 Double-click a row's pair (or select it and click <i>Show in Glyph window</i>) to look at it with
 FontLab's own tools. <i>Tick all</i> and <i>Untick all</i> tick or untick a whole list;
 <i>Restore suggestions</i> puts its ticks back as it first came.
-Click this help's <i>?</i> button, then any control, for what it does."""
+Click this help's button, then anything in the window, for what it does (or right-click it: <i>What's This?</i>)."""
 
 
 class TabStatus(object):
@@ -777,23 +782,21 @@ class KerningCheckDialog(object):
         self.mode = QtGui.QComboBox()
         for _, label in COLLISION_MODES:
             self.mode.addItem(label)
-        self.mode.setWhatsThis(u"How both glyphs' ink is measured: the narrowest horizontal distance between them, "
-                               u"row by row, at the pair's kerning.<br><i>And that many units closer than without "
-                               u"the accent</i>: a pair is listed when its ink comes within the distance set, and "
-                               u"also comes closer by at least as many units than the same pair without the accent "
-                               u"or stroke, at the same value (\N{LATIN CAPITAL LETTER T WITH CARON}o against To, "
+        self.mode.setWhatsThis(u"Which pairs are listed.<br><i>And that many units closer than without the "
+                               u"accent</i>: a pair whose ink comes within the distance set and also at least that "
+                               u"many units closer than the same pair without the accent or stroke, at the same "
+                               u"value (\N{LATIN CAPITAL LETTER T WITH CARON}o against To, "
                                u"\N{LATIN CAPITAL LETTER T WITH STROKE}o against To): what a class's value does to "
-                               u"an accented or wider member. It suits any font, also one whose letters touch on "
-                               u"purpose.<br><i>Of each other, accented or not</i>: every kerned pair whose ink "
-                               u"comes within the distance set.")
+                               u"an accented or wider member.<br><i>Of each other, accented or not</i>: every kerned "
+                               u"pair whose ink comes within the distance set.")
         tab.settings.addWidget(self.mode)
         self.ak.sentence_end(tab.settings)
         self.collisions_button = QtGui.QPushButton("Check")
         tab.settings.addWidget(self.collisions_button)
         tab.settings.addStretch(1)
-        tab.tree.setWhatsThis(u"The pairs whose ink comes too close, closest first: their kerning now, the "
-                              u"narrowest distance between their ink with it, the value that keeps the distance "
-                              u"you set, and the entry the kerning comes from.")
+        tab.tree.setWhatsThis(u"The pairs whose ink comes too close, the worst first: their kerning now, the "
+                              u"narrowest distance between their ink with it, the fix, the entry the kerning "
+                              u"comes from, and the base pair it is compared with.")
         tab.action.setWhatsThis(u"Writes each ticked pair's fix as a pair of its own (the class it takes its value "
                                 u"from kerns its other glyphs as before).")
 
@@ -812,7 +815,7 @@ class KerningCheckDialog(object):
         tab.settings.addStretch(1)
         tab.tree.setWhatsThis(u"Entries that change nothing or name what is gone (ticked), and tiny values "
                               u"(unticked).")
-        tab.action.setWhatsThis(u"Cleans up: removes the ticked entries from the current master.")
+        tab.action.setWhatsThis(u"Removes the ticked entries from the current master.")
 
         self.masters = Tab(QtGui, ("Entry or class", "Values", "Why"), None, TabStatus(self.status_line, shown))
         tab = self.masters
@@ -835,8 +838,8 @@ class KerningCheckDialog(object):
         layout.addWidget(self.log.widget)
 
         self.glyph_window_button = QtGui.QPushButton("Show in Glyph window")
-        self.glyph_window_button.setWhatsThis(u"Opens the selected row's pair in a <i>Glyph</i> window, between H's, n's, "
-                                              u"and o's.")
+        self.glyph_window_button.setWhatsThis(u"Opens the selected row's pair in a <i>Glyph</i> window, between its "
+                                              u"script's control glyphs (H, n, and o for Latin).")
         self.close_button = QtGui.QPushButton("Close")
         layout.addLayout(self.bottom_row(QtGui))
 
@@ -1302,7 +1305,7 @@ class KerningCheckDialog(object):
                 b(counted(stale, u"pair")), u"was" if stale == 1 else u"were", u"it was" if stale == 1 else u"they were"),
                 "warning")
         if error is not None:
-            self.log.add(u"Stopped by an error: %s" % self.ak.html(error), "error")
+            self.log.add(self.ak.error_sentence(u"Stopped by an error", error), "error")
 
     def check_cleanup(self):
         if self.busy or not self.read_font():
@@ -1391,7 +1394,7 @@ class KerningCheckDialog(object):
                 b(counted(stale, u"entry", u"entries")), u"was" if stale == 1 else u"were", u"it was" if stale == 1 else u"they were"),
                 "warning")
         if error is not None:
-            self.log.add(u"Stopped by an error: %s" % self.ak.html(error), "error")
+            self.log.add(self.ak.error_sentence(u"Stopped by an error", error), "error")
 
     def check_masters(self):
         if self.busy or not self.read_font():
@@ -1440,7 +1443,7 @@ class KerningCheckDialog(object):
     def bottom_row(self, QtGui):
         """The window's bottom row, as every tool's (owner's report 152: they sat under each list, above
         the previews and the log): the list's own Tick all, Untick all, and Restore suggestions, then
-        Show in Glyph window; at the right, the list's action, then Close. Every list's buttons are in
+        Show in Glyph window; at the right, the list's action, then Cancel and Close. Every list's buttons are in
         it, those of the list shown visible (show_tab_buttons)."""
         row = QtGui.QHBoxLayout()
         tabs = (self.collisions, self.cleanup, self.masters)
@@ -1454,6 +1457,7 @@ class KerningCheckDialog(object):
             if tab.action is not None:
                 row.addWidget(tab.action)
         row.addWidget(self.close_button)
+        self.ak.cancel_button(self, row, self.close_button, CANCEL_NOTE)  # (right before Close)
         self.show_tab_buttons(0)
         return row
 
@@ -1631,7 +1635,7 @@ class KerningCheckDialog(object):
         contexts = self.ak.proof_contexts(self.package, list(pair))
         error = self.ak.show_in_glyph_window(self.fontlab, self.ak.proof_text(pair[0], pair[1], contexts))
         if error:
-            self.log.add(u"FontLab did not open the pair: %s" % self.ak.html(error), "error")
+            self.log.add(self.ak.error_sentence(u"FontLab did not open the pair", error), "error")
 
     def show(self):
         QtCore, QtGui = _qt()

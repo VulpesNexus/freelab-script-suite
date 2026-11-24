@@ -1016,7 +1016,8 @@ def preview_note(text, names, bold=lambda text: text, escape=lambda text: text):
     """What the previews show of a sample, where the font lacks some of its characters (owner's report
     148: on Bellefair, the Korean sample's previews held a comma and a period only, and nothing said
     why): the characters the font has, and what it lacks, by kind (its Hangul, its CJK punctuation
-    marks, named). Empty where the font has every character. names: {code point: glyph}; bold: how a
+    marks, named), said in the window's log (CJK Spacing's LacksNote). Empty where the font has every
+    character. names: {code point: glyph}; bold: how a
     count is set off, with its noun (owner's images 297 and 301); escape: the sample's characters made
     safe in rich text (ak.html), as bold makes it rich."""
     shown, lacking = [], []
@@ -1177,6 +1178,9 @@ EXPORT_STEPS = ((VALUES_STEP, 0.12), (OPEN_STEP, 0.13), (SCRIPT_STEPS["match"], 
 CFF_EXPORT_STEPS = ((VALUES_STEP, 0.12), (OPEN_STEP, 0.13), (SCRIPT_STEPS["match"], 0.14), (SCRIPT_STEPS["measure"], 0.56),
                     (SCRIPT_STEPS["build"], 0.57), (SAVE_STEP, 0.96), (CHECK_STEP, 1.0))
 SHOW_AFTER = 0.3  # seconds: the list read again (an undo, a check box) shows the bar only when it takes longer
+# The Cancel button's own line (ak.cancel_button): what a stop leaves (listing_stopped; an export stopped before
+# its copy and values file take their names, add_metrics_to)
+CANCEL_NOTE = u"A listing stopped changes nothing in the font, and an export stopped writes no file."
 ROWS_PER_STEP = 100  # rows listed between two moves of the bar
 BAR_RANGE = 1000  # the top row's bar's range (ak.BUSY_RANGE), should the shared module not say
 
@@ -1202,13 +1206,13 @@ open-licensed CJK fonts make them; each form is built as a component of its glyp
 A form the font has drawn (a .vert glyph, or the character's vertical presentation form) is used as
 it is; one the font's own code makes is listed and left alone. Then each full-width kana and
 punctuation mark's vpal trim (its top and bottom sidebearings, as those fonts set them), the vkrn
-pairs (the pairs those fonts kern, a kana before the comma or full stop above all, each by their
+pairs (the pairs those fonts kern, a kana before the comma or full stop above all, each at its
 median value), and the vertical metrics: advance heights for the glyphs
 without one, and vhea's ascender, descender, and line gap (0; the corpus's median is 0.15 em).
 FontLab 7's export writes no vhea, vmtx, or VORG table: these stay in the font (its .vfc), and
 <i>Add vertical metrics to an exported font</i> adds them to a copy of the font FontLab exported
 (.vert before its extension; the exported font is not changed).
-<i>Turned proportional glyphs (vrt2)</i>, off unless ticked, adds turned copies of the font's
+<i>Turned proportional glyphs (vrt2)</i> adds turned copies of the font's
 proportional glyphs to vrt2, as a third of those fonts do. Ticked rows are written.<br>
 <b>The previews</b>: the sample set in vertical columns, right to left, as the font's own code sets
 it, and with what is ticked. A sample in a writing the font has none of is grayed.<br>
@@ -1217,15 +1221,14 @@ written yet), and what it builds and sets besides, in comments.<br>
 Drag the space between two parts (the list, the previews, the code) to give one more room.<br>
 <i>Restore suggestions</i> puts every tick back as the list first came; <i>Put back vhea</i> puts
 the font info back as it was before the last write (FontLab's History does not hold it).<br><br>
-Click this help's <i>?</i> button, then any control, for what it does."""
+Click this help's button, then anything in the window, for what it does (or right-click it: <i>What's This?</i>)."""
 
 
 PREVIEW_CAPTIONS = (u"Now (the font's own code)", u"With what is ticked")  # (Tick, not Check: owner's image 261)
 CODE_PREVIEW_WHAT = (u"The code <i>Write</i> would write, as the ticks and options stand: vert, vrt2, vpal, and vkrn "
                      u"whole, FreeLab's block between its marker lines, the rest of each feature as it is (a feature "
                      u"that would not change is left out), then, in comments, the glyphs it builds and the metrics it "
-                     u"sets. Nothing is written until you click the button. Keywords, tags, glyph classes, numbers, and "
-                     u"comments are in colors of their own, as in <i>Feature Code</i>.")
+                     u"sets. Nothing is written until you click the button.")
 
 
 def code_notes(builds, metrics):
@@ -1299,13 +1302,13 @@ class CJKVerticalDialog(object):
         self.vkrn_box = QtGui.QCheckBox(u"Vertical kerning (vkrn)")
         self.vkrn_box.setChecked(True)
         self.vkrn_box.setWhatsThis(u"Writes vkrn for the pairs the corpus's fonts kern in vertical text (kana before the "
-                                   u"comma and full stop, and kana pairs), each by their median value, scaled to the "
+                                   u"comma and full stop, and kana pairs), each at its median value, scaled to the "
                                    u"em: a starting point, not measured on the font's glyphs.")
         self.turned_box = QtGui.QCheckBox(u"Turned proportional glyphs (vrt2)")
         self.turned_box.setChecked(False)
         self.turned_box.setWhatsThis(u"Builds turned copies of the font's proportional glyphs (Latin, figures, half-width "
                                      u"forms) for vrt2, as a third of the corpus's fonts do; the others leave them to "
-                                     u"applications, which turn them themselves. Off unless ticked.")
+                                     u"applications, which turn them themselves.")
         self.metrics_box = QtGui.QCheckBox(u"Vertical metrics")
         self.metrics_box.setChecked(True)
         self.metrics_box.setWhatsThis(u"Sets the ticked vertical metrics: advance heights for the glyphs without one, and "
@@ -1328,9 +1331,10 @@ class CJKVerticalDialog(object):
         self.tree.setIconSize(QtCore.QSize(ICON_SIZE, ICON_SIZE))
         self.tree.setProperty(ak.LEAVE_ALONE_PROP, True)  # its pictures are drawn in the dialog's colors
         ak.table_layout(self.tree)
-        self.tree.setWhatsThis(u"The vertical forms (the picture shows the form), the vpal trims (y placement and y "
-                               u"advance), and the vertical metrics, each with its value now and after. Ticked rows "
-                               u"are written. Double-click a glyph to see it in a <i>Glyph</i> window.")
+        self.tree.setWhatsThis(u"The vertical forms (the picture shows the form), the turned proportional glyphs while "
+                               u"their option is ticked, the vpal trims (y placement and y advance), the vkrn pairs, "
+                               u"and the vertical metrics, each with its value now and after. Ticked rows are "
+                               u"written. Double-click a glyph to see it in a <i>Glyph</i> window.")
         list_part.addWidget(self.tree, 1)  # (the last of its pane: the handle right under its frame)
         preview_part = self.cj.splitter_part(QtGui, self.splitter, 3)
         sample_row = QtGui.QHBoxLayout()
@@ -1382,14 +1386,9 @@ class CJKVerticalDialog(object):
             self.previews.append(label)
         ak.preview_filled(self.preview_parts, False)  # (nothing drawn yet)
         preview_part.addLayout(previews, 1)
-        # What the previews show of the sample where the font lacks some of it (preview_note), else hidden
-        self.preview_note = QtGui.QLabel(u"")
-        self.preview_note.setWordWrap(True)
-        self.preview_note.setEnabled(False)  # (drawn in the quiet text color, as the captions)
-        self.preview_note.setWhatsThis(u"The previews leave out the sample's characters the font lacks: this line "
-                                       u"says which they show, and which are missing.")
-        self.preview_note.setVisible(False)
-        preview_part.addWidget(self.preview_note)
+        # What the previews show of the sample where the font lacks some of it (preview_note): said in the log, no
+        # longer in a line under the previews (CJK Spacing's LacksNote)
+        self.lacks_note = self.cj.LacksNote(ak, self.log, dialog)
         # The Code preview, last, as Feature Code's code under its lists (owner's image 305)
         self.code_preview = self.cj.CodePreview(ak, reader(), self.splitter, CODE_PREVIEW_WHAT, 2)
         try:  # (the splitter's hint on its handles, as Feature Code's: not on every label inside it)
@@ -1400,7 +1399,9 @@ class CJKVerticalDialog(object):
         layout.addWidget(self.log.widget)
         buttons = QtGui.QHBoxLayout()
         self.all_button = QtGui.QPushButton("Tick all")
+        self.all_button.setWhatsThis(u"Ticks every row of the list.")
         self.none_button = QtGui.QPushButton("Untick all")
+        self.none_button.setWhatsThis(u"Unticks every row of the list.")
         self.restore_button = QtGui.QPushButton("Restore suggestions")
         self.restore_button.setWhatsThis(u"Puts every tick back as the list first came.")
         self.put_back_button = QtGui.QPushButton("Put back vhea")
@@ -1414,9 +1415,9 @@ class CJKVerticalDialog(object):
                                         u"origin at the typographic ascender; VORG for a CFF font). The exported "
                                         u"font is not changed.")
         self.write_button = QtGui.QPushButton("Write")
-        self.write_button.setWhatsThis(u"Builds the ticked vertical forms, writes vert, vrt2, and vpal between FreeLab's "
-                                       u"marker lines (the rest of each feature kept), and sets the ticked vertical "
-                                       u"metrics. <i>Edit &gt; Undo</i> takes the glyphs, the code, and the advance "
+        self.write_button.setWhatsThis(u"Builds the ticked vertical forms and turned glyphs, writes vert, vrt2, vpal, and "
+                                       u"vkrn between FreeLab's marker lines (the rest of each feature kept), and sets "
+                                       u"the ticked vertical metrics. <i>Edit &gt; Undo</i> takes the glyphs, the code, and the advance "
                                        u"heights back; <i>Put back vhea</i> the font info.")
         self.close_button = QtGui.QPushButton("Close")
         for button in (self.all_button, self.none_button, self.restore_button):
@@ -1425,6 +1426,7 @@ class CJKVerticalDialog(object):
         self.compile_box = ak.compile_box()
         for widget in self.bottom_right():  # (owner's image 298: the compile tick by the write it is about)
             buttons.addWidget(widget)
+        ak.cancel_button(self, buttons, self.close_button, CANCEL_NOTE)  # (right before Close)
         layout.addLayout(buttons)
         self.all_button.connect("clicked()", lambda: self.check_all(True))
         self.none_button.connect("clicked()", lambda: self.check_all(False))
@@ -1435,8 +1437,8 @@ class CJKVerticalDialog(object):
         self.close_button.connect("clicked()", self.ak.close_slot(self))  # (never the window itself: see let_go)
         for box in (self.forms_box, self.vpal_box, self.vkrn_box, self.turned_box, self.metrics_box):
             box.connect("toggled(bool)", lambda on: self.toggled())
-        self.sample.connect("textChanged(QString)", lambda text: self.draw_previews())
-        self.sample_box.connect("activated(int)", lambda index: self.sample.setText(self.samples[index][2]))
+        self.sample.connect("textChanged(QString)", lambda text: self.draw_previews(typed=True))
+        self.sample_box.connect("activated(int)", lambda index: self.sample_chosen(self.samples[index][2]))
         self.tree.connect("itemChanged(QTreeWidgetItem*,int)", lambda item, column: self.changed())
         self.tree.connect("itemDoubleClicked(QTreeWidgetItem*,int)", lambda item, column: self.show_in_glyph_window(item))
         self.package = None
@@ -1600,6 +1602,19 @@ class CJKVerticalDialog(object):
         self.busy_now = first
         try:
             self.ak.busy_start(self, first, stoppable=self.stoppable)
+        except Exception:
+            pass
+
+    def can_stop_again(self):
+        """A write over, the list read again under its bar: stoppable from here, by Cancel as by Esc (the bar
+        began as the write's, its Cancel grayed: ak.busy_stoppable sets it usable). Never raises."""
+        self.stoppable = True
+        if not self.busy_shown:
+            return  # (busy_start, once the bar shows, takes stoppable as it is then)
+        try:
+            stoppable = getattr(self.ak, "busy_stoppable", None)
+            if stoppable is not None:
+                stoppable(self, True)
         except Exception:
             pass
 
@@ -2131,7 +2146,7 @@ class CJKVerticalDialog(object):
                     u"scaled to the em (the upper glyph's height changes by this much: vkrn).")
         if row.key == "advance_height":
             return u"Each layer without an advance height gets the em (FontLab keeps none from a font file it opens)."
-        return u"The font info's %s (not in FontLab's History: Put back vhea undoes it)." % row.label
+        return u"The font info's %s (not in FontLab's History: <i>Put back vhea</i> undoes it)." % row.label
 
     def items(self):
         found = []
@@ -2185,7 +2200,7 @@ class CJKVerticalDialog(object):
         """The log's sentence for features left as they are (feature_text found no braces)."""
         one = len(tags) == 1
         return (u"FreeLab leaves %s as %s: it cannot find where %s code begins and ends (the feature's braces), "
-                u"so nothing of FreeLab's goes in. Check %s code in FontLab's Features panel." % (
+                u"so nothing of FreeLab's goes in. Check %s code in FontLab's <i>Features</i> panel." % (
                     u", ".join(sorted(set(tags))), u"it is" if one else u"they are",
                     u"that feature's" if one else u"each one's", u"its" if one else u"their"))
 
@@ -2241,7 +2256,8 @@ class CJKVerticalDialog(object):
         if self.package is None:
             preview.show(u"")
             return
-        preview.show(self.cj.preview_code(new, self.texts, CODE_TAGS, code_notes(builds, metrics)))
+        preview.show(self.cj.preview_code(new, self.texts, CODE_TAGS, code_notes(builds, metrics),
+                                          empty=not self.checkable()))
 
     def toggled(self):
         if self.busy:
@@ -2289,9 +2305,6 @@ class CJKVerticalDialog(object):
         # (the captions and the line between: with the pictures, and only where draw_previews drew a sample)
         self.pictures_shown = bool(on)
         self.parts_filled(on and getattr(self, "previews_drawn", False))
-        note = getattr(self, "preview_note", None)
-        if note is not None and not on:  # (shown again by draw_previews, where it has something to say)
-            note.setVisible(False)
         for widget in (self.forms_box, self.vpal_box, self.vkrn_box, self.turned_box, self.metrics_box, self.export_button):
             self.ak.enable(widget, on)
         if not on:  # (with a font, update_buttons sets it with the write button)
@@ -2329,7 +2342,7 @@ class CJKVerticalDialog(object):
         name = names[-1]
         error = self.ak.show_in_glyph_window(self.fontlab, u"/%s/%s/%s" % (name, name, name))
         if error:
-            self.log.add(u"FontLab did not open the glyph: %s" % self.ak.html(error), "error")
+            self.log.add(self.ak.error_sentence(u"FontLab did not open the glyph", error), "error")
 
     # -- pictures ------------------------------------------------------------------
 
@@ -2431,10 +2444,23 @@ class CJKVerticalDialog(object):
         # (in one color: redrawn in the new one when dark mode switches)
         return self.ak.inked(pixmap, color)
 
-    def draw_previews(self):
+    def sample_chosen(self, text):
+        """A sample chosen in Sample: set in the field (its textChanged draws the previews), and what the font
+        lacks of it said in the log at once: a choice, not typing (CJK Spacing's LacksNote)."""
+        self.sample.setText(text)
+        lacks = getattr(self, "lacks_note", None)
+        if lacks is not None:
+            lacks.now()
+
+    def draw_previews(self, typed=False):
+        """The previews set again, and what the font lacks of the sample said in the log (LacksNote); typed:
+        the sample was typed into (its textChanged), the log's note waiting for a pause in the typing."""
+        lacks = getattr(self, "lacks_note", None)
         if self.package is None:
             self.previews_drawn = False  # (no font: nothing drawn, no caption or line over nothing)
             self.parts_filled(False)
+            if lacks is not None:
+                lacks.show(None, u"")  # (a font read next says its note again)
             return
         names = self.char_names
         text = u"%s" % self.sample.text
@@ -2468,11 +2494,8 @@ class CJKVerticalDialog(object):
         # of, draws nothing; with the pictures hidden, show_font_parts shows them together)
         self.previews_drawn = any(pixmap is not None for pixmap in self.preview_pixmaps)
         self.parts_filled(self.previews_drawn and getattr(self, "pictures_shown", True))
-        note = getattr(self, "preview_note", None)
-        if note is not None:
-            words = preview_note(text, names, self.ak.b, self.ak.html)  # (counts bold: owner's images 297, 301)
-            note.setText(words)
-            note.setVisible(bool(words))
+        if lacks is not None:  # (counts bold: owner's images 297, 301)
+            lacks.show(self.package, preview_note(text, names, self.ak.b, self.ak.html), typed)
 
     # -- writing --------------------------------------------------------------------
 
@@ -2498,11 +2521,11 @@ class CJKVerticalDialog(object):
         current = self.current_font()
         if current is None or self.ak.font_key(current) != self.ak.font_key(package):
             self.run()
-            self.log.add(u"The font changed: here is this one's list. Nothing was written.", "warning")
+            self.log.add(u"The font changed since the list was read: it is listed again. Nothing was written.", "warning")
             return
         new, builds, metrics = self.pending()
         if getattr(self, "refused", None):
-            self.log.add(self.ak.html(self.cj_refused_words(self.refused)), "warning")
+            self.log.add(self.cj_refused_words(self.refused), "warning")  # (rich: its tags are this tool's own)
         fc = None
         try:
             fc = self.ak.load_sibling("freelab_feature_code.py", "freelab_feature_code")
@@ -2550,7 +2573,8 @@ class CJKVerticalDialog(object):
         except Exception:
             changed = list(CODE_TAGS)  # (code that cannot be read counts as changed)
         if changed:
-            self.holding, self.stoppable = False, True  # (nothing written: the list read again may stop)
+            self.holding = False
+            self.can_stop_again()  # (nothing written: the list read again may stop)
             self.read_font()  # (under the same bar)
             self.log.add(u"The feature code (%s) changed since the list was read: here is the list again, to check "
                          u"before writing. Nothing was written." % self.ak.html(self.ak.joined(changed)), "warning")
@@ -2616,7 +2640,7 @@ class CJKVerticalDialog(object):
                 u"It is" if len(built) == 1 else u"They are",
                 u"; <i>Edit &gt; Undo</i> takes %s back" % (u"it" if len(built) == 1 else u"them") if undo else u""), "done")
         for target, why in failed:
-            self.log.add(u"%s was not built: %s." % (b(target), self.ak.html(why)), "warning")
+            self.log.add(u"%s was not built: %s." % (self.ak.glyph_name_link(target), self.ak.html(why)), "warning")
         if written:
             self.log.add(u"Wrote %s%s.%s" % (
                 b(self.ak.joined(written)),
@@ -2640,8 +2664,8 @@ class CJKVerticalDialog(object):
         if unmarked is not None and getattr(status, "marked", True):  # (said once: the History's write said it)
             self.log.add(UNMARKED % self.ak.html(unmarked), "error")
         if error is not None:
-            self.log.add(u"Stopped by an error: %s" % self.ak.html(error), "error")
-        self.stoppable = True  # (written: the list read again may stop, at the user's Esc, Close, tool, or arrow)
+            self.log.add(self.ak.error_sentence(u"Stopped by an error", error), "error")
+        self.can_stop_again()  # (written: the list read again may stop, at the user's Esc, Cancel, Close, tool, or arrow)
         self.read_font()  # (under the same bar)
 
     def changed_code(self, package):
@@ -2916,7 +2940,9 @@ class CJKVerticalDialog(object):
             return
         info = current.fgPackage.info
         restored, kept = 0, {}
+        labels = dict((field, label) for _, field, label in VHEA_FIELDS)  # (named as the write names them)
         for field, value in sorted(held[1].items()):
+            label = labels.get(field, field)
             try:
                 setattr(info, field, None if value is None else float(value))  # (None unsets it: live, 2026-11-14)
                 now = getattr(info, field, None)  # (read back: counted only when FontLab took it)
@@ -2924,9 +2950,9 @@ class CJKVerticalDialog(object):
                         abs(float(now) - float(value)) < 0.5:
                     restored += 1
                     continue
-                self.log.add(u"FontLab did not take %s back." % field, "warning")
+                self.log.add(u"FontLab did not take %s back." % label, "warning")
             except Exception as exc:
-                self.log.add(u"FontLab did not take %s back: %s" % (field, self.ak.html(exc)), "warning")
+                self.log.add(u"FontLab did not take %s back: %s" % (label, self.ak.html(exc)), "warning")
             kept[field] = value  # (outside FontLab's History: its old value kept for another try)
         # (only the values put back are let go: adversarial review 8, a refused one lost its old value)
         self.put_back = (held[0], kept) if kept else None

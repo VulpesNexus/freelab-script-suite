@@ -83,9 +83,17 @@ PRINT_LABEL = u"Print (black on white)"
 # The second choice beside a light window: light gray (#ebebeb) on an off-black (#1e1e1e), named as they are
 # (owner's image 378: the label said white ink on black paper, which neither is)
 DARK_LABEL = u"Dark (light gray on off-black)"
-COLOR_MODES = (("window", u"As the window"), ("print", PRINT_LABEL))
+# Dark mode's medium grays (its Shade setting), as they color a window: the Text color of its medium palette
+# (#e0e0e0) on its Base (#3c3c40), darkmode/freelab_dark_mode.py's PALETTE_MEDIUM (tests/proof_tests.py reads
+# them there). The owner asked for "white on medium gray": the ink is a light gray, named as it is.
+MEDIUM_LABEL = u"Medium (light gray on medium gray)"
+# The dropdown's items (color_choices): the window's colors first, then the others it is not in already
+COLOR_MODES = (("window", u"As the window"), ("print", PRINT_LABEL), ("medium", MEDIUM_LABEL))
 PRINT_COLORS = ((0, 0, 0), (255, 255, 255))  # (ink, paper)
 DARK_COLORS = ((235, 235, 235), (30, 30, 30))
+MEDIUM_COLORS = ((224, 224, 224), (60, 60, 64))
+CHOICE_LABELS = {"print": PRINT_LABEL, "dark": DARK_LABEL, "medium": MEDIUM_LABEL}
+CHOICE_COLORS = {"print": PRINT_COLORS, "dark": DARK_COLORS, "medium": MEDIUM_COLORS}
 INFO_LABEL_WIDTH = 110.0  # points left of the font info's values, for their names
 INFO_TEXT_MAX = 1200  # characters of one font info field shown (a license's whole text is cut)
 
@@ -2340,31 +2348,72 @@ ALIGNS = {"left": "AlignLeft", "center": "AlignHCenter", "right": "AlignRight"}
 
 def page_colors(mode, ink=None, paper=None):
     """(ink, paper) as (red, green, blue) for the pages, the PDF's and the preview's alike: the
-    window's text and background colors for "window" (when given), else black on white."""
+    window's text and background colors for "window" (when given), those of "dark" or "medium"
+    (CHOICE_COLORS), else black on white."""
     if mode == "window" and ink is not None and paper is not None:
         return tuple(int(c) for c in ink[:3]), tuple(int(c) for c in paper[:3])
-    return PRINT_COLORS
+    return CHOICE_COLORS.get(mode, PRINT_COLORS)
+
+
+def window_is_dark(paper):
+    """Whether a window whose background is paper (red, green, blue) is dark (dark mode's, either shade)."""
+    return 0.299 * paper[0] + 0.587 * paper[1] + 0.114 * paper[2] < 128
+
+
+def dark_mode_shade(paper=None):
+    """The shade of grays dark mode colors a dark window in, "dark" or "medium" (its Shade setting): the
+    one dark mode says it applied while it is on (it keeps its state on sys, as the other tools read
+    it), else the one whose background paper is (MEDIUM_COLORS), else "dark"."""
+    try:
+        state = getattr(sys, "_freelab_dark_mode", None) or {}
+        if state.get("on") and state.get("shade") in ("dark", "medium"):
+            return state.get("shade")
+    except Exception:
+        pass
+    if paper is not None and tuple(paper[:3]) == MEDIUM_COLORS[1]:
+        return "medium"
+    return "dark"
+
+
+def color_choices(dark_window, shade="dark"):
+    """The Colors dropdown's items, [(mode, label)]: the window's own colors first, then those the window
+    is not in already, black on white (for printing) first. Beside a light window: the dark and the medium
+    choices; beside a dark one, black on white and the shade of dark mode the window is not in (the owner:
+    the dark mode setting decides, "naturally, the current theme color determines which options get
+    listed"). The second item stays the other of light and dark (print or dark), as it was before the
+    medium choice."""
+    if not dark_window:
+        others = ("dark", "medium")
+    else:
+        others = ("print", "dark" if shade == "medium" else "medium")
+    return [COLOR_MODES[0]] + [(mode, CHOICE_LABELS[mode]) for mode in others]
 
 
 def colors_label(mode, ink, paper):
-    """How the colors read, for the log: "black on white", "light gray on off-black" (the dark choice beside a
-    light window), or "the window's: light on dark"."""
+    """How the colors read, for the log: "black on white", "light gray on off-black" (the dark choice),
+    "light gray on medium gray" (the medium choice), or "light on dark, as the window" ("Saved 3 pages (light
+    on dark, as the window) in ...": "(the window's: light on dark)" read awkwardly there)."""
     if (tuple(ink), tuple(paper)) == PRINT_COLORS:
         return u"black on white"
     if mode != "window" and (tuple(ink), tuple(paper)) == DARK_COLORS:
         return u"light gray on off-black"
+    if mode != "window" and (tuple(ink), tuple(paper)) == MEDIUM_COLORS:
+        return u"light gray on medium gray"
     light = lambda rgb: 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2] >= 128
-    return u"the window's: %s on %s" % (u"light" if light(ink) else u"dark", u"light" if light(paper) else u"dark")
+    return u"%s on %s, as the window" % (u"light" if light(ink) else u"dark", u"light" if light(paper) else u"dark")
 
 
-def saved_line(ak, pages, path, colors):
-    """The log's line once the PDF is written: its pages counted in bold, its colors (colors_label), the
-    folder as a link that shows the file selected in a new window of the system's file manager (ak.reveal_link:
-    owner's image 375), and its name in italics."""
+def saved_line(ak, pages, path, colors, size=None):
+    """The log's line once the PDF is written: its pages counted in bold, its colors (colors_label) and its size
+    (size, in bytes, worded by ak.file_size_text; None: not said), the folder as a link that shows the file
+    selected in a new window of the system's file manager (ak.reveal_link: owner's image 375), and its name in
+    italics."""
     folder = os.path.normpath(os.path.dirname(path))
     link = getattr(ak, "reveal_link", None)
     place = link(path, folder) if link is not None else ak.html(folder)
-    return u"Saved %s (%s) in %s: %s." % (ak.b(counted(pages, u"page")), colors, place, ak.i(os.path.basename(path)))
+    words = getattr(ak, "file_size_text", None)
+    data = colors if size is None or words is None else u"%s, %s" % (colors, words(size))
+    return u"Saved %s (%s) in %s: %s." % (ak.b(counted(pages, u"page")), data, place, ak.i(os.path.basename(path)))
 
 
 COLLISION_ON_LIGHT = (205, 25, 20)  # the red of a collision on light paper (Options.collisions)
@@ -2512,6 +2561,7 @@ def write_pdf(QtCore, QtGui, path, pages, renderer, page_key="A4", title=u"", pr
         except Exception:
             pass
     painter = QtGui.QPainter(writer)
+    whole = False
     try:  # ended whatever happens: a painter left open on a freed device aborts FontLab
         if not painter.isActive():
             raise IOError(u"Qt could not open %s for writing" % path)
@@ -2524,9 +2574,14 @@ def write_pdf(QtCore, QtGui, path, pages, renderer, page_key="A4", title=u"", pr
                 painter.fillRect(QtCore.QRectF(-scale, -scale, (width + 2) * scale, (height + 2) * scale), paper)
             renderer.draw(painter, page, scale)
             if progress is not None:
-                progress(index + 1, len(pages))
+                progress(index + 1, len(pages))  # (it may raise, to stop: the caller removes the file)
+        whole = True
     finally:
         painter.end()
+        if not whole:
+            # (the writer freed now, its file closed: the error's traceback holds this frame, Python 2.7's until
+            # the caller returns, and Windows removes no open file)
+            painter = writer = None
     return writer
 
 
@@ -2788,13 +2843,13 @@ Kerning is applied as FontLab applies it, classes resolved. OpenType features ar
 no contextual or localized forms, no mark positioning, so each character shows its own glyph, and
 scripts that need shaping (Arabic, the Indic scripts, Thai) get no text. Hebrew is set right to left,
 its kerning strings too, each pair kerned as the font keeps it (its right glyph first).<br><br>
-<i>Colors</i>: the PDF in this window's colors (light on dark in dark mode), or the other of black on
-white (for printing, beside a dark window) and light gray on off-black (beside a light one); the page
-beside the list shows the PDF as it will be.<br><br>
+<i>Colors</i>: the PDF in this window's colors (light on dark in dark mode), or in one of two others:
+beside a light window, light gray on off-black or on medium gray; beside a dark one, black on white (for
+printing) or dark mode's other shade. The page beside the list shows the PDF as it will be.<br><br>
 The list shows the pages; select one to see it. <i>Save PDF</i> writes them all (the log's link then shows
 the file in its folder), <i>Open PDF</i> opens the file saved. <i>Show in Glyph window</i> opens the page's
-lines in FontLab.
-Click this help's <i>?</i> button, then any control, for what it does."""
+lines in FontLab.<br><br>
+Click this help's button, then anything in the window, for what it does (or right-click it: <i>What's This?</i>)."""
 
 DEFAULT_KERNING_SET = "all"
 
@@ -2888,9 +2943,9 @@ class ProofDialog(object):
         for _, label in COLOR_MODES:
             self.colors_box.addItem(label)
         captioned(row, "colors", "Colors:", self.colors_box,
-                  u"The PDF's colors: this window's (its text on its background, light on dark in dark mode), or the "
-                  u"other of black on white (for printing, beside a dark window) and light gray on off-black (beside a "
-                  u"light one). The page shown beside the list is the PDF as it will be.")
+                  u"The PDF's colors: this window's (its text on its background, light on dark in dark mode), or one "
+                  u"of two others: beside a light window, <i>Dark</i> or <i>Medium</i>; beside a dark one, "
+                  u"<i>Print</i> or dark mode's other shade. The page shown beside the list is the PDF as it will be.")
         row.addSpacing(12)
         self.zoom_box = QtGui.QComboBox()
         for _, label in ZOOMS:
@@ -2913,17 +2968,19 @@ class ProofDialog(object):
         self.summary_box.setChecked(self.settings.get("summary") is not False)
         self.summary_box.setWhatsThis(u"The proof's first page: the family's name in the font itself, then the font and "
                                       u"the master proofed, the version and dates the font records, its units per em, "
-                                      u"its counts of glyphs and of encoded characters, its vertical metrics, its "
-                                      u"OpenType features and kerning, and the scripts and languages it covers, as "
-                                      u"<i>Font Check</i> counts them, with the data's sources. Unticked, a few lines "
+                                      u"its counts of glyphs and of encoded characters, its vertical metrics, and its "
+                                      u"OpenType features and kerning. The scripts and languages it covers, as "
+                                      u"<i>Font Check</i> counts them, with the data's sources, close the proof. "
+                                      u"Unticked, a few lines "
                                       u"about the proof take its place. Kept from one FontLab session to the next.")
         checks.addWidget(self.summary_box)
         self.section_boxes = {}
         tips = {"charset": u"Every glyph in a grid, in the font's order, with its name and code point.",
                 "waterfall": u"A line of sample text at each waterfall size.",
                 "text": u"A few lines of sample text in each script the font covers, at each text size.",
-                "kerning": u"Every kerned pair between control letters (HH?HOHO, nn?nono), grouped by first glyph "
-                           u"(the right one in a right-to-left pair, set right to left).",
+                "kerning": u"Every kerned pair (or the common ones, as <i>Kerning strings</i> says) between control "
+                           u"letters (HH?HOHO, nn?nono), grouped by first glyph (the right one in a right-to-left "
+                           u"pair, set right to left).",
                 "spacing": u"Each letter and figure between control letters (HHxHOxOO, nnxnoxoo), without kerning.",
                 "diacritics": u"The letters with diacritics, each after its base letter, and the marks.",
                 "figures": u"Figures and their alternates, punctuation, and symbols, alone and between letters."}
@@ -2955,11 +3012,10 @@ class ProofDialog(object):
         if self.settings.get("summary_languages") in keys:
             self.languages_box.setCurrentIndex(keys.index(self.settings.get("summary_languages")))
         captioned(sizes, "languages", "Summary lists:", self.languages_box,
-                  u"What the summary lists after the counts of each script's languages: the languages the font covers "
-                  u"(under their scripts, A to Z, in five columns of small type; some 435 fill a page, and a longer "
-                  u"list goes on over the following pages, never cut: a font with the Latin of Western and Central "
-                  u"Europe covers nearly a thousand languages, about four pages), those and the languages within "
-                  u"reach (each with how many characters it lacks), or none: the counts alone. They close the proof, "
+                  u"What the summary lists after each script's language counts: the languages the font covers (by "
+                  u"script, A to Z, in small type over as many pages as they need: a font with Western and Central "
+                  u"Europe's Latin covers nearly a thousand, about four pages), those and the languages within "
+                  u"reach (with how many characters each lacks), or none (the counts alone). They close the proof, "
                   u"on its <i>Language coverage</i> pages: a choice here shows the first of them. Kept from one "
                   u"FontLab session to the next.")
         sizes.addSpacing(12)
@@ -3018,7 +3074,8 @@ class ProofDialog(object):
         self.glyph_window_button = QtGui.QPushButton("Show in Glyph window")
         self.glyph_window_button.setWhatsThis(u"Opens the selected page's lines of glyphs in a <i>Glyph</i> window.")
         self.restore_button = QtGui.QPushButton("Restore defaults")
-        self.restore_button.setWhatsThis(u"Puts the sections, sizes, and choices back as the window first came.")
+        self.restore_button.setWhatsThis(u"Puts the sections, sizes, and choices back to their defaults (the zoom "
+                                         u"aside), those kept from one FontLab session to the next included.")
         self.save_button = QtGui.QPushButton(u"Save PDF\N{HORIZONTAL ELLIPSIS}")
         self.ak.mark_risky(self.save_button)  # (writes a file: FreeLab MCP clicks it only in risky mode)
         self.save_button.setWhatsThis(u"Writes every page to a PDF file you name (in <i>Documents</i> at first).")
@@ -3033,6 +3090,7 @@ class ProofDialog(object):
         buttons.addWidget(self.save_button)
         buttons.addWidget(self.open_button)
         buttons.addWidget(self.close_button)
+        ak.cancel_button(self, buttons, self.close_button, CANCEL_NOTE)  # (right before Close: a PDF stopped at once)
         layout.addLayout(buttons)
 
         # (their parent the window: Qt deletes them with it, never PythonQt at a random moment)
@@ -3661,29 +3719,39 @@ class ProofDialog(object):
         return self.proof.pages[row] if 0 <= row < len(self.proof.pages) else None
 
     def color_mode(self):
-        return COLOR_MODES[max(0, min(self.colors_box.currentIndex, len(COLOR_MODES) - 1))][0]
+        """The Colors dropdown's choice: "window", "print", "dark", or "medium" (its items as colors() last
+        listed them: color_choices)."""
+        choices = getattr(self, "color_items", None) or COLOR_MODES
+        return choices[max(0, min(self.colors_box.currentIndex, len(choices) - 1))][0]
+
+    def window_colors(self):
+        """The window's text and background colors, (ink, paper) as (red, green, blue)."""
+        QtCore, QtGui = _qt()
+        palette = self.ak._property(self.dialog, "palette")
+        rgb = lambda color: (color.red(), color.green(), color.blue())
+        return rgb(palette.color(QtGui.QPalette.Text)), rgb(palette.color(QtGui.QPalette.Base))
 
     def colors(self):
         """(ink, paper) as (red, green, blue), for the preview and the PDF alike: the window's text and
-        background colors, or black on white."""
-        QtCore, QtGui = _qt()
-        mode = self.color_mode()
+        background colors, or those of the other choice made (black on white, or dark mode's dark or
+        medium grays). The dropdown's items are named again first, for the window as it is now: dark mode
+        may have been switched, or its shade changed, since (color_choices)."""
         try:
-            palette = self.ak._property(self.dialog, "palette")
-            rgb = lambda color: (color.red(), color.green(), color.blue())
-            ink, paper = rgb(palette.color(QtGui.QPalette.Text)), rgb(palette.color(QtGui.QPalette.Base))
+            ink, paper = self.window_colors()
         except Exception:
             return page_colors("print")
-        dark_window = 0.299 * paper[0] + 0.587 * paper[1] + 0.114 * paper[2] < 128
-        # the second choice is the other of the two: black on white beside a dark window, light on dark
-        # beside a light one (black on white twice said nothing)
+        dark_window = window_is_dark(paper)
+        # Black on white twice (or the dark grays beside a window in them) said nothing: only the choices the
+        # window is not in already are listed, at the same places, the second the other of light and dark
+        items = color_choices(dark_window, dark_mode_shade(paper) if dark_window else "dark")
+        self.color_items = items
         try:
-            self.colors_box.setItemText(1, PRINT_LABEL if dark_window else DARK_LABEL)
+            for index, (_, label) in enumerate(items):
+                if index:
+                    self.colors_box.setItemText(index, label)
         except Exception:
             pass
-        if mode == "window":
-            return page_colors(mode, ink, paper)
-        return PRINT_COLORS if dark_window else DARK_COLORS
+        return page_colors(self.color_mode(), ink, paper)
 
     def pixel_ratio(self):
         """Device pixels per pixel of the preview (above 1 on a scaled display), 1 where Qt does not say."""
@@ -3926,44 +3994,82 @@ class ProofDialog(object):
         date = time.strftime("%Y-%m-%d")
         master = self.master if len(self.proof.masters) == 1 else u""
         suggested = os.path.join(folder, pdf_name(self.package.tfn, master, date))
-        chosen = QtGui.QFileDialog.getSaveFileName(self.dialog, u"Save the proof as PDF", suggested,
-                                                   u"PDF files (*.pdf)")
+        # (the dialog asked not to confirm replacing a file: ask_replace asks, in a box that follows dark mode)
+        chosen, windows_asked = self.ak.save_file_name(QtGui, self.dialog, u"Save the proof as PDF", suggested,
+                                                       u"PDF files (*.pdf)")
         if isinstance(chosen, (tuple, list)):
             chosen = chosen[0] if chosen else u""
-        path = u"%s" % (chosen or u"")
+        typed = path = u"%s" % (chosen or u"")
         if not path:
             return
         if not path.lower().endswith(u".pdf"):
             path += u".pdf"
         del SAVE_FOLDER[:]
         SAVE_FOLDER.append(os.path.dirname(path))
+        # (asked once: not where Windows' own box asked of this very file, as before ak.save_file_name)
+        if replaces(path, typed if windows_asked else None) and not self.ask_replace(path):
+            self.log.add(STOPPED_LINE, "warning")
+            return
+        clear_staged_pdfs(path)  # (staged files of this very PDF, left by a save FontLab never finished)
         self.busy = True
         self.update_buttons()
-        b = self.ak.b
         pages = self.proof.pages
-        # The pages written in the window's top row (owner's image 180), never stopped half way: a PDF half
-        # written is no PDF (what was clicked meanwhile is done once it is whole)
-        self.ak.busy_start(self, u"Writing the PDF", stoppable=False)
+        # The pages written in the window's top row (owner's image 180), to a staged file beside the PDF: Cancel,
+        # Esc, the tools menu, the arrows, and Close stop it between two pages, and a PDF stopped or failed is
+        # removed whole, the file there left as it was (the owner, 2026-11-24); only a whole one takes its place
+        self.ak.busy_start(self, u"Writing the PDF")
+        staged = None
         try:
             def progress(done, total):
-                self.ak.busy_progress(self, u"Writing page %d of %d" % (done, total),
-                                      done / float(total or 1), stoppable=False)
+                self.ak.busy_progress(self, u"Writing page %d of %d" % (done, total), done / float(total or 1))
 
             ink, paper = self.colors()
             renderer = Renderer(QtCore, QtGui, self.path, self.ak._property(self.dialog, "font").family(),
                                 QtGui.QColor(*ink), self.parts)
-            write_pdf(QtCore, QtGui, path, pages, renderer, self.page_options.page,
+            staged = staged_pdf(path)
+            write_pdf(QtCore, QtGui, staged, pages, renderer, self.page_options.page,
                       u"%s proof" % self.package.tfn, progress, None if paper == PRINT_COLORS[1] else QtGui.QColor(*paper))
+            put_pdf_in_place(staged, path)
+            staged = None
             self.saved = path
             self.gone_said = False
-            self.log.add(saved_line(self.ak, len(pages), path, colors_label(self.color_mode(), ink, paper)), "done")
+            try:
+                size = os.path.getsize(path)
+            except OSError:
+                size = None
+            self.log.add(saved_line(self.ak, len(pages), path, colors_label(self.color_mode(), ink, paper), size),
+                         "done")
+        except self.ak.Stopped:
+            self.log.add(STOPPED_LINE, "warning")
         except Exception as exc:
-            self.log.add(u"The PDF could not be written: %s" % self.ak.html(exc), "error")
+            why = (u"%s" % exc).rstrip(u". ")
+            self.log.add(u"The PDF could not be written: %s. Nothing was saved or overwritten." % self.ak.html(why),
+                         "error")
         finally:
+            discard_pdf(staged)
             self.busy = False
             self.ak.busy_end(self)
             self.status()
             self.update_buttons()
+
+    def ask_replace(self, path):
+        """FreeLab's question before the PDF takes the place of a file there (Font Builder's, in its words):
+        True to replace it, False (Cancel, Esc, or a question that could not be shown) to save nothing."""
+        QtCore, QtGui = _qt()
+        try:
+            box = self.ak.mcp_script_window(QtGui.QMessageBox(self.dialog))  # (FreeLab's question, not FontLab's)
+            box.setWindowTitle(u"Save the proof as PDF")
+            box.setIcon(QtGui.QMessageBox.Warning)
+            box.setText(REPLACE_QUESTION % os.path.basename(path))
+            self.ak.mark_risky(box.addButton(u"Replace", QtGui.QMessageBox.AcceptRole))  # (it overwrites a file)
+            cancel = box.addButton(QtGui.QMessageBox.Cancel)
+            box.setDefaultButton(cancel)
+            box.setEscapeButton(cancel)
+            box.exec_()
+            clicked = box.clickedButton()
+            return clicked is not None and box.buttonRole(clicked) == QtGui.QMessageBox.AcceptRole
+        except Exception:
+            return False
 
     def open_pdf(self):
         QtCore, QtGui = _qt()
@@ -3994,6 +4100,91 @@ class ProofDialog(object):
 
 
 SAVE_FOLDER = []  # the folder a PDF was last saved in, while FontLab runs
+REPLACE_QUESTION = u"%s already exists. Replace it with a new proof?"  # (the owner's words, 2026-11-24, as Font Builder's)
+# A save stopped (the question answered Cancel, Cancel or Esc while the PDF is written, the tools menu, the arrows,
+# or Close) or failed: the PDF is written beside its file and takes its place only once whole, so nothing is ever
+# half saved (the owner, 2026-11-24, as Font Builder's sheets)
+STOPPED_LINE = u"The operation was interrupted. Nothing was saved or overwritten."
+CANCEL_NOTE = u"A PDF stopped leaves nothing behind: a file there stays as it was."
+
+
+def staged_pdf(path):
+    """A new, empty file beside path (its name, a dot, tempfile's random part, then .part.pdf), for the PDF to be
+    written whole before it takes path's place."""
+    import tempfile
+    folder = os.path.dirname(os.path.abspath(path))
+    stem, ext = os.path.splitext(os.path.basename(path))
+    handle, staged = tempfile.mkstemp(prefix=stem + u".", suffix=u".part" + ext, dir=folder)
+    os.close(handle)
+    return staged
+
+
+def staged_pdf_pattern(path):
+    """What staged_pdf names a staged file of path (tempfile's random part: 6 letters, digits, or underscores in
+    Python 2.7, 8 in Python 3). Never put_pdf_in_place's .old file, which may be the only copy of a PDF."""
+    stem, ext = os.path.splitext(os.path.basename(path))
+    return re.compile(u"^%s\\.[a-z0-9_]{6,8}\\.part%s$" % (re.escape(stem), re.escape(ext)), re.I)
+
+
+def clear_staged_pdfs(path):
+    """The staged files a save of this very PDF left behind (FontLab ended while it wrote it), removed: only names
+    that match staged_pdf_pattern. Those removed. Never raises."""
+    folder = os.path.dirname(os.path.abspath(path))
+    pattern, removed = staged_pdf_pattern(path), []
+    try:
+        entries = os.listdir(folder)
+    except OSError:
+        return removed
+    for entry in entries:
+        found = os.path.join(folder, entry)
+        if pattern.match(entry) and os.path.isfile(found):
+            discard_pdf(found)
+            if not os.path.exists(found):
+                removed.append(found)
+    return removed
+
+
+def put_pdf_in_place(staged, path):
+    """A staged PDF moved to path, replacing a file there. Python 2.7 has no os.replace, and its rename onto a
+    file fails on Windows: the old file is set aside first, and put back when the new one cannot take its place."""
+    replace = getattr(os, "replace", None)
+    if replace is not None:
+        replace(staged, path)
+        return
+    if not os.path.exists(path):
+        os.rename(staged, path)
+        return
+    aside = staged + u".old"
+    os.rename(path, aside)
+    try:
+        os.rename(staged, path)
+    except OSError:
+        os.rename(aside, path)
+        raise
+    try:
+        os.remove(aside)
+    except OSError:
+        pass
+
+
+def discard_pdf(staged):
+    try:
+        if staged is not None and os.path.exists(staged):
+            os.remove(staged)
+    except OSError:
+        pass
+
+
+def replaces(path, confirmed=None):
+    """Whether saving to path replaces a file there that nobody was asked about: confirmed is the file Windows'
+    own box asked of (the save dialog's name, where it could not be told not to ask: ak.save_file_name), or
+    None. The name typed without .pdf is not the file written, so its question never stands for this one."""
+    if not os.path.exists(path):
+        return False
+    if confirmed:
+        same = os.path.normcase(os.path.abspath(path)) == os.path.normcase(os.path.abspath(confirmed))
+        return not same
+    return True
 
 
 def main():

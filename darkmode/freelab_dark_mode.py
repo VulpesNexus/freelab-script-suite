@@ -150,7 +150,12 @@ ISLAND_CLASSES = frozenset((
     "YContinueWidget",  # the zigzag edge where a panel's content continues below
     "YNibShape", "YStrokeShape", "YBrushStrokePreview",  # Brush panel previews
 ))
-ISLAND_NAMES = frozenset((("QListWidget", "historyList"),))  # its selected row is painted light
+ISLAND_NAMES = frozenset((
+    ("QListWidget", "historyList"),  # its selected row is painted light
+    # Open Installed Fonts: each font's name on a pill its delegate paints; as ink, the names came out garbled
+    # (seen in the survey of FontLab's dialogs, 2026-11-24, and clean as an island, tried live)
+    ("QListWidget", "listFonts"),
+))
 MARGIN_PARENTS = ("CodeEditor",)  # an unnamed narrow QWidget child is the line-number margin
 MARGIN_MAX_WIDTH = 80
 # A canvas is a plain QWidget child of these, with this name (None: any name). Only the glyph
@@ -412,6 +417,24 @@ def _qt_at_least(major, minor):
     except ValueError:
         return False
     return parts >= [major, minor]
+
+
+HELP_CLASS = "QWhatsThat"  # Qt's window for What's This help
+
+
+def _help_palette(app, palette):
+    """What's This help given a palette of its own, the dark one with its shadow in the frame's color. Qt
+    draws that window's frame in the tooltip text color, then dots in the shadow color over the frame's
+    right and bottom sides: unseen on a light tooltip's black frame, a dashed edge on a dark one's light
+    frame (the owner, November 23, image 22; read from a live one, November 24: #0e0e0f and #e0e0e0 by
+    turns along the last row and column). Never raises."""
+    try:
+        QPalette = _gui("QPalette")
+        own = QPalette(palette)
+        own.setColor(QPalette.Shadow, palette.color(QPalette.ToolTipText))
+        app.setPalette(own, HELP_CLASS)
+    except Exception as exc:
+        _note_error("help palette", exc)
 
 
 def build_palette(QPalette, QColor, base=None):
@@ -2433,10 +2456,29 @@ def classify_ink(width, height, changed):
     return "ink" if changed >= max(AUTO_INK_MIN, AUTO_INK_SHARE * width * height) else None
 
 
+FREELAB_WINDOW_PROP = "freelab_window"  # on a FreeLab tool's window (the shared module's WINDOW_PROP)
+
+
+def _freelab_caption(widget):
+    """A label of a FreeLab tool's window: drawn from the palette, so it has no fixed dark ink to map. One
+    was taken for ink all the same (Font Builder's Ink darker than:, the owner, November 24: read live, it
+    had the ink effect and the caption beside it had none), and text drawn through an effect loses
+    ClearType: it looked blurrier than its neighbors. Never raises."""
+    try:
+        if not widget.inherits("QLabel"):
+            return False
+        window = widget.window()
+        return window is not None and window.property(FREELAB_WINDOW_PROP) is not None
+    except Exception:
+        return False
+
+
 def detect_ink(widget):
     """Render the widget alone and look for dark ink (after its icons are mapped: those need no effect)."""
     width, height = _prop(widget, "width"), _prop(widget, "height")
     if width * height < AUTO_MIN_AREA or widget.isWindow() or _shows_picture(widget):
+        return None
+    if _freelab_caption(widget):
         return None
     if any(widget.inherits(c) for c in STYLE_DRAWN_BUTTONS):
         return None  # the style draws them from the dark palette: mapped as ink, radio circles turned jagged
@@ -2612,7 +2654,32 @@ def _make_island(widget):
     else:
         _note_sheet_as_seen(widget)
     _set_effect(widget, record, "island")
+    _fill_chart(widget, record)
     _enqueue(_descendants(widget), "dark")  # each undoes what dark mode did to it
+
+
+FILLED_ISLANDS = ("FontCellChart", "CellChart")  # cell charts: they paint their cells and nothing between or after them
+
+
+def _fill_chart(widget, record):
+    """A cell chart made to fill itself, in FontLab's light window color, which its island effect maps to the
+    dark one. The chart paints its cells only: where a strip has fewer glyphs than it has room for (the glyph
+    window's bar of glyphs), the light background of the widget behind showed through as a white band, since
+    an effect leaves the place of an inner effect's widget unmapped (the owner, November 24; tried live: the
+    band read #f4f4f4, and #2a2a2a, the bar's own, once the chart filled itself). Taken back with the island
+    (the record's "autofill" and "palette"). Never raises."""
+    try:
+        if not _is_one_of(widget, _class_name(widget), FILLED_ISLANDS):
+            return
+        QPalette = _gui("QPalette")
+        palette = QPalette(_prop(widget, "palette"))
+        palette.setColor(QPalette.Window, _state()["saved"]["palette"].color(QPalette.Window))
+        widget.setPalette(palette)
+        if "autofill" not in record:
+            record["autofill"] = bool(_prop(widget, "autoFillBackground"))
+        widget.setAutoFillBackground(True)
+    except Exception as exc:
+        _note_error("chart fill", exc)
 
 
 def _island_palette():
@@ -2693,6 +2760,9 @@ def _undo_widget(widget, keep_props=False, keep_placeholder=False):
 # ---------------------------------------------------------------------------
 
 DWMWA_USE_IMMERSIVE_DARK_MODE = 20  # Windows 10 20H1 and later; 19 before that
+DWMWA_CAPTION_COLOR = 35  # Windows 11: a title bar's own color (earlier Windows refuses it, which is ignored)
+DWMWA_COLOR_DEFAULT = 0xFFFFFFFF  # Windows' own color again
+TITLE_BAR_PERCENT = 85  # a dark title bar's gray: its shade's window color at this much
 SWP_FLAGS = 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020  # NOSIZE, NOMOVE, NOZORDER, NOACTIVATE, FRAMECHANGED
 
 
@@ -2730,6 +2800,19 @@ def _process_windows():
     return found
 
 
+def caption_color(dark=True):
+    """The color asked of Windows for a title bar, as a COLORREF (0x00bbggrr): the shade's window gray, a
+    little darker (TITLE_BAR_PERCENT), so that the bar stands apart from its window by the same step in
+    both shades (the owner, November 23 and 24, images 28, 32, and 33: Windows' own dark bar was far from
+    the medium shade's windows, and bluish against the dark shade's). Windows' own in light mode."""
+    if not dark:
+        return DWMWA_COLOR_DEFAULT
+    palette = SHADES.get(_state().get("shade", "dark"), SHADES["dark"])[0]
+    name = lighter_name(dict((entry[0], entry[1]) for entry in palette)["Window"], TITLE_BAR_PERCENT)
+    red, green, blue = [int(name[i:i + 2], 16) for i in (1, 3, 5)]
+    return red | (green << 8) | (blue << 16)
+
+
 def _set_title_bar(hwnd, dark):
     import ctypes
     handle = ctypes.c_void_p(hwnd)
@@ -2738,6 +2821,8 @@ def _set_title_bar(hwnd, dark):
     for attribute in (DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_USE_IMMERSIVE_DARK_MODE - 1):
         if dwm.DwmSetWindowAttribute(handle, attribute, ctypes.byref(value), ctypes.sizeof(value)) == 0:
             break
+    color = ctypes.c_uint(caption_color(dark))
+    dwm.DwmSetWindowAttribute(handle, DWMWA_CAPTION_COLOR, ctypes.byref(color), ctypes.sizeof(color))
     _win_api("user32").SetWindowPos(handle, None, 0, 0, 0, 0, SWP_FLAGS)  # redraw the frame now
 
 
@@ -2761,6 +2846,9 @@ def dark_title_bars(dark):
     try:
         for hwnd in [h for h in done if not _is_window(h)]:
             done.discard(hwnd)
+        if dark and state.get("title_shade") != state.get("shade", "dark"):
+            done.clear()  # (the shade changed: each title bar is given the new shade's color)
+            state["title_shade"] = state.get("shade", "dark")
         if dark:
             for hwnd in _process_windows():
                 if hwnd not in done:
@@ -3415,6 +3503,7 @@ def _framed_style(fusion):
         antialiasing, no_brush = QPainter.Antialiasing, _gui("QBrush")()  # an empty brush fills nothing
         check, radio = int(QStyle.PE_IndicatorCheckBox), int(QStyle.PE_IndicatorRadioButton)
         panel_menu = int(getattr(QStyle, "PE_PanelMenu", -1))
+        frame_menu = int(getattr(QStyle, "PE_FrameMenu", -1))
         window_role = _gui("QPalette").Window
 
         def dark(option):
@@ -3445,6 +3534,10 @@ def _framed_style(fusion):
                     if which == panel_menu and which >= 0:
                         if _in_menu(widget) and dark(option):
                             _menu_gutter(option, painter, widget)
+                        return
+                    if which == frame_menu and which >= 0:
+                        if _in_menu(widget) and dark(option):
+                            _menu_frame(option, painter)  # (drawn last, over the entries: Fusion's is near black)
                         return
                     if which != check and which != radio:
                         return
@@ -3483,6 +3576,11 @@ def _framed_style(fusion):
 MENU_TICK = ((0.20, 0.52), (0.42, 0.74), (0.82, 0.26))  # a menu's tick across its box: down to the corner, up to the end
 MENU_TICK_WIDTH = 1.4  # pixels: the tick's stroke
 MENU_GUTTER = 23  # pixels at 96 dpi from a menu's left edge to the line beside its ticks and icons (Fusion's text: 27)
+# A menu's frame and the line beside its ticks share one color, near the menu's own, and the line is thicker
+# than the separators between entries, as in FontLab's light look (the owner, November 23, images 23 and 24):
+# the window color this much lighter (the separators: SEPARATOR_LIGHTER, plainer).
+MENU_FRAME_LIGHTER = 145
+MENU_GUTTER_WIDTH = 2  # pixels
 
 
 def _menu_tick(option, painter, widget):
@@ -3523,16 +3621,31 @@ def _gutter_offset(menu):
 
 def _menu_gutter(option, painter, widget):
     """The line beside a menu's ticks and icons, which FontLab's light look has and Fusion does not (the owner,
-    November 23): drawn over the menu's panel, before its entries, in the color of dark mode's menu separators.
-    A highlighted entry covers it, as it covers the panel."""
+    November 23): drawn over the menu's panel, before its entries, in the color of the menu's frame and from
+    one edge of it to the other. A highlighted entry covers it, as it covers the panel."""
     QPalette, QColor, QPointF = _gui("QPalette"), _qt()[2], _core("QPointF")
     rect = option.rect
     x = rect.x() + _gutter_offset(widget) + 0.5
     window = option.palette.color(QPalette.Window).name()
     painter.save()
     try:
-        painter.setPen(QColor(lighter_name(window, SEPARATOR_LIGHTER)))
-        painter.drawLine(QPointF(x, rect.y() + 3), QPointF(x, rect.y() + rect.height() - 4))
+        painter.setPen(QColor(lighter_name(window, MENU_FRAME_LIGHTER)))
+        for step in range(MENU_GUTTER_WIDTH):
+            painter.drawLine(QPointF(x + step, rect.y() + 1), QPointF(x + step, rect.y() + rect.height() - 2))
+        _menu_frame(option, painter)
+    finally:
+        painter.restore()
+
+
+def _menu_frame(option, painter):
+    """A dark menu's frame, one pixel around it, in the color of the line beside its ticks (_menu_gutter)."""
+    QPalette, QColor, QRectF = _gui("QPalette"), _qt()[2], _core("QRectF")
+    window = option.palette.color(QPalette.Window).name()
+    painter.save()
+    try:
+        painter.setBrush(_gui("QBrush")())
+        painter.setPen(QColor(lighter_name(window, MENU_FRAME_LIGHTER)))
+        painter.drawRect(QRectF(option.rect).adjusted(0.5, 0.5, -0.5, -0.5))
     finally:
         painter.restore()
 
@@ -3620,6 +3733,7 @@ def apply_dark():
             app.setStyle(_framed_style(fusion))
         app.setPalette(build_palette(QPalette, QColor))
         app.setFont(state["saved"]["font"])  # undoes the grayscale text smoothing an earlier version set
+    _help_palette(app, build_palette(QPalette, QColor))  # (each time: a class's palette goes with the application's)
     state["on"] = True
     if switched:
         _tell_tools(True)  # (before the queue: FreeLab's windows in their new colors when they are looked at)
@@ -3681,7 +3795,7 @@ def restore():
     style = QStyleFactory.create(saved["style"] or ORIGINAL_STYLE_FALLBACK)
     if style is not None:
         app.setStyle(style)
-    app.setPalette(saved["palette"])
+    app.setPalette(saved["palette"])  # (the help's own palette goes with it: Qt forgets each class's)
     if saved.get("font") is not None:
         app.setFont(saved["font"])
     sheet = _prop(app, "styleSheet") or u""
@@ -3871,7 +3985,8 @@ def toggle():
     if settings.get("follow_windows"):
         settings["follow_windows"] = False  # switching by hand stops following Windows
         _watch_windows(False)
-        message += " (No longer following Windows: Scripts > FreeLab > Dark Mode Settings turns that back on.)"
+        message += (" (It no longer follows Windows: Automatic, in Scripts > FreeLab > Dark Mode Settings, turns "
+                    "that back on.)")
     save_settings(settings)
     print(message)
     return enabled

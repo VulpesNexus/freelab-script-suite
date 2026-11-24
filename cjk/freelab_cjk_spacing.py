@@ -95,6 +95,9 @@ UNDO_STEP, CODE_STEP, WIDTHS_STEP, UPDATE_STEP, COMPILE_STEP = (u"Opening an und
 WRITE_STEPS = ((UNDO_STEP, 0.05), (CODE_STEP, 0.15), (WIDTHS_STEP, 0.8), (UPDATE_STEP, 0.9), (COMPILE_STEP, 1.0))
 PUMP_EVERY = 50  # glyphs read between two calls to the progress (it lets events through at most every 0.1 s)
 LIST_AGAIN = u"freelab:list-again"  # the status line's link once a listing was stopped
+# The Cancel button's own line (ak.cancel_button): what a stop leaves (listing_stopped; Hangul measured: the
+# syllables left as they are)
+CANCEL_NOTE = u"A listing or a Hangul measuring stopped changes nothing in the font."
 
 
 def bar_share(steps, label, part=0.0):
@@ -588,8 +591,9 @@ VERTICAL_FILE, VERTICAL_MODULE = "freelab_cjk_vertical.py", "freelab_cjk_vertica
 
 
 def preview_note(text, names, bold=lambda text: text, escape=lambda text: text):
-    """CJK Vertical's line on what the previews show of a sample the font lacks some of (its preview_note),
-    for this window's previews too (owner's image 360); u"" where CJK Vertical cannot be loaded."""
+    """CJK Vertical's note on what the previews show of a sample the font lacks some of (its preview_note),
+    for this window's previews too (owner's image 360), said in the log (LacksNote); u"" where CJK Vertical
+    cannot be loaded."""
     try:
         here = os.path.dirname(os.path.abspath(globals().get("__file__") or "."))
         path = os.path.join(here, VERTICAL_FILE)
@@ -621,6 +625,67 @@ def preview_note(text, names, bold=lambda text: text, escape=lambda text: text):
         return held.preview_note(text, names, bold, escape)
     except Exception:
         return u""
+
+
+NOTE_PAUSE = 700  # milliseconds of a pause in the typing before the log says what a typed sample lacks
+
+
+class LacksNote(object):
+    """The previews' note (preview_note) in the window's log: it was a quiet line between the previews and
+    the Code preview while the log under it stayed empty (the owner, of both CJK windows: "Shouldn't we
+    have this line in the log instead?"). Said as it first applies, and again only when its words change
+    or another font is read: a refresh that leaves them as they are (a tick, a resize, the History read
+    again) says nothing. While the sample is typed into, it waits for a pause in the typing (NOTE_PAUSE),
+    as Font Check's search does: each keystroke would add a line. Shared by CJK Spacing and CJK Vertical;
+    ak: the shared module (font_key); parent: the window, the timer's parent (Qt deletes it with it)."""
+
+    def __init__(self, ak, log, parent=None):
+        self.ak, self.log, self.said, self.waiting, self.timer = ak, log, None, None, None
+        if parent is None:
+            return  # (no timer: said at once)
+        try:
+            QtCore = _qt()[0]
+            timer = QtCore.QTimer(parent)
+            timer.setSingleShot(True)
+            timer.setInterval(NOTE_PAUSE)
+            timer.connect("timeout()", self.paused)
+            self.timer = timer
+        except Exception:
+            self.timer = None
+
+    def show(self, package, words, typed=False):
+        """words: preview_note's for the font package (None: no font), u"" where it has every character
+        of the sample; typed: the sample was typed into, so said once the typing pauses."""
+        try:
+            font = self.ak.font_key(package) if package is not None else None
+        except Exception:
+            font = None
+        self.waiting = (font, words or u"")
+        if typed and self.timer is not None:
+            self.timer.start()  # (from this keystroke again)
+        else:
+            self.now()
+
+    def paused(self):
+        try:
+            self.now()
+        except Exception:
+            pass  # a timer's handler must not raise
+
+    def now(self):
+        """What waits said now: the pause over, a sample chosen in Sample:, or a refresh of the previews.
+        A note gone (u"") says nothing, but the same words coming back later are said again."""
+        if self.timer is not None:
+            try:
+                self.timer.stop()
+            except Exception:
+                pass
+        waiting, self.waiting = self.waiting, None
+        if waiting is None or waiting == self.said:
+            return
+        self.said = waiting
+        if waiting[1]:
+            self.log.add(waiting[1])  # (rich text: its counts bold, as preview_note makes them)
 
 
 FEATURE_CODE_FILE, FEATURE_CODE_MODULE = "freelab_feature_code.py", "freelab_feature_code"
@@ -858,9 +923,19 @@ def refused_words(tags):
         return u""
     one = len(tags) == 1
     return (u"FreeLab leaves %s as %s: it cannot find where %s code begins and ends (the feature's braces), so "
-            u"nothing of FreeLab's goes in. Check %s code in FontLab's Features panel." % (
+            u"nothing of FreeLab's goes in. Check %s code in FontLab's <i>Features</i> panel." % (
                 u" and ".join(sorted(set(tags))), u"it is" if one else u"they are",
                 u"that feature's" if one else u"each one's", u"its" if one else u"their"))
+
+
+KEPT_SHOWN = 30  # glyphs the line on those the font's own code positions names at most (the rest an ellipsis)
+
+
+def kept_names(names, link):
+    """The glyphs the font's own palt or halt code positions already, as the log names them: each glyph's name a
+    link (ak.glyph_name_link), with a space between, the first KEPT_SHOWN only, then an ellipsis."""
+    shown = u" ".join(link(name) for name in names[:KEPT_SHOWN])
+    return shown + (u" \N{HORIZONTAL ELLIPSIS}" if len(names) > KEPT_SHOWN else u"")
 
 
 UNCOMPARED = object()
@@ -900,23 +975,24 @@ def block_of(tag, text):
 
 CODE_PREVIEW_HEADING = u"Code preview"  # (not "Code": it is not written yet, owner's images 299 and 305)
 NO_CODE = u"# No code to write: what is ticked changes none of the font's feature code."
-CODE_PREVIEW_WHAT = (u"The code <i>Write the code</i> would write, as the ticks and options stand: palt and halt "
+# (a font the list is empty for has nothing ticked: owner's image 29, 2026-11-24)
+NO_CODE_EMPTY = u"# No code to write: this font has nothing to tick here."
+CODE_PREVIEW_WHAT = (u"The code the write button would write, as the ticks and options stand: palt and halt "
                      u"whole, FreeLab's block between its marker lines, the rest of each feature as it is (a feature "
                      u"the font has as shown already is left out: nothing to write). Nothing is written until you click "
-                     u"the button. Keywords, tags, glyph classes, numbers, and comments are in colors of their own, as "
-                     u"in <i>Feature Code</i>.")
+                     u"the button.")
 
 
-def preview_code(new, old_texts, tags, also=()):
+def preview_code(new, old_texts, tags, also=(), empty=False):
     """The Code preview's text (owner's image 305: CJK Spacing and CJK Vertical wrote code and showed none):
     the code the write button would write, feature by feature in tags' order, each whole as it would stand in
     the font (new: {tag: feature code}; those the same as the font's, old_texts, left out: not written), else
     NO_CODE. also: comment lines for what the write changes besides code (Hangul widths, glyphs built), each
-    one under the code."""
+    one under the code. empty: the list has no row to tick, said in place of NO_CODE."""
     shown = [new[tag].rstrip(u"\r\n") for tag in tags if tag in new and new[tag] != old_texts.get(tag)]
     notes = [u"# %s" % line for line in also if line]
     if not shown:
-        return u"\n".join([NO_CODE] + notes)
+        return u"\n".join([NO_CODE_EMPTY if empty else NO_CODE] + notes)
     return u"\n\n".join(shown) + (u"\n\n" + u"\n".join(notes) if notes else u"") + u"\n"
 
 
@@ -1094,7 +1170,7 @@ def hangul_note(count, where, bold=lambda text: text):
 HELP = u"""<b>FreeLab CJK Spacing</b><br>
 Writes palt (proportional widths) and halt (half widths) for the font's full-width kana and
 punctuation, so that applications can set Japanese proportionally. Nothing is written until you
-click <i>Write the code</i>.<br><br>
+click <i>Write the code</i> (<i>Update the code</i> once FreeLab's code is in the font).<br><br>
 <b>The list</b>: each full-width kana and punctuation mark, grouped, with its trim: how far its ink
 moves (x placement) and how much its width changes (x advance), trimmed to its ink and the
 sidebearings the open-licensed CJK fonts give theirs (about 0.07 em on each side for kana; each
@@ -1105,14 +1181,14 @@ lines where the window's width allows (the text set smaller to fit, as small as 
 the Iroha (every kana once), a Hangul pangram, or the opening of the Thousand Character Classic in
 Simplified or Traditional Chinese, each with full-width punctuation. A sample in a writing the font
 has none of is grayed. Type your own sample.<br>
-<b>Code preview</b>: the code <i>Write the code</i> would write, as the ticks and options stand
+<b>Code preview</b>: the code the write button would write, as the ticks and options stand
 (nothing is written yet).<br>
-<b>Hangul</b> stays out of palt, as the corpus's Korean fonts leave it: <i>Hangul:</i> sets the
+<b>Hangul</b> stays out of palt, as the corpus's Korean fonts leave it: <i>Hangul</i> sets the
 syllables' widths instead (one width for all, or each by its shape), in every master; it is grayed
 for a font with no Hangul syllables.<br>
 Drag the space between two parts (the list, the previews, the code) to give one more room.<br>
 <i>Restore suggestions</i> puts every tick back as the list first came.<br><br>
-Click this help's <i>?</i> button, then any control, for what it does."""
+Click this help's button, then anything in the window, for what it does (or right-click it: <i>What's This?</i>)."""
 
 
 class CJKSpacingDialog(object):
@@ -1186,10 +1262,8 @@ class CJKSpacingDialog(object):
                                      u"alone, is grayed); the field beside it takes text of your own.")
         sample_row.addWidget(self.sample_box)
         self.sample = QtGui.QLineEdit(SAMPLE)
-        self.sample.setWhatsThis(u"The text the previews set, as it is and with palt, in three lines where the window's "
-                                 u"width allows (set smaller to fit), more for a long text: the Iroha (every kana once), a "
-                                 u"Hangul pangram, or the opening of the Thousand Character Classic, each with full-width "
-                                 u"punctuation; or text of your own.")
+        self.sample.setWhatsThis(u"The text the previews set, as it is and with palt: the chosen sample, or text of "
+                                 u"your own.")
         sample_row.addWidget(self.sample, 1)
         preview_part.addLayout(sample_row)
         self.previews, self.preview_captions = [], []
@@ -1216,14 +1290,9 @@ class CJKSpacingDialog(object):
             preview_part.addWidget(label)
             self.previews.append((label, caption))
         ak.preview_filled(self.preview_parts, False)  # (nothing drawn yet)
-        # What the previews show of the sample where the font lacks some of it, as CJK Vertical's (image 360)
-        self.preview_note = QtGui.QLabel(u"")
-        self.preview_note.setWordWrap(True)
-        self.preview_note.setEnabled(False)  # (drawn in the quiet text color, as the captions)
-        self.preview_note.setWhatsThis(u"The previews leave out the sample's characters the font lacks: this line "
-                                       u"says which they show, and which are missing.")
-        self.preview_note.setVisible(False)
-        preview_part.addWidget(self.preview_note)
+        # What the previews show of the sample where the font lacks some of it, as CJK Vertical's (image 360): said
+        # in the log, no longer in a line under the previews (LacksNote)
+        self.lacks_note = LacksNote(ak, self.log, dialog)
         preview_part.addStretch(1)  # (a taller pane: the previews stay under the sample row)
         # The Code preview, last, as Feature Code's code under its lists (owner's image 305)
         self.code_preview = CodePreview(ak, feature_code_or_none(), self.splitter, CODE_PREVIEW_WHAT)
@@ -1235,13 +1304,17 @@ class CJKSpacingDialog(object):
         layout.addWidget(self.log.widget)
         buttons = QtGui.QHBoxLayout()
         self.all_button = QtGui.QPushButton("Tick all")
+        self.all_button.setWhatsThis(u"Ticks every row of the list.")
         self.none_button = QtGui.QPushButton("Untick all")
+        self.none_button.setWhatsThis(u"Unticks every row of the list.")
         self.restore_button = QtGui.QPushButton("Restore suggestions")
         self.restore_button.setWhatsThis(u"Puts every tick back as the list first came.")
         self.write_button = QtGui.QPushButton("Write the code")
         self.write_button.setWhatsThis(u"Writes palt and halt for the ticked glyphs, between FreeLab's marker lines (the "
-                                       u"code <i>Code preview</i> shows); the rest of each feature is kept. <i>Edit &gt; "
-                                       u"Undo</i> takes it back.")
+                                       u"code <i>Code preview</i> shows); the rest of each feature is kept. It also sets "
+                                       u"the Hangul widths chosen under <i>Hangul</i>, in every master. Named <i>Update "
+                                       u"the code</i> once FreeLab's code is in the font, and <i>Set Hangul widths</i> "
+                                       u"when only those change. <i>Edit &gt; Undo</i> takes it back.")
         self.close_button = QtGui.QPushButton("Close")
         for button in (self.all_button, self.none_button, self.restore_button):
             buttons.addWidget(button)
@@ -1250,6 +1323,7 @@ class CJKSpacingDialog(object):
         # (the compile tick, then the button it is about, then Close: owner's image 298)
         for widget in self.bottom_right():
             buttons.addWidget(widget)
+        ak.cancel_button(self, buttons, self.close_button, CANCEL_NOTE)  # (right before Close)
         layout.addLayout(buttons)
         self.all_button.connect("clicked()", lambda: self.check_all(True))
         self.none_button.connect("clicked()", lambda: self.check_all(False))
@@ -1258,8 +1332,8 @@ class CJKSpacingDialog(object):
         self.close_button.connect("clicked()", self.ak.close_slot(self))  # (never the window itself: see let_go)
         self.palt_box.connect("toggled(bool)", lambda on: self.toggled())
         self.halt_box.connect("toggled(bool)", lambda on: self.toggled())
-        self.sample.connect("textChanged(QString)", lambda text: self.draw_previews())
-        self.sample_box.connect("activated(int)", lambda index: self.sample.setText(SAMPLES[index][2]))
+        self.sample.connect("textChanged(QString)", lambda text: self.draw_previews(typed=True))
+        self.sample_box.connect("activated(int)", lambda index: self.sample_chosen(SAMPLES[index][2]))
         self.tree.connect("itemChanged(QTreeWidgetItem*,int)", lambda item, column: self.changed())
         self.tree.connect("itemDoubleClicked(QTreeWidgetItem*,int)", lambda item, column: self.show_in_glyph_window(item))
         self.package = None
@@ -1491,7 +1565,7 @@ class CJKSpacingDialog(object):
         self.update_buttons()  # (fill compared the checks with the last font's)
         b = ak.b
         full = sum(1 for g in glyphs if g[2] >= FULL_WIDTH_SHARE * package.upm)
-        korean = hangul_note(hangul, ak.i(u"Hangul:"), b)
+        korean = hangul_note(hangul, ak.i(u"Hangul"), b)  # (the control's name, without its caption's colon)
         self.status.setText(head_join(ak, font_line(ak, package, master), trims_status(
             len(self.trims), full, sum(1 for t in self.trims if t.palt), sum(1 for t in self.trims if t.halt),
             self.write_button.text, korean, b, ak.i)))
@@ -1770,7 +1844,8 @@ class CJKSpacingDialog(object):
         chosen = self.hangul_chosen() if widths else []
         also = [u"And the widths of %s, set on their glyphs in every master (no code)." % counted(
             len(chosen), u"Hangul syllable")] if chosen else []
-        preview.show(preview_code(new, self.texts, ("palt", "halt"), also))
+        preview.show(preview_code(new, self.texts, ("palt", "halt"), also,
+                                  empty=not self.trims and not self.hangul_glyphs))
 
     def restore(self):
         for t, on in zip(self.trims, self.first_checks):
@@ -1883,10 +1958,23 @@ class CJKSpacingDialog(object):
         except Exception:
             return None
 
-    def draw_previews(self):
+    def sample_chosen(self, text):
+        """A sample chosen in Sample: set in the field (its textChanged draws the previews), and what the font
+        lacks of it said in the log at once: a choice, not typing (LacksNote)."""
+        self.sample.setText(text)
+        lacks = getattr(self, "lacks_note", None)
+        if lacks is not None:
+            lacks.now()
+
+    def draw_previews(self, typed=False):
+        """The previews set again, and what the font lacks of the sample said in the log (LacksNote); typed:
+        the sample was typed into (its textChanged), the log's note waiting for a pause in the typing."""
+        lacks = getattr(self, "lacks_note", None)
         if self.package is None:
             self.previews_drawn = False  # (no font: nothing drawn, no caption or line over nothing)
             self.parts_filled(False)
+            if lacks is not None:
+                lacks.show(None, u"")  # (a font read next says its note again)
             return
         by_code = dict((t.code, t) for t in self.trims if t.checked and t.palt)
         by_code.update((c.code, c) for c in self.hangul_chosen())
@@ -1944,11 +2032,8 @@ class CJKSpacingDialog(object):
         # of, draws nothing; while the font is read, the pictures are hidden, and run shows them with these)
         self.previews_drawn = any(pixmap is not None for pixmap in self.preview_pixmaps)
         self.parts_filled(self.previews_drawn and getattr(self, "pictures_shown", True))
-        note = getattr(self, "preview_note", None)
-        if note is not None:
-            words = preview_note(text, names, self.ak.b, self.ak.html)
-            note.setText(words)
-            note.setVisible(bool(words))
+        if lacks is not None:  # (counts bold with their nouns: owner's images 297 and 301)
+            lacks.show(self.package, preview_note(text, names, self.ak.b, self.ak.html), typed)
 
     def show_in_glyph_window(self, item):
         QtCore, QtGui = _qt()
@@ -1958,7 +2043,7 @@ class CJKSpacingDialog(object):
         name = self.trims[index].name
         error = self.ak.show_in_glyph_window(self.fontlab, u"/%s/%s/%s" % (name, name, name))
         if error:
-            self.log.add(u"FontLab did not open the glyph: %s" % self.ak.html(error), "error")
+            self.log.add(self.ak.error_sentence(u"FontLab did not open the glyph", error), "error")
 
     # -- writing --------------------------------------------------------------------
 
@@ -1974,21 +2059,21 @@ class CJKSpacingDialog(object):
         current = self.current_font()
         if current is None or self.ak.font_key(current) != self.ak.font_key(package):
             self.run()
-            self.log.add(u"The font changed: here is this one's list. Nothing was written.", "warning")
+            self.log.add(u"The font changed since the list was read: it is listed again. Nothing was written.", "warning")
             return
         features = package.fgPackage.features
         kept, refused = {}, []
         new = texts_for(self.trims, self.texts, self.palt_box.checked, self.halt_box.checked, kept, self.classes,
                         self.lookups, refused)
         if refused:
-            self.log.add(self.ak.html(refused_words(refused)), "warning")
+            self.log.add(refused_words(refused), "warning")  # (rich: its tags are this tool's own, palt and halt)
         for tag, names in sorted(kept.items()):
             if names:
                 self.log.add(u"%s %s positioned by the font's own %s code already: %s, not FreeLab's trim "
                              u"(two values for one glyph do not compile): %s." % (
                                  self.ak.b(counted(len(names), u"glyph")), u"is" if len(names) == 1 else u"are", tag,
                                  u"it keeps its value" if len(names) == 1 else u"they keep theirs",
-                                 self.ak.html(u" ".join(names[:30]) + (u" \N{HORIZONTAL ELLIPSIS}" if len(names) > 30 else u""))),
+                                 kept_names(names, self.ak.glyph_name_link)),
                              "warning")
         fc = None
         try:
@@ -2049,7 +2134,7 @@ class CJKSpacingDialog(object):
         if not getattr(status, "ok", True):
             self.log.add(status.message(), "error")
         if error is not None:
-            self.log.add(u"Stopped by an error: %s" % self.ak.html(error), "error")
+            self.log.add(self.ak.error_sentence(u"Stopped by an error", error), "error")
 
     def write_parts(self, package, features, new):
         """The write itself, under the top row's progress (write): None when nothing was written (said in

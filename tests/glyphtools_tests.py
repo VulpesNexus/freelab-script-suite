@@ -25,6 +25,19 @@ A_CARON, I_CARON, CAP_A_CARON = ac.unichr_(0x01CE), ac.unichr_(0x01D0), ac.unich
 A_DOT_BELOW, O_CIRCUMFLEX_ACUTE, O_HORN_DOT = ac.unichr_(0x1EA1), ac.unichr_(0x1ED1), ac.unichr_(0x1EE3)
 
 
+def kerning_module():
+    """Auto Kerning's module (the helpers every tool shares, as ak), loaded once: the log's glyph links."""
+    if "freelab_auto_kerning" not in sys.modules:
+        sys.path.insert(0, os.path.join(HERE, os.pardir, "kerning"))
+        import freelab_auto_kerning  # noqa: F401
+    return sys.modules["freelab_auto_kerning"]
+
+
+def named_link(name):
+    """A glyph's name as the log writes it (ak.glyph_name_link)."""
+    return kerning_module().glyph_name_link(name)
+
+
 def font():
     return ac.Font(["a", "acaron", "i", "dotlessi", "caron", "acute", "caron.case", "A", "dotaccent", "I", "o",
                     "circumflex", "e"],
@@ -1323,6 +1336,13 @@ class TouchTests(unittest.TestCase):
         del lines[:]
         dialog.log_touches([(u"a", u"x"), (u"d", u"y")], "")
         self.assertEqual(lines[0][1], u"2 letters come within 12 units of their letter or another diacritic: a d. Look at them.")
+        # The units are the font's own em's (closeness measures TOUCH_SHARE of it), never a fixed 12
+        for upm, units in ((2048, u"25 units"), (50, u"1 unit"), (1000, u"12 units")):
+            del lines[:]
+            dialog.package = Stub(upm=upm)
+            dialog.log_touches([(u"a", u"x")], "")
+            self.assertEqual(lines[0][1], u"1 letter comes within %s of its letter or another diacritic: a. Look at it." % units)
+        self.assertEqual(ac.touch_units(None), 12, "an em not known: 1,000 units")
         del lines[:]
         dialog.log_touches([], "built")
         self.assertEqual(lines, [], "nothing to name")
@@ -1343,7 +1363,8 @@ class GoToTests(unittest.TestCase):
         dialog.recipes = [ac.Recipe(ch, name=u"uni%04X" % ord(ch), base="o") for ch in listed]
         dialog.select_recipe = lambda recipe: done["selected"].append(recipe.char) or True
         dialog.log = Stub(add=lambda text, level="info": done["log"].append((level, text)))
-        dialog.ak = Stub(b=lambda text: u"%s" % text, i=lambda text: u"%s" % text, html=lambda text: u"%s" % text)
+        dialog.ak = Stub(b=lambda text: u"%s" % text, i=lambda text: u"%s" % text, html=lambda text: u"%s" % text,
+                         glyph_name_link=named_link)
         dialog.tabs = Stub(currentIndex=0)
         box = dialog.existing_box = Stub(checked=existing_on, blockSignals=lambda on: None)
         box.setChecked = lambda on: setattr(box, "checked", on)
@@ -1412,6 +1433,9 @@ class GoToTests(unittest.TestCase):
         self.assertEqual(dialog.go_to_char(O_HORN_HOOK), "opened")
         self.assertFalse(dialog.existing_box.checked, "not switched on for nothing")
         self.assertEqual((done["runs"], done["opened"]), (0, ["ohornhookabove"]))
+        self.assertEqual(done["log"][-1][1], u"%s is in the font (%s) and not in the list: opened in a <i>Glyph</i> "
+                                             u"window." % (O_HORN_HOOK, named_link(u"ohornhookabove")),
+                         "the glyph's name in italics, a link that opens it")
         dialog, done = self.dialog(in_font={O_HORN_HOOK: "ohornhookabove"}, existing_on=True)
         self.assertEqual(dialog.go_to_char(O_HORN_HOOK), "opened", "existing glyphs listed already, and it is not among them")
         self.assertEqual(done["opened"], ["ohornhookabove"])
@@ -1427,10 +1451,16 @@ class GoToTests(unittest.TestCase):
         import freelab_auto_kerning as kerning
         dialog, done = self.dialog(in_font={O_HORN_HOOK: "ohornhookabove"})
         dialog.ak.linked_char = kerning.linked_char
+        dialog.ak.linked_glyph_name = kerning.linked_glyph_name
         link = kerning.glyph_links([O_HORN_HOOK])
         target = link.split(u'"')[1]
         dialog.log_link(target)
         self.assertEqual(done["selected"], [O_HORN_HOOK], "built since, off the list: listed again and selected")
+        # A glyph named by its name (a dotless i made): left to the log, which opens it in a Glyph window
+        named = kerning.glyph_name_link(u"dotlessi").split(u'"')[1]
+        logged = len(done["log"])
+        self.assertIs(dialog.log_link(named), False)
+        self.assertEqual((len(done["log"]), done["selected"]), (logged, [O_HORN_HOOK]), "nothing said, nothing selected")
         dialog.log_link(u"nothing")
         self.assertEqual(done["log"][-1][0], "warning")
         dialog.go_to_char = lambda ch: 1 / 0
@@ -3298,8 +3328,12 @@ def recording_qt():
 
     def checked(self, on):
         self.__dict__["checked"] = on
+
+    def tab_tip(self, index, text):  # (a tab bar's tooltips, by tab)
+        self.__dict__.setdefault("tips", {})[index] = text
     base = meta("Base", (object,), {"__init__": init, "__getattr__": missing, "setWhatsThis": whats,
-                                    "addWidget": add, "addLayout": add, "setChecked": checked})
+                                    "addWidget": add, "addLayout": add, "setChecked": checked,
+                                    "setTabToolTip": tab_tip})
     classes = {}
 
     class Namespace(object):
@@ -3448,6 +3482,15 @@ class WhatsThisTests(unittest.TestCase):
         self.assertEqual(len(set(buttons)), len(buttons))
         labels = dict((w.args[0], w) for w in made if type(w).__name__ == "QLabel" and w.args)
         self.assertEqual(labels[u"Thin space:"].whats, dialog.generation.spins["thin"].whats)
+        # The review of 2026-11-24: two Undo steps when parts are added (record_parts), the hidden count beside
+        # the search field (never on the button), and Restore puts Vary and the widths back too (restore)
+        self.assertIn(u"two steps", page.build_button.whats)
+        self.assertNotIn(u"one step", page.build_button.whats)
+        self.assertIn(u"the count beside the search field", page.build_button.whats)
+        self.assertIn(u"<i>Vary turned and mirrored glyphs</i> back to their defaults", page.restore_button.whats)
+        self.assertIn(u"widths", page.restore_button.whats)
+        self.assertIn(u"not an exact copy of its source", page.vary_box.whats)
+        self.assertNotIn(u"carbon", page.vary_box.whats)
         dialog, made = self.build()  # (a module that will not load: the tab says why, once)
         try:
             ac._qt = lambda: (core, gui)
@@ -3483,9 +3526,53 @@ class WhatsThisTests(unittest.TestCase):
         self.assertEqual(dialog.anchors.reference_title.whats, dialog.anchors.reference.whats)
         self.assertEqual(dialog.reference_font.whats, dialog.anchors.reference_font.whats, "one chooser, on both tabs")
         self.assertIn(u"FreeLab's own font", dialog.reference_font.whats, "named plainly where Font Check is not read")
-        self.assertTrue(dialog.compact_box.whats.startswith(u"Makes the diacritics of a glyph too tall for a 120% line compact"))
+        self.assertTrue(dialog.compact_box.whats.startswith(u"Fits the diacritics of a glyph too tall for a 120% line"))
         self.assertIn(u"Every ticked glyph is built, those a search hides too", dialog.build_button.whats)
         self.assertNotEqual(dialog.dialog.whats, dialog.tabs.whats, "the tab bar's own, not the whole dialog's")
+
+    def test_the_helps_say_what_the_code_does(self):
+        """The review of 2026-11-24: helps that promised what the code does not (one Undo step where a build
+        that adds parts records two, a count on a button that never shows one, 12 units whatever the em)."""
+        dialog, made = self.build()
+        for text in (dialog.build_button.whats, ac.HELP, ac.CORRECT_HELP):
+            self.assertIn(u"two steps", text, "a build adding parts is two steps of the History (record_parts)")
+            self.assertNotIn(u"one step", text)
+        self.assertIn(u"the count beside the search field", dialog.build_button.whats, "never the button: build_text")
+        self.assertEqual(ac.build_text(5, 3), ac.BUILD_TICKED)
+        self.assertNotIn(u"<i>Build</i> button", ac.HELP, "no button of that name")
+        self.assertIn(u"<i>Add ticked anchors</i>", ac.HELP)
+        self.assertIn(u"unticks the others shown", ac.HELP)
+        self.assertIn(u"1.2% of the em", dialog.propagate_button.whats, "TOUCH_SHARE, not units of an em of 1,000")
+        self.assertNotIn(u"units of its letter", dialog.propagate_button.whats)
+        # Glyph generation's groups, the CJK ones too (the help named the first scope's alone); the Glyph window
+        # opened between the script's controls (proof_contexts), not always H, n, and o
+        for text in (ac.HELP, ac.TOP_TABS_HELP, ac.TOP_TAB_HELPS[1]):
+            for words in (u"Kangxi radicals", u"telegraph symbols", u"Roman"):
+                self.assertIn(words, text)
+            # (and the next scope of 2026-11-24, each of its groups named)
+            for words in (u"superscript and subscript signs and letters", u"trade mark and numero signs",
+                          u"circled figures and letters", u"full-width and half-width forms", u"small capitals",
+                          u"letters with bars", u"small kana"):
+                self.assertIn(words, u" ".join(text.split()), (words, text[:80]))
+        self.assertTrue(ac.TOP_TAB_HELPS[1].startswith(u"Spaces, dashes"))
+        self.assertIn(u"its script's control glyphs", dialog.glyph_window_button.whats)
+        with open(ac.__file__.replace(".pyc", ".py"), "rb") as handle:
+            source = handle.read().decode("utf-8")
+        self.assertNotIn(u"Stopped by an error: %s", source)
+        self.assertNotIn(u"did not open the glyph: %s", source)
+        for text in (ac.HELP, dialog.editor.whats):  # (one description of snapping, the same in both)
+            self.assertIn(u"box center or top center", text)
+            self.assertIn(u"bottom", text)
+        self.assertEqual(dialog.editor.whats.count(u"double-click the glyph") +
+                         dialog.editor.whats.count(u"Double-click the glyph"), 1, "said once")
+        self.assertIn(u"more than one master", dialog.anchors.code_box.whats, "grayed there: AnchorPage")
+        self.assertIn(u"70%", ac.COMPACT_HELP, "MIN_SCALE")
+        self.assertIn(u"120% line", ac.COMPACT_HELP)
+        self.assertNotIn(u"Each such mark", ac.CORRECT_HELP, "any component, not only marks: mirrored_components")
+        self.assertNotIn(u"Gaps are closed", ac.VALUE_BUTTON_HELP + ac.VALUE_ONLY_HELP)
+        self.assertNotIn(u"asked", ac.VALUE_BUTTON_HELP + ac.VALUE_ONLY_HELP)
+        self.assertIn(u"a click would change no tick", ac.VALUE_BUTTON_HELP)
+        self.assertEqual(dialog.tabs.tips, {0: ac.TAB_HELPS[0], 1: ac.TAB_HELPS[1]}, "both tabs, with their periods")
 
 
 class CellWalkTests(unittest.TestCase):
@@ -3730,6 +3817,10 @@ class FlShape(object):
     def clone(self):
         return FlShape(self.own, self.component, self.transform, self.font)
 
+    def addContours(self, contours, flag):
+        """flShape().addContours(clones, True), as Glyph generation's stretched dashes make a shape."""
+        self.own.extend(FlContour(c.points, self.font) for c in contours)
+
 
 class FlLayer(object):
     def __init__(self, font, master, advance=0.0, shapes=()):
@@ -3886,7 +3977,8 @@ class MirrorFixTests(unittest.TestCase):
         dialog.package, dialog.master, dialog.fontlab, dialog.hidden = font, "Regular", FL, set()
         dialog.steps, dialog.lines, dialog.reads = [], [], []
         dialog.ak = Stub(layer_path=fl_path, b=lambda value: u"%s" % value, html=lambda value: u"%s" % value,
-                         glyph_links=lambda chars: u" ".join(chars),
+                         glyph_links=lambda chars: u" ".join(chars), glyph_name_link=named_link,
+                         glyph_names_linked=kerning_module().glyph_names_linked,
                          before_changes=lambda fontlab, package, title, glyphs=(), coverage=False: [],
                          notify_changed=lambda fontlab, package, title, glyphs=(), coverage=False: dialog.steps.append(
                              (title, sorted(set(g.name for g in glyphs)))))
@@ -3977,16 +4069,17 @@ class MirrorFixTests(unittest.TestCase):
         # 2026-11-16: one step holding both made FontLab's Undo say the letters' components did not exist)
         self.assertEqual(dialog.steps, [(u"FreeLab Glyph Compose mirrored components (parts)", ["mark.flipped", "mark.mirrored"]),
                                         (u"FreeLab Glyph Compose mirrored components", ["oflip", "oflip.alt", "omirror"])])
-        self.assertEqual(dialog.lines[0], ("info", u"This takes two steps of <i>Edit &gt; Undo</i>: mark.flipped, "
-                                                   u"mark.mirrored were added in a step of their own first, so that "
-                                                   u"FontLab's Undo never takes out a glyph that others still point to."))
+        self.assertEqual(dialog.lines[0], ("info", u"This takes two steps of <i>Edit &gt; Undo</i>: %s, %s were added in "
+                                                   u"a step of their own first, so that FontLab's Undo never takes out a "
+                                                   u"glyph that others still point to." % (
+                                                       named_link(u"mark.flipped"), named_link(u"mark.mirrored"))))
         self.assertEqual(ac.parts_step_text([u"R.mirrored"]), u"This takes two steps of <i>Edit &gt; Undo</i>: R.mirrored "
                                                                u"was added in a step of its own first, so that FontLab's "
                                                                u"Undo never takes out a glyph that others still point to.")
         self.assertEqual(dialog.lines[1][0], "done")
         self.assertIn(u"Corrected the mirrored components of 3 glyphs (2 glyphs added, mirrored with their contours "
                       u"reversed)", dialog.lines[1][1])
-        self.assertIn(u"added: mark.flipped, mark.mirrored", dialog.lines[1][1])
+        self.assertIn(u"added: %s, %s" % (named_link(u"mark.flipped"), named_link(u"mark.mirrored")), dialog.lines[1][1])
         self.assertEqual((len(dialog.lines), dialog.reads), (2, [1]), "and the list read again")
         return font
 
@@ -4139,7 +4232,7 @@ class MirrorFixTests(unittest.TestCase):
         self.assertEqual(len(lines), 1)
         self.assertIn(u"1 glyph built with a corrected glyph in the place of a mirrored one", lines[0])
         self.assertIn(u"(1 glyph added, mirrored with its contours reversed, so that no hole shows where it overlaps: "
-                      u"caron.mirrored)", lines[0])
+                      u"%s)" % named_link(u"caron.mirrored"), lines[0])
         self.assertFalse(any(u"built with a mirrored component" in line for _, line in dialog.lines))
         self.assertIn("caron.mirrored", dialog.steps[0][1], "in the build's one step of the History")
 
@@ -4174,8 +4267,8 @@ class MirrorFixTests(unittest.TestCase):
         self.assertEqual(len(helper), 1, font.glyphs.keys())
         self.assertEqual(dialog.steps, [(u"FreeLab Glyph Compose (parts)", helper),
                                         (u"FreeLab Glyph Compose", [recipe.name])], "the part first, then the letter")
-        self.assertTrue(any(level == "info" and u"two steps of <i>Edit &gt; Undo</i>: %s was added" % helper[0] in line
-                            for level, line in dialog.lines), dialog.lines)
+        self.assertTrue(any(level == "info" and u"two steps of <i>Edit &gt; Undo</i>: %s was added" % named_link(helper[0])
+                            in line for level, line in dialog.lines), dialog.lines)
 
     def test_a_correction_refused_before_any_write_records_no_step(self):
         font = fl_font("bake")
@@ -4208,8 +4301,308 @@ class MirrorFixTests(unittest.TestCase):
         self.assertFalse(any(u"corrected glyph" in line for _, line in dialog.lines), "no glyph added to name")
 
 
+FL_SHAPES = Stub(flGlyph=lambda: Stub(name=None), GlyphComponent=FlComponent, flShape=lambda: FlShape())
+I_STEM, I_DOT = [(100, 0), (100, 500), (180, 500), (180, 0)], [(100, 580), (100, 660), (180, 660), (180, 580)]
+J_BODY = [(100, 500), (180, 500), (180, -150), (60, -220), (20, -180), (100, -120)]  # (its tail: a box wider and taller)
+I_GRAVE, I_ACUTE, J_CIRCUMFLEX, DOTLESS_I, DOTLESS_J = (ac.unichr_(0xEC), ac.unichr_(0xED), ac.unichr_(0x135),
+                                                         ac.unichr_(0x131), ac.unichr_(0x237))
+
+
+class DotlessTests(unittest.TestCase):
+    """A font with no dotless i or j (the owner's decision of 2026-11-24): its i read in every master; two
+    contours, one clearly the dot, make the dotless i (a part, in a History step of its own before the glyphs
+    built on it); one contour is the font's i drawn dotless; anything else is not taken apart, and the glyphs
+    stay on the dotted i, said in amber. Until then they were built on the dotted i, and nothing said so."""
+
+    def setUp(self):
+        self.saved = ac._qt
+        ac._qt = lambda: (Stub(), Stub(QTransform=FlTransform))
+
+    def tearDown(self):
+        ac._qt = self.saved
+
+    def fl(self, i=(I_STEM, I_DOT), j=(J_BODY, I_DOT)):
+        """i, j, and the marks, in Regular and Bold (Bold 1.1 times as large)."""
+        font = FlFont("bake")
+        font.draw("i", 280, list(i), bold=1.1)
+        font.draw("j", 280, list(j), bold=1.1)
+        for name in ("gravecomb", "acutecomb", "circumflexcomb"):
+            font.draw(name, 0, [[(-60, 560), (-60, 700), (60, 700), (60, 560)]], bold=1.1)
+        return font
+
+    def planned(self, fl, chars):
+        names = [("i", 0x69), ("j", 0x6A), ("gravecomb", 0x300), ("acutecomb", 0x301), ("circumflexcomb", 0x302)]
+        font = ac.Font([name for name, _ in names], names)
+        font.dotless = ac.read_dotless(fl, fl.masters, font)
+        return font, dict((r.char, r) for r in ac.plan(font, list(chars)))
+
+    def dialog(self, fl, recipes):
+        dialog = ac.AccentsDialog.__new__(ac.AccentsDialog)
+        dialog.package, dialog.master, dialog.fontlab, dialog.hidden = fl, "Regular", FL_SHAPES, set()
+        dialog.steps, dialog.lines, dialog.reads = [], [], []
+        dialog.ak = Stub(layer_path=fl_path, b=lambda value: u"%s" % value, html=lambda value: u"%s" % value,
+                         glyph_links=lambda chars: u" ".join(chars), glyph_name_link=named_link,
+                         glyph_names_linked=kerning_module().glyph_names_linked,
+                         before_changes=lambda fontlab, package, title, glyphs=(), coverage=False: [],
+                         notify_changed=lambda fontlab, package, title, glyphs=(), coverage=False: dialog.steps.append(
+                             (title, sorted(set(g.name for g in glyphs)))))
+        dialog.current_font = lambda: fl
+        dialog.package_key = lambda package: None if package is None else id(package)
+        dialog.run = lambda: dialog.reads.append(1)
+        dialog.log = Stub(add=lambda line, level="info": dialog.lines.append((level, line)))
+        dialog.recipes = recipes
+        ink = InkOf({"i": ac.Ink(100, 0, 180, 660, advance=280), "dotlessi": ac.Ink(100, 0, 180, 500, advance=280),
+                     "j": ac.Ink(20, -220, 180, 660, advance=280), "dotlessj": ac.Ink(20, -220, 180, 500, advance=280),
+                     "gravecomb": ac.Ink(-60, 560, 60, 700), "acutecomb": ac.Ink(-60, 560, 60, 700),
+                     "circumflexcomb": ac.Ink(-60, 560, 60, 700)})
+        dialog.inks = dict((master, ink) for master in fl.masters)
+        dialog.placements = dict((master, ac.Placement(1000.0, MODEL)) for master in fl.masters)
+        dialog.metrics = lambda package: None
+        dialog.harvest = lambda: None
+        dialog.closeness = lambda r: u""
+        dialog.log_touches = lambda noted, how: None
+        dialog.built_names, dialog.built_font = [], None
+        return dialog
+
+    def test_the_dot_is_the_higher_and_smaller_contour_clearly_over_the_other(self):
+        stem, dot = (100, 0, 180, 500), (100, 580, 180, 660)
+        self.assertEqual(ac.dot_index([stem, dot]), 1)
+        self.assertEqual(ac.dot_index([dot, stem]), 0, "whatever their order")
+        self.assertEqual(ac.dot_index([(20, -220, 180, 500), dot]), 1, "a j: its tail makes its body's box wider and taller")
+        self.assertEqual(ac.dot_index([stem, (110, 470, 170, 540)]), 1, "a dot overlapping its stem's top, its center over it")
+        self.assertIsNone(ac.dot_index([stem, (0, 580, 400, 900)]), "the higher is the larger: not guessed")
+        self.assertIsNone(ac.dot_index([stem, (180, 380, 240, 480)]), "its center under the other's top: not clearly over it")
+        self.assertIsNone(ac.dot_index([stem, (300, 580, 380, 660)]), "beside the stem, not over it")
+        self.assertIsNone(ac.dot_index([stem, (100, 0, 180, 500)]), "the same height: neither is higher")
+        self.assertIsNone(ac.dot_index([stem, dot, dot]))
+        self.assertIsNone(ac.dot_index([stem, None]), "a contour with no node")
+
+    def test_the_verdict_and_the_rows_notes(self):
+        stem, dot = (100, 0, 180, 500), (100, 580, 180, 660)
+        made = ac.dotless_verdict(0x131, [[stem, dot], [dot, stem]])
+        self.assertEqual(made.kind, "refused", "the masters' dots differ in their order: their masters differ")
+        self.assertEqual(made.reason, u"the font has no dotless i, and its i differs from master to master")
+        made = ac.dotless_verdict(0x131, [[stem, dot], [stem, dot]])
+        self.assertEqual((made.kind, made.dot, made.letter, made.code), ("made", 1, u"i", 0x131))
+        made.name, made.source = u"dotlessi", u"i"
+        self.assertEqual(ac.dotless_note(made, u"dotlessi"), u"dotlessi is i without its dot, built here first")
+        own = ac.dotless_verdict(0x237, [[stem], [stem]])
+        self.assertEqual(own.kind, "own")
+        self.assertEqual(ac.dotless_note(own, u"j"), u"on j itself: the font's j has no dot")
+        reasons = {u"the font has no dotless i, and its i has 3 contours": [[stem, dot, dot]],
+                   u"the font has no dotless i, and its i is made of components": [[stem, dot], None],
+                   u"the font has no dotless i, and its i differs from master to master": [[stem, dot], [stem, dot, dot]],
+                   u"the font has no dotless i, and neither contour of its i is clearly the dot": [[stem, (0, 580, 400, 900)]],
+                   u"the font has no dotless i, and its i has no outline": []}
+        for reason, readings in reasons.items():
+            refused = ac.dotless_verdict(0x131, readings)
+            self.assertEqual((refused.kind, refused.reason), ("refused", reason))
+        refused = ac.dotless_verdict(0x131, [[stem, dot, dot]])
+        self.assertEqual(ac.dotless_note(refused, u"i"), u"the dot of i stays under the diacritic: the font has no dotless "
+                                                          u"i, and its i has 3 contours; draw U+0131")
+        self.assertEqual(ac.dotless_note(refused, u"i", 2), u"the dot of i stays under the diacritics: the font has no "
+                                                             u"dotless i, and its i has 3 contours; draw U+0131")
+        self.assertEqual(ac.dotless_verdict(0x131, [[stem, dot, dot, dot, dot]]).reason,
+                         u"the font has no dotless i, and its i has 5 contours")
+        for note in [ac.dotless_note(made, u"dotlessi"), ac.dotless_note(own, u"j"), ac.dotless_note(refused, u"i")]:
+            self.assertFalse(note.endswith(u".") or u"(" in note, "a cell's note: no period, no parentheses in the cell's")
+        self.assertEqual(ac.made_dotless_text(u"dotlessi", u"i", 2),
+                         u"Made dotlessi from i without its dot in every master: the font had none.")
+        self.assertEqual(ac.made_dotless_text(u"dotlessj", u"j"), u"Made dotlessj from j without its dot: the font had none.")
+        # In the log, each glyph's name in italics, a link that opens it (owner's request of 2026-11-24)
+        sys.path.insert(0, os.path.join(HERE, os.pardir, "kerning"))
+        import freelab_auto_kerning as kerning
+        self.assertEqual(ac.made_dotless_text(u"dotlessj", u"j", 1, kerning.glyph_name_link),
+                         u'Made <a href="glyphname:dotlessj"><i>dotlessj</i></a> from <a href="glyphname:j"><i>j</i></a> '
+                         u"without its dot: the font had none.")
+        self.assertEqual(ac.parts_step_text([u"dotlessi", u"dotlessj"], kerning.glyph_name_link),
+                         u'This takes two steps of <i>Edit &gt; Undo</i>: <a href="glyphname:dotlessi"><i>dotlessi</i></a>, '
+                         u'<a href="glyphname:dotlessj"><i>dotlessj</i></a> were added in a step of their own first, so that '
+                         u"FontLab's Undo never takes out a glyph that others still point to.")
+
+    def test_the_font_is_read_in_every_master(self):
+        fl = self.fl()
+        found = ac.read_dotless(fl, fl.masters, ac.Font(["i", "j"], [("i", 0x69), ("j", 0x6A)]))
+        self.assertEqual([(code, d.kind, d.dot, d.name, d.source) for code, d in sorted(found.items())],
+                         [(0x131, "made", 1, u"dotlessi", u"i"), (0x237, "made", 1, u"dotlessj", u"j")])
+        taken = ac.Font(["i", "j", "dotlessi"], [("i", 0x69), ("j", 0x6A)], empty=["dotlessi"])
+        self.assertEqual(ac.read_dotless(fl, fl.masters, taken)[0x131].name, u"idotless", "a name another glyph has")
+        fl = self.fl(i=(I_STEM, I_DOT, [(300, 0), (300, 50), (350, 50)]), j=(J_BODY,))
+        found = ac.read_dotless(fl, fl.masters, ac.Font(["i", "j"], [("i", 0x69), ("j", 0x6A)]))
+        self.assertEqual((found[0x131].kind, found[0x131].reason),
+                         ("refused", u"the font has no dotless i, and its i has 3 contours"))
+        self.assertEqual(found[0x237].kind, "own")
+        fl = self.fl()
+        fl.glyphs["i"].by_master["Bold"].shapes[0].own.append(FlContour([(300, 0), (300, 50), (350, 50)]))
+        self.assertEqual(ac.read_dotless(fl, fl.masters, ac.Font(["i"], [("i", 0x69)]))[0x131].reason,
+                         u"the font has no dotless i, and its i differs from master to master")
+        fl = self.fl()
+        fl.compose("i", 280, [("j", (1, 0, 0, 1, 0, 0))])
+        self.assertEqual(ac.read_dotless(fl, fl.masters, ac.Font(["i"], [("i", 0x69)]))[0x131].reason,
+                         u"the font has no dotless i, and its i is made of components")
+        fl = self.fl()
+        fl.glyphs["i"].by_master["Bold"].shapes = []  # (a sparse master: left out, as a build leaves it)
+        self.assertEqual(ac.read_dotless(fl, fl.masters, ac.Font(["i"], [("i", 0x69)]))[0x131].kind, "made")
+        has = ac.Font(["i", "dotlessi", "j", "uni0237"], [("i", 0x69), ("dotlessi", 0x131), ("j", 0x6A)])
+        self.assertEqual(ac.read_dotless(self.fl(), ["Regular", "Bold"], has), {}, "the font's own dotless i and j: none read")
+        empty = ac.Font(["i", "uni0131"], [("i", 0x69), ("uni0131", 0x131)], empty=["uni0131"])
+        self.assertEqual(ac.read_dotless(self.fl(), ["Regular"], empty)[0x131].reason, u"the font's dotless i is empty")
+
+    def test_the_plan_builds_on_the_dotless_glyph_it_makes_and_lists_that_glyph(self):
+        font, found = self.planned(self.fl(), [I_GRAVE, I_ACUTE, J_CIRCUMFLEX, DOTLESS_I, DOTLESS_J])
+        self.assertEqual([(found[c].base, found[c].base_note, found[c].checked) for c in (I_GRAVE, J_CIRCUMFLEX)],
+                         [(u"dotlessi", u"dotlessi is i without its dot, built here first", True),
+                          (u"dotlessj", u"dotlessj is j without its dot, built here first", True)])
+        self.assertEqual(found[I_GRAVE].name, u"igrave", "named after the letter, not its dotless form")
+        row = found[DOTLESS_I]
+        self.assertTrue(row.dotless_row and row.checked and not row.missing, "a proper build: ticked")
+        self.assertEqual((row.name, row.base, row.marks, row.describe()), (u"dotlessi", u"dotlessi", [], u"i without its dot"))
+        self.assertEqual(found[DOTLESS_J].describe(), u"j without its dot")
+        self.assertFalse(ac.kept_dotted(found[I_GRAVE]))
+        cell = ac.row_text(found[I_GRAVE].describe(), notes=[found[I_GRAVE].base_note])
+        self.assertEqual(cell, u"dotlessi + gravecomb (dotlessi is i without its dot, built here first)")
+
+    def test_an_i_drawn_without_a_dot_and_an_i_not_taken_apart(self):
+        fl = self.fl(i=(I_STEM,), j=(J_BODY, I_DOT, [(300, 0), (300, 50), (350, 50)]))
+        font, found = self.planned(fl, [I_GRAVE, J_CIRCUMFLEX, DOTLESS_I, DOTLESS_J])
+        self.assertEqual((found[I_GRAVE].base, found[I_GRAVE].base_note), (u"i", u"on i itself: the font's i has no dot"))
+        self.assertFalse(ac.kept_dotted(found[I_GRAVE]), "nothing collides: a plain note")
+        j = found[J_CIRCUMFLEX]
+        self.assertEqual((j.base, j.checked), (u"j", True), "the dotted j, ticked as a glyph with a collision stays")
+        self.assertEqual(j.base_note, u"the dot of j stays under the diacritic: the font has no dotless j, and its j has 3 "
+                                      u"contours; draw U+0237")
+        self.assertTrue(ac.kept_dotted(j))
+        self.assertNotIn(DOTLESS_I, found, "no row: the font's i has no dot to take out")
+        self.assertNotIn(DOTLESS_J, found, "no row: the rows built on it say what to draw")
+
+    def test_the_ukrainian_yi_takes_the_dotless_i_made_or_says_why_not(self):
+        yi = ac.unichr_(0x457)
+        cyrillic = ac.Font(["i", "i-cy", "dieresiscomb"], [("i", 0x69), ("i-cy", 0x456), ("dieresiscomb", 0x308)])
+        made = ac.Dotless("made", 0x131, 1)
+        made.name, made.source = u"dotlessi", u"i"
+        cyrillic.dotless = {0x131: made}
+        recipe = ac.plan(cyrillic, [yi])[0]
+        self.assertEqual((recipe.base, recipe.base_note), (u"dotlessi", u"dotlessi is i without its dot, built here first"))
+        cyrillic.dotless = {0x131: ac.dotless_verdict(0x131, [None])}
+        recipe = ac.plan(cyrillic, [yi])[0]
+        self.assertEqual((recipe.base, recipe.base_note), (u"i-cy", u"the dot of i-cy stays under the diacritic: the font "
+                                                                    u"has no dotless i, and its i is made of components; "
+                                                                    u"draw U+0131"))
+
+    def test_a_font_with_a_dotless_i_or_none_read_is_planned_as_before(self):
+        found = dict((r.char, r) for r in ac.plan(font(), [I_CARON, ac.unichr_(0x131)]))
+        self.assertEqual(found[I_CARON].base, "dotlessi", "the font's own dotless i, as PlanTests expects")
+        self.assertEqual((found[I_CARON].base_note, found[I_CARON].dotless), (u"", None))
+        self.assertNotIn(ac.unichr_(0x131), found, "the font has it")
+        own = font()
+        own.dotless = {0x131: ac.Dotless("refused", 0x131, reason=u"never asked")}
+        self.assertEqual(ac.plan(own, [I_CARON])[0].base_note, u"", "a font with a dotless i is never read for one")
+        unread = ac.Font(["i", "caron"], [("i", 0x69)])  # (Font Check's planning reads no outlines)
+        recipe = ac.plan(unread, [I_CARON, ac.unichr_(0x131)])
+        self.assertEqual([(r.char, r.base, r.base_note, r.checked) for r in recipe], [(I_CARON, "i", u"", True)],
+                         "unread: the dotted i, as before, and no row of its own")
+
+    def test_a_row_draws_the_dotless_glyph_before_it_is_made(self):
+        fl = self.fl()
+        ak = Stub(layer_path=lambda layer: [list(c.points) for s in layer.shapes for c in s.contours])
+        ink = ac.FontLabInk(ak, fl, "Bold", {u"dotlessi": (u"i", 1)})
+        path, advance = ink.path(u"dotlessi")
+        self.assertEqual(path, [[(x * 1.1, y * 1.1) for x, y in I_STEM]], "the i without its dot")
+        self.assertAlmostEqual(advance, 280 * 1.1)
+        self.assertEqual(len(ink.path(u"i")[0]), 2, "the i itself, dot and all")
+        fl.draw("dotlessi", 280, [I_STEM])
+        self.assertEqual(len(ac.FontLabInk(ak, fl, "Bold", {u"dotlessi": (u"i", 1)}).path(u"dotlessi")[0]), 1,
+                         "made: the font's glyph")
+
+    def made_glyph(self, fl, name, contour):
+        for master in fl.masters:
+            k = 1.1 if master == "Bold" else 1.0
+            layer = fl.glyphs[name].by_master[master]
+            self.assertEqual(ac.layer_points(layer), [(x * k, y * k) for x, y in contour], "%s %s" % (name, master))
+            self.assertAlmostEqual(layer.advanceWidth, 280 * k, 6, "the letter's advance, so its sidebearings")
+        self.assertTrue(all(not shape.isComponent for layer in fl.glyphs[name].layers for shape in layer.shapes))
+
+    def test_a_build_makes_the_dotless_glyph_first_in_a_step_of_its_own(self):
+        fl = self.fl()
+        font, found = self.planned(fl, [I_GRAVE, J_CIRCUMFLEX, DOTLESS_I])
+        dialog = self.dialog(fl, [found[I_GRAVE], found[J_CIRCUMFLEX], found[DOTLESS_I]])
+        dialog.build()
+        self.made_glyph(fl, "dotlessi", I_STEM)
+        self.made_glyph(fl, "dotlessj", J_BODY)
+        self.assertEqual((fl.glyphs["dotlessi"].fgGlyph.unicode, fl.glyphs["dotlessj"].fgGlyph.unicode), (0x131, 0x237))
+        for master in fl.masters:
+            self.assertEqual([s.component for s in fl.glyphs["igrave"].by_master[master].shapes], ["dotlessi", "gravecomb"])
+            self.assertEqual([s.component for s in fl.glyphs["jcircumflex"].by_master[master].shapes],
+                             ["dotlessj", "circumflexcomb"])
+        self.assertEqual(dialog.steps, [(u"FreeLab Glyph Compose (parts)", ["dotlessi", "dotlessj"]),
+                                        (u"FreeLab Glyph Compose", ["igrave", "jcircumflex"])],
+                         "the dotless glyphs first, in a step of their own, then the glyphs built on them")
+        lines = [line for _, line in dialog.lines]
+        # (the owner's image of 2026-11-24: each glyph's name in italics, a link that opens it)
+        self.assertIn(u"This takes two steps of <i>Edit &gt; Undo</i>: %s, %s were added in a step of their own first, so "
+                      u"that FontLab's Undo never takes out a glyph that others still point to." % (
+                          named_link(u"dotlessi"), named_link(u"dotlessj")), lines)
+        self.assertIn((u"done", u"Made %s from %s without its dot in every master: the font had none." % (
+            named_link(u"dotlessi"), named_link(u"i"))), dialog.lines)
+        self.assertIn((u"done", u"Made %s from %s without its dot in every master: the font had none." % (
+            named_link(u"dotlessj"), named_link(u"j"))), dialog.lines)
+        self.assertTrue(any(line.startswith(u"Built 3 glyphs: ") for line in lines), lines)
+        self.assertFalse(any(level == "warning" for level, _ in dialog.lines), dialog.lines)
+
+    def test_its_own_row_alone_is_one_step(self):
+        fl = FlFont("bake")
+        fl.glyphs["i"] = FlGlyph("i", fl)
+        for master in fl.masters:  # (the dot in a shape of its own: the stem's shape copied whole)
+            fl.glyphs["i"].by_master[master] = FlLayer(fl, master, 280, [FlShape([I_STEM]), FlShape([I_DOT])])
+        font, found = self.planned(fl, [DOTLESS_I])
+        dialog = self.dialog(fl, [found[DOTLESS_I]])
+        dialog.build()
+        self.assertEqual(ac.layer_points(fl.glyphs["dotlessi"].by_master["Bold"]), [(float(x), float(y)) for x, y in I_STEM])
+        self.assertEqual(dialog.steps, [(u"FreeLab Glyph Compose", ["dotlessi"])], "nothing built on it: one step")
+        self.assertIn((u"done", u"Made %s from %s without its dot in every master: the font had none." % (
+            named_link(u"dotlessi"), named_link(u"i"))), dialog.lines)
+
+    def test_glyphs_on_an_i_not_taken_apart_are_built_and_named_in_amber(self):
+        fl = self.fl(i=(I_STEM, I_DOT, [(300, 0), (300, 50), (350, 50)]))
+        font, found = self.planned(fl, [I_GRAVE, I_ACUTE])
+        dialog = self.dialog(fl, [found[I_GRAVE], found[I_ACUTE]])
+        dialog.build()
+        self.assertNotIn("dotlessi", fl.glyphs)
+        self.assertEqual([s.component for s in fl.glyphs["igrave"].by_master["Regular"].shapes], ["i", "gravecomb"])
+        self.assertEqual(dialog.steps, [(u"FreeLab Glyph Compose", ["iacute", "igrave"])])
+        self.assertIn((u"warning", u"2 glyphs built on i with its dot: the font has no dotless i, and its i has 3 contours. "
+                                   u"Draw U+0131, then rebuild them: %s %s." % (I_GRAVE, I_ACUTE)), dialog.lines)
+        self.assertEqual(ac.dot_kept_lines([found[I_GRAVE]], lambda text: u"<b>%s</b>" % text),
+                         [u"<b>1 glyph</b> built on i with its dot: the font has no dotless i, and its i has 3 contours. "
+                          u"Draw U+0131, then rebuild it: %s." % I_GRAVE])
+
+    def test_a_dotless_glyph_no_glyph_ends_up_on_is_taken_out(self):
+        fl = self.fl()
+        fl.refuses = True  # FontLab keeps none of the components: igrave is not built
+        font, found = self.planned(fl, [I_GRAVE])
+        dialog = self.dialog(fl, [found[I_GRAVE]])
+        dialog.build()
+        self.assertNotIn("igrave", fl.glyphs)
+        self.assertNotIn("dotlessi", fl.glyphs, "made for igrave, used by nothing: taken out again")
+        self.assertFalse(any(u"Made dotlessi" in line for _, line in dialog.lines))
+
+    def test_a_dotless_glyph_fontlab_does_not_copy_is_taken_out_and_nothing_is_built_on_it(self):
+        fl = self.fl()
+        for master in fl.masters:  # (the dot's shape placed by a transform: its stem's clones land elsewhere)
+            fl.glyphs["i"].by_master[master].shapes[0].transform = FlTransform(1, 0, 0, 1, 0, 10)
+        font, found = self.planned(fl, [I_GRAVE, DOTLESS_I])
+        dialog = self.dialog(fl, [found[I_GRAVE], found[DOTLESS_I]])
+        dialog.build()
+        self.assertNotIn("dotlessi", fl.glyphs)
+        self.assertNotIn("igrave", fl.glyphs, "never built on a glyph that is not there")
+        why = u"%s could not be made: FontLab did not copy the outlines of i in master Regular" % named_link(u"dotlessi")
+        self.assertIn((u"warning", u"%s was not built: %s." % (I_GRAVE, why)), dialog.lines)
+        self.assertIn((u"warning", u"%s was not built: %s." % (DOTLESS_I, why)), dialog.lines)
+        self.assertEqual(dialog.steps, [], "nothing written: no step")
+
+
 class LigatureTests(unittest.TestCase):
-    LIGA = u"\n".join([u"feature liga {", u"# Standard Ligatures", u"", u"#> feature",
+    LIGA =u"\n".join([u"feature liga {", u"# Standard Ligatures", u"", u"#> feature",
                        u"  sub parenleft c parenright by copyright;", u"  sub f f by f_f;", u"  sub f f t by f_f_t;",
                        u"#< feature", u"} liga;", u""])
     NAMES = ["f", "t", "c", "l", "f_f", "f_f_t", "l_l.dlig", "parenleft", "parenright", "copyright"]

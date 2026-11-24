@@ -509,6 +509,10 @@ class FakeCalls(object):
         if self.keep_masters:
             package.masters.append(name)
 
+    def set_names(self, package, family, style):
+        self.check("names")
+        self.record.events.append(("named", family, style))
+
     def show_package(self, package):
         self.record.events.append(("shown",))
 
@@ -754,6 +758,11 @@ class BuildTests(unittest.TestCase):
             self.assertGreater(events.index(("contours", u"Aacute", master)), made, "its own outlines after")
         self.assertEqual(package.glyphs[u"Aacute"].layers[u"Bold"].parts, [u"A", u"acute"])
         self.assertLess(events.index(("shown",)), events.index(("contours", u"A", u"Regular")))
+        # (the owner, 2026-11-24: the new font's tab read "Unnamed". Named before its window opens)
+        named = [event for event in events if event[0] == "named"]
+        self.assertEqual(len(named), 1, named)
+        self.assertEqual(named[0][2], u"Regular", "its first master's name as the style")
+        self.assertLess(events.index(named[0]), events.index(("shown",)))
         self.assertEqual(events[-2:], [("listed",), ("modified",)])
 
     def test_the_references_code_info_kerning_and_axes(self):
@@ -824,7 +833,11 @@ class AssemblyLineTests(unittest.TestCase):
         self.assertEqual(lines[0], (u"Made a new font with <b>2 masters</b> (Regular and Bold) and <b>2 glyphs</b>; "
                                     u"<b>1 layer</b> is left empty where a source lacks its glyph. Nothing in the sources "
                                     u"changed; close the new font without saving to take it back.", "done"))
-        self.assertIn((u"Left empty in <b>Bold</b>: B.", "info"), lines)
+        # (a glyph's name in italics, as every log has it; no link: it is the new font's glyph, not this window's)
+        self.assertIn((u"Left empty in <b>Bold</b>: <i>B</i>.", "info"), lines)
+        plan.empty = [(u"Bold", [u"a<b"] + [u"g%d" % n for n in range(fa.NAMES_SHOWN)])]
+        self.assertIn((u"Left empty in <b>Bold</b>: <i>a&lt;b</i>, %s, and 1 more." % u", ".join(
+            u"<i>g%d</i>" % n for n in range(fa.NAMES_SHOWN - 1)), "info"), fa.assembly_lines(plan, []))
         self.assertIn((u"Axes: Weight (Regular 400, Bold 700).", "info"), lines)
         self.assertIn((u"At the audit, <b>1 of 1 glyph</b> matched in structure: that is needed to interpolate, not a "
                        u"promise of it.", "info"), lines)
@@ -946,6 +959,9 @@ class FakeButton(Anything):
     def property(self, name):
         return self.props.get(name)
 
+    def setWhatsThis(self, text):
+        self.whats = text
+
 
 class FakeLayout(Anything):
     """A row or column that keeps what is added to it, in order (None: a stretch)."""
@@ -961,6 +977,17 @@ class FakeLayout(Anything):
 
     def addStretch(self, *args):
         self.items.append(None)
+
+    # (as ak.cancel_button reads and fills a row: the Cancel button put right before Close)
+    def count(self):
+        return len(self.items)
+
+    def itemAt(self, k):
+        held = self.items[k]
+        return type("Item", (object,), {"widget": lambda item: held})()
+
+    def insertWidget(self, k, widget):
+        self.items.insert(k, widget)
 
 
 class FakeLabel(Anything):
@@ -1131,7 +1158,7 @@ class DialogTests(unittest.TestCase):
         self.assertIs(window.items[-2], dialog.log.widget)
         bottom = window.items[-1]
         self.assertEqual(bottom.items, [dialog.tick_all, dialog.tick_none, dialog.glyph_window_button, None,
-                                        dialog.assemble_button, dialog.close_button])
+                                        dialog.assemble_button, dialog.cancel_button, dialog.close_button])
         self.assertEqual(dialog.add_button.text, u"Add files\N{HORIZONTAL ELLIPSIS}")
 
     def test_the_lower_part_starts_with_its_line_under_the_handle(self):
@@ -1275,6 +1302,31 @@ class DialogTests(unittest.TestCase):
         self.assertTrue(done[-1].startswith(u"Made a new font with <b>2 masters</b> (Regular and Bold)"), done)
         self.assertIn(("info", u"Axes: Weight (Regular 400, Bold 700)."), self.said)
 
+    def test_cancel_is_usable_while_it_compares_not_while_it_assembles(self):
+        """The owner, 2026-11-24: a Cancel left of Close (test_the_rows_in_order), grayed but while work that can
+        stop runs (ak.cancel_button), as Esc stops it; its help says what a stop leaves."""
+        import qtfakes
+        dialog = self.compared()
+        self.assertFalse(dialog.cancel_button.enabled, "grayed while nothing runs")
+        self.assertEqual(dialog.cancel_button.whats, self.ak.CANCEL_HELP + u" A comparison stopped changes no font: the "
+                                                                           u"tabs show the one before it.")
+        seen = qtfakes.follow_cancel(self, self.ak)
+        audit = dialog.audit
+
+        def stopping(owner, what=None, part=None, force=False, stoppable=True):
+            if stoppable:
+                raise self.ak.Stopped()  # (as a click on Cancel makes it)
+        self.ak.busy_progress = stopping
+        dialog.compare()
+        self.assertEqual(seen, [(fa.READ_STEP, True, True), (None, None, False)], "usable while it compares")
+        self.assertEqual(self.said[-1], ("warning", u"The comparison was stopped: the tabs show the one before it."))
+        self.assertIs(dialog.audit, audit)
+        del seen[:]
+        dialog.calls = FakeCalls()
+        dialog.assemble()
+        self.assertEqual(seen, [(fa.READ_STEP, False, False), (None, None, False)], "grayed while it assembles")
+        self.assertIs(dialog.made_fonts[-1], dialog.calls.package, "made whole, whatever was clicked")
+
     def test_an_unfinished_font_is_said_never_closed(self):
         dialog = self.compared()
         dialog.calls = FakeCalls(keep_masters=False)
@@ -1358,6 +1410,28 @@ class DialogTests(unittest.TestCase):
         dialog.open_paths([path])
         self.assertEqual(asked, [], "its copy open already: ticked, not opened again")
         self.assertIn(u"is open already: ticked", self.said[-1][1])
+
+
+class TextReviewTests(unittest.TestCase):
+    """The interface-text review of November 24: Assemble's help says each thing once, plainly."""
+
+    def test_assembles_help_and_the_window_help(self):
+        with io.open(os.path.join(os.path.dirname(os.path.abspath(fa.__file__)), "freelab_family_audit.py"),
+                     encoding="utf-8") as handle:
+            source = handle.read()
+        assemble = source.split(u"self.assemble_button.setWhatsThis(")[1].split(u")\n")[0]
+        self.assertIn(u"Makes a new font", assemble)
+        self.assertNotIn(u"NEW", assemble)
+        self.assertNotIn(u"promise", assemble, "said by the Compatibility list and the log")
+        self.assertEqual(assemble.count(u"without saving"), 1)
+        self.assertNotIn(u"not saved", assemble)
+        self.assertIn(u"each master's kerning and line metrics", fa.HELP, "as Assemble copies them (MASTER_METRICS)")
+        self.assertTrue(fa.MASTER_METRICS)
+        # (the review of 2026-11-24: a font of another family is opened unticked, and both helps say so)
+        self.assertIn(u"another family is left unticked", u" ".join(fa.HELP.split()))
+        add = source.split(u"self.add_button.setWhatsThis(")[1].split(u")\n")[0]
+        self.assertIn(u"a font of another family is left unticked", add)
+        self.assertIn(u"of another family (%s): left unticked", source)
 
 
 if __name__ == "__main__":

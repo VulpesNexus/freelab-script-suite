@@ -42,6 +42,8 @@ READ_A_STEP, READ_B_STEP, GLYPHS_STEP, KERNING_STEP, FEATURES_STEP, LIST_STEP = 
 COMPARE_STEPS = ((READ_A_STEP, 0.04), (READ_B_STEP, 0.08), (GLYPHS_STEP, 0.85), (KERNING_STEP, 0.95),
                  (FEATURES_STEP, 0.98), (LIST_STEP, 1.0))
 SHOW_AFTER = 0.3  # seconds: a comparison shows the bar only once it has taken this long (a small font never flickers)
+# The Cancel button's own line (ak.cancel_button): what a stop leaves (compare: the comparison before it kept)
+CANCEL_NOTE = u"A comparison stopped changes neither font: the lists show the one before it."
 OPEN_SETTLE_MS = 400  # a font just opened: FontLab activates its window as it lists it; this window comes back after
 OPEN_LATE_MS = 1500  # ... and once more this long after the comparison
 DIFF_CONTEXT = 3  # unchanged lines shown around each change of a feature's code
@@ -1296,11 +1298,12 @@ file. A font picked there, opened from there, or opened from the fonts installed
 it, is compared at once, and stays the font chosen in <i>with</i> for the rest of the FontLab session (in
 the <i>Font Compare</i> windows opened after too) until another is chosen; <i>Compare</i> compares
 again. A long comparison shows how far it is in the window's top row; the tools
-menu, the arrows, <i>Close</i>, and Esc stop it (the lists keep the comparison before it).
+menu, the arrows, <i>Close</i>, and <i>Esc</i> stop it (the lists keep the comparison before it).
 Differences of at most the units set are left out (metrics, anchors, nodes, components, kerning).
 A font of another em is scaled to the first one's.<br><br>
 <i>Glyphs</i>: a chip per kind of difference, each showing or hiding that kind in the list (a glyph
-with none of the kinds shown is left out; the glyphs only in one font are hidden to start with); the
+with none of the kinds shown is left out; the glyphs only in one font are hidden to start with, unless
+nothing else differs); the
 glyphs that differ, the worst first by the kinds
 shown, both drawn small; the selected glyph from both fonts, the first in the text
 color and the second in the highlight color, overlaid in the middle, its differences in one sentence
@@ -1308,11 +1311,12 @@ under it. How much two outlines differ is the area where one has ink and the oth
 the ink: a node moved shows.<br>
 <i>Kerning</i>: the glyph pairs kerned differently, classes resolved as FontLab applies them, the
 largest difference first, and the selected pair drawn in both. The pairs both fonts kern, with
-differing values, are shown to start with; a chip shows the others.<br>
+differing values, are shown to start with (the other kinds when there are none); a chip shows the others.<br>
 <i>Features</i>: the features only in one font, and the lines of code that differ, removed in red and
 added in green.<br><br>
 Right-click a glyph or a pair to flag it in the first font. Compared again after an undo or an edit
-in either font. Click this help's <i>?</i> button, then any control, for what it does."""
+in either font.<br><br>
+Click this help's button, then anything in the window, for what it does (or right-click it: <i>What's This?</i>)."""
 
 CHIP_SHEET = (u"QToolButton { background: transparent; color: rgba(128, 128, 128, 255); "
               u"border: 1px solid rgba(128, 128, 128, 110); border-radius: 10px; padding: 2px 10px; } "
@@ -1657,8 +1661,10 @@ class CompareDialog(object):
         # of the other font (or of a font not current) would show in the wrong one
         buttons = QtGui.QHBoxLayout()
         self.close_button = QtGui.QPushButton("Close")
+        self.close_button.setWhatsThis(u"Closes the window, and stops a comparison under way.")
         buttons.addStretch(1)
         buttons.addWidget(self.close_button)
+        ak.cancel_button(self, buttons, self.close_button, CANCEL_NOTE)  # (right before Close)
         layout.addLayout(buttons)
         self.close_button.connect("clicked()", self.ak.close_slot(self))  # (never the window itself: see let_go)
         # What chooses the fonts stays usable with no comparison to make (ak.no_font_states grays the rest
@@ -2761,7 +2767,9 @@ class CompareDialog(object):
                                            [Difference(kind, text, text)]))
         self.sides, self.masters_mode, self.results = (first, second), same, results
         if unread:
-            self.log.add(u"Could not read %s: %s." % (b_(counted(len(unread), u"glyph")), ak.html(u", ".join(unread[:20]))
+            # (each the first font's glyph, this window's: its name in italics, a link that opens it)
+            self.log.add(u"Could not read %s: %s." % (b_(counted(len(unread), u"glyph")),
+                                                     ak.glyph_names_linked(unread[:20], word=None)
                                                      + (u"\N{HORIZONTAL ELLIPSIS}" if len(unread) > 20 else u"")), "warning")
             unread = []
 

@@ -18,9 +18,15 @@ import sys
 
 DARK_MODE_MODULE = "freelab_dark_mode"
 DARK_MODE_FILE = "freelab_dark_mode.py"
-THEMES = (("dark", "Dark"), ("automatic", "Automatic (matches system theme)"))
+THEMES = (("dark", "Dark"), ("automatic", "Automatic (follows Windows)"))
 MIXED = "Mixed (dark interface, light canvases)"
 SHADES = (("dark", "Dark grays"), ("medium", "Medium grays"))
+# One tooltip per option, as Tab Docking Settings has (system_light grays the last two: said so)
+AUTOMATIC_TIP = (u"Dark while Windows apps are set to dark, FontLab's own light look while they are light, "
+                 u"switching as Windows does.")
+IDLE_NOTE = u" Grayed under <i>Automatic</i> while Windows is light."
+MIXED_TIP = u"Keeps FontLab's light glyph canvases, font cells, and previews in the dark interface." + IDLE_NOTE
+SHADE_TIP = u"How dark the interface's grays are: dark grays, or medium grays with a lighter palette." + IDLE_NOTE
 SYSTEM_CHECK_MS = 2000  # how often the open dialog looks at Windows' theme
 SCRIPT_WINDOW_PROP = "mcpScriptWindow"  # FreeLab MCP's convention: the dialog is a script's, not FontLab's question
 
@@ -148,15 +154,19 @@ def _run(dialog, watch, slots, dm):
     for key, label in THEMES:
         button = QRadioButton(label)
         button.setChecked(key == theme)
+        if key == "automatic":
+            button.setToolTip(AUTOMATIC_TIP)
         layout.addWidget(button)
         theme_group.addButton(button)
         themes[key] = button
     mixed_box = QCheckBox(MIXED)
+    mixed_box.setToolTip(MIXED_TIP)
     mixed_box.setChecked(mixed)
     layout.addWidget(mixed_box)
     layout.addWidget(QLabel("Shade:"))
     for key, label in SHADES:
         button = QRadioButton(label)
+        button.setToolTip(SHADE_TIP)
         button.setChecked(key == shade)
         layout.addWidget(button)
         shade_group.addButton(button)

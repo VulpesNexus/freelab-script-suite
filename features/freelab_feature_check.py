@@ -1945,6 +1945,9 @@ TITLE = "FreeLab Feature Check"
 APPLY_TEXT = "Apply ticked fixes"  # (with a count once some are ticked: "Apply 3 ticked fixes")
 COMPILE_STEP = "Compiling in FontLab"  # the top row's step while FontLab compiles (owner's image 212)
 READ_STEP = "Reading what FontLab's compiler said"
+# The Cancel button's own line (ak.cancel_button): what a stop leaves (a check's fixes applied automatically are
+# whole writes made before the stop; a compile never stops)
+CANCEL_NOTE = "A check stopped applies no further fix: those applied before it stay in the font."
 COMPILE_WAIT_MS = 4000  # the bar ends by then whatever happens (ak.compiled_note reads the Output panel for ~3.2 s)
 
 HELP = """<b>FreeLab Feature Check</b><br>
@@ -1959,14 +1962,16 @@ Findings are grouped by kind, errors first; select one to see its code under the
 selected. A finding with a fix has a check box: tick the fixes you want, then <i>Apply ticked
 fixes</i> (one step of FontLab's History: <i>Edit &gt; Undo</i> takes it back). Each fix is tried first,
 and its last column says whether the font's layout, compiled with it, stays the same.<br><br>
-<i>Apply safe fixes automatically</i>: at each check, the fixes proven to change nothing in the compiled
+<i>Apply safe fixes automatically</i>: at each check (but one after an undo, a redo, or an edit in FontLab,
+which applies none until you click <i>Check</i>), the fixes proven to change nothing in the compiled
 font (rules written twice, substitutions by the glyph itself, glyphs listed twice in a class, classes and
 lookups never used) are applied at once, and the list shows what is left to review.<br><br>
 The checks use fontTools' compiler, which FontLab ships; FontLab compiles with Adobe's, which differs
 in places: <i>Compile in FontLab</i> compiles there (the window's top row shows it meanwhile) and adds
 what it reports to the log.
 FontLab's automatic code (between its <code>#&gt; feature</code> and <code>#&lt;</code> lines) is checked
-but never fixed: FontLab writes it again on compiling."""
+but never fixed: FontLab writes it again on compiling.<br><br>
+Click this help's button, then anything in the window, for what it does (or right-click it: <i>What's This?</i>)."""
 
 
 def _qt():
@@ -2121,17 +2126,24 @@ class FeatureCheckDialog(object):
         # while a check or a compile runs), the check's result under it, then the header's line
         self.font_label = ak.status_label()
         self.font_label.setWordWrap(True)
+        self.font_label.setWhatsThis("The font this window checks, and how many glyphs it has. While a check or a "
+                                     "compile runs, a bar in its place says what is under way.")
         layout.addWidget(self.font_label)
         self.status = ak.status_label()
         self.status.setWordWrap(True)
+        self.status.setWhatsThis("The last check's result: whether the code compiles, and its errors, warnings, and "
+                                 "pieces of advice counted.")
         layout.addWidget(self.status)
         layout.addWidget(ak.header_separator())
 
         row = QtGui.QHBoxLayout()
         self.auto_box = QtGui.QCheckBox("Apply safe fixes automatically.")
-        self.auto_box.setWhatsThis("At each check, applies the fixes proven to change nothing in the compiled font "
-                                   "(rules written twice, substitutions by the glyph itself, glyphs listed twice in a "
-                                   "class, classes and lookups never used), as one step of FontLab's History; the list "
+        # (run(automatic=False) after the History moves: an undo of an automatic fix must not be redone at once)
+        self.auto_box.setWhatsThis("At each check (but one after an undo, a redo, or an edit in FontLab, which applies "
+                                   "none until you click <i>Check</i>), applies the fixes proven to change nothing in "
+                                   "the compiled font (rules written twice, substitutions by the glyph itself, glyphs "
+                                   "listed twice in a class, classes and lookups never used), as one step of FontLab's "
+                                   "History; the list "
                                    "then shows what is left to review. Off: every finding is listed for you to review.")
         self.settings = read_settings(ak)
         self.auto_box.setChecked(bool(self.settings.get("auto")))
@@ -2168,7 +2180,7 @@ class FeatureCheckDialog(object):
         layout.addWidget(self.log.widget)
 
         # The bottom row, as in every window (owner's image 255): the list's tick buttons at the left; at the
-        # right the compile, then the committing action, then Close
+        # right the compile, then the committing action, then Cancel and Close
         buttons = QtGui.QHBoxLayout()
         self.check_all = QtGui.QPushButton("Tick all")
         self.check_all.setWhatsThis("Ticks every fix in the list.")
@@ -2183,12 +2195,14 @@ class FeatureCheckDialog(object):
         self.apply_button.setWhatsThis("Applies the ticked fixes to the font's feature code, as one step of FontLab's "
                                        "History, then checks the code again.")
         self.close_button = QtGui.QPushButton("Close")
+        self.close_button.setWhatsThis("Closes the window. Fixes applied stay in the font; ticks are not kept.")
         for button in (self.check_all, self.check_none):
             buttons.addWidget(button)
         buttons.addStretch(1)
         buttons.addWidget(self.compile_button)
         buttons.addWidget(self.apply_button)
         buttons.addWidget(self.close_button)
+        ak.cancel_button(self, buttons, self.close_button, CANCEL_NOTE)  # (right before Close)
         layout.addLayout(buttons)
 
         self.package = None
@@ -2494,7 +2508,7 @@ class FeatureCheckDialog(object):
                 status.undo(" <i>Edit &gt; Undo</i> takes %s back." % ("it" if len(fixes) == 1 else "them"))), "done")
         status.report(self.log)
         if error is not None:
-            self.log.add("Stopped by an error: %s" % self.ak.html("%s" % error), "error")
+            self.log.add(self.ak.error_sentence(u"Stopped by an error", error), "error")
         return bool(written)
 
     def compile_in_fontlab(self):

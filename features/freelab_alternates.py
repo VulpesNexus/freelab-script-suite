@@ -748,7 +748,8 @@ class AlternatesPage(object):
         what = (u"How far each change may go: <i>Subtle</i> (within 0.8\N{DEGREE SIGN} of rotation, 2% of scale, "
                 u"1\N{DEGREE SIGN} of slant, 0.5% of the em of baseline), <i>Moderate</i> (1.5\N{DEGREE SIGN}, 4%, "
                 u"2\N{DEGREE SIGN}, 1%), or <i>Bold</i> (3\N{DEGREE SIGN}, 7%, 4\N{DEGREE SIGN}, 2%), to experiment "
-                u"with. Changed after a build, the variants built here are built again in place.")
+                u"with. Changed after a build, the next <i>Build variants</i> builds the variants built here again "
+                u"in place.")
         settings.addWidget(label_of(QtGui, u"Strength:", what))
         self.strength_box = QtGui.QComboBox()
         for _, label, rotation, scale, slant, rise in STRENGTHS:
@@ -758,8 +759,8 @@ class AlternatesPage(object):
         settings.addWidget(self.strength_box)
         what = (u"The number the variants' changes are drawn from: the same seed, strength, and glyph make the same "
                 u"variant again; another seed, other variants. The preview at the right shows them before a build. "
-                u"Changed after a build, the variants built here are built again in place, as one step of FontLab's "
-                u"History.")
+                u"Changed after a build, the next <i>Build variants</i> builds the variants built here again in "
+                u"place.")
         settings.addWidget(label_of(QtGui, u"Seed:", what))
         self.seed_box = QtGui.QSpinBox()
         self.seed_box.setRange(1, 9999)
@@ -772,7 +773,12 @@ class AlternatesPage(object):
         self.baseline_box = QtGui.QSpinBox()
         self.baseline_box.setRange(0, BASELINE_MOST)
         self.baseline_box.setValue(0)
-        self.baseline_box.setSuffix(u" units")
+        # ("1 unit", "2 units": a fixed " units" read "1 units"; as Font Compare's threshold)
+        counted_suffix = getattr(self.ak, "counted_suffix", None)
+        if counted_suffix is not None:
+            self.suffix_slot = counted_suffix(self.baseline_box, u"unit")
+        else:
+            self.baseline_box.setSuffix(u" units")
         self.baseline_box.setWhatsThis(what)
         settings.addWidget(self.baseline_box)
         self.designs_box = QtGui.QCheckBox(DESIGNS_LABEL)
@@ -1434,7 +1440,7 @@ class AlternatesPage(object):
                                "done")
         status.report(self.owner.log)
         if error is not None:
-            self.owner.log.add(u"Stopped by an error: %s" % self.ak.html(error), "error")
+            self.owner.log.add(self.ak.error_sentence(u"Stopped by an error", error), "error")
         self.owner.run()
 
     def takes_turns(self, ch):
@@ -1570,7 +1576,7 @@ class AlternatesPage(object):
             self.owner.log.add(u"%s the font has already, left as %s." % (
                 self.ak.b(self.ak.counted(kept, u"variant")), u"it is" if kept == 1 else u"they are"), "warning")
         if error is not None:
-            self.owner.log.add(u"Stopped by an error: %s" % self.ak.html(error), "error")
+            self.owner.log.add(self.ak.error_sentence(u"Stopped by an error", error), "error")
         self.owner.run()
 
     def record(self, package, names, settings):

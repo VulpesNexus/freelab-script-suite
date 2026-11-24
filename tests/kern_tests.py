@@ -20,6 +20,7 @@ os.environ["FREELAB_NO_AUTOSTART"] = "1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, os.pardir, "kerning"))
 import freelab_auto_kerning as ak  # noqa: E402
+import qtfakes  # noqa: E402  (beside this file: the Cancel button's fakes, shared by every tool's tests)
 
 try:
     CORE = ak.Core()
@@ -438,6 +439,30 @@ class ContourTests(unittest.TestCase):
 
 
 class ClassSuggestionTests(unittest.TestCase):
+    def test_the_classes_window_records_the_font_before_it_writes(self):
+        """Kerning Classes said "close it without saving to take it back". Tried live, 2026-11-24: one Edit >
+        Undo takes a created class back. Both of its writes begin with the History step Auto Kerning's own
+        write begins with, and say Undo takes them back when FontLab recorded the step."""
+        import inspect
+        window = [value for value in vars(ak).values()
+                  if inspect.isclass(value) and hasattr(value, "begin_classes_write")][0]
+        for method in (window.apply, window.write_exceptions):
+            source = inspect.getsource(method)
+            self.assertLess(source.index("self.begin_classes_write(package)"), source.index("FontKerning("))
+            self.assertIn("if status.recorded:", source)
+            self.assertNotIn("without saving", source)
+        self.assertIn(u"Edit &gt; Undo", ak.TAKE_BACK_NOTE)
+        calls = []
+        saved = ak.begin_write
+        ak.begin_write = lambda fontlab, package, title, log: calls.append(title) or False
+        self.addCleanup(setattr, ak, "begin_write", saved)
+        texts = []
+        status = type("S", (), {"text": u"old", "setText": lambda self, text: texts.append(text)})()
+        fake = type("W", (), {"owner": type("O", (), {"fontlab": None})(), "status": status})()
+        self.assertFalse(window.__dict__["begin_classes_write"](fake, "font"))
+        self.assertEqual(calls, [u"FreeLab Auto Kerning"])
+        self.assertTrue(texts[0].startswith(u"Nothing was changed"), texts)
+
     def test_signatures_match_within_the_tolerance(self):
         one = [0.0, -0.05, 0.02, None]
         self.assertTrue(ak.signatures_match(one, [0.01, -0.05, 0.03, 0.2]))
@@ -4006,6 +4031,13 @@ class HelperModuleTests(unittest.TestCase):
                          "the .py first (the repository's layout, and the tests')")
 
 
+class Stub(object):
+    """An object with the attributes given (a tool, a widget, a glyph: what the code reads of it)."""
+
+    def __init__(self, **values):
+        self.__dict__.update(values)
+
+
 class LogGlyphTests(unittest.TestCase):
     """A log's glyphs: drawn as the font draws them, and opened in a Glyph window when clicked."""
 
@@ -4027,6 +4059,7 @@ class LogGlyphTests(unittest.TestCase):
 
     def log(self, font):
         log = ak.Log.__new__(ak.Log)  # (no Qt here: the parts that need none)
+        log.view = None
         log.link_handler, log.line, log.lines = None, 16, []
         log.source = lambda: ("fontlab", font, "Regular")
         log.add = lambda text, level="info": log.lines.append((level, text))
@@ -4095,6 +4128,96 @@ class LogGlyphTests(unittest.TestCase):
         log.link_clicked(u"glyphname:B")
         self.assertEqual(taken, [u"glyphname:A", u"glyphname:B"])
         self.assertEqual(opened, [u"/B"], "False: left to the log")
+
+    ODD_NAMES = [u"a.alt1", u"f_f_i", u"uni0E01", u"caroncomb.alt", u"a-b~2", u'q"uote', u"a&b", u"x<y>", u"sp ace",
+                 u"frag#1", u"what?", u"pct%41", u"e\N{COMBINING ACUTE ACCENT}.ss01", u"\N{HIRAGANA LETTER A}", u"a/b:c"]
+
+    def test_a_glyph_named_in_a_line_is_an_italic_link_to_it(self):
+        # The owner's request of 2026-11-24, on Glyph Compose's "Made dotlessi from i without its dot"
+        self.assertEqual(ak.glyph_name_link(u"dotlessi"), u'<a href="glyphname:dotlessi"><i>dotlessi</i></a>')
+        self.assertEqual(ak.glyph_name_link(u"f_f_i.alt1-2"), u'<a href="glyphname:f_f_i.alt1-2"><i>f_f_i.alt1-2</i></a>',
+                         "a name's usual characters kept readable in the target")
+        self.assertEqual(ak.glyph_name_link(u"x<y>&z"), u'<a href="glyphname:x%3Cy%3E%26z"><i>x&lt;y&gt;&amp;z</i></a>')
+        for name in self.ODD_NAMES:
+            link = ak.glyph_name_link(name)
+            target = re.match(u'<a href="([^"]*)"><i>(.*)</i></a>$', link)
+            self.assertIsNotNone(target, link)
+            self.assertFalse(re.search(u"[\\s\"<>&#?]", target.group(1)), link)
+            self.assertTrue(all(ord(ch) < 0x80 for ch in target.group(1)), "a target of ASCII alone: %s" % link)
+            self.assertEqual(ak.linked_glyph_name(target.group(1)), name, "read back whole")
+            self.assertNotIn(u"<", target.group(2))
+        # QUrl may hand some characters back decoded: they read the same
+        self.assertEqual(ak.linked_glyph_name(u"glyphname:sp ace"), u"sp ace")
+        self.assertEqual(ak.linked_glyph_name(u"glyphname:e\N{COMBINING ACUTE ACCENT}.ss01"), u"e\N{COMBINING ACUTE ACCENT}.ss01")
+        self.assertEqual(ak.linked_glyph_name(u"glyphname:pct%2541"), u"pct%41", "decoded once, not twice")
+        self.assertEqual(ak.linked_glyph_name(u"glyphname:50%"), u"50%", "a stray % stays")
+
+    def test_a_named_glyph_is_opened_on_a_click_and_never_drawn(self):
+        opened = []
+        self.patch("show_in_glyph_window", lambda fontlab, text: opened.append(text) and None)
+        self.patch("glyph_picture", lambda *args: (u"UE5H", 12, 24))
+        log = self.log(self.Font(set(self.ODD_NAMES), {}))
+        for name in self.ODD_NAMES:
+            log.link_clicked(re.search(u'href="([^"]*)"', ak.glyph_name_link(name)).group(1))
+        self.assertEqual(opened, [u"/%s" % name for name in self.ODD_NAMES], "each by its own name")
+        line = u"Made %s from %s." % (ak.glyph_name_link(u"a.alt1"), ak.glyph_name_link(u"f_f_i"))
+        self.assertEqual(log.pictured(line, (0, 0, 0)), line, "a name stays a name: only glyph_name_links are drawn")
+        self.assertIn(u"<img ", log.pictured(ak.glyph_name_links([u"a.alt1"]), (0, 0, 0)))
+
+    def test_a_named_glyph_gone_does_nothing_but_say_so(self):
+        opened = []
+        self.patch("show_in_glyph_window", lambda fontlab, text: opened.append(text) and None)
+        log = self.log(self.Font({"i"}, {}))
+        log.link_clicked(re.search(u'href="([^"]*)"', ak.glyph_name_link(u"dotlessi")).group(1))
+        self.assertEqual(opened, [])
+        self.assertEqual(log.lines, [("warning", u"The font does not have that glyph now.")])
+
+    def test_a_log_that_follows_no_font_opens_its_window_tools_font(self):
+        # Font Check, Kerning Check, and the other windows whose lines are never drawn: the tool's own font
+        opened = []
+        self.patch("show_in_glyph_window", lambda fontlab, text: opened.append((fontlab, text)) and None)
+        log = self.log(self.Font({"a.alt1"}, {}))
+        log.source = None
+        log.view = Stub(window=lambda: "the window")
+        tool = Stub(fontlab="fontlab", package=self.Font({"a.alt1"}, {}))
+        self.patch("window_owner", lambda widget: tool if widget == "the window" else None)
+        log.link_clicked(u"glyphname:a.alt1")
+        self.assertEqual(opened, [("fontlab", u"/a.alt1")])
+        log.link_clicked(u"glyphname:gone")
+        self.assertEqual((len(opened), log.lines), (1, [("warning", u"The font does not have that glyph now.")]))
+        self.patch("window_owner", lambda widget: None)
+        log.link_clicked(u"glyphname:a.alt1")  # (a window no tool holds: nothing)
+        log.link_clicked(u"https://example.org")
+        self.assertEqual((len(opened), len(log.lines)), (1, 1))
+
+    def test_a_list_of_names_takes_the_serial_comma_and_its_cut(self):
+        link = ak.glyph_name_link
+        self.assertEqual(ak.glyph_names_linked([u"a"]), link(u"a"))
+        self.assertEqual(ak.glyph_names_linked([u"a", u"b"]), u"%s and %s" % (link(u"a"), link(u"b")))
+        self.assertEqual(ak.glyph_names_linked([u"a", u"", u"b", u"c"]), u"%s, %s, and %s" % (link(u"a"), link(u"b"), link(u"c")))
+        self.assertEqual(ak.glyph_names_linked([u"a", u"b"], word=None), u"%s, %s" % (link(u"a"), link(u"b")))
+        self.assertEqual(ak.glyph_names_linked([u"a", u"b", u"c"], word=u"or"), u"%s, %s, or %s" % (link(u"a"), link(u"b"), link(u"c")))
+        many = [u"g%d" % index for index in range(1203)]
+        cut = ak.glyph_names_linked(many, 3)
+        self.assertEqual(cut, u"%s, %s, %s, and 1,200 more" % (link(u"g0"), link(u"g1"), link(u"g2")))
+        self.assertEqual(ak.glyph_names_linked(many, 3, word=None), cut, "a cut list ends with and")
+        self.assertEqual(ak.glyph_names_linked(many[:3], 3), u"%s, %s, and %s" % (link(u"g0"), link(u"g1"), link(u"g2")))
+
+    def test_flagging_names_its_glyphs_as_links(self):
+        logged = []
+        self.patch("begin_write", lambda *args, **kwargs: True)
+        self.patch("notify_changed", lambda *args, **kwargs: Stub(report=lambda log: True))
+        self.patch("history_mark", lambda package: None)
+        glyphs = dict((name, Stub(name=name, isNull=False, mark=0)) for name in [u"a.alt1"] + [u"g%d" % n for n in range(50)])
+        owner = Stub(package=Stub(findName=glyphs.get), fontlab="fontlab", flagging=None,
+                     log=Stub(add=lambda text, level="info": logged.append((level, text))))
+        ak.flag_glyphs(owner, [u"a.alt1", u"g0"], u"Red", 1)
+        self.assertEqual(logged[-1], ("done", u"Flagged %s, %s red in FontLab (<i>Select &gt; Same Flag</i> gathers them "
+                                              u"again; <i>F3</i> goes to the next flagged row here)." % (
+                                                  ak.glyph_name_link(u"a.alt1"), ak.glyph_name_link(u"g0"))))
+        ak.flag_glyphs(owner, [u"g%d" % n for n in range(50)], u"Red", 0)
+        self.assertEqual(logged[-1][1].count(u"<a href="), ak.LOG_NAMES_LINKED, "a row of a group: the rest counted")
+        self.assertTrue(logged[-1][1].endswith(u", and 10 more."), logged[-1][1])
 
 
 class SingleChoiceTests(unittest.TestCase):
@@ -5366,15 +5489,11 @@ class KerningCheckTableTests(unittest.TestCase):
             def setVisible(self, on):
                 self.visible = on
 
-        class Row(object):
-            def __init__(self):
-                self.order = []
-
-            def addWidget(self, widget):
-                self.order.append(widget.name)
-
-            def addStretch(self, factor):
-                self.order.append("|")
+        class Row(qtfakes.CancelRow):
+            @property
+            def order(self):
+                return ["|" if widget is None else widget.name if hasattr(widget, "name") else widget.text
+                        for widget in self.items]
 
         class Tab(object):
             def __init__(self, key, action=True):
@@ -5383,12 +5502,17 @@ class KerningCheckTableTests(unittest.TestCase):
                                                                  Button(key + " restore"))
 
         dialog = kc.KerningCheckDialog.__new__(kc.KerningCheckDialog)
+        dialog.ak = ak
         dialog.collisions, dialog.cleanup, dialog.masters = Tab("collisions"), Tab("cleanup"), Tab("masters", False)
         dialog.glyph_window_button, dialog.close_button = Button("glyph window"), Button("close")
+        real = ak._qt
+        ak._qt = lambda: (None, type("QtGui", (object,), {"QPushButton": staticmethod(qtfakes.CancelButton)}))
+        self.addCleanup(setattr, ak, "_qt", real)
         row = dialog.bottom_row(type("QtGui", (), {"QHBoxLayout": Row}))
         self.assertEqual(row.order, ["collisions all", "collisions none", "collisions restore", "cleanup all",
                                      "cleanup none", "cleanup restore", "glyph window", "|", "collisions action",
-                                     "cleanup action", "close"], "checks at the left, the action then Close at the right")
+                                     "cleanup action", "Cancel", "close"],
+                         "checks at the left, the action, Cancel, then Close at the right")
         shown = lambda: sorted(b.name for tab in (dialog.collisions, dialog.cleanup) for b in
                                (tab.check_all, tab.check_none, tab.restore, tab.action) if b.visible)
         self.assertEqual(shown(), ["collisions action", "collisions all", "collisions none", "collisions restore"])
@@ -5974,7 +6098,8 @@ class AutoKerningListTests(unittest.TestCase):
                 return stored
 
         d.package, d.analysis = Package(), ak.Analysis([av, to], {}, (None, None))
-        d.after_writing = lambda package: type("Status", (), {"report": lambda status, log: None})()
+        d.after_writing = lambda package: type("Status", (), {"report": lambda status, log: None,
+                                                              "undo": lambda status, text: text})()
         d.begin_kerning_write = lambda: True
         d.refresh_kerning()
         d.fill_table()
@@ -5983,6 +6108,8 @@ class AutoKerningListTests(unittest.TestCase):
         d.write()
         self.assertEqual(stored.stored, {(("A", False), ("V", False)): -70, (("T", False), ("o", False)): -80})
         self.assertIn(u"Wrote <b>2 entries</b> for <b>2 pairs</b> to master <b>Regular</b>", d.logged[-1][1])
+        self.assertTrue(d.logged[-1][1].endswith(u" (<i>Edit &gt; Undo</i> takes them back)."),
+                        "the write is a History step: the log says Undo takes it back")
         self.assertEqual([item.state for item in d.tree.items], [self.Qt.Checked] * 2, "its checks stay")
         self.assertFalse(enabled(), "nothing new to write: grayed out")
         d.write()
@@ -6950,6 +7077,50 @@ class ReviewOfNov19Tests(unittest.TestCase):
 class ReviewOfNov23Tests(unittest.TestCase):
     """The owner's review of November 23 (thirteen images): the shared module's part."""
 
+    def test_the_help_menu_is_fontlabs_main_windows(self):
+        """Image 25: "What's This?" came out without a standard menu's margin and padding. A menu takes its
+        look from its parent: FontLab's main window, not the tool's; made for the click, deleted after it."""
+        made = []
+
+        class Menu(object):
+            def __init__(self, parent):
+                self.parent, self.deleted, self.pick = parent, False, True
+                made.append(self)
+
+            def addAction(self, text):
+                self.action = type("Action", (), {"text": text})()
+                return self.action
+
+            def exec_(self, where):
+                return self.action if self.pick else None
+
+            def deleteLater(self):
+                self.deleted = True
+
+        saved = (ak._qt, ak.AutoKerningDialog.main_window)
+        ak._qt = lambda: (None, type("Gui", (), {"QMenu": Menu}))
+        ak.AutoKerningDialog.main_window = staticmethod(lambda: "main window")
+
+        def restore():
+            ak._qt, ak.AutoKerningDialog.main_window = saved[0], staticmethod(saved[1])
+        self.addCleanup(restore)
+        self.assertTrue(ak.help_menu_picked("tool window", "here"))
+        self.assertEqual((made[0].parent, made[0].deleted, made[0].action.text), ("main window", True, u"What's This?"))
+        ak.AutoKerningDialog.main_window = staticmethod(lambda: None)
+        self.assertTrue(ak._whats_this_menu("tool window", "here"))
+        self.assertEqual(made[1].parent, "tool window", "no main window found: the tool's, as before")
+
+    def test_the_help_menu_has_a_tooltips_frame(self):
+        """Images 25 and 31: a menu of one entry has no use for a menu's margin; a tooltip's frame instead."""
+        dark = ak.help_menu_sheet(u"#3c3c40", u"#e0e0e0", u"#3a6ea5", u"#ffffff")
+        self.assertIn(u"background-color: #3c3c40; color: #e0e0e0; border: 1px solid #e0e0e0", dark)
+        self.assertIn(u"QMenu::item:selected { background-color: #3a6ea5; color: #ffffff; }", dark)
+        self.assertIn(u"QMenu::item { background-color: transparent; padding: 3px 8px; }", dark)
+        # (dark mode mapped the light frame to a dark one once the menu was up: marked first, November 24)
+        import inspect
+        source = inspect.getsource(ak.help_menu_picked)
+        self.assertLess(source.index("menu.setProperty(LEAVE_ALONE_PROP, True)"), source.index("menu.setStyleSheet("))
+
     def test_italics_get_a_hair_of_room_after_them(self):
         """Image 8: "Condense.otf in" read as "otfin". The interface font's italic is the upright one slanted,
         each letter reaching one or two pixels past its width (measured live); a small no-break space follows
@@ -7367,7 +7538,7 @@ class McpConventionTests(unittest.TestCase):
                     continue
                 with io.open(os.path.join(folder, file_name), encoding="utf-8") as handle:
                     source = handle.read()
-                if "getSaveFileName(" in source and "darkmode" not in name:
+                if ("getSaveFileName(" in source or "save_file_name(" in source) and "darkmode" not in name:
                     self.assertIn("mark_risky(", source, "%s/%s writes a file the user names" % (name, file_name))
                 # every message box FreeLab shows says it is FreeLab's own
                 for match in re.finditer(r"QMessageBox\((self\.dialog|[a-z_.]+)\)", source):
@@ -7382,6 +7553,526 @@ class McpConventionTests(unittest.TestCase):
         button = self.Widget("QPushButton")
         self.assertIs(ak.mark_risky(button), button)
         self.assertIs(button.props["mcpRisky"], True)
+
+
+class SaveFileNameTests(unittest.TestCase):
+    """Windows' own "Confirm Save As" box stays light in dark mode (owner's report, 2026-11-24): the save dialog
+    is asked not to confirm replacing a file, so the tool asks in its own box; where this PythonQt takes no
+    options, the plain call as before, and Windows' box asked of the name typed."""
+
+    def dialog_class(self, refuse=(), named=True, broken=False):
+        calls = []
+
+        class Dialog(object):
+            DontConfirmOverwrite = "the enum's value"
+
+            @staticmethod
+            def getSaveFileName(*args):
+                calls.append(args)
+                if broken:
+                    raise RuntimeError("no dialog")
+                if len(args) > 4 and (args[4] in refuse or "all" in refuse):
+                    raise ValueError("Could not find matching overload for given arguments")
+                return "C:/Temp/Hand.svg"
+        if not named:
+            del Dialog.DontConfirmOverwrite
+
+        class Gui(object):
+            QFileDialog = Dialog
+        return Gui, calls
+
+    def test_the_options_asked_where_this_pythonqt_takes_them(self):
+        gui, calls = self.dialog_class()
+        self.assertEqual(ak.save_file_name(gui, "parent", "Save", "C:/Temp/x.svg", "SVG (*.svg)"),
+                         ("C:/Temp/Hand.svg", False), "Windows asked nothing: the tool asks")
+        self.assertEqual(calls, [("parent", "Save", "C:/Temp/x.svg", "SVG (*.svg)", None, "the enum's value")])
+        gui, calls = self.dialog_class(refuse=(None,))
+        self.assertEqual(ak.save_file_name(gui, "parent", "Save", "C:/Temp/x.svg", "SVG (*.svg)")[1], False)
+        self.assertEqual([call[4] for call in calls], [None, u""], "the filter as an empty string next")
+        gui, calls = self.dialog_class(named=False)
+        ak.save_file_name(gui, None, "Save", "", "")
+        self.assertEqual(calls[0][5], ak.DONT_CONFIRM_OVERWRITE)
+        self.assertEqual(ak.DONT_CONFIRM_OVERWRITE, 0x4, "QFileDialog::DontConfirmOverwrite")
+
+    def test_the_plain_call_as_before_where_it_takes_none(self):
+        gui, calls = self.dialog_class(refuse=("all",))
+        self.assertEqual(ak.save_file_name(gui, "parent", "Save", "C:/Temp/x.svg", "SVG (*.svg)"),
+                         ("C:/Temp/Hand.svg", True), "Windows' own box asked of the name typed")
+        self.assertEqual(calls[-1], ("parent", "Save", "C:/Temp/x.svg", "SVG (*.svg)"))
+        self.assertEqual(len(calls), 3)
+        gui, calls = self.dialog_class(broken=True)
+        self.assertEqual(ak.save_file_name(gui, "parent", "Save", "", ""), (u"", True), "never raises")
+        self.assertEqual(len(calls), 2, "another error: the plain call, once")
+
+
+class TextReviewTests(unittest.TestCase):
+    """The interface-text review of November 24: each help names what the window really does, with "tick" for
+    check boxes, and each count with its noun."""
+
+    def source(self, module):
+        path = module.__file__[:-1] if module.__file__.endswith(".pyc") else module.__file__
+        with io.open(path, encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_auto_kerning_help_ticks_and_says_each_key_once(self):
+        for words in (u"writes only the pairs you tick", u"Tick the pairs to write;\npairs the font kerns already start "
+                      u"unticked", u"puts every tick and pick back", u"<i>Space</i> ticks or\nunticks the pair.<br>"):
+            self.assertIn(words, ak.HELP)
+        self.assertNotIn(u"uncheck", ak.HELP)
+        keys = ak.HELP.split(u"<b>Keys in the list</b>")[1].split(u"<br>")[0]
+        self.assertNotIn(u"Ctrl", keys, "said in the paragraph above")
+        self.assertNotIn(u"Backspace", keys, "said in the paragraph above")
+        self.assertIn(u"<i>Write ticked\npairs</i>", ak.CLASS_HELP, "the button's own name")
+
+    def test_auto_kerning_controls_have_their_help(self):
+        source = self.source(ak)
+        main = source.split(u"class AutoKerningDialog")[1].split(u"\n    def ")[1]  # (its __init__)
+        self.assertIn(u'self.none_button.setWhatsThis("Unticks every listed pair.")', main)
+        self.assertIn(u"Spread: how far apart the methods' values lie", main)
+        order = main.split(u"self.order.setWhatsThis(")[1].split(u")\n")[0]
+        for words in (u"largest change", u"agreement first (the smallest Spread)", u"most common", u"alphabetical"):
+            self.assertIn(words, order)
+        self.assertNotIn(u"between H's, n's", main)
+        self.assertIn(u"between its script's \"\n", main)
+        self.assertNotIn(u"two H's", main)
+        self.assertNotIn(u"this H's pair", main)
+        self.assertEqual(ak.spread([-80, -60, None, -70]), 20, "how far the methods' values lie apart")
+        classes = source.split(u"class ClassDialog")[1].split(u"\n    def show")[0]
+        for button, words in ((u"all_button", u"Ticks every row of the list."),
+                              (u"none_button", u"Unticks every row of the list."),
+                              (u"apply_button", u"Makes the ticked new classes")):
+            self.assertIn(u'self.%s.setWhatsThis(u"%s' % (button, words), classes)
+        self.assertNotIn(u"here are this one's", source)
+
+    def test_delete_resets_a_pick_as_backspace_does_and_the_help_says_so(self):
+        # (the review of 2026-11-24: Delete was bound to reset with Backspace, and no help said it)
+        source = self.source(ak)
+        self.assertIn(u'("Delete", self.reset)', source)
+        self.assertIn(u"<i>Backspace</i>, <i>Delete</i>, or <i>Reset pair</i>", u" ".join(ak.HELP.split()))
+        self.assertIn(u"<i>Backspace</i> or <i>Delete</i> gives", source)
+
+    def test_error_sentences_end_with_one_period(self):
+        # (the review of 2026-11-24: "Stopped by an error: ..." had no period, and the log adds none)
+        self.assertEqual(ak.error_sentence(u"Stopped by an error", ValueError(u"no master")),
+                         u"Stopped by an error: no master.")
+        self.assertEqual(ak.error_sentence(u"FontLab did not open the glyph", u"It failed."),
+                         u"FontLab did not open the glyph: It failed.", "never two periods")
+        self.assertEqual(ak.error_sentence(u"Stopped by an error", u"a < b "), u"Stopped by an error: a &lt; b.")
+        self.assertEqual(ak.error_sentence(u"Stopped by an error", u""), u"Stopped by an error.")
+        for module in (ak, kc):
+            source = self.source(module)
+            self.assertNotIn(u"Stopped by an error: %s", source)
+            self.assertNotIn(u"did not open the pair: %s", source)
+            self.assertNotIn(u"did not open: %s", source)
+        for path in ("builder/freelab_font_builder.py", "cjk/freelab_cjk_spacing.py", "cjk/freelab_cjk_vertical.py",
+                     "compose/freelab_glyph_compose.py", "compose/freelab_glyph_generation.py",
+                     "features/freelab_alternates.py", "features/freelab_feature_check.py",
+                     "features/freelab_feature_code.py", "spacing/freelab_auto_spacing.py",
+                     "checks/freelab_font_check.py"):
+            with io.open(os.path.join(HERE, os.pardir, *path.split("/")), encoding="utf-8") as handle:
+                source = handle.read()
+            for sentence in (u"Stopped by an error: %s", u"did not open the glyph: %s", u"did not open: %s"):
+                self.assertNotIn(sentence, source, path)
+
+    def test_the_busy_bar_help_says_a_write_is_never_stopped(self):
+        # (shared by reads and writes; busy_progress never stops a write: stoppable=False)
+        self.assertIn(u"A write to the font is never stopped", ak.BUSY_HELP)
+        self.assertIn(u"<i>Cancel</i> (where the window has it) and <i>Esc</i> stop it at its next step", ak.BUSY_HELP)
+        self.assertIn(u"tip = BUSY_HELP", self.source(ak))
+
+    def test_kerning_classes_counts_take_their_nouns(self):
+        text = ak.class_counts_text({"new": 1, "add": 2, "same": 0, "overlap": 1})
+        self.assertEqual(text, u"<b>1 new class</b>, <b>2 classes to extend</b>, <b>0 classes</b> the font has "
+                               u"already, <b>1 class</b> left as it is (it overlaps the font's classes). Nothing is "
+                               u"changed until you create them.")
+        self.assertIn(u"<b>2 classes</b> left as they are (they overlap", ak.class_counts_text({"overlap": 2}))
+        self.assertEqual(ak.class_made_text(0, 0, 0), u"Made 0 classes and extended 0 classes.")
+        self.assertEqual(ak.class_made_text(1, 0, 1), u"Made 1 class and extended 0 classes, and moved 1 pair into it.")
+        self.assertEqual(ak.class_made_text(2, 1, 3), u"Made 2 classes and extended 1 class, and moved 3 pairs into them.")
+
+    def test_kerning_check_help_describes_the_default_mode_first(self):
+        self.assertEqual(kc.COLLISION_MODES[0][0], "relative", "the dropdown starts on it")
+        collisions = kc.HELP.split(u"<b>Collisions</b>")[1].split(u"<br>")[0]
+        self.assertLess(collisions.index(u"base pair"), collisions.index(u"<i>of each other, accented or not</i>"))
+        self.assertIn(u"as far apart as the base pair", collisions)
+        self.assertIn(u"drag the <i>Adjusted</i> preview's right glyph", collisions)
+        source = self.source(kc)
+        mode = source.split(u"self.mode.setWhatsThis(")[1].split(u")\n")[0]
+        self.assertTrue(mode.startswith(u'u"Which pairs are listed.'))
+        for gone in (u"How both glyphs' ink", u"closer by at least as many units than", u"It suits any font"):
+            self.assertNotIn(gone, mode)
+        self.assertIn(u"the worst first", source)
+        self.assertNotIn(u"closest first: their kerning", source)
+        self.assertIn(u'u"Removes the ticked entries from the current master."', source)
+        self.assertNotIn(u"between H's, n's", source)
+
+
+DOCS = os.path.join(HERE, os.pardir, "docs")
+
+
+class CancelButtonTests(unittest.TestCase):
+    """A window's Cancel button (the owner, 2026-11-24: "a 'Cancel' button left of 'Close' could be useful,
+    especially when exporting very big character sets; greyed out when nothing is being exported"): right before
+    Close, grayed but while work that can stop runs, and a click on it stops the work as Esc does."""
+
+    class Button(object):
+        def __init__(self, text=u""):
+            self.text, self.props, self.enabled, self.slots = text, {}, True, {}
+            self.tip = self.whats = None
+
+        def setProperty(self, name, value):
+            self.props[name] = value
+
+        def property(self, name):
+            return self.props.get(name)
+
+        def setToolTip(self, text):
+            self.tip = text
+
+        def setWhatsThis(self, text):
+            self.whats = text
+
+        def setEnabled(self, on):
+            self.enabled = bool(on)
+
+        def isEnabled(self):
+            return self.enabled
+
+        def connect(self, signal, slot):
+            self.slots[signal] = slot
+
+    class Row(object):
+        """A QHBoxLayout: its items in order (None for a stretch)."""
+
+        def __init__(self, widgets):
+            self.items = list(widgets)
+
+        def count(self):
+            return len(self.items)
+
+        def itemAt(self, k):
+            held = self.items[k]
+            return type("Item", (object,), {"widget": lambda item: held})()
+
+        def insertWidget(self, k, widget):
+            self.items.insert(k, widget)
+
+        def addWidget(self, widget):
+            self.items.append(widget)
+
+    def made(self, close_in_row=True):
+        gui = type("Gui", (object,), {"QPushButton": staticmethod(lambda text: self.Button(text))})
+        real = ak._qt
+        ak._qt = lambda: (None, gui)
+        self.addCleanup(setattr, ak, "_qt", real)
+        owner = type("Tool", (object,), {})()
+        build, close = self.Button(u"Build ticked glyphs"), self.Button(u"Close")
+        row = self.Row([None, build, close] if close_in_row else [None, build])
+        button = ak.cancel_button(owner, row, close, u"A save stopped leaves nothing behind.")
+        return owner, row, button, build, close
+
+    def test_cancel_stands_right_before_close_grayed_with_its_help(self):
+        owner, row, button, build, close = self.made()
+        self.assertEqual(row.items, [None, build, button, close], "immediately left of Close")
+        self.assertIs(owner.cancel_button, button)
+        self.assertEqual(button.text, u"Cancel")
+        self.assertFalse(button.enabled, "grayed while nothing runs (never hidden: the row keeps its place)")
+        self.assertEqual(button.tip, u"Stops the work in progress at its next step.")
+        self.assertEqual(button.whats, ak.CANCEL_HELP + u" A save stopped leaves nothing behind.")
+        self.assertIn(u"as <i>Esc</i> does", ak.CANCEL_HELP)
+        self.assertIs(button.props[ak.CANCEL_PROP], True)
+        self.assertIs(button.props[ak.WITHOUT_FONT_PROP], True, "no_font_states never gives it back with a font")
+        self.assertIn("clicked()", button.slots)
+        owner, row, button, build, close = self.made(close_in_row=False)
+        self.assertEqual(row.items[-1], button, "no Close in the row: at its end")
+
+    def test_it_is_usable_only_while_stoppable_work_runs_and_stops_it_as_esc(self):
+        owner, row, button, build, close = self.made()
+        state = ak._busy_state(owner)
+        state.update({"running": True, "stoppable": True})
+        ak.cancel_states(owner)
+        self.assertTrue(button.enabled)
+        self.assertTrue(ak.busy_cancel(owner))
+        self.assertEqual((state["stop"], state["then"]), (True, None), "Esc's stop: nothing done after it")
+        self.assertFalse(ak.busy_cancel(owner), "asked once")
+        state.update({"stop": False, "stoppable": False})
+        ak.cancel_states(owner)
+        self.assertFalse(button.enabled, "a write to the font: grayed")
+        self.assertFalse(ak.busy_cancel(owner))
+        self.assertFalse(state["stop"])
+        state.update({"running": False, "stoppable": True})
+        ak.cancel_states(owner)
+        self.assertFalse(button.enabled, "nothing runs: grayed")
+        self.assertFalse(ak.busy_cancel(owner))
+        ak.cancel_states(type("Bare", (object,), {})())  # (a window without one: nothing to do, no error)
+
+    def test_busy_start_and_end_set_it_and_the_guard_lets_its_click_through(self):
+        owner, row, button, build, close = self.made()
+        filters = []
+
+        class Timer(object):
+            def __init__(self, parent=None):
+                pass
+
+            def __getattr__(self, name):
+                if name.startswith("__"):
+                    raise AttributeError(name)
+                return lambda *args: None
+
+        class App(object):
+            def installEventFilter(self, guard):
+                filters.append(guard)
+
+            def removeEventFilter(self, guard):
+                pass
+
+        class Gui(object):
+            QPushButton = staticmethod(lambda text: self.Button(text))
+
+            class QApplication(object):
+                @staticmethod
+                def instance():
+                    return App()
+
+                @staticmethod
+                def processEvents():
+                    pass
+
+        class Core(object):
+            QTimer = Timer
+
+            class Qt(object):
+                Key_Escape = 0x01000000
+
+                @staticmethod
+                def singleShot(ms, slot):
+                    pass
+
+        class Window(object):
+            def window(self):
+                return self
+
+            def property(self, name):
+                return None
+
+            def findChild(self, *args):
+                return None
+
+        window = Window()
+        owner.dialog, owner.busy = window, True
+
+        class Widget(object):
+            def __init__(self, button, parent=None):
+                self.button = button
+
+            def isWidgetType(self):
+                return True
+
+            def window(self):
+                return window
+
+            def property(self, name):
+                return self.button.property(name)
+
+            def isEnabled(self):
+                return self.button.enabled
+
+            def inherits(self, name):
+                return False
+
+            def parentWidget(self):
+                return None
+
+        class Event(object):
+            def __init__(self, kind):
+                self.kind = kind
+
+            def type(self):
+                return self.kind
+
+        ak._qt = lambda: (Core, Gui)
+        ak.busy_start(owner, u"Saving the template")
+        self.assertTrue(button.enabled, "stoppable work: usable")
+        guard = filters[-1]
+        state = ak._busy_state(owner)
+        target = Widget(button)
+        self.assertTrue(guard.eventFilter(target, Event(2)), "the press is taken, never reaching the window")
+        self.assertFalse(state["stop"], "on release, as a click")
+        self.assertTrue(guard.eventFilter(target, Event(3)))
+        self.assertEqual((state["stop"], state["then"]), (True, None), "stopped as Esc stops it")
+        self.assertRaises(ak.Stopped, ak.busy_progress, owner, None, 0.5)
+        ak.busy_end(owner)
+        self.assertFalse(button.enabled, "over: grayed")
+        ak.busy_start(owner, u"Building the glyphs", stoppable=False)
+        self.assertFalse(button.enabled, "a write to the font: grayed")
+        guard = filters[-1]
+        state = ak._busy_state(owner)
+        self.assertTrue(guard.eventFilter(target, Event(3)))
+        self.assertFalse(state["stop"], "a grayed Cancel stops nothing")
+        ak.busy_end(owner)
+
+    def test_a_write_that_goes_on_as_a_reading_gives_it_back(self):
+        # (CJK Vertical reads its list again under its write's bar, which Esc stops: Cancel too, busy_stoppable)
+        owner, row, button, build, close = self.made()
+        state = ak._busy_state(owner)
+        state.update({"running": True, "stoppable": False})
+        ak.cancel_states(owner)
+        self.assertFalse(button.enabled)
+        ak.busy_stoppable(owner, True)
+        self.assertTrue(button.enabled)
+        self.assertTrue(ak.busy_cancel(owner), "stops as Esc would")
+        state.update({"running": False, "stop": False, "stoppable": False})
+        ak.cancel_states(owner)  # (busy_end's)
+        ak.busy_stoppable(owner, True)
+        self.assertFalse(button.enabled, "nothing runs: nothing to give back")
+        self.assertFalse(state["stoppable"], "left as the last work had it")
+        ak.busy_stoppable(type("Bare", (object,), {})())  # (a window without one: no error)
+
+
+class CancelInEachWindowTests(unittest.TestCase):
+    """The owner, 2026-11-24 ("a 'Cancel' button left of 'Close' could be useful ... greyed out ... when nothing
+    is currently being exported"), asked for every window: Auto Kerning's and Kerning Check's here, right before
+    Close, usable only while their work can stop, their help saying what a stop leaves."""
+
+    def setUp(self):
+        saved = dict((name, getattr(ak, name)) for name in ("busy_start", "busy_progress", "busy_end", "busy_stopping",
+                                                            "fontlab_autokern"))
+        self.addCleanup(lambda: [setattr(ak, name, value) for name, value in saved.items()])
+        self.progressed, self.stopping = [], False
+
+        def progress(owner, what=None, part=None, force=False, stoppable=True):
+            self.progressed.append((what, owner.cancel_button.enabled))
+            if self.stopping and stoppable:
+                raise ak.Stopped()  # (as a click on Cancel makes it)
+        ak.busy_start = lambda owner, what=u"", stoppable=True: None  # (the real ones need a window)
+        ak.busy_end = lambda owner: None
+        ak.busy_progress = progress
+        ak.busy_stopping = lambda owner: False
+
+    def test_auto_kerning_has_it_while_it_measures_or_asks_fontlab(self):
+        with io.open(ak.__file__.replace(".pyc", ".py"), encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertIn(u"buttons.addWidget(self.close_button)\n        cancel_button(self, buttons, self.close_button, "
+                      u"AUTO_KERNING_CANCEL_NOTE)", source)
+        dialog = ak.AutoKerningDialog.__new__(ak.AutoKerningDialog)
+        row, button, close = qtfakes.cancel_made(ak, dialog, ak.AUTO_KERNING_CANCEL_NOTE, (u"Write ticked pairs",))
+        self.assertEqual(row.items.index(button) + 1, row.items.index(close), "right before Close")
+        self.assertFalse(button.enabled, "grayed while nothing runs")
+        self.assertEqual(button.whats, ak.CANCEL_HELP + u" An analysis stopped changes nothing in the font.")
+        seen = qtfakes.follow_cancel(self, ak)
+        widget = type("Widget", (object,), {"setEnabled": lambda w, on: None})
+        dialog.busy, dialog.refilter_again, dialog.package, dialog.focus, dialog.analysis = False, False, None, None, None
+        dialog.analyze_button, dialog.update_buttons = widget(), lambda: None
+        dialog.run_once = lambda: self.progressed.append((u"measuring", button.enabled))
+        dialog.run()
+        self.assertEqual(self.progressed, [(u"measuring", True)])
+        self.assertEqual(seen, [(u"Measuring pairs", True, True), (None, None, False)], "grayed once it is over")
+        # FontLab's values asked for a list filtered anew: its own bar, stoppable
+        del seen[:], self.progressed[:]
+        ak.fontlab_autokern = lambda package, master, left, right: 0
+        dialog.master = u"Regular"
+        dialog.analysis = type("Analysis", (object,), {"remember_fontlab": lambda a: None})()
+        dialog.ask_fontlab([type("Pair", (object,), {"values": {}, "left": u"A", "right": u"V"})()])
+        self.assertEqual(seen, [(u"Asking FontLab", True, True), (None, None, False)])
+        self.assertEqual(self.progressed, [(u"Asking FontLab (0 of 1)", True)])
+        # Write ticked pairs takes no bar: Cancel stays grayed through it
+        write = source.split(u"\n    def write(self):\n")[1].split(u"\n    def ")[0]
+        self.assertNotIn(u"busy_start", write)
+
+    def check_dialog(self):
+        dialog = kc.KerningCheckDialog.__new__(kc.KerningCheckDialog)
+        dialog.ak, dialog.busy, dialog.only = ak, False, None
+        qtfakes.cancel_made(ak, dialog, kc.CANCEL_NOTE, (u"Remove ticked entries",))
+        return dialog
+
+    def test_kerning_check_has_it_while_it_checks_not_while_it_writes(self):
+        dialog = self.check_dialog()
+        self.assertFalse(dialog.cancel_button.enabled)
+        self.assertEqual(dialog.cancel_button.whats,
+                         ak.CANCEL_HELP + u" A check stopped changes nothing in the font: its list is left empty.")
+        seen = qtfakes.follow_cancel(self, ak)
+        status = type("Status", (), {"text": None, "setText": lambda s, text: setattr(s, "text", text),
+                                     "undo": lambda s, text: text, "report": lambda s, log: None})()
+        tree = type("Tree", (), {"clear": lambda t: None})()
+        dialog.cleanup = dialog.collisions = type("Tab", (), {"tree": tree, "status": status, "action": None,
+                                                              "findings": [1], "first_checks": [True]})()
+        dialog.masters = object()
+        dialog.read_font = lambda: True
+        dialog.update_previews = dialog.update_buttons = lambda: None
+        dialog.tiny = type("Box", (), {"value": 5})()
+        entries = [((u"A", False), (u"V%d" % n, False)) for n in range(60)]
+        kerning = type("Kerning", (), {"entries": entries, "values": dict((e, -40) for e in entries), "members": {},
+                                       "describe": staticmethod(lambda e: u"%s %s" % (e[0][0], e[1][0])),
+                                       "pairs": staticmethod(lambda e: []), "candidates": staticmethod(lambda a, b: []),
+                                       "current": staticmethod(lambda a, b: -60),
+                                       "write": staticmethod(lambda *args: None)})()
+        dialog.kerning = lambda master=None: kerning
+        dialog.glyph_exists = lambda name: True
+        self.stopping = True  # (Cancel clicked at the check's first step)
+        dialog.check_cleanup()
+        self.assertEqual(seen, [(kc.CLEANUP_STEP, True, True), (None, None, False)], "usable while it checks")
+        self.assertEqual(self.progressed[0][1], True)
+        self.assertIn(u"was stopped: nothing is listed", status.text, "the note's empty list")
+        del seen[:], self.progressed[:]
+        dialog.same_font = dialog.begin_writing = lambda: True
+        dialog.checked = lambda tab: [kc.Collision(u"T", u"o", -60, 2, -40, None)]
+        dialog.after_writing = lambda: status
+        dialog.check_collisions = lambda: None
+        dialog.log = type("Log", (), {"add": lambda log, text, kind="info": None})()
+        dialog.write_fixes()
+        self.assertEqual(seen, [(kc.WRITE_STEP, False, False), (None, None, False)], "grayed while it writes")
+        self.assertEqual(self.progressed, [(kc.WRITE_STEP, False)], "and never stopped by the click")
+
+    def test_the_python27_copy_skips_only_the_pages_claims(self):
+        # (the Python 2.7 run copies no README.md or WINDOWS.md: DocsClaimTests skips there, nothing else here)
+        pages = os.path.isfile(os.path.join(DOCS, "WINDOWS.md"))
+        self.assertEqual(bool(getattr(DocsClaimTests, "__unittest_skip__", False)), not pages)
+        for case in (CancelButtonTests, CancelInEachWindowTests):
+            self.assertFalse(getattr(case, "__unittest_skip__", False), case.__name__)
+
+
+# (the skip is this class's: it stood over CancelButtonTests, which needs no page, and the Python 2.7 run, whose
+# copy holds no README.md or WINDOWS.md, errored here twice)
+@unittest.skipUnless(os.path.isfile(os.path.join(DOCS, "WINDOWS.md")),
+                     "the pages are not beside the tests (the Python 2.7 run's copy holds COVERAGE-GAPS.md alone)")
+class DocsClaimTests(unittest.TestCase):
+    """The pages' sentences the review of 2026-11-24 found the interface had moved past: each stays gone."""
+
+    def page(self, name):
+        folder = os.path.join(HERE, os.pardir) if name == "README.md" else DOCS
+        with io.open(os.path.join(folder, name), encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_stale_claims_stay_gone(self):
+        gone = {
+            "README.md": (u"Each write is one step of FontLab's History",),
+            "WINDOWS.md": (u"Each write is one step of FontLab's History", u"it ends as one step of FontLab's History"),
+            "GLYPH-COMPOSE.md": (u"a tab's *Build* button", u"within 12 units (per 1000)",
+                                 u"every recipe starts from glyphs any Latin font has", u"between H's, n's, and o's"),
+            "FONT-CHECK.md": (u"its two writing buttons", u"what *Fix* sets right", u"*Fix* does not touch",
+                              u"a checked set completes"),
+            "SPACING.md": (u"the script never changes them", u"; they are never changed",
+                           u"covers every glyph with a character"),
+            "KERNING.md": (u"Auto Kerning reads and writes through them, and never makes",
+                           u"analyzes the font that is current then", u"owner's test font), closest first"),
+            "CJK.md": (u"*Hangul:*", u"*Write* once more", u"more Hangul than kana or hanzi",
+                       u"the code *Write the code* would write"),
+            "FONT-BUILDER.md": (u"**Glyphs a sheet**", u"*Save template...*", u"*Add sheets...*"),
+            "PROOF.md": (u"what a designer wants",),
+        }
+        for name, sentences in gone.items():
+            text = self.page(name)
+            for sentence in sentences:
+                self.assertNotIn(sentence, text, name)
+
+    def test_the_pages_name_what_the_interface_shows(self):
+        self.assertIn(u"*Put back vhea*", self.page("WINDOWS.md"))
+        self.assertIn(u"FreeLab shows its own at the left end of the tab under the mouse", self.page("WINDOWS.md"))
+        self.assertIn(u"*Backspace*, *Delete*", self.page("KERNING.md"))
+        self.assertIn(u"*Declare coverage*", self.page("FONT-CHECK.md").split(u"\n")[2])
+        self.assertIn(u"*Set Hangul widths*", self.page("CJK.md"))
+        self.assertIn(u"**Glyphs per sheet**", self.page("FONT-BUILDER.md"))
+        self.assertIn(u"within 1.2% of the em", self.page("GLYPH-COMPOSE.md"))
 
 
 if __name__ == "__main__":

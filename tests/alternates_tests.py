@@ -128,6 +128,9 @@ class Box(ft.Anything):
     def setToolTip(self, text):
         self.tip = text
 
+    def setSuffix(self, text):
+        self.suffix = text
+
     def setValue(self, value):
         self.value = value
 
@@ -367,6 +370,16 @@ class PageTests(unittest.TestCase):
 
     def page(self, *args):
         return make_page(self.ak, *args)
+
+    def test_the_baseline_box_counts_its_units(self):
+        """The review of 2026-11-24: "Baseline: +-" read "1 units"; its word follows its number (ak.counted_suffix)."""
+        page, owner = self.page()
+        box = page.baseline_box
+        for value, suffix in ((0, u" units"), (1, u" unit"), (2, u" units")):
+            box.setValue(value)
+            for slot in box.slots.get("valueChanged(int)", []):
+                slot(value)
+            self.assertEqual(box.suffix, suffix, value)
 
     def row(self, page, glyph, key=fa.SUGGESTIONS_KEY):
         """A glyph's row in a group of the list (Suggestions, unless another is named)."""
@@ -972,6 +985,14 @@ class PageTests(unittest.TestCase):
         self.assertEqual(page.group_rows(fa.SUGGESTIONS_KEY), [])
         self.assertEqual([group.text(0) for group in page.tree.items], [u"Suggestions (0)", u"Selected glyphs (0)"])
         self.assertTrue(page.note.text.startswith(u"The font has none of the glyphs fonts most often give"))
+
+    def test_strength_and_seed_say_a_build_rebuilds_not_the_change(self):
+        """The review of 2026-11-24: changing them redraws the preview only (draw_preview); the next Build
+        variants builds the variants again."""
+        page, owner = self.page()
+        for box in (page.strength_box, page.seed_box):
+            self.assertIn(u"the next <i>Build variants</i> builds the variants built here again", box.whats)
+            self.assertNotIn(u"the variants built here are built again in place", box.whats)
 
     def test_a_new_seed_builds_the_variants_built_here_again_in_place(self):
         """Owner's image 270: after a build, another seed left nothing to build ("the font has these variants

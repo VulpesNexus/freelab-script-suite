@@ -170,7 +170,7 @@ class FakeQt(object):
             "instance": staticmethod(lambda: app)})})
         self.QtCore = type("QtCore", (), {
             "QTimer": type("QTimer", (object,), {"singleShot": staticmethod(lambda ms, function: self.later.append(function))}),
-            "QEvent": type("QEvent", (), {"MouseButtonPress": 2, "MouseButtonDblClick": 4}),
+            "QEvent": type("QEvent", (), {"MouseButtonPress": 2, "MouseButtonRelease": 3, "MouseButtonDblClick": 4}),
             "Qt": type("Qt", (), {"LeftButton": 1})})
         self.later = []
 
@@ -483,7 +483,14 @@ class SettingTests(unittest.TestCase):
         for text in texts:
             self.assertTrue(text.endswith(u"."), text)
             self.assertNotIn(u"(s)", text)
-        self.assertIn(u"never undock", texts[2])
+        self.assertIn(u"cannot be dragged out", texts[2])
+        # (the review of 2026-11-24: the off sentence had no verb)
+        self.assertEqual(texts[3], u"FreeLab tab docking is off: FontLab handles tab dragging again.")
+
+    def test_the_dock_buttons_tooltip_is_a_sentence(self):
+        """As the settings' tooltips are (the review of 2026-11-24: no period, and the only imperative)."""
+        self.assertEqual(ft.DOCK_TIP, u"Puts this window's tabs back into the main window. A double-click on one of "
+                                      u"its tabs does the same.")
 
 
 class Capture(object):
@@ -637,7 +644,7 @@ class ConfigureTests(StateCase):
         sys.stdout = out = Capture()
         ft.toggle()
         self.assertEqual(self.calls, [("start", {"reorder": False, "no_undock": True})])
-        self.assertIn(u"never undock", out.text())
+        self.assertIn(u"cannot be dragged out", out.text())
 
 
 class ApplyTests(StateCase):
@@ -682,6 +689,14 @@ class Tabs(object):
     def widget(self, index):
         return self.pages[index]
 
+    currentIndex = 0
+
+    def indexOf(self, page):
+        return self.pages.index(page) if page in self.pages else -1
+
+    def setCurrentIndex(self, index):
+        self.currentIndex = index
+
 
 class MainTabs(Bar):
     """The main window's tab bar and tab widget in one (as near_bar and drop_slot read them)."""
@@ -692,6 +707,14 @@ class MainTabs(Bar):
 
     def widget(self, index):
         return self.pages[index]
+
+    currentIndex = 0
+
+    def indexOf(self, page):
+        return self.pages.index(page) if page in self.pages else -1
+
+    def setCurrentIndex(self, index):
+        self.currentIndex = index
 
 
 AWAY, NEAR = Point(500, 400), Point(110, 110)  # far below the bar; on it, at the second tab
@@ -712,7 +735,7 @@ class DragTests(StateCase):
         self.patch("button_down", lambda: self.down)
         self.patch("drag_distance", lambda: 10)
         self.patch("main_tabs", lambda: (self.main, self.main))
-        self.patch("show_marker", lambda page, point: self.markers.append(point))
+        self.patch("show_marker", lambda page, point, margin=None: self.markers.append(point))
         self.patch("hide_marker", lambda: None)
         self.patch("holder_of", lambda page: self.windows.get(page))
         self.patch("dock", lambda page, target=None: self.docked.append((page, target)) or True)
@@ -733,6 +756,350 @@ class DragTests(StateCase):
             self.windows[page] = Frame(window=True)
         self.run_later()
         return page
+
+    def test_no_undock_keeps_the_press_from_fontlabs_tab_bar(self):
+        """The owner, 2026-11-23: put back after the drop, a tab could still be grabbed. The press on a main
+        window tab is kept from the bar (the filter returns what on_pressed says), and the release that ends
+        it kept too. Nothing is chosen at the press (the view changed under a tab being moved)."""
+        chosen = []
+        self.main_area.indexOf, self.main_area.currentIndex = self.pages.index, 0
+        self.main_area.setCurrentIndex = lambda index: chosen.append(index)
+        self.set_options(False, True)
+        self.assertTrue(ft.on_pressed(self.main_area, 2), "kept: FontLab has no tab to drag away")
+        self.assertEqual(chosen, [], "not chosen while the button is held")
+        self.assertTrue(ft.on_released(), "a release with the button still held is kept, and is no click")
+        self.run_later()
+        self.assertEqual(chosen, [], "the owner, 2026-11-23: a tab held some two seconds was shown, unmoved")
+        self.assertEqual([what for when, what in sys._freelab_tabs_state["notes"]],
+                         ["a release came with the button still held"])
+        self.down = False
+        self.assertTrue(ft.on_released(), "its release kept too")
+        self.run_later()
+        self.assertEqual(chosen, [2], "a click: chosen at the release")
+        self.assertFalse(ft.on_released(), "once")
+        self.assertFalse(ft.on_pressed(self.main_area, -1), "a press beside the tabs is the bar's")
+        loose = Tabs(Frame(window=True), [Page()])
+        self.assertFalse(ft.on_pressed(loose, 0), "a tab of a window of its own is FontLab's to drag")
+        self.assertFalse(ft.on_released())
+        self.set_options(True, False)
+        self.assertFalse(ft.on_pressed(self.main_area, 2), "without no_undock the press is FontLab's, as before")
+        self.assertFalse(ft.on_released())
+
+    def test_with_both_freelab_moves_the_tab_itself_at_the_release(self):
+        self.set_options(True, True)
+        page = self.drag(self.main_area, 2, NEAR, made_window=False)
+        self.assertEqual(self.docked, [(page, 1)], "moved along the bar: no window was ever made")
+        self.assertEqual(len(self.markers), 1, "the marker shown while dragging")
+        self.docked[:] = []
+        self.drag(self.main_area, 2, AWAY, made_window=False)
+        self.assertEqual(self.docked, [], "released away: it stays where it is")
+
+    def cross_bar(self):
+        """A tab bar of 100-pixel tabs with close crosses: a tab's cross is at its left end, 24 pixels."""
+        class BarWithCrosses(object):
+            tabsClosable, font = True, None
+
+            def tabRect(self, index):
+                return type("R", (), {"left": lambda self: 100 * index, "width": lambda self: 100})()
+
+            def mapFromGlobal(self, point):
+                return point
+        return BarWithCrosses()
+
+    def test_a_click_on_a_tabs_close_cross_closes_it(self):
+        """The owner, 2026-11-23 and 24: the close cross took two clicks, and was not shown on main window
+        tabs (FontLab shows none on tabs whose presses it never gets). Its place is the tab's left end, read
+        from the owner's own closing clicks. A press there is kept like any other; released there, the tab
+        is closed by FontLab's own slot; released elsewhere, it is a click on the tab."""
+        bar = self.cross_bar()
+        closed, chosen = [], []
+        area = self.main_area
+        area.onTabCloseRequested = lambda index: closed.append(index)
+        area.setCurrentIndex = lambda index: chosen.append(index)
+        self.set_options(True, True)
+        self.assertEqual(ft.cross_zone(bar, 2), (200, 224))
+        self.at = Point(210, 5)
+        self.assertTrue(ft.on_pressed(area, 2, bar, Point(210, 5)), "on the cross: kept, like any press")
+        self.assertIn("press at 210, cross zone (200, 224), kept", sys._freelab_tabs_state["presses"][-1][1])
+        self.down = False
+        self.assertTrue(ft.on_released())
+        self.run_later()
+        self.assertEqual((closed, chosen), ([2], []), "one click closes")
+        self.down, self.at = True, Point(220, 5)
+        self.assertTrue(ft.on_pressed(area, 2, bar, Point(220, 5)))
+        self.down, self.at = False, Point(226, 5)  # (released off the cross, the mouse hardly moved)
+        self.assertTrue(ft.on_released())
+        self.run_later()
+        self.assertEqual((closed, chosen), ([2], [2]), "released off the cross: the tab is chosen, not closed")
+        self.down, self.at = True, Point(230, 5)
+        self.assertTrue(ft.on_pressed(area, 2, bar, Point(230, 5)), "on the title")
+        self.down = False
+        self.assertTrue(ft.on_released())
+        self.run_later()
+        self.assertEqual(closed, [2], "a click on the title closes nothing")
+        closed[:] = []
+        ft.close_tab(area, self.pages[0])
+        self.assertEqual(closed, [], "the Sketchboard does not close")
+        bar.tabsClosable = False
+        self.assertIsNone(ft.cross_zone(bar, 2), "no cross on these tabs")
+        self.assertIsNone(ft.cross_zone(None, 2))
+        self.assertFalse(ft.on_close_cross(object(), 2, Point(230, 5)), "a bar that cannot say: nothing raised")
+        self.set_options(True, False)
+        bar.tabsClosable = True
+        self.assertFalse(ft.on_pressed(area, 2, bar, Point(210, 5)), "undockable: the cross is FontLab's own")
+
+    def test_the_tab_under_the_mouse_shows_a_close_cross(self):
+        """The owner, 2026-11-24: main window tabs showed no cross. FreeLab shows its own while the mouse is
+        over the main tab bar (no_undock), and takes it away as the mouse leaves."""
+        class Label(object):
+            def __init__(self):
+                self.visible, self.geometry = False, None
+
+            def isVisible(self):
+                return self.visible
+
+            def show(self):
+                self.visible = True
+
+            def hide(self):
+                self.visible = False
+
+            def setGeometry(self, *box):
+                self.geometry = box
+
+            def raise_(self):
+                pass
+
+        class Timer(object):
+            active = False
+
+            def start(self):
+                self.active = True
+
+            def stop(self):
+                self.active = False
+
+        bar = self.cross_bar()
+        bar.width, bar.height, bar.isVisible = 400, 22, lambda: True
+        bar.tabAt = lambda point: point.x() // 100 if 0 <= point.x() < 400 else -1
+        bar.parentWidget = lambda: self.main_area
+        label, timer = Label(), Timer()
+        state = sys._freelab_tabs_state
+        state["hover_timer"] = timer
+        self.patch("_cross_label", lambda bar: label)
+        self.patch("_alive", lambda widget: True)
+        self.patch("_in_main_window", lambda tabs: True)
+        self.patch("_class", lambda widget: getattr(widget, "kind", ""))
+        self.set_options(True, False)
+        ft.on_bar_entered(bar)
+        self.assertFalse(timer.active, "undockable: FontLab's own cross")
+        self.set_options(True, True)
+        ft.on_bar_entered(bar)
+        self.assertTrue(timer.active)
+        state["cross_label"] = label
+        self.at = Point(250, 5)
+        ft.hover_cross()
+        self.assertEqual((label.visible, label.geometry), (True, (200 + ft.CROSS_INSET, 0, ft.CROSS_SIZE, 22)))
+        self.at = Point(250, 60)  # (the mouse left the bar)
+        ft.hover_cross()
+        self.assertEqual((label.visible, timer.active), (False, False))
+
+    def test_a_click_chooses_its_tab_at_the_release(self):
+        """The owner, 2026-11-23: the view changed at the press, under a tab being moved. A click chooses its tab
+        at its release; a drag moves it."""
+        chosen = []
+        self.main_area.indexOf, self.main_area.currentIndex = self.pages.index, 0
+        self.main_area.setCurrentIndex = lambda index: chosen.append(index)
+        self.set_options(True, True)
+        self.assertTrue(ft.on_pressed(self.main_area, 2))
+        self.down = False
+        self.assertTrue(ft.on_released())
+        self.assertEqual(chosen, [], "not from inside the filter")
+        ft.poll()
+        self.run_later()
+        self.assertEqual(chosen, [2], "once, though the timer saw the button up too")
+        self.down = True
+        self.assertTrue(ft.on_pressed(self.main_area, 3))
+        self.down, self.at = False, NEAR  # (moved before the release: a drag)
+        self.assertTrue(ft.on_released())
+        ft.poll()
+        self.run_later()
+        self.assertEqual(chosen, [2], "a drag chooses nothing here")
+        self.assertEqual(self.docked, [(self.pages[3], 1)], "moved along the bar, once")
+
+    def test_a_click_whose_release_the_bar_never_got_is_ended_by_the_timer(self):
+        chosen = []
+        self.main_area.indexOf, self.main_area.currentIndex = self.pages.index, 0
+        self.main_area.setCurrentIndex = lambda index: chosen.append(index)
+        self.set_options(True, True)
+        self.assertTrue(ft.on_pressed(self.main_area, 2))
+        self.down = False
+        ft.poll()
+        self.run_later()
+        self.assertEqual(chosen, [2], "chosen all the same")
+        self.assertTrue(ft.on_released(), "the release that comes late is still kept")
+        self.run_later()
+        self.assertEqual(chosen, [2], "once")
+
+    def test_fontlabs_drop_highlight_left_showing_is_hidden(self):
+        """The owner, 2026-11-23: the blue highlight stayed over the document area after a merge."""
+        class Child(object):
+            def __init__(self, kind, visible):
+                self.kind, self.visible = kind, visible
+
+            def isVisible(self):
+                return self.visible
+
+            def hide(self):
+                self.visible = False
+
+        children = [Child("YDropHighlight", True), Child("YTabWidget", True), Child("YDropHighlight", False)]
+        frame = type("F", (), {"children": lambda self: children})()
+        self.patch("document_tab_widgets", lambda: [(None, frame)])
+        self.patch("_class", lambda widget: widget.kind)
+        self.assertEqual(ft.clear_highlight(), 0, "not while a button is held: FontLab is showing a drop")
+        self.down = False
+        self.assertEqual(ft.clear_highlight(), 1)
+        self.assertEqual([child.visible for child in children], [False, True, False], "the highlight only")
+
+    def drop_frame(self, active=True, interval=500, lit=True):
+        """A document area's frame with FontLab's drop timer and blue highlight among its children."""
+        class Timer(object):
+            kind = "QTimer"
+
+            def __init__(self):
+                self.active, self.interval, self.calls = active, interval, []
+
+            def stop(self):
+                self.active = False
+                self.calls.append("stop")
+
+            def start(self, interval):
+                self.interval = interval
+                self.calls.append(interval)
+
+        class Light(object):
+            kind, visible = "YDropHighlight", lit
+
+            def isVisible(self):
+                return self.visible
+
+            def hide(self):
+                self.visible = False
+
+        timer, light = Timer(), Light()
+        frame = type("F", (), {"kind": "YFrameWindow", "children": lambda self: [timer, light]})()
+        self.patch("_class", lambda widget: getattr(widget, "kind", ""))
+        return frame, timer, light
+
+    def test_a_tab_dragged_out_gets_no_drop_highlight(self):
+        """The owner, 2026-11-24: the blue highlight came up over the area the tab had just left, and made
+        undocking hard. FontLab's drop timer is stopped, and the highlight hidden should it show."""
+        frame, timer, light = self.drop_frame()
+        self.set_options(True, False)
+        drag = {"frame": frame, "from_main": True, "own": False, "tabs": None}
+        ft.follow_drop(drag)
+        self.assertEqual((timer.calls, light.visible), (["stop"], False))
+        self.assertIn("drop timer running (500 ms), highlight shown", drag["trace"][-1][1])
+        ft.follow_drop(drag)
+        self.assertEqual(timer.calls, ["stop"], "idle now: left alone")
+        ft.follow_drop({"from_main": True})  # (no main window: nothing raised)
+
+    def test_a_window_dragged_gets_its_highlight_at_once(self):
+        """The owner, 2026-11-23 and 24: the highlight lagged half a second. FontLab's timer is started again
+        with almost no wait; without reorder it is FontLab's own."""
+        frame, timer, light = self.drop_frame(lit=False)
+        self.set_options(True, False)
+        drag = {"frame": frame, "from_main": False, "window": True}
+        ft.follow_drop(drag)
+        ft.follow_drop(drag)
+        self.assertEqual(timer.calls, [ft.DROP_TIMER_FAST_MS], "once: it is short already")
+        frame, timer, light = self.drop_frame()
+        self.set_options(False, True)
+        ft.follow_drop({"frame": frame, "from_main": True, "own": False})
+        self.assertEqual((timer.calls, light.visible), ([], True), "reorder off: FontLab's own drop")
+
+    def test_a_held_tab_is_not_shown_before_the_release(self):
+        """The owner, 2026-11-23 and 24: a tab held some two seconds was shown, unmoved, without a release."""
+        chosen = []
+        area = self.main_area
+        area.count, area.currentIndex = 4, 0
+        area.setCurrentIndex = lambda index: chosen.append(index) or setattr(area, "currentIndex", index)
+        self.set_options(True, False)
+        self.patch("follow_drop", lambda drag: None)
+        self.assertFalse(ft.on_pressed(area, 2), "undockable: the press is FontLab's")
+        ft.poll()
+        self.assertEqual(chosen, [])
+        area.currentIndex = 2  # (FontLab shows the held tab)
+        ft.poll()
+        self.assertEqual(chosen, [0], "put back")
+        self.down = False
+        ft.poll()
+        self.run_later()
+        self.assertEqual(chosen, [0, 2], "and chosen at the release, as a click")
+        self.down = True
+        ft.on_pressed(area, 3)
+        area.count = 3  # (FontLab took the tab for its drag)
+        area.currentIndex = 1
+        ft.poll()
+        self.assertEqual(chosen, [0, 2], "the bar lost a tab: FontLab's drag, left alone")
+
+    def test_a_dock_that_failed_after_a_drop_is_tried_again(self):
+        """2026-11-24: Merge Window stayed unavailable for the window just dropped, twice."""
+        tries = []
+        page = self.pages[2]
+        self.windows[page] = Frame(window=True)
+        self.patch("_alive", lambda widget: True)
+        self.patch("dock", lambda page, target=None: tries.append(target) or len(tries) > 2)
+        self.set_options(True, False)
+        ft.dock_after_drop(page, 1)
+        self.run_later()
+        self.run_later()
+        self.assertEqual(tries, [1, 1, 1], "until it docks")
+        self.run_later()
+        self.assertEqual(len(tries), 3)
+
+    def test_a_tab_dragged_away_stays_and_is_chosen(self):
+        chosen = []
+        self.main.indexOf, self.main.currentIndex = self.pages.index, 0
+        self.main.setCurrentIndex = lambda index: chosen.append(index)
+        self.set_options(False, True)
+        self.drag(self.main_area, 2, NEAR, made_window=False)
+        self.assertEqual((self.docked, chosen), ([], [2]), "no_undock alone: not moved, chosen at the release")
+
+    def test_a_window_dragged_by_its_title_bar_onto_the_tab_bar_docks(self):
+        """The owner, 2026-11-23: FontLab's own blue highlight was hard to get. A window of its own moved with the
+        button held is followed as a tab's drag is, and docks when released on the main tab bar."""
+        page = Page()
+        frame = Frame(window=True)
+        loose = Tabs(frame, [page])
+        loose.currentWidget = lambda: page
+        self.patch("document_tab_widgets", lambda: [(self.main_area, self.main_area.frame), (loose, frame)])
+        self.set_options(True, False)
+        self.down, self.at = True, AWAY
+        ft.on_window_moved(frame)
+        drag = sys._freelab_tabs_state["drag"]
+        self.assertTrue(drag["window"] and drag["page"] is page)
+        ft.on_window_moved(frame)
+        self.assertIs(sys._freelab_tabs_state["drag"], drag, "each step of the move: followed once")
+        self.at = NEAR
+        ft.poll()
+        self.assertEqual(len(self.markers), 1, "the marker while it is over the bar")
+        self.down = False
+        ft.poll()
+        self.windows[page] = frame
+        self.run_later()
+        self.assertEqual(self.docked, [(page, 1)], "docked at the marker's place")
+        self.docked[:] = []
+        self.down = False
+        ft.on_window_moved(frame)
+        self.assertIsNone(sys._freelab_tabs_state["drag"], "moved with no button held (a program, a snap): not a drag")
+        self.down = True
+        self.set_options(False, True)
+        ft.on_window_moved(frame)
+        self.assertIsNone(sys._freelab_tabs_state["drag"], "without reorder: FontLab's own")
+        ft.on_window_moved(self.main_area.frame)
+        self.assertIsNone(sys._freelab_tabs_state["drag"], "the main window is no window of its own")
 
     def test_reorder_alone_is_as_before(self):
         self.set_options(True, False)
@@ -1036,7 +1403,17 @@ class SettingsScriptTests(unittest.TestCase):
             self.assertTrue(text.endswith(u"."), text)
             self.assertFalse(set(text) & set([unichr_(0xb7), unichr_(0x2014)]), "no interpuncts or em dashes")
         self.assertIn(u"window of its own", s.REORDER_TIP)
-        self.assertIn(u"Window > Docking", s.NO_UNDOCK_TIP)
+        self.assertIn(u"<i>Window &gt; Docking</i>", s.NO_UNDOCK_TIP)
+        # The review of 2026-11-24: a window of its own dragged by its title bar docks too (on_window_moved); the
+        # first box named by its caption, not its place; OK with both unticked leaves docking off
+        self.assertIn(u"dragged there by its title bar", s.REORDER_TIP)
+        self.assertIn(u"<i>%s</i>" % s.REORDER.rstrip(u"."), s.NO_UNDOCK_TIP)
+        self.assertNotIn(u"first box", s.NO_UNDOCK_TIP)
+        self.assertIn(u"with both unticked, it stays off", s.OFF_NOTE)
+        # (the review of 2026-11-24: a button's or a command's name in italics)
+        self.assertIn(u"a <i>Dock</i> button", s.REORDER_TIP)
+        self.assertIn(u"FontLab's <i>Undock</i> commands", s.NO_UNDOCK_TIP)
+        self.assertIn(u"<i>OK</i> switches it on", s.OFF_NOTE)
 
 
 class _Control(object):

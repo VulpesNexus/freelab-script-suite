@@ -636,6 +636,9 @@ class FakeButton(Anything):
     def setChecked(self, on):
         self.checked = on
 
+    def setWhatsThis(self, text):
+        self.whats = text
+
 
 class FakeEvent(object):
     def __init__(self, kind):
@@ -933,6 +936,21 @@ class DialogTests(unittest.TestCase):
                          "the placeholder is no choice (its row is grayed out): the font chosen stays")
         self.assertEqual(dialog.choice_b.currentIndex, 1)
         self.assertTrue(dialog.compare_button.enabled)
+
+    def test_a_glyph_not_read_is_named_as_a_link_to_it(self):
+        # (the owner's request of 2026-11-24: a glyph's name in a log line in italics, a link that opens it)
+        dialog = self.dialog([first_font(), second_font()])
+        logged = []
+        dialog.log.add = lambda text, level="info": logged.append((level, text))
+        real = dialog.read_glyph
+
+        def read_glyph(side, name, *rest):
+            if name == u"o":
+                raise RuntimeError("unreadable")
+            return real(side, name, *rest)
+        dialog.read_glyph = read_glyph
+        dialog.choice_b.pick(1)
+        self.assertIn((u"warning", u"Could not read <b>1 glyph</b>: %s." % self.ak.glyph_name_link(u"o")), logged)
 
     def test_a_right_to_left_pair_is_drawn_as_on_screen(self):
         # FontLab keeps typed yod then bet as the key (yod, bet): bet stands at the left. The Latin key
@@ -1460,6 +1478,68 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(lines[-1], u"Compared A with B.", "its top line too")
         self.assertEqual((logged[-1][0], dialog.busy, ended[-1]), ("warning", False, False))
 
+    def test_cancel_sits_before_close_usable_while_it_compares(self):
+        """The owner, 2026-11-24: a Cancel left of Close, grayed but while work that can stop runs (ak.cancel_button),
+        as Esc stops it; its help says what a stop leaves. Font Compare never writes: it is grayed but then."""
+        import qtfakes
+        rows = []
+
+        class Row(Anything):
+            def __init__(self, *args):
+                self.items = []
+                rows.append(self)
+
+            def addWidget(self, widget, *args):
+                self.items.append(widget)
+
+            def addStretch(self, *args):
+                self.items.append(None)
+
+            def count(self):
+                return len(self.items)
+
+            def itemAt(self, k):
+                held = self.items[k]
+                return type("Item", (object,), {"widget": lambda item: held})()
+
+            def insertWidget(self, k, widget):
+                self.items.insert(k, widget)
+
+        classes = sys.modules["PythonQt"].QtGui.classes
+        before = classes.get("QHBoxLayout")
+        classes["QHBoxLayout"] = Row
+        self.addCleanup(lambda: classes.pop("QHBoxLayout") if before is None else classes.update(QHBoxLayout=before))
+        dialog = self.dialog([first_font(), second_font()])
+        bottom = [row for row in rows if dialog.close_button in row.items][0]
+        self.assertEqual(bottom.items, [None, dialog.cancel_button, dialog.close_button], "right before Close")
+        self.assertFalse(dialog.cancel_button.enabled, "grayed while nothing runs")
+        self.assertEqual(dialog.cancel_button.whats, self.ak.CANCEL_HELP + u" A comparison stopped changes neither "
+                                                                           u"font: the lists show the one before it.")
+        dialog.choice_b.pick(1)
+        ak = self.ak
+        real = ak.busy_start, ak.busy_progress, ak.busy_end, fcmp.SHOW_AFTER
+
+        def restore():
+            ak.busy_start, ak.busy_progress, ak.busy_end, fcmp.SHOW_AFTER = real
+        self.addCleanup(restore)
+        ak.busy_start = lambda owner, what=u"", stoppable=True: None  # (the real ones need a window)
+        ak.busy_end = lambda owner: None
+        moved = []
+
+        def stopping(owner, what=None, part=None, force=False, stoppable=True):
+            moved.append((what, owner.cancel_button.enabled))
+            if what == fcmp.KERNING_STEP and stoppable:
+                raise ak.Stopped()  # (as a click on Cancel makes it)
+        ak.busy_progress = stopping
+        seen = qtfakes.follow_cancel(self, ak)
+        fcmp.SHOW_AFTER = 0
+        logged = []
+        dialog.log.add = lambda text, level="info": logged.append((level, text))
+        dialog.compare()
+        self.assertEqual(seen, [(fcmp.READ_A_STEP, True, True), (None, None, False)], "usable while it compares")
+        self.assertTrue(moved and all(on for _, on in moved))
+        self.assertEqual(logged[-1], ("warning", u"The comparison was stopped: the lists show the one before it."))
+
     def test_has_font_and_the_choices_kept_usable(self):
         """Owner's image 209: with no comparison to make, the controls are grayed (ak.no_font_states, which
         asks has_font) but the two dropdowns that choose the fonts."""
@@ -1502,6 +1582,18 @@ class DialogTests(unittest.TestCase):
             fcmp.comparison_pixmap, self.ak.layer_parts = saved
         self.assertEqual(drawn[0][0][3], [(u"part", u"red")])
         self.assertEqual(drawn[0][1][3], [((0.5, u"part"), u"red")], "scaled as the second font's path")
+
+    def test_close_and_the_help_read_as_every_tools(self):
+        """The review of 2026-11-24: Close has a help, as Proof's and Glyph Compose's; the help's last line stands
+        apart, as every tool's; Esc is a key, in italics."""
+        dialog = self.dialog([first_font()])
+        self.assertIn(u"Closes the window", getattr(dialog.close_button, "whats", u""))
+        self.assertIn(u".<br><br>\nClick this help's button", fcmp.HELP)
+        self.assertIn(u"<i>Esc</i>", fcmp.HELP)
+        # (kinds_first_on: what starts hidden is shown when nothing else differs, as the chips' helps said)
+        help_text = u" ".join(fcmp.HELP.split())
+        self.assertIn(u"hidden to start with, unless nothing else differs", help_text)
+        self.assertIn(u"(the other kinds when there are none)", help_text)
 
     def test_one_font_one_master(self):
         dialog = self.dialog([first_font()])

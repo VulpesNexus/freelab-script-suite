@@ -3899,6 +3899,32 @@ def mark_risky(widget):
     return widget
 
 
+DONT_CONFIRM_OVERWRITE = 0x4  # QFileDialog::DontConfirmOverwrite, where this PythonQt does not name it
+
+
+def save_file_name(QtGui, parent, caption, directory, filters):
+    """(what the save dialog gave, whether Windows' own box asked before replacing that file): the dialog
+    asked not to confirm an overwrite, so the tool asks in its own box, which follows dark mode (Windows' own
+    "Confirm Save As" box stays light in dark mode, owner's report of 2026-11-24). PythonQt's handling of the
+    static call's options, after its selectedFilter out-parameter, is not proven: each form is tried (None,
+    then "", for the filter), and where this PythonQt takes neither (TypeError, ValueError: no matching
+    overload), the plain call as before, whose name typed Windows confirms itself (True). Never raises:
+    ("", True) when not even the plain call could be made."""
+    dialog = QtGui.QFileDialog
+    option = getattr(dialog, "DontConfirmOverwrite", DONT_CONFIRM_OVERWRITE)
+    for selected in (None, u""):
+        try:
+            return dialog.getSaveFileName(parent, caption, directory, filters, selected, option), False
+        except (TypeError, ValueError):
+            continue
+        except Exception:
+            break
+    try:
+        return dialog.getSaveFileName(parent, caption, directory, filters), True
+    except Exception:
+        return u"", True
+
+
 # ---------------------------------------------------------------------------
 # A font FontLab 7.2 crashes on: single adjustments with no values
 # ---------------------------------------------------------------------------
@@ -4873,8 +4899,10 @@ def add_tools_button(dialog, current, log=None):
         bold = QtGui.QFont(help_button.font)
         bold.setBold(True)
         help_button.setFont(bold)
-        help_button.setToolTip(u"What's this? Click it, then a control, to read what the control does.")
-        help_button.setWhatsThis(u"Click it, then any control of this window, to read what that control does.")
+        help_button.setToolTip(u"What's this? Click it, then anything in the window, to read what it does "
+                              u"(or right-click it: What's This?).")  # (not only controls: owner's image 34)
+        help_button.setWhatsThis(u"Click it, then anything in this window, to read what it does (or right-click "
+                                 u"it: <i>What's This?</i>).")
         whats_this = lambda *args: QtGui.QWhatsThis.enterWhatsThisMode()
         held.append(whats_this)
         help_button.connect("clicked()", whats_this)
@@ -4918,6 +4946,18 @@ BUSY_NAME = "freelabBusy"  # the top row's busy part (a label and a bar), made b
 BUSY_ALLOWED_PROP = "freelabBusyAllowed"  # on the controls a click on which stops the work, then is done
 BUSY_LINE_PROP = "freelabBusyLine"  # on a window's top line while its bar takes its place
 BUSY_RANGE = 1000
+BUSY_HELP = (u"How far the work is. <i>Cancel</i> (where the window has it) and <i>Esc</i> stop it at its next step; "
+             u"the tools menu, the arrows, and <i>Close</i> stop it too, then do what was clicked. A write to the font "
+             u"is never stopped: what was clicked is done once it is over.")
+# A window's Cancel button (the owner, 2026-11-24: "a 'Cancel' button left of 'Close' could be useful, especially
+# when exporting very big character sets"): right before Close, usable only while work that can stop runs
+# (grayed, never hidden, so the row never shifts), and it stops the work as Esc does (cancel_button)
+CANCEL_PROP = "freelabCancel"  # on a window's Cancel button: the input guard lets a click on it through, as Esc
+CANCEL_TIP = u"Stops the work in progress at its next step."
+CANCEL_HELP = (u"Stops the work in progress at its next step, as <i>Esc</i> does. Grayed while nothing runs, and "
+               u"while the work cannot be stopped (a write to the font, which always ends whole).")
+# Auto Kerning's (its stoppable work reads: measuring the pairs, asking FontLab; Write ticked pairs takes no bar)
+AUTO_KERNING_CANCEL_NOTE = u"An analysis stopped changes nothing in the font."
 BUSY_PUMP_SECONDS = 0.1  # events let through at most this often during the work
 BUSY_GREEN = ((120, 200, 120), (30, 120, 40))  # LOG_COLORS["done"]: the bar's chunk (on dark, on light)
 BUSY_SHEET = (u"QProgressBar { border: 1px solid rgba(128, 128, 128, 140); border-radius: 3px; "
@@ -5008,8 +5048,8 @@ def busy_row(dialog):
     bar.setRange(0, BUSY_RANGE)
     bar.setTextVisible(False)
     bar.setProperty(LEAVE_ALONE_PROP, True)
-    tip = (u"How far the work is. The tools menu, the arrows, and Close stop it first (at its next step), "
-           u"then do what was clicked; Esc stops it.")
+    # (shared by reads and writes: a write is never stopped, busy_progress's stoppable)
+    tip = BUSY_HELP
     for widget in (row, label, bar):
         widget.setWhatsThis(tip)
     box.addWidget(label)
@@ -5038,12 +5078,16 @@ def _busy_state(owner):
 
 def busy_start(owner, what=u"", stoppable=True):
     """The window's work begins: its top row shows what (a step's name) and the bar at 0, its top line
-    hidden meanwhile, the input guard on. owner.busy is the tool's own (it grays what it must)."""
+    hidden meanwhile, the input guard on, and its Cancel button (cancel_button) usable when the work can stop
+    (stoppable: False for a write to the font, whose steps never stop). owner.busy is the tool's own (it grays
+    what it must)."""
     QtCore, QtGui = _qt()
     dialog = owner.dialog
     state = _busy_state(owner)
     row, label, bar = _busy_parts(dialog)
-    state.update({"stop": False, "then": None, "pumped": 0.0, "what": None})
+    state.update({"stop": False, "then": None, "pumped": 0.0, "what": None, "running": True,
+                  "stoppable": bool(stoppable)})
+    cancel_states(owner)
     _mcp_busy(owner, what)  # (FreeLab MCP waits on it: set before the first events go through)
     if row is not None:
         try:
@@ -5140,6 +5184,8 @@ def busy_end(owner):
     QtCore, QtGui = _qt()
     state = _busy_state(owner)
     _guard_off(owner)
+    state["running"] = False
+    cancel_states(owner)
     _mcp_busy(owner, False)
     name_controls(owner)  # (the controls the work made, for FreeLab MCP)
     try:
@@ -5161,6 +5207,75 @@ def busy_end(owner):
     then, state["then"], state["stop"] = state.get("then"), None, False
     if then is not None:
         QtCore.QTimer.singleShot(0, then)
+
+
+def cancel_button(owner, row, close, note=u""):
+    """The window's Cancel button, made and put in row (the bottom row's layout) right before close (its Close
+    button, in row already; at the row's end where row does not hold it), held as owner.cancel_button. Grayed
+    until stoppable work runs (busy_start and busy_end set it: cancel_states), never hidden, so the row keeps
+    its place. While the work runs, the input guard lets a click on it through and stops the work as Esc does
+    (_guard_on: the same stop, the same lines in the log). note: a sentence a tool adds to its help (what a
+    stop leaves behind). The button, or None where it could not be made. Never raises."""
+    QtGui = _qt()[1]
+    try:
+        button = QtGui.QPushButton(u"Cancel")
+        button.setProperty(CANCEL_PROP, True)
+        button.setProperty(WITHOUT_FONT_PROP, True)  # (no_font_states leaves it to cancel_states, font or not)
+        button.setToolTip(CANCEL_TIP)
+        button.setWhatsThis(CANCEL_HELP + (u" " + note if note else u""))
+        button.setEnabled(False)
+        at = None
+        for k in range(row.count()):
+            item = row.itemAt(k)
+            held = item.widget() if item is not None else None
+            if held is not None and _same(held, close):
+                at = k
+                break
+        if at is None:
+            row.addWidget(button)
+        else:
+            row.insertWidget(at, button)
+
+        def clicked(*args):  # (the guard takes the click while the work runs; this is for one it let through)
+            busy_cancel(owner)
+        button.connect("clicked()", clicked)
+        owner.cancel_button, owner.cancel_clicked = button, clicked  # (held with the tool: PythonQt drops a slot no one holds)
+        return button
+    except Exception:
+        return None
+
+
+def cancel_states(owner):
+    """A window's Cancel button usable while its work runs and can stop (busy_start's stoppable), grayed
+    otherwise. Never raises."""
+    button = getattr(owner, "cancel_button", None)
+    if button is None:
+        return
+    state = _busy_state(owner)
+    try:
+        button.setEnabled(bool(state.get("running") and state.get("stoppable", True)))
+    except Exception:
+        pass
+
+
+def busy_stoppable(owner, stoppable=True):
+    """The work under way can stop from here on (or no longer can), its Cancel button set to match: a write's bar
+    that goes on as a reading of the font (CJK Vertical reads its list again under the bar of the write it
+    followed), which Esc already stops (busy_progress's own stoppable). Never raises."""
+    state = _busy_state(owner)
+    if state.get("running"):
+        state["stoppable"] = bool(stoppable)
+        cancel_states(owner)
+
+
+def busy_cancel(owner):
+    """The work asked to stop at its next step, as Esc asks (nothing done after it): only while it runs and can
+    stop. Whether it was asked."""
+    state = _busy_state(owner)
+    if not (state.get("running") and state.get("stoppable", True)) or state.get("stop"):
+        return False
+    state["stop"], state["then"] = True, None
+    return True
 
 
 def _guard_on(owner):
@@ -5195,6 +5310,10 @@ def _guard_on(owner):
                     for _ in range(4):
                         if target is None:
                             break
+                        if target.property(CANCEL_PROP):  # (Cancel: on release, the stop Esc asks; grayed, nothing)
+                            if kind == 3 and target.isEnabled() and state.get("stoppable", True):
+                                ask(None)
+                            return True
                         if target.property(BUSY_ALLOWED_PROP) or (
                                 target.inherits("QPushButton") and (u"%s" % target.text).replace(u"&", u"") in ALWAYS_ON_TEXTS):
                             if kind == 3:  # (on release: stop, then click it, or open its menu)
@@ -5850,16 +5969,59 @@ def clear_selections(window):
     return cleared
 
 
+def help_menu_sheet(base, text, highlight, highlighted):
+    """The stylesheet that gives the one-entry menu of help the frame and colors of the help it leads to
+    (#rrggbb names: the help's background and text, the highlight and its text): no margin for ticks and
+    icons, which a menu of one entry has no use for (the owner, November 23 and 24, images 25 and 31). The
+    frame is in the text's color, as Qt draws the help's own."""
+    return (u"QMenu { background-color: %s; color: %s; border: 1px solid %s; padding: 0px; }\n"
+            u"QMenu::item { background-color: transparent; padding: 3px 8px; }\n"
+            u"QMenu::item:selected { background-color: %s; color: %s; }"
+            % (base, text, text, highlight, highlighted))
+
+
+def help_menu_picked(window, where):
+    """The right-click menu of help ("What's This?") shown at where: whether it was picked. It is given a
+    tooltip's frame and colors (help_menu_sheet). The menu is FontLab's main window's, not the tool's. Made
+    for the click and deleted after it (by Qt: it has a parent)."""
+    QtGui = _qt()[1]
+    main = None
+    try:
+        main = AutoKerningDialog.main_window()
+    except Exception:
+        pass
+    menu = QtGui.QMenu(main if main is not None else window)
+    try:
+        try:
+            # (the application's palette, which the help itself is drawn with; QToolTip's own stays light
+            # yellow in dark mode, read live 2026-11-24)
+            tip = QtGui.QApplication.palette()
+            # (dark mode maps a stylesheet's light borders to dark ones: the frame went as the menu was
+            # first highlighted, the owner, November 24. Marked before the stylesheet is set.)
+            menu.setProperty(LEAVE_ALONE_PROP, True)
+            menu.setStyleSheet(help_menu_sheet(
+                tip.color(QtGui.QPalette.ToolTipBase).name(), tip.color(QtGui.QPalette.ToolTipText).name(),
+                menu.palette.color(QtGui.QPalette.Highlight).name(),
+                menu.palette.color(QtGui.QPalette.HighlightedText).name()))
+        except Exception:
+            pass  # (a standard menu then)
+        action = menu.addAction(u"What's This?")
+        picked = menu.exec_(where)
+        return picked is not None and (picked is action or picked.text == action.text)
+    finally:
+        try:
+            menu.deleteLater()
+        except Exception:
+            pass
+
+
 def show_disabled_help(widget, where):
     """The What's This menu Qt shows on a right-click, for a grayed-out control: its help once picked."""
     QtGui = _qt()[1]
     text = disabled_help(widget)
     if not text:
         return False
-    menu = QtGui.QMenu(widget.window())
-    action = menu.addAction(u"What's This?")
-    picked = menu.exec_(where)
-    if picked is not None and widget_alive(widget) and (picked is action or picked.text == action.text):
+    if help_menu_picked(widget.window(), where) and widget_alive(widget):
         center = _property(widget, "rect").center()
         QtGui.QWhatsThis.showText(widget.mapToGlobal(center), text, widget)
     return True
@@ -6050,11 +6212,7 @@ def tab_help(bar, index):
 
 def _whats_this_menu(window, where):
     """Qt's own right-click menu of help ("What's This?"): whether it was picked."""
-    QtGui = _qt()[1]
-    menu = QtGui.QMenu(window)
-    action = menu.addAction(u"What's This?")
-    picked = menu.exec_(where)
-    return picked is not None and (picked is action or picked.text == action.text)
+    return help_menu_picked(window, where)
 
 
 def show_tab_help(bar, event, menu):
@@ -6532,6 +6690,21 @@ def html(text):
     return (u"%s" % text).replace(u"&", u"&amp;").replace(u"<", u"&lt;").replace(u">", u"&gt;")
 
 
+def error_sentence(lead, error):
+    """A log or status sentence naming an error, made safe for rich text: "Stopped by an error: no master.".
+    The log adds no period of its own, and an error's text may end with one or not, so the sentence ends
+    with exactly one."""
+    try:
+        text = html(u"%s" % (error,)).rstrip()
+    except Exception:
+        text = html(repr(error))
+    if not text:
+        return u"%s." % lead
+    if not text.endswith((u".", u"!", u"?", u"\N{HORIZONTAL ELLIPSIS}")):
+        text += u"."
+    return u"%s: %s" % (lead, text)
+
+
 GLYPH_LINK = u"glyph:"
 
 
@@ -6566,13 +6739,73 @@ def linked_char(target):
 
 
 GLYPH_NAME_LINK = u"glyphname:"
+_LINK_KEPT = frozenset(u"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-~")
+_LINK_ESCAPE = re.compile(u"%([0-9A-Fa-f]{2})")
+
+
+def link_quoted(text):
+    """text as a link's target carries it: letters, digits, and . _ - ~ (a glyph name's usual characters:
+    a.alt1, f_f_i, uni0E01) kept as they are, every other character percent-encoded from its UTF-8, so
+    that a quote cannot end the href, and a space, #, ?, or % cannot make a URL of it cut or changed
+    on its way back through QUrl (link_unquoted reads it)."""
+    try:
+        data = bytearray((u"%s" % text).encode("utf-8"))
+    except Exception:  # (a lone surrogate under Python 3: kept as Python writes it)
+        data = bytearray((u"%s" % text).encode("utf-8", "backslashreplace"))
+    out = []
+    for byte in data:
+        ch = unichr_(byte) if byte < 0x80 else u""
+        out.append(ch if ch in _LINK_KEPT else u"%%%02X" % byte)
+    return u"".join(out)
+
+
+def link_unquoted(text):
+    """A link's target as link_quoted wrote it, read back (each %XX decoded from UTF-8; QUrl may hand
+    some back decoded already, which reads the same)."""
+    text = u"%s" % text
+    if u"%" not in text:
+        return text
+    data, at = bytearray(), 0
+    for match in _LINK_ESCAPE.finditer(text):
+        data.extend(bytearray(text[at:match.start()].encode("utf-8")))
+        data.append(int(match.group(1), 16))
+        at = match.end()
+    data.extend(bytearray(text[at:].encode("utf-8")))
+    return bytes(data).decode("utf-8", "replace")
 
 
 def glyph_name_links(names):
     """Glyphs by name as links (u"glyphname:" and the name), for glyphs without a character, or whose
     character the interface's fonts may not have: a font's private-use glyphs came out as empty boxes
     in a log. A log that follows the font (Log.follow) draws each as the font does."""
-    return u" ".join(u'<a href="%s%s">%s</a>' % (GLYPH_NAME_LINK, html(name), html(name)) for name in names if name)
+    return u" ".join(u'<a href="%s%s">%s</a>' % (GLYPH_NAME_LINK, link_quoted(name), html(name))
+                     for name in names if name)
+
+
+def glyph_name_link(name):
+    """A glyph a log line names by its name (owner's request of 2026-11-24, on Glyph Compose's "Made dotlessi
+    from i without its dot"): the name in italics, as a link that opens the glyph in a Glyph window of the
+    window's font on a click (the glyphname: target glyph_name_links use; Log.open_linked, or a dialog's
+    handler). Its text stays the name: Log.pictured draws only the links whose text is not in italics.
+    Only for names that come from the font, never for a word of a sentence."""
+    name = u"%s" % name
+    return u'<a href="%s%s"><i>%s</i></a>' % (GLYPH_NAME_LINK, link_quoted(name), html(name))
+
+
+LOG_NAMES_LINKED = 40  # glyph names a log line that had no cut of its own links at most (the rest counted)
+
+
+def glyph_names_linked(names, most=None, word=u"and"):
+    """Glyph names for a log line, each a glyph_name_link: u"a, b, and c" (joined: the serial comma), or
+    u"a, b, c" with word None (a line that lists them with commas alone). With most, the first most
+    named and the rest counted, as a log shortens a long list (u"a, b, and 4 more"): a link per name
+    costs the log its HTML, and a line may name hundreds."""
+    names = [u"%s" % name for name in names if name]
+    shown = [glyph_name_link(name) for name in (names if most is None else names[:most])]
+    if most is not None and len(names) > most:
+        more = u"%s more" % grouped(len(names) - most)
+        return joined(shown + [more], word or u"and")
+    return u", ".join(shown) if word is None else joined(shown, word)
 
 
 LOG_PAIRS_SHOWN = 12  # a log line names the pairs it wrote when they are this few
@@ -6588,7 +6821,7 @@ def linked_glyph_name(target):
     """The glyph name a link names, or None."""
     if not target.startswith(GLYPH_NAME_LINK):
         return None
-    return target[len(GLYPH_NAME_LINK):] or None
+    return link_unquoted(target[len(GLYPH_NAME_LINK):]) or None
 
 
 def glyph_of_link(package, target):
@@ -6611,7 +6844,8 @@ def glyph_of_link(package, target):
 GLYPH_PICTURE_SIZE = 0.9
 GLYPH_PICTURE_ABOVE, GLYPH_PICTURE_BELOW = 1.08, 0.78
 GLYPH_UNDERLINE = 0.14  # of the em under the baseline: where a linked glyph's underline is drawn
-_GLYPH_ANCHOR = re.compile(u'<a href="(glyph(?:name)?:[^"]+)">(.*?)</a>')
+# (a link whose text is in italics is a glyph named by its name, glyph_name_link: its name stays)
+_GLYPH_ANCHOR = re.compile(u'<a href="(glyph(?:name)?:[^"]+)">(?!<i>)(.*?)</a>')
 
 
 def glyph_picture(package, master, name, color, line):
@@ -7011,6 +7245,23 @@ def counted(number, one, many=None):
     """"1 pair", "2 pairs", "13,932 glyphs": a count (thousands set apart, grouped) with its noun in the
     right number."""
     return u"%s %s" % (grouped(number), one if number == 1 else (many or one + u"s"))
+
+
+KILOBYTE = 1024  # a log's file sizes count as Windows' Explorer counts them, so the two read alike
+
+
+def file_size_text(size):
+    """A file's size as a log words it (the owner, 2026-11-24): whole KB under 1 MB (1 KB at the least, 0 KB
+    for an empty file), MB with one decimal under 1 GB, GB with one decimal past it: u"840 KB", u"12.3 MB",
+    u"1.6 GB". A value that rounds up to the next unit is said in it (1,023.96 MB is u"1.0 GB")."""
+    size = max(0, int(size or 0))
+    kb = int(size / float(KILOBYTE) + 0.5)  # (halves up, in Python 2.7 as in 3: round() differs between them)
+    if kb < KILOBYTE:
+        return u"%s KB" % grouped(max(1, kb) if size else 0)
+    mb = size / float(KILOBYTE ** 2)
+    if float(u"%.1f" % mb) < KILOBYTE:
+        return u"{:,.1f} MB".format(mb)
+    return u"{:,.1f} GB".format(size / float(KILOBYTE ** 3))
 
 
 def font_named(name, master=None, masters=1):
@@ -7643,10 +7894,18 @@ class Log(object):
 
     def open_linked(self, target):
         """A glyph link no dialog took: its glyph in a new Glyph tab (a list that no longer shows the
-        glyph has no row to select)."""
-        if self.source is None:
-            return
-        fontlab, package = self.source()[:2]
+        glyph has no row to select). In a window whose log follows no font (its lines never drawn), the
+        font of the tool whose window the log is in (window_owner): a glyph named by its name
+        (glyph_name_link, flag_glyphs) opens in every tool."""
+        if self.source is not None:
+            fontlab, package = self.source()[:2]
+        else:
+            if linked_glyph_name(target) is None and linked_code(target) is None:
+                return
+            owner = window_owner(self.view.window())
+            fontlab, package = getattr(owner, "fontlab", None), getattr(owner, "package", None)
+            if owner is None or fontlab is None:
+                return
         name = glyph_of_link(package, target)
         if not name:
             if linked_glyph_name(target) or linked_code(target) is not None:
@@ -7654,7 +7913,7 @@ class Log(object):
             return
         error = show_in_glyph_window(fontlab, u"/%s" % name)
         if error:
-            self.add(u"FontLab did not open the glyph: %s" % html(error), "error")
+            self.add(error_sentence(u"FontLab did not open the glyph", error), "error")
 
     def clear(self):
         self.entries, self.lines = [], []
@@ -9225,11 +9484,13 @@ def flag_glyphs(owner, names, label, value):
         if isinstance(menu, FlagMenu):
             menu.cache = {}
             menu.refresh()
+    # (a row's glyphs: one, a pair, a few; a row of a group may hold hundreds, which the line once named all)
+    named = glyph_names_linked([g.name for g in glyphs], LOG_NAMES_LINKED, word=None)
     if value:
         owner.log.add(u"Flagged %s %s in FontLab (<i>Select &gt; Same Flag</i> gathers them again; <i>F3</i> goes to the next "
-                      u"flagged row here)." % (b(u", ".join(g.name for g in glyphs)), html(label.lower())), "done")
+                      u"flagged row here)." % (named, html(label.lower())), "done")
     else:
-        owner.log.add(u"Took the flag off %s." % b(u", ".join(g.name for g in glyphs)), "done")
+        owner.log.add(u"Took the flag off %s." % named, "done")
 
 
 def open_auto_kerning_at(left, right, caller=None):
@@ -10003,23 +10264,23 @@ COLUMN_CHOICES = {1: "current", 2: "halfkern", 3: "contour", 4: "learned", 5: "f
 HELP = u"""<b>FreeLab Auto Kerning</b><br>
 Suggests kerning for the font's pairs, one script at a time (Latin, Cyrillic, Greek, Armenian, Georgian, Devanagari, kana,
 Hebrew, and Thaana: the <i>Script</i> list offers those the font has, and <i>All scripts</i>, each against its own references,
-in one list), and writes only the pairs you check. Kana are kerned as
+in one list), and writes only the pairs you tick. Kana are kerned as
 the font's palt sets them, on top of it. Hebrew and Thaana pairs are listed as read, right to left, measured and drawn as
 they stand on screen, and read and written in text order, the right glyph first, as FontLab 7 keeps them.<br><br>
-<b>The list</b>: each method's value beside the font's current one. Check the pairs to write;
-pairs the font kerns already start unchecked.<br>
+<b>The list</b>: each method's value beside the font's current one. Tick the pairs to write;
+pairs the font kerns already start unticked.<br>
 <b>Choosing a value for one pair</b>: click a preview below the list, double-click a value in the
 list, or press <i>Ctrl</i> and its number (1 Now, 2 Average, 3 halfkern, 4 Contour, 5 FreeLab, 6 FontLab)
-while the list has the focus. A pair picked by hand is tinted; <i>Backspace</i> or <i>Reset pair</i> gives it the
-suggested value again. <i>Restore suggestions</i> puts every check and pick back as the list first came.<br>
-<b>Keys in the list</b>: arrows move, a letter jumps to the pairs starting with it, <i>Space</i> checks or
-unchecks the pair, <i>Ctrl+1</i> to <i>Ctrl+6</i> pick, <i>Backspace</i> resets.<br>
+while the list has the focus. A pair picked by hand is tinted; <i>Backspace</i>, <i>Delete</i>, or <i>Reset
+pair</i> gives it the suggested value again. <i>Restore suggestions</i> puts every tick and pick back as the list first came.<br>
+<b>Keys in the list</b>: arrows move, a letter jumps to the pairs starting with it, <i>Space</i> ticks or
+unticks the pair.<br>
 <b>The H's around a pair</b> (the script's own straight letter past Latin): double-click one, in any
 preview, to go to its pair with the pair's glyph beside it (H and T for HTo); a single click there does nothing.<br>
 <b>The pair's name</b>: double-click it to open the pair in a <i>Glyph</i> window.<br>
 <b>Kerning classes</b>: a pair is written where its value comes from: its own pair, or else its
 classes' pair, which kerns every glyph of both classes. The line under the list says which.<br><br>
-Click this help's <i>?</i> button, then any control, for what it does."""
+Click this help's button, then anything in the window, for what it does (or right-click it: <i>What's This?</i>)."""
 
 
 class AutoKerningDialog(object):
@@ -10106,7 +10367,9 @@ class AutoKerningDialog(object):
         row.addSpacing(12)
         row.addWidget(QtGui.QLabel("Order:"))
         self.order = self.combo(ORDERS)
-        self.order.setWhatsThis("The order of the list.")
+        self.order.setWhatsThis("The largest change first (the average against the current value), the best "
+                                "agreement first (the smallest Spread), the most common in text first, or "
+                                "alphabetical.")
         row.addWidget(self.order)
         row.addSpacing(12)
         # Pairs the font kerns already are the designer's choices (a j tucked under the letter before
@@ -10134,9 +10397,10 @@ class AutoKerningDialog(object):
         self.tree.setIconSize(QtCore.QSize(*glyph_icon_size(2)))
         self.tree.setProperty(LEAVE_ALONE_PROP, True)  # its pictures are drawn in the dialog's colors
         self.tree.setWhatsThis(u"The pairs, each drawn at the value it takes, each method's value, and the value to "
-                               u"write (Suggested). Double-click a value to use it for that pair, or press <i>Ctrl+1</i> "
-                               u"to <i>Ctrl+6</i>; <i>Space</i> ticks the pair; <i>Backspace</i> gives it the suggested "
-                               u"value again. Double-click a pair to open it in a <i>Glyph</i> window.")
+                               u"write (Suggested). Spread: how far apart the methods' values lie (the smaller, the "
+                               u"more they agree). Double-click a value to use it for that pair, or press <i>Ctrl+1</i> "
+                               u"to <i>Ctrl+6</i>; <i>Space</i> ticks the pair; <i>Backspace</i> or <i>Delete</i> gives "
+                               u"it the suggested value again. Double-click a pair to open it in a <i>Glyph</i> window.")
         table_layout(self.tree, stretch=0)  # (the pairs take the room the numbers leave)
         layout.addWidget(self.tree, 1)
         self.icon_cache = {}  # (left, right, value, color): the pair's picture, drawn once
@@ -10150,8 +10414,9 @@ class AutoKerningDialog(object):
         self.reset_button.setWhatsThis("Gives the selected pair the value of the source chosen above, undoing a pick.")
         self.reset_button.setEnabled(False)
         self.glyph_window_button = QtGui.QPushButton(u"Show in Glyph window")
-        self.glyph_window_button.setWhatsThis(u"Opens the selected pair in a <i>Glyph</i> window, between H's, n's, and o's, "
-                                              u"to look at it (and edit it) with FontLab's own tools.")
+        self.glyph_window_button.setWhatsThis(u"Opens the selected pair in a <i>Glyph</i> window, between its script's "
+                                              u"control glyphs (H, n, and o for Latin), to look at it (and edit it) with "
+                                              u"FontLab's own tools.")
         self.glyph_window_button.setEnabled(False)
         layout.addLayout(note_row)  # (the pair's buttons in the bottom row, with the others acting on the list)
         self.related = QtGui.QLabel(u"")
@@ -10170,14 +10435,15 @@ class AutoKerningDialog(object):
             button.setProperty(LEAVE_ALONE_PROP, True)
             button.setStyleSheet(choice_sheet(dialog.palette))
             button.setToolTip(u"%s: click to use it for this pair (<i>Ctrl+%d</i> in the list)." % (html(label), number + 1))
-            button.setWhatsThis(u"The pair as %s sets it, between two H's. Click to use it for this pair." % label)
+            button.setWhatsThis(u"The pair as %s sets it, between two of its script's straight letters (H for Latin). "
+                                u"Click to use it for this pair." % label)
             button.setEnabled(False)
             self.choice_group.addButton(button, number)
             self.choice_buttons[key] = button
             grid.addWidget(button, number // 2, number % 2)
             _keep_room_when_hidden(button)  # drawn once a pair is selected
         self.neighbors = dict((key, ClickRegions(button, self.focus_neighbor,
-                                                 u"Double-click to go to this H's pair with the glyph beside it."))
+                                                 u"Double-click to go to this letter's pair with the glyph beside it."))
                               for key, button in self.choice_buttons.items())
         layout.addLayout(grid)
         layout.addWidget(self.log.widget)
@@ -10185,6 +10451,7 @@ class AutoKerningDialog(object):
         self.all_button = QtGui.QPushButton("Tick new pairs")
         self.all_button.setWhatsThis("Ticks every listed pair the font does not kern yet.")
         self.none_button = QtGui.QPushButton("Untick all")
+        self.none_button.setWhatsThis("Unticks every listed pair.")
         self.restore_button = QtGui.QPushButton("Restore suggestions")
         self.restore_button.setWhatsThis("Puts every tick and every value picked by hand back as the list first "
                                          "came, after the last analysis.")
@@ -10205,6 +10472,7 @@ class AutoKerningDialog(object):
         buttons.addStretch(1)
         buttons.addWidget(self.apply_button)
         buttons.addWidget(self.close_button)
+        cancel_button(self, buttons, self.close_button, AUTO_KERNING_CANCEL_NOTE)  # (right before Close)
         layout.addLayout(buttons)
         self.apply_button.setEnabled(False)
         self.analyze_button.connect("clicked()", self.run)
@@ -10254,13 +10522,13 @@ class AutoKerningDialog(object):
         # (in the font's key order: FontLab 7 sets typed Hebrew left to right and kerns it by that key)
         error = show_in_glyph_window(self.fontlab, proof_text(s.key[0], s.key[1], proof_contexts(self.package, list(s.key))))
         if error:
-            self.log.add(u"FontLab did not open the pair: %s" % html(error), "error")
+            self.log.add(error_sentence(u"FontLab did not open the pair", error), "error")
 
     def open_kerning_check(self):
         """Kerning Check, the script beside this one, on the same font."""
         error = open_sibling_script(KERNING_CHECK_FILE, KERNING_CHECK_MODULE, caller=self.dialog)
         if error:
-            self.log.add(u"<i>Kerning Check</i> did not open: %s" % html(error), "error")
+            self.log.add(error_sentence(u"<i>Kerning Check</i> did not open", error), "error")
 
     def make_keys(self):
         """The list's keys: Ctrl+1 to Ctrl+6 pick (a plain number or letter jumps to the pairs starting
@@ -10798,7 +11066,8 @@ class AutoKerningDialog(object):
         font = QtGui.QFont(self.tree.font)
         font.setBold(bool(s.override))
         item.setFont(last, font)
-        item.setToolTip(last, u"Picked by hand: %s. <i>Backspace</i> or <i>Reset pair</i> gives it the suggested value."
+        item.setToolTip(last, u"Picked by hand: %s. <i>Backspace</i>, <i>Delete</i>, or <i>Reset pair</i> gives it the "
+                              u"suggested value."
                         % html(dict(CHOICES)[s.override]) if s.override else u"")
         for column in range(len(self.COLUMNS)):
             if bool(item.data(column, PICKED_ROLE)) != bool(s.override):
@@ -10909,7 +11178,7 @@ class AutoKerningDialog(object):
             s = self.measure_one(left, right)
             if s is None:
                 self.log.add(u"The pair %s %s could not be measured: Auto Kerning measures pairs of encoded "
-                             u"glyphs." % (b(left), b(right)), "warning")
+                             u"glyphs." % (glyph_name_link(left), glyph_name_link(right)), "warning")
                 return
             self.analysis.suggestions.append(s)
             found = [s]
@@ -11257,13 +11526,15 @@ class AutoKerningDialog(object):
                 u"s" if classes == 1 else u"", u"its" if classes == 1 else u"their")) if classes else u"")
         if 0 < len(written) <= LOG_PAIRS_SHOWN:  # the pairs, drawn from the font, each glyph opened on a click
             first += u": %s" % pair_links([(s.left, s.right) for s in written])
-        lines = [u"%s shared an entry with a commoner pair and took its value." % b(counted(shared, u"pair"))] if shared else []
+        # (the write began with begin_kerning_write: one History step, promised only when it was recorded)
+        first += status.undo(u" (<i>Edit &gt; Undo</i> takes %s back)" % (u"it" if entries == 1 else u"them"))
+        lines =[u"%s shared an entry with a commoner pair and took its value." % b(counted(shared, u"pair"))] if shared else []
         self.update_picked()
         self.fill_table()
         if entries:  # (none: the error below says why)
             self.log.add(u" ".join([first + u"."] + lines), "done")
         if error is not None:
-            self.log.add(u"Stopped by an error: %s" % html(error), "error")
+            self.log.add(error_sentence(u"Stopped by an error", error), "error")
         status.report(self.log)
         self.seen_history = history_mark(self.package)
 
@@ -11357,8 +11628,12 @@ class ClassDialog(object):
         layout.addWidget(self.move)
         buttons = QtGui.QHBoxLayout()
         self.all_button = QtGui.QPushButton("Tick all")
+        self.all_button.setWhatsThis(u"Ticks every row of the list.")
         self.none_button = QtGui.QPushButton("Untick all")
+        self.none_button.setWhatsThis(u"Unticks every row of the list.")
         self.apply_button = QtGui.QPushButton("Create ticked classes")
+        self.apply_button.setWhatsThis(u"Makes the ticked new classes and extends the ticked ones the font has, in "
+                                       u"the current master.")
         self.exceptions_button = QtGui.QPushButton("Write ticked pairs")
         self.exceptions_button.setWhatsThis(u"Gives each ticked pair of <i>Pairs too close with their class's "
                                             u"value</i> the value shown, as a pair of its own: the class kerns "
@@ -11472,14 +11747,7 @@ class ClassDialog(object):
         # every row measured, each column at most TEXT_COLUMN_MOST: sized to its longest glyph list, the table
         # ran 1,664 pixels wide in a 964-pixel view (Tinos, live); a row's tooltip holds the whole list
         fit_rows(self.tree, range(len(CLASS_COLUMNS) - 1), most=TEXT_COLUMN_MOST)
-        plural = lambda count, one, many: u"%s %s" % (b(count), one if count == 1 else many)
-        self.summary = (u"%s, master %s: %s, %s, %s, %s. Nothing is changed until you "
-                        u"create them." % (b(self.package.tfn), b(self.master),
-                                           plural(counts.get("new", 0), u"new class", u"new classes"),
-                                           plural(counts.get("add", 0), u"class to extend", u"classes to extend"),
-                                           plural(counts.get("same", 0), u"the font has already", u"the font has already"),
-                                           plural(counts.get("overlap", 0), u"left as it is (it overlaps the font's classes)",
-                                                  u"left as they are (they overlap the font's classes)")))
+        self.summary = u"%s, master %s: %s" % (b(self.package.tfn), b(self.master), class_counts_text(counts))
         self.status.setText(self.summary)
         self.apply_button.setEnabled(bool(counts.get("new") or counts.get("add")))
         for button in (self.all_button, self.none_button):  # (grayed by update_states while the list was empty)
@@ -11571,8 +11839,10 @@ class ClassDialog(object):
         current = self.owner.current_font()
         if current is None or font_key(current) != font_key(package) or current.master != master:
             self.run()
-            self.status.setText(u"The font or master changed since these pairs were measured: here are this one's. "
-                                + self.status.text)
+            self.status.setText(u"The font or master changed since these pairs were measured: they are measured again. "
+                                u"Nothing was written. " + self.status.text)
+            return
+        if not self.begin_classes_write(package):
             return
         kerning = FontKerning(package.kerning(master))
         stale = [e for e in chosen if kerning.current(*e.pair) != e.current]
@@ -11589,11 +11859,24 @@ class ClassDialog(object):
                 counted(len(stale), u"pair"), u"it was" if len(stale) == 1 else u"they were",
                 u"was" if len(stale) == 1 else u"were", u"it is" if len(stale) == 1 else u"they are"))
         if error is not None:
-            notes.append(u"Stopped by an error: %s" % html(error))
+            notes.append(error_sentence(u"Stopped by an error", error))
         if not status.ok:
             notes.append(status.message())
-        notes.append(u"Writing goes straight into the open font: close it without saving to take it back.")
+        if status.recorded:  # (not recorded: status.message() has said so, and how to drop the change)
+            notes.append(TAKE_BACK_NOTE)
         self.status.setText(u" ".join(notes) + u" " + self.status.text)
+
+    def begin_classes_write(self, package):
+        """The font recorded in FontLab's History before this window writes to it, as Auto Kerning's own
+        write does (begin_kerning_write): False, said in the status line, when it could not be, and nothing
+        may then be written. Tried live, 2026-11-24, on a font opened afresh: a class added and recorded
+        with no step before it was taken back by one Edit > Undo, kerning classes being the font's own
+        state; the step before keeps FontLab from complaining of component glyphs at that undo."""
+        if begin_write(self.owner.fontlab, package, u"FreeLab Auto Kerning", None):
+            return True
+        self.status.setText(u"Nothing was changed: FontLab's History could not record the font first, so "
+                            u"<i>Edit &gt; Undo</i> could not have taken the change back. " + self.status.text)
+        return False
 
     def check_all(self, on):
         """Check all or Check none over the rows that can be made, the window's status line saying how many
@@ -11618,8 +11901,8 @@ class ClassDialog(object):
         current = self.owner.current_font()
         if current is None or font_key(current) != font_key(package) or current.master != master:
             self.run()
-            self.status.setText(u"The font or master changed since these suggestions: here are this one's. Review them "
-                                u"before creating any. " + self.status.text)
+            self.status.setText(u"The font or master changed since these classes were suggested: they are suggested "
+                                u"again. Nothing was created. " + self.status.text)
             return
         fresh, _ = font_class_suggestions(package, master)  # the font as it is now: names free, classes as listed
         wanted = set(plan.key() for plan in chosen)
@@ -11630,6 +11913,8 @@ class ClassDialog(object):
             self.status.setText(u"The font's classes changed since these suggestions: they are worked out again. Review "
                                 u"them before creating any. " + self.status.text)
             return
+        if not self.begin_classes_write(package):
+            return
         error = None
         made = extended = moved = kept = 0
         try:
@@ -11638,19 +11923,44 @@ class ClassDialog(object):
             error = exc
         status = self.owner.after_writing(package)
         self.run()
-        notes = [u"Made %s and extended %d%s." % (counted(made, u"class", u"classes"), extended,
-                                                   u", and moved %s into them" % counted(moved, u"pair") if moved else u"")]
+        notes = [class_made_text(made, extended, moved)]
         if kept:
             notes.append(u"%s kept %s own value as an exception." % (counted(kept, u"glyph pair"),
                                                                     u"its" if kept == 1 else u"their"))
         if error is not None:
-            notes.append(u"Stopped by an error: %s" % html(error))
+            notes.append(error_sentence(u"Stopped by an error", error))
         if not status.ok:
             notes.append(status.message())
-        notes.append(u"Writing goes straight into the open font: close it without saving to take it back.")
+        if status.recorded:  # (not recorded: status.message() has said so, and how to drop the change)
+            notes.append(TAKE_BACK_NOTE)
         self.status.setText(u" ".join(notes) + u" " + self.status.text)
         if self.owner.package is not None and font_key(self.owner.package) == font_key(package):
             self.owner.run()  # Auto Kerning reads the classes again
+
+
+TAKE_BACK_NOTE = u"<i>Edit &gt; Undo</i> takes it back."
+
+
+def class_counts_text(counts):
+    """Kerning Classes' status line after the font's name: how many classes of each kind are suggested
+    ({action: count}), each count in bold with its noun, as the other windows' status lines."""
+    count = lambda key: counts.get(key, 0)
+    overlap = count("overlap")
+    return u"%s, %s, %s the font has already, %s %s. Nothing is changed until you create them." % (
+        b(counted(count("new"), u"new class", u"new classes")),
+        b(counted(count("add"), u"class to extend", u"classes to extend")),
+        b(counted(count("same"), u"class", u"classes")), b(counted(overlap, u"class", u"classes")),
+        u"left as it is (it overlaps the font's classes)" if overlap == 1
+        else u"left as they are (they overlap the font's classes)")
+
+
+def class_made_text(made, extended, moved):
+    """Kerning Classes' line once classes are made: each count with its noun."""
+    moved_text = u""
+    if moved:
+        moved_text = u", and moved %s into %s" % (counted(moved, u"pair"), u"it" if made + extended == 1 else u"them")
+    return u"Made %s and extended %s%s." % (counted(made, u"class", u"classes"), counted(extended, u"class", u"classes"),
+                                            moved_text)
 
 
 CLASS_HELP = u"""<b>FreeLab Kerning Classes</b><br>
@@ -11663,14 +11973,14 @@ font.<br>
 3% of the em or more, each at the pair where it differs most (an e with an accent beside T: the accent
 stops it from tucking under T's bar as far as e does). The class's value will not fit that pair.<br>
 <b>Pairs too close with their class's value</b>: the noted pairs the class tightens now, each with a
-value of its own: the class's, loosened by the difference measured (never past 0). <i>Write checked
+value of its own: the class's, loosened by the difference measured (never past 0). <i>Write ticked
 pairs</i> writes them as glyph pairs, which the class's value no longer reaches.<br>
 <b>Sides</b>: <i>First in a pair</i> classes group glyphs by their right side (FontLab's left, or 1st,
 classes); <i>second in a pair</i> by their left side.<br>
 <b>The font's classes come first</b>: a suggestion makes a class only where none of its glyphs has one
 on that side, or adds glyphs to the one class they share. Suggestions overlapping several classes,
 or a class that kerns both sides, are shown and left as they are.<br><br>
-Click this help's <i>?</i> button, then any control, for what it does."""
+Click this help's button, then anything in the window, for what it does (or right-click it: <i>What's This?</i>)."""
 
 
 

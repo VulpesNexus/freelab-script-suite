@@ -18,14 +18,14 @@ import sys
 TABS_MODULE = "freelab_tabs"
 TABS_FILE = "freelab_tabs.py"
 REORDER = u"Dock tabs released on or near the tab bar."
-REORDER_TIP = (u"Drag a tab along the tab bar to reorder it: a tab released on or near the bar goes back into "
-               u"the main window at that place. A window of its own gets a Dock button, and a double-click on "
-               u"its tab docks it.")
+REORDER_TIP = (u"Drag a tab along the tab bar to reorder it: a tab released on or near the bar, or a window of "
+               u"its own dragged there by its title bar, goes into the main window at that place. A window of its "
+               u"own gets a <i>Dock</i> button, and a double-click on its tab docks it.")
 NO_UNDOCK = u"Tabs cannot be undocked."
-NO_UNDOCK_TIP = (u"A tab dragged away from the main window goes back where it was, and FontLab's Undock commands "
-                 u"(Window > Docking) are hidden. With the first box unticked, tabs cannot be reordered by "
-                 u"dragging, as in FontLab itself.")
-OFF_NOTE = u"Tab docking is off: OK switches it on with these options."
+NO_UNDOCK_TIP = (u"A tab of the main window cannot be dragged out of it, and FontLab's <i>Undock</i> commands "
+                 u"(<i>Window &gt; Docking</i>) are hidden. With <i>Dock tabs released on or near the tab bar</i> "
+                 u"ticked too, a tab still moves along the tab bar; with it unticked, dragging a tab does nothing.")
+OFF_NOTE = u"Tab docking is off: <i>OK</i> switches it on with these options (with both unticked, it stays off)."
 SCRIPT_WINDOW_PROP = "mcpScriptWindow"  # FreeLab MCP's convention: the dialog is a script's, not FontLab's question
 
 

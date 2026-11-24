@@ -618,26 +618,36 @@ def readable(text, tag):
         raise FeatureCodeUnreadable(tag, u"its code's braces do not match")
 
 
+def rich_escaped(text):
+    """Text made safe inside a rich-text sentence (a glyph's or a tag's name)."""
+    return (u"%s" % text).replace(u"&", u"&amp;").replace(u"<", u"&lt;").replace(u">", u"&gt;")
+
+
 def refused_words(tags):
-    """The sentence for features FreeLab leaves as they are (FeatureCodeUnreadable), or empty."""
+    """The sentence for features FreeLab leaves as they are (FeatureCodeUnreadable), or empty: rich text,
+    its tags escaped here, so that the panel's name can be in italics (the log and status take it as is)."""
     if not tags:
         return u""
     one = len(tags) == 1
     return (u"FreeLab leaves %s as %s: it cannot find where %s code begins and ends (the feature's braces), "
-            u"so nothing of FreeLab's goes in. Check %s code in FontLab's Features panel." % (
-                describe_list(sorted(set(tags))), u"it is" if one else u"they are",
+            u"so nothing of FreeLab's goes in. Check %s code in FontLab's <i>Features</i> panel." % (
+                rich_escaped(describe_list(sorted(set(tags)))), u"it is" if one else u"they are",
                 u"that feature's" if one else u"each one's", u"its" if one else u"their"))
 
 
-def stuck_words(glyphs):
-    """The sentence for ligatures set to another feature than the one the font's own code puts them in."""
+def stuck_words(glyphs, named=None):
+    """The sentence for ligatures set to another feature than the one the font's own code puts them in:
+    rich text, as refused_words'. named: how the log writes a glyph's name (ak.glyph_name_link, a link that
+    opens it); the status line, whose links nothing opens, takes the names escaped alone."""
     if not glyphs:
         return u""
     one = len(glyphs) == 1
+    names = sorted(set(glyphs))
     return (u"FreeLab does not move %s: the font's own code has %s rule, and FreeLab never moves or takes out "
-            u"a rule the font wrote. %s where %s: move %s in FontLab's Features panel." % (
-                describe_list(sorted(set(glyphs))), u"its" if one else u"each one's", u"It stays" if one else
-                u"They stay", u"it is" if one else u"they are", u"it" if one else u"them"))
+            u"a rule the font wrote. %s where %s: move %s in FontLab's <i>Features</i> panel." % (
+                describe_list([named(name) for name in names]) if named else rich_escaped(describe_list(names)),
+                u"its" if one else u"each one's",
+                u"It stays" if one else u"They stay", u"it is" if one else u"they are", u"it" if one else u"them"))
 
 
 def ligature_texts(found, texts, refused=None, stuck=None):
@@ -3069,8 +3079,12 @@ FEA_TOKEN = re.compile(u"#.*|\"[^\"]*\"?|\\[[^\\]]*\\]?|@[A-Za-z0-9_.\\-]+|[{};]
                        u"-?[0-9]+(?:\\.[0-9]+)?(?![A-Za-z0-9_.])|[A-Za-z0-9_.\\\\\\-]+")
 FEA_KINDS = ("keyword", "tag", "class", "list", "comment", "number", "string")
 # (r, g, b) on a dark background, on a light one: each kind plain to read on either (as LOG_COLORS)
+# (a glyph list on a dark background: a paler yellow than the (225, 200, 140) it was, whose words showed a pink
+# and blue hue at their edges, owner's image 26 of November 23. Windows smooths text with the screen's color
+# stripes, and a color with little blue in it shows that most; smoothing in grays instead is no way out, GDI
+# then smooths nothing at this size, as drawn off screen in FontLab: two colors, jagged)
 FEA_COLORS = {"keyword": ((110, 170, 240), (20, 70, 190)), "tag": ((90, 205, 185), (0, 120, 130)),
-              "class": ((205, 150, 225), (130, 40, 150)), "list": ((225, 200, 140), (130, 90, 20)),
+              "class": ((205, 150, 225), (130, 40, 150)), "list": ((224, 208, 166), (130, 90, 20)),
               "comment": ((125, 180, 105), (40, 120, 40)), "number": ((190, 220, 160), (20, 120, 80)),
               "string": ((230, 150, 120), (170, 50, 30))}
 # Past this many lines the code is shown plain: Qt asks the highlighter for every line each time the
@@ -3139,6 +3153,8 @@ ICON_SIZE = 36
 ROW_HEIGHT = ICON_SIZE + 4
 TIP_WIDTH = 520  # pixels: a tooltip's text at most (Font Check's width)
 TIP_CHARACTER = 7  # pixels: about a character's width (a tooltip's text is not measured)
+# The Cancel button's own line (ak.cancel_button): what a stop leaves (read_stopped; writes and builds never stop)
+CANCEL_NOTE = u"A reading of the font stopped changes nothing in it: nothing is listed."
 
 
 def load_auto_kerning():
@@ -3430,7 +3446,7 @@ The code is made again as you change the choices. Pick a ligature's feature in i
 double-click a ligature, a glyph, or a form to see it in a <i>Glyph</i> window. The bottom row holds the buttons
 of the tab shown, then <i>Restore suggestions</i>, which puts the choices back as they first came; at the
 right, <i>Compile after writing</i>, <i>Write the code</i> beside it, the tab's builds, and <i>Close</i>.<br><br>
-Click this help's <i>?</i> button, then any control, for what it does."""
+Click this help's button, then anything in the window, for what it does (or right-click it: <i>What's This?</i>)."""
 
 TABS = (u"Ligatures and alternates", u"Forms", u"Stylistic alternates")
 ALTERNATES_TAB = 2  # the third tab's index (its page is the tab's own module: freelab_alternates.py)
@@ -3690,7 +3706,7 @@ class FeatureCodeDialog(object):
         describe(self.top_line, u"The font this window works on, and its current master (whose outlines the lists "
                                 u"draw and the figure forms are measured in). While the font is read, glyphs are "
                                 u"built, or the code is written, a bar in its place says what is under way: the tools "
-                                u"menu, the arrows, <i>Close</i>, and Esc stop a read, and wait for a build or a write.")
+                                u"menu, the arrows, <i>Close</i>, and <i>Esc</i> stop a read, and wait for a build or a write.")
         layout.addWidget(self.top_line)
         self.status = self.ak.status_label()
         self.status.setWordWrap(True)
@@ -3721,9 +3737,9 @@ class FeatureCodeDialog(object):
         self.tabs.setExpanding(False)
         for label in TABS:
             self.tabs.addTab(label)
-        self.tabs.setTabToolTip(0, u"Ligatures (liga, dlig) and alternates that take turns (calt)")
-        self.tabs.setTabToolTip(1, u"Forms: case, locl, fractions and figures, small capitals, stylistic sets")
-        self.tabs.setTabToolTip(2, u"Alternates fonts commonly offer, as copies to redraw; variants that take turns")
+        self.tabs.setTabToolTip(0, u"Ligatures (liga, dlig) and alternates that take turns (calt).")
+        self.tabs.setTabToolTip(1, u"Forms: case, locl, fractions and figures, small capitals, and stylistic sets.")
+        self.tabs.setTabToolTip(2, u"Alternates fonts commonly offer, as copies to redraw; variants that take turns.")
         describe(self.tabs, u"The window's three tabs: <i>Ligatures and alternates</i> (liga, dlig, and calt), "
                             u"<i>Forms</i> (case, locl, fractions and figures, small capitals, stylistic sets, and the "
                             u"figure forms to build), and <i>Stylistic alternates</i> (copies to redraw, and variants "
@@ -3891,8 +3907,8 @@ class FeatureCodeDialog(object):
                                          u"tick, every set's name, and the build settings back as they first came.")
         self.write_button = QtGui.QPushButton("Write the code")
         self.write_button.setWhatsThis(u"Writes the features as shown (liga, dlig, calt, and the ticked forms) to the "
-                                       u"font, and the language systems locl needs to its prefix (<i>Update the code</i>: "
-                                       u"FreeLab's code is in them already, and changes).")
+                                       u"font, and the language systems locl needs to its prefix. Named <i>Update the "
+                                       u"code</i> when the font has FreeLab's code already.")
         self.close_button = QtGui.QPushButton("Close")
         self.close_button.setWhatsThis(u"Closes the window. What was written or built stays in the font; choices "
                                        u"not written are not kept.")
@@ -3950,7 +3966,7 @@ class FeatureCodeDialog(object):
         tab's Tick all and Untick all), then Restore suggestions; at the right Compile after writing, Write
         the code (or Update the code) right beside it (the tick is about that button: owner's image 298),
         then the shown tab's builds (Build ticked figure forms; Make copies to redraw and Build N variants),
-        and Close. Every tab's buttons are in it, those of the tab shown visible (show_tab_buttons): no
+        then Cancel and Close. Every tab's buttons are in it, those of the tab shown visible (show_tab_buttons): no
         button is left between a list and its splitter handle."""
         row = QtGui.QHBoxLayout()
         left, right = self.tab_buttons()
@@ -3965,6 +3981,7 @@ class FeatureCodeDialog(object):
             for button in buttons:
                 row.addWidget(button)
         row.addWidget(self.close_button)
+        self.ak.cancel_button(self, row, self.close_button, CANCEL_NOTE)  # (right before Close)
         self.show_tab_buttons(0)
         return row
 
@@ -5536,9 +5553,9 @@ class FeatureCodeDialog(object):
                 self.ak.glyph_name_links(skipped), u"was" if len(skipped) == 1 else u"were",
                 u"it was" if len(skipped) == 1 else u"they were"), "warning")
         for name, why in failed:
-            self.log.add(u"%s was not built: %s." % (b(name), self.ak.html(why)), "warning")
+            self.log.add(u"%s was not built: %s." % (self.ak.glyph_name_link(name), self.ak.html(why)), "warning")
         if error is not None:
-            self.log.add(u"Stopped by an error: %s" % self.ak.html(error), "error")
+            self.log.add(self.ak.error_sentence(u"Stopped by an error", error), "error")
         forms, choices = self.form_state(), self.choice_state()
         self.run()
         self.apply_choices(choices)
@@ -5950,8 +5967,9 @@ class FeatureCodeDialog(object):
                                 b(grouped(counts["dlig"])), b(grouped(counts["off"])),
                                 b(counted(len(cycling), u"glyph")), forms,
                                 u" The font has this code already." if not changes and (texts or self.forms) else u"",
-                                (u" " + self.ak.html(refused_words(self.refused))) if getattr(self, "refused", None) else u"",
-                                (u" " + self.ak.html(stuck_words(self.stuck))) if getattr(self, "stuck", None) else u"",
+                                # (rich text, their names escaped: refused_words)
+                                (u" " + refused_words(self.refused)) if getattr(self, "refused", None) else u"",
+                                (u" " + stuck_words(self.stuck)) if getattr(self, "stuck", None) else u"",
                                 (u" The code has problems, so nothing can be written: " +
                                  self.ak.html(u"; ".join(problems))) if problems else u""))
 
@@ -6069,9 +6087,9 @@ class FeatureCodeDialog(object):
             "done" if written else "info")
         status.report(self.log)
         if self.refused:
-            self.log.add(self.ak.html(refused_words(self.refused)), "warning")
+            self.log.add(refused_words(self.refused), "warning")  # (rich: their names escaped there)
         if self.stuck:
-            self.log.add(self.ak.html(stuck_words(self.stuck)), "warning")
+            self.log.add(stuck_words(self.stuck, self.ak.glyph_name_link), "warning")
         if skipped is not None:
             self.log.add(u"locl was not written: the prefix could not be (%s). Add these lines to the prefix in "
                          u"FontLab's <i>Features</i> panel, then write again: %s" % (
@@ -6079,7 +6097,7 @@ class FeatureCodeDialog(object):
                                                                            sorted(language_systems(self.locl()))))),
                          "warning")
         if error is not None:
-            self.log.add(u"Stopped by an error: %s" % self.ak.html(error), "error")
+            self.log.add(self.ak.error_sentence(u"Stopped by an error", error), "error")
 
     def show(self):
         QtCore, QtGui = _qt()

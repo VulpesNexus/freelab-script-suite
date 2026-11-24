@@ -426,8 +426,12 @@ class FakeApp(object):
     def palette(self):
         return QPalette(self._palette)
 
-    def setPalette(self, palette):
+    def setPalette(self, palette, class_name=None):
+        if class_name is not None:  # (a class's own palette, which Qt forgets when the application's is set)
+            self.class_palettes = dict(getattr(self, "class_palettes", {}), **{class_name: QPalette(palette)})
+            return
         self._palette = QPalette(palette)
+        self.class_palettes = {}
 
     def setStyleSheet(self, sheet):
         self.styleSheet = sheet
@@ -596,3 +600,106 @@ def uninstall():
     QApplication.current = None
     if not hasattr(QPalette, "PlaceholderText"):
         QPalette.PlaceholderText = "PlaceholderText"
+
+
+# -- A window's Cancel button (ak.cancel_button), for each tool's tests: one set of fakes, as every tool shares
+# the function (the owner, 2026-11-24: "a 'Cancel' button left of 'Close' could be useful")
+
+class CancelButton(object):
+    """A QPushButton as ak.cancel_button uses one: its text, properties, tooltip, help, state, and slots kept."""
+
+    def __init__(self, text=u""):
+        self.text, self.props, self.enabled, self.slots = text, {}, True, {}
+        self.tip = self.whats = None
+
+    def setProperty(self, name, value):
+        self.props[name] = value
+
+    def property(self, name):
+        return self.props.get(name)
+
+    def setToolTip(self, text):
+        self.tip = text
+
+    def setWhatsThis(self, text):
+        self.whats = text
+
+    def setEnabled(self, on):
+        self.enabled = bool(on)
+
+    def isEnabled(self):
+        return self.enabled
+
+    def connect(self, signal, slot):
+        self.slots[signal] = slot
+
+
+class CancelRow(object):
+    """A QHBoxLayout as ak.cancel_button reads and fills one: its items in order (None for a stretch)."""
+
+    def __init__(self, widgets=()):
+        self.items = list(widgets)
+
+    def count(self):
+        return len(self.items)
+
+    def itemAt(self, k):
+        held = self.items[k]
+        return type("Item", (object,), {"widget": lambda item: held})()
+
+    def insertWidget(self, k, widget):
+        self.items.insert(k, widget)
+
+    def addWidget(self, widget, *args):
+        self.items.append(widget)
+
+    def addStretch(self, *args):
+        self.items.append(None)
+
+
+def cancel_made(ak, owner, note, before=(u"Write",)):
+    """owner's Cancel button as ak.cancel_button makes it, PythonQt's QPushButton faked (CancelButton), in a
+    bottom row of before's buttons then Close: (row, the button, Close)."""
+    close = CancelButton(u"Close")
+    row = CancelRow([None] + [CancelButton(text) for text in before] + [close])
+    real = ak._qt
+    ak._qt = lambda: (None, type("QtGui", (object,), {"QPushButton": staticmethod(CancelButton)}))
+    try:
+        button = ak.cancel_button(owner, row, close, note)
+    finally:
+        ak._qt = real
+    return row, button, close
+
+
+def follow_cancel(test, ak, holder=None):
+    """The Cancel button through a tool's work: holder's busy_start and busy_end (ak's, or a tool's fake of
+    them), as they are now, also set the owner's Cancel button as the real ones do (ak.cancel_states), then
+    record (the step, whether it may stop, whether Cancel is usable then): (None, None, ...) at busy_end. The
+    list of records; holder's own put back at test's end."""
+    holder = ak if holder is None else holder
+    wrap = staticmethod if isinstance(holder, type) else (lambda function: function)
+    start, end = holder.busy_start, holder.busy_end
+    seen = []
+
+    def usable(owner):
+        button = getattr(owner, "cancel_button", None)
+        return None if button is None else bool(button.enabled)
+
+    def started(owner, what=u"", stoppable=True):
+        start(owner, what, stoppable=stoppable)
+        ak._busy_state(owner).update({"running": True, "stoppable": bool(stoppable)})  # (busy_start's own)
+        ak.cancel_states(owner)
+        seen.append((what, bool(stoppable), usable(owner)))
+
+    def ended(owner):
+        end(owner)
+        ak._busy_state(owner)["running"] = False  # (busy_end's own)
+        ak.cancel_states(owner)
+        seen.append((None, None, usable(owner)))
+
+    holder.busy_start, holder.busy_end = wrap(started), wrap(ended)
+
+    def restore():
+        holder.busy_start, holder.busy_end = wrap(start), wrap(end)
+    test.addCleanup(restore)
+    return seen

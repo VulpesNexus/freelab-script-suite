@@ -18,7 +18,7 @@ FontLab 7 has a basic built-in autokern for selected pairs. Its managing directo
 | [simoncozens/kerndeterminer](https://github.com/simoncozens/kerndeterminer) | MIT and Apache-2.0 | Rust with Python bindings; warns it does not suit Latin |
 | [simoncozens/atokern](https://github.com/simoncozens/atokern) | none on GitHub | neural kerner; do not copy |
 | "Learning to Kern" ([arXiv 2402.14313](https://arxiv.org/abs/2402.14313), Kyushu University, 2024) | paper; no code found | pairwise and set-wise (transformer) models over letter images, about 5.3 px average error on about 2,500 Google Fonts; compared against FontForge's autokern |
-| [HTLetterspacer](https://github.com/huertatipografica/HTLetterspacer), kernagic, FittingRoom | GPL-3.0 | read only, unless FreeLab becomes GPL |
+| [HTLetterspacer](https://github.com/huertatipografica/HTLetterspacer), kernagic, FittingRoom | GPL-3.0 | usable: FreeLab is GPL-3.0-or-later |
 | Kern On, iKern | commercial | Glyphs-only and a paid service. Kern On works from a few "model" pairs the designer kerns, and compares glyphs and pairs to kern the rest ([manual](https://kern-on.com/manual)) |
 | FontLab 8 | commercial | a newer autokern algorithm (K2, beside the old K1), *Kern to Distance* (the pair's closest contours at a given distance), and automatic kerning classes ([FontLab 8 help](https://help.fontlab.com/fontlab/8/whats-new/whats-new-06-metrics-kerning/)); no internals published |
 
@@ -57,7 +57,7 @@ Built in and scriptable. *Font > Generate Glyphs* builds accented glyphs from re
 
 ## Ligature and discretionary feature code
 
-FontLab 7's auto features already write `liga` and `dlig` from glyph names (for example `f_f_i`, and names with a `.liga` or `.dlig` suffix) between `#>` and `#<` markers, keeping code outside them; this was reported by the survey from FontLab's manual and not checked on this machine. No Python call to trigger it was found. FontLab 7's `fgFont.features` (`fgOTLayout`) has `keys()`, `get_feature(tag)`, and `set_feature(tag, text)`, so FreeLab can generate the code itself and write it. Prior art: tphinney's `Generate-substitutions.py` (Apache-2.0, FontLab Studio 5) and mekkablue's feature scripts (Apache-2.0).
+FontLab 7's auto features already write `liga` and `dlig` from glyph names (for example `f_f_i`, and names with a `.liga` or `.dlig` suffix) between `#>` and `#<` markers, keeping code outside them; this was reported by the survey from FontLab's manual and not checked on this machine. No Python call to trigger it was found. FontLab 7's `fgFont.features` (`fgOTLayout`) has `keys()`, `get_feature(tag)`, and `set_feature(tag, text)`, so FreeLab can generate the code itself and write it. Prior art: tphinney's *Generate-substitutions.py* (Apache-2.0, FontLab Studio 5) and mekkablue's feature scripts (Apache-2.0).
 
 Contextual alternates for handwriting (surveyed 2026-11-09): FontLab 7's auto features write no `calt` (its [release notes](https://help.fontlab.com/fontlab/7/manual/Release-Notes-7264-4/) list the suffix rules: `.alt1` lands in `ss01`), so cycling alternates is hand-written code. Known techniques: Tal Leming's [OpenType Cookbook](https://opentypecookbook.com/common-techniques/) (endless cycle, duplicate eliminator, quantum; no license stated, ideas only), Glyphs' [DEFAULT, ALT1, ALT2 classes](https://glyphsapp.com/learn/features-part-3-advanced-contextual-alternates), Underware's [Liza Pro](https://underware.nl/case-studies/random-vs-clever) (a rotator and a swapper looking back along the line), and mekkablue's *Create Pseudorandom calt Feature* (Apache-2.0). Large `calt` code can overflow a lookup's 16-bit offsets ([Simon Cozens](https://simoncozens.github.io/gsub-overflow)).
 
@@ -87,4 +87,4 @@ FontLab 7's FontAudit ([manual](https://help.fontlab.com/fontlab/7/manual/FontAu
 
 ## Licensing
 
-Reusable: MIT, Apache-2.0, and BSD code, with notices kept. GPL-3.0 and AGPL-3.0: read only. No license: never copied. A work whose rightholders reserve text and data mining (TypeRig's NOTICE): not processed with AI tools at all.
+Reusable: MIT, Apache-2.0, BSD, and GPL-3.0 code (FreeLab is GPL-3.0-or-later), with notices kept. AGPL-3.0: read only. No license: never copied. A work whose rightholders reserve text and data mining (TypeRig's NOTICE): not processed with AI tools at all.

@@ -540,6 +540,34 @@ class SettingsDialogLifetimeTests(unittest.TestCase):
         self.assertIs(dialog.props.get("mcpScriptWindow"), True)
         self.freed_once(dialog)
 
+    def test_each_option_has_a_tooltip(self):
+        """As Tab Docking Settings' options have (the review of 2026-11-24); Automatic named as dark mode's message
+        names it."""
+        tips = {}
+
+        class Option(_Control):
+            def __init__(self, label=u"", *args):
+                _Control.__init__(self)
+                self.label = label
+
+            def setToolTip(self, text):
+                tips[self.label] = text
+        gui = sys.modules["PythonQt.QtGui"]
+        gui.QRadioButton = gui.QCheckBox = Option
+        self.show(_FakeDarkMode(), lambda dialog: 0)
+        s = self.settings
+        self.assertEqual(dict(s.THEMES)["automatic"], u"Automatic (follows Windows)")
+        self.assertEqual(tips[u"Automatic (follows Windows)"], s.AUTOMATIC_TIP)
+        self.assertEqual(tips[s.MIXED], s.MIXED_TIP)
+        for _key, label in s.SHADES:
+            self.assertEqual(tips[label], s.SHADE_TIP)
+        for text in (s.AUTOMATIC_TIP, s.MIXED_TIP, s.SHADE_TIP):
+            self.assertTrue(text.endswith(u"."), text)
+        # Grayed only where system_light grays them: Mixed and the shades, not Automatic
+        self.assertIn(u"Grayed", s.MIXED_TIP)
+        self.assertIn(u"Grayed", s.SHADE_TIP)
+        self.assertNotIn(u"Grayed", s.AUTOMATIC_TIP)
+
     def test_ok_frees_it_too(self):
         result = self.show(_FakeDarkMode(), lambda dialog: 1)
         self.assertTrue(result["dark"])
@@ -1091,6 +1119,8 @@ class KindTests(DarkModeCase):
         self.assertEqual(dm.widget_kind(FakeWidget("YContinueWidget", "widgetContinue")), "island")
         self.assertEqual(dm.widget_kind(FakeWidget("YTabWidget", parent=FakeWidget("QSplitter"))), "fill")
         self.assertEqual(dm.widget_kind(FakeWidget("FontCellChart", "fontChartView")), "island")
+        # (Open Installed Fonts' list: its names were garbled as ink, the survey of 2026-11-24)
+        self.assertEqual(dm.widget_kind(FakeWidget("QListWidget", "listFonts", inherits=("QListWidget",))), "island")
         glyph_canvas = FakeWidget("QWidget", "widget", parent=FakeWidget("GlyphWindow", "GlyphWindow"))
         self.assertEqual(dm.widget_kind(glyph_canvas, canvas=True), "island")
         self.assertEqual(dm.widget_kind(self.canvas, canvas=True), "island")
@@ -1404,6 +1434,20 @@ class ToggleTests(DarkModeCase):
         self.assertFalse(dm.toggle())
         self.assertEqual(self.settings()["enabled"], False)
 
+    def test_switching_by_hand_says_automatic_is_off(self):
+        """Named as the settings dialog names it, Automatic (follows Windows) (the review of 2026-11-24)."""
+        dm.save_settings({"enabled": False, "follow_windows": True})
+        written = []
+        out = type("Out", (), {"write": lambda self, text: written.append(u"%s" % text), "flush": lambda self: None})()
+        saved, sys.stdout = sys.stdout, out
+        try:
+            dm.toggle()
+        finally:
+            sys.stdout = saved
+        self.assertIn(u"It no longer follows Windows: Automatic, in Scripts > FreeLab > Dark Mode Settings, turns that "
+                      u"back on.", u"".join(written))
+        self.assertFalse(self.settings()["follow_windows"])
+
     def test_other_settings_survive(self):
         dm.save_settings({"enabled": False, "future": 1})
         dm.toggle()
@@ -1594,6 +1638,97 @@ class TitleBarTests(DarkModeCase):
         finally:
             sys.platform = old_platform
         self.assertEqual(calls, [(101, True), (102, True), (103, True), (101, False), (103, False)])
+
+    def test_a_cell_chart_fills_the_room_its_cells_leave(self):
+        """The owner, November 24: a white band beside the glyph window's few cells. The chart fills itself in
+        FontLab's light window color, which its island effect maps dark; taken back with dark mode."""
+        cells = FakeWidget("FontCellChart", "fontChartView", parent=self.odd, inherits=("FontCellChart",))
+        QPalette = dm._gui("QPalette")
+        self.on()
+        self.assertIsNotNone(cells.effect)
+        self.assertTrue(cells.autoFillBackground)
+        light = dm._state()["saved"]["palette"].color(QPalette.Window).name()
+        self.assertEqual(cells.palette.color(QPalette.Window).name(), light)
+        self.off()
+        self.assertFalse(cells.autoFillBackground, "as FontLab had it")
+
+    def test_a_freelab_windows_caption_is_never_taken_for_ink(self):
+        """The owner, November 24: Font Builder's Ink darker than: looked blurrier than Make: beside it. It had
+        been given the ink effect, and text drawn through an effect loses ClearType."""
+        class Label(object):
+            width, height = 120, 20
+
+            def __init__(self, kind, window_mark):
+                self.kind, self.mark = kind, window_mark
+
+            def inherits(self, name):
+                return name == self.kind
+
+            def window(self):
+                mark = self.mark
+                return type("W", (), {"property": lambda self, name: mark if name == dm.FREELAB_WINDOW_PROP else None})()
+
+        self.assertTrue(dm._freelab_caption(Label("QLabel", 3)))
+        self.assertFalse(dm._freelab_caption(Label("QLabel", None)), "FontLab's own labels are still looked at")
+        self.assertFalse(dm._freelab_caption(Label("QTreeView", 3)), "labels only")
+        self.assertFalse(dm._freelab_caption(object()), "nothing raised")
+        label = Label("QLabel", 3)
+        label.isWindow = lambda: False
+        saved = (dm._shows_picture, dm.own_render)
+        dm._shows_picture = lambda widget: False
+        dm.own_render = lambda widget: self.fail("a FreeLab caption is not rendered to look for ink")
+        try:
+            self.assertIsNone(dm.detect_ink(label))
+        finally:
+            dm._shows_picture, dm.own_render = saved
+
+    def test_whats_this_help_has_no_dashed_edge(self):
+        """The owner, November 23 (image 22): the help's right and bottom sides were dashed. Qt dots its shadow
+        color over the frame there: the help's own palette has it in the frame's color."""
+        self.on()
+        QPalette = dm._gui("QPalette")
+        own = self.app.class_palettes[dm.HELP_CLASS]
+        self.assertEqual(own.color(QPalette.Shadow).name(), own.color(QPalette.ToolTipText).name())
+        self.assertNotEqual(self.app.palette().color(QPalette.Shadow).name(), own.color(QPalette.Shadow).name(),
+                            "the application's own shadow stays")
+        self.off()
+        self.assertEqual(self.app.class_palettes, {}, "gone with dark mode")
+
+    def test_a_medium_shades_title_bars_take_the_windows_gray(self):
+        """The owner, November 23 (image 28): Windows' dark title bar on a medium gray window."""
+        state = dm._state()
+        saved = (state.get("shade"), state.get("title_shade"), state.get("dark_windows"))
+
+        def restore():
+            state["shade"], state["title_shade"], state["dark_windows"] = saved
+        self.addCleanup(restore)
+        def bar(palette):  # (the shade's window gray at TITLE_BAR_PERCENT, as 0x00bbggrr)
+            window = dict((entry[0], entry[1]) for entry in palette)["Window"]
+            red, green, blue = [int(round(int(window[i:i + 2], 16) * dm.TITLE_BAR_PERCENT / 100.0)) for i in (1, 3, 5)]
+            return red | (green << 8) | (blue << 16)
+        medium_bar, dark_bar = bar(dm.PALETTE_MEDIUM), bar(dm.PALETTE_DARK)
+        state["shade"] = "medium"
+        self.assertEqual(dm.caption_color(), medium_bar, "0x00bbggrr, as Windows takes it")
+        self.assertEqual(dm.caption_color(False), dm.DWMWA_COLOR_DEFAULT, "light again: Windows' own")
+        state["shade"] = "dark"
+        self.assertEqual(dm.caption_color(), dark_bar, "the dark shade: the same step from its windows (images 32, 33)")
+        self.assertEqual(dark_bar, 0x292626)
+        calls = []
+        self.patch("_process_windows", lambda: [101])
+        self.patch("_set_title_bar", lambda hwnd, dark: calls.append((hwnd, dm.caption_color(dark))))
+        self.patch("_is_window", lambda hwnd: True)
+        state["dark_windows"], state["title_shade"] = set(), None
+        old_platform = sys.platform
+        sys.platform = "win32"
+        try:
+            dm.dark_title_bars(True)
+            dm.dark_title_bars(True)
+            state["shade"] = "medium"
+            dm.dark_title_bars(True)  # the shade changed: the window's title bar is set again
+            dm.dark_title_bars(True)
+        finally:
+            sys.platform = old_platform
+        self.assertEqual(calls, [(101, dark_bar), (101, medium_bar)])
 
 
 class EffectOwnershipTests(DarkModeCase):
@@ -2004,7 +2139,8 @@ class MenuTickFrameTests(unittest.TestCase):
                 return u"#%02x%02x%02x" % (window, window, window)
 
         gui = {"QProxyStyle": ProxyStyle,
-               "QStyle": type("QStyle", (), {"PE_IndicatorCheckBox": 7, "PE_IndicatorRadioButton": 8, "PE_PanelMenu": 9}),
+               "QStyle": type("QStyle", (), {"PE_IndicatorCheckBox": 7, "PE_IndicatorRadioButton": 8, "PE_PanelMenu": 9,
+                                             "PE_FrameMenu": 10}),
                "QPainter": tests.Painter, "QBrush": lambda: "no brush", "QPen": Pen,
                "QPalette": type("QPalette", (), {"Window": "window", "WindowText": "text"})}
         saved = (dm._gui, dm._core, dm._qt, dm._state)
@@ -2058,10 +2194,22 @@ class MenuTickFrameTests(unittest.TestCase):
         option.rect = self.Rect(0, 0, 176, 375)
         painter = self.Painter()
         style.drawPrimitive(9, option, painter, self.Widget("QMenu"))
-        self.assertEqual(painter.drawn, [("fusion", 9), ("line", (dm.MENU_GUTTER + 0.5, 3), (dm.MENU_GUTTER + 0.5, 371))],
-                         "over the panel, before the entries are drawn")
-        self.assertEqual(painter.pens[-1].args, (dm.lighter_name(u"#1e1e1e", dm.SEPARATOR_LIGHTER),),
-                         "the color of dark mode's menu separators")
+        self.assertEqual(painter.drawn, [("fusion", 9), ("line", (dm.MENU_GUTTER + 0.5, 1), (dm.MENU_GUTTER + 0.5, 373)),
+                                         ("line", (dm.MENU_GUTTER + 1.5, 1), (dm.MENU_GUTTER + 1.5, 373)),
+                                         ("square", (0.5, 0.5, 175.0, 374.0))],
+                         "over the panel, before the entries are drawn: two pixels wide, from the frame to the frame")
+        frame_color = (dm.lighter_name(u"#1e1e1e", dm.MENU_FRAME_LIGHTER),)
+        self.assertEqual([pen.args for pen in painter.pens], [frame_color, frame_color],
+                         "the owner, November 23 (images 23 and 24): the line and the frame share one color")
+        self.assertLess(dm.MENU_FRAME_LIGHTER, dm.SEPARATOR_LIGHTER, "nearer the menu's own than the separators'")
+        painter = self.Painter()
+        style.drawPrimitive(10, option, painter, self.Widget("QMenu"))
+        self.assertEqual(painter.drawn, [("fusion", 10), ("square", (0.5, 0.5, 175.0, 374.0))],
+                         "the frame again once the entries are drawn, over Fusion's near-black one")
+        self.assertEqual(painter.pens[-1].args, frame_color)
+        painter = self.Painter()
+        style.drawPrimitive(10, option, painter, self.Widget("QFrame"))
+        self.assertEqual(painter.drawn, [("fusion", 10)], "a menu's frame only")
         painter = self.Painter()
         style.drawPrimitive(9, option, painter, self.Widget("QFrame"))
         self.assertEqual(painter.drawn, [("fusion", 9)], "a menu's panel only")
@@ -2077,7 +2225,7 @@ class MenuTickFrameTests(unittest.TestCase):
             option.rect = self.Rect(0, 0, 176, 375)
             painter = self.Painter()
             style.drawPrimitive(9, option, painter, menu)
-            self.assertEqual(painter.drawn[-1][1][0], offset + 0.5, "the line")
+            self.assertEqual(painter.drawn[1][1][0], offset + 0.5, "the line")
             self.assertIn(u"margin: 4px 8px 4px %dpx;" % offset, dm.separator_sheet(u"#3a3a3a", dm._gutter_offset(menu)),
                           "the separators' start")
         self.assertEqual(dm._gutter_offset(object()), dm.MENU_GUTTER, "a menu that cannot say its scale: unscaled")

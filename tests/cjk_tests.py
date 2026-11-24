@@ -13,6 +13,17 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, os.pardir, "cjk"))
 import freelab_cjk_spacing as cj  # noqa: E402
 
+
+def kerning_module():
+    """Auto Kerning's module (the helpers every tool shares, as ak): the log's glyph links."""
+    sys.path.insert(0, os.path.join(HERE, os.pardir, "kerning"))
+    import freelab_auto_kerning
+    return freelab_auto_kerning
+
+
+ak = kerning_module()
+import qtfakes  # noqa: E402  (beside this file: the Cancel button's fakes, shared by every tool's tests)
+
 MODEL = {"format": 1, "palt": {"hiragana": [0.08, 0.06], "punctuation": [0.07, 0.07], "U+3001": [0.05, 0.19]},
          "halt": {"U+3001": [0.0, -0.5], "U+300C": [-0.5, -0.5]}}
 
@@ -560,6 +571,7 @@ class StaleCodeTests(unittest.TestCase):
             notify_changed=staticmethod(lambda *args: self.history.append("notify")),
             compiled_note=staticmethod(lambda box, log: u""), b=staticmethod(lambda t: u"%s" % t),
             html=staticmethod(lambda t: u"%s" % t), joined=staticmethod(lambda items: u" and ".join(items)),
+            glyph_name_link=staticmethod(ak.glyph_name_link),
             busy_start=staticmethod(lambda owner, what=u"", stoppable=True: self.busy.append(("start", stoppable))),
             busy_progress=staticmethod(lambda owner, what=None, part=None, force=False, stoppable=True:
                                        self.busy.append(("progress", stoppable))),
@@ -648,6 +660,49 @@ class StaleCodeTests(unittest.TestCase):
         self.assertIn(u"are positioned by the font's own palt code already: they keep theirs, not FreeLab's trim", palt[0])
         self.assertNotIn(u"keep palt", palt[0])
         self.assertEqual(features.written, ["halt"], "palt has nothing left to write")
+        # Each glyph named by its name, in italics, a link that opens it (owner's request of 2026-11-24)
+        self.assertTrue(palt[0].endswith(u"compile): %s %s." % (ak.glyph_name_link(u"a-hira"),
+                                                                 ak.glyph_name_link(u"ideographiccomma"))), palt[0])
+
+    def test_cancel_sits_before_close_usable_while_it_lists(self):
+        """The owner, 2026-11-24: a Cancel left of Close, grayed but while work that can stop runs (ak.cancel_button),
+        as Esc stops it; its help says what a stop leaves."""
+        with io.open(cj.__file__.replace(".pyc", ".py"), encoding="utf-8") as handle:
+            init = handle.read().split(u"class CJKSpacingDialog")[1].split(u"\n    def bottom_right")[0]
+        self.assertIn(u"for widget in self.bottom_right():\n            buttons.addWidget(widget)\n        "
+                      u"ak.cancel_button(self, buttons, self.close_button, CANCEL_NOTE)", init)
+        dialog, features = self.make({"palt": self.USER_PALT})
+        row, button, close = qtfakes.cancel_made(ak, dialog, cj.CANCEL_NOTE, (u"Write the code",))
+        self.assertEqual(row.items.index(button) + 1, row.items.index(close), "right before Close")
+        self.assertFalse(button.enabled, "grayed while nothing runs")
+        self.assertEqual(button.whats, ak.CANCEL_HELP + u" A listing or a Hangul measuring stopped changes nothing in "
+                                                        u"the font.")
+        seen = qtfakes.follow_cancel(self, ak, dialog.ak)
+        dialog.write()  # (palt and halt written: one History step)
+        self.assertEqual(sorted(features.written), ["halt", "palt"])
+        self.assertEqual(seen, [(cj.CODE_STEP, False, False), (None, None, False)], "grayed while it writes")
+        del seen[:]
+        dialog.tree = type("Tree", (), {"blockSignals": lambda t, on: None, "clear": lambda t: None})()
+        dialog.status = type("Status", (), {"setText": lambda s, text: setattr(s, "text", text)})()
+        dialog.ak.history_mark = staticmethod(lambda package: "mark")
+        dialog.update_buttons = lambda: None
+
+        def read_font():
+            seen.append(("reading", None, button.enabled))
+            raise dialog.ak.Stopped()  # (as a click on Cancel makes it)
+        dialog.read_font = read_font
+        del dialog.run
+        dialog.run()
+        self.assertEqual(seen, [(cj.READ_STEP, True, True), ("reading", None, True), (None, None, False)],
+                         "usable while it lists")
+        self.assertIn(u"Listing was stopped", dialog.status.text)
+
+    def test_the_kept_glyphs_stay_few_in_the_log(self):
+        many = [u"g%d" % index for index in range(cj.KEPT_SHOWN + 5)]
+        text = cj.kept_names(many, ak.glyph_name_link)
+        self.assertEqual(text.count(u"<a href="), cj.KEPT_SHOWN)
+        self.assertTrue(text.endswith(u" \N{HORIZONTAL ELLIPSIS}"), text)
+        self.assertEqual(cj.kept_names([u"a<b"], ak.glyph_name_link), u'<a href="glyphname:a%3Cb"><i>a&lt;b</i></a>')
 
 
 class CheckRow(object):
@@ -877,12 +932,12 @@ class WordingTests(unittest.TestCase):
     goes in parentheses."""
 
     def test_the_hangul_sentence_follows_its_count(self):
-        self.assertEqual(cj.hangul_note(0, u"Hangul:"), u"")
-        one, two = cj.hangul_note(1, u"Hangul:"), cj.hangul_note(2, u"Hangul:", lambda text: u"<b>%s</b>" % text)
+        self.assertEqual(cj.hangul_note(0, u"Hangul"), u"")
+        one, two = cj.hangul_note(1, u"Hangul"), cj.hangul_note(2, u"Hangul", lambda text: u"<b>%s</b>" % text)
         self.assertTrue(one.startswith(u" Its 1 Hangul syllable: "), one)
-        self.assertTrue(one.endswith(u"choose how to set its width under Hangul:."), one)
+        self.assertTrue(one.endswith(u"choose how to set its width under Hangul."), one)
         self.assertTrue(two.startswith(u" Its <b>2 Hangul syllables</b>: "), two)
-        self.assertTrue(two.endswith(u"choose how to set their widths under Hangul:."), two)
+        self.assertTrue(two.endswith(u"choose how to set their widths under Hangul."), two)
 
     def test_counted(self):
         self.assertEqual([cj.counted(n, u"unit") for n in (0, 1, 2)], [u"0 units", u"1 unit", u"2 units"])
@@ -1014,7 +1069,7 @@ class UIRound3Tests(unittest.TestCase):
 
     def test_the_previews_use_one_em_from_the_wider_sample(self):
         source = self.source()
-        draw = source.split(u"    def draw_previews(self):")[1].split(u"\n    def ")[0]
+        draw = source.split(u"    def draw_previews(self, typed=False):")[1].split(u"\n    def ")[0]
         self.assertIn(u"em = preview_em(sets[0][1], sets[0][2], room)", draw, "the Now preview's widths")
         self.assertIn(u"self.picture(placed, em, rows)", draw, "both previews at that em")
         self.assertNotIn(u"PREVIEW_EM / upm", draw)
@@ -1136,6 +1191,9 @@ class UIRound3Tests(unittest.TestCase):
         same = cj.preview_code(new, dict(new), ("palt", "halt"))
         self.assertEqual(same, cj.NO_CODE, "the font has it already: nothing to write")
         self.assertEqual(cj.preview_code({}, {}, ("palt", "halt"), [u"Widths."]), cj.NO_CODE + u"\n# Widths.")
+        # (an empty list has nothing ticked: owner's image 29)
+        self.assertEqual(cj.preview_code({}, {}, ("palt", "halt"), empty=True), cj.NO_CODE_EMPTY)
+        self.assertNotIn(u"ticked", cj.NO_CODE_EMPTY)
         self.assertEqual(cj.CODE_PREVIEW_HEADING, u"Code preview", "not Code: it is not written yet (image 299)")
 
     def test_the_code_preview_follows_the_ticks(self):
@@ -1203,6 +1261,141 @@ class UIRound3Tests(unittest.TestCase):
         dialog.compile_box, dialog.write_button, dialog.close_button = "compile", "write", "close"
         self.assertEqual(dialog.bottom_right(), ["compile", "write", "close"])
         self.assertIn(u"for widget in self.bottom_right():", init)
+
+
+class LacksNoteTests(unittest.TestCase):
+    """The owner, of both CJK windows: "Shouldn't we have this line in the log instead?" What the font lacks of
+    the sample (preview_note) was a quiet line between the previews and the Code preview while the log stayed
+    empty: it is said in the log now, once per font and words, and after a pause while the sample is typed."""
+
+    class Log(object):
+        def __init__(self):
+            self.lines = []
+
+        def add(self, text, level="info"):
+            self.lines.append((level, text))
+
+    AK = type("Ak", (), {"font_key": staticmethod(lambda package: package.path)})
+
+    def setUp(self):
+        sys.path.insert(0, HERE)
+        import qtfakes
+        qtfakes.install()
+        self.qtfakes = qtfakes
+
+    def tearDown(self):
+        self.qtfakes.uninstall()
+
+    def test_said_as_it_first_applies_and_again_only_when_it_changes(self):
+        log = self.Log()
+        note = cj.LacksNote(self.AK, log)  # (no window: said at once)
+        font = type("Package", (), {"path": u"a.vfc"})()
+        other = type("Package", (), {"path": u"b.vfc"})()
+        note.show(font, u"It lacks <b>1 kana</b>.")
+        self.assertEqual(log.lines, [("info", u"It lacks <b>1 kana</b>.")], "in the log, rich text kept, plain info")
+        for _ in range(3):  # (a tick, a resize, the History read again: the same words)
+            note.show(font, u"It lacks <b>1 kana</b>.")
+        self.assertEqual(len(log.lines), 1, "never again for the same words")
+        note.show(font, u"It lacks <b>2 kana</b>.")
+        self.assertEqual(log.lines[-1][1], u"It lacks <b>2 kana</b>.", "its words changed: said")
+        note.show(font, u"")
+        self.assertEqual(len(log.lines), 2, "nothing lacking: nothing said")
+        note.show(font, u"It lacks <b>2 kana</b>.")
+        self.assertEqual(len(log.lines), 3, "applies again: said again")
+        note.show(other, u"It lacks <b>2 kana</b>.")
+        self.assertEqual(len(log.lines), 4, "another font read: said for it")
+        note.show(None, u"")  # (the font closed)
+        note.show(other, u"It lacks <b>2 kana</b>.")
+        self.assertEqual(len(log.lines), 5, "opened again: said again")
+
+    def test_typing_waits_for_a_pause(self):
+        log = self.Log()
+        note = cj.LacksNote(self.AK, log, parent=object())
+        self.assertEqual((note.timer.single, note.timer.interval), (True, cj.NOTE_PAUSE))
+        self.assertIn(note.timer, self.qtfakes.QTimer.parented, "its parent the window: Qt deletes it with it")
+        font = type("Package", (), {"path": u"a.vfc"})()
+        for count in (1, 2, 3):  # (a keystroke each)
+            note.show(font, u"It lacks <b>%d kana</b>." % count, typed=True)
+        self.assertEqual(log.lines, [], "nothing while typing")
+        self.assertTrue(note.timer.isActive())
+        note.timer.fire()
+        self.assertEqual(log.lines, [("info", u"It lacks <b>3 kana</b>.")], "the pause: the last words, once")
+        note.show(font, u"It lacks <b>4 kana</b>.", typed=True)
+        note.show(font, u"It lacks <b>3 kana</b>.", typed=True)  # (typed back to what was said)
+        note.timer.fire()
+        self.assertEqual(len(log.lines), 1, "the same words as said: nothing")
+        note.show(font, u"It lacks <b>5 kana</b>.", typed=True)
+        note.now()  # (a sample chosen in Sample:, or the previews drawn again otherwise)
+        self.assertEqual(log.lines[-1][1], u"It lacks <b>5 kana</b>.", "said at once")
+        self.assertFalse(note.timer.isActive())
+        note.paused()  # (a pause with nothing waiting)
+        self.assertEqual(len(log.lines), 2)
+
+    def test_the_window_logs_it_and_has_no_line_for_it(self):
+        ak, dialog = PreviewRuleTests("test_the_captions_and_the_line_show_only_over_a_sample_drawn").dialog()
+        log = self.Log()
+        dialog.package.path = u"a.vfc"
+        dialog.lacks_note = cj.LacksNote(ak, log, parent=object())
+        texts = []
+        dialog.sample.setText = lambda text: (texts.append(text), setattr(dialog.sample, "text", text),
+                                              dialog.draw_previews(typed=True))  # (its textChanged)
+        dialog.draw_previews()
+        self.assertEqual(log.lines, [], "the font has the sample's character: nothing to say")
+        dialog.sample.text = u"\N{HIRAGANA LETTER A}\N{KATAKANA LETTER A}"
+        for _ in range(2):  # (drawn again: a tick, a resize)
+            dialog.draw_previews()
+        self.assertEqual(log.lines, [("info", u"The previews show only the <b>1 character</b> of the sample the font has "
+                                               u"(\N{LEFT DOUBLE QUOTATION MARK}\N{HIRAGANA LETTER A}"
+                                               u"\N{RIGHT DOUBLE QUOTATION MARK}): it lacks <b>1 kana</b>.")])
+        dialog.sample.setText(u"\N{KATAKANA LETTER A}")  # (typed)
+        self.assertEqual(len(log.lines), 1, "typed: waits for the pause")
+        dialog.lacks_note.timer.fire()
+        self.assertEqual(log.lines[-1][1], u"The font has none of the sample's characters, so the previews are empty: "
+                                           u"it lacks <b>1 kana</b>.")
+        dialog.sample_chosen(u"\N{KATAKANA LETTER A}\N{IDEOGRAPHIC COMMA}")  # (Sample:'s item: at once)
+        self.assertEqual(texts[-1], u"\N{KATAKANA LETTER A}\N{IDEOGRAPHIC COMMA}")
+        self.assertIn(u"<b>1 CJK punctuation mark</b> (the ideographic comma)", log.lines[-1][1])
+        self.assertFalse(dialog.lacks_note.timer.isActive())
+        count = len(log.lines)
+        dialog.package = None  # (the font closed: nothing said)
+        dialog.draw_previews()
+        self.assertEqual(len(log.lines), count)
+        with io.open(os.path.join(HERE, os.pardir, "cjk", "freelab_cjk_spacing.py"), encoding="utf-8") as handle:
+            source = handle.read()
+        init = source.split(u"class CJKSpacingDialog")[1].split(u"\n    def watch_previews")[0]
+        self.assertNotIn(u"preview_note = QtGui.QLabel", init, "no line between the previews and the Code preview")
+        self.assertIn(u"self.lacks_note = LacksNote(ak, self.log, dialog)", init)
+        self.assertIn(u'self.sample.connect("textChanged(QString)", lambda text: self.draw_previews(typed=True))', init)
+        self.assertIn(u"lambda index: self.sample_chosen(SAMPLES[index][2])", init)
+
+
+class TextReviewTests(unittest.TestCase):
+    """The interface-text review of November 24: each help names what the window really does."""
+
+    def source(self):
+        with io.open(os.path.join(HERE, os.pardir, "cjk", "freelab_cjk_spacing.py"), encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_the_write_buttons_help_names_its_other_names_and_the_hangul_widths(self):
+        source = self.source()
+        init = source.split(u"class CJKSpacingDialog")[1].split(u"\n    def ")[1]  # (its __init__)
+        help_text = init.split(u"self.write_button.setWhatsThis(")[1].split(u")\n")[0]
+        for words in (u"the Hangul widths chosen under <i>Hangul</i>", u"<i>Update", u"<i>Set Hangul widths</i>"):
+            self.assertIn(words, help_text)
+        self.assertIn(u"<i>Update the code</i> once FreeLab's code is in the font", cj.HELP)
+        self.assertTrue(cj.CODE_PREVIEW_WHAT.startswith(u"The code the write button would write"))
+        self.assertNotIn(u"colors", cj.CODE_PREVIEW_WHAT)
+        self.assertIn(u'hangul_note(hangul, ak.i(u"Hangul"), b)', source, "no caption's colon before the period")
+        self.assertIn(u'self.all_button.setWhatsThis(u"Ticks every row of the list.")', init)
+        self.assertIn(u'self.none_button.setWhatsThis(u"Unticks every row of the list.")', init)
+        self.assertIn(u"The font changed since the list was read: it is listed again. Nothing was written.", source)
+
+    def test_the_features_panel_is_named_in_italics_and_kept_rich(self):
+        self.assertIn(u"FontLab's <i>Features</i> panel.", cj.refused_words(["palt"]))
+        self.assertIn(u'self.log.add(refused_words(refused), "warning")', self.source())
+        # (the review of 2026-11-24: an error's log sentence ends with its period, ak.error_sentence)
+        self.assertIn(u'self.ak.error_sentence(u"Stopped by an error", error)', self.source())
+        self.assertNotIn(u"Stopped by an error: %s", self.source())
 
 
 if __name__ == "__main__":

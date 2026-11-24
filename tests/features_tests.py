@@ -447,6 +447,22 @@ class LoclTests(unittest.TestCase):
             self.assertEqual(out.get(u"dlig", u"").count(u"sub f i by f_i;"), 0)
             self.assertEqual(stuck, [] if choice == "liga" else [u"f_i"])
         self.assertIn(u"FreeLab does not move f_i", fc.stuck_words([u"f_i"]))
+        # (the review of 2026-11-24: rich text, the panel's name in italics and the names escaped there, so that
+        # the log and the status take them as they are)
+        for text in (fc.stuck_words([u"a<b"]), fc.refused_words([u"liga"])):
+            self.assertIn(u"FontLab's <i>Features</i> panel.", text)
+        self.assertIn(u"FreeLab does not move a&lt;b", fc.stuck_words([u"a<b"]))
+        # In the log, each glyph's name in italics, a link that opens it; the status line keeps them plain
+        link = lambda name: u'<a href="glyphname:%s"><i>%s</i></a>' % (name, name)
+        self.assertIn(u"FreeLab does not move %s and %s:" % (link(u"f_f_i"), link(u"f_i")),
+                      fc.stuck_words([u"f_i", u"f_f_i", u"f_i"], link))
+        with open(fc.__file__.replace(".pyc", ".py"), "rb") as handle:
+            source = handle.read().decode("utf-8")
+        self.assertIn(u"self.log.add(stuck_words(self.stuck, self.ak.glyph_name_link)", source)
+        self.assertIn(u'(u" " + stuck_words(self.stuck)) if', source, "the status line: no links")
+        self.assertIn(u'u"%s was not built: %s." % (self.ak.glyph_name_link(name), ', source, "a figure form not built")
+        self.assertNotIn(u"self.ak.html(refused_words(", source)
+        self.assertNotIn(u"self.ak.html(stuck_words(", source)
         # FontLab's automatic code is FreeLab's to take over: moved once
         texts = {u"liga": u"feature liga {\n#> feature\n  sub f i by f_i;\n#< feature\n} liga;"}
         for choice in ("liga", "dlig", "off"):
@@ -1221,6 +1237,17 @@ class RecordedRow(Anything):
 
     def addWidget(self, widget, *args):
         self.widgets.append(widget)
+
+    # (as ak.cancel_button reads and fills a row: the Cancel button put right before Close)
+    def count(self):
+        return len(self.widgets)
+
+    def itemAt(self, k):
+        held = self.widgets[k]
+        return type("Item", (object,), {"widget": lambda item: held})()
+
+    def insertWidget(self, k, widget):
+        self.widgets.insert(k, widget)
 
 
 class FakeQTransform(Anything):
@@ -2369,6 +2396,32 @@ class DialogTests(unittest.TestCase):
         self.assertIs(dialog.package, package, "read again")
         self.assertTrue(dialog.sets)
 
+    def test_cancel_is_usable_while_the_font_is_read_not_while_it_is_written(self):
+        """The owner, 2026-11-24: a Cancel left of Close (test_the_bottom_row_holds_the_shown_tabs_buttons), grayed
+        but while work that can stop runs (ak.cancel_button), as Esc stops it; its help says what a stop leaves."""
+        import qtfakes
+        features = FakeFeatures({})
+        package, letters = self.big_font(features)
+        ak = self.ak
+        real = ak.busy_start, ak.busy_progress, ak.busy_end
+
+        def restore():
+            ak.busy_start, ak.busy_progress, ak.busy_end = real
+        self.addCleanup(restore)
+        ak.busy_start = lambda owner, what=u"", stoppable=True: None  # (the real ones need a window)
+        ak.busy_progress = lambda owner, what=None, part=None, force=False, stoppable=True: None
+        ak.busy_end = lambda owner: None
+        seen = qtfakes.follow_cancel(self, ak)
+        dialog = self.dialog(features, package)
+        self.assertEqual(dialog.cancel_button.whats, ak.CANCEL_HELP + u" A reading of the font stopped changes nothing "
+                                                                      u"in it: nothing is listed.")
+        self.assertEqual(seen, [(u"Reading the font", True, True), (None, None, False)], "usable while it reads")
+        del seen[:]
+        dialog.write()
+        self.assertEqual(seen, [(u"Writing the code", False, False), (None, None, False),
+                                (u"Reading the font", True, True), (None, None, False)],
+                         "grayed while it writes, usable as the font is read again")
+
     def test_set_enabled_keeps_the_no_font_gate(self):
         """Owner's images 201 to 210: a control the shared module grayed for want of a font (ak.NO_FONT_PROP)
         stays grayed whatever the tool asks; ak.no_font_states gives it back with a font."""
@@ -2896,6 +2949,17 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(fc.plan_signature(None, 107), None)
         self.assertEqual(fc.layer_print(two.made[u"Regular"])[0], 999)
 
+    def test_the_tab_tips_and_the_write_help_read_plainly(self):
+        """The review of 2026-11-24: tab tooltips are sentences, as Glyph Compose's; the write button's help names
+        its other name plainly; Esc is a key, in italics."""
+        tips = {}
+        tab_bar = type("QTabBar", (Recorded,), {"setTabToolTip": lambda self, index, text: tips.__setitem__(index, text)})
+        dialog = self.recorded(FakeFeatures({}), classes={"QTabBar": tab_bar})
+        self.assertEqual(sorted(tips), [0, 1, 2])
+        self.assertTrue(all(text.endswith(u".") for text in tips.values()), tips)
+        self.assertIn(u"Named <i>Update the code</i> when the font has FreeLab's code already.", dialog.write_button.whats)
+        self.assertIn(u"<i>Esc</i>", dialog.top_line.whats)
+
     def test_the_code_part_is_named_code_preview_and_colored(self):
         """The owner: "it should just be 'Code'; also, syntax highlighting would be neat." Then (owner's
         image 299): "Code preview", so people understand they still have to write it. The heading reads
@@ -3137,7 +3201,9 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(row.widgets, list(dialog.turn_buttons) + [page.all_button, page.none_button, dialog.restore_button,
                                                                    dialog.compile_box, dialog.write_button,
                                                                    dialog.build_button, page.copy_button,
-                                                                   page.build_button, dialog.close_button])
+                                                                   page.build_button, dialog.cancel_button,
+                                                                   dialog.close_button])
+        self.assertEqual(dialog.cancel_button.text, u"Cancel", "right before Close (owner, 2026-11-24)")
         self.assertEqual([button.text for button in dialog.turn_buttons],
                          [u"Tick all", u"Untick all", u"Tick often doubled"])
         moved = list(dialog.turn_buttons) + [dialog.build_button, page.build_button, page.copy_button, page.all_button]
@@ -3151,8 +3217,8 @@ class DialogTests(unittest.TestCase):
                 self.assertEqual([button.visible for button in buttons], [number == index] * len(buttons), (index, number))
         left, right = dialog.tab_buttons()
         shifted = [button for buttons in left + right for button in buttons]
-        self.assertEqual([w for w in (dialog.restore_button, dialog.compile_box, dialog.write_button, dialog.close_button)
-                          if w in shifted], [], "the window's own buttons stay whatever the tab")
+        own = (dialog.restore_button, dialog.compile_box, dialog.write_button, dialog.cancel_button, dialog.close_button)
+        self.assertEqual([w for w in own if w in shifted], [], "the window's own buttons stay whatever the tab")
         self.assertEqual(fc.build_label(62), u"Build 62 ticked figure forms", "named for its section (owner's image 258)")
         self.assertIsNotNone(page.parts, "the third tab's two parts share a splitter, as the other tabs' (image 259)")
 

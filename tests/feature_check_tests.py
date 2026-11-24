@@ -584,6 +584,9 @@ class FakeButton(Anything):
     def setText(self, text):
         self.text = text
 
+    def setWhatsThis(self, text):
+        self.whats = text
+
     def connect(self, signal, slot):
         self.slots.setdefault(signal, []).append(slot)
 
@@ -603,6 +606,17 @@ class FakeLayout(Anything):
     def addStretch(self, *args):
         self.items.append(None)
 
+    # (as ak.cancel_button reads and fills a row: the Cancel button put right before Close)
+    def count(self):
+        return len(self.items)
+
+    def itemAt(self, k):
+        held = self.items[k]
+        return type(str("Item"), (object,), {str("widget"): lambda item: held})()
+
+    def insertWidget(self, k, widget):
+        self.items.insert(k, widget)
+
 
 class FakeLabel(Anything):
     def __init__(self, *args, **kwargs):
@@ -610,6 +624,9 @@ class FakeLabel(Anything):
 
     def setText(self, text):
         self.text = text
+
+    def setWhatsThis(self, text):
+        self.whats = text
 
 
 class FakeDialogPackage(FakePackage):
@@ -716,7 +733,24 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(options.items, [dialog.auto_box, dialog.check_button, None], "Check after its option")
         bottom = window.items[-1]
         self.assertEqual(bottom.items, [dialog.check_all, dialog.check_none, None, dialog.compile_button,
-                                        dialog.apply_button, dialog.close_button])
+                                        dialog.apply_button, dialog.cancel_button, dialog.close_button])
+
+    def test_the_header_lines_and_close_have_a_help(self):
+        """The review of 2026-11-24: as Feature Code's and Proof's, each header line and Close say what they are,
+        and the window's help ends with the line every tool's has."""
+        dialog = self.dialog(FakeDialogPackage(DECLARED, [("liga", feature("liga", "  sub f i by f_i;\n"))], ORDER))
+        for widget in (dialog.font_label, dialog.status, dialog.close_button):
+            self.assertTrue(getattr(widget, "whats", "").endswith("."), widget)
+        self.assertIn("Closes the window", dialog.close_button.whats)
+        self.assertTrue(fc.HELP.endswith("<br><br>\nClick this help's button, then anything in the window, for what it "
+                                         "does (or right-click it: <i>What's This?</i>)."))
+        # (the review of 2026-11-24: a check after the History moves applies nothing, run(automatic=False))
+        with open(fc.__file__.replace(".pyc", ".py"), "rb") as handle:
+            source = handle.read().decode("utf-8")
+        auto = source.split("self.auto_box.setWhatsThis(")[1].split(")\n")[0]
+        for text in (" ".join(fc.HELP.split()), " ".join(auto.replace('"', " ").split())):
+            self.assertIn("but one after an undo, a redo, or an edit in FontLab", text)
+            self.assertIn("until you click <i>Check</i>", text)
 
     def test_compile_and_apply_gray_with_nothing_to_do(self):
         dialog = self.dialog(None)
@@ -760,6 +794,36 @@ class DialogTests(unittest.TestCase):
         dialog.compile_in_fontlab()
         self.assertEqual((len(started), ended[-1], dialog.busy), (2, False, False))
         self.assertIn("Not compiled", self.said[-1][1])
+
+
+    def test_cancel_is_usable_while_it_checks_not_while_fontlab_compiles(self):
+        """The owner, 2026-11-24: a Cancel left of Close (test_the_rows_in_order), grayed but while work that can
+        stop runs (ak.cancel_button), as Esc stops it; its help says what a stop leaves."""
+        import qtfakes
+        ak = self.ak
+        package = FakeDialogPackage(DECLARED, [("liga", feature("liga", "  sub f i by f_i;\n"))], ORDER)
+        package.path = "Fake Sans.vfc"  # (ak.font_key's)
+        dialog = self.dialog(package)
+        self.assertFalse(dialog.cancel_button.enabled, "grayed while nothing runs")
+        self.assertEqual(dialog.cancel_button.whats, ak.CANCEL_HELP + " A check stopped applies no further fix: those "
+                                                                      "applied before it stay in the font.")
+        self.addCleanup(lambda: [setattr(ak, name, value) for name, value in self.real.items()])
+        ak.busy_start = lambda owner, what="", stoppable=True: None  # (the real ones need a window)
+        ak.busy_end = lambda owner: None
+
+        def stopping(owner, what=None, part=None, force=False, stoppable=True):
+            if stoppable:
+                raise ak.Stopped()  # (as a click on Cancel makes it)
+        ak.busy_progress = stopping
+        seen = qtfakes.follow_cancel(self, ak)
+        dialog.run()
+        self.assertEqual(seen, [("Checking the feature code", True, True), (None, None, False)], "usable while it checks")
+        if HAS_FONTTOOLS:  # (without it, nothing is checked: no step to stop at)
+            self.assertIn("The check was stopped", dialog.status.text)
+        del seen[:]
+        ak.compiled_note = lambda box, log=None: " Not compiled: FontLab's <i>Features</i> panel was never opened."
+        dialog.compile_in_fontlab()
+        self.assertEqual(seen, [(fc.COMPILE_STEP, False, False), (None, None, False)], "grayed while FontLab compiles")
 
 
 class ModuleNameTests(unittest.TestCase):

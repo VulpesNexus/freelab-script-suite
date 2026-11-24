@@ -820,6 +820,13 @@ def spaces_note(has, listed=()):
 
 
 DECLARE_BUTTON = u"Declare coverage"  # the Coverage tab's button that sets the font info to what the font covers
+# Build with Glyph Compose: the rows handed over start ticked there (Recipe.checked), and a build that leaves
+# none of them to build opens Font Check again in that window's place (Glyph Compose's back_to_font_check)
+HANDOFF_HELP = (u"Opens <i>Glyph Compose</i> on the ticked glyphs of the tab of glyphs shown that it can build from "
+                u"the font's glyphs, listed alone and ticked: glyphs with diacritics on its <i>Diacritics</i> tab, "
+                u"other glyphs (spaces, dashes, quotes...) on its <i>Glyph generation</i> tab. It opens on the tab "
+                u"with more, and its log says what the other holds. Nothing is made until you click <i>Build ticked "
+                u"glyphs</i> there; once every glyph handed over is built, <i>Font Check</i> opens again in its place.")
 DECLARE_LINK = u"freelab-declare-coverage:"  # a log link's target: the font info set to declare what the font covers
 COVERAGE_KEYS = (("unicode_ranges", "openTypeOS2UnicodeRanges", u"Unicode ranges"),
                  ("code_pages", "openTypeOS2CodePageRanges", u"code pages"))
@@ -2227,12 +2234,13 @@ def fix_sentence(problems):
             left.append(DESIGNER_WORDS[kind])
     if not fixes and not left:
         return u""
+    # (no button is named "Fix": they are Fix ticked glyphs and Fix this, so the tool is named instead)
     if not left:
-        return u"Fix sets %s right." % word_list(fixes)
+        return u"Font Check can set %s right." % word_list(fixes)
     rest = u"%s %s the designer" % (word_list(left), u"needs" if len(left) == 1 else u"need")
     if not fixes:
         return u"Needs the designer: %s." % word_list(left)
-    return u"Fix sets %s right; %s." % (word_list(fixes), rest)
+    return u"Font Check can set %s right; %s." % (word_list(fixes), rest)
 
 
 # ---------------------------------------------------------------------------
@@ -2618,6 +2626,9 @@ BUSY_STEPS = (u"Reading the language data", u"Reading the font", u"Checking the 
 # takes most of the time.
 BUSY_SHARES = (0.10, 0.20, 0.40, 1.0)
 LIST_PARTS = (0.05, 0.75, 0.95)  # of the listing: the scripts listed, the list at the right, the glyphs to add
+# The Cancel button's own line (ak.cancel_button): what a stop leaves (its stoppable work reads: the checks and
+# the listing; Fix ticked glyphs never stops)
+CANCEL_NOTE = u"A check or a listing stopped changes nothing in the font."
 
 
 def busy_share(done, part=0.0):
@@ -3135,8 +3146,8 @@ def check_lines(m, extents, findings, capitals=True):
                     worst[e.name] = over
             rows = sorted(worst.items(), key=lambda item: (-item[1], item[0]))
             if rows:
-                warn.append(CheckLine("warn", u"Windows clips %s %s, up to %d units (%s)" % (
-                    counted(len(rows), u"glyph"), word, rows[0][1], rows[0][0]),
+                warn.append(CheckLine("warn", u"Windows clips %s %s, up to %s (%s)" % (
+                    counted(len(rows), u"glyph"), word, counted(int(rows[0][1]), u"unit"), rows[0][0]),
                     u"Windows cuts off what reaches %s %s (%d): %s." % (
                         side, u"winAscent" if side == "above" else u"winDescent",
                         m.win_ascent if side == "above" else m.win_descent,
@@ -3604,7 +3615,7 @@ def register_list_font(QtCore, QtGui):
 
 HELP = u"""<b>FreeLab Font Check</b><br>
 Three views of the current font. Nothing in the font changes until you click <i>Write suggested
-values</i>, <i>Fix</i>, or the Coverage tab's <i>Declare coverage</i> (the font info's Unicode ranges and code
+values</i>, <i>Fix ticked glyphs</i>, <i>Fix this</i>, or the Coverage tab's <i>Declare coverage</i> (the font info's Unicode ranges and code
 pages set to what the glyphs cover, where they differ). A fix or a declaration is one step of <i>Edit &gt;
 Undo</i>; the vertical metrics written are not in FontLab's History: <i>Put back old values</i> takes them back
 (a value that was not set before stays as written).<br><br>
@@ -3635,11 +3646,13 @@ Glottolog records, says why a find is not listed otherwise, and names the langua
 describes. Those are counted beside each family's bar and listed under its last node, <i>Not yet
 covered</i>, and the scripts no orthography here is written in close the <i>Languages</i> tab, each
 checked as a script and selected like a language: to
-add a language, open an issue on FreeLab's repository with its characters and a source. A script Unicode
+add a language, open an issue on FreeLab's repository with its characters and a source FreeLab can
+reuse (under an open license, or in the public domain). A script Unicode
 has not encoded cannot be checked. Meanwhile, paste
 a language's alphabet or a text in it in the field of the <i>Character sets</i> tab: it is checked
-as a set of your own, which <i>Save set</i> keeps on this computer. <i>Languages</i>, at the top,
-keeps every language, the living and constructed ones, the living ones, or the historical ones.
+as a set of your own, which <i>Save set</i> keeps on this computer. <i>Display</i>, at the top,
+keeps every language (as the window opens), the living and constructed ones, the living ones only,
+the historical ones only, or the high-value ones only.
 A letter the font lacks as one glyph counts when its anchors compose it from the font's letter and
 mark (the language says <i>composed</i>).<br>
 <b>Vertical metrics</b>: the font's tallest and deepest glyphs drawn on its line metrics (winAscent,
@@ -3655,7 +3668,7 @@ and its nodes numbered. <i>Fix ticked glyphs</i> sets right, in the other master
 start points, and the components' order; contour and node counts, node types, missing layers, and
 anchors need the designer. The master compared with never changes.<br><br>
 Each view is checked as its tab is first shown, and again after an undo or an edit in FontLab. Click
-this help's <i>?</i> button, then any control, for what it does."""
+this help's button, then anything in the window, for what it does (or right-click it: <i>What's This?</i>)."""
 
 AMBER = (230, 150, 30)  # within reach, warnings
 RED = (222, 64, 52)  # clipped ink, masters that cannot interpolate
@@ -4751,7 +4764,7 @@ def notation_line(text):
 UNCOVERED_NAMED = 4  # languages a family's tooltip names of those it cannot check
 UNCOVERED_OPEN = 50  # a search opens a family's Not yet covered node by itself up to this many languages
 CONTRIBUTE = (u"These languages are known, but FreeLab has no data on how they are written. To add one, open an "
-              u"issue on FreeLab's repository (%s) with the characters the language uses and a source."
+              u"issue on FreeLab's repository (%s) with the characters the language uses and a source FreeLab can reuse (under an open license, or in the public domain)."
               % ISSUES_ADDRESS)
 CONTRIBUTE_SCRIPTS = (u"Unicode encodes these scripts, but FreeLab has no orthography written in them: each is "
                       u"checked as a script, its whole repertoire the measure. To add a "
@@ -4868,7 +4881,7 @@ def uncovered_tip(entry, scripts=()):
     if entry.others:
         others = list(entry.others[:12]) + ([u"%d more" % (len(entry.others) - 12)] if len(entry.others) > 12 else [])
         lines.append(u"Also called: %s" % word_list(others))
-    lines.append(u"To add it, open an issue on FreeLab's repository (%s) with the characters it uses and a source."
+    lines.append(u"To add it, open an issue on FreeLab's repository (%s) with the characters it uses and a source FreeLab can reuse (under an open license, or in the public domain)."
                  % ISSUES_ADDRESS)
     return u"\n\n".join(line for line in lines if line)  # (a blank line between two paragraphs)
 
@@ -5822,7 +5835,7 @@ class FontCheckDialog(object):
         layout.addWidget(self.log.widget)
         # The bottom row, as every window's (owner's images 258 to 265, 279): at the left the shown tab's
         # buttons that act on its lists' ticks and rows, and Show in Glyph window; at the right the shown
-        # tab's committing button, then Close
+        # tab's committing button, then Cancel and Close
         buttons = QtGui.QHBoxLayout()
         self.glyph_window_button = QtGui.QPushButton("Show in Glyph window")
         self.glyph_window_button.setWhatsThis(u"Opens a <i>Glyph</i> window on the ticked glyphs of the tab "
@@ -5840,6 +5853,7 @@ class FontCheckDialog(object):
             if tab.commit is not None:
                 buttons.addWidget(tab.commit)
         buttons.addWidget(self.close_button)
+        ak.cancel_button(self, buttons, self.close_button, CANCEL_NOTE)  # (right before Close)
         layout.addLayout(buttons)
         self.show_tab_parts()
         self.glyph_window_button.connect("clicked()", self.show_in_glyph_window)
@@ -6420,12 +6434,7 @@ class FontCheckDialog(object):
             self.use_list_font(widget, 1)
         box.addWidget(self.left_pages, 1)
         self.diacritics_button = QtGui.QPushButton("Build with Glyph Compose")
-        self.diacritics_button.setWhatsThis(u"Opens <i>Glyph Compose</i> on the ticked glyphs of the tab of glyphs shown "
-                                            u"that it can build from the font's glyphs (you tick them there before "
-                                            u"anything is made): glyphs with diacritics on its <i>Diacritics</i> tab, "
-                                            u"other glyphs (spaces, dashes, quotes...) on its <i>Glyph generation</i> "
-                                            u"tab, each listed alone; it opens on the tab with more, and its log says "
-                                            u"what the other holds.")
+        self.diacritics_button.setWhatsThis(HANDOFF_HELP)
         self.copy_chars_button = QtGui.QPushButton("Copy glyphs")
         self.copy_chars_button.setWhatsThis(u"Copies the ticked glyphs of the tab of glyphs shown (or the selected "
                                             u"row's) as text.")
@@ -6478,7 +6487,7 @@ class FontCheckDialog(object):
                                  u"tooltip says which name it was found by), the character sets whose name does, or "
                                  u"the families and branches so named with their languages. Case and diacritics are "
                                  u"set aside. A search looks through every language: one of a script not listed, or "
-                                 u"left out by <i>Languages</i>, comes under a heading that says so, and a language "
+                                 u"left out by <i>Display</i>, comes under a heading that says so, and a language "
                                  u"none of Font Check's sources describes is named under the list.")
         self.level_filter = QtGui.QComboBox()
         self.level_filter.setSizeAdjustPolicy(QtGui.QComboBox.AdjustToContents)  # (as wide as its widest item: image 239)
@@ -7369,7 +7378,8 @@ class FontCheckDialog(object):
             else u"This glyph's problems need the designer."))
         ak.enable(self.font_info_button, self.package is not None)
         ak.enable(self.glyph_window_button, self.package is not None and bool(self.glyph_window_text()))
-        self.glyph_window_button.setToolTip(self.tip(self.glyph_window_tip(), True))  # (it may name a set of any script)
+        # (it may name a set of any script; rich: the window's name in italics)
+        self.glyph_window_button.setToolTip(self.tip(self.glyph_window_tip(), True, rich=True))
         # The user's own sets: saved once there are characters and a name, removed when a saved one is selected
         pasted = bool(pasted_characters(self.pasted_text))
         named = bool((u"%s" % (_prop(self.name_field, "text") or u"")).strip())
@@ -7405,23 +7415,24 @@ class FontCheckDialog(object):
             ak.enable(box, count >= least)
 
     def glyph_window_tip(self):
-        """What Show in Glyph window opens now, and what a double-click does instead."""
+        """What Show in Glyph window opens now, and what a double-click does instead: rich text (the window's
+        name in italics, as in the button's first help), a line per sentence."""
         if self.package is None or self.current_key() != "coverage":
             return u""
         chosen = self.chosen_characters()
         checked = self.checked_listed()
         if checked:
-            what = u"Opens the %s of this tab in a Glyph window." % (
+            what = u"Opens the %s of this tab in a <i>Glyph</i> window." % (
                 u"1 ticked glyph" if len(checked) == 1 else u"%s ticked glyphs" % grouped(len(checked)))
         elif chosen:
-            what = u"Opens the selected row's %s in a Glyph window (no glyph is ticked)." % (
+            what = u"Opens the selected row's %s in a <i>Glyph</i> window (no glyph is ticked)." % (
                 u"glyph" if len(chosen) == 1 else u"glyphs")
         elif self.selection is not None and self.selection_glyph_text():
-            what = u"Opens the glyphs %s misses in a Glyph window (no glyph is ticked, no row selected)." % (
-                self.selection.name)
+            what = u"Opens the glyphs %s misses in a <i>Glyph</i> window (no glyph is ticked, no row selected)." % (
+                self.ak.html(self.selection.name))
         else:
             return u"Tick glyphs or select a row first. A double-click on a row opens that row's glyph alone."
-        return what + u"\nA double-click on a row opens that row's glyph alone, whatever is ticked."
+        return what + u"<br>A double-click on a row opens that row's glyph alone, whatever is ticked."
 
     def tip(self, text, names=False, rich=False):
         """A tooltip's text for Qt: rich text, which Qt wraps (plain text ran on one line, thousands of
@@ -7672,7 +7683,7 @@ class FontCheckDialog(object):
         state["statuses"] = self.choice(self.status_filter, STATUS_FILTERS)[2]
         if state["statuses"] == HIGH_VALUE and not high_value_orthographies():
             self.log.add(u"The list of high-value languages (%s) could not be read: <i>High-value only</i> keeps no "
-                         u"language. Install FreeLab again." % HIGH_VALUE_FILE, "warning")
+                         u"language. Reinstall FreeLab." % HIGH_VALUE_FILE, "warning")
         # (the languages inferred from a text: checked with the others, or set aside for a search to find)
         state["languages"], state["aside"] = chosen_languages(state["languages"], bool(self.inferred_box.checked))
         return checking_text(len(set(one.iso for one in state["languages"])))
@@ -9261,14 +9272,14 @@ class FontCheckDialog(object):
             with self.ak.opening_from(self.dialog):  # (on this window's font, in its place)
                 try:
                     dm.main(characters=chars)  # a Glyph Compose that lists the letters given only
-                    self.log.add(self.tool_links(u"<i>Glyph Compose</i> lists %s: tick them there, then build." %
-                                                 i(u" ".join(chars))), "done")
+                    self.log.add(self.tool_links(u"<i>Glyph Compose</i> lists %s, ticked: review them there, then "
+                                                 u"build." % i(u" ".join(chars))), "done")
                 except TypeError:
                     dm.main()  # (a Glyph Compose that takes no letters lists every one it can build)
                     self.log.add(self.tool_links(u"<i>Glyph Compose</i> lists every glyph with diacritics it can "
                                                  u"build, %s among them." % i(u" ".join(chars))), "done")
         except Exception as exc:
-            self.log.add(self.tool_links(u"<i>Glyph Compose</i> did not open: %s" % self.ak.html(exc)), "error")
+            self.log.add(self.tool_links(self.ak.error_sentence(u"<i>Glyph Compose</i> did not open", exc)), "error")
 
     def build_spaces(self, chars):
         """The spaces the font lacks (the log's spaces line, its Glyph Compose clicked) handed to Glyph Compose
@@ -9283,7 +9294,7 @@ class FontCheckDialog(object):
                                              self.ak.b(counted(len(chars), u"space")),
                                              u"it" if len(chars) == 1 else u"them")), "done")
         except Exception as exc:
-            self.log.add(self.tool_links(u"<i>Glyph Compose</i> did not open: %s" % self.ak.html(exc)), "error")
+            self.log.add(self.tool_links(self.ak.error_sentence(u"<i>Glyph Compose</i> did not open", exc)), "error")
 
     def copy_characters(self):
         QtCore, QtGui = _qt()
@@ -10025,7 +10036,8 @@ class FontCheckDialog(object):
         reference = self.reference_name()
         masters = [m for m in self.master_names() if m != reference]
         before = set((f.glyph, f.master, f.kind, f.contour) for f in self.problems)
-        done, failed, touched = [], [], []
+        done, failed, touched = [], [], []  # (done and failed: the log's rich text, each glyph's name a link)
+        link, html = ak.glyph_name_link, ak.html
         if not ak.begin_write(self.fontlab, self.package, u"FreeLab Font Check: masters", self.log):
             return  # (nothing fixed: the reason in the log)
         self.busy = True
@@ -10039,7 +10051,7 @@ class FontCheckDialog(object):
                 reference_layer = self.layer(name, reference)
                 original = read_outline(reference_layer) if reference_layer is not None else None
                 if glyph is None or original is None:
-                    failed.append(u"%s: no layer in %s to match" % (name, reference))
+                    failed.append(u"%s: no layer in %s to match" % (link(name), html(reference)))
                     continue
                 shared = shape_ids(reference_layer)
                 for master in masters:
@@ -10052,24 +10064,25 @@ class FontCheckDialog(object):
                         continue
                     if shared & shape_ids(layer):
                         failed.append(u"%s in %s: its shapes are shared with %s, which would change too" % (
-                            name, master, reference))
+                            link(name), html(master), html(reference)))
                         continue
                     if glyph not in touched:
                         touched.append(glyph)
                     try:
                         apply_fix(layer, plan)
                     except Exception as exc:
-                        failed.append(u"%s in %s: %s" % (name, master, exc))
+                        failed.append(u"%s in %s: %s" % (link(name), html(master), html(exc)))
                         continue
                     if same_outline(read_outline(layer), apply_plan(outline, plan)):
-                        done.append(u"%s in %s (%s)" % (name, master, u"; ".join(plan_steps(plan, reference))))
+                        done.append(u"%s in %s (%s)" % (link(name), html(master), html(u"; ".join(plan_steps(plan, reference)))))
                     else:
                         failed.append(u"%s in %s: it did not read back as planned (%s), look at it" % (
-                            name, master, u"; ".join(plan_steps(plan, reference))))
+                            link(name), html(master), html(u"; ".join(plan_steps(plan, reference)))))
                 if not same_outline(read_outline(reference_layer), original):
-                    failed.append(u"%s in %s: the master compared with changed too (a shared element?)" % (name, reference))
+                    failed.append(u"%s in %s: the master compared with changed too (a shared element?)" % (
+                        link(name), html(reference)))
         except Exception as exc:
-            failed.append(u"%s" % exc)
+            failed.append(html(u"%s" % exc))
         finally:
             self.busy = False
             ak.busy_end(self)
@@ -10080,10 +10093,10 @@ class FontCheckDialog(object):
                            if touched else u"")
         if done:
             shown = done[:20] + ([u"%d more" % (len(done) - 20)] if len(done) > 20 else [])
-            self.log.add(u"Fixed %s: %s.%s" % (b(counted(len(done), u"glyph layer")), ak.html(u"; ".join(shown)), undo),
+            self.log.add(u"Fixed %s: %s.%s" % (b(counted(len(done), u"glyph layer")), u"; ".join(shown), undo),
                          "done")
         if failed:
-            self.log.add(u"Not fixed: %s.%s" % (ak.html(u"; ".join(failed[:20])), u"" if done else undo), "error")
+            self.log.add(u"Not fixed: %s.%s" % (u"; ".join(failed[:20]), u"" if done else undo), "error")
         if not done and not failed:
             self.log.add(u"Nothing to fix: the masters already match where Font Check can set them right.")
         status.report(self.log)
@@ -10094,18 +10107,18 @@ class FontCheckDialog(object):
         elsewhere = sorted(set(f.glyph for f in after if f.glyph not in names))
         if elsewhere:
             self.log.add(u"New problems in %s since the fix (a shared element changed with it?): %s." % (
-                b(counted(len(elsewhere), u"other glyph")), ak.html(u", ".join(elsewhere[:20]))), "warning")
+                b(counted(len(elsewhere), u"other glyph")), u", ".join(link(g) for g in elsewhere[:20])), "warning")
         left = sorted(set(f.glyph for f in self.problems if f.glyph in names))
         designer = [g for g in left if g not in self.fixable_names]
         if designer:
             self.log.add(u"%s still %s problems that need the designer: %s." % (
                 b(counted(len(designer), u"glyph")), u"has" if len(designer) == 1 else u"have",
-                ak.html(u", ".join(designer[:20]))), "warning")  # (what the font still does wrong: amber)
+                u", ".join(link(g) for g in designer[:20])), "warning")  # (what the font still does wrong: amber)
         unfixed = [g for g in left if g in self.fixable_names]
         if unfixed:
-            self.log.add(u"%s still %s problems Fix sets right: %s. Look at %s in a <i>Glyph</i> window." % (
+            self.log.add(u"%s still %s problems Font Check can set right: %s. Look at %s in a <i>Glyph</i> window." % (
                 b(counted(len(unfixed), u"glyph")), u"has" if len(unfixed) == 1 else u"have",
-                ak.html(u", ".join(unfixed[:20])), u"it" if len(unfixed) == 1 else u"them"), "warning")
+                u", ".join(link(g) for g in unfixed[:20]), u"it" if len(unfixed) == 1 else u"them"), "warning")
         for item in self.top_items(self.glyph_tree):
             if selected is not None and u"%s" % self.data_of(item, u"") == selected:
                 self.glyph_tree.setCurrentItem(item)
@@ -10170,6 +10183,9 @@ class FontCheckDialog(object):
         name = self.ak.linked_glyph_name(u"%s" % target)
         if not name or self.package is None:
             return False
+        if self.ak.glyph_of_link(self.package, u"%s" % target) is None:  # (taken out since the line was written)
+            self.log.add(u"The font does not have that glyph now.", "warning")
+            return True
         self.open_glyph_text(u"/%s" % name)
         return True
 

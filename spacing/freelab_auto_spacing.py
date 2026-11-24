@@ -49,6 +49,11 @@ TOLERANCE_UNITS = 6  # a side whose suggestion is closer than this to its sidebe
 GROUPS = (("letters", "Letters"), ("figures", "Letters and figures"), ("all", "Letters, figures, and punctuation"),
           ("everything", "Everything"))  # (other scripts and symbols too, by case)
 DEFAULT_GROUP = "everything"  # the dropdown's choice as the window opens (owner's report 143)
+# (Everything takes the categories L, N, P, and S only, and nothing past sys.maxunicode: characters)
+GROUP_HELP = (u"Which glyphs to space. Figures are often tabular (one width for all): leave them out unless they are "
+              u"proportional. <i>Everything</i>: every glyph whose character is a letter, a number, punctuation, or a "
+              u"symbol (other scripts' letters by their case, symbols beside n); marks, spaces, and characters past "
+              u"U+FFFF are left out.")
 PREVIEW_SIZE = 80  # pixels per em in the previews
 PREVIEW_HEIGHT, PREVIEW_BASELINE = 1.35, 1.05  # a preview's height and its baseline's depth, in ems (its caption over it)
 APPLY_BUTTON = u"Space ticked glyphs"  # (Tick, not Check, for check boxes: owner's image 261)
@@ -65,6 +70,8 @@ FOLLOW_STEP, UPDATE_STEP = u"Moving the glyphs built on them", u"Updating the fo
 MEASURE_SHARE = 0.9
 MEASURE_PARTS = ((DRAW_STEP, 0.0, 0.15), (MEASURE_STEP, 0.15, 0.5), (SETTLE_STEP, 0.5, 0.9), (COMPOSITES_STEP, 0.9, 1.0))
 PUMP_EVERY = 50  # glyphs read between two calls to the progress (it lets events through at most every 0.1 s)
+# The Cancel button's own line (ak.cancel_button): what a stop leaves (stopped: the list left empty, said so)
+CANCEL_NOTE = u"A measuring or a listing stopped changes nothing in the font: the list is left empty."
 
 
 def stopped_text(what, measured=False):
@@ -102,9 +109,7 @@ def spacing_status(listed, drawn, tolerance, passes=1, bold=lambda text: u"%s" %
     if listed:
         text += u" Nothing changes until you click %s." % italic(APPLY_BUTTON)
     if passes > 1:
-        text += (u" Each change was measured again with it made, until the changes settled (%s): halfkern "
-                 u"closes half of a tightening at a time, so one measure leaves part of it."
-                 % bold(counted(passes, u"pass", u"passes")))
+        text += u" Measured in %s, each with the changes made so far." % bold(counted(passes, u"pass", u"passes"))
     return text
 
 
@@ -336,7 +341,7 @@ def apply_note(passes, again, tolerance, references_first=0, bold=lambda text: u
                      u"changes differ from the list's." % bold(counted(references_first, u"glyph")))
     if passes > 1:
         notes.append(u"It took %s: measured again after spacing, %s still had a side %s or more off, and %s "
-                     u"spaced again (the measuring's pixels round each change a little)." % (
+                     u"spaced again." % (
                          bold(counted(passes, u"pass", u"passes")), bold(counted(again, u"glyph")),
                          bold(counted(tolerance, u"unit")), u"was" if again == 1 else u"were"))
     return u" ".join(notes)
@@ -486,15 +491,19 @@ HELP = u"""<b>FreeLab Auto Spacing</b><br>
 Suggests sidebearings for the drawn glyphs of this master, so that each sits beside its
 straight reference (H for capitals, n for lowercase, 0 for figures) as the references sit beside each
 other. Changes only the glyphs you leave ticked.<br><br>
-<b>Scripts</b>: Latin; Armenian, against its own vo (capital and small) and oh; Georgian, against
-its own in and on (Mkhedruli, and Mtavruli where the font has them); kana where they are
-proportional already, against RO, NO, and I (full-width kana are set proportionally by palt: <i>CJK
-Spacing</i>). A script whose references the font lacks is spaced by case against H and n.<br><br>
+<b>Scripts</b>: Latin; Cyrillic, Greek, and Armenian, capital and small, against en and o, eta and
+omicron, and vo and oh; Georgian, against in and on (Mkhedruli, and
+Mtavruli where the font has them); Devanagari, against na and ttha; Hebrew, against he and samekh;
+Thaana, against noonu and meemu; kana where they are proportional already, against RO and NO
+(full-width kana are set proportionally by palt: <i>CJK Spacing</i>). A script whose references the
+font lacks is spaced by case against H and n.<br><br>
 <b>How</b>: <i>Auto Kerning</i>'s two methods measure the pair of the glyph and its reference on each side
 (T beside H, H beside T); the kerning they would want there, averaged, is what that sidebearing
 lacks. A side measured within the tolerance is left as it is.<br>
 <b>The references are yours</b>: H, O, l, n, o, 0, and 8 set the spacing (as in Walter Tracy's
-method: space H and n, then O and o, by eye) and are never changed, nor are the other scripts'. Glyphs built from components
+method: space H and n, then O and o, by eye), as the other scripts' own set theirs; they are not
+measured. Where Latin's, Armenian's, or Georgian's look unspaced, they are listed first, unticked,
+spaced as open-licensed fonts space theirs; only those you tick are changed. Glyphs built from components
 are not spaced: they follow the glyphs they are built on, their accents kept over them.<br>
 <b>One click</b>: each suggestion is measured again with its change made, until it settles (halfkern
 closes half of a tightening at a time, so one measure leaves part of it), and the list shows where
@@ -512,7 +521,7 @@ other values.<br>
 (right). Double-click a reference beside it to open that pair in <i>Auto Kerning</i>; double-click a glyph's name
 to open it in a <i>Glyph</i> window.<br>
 <i>Restore suggestions</i> puts the ticks back as the list first came.<br><br>
-Click this help's <i>?</i> button, then any control, for what it does."""
+Click this help's button, then anything in the window, for what it does (or right-click it: <i>What's This?</i>)."""
 
 
 class AutoSpacingDialog(object):
@@ -554,9 +563,7 @@ class AutoSpacingDialog(object):
         for _, label in GROUPS:
             self.group.addItem(label)
         self.group.setCurrentIndex(default_group())  # (Everything: owner's report 143; set before it is heard)
-        self.group.setWhatsThis(u"Which glyphs to space. Figures are often tabular (one width for all): leave them "
-                                u"out unless they are proportional. <i>Everything</i>: every glyph with a character (other "
-                                u"scripts' letters by their case, symbols beside n).")
+        self.group.setWhatsThis(GROUP_HELP)
         row.addWidget(self.group)
         row.addWidget(QtGui.QLabel("List changes of at least"))
         self.tolerance = QtGui.QSpinBox()
@@ -620,10 +627,14 @@ class AutoSpacingDialog(object):
         layout.addWidget(self.log.widget)
         buttons = QtGui.QHBoxLayout()
         self.all_button = QtGui.QPushButton("Tick all")
+        self.all_button.setWhatsThis(u"Ticks every row of the list.")
         self.none_button = QtGui.QPushButton("Untick all")
+        self.none_button.setWhatsThis(u"Unticks every row of the list.")
         self.restore_button = QtGui.QPushButton("Restore suggestions")
         self.restore_button.setWhatsThis(u"Puts the ticks back as the list first came after the analysis.")
         self.glyph_window_button = QtGui.QPushButton("Show in Glyph window")
+        self.glyph_window_button.setWhatsThis(u"Opens the selected glyph in a <i>Glyph</i> window, between its straight "
+                                              u"and round references.")
         self.kerning_button = QtGui.QPushButton(KERNING_BUTTON)
         self.kerning_button.setWhatsThis(u"Opens <i>Kerning Check</i> on the glyphs the last <i>%s</i> "
                                          u"changed (and those built on them that followed): their kerning was set for "
@@ -632,7 +643,9 @@ class AutoSpacingDialog(object):
         self.spaced = []  # the glyphs the last spacing changed: their kerning is checked on request
         self.apply_button = QtGui.QPushButton(APPLY_BUTTON)
         self.apply_button.setWhatsThis(u"Changes the sidebearings of the ticked glyphs in the current master (their "
-                                       u"outlines move, their widths change), and the glyphs built on them.")
+                                       u"outlines move, their widths change). The glyphs built on them follow when "
+                                       u"<i>Glyphs built from components follow the glyphs they are built on</i> is "
+                                       u"ticked.")
         self.close_button = QtGui.QPushButton("Close")
         for button in (self.all_button, self.none_button, self.restore_button, self.glyph_window_button,
                        self.kerning_button):
@@ -640,6 +653,7 @@ class AutoSpacingDialog(object):
         buttons.addStretch(1)
         buttons.addWidget(self.apply_button)
         buttons.addWidget(self.close_button)
+        self.ak.cancel_button(self, buttons, self.close_button, CANCEL_NOTE)  # (right before Close)
         layout.addLayout(buttons)
         self.analyze_button.connect("clicked()", self.run)
         self.group.connect("currentIndexChanged(int)", lambda index: self.run())
@@ -1097,7 +1111,7 @@ class AutoSpacingDialog(object):
             return
         error = self.ak.open_kerning_check(self.spaced, u"Auto Spacing spaced", caller=self.dialog)
         if error:
-            self.log.add(u"<i>Kerning Check</i> did not open: %s" % self.ak.html(error), "error")
+            self.log.add(self.ak.error_sentence(u"<i>Kerning Check</i> did not open", error), "error")
 
     def restore(self):
         """The checks back as the list first came after the analysis (set on the rows themselves: filling
@@ -1139,7 +1153,7 @@ class AutoSpacingDialog(object):
         error = self.ak.open_auto_kerning_at(*((reference, s.name) if side == "before" else (s.name, reference)),
                                              caller=self.dialog)
         if error:
-            self.log.add(u"<i>Auto Kerning</i> did not open: %s" % self.ak.html(error), "error")
+            self.log.add(self.ak.error_sentence(u"<i>Auto Kerning</i> did not open", error), "error")
 
     def selected(self):
         QtCore, QtGui = _qt()
@@ -1237,7 +1251,7 @@ class AutoSpacingDialog(object):
             return
         error = self.ak.show_in_glyph_window(self.fontlab, self.context_text(s.name, s.char))
         if error:
-            self.log.add(u"FontLab did not open the glyph: %s" % self.ak.html(error), "error")
+            self.log.add(self.ak.error_sentence(u"FontLab did not open the glyph", error), "error")
 
     def log_link(self, target):
         """A glyph named in the log clicked: opened between its references in a Glyph window, as Show in
@@ -1254,7 +1268,7 @@ class AutoSpacingDialog(object):
             char = None
         error = ak.show_in_glyph_window(self.fontlab, self.context_text(name, char))
         if error:
-            self.log.add(u"FontLab did not open the glyph: %s" % ak.html(error), "error")
+            self.log.add(ak.error_sentence(u"FontLab did not open the glyph", error), "error")
         return None
 
     # -- changing the font ----------------------------------------------
@@ -1270,7 +1284,7 @@ class AutoSpacingDialog(object):
         current = self.current_font()
         if current is None or self.ak.font_key(current) != self.ak.font_key(self.package) or current.master != self.master:
             self.run()
-            self.log.add(u"The font or master changed since the analysis: here is this one's. Nothing was spaced.",
+            self.log.add(u"The font or master changed since the analysis: it is measured again. Nothing was spaced.",
                          "warning")
             return
         tolerance = self.tolerance.value
@@ -1363,7 +1377,7 @@ class AutoSpacingDialog(object):
                 ak.b(counted(stale, u"glyph")), u"was" if stale == 1 else u"were", u"it was" if stale == 1 else u"they were"),
                 "warning")
         if error is not None:
-            self.log.add(u"Stopped by an error: %s" % ak.html(error), "error")
+            self.log.add(ak.error_sentence(u"Stopped by an error", error), "error")
         if asked_to_stop:  # (what was clicked is done now: the glyphs are not measured again under it)
             self.stopped(u"Measuring again")
             self.seen_history = ak.history_mark(self.package)  # (this write's own step: not measured again for it)

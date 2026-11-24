@@ -163,7 +163,10 @@ DRAFT_SPACING = 0.5  # two drafted dots apart by this share of a dot's width
 DOTLESS = {u"i": (u"\u0131", ("dotlessi", "idotless")), u"j": (u"\u0237", ("dotlessj", "jdotless", "uni0237")),
            u"\u0456": (u"\u0131", ("dotlessi", "idotless")),  # Cyrillic i and je: the Latin dotless forms
            u"\u0458": (u"\u0237", ("dotlessj", "jdotless", "uni0237"))}
-SETS = (("latin", "Latin-1, Latin Extended-A and -B", ((0x00C0, 0x0250),)),
+# A font with no dotless i or j: each made of its i or j without its dot (read_dotless), where the dot can be
+# told. {the dotless letter's code point: (the letter it is made of, its code point)}
+DOTLESS_LETTERS = {0x0131: (u"i", 0x0069), 0x0237: (u"j", 0x006A)}
+SETS =(("latin", "Latin-1, Latin Extended-A and -B", ((0x00C0, 0x0250),)),
         ("additional", "Latin Extended Additional (Vietnamese, and more)", ((0x1E00, 0x1F00),)),
         ("greek", "Greek", ((0x0370, 0x0400),)),
         ("polytonic", "Greek Extended (polytonic)", ((0x1F00, 0x2000),)),
@@ -347,6 +350,9 @@ class Font(object):
         self.names = set(names)
         self.by_code = dict((code, name) for name, code in unicodes if code)
         self.empty = set(empty)
+        # {0x0131 or 0x0237: Dotless} where the font has no dotless i or j and its i or j was read for one
+        # (read_dotless, in FontLab); none read (Font Check's planning), the letters fall back to i and j
+        self.dotless = {}
 
     def glyph_for(self, ch):
         return self.by_code.get(ord(ch))
@@ -413,6 +419,9 @@ class Recipe(object):
         # hand's changes are measured from that suggestion.
         self.compact = True
         self.cell = u""  # its row's Built from text, as last written (a search looks through it)
+        # Its dotless i or j where the font has none (Dotless): made here first, the font's dotless i itself,
+        # or kept dotted (said in amber); with the note its row says of it, and whether it is that glyph's row
+        self.dotless, self.base_note, self.dotless_row = None, u"", False
 
     @property
     def code(self):
@@ -421,6 +430,8 @@ class Recipe(object):
     def describe(self):
         if self.missing:
             return u"needs %s" % self.missing
+        if self.dotless_row:
+            return u"%s without its dot" % self.dotless.source
         if self.standalone:
             return u"%s (a combining mark: placed as on %s, then centered on the origin, zero width)" % (
                 self.marks[0].label(), self.base)
@@ -542,6 +553,11 @@ def plan(font, characters, include_existing=False, also=()):
             continue
         if drawn and not ((include_existing or ch in also) and script_of(ch) in REBUILT_SCRIPTS):
             continue
+        if ord(ch) in DOTLESS_LETTERS and not drawn:  # the dotless i or j, made of i or j without its dot
+            row = dotless_row(font, ch)
+            if row is not None:
+                recipes.append(row)
+            continue
         decomposed = unicodedata.normalize("NFD", ch)
         if len(decomposed) < 2:
             continue
@@ -554,9 +570,15 @@ def plan(font, characters, include_existing=False, also=()):
                 recipes.append(Recipe(ch, missing=u"its letter %s" % base_char))
             continue
         name_base = base
+        dotless, base_note = None, u""
         if base_char in DOTLESS and any(side_of(code) == "above" for code in codes):
             dotless_char, dotless_names = DOTLESS[base_char]
-            base = font.drawn(ord(dotless_char)) or next((n for n in dotless_names if font.usable(n)), base)
+            own = font.drawn(ord(dotless_char)) or next((n for n in dotless_names if font.usable(n)), None)
+            # None: the font's own; else as read_dotless found its i or j (none read: the dotted letter, unsaid)
+            dotless = None if own else font.dotless.get(ord(dotless_char))
+            base = own or (dotless.name if dotless is not None and dotless.kind == "made" else base)
+            if dotless is not None:
+                base_note = dotless_note(dotless, base, sum(1 for code in codes if side_of(code) == "above"))
         marks, lacking = [], []
         script, case = script_of(ch), case_of(ch)
         steps, at = [], 0  # each mark's code point, or a pair of them Greek joins
@@ -604,6 +626,7 @@ def plan(font, characters, include_existing=False, also=()):
         name = existing or glyph_name(font, name_base, [mark.root for mark in marks], ord(ch),
                                       plain=script == "kana")
         recipe = Recipe(ch, name, base, marks)
+        recipe.dotless, recipe.base_note = dotless, base_note
         recipe.refill = bool(existing) and not drawn
         if drawn:
             recipe.existing, recipe.checked = existing, False
@@ -639,6 +662,145 @@ def adscript_mark(font):
         return None
     return Mark("prosgegrammeni", "adscript", [(glyph, 1.0, 1.0, 0.0, 0.0)],
                 None if glyph != font.drawn(iota) else u"the iota, as an adscript")
+
+
+# -- the dotless i and j a font lacks (the owner's decision of 2026-11-24) ----------------------------------
+# Until then a font with no dotless i had its accented i built on the dotted i, the dot under the accent, and
+# nothing said so. Now its i is read in every master (read_dotless): two contours, one clearly the dot, make
+# the dotless i of the other (made here first, as a part: record_parts); one contour is an i drawn without a
+# dot, used as it is; anything else is not taken apart, and the glyphs stay on the dotted i, said in amber.
+
+class Dotless(object):
+    """What a font with no dotless i (or j) has to build its accented i on: kind "made" (its i without its
+    dot: contour dot, by numbered_contours' count, made into glyph name), "own" (its i has no dot: used as it
+    is), or "refused" (reason, a clause: the dotted i is used, said in amber). code: the dotless letter's code
+    point; letter: "i" or "j"; source: the font's glyph of that letter (None where it has none)."""
+
+    def __init__(self, kind, code, dot=None, reason=u""):
+        self.kind, self.code, self.dot, self.reason = kind, code, dot, reason
+        self.letter = DOTLESS_LETTERS[code][0]
+        self.source, self.name = None, None
+
+
+def dot_index(boxes):
+    """Which of a letter's two contours is its dot (its index in boxes, [(left, bottom, right, top)] as
+    drawn), or None where that is not clear. The dot is the higher one, its center above the other's top
+    (a dot that overlaps its stem's top still counts; one whose center comes down beside the stem does not:
+    a head serif, a stem in two pieces), it is the smaller (its box's area), and the two meet across (a dot
+    beside the stem is not over it). Where the highest and the smallest disagree, or the two overlap so
+    that neither is clearly over the other, it is not guessed. A j's tail makes its body's box wider and
+    taller: its dot is still the higher and smaller one."""
+    if len(boxes) != 2 or any(box is None for box in boxes):
+        return None
+    centers = [(box[1] + box[3]) / 2.0 for box in boxes]
+    if centers[0] == centers[1]:
+        return None
+    dot = 0 if centers[0] > centers[1] else 1
+    high, low = boxes[dot], boxes[1 - dot]
+    area = lambda box: max(0.0, box[2] - box[0]) * max(0.0, box[3] - box[1])  # noqa: E731
+    if not area(high) < area(low):
+        return None  # the higher is not the smaller
+    if not centers[dot] > low[3]:
+        return None  # not clearly over the other
+    if not (high[0] < low[2] and high[2] > low[0]):
+        return None  # beside it, not over it
+    return dot
+
+
+def dotless_verdict(code, readings):
+    """A Dotless of a letter's readings, one per master it is drawn in: its contours' boxes (dot_index's),
+    or None for a master where it is made of components. Every master must agree: the same count, and the
+    same contour clearly its dot. Reasons are clauses for the row's note and the log."""
+    letter = DOTLESS_LETTERS[code][0]
+    lacks = u"the font has no dotless %s, and its %s" % (letter, letter)
+    if any(boxes is None for boxes in readings):
+        return Dotless("refused", code, reason=u"%s is made of components" % lacks)
+    counts = set(len(boxes) for boxes in readings)
+    if not counts:
+        return Dotless("refused", code, reason=u"%s has no outline" % lacks)
+    if len(counts) > 1:
+        return Dotless("refused", code, reason=u"%s differs from master to master" % lacks)
+    count = counts.pop()
+    if count == 1:
+        return Dotless("own", code)
+    if count != 2:
+        return Dotless("refused", code, reason=u"%s has %s" % (lacks, counted(count, u"contour")))
+    dots = set(dot_index(boxes) for boxes in readings)
+    if len(dots) > 1:
+        return Dotless("refused", code, reason=u"%s differs from master to master" % lacks)
+    dot = dots.pop()
+    if dot is None:
+        return Dotless("refused", code, reason=u"the font has no dotless %s, and neither contour of its %s is "
+                                                u"clearly the dot" % (letter, letter))
+    return Dotless("made", code, dot)
+
+
+def dotless_note(dotless, base, above=1):
+    """A row's note of the glyph it is built on, where the font has no dotless i (or j): the one made here,
+    the font's i used as it is (no dot: nothing collides, said plainly), or the dotted i kept (an amber
+    note, kept_dotted, as a collision's: the dot stays under the diacritics above, which number above). The
+    advice to draw the dotless letter follows a semicolon, as a note of its own: in parentheses it would
+    close twice at the end of the row's cell, itself in parentheses."""
+    if dotless.kind == "made":
+        return u"%s is %s without its dot, built here first" % (dotless.name, dotless.source)
+    if dotless.kind == "own":
+        return u"on %s itself: the font's %s has no dot" % (base, dotless.letter)
+    return u"the dot of %s stays under the %s: %s; draw U+%04X" % (
+        base, u"diacritic" if above == 1 else u"diacritics", dotless.reason, dotless.code)
+
+
+def kept_dotted(recipe):
+    """Whether a recipe is built on a dotted i or j its font has no dotless form for and could not take
+    apart (an amber note, as a collision's)."""
+    return recipe.dotless is not None and recipe.dotless.kind == "refused"
+
+
+def made_dotless(recipe):
+    """The Dotless a recipe's base is made from (its own glyph's, for the dotless letter's row), or None."""
+    return recipe.dotless if recipe.dotless is not None and recipe.dotless.kind == "made" else None
+
+
+def dotless_row(font, ch):
+    """The row of the dotless i or j itself (U+0131, U+0237) where the font lacks it and its i or j can be
+    taken apart (read_dotless): its glyph drawn as that letter without its dot. None otherwise: the rows
+    built on it say what the font lacks."""
+    dotless = font.dotless.get(ord(ch))
+    if dotless is None or dotless.kind != "made":
+        return None
+    recipe = Recipe(ch, dotless.name, dotless.name)
+    recipe.dotless, recipe.dotless_row = dotless, True
+    return recipe
+
+
+def made_dotless_text(name, source, masters=1, named=None):
+    """The log's line for a dotless glyph a build made; named: how a glyph's name is written (the log's
+    ak.glyph_name_link: in italics, opened on a click), as it is by default."""
+    named = named or (lambda text: text)
+    return u"Made %s from %s without its dot%s: the font had none." % (
+        named(name), named(source), u" in every master" if masters > 1 else u"")
+
+
+def dot_kept_lines(recipes, bold=None, links=None):
+    """The log's warnings after a build for the glyphs built on a dotted i or j (kept_dotted), one per
+    letter and reason, as the lines on glyphs built with a diacritic too close are written (log_touches)."""
+    bold = bold or (lambda text: text)
+    links = links or (lambda chars: u" ".join(chars))
+    groups, order = {}, []
+    for r in recipes:
+        if not kept_dotted(r):
+            continue
+        key = (r.base, r.dotless.reason, r.dotless.code)
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(r.char)
+    lines = []
+    for base, reason, code in order:
+        chars = groups[(base, reason, code)]
+        lines.append(u"%s built on %s with its dot: %s. Draw U+%04X, then rebuild %s: %s." % (
+            bold(counted(len(chars), u"glyph")), base, reason, code, u"it" if len(chars) == 1 else u"them",
+            links(chars)))
+    return lines
 
 
 def scripts_present(codes):
@@ -1613,17 +1775,15 @@ def adjusted(recipe, parts, ink_of):
     return parts
 
 
-# Compact diacritics to fit the line: the key its choice is remembered by (diacritics.json), and its help
+# Compact diacritics to fit the line: the key its choice is remembered by (glyph_compose.json), and its help
 COMPACT_KEY = "compact_diacritics"
-COMPACT_HELP = (u"Makes the diacritics of a glyph too tall for a 120% line compact, by no more than it needs: the gaps "
-                u"of its stack closed just enough to fit, and only where closing them is not enough, its diacritics "
-                u"made smaller too, as little as fits, down to 70%; its row says what it took. The letter itself is "
-                u"never made compact, and a letter that reaches past the line by itself (a descender) does not count "
-                u"against its diacritics. Off (as at first), every diacritic keeps its own gap and size, and a glyph "
-                u"too tall says by how much, for you to see to by hand. A glyph whose diacritics you moved, scaled, "
-                u"lined up, or took from a related letter keeps what you set, either way, and its row says whether that "
-                u"fits. In the font, nothing changes until you build: a glyph the font has (<i>Also list existing "
-                u"glyphs</i>) is only compared with the other suggestion. The choice is remembered.")
+COMPACT_HELP = (u"Fits the diacritics of a glyph too tall for a 120%% line: the gaps of its stack closed just enough, "
+                u"and, where that is not enough, its diacritics made smaller, down to %d%%; its row says what it took. "
+                u"The letter is never changed, and a letter that reaches past the line by itself (a descender) does "
+                u"not count. Unticked (as at first), a glyph too tall says by how much, for you to fix by hand. A "
+                u"glyph whose diacritics you placed by hand keeps them either way, and its row says whether they "
+                u"fit. Nothing changes in the font until you build (a glyph the font has is only compared with "
+                u"the other suggestion). The choice is remembered." % round(MIN_SCALE * 100))
 
 # What a row's notes say of the room of a 120% line (the top line counts the rows by them)
 COMPACT_NOTE = u"gaps closed"  # how a note of a glyph made compact begins
@@ -2329,15 +2489,15 @@ FIND_A_GLYPH = u"Find a glyph…"  # (a placeholder ends with an ellipsis: owner
 VALUE_ONLY_LABEL = u"List only high-value glyphs."
 VALUE_ONLY_HELP = (u"Shows only the glyphs <i>Font Check</i> lists under <i>High-value missing glyphs</i> for this font "
                    u"(the missing glyphs of the languages already within reach, which they complete), as <i>Tick "
-                   u"high-value glyphs</i> reads them; rows not shown keep their ticks. Grayed until <i>Font Check</i> "
-                   u"has been asked, and when its data cannot be read.")
+                   u"high-value glyphs</i> reads them; rows not shown keep their ticks. Grayed until <i>Font Check</i>'s "
+                   u"data has been read.")
 
 
 VALUE_BUTTON_HELP = (u"Ticks the glyphs <i>Font Check</i> lists under <i>High-value missing glyphs</i> for this font "
                      u"(the missing glyphs of the languages already within reach, which they complete), and unticks "
-                     u"the others shown: gaps are closed without new ones being opened. <i>Font Check</i>'s own "
-                     u"settings count where its window is open, else those it starts with. Grayed while <i>Font "
-                     u"Check</i> is asked, when its data cannot be read, and when no glyph shown is among them.")
+                     u"the others shown. <i>Font Check</i>'s own settings count where its window is open, else those "
+                     u"it starts with. Grayed until <i>Font Check</i>'s data has been read, and when a click would "
+                     u"change no tick.")
 
 
 def high_value_text(count, bold=None):
@@ -3505,15 +3665,22 @@ def counted(number, one, many=None):
 class FontLabInk(object):
     """The ink of a master's glyphs (components drawn), measured once each."""
 
-    def __init__(self, ak, package, master):
+    def __init__(self, ak, package, master, virtual=None):
         self.ak, self.package, self.master = ak, package, master
         self.found, self.paths = {}, {}
+        # {name: (glyph, contour)}: a glyph a build will make (a dotless i), not in the font yet, drawn as that
+        # glyph without that contour (numbered_contours' count), so that its rows show it before it is made
+        self.virtual = dict(virtual or {})
 
     def path(self, name):
         if name not in self.paths:
-            glyph = self.package.findName(name)
+            glyph, dot = self.package.findName(name), None
+            if (glyph is None or glyph.isNull) and name in self.virtual:
+                source, dot = self.virtual[name]
+                glyph = self.package.findName(source)
             layer = glyph.getLayerByName(self.master) if glyph is not None and not glyph.isNull else None
-            self.paths[name] = (self.ak.layer_path(layer), layer.advanceWidth) if layer is not None else (None, 0)
+            drawn = layer if dot is None or layer is None else WithoutContour(layer, dot)
+            self.paths[name] = (self.ak.layer_path(drawn), layer.advanceWidth) if layer is not None else (None, 0)
         return self.paths[name]
 
     def __call__(self, name):
@@ -3555,6 +3722,20 @@ def is_empty(glyph):
 
 UNWRAP_DEPTH = 4  # components inside components followed this deep
 TOUCH_SHARE = 0.012  # of the em: a mark placed from another letter this close to its letter or another mark is named
+
+
+def touch_units(upm):
+    """TOUCH_SHARE of this em in whole units, as the log names it (1,000 when the em is unknown): the log
+    said 12 units whatever the font's em, while the test measures TOUCH_SHARE of the font's own."""
+    try:
+        upm = float(upm)
+    except (TypeError, ValueError):
+        upm = 1000.0
+    if not upm > 0:
+        upm = 1000.0
+    return int(round(TOUCH_SHARE * upm))
+
+
 # The marks drawn joined to their letter: touching it is how they should sit, and standing clear of it is
 # the fault (the vertical caron, lined up with its own kind too, stands beside its letter like any mark)
 TOUCHING_KINDS = ("ogonek", "cedilla", "horn")
@@ -3918,6 +4099,174 @@ def corrected_glyph(fontlab, ak, package, masters, source, axis):
     return name, make_corrected(fontlab, ak, package, masters, source, axis, name)
 
 
+# -- the dotless i and j a font lacks, made of its i and j (FontLab) -----------------------------------------
+# Read and written with the calls the corrected glyphs above use (getLayerByName, shapes, contours, a
+# contour's nodes() and their x and y, a shape's transform and clone, addGlyph, setGlyphComponents with no
+# component first, addShape, advanceWidth, deleteGlyph, fgGlyph.unicode), and two that Glyph generation's
+# stretched dashes use, live 2026-11-14: a contour's clone() and flShape().addContours(clones, True). Not
+# proven live here yet; whatever FontLab does is read back node by node, and a glyph that does not measure
+# right is taken out again and said so.
+
+def numbered_contours(shapes):
+    """[(shape's index, contour, its number)] of a layer's contours in order, every shape's (FontLab lists
+    an empty contour as None: not counted). The number is what Dotless.dot and dot_index count."""
+    found = []
+    for at, shape in enumerate(shapes):
+        for contour in shape.contours:
+            if contour is not None:
+                found.append((at, contour, len(found)))
+    return found
+
+
+def contour_points(shape, contour):
+    """[(x, y)] of a contour's nodes as drawn, through its shape's transform (as layer_points reads them)."""
+    m11, m12, m21, m22, dx, dy = transform_values(shape.transform)
+    return [(m11 * x + m21 * y + dx, m12 * x + m22 * y + dy)
+            for x, y in [(float(node.x), float(node.y)) for node in contour.nodes()]]
+
+
+def contour_boxes(layer):
+    """[(left, bottom, right, top)] of each contour of a layer as drawn, from its nodes (None for one with
+    none), in numbered_contours' order; None where the layer holds a component (its glyph's contours are
+    not this glyph's to take apart); [] where it draws nothing."""
+    shapes = list(layer.shapes)
+    if any(shape_is_component(shape) for shape in shapes):
+        return None
+    boxes = []
+    for at, contour, _ in numbered_contours(shapes):
+        points = contour_points(shapes[at], contour)
+        xs, ys = [x for x, _ in points], [y for _, y in points]
+        boxes.append((min(xs), min(ys), max(xs), max(ys)) if points else None)
+    return boxes
+
+
+class WithoutContour(object):
+    """A layer seen without one of its contours (numbered_contours' count), as Auto Kerning's layer_path
+    reads a layer (its shapes, each with its transform and contours): the dotless glyph a build will make,
+    drawn before it is made."""
+
+    def __init__(self, layer, dot):
+        self.advanceWidth = layer.advanceWidth
+        shapes = list(layer.shapes)
+        numbered = numbered_contours(shapes)
+        self.shapes = [_Contours(shape.transform, [contour for at_, contour, number in numbered
+                                                   if at_ == at and number != dot])
+                       for at, shape in enumerate(shapes)]
+
+
+class _Contours(object):
+    isComponent = False
+
+    def __init__(self, transform, contours):
+        self.transform, self.contours = transform, contours
+
+
+def read_dotless(package, masters, font):
+    """{0x0131 or 0x0237: Dotless} for the dotless letters the font lacks (neither the code point drawn
+    nor a glyph of the names fonts give it): what its i or j, read in every master it is drawn in, can give.
+    A dotless letter whose code point is the font's, empty, is refused (an empty glyph is never built on)."""
+    found = {}
+    for code in sorted(DOTLESS_LETTERS):
+        letter, letter_code = DOTLESS_LETTERS[code]
+        names = DOTLESS[letter][1]
+        if font.drawn(code) or any(font.usable(name) for name in names):
+            continue
+        if font.by_code.get(code):
+            found[code] = Dotless("refused", code, reason=u"the font's dotless %s is empty" % letter)
+            continue
+        source = font.drawn(letter_code)
+        glyph = font_glyph(package, source) if source else None
+        if glyph is None:
+            found[code] = Dotless("refused", code, reason=u"the font has no dotless %s, and no %s to make one of" % (
+                letter, letter))
+            continue
+        readings = []
+        for master in masters:
+            layer = glyph.getLayerByName(master)
+            boxes = contour_boxes(layer) if layer is not None else []
+            if boxes != []:  # (a master it is not drawn in is left out, as a build leaves it)
+                readings.append(boxes)
+        dotless = dotless_verdict(code, readings)
+        dotless.source = source
+        if dotless.kind == "made":
+            dotless.name = next((name for name in names + (u"uni%04X" % code,) if name not in font.names), None)
+            if dotless.name is None:
+                dotless = Dotless("refused", code, reason=u"the font has no dotless %s, and its names are other "
+                                                          u"glyphs' (%s)" % (letter, listed(names + (u"uni%04X" % code,))))
+                dotless.source = source
+        found[code] = dotless
+    return found
+
+
+class DotlessError(Exception):
+    """Why a dotless i or j could not be made of the font's i or j (said in the log)."""
+
+
+def make_dotless(fontlab, ak, package, masters, dotless):
+    """dotless's glyph (kind "made") made of its letter without its dot, in every master the letter is
+    drawn in: the other contours copied (a shape without the dot whole, its transform kept; the dot's own
+    shape as a new shape of clones of its other contours), the letter's advance width kept, so its
+    sidebearings too. Made as a new glyph is everywhere here: its layers through setGlyphComponents with no
+    component first (a layer made by getLayerByName alone crashed FontLab, live 2026-11-16), the code point
+    set last, once every layer is made (given before, FontLab kept none of the layers made on it, live
+    2026-11-11), the glyph looked up again by name. Each master is read again first (still two contours,
+    the same one clearly the dot) and read back node by node after; DotlessError, and the glyph taken out
+    again, where anything does not measure right. The glyph made."""
+    origin = font_glyph(package, dotless.source)
+    if origin is None:
+        raise DotlessError(u"%s is not in the font" % dotless.source)
+    if font_glyph(package, dotless.name) is not None:
+        raise DotlessError(u"%s is in the font already" % dotless.name)
+    new = new_glyph(fontlab, package, dotless.name)
+    package.addGlyph(new)  # (FontLab adds a copy, without layers: they are made on the font's glyph)
+    glyph = font_glyph(package, dotless.name)
+    if glyph is None:
+        raise DotlessError(u"FontLab did not add %s" % dotless.name)
+    try:
+        drawn = 0
+        for master in masters:
+            layer_from = origin.getLayerByName(master)
+            boxes = contour_boxes(layer_from) if layer_from is not None else []
+            if boxes == []:
+                continue  # (not drawn in this master: no layer made, as a build makes none)
+            if boxes is None or dot_index(boxes) != dotless.dot:
+                raise DotlessError(u"%s changed in master %s since the list was made" % (dotless.source, master))
+            shapes = list(layer_from.shapes)
+            numbered = numbered_contours(shapes)
+            wanted = [point for at, contour, number in numbered if number != dotless.dot
+                      for point in contour_points(shapes[at], contour)]
+            width = float(layer_from.advanceWidth)
+            layer = glyph.getLayerByName(master, True)
+            layer.setGlyphComponents([], width, package, False)
+            for at, shape in enumerate(shapes):
+                own = [(contour, number) for at_, contour, number in numbered if at_ == at]
+                kept = [contour for contour, number in own if number != dotless.dot]
+                if len(kept) == len(own):
+                    layer.addShape(shape_copy(shape))
+                elif kept:  # (the dot shares this shape: its other contours in a shape of their own)
+                    piece = fontlab.flShape()
+                    piece.addContours([contour.clone() for contour in kept], True)
+                    layer.addShape(piece)
+            layer.advanceWidth = width
+            if not same_points(layer_points(layer), wanted):
+                raise DotlessError(u"FontLab did not copy the outlines of %s in master %s" % (dotless.source, master))
+            if abs(float(layer.advanceWidth) - width) > 0.5:
+                raise DotlessError(u"FontLab did not keep the advance of %s in master %s" % (dotless.name, master))
+            drawn += 1
+        if not drawn:
+            raise DotlessError(u"%s has no outline" % dotless.source)
+        font_glyph(package, dotless.name).fgGlyph.unicode = dotless.code
+    except Exception as exc:
+        try:
+            package.deleteGlyph(font_glyph(package, dotless.name))
+        except Exception:
+            pass
+        if isinstance(exc, DotlessError):
+            raise
+        raise DotlessError(u"%s" % exc)
+    return font_glyph(package, dotless.name)
+
+
 def relink_plan(ak, package, master, glyph, corrected):
     """(layer, its shapes, [None for an outline of its own, else (glyph, transform) of a component], how
     many components are set right) of a glyph's mirrored components in a master pointed to their
@@ -4020,25 +4369,29 @@ def component_parts(layer):
 HELP = u"""<b>FreeLab Glyph Compose</b><br>
 Builds the glyphs this font lacks from the glyphs it has. Two tabs: <i>Diacritics</i> (the letters with
 diacritics, and the anchors of scripts whose marks attach) and <i>Glyph generation</i> (spaces, dashes,
-punctuation, look-alike letters, ligature letters, fractions, arrows, and turned and reversed letters). Nothing
-is made until you click a
-tab's <i>Build</i> button.<br><br>
+punctuation, look-alike letters, ligature letters, fractions, arrows, turned and reversed letters, superscript and
+subscript signs and letters, signs made of letters (the trade mark and numero signs), circled figures and letters,
+full-width and half-width forms, small capitals, letters with bars, small kana, squared words and abbreviations,
+Kangxi radicals, telegraph symbols, Roman numerals, and parenthesized and numbered forms). Nothing
+is made until you click <i>Build ticked glyphs</i> (on <i>Mark anchors</i>: <i>Add ticked anchors</i>).<br><br>
 <b>Diacritics</b> builds the letters with diacritics this font lacks (Latin, Greek, Cyrillic, and the voiced
 kana) from its letters and marks, as glyphs of components, placing each diacritic as the font's own accented
 glyphs place theirs (no anchors needed).<br>
 <b>The list</b>: each glyph that can be built, drawn as it would be, with the glyphs it is
 built from. Capitals take a mark's .case form where the font has one; i and j take their dotless
-forms under a mark above. A mark the font lacks is borrowed (a dot below from the dot accent) or
+forms under a mark above (a font with none has them made of its i and j without their dot, where the dot
+can be told; else the row says that the dot stays, and the log warns of it at the build). A mark the font lacks is borrowed (a dot below from the dot accent) or
 drafted from its punctuation, and the list says so. Glyphs that cannot be built say what the
 font lacks (select one to see it in the reference font). Where fonts draw another mark than Unicode's
 decomposition names (Latvian's comma below for a cedilla, the vertical caron of d, t, l, and L), that mark is
 used, and the row says why. Double-click a row to open its glyph (or, not built yet, its letter) in a
 <i>Glyph</i> window.<br>
 <b>The editor</b> (under the list): the selected glyph between its letter and a letter the font has
-with the same base (double-click that one to go to its row; double-click the glyph to open it). Click a diacritic to select it; drag it (its center snaps to the letter's center, a guide drawn;
-<i>Alt</i>: no snapping), or press the arrow keys (<i>Shift</i>: 10 units),
-to move it; drag a corner or a side of its frame to scale it (<i>Shift</i> on a corner: in proportion);
-<i>Tab</i> selects the next diacritic, <i>Backspace</i> puts the selected one back. Your changes stay with the glyph as
+with the same base (double-click that one to go to its row; double-click the glyph to open it). Click a diacritic
+to select it; drag it, or press the arrow keys (<i>Shift</i>: 10 units), to move it; drag a corner or a side of its
+frame to scale it (<i>Shift</i> on a corner: in proportion); <i>Tab</i> selects the next diacritic, <i>Backspace</i>
+puts the selected one back. Dragged, a diacritic's center snaps to the letter's box center or top center (bottom
+center, for a diacritic below), a guide drawn; <i>Alt</i>: no snapping. Your changes stay with the glyph as
 you go down the list, and are built. The faint dashed lines are the font's lines, each named at one end. A
 limit says in parentheses what happens past it (Windows clips past winAscent and winDescent, macOS past the
 hhea values, and past the room of a 120% line the glyph meets the next line), and turns amber when a diacritic
@@ -4049,7 +4402,8 @@ its diacritics made smaller); glyphs you placed by hand keep what you set.<br>
 <b>Finding glyphs</b>: type in <i>Find a glyph</i> to show only the rows with that text in their name or in
 what they are built from, that character, or that Unicode value; the others keep their ticks, and <i>Build
 ticked glyphs</i> builds them too (the count beside the field says how many ticked ones are hidden). <i>Tick
-high-value glyphs</i> ticks those <i>Font Check</i> lists as completing languages already within reach.<br>
+high-value glyphs</i> ticks those <i>Font Check</i> lists as completing languages already within reach, and
+unticks the others shown.<br>
 <b>Reference</b>: the character in another font, to compare: {reference} at first,
 or one you pick (its entry at the top of the list takes the pick back).<br>
 <b>Mirrored components</b>: a component mirrored one way has its contours reversed, and shows a hole where it
@@ -4062,8 +4416,9 @@ move by as much in every master.<br><br>
 its recipe, a picture, and how sure the recipe is (<i>exact</i>: no design in it; <i>accepted</i>: how
 fonts commonly build it; <i>starting point</i>: a draft to draw over, never a finished glyph; <i>likely usable
 as it is</i>: a turned or reversed letter of a monoline design). Ticked
-rows are built in every master as one step of the History.<br><br>
-Click this help's <i>?</i> button, then any control, for what it does."""
+rows are built in every master; <i>Edit &gt; Undo</i> takes them back (in two steps when some of them are made of
+others built with them, as the log says).<br><br>
+Click this help's button, then anything in the window, for what it does (or right-click it: <i>What's This?</i>)."""
 
 LINES_HELP = (u"The faint dashed lines are the font's lines, named at one end (equal ones share a line). A limit "
               u"says in parentheses what happens past it: Windows clips past winAscent and winDescent, macOS past "
@@ -4071,14 +4426,18 @@ LINES_HELP = (u"The faint dashed lines are the font's lines, named at one end (e
               u"crosses turns amber. The font's ascender and descender and its typo values are reference lines: "
               u"drawn, never amber.")
 TOP_TABS = (u"Diacritics", u"Glyph generation")
+# What Glyph generation builds: its table's groups (freelab_glyph_generation.py), the CJK ones included
+GENERATED_KINDS = (u"spaces, dashes, punctuation, look-alike letters, ligature letters, fractions, arrows, turned and "
+                   u"reversed letters, superscript and subscript signs and letters, signs made of letters (the trade "
+                   u"mark and numero signs), circled figures and letters, full-width and half-width forms, small "
+                   u"capitals, letters with bars, small kana, squared words and abbreviations, Kangxi radicals, "
+                   u"telegraph symbols, Roman numerals, and parenthesized and numbered forms")
 TAB_KEYS = ("letters", "anchors", "generation")  # the three tabs with a list: their status lines and bottom-row parts
 TOP_TABS_HELP = (u"<i>Diacritics</i> builds the letters with diacritics the font lacks, and places the anchors of "
                  u"scripts whose marks attach. <i>Glyph generation</i> builds other glyphs the font lacks from the "
-                 u"glyphs it has: spaces, dashes, punctuation, look-alike letters, ligature letters, fractions, "
-                 u"arrows, and turned and reversed letters.")
+                 u"glyphs it has: %s." % GENERATED_KINDS)
 TOP_TAB_HELPS = (u"Letters with diacritics, and mark anchors.",
-                 u"Spaces, dashes, punctuation, look-alike letters, ligature letters, fractions, arrows, and turned "
-                 u"and reversed letters, made of the glyphs the font has.")
+                 u"%s%s, made of the glyphs the font has." % (GENERATED_KINDS[0].upper(), GENERATED_KINDS[1:]))
 GENERATION_FILE, GENERATION_MODULE = "freelab_glyph_generation.py", "freelab_glyph_generation"  # (its tab)
 TABS_HELP = (u"<i>Letters with diacritics</i> builds the letters the font lacks from its letters and marks. "
              u"<i>Mark anchors</i> places anchors, and writes the mark features, for scripts whose marks are "
@@ -4093,14 +4452,14 @@ REFERENCE_NOTE_HELP = (u"Which font the reference is drawn in: the one chosen, o
                        u"character, the font drawn in its place.")
 HINT_HELP = (u"What is selected in the picture: the diacritic, how far it was moved and scaled by hand, and whether it "
              u"lies outside the picture; else what a click there does.")
-CORRECT_HELP = (u"Sets right the mirrored components of the font's glyphs listed here, those shown: under <i>Also "
-                u"list existing glyphs</i>, and those under <i>Built in this window</i>. A component mirrored one way (scaled by a negative number across or up, not "
-                u"both) has its contours reversed: where it overlaps another part, renderers leave a hole. Each "
-                u"such mark is mirrored into a glyph of its own with its contours reversed (<i>caron.flipped</i> "
-                u"for one turned upside down, <i>comma.mirrored</i> for one mirrored left to right), made once "
-                u"and used by every letter that needs it, and the letters' components point to it, no longer "
-                u"mirrored: they stay glyphs of components and look as they did. In every master, as one step: "
-                u"<i>Edit &gt; Undo</i> takes it back. A glyph left as it is keeps the note in its row.")
+CORRECT_HELP = (u"Sets right the mirrored components of the font's glyphs listed and shown (under <i>Also list "
+                u"existing glyphs</i> and <i>Built in this window</i>). A component mirrored one way (scaled by a "
+                u"negative number across or up, not both) has its contours reversed, so renderers leave a hole "
+                u"where it overlaps another part. The glyph it points to is mirrored into a glyph of its own with "
+                u"its contours reversed (<i>caron.flipped</i> upside down, <i>comma.mirrored</i> left to right), "
+                u"made once for every glyph that needs it, and the component points there, no longer mirrored: "
+                u"the glyph looks as it did. In every master; <i>Edit &gt; Undo</i> takes it back (in two steps "
+                u"when glyphs are added, as the log says). A glyph left as it is keeps the note in its row.")
 REFERENCE_SLICE = 40  # entries of the reference font's chooser given their own font per turn of the event loop
 OWN_WRITE_SECONDS = 3.0  # a History step FontLab records this soon after the dialog's own write is that write's
 REVEALED_WAIT_MS = 700  # a row selected: the glyph listed to show it goes this long after (past a double-click)
@@ -4144,13 +4503,15 @@ def record_parts(ak, fontlab, package, parts, title=PARTS_TITLE):
     return ak.notify_changed(fontlab, package, title, list(parts))
 
 
-def parts_step_text(names):
-    """The log's line for a write recorded in two steps (record_parts)."""
+def parts_step_text(names, named=None):
+    """The log's line for a write recorded in two steps (record_parts); named: how a glyph's name is
+    written (the log's ak.glyph_name_link), as it is by default."""
     names = [name for name in names if name]
+    named = named or (lambda text: text)
     one = len(names) == 1
     return (u"This takes two steps of <i>Edit &gt; Undo</i>: %s %s added in a step of %s own first, so that FontLab's "
             u"Undo never takes out a glyph that others still point to." % (
-                u", ".join(names), u"was" if one else u"were", u"its" if one else u"their"))
+                u", ".join(named(name) for name in names), u"was" if one else u"were", u"its" if one else u"their"))
 
 
 def undo_words(status, text):
@@ -5186,8 +5547,8 @@ class AnchorPage(object):
         self.code_box = QtGui.QCheckBox(u"Write the feature code.")
         self.code_box.setChecked(True)
         self.code_box.setWhatsThis(u"Also writes the mark and mkmk features that attach the marks by these anchors "
-                                   u"(and the ticked substitutions: ccmp, pres), between FreeLab's marker lines (a "
-                                   u"font with one master: anchors are the same in every master only then).")
+                                   u"(and the ticked substitutions: ccmp, pres), between FreeLab's marker lines. "
+                                   u"Grayed and unticked in a font with more than one master.")
         row.addStretch(1)
         self.search, self.search_label = owner.search_field(
             FIND_A_GLYPH, u"Shows only the glyphs whose name holds this text, whose character it is (a "
@@ -6099,7 +6460,7 @@ class AnchorPage(object):
             return
         error = self.ak.show_in_glyph_window(self.fontlab, u"/%s" % g.name)
         if error:
-            self.owner.log.add(u"FontLab did not open the glyph: %s" % self.ak.html(error), "error")
+            self.owner.log.add(self.ak.error_sentence(u"FontLab did not open the glyph", error), "error")
 
     # -- writing -----------------------------------------------------------------------
 
@@ -6220,8 +6581,12 @@ class AnchorPage(object):
             self.owner.log.add(u"Nothing was added: the ticked glyphs have their anchors in every master already%s." % (
                 u", and the font has the mark code as written" if new_texts else u""))
         if error is not None:
-            self.owner.log.add(u"Stopped by an error: %s" % self.ak.html(error), "error")
+            self.owner.log.add(self.ak.error_sentence(u"Stopped by an error", error), "error")
         self.run(keep_script=True)
+
+
+# The Cancel button's own line (ak.cancel_button): what a stop leaves, as the stop's log lines say
+CANCEL_NOTE = u"A reading stopped changes nothing in the font, and a build stopped while it reads the masters builds nothing."
 
 
 class AccentsDialog(object):
@@ -6424,14 +6789,13 @@ class AccentsDialog(object):
         self.editor.setProperty(ak.LEAVE_ALONE_PROP, True)  # dark mode leaves what it draws alone
         self.editor.setWhatsThis(u"The selected glyph as it would be built, between its letter and a letter the font "
                                  u"has with the same base (double-click that one to go to its row: it is listed, "
-                                 u"unticked, until you go on to another letter, unless you tick it; double-click the "
-                                 u"glyph to open it in a <i>Glyph</i> window). Click a diacritic to select it, drag it (its center snaps to "
-                                 u"the letter's box center or top center, a guide drawn; <i>Alt</i>: no snapping) or "
-                                 u"press the arrow keys "
-                                 u"to move it, drag its frame to scale it; <i>Tab</i> selects the next diacritic, <i>Backspace</i> "
-                                 u"puts it back; "
-                                 u"double-click the glyph to open it (or, not built yet, its letter) in a <i>Glyph</i> "
-                                 u"window. " + LINES_HELP + u" The glyph is drawn as a renderer fills it, its "
+                                 u"unticked, until you go on to another letter, unless you tick it). Double-click the "
+                                 u"glyph to open it (or, not built yet, its letter) in a <i>Glyph</i> window. Click a "
+                                 u"diacritic to select it; drag it or press the arrow keys to move it; drag its frame "
+                                 u"to scale it; <i>Tab</i> selects the next diacritic, <i>Backspace</i> puts it back. "
+                                 u"Dragged, a diacritic's center snaps to the letter's box center or top center "
+                                 u"(bottom center, for a diacritic below), a guide drawn; <i>Alt</i>: no snapping. "
+                                 + LINES_HELP + u" The glyph is drawn as a renderer fills it, its "
                                  u"components kept: a hole shown here would show in the font. A diacritic moved out of "
                                  u"the picture is shown by an arrow at the edge: click the arrow to select it.")
         editing.addWidget(self.editor, 1)
@@ -6448,19 +6812,15 @@ class AccentsDialog(object):
         self.propagate_button.setWhatsThis(u"Moves and scales the same diacritic on the related letters as on this "
                                            u"one: the same mark, on the same side and at the same place in its "
                                            u"stack, over letters of the same case (a circumflex raised on <i>C</i>: "
-                                           u"every capital with a circumflex). Across, a diacritic centered by hand "
-                                           u"(snapped to a center) is centered on each letter; else its offset from "
-                                           u"the letter's center is carried in units, each letter keeping where fonts "
-                                           u"set diacritics on it (right of <i>l</i>'s stem). Grayed once applied, "
-                                           u"until the diacritic is moved again. A diacritic put back here (<i>Reset "
-                                           u"diacritics</i>) while related letters still hold a placement made by "
-                                           u"hand keeps the button clickable: it then puts theirs back too. "
-                                           u"Letters where the diacritic then comes "
-                                           u"within %d units of its letter or another diacritic are named in the log "
-                                           u"and in their row, to look at (a diacritic that joins its letter, an ogonek, a "
-                                           u"cedilla, or a horn, is named when it does not touch it instead); "
-                                           u"<i>Reset diacritics</i> on a row puts it back."
-                                           % round(TOUCH_SHARE * 1000))
+                                           u"every capital with a circumflex). Across, a diacritic snapped to a "
+                                           u"center is centered on each letter; else its offset from the letter's "
+                                           u"center is carried, each letter keeping where fonts set diacritics on it "
+                                           u"(right of <i>l</i>'s stem). Grayed once applied, until the diacritic is "
+                                           u"moved again; after <i>Reset diacritics</i> here, it puts the related "
+                                           u"letters back too. Letters where the diacritic then comes within %.1f%% "
+                                           u"of the em of its letter or another diacritic are named in the log and in "
+                                           u"their row (an ogonek, a cedilla, or a horn: where it does not touch its "
+                                           u"letter)." % (TOUCH_SHARE * 100))
         hint_row.addWidget(self.propagate_button)
         self.line_up_button = QtGui.QPushButton(u"Line up diacritics")
         self.line_up_button.setWhatsThis(u"Sets every diacritic above (or below) of the same group at the same height "
@@ -6485,13 +6845,16 @@ class AccentsDialog(object):
         self.restore_button = QtGui.QPushButton("Restore suggestions")
         self.restore_button.setWhatsThis(u"Puts every tick, and every diacritic moved by hand, back as the list first came.")
         self.glyph_window_button = QtGui.QPushButton("Show in Glyph window")
-        self.glyph_window_button.setWhatsThis(u"Opens the selected glyph in a <i>Glyph</i> window, between H's, n's, and o's "
-                                              u"(only a glyph the font has: build it first).")
+        self.glyph_window_button.setWhatsThis(u"Opens the selected glyph in a <i>Glyph</i> window, between its "
+                                              u"script's control glyphs (H, n, and o for Latin; only a glyph the font "
+                                              u"has: build it first).")
         self.build_button = QtGui.QPushButton(BUILD_TICKED)
         self.build_button.setWhatsThis(u"Adds each ticked glyph to the font, with its Unicode value, built from its "
                                        u"letter and marks as components, in every master. Every ticked glyph is "
-                                       u"built, those a search hides too: the button then says how many are not "
-                                       u"shown. <i>Edit &gt; Undo</i> takes it back.")
+                                       u"built, those a search hides too: the count beside the search field says "
+                                       u"how many of them are hidden. <i>Edit &gt; Undo</i> takes them back (in two "
+                                       u"steps when some of them are made of others built with them, as the log "
+                                       u"says).")
         # ("Check" here runs a check, in Kerning Check: not a tick)
         self.kerning_button = QtGui.QPushButton(u"Check kerning of these glyphs")
         self.kerning_button.setWhatsThis(u"Opens <i>Kerning Check</i> on the pairs with the glyphs built here (since "
@@ -6509,9 +6872,8 @@ class AccentsDialog(object):
         self.anchors = AnchorPage(self)
         self.pages.addWidget(self.anchors.widget)
         self.tabs.addTab(u"Mark anchors")
-        self.tabs.setTabToolTip(1, u"Anchors and mark features for scripts whose marks are attached, not built "
-                                   u"(Khmer, Thai, Arabic, Hebrew, Devanagari, Bengali, Gujarati, Tamil, and the combining "
-                                   u"marks of any script)")
+        self.tabs.setTabToolTip(0, TAB_HELPS[0])
+        self.tabs.setTabToolTip(1, TAB_HELPS[1])
         try:  # each tab's own help, where the tab bar takes one per tab
             self.tabs.setTabWhatsThis(0, TAB_HELPS[0])
             self.tabs.setTabWhatsThis(1, TAB_HELPS[1])
@@ -6527,6 +6889,10 @@ class AccentsDialog(object):
         for key in TAB_KEYS:
             closing.addWidget(self.bottom_parts[key][1][0])
         closing.addWidget(self.close_button)
+        try:
+            ak.cancel_button(self, closing, self.close_button, CANCEL_NOTE)  # (right before Close)
+        except Exception:
+            pass  # (an older shared module without it: the window as before)
         outer.addLayout(closing)
         self.anchors_read = False
         self.tabs.connect("currentChanged(int)", self.switch_page)
@@ -6969,7 +7335,18 @@ class AccentsDialog(object):
                 glyph = package.findName(g.name)
                 if glyph is not None and is_empty(glyph):
                     empty.append(g.name)
-        return Font([g.name for g in glyphs], font_codes(self.ak, glyphs), empty)
+        found = Font([g.name for g in glyphs], font_codes(self.ak, glyphs), empty)
+        try:  # (the dotless i and j the font lacks: made of its i and j where their dot can be told, else said)
+            found.dotless = read_dotless(package, list(package.masters) or [self.master], found)
+        except Exception:
+            found.dotless = {}  # (unread: the letters stay on the dotted i, as before it was read)
+        self.dotless_found = found.dotless
+        return found
+
+    def dotless_virtual(self):
+        """FontLabInk's virtual glyphs: the dotless glyphs a build would make, as the font was last read."""
+        return dict((d.name, (d.source, d.dot)) for d in getattr(self, "dotless_found", {}).values()
+                    if d.kind == "made")
 
     def characters(self):
         index = self.set_box.currentIndex
@@ -6982,7 +7359,7 @@ class AccentsDialog(object):
 
     def learn(self, package, master, progress=None):
         """The master's ink and where its composites put their marks. progress(share): told as it goes."""
-        ink = FontLabInk(self.ak, package, master)
+        ink = FontLabInk(self.ak, package, master, self.dotless_virtual())
         placement = Placement(float(package.upm), self.model)
         composites = []
         glyphs = list(package.fgPackage.glyphs)
@@ -7075,7 +7452,7 @@ class AccentsDialog(object):
         """The shared module's Stopped (busy_progress raises it when the user asks the work to stop)."""
         return getattr(getattr(self, "ak", None), "Stopped", None) or NotStopped
 
-    def work_begin(self, what, stoppable=True):
+    def work_begin(self, what, stoppable=True):  # (work_stoppable: what Cancel was last told, work_progress)
         """Long work begins (owner's images 176 to 183): its step and a bar in the window's top row, the
         window held from clicks and keys meanwhile (but the tools menu, the arrows, Close, and Esc, which stop
         it); self.busy holds the font's watches. Work begun inside other work (a build reads the font again
@@ -7086,6 +7463,7 @@ class AccentsDialog(object):
         if depth:
             self.work_progress(what, None, stoppable)
             return
+        self.work_stoppable = bool(stoppable)
         start = getattr(getattr(self, "ak", None), "busy_start", None)
         if start is not None:
             try:
@@ -7099,6 +7477,14 @@ class AccentsDialog(object):
         if not getattr(self, "work_depth", 0):
             return
         progress = getattr(getattr(self, "ak", None), "busy_progress", None)
+        # (Cancel follows the step: a build reads the masters, which can stop, then writes, which cannot)
+        follow = getattr(getattr(self, "ak", None), "busy_stoppable", None)
+        if follow is not None and getattr(self, "work_stoppable", None) != bool(stoppable):
+            self.work_stoppable = bool(stoppable)
+            try:
+                follow(self, stoppable)
+            except Exception:
+                pass
         if progress is not None:
             progress(self, what, part, stoppable=stoppable)
 
@@ -7456,7 +7842,10 @@ class AccentsDialog(object):
         if icon is not None:
             item.setIcon(0, self.ak.icon_of(icon))
         r.far = far_note(self.far_reasons(r))  # (a mark the hand left far off: said in its row too)
-        notes = list(r.notes) + ([r.touches] if r.touches else []) + ([r.far] if r.far else []) + self.reversal_notes(r)
+        # (its dotless i first: made here, the font's i as it is, or the dot kept under the diacritic, the last
+        # an amber note as a collision's: kept_dotted)
+        notes = ([r.base_note] if r.base_note else []) + list(r.notes) + ([r.touches] if r.touches else []) + (
+            [r.far] if r.far else []) + self.reversal_notes(r)
         r.cell = row_text(r.describe(), r.refill, self.existing_shift(r) if r.existing else None, bool(r.existing), notes)
         item.setText(2, r.cell)
         item.setToolTip(2, (u"; ".join(notes) + u".") if notes else u"")
@@ -7621,13 +8010,15 @@ class AccentsDialog(object):
             finally:
                 self.end_write(package, bool(touched) or bool(parts))
             if parts and second:
-                self.log.add(parts_step_text([u"%s" % getattr(glyph, "name", u"") for glyph in parts]))
+                self.log.add(parts_step_text([u"%s" % getattr(glyph, "name", u"") for glyph in parts],
+                                             self.ak.glyph_name_link))
             report_write(parts_status, self.log)
             b, html = self.ak.b, self.ak.html
             if done:
                 self.log.add(corrected_text(len(done), len(made), b) + u": %s%s. The letters stay glyphs of "
                              u"components and look as they did%s." % (
-                                 self.ak.glyph_links(done), (u"; added: %s" % html(u", ".join(made))) if made else u"",
+                                 self.ak.glyph_links(done),
+                                 (u"; added: %s" % self.ak.glyph_names_linked(made, word=None)) if made else u"",
                                  undo_words(status, u"; <i>Edit &gt; Undo</i> takes it back")),
                              "done")
             report_write(status, self.log)
@@ -8367,12 +8758,13 @@ class AccentsDialog(object):
             self.ak.enable(button, True)  # (through enable: never over the grayed state of a window with no font)
             button.setText(other.char)
             far = getattr(other, "far", u"")
-            state = ([u"moved by hand"] if other.adjust else []) + (
+            dotted = kept_dotted(other)  # (the dot of i kept under the diacritic: a collision too)
+            state = ([u"moved by hand"] if other.adjust else []) + ([other.base_note] if dotted else []) + (
                 [other.touches] if other.touches else []) + ([far] if far else [])  # (amber: too close, apart, far)
             button.setToolTip(u"%s: %s%s" % (other.name, other.describe(),
                                              (u" (%s)" % u"; ".join(state)) if state else u""))
             color = text if other is not r else accent
-            if other.touches or far:
+            if other.touches or far or dotted:
                 color = warn
             border = (u"border: none; border-bottom: 2px solid %s;" % accent) if other is r else u"border: none;"
             weight = u"font-weight: bold;" if other.adjust or other is r else u""
@@ -8725,15 +9117,16 @@ class AccentsDialog(object):
         b, links = self.ak.b, self.ak.glyph_links
         close = [char for char, note in noted if note and APART not in note]
         apart = [char for char, note in noted if note and APART in note]
-        units = round(TOUCH_SHARE * 1000)
+        # (the gap closeness measures, in the font's own em: a fixed "12 units" was wrong past an em of 1,000)
+        units = counted(touch_units(getattr(getattr(self, "package", None), "upm", None)), u"unit")
         if close:
             one = len(close) == 1
             if how == "built":
-                text = u"%s built with a diacritic within %d units of %s letter or another diacritic: %s. Look at %s." % (
+                text = u"%s built with a diacritic within %s of %s letter or another diacritic: %s. Look at %s." % (
                     b(counted(len(close), u"glyph")), units, u"its" if one else u"their", links(close),
                     u"it" if one else u"them")
             else:
-                text = u"%s %s%s within %d units of %s letter or another diacritic: %s. Look at %s." % (
+                text = u"%s %s%s within %s of %s letter or another diacritic: %s. Look at %s." % (
                     b(counted(len(close), u"letter")), u"now " if how == "now" else u"", u"comes" if one else u"come",
                     units, u"its" if one else u"their", links(close), u"it" if one else u"them")
             self.log.add(text, "warning")
@@ -8860,12 +9253,12 @@ class AccentsDialog(object):
                 self.log.add(u"%s is in the font (%s): listed to show it, unticked, and selected (%s stays "
                              u"off). It leaves the list again once you go on to another letter, search, or "
                              u"tick a glyph, unless you tick it." % (
-                                 b(ch), self.ak.html(name), self.ak.i(u"Also list existing glyphs")))
+                                 b(ch), self.ak.glyph_name_link(name), self.ak.i(u"Also list existing glyphs")))
                 return "listed"
         error = self.open_glyph(name)
         if error is None:
             self.log.add(u"%s is in the font (%s) and not in the list: opened in a <i>Glyph</i> window." % (
-                b(ch), self.ak.html(name)))
+                b(ch), self.ak.glyph_name_link(name)))
             return "opened"
         return None
 
@@ -8941,8 +9334,12 @@ class AccentsDialog(object):
 
     def log_link(self, target):
         """A glyph named in the log clicked: its row selected (the log lists letters to look at); one built
-        since, which left the list, is listed again or opened (go_to_char)."""
+        since, which left the list, is listed again or opened (go_to_char). A glyph named by its name
+        (ak.glyph_name_link: a dotless i made, a corrected glyph added) is left to the log, which opens it in
+        a Glyph window (False)."""
         try:
+            if self.ak.linked_glyph_name(u"%s" % target):
+                return False
             ch = self.ak.linked_char(target)
             if not ch:
                 self.log.add(u"That link names no glyph (%s)." % self.ak.html(target), "warning")
@@ -9162,7 +9559,10 @@ class AccentsDialog(object):
             return r.name
         try:
             if r.base:
-                return r.base if self.package.findName(r.base) is not None else None
+                if self.package.findName(r.base) is not None:
+                    return r.base
+                made = made_dotless(r)  # (a dotless i not made yet: the i it is made of)
+                return made.source if made is not None and self.package.findName(made.source) is not None else None
             glyph = self.package.findUnicode(ord(unicodedata.normalize("NFD", r.char)[0]))  # (a row that cannot be built)
             return glyph.name if glyph is not None and not glyph.isNull else None
         except Exception:
@@ -9177,7 +9577,7 @@ class AccentsDialog(object):
             return
         if name != r.name:
             self.log.add(u"%s is not in the font yet: its letter %s opened instead." % (self.ak.b(r.char),
-                                                                                      self.ak.b(name)))
+                                                                                      self.ak.glyph_name_link(name)))
         self.open_glyph(name)
 
     def open_glyph(self, name):
@@ -9187,7 +9587,7 @@ class AccentsDialog(object):
         text = u"/space".join(u"/%s/%s/%s/%s/%s" % (c, c, name, c, c) for c in contexts)
         error = self.ak.show_in_glyph_window(self.fontlab, text)
         if error:
-            self.log.add(u"FontLab did not open the glyph: %s" % self.ak.html(error), "error")
+            self.log.add(self.ak.error_sentence(u"FontLab did not open the glyph", error), "error")
         return error or None
 
     def editor_double_clicked(self):
@@ -9219,7 +9619,7 @@ class AccentsDialog(object):
                 except TypeError:  # (a Kerning Check that takes no glyphs: all its pairs)
                     module.main()
         except Exception as exc:
-            self.log.add(u"<i>Kerning Check</i> did not open: %s" % self.ak.html(exc), "error")
+            self.log.add(self.ak.error_sentence(u"<i>Kerning Check</i> did not open", exc), "error")
 
     # -- building -----------------------------------------------------------------
 
@@ -9266,6 +9666,11 @@ class AccentsDialog(object):
         set_right, helpers = [], []  # those built with a corrected glyph in a mirrored one's place, and the glyphs added
         used = set()  # the corrected glyphs a glyph built points to
         corrected = self.corrector(package, masters, helpers, touched)
+        # The dotless i and j made of the font's i and j (the glyphs built on them, or their own rows ticked):
+        # parts as the corrected glyphs are, made first and recorded in a step of their own before any glyph
+        # made of them (record_parts); their names, {name: why} of those that could not be made, and the
+        # names a glyph built ended up using (those used by none are taken out again)
+        dotless_made, dotless_failed, dotless_used = [], {}, set()
         changing = None  # the glyph whose layers are being changed, for touched should an error stop the build
         if not self.begin_write(package, existing_glyphs(package, [r.name for r in chosen]), coverage=True):
             return  # (nothing built: the reason in the log)
@@ -9279,12 +9684,27 @@ class AccentsDialog(object):
                 recorded_parts["parts"] = list(touched)
                 recorded_parts["status"] = record_parts(self.ak, fontlab, package, recorded_parts["parts"])
         try:
+            self.make_dotless(chosen, masters, dotless_made, dotless_failed, touched)
             self.make_helpers(chosen, masters, metrics, corrected)
         except Exception as exc:
             error = exc
         try:
             for at, r in enumerate(chosen if error is None else []):
                 self.work_progress(None, at / float(len(chosen)), stoppable=False)  # (a write: never stopped half way)
+                dotless = made_dotless(r)
+                if dotless is not None and dotless.name in dotless_failed:  # (never built on a glyph not made)
+                    # (each reason rich text for the log: the dotless glyph's name a link, the reason escaped)
+                    failed.append((r.char, u"%s could not be made: %s" % (self.ak.glyph_name_link(dotless.name),
+                                                                          self.ak.html(dotless_failed[dotless.name]))))
+                    continue
+                if r.dotless_row:  # the dotless glyph itself: made with the parts, or made meanwhile
+                    if dotless.name in dotless_made:
+                        made.append(r.char)
+                        dotless_used.add(dotless.name)
+                        self.note_built(package, r.name)
+                    else:
+                        skipped.append(r.char)
+                    continue
                 glyph = package.findName(r.name)
                 if glyph is not None and not is_empty(glyph) and not r.existing:
                     skipped.append(r.char)  # made meanwhile
@@ -9380,7 +9800,7 @@ class AccentsDialog(object):
                     # Nothing of it drawn: said why, and a glyph added for it taken out again (one the
                     # font had is left as it was)
                     why = self.why_empty(r, masters, placed)
-                    failed.append((r.char, why + (u"; it is left as it was" if r.existing else u"")))
+                    failed.append((r.char, self.ak.html(why + (u"; it is left as it was" if r.existing else u""))))
                     if added:
                         package.deleteGlyph(package.findName(r.name))
                     elif refused:
@@ -9394,18 +9814,18 @@ class AccentsDialog(object):
                 if refused:
                     partial.append((r.char, r.existing, refused))
                 (rebuilt if r.existing else made).append(r.char)
-                key = self.package_key(package)
-                if self.built_font != key:
-                    self.built_names, self.built_font = [], key
-                if r.name not in self.built_names:
-                    self.built_names.append(r.name)
+                if dotless is not None:
+                    dotless_used.add(dotless.name)
+                self.note_built(package, r.name)
         except Exception as exc:  # what was made stays made, and is reported
             error = exc
             if changing is not None:
                 touched.append(changing)
         # A corrected glyph made for a glyph that was then not built (or built with the mirrored component
         # in every master) is used by nothing: taken out again, as Correct mirrored components does
-        unused = [name for name in helpers if name not in used]
+        # A dotless glyph made for glyphs none of which was then built (its own row unticked) is taken out too
+        unused = [name for name in helpers if name not in used] + [name for name in dotless_made
+                                                                   if name not in dotless_used]
         for name in unused:
             try:
                 package.deleteGlyph(font_glyph(package, name))
@@ -9413,6 +9833,7 @@ class AccentsDialog(object):
                 pass
         touched = [glyph for glyph in touched if u"%s" % getattr(glyph, "name", u"") not in unused]
         helpers = [name for name in helpers if name in used]
+        dotless_made = [name for name in dotless_made if name in dotless_used]
         status = None
         parts, parts_status = recorded_parts["parts"] or [], recorded_parts["status"]
         later = [glyph for glyph in touched if all(glyph is not part for part in parts)]
@@ -9426,7 +9847,7 @@ class AccentsDialog(object):
         finally:
             self.end_write(package, bool(touched) or bool(parts))
         if parts and second:
-            self.log.add(parts_step_text([u"%s" % getattr(glyph, "name", u"") for glyph in parts]))
+            self.log.add(parts_step_text([u"%s" % getattr(glyph, "name", u"") for glyph in parts], self.ak.glyph_name_link))
         report_write(parts_status, self.log)
         b = self.ak.b
         if made:
@@ -9445,7 +9866,13 @@ class AccentsDialog(object):
                 self.ak.html(u"".join(rebuilt)),
                 undo_words(status, u" <i>Edit &gt; Undo</i> takes %s back." % (u"it" if len(rebuilt) == 1 else u"them"))),
                 "done")
+        sources = dict((made_dotless(r).name, made_dotless(r).source) for r in chosen if made_dotless(r) is not None)
+        for name in dotless_made:
+            self.log.add(made_dotless_text(name, sources.get(name, u""), len(masters), self.ak.glyph_name_link), "done")
         report_write(status, self.log)
+        # Built on a dotted i the font could not take apart: named in amber, as a diacritic too close is
+        for line in dot_kept_lines([r for r in chosen if r.char in made or r.char in rebuilt], b, self.ak.glyph_links):
+            self.log.add(line, "warning")
         close = []
         for r in chosen:  # built in spite of a mark too close: named, to look at
             if r.char in made or r.char in rebuilt:
@@ -9462,7 +9889,8 @@ class AccentsDialog(object):
             self.log.add(u"%s built with a corrected glyph in the place of a mirrored one: %s%s." % (
                 b(counted(len(set_right), u"glyph")), self.ak.glyph_links(set_right),
                 (u" (%s added, mirrored with %s contours reversed, so that no hole shows where it overlaps: %s)" % (
-                    b(counted(len(helpers), u"glyph")), u"its" if one else u"their", self.ak.html(u", ".join(helpers))))
+                    b(counted(len(helpers), u"glyph")), u"its" if one else u"their",
+                    self.ak.glyph_names_linked(helpers, word=None)))
                 if helpers else u""), "done")
         mirrored = [char for char in mirrored if char in made or char in rebuilt]
         if mirrored:
@@ -9472,8 +9900,8 @@ class AccentsDialog(object):
             self.log.add(u"%s had been made meanwhile and %s left as %s." % (
                 b(u"".join(skipped)), u"was" if len(skipped) == 1 else u"were",
                 u"it was" if len(skipped) == 1 else u"they were"), "warning")
-        for char, why in failed:
-            self.log.add(u"%s was not built: %s." % (b(char), self.ak.html(why)), "warning")
+        for char, why in failed:  # (why: rich text already)
+            self.log.add(u"%s was not built: %s." % (b(char), why), "warning")
         for char, was_there, left in partial:  # refused in some masters only
             where = self.ak.html(u"%s %s" % (u"master" if len(left) == 1 else u"masters", listed(left)))
             if was_there:
@@ -9483,7 +9911,7 @@ class AccentsDialog(object):
                 self.log.add(u"%s was built with %s left empty: FontLab did not keep its components there." % (
                     b(char), where), "warning")
         if error is not None:
-            self.log.add(u"Stopped by an error: %s" % self.ak.html(error), "error")
+            self.log.add(self.ak.error_sentence(u"Stopped by an error", error), "error")
         # The glyphs built stay listed (under JUST_BUILT, unchecked): the font has them now, and the list
         # would otherwise drop them, out of reach of what is set right after a build
         self.just_built = set(getattr(self, "just_built", ())) | set(made) | set(rebuilt)
@@ -9495,6 +9923,34 @@ class AccentsDialog(object):
             self.generation.run()
         if made or rebuilt:  # (from Font Check's hand-over, all of it built: back to Font Check)
             self.back_to_font_check(bool(failed or skipped or partial or mirrored) or error is not None)
+
+    def note_built(self, package, name):
+        """A glyph built (or rebuilt) for Check kerning of these glyphs, which looks at those of this font."""
+        key = self.package_key(package)
+        if self.built_font != key:
+            self.built_names, self.built_font = [], key
+        if name not in self.built_names:
+            self.built_names.append(name)
+
+    def make_dotless(self, chosen, masters, made, failed, touched):
+        """The dotless glyphs the chosen glyphs are built on, or are (their own rows), where the font has none
+        (made_dotless), made now of its i and j (make_dotless), before any glyph is written: each glyph made
+        added to touched, so that it is recorded with the parts (record_parts), a new prerequisite in a step of
+        its own before the glyphs made of it; its name to made, or to failed with why. One the font has by now
+        (made meanwhile) is built on as it is."""
+        wanted = []
+        for r in chosen:
+            dotless = made_dotless(r)
+            if dotless is not None and all(dotless.name != other.name for other in wanted):
+                wanted.append(dotless)
+        for dotless in wanted:
+            if font_glyph(self.package, dotless.name) is not None:
+                continue
+            try:
+                touched.append(make_dotless(self.fontlab, self.ak, self.package, masters, dotless))
+                made.append(dotless.name)
+            except DotlessError as exc:
+                failed[dotless.name] = u"%s" % exc
 
     def make_helpers(self, chosen, masters, metrics, corrected):
         """The corrected glyphs the chosen letters' mirrored parts will point to, made now (corrected: the

@@ -1293,7 +1293,7 @@ class FontLabCalls(object):
 
     @staticmethod
     def rename_master(package, old, new):
-        """Assumed: flPackage.renameMaster(old name, new name), seen in dir() (2026-11-18)."""
+        """Live (2026-11-24, Sarabun Regular and Bold assembled): flPackage.renameMaster(old name, new name)."""
         package.renameMaster(old, new)
 
     @staticmethod
@@ -1459,8 +1459,8 @@ class FontLabCalls(object):
 
     @staticmethod
     def set_prefix(package, text):
-        """Assumed: fgPackage.features.set_prefix(text), mirroring the proven get_prefix (Feature Code and
-        Feature Check use it, not yet run live)."""
+        """Live (2026-11-24, Sarabun Regular and Bold assembled): fgPackage.features.set_prefix(text); get_prefix() read the
+        text back."""
         package.fgPackage.features.set_prefix(text)
 
     @staticmethod
@@ -1470,24 +1470,26 @@ class FontLabCalls(object):
 
     @staticmethod
     def set_upm(package, upm):
-        """Assumed: flPackage.setUpm(units, False), Font Builder's call (False: the glyphs not scaled; the
-        new font has none yet)."""
+        """Live (2026-11-24, Sarabun Regular and Bold assembled): flPackage.setUpm(units, False), Font Builder's call (False:
+        the glyphs not scaled; the new font has none yet); upm read back."""
         package.setUpm(int(upm), False)
 
     @staticmethod
     def set_info(package, attribute, value):
-        """Assumed: fgPackage.info's UFO-named attributes are settable (proven for the vhea values only)."""
+        """Live (2026-11-24, Sarabun Regular and Bold assembled): fgPackage.info's UFO-named attributes are settable (the family
+        name, the copyright, the designer, the typo, win, and hhea values read back)."""
         setattr(package.fgPackage.info, attribute, value)
 
     @staticmethod
     def set_version(package, major, minor):
-        """Assumed: flPackage.versionMajor and versionMinor are settable."""
+        """Live (2026-11-24): flPackage.versionMajor and versionMinor are settable (2 and 5 read back)."""
         package.versionMajor, package.versionMinor = int(major), int(minor)
 
     @staticmethod
     def set_metric(package, attribute, value):
-        """Assumed: flPackage's line metrics (ascender_value, descender_value, xHeight_value,
-        capsHeight_value, lineGap_value) are settable, for the current master (Font Builder sets them)."""
+        """Live (2026-11-24): flPackage's line metrics (ascender_value, descender_value, xHeight_value,
+        capsHeight_value, lineGap_value) are settable, and are the current master's: xHeight_value set to 510
+        with Bold current read 500 with Regular current."""
         setattr(package, attribute, float(value))
 
     def add_axis(self, package, name, tag, minimum, default, maximum):
@@ -1509,9 +1511,20 @@ class FontLabCalls(object):
         str(flPackage.location(master)) says "<flLocation weight=700>"."""
         package.setLocation(self.fontlab.flLocation(dict(location)), master)
 
+    @staticmethod
+    def set_names(package, family, style):
+        """Live (2026-11-24): a new font's flPackage.tfn reads "Unnamed", its ffn "Unnamed Regular", and its
+        psn "Unnamed-Regular", whatever fgPackage.info.familyName is set to, and its Font window's tab is
+        titled by them (title_name(): the ffn, or "tfn: master" once it has several masters): the assembled
+        Sarabun came up as "Unnamed: Bold" (the owner, 2026-11-24). All four are settable; set before the
+        window opens, since a tab already open kept its title when ffn was set after."""
+        package.tfn, package.tsn = family, style
+        package.ffn = u"%s %s" % (family, style)
+        package.psn = u"%s-%s" % (family.replace(u" ", u""), style.replace(u" ", u""))
+
     def show_package(self, package):
-        """Assumed: fontlab.flItems.notifyPackageAdded(package) opens the new font's Font window (Font
-        Builder's call)."""
+        """Live (2026-11-24, Sarabun Regular and Bold assembled): fontlab.flItems.notifyPackageAdded(package) opens the new
+        font's Font window, as a tab of the main window (Font Builder's call)."""
         self.fontlab.flItems.notifyPackageAdded(package)
 
     def glyphs_shown(self, package):
@@ -1699,6 +1712,9 @@ def build_font(calls, plan, sources, progress=None):
     lost = [name for name in names if name not in made]
     if lost:
         raise AssembleError(u"FontLab did not make the masters %s" % listed(lost), package)
+    family = u"%s" % ((reference.info or {}).get("family") or u"")
+    if family:  # (before its window opens: the window's tab is titled by these names)
+        failed.attempt(u"Font not named", family, calls.set_names, package, family, names[0])
     failed.attempt(u"Font window not opened", u"the new font", calls.show_package, package)
     source_of = dict((name, sources[key]) for name, key in plan.masters)
 
@@ -1906,24 +1922,29 @@ The fonts of a family compared with one another, before they become masters of o
 of them changes.<br><br>
 <i>Sources</i>: the fonts open in FontLab, a row for each master of a font of several; tick those to compare.
 <i>Add files\N{HORIZONTAL ELLIPSIS}</i> opens font files in FontLab first, in any format it opens (FontLab
-projects, UFO, Glyphs, designspace, OpenType, TrueType, WOFF, Type 1), and ticks them once they are in. The
+projects, UFO, Glyphs, designspace, OpenType, TrueType, WOFF, Type 1), and ticks them once they are in (a font of
+another family is left unticked, and the log says so). The
 <i>Reference</i> is the source the others are compared with (to start with, the upright one nearest Regular).
 <i>Compare</i> compares the ticked sources.<br><br>
 <i>Glyph sets</i>: the glyphs each source lacks, and the code points that differ. <i>Compatibility</i>: each
 glyph's contours, nodes, components, and anchors across the sources, compatible or the first thing that
-differs; matching structures are needed to interpolate, but do not promise it. <i>Metrics and info</i>: the
+differs. <i>Metrics and info</i>: the
 font info a column per source. <i>Kerning</i>: classes that differ, entries only some sources kern, and
 entries whose sign flips. <i>Features</i>: features some sources lack, and code that differs from the
 reference's.<br><br>
 <i>Assemble as masters</i> makes a new font with a master per ticked source (named by its style), each
 glyph's layers copied from the sources by name, in the reference's glyph order, with its feature code,
-classes, and font info, and each master's kerning; a glyph a source lacks is left empty in its master. Weight
+classes, and font info, and each master's kerning and line metrics; a glyph a source lacks is left empty in its
+master. Weight
 and width axes are set where the sources' classes differ. The sources do not change; to take it back, close
-the new font without saving. Click this help's <i>?</i> button, then any control, for what it does."""
+the new font without saving. Click this help's button, then anything in the window, for what it does (or right-click it: <i>What's This?</i>)."""
 
 NO_FONT_LINE = (u"No font is open. This window hooks to the next font you open, or click <i>Add "
                 u"files\N{HORIZONTAL ELLIPSIS}</i> to open a family's fonts.")
 READ_STEP, COMPARE_STEP = u"Reading the sources", u"Comparing"
+# The Cancel button's own line (ak.cancel_button): what a stop leaves (compare: the audit before it kept;
+# Assemble as masters never stops)
+CANCEL_NOTE = u"A comparison stopped changes no font: the tabs show the one before it."
 OPEN_WAIT_MS, OPEN_TRIES = 500, 120  # FontLab opens a font in the background: looked for twice a second, a minute
 SOURCE_COLUMNS = (u"Source", u"File", u"Format", u"Masters", u"Glyphs", u"Version")
 GLYPH_COLUMNS = (u"Glyph", u"Difference")
@@ -1965,7 +1986,9 @@ def assembly_lines(plan, report, error=None, made=True):
     lines.append((text + u". Nothing in the sources changed; close the new font without saving to take it back.",
                   "done"))
     for master, names in plan.empty:
-        lines.append((u"Left empty in %s: %s." % (bold(master), html(names_text(names))), "info"))
+        # (each glyph's name in italics, as every log names a glyph; no link: the glyph is the new font's, and a
+        # link opens the glyph of this window's font)
+        lines.append((u"Left empty in %s: %s." % (bold(master), names_text([italic(name) for name in names])), "info"))
     if plan.axes:
         lines.append((u"Axes: %s." % html(listed([u"%s (%s)" % (axis.name, u", ".join(
             u"%s %s" % (name, number_text(axis.locations[name])) for name, _ in plan.masters)) for axis in plan.axes])),
@@ -2058,8 +2081,9 @@ class FamilyAuditDialog(object):
         self.add_button.setWhatsThis(u"Opens font files in FontLab (several at once), in any format FontLab opens: "
                                      u"FontLab projects (.vfc, .vfj, .vfb), UFO (pick any file inside a .ufo folder), "
                                      u".ufoz, Glyphs, designspace, OpenType and TrueType (.otf, .ttf, .otc, .ttc), WOFF, "
-                                     u"and Type 1 (.pfb, .pfa). Each font is ticked as a source once FontLab has opened "
-                                     u"it, and the log says so; a font of several masters gives a source per master.")
+                                     u"and Type 1 (.pfb, .pfa). Each font of this family is ticked as a source once "
+                                     u"FontLab has opened it, and a font of another family is left unticked; the log "
+                                     u"says which. A font of several masters gives a source per master.")
         self.add_button.setProperty(getattr(ak, "WITHOUT_FONT_PROP", "freelabWithoutFont"), True)
         options.addWidget(self.add_button)
         options.addSpacing(8)
@@ -2150,7 +2174,7 @@ class FamilyAuditDialog(object):
         layout.addWidget(self.log.widget)
 
         # The bottom row (owner's images 255 and 298): the sources' ticks and Show in Glyph window at the left;
-        # the committing action, then Close, at the right
+        # the committing action, then Cancel and Close, at the right
         buttons = QtGui.QHBoxLayout()
         self.tick_all = QtGui.QPushButton(u"Tick all")
         self.tick_all.setWhatsThis(u"Ticks every source.")
@@ -2161,19 +2185,19 @@ class FamilyAuditDialog(object):
                                               u"window's font (<i>Glyph sets</i> and <i>Compatibility</i>).")
         self.assemble_button = QtGui.QPushButton(assemble_text(0))
         self.assemble_button.setWhatsThis(
-            u"Makes a NEW font, a master per audited source (named by its style, the reference's first): each glyph's "
+            u"Makes a new font, a master per audited source (named by its style, the reference's first): each glyph's "
             u"layers copied from the sources by name, in the reference's glyph order; the reference's feature code, "
             u"classes, and font info; each master's kerning and line metrics from its source. A glyph a source lacks "
             u"is left empty in its master, and listed in the log with whatever could not be carried over. Weight and "
-            u"width axes are set where the sources' classes differ. The sources do not change; the new font is not "
-            u"saved: close it without saving to take it back. Matching structures are reported, not promised to "
-            u"interpolate.")
+            u"width axes are set where the sources' classes differ. The sources do not change; to take it back, "
+            u"close the new font without saving.")
         self.close_button = QtGui.QPushButton(u"Close")
         for button in (self.tick_all, self.tick_none, self.glyph_window_button):
             buttons.addWidget(button)
         buttons.addStretch(1)
         buttons.addWidget(self.assemble_button)
         buttons.addWidget(self.close_button)
+        ak.cancel_button(self, buttons, self.close_button, CANCEL_NOTE)  # (right before Close)
         layout.addLayout(buttons)
 
         self.add_button.connect("clicked()", self.add_files)

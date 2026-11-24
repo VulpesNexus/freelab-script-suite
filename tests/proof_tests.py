@@ -865,7 +865,8 @@ class InfoTests(unittest.TestCase):
         self.assertEqual(fp.page_colors("print", (200, 200, 200), (30, 30, 30)), ((0, 0, 0), (255, 255, 255)))
         self.assertEqual(fp.page_colors("window", (200, 200, 200), (30, 30, 30)), ((200, 200, 200), (30, 30, 30)))
         self.assertEqual(fp.page_colors("window"), fp.PRINT_COLORS, "no palette: black on white")
-        self.assertEqual(fp.colors_label("window", (230, 230, 230), (40, 40, 40)), u"the window's: light on dark")
+        # (in the log: "Saved 3 pages (light on dark, as the window) in ...", the review of 2026-11-24)
+        self.assertEqual(fp.colors_label("window", (230, 230, 230), (40, 40, 40)), u"light on dark, as the window")
         self.assertEqual(fp.colors_label("print", (0, 0, 0), (255, 255, 255)), u"black on white")
         self.assertAlmostEqual(fp.fit_scale((300, 300), (600, 800)), 0.375, msg="the page's height decides")
 
@@ -883,7 +884,84 @@ class InfoTests(unittest.TestCase):
         with io.open(fp.__file__.replace(".pyc", ".py"), encoding="utf-8") as handle:
             source = handle.read()
         self.assertNotIn(u"white on black", source)
-        self.assertIn(u"light gray on off-black (beside a", source, "the dropdown's help names it")
+        self.assertIn(u"light gray on off-black or on medium gray", fp.HELP, "the window's help names it")
+        # The review of 2026-11-24: two choices besides the window's, by the window's colors (color_choices),
+        # never three joined by "and"
+        self.assertIn(u"beside a light window, light gray on off-black or on medium gray; beside a dark one, black on "
+                      u"white (for printing) or dark mode's other shade", u" ".join(fp.HELP.split()))
+        self.assertEqual([len(fp.color_choices(dark)) for dark in (False, True)], [3, 3])
+
+    @staticmethod
+    def dark_mode_palettes():
+        """Dark mode's palettes as darkmode/freelab_dark_mode.py defines them, {name: {role: (r, g, b)}}, read
+        from its source (not imported: importing it would leave it in sys.modules for the suites after)."""
+        import ast
+        path = os.path.join(HERE, os.pardir, "darkmode", "freelab_dark_mode.py")
+        with open(path, "rb") as handle:
+            tree = ast.parse(handle.read())
+        found = {}
+        for node in tree.body:
+            if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) \
+                    and node.targets[0].id in ("PALETTE_DARK", "PALETTE_MEDIUM"):
+                rows = ast.literal_eval(node.value)
+                found[node.targets[0].id] = dict(
+                    (role, tuple(int(color.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4))) for role, color, _ in rows)
+        return found
+
+    def test_the_medium_choice_is_dark_mode_s_medium_grays(self):
+        # The owner: with dark mode's medium grays chosen, a light window should offer "white on medium gray". The
+        # colors are those the medium shade gives a window (its Text on its Base), named as they are
+        palettes = self.dark_mode_palettes()
+        medium, dark = palettes["PALETTE_MEDIUM"], palettes["PALETTE_DARK"]
+        self.assertEqual(fp.MEDIUM_COLORS, (medium["Text"], medium["Base"]))
+        self.assertEqual(fp.DARK_COLORS[1], dark["Base"], "the dark choice's paper: the dark shade's")
+        self.assertEqual(fp.MEDIUM_LABEL, u"Medium (light gray on medium gray)")
+        ink, paper = fp.MEDIUM_COLORS
+        self.assertTrue(all(200 <= c < 255 for c in ink) and len(set(ink)) == 1, "a light gray, not white")
+        self.assertTrue(fp.window_is_dark(paper) and not fp.window_is_dark(ink))
+        self.assertEqual(fp.page_colors("medium"), fp.MEDIUM_COLORS)
+        self.assertEqual(fp.page_colors("dark"), fp.DARK_COLORS)
+        self.assertEqual(fp.colors_label("medium", ink, paper), u"light gray on medium gray")
+        self.assertEqual(fp.colors_label("window", ink, paper), u"light on dark, as the window", "a medium window's own")
+        settings = os.path.join(HERE, os.pardir, "darkmode", "freelab_dark_mode_settings.py")
+        with open(settings, "rb") as handle:
+            self.assertIn(b'("medium", "Medium grays")', handle.read(), "the shade the choice is named for")
+
+    def test_the_colors_listed_follow_the_window_and_dark_mode_s_shade(self):
+        labels = lambda items: [label for _, label in items]
+        light = fp.color_choices(False)
+        self.assertEqual(labels(light), [u"As the window", fp.DARK_LABEL, fp.MEDIUM_LABEL])
+        self.assertEqual(fp.color_choices(False, "medium"), light, "a light window: both, whatever the shade")
+        self.assertEqual(labels(fp.color_choices(True, "dark")), [u"As the window", fp.PRINT_LABEL, fp.MEDIUM_LABEL])
+        self.assertEqual(labels(fp.color_choices(True, "medium")), [u"As the window", fp.PRINT_LABEL, fp.DARK_LABEL])
+        for dark, shade in ((False, "dark"), (True, "dark"), (True, "medium")):
+            items = fp.color_choices(dark, shade)
+            self.assertEqual(items[0], fp.COLOR_MODES[0])
+            self.assertEqual(len(items), len(fp.COLOR_MODES), "as many items as the dropdown is filled with")
+            self.assertEqual(items[1][0], "print" if dark else "dark", "the second: the other of light and dark")
+        self.assertEqual([mode for mode, _ in fp.COLOR_MODES], ["window", "print", "medium"],
+                         "filled as beside a window in the dark grays (colors() names them again)")
+
+    def test_the_shade_is_dark_mode_s_own_while_it_is_on(self):
+        saved = getattr(sys, "_freelab_dark_mode", "unset")
+
+        def restore():
+            if saved == "unset":
+                if hasattr(sys, "_freelab_dark_mode"):
+                    del sys._freelab_dark_mode
+            else:
+                sys._freelab_dark_mode = saved
+        self.addCleanup(restore)
+        sys._freelab_dark_mode = {"on": True, "shade": "medium"}
+        self.assertEqual(fp.dark_mode_shade((30, 30, 30)), "medium", "its setting, applied")
+        sys._freelab_dark_mode = {"on": True, "shade": "dark"}
+        self.assertEqual(fp.dark_mode_shade(fp.MEDIUM_COLORS[1]), "dark")
+        sys._freelab_dark_mode = {"on": False, "shade": "medium"}  # (off: the window says)
+        self.assertEqual(fp.dark_mode_shade((30, 30, 30)), "dark")
+        self.assertEqual(fp.dark_mode_shade(fp.MEDIUM_COLORS[1]), "medium")
+        del sys._freelab_dark_mode
+        self.assertEqual(fp.dark_mode_shade(fp.MEDIUM_COLORS[1]), "medium", "no dark mode loaded")
+        self.assertEqual(fp.dark_mode_shade(), "dark")
 
 
 class SettleTests(unittest.TestCase):
@@ -936,6 +1014,232 @@ class SettleTests(unittest.TestCase):
         stand, made = self.dialog(False)
         stand.show_in_glyph_window()
         self.assertEqual(made, [])
+
+
+class Bag(object):
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+
+class SaveReplaceTests(unittest.TestCase):
+    """Windows' own "Confirm Save As" box is light in dark mode (owner's report, 2026-11-24): Save PDF... asks the
+    save dialog not to confirm, and asks in FreeLab's own box (which follows dark mode) before a PDF takes the
+    place of a file; where this PythonQt takes no options, Windows' box asked of the name typed, as before."""
+
+    def setUp(self):
+        import shutil
+        import tempfile
+        self.folder = tempfile.mkdtemp(prefix="freelab-proof-")
+        self.addCleanup(shutil.rmtree, self.folder, True)
+        self.stop_at = None  # (the step at which the fake bar raises Stopped, as Cancel or Esc make it)
+        saved = (fp._qt, fp.Renderer, fp.write_pdf, fp.saved_line, fp.colors_label, list(fp.SAVE_FOLDER))
+
+        def restore():
+            fp._qt, fp.Renderer, fp.write_pdf, fp.saved_line, fp.colors_label = saved[:5]
+            fp.SAVE_FOLDER[:] = saved[5]
+        self.addCleanup(restore)
+
+    def stand(self, typed, answer=None, options=True):
+        """A Proof window saving its PDF as typed (a name in the test's folder), its question answered with answer
+        ("Replace", or None for Cancel); options False: a PythonQt whose save dialog takes no options. (the
+        window, what was asked, what was logged, the files written, what was marked for FreeLab MCP)"""
+        sys.path.insert(0, os.path.join(HERE, os.pardir, "kerning"))
+        import freelab_auto_kerning as ak
+        asked, logged, written, marked = [], [], [], []
+
+        class MessageBox(object):
+            AcceptRole, RejectRole, Cancel, Warning = "accept", "reject", "cancel", "warning"
+
+            def __init__(self, parent):
+                self.buttons, self.clicked = {}, None
+
+            def setText(self, text):
+                asked.append(text)
+
+            def addButton(self, label, role=None):
+                button = object()
+                self.buttons[button] = "reject" if label == "cancel" else role
+                if label == answer:
+                    self.clicked = button
+                return button
+
+            def exec_(self):
+                if self.clicked is None:
+                    self.clicked = [b for b, role in self.buttons.items() if role == "reject"][0]
+
+            def clickedButton(self):
+                return self.clicked
+
+            def buttonRole(self, button):
+                return self.buttons[button]
+
+            def __getattr__(self, name):
+                return lambda *args: None
+
+        def dialog(*args):
+            if len(args) > 4 and not options:
+                raise ValueError("Could not find matching overload for given arguments")
+            return os.path.join(self.folder, typed)
+
+        class Gui(object):
+            QFileDialog = type("QFileDialog", (), {"getSaveFileName": staticmethod(dialog)})
+            QMessageBox = MessageBox
+            QColor = staticmethod(lambda *rgb: rgb)
+
+        def write(core, gui, path, pages, renderer, page, title, progress=None, *args):
+            with open(path, "w") as handle:
+                handle.write("NEW PROOF")
+                for done in range(len(pages)):
+                    handle.write(" PAGE")
+                    progress(done + 1, len(pages))  # (it may raise, to stop: Cancel, Esc)
+            # (written beside the PDF, under a staged name: recorded as the PDF it stands for)
+            stem = os.path.basename(path).split(".")[0]
+            self.assertTrue(fp.staged_pdf_pattern(stem + ".pdf").match(os.path.basename(path)), path)
+            written.append(stem + ".pdf")
+        fp._qt = lambda: (None, Gui)
+        fp.Renderer = lambda *args: None
+        fp.write_pdf = write
+        fp.saved_line = lambda ak_, count, path, colors, size=None: u"Saved %s (%s)" % (os.path.basename(path), size)
+        fp.colors_label = lambda *args: u""
+        fp.SAVE_FOLDER[:] = [self.folder]
+
+        class Stand(object):
+            busy, dialog, path, parts, master = False, None, None, None, u"Regular"
+            proof = Bag(pages=[1, 2], masters=[u"Regular"])
+            package = Bag(tfn=u"Hand")
+            page_options = Bag(page=None)
+
+            def settle(self):
+                pass
+
+            def same_font(self):
+                return True
+
+            def update_buttons(self):
+                pass
+
+            def colors(self):
+                return (0, 0, 0), (255, 255, 255)
+
+            def color_mode(self):
+                return 0
+
+            def status(self):
+                pass
+        for name in ("save_pdf", "ask_replace"):
+            setattr(Stand, name, fp.ProofDialog.__dict__[name])
+        stand = Stand()
+        self.started = []
+
+        def progress(owner, what=None, part=None, force=False, stoppable=True):
+            if what == self.stop_at and stoppable:
+                raise ak.Stopped()
+        stand.ak = Bag(b=lambda s: s, html=lambda s: s,
+                       busy_start=lambda owner, what=u"", stoppable=True: self.started.append((what, stoppable)),
+                       busy_progress=progress, busy_end=lambda *a: None, Stopped=ak.Stopped,
+                       file_size_text=ak.file_size_text,
+                       _property=lambda dialog, name: Bag(family=lambda: u"Arial"),
+                       mcp_script_window=lambda w: marked.append("script") or w,
+                       mark_risky=lambda w: marked.append("risky") or w, save_file_name=ak.save_file_name)
+        stand.log = Bag(add=lambda text, level="info": logged.append((level, text)))
+        return stand, asked, logged, written, marked
+
+    def existing(self, name):
+        with open(os.path.join(self.folder, name), "w") as handle:
+            handle.write("OWNER PROOF")
+
+    def read(self, name):
+        with open(os.path.join(self.folder, name)) as handle:
+            return handle.read()
+
+    def test_freelab_asks_before_a_pdf_takes_a_files_place(self):
+        self.existing("Hand.pdf")
+        stand, asked, logged, written, marked = self.stand("Hand.pdf")
+        stand.save_pdf()
+        self.assertEqual(asked, [u"Hand.pdf already exists. Replace it with a new proof?"])
+        self.assertEqual(marked, ["script", "risky"], "FreeLab's own question for FreeLab MCP, its Replace risky")
+        self.assertEqual((written, self.read("Hand.pdf")), ([], "OWNER PROOF"), "canceled: left as it was")
+        self.assertEqual(logged, [("warning", u"The operation was interrupted. Nothing was saved or overwritten.")])
+        stand, asked, logged, written, marked = self.stand("Hand.pdf", "Replace")
+        stand.save_pdf()
+        self.assertEqual(len(asked), 1, "asked once")
+        self.assertEqual((written, self.read("Hand.pdf")), (["Hand.pdf"], "NEW PROOF PAGE PAGE"))
+        self.assertEqual(logged[-1], ("done", u"Saved Hand.pdf (%d)" % len("NEW PROOF PAGE PAGE")), "its size given")
+        self.assertEqual(os.listdir(self.folder), ["Hand.pdf"], "nothing staged left")
+        self.assertEqual(self.started[-1], (u"Writing the PDF", True), "stoppable now: a stop removes it whole")
+        # A new file: nothing asked
+        stand, asked, logged, written, marked = self.stand("Other.pdf")
+        stand.save_pdf()
+        self.assertEqual((asked, written), ([], ["Other.pdf"]))
+
+    def test_where_windows_asked_of_the_file_freelab_does_not_ask_again(self):
+        self.existing("Hand.pdf")
+        stand, asked, logged, written, marked = self.stand("Hand.pdf", options=False)
+        stand.save_pdf()
+        self.assertEqual((asked, written), ([], ["Hand.pdf"]), "Windows' own box asked of it, as before")
+        # (a name typed without .pdf: Windows asked of "Hand", not of the Hand.pdf written)
+        self.existing("Hand.pdf")
+        stand, asked, logged, written, marked = self.stand("Hand", options=False)
+        stand.save_pdf()
+        self.assertEqual((len(asked), written), (1, []))
+        self.assertTrue(fp.replaces(os.path.join(self.folder, "Hand.pdf")))
+        self.assertFalse(fp.replaces(os.path.join(self.folder, "Hand.pdf"), os.path.join(self.folder, "Hand.pdf")))
+        self.assertTrue(fp.replaces(os.path.join(self.folder, "Hand.pdf"), os.path.join(self.folder, "Hand")))
+        self.assertFalse(fp.replaces(os.path.join(self.folder, "None.pdf")))
+
+    def test_a_pdf_stopped_or_failed_leaves_the_old_one_and_no_part(self):
+        """The owner, 2026-11-24: a stopped export must leave nothing behind. The PDF is written beside its file and
+        takes its place only once whole: stopped after its first page (Cancel, Esc, Close, the tools menu, an
+        arrow), or failed, the PDF there stays byte for byte, and no staged file is left."""
+        self.existing("Hand.pdf")
+        self.stop_at = u"Writing page 1 of 2"
+        stand, asked, logged, written, marked = self.stand("Hand.pdf", "Replace")
+        stand.save_pdf()
+        self.assertEqual((self.read("Hand.pdf"), os.listdir(self.folder)), ("OWNER PROOF", ["Hand.pdf"]))
+        self.assertEqual(logged[-1], ("warning", u"The operation was interrupted. Nothing was saved or overwritten."))
+        self.assertFalse(stand.busy)
+        self.stop_at = None
+
+        def broken(core, gui, path, *args):
+            with open(path, "w") as handle:
+                handle.write("HALF")
+            raise IOError(u"Qt could not open the file for writing.")
+        stand, asked, logged, written, marked = self.stand("Hand.pdf", "Replace")
+        fp.write_pdf = broken  # (setUp's cleanup puts the real one back)
+        stand.save_pdf()
+        self.assertEqual((self.read("Hand.pdf"), os.listdir(self.folder)), ("OWNER PROOF", ["Hand.pdf"]))
+        self.assertEqual(logged[-1], ("error", u"The PDF could not be written: Qt could not open the file for writing. "
+                                               u"Nothing was saved or overwritten."))
+
+    def test_staged_pdfs_an_earlier_save_left_are_cleared_and_only_those(self):
+        leftovers = {"Hand.ab12_xyz.part.pdf": True, "Hand.q9w8e7.part.pdf": True, "Hand.ab12_xyz.part.pdf.old": False,
+                     "Other.ab12_xyz.part.pdf": False, "Hand.ab.part.pdf": False}
+        for name in leftovers:
+            self.existing(name)
+        stand, asked, logged, written, marked = self.stand("Hand.pdf")
+        stand.save_pdf()
+        self.assertEqual(sorted(os.listdir(self.folder)),
+                         sorted(["Hand.pdf"] + [name for name, gone in leftovers.items() if not gone]))
+        self.assertTrue(fp.staged_pdf_pattern(u"Hand.pdf").match(os.path.basename(fp.staged_pdf(
+            os.path.join(self.folder, u"Hand.pdf")))), "the pattern is staged_pdf's own")
+
+    def test_the_saved_line_gives_the_pdfs_size(self):
+        sys.path.insert(0, os.path.join(HERE, os.pardir, "kerning"))
+        import freelab_auto_kerning as ak
+        line = fp.saved_line(Bag(b=lambda s: u"<b>%s</b>" % s, html=lambda s: s, i=lambda s: u"<i>%s</i>" % s,
+                                 file_size_text=ak.file_size_text), 12, u"a/Hand.pdf", u"black on white", 860000)
+        self.assertEqual(line, u"Saved <b>12 pages</b> (black on white, 840 KB) in %s: <i>Hand.pdf</i>." %
+                         os.path.normpath(u"a"))
+        self.assertIn(u"(black on white) in", fp.saved_line(Bag(b=lambda s: s, html=lambda s: s, i=lambda s: s), 1,
+                                                            u"a/Hand.pdf", u"black on white"))
+        self.assertIn(u"ak.cancel_button(self, buttons, self.close_button, CANCEL_NOTE)", proof_source())
+        self.assertIn(u"nothing behind", fp.CANCEL_NOTE)
+
+
+def proof_source():
+    import io
+    with io.open(fp.__file__.replace(".pyc", ".py"), encoding="utf-8") as handle:
+        return handle.read()
 
 
 class ZoomTests(unittest.TestCase):
@@ -2045,6 +2349,52 @@ class DialogTests(unittest.TestCase):
         self.assertTrue(dialog.defaults_changed())
         dialog.show_page()
 
+    def test_the_colors_dropdown_names_its_items_for_the_window_and_gives_their_colors(self):
+        class Box(object):
+            currentIndex = 0
+
+            def __init__(self):
+                self.rows = [label for _, label in fp.COLOR_MODES]
+
+            def setItemText(self, index, text):
+                self.rows[index] = text
+        saved = getattr(sys, "_freelab_dark_mode", "unset")
+
+        def restore():
+            if saved == "unset":
+                if hasattr(sys, "_freelab_dark_mode"):
+                    del sys._freelab_dark_mode
+            else:
+                sys._freelab_dark_mode = saved
+        self.addCleanup(restore)
+        dialog = self.dialog(fake_font())
+        dialog.colors_box = box = Box()
+        light, dark = ((0, 0, 0), (255, 255, 255)), ((220, 220, 220), (30, 30, 30))
+        cases = ((light, None, [fp.DARK_LABEL, fp.MEDIUM_LABEL], [fp.DARK_COLORS, fp.MEDIUM_COLORS]),
+                 (dark, "dark", [fp.PRINT_LABEL, fp.MEDIUM_LABEL], [fp.PRINT_COLORS, fp.MEDIUM_COLORS]),
+                 (fp.MEDIUM_COLORS, "medium", [fp.PRINT_LABEL, fp.DARK_LABEL], [fp.PRINT_COLORS, fp.DARK_COLORS]))
+        logged = {"dark": u"light gray on off-black", "medium": u"light gray on medium gray", "print": u"black on white"}
+        for window, shade, labels, colors in cases:
+            sys._freelab_dark_mode = {"on": shade is not None, "shade": shade or "dark"}
+            dialog.window_colors = lambda window=window: window
+            box.currentIndex = 0
+            self.assertEqual(dialog.colors(), window, "as the window")
+            self.assertEqual(box.rows, [u"As the window"] + labels)
+            self.assertEqual(dialog.color_mode(), "window")
+            for index, (label, chosen) in enumerate(zip(labels, colors), 1):
+                box.currentIndex = index
+                self.assertEqual(dialog.colors(), chosen, label)
+                self.assertEqual(fp.colors_label(dialog.color_mode(), *chosen), logged[dialog.color_mode()], label)
+        # Dark mode switched to its medium grays with Medium chosen: the third item is the dark grays now, and
+        # the second still the other of light and dark
+        box.currentIndex = 2
+        dialog.window_colors = lambda: light
+        self.assertEqual(dialog.colors(), fp.MEDIUM_COLORS)
+        sys._freelab_dark_mode = {"on": True, "shade": "medium"}
+        dialog.window_colors = lambda: fp.MEDIUM_COLORS
+        self.assertEqual(dialog.colors(), fp.DARK_COLORS)
+        self.assertEqual(box.rows[2], fp.DARK_LABEL)
+
     def test_the_saved_line_links_to_the_folder_and_a_click_shows_the_pdf(self):
         # Owner's image 375: the log reminds where the PDF went, its folder a link that shows it selected
         ak = self.ak
@@ -2127,6 +2477,13 @@ class DialogTests(unittest.TestCase):
                  "waterfall": dialog.waterfall_edit, "text": dialog.text_edit, "zoom": dialog.zoom_box}
         self.assertEqual(sorted(dialog.captions), sorted(named))
         self.assertIn(u"<i>Ctrl</i> with the mouse wheel", dialog.zoom_box.whats, "the zoom's keys said")
+        # The review of 2026-11-24: what each says is what the code does
+        self.assertIn(u"<i>Dark</i> or <i>Medium</i>", dialog.colors_box.whats, "two choices, by case (color_choices)")
+        self.assertNotIn(u", and light gray", dialog.colors_box.whats)
+        self.assertIn(u"or the common ones", dialog.section_boxes["kerning"].whats, "the Kerning strings dropdown limits it")
+        self.assertIn(u"back to their defaults", dialog.restore_button.whats, "restore_defaults, not the first state")
+        self.assertIn(u"kept from one FontLab session to the next included", dialog.restore_button.whats)
+        self.assertIn(u".<br><br>\nClick this help's button", fp.HELP)
         for name, control in named.items():
             # The help is the control's: its caption (ak.caption) shows it on a right-click and grays with it,
             # and has none of its own (the brief of the owner's images 216 and 281)
@@ -2150,6 +2507,9 @@ class DialogTests(unittest.TestCase):
                                                    (u"ss01", u'featureNames { name "Round a"; };\nsub a by a.ss01;')])
         dialog, made = self.remembering(package)
         self.assertTrue(dialog.summary_box.isChecked(), "on to start with")
+        # (the review of 2026-11-24: the languages close the proof, after every section: section_coverage)
+        self.assertIn(u"with the data's sources, close the proof.", dialog.summary_box.whats)
+        self.assertNotIn(u"kerning, and the scripts and languages it covers", dialog.summary_box.whats)
         reads = []
         read = dialog.read_coverage
         dialog.read_coverage = lambda fc: reads.append(1) or read(fc)

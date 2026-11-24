@@ -2,11 +2,11 @@
 
 *Scripts > FreeLab > Family Audit* compares the fonts of a family with one another, before they become masters of one font: the glyphs each lacks and the code points that differ, each glyph's structure across them, their font info side by side, their kerning, and their feature code. It changes nothing in any of them. Its one action, *Assemble as masters*, makes a new font with a master per source, and leaves the sources as they were.
 
-It answers the owner's question whether a tool that makes masters out of a set of fonts would be of use or only fancy. A survey of 4,986 fonts (the owner's and the corpus's) found that only about 7% of static Regular and Bold pairs are compatible for interpolation as shipped, that within families of several files the glyph sets differ in 39%, the versions in 13%, and the feature code in 16%, and that the owner's own FontLab projects mostly hold one master each. So the audit comes first: it says what differs and where, which is what tidying a family takes; assembling the masters is a second step, which reports compatibility and never promises interpolation.
+A survey of 4,986 fonts (the owner's and the corpus's) found that only about 7% of static Regular and Bold pairs are compatible for interpolation as shipped, that within families of several files the glyph sets differ in 39%, the versions in 13%, and the feature code in 16%, and that the owner's own FontLab projects mostly hold one master each. So the audit comes first: it says what differs and where, which is what tidying a family takes; assembling the masters is a second step, which reports compatibility and never promises interpolation.
 
 ## The window
 
-The window keeps every FreeLab window's layout ([WINDOWS.md](WINDOWS.md)). The top line names the window's font and how many sources are ticked, with the reference: *Sans: 3 of 5 sources ticked (reference Regular).* (the counts with their noun in bold); under it, the status line of the tab shown, then the header's line. The options follow, in one row: *Add files…*, *Reference:* [a dropdown], and *Compare* at their end. Under them, the sources' list over the results, in a splitter: the list's frame, the handle right under it, then a line, the tabs, and the tab's list. The log follows, then the bottom row: *Tick all*, *Untick all*, and *Show in Glyph window* at the left, *Assemble as masters* and *Close* at the right.
+The window keeps every FreeLab window's layout ([WINDOWS.md](WINDOWS.md)). The top line names the window's font and how many sources are ticked, with the reference: *Sans: 3 of 5 sources ticked (reference Regular).* (the counts with their noun in bold); under it, the status line of the tab shown, then the header's line. The options follow, in one row: *Add files…*, *Reference:* [a dropdown], and *Compare* at their end. Under them, the sources' list over the results, in a splitter: the list's frame, the handle right under it, then a line, the tabs, and the tab's list. The log follows, then the bottom row: *Tick all*, *Untick all*, and *Show in Glyph window* at the left, *Assemble as masters*, *Cancel*, and *Close* at the right.
 
 With no font open, the top line reads *No font is open. This window hooks to the next font you open, or click Add files… to open a family's fonts.*, on one line. Every control is grayed then but *Add files…*, which opens fonts, and the *Reference* dropdown reads a grayed *n/a*.
 
@@ -16,7 +16,7 @@ The sources' list holds the fonts open in FontLab, a row for each master of a fo
 
 To start with, the window's own font is ticked with every open font of its family (the same family name, FontLab's `tfn`: a variable font's `fgPackage.info.familyName` is its name ID 1, *Noto Sans JP Thin* for *NotoSansJP[wght].ttf*, live); with no font of its own, the family most open fonts belong to. The list is read again each time the window becomes the active one: the ticks are kept, and a new font of the family is ticked. A font closed leaves the list.
 
-*Add files…* opens font files in FontLab, several at once, in any format FontLab 7 opens: FontLab projects (*.vfc*, *.vfj*, *.vfb*), UFO (*.ufo* is a folder, which a file dialog cannot pick: pick any file inside it, *metainfo.plist* for one) and *.ufoz*, Glyphs, designspace, OpenType and TrueType (*.otf*, *.ttf*, *.otc*, *.ttc*), WOFF and WOFF2, and Type 1 (*.pfb*, *.pfa*). FontLab opens a font in the background: the window looks for each font twice a second, for up to a minute, matches it with its file by path (a font that gives no path is taken for the first file still awaited, once the fonts with paths are matched), ticks it, and says so in the log: *Opened Sans-Bold.otf in FontLab: ticked as Bold.* A font of another family than the window's (its own font's, else the one the ticked sources belong to) is left unticked, and the log says so: tick it to compare it all the same (image 344: a font of another family was ticked with the family). A file open already is ticked at once. A file that never comes in is said, as FontLab may be waiting for an answer in a dialog of its own (*Coordinates Rounding*, for some fonts).
+*Add files…* opens font files in FontLab, several at once, in any format FontLab 7 opens: FontLab projects (*.vfc*, *.vfj*, *.vfb*), UFO (*.ufo* is a folder, which a file dialog cannot pick: pick any file inside it, *metainfo.plist* for one) and *.ufoz*, Glyphs, designspace, OpenType and TrueType (*.otf*, *.ttf*, *.otc*, *.ttc*), WOFF and WOFF2, and Type 1 (*.pfb*, *.pfa*). FontLab opens a font in the background: the window looks for each font twice a second, for up to a minute, matches it with its file by path (a font that gives no path is taken for the first file still awaited, once the fonts with paths are matched), ticks it, and says so in the log: *Opened Sans-Bold.otf in FontLab: ticked as Bold.* A font of another family than the window's (its own font's, else the one the ticked sources belong to) is left unticked, and the log says so: tick it to compare it all the same. A file open already is ticked at once. A file that never comes in is said, as FontLab may be waiting for an answer in a dialog of its own (*Coordinates Rounding*, for some fonts).
 
 ### Fonts FontLab 7.2 crashes on
 
@@ -58,7 +58,7 @@ The prefix, each feature, and the Classes panel's classes, as Font Compare split
 
 ## Assemble as masters
 
-After an audit, *Assemble 3 sources as masters* (its count follows the sources) makes a NEW font in FontLab, which opens in its own window, and never changes the sources:
+After an audit, *Assemble 3 sources as masters* (its count follows the sources) makes a new font in FontLab, which opens in its own window, and never changes the sources:
 
 - a master per audited source, named by the source's name in the window, the reference's first (the default master);
 - every glyph of every source, in the reference's glyph order, then the glyphs only other sources have, in the order they come; each glyph's layer in a master copied by name from that master's source: its outlines (the contours copied, nothing shared with the source), its components (made once the glyphs they draw are drawn, as FontLab builds a component from its glyph as it is then), its anchors, and its width; a glyph a source lacks has an empty layer in its master, and the log lists those glyphs master by master;
@@ -73,26 +73,26 @@ The units per em are the reference's; sources with other units per em are copied
 
 The sources are read again as *Assemble* starts, as they are then. Making the new font cannot be stopped halfway: its steps show in the top row until it is done.
 
-## FontLab calls not yet proven live
+## FontLab calls proven live, and not yet
 
-Every FontLab call of the tool is a method of `FontLabCalls`, each with a docstring saying what it assumes. Proven before (FreeLab MCP's *FONTLAB7-API.md*, Font Compare, Feature Code, Glyph Compose): the open fonts and their numbers, `masters`, `master`, `tfn`, `tsn`, `path`, `versionMajor` and `versionMinor`, `fgPackage.glyphs` and their `unicodes`, `findName`, `getLayerByName` (with `True` to make a layer), a layer's shapes, contours, nodes and their types, components and anchors, `kerning(master)` read through FontKerning and written through it, `groups[name] = (members, side)`, `get_feature`, `get_prefix`, `set_feature`, `getAllGroups`, `requestLoadingFont`, `flPackage()` for a new font, `flGlyph()` and `addGlyph`, `flShape()` with `addContours` and `flContour.clone()`, `GlyphComponent` with `setGlyphComponents`, `flPinPoint` with `addAnchor`, `advanceWidth`, `fgGlyph.unicodes`, `flGlyph.update()`, `rebuildMaps()`, `notifyPackageContentUpdated`, and `setFlag(2, True)`. To check live, on a disposable font, before the owner relies on *Assemble as masters*:
+Every FontLab call of the tool is a method of `FontLabCalls`, each with a docstring saying what it assumes. Proven before (FreeLab MCP's *FONTLAB7-API.md*, Font Compare, Feature Code, Glyph Compose): the open fonts and their numbers, `masters`, `master`, `tfn`, `tsn`, `path`, `versionMajor` and `versionMinor`, `fgPackage.glyphs` and their `unicodes`, `findName`, `getLayerByName` (with `True` to make a layer), a layer's shapes, contours, nodes and their types, components and anchors, `kerning(master)` read through FontKerning and written through it, `groups[name] = (members, side)`, `get_feature`, `get_prefix`, `set_feature`, `getAllGroups`, `requestLoadingFont`, `flPackage()` for a new font, `flGlyph()` and `addGlyph`, `flShape()` with `addContours` and `flContour.clone()`, `GlyphComponent` with `setGlyphComponents`, `flPinPoint` with `addAnchor`, `advanceWidth`, `fgGlyph.unicodes`, `flGlyph.update()`, `rebuildMaps()`, `notifyPackageContentUpdated`, and `setFlag(2, True)`. Proven on 2026-11-24, by assembling Sarabun Regular and Bold (two static fonts of 777 glyphs, opened from their files) in FontLab 7.2 and reading the new font back:
 
-- `flPackage.renameMaster(old, new)`: rename the new font's first master; read `masters` back.
-- `flPackage.addMaster(name, False, None, "", False, False)` (Font Builder's call, its arguments unchecked): add a master; read `masters` back, and check that every glyph then has a layer of that name.
-- `flPackage.master = name`: make a master current; read `master` back, and check that `ascender_value` then reads that master's.
-- `flShape.transform = …` on a new shape: copy a shape whose transform is not the identity (a scaled or moved contour shape); compare the copy's drawn box with the source's.
-- `setGlyphComponents` on a layer that has contours already, then contours added after it: check that both stay (the tool calls it first, then copies the contours).
-- `fgPackage.features.set_prefix(text)`: write a prefix; read it back with `get_prefix()`.
-- `flPackage.setUpm(units, False)` on a new font: read `upm` back.
-- `setattr(fgPackage.info, name, value)` for `familyName`, `copyright`, `openTypeNameDesigner` and the other text fields, and the OS/2 and hhea values: read each back (only the vhea values are proven settable).
-- `flPackage.versionMajor` and `versionMinor` as settable: read them back.
-- `ascender_value`, `descender_value`, `xHeight_value`, `capsHeight_value`, `lineGap_value` as settable for the current master (Font Builder's): set them in two masters, then read each master's back.
-- `fontlab.flAxis()` with `name`, `tag`, `shortName`, `minimum`, `maximum`, and `default` or `defaultValue`, then `flPackage.addAxis(axis)`: read `axes` back, and look at *Font Info > Axes*.
-- `flPackage.setLocation(master, {axis name: value})`: read `location(master)` back, and look at the masters' locations in *Font Info > Masters*.
-- `fontlab.flItems.notifyPackageAdded(package)` (Font Builder's): check that the new font's Font window opens.
-- `fgPackage.info.italicAngle`, `openTypeOS2WeightClass`, `openTypeOS2WidthClass`, and `styleName` as read: compare with *Font Info* on a static font. (`familyName` was read live: name ID 1, so a variable font's family is taken from `tfn`.)
-- Opening each format through `requestLoadingFont`, and whether a font opened from a binary file (OpenType, WOFF, Type 1) gives that file as its `path` (else it is matched as the first file awaited).
-- How long reading and assembling take on four static fonts of a few thousand glyphs, and on a CJK family.
+- `renameMaster`, `addMaster(name, False, package, "", False, False)`, and `setMaster(name)`: the masters read *Regular* and *Bold*, and every glyph has a layer in both.
+- A component's `transform` copied to the new shape: *Aacute*'s acute sits at 298 in Regular and 321 in Bold, as in the sources.
+- `set_prefix`: the prefix reads back (7,332 characters), with 13 features.
+- `setUpm(units, False)`, `versionMajor` and `versionMinor` (set and read back), and the font info's text fields and OS/2 and hhea values through `setattr` (family name, copyright, designer, typo ascender and descender, win ascent, hhea ascender read back).
+- The line metrics (`ascender_value` and the others) are settable and are the current master's: `xHeight_value` set to 510 with Bold current read 500 with Regular current.
+- `flAxis` with `minimal`, `default`, and `maximum`, `addAxis`, and `setLocation(flLocation, master)`: the font has a *Weight* axis (`wght`, 400 to 700), and the masters' locations read `<flLocation weight=400>` and `<flLocation weight=700>`.
+- `notifyPackageAdded`: the new font's Font window opens as a tab of the main window (titled *Unnamed*, the new font having no file).
+- `italicAngle`, `openTypeOS2WeightClass` (400 and 700), `openTypeOS2WidthClass` (5), and `styleName` read as *Font Info* gives them; a font opened from a TrueType file gives that file as its `path`.
+- Each master kept its source's kerning (2,394 entries and 50 classes each).
+
+Not yet proven:
+
+- `setGlyphComponents` on a layer that also gets contours (Sarabun has no glyph of both): check on a font that has one that both stay.
+- The other formats through `requestLoadingFont` (OpenType CFF, WOFF, Type 1, UFO, *.vfc*), and whether each gives its file as `path`.
+- How long reading and assembling take on four static fonts of a few thousand glyphs, and on a CJK family (two fonts of 777 glyphs: under a minute, the comparison included).
+
 ## The crash check, live (2026-11-19)
 
 FontLab 7.2, the suite's window on a static instance of *NotoSansJP[wght].ttf* at `wght` 400 (fontTools' instancer drops the two subtables), and FreeLab MCP's heap fill (a million 64-byte blocks of 0x41, every other one freed: the same fill made FontLab crash on the original that day) made before the files were added. The file dialog is Windows' own, which the window tools cannot fill: the files were passed to the window's `open_paths` through `run_python`, as *Add files…* passes them, and its question was answered with the window tools.

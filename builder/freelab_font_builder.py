@@ -30,6 +30,27 @@ PER_SHEET = 100  # glyphs a sheet, by default
 PER_SHEET_MAX = 400  # at most (a sheet stays under SHEET_PIXELS_MAX at the default em size)
 EM_PIXELS = 500  # the em's size on the sheet, in pixels, by default
 EM_PIXELS_RANGE = (150, 1200)
+PRINT_DPI = 300  # the resolution the em size's help measures a printed sheet at
+# (the owner asked, 2026-11-24, whether the font's metrics affect the em size: they do not, and the help says so)
+EM_HELP = ("The em's size on the sheet, in pixels (%d at first, which draws well on a screen), whatever the font's "
+           "units per em: the font's metrics set where its lines fall within the em, and how tall a box is. "
+           "Printed at %d dpi, %d pixels make a centimeter, so an em of %d pixels is about %.1f cm." % (
+               EM_PIXELS, PRINT_DPI, round(PRINT_DPI / 2.54), EM_PIXELS, EM_PIXELS / (PRINT_DPI / 2.54)))
+# The buttons that open a file dialog end with an ellipsis, as Proof's Save PDF (the source kept ASCII)
+SAVE_TEMPLATE = "Save template\N{HORIZONTAL ELLIPSIS}"
+ADD_SHEETS = "Add sheets\N{HORIZONTAL ELLIPSIS}"
+# Replace glyphs the font has drawn: it decides at the build (unticked, a drawn glyph is kept whatever its
+# tick in the list), and sets the list's ticks only as the sheets are read
+REPLACE_HELP = ("Ticked, a glyph that has outlines, components, or an image in the current master is replaced by "
+                "the one read. Unticked, it is kept, even ticked in the list. The list's ticks follow this box when "
+                "the sheets are read.")
+# Print each character faintly as a guide. (Guides), ticked at first
+GUIDE_CAPTION = "Print each character faintly as a guide."
+GUIDE_TIP = "Each box shows its character very faintly, in FreeLang, to draw over."
+NO_GUIDES_LINE = "No character was printed as a guide: FreeLang, FreeLab's own font, could not be loaded."
+GUIDE_HELP = ("Prints each box's character very faintly in FreeLang, FreeLab's own font, on its baseline at the <i>Em "
+              "size</i>, to show what to draw. The reading never takes it for ink, so drawing over it is safe; a "
+              "character FreeLang does not draw, and a glyph with no character of its own (an alternate), get none.")
 SHEET_PIXELS_MAX = 120 * 1000 * 1000  # a sheet larger than this is split into more sheets
 BOX_WIDTH = 1.2  # the drawing box's width, in ems (room for wide glyphs and their sidebearings)
 BOX_LEFT = 0.1  # where the glyph's origin stands in it, in ems from its left edge
@@ -41,7 +62,38 @@ QUIET = 2  # white modules around a finder and a band
 GUIDE_GRAY = 205  # the guides' gray (and the label's), as Qt makes gray of GUIDE_RGB: above any threshold allowed
 THRESHOLD_MAX = 185  # the ink threshold at most: the guides 20 grays above it, for JPEG noise and soft edges
 INK_THRESHOLD = 128
+# The guide characters (Print each character faintly as a guide.): the guides' pale blue, lighter. Qt's gray of
+# GUIDE_INK_RGB is GUIDE_INK_GRAY, 50 grays above THRESHOLD_MAX and 30 above the guides' lines: whatever reads
+# those lines as paper reads the characters as paper, and the reading measures each box's paper first
+# (paper_table), so a dim photograph or scan keeps them that far above the ink threshold
+GUIDE_INK_RGB = (221, 239, 253)
+GUIDE_INK_GRAY = 235
+GUIDE_PAD = 0.02  # the room, in ems, a guide character's ink keeps from its box's sides
 EVEN_SIDE = 0.05  # each sidebearing, in ems, of a glyph placed With even sidebearings
+# Ink darker than: where the risk begins, from the grays themselves (the owner, 2026-11-24)
+THRESHOLD_TIP = ("The gray under which a pixel counts as ink (0 black, 255 white). The boxes' lines read at about %d "
+                 "and the guide characters at about %d, so up to %d neither is ink: raise it only as far as pale ink "
+                 "needs." % (GUIDE_GRAY, GUIDE_INK_GRAY, THRESHOLD_MAX))
+THRESHOLD_HELP = ("What counts as ink: pixels darker than this gray (0 black, 255 white). On a sheet as saved, the "
+                  "boxes' lines read at about %d and the guide characters at about %d, and this stops at %d, so "
+                  "neither is taken for ink. A scan or a photograph whose paper is darker or more uneven than the "
+                  "reading can make white brings them closer: the higher this is set, the sooner the lines, then the "
+                  "guide characters, show in the glyphs read. Raise it only as far as pencil or pale ink needs, and "
+                  "lower it if lines appear in the glyphs." % (GUIDE_GRAY, GUIDE_INK_GRAY, THRESHOLD_MAX))
+# Save template...: the formats, and what may be hidden in a sheet before it is saved (the owner, 2026-11-24)
+SAVE_HELP = ("Writes the sheets, one file a sheet, numbered: as SVG drawings (for a vector app, or any app that "
+             "opens SVG), as PNG or TIFF images, or as Photoshop documents (PSD). SVG and PSD keep the template on "
+             "locked layers of their own, with an empty layer above it to draw on; PNG and TIFF are flat images. The "
+             "boxes and guides may be hidden before a sheet is saved again, but the marks (the corner squares and "
+             "the bands) must stay visible. A save is all or nothing: stopped or failed, it leaves no file behind and "
+             "replaces none. The log then links to the folder.")
+# A save stopped (the question answered Cancel, Cancel or Esc during the writing, the tools menu, the arrows, or
+# Close): every sheet is staged beside its file until all are written, so nothing is ever half saved (the owner,
+# 2026-11-24)
+STOPPED_LINE = "The operation was interrupted. Nothing was saved or overwritten."
+CANCEL_NOTE = ("A save stopped leaves nothing behind: no sheet of it is kept, and the files there stay as they "
+               "were.")
+FILES_NAMED = 5  # files a question or a log line names at most before it counts the rest ("and 126 more")
 
 
 # ---------------------------------------------------------------------------
@@ -312,23 +364,34 @@ def _n(value):
     return ("%.2f" % value).rstrip("0").rstrip(".")
 
 
-def sheet_svg(sheet, guide_rgb=(170, 215, 250)):
-    """A sheet as an SVG drawing, the same as render_sheet's image (its pixels its user units): the
-    template in a locked group, "template", for a vector app to draw on a layer above it. Read back as an
-    image (Qt renders it at its size), so whatever the app draws is traced as on a raster sheet."""
+def sheet_svg(sheet, guide_rgb=(170, 215, 250), guides=None):
+    """A sheet as an SVG drawing, the same as render_sheet's image (its pixels its user units): the paper,
+    boxes, lines, labels, and guide characters in a locked group, "template", and what the reading finds the
+    sheet by (the corner squares and the bands) in a locked group of their own above it, "marks", so the
+    template can be hidden before the sheet is saved (the owner, 2026-11-24: the reading needs the marks
+    alone; a hidden template leaves them on a clear ground, read as white paper), for a vector app to draw on
+    a layer above them ("drawing"). Drawn in the order it always was (the marks last, over a title wider than
+    a small sheet), so it renders as before. Read back as an image (Qt renders it at its size), so whatever
+    the app draws is traced as on a raster sheet. guides: each cell's guide character as an SVG path element
+    (guide_svg), or None; drawn first, under the lines, as outlines (a viewer needs no FreeLang). None, or
+    none given: no guide group."""
     width, height = sheet.size()
     guide = "rgb(%d,%d,%d)" % tuple(guide_rgb)
     thin, base = max(1.0, sheet.em / 400.0), max(2.0, sheet.em / 200.0)
     label_px, small_px = max(10, int(sheet.em * LABEL * 0.6)), max(9, int(sheet.em * LABEL * 0.35))
     bw, bh = sheet.box_size()
     out = ['<?xml version="1.0" encoding="UTF-8"?>',
-           '<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d">' % (
-               width, height, width, height),
+           '<svg xmlns="http://www.w3.org/2000/svg" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd" '
+           'width="%d" height="%d" viewBox="0 0 %d %d">' % (width, height, width, height),
            '<title>%s</title>' % _xml("%s sheet %d of %d" % (sheet.family or "Font Builder", sheet.index + 1, sheet.count)),
-           '<g id="template" sodipodi:insensitive="true" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/'
-           'sodipodi-0.dtd">',
-           '<rect x="0" y="0" width="%d" height="%d" fill="#ffffff"/>' % (width, height),
-           '<g fill="none" stroke="%s" stroke-width="%s">' % (guide, _n(thin))]
+           '<g id="template" sodipodi:insensitive="true">',
+           '<rect x="0" y="0" width="%d" height="%d" fill="#ffffff"/>' % (width, height)]
+    drawn = [element for element in (guides or ()) if element]
+    if drawn:  # (only then: a sheet without guides stays byte for byte as it was)
+        out.append('<g id="guides" fill="rgb(%d,%d,%d)">' % GUIDE_INK_RGB)
+        out.extend(drawn)
+        out.append('</g>')
+    out.append('<g fill="none" stroke="%s" stroke-width="%s">' % (guide, _n(thin)))
     for i in range(len(sheet.names)):
         left, top = sheet.cell(i)
         out.append('<rect x="%s" y="%s" width="%d" height="%d"/>' % (_n(left), _n(top), bw, bh))
@@ -353,13 +416,329 @@ def sheet_svg(sheet, guide_rgb=(170, 215, 250)):
     out.append('<text x="%s" y="%s" font-size="%d" text-anchor="middle">%s</text>' % (
         _n(width / 2.0), _n(QUIET * sheet.unit * 1.25 + small_px * 0.35), small_px, _xml(title)))
     out.append('</g>')
+    out.append('</g>')
     u = sheet.unit
+    out.append('<g id="marks" sodipodi:insensitive="true">')
     out.append('<path fill="#000000" d="%s"/>' % " ".join(
         "M%s %sh%sv%sh-%sz" % (_n(x * u), _n(y * u), _n(w * u), _n(h * u), _n(w * u)) for x, y, w, h in marks(sheet)))
     out.append('</g>')
     out.append('<g id="drawing"></g>')
     out.append('</svg>')
     return "\n".join(out) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# PSD: a sheet in layers, written here (Qt 5.14 reads PSD but writes none, and FontLab's Python has no Pillow)
+# ---------------------------------------------------------------------------
+
+PSD_SIDE_MAX = 30000  # a PSD's width and height at most (version 1, "8BPS"; past it, the PSB format)
+# The layers, bottom to top (the owner, 2026-11-24): what the reading finds the sheet by, on white; the boxes,
+# lines, labels, and guide characters, on a clear ground, which may be hidden before the sheet is saved (and
+# need not be: "can be hidden" says what is true, where "preferably hidden" read as "hide it to draw"); and
+# an empty layer to draw on
+PSD_LAYERS = ("Marks (keep visible)", "Template (can be hidden)", "Draw here")
+# The Template layer prints in strong colors at a third of its opacity (the owner, 2026-11-24: "a user may want to
+# temporarily boost colors to see things better"): at this opacity over white it looks as the flat sheet does, and
+# raised it shows the boxes, labels, and guides stronger. Each channel c of the sheet as painted is stored as
+# 255 - (255 - c) * 255 / opacity (template_strong): the boxes' lines and labels (GUIDE_RGB, 170, 215, 250, the
+# template's darkest: 85 of 255 from white at their darkest channel) land at full strength, 0, 135, 240, never
+# clamped, and the guide characters (GUIDE_INK_RGB, 221, 239, 253) become 153, 207, 249, as much lighter than
+# the lines as they were (every color three times as far from white). At 85,
+# 255 / 85 is 3: every stored value is a whole number, and the layer over white gives each color back exactly
+PSD_TEMPLATE_OPACITY = 85
+# Layer record flags (Adobe's Photoshop File Format): bit 0 transparency protected; bit 1 hidden (clear: shown);
+# bit 3 set, as Photoshop 5 and later set it, saying bit 4 means something (clear: the pixels make the picture)
+PSD_FLAGS_LOCKED = 0x09
+PSD_FLAGS_OPEN = 0x08
+# The protected settings ('lspf'): bit 0 transparency, bit 1 composite (the pixels), bit 2 position, every one
+# locked, as Photoshop's three locks ticked (its newer Lock All, bit 31, is not in the published format)
+PSD_LOCK_ALL = 0x07
+PSD_BLEND_RANGES = b"\x00\x00\xff\xff" * 10  # the gray's and each channel's blending ranges, whole, as Photoshop writes them
+PSD_PROGRESS_ROWS = 256  # rows encoded between two calls of progress (Esc stops between them)
+PSD_CACHE_ROWS = 512  # channel rows kept with their PackBits, to encode a row seen before once (cleared when full)
+
+_PACKBITS_RUN = re.compile(b"(.)\\1{2,}", re.S)  # 3 equal bytes or more
+# A row of pixels as Qt keeps a Format_RGB32 image (bytes B, G, R, 255): white ones, else the others, four bytes
+# at a time from the row's start, so each match stands on whole pixels
+_WHITE_OR_NOT = re.compile(b"((?:\xff\xff\xff.)+)|(?:(?!\xff\xff\xff)....)+", re.S)
+_MARK_PIXEL = b"\x00\x00\x00\xff"  # the marks' black, as Format_RGB32 keeps it
+_BYTE = [struct.pack(">B", value) for value in range(256)]
+
+
+def template_strong(value, opacity=PSD_TEMPLATE_OPACITY):
+    """A channel's value c of the sheet as painted, as the Template layer stores it to give c back over white at
+    opacity (0 to 255): 255 - (255 - c) * 255 / opacity, rounded, kept within 0 to 255."""
+    return max(0, min(255, int(math.floor(255 - (255 - value) * 255.0 / opacity + 0.5))))
+
+
+# (one byte a value, for bytes.translate: a row's channel turned at once, not a byte at a time)
+_STRONG = b"".join(_BYTE[template_strong(value)] for value in range(256))
+
+
+def _packbits_literal(out, data, start, end):
+    while start < end:
+        take = min(end - start, 128)
+        out.append(_BYTE[take - 1] + data[start:start + take])
+        start += take
+
+
+def packbits(data):
+    """A row's bytes in PackBits, PSD's RLE: a run of 2 to 128 equal bytes as (257 - n, the byte), the bytes
+    between runs as (n - 1, the n bytes), 128 at most a piece. Runs shorter than 3 stay among the bytes around
+    them (a run of 2 saves nothing there). The runs are found by a regular expression, so a row of a sheet,
+    white but for a few lines, costs a few matches, not a step a byte."""
+    out = []
+    at = 0
+    for match in _PACKBITS_RUN.finditer(data):
+        start, end = match.span()
+        _packbits_literal(out, data, at, start)
+        byte = data[start:start + 1]
+        n = end - start
+        while n > 1:
+            take = min(n, 128)
+            out.append(_BYTE[257 - take] + byte)
+            n -= take
+        if n == 1:  # (one left past 128s: a literal of one)
+            out.append(_BYTE[0] + byte)
+        at = end
+    _packbits_literal(out, data, at, len(data))
+    return b"".join(out)
+
+
+def mark_spans(sheet):
+    """{a row of units: ((start, end), ...) in pixels}: where that row holds the marks' black (marks: the corner
+    squares and the bands), its rectangles merged along the row; rows without any left out. One tuple for
+    every pixel row of a row of units, so write_psd meets the same spans again."""
+    u = sheet.unit
+    rows = {}
+    for x, y, w, h in marks(sheet):
+        x0, x1 = int(round(x)), int(round(x + w))
+        for v in range(int(round(y)), int(round(y + h))):
+            rows.setdefault(v, []).append((x0, x1))
+    out = {}
+    for v, spans in rows.items():
+        merged = []
+        for start, end in sorted(spans):
+            if merged and start <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], end)
+            else:
+                merged.append([start, end])
+        out[v] = tuple((start * u, end * u) for start, end in merged)
+    return out
+
+
+def marks_plane(width, spans):
+    """A row of the Marks layer, one byte a pixel (its red, green, and blue alike): white, black over spans."""
+    plane = bytearray(b"\xff" * width)
+    for start, end in spans:
+        plane[start:end] = b"\x00" * (end - start)
+    return bytes(plane)
+
+
+def template_alpha(row, spans=()):
+    """The Template layer's alpha for a row of the sheet's picture (row: its pixels as Qt keeps Format_RGB32,
+    bytes B, G, R, 255), one byte a pixel: opaque where the picture is not white, clear where it is; over the
+    marks (spans, in pixels), clear where the picture is their black, so the Marks layer under it shows, and
+    opaque where it is not (the picture's own pixels then). The Template over the Marks layer, at its opacity
+    (template_strong), is the picture, pixel for pixel, where the marks are their black, as Qt paints them; a
+    mark's pixel painted otherwise would show darker under the Template's lowered opacity."""
+    parts = []
+    for match in _WHITE_OR_NOT.finditer(row):
+        parts.append((b"\x00" if match.group(1) is not None else b"\xff") * ((match.end() - match.start()) // 4))
+    alpha = bytearray(b"".join(parts))
+    for start, end in spans:
+        black = row[4 * start:4 * end] == _MARK_PIXEL * (end - start)
+        alpha[start:end] = (b"\x00" if black else b"\xff") * (end - start)
+    return bytes(alpha)
+
+
+def _psd_layer_record(name, bounds, channels, flags, locked, opacity=255):
+    """A layer record: its bounds (top, left, bottom, right), its channels [(id, length of its data)], normal
+    blending at opacity (0 to 255), flags, its name as a Pascal string padded to 4 bytes and as Unicode
+    ('luni'), and, locked, the protected settings ('lspf')."""
+    top, left, bottom, right = bounds
+    out = [struct.pack(">iiiiH", top, left, bottom, right, len(channels))]
+    out.extend(struct.pack(">hI", channel, length) for channel, length in channels)
+    out.append(b"8BIMnorm" + struct.pack(">BBBB", opacity, 0, flags, 0))
+    raw = name.encode("ascii", "replace")[:255]
+    pascal = _BYTE[len(raw)] + raw
+    pascal += b"\x00" * (-len(pascal) % 4)
+    units = name.encode("utf-16-be")
+    luni = struct.pack(">I", len(units) // 2) + units
+    luni += b"\x00" * (-len(luni) % 4)
+    extra = [struct.pack(">I", 0), struct.pack(">I", len(PSD_BLEND_RANGES)) + PSD_BLEND_RANGES, pascal,
+             b"8BIMluni" + struct.pack(">I", len(luni)) + luni]
+    if locked:
+        extra.append(b"8BIMlspf" + struct.pack(">II", 4, PSD_LOCK_ALL))
+    extra = b"".join(extra)
+    out.append(struct.pack(">I", len(extra)) + extra)
+    return b"".join(out)
+
+
+def _psd_channel_length(rows):
+    """The bytes of a layer's channel: its compression, then (PackBits) each row's length and the rows; an
+    empty layer's, its compression alone (raw, no pixels)."""
+    return 2 if rows is None else 2 + 2 * len(rows) + sum(len(row) for row in rows)
+
+
+def _psd_write_channel(handle, rows):
+    if rows is None:
+        handle.write(struct.pack(">H", 0))
+        return
+    handle.write(struct.pack(">H", 1) + struct.pack(">%dH" % len(rows), *[len(row) for row in rows]))
+    handle.write(b"".join(rows))
+
+
+def write_psd(handle, width, height, row_of, spans_of=None, progress=None):
+    """A sheet's picture written to handle (a file open for bytes) as a PSD (version 1, RGB, 8 bits) in three
+    layers, bottom to top (PSD_LAYERS): Marks (keep visible), white with the marks' black, locked; Template (can
+    be hidden), the rest of the picture on a clear ground (template_alpha) in strong colors at the layer's
+    opacity PSD_TEMPLATE_OPACITY (template_strong: over the Marks layer's white it gives the picture back),
+    locked; Draw here, empty (no bounds), on top. Then the picture flattened, as painted, as Qt's reader,
+    FontLab's, and every app that takes no layers read it. Every channel in PackBits. row_of(y): row y of the
+    picture (bytes B, G, R, 255 a pixel, as Qt's Format_RGB32); spans_of(y): the marks' black in that row
+    ((start, end) in pixels, the same tuple for rows alike: mark_spans); progress(part, 0 to 1): called every
+    PSD_PROGRESS_ROWS rows (it may raise, to stop). A row like the one before it (most of a sheet) is not
+    encoded again, nor one seen in the last PSD_CACHE_ROWS. Raises IOError for a picture past PSD_SIDE_MAX a
+    side."""
+    if not (0 < width <= PSD_SIDE_MAX and 0 < height <= PSD_SIDE_MAX):
+        raise IOError("a sheet of %d by %d pixels is too large for a PSD" % (width, height))
+    cache = {}
+
+    def packed(data):
+        made = cache.get(data)
+        if made is None:
+            if len(cache) >= PSD_CACHE_ROWS:
+                cache.clear()
+            made = cache[data] = packbits(data)
+        return made
+
+    red, green, blue, alpha, plane = [], [], [], [], []
+    strong_red, strong_green, strong_blue = [], [], []
+    last_row = last_spans = None
+    for y in range(height):
+        if progress is not None and y % PSD_PROGRESS_ROWS == 0:
+            progress(y / float(height))
+        row = row_of(y)
+        spans = spans_of(y) if spans_of is not None else ()
+        if row == last_row and spans == last_spans:
+            for rows in (red, green, blue, alpha, plane, strong_red, strong_green, strong_blue):
+                rows.append(rows[-1])
+            continue
+        for rows, strong, data in ((red, strong_red, row[2::4]), (green, strong_green, row[1::4]),
+                                   (blue, strong_blue, row[0::4])):
+            rows.append(packed(data))
+            strong.append(packed(data.translate(_STRONG)))
+        alpha.append(packed(template_alpha(row, spans)))
+        plane.append(packed(marks_plane(width, spans)))
+        last_row, last_spans = row, spans
+    opaque = [packbits(b"\xff" * width)] * height
+    full = (0, 0, height, width)
+    layers = ((PSD_LAYERS[0], full, ((-1, opaque), (0, plane), (1, plane), (2, plane)), PSD_FLAGS_LOCKED, True, 255),
+              (PSD_LAYERS[1], full, ((-1, alpha), (0, strong_red), (1, strong_green), (2, strong_blue)),
+               PSD_FLAGS_LOCKED, True, PSD_TEMPLATE_OPACITY),
+              (PSD_LAYERS[2], (0, 0, 0, 0), ((-1, None), (0, None), (1, None), (2, None)), PSD_FLAGS_OPEN, False, 255))
+    records = b"".join(_psd_layer_record(name, bounds, [(channel, _psd_channel_length(rows)) for channel, rows in channels],
+                                         flags, locked, opacity) for name, bounds, channels, flags, locked, opacity in layers)
+    info = 2 + len(records) + sum(_psd_channel_length(rows) for layer in layers for _, rows in layer[2])
+    pad = info % 2  # (the layer info's length rounded up to even)
+    handle.write(b"8BPS" + struct.pack(">H6xHIIHH", 1, 3, height, width, 8, 3))
+    handle.write(struct.pack(">II", 0, 0))  # (no color mode data, no image resources)
+    handle.write(struct.pack(">IIh", 4 + info + pad + 4, info + pad, len(layers)))
+    handle.write(records)
+    for layer in layers:
+        for _, rows in layer[2]:
+            _psd_write_channel(handle, rows)
+    handle.write(b"\x00" * pad + struct.pack(">I", 0))  # (no global layer mask)
+    handle.write(struct.pack(">H", 1))
+    for rows in (red, green, blue):
+        handle.write(struct.pack(">%dH" % height, *[len(row) for row in rows]))
+    for rows in (red, green, blue):
+        handle.write(b"".join(rows))
+
+
+# ---------------------------------------------------------------------------
+# Guide characters: where they stand in a cell, and their outlines in an SVG sheet
+# ---------------------------------------------------------------------------
+
+
+def guide_code(label):
+    """The code point a cell's guide character draws: its label's, where the label is one character (a pair of
+    surrogates, on a narrow build, as one); None for a glyph with no character of its own (an alternate's
+    "a.alt1", a ligature's name), which gets no guide."""
+    if len(label) == 1 or (len(label) == 2 and 0xD800 <= ord(label[0]) < 0xDC00 and 0xDC00 <= ord(label[1]) < 0xE000):
+        return code_of(label)
+    return None
+
+
+def guide_left(sheet, i, ink_left, ink_right):
+    """Where a guide character's origin stands across cell i (template pixels), or None: on the box's origin
+    line, its own sidebearings kept, as a glyph drawn there is read (Where drawn keeps the ink against that
+    line); where its ink would then cross a side of the box (a glyph wider than the room right of the line, a
+    mark drawn left of its origin), its ink centered in the box instead; ink wider than the box (less
+    GUIDE_PAD a side) gets no guide, which would show only a part. ink_left, ink_right: the character's ink
+    across, in pixels from its origin, at the sheet's em."""
+    left, _ = sheet.cell(i)
+    bw, _ = sheet.box_size()
+    pad = GUIDE_PAD * sheet.em
+    if ink_right - ink_left > bw - 2 * pad:
+        return None
+    ox, _ = sheet.origin(i)
+    if ox + ink_left >= left + pad and ox + ink_right <= left + bw - pad:
+        return ox
+    return left + bw / 2.0 - (ink_left + ink_right) / 2.0
+
+
+def _tenths(value):
+    return int(math.floor(value * 10.0 + 0.5))
+
+
+def _t(tenths):
+    """A coordinate in tenths of a pixel, written short: 12.3, 4, -0.5."""
+    whole, part = divmod(abs(tenths), 10)
+    return "%s%d%s" % ("-" if tenths < 0 else "", whole, (".%d" % part) if part else "")
+
+
+def path_data(path):
+    """An SVG path's data for a QPainterPath (its elements: 0 a move, 1 a line, 2 a curve's first handle and
+    3 the rest of it), to a tenth of a pixel: an absolute move for each contour, then lines and curves
+    relative to the point before, as rounded (so no rounding error adds up along a contour), each contour
+    closed. A guide character of Big Five in FreeLang CJK, at an em of 500 pixels, takes about 1.7 kB (2.8 kB
+    in absolute coordinates)."""
+    out, x0, y0, started = [], 0, 0, False
+    count = path.elementCount()
+    k = 0
+    while k < count:
+        element = path.elementAt(k)
+        kind = int(element.type)
+        x, y = _tenths(element.x), _tenths(element.y)
+        if kind == 0:
+            out.append("%sM%s %s" % ("z" if started else "", _t(x), _t(y)))
+            started = True
+        elif kind == 1:
+            out.append("l%s %s" % (_t(x - x0), _t(y - y0)))
+        elif kind == 2 and k + 2 < count:
+            second, end = path.elementAt(k + 1), path.elementAt(k + 2)
+            x2, y2, x3, y3 = _tenths(second.x), _tenths(second.y), _tenths(end.x), _tenths(end.y)
+            out.append("c%s %s %s %s %s %s" % (_t(x - x0), _t(y - y0), _t(x2 - x0), _t(y2 - y0), _t(x3 - x0),
+                                               _t(y3 - y0)))
+            x, y = x3, y3
+            k += 2
+        x0, y0 = x, y
+        k += 1
+    if started:
+        out.append("z")
+    return "".join(out)
+
+
+def guide_svg(path, clipped=False):
+    """A guide character's path as an SVG path element, or None where it has no outline. clipped: cut to its
+    box by Qt (QPainterPath.intersected), whose contours do not overlap but may turn either way, so filled by
+    the even-odd rule; a character's own outline is filled by the nonzero rule, as text is."""
+    data = path_data(path)
+    if not data:
+        return None
+    return '<path%s d="%s"/>' % (' fill-rule="evenodd"' if clipped else "", data)
 
 
 # ---------------------------------------------------------------------------
@@ -789,6 +1168,107 @@ def common_sets(names):
     return [where[name] for name in COMMON_SETS if name in where]
 
 
+# The box under the Character set dropdown shows its characters in FreeLab's own font, FreeLang, as Font Check's
+# and Glyph Compose's lists do (Font Check's register_list_font: the first file, and the optional ones as its
+# substitutes): in the window's font, a set of a script that font lacks (Yi's 1,220 characters) was a box
+# each. It is registered once the box first holds a character past ASCII, not as the window opens.
+PREVIEW_POINTS = 12  # the box's text size, in points, until another is picked (Text size)
+PREVIEW_POINTS_RANGE = (6, 72)
+EXTRAS_FILE = "FreeLang-Extras.zip"  # the release's file that holds FreeLang's optional fonts (docs/INSTALL.md)
+# The Duployan block and its shorthand format controls, which FreeLang's last optional font (Duployan) alone
+# draws (tests/language_font_tests.py, test_duployan_drawn_by_the_optional_font_alone)
+DUPLOYAN_CODES = (0x1BC00, 0x1BCA3)
+# Pixels added above and below the line between the dropdown's common sets and every set: Qt's own row for a
+# separator is as tall as a frame's width, and the line sat tight between two rows (owner's review)
+SEPARATOR_ROOM = 4
+
+
+def set_characters(character_set):
+    """A set's characters as the box takes them, in its order: single characters (a pair of surrogates, on
+    a narrow build, as one); a letter with marks that has no character of its own is left to Glyph Compose."""
+    return [item for item in character_set.base if len(item) == 1 or
+            (len(item) == 2 and 0xD800 <= ord(item[0]) < 0xDC00)]
+
+
+def set_key(character_set):
+    """What the settings keep of the set picked: Font Check's code for it ("script:Yi", "unihan-big5",
+    "block-2000"), which stays when the sets are made again, where a row's number and a label with its count
+    of characters change with the data."""
+    return "%s" % character_set.iso
+
+
+def restored_choice(sets, key, typed):
+    """The number (in sets) of the set saved with the template, to be chosen again at the window's opening,
+    or None: no set saved, a set no longer there, or saved characters that differ from the set's (typed or
+    edited by hand: they come back as Characters typed below). Characters saved with none counts as the
+    set's own."""
+    if not key:
+        return None
+    found = [number for number, s in enumerate(sets) if set_key(s) == key]
+    if not found:
+        return None
+    number = found[0]
+    if typed and characters_of(typed) != characters_of("".join(set_characters(sets[number]))):
+        return None
+    return number
+
+
+def saved_points(settings):
+    """The box's text size kept in the settings, within PREVIEW_POINTS_RANGE; PREVIEW_POINTS when none
+    was kept or it cannot be read."""
+    try:
+        points = int(settings.get("preview_points", PREVIEW_POINTS))
+    except (TypeError, ValueError, AttributeError):
+        return PREVIEW_POINTS
+    return max(PREVIEW_POINTS_RANGE[0], min(PREVIEW_POINTS_RANGE[1], points))
+
+
+def past_ascii(text):
+    """Whether text holds a character past ASCII (a character past U+FFFF, two code units in FontLab's
+    narrow Python, has both past it): the window's font draws ASCII, so FreeLang is registered only then."""
+    return bool(text) and max(text) > "\x7f"
+
+
+def missing_fonts(fc, character_set, chars=()):
+    """The optional FreeLang families a set's characters are drawn by that did not register (their files
+    not installed, or refused), in Font Check's order: its own judgment (fallbacks_needed, and
+    names_characters, which a set the first file draws whole passes), and the Duployan font for a set
+    with a character of DUPLOYAN_CODES among chars (Font Check's judgment, made for tooltips, takes that
+    small set for one the first file draws). Empty before FreeLang was registered, and wherever Font Check
+    cannot tell."""
+    try:
+        drawn = fc.LIST_FALLBACKS_DRAWN
+        if drawn is None:
+            return []
+        needed = [] if fc.names_characters(character_set) else list(fc.fallbacks_needed(character_set))
+        duployan = fc.LIST_FONT_FALLBACKS[-1][1]
+        if duployan not in drawn and duployan not in needed and \
+                any(DUPLOYAN_CODES[0] <= code_of(ch) <= DUPLOYAN_CODES[1] for ch in chars):
+            needed.append(duployan)
+        return [family for family in needed if family not in drawn]
+    except Exception:
+        return []
+
+
+def missing_fonts_line(ak, families):
+    """The one line under the box when a set's characters need fonts that are not installed (the boxes Qt
+    draws for them would say nothing), or "" when none is missing."""
+    if not families:
+        return ""
+    names = [ak.i(family) for family in families]
+    if len(names) == 1:
+        listed = names[0]
+    elif len(names) == 2:
+        listed = "%s and %s" % tuple(names)
+    else:  # (Oxford comma)
+        listed = "%s, and %s" % (", ".join(names[:-1]), names[-1])
+    if len(families) == 1:
+        return ("Some of these characters may show as boxes: %s, the font that draws them, is not installed; it "
+                "comes with each release, in %s." % (listed, ak.i(EXTRAS_FILE)))
+    return ("Some of these characters may show as boxes: %s, the fonts that draw them, are not installed; they "
+            "come with each release, in %s." % (listed, ak.i(EXTRAS_FILE)))
+
+
 def _qt():
     from PythonQt import QtCore, QtGui
     return QtCore, QtGui
@@ -848,14 +1328,24 @@ def nice_names():
         return {}
 
 
-def render_sheet(sheet, QtCore, QtGui):
+def render_sheet(sheet, QtCore, QtGui, guides=None):
     """The sheet as an image: white, its cells' boxes and metric lines and labels in pale blue, its
-    finders and bands in black."""
+    finders and bands in black. guides: each cell's guide character (a QPainterPath in the template's
+    pixels: Guides.path), or None; filled first, in GUIDE_INK_RGB, smoothed (its soft edges lighter still),
+    the lines drawn over them unsmoothed as before. None, or none given: the sheet as it was before guides."""
     width, height = sheet.size()
     image = QtGui.QImage(width, height, QtGui.QImage.Format_RGB32)
     image.fill(QtGui.QColor(255, 255, 255))
     painter = QtGui.QPainter(image)
     try:
+        drawn = [path for path in (guides or ()) if path is not None]
+        if drawn:
+            painter.save()  # (restored: the smoothing for the characters alone)
+            painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+            brush = QtGui.QBrush(QtGui.QColor(*GUIDE_INK_RGB))
+            for path in drawn:
+                painter.fillPath(path, brush)
+            painter.restore()
         guide = QtGui.QColor(*GUIDE_RGB)
         thin = QtGui.QPen(guide)
         thin.setWidthF(max(1.0, sheet.em / 400.0))
@@ -897,6 +1387,104 @@ def render_sheet(sheet, QtCore, QtGui):
     return image
 
 
+def write_tiff(image, path, QtGui):
+    """An image written as TIFF, LZW-compressed (lossless): QImage.save writes TIFF uncompressed (a sheet of
+    7,518 by 9,996 pixels took 220 MB, with LZW 1.6 MB, measured live in FontLab's Qt 5.14). The format is
+    named, as a staged file's name may end otherwise (staged_beside). True when written."""
+    # (str(): PythonQt takes the format as a QByteArray, which Python 2's unicode text does not match: live,
+    # 2026-11-24, "Could not find matching overload" for u"tiff" under this file's unicode_literals)
+    writer = QtGui.QImageWriter(path, str("tiff"))
+    writer.setCompression(1)  # (Qt's TIFF writer: 0 none, 1 LZW)
+    written = bool(writer.write(image))
+    del writer  # (its file closed now: Qt keeps it open while the writer lives, and Windows moves no open file)
+    return written
+
+
+def write_psd_image(image, path, sheet, progress=None):
+    """render_sheet's picture written to path as a PSD in layers (write_psd). Its pixels are read through
+    ctypes as gray_bytes reads an image's: a Format_RGB32 image keeps each pixel as the bytes B, G, R, 255, its
+    rows bytesPerLine apart; each row is read as it is encoded, so no copy of the whole is made."""
+    import ctypes
+    width, height = image.width(), image.height()
+    stride = image.bytesPerLine()
+    address = ctypes.addressof(ctypes.c_char.from_buffer(image.bits()))
+    spans = mark_spans(sheet)
+    unit = sheet.unit
+    with io.open(path, "wb") as handle:
+        write_psd(handle, width, height, lambda y: ctypes.string_at(address + y * stride, 4 * width),
+                  lambda y: spans.get(y // unit, ()), progress)
+
+
+class Guides(object):
+    """The guide characters of a template (Print each character faintly as a guide.): each cell's character
+    drawn by the first of FreeLang's families that has it (Font Check's order: FreeLang Essential, then the
+    optional files registered), its em the sheet's em, on the cell's baseline (FreeLang's own heights, not the
+    font's: placed by the baseline and the em, never stretched), across as guide_left places it, and cut to
+    its box where it rises or falls past it. Each family's font is read once (QRawFont, as Glyph Compose's
+    char_family reads it), so a character no installed file draws gets no guide, never a box. Qt shapes the
+    character alone: an Arabic letter's isolated form, a mark as FreeLang draws it alone."""
+
+    def __init__(self, families):
+        self.families = [family for family in families if family]
+        self.raws, self.fonts = {}, {}
+
+    def family_for(self, code):
+        """The first family whose own font has the character (QRawFont.supportsCharacter: QFontMetrics.inFontUcs4
+        answers for Windows' fallback fonts too), or None. Never raises."""
+        QtCore, QtGui = _qt()
+        for family in self.families:
+            raw = self.raws.get(family)
+            if raw is None:
+                raw = False
+                try:
+                    made = QtGui.QRawFont.fromFont(QtGui.QFont(family))
+                    raw = made if _value(made, "isValid") else False
+                except Exception:
+                    pass
+                self.raws[family] = raw
+            try:
+                if raw and raw.supportsCharacter(code):
+                    return family
+            except Exception:
+                continue
+        return None
+
+    def path(self, sheet, i):
+        """(cell i's guide as a QPainterPath in the template's pixels, whether it was cut to its box), or None: a
+        glyph with no character of its own, a character no family draws, one with no ink, or one wider than
+        its box."""
+        label = sheet.labels[i] if i < len(sheet.labels) else ""
+        code = guide_code(label)
+        family = self.family_for(code) if code is not None else None
+        if family is None:
+            return None
+        QtCore, QtGui = _qt()
+        font = self.fonts.get((family, sheet.em))
+        if font is None:
+            font = QtGui.QFont(family)
+            font.setPixelSize(int(sheet.em))  # (a font's pixel size is its em)
+            self.fonts[(family, sheet.em)] = font
+        path = QtGui.QPainterPath()
+        path.setFillRule(QtCore.Qt.WindingFill)  # (as text is filled: overlapping contours stay ink)
+        path.addText(QtCore.QPointF(0, 0), font, label)  # (y down, the baseline at 0)
+        if path.isEmpty():
+            return None
+        ink = path.boundingRect()
+        x = guide_left(sheet, i, ink.left(), ink.right())
+        if x is None:
+            return None
+        _, baseline = sheet.origin(i)
+        placed = QtGui.QTransform(1, 0, 0, 1, x, baseline).map(path)
+        left, top = sheet.cell(i)
+        bw, bh = sheet.box_size()
+        if ink.top() + baseline >= top and ink.bottom() + baseline <= top + bh:
+            return placed, False
+        box = QtGui.QPainterPath()
+        box.addRect(QtCore.QRectF(left, top, bw, bh))
+        placed = placed.intersected(box)  # (taller than its box, for this font's metrics: the part in it)
+        return (placed, True) if not placed.isEmpty() else None
+
+
 def gray_bytes(image, QtGui):
     """(bytes, width, height, stride) of an image in 8-bit gray."""
     import ctypes
@@ -908,6 +1496,41 @@ def gray_bytes(image, QtGui):
 
 NOT_AN_IMAGE = "not an image FontLab can read"
 SVG_NOT_DRAWN = "an SVG drawing FontLab's Qt cannot draw: save the sheet as PNG"
+# A PSD is read by its flattened picture (Qt's reader takes no layers), which Photoshop leaves out, blank, when
+# Maximize Compatibility is off
+PSD_NO_PICTURE = ("not read: a PSD without a flattened picture FontLab can read; save it in Photoshop with "
+                  "Maximize Compatibility, or as PNG")
+PSD_VERSION_INFO = 0x0421  # the image resource whose fifth byte says whether the flattened picture is real
+
+
+def psd_without_picture(path):
+    """Whether path is a PSD whose image resources say its flattened picture is not real (Photoshop's Version
+    Info, written with Maximize Compatibility off: hasRealMergedData 0). False for any other file, and where
+    it does not say. Reads the header and the image resources only; never raises."""
+    try:
+        with io.open(path, "rb") as handle:
+            head = handle.read(26)
+            if len(head) < 26 or head[:4] != b"8BPS":
+                return False
+            skip = struct.unpack(">I", handle.read(4))[0]  # (the color mode data)
+            handle.seek(skip, 1)
+            length = struct.unpack(">I", handle.read(4))[0]
+            resources = handle.read(length)
+    except (IOError, OSError, struct.error):
+        return False
+    at = 0
+    while at + 12 <= len(resources) and resources[at:at + 4] == b"8BIM":
+        key = struct.unpack(">H", resources[at + 4:at + 6])[0]
+        name = bytearray(resources[at + 6:at + 7])[0] if at + 7 <= len(resources) else 0
+        at += 6 + name + 1 + (name + 1) % 2  # (the Pascal name, padded to even)
+        if at + 4 > len(resources):
+            return False
+        size = struct.unpack(">I", resources[at:at + 4])[0]
+        data = resources[at + 4:at + 4 + size]
+        if key == PSD_VERSION_INFO:
+            return len(data) >= 5 and bytearray(data[4:5])[0] == 0
+        at += 4 + size + size % 2
+    return False
 
 
 def on_white(image, QtGui):
@@ -994,12 +1617,14 @@ def render_svg(path, QtCore, QtGui):
 
 def read_sheet_image(path, QtCore, QtGui):
     """(a sheet's image on white, None), or (None, why it cannot be read): an SVG drawing rendered (render_svg),
-    any other file read by Qt's image readers (PNG, JPEG, TIFF, BMP, WebP, PSD where FontLab has their plugins)."""
-    if os.path.splitext(path)[1].lower() == ".svg":
+    any other file read by Qt's image readers (PNG, JPEG, TIFF, BMP, WebP, PSD where FontLab has their plugins):
+    a PSD by its flattened picture, whatever its layers (PSD_NO_PICTURE where Qt reads none)."""
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".svg":
         return render_svg(path, QtCore, QtGui)
     image = QtGui.QImage(path)
     if image.isNull():
-        return None, NOT_AN_IMAGE
+        return None, PSD_NO_PICTURE if ext == ".psd" else NOT_AN_IMAGE
     return on_white(image, QtGui), None
 
 
@@ -1066,12 +1691,46 @@ def cell_image(found, i, gray, QtCore, QtGui, scale=1.0):
     return out
 
 
-def ink_image(cell, threshold, QtGui):
-    """A cell's drawing as black ink on a clear ground (ARGB): its gray read through alpha_table, so the
-    guides and the paper are clear and the ink keeps its soft edges."""
+PAPER_SAMPLES = 4096  # pixels of a box looked at for its paper's gray, about
+PAPER_SHARE = 0.9  # the paper's gray: the darkest of the brightest tenth of them
+
+
+def paper_level(data, width, height, stride, samples=PAPER_SAMPLES):
+    """The gray of a box's paper (0 to 255): where the brightest tenth of a grid of its pixels begins. A
+    template's box is mostly paper (its ink, and a guide character's, a third of it at the most), so this is
+    its paper as the image shows it: white for a sheet drawn on a screen, darker and uneven across a sheet
+    scanned or photographed."""
+    if width <= 0 or height <= 0:
+        return 255
+    step = max(1, int(math.sqrt(width * height / float(max(1, samples)))))
+    picked = bytearray()
+    for y in range(0, height, step):
+        picked += bytearray(data[y * stride:y * stride + width:step])
+    if not picked:
+        return 255
+    picked = sorted(picked)
+    return picked[min(len(picked) - 1, int(len(picked) * PAPER_SHARE))]
+
+
+def paper_table(paper, threshold):
+    """A table (256 bytes, for bytes.translate) that makes a box's paper white: each gray times 255 / paper, so
+    the template's printing reads as printed against white whatever the light or the scanner did to the
+    whole (a guide character, GUIDE_INK_GRAY of white, stays 50 grays above THRESHOLD_MAX; the guides' lines,
+    GUIDE_GRAY, 20). None where the paper reads white already (a sheet drawn on a screen: read as before) or
+    no lighter than the ink threshold (a box inked nearly all over, or an image too dark to tell: read as
+    before)."""
+    if paper >= 255 or paper <= threshold:
+        return None
+    return bytes(bytearray(min(255, int(round(v * 255.0 / paper))) for v in range(256)))
+
+
+def ink_image(cell, threshold, QtGui, paper=255):
+    """A cell's drawing as black ink on a clear ground (ARGB): its gray read through alpha_table (its paper
+    made white first: paper, as read), so the guides and the paper are clear and the ink keeps its soft
+    edges."""
     import ctypes
     data, width, height, stride, _ = gray_bytes(cell, QtGui)
-    table = bytes(bytearray(alpha_table(threshold)))
+    table = bytes(bytearray(alpha_table(threshold, paper)))
     image = QtGui.QImage(width, height, QtGui.QImage.Format_ARGB32)  # (bytes B, G, R, A: black, its alpha)
     out_stride = image.bytesPerLine()
     address = ctypes.addressof(ctypes.c_char.from_buffer(image.bits()))
@@ -1118,20 +1777,26 @@ Makes template sheets to draw a font's glyphs on, then builds the glyphs from th
 <b>Template</b>: pick the glyphs (a character set of Font Check's, the common ones first, which fills
 the box with its characters to edit; or characters typed or pasted), and with a font open, whether to
 leave out the glyphs it already has drawn; alternates add <i>name.alt1</i> and the like after each. Each
-sheet holds the glyphs a sheet you set (100 by default): one image, each glyph in a box with the font's
-metric lines (its baseline thicker) and an origin line, in a pale blue that the reading leaves out.
-<i>Save template</i> writes one SVG drawing a sheet (the template a locked group, to draw above), or
-one image a sheet (PNG or TIFF); the log's link then shows them in their folder. Open them in any app, or
-print them; draw each glyph in dark ink inside its box, on the sheet or on a layer above it, and save or
-export each sheet again (SVG, PNG, JPEG, TIFF, BMP, WebP, or PSD), or scan or photograph the paper.<br><br>
+sheet holds as many glyphs as you set (100 at first): one image, each glyph in a box with the font's
+metric lines (its baseline thicker) and an origin line, in a pale blue that the reading leaves out, and
+its character printed very faintly in FreeLang as a guide, which the reading leaves out too (unless
+<i>Print each character faintly as a guide</i> is unticked).
+<i>Save template</i> writes one file a sheet: an SVG drawing or a PSD image, the template on locked
+layers with an empty one above it to draw on, or a flat PNG or TIFF image; the log's link then shows them in
+their folder. Open them in any app, or print them; draw each glyph in dark ink inside its box, on the sheet
+or on a layer above it, and save or export each sheet again (SVG, PNG, JPEG, TIFF, BMP, WebP, or PSD), or
+scan or photograph the paper.<br><br>
 The corner squares and the two bands of squares tell the reading where the sheet is and what it holds,
 so a sheet can be read on another computer than the one that made it, turned, skewed, or photographed;
-keep them clean and wholly in the image.<br><br>
+keep them clean, visible, and wholly in the image. The boxes, lines, and guide characters may be hidden
+before a sheet is saved (in an SVG or a PSD, they are a layer of their own): the reading needs none of
+them.<br><br>
 <b>Build</b>: add the sheets drawn and click <i>Read sheets</i>: each drawn box is traced into outlines
 (or kept as an image, as drawn), and listed. Tick the glyphs to build and click <i>Build ticked
 glyphs</i> (one step of FontLab's History). With no font open, building makes a new font, which this
 window then works on: the units per em, metrics, and family name of the font that made the sheets.
-Then space the glyphs (<i>Auto Spacing</i>) and build the rest (<i>Glyph Compose</i>)."""
+Then space the glyphs (<i>Auto Spacing</i>) and build the rest (<i>Glyph Compose</i>).<br><br>
+Click this help's button, then anything in the window, for what it does (or right-click it: <i>What's This?</i>)."""
 
 # The top line while no font is open, on one line (ak.one_line: owner's images 274 and 280): the window
 # hooks to a font it builds too
@@ -1195,9 +1860,17 @@ def grouped(number):
 
 
 # The template's file types, the first the save dialog's own (owner's image 374: SVG, which every vector app and
-# most drawing apps open, and which Read sheets reads back)
-TEMPLATE_FORMATS = ((".svg", "SVG drawings, for vector apps (*.svg)"), (".png", "PNG images (*.png)"),
-                    (".tif", "TIFF images (*.tif *.tiff)"))
+# most drawing apps open, and which Read sheets reads back). Plural kinds of files, as Windows' own lists name
+# them; the owner's words of 2026-11-24 for SVG and PSD. A label holds two groups in parentheses: Qt takes the last
+# as the patterns (QPlatformFileDialogHelper's filterRegExp, greedy on the name; Windows' dialog helper, the last
+# "("), so "(vector)" and "(layered)" stay words of the name (filter_patterns, its test). Nothing is keyed on a
+# label: the extension of the name chosen decides the format (template_ext)
+TEMPLATE_FORMATS = ((".svg", "SVG drawings (vector) (*.svg)"), (".png", "PNG images (*.png)"),
+                    (".tif", "TIFF images (*.tif *.tiff)"), (".psd", "Photoshop documents (layered) (*.psd)"))
+FORMAT_NAMES = {".svg": "SVG", ".png": "PNG", ".tif": "TIFF", ".tiff": "TIFF", ".psd": "PSD"}
+# Qt's own reading of a name filter (QPlatformFileDialogHelper::filterRegExp, Qt 5.14), for the test that each
+# label still gives its patterns
+QT_FILTER = re.compile(r"^(.*)\(([a-zA-Z0-9_.,*? +;#\-\[\]@\{\}/!<>\$%&=^~:\|]*)\)$")
 
 
 def template_filter():
@@ -1205,11 +1878,18 @@ def template_filter():
     return ";;".join(label for _, label in TEMPLATE_FORMATS)
 
 
+def filter_patterns(label):
+    """The patterns Qt reads from a name filter ("*.tif *.tiff"), as its own regular expression reads them;
+    the label itself where it matches none (Qt then takes the whole as patterns)."""
+    match = QT_FILTER.match(label)
+    return match.group(2) if match else label
+
+
 def template_ext(path):
     """(the path without its extension, the extension the sheets are written with): the one typed where it is
     a template's (.tiff kept), else SVG's."""
     stem, ext = os.path.splitext(path)
-    if ext.lower() in (".svg", ".png", ".tif", ".tiff"):
+    if ext.lower() in (".svg", ".png", ".tif", ".tiff", ".psd"):
         return stem, ext.lower()
     return (stem if not ext else path), TEMPLATE_FORMATS[0][0]
 
@@ -1219,10 +1899,32 @@ def sheet_names(sheets, stem, ext):
     return [stem + ("-%d-of-%d" % (sheet.index + 1, sheet.count) if sheet.count > 1 else "") + ext for sheet in sheets]
 
 
+def files_named(names, most=FILES_NAMED):
+    """Files by name for a question or a log line: "A.tif", "A.tif and B.tif", "A.tif, B.tif, and C.tif" (the
+    serial comma); past most + 1, the first most named and the rest counted, as the logs shorten a long list
+    ("A.tif, B.tif, C.tif, D.tif, E.tif, and 126 more": a save of 131 sheets never lists 131 names)."""
+    shown = [os.path.basename(name) for name in names]
+    if len(shown) > most + 1:  # (never "and 1 more": that one is named)
+        shown = shown[:most] + ["%s more" % grouped(len(shown) - most)]
+    if len(shown) < 3:
+        return " and ".join(shown)
+    return "%s, and %s" % (", ".join(shown[:-1]), shown[-1])
+
+
+def replace_question(existing, what="sheet"):
+    """The question before a save replaces files there (the owner's words, 2026-11-24): "DotTest.tif already
+    exists. Replace it with a new sheet?", "A.tif, B.tif, and C.tif already exist. Replace them with new
+    sheets?"."""
+    if len(existing) == 1:
+        return "%s already exists. Replace it with a new %s?" % (files_named(existing), what)
+    return "%s already exist. Replace them with new %ss?" % (files_named(existing), what)
+
+
 def files_to_replace(names, confirmed=None):
     """The names given that are files already, but the one the save dialog asked about (confirmed): the dialog
     asks of the name typed, never of the numbered ones written instead (adversarial review 2: a sheet drawn in
-    place, Hand-2-of-2.svg, was replaced by an empty one without a word)."""
+    place, Hand-2-of-2.svg, was replaced by an empty one without a word). confirmed None: the dialog asked of
+    none (told not to, ak.save_file_name), so the name typed is asked of with the others."""
     def same(first, second):
         return os.path.normcase(os.path.abspath(first)) == os.path.normcase(os.path.abspath(second))
     return [name for name in names if os.path.exists(name) and not (confirmed and same(name, confirmed))]
@@ -1268,6 +1970,50 @@ def discard_staged(staged):
             os.remove(staged)
     except OSError:
         pass
+
+
+def staged_pattern(name):
+    """What staged_beside names a staged file of name: its stem, a dot, tempfile's random part (6 letters,
+    digits, or underscores in Python 2.7, 8 in Python 3), then .part and its extension. Never the .old file
+    put_in_place sets aside, which may be the only copy of a sheet drawn."""
+    stem, ext = os.path.splitext(os.path.basename(name))
+    return re.compile(r"^%s\.[a-z0-9_]{6,8}\.part%s$" % (re.escape(stem), re.escape(ext)), re.I)
+
+
+def clear_leftovers(names):
+    """The staged files an earlier save of these very files left behind (FontLab ended while it wrote them),
+    removed before this one writes: only names that match a sheet's own staged_pattern. Those removed. Never
+    raises."""
+    removed, listed = [], {}
+    for name in names:
+        folder = os.path.dirname(os.path.abspath(name))
+        try:
+            if folder not in listed:
+                listed[folder] = os.listdir(folder)
+        except OSError:
+            listed[folder] = []
+        pattern = staged_pattern(name)
+        for entry in listed[folder]:
+            path = os.path.join(folder, entry)
+            if pattern.match(entry) and path not in removed and os.path.isfile(path):
+                discard_staged(path)
+                if not os.path.exists(path):
+                    removed.append(path)
+    return removed
+
+
+def place_staged(staged):
+    """Every staged file moved to its place ([(the staged file, its file)], in order), once all are written:
+    (the files in place, the file that could not take its place or None, the reason). Stops at the first move
+    that fails (a file locked by another app), the staged files from it on left for the caller to remove."""
+    placed = []
+    for path, name in staged:
+        try:
+            put_in_place(path, name)
+        except (IOError, OSError) as exc:
+            return placed, name, "%s" % (getattr(exc, "strerror", None) or exc)
+        placed.append(name)
+    return placed, None, ""
 
 
 _TEXT_TYPES = (type(u""), type(b""))
@@ -1347,25 +2093,126 @@ def capped_size(width, height, most=SHEET_PIXELS_MAX):
     return max(1, int(round(width * scale))), max(1, int(round(height * scale)))
 
 
-def saved_line(ak, paths, one="sheet"):
-    """The log's line once files are saved: how many in bold, the folder they are in as a link that shows the
-    first selected in a new window of the system's file manager (ak.reveal_link: owner's image 375), then their
-    names."""
+def saved_line(ak, paths, one="sheet", size=None):
+    """The log's line once files are saved: how many in bold, their size together (size, in bytes, worded by
+    ak.file_size_text; None: not said), the folder they are in as a link that shows the first selected in a new
+    window of the system's file manager (ak.reveal_link: owner's image 375), then their names (files_named: a
+    long list shortened)."""
     folder = os.path.normpath(os.path.dirname(paths[0]))
     link = getattr(ak, "reveal_link", None)
     place = link(paths[0], folder) if link is not None else ak.html(folder)
-    return "Saved %s in %s: %s." % (ak.b(counted(len(paths), one)), place,
-                                    ak.html(", ".join(os.path.basename(p) for p in paths)))
+    words = getattr(ak, "file_size_text", None)
+    weight = " (%s)" % words(size) if size is not None and words is not None else ""
+    return "Saved %s%s in %s: %s." % (ak.b(counted(len(paths), one)), weight, place, ak.html(files_named(paths)))
+
+
+def files_size(paths):
+    """The files' sizes together, in bytes (a file gone counts 0)."""
+    total = 0
+    for path in paths:
+        try:
+            total += os.path.getsize(path)
+        except OSError:
+            pass
+    return total
+
+
+# ---------------------------------------------------------------------------
+# What a save will take on disk, said before it writes (the owner, 2026-11-24: "for PSD size risks, is it
+# doable to estimate required size before writing based on template settings?")
+# ---------------------------------------------------------------------------
+
+ESTIMATE_QUIET = 50 * 1024 * 1024  # a save estimated under this goes unsaid (the log stays quiet for ordinary saves)
+ESTIMATE_WARN = 1024 * 1024 * 1024  # past this, the line is a warning that names a lighter format
+# PSD (write_psd): 11 channels a row (3 flattened, 4 Template, 4 Marks), each row its 2 bytes of length and its
+# PackBits; a white row costs packbits(b"\xff" * width), worked out, and the marks' rows theirs (mark_spans: on
+# the flattened, Marks, and Template colors, whose clear pixels keep the picture's black).
+# Each box adds, on each of its rows (its height, its label's strip included), on the 7 channels that hold the
+# template (3 flattened, the Template's 3 and its alpha), PSD_BOX_ROW bytes for its lines and labels, and
+# PSD_GUIDE_ROW more for a guide character. Calibrated on the writer's own output for synthetic sheets of 4 to 12
+# boxes at ems of 60 to 200 pixels, with and without guides (FreeLang's "d": a bowl and a stem, smoothed), within
+# 30% (tests/font_builder_tests.py, EstimateTests); a guide of many strokes (a CJK character) costs more
+PSD_BOX_ROW = 9.5
+PSD_GUIDE_ROW = 6.0
+# PNG and TIFF (Qt's writers, not in Python here): rough, from live measures in FontLab's Qt 5.14 (a sheet of 100
+# Big Five boxes at an em of 500 pixels, 60.7 megapixels: PNG 0.2 MB without guides, 0.8 MB with; TIFF in LZW
+# about twice PNG): deflate's best of about 1,000 to 1 on a white sheet's 3 bytes a pixel, then each box
+PNG_PER_MEGAPIXEL = 2900
+PNG_BOX = 250  # bytes a box at an em of 500 pixels (more with the em: its lines are longer)
+PNG_GUIDE = 6000  # and for a guide character
+TIFF_TIMES_PNG = 2.0
+SVG_GUIDE = 1700  # bytes a guide character's outline takes in an SVG sheet (Big Five in FreeLang CJK, measured)
+# An SVG sheet without guides, fitted to sheet_svg's own text (4 to 400 boxes, ems of 60 to 500: within 20%), so
+# the estimate writes nothing out: its head, each mark's rectangle in the marks' path, and each box
+SVG_SHEET, SVG_MARK, SVG_BOX = 1200, 18.5, 600
+
+
+def guided_boxes(sheet):
+    """How many of a sheet's boxes get a guide character: those whose label is one character (guide_code)."""
+    return sum(1 for label in sheet.labels if guide_code(label) is not None)
+
+
+def estimated_size(sheets, ext, guides=False):
+    """The bytes a save of sheets as ext (".psd", ".png", ".tif", ".tiff", ".svg") will take, about: PSD by
+    PackBits' own costs (PSD_BOX_ROW), PNG and TIFF roughly (PNG_PER_MEGAPIXEL), SVG by its marks and boxes
+    (SVG_BOX) plus SVG_GUIDE a guide. Nothing is painted or written. guides: whether the sheets print their guide
+    characters."""
+    total = 0.0
+    for sheet in sheets:
+        width, height = sheet.size()
+        _, bh = sheet.box_size()
+        rows = bh + int(round(LABEL * sheet.em))
+        boxes = len(sheet.names)
+        guided = guided_boxes(sheet) if guides else 0
+        if ext == ".psd":
+            white = len(packbits(b"\xff" * width))
+            total += 11 * height * (2 + white)
+            for spans in mark_spans(sheet).values():  # (9 channels hold the marks' black: flattened, Template, Marks)
+                total += 9 * sheet.unit * (len(packbits(marks_plane(width, spans))) - white)
+            total += 7 * rows * (PSD_BOX_ROW * boxes + PSD_GUIDE_ROW * guided)
+        elif ext in (".png", ".tif", ".tiff"):
+            scale = sheet.em / float(EM_PIXELS)
+            png = PNG_PER_MEGAPIXEL * width * height / 1e6 + scale * (PNG_BOX * boxes + PNG_GUIDE * guided)
+            total += png * (TIFF_TIMES_PNG if ext != ".png" else 1.0)
+        else:
+            total += SVG_SHEET + SVG_MARK * len(marks(sheet)) + SVG_BOX * boxes + SVG_GUIDE * guided
+    return int(total)
+
+
+def estimate_line(ak, sheets, ext, guides=False):
+    """The log's line as a save starts, (the line, its level), or (None, None) under ESTIMATE_QUIET: "Writing 81
+    sheets as PSD: about 1.5 GB." (100 boxes a sheet at an em of 500 pixels, with guides). Past ESTIMATE_WARN, a
+    warning that names the lighter of PNG and TIFF (else SVG): "PNG and TIFF sheets of this template would take
+    about 61.9 MB and 123.9 MB." Never stops the save (save_template ignores an estimate that fails)."""
+    size = estimated_size(sheets, ext, guides)
+    if size < ESTIMATE_QUIET:
+        return None, None
+    words = ak.file_size_text
+    line = "Writing %s as %s: about %s." % (ak.b(counted(len(sheets), "sheet")), FORMAT_NAMES.get(ext, ext),
+                                            ak.b(words(size)))
+    if size < ESTIMATE_WARN:
+        return line, "info"
+    chosen = FORMAT_NAMES.get(ext)
+    lighter = [(FORMAT_NAMES[other], estimated_size(sheets, other, guides)) for other in (".png", ".tif")
+               if FORMAT_NAMES[other] != chosen]
+    lighter = [(name, other) for name, other in lighter if other < size / 2.0]
+    if not lighter and chosen != "SVG":
+        lighter = [(name, other) for name, other in [("SVG", estimated_size(sheets, ".svg", guides))] if other < size / 2.0]
+    if lighter:
+        line += " %s sheets of this template would take about %s." % (
+            " and ".join(name for name, _ in lighter), " and ".join(words(other) for _, other in lighter))
+    return line, "warning"
 
 
 class Drawn(object):
     """A glyph read from a sheet: its name, label, the file and sheet it came from, and its contours in
     font units (or its image, for images)."""
 
-    def __init__(self, name, label, source, contours=None, image=None, note="", upm=1000, code=None):
+    def __init__(self, name, label, source, contours=None, image=None, note="", upm=1000, code=None, paper=255):
         self.name, self.label, self.source = name, label, source
         self.contours = contours or []
         self.image = image  # (QImage, units a pixel, x0, y_top) for images
+        self.paper = paper  # (its box's paper as read, paper_level: its image's gray is made white from it)
         self.note = note
         self.upm = upm  # the units of the sheet it was drawn on (the font that made the template)
         # the code point its cell asked for (from its label when not given), or None
@@ -1500,6 +2347,59 @@ def even_height(bars):
     return tallest
 
 
+def separator_room(combo, ak, room=SEPARATOR_ROOM):
+    """A dropdown's separators given room pixels above and below their line in its open list. Qt sizes a
+    separator's row in the list's item delegate (its own QComboBoxDelegate, a row as tall as a frame's width),
+    which takes no stylesheet's height, and FreeLab puts no stylesheet on a list dark mode leaves alone
+    (ak.leave_popup_alone). So a delegate of FreeLab's stands in front of Qt's own: it asks Qt's for every
+    size and every painting, and makes a separator's row taller, its line drawn by Qt's in the middle (the
+    style's line, in either palette). Every other row is as Qt draws it. Put on the list (view.setItemDelegate)
+    rather than the box: QComboBox.setItemDelegate deletes the delegate it replaces. The box first gets
+    the sheet every FreeLab dropdown has (ak.long_choice), so that Qt's delegate is already the one for a
+    list, not a menu's: Qt replaces its own when the popup's kind changes, never a delegate of another
+    class. The delegate (its parent the list: Qt deletes it with it), or None where it could not be made.
+    Never raises."""
+    try:
+        QtCore, QtGui = _qt()
+        long_choice = getattr(ak, "long_choice", None)
+        if long_choice is not None:
+            long_choice(combo)
+        view = combo.view()
+        own = view.itemDelegate()
+    except Exception:
+        return None
+    if view is None or own is None:
+        return None
+    # (what it uses held here: a dropped module's globals turn None)
+    role, value_of, pad = QtCore.Qt.AccessibleDescriptionRole, _value, int(room)
+
+    class Room(QtGui.QStyledItemDelegate):
+        def sizeHint(self, option, index):
+            try:
+                hint = own.sizeHint(option, index)
+                if u"%s" % (index.data(role) or u"") == u"separator":  # (how QComboBox marks one)
+                    return QtCore.QSize(int(value_of(hint, "width")), int(value_of(hint, "height")) + 2 * pad)
+                return hint
+            except Exception:
+                return QtGui.QStyledItemDelegate.sizeHint(self, option, index)
+
+        def paint(self, painter, option, index):
+            try:
+                own.paint(painter, option, index)
+            except Exception:
+                try:
+                    QtGui.QStyledItemDelegate.paint(self, painter, option, index)
+                except Exception:
+                    pass  # a delegate's paint must never raise
+
+    try:
+        delegate = Room(view)
+        view.setItemDelegate(delegate)
+        return delegate
+    except Exception:
+        return None
+
+
 class FontBuilderDialog(object):
     def __init__(self):
         QtCore, QtGui = _qt()
@@ -1549,7 +2449,10 @@ class FontBuilderDialog(object):
         buttons.addStretch(1)
         buttons.addWidget(self.build_button)
         self.close_button = QtGui.QPushButton("Close")
+        self.close_button.setWhatsThis("Closes the window. Glyphs built stay in the font, and templates saved stay "
+                                       "where they were saved.")
         buttons.addWidget(self.close_button)
+        ak.cancel_button(self, buttons, self.close_button, CANCEL_NOTE)  # (right before Close: a save stopped at once)
         layout.addLayout(buttons)
         self.tabs.connect("currentChanged(int)", self.tab_changed)
         self.close_button.connect("clicked()", ak.close_slot(self))
@@ -1562,10 +2465,12 @@ class FontBuilderDialog(object):
         self.read_metrics, self.read_family = None, ""  # (the first sheet's: a new font takes them)
         self.filling = False
         self.sets = None  # Font Check's character sets, read when first listed
+        self.picked_set = None  # the set last picked (its number in self.sets), saved with the template
         ak.add_tools_button(dialog, "Font Builder", self.log)
         ak.plain_buttons(dialog)
         self.read_font()
         self.fill_sets()
+        self.restore_set()
         self.update_summary()
         self.tab_changed(0)
 
@@ -1598,7 +2503,7 @@ class FontBuilderDialog(object):
         self.even_rows()
 
     def even_rows(self):
-        """The rows above the two tabs' frames (the Template tab's Glyphs dropdown, the Build tab's Add
+        """The rows above the two tabs' frames (the Template tab's Character set dropdown, the Build tab's Add
         sheets... and Clear) made as tall as the taller (even_height): a row of buttons was lower than one
         with a dropdown, so the frame under it moved as the tabs switched (owner's images 285 and 286). At
         each switch, as the window's style may have changed their sizes since. Never raises."""
@@ -1615,7 +2520,18 @@ class FontBuilderDialog(object):
         bar = self.template_bar = QtGui.QWidget()
         row = QtGui.QHBoxLayout(bar)
         row.setContentsMargins(0, 0, 0, 0)
-        row.addWidget(QtGui.QLabel("Glyphs:"))
+        # The box's text size (owner's review: "one extra option ... to change font size up or down"): what the
+        # box shows, never the sheets. It stands right of the sets' dropdown (the owner, 2026-11-24: "Character
+        # set: [dropdown]   Text size: [14 pt]"), first left of it
+        self.preview_size = QtGui.QSpinBox()
+        self.preview_size.setRange(PREVIEW_POINTS_RANGE[0], PREVIEW_POINTS_RANGE[1])
+        self.preview_size.setSuffix(" pt")  # (an abbreviation: the same at 1 point and at 2, as the em's px)
+        self.preview_size.setValue(saved_points(self.settings))
+        self.preview_size.setToolTip("The size of the characters in the box below.")
+        self.preview_size.setWhatsThis("The size the box below shows its characters at, kept for the next time. It "
+                                       "changes only what the box shows: the sheets keep their <i>Em size</i>.")
+        # (captioned as Glyph Compose's dropdown of the same sets is: owner's review, 2026-11-24)
+        row.addWidget(QtGui.QLabel("Character set:"))
         self.source = QtGui.QComboBox()
         self.source.setSizeAdjustPolicy(QtGui.QComboBox.AdjustToContents)  # (as wide as its widest item: image 239)
         self.source.setWhatsThis("Where the glyphs come from: the characters typed below, or one of Font Check's "
@@ -1623,17 +2539,34 @@ class FontBuilderDialog(object):
                                  "first, then every set). A set picked fills the box below with its characters; "
                                  "edit them there, and the choice becomes the characters typed.")
         row.addWidget(self.source)
+        row.addSpacing(FLOW_SPACING)
+        row.addWidget(QtGui.QLabel("Text size:"))
+        row.addWidget(self.preview_size)
         row.addStretch(1)
         box.addWidget(bar)
+        self.separator_delegate = separator_room(self.source, self.ak)  # (kept: its line set apart from the rows)
         self.typed = QtGui.QPlainTextEdit()
         self.typed.setPlaceholderText(u"Type or paste the characters to draw (each once; spaces do not count)…")
         self.typed.setPlainText(self.settings.get("typed") or "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
-        self.typed.setWhatsThis("The characters to draw, when the glyphs come from them.")
+        self.typed.setWhatsThis("The characters to draw, when the glyphs come from them. The box shows them in "
+                                "FreeLab's own font, FreeLang, at the <i>Text size</i> above.")
         box.addWidget(self.typed, 1)
+        # One line under the box when a set picked needs FreeLang's optional fonts and they are not installed
+        # (missing_fonts_line): without it, their characters showed as boxes and nothing said why
+        self.preview_note = self.ak.status_label()
+        box.addWidget(self.preview_note)
+        self.preview_family = None  # FreeLang's family once registered (preview_font), False where it could not be
+        self.preview_font("%s" % self.typed.toPlainText())
         self.lacking = QtGui.QCheckBox("Leave out the glyphs the font has drawn.")
         self.lacking.setChecked(True)
         self.lacking.setWhatsThis("With a font open: no box for a glyph that has outlines, components, or an image in "
                                   "its current master.")
+        # Each box's character printed faintly in FreeLang (Guides), to show what to draw (the owner, 2026-11-24:
+        # users "may not know what each glyph looks like"); kept with the template's other settings
+        self.guide_box = QtGui.QCheckBox(GUIDE_CAPTION)
+        self.guide_box.setChecked(bool(self.settings.get("guides", True)))
+        self.guide_box.setToolTip(GUIDE_TIP)
+        self.guide_box.setWhatsThis(GUIDE_HELP)
         self.alternates = QtGui.QSpinBox()
         self.alternates.setRange(0, 9)
         self.alternates.setValue(int(self.settings.get("alternates", 0)))
@@ -1648,18 +2581,15 @@ class FontBuilderDialog(object):
         self.em.setRange(EM_PIXELS_RANGE[0], EM_PIXELS_RANGE[1])
         self.em.setSuffix(" px")
         self.em.setValue(int(self.settings.get("em", EM_PIXELS)))
-        self.em.setWhatsThis("The em's size on the sheet, in pixels: 500 draws well on a screen; for print, 300 "
-                             "pixels a centimeter of em at 300 dpi is about 118, so raise it for small paper sizes.")
-        self.save_button = QtGui.QPushButton("Save template...")
+        self.em.setWhatsThis(EM_HELP)
+        self.save_button = QtGui.QPushButton(SAVE_TEMPLATE)
         self.ak.mark_risky(self.save_button)  # (writes files: FreeLab MCP clicks it only in risky mode)
-        self.save_button.setWhatsThis("Writes the sheets as SVG drawings (the template a locked group, to draw above, "
-                                      "in a vector app or any app that opens SVG), or as images (PNG or TIFF), one a "
-                                      "sheet, numbered. The log then links to the folder.")
+        self.save_button.setWhatsThis(SAVE_HELP)
         # The options on one line with the run button at their end (owner's images 241 and 266), wrapping
         # onto the next line where the window is too narrow (FlowRow); the template's status is in the header
         self.template_options = FlowRow([
-            [self.lacking], [QtGui.QLabel("Alternates of each:"), self.alternates],
-            [QtGui.QLabel("Glyphs a sheet:"), self.per_sheet], [QtGui.QLabel("Em size:"), self.em],
+            [self.lacking], [self.guide_box], [QtGui.QLabel("Alternates of each:"), self.alternates],
+            [QtGui.QLabel("Glyphs per sheet:"), self.per_sheet], [QtGui.QLabel("Em size:"), self.em],
             [self.save_button]])
         box.addWidget(self.template_options.widget)
         self.summary_timer = QtCore.QTimer(page)  # (its parent the page: Qt deletes it with the window)
@@ -1671,8 +2601,51 @@ class FontBuilderDialog(object):
         self.lacking.connect("toggled(bool)", lambda on: self.update_summary())
         for spin in (self.alternates, self.per_sheet, self.em):
             spin.connect("valueChanged(int)", lambda v: self.update_summary())
+        self.preview_size.connect("valueChanged(int)", self.preview_size_changed)
         self.save_button.connect("clicked()", self.save_template)
         return page
+
+    def preview_font(self, text=None):
+        """The box's font: FreeLang, registered (Font Check's register_list_font, once a session) the first
+        time text holds a character past ASCII, and the Text size picked. Without FreeLang, the window's
+        font at that size. Never raises."""
+        try:
+            QtCore, QtGui = _qt()
+            if self.preview_family is None and text is not None and past_ascii(text):
+                self.preview_family = False  # (tried once a window, whatever comes of it)
+                fc = self.ak.load_sibling(FONT_CHECK_FILE, FONT_CHECK_MODULE)
+                self.preview_family = fc.register_list_font(QtCore, QtGui) or False
+            font = QtGui.QFont(_value(self.typed, "font"))
+            if self.preview_family:
+                font.setFamily(self.preview_family)
+            font.setPointSizeF(float(_value(self.preview_size, "value")))
+            self.typed.setFont(font)
+        except Exception:
+            pass
+
+    def preview_size_changed(self, value):
+        """A Text size picked: the box's text at it, and kept for the next session (font_builder.json)."""
+        try:
+            self.preview_font()
+            self.settings["preview_points"] = int(value)
+            write_settings(self.ak, self.settings)
+        except Exception:
+            pass  # a signal's handler must not raise
+
+    def show_missing_fonts(self, number, chars=()):
+        """The line under the box for the set picked (number in self.sets; None: the characters typed) and
+        its characters: which of FreeLang's optional fonts they need and are not installed, or nothing."""
+        line = ""
+        try:
+            if number is not None and self.preview_family is not False:
+                fc = self.ak.load_sibling(FONT_CHECK_FILE, FONT_CHECK_MODULE)
+                line = missing_fonts_line(self.ak, missing_fonts(fc, self.sets[number], chars))
+        except Exception:
+            line = ""
+        try:
+            self.preview_note.setText(line)
+        except Exception:
+            pass
 
     def fill_sets(self):
         """The dropdown: the characters typed, the common sets (COMMON_SETS, a quick way to them), a
@@ -1711,29 +2684,110 @@ class FontBuilderDialog(object):
         except (TypeError, ValueError):
             return None
 
+    def set_row(self, number):
+        """The dropdown's first row for a set (its number in self.sets: a common set's row among the common
+        ones), or None."""
+        try:
+            for row in range(1, int(self.source.count)):
+                if self.set_number(row) == number:
+                    return row
+        except Exception:
+            pass
+        return None
+
+    def restore_set(self):
+        """The set saved with the template (set_key) chosen again as the window opens, its characters in the
+        box, unless the characters saved were typed or edited by hand (restored_choice): they stay as
+        Characters typed below, as they do when the set is no longer there. Never raises."""
+        try:
+            number = restored_choice(self.sets or [], self.settings.get("set"), self.settings.get("typed"))
+            row = self.set_row(number) if number is not None else None
+            if row is None:
+                return
+            self.source.blockSignals(True)
+            try:
+                self.source.setCurrentIndex(row)
+            finally:
+                self.source.blockSignals(False)
+            self.set_chosen(row)
+        except Exception:
+            pass
+
+    def keep_set(self):
+        """The settings (saved with the template, beside its characters) told the set last picked, by its key,
+        or that none was: the window reopens on it (restore_set). Before this, only the characters were kept,
+        and a set's came back as Characters typed below (owner's review, 2026-11-24)."""
+        number = getattr(self, "picked_set", None)
+        try:
+            key = set_key(self.sets[number]) if number is not None else None
+        except Exception:
+            key = None
+        if key:
+            self.settings["set"] = key
+        else:
+            self.settings.pop("set", None)
+
     def set_chosen(self, index):
         """A set picked: its characters fill the box below (each once), where they can be edited; typing
-        there makes the choice the characters typed again."""
+        there makes the choice the characters typed again. The set is noted (picked_set), saved with the
+        template; Characters typed below picked notes none."""
         number = self.set_number(index)
+        self.picked_set = number
         if number is None or not self.sets:
+            self.remember_choice()
             self.summary_soon()
             return
-        # (single characters: a letter with marks that has no character of its own is left to Glyph Compose)
-        chars = [item for item in self.sets[number].base if len(item) == 1 or
-                 (len(item) == 2 and 0xD800 <= ord(item[0]) < 0xDC00)]
+        chars = set_characters(self.sets[number])
+        text = "".join(chars)
+        self.preview_font(text)  # (FreeLang in place before the box lays out a large set)
         self.filling = True
         try:
-            self.typed.setPlainText("".join(chars))
+            self.typed.setPlainText(text)
         finally:
             self.filling = False
+        self.show_missing_fonts(number, chars)
+        self.remember_choice(text)
         self.summary_soon()
 
+    def remember_choice(self, text=None):
+        """The set just picked kept for the next session at once (font_builder.json), with its characters
+        (text), by which restore_set knows the set's own from ones typed since; Characters typed below
+        picked: no set kept. Before this the choice was kept only when a template was saved, so a set
+        picked and used without saving came back as Characters typed below. Never raises (a signal's
+        handler)."""
+        try:
+            self.keep_set()
+            if text is not None:
+                self.settings["typed"] = text
+            write_settings(self.ak, self.settings)
+        except Exception:
+            pass
+
     def typed_changed(self):
-        if not getattr(self, "filling", False) and self.source.currentIndex != 0:
-            self.source.blockSignals(True)
-            self.source.setCurrentIndex(0)  # (the set edited: the characters typed now)
-            self.source.blockSignals(False)
+        if not getattr(self, "filling", False):
+            if self.source.currentIndex != 0:
+                self.source.blockSignals(True)
+                self.source.setCurrentIndex(0)  # (the set edited: the characters typed now)
+                self.source.blockSignals(False)
+            self.preview_typed()
         self.summary_soon()
+
+    def preview_typed(self):
+        """Typing or pasting: FreeLang registered once the box holds a character past ASCII, and the line
+        about missing fonts taken away with the last such character. Reads the box only while either can
+        happen. Never raises."""
+        try:
+            noted = (u"%s" % (_value(self.preview_note, "text") or u"")).strip()
+            if self.preview_family is not None and not noted:
+                return
+            text = u"%s" % self.typed.toPlainText()
+            if past_ascii(text):
+                if self.preview_family is None:
+                    self.preview_font(text)
+            elif noted:
+                self.preview_note.setText("")
+        except Exception:
+            pass
 
     def summary_soon(self):
         """update_summary once typing pauses (a set of 20,000 characters is not counted at each key)."""
@@ -1810,37 +2864,78 @@ class FontBuilderDialog(object):
         sheets = self.sheets()
         folder = self.settings.get("folder") or os.path.expanduser("~")
         base = (sheets[0].family or "template").replace(" ", "-")
-        # (SVG first, the name ending in it: the dialog's type is SVG unless another is picked, owner's image 374)
-        chosen = QtGui.QFileDialog.getSaveFileName(self.dialog, "Save the template",
-                                                   os.path.join(folder, base + TEMPLATE_FORMATS[0][0]), template_filter())
+        # (SVG first, the name ending in it: the dialog's type is SVG unless another is picked, owner's image 374;
+        # the dialog asked not to confirm replacing a file, which ask_replace asks in a box that follows dark mode)
+        chosen, windows_asked = self.ak.save_file_name(QtGui, self.dialog, "Save the template",
+                                                       os.path.join(folder, base + TEMPLATE_FORMATS[0][0]),
+                                                       template_filter())
         path = picked_path(chosen)
         if not path:
             return
         stem, ext = template_ext(path)
+        with_guides = bool(self.guide_box.checked)
         self.settings.update({"folder": os.path.dirname(path), "typed": "%s" % self.typed.toPlainText(),
-                              "alternates": self.alternates.value, "per_sheet": self.per_sheet.value, "em": self.em.value})
+                              "alternates": self.alternates.value, "per_sheet": self.per_sheet.value, "em": self.em.value,
+                              "guides": with_guides})
+        self.keep_set()
         write_settings(self.ak, self.settings)
         names = sheet_names(sheets, stem, ext)
-        # (every file the save replaces, asked of once: the dialog asked of the name typed only)
-        existing = files_to_replace(names, path)
+        # (every file the save replaces, asked of once: the name typed too, unless Windows' own box asked of it,
+        # where this PythonQt could not ask the dialog not to: ak.save_file_name)
+        existing = files_to_replace(names, path if windows_asked else None)
         if existing and not self.ask_replace(existing):
-            self.log.add("Nothing was saved: %s left as %s." % (
-                "the file there already" if len(existing) == 1 else "the files there already",
-                "it was" if len(existing) == 1 else "they were"), "warning")
+            self.log.add(STOPPED_LINE, "warning")
             return
-        written = []
+        clear_leftovers(names)  # (staged files of these very sheets, left by a save FontLab never finished)
+        guides = None
+        if with_guides:
+            families = self.guide_families()
+            guides = Guides(families) if families else None
+        try:
+            line, level = estimate_line(self.ak, sheets, ext, guides is not None)
+        except Exception:
+            line, level = None, None  # (an estimate never stops a save)
+        if line:
+            self.log.add(line, level)
+        # All or nothing (the owner, 2026-11-24: a save stopped by Close left the sheets written so far): every
+        # sheet is written to a staged file beside its own, and they take their places only once all are
+        # written; a stop or a failure removes every staged file, and no file there is touched
+        staged, placed, failed, why = [], [], None, ""
         self.busy = True
         self.ak.busy_start(self, "Saving the template")
         try:
-            self.write_sheets(sheets, stem, ext, written, names)
-        except self.ak.Stopped:
-            self.log.add("Saving was stopped after %s." % self.ak.b(counted(len(written), "sheet")), "warning")
-            return
+            try:
+                failed = self.write_sheets(sheets, stem, ext, staged, names, guides)
+            except self.ak.Stopped:
+                self.log.add(STOPPED_LINE, "warning")
+                return
+            if failed is not None:
+                self.log.add("%s could not be written. Nothing was saved or overwritten." % self.ak.html(failed),
+                             "error")
+                return
+            placed, failed, why = place_staged(staged)  # (quick, never stopped halfway: no step of the bar between)
         finally:
+            for staged_path, _name in staged:
+                discard_staged(staged_path)  # (those moved are gone already)
             self.busy = False
             self.ak.busy_end(self)
-        if written:
-            self.log.add(saved_line(self.ak, written), "done")
+        if failed is not None:
+            self.log.add(self.placing_failed(names, placed, failed, why), "error")
+            return
+        self.log.add(saved_line(self.ak, placed, size=files_size(placed)), "done")
+        if with_guides and guides is None:  # (the sheets hold no guide: said, not left to be found)
+            self.log.add(NO_GUIDES_LINE, "warning")
+
+    def placing_failed(self, names, placed, failed, why):
+        """The log's line when a staged sheet could not take its file's place (a file locked by another app):
+        which sheets are saved and which are not. Nothing placed: nothing was saved or overwritten."""
+        html = self.ak.html
+        rest = names[names.index(failed):] if failed in names else [failed]
+        start = "%s could not take its place (%s)." % (html(os.path.basename(failed)), html(why))
+        if not placed:
+            return "%s Nothing was saved or overwritten." % start
+        return "%s Saved: %s. Not saved, any file there left as it was: %s." % (
+            start, html(files_named(placed)), html(files_named(rest)))
 
     def log_link(self, target):
         """A link of the log clicked: a file saved (ak.reveal_link) shown selected in its folder; any other
@@ -1852,10 +2947,7 @@ class FontBuilderDialog(object):
         """One question for every sheet's file the save would replace: True to replace them all, False (Cancel,
         Esc, or a question that could not be shown) to save nothing."""
         QtCore, QtGui = _qt()
-        one = len(existing) == 1
-        text = "%s there already: %s. Replace %s with the template's empty %s?" % (
-            "This sheet's file is" if one else "These sheets' files are",
-            ", ".join(os.path.basename(name) for name in existing), "it" if one else "them", "sheet" if one else "sheets")
+        text = replace_question(existing)
         try:
             box = self.ak.mcp_script_window(QtGui.QMessageBox(self.dialog))  # (FreeLab's question, not FontLab's)
             box.setWindowTitle("Save the template")
@@ -1871,30 +2963,76 @@ class FontBuilderDialog(object):
         except Exception:
             return False
 
-    def write_sheets(self, sheets, stem, ext, written, names=None):
-        """Each sheet written (its path added to written); stops at the first that cannot be. A sheet is written
-        whole beside its file first, and takes its place only then: a write that fails leaves the file as it was."""
+    def guide_families(self):
+        """FreeLang's families that draw the guide characters, in Font Check's order (FreeLang Essential, then the
+        optional files registered), FreeLang registered now where the box has not registered it yet (Font
+        Check's register_list_font, itself once a session; the box keeps its font until it holds a character
+        past ASCII). [] without FreeLang. Never raises."""
+        try:
+            QtCore, QtGui = _qt()
+            fc = self.ak.load_sibling(FONT_CHECK_FILE, FONT_CHECK_MODULE)
+            family = getattr(self, "preview_family", None)
+            if family is None:
+                family = getattr(self, "guide_family", None)
+                if family is None:
+                    family = self.guide_family = fc.register_list_font(QtCore, QtGui) or False
+            if not family:
+                return []
+            drawn = getattr(fc, "LIST_FALLBACKS_DRAWN", None) or ()
+            return [family] + [fallback for _, fallback in fc.LIST_FONT_FALLBACKS if fallback in drawn]
+        except Exception:
+            return []
+
+    def write_sheets(self, sheets, stem, ext, staged, names=None, guides=None):
+        """Each sheet written whole to a staged file beside its own (staged_beside), (the staged file, its file)
+        added to staged as the staged file is made; none takes its file's place here: save_template moves them
+        all once every one is written (place_staged), and removes them all when the save stops or fails. The
+        file of the first sheet that could not be written, or None; Stopped passes through. guides (Guides, or
+        None for none): each box's character printed faintly, made box by box with the bar's progress (13,064
+        boxes for Big Five), so Cancel and Esc stop between two boxes."""
         QtCore, QtGui = _qt()
         names = names or sheet_names(sheets, stem, ext)
+        # (a PSD's encoding takes the second half of each sheet's share of the bar, its guides the first)
+        share = 0.5 if ext == ".psd" else 1.0
         for sheet, name in zip(sheets, names):
             self.ak.busy_progress(self, "Saving sheet %d of %d" % (sheet.index + 1, len(sheets)),
                                   sheet.index / float(len(sheets)))
-            staged = None
+            paths = None
+            if guides is not None:
+                paths = []
+                for i in range(len(sheet.names)):
+                    if i % 8 == 0:
+                        self.ak.busy_progress(self, None, (sheet.index + share * i / float(len(sheet.names))) / len(sheets))
+                    try:
+                        paths.append(guides.path(sheet, i))
+                    except Exception:
+                        paths.append(None)  # (a character Qt could not draw: no guide, the sheet still written)
             try:
-                staged = staged_beside(name)
+                staged_path = staged_beside(name)
+                staged.append((staged_path, name))  # (known at once: removed whatever stops the save)
                 if ext == ".svg":
-                    with io.open(staged, "w", encoding="utf-8", newline="\n") as handle:
-                        handle.write(sheet_svg(sheet, GUIDE_RGB))
-                elif not render_sheet(sheet, QtCore, QtGui).save(staged):
-                    raise IOError("not saved")
-                put_in_place(staged, name)
-                staged = None
+                    elements = None
+                    if paths is not None:
+                        elements = [guide_svg(made[0], made[1]) if made is not None else None for made in paths]
+                    with io.open(staged_path, "w", encoding="utf-8", newline="\n") as handle:
+                        handle.write(sheet_svg(sheet, GUIDE_RGB, elements))
+                else:
+                    image = render_sheet(sheet, QtCore, QtGui, [made[0] if made is not None else None for made in paths]
+                                         if paths is not None else None)
+                    if ext == ".psd":
+                        try:
+                            write_psd_image(image, staged_path, sheet, lambda part, at=sheet.index: self.ak.busy_progress(
+                                self, None, (at + share + (1 - share) * part) / float(len(sheets))))
+                        except self.ak.Stopped:
+                            raise
+                        except Exception as exc:  # (a sheet not written is said in the log, as a file that fails)
+                            raise IOError("%s" % exc)
+                    elif not (write_tiff(image, staged_path, QtGui) if ext in (".tif", ".tiff") else image.save(staged_path)):
+                        raise IOError("not saved")
+                    image = None  # (its pixels freed before the next sheet's are painted)
             except (IOError, OSError):
-                self.log.add("%s could not be written." % self.ak.html(name), "error")
-                return
-            finally:
-                discard_staged(staged)
-            written.append(name)
+                return name
+        return None
 
     # -- building ------------------------------------------------------------------
 
@@ -1905,7 +3043,7 @@ class FontBuilderDialog(object):
         bar = self.build_bar = QtGui.QWidget()  # (as tall as the Template tab's row: even_rows)
         row = QtGui.QHBoxLayout(bar)
         row.setContentsMargins(0, 0, 0, 0)
-        self.add_button = QtGui.QPushButton("Add sheets...")
+        self.add_button = QtGui.QPushButton(ADD_SHEETS)
         self.add_button.setWhatsThis("Adds sheets drawn to read: images (PNG, JPEG, TIFF, BMP, WebP, PSD) or SVG "
                                      "drawings.")
         self.clear_button = QtGui.QPushButton("Clear")
@@ -1930,9 +3068,8 @@ class FontBuilderDialog(object):
         self.threshold = QtGui.QSpinBox()
         self.threshold.setRange(1, THRESHOLD_MAX)  # (higher, the guides would count as ink)
         self.threshold.setValue(min(THRESHOLD_MAX, int(self.settings.get("threshold", INK_THRESHOLD))))
-        self.threshold.setWhatsThis("What counts as ink: pixels darker than this gray (0 black, 255 white). Raise it for "
-                                    "pencil or light ink, lower it for a gray paper; up to %d, so the guides (gray "
-                                    "%d) always stay out." % (THRESHOLD_MAX, GUIDE_GRAY))
+        self.threshold.setToolTip(THRESHOLD_TIP)  # (where the risk begins, the grays' own numbers: THRESHOLD_HELP)
+        self.threshold.setWhatsThis(THRESHOLD_HELP)
         self.placement = QtGui.QComboBox()
         self.placement.setSizeAdjustPolicy(QtGui.QComboBox.AdjustToContents)
         self.placement.addItem("Where drawn")
@@ -1942,8 +3079,7 @@ class FontBuilderDialog(object):
                                     "right side given the left side's room. Even: both sides %d%% of the em. Either "
                                     "way, <i>Auto Spacing</i> spaces them better after." % int(round(EVEN_SIDE * 100)))
         self.replace = QtGui.QCheckBox("Replace glyphs the font has drawn.")
-        self.replace.setWhatsThis("Off: a glyph that has outlines, components, or an image in the current master is "
-                                  "listed unticked and left as it is unless you tick it.")
+        self.replace.setWhatsThis(REPLACE_HELP)
         self.read_button = QtGui.QPushButton("Read sheets")
         self.read_button.setWhatsThis("Reads every sheet added: finds it in its image, and traces each drawn box.")
         # The options on one line with Read sheets at their end (owner's image 267), wrapping where the window
@@ -2037,8 +3173,8 @@ class FontBuilderDialog(object):
                     item.setText(3, why)
                     continue
                 found, gray = find_sheet(image, QtCore, QtGui)
-                if found is None:
-                    item.setText(3, "not read: %s" % gray)
+                if found is None:  # (a PSD's blank stand-in for its picture said as such, not as a sheet unfound)
+                    item.setText(3, PSD_NO_PICTURE if psd_without_picture(path) else "not read: %s" % gray)
                     continue
                 sheet = found.sheet
                 if self.read_metrics is None:  # (a new font, built with no font open, takes the first sheet's)
@@ -2058,6 +3194,12 @@ class FontBuilderDialog(object):
                     if cell is None:
                         continue
                     data, w, h, stride, cell = gray_bytes(cell, QtGui)
+                    # (its paper made white: the guide characters and lines then read as printed, above the
+                    # threshold, in a dim scan or photograph as on a screen)
+                    paper = paper_level(data, w, h, stride)
+                    whiter = paper_table(paper, threshold)
+                    if whiter is not None:
+                        data = data.translate(whiter)
                     if not has_ink(data, w, h, stride, threshold, max(20, int(w * h * 0.0005))):
                         continue
                     units, x0, y_top = cell_mapping(sheet, i, scale)
@@ -2070,7 +3212,8 @@ class FontBuilderDialog(object):
                         cropped = cell.copy(QtCore.QRect(left, top, right - left, bottom - top))
                         self.drawn.append(Drawn(name, label, source,
                                                 image=(cropped, units, x0 + left * units, y_top - top * units),
-                                                upm=sheet.metrics.upm, code=cell_code(name, label, nice)))
+                                                upm=sheet.metrics.upm, code=cell_code(name, label, nice),
+                                                paper=paper))
                     else:
                         contours = trace_cell(tracer, data, w, h, stride, threshold, units, x0, y_top, sheet.em * scale)
                         self.drawn.append(Drawn(name, label, source, contours=contours,
@@ -2142,8 +3285,8 @@ class FontBuilderDialog(object):
             painter.setRenderHint(QtGui.QPainter.SmoothPixmapTransform, True)
             if d.image is not None:
                 cell, units, x0, y_top = d.image
-                ink = ink_image(cell, self.threshold.value, QtGui)
-                tinted = QtGui.QImage(ink.size(), QtGui.QImage.Format_ARGB32_Premultiplied)
+                ink = ink_image(cell, self.threshold.value, QtGui, getattr(d, "paper", 255))
+                tinted =QtGui.QImage(ink.size(), QtGui.QImage.Format_ARGB32_Premultiplied)
                 tinted.fill(QtGui.QColor(0, 0, 0, 0))
                 inner = QtGui.QPainter(tinted)
                 try:
@@ -2283,20 +3426,23 @@ class FontBuilderDialog(object):
             self.log.add("%s%s.%s" % (done[0].upper(), done[1:], status.undo(" <i>Edit &gt; Undo</i> takes it back.")),
                          "done")
         status.report(self.log)
+        # Each glyph's name in italics, a link that opens it; a sheet of hundreds once named them all: the first
+        # ak.LOG_NAMES_LINKED, the rest counted
+        named = lambda names: self.ak.glyph_names_linked(names, self.ak.LOG_NAMES_LINKED, word=None)
         if kept:
-            self.log.add("Left as drawn in the font (turn on <i>Replace glyphs the font has drawn</i> to redraw them): "
-                         "%s." % self.ak.html(", ".join(kept)), "warning")
+            self.log.add("Left as drawn in the font (tick <i>Replace glyphs the font has drawn</i> to redraw them): "
+                         "%s." % named(kept), "warning")
         if unencoded:
             self.log.add("Left without a code point, since another glyph of the font has it: %s." %
-                         self.ak.html(", ".join(unencoded)), "warning")
+                         named(unencoded), "warning")
         if twice:
             self.log.add("Drawn more than once among the ticked: built from the first, the others left out: %s." %
-                         self.ak.html(", ".join(sorted(set(twice)))), "warning")
+                         named(sorted(set(twice))), "warning")
         if nowhere:
             self.log.add("Not built, since the font's glyphs of these names are other characters' (and so are their "
-                         "uniXXXX names): %s." % self.ak.html(", ".join(nowhere)), "warning")
+                         "uniXXXX names): %s." % named(nowhere), "warning")
         if error is not None:
-            self.log.add("Stopped by an error: %s" % self.ak.html("%s" % error), "error")
+            self.log.add(self.ak.error_sentence(u"Stopped by an error", error), "error")
         self.show_drawn()
 
     def new_font(self):
@@ -2327,6 +3473,14 @@ class FontBuilderDialog(object):
                 package.info.familyName = family
             except Exception:
                 pass
+            # (live, 2026-11-24: a new font's own names stay "Unnamed" whatever its font info says, and its
+            # window's tab is titled by them; set before the window opens, a tab open already keeping its title)
+            for attr, value in (("tfn", family), ("tsn", "Regular"), ("ffn", "%s Regular" % family),
+                                ("psn", "%s-Regular" % family.replace(" ", ""))):
+                try:
+                    setattr(package, attr, value)
+                except Exception:
+                    pass
             try:
                 package.updateFontMetrics()
             except Exception:
@@ -2378,7 +3532,8 @@ class FontBuilderDialog(object):
         QtCore, QtGui = _qt()
         cell, units, x0, y_top = d.image
         units, x0, y_top = units * factor, x0 * factor, y_top * factor
-        ink = ink_image(cell, self.threshold.value, QtGui).mirrored(False, True)  # (FontLab keeps rows bottom-up)
+        ink = ink_image(cell, self.threshold.value, QtGui, getattr(d, "paper", 255))
+        ink = ink.mirrored(False, True)  # (FontLab keeps rows bottom-up)
         shape = self.fontlab.flShape(ink)
         # (placed as outlines are: its box's corners stand for its ink)
         corners = [[(x0, y_top - cell.height() * units, "on"), (x0 + cell.width() * units, y_top, "on")]]
@@ -2520,10 +3675,15 @@ def target_name(name, code, by_code, codes_of=None):
     return fallback if not other or code in other else None
 
 
-def alpha_table(threshold):
+def alpha_table(threshold, paper=255):
     """[256 alphas] of an image glyph's ink by gray: opaque up to half the threshold, clear from halfway
     between it and white (the guides, about 205, and scanned paper fall there at the default 128), and
-    fading between, so the ink keeps its soft edges (review 9: every gray pixel was made ink)."""
+    fading between, so the ink keeps its soft edges (review 9: every gray pixel was made ink). paper: the
+    box's paper as read (paper_level), made white first (paper_table), as the reading made it."""
+    scaled = paper_table(paper, threshold)
+    if scaled is not None:
+        alphas = alpha_table(threshold)
+        return [alphas[value] for value in bytearray(scaled)]
     low = threshold / 2.0
     # (clear 15 grays under the guides at the most: at 180, halfway to white was 217, and a guide's 205
     # came back as faint ink; review 10)
