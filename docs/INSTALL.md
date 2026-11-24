@@ -3,9 +3,23 @@
 ## Requirements
 
 - FontLab 7 for Windows (developed against 7.2.0), with its Python working. FontLab 7 runs scripts with a **64-bit** Python 2.7 installed on the system (a 32-bit one does not work); the FontLab 7 installer offers one. If *Window > Panels > Scripting* cannot run a one-line `print(1)`, fix that first: [PYTHON27.md](PYTHON27.md).
-- LLVM (clang) or Visual Studio with the C++ tools, to build FreeLab's native libraries once: the auto kerning core, which Auto Kerning, Auto Spacing, Kerning Check, and Glyph Compose measure with (required), and dark mode's small helper (without it, dark mode still works, with flipped hues in the widgets FontLab paints itself).
+- Only to install from the source: LLVM (clang) or Visual Studio with the C++ tools, to build FreeLab's native libraries once. A release's folder holds them built.
 
-## Install
+## Install from a release
+
+A [release](https://github.com/VulpesNexus/freelab-script-suite/releases) holds *FreeLab-Script-Suite-&lt;version&gt;.zip*: the *FreeLab* folder ready to use, with FreeLang's five fonts and the two native libraries built. Nothing is compiled and no installer runs.
+
+1. Quit FontLab.
+2. Unpack the archive into FontLab's *Scripts* folder, *Documents\FontLab\FontLab 7\Scripts*, so that it holds a *FreeLab* folder.
+3. Start FontLab and choose *Scripts > FreeLab > Set Up FreeLab*.
+
+*Set Up FreeLab* (*windows/freelab_setup.py*) adds FreeLab's block to FontLab's startup script, the one thing a dropped folder cannot do by itself, and starts it at once. The block arranges the *Scripts > FreeLab* menu, starts tab docking, and applies dark mode at launch when it was left on; until it is there, the tools open from the menu but are listed in file order, and neither tab docking nor dark mode starts with FontLab. It is the block the installer writes, to the letter, under the same rules (below), so either way of installing can follow the other.
+
+To update, quit FontLab and unpack the newer archive over the folder. To remove FreeLab, switch dark mode off, choose *Set Up FreeLab* again and *Remove*, restart FontLab, and delete the *FreeLab* folder; the installer's `-Uninstall` does the same from a copy of the repository, and also removes FreeLab's settings.
+
+The native libraries are in the folder's *bin*; the tools take the ones the installer built in *%LOCALAPPDATA%\FreeLab\bin* first, where there are any. They are not signed: a virus scanner that objects to them leaves dark mode working with flipped hues in the widgets FontLab paints itself, but Auto Kerning, Auto Spacing, Kerning Check, and Glyph Compose need theirs, and installing from the source builds both on your own computer.
+
+## Install from the source
 
 Start FontLab once, so that it writes its startup script, then quit it and run *tools/install-fontlab.ps1*. It:
 
@@ -17,9 +31,9 @@ When anything required could not be done, the installer lists it and ends with e
 
 `-Uninstall` takes it all out again, leaving FreeLab MCP's files alone, and puts back the workspace color dark mode changed (it asks for dark mode to be switched off first when FontLab is running). Either way, the installer also removes the single startup block that FreeLab wrote when it and FreeLab MCP were one repository, which started the MCP listener too; run FreeLab MCP's installer with `-ListenerAtLaunch` to keep the listener at launch.
 
-## FreeLang Extras
+## FreeLang
 
-Font Check draws its lists in FreeLang, a font of five files ([FONT-CHECK.md](FONT-CHECK.md#five-files)). The repository holds the first, *FreeLang Essential* (Latin, Greek, Cyrillic, and the other scripts in common modern use). The four others come with each [release](https://github.com/VulpesNexus/freelab-script-suite/releases) as *FreeLang-Extras.zip* (15.6 MB, 29.2 MB unpacked), which *tools/freelang_extras.py* packs: FreeLang CJK, FreeLang+ General (every other script and symbol block), FreeLang+ Mongolian–Tibetan, and FreeLang+ Duployan. Unpack it into *checks/language_font* before running the installer. Without them, Font Check still works and takes those scripts from Windows' own fonts, which draw most of them in another design and some as boxes.
+Font Check, Glyph Compose, and Font Builder draw their lists in FreeLang, a font of five files, 31.1 MB together ([FONT-CHECK.md](FONT-CHECK.md#five-files)): *FreeLang Essential* (Latin, Greek, Cyrillic, and the other scripts in common modern use), FreeLang CJK, FreeLang+ General (every other script and symbol block), FreeLang+ Mongolian–Tibetan, and FreeLang+ Duployan. The repository and each release hold all five, in *checks/language_font*. A copy that lacks some of the last four still installs and works: Windows' own fonts then draw those scripts, most in another design and some as boxes.
 
 ## macOS
 
@@ -31,4 +45,4 @@ macOS is not supported yet, and nothing has run on a Mac. FontLab 7 for macOS ha
 
 ## The tools folder
 
-*tools/* holds the installer (*install-fontlab.ps1*), the native libraries' build script (*build-native.ps1*), the test gate's Python 2.7 fetcher (*get-python27.ps1*), CJK Vertical's vertical metrics step for an exported font (*add_vertical_metrics.py*, see [VERTICAL.md](VERTICAL.md)), and the packer of a release's *FreeLang-Extras.zip* (*freelang_extras.py*).
+*tools/* holds the installer (*install-fontlab.ps1*), the native libraries' build script (*build-native.ps1*), the test gate's Python 2.7 fetcher (*get-python27.ps1*), CJK Vertical's vertical metrics step for an exported font (*add_vertical_metrics.py*, see [VERTICAL.md](VERTICAL.md)), and the packer of a release's ready-made folder (*pack_release.py*, which builds the native libraries first and prints the archive's size and SHA-256).

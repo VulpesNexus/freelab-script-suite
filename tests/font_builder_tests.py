@@ -1740,7 +1740,7 @@ class TemplatePreviewTests(unittest.TestCase):
         d.set_chosen(1)
         self.assertEqual(d.preview_note.text, "Some of these characters may show as boxes: <i>FreeLang CJK</i> and "
                                               "<i>FreeLang+ General</i>, the fonts that draw them, are not installed; "
-                                              "they come with each release, in <i>FreeLang-Extras.zip</i>.")
+                                              "install FreeLab again to get them.")
         d.set_chosen(2)
         self.assertEqual(d.preview_note.text, "", "a set the first file draws: no line")
         d.set_chosen(1)
@@ -1760,9 +1760,9 @@ class TemplatePreviewTests(unittest.TestCase):
         self.assertEqual(fb.missing_fonts_line(ak, []), "")
         one = fb.missing_fonts_line(ak, ["FreeLang+ Duployan"])
         self.assertEqual(one, "Some of these characters may show as boxes: <i>FreeLang+ Duployan</i>, the font that "
-                              "draws them, is not installed; it comes with each release, in <i>FreeLang-Extras.zip</i>.")
+                              "draws them, is not installed; install FreeLab again to get it.")
         three = fb.missing_fonts_line(ak, ["A", "B", "C"])
-        self.assertIn("<i>A</i>, <i>B</i>, and <i>C</i>, the fonts that draw them, are not installed; they come", three)
+        self.assertIn("<i>A</i>, <i>B</i>, and <i>C</i>, the fonts that draw them, are not installed; install", three)
         for line in (one, three):
             self.assertEqual(line.count(". "), 0, "one sentence: one line (a status label starts a line per sentence)")
             self.assertTrue(line.endswith("."))

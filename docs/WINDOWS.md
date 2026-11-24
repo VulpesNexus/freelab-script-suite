@@ -15,7 +15,7 @@ Check boxes are *ticked*: "check" is the verb of the tools that check a font (*C
 
 ## The menu
 
-*Scripts > FreeLab* lists the font tools in the order a font is usually made (Font Builder, Glyph Compose, Auto Spacing, CJK Spacing, CJK Vertical, Auto Kerning, Kerning Check, Feature Code, Feature Check, Font Compare, Family Audit, Font Check, Proof), then dark mode and tab docking, then FreeLab MCP's, with separators between them; *Dark Mode* and *Tab Docking* are ticked while they are on. FontLab lists a folder's scripts by file name, so FreeLab's startup block arranges the menu each time *Scripts* opens.
+*Scripts > FreeLab* lists the font tools in the order a font is usually made (Font Builder, Glyph Compose, Auto Spacing, CJK Spacing, CJK Vertical, Auto Kerning, Kerning Check, Feature Code, Feature Check, Font Compare, Family Audit, Font Check, Proof), then dark mode and tab docking, then FreeLab MCP's, then *Set Up FreeLab* where a release's folder was dropped in ([INSTALL.md](INSTALL.md#install-from-a-release)), with separators between them; *Dark Mode* and *Tab Docking* are ticked while they are on. FontLab lists a folder's scripts by file name, so FreeLab's startup block arranges the menu each time *Scripts* opens.
 
 ## One window per font
 

@@ -550,5 +550,55 @@ class InstallerTests(unittest.TestCase):
         self.assertFalse(self.startup.exists(), "FontLab writes its own first")
 
 
+class ReleaseFolderTests(unittest.TestCase):
+    """tools/pack_release.py: a release's ready-made FreeLab folder, dropped into FontLab's Scripts folder."""
+
+    def setUp(self):
+        sys.path.insert(0, str(ROOT / "tools"))
+        self.addCleanup(sys.path.remove, str(ROOT / "tools"))
+        import pack_release
+        self.pack = pack_release
+        self.tmp = Path(tempfile.mkdtemp(prefix="freelab-release-"))
+        self.addCleanup(shutil.rmtree, str(self.tmp), True)
+
+    def test_the_folder_holds_what_the_installer_installs_and_what_a_drop_in_needs(self):
+        files = self.pack.installed_files()
+        text = INSTALLER.read_text(encoding="utf-8")
+        self.assertEqual(len(files), text.count("@{ From = "), "every row of the installer's list")
+        self.assertIn(("compose/freelab_glyph_generation.py", "freelab_glyph_generation.module", False), files)
+        self.assertEqual([name for _s, name, optional in files if optional], OPTIONAL_FONTS)
+        self.assertEqual(self.pack.native_names(), ["freelab_pixels-v%s.dll" % VERSION, "freelab_kern-v%s.dll" % KERN])
+        for name in self.pack.native_names():
+            (self.tmp / name).write_bytes(b"built")
+        missing = [source for source, _n, _o in files if not (ROOT / source).is_file()]
+        if missing:
+            self.skipTest("this copy lacks %s" % ", ".join(missing))
+        out = self.tmp / "release.zip"
+        size, digest = self.pack.pack(str(out), str(self.tmp))
+        again = self.tmp / "again.zip"
+        self.assertEqual(self.pack.pack(str(again), str(self.tmp)), (size, digest), "the same files, the same bytes")
+        import zipfile
+        with zipfile.ZipFile(str(out)) as archive:
+            names = archive.namelist()
+            notes = archive.read("FreeLab/README.txt").decode("utf-8")
+            setup = archive.read("FreeLab/freelab_setup.py")
+        self.assertTrue(all(name.startswith("FreeLab/") for name in names), "one folder, unpacked into Scripts")
+        self.assertEqual(len(names), len(set(names)))
+        for name in ["freelab_auto_kerning.py", "freelab_setup.py", "LICENSE", "README.txt", "FreeLang-CJK.ttf",
+                     "bin/freelab_pixels-v%s.dll" % VERSION, "bin/freelab_kern-v%s.dll" % KERN]:
+            self.assertIn("FreeLab/" + name, names)
+        self.assertEqual(setup, (ROOT / "windows" / "freelab_setup.py").read_bytes())
+        self.assertIn("FreeLab Script Suite %s," % self.pack.version(), notes)
+        self.assertIn("Set Up FreeLab", notes)
+        # (only the scripts FontLab should list are .py: a helper listed as a script was the stray entry of November 24)
+        listed = sorted(name[len("FreeLab/"):] for name in names if name.endswith(".py"))
+        self.assertNotIn("freelab_glyph_generation.py", listed)
+        self.assertNotIn("freelab_trace.py", listed)
+
+    def test_a_library_not_built_stops_the_packing(self):
+        with self.assertRaises(SystemExit):
+            self.pack.entries(str(self.tmp))
+
+
 if __name__ == "__main__":
     unittest.main()

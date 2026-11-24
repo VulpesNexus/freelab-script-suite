@@ -276,7 +276,22 @@ def settings_path():
 def native_path():
     # Versioned name: FontLab keeps a loaded DLL locked, so a newer one must not need the same file.
     name = "freelab_pixels-v%d.dll" % NATIVE_VERSION
-    return os.environ.get("FREELAB_PIXELS_DLL") or os.path.join(state_dir(), "bin", name)
+    return os.environ.get("FREELAB_PIXELS_DLL") or _built_or_beside(os.path.join(state_dir(), "bin", name), name)
+
+
+def _built_or_beside(built, name, here=None):
+    """A native library's path: the one the installer built (in FreeLab's own folder), else the one a release
+    ships beside the scripts (a bin folder in Scripts\\FreeLab, for a copy dropped in with no installer run),
+    else the built path again (where the messages say to look). Never raises."""
+    try:
+        if not os.path.isfile(built):
+            here = here or os.path.dirname(os.path.abspath(globals().get("__file__") or "."))
+            beside = os.path.join(here, "bin", name)
+            if os.path.isfile(beside):
+                return beside
+    except Exception:
+        pass
+    return built
 
 
 # The retired native engine's settings (see _remove_old_hooks): read as nothing, so never written back.

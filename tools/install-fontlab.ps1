@@ -72,9 +72,8 @@ $files = @(
     @{ From = 'checks\space_conventions.json'; Name = 'space_conventions.json' },
     @{ From = 'checks\high_value_languages.json'; Name = 'high_value_languages.json' },
     @{ From = 'checks\language_font\FreeLang-Essential.ttf'; Name = 'FreeLang-Essential.ttf' },
-    # Optional: the repository holds the Essential font alone, and each release publishes these four
-    # beside it (FreeLang-Extras.zip, unpacked into checks\language_font). Font Check works without
-    # them (their scripts are then left to the system's fonts), so a copy without them still installs.
+    # Optional: Font Check works without these four (their scripts are then left to the system's
+    # fonts), so a copy without them still installs. The repository holds all five since 0.3.0.
     @{ From = 'checks\language_font\FreeLang-CJK.ttf'; Name = 'FreeLang-CJK.ttf'; Optional = $true },
     @{ From = 'checks\language_font\FreeLangPlus-General.ttf'; Name = 'FreeLangPlus-General.ttf'; Optional = $true },
     @{ From = 'checks\language_font\FreeLangPlus-Mongolian-Tibetan.ttf'; Name = 'FreeLangPlus-Mongolian-Tibetan.ttf'; Optional = $true },
@@ -399,6 +398,23 @@ if ($Uninstall) {
             try { [System.IO.File]::Delete($target); Write-Output "Removed $target" }
             catch { Add-Incomplete "remove $target ($(Get-Reason $_))" }
         }
+    }
+    # What a release's folder, dropped in by hand, holds beyond the files above: its setup script, its
+    # notes, and the native libraries beside the scripts.
+    foreach ($name in @('freelab_setup.py', 'freelab_setup.pyc', 'LICENSE', 'README.txt')) {
+        $extra = Join-Path $scripts $name
+        if (Test-Path $extra) {
+            try { [System.IO.File]::Delete($extra); Write-Output "Removed $extra" }
+            catch { Add-Incomplete "remove $extra ($(Get-Reason $_))" }
+        }
+    }
+    $dropBin = Join-Path $scripts 'bin'
+    if (Test-Path $dropBin) {
+        foreach ($dll in @(Get-ChildItem $dropBin -Filter 'freelab_*.dll')) {
+            try { [System.IO.File]::Delete($dll.FullName); Write-Output "Removed $($dll.FullName)" }
+            catch { Add-Incomplete "remove $($dll.FullName) ($(Get-Reason $_))" }
+        }
+        if (-not (Get-ChildItem $dropBin -Force)) { [System.IO.Directory]::Delete($dropBin) }
     }
     if ((Test-Path $scripts) -and -not (Get-ChildItem $scripts -Force)) {
         [System.IO.Directory]::Delete($scripts); Write-Output "Removed $scripts"

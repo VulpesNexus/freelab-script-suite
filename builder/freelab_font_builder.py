@@ -1174,7 +1174,6 @@ def common_sets(names):
 # each. It is registered once the box first holds a character past ASCII, not as the window opens.
 PREVIEW_POINTS = 12  # the box's text size, in points, until another is picked (Text size)
 PREVIEW_POINTS_RANGE = (6, 72)
-EXTRAS_FILE = "FreeLang-Extras.zip"  # the release's file that holds FreeLang's optional fonts (docs/INSTALL.md)
 # The Duployan block and its shorthand format controls, which FreeLang's last optional font (Duployan) alone
 # draws (tests/language_font_tests.py, test_duployan_drawn_by_the_optional_font_alone)
 DUPLOYAN_CODES = (0x1BC00, 0x1BCA3)
@@ -1263,10 +1262,10 @@ def missing_fonts_line(ak, families):
     else:  # (Oxford comma)
         listed = "%s, and %s" % (", ".join(names[:-1]), names[-1])
     if len(families) == 1:
-        return ("Some of these characters may show as boxes: %s, the font that draws them, is not installed; it "
-                "comes with each release, in %s." % (listed, ak.i(EXTRAS_FILE)))
-    return ("Some of these characters may show as boxes: %s, the fonts that draw them, are not installed; they "
-            "come with each release, in %s." % (listed, ak.i(EXTRAS_FILE)))
+        return ("Some of these characters may show as boxes: %s, the font that draws them, is not installed; "
+                "install FreeLab again to get it." % listed)
+    return ("Some of these characters may show as boxes: %s, the fonts that draw them, are not installed; "
+            "install FreeLab again to get them." % listed)
 
 
 def _qt():

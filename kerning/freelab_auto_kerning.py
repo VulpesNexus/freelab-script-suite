@@ -323,7 +323,23 @@ def state_dir():
 
 
 def kern_library_path():
-    return os.environ.get("FREELAB_KERN_DLL") or os.path.join(state_dir(), u"bin", u"freelab_kern-v%d.dll" % KERN_VERSION)
+    name = u"freelab_kern-v%d.dll" % KERN_VERSION
+    return os.environ.get("FREELAB_KERN_DLL") or built_or_beside(os.path.join(state_dir(), u"bin", name), name)
+
+
+def built_or_beside(built, name, here=None):
+    """A native library's path: the one the installer built (in FreeLab's own folder), else the one a release
+    ships beside the scripts (a bin folder in Scripts\\FreeLab, for a copy dropped in with no installer run),
+    else the built path again (where the messages say to look). Never raises."""
+    try:
+        if not os.path.isfile(built):
+            here = here or os.path.dirname(os.path.abspath(globals().get("__file__") or "."))
+            beside = os.path.join(here, u"bin", name)
+            if os.path.isfile(beside):
+                return beside
+    except Exception:
+        pass
+    return built
 
 
 class Core(object):
@@ -1970,7 +1986,8 @@ MENU_GROUPS = (("Font Builder", "Glyph Compose", "Auto Spacing", "CJK Spacing", 
                 "Feature Code", "Feature Check", "Font Compare", "Family Audit", "Font Check", "Proof"),
                ("Dark Mode", "Toggle Dark Mode", "Dark Mode Settings", "Tab Docking", "Toggle Tab Docking",
                 "Tab Docking Settings"),
-               ("Start MCP Listener", "Stop MCP Listener", "Start Listener", "Stop Listener"))  # (FreeLab MCP's, old names too)
+               ("Start MCP Listener", "Stop MCP Listener", "Start Listener", "Stop Listener"),  # (FreeLab MCP's, old names too)
+               ("Set Up FreeLab",))  # (a release's folder dropped in by hand: windows/freelab_setup.py)
 MENU_TITLE, SCRIPTS_MENU = "FreeLab", "menuScripts"
 MENU_ORDER_PROP = "freelab_menu_order"
 MENU_HOOK_VERSION = 7  # the Scripts menu's property holds it: an older hook found there is replaced

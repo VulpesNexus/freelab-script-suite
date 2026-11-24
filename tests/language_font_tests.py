@@ -51,7 +51,7 @@ PARTS = ("names", "other_names", "orthographies", "sets")
 MAX_SIZES = {u"Essential": 2400 * 1024, u"CJK": 22000 * 1024, u"General": 13000 * 1024,
              u"Mongolian-Tibetan": 1050 * 1024, u"Duployan": 1900 * 1024}
 LABELS = (u"Essential", u"CJK", u"General", u"Mongolian-Tibetan", u"Duployan")
-# The tools work without these files, published beside each release rather than kept in the repository:
+# The tools work without these files (a copy may lack them: the repository kept the first alone until 0.3.0):
 # a test of a file is skipped without it.
 OPTIONAL = (u"CJK", u"General", u"Mongolian-Tibetan", u"Duployan")
 GDI_FAMILY_LIMIT = 31  # characters of a family name Windows (GDI) and so Qt can register
