@@ -233,6 +233,54 @@ class ShadeAndPickerTests(DarkModeCase):
         dm.run_queue()
         self.assertEqual(self.content.styleSheet, PANEL_SHEET)
 
+    def test_a_cursors_light_glow_is_made_a_dark_one(self):
+        """The owner, November 25: a light shadow beside the arrow over the dark canvas. FontLab's cursors carry
+        a white glow for a light canvas."""
+        class Color(object):
+            def __init__(self, r, g, b, a=255):
+                self.rgba = (r, g, b, a)
+
+            @staticmethod
+            def fromRgba(value):
+                return Color((value >> 16) & 255, (value >> 8) & 255, value & 255, (value >> 24) & 255)
+
+            def alpha(self):
+                return self.rgba[3]
+
+            def red(self):
+                return self.rgba[0]
+
+            def green(self):
+                return self.rgba[1]
+
+            def blue(self):
+                return self.rgba[2]
+
+        class Picture(object):
+            def __init__(self, pixels):
+                self.pixels = pixels
+
+            def width(self):
+                return len(self.pixels)
+
+            def height(self):
+                return 1
+
+            def pixel(self, x, y):
+                return self.pixels[x]
+
+            def setPixelColor(self, x, y, color):
+                r, g, b, a = color.rgba
+                self.pixels[x] = (a << 24) | (r << 16) | (g << 8) | b
+
+        self.patch("_gui", lambda name: Color if name == "QColor" else None)
+        clear, white, black, glow, edge = 0x00000000, 0xffffffff, 0xff000000, 0x60ffffff, 0x80101010
+        picture = Picture([clear, white, black, glow, edge])
+        self.assertTrue(dm.glow_to_shadow(picture))
+        self.assertEqual(picture.pixels, [clear, white, black, 0x60000000, edge],
+                         "the glow black at the opacity it had; the arrow, its outline, and the outline's own smoothing as drawn")
+        self.assertFalse(dm.glow_to_shadow(Picture([clear, white, black, edge])), "no glow: nothing to make")
+
     def test_a_pickers_bare_declarations_are_wrapped(self):
         """The owner, November 24: Overlay Fonts' opacity dropdown stayed white. Its stylesheet is "color:
         lightGray;", declarations with no selector: with the frame's rule after them Qt read neither, drew a plain

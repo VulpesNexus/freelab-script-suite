@@ -814,5 +814,58 @@ class KeyedTests(unittest.TestCase):
         self.assertEqual(rgb_at(one, 1), dm.map_rgb(255, 255, 255), "a stray white is not")
 
 
+@unittest.skipIf(LIB is None, "native helper not built: run tools/build-native.ps1 (%s)" % DLL)
+class ReviewOfNovember24Tests(unittest.TestCase):
+    def map(self, rows, mode, tint):
+        width = len(rows[0])
+        buf = pixels([color for row in rows for color in row])
+        array = (ctypes.c_char * len(buf)).from_buffer(buf)
+        LIB.freelab_map_anchors(ctypes.addressof(array), len(buf) // 4, width, mode, dm.DARK_OKL, dm.LIGHT_OKL, tint,
+                                dm.DARK_OKL, 1)
+        return [[tuple(reversed(struct.unpack_from("<BBB", buf, 4 * (y * width + x)))) for x in range(width)]
+                for y in range(len(rows))]
+
+    def test_the_darkest_channel_is_a_strokes_gray(self):
+        """A panel's title on a narrow panel: ClearType's thin capitals came out uneven as the channels' mean."""
+        buf = pixels([(131, 190, 249), (218, 161, 103), (73, 73, 73), (210, 211, 213)]) + pixels([(10, 200, 30)], alpha=7)
+        array = (ctypes.c_char * len(buf)).from_buffer(buf)
+        LIB.freelab_gray_darkest.argtypes = [ctypes.c_void_p, ctypes.c_int64]
+        LIB.freelab_gray_darkest(ctypes.addressof(array), len(buf) // 4)
+        self.assertEqual([tuple(buf[4 * i:4 * i + 4]) for i in range(5)],
+                         [(131, 131, 131, 255), (103, 103, 103, 255), (73, 73, 73, 255), (210, 210, 210, 255), (10, 10, 10, 7)])
+
+    def test_light_text_on_a_gray_pill_stays_lighter_than_its_pill_on_a_canvas(self):
+        """An anchor's name on its gray pill: turned over with the rest of the canvas, the white name came out
+        darker than its pill."""
+        ground, pill, name = (240, 240, 240), (176, 174, 170), (255, 255, 255)
+        rows = [[ground] * 40 for _ in range(4)]
+        for y in range(14):
+            row = [ground] * 4 + [pill] * 32 + [ground] * 4
+            if 4 <= y < 10:
+                for x in (10, 11, 16, 17, 22, 23):  # three stems, two pixels wide
+                    row[x] = name
+            rows.append(row)
+        rows += [[ground] * 40 for _ in range(4)]
+        out = self.map(rows, 1, 1.0)
+        on_pill, on_name = out[6][6], out[8][10]
+        self.assertGreater(sum(on_name), sum(on_pill) + 150, "the name clearly lighter than the pill it is on")
+        self.assertLess(sum(out[1][1]), 3 * 100, "and the canvas dark")
+
+    def test_dark_text_on_a_tag_is_mapped_from_its_darkest_channel_but_not_on_pure_white(self):
+        """FontAudit's captions: ClearType's edges of thin dark text, turned over by their own lightness, were
+        most of the text and dim. TrueType Hinting's preview, on pure white, shows those colors on purpose."""
+        def picture(paper):
+            rows = [[paper] * 24 for _ in range(12)]
+            for y in range(3, 9):
+                rows[y][10], rows[y][11], rows[y][12] = (218, 161, 103), (73, 73, 73), (131, 190, 249)
+            return rows
+        tag = self.map(picture((248, 248, 249)), 1, 1.0)
+        white = self.map(picture((255, 255, 255)), 1, 1.0)
+        edge = tag[5][12]
+        self.assertLessEqual(max(edge) - min(edge), 12, "gray: no color left on a tag")
+        self.assertGreater(sum(edge), sum(tag[5][2]) + 120, "and light on the dark tag")
+        self.assertGreater(max(white[5][12]) - min(white[5][12]), 12, "on pure white the edge keeps its color")
+
+
 if __name__ == "__main__":
     unittest.main()

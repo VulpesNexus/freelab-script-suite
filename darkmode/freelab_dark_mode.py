@@ -227,7 +227,7 @@ SWEEP_MS = 500  # how often to look for widgets FontLab created or showed (750 w
 FULL_SWEEP_EVERY = 60  # every Nth sweep revisits every widget (replaced stylesheets, new icons): every 30 s
 FOCUS_DRAIN_MS = 80  # a window that takes focus is darkened at once, up to this long, before it paints light
 MAX_ERRORS = 50
-NATIVE_VERSION = 116
+NATIVE_VERSION = 117
 
 ID_PROP = "freelab_id"  # dynamic properties FreeLab sets on widgets, all removed by restore()
 SEEN_PROP = "freelab_seen"
@@ -711,7 +711,11 @@ def _native():
                     if defringe is not None:
                         defringe.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_int64, ctypes.c_int]
                         defringe.restype = None
-                    state["native"] = (mapper, stats, collect, keyed, anchors, defringe)
+                    darkest = getattr(lib, "freelab_gray_darkest", None)  # optional, as defringe is
+                    if darkest is not None:
+                        darkest.argtypes = [ctypes.c_void_p, ctypes.c_int64]
+                        darkest.restype = None
+                    state["native"] = (mapper, stats, collect, keyed, anchors, defringe, darkest)
                 else:
                     _note_error("native", "version mismatch")
             except Exception as exc:
@@ -1080,6 +1084,10 @@ def _watcher():
                         module = _module()
                         if module is not None:
                             module._on_style_change(obj)
+                    elif kind == CURSOR_CHANGE_EVENT:
+                        module = _module()
+                        if module is not None:
+                            module._fix_cursor(obj)
                     elif kind == PAINT_EVENT and obj.property(MARK_FLAG_PROP):
                         module = _module()
                         if module is not None:
@@ -1772,6 +1780,23 @@ def gray_image(image):
     return out
 
 
+def darkest_gray_image(image):
+    """The image in grays, each pixel the gray of its darkest channel (the native helper's
+    freelab_gray_darkest: dark text as ClearType draws it comes out whole, its strokes even), or gray_image's
+    where the helper cannot do it."""
+    native = _native()
+    darkest = native[6] if native is not None and len(native) > 6 else None
+    if darkest is None:
+        return gray_image(image)
+    try:
+        out = image.convertToFormat(_gui("QImage").Format_ARGB32)
+        darkest(_address(out), out.width() * out.height())
+        return out
+    except Exception as exc:
+        _note_error("darkest gray", exc)
+        return gray_image(image)
+
+
 def _effect_classes():
     """{"map": MapEffect, "title": TitleEffect}, defined on first use: they need PythonQt."""
     if not _EFFECTS:
@@ -2072,7 +2097,7 @@ def _effect_classes():
                             area = area.intersected(painter.clipBoundingRect().toAlignedRect())
                         if not area.isEmpty():
                             part = pixmap.copy(area.translated(-offset.x(), -offset.y())).toImage()
-                            part = gray_image(part)
+                            part = darkest_gray_image(part)  # (not the channels' mean: thin capitals came out uneven)
                             painter.drawImage(area.topLeft(), map_image(part, 0.0, None, -1.0, 0.0, None, 0.0, 0, "all"))
                 except Exception as exc:
                     _note_error("title", exc)
@@ -2627,6 +2652,87 @@ def _in_fontlab_view(widget):
         return False
 
 
+# FontLab's own cursors over a canvas (its arrow, its tools') are pictures with a white glow around them, for
+# a light canvas: there it lifts the cursor off the outlines, and on the dark canvas it stood out as a light
+# shadow beside the arrow, "inverted" (the owner, November 25). The glow is made a dark one: each light pixel
+# that is not opaque turns black at the opacity it had. FontLab sets another cursor at each change of tool,
+# so the canvas is watched for it (CURSOR_CHANGE_EVENT), and each picture is made once.
+CURSOR_CHANGE_EVENT = 183  # QEvent::CursorChange
+BITMAP_CURSOR = 24  # Qt::BitmapCursor: a cursor made of a picture
+CURSOR_GLOW_L = 0.5  # a glow's pixel: this light (HLS), and neither clear nor opaque
+CURSOR_MAX_SIDE = 128
+
+
+def glow_to_shadow(image):
+    """A cursor's picture with its light glow made dark, in place: True when a pixel changed."""
+    QColor = _gui("QColor")
+    changed = False
+    for y in range(image.height()):
+        for x in range(image.width()):
+            color = QColor.fromRgba(image.pixel(x, y))
+            alpha = color.alpha()
+            if 0 < alpha < 255 and _lightness(color.red(), color.green(), color.blue()) >= CURSOR_GLOW_L:
+                image.setPixelColor(x, y, QColor(0, 0, 0, alpha))
+                changed = True
+    return changed
+
+
+def _fix_cursor(widget):
+    """The widget's cursor replaced by its copy without the light glow, if it is one of FontLab's pictures.
+    Never raises (it runs from an event filter)."""
+    try:
+        state = _state()
+        if not state["on"] or not state.get("canvas", True):
+            return False
+        cursor = getattr(widget, "cursor", None)
+        cursor = cursor() if callable(cursor) else cursor
+        if cursor is None or int(cursor.shape()) != BITMAP_CURSOR:
+            return False
+        pixmap = cursor.pixmap()
+        if pixmap is None or pixmap.isNull() or max(pixmap.width(), pixmap.height()) > CURSOR_MAX_SIDE:
+            return False
+        key = pixmap.cacheKey()
+        ours = state.setdefault("cursor_keys", set())
+        if key in ours:
+            return False  # ours already (setting it sends the event again)
+        made = state.setdefault("cursors", {})
+        entry = made.get(key)
+        if entry is None:
+            image = pixmap.toImage().convertToFormat(_gui("QImage").Format_ARGB32)
+            entry = False
+            if glow_to_shadow(image):
+                fixed_pixmap = _gui("QPixmap").fromImage(image)
+                spot = cursor.hotSpot()
+                fixed = _gui("QCursor")(fixed_pixmap, spot.x(), spot.y())
+                ours.add(fixed_pixmap.cacheKey())
+                ours.add(fixed.pixmap().cacheKey())
+                entry = (fixed, fixed_pixmap)  # (held: Qt keeps no reference Python can count on)
+            made[key] = entry
+        if not entry:
+            return False
+        record = _record(widget)
+        record["cursor"] = _gui("QCursor")(cursor)
+        widget.setCursor(entry[0])
+        return True
+    except Exception as exc:
+        _note_error("cursor", exc)
+        return False
+
+
+def _restore_cursor(widget, record):
+    """FontLab's own cursor back on a widget whose cursor is dark mode's copy. Never raises."""
+    try:
+        original = record.pop("cursor", None)
+        if original is None:
+            return
+        cursor = widget.cursor() if callable(widget.cursor) else widget.cursor
+        pixmap = cursor.pixmap() if int(cursor.shape()) == BITMAP_CURSOR else None
+        if pixmap is not None and pixmap.cacheKey() in _state().get("cursor_keys", ()):
+            widget.setCursor(original)
+    except Exception as exc:
+        _note_error("cursor", exc)
+
+
 def _frame_picker(widget):
     own = _prop(widget, "styleSheet") or u""
     if own == widget.property(DARK_SHEET_PROP):
@@ -3082,6 +3188,8 @@ def _undo_widget(widget, keep_props=False, keep_placeholder=False):
             widget.setAutoFillBackground(record.pop("autofill"))
         if "styled" in record:
             widget.setAttribute(_core("Qt").WA_StyledBackground, record.pop("styled"))
+        if "cursor" in record:
+            _restore_cursor(widget, record)
         if "sci" in record:
             try:
                 _restore_editor(widget, record)
@@ -3280,6 +3388,9 @@ def process(widget):
     kind = widget_kind(widget, canvas)
     if kind == "island":
         _make_island(widget)
+        if is_content(widget):
+            _watch(widget)  # (FontLab gives a canvas another cursor at each change of tool)
+            _fix_cursor(widget)
         return
     _darken_sheet(widget)
     if widget.inherits("QsciScintilla"):
