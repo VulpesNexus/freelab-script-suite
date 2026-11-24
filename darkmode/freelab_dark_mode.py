@@ -2015,6 +2015,8 @@ def _effect_classes():
                     if logos:
                         draw_logos(painter, pixmap, offset, logos)
                     keep_unmapped(self, painter, pixmap, offset)
+                    if kind == "island" and self.freelab_keep_tint:
+                        keep_pictures(self, painter, pixmap, offset)
                 except Exception as exc:
                     _note_error("effect", exc)
                     self.drawSource(painter)
@@ -2117,6 +2119,16 @@ def _effect_classes():
                     # (the owner, November 24). On a ground dark already (the Font window's bar) it is kept.
                     continue
                 painter.drawPixmap(area.topLeft(), pixmap, local)
+
+        def keep_pictures(effect, painter, pixmap, offset):
+            """The pictures of the glyphs a canvas shows, drawn as they are over its mapping (see
+            _picture_rects): a scan or a screenshot turned over came out as a negative."""
+            for rect in _picture_rects(effect):
+                area = rect.translated(offset).intersected(QRect(offset, pixmap.size()))
+                if painter.hasClipping():
+                    area = area.intersected(painter.clipBoundingRect().toAlignedRect())
+                if not area.isEmpty():
+                    painter.drawPixmap(area.topLeft(), pixmap, area.translated(-offset.x(), -offset.y()))
 
         class TitleEffect(QGraphicsEffect):
             """Draw a panel as it is, then its title strip mapped."""
@@ -2781,6 +2793,66 @@ def _restore_cursor(widget, record):
             widget.setCursor(original)
     except Exception as exc:
         _note_error("cursor", exc)
+
+
+# A canvas' pictures (a scan or a screenshot placed in a glyph, to trace or to compare) are pixels like the rest
+# of the canvas, and the canvas is mapped whole: a picture came out as its negative, and whatever FontLab draws
+# over it with it (the owner, November 25: "inverted images also mess up with other stuff"). FontLab says where
+# each picture is: an element whose image is not null, in the shown layer of each glyph of the canvas' text;
+# the element's transform, the glyph's place in its line, and the canvas' own transform take it to the screen.
+# Its area is drawn as it is, over the mapping, with what FontLab draws on it in its light colors.
+PICTURE_RECTS_SECONDS = 0.15  # how long the places found are used before they are asked again (a repaint is often)
+PICTURE_MAX_GLYPHS = 200  # glyphs of a canvas' text looked at
+
+
+def _picture_rects(effect):
+    """The rectangles (widget coordinates, QRect) of the pictures a canvas shows, or []. Asked of FontLab at most
+    every PICTURE_RECTS_SECONDS. Never raises."""
+    try:
+        now = time.time()
+        kept = getattr(effect, "freelab_pictures", None)
+        if kept is not None and now - kept[0] < PICTURE_RECTS_SECONDS:
+            return kept[1]
+        rects = []
+        try:
+            rects = _find_picture_rects(effect.freelab_widget)
+        except Exception as exc:
+            _note_error("pictures", exc)
+        effect.freelab_pictures = (now, rects)
+        return rects
+    except Exception:
+        return []
+
+
+def _find_picture_rects(widget):
+    import fontlab
+    QRectF = _core("QRectF")
+    workspace = fontlab.flWorkspace.instance()
+    canvas = workspace.getCanvasForViewport(widget)
+    if canvas is None:
+        return []
+    found = []
+    to_screen = canvas.transform
+    for block in canvas.textBlocks():
+        glyphs = block.getAllGlyphs()
+        for index, info in enumerate(glyphs[:PICTURE_MAX_GLYPHS]):
+            glyph = info.glyph
+            if glyph is None:
+                continue
+            layer = glyph.activeLayer
+            layer = layer() if callable(layer) else layer
+            if layer is None:
+                continue
+            for shape in layer.shapes:
+                image = shape.image
+                if image is None or image.isNull():
+                    continue
+                rect = QRectF(0, 0, image.width(), image.height())
+                rect = shape.transform.mapRect(rect)
+                rect = block.getGlyphTransform(index).mapRect(rect)
+                rect = to_screen.mapRect(rect)
+                found.append(rect.toAlignedRect())
+    return found
 
 
 def _frame_picker(widget):

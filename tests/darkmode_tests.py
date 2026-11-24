@@ -281,6 +281,99 @@ class ShadeAndPickerTests(DarkModeCase):
                          "the glow black at the opacity it had; the arrow, its outline, and the outline's own smoothing as drawn")
         self.assertFalse(dm.glow_to_shadow(Picture([clear, white, black, edge])), "no glow: nothing to make")
 
+    def test_a_canvas_pictures_are_found_where_fontlab_draws_them(self):
+        """The owner, November 25: a picture in a glyph came out as its negative. Its place comes from FontLab:
+        the element's transform, the glyph's place in its line, the canvas' transform."""
+        import sys as system
+        import types
+
+        class Rect(object):
+            def __init__(self, x, y, w, h):
+                self.box = (x, y, w, h)
+
+            def toAlignedRect(self):
+                return self.box
+
+        class Scale(object):
+            def __init__(self, k, dx=0.0, dy=0.0):
+                self.k, self.dx, self.dy = k, dx, dy
+
+            def mapRect(self, rect):
+                x, y, w, h = rect.box
+                return Rect(x * self.k + self.dx, y * self.k + self.dy, w * self.k, h * self.k)
+
+        class Image(object):
+            def __init__(self, w, h):
+                self.w, self.h = w, h
+
+            def isNull(self):
+                return not self.w
+
+            def width(self):
+                return self.w
+
+            def height(self):
+                return self.h
+
+        class Shape(object):
+            def __init__(self, image, transform):
+                self.image, self.transform = image, transform
+
+        class Layer(object):
+            def __init__(self, shapes):
+                self.shapes = shapes
+
+        class Glyph(object):
+            def __init__(self, layer):
+                self.activeLayer = layer
+
+        class Info(object):
+            def __init__(self, glyph):
+                self.glyph = glyph
+
+        class Block(object):
+            def __init__(self, infos):
+                self.infos = infos
+
+            def getAllGlyphs(self):
+                return self.infos
+
+            def getGlyphTransform(self, index):
+                return Scale(1.0, dx=1000.0 * index)
+
+        class Canvas(object):
+            transform = Scale(0.5)
+
+            def textBlocks(self):
+                return [Block([Info(Glyph(Layer([Shape(Image(0, 0), Scale(1.0))]))),
+                               Info(Glyph(Layer([Shape(Image(300, 200), Scale(2.0))])))])]
+
+        class Workspace(object):
+            def getCanvasForViewport(self, widget):
+                return Canvas() if widget == "canvas" else None
+
+        fake = types.ModuleType("fontlab")
+        fake.flWorkspace = types.SimpleNamespace(instance=lambda: Workspace()) if hasattr(types, "SimpleNamespace") else None
+        if fake.flWorkspace is None:
+            class Holder(object):
+                @staticmethod
+                def instance():
+                    return Workspace()
+            fake.flWorkspace = Holder
+        saved = system.modules.get("fontlab")
+        system.modules["fontlab"] = fake
+
+        def restore():
+            if saved is None:
+                system.modules.pop("fontlab", None)
+            else:
+                system.modules["fontlab"] = saved
+        self.addCleanup(restore)
+        self.patch("_core", lambda name: (lambda x, y, w, h: Rect(x, y, w, h)) if name == "QRectF" else None)
+        self.assertEqual(dm._find_picture_rects("canvas"), [(500.0, 0.0, 300.0, 200.0)],
+                         "the second glyph's picture: 300 by 200, doubled, its glyph 1,000 units on, the canvas halved")
+        self.assertEqual(dm._find_picture_rects("elsewhere"), [], "no canvas: none")
+
     def test_a_pickers_bare_declarations_are_wrapped(self):
         """The owner, November 24: Overlay Fonts' opacity dropdown stayed white. Its stylesheet is "color:
         lightGray;", declarations with no selector: with the frame's rule after them Qt read neither, drew a plain
