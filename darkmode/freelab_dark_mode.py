@@ -155,7 +155,14 @@ ISLAND_NAMES = frozenset((
     # Open Installed Fonts: each font's name on a pill its delegate paints; as ink, the names came out garbled
     # (seen in the survey of FontLab's dialogs, 2026-11-24, and clean as an island, tried live)
     ("QListWidget", "listFonts"),
+    # Add Glyphs: its list of categories paints the selected row in a fixed light color, under text of the
+    # palette's color (as ink, the text's edges came out rough and the selected row's text could not be read)
+    ("YSelectableTree", "itemsList"),
 ))
+# An island whose delegate takes its text's color from the palette: the color is set in its stylesheet too, since
+# the palette an island is given does not outlast its stylesheet (read live, 2026-11-24: Add Glyphs' list still
+# had the dark palette's light text, which the island's mapping then turned as dark as the list).
+ISLAND_TEXT = {("YSelectableTree", "itemsList"): u"QTreeWidget{color:#000000;}"}
 MARGIN_PARENTS = ("CodeEditor",)  # an unnamed narrow QWidget child is the line-number margin
 MARGIN_MAX_WIDTH = 80
 # A canvas is a plain QWidget child of these, with this name (None: any name). Only the glyph
@@ -2647,6 +2654,9 @@ def _make_island(widget):
     widget.setPalette(_island_palette())  # FontLab's own light palette, before the stylesheet repolishes
     own = _prop(widget, "styleSheet") or u""
     combined = (_light_cascade(widget) + u"\n" + own).strip()
+    text_rule = ISLAND_TEXT.get((_class_name(widget), _prop(widget, "objectName")))
+    if text_rule:
+        combined = (combined + u"\n" + text_rule).strip()
     if combined != own:
         widget.setProperty(SHEET_PROP, own)
         widget.setProperty(DARK_SHEET_PROP, combined)

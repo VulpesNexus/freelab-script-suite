@@ -2332,6 +2332,23 @@ class CompatTests(unittest.TestCase):
         self.assertIn(u(0x2160), plan()[1], u"Ⅰ in a Latin font")
 
 
+class FullWidthCellTests(unittest.TestCase):
+    """Live, 2026-11-24 (BIZ UDPGothic): a proportional CJK font's ideographic space is two thirds of an em, and a
+    circled letter's ring, centered in that, stood out of its advance on both sides."""
+
+    def test_the_cell_is_the_widest_of_its_measures(self):
+        square = [[(0, 0), (800, 0), (800, 800), (0, 800)]]
+        glyphs = dict(BARE)
+        glyphs["ideospace"] = (0x3000, 667, None, None)
+        glyphs["uni4E00"] = (0x4E00, 1000, square, None)
+        glyphs["a-hira"] = (0x3042, 900, square, None)
+        planner = gg.Planner(DATA, FakeFont(glyphs))
+        self.assertEqual(planner.em_width(), 1000.0, "the ideograph's, not the narrowed space's")
+        del glyphs["uni4E00"]
+        self.assertEqual(gg.Planner(DATA, FakeFont(glyphs)).em_width(), 900.0)
+        self.assertEqual(gg.Planner(DATA, FakeFont()).em_width(), 1000.0, "no CJK glyph: the em")
+
+
 # -- The next scope (2026-11-24): superscripts and subscripts, signs made of letters, circled forms, full-width and
 # half-width forms, small capitals, letters with bars, small kana -------------------------------------------------
 

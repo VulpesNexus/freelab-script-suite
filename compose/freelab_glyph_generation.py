@@ -1385,14 +1385,18 @@ class Planner(object):
         return Layout([Part(name, matrix) for name, matrix in placed], round(em))
 
     def em_width(self):
-        """A full-width glyph's advance (the ideographic space's, 一's, あ's, or ア's), else the em."""
-        for code in (0x3000, 0x4E00, 0x3042, 0x30A2):
+        """A full-width glyph's advance: the widest of 一's, the ideographic space's, あ's, and ア's, else the em.
+        The widest, since a proportional CJK font narrows its space and kana and keeps its ideographs full
+        (live, 2026-11-24, BIZ UDPGothic: its ideographic space is two thirds of an em, and a circled letter's
+        ring, centered in that, stood out of its advance on both sides)."""
+        found = []
+        for code in (0x4E00, 0x3000, 0x3042, 0x30A2):
             name = self.font.glyph_of(code)
             if name is not None and self.font.has_layer(name):
                 advance = self.font.advance(name)
                 if advance:
-                    return float(advance)
-        return float(self.font.upm)
+                    found.append(float(advance))
+        return max(found) if found else float(self.font.upm)
 
     def op_fraction(self, way, row, stack, needs):
         slash = self.font.glyph_of(int(FRACTION_SLASH, 16))
