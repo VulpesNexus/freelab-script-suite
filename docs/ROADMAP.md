@@ -2,7 +2,10 @@
 
 ## Next
 
-1. Dark mode in the dialogs not looked at yet. Of the dialogs FontLab's menus open (file pickers aside, which Windows draws), 34 were opened and looked at on 2026-11-24, with a static and a variable font open: all are dark, *Open Installed Fonts* and *Add Glyphs* once their lists were mapped whole ([DARKMODE.md](DARKMODE.md#what-dark-mode-does)). Left: the dialogs whose commands stayed grayed or showed nothing in that state (*Create Instance*, *Compare Fonts*, *Adjust Stem Thickness*, *Replace Element Reference*, *Zoom*, *Autotrace*, *Paste Special*, and *Place As Glyphs*).
+1. Dark mode's remaining display defects. Every dialog FontLab's menus open has now been looked at (34 on 2026-11-24 with a static and a variable font open, the rest by the owner that day: *Create Instance*, *Place As Glyphs*, and *Compare Fonts* are dark; *Paste Special* and *Zoom* open no window of their own; *Adjust Stem Thickness* is not a FontLab 7 command). What the owner's review of that day found, still to fix, each to be looked at again in a fresh session first (a probe of that afternoon left dark mode unable to examine new widgets for a while, and some of these may be its doing):
+   - Dialogs and panels: *Overlay Fonts* (the sample text's edges, the name labels, the opacity dropdown), *Autotrace*'s slider handles, *Replace Element*'s two buttons, *Compare Fonts*' color dropdown, *Add Variation*'s dropdown as it opens, the *Actions* panel (its list's first row, small labels, an underlined unit), *FontAudit*'s captions and *TrueType Hinting*'s size numbers (colored fringes), the *Fonts* panel's style-link letter in its blue circle, panel titles while the mouse is over them, and the view buttons that keep stale painting.
+   - The Glyph window: text typed in its small fields, Matchmaker's dotted line, the Sketchboard's and the metrics table's text, and a pasted picture, which the canvas' mapping inverts.
+   - Speed: menus are slow to answer while many cells of a Font window are selected.
 
 ## Open work the tools' pages record
 

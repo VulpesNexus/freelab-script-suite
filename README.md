@@ -4,7 +4,7 @@ This is a comprehensive script suite for FontLab to help you build and manage yo
 
 It all started because I had wanted a dark theme for FontLab for ages. I was so happy to see that FontLab 8 came with one. I was not so happy when I found out I had to pay an extra $150 on top of the $200 I had already paid a year prior just to qualify for an upgrade. I want the fonts I make to be free, but I don't want to sacrifice the quality of the tools I use to make them. Thanks to the recent boom in AI, I finally had enough power to turn FontLab 7 into what I wish it were. The result of those efforts is what you see here, FreeLab Script Suite.
 
-**Status: 0.3.0.** Every tool below runs in FontLab 7.2 for Windows. Not done yet: a few FontLab calls are still to be proven live, dark mode has not been looked at in eight of FontLab's dialogs, and nothing has run on a Mac ([docs/ROADMAP.md](docs/ROADMAP.md)).
+**Status: 0.3.0.** Every tool below runs in FontLab 7.2 for Windows. Not done yet: a few FontLab calls are still to be proven live, dark mode still has display defects in some of FontLab's panels and dialogs, and nothing has run on a Mac ([docs/ROADMAP.md](docs/ROADMAP.md)).
 
 ![FontLab 7's main window: its own light look on the left, FreeLab's dark mode on the right](docs/images/dark-mode.png)
 

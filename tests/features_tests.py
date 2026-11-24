@@ -3041,10 +3041,20 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(highlighter.formats[0][2], fc.fea_color("keyword", True))
         # Long code shown plain; short code colored again
         document = highlighter.document
+
+        class Heading(object):
+            text = fc.CODE_HEADING
+
+            def setText(self, text):
+                self.text = text
+        dialog.code_heading = Heading()
         dialog.show_code(u"\n".join([u"sub a by b;"] * (fc.HIGHLIGHT_LINES + 1)))
         self.assertIsNone(highlighter.document)
         self.assertFalse(dialog.highlighting.attached)
+        # (said in the heading: the owner took plain code for a fault, 2026-11-24)
+        self.assertEqual(dialog.code_heading.text, u"Code preview (shown plain: more than 2,000 lines)")
         dialog.show_code(u"sub a by b;")
+        self.assertEqual(dialog.code_heading.text, fc.CODE_HEADING)
         self.assertIs(highlighter.document, document)
         self.assertTrue(dialog.highlighting.attached)
         # A highlighter that cannot be made: the box stays plain, and the code is shown

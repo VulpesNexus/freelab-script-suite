@@ -3453,6 +3453,9 @@ ALTERNATES_TAB = 2  # the third tab's index (its page is the tab's own module: f
 # The part under the tabs: "Code preview", not "Code" (owner's image 299: people must see that the code
 # shown is not in the font yet, and that Write the code writes it)
 CODE_HEADING = u"Code preview"
+# The heading over code too long to be colored, so that plain code is not taken for a fault (the owner,
+# 2026-11-24, on a font of 2,043 ligatures: "isn't code supposed to be color-coded?")
+CODE_HEADING_PLAIN = u"Code preview (shown plain: more than %s lines)"
 # The buttons that tick the glyphs taking turns, in the window's bottom row while the first tab is shown, in
 # the suite's order (Tick all, Untick all, then the tool's own): (key, label, what it does)
 TURN_CHECKS = (("all", u"Tick all", u"Ticks every glyph of <i>Alternates that take turns</i> whose alternates have no "
@@ -3885,7 +3888,8 @@ class FeatureCodeDialog(object):
         part.addWidget(self.ak.separator())
         # "Code preview" (owner's image 299: "Code" read as if it were the font's own), the same in every tool
         # that writes feature code
-        part.addWidget(describe(self.heading(QtGui, CODE_HEADING), what))
+        self.code_heading = self.heading(QtGui, CODE_HEADING)
+        part.addWidget(describe(self.code_heading, what))
         self.code = QtGui.QPlainTextEdit()
         self.code.setReadOnly(True)
         self.code.setWhatsThis(what)
@@ -5884,6 +5888,11 @@ class FeatureCodeDialog(object):
         self.code_text = text
         highlighting = self.highlighting
         long_code = text.count(u"\n") + 1 > HIGHLIGHT_LINES
+        try:  # (said in the heading: plain code read as a fault)
+            self.code_heading.setText(CODE_HEADING_PLAIN % grouped(HIGHLIGHT_LINES)
+                                      if highlighting is not None and long_code else CODE_HEADING)
+        except Exception:
+            pass
         if highlighting is not None and long_code:
             highlighting.detach()  # (before the text: none of its lines is colored)
         self.code.setPlainText(text)
