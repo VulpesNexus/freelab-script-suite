@@ -870,6 +870,38 @@ class ReviewOfNovember24Tests(unittest.TestCase):
             self.assertLess(pixel[0], core[0], "and weaker than the line")
         self.assertGreater(soft[0], softer[0], "more of the line, more red: a ramp, not steps")
 
+    def test_black_ink_on_a_list_dark_already_turns_light(self):
+        """Generate Instance's "Ag" beside each style: black on a list its stylesheet makes dark, too rare to be an
+        anchor, stayed dark on dark."""
+        paper, text, ink = (30, 30, 30), (220, 220, 220), (4, 4, 4)
+        rows = [[paper] * 40 for _ in range(20)]
+        for y in range(6, 14):
+            for x in range(4, 8):
+                rows[y][x] = ink
+            for x in range(20, 36, 2):
+                rows[y][x] = text
+        buf = pixels([color for row in rows for color in row])
+        array = (ctypes.c_char * len(buf)).from_buffer(buf)
+        LIB.freelab_map_anchors(ctypes.addressof(array), len(buf) // 4, 40, 6, dm.DARK_OKL, dm.LIGHT_OKL, 0.0,
+                                dm.DARK_OKL, 1)
+        out = lambda x, y: tuple(reversed(struct.unpack_from("<BBB", buf, 4 * (y * 40 + x))))
+        self.assertGreater(sum(out(5, 9)), 3 * 150, "the black ink light now")
+        self.assertEqual(out(1, 1), paper, "the paper as it was")
+        self.assertEqual(out(20, 9), text, "light text as it was")
+
+    def test_a_colored_letters_counter_is_the_paper_not_kept_text(self):
+        """An overlaid font's red O in a Font window cell: its counter, the cell's gray with red on every side,
+        was kept as light text on a colored band and stood light in the dark cell."""
+        paper, red = (183, 183, 184), (200, 59, 59)
+        rows = [[paper] * 40 for _ in range(40)]
+        for y in range(8, 32):
+            for x in range(8, 32):
+                if not (12 <= x < 28 and 12 <= y < 28):
+                    rows[y][x] = red
+        out = self.map(rows, 1, 1.0)
+        self.assertLess(sum(out[20][20]), sum(paper) - 200, "the counter dark, as the paper around the letter")
+        self.assertEqual(out[20][20], out[2][2], "the same as the paper outside")
+
     def test_dark_text_on_a_tag_is_mapped_from_its_darkest_channel_but_not_on_pure_white(self):
         """FontAudit's captions: ClearType's edges of thin dark text, turned over by their own lightness, were
         most of the text and dim. TrueType Hinting's preview, on pure white, shows those colors on purpose."""

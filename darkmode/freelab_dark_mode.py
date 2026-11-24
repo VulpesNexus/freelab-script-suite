@@ -227,7 +227,7 @@ SWEEP_MS = 500  # how often to look for widgets FontLab created or showed (750 w
 FULL_SWEEP_EVERY = 60  # every Nth sweep revisits every widget (replaced stylesheets, new icons): every 30 s
 FOCUS_DRAIN_MS = 80  # a window that takes focus is darkened at once, up to this long, before it paints light
 MAX_ERRORS = 50
-NATIVE_VERSION = 120
+NATIVE_VERSION = 122
 
 ID_PROP = "freelab_id"  # dynamic properties FreeLab sets on widgets, all removed by restore()
 SEEN_PROP = "freelab_seen"
@@ -2004,7 +2004,10 @@ def _effect_classes():
                                 # its stylesheet, or just mapped) keeps its blue and yellow edges through the
                                 # mapping; they are made gray after it. Found by tools/find_fringes.py on a
                                 # screenshot (Pairs & Phrases: 6,993 pairs of opposite hues, 4 after).
-                                kind == "ink" and bool(getattr(self, "freelab_view", False)))
+                                (kind == "ink" and bool(getattr(self, "freelab_view", False)))
+                                # an island of the interface (no colors kept: not a canvas), the Fonts panel's
+                                # list among them (5,240 pairs as drawn, 615 mapped, 233 defringed)
+                                or (kind == "island" and not self.freelab_keep_tint))
                     if kind == "ink" and getattr(self, "freelab_list", False):
                         # from the copy without logos: FontLab's logo, with its light fringe, showed through
                         # the cleaned logo's smoothing drawn over it

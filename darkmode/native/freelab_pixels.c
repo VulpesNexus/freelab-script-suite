@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 120
+#define FREELAB_PIXELS_VERSION 122
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -1739,7 +1739,7 @@ static int lighter_than_light_surface(uint32_t c, uint32_t surfaces)
  * turned over, dark, and every thin colored line came out as steps and dots (the owner, 2026-11-25:
  * "all color paths, contours and curves have this kind of jaggy edge"). Returns 0 where there is no light
  * main paper, or the pixel is no lighter mix of it (darker ink than any the paper could hold). */
-#define PAPER_MIN_HLS 0.8 /* the main paper of a light canvas */
+#define PAPER_MIN_HLS 0.6 /* the main paper of a light canvas (a Font window cell's gray, b7b7b8, is 0.72) */
 #define PAPER_MIN_COVER 0.04 /* less ink than this is the paper */
 #define PAPER_FULL_COVER 0.7 /* a mark as FontLab draws it: this much of the pure ink */
 static int paper_blend(uint32_t c, double dark_l, double light_l, double tint, uint32_t *out)
@@ -1948,10 +1948,14 @@ static int sharp_edge(const uint32_t *p, int64_t i, int64_t width, int64_t count
 #define LIGHT_ON_COLOR_MIN_HLS 0.2
 #define LIGHT_ON_COLOR_MAX_HLS 0.62
 #define LIGHT_ON_COLOR_THICK 3
+#define LIGHT_ON_COLOR_PAPER_NEAR 6 /* per channel: a pixel this near a paper's color is that paper */
 #define LIGHT_ON_COLOR_SAME_HUE_COS2 0.64 /* cos 0.8, squared */
 #define NEAR_BAND 0x10 /* the pixel is a band pixel; bits 1, 2, 4, 8: one within reach left, right, up, down */
 
 static uint8_t near_band[MAX_INDEXED];
+
+static int band_plain; /* set for an island of the interface: a band may be lighter, and nothing is "kept" */
+#define LIGHT_ON_COLOR_MAX_HLS_PLAIN 0.8 /* (the Fonts panel's disc, 7ebcff, is 0.75) */
 
 static int band_pixel(const uint8_t *q)
 {
@@ -1959,6 +1963,8 @@ static int band_pixel(const uint8_t *q)
     if (q[3] < ANCHOR_MIN_ALPHA || spread_of(q) < LIGHT_ON_COLOR_SPREAD)
         return 0;
     lq = lightness(q[2], q[1], q[0]);
+    if (band_plain)
+        return lq >= LIGHT_ON_COLOR_MIN_HLS && lq <= LIGHT_ON_COLOR_MAX_HLS_PLAIN;
     if (lq < LIGHT_ON_COLOR_MIN_HLS || lq > LIGHT_ON_COLOR_MAX_HLS)
         return 0;
     oklab_of(((uint32_t)q[2] << 16) | ((uint32_t)q[1] << 8) | q[0], &l, &chroma);
@@ -2017,6 +2023,8 @@ static int find_bands(const uint32_t *p, int64_t count, int64_t width)
     return 1;
 }
 
+static int near_rgb(uint32_t a, uint32_t b, int tolerance);
+
 static int light_on_kept_color(const uint32_t *p, int64_t i, int64_t width, int64_t count)
 {
     int64_t x, y, rows;
@@ -2028,6 +2036,18 @@ static int light_on_kept_color(const uint32_t *p, int64_t i, int64_t width, int6
     sides = (near_band[i] & 1) + ((near_band[i] >> 1) & 1) + ((near_band[i] >> 2) & 1) + ((near_band[i] >> 3) & 1);
     if (sides < 2)
         return 0; /* the quick test: no band within reach on two sides */
+    {
+        /* The paper itself is no text: the counter of a colored letter (an overlaid font's red O in a Font
+         * window cell) has the letter's color on every side, and kept as drawn, it stood light in the dark
+         * cell (the owner, 2026-11-25). Text on a colored band is lighter than any paper around. */
+        int a;
+        uint32_t own = p[i] & 0xffffffU;
+        for (a = 0; a < anchor_count; a++) {
+            if (anchors[a].surface && anchors[a].mapped
+                && near_rgb(pack(anchors[a].r, anchors[a].g, anchors[a].b), own, LIGHT_ON_COLOR_PAPER_NEAR))
+                return 0;
+        }
+    }
     x = i % width;
     y = i / width;
     rows = count / width;
@@ -2814,7 +2834,7 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
     uint32_t last_in = 0, last_out = 0;
     int have_last = 0, any_mapped = 0, j, local, tinted, last_edge = 0, glyph_icons = 0;
     uint32_t paper_bit, other_surfaces, other_surface_bits;
-    int white_marks = 0, fringes = 0, bands = 0, thin, badge, darkened = 0;
+    int white_marks = 0, fringes = 0, bands = 0, thin, badge, darkened = 0, plain_marks = 0;
     uint32_t left_orig = 0;
     double paper_hls;
     int64_t i, changed = 0;
@@ -2848,6 +2868,18 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
         else if (cleartype_fringe(p, i, width, count))
             white_mark[i] = 3;
     }
+    /* An island of the interface (everything mapped, no tint kept): light text on a strongly colored surface
+     * stays as drawn, as content's does on a surface it keeps. The Fonts panel's style links are a light letter
+     * on a light blue disc; turned over with the rest, the disc came out dark blue and the letter darker still
+     * (the owner, 2026-11-24 and 25: "hard-to-read black text"). */
+    plain_marks = (mode == ANCHORS_ALL || mode == ANCHORS_ICON) && !fringes && width > 0 && count <= MAX_INDEXED;
+    band_plain = plain_marks;
+    plain_marks = plain_marks && find_bands(p, count, width);
+    for (i = 0; plain_marks && i < count; i++) {
+        white_mark[i] = (uint8_t)((p[i] >> 24) >= ANCHOR_MIN_ALPHA && !(near_band[i] & NEAR_BAND)
+                                  && light_on_kept_color(p, i, width, count));
+    }
+    band_plain = 0;
     badge_count = 0;
     if (white_marks || fringes) {
         find_badge_colors(mode, dark_l, light_l, keep_tint);
@@ -2978,7 +3010,7 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
             }
             continue;
         }
-        if (white_marks && white_mark[i] == 1) { /* the mark and its smoothing toward the box */
+        if ((white_marks || plain_marks) && white_mark[i] == 1) { /* the mark and its smoothing toward the box */
             have_last = 0;
             continue;
         }

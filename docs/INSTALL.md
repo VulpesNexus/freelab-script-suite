@@ -45,4 +45,4 @@ macOS is not supported yet, and nothing has run on a Mac. FontLab 7 for macOS ha
 
 ## The tools folder
 
-*tools/* holds the installer (*install-fontlab.ps1*), the native libraries' build script (*build-native.ps1*), the test gate's Python 2.7 fetcher (*get-python27.ps1*), CJK Vertical's vertical metrics step for an exported font (*add_vertical_metrics.py*, see [VERTICAL.md](VERTICAL.md)), and the packer of a release's ready-made folder (*pack_release.py*, which builds the native libraries first and prints the archive's size and SHA-256).
+*tools/* holds the installer (*install-fontlab.ps1*), the native libraries' build script (*build-native.ps1*), the test gate's Python 2.7 fetcher (*get-python27.ps1*), CJK Vertical's vertical metrics step for an exported font (*add_vertical_metrics.py*, see [VERTICAL.md](VERTICAL.md)), *find_fringes.py*, which counts ClearType's colored edges left in a screenshot of dark mode and writes a sheet of the worst places, and the packer of a release's ready-made folder (*pack_release.py*, which builds the native libraries first and prints the archive's size and SHA-256).
