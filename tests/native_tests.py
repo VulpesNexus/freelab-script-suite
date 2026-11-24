@@ -851,6 +851,25 @@ class ReviewOfNovember24Tests(unittest.TestCase):
         self.assertGreater(sum(on_name), sum(on_pill) + 150, "the name clearly lighter than the pill it is on")
         self.assertLess(sum(out[1][1]), 3 * 100, "and the canvas dark")
 
+    def test_a_colored_lines_smoothing_fades_to_the_paper_on_a_canvas(self):
+        """The owner, 2026-11-25: every colored contour had a jagged edge. A line's full pixels were kept, light
+        and red, and its smoothing, judged pixel by pixel, was turned over to a dark red: steps and dots."""
+        paper, full, half, faint = (240, 240, 240), (255, 70, 70), (248, 155, 155), (243, 205, 205)
+        rows = [[paper] * 60 for _ in range(40)]
+        for y in range(5, 35):  # a slanted line: its core, and smoothing on each side
+            x = 10 + y
+            rows[y][x - 1], rows[y][x], rows[y][x + 1] = faint, full, half
+        out = self.map(rows, 1, 1.0)
+        ground, core, soft, softer = out[2][2], out[20][30], out[20][31], out[20][29]
+        self.assertLess(sum(ground), 3 * 80, "the canvas dark")
+        self.assertGreater(core[0], 200, "the line as red as drawn")
+        self.assertGreater(core[0] - core[1], 120)
+        for name, pixel in (("half", soft), ("faint", softer)):
+            self.assertGreater(pixel[0], pixel[1] + 10, "%s smoothing still red" % name)
+            self.assertGreater(pixel[0], ground[0] + 15, "and lighter than the canvas, not turned over below it")
+            self.assertLess(pixel[0], core[0], "and weaker than the line")
+        self.assertGreater(soft[0], softer[0], "more of the line, more red: a ramp, not steps")
+
     def test_dark_text_on_a_tag_is_mapped_from_its_darkest_channel_but_not_on_pure_white(self):
         """FontAudit's captions: ClearType's edges of thin dark text, turned over by their own lightness, were
         most of the text and dim. TrueType Hinting's preview, on pure white, shows those colors on purpose."""

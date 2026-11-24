@@ -227,7 +227,7 @@ SWEEP_MS = 500  # how often to look for widgets FontLab created or showed (750 w
 FULL_SWEEP_EVERY = 60  # every Nth sweep revisits every widget (replaced stylesheets, new icons): every 30 s
 FOCUS_DRAIN_MS = 80  # a window that takes focus is darkened at once, up to this long, before it paints light
 MAX_ERRORS = 50
-NATIVE_VERSION = 117
+NATIVE_VERSION = 120
 
 ID_PROP = "freelab_id"  # dynamic properties FreeLab sets on widgets, all removed by restore()
 SEEN_PROP = "freelab_seen"
@@ -1070,10 +1070,17 @@ def _darken_sheet(widget):
         widget.setStyleSheet(dark)
 
 
+WATCHER_REVISION = 2  # raised when the filter below learns another event: a session that loaded an older one
+
+
 def _watcher():
-    """The one event filter dark mode installs on restyled widgets (a QTimer: PythonQt has no QObject to subclass)."""
+    """The one event filter dark mode installs on watched widgets (a QTimer: PythonQt has no QObject to
+    subclass). A module loaded again in the same session makes its own when the one the session holds is an
+    older revision, which knew fewer events (the cursor's, November 25: the filter of the session's first
+    module went on answering, and no canvas' cursor was ever replaced); the older one is kept referenced, as
+    the widgets it is still installed on call it."""
     state = _state()
-    if state.get("watcher") is None:
+    if state.get("watcher") is None or state.get("watcher_revision") != WATCHER_REVISION:
         QTimer = _qt()[4]
 
         class StyleWatcher(QTimer):
@@ -1096,20 +1103,39 @@ def _watcher():
                     _note_error("watcher", exc)
                 return False
 
+        if state.get("watcher") is not None:
+            state.setdefault("old_watchers", []).append(state["watcher"])
         app = _qt()[0].instance()
         state["watcher"] = StyleWatcher(app) if app is not None else StyleWatcher()  # (held: see _new_timer)
+        state["watcher_revision"] = WATCHER_REVISION
     return state["watcher"]
 
 
 def _watch(widget):
-    if widget.property(WATCHED_PROP) is None:
-        widget.setProperty(WATCHED_PROP, True)
-        widget.installEventFilter(_watcher())
+    """The widget watched by this revision's filter (WATCHED_PROP holds the revision that watches it; True was
+    the first's)."""
+    seen = widget.property(WATCHED_PROP)
+    if seen == WATCHER_REVISION and seen is not True:
+        return
+    watcher = _watcher()
+    if seen is not None:
+        for old in _state().get("old_watchers", ()):
+            try:
+                widget.removeEventFilter(old)
+            except Exception:
+                pass
+    widget.setProperty(WATCHED_PROP, WATCHER_REVISION)
+    widget.installEventFilter(watcher)
 
 
 def _unwatch(widget):
     if widget.property(WATCHED_PROP) is not None:
         widget.removeEventFilter(_watcher())
+        for old in _state().get("old_watchers", ()):
+            try:
+                widget.removeEventFilter(old)
+            except Exception:
+                pass
         widget.setProperty(WATCHED_PROP, None)
 
 
@@ -1815,7 +1841,7 @@ def _effect_classes():
 
         def draw_mapped(painter, pixmap, offset, area, min_l, keys=None, ink_below=-1.0, keep_tint=0.0, light_l=None,
                         edge_neutral=0.0, edge_target=0, anchors=None, dark_l=None, gray=False, analyze=None,
-                        plain=False):
+                        plain=False, defringe=False):
             """Draw the part of pixmap that lands on `area` (painter coordinates), mapped.
 
             analyze: a larger rect (painter coordinates) whose pixels decide the mapping, of which
@@ -1836,14 +1862,17 @@ def _effect_classes():
                         part = gray_image(part)
                     mapped = part if plain else map_image(part, min_l, keys, ink_below, keep_tint, light_l, edge_neutral,
                                                           edge_target, anchors, dark_l)
+                    if defringe:
+                        mapped = defringe_image(mapped)
                     painter.drawImage(area.topLeft(), mapped, area.translated(-analyze.x(), -analyze.y()))
                     return
             if True:
                 part = pixmap.copy(area.translated(-offset.x(), -offset.y())).toImage()
                 if gray:
                     part = gray_image(part)
-                painter.drawImage(area.topLeft(), part if plain else map_image(
-                    part, min_l, keys, ink_below, keep_tint, light_l, edge_neutral, edge_target, anchors, dark_l))
+                mapped = part if plain else map_image(part, min_l, keys, ink_below, keep_tint, light_l, edge_neutral,
+                                                      edge_target, anchors, dark_l)
+                painter.drawImage(area.topLeft(), defringe_image(mapped) if defringe else mapped)
 
         class MapEffect(QGraphicsEffect):
             """Draw the widget with its colors mapped: by anchor blends (islands, ink, editors), or by key (frames)."""
@@ -1970,7 +1999,12 @@ def _effect_classes():
                     # a field, text typed in the Glyph window's small fields: the owner, November 24).
                     plain = gray and kind == "ink" and dark_ground(pixmap)
                     draw_mapped(painter, mapped_from, offset, whole, 0.0, None, -1.0, self.freelab_keep_tint, None, 0.0, 0,
-                                anchors, None, gray, QRect(whole) if kind in ("ink", "edges") else None, plain)
+                                anchors, None, gray, QRect(whole) if kind in ("ink", "edges") else None, plain,
+                                # A list's rows, a text view's lines: light text ClearType has drawn on the dark ground (dark by
+                                # its stylesheet, or just mapped) keeps its blue and yellow edges through the
+                                # mapping; they are made gray after it. Found by tools/find_fringes.py on a
+                                # screenshot (Pairs & Phrases: 6,993 pairs of opposite hues, 4 after).
+                                kind == "ink" and bool(getattr(self, "freelab_view", False)))
                     if kind == "ink" and getattr(self, "freelab_list", False):
                         # from the copy without logos: FontLab's logo, with its light fringe, showed through
                         # the cleaned logo's smoothing drawn over it
@@ -2616,6 +2650,19 @@ def _light_face_button(widget, look):
         return False
 
 
+def _own_sheet_ground(widget):
+    """Whether the widget's own stylesheet sets a background for the widget itself, by its object name
+    (QWidget#widgetButtons{background: ...}). Never raises."""
+    try:
+        name = _prop(widget, "objectName") or u""
+        sheet = _prop(widget, "styleSheet") or u""
+        if not name or u"#" + name not in sheet:
+            return False
+        return re.search(u"#" + re.escape(name) + u"\\s*\\{[^}]*background(-color)?\\s*:", sheet) is not None
+    except Exception:
+        return False
+
+
 def _light_faced_text_button(widget):
     """A tool button with text and no icon whose text the palette makes light, found to paint light all the
     same (the caller's ink detection). Never raises."""
@@ -3001,6 +3048,9 @@ def _set_effect(widget, record, kind, keys=None):
     # a list's rows (the font window's sidebar): drawn on nothing, gray sub-items and dark glyph icons are ink too
     parent = widget.parentWidget()
     effect.freelab_list = kind == "ink" and parent is not None and parent.inherits("QAbstractItemView")
+    # a list's or a text view's own area (the Output panel's too): its text's colored edges are made gray
+    # after the mapping (see draw_mapped's defringe)
+    effect.freelab_view = kind == "ink" and parent is not None and any(parent.inherits(c) for c in INK_VIEW_PARENTS)
     effect.setProperty(EFFECT_PROP, kind)
     widget.setGraphicsEffect(effect)  # deletes any effect FreeLab set before
     record["effect"], record["kind"] = effect, kind  # PythonQt deletes it if no Python reference is kept
@@ -3393,6 +3443,12 @@ def process(widget):
             _fix_cursor(widget)
         return
     _darken_sheet(widget)
+    if _own_sheet_ground(widget):
+        # Its stylesheet gives it a ground of its own, dark now: kept out of the mapping of any effect above
+        # it. Inside a table mapped as ink on its light paper, the dark block was ink, and came out light
+        # (the three buttons at the right of the Glyph window's metrics table, in a light box: the owner,
+        # November 25).
+        _protect(widget)
     if widget.inherits("QsciScintilla"):
         _recolor_editor(widget)  # after its stylesheet: a repolish could reset QScintilla's defaults
     if kind is None and visible_unchecked and _shows_white_artwork(widget):

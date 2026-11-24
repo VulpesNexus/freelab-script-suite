@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 117
+#define FREELAB_PIXELS_VERSION 120
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -905,6 +905,53 @@ static uint32_t all_color(uint32_t rgb, int mode, double dark_l, double light_l,
     return mapped_one(rgb, dark_l, light_l, keep_tint);
 }
 
+/* A list's rows on a paper dark already (a list dark by its stylesheet): a gray clearly darker than the paper is
+ * ink drawn for a light list, black on what is now dark (Generate Instance's "Ag" beside each style, the
+ * sample of the font in the Glyph window's bar: the owner, 2026-11-25). Too rare to be an anchor, it was left
+ * as drawn, dark on dark. It is taken for black ink over the paper, as much of it as it is darker, and comes
+ * out as that much of light text over the paper. Returns 0 where that does not hold. */
+#define DARK_INK_PAPER_HLS 0.3 /* the paper: this dark at most */
+#define DARK_INK_MIN_COVER 0.3 /* less ink than this is a shade of the paper (a field's rounded corner) */
+#define DARK_INK_SPREAD 30
+static int dark_list_ink(uint32_t rgb, double dark_l, double light_l, uint32_t *out)
+{
+    const Anchor *paper;
+    uint8_t px[3];
+    double k = 0.0, light[3];
+    uint32_t text;
+    int ch;
+    if (!mode_list || anchor_count < 1 || !anchors[0].surface || anchors[0].mapped)
+        return 0;
+    paper = &anchors[0];
+    if (lightness((uint8_t)paper->r, (uint8_t)paper->g, (uint8_t)paper->b) > DARK_INK_PAPER_HLS)
+        return 0;
+    px[2] = (uint8_t)(rgb >> 16);
+    px[1] = (uint8_t)(rgb >> 8);
+    px[0] = (uint8_t)rgb;
+    if (spread_of(px) > DARK_INK_SPREAD)
+        return 0;
+    {
+        double pc[3], cover;
+        pc[0] = paper->r; pc[1] = paper->g; pc[2] = paper->b;
+        for (ch = 0; ch < 3; ch++) {
+            double c = (double)((rgb >> (16 - 8 * ch)) & 255);
+            if (c >= pc[ch] || pc[ch] <= 0.0)
+                return 0; /* not darker than the paper */
+            cover = (pc[ch] - c) / pc[ch];
+            k += cover / 3.0;
+        }
+    }
+    if (k < DARK_INK_MIN_COVER)
+        return 0;
+    text = mapped_one(0x000000U, dark_l, light_l, 0.0); /* black ink as it turns: the light of text */
+    light[0] = (double)((text >> 16) & 255);
+    light[1] = (double)((text >> 8) & 255);
+    light[2] = (double)(text & 255);
+    *out = pack(paper->r + k * (light[0] - paper->r), paper->g + k * (light[1] - paper->g),
+                paper->b + k * (light[2] - paper->b));
+    return 1;
+}
+
 /* The fallback for a pixel no anchor or blend explains. */
 static uint32_t lone_color(uint32_t rgb, int mode, double dark_l, double light_l, double keep_tint)
 {
@@ -1683,9 +1730,81 @@ static int lighter_than_light_surface(uint32_t c, uint32_t surfaces)
     return l > surface_l + 0.01;
 }
 
+/* Content on its paper (a glyph canvas): a colored pixel that is no anchor is taken for ink over the main
+ * paper, as much of it as its distance from the paper says: the paper P, the pixel C = P + k (I - P), the ink
+ * I where that line leaves the colors there are (a channel at 0 or 255), k the coverage. It comes out as the
+ * paper as mapped plus k of the ink as content maps it (kept when clearly colored, turned over when not):
+ * a red contour's smoothing is red at half strength over the dark canvas, as it was over the light one.
+ * Before, each pixel was judged by its own color: a line's full pixels kept, light and red, its smoothing
+ * turned over, dark, and every thin colored line came out as steps and dots (the owner, 2026-11-25:
+ * "all color paths, contours and curves have this kind of jaggy edge"). Returns 0 where there is no light
+ * main paper, or the pixel is no lighter mix of it (darker ink than any the paper could hold). */
+#define PAPER_MIN_HLS 0.8 /* the main paper of a light canvas */
+#define PAPER_MIN_COVER 0.04 /* less ink than this is the paper */
+#define PAPER_FULL_COVER 0.7 /* a mark as FontLab draws it: this much of the pure ink */
+static int paper_blend(uint32_t c, double dark_l, double light_l, double tint, uint32_t *out)
+{
+    const Anchor *paper;
+    double pc[3], cc[3], ink[3], mapped[3], k = 0.0;
+    uint32_t ink_rgb, ink_out;
+    int ch;
+    if (anchor_count < 1 || !anchors[0].surface || !anchors[0].mapped)
+        return 0;
+    paper = &anchors[0];
+    if (lightness((uint8_t)paper->r, (uint8_t)paper->g, (uint8_t)paper->b) < PAPER_MIN_HLS)
+        return 0;
+    pc[0] = paper->r; pc[1] = paper->g; pc[2] = paper->b;
+    cc[0] = (double)((c >> 16) & 255); cc[1] = (double)((c >> 8) & 255); cc[2] = (double)(c & 255);
+    for (ch = 0; ch < 3; ch++) {
+        double d = cc[ch] - pc[ch], need;
+        if (d < 0.0)
+            need = pc[ch] > 0.0 ? -d / pc[ch] : 1.0;
+        else
+            need = pc[ch] < 255.0 ? d / (255.0 - pc[ch]) : (d > 0.0 ? 1.0 : 0.0);
+        if (need > k)
+            k = need;
+    }
+    if (k > 1.0)
+        k = 1.0;
+    if (k < PAPER_MIN_COVER) {
+        *out = pack(paper->mr, paper->mg, paper->mb);
+        return 1;
+    }
+    for (ch = 0; ch < 3; ch++) {
+        double v = pc[ch] + (cc[ch] - pc[ch]) / k;
+        ink[ch] = v < 0.0 ? 0.0 : v > 255.0 ? 255.0 : v;
+    }
+    ink_rgb = pack(ink[0], ink[1], ink[2]);
+    ink_out = all_color(ink_rgb, ANCHORS_ALL, dark_l, light_l, tint);
+    {
+        /* A line FontLab draws is seldom the full ink (its red is ff4646, 0.7 of pure red over the paper):
+         * the mark as drawn, at PAPER_FULL_COVER, keeps the strength it has, and thinner smoothing fades
+         * from it to the paper; past it, toward the pure ink. */
+        double mark[3], from[3], to[3], w;
+        uint32_t mark_out;
+        for (ch = 0; ch < 3; ch++)
+            mark[ch] = pc[ch] + PAPER_FULL_COVER * (ink[ch] - pc[ch]);
+        mark_out = all_color(pack(mark[0], mark[1], mark[2]), ANCHORS_ALL, dark_l, light_l, tint);
+        if (k <= PAPER_FULL_COVER) {
+            w = k / PAPER_FULL_COVER;
+            from[0] = paper->mr; from[1] = paper->mg; from[2] = paper->mb;
+            to[0] = (double)((mark_out >> 16) & 255); to[1] = (double)((mark_out >> 8) & 255); to[2] = (double)(mark_out & 255);
+        } else {
+            w = (k - PAPER_FULL_COVER) / (1.0 - PAPER_FULL_COVER);
+            from[0] = (double)((mark_out >> 16) & 255); from[1] = (double)((mark_out >> 8) & 255); from[2] = (double)(mark_out & 255);
+            to[0] = (double)((ink_out >> 16) & 255); to[1] = (double)((ink_out >> 8) & 255); to[2] = (double)(ink_out & 255);
+        }
+        for (ch = 0; ch < 3; ch++)
+            mapped[ch] = from[ch] + w * (to[ch] - from[ch]);
+    }
+    *out = pack(mapped[0], mapped[1], mapped[2]);
+    return 1;
+}
+
 static uint32_t resolve(uint32_t c, int translucent, uint32_t mask, int mode, double dark_l, double light_l,
                         double keep_tint, double tint)
 {
+    uint32_t blend_out = 0;
     double r = (double)((c >> 16) & 255), g = (double)((c >> 8) & 255), b = (double)(c & 255);
     double best = -1.0, t = 0.0;
     int a_i = -1, b_i = -1, j;
@@ -1711,6 +1830,8 @@ static uint32_t resolve(uint32_t c, int translucent, uint32_t mask, int mode, do
         if (anchors[j].r == r && anchors[j].g == g && anchors[j].b == b)
             return pack(anchors[j].mr, anchors[j].mg, anchors[j].mb);
     }
+    if (mode == ANCHORS_INK && dark_list_ink(c, dark_l, light_l, &blend_out))
+        return blend_out; /* (before any pair: a pair of kept anchors explains it as drawn) */
     if (mode == ANCHORS_INK && (mask & light_bits) && !(mask & main_bit)
         && !lighter_than_light_surface(c, mask & light_bits)) { /* inside it, not at its edge */
         /* Beside a light surface that turns dark (a selected row, a white thumbnail), everything
@@ -1762,6 +1883,9 @@ static uint32_t resolve(uint32_t c, int translucent, uint32_t mask, int mode, do
         if (spread_of(px) <= (tint > 0.0 ? TINTED_LINEAR_SPREAD : LINEAR_SPREAD))
             return all_color(c, mode, dark_l, light_l, tint);
     }
+    if (mode == ANCHORS_ALL && tint > 0.0 && paper_blend(c, dark_l, light_l, tint, &blend_out))
+        return blend_out; /* (before any pair: a line's color is seldom an anchor, and a far pair explained its
+                           * smoothing no better than chance) */
     if (!(mask && best_pair(r, g, b, mask, mask, LOCAL_BLEND_TOLERANCE, &a_i, &b_i, &t))
         && !best_pair(r, g, b, 0U, all, BLEND_TOLERANCE, &a_i, &b_i, &t))
         return lone_color(c, mode, dark_l, light_l, tint);
@@ -1963,6 +2087,7 @@ static int light_on_kept_color(const uint32_t *p, int64_t i, int64_t width, int6
 #define BOX_MAX_RUN 16
 #define WHITE_MARK_SAME_HUE_COS2 0.64 /* cos 0.8, squared */
 #define WHITE_MARK_CONTROL_HLS 0.45 /* a control's color is of middle lightness or lighter */
+#define WHITE_MARK_INK_REACH 3 /* px past the first colored pixel met: where a stroke's own color is */
 #define WHITE_MARK_ENCLOSED 6 /* px: the control's color around a mark, each way */
 #define WHITE_MARK_PURE_SPREAD 20 /* a white mark is pure white; its smoothing toward the box is colored */
 #define WHITE_MARK_TEST_HLS 0.6 /* pixels this light are tested: the mark, and its smoothing */
@@ -2004,6 +2129,29 @@ static int white_on_colored(const uint32_t *p, int64_t i, int64_t width, int64_t
                     || lightness(q[2], q[1], q[0]) > own - WHITE_MARK_STEP)
                     return 0;
                 found = 1;
+                { /* A mark stands in a control, a body of color. The white inside a colored letter (the counter
+                   * of an a, an A's triangle: Overlay Fonts' sample on its white row) has strokes around it:
+                   * where the color met, within a step or two (past its smoothing), is one of the picture's
+                   * anchors and no surface, it is ink, and the white is the row's. Kept as a mark, it stood
+                   * white in the dark row (the owner, 2026-11-25). */
+                    int64_t t;
+                    for (t = 0; t < WHITE_MARK_INK_REACH; t++) {
+                        int64_t tx = xx + sx * t, ty = yy + sy * t;
+                        uint32_t rgb;
+                        int a;
+                        if (tx < 0 || tx >= width || ty < 0 || ty >= rows)
+                            break;
+                        rgb = p[ty * width + tx] & 0xffffffU;
+                        for (a = 0; a < anchor_count; a++) {
+                            if (pack(anchors[a].r, anchors[a].g, anchors[a].b) == rgb) {
+                                if (!anchors[a].surface)
+                                    return 0;
+                                t = WHITE_MARK_INK_REACH;
+                                break;
+                            }
+                        }
+                    }
+                }
             }
             if (!found)
                 return 0;
@@ -2054,7 +2202,7 @@ static int white_on_colored(const uint32_t *p, int64_t i, int64_t width, int64_t
  * a gray letter's strokes are short), of low color (white_on_colored takes colored controls), darker
  * than the text, and of middle lightness (a dark gray tile behind white letters too). */
 #define BADGE_REACH 10 /* px: the badge's gray within this many pixels up and down (a capital's stem is 8 at the size of a cell's caption), */
-#define BADGE_REACH_ACROSS 24 /* and across (a line of digits' bars touch through their fringes) */
+#define BADGE_REACH_ACROSS 48 /* and across (a line of digits' bars touch through their fringes) */
 #define BADGE_MIN_HLS 0.3 /* a badge's gray is no darker (black text's counters are no badge text) */
 #define BADGE_TEXT_STEP 0.01 /* the text (its fringes too) is lighter than its badge by this much (HLS) */
 #define BADGE_LIGHT_HLS 0.5 /* what the walk crosses: the text and its fringes, this light at least */
@@ -2682,6 +2830,9 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
         thin_px[i] = 0;
     for (j = 0; j < anchor_count; j++)
         any_mapped |= anchors[j].mapped;
+    /* (a list on a dark paper may hold dark ink that is no anchor: see dark_list_ink) */
+    any_mapped |= mode_list && anchor_count > 0 && anchors[0].surface && !anchors[0].mapped
+                  && lightness((uint8_t)anchors[0].r, (uint8_t)anchors[0].g, (uint8_t)anchors[0].b) <= DARK_INK_PAPER_HLS;
     /* White marks and box edges are judged on the pixels as drawn, before any is mapped: mapped in
      * place first, a box's inside read as ink at its bottom and right edges. */
     white_marks = mode == ANCHORS_INK && width > 0 && count <= MAX_INDEXED;
