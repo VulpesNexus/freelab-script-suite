@@ -16,6 +16,8 @@ It all started because I had wanted a dark theme for FontLab for ages. I was so 
 | *Font Check*: the languages a font covers and the glyphs that would complete the most of the rest. | *Auto Kerning*: four methods side by side for each pair, previewed before anything is written. |
 | ![Glyph Compose listing letters with diacritics it can build, with an editor placing a macron and dieresis over A](docs/images/glyph-compose.png) | ![Feature Code listing a font's ligatures and alternates, with the feature code it would write](docs/images/feature-code.png) |
 | *Glyph Compose*: the letters with diacritics a font lacks, built from its own glyphs, each mark placed by hand where needed. | *Feature Code*: ligatures, alternates that take turns, and forms, with the code shown before it is written. |
+| ![Font Builder listing the characters of a Latin set, with the options of the template it would save](docs/images/font-builder.png) | ![The top of a template sheet: a band of marks, then a box for each character with its guide lines and the character printed faintly](docs/images/font-builder-template.png) |
+| *Font Builder*: the characters a template will hold, by set or typed, and how its sheets are laid out. | A template sheet: one box per glyph on the font's own guide lines, each character printed faintly, under the marks that let a drawn sheet be read back. |
 
 ![Proof showing a waterfall page of a PDF proof beside the list of its pages](docs/images/proof.png)
 
