@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 115
+#define FREELAB_PIXELS_VERSION 116
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -2390,23 +2390,31 @@ static uint32_t subpixel_color(uint32_t c, uint32_t mask, double dark_l, double 
 static int cleartype_fringe(const uint32_t *p, int64_t i, int64_t width, int64_t count)
 {
     const uint8_t *px = (const uint8_t *)&p[i];
-    double m, vr, vg, vb, norm;
+    double m, vr, vg, vb, norm2;
     int64_t x, d;
+    uint32_t own;
     if (spread_of(px) < CLEARTYPE_MIN_SPREAD)
-        return 0; /* first: most pixels stop here, before any square root */
+        return 0; /* first: most pixels stop here */
     m = (px[0] + px[1] + px[2]) / 3.0;
     vr = px[2] - m;
     vg = px[1] - m;
     vb = px[0] - m;
-    norm = sqrt_pos(vr * vr + vg * vg + vb * vb);
+    norm2 = vr * vr + vg * vg + vb * vb;
     x = i % width;
-    if (norm <= 0.0)
+    if (norm2 <= 0.0)
         return 0;
+    own = p[i] & 0xffffffU;
+    /* No square root, and a neighbor of the pixel's own color is passed at once: a tinted surface (a Font
+     * window's selected cells, pale blue, a million pixels of it) took a second to test, seven roots a pixel
+     * (the owner, 2026-11-24: menus slow to answer with many cells selected). The cosine test squared:
+     * dot / (|v| |q|) <= c, with c negative, is dot < 0 and dot * dot >= c * c * |v|^2 * |q|^2. */
     for (d = -CLEARTYPE_REACH; d <= CLEARTYPE_REACH; d++) {
         const uint8_t *q;
-        double qm, qr, qg, qb, qn;
+        double qm, qr, qg, qb, qn2, dot;
         if (d == 0 || x + d < 0 || x + d >= width || i + d >= count)
             continue;
+        if ((p[i + d] & 0xffffffU) == own)
+            continue; /* its own color: the same hue, never the opposite one */
         q = (const uint8_t *)&p[i + d];
         if (q[3] < ANCHOR_MIN_ALPHA || spread_of(q) < CLEARTYPE_MIN_SPREAD)
             continue;
@@ -2414,8 +2422,10 @@ static int cleartype_fringe(const uint32_t *p, int64_t i, int64_t width, int64_t
         qr = q[2] - qm;
         qg = q[1] - qm;
         qb = q[0] - qm;
-        qn = sqrt_pos(qr * qr + qg * qg + qb * qb);
-        if (qn > 0.0 && (vr * qr + vg * qg + vb * qb) / (norm * qn) <= CLEARTYPE_OPPOSITE_COS)
+        qn2 = qr * qr + qg * qg + qb * qb;
+        dot = vr * qr + vg * qg + vb * qb;
+        if (qn2 > 0.0 && dot < 0.0
+            && dot * dot >= CLEARTYPE_OPPOSITE_COS * CLEARTYPE_OPPOSITE_COS * norm2 * qn2)
             return 1;
     }
     return 0;
@@ -2487,7 +2497,7 @@ static int find_glyph_icons(const uint32_t *p, int64_t count, int64_t width)
     for (i = 0; i < count; i++)
         icon_px[i] = 0;
     for (i = 0; i < count; i++) {
-        int64_t head = 0, tail = 0, k, x0, x1, y0, y1, x, y, light = 0;
+        int64_t head = 0, tail = 0, k, x0, x1, y0, y1, x, y, light = 0, on_row = 0;
         uint32_t rgb = 0;
         const Anchor *a = NULL;
         int verdict, hole = 0, bare = 0;
@@ -2548,13 +2558,20 @@ static int find_glyph_icons(const uint32_t *p, int64_t count, int64_t width)
             for (x = x0; x <= x1; x++) {
                 int64_t at = y * width + x;
                 uint32_t v = p[at];
-                if ((v >> 24) >= ANCHOR_MIN_ALPHA && !light_row_pixel(at)
+                if ((v >> 24) >= ANCHOR_MIN_ALPHA && light_row_pixel(at))
+                    on_row++;
+                else if ((v >> 24) >= ANCHOR_MIN_ALPHA
                     && lightness((uint8_t)(v >> 16), (uint8_t)(v >> 8), (uint8_t)v) >= GLYPH_ICON_LIGHT_HLS)
                     light++;
             }
         }
-        /* light letters on it: a badge; a light pixel or two (a tag's hole): an icon */
-        if (light >= GLYPH_BADGE_MIN_LIGHT && (double)light >= GLYPH_BADGE_LIGHT_SHARE * (double)tail) {
+        /* light letters on it: a badge; a light pixel or two (a tag's hole): an icon. A shape whose box
+         * holds more of a light row than of other light pixels is text on that row, its smoothing toward
+         * the row being the light pixels: no badge (Overlay Fonts' sample, black on its selected row: the
+         * letters with counters were kept dark, light edges around them; the owner, 2026-11-24). A badge
+         * on a row fills its box but for its rounded corners. */
+        if (light >= GLYPH_BADGE_MIN_LIGHT && (double)light >= GLYPH_BADGE_LIGHT_SHARE * (double)tail && on_row <= light
+            && 2 * tail >= (x1 - x0 + 1) * (y1 - y0 + 1) && x1 - x0 >= 7 && y1 - y0 >= 7) { /* (and a badge fills half its box at least, and holds letters: a letter or its end does neither) */
             verdict = 3;
             for (y = y0; y <= y1; y++) { /* its letters and their smoothing too, as drawn */
                 for (x = x0; x <= x1; x++) {

@@ -233,6 +233,148 @@ class ShadeAndPickerTests(DarkModeCase):
         dm.run_queue()
         self.assertEqual(self.content.styleSheet, PANEL_SHEET)
 
+    def test_a_pickers_bare_declarations_are_wrapped(self):
+        """The owner, November 24: Overlay Fonts' opacity dropdown stayed white. Its stylesheet is "color:
+        lightGray;", declarations with no selector: with the frame's rule after them Qt read neither, drew a plain
+        button from the dark palette, and the picker's effect turned that light."""
+        picker = FakeWidget("QtColorPicker", "buttonColor", parent=self.content, sheet=u"color: lightGray;")
+        self.on()
+        self.assertEqual(picker.styleSheet, u"QtColorPicker{color: lightGray;}" + dm.PICKER_FRAME)
+        self.off()
+        self.assertEqual(picker.styleSheet, u"color: lightGray;")
+
+    def test_a_fields_ground_decides_whether_it_is_mapped(self):
+        """The owner, November 24: Actions' "Glyph" and "Baseline", a unit beside a field, and text typed in the
+        Glyph window's fields came out heavy or fringed; a white square stood in the corner of the metrics table."""
+        class Color(object):
+            def __init__(self, value):
+                self.value = value
+
+            @staticmethod
+            def fromRgba(value):
+                return Color(value)
+
+            def alpha(self):
+                return (self.value >> 24) & 255
+
+            def red(self):
+                return (self.value >> 16) & 255
+
+            def green(self):
+                return (self.value >> 8) & 255
+
+            def blue(self):
+                return self.value & 255
+
+        class Picture(object):
+            def __init__(self, corners, width=40, height=14):
+                self.corners, self.w, self.h = corners, width, height
+
+            def toImage(self):
+                return self
+
+            def width(self):
+                return self.w
+
+            def height(self):
+                return self.h
+
+            def pixel(self, x, y):
+                return self.corners[(x > self.w // 2) + 2 * (y > self.h // 2)]
+
+        class Rect(object):
+            def left(self):
+                return 2
+
+            def right(self):
+                return 30
+
+            def top(self):
+                return 1
+
+            def bottom(self):
+                return 12
+
+        self.patch("_gui", lambda name: Color if name == "QColor" else None)
+        dark, light, bare = 0xff1f1f1f, 0xffecf1f6, 0x00000000
+        self.assertTrue(dm.dark_ground(Picture([dark, dark, dark, dark])))
+        self.assertTrue(dm.dark_ground(Picture([dark, 0xffdbdbdb, dark, dark])), "a letter's end in one corner")
+        self.assertFalse(dm.dark_ground(Picture([bare, bare, bare, bare])), "drawn on nothing: judged with what is under it")
+        self.assertFalse(dm.dark_ground(Picture([light, light, light, light])), "a light field is mapped as ever")
+        self.assertFalse(dm.dark_ground(Picture([dark] * 4, width=3)), "too small to tell")
+        self.assertTrue(dm.light_ground(Picture([light, light, light, light]), Rect()))
+        self.assertTrue(dm.light_ground(Picture([light, dark, light, light]), Rect()))
+        self.assertFalse(dm.light_ground(Picture([dark, dark, light, light]), Rect()))
+        self.assertFalse(dm.light_ground(Picture([bare, bare, bare, bare]), Rect()))
+
+    def test_a_lists_wide_picture_is_no_logo(self):
+        """The owner, November 24: Overlay Fonts' sample text. A line of text drawn as a list's picture is mapped
+        with its row; drawn from its icon in a logo's square, it came out dark."""
+        class Size(object):
+            def __init__(self, w, h):
+                self.w, self.h = w, h
+
+            def width(self):
+                return self.w
+
+            def height(self):
+                return self.h
+
+        class Icon(FakeIcon):
+            def __init__(self, sizes):
+                FakeIcon.__init__(self)
+                self.sizes = sizes
+
+            def availableSizes(self):
+                return self.sizes
+
+        state = {"mapped_keys": set(), "icon_cache": {}, "originals": {}}
+        self.assertFalse(dm._logo_icon(Icon([Size(120, 24)]), state))
+        self.patch("icon_is_swatch", lambda icon: True)
+        self.assertTrue(dm._logo_icon(Icon([Size(32, 32)]), state), "a square picture goes on to the logo rules")
+
+    def test_a_menu_holds_the_pictures_under_it_but_not_its_own(self):
+        """The owner, November 24: menus slow to answer over a Font window. FontLab repaints its windows as the mouse
+        moves over a menu's entries."""
+        import sys as system
+        saved = getattr(system, "_freelab_paint_hold", None)
+        system._freelab_paint_hold = None
+        self.addCleanup(setattr, system, "_freelab_paint_hold", saved)
+
+        class Menu(object):
+            def isAncestorOf(self, widget):
+                return widget is inside
+
+            def inherits(self, name):
+                return name == "QMenu"
+
+        class Under(object):
+            def window(self):
+                return self
+
+            def inherits(self, name):
+                return False
+
+        menu, inside, under = Menu(), Under(), Under()
+        app = dm._qt()[0]
+        had = getattr(app, "activePopupWidget", None)
+        app.activePopupWidget = staticmethod(lambda: menu)
+
+        def restore():
+            if had is None:
+                del app.activePopupWidget
+            else:
+                app.activePopupWidget = had
+        self.addCleanup(restore)
+        hold = dm._paint_hold()
+        self.assertEqual(hold, (dm.POPUP_HOLD, id(menu)))
+        self.assertFalse(dm._held_in_popup(hold, under), "a window under the menu: held")
+        self.assertTrue(dm._held_in_popup(hold, inside), "the menu's own: painted as ever")
+        self.assertTrue(dm._held_in_popup(hold, menu))
+        self.assertFalse(dm._held_in_popup("a drag", inside), "a drag holds everything large")
+        app.activePopupWidget = staticmethod(lambda: None)
+        self.assertIsNone(dm._paint_hold())
+
     def test_color_pickers_get_a_dark_frame_and_lose_it(self):
         picker = FakeWidget("QtColorPicker", "colorMark", parent=self.content, sheet=u"QtColorPicker{color: lightGray;}")
         self.on()

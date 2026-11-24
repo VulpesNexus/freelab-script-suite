@@ -227,7 +227,7 @@ SWEEP_MS = 500  # how often to look for widgets FontLab created or showed (750 w
 FULL_SWEEP_EVERY = 60  # every Nth sweep revisits every widget (replaced stylesheets, new icons): every 30 s
 FOCUS_DRAIN_MS = 80  # a window that takes focus is darkened at once, up to this long, before it paints light
 MAX_ERRORS = 50
-NATIVE_VERSION = 115
+NATIVE_VERSION = 116
 
 ID_PROP = "freelab_id"  # dynamic properties FreeLab sets on widgets, all removed by restore()
 SEEN_PROP = "freelab_seen"
@@ -1510,6 +1510,9 @@ def _list_items(widget):
 
 
 LOGO_ROWS_MAX = 200  # visible rows looked at per paint
+LOGO_MAX_ASPECT = 2  # wider than this many times its height, a list's picture is no logo: a line of text, mapped
+# with its row (drawn from its icon in a logo's square, Overlay Fonts' sample text came out dark with light
+# edges over its first letters: the owner, November 24)
 LOGO_MIN_SIDE = 24  # a list icon drawn this large or larger is a picture (Export Profiles' formats are 32 px)
 
 
@@ -1586,7 +1589,10 @@ def _logo_icon(icon, state):
     jagged."""
     key = icon.cacheKey()
     mapped = key in state["mapped_keys"]
-    large = any(s.width() >= LOGO_MIN_SIDE for s in icon.availableSizes())  # a picture, not a line icon
+    sizes = icon.availableSizes()
+    if any(s.width() > LOGO_MAX_ASPECT * s.height() for s in sizes):
+        return False  # a line of sample text (Overlay Fonts' "AaGg123"), not a logo: the row's mapping draws it
+    large = any(s.width() >= LOGO_MIN_SIDE for s in sizes)  # a picture, not a line icon
     if mapped:
         return icon if large else False  # dark already: its own smoothing, over the dark row
     if icon_is_swatch(icon):
@@ -1729,6 +1735,10 @@ INK_VIEW_PARENTS = ("QAbstractItemView", "QTextEdit", "QPlainTextEdit", "QtnProp
 # "Name: Encoding: None Index" selectors): any effect draws it through a transparent image, where text
 # gets grayscale smoothing; the ink mapping leaves light text as it is.
 GRAYSCALE_TEXT_CLASSES = ("YSelector",)
+# Tables of small figures FontLab draws with ClearType on a light ground: mapped as ink, their digits kept
+# orange and blue fringes on the dark cells (the Glyph window's metrics table: the owner, November 24). Drawn
+# in grays before the mapping, as fields are.
+GRAY_INK_CLASSES = ("MetricsTable",)
 STYLE_DRAWN_BUTTONS = ("QRadioButton", "QCheckBox", "QPushButton")  # never ink by render detection
 # Bars dark mode's stylesheet already darkens inside a window drawn through the ink effect: kept
 # out of its mapping (which garbled their labels) and drawn with their text's ClearType fringes
@@ -1776,7 +1786,8 @@ def _effect_classes():
             return pixmap, offset
 
         def draw_mapped(painter, pixmap, offset, area, min_l, keys=None, ink_below=-1.0, keep_tint=0.0, light_l=None,
-                        edge_neutral=0.0, edge_target=0, anchors=None, dark_l=None, gray=False, analyze=None):
+                        edge_neutral=0.0, edge_target=0, anchors=None, dark_l=None, gray=False, analyze=None,
+                        plain=False):
             """Draw the part of pixmap that lands on `area` (painter coordinates), mapped.
 
             analyze: a larger rect (painter coordinates) whose pixels decide the mapping, of which
@@ -1795,16 +1806,16 @@ def _effect_classes():
                     part = pixmap.copy(analyze.translated(-offset.x(), -offset.y())).toImage()
                     if gray:
                         part = gray_image(part)
-                    mapped = map_image(part, min_l, keys, ink_below, keep_tint, light_l, edge_neutral, edge_target,
-                                       anchors, dark_l)
+                    mapped = part if plain else map_image(part, min_l, keys, ink_below, keep_tint, light_l, edge_neutral,
+                                                          edge_target, anchors, dark_l)
                     painter.drawImage(area.topLeft(), mapped, area.translated(-analyze.x(), -analyze.y()))
                     return
             if True:
                 part = pixmap.copy(area.translated(-offset.x(), -offset.y())).toImage()
                 if gray:
                     part = gray_image(part)
-                painter.drawImage(area.topLeft(), map_image(part, min_l, keys, ink_below, keep_tint, light_l, edge_neutral,
-                                                            edge_target, anchors, dark_l))
+                painter.drawImage(area.topLeft(), part if plain else map_image(
+                    part, min_l, keys, ink_below, keep_tint, light_l, edge_neutral, edge_target, anchors, dark_l))
 
         class MapEffect(QGraphicsEffect):
             """Draw the widget with its colors mapped: by anchor blends (islands, ink, editors), or by key (frames)."""
@@ -1824,7 +1835,7 @@ def _effect_classes():
                 """The widget's picture held for this drag drawn (see HOLD_PIXELS): True when it was."""
                 try:
                     box = self.sourceBoundingRect(Qt.LogicalCoordinates).toAlignedRect()
-                    if box.width() * box.height() < HOLD_PIXELS:
+                    if box.width() * box.height() < HOLD_PIXELS or _held_in_popup(hold, self.freelab_widget):
                         return False
 
                     def paint():
@@ -1925,8 +1936,13 @@ def _effect_classes():
                     logos, mapped_from = (logo_places(self), pixmap) if kind == "ink" else ([], pixmap)
                     if logos:
                         mapped_from = without_logos(pixmap, logos)
+                    # A field or a selector drawn light on a dark ground already (its stylesheet's, or the dark
+                    # palette's): grayed, never mapped. Mapped, so small a picture has no ground to judge by,
+                    # and its text came out doubled and heavy (Actions' "Glyph" and "Baseline", a unit beside
+                    # a field, text typed in the Glyph window's small fields: the owner, November 24).
+                    plain = gray and kind == "ink" and dark_ground(pixmap)
                     draw_mapped(painter, mapped_from, offset, whole, 0.0, None, -1.0, self.freelab_keep_tint, None, 0.0, 0,
-                                anchors, None, gray, QRect(whole) if kind in ("ink", "edges") else None)
+                                anchors, None, gray, QRect(whole) if kind in ("ink", "edges") else None, plain)
                     if kind == "ink" and getattr(self, "freelab_list", False):
                         # from the copy without logos: FontLab's logo, with its light fringe, showed through
                         # the cleaned logo's smoothing drawn over it
@@ -2025,8 +2041,17 @@ def _effect_classes():
                 corner = widget.mapTo(owner, QPoint(0, 0))
                 area = QRect(corner.x() + offset.x(), corner.y() + offset.y(), _prop(widget, "width"),
                              _prop(widget, "height")).intersected(QRect(offset, pixmap.size()))
-                if not area.isEmpty():
-                    painter.drawPixmap(area.topLeft(), pixmap, area.translated(-offset.x(), -offset.y()))
+                if area.isEmpty():
+                    continue
+                local = area.translated(-offset.x(), -offset.y())
+                record = _record(widget, create=False)
+                if record is not None and record.get("kind") == "ink" and light_ground(pixmap, local):
+                    # A selector or a field with an effect of its own, drawn on nothing, where its parent
+                    # paints a light ground under it: left to the parent's mapping. Drawn as it is, the
+                    # ground came with it: a white square in the corner of the Glyph window's metrics table
+                    # (the owner, November 24). On a ground dark already (the Font window's bar) it is kept.
+                    continue
+                painter.drawPixmap(area.topLeft(), pixmap, local)
 
         class TitleEffect(QGraphicsEffect):
             """Draw a panel as it is, then its title strip mapped."""
@@ -2067,15 +2092,37 @@ HOLD_PIXELS = 150000  # smaller widgets are mapped in a millisecond or two: neve
 
 
 def _paint_hold():
-    """The drag large widgets' pictures are held for (any value that names it), or None. Never raises."""
+    """What large widgets' pictures are held for (any value that names it), or None: a drag tab docking
+    follows, or an open menu or dropdown list (POPUP_HOLD and the popup's own identity). Never raises."""
     try:
         import sys
         hold = getattr(sys, "_freelab_paint_hold", None)
         if hold and time.time() < hold[1]:
             return hold[0]
+        popup = _qt()[0].activePopupWidget()
+        if popup is not None:
+            return (POPUP_HOLD, id(popup))
     except Exception:
         pass
     return None
+
+
+# While a menu or a dropdown list is open, the widgets under it are held too: FontLab repaints its windows as
+# the mouse moves over a menu's entries, and each repaint drew and mapped a Font window anew (the owner,
+# November 24: with many cells selected, "menus and such laggy and mostly unresponsive"). The popup's own
+# widgets are never held: its rows change as the mouse moves.
+POPUP_HOLD = "popup"
+
+
+def _held_in_popup(hold, widget):
+    """Whether a widget is part of the popup its pictures would be held for (then it is painted as ever)."""
+    try:
+        if not (isinstance(hold, tuple) and hold and hold[0] == POPUP_HOLD):
+            return False
+        popup = _qt()[0].activePopupWidget()
+        return popup is None or widget is popup or popup.isAncestorOf(widget) or widget.window().inherits("QMenu")
+    except Exception:
+        return True
 
 
 def _held():
@@ -2165,6 +2212,52 @@ def editor_margin(pixmap):
 
 MARGIN_SAMPLES = 16
 MARGIN_WHITE_SHARE = 0.25  # digits cover a column now and then; the paper beside the margin is never white
+
+
+DARK_GROUND_L = 0.3  # a ground this dark needs no mapping (dark mode's own grays are darker)
+
+
+LIGHT_GROUND_L = 0.6
+LIGHT_GROUND_INSET = 3
+
+
+def light_ground(pixmap, rect):
+    """True when a rectangle of a picture stands on a light, opaque ground: three at least of four points just
+    inside its corners (LIGHT_GROUND_INSET pixels in: at the very corners, a field with rounded corners shows
+    what is under it, and a field drawn dark on a light canvas read as light and was mapped a second time).
+    Never raises."""
+    try:
+        QColor = _gui("QColor")
+        image = pixmap.toImage()
+        light = 0
+        inset = max(0, min(LIGHT_GROUND_INSET, (rect.right() - rect.left()) // 4, (rect.bottom() - rect.top()) // 4))
+        for x, y in ((rect.left() + inset, rect.top() + inset), (rect.right() - inset, rect.top() + inset),
+                     (rect.left() + inset, rect.bottom() - inset), (rect.right() - inset, rect.bottom() - inset)):
+            if 0 <= x < image.width() and 0 <= y < image.height():
+                color = QColor.fromRgba(image.pixel(x, y))
+                light += color.alpha() >= 200 and _lightness(color.red(), color.green(), color.blue()) >= LIGHT_GROUND_L
+        return light >= 3
+    except Exception:
+        return False
+
+
+def dark_ground(pixmap):
+    """True when a small widget's picture stands on a dark, opaque ground: three of its four corners at least
+    (one may hold a letter's end or a frame's rounding). A transparent ground is none: its text is judged with
+    what it stands on, by the mapping. Never raises."""
+    try:
+        QColor = _gui("QColor")
+        image = pixmap.toImage()
+        width, height = image.width(), image.height()
+        if width < 4 or height < 4:
+            return False
+        dark = 0
+        for x, y in ((1, 1), (width - 2, 1), (1, height - 2), (width - 2, height - 2)):
+            color = QColor.fromRgba(image.pixel(x, y))
+            dark += color.alpha() >= 200 and _lightness(color.red(), color.green(), color.blue()) < DARK_GROUND_L
+        return dark >= 3
+    except Exception:
+        return False
 
 
 def light_paper(pixmap, margin):
@@ -2454,7 +2547,10 @@ def _frame_picker(widget):
     own = _prop(widget, "styleSheet") or u""
     if own == widget.property(DARK_SHEET_PROP):
         return
-    framed = own + PICKER_FRAME
+    # (declarations with no selector, as Overlay Fonts' "color: lightGray;": followed by a rule, Qt reads
+    # neither, the picker was drawn as a plain button from the dark palette, and its effect turned that light:
+    # the owner, November 24, "the opacity dropdown still being white")
+    framed = (u"QtColorPicker{%s}" % own if own.strip() and u"{" not in own else own) + PICKER_FRAME
     widget.setProperty(SHEET_PROP, own)
     widget.setProperty(DARK_SHEET_PROP, framed)
     widget.setStyleSheet(framed)
@@ -2737,7 +2833,8 @@ def _forget_effect(widget):
 
 def _gray_text(widget):
     """Fields and selectors: drawn in grays before mapping (their light text's ClearType fringes)."""
-    return (_class_name(widget) in GRAYSCALE_TEXT_CLASSES or widget.inherits("QLineEdit")
+    return (_class_name(widget) in GRAYSCALE_TEXT_CLASSES or _class_name(widget) in GRAY_INK_CLASSES
+            or widget.inherits("QLineEdit")
             or (_class_name(widget) == "QLabel" and _prop(widget, "objectName") in GRAYSCALE_TEXT_NAMES))
 
 
@@ -3080,7 +3177,14 @@ def process(widget):
         _note_sheet_as_seen(widget)  # "dark interface" mode: canvases, font cells, and previews keep FontLab's look
         _protect(widget)  # and the ink effect of the window around them must not map them (garbled cells)
         return
-    if _island_ancestor(widget, canvas) is not None:
+    island = _island_ancestor(widget, canvas)
+    if island is not None and widget.inherits("QLineEdit") and is_content(island):
+        # A field FontLab puts on a canvas (the Glyph window's width and sidebearing fields, as they are
+        # typed in): a field like any other, its stylesheet darkened and its text drawn in grays, kept out of
+        # the canvas' mapping, which keeps colors and so kept ClearType's orange and blue around the digits
+        # (the owner, November 24).
+        island = None
+    if island is not None:
         _undo_widget(widget, keep_props=True, keep_placeholder=True)  # the island maps it as drawn in light mode
         _set_placeholder(widget)
         _show_original_icon(widget)
