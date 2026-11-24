@@ -636,6 +636,12 @@ def poll():
         return
     chosen = _options()
     point = cursor_pos()
+    # (a tick that comes late: FontLab was busy meanwhile, as when its blue highlight comes up; kept in the
+    # drag's trace, to tell where a stall the owner sees falls)
+    now, last = time.time(), drag.get("tick")
+    drag["tick"] = now
+    if last is not None and now - last > STALL_SECONDS:
+        _trace(drag, "stalled %d ms" % ((now - last) * 1000))
     if button_down():
         if not drag["started"]:
             moved = abs(point.x() - drag["start"].x()) + abs(point.y() - drag["start"].y())
@@ -676,8 +682,8 @@ def poll():
     # (else released away: a window of its own, as FontLab made it)
 
 
+STALL_SECONDS = 0.2  # a poll tick this late (they come every POLL_MS) is noted in the drag's trace
 HOLD_REVERTS = 2  # how many times the tab shown is put back under a held press, before FontLab is let be
-DROP_TIMER_FAST_MS = 1  # FontLab's wait before its blue drop highlight, for a window dragged by its title bar
 TRACE_AFTER_MS = (100, 300, 600, 1000, 1500)  # after a release, when FontLab's own drop is looked at again
 
 
@@ -723,14 +729,16 @@ def _drop_parts(frame):
 def follow_drop(drag):
     """FontLab's own drop target on the main window, each step of a drag. Never raises.
 
-    - A tab dragged out of the main window: FontLab's blue highlight came up over the document area the tab
-      had just left, and a release there put the tab back, which made undocking hard (the owner,
-      2026-11-24: a tab is put back by dragging it to the tab bar). Its drop timer is stopped before it
-      fires, and the highlight hidden should it show all the same.
-    - A window dragged by its title bar, or a tab of one: the highlight came half a second late (the owner,
-      2026-11-23 and 24). The timer, once FontLab has started it, is started again with almost no wait.
+    A tab dragged out of the main window: FontLab's blue highlight came up over the document area the tab
+    had just left, and a release there put the tab back, which made undocking hard (the owner, 2026-11-24).
+    The highlight is hidden while the drag is young (grace_over), then left to FontLab.
+
+    (The frame's QTimer, taken for FontLab's wait before the highlight, never ran in 25 drags followed live
+    on 2026-11-24: it is only read here, for the trace. The wait and the stall the owner saw as the
+    highlight came up were dark mode's, mapping the widgets under it at each repaint.)
 
     What is seen is kept (_trace), to be read when the owner reports how it went."""
+    hold_paint(drag)
     try:
         frame = drag.get("frame")
         if frame is None or not _alive(frame):
@@ -750,12 +758,49 @@ def follow_drop(drag):
         if not _options()["reorder"]:
             return
         if drag.get("from_main") and not drag.get("own") and not drag.get("window"):
-            if active:
-                timer.stop()
-            if lit:
+            if not grace_over(drag, frame) and lit:
                 highlight.hide()
-        elif active and interval > DROP_TIMER_FAST_MS:
-            timer.start(DROP_TIMER_FAST_MS)
+    except Exception:
+        pass
+
+
+HIGHLIGHT_GRACE_SECONDS = 1.5  # how long a tab just dragged out is not offered its own area back
+
+
+def grace_over(drag, frame):
+    """Whether a tab dragged out of the main window may be offered the main window again. Not at first: the
+    blue highlight over the area the tab had just left made undocking hard (the owner, 2026-11-24). Once the
+    tab has been held HIGHLIGHT_GRACE_SECONDS, or the mouse has left the document area, FontLab's highlight
+    is its own again: hidden at every step for the whole drag, it flashed and went each time FontLab showed
+    it, as if the tab could never be docked back (the owner, the same day). Never raises."""
+    try:
+        if drag.get("grace_over"):
+            return True
+        begun = drag.setdefault("followed", time.time())
+        over = time.time() - begun >= HIGHLIGHT_GRACE_SECONDS
+        if not over:
+            local = frame.mapFromGlobal(cursor_pos())
+            over = not (0 <= local.x() < frame.width and 0 <= local.y() < frame.height)
+        if over:
+            drag["grace_over"] = True
+            _trace(drag, "the highlight is FontLab's again")
+        return over
+    except Exception:
+        return True
+
+
+PAINT_HOLD_SECONDS = 1.5  # how long after a drag's last step dark mode still holds its pictures
+
+
+def hold_paint(drag):
+    """Dark mode told a drag is on, at each of its steps: it holds large widgets' pictures meanwhile, in place
+    of mapping each anew at every repaint under FontLab's blue highlight (see its HOLD_PIXELS; a window
+    dragged over the main window stalled for 2.1 seconds each time the highlight came up, the owner,
+    2026-11-24). Left on sys, which both modules read: neither imports the other. Never raises."""
+    try:
+        import sys
+        now = time.time()
+        sys._freelab_paint_hold = (drag.setdefault("hold", now), now + PAINT_HOLD_SECONDS)
     except Exception:
         pass
 

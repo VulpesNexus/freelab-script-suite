@@ -1294,6 +1294,20 @@ class OnOffTests(DarkModeCase):
         dm.run_queue()
         self.assertTrue(seen and all(seen))
 
+    def test_fontlabs_drop_highlight_is_never_rendered_to_be_looked_at(self):
+        """The owner, November 24: every drag of a window over the main window stalled for two seconds as the
+        blue highlight came up. It grows step by step, and at each size it was rendered and its pixels counted."""
+        self.on()
+        looked = []
+        self.patch("detect_light", lambda widget: looked.append(widget))
+        self.patch("detect_ink", lambda widget: looked.append(widget))
+        highlight = FakeWidget("YDropHighlight", parent=self.content)
+        plain = FakeWidget("QWidget", parent=self.content)
+        for widget in (highlight, plain):
+            dm.process(widget)
+        self.assertEqual(looked, [plain, plain], "the plain one is looked at (light, then ink); the highlight never")
+        self.assertIsNone(highlight.graphicsEffect())
+
     def test_restore_keeps_a_stylesheet_fontlab_replaced(self):
         self.on()
         self.content.setStyleSheet(u"QWidget{color:red;}")
@@ -1649,11 +1663,16 @@ class TitleBarTests(DarkModeCase):
         QPalette = dm._gui("QPalette")
         self.on()
         self.assertIsNotNone(cells.effect)
-        self.assertTrue(cells.autoFillBackground)
+        # (in its stylesheet, drawn by the style: the palette's color did not outlast a repolish, and a font
+        # window merged back into the main window came out light under its cells, the owner, November 24)
         light = dm._state()["saved"]["palette"].color(QPalette.Window).name()
-        self.assertEqual(cells.palette.color(QPalette.Window).name(), light)
+        self.assertIn(u"FontCellChart{background-color:%s;}" % light, cells.styleSheet)
+        styled = dm._core("Qt").WA_StyledBackground
+        self.assertTrue(cells.testAttribute(styled))
+        self.assertIsNone(dm._chart_fill_rule(self.odd), "a cell chart only")
         self.off()
-        self.assertFalse(cells.autoFillBackground, "as FontLab had it")
+        self.assertFalse(cells.testAttribute(styled), "as FontLab had it")
+        self.assertNotIn(u"background-color:%s" % light, cells.styleSheet or u"")
 
     def test_a_freelab_windows_caption_is_never_taken_for_ink(self):
         """The owner, November 24: Font Builder's Ink darker than: looked blurrier than Make: beside it. It had
@@ -1684,6 +1703,46 @@ class TitleBarTests(DarkModeCase):
             self.assertIsNone(dm.detect_ink(label))
         finally:
             dm._shows_picture, dm.own_render = saved
+
+    def test_large_widgets_pictures_are_held_for_the_length_of_a_drag(self):
+        """The owner, November 24: dragging a window over the main window stalled for seconds as FontLab's blue
+        highlight came up, and not with dark mode off. Each repaint under the highlight drew and mapped the
+        widget anew (111 ms for a font window, read live); Qt keeps no picture of a widget for its effect."""
+        import sys as system
+        import time as clock
+        saved = (getattr(system, "_freelab_paint_hold", None), getattr(system, "_freelab_held", None))
+        system._freelab_held = None
+
+        def restore():
+            system._freelab_paint_hold, system._freelab_held = saved
+        self.addCleanup(restore)
+
+        class Effect(object):
+            updates = 0
+
+            def update(self):
+                self.updates += 1
+
+        system._freelab_paint_hold = None
+        self.assertIsNone(dm._paint_hold(), "no drag")
+        system._freelab_paint_hold = ("drag 1", clock.time() - 0.1)
+        self.assertIsNone(dm._paint_hold(), "a drag whose time is past: tab docking stopped saying so")
+        system._freelab_paint_hold = ("drag 1", clock.time() + 60)
+        self.assertEqual(dm._paint_hold(), "drag 1")
+        effect, painted = Effect(), []
+
+        def paint():
+            painted.append(1)
+            return "picture %d" % len(painted)
+        box = (0, 0, 1715, 1329)
+        self.assertEqual(dm._held_picture(effect, "drag 1", box, paint), "picture 1")
+        self.assertEqual(dm._held_picture(effect, "drag 1", box, paint), "picture 1", "held: not painted again")
+        self.assertEqual(dm._held_picture(effect, "drag 1", (0, 0, 900, 1329), paint), "picture 2", "another size")
+        self.assertEqual(dm._held_picture(effect, "drag 2", (0, 0, 900, 1329), paint), "picture 3", "another drag")
+        self.assertEqual(dm._release_held(), 0, "a drag is on: held still")
+        system._freelab_paint_hold = ("drag 2", clock.time() - 0.1)
+        self.assertEqual((dm._release_held(), effect.updates, dm._held()), (1, 1, {}), "let go, and repainted")
+        self.assertEqual(dm._release_held(), 0)
 
     def test_whats_this_help_has_no_dashed_edge(self):
         """The owner, November 23 (image 22): the help's right and bottom sides were dashed. Qt dots its shadow

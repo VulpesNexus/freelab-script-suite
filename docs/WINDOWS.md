@@ -90,7 +90,7 @@ FontLab 7 makes a window of every document tab dropped anywhere, even on the tab
 - While a tab is dragged, a marker on the main window's tab bar shows where it will go.
 - Released on the bar or within 40 pixels of it, the tab goes into the main window at that place, from the main window or from a window of its own, so tabs reorder by dragging. Released farther away, it becomes a window of its own, as FontLab makes it.
 - A window of its own gets a *Dock* button beside its tabs, and a double-click on one of its tabs docks it. Dragged by its title bar, it docks when released with the mouse on the main tab bar or within 12 pixels of it.
-- A tab dragged out of the main window gets no blue drop highlight from FontLab over the area it left: FreeLab stops FontLab's drop timer, since a release there put the tab back. Put a tab back by dragging it to the tab bar. For a window of its own, FontLab's highlight comes without its half-second wait.
+- A tab just dragged out of the main window gets no blue drop highlight from FontLab over the area it left, since a release there put the tab back: FreeLab hides it for the first 1.5 seconds of the drag, or until the mouse leaves the document area, and after that the highlight is FontLab's own again, so the tab can be dropped back there (or on the tab bar at any time). A window's highlight is FontLab's own throughout.
 
 *Tabs cannot be undocked.* (unticked at first):
 

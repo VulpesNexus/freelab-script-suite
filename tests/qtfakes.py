@@ -79,6 +79,7 @@ for _role in ROLES:
 
 class Qt(object):
     WA_SetPalette = 13
+    WA_StyledBackground = 93
     LogicalCoordinates = 0
 
 
@@ -341,7 +342,17 @@ class FakeWidget(QObject):
         self.set_palette = palette.resolve() != 0
 
     def testAttribute(self, attribute):
-        return attribute == Qt.WA_SetPalette and self.set_palette
+        if attribute == Qt.WA_SetPalette:
+            return self.set_palette
+        return attribute in getattr(self, "attributes", ())
+
+    def setAttribute(self, attribute, on=True):
+        kept = set(getattr(self, "attributes", ()))
+        if on:
+            kept.add(attribute)
+        else:
+            kept.discard(attribute)
+        self.attributes = kept
 
     def setPixmap(self, pixmap):
         self.pixmap = pixmap

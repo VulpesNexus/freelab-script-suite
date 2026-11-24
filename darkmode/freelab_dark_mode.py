@@ -1795,6 +1795,42 @@ def _effect_classes():
             """Draw the widget with its colors mapped: by anchor blends (islands, ink, editors), or by key (frames)."""
 
             def draw(self, painter):
+                # (timed: where a slow repaint's time goes is read from _paint_times when one is reported,
+                # as the stall the owner saw when FontLab's blue drop highlight came up, November 24)
+                began = time.time()
+                try:
+                    hold = _paint_hold()
+                    if hold is None or not self.draw_held(painter, hold):
+                        self.paint_mapped(painter)
+                finally:
+                    _paint_timed(self, (time.time() - began) * 1000.0)
+
+            def draw_held(self, painter, hold):
+                """The widget's picture held for this drag drawn (see HOLD_PIXELS): True when it was."""
+                try:
+                    box = self.sourceBoundingRect(Qt.LogicalCoordinates).toAlignedRect()
+                    if box.width() * box.height() < HOLD_PIXELS:
+                        return False
+
+                    def paint():
+                        QImage, QPainter = _gui("QImage"), _gui("QPainter")
+                        image = QImage(box.size(), QImage.Format_ARGB32_Premultiplied)
+                        image.fill(Qt.transparent)
+                        inner = QPainter(image)
+                        try:
+                            inner.translate(-box.x(), -box.y())
+                            self.paint_mapped(inner)
+                        finally:
+                            inner.end()
+                        return image
+                    picture = _held_picture(self, hold, (box.x(), box.y(), box.width(), box.height()), paint)
+                    painter.drawImage(box.topLeft(), picture)
+                    return True
+                except Exception as exc:
+                    _note_error("held", exc)
+                    return False
+
+            def paint_mapped(self, painter):
                 try:
                     pixmap, offset = source(self)
                     whole = QRect(offset, pixmap.size())
@@ -2002,6 +2038,95 @@ def _effect_classes():
         _EFFECTS["map"] = MapEffect
         _EFFECTS["title"] = TitleEffect
     return _EFFECTS
+
+
+# Large widgets' pictures held for the length of a drag. FontLab's blue drop highlight, as it comes up over
+# the document area, makes every widget under it repaint, time after time, and Qt keeps no picture of a
+# widget for its effect: each repaint drew the widget and mapped it anew (measured live, November 24: 111 ms
+# for a font window of 1,715 by 1,329 pixels with its cell chart inside, and a window dragged over the main
+# window stalled for 2.1 seconds each time the highlight came up; with dark mode off, no stall). While tab
+# docking says a drag is on (sys._freelab_paint_hold, written at each step of a drag, which no longer
+# counts once its time is past), a large widget is painted once and that picture drawn at each repaint. What
+# changes inside one during the drag shows when the drag is over (_release_held).
+HOLD_PIXELS = 150000  # smaller widgets are mapped in a millisecond or two: never held
+
+
+def _paint_hold():
+    """The drag large widgets' pictures are held for (any value that names it), or None. Never raises."""
+    try:
+        import sys
+        hold = getattr(sys, "_freelab_paint_hold", None)
+        if hold and time.time() < hold[1]:
+            return hold[0]
+    except Exception:
+        pass
+    return None
+
+
+def _held():
+    """{id(effect): (the drag, (x, y, width, height), the picture, the effect)}; on sys, to outlast a reload."""
+    import sys
+    found = getattr(sys, "_freelab_held", None)
+    if found is None:
+        found = sys._freelab_held = {}
+    return found
+
+
+def _held_picture(effect, hold, rect, paint):
+    """The picture of an effect's widget for this drag: the one held, or paint() called and its result held."""
+    held = _held()
+    kept = held.get(id(effect))
+    if kept is None or kept[0] != hold or kept[1] != rect:
+        kept = held[id(effect)] = (hold, rect, paint(), effect)
+    return kept[2]
+
+
+def _release_held():
+    """The held pictures let go once no drag is on, and their widgets repainted. Never raises."""
+    try:
+        held = _held()
+        if not held or _paint_hold() is not None:
+            return 0
+        effects = [kept[3] for kept in held.values()]
+        held.clear()
+        for effect in effects:
+            try:
+                effect.update()
+            except Exception:
+                pass
+        return len(effects)
+    except Exception:
+        return 0
+
+
+PAINT_SLOW_MS = 30.0  # a mapped repaint this long is kept in _paint_times' list
+PAINT_KEPT = 60
+
+
+def _paint_times():
+    """The time dark mode's effects take to repaint: {"count", "ms", "slow": the last PAINT_KEPT repaints of
+    PAINT_SLOW_MS or more, each (clock time, ms, class, name, width, height, kind)}. Kept on sys, so that it
+    outlasts a reload."""
+    import sys
+    found = getattr(sys, "_freelab_paint_times", None)
+    if found is None:
+        found = sys._freelab_paint_times = {"count": 0, "ms": 0.0, "slow": []}
+    return found
+
+
+def _paint_timed(effect, ms):
+    """One mapped repaint counted (_paint_times). Never raises: it runs inside a paint."""
+    try:
+        times = _paint_times()
+        times["count"] += 1
+        times["ms"] += ms
+        if ms >= PAINT_SLOW_MS:
+            widget = effect.freelab_widget
+            times["slow"].append((time.strftime("%H:%M:%S"), int(ms), _class_name(widget), _prop(widget, "objectName"),
+                                  _prop(widget, "width"), _prop(widget, "height"), effect.freelab_kind))
+            del times["slow"][:-PAINT_KEPT]
+    except Exception:
+        pass
 
 
 def editor_margin(pixmap):
@@ -2657,6 +2782,9 @@ def _make_island(widget):
     text_rule = ISLAND_TEXT.get((_class_name(widget), _prop(widget, "objectName")))
     if text_rule:
         combined = (combined + u"\n" + text_rule).strip()
+    fill_rule = _chart_fill_rule(widget)
+    if fill_rule:
+        combined = (combined + u"\n" + fill_rule).strip()
     if combined != own:
         widget.setProperty(SHEET_PROP, own)
         widget.setProperty(DARK_SHEET_PROP, combined)
@@ -2671,23 +2799,36 @@ def _make_island(widget):
 FILLED_ISLANDS = ("FontCellChart", "CellChart")  # cell charts: they paint their cells and nothing between or after them
 
 
+def _chart_fill_rule(widget):
+    """The stylesheet rule that fills a cell chart in FontLab's light window color (which the chart's island
+    effect maps to the dark one), or None for any other widget. In the stylesheet, since a color given through
+    the palette does not outlast a repolish: a font window merged back into the main window came out with its
+    room under the cells light (the owner, November 24; read live: the palette's window color back at the
+    dark one after a repolish, which the effect then mapped light, and still the light one with this rule)."""
+    try:
+        name = _class_name(widget)
+        if not _is_one_of(widget, name, FILLED_ISLANDS):
+            return None
+        return u"%s{background-color:%s;}" % (name, _state()["saved"]["palette"].color(_gui("QPalette").Window).name())
+    except Exception:
+        return None
+
+
 def _fill_chart(widget, record):
-    """A cell chart made to fill itself, in FontLab's light window color, which its island effect maps to the
-    dark one. The chart paints its cells only: where a strip has fewer glyphs than it has room for (the glyph
-    window's bar of glyphs), the light background of the widget behind showed through as a white band, since
-    an effect leaves the place of an inner effect's widget unmapped (the owner, November 24; tried live: the
-    band read #f4f4f4, and #2a2a2a, the bar's own, once the chart filled itself). Taken back with the island
-    (the record's "autofill" and "palette"). Never raises."""
+    """A cell chart made to fill itself (its stylesheet's background, _chart_fill_rule, drawn by the style:
+    WA_StyledBackground; Qt takes autoFillBackground off a widget whose stylesheet has a background). The
+    chart paints its cells only: where a strip has fewer glyphs than it has room for (the glyph window's bar
+    of glyphs), the light background of the widget behind showed through as a white band, since an effect
+    leaves the place of an inner effect's widget unmapped (the owner, November 24; tried live: the band read
+    #f4f4f4, and #2a2a2a, the bar's own, once the chart filled itself). Taken back with the island (the
+    record's "styled"). Never raises."""
     try:
         if not _is_one_of(widget, _class_name(widget), FILLED_ISLANDS):
             return
-        QPalette = _gui("QPalette")
-        palette = QPalette(_prop(widget, "palette"))
-        palette.setColor(QPalette.Window, _state()["saved"]["palette"].color(QPalette.Window))
-        widget.setPalette(palette)
-        if "autofill" not in record:
-            record["autofill"] = bool(_prop(widget, "autoFillBackground"))
-        widget.setAutoFillBackground(True)
+        attribute = _core("Qt").WA_StyledBackground
+        if "styled" not in record:
+            record["styled"] = bool(widget.testAttribute(attribute))
+        widget.setAttribute(attribute, True)
     except Exception as exc:
         _note_error("chart fill", exc)
 
@@ -2741,6 +2882,8 @@ def _undo_widget(widget, keep_props=False, keep_placeholder=False):
             widget.setPalette(palette if palette is not None else _gui("QPalette")())  # empty: inherit again
         if "autofill" in record:
             widget.setAutoFillBackground(record.pop("autofill"))
+        if "styled" in record:
+            widget.setAttribute(_core("Qt").WA_StyledBackground, record.pop("styled"))
         if "sci" in record:
             try:
                 _restore_editor(widget, record)
@@ -2876,6 +3019,14 @@ def dark_title_bars(dark):
 # Work queue
 # ---------------------------------------------------------------------------
 
+# Widgets never rendered to see what they paint. FontLab's blue drop highlight, made anew at each drag,
+# grows over the document area step by step: at each size it was one not looked at yet, and was rendered and
+# its pixels counted again, 82 ms each time, some 26 times: every drag of a window over the main window
+# stalled for 2.1 to 2.2 seconds as the highlight came up (profiled live in the owner's drag, November 24:
+# 4.6 of 7.4 seconds in ink_count). It paints a translucent blue and nothing to map.
+NEVER_DETECTED = ("YDropHighlight",)
+
+
 def process(widget):
     """Darken one widget, or hand it to the island that contains it.
 
@@ -2897,6 +3048,8 @@ def process(widget):
     if visible_unchecked:
         widget.setProperty(CHECKED_PROP, _size_key(widget))  # sweeps need not queue it again at this size
     name = _class_name(widget)
+    if name in NEVER_DETECTED:
+        visible_unchecked = False
     if name == "QtColorPicker":
         _frame_picker(widget)
         _set_effect(widget, _record(widget), "picker")
@@ -3036,6 +3189,7 @@ def _sweep():
     app = _qt()[0].instance()
     if app is None:
         return
+    _release_held()
     state["sweeps"] += 1
     full = state["sweeps"] % FULL_SWEEP_EVERY == 0
     known = state.setdefault("known", {})

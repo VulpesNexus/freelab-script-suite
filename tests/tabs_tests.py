@@ -992,29 +992,58 @@ class DragTests(StateCase):
         self.patch("_class", lambda widget: getattr(widget, "kind", ""))
         return frame, timer, light
 
-    def test_a_tab_dragged_out_gets_no_drop_highlight(self):
+    def test_a_tab_dragged_out_gets_no_drop_highlight_at_first(self):
         """The owner, 2026-11-24: the blue highlight came up over the area the tab had just left, and made
-        undocking hard. FontLab's drop timer is stopped, and the highlight hidden should it show."""
+        undocking hard; hidden for the whole drag, it flashed and went each time FontLab showed it. It is hidden
+        while the drag is young, and FontLab's own once the tab has been held a while or the mouse has left the
+        document area."""
         frame, timer, light = self.drop_frame()
+        frame.width, frame.height = 1000, 800
+        frame.mapFromGlobal = lambda point: point
         self.set_options(True, False)
+        self.at = Point(500, 400)
         drag = {"frame": frame, "from_main": True, "own": False, "tabs": None}
         ft.follow_drop(drag)
-        self.assertEqual((timer.calls, light.visible), (["stop"], False))
-        self.assertIn("drop timer running (500 ms), highlight shown", drag["trace"][-1][1])
+        self.assertEqual((timer.calls, light.visible), ([], False), "hidden; the timer is only read")
+        light.visible = True
+        drag["followed"] -= ft.HIGHLIGHT_GRACE_SECONDS + 0.1  # (held long enough)
         ft.follow_drop(drag)
-        self.assertEqual(timer.calls, ["stop"], "idle now: left alone")
+        self.assertTrue(light.visible, "FontLab's own again")
+        self.assertIn("the highlight is FontLab's again", [step[1] for step in drag["trace"][1:]])
+        away = {"frame": frame, "from_main": True, "own": False, "tabs": None}
+        self.at = Point(1500, 400)  # (the mouse has left the document area)
+        light.visible = True
+        ft.follow_drop(away)
+        self.assertTrue(light.visible)
+        self.at = Point(500, 400)
+        ft.follow_drop(away)
+        self.assertTrue(light.visible, "and stays FontLab's once it is")
         ft.follow_drop({"from_main": True})  # (no main window: nothing raised)
 
-    def test_a_window_dragged_gets_its_highlight_at_once(self):
-        """The owner, 2026-11-23 and 24: the highlight lagged half a second. FontLab's timer is started again
-        with almost no wait; without reorder it is FontLab's own."""
-        frame, timer, light = self.drop_frame(lit=False)
-        self.set_options(True, False)
-        drag = {"frame": frame, "from_main": False, "window": True}
+    def test_a_drag_tells_dark_mode_to_hold_its_pictures(self):
+        """The owner, 2026-11-24: a window dragged over the main window stalled for seconds with dark mode on."""
+        import sys as system
+        import time as clock
+        saved = getattr(system, "_freelab_paint_hold", None)
+
+        def restore():
+            system._freelab_paint_hold = saved
+        self.addCleanup(restore)
+        drag = {"from_main": False, "window": True}
+        ft.follow_drop(drag)  # (no main window found: said all the same)
+        name, until = system._freelab_paint_hold
+        self.assertEqual(name, drag["hold"])
+        self.assertTrue(clock.time() < until <= clock.time() + ft.PAINT_HOLD_SECONDS)
         ft.follow_drop(drag)
-        ft.follow_drop(drag)
-        self.assertEqual(timer.calls, [ft.DROP_TIMER_FAST_MS], "once: it is short already")
+        self.assertEqual(system._freelab_paint_hold[0], name, "one drag, one name")
+
+    def test_a_dragged_windows_highlight_is_fontlabs_own(self):
+        """The frame's timer, taken for FontLab's wait before the highlight, never ran in 25 drags followed
+        live (2026-11-24): it is only read, and a window's highlight is never touched."""
         frame, timer, light = self.drop_frame()
+        self.set_options(True, False)
+        ft.follow_drop({"frame": frame, "from_main": False, "window": True})
+        self.assertEqual((timer.calls, light.visible), ([], True))
         self.set_options(False, True)
         ft.follow_drop({"frame": frame, "from_main": True, "own": False})
         self.assertEqual((timer.calls, light.visible), ([], True), "reorder off: FontLab's own drop")

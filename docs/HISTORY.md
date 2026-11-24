@@ -21,6 +21,8 @@ How each tool came to work as it does: what it did before, what it does now, and
 - Before only colored pixels went through the pair search, a font window full of smoothed glyphs took 215 ms to map.
 - 2026-11-24: The glyph window's bar of glyphs showed a white band beside its cells when a font had fewer glyphs than the bar had room for. A cell chart paints its cells only, and the light background of the widget behind it showed through. A cell chart now fills itself, in a color its effect maps to the bar's dark one.
 - 2026-11-24: Font Builder's *Ink darker than:* caption looked blurrier than *Make:* beside it. Dark mode had taken the label for fixed dark ink and given it the ink effect, and text drawn through an effect loses ClearType. Labels of FreeLab's own windows are drawn from the palette and are no longer looked at for ink.
+- 2026-11-24: Dragging a window over the main window stalled for two or three seconds as FontLab's blue highlight came up, and again at the merge; with dark mode off, it did not. A profile of the owner's own drag named the cause: the highlight grows step by step, and dark mode rendered it and counted its pixels at each new size, 4.6 of the 7.4 seconds profiled. It is no longer looked at. Two earlier guesses went to the repaints under it: a cache keyed on Qt's source pixmap, which never hit (Qt keeps none for a widget), then large widgets' pictures held for the length of a drag, which stays (111 ms a repaint down to 1).
+- 2026-11-24: A font window merged back into the main window came out light under its cells: the fill color a cell chart had been given that morning, through its palette, did not outlast the repolish a move between windows makes. It is now set in the chart's stylesheet.
 
 ## Auto Kerning and Kerning Check
 
