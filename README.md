@@ -4,7 +4,7 @@ This is a comprehensive script suite for FontLab to help you build and manage yo
 
 It all started because I had wanted a dark theme for FontLab for ages. I was so happy to see that FontLab 8 came with one. I was not so happy when I found out I had to pay an extra $150 on top of the $200 I had already paid a year prior just to qualify for an upgrade. I want the fonts I make to be free, but I don't want to sacrifice the quality of the tools I use to make them. Thanks to the recent boom in AI, I finally had enough power to turn FontLab 7 into what I wish it were. The result of those efforts is what you see here, FreeLab Script Suite.
 
-**Status: 0.3.0.** Every tool below runs in FontLab 7.2 for Windows. Not done yet: a few FontLab calls are still to be proven live (what its export writes, among them), dark mode has not been looked at in each of FontLab's dialogs, and nothing has run on a Mac ([docs/ROADMAP.md](docs/ROADMAP.md)).
+**Status: 0.3.0.** Every tool below runs in FontLab 7.2 for Windows. Not done yet: a few FontLab calls are still to be proven live, dark mode has not been looked at in eight of FontLab's dialogs, and nothing has run on a Mac ([docs/ROADMAP.md](docs/ROADMAP.md)).
 
 ![FontLab 7's main window: its own light look on the left, FreeLab's dark mode on the right](docs/images/dark-mode.png)
 
@@ -38,7 +38,7 @@ Each opens from *Scripts > FreeLab* and runs inside FontLab 7.
 - *Family Audit* compares the fonts of a family before they become masters (glyph sets, glyph structure, font info, kerning, and feature code), and *Assemble as masters* makes a new font with a master per source: [docs/FAMILY-AUDIT.md](docs/FAMILY-AUDIT.md).
 - *Proof* makes a PDF proof of the current font from its own outlines, for the current master or each one: [docs/PROOF.md](docs/PROOF.md).
 - *Font Check* ranks the glyphs to add by the languages they would complete, checks character sets, suggests vertical metrics, and compares the masters' outlines where they do not interpolate: [docs/FONT-CHECK.md](docs/FONT-CHECK.md).
-- *Tab Docking* puts a document tab released on or near FontLab's tab bar back in at that place, so tabs reorder by dragging, and can keep tabs from being undocked at all; it starts at launch: [docs/WINDOWS.md](docs/WINDOWS.md#tab-docking).
+- *Tab Docking* puts a document tab released on or near FontLab's tab bar back in at that place, so tabs reorder by dragging, gives each undocked window a *Dock* button that puts its tabs back, and can keep tabs from being undocked at all (*Tab Docking Settings*); it starts at launch: [docs/WINDOWS.md](docs/WINDOWS.md#tab-docking).
 
 Each open font has its own FreeLab window, named after it; its tools menu and arrows open the other tools. Writes go into FontLab's History, so *Edit > Undo* takes them back. What every window shares: [docs/WINDOWS.md](docs/WINDOWS.md).
 
@@ -50,9 +50,11 @@ Each open font has its own FreeLab window, named after it; its tools menu and ar
 
 ## Install
 
-1. Start FontLab once, so that it writes its startup script, then quit it.
-2. For Font Check's lists in every script, unpack *FreeLang-Extras.zip* from a [release](https://github.com/VulpesNexus/freelab-script-suite/releases) into *checks/language_font*.
-3. Run *tools/install-fontlab.ps1*. It copies the tools into FontLab's user *Scripts* folder, adds a block to FontLab's startup script, and builds the native libraries. `-Uninstall` takes it all out again.
+1. Download a [release](https://github.com/VulpesNexus/freelab-script-suite/releases)'s source code and unpack it, or clone this repository.
+2. Optional, for Font Check's lists in every script: unpack the release's *FreeLang-Extras.zip* into *checks/language_font*.
+3. Start FontLab once, so that it writes its startup script, then quit it.
+4. Run *tools/install-fontlab.ps1* in PowerShell. It copies the tools into FontLab's user *Scripts* folder, adds a block to FontLab's startup script, and builds the native libraries. `-Uninstall` takes it all out again.
+5. Start FontLab: the tools are under *Scripts > FreeLab*.
 
 What the installer writes, and what it keeps: [docs/INSTALL.md](docs/INSTALL.md).
 
@@ -78,7 +80,7 @@ It runs every suite under Python 3, then the suites of the scripts FontLab runs 
 - [docs/ROADMAP.md](docs/ROADMAP.md): what comes next.
 - [docs/HISTORY.md](docs/HISTORY.md): how the tools got to where they are.
 - [docs/FEATURE-SURVEY.md](docs/FEATURE-SURVEY.md): what already exists for dark mode, kerning, diacritics, and feature code.
-- FreeLab MCP, the separate `freelab-mcp` repository, lets an AI app such as Claude Code read and drive the font open in FontLab. Neither needs the other; installed together, they share *Scripts > FreeLab*, and the MCP's window tools drive FreeLab's windows as a user would ([docs/WINDOWS.md](docs/WINDOWS.md#driving-freelab-with-freelab-mcp)).
+- [FreeLab MCP](https://github.com/VulpesNexus/freelab-mcp), a separate repository, lets an AI app such as Claude Code read and drive the font open in FontLab. Neither needs the other; installed together, they share *Scripts > FreeLab*, and the MCP's window tools drive FreeLab's windows as a user would ([docs/WINDOWS.md](docs/WINDOWS.md#driving-freelab-with-freelab-mcp)).
 
 ## License
 
