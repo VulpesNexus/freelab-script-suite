@@ -216,7 +216,9 @@ def document_tab_widgets():
             try:
                 for widget in window.findChildren(tab_class):
                     pair = _document_tab(widget)
-                    if pair is not None:
+                    # (once each: a window of its own is a top-level window and a child of the main window too,
+                    # and came twice, read live 2026-11-24)
+                    if pair is not None and not any(pair[0] == known for known, _ in found):
                         found.append(pair)
             except Exception:
                 continue
@@ -987,37 +989,46 @@ def merge_window(frame):
     actions = [a for a in main.findChildren(QtGui.QAction) if a.objectName == MERGE_WINDOW]
     if not actions:
         return _fail(u"FontLab's Merge Window command was not found.")
+    asked = time.time()
     frame.raise_()
     frame.activateWindow()
     active = None
     for attempt in range(ACTIVATE_TRIES):
-        QtGui.QApplication.processEvents()
+        # (looked at before any event is processed: a window just dropped is the active one already, and
+        # processing FontLab's pending events first was most of a dock's wait, read live 2026-11-24)
         try:
             active = QtGui.QApplication.activeWindow()
         except Exception:
             active = None  # not known: merged as before
-        if actions[0].isEnabled() and (active is None or active is frame or _class(active) != "YFrameWindow"):
+        if actions[0].isEnabled() and (active is None or active is frame or active == frame
+                                       or _class(active) != "YFrameWindow"):
             break
+        QtGui.QApplication.processEvents()
         time.sleep(ACTIVATE_WAIT)
         if attempt == ACTIVATE_TRIES // 2:
             frame.activateWindow()  # (asked once more: another window had taken the activation back)
     if not actions[0].isEnabled():
         return _fail(u"FontLab's Merge Window command stayed unavailable for %s (the active window: %s)."
                      % (_describe(frame), _describe(active)))
-    if active is not None and active is not frame and _class(active) == "YFrameWindow":
+    if active is not None and active is not frame and active != frame and _class(active) == "YFrameWindow":
         # another window of its own is still the active one: Merge Window would merge that one
         return _fail(u"another window stayed the active one (%s), not %s." % (_describe(active), _describe(frame)))
     began = time.time()
     actions[0].trigger()
     QtGui.QApplication.processEvents()
-    _note("Merge Window took %d ms (%d tries to make its window active)" % ((time.time() - began) * 1000, attempt + 1),
-          "merges")
+    _note("Merge Window took %d ms, after %d ms to make its window active (%d tries)" % (
+        (time.time() - began) * 1000, (began - asked) * 1000, attempt + 1), "merges")
     return True
 
 
 def dock(page, target=None):
     """Put a document tab into the main window (merging the window that holds it), at target if given;
     a window it left empty is closed (FontLab keeps it open, and merging it does nothing)."""
+    steps, began = [], time.time()
+
+    def step(name):
+        steps.append("%s %d ms" % (name, (time.time() - began) * 1000))
+
     bar, main = main_tabs()
     if main is None:
         return _fail(u"the main window's tabs were not found.")
@@ -1028,6 +1039,7 @@ def dock(page, target=None):
             return _fail(u"the tab's window was not found (FontLab may have moved the tab since).")
         if not merge_window(frame):
             return False
+        step("merged at")
         at = main.indexOf(page)
         if at < 0:
             return _fail(u"FontLab's Merge Window ran, but the tab is not in the main window.")
@@ -1036,13 +1048,19 @@ def dock(page, target=None):
         target = max(0, min(target, bar.count - 1))
         if target != at:
             bar.moveTab(at, target)
+    step("moved at")
     for widget, frame in document_tab_widgets():
         if frame.isWindow() and frame.isVisible() and widget.count == 0:
             frame.close()
+    step("empty windows closed at")
     main.setCurrentIndex(main.indexOf(page))
+    step("tab chosen at")
     window = main_window()
     if window is not None:
         window.activateWindow()
+    step("main window made active at")
+    # (where a dock's time goes, kept to be read when the owner reports a slow one: state["merges"])
+    _note("dock: " + ", ".join(steps), "merges")
     return True
 
 
