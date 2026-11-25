@@ -55,6 +55,7 @@ $files = @(
     @{ From = 'kerning\freelab_kerning_check.py'; Name = 'freelab_kerning_check.py' },
     @{ From = 'checks\freelab_font_check.py'; Name = 'freelab_font_check.py' },
     @{ From = 'compare\freelab_font_compare.py'; Name = 'freelab_font_compare.py' },
+    @{ From = 'compare\freelab_quick_overlay.py'; Name = 'freelab_quick_overlay.py' },
     # Family Audit reads layers and splits features with Font Compare's code (loaded beside it)
     @{ From = 'checks\freelab_family_audit.py'; Name = 'freelab_family_audit.py' },
     # The font info kept in step with the tools' writes: a helper module, no menu entry of its own

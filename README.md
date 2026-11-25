@@ -43,6 +43,7 @@ Each opens from *Scripts > FreeLab* and runs inside FontLab 7.
 - *Proof* makes a PDF proof of the current font from its own outlines, for the current master or each one: [docs/PROOF.md](docs/PROOF.md).
 - *Font Check* ranks the glyphs to add by the languages they would complete, checks character sets, suggests vertical metrics, and compares the masters' outlines where they do not interpolate: [docs/FONT-CHECK.md](docs/FONT-CHECK.md).
 - *Tab Docking* puts a document tab released on or near FontLab's tab bar back in at that place, so tabs reorder by dragging, gives each undocked window a *Dock* button that puts its tabs back, and can keep tabs from being undocked at all (*Tab Docking Settings*); it starts at launch: [docs/WINDOWS.md](docs/WINDOWS.md#tab-docking).
+- *Quick Overlay* opens FontLab's *Overlay Fonts* on a new font holding only the glyphs typed, with the family's fonts overlaid, so each change shows at once: on a large font, *Overlay Fonts* takes seconds a change, since FontLab works again on every glyph of the window's font: [docs/QUICK-OVERLAY.md](docs/QUICK-OVERLAY.md).
 
 Each open font has its own FreeLab window, named after it; its tools menu and arrows open the other tools. Writes go into FontLab's History, so *Edit > Undo* takes them back. What every window shares: [docs/WINDOWS.md](docs/WINDOWS.md).
 

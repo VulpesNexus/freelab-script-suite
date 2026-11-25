@@ -1985,12 +1985,12 @@ def history_state(package):
 MENU_GROUPS = (("Font Builder", "Glyph Compose", "Auto Spacing", "CJK Spacing", "CJK Vertical", "Auto Kerning", "Kerning Check",
                 "Feature Code", "Feature Check", "Font Compare", "Family Audit", "Font Check", "Proof"),
                ("Dark Mode", "Toggle Dark Mode", "Dark Mode Settings", "Tab Docking", "Toggle Tab Docking",
-                "Tab Docking Settings"),
+                "Tab Docking Settings", "Quick Overlay"),  # (FontLab's interface helped: Quick Overlay's Overlay Fonts)
                ("Start MCP Listener", "Stop MCP Listener", "Start Listener", "Stop Listener"),  # (FreeLab MCP's, old names too)
                ("Set Up FreeLab",))  # (a release's folder dropped in by hand: windows/freelab_setup.py)
 MENU_TITLE, SCRIPTS_MENU = "FreeLab", "menuScripts"
 MENU_ORDER_PROP = "freelab_menu_order"
-MENU_HOOK_VERSION = 7  # the Scripts menu's property holds it: an older hook found there is replaced
+MENU_HOOK_VERSION = 8  # the Scripts menu's property holds it: an older hook found there is replaced
 
 
 def menu_order(texts, groups=MENU_GROUPS):
