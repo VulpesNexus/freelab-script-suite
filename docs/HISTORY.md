@@ -35,6 +35,10 @@ How each tool came to work as it does: what it did before, what it does now, and
   - Dropdowns gained nothing outside FreeLab's windows and stay as Fusion draws them.
   - A list's effect came and went with each full sweep: looked at again, it failed a test for "no effect" and lost it.
   - Native helpers 123 to 125: the defringe pass had grayed Font Check's green counts, its blue link, and its coverage bars. A run of mixed colors is now taken for text edges only beside a light text core, or when its colors add up to gray.
+- 2026-11-25: The last three items of the owner's reviews, each checked on every saved capture of the session's probes before it went in (nothing else changed):
+  - Native helper 126: *TrueType Hinting*'s navy size numbers came out soft, in purples and teals. They are now drawn with one coverage per pixel in light blue. A first attempt that grayed them as black text's edges changed 85 pixels and left a white blotch on the selected size.
+  - Native helper 127: a name on an anchor's pill came out dark where a guide crossed the pill. The pill's two shades over the canvas' two grounds were not the same badge, the canvas' light grays took the eight places for badge colors before the pill's gray, and the lines under the pill ended the search.
+  - Native helpers 128 and 129: the Scoreboard's orange word, shown in a window of its own, was ringed in light dots: its white halo turned dark, but the blends between the word and the halo were kept. Caught by screen captures every 75 ms (the word shows about four seconds, half a second after the Scoreboard is switched on again).
 
 ## Auto Kerning and Kerning Check
 

@@ -869,6 +869,37 @@ class ReviewOfNovember24Tests(unittest.TestCase):
         self.assertGreater(sum(on_name), sum(on_pill) + 150, "the name clearly lighter than the pill it is on")
         self.assertLess(sum(out[1][1]), 3 * 100, "and the canvas dark")
 
+    def test_a_name_on_a_pill_a_guide_crosses_stays_light(self):
+        """The owner, 2026-11-25: a name on a pill a guide crosses had its letters dark. The pill is translucent:
+        over the canvas' two grounds it is two shades of warm gray, each in two steps, the guide's dashes and a
+        side line run under it, and the canvas' own light grays came first among the badge colors."""
+        above, below, guide, name = (212, 212, 212), (232, 232, 234), (80, 78, 74), (236, 236, 235)
+        rows = []
+        for y in range(20):
+            row = [above if y < 10 else below] * 44
+            if 3 <= y < 17:
+                for x in range(4, 40):
+                    if y < 10:
+                        row[x] = (162, 160, 157) if x < 22 else (164, 162, 158)
+                    else:
+                        row[x] = (173, 171, 168) if x < 22 else (176, 174, 170)
+            if y == 10:
+                row = [guide if x % 4 < 2 else row[x] for x in range(44)]
+            if 3 <= y < 17:
+                row[30] = guide  # a side line under the pill
+            if 6 <= y < 14:
+                for x in (10, 11, 16, 17, 25, 26, 34, 35):  # stems, two pixels wide
+                    row[x] = name
+            rows.append(row)
+        for _ in range(4):
+            rows.append([below] * 44)
+        for k in range(8):  # the canvas' own light grays, in tiles (its shaded bands): more frequent than the pill
+            gray = 200 + 3 * k
+            rows += [[(gray, gray, gray + 8)] * 44 for _ in range(6)]
+        out = self.map(rows, 1, 1.0)
+        for (y, x, pill_x) in ((7, 10, 7), (12, 16, 7), (7, 34, 37), (12, 25, 21)):
+            self.assertGreater(sum(out[y][x]), sum(out[y][pill_x]) + 150, "the name lighter than its pill at %d,%d" % (x, y))
+
     def test_a_colored_lines_smoothing_fades_to_the_paper_on_a_canvas(self):
         """The owner, 2026-11-25: every colored contour had a jagged edge. A line's full pixels were kept, light
         and red, and its smoothing, judged pixel by pixel, was turned over to a dark red: steps and dots."""
@@ -934,6 +965,43 @@ class ReviewOfNovember24Tests(unittest.TestCase):
         self.assertLessEqual(max(edge) - min(edge), 12, "gray: no color left on a tag")
         self.assertGreater(sum(edge), sum(tag[5][2]) + 120, "and light on the dark tag")
         self.assertGreater(max(white[5][12]) - min(white[5][12]), 12, "on pure white the edge keeps its color")
+
+    def colored_numbers(self, orange_near):
+        white, navy = (255, 255, 255), (0, 0, 128)
+        left, core, right = (255, 170, 128), (43, 43, 170), (170, 255, 128)  # one coverage on average, apart
+        rows = [[white] * 40 for _ in range(20)]
+        for y in range(5):
+            rows[y][:8] = [navy] * 8  # the box of the size shown: the text color, 40 pixels
+        rows[10][10:13] = [left, core, right]
+        if orange_near:
+            rows[10][15] = (230, 150, 40)  # black text's orange edge: a blue far below navy's
+        return self.map(rows, 1, 1.0)[10]
+
+    def test_colored_cleartype_text_on_white_is_smoothed_in_its_color(self):
+        """TrueType Hinting's navy size numbers: their ClearType edges came out a dim mix of purples and teals."""
+        row = self.colored_numbers(False)
+        self.assertEqual(row[10], row[12], "the same coverage on average: the same color")
+        self.assertGreater(sum(row[11]), sum(row[10]), "the core more inked toward the light text color")
+
+    def test_a_colored_words_white_halo_and_its_blends_turn_dark_together(self):
+        """The Scoreboard's orange word, drawn with a white halo for a light canvas: under the ink effect its halo
+        turned dark, and the blends between the word and its halo, kept, ringed it in light dots."""
+        orange, white, blend = (200, 100, 0), (250, 250, 250), (223, 169, 116)
+        buf = bytearray()
+        for _ in range(6):
+            buf += pixels([(0, 0, 0)] * 2, alpha=0) + pixels([white] * 3, alpha=220) + pixels([blend], alpha=238)
+            buf += pixels([orange] * 10) + pixels([blend], alpha=238) + pixels([white] * 3, alpha=220)
+            buf += pixels([(0, 0, 0)] * 2, alpha=0)
+        anchors(LIB, buf, 22, "ink")
+        halo, edge, mark = rgb_at(buf, 3), rgb_at(buf, 5), rgb_at(buf, 8)
+        self.assertEqual(mark, orange, "the word as drawn")
+        self.assertLess(sum(halo), 3 * 80, "its halo dark")
+        self.assertLess(sum(edge), sum(orange), "the blend between them no lighter than the word")
+        self.assertGreater(sum(edge), sum(halo))
+
+    def test_small_black_text_is_not_taken_for_colored(self):
+        row = self.colored_numbers(True)
+        self.assertNotEqual(row[10], row[12])
 
 
 if __name__ == "__main__":

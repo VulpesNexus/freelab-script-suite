@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 125
+#define FREELAB_PIXELS_VERSION 129
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -2260,6 +2260,23 @@ static uint32_t badge_colors[BADGE_MAX_COLORS], badge_out[BADGE_MAX_COLORS], bad
 static int64_t badge_text_count[BADGE_MAX_COLORS];
 static double badge_hls[BADGE_MAX_COLORS];
 static int badge_count;
+/* On a canvas (content), an anchor's pill is translucent: over a ground that changes under it (the baseline's
+ * band, a guide) its warm gray takes a step or two, and only its frequent shades are candidates; the canvas'
+ * own light grays (0.78 to 0.85) filled the BADGE_MAX_COLORS before the pill's turn; and the lines under it (a
+ * guide, the side lines, a contour) ended the walks as dark. A walk then met another gray, a line, or nothing,
+ * and the name's letters came out dark on one side of the line or all along (the owner, 2026-11-25). So on a
+ * canvas a badge is no lighter than BADGE_PILL_MAX_HLS, a tinted badge's shades within BADGE_SHADE per channel
+ * are it, and a walk crosses a thin line to a tinted badge (BADGE_CROSS_LINE). Lists (ink) keep the plain
+ * rules: their badges are flat. Checked on every capture of the session's probes: only canvases with pills
+ * change. */
+#define BADGE_PILL_MAX_HLS 0.8
+#define BADGE_SHADE 6
+#define BADGE_TINT 3 /* red above blue by this much at least: a tinted (warm) gray */
+#define BADGE_CROSS_LINE 2 /* px: on a canvas, a walk crosses a dark line this thin (a guide, the side lines, a
+                            * contour, drawn under a translucent pill) when the badge it reaches is a tinted
+                            * one: FontLab's pill holds light names only, and black text's strokes on a
+                            * neutral badge still end a walk (its counters are no light text) */
+static int badge_pill;
 
 static uint32_t resolve(uint32_t c, int translucent, uint32_t mask, int mode, double dark_l, double light_l,
                         double keep_tint, double tint);
@@ -2280,7 +2297,7 @@ static void find_badge_colors(int mode, double dark_l, double light_l, double ke
         px[1] = (uint8_t)a->g;
         px[0] = (uint8_t)a->b;
         hls = lightness(px[2], px[1], px[0]);
-        if (spread_of(px) >= WHITE_MARK_SPREAD || hls < BADGE_MIN_HLS || hls > BADGE_MAX_HLS
+        if (spread_of(px) >= WHITE_MARK_SPREAD || hls < BADGE_MIN_HLS || hls > (badge_pill ? BADGE_PILL_MAX_HLS : BADGE_MAX_HLS)
             || (a->hrun < SURFACE_RUN && a->vrun < SURFACE_RUN))
             continue;
         badge_colors[badge_count] = rgb;
@@ -2291,11 +2308,31 @@ static void find_badge_colors(int mode, double dark_l, double light_l, double ke
     }
 }
 
+static int badge_tinted(uint32_t b)
+{
+    return (int)((b >> 16) & 255U) - (int)(b & 255U) >= BADGE_TINT;
+}
+
 static int badge_color_of(uint32_t rgb)
 {
-    int k;
+    int k, ch;
     for (k = 0; k < badge_count; k++) {
         if (badge_colors[k] == rgb)
+            return k;
+    }
+    for (k = 0; badge_pill && k < badge_count; k++) { /* (a shade of it: see badge_pill) */
+        uint32_t b = badge_colors[k];
+        int br = (int)((b >> 16) & 255U), bg = (int)((b >> 8) & 255U), bb = (int)(b & 255U);
+        int r = (int)((rgb >> 16) & 255U), g = (int)((rgb >> 8) & 255U), bl = (int)(rgb & 255U);
+        if (br - bb < BADGE_TINT || r - bl < BADGE_TINT || (br >= bg) != (r >= g) || (bg >= bb) != (g >= bl))
+            continue; /* only a tinted gray and its shades tinted alike (the pill's warm gray: the canvas' own
+                       * grays, the cells' bands, are neutral, and their shades are other surfaces) */
+        for (ch = 0; ch < 3; ch++) {
+            int d = (int)((rgb >> (8 * ch)) & 255U) - (int)((badge_colors[k] >> (8 * ch)) & 255U);
+            if (d > BADGE_SHADE || d < -BADGE_SHADE)
+                break;
+        }
+        if (ch == 3)
             return k;
     }
     return -1;
@@ -2346,7 +2383,7 @@ static int near_rgb(uint32_t a, uint32_t b, int tolerance);
 static int light_on_gray_badge(const uint32_t *p, int64_t i, int64_t width, int64_t count)
 {
     int64_t x, y, rows, k;
-    int dir, badge = -1, run[4], nearest = 0, nearest_k = BADGE_REACH_ACROSS + 1;
+    int dir, badge = -1, run[4], nearest = 0, nearest_k = BADGE_REACH_ACROSS + 1, crossed = 0;
     double own;
     if (!badge_count || width <= 0 || !badge_near[i])
         return 0;
@@ -2358,7 +2395,7 @@ static int light_on_gray_badge(const uint32_t *p, int64_t i, int64_t width, int6
     rows = count / width;
     for (dir = 0; dir < 4; dir++) {
         int64_t sx = dir == 0 ? 1 : dir == 1 ? -1 : 0, sy = dir == 2 ? 1 : dir == 3 ? -1 : 0;
-        int found = 0, same = 1, reach = sx ? BADGE_REACH_ACROSS : BADGE_REACH;
+        int found = 0, same = 1, reach = sx ? BADGE_REACH_ACROSS : BADGE_REACH, dark_run = 0;
         run[dir] = 0;
         for (k = 1; k <= reach && !found; k++) {
             int64_t xx = x + sx * k, yy = y + sy * k;
@@ -2383,8 +2420,14 @@ static int light_on_gray_badge(const uint32_t *p, int64_t i, int64_t width, int6
                     nearest_k = (int)k;
                     nearest = dir << 5 | (int)k;
                 }
-            } else if (l < BADGE_LIGHT_HLS)
-                return 0; /* dark before the gray: no badge around the pixel */
+            } else if (l < BADGE_LIGHT_HLS) {
+                if (!badge_pill || ++dark_run > BADGE_CROSS_LINE)
+                    return 0; /* dark before the gray: no badge around the pixel */
+                crossed = 1; /* (a line under a translucent pill: see BADGE_CROSS_LINE) */
+                same = 0;
+                continue;
+            }
+            dark_run = 0;
             same = same && l >= own - BADGE_SAME_HLS && spread_of(q) <= WHITE_MARK_PURE_SPREAD;
             run[dir] += same && !found; /* the pixel's own stroke, up to its fringe or the badge */
         }
@@ -2394,6 +2437,8 @@ static int light_on_gray_badge(const uint32_t *p, int64_t i, int64_t width, int6
     /* Text is thin one way at least (a stroke, a bar); the white inside a gray-framed box is as wide
      * as it is tall. */
     if (run[0] + run[1] + 1 > BADGE_STROKE && run[2] + run[3] + 1 > BADGE_STROKE)
+        return 0;
+    if (crossed && !badge_tinted(badge_colors[badge]))
         return 0;
     badge_at[i] = (uint8_t)nearest;
     return badge + 1;
@@ -2850,6 +2895,220 @@ static int dark_text_fringe(const uint32_t *p, int64_t i, int64_t width, int64_t
     return found;
 }
 
+/* Colored text drawn with ClearType on pure white (TrueType Hinting's size numbers, navy #000080, and the
+ * number on the navy box of the size shown): each channel is white * (1 - coverage) + text * coverage.
+ * Mapped as other pixels, its edges came out a dim mix of purples and teals; dark_text_fringe, for black
+ * text, leaves pure white alone (the preview above shows ClearType's colors on purpose). Small numbers
+ * have no pixel of the text color itself, so it is the picture's most frequent dark, strongly colored
+ * exact color (colored_text_color), and only one the mapping moves far (the Font window's selected cell
+ * keeps its blue: a surface, not text). Found on the pixels as drawn, before any is mapped: a colored
+ * pixel with pure white within COLORED_CT_REACH, whose most inked pixel near leans to the text color's
+ * channel, and with no pixel within a letter's reach (COLORED_CT_VETO_REACH) below the text color in any
+ * channel (ClearType never draws navy text's blue below navy's 128; small black text, whose thin stems
+ * look like navy's, has an orange edge's low blue or a black core). Each such pixel is redrawn with one
+ * coverage, its channels' mean, from the mapped white toward the mapped text color: gray smoothing in the
+ * text's own dark-mode color, as the editors get (the owner, 2026-11-25: soft numbers, colored edges).
+ * Checked on every capture of the session's probes: only the hinting numbers change. */
+#define COLORED_CT_MARK 5          /* white_mark */
+#define COLORED_CT_REACH 2
+#define COLORED_CT_MIN_SPREAD 90
+#define COLORED_CT_MAX_LOW 40      /* the text color's darkest channel at most */
+#define COLORED_CT_MAX_HLS 0.4
+#define COLORED_CT_LEEWAY 24       /* how much darker than the text color a channel may be */
+#define COLORED_CT_MIN_CONTRAST 30.0
+static uint32_t colored_out[MAX_INDEXED];
+
+/* The text color: the most frequent exact color that is dark and strongly colored (navy: the box of the
+ * size shown, the cores of larger numbers); 0x1000000 when the picture has none of COLORED_CT_MIN_COUNT. */
+#define COLORED_CT_MIN_COUNT 20
+#define COLORED_CT_COLORS 512 /* distinct candidates counted (a hinting preview has some 155: its black text's edges) */
+#define COLORED_CT_NEAR_SPREAD 60  /* the darkest pixel near: colored, led by the text color's channel, */
+#define COLORED_CT_NEAR_LOW 70     /* and dark in one channel at least */
+#define COLORED_CT_VETO_REACH 6    /* pixels: a letter's reach, for a pixel below the text color */
+#define COLORED_CT_PIXEL_SPREAD 16 /* the pixel itself: colored */
+#define COLORED_CT_MIN_MOVE 120    /* how far the mapping moves the color (channels' sum) for it to be text's */
+static int strongest_of(uint32_t c)
+{
+    int r = (int)((c >> 16) & 255U), g = (int)((c >> 8) & 255U), b = (int)(c & 255U);
+    return r >= g && r >= b ? 2 : (g >= b ? 1 : 0); /* (as strongest_channel: memory order) */
+}
+
+static uint32_t ct_colors[COLORED_CT_COLORS];
+static int64_t ct_counts[COLORED_CT_COLORS];
+
+static uint32_t colored_text_color(const uint32_t *p, int64_t count)
+{
+    uint32_t *colors = ct_colors;
+    int64_t *counts = ct_counts, i, best = 0;
+    int n = 0, k;
+    uint32_t found = 0x1000000U;
+    for (i = 0; i < count; i++) {
+        const uint8_t *q = (const uint8_t *)&p[i];
+        int high, low;
+        uint32_t c;
+        if (q[3] < ANCHOR_MIN_ALPHA)
+            continue;
+        high = q[0] > q[1] ? (q[0] > q[2] ? q[0] : q[2]) : (q[1] > q[2] ? q[1] : q[2]);
+        low = q[0] < q[1] ? (q[0] < q[2] ? q[0] : q[2]) : (q[1] < q[2] ? q[1] : q[2]);
+        if (high - low < COLORED_CT_MIN_SPREAD || low > COLORED_CT_MAX_LOW || (high + low) / 510.0 > COLORED_CT_MAX_HLS)
+            continue;
+        c = p[i] & 0xffffffU;
+        for (k = 0; k < n && colors[k] != c; k++)
+            ;
+        if (k == n) {
+            if (n == COLORED_CT_COLORS)
+                continue;
+            colors[n] = c;
+            counts[n++] = 0;
+        }
+        counts[k]++;
+    }
+    for (k = 0; k < n; k++) {
+        if (counts[k] >= COLORED_CT_MIN_COUNT && counts[k] > best) {
+            best = counts[k];
+            found = colors[k];
+        }
+    }
+    return found;
+}
+
+static int colored_cleartype(const uint32_t *p, int64_t i, int64_t width, int64_t count, uint32_t t)
+{
+    int64_t x = i % width, dx, dy;
+    const uint8_t *v = (const uint8_t *)&p[i];
+    int white = 0, ch, t_high = (int)((t >> 16) & 255U);
+    double darkest = 256.0;
+    const uint8_t *dark = 0;
+    if (t <= 0xffffffU) {
+        if ((int)((t >> 8) & 255U) > t_high)
+            t_high = (int)((t >> 8) & 255U);
+        if ((int)(t & 255U) > t_high)
+            t_high = (int)(t & 255U);
+    }
+    if (t > 0xffffffU || v[3] < ANCHOR_MIN_ALPHA || spread_of(v) < COLORED_CT_PIXEL_SPREAD)
+        return 0; /* (pure white, grays: no navy smoothing is gray but by chance, and grays are most of a canvas) */
+    for (ch = 0; ch < 3; ch++)
+        if ((int)v[ch] + COLORED_CT_LEEWAY < (int)((t >> (8 * ch)) & 255U))
+            return 0;
+    for (dy = -COLORED_CT_REACH; dy <= COLORED_CT_REACH; dy++) {
+        for (dx = -COLORED_CT_REACH; dx <= COLORED_CT_REACH; dx++) {
+            int64_t at = i + dy * width + dx;
+            const uint8_t *q;
+            int high;
+            double l;
+            if (x + dx < 0 || x + dx >= width || at < 0 || at >= count)
+                continue;
+            q = (const uint8_t *)&p[at];
+            if (q[3] < ANCHOR_MIN_ALPHA)
+                continue;
+            if (q[0] >= DARK_TEXT_PURE_WHITE && q[1] >= DARK_TEXT_PURE_WHITE && q[2] >= DARK_TEXT_PURE_WHITE) {
+                white = 1;
+                continue;
+            }
+            high = q[0] > q[1] ? (q[0] > q[2] ? q[0] : q[2]) : (q[1] > q[2] ? q[1] : q[2]);
+            if (high + COLORED_CT_LEEWAY < t_high)
+                return 0; /* darker than the text color at its brightest: black text, a dark ground */
+            for (ch = 0; ch < 3; ch++) /* each a blend of white and the text color: no channel below the color's
+                                        * (black text's orange edges have a low blue) */
+                if ((int)q[ch] + COLORED_CT_LEEWAY < (int)((t >> (8 * ch)) & 255U))
+                    return 0;
+            l = (double)min_channel(q); /* the most ink: its lowest channel (navy's red and green) */
+            if (l < darkest) {
+                darkest = l;
+                dark = q;
+            }
+        }
+    }
+    if (!white || dark == 0 || spread_of(dark) < COLORED_CT_NEAR_SPREAD || strongest_channel(dark) != strongest_of(t)
+        || min_channel(dark) > COLORED_CT_NEAR_LOW)
+        return 0; /* (a light fringe the darkest near: gray text, a ruler's digits on its near-white strip) */
+    /* Small black text's thin stems are drawn as navy's would be ((43,43,128) beside (255,212,128)); its
+     * letter has a pixel below the text color somewhere (an orange edge's low blue, a black core), navy
+     * text never: looked for over a letter's reach (the Fonts panel's list as drawn, the owner's fonts) */
+    for (dy = -COLORED_CT_VETO_REACH; dy <= COLORED_CT_VETO_REACH; dy++) {
+        for (dx = -COLORED_CT_VETO_REACH; dx <= COLORED_CT_VETO_REACH; dx++) {
+            int64_t at = i + dy * width + dx;
+            const uint8_t *q;
+            if (x + dx < 0 || x + dx >= width || at < 0 || at >= count)
+                continue;
+            q = (const uint8_t *)&p[at];
+            if (q[3] < ANCHOR_MIN_ALPHA)
+                continue;
+            for (ch = 0; ch < 3; ch++)
+                if ((int)q[ch] + COLORED_CT_LEEWAY < (int)((t >> (8 * ch)) & 255U))
+                    return 0;
+        }
+    }
+    return 1;
+}
+
+static uint32_t colored_cleartype_color(uint32_t c, uint32_t t, int mode, double dark_l, double light_l,
+                                        double keep_tint)
+{
+    uint32_t mw = resolve(0xffffffU, 0, 0U, mode, dark_l, light_l, keep_tint, 0.0) & 0xffffffU;
+    uint32_t mt = resolve(t, 0, 0U, mode, dark_l, light_l, keep_tint, 0.0) & 0xffffffU;
+    double sum = 0.0, cov, out[3];
+    int ch, valid = 0;
+    for (ch = 0; ch < 3; ch++) {
+        double f = rgb_channel(t, ch), value = rgb_channel(c, ch);
+        if (255.0 - f >= COLORED_CT_MIN_CONTRAST) {
+            double one = (255.0 - value) / (255.0 - f);
+            sum += one < 0.0 ? 0.0 : one > 1.0 ? 1.0 : one;
+            valid++;
+        }
+    }
+    cov = valid ? sum / valid : 1.0;
+    for (ch = 0; ch < 3; ch++)
+        out[ch] = rgb_channel(mw, ch) + cov * (rgb_channel(mt, ch) - rgb_channel(mw, ch));
+    return pack(out[0], out[1], out[2]);
+}
+
+/* A strongly colored mark with a white halo (the Scoreboard's orange word, drawn for a light canvas, shown in
+ * a window of its own with the ink effect): ink, with no anchor to map, turns the halo's whites dark as
+ * stray whites, and the blends between the mark and its halo, kept as drawn, ringed the word in light dots
+ * (the owner, 2026-11-25). Such a blend is drawn again as the blend of the mark and what the white becomes.
+ * The pixel (BGRA) is changed in place; 1 when it was such a blend. */
+#define HALO_WHITE_HLS 0.95 /* the halo: this light, of low color */
+#define HALO_MARK_SPREAD 60 /* the mark it rings: strongly colored */
+#define HALO_MAX_ALPHA 250 /* a halo is translucent (the Scoreboard's, 220); a white mark on a control is opaque */
+static int halo_blend(uint8_t *px, double dark_l, double light_l)
+{
+    int a_i = -1, b_i = -1, j;
+    double t = 0.0;
+    uint32_t all = anchor_count >= 32 ? 0xffffffffU : ((1U << anchor_count) - 1U);
+    const Anchor *w, *k;
+    uint8_t q[3], white[3];
+    if (!best_pair((double)px[2], (double)px[1], (double)px[0], 0U, all, BLEND_TOLERANCE, &a_i, &b_i, &t))
+        return 0;
+    for (j = 0; j < 2; j++) {
+        const Anchor *x = &anchors[j == 0 ? a_i : b_i];
+        q[2] = (uint8_t)x->r;
+        q[1] = (uint8_t)x->g;
+        q[0] = (uint8_t)x->b;
+        if (lightness(q[2], q[1], q[0]) >= HALO_WHITE_HLS && spread_of(q) <= LINEAR_SPREAD)
+            break;
+    }
+    if (j == 2)
+        return 0;
+    w = &anchors[j == 0 ? a_i : b_i];
+    k = &anchors[j == 0 ? b_i : a_i];
+    q[2] = (uint8_t)k->r;
+    q[1] = (uint8_t)k->g;
+    q[0] = (uint8_t)k->b;
+    if (spread_of(q) <= HALO_MARK_SPREAD)
+        return 0;
+    if (j == 0)
+        t = 1.0 - t; /* t: from the mark toward the white */
+    white[2] = (uint8_t)w->r;
+    white[1] = (uint8_t)w->g;
+    white[0] = (uint8_t)w->b;
+    map_rgb(&white[2], &white[1], &white[0], dark_l, light_l, 0.0);
+    px[2] = (uint8_t)(k->r + t * ((double)white[2] - k->r) + 0.5);
+    px[1] = (uint8_t)(k->g + t * ((double)white[1] - k->g) + 0.5);
+    px[0] = (uint8_t)(k->b + t * ((double)white[0] - k->b) + 0.5);
+    return 1;
+}
+
 EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width, int mode, double dark_l,
                                    double light_l, double keep_tint, double main_default, int apply)
 {
@@ -2858,7 +3117,7 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
     int have_last = 0, any_mapped = 0, j, local, tinted, last_edge = 0, glyph_icons = 0;
     uint32_t paper_bit, other_surfaces, other_surface_bits;
     int white_marks = 0, fringes = 0, bands = 0, thin, badge, darkened = 0, plain_marks = 0;
-    uint32_t left_orig = 0;
+    uint32_t left_orig = 0, text;
     double paper_hls;
     int64_t i, changed = 0;
     mode_icon_fallback = mode == ANCHORS_SUBPIXEL_SYNTAX;
@@ -2882,11 +3141,27 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
     paper_hls = anchor_count > 0 && anchors[0].surface ? lightness((uint8_t)anchors[0].r, (uint8_t)anchors[0].g, (uint8_t)anchors[0].b) : 0.15;
     fringes = (mode == ANCHORS_ALL || mode == ANCHORS_ICON) && keep_tint > 0.0 && width > 0 && count <= MAX_INDEXED;
     bands = fringes && find_bands(p, count, width);
+    text = fringes ? colored_text_color(p, count) : 0x1000000U;
+    if (text <= 0xffffffU) {
+        uint32_t mapped_text = resolve(text, 0, 0U, mode, dark_l, light_l, keep_tint, 0.0) & 0xffffffU;
+        int moved = 0, ch;
+        for (ch = 0; ch < 3; ch++) {
+            int d = (int)((mapped_text >> (8 * ch)) & 255U) - (int)((text >> (8 * ch)) & 255U);
+            moved += d < 0 ? -d : d;
+        }
+        if (moved < COLORED_CT_MIN_MOVE)
+            text = 0x1000000U; /* kept as it is: a surface (the Font window's selected cell), not text */
+    }
     for (i = 0; fringes && i < count; i++) { /* on the pixels as drawn, before any is mapped */
         white_mark[i] = 0;
         if ((p[i] >> 24) < ANCHOR_MIN_ALPHA)
             continue;
-        if (bands && light_on_kept_color(p, i, width, count))
+        if (colored_cleartype(p, i, width, count, text)) {
+            white_mark[i] = COLORED_CT_MARK; /* colored text's ClearType on white: drawn from the color found */
+            colored_out[i] = colored_cleartype_color(p[i] & 0xffffffU, text, mode, dark_l, light_l, keep_tint)
+                             | (p[i] & 0xff000000U);
+        }
+        else if (bands && light_on_kept_color(p, i, width, count))
             white_mark[i] = 4; /* light text on a colored surface the content keeps: kept as drawn */
         else if (cleartype_fringe(p, i, width, count))
             white_mark[i] = 3;
@@ -2904,6 +3179,7 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
     }
     band_plain = 0;
     badge_count = 0;
+    badge_pill = fringes && !white_marks;
     if (white_marks || fringes) {
         find_badge_colors(mode, dark_l, light_l, keep_tint);
         if (badge_count)
@@ -2915,7 +3191,7 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
      * comes out toward white. */
     for (i = 0; fringes && badge_count && i < count; i++) {
         uint32_t v = p[i];
-        if ((v >> 24) < ANCHOR_MIN_ALPHA || white_mark[i] == 4)
+        if ((v >> 24) < ANCHOR_MIN_ALPHA || white_mark[i] == 4 || white_mark[i] == COLORED_CT_MARK)
             continue;
         if (lightness((uint8_t)(v >> 16), (uint8_t)(v >> 8), (uint8_t)v) >= BADGE_LIGHT_HLS
             && (badge = light_on_gray_badge(p, i, width, count)) > 0) {
@@ -2970,8 +3246,9 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
         for (i = 0; i < count; i++) {
             uint8_t *px = pixels + 4 * i;
             if (px[3] > 0 && lightness(px[2], px[1], px[0]) >= WHITE_HLS) {
-                if (white_marks && (white_mark[i] == 1 || white_mark[i] >= BADGE_MARK))
-                    continue; /* (a badge's text: no anchor is mapped, its badge neither) */
+                if (white_marks && ((white_mark[i] == 1 && px[3] >= HALO_MAX_ALPHA) || white_mark[i] >= BADGE_MARK))
+                    continue; /* (a badge's text: no anchor is mapped, its badge neither; a translucent white
+                               * enclosed by a colored mark is its halo, see halo_blend, never a mark on it) */
                 if (white_marks && white_mark[i] == 2) {
                     changed++;
                     if (apply)
@@ -2981,6 +3258,8 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
                 changed++;
                 if (apply)
                     map_rgb(&px[2], &px[1], &px[0], dark_l, light_l, 0.0);
+            } else if (px[3] >= ANCHOR_MIN_ALPHA && halo_blend(px, dark_l, light_l)) {
+                changed++; /* (halo_blend draws it when apply: it is called on the pixel itself) */
             }
         }
         return changed;
@@ -3043,6 +3322,17 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
         }
         if (fringes && white_mark[i] == 4) {
             have_last = 0;
+            continue;
+        }
+        if (fringes && white_mark[i] == COLORED_CT_MARK) {
+            have_last = 0;
+            if (colored_out[i] != v) {
+                changed++;
+                if (apply)
+                    p[i] = colored_out[i];
+                if (thin)
+                    thin_px[i] = 1;
+            }
             continue;
         }
         if (white_marks && white_mark[i] == 2) {
