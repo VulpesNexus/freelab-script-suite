@@ -2587,6 +2587,9 @@ def _paint_hold():
         popup = _qt()[0].activePopupWidget()
         if popup is not None:
             return (POPUP_HOLD, id(popup))
+        modal = _qt()[0].activeModalWidget()
+        if modal is not None:
+            return (MODAL_HOLD, id(modal))
     except Exception:
         pass
     return None
@@ -2597,13 +2600,25 @@ def _paint_hold():
 # November 24: with many cells selected, "menus and such laggy and mostly unresponsive"). The popup's own
 # widgets are never held: its rows change as the mouse moves.
 POPUP_HOLD = "popup"
+# While a modal dialog is open, the windows behind it cannot be scrolled or clicked, and FontLab repaints them as
+# the dialog changes what they show: dragging a color in Overlay Fonts repainted the Font window's cells at each
+# step, each drawn by FontLab and mapped anew, and FontLab stopped answering, then died (the owner, 2026-11-25;
+# laggy with dark mode off too, less). Their large widgets are held as for a menu, and drawn again at most every
+# MODAL_REFRESH seconds, and once after the last change, so they still follow the dialog. The dialog's own
+# widgets are painted as ever.
+MODAL_HOLD = "modal"
+MODAL_REFRESH = 0.4
 
 
 def _held_in_popup(hold, widget):
-    """Whether a widget is part of the popup its pictures would be held for (then it is painted as ever)."""
+    """Whether a widget is part of the popup or modal dialog its pictures would be held for (then it is painted
+    as ever)."""
     try:
-        if not (isinstance(hold, tuple) and hold and hold[0] == POPUP_HOLD):
+        if not (isinstance(hold, tuple) and hold and hold[0] in (POPUP_HOLD, MODAL_HOLD)):
             return False
+        if hold[0] == MODAL_HOLD:
+            modal = _qt()[0].activeModalWidget()
+            return modal is None or widget is modal or modal.isAncestorOf(widget)
         popup = _qt()[0].activePopupWidget()
         return popup is None or widget is popup or popup.isAncestorOf(widget) or widget.window().inherits("QMenu")
     except Exception:
@@ -2623,9 +2638,31 @@ def _held_picture(effect, hold, rect, paint):
     """The picture of an effect's widget for this drag: the one held, or paint() called and its result held."""
     held = _held()
     kept = held.get(id(effect))
-    if kept is None or kept[0] != hold or kept[1] != rect:
-        kept = held[id(effect)] = (hold, rect, paint(), effect)
+    modal = isinstance(hold, tuple) and hold and hold[0] == MODAL_HOLD
+    now = time.time()
+    if kept is None or kept[0] != hold or kept[1] != rect or (modal and now - kept[4] >= MODAL_REFRESH):
+        kept = held[id(effect)] = (hold, rect, paint(), effect, now, False)
+    elif modal and not kept[5]:
+        # a repaint asked for and not drawn: one more, once the refresh's time has come (the dialog's last change)
+        held[id(effect)] = kept[:5] + (True,)
+        try:
+            _core("QTimer").singleShot(int(MODAL_REFRESH * 1000) + 50, _modal_refresh(effect))
+        except Exception:
+            pass
     return kept[2]
+
+
+def _modal_refresh(effect):
+    """A callback repainting an effect's widget held under a modal dialog, its next picture drawn anew."""
+    def refresh():
+        try:
+            kept = _held().get(id(effect))
+            if kept is not None:
+                _held()[id(effect)] = kept[:4] + (0.0, False)  # (stale: drawn anew at the repaint)
+            effect.update()
+        except Exception:
+            pass
+    return refresh
 
 
 def _release_held():

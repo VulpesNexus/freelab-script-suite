@@ -307,6 +307,51 @@ class ShadeAndPickerTests(DarkModeCase):
         self.assertEqual(thin.rows[0][1], white, "a thin dark outline (the magnifier's) turned over by all its pixels")
         self.assertFalse(dm.glow_to_shadow(Picture([[clear, edge, red]])), "nothing to make")
 
+    def test_under_a_modal_dialog_a_large_widget_is_drawn_again_at_most_every_refresh(self):
+        """The owner, November 25: dragging a color in Overlay Fonts repainted the Font window at each step, and
+        FontLab stopped answering, then died. Under a modal dialog, a large widget's picture is held, drawn anew
+        at most every MODAL_REFRESH seconds, and once more after the last change."""
+        clock = [100.0]
+        timers = []
+
+        class Clock(object):
+            @staticmethod
+            def time():
+                return clock[0]
+
+        class Timer(object):
+            @staticmethod
+            def singleShot(ms, callback):
+                timers.append((ms, callback))
+
+        class Effect(object):
+            updates = 0
+
+            def update(self):
+                Effect.updates += 1
+
+        self.patch("time", Clock)
+        self.patch("_core", lambda name: Timer if name == "QTimer" else None)
+        dm._held().clear()
+        effect, hold, rect, painted = Effect(), (dm.MODAL_HOLD, 1), (0, 0, 500, 500), []
+
+        def paint():
+            painted.append(clock[0])
+            return "picture %d" % len(painted)
+
+        self.assertEqual(dm._held_picture(effect, hold, rect, paint), "picture 1")
+        clock[0] += 0.1
+        self.assertEqual(dm._held_picture(effect, hold, rect, paint), "picture 1", "held: the dialog changed again")
+        self.assertEqual(len(timers), 1, "one repaint asked for, after the refresh's time")
+        dm._held_picture(effect, hold, rect, paint)
+        self.assertEqual(len(timers), 1, "not one each repaint")
+        timers[0][1]()  # the last change's repaint comes
+        self.assertEqual(Effect.updates, 1)
+        self.assertEqual(dm._held_picture(effect, hold, rect, paint), "picture 2", "drawn anew")
+        clock[0] += dm.MODAL_REFRESH
+        self.assertEqual(dm._held_picture(effect, hold, rect, paint), "picture 3", "and when the refresh's time has come")
+        dm._held().clear()
+
     def test_a_tabs_faint_close_cross_is_made_stronger_as_fontlab_draws_it(self):
         """The owner, November 25: a document tab's close cross was nearly invisible, then, drawn by dark mode where
         FontLab's was found, halved or missing as FontLab faded it. FontLab's own is kept: each pixel's share of the
