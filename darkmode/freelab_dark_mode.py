@@ -2669,22 +2669,40 @@ def _held_picture(effect, hold, rect, paint):
     kept = held.get(id(effect))
     refresh = HOLD_REFRESH.get(hold[0]) if isinstance(hold, tuple) and hold else None
     now = time.time()
+    if refresh is not None and _mouse_held():
+        # A color dragged: not drawn anew until the mouse is let go. Drawn every 0.15 s, FontLab's drag still
+        # nested its message handling inside the paints until it stopped answering and died (the owner, 2026-11-25;
+        # it died once with dark mode off too): no widget of FontLab's is drawn for the effects during the drag.
+        refresh = float("inf")
     if kept is None or kept[0] != hold or kept[1] != rect or (refresh is not None and now - kept[4] >= refresh):
         kept = held[id(effect)] = (hold, rect, paint(), effect, now, False)
     elif refresh is not None and not kept[5]:
         # a repaint asked for and not drawn: one more, once the refresh's time has come (the dialog's last change)
         held[id(effect)] = kept[:5] + (True,)
         try:
-            _core("QTimer").singleShot(int(refresh * 1000) + 50, _modal_refresh(effect))
+            wait = HOLD_REFRESH.get(hold[0], MODAL_REFRESH)
+            _core("QTimer").singleShot(int(wait * 1000) + 50, _modal_refresh(effect))
         except Exception:
             pass
     return kept[2]
 
 
+def _mouse_held():
+    """Whether the left mouse button is down (a drag in a dialog). Never raises."""
+    try:
+        return bool(int(_qt()[0].instance().mouseButtons()) & int(_core("Qt").LeftButton))
+    except Exception:
+        return False
+
+
 def _modal_refresh(effect):
-    """A callback repainting an effect's widget held under a modal dialog, its next picture drawn anew."""
+    """A callback repainting an effect's widget held under a modal dialog, its next picture drawn anew; while the
+    mouse is still held, asked again later."""
     def refresh():
         try:
+            if _mouse_held():
+                _core("QTimer").singleShot(int(MODAL_OWN_REFRESH * 1000), _modal_refresh(effect))
+                return
             kept = _held().get(id(effect))
             if kept is not None:
                 _held()[id(effect)] = kept[:4] + (0.0, False)  # (stale: drawn anew at the repaint)

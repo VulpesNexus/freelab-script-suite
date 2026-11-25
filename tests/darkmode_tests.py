@@ -377,6 +377,19 @@ class ShadeAndPickerTests(DarkModeCase):
         self.assertEqual(dm._held_picture(effect, hold, rect, paint), "picture 2", "drawn anew")
         clock[0] += dm.MODAL_REFRESH
         self.assertEqual(dm._held_picture(effect, hold, rect, paint), "picture 3", "and when the refresh's time has come")
+        self.patch("_mouse_held", lambda: True)  # a color dragged
+        clock[0] += 10 * dm.MODAL_REFRESH
+        self.assertEqual(dm._held_picture(effect, hold, rect, paint), "picture 3", "never drawn during the drag")
+        del timers[:]
+        dm._held()[id(effect)] = dm._held()[id(effect)][:5] + (False,)
+        dm._held_picture(effect, hold, rect, paint)
+        timers[-1][1]()  # its time comes with the mouse still held: asked again later, not drawn
+        self.assertEqual(Effect.updates, 1)
+        self.assertEqual(len(timers), 2)
+        self.patch("_mouse_held", lambda: False)  # let go
+        timers[-1][1]()
+        self.assertEqual(Effect.updates, 2)
+        self.assertEqual(dm._held_picture(effect, hold, rect, paint), "picture 4", "drawn once the mouse is let go")
         dm._held().clear()
 
     def test_a_tabs_faint_close_cross_is_made_stronger_as_fontlab_draws_it(self):
