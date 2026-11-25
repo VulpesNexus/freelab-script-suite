@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define FREELAB_PIXELS_VERSION 129
+#define FREELAB_PIXELS_VERSION 133
 
 /* Built without the C runtime (no entry point, no imports); the compiler still expects this symbol when doubles are used. */
 int _fltused = 0;
@@ -575,6 +575,7 @@ EXPORT void freelab_map_keyed(uint8_t *pixels, int64_t count, int64_t width, con
 #define GLYPH_ICON_LIGHT_HLS 0.8
 #define GLYPH_BADGE_MIN_LIGHT 4 /* light pixels in a shape's box: a badge's letters, */
 #define GLYPH_BADGE_LIGHT_SHARE 0.04 /* as a share of the shape's own pixels */
+#define GLYPH_TILE_FILL 85 /* percent of its box a tile fills, its dark ground and light letters together */
 #define GLYPH_SOLID_SHARE 0.7 /* a shape filling this much of its box is a block, not a glyph */
 #define GLYPH_ICON_NEAR 4 /* per channel: a pixel of the shape's color (premultiplied rounding of translucent text) */
 #define GLYPH_ICON_GROW 24 /* per channel: the shape goes on through its blends with a translucent fill (a flag's tint) */
@@ -599,6 +600,7 @@ EXPORT void freelab_map_keyed(uint8_t *pixels, int64_t count, int64_t width, con
 #define LINE_RUN 8.0 /* mean run, across or down, of a (white) line's pixels */
 #define LONG_LINE_RUN 24.0 /* a dark color this long and thin is a separator, not text (stems are shorter) */
 #define LIGHT_SURFACE_RUN 6.0 /* a light surface is solid one way at least (badges, rows), unlike most text strokes */
+#define LIGHT_SURFACE_MIN_COUNT 500 /* pixels: a light surface, of them all (a selected row holds thousands) */
 #define BACKGROUND_SHARE 0.2 /* a color covering this much is a background, never ink */
 #define FRINGE_SHARE 0.4 /* a dark, colored pixel this often right beside light ones is ClearType smoothing of light text */
 #define LIGHT_FRINGE_SHARE 0.15 /* a light fringe this often beside lighter text (badges): smoothing */
@@ -1150,8 +1152,9 @@ static int light_surface_candidate(const Anchor *a)
     px[2] = (uint8_t)a->r;
     px[1] = (uint8_t)a->g;
     px[0] = (uint8_t)a->b;
-    if (!a->surface)
-        return 0;
+    if (!a->surface || a->count < LIGHT_SURFACE_MIN_COUNT)
+        return 0; /* (a few light letters are no surface: the Font window's script icons, white letters on dark
+                   * tiles, turned the tiles light around their letters, the owner, 2026-11-25) */
     if (lightness(px[2], px[1], px[0]) >= WHITE_HLS)
         return 1;
     return (a->hrun >= LIGHT_SURFACE_RUN || a->vrun >= LIGHT_SURFACE_RUN) && a->okl >= LIGHT_SURFACE_OKL
@@ -1824,6 +1827,9 @@ static int paper_blend(uint32_t c, double dark_l, double light_l, double tint, u
     return 1;
 }
 
+static uint32_t colored_anchor_bits; /* per call: anchors more colored than LINEAR_SPREAD (see resolve) */
+#define KEPT_BLEND_SPREAD 40 /* a pixel this colored at least may be such an anchor's blend */
+
 static uint32_t resolve(uint32_t c, int translucent, uint32_t mask, int mode, double dark_l, double light_l,
                         double keep_tint, double tint)
 {
@@ -1903,8 +1909,20 @@ static uint32_t resolve(uint32_t c, int translucent, uint32_t mask, int mode, do
         px[2] = (uint8_t)r;
         px[1] = (uint8_t)g;
         px[0] = (uint8_t)b;
-        if (spread_of(px) <= (tint > 0.0 ? TINTED_LINEAR_SPREAD : LINEAR_SPREAD))
+        if (spread_of(px) <= (tint > 0.0 ? TINTED_LINEAR_SPREAD : LINEAR_SPREAD)) {
+            /* A blend with a strongly colored anchor, which the mapping keeps (red text on the Preview panel's
+             * white): mapped alone, the smoothing went gray, a gray rim around the red letters (the owner,
+             * 2026-11-25). Drawn as the blend of the two anchors as they come out. */
+            if (keep_tint <= 0.0 && colored_anchor_bits && spread_of(px) > KEPT_BLEND_SPREAD /* (an island of the
+                                     * interface, its ClearType grayed before: a canvas' ClearType colors are
+                                     * anchors too, and its rulers' gray digits came out blue) */
+                && best_pair(r, g, b, 0U, all, BLEND_TOLERANCE, &a_i, &b_i, &t)
+                && (((colored_anchor_bits >> a_i) & 1U) || ((colored_anchor_bits >> b_i) & 1U))) {
+                Anchor *a = &anchors[a_i], *o = &anchors[b_i];
+                return pack(a->mr + t * (o->mr - a->mr), a->mg + t * (o->mg - a->mg), a->mb + t * (o->mb - a->mb));
+            }
             return all_color(c, mode, dark_l, light_l, tint);
+        }
     }
     if (mode == ANCHORS_ALL && tint > 0.0 && paper_blend(c, dark_l, light_l, tint, &blend_out))
         return blend_out; /* (before any pair: a line's color is seldom an anchor, and a far pair explained its
@@ -2005,8 +2023,17 @@ static int same_hue(const uint8_t *q, double hr, double hg, double hb)
 static int find_bands(const uint32_t *p, int64_t count, int64_t width)
 {
     int64_t i, x, y, rows = count / width, any = 0;
-    for (i = 0; i < count; i++) {
-        near_band[i] = band_pixel((const uint8_t *)&p[i]) ? NEAR_BAND : 0;
+    uint32_t last = 0;
+    uint8_t last_band = 0;
+    int have = 0;
+    for (i = 0; i < count; i++) { /* (a run of one color answers once: OKLab's roots for each pixel of a Font
+                                   * window's selected cells took most of its 110 ms) */
+        if (!have || p[i] != last) {
+            last = p[i];
+            last_band = band_pixel((const uint8_t *)&p[i]) ? NEAR_BAND : 0;
+            have = 1;
+        }
+        near_band[i] = last_band;
         any |= near_band[i];
     }
     if (!any)
@@ -2048,6 +2075,38 @@ static int find_bands(const uint32_t *p, int64_t count, int64_t width)
 
 static int near_rgb(uint32_t a, uint32_t b, int tolerance);
 
+#define LIGHT_CORE_REACH 2
+#define LIGHT_CORE_HLS 0.75
+#define LIGHT_CORE_SPREAD 30
+#define LIGHT_CORE_PAPER_NEAR 12 /* per channel: the paper, smoothed faintly toward a colored shape beside it */
+static int light_core_near(const uint32_t *p, int64_t i, int64_t width, int64_t count)
+{
+    int64_t x = i % width, dx, dy;
+    int found = 0;
+    uint32_t paper = anchor_count > 0 && anchors[0].surface ? pack(anchors[0].r, anchors[0].g, anchors[0].b) : 0x1000000U;
+    for (dy = -LIGHT_CORE_REACH; dy <= LIGHT_CORE_REACH; dy++) {
+        for (dx = -LIGHT_CORE_REACH; dx <= LIGHT_CORE_REACH; dx++) {
+            int64_t at = i + dy * width + dx;
+            const uint8_t *q;
+            if (x + dx < 0 || x + dx >= width || at < 0 || at >= count)
+                continue;
+            q = (const uint8_t *)&p[at];
+            if (q[3] < ANCHOR_MIN_ALPHA)
+                continue;
+            /* The main paper this near: the pixel is the paper's edge between two colored shapes (red text on the
+             * Preview panel's white kept a white speck where the Q's tail meets its bowl), not text on a band, which
+             * the band encloses (the Fonts panel's letters on their discs: a core of the selected row's light blue,
+             * another surface, is a core). */
+            if (paper <= 0xffffffU && (dx == 0 || dy == 0) && dx + dy >= -1 && dx + dy <= 1
+                && near_rgb(paper, p[at] & 0xffffffU, LIGHT_ON_COLOR_PAPER_NEAR))
+                return 0; /* (beside it: a letter on a disc has the disc around it, the paper beyond) */
+            if (spread_of(q) <= LIGHT_CORE_SPREAD && lightness(q[2], q[1], q[0]) >= LIGHT_CORE_HLS)
+                found = 1;
+        }
+    }
+    return found;
+}
+
 static int light_on_kept_color(const uint32_t *p, int64_t i, int64_t width, int64_t count)
 {
     int64_t x, y, rows;
@@ -2070,6 +2129,11 @@ static int light_on_kept_color(const uint32_t *p, int64_t i, int64_t width, int6
                 && near_rgb(pack(anchors[a].r, anchors[a].g, anchors[a].b), own, LIGHT_ON_COLOR_PAPER_NEAR))
                 return 0;
         }
+        /* Nor is the smoothing between a thin colored line and the paper (an overlaid font's red outlines in a
+         * Font window cell, crossed slantwise where they curve): kept as drawn, it dotted the outlines light
+         * (the owner, 2026-11-25). Light text has a light core of low color near it, lighter than a cell's gray. */
+        if (!light_core_near(p, i, width, count))
+            return 0;
     }
     x = i % width;
     y = i / width;
@@ -2089,7 +2153,7 @@ static int light_on_kept_color(const uint32_t *p, int64_t i, int64_t width, int6
             if (q[3] < ANCHOR_MIN_ALPHA)
                 return 0;
             lq = lightness(q[2], q[1], q[0]);
-            if (band_pixel(q)) {
+            if (near_band[yy * width + xx] & NEAR_BAND) { /* (band_pixel, as find_bands found it) */
                 int64_t t;
                 double m = (q[0] + q[1] + q[2]) / 3.0;
                 if (have && !same_hue(q, hr, hg, hb))
@@ -2106,7 +2170,7 @@ static int light_on_kept_color(const uint32_t *p, int64_t i, int64_t width, int6
                     if (tx < 0 || tx >= width || ty < 0 || ty >= rows)
                         break;
                     r = (const uint8_t *)&p[ty * width + tx];
-                    if (!band_pixel(r) || !same_hue(r, hr, hg, hb))
+                    if (!(near_band[ty * width + tx] & NEAR_BAND) || !same_hue(r, hr, hg, hb))
                         break;
                 }
                 thick += t == LIGHT_ON_COLOR_THICK; /* between letters it is thin; above or below text, thick */
@@ -2272,6 +2336,9 @@ static int badge_count;
 #define BADGE_PILL_MAX_HLS 0.8
 #define BADGE_SHADE 6
 #define BADGE_TINT 3 /* red above blue by this much at least: a tinted (warm) gray */
+#define BADGE_PILL_STROKE 5 /* px: on a pill, a name drawn pale over a glyph's fill has its smoothing within the
+                             * stroke's lightness, and an "n"'s stems ran 4 pixels across (the owner, 2026-11-25:
+                             * "uni" dark in every name over the glyph) */
 #define BADGE_CROSS_LINE 2 /* px: on a canvas, a walk crosses a dark line this thin (a guide, the side lines, a
                             * contour, drawn under a translucent pill) when the badge it reaches is a tinted
                             * one: FontLab's pill holds light names only, and black text's strokes on a
@@ -2383,7 +2450,7 @@ static int near_rgb(uint32_t a, uint32_t b, int tolerance);
 static int light_on_gray_badge(const uint32_t *p, int64_t i, int64_t width, int64_t count)
 {
     int64_t x, y, rows, k;
-    int dir, badge = -1, run[4], nearest = 0, nearest_k = BADGE_REACH_ACROSS + 1, crossed = 0;
+    int dir, badge = -1, run[4], nearest = 0, nearest_k = BADGE_REACH_ACROSS + 1, crossed = 0, stroke;
     double own;
     if (!badge_count || width <= 0 || !badge_near[i])
         return 0;
@@ -2436,7 +2503,8 @@ static int light_on_gray_badge(const uint32_t *p, int64_t i, int64_t width, int6
     }
     /* Text is thin one way at least (a stroke, a bar); the white inside a gray-framed box is as wide
      * as it is tall. */
-    if (run[0] + run[1] + 1 > BADGE_STROKE && run[2] + run[3] + 1 > BADGE_STROKE)
+    stroke = badge_pill && badge_tinted(badge_colors[badge]) ? BADGE_PILL_STROKE : BADGE_STROKE;
+    if (run[0] + run[1] + 1 > stroke && run[2] + run[3] + 1 > stroke)
         return 0;
     if (crossed && !badge_tinted(badge_colors[badge]))
         return 0;
@@ -2788,7 +2856,13 @@ static int find_glyph_icons(const uint32_t *p, int64_t count, int64_t width)
                 int64_t m = n[d];
                 if (m >= 0 && (p[m] >> 24) < ANCHOR_MIN_ALPHA)
                     bare = 1; /* drawn on nothing, or smoothed toward it */
-                if (m >= 0 && !icon_px[m] && (p[m] >> 24) > 0 && near_rgb(p[m], rgb, GLYPH_ICON_GROW)) {
+                if (m >= 0 && !icon_px[m] && (p[m] >> 24) > 0
+                    && (near_rgb(p[m], rgb, GLYPH_ICON_GROW)
+                        /* through its light letters too, opaque (a tile: the Font window's script icons, cut in
+                         * pieces by their letters, each piece too small for a badge, came out light: the owner,
+                         * 2026-11-25); a glyph icon drawn on nothing has no opaque light pixel on it */
+                        || ((p[m] >> 24) == 255 && !light_row_pixel(m)
+                            && lightness((uint8_t)(p[m] >> 16), (uint8_t)(p[m] >> 8), (uint8_t)p[m]) >= GLYPH_ICON_LIGHT_HLS))) {
                     icon_px[m] = 2;
                     queue[tail++] = (int32_t)m;
                 }
@@ -2829,7 +2903,13 @@ static int find_glyph_icons(const uint32_t *p, int64_t count, int64_t width)
          * letters with counters were kept dark, light edges around them; the owner, 2026-11-24). A badge
          * on a row fills its box but for its rounded corners. */
         if (light >= GLYPH_BADGE_MIN_LIGHT && (double)light >= GLYPH_BADGE_LIGHT_SHARE * (double)tail && on_row <= light
-            && 2 * tail >= (x1 - x0 + 1) * (y1 - y0 + 1) && x1 - x0 >= 7 && y1 - y0 >= 7) { /* (and a badge fills half its box at least, and holds letters: a letter or its end does neither) */
+            && (2 * tail >= (x1 - x0 + 1) * (y1 - y0 + 1)
+                || (tail + light) * 100 >= GLYPH_TILE_FILL * (x1 - x0 + 1) * (y1 - y0 + 1))
+            && x1 - x0 >= 7 && y1 - y0 >= 7) { /* (and a badge fills half its box at least, or, a tile, fills it with
+                                                * its letters: the Font window's Bengali and Kannada script icons,
+                                                * their letters more than half the tile, came out light gray: the
+                                                * owner, 2026-11-25; and holds letters: a letter or its end does
+                                                * neither) */
             verdict = 3;
             for (y = y0; y <= y1; y++) { /* its letters and their smoothing too, as drawn */
                 for (x = x0; x <= x1; x++) {
@@ -2855,6 +2935,7 @@ static int find_glyph_icons(const uint32_t *p, int64_t count, int64_t width)
 #define DARK_TEXT_VETO_REACH 12 /* pure white this near, along the row: not a tag */
 #define DARK_TEXT_PAPER_HLS 0.9
 #define DARK_TEXT_PURE_WHITE 253 /* every channel: FontLab's tags and pills are off-white (f8f8f9) */
+static int dark_text_white_ok; /* set by freelab_gray_cleartype: an interface's pure white is a ground like any */
 static int dark_text_fringe(const uint32_t *p, int64_t i, int64_t width, int64_t count)
 {
     int64_t x = i % width, d;
@@ -2866,7 +2947,8 @@ static int dark_text_fringe(const uint32_t *p, int64_t i, int64_t width, int64_t
         q = (const uint8_t *)&p[i + d];
         if (q[3] < ANCHOR_MIN_ALPHA)
             continue;
-        if (q[0] >= DARK_TEXT_PURE_WHITE && q[1] >= DARK_TEXT_PURE_WHITE && q[2] >= DARK_TEXT_PURE_WHITE)
+        if (q[0] >= DARK_TEXT_PURE_WHITE && q[1] >= DARK_TEXT_PURE_WHITE && q[2] >= DARK_TEXT_PURE_WHITE
+            && !dark_text_white_ok)
             return 0; /* on pure white: TrueType Hinting's preview, whose ClearType colors are what it shows */
         if (d < -DARK_TEXT_REACH || d > DARK_TEXT_REACH)
             continue;
@@ -2886,7 +2968,8 @@ static int dark_text_fringe(const uint32_t *p, int64_t i, int64_t width, int64_t
         q = (const uint8_t *)&p[at];
         if (q[3] < ANCHOR_MIN_ALPHA)
             continue;
-        if (q[0] >= DARK_TEXT_PURE_WHITE && q[1] >= DARK_TEXT_PURE_WHITE && q[2] >= DARK_TEXT_PURE_WHITE)
+        if (q[0] >= DARK_TEXT_PURE_WHITE && q[1] >= DARK_TEXT_PURE_WHITE && q[2] >= DARK_TEXT_PURE_WHITE
+            && !dark_text_white_ok)
             return 0;
         if (spread_of(q) < CLEARTYPE_MIN_SPREAD && lightness(q[2], q[1], q[0]) >= DARK_TEXT_PAPER_HLS
             && ((x + 1 < width && at + 1 < count && p[at + 1] == p[at]) || (x - 1 >= 0 && at - 1 >= 0 && p[at - 1] == p[at])))
@@ -3109,6 +3192,33 @@ static int halo_blend(uint8_t *px, double dark_l, double light_l)
     return 1;
 }
 
+/* Dark text ClearType drew on a light ground, in an island of the interface (the Fonts panel's names, black
+ * on its near-white list): each pixel of a stroke's edges made the gray of its darkest channel, before the
+ * island is mapped. Mapped with their colors, the edges came out orange and blue around the light text, with
+ * a channel darker than the dark ground, which the defringe pass after keeps (the owner, 2026-11-25). The
+ * pixels are judged as drawn, then changed; returns how many were. */
+static uint8_t gray_ct_mark[MAX_INDEXED];
+EXPORT int64_t freelab_gray_cleartype(uint8_t *pixels, int64_t count, int64_t width)
+{
+    uint32_t *p = (uint32_t *)pixels;
+    int64_t i, changed = 0;
+    if (width <= 0 || count > MAX_INDEXED)
+        return 0;
+    dark_text_white_ok = 1;
+    for (i = 0; i < count; i++)
+        gray_ct_mark[i] = (uint8_t)((p[i] >> 24) >= ANCHOR_MIN_ALPHA && cleartype_fringe(p, i, width, count)
+                                    && dark_text_fringe(p, i, width, count));
+    dark_text_white_ok = 0;
+    for (i = 0; i < count; i++) {
+        uint8_t *px = pixels + 4 * i;
+        if (gray_ct_mark[i]) {
+            px[0] = px[1] = px[2] = (uint8_t)((px[0] + px[1] + px[2] + 1) / 3); /* (the channels' mean: the darkest made the names bold) */
+            changed++;
+        }
+    }
+    return changed;
+}
+
 EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width, int mode, double dark_l,
                                    double light_l, double keep_tint, double main_default, int apply)
 {
@@ -3127,6 +3237,15 @@ EXPORT int64_t freelab_map_anchors(uint8_t *pixels, int64_t count, int64_t width
     if (mode_icon_fallback)
         mode = ANCHORS_SUBPIXEL;
     find_anchors(p, count, width, mode, dark_l, light_l, keep_tint, main_default);
+    colored_anchor_bits = 0;
+    for (j = 0; j < anchor_count && j < 32; j++) {
+        uint8_t q[3];
+        q[2] = (uint8_t)anchors[j].r;
+        q[1] = (uint8_t)anchors[j].g;
+        q[0] = (uint8_t)anchors[j].b;
+        if (spread_of(q) > LINEAR_SPREAD)
+            colored_anchor_bits |= 1U << j;
+    }
     thin = mode_list && apply && width > 0 && count <= MAX_INDEXED; /* light ink's edges thinned after */
     for (i = 0; thin && i < count; i++)
         thin_px[i] = 0;

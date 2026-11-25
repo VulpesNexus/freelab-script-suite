@@ -999,6 +999,44 @@ class ReviewOfNovember24Tests(unittest.TestCase):
         self.assertLess(sum(edge), sum(orange), "the blend between them no lighter than the word")
         self.assertGreater(sum(edge), sum(halo))
 
+    def test_dark_cleartype_text_on_light_is_grayed_before_an_island_maps_it(self):
+        """The Fonts panel's names: black ClearType text on its near-white list came out with orange and blue edges."""
+        paper, left, core, right = (250, 250, 250), (250, 208, 125), (42, 0, 83), (125, 208, 250)
+        row = [paper] * 4 + [left, core, right] + [paper] * 4
+        buf = pixels(row * 6)
+        LIB.freelab_gray_cleartype.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_int64]
+        array = (ctypes.c_char * len(buf)).from_buffer(buf)
+        LIB.freelab_gray_cleartype(ctypes.addressof(array), len(buf) // 4, len(row))
+        for x in (4, 6):
+            got = rgb_at(buf, len(row) * 2 + x)
+            self.assertEqual(got[0], got[1], "an edge made gray")
+            self.assertEqual(got[1], got[2])
+        self.assertEqual(rgb_at(buf, len(row) * 2), paper, "the paper as it is")
+
+    def test_colored_text_on_white_keeps_its_color_to_its_edges_in_an_island(self):
+        """Red text on the Preview panel's white: its smoothing went gray, a gray rim around the letters."""
+        white, red, edge = (255, 255, 255), (205, 62, 58), (224, 134, 132)
+        rows = [[white] * 30 for _ in range(20)]
+        for y in range(4, 16):
+            rows[y][8:20] = [red] * 12
+            rows[y][7], rows[y][20] = edge, edge
+        out = self.map(rows, 1, 0.0)[10]
+        self.assertGreater(out[7][0] - out[7][2], 40, "the edge reddish, not gray")
+        self.assertLess(sum(out[7]), sum(out[10]), "and darker than the red")
+
+    def test_a_thin_colored_outline_keeps_no_light_dots(self):
+        """An overlaid font's red outlines in a Font window cell: the smoothing inside them stayed light."""
+        cell, red, blend = (183, 183, 184), (214, 58, 52), (187, 150, 151)
+        rows = [[cell] * 40 for _ in range(40)]
+        for k in range(8, 32):  # a ring, 1 pixel wide, its smoothing inside
+            for (x, y) in ((k, 8), (k, 31), (8, k), (31, k)):
+                rows[y][x] = red
+            for (x, y) in ((k, 9), (k, 30), (9, k), (30, k)):
+                if 9 <= x <= 30 and 9 <= y <= 30:
+                    rows[y][x] = blend
+        out = self.map(rows, 1, 1.0)
+        self.assertLess(sum(out[9][20]), 3 * 120, "the smoothing toward the dark cell, not kept light")
+
     def test_small_black_text_is_not_taken_for_colored(self):
         row = self.colored_numbers(True)
         self.assertNotEqual(row[10], row[12])

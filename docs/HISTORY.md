@@ -39,6 +39,12 @@ How each tool came to work as it does: what it did before, what it does now, and
   - Native helper 126: *TrueType Hinting*'s navy size numbers came out soft, in purples and teals. They are now drawn with one coverage per pixel in light blue. A first attempt that grayed them as black text's edges changed 85 pixels and left a white blotch on the selected size.
   - Native helper 127: a name on an anchor's pill came out dark where a guide crossed the pill. The pill's two shades over the canvas' two grounds were not the same badge, the canvas' light grays took the eight places for badge colors before the pill's gray, and the lines under the pill ended the search.
   - Native helpers 128 and 129: the Scoreboard's orange word, shown in a window of its own, was ringed in light dots: its white halo turned dark, but the blends between the word and the halo were kept. Caught by screen captures every 75 ms (the word shows about four seconds, half a second after the Scoreboard is switched on again).
+- 2026-11-25: An audit of dark mode's speed against light mode, and the owner's review of that evening (images 100 to 108):
+  - Menus opened in 63 to 147 ms (13 to 17 in light mode): FontLab repaints its canvas and docks as a menu opens and closes, and each was mapped again, 50 to 90 ms. An effect now draws the mapping it kept when its pixels have not changed; menus open in 9 to 21 ms.
+  - Switching back to a Font window showing overlaid fonts took 2.6 s: the window's own ink effect mapped its whole cell chart, drawn over afterward as an island of its own. Large protected widgets are now cleared from their parent's picture before the mapping. Tab switches take 230 to 610 ms (55 to 120 in light mode).
+  - Native helper 130: the band tests converted every colored pixel to OKLab again and again; the Font window's cells took 110 ms to map, 63 now.
+  - Native helpers 131 to 133: the Fonts panel's names kept ClearType's colors (their edges, mapped, had a channel darker than the ground); red text on the Preview panel's white had a gray rim and a white speck; an overlaid font's thin red outlines had light dots inside; the Font window's Bengali, Kannada, and Oriya script tiles came out light (their letters cut them in pieces, each too small for a badge); a pale name on a pill over a glyph had its "uni" dark.
+  - The tool bar's checked tool, a blue icon on a light chip, came out with light dots and gray in its strokes: it is now drawn as painted, on a dark chip.
 
 ## Auto Kerning and Kerning Check
 

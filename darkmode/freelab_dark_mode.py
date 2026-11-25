@@ -163,6 +163,14 @@ ISLAND_NAMES = frozenset((
 # the palette an island is given does not outlast its stylesheet (read live, 2026-11-24: Add Glyphs' list still
 # had the dark palette's light text, which the island's mapping then turned as dark as the list).
 ISLAND_TEXT = {("YSelectableTree", "itemsList"): u"QTreeWidget{color:#000000;}"}
+# The tool bar's checked tool: FontLab draws its blue icon on a light chip, and mapped with the bar, the icon's
+# edges came out in light dots and gray (the owner, 2026-11-25: "selected tools look weird"). Its chip is made
+# dark here, and the checked button drawn as painted, over the bar's mapping (draw_checked_tools): the blue icon
+# FontLab gives a checked tool reads on it as it is.
+CHECKED_TOOL_RULE = (u"QToolButton:checked{background-color: #3a3c40; border: 1px solid #4a4d52;"
+                     u" border-radius: 5px;}")
+CHECKED_TOOL_ISLANDS = ("ToolbarPanel",)
+CHECKED_TOOL_MARGIN = 5  # px left and right: the bar's buttons' own margin (QToolButton{margin:0 5 0 5;})
 MARGIN_PARENTS = ("CodeEditor",)  # an unnamed narrow QWidget child is the line-number margin
 MARGIN_MAX_WIDTH = 80
 # A canvas is a plain QWidget child of these, with this name (None: any name). Only the glyph
@@ -227,7 +235,7 @@ SWEEP_MS = 500  # how often to look for widgets FontLab created or showed (750 w
 FULL_SWEEP_EVERY = 60  # every Nth sweep revisits every widget (replaced stylesheets, new icons): every 30 s
 FOCUS_DRAIN_MS = 80  # a window that takes focus is darkened at once, up to this long, before it paints light
 MAX_ERRORS = 50
-NATIVE_VERSION = 129
+NATIVE_VERSION = 133
 
 ID_PROP = "freelab_id"  # dynamic properties FreeLab sets on widgets, all removed by restore()
 SEEN_PROP = "freelab_seen"
@@ -715,7 +723,11 @@ def _native():
                     if darkest is not None:
                         darkest.argtypes = [ctypes.c_void_p, ctypes.c_int64]
                         darkest.restype = None
-                    state["native"] = (mapper, stats, collect, keyed, anchors, defringe, darkest)
+                    gray_ct = getattr(lib, "freelab_gray_cleartype", None)  # optional, as defringe is
+                    if gray_ct is not None:
+                        gray_ct.argtypes = [ctypes.c_void_p, ctypes.c_int64, ctypes.c_int64]
+                        gray_ct.restype = ctypes.c_int64
+                    state["native"] = (mapper, stats, collect, keyed, anchors, defringe, darkest, gray_ct)
                 else:
                     _note_error("native", "version mismatch")
             except Exception as exc:
@@ -772,6 +784,19 @@ def map_image(image, min_l=0.0, keys=None, ink_below=-1.0, keep_tint=0.0, light_
             _state()["native"] = None
     if anchors in ("all", "icon", "subpixel", "syntax") or (not anchors and min_l <= 0.0 and not keys):
         image.invertPixels()
+    return image
+
+
+def gray_cleartype_image(image):
+    """A Format_ARGB32 copy of a QImage whose dark text's ClearType edges on a light ground are gray, before an
+    island of the interface is mapped (see freelab_gray_cleartype). Without the native helper, unchanged."""
+    image = image.convertToFormat(_gui("QImage").Format_ARGB32)
+    native = _native()
+    if native is not None and len(native) > 7 and native[7] is not None:
+        try:
+            native[7](_address(image), image.width() * image.height(), image.width())
+        except Exception as exc:
+            _note_error("gray cleartype", exc)
     return image
 
 
@@ -1615,6 +1640,22 @@ def _selected_rows(view, width, height):
     return rows
 
 
+ICON_TILE_SHARE = 0.7  # of an icon's pixels opaque: a tile, not a line icon
+
+
+def _icon_is_tile(icon):
+    """Whether an icon is mostly opaque (a square tile, as the Font window's script icons). Never raises."""
+    try:
+        sizes = icon.availableSizes()
+        if not sizes:
+            return False
+        image = icon.pixmap(sizes[0]).toImage()
+        opaque, _white, _black = image_stats(image)
+        return opaque >= ICON_TILE_SHARE * image.width() * image.height()
+    except Exception:
+        return False
+
+
 def _logo_icon(icon, state):
     """The icon a list's logo is drawn from over its mapped row, or False for a line icon the row's
     mapping takes care of. A logo is a picture (LOGO_MIN_SIDE or larger), a swatch, or colorful. A
@@ -1628,7 +1669,10 @@ def _logo_icon(icon, state):
         return False  # a line of sample text (Overlay Fonts' "AaGg123"), not a logo: the row's mapping draws it
     large = any(s.width() >= LOGO_MIN_SIDE for s in sizes)  # a picture, not a line icon
     if mapped:
-        return icon if large else False  # dark already: its own smoothing, over the dark row
+        # dark already: its own smoothing, over the dark row. A small one too when it is a tile (the Font window's
+        # script icons, light letters on a dark square): mapped again with the row, some tiles passed for dark
+        # glyph icons and came out light gray under their light letters (Bengali, Kannada: the owner, 2026-11-25)
+        return icon if large or _icon_is_tile(icon) else False
     if icon_is_swatch(icon):
         return icon  # as FontLab draws it
     if not icon_is_gray(icon):  # colorful: as drawn, its colored edges cleaned (smoothed toward white, ragged on dark)
@@ -1841,7 +1885,7 @@ def _effect_classes():
 
         def draw_mapped(painter, pixmap, offset, area, min_l, keys=None, ink_below=-1.0, keep_tint=0.0, light_l=None,
                         edge_neutral=0.0, edge_target=0, anchors=None, dark_l=None, gray=False, analyze=None,
-                        plain=False, defringe=False):
+                        plain=False, defringe=False, cache=None, gray_ct=False):
             """Draw the part of pixmap that lands on `area` (painter coordinates), mapped.
 
             analyze: a larger rect (painter coordinates) whose pixels decide the mapping, of which
@@ -1854,25 +1898,29 @@ def _effect_classes():
                 area = area.intersected(painter.clipBoundingRect().toAlignedRect())
             if area.isEmpty():
                 return
+
+            def compute(part):
+                if gray:
+                    part = gray_image(part)
+                if gray_ct:
+                    part = gray_cleartype_image(part)
+                mapped = part if plain else map_image(part, min_l, keys, ink_below, keep_tint, light_l, edge_neutral,
+                                                      edge_target, anchors, dark_l)
+                return defringe_image(mapped) if defringe else mapped
+
+            def signature(rect):
+                return (rect.x(), rect.y(), rect.width(), rect.height(), min_l, tuple(keys or ()), ink_below, keep_tint,
+                        light_l, edge_neutral, edge_target, anchors, dark_l, gray, plain, defringe, gray_ct)
+
             if analyze is not None:
                 analyze = analyze.intersected(QRect(offset, pixmap.size()))
                 if analyze.contains(area) and analyze != area:
                     part = pixmap.copy(analyze.translated(-offset.x(), -offset.y())).toImage()
-                    if gray:
-                        part = gray_image(part)
-                    mapped = part if plain else map_image(part, min_l, keys, ink_below, keep_tint, light_l, edge_neutral,
-                                                          edge_target, anchors, dark_l)
-                    if defringe:
-                        mapped = defringe_image(mapped)
+                    mapped = _cached_map(cache, signature(analyze), part, compute)
                     painter.drawImage(area.topLeft(), mapped, area.translated(-analyze.x(), -analyze.y()))
                     return
-            if True:
-                part = pixmap.copy(area.translated(-offset.x(), -offset.y())).toImage()
-                if gray:
-                    part = gray_image(part)
-                mapped = part if plain else map_image(part, min_l, keys, ink_below, keep_tint, light_l, edge_neutral,
-                                                      edge_target, anchors, dark_l)
-                painter.drawImage(area.topLeft(), defringe_image(mapped) if defringe else mapped)
+            part = pixmap.copy(area.translated(-offset.x(), -offset.y())).toImage()
+            painter.drawImage(area.topLeft(), _cached_map(cache, signature(area), part, compute))
 
         class MapEffect(QGraphicsEffect):
             """Draw the widget with its colors mapped: by anchor blends (islands, ink, editors), or by key (frames)."""
@@ -1920,7 +1968,7 @@ def _effect_classes():
                     kind = self.freelab_kind
                     if kind == "keyed":
                         draw_mapped(painter, pixmap, offset, whole, self.freelab_min_l, self.freelab_keys, -1.0,
-                                    self.freelab_keep_tint, None, 0.0, self.freelab_edge_target)
+                                    self.freelab_keep_tint, None, 0.0, self.freelab_edge_target, cache=id(self))
                         keep_unmapped(self, painter, pixmap, offset)  # a frame color may recur inside a panel
                         return
                     if kind == "relight":  # an editor left dark after switching off: its dark paper white, its light text black
@@ -1950,7 +1998,7 @@ def _effect_classes():
                             area = area.intersected(painter.clipBoundingRect().toAlignedRect())
                         if not area.isEmpty():
                             # decided on the whole widget (its ground), drawn where it is repainted
-                            image = defringe_image(pixmap.toImage())
+                            image = _cached_map(id(self), ("defringe",), pixmap.toImage(), defringe_image)
                             painter.drawImage(area.topLeft(), image, area.translated(-offset.x(), -offset.y()))
                         keep_unmapped(self, painter, pixmap, offset)
                         return
@@ -1993,6 +2041,9 @@ def _effect_classes():
                     logos, mapped_from = (logo_places(self), pixmap) if kind == "ink" else ([], pixmap)
                     if logos:
                         mapped_from = without_logos(pixmap, logos)
+                    holes = kept_areas(self, pixmap, offset, KEPT_HOLE_PIXELS)
+                    if holes:
+                        mapped_from = without_kept(mapped_from, holes)
                     # A field or a selector drawn light on a dark ground already (its stylesheet's, or the dark
                     # palette's): grayed, never mapped. Mapped, so small a picture has no ground to judge by,
                     # and its text came out doubled and heavy (Actions' "Glyph" and "Baseline", a unit beside
@@ -2007,7 +2058,11 @@ def _effect_classes():
                                 (kind == "ink" and bool(getattr(self, "freelab_view", False)))
                                 # an island of the interface (no colors kept: not a canvas), the Fonts panel's
                                 # list among them (5,240 pairs as drawn, 615 mapped, 233 defringed)
-                                or (kind == "island" and not self.freelab_keep_tint))
+                                or (kind == "island" and not self.freelab_keep_tint),
+                                cache=id(self) if not logos else None,
+                                # the same island's dark text, drawn with ClearType on a light ground: its edges made
+                                # gray before the mapping (see gray_cleartype_image)
+                                gray_ct=kind == "island" and not self.freelab_keep_tint)
                     if kind == "ink" and getattr(self, "freelab_list", False):
                         # from the copy without logos: FontLab's logo, with its light fringe, showed through
                         # the cleaned logo's smoothing drawn over it
@@ -2017,6 +2072,8 @@ def _effect_classes():
                     keep_unmapped(self, painter, pixmap, offset)
                     if kind == "island" and self.freelab_keep_tint:
                         keep_pictures(self, painter, pixmap, offset)
+                    if kind == "island" and _class_name(self.freelab_widget) in CHECKED_TOOL_ISLANDS:
+                        draw_checked_tools(self, painter, pixmap, offset)
                 except Exception as exc:
                     _note_error("effect", exc)
                     self.drawSource(painter)
@@ -2093,6 +2150,48 @@ def _effect_classes():
                 except Exception as exc:
                     _note_error("list logos", exc)
 
+        def kept_areas(effect, pixmap, offset, min_pixels):
+            """The areas (pixmap coordinates) of the protected descendants keep_unmapped draws as they are, of
+            min_pixels or more: mapped, they are drawn over at once."""
+            owner = effect.freelab_widget
+            found = []
+            for widget in list(getattr(effect, "freelab_protect", {}).values()):
+                try:
+                    if not _alive(widget) or widget is owner or not owner.isAncestorOf(widget) or not widget.isVisible():
+                        continue
+                    if _prop(widget, "width") * _prop(widget, "height") < min_pixels:
+                        continue
+                    corner = widget.mapTo(owner, QPoint(0, 0))
+                    local = QRect(corner.x(), corner.y(), _prop(widget, "width"), _prop(widget, "height")).intersected(
+                        QRect(QPoint(0, 0), pixmap.size()))
+                    if local.isEmpty():
+                        continue
+                    record = _record(widget, create=False)
+                    if record is not None and record.get("kind") == "ink" and light_ground(pixmap, local):
+                        continue  # (left to the parent's mapping: see keep_unmapped)
+                    found.append(local)
+                except Exception:
+                    continue
+            return found
+
+        def without_kept(pixmap, areas):
+            """A copy of pixmap with areas cleared to transparent: the mapping passes over them at once, and
+            reads no colors there (the Font window's ink effect mapped its whole cell chart, an island of its
+            own drawn over it after: 2 s with overlaid fonts' colored glyphs, the owner, 2026-11-25)."""
+            QPainter = _gui("QPainter")
+            copy = QPixmap_copy(pixmap)
+            painter = QPainter(copy)
+            try:
+                painter.setCompositionMode(QPainter.CompositionMode_Clear)
+                for area in areas:
+                    painter.fillRect(area, Qt.transparent)
+            finally:
+                painter.end()
+            return copy
+
+        def QPixmap_copy(pixmap):
+            return pixmap.copy(QRect(QPoint(0, 0), pixmap.size()))
+
         def keep_unmapped(effect, painter, pixmap, offset):
             """Draw protected descendants (color swatches, mark slots, pickers) as they are, over the mapping."""
             owner = effect.freelab_widget
@@ -2119,6 +2218,32 @@ def _effect_classes():
                     # (the owner, November 24). On a ground dark already (the Font window's bar) it is kept.
                     continue
                 painter.drawPixmap(area.topLeft(), pixmap, local)
+
+        def draw_checked_tools(effect, painter, pixmap, offset):
+            """The checked tool buttons of the bar drawn as painted (their chip dark, see CHECKED_TOOL_RULE),
+            clipped to the chip, over the bar's mapping."""
+            QPainterPath, QToolButton = _gui("QPainterPath"), _gui("QToolButton")
+            owner = effect.freelab_widget
+            for button in owner.findChildren(QToolButton):
+                try:
+                    if not button.isVisible() or not button.isChecked():
+                        continue
+                    corner = button.mapTo(owner, QPoint(0, 0))
+                    local = QRect(corner.x() + CHECKED_TOOL_MARGIN, corner.y(),
+                                  _prop(button, "width") - 2 * CHECKED_TOOL_MARGIN, _prop(button, "height"))
+                    if local.width() <= 0:
+                        continue
+                    area = local.translated(offset)
+                    path = QPainterPath()
+                    path.addRoundedRect(_core("QRectF")(area), 5.0, 5.0)
+                    painter.save()
+                    try:
+                        painter.setClipPath(path, Qt.IntersectClip)
+                        painter.drawPixmap(area.topLeft(), pixmap, local)
+                    finally:
+                        painter.restore()
+                except Exception as exc:
+                    _note_error("checked tool", exc)
 
         def keep_pictures(effect, painter, pixmap, offset):
             """The pictures of the glyphs a canvas shows, drawn as they are over its mapping (see
@@ -2236,6 +2361,76 @@ def _release_held():
         return len(effects)
     except Exception:
         return 0
+
+
+# A large widget's repaint whose pixels are what they were at its last repaint (FontLab repaints its canvas, its
+# cell chart, and its docks as a menu opens and closes, as the window is activated, as focus moves) is drawn
+# from the mapping kept then: mapping the 1702 by 1134 glyph canvas took 50 ms each time, against 7 ms for
+# FontLab to paint it, and opening a menu took 65 ms where light mode takes 13 (the owner, 2026-11-25: menus
+# lag). Small widgets too: a panel's repaint remapped each of its hundreds of small ink effects (the main
+# window's repaint: 74 ms, against 16 in light mode). Two images compare in about 1 ms for the canvas, far less
+# for a button. Kept up to MAP_CACHE_PIXELS pixels (each kept twice, as drawn and as mapped), the least
+# recently used let go first: two fonts with a Font window and a Glyph window each, and the docks, hold some
+# 17.7 million (12 million made the windows evict each other at each tab switch: 600 ms where 300 do).
+MAP_CACHE_PIXELS = 24000000
+# A protected descendant this large (a cell chart, a canvas, a panel with its own effect inside a window's) is
+# left out of its parent's mapping: kept_areas. Smaller ones (swatches, mark slots) are mapped as before.
+KEPT_HOLE_PIXELS = 40000
+
+
+def _map_cache():
+    """{"entries": {key: [signature, source image, mapped image, pixels, last use]}, "pixels", "clock", "hits",
+    "misses"}; on sys, to outlast a reload (its images are Qt's, keyed by effect and by everything the mapping
+    was asked)."""
+    import sys
+    found = getattr(sys, "_freelab_map_cache", None)
+    if found is None or not isinstance(found.get("entries"), dict):
+        found = sys._freelab_map_cache = {"entries": {}, "pixels": 0, "clock": 0, "hits": 0, "misses": 0}
+    return found
+
+
+def _cached_map(key, signature, part, compute):
+    """compute(part) as kept, when the same effect asked the same of the same pixels last time; else computed and
+    kept. Never raises past compute's own errors."""
+    if key is None:
+        return compute(part)
+    cache = _map_cache()
+    entries = cache["entries"]
+    cache["clock"] += 1
+    entry = entries.get(key)
+    if entry is not None:
+        try:
+            if entry[0] == signature and entry[1].size() == part.size() and entry[1] == part:
+                cache["hits"] += 1
+                entry[4] = cache["clock"]
+                return entry[2]
+        except Exception:
+            pass
+        cache["pixels"] -= entry[3]
+        del entries[key]
+    cache["misses"] += 1
+    mapped = compute(part)
+    pixels = part.width() * part.height()
+    if pixels <= MAP_CACHE_PIXELS // 4:
+        entries[key] = [signature, part, mapped, pixels, cache["clock"]]
+        cache["pixels"] += pixels
+        if cache["pixels"] > MAP_CACHE_PIXELS:
+            for old_key, old in sorted(entries.items(), key=lambda item: item[1][4]):
+                if cache["pixels"] <= MAP_CACHE_PIXELS * 3 // 4:
+                    break
+                cache["pixels"] -= old[3]
+                del entries[old_key]
+    return mapped
+
+
+def _forget_map_cache():
+    """The kept mappings let go (switching off, another theme). Never raises."""
+    try:
+        cache = _map_cache()
+        cache["entries"].clear()
+        cache["pixels"] = 0
+    except Exception:
+        pass
 
 
 PAINT_SLOW_MS = 30.0  # a mapped repaint this long is kept in _paint_times' list
@@ -3343,6 +3538,8 @@ def _make_island(widget):
     fill_rule = _chart_fill_rule(widget)
     if fill_rule:
         combined = (combined + u"\n" + fill_rule).strip()
+    if _class_name(widget) in CHECKED_TOOL_ISLANDS:
+        combined = (combined + u"\n" + CHECKED_TOOL_RULE).strip()
     if combined != own:
         widget.setProperty(SHEET_PROP, own)
         widget.setProperty(DARK_SHEET_PROP, combined)
@@ -4482,6 +4679,7 @@ def apply_dark():
     if app is None:
         raise RuntimeError("No Qt application is running.")
     state = _state()
+    _forget_map_cache()  # (mapped for another shade, or by an earlier module)
     if state.get("hooked"):  # an earlier version's native engine, on in this FontLab session
         restore()  # (takes its hooks out with everything else: the script engine starts from scratch)
     if state["saved"] is None:
@@ -4534,6 +4732,7 @@ def restore():
     QApplication, QPalette, QColor, QStyleFactory, QTimer = _qt()
     app = QApplication.instance()
     state = _state()
+    _forget_map_cache()
     _cancel_timers(state)
     _stop_timer(state, "sweeper")
     _stop_timer(state, "worker")
