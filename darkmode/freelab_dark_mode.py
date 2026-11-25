@@ -2127,18 +2127,38 @@ def _effect_classes():
                 # (timed: where a slow repaint's time goes is read from _paint_times when one is reported,
                 # as the stall the owner saw when FontLab's blue drop highlight came up, November 24)
                 began = time.time()
+                depth = _DRAWING[0]
+                if getattr(self, "freelab_drawing", False) or depth >= MAX_DRAW_DEPTH:
+                    # Drawn again from inside its own drawing (an event loop run during a paint), or nested past
+                    # any real nesting of effects: drawn as it is. Mapped, each level started the next, and the
+                    # stack ran out as a color was dragged in Overlay Fonts (the owner, 2026-11-25: FontLab died
+                    # after a few seconds; the stack held hundreds of nested message dispatches).
+                    try:
+                        self.drawSource(painter)
+                    except Exception:
+                        pass
+                    return
+                self.freelab_drawing = True
+                _DRAWING[0] = depth + 1
                 try:
                     hold = _paint_hold()
                     if hold is None or not self.draw_held(painter, hold):
                         self.paint_mapped(painter)
                 finally:
+                    _DRAWING[0] = depth
+                    self.freelab_drawing = False
                     _paint_timed(self, (time.time() - began) * 1000.0)
 
             def draw_held(self, painter, hold):
                 """The widget's picture held for this drag drawn (see HOLD_PIXELS): True when it was."""
                 try:
                     box = self.sourceBoundingRect(Qt.LogicalCoordinates).toAlignedRect()
-                    if box.width() * box.height() < HOLD_PIXELS or _held_in_popup(hold, self.freelab_widget):
+                    if _held_in_popup(hold, self.freelab_widget):
+                        held_down = bool(int(_qt()[0].instance().mouseButtons()) & int(Qt.LeftButton))
+                        if not (hold[0] == MODAL_HOLD and held_down and box.width() * box.height() >= MODAL_OWN_PIXELS):
+                            return False
+                        hold = (MODAL_OWN_HOLD, hold[1])  # (the dialog's own, while a color is dragged)
+                    elif box.width() * box.height() < HOLD_PIXELS:
                         return False
 
                     def paint():
@@ -2608,6 +2628,15 @@ POPUP_HOLD = "popup"
 # widgets are painted as ever.
 MODAL_HOLD = "modal"
 MODAL_REFRESH = 0.4
+# While the mouse is held down in the modal dialog (a color dragged), its own large widgets are held too, drawn
+# anew at most every MODAL_OWN_REFRESH seconds: each step's paints must end before FontLab's next step begins.
+MODAL_OWN_HOLD = "modal-own"
+MODAL_OWN_REFRESH = 0.15
+MODAL_OWN_PIXELS = 40000  # (Overlay Fonts' list, 564 by 314, and preview, 552 by 161)
+HOLD_REFRESH = {MODAL_HOLD: MODAL_REFRESH, MODAL_OWN_HOLD: MODAL_OWN_REFRESH}
+# Effects drawing inside effects (a dock's, a panel's, a list's): never this deep but by re-entry (MapEffect.draw)
+MAX_DRAW_DEPTH = 12
+_DRAWING = [0]
 
 
 def _held_in_popup(hold, widget):
@@ -2638,15 +2667,15 @@ def _held_picture(effect, hold, rect, paint):
     """The picture of an effect's widget for this drag: the one held, or paint() called and its result held."""
     held = _held()
     kept = held.get(id(effect))
-    modal = isinstance(hold, tuple) and hold and hold[0] == MODAL_HOLD
+    refresh = HOLD_REFRESH.get(hold[0]) if isinstance(hold, tuple) and hold else None
     now = time.time()
-    if kept is None or kept[0] != hold or kept[1] != rect or (modal and now - kept[4] >= MODAL_REFRESH):
+    if kept is None or kept[0] != hold or kept[1] != rect or (refresh is not None and now - kept[4] >= refresh):
         kept = held[id(effect)] = (hold, rect, paint(), effect, now, False)
-    elif modal and not kept[5]:
+    elif refresh is not None and not kept[5]:
         # a repaint asked for and not drawn: one more, once the refresh's time has come (the dialog's last change)
         held[id(effect)] = kept[:5] + (True,)
         try:
-            _core("QTimer").singleShot(int(MODAL_REFRESH * 1000) + 50, _modal_refresh(effect))
+            _core("QTimer").singleShot(int(refresh * 1000) + 50, _modal_refresh(effect))
         except Exception:
             pass
     return kept[2]

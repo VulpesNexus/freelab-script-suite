@@ -307,6 +307,33 @@ class ShadeAndPickerTests(DarkModeCase):
         self.assertEqual(thin.rows[0][1], white, "a thin dark outline (the magnifier's) turned over by all its pixels")
         self.assertFalse(dm.glow_to_shadow(Picture([[clear, edge, red]])), "nothing to make")
 
+    def test_an_effect_drawn_again_from_inside_its_own_drawing_draws_its_widget_as_it_is(self):
+        """The owner, November 25: dragging a color in Overlay Fonts ran FontLab's stack out after a few seconds,
+        each nested paint starting the next. An effect re-entered while it draws, or nested past MAX_DRAW_DEPTH,
+        draws its widget as it is."""
+        self.patch("_paint_hold", lambda: None)
+        self.patch("_paint_timed", lambda effect, ms: None)
+        effect = dm._effect_classes()["map"]()
+        calls = []
+        effect.drawSource = lambda painter: calls.append("as it is")
+
+        def paint_mapped(painter):
+            calls.append("mapped")
+            effect.draw(painter)  # an event loop run inside the paint draws it again
+
+        effect.paint_mapped = paint_mapped
+        effect.draw("painter")
+        self.assertEqual(calls, ["mapped", "as it is"])
+        self.assertFalse(effect.freelab_drawing, "free again once drawn")
+        self.assertEqual(dm._DRAWING[0], 0)
+        del calls[:]
+        dm._DRAWING[0] = dm.MAX_DRAW_DEPTH
+        try:
+            effect.draw("painter")
+        finally:
+            dm._DRAWING[0] = 0
+        self.assertEqual(calls, ["as it is"], "nested too deep: as it is")
+
     def test_under_a_modal_dialog_a_large_widget_is_drawn_again_at_most_every_refresh(self):
         """The owner, November 25: dragging a color in Overlay Fonts repainted the Font window at each step, and
         FontLab stopped answering, then died. Under a modal dialog, a large widget's picture is held, drawn anew
